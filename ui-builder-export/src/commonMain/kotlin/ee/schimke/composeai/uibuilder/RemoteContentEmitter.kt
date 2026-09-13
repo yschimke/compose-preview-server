@@ -367,8 +367,15 @@ internal class RemoteContentEmitter(
     if (SHOW_BY_STATE in node.properties) return stateSelection(node, depth)
     val pad = INDENT.repeat(depth)
     return when (node.componentId) {
-      "m3/text",
-      REMOTE_TEXT_COMPONENT_ID -> (pad + text(node, pad)).split("\n")
+      "m3/text" -> (pad + text(node, pad)).split("\n")
+      // The same hand, but only where the host PUBLISHED the component. Without its record this is
+      // a component this host never served, and writing a call to one anyway would put a name in
+      // generated source that nothing on the box can resolve -- so it falls through to the refusal
+      // it had before, which names the component. `RecordFreeComposeExportTest` pins both halves,
+      // export and native preview, because only the pair is evidence.
+      REMOTE_TEXT_COMPONENT_ID ->
+        if (node.componentId in components) (pad + text(node, pad)).split("\n")
+        else recordCall(node, depth) ?: refuseUnknown(node)
       "layout/box" -> container(node, depth, "RemoteBox", boxArguments(node, pad))
       "layout/column" -> container(node, depth, "RemoteColumn", columnArguments(node, pad))
       "layout/row" -> container(node, depth, "RemoteRow", rowArguments(node, pad))

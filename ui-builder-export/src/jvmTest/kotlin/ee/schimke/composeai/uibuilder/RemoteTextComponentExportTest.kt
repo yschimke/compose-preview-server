@@ -1,5 +1,9 @@
 package ee.schimke.composeai.uibuilder
 
+import ee.schimke.composeai.discovery.ComponentOrigin
+import ee.schimke.composeai.discovery.ComponentRecord
+import ee.schimke.composeai.discovery.ComponentSymbol
+import ee.schimke.composeai.discovery.TargetParameter
 import kotlin.test.Test
 import kotlin.test.assertContains
 import kotlin.test.assertFalse
@@ -52,6 +56,7 @@ class RemoteTextComponentExportTest {
           },
         ),
         refusals,
+        components = published,
       )
 
     val source = emitter.emit("label", 1).joinToString("\n")
@@ -86,6 +91,7 @@ class RemoteTextComponentExportTest {
               },
             ),
             refusals,
+            components = published,
           )
           .emit("label", 1)
           .joinToString("\n")
@@ -127,6 +133,60 @@ class RemoteTextComponentExportTest {
     )
     assertContains(emitter.imports(null), "androidx.compose.ui.unit.sp")
   }
+
+  /**
+   * A host that published no catalog must not get a call to a component it never served.
+   *
+   * The hand-written case is keyed on the id, and the id alone says nothing about whether this box
+   * serves the component — so it is taken only where the record is. Without it the node falls to
+   * the same refusal it had before this writer existed, which `RecordFreeComposeExportTest` pins
+   * from the production side for both the export and the native preview.
+   */
+  @Test
+  fun `an unpublished component refuses rather than being written by hand`() {
+    val refusals = mutableListOf<String>()
+
+    val source =
+      RemoteContentEmitter(
+          document(REMOTE_TEXT_COMPONENT_ID, buildJsonObject { string("text", "hi") }),
+          refusals,
+        )
+        .emit("label", 1)
+        .joinToString("\n")
+
+    assertFalse("RemoteText(" in source, source)
+    assertTrue(
+      refusals.any { REMOTE_TEXT_COMPONENT_ID in it },
+      "the refusal has to name the component: $refusals",
+    )
+  }
+
+  /** Present is all this needs to be: the writer reads the design, not the record. */
+  private val published =
+    mapOf(
+      REMOTE_TEXT_COMPONENT_ID to
+        ComponentRecord(
+          canonicalId = "remote-catalog/RemoteText",
+          componentIds = listOf(REMOTE_TEXT_COMPONENT_ID),
+          symbol =
+            ComponentSymbol(
+              jvmOwner = "androidx.wear.compose.remote.material3.RemoteTextKt",
+              callable = "androidx.wear.compose.remote.material3.RemoteText",
+              name = "RemoteText",
+              origin = ComponentOrigin.LIBRARY,
+            ),
+          parameters =
+            listOf(
+              TargetParameter(
+                name = "text",
+                type = "RemoteString",
+                typeFqn = "androidx.compose.remote.creation.compose.state.RemoteString",
+              )
+            ),
+          slots = emptyList(),
+          signatureKnown = true,
+        )
+    )
 
   private fun kotlinx.serialization.json.JsonObjectBuilder.string(name: String, value: String) =
     putJsonObject(name) {
