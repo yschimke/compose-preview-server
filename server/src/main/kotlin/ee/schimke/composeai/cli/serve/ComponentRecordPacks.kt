@@ -236,6 +236,17 @@ internal object ComponentRecordPacks {
       "androidx.compose.remote.creation.compose.state.RemoteBoolean" -> "boolean"
       "androidx.compose.remote.creation.compose.state.RemoteInt" -> "integer"
       "androidx.compose.remote.creation.compose.state.RemoteFloat" -> "number"
+      // A text size, and the property a design most visibly loses without it. Left out, a
+      // published Remote Compose text component offered a builder `text`, `color` and `maxLines`
+      // out of twelve parameters -- every size, weight and alignment dropped -- so a design moving
+      // onto it lost the size it was authored with.
+      //
+      // `number` the way `RemoteFloat` is, with one caveat this map cannot express and the emitter
+      // enforces: the spelling is `22.rsp`, and `RemoteTextUnitKt` publishes no `Float.rsp`, so
+      // only a whole number has a Kotlin form at all. `RemoteContentEmitter` refuses a fractional
+      // size by name rather than rounding one. Compiled rather than assumed, by the value
+      // vocabulary probe in the catalog repository that publishes the component.
+      "androidx.compose.remote.creation.compose.state.RemoteTextUnit" -> "number"
       else -> null
     }
 
