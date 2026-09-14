@@ -44,7 +44,7 @@ ENV LIBGL_ALWAYS_SOFTWARE=1 \
     GRADLE_USER_HOME=/root/.gradle
 
 # ---------------------------------------------------------------------------
-# Stage 1: install the released standalone server and seed Maven Local.
+# Stage 1: install the released standalone server.
 # ---------------------------------------------------------------------------
 FROM base AS server
 ARG SERVER_VERSION
@@ -66,14 +66,6 @@ RUN set -eu; \
     rm /tmp/cp.tgz; \
     ln -s "/opt/compose-preview-server-${SERVER_VERSION}" /opt/compose-preview-server
 ENV PATH="/opt/compose-preview-server/bin:${PATH}"
-
-# Seed Maven local from the same release tag (preview-host-image.yml builds the
-# published `ee` tree directly into deploy/image/m2/).
-# Carrying the release's plugin/runtime jars makes live-bundle dependency resolution
-# self-contained instead of depending on Maven Central propagation. The directory
-# always exists (.keep); on the manual workflow_dispatch path it can be empty, in
-# which case the runtime resolver falls back to its configured remote repositories.
-COPY m2/ /root/.m2/repository/
 
 # ---------------------------------------------------------------------------
 # Stage 1b (optional): Android/Wear live daemon — "do the slow work upfront".
@@ -394,19 +386,16 @@ COPY --from=desktop-daemon /opt/lib-bta /opt/lib-bta
 ENV PATH="/opt/compose-preview-server/bin:${PATH}" \
     SERVE_IDLE_EXIT=0 \
     SERVE_TIMEOUT=1800 \
-    COMPOSE_PREVIEW_INIT_USE_MAVEN_LOCAL=1 \
     ANDROID_HOME=/opt/android-sdk \
     ANDROID_SDK_ROOT=/opt/android-sdk \
     JAVA_TOOL_OPTIONS="-XX:MaxRAMPercentage=70 -Dcomposeai.cli.libDaemonAndroidDir=/opt/lib-daemon-android -Dcomposeai.cli.libDaemonDesktopDir=/opt/lib-daemon-desktop -Dcomposeai.cli.libRendererDir=/opt/lib-renderer -Dcomposeai.cli.libRcjvmDir=/opt/lib-rcjvm -Dcomposeai.cli.skikoDir=/opt/lib-skiko -Dcomposeai.cli.libBtaDir=/opt/lib-bta -Dcomposeai.serve.warmInBackground=true -Dcomposeai.serve.renderTimeoutSeconds=900 -Dcomposeai.serve.frameRenderTimeoutSeconds=120 -Dcomposeai.daemon.sandboxCount=3 -Dcomposeai.daemon.sandboxBootTimeoutMs=1800000 -Dcomposeai.daemon.backgroundSandboxBoot=true -Dcomposeai.daemon.lazyInProcessSandbox=true -Dcomposeai.serve.spareSandboxes=2"
 
 WORKDIR /project
-# Carry the release Maven tree so live bundles can resolve the plugin/runtime
-# coordinates without waiting on Central. `/project` intentionally stays empty:
-# entrypoint.sh starts module-less serve and hosts published catalogs/bundles.
-COPY --from=server /root/.m2 /root/.m2
-# Merge the pre-fetched Robolectric `android-all` runtime into the Maven cache (after
-# the CLI-stage m2 so it lands alongside it), so the Android daemon's first render
-# skips the ~200 MB download.
+# `/project` intentionally stays empty: entrypoint.sh starts module-less serve and hosts
+# published catalogs/bundles. Seed only the pre-fetched Robolectric `android-all` runtime into
+# Maven's cache, so the Android daemon's first render skips the ~200 MB download. Released
+# compose-preview dependencies continue to resolve from their configured remote repositories;
+# this image must not force the auto-injected Gradle build to trust arbitrary Maven Local state.
 COPY --from=android-daemon /root/.m2/repository/org/robolectric /root/.m2/repository/org/robolectric
 
 # Bake the branch-trust store so a public deploy badges the published

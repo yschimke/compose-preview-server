@@ -66,10 +66,9 @@ jobs:
   # this release asked for has succeeded.
   #
   # It also attaches the UI-builder web bundle on its own. The server archive already carries it
-  # (`server/build.gradle.kts` unpacks it into `ui-builder/`), and it is on Maven Central as
-  # `compose-preview-ui-builder-web` - but neither is reachable for someone who wants only the
-  # bundle: to serve it themselves, to put it in an image, or to point an existing `serve` at it
-  # with `--ui-builder-dir`. A release asset is the one form that needs no Gradle and no Maven.
+  # (`server/build.gradle.kts` unpacks it into `ui-builder/`), but that copy is not reachable for
+  # someone who wants only the bundle: to serve it themselves, to put it in an image, or to point
+  # an existing `serve` at it with `--ui-builder-dir`.
   publish-distributions:
     needs: release-please
     if: ${{ needs.release-please.outputs.release_created == 'true' }}
@@ -114,8 +113,8 @@ jobs:
           gh release upload "${{ needs.release-please.outputs.tag_name }}"
           "mcp/build/distributions/compose-preview-mcp-${PLUGIN_VERSION}.tar.gz"
           --clobber
-      # The same archive `:ui-builder-web` publishes to Maven Central, attached under the same name
-      # it has there, so the two can be compared byte for byte.
+      # The standalone editor archive, named consistently with the copy inside the server
+      # distribution.
       - name: Upload UI-builder web bundle
         run: >-
           gh release upload "${{ needs.release-please.outputs.tag_name }}"
