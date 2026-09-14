@@ -301,6 +301,16 @@ curl -sX DELETE -H "X-Compose-Preview-Admin-Token: $SERVE_ADMIN_TOKEN" \
   https://<host>/admin/ui-builder/designs/<designId>
 ```
 
+For diagnosis without operator authority, set `SERVE_ADMIN_READ_TOKEN` and use it with the same
+header on `GET /admin/ui-builder` or `GET /admin/ui-builder/designs`. That credential receives the
+summary list, including each design's `unusableReason`, but it cannot download document bodies or
+reach a write route:
+
+```bash
+curl -sH "X-Compose-Preview-Admin-Token: $SERVE_ADMIN_READ_TOKEN" \
+  https://<host>/admin/ui-builder/designs
+```
+
 No `ui-builder-read` / `ui-builder-write` grant reaches either route: the actor-scoped API can
 list only what its actor owns or was granted, and has no delete at all.
 

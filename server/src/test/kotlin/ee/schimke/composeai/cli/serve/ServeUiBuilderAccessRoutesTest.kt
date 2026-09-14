@@ -1,9 +1,12 @@
 package ee.schimke.composeai.cli.serve
 
+import ee.schimke.composeai.uibuilder.protocol.CatalogReferenceV1
 import ee.schimke.composeai.uibuilder.protocol.DesignAccessActionV1
 import ee.schimke.composeai.uibuilder.protocol.DesignAccessControlV1
 import ee.schimke.composeai.uibuilder.protocol.DesignAccessRoleV1
+import ee.schimke.composeai.uibuilder.protocol.DesignActorAccessV1
 import ee.schimke.composeai.uibuilder.protocol.DesignActorGrantV1
+import ee.schimke.composeai.uibuilder.protocol.DesignListItemV1
 import ee.schimke.composeai.uibuilder.protocol.GrantActorAccessMutationV1
 import ee.schimke.composeai.uibuilder.protocol.RevokeActorAccessMutationV1
 import ee.schimke.composeai.uibuilder.protocol.ServiceErrorCodeV1
@@ -58,6 +61,30 @@ class ServeUiBuilderAccessRoutesTest {
     object : UiBuilderServicePort {
       override suspend fun execute(call: UiBuilderServiceCall): UiBuilderServiceResponse =
         when (val request = call.request) {
+          is UiBuilderServiceRequest.ListDesigns ->
+            UiBuilderServiceResponse.Designs(
+              designs =
+                when {
+                  "github:owner" in call.actor.accessIdentities ->
+                    listOf(
+                      listItem("screen", "Owner screen", DesignAccessRoleV1.OWNER),
+                      listItem("broken", "Old screen", DesignAccessRoleV1.OWNER),
+                    )
+                  call.actor.actorId == "github:other" ->
+                    listOf(listItem("screen", "Owner screen", DesignAccessRoleV1.VIEWER))
+                  else -> emptyList()
+                },
+              nextCursor = null,
+            )
+          is UiBuilderServiceRequest.OpenDesign ->
+            if (request.designId == "broken")
+              UiBuilderServiceResponse.Error(
+                UiBuilderServiceError(
+                  ServiceErrorCodeV1.CATALOG_UNAVAILABLE,
+                  "catalog unavailable for stored design broken",
+                )
+              )
+            else UiBuilderServiceResponse.Catalogs(emptyList())
           is UiBuilderServiceRequest.GetDesignAccess ->
             // The real service answers only the owner, and a delegate of the owner. Reproduced
             // here rather than stubbed open, because the route's refusal path is what is on test.
@@ -135,6 +162,30 @@ class ServeUiBuilderAccessRoutesTest {
       .also(ServeHttpServer::start)
   private val client = OkHttpClient.Builder().followRedirects(false).build()
 
+  private fun listItem(
+    id: String,
+    title: String,
+    role: DesignAccessRoleV1,
+  ) =
+    DesignListItemV1(
+      designId = id,
+      title = title,
+      revision = 4,
+      accessRevision = access.accessRevision,
+      catalogPin = CatalogReferenceV1("m3-catalog", "rev", "rev", "runtime"),
+      createdAtEpochMillis = 1_000,
+      updatedAtEpochMillis = 2_000,
+      ownerActorId = access.ownerActorId,
+      requesterAccess =
+        DesignActorAccessV1(
+          actorId = if (role == DesignAccessRoleV1.OWNER) "github:owner" else "github:other",
+          role = role,
+          allowedActions =
+            if (role == DesignAccessRoleV1.OWNER) DesignAccessActionV1.entries
+            else listOf(DesignAccessActionV1.READ, DesignAccessActionV1.EXPORT),
+        ),
+    )
+
   @AfterTest
   fun tearDown() {
     server.stop()
@@ -181,6 +232,28 @@ class ServeUiBuilderAccessRoutesTest {
   }
 
   @Test
+  fun `the designs screen lists only this actor's designs with ownership sharing and open failures`() {
+    val (ownerCode, ownerPage) = get("/ui-builder/designs", actor = "github:owner")
+    assertEquals(200, ownerCode)
+    assertTrue(ownerPage.contains("Owner screen"), ownerPage)
+    assertTrue(ownerPage.contains("agent:abc123"), "owner sees the inline grant list: $ownerPage")
+    assertTrue(ownerPage.contains("name=\"actorId\""), "owner can share from the list: $ownerPage")
+    assertTrue(ownerPage.contains("catalog unavailable for stored design broken"), ownerPage)
+    assertTrue(ownerPage.contains("This design cannot be opened"), ownerPage)
+
+    val (sharedCode, sharedPage) = get("/ui-builder/designs", actor = "github:other")
+    assertEquals(200, sharedCode)
+    assertTrue(sharedPage.contains("Shared by <code>github:owner</code>"), sharedPage)
+    assertFalse(sharedPage.contains("agent:abc123"), "a collaborator never sees the owner's grants")
+    assertFalse(sharedPage.contains("name=\"actorId\""), "a collaborator cannot share onward")
+
+    val (_, strangerPage) = get("/ui-builder/designs", actor = "github:stranger")
+    assertFalse(strangerPage.contains("Owner screen"), strangerPage)
+    assertEquals(401, get("/ui-builder/designs", actor = null).first)
+    assertEquals(403, get("/ui-builder/designs", actor = "forbidden").first)
+  }
+
+  @Test
   fun `an agent acting for the owner manages sharing as the owner does`() {
     val (code, page) = get("/ui-builder/m3-catalog/screen/access", actor = "agent")
     assertEquals(200, code)
@@ -219,6 +292,21 @@ class ServeUiBuilderAccessRoutesTest {
       (mutations.single().mutations.single() as RevokeActorAccessMutationV1).actorId,
     )
     assertFalse(revokedPage.contains(">github:colleague<"), revokedPage)
+  }
+
+  @Test
+  fun `sharing from the designs screen returns to the actor scoped list`() {
+    val (code, _) =
+      post(
+        "/ui-builder/m3-catalog/screen/access",
+        FormBody.Builder().add("actorId", "github:colleague").add("returnTo", "designs").build(),
+      )
+
+    assertEquals(303, code)
+    assertEquals(
+      "github:colleague",
+      (mutations.single().mutations.single() as GrantActorAccessMutationV1).actorId,
+    )
   }
 
   @Test

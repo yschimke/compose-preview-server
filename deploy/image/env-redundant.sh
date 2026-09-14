@@ -8,7 +8,8 @@
 # the handful of lines that genuinely differ from stock — the ones that explain why this box behaves
 # unlike a fresh one — are buried among them.
 #
-# Values are never printed. The file holds SERVE_TOKEN, SERVE_ADMIN_TOKEN, the GitHub OAuth secret
+# Values are never printed. The file holds SERVE_TOKEN, SERVE_ADMIN_TOKEN, SERVE_ADMIN_READ_TOKEN,
+# the GitHub OAuth secret
 # and the deploy hook token; a tidy-up tool that pastes those into a terminal (and from there into
 # an issue, or a chat with an agent) would be a poor trade for the tidiness. Only key names, line
 # numbers, and defaults that are already public in this repo, reach stdout.

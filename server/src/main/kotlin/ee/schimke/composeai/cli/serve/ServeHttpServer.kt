@@ -31,6 +31,8 @@ import ee.schimke.composeai.uibuilder.protocol.DesignAccessRoleV1
 import ee.schimke.composeai.uibuilder.protocol.GetDesignAccessRequestV1
 import ee.schimke.composeai.uibuilder.protocol.GetSnapshotRequestV1
 import ee.schimke.composeai.uibuilder.protocol.GrantActorAccessMutationV1
+import ee.schimke.composeai.uibuilder.protocol.ListDesignsRequestV1
+import ee.schimke.composeai.uibuilder.protocol.OpenDesignRequestV1
 import ee.schimke.composeai.uibuilder.protocol.RevokeActorAccessMutationV1
 import ee.schimke.composeai.uibuilder.protocol.UpdateDesignAccessRequestV1
 import ee.schimke.composeai.uibuilder.service.AuthenticatedUiBuilderActor
@@ -411,6 +413,11 @@ class ServeHttpServer(
    * server that never opted in can't be administered at all.
    */
   private val adminToken: String? = null,
+  /**
+   * Narrow diagnostic credential for the UI-builder design list. Unlike [adminToken], this never
+   * admits a document body or mutation; see [rejectBadAdminToken].
+   */
+  private val adminReadToken: String? = null,
   /**
    * When non-null, enables the **document** lane: `GET /docs` (upload page), `POST /docs` (ingest a
    * known document format), and `GET /d/{id}` (the expiring permalink that plays it back). Supplied
@@ -806,7 +813,8 @@ class ServeHttpServer(
   /**
    * As [adminEnabled], for the `/admin/ui-builder` routes. Same token, separately supplied admin.
    */
-  private val uiBuilderAdminEnabled: Boolean = uiBuilderAdmin != null && !adminToken.isNullOrBlank()
+  private val uiBuilderAdminEnabled: Boolean =
+    uiBuilderAdmin != null && (!adminToken.isNullOrBlank() || !adminReadToken.isNullOrBlank())
 
   /** As [uiBuilderAdminEnabled], for the `/admin/ui-builder/library` routes. */
   private val uiBuilderDesignLibraryEnabled: Boolean =
@@ -1259,6 +1267,10 @@ class ServeHttpServer(
             call.respondRedirect(if (query.isEmpty()) "/ui-builder/" else "/ui-builder/?$query")
           }
         }
+        // A person's index over only the designs the service says this actor may read. This is not
+        // the operator's `/admin/ui-builder`: it has no delete or document-replacement path, and a
+        // design that was never shared with the caller never reaches the page.
+        get("/ui-builder/designs") { handleUiBuilderDesigns() }
         // Creating a design is a POST, and its answer is a redirect to the design's permalink.
         // The form the New design dialog submits is an ordinary HTML form, so the browser follows
         // the `303` itself and lands on a URL that is safe to reload, bookmark and share — which
@@ -1755,18 +1767,24 @@ class ServeHttpServer(
         if (uiBuilderAdminEnabled) {
           val admin = uiBuilderAdmin!!
           get("/admin/ui-builder") {
-            if (rejectBadAdminToken()) return@get
+            if (rejectBadAdminToken(allowReadToken = true)) return@get
+            val pageToken = call.request.queryParameters["token"]
             call.response.headers.append(HttpHeaders.CacheControl, "no-store")
             call.respondText(
               ServeWeb.uiBuilderAdminPage(
-                adminToken = call.request.queryParameters["token"],
+                adminToken = pageToken,
+                readOnly =
+                  !adminReadToken.isNullOrBlank() &&
+                    ServeUrls.tokensMatch(adminReadToken, pageToken.orEmpty()) &&
+                    (adminToken.isNullOrBlank() ||
+                      !ServeUrls.tokensMatch(adminToken, pageToken.orEmpty())),
                 version = SERVE_VERSION,
               ),
               ContentType.Text.Html,
             )
           }
           get("/admin/ui-builder/designs") {
-            if (rejectBadAdminToken()) return@get
+            if (rejectBadAdminToken(allowReadToken = true)) return@get
             respondAdminUiBuilderDesigns(admin)
           }
           // Copy a design out before deciding what to do with it. The one route here that is
@@ -4943,18 +4961,27 @@ class ServeHttpServer(
    * 404 like the browse gate so the surface isn't confirmed to a scanner, and compares in constant
    * time.
    */
-  private suspend fun RoutingContext.rejectBadAdminToken(): Boolean {
+  private suspend fun RoutingContext.rejectBadAdminToken(allowReadToken: Boolean = false): Boolean {
     val provided = call.request.queryParameters["token"] ?: call.request.headers[ADMIN_TOKEN_HEADER]
     // An unconfigured token is not a token everyone matches. `tokensMatch` compares bytes, so a
     // blank expected value is satisfied by `?token=` — which would turn "the operator never set a
     // credential" into "no credential is required", the exact inversion the `*Enabled` flags below
     // exist to prevent. They gate registration; this gates the check, so a route that forgets to
     // pair itself with one still fails closed rather than open.
-    if (adminToken.isNullOrBlank()) {
+    if (adminToken.isNullOrBlank() && (!allowReadToken || adminReadToken.isNullOrBlank())) {
       call.respondText("not found", status = HttpStatusCode.NotFound)
       return true
     }
-    if (ServeUrls.tokensMatch(adminToken, provided)) return false
+    if (!adminToken.isNullOrBlank() && ServeUrls.tokensMatch(adminToken, provided.orEmpty())) {
+      return false
+    }
+    if (
+      allowReadToken &&
+        !adminReadToken.isNullOrBlank() &&
+        ServeUrls.tokensMatch(adminReadToken, provided.orEmpty())
+    ) {
+      return false
+    }
     call.respondText("not found", status = HttpStatusCode.NotFound)
     return true
   }
@@ -13117,6 +13144,97 @@ class ServeHttpServer(
     respondUiBuilderAccessPage(designId, actor, access, notice = "")
   }
 
+  /** `GET /ui-builder/designs` — owned and shared designs for the authenticated actor. */
+  private suspend fun RoutingContext.handleUiBuilderDesigns() {
+    val service = uiBuilderService
+    val authorization = uiBuilderAuthorization
+    if (service == null || authorization == null || uiBuilderDir == null) {
+      call.respondText("not found", status = HttpStatusCode.NotFound)
+      return
+    }
+    val actor = authorizeUiBuilderPage(authorization, UiBuilderRouteCapability.READ) ?: return
+    val listed = mutableListOf<ee.schimke.composeai.uibuilder.protocol.DesignListItemV1>()
+    var cursor: String? = null
+    do {
+      when (val response = service.executeMapped(ListDesignsRequestV1(cursor, 200), actor)) {
+        is UiBuilderServiceResponse.Designs -> {
+          listed += response.designs
+          cursor = response.nextCursor
+        }
+        is UiBuilderServiceResponse.Error -> {
+          respondUiBuilderDenied(
+            HttpStatusCode.fromValue(response.httpStatusValue()),
+            response.error.message,
+            response.error.message,
+          )
+          return
+        }
+        else -> {
+          call.respondText(
+            "UI-builder service returned an unexpected design list",
+            status = HttpStatusCode.InternalServerError,
+          )
+          return
+        }
+      }
+    } while (cursor != null)
+
+    val rows = listed.map { item ->
+      val openFailure =
+        (service.executeMapped(OpenDesignRequestV1(item.designId), actor)
+            as? UiBuilderServiceResponse.Error)
+          ?.error
+          ?.message
+      val access =
+        if (item.requesterAccess.role == DesignAccessRoleV1.OWNER)
+          (service.executeMapped(GetDesignAccessRequestV1(item.designId), actor)
+              as? UiBuilderServiceResponse.DesignAccess)
+            ?.access
+        else null
+      val href =
+        uiBuilderPermalink(item.catalogPin.systemId, item.designId, call.request.queryParameters)
+      ServeWeb.UiBuilderDesignRow(
+        designId = item.designId,
+        title = item.title,
+        catalogSystemId = item.catalogPin.systemId,
+        revision = item.revision,
+        updatedAtEpochMillis = item.updatedAtEpochMillis,
+        ownerActorId = item.ownerActorId,
+        requesterRole = item.requesterAccess.role.name.lowercase(),
+        requesterAllowed =
+          item.requesterAccess.allowedActions.joinToString(", ") { it.name.lowercase() },
+        designHref = href,
+        shareAction =
+          href.let { permalink ->
+            val (path, query) = permalink.substringBefore("?") to permalink.substringAfter("?", "")
+            "$path/access" + if (query.isEmpty()) "" else "?$query"
+          },
+        grants =
+          access?.actorGrants?.map {
+            ServeWeb.UiBuilderAccessRow(
+              actorId = it.actorId,
+              role = it.role.name.lowercase(),
+              allowed = it.allowedActions.joinToString(", ") { action -> action.name.lowercase() },
+            )
+          },
+        unopenableReason = openFailure,
+      )
+    }
+    val skin = call.siteSkin()
+    markGeneration("static-page", "no-store")
+    call.respondText(
+      ServeWeb.uiBuilderDesignsPage(
+        rows = rows,
+        viewerActorId = actor.actorId,
+        navSuffix = agentGrantTokenQuery(),
+        version = SERVE_VERSION,
+        siteName = skin.first,
+        themeCss = skin.second,
+      ),
+      ContentType.Text.Html,
+    )
+  }
+
   /**
    * `POST /ui-builder/{catalog}/{designId}/access` — share it, or take the sharing back.
    *
@@ -13184,7 +13302,15 @@ class ServeHttpServer(
         actor,
       )
     when (updated) {
-      is UiBuilderServiceResponse.DesignAccess ->
+      is UiBuilderServiceResponse.DesignAccess -> {
+        if (form["returnTo"] == "designs") {
+          call.response.headers.append(
+            HttpHeaders.Location,
+            "/ui-builder/designs${agentGrantTokenQuery()}",
+          )
+          call.respond(HttpStatusCode.SeeOther)
+          return
+        }
         respondUiBuilderAccessPage(
           designId,
           actor,
@@ -13193,6 +13319,7 @@ class ServeHttpServer(
             if (revoking) "$target can no longer open this design."
             else "$target can now open this design as ${role.name.lowercase()}.",
         )
+      }
       is UiBuilderServiceResponse.Error ->
         respondUiBuilderAccessPage(designId, actor, current, notice = updated.error.message)
       else -> respondUiBuilderAccessPage(designId, actor, current, notice = "nothing changed")
@@ -13244,6 +13371,32 @@ class ServeHttpServer(
       }
     return actor to designId
   }
+
+  /** Authenticate one server-rendered UI-builder page without trusting an actor from its URL. */
+  private suspend fun RoutingContext.authorizeUiBuilderPage(
+    authorization: ServeUiBuilderAuthorization,
+    capability: UiBuilderRouteCapability,
+  ): AuthenticatedUiBuilderActor? =
+    when (val decision = authorization.authorize(call, capability)) {
+      is UiBuilderAuthorizationDecision.Authorized -> decision.actor
+      UiBuilderAuthorizationDecision.Missing -> {
+        call.response.headers.append(HttpHeaders.WWWAuthenticate, "Bearer")
+        respondUiBuilderDenied(
+          HttpStatusCode.Unauthorized,
+          "authentication is required",
+          uiBuilderDeniedReason(githubAuth?.currentLogin(call)),
+        )
+        null
+      }
+      UiBuilderAuthorizationDecision.Forbidden -> {
+        respondUiBuilderDenied(
+          HttpStatusCode.Forbidden,
+          "UI-builder access required",
+          uiBuilderDeniedReason(githubAuth?.currentLogin(call)),
+        )
+        null
+      }
+    }
 
   private suspend fun RoutingContext.respondUiBuilderAccessPage(
     designId: String,

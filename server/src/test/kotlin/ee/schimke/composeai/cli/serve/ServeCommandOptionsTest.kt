@@ -81,11 +81,22 @@ class ServeCommandOptionsTest {
     assertNull(options.uiBuilderStateDirFlag)
     assertFalse(options.uiBuilderMigrateState)
     assertFalse(options.catalogMcp)
+    assertNull(options.adminReadToken)
     assertEquals(setOf("m3-catalog"), options.uiBuilderCatalogs)
     assertEquals(
       "none",
       options(listOf("--ui-builder-state-dir=none")).uiBuilderStateDirFlag,
     )
+  }
+
+  @Test
+  fun `the diagnostic admin token is parsed separately and blanks stay disabled`() {
+    assertEquals(
+      "read-secret",
+      options(listOf("--admin-token", "write-secret", "--admin-read-token", "read-secret"))
+        .adminReadToken,
+    )
+    assertNull(options(listOf("--admin-read-token", " ")).adminReadToken)
   }
 
   @Test

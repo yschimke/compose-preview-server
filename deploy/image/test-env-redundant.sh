@@ -21,6 +21,7 @@ SERVE_PUBLIC=1
 SERVE_CATALOG_MAX_IMAGES=
 SERVE_TOKEN=sup3rs3cr3t-token-value
 SERVE_ADMIN_TOKEN="quoted-secret-value"
+SERVE_ADMIN_READ_TOKEN="read-only-secret-value"
 SERVE_LIVE_SEATS=8
 ROLLOUT_HEALTH_TIMEOUT=900
 ENV
@@ -45,7 +46,7 @@ grep -q "SERVE_CATALOG_MAX_IMAGES" <<<"${out}" || {
 echo "PASS: empty assignments are reported"
 
 # 3. Values that genuinely differ are kept, by NAME only.
-for key in SERVE_LIVE_SEATS ROLLOUT_HEALTH_TIMEOUT SERVE_TOKEN; do
+for key in SERVE_LIVE_SEATS ROLLOUT_HEALTH_TIMEOUT SERVE_TOKEN SERVE_ADMIN_READ_TOKEN; do
   grep -q "  ${key}$" <<<"${out}" || {
     echo "FAIL: ${key} differs from stock and was not listed as active" >&2
     echo "${out}" >&2
@@ -55,7 +56,7 @@ done
 echo "PASS: entries that differ from stock are kept"
 
 # 4. THE property: no secret value appears anywhere in the output.
-for secret in sup3rs3cr3t-token-value quoted-secret-value; do
+for secret in sup3rs3cr3t-token-value quoted-secret-value read-only-secret-value; do
   if grep -qF "${secret}" <<<"${out}"; then
     echo "FAIL: a secret VALUE reached stdout — this tool's output is meant to be pasteable" >&2
     exit 1

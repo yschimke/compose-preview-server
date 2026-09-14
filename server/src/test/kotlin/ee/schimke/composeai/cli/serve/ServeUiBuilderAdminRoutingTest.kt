@@ -29,6 +29,7 @@ import okhttp3.RequestBody.Companion.toRequestBody
 class ServeUiBuilderAdminRoutingTest {
   private val jsonMediaType = "application/json".toMediaType()
   private val adminToken = "admin-secret"
+  private val adminReadToken = "admin-read-secret"
   private val designs =
     linkedMapOf(
       "cheeky-raccoon" to summary("cheeky-raccoon", "Home", "operator"),
@@ -73,7 +74,11 @@ class ServeUiBuilderAdminRoutingTest {
     }
   private val registry = ServeSessionRegistry(open = { null })
 
-  private fun server(admin: ServeUiBuilderAdmin?, token: String? = adminToken) =
+  private fun server(
+    admin: ServeUiBuilderAdmin?,
+    token: String? = adminToken,
+    readToken: String? = null,
+  ) =
     ServeHttpServer(
         host = "127.0.0.1",
         requestedPort = 0,
@@ -83,6 +88,7 @@ class ServeUiBuilderAdminRoutingTest {
         isPublic = true,
         uiBuilderAdmin = admin,
         adminToken = token,
+        adminReadToken = readToken,
       )
       .also(ServeHttpServer::start)
 
@@ -139,6 +145,54 @@ class ServeUiBuilderAdminRoutingTest {
     server!!.stop()
     server = server(ServeUiBuilderAdmin(port, onLog = {}), token = null)
     assertEquals(404, send("/admin/ui-builder", token = null).first)
+  }
+
+  @Test
+  fun `the read token sees summaries and unusable reasons but never documents or mutations`() {
+    server =
+      server(
+        ServeUiBuilderAdmin(port, onLog = {}),
+        token = adminToken,
+        readToken = adminReadToken,
+      )
+
+    assertEquals(200, send("/admin/ui-builder", token = adminReadToken).first)
+    val (_, readOnlyPage) = send("/admin/ui-builder?token=$adminReadToken", token = null)
+    assertTrue(readOnlyPage.contains("Read-only diagnosis"), readOnlyPage)
+    assertFalse(readOnlyPage.contains("id=\"cp-library-table\""), readOnlyPage)
+    val (listCode, listBody) = send("/admin/ui-builder/designs", token = adminReadToken)
+    assertEquals(200, listCode)
+    assertTrue(listBody.contains("catalog unavailable for stored design shady-goose"), listBody)
+
+    assertEquals(
+      404,
+      send("/admin/ui-builder/designs/shady-goose/document", token = adminReadToken).first,
+    )
+    assertEquals(
+      404,
+      send("/admin/ui-builder/designs/shady-goose", "DELETE", token = adminReadToken).first,
+    )
+    assertEquals(listOf("cheeky-raccoon", "shady-goose"), designs.keys.toList())
+  }
+
+  @Test
+  fun `a read token alone registers only the diagnostic design overview`() {
+    server =
+      server(
+        ServeUiBuilderAdmin(port, onLog = {}),
+        token = null,
+        readToken = adminReadToken,
+      )
+
+    assertEquals(200, send("/admin/ui-builder/designs", token = adminReadToken).first)
+    assertEquals(
+      404,
+      send("/admin/ui-builder/designs/shady-goose/document", token = adminReadToken).first,
+    )
+    assertEquals(
+      404,
+      send("/admin/ui-builder/designs/shady-goose", "DELETE", token = adminReadToken).first,
+    )
   }
 
   @Test
