@@ -84,6 +84,23 @@ This repository is a good fit for it: `check` here drags in `ktfmtCheckAll`, `ch
 `:ui-builder-*` test lanes, and the one line that says which gate rejected you is otherwise buried.
 A failure prints the raw log path — open that when the brief is not enough.
 
+On a shared developer host, automated builds use [`scripts/agent-gradle.sh`](scripts/agent-gradle.sh)
+instead of invoking `build-brief` directly:
+
+```
+scripts/agent-gradle.sh :server:test --tests '*ServeCommandOptionsTest*'
+scripts/agent-gradle.sh --exclusive check
+```
+
+The launcher still goes through `build-brief`, but gives automation a four-worker ceiling, low
+process priority, non-interactive input and a ten-minute Gradle-daemon idle timeout. Use the normal
+profile for focused compilation, formatting and tests. Use `--exclusive` for `check`, distribution
+builds, Wasm executable links and other broad Gradle task graphs: it takes one per-user machine lock
+shared by every worktree, so two automated 6 GB Kotlin/Wasm compiler daemons cannot peak together.
+The lock deliberately does not cover direct `./gradlew` or `build-brief` invocations, so interactive
+development stays responsive, and hosted CI keeps its runner's full capacity. Do not copy these
+limits into the repository's `gradle.properties`; that would throttle those two cases as well.
+
 Two local notes. Report-style commands (`tasks`, `help`, `projects`, `dependencies`,
 `dependencyInsight`) keep their full bodies, so dependency debugging is unaffected. `--ci` is opt-in
 per job and never inferred; the workflows here call Gradle directly and none of them depend on the
