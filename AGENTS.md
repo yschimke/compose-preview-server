@@ -96,10 +96,11 @@ The launcher still goes through `build-brief`, but gives automation a four-worke
 process priority, non-interactive input and a ten-minute Gradle-daemon idle timeout. Use the normal
 profile for focused compilation, formatting and tests. Use `--exclusive` for `check`, distribution
 builds, Wasm executable links and other broad Gradle task graphs: it takes one per-user machine lock
-shared by every worktree, so two automated 6 GB Kotlin/Wasm compiler daemons cannot peak together.
-The lock deliberately does not cover direct `./gradlew` or `build-brief` invocations, so interactive
-development stays responsive, and hosted CI keeps its runner's full capacity. Do not copy these
-limits into the repository's `gradle.properties`; that would throttle those two cases as well.
+shared by every worktree of the Compose Preview server, daemon and tools repositories, so two
+automated compiler daemons cannot peak together. The lock deliberately does not cover direct
+`./gradlew` or `build-brief` invocations, so interactive development stays responsive, and hosted CI
+keeps its runner's full capacity. Do not copy these limits into the repository's
+`gradle.properties`; that would throttle those two cases as well.
 
 Two local notes. Report-style commands (`tasks`, `help`, `projects`, `dependencies`,
 `dependencyInsight`) keep their full bodies, so dependency debugging is unaffected. `--ci` is opt-in

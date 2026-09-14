@@ -33,7 +33,7 @@ if [ "${actual}" != "${expected}" ]; then
   exit 1
 fi
 
-lock_path="${test_root}/runtime/compose-preview-server-gradle-${UID}.lock"
+lock_path="${test_root}/runtime/compose-preview-gradle-${UID}.lock"
 exclusive_output="${test_root}/exclusive-output"
 exec 9>"${lock_path}"
 flock 9
