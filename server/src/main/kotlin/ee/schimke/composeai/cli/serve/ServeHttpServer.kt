@@ -6325,26 +6325,23 @@ class ServeHttpServer(
       .knownSessionIds()
       .filter { it != selfSystem }
       .mapNotNull { system ->
-        val host = sessions.peekHost(system) ?: return@mapNotNull null
-        val bundle = catalogBundleHost(host) ?: return@mapNotNull null
+        val source = relatedCatalogOf(system) ?: return@mapNotNull null
         // The cheap guard first: most catalogs declare no `related` at all, and one that does not
         // cannot be pointing at anything.
-        if (bundle.relatedByComponentId.isEmpty()) return@mapNotNull null
+        if (source.relatedByComponentId.isEmpty()) return@mapNotNull null
         val sourceComponentIds =
-          memo.of(system, bundle, selfSystem)[componentId].orEmpty().ifEmpty {
+          memo.of(system, source.relatedByComponentId, selfSystem)[componentId].orEmpty().ifEmpty {
             return@mapNotNull null
           }
         val rows = sourceComponentIds.mapNotNull { sourceComponentId ->
-          val target =
-            host.previews.firstOrNull { ServeIssueReport.componentIdFor(it) == sourceComponentId }
-              ?: return@mapNotNull null
+          val target = source.componentsById[sourceComponentId] ?: return@mapNotNull null
           ServeWeb.ComponentDirectoryRow(
-            label = ServeWeb.rowDisplayName(target),
+            label = target.label,
             href =
               "/" +
                 WebEscaping.urlEncodeSegment(system) +
                 "/p/" +
-                WebEscaping.urlEncodeSegment(target.id) +
+                WebEscaping.urlEncodeSegment(target.previewId) +
                 requestQuerySuffix(),
           )
         }
@@ -6364,13 +6361,28 @@ class ServeHttpServer(
             // needs: on a kit page, a group headed "Wear Material 3 Samples" spends a catalog title
             // where one word does the work. A catalog that declares what KIND it is gets that word;
             // anything else keeps the heading, which is the only other answer that stays true.
-            when (ServeWeb.PageRole.of(catalogBundleHost(host)?.catalogRole)) {
-              ServeWeb.PageRole.SAMPLES -> "Samples"
-              else -> ServeWeb.catalogHeading(catalogBundleHost(host)?.title, host.label)
-            },
+            source.heading,
             rows,
           )
       }
+  }
+
+  /**
+   * The related-link facts for [system], without waking an idle catalog daemon.
+   *
+   * A resident host is authoritative, including an authoritative empty result after a refresh. Once
+   * suspended, the snapshot taken as the host was detached answers instead. This is the same
+   * resident/suspended/retired ladder as [sourceLocationFor]: relationship metadata comes from the
+   * published catalog, so suspension cannot make it stale, and absence must not mean that the
+   * catalog stopped declaring its links.
+   */
+  private fun relatedCatalogOf(system: String): RelatedCatalog? {
+    val host = sessions.peekHost(system)
+    return when {
+      host != null -> relatedCatalogOf(host)
+      sessions.isKnownSession(system) -> relatedCatalogsSeen[system]
+      else -> null
+    }
   }
 
   private fun RoutingContext.componentRelatedDirectories(
@@ -7477,6 +7489,24 @@ class ServeHttpServer(
   private val catalogSourceLocationsSeen =
     ConcurrentHashMap<String, Map<String, PlaygroundSeedResolver.Location>>()
 
+  /**
+   * The related-link index and its link-facing component labels for each suspended catalog.
+   *
+   * Back-links are derived by walking OTHER catalogs. Most of those are suspended most of the time,
+   * so consulting resident hosts alone made the links disappear after the ten-minute idle window.
+   * Captured and retired atomically beside [catalogSourceLocationsSeen], because these are the same
+   * kind of immutable published-catalog facts and need the same no-gap transition guarantee.
+   */
+  private val relatedCatalogsSeen = ConcurrentHashMap<String, RelatedCatalog>()
+
+  private data class RelatedCatalog(
+    val relatedByComponentId: Map<String, List<ServeRelatedCatalogs.Declared>>,
+    val componentsById: Map<String, RelatedComponent>,
+    val heading: String,
+  )
+
+  private data class RelatedComponent(val previewId: String, val label: String)
+
   /** A resident-time snapshot of one catalog's status facts. See [catalogMetaSeen]. */
   private data class CatalogMeta(
     val title: String?,
@@ -7588,13 +7618,40 @@ class ServeHttpServer(
           val locations = sourceLocationsOf(host)
           if (locations.isEmpty()) catalogSourceLocationsSeen.remove(sessionId)
           else catalogSourceLocationsSeen[sessionId] = locations
+
+          val related = relatedCatalogOf(host)
+          if (related == null) relatedCatalogsSeen.remove(sessionId)
+          else relatedCatalogsSeen[sessionId] = related
         }
 
         override fun discard(sessionId: String) {
           catalogSourceLocationsSeen.remove(sessionId)
+          relatedCatalogsSeen.remove(sessionId)
         }
       }
     )
+  }
+
+  /** The smallest projection of [host] from which another catalog can derive its back-links. */
+  private fun relatedCatalogOf(host: ServeHost): RelatedCatalog? {
+    val bundle = catalogBundleHost(host) ?: return null
+    if (bundle.relatedByComponentId.isEmpty()) return null
+    val components = buildMap {
+      host.previews.forEach { preview ->
+        val componentId = ServeIssueReport.componentIdFor(preview)
+        if (componentId.isNotBlank()) {
+          // Match the resident lookup's firstOrNull: variants share a component id, and the first
+          // published render is its canonical link destination.
+          putIfAbsent(componentId, RelatedComponent(preview.id, ServeWeb.rowDisplayName(preview)))
+        }
+      }
+    }
+    val heading =
+      when (ServeWeb.PageRole.of(bundle.catalogRole)) {
+        ServeWeb.PageRole.SAMPLES -> "Samples"
+        else -> ServeWeb.catalogHeading(bundle.title, host.label)
+      }
+    return RelatedCatalog(bundle.relatedByComponentId, components, heading)
   }
 
   /**
@@ -12538,11 +12595,11 @@ class ServeHttpServer(
     /** [source]'s declarations, inverted onto [targetSystem]'s component ids. */
     fun of(
       sourceSystem: String,
-      source: ServeBundleHost,
+      entries: Map<String, List<ServeRelatedCatalogs.Declared>>,
       targetSystem: String,
     ): Map<String, List<String>> =
       indexes.getOrPut(sourceSystem to targetSystem) {
-        ServeRelatedCatalogs.inverse(source.relatedByComponentId, targetSystem)
+        ServeRelatedCatalogs.inverse(entries, targetSystem)
       }
   }
 
