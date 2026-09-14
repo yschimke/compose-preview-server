@@ -62,6 +62,37 @@ class ComponentRecordPacksTest {
     )
   }
 
+  @Test
+  fun `Compose value conventions derive JSON types and preserve unit names`() {
+    val cases =
+      listOf(
+        "androidx.compose.ui.graphics.Color" to "string",
+        "androidx.compose.ui.graphics.Shape" to "string",
+        "androidx.compose.ui.unit.Dp" to "number",
+        "androidx.compose.ui.unit.TextUnit" to "number",
+        "androidx.compose.ui.text.font.FontWeight" to "string",
+        "androidx.compose.ui.text.font.FontStyle" to "string",
+        "androidx.compose.ui.text.style.TextAlign" to "string",
+        "androidx.compose.ui.text.style.TextOverflow" to "string",
+        "androidx.compose.ui.text.style.TextDecoration" to "string",
+      )
+    cases.forEach { (type, jsonType) ->
+      assertEquals(jsonType, ComponentRecordPacks.jsonTypeOf(parameter("value", type)), type)
+    }
+    assertEquals(
+      "tonalElevationDp",
+      ComponentRecordPacks.propertyNameOf(
+        parameter("tonalElevation", "androidx.compose.ui.unit.Dp")
+      ),
+    )
+    assertEquals(
+      "fontSizeSp",
+      ComponentRecordPacks.propertyNameOf(
+        parameter("fontSize", "androidx.compose.ui.unit.TextUnit")
+      ),
+    )
+  }
+
   private fun parameter(name: String, typeFqn: String) =
     TargetParameter(
       name = name,

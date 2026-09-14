@@ -52,6 +52,9 @@ class ServeUiBuilderAdminRoutingTest {
           "sunken-otter" to "stored design cannot be read: document-a1b2.json is missing",
         )
 
+      override fun adminDegradedDesigns(): Map<String, String> =
+        mapOf("cheeky-raccoon" to "node `title`: `oldColor`")
+
       override fun adminUnreadableDesigns(): Set<String> = setOf("sunken-otter")
 
       override fun adminDesignDocument(designId: String): String? =
@@ -164,6 +167,10 @@ class ServeUiBuilderAdminRoutingTest {
     )
     assertEquals("m3-catalog", listed.first().getValue("catalogSystemId").jsonPrimitive.content)
     assertEquals("Home", listed.first().getValue("title").jsonPrimitive.content)
+    assertEquals(
+      "node `title`: `oldColor`",
+      listed.first().getValue("degradedReason").jsonPrimitive.content,
+    )
 
     val (pageCode, page) = send("/admin/ui-builder?token=$adminToken", token = null)
     assertEquals(200, pageCode)

@@ -166,7 +166,7 @@ class PublishedM3CatalogEquivalenceTest {
     val builderOwned = builderOwnedProperties[id].orEmpty()
     val want = expected.properties.filterNot { it.name in builderOwned }.associateBy { it.name }
     val got = actual.properties.associateBy { it.name }
-    check("properties", want.keys.sorted(), got.keys.sorted())
+    check("missingProperties", emptyList<String>(), (want.keys - got.keys).sorted())
     for ((name, w) in want) {
       val g = got[name] ?: continue
       check("properties[$name].jsonType", w.jsonType, g.jsonType)

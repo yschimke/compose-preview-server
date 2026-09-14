@@ -5470,6 +5470,7 @@ class ServeHttpServer(
   private suspend fun RoutingContext.respondAdminUiBuilderDesigns(admin: ServeUiBuilderAdmin) {
     val designs = withContext(Dispatchers.IO) { admin.list() }
     val unusable = withContext(Dispatchers.IO) { admin.unusable() }
+    val degraded = withContext(Dispatchers.IO) { admin.degraded() }
     val unreadable = withContext(Dispatchers.IO) { admin.unreadable() }
     val listed = designs.map {
       AdminUiBuilderDesignDto(
@@ -5483,6 +5484,7 @@ class ServeHttpServer(
         updatedAtEpochMillis = it.updatedAtEpochMillis,
         activeSubscribers = it.activeSubscribers,
         unusableReason = unusable[it.designId],
+        degradedReason = degraded[it.designId],
       )
     }
     // A design whose own stored files would not read is not in the map above — it never became a
@@ -8222,6 +8224,7 @@ class ServeHttpServer(
                 activeMutationBuckets = diagnostics.activeMutationBuckets,
                 persistenceMigrations = diagnostics.persistenceMigrations,
                 unusableDesigns = diagnostics.unusableDesigns,
+                degradedDesigns = diagnostics.degradedDesigns,
                 rePinnedDesigns = diagnostics.rePinnedDesigns,
                 rePinPersistenceFailure = diagnostics.rePinPersistenceFailure,
                 storageBytes = ceiling?.let { diagnostics.storageBytes },
@@ -15398,6 +15401,7 @@ private data class UiBuilderDto(
   val activeMutationBuckets: Int,
   val persistenceMigrations: Long,
   val unusableDesigns: Int = 0,
+  val degradedDesigns: Int = 0,
   /**
    * Stored designs re-pinned to the served catalog reference as they loaded, and the CLASS of the
    * exception that stopped the rewrite being written when one did.
@@ -16197,6 +16201,8 @@ private data class AdminUiBuilderDesignDto(
    * schema: a client that does not know the field sees exactly what it saw before.
    */
   val unusableReason: String? = null,
+  /** Why this still-editable design has lost catalog vocabulary, if it has. */
+  val degradedReason: String? = null,
   /**
    * Whether this design's document can still be produced, and so whether download and repair are
    * offered. False only for a quarantine where the stored files themselves would not read, which is

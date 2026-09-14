@@ -5,6 +5,7 @@ import ee.schimke.composeai.uibuilder.protocol.ExportCapabilitiesV1
 import ee.schimke.composeai.uibuilder.protocol.WasmAdapterStatusV1
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertIs
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -142,6 +143,33 @@ class PublishedUiBuilderCatalogTest {
     assertTrue("frame" in catalog.statusSemantics.keys)
     assertTrue("componentMenu" in catalog.statusSemantics.keys)
     assertTrue(composed.note.startsWith("test-catalog — published ui-builder.json"))
+  }
+
+  @Test
+  fun `authored exceptions augment rather than replace record-derived properties`() {
+    val document =
+      published(
+        extra =
+          """,
+        "components": {
+          "test-catalog/widget": {
+            "record": ":test-catalog/com.example.TestKt.Widget",
+            "propertyCapabilities": [
+              { "name": "stableKey", "jsonType": "string" },
+              { "name": "label", "jsonType": "string", "required": false,
+                "notes": "policy overrides the convention" }
+            ]
+          }
+        }"""
+      )
+
+    val result = PublishedUiBuilderCatalog.compose(document, record, exports)
+    val catalog = assertIs<PublishedUiBuilderCatalog.Result.Composed>(result).catalog
+    val properties =
+      catalog.components.single { it.componentId == "test-catalog/widget" }.properties
+
+    assertEquals(listOf("stableKey", "label", "count"), properties.map { it.name })
+    assertTrue(properties.single { it.name == "label" }.notes!!.contains("overrides"))
   }
 
   @Test
@@ -310,6 +338,34 @@ class PublishedUiBuilderCatalogTest {
     // And a slot that says nothing is still unbounded: `max` is an opt-in bound, not a default of
     // one that every existing builtin would silently acquire.
     assertEquals(null, host.slots.single { it.name == "background" }.cardinality.max)
+  }
+
+  @Test
+  fun `a builtin may ship its wrapper implementation without making the server know its id`() {
+    val document =
+      published(
+        extra =
+          """,
+        "builtins": {
+          "test-catalog/novel-host": {
+            "role": "screen-root",
+            "displayName": "Novel Host",
+            "canvas": "placeholder",
+            "slots": { "content": { "required": true } },
+            "implementation": ":test-catalog/com.example.TestKt.Unlabelled"
+          }
+        }"""
+      )
+
+    val result =
+      assertIs<PublishedUiBuilderCatalog.Result.Composed>(
+        PublishedUiBuilderCatalog.compose(document, record, exports)
+      )
+    val host = result.catalog.components.single { it.componentId == "test-catalog/novel-host" }
+
+    assertEquals("com.example.RTLText", host.code?.symbol)
+    assertEquals("com.example.RTLText", result.records.getValue(host.componentId).symbol.callable)
+    assertEquals(WasmAdapterStatusV1.UNSUPPORTED, host.wasm?.adapterStatus)
   }
 
   @Test
