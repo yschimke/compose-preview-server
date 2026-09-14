@@ -73,6 +73,7 @@ async function openDesign(page, selectors, onDesign = designId) {
     null,
     { timeout: 60_000 },
   );
+  expect(new URL(page.url()).pathname).toBe(`/ui-builder/${onDesign}`);
   return page.evaluate(() => globalThis.__uiBuilderDesignSelectors);
 }
 
@@ -311,7 +312,7 @@ test("Copy link on a thread copies the canonical URL, with no token on it", asyn
   // The thread, and the layer it is pinned to. No revision — a discussion is about the living
   // design — and above all no `token`, which is the one thing a shared link must never carry.
   await expect(notice).toContainText(
-    `/ui-builder/${catalogSystemId}/${designId}?node=discover-grid#thread=${threadId}`,
+    `/ui-builder/${designId}?node=discover-grid#thread=${threadId}`,
   );
   await expect(notice).not.toContainText("token");
 });

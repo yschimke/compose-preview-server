@@ -3581,8 +3581,8 @@ class ServeWebFixtureTest {
               ownerActorId = "github:octocat",
               requesterRole = "owner",
               requesterAllowed = "read, write, export, manage_access, delete",
-              designHref = "/ui-builder/wear-m3-catalog/morning-player?token=fixture-token",
-              shareAction = "/ui-builder/wear-m3-catalog/morning-player/access?token=fixture-token",
+              designHref = "/ui-builder/morning-player?token=fixture-token",
+              shareAction = "/ui-builder/morning-player/access?token=fixture-token",
               grants =
                 listOf(
                   ServeWeb.UiBuilderAccessRow(
@@ -3602,8 +3602,8 @@ class ServeWebFixtureTest {
               ownerActorId = "github:designer",
               requesterRole = "viewer",
               requesterAllowed = "read, export",
-              designHref = "/ui-builder/m3-catalog/archived-dashboard?token=fixture-token",
-              shareAction = "/ui-builder/m3-catalog/archived-dashboard/access?token=fixture-token",
+              designHref = "/ui-builder/archived-dashboard?token=fixture-token",
+              shareAction = "/ui-builder/archived-dashboard/access?token=fixture-token",
               grants = null,
               unopenableReason = "catalog unavailable for stored design archived-dashboard",
             ),

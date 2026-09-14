@@ -274,13 +274,7 @@ internal fun Route.installUiBuilderRoutes(
         call.respondText(created.error.message, status = status)
       }
       else -> {
-        val catalogSystemId = document.catalogPin.systemId.takeIf { it.isNotBlank() }
-        if (catalogSystemId != null) {
-          call.response.headers.append(
-            HttpHeaders.Location,
-            "/ui-builder/$catalogSystemId/$designId",
-          )
-        }
+        call.response.headers.append(HttpHeaders.Location, "/ui-builder/$designId")
         call.respondText("created $designId", status = HttpStatusCode.Created)
       }
     }

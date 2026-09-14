@@ -110,7 +110,7 @@ class ServeUiBuilderCommentWebhookIntegrationTest {
     val url = body["url"]!!.jsonPrimitive.content
     val threadId = threadIdOf(posted.second)
     assertEquals(
-      "http://127.0.0.1:${server.port}/ui-builder/$CATALOG_SYSTEM_ID/$DESIGN_ID#thread=$threadId",
+      "http://127.0.0.1:${server.port}/ui-builder/$DESIGN_ID#thread=$threadId",
       url,
     )
   }

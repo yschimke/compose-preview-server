@@ -34,7 +34,7 @@ try {
     const body = await response.json(); assert(response.ok && !body.result.isError, JSON.stringify(body));
     return JSON.parse(body.result.content[0].text).response;
   }
-  await page.goto(`${origin}/ui-builder/remote-m3/${doc.id}?storage=local&token=${encodeURIComponent(token)}&node=choice`);
+  await page.goto(`${origin}/ui-builder/${doc.id}?storage=local&token=${encodeURIComponent(token)}&node=choice`);
   await ready();
   await click(page.getByLabel("Open screen panel"));
   await click(page.getByRole("button", { name: /^State ·/ }));

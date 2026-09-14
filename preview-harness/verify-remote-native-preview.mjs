@@ -16,7 +16,7 @@ try {
   page = await browser.newPage({ viewport: { width: 1600, height: 1050 }, deviceScaleFactor: 1 });
   const errors = [];
   page.on("pageerror", error => errors.push(error.message));
-  await page.goto(`${origin}/ui-builder/remote-m3/${designId}?token=${encodeURIComponent(token)}&node=choice`);
+  await page.goto(`${origin}/ui-builder/${designId}?token=${encodeURIComponent(token)}&node=choice`);
   async function click(locator) {
     await expect(locator).toBeVisible({ timeout: 60000 });
     const bounds = await locator.boundingBox();

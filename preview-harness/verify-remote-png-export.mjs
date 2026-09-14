@@ -40,7 +40,7 @@ try {
     await page.mouse.click(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2);
     await page.mouse.move(60, 100);
   }
-  await page.goto(`${origin}/ui-builder/remote-m3/${sample.id}?storage=local&token=${encodeURIComponent(token)}&node=choice`);
+  await page.goto(`${origin}/ui-builder/${sample.id}?storage=local&token=${encodeURIComponent(token)}&node=choice`);
   await page.waitForFunction(() => document.documentElement.dataset.uiBuilderReady === "true", null, { timeout: 60000 });
   if (decimalSelection) {
     const pending = page.waitForResponse(r => r.request().method() === "POST" && new URL(r.url()).pathname === "/api/ui-builder/v1/documents/export.rc");

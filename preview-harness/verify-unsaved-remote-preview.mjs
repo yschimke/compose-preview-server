@@ -92,7 +92,7 @@ try {
         await target.waitFor({ timeout: 30000 });
         return { bytes: await response.body(), document: savedInitial ? sample : JSON.parse(response.request().postData()) };
     }
-    await page.goto(`${origin}/ui-builder/remote-m3/${sample.id}?${pendingSave ? "" : "storage=local&"}token=${encodeURIComponent(token)}&node=choice`);
+    await page.goto(`${origin}/ui-builder/${sample.id}?${pendingSave ? "" : "storage=local&"}token=${encodeURIComponent(token)}&node=choice`);
     await page.waitForFunction(() => document.documentElement.dataset.uiBuilderReady === "true", null, { timeout: 60000 });
     const initial = await preview(pendingSave);
     await capture("local-first", [103, 80, 164]);
