@@ -456,6 +456,13 @@ public interface ServeOptions {
    */
   public val adminToken: String?
 
+  /**
+   * Read-only credential for the UI-builder admin overview (`--admin-read-token`; env
+   * `SERVE_ADMIN_READ_TOKEN`). It may list design summaries and their unusable reasons, but cannot
+   * read documents or reach any admin mutation. Null keeps that diagnostic surface operator-only.
+   */
+  public val adminReadToken: String?
+
   /** Optional durable aggregate counters. Null keeps local serve sessions in-memory only. */
   public val engagementFile: File?
 

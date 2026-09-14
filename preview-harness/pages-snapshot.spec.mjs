@@ -376,6 +376,7 @@ const STYLED_FIXTURES = new Set([
   // The UI-builder admin screen. Its whole claim is a table the page's own script fills from
   // `/admin/ui-builder/designs`, so it needs the stylesheet for the table and the delete button.
   "serve-admin-ui-builder",
+  "serve-admin-ui-builder-read",
   "serve-component-browser-home",
   "serve-component-browser-catalog",
   "serve-component-browser-component",
@@ -991,6 +992,24 @@ const FIXTURE_STATES = [
       await page.click("#cp-admin-reload");
       await expect(page.locator("#cp-admin-rows tr")).toHaveCount(3);
       await expect(page.locator("#cp-admin-count")).toHaveText("3 designs");
+    },
+  },
+  {
+    // The diagnostic credential sees the same incident rows, but the page must not offer a single
+    // document or mutation control. Capture the loaded state rather than a fixture-server 404.
+    fixture: "serve-admin-ui-builder-read",
+    suffix: "designs",
+    apply: async (page) => {
+      await page.route("**/admin/ui-builder/designs", (route) =>
+        route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify(ADMIN_UI_BUILDER_DESIGNS),
+        }),
+      );
+      await page.click("#cp-admin-reload");
+      await expect(page.locator("#cp-admin-rows tr")).toHaveCount(3);
+      await expect(page.locator("#cp-admin-rows button")).toHaveCount(0);
     },
   },
   {

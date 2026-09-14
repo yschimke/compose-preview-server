@@ -206,6 +206,11 @@ A local render prints the classpath it resolved, the daemon opener it built and 
 diagnostics; `--components <catalog>=<components.json>` names the record a record-driven catalog's
 call sites are proven against, exactly as `serve --ui-builder-components` does.
 
+A signed-in person can browse every design the service permits them to read at
+`/ui-builder/designs`. The page separates owned designs from designs shared by somebody else,
+shows the exact service reason when one cannot open, and lets an owner manage sharing inline. It is
+actor-scoped and has no connection to the all-designs operator surface at `/admin/ui-builder`.
+
 A served catalog's own composables can also be offered *inside* the builder's catalogs as a
 component pack (`--ui-builder-packs confetti-mobile=mobile,confetti-wear=wear`), switched on by an
 author from the editor's settings; see

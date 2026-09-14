@@ -5645,15 +5645,16 @@ ${captureControlsHtml().prependIndent("          ")}
           .joinToString("\n") { if (it.isEmpty()) "" else "      $it" }
           .trimStart()
       else
-        """
-        var tabBtnsForHash = [];
-        function selectCollapsedTab() {}
-        function applyLandingTab() {}
-        """
-          .trimIndent()
-          .lines()
-          .joinToString("\n") { if (it.isEmpty()) "" else "      $it" }
-          .trimStart()
+        "\n" +
+          """
+          var tabBtnsForHash = [];
+          function selectCollapsedTab() {}
+          function applyLandingTab() {}
+          """
+            .trimIndent()
+            .lines()
+            .joinToString("\n") { if (it.isEmpty()) "" else "      $it" }
+            .trimStart()
     val popPrecedence =
       if (!hasTabs) ""
       else
@@ -7380,6 +7381,106 @@ ${captureControlsHtml().prependIndent("          ")}
     )
   }
 
+  /**
+   * One actor-scoped design on [uiBuilderDesignsPage]. Null [grants] means the caller is not owner.
+   */
+  data class UiBuilderDesignRow(
+    val designId: String,
+    val title: String,
+    val catalogSystemId: String,
+    val revision: Long,
+    val updatedAtEpochMillis: Long?,
+    val ownerActorId: String,
+    val requesterRole: String,
+    val requesterAllowed: String,
+    val designHref: String,
+    val shareAction: String,
+    val grants: List<UiBuilderAccessRow>?,
+    val unopenableReason: String?,
+  )
+
+  /** `GET /ui-builder/designs` — the caller's own designs and the ones shared with them. */
+  fun uiBuilderDesignsPage(
+    rows: List<UiBuilderDesignRow>,
+    viewerActorId: String,
+    navSuffix: String = "",
+    version: String? = null,
+    siteName: String = "",
+    themeCss: String = "",
+  ): String {
+    val esc = WebEscaping::htmlEscape
+    val body =
+      if (rows.isEmpty())
+        "<p class=\"cp-sub\">No designs are owned by or shared with this account yet.</p>"
+      else
+        rows.joinToString("\n") { row ->
+          val grants =
+            row.grants?.let { owned ->
+              val current =
+                if (owned.isEmpty()) "<p><strong>Shared with:</strong> Nobody else.</p>"
+                else
+                  owned.joinToString("\n", prefix = "<p><strong>Shared with:</strong></p>") {
+                    """
+                    <form method="post" action="${esc(row.shareAction)}">
+                      <input type="hidden" name="returnTo" value="designs">
+                      <input type="hidden" name="actorId" value="${esc(it.actorId)}">
+                      <code>${esc(it.actorId)}</code> (${esc(it.role)})
+                      <button class="cp-grant-deny" type="submit" name="action" value="revoke">Remove</button>
+                    </form>
+                    """
+                      .trimIndent()
+                  }
+              """
+              $current
+              <form class="cp-grant-form" method="post" action="${esc(row.shareAction)}">
+                <input type="hidden" name="returnTo" value="designs">
+                <label class="cp-grant-ttl"><span>Actor id</span><input type="text" name="actorId" placeholder="github:octocat" required></label>
+                <label><input type="radio" name="role" value="viewer" checked> viewer</label>
+                <label><input type="radio" name="role" value="editor"> editor</label>
+                <button class="cp-grant-approve" type="submit" name="action" value="share">Share</button>
+              </form>
+              """
+                .trimIndent()
+            }
+              ?: "<p>Shared by <code>${esc(row.ownerActorId)}</code>; the owner manages its grants.</p>"
+          val unavailable =
+            row.unopenableReason
+              ?.let {
+                "\n            <p class=\"cp-grant-withheld\"><strong>This design cannot be opened:</strong> ${esc(it)}</p>"
+              }
+              .orEmpty()
+          val title = if (row.title.isBlank()) row.designId else row.title
+          val updated =
+            row.updatedAtEpochMillis?.let { java.time.Instant.ofEpochMilli(it).toString() }
+              ?: "unknown"
+          """
+          <article class="cp-card">
+            <h2><a href="${esc(row.designHref)}">${esc(title)}</a></h2>
+            <p><code>${esc(row.designId)}</code> · ${esc(row.catalogSystemId)} · revision ${row.revision}</p>
+            <p>${esc(row.requesterRole)} · may ${esc(row.requesterAllowed)} · updated ${esc(updated)}</p>$unavailable
+            $grants
+          </article>
+          """
+            .trimIndent()
+        }
+    return document(
+      title = "My designs — compose-preview",
+      unfurlDescription = "UI-builder designs owned by or shared with this account.",
+      version = version,
+      navSuffix = navSuffix,
+      siteName = siteName,
+      themeCss = themeCss,
+      body =
+        """
+        <h1 class="cp-head">My designs</h1>
+        <p class="cp-sub">Only designs this server permits <code>${esc(viewerActorId)}</code> to read are shown.</p>
+        $body
+        <a class="cp-back" href="/ui-builder/$navSuffix">← UI builder</a>
+        """
+          .trimIndent(),
+    )
+  }
+
   /** One row of [uiBuilderAccessPage]'s table, already flattened for display. */
   data class UiBuilderAccessRow(
     val actorId: String,
@@ -8664,31 +8765,20 @@ ${captureControlsHtml().prependIndent("          ")}
    * Delete is a confirm-then-DELETE: there is no soft delete and no undo on the service, so the
    * prompt names the design and its owner before the request is made.
    */
-  fun uiBuilderAdminPage(adminToken: String?, version: String? = null): String {
+  fun uiBuilderAdminPage(
+    adminToken: String?,
+    readOnly: Boolean = false,
+    version: String? = null,
+  ): String {
     val suffix = querySuffix(adminToken?.let { "token=" + WebEscaping.urlEncodeSegment(it) } ?: "")
-    return document(
-      title = "UI-builder designs — admin — compose-preview",
-      version = version,
-      navSuffix = suffix,
-      body =
+    val warning =
+      if (readOnly)
+        "\n        <p class=\"cp-grant-withheld\">Read-only diagnosis: document bodies and every change are withheld.</p>"
+      else ""
+    val library =
+      if (readOnly) ""
+      else
         """
-        <h1 class="cp-head">UI-builder designs</h1>
-        <p class="cp-sub">Every design this host holds, whoever owns it. Deleting one removes its
-          history, its reference overlay and its comments, and closes any editor that has it open.
-          There is no undo.</p>
-        <div class="cp-admin-bar">
-          <span id="cp-admin-count" class="cp-muted"></span>
-          <button class="cp-doc-btn" id="cp-admin-reload" type="button">Reload</button>
-        </div>
-        <div class="cp-doc-result" id="cp-admin-status" hidden></div>
-        <div class="cp-status-scroll"><table class="cp-table cp-admin-table" id="cp-admin-table">
-          <thead><tr>
-            <th>Design</th><th>Catalog</th><th>Owner</th><th>Rev</th><th>Open</th>
-            <th>Created</th><th>Updated</th><th></th>
-          </tr></thead>
-          <tbody id="cp-admin-rows"></tbody>
-        </table></div>
-
         <h2 class="cp-head">From the projects</h2>
         <p class="cp-sub">Designs the projects this host reads are working on, kept in
           <code>ui-builder/designs/</code> in their own repository. Opening one copies it here to
@@ -8703,8 +8793,33 @@ ${captureControlsHtml().prependIndent("          ")}
           <thead><tr><th>Design</th><th>Catalog</th><th>What it is</th><th></th></tr></thead>
           <tbody id="cp-library-rows"></tbody>
         </table></div>
-        <script>${uiBuilderAdminScript(adminToken)}</script>
         <script>${uiBuilderLibraryScript(adminToken)}</script>
+        """
+          .trimIndent()
+    return document(
+      title = "UI-builder designs — admin — compose-preview",
+      version = version,
+      navSuffix = suffix,
+      body =
+        """
+        <h1 class="cp-head">UI-builder designs</h1>
+        <p class="cp-sub">Every design this host holds, whoever owns it. Deleting one removes its
+          history, its reference overlay and its comments, and closes any editor that has it open.
+          There is no undo.</p>$warning
+        <div class="cp-admin-bar">
+          <span id="cp-admin-count" class="cp-muted"></span>
+          <button class="cp-doc-btn" id="cp-admin-reload" type="button">Reload</button>
+        </div>
+        <div class="cp-doc-result" id="cp-admin-status" hidden></div>
+        <div class="cp-status-scroll"><table class="cp-table cp-admin-table" id="cp-admin-table">
+          <thead><tr>
+            <th>Design</th><th>Catalog</th><th>Owner</th><th>Rev</th><th>Open</th>
+            <th>Created</th><th>Updated</th><th></th>
+          </tr></thead>
+          <tbody id="cp-admin-rows"></tbody>
+        </table></div>
+
+        <script>${uiBuilderAdminScript(adminToken, readOnly)}</script>$library
         """
           .trimIndent(),
     )
@@ -8811,7 +8926,7 @@ ${captureControlsHtml().prependIndent("          ")}
    * Drives the admin page: fetch the design list, render rows, download one design's stored
    * document, confirm-then-DELETE a design.
    */
-  private fun uiBuilderAdminScript(adminToken: String?): String =
+  private fun uiBuilderAdminScript(adminToken: String?, readOnly: Boolean): String =
     """
     (function () {
       var rows = document.getElementById("cp-admin-rows");
@@ -8819,6 +8934,7 @@ ${captureControlsHtml().prependIndent("          ")}
       var status = document.getElementById("cp-admin-status");
       var reload = document.getElementById("cp-admin-reload");
       var token = ${jsString(adminToken.orEmpty())};
+      var readOnly = $readOnly;
       var headers = token ? { "X-Compose-Preview-Admin-Token": token } : {};
       function show(text, isError) {
         status.hidden = false;
@@ -8879,6 +8995,11 @@ ${captureControlsHtml().prependIndent("          ")}
           cell(tr, when(d.createdAtEpochMillis));
           cell(tr, when(d.updatedAtEpochMillis));
           var actions = cell(tr, "");
+          if (readOnly) {
+            actions.textContent = "read only";
+            rows.appendChild(tr);
+            return;
+          }
           // Offered on every row, and the only action that works on an unusable one: a design the
           // host cannot serve can still be copied out, repaired against the current rules and
           // created again. Without it, Delete is the operator's only move and the document is lost.

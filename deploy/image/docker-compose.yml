@@ -91,6 +91,9 @@ services:
       # code-execution credential: trusting a branch makes that producer's Compose eligible for
       # server-side re-render here. Treat it like a deploy key, not a read token.
       SERVE_ADMIN_TOKEN: "${SERVE_ADMIN_TOKEN:-}"
+      # Read-only diagnosis: UI-builder design summaries + unusable reasons, never documents or
+      # mutations. Safe to give a narrower audience than SERVE_ADMIN_TOKEN.
+      SERVE_ADMIN_READ_TOKEN: "${SERVE_ADMIN_READ_TOKEN:-}"
       # Privacy-minimal aggregate app/catalog + preview views, persisted on preview_config.
       SERVE_ENGAGEMENT_FILE: "${SERVE_ENGAGEMENT_FILE:-}"
       # Optional GitHub OAuth auth for code-running surfaces. Empty values keep public catalog

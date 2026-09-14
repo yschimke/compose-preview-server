@@ -527,6 +527,9 @@ public class ServeCommandOptions(
    */
   override val adminToken: String? = args.flagValue("--admin-token")?.takeIf { it.isNotBlank() }
 
+  override val adminReadToken: String? =
+    args.flagValue("--admin-read-token")?.takeIf { it.isNotBlank() }
+
   /** Optional durable aggregate counters. Null keeps local serve sessions in-memory only. */
   override val engagementFile: File? =
     args.flagValue("--engagement-file")?.takeIf { it.isNotBlank() }?.let(::File)
@@ -1286,6 +1289,12 @@ public class ServeCommandOptions(
                           routes don't exist at all. NB with --allow-render-trusted this token can
                           grant server-side execution, since trusting a branch makes that
                           producer's Compose eligible for re-render here.
+        --admin-read-token <value>
+                          Enable a read-only diagnostic credential for GET /admin/ui-builder and
+                          GET /admin/ui-builder/designs. It can see design summaries and unusable
+                          reasons, but cannot download design documents, repair or delete designs,
+                          or reach any other admin route. Separate from --admin-token so diagnosis
+                          need not receive the code-execution-capable operator credential.
         --onboard-cache <dir>
                           Where POST /admin/onboard/scan checks repositories out to read them (one
                           directory per repo, reused). Nothing in them is executed. Default: a

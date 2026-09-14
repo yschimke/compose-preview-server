@@ -3563,6 +3563,55 @@ class ServeWebFixtureTest {
     // with a delete per row. The rows are fetched by the page's script, so the fixture is the
     // chrome around an empty table; the harness stubs the JSON route to fill it.
     val uiBuilderAdmin = ServeWeb.uiBuilderAdminPage(adminToken = token, version = version)
+    val uiBuilderAdminRead =
+      ServeWeb.uiBuilderAdminPage(adminToken = token, readOnly = true, version = version)
+    // The actor-scoped counterpart: owned and shared rows together, including the exact failure a
+    // design that cannot open will show. Static rows make the page itself the fixture rather than
+    // replacing its service calls with a second implementation in the browser harness.
+    val uiBuilderDesigns =
+      ServeWeb.uiBuilderDesignsPage(
+        rows =
+          listOf(
+            ServeWeb.UiBuilderDesignRow(
+              designId = "morning-player",
+              title = "Morning player",
+              catalogSystemId = "wear-m3-catalog",
+              revision = 12,
+              updatedAtEpochMillis = 1_768_214_400_000,
+              ownerActorId = "github:octocat",
+              requesterRole = "owner",
+              requesterAllowed = "read, write, export, manage_access, delete",
+              designHref = "/ui-builder/wear-m3-catalog/morning-player?token=fixture-token",
+              shareAction = "/ui-builder/wear-m3-catalog/morning-player/access?token=fixture-token",
+              grants =
+                listOf(
+                  ServeWeb.UiBuilderAccessRow(
+                    actorId = "github:colleague",
+                    role = "editor",
+                    allowed = "read, write, export",
+                  )
+                ),
+              unopenableReason = null,
+            ),
+            ServeWeb.UiBuilderDesignRow(
+              designId = "archived-dashboard",
+              title = "Archived dashboard",
+              catalogSystemId = "m3-catalog",
+              revision = 7,
+              updatedAtEpochMillis = 1_767_955_200_000,
+              ownerActorId = "github:designer",
+              requesterRole = "viewer",
+              requesterAllowed = "read, export",
+              designHref = "/ui-builder/m3-catalog/archived-dashboard?token=fixture-token",
+              shareAction = "/ui-builder/m3-catalog/archived-dashboard/access?token=fixture-token",
+              grants = null,
+              unopenableReason = "catalog unavailable for stored design archived-dashboard",
+            ),
+          ),
+        viewerActorId = "github:octocat",
+        navSuffix = "?token=fixture-token",
+        version = version,
+      )
     // The playground Stage-1 editor (`GET /playground`): the code box, mode selector, and result
     // pane. Always token-gated (the lane runs user code, refused under `--public`), so the fixture
     // renders the non-public form the server actually serves.
@@ -4357,6 +4406,8 @@ class ServeWebFixtureTest {
         "serve-agent-access-granted.html" to agentAccessGranted,
         "serve-docs-upload.html" to docUpload,
         "serve-admin-ui-builder.html" to uiBuilderAdmin,
+        "serve-admin-ui-builder-read.html" to uiBuilderAdminRead,
+        "serve-ui-builder-designs.html" to uiBuilderDesigns,
         "serve-playground.html" to playground,
         "serve-playground-uncompilable.html" to playgroundUncompilable,
         "serve-doc-lottie.html" to docLottie,
