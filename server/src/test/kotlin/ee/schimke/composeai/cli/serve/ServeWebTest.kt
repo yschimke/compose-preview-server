@@ -765,13 +765,14 @@ class ServeWebTest {
 
     assertTrue(
       html.contains(
-        "<a class=\"cp-action-chip cp-action-chip--primary\" href=\"/ui-builder/m3-catalog/\" " +
+        "<a class=\"cp-action-chip cp-action-chip--primary\" " +
+          "href=\"/ui-builder/?catalog=m3-catalog\" " +
           "aria-label=\"m3-catalog: open the UI Builder\">"
       ),
       html,
     )
     // …but only for a catalog the builder is configured for. Every other card is unchanged.
-    assertFalse(html.contains("/ui-builder/plain/"), html)
+    assertFalse(html.contains("catalog=plain"), html)
     assertEquals(1, Regex("cp-action-chip--primary").findAll(html).count(), html)
   }
 
@@ -801,7 +802,7 @@ class ServeWebTest {
       html,
     )
     // Explained, not offered: nothing on the page links the create route.
-    assertFalse(html.contains("/ui-builder/m3-catalog/"), html)
+    assertFalse(html.contains("catalog=m3-catalog"), html)
   }
 
   /** Creating a design is a write, so an anonymous visitor is offered the header's sign-in only. */

@@ -226,7 +226,7 @@ internal class ServeUiBuilderCommentWebhook(
           resolved = change.thread.resolved,
         ),
       comment = change.comment,
-      url = threadUrl(baseUrl(), design?.catalogSystemId, change.designId, change.thread.id),
+      url = threadUrl(baseUrl(), change.designId, change.thread.id),
     )
   }
 
@@ -274,8 +274,7 @@ internal class ServeUiBuilderCommentWebhook(
         .joinToString("") { (it.toInt() and 0xff).toString(16).padStart(2, '0') }
 
     /**
-     * The permalink a notification links to:
-     * `<origin>/ui-builder/<catalog>/<designId>#thread=<threadId>`.
+     * The permalink a notification links to: `<origin>/ui-builder/<designId>#thread=<threadId>`.
      *
      * The `#thread=` selector is item 1 of the same build list and may not have landed on the host
      * reading this link. That is deliberately fine and is why the fragment rather than a query
@@ -283,15 +282,12 @@ internal class ServeUiBuilderCommentWebhook(
      * fragment, which is the right degraded behaviour — the reader still lands on the thing being
      * discussed, one scroll from the thread, rather than on a 404.
      *
-     * A design whose catalog this host cannot name links to the builder's own entry instead of
-     * inventing a catalog segment that would not resolve.
+     * The catalog never enters the URL: the opened document's `catalogPin` is authoritative.
      */
-    fun threadUrl(origin: String, catalog: String?, designId: String, threadId: String): String {
+    fun threadUrl(origin: String, designId: String, threadId: String): String {
       val base = origin.trimEnd('/')
       val fragment = "#thread=${WebEscaping.urlEncodeSegment(threadId)}"
-      val catalogSegment = catalog?.trim()?.takeIf { it.isNotEmpty() } ?: return "$base/ui-builder/"
-      return "$base/ui-builder/${WebEscaping.urlEncodeSegment(catalogSegment)}/" +
-        "${WebEscaping.urlEncodeSegment(designId)}$fragment"
+      return "$base/ui-builder/${WebEscaping.urlEncodeSegment(designId)}$fragment"
     }
   }
 }

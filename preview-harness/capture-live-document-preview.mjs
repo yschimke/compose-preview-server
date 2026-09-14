@@ -36,7 +36,7 @@ try {
     });
     assert(created.ok(), await created.text());
     assert.equal((await created.json()).response.type, "snapshot");
-    await page.goto(`${origin}/ui-builder/remote-m3/${sample.id}?token=${encodeURIComponent(token)}&node=choice`);
+    await page.goto(`${origin}/ui-builder/${sample.id}?token=${encodeURIComponent(token)}&node=choice`);
     await page.waitForFunction(() => document.documentElement.dataset.uiBuilderReady === "true", null, { timeout: 60000 });
     const exported = page.waitForResponse(response => response.url().includes(`/designs/${sample.id}/export.rc?revision=0`));
     await click(page.getByRole("button", { name: /^Preview \(/ }));

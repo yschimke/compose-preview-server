@@ -54,7 +54,7 @@ try {
   async function ready() {
     await page.waitForFunction(() => document.documentElement.dataset.uiBuilderReady === "true", null, { timeout: 60000 });
   }
-  await page.goto(`${origin}/ui-builder/remote-m3/${sample.id}?storage=local&token=${encodeURIComponent(token)}&node=loop`);
+  await page.goto(`${origin}/ui-builder/${sample.id}?storage=local&token=${encodeURIComponent(token)}&node=loop`);
   await ready();
   await expect(page.getByText("3 rows", { exact: true })).toBeVisible();
   await page.screenshot({ path: `${output}/repetition-editor.png` });
@@ -174,7 +174,7 @@ try {
   assert.equal(kotlin.contentDigest, createHash("sha256").update(kotlin.content).digest("hex"));
   await writeFile(`${output}/repetition-mcp-edited.kt.txt`, kotlin.content);
   // Exercise the saved design in the actual WASM Code pane after authoring its rows through MCP.
-  await page.goto(`${origin}/ui-builder/remote-m3/${saved.id}?token=${encodeURIComponent(token)}&node=loop`);
+  await page.goto(`${origin}/ui-builder/${saved.id}?token=${encodeURIComponent(token)}&node=loop`);
   await ready();
   // The WASM runtime becomes ready before the saved document finishes loading. Wait for the
   // MCP-authored revision so its arrival cannot replace the editor state after opening Code.

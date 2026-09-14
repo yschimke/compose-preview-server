@@ -2097,27 +2097,24 @@ class ServeHttpRoutingTest {
           assertEquals("window.composeUiBuilder = true", response.body.string())
         }
       }
-      // The cool-URI form. `/ui-builder/<catalog>/<designId>` serves the same shell as the
-      // catalog root; the browser reads the design out of the path. Relative asset requests from
-      // that document resolve against `/ui-builder/<catalog>/`, which is the ordinary asset lane,
-      // so the trailing-slash spelling is redirected away rather than served.
-      fetch("/ui-builder/remote-m3/my-remote-screen").let { (code, response) ->
+      // Catalog-prefixed design URLs are compatibility inputs. The document owns its catalog pin,
+      // so both old spellings redirect to the design's catalog-free identity.
+      fetch("/ui-builder/remote-m3/my-remote-screen", noRedirects).let { (code, response) ->
         response.use {
-          assertEquals(200, code)
-          assertTrue(response.body.string().contains("Compose UI builder"))
-          assertEquals("no-cache", response.header("Cache-Control"))
+          assertEquals(302, code)
+          assertEquals("/ui-builder/my-remote-screen", response.header("Location"))
         }
       }
-      fetch("/ui-builder/m3-catalog/mywidget3").let { (code, response) ->
+      fetch("/ui-builder/m3-catalog/mywidget3", noRedirects).let { (code, response) ->
         response.use {
-          assertEquals(200, code)
-          assertTrue(response.body.string().contains("Compose UI builder"))
+          assertEquals(302, code)
+          assertEquals("/ui-builder/mywidget3", response.header("Location"))
         }
       }
       fetch("/ui-builder/m3-catalog/mywidget3/", noRedirects).let { (code, response) ->
         response.use {
           assertEquals(302, code)
-          assertEquals("/ui-builder/m3-catalog/mywidget3", response.header("Location"))
+          assertEquals("/ui-builder/mywidget3", response.header("Location"))
         }
       }
       // A real asset still wins over the design lane, and a missing one still 404s rather than
@@ -2130,10 +2127,10 @@ class ServeHttpRoutingTest {
       }
       // A design id may carry a dot, as the New design dialog allows; a static-asset extension
       // may not, so a mistyped asset still 404s instead of answering with the shell.
-      fetch("/ui-builder/m3-catalog/my.widget").let { (code, response) ->
+      fetch("/ui-builder/m3-catalog/my.widget", noRedirects).let { (code, response) ->
         response.use {
-          assertEquals(200, code)
-          assertTrue(response.body.string().contains("Compose UI builder"))
+          assertEquals(302, code)
+          assertEquals("/ui-builder/my.widget", response.header("Location"))
         }
       }
       assertEquals(404, fetch("/ui-builder/m3-catalog/missing.mjs").second.use { it.code })

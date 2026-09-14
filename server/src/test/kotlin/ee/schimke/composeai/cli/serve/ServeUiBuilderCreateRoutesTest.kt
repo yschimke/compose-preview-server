@@ -121,17 +121,22 @@ class ServeUiBuilderCreateRoutesTest {
 
   @Test
   fun `the New design form creates once and redirects to the design's permalink`() {
-    val form = FormBody.Builder().add("designId", "mywidget3").add("template", "blank").build()
+    val form =
+      FormBody.Builder()
+        .add("designId", "mywidget3")
+        .add("catalog", "m3-catalog")
+        .add("template", "blank")
+        .build()
     val request =
       Request.Builder()
-        .url(url("/ui-builder/m3-catalog?token=t"))
+        .url(url("/ui-builder/designs?token=t"))
         .header("X-Test-Actor", "operator")
         .header("Origin", "http://127.0.0.1:${server.port}")
         .post(form)
         .build()
     client.newCall(request).execute().use { response ->
       assertEquals(303, response.code)
-      assertEquals("/ui-builder/m3-catalog/mywidget3?token=t", response.header("Location"))
+      assertEquals("/ui-builder/mywidget3?token=t", response.header("Location"))
     }
     assertEquals(listOf("mywidget3"), created)
 
@@ -140,6 +145,8 @@ class ServeUiBuilderCreateRoutesTest {
     client
       .newCall(
         Request.Builder()
+          // The old catalog-prefixed action remains a compatibility input, but its output is the
+          // same catalog-free permalink.
           .url(url("/ui-builder/m3-catalog"))
           .header("X-Test-Actor", "operator")
           .post(FormBody.Builder().add("designId", "mywidget3").add("template", "blank").build())
@@ -148,7 +155,7 @@ class ServeUiBuilderCreateRoutesTest {
       .execute()
       .use { response ->
         assertEquals(303, response.code)
-        assertEquals("/ui-builder/m3-catalog/mywidget3", response.header("Location"))
+        assertEquals("/ui-builder/mywidget3", response.header("Location"))
       }
     assertEquals(listOf("mywidget3"), created)
   }
@@ -166,24 +173,47 @@ class ServeUiBuilderCreateRoutesTest {
       if (origin != null) builder.header("Origin", origin)
       return client.newCall(builder.build()).execute().use { it.code }
     }
-    val blank = FormBody.Builder().add("designId", "another").add("template", "blank").build()
+    val blank =
+      FormBody.Builder()
+        .add("designId", "another")
+        .add("catalog", "m3-catalog")
+        .add("template", "blank")
+        .build()
 
-    assertEquals(404, post("/ui-builder/not-served", blank))
-    assertEquals(401, post("/ui-builder/m3-catalog", blank, actor = null))
-    assertEquals(403, post("/ui-builder/m3-catalog", blank, actor = "forbidden"))
-    assertEquals(403, post("/ui-builder/m3-catalog", blank, origin = "https://evil.example"))
+    assertEquals(
+      404,
+      post(
+        "/ui-builder/designs",
+        FormBody.Builder()
+          .add("designId", "another")
+          .add("catalog", "not-served")
+          .add("template", "blank")
+          .build(),
+      ),
+    )
+    assertEquals(401, post("/ui-builder/designs", blank, actor = null))
+    assertEquals(403, post("/ui-builder/designs", blank, actor = "forbidden"))
+    assertEquals(403, post("/ui-builder/designs", blank, origin = "https://evil.example"))
     assertEquals(
       400,
       post(
-        "/ui-builder/m3-catalog",
-        FormBody.Builder().add("designId", "../escape").add("template", "blank").build(),
+        "/ui-builder/designs",
+        FormBody.Builder()
+          .add("designId", "../escape")
+          .add("catalog", "m3-catalog")
+          .add("template", "blank")
+          .build(),
       ),
     )
     assertEquals(
       400,
       post(
-        "/ui-builder/m3-catalog",
-        FormBody.Builder().add("designId", "fine").add("template", "wear-widget-small").build(),
+        "/ui-builder/designs",
+        FormBody.Builder()
+          .add("designId", "fine")
+          .add("catalog", "m3-catalog")
+          .add("template", "wear-widget-small")
+          .build(),
       ),
     )
     assertTrue(created.isEmpty(), "no refusal may have created a design: $created")
@@ -218,7 +248,7 @@ class ServeUiBuilderCreateRoutesTest {
 
     val (code, location) = put("put-design", document)
     assertEquals(201, code)
-    assertEquals("/ui-builder/m3-catalog/put-design", location)
+    assertEquals("/ui-builder/put-design", location)
     assertEquals(listOf("put-design"), created)
 
     // The second one fails its own precondition rather than replacing the first.

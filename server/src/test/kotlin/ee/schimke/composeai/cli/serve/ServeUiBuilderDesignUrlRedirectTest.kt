@@ -50,19 +50,20 @@ class ServeUiBuilderDesignUrlRedirectTest {
   private val client = OkHttpClient.Builder().followRedirects(false).build()
 
   @Test
-  fun `a design named without its catalog redirects to the catalog it pins`() {
+  fun `a catalog-free URL opens the design and old permalinks redirect to it`() {
     withServer { port ->
       create(port, "my-remote-screen", "remote-m3")
       create(port, "my-phone-screen", "m3-catalog")
 
+      assertEquals(200, get(port, "/ui-builder/my-remote-screen", OPERATOR_TOKEN).code)
+      assertEquals(200, get(port, "/ui-builder/my-phone-screen", OPERATOR_TOKEN).code)
       assertEquals(
-        "/ui-builder/remote-m3/my-remote-screen",
-        get(port, "/ui-builder/my-remote-screen", OPERATOR_TOKEN).header("Location"),
+        "/ui-builder/my-remote-screen",
+        get(port, "/ui-builder/remote-m3/my-remote-screen", OPERATOR_TOKEN).header("Location"),
       )
-      // Not a constant: the segment comes from each design's own pin.
       assertEquals(
-        "/ui-builder/m3-catalog/my-phone-screen",
-        get(port, "/ui-builder/my-phone-screen", OPERATOR_TOKEN).header("Location"),
+        "/ui-builder/my-phone-screen",
+        get(port, "/ui-builder/m3-catalog/my-phone-screen", OPERATOR_TOKEN).header("Location"),
       )
     }
   }

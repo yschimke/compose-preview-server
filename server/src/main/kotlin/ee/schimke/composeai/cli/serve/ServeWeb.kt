@@ -6550,8 +6550,8 @@ ${captureControlsHtml().prependIndent("          ")}
      * is signed in, and this is not the component-browser mode (which is for browsing components,
      * not authoring against them, and drops the compare action beside it for the same reason).
      *
-     * The link goes to `/ui-builder/<catalog>/`, which is the builder's **New design** chooser: the
-     * shell reads the design out of `location.pathname`, finds none, and opens the create screen.
+     * The link goes to `/ui-builder/?catalog=<catalog>`, which is the builder's **New design**
+     * chooser: the catalog is a creation choice, not part of a future document's identity.
      * Deliberately a plain `GET` link rather than a form that posts a creation: the design does not
      * exist until its id and template are chosen, and a chip that silently minted `untitled-3` on
      * every stray click is not a front door.
@@ -6578,7 +6578,14 @@ ${captureControlsHtml().prependIndent("          ")}
           "UI Builder<span class=\"cp-action-chip-hint\" aria-hidden=\"true\">why?</span></summary>" +
           "<span class=\"cp-action-note-body\">$why</span></details>"
       }
-      val href = WebEscaping.htmlEscape("/ui-builder/$sysSeg/$suffix")
+      val catalogQuery = "catalog=${WebEscaping.urlEncodeSegment(sysSeg)}"
+      val href =
+        WebEscaping.htmlEscape(
+          "/ui-builder/" +
+            querySuffix(
+              listOf(catalogQuery, tokenParam).filter { it.isNotEmpty() }.joinToString("&")
+            )
+        )
       val described = WebEscaping.htmlEscape("${s.title}: open the UI Builder")
       return "<a class=\"cp-action-chip cp-action-chip--primary\" href=\"$href\" " +
         "aria-label=\"$described\">" +
@@ -7221,7 +7228,7 @@ ${captureControlsHtml().prependIndent("          ")}
 
   /**
    * A styled **explanation** for a browser that reached a surface its credential does not open —
-   * today, `POST /ui-builder/<catalog>` refusing to create a design.
+   * today, `POST /ui-builder/designs` refusing to create a design.
    *
    * The route answers a script with `text/plain` and the right status, which is correct for a
    * script and useless to a person: a form submission that lands on a bare "UI-builder write access
@@ -7270,8 +7277,7 @@ ${captureControlsHtml().prependIndent("          ")}
   }
 
   /**
-   * `GET /ui-builder/{catalog}/{designId}/access` — who can open one design, and the form that
-   * changes it.
+   * `GET /ui-builder/{designId}/access` — who can open one design, and the form that changes it.
    *
    * A design's access control has existed in the protocol since v1 and had, until this page, no
    * user interface at all: a person could create a design and then had no way to let a colleague —

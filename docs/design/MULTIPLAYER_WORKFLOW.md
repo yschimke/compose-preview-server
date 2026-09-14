@@ -70,7 +70,7 @@ An inventory of what exists, ordered by how much of the workflow each already ca
 
 | Primitive | Where it is | What it gives a multiplayer flow |
 | --- | --- | --- |
-| A design with a canonical URL, revisions, presence and an owner/viewer/editor list | `/ui-builder/<catalog>/<design>`; [`UI_BUILDER_LIVE_SESSION.md`](UI_BUILDER_LIVE_SESSION.md), `ui_builder_share_design` | The shared object. A browser and an MCP client land in one `PersistentUiBuilderService.apply`, and every accepted write reaches every subscriber |
+| A design with a canonical URL, revisions, presence and an owner/viewer/editor list | `/ui-builder/<design>`; [`UI_BUILDER_LIVE_SESSION.md`](UI_BUILDER_LIVE_SESSION.md), `ui_builder_share_design` | The shared object. A browser and an MCP client land in one `PersistentUiBuilderService.apply`, and every accepted write reaches every subscriber |
 | Comments pinned to a node, a mark or a point, with react / acknowledge / resolve kept distinct | [`UI_BUILDER_COMMENTS.md`](UI_BUILDER_COMMENTS.md) | The in-context discussion. Stored *beside* the design, so talking never moves the revision |
 | The agent is woken, and told what it has not read, on every reply | `ui_builder_await_comments`; the `comments` block on `ui_builder_get_design` / `_apply` / `_export` | An agent mid-edit learns a designer spoke without polling |
 | A reference overlay: paste a frame from any tool, a screenshot of a shipped screen, or a photo of a sketch; mark it up, erase, capture a component, promote it into the tree | [`UI_BUILDER_REFERENCE_OVERLAY.md`](UI_BUILDER_REFERENCE_OVERLAY.md) | The cheapest possible join to a design tool *and* to the existing app: the clipboard |
@@ -274,7 +274,7 @@ that a design nobody is editing has no reason to stay.
 - a preview: `/<system>/p/<id>` plus its override query, the `compose-preview://catalog/<catalog>/<id>`
   resource URI, a history entry by commit or blob, and the `compose-parity-locator/v1` block that
   spells all of it out in an issue body;
-- a design: `/ui-builder/<catalog>/<design>`, a `revision`, a `nodeId`, a comment `threadId`;
+- a design: `/ui-builder/<design>`, a `revision`, a `nodeId`, a comment `threadId`;
 - a comparison: `/<system>/compare/<id>?reference=<ref>`;
 - a kit node: `<tool>:<file>/<node>`, recorded on every catalog component (`figma:` today).
 
@@ -454,7 +454,7 @@ on is `compose-preview-contracts`.
 
 | # | Build | Size | Where | Answers |
 | --- | --- | --- | --- | --- |
-| 1 | **Design URL selectors and an unfurl card.** `?revision=` / `?node=` / `#thread=` on `/ui-builder/<catalog>/<design>`; an `og:image` for the design page from its PNG export or blank frame, content-addressed, privacy-aware | S | server, ui-builder | 4.1; a link in the chat means something |
+| 1 | **Design URL selectors and an unfurl card.** `?revision=` / `?node=` / `#thread=` on `/ui-builder/<design>`; an `og:image` for the design page from its PNG export or blank frame, content-addressed, privacy-aware | S | server, ui-builder | 4.1; a link in the chat means something |
 | 2 | **`links` beside the design.** A `links/<digest>.json` store, Screen-panel editor, `ui_builder_set_links` / carried in `ui_builder_get_design`, an additive `links` field on the project index, `GET /ui-builder/links?issue=` | S | server, ui-builder, contracts (index schema) | 4.2; "where were we" |
 | 3 | **Outbound comment webhook.** `--ui-builder-comment-webhook <url>`, posting new threads and replies with the thread permalink as plain JSON, and carrying the design's `links.thread` so a relay can put the message in the right conversation; the Slack, Teams and Google Chat incoming-webhook bodies are one adapter each | S | server | Reviewing without opening the builder |
 | 4 | **Comments on served previews.** The comment board keyed by `<catalog>/<previewId>` beside its design keying; the `ref` / `point` / `sha` anchor and the three display states above; the viewer's Talk panel; the same six MCP tools with a `preview` argument, and the same `comments` block on `render_preview` | M | server, serve-web | The "feedback on the shipped screen" entry |

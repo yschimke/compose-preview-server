@@ -249,5 +249,5 @@ export function designPermalink(
   if (node !== undefined) query.set("node", node);
   const fragment =
     thread === undefined ? "" : `#thread=${encodeURIComponent(thread)}`;
-  return `${server.origin}/ui-builder/${catalogSystemId}/${designId}?${query}${fragment}`;
+  return `${server.origin}/ui-builder/${designId}?${query}${fragment}`;
 }

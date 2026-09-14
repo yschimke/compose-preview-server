@@ -309,14 +309,13 @@ async function openBrowserSession(
     const query = new URLSearchParams({
         session: "live",
         designId: sessionDesignId,
+        catalog: catalogSystemId,
         actor: actorId,
         clientId,
         token,
     });
     if (create) query.set("create", "true");
-    const builderPath =
-        catalogSystemId === "m3-catalog" ? "/ui-builder/" : `/ui-builder/${catalogSystemId}/`;
-    await page.goto(`${origin}${builderPath}?${query}`);
+    await page.goto(`${origin}/ui-builder/?${query}`);
     await page.waitForFunction(
         () =>
             document.documentElement.dataset.uiBuilderReady === "true" &&
@@ -443,7 +442,7 @@ test("only explicitly enabled catalog-scoped UI builders are available", async (
             remoteBuilder.page.getByRole("button", { name: "Cancel" }),
         );
         await remoteBuilder.page.goto(
-            `${server.origin}/ui-builder/remote-m3/?token=${encodeURIComponent(operatorToken)}&actor=operator&clientId=catalog-remote`,
+            `${server.origin}/ui-builder/?catalog=remote-m3&token=${encodeURIComponent(operatorToken)}&actor=operator&clientId=catalog-remote`,
         );
         await remoteBuilder.page.waitForFunction(
             () => document.documentElement.dataset.uiBuilderReady === "true",
@@ -474,9 +473,7 @@ test("only explicitly enabled catalog-scoped UI builders are available", async (
         );
         await remoteBuilder.page.waitForURL(
             (url) =>
-                url.pathname === "/ui-builder/remote-m3/" &&
-                url.searchParams.get("designId") === createdDesignId &&
-                url.searchParams.get("template") === "wear-widget-large" &&
+                url.pathname === `/ui-builder/${createdDesignId}` &&
                 url.searchParams.get("token") === operatorToken,
         );
         await remoteBuilder.page.waitForFunction(

@@ -49,7 +49,7 @@ try {
     const page = await browser.newPage({ viewport: { width: 1600, height: 1050 }, deviceScaleFactor: 1 });
     const errors = [];
     page.on("pageerror", error => errors.push(error.message));
-    await page.goto(`${origin}/ui-builder/remote-m3/${sample.id}?token=${encodeURIComponent(token)}&node=choice`);
+    await page.goto(`${origin}/ui-builder/${sample.id}?token=${encodeURIComponent(token)}&node=choice`);
     await page.waitForFunction(() => document.documentElement.dataset.uiBuilderReady === "true", null, { timeout: 60000 });
     const button = page.getByRole("button", { name: /^Code/ });
     const bounds = await button.boundingBox();

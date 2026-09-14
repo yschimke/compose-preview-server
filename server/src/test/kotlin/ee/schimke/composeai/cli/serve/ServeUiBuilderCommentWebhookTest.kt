@@ -153,12 +153,11 @@ class ServeUiBuilderCommentWebhookTest {
   }
 
   @Test
-  fun `the permalink names the catalog, the design and the thread`() {
+  fun `the permalink names the design and the thread`() {
     assertEquals(
-      "https://preview.example/ui-builder/m3-catalog/checkout-screen#thread=t-1",
+      "https://preview.example/ui-builder/checkout-screen#thread=t-1",
       ServeUiBuilderCommentWebhook.threadUrl(
         "https://preview.example/",
-        "m3-catalog",
         "checkout-screen",
         "t-1",
       ),
@@ -166,10 +165,10 @@ class ServeUiBuilderCommentWebhookTest {
   }
 
   @Test
-  fun `a design whose catalog is unknown links to the builder rather than inventing a segment`() {
+  fun `the catalog does not participate in a design permalink`() {
     assertEquals(
-      "https://preview.example/ui-builder/",
-      ServeUiBuilderCommentWebhook.threadUrl("https://preview.example", null, "d-1", "t-1"),
+      "https://preview.example/ui-builder/d-1#thread=t-1",
+      ServeUiBuilderCommentWebhook.threadUrl("https://preview.example", "d-1", "t-1"),
     )
   }
 
@@ -183,7 +182,7 @@ class ServeUiBuilderCommentWebhookTest {
     assertEquals("node play-button", body["thread"]!!.jsonObject["anchor"]!!.jsonPrimitive.content)
     assertEquals("Yuri", body["comment"]!!.jsonObject["author"]!!.jsonPrimitive.content)
     assertEquals(
-      "https://preview.example/ui-builder/m3-catalog/checkout#thread=t-1",
+      "https://preview.example/ui-builder/checkout#thread=t-1",
       body["url"]!!.jsonPrimitive.content,
     )
   }
@@ -196,7 +195,7 @@ class ServeUiBuilderCommentWebhookTest {
     assertEquals(setOf("text"), body.keys)
     assertTrue(text.startsWith("*Yuri* started a thread on "), text)
     assertTrue(
-      text.contains("<https://preview.example/ui-builder/m3-catalog/checkout#thread=t-1|Checkout>"),
+      text.contains("<https://preview.example/ui-builder/checkout#thread=t-1|Checkout>"),
       text,
     )
     assertTrue(text.contains("\n> This row should be a card."), text)
@@ -227,7 +226,7 @@ class ServeUiBuilderCommentWebhookTest {
       body["text"]!!
         .jsonPrimitive
         .content
-        .contains("<https://preview.example/ui-builder/m3-catalog/checkout#thread=t-1|Checkout>"),
+        .contains("<https://preview.example/ui-builder/checkout#thread=t-1|Checkout>"),
       body.toString(),
     )
   }
@@ -251,7 +250,7 @@ class ServeUiBuilderCommentWebhookTest {
     val action = content["actions"]!!.jsonArray.single().jsonObject
     assertEquals("Action.OpenUrl", action["type"]!!.jsonPrimitive.content)
     assertEquals(
-      "https://preview.example/ui-builder/m3-catalog/checkout#thread=t-1",
+      "https://preview.example/ui-builder/checkout#thread=t-1",
       action["url"]!!.jsonPrimitive.content,
     )
   }
@@ -600,7 +599,7 @@ class ServeUiBuilderCommentWebhookTest {
           authorKind = kind,
           excerpt = excerpt,
         ),
-      url = "https://preview.example/ui-builder/m3-catalog/checkout#thread=t-1",
+      url = "https://preview.example/ui-builder/checkout#thread=t-1",
     )
 
   private fun board(vararg threads: StoredCommentThread) =

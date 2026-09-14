@@ -281,7 +281,7 @@ Delegation answers "my agent and I are one session". It deliberately does not an
 colleague in", and that is a separate door, per design, which now exists in both places a person or
 an agent might look for it:
 
-- **In the browser**, `GET /ui-builder/{catalog}/{designId}/access` — the owner sees who can open the
+- **In the browser**, `GET /ui-builder/{designId}/access` — the owner sees who can open the
   design and shares it with an actor id, as `viewer` (read and export) or `editor` (also write).
 - **Over MCP**, `ui_builder_design_access` reads that same list and `ui_builder_share_design`
   changes it. An agent acting under a grant shares as the person who approved it, so what it can

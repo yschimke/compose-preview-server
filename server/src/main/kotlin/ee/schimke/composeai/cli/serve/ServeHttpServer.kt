@@ -116,7 +116,7 @@ import kotlinx.serialization.json.jsonObject
 private val UI_BUILDER_IDENTITY_QUERY =
   listOf("token", "actor", "clientId", "displayName", "color", "endpoint", "updatesEndpoint")
 
-/** A `/ui-builder/<catalog>/<designId>` design segment: the New design dialog's own id shape. */
+/** A `/ui-builder/<designId>` design segment: the New design dialog's own id shape. */
 private val UI_BUILDER_DESIGN_SEGMENT = Regex("[A-Za-z0-9][A-Za-z0-9._-]*")
 
 /** Everything a design id may hold that a `Content-Disposition` filename may not. */
@@ -1275,10 +1275,15 @@ class ServeHttpServer(
         // The form the New design dialog submits is an ordinary HTML form, so the browser follows
         // the `303` itself and lands on a URL that is safe to reload, bookmark and share — which
         // is the whole reason creation is not a navigation to a `?create=1` URL any more.
+        post("/ui-builder/designs") { handleUiBuilderCreate() }
+        // Compatibility for creation forms emitted by older builder bundles.
         post("/ui-builder/{catalog}") { handleUiBuilderCreate() }
         // Sharing one design, as a page rather than a hand-written protocol POST. Registered
         // before the asset catch-all; a literal `access` segment outranks `{path...}`, so the
         // editor shell is still what every other path under a design serves.
+        get("/ui-builder/{designId}/access") { handleUiBuilderAccess() }
+        post("/ui-builder/{designId}/access") { handleUiBuilderAccessUpdate() }
+        // Compatibility for bookmarks emitted before the catalog became document-only state.
         get("/ui-builder/{catalog}/{designId}/access") { handleUiBuilderAccess() }
         post("/ui-builder/{catalog}/{designId}/access") { handleUiBuilderAccessUpdate() }
         // A runtime id is an exact immutable pin. There is deliberately no unversioned or
@@ -12743,20 +12748,18 @@ class ServeHttpServer(
   }
 
   /**
-   * `/ui-builder/<designId>` → `/ui-builder/<catalog>/<designId>`, when this caller may open it.
+   * Whether this caller may open the design named by a catalog-free UI-builder URL.
    *
-   * Gated on a **READ authorization and the store's own answer**, which is what keeps the redirect
-   * from being an existence oracle. Designs are private to their owner and collaborators, so a
-   * redirect that fired for any id that exists would tell an unauthenticated stranger both that a
-   * `cheeky-raccoon` id is taken and which catalog it pins — the leak the issue weighs this option
-   * against. Asking the service as the caller means the answer is exactly the one the design API
-   * would already give them: whoever cannot open the design gets the same `404` they got before,
-   * and whoever can gets the URL they were looking for.
+   * Gated on a **READ authorization and the store's own answer**, which keeps the shell from being
+   * an existence oracle. Designs are private to their owner and collaborators, so serving the shell
+   * for any id that exists would tell an unauthenticated stranger that a `cheeky-raccoon` id is
+   * taken. Asking the service as the caller means the answer is exactly the one the design API
+   * would already give them: whoever cannot open the design gets the same `404` they got before.
    *
-   * @return true once a redirect has been written, false to leave the request to the static lane —
-   *   which is what keeps a genuinely missing asset a 404 rather than a silent app shell.
+   * @return true when the shell may be served, false to leave the request to the static lane —
+   *   which keeps a genuinely missing asset a 404 rather than a silent app shell.
    */
-  private suspend fun RoutingContext.respondUiBuilderDesignRedirect(designId: String): Boolean {
+  private suspend fun RoutingContext.canOpenUiBuilderDesign(designId: String): Boolean {
     val service = uiBuilderService ?: return false
     val authorization = uiBuilderAuthorization ?: return false
     val actor =
@@ -12772,17 +12775,7 @@ class ServeHttpServer(
       (mapping as? ProtocolRequestMapping.Mapped)?.let {
         withContext(Dispatchers.IO) { service.execute(it.call) }
       }
-    val catalog =
-      (response as? UiBuilderServiceResponse.Snapshot)
-        ?.snapshot
-        ?.state
-        ?.document
-        ?.catalogPin
-        ?.systemId ?: return false
-    // 302 rather than 301: a design can be migrated to another catalog, and a permanent redirect
-    // is one a browser keeps long after the answer has changed.
-    call.respondRedirect("/ui-builder/$catalog/$designId")
-    return true
+    return response is UiBuilderServiceResponse.Snapshot
   }
 
   /**
@@ -12853,8 +12846,8 @@ class ServeHttpServer(
     val assetSegments = if (scopedCatalog == null) segments else segments.drop(1)
     if (version != null) {
       // The versioned prefix carries assets only. The document keeps its own URL because the app
-      // reads both the catalog and the design id back out of `location.pathname` — moving it under
-      // a prefix would make `parts[1]` the digest, and every design URL a different design.
+      // reads the design id back out of `location.pathname` — moving it under a prefix would make
+      // `parts[1]` the digest, and every design URL a different design.
       //
       // Only one bundle exists on disk, so a prefix naming another version has nothing to serve.
       // Answering with the current bytes would make an immutable URL return two different files
@@ -12866,26 +12859,24 @@ class ServeHttpServer(
     } else if (
       scopedCatalog != null && assetSegments.size == 1 && isUiBuilderDesignSegment(assetSegments[0])
     ) {
-      // The cool-URI form: `/ui-builder/<catalog>/<designId>` names one design in the path instead
-      // of in a `?designId=` query, and the browser reads it back out of `location.pathname`. Only
-      // a catalog-scoped single segment that cannot be a file qualifies, so an asset that is simply
-      // missing still 404s rather than silently rendering the app shell.
+      // An old catalog-prefixed permalink. The document now owns its catalog pin, so keep the old
+      // address only as a temporary redirect to the catalog-free identity.
       val designId = assetSegments[0]
       if (!File(dir, designId).isFile) {
-        if (call.request.path().endsWith("/")) {
-          call.respondRedirect("/ui-builder/$scopedCatalog/$designId")
-          return
-        }
-        respondUiBuilderShell(dir, File(dir, "index.html"))
+        val suffix = call.request.queryString().let { if (it.isEmpty()) "" else "?$it" }
+        call.respondRedirect("/ui-builder/$designId$suffix")
         return
       }
     } else if (assetSegments.size == 1 && isUiBuilderDesignSegment(assetSegments[0])) {
-      // A design named without its catalog. `PUT /api/ui-builder/v1/designs/{id}` is catalog-free
-      // — the server reads the catalog out of the stored document — so anything holding only a
-      // design id builds `/ui-builder/<designId>` and gets a bare 404 that reads like a deletion
-      // (yschimke/compose-preview-server#509). The catalog the URL is missing is
-      // `catalogPin.systemId`, which the store already knows.
-      if (!File(dir, assetSegments[0]).isFile && respondUiBuilderDesignRedirect(assetSegments[0])) {
+      // The canonical design URL. Authorize before serving the public shell so a design id cannot
+      // be used as an existence oracle; the API then reads its catalog from the document.
+      if (!File(dir, assetSegments[0]).isFile && canOpenUiBuilderDesign(assetSegments[0])) {
+        if (call.request.path().endsWith("/")) {
+          val suffix = call.request.queryString().let { if (it.isEmpty()) "" else "?$it" }
+          call.respondRedirect("/ui-builder/${assetSegments[0]}$suffix")
+        } else {
+          respondUiBuilderShell(dir, File(dir, "index.html"))
+        }
         return
       }
     }
@@ -13066,7 +13057,7 @@ class ServeHttpServer(
   }
 
   /**
-   * `POST /ui-builder/<catalog>` — create one design, then `303` to its permalink.
+   * `POST /ui-builder/designs` — create one design, then `303` to its permalink.
    *
    * Plain `application/x-www-form-urlencoded`, because the point is that a browser can submit it
    * without any script and follow the redirect on its own: POST/Redirect/GET, so the design's URL
@@ -13087,7 +13078,8 @@ class ServeHttpServer(
       call.respondText("not found", status = HttpStatusCode.NotFound)
       return
     }
-    val catalog = call.parameters["catalog"].orEmpty()
+    val form = call.receiveParameters()
+    val catalog = form["catalog"]?.trim().orEmpty().ifEmpty { call.parameters["catalog"].orEmpty() }
     if (catalog !in uiBuilderCatalogs) {
       call.respondText("not found", status = HttpStatusCode.NotFound)
       return
@@ -13121,7 +13113,6 @@ class ServeHttpServer(
           return
         }
       }
-    val form = call.receiveParameters()
     val designId = form["designId"].orEmpty().trim()
     if (!isUiBuilderDesignSegment(designId)) {
       call.respondText(
@@ -13168,7 +13159,7 @@ class ServeHttpServer(
         // exists to stop.
         call.response.headers.append(
           HttpHeaders.Location,
-          uiBuilderPermalink(catalog, designId, call.request.queryParameters),
+          uiBuilderPermalink(designId, call.request.queryParameters),
         )
         call.respond(HttpStatusCode.SeeOther)
       }
@@ -13178,7 +13169,7 @@ class ServeHttpServer(
   }
 
   /**
-   * `GET /ui-builder/{catalog}/{designId}/access` — the sharing page for one design.
+   * `GET /ui-builder/{designId}/access` — the sharing page for one design.
    *
    * Owner-only, and that is the service's decision rather than this route's: `GetDesignAccess` is
    * refused for anyone else, so a visitor who merely has the design open is told the same thing a
@@ -13251,8 +13242,7 @@ class ServeHttpServer(
               as? UiBuilderServiceResponse.DesignAccess)
             ?.access
         else null
-      val href =
-        uiBuilderPermalink(item.catalogPin.systemId, item.designId, call.request.queryParameters)
+      val href = uiBuilderPermalink(item.designId, call.request.queryParameters)
       ServeWeb.UiBuilderDesignRow(
         designId = item.designId,
         title = item.title,
@@ -13296,7 +13286,7 @@ class ServeHttpServer(
   }
 
   /**
-   * `POST /ui-builder/{catalog}/{designId}/access` — share it, or take the sharing back.
+   * `POST /ui-builder/{designId}/access` — share it, or take the sharing back.
    *
    * Answers with the page again rather than a redirect: the outcome worth showing is the new access
    * list, and re-rendering it puts the confirmation and the state it describes in one response.
@@ -13399,9 +13389,13 @@ class ServeHttpServer(
       call.respondText("not found", status = HttpStatusCode.NotFound)
       return null
     }
-    if (call.parameters["catalog"] !in uiBuilderCatalogs) {
-      call.respondText("not found", status = HttpStatusCode.NotFound)
-      return null
+    // The catalog-prefixed route is compatibility-only. If it is used, retain its old rule that
+    // an unknown catalog is a 404; the canonical route has no catalog parameter at all.
+    call.parameters["catalog"]?.let { catalog ->
+      if (catalog !in uiBuilderCatalogs) {
+        call.respondText("not found", status = HttpStatusCode.NotFound)
+        return null
+      }
     }
     val designId = call.parameters["designId"].orEmpty()
     if (!isUiBuilderDesignSegment(designId)) {
@@ -13464,15 +13458,14 @@ class ServeHttpServer(
     access: DesignAccessControlV1,
     notice: String,
   ) {
-    val catalog = call.parameters["catalog"].orEmpty()
     val skin = call.siteSkin()
     markGeneration("static-page", "no-store")
     call.respondText(
       ServeWeb.uiBuilderAccessPage(
         designId = designId,
-        designHref = uiBuilderPermalink(catalog, designId, call.request.queryParameters),
+        designHref = uiBuilderPermalink(designId, call.request.queryParameters),
         formAction =
-          uiBuilderPermalink(catalog, designId, call.request.queryParameters).let { permalink ->
+          uiBuilderPermalink(designId, call.request.queryParameters).let { permalink ->
             val (path, query) = permalink.substringBefore("?") to permalink.substringAfter("?", "")
             "$path/access" + if (query.isEmpty()) "" else "?$query"
           },
@@ -13523,7 +13516,6 @@ class ServeHttpServer(
 
   /** The design's own URL, carrying forward only the identity a create link was opened with. */
   private fun uiBuilderPermalink(
-    catalog: String,
     designId: String,
     query: io.ktor.http.Parameters,
   ): String {
@@ -13532,7 +13524,7 @@ class ServeHttpServer(
       "$name=" + java.net.URLEncoder.encode(value, "UTF-8")
     }
     val suffix = if (carried.isEmpty()) "" else carried.joinToString("&", prefix = "?")
-    return "/ui-builder/$catalog/$designId$suffix"
+    return "/ui-builder/$designId$suffix"
   }
 
   private suspend fun RoutingContext.handleUiBuilderRuntimeAsset() {

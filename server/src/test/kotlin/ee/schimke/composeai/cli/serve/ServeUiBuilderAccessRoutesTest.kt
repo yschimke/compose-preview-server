@@ -214,7 +214,7 @@ class ServeUiBuilderAccessRoutesTest {
 
   @Test
   fun `the owner sees who else can open the design, and nobody else does`() {
-    val (code, page) = get("/ui-builder/m3-catalog/screen/access", actor = "github:owner")
+    val (code, page) = get("/ui-builder/screen/access", actor = "github:owner")
     assertEquals(200, code)
     assertTrue(page.contains("agent:abc123"), page)
     assertTrue(page.contains("github:owner"), page)
@@ -222,12 +222,12 @@ class ServeUiBuilderAccessRoutesTest {
 
     // A visitor who can open the design but does not own it is refused the list, because the
     // service refuses it — the route must not answer a question it did not get an answer to.
-    val (otherCode, otherPage) = get("/ui-builder/m3-catalog/screen/access", actor = "github:other")
+    val (otherCode, otherPage) = get("/ui-builder/screen/access", actor = "github:other")
     assertEquals(403, otherCode)
     assertFalse(otherPage.contains("agent:abc123"), otherPage)
 
-    assertEquals(401, get("/ui-builder/m3-catalog/screen/access", actor = null).first)
-    assertEquals(403, get("/ui-builder/m3-catalog/screen/access", actor = "forbidden").first)
+    assertEquals(401, get("/ui-builder/screen/access", actor = null).first)
+    assertEquals(403, get("/ui-builder/screen/access", actor = "forbidden").first)
     assertEquals(404, get("/ui-builder/not-served/screen/access", actor = "github:owner").first)
   }
 
@@ -255,7 +255,7 @@ class ServeUiBuilderAccessRoutesTest {
 
   @Test
   fun `an agent acting for the owner manages sharing as the owner does`() {
-    val (code, page) = get("/ui-builder/m3-catalog/screen/access", actor = "agent")
+    val (code, page) = get("/ui-builder/screen/access", actor = "agent")
     assertEquals(200, code)
     assertTrue(page.contains("agent:abc123"), page)
   }
@@ -264,7 +264,7 @@ class ServeUiBuilderAccessRoutesTest {
   fun `sharing and revoking reach the service as the mutations they claim to be`() {
     val (code, page) =
       post(
-        "/ui-builder/m3-catalog/screen/access",
+        "/ui-builder/screen/access",
         FormBody.Builder().add("actorId", "github:colleague").add("role", "editor").build(),
       )
     assertEquals(200, code)
@@ -283,7 +283,7 @@ class ServeUiBuilderAccessRoutesTest {
     mutations.clear()
     val (revokedCode, revokedPage) =
       post(
-        "/ui-builder/m3-catalog/screen/access",
+        "/ui-builder/screen/access",
         FormBody.Builder().add("actorId", "github:colleague").add("action", "revoke").build(),
       )
     assertEquals(200, revokedCode)
@@ -298,7 +298,7 @@ class ServeUiBuilderAccessRoutesTest {
   fun `sharing from the designs screen returns to the actor scoped list`() {
     val (code, _) =
       post(
-        "/ui-builder/m3-catalog/screen/access",
+        "/ui-builder/screen/access",
         FormBody.Builder().add("actorId", "github:colleague").add("returnTo", "designs").build(),
       )
 
@@ -312,7 +312,7 @@ class ServeUiBuilderAccessRoutesTest {
   @Test
   fun `a viewer is shared read and export and nothing else`() {
     post(
-      "/ui-builder/m3-catalog/screen/access",
+      "/ui-builder/screen/access",
       FormBody.Builder().add("actorId", "github:colleague").build(),
     )
     val grant = mutations.single().mutations.single() as GrantActorAccessMutationV1
@@ -328,17 +328,17 @@ class ServeUiBuilderAccessRoutesTest {
     val form = FormBody.Builder().add("actorId", "github:colleague").build()
     assertEquals(
       403,
-      post("/ui-builder/m3-catalog/screen/access", form, origin = "https://evil.example").first,
+      post("/ui-builder/screen/access", form, origin = "https://evil.example").first,
     )
-    assertEquals(403, post("/ui-builder/m3-catalog/screen/access", form, actor = "forbidden").first)
-    assertEquals(403, post("/ui-builder/m3-catalog/screen/access", form, actor = "github:x").first)
+    assertEquals(403, post("/ui-builder/screen/access", form, actor = "forbidden").first)
+    assertEquals(403, post("/ui-builder/screen/access", form, actor = "github:x").first)
     // The owner's own id is not a grant to add: an owner is not in the grant list at all, so this
     // would be a change that could only ever be undone by a revoke that removes nothing.
     post(
-      "/ui-builder/m3-catalog/screen/access",
+      "/ui-builder/screen/access",
       FormBody.Builder().add("actorId", "github:owner").build(),
     )
-    post("/ui-builder/m3-catalog/screen/access", FormBody.Builder().add("actorId", " ").build())
+    post("/ui-builder/screen/access", FormBody.Builder().add("actorId", " ").build())
     assertTrue(mutations.isEmpty(), "no refusal may have changed access: $mutations")
   }
 }

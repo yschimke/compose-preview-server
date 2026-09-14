@@ -46,7 +46,7 @@ import org.junit.jupiter.api.io.TempDir
  *
  * ## What it walks
  *
- * The New design form's own route — `POST /ui-builder/<catalog>`,
+ * The New design form's own route — `POST /ui-builder/designs`,
  * `application/x-www-form-urlencoded`, seeded server-side by `UiBuilderNewDesignSeed` — then reads
  * the design back and exports it. That is the path the chooser drives, so a template that only
  * worked from the browser's bootstrap, or a seed that produced a document the service then
@@ -79,7 +79,7 @@ class ServeWearScreenDeploymentIntegrationTest {
         createDesign(running, catalog = "wear-m3", designId = "activity", template = "wear-list")
       assertEquals(303, created.first, created.second)
       // The redirect goes to the permalink a person opens, not to the API path that made it.
-      assertEquals("/ui-builder/wear-m3/activity", created.second)
+      assertEquals("/ui-builder/activity", created.second)
 
       // 3. Read it back: a scaffold over a list, with more than a screenful in it.
       val snapshot =
@@ -149,14 +149,14 @@ class ServeWearScreenDeploymentIntegrationTest {
     }
   }
 
-  /** `POST /ui-builder/<catalog>`, form-encoded, following no redirect: status and Location. */
+  /** `POST /ui-builder/designs`, form-encoded, following no redirect: status and Location. */
   private fun createDesign(
     running: RunningServer,
     catalog: String,
     designId: String,
     template: String,
   ): Pair<Int, String> {
-    val form = "designId=$designId&template=$template"
+    val form = "catalog=$catalog&designId=$designId&template=$template"
     val http =
       client
         .newBuilder()
@@ -164,7 +164,7 @@ class ServeWearScreenDeploymentIntegrationTest {
         .build()
         .newCall(
           Request.Builder()
-            .url("http://127.0.0.1:${running.server.port}/ui-builder/$catalog")
+            .url("http://127.0.0.1:${running.server.port}/ui-builder/designs")
             .header(ServeHttpServer.TOKEN_HEADER, OPERATOR_TOKEN)
             .post(form.toRequestBody("application/x-www-form-urlencoded".toMediaType()))
             .build()
