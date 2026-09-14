@@ -1,5 +1,21 @@
 # Changelog
 
+## [3.32.0](https://github.com/yschimke/compose-preview-server/compare/v3.31.0...v3.32.0) (2026-09-14)
+
+
+### Features
+
+* add caller-supplied preview backdrops ([#864](https://github.com/yschimke/compose-preview-server/issues/864)) ([4a1cad7](https://github.com/yschimke/compose-preview-server/commit/4a1cad742ae181013eefaae70a968fd4809315f2))
+* **ui-builder:** add actor and diagnostic design indexes ([#860](https://github.com/yschimke/compose-preview-server/issues/860)) ([4fd4713](https://github.com/yschimke/compose-preview-server/commit/4fd471306c580dbd457ecdf7989d72d8c7001752))
+* **ui-builder:** evolve catalogs and navigate designs ([#866](https://github.com/yschimke/compose-preview-server/issues/866)) ([f5a3317](https://github.com/yschimke/compose-preview-server/commit/f5a3317fa2d9f8e740f6fd9fa8e35748718b895c))
+
+
+### Bug Fixes
+
+* **deps:** update dependency ee.schimke.composeai:remotecompose-json to v2.13.1 ([#857](https://github.com/yschimke/compose-preview-server/issues/857)) ([1e92a66](https://github.com/yschimke/compose-preview-server/commit/1e92a6610423ea006526233c57ed05c5372feba8))
+* **serve:** keep related links when catalogs suspend ([#865](https://github.com/yschimke/compose-preview-server/issues/865)) ([48b02c7](https://github.com/yschimke/compose-preview-server/commit/48b02c745178281162580c9c531200e6de665e0d))
+* **ui-builder:** format the foundation test the way ktfmtCheck judges it ([#851](https://github.com/yschimke/compose-preview-server/issues/851)) ([1baff64](https://github.com/yschimke/compose-preview-server/commit/1baff643222b75be1d55e1be05da3c016b3498ae))
+
 ## [3.31.0](https://github.com/yschimke/compose-preview-server/compare/v3.30.0...v3.31.0) (2026-09-13)
 
 
