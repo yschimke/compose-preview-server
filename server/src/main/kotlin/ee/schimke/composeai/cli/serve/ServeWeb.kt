@@ -16817,6 +16817,12 @@ ${scriptTag("known-differences.js")}
           "<button type=\"button\" class=\"cp-bg-btn cp-zoom-toggle\" aria-pressed=\"false\" " +
           "title=\"Show the preview at full width instead of fitting it to the screen\">" +
           "Fit width</button>" +
+          "<label class=\"cp-bg-btn cp-backdrop-btn\" " +
+          "title=\"Choose a local scene to place behind a transparent additive preview\">" +
+          "<span id=\"cp-backdrop-label\">Choose backdrop</span>" +
+          "<input id=\"cp-backdrop-file\" type=\"file\" accept=\"image/*\" hidden></label>" +
+          "<button type=\"button\" id=\"cp-backdrop-clear\" class=\"cp-bg-btn\" hidden>" +
+          "Clear backdrop</button>" +
           "</div></div></details>"
     val pinnedControlsNote =
       if (pinned == null) ""

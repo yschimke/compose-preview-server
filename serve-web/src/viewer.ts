@@ -202,6 +202,45 @@ const live = must<HTMLInputElement>("cp-live");
 // ("Fit width") and pressed-ness says whether it is on. A two-button group spends twice the bar
 // width to say the same thing, and always shows one button that does nothing when clicked.
 const zoomToggle = document.querySelector<HTMLButtonElement>(".cp-zoom-toggle");
+const backdropFile = may<HTMLInputElement>("cp-backdrop-file");
+const backdropClear = may<HTMLButtonElement>("cp-backdrop-clear");
+const backdropLabel = may<HTMLElement>("cp-backdrop-label");
+let backdropObjectUrl: string | null = null;
+
+/**
+ * Places a caller-owned scene behind the snapshot without sending that image to the server.
+ * `plus-lighter` on the image reproduces Glimmer's clamped additive display model; an ordinary
+ * alpha preview remains useful too, and a fully opaque preview simply hides the scene.
+ */
+function clearBackdrop() {
+    if (backdropObjectUrl) URL.revokeObjectURL(backdropObjectUrl);
+    backdropObjectUrl = null;
+    stage.style.backgroundImage = "";
+    stage.removeAttribute("data-custom-backdrop");
+    if (backdropFile) backdropFile.value = "";
+    if (backdropLabel) backdropLabel.textContent = "Choose backdrop";
+    if (backdropClear) backdropClear.hidden = true;
+}
+
+if (backdropFile) {
+    backdropFile.addEventListener("change", function () {
+        const file = backdropFile.files?.[0];
+        if (!file || !file.type.startsWith("image/")) {
+            clearBackdrop();
+            return;
+        }
+        if (backdropObjectUrl) URL.revokeObjectURL(backdropObjectUrl);
+        backdropObjectUrl = URL.createObjectURL(file);
+        stage.style.backgroundImage = `url(${JSON.stringify(backdropObjectUrl)})`;
+        stage.setAttribute("data-custom-backdrop", "1");
+        if (backdropLabel) backdropLabel.textContent = file.name;
+        if (backdropClear) backdropClear.hidden = false;
+    });
+    window.addEventListener("pagehide", function () {
+        if (backdropObjectUrl) URL.revokeObjectURL(backdropObjectUrl);
+    });
+}
+if (backdropClear) backdropClear.addEventListener("click", clearBackdrop);
 // "Fit screen" means the WHOLE preview is on screen, so the cap is whatever the viewport has
 // left BELOW the chrome above the stage — measured, not a fixed 72vh guess. The guess was wrong
 // in both directions: on the viewer, where the title block and two control rows sit above the

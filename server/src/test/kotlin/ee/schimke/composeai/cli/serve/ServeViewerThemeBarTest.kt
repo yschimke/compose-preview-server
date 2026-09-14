@@ -129,6 +129,8 @@ class ServeViewerThemeBarTest {
       "the grid's toggle must be the same element, or the two bars are wiring two shapes",
     )
     assertTrue(html.contains("""class="cp-bg-btn cp-zoom-toggle" aria-pressed="false""""), html)
+    assertTrue(html.contains("""id="cp-backdrop-file" type="file" accept="image/*"""), html)
+    assertTrue(html.contains("""id="cp-backdrop-clear" class="cp-bg-btn" hidden"""), html)
     assertFalse(html.contains("data-zoom-mode="), "the Fit screen / Fit width pair is one toggle")
     assertFalse(html.contains("data-bg-choice="), "…and so is Background / Transparent")
   }
