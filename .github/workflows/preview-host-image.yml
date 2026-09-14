@@ -57,8 +57,8 @@ jobs:
           echo "daemon=${daemon}" >> "$GITHUB_OUTPUT"
       - name: Prepare image context
         run: |
-          mkdir -p deploy/image/m2 deploy/image/release-assets deploy/image/scripts
-          touch deploy/image/m2/.keep deploy/image/release-assets/.keep
+          mkdir -p deploy/image/release-assets deploy/image/scripts
+          touch deploy/image/release-assets/.keep
           cp scripts/install-linux-font-fallbacks.sh deploy/image/scripts/
       - name: Wait for the standalone distribution
         env:

@@ -2,16 +2,15 @@
 # Post (or update) a release milestone comment on the merged release PR.
 #
 # Why this exists: merging the `chore(main): release X.Y.Z` PR is the one manual step of a
-# release, and everything after it happens in workflow logs nobody is watching. The two moments
-# that actually matter to a human — "the preview server is running the new version" and "the
-# artifacts resolve from Maven Central" — arrive 10-40 minutes apart, in two different reusable
-# workflows, with no signal anywhere the releaser is looking. This turns each of them into a
-# comment on the PR they just merged.
+# release, and everything after it happens in workflow logs nobody is watching. The moment that
+# actually matters to a human — "the preview server is running the new version" — arrives later in
+# a reusable workflow, with no signal anywhere the releaser is looking. This turns it into a comment
+# on the PR they just merged.
 #
 # It is a COURTESY, never a gate. Every caller runs it with `continue-on-error: true`, after the
 # milestone has already been reached, so it can neither delay the release nor fail it. It also
-# adds no waiting of its own: the deploy convergence poll and the Maven readiness poll already
-# existed for their own reasons, and this only reports what they concluded.
+# adds no waiting of its own: the deploy convergence poll already exists for its own reason, and
+# this only reports what it concluded.
 #
 # Targeting. The reusable workflows that call this only receive a tag, so the PR is resolved
 # from THE TAG's commit — deliberately not from GITHUB_SHA. Those workflows are also the manual
@@ -30,8 +29,7 @@
 #
 # Idempotent. Each milestone carries an invisible `<!-- release-milestone:<key>:<tag> -->`
 # marker; a re-run finds its own previous comment and PATCHes it instead of stacking a second
-# one. That matters because both callers are re-runnable repair paths (a failed Maven readiness
-# job is re-run by hand often enough to have its own section in docs/RELEASING.md). The marker
+# one. That matters because the deployment workflow is a re-runnable repair path. The marker
 # is predictable and release PRs are public, so the search is restricted to comments authored by
 # `github-actions[bot]`: otherwise anyone could post the marker ahead of the release and have
 # their comment either overwritten in place or — if GitHub refuses the cross-author edit —

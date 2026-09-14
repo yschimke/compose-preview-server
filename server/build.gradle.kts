@@ -311,14 +311,9 @@ tasks.named<Tar>("distTar") {
   archiveExtension.set("tar.gz")
 }
 
-// Published, because after #3824's repo split `:cli` cannot reach the server any other way.
-//
-// The seam register is down to 11 `:cli` -> serve crossings (`ServeCommand`'s four seam types plus
-// `bundle` and the history commands), and every one of them is a compile-time dependency.
-// Once the two live in separate repositories the only way to satisfy them is a published artifact,
-// so an unpublished `:cli:serve` is the remaining hard blocker on the split regardless of how low
-// that number goes. Every project dependency this module has is already published, so nothing here
-// makes a POM that points at something nobody can resolve.
+// The standalone server application. The old Maven library seam to compose-ai-tools' `:cli` was
+// replaced by distribution launch in compose-ai-tools#5436, and #794 removed publication here.
+// Internal module edges below still state the code boundary even though no POM leaves this build.
 //
 // Deliberately WITHOUT `explicitApi()`, unlike the contract modules (`:common-io`,
 // `:bundle-format`, `:common-image-crop`) and unlike `:ui-builder-runtime`, which took the gate and
@@ -353,8 +348,7 @@ dependencies {
 
   // The build-host protocol. `implementation`, not `api`: the messages are this module's business
   // with the CLI, and `ServeBuildHost` — the interface the rest of the server actually programs
-  // against — is unchanged and stays the published surface. A consumer of `compose-preview-serve`
-  // has no reason to see the wire types.
+  // against — is unchanged. The rest of the server has no reason to see the wire types.
   implementation(libs.composeai.build.host.protocol)
   // Authoritative persistence, validation, collaboration and export orchestration. The server
   // supplies Ktor/auth and the narrow render-host adapter; the runtime has neither dependency.
@@ -705,12 +699,12 @@ tasks.register<CheckServeModuleBoundary>("checkServeModuleBoundary") {
     }
   )
 
-  // The UI-builder runtime and its export module are the deliberately published libraries beneath
-  // the server. Everything else in this build reaching its classpath is still a failure.
+  // The UI-builder runtime and its export module are the deliberately narrow libraries beneath the
+  // server. Everything else in this build reaching its classpath is still a failure.
   //
   // `:ui-builder-render-bundle` is here because it is what the runtime's `api` edge now drags in:
   // the packaged preview `PackagedUiBuilderRenderBundle.copyTo` materializes, which used to be a
-  // resource inside the runtime's own jar and is a published artifact of its own since #346. It
+  // resource inside the runtime's own jar and is a packaged artifact of its own since #346. It
   // has no source set — the jar is one PNG — so nothing about it reaches this classpath as code.
   allowedProjects.set(
     listOf(":ui-builder-runtime", ":ui-builder-export", ":ui-builder-render-bundle")

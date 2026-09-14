@@ -37,13 +37,14 @@ The standalone image skips the source build entirely:
 | | From source (`deploy/cloudrun`) | Prebuilt (`deploy/image`) |
 |---|---|---|
 | Tool | compiled in the image (~8 min) | **release server tarball, staged by CI** |
-| Release modules | built locally | **same-tag Maven tree, baked into the image** |
+| Server runtime | built locally | **release distribution, baked into the image** |
 | Content served | the whole repo's `:samples:cmp` | published catalogs + live bundles |
 | Host build | yes, every deploy | **none — `docker pull`** |
 
-The image carries the release's Maven modules and both live-render backends, so
-catalog bundles can start without building a local project or waiting for the
-release to propagate through Maven Central.
+The image carries the release distribution and both live-render backends, so catalog bundles can
+start without building a local project. Their declared third-party coordinates resolve from the
+configured remote repositories; only Robolectric's large Android runtime is pre-fetched into the
+image's Maven cache.
 
 ## Publishing the image (one-time / per release)
 
@@ -1085,10 +1086,10 @@ the publish CI can push the roll the moment the image lands:
 > goes healthy → traffic drains over → old replica retired
 
 **Fire on the image, not the release.** The webhook is triggered from the *end of the
-image build*, not a `release: published` event — at image-publish time the GHCR image
-is fully self-contained (baked CLI + plugin jars + live-render daemons), so
-the box needs **only GHCR** to roll and **no Maven propagation can race it** (the
-image workflow builds and seeds its local `m2` directly from the release tag).
+image build*, not a `release: published` event — at image-publish time the GHCR image is fully
+self-contained for the server and daemon release inputs, so the box needs **only GHCR** to roll.
+Catalog-declared third-party dependencies remain ordinary runtime resolution and are not part of
+release convergence.
 A `release: published` webhook would fire *before* the image exists and roll the box onto
 the *old* `:latest`.
 
@@ -1220,7 +1221,7 @@ docker run -d --restart always -p 8080:8080 \
 
 | File | Purpose |
 |------|---------|
-| `Dockerfile` | Downloads the released CLI and carries the published Maven modules + live-render daemons. |
+| `Dockerfile` | Downloads the released server distribution and carries the live-render daemons. |
 | `entrypoint.sh` | Maps `$PORT`/`$SERVE_TOKEN` onto serve flags; generous `--timeout`. |
 | `docker-compose.yml` + `Caddyfile` | Pull the image + Caddy auto-HTTPS + zero-downtime (`rollout`) / Watchtower auto-updates + the `hook` instant-roll webhook. |
 | `docker-compose.deploy-config.yml` + `test-deploy-config-mount.sh` | Opt-in overlay serving a deployment's `catalogs.json` / `producers.json` read-only from version control instead of the volume (see *Config from version control*), and its offline self-test (run by `ci.yml`). |
@@ -1266,8 +1267,8 @@ should never show two different typefaces.
 
 - The default runtime is module-less: it serves fetched catalogs and launches
   their trusted live bundles without running Gradle.
-- Live bundles resolve coordinate dependencies from the baked Maven tree first,
-  then the configured remote repositories. `SERVE_TIMEOUT` (default 1800s)
-  guards slow first renders.
+- Live bundles resolve coordinate dependencies from the configured remote repositories.
+  Robolectric's large Android runtime is pre-fetched into the image cache; `SERVE_TIMEOUT`
+  (default 1800s) guards slow first renders.
 - `SERVE_CATALOG_MAX_IMAGES` forwards to `serve --catalog-max-images`; leave it empty for the CLI
   default, or raise it when the configured catalogs legitimately contain more images.

@@ -23,12 +23,10 @@
 // both repositories, and keeping it is what makes this move source-compatible — a reader diffs
 // the two trees and sees no edits at all.
 //
-// Coordinate change, deliberate, the `:render-host` lesson applied in the other direction: it
-// published as `ee.schimke.composeai:mcp` from compose-ai-tools and publishes as
-// `compose-preview-mcp` from here. Keeping the old coordinate would mean two repositories
-// publishing one artifact on two version lines; a new coordinate in this repository's naming
-// (`compose-preview-serve`, `compose-preview-ui-builder-runtime`) has neither problem, and the old
-// one stays resolvable at its final 1.x for anyone pinned to it.
+// Artifact-name change, deliberate, the `:render-host` lesson applied in the other direction: it
+// published as `ee.schimke.composeai:mcp` from compose-ai-tools and now ships in the
+// `compose-preview-mcp` distribution from here. The old coordinate stays resolvable at its final
+// 1.x for anyone pinned to it; this repository publishes no replacement Maven coordinate.
 plugins {
   application
   alias(libs.plugins.kotlin.jvm)
@@ -125,8 +123,8 @@ dependencies {
   // `SupervisedDaemon.session` is a `RenderSession`, `SupervisedDaemon.client` is a
   // `DaemonClient`, `DaemonSupervisor` takes a
   // `DaemonClientFactory`, and the protocol message types are all over the tool implementations.
-  // Without `api` the generated POM scopes them as `runtime` only and a consumer resolving from POM
-  // metadata cannot compile against the MCP APIs.
+  // `api` records that these types are part of this module's signatures rather than implementation
+  // details, even though the module now ships only inside its standalone distribution.
   //
   // Project dependencies became published coordinates in the move. That is the cost the layer rule
   // charges for putting this module on the right side of the boundary, and it is why the version
