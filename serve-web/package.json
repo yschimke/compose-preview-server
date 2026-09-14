@@ -9,7 +9,7 @@
         "build": "tsc -p tsconfig.json && node esbuild.mjs",
         "watch": "node esbuild.mjs --watch",
         "typecheck": "tsc -p tsconfig.json",
-        "test": "node --import tsx --import ./test/preload.ts ./node_modules/mocha/bin/mocha.js \"test/**/*.test.ts\"",
+        "test": "node --import tsx/esm --import ./test/preload.ts ./node_modules/mocha/bin/mocha.js \"test/**/*.test.ts\"",
         "format": "prettier --write --tab-width 4 package.json tsconfig.json esbuild.mjs \"scripts/*.mjs\" \"src/**/*.ts\" \"test/**/*.ts\"",
         "format:check": "prettier --check --tab-width 4 package.json tsconfig.json esbuild.mjs \"scripts/*.mjs\" \"src/**/*.ts\" \"test/**/*.ts\"",
         "verify": "npm run typecheck && npm run test && npm run build && node scripts/check-bundle-budgets.mjs && node scripts/check-committed-bundle.mjs"

@@ -2202,6 +2202,11 @@ cp-history-menu { display: contents; }
    usual stacked labels: these are two chips of the same kind, and the panel's `<label>` column
    would have given each a full-width row and made a two-item group look like a form. */
 .cp-stage-view-row { display: flex; flex-wrap: wrap; gap: 8px; }
+.cp-backdrop-btn { cursor: pointer; max-width: 190px; }
+.cp-backdrop-btn span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cp-stage-view-row > [hidden] { display: none; }
+.cp-stage[data-custom-backdrop="1"] { background-position: center; background-size: cover; }
+.cp-stage[data-custom-backdrop="1"] > #cp-img { mix-blend-mode: plus-lighter; }
 .cp-theme-menu { position: relative; }
 .cp-theme-menu > summary { list-style: none; }
 .cp-theme-menu > summary::-webkit-details-marker { display: none; }
