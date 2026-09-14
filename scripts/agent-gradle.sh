@@ -54,5 +54,5 @@ lock_directory=${XDG_RUNTIME_DIR:-/tmp}
 if [ ! -d "${lock_directory}" ] || [ ! -w "${lock_directory}" ]; then
   lock_directory=/tmp
 fi
-lock_path="${lock_directory}/compose-preview-server-gradle-${UID}.lock"
+lock_path="${lock_directory}/compose-preview-gradle-${UID}.lock"
 exec flock "${lock_path}" "${command[@]}"
