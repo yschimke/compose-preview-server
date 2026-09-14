@@ -168,6 +168,40 @@ class PublishedGeneratedM3CatalogEquivalenceTest {
     )
   }
 
+  @Test
+  fun `record conventions add the reviewed vocabulary`() {
+    val frozenById = frozen.components.associateBy { it.componentId }
+    val additions =
+      composed.components
+        .mapNotNull { component ->
+          val before = frozenById[component.componentId] ?: return@mapNotNull null
+          val added =
+            component.properties.map { it.name }.toSet() - before.properties.map { it.name }
+          added.takeIf { it.isNotEmpty() }?.let { component.componentId to it.sorted() }
+        }
+        .toMap()
+
+    assertEquals(
+      mapOf(
+        "m3/button" to listOf("shape"),
+        "m3/center-aligned-top-app-bar" to listOf("expandedHeightDp"),
+        "m3/dialog" to listOf("iconContentColor", "shape", "textContentColor", "titleContentColor"),
+        "m3/horizontal-floating-toolbar" to
+          listOf("collapsedShadowElevationDp", "expandedShadowElevationDp", "shape"),
+        "m3/icon" to listOf("tint"),
+        "m3/list-item" to listOf("shadowElevationDp", "tonalElevationDp"),
+        "m3/primary-tab-row" to listOf("containerColor", "contentColor", "selectedTabIndex"),
+        "m3/progress-indicator" to listOf("color", "gapSizeDp", "trackColor"),
+        "m3/search-bar" to listOf("shadowElevationDp", "shape"),
+        "m3/search-input-field" to listOf("shape"),
+        "m3/surface" to listOf("color", "shadowElevationDp", "shape"),
+        "m3/tab" to listOf("enabled", "selectedContentColor", "unselectedContentColor"),
+        "m3/text-field" to listOf("shape"),
+      ),
+      additions,
+    )
+  }
+
   /** The same comparison [PublishedM3CatalogEquivalenceTest] makes, for the same reasons. */
   /**
    * The two fields the comparison above leaves out: what the shelf CLAIMS about the canvas, and
@@ -307,7 +341,7 @@ class PublishedGeneratedM3CatalogEquivalenceTest {
     val builderOwned = builderOwnedProperties[id].orEmpty()
     val want = expected.properties.filterNot { it.name in builderOwned }.associateBy { it.name }
     val got = actual.properties.associateBy { it.name }
-    check("properties", want.keys.sorted(), got.keys.sorted())
+    check("missingProperties", emptyList<String>(), (want.keys - got.keys).sorted())
     for ((name, w) in want) {
       val g = got[name] ?: continue
       check("properties[$name].jsonType", w.jsonType, g.jsonType)
@@ -893,7 +927,7 @@ class PublishedGeneratedM3CatalogEquivalenceTest {
         }
 
     assertEquals(
-      91,
+      84,
       unknown.size,
       "how much of the published m3 shelf the record embedded in the editor cannot name has " +
         "changed: $unknown",

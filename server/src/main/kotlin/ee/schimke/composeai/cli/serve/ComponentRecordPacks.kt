@@ -174,7 +174,7 @@ internal object ComponentRecordPacks {
         .mapNotNull { parameter ->
           val jsonType = jsonTypeOf(parameter) ?: return@mapNotNull null
           PropertyCapabilityV1(
-            name = parameter.name,
+            name = propertyNameOf(parameter),
             jsonType = JsonPrimitive(jsonType),
             required = !parameter.hasDefault && !parameter.nullable,
             notes = "`${parameter.name}: ${parameter.type}` on `${component.symbol.callable}`.",
@@ -223,6 +223,15 @@ internal object ComponentRecordPacks {
       "kotlin.Long" -> "integer"
       "kotlin.Float",
       "kotlin.Double" -> "number"
+      "androidx.compose.ui.graphics.Color",
+      "androidx.compose.ui.graphics.Shape",
+      "androidx.compose.ui.text.font.FontStyle",
+      "androidx.compose.ui.text.font.FontWeight",
+      "androidx.compose.ui.text.style.TextAlign",
+      "androidx.compose.ui.text.style.TextDecoration",
+      "androidx.compose.ui.text.style.TextOverflow" -> "string"
+      "androidx.compose.ui.unit.Dp",
+      "androidx.compose.ui.unit.TextUnit" -> "number"
       // The Remote Compose value types, which a Remote catalog's components take instead of the
       // Kotlin ones: `RemoteText(text: RemoteString)` rather than `Text(text: String)`. Left out,
       // every component of such a catalog was served with NO editable properties at all — a text
@@ -248,6 +257,20 @@ internal object ComponentRecordPacks {
       // vocabulary probe in the catalog repository that publishes the component.
       "androidx.compose.remote.creation.compose.state.RemoteTextUnit" -> "number"
       else -> null
+    }
+
+  /**
+   * The document spelling for a typed parameter.
+   *
+   * Units are bare numbers in JSON and typed values in Kotlin, so the suffix makes the unit part of
+   * the saved vocabulary (`fontSize` -> `fontSizeSp`, `tonalElevation` -> `tonalElevationDp`).
+   * Other conventions retain the callable's own parameter name.
+   */
+  internal fun propertyNameOf(parameter: TargetParameter): String =
+    when (parameter.typeFqn) {
+      "androidx.compose.ui.unit.Dp" -> "${parameter.name}Dp"
+      "androidx.compose.ui.unit.TextUnit" -> "${parameter.name}Sp"
+      else -> parameter.name
     }
 
   /** `SessionCard` → `Session Card`. */

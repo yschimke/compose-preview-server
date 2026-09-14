@@ -82,8 +82,9 @@ internal object PublishedUiBuilderCatalog {
      * `record` field to get back here. Carried rather than re-derived, because two implementations
      * of one derivation is how a saved design and the code generated for it come to disagree.
      *
-     * Builtins are absent by construction: a builtin is declared precisely because no record
-     * component backs it.
+     * A declaration-only builtin is absent. A builtin carrying a catalog-shipped implementation
+     * record is present under its builder id, so the generic exporter can call the wrapper without
+     * knowing that id or symbol in advance.
      */
     data class Composed(
       val catalog: CatalogCapabilityV1,
@@ -255,6 +256,8 @@ internal object PublishedUiBuilderCatalog {
     // The same join as `taken`, kept as the records rather than the capabilities. See
     // [Result.Composed.records].
     val recordsById = linkedMapOf<String, ComponentRecord>()
+    val recordsByCanonicalId =
+      record?.components.orEmpty().associateBy(ComponentRecord::canonicalId)
     val skipped = mutableListOf<String>()
     // Counted apart from the rest of `skipped`, because a collision means something the other skip
     // reasons do not: two components claimed one identity. See [COLLISION_REFUSAL_RATE].
@@ -316,7 +319,9 @@ internal object PublishedUiBuilderCatalog {
       if (taken.containsKey(builtinId)) {
         skipped += "$builtinId — declared as a builtin, but a record component publishes this id"
       } else {
-        taken[builtinId] = builtinCapability(builtinId, builtin, semantics.platform)
+        val implementation = builtin.implementation?.let(recordsByCanonicalId::get)
+        taken[builtinId] = builtinCapability(builtinId, builtin, semantics.platform, implementation)
+        implementation?.let { recordsById[builtinId] = it }
       }
     }
 
@@ -510,19 +515,24 @@ internal object PublishedUiBuilderCatalog {
     // What the catalog says it offers, and only failing that what its call site happens to take.
     // See `UiBuilderComponentPolicy.propertyCapabilities` for why the two are not the same
     // question.
-    val properties =
-      policy?.propertyCapabilities?.map { it.toCapability() }
-        ?: component.parameters
-          .filterNot { it.composableSlot || it.name in slotNames }
-          .mapNotNull { parameter ->
-            val jsonType = ComponentRecordPacks.jsonTypeOf(parameter) ?: return@mapNotNull null
-            PropertyCapabilityV1(
-              name = parameter.name,
-              jsonType = JsonPrimitive(jsonType),
-              required = !parameter.hasDefault && !parameter.nullable,
-              notes = "`${parameter.name}: ${parameter.type}` on `${component.symbol.callable}`.",
-            )
-          }
+    val derivedProperties =
+      component.parameters
+        .filterNot { it.composableSlot || it.name in slotNames }
+        .mapNotNull { parameter ->
+          val jsonType = ComponentRecordPacks.jsonTypeOf(parameter) ?: return@mapNotNull null
+          PropertyCapabilityV1(
+            name = ComponentRecordPacks.propertyNameOf(parameter),
+            jsonType = JsonPrimitive(jsonType),
+            required = !parameter.hasDefault && !parameter.nullable,
+            notes = "`${parameter.name}: ${parameter.type}` on `${component.symbol.callable}`.",
+          )
+        }
+    // Authored policy is the exception vocabulary — builder state, layout participation, roles on
+    // another class — and overrides a convention of the same name. It no longer has to repeat the
+    // callable's scalar vocabulary merely because it needs to add one exceptional property.
+    val authoredProperties = policy?.propertyCapabilities?.map { it.toCapability() }.orEmpty()
+    val authoredNames = authoredProperties.mapTo(mutableSetOf()) { it.name }
+    val properties = authoredProperties + derivedProperties.filter { it.name !in authoredNames }
     return ComponentCapabilityV1(
       componentId = componentId,
       displayName = policy?.displayName ?: component.symbol.name,
@@ -591,13 +601,15 @@ internal object PublishedUiBuilderCatalog {
    * A builtin, as a component.
    *
    * A builtin exists because it has NO call site — there is nothing in the record to discover — so
-   * everything it offers comes from the policy. It carries no [CodeCapabilityV1] for the same
-   * reason: the templates named by its role are what write it.
+   * everything it offers comes from the policy. It carries [CodeCapabilityV1] only when the policy
+   * points at a wrapper in the catalog's own record; otherwise the templates named by its role are
+   * what write it.
    */
   private fun builtinCapability(
     id: String,
     builtin: UiBuilderBuiltin,
     platform: String,
+    implementation: ComponentRecord?,
   ): ComponentCapabilityV1 =
     ComponentCapabilityV1(
       componentId = id,
@@ -621,6 +633,13 @@ internal object PublishedUiBuilderCatalog {
         (builtin.modifierCapabilities ?: structuralModifiers(builtin.slots.isNotEmpty()))
           .writableOn(platform),
       wasm = wasm(builtin.canvas, nativeOnly = false, callable = null),
+      code =
+        implementation?.let {
+          CodeCapabilityV1(
+            symbol = it.symbol.callable,
+            imports = it.code?.imports.orEmpty().ifEmpty { listOf(it.symbol.callable) },
+          )
+        },
     )
 
   /**
@@ -799,6 +818,17 @@ internal object PublishedUiBuilderCatalog {
     val properties: List<UiBuilderPropertyPolicy>? = null,
     /** See [UiBuilderComponentPolicy.modifierCapabilities]. */
     val modifierCapabilities: List<String>? = null,
+    /**
+     * Optional canonical id of a catalog-shipped wrapper callable for generic Compose export.
+     *
+     * The declaration remains sufficient for an older server to place and placeholder-render the
+     * builtin. A server that understands this field adds the embedded record to the same export
+     * inventory as discovered components, so no component id or call syntax is compiled into the
+     * host. A missing reference degrades to the same declaration-only placeholder older servers
+     * draw. This is data with the same trust boundary as the catalog's ordinary component record,
+     * not executable Wasm loaded into the browser.
+     */
+    val implementation: String? = null,
   )
 
   /**

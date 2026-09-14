@@ -45,6 +45,9 @@ class ServeUiBuilderAdmin(
   /** Designs this build cannot serve, by id, each with the reason. */
   fun unusable(): Map<String, String> = service.adminUnusableDesigns()
 
+  /** Designs that remain usable but carry catalog-undeclared properties. */
+  fun degraded(): Map<String, String> = service.adminDegradedDesigns()
+
   /**
    * Of those, the ones whose document cannot be produced at all.
    *

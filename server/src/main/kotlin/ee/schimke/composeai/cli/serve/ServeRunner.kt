@@ -2830,6 +2830,12 @@ public class ServeRunner(
         "serve: WARNING UI-builder design $designId cannot be served: $reason — $remedy"
       )
     }
+    service.adminDegradedDesigns().forEach { (designId, reason) ->
+      System.err.println(
+        "serve: WARNING UI-builder design $designId is degraded: $reason — open its Issues " +
+          "panel to drop each property or map it to a catalog replacement"
+      )
+    }
     // The other startup condition nothing announced: a state file near the ceiling every save is
     // bounded by. Printed here rather than only carried on /status.json because the operator who
     // needs it is the one reading a deploy's output, and never allowed to fail — a gauge that can
