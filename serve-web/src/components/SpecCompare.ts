@@ -17,12 +17,16 @@
 //
 // The decisions live next door: `spec/views.ts` (who gets to pick the view — three sources compete
 // and they are not equal), `spec/verdict.ts` (what the chip and the readout say), `spec/wipe.ts`
-// (where the seam sits), `dom/sameOrigin.ts` (what may reach a canvas at all).
+// (where the seam sits), `spec/loupe.ts` (what the magnifier looks at and where it sits),
+// `spec/align.ts` (which matched box a point is in, and how far it moved), `dom/sameOrigin.ts`
+// (what may reach a canvas at all).
 
 import { ControllerElement, customElement } from "../controllerElement.js";
 import { whenParsed } from "../dom/whenParsed.js";
 import { compareApi, type NormalisedPair } from "../compare/api.js";
-import { readingAt, summarise } from "../spec/pick.js";
+import { readingAt, summarise, type Offset } from "../spec/pick.js";
+import { alignedBoxes, offsetAt, type AlignedBox } from "../spec/align.js";
+import { crosshairAt, placeAt, windowAt } from "../spec/loupe.js";
 import { urlState } from "../urlState.js";
 import { sameOrigin } from "../dom/sameOrigin.js";
 import {
@@ -92,6 +96,20 @@ interface PickPoint {
     y: number;
     target: Node | null;
 }
+
+/**
+ * The loupe's dial settings, and why these numbers.
+ *
+ * An odd [LOUPE_SPAN] so the magnified window has a centre CELL rather than a centre line, which is
+ * what lets the crosshair mark the pixel the readout names instead of the corner between four of
+ * them. Fifteen across at [LOUPE_TILE] pixels is an 8× cell — large enough to see a one-pixel
+ * border and a half-covered state layer, small enough that a 3px shift is a visible fraction of the
+ * patch rather than a scroll of it.
+ */
+const LOUPE_SPAN = 15;
+const LOUPE_TILE = 120;
+/** Clear of the cursor, and of the pixels it is over. */
+const LOUPE_GAP = 20;
 
 /** What `viewer.js` calls on the way into and out of the lane. */
 interface SpecCompareApi {
@@ -249,6 +267,30 @@ export class SpecCompare extends ControllerElement {
      * frames arrive.
      */
     private pickSettled = false;
+    /** The magnifier, created on first install and parked in the body — see [ensureLoupe]. */
+    private loupe: HTMLElement | null = null;
+    /** Its two toggles, beside the view group. */
+    private loupeControls: HTMLElement | null = null;
+    /**
+     * Whether the magnifier follows the pointer. On by default: the reading and the patch answer
+     * the same question at two scales, and the patch is the one that shows a shift is a shift.
+     */
+    private loupeOn = true;
+    /**
+     * Whether the render is read at its own matched box's position rather than at the reference's
+     * coordinate — issue #830, and an OPTION because it trades one truth for another. Off, the
+     * lane reports what is at a point, which is what a pixel diff means. On, it reports what the
+     * same element is, which is what a design review is asking. The first is the lane's contract,
+     * so it stays the default.
+     */
+    private alignOn = false;
+    /**
+     * The matched layout boxes of [frames], in its normalised space — null until they have been
+     * asked for, empty when the pair has none to offer.
+     */
+    private alignBoxes: AlignedBox[] | null = null;
+    /** The `framesKey` those boxes were built for, so a new pair cannot inherit them. */
+    private alignKey = "";
     private cleanups: Array<() => void> = [];
     private annotationKey = "";
     private annotationPromise: Promise<unknown> | null = null;
@@ -274,6 +316,13 @@ export class SpecCompare extends ControllerElement {
         this.clearTypography();
         this.typographyLegend?.remove();
         this.typographyLegend = null;
+        // Both of these live OUTSIDE this element — the loupe in the body, the toggles in the lane
+        // — so nothing takes them away with the tag. A magnifier left floating over a page whose
+        // comparison has gone is the same fault as a reading left in the lane header.
+        this.loupe?.remove();
+        this.loupe = null;
+        this.loupeControls?.remove();
+        this.loupeControls = null;
         super.disconnectedCallback();
     }
 
@@ -387,6 +436,7 @@ export class SpecCompare extends ControllerElement {
             if (!button || !this.views?.contains(button)) return;
             this.setView(button.getAttribute("data-cp-spec-view") ?? "");
         });
+        this.ensureLoupeControls();
         const range = this.range();
         // A drag is continuous input: redraw every frame, but leave the URL alone. The chosen VIEW
         // is the shareable state; where the seam happened to stop is not.
@@ -521,29 +571,57 @@ export class SpecCompare extends ControllerElement {
         this.showPick(this.pickPoint);
     }
 
-    /** Draw the reading for a point into the row, or empty it when there is nothing to read. */
+    /**
+     * Draw the reading for a point into the row and the loupe, or empty both.
+     *
+     * One resolution feeds both, because they are one instrument at two scales: the row names the
+     * pixel under the crosshair, and a row and a patch resolved separately could name different
+     * ones the moment anything between the pointer and the buffer changed.
+     */
     private showPick(point: PickPoint | null): string {
-        this.pickLive = point ? this.readingFor(point) : "";
+        const at = point ? this.pickAt(point) : null;
+        this.pickLive = at
+            ? summarise(
+                  readingAt(
+                      at.pixels.reference,
+                      at.pixels.candidate,
+                      at.pair.width,
+                      at.pair.height,
+                      at.x,
+                      at.y,
+                      at.offset,
+                  ),
+                  this.sourceLabel || "Spec",
+                  "Render",
+              )
+            : "";
         this.setPick(this.pickLive);
+        this.drawLoupe(at, point);
         return this.pickLive;
     }
 
     /**
-     * Read both sides at a point; returns the line, or "" when there is nothing to say about it.
+     * Resolve a pointer position to a readable point of the normalised space, or null.
      *
-     * Every no-reading path returns "" rather than leaving the previous line up: an unreadable
-     * pair, a point in the gutter between two panels and a pair that has not settled are all cases
-     * where the row would otherwise go on describing a pixel the pointer has left.
+     * Every null path is a case where the row must go EMPTY rather than keep its previous line: an
+     * unreadable pair, a point in the gutter between two panels, a pair that has not settled, and
+     * the letterbox beside a frame are all points the lane has nothing true to say about.
      */
-    private readingFor(point: PickPoint): string {
+    private pickAt(point: PickPoint): {
+        pair: NormalisedPair;
+        pixels: { reference: Uint8ClampedArray; candidate: Uint8ClampedArray };
+        x: number;
+        y: number;
+        offset: Offset | null;
+    } | null {
         const pair = this.frames;
-        if (!pair || !this.pickSettled) return "";
+        if (!pair || !this.pickSettled) return null;
         const panel = this.pickPanels().find((c) => c.contains(point.target));
-        if (!panel) return "";
+        if (!panel) return null;
         const pixels = this.pickBuffers(pair);
-        if (!pixels) return "";
+        if (!pixels) return null;
         const drawn = this.drawnRect(panel, pair);
-        if (!drawn) return "";
+        if (!drawn) return null;
         // The panel is the normalised space scaled to fit its box, so the mapping is that scale
         // and nothing else — no per-side offset, because both sides already share this origin.
         const x = (point.x - drawn.left) / drawn.scale;
@@ -552,19 +630,8 @@ export class SpecCompare extends ControllerElement {
         // columns and `object-fit: contain` bars a frame taller than its column. Nothing is there,
         // and `sampleAt` would answer "outside this frame" — a reading, for a point that is not on
         // the picture at all. The row stays empty, exactly as it does off a panel.
-        if (x < 0 || y < 0 || x >= pair.width || y >= pair.height) return "";
-        return summarise(
-            readingAt(
-                pixels.reference,
-                pixels.candidate,
-                pair.width,
-                pair.height,
-                x,
-                y,
-            ),
-            this.sourceLabel || "Spec",
-            "Render",
-        );
+        if (x < 0 || y < 0 || x >= pair.width || y >= pair.height) return null;
+        return { pair, pixels, x, y, offset: this.offsetFor(x, y) };
     }
 
     /**
@@ -635,6 +702,294 @@ export class SpecCompare extends ControllerElement {
         return this.pickPixels;
     }
 
+    // ---- The loupe --------------------------------------------------------------------------
+    //
+    // The eyedropper names one pixel on each side. That is the right answer to "is the state layer
+    // drawn" and the wrong one to "why does this edge read as different": a one-pixel border that
+    // became two, a glyph a hair heavier, a shadow that starts a row earlier are all differences a
+    // single reading reports as one number and a magnified patch shows as what they are. So the
+    // picker grows a magnifier over the same point — both sides, side by side, at 8× — and the
+    // reading becomes its caption.
+    //
+    // The geometry is `spec/loupe.ts`; what is drawn is two `drawImage` calls out of the very
+    // canvases the panels were painted from, so the patch is the picture and not a redraw of it.
+
+    /** The magnifier's element, built once and parked in the body. */
+    private ensureLoupe(): HTMLElement | null {
+        if (this.loupe?.isConnected) return this.loupe;
+        if (!document.body) return null;
+        const loupe = document.createElement("div");
+        loupe.className = "cp-spec-loupe";
+        loupe.id = "cp-spec-loupe";
+        loupe.hidden = true;
+        // Nothing here is for a screen reader: the readout row carries the same reading as text,
+        // and the frozen one is announced. A live region of magnified pixels would be a second
+        // voice saying the same thing badly.
+        loupe.setAttribute("aria-hidden", "true");
+        for (const [side, caption] of [
+            ["reference", "Spec"],
+            ["candidate", "Render"],
+        ] as const) {
+            const figure = document.createElement("figure");
+            figure.className = "cp-spec-loupe-tile";
+            const canvas = document.createElement("canvas");
+            canvas.className = "cp-spec-loupe-canvas";
+            canvas.setAttribute("data-cp-loupe-side", side);
+            const label = document.createElement("figcaption");
+            label.setAttribute("data-cp-loupe-caption", side);
+            label.textContent = caption;
+            figure.append(canvas, label);
+            loupe.appendChild(figure);
+        }
+        const note = document.createElement("p");
+        note.className = "cp-spec-loupe-note";
+        note.setAttribute("data-cp-loupe-note", "");
+        loupe.appendChild(note);
+        // In the BODY rather than in the lane: `position: fixed` inside a scrolling row would be
+        // fine, but the lane is also what `html { overflow-x: clip }` has already caught out once
+        // (issue #801), and a magnifier has no business contributing to the page's width at all.
+        document.body.appendChild(loupe);
+        this.loupe = loupe;
+        return loupe;
+    }
+
+    /** The two toggles, beside the view group: whether to magnify, and whether to align. */
+    private ensureLoupeControls(): HTMLElement | null {
+        if (this.loupeControls?.isConnected) return this.loupeControls;
+        const views = this.views;
+        if (!views) return null;
+        const group = document.createElement("span");
+        // The view group's own classes: this is the same kind of control one question over — how
+        // the pair is READ, beside how it is drawn — and a second shape for it would say otherwise.
+        group.className = "cp-spec-views cp-spec-loupe-group";
+        group.id = "cp-spec-loupe-controls";
+        group.setAttribute("role", "group");
+        group.setAttribute("aria-label", "Loupe");
+        group.hidden = true;
+        group.append(
+            this.loupeToggle(
+                "loupe",
+                "Loupe",
+                "Magnify the pixels under the pointer, on both sides at once",
+                this.loupeOn,
+            ),
+            this.loupeToggle(
+                "align",
+                "Align",
+                "Read the render inside its own matched layout box, so an element that only moved " +
+                    "is compared with itself instead of with whatever is now behind it",
+                this.alignOn,
+            ),
+        );
+        this.on(group, "click", (event) => {
+            const button = (event.target as Element | null)?.closest?.(
+                "[data-cp-spec-loupe]",
+            );
+            if (!button || !group.contains(button)) return;
+            this.toggleLoupe(button.getAttribute("data-cp-spec-loupe") ?? "");
+        });
+        views.after(group);
+        this.loupeControls = group;
+        return group;
+    }
+
+    private loupeToggle(
+        name: string,
+        label: string,
+        tip: string,
+        pressed: boolean,
+    ): HTMLButtonElement {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "cp-spec-view";
+        button.setAttribute("data-cp-spec-loupe", name);
+        button.setAttribute("aria-pressed", String(pressed));
+        button.title = tip;
+        button.textContent = label;
+        return button;
+    }
+
+    /**
+     * Flip one of the two and re-read where the pointer already is.
+     *
+     * Re-reading matters for Align in a way it does not for Loupe: turning alignment on changes the
+     * READING, so leaving the row showing the unaligned line beside a patch drawn aligned would put
+     * two answers to one question on screen. A frozen reading is re-read too — the latch holds a
+     * POINT, and both toggles are about what is true at that point.
+     */
+    private toggleLoupe(name: string): void {
+        if (name === "loupe") this.loupeOn = !this.loupeOn;
+        else if (name === "align") this.alignOn = !this.alignOn;
+        else return;
+        for (const button of this.loupeControls?.querySelectorAll(
+            "[data-cp-spec-loupe]",
+        ) ?? []) {
+            const on =
+                button.getAttribute("data-cp-spec-loupe") === "loupe"
+                    ? this.loupeOn
+                    : this.alignOn;
+            button.setAttribute("aria-pressed", String(on));
+        }
+        if (this.alignOn) void this.ensureAlignment();
+        const held = this.pickFrozen;
+        const line = this.showPick(this.pickPoint);
+        if (held && line) this.announcePick(line);
+    }
+
+    /**
+     * Draw the patch, or take it off screen.
+     *
+     * Hidden rather than emptied whenever there is nothing to magnify, and the same set of cases
+     * the readout goes empty on — plus the toggle being off. A stale patch is worse than none: the
+     * row at least goes blank, while a patch left up is a picture of somewhere else.
+     */
+    private drawLoupe(
+        at: {
+            pair: NormalisedPair;
+            x: number;
+            y: number;
+            offset: Offset | null;
+        } | null,
+        point: PickPoint | null,
+    ): void {
+        const loupe = this.loupeOn && at && point ? this.ensureLoupe() : null;
+        if (!loupe || !at || !point) {
+            if (this.loupe) this.loupe.hidden = true;
+            return;
+        }
+        const window_ = windowAt(at.x, at.y, LOUPE_SPAN);
+        this.paintTile("reference", at.pair.reference, window_, null);
+        this.paintTile("candidate", at.pair.candidate, window_, at.offset);
+        const caption = loupe.querySelector<HTMLElement>(
+            '[data-cp-loupe-caption="reference"]',
+        );
+        if (caption) caption.textContent = this.sourceLabel || "Spec";
+        const note = loupe.querySelector<HTMLElement>("[data-cp-loupe-note]");
+        if (note) note.textContent = this.alignmentNote(at.offset);
+        loupe.hidden = false;
+        // Measured after unhiding, because a hidden element has no size — and the placement is the
+        // whole reason the patch does not end up under the cursor it is following.
+        const place = placeAt(
+            { x: point.x, y: point.y },
+            { width: loupe.offsetWidth, height: loupe.offsetHeight },
+            { width: window.innerWidth, height: window.innerHeight },
+            LOUPE_GAP,
+        );
+        loupe.style.left = `${place.left}px`;
+        loupe.style.top = `${place.top}px`;
+    }
+
+    /** One side's magnified patch, with the sampled cell ringed in the diff map's magenta. */
+    private paintTile(
+        side: "reference" | "candidate",
+        source: CanvasImageSource,
+        window_: { sx: number; sy: number; span: number },
+        offset: Offset | null,
+    ): void {
+        const canvas = this.loupe?.querySelector<HTMLCanvasElement>(
+            `[data-cp-loupe-side="${side}"]`,
+        );
+        if (!canvas) return;
+        canvas.width = LOUPE_TILE;
+        canvas.height = LOUPE_TILE;
+        const context = canvas.getContext("2d");
+        if (!context) return;
+        context.clearRect(0, 0, LOUPE_TILE, LOUPE_TILE);
+        // Nearest-neighbour, for the same reason `.cp-spec-canvas--upscaled` exists: a smoothed
+        // magnification is an average of the pixels rather than the pixels, and the whole patch is
+        // here to be counted.
+        context.imageSmoothingEnabled = false;
+        try {
+            context.drawImage(
+                source,
+                window_.sx + (offset?.dx ?? 0),
+                window_.sy + (offset?.dy ?? 0),
+                window_.span,
+                window_.span,
+                0,
+                0,
+                LOUPE_TILE,
+                LOUPE_TILE,
+            );
+        } catch {
+            // A window entirely off the frame has no intersection to draw. The cleared tile is the
+            // right picture of that: there is nothing there.
+        }
+        const cell = LOUPE_TILE / window_.span;
+        const cross = crosshairAt(window_.span, LOUPE_TILE);
+        context.lineWidth = 2;
+        context.strokeStyle = "#e52e73";
+        context.strokeRect(cross.left, cross.top, cell, cell);
+    }
+
+    /** What the patch says about alignment — nothing at all while it is off. */
+    private alignmentNote(offset: Offset | null): string {
+        if (!this.alignOn) return "";
+        if (!this.alignBoxes) return "matching layout…";
+        if (!offset) return "no matched box here";
+        if (!offset.dx && !offset.dy) return "aligned · this box did not move";
+        const signed = (n: number) => (n < 0 ? "" : "+") + n;
+        return `aligned ${signed(offset.dx)},${signed(offset.dy)}`;
+    }
+
+    // ---- Content-aware alignment (issue #830) -------------------------------------------------
+
+    /** The offset the candidate is read at, or null wherever alignment has nothing to say. */
+    private offsetFor(x: number, y: number): Offset | null {
+        if (!this.alignOn || !this.alignBoxes) return null;
+        return offsetAt(this.alignBoxes, x, y);
+    }
+
+    /**
+     * Match the two sides' layout boxes for the pair on the stage, once.
+     *
+     * Keyed on `framesKey` rather than on a flag, because the boxes are only true of ONE pair: a
+     * source switch or a new render replaces the pixels, and boxes carried across would align the
+     * new frame by the old one's geometry — which is the same class of fault as a reading that
+     * outlives its pair, and harder to see, because the patch would still look like a patch.
+     *
+     * The render's annotations are fetched, so this resolves after the first hover that needs them;
+     * until it does, `alignBoxes` is null and the readings are plain ones. That is the honest
+     * intermediate state — a reading is never silently aligned by an empty box set.
+     */
+    private async ensureAlignment(): Promise<void> {
+        const key = this.framesKey;
+        const pair = this.frames;
+        if (!pair || !key) return;
+        if (this.alignKey === key && this.alignBoxes) return;
+        const reference = this.referenceAnnotations();
+        if (reference === null) {
+            // No published reference annotations — a sibling catalog's raster, or a preview whose
+            // kit carries none. There is nothing to match against, so alignment stays unavailable
+            // rather than falling back to some other geometry.
+            this.alignKey = key;
+            this.alignBoxes = [];
+            this.refreshPick();
+            return;
+        }
+        const actual = await this.actualAnnotations();
+        if (this.framesKey !== key || this.frames !== pair) return;
+        this.alignKey = key;
+        this.alignBoxes = actual
+            ? alignedBoxes(
+                  reference,
+                  actual,
+                  pair.boxes,
+                  pair.width,
+                  pair.height,
+              )
+            : [];
+        this.refreshPick();
+    }
+
+    /** Re-read wherever the pointer is, after something that changes what a point MEANS. */
+    private refreshPick(): void {
+        if (!this.pickPoint) return;
+        const held = this.pickFrozen;
+        const line = this.showPick(this.pickPoint);
+        if (held && line) this.announcePick(line);
+    }
+
     /**
      * Drop everything the eyedropper holds: the readout, the announcement, the frozen latch and
      * the two readbacks.
@@ -653,6 +1008,11 @@ export class SpecCompare extends ControllerElement {
         this.pickPixels = null;
         this.pickFrozen = false;
         this.pickSettled = false;
+        // The patch is a picture of the pair, so it goes exactly where the reading goes. The
+        // matched boxes go with it: they describe this pair's geometry and nothing else.
+        if (this.loupe) this.loupe.hidden = true;
+        this.alignBoxes = null;
+        this.alignKey = "";
         // The tracked point named a surface this pair may not have — a view switch comes through
         // here, and the plain Spec view has no panels at all — so it goes with the reading rather
         // than waiting to be re-read into the next one.
@@ -769,6 +1129,10 @@ export class SpecCompare extends ControllerElement {
         this.root?.setAttribute("data-spec-view", view);
         this.compare?.setAttribute("data-view", view);
         if (this.views) this.views.hidden = !this.open;
+        // With the views, and gone in the plain Spec view for the same reason the panels are: there
+        // is nothing on the stage to magnify, so a toggle over it would act on nothing.
+        if (this.loupeControls)
+            this.loupeControls.hidden = !this.open || view === PLAIN_VIEW;
         const score = document.getElementById("cp-spec-score");
         if (score) score.hidden = !this.open || view === PLAIN_VIEW;
         if (this.compare)
@@ -861,6 +1225,7 @@ export class SpecCompare extends ControllerElement {
             // reference canvas carried the paired catalog's pixels under the Figma caption.
             this.generation++;
             this.pickSettled = true;
+            if (this.alignOn) void this.ensureAlignment();
             this.drawWipe();
             // The view may have changed under the same pair — triptych stretches its columns and
             // diff does not — so which panels are enlarged is re-decided even when nothing repaints.
@@ -890,6 +1255,7 @@ export class SpecCompare extends ControllerElement {
             // hidden render image can advance while a comparison remains open; reading its URL
             // later would put new bounds and typography over old pixels.
             this.framesAnnotationUrl = annotationUrl ?? "";
+            if (this.alignOn) void this.ensureAlignment();
             this.copyInto(next.reference, this.canvas("cp-spec-reference"));
             this.copyInto(next.candidate, this.canvas("cp-spec-actual"));
             const diff = this.canvas("cp-spec-diff");

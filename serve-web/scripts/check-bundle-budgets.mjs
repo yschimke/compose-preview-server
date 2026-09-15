@@ -44,7 +44,16 @@ const limits = {
     // transparent canvases. Measured at 68_217 gzip bytes: +217 over the former ceiling, while
     // avoiding the expensive version of the feature (eagerly scoring every strip row). Raised by
     // the usual 2 kB step so the next small viewer fix does not become another budget edit.
-    viewer: 70_000,
+    //
+    // 70_000 until the spec lane's eyedropper became a loupe with content-aware alignment (#830).
+    // Measured at 70_272 gzip bytes: +1_837 over the previous build, of which the magnifier and
+    // the matched-box arithmetic are new code and none is a new dependency — `annotate/match.ts`
+    // was already on this page for the typography overlay. Raised by the usual 2 kB step over the
+    // former ceiling. Note that `viewer-components.js` is also two thirds of the spatial viewer's
+    // bundle, which absorbed the same +1_837 and now sits about 240 bytes under its own ceiling:
+    // the next change to a shared viewer control will fail THERE first, and that is a real signal
+    // rather than a stale budget.
+    viewer: 72_000,
     // 180_000 until the report form's body writer learned to fill a locator's `overrides:` from
     // live viewer state (#5000). That put `fillOverrides` and the classification read-back into
     // `viewer-components.js`, which this page carries for its report affordance: measured at

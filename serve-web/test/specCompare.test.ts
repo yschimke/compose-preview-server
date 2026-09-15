@@ -961,6 +961,268 @@ describe("<cp-spec-compare>", () => {
         );
     });
 
+    // ---- The loupe, and content-aware alignment (issue #830) -----------------------------------
+    //
+    // The eyedropper answers "what is this pixel, on both sides". Extended to a magnifier it
+    // answers "what is this NEIGHBOURHOOD", which is the question a 3px shift is an answer to —
+    // and, with alignment on, it answers it about the element rather than about the coordinate.
+
+    const loupeControls = () =>
+        document.getElementById("cp-spec-loupe-controls") as HTMLElement;
+    const loupe = () =>
+        document.getElementById("cp-spec-loupe") as HTMLElement | null;
+    const pressLoupe = (name: string) =>
+        document
+            .querySelector<HTMLElement>(`[data-cp-spec-loupe="${name}"]`)
+            ?.click();
+
+    it("puts the loupe's toggles beside the views, and hides them with them", async () => {
+        stubCompare();
+        await mount();
+        assert.equal(
+            loupeControls().hidden,
+            true,
+            "no toggles before the lane is entered",
+        );
+        lane().open("/render/Button.png");
+        for (let i = 0; i < 5; i++) await flush();
+        assert.equal(loupeControls().hidden, false);
+        assert.equal(
+            loupeControls().previousElementSibling?.id,
+            "cp-spec-views",
+            "beside the views, because it is the same kind of choice one question over",
+        );
+
+        // The plain Spec view has no panels, so there is nothing to magnify and nothing to align.
+        press("spec");
+        await flush();
+        assert.equal(loupeControls().hidden, true);
+
+        press("triptych");
+        await flush();
+        lane().close();
+        assert.equal(loupeControls().hidden, true);
+    });
+
+    it("magnifies while the pointer is on a panel, and takes the patch away when it leaves", async () => {
+        const actual = await openReadableLane();
+        movePointer(actual, 4.4, 1.9);
+        assert.equal(loupe()?.hidden, false, "a patch, for a reading");
+
+        panel().dispatchEvent(
+            new MouseEvent("pointerleave", { bubbles: false }),
+        );
+        assert.equal(
+            loupe()?.hidden,
+            true,
+            "nothing under the pointer, nothing to magnify",
+        );
+    });
+
+    it("draws no patch while the loupe is switched off", async () => {
+        const actual = await openReadableLane();
+        pressLoupe("loupe");
+        assert.equal(
+            document
+                .querySelector('[data-cp-spec-loupe="loupe"]')
+                ?.getAttribute("aria-pressed"),
+            "false",
+        );
+        movePointer(actual, 4.4, 1.9);
+        assert.equal(loupe()?.hidden ?? true, true);
+        assert.notEqual(
+            pick().textContent,
+            "",
+            "…but the reading is the picker's, not the loupe's, so it stays",
+        );
+    });
+
+    it("takes the patch away with the pair it was a picture of", async () => {
+        const actual = await openReadableLane();
+        movePointer(actual, 4.4, 1.9);
+        assert.equal(loupe()?.hidden, false);
+        lane().close();
+        assert.equal(loupe()?.hidden, true);
+    });
+
+    /**
+     * The lane open on a pair whose "label" is one row lower in the render, with layout
+     * annotations on both sides saying so.
+     *
+     * This is issue #830's case at its smallest: read at the same coordinate the label's row is
+     * white on one side and black on the other, which is a maximal difference for a shift of one.
+     */
+    async function openShiftedLane(): Promise<HTMLCanvasElement> {
+        const size = 8;
+        const row = (data: Uint8ClampedArray, y: number) => {
+            for (let x = 0; x < size; x++)
+                data.set([255, 255, 255, 255], (y * size + x) * 4);
+        };
+        const buffer = (ink: number) => {
+            const data = new Uint8ClampedArray(size * size * 4);
+            for (let i = 0; i < size * size; i++)
+                data.set([0, 0, 0, 255], i * 4);
+            row(data, ink);
+            return {
+                width: size,
+                height: size,
+                getContext: () => ({ getImageData: () => ({ data }) }),
+            } as never;
+        };
+        const pair = {
+            reference: buffer(2),
+            candidate: buffer(5),
+            images: [{}, {}] as [unknown, unknown],
+            width: size,
+            height: size,
+            boxes: {
+                reference: { x: 0, y: 0, width: size, height: size },
+                candidate: { x: 0, y: 0, width: size, height: size },
+            },
+        };
+        window.ComposePreviewCompare = {
+            scoreImageUrls: async () => ({ percent: 60, geometry: 0 }),
+            normaliseImageUrls: async () => pair as never,
+            diffCanvases: () => 8,
+            scoreImages: async () => ({ percent: 60, geometry: 0 }),
+        };
+        await mount();
+        const annotations = document.getElementById("cp-spec-annotations")!;
+        annotations.textContent = JSON.stringify({
+            reference: [
+                {
+                    kind: "layout",
+                    bounds: { x: 0, y: 0, width: 8, height: 8 },
+                    role: "card",
+                },
+                {
+                    kind: "layout",
+                    bounds: { x: 0, y: 2, width: 8, height: 1 },
+                    role: "label",
+                },
+            ],
+        });
+        lane().open("/render/Button.png");
+        for (let i = 0; i < 5; i++) await flush();
+        const actual = document.getElementById(
+            "cp-spec-actual",
+        ) as HTMLCanvasElement;
+        // 1:1, so a client coordinate is a normalised one and the arithmetic stays readable.
+        actual.getBoundingClientRect = () =>
+            ({
+                left: 0,
+                top: 0,
+                right: 8,
+                bottom: 8,
+                width: 8,
+                height: 8,
+            }) as DOMRect;
+        return actual;
+    }
+
+    /** The render's annotations, as the annotations endpoint would answer them. */
+    function stubAnnotations(labelY: number): () => void {
+        const original = globalThis.fetch;
+        globalThis.fetch = (async () => ({
+            ok: true,
+            json: async () => ({
+                annotations: [
+                    {
+                        kind: "layout",
+                        bounds: { x: 0, y: 0, width: 8, height: 8 },
+                        role: "card",
+                    },
+                    {
+                        kind: "layout",
+                        bounds: { x: 0, y: labelY, width: 8, height: 1 },
+                        role: "label",
+                    },
+                ],
+            }),
+        })) as unknown as typeof fetch;
+        return () => {
+            globalThis.fetch = original;
+        };
+    }
+
+    it("reads the render inside its own matched box once alignment is on", async () => {
+        const restore = stubAnnotations(5);
+        try {
+            const actual = await openShiftedLane();
+            movePointer(actual, 4.5, 2.5);
+            assert.match(
+                pick().textContent ?? "",
+                /Δ 255$/,
+                "at the same coordinate the shifted label is ink against background",
+            );
+
+            pressLoupe("align");
+            for (let i = 0; i < 6; i++) await flush();
+            assert.equal(
+                pick().textContent,
+                "4,2 · Spec #ffffff · Render #ffffff · aligned +0,+3 · identical",
+                "inside the matched box it is the same ink, and the line says how far it moved",
+            );
+        } finally {
+            restore();
+        }
+    });
+
+    it("says so rather than guessing where no matched box covers the point", async () => {
+        // A silent fall back to a zero offset would be indistinguishable from a matched box that
+        // had not moved — the one case the option exists to tell apart.
+        const restore = stubAnnotations(5);
+        try {
+            const actual = await openShiftedLane();
+            const annotations = document.getElementById("cp-spec-annotations")!;
+            annotations.textContent = JSON.stringify({
+                reference: [
+                    {
+                        kind: "layout",
+                        bounds: { x: 0, y: 6, width: 2, height: 2 },
+                        role: "chip",
+                    },
+                ],
+            });
+            pressLoupe("align");
+            for (let i = 0; i < 6; i++) await flush();
+            movePointer(actual, 4.5, 2.5);
+            assert.match(pick().textContent ?? "", /Δ 255$/);
+            assert.doesNotMatch(pick().textContent ?? "", /aligned/);
+            assert.equal(
+                loupe()?.querySelector("[data-cp-loupe-note]")?.textContent,
+                "no matched box here",
+            );
+        } finally {
+            restore();
+        }
+    });
+
+    it("drops the matched boxes with the pair they describe", async () => {
+        // Boxes carried into the next pair would align new pixels by the old frame's geometry —
+        // the same class of fault as a reading that outlives its pair, and harder to see, because
+        // the patch would still look like a patch.
+        const restore = stubAnnotations(5);
+        try {
+            const actual = await openShiftedLane();
+            pressLoupe("align");
+            for (let i = 0; i < 6; i++) await flush();
+            movePointer(actual, 4.5, 2.5);
+            assert.match(pick().textContent ?? "", /aligned \+0,\+3/);
+
+            lane().close();
+            lane().open("/render/Button.png?theme=dark");
+            movePointer(actual, 4.5, 2.5);
+            assert.doesNotMatch(
+                pick().textContent ?? "",
+                /aligned/,
+                "nothing is aligned until the new pair's own boxes are matched",
+            );
+        } finally {
+            restore();
+        }
+    });
+
     it("stays silent on a preview with no published reference", async () => {
         document.body.innerHTML = `<cp-spec-compare></cp-spec-compare><div class="cp-viewer"></div>`;
         await flush();
