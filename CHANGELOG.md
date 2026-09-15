@@ -1,5 +1,14 @@
 # Changelog
 
+## [3.33.0](https://github.com/yschimke/compose-preview-server/compare/v3.32.0...v3.33.0) (2026-09-15)
+
+
+### Bug Fixes
+
+* **deploy:** stop forcing Maven Local ([#868](https://github.com/yschimke/compose-preview-server/issues/868)) ([a2df999](https://github.com/yschimke/compose-preview-server/commit/a2df9992d3c392e170aa38f2136aa3c64feec467))
+* **deps:** update compose-ai-tools to v2.14.1 ([#871](https://github.com/yschimke/compose-preview-server/issues/871)) ([1b3d222](https://github.com/yschimke/compose-preview-server/commit/1b3d222c26a2bc2a39d97e2c5102d632d33c41b1))
+* **deps:** update compose-preview-daemon to v3.4.7 ([#870](https://github.com/yschimke/compose-preview-server/issues/870)) ([84d684f](https://github.com/yschimke/compose-preview-server/commit/84d684fda92042f9186807fff579be2257bc285d))
+
 ## [3.32.0](https://github.com/yschimke/compose-preview-server/compare/v3.31.0...v3.32.0) (2026-09-14)
 
 
