@@ -2577,7 +2577,15 @@ cp-history-menu { display: contents; }
    it) that nobody needs to look at, so it is taken out of the flow rather than given a third of
    the line. Not `hidden` / `display:none` — `field.select()` in the copy fallback needs a laid-out
    control. */
-.cp-url { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+/* Every visually-hidden element on these pages is ANCHORED (`left: 0; top: 0`) as well as
+   clipped. Clipping hides the paint; it does not stop the box from sitting at its static position,
+   and a static position inside one of the horizontally scrolling rows here is hundreds of pixels
+   to the right of a phone. An absolutely positioned box whose containing block is the initial one
+   escapes that scroller's clip, so the document — and on a mobile browser the layout viewport with
+   it — grows to reach it, and every `position: fixed; right:` on the page lands off screen.
+   Issue #801 was exactly that, via `.cp-spec-pick-live`. Anchoring costs nothing: these boxes are
+   1x1 and clipped, so where they sit is only ever a question of what they drag behind them. */
+.cp-url { position: absolute; left: 0; top: 0; width: 1px; height: 1px; padding: 0; margin: -1px;
   overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
 /* M3 text buttons on the export line. */
 .cp-copyurl, .cp-copyimg, .cp-dl { font-size: var(--md-sys-typescale-label-large-size);
@@ -2903,9 +2911,50 @@ cp-history-menu { display: contents; }
 /* A frozen reading is held for reading and copying, so it stops looking like a live hover. */
 .cp-spec-pick--frozen { color: var(--cp-fg); }
 /* Announcements only: off-screen rather than display:none, which would take it out of the
-   accessibility tree and silence it. */
-.cp-spec-pick-live { position: absolute; width: 1px; height: 1px; overflow: hidden;
-  clip-path: inset(50%); white-space: nowrap; }
+   accessibility tree and silence it.
+   `left: 0; top: 0` is not decoration — see the note beside `.cp-url` above. This span sits at the
+   END of `.cp-spec-lane`, which is the last entry of `.cp-preview-primary`; that row scrolls
+   (`overflow-x: auto`) and on a phone it is well over a thousand pixels long, so the span's STATIC
+   position is off to the right of the device. Absolutely positioned, its containing block is the
+   initial one rather than the scroller, so it escaped the scroller's clip and stretched the
+   document — and with it the layout viewport — to 764px on a 411px phone. `.cp-fab`'s
+   `right: 16px` then resolved against 764 and put the report button at x=708: never on screen, and
+   `html { overflow-x: clip }` meant it could not be scrolled to either (issue #801). */
+.cp-spec-pick-live { position: absolute; left: 0; top: 0; width: 1px; height: 1px;
+  overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+/* ── The loupe ──────────────────────────────────────────────────────────────────────────────
+   The eyedropper's patch: the same point the readout names, magnified on both sides at once
+   (`spec/loupe.ts`, issue #830). Fixed and pointer-transparent, because it FOLLOWS the cursor —
+   it must never become the thing under it, or the reading would be of the magnifier. Built by
+   `<cp-spec-compare>` and parked in the body, so it contributes nothing to the page's width.
+   The second toggle group in the lane wears the view group's own shape (`.cp-spec-views`), one
+   question over: the views say how the pair is drawn, these say how it is read. */
+.cp-spec-loupe { position: fixed; left: 0; top: 0; z-index: 70; pointer-events: none;
+  display: flex; align-items: flex-end; gap: 8px; flex-wrap: wrap; max-width: 280px; padding: 8px;
+  border-radius: var(--md-sys-shape-corner-medium);
+  border: 1px solid var(--cp-border);
+  background: var(--md-sys-color-surface-container-high);
+  color: var(--cp-fg); box-shadow: var(--md-sys-elevation-level2); }
+.cp-spec-loupe[hidden] { display: none; }
+.cp-spec-loupe-tile { display: grid; gap: 4px; margin: 0; justify-items: center; }
+/* A chequerboard under the patch, so a transparent pixel reads as transparent rather than as the
+   panel's background — the one distinction the readout spells out in words and the patch would
+   otherwise lose. The tile's own size is the canvas's backing size; `image-rendering` keeps the
+   cells square-edged at any device pixel ratio. */
+.cp-spec-loupe-canvas { display: block; width: 120px; height: 120px;
+  image-rendering: pixelated; border-radius: var(--md-sys-shape-corner-extra-small);
+  background: repeating-conic-gradient(var(--md-sys-color-surface-container-highest) 0% 25%,
+    var(--md-sys-color-surface) 0% 50%) 50% / 10px 10px; }
+.cp-spec-loupe-tile figcaption { font-size: 0.68rem; color: var(--cp-fg-muted);
+  letter-spacing: 0.04em; text-transform: uppercase; max-width: 120px; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap; }
+/* Alignment's own line — what the offset was, or why there is none. Empty while alignment is off,
+   and an empty note is no note: a reserved line here would put a gap under the patch on the three
+   quarters of hovers that have nothing to say. */
+.cp-spec-loupe-note { flex-basis: 100%; margin: 0; font-size: 0.68rem;
+  font-family: var(--cp-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  color: var(--cp-fg-muted); }
+.cp-spec-loupe-note:empty { display: none; }
 /* The motion lane's carrier — the per-capture picker and the caption readout — shown only while a
    recording is actually on the stage. `[hidden]` needs its own rule here because the `inline-flex`
    above would otherwise win over the attribute's UA `display: none`. */
@@ -3980,7 +4029,8 @@ html:not(.cp-bg-transparent) #cp-reference-compare[data-cp-stage-clip] .cp-refer
 }
 /* The mode radios are kept in the DOM (the transport JS drives them) but visually removed —
    the single toggle above is the only visible mode control. */
-.cp-modes-inputs { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+.cp-modes-inputs { position: absolute; left: 0; top: 0; width: 1px; height: 1px;
+  overflow: hidden; clip: rect(0 0 0 0); }
 /* Backend badge flips its accent green when a live lane drives the stage (`<cp-backend-badge>`,
    cli/serve-web/src/components/BackendBadge.ts). */
 .cp-backend[data-live="true"] { background: rgba(30, 122, 52, 0.82); }
@@ -4209,8 +4259,8 @@ html:not(.cp-bg-transparent) #cp-reference-compare[data-cp-stage-clip] .cp-refer
      name. Hidden rather than removed — `clip` keeps it in the accessibility tree, so the document
      still has its `<h1>` and the page still announces what it is. Only when the bar really is
      carrying that name: a plain module names itself nowhere else. */
-  html:has(.cp-site-catalog) .cp-catalog-title { position: absolute; width: 1px; height: 1px;
-    overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  html:has(.cp-site-catalog) .cp-catalog-title { position: absolute; left: 0; top: 0;
+    width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
   /* The clipped title leaves the flow, and `<cp-catalog-toolbar>` takes the tally below the grid,
      so the row that holds them both is left with nothing to show and no reason to keep its own
      bottom margin above the toolbar. Unless it is also carrying the Theme and `⋯` pills — a
@@ -5156,6 +5206,8 @@ cp-page-zoom button:focus-visible {
    than in the (decorative) outline itself. */
 .cp-visually-hidden {
   position: absolute;
+  left: 0;
+  top: 0;
   width: 1px;
   height: 1px;
   overflow: hidden;
