@@ -7,13 +7,15 @@
 // pixels are read out of the very canvases the panels were painted from. That is why this is shot
 // rather than described: the ink in the loupe is the picture's.
 //
-//   node shoot.mjs after.png            # the lane as this branch serves it
-//   node shoot.mjs before.png --before  # the same hover with the loupe switched off
+//   node shoot.mjs after.png            # the same hover, asking for the patch
+//   node shoot.mjs before.png --before  # the lane as it was, and as it still rests
 //
-// `--before` presses the new Loupe toggle off rather than checking out the old assets, and that is
-// exactly the old lane: before this change the lane had a reading and no patch, which is what the
-// toggle off produces. The toggle itself is visible in `before.png` for the same reason — it is
-// part of what changed, and hiding it would make the two shots differ in more than one thing.
+// The loupe is OFF at rest, so `before.png` needs nothing removed or backed out: it is the lane on
+// an ordinary hover, which is what the lane did before this change and what it still does until
+// somebody asks. `after.png` asks, by holding Shift over the panel — the one-look gesture, rather
+// than the toggle, because that is how this will mostly be reached. The toggles are visible in both
+// shots on purpose: they are part of what changed, and hiding them in one would make the pair
+// differ in more than the one thing it is about.
 import { chromium } from "playwright";
 import http from "node:http";
 import fs from "node:fs";
@@ -87,12 +89,13 @@ await page.evaluate(() => {
 });
 // Let the lane normalise the pair and paint the three panels before reading pixels out of them.
 await page.waitForTimeout(1500);
-if (before) await page.click('[data-cp-spec-loupe="loupe"]');
 
 // Hover the render panel where the card's own type is — an ordinary pointer move over the
-// server-rendered canvas, not a state poked into the page.
+// server-rendered canvas, not a state poked into the page. For the `after` shot, with Shift down:
+// a real modifier on a real pointer move, which is the gesture, not a flag set on the element.
 const actual = page.locator("#cp-spec-actual");
 const box = await actual.boundingBox();
+if (!before) await page.keyboard.down("Shift");
 await page.mouse.move(box.x + box.width * 0.42, box.y + box.height * 0.34);
 await page.waitForTimeout(400);
 
@@ -124,10 +127,11 @@ console.log(
             () => document.getElementById("cp-spec-pick")?.textContent ?? null,
         ),
     ),
-    "patch:",
+    "patch hidden:",
     await page.evaluate(
         () => document.getElementById("cp-spec-loupe")?.hidden ?? null,
     ),
 );
+if (!before) await page.keyboard.up("Shift");
 await browser.close();
 server.close();

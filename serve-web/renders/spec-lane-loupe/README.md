@@ -7,8 +7,8 @@ inside its own matched layout box rather than at the reference's coordinate.
 
 | | |
 | --- | --- |
-| `before.png` | the pointer on the render panel, the lane header carrying `146,122 · Figma #494451 · Render #332e3c · Δ 22`. Two colours and a number, about one pixel. |
-| `after.png` | the same hover with the loupe on: `FIGMA` and `RENDER` at 8×, the sampled cell ringed in the diff map's magenta, and the same reading still in the header. |
+| `before.png` | the pointer on the render panel, the lane header carrying `146,122 · Figma #494451 · Render #332e3c · Δ 22`. Two colours and a number, about one pixel. This is also the lane **at rest** after this change — the loupe is not raised by hovering. |
+| `after.png` | the same hover with **Shift held**: `FIGMA` and `RENDER` at 8×, the sampled cell ringed in the diff map's magenta, and the same reading still in the header. Note the `Loupe` toggle is still unpressed in that shot — the patch was raised by the modifier alone. |
 
 The patch in `after.png` is the answer the reading could not give. Under the crosshair Figma has the
 inside edge of a stroke and the render has the *middle* of a different glyph — the card's body text
@@ -19,6 +19,24 @@ Both shots are of the committed artwork through the committed bundles: nothing i
 a panel or a patch. The magnified pixels are `drawImage`d out of the very canvases the three panels
 were painted from, so the ink in the loupe is the picture's, which is why this is shot rather than
 described.
+
+## Never simply on
+
+A patch that follows the cursor covers the very picture it is magnifying, and the lane is not
+entered to use a loupe — it is entered to look at two frames, and most of that looking is not asking
+about one pixel's neighbourhood. So it is asked for, two ways, and the default is neither:
+
+- **hold Shift** for one look. This is the common case — something on the diff looks a pixel off and
+  the question is over in a second. Reaching a toggle for that costs two presses and leaves the
+  patch following the cursor afterwards, so the honest answer is that most people would not bother;
+  held, the patch lasts exactly as long as the question. Shift is read from `pointermove`'s own
+  `shiftKey` *and* from `keydown`/`keyup` on the document, because neither alone is enough: a
+  pointer arriving over a panel with Shift already down never produced a `keydown` this element saw,
+  and a modifier pressed without moving the pointer is not delivered to whatever the cursor is over.
+  `window.blur` lets it go, since a key released while the page is unfocused never arrives and Shift
+  is half of Shift+Tab — without that the patch would follow the cursor for the rest of the visit
+  with no gesture that turns it off;
+- **press Loupe** to latch it, for a spell of close reading where the hold would be a cramp.
 
 ## The dial settings, and why
 
@@ -91,10 +109,12 @@ node shoot.mjs after.png
 node shoot.mjs before.png --before
 ```
 
-`--before` presses the new **Loupe** toggle off rather than checking out the old assets, and that is
-precisely the old lane: a reading and no patch. The toggles themselves are visible in both shots on
-purpose — they are part of what changed, and hiding them in one would make the pair differ in more
-than the one thing it is about.
+`--before` needs nothing removed or backed out, which is the point: the loupe rests off, so an
+ordinary hover is both what the lane did before this change and what it still does until somebody
+asks. `after.png` asks with a real `keyboard.down("Shift")` before a real pointer move, rather than
+by setting a flag on the element. The toggles are visible in both shots on purpose — they are part
+of what changed, and hiding them in one would make the pair differ in more than the one thing it is
+about.
 
 The alignment case is not shot here. This fixture is a captured page, so the render side's
 annotations endpoint is not among the files it carries, and authoring a payload to stand in for it

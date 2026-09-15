@@ -283,10 +283,28 @@ export class SpecCompare extends ControllerElement {
     /** Its two toggles, beside the view group. */
     private loupeControls: HTMLElement | null = null;
     /**
-     * Whether the magnifier follows the pointer. On by default: the reading and the patch answer
-     * the same question at two scales, and the patch is the one that shows a shift is a shift.
+     * Whether the magnifier follows the pointer, latched on.
+     *
+     * OFF by default. A patch that tracks the cursor covers the very picture it is magnifying, and
+     * the lane is not entered to use a loupe — it is entered to look at two frames, and most of
+     * that looking is not asking about one pixel's neighbourhood. An instrument that is always in
+     * the way is the version of this nobody wants, so it is asked for: pressed, for a spell of
+     * close reading, or held on [loupeHeld]'s modifier for one look.
      */
-    private loupeOn = true;
+    private loupeOn = false;
+    /**
+     * Whether Shift is down — the magnifier for one look, without spending the toggle.
+     *
+     * The common case is a glance: something on the diff looks a pixel off and the question is over
+     * in a second. Reaching the toggle for that costs two presses and leaves the patch following
+     * the cursor afterwards, so the answer is usually not to bother. Held, the patch lasts exactly
+     * as long as the question.
+     *
+     * Read from `pointermove`'s own `shiftKey` as well as from the key events, because a pointer
+     * arriving over a panel with Shift already down never produced a `keydown` this element saw —
+     * the visitor may have pressed it while the page did not have focus at all.
+     */
+    private loupeHeld = false;
     /**
      * Whether the render is read at its own matched box's position rather than at the reference's
      * coordinate — issue #830, and an OPTION because it trades one truth for another. Off, the
@@ -511,6 +529,7 @@ export class SpecCompare extends ControllerElement {
         if (!this.compare) return;
         this.on(this.compare, "pointermove", (event) => {
             const pointer = event as PointerEvent;
+            this.loupeHeld = pointer.shiftKey;
             // Kept even while frozen. The latch stops the ROW from moving, not the pointer, and
             // releasing it has to put the reading back where the cursor actually ended up.
             this.pickPoint = {
@@ -553,10 +572,36 @@ export class SpecCompare extends ControllerElement {
             this.markFrozen(true);
         });
         this.on(document, "keydown", (event) => {
-            if ((event as KeyboardEvent).key !== "Escape" || !this.pickFrozen)
+            const key = (event as KeyboardEvent).key;
+            // Shift alone, so a reading already on screen gains its patch without the pointer
+            // having to move. On `document` rather than on the comparison, because a modifier is
+            // not delivered to whatever the cursor happens to be over.
+            if (key === "Shift") {
+                this.holdLoupe(true);
                 return;
+            }
+            if (key !== "Escape" || !this.pickFrozen) return;
             this.releaseFreeze();
         });
+        this.on(document, "keyup", (event) => {
+            if ((event as KeyboardEvent).key === "Shift") this.holdLoupe(false);
+        });
+        // A key released while the page is not focused never arrives, and the modifier would stay
+        // down for the rest of the visit — a loupe nobody asked for and no gesture turns off.
+        // Tabbing away is the ordinary way to reach that: Shift is half of Shift+Tab.
+        this.on(window, "blur", () => this.holdLoupe(false));
+    }
+
+    /** Take the modifier down or up, and re-read if it changed what is on screen. */
+    private holdLoupe(down: boolean): void {
+        if (down === this.loupeHeld) return;
+        this.loupeHeld = down;
+        this.refreshPick();
+    }
+
+    /** Whether the patch is wanted right now — latched on, or held. */
+    private loupeShowing(): boolean {
+        return this.loupeOn || this.loupeHeld;
     }
 
     /** Put the frozen styling on the row, or take it off. */
@@ -726,6 +771,12 @@ export class SpecCompare extends ControllerElement {
     //
     // The geometry is `spec/loupe.ts`; what is drawn is two `drawImage` calls out of the very
     // canvases the panels were painted from, so the patch is the picture and not a redraw of it.
+    //
+    // It is never simply ON. A patch that follows the cursor covers what it magnifies, so it is
+    // reached two ways and both are the visitor's: the Loupe toggle latches it for a spell of close
+    // reading, and holding Shift raises it for one look. The second is the one that gets used —
+    // most questions about a neighbourhood last a second, and an instrument you have to put away
+    // afterwards does not get picked up for those.
 
     /** The magnifier's element, built once and parked in the body. */
     private ensureLoupe(): HTMLElement | null {
@@ -783,7 +834,8 @@ export class SpecCompare extends ControllerElement {
             this.loupeToggle(
                 "loupe",
                 "Loupe",
-                "Magnify the pixels under the pointer, on both sides at once",
+                "Magnify the pixels under the pointer, on both sides at once — " +
+                    "or hold Shift for one look without pressing this",
                 this.loupeOn,
             ),
             this.loupeToggle(
@@ -853,8 +905,9 @@ export class SpecCompare extends ControllerElement {
      * Draw the patch, or take it off screen.
      *
      * Hidden rather than emptied whenever there is nothing to magnify, and the same set of cases
-     * the readout goes empty on — plus the toggle being off. A stale patch is worse than none: the
-     * row at least goes blank, while a patch left up is a picture of somewhere else.
+     * the readout goes empty on — plus nobody asking for it, neither latched nor held. A stale
+     * patch is worse than none: the row at least goes blank, while a patch left up is a picture of
+     * somewhere else.
      */
     private drawLoupe(
         at: {
@@ -865,7 +918,8 @@ export class SpecCompare extends ControllerElement {
         } | null,
         point: PickPoint | null,
     ): void {
-        const loupe = this.loupeOn && at && point ? this.ensureLoupe() : null;
+        const loupe =
+            this.loupeShowing() && at && point ? this.ensureLoupe() : null;
         if (!loupe || !at || !point) {
             if (this.loupe) this.loupe.hidden = true;
             return;

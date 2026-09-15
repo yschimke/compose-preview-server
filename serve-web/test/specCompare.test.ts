@@ -232,11 +232,17 @@ describe("<cp-spec-compare>", () => {
     }
 
     /** A pointer move over a panel, at the sub-pixel coordinates a real one carries. */
-    const movePointer = (panel: HTMLElement, x: number, y: number) =>
+    const movePointer = (
+        panel: HTMLElement,
+        x: number,
+        y: number,
+        options: { shift?: boolean } = {},
+    ) =>
         panel.dispatchEvent(
             new MouseEvent("pointermove", {
                 clientX: x,
                 clientY: y,
+                shiftKey: options.shift ?? false,
                 bubbles: true,
             }),
         );
@@ -1004,8 +1010,25 @@ describe("<cp-spec-compare>", () => {
         assert.equal(loupeControls().hidden, true);
     });
 
-    it("magnifies while the pointer is on a panel, and takes the patch away when it leaves", async () => {
+    it("draws no patch until one is asked for", async () => {
+        // A patch that follows the cursor covers what it magnifies, so hovering alone must not
+        // raise one. The READING is the picker's and not the loupe's, so it is there as ever.
         const actual = await openReadableLane();
+        assert.equal(
+            document
+                .querySelector('[data-cp-spec-loupe="loupe"]')
+                ?.getAttribute("aria-pressed"),
+            "false",
+            "the toggle rests unpressed",
+        );
+        movePointer(actual, 4.4, 1.9);
+        assert.equal(loupe()?.hidden ?? true, true);
+        assert.notEqual(pick().textContent, "");
+    });
+
+    it("magnifies while the loupe is latched on, and drops the patch when the pointer leaves", async () => {
+        const actual = await openReadableLane();
+        pressLoupe("loupe");
         movePointer(actual, 4.4, 1.9);
         assert.equal(loupe()?.hidden, false, "a patch, for a reading");
 
@@ -1019,26 +1042,55 @@ describe("<cp-spec-compare>", () => {
         );
     });
 
-    it("draws no patch while the loupe is switched off", async () => {
+    it("raises the patch for as long as Shift is held, without spending the toggle", async () => {
+        // The common case is a glance. Held, the patch lasts exactly as long as the question, and
+        // the toggle is still resting unpressed afterwards.
         const actual = await openReadableLane();
-        pressLoupe("loupe");
+        movePointer(actual, 4.4, 1.9, { shift: true });
+        assert.equal(loupe()?.hidden, false);
+
+        document.dispatchEvent(
+            new KeyboardEvent("keyup", { key: "Shift", bubbles: true }),
+        );
+        assert.equal(loupe()?.hidden, true, "let go, and it is gone");
         assert.equal(
             document
                 .querySelector('[data-cp-spec-loupe="loupe"]')
                 ?.getAttribute("aria-pressed"),
             "false",
+            "holding it never pressed the toggle",
         );
+    });
+
+    it("raises the patch on a reading already on screen when Shift goes down", async () => {
+        // A modifier is not delivered to whatever the cursor is over, and the pointer need not
+        // move to ask the question — so Shift alone, on the document, has to be enough.
+        const actual = await openReadableLane();
         movePointer(actual, 4.4, 1.9);
         assert.equal(loupe()?.hidden ?? true, true);
-        assert.notEqual(
-            pick().textContent,
-            "",
-            "…but the reading is the picker's, not the loupe's, so it stays",
+
+        document.dispatchEvent(
+            new KeyboardEvent("keydown", { key: "Shift", bubbles: true }),
         );
+        assert.equal(loupe()?.hidden, false);
+    });
+
+    it("lets the modifier go when the page loses focus", async () => {
+        // A key released while the page is not focused never arrives, and Shift is half of
+        // Shift+Tab — so without this the patch would follow the cursor for the rest of the visit
+        // with no gesture that turns it off.
+        const actual = await openReadableLane();
+        movePointer(actual, 4.4, 1.9, { shift: true });
+        assert.equal(loupe()?.hidden, false);
+
+        window.dispatchEvent(new Event("blur"));
+        movePointer(actual, 4.4, 1.9);
+        assert.equal(loupe()?.hidden, true);
     });
 
     it("takes the patch away with the pair it was a picture of", async () => {
         const actual = await openReadableLane();
+        pressLoupe("loupe");
         movePointer(actual, 4.4, 1.9);
         assert.equal(loupe()?.hidden, false);
         lane().close();
@@ -1223,6 +1275,7 @@ describe("<cp-spec-compare>", () => {
                 ],
             });
             pressLoupe("align");
+            pressLoupe("loupe");
             for (let i = 0; i < 6; i++) await flush();
             movePointer(actual, 4.5, 2.5);
             assert.match(pick().textContent ?? "", /Δ 255$/);
