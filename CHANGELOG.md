@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.34.0](https://github.com/yschimke/compose-preview-server/compare/v3.33.0...v3.34.0) (2026-09-15)
+
+
+### Bug Fixes
+
+* take daemon 3.4.8 ([#872](https://github.com/yschimke/compose-preview-server/issues/872)) ([c10e01e](https://github.com/yschimke/compose-preview-server/commit/c10e01e560b93543a43bed3c6982c51d44919935))
+
 ## [3.33.0](https://github.com/yschimke/compose-preview-server/compare/v3.32.0...v3.33.0) (2026-09-15)
 
 
