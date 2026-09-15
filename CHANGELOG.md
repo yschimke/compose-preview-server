@@ -1,5 +1,13 @@
 # Changelog
 
+## [3.35.0](https://github.com/yschimke/compose-preview-server/compare/v3.34.0...v3.35.0) (2026-09-15)
+
+
+### Bug Fixes
+
+* **deps:** update compose-ai-tools to v2.15.0 ([#874](https://github.com/yschimke/compose-preview-server/issues/874)) ([7c520b6](https://github.com/yschimke/compose-preview-server/commit/7c520b6d835af70ffc8ed26867e76a8cde5d37ef))
+* **deps:** update compose-preview-daemon to v3.4.9 ([#878](https://github.com/yschimke/compose-preview-server/issues/878)) ([babb3e0](https://github.com/yschimke/compose-preview-server/commit/babb3e0433125e884425e4aea50b23a7f5e6afcf))
+
 ## [3.34.0](https://github.com/yschimke/compose-preview-server/compare/v3.33.0...v3.34.0) (2026-09-15)
 
 
