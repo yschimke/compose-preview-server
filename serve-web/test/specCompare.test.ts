@@ -1045,6 +1045,44 @@ describe("<cp-spec-compare>", () => {
         assert.equal(loupe()?.hidden, true);
     });
 
+    it("keeps a frozen reading when a toggle is pressed from outside the comparison", async () => {
+        // The toggles are in the lane, not on the stage, so reaching one sends `pointerleave`
+        // first and empties the live point. Re-reading a frozen line from THAT blanked the row and
+        // hid the patch with the latch still shut — and returning to the panels could not restore
+        // either, because pointer moves are latched. A frozen reading is re-read at the point the
+        // latch closed on.
+        const actual = await openReadableLane();
+        movePointer(actual, 4.4, 1.9);
+        clickPanel(actual, 4.4, 1.9);
+        const frozen = pick().textContent;
+        panel().dispatchEvent(
+            new MouseEvent("pointerleave", { bubbles: false }),
+        );
+
+        pressLoupe("align");
+        assert.equal(pick().textContent, frozen, "the latch still holds it");
+        assert.equal(pick().classList.contains("cp-spec-pick--frozen"), true);
+        assert.equal(pickLive().textContent, "Frozen reading. " + frozen);
+
+        // The other half of the same rule: while the latch is shut, a re-read is of the LATCHED
+        // point, not of wherever the pointer has since moved to on the panel.
+        movePointer(actual, 4.4, 1.1);
+        pressLoupe("align");
+        assert.equal(
+            pick().textContent,
+            frozen,
+            "not the pixel the pointer has wandered onto",
+        );
+
+        // …and releasing still hands the row back to the LIVE pointer, wherever it now is.
+        document.dispatchEvent(
+            new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
+        );
+        assert.equal(pick().classList.contains("cp-spec-pick--frozen"), false);
+        assert.notEqual(pick().textContent, frozen);
+        assert.match(pick().textContent ?? "", /^4,2 /);
+    });
+
     /**
      * The lane open on a pair whose "label" is one row lower in the render, with layout
      * annotations on both sides saying so.

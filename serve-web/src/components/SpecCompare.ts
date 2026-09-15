@@ -258,6 +258,17 @@ export class SpecCompare extends ControllerElement {
      */
     private pickPoint: PickPoint | null = null;
     /**
+     * The point the LATCH closed on, held for as long as it is closed.
+     *
+     * [pickPoint] cannot serve: it is the live pointer, and a frozen reading survives the pointer
+     * leaving the comparison — which is most of what freezing is for. Re-reading a frozen line
+     * from it therefore reads from `null` the moment the visitor moves off the stage to press one
+     * of the loupe's toggles, which blanked the row and hid the patch while the latch stayed shut,
+     * and a return to the panels could not restore either: `pointermove` is latched. So the two
+     * are separate, and what a frozen reading is re-read at is the point it was taken at.
+     */
+    private pickHeld: PickPoint | null = null;
+    /**
      * Whether the frames on the stage are the pair currently being asked for.
      *
      * An in-lane source switch re-labels the lane at once and re-normalises asynchronously, so
@@ -537,6 +548,7 @@ export class SpecCompare extends ControllerElement {
             // froze a line the visitor had never seen.
             if (!this.pickLive) return;
             this.pickFrozen = true;
+            this.pickHeld = this.pickPoint;
             this.announcePick(this.pickLive);
             this.markFrozen(true);
         });
@@ -566,6 +578,7 @@ export class SpecCompare extends ControllerElement {
      */
     private releaseFreeze(): void {
         this.pickFrozen = false;
+        this.pickHeld = null;
         this.announcePick("");
         this.markFrozen(false);
         this.showPick(this.pickPoint);
@@ -815,7 +828,9 @@ export class SpecCompare extends ControllerElement {
      * Re-reading matters for Align in a way it does not for Loupe: turning alignment on changes the
      * READING, so leaving the row showing the unaligned line beside a patch drawn aligned would put
      * two answers to one question on screen. A frozen reading is re-read too — the latch holds a
-     * POINT, and both toggles are about what is true at that point.
+     * POINT, and both toggles are about what is true at that point — which is why it goes through
+     * [refreshPick] rather than reading [pickPoint] directly: these buttons are OUTSIDE the
+     * comparison, so pressing one has already sent a `pointerleave` and emptied the live point.
      */
     private toggleLoupe(name: string): void {
         if (name === "loupe") this.loupeOn = !this.loupeOn;
@@ -831,9 +846,7 @@ export class SpecCompare extends ControllerElement {
             button.setAttribute("aria-pressed", String(on));
         }
         if (this.alignOn) void this.ensureAlignment();
-        const held = this.pickFrozen;
-        const line = this.showPick(this.pickPoint);
-        if (held && line) this.announcePick(line);
+        this.refreshPick();
     }
 
     /**
@@ -982,11 +995,23 @@ export class SpecCompare extends ControllerElement {
         this.refreshPick();
     }
 
-    /** Re-read wherever the pointer is, after something that changes what a point MEANS. */
+    /**
+     * The point a reading describes: the latched one while the latch is shut, else the pointer's.
+     *
+     * Both re-read paths go through this, because both mean "say that again about the same point",
+     * and while frozen the same point is the one the latch closed on rather than wherever the
+     * cursor has since wandered — including off the comparison entirely.
+     */
+    private pickSubject(): PickPoint | null {
+        return this.pickFrozen ? this.pickHeld : this.pickPoint;
+    }
+
+    /** Re-read wherever the reading is, after something that changes what a point MEANS. */
     private refreshPick(): void {
-        if (!this.pickPoint) return;
+        const subject = this.pickSubject();
+        if (!subject) return;
         const held = this.pickFrozen;
-        const line = this.showPick(this.pickPoint);
+        const line = this.showPick(subject);
         if (held && line) this.announcePick(line);
     }
 
@@ -1018,6 +1043,7 @@ export class SpecCompare extends ControllerElement {
         // than waiting to be re-read into the next one.
         this.pickLive = "";
         this.pickPoint = null;
+        this.pickHeld = null;
         this.setPick("");
         this.announcePick("");
         this.markFrozen(false);
