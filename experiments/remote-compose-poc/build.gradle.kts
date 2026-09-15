@@ -21,7 +21,7 @@ kotlin {
     }
     jvmMain.dependencies {
       implementation(compose.desktop.currentOs)
-      implementation("ee.schimke.composeai:remotecompose-json:2.13.1")
+      implementation("ee.schimke.composeai:remotecompose-json:2.14.1")
       implementation("androidx.compose.remote:remote-creation-core:1.0.0-alpha19")
       implementation("org.json:json:20250517")
     }
