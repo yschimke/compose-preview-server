@@ -44,7 +44,14 @@ const limits = {
     // transparent canvases. Measured at 68_217 gzip bytes: +217 over the former ceiling, while
     // avoiding the expensive version of the feature (eagerly scoring every strip row). Raised by
     // the usual 2 kB step so the next small viewer fix does not become another budget edit.
-    viewer: 70_000,
+    //
+    // 70_000 until the spec lane's eyedropper became a loupe with content-aware alignment (#830).
+    // Measured at 70_272 gzip bytes: +1_837 over the previous build, of which the magnifier and
+    // the matched-box arithmetic are new code and none is a new dependency — `annotate/match.ts`
+    // was already on this page for the typography overlay. Raised by the usual 2 kB step over the
+    // former ceiling. `viewer-components.js` is also two thirds of the spatial viewer's bundle, so
+    // that page absorbed the same increase; see its own note below.
+    viewer: 72_000,
     // 180_000 until the report form's body writer learned to fill a locator's `overrides:` from
     // live viewer state (#5000). That put `fillOverrides` and the classification read-back into
     // `viewer-components.js`, which this page carries for its report affordance: measured at
@@ -56,7 +63,14 @@ const limits = {
     // step over the measurement, for the same reason. This page is the only one carrying the
     // WebGL/WebXR runtime, so it absorbs a renderer bump the other six never feel — splitting the
     // spatial surface into its own artifact is the way that stops being true.
-    "spatial viewer": 186_000,
+    //
+    // 186_000 until the spec lane's loupe (#830). It fits — 185_905 gzip — but only just, because
+    // this page carries `viewer-components.js` and therefore the whole of a change made for the
+    // viewer's comparison lane, a surface it does not itself show. Ninety-five bytes of headroom is
+    // not a signal, it is a tripwire that the next unrelated edit to any shared viewer control
+    // springs, in a page whose own bundle nobody touched. Raised by the usual 2 kB step so the
+    // ceiling goes on meaning what it says.
+    "spatial viewer": 188_000,
 };
 
 const gzipBytes = new Map();

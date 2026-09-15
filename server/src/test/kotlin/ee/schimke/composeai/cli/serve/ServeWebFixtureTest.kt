@@ -7200,6 +7200,44 @@ class ServeWebFixtureTest {
   }
 
   /**
+   * Every visually-hidden box is ANCHORED as well as clipped, or the report button leaves the phone
+   * — issue #801.
+   *
+   * Clipping hides the paint. It does not move the box, and an absolutely positioned box with no
+   * positioned ancestor takes its containing block from the initial one, so it is not clipped by
+   * the scroller it happens to sit in either. `.cp-spec-pick-live` is the last child of
+   * `.cp-spec-lane`, itself the last entry of `.cp-preview-primary` — a row that is `overflow-x:
+   * auto` and, on a preview page at 411px, about 1400px long. The span's static position was
+   * therefore x=762, outside that row's clip, and the document's scrollable width became 764.
+   *
+   * On a mobile browser the layout viewport grows to the document, so `innerWidth` became 764 on a
+   * 411px device. `.cp-fab { position: fixed; right: 16px }` resolves against that layout viewport,
+   * which put the report button at x=708..748 — entirely off the 411px screen, and unreachable,
+   * because `html { overflow-x: clip }` means the page cannot be scrolled sideways to it. Measured
+   * on `/remote-m3/p/appcard__ideal__default__compact` at the reporter's own 411x785; the shots are
+   * in `serve-web/renders/report-button-reach`.
+   *
+   * So the rule is the anchor, on every one of these, and it is pinned here because nothing in a
+   * capture of a working page shows why the button is where it is.
+   */
+  @Test
+  fun `a visually-hidden box cannot push the page wider than the device`() {
+    val css = assetText("serve.css")
+    for (selector in
+      listOf(
+        ".cp-spec-pick-live { position: absolute; left: 0; top: 0;",
+        ".cp-url { position: absolute; left: 0; top: 0;",
+        ".cp-modes-inputs { position: absolute; left: 0; top: 0;",
+      )) {
+      assertTrue(css.contains(selector), "$selector — clipped is not enough, it has to be anchored")
+    }
+    assertTrue(
+      css.contains(".cp-fab { position: fixed; right: 16px;"),
+      "…which is load-bearing only because the report launcher is anchored to the layout viewport",
+    )
+  }
+
+  /**
    * The triptych's frames FILL their columns, and `object-fit` is what keeps that honest.
    *
    * The base panel rule sizes a frame with `max-width`/`max-height` against `auto` dimensions,

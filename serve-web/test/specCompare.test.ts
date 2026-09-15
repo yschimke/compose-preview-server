@@ -232,11 +232,17 @@ describe("<cp-spec-compare>", () => {
     }
 
     /** A pointer move over a panel, at the sub-pixel coordinates a real one carries. */
-    const movePointer = (panel: HTMLElement, x: number, y: number) =>
+    const movePointer = (
+        panel: HTMLElement,
+        x: number,
+        y: number,
+        options: { shift?: boolean } = {},
+    ) =>
         panel.dispatchEvent(
             new MouseEvent("pointermove", {
                 clientX: x,
                 clientY: y,
+                shiftKey: options.shift ?? false,
                 bubbles: true,
             }),
         );
@@ -959,6 +965,353 @@ describe("<cp-spec-compare>", () => {
             "18.75% pixels differ · wear-m3-catalog's render is baseline-only, " +
                 "so this is not a match score — clear the overrides to compare",
         );
+    });
+
+    // ---- The loupe, and content-aware alignment (issue #830) -----------------------------------
+    //
+    // The eyedropper answers "what is this pixel, on both sides". Extended to a magnifier it
+    // answers "what is this NEIGHBOURHOOD", which is the question a 3px shift is an answer to —
+    // and, with alignment on, it answers it about the element rather than about the coordinate.
+
+    const loupeControls = () =>
+        document.getElementById("cp-spec-loupe-controls") as HTMLElement;
+    const loupe = () =>
+        document.getElementById("cp-spec-loupe") as HTMLElement | null;
+    const pressLoupe = (name: string) =>
+        document
+            .querySelector<HTMLElement>(`[data-cp-spec-loupe="${name}"]`)
+            ?.click();
+
+    it("puts the loupe's toggles beside the views, and hides them with them", async () => {
+        stubCompare();
+        await mount();
+        assert.equal(
+            loupeControls().hidden,
+            true,
+            "no toggles before the lane is entered",
+        );
+        lane().open("/render/Button.png");
+        for (let i = 0; i < 5; i++) await flush();
+        assert.equal(loupeControls().hidden, false);
+        assert.equal(
+            loupeControls().previousElementSibling?.id,
+            "cp-spec-views",
+            "beside the views, because it is the same kind of choice one question over",
+        );
+
+        // The plain Spec view has no panels, so there is nothing to magnify and nothing to align.
+        press("spec");
+        await flush();
+        assert.equal(loupeControls().hidden, true);
+
+        press("triptych");
+        await flush();
+        lane().close();
+        assert.equal(loupeControls().hidden, true);
+    });
+
+    it("draws no patch until one is asked for", async () => {
+        // A patch that follows the cursor covers what it magnifies, so hovering alone must not
+        // raise one. The READING is the picker's and not the loupe's, so it is there as ever.
+        const actual = await openReadableLane();
+        assert.equal(
+            document
+                .querySelector('[data-cp-spec-loupe="loupe"]')
+                ?.getAttribute("aria-pressed"),
+            "false",
+            "the toggle rests unpressed",
+        );
+        movePointer(actual, 4.4, 1.9);
+        assert.equal(loupe()?.hidden ?? true, true);
+        assert.notEqual(pick().textContent, "");
+    });
+
+    it("magnifies while the loupe is latched on, and drops the patch when the pointer leaves", async () => {
+        const actual = await openReadableLane();
+        pressLoupe("loupe");
+        movePointer(actual, 4.4, 1.9);
+        assert.equal(loupe()?.hidden, false, "a patch, for a reading");
+
+        panel().dispatchEvent(
+            new MouseEvent("pointerleave", { bubbles: false }),
+        );
+        assert.equal(
+            loupe()?.hidden,
+            true,
+            "nothing under the pointer, nothing to magnify",
+        );
+    });
+
+    it("raises the patch for as long as Shift is held, without spending the toggle", async () => {
+        // The common case is a glance. Held, the patch lasts exactly as long as the question, and
+        // the toggle is still resting unpressed afterwards.
+        const actual = await openReadableLane();
+        movePointer(actual, 4.4, 1.9, { shift: true });
+        assert.equal(loupe()?.hidden, false);
+
+        document.dispatchEvent(
+            new KeyboardEvent("keyup", { key: "Shift", bubbles: true }),
+        );
+        assert.equal(loupe()?.hidden, true, "let go, and it is gone");
+        assert.equal(
+            document
+                .querySelector('[data-cp-spec-loupe="loupe"]')
+                ?.getAttribute("aria-pressed"),
+            "false",
+            "holding it never pressed the toggle",
+        );
+    });
+
+    it("raises the patch on a reading already on screen when Shift goes down", async () => {
+        // A modifier is not delivered to whatever the cursor is over, and the pointer need not
+        // move to ask the question — so Shift alone, on the document, has to be enough.
+        const actual = await openReadableLane();
+        movePointer(actual, 4.4, 1.9);
+        assert.equal(loupe()?.hidden ?? true, true);
+
+        document.dispatchEvent(
+            new KeyboardEvent("keydown", { key: "Shift", bubbles: true }),
+        );
+        assert.equal(loupe()?.hidden, false);
+    });
+
+    it("lets the modifier go when the page loses focus", async () => {
+        // A key released while the page is not focused never arrives, and Shift is half of
+        // Shift+Tab — so without this the patch would follow the cursor for the rest of the visit
+        // with no gesture that turns it off.
+        const actual = await openReadableLane();
+        movePointer(actual, 4.4, 1.9, { shift: true });
+        assert.equal(loupe()?.hidden, false);
+
+        window.dispatchEvent(new Event("blur"));
+        movePointer(actual, 4.4, 1.9);
+        assert.equal(loupe()?.hidden, true);
+    });
+
+    it("takes the patch away with the pair it was a picture of", async () => {
+        const actual = await openReadableLane();
+        pressLoupe("loupe");
+        movePointer(actual, 4.4, 1.9);
+        assert.equal(loupe()?.hidden, false);
+        lane().close();
+        assert.equal(loupe()?.hidden, true);
+    });
+
+    it("keeps a frozen reading when a toggle is pressed from outside the comparison", async () => {
+        // The toggles are in the lane, not on the stage, so reaching one sends `pointerleave`
+        // first and empties the live point. Re-reading a frozen line from THAT blanked the row and
+        // hid the patch with the latch still shut — and returning to the panels could not restore
+        // either, because pointer moves are latched. A frozen reading is re-read at the point the
+        // latch closed on.
+        const actual = await openReadableLane();
+        movePointer(actual, 4.4, 1.9);
+        clickPanel(actual, 4.4, 1.9);
+        const frozen = pick().textContent;
+        panel().dispatchEvent(
+            new MouseEvent("pointerleave", { bubbles: false }),
+        );
+
+        pressLoupe("align");
+        assert.equal(pick().textContent, frozen, "the latch still holds it");
+        assert.equal(pick().classList.contains("cp-spec-pick--frozen"), true);
+        assert.equal(pickLive().textContent, "Frozen reading. " + frozen);
+
+        // The other half of the same rule: while the latch is shut, a re-read is of the LATCHED
+        // point, not of wherever the pointer has since moved to on the panel.
+        movePointer(actual, 4.4, 1.1);
+        pressLoupe("align");
+        assert.equal(
+            pick().textContent,
+            frozen,
+            "not the pixel the pointer has wandered onto",
+        );
+
+        // …and releasing still hands the row back to the LIVE pointer, wherever it now is.
+        document.dispatchEvent(
+            new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
+        );
+        assert.equal(pick().classList.contains("cp-spec-pick--frozen"), false);
+        assert.notEqual(pick().textContent, frozen);
+        assert.match(pick().textContent ?? "", /^4,2 /);
+    });
+
+    /**
+     * The lane open on a pair whose "label" is one row lower in the render, with layout
+     * annotations on both sides saying so.
+     *
+     * This is issue #830's case at its smallest: read at the same coordinate the label's row is
+     * white on one side and black on the other, which is a maximal difference for a shift of one.
+     */
+    async function openShiftedLane(): Promise<HTMLCanvasElement> {
+        const size = 8;
+        const row = (data: Uint8ClampedArray, y: number) => {
+            for (let x = 0; x < size; x++)
+                data.set([255, 255, 255, 255], (y * size + x) * 4);
+        };
+        const buffer = (ink: number) => {
+            const data = new Uint8ClampedArray(size * size * 4);
+            for (let i = 0; i < size * size; i++)
+                data.set([0, 0, 0, 255], i * 4);
+            row(data, ink);
+            return {
+                width: size,
+                height: size,
+                getContext: () => ({ getImageData: () => ({ data }) }),
+            } as never;
+        };
+        const pair = {
+            reference: buffer(2),
+            candidate: buffer(5),
+            images: [{}, {}] as [unknown, unknown],
+            width: size,
+            height: size,
+            boxes: {
+                reference: { x: 0, y: 0, width: size, height: size },
+                candidate: { x: 0, y: 0, width: size, height: size },
+            },
+        };
+        window.ComposePreviewCompare = {
+            scoreImageUrls: async () => ({ percent: 60, geometry: 0 }),
+            normaliseImageUrls: async () => pair as never,
+            diffCanvases: () => 8,
+            scoreImages: async () => ({ percent: 60, geometry: 0 }),
+        };
+        await mount();
+        const annotations = document.getElementById("cp-spec-annotations")!;
+        annotations.textContent = JSON.stringify({
+            reference: [
+                {
+                    kind: "layout",
+                    bounds: { x: 0, y: 0, width: 8, height: 8 },
+                    role: "card",
+                },
+                {
+                    kind: "layout",
+                    bounds: { x: 0, y: 2, width: 8, height: 1 },
+                    role: "label",
+                },
+            ],
+        });
+        lane().open("/render/Button.png");
+        for (let i = 0; i < 5; i++) await flush();
+        const actual = document.getElementById(
+            "cp-spec-actual",
+        ) as HTMLCanvasElement;
+        // 1:1, so a client coordinate is a normalised one and the arithmetic stays readable.
+        actual.getBoundingClientRect = () =>
+            ({
+                left: 0,
+                top: 0,
+                right: 8,
+                bottom: 8,
+                width: 8,
+                height: 8,
+            }) as DOMRect;
+        return actual;
+    }
+
+    /** The render's annotations, as the annotations endpoint would answer them. */
+    function stubAnnotations(labelY: number): () => void {
+        const original = globalThis.fetch;
+        globalThis.fetch = (async () => ({
+            ok: true,
+            json: async () => ({
+                annotations: [
+                    {
+                        kind: "layout",
+                        bounds: { x: 0, y: 0, width: 8, height: 8 },
+                        role: "card",
+                    },
+                    {
+                        kind: "layout",
+                        bounds: { x: 0, y: labelY, width: 8, height: 1 },
+                        role: "label",
+                    },
+                ],
+            }),
+        })) as unknown as typeof fetch;
+        return () => {
+            globalThis.fetch = original;
+        };
+    }
+
+    it("reads the render inside its own matched box once alignment is on", async () => {
+        const restore = stubAnnotations(5);
+        try {
+            const actual = await openShiftedLane();
+            movePointer(actual, 4.5, 2.5);
+            assert.match(
+                pick().textContent ?? "",
+                /Δ 255$/,
+                "at the same coordinate the shifted label is ink against background",
+            );
+
+            pressLoupe("align");
+            for (let i = 0; i < 6; i++) await flush();
+            assert.equal(
+                pick().textContent,
+                "4,2 · Spec #ffffff · Render #ffffff · aligned +0,+3 · identical",
+                "inside the matched box it is the same ink, and the line says how far it moved",
+            );
+        } finally {
+            restore();
+        }
+    });
+
+    it("says so rather than guessing where no matched box covers the point", async () => {
+        // A silent fall back to a zero offset would be indistinguishable from a matched box that
+        // had not moved — the one case the option exists to tell apart.
+        const restore = stubAnnotations(5);
+        try {
+            const actual = await openShiftedLane();
+            const annotations = document.getElementById("cp-spec-annotations")!;
+            annotations.textContent = JSON.stringify({
+                reference: [
+                    {
+                        kind: "layout",
+                        bounds: { x: 0, y: 6, width: 2, height: 2 },
+                        role: "chip",
+                    },
+                ],
+            });
+            pressLoupe("align");
+            pressLoupe("loupe");
+            for (let i = 0; i < 6; i++) await flush();
+            movePointer(actual, 4.5, 2.5);
+            assert.match(pick().textContent ?? "", /Δ 255$/);
+            assert.doesNotMatch(pick().textContent ?? "", /aligned/);
+            assert.equal(
+                loupe()?.querySelector("[data-cp-loupe-note]")?.textContent,
+                "no matched box here",
+            );
+        } finally {
+            restore();
+        }
+    });
+
+    it("drops the matched boxes with the pair they describe", async () => {
+        // Boxes carried into the next pair would align new pixels by the old frame's geometry —
+        // the same class of fault as a reading that outlives its pair, and harder to see, because
+        // the patch would still look like a patch.
+        const restore = stubAnnotations(5);
+        try {
+            const actual = await openShiftedLane();
+            pressLoupe("align");
+            for (let i = 0; i < 6; i++) await flush();
+            movePointer(actual, 4.5, 2.5);
+            assert.match(pick().textContent ?? "", /aligned \+0,\+3/);
+
+            lane().close();
+            lane().open("/render/Button.png?theme=dark");
+            movePointer(actual, 4.5, 2.5);
+            assert.doesNotMatch(
+                pick().textContent ?? "",
+                /aligned/,
+                "nothing is aligned until the new pair's own boxes are matched",
+            );
+        } finally {
+            restore();
+        }
     });
 
     it("stays silent on a preview with no published reference", async () => {

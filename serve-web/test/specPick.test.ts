@@ -90,6 +90,40 @@ describe("readingAt", () => {
         assert.equal(reading.candidate, null);
         assert.equal(reading.delta, null);
     });
+
+    it("reads the candidate at the offset, and only the candidate", () => {
+        // Issue #830's case, in miniature: the ink is at row 0 on one side and row 1 on the other.
+        // Read at the same coordinate the two disagree completely; read at the shift they are the
+        // same ink, which is the answer the question was actually about.
+        const reference = buffer([FOCUSED, CLEAR]);
+        const candidate = buffer([CLEAR, FOCUSED]);
+        const plain = readingAt(reference, candidate, 1, 2, 0, 0);
+        assert.equal(plain.delta, 255);
+        assert.equal(plain.offset, null);
+
+        const aligned = readingAt(reference, candidate, 1, 2, 0, 0, {
+            dx: 0,
+            dy: 1,
+        });
+        assert.equal(aligned.delta, 0);
+        assert.deepEqual(aligned.offset, { dx: 0, dy: 1 });
+        // The point named is still the point the pointer is on. The offset says where the other
+        // side was read, it does not move the reading.
+        assert.equal(aligned.x, 0);
+        assert.equal(aligned.y, 0);
+    });
+
+    it("answers null for a candidate the offset pushes off the frame", () => {
+        const reference = buffer([RESTING, RESTING]);
+        const candidate = buffer([RESTING, RESTING]);
+        const reading = readingAt(reference, candidate, 1, 2, 0, 1, {
+            dx: 0,
+            dy: 4,
+        });
+        assert.notEqual(reading.reference, null);
+        assert.equal(reading.candidate, null);
+        assert.equal(reading.delta, null);
+    });
 });
 
 describe("describe", () => {
@@ -140,6 +174,30 @@ describe("summarise", () => {
         assert.match(
             summarise(readingAt(same, same, 1, 1, 0, 0), "Spec", "Render"),
             /identical$/,
+        );
+    });
+
+    it("states an applied offset, zero included", () => {
+        // A reading taken under alignment and one taken without it can name the same point and
+        // disagree about the colour, so the line has to say which of the two it is — and "+0,+3"
+        // is itself the answer to "how far did it move".
+        const reference = buffer([FOCUSED, CLEAR]);
+        const candidate = buffer([CLEAR, FOCUSED]);
+        assert.equal(
+            summarise(
+                readingAt(reference, candidate, 1, 2, 0, 0, { dx: 0, dy: 1 }),
+                "Figma",
+                "Render",
+            ),
+            "0,0 · Figma #7661ad · Render #7661ad · aligned +0,+1 · identical",
+        );
+        assert.match(
+            summarise(
+                readingAt(reference, reference, 1, 2, 0, 0, { dx: -2, dy: 0 }),
+                "Figma",
+                "Render",
+            ),
+            /aligned -2,\+0/,
         );
     });
 
