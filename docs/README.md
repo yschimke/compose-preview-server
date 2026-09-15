@@ -102,6 +102,9 @@ The product spec and its RFC come first; everything after them is one surface or
   scoped acceptance.
 - [design/MULTIPLAYER_WORKFLOW.md](design/MULTIPLAYER_WORKFLOW.md) — **proposal**: what a
   multiplayer design/engineering/product workflow would look like over what exists today.
+- [design/NATIVE_DESKTOP_HOST.md](design/NATIVE_DESKTOP_HOST.md) — **exploration**: what a no-JVM
+  Kotlin/Native desktop host would buy an inspector, a catalog and the UI builder, and what the
+  Compose UI fork underneath it would cost.
 
 ## History
 
