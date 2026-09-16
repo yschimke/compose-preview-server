@@ -1411,6 +1411,11 @@ public class ServeRunner(
           catalogThemeCache = state.catalogThemeCache ?: CatalogThemeCache(),
           serverIdleMillis = state.serverIdleMillis,
           backgroundWork = state.backgroundWork,
+          // The same budget the pools above charge, now charged for the catalog's OWN resident
+          // daemon too. That daemon is the largest single thing `--live-seats` was sized to bound
+          // (~1.2 GB apiece) and was the one holder that never asked for a permit.
+          liveSeats = liveSeatLimiter,
+          residencySeatWeight = { state.liveSeatWeight },
         )
         // Warm the daemon off the request path so the first browse already gets the per-variant
         // SVG lane instead of the baked fallback — critical for a slow-cold-starting Android
