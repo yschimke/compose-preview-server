@@ -1,5 +1,6 @@
 package ee.schimke.composeai.cli.serve
 
+import ee.schimke.composeai.designpages.PageNodeLink
 import java.io.File
 import java.nio.file.Files
 import kotlin.test.Test
@@ -211,14 +212,19 @@ class ServeDesignPageStoreTest {
   }
 
   @Test
-  fun `an unknown link method drops the manifest rather than mis-colouring a node`() {
-    // The four methods are a typed enum in the contract, so an unrecognised one is a parse failure
-    // for the whole document rather than a per-node degrade. That is the harsher outcome and the
-    // right one: the alternative is guessing what an unknown method means while drawing it in a
-    // colour that claims coverage. An *additive* producer change carries new fields, which
-    // DesignPagesJson ignores.
+  fun `an unknown link method degrades that node to unlinked rather than dropping the manifest`() {
+    // The four methods are a typed enum in the contract, and an unrecognised one used to fail the
+    // parse of the whole document. compose-preview-daemon#119 put `coerceInputValues` on
+    // `DesignPagesJson`, so it now falls back to the property's default instead — and the default
+    // is UNLINKED, which claims no coverage. That is the same guarantee the harsher outcome bought
+    // (never guess what an unknown method means while drawing it in a colour that claims
+    // coverage), without taking the other pages of a newer producer's manifest down with it.
     val odd = shape.replace("\"link\":\"manifest\"", "\"link\":\"vibes\"")
-    assertTrue(store(manifest(odd)).pages.isEmpty())
+    val loaded = store(manifest(odd))
+    val page = loaded.pages.single()
+    val coerced = page.nodes.single { it.nodeId == "1:1" }
+    assertEquals(PageNodeLink.UNLINKED, coerced.link)
+    assertTrue(coerced.isUnlinked)
   }
 
   @Test
