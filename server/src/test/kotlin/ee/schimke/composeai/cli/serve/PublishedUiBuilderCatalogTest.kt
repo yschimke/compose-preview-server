@@ -2,6 +2,8 @@ package ee.schimke.composeai.cli.serve
 
 import ee.schimke.composeai.discovery.ComponentRecordFile
 import ee.schimke.composeai.uibuilder.protocol.ExportCapabilitiesV1
+import ee.schimke.composeai.uibuilder.protocol.SvgCapabilityStatusV1
+import ee.schimke.composeai.uibuilder.protocol.SvgFallbackV1
 import ee.schimke.composeai.uibuilder.protocol.WasmAdapterStatusV1
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -338,6 +340,113 @@ class PublishedUiBuilderCatalogTest {
     // And a slot that says nothing is still unbounded: `max` is an opt-in bound, not a default of
     // one that every existing builtin would silently acquire.
     assertEquals(null, host.slots.single { it.name == "background" }.cardinality.max)
+  }
+
+  @Test
+  fun `a builtin states its shelf role, its lanes, its call and its slot order`() {
+    // Five things this composed for a builtin by DERIVING them, which is not the same as a catalog
+    // being silent: the derived answer was served as though the catalog had agreed with it. Each
+    // assertion below is a value the derivation gets wrong for the donor catalog that publishes
+    // the builder's own vocabulary (`compose-foundation`, yschimke/m3-catalog).
+    val document =
+      published(
+        extra =
+          """,
+        "builtins": {
+          "test-catalog/box": {
+            "role": "container",
+            "shelfRole": "Container",
+            "canvas": "layout/box",
+            "wasm": { "adapterStatus": "planned" },
+            "code": { "symbol": "Box", "imports": ["androidx.compose.foundation.layout.Box"] },
+            "svg": { "status": "verified", "fallback": "none" },
+            "slots": { "children": { "ordered": false } }
+          },
+          "test-catalog/stack": {
+            "role": "container",
+            "shelfRole": "Scaffold",
+            "slots": { "children": {} }
+          }
+        }"""
+      )
+    val result = PublishedUiBuilderCatalog.compose(document, record, exports)
+    assertTrue(
+      result is PublishedUiBuilderCatalog.Result.Composed,
+      "the builtin did not compose: ${(result as? PublishedUiBuilderCatalog.Result.Unusable)?.reason}",
+    )
+    val components = (result as PublishedUiBuilderCatalog.Result.Composed).catalog.components
+    val box = components.single { it.componentId == "test-catalog/box" }
+
+    // `container` is a structural role the template engine grew for exactly this; the shelf role
+    // beside it is the one served as `role`, and it is stated rather than derived.
+    assertEquals("Container", box.role)
+    // The derivation can produce SUPPORTED and UNSUPPORTED and never PLANNED, which is the
+    // difference between an adapter that is coming and one that will never exist.
+    assertEquals(WasmAdapterStatusV1.PLANNED, box.wasm.adapterStatus)
+    // ...and only the field the catalog stated moves. Platform support and the note still come
+    // from the adapter id, so stating one field is not a claim about the other two.
+    assertEquals("true", box.wasm.platformSupported.toString())
+    assertEquals("Drawn on the canvas by the `layout/box` adapter.", box.wasm.notes)
+    // A builtin has no record entry, so before it could state this it published no code capability
+    // whatsoever — and nothing in a foundation catalog's record can name `Box`, because discovery
+    // scopes library components to material3/material/wear.
+    assertEquals("Box", assertNotNull(box.code).symbol)
+    assertEquals(listOf("androidx.compose.foundation.layout.Box"), assertNotNull(box.code).imports)
+    assertEquals(SvgCapabilityStatusV1.VERIFIED, assertNotNull(box.svg).status)
+    assertEquals(SvgFallbackV1.NONE, assertNotNull(box.svg).fallback)
+    // Every builtin slot composed as ordered because there was nothing to read, and the packaged
+    // vocabulary this donor republishes has six of its fifteen slots unordered.
+    assertEquals(false, box.slots.single { it.name == "children" }.ordered)
+
+    // A stated shelf role beats the derivation even where the derivation has an answer: `stack`
+    // has slots, so "it has slots" would make it a Container, and it says it is a design root.
+    val stack = components.single { it.componentId == "test-catalog/stack" }
+    assertEquals("Scaffold", stack.role)
+    // An absent `ordered` keeps the old default, so no declaration published before the field
+    // changes meaning by being reread.
+    assertEquals(true, stack.slots.single { it.name == "children" }.ordered)
+  }
+
+  @Test
+  fun `a word this build cannot decode costs its field, never the catalog`() {
+    // `adapterStatus`, `svg.status` and `svg.fallback` are closed enums on the wire, and a
+    // capability document carrying a word the builder cannot decode fails the WHOLE document
+    // rather than one field. A catalog is published once and read by builders of several vintages
+    // that its publisher cannot upgrade, so a typo — or a word from a later minor — must cost that
+    // field and leave the palette standing.
+    val document =
+      published(
+        extra =
+          """,
+        "builtins": {
+          "test-catalog/box": {
+            "role": "container",
+            "shelfRole": "container",
+            "canvas": "layout/box",
+            "wasm": { "adapterStatus": "soon", "notes": "Coming." },
+            "svg": { "status": "verified", "fallback": "tracing-paper" },
+            "slots": { "children": {} }
+          }
+        }"""
+      )
+    val result = PublishedUiBuilderCatalog.compose(document, record, exports)
+    assertTrue(
+      result is PublishedUiBuilderCatalog.Result.Composed,
+      "one undecodable word took the whole catalog off the shelf",
+    )
+    val box =
+      (result as PublishedUiBuilderCatalog.Result.Composed).catalog.components.single {
+        it.componentId == "test-catalog/box"
+      }
+
+    // `container` is the STRUCTURAL role, not a shelf role, so the stated shelf role is dropped
+    // and the derivation answers instead — the answer every catalog got before the field existed.
+    assertEquals("Container", box.role)
+    assertEquals(WasmAdapterStatusV1.SUPPORTED, box.wasm.adapterStatus)
+    // The field beside the bad one survives, because the override is field by field.
+    assertEquals("Coming.", box.wasm.notes)
+    // An undecodable half drops the block, which is what a catalog stating no block gets.
+    assertNull(box.svg)
   }
 
   @Test

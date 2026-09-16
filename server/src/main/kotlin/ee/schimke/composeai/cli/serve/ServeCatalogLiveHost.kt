@@ -12,6 +12,7 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.TimeoutException
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicReference
 
 /**
  * A [ServeHost] that fronts a trusted design-system catalog with its baked-PNG render **and** an
@@ -171,6 +172,29 @@ class ServeCatalogLiveHost(
    */
   private val eagerWarmOnOpen: Boolean =
     System.getProperty("composeai.serve.eagerWarmOnOpen")?.toBooleanStrictOrNull() ?: false,
+  /**
+   * Whole-box daemon **residency** budget ([LiveSeatLimiter]), shared by every catalog host in a
+   * `serve` run.
+   *
+   * `deploy/image/README.md` documents `SERVE_LIVE_SEATS` as "concurrent daemon *residency*,
+   * weighted (Android costs 2)", and [ServeRunner] derives it from the container's memory limit at
+   * roughly 1.2 GB a seat — precisely because a resident daemon is what holds that memory. Until
+   * this was wired in, the only thing that ever charged the budget was an interactive stream
+   * (`ServeHttpServer`'s live-socket route), so every other way a daemon starts — this warm, the
+   * theme optimizer's resume, a catalog publish — spawned its JVM without asking. A box with no
+   * visitors at all then held as many resident daemons as it had catalogs to warm: measured on
+   * `preview.coo.ee`, 22 resident daemons and 64 live JVMs against `liveSeatsAvailable: 8/8`, with
+   * the container at 0% available memory while the host still had 70% free.
+   *
+   * Null leaves residency uncharged — the previous behaviour, and what every test that does not
+   * care about the budget gets.
+   */
+  private val liveSeats: LiveSeatLimiter? = null,
+  /**
+   * What this catalog's resident daemon costs the budget — desktop 1, Android 2, read from the
+   * session state's `liveSeatWeight`. A function because that state is built alongside this host.
+   */
+  private val residencySeatWeight: () -> Int = { 1 },
   private val clock: () -> Long = System::currentTimeMillis,
 ) : ServeHost {
   override fun canDownloadExecutableBundle(previewId: String): Boolean =
@@ -363,6 +387,16 @@ class ServeCatalogLiveHost(
    */
   private fun daemonWarmOrScheduling(daemonId: String): Boolean {
     if (!warmInBackground || warmDaemonIds.contains(daemonId)) return true
+    // The other door to the same JVM. [scheduleWarm] is the background one (prewarm, the presence
+    // heartbeat, the optimizer's re-entry); this one is a request finding the id cold. Both make
+    // the catalog's daemon RESIDENT, so both charge the residency budget — what differs between
+    // them is which lane pays, and [LiveSeatLimiter.acquireBackground] already keeps
+    // `STREAM_RESERVE` free so charging here can never spend an interactive stream's headroom.
+    //
+    // A refusal returns false exactly like a warm that is merely in flight, so the caller takes its
+    // existing baked-pixel fallback rather than failing: at budget the visitor sees the catalog a
+    // little less sharply, instead of the box spawning the daemon that puts it out of memory.
+    if (!chargeResidency()) return false
     if (warmingInFlight.add(daemonId)) {
       warmExecutor.execute {
         try {
@@ -411,8 +445,44 @@ class ServeCatalogLiveHost(
     return warmDaemonIds.contains(daemonId)
   }
 
+  /**
+   * The live daemon's residency permit, held for as long as this catalog keeps a daemon warm.
+   *
+   * Taken as **background** work ([LiveSeatLimiter.acquireBackground]) and without the per-preview
+   * slice: warming a catalog is deferrable and always has a fallback (the baked PNGs), so it must
+   * take neither the headroom an interactive stream needs nor the slice a supplement-only preview
+   * is guaranteed. Released in [close].
+   */
+  private val residencyTicket = AtomicReference<LiveSeatLimiter.Ticket?>(null)
+
+  /**
+   * Charge this catalog's daemon residency against the box-wide budget, returning false when the
+   * box cannot afford another resident daemon right now.
+   *
+   * Idempotent: a catalog holds at most one residency permit however many ids it warms, because
+   * what the budget models is the JVM, not the render. A refusal is not an error — the caller skips
+   * the warm and the catalog stays cold until a seat frees or a visitor asks for it, which is the
+   * trade the budget exists to make. [liveSeats] null (tests, and any embedder that never set a
+   * budget) charges nothing and always admits.
+   */
+  private fun chargeResidency(): Boolean {
+    val limiter = liveSeats ?: return true
+    if (residencyTicket.get() != null) return true
+    val ticket =
+      limiter.acquireBackground(residencySeatWeight(), dedicatedSlice = false) ?: return false
+    // Another thread may have charged between the read and the acquire. Keep one permit and hand
+    // the loser's straight back rather than leaking it for the life of the host.
+    if (!residencyTicket.compareAndSet(null, ticket)) ticket.close()
+    return true
+  }
+
   private fun scheduleWarm(daemonId: String, host: ServeHost = live) {
     if (!warmInBackground || warmDaemonIds.contains(daemonId)) return
+    // Before the JVM starts, not after: a warm is what makes this catalog's daemon resident, and
+    // the budget exists to bound resident daemons. Charging after the render would admit every
+    // catalog that asked and only report the overage afterwards, which is what `/status.json` was
+    // doing while the container ran out of memory.
+    if (!chargeResidency()) return
     if (warmingInFlight.add(daemonId)) {
       warmExecutor.execute {
         try {
@@ -1994,6 +2064,10 @@ class ServeCatalogLiveHost(
       sharedDaemonPool?.close()
       live.close()
     } finally {
+      // The daemon this permit was charged for is gone by here, so the seat goes back even if
+      // `baked.close()` throws — a leaked residency permit shrinks the box's budget for the life
+      // of the process, which is worse than the failure that leaked it.
+      residencyTicket.getAndSet(null)?.close()
       baked.close()
     }
   }

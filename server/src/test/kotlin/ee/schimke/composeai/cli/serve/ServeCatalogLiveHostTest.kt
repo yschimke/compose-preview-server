@@ -927,6 +927,111 @@ class ServeCatalogLiveHostTest {
    * Poll [block] until it returns non-null or [timeoutMs] (times [POLL_BUDGET_FACTOR]) elapses (for
    * the async warm).
    */
+  /**
+   * The residency half of `--live-seats`.
+   *
+   * `deploy/image/README.md` documents the budget as "concurrent daemon *residency*, weighted
+   * (Android costs 2)", but the only thing that ever charged it was an interactive stream, so a box
+   * with no visitors at all warmed one resident daemon per catalog: 22 of them and 64 live JVMs on
+   * `preview.coo.ee` against `liveSeatsAvailable: 8/8`, with the container out of memory while the
+   * host still had 70% free. A warm is what starts that JVM, so a warm is what has to pay for it.
+   */
+  @Test
+  fun `a background warm charges the catalog daemon residency against the live-seat budget`() {
+    val baked = RecordingHost(previews = listOf(ServePreview(catalogId, catalogId)), tag = "baked")
+    val live =
+      RecordingHost(
+        previews = listOf(ServePreview(daemonId, daemonId)),
+        tag = "live",
+        streaming = true,
+      )
+    // perPreviewReserve = 0 keeps the arithmetic to the general lane, which is the lane a resident
+    // catalog daemon draws on.
+    val seats = LiveSeatLimiter(8, perPreviewReserve = 0)
+    val composite =
+      ServeCatalogLiveHost(
+        mapOf(catalogId to daemonId),
+        live,
+        baked,
+        warmInBackground = true,
+        liveSeats = seats,
+        residencySeatWeight = { 2 },
+      )
+
+    composite.renderSvg(catalogId, PreviewOverrides())
+    awaitOk(2_000) { live.lastRenderId }
+
+    assertEquals(6, seats.availablePermits(), "an Android-weight resident daemon holds two permits")
+  }
+
+  /**
+   * The refusal is the whole point: a box already at its budget must stay at its budget rather than
+   * start daemon number twenty-three and let the kernel decide which process dies.
+   */
+  @Test
+  fun `a full residency budget leaves the catalog cold instead of starting another daemon`() {
+    val baked = RecordingHost(previews = listOf(ServePreview(catalogId, catalogId)), tag = "baked")
+    val live =
+      RecordingHost(
+        previews = listOf(ServePreview(daemonId, daemonId)),
+        tag = "live",
+        streaming = true,
+      )
+    // A background holder must leave STREAM_RESERVE (2) free for an interactive stream, so a
+    // two-permit box can afford no resident background daemon at all — the state a box that has
+    // spent its budget is already in.
+    val seats = LiveSeatLimiter(2, perPreviewReserve = 0)
+    val composite =
+      ServeCatalogLiveHost(
+        mapOf(catalogId to daemonId),
+        live,
+        baked,
+        warmInBackground = true,
+        liveSeats = seats,
+        residencySeatWeight = { 1 },
+      )
+
+    // The browse still works — it just stays on the baked vector, which is the fallback the warm
+    // exists to improve on rather than to replace.
+    val first = composite.renderSvg(catalogId, PreviewOverrides()) as SvgOutcome.Ok
+    assertEquals("baked-svg:$catalogId", first.svg.decodeToString())
+
+    // A negative assertion needs a window rather than a poll: give the warm executor room to have
+    // run, then confirm it did not.
+    Thread.sleep(300L * POLL_BUDGET_FACTOR)
+    assertNull(live.lastRenderId, "a refused residency seat must not start the daemon anyway")
+    assertEquals(2, seats.availablePermits(), "and must not leak a permit on the way out")
+  }
+
+  @Test
+  fun `closing the catalog hands its residency seat back`() {
+    val baked = RecordingHost(previews = listOf(ServePreview(catalogId, catalogId)), tag = "baked")
+    val live =
+      RecordingHost(
+        previews = listOf(ServePreview(daemonId, daemonId)),
+        tag = "live",
+        streaming = true,
+      )
+    val seats = LiveSeatLimiter(8, perPreviewReserve = 0)
+    val composite =
+      ServeCatalogLiveHost(
+        mapOf(catalogId to daemonId),
+        live,
+        baked,
+        warmInBackground = true,
+        liveSeats = seats,
+        residencySeatWeight = { 2 },
+      )
+
+    composite.renderSvg(catalogId, PreviewOverrides())
+    awaitOk(2_000) { live.lastRenderId }
+    assertEquals(6, seats.availablePermits())
+
+    composite.close()
+
+    assertEquals(8, seats.availablePermits(), "a retired catalog must not hold the box's budget")
+  }
+
   private fun <T : Any> awaitOk(timeoutMs: Long, block: () -> T?): T {
     val budgetMs = timeoutMs * POLL_BUDGET_FACTOR
     val deadline = System.nanoTime() + budgetMs * 1_000_000

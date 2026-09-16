@@ -217,6 +217,13 @@ class ServeDesignPageStoreTest {
     // right one: the alternative is guessing what an unknown method means while drawing it in a
     // colour that claims coverage. An *additive* producer change carries new fields, which
     // DesignPagesJson ignores.
+    //
+    // This briefly asserted the opposite. compose-preview-daemon#119 put `coerceInputValues` on
+    // `DesignPagesJson`, which made an unknown method fall back to UNLINKED, and #890 followed the
+    // behaviour here. But that flag is Json-wide rather than per-field: it disabled this rule for
+    // EVERY enum the contract carries, blend modes included, where reinterpreting an unrecognised
+    // value composites a layer the reader believes is authored. compose-preview-daemon#128 reverted
+    // it and 3.6.1 is that revert, so the original rule stands. Do not soften it to match a pin.
     val odd = shape.replace("\"link\":\"manifest\"", "\"link\":\"vibes\"")
     assertTrue(store(manifest(odd)).pages.isEmpty())
   }
