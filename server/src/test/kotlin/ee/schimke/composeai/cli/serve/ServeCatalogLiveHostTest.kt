@@ -1032,6 +1032,43 @@ class ServeCatalogLiveHostTest {
     assertEquals(8, seats.availablePermits(), "a retired catalog must not hold the box's budget")
   }
 
+  /**
+   * The asymmetry in the residency refusal, from the side that must never be refused.
+   *
+   * A leased render short-circuits the `||` that used to carry the residency charge, so on
+   * preview.coo.ee seats sat at 5/8 while 23 daemons ran. Charging it is the fix -- but a visitor's
+   * leased render is not deferrable, and refusing it would return Busy for every card rather than
+   * letting the pool grow. So it asks the budget, proceeds regardless, and the daemon is reached.
+   */
+  @Test
+  fun `a full residency budget still lets a visitor's leased render reach the daemon`() {
+    val baked = RecordingHost(previews = listOf(ServePreview(catalogId, catalogId)), tag = "baked")
+    val live =
+      RecordingHost(
+        previews = listOf(ServePreview(daemonId, daemonId)),
+        tag = "live",
+        streaming = true,
+      )
+    // Two permits with the stream reserve carved out affords no background holder at all, so
+    // `chargeResidency` refuses -- the state a box at its budget is in.
+    val seats = LiveSeatLimiter(2, perPreviewReserve = 0)
+    val composite =
+      ServeCatalogLiveHost(
+        mapOf(catalogId to daemonId),
+        live,
+        baked,
+        warmInBackground = true,
+        liveSeats = seats,
+        residencySeatWeight = { 1 },
+      )
+
+    // A routed override, not a bare render: an un-overridden leased render is answered from the
+    // cache and never reaches a daemon, so it would pass this test without exercising anything.
+    composite.renderLeased(catalogId, themeOverride())
+
+    assertEquals(daemonId, live.lastRenderId, "a refused seat must not turn a lease into Busy")
+  }
+
   private fun <T : Any> awaitOk(timeoutMs: Long, block: () -> T?): T {
     val budgetMs = timeoutMs * POLL_BUDGET_FACTOR
     val deadline = System.nanoTime() + budgetMs * 1_000_000
