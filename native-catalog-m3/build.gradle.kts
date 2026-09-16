@@ -27,6 +27,11 @@ kotlin {
       @Suppress("DEPRECATION") implementation(compose.ui)
       @Suppress("DEPRECATION") implementation(compose.components.resources)
       implementation(libs.graphics.shapes)
+      // Carries no version of its own; the platform supplies it (see the catalog).
+      // `project.dependencies.platform(...)`, not a bare `platform(...)`: inside a Kotlin
+      // Multiplatform source set the receiver is `KotlinDependencyHandler`, which has no
+      // `platform` function at all.
+      api(project.dependencies.platform(libs.composeai.daemon.bom))
       api(libs.composeai.slot.preview.runtime)
     }
   }

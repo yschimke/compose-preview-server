@@ -130,6 +130,9 @@ dependencies {
   // charges for putting this module on the right side of the boundary, and it is why the version
   // pin below matters: this module is compiled against a compose-ai-tools RELEASE, not against its
   // main branch, so an API it needs must be in a release before it can be used here.
+  // The daemon coordinates below carry no version of their own; this platform supplies them. See
+  // `composeai-daemon-bom` in the catalog for why.
+  api(platform(libs.composeai.daemon.bom))
   api(libs.composeai.daemon.core)
   api(libs.composeai.render.session.api)
   api(libs.composeai.daemon.client)

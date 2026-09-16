@@ -360,6 +360,10 @@ dependencies {
   api(libs.composeai.common.web.escaping)
   // Published wire-format DTOs and the bundle format. `api` because they appear in this module's
   // own signatures, which `:cli` reads.
+  // The daemon coordinates in this block carry no version of their own; this platform supplies
+  // them. On `api` so it reaches `implementation` too -- `implementation` extends `api`, not the
+  // other way round. See `composeai-daemon-bom` in the catalog.
+  api(platform(libs.composeai.daemon.bom))
   api(libs.composeai.preview.data.api)
   // `ScreenGenerator` and the component record it reads. Pure-JVM and published: the UI-builder
   // runtime cannot take it (its boundary forbids any composeai module but the protocol), which is
