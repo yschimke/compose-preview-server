@@ -2429,6 +2429,15 @@ cp-history-menu { display: contents; }
    the snapshot img's slot — so the stage is one fixed box every transport fills and toggling a
    mode never resizes or shifts it (the img keeps its layout slot underneath via visibility). */
 .cp-stage canvas.cp-canvas-live { position: absolute; max-width: none; }
+/* The live canvas is focusable on purpose (`viewer.ts` sets `tabIndex = 0` and focuses it on
+   pointer-down) so keystrokes can be forwarded to the running composable as key events. That made
+   it match the site-wide `[tabindex]:focus-visible` ring near the top of this sheet, painting a 3dp
+   `secondary` outline around the render the moment anyone tapped it — page chrome drawn on top of
+   a surface whose whole point is to show what the app itself draws. Focus indication inside the
+   stage belongs to the rendered UI: what the composable paints for its own focused control IS the
+   answer, and a second ring around the viewport is noise. The element keeps its focus (the ring is
+   suppressed, not the tab stop), so keyboard input still works. */
+.cp-stage canvas#cp-canvas:focus, .cp-stage canvas#cp-canvas:focus-visible { outline: none; }
 
 /* ---- The spec lane's comparison views ------------------------------------------------------
    The lane's default (`spec`) is untouched: the imported raster `<img>` is the whole stage, exactly
