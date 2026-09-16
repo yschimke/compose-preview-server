@@ -21,6 +21,17 @@ export interface Sample {
     a: number;
 }
 
+/**
+ * How far the candidate is read from the reference's own point, in normalised pixels.
+ *
+ * Null everywhere alignment is off or has nothing to say, which is not the same as `{0, 0}`: a
+ * zero offset is a matched box that turned out not to have moved, and the readout says so.
+ */
+export interface Offset {
+    dx: number;
+    dy: number;
+}
+
 export interface Reading {
     /** The sampled point, in the normalised space both buffers share. */
     x: number;
@@ -30,6 +41,8 @@ export interface Reading {
     candidate: Sample | null;
     /** Largest channel difference, alpha included; null unless both sides answered. */
     delta: number | null;
+    /** The shift the candidate was read at, or null when both sides were read at the same point. */
+    offset: Offset | null;
 }
 
 /** The pixel at (x, y), or null when the point is off the buffer. */
@@ -62,7 +75,16 @@ export function deltaOf(reference: Sample, candidate: Sample): number {
     );
 }
 
-/** Both sides at one point in the shared space. */
+/**
+ * Both sides at one point in the shared space — or, with an offset, at one point and its match.
+ *
+ * The offset is the whole of issue #830. Normalisation lines the two frames up by their content
+ * boxes, which is the right registration for a delta map and the wrong one for a component whose
+ * label sits three pixels lower on one side: read at the same coordinate, every pixel of that label
+ * disagrees with the background beside it, and the picker reports two unrelated colours as a
+ * difference of 200. Given the shift, it reports ink against ink. Where the shift comes from is
+ * `spec/align.ts`'s problem; here it is two more terms in the index arithmetic.
+ */
 export function readingAt(
     reference: ArrayLike<number>,
     candidate: ArrayLike<number>,
@@ -70,15 +92,23 @@ export function readingAt(
     height: number,
     x: number,
     y: number,
+    offset: Offset | null = null,
 ): Reading {
     const ref = sampleAt(reference, width, height, x, y);
-    const cand = sampleAt(candidate, width, height, x, y);
+    const cand = sampleAt(
+        candidate,
+        width,
+        height,
+        x + (offset?.dx ?? 0),
+        y + (offset?.dy ?? 0),
+    );
     return {
         x: Math.floor(x),
         y: Math.floor(y),
         reference: ref,
         candidate: cand,
         delta: ref && cand ? deltaOf(ref, cand) : null,
+        offset,
     };
 }
 
@@ -104,7 +134,19 @@ export function describe(sample: Sample | null): string {
     return hexOf(sample) + " at " + (sample.a / 255).toFixed(2) + " alpha";
 }
 
-/** The whole reading as one line — the readout's text, and the announcement's. */
+/** A shift, always signed, so `+0` reads as "measured, and it had not moved". */
+function signed(n: number): string {
+    return (n < 0 ? "" : "+") + n;
+}
+
+/**
+ * The whole reading as one line — the readout's text, and the announcement's.
+ *
+ * An applied offset is always stated, zero included. A reading taken under alignment and one taken
+ * without it can name the same point and disagree about the colour, so the line has to say which
+ * of the two it is; "aligned +0,+3" is also the answer to "did the label move, and by how much",
+ * which is usually the next question after "do these pixels differ".
+ */
 export function summarise(
     reading: Reading,
     referenceLabel: string,
@@ -116,6 +158,13 @@ export function summarise(
         referenceLabel + " " + describe(reading.reference),
         candidateLabel + " " + describe(reading.candidate),
     ];
+    if (reading.offset)
+        parts.push(
+            "aligned " +
+                signed(reading.offset.dx) +
+                "," +
+                signed(reading.offset.dy),
+        );
     if (reading.delta !== null)
         parts.push(reading.delta === 0 ? "identical" : "Δ " + reading.delta);
     return parts.join(" · ");
