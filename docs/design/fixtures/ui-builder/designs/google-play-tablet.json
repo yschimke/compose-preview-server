@@ -51,10 +51,9 @@
       }
     },
     {
-      "operationId": "ins-root",
+      "operationId": "insert-root",
       "type": "insertNode",
       "parent": null,
-      "afterNodeId": null,
       "node": {
         "id": "root",
         "componentId": "layout/row",
@@ -76,13 +75,12 @@
       }
     },
     {
-      "operationId": "ins-play-rail",
+      "operationId": "insert-play-rail",
       "type": "insertNode",
       "parent": {
         "nodeId": "root",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "play-rail",
         "componentId": "layout/column",
@@ -122,13 +120,12 @@
       }
     },
     {
-      "operationId": "ins-play-rail-games",
+      "operationId": "insert-play-rail-games",
       "type": "insertNode",
       "parent": {
         "nodeId": "play-rail",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "play-rail-games",
         "componentId": "layout/column",
@@ -157,13 +154,12 @@
       }
     },
     {
-      "operationId": "ins-play-rail-games-pill",
+      "operationId": "insert-play-rail-games-pill",
       "type": "insertNode",
       "parent": {
         "nodeId": "play-rail-games",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "play-rail-games-pill",
         "componentId": "layout/box",
@@ -189,13 +185,12 @@
       }
     },
     {
-      "operationId": "ins-play-rail-games-icon",
+      "operationId": "insert-play-rail-games-icon",
       "type": "insertNode",
       "parent": {
         "nodeId": "play-rail-games-pill",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "play-rail-games-icon",
         "componentId": "m3/icon",
@@ -220,13 +215,12 @@
       }
     },
     {
-      "operationId": "ins-play-rail-games-label",
+      "operationId": "insert-play-rail-games-label",
       "type": "insertNode",
       "parent": {
         "nodeId": "play-rail-games",
         "slot": "children"
       },
-      "afterNodeId": "play-rail-games-pill",
       "node": {
         "id": "play-rail-games-label",
         "componentId": "m3/text",
@@ -244,16 +238,16 @@
             "value": "onSurface"
           }
         }
-      }
+      },
+      "afterNodeId": "play-rail-games-pill"
     },
     {
-      "operationId": "ins-play-rail-apps",
+      "operationId": "insert-play-rail-apps",
       "type": "insertNode",
       "parent": {
         "nodeId": "play-rail",
         "slot": "children"
       },
-      "afterNodeId": "play-rail-games",
       "node": {
         "id": "play-rail-apps",
         "componentId": "layout/column",
@@ -279,16 +273,16 @@
             "bottomDp": 4
           }
         ]
-      }
+      },
+      "afterNodeId": "play-rail-games"
     },
     {
-      "operationId": "ins-play-rail-apps-pill",
+      "operationId": "insert-play-rail-apps-pill",
       "type": "insertNode",
       "parent": {
         "nodeId": "play-rail-apps",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "play-rail-apps-pill",
         "componentId": "layout/box",
@@ -306,13 +300,12 @@
       }
     },
     {
-      "operationId": "ins-play-rail-apps-icon",
+      "operationId": "insert-play-rail-apps-icon",
       "type": "insertNode",
       "parent": {
         "nodeId": "play-rail-apps-pill",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "play-rail-apps-icon",
         "componentId": "m3/icon",
@@ -337,13 +330,12 @@
       }
     },
     {
-      "operationId": "ins-play-rail-apps-label",
+      "operationId": "insert-play-rail-apps-label",
       "type": "insertNode",
       "parent": {
         "nodeId": "play-rail-apps",
         "slot": "children"
       },
-      "afterNodeId": "play-rail-apps-pill",
       "node": {
         "id": "play-rail-apps-label",
         "componentId": "m3/text",
@@ -361,16 +353,16 @@
             "value": "onSurfaceVariant"
           }
         }
-      }
+      },
+      "afterNodeId": "play-rail-apps-pill"
     },
     {
-      "operationId": "ins-play-rail-books",
+      "operationId": "insert-play-rail-books",
       "type": "insertNode",
       "parent": {
         "nodeId": "play-rail",
         "slot": "children"
       },
-      "afterNodeId": "play-rail-apps",
       "node": {
         "id": "play-rail-books",
         "componentId": "layout/column",
@@ -396,16 +388,16 @@
             "bottomDp": 4
           }
         ]
-      }
+      },
+      "afterNodeId": "play-rail-apps"
     },
     {
-      "operationId": "ins-play-rail-books-pill",
+      "operationId": "insert-play-rail-books-pill",
       "type": "insertNode",
       "parent": {
         "nodeId": "play-rail-books",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "play-rail-books-pill",
         "componentId": "layout/box",
@@ -423,13 +415,12 @@
       }
     },
     {
-      "operationId": "ins-play-rail-books-icon",
+      "operationId": "insert-play-rail-books-icon",
       "type": "insertNode",
       "parent": {
         "nodeId": "play-rail-books-pill",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "play-rail-books-icon",
         "componentId": "m3/icon",
@@ -454,13 +445,12 @@
       }
     },
     {
-      "operationId": "ins-play-rail-books-label",
+      "operationId": "insert-play-rail-books-label",
       "type": "insertNode",
       "parent": {
         "nodeId": "play-rail-books",
         "slot": "children"
       },
-      "afterNodeId": "play-rail-books-pill",
       "node": {
         "id": "play-rail-books-label",
         "componentId": "m3/text",
@@ -478,16 +468,16 @@
             "value": "onSurfaceVariant"
           }
         }
-      }
+      },
+      "afterNodeId": "play-rail-books-pill"
     },
     {
-      "operationId": "ins-play-rail-offers",
+      "operationId": "insert-play-rail-offers",
       "type": "insertNode",
       "parent": {
         "nodeId": "play-rail",
         "slot": "children"
       },
-      "afterNodeId": "play-rail-books",
       "node": {
         "id": "play-rail-offers",
         "componentId": "layout/column",
@@ -513,16 +503,16 @@
             "bottomDp": 4
           }
         ]
-      }
+      },
+      "afterNodeId": "play-rail-books"
     },
     {
-      "operationId": "ins-play-rail-offers-pill",
+      "operationId": "insert-play-rail-offers-pill",
       "type": "insertNode",
       "parent": {
         "nodeId": "play-rail-offers",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "play-rail-offers-pill",
         "componentId": "layout/box",
@@ -540,13 +530,12 @@
       }
     },
     {
-      "operationId": "ins-play-rail-offers-icon",
+      "operationId": "insert-play-rail-offers-icon",
       "type": "insertNode",
       "parent": {
         "nodeId": "play-rail-offers-pill",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "play-rail-offers-icon",
         "componentId": "m3/icon",
@@ -571,13 +560,12 @@
       }
     },
     {
-      "operationId": "ins-play-rail-offers-label",
+      "operationId": "insert-play-rail-offers-label",
       "type": "insertNode",
       "parent": {
         "nodeId": "play-rail-offers",
         "slot": "children"
       },
-      "afterNodeId": "play-rail-offers-pill",
       "node": {
         "id": "play-rail-offers-label",
         "componentId": "m3/text",
@@ -595,16 +583,16 @@
             "value": "onSurfaceVariant"
           }
         }
-      }
+      },
+      "afterNodeId": "play-rail-offers-pill"
     },
     {
-      "operationId": "ins-play-screen",
+      "operationId": "insert-play-screen",
       "type": "insertNode",
       "parent": {
         "nodeId": "root",
         "slot": "children"
       },
-      "afterNodeId": "play-rail",
       "node": {
         "id": "play-screen",
         "componentId": "layout/scaffold",
@@ -617,16 +605,16 @@
             "weight": 1
           }
         ]
-      }
+      },
+      "afterNodeId": "play-rail"
     },
     {
-      "operationId": "ins-play-search",
+      "operationId": "insert-play-search",
       "type": "insertNode",
       "parent": {
         "nodeId": "play-screen",
         "slot": "topBar"
       },
-      "afterNodeId": null,
       "node": {
         "id": "play-search",
         "componentId": "m3/search-bar",
@@ -651,13 +639,12 @@
       }
     },
     {
-      "operationId": "ins-play-search-field",
+      "operationId": "insert-play-search-field",
       "type": "insertNode",
       "parent": {
         "nodeId": "play-search",
         "slot": "inputField"
       },
-      "afterNodeId": null,
       "node": {
         "id": "play-search-field",
         "componentId": "m3/search-input-field",
@@ -675,13 +662,12 @@
       }
     },
     {
-      "operationId": "ins-play-search-placeholder",
+      "operationId": "insert-play-search-placeholder",
       "type": "insertNode",
       "parent": {
         "nodeId": "play-search-field",
         "slot": "placeholder"
       },
-      "afterNodeId": null,
       "node": {
         "id": "play-search-placeholder",
         "componentId": "m3/text",
@@ -698,13 +684,12 @@
       }
     },
     {
-      "operationId": "ins-play-search-leading",
+      "operationId": "insert-play-search-leading",
       "type": "insertNode",
       "parent": {
         "nodeId": "play-search-field",
         "slot": "leadingIcon"
       },
-      "afterNodeId": null,
       "node": {
         "id": "play-search-leading",
         "componentId": "m3/icon",
@@ -721,13 +706,12 @@
       }
     },
     {
-      "operationId": "ins-play-search-trailing",
+      "operationId": "insert-play-search-trailing",
       "type": "insertNode",
       "parent": {
         "nodeId": "play-search-field",
         "slot": "trailingIcon"
       },
-      "afterNodeId": null,
       "node": {
         "id": "play-search-trailing",
         "componentId": "m3/icon",
@@ -744,13 +728,12 @@
       }
     },
     {
-      "operationId": "ins-play-body",
+      "operationId": "insert-play-body",
       "type": "insertNode",
       "parent": {
         "nodeId": "play-screen",
         "slot": "content"
       },
-      "afterNodeId": null,
       "node": {
         "id": "play-body",
         "componentId": "layout/column",
@@ -775,13 +758,12 @@
       }
     },
     {
-      "operationId": "ins-play-tabs",
+      "operationId": "insert-play-tabs",
       "type": "insertNode",
       "parent": {
         "nodeId": "play-body",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "play-tabs",
         "componentId": "m3/primary-tab-row",
@@ -799,13 +781,12 @@
       }
     },
     {
-      "operationId": "ins-play-tab-0",
+      "operationId": "insert-play-tab-0",
       "type": "insertNode",
       "parent": {
         "nodeId": "play-tabs",
         "slot": "tabs"
       },
-      "afterNodeId": null,
       "node": {
         "id": "play-tab-0",
         "componentId": "m3/tab",
@@ -818,13 +799,12 @@
       }
     },
     {
-      "operationId": "ins-play-tab-0-label",
+      "operationId": "insert-play-tab-0-label",
       "type": "insertNode",
       "parent": {
         "nodeId": "play-tab-0",
         "slot": "text"
       },
-      "afterNodeId": null,
       "node": {
         "id": "play-tab-0-label",
         "componentId": "m3/text",
@@ -841,13 +821,12 @@
       }
     },
     {
-      "operationId": "ins-play-tab-1",
+      "operationId": "insert-play-tab-1",
       "type": "insertNode",
       "parent": {
         "nodeId": "play-tabs",
         "slot": "tabs"
       },
-      "afterNodeId": "play-tab-0",
       "node": {
         "id": "play-tab-1",
         "componentId": "m3/tab",
@@ -857,16 +836,16 @@
             "value": false
           }
         }
-      }
+      },
+      "afterNodeId": "play-tab-0"
     },
     {
-      "operationId": "ins-play-tab-1-label",
+      "operationId": "insert-play-tab-1-label",
       "type": "insertNode",
       "parent": {
         "nodeId": "play-tab-1",
         "slot": "text"
       },
-      "afterNodeId": null,
       "node": {
         "id": "play-tab-1-label",
         "componentId": "m3/text",
@@ -883,13 +862,12 @@
       }
     },
     {
-      "operationId": "ins-play-tab-2",
+      "operationId": "insert-play-tab-2",
       "type": "insertNode",
       "parent": {
         "nodeId": "play-tabs",
         "slot": "tabs"
       },
-      "afterNodeId": "play-tab-1",
       "node": {
         "id": "play-tab-2",
         "componentId": "m3/tab",
@@ -899,16 +877,16 @@
             "value": false
           }
         }
-      }
+      },
+      "afterNodeId": "play-tab-1"
     },
     {
-      "operationId": "ins-play-tab-2-label",
+      "operationId": "insert-play-tab-2-label",
       "type": "insertNode",
       "parent": {
         "nodeId": "play-tab-2",
         "slot": "text"
       },
-      "afterNodeId": null,
       "node": {
         "id": "play-tab-2-label",
         "componentId": "m3/text",
@@ -925,13 +903,12 @@
       }
     },
     {
-      "operationId": "ins-play-tab-3",
+      "operationId": "insert-play-tab-3",
       "type": "insertNode",
       "parent": {
         "nodeId": "play-tabs",
         "slot": "tabs"
       },
-      "afterNodeId": "play-tab-2",
       "node": {
         "id": "play-tab-3",
         "componentId": "m3/tab",
@@ -941,16 +918,16 @@
             "value": false
           }
         }
-      }
+      },
+      "afterNodeId": "play-tab-2"
     },
     {
-      "operationId": "ins-play-tab-3-label",
+      "operationId": "insert-play-tab-3-label",
       "type": "insertNode",
       "parent": {
         "nodeId": "play-tab-3",
         "slot": "text"
       },
-      "afterNodeId": null,
       "node": {
         "id": "play-tab-3-label",
         "componentId": "m3/text",
@@ -967,13 +944,12 @@
       }
     },
     {
-      "operationId": "ins-play-tab-4",
+      "operationId": "insert-play-tab-4",
       "type": "insertNode",
       "parent": {
         "nodeId": "play-tabs",
         "slot": "tabs"
       },
-      "afterNodeId": "play-tab-3",
       "node": {
         "id": "play-tab-4",
         "componentId": "m3/tab",
@@ -983,16 +959,16 @@
             "value": false
           }
         }
-      }
+      },
+      "afterNodeId": "play-tab-3"
     },
     {
-      "operationId": "ins-play-tab-4-label",
+      "operationId": "insert-play-tab-4-label",
       "type": "insertNode",
       "parent": {
         "nodeId": "play-tab-4",
         "slot": "text"
       },
-      "afterNodeId": null,
       "node": {
         "id": "play-tab-4-label",
         "componentId": "m3/text",
@@ -1009,13 +985,12 @@
       }
     },
     {
-      "operationId": "ins-play-heading-recommended",
+      "operationId": "insert-play-heading-recommended",
       "type": "insertNode",
       "parent": {
         "nodeId": "play-body",
         "slot": "children"
       },
-      "afterNodeId": "play-tabs",
       "node": {
         "id": "play-heading-recommended",
         "componentId": "m3/text",
@@ -1042,16 +1017,16 @@
             "bottomDp": 10
           }
         ]
-      }
+      },
+      "afterNodeId": "play-tabs"
     },
     {
-      "operationId": "ins-play-carousel",
+      "operationId": "insert-play-carousel",
       "type": "insertNode",
       "parent": {
         "nodeId": "play-body",
         "slot": "children"
       },
-      "afterNodeId": "play-heading-recommended",
       "node": {
         "id": "play-carousel",
         "componentId": "layout/horizontal-carousel",
@@ -1082,16 +1057,16 @@
             "type": "fillMaxWidth"
           }
         ]
-      }
+      },
+      "afterNodeId": "play-heading-recommended"
     },
     {
-      "operationId": "ins-play-feature-stellar",
+      "operationId": "insert-play-feature-stellar",
       "type": "insertNode",
       "parent": {
         "nodeId": "play-carousel",
         "slot": "items"
       },
-      "afterNodeId": null,
       "node": {
         "id": "play-feature-stellar",
         "componentId": "m3/card",
@@ -1122,13 +1097,12 @@
       }
     },
     {
-      "operationId": "ins-play-feature-stellar-body",
+      "operationId": "insert-play-feature-stellar-body",
       "type": "insertNode",
       "parent": {
         "nodeId": "play-feature-stellar",
         "slot": "content"
       },
-      "afterNodeId": null,
       "node": {
         "id": "play-feature-stellar-body",
         "componentId": "layout/column",
@@ -1150,13 +1124,12 @@
       }
     },
     {
-      "operationId": "ins-play-feature-stellar-art",
+      "operationId": "insert-play-feature-stellar-art",
       "type": "insertNode",
       "parent": {
         "nodeId": "play-feature-stellar-body",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "play-feature-stellar-art",
         "componentId": "layout/box",
@@ -1172,13 +1145,12 @@
       }
     },
     {
-      "operationId": "ins-play-feature-stellar-art-fill",
+      "operationId": "insert-play-feature-stellar-art-fill",
       "type": "insertNode",
       "parent": {
         "nodeId": "play-feature-stellar-art",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "play-feature-stellar-art-fill",
         "componentId": "shape/linear-gradient",
@@ -1204,13 +1176,12 @@
       }
     },
     {
-      "operationId": "ins-play-feature-stellar-meta",
+      "operationId": "insert-play-feature-stellar-meta",
       "type": "insertNode",
       "parent": {
         "nodeId": "play-feature-stellar-body",
         "slot": "children"
       },
-      "afterNodeId": "play-feature-stellar-art",
       "node": {
         "id": "play-feature-stellar-meta",
         "componentId": "layout/column",
@@ -1236,16 +1207,16 @@
             "bottomDp": 12
           }
         ]
-      }
+      },
+      "afterNodeId": "play-feature-stellar-art"
     },
     {
-      "operationId": "ins-play-feature-stellar-title",
+      "operationId": "insert-play-feature-stellar-title",
       "type": "insertNode",
       "parent": {
         "nodeId": "play-feature-stellar-meta",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "play-feature-stellar-title",
         "componentId": "m3/text",
@@ -1270,13 +1241,12 @@
       }
     },
     {
-      "operationId": "ins-play-feature-stellar-rating",
+      "operationId": "insert-play-feature-stellar-rating",
       "type": "insertNode",
       "parent": {
         "nodeId": "play-feature-stellar-meta",
         "slot": "children"
       },
-      "afterNodeId": "play-feature-stellar-title",
       "node": {
         "id": "play-feature-stellar-rating",
         "componentId": "layout/row",
@@ -1290,16 +1260,16 @@
             "value": "center"
           }
         }
-      }
+      },
+      "afterNodeId": "play-feature-stellar-title"
     },
     {
-      "operationId": "ins-play-feature-stellar-genre",
+      "operationId": "insert-play-feature-stellar-genre",
       "type": "insertNode",
       "parent": {
         "nodeId": "play-feature-stellar-rating",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "play-feature-stellar-genre",
         "componentId": "m3/text",
@@ -1320,13 +1290,12 @@
       }
     },
     {
-      "operationId": "ins-play-feature-stellar-star",
+      "operationId": "insert-play-feature-stellar-star",
       "type": "insertNode",
       "parent": {
         "nodeId": "play-feature-stellar-rating",
         "slot": "children"
       },
-      "afterNodeId": "play-feature-stellar-genre",
       "node": {
         "id": "play-feature-stellar-star",
         "componentId": "m3/icon",
@@ -1348,16 +1317,16 @@
             "value": "onSurfaceVariant"
           }
         }
-      }
+      },
+      "afterNodeId": "play-feature-stellar-genre"
     },
     {
-      "operationId": "ins-play-feature-bloom",
+      "operationId": "insert-play-feature-bloom",
       "type": "insertNode",
       "parent": {
         "nodeId": "play-carousel",
         "slot": "items"
       },
-      "afterNodeId": "play-feature-stellar",
       "node": {
         "id": "play-feature-bloom",
         "componentId": "m3/card",
@@ -1385,16 +1354,16 @@
             "widthDp": 220
           }
         ]
-      }
+      },
+      "afterNodeId": "play-feature-stellar"
     },
     {
-      "operationId": "ins-play-feature-bloom-body",
+      "operationId": "insert-play-feature-bloom-body",
       "type": "insertNode",
       "parent": {
         "nodeId": "play-feature-bloom",
         "slot": "content"
       },
-      "afterNodeId": null,
       "node": {
         "id": "play-feature-bloom-body",
         "componentId": "layout/column",
@@ -1416,13 +1385,12 @@
       }
     },
     {
-      "operationId": "ins-play-feature-bloom-art",
+      "operationId": "insert-play-feature-bloom-art",
       "type": "insertNode",
       "parent": {
         "nodeId": "play-feature-bloom-body",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "play-feature-bloom-art",
         "componentId": "layout/box",
@@ -1438,13 +1406,12 @@
       }
     },
     {
-      "operationId": "ins-play-feature-bloom-art-fill",
+      "operationId": "insert-play-feature-bloom-art-fill",
       "type": "insertNode",
       "parent": {
         "nodeId": "play-feature-bloom-art",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "play-feature-bloom-art-fill",
         "componentId": "shape/linear-gradient",
@@ -1470,13 +1437,12 @@
       }
     },
     {
-      "operationId": "ins-play-feature-bloom-meta",
+      "operationId": "insert-play-feature-bloom-meta",
       "type": "insertNode",
       "parent": {
         "nodeId": "play-feature-bloom-body",
         "slot": "children"
       },
-      "afterNodeId": "play-feature-bloom-art",
       "node": {
         "id": "play-feature-bloom-meta",
         "componentId": "layout/column",
@@ -1502,16 +1468,16 @@
             "bottomDp": 12
           }
         ]
-      }
+      },
+      "afterNodeId": "play-feature-bloom-art"
     },
     {
-      "operationId": "ins-play-feature-bloom-title",
+      "operationId": "insert-play-feature-bloom-title",
       "type": "insertNode",
       "parent": {
         "nodeId": "play-feature-bloom-meta",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "play-feature-bloom-title",
         "componentId": "m3/text",
@@ -1536,13 +1502,12 @@
       }
     },
     {
-      "operationId": "ins-play-feature-bloom-rating",
+      "operationId": "insert-play-feature-bloom-rating",
       "type": "insertNode",
       "parent": {
         "nodeId": "play-feature-bloom-meta",
         "slot": "children"
       },
-      "afterNodeId": "play-feature-bloom-title",
       "node": {
         "id": "play-feature-bloom-rating",
         "componentId": "layout/row",
@@ -1556,16 +1521,16 @@
             "value": "center"
           }
         }
-      }
+      },
+      "afterNodeId": "play-feature-bloom-title"
     },
     {
-      "operationId": "ins-play-feature-bloom-genre",
+      "operationId": "insert-play-feature-bloom-genre",
       "type": "insertNode",
       "parent": {
         "nodeId": "play-feature-bloom-rating",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "play-feature-bloom-genre",
         "componentId": "m3/text",
@@ -1586,13 +1551,12 @@
       }
     },
     {
-      "operationId": "ins-play-feature-bloom-star",
+      "operationId": "insert-play-feature-bloom-star",
       "type": "insertNode",
       "parent": {
         "nodeId": "play-feature-bloom-rating",
         "slot": "children"
       },
-      "afterNodeId": "play-feature-bloom-genre",
       "node": {
         "id": "play-feature-bloom-star",
         "componentId": "m3/icon",
@@ -1614,16 +1578,16 @@
             "value": "onSurfaceVariant"
           }
         }
-      }
+      },
+      "afterNodeId": "play-feature-bloom-genre"
     },
     {
-      "operationId": "ins-play-feature-lantern",
+      "operationId": "insert-play-feature-lantern",
       "type": "insertNode",
       "parent": {
         "nodeId": "play-carousel",
         "slot": "items"
       },
-      "afterNodeId": "play-feature-bloom",
       "node": {
         "id": "play-feature-lantern",
         "componentId": "m3/card",
@@ -1651,16 +1615,16 @@
             "widthDp": 220
           }
         ]
-      }
+      },
+      "afterNodeId": "play-feature-bloom"
     },
     {
-      "operationId": "ins-play-feature-lantern-body",
+      "operationId": "insert-play-feature-lantern-body",
       "type": "insertNode",
       "parent": {
         "nodeId": "play-feature-lantern",
         "slot": "content"
       },
-      "afterNodeId": null,
       "node": {
         "id": "play-feature-lantern-body",
         "componentId": "layout/column",
@@ -1682,13 +1646,12 @@
       }
     },
     {
-      "operationId": "ins-play-feature-lantern-art",
+      "operationId": "insert-play-feature-lantern-art",
       "type": "insertNode",
       "parent": {
         "nodeId": "play-feature-lantern-body",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "play-feature-lantern-art",
         "componentId": "layout/box",
@@ -1704,13 +1667,12 @@
       }
     },
     {
-      "operationId": "ins-play-feature-lantern-art-fill",
+      "operationId": "insert-play-feature-lantern-art-fill",
       "type": "insertNode",
       "parent": {
         "nodeId": "play-feature-lantern-art",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "play-feature-lantern-art-fill",
         "componentId": "shape/linear-gradient",
@@ -1736,13 +1698,12 @@
       }
     },
     {
-      "operationId": "ins-play-feature-lantern-meta",
+      "operationId": "insert-play-feature-lantern-meta",
       "type": "insertNode",
       "parent": {
         "nodeId": "play-feature-lantern-body",
         "slot": "children"
       },
-      "afterNodeId": "play-feature-lantern-art",
       "node": {
         "id": "play-feature-lantern-meta",
         "componentId": "layout/column",
@@ -1768,16 +1729,16 @@
             "bottomDp": 12
           }
         ]
-      }
+      },
+      "afterNodeId": "play-feature-lantern-art"
     },
     {
-      "operationId": "ins-play-feature-lantern-title",
+      "operationId": "insert-play-feature-lantern-title",
       "type": "insertNode",
       "parent": {
         "nodeId": "play-feature-lantern-meta",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "play-feature-lantern-title",
         "componentId": "m3/text",
@@ -1802,13 +1763,12 @@
       }
     },
     {
-      "operationId": "ins-play-feature-lantern-rating",
+      "operationId": "insert-play-feature-lantern-rating",
       "type": "insertNode",
       "parent": {
         "nodeId": "play-feature-lantern-meta",
         "slot": "children"
       },
-      "afterNodeId": "play-feature-lantern-title",
       "node": {
         "id": "play-feature-lantern-rating",
         "componentId": "layout/row",
@@ -1822,16 +1782,16 @@
             "value": "center"
           }
         }
-      }
+      },
+      "afterNodeId": "play-feature-lantern-title"
     },
     {
-      "operationId": "ins-play-feature-lantern-genre",
+      "operationId": "insert-play-feature-lantern-genre",
       "type": "insertNode",
       "parent": {
         "nodeId": "play-feature-lantern-rating",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "play-feature-lantern-genre",
         "componentId": "m3/text",
@@ -1852,13 +1812,12 @@
       }
     },
     {
-      "operationId": "ins-play-feature-lantern-star",
+      "operationId": "insert-play-feature-lantern-star",
       "type": "insertNode",
       "parent": {
         "nodeId": "play-feature-lantern-rating",
         "slot": "children"
       },
-      "afterNodeId": "play-feature-lantern-genre",
       "node": {
         "id": "play-feature-lantern-star",
         "componentId": "m3/icon",
@@ -1880,16 +1839,16 @@
             "value": "onSurfaceVariant"
           }
         }
-      }
+      },
+      "afterNodeId": "play-feature-lantern-genre"
     },
     {
-      "operationId": "ins-play-feature-skyline",
+      "operationId": "insert-play-feature-skyline",
       "type": "insertNode",
       "parent": {
         "nodeId": "play-carousel",
         "slot": "items"
       },
-      "afterNodeId": "play-feature-lantern",
       "node": {
         "id": "play-feature-skyline",
         "componentId": "m3/card",
@@ -1917,16 +1876,16 @@
             "widthDp": 220
           }
         ]
-      }
+      },
+      "afterNodeId": "play-feature-lantern"
     },
     {
-      "operationId": "ins-play-feature-skyline-body",
+      "operationId": "insert-play-feature-skyline-body",
       "type": "insertNode",
       "parent": {
         "nodeId": "play-feature-skyline",
         "slot": "content"
       },
-      "afterNodeId": null,
       "node": {
         "id": "play-feature-skyline-body",
         "componentId": "layout/column",
@@ -1948,13 +1907,12 @@
       }
     },
     {
-      "operationId": "ins-play-feature-skyline-art",
+      "operationId": "insert-play-feature-skyline-art",
       "type": "insertNode",
       "parent": {
         "nodeId": "play-feature-skyline-body",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "play-feature-skyline-art",
         "componentId": "layout/box",
@@ -1970,13 +1928,12 @@
       }
     },
     {
-      "operationId": "ins-play-feature-skyline-art-fill",
+      "operationId": "insert-play-feature-skyline-art-fill",
       "type": "insertNode",
       "parent": {
         "nodeId": "play-feature-skyline-art",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "play-feature-skyline-art-fill",
         "componentId": "shape/linear-gradient",
@@ -2002,13 +1959,12 @@
       }
     },
     {
-      "operationId": "ins-play-feature-skyline-meta",
+      "operationId": "insert-play-feature-skyline-meta",
       "type": "insertNode",
       "parent": {
         "nodeId": "play-feature-skyline-body",
         "slot": "children"
       },
-      "afterNodeId": "play-feature-skyline-art",
       "node": {
         "id": "play-feature-skyline-meta",
         "componentId": "layout/column",
@@ -2034,16 +1990,16 @@
             "bottomDp": 12
           }
         ]
-      }
+      },
+      "afterNodeId": "play-feature-skyline-art"
     },
     {
-      "operationId": "ins-play-feature-skyline-title",
+      "operationId": "insert-play-feature-skyline-title",
       "type": "insertNode",
       "parent": {
         "nodeId": "play-feature-skyline-meta",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "play-feature-skyline-title",
         "componentId": "m3/text",
@@ -2068,13 +2024,12 @@
       }
     },
     {
-      "operationId": "ins-play-feature-skyline-rating",
+      "operationId": "insert-play-feature-skyline-rating",
       "type": "insertNode",
       "parent": {
         "nodeId": "play-feature-skyline-meta",
         "slot": "children"
       },
-      "afterNodeId": "play-feature-skyline-title",
       "node": {
         "id": "play-feature-skyline-rating",
         "componentId": "layout/row",
@@ -2088,16 +2043,16 @@
             "value": "center"
           }
         }
-      }
+      },
+      "afterNodeId": "play-feature-skyline-title"
     },
     {
-      "operationId": "ins-play-feature-skyline-genre",
+      "operationId": "insert-play-feature-skyline-genre",
       "type": "insertNode",
       "parent": {
         "nodeId": "play-feature-skyline-rating",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "play-feature-skyline-genre",
         "componentId": "m3/text",
@@ -2118,13 +2073,12 @@
       }
     },
     {
-      "operationId": "ins-play-feature-skyline-star",
+      "operationId": "insert-play-feature-skyline-star",
       "type": "insertNode",
       "parent": {
         "nodeId": "play-feature-skyline-rating",
         "slot": "children"
       },
-      "afterNodeId": "play-feature-skyline-genre",
       "node": {
         "id": "play-feature-skyline-star",
         "componentId": "m3/icon",
@@ -2146,16 +2100,16 @@
             "value": "onSurfaceVariant"
           }
         }
-      }
+      },
+      "afterNodeId": "play-feature-skyline-genre"
     },
     {
-      "operationId": "ins-play-feature-nimbus",
+      "operationId": "insert-play-feature-nimbus",
       "type": "insertNode",
       "parent": {
         "nodeId": "play-carousel",
         "slot": "items"
       },
-      "afterNodeId": "play-feature-skyline",
       "node": {
         "id": "play-feature-nimbus",
         "componentId": "m3/card",
@@ -2183,16 +2137,16 @@
             "widthDp": 220
           }
         ]
-      }
+      },
+      "afterNodeId": "play-feature-skyline"
     },
     {
-      "operationId": "ins-play-feature-nimbus-body",
+      "operationId": "insert-play-feature-nimbus-body",
       "type": "insertNode",
       "parent": {
         "nodeId": "play-feature-nimbus",
         "slot": "content"
       },
-      "afterNodeId": null,
       "node": {
         "id": "play-feature-nimbus-body",
         "componentId": "layout/column",
@@ -2214,13 +2168,12 @@
       }
     },
     {
-      "operationId": "ins-play-feature-nimbus-art",
+      "operationId": "insert-play-feature-nimbus-art",
       "type": "insertNode",
       "parent": {
         "nodeId": "play-feature-nimbus-body",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "play-feature-nimbus-art",
         "componentId": "layout/box",
@@ -2236,13 +2189,12 @@
       }
     },
     {
-      "operationId": "ins-play-feature-nimbus-art-fill",
+      "operationId": "insert-play-feature-nimbus-art-fill",
       "type": "insertNode",
       "parent": {
         "nodeId": "play-feature-nimbus-art",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "play-feature-nimbus-art-fill",
         "componentId": "shape/linear-gradient",
@@ -2268,13 +2220,12 @@
       }
     },
     {
-      "operationId": "ins-play-feature-nimbus-meta",
+      "operationId": "insert-play-feature-nimbus-meta",
       "type": "insertNode",
       "parent": {
         "nodeId": "play-feature-nimbus-body",
         "slot": "children"
       },
-      "afterNodeId": "play-feature-nimbus-art",
       "node": {
         "id": "play-feature-nimbus-meta",
         "componentId": "layout/column",
@@ -2300,16 +2251,16 @@
             "bottomDp": 12
           }
         ]
-      }
+      },
+      "afterNodeId": "play-feature-nimbus-art"
     },
     {
-      "operationId": "ins-play-feature-nimbus-title",
+      "operationId": "insert-play-feature-nimbus-title",
       "type": "insertNode",
       "parent": {
         "nodeId": "play-feature-nimbus-meta",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "play-feature-nimbus-title",
         "componentId": "m3/text",
@@ -2334,13 +2285,12 @@
       }
     },
     {
-      "operationId": "ins-play-feature-nimbus-rating",
+      "operationId": "insert-play-feature-nimbus-rating",
       "type": "insertNode",
       "parent": {
         "nodeId": "play-feature-nimbus-meta",
         "slot": "children"
       },
-      "afterNodeId": "play-feature-nimbus-title",
       "node": {
         "id": "play-feature-nimbus-rating",
         "componentId": "layout/row",
@@ -2354,16 +2304,16 @@
             "value": "center"
           }
         }
-      }
+      },
+      "afterNodeId": "play-feature-nimbus-title"
     },
     {
-      "operationId": "ins-play-feature-nimbus-genre",
+      "operationId": "insert-play-feature-nimbus-genre",
       "type": "insertNode",
       "parent": {
         "nodeId": "play-feature-nimbus-rating",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "play-feature-nimbus-genre",
         "componentId": "m3/text",
@@ -2384,13 +2334,12 @@
       }
     },
     {
-      "operationId": "ins-play-feature-nimbus-star",
+      "operationId": "insert-play-feature-nimbus-star",
       "type": "insertNode",
       "parent": {
         "nodeId": "play-feature-nimbus-rating",
         "slot": "children"
       },
-      "afterNodeId": "play-feature-nimbus-genre",
       "node": {
         "id": "play-feature-nimbus-star",
         "componentId": "m3/icon",
@@ -2412,16 +2361,16 @@
             "value": "onSurfaceVariant"
           }
         }
-      }
+      },
+      "afterNodeId": "play-feature-nimbus-genre"
     },
     {
-      "operationId": "ins-play-heading-top",
+      "operationId": "insert-play-heading-top",
       "type": "insertNode",
       "parent": {
         "nodeId": "play-body",
         "slot": "children"
       },
-      "afterNodeId": "play-carousel",
       "node": {
         "id": "play-heading-top",
         "componentId": "m3/text",
@@ -2448,16 +2397,16 @@
             "bottomDp": 10
           }
         ]
-      }
+      },
+      "afterNodeId": "play-carousel"
     },
     {
-      "operationId": "ins-play-app-list",
+      "operationId": "insert-play-app-list",
       "type": "insertNode",
       "parent": {
         "nodeId": "play-body",
         "slot": "children"
       },
-      "afterNodeId": "play-heading-top",
       "node": {
         "id": "play-app-list",
         "componentId": "layout/column",
@@ -2476,16 +2425,16 @@
             "type": "fillMaxWidth"
           }
         ]
-      }
+      },
+      "afterNodeId": "play-heading-top"
     },
     {
-      "operationId": "ins-play-app-notes",
+      "operationId": "insert-play-app-notes",
       "type": "insertNode",
       "parent": {
         "nodeId": "play-app-list",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "play-app-notes",
         "componentId": "layout/row",
@@ -2514,13 +2463,12 @@
       }
     },
     {
-      "operationId": "ins-play-app-notes-rank",
+      "operationId": "insert-play-app-notes-rank",
       "type": "insertNode",
       "parent": {
         "nodeId": "play-app-notes",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "play-app-notes-rank",
         "componentId": "m3/text",
@@ -2547,13 +2495,12 @@
       }
     },
     {
-      "operationId": "ins-play-app-notes-icon",
+      "operationId": "insert-play-app-notes-icon",
       "type": "insertNode",
       "parent": {
         "nodeId": "play-app-notes",
         "slot": "children"
       },
-      "afterNodeId": "play-app-notes-rank",
       "node": {
         "id": "play-app-notes-icon",
         "componentId": "layout/box",
@@ -2568,16 +2515,16 @@
             "shape": "14"
           }
         ]
-      }
+      },
+      "afterNodeId": "play-app-notes-rank"
     },
     {
-      "operationId": "ins-play-app-notes-icon-fill",
+      "operationId": "insert-play-app-notes-icon-fill",
       "type": "insertNode",
       "parent": {
         "nodeId": "play-app-notes-icon",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "play-app-notes-icon-fill",
         "componentId": "shape/linear-gradient",
@@ -2603,13 +2550,12 @@
       }
     },
     {
-      "operationId": "ins-play-app-notes-meta",
+      "operationId": "insert-play-app-notes-meta",
       "type": "insertNode",
       "parent": {
         "nodeId": "play-app-notes",
         "slot": "children"
       },
-      "afterNodeId": "play-app-notes-icon",
       "node": {
         "id": "play-app-notes-meta",
         "componentId": "layout/column",
@@ -2629,16 +2575,16 @@
             "weight": 1
           }
         ]
-      }
+      },
+      "afterNodeId": "play-app-notes-icon"
     },
     {
-      "operationId": "ins-play-app-notes-name",
+      "operationId": "insert-play-app-notes-name",
       "type": "insertNode",
       "parent": {
         "nodeId": "play-app-notes-meta",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "play-app-notes-name",
         "componentId": "m3/text",
@@ -2663,13 +2609,12 @@
       }
     },
     {
-      "operationId": "ins-play-app-notes-sub",
+      "operationId": "insert-play-app-notes-sub",
       "type": "insertNode",
       "parent": {
         "nodeId": "play-app-notes-meta",
         "slot": "children"
       },
-      "afterNodeId": "play-app-notes-name",
       "node": {
         "id": "play-app-notes-sub",
         "componentId": "layout/row",
@@ -2683,16 +2628,16 @@
             "value": "center"
           }
         }
-      }
+      },
+      "afterNodeId": "play-app-notes-name"
     },
     {
-      "operationId": "ins-play-app-notes-genre",
+      "operationId": "insert-play-app-notes-genre",
       "type": "insertNode",
       "parent": {
         "nodeId": "play-app-notes-sub",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "play-app-notes-genre",
         "componentId": "m3/text",
@@ -2713,13 +2658,12 @@
       }
     },
     {
-      "operationId": "ins-play-app-notes-star",
+      "operationId": "insert-play-app-notes-star",
       "type": "insertNode",
       "parent": {
         "nodeId": "play-app-notes-sub",
         "slot": "children"
       },
-      "afterNodeId": "play-app-notes-genre",
       "node": {
         "id": "play-app-notes-star",
         "componentId": "m3/icon",
@@ -2741,16 +2685,16 @@
             "value": "onSurfaceVariant"
           }
         }
-      }
+      },
+      "afterNodeId": "play-app-notes-genre"
     },
     {
-      "operationId": "ins-play-app-notes-install",
+      "operationId": "insert-play-app-notes-install",
       "type": "insertNode",
       "parent": {
         "nodeId": "play-app-notes",
         "slot": "children"
       },
-      "afterNodeId": "play-app-notes-meta",
       "node": {
         "id": "play-app-notes-install",
         "componentId": "m3/button",
@@ -2760,16 +2704,16 @@
             "value": "filledTonal"
           }
         }
-      }
+      },
+      "afterNodeId": "play-app-notes-meta"
     },
     {
-      "operationId": "ins-play-app-notes-install-label",
+      "operationId": "insert-play-app-notes-install-label",
       "type": "insertNode",
       "parent": {
         "nodeId": "play-app-notes-install",
         "slot": "content"
       },
-      "afterNodeId": null,
       "node": {
         "id": "play-app-notes-install-label",
         "componentId": "m3/text",
@@ -2786,13 +2730,12 @@
       }
     },
     {
-      "operationId": "ins-play-app-mapper",
+      "operationId": "insert-play-app-mapper",
       "type": "insertNode",
       "parent": {
         "nodeId": "play-app-list",
         "slot": "children"
       },
-      "afterNodeId": "play-app-notes",
       "node": {
         "id": "play-app-mapper",
         "componentId": "layout/row",
@@ -2818,16 +2761,16 @@
             "bottomDp": 8
           }
         ]
-      }
+      },
+      "afterNodeId": "play-app-notes"
     },
     {
-      "operationId": "ins-play-app-mapper-rank",
+      "operationId": "insert-play-app-mapper-rank",
       "type": "insertNode",
       "parent": {
         "nodeId": "play-app-mapper",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "play-app-mapper-rank",
         "componentId": "m3/text",
@@ -2854,13 +2797,12 @@
       }
     },
     {
-      "operationId": "ins-play-app-mapper-icon",
+      "operationId": "insert-play-app-mapper-icon",
       "type": "insertNode",
       "parent": {
         "nodeId": "play-app-mapper",
         "slot": "children"
       },
-      "afterNodeId": "play-app-mapper-rank",
       "node": {
         "id": "play-app-mapper-icon",
         "componentId": "layout/box",
@@ -2875,16 +2817,16 @@
             "shape": "14"
           }
         ]
-      }
+      },
+      "afterNodeId": "play-app-mapper-rank"
     },
     {
-      "operationId": "ins-play-app-mapper-icon-fill",
+      "operationId": "insert-play-app-mapper-icon-fill",
       "type": "insertNode",
       "parent": {
         "nodeId": "play-app-mapper-icon",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "play-app-mapper-icon-fill",
         "componentId": "shape/linear-gradient",
@@ -2910,13 +2852,12 @@
       }
     },
     {
-      "operationId": "ins-play-app-mapper-meta",
+      "operationId": "insert-play-app-mapper-meta",
       "type": "insertNode",
       "parent": {
         "nodeId": "play-app-mapper",
         "slot": "children"
       },
-      "afterNodeId": "play-app-mapper-icon",
       "node": {
         "id": "play-app-mapper-meta",
         "componentId": "layout/column",
@@ -2936,16 +2877,16 @@
             "weight": 1
           }
         ]
-      }
+      },
+      "afterNodeId": "play-app-mapper-icon"
     },
     {
-      "operationId": "ins-play-app-mapper-name",
+      "operationId": "insert-play-app-mapper-name",
       "type": "insertNode",
       "parent": {
         "nodeId": "play-app-mapper-meta",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "play-app-mapper-name",
         "componentId": "m3/text",
@@ -2970,13 +2911,12 @@
       }
     },
     {
-      "operationId": "ins-play-app-mapper-sub",
+      "operationId": "insert-play-app-mapper-sub",
       "type": "insertNode",
       "parent": {
         "nodeId": "play-app-mapper-meta",
         "slot": "children"
       },
-      "afterNodeId": "play-app-mapper-name",
       "node": {
         "id": "play-app-mapper-sub",
         "componentId": "layout/row",
@@ -2990,16 +2930,16 @@
             "value": "center"
           }
         }
-      }
+      },
+      "afterNodeId": "play-app-mapper-name"
     },
     {
-      "operationId": "ins-play-app-mapper-genre",
+      "operationId": "insert-play-app-mapper-genre",
       "type": "insertNode",
       "parent": {
         "nodeId": "play-app-mapper-sub",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "play-app-mapper-genre",
         "componentId": "m3/text",
@@ -3020,13 +2960,12 @@
       }
     },
     {
-      "operationId": "ins-play-app-mapper-star",
+      "operationId": "insert-play-app-mapper-star",
       "type": "insertNode",
       "parent": {
         "nodeId": "play-app-mapper-sub",
         "slot": "children"
       },
-      "afterNodeId": "play-app-mapper-genre",
       "node": {
         "id": "play-app-mapper-star",
         "componentId": "m3/icon",
@@ -3048,16 +2987,16 @@
             "value": "onSurfaceVariant"
           }
         }
-      }
+      },
+      "afterNodeId": "play-app-mapper-genre"
     },
     {
-      "operationId": "ins-play-app-mapper-install",
+      "operationId": "insert-play-app-mapper-install",
       "type": "insertNode",
       "parent": {
         "nodeId": "play-app-mapper",
         "slot": "children"
       },
-      "afterNodeId": "play-app-mapper-meta",
       "node": {
         "id": "play-app-mapper-install",
         "componentId": "m3/button",
@@ -3067,16 +3006,16 @@
             "value": "filledTonal"
           }
         }
-      }
+      },
+      "afterNodeId": "play-app-mapper-meta"
     },
     {
-      "operationId": "ins-play-app-mapper-install-label",
+      "operationId": "insert-play-app-mapper-install-label",
       "type": "insertNode",
       "parent": {
         "nodeId": "play-app-mapper-install",
         "slot": "content"
       },
-      "afterNodeId": null,
       "node": {
         "id": "play-app-mapper-install-label",
         "componentId": "m3/text",
@@ -3093,13 +3032,12 @@
       }
     },
     {
-      "operationId": "ins-play-app-ledger",
+      "operationId": "insert-play-app-ledger",
       "type": "insertNode",
       "parent": {
         "nodeId": "play-app-list",
         "slot": "children"
       },
-      "afterNodeId": "play-app-mapper",
       "node": {
         "id": "play-app-ledger",
         "componentId": "layout/row",
@@ -3125,16 +3063,16 @@
             "bottomDp": 8
           }
         ]
-      }
+      },
+      "afterNodeId": "play-app-mapper"
     },
     {
-      "operationId": "ins-play-app-ledger-rank",
+      "operationId": "insert-play-app-ledger-rank",
       "type": "insertNode",
       "parent": {
         "nodeId": "play-app-ledger",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "play-app-ledger-rank",
         "componentId": "m3/text",
@@ -3161,13 +3099,12 @@
       }
     },
     {
-      "operationId": "ins-play-app-ledger-icon",
+      "operationId": "insert-play-app-ledger-icon",
       "type": "insertNode",
       "parent": {
         "nodeId": "play-app-ledger",
         "slot": "children"
       },
-      "afterNodeId": "play-app-ledger-rank",
       "node": {
         "id": "play-app-ledger-icon",
         "componentId": "layout/box",
@@ -3182,16 +3119,16 @@
             "shape": "14"
           }
         ]
-      }
+      },
+      "afterNodeId": "play-app-ledger-rank"
     },
     {
-      "operationId": "ins-play-app-ledger-icon-fill",
+      "operationId": "insert-play-app-ledger-icon-fill",
       "type": "insertNode",
       "parent": {
         "nodeId": "play-app-ledger-icon",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "play-app-ledger-icon-fill",
         "componentId": "shape/linear-gradient",
@@ -3217,13 +3154,12 @@
       }
     },
     {
-      "operationId": "ins-play-app-ledger-meta",
+      "operationId": "insert-play-app-ledger-meta",
       "type": "insertNode",
       "parent": {
         "nodeId": "play-app-ledger",
         "slot": "children"
       },
-      "afterNodeId": "play-app-ledger-icon",
       "node": {
         "id": "play-app-ledger-meta",
         "componentId": "layout/column",
@@ -3243,16 +3179,16 @@
             "weight": 1
           }
         ]
-      }
+      },
+      "afterNodeId": "play-app-ledger-icon"
     },
     {
-      "operationId": "ins-play-app-ledger-name",
+      "operationId": "insert-play-app-ledger-name",
       "type": "insertNode",
       "parent": {
         "nodeId": "play-app-ledger-meta",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "play-app-ledger-name",
         "componentId": "m3/text",
@@ -3277,13 +3213,12 @@
       }
     },
     {
-      "operationId": "ins-play-app-ledger-sub",
+      "operationId": "insert-play-app-ledger-sub",
       "type": "insertNode",
       "parent": {
         "nodeId": "play-app-ledger-meta",
         "slot": "children"
       },
-      "afterNodeId": "play-app-ledger-name",
       "node": {
         "id": "play-app-ledger-sub",
         "componentId": "layout/row",
@@ -3297,16 +3232,16 @@
             "value": "center"
           }
         }
-      }
+      },
+      "afterNodeId": "play-app-ledger-name"
     },
     {
-      "operationId": "ins-play-app-ledger-genre",
+      "operationId": "insert-play-app-ledger-genre",
       "type": "insertNode",
       "parent": {
         "nodeId": "play-app-ledger-sub",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "play-app-ledger-genre",
         "componentId": "m3/text",
@@ -3327,13 +3262,12 @@
       }
     },
     {
-      "operationId": "ins-play-app-ledger-star",
+      "operationId": "insert-play-app-ledger-star",
       "type": "insertNode",
       "parent": {
         "nodeId": "play-app-ledger-sub",
         "slot": "children"
       },
-      "afterNodeId": "play-app-ledger-genre",
       "node": {
         "id": "play-app-ledger-star",
         "componentId": "m3/icon",
@@ -3355,16 +3289,16 @@
             "value": "onSurfaceVariant"
           }
         }
-      }
+      },
+      "afterNodeId": "play-app-ledger-genre"
     },
     {
-      "operationId": "ins-play-app-ledger-install",
+      "operationId": "insert-play-app-ledger-install",
       "type": "insertNode",
       "parent": {
         "nodeId": "play-app-ledger",
         "slot": "children"
       },
-      "afterNodeId": "play-app-ledger-meta",
       "node": {
         "id": "play-app-ledger-install",
         "componentId": "m3/button",
@@ -3374,16 +3308,16 @@
             "value": "filledTonal"
           }
         }
-      }
+      },
+      "afterNodeId": "play-app-ledger-meta"
     },
     {
-      "operationId": "ins-play-app-ledger-install-label",
+      "operationId": "insert-play-app-ledger-install-label",
       "type": "insertNode",
       "parent": {
         "nodeId": "play-app-ledger-install",
         "slot": "content"
       },
-      "afterNodeId": null,
       "node": {
         "id": "play-app-ledger-install-label",
         "componentId": "m3/text",
@@ -3400,13 +3334,12 @@
       }
     },
     {
-      "operationId": "ins-play-app-shutter",
+      "operationId": "insert-play-app-shutter",
       "type": "insertNode",
       "parent": {
         "nodeId": "play-app-list",
         "slot": "children"
       },
-      "afterNodeId": "play-app-ledger",
       "node": {
         "id": "play-app-shutter",
         "componentId": "layout/row",
@@ -3432,16 +3365,16 @@
             "bottomDp": 8
           }
         ]
-      }
+      },
+      "afterNodeId": "play-app-ledger"
     },
     {
-      "operationId": "ins-play-app-shutter-rank",
+      "operationId": "insert-play-app-shutter-rank",
       "type": "insertNode",
       "parent": {
         "nodeId": "play-app-shutter",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "play-app-shutter-rank",
         "componentId": "m3/text",
@@ -3468,13 +3401,12 @@
       }
     },
     {
-      "operationId": "ins-play-app-shutter-icon",
+      "operationId": "insert-play-app-shutter-icon",
       "type": "insertNode",
       "parent": {
         "nodeId": "play-app-shutter",
         "slot": "children"
       },
-      "afterNodeId": "play-app-shutter-rank",
       "node": {
         "id": "play-app-shutter-icon",
         "componentId": "layout/box",
@@ -3489,16 +3421,16 @@
             "shape": "14"
           }
         ]
-      }
+      },
+      "afterNodeId": "play-app-shutter-rank"
     },
     {
-      "operationId": "ins-play-app-shutter-icon-fill",
+      "operationId": "insert-play-app-shutter-icon-fill",
       "type": "insertNode",
       "parent": {
         "nodeId": "play-app-shutter-icon",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "play-app-shutter-icon-fill",
         "componentId": "shape/linear-gradient",
@@ -3524,13 +3456,12 @@
       }
     },
     {
-      "operationId": "ins-play-app-shutter-meta",
+      "operationId": "insert-play-app-shutter-meta",
       "type": "insertNode",
       "parent": {
         "nodeId": "play-app-shutter",
         "slot": "children"
       },
-      "afterNodeId": "play-app-shutter-icon",
       "node": {
         "id": "play-app-shutter-meta",
         "componentId": "layout/column",
@@ -3550,16 +3481,16 @@
             "weight": 1
           }
         ]
-      }
+      },
+      "afterNodeId": "play-app-shutter-icon"
     },
     {
-      "operationId": "ins-play-app-shutter-name",
+      "operationId": "insert-play-app-shutter-name",
       "type": "insertNode",
       "parent": {
         "nodeId": "play-app-shutter-meta",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "play-app-shutter-name",
         "componentId": "m3/text",
@@ -3584,13 +3515,12 @@
       }
     },
     {
-      "operationId": "ins-play-app-shutter-sub",
+      "operationId": "insert-play-app-shutter-sub",
       "type": "insertNode",
       "parent": {
         "nodeId": "play-app-shutter-meta",
         "slot": "children"
       },
-      "afterNodeId": "play-app-shutter-name",
       "node": {
         "id": "play-app-shutter-sub",
         "componentId": "layout/row",
@@ -3604,16 +3534,16 @@
             "value": "center"
           }
         }
-      }
+      },
+      "afterNodeId": "play-app-shutter-name"
     },
     {
-      "operationId": "ins-play-app-shutter-genre",
+      "operationId": "insert-play-app-shutter-genre",
       "type": "insertNode",
       "parent": {
         "nodeId": "play-app-shutter-sub",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "play-app-shutter-genre",
         "componentId": "m3/text",
@@ -3634,13 +3564,12 @@
       }
     },
     {
-      "operationId": "ins-play-app-shutter-star",
+      "operationId": "insert-play-app-shutter-star",
       "type": "insertNode",
       "parent": {
         "nodeId": "play-app-shutter-sub",
         "slot": "children"
       },
-      "afterNodeId": "play-app-shutter-genre",
       "node": {
         "id": "play-app-shutter-star",
         "componentId": "m3/icon",
@@ -3662,16 +3591,16 @@
             "value": "onSurfaceVariant"
           }
         }
-      }
+      },
+      "afterNodeId": "play-app-shutter-genre"
     },
     {
-      "operationId": "ins-play-app-shutter-install",
+      "operationId": "insert-play-app-shutter-install",
       "type": "insertNode",
       "parent": {
         "nodeId": "play-app-shutter",
         "slot": "children"
       },
-      "afterNodeId": "play-app-shutter-meta",
       "node": {
         "id": "play-app-shutter-install",
         "componentId": "m3/button",
@@ -3681,16 +3610,16 @@
             "value": "filledTonal"
           }
         }
-      }
+      },
+      "afterNodeId": "play-app-shutter-meta"
     },
     {
-      "operationId": "ins-play-app-shutter-install-label",
+      "operationId": "insert-play-app-shutter-install-label",
       "type": "insertNode",
       "parent": {
         "nodeId": "play-app-shutter-install",
         "slot": "content"
       },
-      "afterNodeId": null,
       "node": {
         "id": "play-app-shutter-install-label",
         "componentId": "m3/text",
@@ -3707,13 +3636,12 @@
       }
     },
     {
-      "operationId": "ins-play-app-cadence",
+      "operationId": "insert-play-app-cadence",
       "type": "insertNode",
       "parent": {
         "nodeId": "play-app-list",
         "slot": "children"
       },
-      "afterNodeId": "play-app-shutter",
       "node": {
         "id": "play-app-cadence",
         "componentId": "layout/row",
@@ -3739,16 +3667,16 @@
             "bottomDp": 8
           }
         ]
-      }
+      },
+      "afterNodeId": "play-app-shutter"
     },
     {
-      "operationId": "ins-play-app-cadence-rank",
+      "operationId": "insert-play-app-cadence-rank",
       "type": "insertNode",
       "parent": {
         "nodeId": "play-app-cadence",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "play-app-cadence-rank",
         "componentId": "m3/text",
@@ -3775,13 +3703,12 @@
       }
     },
     {
-      "operationId": "ins-play-app-cadence-icon",
+      "operationId": "insert-play-app-cadence-icon",
       "type": "insertNode",
       "parent": {
         "nodeId": "play-app-cadence",
         "slot": "children"
       },
-      "afterNodeId": "play-app-cadence-rank",
       "node": {
         "id": "play-app-cadence-icon",
         "componentId": "layout/box",
@@ -3796,16 +3723,16 @@
             "shape": "14"
           }
         ]
-      }
+      },
+      "afterNodeId": "play-app-cadence-rank"
     },
     {
-      "operationId": "ins-play-app-cadence-icon-fill",
+      "operationId": "insert-play-app-cadence-icon-fill",
       "type": "insertNode",
       "parent": {
         "nodeId": "play-app-cadence-icon",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "play-app-cadence-icon-fill",
         "componentId": "shape/linear-gradient",
@@ -3831,13 +3758,12 @@
       }
     },
     {
-      "operationId": "ins-play-app-cadence-meta",
+      "operationId": "insert-play-app-cadence-meta",
       "type": "insertNode",
       "parent": {
         "nodeId": "play-app-cadence",
         "slot": "children"
       },
-      "afterNodeId": "play-app-cadence-icon",
       "node": {
         "id": "play-app-cadence-meta",
         "componentId": "layout/column",
@@ -3857,16 +3783,16 @@
             "weight": 1
           }
         ]
-      }
+      },
+      "afterNodeId": "play-app-cadence-icon"
     },
     {
-      "operationId": "ins-play-app-cadence-name",
+      "operationId": "insert-play-app-cadence-name",
       "type": "insertNode",
       "parent": {
         "nodeId": "play-app-cadence-meta",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "play-app-cadence-name",
         "componentId": "m3/text",
@@ -3891,13 +3817,12 @@
       }
     },
     {
-      "operationId": "ins-play-app-cadence-sub",
+      "operationId": "insert-play-app-cadence-sub",
       "type": "insertNode",
       "parent": {
         "nodeId": "play-app-cadence-meta",
         "slot": "children"
       },
-      "afterNodeId": "play-app-cadence-name",
       "node": {
         "id": "play-app-cadence-sub",
         "componentId": "layout/row",
@@ -3911,16 +3836,16 @@
             "value": "center"
           }
         }
-      }
+      },
+      "afterNodeId": "play-app-cadence-name"
     },
     {
-      "operationId": "ins-play-app-cadence-genre",
+      "operationId": "insert-play-app-cadence-genre",
       "type": "insertNode",
       "parent": {
         "nodeId": "play-app-cadence-sub",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "play-app-cadence-genre",
         "componentId": "m3/text",
@@ -3941,13 +3866,12 @@
       }
     },
     {
-      "operationId": "ins-play-app-cadence-star",
+      "operationId": "insert-play-app-cadence-star",
       "type": "insertNode",
       "parent": {
         "nodeId": "play-app-cadence-sub",
         "slot": "children"
       },
-      "afterNodeId": "play-app-cadence-genre",
       "node": {
         "id": "play-app-cadence-star",
         "componentId": "m3/icon",
@@ -3969,16 +3893,16 @@
             "value": "onSurfaceVariant"
           }
         }
-      }
+      },
+      "afterNodeId": "play-app-cadence-genre"
     },
     {
-      "operationId": "ins-play-app-cadence-install",
+      "operationId": "insert-play-app-cadence-install",
       "type": "insertNode",
       "parent": {
         "nodeId": "play-app-cadence",
         "slot": "children"
       },
-      "afterNodeId": "play-app-cadence-meta",
       "node": {
         "id": "play-app-cadence-install",
         "componentId": "m3/button",
@@ -3988,16 +3912,16 @@
             "value": "filledTonal"
           }
         }
-      }
+      },
+      "afterNodeId": "play-app-cadence-meta"
     },
     {
-      "operationId": "ins-play-app-cadence-install-label",
+      "operationId": "insert-play-app-cadence-install-label",
       "type": "insertNode",
       "parent": {
         "nodeId": "play-app-cadence-install",
         "slot": "content"
       },
-      "afterNodeId": null,
       "node": {
         "id": "play-app-cadence-install-label",
         "componentId": "m3/text",
@@ -4014,13 +3938,12 @@
       }
     },
     {
-      "operationId": "ins-play-app-verse",
+      "operationId": "insert-play-app-verse",
       "type": "insertNode",
       "parent": {
         "nodeId": "play-app-list",
         "slot": "children"
       },
-      "afterNodeId": "play-app-cadence",
       "node": {
         "id": "play-app-verse",
         "componentId": "layout/row",
@@ -4046,16 +3969,16 @@
             "bottomDp": 8
           }
         ]
-      }
+      },
+      "afterNodeId": "play-app-cadence"
     },
     {
-      "operationId": "ins-play-app-verse-rank",
+      "operationId": "insert-play-app-verse-rank",
       "type": "insertNode",
       "parent": {
         "nodeId": "play-app-verse",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "play-app-verse-rank",
         "componentId": "m3/text",
@@ -4082,13 +4005,12 @@
       }
     },
     {
-      "operationId": "ins-play-app-verse-icon",
+      "operationId": "insert-play-app-verse-icon",
       "type": "insertNode",
       "parent": {
         "nodeId": "play-app-verse",
         "slot": "children"
       },
-      "afterNodeId": "play-app-verse-rank",
       "node": {
         "id": "play-app-verse-icon",
         "componentId": "layout/box",
@@ -4103,16 +4025,16 @@
             "shape": "14"
           }
         ]
-      }
+      },
+      "afterNodeId": "play-app-verse-rank"
     },
     {
-      "operationId": "ins-play-app-verse-icon-fill",
+      "operationId": "insert-play-app-verse-icon-fill",
       "type": "insertNode",
       "parent": {
         "nodeId": "play-app-verse-icon",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "play-app-verse-icon-fill",
         "componentId": "shape/linear-gradient",
@@ -4138,13 +4060,12 @@
       }
     },
     {
-      "operationId": "ins-play-app-verse-meta",
+      "operationId": "insert-play-app-verse-meta",
       "type": "insertNode",
       "parent": {
         "nodeId": "play-app-verse",
         "slot": "children"
       },
-      "afterNodeId": "play-app-verse-icon",
       "node": {
         "id": "play-app-verse-meta",
         "componentId": "layout/column",
@@ -4164,16 +4085,16 @@
             "weight": 1
           }
         ]
-      }
+      },
+      "afterNodeId": "play-app-verse-icon"
     },
     {
-      "operationId": "ins-play-app-verse-name",
+      "operationId": "insert-play-app-verse-name",
       "type": "insertNode",
       "parent": {
         "nodeId": "play-app-verse-meta",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "play-app-verse-name",
         "componentId": "m3/text",
@@ -4198,13 +4119,12 @@
       }
     },
     {
-      "operationId": "ins-play-app-verse-sub",
+      "operationId": "insert-play-app-verse-sub",
       "type": "insertNode",
       "parent": {
         "nodeId": "play-app-verse-meta",
         "slot": "children"
       },
-      "afterNodeId": "play-app-verse-name",
       "node": {
         "id": "play-app-verse-sub",
         "componentId": "layout/row",
@@ -4218,16 +4138,16 @@
             "value": "center"
           }
         }
-      }
+      },
+      "afterNodeId": "play-app-verse-name"
     },
     {
-      "operationId": "ins-play-app-verse-genre",
+      "operationId": "insert-play-app-verse-genre",
       "type": "insertNode",
       "parent": {
         "nodeId": "play-app-verse-sub",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "play-app-verse-genre",
         "componentId": "m3/text",
@@ -4248,13 +4168,12 @@
       }
     },
     {
-      "operationId": "ins-play-app-verse-star",
+      "operationId": "insert-play-app-verse-star",
       "type": "insertNode",
       "parent": {
         "nodeId": "play-app-verse-sub",
         "slot": "children"
       },
-      "afterNodeId": "play-app-verse-genre",
       "node": {
         "id": "play-app-verse-star",
         "componentId": "m3/icon",
@@ -4276,16 +4195,16 @@
             "value": "onSurfaceVariant"
           }
         }
-      }
+      },
+      "afterNodeId": "play-app-verse-genre"
     },
     {
-      "operationId": "ins-play-app-verse-install",
+      "operationId": "insert-play-app-verse-install",
       "type": "insertNode",
       "parent": {
         "nodeId": "play-app-verse",
         "slot": "children"
       },
-      "afterNodeId": "play-app-verse-meta",
       "node": {
         "id": "play-app-verse-install",
         "componentId": "m3/button",
@@ -4295,16 +4214,16 @@
             "value": "filledTonal"
           }
         }
-      }
+      },
+      "afterNodeId": "play-app-verse-meta"
     },
     {
-      "operationId": "ins-play-app-verse-install-label",
+      "operationId": "insert-play-app-verse-install-label",
       "type": "insertNode",
       "parent": {
         "nodeId": "play-app-verse-install",
         "slot": "content"
       },
-      "afterNodeId": null,
       "node": {
         "id": "play-app-verse-install-label",
         "componentId": "m3/text",

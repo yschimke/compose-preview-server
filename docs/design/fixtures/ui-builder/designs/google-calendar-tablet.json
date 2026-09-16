@@ -36,10 +36,9 @@
       "stateVariables": {}
     },
     {
-      "operationId": "ins-root",
+      "operationId": "insert-root",
       "type": "insertNode",
       "parent": null,
-      "afterNodeId": null,
       "node": {
         "id": "root",
         "componentId": "layout/row",
@@ -61,13 +60,12 @@
       }
     },
     {
-      "operationId": "ins-cal-rail",
+      "operationId": "insert-cal-rail",
       "type": "insertNode",
       "parent": {
         "nodeId": "root",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "cal-rail",
         "componentId": "layout/column",
@@ -107,13 +105,12 @@
       }
     },
     {
-      "operationId": "ins-cal-rail-day",
+      "operationId": "insert-cal-rail-day",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-rail",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "cal-rail-day",
         "componentId": "layout/column",
@@ -142,13 +139,12 @@
       }
     },
     {
-      "operationId": "ins-cal-rail-day-pill",
+      "operationId": "insert-cal-rail-day-pill",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-rail-day",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "cal-rail-day-pill",
         "componentId": "layout/box",
@@ -174,13 +170,12 @@
       }
     },
     {
-      "operationId": "ins-cal-rail-day-icon",
+      "operationId": "insert-cal-rail-day-icon",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-rail-day-pill",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "cal-rail-day-icon",
         "componentId": "m3/icon",
@@ -205,13 +200,12 @@
       }
     },
     {
-      "operationId": "ins-cal-rail-day-label",
+      "operationId": "insert-cal-rail-day-label",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-rail-day",
         "slot": "children"
       },
-      "afterNodeId": "cal-rail-day-pill",
       "node": {
         "id": "cal-rail-day-label",
         "componentId": "m3/text",
@@ -229,16 +223,16 @@
             "value": "onSurface"
           }
         }
-      }
+      },
+      "afterNodeId": "cal-rail-day-pill"
     },
     {
-      "operationId": "ins-cal-rail-week",
+      "operationId": "insert-cal-rail-week",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-rail",
         "slot": "children"
       },
-      "afterNodeId": "cal-rail-day",
       "node": {
         "id": "cal-rail-week",
         "componentId": "layout/column",
@@ -264,16 +258,16 @@
             "bottomDp": 4
           }
         ]
-      }
+      },
+      "afterNodeId": "cal-rail-day"
     },
     {
-      "operationId": "ins-cal-rail-week-pill",
+      "operationId": "insert-cal-rail-week-pill",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-rail-week",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "cal-rail-week-pill",
         "componentId": "layout/box",
@@ -291,13 +285,12 @@
       }
     },
     {
-      "operationId": "ins-cal-rail-week-icon",
+      "operationId": "insert-cal-rail-week-icon",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-rail-week-pill",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "cal-rail-week-icon",
         "componentId": "m3/icon",
@@ -322,13 +315,12 @@
       }
     },
     {
-      "operationId": "ins-cal-rail-week-label",
+      "operationId": "insert-cal-rail-week-label",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-rail-week",
         "slot": "children"
       },
-      "afterNodeId": "cal-rail-week-pill",
       "node": {
         "id": "cal-rail-week-label",
         "componentId": "m3/text",
@@ -346,16 +338,16 @@
             "value": "onSurfaceVariant"
           }
         }
-      }
+      },
+      "afterNodeId": "cal-rail-week-pill"
     },
     {
-      "operationId": "ins-cal-rail-month",
+      "operationId": "insert-cal-rail-month",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-rail",
         "slot": "children"
       },
-      "afterNodeId": "cal-rail-week",
       "node": {
         "id": "cal-rail-month",
         "componentId": "layout/column",
@@ -381,16 +373,16 @@
             "bottomDp": 4
           }
         ]
-      }
+      },
+      "afterNodeId": "cal-rail-week"
     },
     {
-      "operationId": "ins-cal-rail-month-pill",
+      "operationId": "insert-cal-rail-month-pill",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-rail-month",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "cal-rail-month-pill",
         "componentId": "layout/box",
@@ -408,13 +400,12 @@
       }
     },
     {
-      "operationId": "ins-cal-rail-month-icon",
+      "operationId": "insert-cal-rail-month-icon",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-rail-month-pill",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "cal-rail-month-icon",
         "componentId": "m3/icon",
@@ -439,13 +430,12 @@
       }
     },
     {
-      "operationId": "ins-cal-rail-month-label",
+      "operationId": "insert-cal-rail-month-label",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-rail-month",
         "slot": "children"
       },
-      "afterNodeId": "cal-rail-month-pill",
       "node": {
         "id": "cal-rail-month-label",
         "componentId": "m3/text",
@@ -463,16 +453,16 @@
             "value": "onSurfaceVariant"
           }
         }
-      }
+      },
+      "afterNodeId": "cal-rail-month-pill"
     },
     {
-      "operationId": "ins-cal-rail-tasks",
+      "operationId": "insert-cal-rail-tasks",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-rail",
         "slot": "children"
       },
-      "afterNodeId": "cal-rail-month",
       "node": {
         "id": "cal-rail-tasks",
         "componentId": "layout/column",
@@ -498,16 +488,16 @@
             "bottomDp": 4
           }
         ]
-      }
+      },
+      "afterNodeId": "cal-rail-month"
     },
     {
-      "operationId": "ins-cal-rail-tasks-pill",
+      "operationId": "insert-cal-rail-tasks-pill",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-rail-tasks",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "cal-rail-tasks-pill",
         "componentId": "layout/box",
@@ -525,13 +515,12 @@
       }
     },
     {
-      "operationId": "ins-cal-rail-tasks-icon",
+      "operationId": "insert-cal-rail-tasks-icon",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-rail-tasks-pill",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "cal-rail-tasks-icon",
         "componentId": "m3/icon",
@@ -556,13 +545,12 @@
       }
     },
     {
-      "operationId": "ins-cal-rail-tasks-label",
+      "operationId": "insert-cal-rail-tasks-label",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-rail-tasks",
         "slot": "children"
       },
-      "afterNodeId": "cal-rail-tasks-pill",
       "node": {
         "id": "cal-rail-tasks-label",
         "componentId": "m3/text",
@@ -580,16 +568,16 @@
             "value": "onSurfaceVariant"
           }
         }
-      }
+      },
+      "afterNodeId": "cal-rail-tasks-pill"
     },
     {
-      "operationId": "ins-cal-panes",
+      "operationId": "insert-cal-panes",
       "type": "insertNode",
       "parent": {
         "nodeId": "root",
         "slot": "children"
       },
-      "afterNodeId": "cal-rail",
       "node": {
         "id": "cal-panes",
         "componentId": "layout/supporting-pane-scaffold",
@@ -628,29 +616,28 @@
             "weight": 1
           }
         ]
-      }
+      },
+      "afterNodeId": "cal-rail"
     },
     {
-      "operationId": "ins-cal-day",
+      "operationId": "insert-cal-day",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-panes",
         "slot": "mainPane"
       },
-      "afterNodeId": null,
       "node": {
         "id": "cal-day",
         "componentId": "layout/scaffold"
       }
     },
     {
-      "operationId": "ins-cal-bar",
+      "operationId": "insert-cal-bar",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-day",
         "slot": "topBar"
       },
-      "afterNodeId": null,
       "node": {
         "id": "cal-bar",
         "componentId": "m3/center-aligned-top-app-bar",
@@ -663,13 +650,12 @@
       }
     },
     {
-      "operationId": "ins-cal-bar-title",
+      "operationId": "insert-cal-bar-title",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-bar",
         "slot": "title"
       },
-      "afterNodeId": null,
       "node": {
         "id": "cal-bar-title",
         "componentId": "m3/text",
@@ -686,13 +672,12 @@
       }
     },
     {
-      "operationId": "ins-cal-day-body",
+      "operationId": "insert-cal-day-body",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-day",
         "slot": "content"
       },
-      "afterNodeId": null,
       "node": {
         "id": "cal-day-body",
         "componentId": "layout/column",
@@ -714,13 +699,12 @@
       }
     },
     {
-      "operationId": "ins-cal-day-head",
+      "operationId": "insert-cal-day-head",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-day-body",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "cal-day-head",
         "componentId": "layout/row",
@@ -749,13 +733,12 @@
       }
     },
     {
-      "operationId": "ins-cal-day-title",
+      "operationId": "insert-cal-day-title",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-day-head",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "cal-day-title",
         "componentId": "m3/text",
@@ -782,13 +765,12 @@
       }
     },
     {
-      "operationId": "ins-cal-search-button",
+      "operationId": "insert-cal-search-button",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-day-head",
         "slot": "children"
       },
-      "afterNodeId": "cal-day-title",
       "node": {
         "id": "cal-search-button",
         "componentId": "m3/icon-button",
@@ -802,16 +784,16 @@
             "value": "Search"
           }
         }
-      }
+      },
+      "afterNodeId": "cal-day-title"
     },
     {
-      "operationId": "ins-cal-search-button-icon",
+      "operationId": "insert-cal-search-button-icon",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-search-button",
         "slot": "content"
       },
-      "afterNodeId": null,
       "node": {
         "id": "cal-search-button-icon",
         "componentId": "m3/icon",
@@ -828,13 +810,12 @@
       }
     },
     {
-      "operationId": "ins-cal-refresh-button",
+      "operationId": "insert-cal-refresh-button",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-day-head",
         "slot": "children"
       },
-      "afterNodeId": "cal-search-button",
       "node": {
         "id": "cal-refresh-button",
         "componentId": "m3/icon-button",
@@ -848,16 +829,16 @@
             "value": "Refresh"
           }
         }
-      }
+      },
+      "afterNodeId": "cal-search-button"
     },
     {
-      "operationId": "ins-cal-refresh-button-icon",
+      "operationId": "insert-cal-refresh-button-icon",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-refresh-button",
         "slot": "content"
       },
-      "afterNodeId": null,
       "node": {
         "id": "cal-refresh-button-icon",
         "componentId": "m3/icon",
@@ -874,13 +855,12 @@
       }
     },
     {
-      "operationId": "ins-cal-add-button",
+      "operationId": "insert-cal-add-button",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-day-head",
         "slot": "children"
       },
-      "afterNodeId": "cal-refresh-button",
       "node": {
         "id": "cal-add-button",
         "componentId": "m3/icon-button",
@@ -894,16 +874,16 @@
             "value": "Create"
           }
         }
-      }
+      },
+      "afterNodeId": "cal-refresh-button"
     },
     {
-      "operationId": "ins-cal-add-button-icon",
+      "operationId": "insert-cal-add-button-icon",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-add-button",
         "slot": "content"
       },
-      "afterNodeId": null,
       "node": {
         "id": "cal-add-button-icon",
         "componentId": "m3/icon",
@@ -920,13 +900,12 @@
       }
     },
     {
-      "operationId": "ins-cal-hours",
+      "operationId": "insert-cal-hours",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-day-body",
         "slot": "children"
       },
-      "afterNodeId": "cal-day-head",
       "node": {
         "id": "cal-hours",
         "componentId": "layout/lazy-column",
@@ -952,16 +931,16 @@
             "type": "fillMaxSize"
           }
         ]
-      }
+      },
+      "afterNodeId": "cal-day-head"
     },
     {
-      "operationId": "ins-cal-slot-0800",
+      "operationId": "insert-cal-slot-0800",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-hours",
         "slot": "items"
       },
-      "afterNodeId": null,
       "node": {
         "id": "cal-slot-0800",
         "componentId": "layout/row",
@@ -994,13 +973,12 @@
       }
     },
     {
-      "operationId": "ins-cal-slot-0800-label",
+      "operationId": "insert-cal-slot-0800-label",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-slot-0800",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "cal-slot-0800-label",
         "componentId": "m3/text",
@@ -1034,13 +1012,12 @@
       }
     },
     {
-      "operationId": "ins-cal-slot-0800-lane",
+      "operationId": "insert-cal-slot-0800-lane",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-slot-0800",
         "slot": "children"
       },
-      "afterNodeId": "cal-slot-0800-label",
       "node": {
         "id": "cal-slot-0800-lane",
         "componentId": "layout/box",
@@ -1053,16 +1030,16 @@
             "type": "fillMaxHeight"
           }
         ]
-      }
+      },
+      "afterNodeId": "cal-slot-0800-label"
     },
     {
-      "operationId": "ins-cal-slot-0800-rule",
+      "operationId": "insert-cal-slot-0800-rule",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-slot-0800-lane",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "cal-slot-0800-rule",
         "componentId": "m3/horizontal-divider",
@@ -1088,13 +1065,12 @@
       }
     },
     {
-      "operationId": "ins-cal-slot-0900",
+      "operationId": "insert-cal-slot-0900",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-hours",
         "slot": "items"
       },
-      "afterNodeId": "cal-slot-0800",
       "node": {
         "id": "cal-slot-0900",
         "componentId": "layout/row",
@@ -1124,16 +1100,16 @@
             "bottomDp": 0
           }
         ]
-      }
+      },
+      "afterNodeId": "cal-slot-0800"
     },
     {
-      "operationId": "ins-cal-slot-0900-label",
+      "operationId": "insert-cal-slot-0900-label",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-slot-0900",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "cal-slot-0900-label",
         "componentId": "m3/text",
@@ -1167,13 +1143,12 @@
       }
     },
     {
-      "operationId": "ins-cal-slot-0900-lane",
+      "operationId": "insert-cal-slot-0900-lane",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-slot-0900",
         "slot": "children"
       },
-      "afterNodeId": "cal-slot-0900-label",
       "node": {
         "id": "cal-slot-0900-lane",
         "componentId": "layout/box",
@@ -1186,16 +1161,16 @@
             "type": "fillMaxHeight"
           }
         ]
-      }
+      },
+      "afterNodeId": "cal-slot-0900-label"
     },
     {
-      "operationId": "ins-cal-slot-0900-rule",
+      "operationId": "insert-cal-slot-0900-rule",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-slot-0900-lane",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "cal-slot-0900-rule",
         "componentId": "m3/horizontal-divider",
@@ -1221,13 +1196,12 @@
       }
     },
     {
-      "operationId": "ins-cal-event-0900",
+      "operationId": "insert-cal-event-0900",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-slot-0900-lane",
         "slot": "children"
       },
-      "afterNodeId": "cal-slot-0900-rule",
       "node": {
         "id": "cal-event-0900",
         "componentId": "m3/card",
@@ -1257,16 +1231,16 @@
             "bottomDp": 4
           }
         ]
-      }
+      },
+      "afterNodeId": "cal-slot-0900-rule"
     },
     {
-      "operationId": "ins-cal-event-0900-body",
+      "operationId": "insert-cal-event-0900-body",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-event-0900",
         "slot": "content"
       },
-      "afterNodeId": null,
       "node": {
         "id": "cal-event-0900-body",
         "componentId": "layout/column",
@@ -1295,13 +1269,12 @@
       }
     },
     {
-      "operationId": "ins-cal-event-0900-title",
+      "operationId": "insert-cal-event-0900-title",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-event-0900-body",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "cal-event-0900-title",
         "componentId": "m3/text",
@@ -1330,13 +1303,12 @@
       }
     },
     {
-      "operationId": "ins-cal-event-0900-detail",
+      "operationId": "insert-cal-event-0900-detail",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-event-0900-body",
         "slot": "children"
       },
-      "afterNodeId": "cal-event-0900-title",
       "node": {
         "id": "cal-event-0900-detail",
         "componentId": "m3/text",
@@ -1354,16 +1326,16 @@
             "value": "#FFFFFFFF"
           }
         }
-      }
+      },
+      "afterNodeId": "cal-event-0900-title"
     },
     {
-      "operationId": "ins-cal-slot-1000",
+      "operationId": "insert-cal-slot-1000",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-hours",
         "slot": "items"
       },
-      "afterNodeId": "cal-slot-0900",
       "node": {
         "id": "cal-slot-1000",
         "componentId": "layout/row",
@@ -1393,16 +1365,16 @@
             "bottomDp": 0
           }
         ]
-      }
+      },
+      "afterNodeId": "cal-slot-0900"
     },
     {
-      "operationId": "ins-cal-slot-1000-label",
+      "operationId": "insert-cal-slot-1000-label",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-slot-1000",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "cal-slot-1000-label",
         "componentId": "m3/text",
@@ -1436,13 +1408,12 @@
       }
     },
     {
-      "operationId": "ins-cal-slot-1000-lane",
+      "operationId": "insert-cal-slot-1000-lane",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-slot-1000",
         "slot": "children"
       },
-      "afterNodeId": "cal-slot-1000-label",
       "node": {
         "id": "cal-slot-1000-lane",
         "componentId": "layout/box",
@@ -1455,16 +1426,16 @@
             "type": "fillMaxHeight"
           }
         ]
-      }
+      },
+      "afterNodeId": "cal-slot-1000-label"
     },
     {
-      "operationId": "ins-cal-slot-1000-rule",
+      "operationId": "insert-cal-slot-1000-rule",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-slot-1000-lane",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "cal-slot-1000-rule",
         "componentId": "m3/horizontal-divider",
@@ -1490,13 +1461,12 @@
       }
     },
     {
-      "operationId": "ins-cal-event-1000",
+      "operationId": "insert-cal-event-1000",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-slot-1000-lane",
         "slot": "children"
       },
-      "afterNodeId": "cal-slot-1000-rule",
       "node": {
         "id": "cal-event-1000",
         "componentId": "m3/card",
@@ -1526,16 +1496,16 @@
             "bottomDp": 4
           }
         ]
-      }
+      },
+      "afterNodeId": "cal-slot-1000-rule"
     },
     {
-      "operationId": "ins-cal-event-1000-body",
+      "operationId": "insert-cal-event-1000-body",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-event-1000",
         "slot": "content"
       },
-      "afterNodeId": null,
       "node": {
         "id": "cal-event-1000-body",
         "componentId": "layout/column",
@@ -1564,13 +1534,12 @@
       }
     },
     {
-      "operationId": "ins-cal-event-1000-title",
+      "operationId": "insert-cal-event-1000-title",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-event-1000-body",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "cal-event-1000-title",
         "componentId": "m3/text",
@@ -1599,13 +1568,12 @@
       }
     },
     {
-      "operationId": "ins-cal-event-1000-detail",
+      "operationId": "insert-cal-event-1000-detail",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-event-1000-body",
         "slot": "children"
       },
-      "afterNodeId": "cal-event-1000-title",
       "node": {
         "id": "cal-event-1000-detail",
         "componentId": "m3/text",
@@ -1623,16 +1591,16 @@
             "value": "#FFFFFFFF"
           }
         }
-      }
+      },
+      "afterNodeId": "cal-event-1000-title"
     },
     {
-      "operationId": "ins-cal-slot-1100",
+      "operationId": "insert-cal-slot-1100",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-hours",
         "slot": "items"
       },
-      "afterNodeId": "cal-slot-1000",
       "node": {
         "id": "cal-slot-1100",
         "componentId": "layout/row",
@@ -1662,16 +1630,16 @@
             "bottomDp": 0
           }
         ]
-      }
+      },
+      "afterNodeId": "cal-slot-1000"
     },
     {
-      "operationId": "ins-cal-slot-1100-label",
+      "operationId": "insert-cal-slot-1100-label",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-slot-1100",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "cal-slot-1100-label",
         "componentId": "m3/text",
@@ -1705,13 +1673,12 @@
       }
     },
     {
-      "operationId": "ins-cal-slot-1100-lane",
+      "operationId": "insert-cal-slot-1100-lane",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-slot-1100",
         "slot": "children"
       },
-      "afterNodeId": "cal-slot-1100-label",
       "node": {
         "id": "cal-slot-1100-lane",
         "componentId": "layout/box",
@@ -1724,16 +1691,16 @@
             "type": "fillMaxHeight"
           }
         ]
-      }
+      },
+      "afterNodeId": "cal-slot-1100-label"
     },
     {
-      "operationId": "ins-cal-slot-1100-rule",
+      "operationId": "insert-cal-slot-1100-rule",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-slot-1100-lane",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "cal-slot-1100-rule",
         "componentId": "m3/horizontal-divider",
@@ -1759,13 +1726,12 @@
       }
     },
     {
-      "operationId": "ins-cal-slot-1200",
+      "operationId": "insert-cal-slot-1200",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-hours",
         "slot": "items"
       },
-      "afterNodeId": "cal-slot-1100",
       "node": {
         "id": "cal-slot-1200",
         "componentId": "layout/row",
@@ -1795,16 +1761,16 @@
             "bottomDp": 0
           }
         ]
-      }
+      },
+      "afterNodeId": "cal-slot-1100"
     },
     {
-      "operationId": "ins-cal-slot-1200-label",
+      "operationId": "insert-cal-slot-1200-label",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-slot-1200",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "cal-slot-1200-label",
         "componentId": "m3/text",
@@ -1838,13 +1804,12 @@
       }
     },
     {
-      "operationId": "ins-cal-slot-1200-lane",
+      "operationId": "insert-cal-slot-1200-lane",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-slot-1200",
         "slot": "children"
       },
-      "afterNodeId": "cal-slot-1200-label",
       "node": {
         "id": "cal-slot-1200-lane",
         "componentId": "layout/box",
@@ -1857,16 +1822,16 @@
             "type": "fillMaxHeight"
           }
         ]
-      }
+      },
+      "afterNodeId": "cal-slot-1200-label"
     },
     {
-      "operationId": "ins-cal-slot-1200-rule",
+      "operationId": "insert-cal-slot-1200-rule",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-slot-1200-lane",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "cal-slot-1200-rule",
         "componentId": "m3/horizontal-divider",
@@ -1892,13 +1857,12 @@
       }
     },
     {
-      "operationId": "ins-cal-event-1200",
+      "operationId": "insert-cal-event-1200",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-slot-1200-lane",
         "slot": "children"
       },
-      "afterNodeId": "cal-slot-1200-rule",
       "node": {
         "id": "cal-event-1200",
         "componentId": "m3/card",
@@ -1928,16 +1892,16 @@
             "bottomDp": 4
           }
         ]
-      }
+      },
+      "afterNodeId": "cal-slot-1200-rule"
     },
     {
-      "operationId": "ins-cal-event-1200-body",
+      "operationId": "insert-cal-event-1200-body",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-event-1200",
         "slot": "content"
       },
-      "afterNodeId": null,
       "node": {
         "id": "cal-event-1200-body",
         "componentId": "layout/column",
@@ -1966,13 +1930,12 @@
       }
     },
     {
-      "operationId": "ins-cal-event-1200-title",
+      "operationId": "insert-cal-event-1200-title",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-event-1200-body",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "cal-event-1200-title",
         "componentId": "m3/text",
@@ -2001,13 +1964,12 @@
       }
     },
     {
-      "operationId": "ins-cal-event-1200-detail",
+      "operationId": "insert-cal-event-1200-detail",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-event-1200-body",
         "slot": "children"
       },
-      "afterNodeId": "cal-event-1200-title",
       "node": {
         "id": "cal-event-1200-detail",
         "componentId": "m3/text",
@@ -2025,16 +1987,16 @@
             "value": "#FFFFFFFF"
           }
         }
-      }
+      },
+      "afterNodeId": "cal-event-1200-title"
     },
     {
-      "operationId": "ins-cal-slot-1300",
+      "operationId": "insert-cal-slot-1300",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-hours",
         "slot": "items"
       },
-      "afterNodeId": "cal-slot-1200",
       "node": {
         "id": "cal-slot-1300",
         "componentId": "layout/row",
@@ -2064,16 +2026,16 @@
             "bottomDp": 0
           }
         ]
-      }
+      },
+      "afterNodeId": "cal-slot-1200"
     },
     {
-      "operationId": "ins-cal-slot-1300-label",
+      "operationId": "insert-cal-slot-1300-label",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-slot-1300",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "cal-slot-1300-label",
         "componentId": "m3/text",
@@ -2107,13 +2069,12 @@
       }
     },
     {
-      "operationId": "ins-cal-slot-1300-lane",
+      "operationId": "insert-cal-slot-1300-lane",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-slot-1300",
         "slot": "children"
       },
-      "afterNodeId": "cal-slot-1300-label",
       "node": {
         "id": "cal-slot-1300-lane",
         "componentId": "layout/box",
@@ -2126,16 +2087,16 @@
             "type": "fillMaxHeight"
           }
         ]
-      }
+      },
+      "afterNodeId": "cal-slot-1300-label"
     },
     {
-      "operationId": "ins-cal-slot-1300-rule",
+      "operationId": "insert-cal-slot-1300-rule",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-slot-1300-lane",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "cal-slot-1300-rule",
         "componentId": "m3/horizontal-divider",
@@ -2161,13 +2122,12 @@
       }
     },
     {
-      "operationId": "ins-cal-slot-1400",
+      "operationId": "insert-cal-slot-1400",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-hours",
         "slot": "items"
       },
-      "afterNodeId": "cal-slot-1300",
       "node": {
         "id": "cal-slot-1400",
         "componentId": "layout/row",
@@ -2197,16 +2157,16 @@
             "bottomDp": 0
           }
         ]
-      }
+      },
+      "afterNodeId": "cal-slot-1300"
     },
     {
-      "operationId": "ins-cal-slot-1400-label",
+      "operationId": "insert-cal-slot-1400-label",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-slot-1400",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "cal-slot-1400-label",
         "componentId": "m3/text",
@@ -2240,13 +2200,12 @@
       }
     },
     {
-      "operationId": "ins-cal-slot-1400-lane",
+      "operationId": "insert-cal-slot-1400-lane",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-slot-1400",
         "slot": "children"
       },
-      "afterNodeId": "cal-slot-1400-label",
       "node": {
         "id": "cal-slot-1400-lane",
         "componentId": "layout/box",
@@ -2259,16 +2218,16 @@
             "type": "fillMaxHeight"
           }
         ]
-      }
+      },
+      "afterNodeId": "cal-slot-1400-label"
     },
     {
-      "operationId": "ins-cal-slot-1400-rule",
+      "operationId": "insert-cal-slot-1400-rule",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-slot-1400-lane",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "cal-slot-1400-rule",
         "componentId": "m3/horizontal-divider",
@@ -2294,13 +2253,12 @@
       }
     },
     {
-      "operationId": "ins-cal-event-1400",
+      "operationId": "insert-cal-event-1400",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-slot-1400-lane",
         "slot": "children"
       },
-      "afterNodeId": "cal-slot-1400-rule",
       "node": {
         "id": "cal-event-1400",
         "componentId": "m3/card",
@@ -2330,16 +2288,16 @@
             "bottomDp": 4
           }
         ]
-      }
+      },
+      "afterNodeId": "cal-slot-1400-rule"
     },
     {
-      "operationId": "ins-cal-event-1400-body",
+      "operationId": "insert-cal-event-1400-body",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-event-1400",
         "slot": "content"
       },
-      "afterNodeId": null,
       "node": {
         "id": "cal-event-1400-body",
         "componentId": "layout/column",
@@ -2368,13 +2326,12 @@
       }
     },
     {
-      "operationId": "ins-cal-event-1400-title",
+      "operationId": "insert-cal-event-1400-title",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-event-1400-body",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "cal-event-1400-title",
         "componentId": "m3/text",
@@ -2403,13 +2360,12 @@
       }
     },
     {
-      "operationId": "ins-cal-event-1400-detail",
+      "operationId": "insert-cal-event-1400-detail",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-event-1400-body",
         "slot": "children"
       },
-      "afterNodeId": "cal-event-1400-title",
       "node": {
         "id": "cal-event-1400-detail",
         "componentId": "m3/text",
@@ -2427,16 +2383,16 @@
             "value": "#FFFFFFFF"
           }
         }
-      }
+      },
+      "afterNodeId": "cal-event-1400-title"
     },
     {
-      "operationId": "ins-cal-slot-1500",
+      "operationId": "insert-cal-slot-1500",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-hours",
         "slot": "items"
       },
-      "afterNodeId": "cal-slot-1400",
       "node": {
         "id": "cal-slot-1500",
         "componentId": "layout/row",
@@ -2466,16 +2422,16 @@
             "bottomDp": 0
           }
         ]
-      }
+      },
+      "afterNodeId": "cal-slot-1400"
     },
     {
-      "operationId": "ins-cal-slot-1500-label",
+      "operationId": "insert-cal-slot-1500-label",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-slot-1500",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "cal-slot-1500-label",
         "componentId": "m3/text",
@@ -2509,13 +2465,12 @@
       }
     },
     {
-      "operationId": "ins-cal-slot-1500-lane",
+      "operationId": "insert-cal-slot-1500-lane",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-slot-1500",
         "slot": "children"
       },
-      "afterNodeId": "cal-slot-1500-label",
       "node": {
         "id": "cal-slot-1500-lane",
         "componentId": "layout/box",
@@ -2528,16 +2483,16 @@
             "type": "fillMaxHeight"
           }
         ]
-      }
+      },
+      "afterNodeId": "cal-slot-1500-label"
     },
     {
-      "operationId": "ins-cal-slot-1500-rule",
+      "operationId": "insert-cal-slot-1500-rule",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-slot-1500-lane",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "cal-slot-1500-rule",
         "componentId": "m3/horizontal-divider",
@@ -2563,13 +2518,12 @@
       }
     },
     {
-      "operationId": "ins-cal-slot-1600",
+      "operationId": "insert-cal-slot-1600",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-hours",
         "slot": "items"
       },
-      "afterNodeId": "cal-slot-1500",
       "node": {
         "id": "cal-slot-1600",
         "componentId": "layout/row",
@@ -2599,16 +2553,16 @@
             "bottomDp": 0
           }
         ]
-      }
+      },
+      "afterNodeId": "cal-slot-1500"
     },
     {
-      "operationId": "ins-cal-slot-1600-label",
+      "operationId": "insert-cal-slot-1600-label",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-slot-1600",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "cal-slot-1600-label",
         "componentId": "m3/text",
@@ -2642,13 +2596,12 @@
       }
     },
     {
-      "operationId": "ins-cal-slot-1600-lane",
+      "operationId": "insert-cal-slot-1600-lane",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-slot-1600",
         "slot": "children"
       },
-      "afterNodeId": "cal-slot-1600-label",
       "node": {
         "id": "cal-slot-1600-lane",
         "componentId": "layout/box",
@@ -2661,16 +2614,16 @@
             "type": "fillMaxHeight"
           }
         ]
-      }
+      },
+      "afterNodeId": "cal-slot-1600-label"
     },
     {
-      "operationId": "ins-cal-slot-1600-rule",
+      "operationId": "insert-cal-slot-1600-rule",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-slot-1600-lane",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "cal-slot-1600-rule",
         "componentId": "m3/horizontal-divider",
@@ -2696,13 +2649,12 @@
       }
     },
     {
-      "operationId": "ins-cal-event-1600",
+      "operationId": "insert-cal-event-1600",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-slot-1600-lane",
         "slot": "children"
       },
-      "afterNodeId": "cal-slot-1600-rule",
       "node": {
         "id": "cal-event-1600",
         "componentId": "m3/card",
@@ -2732,16 +2684,16 @@
             "bottomDp": 4
           }
         ]
-      }
+      },
+      "afterNodeId": "cal-slot-1600-rule"
     },
     {
-      "operationId": "ins-cal-event-1600-body",
+      "operationId": "insert-cal-event-1600-body",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-event-1600",
         "slot": "content"
       },
-      "afterNodeId": null,
       "node": {
         "id": "cal-event-1600-body",
         "componentId": "layout/column",
@@ -2770,13 +2722,12 @@
       }
     },
     {
-      "operationId": "ins-cal-event-1600-title",
+      "operationId": "insert-cal-event-1600-title",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-event-1600-body",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "cal-event-1600-title",
         "componentId": "m3/text",
@@ -2805,13 +2756,12 @@
       }
     },
     {
-      "operationId": "ins-cal-event-1600-detail",
+      "operationId": "insert-cal-event-1600-detail",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-event-1600-body",
         "slot": "children"
       },
-      "afterNodeId": "cal-event-1600-title",
       "node": {
         "id": "cal-event-1600-detail",
         "componentId": "m3/text",
@@ -2829,16 +2779,16 @@
             "value": "#FFFFFFFF"
           }
         }
-      }
+      },
+      "afterNodeId": "cal-event-1600-title"
     },
     {
-      "operationId": "ins-cal-slot-1700",
+      "operationId": "insert-cal-slot-1700",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-hours",
         "slot": "items"
       },
-      "afterNodeId": "cal-slot-1600",
       "node": {
         "id": "cal-slot-1700",
         "componentId": "layout/row",
@@ -2868,16 +2818,16 @@
             "bottomDp": 0
           }
         ]
-      }
+      },
+      "afterNodeId": "cal-slot-1600"
     },
     {
-      "operationId": "ins-cal-slot-1700-label",
+      "operationId": "insert-cal-slot-1700-label",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-slot-1700",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "cal-slot-1700-label",
         "componentId": "m3/text",
@@ -2911,13 +2861,12 @@
       }
     },
     {
-      "operationId": "ins-cal-slot-1700-lane",
+      "operationId": "insert-cal-slot-1700-lane",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-slot-1700",
         "slot": "children"
       },
-      "afterNodeId": "cal-slot-1700-label",
       "node": {
         "id": "cal-slot-1700-lane",
         "componentId": "layout/box",
@@ -2930,16 +2879,16 @@
             "type": "fillMaxHeight"
           }
         ]
-      }
+      },
+      "afterNodeId": "cal-slot-1700-label"
     },
     {
-      "operationId": "ins-cal-slot-1700-rule",
+      "operationId": "insert-cal-slot-1700-rule",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-slot-1700-lane",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "cal-slot-1700-rule",
         "componentId": "m3/horizontal-divider",
@@ -2965,26 +2914,24 @@
       }
     },
     {
-      "operationId": "ins-cal-side",
+      "operationId": "insert-cal-side",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-panes",
         "slot": "supportingPane"
       },
-      "afterNodeId": null,
       "node": {
         "id": "cal-side",
         "componentId": "layout/scaffold"
       }
     },
     {
-      "operationId": "ins-cal-side-body",
+      "operationId": "insert-cal-side-body",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-side",
         "slot": "content"
       },
-      "afterNodeId": null,
       "node": {
         "id": "cal-side-body",
         "componentId": "layout/column",
@@ -3016,13 +2963,12 @@
       }
     },
     {
-      "operationId": "ins-cal-mini-title",
+      "operationId": "insert-cal-mini-title",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-side-body",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "cal-mini-title",
         "componentId": "m3/text",
@@ -3043,13 +2989,12 @@
       }
     },
     {
-      "operationId": "ins-cal-mini-weekdays",
+      "operationId": "insert-cal-mini-weekdays",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-side-body",
         "slot": "children"
       },
-      "afterNodeId": "cal-mini-title",
       "node": {
         "id": "cal-mini-weekdays",
         "componentId": "layout/row",
@@ -3072,16 +3017,16 @@
             "type": "fillMaxWidth"
           }
         ]
-      }
+      },
+      "afterNodeId": "cal-mini-title"
     },
     {
-      "operationId": "ins-cal-weekday-0",
+      "operationId": "insert-cal-weekday-0",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-mini-weekdays",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "cal-weekday-0",
         "componentId": "m3/text",
@@ -3112,13 +3057,12 @@
       }
     },
     {
-      "operationId": "ins-cal-weekday-1",
+      "operationId": "insert-cal-weekday-1",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-mini-weekdays",
         "slot": "children"
       },
-      "afterNodeId": "cal-weekday-0",
       "node": {
         "id": "cal-weekday-1",
         "componentId": "m3/text",
@@ -3146,16 +3090,16 @@
             "widthDp": 36
           }
         ]
-      }
+      },
+      "afterNodeId": "cal-weekday-0"
     },
     {
-      "operationId": "ins-cal-weekday-2",
+      "operationId": "insert-cal-weekday-2",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-mini-weekdays",
         "slot": "children"
       },
-      "afterNodeId": "cal-weekday-1",
       "node": {
         "id": "cal-weekday-2",
         "componentId": "m3/text",
@@ -3183,16 +3127,16 @@
             "widthDp": 36
           }
         ]
-      }
+      },
+      "afterNodeId": "cal-weekday-1"
     },
     {
-      "operationId": "ins-cal-weekday-3",
+      "operationId": "insert-cal-weekday-3",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-mini-weekdays",
         "slot": "children"
       },
-      "afterNodeId": "cal-weekday-2",
       "node": {
         "id": "cal-weekday-3",
         "componentId": "m3/text",
@@ -3220,16 +3164,16 @@
             "widthDp": 36
           }
         ]
-      }
+      },
+      "afterNodeId": "cal-weekday-2"
     },
     {
-      "operationId": "ins-cal-weekday-4",
+      "operationId": "insert-cal-weekday-4",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-mini-weekdays",
         "slot": "children"
       },
-      "afterNodeId": "cal-weekday-3",
       "node": {
         "id": "cal-weekday-4",
         "componentId": "m3/text",
@@ -3257,16 +3201,16 @@
             "widthDp": 36
           }
         ]
-      }
+      },
+      "afterNodeId": "cal-weekday-3"
     },
     {
-      "operationId": "ins-cal-weekday-5",
+      "operationId": "insert-cal-weekday-5",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-mini-weekdays",
         "slot": "children"
       },
-      "afterNodeId": "cal-weekday-4",
       "node": {
         "id": "cal-weekday-5",
         "componentId": "m3/text",
@@ -3294,16 +3238,16 @@
             "widthDp": 36
           }
         ]
-      }
+      },
+      "afterNodeId": "cal-weekday-4"
     },
     {
-      "operationId": "ins-cal-weekday-6",
+      "operationId": "insert-cal-weekday-6",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-mini-weekdays",
         "slot": "children"
       },
-      "afterNodeId": "cal-weekday-5",
       "node": {
         "id": "cal-weekday-6",
         "componentId": "m3/text",
@@ -3331,16 +3275,16 @@
             "widthDp": 36
           }
         ]
-      }
+      },
+      "afterNodeId": "cal-weekday-5"
     },
     {
-      "operationId": "ins-cal-mini-grid",
+      "operationId": "insert-cal-mini-grid",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-side-body",
         "slot": "children"
       },
-      "afterNodeId": "cal-mini-weekdays",
       "node": {
         "id": "cal-mini-grid",
         "componentId": "layout/column",
@@ -3359,16 +3303,16 @@
             "type": "fillMaxWidth"
           }
         ]
-      }
+      },
+      "afterNodeId": "cal-mini-weekdays"
     },
     {
-      "operationId": "ins-cal-week-0",
+      "operationId": "insert-cal-week-0",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-mini-grid",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "cal-week-0",
         "componentId": "layout/row",
@@ -3394,13 +3338,12 @@
       }
     },
     {
-      "operationId": "ins-cal-day-1",
+      "operationId": "insert-cal-day-1",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-week-0",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "cal-day-1",
         "componentId": "layout/box",
@@ -3418,13 +3361,12 @@
       }
     },
     {
-      "operationId": "ins-cal-day-1-label",
+      "operationId": "insert-cal-day-1-label",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-day-1",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "cal-day-1-label",
         "componentId": "m3/text",
@@ -3453,13 +3395,12 @@
       }
     },
     {
-      "operationId": "ins-cal-day-2",
+      "operationId": "insert-cal-day-2",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-week-0",
         "slot": "children"
       },
-      "afterNodeId": "cal-day-1",
       "node": {
         "id": "cal-day-2",
         "componentId": "layout/box",
@@ -3474,16 +3415,16 @@
             "shape": "18"
           }
         ]
-      }
+      },
+      "afterNodeId": "cal-day-1"
     },
     {
-      "operationId": "ins-cal-day-2-label",
+      "operationId": "insert-cal-day-2-label",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-day-2",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "cal-day-2-label",
         "componentId": "m3/text",
@@ -3512,13 +3453,12 @@
       }
     },
     {
-      "operationId": "ins-cal-day-3",
+      "operationId": "insert-cal-day-3",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-week-0",
         "slot": "children"
       },
-      "afterNodeId": "cal-day-2",
       "node": {
         "id": "cal-day-3",
         "componentId": "layout/box",
@@ -3533,16 +3473,16 @@
             "shape": "18"
           }
         ]
-      }
+      },
+      "afterNodeId": "cal-day-2"
     },
     {
-      "operationId": "ins-cal-day-3-label",
+      "operationId": "insert-cal-day-3-label",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-day-3",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "cal-day-3-label",
         "componentId": "m3/text",
@@ -3571,13 +3511,12 @@
       }
     },
     {
-      "operationId": "ins-cal-day-4",
+      "operationId": "insert-cal-day-4",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-week-0",
         "slot": "children"
       },
-      "afterNodeId": "cal-day-3",
       "node": {
         "id": "cal-day-4",
         "componentId": "layout/box",
@@ -3592,16 +3531,16 @@
             "shape": "18"
           }
         ]
-      }
+      },
+      "afterNodeId": "cal-day-3"
     },
     {
-      "operationId": "ins-cal-day-4-label",
+      "operationId": "insert-cal-day-4-label",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-day-4",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "cal-day-4-label",
         "componentId": "m3/text",
@@ -3630,13 +3569,12 @@
       }
     },
     {
-      "operationId": "ins-cal-day-5",
+      "operationId": "insert-cal-day-5",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-week-0",
         "slot": "children"
       },
-      "afterNodeId": "cal-day-4",
       "node": {
         "id": "cal-day-5",
         "componentId": "layout/box",
@@ -3651,16 +3589,16 @@
             "shape": "18"
           }
         ]
-      }
+      },
+      "afterNodeId": "cal-day-4"
     },
     {
-      "operationId": "ins-cal-day-5-label",
+      "operationId": "insert-cal-day-5-label",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-day-5",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "cal-day-5-label",
         "componentId": "m3/text",
@@ -3689,13 +3627,12 @@
       }
     },
     {
-      "operationId": "ins-cal-day-6",
+      "operationId": "insert-cal-day-6",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-week-0",
         "slot": "children"
       },
-      "afterNodeId": "cal-day-5",
       "node": {
         "id": "cal-day-6",
         "componentId": "layout/box",
@@ -3710,16 +3647,16 @@
             "shape": "18"
           }
         ]
-      }
+      },
+      "afterNodeId": "cal-day-5"
     },
     {
-      "operationId": "ins-cal-day-6-label",
+      "operationId": "insert-cal-day-6-label",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-day-6",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "cal-day-6-label",
         "componentId": "m3/text",
@@ -3748,13 +3685,12 @@
       }
     },
     {
-      "operationId": "ins-cal-day-7",
+      "operationId": "insert-cal-day-7",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-week-0",
         "slot": "children"
       },
-      "afterNodeId": "cal-day-6",
       "node": {
         "id": "cal-day-7",
         "componentId": "layout/box",
@@ -3769,16 +3705,16 @@
             "shape": "18"
           }
         ]
-      }
+      },
+      "afterNodeId": "cal-day-6"
     },
     {
-      "operationId": "ins-cal-day-7-label",
+      "operationId": "insert-cal-day-7-label",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-day-7",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "cal-day-7-label",
         "componentId": "m3/text",
@@ -3807,13 +3743,12 @@
       }
     },
     {
-      "operationId": "ins-cal-week-1",
+      "operationId": "insert-cal-week-1",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-mini-grid",
         "slot": "children"
       },
-      "afterNodeId": "cal-week-0",
       "node": {
         "id": "cal-week-1",
         "componentId": "layout/row",
@@ -3836,16 +3771,16 @@
             "type": "fillMaxWidth"
           }
         ]
-      }
+      },
+      "afterNodeId": "cal-week-0"
     },
     {
-      "operationId": "ins-cal-day-8",
+      "operationId": "insert-cal-day-8",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-week-1",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "cal-day-8",
         "componentId": "layout/box",
@@ -3863,13 +3798,12 @@
       }
     },
     {
-      "operationId": "ins-cal-day-8-label",
+      "operationId": "insert-cal-day-8-label",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-day-8",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "cal-day-8-label",
         "componentId": "m3/text",
@@ -3898,13 +3832,12 @@
       }
     },
     {
-      "operationId": "ins-cal-day-9",
+      "operationId": "insert-cal-day-9",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-week-1",
         "slot": "children"
       },
-      "afterNodeId": "cal-day-8",
       "node": {
         "id": "cal-day-9",
         "componentId": "layout/box",
@@ -3919,16 +3852,16 @@
             "shape": "18"
           }
         ]
-      }
+      },
+      "afterNodeId": "cal-day-8"
     },
     {
-      "operationId": "ins-cal-day-9-label",
+      "operationId": "insert-cal-day-9-label",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-day-9",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "cal-day-9-label",
         "componentId": "m3/text",
@@ -3957,13 +3890,12 @@
       }
     },
     {
-      "operationId": "ins-cal-day-10",
+      "operationId": "insert-cal-day-10",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-week-1",
         "slot": "children"
       },
-      "afterNodeId": "cal-day-9",
       "node": {
         "id": "cal-day-10",
         "componentId": "layout/box",
@@ -3978,16 +3910,16 @@
             "shape": "18"
           }
         ]
-      }
+      },
+      "afterNodeId": "cal-day-9"
     },
     {
-      "operationId": "ins-cal-day-10-label",
+      "operationId": "insert-cal-day-10-label",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-day-10",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "cal-day-10-label",
         "componentId": "m3/text",
@@ -4016,13 +3948,12 @@
       }
     },
     {
-      "operationId": "ins-cal-day-11",
+      "operationId": "insert-cal-day-11",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-week-1",
         "slot": "children"
       },
-      "afterNodeId": "cal-day-10",
       "node": {
         "id": "cal-day-11",
         "componentId": "layout/box",
@@ -4037,16 +3968,16 @@
             "shape": "18"
           }
         ]
-      }
+      },
+      "afterNodeId": "cal-day-10"
     },
     {
-      "operationId": "ins-cal-day-11-label",
+      "operationId": "insert-cal-day-11-label",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-day-11",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "cal-day-11-label",
         "componentId": "m3/text",
@@ -4075,13 +4006,12 @@
       }
     },
     {
-      "operationId": "ins-cal-day-12",
+      "operationId": "insert-cal-day-12",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-week-1",
         "slot": "children"
       },
-      "afterNodeId": "cal-day-11",
       "node": {
         "id": "cal-day-12",
         "componentId": "layout/box",
@@ -4096,16 +4026,16 @@
             "shape": "18"
           }
         ]
-      }
+      },
+      "afterNodeId": "cal-day-11"
     },
     {
-      "operationId": "ins-cal-day-12-label",
+      "operationId": "insert-cal-day-12-label",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-day-12",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "cal-day-12-label",
         "componentId": "m3/text",
@@ -4134,13 +4064,12 @@
       }
     },
     {
-      "operationId": "ins-cal-day-13",
+      "operationId": "insert-cal-day-13",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-week-1",
         "slot": "children"
       },
-      "afterNodeId": "cal-day-12",
       "node": {
         "id": "cal-day-13",
         "componentId": "layout/box",
@@ -4155,16 +4084,16 @@
             "shape": "18"
           }
         ]
-      }
+      },
+      "afterNodeId": "cal-day-12"
     },
     {
-      "operationId": "ins-cal-day-13-label",
+      "operationId": "insert-cal-day-13-label",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-day-13",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "cal-day-13-label",
         "componentId": "m3/text",
@@ -4193,13 +4122,12 @@
       }
     },
     {
-      "operationId": "ins-cal-day-14",
+      "operationId": "insert-cal-day-14",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-week-1",
         "slot": "children"
       },
-      "afterNodeId": "cal-day-13",
       "node": {
         "id": "cal-day-14",
         "componentId": "layout/box",
@@ -4214,16 +4142,16 @@
             "shape": "18"
           }
         ]
-      }
+      },
+      "afterNodeId": "cal-day-13"
     },
     {
-      "operationId": "ins-cal-day-14-label",
+      "operationId": "insert-cal-day-14-label",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-day-14",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "cal-day-14-label",
         "componentId": "m3/text",
@@ -4252,13 +4180,12 @@
       }
     },
     {
-      "operationId": "ins-cal-week-2",
+      "operationId": "insert-cal-week-2",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-mini-grid",
         "slot": "children"
       },
-      "afterNodeId": "cal-week-1",
       "node": {
         "id": "cal-week-2",
         "componentId": "layout/row",
@@ -4281,16 +4208,16 @@
             "type": "fillMaxWidth"
           }
         ]
-      }
+      },
+      "afterNodeId": "cal-week-1"
     },
     {
-      "operationId": "ins-cal-day-15",
+      "operationId": "insert-cal-day-15",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-week-2",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "cal-day-15",
         "componentId": "layout/box",
@@ -4308,13 +4235,12 @@
       }
     },
     {
-      "operationId": "ins-cal-day-15-label",
+      "operationId": "insert-cal-day-15-label",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-day-15",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "cal-day-15-label",
         "componentId": "m3/text",
@@ -4343,13 +4269,12 @@
       }
     },
     {
-      "operationId": "ins-cal-day-16",
+      "operationId": "insert-cal-day-16",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-week-2",
         "slot": "children"
       },
-      "afterNodeId": "cal-day-15",
       "node": {
         "id": "cal-day-16",
         "componentId": "layout/box",
@@ -4372,16 +4297,16 @@
             "shape": "18"
           }
         ]
-      }
+      },
+      "afterNodeId": "cal-day-15"
     },
     {
-      "operationId": "ins-cal-day-16-label",
+      "operationId": "insert-cal-day-16-label",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-day-16",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "cal-day-16-label",
         "componentId": "m3/text",
@@ -4410,13 +4335,12 @@
       }
     },
     {
-      "operationId": "ins-cal-day-17",
+      "operationId": "insert-cal-day-17",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-week-2",
         "slot": "children"
       },
-      "afterNodeId": "cal-day-16",
       "node": {
         "id": "cal-day-17",
         "componentId": "layout/box",
@@ -4431,16 +4355,16 @@
             "shape": "18"
           }
         ]
-      }
+      },
+      "afterNodeId": "cal-day-16"
     },
     {
-      "operationId": "ins-cal-day-17-label",
+      "operationId": "insert-cal-day-17-label",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-day-17",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "cal-day-17-label",
         "componentId": "m3/text",
@@ -4469,13 +4393,12 @@
       }
     },
     {
-      "operationId": "ins-cal-day-18",
+      "operationId": "insert-cal-day-18",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-week-2",
         "slot": "children"
       },
-      "afterNodeId": "cal-day-17",
       "node": {
         "id": "cal-day-18",
         "componentId": "layout/box",
@@ -4490,16 +4413,16 @@
             "shape": "18"
           }
         ]
-      }
+      },
+      "afterNodeId": "cal-day-17"
     },
     {
-      "operationId": "ins-cal-day-18-label",
+      "operationId": "insert-cal-day-18-label",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-day-18",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "cal-day-18-label",
         "componentId": "m3/text",
@@ -4528,13 +4451,12 @@
       }
     },
     {
-      "operationId": "ins-cal-day-19",
+      "operationId": "insert-cal-day-19",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-week-2",
         "slot": "children"
       },
-      "afterNodeId": "cal-day-18",
       "node": {
         "id": "cal-day-19",
         "componentId": "layout/box",
@@ -4549,16 +4471,16 @@
             "shape": "18"
           }
         ]
-      }
+      },
+      "afterNodeId": "cal-day-18"
     },
     {
-      "operationId": "ins-cal-day-19-label",
+      "operationId": "insert-cal-day-19-label",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-day-19",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "cal-day-19-label",
         "componentId": "m3/text",
@@ -4587,13 +4509,12 @@
       }
     },
     {
-      "operationId": "ins-cal-day-20",
+      "operationId": "insert-cal-day-20",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-week-2",
         "slot": "children"
       },
-      "afterNodeId": "cal-day-19",
       "node": {
         "id": "cal-day-20",
         "componentId": "layout/box",
@@ -4608,16 +4529,16 @@
             "shape": "18"
           }
         ]
-      }
+      },
+      "afterNodeId": "cal-day-19"
     },
     {
-      "operationId": "ins-cal-day-20-label",
+      "operationId": "insert-cal-day-20-label",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-day-20",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "cal-day-20-label",
         "componentId": "m3/text",
@@ -4646,13 +4567,12 @@
       }
     },
     {
-      "operationId": "ins-cal-day-21",
+      "operationId": "insert-cal-day-21",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-week-2",
         "slot": "children"
       },
-      "afterNodeId": "cal-day-20",
       "node": {
         "id": "cal-day-21",
         "componentId": "layout/box",
@@ -4667,16 +4587,16 @@
             "shape": "18"
           }
         ]
-      }
+      },
+      "afterNodeId": "cal-day-20"
     },
     {
-      "operationId": "ins-cal-day-21-label",
+      "operationId": "insert-cal-day-21-label",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-day-21",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "cal-day-21-label",
         "componentId": "m3/text",
@@ -4705,13 +4625,12 @@
       }
     },
     {
-      "operationId": "ins-cal-week-3",
+      "operationId": "insert-cal-week-3",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-mini-grid",
         "slot": "children"
       },
-      "afterNodeId": "cal-week-2",
       "node": {
         "id": "cal-week-3",
         "componentId": "layout/row",
@@ -4734,16 +4653,16 @@
             "type": "fillMaxWidth"
           }
         ]
-      }
+      },
+      "afterNodeId": "cal-week-2"
     },
     {
-      "operationId": "ins-cal-day-22",
+      "operationId": "insert-cal-day-22",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-week-3",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "cal-day-22",
         "componentId": "layout/box",
@@ -4761,13 +4680,12 @@
       }
     },
     {
-      "operationId": "ins-cal-day-22-label",
+      "operationId": "insert-cal-day-22-label",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-day-22",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "cal-day-22-label",
         "componentId": "m3/text",
@@ -4796,13 +4714,12 @@
       }
     },
     {
-      "operationId": "ins-cal-day-23",
+      "operationId": "insert-cal-day-23",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-week-3",
         "slot": "children"
       },
-      "afterNodeId": "cal-day-22",
       "node": {
         "id": "cal-day-23",
         "componentId": "layout/box",
@@ -4817,16 +4734,16 @@
             "shape": "18"
           }
         ]
-      }
+      },
+      "afterNodeId": "cal-day-22"
     },
     {
-      "operationId": "ins-cal-day-23-label",
+      "operationId": "insert-cal-day-23-label",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-day-23",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "cal-day-23-label",
         "componentId": "m3/text",
@@ -4855,13 +4772,12 @@
       }
     },
     {
-      "operationId": "ins-cal-day-24",
+      "operationId": "insert-cal-day-24",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-week-3",
         "slot": "children"
       },
-      "afterNodeId": "cal-day-23",
       "node": {
         "id": "cal-day-24",
         "componentId": "layout/box",
@@ -4876,16 +4792,16 @@
             "shape": "18"
           }
         ]
-      }
+      },
+      "afterNodeId": "cal-day-23"
     },
     {
-      "operationId": "ins-cal-day-24-label",
+      "operationId": "insert-cal-day-24-label",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-day-24",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "cal-day-24-label",
         "componentId": "m3/text",
@@ -4914,13 +4830,12 @@
       }
     },
     {
-      "operationId": "ins-cal-day-25",
+      "operationId": "insert-cal-day-25",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-week-3",
         "slot": "children"
       },
-      "afterNodeId": "cal-day-24",
       "node": {
         "id": "cal-day-25",
         "componentId": "layout/box",
@@ -4935,16 +4850,16 @@
             "shape": "18"
           }
         ]
-      }
+      },
+      "afterNodeId": "cal-day-24"
     },
     {
-      "operationId": "ins-cal-day-25-label",
+      "operationId": "insert-cal-day-25-label",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-day-25",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "cal-day-25-label",
         "componentId": "m3/text",
@@ -4973,13 +4888,12 @@
       }
     },
     {
-      "operationId": "ins-cal-day-26",
+      "operationId": "insert-cal-day-26",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-week-3",
         "slot": "children"
       },
-      "afterNodeId": "cal-day-25",
       "node": {
         "id": "cal-day-26",
         "componentId": "layout/box",
@@ -4994,16 +4908,16 @@
             "shape": "18"
           }
         ]
-      }
+      },
+      "afterNodeId": "cal-day-25"
     },
     {
-      "operationId": "ins-cal-day-26-label",
+      "operationId": "insert-cal-day-26-label",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-day-26",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "cal-day-26-label",
         "componentId": "m3/text",
@@ -5032,13 +4946,12 @@
       }
     },
     {
-      "operationId": "ins-cal-day-27",
+      "operationId": "insert-cal-day-27",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-week-3",
         "slot": "children"
       },
-      "afterNodeId": "cal-day-26",
       "node": {
         "id": "cal-day-27",
         "componentId": "layout/box",
@@ -5053,16 +4966,16 @@
             "shape": "18"
           }
         ]
-      }
+      },
+      "afterNodeId": "cal-day-26"
     },
     {
-      "operationId": "ins-cal-day-27-label",
+      "operationId": "insert-cal-day-27-label",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-day-27",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "cal-day-27-label",
         "componentId": "m3/text",
@@ -5091,13 +5004,12 @@
       }
     },
     {
-      "operationId": "ins-cal-day-28",
+      "operationId": "insert-cal-day-28",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-week-3",
         "slot": "children"
       },
-      "afterNodeId": "cal-day-27",
       "node": {
         "id": "cal-day-28",
         "componentId": "layout/box",
@@ -5112,16 +5024,16 @@
             "shape": "18"
           }
         ]
-      }
+      },
+      "afterNodeId": "cal-day-27"
     },
     {
-      "operationId": "ins-cal-day-28-label",
+      "operationId": "insert-cal-day-28-label",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-day-28",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "cal-day-28-label",
         "componentId": "m3/text",
@@ -5150,13 +5062,12 @@
       }
     },
     {
-      "operationId": "ins-cal-week-4",
+      "operationId": "insert-cal-week-4",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-mini-grid",
         "slot": "children"
       },
-      "afterNodeId": "cal-week-3",
       "node": {
         "id": "cal-week-4",
         "componentId": "layout/row",
@@ -5179,16 +5090,16 @@
             "type": "fillMaxWidth"
           }
         ]
-      }
+      },
+      "afterNodeId": "cal-week-3"
     },
     {
-      "operationId": "ins-cal-day-29",
+      "operationId": "insert-cal-day-29",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-week-4",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "cal-day-29",
         "componentId": "layout/box",
@@ -5206,13 +5117,12 @@
       }
     },
     {
-      "operationId": "ins-cal-day-29-label",
+      "operationId": "insert-cal-day-29-label",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-day-29",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "cal-day-29-label",
         "componentId": "m3/text",
@@ -5241,13 +5151,12 @@
       }
     },
     {
-      "operationId": "ins-cal-day-30",
+      "operationId": "insert-cal-day-30",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-week-4",
         "slot": "children"
       },
-      "afterNodeId": "cal-day-29",
       "node": {
         "id": "cal-day-30",
         "componentId": "layout/box",
@@ -5262,16 +5171,16 @@
             "shape": "18"
           }
         ]
-      }
+      },
+      "afterNodeId": "cal-day-29"
     },
     {
-      "operationId": "ins-cal-day-30-label",
+      "operationId": "insert-cal-day-30-label",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-day-30",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "cal-day-30-label",
         "componentId": "m3/text",
@@ -5300,13 +5209,12 @@
       }
     },
     {
-      "operationId": "ins-cal-day-31",
+      "operationId": "insert-cal-day-31",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-week-4",
         "slot": "children"
       },
-      "afterNodeId": "cal-day-30",
       "node": {
         "id": "cal-day-31",
         "componentId": "layout/box",
@@ -5321,16 +5229,16 @@
             "shape": "18"
           }
         ]
-      }
+      },
+      "afterNodeId": "cal-day-30"
     },
     {
-      "operationId": "ins-cal-day-31-label",
+      "operationId": "insert-cal-day-31-label",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-day-31",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "cal-day-31-label",
         "componentId": "m3/text",
@@ -5359,13 +5267,12 @@
       }
     },
     {
-      "operationId": "ins-cal-blank-4-3",
+      "operationId": "insert-cal-blank-4-3",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-week-4",
         "slot": "children"
       },
-      "afterNodeId": "cal-day-31",
       "node": {
         "id": "cal-blank-4-3",
         "componentId": "layout/box",
@@ -5376,16 +5283,16 @@
             "heightDp": 36
           }
         ]
-      }
+      },
+      "afterNodeId": "cal-day-31"
     },
     {
-      "operationId": "ins-cal-blank-4-4",
+      "operationId": "insert-cal-blank-4-4",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-week-4",
         "slot": "children"
       },
-      "afterNodeId": "cal-blank-4-3",
       "node": {
         "id": "cal-blank-4-4",
         "componentId": "layout/box",
@@ -5396,16 +5303,16 @@
             "heightDp": 36
           }
         ]
-      }
+      },
+      "afterNodeId": "cal-blank-4-3"
     },
     {
-      "operationId": "ins-cal-blank-4-5",
+      "operationId": "insert-cal-blank-4-5",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-week-4",
         "slot": "children"
       },
-      "afterNodeId": "cal-blank-4-4",
       "node": {
         "id": "cal-blank-4-5",
         "componentId": "layout/box",
@@ -5416,16 +5323,16 @@
             "heightDp": 36
           }
         ]
-      }
+      },
+      "afterNodeId": "cal-blank-4-4"
     },
     {
-      "operationId": "ins-cal-blank-4-6",
+      "operationId": "insert-cal-blank-4-6",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-week-4",
         "slot": "children"
       },
-      "afterNodeId": "cal-blank-4-5",
       "node": {
         "id": "cal-blank-4-6",
         "componentId": "layout/box",
@@ -5436,16 +5343,16 @@
             "heightDp": 36
           }
         ]
-      }
+      },
+      "afterNodeId": "cal-blank-4-5"
     },
     {
-      "operationId": "ins-cal-side-rule",
+      "operationId": "insert-cal-side-rule",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-side-body",
         "slot": "children"
       },
-      "afterNodeId": "cal-mini-grid",
       "node": {
         "id": "cal-side-rule",
         "componentId": "m3/horizontal-divider",
@@ -5464,16 +5371,16 @@
             "type": "fillMaxWidth"
           }
         ]
-      }
+      },
+      "afterNodeId": "cal-mini-grid"
     },
     {
-      "operationId": "ins-cal-next-title",
+      "operationId": "insert-cal-next-title",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-side-body",
         "slot": "children"
       },
-      "afterNodeId": "cal-side-rule",
       "node": {
         "id": "cal-next-title",
         "componentId": "m3/text",
@@ -5491,16 +5398,16 @@
             "value": "semiBold"
           }
         }
-      }
+      },
+      "afterNodeId": "cal-side-rule"
     },
     {
-      "operationId": "ins-cal-next-review",
+      "operationId": "insert-cal-next-review",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-side-body",
         "slot": "children"
       },
-      "afterNodeId": "cal-next-title",
       "node": {
         "id": "cal-next-review",
         "componentId": "m3/list-item",
@@ -5515,16 +5422,16 @@
             "type": "fillMaxWidth"
           }
         ]
-      }
+      },
+      "afterNodeId": "cal-next-title"
     },
     {
-      "operationId": "ins-cal-next-review-headline",
+      "operationId": "insert-cal-next-review-headline",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-next-review",
         "slot": "headline"
       },
-      "afterNodeId": null,
       "node": {
         "id": "cal-next-review-headline",
         "componentId": "m3/text",
@@ -5549,13 +5456,12 @@
       }
     },
     {
-      "operationId": "ins-cal-next-review-detail",
+      "operationId": "insert-cal-next-review-detail",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-next-review",
         "slot": "supporting"
       },
-      "afterNodeId": null,
       "node": {
         "id": "cal-next-review-detail",
         "componentId": "m3/text",
@@ -5576,13 +5482,12 @@
       }
     },
     {
-      "operationId": "ins-cal-next-audit",
+      "operationId": "insert-cal-next-audit",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-side-body",
         "slot": "children"
       },
-      "afterNodeId": "cal-next-review",
       "node": {
         "id": "cal-next-audit",
         "componentId": "m3/list-item",
@@ -5597,16 +5502,16 @@
             "type": "fillMaxWidth"
           }
         ]
-      }
+      },
+      "afterNodeId": "cal-next-review"
     },
     {
-      "operationId": "ins-cal-next-audit-headline",
+      "operationId": "insert-cal-next-audit-headline",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-next-audit",
         "slot": "headline"
       },
-      "afterNodeId": null,
       "node": {
         "id": "cal-next-audit-headline",
         "componentId": "m3/text",
@@ -5631,13 +5536,12 @@
       }
     },
     {
-      "operationId": "ins-cal-next-audit-detail",
+      "operationId": "insert-cal-next-audit-detail",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-next-audit",
         "slot": "supporting"
       },
-      "afterNodeId": null,
       "node": {
         "id": "cal-next-audit-detail",
         "componentId": "m3/text",
@@ -5658,13 +5562,12 @@
       }
     },
     {
-      "operationId": "ins-cal-next-spike",
+      "operationId": "insert-cal-next-spike",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-side-body",
         "slot": "children"
       },
-      "afterNodeId": "cal-next-audit",
       "node": {
         "id": "cal-next-spike",
         "componentId": "m3/list-item",
@@ -5679,16 +5582,16 @@
             "type": "fillMaxWidth"
           }
         ]
-      }
+      },
+      "afterNodeId": "cal-next-audit"
     },
     {
-      "operationId": "ins-cal-next-spike-headline",
+      "operationId": "insert-cal-next-spike-headline",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-next-spike",
         "slot": "headline"
       },
-      "afterNodeId": null,
       "node": {
         "id": "cal-next-spike-headline",
         "componentId": "m3/text",
@@ -5713,13 +5616,12 @@
       }
     },
     {
-      "operationId": "ins-cal-next-spike-detail",
+      "operationId": "insert-cal-next-spike-detail",
       "type": "insertNode",
       "parent": {
         "nodeId": "cal-next-spike",
         "slot": "supporting"
       },
-      "afterNodeId": null,
       "node": {
         "id": "cal-next-spike-detail",
         "componentId": "m3/text",

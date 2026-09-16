@@ -44,10 +44,9 @@
       }
     },
     {
-      "operationId": "ins-root",
+      "operationId": "insert-root",
       "type": "insertNode",
       "parent": null,
-      "afterNodeId": null,
       "node": {
         "id": "root",
         "componentId": "layout/row",
@@ -65,13 +64,12 @@
       }
     },
     {
-      "operationId": "ins-rail",
+      "operationId": "insert-rail",
       "type": "insertNode",
       "parent": {
         "nodeId": "root",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "rail",
         "componentId": "layout/column",
@@ -111,13 +109,12 @@
       }
     },
     {
-      "operationId": "ins-rail-compose",
+      "operationId": "insert-rail-compose",
       "type": "insertNode",
       "parent": {
         "nodeId": "rail",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "rail-compose",
         "componentId": "m3/button",
@@ -139,13 +136,12 @@
       }
     },
     {
-      "operationId": "ins-icon-1",
+      "operationId": "insert-icon-1",
       "type": "insertNode",
       "parent": {
         "nodeId": "rail-compose",
         "slot": "content"
       },
-      "afterNodeId": null,
       "node": {
         "id": "icon-1",
         "componentId": "m3/icon",
@@ -162,13 +158,12 @@
       }
     },
     {
-      "operationId": "ins-rail-inbox",
+      "operationId": "insert-rail-inbox",
       "type": "insertNode",
       "parent": {
         "nodeId": "rail",
         "slot": "children"
       },
-      "afterNodeId": "rail-compose",
       "node": {
         "id": "rail-inbox",
         "componentId": "layout/column",
@@ -194,16 +189,16 @@
             "bottomDp": 4
           }
         ]
-      }
+      },
+      "afterNodeId": "rail-compose"
     },
     {
-      "operationId": "ins-rail-inbox-pill",
+      "operationId": "insert-rail-inbox-pill",
       "type": "insertNode",
       "parent": {
         "nodeId": "rail-inbox",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "rail-inbox-pill",
         "componentId": "layout/box",
@@ -235,13 +230,12 @@
       }
     },
     {
-      "operationId": "ins-icon-2",
+      "operationId": "insert-icon-2",
       "type": "insertNode",
       "parent": {
         "nodeId": "rail-inbox-pill",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "icon-2",
         "componentId": "m3/icon",
@@ -266,13 +260,12 @@
       }
     },
     {
-      "operationId": "ins-text-3",
+      "operationId": "insert-text-3",
       "type": "insertNode",
       "parent": {
         "nodeId": "rail-inbox",
         "slot": "children"
       },
-      "afterNodeId": "rail-inbox-pill",
       "node": {
         "id": "text-3",
         "componentId": "m3/text",
@@ -290,16 +283,16 @@
             "value": "onSurface"
           }
         }
-      }
+      },
+      "afterNodeId": "rail-inbox-pill"
     },
     {
-      "operationId": "ins-rail-starred",
+      "operationId": "insert-rail-starred",
       "type": "insertNode",
       "parent": {
         "nodeId": "rail",
         "slot": "children"
       },
-      "afterNodeId": "rail-inbox",
       "node": {
         "id": "rail-starred",
         "componentId": "layout/column",
@@ -325,16 +318,16 @@
             "bottomDp": 4
           }
         ]
-      }
+      },
+      "afterNodeId": "rail-inbox"
     },
     {
-      "operationId": "ins-rail-starred-pill",
+      "operationId": "insert-rail-starred-pill",
       "type": "insertNode",
       "parent": {
         "nodeId": "rail-starred",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "rail-starred-pill",
         "componentId": "layout/box",
@@ -358,13 +351,12 @@
       }
     },
     {
-      "operationId": "ins-icon-4",
+      "operationId": "insert-icon-4",
       "type": "insertNode",
       "parent": {
         "nodeId": "rail-starred-pill",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "icon-4",
         "componentId": "m3/icon",
@@ -389,13 +381,12 @@
       }
     },
     {
-      "operationId": "ins-text-5",
+      "operationId": "insert-text-5",
       "type": "insertNode",
       "parent": {
         "nodeId": "rail-starred",
         "slot": "children"
       },
-      "afterNodeId": "rail-starred-pill",
       "node": {
         "id": "text-5",
         "componentId": "m3/text",
@@ -413,16 +404,16 @@
             "value": "onSurfaceVariant"
           }
         }
-      }
+      },
+      "afterNodeId": "rail-starred-pill"
     },
     {
-      "operationId": "ins-rail-snoozed",
+      "operationId": "insert-rail-snoozed",
       "type": "insertNode",
       "parent": {
         "nodeId": "rail",
         "slot": "children"
       },
-      "afterNodeId": "rail-starred",
       "node": {
         "id": "rail-snoozed",
         "componentId": "layout/column",
@@ -448,16 +439,16 @@
             "bottomDp": 4
           }
         ]
-      }
+      },
+      "afterNodeId": "rail-starred"
     },
     {
-      "operationId": "ins-rail-snoozed-pill",
+      "operationId": "insert-rail-snoozed-pill",
       "type": "insertNode",
       "parent": {
         "nodeId": "rail-snoozed",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "rail-snoozed-pill",
         "componentId": "layout/box",
@@ -481,13 +472,12 @@
       }
     },
     {
-      "operationId": "ins-icon-6",
+      "operationId": "insert-icon-6",
       "type": "insertNode",
       "parent": {
         "nodeId": "rail-snoozed-pill",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "icon-6",
         "componentId": "m3/icon",
@@ -512,13 +502,12 @@
       }
     },
     {
-      "operationId": "ins-text-7",
+      "operationId": "insert-text-7",
       "type": "insertNode",
       "parent": {
         "nodeId": "rail-snoozed",
         "slot": "children"
       },
-      "afterNodeId": "rail-snoozed-pill",
       "node": {
         "id": "text-7",
         "componentId": "m3/text",
@@ -536,16 +525,16 @@
             "value": "onSurfaceVariant"
           }
         }
-      }
+      },
+      "afterNodeId": "rail-snoozed-pill"
     },
     {
-      "operationId": "ins-rail-sent",
+      "operationId": "insert-rail-sent",
       "type": "insertNode",
       "parent": {
         "nodeId": "rail",
         "slot": "children"
       },
-      "afterNodeId": "rail-snoozed",
       "node": {
         "id": "rail-sent",
         "componentId": "layout/column",
@@ -571,16 +560,16 @@
             "bottomDp": 4
           }
         ]
-      }
+      },
+      "afterNodeId": "rail-snoozed"
     },
     {
-      "operationId": "ins-rail-sent-pill",
+      "operationId": "insert-rail-sent-pill",
       "type": "insertNode",
       "parent": {
         "nodeId": "rail-sent",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "rail-sent-pill",
         "componentId": "layout/box",
@@ -604,13 +593,12 @@
       }
     },
     {
-      "operationId": "ins-icon-8",
+      "operationId": "insert-icon-8",
       "type": "insertNode",
       "parent": {
         "nodeId": "rail-sent-pill",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "icon-8",
         "componentId": "m3/icon",
@@ -635,13 +623,12 @@
       }
     },
     {
-      "operationId": "ins-text-9",
+      "operationId": "insert-text-9",
       "type": "insertNode",
       "parent": {
         "nodeId": "rail-sent",
         "slot": "children"
       },
-      "afterNodeId": "rail-sent-pill",
       "node": {
         "id": "text-9",
         "componentId": "m3/text",
@@ -659,16 +646,16 @@
             "value": "onSurfaceVariant"
           }
         }
-      }
+      },
+      "afterNodeId": "rail-sent-pill"
     },
     {
-      "operationId": "ins-rail-drafts",
+      "operationId": "insert-rail-drafts",
       "type": "insertNode",
       "parent": {
         "nodeId": "rail",
         "slot": "children"
       },
-      "afterNodeId": "rail-sent",
       "node": {
         "id": "rail-drafts",
         "componentId": "layout/column",
@@ -694,16 +681,16 @@
             "bottomDp": 4
           }
         ]
-      }
+      },
+      "afterNodeId": "rail-sent"
     },
     {
-      "operationId": "ins-rail-drafts-pill",
+      "operationId": "insert-rail-drafts-pill",
       "type": "insertNode",
       "parent": {
         "nodeId": "rail-drafts",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "rail-drafts-pill",
         "componentId": "layout/box",
@@ -727,13 +714,12 @@
       }
     },
     {
-      "operationId": "ins-icon-10",
+      "operationId": "insert-icon-10",
       "type": "insertNode",
       "parent": {
         "nodeId": "rail-drafts-pill",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "icon-10",
         "componentId": "m3/icon",
@@ -758,13 +744,12 @@
       }
     },
     {
-      "operationId": "ins-text-11",
+      "operationId": "insert-text-11",
       "type": "insertNode",
       "parent": {
         "nodeId": "rail-drafts",
         "slot": "children"
       },
-      "afterNodeId": "rail-drafts-pill",
       "node": {
         "id": "text-11",
         "componentId": "m3/text",
@@ -782,16 +767,16 @@
             "value": "onSurfaceVariant"
           }
         }
-      }
+      },
+      "afterNodeId": "rail-drafts-pill"
     },
     {
-      "operationId": "ins-panes",
+      "operationId": "insert-panes",
       "type": "insertNode",
       "parent": {
         "nodeId": "root",
         "slot": "children"
       },
-      "afterNodeId": "rail",
       "node": {
         "id": "panes",
         "componentId": "layout/supporting-pane-scaffold",
@@ -830,29 +815,28 @@
             "weight": 1
           }
         ]
-      }
+      },
+      "afterNodeId": "rail"
     },
     {
-      "operationId": "ins-list-pane",
+      "operationId": "insert-list-pane",
       "type": "insertNode",
       "parent": {
         "nodeId": "panes",
         "slot": "mainPane"
       },
-      "afterNodeId": null,
       "node": {
         "id": "list-pane",
         "componentId": "layout/scaffold"
       }
     },
     {
-      "operationId": "ins-mail-search",
+      "operationId": "insert-mail-search",
       "type": "insertNode",
       "parent": {
         "nodeId": "list-pane",
         "slot": "topBar"
       },
-      "afterNodeId": null,
       "node": {
         "id": "mail-search",
         "componentId": "m3/search-bar",
@@ -885,13 +869,12 @@
       }
     },
     {
-      "operationId": "ins-mail-search-field",
+      "operationId": "insert-mail-search-field",
       "type": "insertNode",
       "parent": {
         "nodeId": "mail-search",
         "slot": "inputField"
       },
-      "afterNodeId": null,
       "node": {
         "id": "mail-search-field",
         "componentId": "m3/search-input-field",
@@ -913,13 +896,12 @@
       }
     },
     {
-      "operationId": "ins-text-12",
+      "operationId": "insert-text-12",
       "type": "insertNode",
       "parent": {
         "nodeId": "mail-search-field",
         "slot": "placeholder"
       },
-      "afterNodeId": null,
       "node": {
         "id": "text-12",
         "componentId": "m3/text",
@@ -936,13 +918,12 @@
       }
     },
     {
-      "operationId": "ins-icon-13",
+      "operationId": "insert-icon-13",
       "type": "insertNode",
       "parent": {
         "nodeId": "mail-search-field",
         "slot": "leadingIcon"
       },
-      "afterNodeId": null,
       "node": {
         "id": "icon-13",
         "componentId": "m3/icon",
@@ -959,13 +940,12 @@
       }
     },
     {
-      "operationId": "ins-icon-14",
+      "operationId": "insert-icon-14",
       "type": "insertNode",
       "parent": {
         "nodeId": "mail-search-field",
         "slot": "trailingIcon"
       },
-      "afterNodeId": null,
       "node": {
         "id": "icon-14",
         "componentId": "m3/icon",
@@ -982,13 +962,12 @@
       }
     },
     {
-      "operationId": "ins-list-body",
+      "operationId": "insert-list-body",
       "type": "insertNode",
       "parent": {
         "nodeId": "list-pane",
         "slot": "content"
       },
-      "afterNodeId": null,
       "node": {
         "id": "list-body",
         "componentId": "layout/column",
@@ -1000,13 +979,12 @@
       }
     },
     {
-      "operationId": "ins-mail-chips",
+      "operationId": "insert-mail-chips",
       "type": "insertNode",
       "parent": {
         "nodeId": "list-body",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "mail-chips",
         "componentId": "layout/row",
@@ -1031,13 +1009,12 @@
       }
     },
     {
-      "operationId": "ins-chip-all",
+      "operationId": "insert-chip-all",
       "type": "insertNode",
       "parent": {
         "nodeId": "mail-chips",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "chip-all",
         "componentId": "m3/filter-chip",
@@ -1050,13 +1027,12 @@
       }
     },
     {
-      "operationId": "ins-text-15",
+      "operationId": "insert-text-15",
       "type": "insertNode",
       "parent": {
         "nodeId": "chip-all",
         "slot": "label"
       },
-      "afterNodeId": null,
       "node": {
         "id": "text-15",
         "componentId": "m3/text",
@@ -1073,13 +1049,12 @@
       }
     },
     {
-      "operationId": "ins-icon-16",
+      "operationId": "insert-icon-16",
       "type": "insertNode",
       "parent": {
         "nodeId": "chip-all",
         "slot": "leadingIcon"
       },
-      "afterNodeId": null,
       "node": {
         "id": "icon-16",
         "componentId": "m3/icon",
@@ -1096,13 +1071,12 @@
       }
     },
     {
-      "operationId": "ins-chip-unread",
+      "operationId": "insert-chip-unread",
       "type": "insertNode",
       "parent": {
         "nodeId": "mail-chips",
         "slot": "children"
       },
-      "afterNodeId": "chip-all",
       "node": {
         "id": "chip-unread",
         "componentId": "m3/filter-chip",
@@ -1112,16 +1086,16 @@
             "value": false
           }
         }
-      }
+      },
+      "afterNodeId": "chip-all"
     },
     {
-      "operationId": "ins-text-17",
+      "operationId": "insert-text-17",
       "type": "insertNode",
       "parent": {
         "nodeId": "chip-unread",
         "slot": "label"
       },
-      "afterNodeId": null,
       "node": {
         "id": "text-17",
         "componentId": "m3/text",
@@ -1138,13 +1112,12 @@
       }
     },
     {
-      "operationId": "ins-chip-starred",
+      "operationId": "insert-chip-starred",
       "type": "insertNode",
       "parent": {
         "nodeId": "mail-chips",
         "slot": "children"
       },
-      "afterNodeId": "chip-unread",
       "node": {
         "id": "chip-starred",
         "componentId": "m3/filter-chip",
@@ -1154,16 +1127,16 @@
             "value": false
           }
         }
-      }
+      },
+      "afterNodeId": "chip-unread"
     },
     {
-      "operationId": "ins-text-18",
+      "operationId": "insert-text-18",
       "type": "insertNode",
       "parent": {
         "nodeId": "chip-starred",
         "slot": "label"
       },
-      "afterNodeId": null,
       "node": {
         "id": "text-18",
         "componentId": "m3/text",
@@ -1180,13 +1153,12 @@
       }
     },
     {
-      "operationId": "ins-chip-attachments",
+      "operationId": "insert-chip-attachments",
       "type": "insertNode",
       "parent": {
         "nodeId": "mail-chips",
         "slot": "children"
       },
-      "afterNodeId": "chip-starred",
       "node": {
         "id": "chip-attachments",
         "componentId": "m3/filter-chip",
@@ -1196,16 +1168,16 @@
             "value": false
           }
         }
-      }
+      },
+      "afterNodeId": "chip-starred"
     },
     {
-      "operationId": "ins-text-19",
+      "operationId": "insert-text-19",
       "type": "insertNode",
       "parent": {
         "nodeId": "chip-attachments",
         "slot": "label"
       },
-      "afterNodeId": null,
       "node": {
         "id": "text-19",
         "componentId": "m3/text",
@@ -1222,13 +1194,12 @@
       }
     },
     {
-      "operationId": "ins-message-list",
+      "operationId": "insert-message-list",
       "type": "insertNode",
       "parent": {
         "nodeId": "list-body",
         "slot": "children"
       },
-      "afterNodeId": "mail-chips",
       "node": {
         "id": "message-list",
         "componentId": "layout/lazy-column",
@@ -1250,16 +1221,16 @@
             "type": "fillMaxSize"
           }
         ]
-      }
+      },
+      "afterNodeId": "mail-chips"
     },
     {
-      "operationId": "ins-msg-android",
+      "operationId": "insert-msg-android",
       "type": "insertNode",
       "parent": {
         "nodeId": "message-list",
         "slot": "items"
       },
-      "afterNodeId": null,
       "node": {
         "id": "msg-android",
         "componentId": "layout/row",
@@ -1295,13 +1266,12 @@
       }
     },
     {
-      "operationId": "ins-msg-android-avatar",
+      "operationId": "insert-msg-android-avatar",
       "type": "insertNode",
       "parent": {
         "nodeId": "msg-android",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "msg-android-avatar",
         "componentId": "layout/box",
@@ -1333,13 +1303,12 @@
       }
     },
     {
-      "operationId": "ins-text-20",
+      "operationId": "insert-text-20",
       "type": "insertNode",
       "parent": {
         "nodeId": "msg-android-avatar",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "text-20",
         "componentId": "m3/text",
@@ -1368,13 +1337,12 @@
       }
     },
     {
-      "operationId": "ins-msg-android-body",
+      "operationId": "insert-msg-android-body",
       "type": "insertNode",
       "parent": {
         "nodeId": "msg-android",
         "slot": "children"
       },
-      "afterNodeId": "msg-android-avatar",
       "node": {
         "id": "msg-android-body",
         "componentId": "layout/column",
@@ -1390,16 +1358,16 @@
             "weight": 1
           }
         ]
-      }
+      },
+      "afterNodeId": "msg-android-avatar"
     },
     {
-      "operationId": "ins-msg-android-head",
+      "operationId": "insert-msg-android-head",
       "type": "insertNode",
       "parent": {
         "nodeId": "msg-android-body",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "msg-android-head",
         "componentId": "layout/row",
@@ -1421,13 +1389,12 @@
       }
     },
     {
-      "operationId": "ins-text-21",
+      "operationId": "insert-text-21",
       "type": "insertNode",
       "parent": {
         "nodeId": "msg-android-head",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "text-21",
         "componentId": "m3/text",
@@ -1456,13 +1423,12 @@
       }
     },
     {
-      "operationId": "ins-text-22",
+      "operationId": "insert-text-22",
       "type": "insertNode",
       "parent": {
         "nodeId": "msg-android-head",
         "slot": "children"
       },
-      "afterNodeId": "text-21",
       "node": {
         "id": "text-22",
         "componentId": "m3/text",
@@ -1480,16 +1446,16 @@
             "value": "primary"
           }
         }
-      }
+      },
+      "afterNodeId": "text-21"
     },
     {
-      "operationId": "ins-text-23",
+      "operationId": "insert-text-23",
       "type": "insertNode",
       "parent": {
         "nodeId": "msg-android-body",
         "slot": "children"
       },
-      "afterNodeId": "msg-android-head",
       "node": {
         "id": "text-23",
         "componentId": "m3/text",
@@ -1515,16 +1481,16 @@
             "value": "ellipsis"
           }
         }
-      }
+      },
+      "afterNodeId": "msg-android-head"
     },
     {
-      "operationId": "ins-text-24",
+      "operationId": "insert-text-24",
       "type": "insertNode",
       "parent": {
         "nodeId": "msg-android-body",
         "slot": "children"
       },
-      "afterNodeId": "text-23",
       "node": {
         "id": "text-24",
         "componentId": "m3/text",
@@ -1550,16 +1516,16 @@
             "value": "ellipsis"
           }
         }
-      }
+      },
+      "afterNodeId": "text-23"
     },
     {
-      "operationId": "ins-icon-25",
+      "operationId": "insert-icon-25",
       "type": "insertNode",
       "parent": {
         "nodeId": "msg-android",
         "slot": "children"
       },
-      "afterNodeId": "msg-android-body",
       "node": {
         "id": "icon-25",
         "componentId": "m3/icon",
@@ -1581,16 +1547,16 @@
             "value": "#FFF9AB00"
           }
         }
-      }
+      },
+      "afterNodeId": "msg-android-body"
     },
     {
-      "operationId": "ins-msg-figma",
+      "operationId": "insert-msg-figma",
       "type": "insertNode",
       "parent": {
         "nodeId": "message-list",
         "slot": "items"
       },
-      "afterNodeId": "msg-android",
       "node": {
         "id": "msg-figma",
         "componentId": "layout/row",
@@ -1623,16 +1589,16 @@
             }
           }
         ]
-      }
+      },
+      "afterNodeId": "msg-android"
     },
     {
-      "operationId": "ins-msg-figma-avatar",
+      "operationId": "insert-msg-figma-avatar",
       "type": "insertNode",
       "parent": {
         "nodeId": "msg-figma",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "msg-figma-avatar",
         "componentId": "layout/box",
@@ -1664,13 +1630,12 @@
       }
     },
     {
-      "operationId": "ins-text-26",
+      "operationId": "insert-text-26",
       "type": "insertNode",
       "parent": {
         "nodeId": "msg-figma-avatar",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "text-26",
         "componentId": "m3/text",
@@ -1699,13 +1664,12 @@
       }
     },
     {
-      "operationId": "ins-msg-figma-body",
+      "operationId": "insert-msg-figma-body",
       "type": "insertNode",
       "parent": {
         "nodeId": "msg-figma",
         "slot": "children"
       },
-      "afterNodeId": "msg-figma-avatar",
       "node": {
         "id": "msg-figma-body",
         "componentId": "layout/column",
@@ -1721,16 +1685,16 @@
             "weight": 1
           }
         ]
-      }
+      },
+      "afterNodeId": "msg-figma-avatar"
     },
     {
-      "operationId": "ins-msg-figma-head",
+      "operationId": "insert-msg-figma-head",
       "type": "insertNode",
       "parent": {
         "nodeId": "msg-figma-body",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "msg-figma-head",
         "componentId": "layout/row",
@@ -1752,13 +1716,12 @@
       }
     },
     {
-      "operationId": "ins-text-27",
+      "operationId": "insert-text-27",
       "type": "insertNode",
       "parent": {
         "nodeId": "msg-figma-head",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "text-27",
         "componentId": "m3/text",
@@ -1787,13 +1750,12 @@
       }
     },
     {
-      "operationId": "ins-text-28",
+      "operationId": "insert-text-28",
       "type": "insertNode",
       "parent": {
         "nodeId": "msg-figma-head",
         "slot": "children"
       },
-      "afterNodeId": "text-27",
       "node": {
         "id": "text-28",
         "componentId": "m3/text",
@@ -1811,16 +1773,16 @@
             "value": "primary"
           }
         }
-      }
+      },
+      "afterNodeId": "text-27"
     },
     {
-      "operationId": "ins-text-29",
+      "operationId": "insert-text-29",
       "type": "insertNode",
       "parent": {
         "nodeId": "msg-figma-body",
         "slot": "children"
       },
-      "afterNodeId": "msg-figma-head",
       "node": {
         "id": "text-29",
         "componentId": "m3/text",
@@ -1846,16 +1808,16 @@
             "value": "ellipsis"
           }
         }
-      }
+      },
+      "afterNodeId": "msg-figma-head"
     },
     {
-      "operationId": "ins-text-30",
+      "operationId": "insert-text-30",
       "type": "insertNode",
       "parent": {
         "nodeId": "msg-figma-body",
         "slot": "children"
       },
-      "afterNodeId": "text-29",
       "node": {
         "id": "text-30",
         "componentId": "m3/text",
@@ -1881,16 +1843,16 @@
             "value": "ellipsis"
           }
         }
-      }
+      },
+      "afterNodeId": "text-29"
     },
     {
-      "operationId": "ins-icon-31",
+      "operationId": "insert-icon-31",
       "type": "insertNode",
       "parent": {
         "nodeId": "msg-figma",
         "slot": "children"
       },
-      "afterNodeId": "msg-figma-body",
       "node": {
         "id": "icon-31",
         "componentId": "m3/icon",
@@ -1912,16 +1874,16 @@
             "value": "onSurfaceVariant"
           }
         }
-      }
+      },
+      "afterNodeId": "msg-figma-body"
     },
     {
-      "operationId": "ins-msg-play",
+      "operationId": "insert-msg-play",
       "type": "insertNode",
       "parent": {
         "nodeId": "message-list",
         "slot": "items"
       },
-      "afterNodeId": "msg-figma",
       "node": {
         "id": "msg-play",
         "componentId": "layout/row",
@@ -1947,16 +1909,16 @@
             "bottomDp": 10
           }
         ]
-      }
+      },
+      "afterNodeId": "msg-figma"
     },
     {
-      "operationId": "ins-msg-play-avatar",
+      "operationId": "insert-msg-play-avatar",
       "type": "insertNode",
       "parent": {
         "nodeId": "msg-play",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "msg-play-avatar",
         "componentId": "layout/box",
@@ -1988,13 +1950,12 @@
       }
     },
     {
-      "operationId": "ins-text-32",
+      "operationId": "insert-text-32",
       "type": "insertNode",
       "parent": {
         "nodeId": "msg-play-avatar",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "text-32",
         "componentId": "m3/text",
@@ -2023,13 +1984,12 @@
       }
     },
     {
-      "operationId": "ins-msg-play-body",
+      "operationId": "insert-msg-play-body",
       "type": "insertNode",
       "parent": {
         "nodeId": "msg-play",
         "slot": "children"
       },
-      "afterNodeId": "msg-play-avatar",
       "node": {
         "id": "msg-play-body",
         "componentId": "layout/column",
@@ -2045,16 +2005,16 @@
             "weight": 1
           }
         ]
-      }
+      },
+      "afterNodeId": "msg-play-avatar"
     },
     {
-      "operationId": "ins-msg-play-head",
+      "operationId": "insert-msg-play-head",
       "type": "insertNode",
       "parent": {
         "nodeId": "msg-play-body",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "msg-play-head",
         "componentId": "layout/row",
@@ -2076,13 +2036,12 @@
       }
     },
     {
-      "operationId": "ins-text-33",
+      "operationId": "insert-text-33",
       "type": "insertNode",
       "parent": {
         "nodeId": "msg-play-head",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "text-33",
         "componentId": "m3/text",
@@ -2111,13 +2070,12 @@
       }
     },
     {
-      "operationId": "ins-text-34",
+      "operationId": "insert-text-34",
       "type": "insertNode",
       "parent": {
         "nodeId": "msg-play-head",
         "slot": "children"
       },
-      "afterNodeId": "text-33",
       "node": {
         "id": "text-34",
         "componentId": "m3/text",
@@ -2135,16 +2093,16 @@
             "value": "onSurfaceVariant"
           }
         }
-      }
+      },
+      "afterNodeId": "text-33"
     },
     {
-      "operationId": "ins-text-35",
+      "operationId": "insert-text-35",
       "type": "insertNode",
       "parent": {
         "nodeId": "msg-play-body",
         "slot": "children"
       },
-      "afterNodeId": "msg-play-head",
       "node": {
         "id": "text-35",
         "componentId": "m3/text",
@@ -2170,16 +2128,16 @@
             "value": "ellipsis"
           }
         }
-      }
+      },
+      "afterNodeId": "msg-play-head"
     },
     {
-      "operationId": "ins-text-36",
+      "operationId": "insert-text-36",
       "type": "insertNode",
       "parent": {
         "nodeId": "msg-play-body",
         "slot": "children"
       },
-      "afterNodeId": "text-35",
       "node": {
         "id": "text-36",
         "componentId": "m3/text",
@@ -2205,16 +2163,16 @@
             "value": "ellipsis"
           }
         }
-      }
+      },
+      "afterNodeId": "text-35"
     },
     {
-      "operationId": "ins-icon-37",
+      "operationId": "insert-icon-37",
       "type": "insertNode",
       "parent": {
         "nodeId": "msg-play",
         "slot": "children"
       },
-      "afterNodeId": "msg-play-body",
       "node": {
         "id": "icon-37",
         "componentId": "m3/icon",
@@ -2236,16 +2194,16 @@
             "value": "onSurfaceVariant"
           }
         }
-      }
+      },
+      "afterNodeId": "msg-play-body"
     },
     {
-      "operationId": "ins-msg-stack",
+      "operationId": "insert-msg-stack",
       "type": "insertNode",
       "parent": {
         "nodeId": "message-list",
         "slot": "items"
       },
-      "afterNodeId": "msg-play",
       "node": {
         "id": "msg-stack",
         "componentId": "layout/row",
@@ -2271,16 +2229,16 @@
             "bottomDp": 10
           }
         ]
-      }
+      },
+      "afterNodeId": "msg-play"
     },
     {
-      "operationId": "ins-msg-stack-avatar",
+      "operationId": "insert-msg-stack-avatar",
       "type": "insertNode",
       "parent": {
         "nodeId": "msg-stack",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "msg-stack-avatar",
         "componentId": "layout/box",
@@ -2312,13 +2270,12 @@
       }
     },
     {
-      "operationId": "ins-text-38",
+      "operationId": "insert-text-38",
       "type": "insertNode",
       "parent": {
         "nodeId": "msg-stack-avatar",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "text-38",
         "componentId": "m3/text",
@@ -2347,13 +2304,12 @@
       }
     },
     {
-      "operationId": "ins-msg-stack-body",
+      "operationId": "insert-msg-stack-body",
       "type": "insertNode",
       "parent": {
         "nodeId": "msg-stack",
         "slot": "children"
       },
-      "afterNodeId": "msg-stack-avatar",
       "node": {
         "id": "msg-stack-body",
         "componentId": "layout/column",
@@ -2369,16 +2325,16 @@
             "weight": 1
           }
         ]
-      }
+      },
+      "afterNodeId": "msg-stack-avatar"
     },
     {
-      "operationId": "ins-msg-stack-head",
+      "operationId": "insert-msg-stack-head",
       "type": "insertNode",
       "parent": {
         "nodeId": "msg-stack-body",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "msg-stack-head",
         "componentId": "layout/row",
@@ -2400,13 +2356,12 @@
       }
     },
     {
-      "operationId": "ins-text-39",
+      "operationId": "insert-text-39",
       "type": "insertNode",
       "parent": {
         "nodeId": "msg-stack-head",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "text-39",
         "componentId": "m3/text",
@@ -2435,13 +2390,12 @@
       }
     },
     {
-      "operationId": "ins-text-40",
+      "operationId": "insert-text-40",
       "type": "insertNode",
       "parent": {
         "nodeId": "msg-stack-head",
         "slot": "children"
       },
-      "afterNodeId": "text-39",
       "node": {
         "id": "text-40",
         "componentId": "m3/text",
@@ -2459,16 +2413,16 @@
             "value": "onSurfaceVariant"
           }
         }
-      }
+      },
+      "afterNodeId": "text-39"
     },
     {
-      "operationId": "ins-text-41",
+      "operationId": "insert-text-41",
       "type": "insertNode",
       "parent": {
         "nodeId": "msg-stack-body",
         "slot": "children"
       },
-      "afterNodeId": "msg-stack-head",
       "node": {
         "id": "text-41",
         "componentId": "m3/text",
@@ -2494,16 +2448,16 @@
             "value": "ellipsis"
           }
         }
-      }
+      },
+      "afterNodeId": "msg-stack-head"
     },
     {
-      "operationId": "ins-text-42",
+      "operationId": "insert-text-42",
       "type": "insertNode",
       "parent": {
         "nodeId": "msg-stack-body",
         "slot": "children"
       },
-      "afterNodeId": "text-41",
       "node": {
         "id": "text-42",
         "componentId": "m3/text",
@@ -2529,16 +2483,16 @@
             "value": "ellipsis"
           }
         }
-      }
+      },
+      "afterNodeId": "text-41"
     },
     {
-      "operationId": "ins-icon-43",
+      "operationId": "insert-icon-43",
       "type": "insertNode",
       "parent": {
         "nodeId": "msg-stack",
         "slot": "children"
       },
-      "afterNodeId": "msg-stack-body",
       "node": {
         "id": "icon-43",
         "componentId": "m3/icon",
@@ -2560,16 +2514,16 @@
             "value": "#FFF9AB00"
           }
         }
-      }
+      },
+      "afterNodeId": "msg-stack-body"
     },
     {
-      "operationId": "ins-msg-notion",
+      "operationId": "insert-msg-notion",
       "type": "insertNode",
       "parent": {
         "nodeId": "message-list",
         "slot": "items"
       },
-      "afterNodeId": "msg-stack",
       "node": {
         "id": "msg-notion",
         "componentId": "layout/row",
@@ -2595,16 +2549,16 @@
             "bottomDp": 10
           }
         ]
-      }
+      },
+      "afterNodeId": "msg-stack"
     },
     {
-      "operationId": "ins-msg-notion-avatar",
+      "operationId": "insert-msg-notion-avatar",
       "type": "insertNode",
       "parent": {
         "nodeId": "msg-notion",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "msg-notion-avatar",
         "componentId": "layout/box",
@@ -2636,13 +2590,12 @@
       }
     },
     {
-      "operationId": "ins-text-44",
+      "operationId": "insert-text-44",
       "type": "insertNode",
       "parent": {
         "nodeId": "msg-notion-avatar",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "text-44",
         "componentId": "m3/text",
@@ -2671,13 +2624,12 @@
       }
     },
     {
-      "operationId": "ins-msg-notion-body",
+      "operationId": "insert-msg-notion-body",
       "type": "insertNode",
       "parent": {
         "nodeId": "msg-notion",
         "slot": "children"
       },
-      "afterNodeId": "msg-notion-avatar",
       "node": {
         "id": "msg-notion-body",
         "componentId": "layout/column",
@@ -2693,16 +2645,16 @@
             "weight": 1
           }
         ]
-      }
+      },
+      "afterNodeId": "msg-notion-avatar"
     },
     {
-      "operationId": "ins-msg-notion-head",
+      "operationId": "insert-msg-notion-head",
       "type": "insertNode",
       "parent": {
         "nodeId": "msg-notion-body",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "msg-notion-head",
         "componentId": "layout/row",
@@ -2724,13 +2676,12 @@
       }
     },
     {
-      "operationId": "ins-text-45",
+      "operationId": "insert-text-45",
       "type": "insertNode",
       "parent": {
         "nodeId": "msg-notion-head",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "text-45",
         "componentId": "m3/text",
@@ -2759,13 +2710,12 @@
       }
     },
     {
-      "operationId": "ins-text-46",
+      "operationId": "insert-text-46",
       "type": "insertNode",
       "parent": {
         "nodeId": "msg-notion-head",
         "slot": "children"
       },
-      "afterNodeId": "text-45",
       "node": {
         "id": "text-46",
         "componentId": "m3/text",
@@ -2783,16 +2733,16 @@
             "value": "onSurfaceVariant"
           }
         }
-      }
+      },
+      "afterNodeId": "text-45"
     },
     {
-      "operationId": "ins-text-47",
+      "operationId": "insert-text-47",
       "type": "insertNode",
       "parent": {
         "nodeId": "msg-notion-body",
         "slot": "children"
       },
-      "afterNodeId": "msg-notion-head",
       "node": {
         "id": "text-47",
         "componentId": "m3/text",
@@ -2818,16 +2768,16 @@
             "value": "ellipsis"
           }
         }
-      }
+      },
+      "afterNodeId": "msg-notion-head"
     },
     {
-      "operationId": "ins-text-48",
+      "operationId": "insert-text-48",
       "type": "insertNode",
       "parent": {
         "nodeId": "msg-notion-body",
         "slot": "children"
       },
-      "afterNodeId": "text-47",
       "node": {
         "id": "text-48",
         "componentId": "m3/text",
@@ -2853,16 +2803,16 @@
             "value": "ellipsis"
           }
         }
-      }
+      },
+      "afterNodeId": "text-47"
     },
     {
-      "operationId": "ins-icon-49",
+      "operationId": "insert-icon-49",
       "type": "insertNode",
       "parent": {
         "nodeId": "msg-notion",
         "slot": "children"
       },
-      "afterNodeId": "msg-notion-body",
       "node": {
         "id": "icon-49",
         "componentId": "m3/icon",
@@ -2884,16 +2834,16 @@
             "value": "onSurfaceVariant"
           }
         }
-      }
+      },
+      "afterNodeId": "msg-notion-body"
     },
     {
-      "operationId": "ins-msg-docs",
+      "operationId": "insert-msg-docs",
       "type": "insertNode",
       "parent": {
         "nodeId": "message-list",
         "slot": "items"
       },
-      "afterNodeId": "msg-notion",
       "node": {
         "id": "msg-docs",
         "componentId": "layout/row",
@@ -2919,16 +2869,16 @@
             "bottomDp": 10
           }
         ]
-      }
+      },
+      "afterNodeId": "msg-notion"
     },
     {
-      "operationId": "ins-msg-docs-avatar",
+      "operationId": "insert-msg-docs-avatar",
       "type": "insertNode",
       "parent": {
         "nodeId": "msg-docs",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "msg-docs-avatar",
         "componentId": "layout/box",
@@ -2960,13 +2910,12 @@
       }
     },
     {
-      "operationId": "ins-text-50",
+      "operationId": "insert-text-50",
       "type": "insertNode",
       "parent": {
         "nodeId": "msg-docs-avatar",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "text-50",
         "componentId": "m3/text",
@@ -2995,13 +2944,12 @@
       }
     },
     {
-      "operationId": "ins-msg-docs-body",
+      "operationId": "insert-msg-docs-body",
       "type": "insertNode",
       "parent": {
         "nodeId": "msg-docs",
         "slot": "children"
       },
-      "afterNodeId": "msg-docs-avatar",
       "node": {
         "id": "msg-docs-body",
         "componentId": "layout/column",
@@ -3017,16 +2965,16 @@
             "weight": 1
           }
         ]
-      }
+      },
+      "afterNodeId": "msg-docs-avatar"
     },
     {
-      "operationId": "ins-msg-docs-head",
+      "operationId": "insert-msg-docs-head",
       "type": "insertNode",
       "parent": {
         "nodeId": "msg-docs-body",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "msg-docs-head",
         "componentId": "layout/row",
@@ -3048,13 +2996,12 @@
       }
     },
     {
-      "operationId": "ins-text-51",
+      "operationId": "insert-text-51",
       "type": "insertNode",
       "parent": {
         "nodeId": "msg-docs-head",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "text-51",
         "componentId": "m3/text",
@@ -3083,13 +3030,12 @@
       }
     },
     {
-      "operationId": "ins-text-52",
+      "operationId": "insert-text-52",
       "type": "insertNode",
       "parent": {
         "nodeId": "msg-docs-head",
         "slot": "children"
       },
-      "afterNodeId": "text-51",
       "node": {
         "id": "text-52",
         "componentId": "m3/text",
@@ -3107,16 +3053,16 @@
             "value": "onSurfaceVariant"
           }
         }
-      }
+      },
+      "afterNodeId": "text-51"
     },
     {
-      "operationId": "ins-text-53",
+      "operationId": "insert-text-53",
       "type": "insertNode",
       "parent": {
         "nodeId": "msg-docs-body",
         "slot": "children"
       },
-      "afterNodeId": "msg-docs-head",
       "node": {
         "id": "text-53",
         "componentId": "m3/text",
@@ -3142,16 +3088,16 @@
             "value": "ellipsis"
           }
         }
-      }
+      },
+      "afterNodeId": "msg-docs-head"
     },
     {
-      "operationId": "ins-text-54",
+      "operationId": "insert-text-54",
       "type": "insertNode",
       "parent": {
         "nodeId": "msg-docs-body",
         "slot": "children"
       },
-      "afterNodeId": "text-53",
       "node": {
         "id": "text-54",
         "componentId": "m3/text",
@@ -3177,16 +3123,16 @@
             "value": "ellipsis"
           }
         }
-      }
+      },
+      "afterNodeId": "text-53"
     },
     {
-      "operationId": "ins-icon-55",
+      "operationId": "insert-icon-55",
       "type": "insertNode",
       "parent": {
         "nodeId": "msg-docs",
         "slot": "children"
       },
-      "afterNodeId": "msg-docs-body",
       "node": {
         "id": "icon-55",
         "componentId": "m3/icon",
@@ -3208,16 +3154,16 @@
             "value": "onSurfaceVariant"
           }
         }
-      }
+      },
+      "afterNodeId": "msg-docs-body"
     },
     {
-      "operationId": "ins-msg-trello",
+      "operationId": "insert-msg-trello",
       "type": "insertNode",
       "parent": {
         "nodeId": "message-list",
         "slot": "items"
       },
-      "afterNodeId": "msg-docs",
       "node": {
         "id": "msg-trello",
         "componentId": "layout/row",
@@ -3243,16 +3189,16 @@
             "bottomDp": 10
           }
         ]
-      }
+      },
+      "afterNodeId": "msg-docs"
     },
     {
-      "operationId": "ins-msg-trello-avatar",
+      "operationId": "insert-msg-trello-avatar",
       "type": "insertNode",
       "parent": {
         "nodeId": "msg-trello",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "msg-trello-avatar",
         "componentId": "layout/box",
@@ -3284,13 +3230,12 @@
       }
     },
     {
-      "operationId": "ins-text-56",
+      "operationId": "insert-text-56",
       "type": "insertNode",
       "parent": {
         "nodeId": "msg-trello-avatar",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "text-56",
         "componentId": "m3/text",
@@ -3319,13 +3264,12 @@
       }
     },
     {
-      "operationId": "ins-msg-trello-body",
+      "operationId": "insert-msg-trello-body",
       "type": "insertNode",
       "parent": {
         "nodeId": "msg-trello",
         "slot": "children"
       },
-      "afterNodeId": "msg-trello-avatar",
       "node": {
         "id": "msg-trello-body",
         "componentId": "layout/column",
@@ -3341,16 +3285,16 @@
             "weight": 1
           }
         ]
-      }
+      },
+      "afterNodeId": "msg-trello-avatar"
     },
     {
-      "operationId": "ins-msg-trello-head",
+      "operationId": "insert-msg-trello-head",
       "type": "insertNode",
       "parent": {
         "nodeId": "msg-trello-body",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "msg-trello-head",
         "componentId": "layout/row",
@@ -3372,13 +3316,12 @@
       }
     },
     {
-      "operationId": "ins-text-57",
+      "operationId": "insert-text-57",
       "type": "insertNode",
       "parent": {
         "nodeId": "msg-trello-head",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "text-57",
         "componentId": "m3/text",
@@ -3407,13 +3350,12 @@
       }
     },
     {
-      "operationId": "ins-text-58",
+      "operationId": "insert-text-58",
       "type": "insertNode",
       "parent": {
         "nodeId": "msg-trello-head",
         "slot": "children"
       },
-      "afterNodeId": "text-57",
       "node": {
         "id": "text-58",
         "componentId": "m3/text",
@@ -3431,16 +3373,16 @@
             "value": "onSurfaceVariant"
           }
         }
-      }
+      },
+      "afterNodeId": "text-57"
     },
     {
-      "operationId": "ins-text-59",
+      "operationId": "insert-text-59",
       "type": "insertNode",
       "parent": {
         "nodeId": "msg-trello-body",
         "slot": "children"
       },
-      "afterNodeId": "msg-trello-head",
       "node": {
         "id": "text-59",
         "componentId": "m3/text",
@@ -3466,16 +3408,16 @@
             "value": "ellipsis"
           }
         }
-      }
+      },
+      "afterNodeId": "msg-trello-head"
     },
     {
-      "operationId": "ins-text-60",
+      "operationId": "insert-text-60",
       "type": "insertNode",
       "parent": {
         "nodeId": "msg-trello-body",
         "slot": "children"
       },
-      "afterNodeId": "text-59",
       "node": {
         "id": "text-60",
         "componentId": "m3/text",
@@ -3501,16 +3443,16 @@
             "value": "ellipsis"
           }
         }
-      }
+      },
+      "afterNodeId": "text-59"
     },
     {
-      "operationId": "ins-icon-61",
+      "operationId": "insert-icon-61",
       "type": "insertNode",
       "parent": {
         "nodeId": "msg-trello",
         "slot": "children"
       },
-      "afterNodeId": "msg-trello-body",
       "node": {
         "id": "icon-61",
         "componentId": "m3/icon",
@@ -3532,16 +3474,16 @@
             "value": "onSurfaceVariant"
           }
         }
-      }
+      },
+      "afterNodeId": "msg-trello-body"
     },
     {
-      "operationId": "ins-msg-linkedin",
+      "operationId": "insert-msg-linkedin",
       "type": "insertNode",
       "parent": {
         "nodeId": "message-list",
         "slot": "items"
       },
-      "afterNodeId": "msg-trello",
       "node": {
         "id": "msg-linkedin",
         "componentId": "layout/row",
@@ -3567,16 +3509,16 @@
             "bottomDp": 10
           }
         ]
-      }
+      },
+      "afterNodeId": "msg-trello"
     },
     {
-      "operationId": "ins-msg-linkedin-avatar",
+      "operationId": "insert-msg-linkedin-avatar",
       "type": "insertNode",
       "parent": {
         "nodeId": "msg-linkedin",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "msg-linkedin-avatar",
         "componentId": "layout/box",
@@ -3608,13 +3550,12 @@
       }
     },
     {
-      "operationId": "ins-text-62",
+      "operationId": "insert-text-62",
       "type": "insertNode",
       "parent": {
         "nodeId": "msg-linkedin-avatar",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "text-62",
         "componentId": "m3/text",
@@ -3643,13 +3584,12 @@
       }
     },
     {
-      "operationId": "ins-msg-linkedin-body",
+      "operationId": "insert-msg-linkedin-body",
       "type": "insertNode",
       "parent": {
         "nodeId": "msg-linkedin",
         "slot": "children"
       },
-      "afterNodeId": "msg-linkedin-avatar",
       "node": {
         "id": "msg-linkedin-body",
         "componentId": "layout/column",
@@ -3665,16 +3605,16 @@
             "weight": 1
           }
         ]
-      }
+      },
+      "afterNodeId": "msg-linkedin-avatar"
     },
     {
-      "operationId": "ins-msg-linkedin-head",
+      "operationId": "insert-msg-linkedin-head",
       "type": "insertNode",
       "parent": {
         "nodeId": "msg-linkedin-body",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "msg-linkedin-head",
         "componentId": "layout/row",
@@ -3696,13 +3636,12 @@
       }
     },
     {
-      "operationId": "ins-text-63",
+      "operationId": "insert-text-63",
       "type": "insertNode",
       "parent": {
         "nodeId": "msg-linkedin-head",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "text-63",
         "componentId": "m3/text",
@@ -3731,13 +3670,12 @@
       }
     },
     {
-      "operationId": "ins-text-64",
+      "operationId": "insert-text-64",
       "type": "insertNode",
       "parent": {
         "nodeId": "msg-linkedin-head",
         "slot": "children"
       },
-      "afterNodeId": "text-63",
       "node": {
         "id": "text-64",
         "componentId": "m3/text",
@@ -3755,16 +3693,16 @@
             "value": "onSurfaceVariant"
           }
         }
-      }
+      },
+      "afterNodeId": "text-63"
     },
     {
-      "operationId": "ins-text-65",
+      "operationId": "insert-text-65",
       "type": "insertNode",
       "parent": {
         "nodeId": "msg-linkedin-body",
         "slot": "children"
       },
-      "afterNodeId": "msg-linkedin-head",
       "node": {
         "id": "text-65",
         "componentId": "m3/text",
@@ -3790,16 +3728,16 @@
             "value": "ellipsis"
           }
         }
-      }
+      },
+      "afterNodeId": "msg-linkedin-head"
     },
     {
-      "operationId": "ins-text-66",
+      "operationId": "insert-text-66",
       "type": "insertNode",
       "parent": {
         "nodeId": "msg-linkedin-body",
         "slot": "children"
       },
-      "afterNodeId": "text-65",
       "node": {
         "id": "text-66",
         "componentId": "m3/text",
@@ -3825,16 +3763,16 @@
             "value": "ellipsis"
           }
         }
-      }
+      },
+      "afterNodeId": "text-65"
     },
     {
-      "operationId": "ins-icon-67",
+      "operationId": "insert-icon-67",
       "type": "insertNode",
       "parent": {
         "nodeId": "msg-linkedin",
         "slot": "children"
       },
-      "afterNodeId": "msg-linkedin-body",
       "node": {
         "id": "icon-67",
         "componentId": "m3/icon",
@@ -3856,29 +3794,28 @@
             "value": "onSurfaceVariant"
           }
         }
-      }
+      },
+      "afterNodeId": "msg-linkedin-body"
     },
     {
-      "operationId": "ins-read-pane",
+      "operationId": "insert-read-pane",
       "type": "insertNode",
       "parent": {
         "nodeId": "panes",
         "slot": "supportingPane"
       },
-      "afterNodeId": null,
       "node": {
         "id": "read-pane",
         "componentId": "layout/scaffold"
       }
     },
     {
-      "operationId": "ins-read-bar",
+      "operationId": "insert-read-bar",
       "type": "insertNode",
       "parent": {
         "nodeId": "read-pane",
         "slot": "topBar"
       },
-      "afterNodeId": null,
       "node": {
         "id": "read-bar",
         "componentId": "m3/center-aligned-top-app-bar",
@@ -3891,13 +3828,12 @@
       }
     },
     {
-      "operationId": "ins-text-68",
+      "operationId": "insert-text-68",
       "type": "insertNode",
       "parent": {
         "nodeId": "read-bar",
         "slot": "title"
       },
-      "afterNodeId": null,
       "node": {
         "id": "text-68",
         "componentId": "m3/text",
@@ -3914,13 +3850,12 @@
       }
     },
     {
-      "operationId": "ins-read-body",
+      "operationId": "insert-read-body",
       "type": "insertNode",
       "parent": {
         "nodeId": "read-pane",
         "slot": "content"
       },
-      "afterNodeId": null,
       "node": {
         "id": "read-body",
         "componentId": "layout/column",
@@ -3948,13 +3883,12 @@
       }
     },
     {
-      "operationId": "ins-text-69",
+      "operationId": "insert-text-69",
       "type": "insertNode",
       "parent": {
         "nodeId": "read-body",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "text-69",
         "componentId": "m3/text",
@@ -3975,13 +3909,12 @@
       }
     },
     {
-      "operationId": "ins-read-sender",
+      "operationId": "insert-read-sender",
       "type": "insertNode",
       "parent": {
         "nodeId": "read-body",
         "slot": "children"
       },
-      "afterNodeId": "text-69",
       "node": {
         "id": "read-sender",
         "componentId": "layout/row",
@@ -4000,16 +3933,16 @@
             "type": "fillMaxWidth"
           }
         ]
-      }
+      },
+      "afterNodeId": "text-69"
     },
     {
-      "operationId": "ins-read-avatar",
+      "operationId": "insert-read-avatar",
       "type": "insertNode",
       "parent": {
         "nodeId": "read-sender",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "read-avatar",
         "componentId": "layout/box",
@@ -4035,13 +3968,12 @@
       }
     },
     {
-      "operationId": "ins-text-70",
+      "operationId": "insert-text-70",
       "type": "insertNode",
       "parent": {
         "nodeId": "read-avatar",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "text-70",
         "componentId": "m3/text",
@@ -4070,13 +4002,12 @@
       }
     },
     {
-      "operationId": "ins-read-sender-col",
+      "operationId": "insert-read-sender-col",
       "type": "insertNode",
       "parent": {
         "nodeId": "read-sender",
         "slot": "children"
       },
-      "afterNodeId": "read-avatar",
       "node": {
         "id": "read-sender-col",
         "componentId": "layout/column",
@@ -4092,16 +4023,16 @@
             "weight": 1
           }
         ]
-      }
+      },
+      "afterNodeId": "read-avatar"
     },
     {
-      "operationId": "ins-text-71",
+      "operationId": "insert-text-71",
       "type": "insertNode",
       "parent": {
         "nodeId": "read-sender-col",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "text-71",
         "componentId": "m3/text",
@@ -4122,13 +4053,12 @@
       }
     },
     {
-      "operationId": "ins-text-72",
+      "operationId": "insert-text-72",
       "type": "insertNode",
       "parent": {
         "nodeId": "read-sender-col",
         "slot": "children"
       },
-      "afterNodeId": "text-71",
       "node": {
         "id": "text-72",
         "componentId": "m3/text",
@@ -4146,16 +4076,16 @@
             "value": "onSurfaceVariant"
           }
         }
-      }
+      },
+      "afterNodeId": "text-71"
     },
     {
-      "operationId": "ins-read-star",
+      "operationId": "insert-read-star",
       "type": "insertNode",
       "parent": {
         "nodeId": "read-sender",
         "slot": "children"
       },
-      "afterNodeId": "read-sender-col",
       "node": {
         "id": "read-star",
         "componentId": "m3/icon-button",
@@ -4169,16 +4099,16 @@
             "value": "Star"
           }
         }
-      }
+      },
+      "afterNodeId": "read-sender-col"
     },
     {
-      "operationId": "ins-icon-73",
+      "operationId": "insert-icon-73",
       "type": "insertNode",
       "parent": {
         "nodeId": "read-star",
         "slot": "content"
       },
-      "afterNodeId": null,
       "node": {
         "id": "icon-73",
         "componentId": "m3/icon",
@@ -4195,13 +4125,12 @@
       }
     },
     {
-      "operationId": "ins-read-reply",
+      "operationId": "insert-read-reply",
       "type": "insertNode",
       "parent": {
         "nodeId": "read-sender",
         "slot": "children"
       },
-      "afterNodeId": "read-star",
       "node": {
         "id": "read-reply",
         "componentId": "m3/icon-button",
@@ -4215,16 +4144,16 @@
             "value": "Reply"
           }
         }
-      }
+      },
+      "afterNodeId": "read-star"
     },
     {
-      "operationId": "ins-icon-74",
+      "operationId": "insert-icon-74",
       "type": "insertNode",
       "parent": {
         "nodeId": "read-reply",
         "slot": "content"
       },
-      "afterNodeId": null,
       "node": {
         "id": "icon-74",
         "componentId": "m3/icon",
@@ -4241,13 +4170,12 @@
       }
     },
     {
-      "operationId": "ins-read-more",
+      "operationId": "insert-read-more",
       "type": "insertNode",
       "parent": {
         "nodeId": "read-sender",
         "slot": "children"
       },
-      "afterNodeId": "read-reply",
       "node": {
         "id": "read-more",
         "componentId": "m3/icon-button",
@@ -4261,16 +4189,16 @@
             "value": "More options"
           }
         }
-      }
+      },
+      "afterNodeId": "read-reply"
     },
     {
-      "operationId": "ins-icon-75",
+      "operationId": "insert-icon-75",
       "type": "insertNode",
       "parent": {
         "nodeId": "read-more",
         "slot": "content"
       },
-      "afterNodeId": null,
       "node": {
         "id": "icon-75",
         "componentId": "m3/icon",
@@ -4287,13 +4215,12 @@
       }
     },
     {
-      "operationId": "ins-read-rule",
+      "operationId": "insert-read-rule",
       "type": "insertNode",
       "parent": {
         "nodeId": "read-body",
         "slot": "children"
       },
-      "afterNodeId": "read-sender",
       "node": {
         "id": "read-rule",
         "componentId": "m3/horizontal-divider",
@@ -4312,16 +4239,16 @@
             "type": "fillMaxWidth"
           }
         ]
-      }
+      },
+      "afterNodeId": "read-sender"
     },
     {
-      "operationId": "ins-read-prose",
+      "operationId": "insert-read-prose",
       "type": "insertNode",
       "parent": {
         "nodeId": "read-body",
         "slot": "children"
       },
-      "afterNodeId": "read-rule",
       "node": {
         "id": "read-prose",
         "componentId": "layout/column",
@@ -4336,16 +4263,16 @@
             "type": "fillMaxWidth"
           }
         ]
-      }
+      },
+      "afterNodeId": "read-rule"
     },
     {
-      "operationId": "ins-read-para-0",
+      "operationId": "insert-read-para-0",
       "type": "insertNode",
       "parent": {
         "nodeId": "read-prose",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "read-para-0",
         "componentId": "m3/text",
@@ -4362,13 +4289,12 @@
       }
     },
     {
-      "operationId": "ins-read-para-1",
+      "operationId": "insert-read-para-1",
       "type": "insertNode",
       "parent": {
         "nodeId": "read-prose",
         "slot": "children"
       },
-      "afterNodeId": "read-para-0",
       "node": {
         "id": "read-para-1",
         "componentId": "m3/text",
@@ -4382,16 +4308,16 @@
             "value": "bodyLarge"
           }
         }
-      }
+      },
+      "afterNodeId": "read-para-0"
     },
     {
-      "operationId": "ins-read-para-2",
+      "operationId": "insert-read-para-2",
       "type": "insertNode",
       "parent": {
         "nodeId": "read-prose",
         "slot": "children"
       },
-      "afterNodeId": "read-para-1",
       "node": {
         "id": "read-para-2",
         "componentId": "m3/text",
@@ -4405,16 +4331,16 @@
             "value": "bodyLarge"
           }
         }
-      }
+      },
+      "afterNodeId": "read-para-1"
     },
     {
-      "operationId": "ins-read-para-3",
+      "operationId": "insert-read-para-3",
       "type": "insertNode",
       "parent": {
         "nodeId": "read-prose",
         "slot": "children"
       },
-      "afterNodeId": "read-para-2",
       "node": {
         "id": "read-para-3",
         "componentId": "m3/text",
@@ -4428,16 +4354,16 @@
             "value": "bodyLarge"
           }
         }
-      }
+      },
+      "afterNodeId": "read-para-2"
     },
     {
-      "operationId": "ins-read-attachment",
+      "operationId": "insert-read-attachment",
       "type": "insertNode",
       "parent": {
         "nodeId": "read-body",
         "slot": "children"
       },
-      "afterNodeId": "read-prose",
       "node": {
         "id": "read-attachment",
         "componentId": "m3/card",
@@ -4452,16 +4378,16 @@
             "type": "fillMaxWidth"
           }
         ]
-      }
+      },
+      "afterNodeId": "read-prose"
     },
     {
-      "operationId": "ins-read-attachment-row",
+      "operationId": "insert-read-attachment-row",
       "type": "insertNode",
       "parent": {
         "nodeId": "read-attachment",
         "slot": "content"
       },
-      "afterNodeId": null,
       "node": {
         "id": "read-attachment-row",
         "componentId": "layout/row",
@@ -4490,13 +4416,12 @@
       }
     },
     {
-      "operationId": "ins-read-att-icon",
+      "operationId": "insert-read-att-icon",
       "type": "insertNode",
       "parent": {
         "nodeId": "read-attachment-row",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "read-att-icon",
         "componentId": "m3/icon",
@@ -4521,13 +4446,12 @@
       }
     },
     {
-      "operationId": "ins-read-att-col",
+      "operationId": "insert-read-att-col",
       "type": "insertNode",
       "parent": {
         "nodeId": "read-attachment-row",
         "slot": "children"
       },
-      "afterNodeId": "read-att-icon",
       "node": {
         "id": "read-att-col",
         "componentId": "layout/column",
@@ -4543,16 +4467,16 @@
             "weight": 1
           }
         ]
-      }
+      },
+      "afterNodeId": "read-att-icon"
     },
     {
-      "operationId": "ins-text-76",
+      "operationId": "insert-text-76",
       "type": "insertNode",
       "parent": {
         "nodeId": "read-att-col",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "text-76",
         "componentId": "m3/text",
@@ -4569,13 +4493,12 @@
       }
     },
     {
-      "operationId": "ins-text-77",
+      "operationId": "insert-text-77",
       "type": "insertNode",
       "parent": {
         "nodeId": "read-att-col",
         "slot": "children"
       },
-      "afterNodeId": "text-76",
       "node": {
         "id": "text-77",
         "componentId": "m3/text",
@@ -4593,16 +4516,16 @@
             "value": "onSurfaceVariant"
           }
         }
-      }
+      },
+      "afterNodeId": "text-76"
     },
     {
-      "operationId": "ins-read-att-download",
+      "operationId": "insert-read-att-download",
       "type": "insertNode",
       "parent": {
         "nodeId": "read-attachment-row",
         "slot": "children"
       },
-      "afterNodeId": "read-att-col",
       "node": {
         "id": "read-att-download",
         "componentId": "m3/icon-button",
@@ -4616,16 +4539,16 @@
             "value": "Download"
           }
         }
-      }
+      },
+      "afterNodeId": "read-att-col"
     },
     {
-      "operationId": "ins-icon-78",
+      "operationId": "insert-icon-78",
       "type": "insertNode",
       "parent": {
         "nodeId": "read-att-download",
         "slot": "content"
       },
-      "afterNodeId": null,
       "node": {
         "id": "icon-78",
         "componentId": "m3/icon",
@@ -4642,13 +4565,12 @@
       }
     },
     {
-      "operationId": "ins-read-actions",
+      "operationId": "insert-read-actions",
       "type": "insertNode",
       "parent": {
         "nodeId": "read-body",
         "slot": "children"
       },
-      "afterNodeId": "read-attachment",
       "node": {
         "id": "read-actions",
         "componentId": "layout/row",
@@ -4670,16 +4592,16 @@
             "bottomDp": 0
           }
         ]
-      }
+      },
+      "afterNodeId": "read-attachment"
     },
     {
-      "operationId": "ins-read-action-reply",
+      "operationId": "insert-read-action-reply",
       "type": "insertNode",
       "parent": {
         "nodeId": "read-actions",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "read-action-reply",
         "componentId": "m3/button",
@@ -4692,13 +4614,12 @@
       }
     },
     {
-      "operationId": "ins-icon-79",
+      "operationId": "insert-icon-79",
       "type": "insertNode",
       "parent": {
         "nodeId": "read-action-reply",
         "slot": "content"
       },
-      "afterNodeId": null,
       "node": {
         "id": "icon-79",
         "componentId": "m3/icon",
@@ -4719,13 +4640,12 @@
       }
     },
     {
-      "operationId": "ins-text-80",
+      "operationId": "insert-text-80",
       "type": "insertNode",
       "parent": {
         "nodeId": "read-action-reply",
         "slot": "content"
       },
-      "afterNodeId": "icon-79",
       "node": {
         "id": "text-80",
         "componentId": "m3/text",
@@ -4739,16 +4659,16 @@
             "value": "labelLarge"
           }
         }
-      }
+      },
+      "afterNodeId": "icon-79"
     },
     {
-      "operationId": "ins-read-action-reply-all",
+      "operationId": "insert-read-action-reply-all",
       "type": "insertNode",
       "parent": {
         "nodeId": "read-actions",
         "slot": "children"
       },
-      "afterNodeId": "read-action-reply",
       "node": {
         "id": "read-action-reply-all",
         "componentId": "m3/button",
@@ -4758,16 +4678,16 @@
             "value": "filledTonal"
           }
         }
-      }
+      },
+      "afterNodeId": "read-action-reply"
     },
     {
-      "operationId": "ins-icon-81",
+      "operationId": "insert-icon-81",
       "type": "insertNode",
       "parent": {
         "nodeId": "read-action-reply-all",
         "slot": "content"
       },
-      "afterNodeId": null,
       "node": {
         "id": "icon-81",
         "componentId": "m3/icon",
@@ -4788,13 +4708,12 @@
       }
     },
     {
-      "operationId": "ins-text-82",
+      "operationId": "insert-text-82",
       "type": "insertNode",
       "parent": {
         "nodeId": "read-action-reply-all",
         "slot": "content"
       },
-      "afterNodeId": "icon-81",
       "node": {
         "id": "text-82",
         "componentId": "m3/text",
@@ -4808,16 +4727,16 @@
             "value": "labelLarge"
           }
         }
-      }
+      },
+      "afterNodeId": "icon-81"
     },
     {
-      "operationId": "ins-read-action-forward",
+      "operationId": "insert-read-action-forward",
       "type": "insertNode",
       "parent": {
         "nodeId": "read-actions",
         "slot": "children"
       },
-      "afterNodeId": "read-action-reply-all",
       "node": {
         "id": "read-action-forward",
         "componentId": "m3/button",
@@ -4827,16 +4746,16 @@
             "value": "filledTonal"
           }
         }
-      }
+      },
+      "afterNodeId": "read-action-reply-all"
     },
     {
-      "operationId": "ins-icon-83",
+      "operationId": "insert-icon-83",
       "type": "insertNode",
       "parent": {
         "nodeId": "read-action-forward",
         "slot": "content"
       },
-      "afterNodeId": null,
       "node": {
         "id": "icon-83",
         "componentId": "m3/icon",
@@ -4857,13 +4776,12 @@
       }
     },
     {
-      "operationId": "ins-text-84",
+      "operationId": "insert-text-84",
       "type": "insertNode",
       "parent": {
         "nodeId": "read-action-forward",
         "slot": "content"
       },
-      "afterNodeId": "icon-83",
       "node": {
         "id": "text-84",
         "componentId": "m3/text",
@@ -4877,7 +4795,8 @@
             "value": "labelLarge"
           }
         }
-      }
+      },
+      "afterNodeId": "icon-83"
     }
   ],
   "expectedDocumentHash": "d690be38dc720174bc8d1608bb896e6a24ff926460bd8a3241399c24e0c80266"

@@ -44,10 +44,9 @@
       }
     },
     {
-      "operationId": "ins-root",
+      "operationId": "insert-root",
       "type": "insertNode",
       "parent": null,
-      "afterNodeId": null,
       "node": {
         "id": "root",
         "componentId": "layout/row",
@@ -69,13 +68,12 @@
       }
     },
     {
-      "operationId": "ins-keep-rail",
+      "operationId": "insert-keep-rail",
       "type": "insertNode",
       "parent": {
         "nodeId": "root",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "keep-rail",
         "componentId": "layout/column",
@@ -115,13 +113,12 @@
       }
     },
     {
-      "operationId": "ins-keep-rail-notes",
+      "operationId": "insert-keep-rail-notes",
       "type": "insertNode",
       "parent": {
         "nodeId": "keep-rail",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "keep-rail-notes",
         "componentId": "layout/column",
@@ -150,13 +147,12 @@
       }
     },
     {
-      "operationId": "ins-keep-rail-notes-pill",
+      "operationId": "insert-keep-rail-notes-pill",
       "type": "insertNode",
       "parent": {
         "nodeId": "keep-rail-notes",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "keep-rail-notes-pill",
         "componentId": "layout/box",
@@ -182,13 +178,12 @@
       }
     },
     {
-      "operationId": "ins-keep-rail-notes-icon",
+      "operationId": "insert-keep-rail-notes-icon",
       "type": "insertNode",
       "parent": {
         "nodeId": "keep-rail-notes-pill",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "keep-rail-notes-icon",
         "componentId": "m3/icon",
@@ -213,13 +208,12 @@
       }
     },
     {
-      "operationId": "ins-keep-rail-notes-label",
+      "operationId": "insert-keep-rail-notes-label",
       "type": "insertNode",
       "parent": {
         "nodeId": "keep-rail-notes",
         "slot": "children"
       },
-      "afterNodeId": "keep-rail-notes-pill",
       "node": {
         "id": "keep-rail-notes-label",
         "componentId": "m3/text",
@@ -237,16 +231,16 @@
             "value": "onSurface"
           }
         }
-      }
+      },
+      "afterNodeId": "keep-rail-notes-pill"
     },
     {
-      "operationId": "ins-keep-rail-reminders",
+      "operationId": "insert-keep-rail-reminders",
       "type": "insertNode",
       "parent": {
         "nodeId": "keep-rail",
         "slot": "children"
       },
-      "afterNodeId": "keep-rail-notes",
       "node": {
         "id": "keep-rail-reminders",
         "componentId": "layout/column",
@@ -272,16 +266,16 @@
             "bottomDp": 4
           }
         ]
-      }
+      },
+      "afterNodeId": "keep-rail-notes"
     },
     {
-      "operationId": "ins-keep-rail-reminders-pill",
+      "operationId": "insert-keep-rail-reminders-pill",
       "type": "insertNode",
       "parent": {
         "nodeId": "keep-rail-reminders",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "keep-rail-reminders-pill",
         "componentId": "layout/box",
@@ -299,13 +293,12 @@
       }
     },
     {
-      "operationId": "ins-keep-rail-reminders-icon",
+      "operationId": "insert-keep-rail-reminders-icon",
       "type": "insertNode",
       "parent": {
         "nodeId": "keep-rail-reminders-pill",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "keep-rail-reminders-icon",
         "componentId": "m3/icon",
@@ -330,13 +323,12 @@
       }
     },
     {
-      "operationId": "ins-keep-rail-reminders-label",
+      "operationId": "insert-keep-rail-reminders-label",
       "type": "insertNode",
       "parent": {
         "nodeId": "keep-rail-reminders",
         "slot": "children"
       },
-      "afterNodeId": "keep-rail-reminders-pill",
       "node": {
         "id": "keep-rail-reminders-label",
         "componentId": "m3/text",
@@ -354,16 +346,16 @@
             "value": "onSurfaceVariant"
           }
         }
-      }
+      },
+      "afterNodeId": "keep-rail-reminders-pill"
     },
     {
-      "operationId": "ins-keep-rail-labels",
+      "operationId": "insert-keep-rail-labels",
       "type": "insertNode",
       "parent": {
         "nodeId": "keep-rail",
         "slot": "children"
       },
-      "afterNodeId": "keep-rail-reminders",
       "node": {
         "id": "keep-rail-labels",
         "componentId": "layout/column",
@@ -389,16 +381,16 @@
             "bottomDp": 4
           }
         ]
-      }
+      },
+      "afterNodeId": "keep-rail-reminders"
     },
     {
-      "operationId": "ins-keep-rail-labels-pill",
+      "operationId": "insert-keep-rail-labels-pill",
       "type": "insertNode",
       "parent": {
         "nodeId": "keep-rail-labels",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "keep-rail-labels-pill",
         "componentId": "layout/box",
@@ -416,13 +408,12 @@
       }
     },
     {
-      "operationId": "ins-keep-rail-labels-icon",
+      "operationId": "insert-keep-rail-labels-icon",
       "type": "insertNode",
       "parent": {
         "nodeId": "keep-rail-labels-pill",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "keep-rail-labels-icon",
         "componentId": "m3/icon",
@@ -447,13 +438,12 @@
       }
     },
     {
-      "operationId": "ins-keep-rail-labels-label",
+      "operationId": "insert-keep-rail-labels-label",
       "type": "insertNode",
       "parent": {
         "nodeId": "keep-rail-labels",
         "slot": "children"
       },
-      "afterNodeId": "keep-rail-labels-pill",
       "node": {
         "id": "keep-rail-labels-label",
         "componentId": "m3/text",
@@ -471,16 +461,16 @@
             "value": "onSurfaceVariant"
           }
         }
-      }
+      },
+      "afterNodeId": "keep-rail-labels-pill"
     },
     {
-      "operationId": "ins-keep-rail-archive",
+      "operationId": "insert-keep-rail-archive",
       "type": "insertNode",
       "parent": {
         "nodeId": "keep-rail",
         "slot": "children"
       },
-      "afterNodeId": "keep-rail-labels",
       "node": {
         "id": "keep-rail-archive",
         "componentId": "layout/column",
@@ -506,16 +496,16 @@
             "bottomDp": 4
           }
         ]
-      }
+      },
+      "afterNodeId": "keep-rail-labels"
     },
     {
-      "operationId": "ins-keep-rail-archive-pill",
+      "operationId": "insert-keep-rail-archive-pill",
       "type": "insertNode",
       "parent": {
         "nodeId": "keep-rail-archive",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "keep-rail-archive-pill",
         "componentId": "layout/box",
@@ -533,13 +523,12 @@
       }
     },
     {
-      "operationId": "ins-keep-rail-archive-icon",
+      "operationId": "insert-keep-rail-archive-icon",
       "type": "insertNode",
       "parent": {
         "nodeId": "keep-rail-archive-pill",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "keep-rail-archive-icon",
         "componentId": "m3/icon",
@@ -564,13 +553,12 @@
       }
     },
     {
-      "operationId": "ins-keep-rail-archive-label",
+      "operationId": "insert-keep-rail-archive-label",
       "type": "insertNode",
       "parent": {
         "nodeId": "keep-rail-archive",
         "slot": "children"
       },
-      "afterNodeId": "keep-rail-archive-pill",
       "node": {
         "id": "keep-rail-archive-label",
         "componentId": "m3/text",
@@ -588,16 +576,16 @@
             "value": "onSurfaceVariant"
           }
         }
-      }
+      },
+      "afterNodeId": "keep-rail-archive-pill"
     },
     {
-      "operationId": "ins-keep-rail-bin",
+      "operationId": "insert-keep-rail-bin",
       "type": "insertNode",
       "parent": {
         "nodeId": "keep-rail",
         "slot": "children"
       },
-      "afterNodeId": "keep-rail-archive",
       "node": {
         "id": "keep-rail-bin",
         "componentId": "layout/column",
@@ -623,16 +611,16 @@
             "bottomDp": 4
           }
         ]
-      }
+      },
+      "afterNodeId": "keep-rail-archive"
     },
     {
-      "operationId": "ins-keep-rail-bin-pill",
+      "operationId": "insert-keep-rail-bin-pill",
       "type": "insertNode",
       "parent": {
         "nodeId": "keep-rail-bin",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "keep-rail-bin-pill",
         "componentId": "layout/box",
@@ -650,13 +638,12 @@
       }
     },
     {
-      "operationId": "ins-keep-rail-bin-icon",
+      "operationId": "insert-keep-rail-bin-icon",
       "type": "insertNode",
       "parent": {
         "nodeId": "keep-rail-bin-pill",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "keep-rail-bin-icon",
         "componentId": "m3/icon",
@@ -681,13 +668,12 @@
       }
     },
     {
-      "operationId": "ins-keep-rail-bin-label",
+      "operationId": "insert-keep-rail-bin-label",
       "type": "insertNode",
       "parent": {
         "nodeId": "keep-rail-bin",
         "slot": "children"
       },
-      "afterNodeId": "keep-rail-bin-pill",
       "node": {
         "id": "keep-rail-bin-label",
         "componentId": "m3/text",
@@ -705,16 +691,16 @@
             "value": "onSurfaceVariant"
           }
         }
-      }
+      },
+      "afterNodeId": "keep-rail-bin-pill"
     },
     {
-      "operationId": "ins-keep-screen",
+      "operationId": "insert-keep-screen",
       "type": "insertNode",
       "parent": {
         "nodeId": "root",
         "slot": "children"
       },
-      "afterNodeId": "keep-rail",
       "node": {
         "id": "keep-screen",
         "componentId": "layout/scaffold",
@@ -733,16 +719,16 @@
             "weight": 1
           }
         ]
-      }
+      },
+      "afterNodeId": "keep-rail"
     },
     {
-      "operationId": "ins-keep-search",
+      "operationId": "insert-keep-search",
       "type": "insertNode",
       "parent": {
         "nodeId": "keep-screen",
         "slot": "topBar"
       },
-      "afterNodeId": null,
       "node": {
         "id": "keep-search",
         "componentId": "m3/search-bar",
@@ -767,13 +753,12 @@
       }
     },
     {
-      "operationId": "ins-keep-search-field",
+      "operationId": "insert-keep-search-field",
       "type": "insertNode",
       "parent": {
         "nodeId": "keep-search",
         "slot": "inputField"
       },
-      "afterNodeId": null,
       "node": {
         "id": "keep-search-field",
         "componentId": "m3/search-input-field",
@@ -791,13 +776,12 @@
       }
     },
     {
-      "operationId": "ins-keep-search-placeholder",
+      "operationId": "insert-keep-search-placeholder",
       "type": "insertNode",
       "parent": {
         "nodeId": "keep-search-field",
         "slot": "placeholder"
       },
-      "afterNodeId": null,
       "node": {
         "id": "keep-search-placeholder",
         "componentId": "m3/text",
@@ -814,13 +798,12 @@
       }
     },
     {
-      "operationId": "ins-keep-search-leading",
+      "operationId": "insert-keep-search-leading",
       "type": "insertNode",
       "parent": {
         "nodeId": "keep-search-field",
         "slot": "leadingIcon"
       },
-      "afterNodeId": null,
       "node": {
         "id": "keep-search-leading",
         "componentId": "m3/icon",
@@ -837,13 +820,12 @@
       }
     },
     {
-      "operationId": "ins-keep-search-trailing",
+      "operationId": "insert-keep-search-trailing",
       "type": "insertNode",
       "parent": {
         "nodeId": "keep-search-field",
         "slot": "trailingIcon"
       },
-      "afterNodeId": null,
       "node": {
         "id": "keep-search-trailing",
         "componentId": "m3/icon",
@@ -860,13 +842,12 @@
       }
     },
     {
-      "operationId": "ins-keep-body",
+      "operationId": "insert-keep-body",
       "type": "insertNode",
       "parent": {
         "nodeId": "keep-screen",
         "slot": "content"
       },
-      "afterNodeId": null,
       "node": {
         "id": "keep-body",
         "componentId": "layout/column",
@@ -888,13 +869,12 @@
       }
     },
     {
-      "operationId": "ins-keep-heading-pinned",
+      "operationId": "insert-keep-heading-pinned",
       "type": "insertNode",
       "parent": {
         "nodeId": "keep-body",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "keep-heading-pinned",
         "componentId": "m3/text",
@@ -924,13 +904,12 @@
       }
     },
     {
-      "operationId": "ins-keep-grid",
+      "operationId": "insert-keep-grid",
       "type": "insertNode",
       "parent": {
         "nodeId": "keep-body",
         "slot": "children"
       },
-      "afterNodeId": "keep-heading-pinned",
       "node": {
         "id": "keep-grid",
         "componentId": "layout/lazy-grid",
@@ -964,16 +943,16 @@
             "type": "fillMaxSize"
           }
         ]
-      }
+      },
+      "afterNodeId": "keep-heading-pinned"
     },
     {
-      "operationId": "ins-keep-note-shopping",
+      "operationId": "insert-keep-note-shopping",
       "type": "insertNode",
       "parent": {
         "nodeId": "keep-grid",
         "slot": "items"
       },
-      "afterNodeId": null,
       "node": {
         "id": "keep-note-shopping",
         "componentId": "m3/card",
@@ -1003,13 +982,12 @@
       }
     },
     {
-      "operationId": "ins-keep-note-shopping-body",
+      "operationId": "insert-keep-note-shopping-body",
       "type": "insertNode",
       "parent": {
         "nodeId": "keep-note-shopping",
         "slot": "content"
       },
-      "afterNodeId": null,
       "node": {
         "id": "keep-note-shopping-body",
         "componentId": "layout/column",
@@ -1038,13 +1016,12 @@
       }
     },
     {
-      "operationId": "ins-keep-note-shopping-title",
+      "operationId": "insert-keep-note-shopping-title",
       "type": "insertNode",
       "parent": {
         "nodeId": "keep-note-shopping-body",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "keep-note-shopping-title",
         "componentId": "m3/text",
@@ -1065,13 +1042,12 @@
       }
     },
     {
-      "operationId": "ins-keep-note-shopping-item-0",
+      "operationId": "insert-keep-note-shopping-item-0",
       "type": "insertNode",
       "parent": {
         "nodeId": "keep-note-shopping-body",
         "slot": "children"
       },
-      "afterNodeId": "keep-note-shopping-title",
       "node": {
         "id": "keep-note-shopping-item-0",
         "componentId": "layout/row",
@@ -1090,16 +1066,16 @@
             "type": "fillMaxWidth"
           }
         ]
-      }
+      },
+      "afterNodeId": "keep-note-shopping-title"
     },
     {
-      "operationId": "ins-keep-note-shopping-item-0-box",
+      "operationId": "insert-keep-note-shopping-item-0-box",
       "type": "insertNode",
       "parent": {
         "nodeId": "keep-note-shopping-item-0",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "keep-note-shopping-item-0-box",
         "componentId": "m3/checkbox",
@@ -1112,13 +1088,12 @@
       }
     },
     {
-      "operationId": "ins-keep-note-shopping-item-0-label",
+      "operationId": "insert-keep-note-shopping-item-0-label",
       "type": "insertNode",
       "parent": {
         "nodeId": "keep-note-shopping-item-0",
         "slot": "children"
       },
-      "afterNodeId": "keep-note-shopping-item-0-box",
       "node": {
         "id": "keep-note-shopping-item-0-label",
         "componentId": "m3/text",
@@ -1150,16 +1125,16 @@
             "weight": 1
           }
         ]
-      }
+      },
+      "afterNodeId": "keep-note-shopping-item-0-box"
     },
     {
-      "operationId": "ins-keep-note-shopping-item-1",
+      "operationId": "insert-keep-note-shopping-item-1",
       "type": "insertNode",
       "parent": {
         "nodeId": "keep-note-shopping-body",
         "slot": "children"
       },
-      "afterNodeId": "keep-note-shopping-item-0",
       "node": {
         "id": "keep-note-shopping-item-1",
         "componentId": "layout/row",
@@ -1178,16 +1153,16 @@
             "type": "fillMaxWidth"
           }
         ]
-      }
+      },
+      "afterNodeId": "keep-note-shopping-item-0"
     },
     {
-      "operationId": "ins-keep-note-shopping-item-1-box",
+      "operationId": "insert-keep-note-shopping-item-1-box",
       "type": "insertNode",
       "parent": {
         "nodeId": "keep-note-shopping-item-1",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "keep-note-shopping-item-1-box",
         "componentId": "m3/checkbox",
@@ -1200,13 +1175,12 @@
       }
     },
     {
-      "operationId": "ins-keep-note-shopping-item-1-label",
+      "operationId": "insert-keep-note-shopping-item-1-label",
       "type": "insertNode",
       "parent": {
         "nodeId": "keep-note-shopping-item-1",
         "slot": "children"
       },
-      "afterNodeId": "keep-note-shopping-item-1-box",
       "node": {
         "id": "keep-note-shopping-item-1-label",
         "componentId": "m3/text",
@@ -1238,16 +1212,16 @@
             "weight": 1
           }
         ]
-      }
+      },
+      "afterNodeId": "keep-note-shopping-item-1-box"
     },
     {
-      "operationId": "ins-keep-note-shopping-item-2",
+      "operationId": "insert-keep-note-shopping-item-2",
       "type": "insertNode",
       "parent": {
         "nodeId": "keep-note-shopping-body",
         "slot": "children"
       },
-      "afterNodeId": "keep-note-shopping-item-1",
       "node": {
         "id": "keep-note-shopping-item-2",
         "componentId": "layout/row",
@@ -1266,16 +1240,16 @@
             "type": "fillMaxWidth"
           }
         ]
-      }
+      },
+      "afterNodeId": "keep-note-shopping-item-1"
     },
     {
-      "operationId": "ins-keep-note-shopping-item-2-box",
+      "operationId": "insert-keep-note-shopping-item-2-box",
       "type": "insertNode",
       "parent": {
         "nodeId": "keep-note-shopping-item-2",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "keep-note-shopping-item-2-box",
         "componentId": "m3/checkbox",
@@ -1288,13 +1262,12 @@
       }
     },
     {
-      "operationId": "ins-keep-note-shopping-item-2-label",
+      "operationId": "insert-keep-note-shopping-item-2-label",
       "type": "insertNode",
       "parent": {
         "nodeId": "keep-note-shopping-item-2",
         "slot": "children"
       },
-      "afterNodeId": "keep-note-shopping-item-2-box",
       "node": {
         "id": "keep-note-shopping-item-2-label",
         "componentId": "m3/text",
@@ -1326,16 +1299,16 @@
             "weight": 1
           }
         ]
-      }
+      },
+      "afterNodeId": "keep-note-shopping-item-2-box"
     },
     {
-      "operationId": "ins-keep-note-shopping-item-3",
+      "operationId": "insert-keep-note-shopping-item-3",
       "type": "insertNode",
       "parent": {
         "nodeId": "keep-note-shopping-body",
         "slot": "children"
       },
-      "afterNodeId": "keep-note-shopping-item-2",
       "node": {
         "id": "keep-note-shopping-item-3",
         "componentId": "layout/row",
@@ -1354,16 +1327,16 @@
             "type": "fillMaxWidth"
           }
         ]
-      }
+      },
+      "afterNodeId": "keep-note-shopping-item-2"
     },
     {
-      "operationId": "ins-keep-note-shopping-item-3-box",
+      "operationId": "insert-keep-note-shopping-item-3-box",
       "type": "insertNode",
       "parent": {
         "nodeId": "keep-note-shopping-item-3",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "keep-note-shopping-item-3-box",
         "componentId": "m3/checkbox",
@@ -1376,13 +1349,12 @@
       }
     },
     {
-      "operationId": "ins-keep-note-shopping-item-3-label",
+      "operationId": "insert-keep-note-shopping-item-3-label",
       "type": "insertNode",
       "parent": {
         "nodeId": "keep-note-shopping-item-3",
         "slot": "children"
       },
-      "afterNodeId": "keep-note-shopping-item-3-box",
       "node": {
         "id": "keep-note-shopping-item-3-label",
         "componentId": "m3/text",
@@ -1414,16 +1386,16 @@
             "weight": 1
           }
         ]
-      }
+      },
+      "afterNodeId": "keep-note-shopping-item-3-box"
     },
     {
-      "operationId": "ins-keep-note-shopping-labels",
+      "operationId": "insert-keep-note-shopping-labels",
       "type": "insertNode",
       "parent": {
         "nodeId": "keep-note-shopping-body",
         "slot": "children"
       },
-      "afterNodeId": "keep-note-shopping-item-3",
       "node": {
         "id": "keep-note-shopping-labels",
         "componentId": "layout/row",
@@ -1449,16 +1421,16 @@
             "bottomDp": 0
           }
         ]
-      }
+      },
+      "afterNodeId": "keep-note-shopping-item-3"
     },
     {
-      "operationId": "ins-keep-note-shopping-label-groceries",
+      "operationId": "insert-keep-note-shopping-label-groceries",
       "type": "insertNode",
       "parent": {
         "nodeId": "keep-note-shopping-labels",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "keep-note-shopping-label-groceries",
         "componentId": "m3/filter-chip",
@@ -1475,13 +1447,12 @@
       }
     },
     {
-      "operationId": "ins-keep-note-shopping-label-groceries-text",
+      "operationId": "insert-keep-note-shopping-label-groceries-text",
       "type": "insertNode",
       "parent": {
         "nodeId": "keep-note-shopping-label-groceries",
         "slot": "label"
       },
-      "afterNodeId": null,
       "node": {
         "id": "keep-note-shopping-label-groceries-text",
         "componentId": "m3/text",
@@ -1498,13 +1469,12 @@
       }
     },
     {
-      "operationId": "ins-keep-note-adaptive",
+      "operationId": "insert-keep-note-adaptive",
       "type": "insertNode",
       "parent": {
         "nodeId": "keep-grid",
         "slot": "items"
       },
-      "afterNodeId": "keep-note-shopping",
       "node": {
         "id": "keep-note-adaptive",
         "componentId": "m3/card",
@@ -1531,16 +1501,16 @@
             "type": "fillMaxWidth"
           }
         ]
-      }
+      },
+      "afterNodeId": "keep-note-shopping"
     },
     {
-      "operationId": "ins-keep-note-adaptive-body",
+      "operationId": "insert-keep-note-adaptive-body",
       "type": "insertNode",
       "parent": {
         "nodeId": "keep-note-adaptive",
         "slot": "content"
       },
-      "afterNodeId": null,
       "node": {
         "id": "keep-note-adaptive-body",
         "componentId": "layout/column",
@@ -1569,13 +1539,12 @@
       }
     },
     {
-      "operationId": "ins-keep-note-adaptive-title",
+      "operationId": "insert-keep-note-adaptive-title",
       "type": "insertNode",
       "parent": {
         "nodeId": "keep-note-adaptive-body",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "keep-note-adaptive-title",
         "componentId": "m3/text",
@@ -1596,13 +1565,12 @@
       }
     },
     {
-      "operationId": "ins-keep-note-adaptive-prose",
+      "operationId": "insert-keep-note-adaptive-prose",
       "type": "insertNode",
       "parent": {
         "nodeId": "keep-note-adaptive-body",
         "slot": "children"
       },
-      "afterNodeId": "keep-note-adaptive-title",
       "node": {
         "id": "keep-note-adaptive-prose",
         "componentId": "m3/text",
@@ -1620,16 +1588,16 @@
             "value": "onSurfaceVariant"
           }
         }
-      }
+      },
+      "afterNodeId": "keep-note-adaptive-title"
     },
     {
-      "operationId": "ins-keep-note-adaptive-labels",
+      "operationId": "insert-keep-note-adaptive-labels",
       "type": "insertNode",
       "parent": {
         "nodeId": "keep-note-adaptive-body",
         "slot": "children"
       },
-      "afterNodeId": "keep-note-adaptive-prose",
       "node": {
         "id": "keep-note-adaptive-labels",
         "componentId": "layout/row",
@@ -1655,16 +1623,16 @@
             "bottomDp": 0
           }
         ]
-      }
+      },
+      "afterNodeId": "keep-note-adaptive-prose"
     },
     {
-      "operationId": "ins-keep-note-adaptive-label-work",
+      "operationId": "insert-keep-note-adaptive-label-work",
       "type": "insertNode",
       "parent": {
         "nodeId": "keep-note-adaptive-labels",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "keep-note-adaptive-label-work",
         "componentId": "m3/filter-chip",
@@ -1681,13 +1649,12 @@
       }
     },
     {
-      "operationId": "ins-keep-note-adaptive-label-work-text",
+      "operationId": "insert-keep-note-adaptive-label-work-text",
       "type": "insertNode",
       "parent": {
         "nodeId": "keep-note-adaptive-label-work",
         "slot": "label"
       },
-      "afterNodeId": null,
       "node": {
         "id": "keep-note-adaptive-label-work-text",
         "componentId": "m3/text",
@@ -1704,13 +1671,12 @@
       }
     },
     {
-      "operationId": "ins-keep-note-adaptive-label-compose",
+      "operationId": "insert-keep-note-adaptive-label-compose",
       "type": "insertNode",
       "parent": {
         "nodeId": "keep-note-adaptive-labels",
         "slot": "children"
       },
-      "afterNodeId": "keep-note-adaptive-label-work",
       "node": {
         "id": "keep-note-adaptive-label-compose",
         "componentId": "m3/filter-chip",
@@ -1724,16 +1690,16 @@
             "value": "small"
           }
         }
-      }
+      },
+      "afterNodeId": "keep-note-adaptive-label-work"
     },
     {
-      "operationId": "ins-keep-note-adaptive-label-compose-text",
+      "operationId": "insert-keep-note-adaptive-label-compose-text",
       "type": "insertNode",
       "parent": {
         "nodeId": "keep-note-adaptive-label-compose",
         "slot": "label"
       },
-      "afterNodeId": null,
       "node": {
         "id": "keep-note-adaptive-label-compose-text",
         "componentId": "m3/text",
@@ -1750,13 +1716,12 @@
       }
     },
     {
-      "operationId": "ins-keep-note-talk",
+      "operationId": "insert-keep-note-talk",
       "type": "insertNode",
       "parent": {
         "nodeId": "keep-grid",
         "slot": "items"
       },
-      "afterNodeId": "keep-note-adaptive",
       "node": {
         "id": "keep-note-talk",
         "componentId": "m3/card",
@@ -1783,16 +1748,16 @@
             "type": "fillMaxWidth"
           }
         ]
-      }
+      },
+      "afterNodeId": "keep-note-adaptive"
     },
     {
-      "operationId": "ins-keep-note-talk-body",
+      "operationId": "insert-keep-note-talk-body",
       "type": "insertNode",
       "parent": {
         "nodeId": "keep-note-talk",
         "slot": "content"
       },
-      "afterNodeId": null,
       "node": {
         "id": "keep-note-talk-body",
         "componentId": "layout/column",
@@ -1821,13 +1786,12 @@
       }
     },
     {
-      "operationId": "ins-keep-note-talk-title",
+      "operationId": "insert-keep-note-talk-title",
       "type": "insertNode",
       "parent": {
         "nodeId": "keep-note-talk-body",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "keep-note-talk-title",
         "componentId": "m3/text",
@@ -1848,13 +1812,12 @@
       }
     },
     {
-      "operationId": "ins-keep-note-talk-item-0",
+      "operationId": "insert-keep-note-talk-item-0",
       "type": "insertNode",
       "parent": {
         "nodeId": "keep-note-talk-body",
         "slot": "children"
       },
-      "afterNodeId": "keep-note-talk-title",
       "node": {
         "id": "keep-note-talk-item-0",
         "componentId": "layout/row",
@@ -1873,16 +1836,16 @@
             "type": "fillMaxWidth"
           }
         ]
-      }
+      },
+      "afterNodeId": "keep-note-talk-title"
     },
     {
-      "operationId": "ins-keep-note-talk-item-0-box",
+      "operationId": "insert-keep-note-talk-item-0-box",
       "type": "insertNode",
       "parent": {
         "nodeId": "keep-note-talk-item-0",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "keep-note-talk-item-0-box",
         "componentId": "m3/checkbox",
@@ -1895,13 +1858,12 @@
       }
     },
     {
-      "operationId": "ins-keep-note-talk-item-0-label",
+      "operationId": "insert-keep-note-talk-item-0-label",
       "type": "insertNode",
       "parent": {
         "nodeId": "keep-note-talk-item-0",
         "slot": "children"
       },
-      "afterNodeId": "keep-note-talk-item-0-box",
       "node": {
         "id": "keep-note-talk-item-0-label",
         "componentId": "m3/text",
@@ -1933,16 +1895,16 @@
             "weight": 1
           }
         ]
-      }
+      },
+      "afterNodeId": "keep-note-talk-item-0-box"
     },
     {
-      "operationId": "ins-keep-note-talk-item-1",
+      "operationId": "insert-keep-note-talk-item-1",
       "type": "insertNode",
       "parent": {
         "nodeId": "keep-note-talk-body",
         "slot": "children"
       },
-      "afterNodeId": "keep-note-talk-item-0",
       "node": {
         "id": "keep-note-talk-item-1",
         "componentId": "layout/row",
@@ -1961,16 +1923,16 @@
             "type": "fillMaxWidth"
           }
         ]
-      }
+      },
+      "afterNodeId": "keep-note-talk-item-0"
     },
     {
-      "operationId": "ins-keep-note-talk-item-1-box",
+      "operationId": "insert-keep-note-talk-item-1-box",
       "type": "insertNode",
       "parent": {
         "nodeId": "keep-note-talk-item-1",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "keep-note-talk-item-1-box",
         "componentId": "m3/checkbox",
@@ -1983,13 +1945,12 @@
       }
     },
     {
-      "operationId": "ins-keep-note-talk-item-1-label",
+      "operationId": "insert-keep-note-talk-item-1-label",
       "type": "insertNode",
       "parent": {
         "nodeId": "keep-note-talk-item-1",
         "slot": "children"
       },
-      "afterNodeId": "keep-note-talk-item-1-box",
       "node": {
         "id": "keep-note-talk-item-1-label",
         "componentId": "m3/text",
@@ -2021,16 +1982,16 @@
             "weight": 1
           }
         ]
-      }
+      },
+      "afterNodeId": "keep-note-talk-item-1-box"
     },
     {
-      "operationId": "ins-keep-note-talk-item-2",
+      "operationId": "insert-keep-note-talk-item-2",
       "type": "insertNode",
       "parent": {
         "nodeId": "keep-note-talk-body",
         "slot": "children"
       },
-      "afterNodeId": "keep-note-talk-item-1",
       "node": {
         "id": "keep-note-talk-item-2",
         "componentId": "layout/row",
@@ -2049,16 +2010,16 @@
             "type": "fillMaxWidth"
           }
         ]
-      }
+      },
+      "afterNodeId": "keep-note-talk-item-1"
     },
     {
-      "operationId": "ins-keep-note-talk-item-2-box",
+      "operationId": "insert-keep-note-talk-item-2-box",
       "type": "insertNode",
       "parent": {
         "nodeId": "keep-note-talk-item-2",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "keep-note-talk-item-2-box",
         "componentId": "m3/checkbox",
@@ -2071,13 +2032,12 @@
       }
     },
     {
-      "operationId": "ins-keep-note-talk-item-2-label",
+      "operationId": "insert-keep-note-talk-item-2-label",
       "type": "insertNode",
       "parent": {
         "nodeId": "keep-note-talk-item-2",
         "slot": "children"
       },
-      "afterNodeId": "keep-note-talk-item-2-box",
       "node": {
         "id": "keep-note-talk-item-2-label",
         "componentId": "m3/text",
@@ -2109,16 +2069,16 @@
             "weight": 1
           }
         ]
-      }
+      },
+      "afterNodeId": "keep-note-talk-item-2-box"
     },
     {
-      "operationId": "ins-keep-note-talk-item-3",
+      "operationId": "insert-keep-note-talk-item-3",
       "type": "insertNode",
       "parent": {
         "nodeId": "keep-note-talk-body",
         "slot": "children"
       },
-      "afterNodeId": "keep-note-talk-item-2",
       "node": {
         "id": "keep-note-talk-item-3",
         "componentId": "layout/row",
@@ -2137,16 +2097,16 @@
             "type": "fillMaxWidth"
           }
         ]
-      }
+      },
+      "afterNodeId": "keep-note-talk-item-2"
     },
     {
-      "operationId": "ins-keep-note-talk-item-3-box",
+      "operationId": "insert-keep-note-talk-item-3-box",
       "type": "insertNode",
       "parent": {
         "nodeId": "keep-note-talk-item-3",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "keep-note-talk-item-3-box",
         "componentId": "m3/checkbox",
@@ -2159,13 +2119,12 @@
       }
     },
     {
-      "operationId": "ins-keep-note-talk-item-3-label",
+      "operationId": "insert-keep-note-talk-item-3-label",
       "type": "insertNode",
       "parent": {
         "nodeId": "keep-note-talk-item-3",
         "slot": "children"
       },
-      "afterNodeId": "keep-note-talk-item-3-box",
       "node": {
         "id": "keep-note-talk-item-3-label",
         "componentId": "m3/text",
@@ -2197,16 +2156,16 @@
             "weight": 1
           }
         ]
-      }
+      },
+      "afterNodeId": "keep-note-talk-item-3-box"
     },
     {
-      "operationId": "ins-keep-note-talk-labels",
+      "operationId": "insert-keep-note-talk-labels",
       "type": "insertNode",
       "parent": {
         "nodeId": "keep-note-talk-body",
         "slot": "children"
       },
-      "afterNodeId": "keep-note-talk-item-3",
       "node": {
         "id": "keep-note-talk-labels",
         "componentId": "layout/row",
@@ -2232,16 +2191,16 @@
             "bottomDp": 0
           }
         ]
-      }
+      },
+      "afterNodeId": "keep-note-talk-item-3"
     },
     {
-      "operationId": "ins-keep-note-talk-label-talks",
+      "operationId": "insert-keep-note-talk-label-talks",
       "type": "insertNode",
       "parent": {
         "nodeId": "keep-note-talk-labels",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "keep-note-talk-label-talks",
         "componentId": "m3/filter-chip",
@@ -2258,13 +2217,12 @@
       }
     },
     {
-      "operationId": "ins-keep-note-talk-label-talks-text",
+      "operationId": "insert-keep-note-talk-label-talks-text",
       "type": "insertNode",
       "parent": {
         "nodeId": "keep-note-talk-label-talks",
         "slot": "label"
       },
-      "afterNodeId": null,
       "node": {
         "id": "keep-note-talk-label-talks-text",
         "componentId": "m3/text",
@@ -2281,13 +2239,12 @@
       }
     },
     {
-      "operationId": "ins-keep-note-quote",
+      "operationId": "insert-keep-note-quote",
       "type": "insertNode",
       "parent": {
         "nodeId": "keep-grid",
         "slot": "items"
       },
-      "afterNodeId": "keep-note-talk",
       "node": {
         "id": "keep-note-quote",
         "componentId": "m3/card",
@@ -2314,16 +2271,16 @@
             "type": "fillMaxWidth"
           }
         ]
-      }
+      },
+      "afterNodeId": "keep-note-talk"
     },
     {
-      "operationId": "ins-keep-note-quote-body",
+      "operationId": "insert-keep-note-quote-body",
       "type": "insertNode",
       "parent": {
         "nodeId": "keep-note-quote",
         "slot": "content"
       },
-      "afterNodeId": null,
       "node": {
         "id": "keep-note-quote-body",
         "componentId": "layout/column",
@@ -2352,13 +2309,12 @@
       }
     },
     {
-      "operationId": "ins-keep-note-quote-title",
+      "operationId": "insert-keep-note-quote-title",
       "type": "insertNode",
       "parent": {
         "nodeId": "keep-note-quote-body",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "keep-note-quote-title",
         "componentId": "m3/text",
@@ -2379,13 +2335,12 @@
       }
     },
     {
-      "operationId": "ins-keep-note-quote-prose",
+      "operationId": "insert-keep-note-quote-prose",
       "type": "insertNode",
       "parent": {
         "nodeId": "keep-note-quote-body",
         "slot": "children"
       },
-      "afterNodeId": "keep-note-quote-title",
       "node": {
         "id": "keep-note-quote-prose",
         "componentId": "m3/text",
@@ -2403,16 +2358,16 @@
             "value": "onSurfaceVariant"
           }
         }
-      }
+      },
+      "afterNodeId": "keep-note-quote-title"
     },
     {
-      "operationId": "ins-keep-note-trip",
+      "operationId": "insert-keep-note-trip",
       "type": "insertNode",
       "parent": {
         "nodeId": "keep-grid",
         "slot": "items"
       },
-      "afterNodeId": "keep-note-quote",
       "node": {
         "id": "keep-note-trip",
         "componentId": "m3/card",
@@ -2439,16 +2394,16 @@
             "type": "fillMaxWidth"
           }
         ]
-      }
+      },
+      "afterNodeId": "keep-note-quote"
     },
     {
-      "operationId": "ins-keep-note-trip-body",
+      "operationId": "insert-keep-note-trip-body",
       "type": "insertNode",
       "parent": {
         "nodeId": "keep-note-trip",
         "slot": "content"
       },
-      "afterNodeId": null,
       "node": {
         "id": "keep-note-trip-body",
         "componentId": "layout/column",
@@ -2477,13 +2432,12 @@
       }
     },
     {
-      "operationId": "ins-keep-note-trip-title",
+      "operationId": "insert-keep-note-trip-title",
       "type": "insertNode",
       "parent": {
         "nodeId": "keep-note-trip-body",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "keep-note-trip-title",
         "componentId": "m3/text",
@@ -2504,13 +2458,12 @@
       }
     },
     {
-      "operationId": "ins-keep-note-trip-prose",
+      "operationId": "insert-keep-note-trip-prose",
       "type": "insertNode",
       "parent": {
         "nodeId": "keep-note-trip-body",
         "slot": "children"
       },
-      "afterNodeId": "keep-note-trip-title",
       "node": {
         "id": "keep-note-trip-prose",
         "componentId": "m3/text",
@@ -2528,16 +2481,16 @@
             "value": "onSurfaceVariant"
           }
         }
-      }
+      },
+      "afterNodeId": "keep-note-trip-title"
     },
     {
-      "operationId": "ins-keep-note-trip-labels",
+      "operationId": "insert-keep-note-trip-labels",
       "type": "insertNode",
       "parent": {
         "nodeId": "keep-note-trip-body",
         "slot": "children"
       },
-      "afterNodeId": "keep-note-trip-prose",
       "node": {
         "id": "keep-note-trip-labels",
         "componentId": "layout/row",
@@ -2563,16 +2516,16 @@
             "bottomDp": 0
           }
         ]
-      }
+      },
+      "afterNodeId": "keep-note-trip-prose"
     },
     {
-      "operationId": "ins-keep-note-trip-label-travel",
+      "operationId": "insert-keep-note-trip-label-travel",
       "type": "insertNode",
       "parent": {
         "nodeId": "keep-note-trip-labels",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "keep-note-trip-label-travel",
         "componentId": "m3/filter-chip",
@@ -2589,13 +2542,12 @@
       }
     },
     {
-      "operationId": "ins-keep-note-trip-label-travel-text",
+      "operationId": "insert-keep-note-trip-label-travel-text",
       "type": "insertNode",
       "parent": {
         "nodeId": "keep-note-trip-label-travel",
         "slot": "label"
       },
-      "afterNodeId": null,
       "node": {
         "id": "keep-note-trip-label-travel-text",
         "componentId": "m3/text",
@@ -2612,13 +2564,12 @@
       }
     },
     {
-      "operationId": "ins-keep-note-icons",
+      "operationId": "insert-keep-note-icons",
       "type": "insertNode",
       "parent": {
         "nodeId": "keep-grid",
         "slot": "items"
       },
-      "afterNodeId": "keep-note-trip",
       "node": {
         "id": "keep-note-icons",
         "componentId": "m3/card",
@@ -2645,16 +2596,16 @@
             "type": "fillMaxWidth"
           }
         ]
-      }
+      },
+      "afterNodeId": "keep-note-trip"
     },
     {
-      "operationId": "ins-keep-note-icons-body",
+      "operationId": "insert-keep-note-icons-body",
       "type": "insertNode",
       "parent": {
         "nodeId": "keep-note-icons",
         "slot": "content"
       },
-      "afterNodeId": null,
       "node": {
         "id": "keep-note-icons-body",
         "componentId": "layout/column",
@@ -2683,13 +2634,12 @@
       }
     },
     {
-      "operationId": "ins-keep-note-icons-title",
+      "operationId": "insert-keep-note-icons-title",
       "type": "insertNode",
       "parent": {
         "nodeId": "keep-note-icons-body",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "keep-note-icons-title",
         "componentId": "m3/text",
@@ -2710,13 +2660,12 @@
       }
     },
     {
-      "operationId": "ins-keep-note-icons-item-0",
+      "operationId": "insert-keep-note-icons-item-0",
       "type": "insertNode",
       "parent": {
         "nodeId": "keep-note-icons-body",
         "slot": "children"
       },
-      "afterNodeId": "keep-note-icons-title",
       "node": {
         "id": "keep-note-icons-item-0",
         "componentId": "layout/row",
@@ -2735,16 +2684,16 @@
             "type": "fillMaxWidth"
           }
         ]
-      }
+      },
+      "afterNodeId": "keep-note-icons-title"
     },
     {
-      "operationId": "ins-keep-note-icons-item-0-box",
+      "operationId": "insert-keep-note-icons-item-0-box",
       "type": "insertNode",
       "parent": {
         "nodeId": "keep-note-icons-item-0",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "keep-note-icons-item-0-box",
         "componentId": "m3/checkbox",
@@ -2757,13 +2706,12 @@
       }
     },
     {
-      "operationId": "ins-keep-note-icons-item-0-label",
+      "operationId": "insert-keep-note-icons-item-0-label",
       "type": "insertNode",
       "parent": {
         "nodeId": "keep-note-icons-item-0",
         "slot": "children"
       },
-      "afterNodeId": "keep-note-icons-item-0-box",
       "node": {
         "id": "keep-note-icons-item-0-label",
         "componentId": "m3/text",
@@ -2795,16 +2743,16 @@
             "weight": 1
           }
         ]
-      }
+      },
+      "afterNodeId": "keep-note-icons-item-0-box"
     },
     {
-      "operationId": "ins-keep-note-icons-item-1",
+      "operationId": "insert-keep-note-icons-item-1",
       "type": "insertNode",
       "parent": {
         "nodeId": "keep-note-icons-body",
         "slot": "children"
       },
-      "afterNodeId": "keep-note-icons-item-0",
       "node": {
         "id": "keep-note-icons-item-1",
         "componentId": "layout/row",
@@ -2823,16 +2771,16 @@
             "type": "fillMaxWidth"
           }
         ]
-      }
+      },
+      "afterNodeId": "keep-note-icons-item-0"
     },
     {
-      "operationId": "ins-keep-note-icons-item-1-box",
+      "operationId": "insert-keep-note-icons-item-1-box",
       "type": "insertNode",
       "parent": {
         "nodeId": "keep-note-icons-item-1",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "keep-note-icons-item-1-box",
         "componentId": "m3/checkbox",
@@ -2845,13 +2793,12 @@
       }
     },
     {
-      "operationId": "ins-keep-note-icons-item-1-label",
+      "operationId": "insert-keep-note-icons-item-1-label",
       "type": "insertNode",
       "parent": {
         "nodeId": "keep-note-icons-item-1",
         "slot": "children"
       },
-      "afterNodeId": "keep-note-icons-item-1-box",
       "node": {
         "id": "keep-note-icons-item-1-label",
         "componentId": "m3/text",
@@ -2883,16 +2830,16 @@
             "weight": 1
           }
         ]
-      }
+      },
+      "afterNodeId": "keep-note-icons-item-1-box"
     },
     {
-      "operationId": "ins-keep-note-icons-item-2",
+      "operationId": "insert-keep-note-icons-item-2",
       "type": "insertNode",
       "parent": {
         "nodeId": "keep-note-icons-body",
         "slot": "children"
       },
-      "afterNodeId": "keep-note-icons-item-1",
       "node": {
         "id": "keep-note-icons-item-2",
         "componentId": "layout/row",
@@ -2911,16 +2858,16 @@
             "type": "fillMaxWidth"
           }
         ]
-      }
+      },
+      "afterNodeId": "keep-note-icons-item-1"
     },
     {
-      "operationId": "ins-keep-note-icons-item-2-box",
+      "operationId": "insert-keep-note-icons-item-2-box",
       "type": "insertNode",
       "parent": {
         "nodeId": "keep-note-icons-item-2",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "keep-note-icons-item-2-box",
         "componentId": "m3/checkbox",
@@ -2933,13 +2880,12 @@
       }
     },
     {
-      "operationId": "ins-keep-note-icons-item-2-label",
+      "operationId": "insert-keep-note-icons-item-2-label",
       "type": "insertNode",
       "parent": {
         "nodeId": "keep-note-icons-item-2",
         "slot": "children"
       },
-      "afterNodeId": "keep-note-icons-item-2-box",
       "node": {
         "id": "keep-note-icons-item-2-label",
         "componentId": "m3/text",
@@ -2971,16 +2917,16 @@
             "weight": 1
           }
         ]
-      }
+      },
+      "afterNodeId": "keep-note-icons-item-2-box"
     },
     {
-      "operationId": "ins-keep-note-icons-labels",
+      "operationId": "insert-keep-note-icons-labels",
       "type": "insertNode",
       "parent": {
         "nodeId": "keep-note-icons-body",
         "slot": "children"
       },
-      "afterNodeId": "keep-note-icons-item-2",
       "node": {
         "id": "keep-note-icons-labels",
         "componentId": "layout/row",
@@ -3006,16 +2952,16 @@
             "bottomDp": 0
           }
         ]
-      }
+      },
+      "afterNodeId": "keep-note-icons-item-2"
     },
     {
-      "operationId": "ins-keep-note-icons-label-work",
+      "operationId": "insert-keep-note-icons-label-work",
       "type": "insertNode",
       "parent": {
         "nodeId": "keep-note-icons-labels",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "keep-note-icons-label-work",
         "componentId": "m3/filter-chip",
@@ -3032,13 +2978,12 @@
       }
     },
     {
-      "operationId": "ins-keep-note-icons-label-work-text",
+      "operationId": "insert-keep-note-icons-label-work-text",
       "type": "insertNode",
       "parent": {
         "nodeId": "keep-note-icons-label-work",
         "slot": "label"
       },
-      "afterNodeId": null,
       "node": {
         "id": "keep-note-icons-label-work-text",
         "componentId": "m3/text",
@@ -3055,13 +3000,12 @@
       }
     },
     {
-      "operationId": "ins-keep-note-books",
+      "operationId": "insert-keep-note-books",
       "type": "insertNode",
       "parent": {
         "nodeId": "keep-grid",
         "slot": "items"
       },
-      "afterNodeId": "keep-note-icons",
       "node": {
         "id": "keep-note-books",
         "componentId": "m3/card",
@@ -3088,16 +3032,16 @@
             "type": "fillMaxWidth"
           }
         ]
-      }
+      },
+      "afterNodeId": "keep-note-icons"
     },
     {
-      "operationId": "ins-keep-note-books-body",
+      "operationId": "insert-keep-note-books-body",
       "type": "insertNode",
       "parent": {
         "nodeId": "keep-note-books",
         "slot": "content"
       },
-      "afterNodeId": null,
       "node": {
         "id": "keep-note-books-body",
         "componentId": "layout/column",
@@ -3126,13 +3070,12 @@
       }
     },
     {
-      "operationId": "ins-keep-note-books-title",
+      "operationId": "insert-keep-note-books-title",
       "type": "insertNode",
       "parent": {
         "nodeId": "keep-note-books-body",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "keep-note-books-title",
         "componentId": "m3/text",
@@ -3153,13 +3096,12 @@
       }
     },
     {
-      "operationId": "ins-keep-note-books-item-0",
+      "operationId": "insert-keep-note-books-item-0",
       "type": "insertNode",
       "parent": {
         "nodeId": "keep-note-books-body",
         "slot": "children"
       },
-      "afterNodeId": "keep-note-books-title",
       "node": {
         "id": "keep-note-books-item-0",
         "componentId": "layout/row",
@@ -3178,16 +3120,16 @@
             "type": "fillMaxWidth"
           }
         ]
-      }
+      },
+      "afterNodeId": "keep-note-books-title"
     },
     {
-      "operationId": "ins-keep-note-books-item-0-dot",
+      "operationId": "insert-keep-note-books-item-0-dot",
       "type": "insertNode",
       "parent": {
         "nodeId": "keep-note-books-item-0",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "keep-note-books-item-0-dot",
         "componentId": "shape/colour-dot",
@@ -3204,13 +3146,12 @@
       }
     },
     {
-      "operationId": "ins-keep-note-books-item-0-label",
+      "operationId": "insert-keep-note-books-item-0-label",
       "type": "insertNode",
       "parent": {
         "nodeId": "keep-note-books-item-0",
         "slot": "children"
       },
-      "afterNodeId": "keep-note-books-item-0-dot",
       "node": {
         "id": "keep-note-books-item-0-label",
         "componentId": "m3/text",
@@ -3242,16 +3183,16 @@
             "weight": 1
           }
         ]
-      }
+      },
+      "afterNodeId": "keep-note-books-item-0-dot"
     },
     {
-      "operationId": "ins-keep-note-books-item-1",
+      "operationId": "insert-keep-note-books-item-1",
       "type": "insertNode",
       "parent": {
         "nodeId": "keep-note-books-body",
         "slot": "children"
       },
-      "afterNodeId": "keep-note-books-item-0",
       "node": {
         "id": "keep-note-books-item-1",
         "componentId": "layout/row",
@@ -3270,16 +3211,16 @@
             "type": "fillMaxWidth"
           }
         ]
-      }
+      },
+      "afterNodeId": "keep-note-books-item-0"
     },
     {
-      "operationId": "ins-keep-note-books-item-1-dot",
+      "operationId": "insert-keep-note-books-item-1-dot",
       "type": "insertNode",
       "parent": {
         "nodeId": "keep-note-books-item-1",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "keep-note-books-item-1-dot",
         "componentId": "shape/colour-dot",
@@ -3296,13 +3237,12 @@
       }
     },
     {
-      "operationId": "ins-keep-note-books-item-1-label",
+      "operationId": "insert-keep-note-books-item-1-label",
       "type": "insertNode",
       "parent": {
         "nodeId": "keep-note-books-item-1",
         "slot": "children"
       },
-      "afterNodeId": "keep-note-books-item-1-dot",
       "node": {
         "id": "keep-note-books-item-1-label",
         "componentId": "m3/text",
@@ -3334,16 +3274,16 @@
             "weight": 1
           }
         ]
-      }
+      },
+      "afterNodeId": "keep-note-books-item-1-dot"
     },
     {
-      "operationId": "ins-keep-note-ideas",
+      "operationId": "insert-keep-note-ideas",
       "type": "insertNode",
       "parent": {
         "nodeId": "keep-grid",
         "slot": "items"
       },
-      "afterNodeId": "keep-note-books",
       "node": {
         "id": "keep-note-ideas",
         "componentId": "m3/card",
@@ -3370,16 +3310,16 @@
             "type": "fillMaxWidth"
           }
         ]
-      }
+      },
+      "afterNodeId": "keep-note-books"
     },
     {
-      "operationId": "ins-keep-note-ideas-body",
+      "operationId": "insert-keep-note-ideas-body",
       "type": "insertNode",
       "parent": {
         "nodeId": "keep-note-ideas",
         "slot": "content"
       },
-      "afterNodeId": null,
       "node": {
         "id": "keep-note-ideas-body",
         "componentId": "layout/column",
@@ -3408,13 +3348,12 @@
       }
     },
     {
-      "operationId": "ins-keep-note-ideas-title",
+      "operationId": "insert-keep-note-ideas-title",
       "type": "insertNode",
       "parent": {
         "nodeId": "keep-note-ideas-body",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "keep-note-ideas-title",
         "componentId": "m3/text",
@@ -3435,13 +3374,12 @@
       }
     },
     {
-      "operationId": "ins-keep-note-ideas-prose",
+      "operationId": "insert-keep-note-ideas-prose",
       "type": "insertNode",
       "parent": {
         "nodeId": "keep-note-ideas-body",
         "slot": "children"
       },
-      "afterNodeId": "keep-note-ideas-title",
       "node": {
         "id": "keep-note-ideas-prose",
         "componentId": "m3/text",
@@ -3459,16 +3397,16 @@
             "value": "onSurfaceVariant"
           }
         }
-      }
+      },
+      "afterNodeId": "keep-note-ideas-title"
     },
     {
-      "operationId": "ins-keep-note-ideas-labels",
+      "operationId": "insert-keep-note-ideas-labels",
       "type": "insertNode",
       "parent": {
         "nodeId": "keep-note-ideas-body",
         "slot": "children"
       },
-      "afterNodeId": "keep-note-ideas-prose",
       "node": {
         "id": "keep-note-ideas-labels",
         "componentId": "layout/row",
@@ -3494,16 +3432,16 @@
             "bottomDp": 0
           }
         ]
-      }
+      },
+      "afterNodeId": "keep-note-ideas-prose"
     },
     {
-      "operationId": "ins-keep-note-ideas-label-ideas",
+      "operationId": "insert-keep-note-ideas-label-ideas",
       "type": "insertNode",
       "parent": {
         "nodeId": "keep-note-ideas-labels",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "keep-note-ideas-label-ideas",
         "componentId": "m3/filter-chip",
@@ -3520,13 +3458,12 @@
       }
     },
     {
-      "operationId": "ins-keep-note-ideas-label-ideas-text",
+      "operationId": "insert-keep-note-ideas-label-ideas-text",
       "type": "insertNode",
       "parent": {
         "nodeId": "keep-note-ideas-label-ideas",
         "slot": "label"
       },
-      "afterNodeId": null,
       "node": {
         "id": "keep-note-ideas-label-ideas-text",
         "componentId": "m3/text",
@@ -3543,13 +3480,12 @@
       }
     },
     {
-      "operationId": "ins-keep-create",
+      "operationId": "insert-keep-create",
       "type": "insertNode",
       "parent": {
         "nodeId": "keep-body",
         "slot": "children"
       },
-      "afterNodeId": "keep-grid",
       "node": {
         "id": "keep-create",
         "componentId": "m3/horizontal-floating-toolbar",
@@ -3579,16 +3515,16 @@
             "bottomDp": 20
           }
         ]
-      }
+      },
+      "afterNodeId": "keep-grid"
     },
     {
-      "operationId": "ins-keep-create-new-list",
+      "operationId": "insert-keep-create-new-list",
       "type": "insertNode",
       "parent": {
         "nodeId": "keep-create",
         "slot": "content"
       },
-      "afterNodeId": null,
       "node": {
         "id": "keep-create-new-list",
         "componentId": "m3/icon-button",
@@ -3605,13 +3541,12 @@
       }
     },
     {
-      "operationId": "ins-keep-create-new-list-icon",
+      "operationId": "insert-keep-create-new-list-icon",
       "type": "insertNode",
       "parent": {
         "nodeId": "keep-create-new-list",
         "slot": "content"
       },
-      "afterNodeId": null,
       "node": {
         "id": "keep-create-new-list-icon",
         "componentId": "m3/icon",
@@ -3628,13 +3563,12 @@
       }
     },
     {
-      "operationId": "ins-keep-create-new-drawing",
+      "operationId": "insert-keep-create-new-drawing",
       "type": "insertNode",
       "parent": {
         "nodeId": "keep-create",
         "slot": "content"
       },
-      "afterNodeId": "keep-create-new-list",
       "node": {
         "id": "keep-create-new-drawing",
         "componentId": "m3/icon-button",
@@ -3648,16 +3582,16 @@
             "value": "New drawing"
           }
         }
-      }
+      },
+      "afterNodeId": "keep-create-new-list"
     },
     {
-      "operationId": "ins-keep-create-new-drawing-icon",
+      "operationId": "insert-keep-create-new-drawing-icon",
       "type": "insertNode",
       "parent": {
         "nodeId": "keep-create-new-drawing",
         "slot": "content"
       },
-      "afterNodeId": null,
       "node": {
         "id": "keep-create-new-drawing-icon",
         "componentId": "m3/icon",
@@ -3674,13 +3608,12 @@
       }
     },
     {
-      "operationId": "ins-keep-create-new-recording",
+      "operationId": "insert-keep-create-new-recording",
       "type": "insertNode",
       "parent": {
         "nodeId": "keep-create",
         "slot": "content"
       },
-      "afterNodeId": "keep-create-new-drawing",
       "node": {
         "id": "keep-create-new-recording",
         "componentId": "m3/icon-button",
@@ -3694,16 +3627,16 @@
             "value": "New recording"
           }
         }
-      }
+      },
+      "afterNodeId": "keep-create-new-drawing"
     },
     {
-      "operationId": "ins-keep-create-new-recording-icon",
+      "operationId": "insert-keep-create-new-recording-icon",
       "type": "insertNode",
       "parent": {
         "nodeId": "keep-create-new-recording",
         "slot": "content"
       },
-      "afterNodeId": null,
       "node": {
         "id": "keep-create-new-recording-icon",
         "componentId": "m3/icon",
@@ -3720,13 +3653,12 @@
       }
     },
     {
-      "operationId": "ins-keep-create-new-note-with-image",
+      "operationId": "insert-keep-create-new-note-with-image",
       "type": "insertNode",
       "parent": {
         "nodeId": "keep-create",
         "slot": "content"
       },
-      "afterNodeId": "keep-create-new-recording",
       "node": {
         "id": "keep-create-new-note-with-image",
         "componentId": "m3/icon-button",
@@ -3740,16 +3672,16 @@
             "value": "New note with image"
           }
         }
-      }
+      },
+      "afterNodeId": "keep-create-new-recording"
     },
     {
-      "operationId": "ins-keep-create-new-note-with-image-icon",
+      "operationId": "insert-keep-create-new-note-with-image-icon",
       "type": "insertNode",
       "parent": {
         "nodeId": "keep-create-new-note-with-image",
         "slot": "content"
       },
-      "afterNodeId": null,
       "node": {
         "id": "keep-create-new-note-with-image-icon",
         "componentId": "m3/icon",
@@ -3766,13 +3698,12 @@
       }
     },
     {
-      "operationId": "ins-keep-create-new-note",
+      "operationId": "insert-keep-create-new-note",
       "type": "insertNode",
       "parent": {
         "nodeId": "keep-create",
         "slot": "content"
       },
-      "afterNodeId": "keep-create-new-note-with-image",
       "node": {
         "id": "keep-create-new-note",
         "componentId": "m3/icon-button",
@@ -3786,16 +3717,16 @@
             "value": "New note"
           }
         }
-      }
+      },
+      "afterNodeId": "keep-create-new-note-with-image"
     },
     {
-      "operationId": "ins-keep-create-new-note-icon",
+      "operationId": "insert-keep-create-new-note-icon",
       "type": "insertNode",
       "parent": {
         "nodeId": "keep-create-new-note",
         "slot": "content"
       },
-      "afterNodeId": null,
       "node": {
         "id": "keep-create-new-note-icon",
         "componentId": "m3/icon",

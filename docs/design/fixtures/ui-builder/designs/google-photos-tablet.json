@@ -44,10 +44,9 @@
       }
     },
     {
-      "operationId": "ins-root",
+      "operationId": "insert-root",
       "type": "insertNode",
       "parent": null,
-      "afterNodeId": null,
       "node": {
         "id": "root",
         "componentId": "layout/row",
@@ -69,13 +68,12 @@
       }
     },
     {
-      "operationId": "ins-photos-rail",
+      "operationId": "insert-photos-rail",
       "type": "insertNode",
       "parent": {
         "nodeId": "root",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "photos-rail",
         "componentId": "layout/column",
@@ -115,13 +113,12 @@
       }
     },
     {
-      "operationId": "ins-photos-rail-photos",
+      "operationId": "insert-photos-rail-photos",
       "type": "insertNode",
       "parent": {
         "nodeId": "photos-rail",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "photos-rail-photos",
         "componentId": "layout/column",
@@ -150,13 +147,12 @@
       }
     },
     {
-      "operationId": "ins-photos-rail-photos-pill",
+      "operationId": "insert-photos-rail-photos-pill",
       "type": "insertNode",
       "parent": {
         "nodeId": "photos-rail-photos",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "photos-rail-photos-pill",
         "componentId": "layout/box",
@@ -182,13 +178,12 @@
       }
     },
     {
-      "operationId": "ins-photos-rail-photos-icon",
+      "operationId": "insert-photos-rail-photos-icon",
       "type": "insertNode",
       "parent": {
         "nodeId": "photos-rail-photos-pill",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "photos-rail-photos-icon",
         "componentId": "m3/icon",
@@ -213,13 +208,12 @@
       }
     },
     {
-      "operationId": "ins-photos-rail-photos-label",
+      "operationId": "insert-photos-rail-photos-label",
       "type": "insertNode",
       "parent": {
         "nodeId": "photos-rail-photos",
         "slot": "children"
       },
-      "afterNodeId": "photos-rail-photos-pill",
       "node": {
         "id": "photos-rail-photos-label",
         "componentId": "m3/text",
@@ -237,16 +231,16 @@
             "value": "onSurface"
           }
         }
-      }
+      },
+      "afterNodeId": "photos-rail-photos-pill"
     },
     {
-      "operationId": "ins-photos-rail-search",
+      "operationId": "insert-photos-rail-search",
       "type": "insertNode",
       "parent": {
         "nodeId": "photos-rail",
         "slot": "children"
       },
-      "afterNodeId": "photos-rail-photos",
       "node": {
         "id": "photos-rail-search",
         "componentId": "layout/column",
@@ -272,16 +266,16 @@
             "bottomDp": 4
           }
         ]
-      }
+      },
+      "afterNodeId": "photos-rail-photos"
     },
     {
-      "operationId": "ins-photos-rail-search-pill",
+      "operationId": "insert-photos-rail-search-pill",
       "type": "insertNode",
       "parent": {
         "nodeId": "photos-rail-search",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "photos-rail-search-pill",
         "componentId": "layout/box",
@@ -299,13 +293,12 @@
       }
     },
     {
-      "operationId": "ins-photos-rail-search-icon",
+      "operationId": "insert-photos-rail-search-icon",
       "type": "insertNode",
       "parent": {
         "nodeId": "photos-rail-search-pill",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "photos-rail-search-icon",
         "componentId": "m3/icon",
@@ -330,13 +323,12 @@
       }
     },
     {
-      "operationId": "ins-photos-rail-search-label",
+      "operationId": "insert-photos-rail-search-label",
       "type": "insertNode",
       "parent": {
         "nodeId": "photos-rail-search",
         "slot": "children"
       },
-      "afterNodeId": "photos-rail-search-pill",
       "node": {
         "id": "photos-rail-search-label",
         "componentId": "m3/text",
@@ -354,16 +346,16 @@
             "value": "onSurfaceVariant"
           }
         }
-      }
+      },
+      "afterNodeId": "photos-rail-search-pill"
     },
     {
-      "operationId": "ins-photos-rail-collections",
+      "operationId": "insert-photos-rail-collections",
       "type": "insertNode",
       "parent": {
         "nodeId": "photos-rail",
         "slot": "children"
       },
-      "afterNodeId": "photos-rail-search",
       "node": {
         "id": "photos-rail-collections",
         "componentId": "layout/column",
@@ -389,16 +381,16 @@
             "bottomDp": 4
           }
         ]
-      }
+      },
+      "afterNodeId": "photos-rail-search"
     },
     {
-      "operationId": "ins-photos-rail-collections-pill",
+      "operationId": "insert-photos-rail-collections-pill",
       "type": "insertNode",
       "parent": {
         "nodeId": "photos-rail-collections",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "photos-rail-collections-pill",
         "componentId": "layout/box",
@@ -416,13 +408,12 @@
       }
     },
     {
-      "operationId": "ins-photos-rail-collections-icon",
+      "operationId": "insert-photos-rail-collections-icon",
       "type": "insertNode",
       "parent": {
         "nodeId": "photos-rail-collections-pill",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "photos-rail-collections-icon",
         "componentId": "m3/icon",
@@ -447,13 +438,12 @@
       }
     },
     {
-      "operationId": "ins-photos-rail-collections-label",
+      "operationId": "insert-photos-rail-collections-label",
       "type": "insertNode",
       "parent": {
         "nodeId": "photos-rail-collections",
         "slot": "children"
       },
-      "afterNodeId": "photos-rail-collections-pill",
       "node": {
         "id": "photos-rail-collections-label",
         "componentId": "m3/text",
@@ -471,16 +461,16 @@
             "value": "onSurfaceVariant"
           }
         }
-      }
+      },
+      "afterNodeId": "photos-rail-collections-pill"
     },
     {
-      "operationId": "ins-photos-rail-sharing",
+      "operationId": "insert-photos-rail-sharing",
       "type": "insertNode",
       "parent": {
         "nodeId": "photos-rail",
         "slot": "children"
       },
-      "afterNodeId": "photos-rail-collections",
       "node": {
         "id": "photos-rail-sharing",
         "componentId": "layout/column",
@@ -506,16 +496,16 @@
             "bottomDp": 4
           }
         ]
-      }
+      },
+      "afterNodeId": "photos-rail-collections"
     },
     {
-      "operationId": "ins-photos-rail-sharing-pill",
+      "operationId": "insert-photos-rail-sharing-pill",
       "type": "insertNode",
       "parent": {
         "nodeId": "photos-rail-sharing",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "photos-rail-sharing-pill",
         "componentId": "layout/box",
@@ -533,13 +523,12 @@
       }
     },
     {
-      "operationId": "ins-photos-rail-sharing-icon",
+      "operationId": "insert-photos-rail-sharing-icon",
       "type": "insertNode",
       "parent": {
         "nodeId": "photos-rail-sharing-pill",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "photos-rail-sharing-icon",
         "componentId": "m3/icon",
@@ -564,13 +553,12 @@
       }
     },
     {
-      "operationId": "ins-photos-rail-sharing-label",
+      "operationId": "insert-photos-rail-sharing-label",
       "type": "insertNode",
       "parent": {
         "nodeId": "photos-rail-sharing",
         "slot": "children"
       },
-      "afterNodeId": "photos-rail-sharing-pill",
       "node": {
         "id": "photos-rail-sharing-label",
         "componentId": "m3/text",
@@ -588,16 +576,16 @@
             "value": "onSurfaceVariant"
           }
         }
-      }
+      },
+      "afterNodeId": "photos-rail-sharing-pill"
     },
     {
-      "operationId": "ins-photos-screen",
+      "operationId": "insert-photos-screen",
       "type": "insertNode",
       "parent": {
         "nodeId": "root",
         "slot": "children"
       },
-      "afterNodeId": "photos-rail",
       "node": {
         "id": "photos-screen",
         "componentId": "layout/scaffold",
@@ -610,16 +598,16 @@
             "weight": 1
           }
         ]
-      }
+      },
+      "afterNodeId": "photos-rail"
     },
     {
-      "operationId": "ins-photos-search",
+      "operationId": "insert-photos-search",
       "type": "insertNode",
       "parent": {
         "nodeId": "photos-screen",
         "slot": "topBar"
       },
-      "afterNodeId": null,
       "node": {
         "id": "photos-search",
         "componentId": "m3/search-bar",
@@ -644,13 +632,12 @@
       }
     },
     {
-      "operationId": "ins-photos-search-field",
+      "operationId": "insert-photos-search-field",
       "type": "insertNode",
       "parent": {
         "nodeId": "photos-search",
         "slot": "inputField"
       },
-      "afterNodeId": null,
       "node": {
         "id": "photos-search-field",
         "componentId": "m3/search-input-field",
@@ -668,13 +655,12 @@
       }
     },
     {
-      "operationId": "ins-photos-search-placeholder",
+      "operationId": "insert-photos-search-placeholder",
       "type": "insertNode",
       "parent": {
         "nodeId": "photos-search-field",
         "slot": "placeholder"
       },
-      "afterNodeId": null,
       "node": {
         "id": "photos-search-placeholder",
         "componentId": "m3/text",
@@ -691,13 +677,12 @@
       }
     },
     {
-      "operationId": "ins-photos-search-leading",
+      "operationId": "insert-photos-search-leading",
       "type": "insertNode",
       "parent": {
         "nodeId": "photos-search-field",
         "slot": "leadingIcon"
       },
-      "afterNodeId": null,
       "node": {
         "id": "photos-search-leading",
         "componentId": "m3/icon",
@@ -714,13 +699,12 @@
       }
     },
     {
-      "operationId": "ins-photos-search-trailing",
+      "operationId": "insert-photos-search-trailing",
       "type": "insertNode",
       "parent": {
         "nodeId": "photos-search-field",
         "slot": "trailingIcon"
       },
-      "afterNodeId": null,
       "node": {
         "id": "photos-search-trailing",
         "componentId": "m3/icon",
@@ -737,13 +721,12 @@
       }
     },
     {
-      "operationId": "ins-photos-body",
+      "operationId": "insert-photos-body",
       "type": "insertNode",
       "parent": {
         "nodeId": "photos-screen",
         "slot": "content"
       },
-      "afterNodeId": null,
       "node": {
         "id": "photos-body",
         "componentId": "layout/column",
@@ -765,13 +748,12 @@
       }
     },
     {
-      "operationId": "ins-photos-chips",
+      "operationId": "insert-photos-chips",
       "type": "insertNode",
       "parent": {
         "nodeId": "photos-body",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "photos-chips",
         "componentId": "layout/row",
@@ -800,13 +782,12 @@
       }
     },
     {
-      "operationId": "ins-photos-chip-people",
+      "operationId": "insert-photos-chip-people",
       "type": "insertNode",
       "parent": {
         "nodeId": "photos-chips",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "photos-chip-people",
         "componentId": "m3/filter-chip",
@@ -819,13 +800,12 @@
       }
     },
     {
-      "operationId": "ins-photos-chip-people-label",
+      "operationId": "insert-photos-chip-people-label",
       "type": "insertNode",
       "parent": {
         "nodeId": "photos-chip-people",
         "slot": "label"
       },
-      "afterNodeId": null,
       "node": {
         "id": "photos-chip-people-label",
         "componentId": "m3/text",
@@ -842,13 +822,12 @@
       }
     },
     {
-      "operationId": "ins-photos-chip-people-icon",
+      "operationId": "insert-photos-chip-people-icon",
       "type": "insertNode",
       "parent": {
         "nodeId": "photos-chip-people",
         "slot": "leadingIcon"
       },
-      "afterNodeId": null,
       "node": {
         "id": "photos-chip-people-icon",
         "componentId": "m3/icon",
@@ -865,13 +844,12 @@
       }
     },
     {
-      "operationId": "ins-photos-chip-places",
+      "operationId": "insert-photos-chip-places",
       "type": "insertNode",
       "parent": {
         "nodeId": "photos-chips",
         "slot": "children"
       },
-      "afterNodeId": "photos-chip-people",
       "node": {
         "id": "photos-chip-places",
         "componentId": "m3/filter-chip",
@@ -881,16 +859,16 @@
             "value": false
           }
         }
-      }
+      },
+      "afterNodeId": "photos-chip-people"
     },
     {
-      "operationId": "ins-photos-chip-places-label",
+      "operationId": "insert-photos-chip-places-label",
       "type": "insertNode",
       "parent": {
         "nodeId": "photos-chip-places",
         "slot": "label"
       },
-      "afterNodeId": null,
       "node": {
         "id": "photos-chip-places-label",
         "componentId": "m3/text",
@@ -907,13 +885,12 @@
       }
     },
     {
-      "operationId": "ins-photos-chip-places-icon",
+      "operationId": "insert-photos-chip-places-icon",
       "type": "insertNode",
       "parent": {
         "nodeId": "photos-chip-places",
         "slot": "leadingIcon"
       },
-      "afterNodeId": null,
       "node": {
         "id": "photos-chip-places-icon",
         "componentId": "m3/icon",
@@ -930,13 +907,12 @@
       }
     },
     {
-      "operationId": "ins-photos-chip-favourites",
+      "operationId": "insert-photos-chip-favourites",
       "type": "insertNode",
       "parent": {
         "nodeId": "photos-chips",
         "slot": "children"
       },
-      "afterNodeId": "photos-chip-places",
       "node": {
         "id": "photos-chip-favourites",
         "componentId": "m3/filter-chip",
@@ -946,16 +922,16 @@
             "value": true
           }
         }
-      }
+      },
+      "afterNodeId": "photos-chip-places"
     },
     {
-      "operationId": "ins-photos-chip-favourites-label",
+      "operationId": "insert-photos-chip-favourites-label",
       "type": "insertNode",
       "parent": {
         "nodeId": "photos-chip-favourites",
         "slot": "label"
       },
-      "afterNodeId": null,
       "node": {
         "id": "photos-chip-favourites-label",
         "componentId": "m3/text",
@@ -972,13 +948,12 @@
       }
     },
     {
-      "operationId": "ins-photos-chip-favourites-icon",
+      "operationId": "insert-photos-chip-favourites-icon",
       "type": "insertNode",
       "parent": {
         "nodeId": "photos-chip-favourites",
         "slot": "leadingIcon"
       },
-      "afterNodeId": null,
       "node": {
         "id": "photos-chip-favourites-icon",
         "componentId": "m3/icon",
@@ -995,13 +970,12 @@
       }
     },
     {
-      "operationId": "ins-photos-chip-screenshots",
+      "operationId": "insert-photos-chip-screenshots",
       "type": "insertNode",
       "parent": {
         "nodeId": "photos-chips",
         "slot": "children"
       },
-      "afterNodeId": "photos-chip-favourites",
       "node": {
         "id": "photos-chip-screenshots",
         "componentId": "m3/filter-chip",
@@ -1011,16 +985,16 @@
             "value": false
           }
         }
-      }
+      },
+      "afterNodeId": "photos-chip-favourites"
     },
     {
-      "operationId": "ins-photos-chip-screenshots-label",
+      "operationId": "insert-photos-chip-screenshots-label",
       "type": "insertNode",
       "parent": {
         "nodeId": "photos-chip-screenshots",
         "slot": "label"
       },
-      "afterNodeId": null,
       "node": {
         "id": "photos-chip-screenshots-label",
         "componentId": "m3/text",
@@ -1037,13 +1011,12 @@
       }
     },
     {
-      "operationId": "ins-photos-chip-screenshots-icon",
+      "operationId": "insert-photos-chip-screenshots-icon",
       "type": "insertNode",
       "parent": {
         "nodeId": "photos-chip-screenshots",
         "slot": "leadingIcon"
       },
-      "afterNodeId": null,
       "node": {
         "id": "photos-chip-screenshots-icon",
         "componentId": "m3/icon",
@@ -1060,13 +1033,12 @@
       }
     },
     {
-      "operationId": "ins-photos-chip-videos",
+      "operationId": "insert-photos-chip-videos",
       "type": "insertNode",
       "parent": {
         "nodeId": "photos-chips",
         "slot": "children"
       },
-      "afterNodeId": "photos-chip-screenshots",
       "node": {
         "id": "photos-chip-videos",
         "componentId": "m3/filter-chip",
@@ -1076,16 +1048,16 @@
             "value": false
           }
         }
-      }
+      },
+      "afterNodeId": "photos-chip-screenshots"
     },
     {
-      "operationId": "ins-photos-chip-videos-label",
+      "operationId": "insert-photos-chip-videos-label",
       "type": "insertNode",
       "parent": {
         "nodeId": "photos-chip-videos",
         "slot": "label"
       },
-      "afterNodeId": null,
       "node": {
         "id": "photos-chip-videos-label",
         "componentId": "m3/text",
@@ -1102,13 +1074,12 @@
       }
     },
     {
-      "operationId": "ins-photos-chip-videos-icon",
+      "operationId": "insert-photos-chip-videos-icon",
       "type": "insertNode",
       "parent": {
         "nodeId": "photos-chip-videos",
         "slot": "leadingIcon"
       },
-      "afterNodeId": null,
       "node": {
         "id": "photos-chip-videos-icon",
         "componentId": "m3/icon",
@@ -1125,13 +1096,12 @@
       }
     },
     {
-      "operationId": "ins-photos-heading-today",
+      "operationId": "insert-photos-heading-today",
       "type": "insertNode",
       "parent": {
         "nodeId": "photos-body",
         "slot": "children"
       },
-      "afterNodeId": "photos-chips",
       "node": {
         "id": "photos-heading-today",
         "componentId": "m3/text",
@@ -1158,16 +1128,16 @@
             "bottomDp": 4
           }
         ]
-      }
+      },
+      "afterNodeId": "photos-chips"
     },
     {
-      "operationId": "ins-photos-grid",
+      "operationId": "insert-photos-grid",
       "type": "insertNode",
       "parent": {
         "nodeId": "photos-body",
         "slot": "children"
       },
-      "afterNodeId": "photos-heading-today",
       "node": {
         "id": "photos-grid",
         "componentId": "layout/lazy-grid",
@@ -1201,16 +1171,16 @@
             "type": "fillMaxSize"
           }
         ]
-      }
+      },
+      "afterNodeId": "photos-heading-today"
     },
     {
-      "operationId": "ins-photos-tile-0",
+      "operationId": "insert-photos-tile-0",
       "type": "insertNode",
       "parent": {
         "nodeId": "photos-grid",
         "slot": "items"
       },
-      "afterNodeId": null,
       "node": {
         "id": "photos-tile-0",
         "componentId": "layout/box",
@@ -1227,13 +1197,12 @@
       }
     },
     {
-      "operationId": "ins-photos-tile-0-fill",
+      "operationId": "insert-photos-tile-0-fill",
       "type": "insertNode",
       "parent": {
         "nodeId": "photos-tile-0",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "photos-tile-0-fill",
         "componentId": "shape/linear-gradient",
@@ -1259,13 +1228,12 @@
       }
     },
     {
-      "operationId": "ins-photos-tile-1",
+      "operationId": "insert-photos-tile-1",
       "type": "insertNode",
       "parent": {
         "nodeId": "photos-grid",
         "slot": "items"
       },
-      "afterNodeId": "photos-tile-0",
       "node": {
         "id": "photos-tile-1",
         "componentId": "layout/box",
@@ -1279,16 +1247,16 @@
             "shape": "4"
           }
         ]
-      }
+      },
+      "afterNodeId": "photos-tile-0"
     },
     {
-      "operationId": "ins-photos-tile-1-fill",
+      "operationId": "insert-photos-tile-1-fill",
       "type": "insertNode",
       "parent": {
         "nodeId": "photos-tile-1",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "photos-tile-1-fill",
         "componentId": "shape/linear-gradient",
@@ -1314,13 +1282,12 @@
       }
     },
     {
-      "operationId": "ins-photos-tile-1-badge",
+      "operationId": "insert-photos-tile-1-badge",
       "type": "insertNode",
       "parent": {
         "nodeId": "photos-tile-1",
         "slot": "children"
       },
-      "afterNodeId": "photos-tile-1-fill",
       "node": {
         "id": "photos-tile-1-badge",
         "componentId": "m3/icon",
@@ -1355,16 +1322,16 @@
             "bottomDp": 8
           }
         ]
-      }
+      },
+      "afterNodeId": "photos-tile-1-fill"
     },
     {
-      "operationId": "ins-photos-tile-2",
+      "operationId": "insert-photos-tile-2",
       "type": "insertNode",
       "parent": {
         "nodeId": "photos-grid",
         "slot": "items"
       },
-      "afterNodeId": "photos-tile-1",
       "node": {
         "id": "photos-tile-2",
         "componentId": "layout/box",
@@ -1378,16 +1345,16 @@
             "shape": "4"
           }
         ]
-      }
+      },
+      "afterNodeId": "photos-tile-1"
     },
     {
-      "operationId": "ins-photos-tile-2-fill",
+      "operationId": "insert-photos-tile-2-fill",
       "type": "insertNode",
       "parent": {
         "nodeId": "photos-tile-2",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "photos-tile-2-fill",
         "componentId": "shape/linear-gradient",
@@ -1413,13 +1380,12 @@
       }
     },
     {
-      "operationId": "ins-photos-tile-3",
+      "operationId": "insert-photos-tile-3",
       "type": "insertNode",
       "parent": {
         "nodeId": "photos-grid",
         "slot": "items"
       },
-      "afterNodeId": "photos-tile-2",
       "node": {
         "id": "photos-tile-3",
         "componentId": "layout/box",
@@ -1433,16 +1399,16 @@
             "shape": "4"
           }
         ]
-      }
+      },
+      "afterNodeId": "photos-tile-2"
     },
     {
-      "operationId": "ins-photos-tile-3-fill",
+      "operationId": "insert-photos-tile-3-fill",
       "type": "insertNode",
       "parent": {
         "nodeId": "photos-tile-3",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "photos-tile-3-fill",
         "componentId": "shape/linear-gradient",
@@ -1468,13 +1434,12 @@
       }
     },
     {
-      "operationId": "ins-photos-tile-4",
+      "operationId": "insert-photos-tile-4",
       "type": "insertNode",
       "parent": {
         "nodeId": "photos-grid",
         "slot": "items"
       },
-      "afterNodeId": "photos-tile-3",
       "node": {
         "id": "photos-tile-4",
         "componentId": "layout/box",
@@ -1488,16 +1453,16 @@
             "shape": "4"
           }
         ]
-      }
+      },
+      "afterNodeId": "photos-tile-3"
     },
     {
-      "operationId": "ins-photos-tile-4-fill",
+      "operationId": "insert-photos-tile-4-fill",
       "type": "insertNode",
       "parent": {
         "nodeId": "photos-tile-4",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "photos-tile-4-fill",
         "componentId": "shape/linear-gradient",
@@ -1523,13 +1488,12 @@
       }
     },
     {
-      "operationId": "ins-photos-tile-4-badge",
+      "operationId": "insert-photos-tile-4-badge",
       "type": "insertNode",
       "parent": {
         "nodeId": "photos-tile-4",
         "slot": "children"
       },
-      "afterNodeId": "photos-tile-4-fill",
       "node": {
         "id": "photos-tile-4-badge",
         "componentId": "m3/icon",
@@ -1564,16 +1528,16 @@
             "bottomDp": 8
           }
         ]
-      }
+      },
+      "afterNodeId": "photos-tile-4-fill"
     },
     {
-      "operationId": "ins-photos-tile-5",
+      "operationId": "insert-photos-tile-5",
       "type": "insertNode",
       "parent": {
         "nodeId": "photos-grid",
         "slot": "items"
       },
-      "afterNodeId": "photos-tile-4",
       "node": {
         "id": "photos-tile-5",
         "componentId": "layout/box",
@@ -1587,16 +1551,16 @@
             "shape": "4"
           }
         ]
-      }
+      },
+      "afterNodeId": "photos-tile-4"
     },
     {
-      "operationId": "ins-photos-tile-5-fill",
+      "operationId": "insert-photos-tile-5-fill",
       "type": "insertNode",
       "parent": {
         "nodeId": "photos-tile-5",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "photos-tile-5-fill",
         "componentId": "shape/linear-gradient",
@@ -1622,13 +1586,12 @@
       }
     },
     {
-      "operationId": "ins-photos-tile-6",
+      "operationId": "insert-photos-tile-6",
       "type": "insertNode",
       "parent": {
         "nodeId": "photos-grid",
         "slot": "items"
       },
-      "afterNodeId": "photos-tile-5",
       "node": {
         "id": "photos-tile-6",
         "componentId": "layout/box",
@@ -1642,16 +1605,16 @@
             "shape": "4"
           }
         ]
-      }
+      },
+      "afterNodeId": "photos-tile-5"
     },
     {
-      "operationId": "ins-photos-tile-6-fill",
+      "operationId": "insert-photos-tile-6-fill",
       "type": "insertNode",
       "parent": {
         "nodeId": "photos-tile-6",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "photos-tile-6-fill",
         "componentId": "shape/linear-gradient",
@@ -1677,13 +1640,12 @@
       }
     },
     {
-      "operationId": "ins-photos-tile-7",
+      "operationId": "insert-photos-tile-7",
       "type": "insertNode",
       "parent": {
         "nodeId": "photos-grid",
         "slot": "items"
       },
-      "afterNodeId": "photos-tile-6",
       "node": {
         "id": "photos-tile-7",
         "componentId": "layout/box",
@@ -1697,16 +1659,16 @@
             "shape": "4"
           }
         ]
-      }
+      },
+      "afterNodeId": "photos-tile-6"
     },
     {
-      "operationId": "ins-photos-tile-7-fill",
+      "operationId": "insert-photos-tile-7-fill",
       "type": "insertNode",
       "parent": {
         "nodeId": "photos-tile-7",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "photos-tile-7-fill",
         "componentId": "shape/linear-gradient",
@@ -1732,13 +1694,12 @@
       }
     },
     {
-      "operationId": "ins-photos-tile-8",
+      "operationId": "insert-photos-tile-8",
       "type": "insertNode",
       "parent": {
         "nodeId": "photos-grid",
         "slot": "items"
       },
-      "afterNodeId": "photos-tile-7",
       "node": {
         "id": "photos-tile-8",
         "componentId": "layout/box",
@@ -1752,16 +1713,16 @@
             "shape": "4"
           }
         ]
-      }
+      },
+      "afterNodeId": "photos-tile-7"
     },
     {
-      "operationId": "ins-photos-tile-8-fill",
+      "operationId": "insert-photos-tile-8-fill",
       "type": "insertNode",
       "parent": {
         "nodeId": "photos-tile-8",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "photos-tile-8-fill",
         "componentId": "shape/linear-gradient",
@@ -1787,13 +1748,12 @@
       }
     },
     {
-      "operationId": "ins-photos-tile-8-badge",
+      "operationId": "insert-photos-tile-8-badge",
       "type": "insertNode",
       "parent": {
         "nodeId": "photos-tile-8",
         "slot": "children"
       },
-      "afterNodeId": "photos-tile-8-fill",
       "node": {
         "id": "photos-tile-8-badge",
         "componentId": "m3/icon",
@@ -1828,16 +1788,16 @@
             "bottomDp": 8
           }
         ]
-      }
+      },
+      "afterNodeId": "photos-tile-8-fill"
     },
     {
-      "operationId": "ins-photos-tile-9",
+      "operationId": "insert-photos-tile-9",
       "type": "insertNode",
       "parent": {
         "nodeId": "photos-grid",
         "slot": "items"
       },
-      "afterNodeId": "photos-tile-8",
       "node": {
         "id": "photos-tile-9",
         "componentId": "layout/box",
@@ -1851,16 +1811,16 @@
             "shape": "4"
           }
         ]
-      }
+      },
+      "afterNodeId": "photos-tile-8"
     },
     {
-      "operationId": "ins-photos-tile-9-fill",
+      "operationId": "insert-photos-tile-9-fill",
       "type": "insertNode",
       "parent": {
         "nodeId": "photos-tile-9",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "photos-tile-9-fill",
         "componentId": "shape/linear-gradient",
@@ -1886,13 +1846,12 @@
       }
     },
     {
-      "operationId": "ins-photos-tile-10",
+      "operationId": "insert-photos-tile-10",
       "type": "insertNode",
       "parent": {
         "nodeId": "photos-grid",
         "slot": "items"
       },
-      "afterNodeId": "photos-tile-9",
       "node": {
         "id": "photos-tile-10",
         "componentId": "layout/box",
@@ -1906,16 +1865,16 @@
             "shape": "4"
           }
         ]
-      }
+      },
+      "afterNodeId": "photos-tile-9"
     },
     {
-      "operationId": "ins-photos-tile-10-fill",
+      "operationId": "insert-photos-tile-10-fill",
       "type": "insertNode",
       "parent": {
         "nodeId": "photos-tile-10",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "photos-tile-10-fill",
         "componentId": "shape/linear-gradient",
@@ -1941,13 +1900,12 @@
       }
     },
     {
-      "operationId": "ins-photos-tile-11",
+      "operationId": "insert-photos-tile-11",
       "type": "insertNode",
       "parent": {
         "nodeId": "photos-grid",
         "slot": "items"
       },
-      "afterNodeId": "photos-tile-10",
       "node": {
         "id": "photos-tile-11",
         "componentId": "layout/box",
@@ -1961,16 +1919,16 @@
             "shape": "4"
           }
         ]
-      }
+      },
+      "afterNodeId": "photos-tile-10"
     },
     {
-      "operationId": "ins-photos-tile-11-fill",
+      "operationId": "insert-photos-tile-11-fill",
       "type": "insertNode",
       "parent": {
         "nodeId": "photos-tile-11",
         "slot": "children"
       },
-      "afterNodeId": null,
       "node": {
         "id": "photos-tile-11-fill",
         "componentId": "shape/linear-gradient",
