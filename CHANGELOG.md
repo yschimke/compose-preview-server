@@ -1,5 +1,13 @@
 # Changelog
 
+## [3.37.0](https://github.com/yschimke/compose-preview-server/compare/v3.36.0...v3.37.0) (2026-09-16)
+
+
+### Bug Fixes
+
+* **deps:** take the daemon line to 3.6.1, whose release has its assets ([#892](https://github.com/yschimke/compose-preview-server/issues/892)) ([b383ca2](https://github.com/yschimke/compose-preview-server/commit/b383ca273e5dea85559a90c4804519bee2cab5fe))
+* move the tools line to 2.17.0 with the daemon bump ([#890](https://github.com/yschimke/compose-preview-server/issues/890)) ([d32b907](https://github.com/yschimke/compose-preview-server/commit/d32b907576f7f2903f25f20a6d3a8caefd3bdbd4))
+
 ## [3.36.0](https://github.com/yschimke/compose-preview-server/compare/v3.35.0...v3.36.0) (2026-09-16)
 
 
