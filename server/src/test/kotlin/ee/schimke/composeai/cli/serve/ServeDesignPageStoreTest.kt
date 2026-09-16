@@ -212,18 +212,22 @@ class ServeDesignPageStoreTest {
 
   @Test
   fun `an unknown link method drops the manifest rather than mis-colouring a node`() {
-    // The four methods are a typed enum in the contract, so an unrecognised one is a parse failure
-    // for the whole document rather than a per-node degrade. That is the harsher outcome and the
-    // right one: the alternative is guessing what an unknown method means while drawing it in a
-    // colour that claims coverage. An *additive* producer change carries new fields, which
-    // DesignPagesJson ignores.
+    // The four methods are a typed enum in the contract, and an unrecognised one fails the parse of
+    // the whole document.
     //
-    // This briefly asserted the opposite. compose-preview-daemon#119 put `coerceInputValues` on
-    // `DesignPagesJson`, which made an unknown method fall back to UNLINKED, and #890 followed the
-    // behaviour here. But that flag is Json-wide rather than per-field: it disabled this rule for
-    // EVERY enum the contract carries, blend modes included, where reinterpreting an unrecognised
-    // value composites a layer the reader believes is authored. compose-preview-daemon#128 reverted
-    // it and 3.6.1 is that revert, so the original rule stands. Do not soften it to match a pin.
+    // This assertion has been both ways round, which is why it is spelled out here.
+    // compose-preview-daemon#119 put `coerceInputValues` on `DesignPagesJson` so an unvetted blend
+    // mode would degrade instead of throwing, and this test was rewritten to expect the same
+    // leniency for `link`. #128 reverted that flag: it is not scoped to one field, so it silently
+    // disabled the contract's rule for EVERY enum the document carries, `PageNodeLink` among them.
+    //
+    // Dropping the document is the deliberate outcome, not collateral damage. Reinterpreting an
+    // unknown method draws a node in a colour that claims coverage nobody verified, and the
+    // producer already refuses to emit an unvetted value — so a manifest carrying one is a
+    // hand-edit or a newer producer, and both are better surfaced than silently reinterpreted.
+    // Every reader wraps this parse in `runCatching`, so the failure degrades to "this catalog
+    // serves no pages", which is visible, rather than to a sheet that quietly lies about how it
+    // was drawn.
     val odd = shape.replace("\"link\":\"manifest\"", "\"link\":\"vibes\"")
     assertTrue(store(manifest(odd)).pages.isEmpty())
   }
