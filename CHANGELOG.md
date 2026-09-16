@@ -1,5 +1,20 @@
 # Changelog
 
+## [3.35.0](https://github.com/yschimke/compose-preview-server/compare/v3.34.0...v3.35.0) (2026-09-16)
+
+
+### Features
+
+* **serve-web:** a loupe on the spec lane, and a report button that stays on the phone ([#877](https://github.com/yschimke/compose-preview-server/issues/877)) ([12a32a3](https://github.com/yschimke/compose-preview-server/commit/12a32a3f11681a2a3a5df121b899d033059894e0))
+
+
+### Bug Fixes
+
+* **deps:** update compose-ai-tools to v2.15.0 ([#874](https://github.com/yschimke/compose-preview-server/issues/874)) ([7c520b6](https://github.com/yschimke/compose-preview-server/commit/7c520b6d835af70ffc8ed26867e76a8cde5d37ef))
+* **deps:** update compose-preview-contracts to v2.20.0 ([#883](https://github.com/yschimke/compose-preview-server/issues/883)) ([9df0041](https://github.com/yschimke/compose-preview-server/commit/9df0041cfefa7b3c8b5cbc1b539b5e239b45a4c2))
+* **deps:** update compose-preview-daemon to v3.4.9 ([#878](https://github.com/yschimke/compose-preview-server/issues/878)) ([babb3e0](https://github.com/yschimke/compose-preview-server/commit/babb3e0433125e884425e4aea50b23a7f5e6afcf))
+* **deps:** update dependency ee.schimke.composeai:rc-player-compose to v1.63.0 ([#884](https://github.com/yschimke/compose-preview-server/issues/884)) ([76a3bc2](https://github.com/yschimke/compose-preview-server/commit/76a3bc24e153aa81116d61419000332ab55e41b0))
+
 ## [3.34.0](https://github.com/yschimke/compose-preview-server/compare/v3.33.0...v3.34.0) (2026-09-15)
 
 
