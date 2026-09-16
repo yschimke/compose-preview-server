@@ -1939,6 +1939,16 @@ class ServeHttpServer(
         get("/{system}/pages") { handleDesignPageIndex(sessionInPath = true) }
         get("/pages.json") { handleDesignPageIndex(sessionInPath = false, json = true) }
         get("/{system}/pages.json") { handleDesignPageIndex(sessionInPath = true, json = true) }
+        // The shared backplates a design page composites itself over. Registered BEFORE the
+        // single-segment page routes and two segments deep, so `/pages/assets/<hash>` can never be
+        // read as the page named `assets`.
+        //
+        // The id is the asset's own content hash, so the URL is `immutable` for the same reason
+        // `/hero/` is: it can never come to mean different bytes, and a repeat visitor paints the
+        // whole scene from cache. Serving goes through the store, never through a path in the
+        // manifest — see [handleDesignPageAsset].
+        get("/pages/assets/{id}") { handleDesignPageAsset(sessionInPath = false) }
+        get("/{system}/pages/assets/{id}") { handleDesignPageAsset(sessionInPath = true) }
         get("/pages/{name}") { handleDesignPage(sessionInPath = false) }
         get("/{system}/pages/{name}") { handleDesignPage(sessionInPath = true) }
 
@@ -4510,6 +4520,38 @@ class ServeHttpServer(
    * branch's raw bytes here would publish markup this server has already judged unsafe to inline,
    * and two different answers for one URL is how a check gets bypassed.
    */
+  /**
+   * `GET /{system}/pages/assets/{id}` — the bytes of one shared backplate.
+   *
+   * Served **only** through [ServeDesignPageStore.asset], never from a path the manifest supplies.
+   * That is the whole safety property of this route: the store has already checked the declaration,
+   * the containment of the path, the file's signature and its size, so an id that resolves here is
+   * one this server decided to serve. Reading the manifest's `uri` directly would hand a delivery
+   * branch an arbitrary file read.
+   *
+   * `immutable`, like `/hero/`: the id IS the content hash, so this URL can never come to mean
+   * different bytes and a repeat visitor paints the scene from cache without asking.
+   */
+  private suspend fun RoutingContext.handleDesignPageAsset(sessionInPath: Boolean) {
+    if (rejectBadToken()) return
+    val sessionId = selectedSessionId(sessionInPath)
+    val id = call.parameters["id"].orEmpty()
+    withLeasedSession(sessionId, onMissing = { call.respond(HttpStatusCode.NotFound) }) { renderHost
+      ->
+      val asset = renderHost.designPages().asset(id)
+      val bundle = catalogBundleHost(renderHost)
+      val bytes =
+        if (asset == null || bundle == null) null
+        else withContext(Dispatchers.IO) { bundle.designPageAssetBytes(id) }
+      if (asset == null || bytes == null) {
+        call.respond(HttpStatusCode.NotFound)
+        return@withLeasedSession
+      }
+      markGeneration("design-page-asset", "public, max-age=31536000, immutable")
+      call.respondBytes(bytes, ContentType.parse("image/" + asset.format))
+    }
+  }
+
   private suspend fun RoutingContext.handleDesignPage(sessionInPath: Boolean) {
     if (rejectBadToken() || rejectUnknownFormat()) return
     val sessionId = selectedSessionId(sessionInPath)
@@ -4552,6 +4594,9 @@ class ServeHttpServer(
             // Resolved against what this session actually publishes, exactly as the view resolves
             // it before drawing a render — see [PageNodeDto.renderable].
             renderablePreviewIds = renderHost.previews.mapTo(HashSet()) { it.id },
+            // The plates the view actually draws — the store's verified set, not the manifest's
+            // wish list, so this document and the sheet describe the same scene.
+            background = store.background(page),
           ),
           ContentType.Application.Json,
         )
@@ -4585,6 +4630,12 @@ class ServeHttpServer(
           moduleLabel = renderHost.label,
           page = page,
           svg = svg,
+          // The scene beneath the sheet. `background` is the store's VERIFIED set — a plate whose
+          // file is not the format, size and path its record claimed is already absent — and
+          // `assetHref` resolves through the store again, so a placement naming anything unverified
+          // yields no URL and is dropped rather than drawn as a hole.
+          background = store.background(page),
+          assetHref = { id -> store.asset(id)?.let { pageAssetUrl(sessionId, id) } },
           fileKey = store.fileKey,
           parallelRenders = parallelRenders,
           parallelLabel = parallelLabel,
@@ -5940,6 +5991,17 @@ class ServeHttpServer(
    * is [linkToken] and not the server's own — a caller holding an agent grant gets pages wired with
    * THEIR token, and a foreign-catalog raster must not be the one link that leaks the operator's.
    */
+  /**
+   * The URL for one verified backplate, carrying the same credential as every other URL on the
+   * page. Mirrors [parallelRenderUrl]; the id is a content hash, so the path is stable forever.
+   */
+  private fun RoutingContext.pageAssetUrl(system: String, assetId: String): String =
+    "/" +
+      WebEscaping.urlEncodeSegment(system) +
+      "/pages/assets/" +
+      WebEscaping.urlEncodeSegment(assetId) +
+      if (isPublic) "" else "?token=" + WebEscaping.urlEncodeSegment(linkToken())
+
   private fun RoutingContext.parallelRenderUrl(system: String, previewId: String): String =
     "/" +
       WebEscaping.urlEncodeSegment(system) +

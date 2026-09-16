@@ -1,6 +1,7 @@
 package ee.schimke.composeai.cli.serve
 
 import ee.schimke.composeai.designpages.DesignPage
+import ee.schimke.composeai.designpages.PageLayerPlacement
 import ee.schimke.composeai.designpages.PageNode
 import ee.schimke.composeai.designpages.PageNodeConfidence
 import kotlinx.serialization.Serializable
@@ -76,6 +77,8 @@ internal object ServeDesignPagesPayload {
     refFor: (PageNode) -> String,
     /** Preview ids this session can actually render. See [PageNodeDto.renderable]. */
     renderablePreviewIds: Set<String>,
+    /** The plates the view actually draws — already resolved and verified. See [PageSceneDto]. */
+    background: List<PageLayerPlacement> = emptyList(),
   ): String {
     val gaps = page.coverageGaps.toSet()
     return JSON.encodeToString(
@@ -89,6 +92,26 @@ internal object ServeDesignPagesPayload {
         inventory = page.inventory,
         implemented = page.linked.size,
         total = page.coverageTotal,
+        scene =
+          PageSceneDto(
+            designBlend = page.designBlend.wire,
+            renderBlend = page.renderBlend.wire,
+            plates =
+              background.map { layer ->
+                PagePlateDto(
+                  asset = layer.asset,
+                  x = layer.x,
+                  y = layer.y,
+                  width = layer.width,
+                  height = layer.height,
+                  opacity = layer.opacity,
+                  fit = layer.fit.lowercase(),
+                  radius = layer.radius,
+                  clip = layer.clip,
+                  blend = layer.blend.wire,
+                )
+              },
+          ),
         nodes =
           page.nodes.map { node ->
             PageNodeDto(
@@ -161,8 +184,50 @@ internal data class DesignPageResponse(
   val inventory: Boolean = true,
   val implemented: Int = 0,
   val total: Int = 0,
+  /** What the sheet is drawn ON, and how each layer composites over it. */
+  val scene: PageSceneDto = PageSceneDto(),
   /** In the design file's own order, exactly as the view lists them. */
   val nodes: List<PageNodeDto> = emptyList(),
+)
+
+/**
+ * The page's scene: the shared plates beneath the export, and how the layers above them composite.
+ *
+ * Serialised for the same reason the coverage arithmetic is — this is what the VIEW draws, not what
+ * the manifest asked for. A plate that failed verification is absent here, so a consumer reading
+ * this document and a reader looking at the sheet are looking at the same scene.
+ *
+ * Deliberately no plate URLs, matching the rest of this payload: the bytes are at
+ * `…/pages/assets/{asset}` off the base the caller already used, and minting absolute links would
+ * bake this request's credential into a cacheable document.
+ */
+@Serializable
+internal data class PageSceneDto(
+  /**
+   * How the design's own drawing composites: `source-over`, `screen`, `multiply`, `plus-lighter`.
+   */
+  val designBlend: String = "source-over",
+  /** How THIS catalog's renders composite. Separate from [designBlend] by design — see the view. */
+  val renderBlend: String = "source-over",
+  /** Bottom to top. Empty for a sheet that needs no backdrop, which is most of them. */
+  val plates: List<PagePlateDto> = emptyList(),
+)
+
+/** One placement of a shared plate, in the page's own coordinate space. */
+@Serializable
+internal data class PagePlateDto(
+  /** The plate's content hash — its id under `…/pages/assets/`. */
+  val asset: String,
+  val x: Double = 0.0,
+  val y: Double = 0.0,
+  val width: Double = 0.0,
+  val height: Double = 0.0,
+  val opacity: Double = 1.0,
+  /** `cover`, `contain` or `fill`. */
+  val fit: String = "cover",
+  val radius: Double = 0.0,
+  val clip: Boolean = true,
+  val blend: String = "source-over",
 )
 
 /** One node on the sheet: the manifest's own fields, plus the marks the view draws. */
