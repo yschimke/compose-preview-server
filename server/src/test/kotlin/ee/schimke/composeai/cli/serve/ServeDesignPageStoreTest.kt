@@ -1,6 +1,5 @@
 package ee.schimke.composeai.cli.serve
 
-import ee.schimke.composeai.designpages.PageNodeLink
 import java.io.File
 import java.nio.file.Files
 import kotlin.test.Test
@@ -212,19 +211,25 @@ class ServeDesignPageStoreTest {
   }
 
   @Test
-  fun `an unknown link method degrades that node to unlinked rather than dropping the manifest`() {
-    // The four methods are a typed enum in the contract, and an unrecognised one used to fail the
-    // parse of the whole document. compose-preview-daemon#119 put `coerceInputValues` on
-    // `DesignPagesJson`, so it now falls back to the property's default instead — and the default
-    // is UNLINKED, which claims no coverage. That is the same guarantee the harsher outcome bought
-    // (never guess what an unknown method means while drawing it in a colour that claims
-    // coverage), without taking the other pages of a newer producer's manifest down with it.
+  fun `an unknown link method drops the manifest rather than mis-colouring a node`() {
+    // The four methods are a typed enum in the contract, and an unrecognised one fails the parse of
+    // the whole document.
+    //
+    // This assertion has been both ways round, which is why it is spelled out here.
+    // compose-preview-daemon#119 put `coerceInputValues` on `DesignPagesJson` so an unvetted blend
+    // mode would degrade instead of throwing, and this test was rewritten to expect the same
+    // leniency for `link`. #128 reverted that flag: it is not scoped to one field, so it silently
+    // disabled the contract's rule for EVERY enum the document carries, `PageNodeLink` among them.
+    //
+    // Dropping the document is the deliberate outcome, not collateral damage. Reinterpreting an
+    // unknown method draws a node in a colour that claims coverage nobody verified, and the
+    // producer already refuses to emit an unvetted value — so a manifest carrying one is a
+    // hand-edit or a newer producer, and both are better surfaced than silently reinterpreted.
+    // Every reader wraps this parse in `runCatching`, so the failure degrades to "this catalog
+    // serves no pages", which is visible, rather than to a sheet that quietly lies about how it
+    // was drawn.
     val odd = shape.replace("\"link\":\"manifest\"", "\"link\":\"vibes\"")
-    val loaded = store(manifest(odd))
-    val page = loaded.pages.single()
-    val coerced = page.nodes.single { it.nodeId == "1:1" }
-    assertEquals(PageNodeLink.UNLINKED, coerced.link)
-    assertTrue(coerced.isUnlinked)
+    assertTrue(store(manifest(odd)).pages.isEmpty())
   }
 
   @Test
