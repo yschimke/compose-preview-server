@@ -66,6 +66,15 @@ class ServeSessionRegistry(
    * and busyness are asked as two questions rather than one.
    */
   private val leaseBusyMillis: Long = DEFAULT_LEASE_BUSY_MILLIS,
+  /**
+   * Whether the box is out of memory right now, consulted on every reaper sweep.
+   *
+   * Wired to the same `OptimizerPressureGate` reading `/status.json` publishes, so the threshold a
+   * deployment already tuned governs shedding too rather than a second one drifting beside it. The
+   * default says "never under pressure", which is the old behaviour and what every test that does
+   * not care about memory gets.
+   */
+  private val underMemoryPressure: () -> Boolean = { false },
   private val clock: () -> Long = System::currentTimeMillis,
 ) : AutoCloseable {
 
@@ -291,6 +300,12 @@ class ServeSessionRegistry(
         .also {
           it.scheduleWithFixedDelay(
             {
+              // Pressure first, because the clock-driven passes below cannot help a box that is
+              // already out of memory: `suspendIdle` needs a session to have been untouched for
+              // ten minutes, and a box filling in five does not have ten. This is the path between
+              // "fine" and "the kernel picked a victim" -- shed a little service, stay up, and let
+              // the ordinary passes reclaim the rest on their own schedule.
+              runCatching { if (underMemoryPressure()) shedUnderPressure() }
               // Suspend first, then GC: a session must be suspended (host released) before it's
               // eligible for the longer-window forked-session reclaim below.
               runCatching { suspendIdle() }
@@ -308,9 +323,17 @@ class ServeSessionRegistry(
           // live seat weighted 2 and is cheap to reopen, so waiting a session-suspension interval
           // to look at it means a handful of forgotten replicas can hold an eight-seat box's whole
           // budget. Same single thread, so the two sweeps never overlap.
+          //
+          // The pressure shed rides this faster cadence rather than the session one, and that is
+          // the whole point of putting it here: `reaperIntervalMillis` defaults to the ten-minute
+          // idle window, and a box that fills in five minutes is dead long before a ten-minute
+          // sweep looks at it. Shedding has to run on the order of the fall, not the idle policy.
           if (daemonIdleMillis > 0 && daemonIdleMillis < reaperIntervalMillis) {
             it.scheduleWithFixedDelay(
-              { runCatching { releaseIdleDaemons() } },
+              {
+                runCatching { if (underMemoryPressure()) shedUnderPressure() }
+                runCatching { releaseIdleDaemons() }
+              },
               daemonIdleMillis,
               daemonIdleMillis,
               TimeUnit.MILLISECONDS,
@@ -578,19 +601,62 @@ class ServeSessionRegistry(
    * the old daemon to die rather than starting a second one alongside it (see [liveHost]) — the
    * serialisation that closing-under-the-lock used to provide, without the stall.
    */
-  fun suspendIdle(): Int {
+  fun suspendIdle(): Int = suspendResident(idleTimeoutMillis, limit = Int.MAX_VALUE)
+
+  /**
+   * Suspend resident sessions **now** because the box is out of memory, least-recently-touched
+   * first, without waiting out [idleTimeoutMillis].
+   *
+   * The registry could previously only refuse new work and reap on a clock. Nothing shed what was
+   * already resident, so a box that filled faster than the idle window could drain it had no path
+   * between "fine" and "the kernel picked a victim": on preview.coo.ee, twenty-odd daemons, the
+   * container at 0% available while the host still had 70% free, and a restart every twenty
+   * minutes. The pressure gate that detects the condition already exists and already fires -- it
+   * just had nothing to call.
+   *
+   * Sheds one session per sweep by default. Suspending is not free (a visitor pays a rebuild, and
+   * an unfinished optimizer pass is parked), so this trades a slice of service for staying up, and
+   * takes the smallest slice that still moves. [limit] raises that for a box falling faster than
+   * one host per sweep frees.
+   *
+   * Every guard [suspendIdle] applies still applies: a pinned session, an open lease, a live stream
+   * or active background work is never shed. Under pressure the LRU order matters where it did not
+   * before -- an idle sweep takes everything eligible, this takes the one least likely to be
+   * missed.
+   */
+  fun shedUnderPressure(limit: Int = 1): Int =
+    suspendResident(idleMillis = 0, limit = limit, leastRecentlyUsedFirst = true)
+
+  /**
+   * The shared sweep behind [suspendIdle] and [shedUnderPressure].
+   *
+   * One body rather than two, because the delicate part is not the selection -- it is the detach:
+   * the snapshot captured under the lock in the same transition as `host = null`, the `closing`
+   * gate a concurrent resume waits on, and the listener/close pass that must run outside the lock
+   * and must clear that gate even when a listener throws. A second copy of that would drift.
+   */
+  private fun suspendResident(
+    idleMillis: Long,
+    limit: Int,
+    leastRecentlyUsedFirst: Boolean = false,
+  ): Int {
+    if (limit <= 0) return 0
     val detached = lock.withLock {
       if (closed) return 0
       val now = clock()
       val detached = mutableListOf<Triple<String, Entry, ServeHost>>()
-      for ((id, entry) in sessions) {
+      val ordered =
+        if (leastRecentlyUsedFirst) sessions.entries.sortedBy { it.value.lastAccess }
+        else sessions.entries.toList()
+      for ((id, entry) in ordered) {
+        if (detached.size >= limit) break
         val host = entry.host ?: continue
         if (
           !entry.pinned &&
             entry.leases == 0 &&
             host.activeStreamCount() == 0 &&
             !host.backgroundWorkActive &&
-            now - entry.lastAccess >= idleTimeoutMillis
+            now - entry.lastAccess >= idleMillis
         ) {
           // Under the lock, BEFORE the detach: this and `entry.host = null` are one transition,
           // so no reader can catch the session detached with its snapshot not yet published.

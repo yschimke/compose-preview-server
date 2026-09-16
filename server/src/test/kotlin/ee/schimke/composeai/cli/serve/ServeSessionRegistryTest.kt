@@ -177,6 +177,67 @@ class ServeSessionRegistryTest {
   }
 
   @Test
+  fun `shedding under pressure suspends the least recently used, without waiting out the idle window`() {
+    val clock = AtomicLong(0)
+    ServeSessionRegistry(
+        open = Opener(),
+        factory = CountingFactory(),
+        // Ten minutes, and never reached in this test. That is the point: a box filling in five
+        // minutes is dead long before the idle window would have released anything.
+        idleTimeoutMillis = 600_000,
+        reaperIntervalMillis = 0,
+        clock = clock::get,
+      )
+      .use { reg ->
+        assertNotNull(reg.acquire("oldest"))
+        clock.set(10)
+        assertNotNull(reg.acquire("middle"))
+        clock.set(20)
+        assertNotNull(reg.acquire("newest"))
+        assertEquals(3, reg.residentCount())
+
+        // Nothing is idle by the ten-minute rule, so the ordinary sweep frees nothing at all.
+        assertEquals(0, reg.suspendIdle(), "no session is idle yet")
+        assertEquals(3, reg.residentCount())
+
+        assertEquals(1, reg.shedUnderPressure(), "one host per sweep by default")
+        assertEquals(2, reg.residentCount(), "the box gave up a daemon rather than dying")
+
+        // The one it gave up is the least recently touched, not an arbitrary map entry.
+        assertNotNull(reg.peekHost("newest"), "the most recently used is kept")
+        assertNotNull(reg.peekHost("middle"))
+        assertNull(reg.peekHost("oldest"), "the least recently used is shed first")
+      }
+  }
+
+  @Test
+  fun `shedding never takes a leased session, however long it has been idle`() {
+    val clock = AtomicLong(0)
+    ServeSessionRegistry(
+        open = Opener(),
+        factory = CountingFactory(),
+        idleTimeoutMillis = 600_000,
+        reaperIntervalMillis = 0,
+        clock = clock::get,
+      )
+      .use { reg ->
+        val lease = assertNotNull(reg.lease("held"))
+        clock.set(10)
+        assertNotNull(reg.acquire("free"))
+
+        // `held` is the least recently used, so LRU order would take it first. A lease outranks
+        // that: shedding is a memory measure, not a licence to close a connection someone holds.
+        assertEquals(1, reg.shedUnderPressure(), "it sheds the unleased one instead")
+        assertNotNull(reg.peekHost("held"), "a leased session is never shed")
+        assertNull(reg.peekHost("free"))
+
+        lease.close()
+        assertEquals(1, reg.shedUnderPressure(), "released, it becomes eligible")
+        assertNull(reg.peekHost("held"))
+      }
+  }
+
+  @Test
   fun `a suspended session resumes from saved state without rebuilding`() {
     val clock = AtomicLong(0)
     val opener = Opener()
