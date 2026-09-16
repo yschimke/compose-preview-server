@@ -443,6 +443,22 @@ public class ServeRunner(
    */
   private val catalogRegistrationLock = Any()
 
+  /**
+   * Is the box out of memory right now?
+   *
+   * Reads the same gate `/status.json` publishes under `themeOptimizer.pressure`, so the session
+   * registry sheds against the threshold a deployment has already tuned rather than a second one
+   * drifting alongside it. `constrained` is the gate's own hysteretic answer -- it will not flap a
+   * shed on and off around the boundary the way a raw sample would.
+   *
+   * Lazily reached through [backgroundWork] because the gate lives there; touching it here would
+   * build the background machinery earlier than the paths that do not need it want.
+   */
+  private fun underMemoryPressure(): Boolean = runCatching {
+    backgroundWork.optimizerAdmissionSnapshot().pressure?.constrained == true
+  }
+    .getOrDefault(false)
+
   private val backgroundWork by lazy {
     val pressureSampler = LinuxHostResourceSampler()
     // One number, used three times deliberately.
@@ -1064,7 +1080,12 @@ public class ServeRunner(
     val factory =
       if (revisions && worktrees != null) revisionFactory(module, worktrees)
       else ServeSessionFactory { null }
-    val registry = ServeSessionRegistry(open = openHost, factory = factory)
+    val registry =
+      ServeSessionRegistry(
+        open = openHost,
+        factory = factory,
+        underMemoryPressure = ::underMemoryPressure,
+      )
     val defaultState =
       ServeSessionState(
         descriptor = descriptor,
@@ -1159,7 +1180,8 @@ public class ServeRunner(
     servable: List<Pair<PreviewModule, List<ServePreview>>>,
     manifests: List<Pair<PreviewModule, PreviewManifest>>,
   ) {
-    val registry = ServeSessionRegistry(open = ::openHost)
+    val registry =
+      ServeSessionRegistry(open = ::openHost, underMemoryPressure = ::underMemoryPressure)
     val opened = mutableListOf<Pair<PreviewModule, List<ServePreview>>>()
 
     servable.forEach { (module, previews) ->
@@ -1260,7 +1282,8 @@ public class ServeRunner(
    */
   private fun runBundleServer() {
     val token = tokenOverride ?: ServeUrls.generateToken()
-    val registry = ServeSessionRegistry(open = ::openHost)
+    val registry =
+      ServeSessionRegistry(open = ::openHost, underMemoryPressure = ::underMemoryPressure)
 
     registerBundles().forEach { (id, bundleHost) ->
       registry.register(id, host = bundleHost, pinned = true)
