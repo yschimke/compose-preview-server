@@ -12,6 +12,9 @@ import ee.schimke.composeai.uibuilder.protocol.ExportCapabilitiesV1
 import ee.schimke.composeai.uibuilder.protocol.PropertyCapabilityV1
 import ee.schimke.composeai.uibuilder.protocol.SlotCapabilityV1
 import ee.schimke.composeai.uibuilder.protocol.SlotCardinalityV1
+import ee.schimke.composeai.uibuilder.protocol.SvgCapabilityStatusV1
+import ee.schimke.composeai.uibuilder.protocol.SvgCapabilityV1
+import ee.schimke.composeai.uibuilder.protocol.SvgFallbackV1
 import ee.schimke.composeai.uibuilder.protocol.WasmAdapterStatusV1
 import ee.schimke.composeai.uibuilder.protocol.WasmCapabilityV1
 import java.security.MessageDigest
@@ -579,23 +582,44 @@ internal object PublishedUiBuilderCatalog {
    *
    * Two different words are spelled `role` around here and they are not the same vocabulary. A
    * builtin's own `role` is the STRUCTURAL one — the template engine's closed set (`screen-root`,
-   * `list`, `list-item`, `overlay`, `controlled`, `decoration`) — which says which template writes
-   * it. The shelf's is `Scaffold` / `Container` / `Leaf`, which decides what the editor calls it
-   * and which slots will take it.
+   * `list`, `list-item`, `container`, `overlay`, `controlled`, `decoration`) — which says which
+   * template writes it. The shelf's is `Scaffold` / `Container` / `Leaf`, which decides what the
+   * editor calls it and which slots will take it.
    *
    * The structural one was read and then dropped, and the shelf role derived from whether there
    * were slots at all. That makes a design ROOT — a Wear catalog's `widget-container-small`, whose
    * synthesised twin in `ProductionUiBuilderRuntime.widget()` is a `Scaffold` — arrive as an
    * ordinary `Container`. `screen-root` is the one structural role that names a scaffold outright,
    * so it is the one that maps; every other builtin keeps the derivation, because `list` and
-   * `overlay` say how a thing is WRITTEN and not what shape it is on the shelf.
+   * `container` say how a thing is WRITTEN and not what shape it is on the shelf.
+   *
+   * A catalog can now say it outright, and what it says wins. The derivation stays for everything
+   * published before the field existed, and stays wrong in the same ways: nothing structural tells
+   * `layout/box` from `layout/scaffold`, which both have one slot named `content`.
    */
   private fun shelfRole(builtin: UiBuilderBuiltin): String =
     when {
+      // What the catalog SAYS, first. The derivation below is a fallback for a catalog that says
+      // nothing, and the field exists because the derivation is wrong in ways nothing structural
+      // predicts: `layout/box` and `layout/scaffold` both have one slot named `content`.
+      builtin.shelfRole in SHELF_ROLES -> builtin.shelfRole!!
       builtin.role == "screen-root" -> "Scaffold"
       builtin.slots.isNotEmpty() -> "Container"
       else -> "Leaf"
     }
+
+  /**
+   * The shelf roles a catalog may claim.
+   *
+   * A word outside this set names no shelf, so it is ignored in favour of the derivation rather
+   * than served: an unknown role reaches the editor as a component it has no name for, and the
+   * derived answer — which is what every catalog published before the field existed — is at worst
+   * wrong in a way the editor can still render. The publishing side reports it as a diagnostic
+   * (`policy.builtin.shelfRole.unknown`); refusing the catalog here would take a whole palette off
+   * a shelf over one misspelled word, which is the trade this contract settles the other way
+   * everywhere else.
+   */
+  private val SHELF_ROLES = setOf("Scaffold", "Container", "Leaf")
 
   /**
    * A builtin, as a component.
@@ -623,7 +647,7 @@ internal object PublishedUiBuilderCatalog {
             // `required` means at least one child; `max` bounds it above, and null there is the
             // unbounded slot every builtin had before it could say otherwise.
             cardinality = SlotCardinalityV1(min = if (slot.required) 1 else 0, max = slot.max),
-            ordered = true,
+            ordered = slot.ordered,
             acceptedRoles = slot.acceptedRoles,
             acceptedTraits = slot.acceptedTraits,
           )
@@ -632,14 +656,19 @@ internal object PublishedUiBuilderCatalog {
       modifierCapabilities =
         (builtin.modifierCapabilities ?: structuralModifiers(builtin.slots.isNotEmpty()))
           .writableOn(platform),
-      wasm = wasm(builtin.canvas, nativeOnly = false, callable = null),
+      wasm = wasm(builtin.canvas, nativeOnly = false, callable = null).overriddenBy(builtin.wasm),
       code =
         implementation?.let {
           CodeCapabilityV1(
             symbol = it.symbol.callable,
             imports = it.code?.imports.orEmpty().ifEmpty { listOf(it.symbol.callable) },
           )
-        },
+        }
+          // A record entry is the better answer and keeps precedence: it is discovered, so it
+          // cannot drift from the source. The stated block is what a builtin whose call site is in
+          // no record at all has, and before it those published no code capability whatsoever.
+          ?: builtin.code?.let { CodeCapabilityV1(symbol = it.symbol, imports = it.imports) },
+      svg = builtin.svg?.toCapability(),
     )
 
   /**
@@ -651,6 +680,63 @@ internal object PublishedUiBuilderCatalog {
    * the canvas resolve it; a catalog naming an adapter this build has never heard of degrades to a
    * placeholder instead of failing to load.
    */
+  /**
+   * The stated SVG block as a capability, or null where it names a word this build cannot decode.
+   *
+   * `status` and `fallback` are closed enums on the wire, and a capability document carrying a word
+   * the builder cannot decode fails the WHOLE document rather than one field. So an unknown word
+   * drops the block back to what a catalog that stated nothing gets, which is what every catalog
+   * got before it could state this at all — the same bargain the adapter status takes.
+   */
+  private fun UiBuilderBuiltinSvg.toCapability(): SvgCapabilityV1? {
+    val status = SVG_STATUSES[status] ?: return null
+    val fallback = SVG_FALLBACKS[fallback] ?: return null
+    return SvgCapabilityV1(
+      status = status,
+      fallback = fallback,
+      blocksExport = blocksExport,
+      notes = notes,
+    )
+  }
+
+  private val SVG_STATUSES =
+    mapOf(
+      "verified" to SvgCapabilityStatusV1.VERIFIED,
+      "unverified" to SvgCapabilityStatusV1.UNVERIFIED,
+      "raster-fallback-required" to SvgCapabilityStatusV1.RASTER_FALLBACK_REQUIRED,
+      "unsupported" to SvgCapabilityStatusV1.UNSUPPORTED,
+    )
+
+  private val SVG_FALLBACKS =
+    mapOf("none" to SvgFallbackV1.NONE, "embedded-raster" to SvgFallbackV1.EMBEDDED_RASTER)
+
+  /**
+   * The derived canvas-lane block with whatever the catalog stated laid over it, field by field.
+   *
+   * Field by field rather than all or nothing, because the three answer different questions and a
+   * catalog rarely knows all three: `layout/box` states `planned`, which the derivation cannot
+   * produce, while its platform support is exactly what the adapter id implies. Replacing the whole
+   * block would make stating one field a claim about the other two.
+   */
+  private fun WasmCapabilityV1.overriddenBy(stated: UiBuilderBuiltinWasm?): WasmCapabilityV1 {
+    if (stated == null) return this
+    return copy(
+      platformSupported = stated.platformSupported ?: platformSupported,
+      // An unknown status keeps the derived one rather than failing the load. A capability document
+      // carrying a word the builder cannot decode fails the WHOLE document, not one field, so a
+      // typo in one builtin would cost the catalog its entire palette.
+      adapterStatus = ADAPTER_STATUSES[stated.adapterStatus] ?: adapterStatus,
+      notes = stated.notes ?: notes,
+    )
+  }
+
+  private val ADAPTER_STATUSES =
+    mapOf(
+      "supported" to WasmAdapterStatusV1.SUPPORTED,
+      "planned" to WasmAdapterStatusV1.PLANNED,
+      "unsupported" to WasmAdapterStatusV1.UNSUPPORTED,
+    )
+
   private fun wasm(canvas: String?, nativeOnly: Boolean, callable: String?): WasmCapabilityV1 {
     val drawn = !nativeOnly && canvas != null && canvas != PLACEHOLDER_CANVAS
     return WasmCapabilityV1(
@@ -829,6 +915,58 @@ internal object PublishedUiBuilderCatalog {
      * not executable Wasm loaded into the browser.
      */
     val implementation: String? = null,
+    /**
+     * What this builtin IS on the shelf, when the catalog says rather than leaving it derived.
+     *
+     * See [shelfRole], which is where the derivation and the reason for it live. Spelled
+     * `shelfRole` because [role] beside it is the STRUCTURAL one, and the two are different
+     * vocabularies published under one word: a capability document serves this field as `role`.
+     */
+    val shelfRole: String? = null,
+    /**
+     * The canvas lane, overriding what [canvas] implies. See [wasm].
+     *
+     * Every field is nullable, so a catalog stating only a note keeps the derived support and
+     * status. The derivation can produce `supported` and `unsupported` and never `planned`, which
+     * is a claim about an adapter that is COMING rather than one that will never exist — and the
+     * builder vocabulary this donor republishes is `planned` on nine of its seventeen components.
+     */
+    val wasm: UiBuilderBuiltinWasm? = null,
+    /**
+     * The callable this builtin exports as, when no record entry can name it.
+     *
+     * [implementation] answers the same question by pointing into the catalog's own record, and
+     * stays the better answer where there is one: the record is discovered, so it cannot drift.
+     * This is for the component whose call site is in neither this catalog nor any record — every
+     * foundation symbol, because discovery scopes library components to material3/material/wear.
+     */
+    val code: UiBuilderBuiltinCode? = null,
+    /** What a structured-SVG export makes of this builtin. See [svg]. */
+    val svg: UiBuilderBuiltinSvg? = null,
+  )
+
+  /** The canvas-lane block a builtin may state, as `ui-builder.policy.schema.json` spells it. */
+  @Serializable
+  internal data class UiBuilderBuiltinWasm(
+    val platformSupported: JsonElement? = null,
+    val adapterStatus: String? = null,
+    val notes: String? = null,
+  )
+
+  /** The export call a builtin may state. */
+  @Serializable
+  internal data class UiBuilderBuiltinCode(
+    val symbol: String,
+    val imports: List<String> = emptyList(),
+  )
+
+  /** What a structured-SVG export makes of a builtin. */
+  @Serializable
+  internal data class UiBuilderBuiltinSvg(
+    val status: String,
+    val fallback: String,
+    val blocksExport: Boolean = false,
+    val notes: String? = null,
   )
 
   /**
@@ -858,6 +996,15 @@ internal object PublishedUiBuilderCatalog {
      */
     val max: Int? = null,
     val role: String? = null,
+    /**
+     * Whether the order of this slot's children is meaningful.
+     *
+     * Composed as `true` for every builtin slot before this field, because there was nothing to
+     * read — and the packaged vocabulary this donor republishes has six of its fifteen slots
+     * unordered, so the shelf stated an editorial fact about six slots that their own catalog
+     * denies. `true` stays the default: no existing declaration changes meaning by being reread.
+     */
+    val ordered: Boolean = true,
   )
 
   @Serializable
