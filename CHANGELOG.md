@@ -1,5 +1,17 @@
 # Changelog
 
+## [3.36.0](https://github.com/yschimke/compose-preview-server/compare/v3.35.0...v3.36.0) (2026-09-16)
+
+
+### Features
+
+* read the shelf role, lanes, call and slot order a builtin now states ([#886](https://github.com/yschimke/compose-preview-server/issues/886)) ([185490a](https://github.com/yschimke/compose-preview-server/commit/185490abf5f4aa90349c367bd3402587b08d4e3a))
+
+
+### Bug Fixes
+
+* charge catalog daemon residency against the live-seat budget ([#888](https://github.com/yschimke/compose-preview-server/issues/888)) ([b3cd81d](https://github.com/yschimke/compose-preview-server/commit/b3cd81dd884c380510ee3ffe0c265c70b814629b))
+
 ## [3.35.0](https://github.com/yschimke/compose-preview-server/compare/v3.34.0...v3.35.0) (2026-09-16)
 
 
