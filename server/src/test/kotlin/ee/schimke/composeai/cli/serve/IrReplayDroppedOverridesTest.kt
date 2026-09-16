@@ -120,15 +120,17 @@ class IrReplayDroppedOverridesTest {
     val mixed =
       PreviewOverrides(
         remoteCompose =
-          RemoteComposeOverride(
-            namedValues =
-              mapOf(
-                "label" to RemoteNamedValue.StringValue("HELLO"),
-                "shaderColor" to RemoteNamedValue.ColorValue("#FF00FF00"),
-                "progress" to RemoteNamedValue.FloatValue(0.95f),
-                "iconSize" to RemoteNamedValue.DpValue(64f),
-              )
-          )
+          RemoteComposeOverride.Builder()
+            .also {
+              it.namedValues =
+                mapOf(
+                  "label" to RemoteNamedValue.StringValue("HELLO"),
+                  "shaderColor" to RemoteNamedValue.ColorValue("#FF00FF00"),
+                  "progress" to RemoteNamedValue.FloatValue(0.95f),
+                  "iconSize" to RemoteNamedValue.DpValue(64f),
+                )
+            }
+            .build()
       )
     assertEquals(
       listOf("rc.label"),
@@ -144,7 +146,10 @@ class IrReplayDroppedOverridesTest {
       CatalogLiveRouting.irReplayDroppedOverrideNames(
         lightId,
         PreviewOverrides(
-          remoteCompose = RemoteComposeOverride(player = RemoteComposePlayerKind.EMBEDDED)
+          remoteCompose =
+            RemoteComposeOverride.Builder()
+              .also { it.player = RemoteComposePlayerKind.EMBEDDED }
+              .build()
         ),
       ),
     )
@@ -183,9 +188,9 @@ class IrReplayDroppedOverridesTest {
               "a" to PreviewOverrideValue.StringValue("first"),
             ),
           remoteCompose =
-            RemoteComposeOverride(
-              namedValues = mapOf("text" to RemoteNamedValue.StringValue("body"))
-            ),
+            RemoteComposeOverride.Builder()
+              .also { it.namedValues = mapOf("text" to RemoteNamedValue.StringValue("body")) }
+              .build(),
         ),
       ),
     )

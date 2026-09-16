@@ -252,7 +252,10 @@ internal object CatalogLiveRouting {
       clearBackground = o.clearBackground?.takeIf { it },
       remoteCompose =
         o.remoteCompose
-          ?.let { rc -> if (rc.player == bakedRcPlayer) rc.copy(player = null) else rc }
+          ?.let { rc ->
+            if (rc.player == bakedRcPlayer) rc.newBuilder().also { it.player = null }.build()
+            else rc
+          }
           // An `rc` facet that held nothing but that player is now empty, and an empty facet is not
           // the same as no facet to the `!= PreviewOverrides()` comparison above.
           ?.takeIf { it.profile != null || it.player != null || it.namedValues.isNotEmpty() },
