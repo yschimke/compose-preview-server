@@ -1587,7 +1587,28 @@ class ServeCatalogLiveHost(
       // so wait for the warm this request just scheduled, bounded, and only give up if the cold
       // start really is going to outlast the request.
       var liveNotFound = false
-      if (leased || daemonWarmOrScheduling(daemonId) || awaitForegroundWarm(daemonId)) {
+      // Residency is charged on EVERY route that can start this catalog's daemon, not only the warm
+      // ones. `leased` short-circuits the `||` below, so a leased render reached
+      // `renderForegroundBounded` -- and started the JVM -- without `daemonWarmOrScheduling` ever
+      // running, which is where the charge lives. On preview.coo.ee that was most of them: seats
+      // sat
+      // at 5/8 while 23 daemons ran, because `renderPrefetch` (the idle theme optimizer) passes
+      // `leased = true`, and a budget that never fills never refuses anything.
+      //
+      // The refusal is deliberately asymmetric, because the two callers are not equal claims.
+      // Background work is deferrable and is precisely what grows residency on a box nobody is
+      // browsing, so it declines and falls through to Busy -- which the optimizer already reads as
+      // "ask again" rather than as a render failure (see `recordRenderFailure` below). A visitor's
+      // leased render is not deferrable, and the note above is explicit that it must be allowed to
+      // cold-start or the per-id warm guard returns Busy for every card and the pool never grows.
+      // It proceeds having asked, so the budget accounts for what it can without turning a memory
+      // bound into a Busy cliff for the one caller with a person waiting on it.
+      val residency = chargeResidency()
+      val mayOpenDaemon = residency || !background
+      if (
+        mayOpenDaemon &&
+          (leased || daemonWarmOrScheduling(daemonId) || awaitForegroundWarm(daemonId))
+      ) {
         val live = renderForegroundBounded(daemonId, overrides, leased, background)
         liveNotFound = live is RenderOutcome.NotFound
         // Count a real render failure against this theme key so a permanently broken preview stops
