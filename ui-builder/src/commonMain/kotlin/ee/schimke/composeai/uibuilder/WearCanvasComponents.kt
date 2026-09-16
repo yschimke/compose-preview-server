@@ -6,12 +6,15 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontVariation
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.wear.compose.foundation.CurvedScope
 import androidx.wear.compose.foundation.lazy.TransformingLazyColumn
 import androidx.wear.compose.foundation.lazy.rememberTransformingLazyColumnState
 import androidx.wear.compose.material3.AlertDialogContent
 import androidx.wear.compose.material3.AlertDialogDefaults
+import androidx.wear.compose.material3.AnimatedText
 import androidx.wear.compose.material3.AppCard
 import androidx.wear.compose.material3.ArcProgressIndicator
 import androidx.wear.compose.material3.Button
@@ -24,11 +27,14 @@ import androidx.wear.compose.material3.ConfirmationDialogContent
 import androidx.wear.compose.material3.ConfirmationDialogDefaults
 import androidx.wear.compose.material3.EdgeButton
 import androidx.wear.compose.material3.EdgeButtonSize
+import androidx.wear.compose.material3.FadingExpandingLabel
 import androidx.wear.compose.material3.FailureConfirmationDialogContent
 import androidx.wear.compose.material3.FilledIconButton
 import androidx.wear.compose.material3.FilledTonalButton
 import androidx.wear.compose.material3.FilledTonalIconButton
 import androidx.wear.compose.material3.IconButton
+import androidx.wear.compose.material3.IconToggleButton
+import androidx.wear.compose.material3.LevelIndicator
 import androidx.wear.compose.material3.LinearProgressIndicator
 import androidx.wear.compose.material3.ListHeader
 import androidx.wear.compose.material3.ListSubHeader
@@ -49,11 +55,13 @@ import androidx.wear.compose.material3.SwitchButton
 import androidx.wear.compose.material3.Text
 import androidx.wear.compose.material3.TextButton
 import androidx.wear.compose.material3.TextButtonDefaults
+import androidx.wear.compose.material3.TextToggleButton
 import androidx.wear.compose.material3.TitleCard
 import androidx.wear.compose.material3.confirmationDialogCurvedText
 import androidx.wear.compose.material3.lazy.rememberTransformationSpec
 import androidx.wear.compose.material3.lazy.transformedHeight
 import androidx.wear.compose.material3.openOnPhoneDialogCurvedText
+import androidx.wear.compose.material3.rememberAnimatedTextFontRegistry
 
 /**
  * Wear components drawn by Wear Compose, on the Wasm canvas.
@@ -582,4 +590,109 @@ internal fun WearCanvasButton(
     "child" -> ChildButton(onClick = {}, modifier = modifier, enabled = enabled, label = slot)
     else -> Button(onClick = {}, modifier = modifier, enabled = enabled, label = slot)
   }
+}
+
+// ── Completing the vocabulary
+// ─────────────────────────────────────────────────────────────────────
+//
+// The components above were the catalog's whole inventory, and the inventory was short: a Wear
+// screen could hold a selection family with no toggle buttons in it, text with no animated or
+// fading variants, and no indicator except a progress ring. Each of these is published by Wear
+// Material 3 and demonstrated by the kit; none of them needed anything the port does not have.
+
+/**
+ * `IconToggleButton` and `TextToggleButton`.
+ *
+ * The catalog already carried `CheckboxButton`, `SwitchButton` and `RadioButton`, which are the
+ * *list row* end of selection — full-width, labelled, one per line. These are the other end: a
+ * compact control that lives in a row of its own kind, which is what `ButtonGroup` is for.
+ */
+@Composable
+internal fun WearCanvasIconToggleButton(
+  checked: Boolean,
+  enabled: Boolean,
+  modifier: Modifier = Modifier,
+  content: @Composable () -> Unit,
+) {
+  IconToggleButton(
+    checked = checked,
+    onCheckedChange = {},
+    modifier = modifier,
+    enabled = enabled,
+  ) {
+    content()
+  }
+}
+
+@Composable
+internal fun WearCanvasTextToggleButton(
+  text: String,
+  checked: Boolean,
+  enabled: Boolean,
+  modifier: Modifier = Modifier,
+) {
+  TextToggleButton(
+    checked = checked,
+    onCheckedChange = {},
+    modifier = modifier,
+    enabled = enabled,
+  ) {
+    Text(text)
+  }
+}
+
+/**
+ * `AnimatedText`, drawn at a frozen point on its own animation.
+ *
+ * The component travels a numeral along a variable font's axes between two sizes, driven by
+ * `progressFraction`. The canvas holds that fraction at whatever the document says rather than
+ * running it, for the reason the Wear scaffold freezes its clock: a design whose render changed
+ * every frame could not be diffed, and an author asking "what does this look like" is asking about
+ * a moment, not a motion.
+ */
+@Composable
+internal fun WearCanvasAnimatedText(
+  text: String,
+  progress: Float,
+  modifier: Modifier = Modifier,
+) {
+  AnimatedText(
+    text = text,
+    // The registry is what the component animates THROUGH, and it has no default — the two ends of
+    // the weight axis and the two font sizes have to be named. These are the library's own sample
+    // values, which the kit also uses: a numeral growing from regular to black as it counts.
+    // Not authored properties, because the catalog declares none for them and a knob nobody can
+    // set is worse than a documented constant.
+    fontRegistry =
+      rememberAnimatedTextFontRegistry(
+        startFontVariationSettings = FontVariation.Settings(FontVariation.weight(400)),
+        endFontVariationSettings = FontVariation.Settings(FontVariation.weight(900)),
+        startFontSize = 30.sp,
+        endFontSize = 48.sp,
+      ),
+    progressFraction = { progress.coerceIn(0f, 1f) },
+    modifier = modifier,
+  )
+}
+
+/** `FadingExpandingLabel`: text that fades its overflow rather than clipping or ellipsising it. */
+@Composable
+internal fun WearCanvasFadingExpandingLabel(text: String, modifier: Modifier = Modifier) {
+  FadingExpandingLabel(text = text, modifier = modifier)
+}
+
+/**
+ * `LevelIndicator`: the arc a rotary control draws against the bezel.
+ *
+ * `sweepAngle` is left at the library's default. The kit does not publish the angles its other two
+ * sizes draw, and inventing one here would put a made-up number under the component's name — the
+ * same objection that governed everything else in this file.
+ */
+@Composable
+internal fun WearCanvasLevelIndicator(
+  value: Float,
+  enabled: Boolean,
+  modifier: Modifier = Modifier,
+) {
+  LevelIndicator(value = { value.coerceIn(0f, 1f) }, modifier = modifier, enabled = enabled)
 }

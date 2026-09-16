@@ -206,10 +206,10 @@ private val LocalUiBuilderCornerRadius = staticCompositionLocalOf { 16f }
 /**
  * Component ids the catalog declares and this canvas draws as named placeholders — a pack's.
  *
- * Provided by the editor from the catalog rather than compiled in like [WEAR_NATIVE_ONLY], because
- * a pack's components arrive at run time and this renderer cannot know them: they are whatever
- * another catalog's record proved a call site for. Empty by default, so every other host of this
- * surface — the previews, the renderer bundle — is unchanged.
+ * Provided by the editor from the catalog rather than compiled in, because a pack's components
+ * arrive at run time and this renderer cannot know them: they are whatever another catalog's record
+ * proved a call site for. Empty by default, so every other host of this surface — the previews, the
+ * renderer bundle — is unchanged.
  */
 internal val LocalUiBuilderNativeOnly = staticCompositionLocalOf<Set<String>> { emptySet() }
 
@@ -948,6 +948,33 @@ private fun RenderNode(
       if (node.bool("visible", true)) {
         WearCanvasOpenOnPhoneDialog(text = node.string("text"), modifier = measured)
       }
+    // The vocabulary completed: the compact end of selection, two text treatments and the bezel
+    // arc.
+    "wear-m3/icon-toggle-button" ->
+      WearCanvasIconToggleButton(
+        checked = node.bool("checked"),
+        enabled = node.bool("enabled", true),
+        modifier = measured,
+      ) {
+        slot("content").forEach { child(it, Modifier) }
+      }
+    "wear-m3/text-toggle-button" ->
+      WearCanvasTextToggleButton(
+        text = node.string("label"),
+        checked = node.bool("checked"),
+        enabled = node.bool("enabled", true),
+        modifier = measured,
+      )
+    "wear-m3/animated-text" ->
+      WearCanvasAnimatedText(node.string("text"), node.float("progress"), measured)
+    "wear-m3/fading-expanding-label" ->
+      WearCanvasFadingExpandingLabel(node.string("text"), measured)
+    "wear-m3/level-indicator" ->
+      WearCanvasLevelIndicator(
+        value = node.float("value"),
+        enabled = node.bool("enabled", true),
+        modifier = measured,
+      )
     "wear-m3/date-picker" ->
       WearCanvasDatePicker(
         initialDate = node.string("initialDate"),
@@ -1552,17 +1579,6 @@ private fun RenderNode(
           .clip(CircleShape)
           .background(Color(parseArgb(node.string("color"))))
       )
-    // A Wear component with no Material 3 counterpart, drawn as a named placeholder and not as a
-    // lookalike. See [NativeOnlyPlaceholder] for why this is the honest shape rather than a
-    // gap in the implementation.
-    in WEAR_NATIVE_ONLY ->
-      NativeOnlyPlaceholder(node, measured) {
-        // Every slot's children, flattened. A placeholder cannot lay a child out the way the real
-        // component would — that is what makes it a placeholder — but dropping the children would
-        // hide whole subtrees from the layers panel's counterpart on the canvas, and an icon
-        // inside an icon button is the thing an author is looking for.
-        node.slots.values.flatten().forEach { childId -> child(childId, Modifier) }
-      }
     // A pack's component: declared by the catalog, proven by another catalog's record, and drawn
     // here as its name and place for the reason the Wear ones are — the browser cannot link the
     // classes that draw it. The caption says whose it is, because a `Session Card` on a Material
@@ -2893,13 +2909,12 @@ private fun GeneratedCoverPlaceholder(modifier: Modifier) {
   }
 }
 
-/**
- * The Wear components this catalog publishes and the browser cannot draw, as ids.
- *
- * Derived from `WearScreenCodeExporter`'s own constants rather than listed again: the generator and
- * the canvas have to agree about which ids these are, and two lists is two chances not to.
- */
-private val WEAR_NATIVE_ONLY: Set<String> = WearScreenCodeExporter.NATIVE_ONLY_COMPONENT_IDS
+// `WEAR_NATIVE_ONLY` stood here — the ids the browser could not draw, routed to
+// `NativeOnlyPlaceholder`. Every one of them is drawn by Wear Compose now, so the branch that read
+// it was unreachable and both are gone. `WearScreenCodeExporter.NATIVE_ONLY_COMPONENT_IDS` still
+// exists and still earns its keep, but for its other job: it is the roster the export tests walk to
+// prove every Wear component generates code. The placeholder itself stays for component packs,
+// which genuinely cannot be drawn here.
 
 /**
  * A Wear component the canvas names instead of drawing.

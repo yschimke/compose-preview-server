@@ -288,6 +288,19 @@ object WearScreenCodeExporter {
 
   const val TIME_PICKER = "wear-m3/time-picker"
 
+  /** The compact end of selection: a toggle that sits in a group rather than filling a row. */
+  const val ICON_TOGGLE_BUTTON = "wear-m3/icon-toggle-button"
+
+  const val TEXT_TOGGLE_BUTTON = "wear-m3/text-toggle-button"
+
+  /** A numeral travelling a variable font's weight axis; the design freezes it at one fraction. */
+  const val ANIMATED_TEXT = "wear-m3/animated-text"
+
+  const val FADING_EXPANDING_LABEL = "wear-m3/fading-expanding-label"
+
+  /** The arc a rotary control draws against the bezel. */
+  const val LEVEL_INDICATOR = "wear-m3/level-indicator"
+
   /**
    * The components that own the whole round display rather than a row of a list.
    *
@@ -309,13 +322,15 @@ object WearScreenCodeExporter {
   val OVERLAYS: Set<String> = setOf(ALERT_DIALOG, CONFIRMATION_DIALOG, OPEN_ON_PHONE_DIALOG)
 
   /**
-   * Every id above, as one public set — the canvas's half of the same fact.
+   * Every id above, as one public set: the roster this generator can write.
    *
-   * The editor draws these as named placeholders rather than as components, and the generator
-   * writes them as real Wear Compose. Those two have to be the same list, so the canvas reads this
-   * rather than keeping a copy: a component added to the generator and missed by the canvas falls
-   * through to the red "Unsupported component" box, which is exactly the wrong thing to tell an
-   * author about a component that exports perfectly well.
+   * It used to mean "and the canvas draws these as named placeholders", and the canvas read it to
+   * decide exactly that. It no longer does — every one of these is drawn by Wear Compose on the
+   * canvas now — so the placeholder branch that consumed it is gone.
+   *
+   * The set stays because its other job outlived the first: the export tests walk it, so a
+   * component added to this generator is in those tests the moment its id is here. Keep adding ids;
+   * what changed is only what the canvas does with them.
    */
   val NATIVE_ONLY_COMPONENT_IDS: Set<String> =
     setOf(
@@ -333,6 +348,11 @@ object WearScreenCodeExporter {
       BUTTON_GROUP,
       DATE_PICKER,
       TIME_PICKER,
+      ICON_TOGGLE_BUTTON,
+      TEXT_TOGGLE_BUTTON,
+      ANIMATED_TEXT,
+      FADING_EXPANDING_LABEL,
+      LEVEL_INDICATOR,
     ) + OVERLAYS
 
   internal const val INDENT = "    "
@@ -387,6 +407,11 @@ internal class WearContentEmitter(
   private var usesListSubHeader = false
   private var usesSlider = false
   private var usesStepper = false
+  private var usesIconToggleButton = false
+  private var usesTextToggleButton = false
+  private var usesAnimatedText = false
+  private var usesFadingExpandingLabel = false
+  private var usesLevelIndicator = false
   private var usesButtonGroup = false
   private var usesDatePicker = false
   private var usesTimePicker = false
@@ -658,6 +683,74 @@ internal class WearContentEmitter(
         selectionButton(node, nodeId, pad, depth, transformed, "SwitchButton", "checked")
       WearScreenCodeExporter.RADIO_BUTTON ->
         selectionButton(node, nodeId, pad, depth, transformed, "RadioButton", "selected")
+      WearScreenCodeExporter.ICON_TOGGLE_BUTTON -> {
+        usesIconToggleButton = true
+        val state = rememberedBoolean(nodeId, node.boolean("checked") ?: false)
+        listOf("${pad}IconToggleButton(") +
+          listOf(
+            "${pad}${INDENT}checked = $state,",
+            "${pad}${INDENT}onCheckedChange = { $state = it },",
+          ) +
+          surfaceArguments(pad + INDENT, nodeId, transformed) +
+          listOf("${pad}) {") +
+          node.slots["content"].orEmpty().flatMap { emit(it, depth + 1) } +
+          listOf("${pad}}")
+      }
+      WearScreenCodeExporter.TEXT_TOGGLE_BUTTON -> {
+        usesTextToggleButton = true
+        usesText = true
+        val state = rememberedBoolean(nodeId, node.boolean("checked") ?: false)
+        listOf("${pad}TextToggleButton(") +
+          listOf(
+            "${pad}${INDENT}checked = $state,",
+            "${pad}${INDENT}onCheckedChange = { $state = it },",
+          ) +
+          surfaceArguments(pad + INDENT, nodeId, transformed) +
+          listOf(
+            "${pad}) {",
+            "${pad}${INDENT}Text(text = ${node.string("label").quoted()})",
+            "${pad}}",
+          )
+      }
+      WearScreenCodeExporter.ANIMATED_TEXT -> {
+        usesAnimatedText = true
+        // The registry has no default — both ends of the weight axis and both font sizes are
+        // required — so the generated screen names upstream's own sample values, which is what the
+        // canvas draws with. A design that wanted its own would need catalog properties for them.
+        listOf("${pad}AnimatedText(") +
+          listOf(
+            "${pad}${INDENT}text = ${node.string("text").quoted()},",
+            "${pad}${INDENT}fontRegistry =",
+            "${pad}${INDENT}${INDENT}rememberAnimatedTextFontRegistry(",
+            "${pad}${INDENT}${INDENT}${INDENT}startFontVariationSettings =",
+            "${pad}${INDENT}${INDENT}${INDENT}${INDENT}FontVariation.Settings(FontVariation.weight(400)),",
+            "${pad}${INDENT}${INDENT}${INDENT}endFontVariationSettings =",
+            "${pad}${INDENT}${INDENT}${INDENT}${INDENT}FontVariation.Settings(FontVariation.weight(900)),",
+            "${pad}${INDENT}${INDENT}${INDENT}startFontSize = 30.sp,",
+            "${pad}${INDENT}${INDENT}${INDENT}endFontSize = 48.sp,",
+            "${pad}${INDENT}${INDENT}),",
+            // Frozen at the authored fraction rather than animated, the way the canvas draws it:
+            // the generated screen is a picture of a design, and a running animation would make it
+            // a different picture on every frame.
+            "${pad}${INDENT}progressFraction = { ${node.number("progress") ?: 0f}f },",
+          ) +
+          surfaceArguments(pad + INDENT, nodeId, transformed) +
+          listOf("${pad})")
+      }
+      WearScreenCodeExporter.FADING_EXPANDING_LABEL -> {
+        usesFadingExpandingLabel = true
+        listOf("${pad}FadingExpandingLabel(") +
+          listOf("${pad}${INDENT}text = ${node.string("text").quoted()},") +
+          surfaceArguments(pad + INDENT, nodeId, transformed) +
+          listOf("${pad})")
+      }
+      WearScreenCodeExporter.LEVEL_INDICATOR -> {
+        usesLevelIndicator = true
+        listOf("${pad}LevelIndicator(") +
+          listOf("${pad}${INDENT}value = { ${node.number("value") ?: 0f}f },") +
+          surfaceArguments(pad + INDENT, nodeId, transformed) +
+          listOf("${pad})")
+      }
       WearScreenCodeExporter.SLIDER -> {
         usesSlider = true
         val segmented = node.string("segmented") == "segmented"
@@ -1266,6 +1359,16 @@ internal class WearContentEmitter(
     if (usesListSubHeader) add("androidx.wear.compose.material3.ListSubHeader")
     if (usesSlider) add("androidx.wear.compose.material3.Slider")
     if (usesStepper) add("androidx.wear.compose.material3.Stepper")
+    if (usesIconToggleButton) add("androidx.wear.compose.material3.IconToggleButton")
+    if (usesTextToggleButton) add("androidx.wear.compose.material3.TextToggleButton")
+    if (usesAnimatedText) {
+      add("androidx.wear.compose.material3.AnimatedText")
+      add("androidx.wear.compose.material3.rememberAnimatedTextFontRegistry")
+      add("androidx.compose.ui.text.font.FontVariation")
+      add("androidx.compose.ui.unit.sp")
+    }
+    if (usesFadingExpandingLabel) add("androidx.wear.compose.material3.FadingExpandingLabel")
+    if (usesLevelIndicator) add("androidx.wear.compose.material3.LevelIndicator")
     if (usesButtonGroup) add("androidx.wear.compose.material3.ButtonGroup")
     if (usesDatePicker) {
       add("androidx.wear.compose.material3.DatePicker")

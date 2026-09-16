@@ -426,12 +426,21 @@ class WearComponentExportTest {
   }
 
   /**
-   * The generator and the canvas read one list, so neither can grow a component the other lacks.
+   * The generator's roster is the roster the test above walks, so a component cannot join one
+   * without joining the other.
+   *
+   * This used to read "the generator and the canvas read one list, so neither can grow a component
+   * the other lacks", which was true when the canvas used this set to decide what to draw as a
+   * placeholder. It no longer does — every Wear component is drawn by Wear Compose now and that
+   * branch is gone — so the guarantee this pins is the narrower one the set still provides.
+   *
+   * A literal count rather than a computed one, deliberately: the number only moves when somebody
+   * adds a component, and making them change it is the point.
    */
   @Test
-  fun `the native-only set covers every id the branches handle`() {
+  fun `every id the generator handles is on its roster`() {
     assertEquals(
-      17,
+      22,
       WearScreenCodeExporter.NATIVE_ONLY_COMPONENT_IDS.size,
       WearScreenCodeExporter.NATIVE_ONLY_COMPONENT_IDS.sorted().toString(),
     )
