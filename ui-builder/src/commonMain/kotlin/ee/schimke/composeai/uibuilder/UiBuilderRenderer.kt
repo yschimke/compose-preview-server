@@ -772,7 +772,7 @@ private fun RenderNode(
     )
   }
 
-  when (node.componentId.wearScreenStandIn()) {
+  when (node.componentId) {
     // Both container sizes, framed in whichever host shape is being viewed. The footprint is read
     // from `hostSpec` rather than written here, so this canvas and the native render beside it
     // cannot disagree about what the host reserves — see [WearWidgetHostSpec].
@@ -831,6 +831,133 @@ private fun RenderNode(
         steps = node.integer("steps"),
         segmented = node.bool("segmented"),
         enabled = node.bool("enabled", true),
+        modifier = measured,
+      )
+    "wear-m3/checkbox-button" ->
+      WearCanvasCheckboxButton(
+        label = node.string("label"),
+        secondaryLabel = node.string("secondaryLabel"),
+        checked = node.bool("checked"),
+        enabled = node.bool("enabled", true),
+        modifier = measured,
+      )
+    "wear-m3/radio-button" ->
+      WearCanvasRadioButton(
+        label = node.string("label"),
+        secondaryLabel = node.string("secondaryLabel"),
+        selected = node.bool("selected"),
+        enabled = node.bool("enabled", true),
+        modifier = measured,
+      )
+    "wear-m3/stepper" ->
+      WearCanvasStepper(
+        value = node.float("value"),
+        valueFrom = node.float("valueFrom"),
+        valueTo = node.float("valueTo", 1f),
+        steps = node.integer("steps"),
+        enabled = node.bool("enabled", true),
+        modifier = measured,
+      ) {
+        slot("content").forEach { child(it, Modifier) }
+      }
+    "wear-m3/progress-indicator" ->
+      WearCanvasProgressIndicator(
+        variant = node.string("variant"),
+        progress = node.float("progress"),
+        segments = node.integer("segments", 1),
+        enabled = node.bool("enabled", true),
+        modifier = measured,
+      )
+    "wear-m3/edge-button" ->
+      WearCanvasEdgeButton(
+        size = node.string("size"),
+        enabled = node.bool("enabled", true),
+        modifier = measured,
+      ) {
+        slot("content").forEach { child(it, Modifier) }
+      }
+    "wear-m3/button-group" -> {
+      val children = slot("children")
+      WearCanvasButtonGroup(childCount = children.size, modifier = measured) { index ->
+        child(children[index], Modifier)
+      }
+    }
+    "wear-m3/icon-button" ->
+      WearCanvasIconButton(
+        variant = node.string("variant"),
+        enabled = node.bool("enabled", true),
+        modifier = measured,
+      ) {
+        slot("content").forEach { child(it, Modifier) }
+      }
+    "wear-m3/text-button" ->
+      WearCanvasTextButton(
+        variant = node.string("variant"),
+        enabled = node.bool("enabled", true),
+        modifier = measured,
+      ) {
+        slot("content").forEach { child(it, Modifier) }
+      }
+    // Routed to the shared icon drawer rather than to Wear's `Icon`, and that is not the kind of
+    // borrow this file has been retiring. An icon is a tinted vector at a size on both platforms —
+    // Wear publishes no shape of its own here — and `BuilderIcon` is what owns this build's key
+    // table, its tint resolution and the structured-path export the SVG lane needs. Drawing it
+    // twice would be two answers to one question.
+    "wear-m3/icon" -> BuilderIcon(node, measured)
+    // The last three that were Material 3 borrows. Wear's own now — see `WearCanvasComponents`.
+    "wear-m3/text" ->
+      Text(
+        node.string("text"),
+        measured,
+        color = node.color("color", Color.Unspecified),
+        style = wearTextStyle(node.string("style")),
+        maxLines = node.integer("maxLines", Int.MAX_VALUE),
+      )
+    "wear-m3/card" ->
+      WearCanvasCard(node.string("variant"), measured) {
+        slot("content").forEach { child(it, Modifier) }
+      }
+    "wear-m3/button" ->
+      WearCanvasButton(node.string("variant"), node.bool("enabled", true), measured) {
+        slot("content").forEach { child(it, Modifier) }
+      }
+    // The dialogs. Drawn only when the document says they are showing: `visible` is the flag the
+    // generated screen hangs them on, and a canvas that drew every dialog at once would describe a
+    // screen nobody can reach.
+    "wear-m3/alert-dialog" ->
+      if (node.bool("visible", true)) {
+        WearCanvasAlertDialog(
+          title = node.string("title"),
+          text = node.string("text"),
+          modifier = measured,
+          hasConfirm = slot("confirmButton").isNotEmpty(),
+          hasDismiss = slot("dismissButton").isNotEmpty(),
+        ) {
+          slot("content").forEach { child(it, Modifier) }
+        }
+      }
+    "wear-m3/confirmation-dialog" ->
+      if (node.bool("visible", true)) {
+        WearCanvasConfirmationDialog(
+          text = node.string("text"),
+          variant = node.string("variant"),
+          modifier = measured,
+        )
+      }
+    "wear-m3/open-on-phone-dialog" ->
+      if (node.bool("visible", true)) {
+        WearCanvasOpenOnPhoneDialog(text = node.string("text"), modifier = measured)
+      }
+    "wear-m3/date-picker" ->
+      WearCanvasDatePicker(
+        initialDate = node.string("initialDate"),
+        type = node.string("type"),
+        modifier = measured,
+      )
+    "wear-m3/time-picker" ->
+      WearCanvasTimePicker(
+        initialTime = node.string("initialTime"),
+        type = node.string("type"),
         modifier = measured,
       )
     "wear-m3/transforming-lazy-column" -> {
@@ -3863,46 +3990,19 @@ private val JetcasterDarkColorScheme =
   )
 
 /**
- * The Material 3 component a Wear content id is drawn as, or the id itself.
+ * Whether a component id is a text node, on either platform.
  *
- * `wear-m3/text`, `wear-m3/card` and `wear-m3/button` are Wear Material 3 components — the
- * generated screen names `Text`, `TitleCard` and `Button` from `androidx.wear.compose.material3` —
- * and these three are still drawn as their Material 3 near-equivalents. They are the **remainder**
- * of an approach this module has otherwise left behind, not a rule.
+ * This replaces `wearScreenStandIn`, a table that mapped `wear-m3/text`, `wear-m3/card` and
+ * `wear-m3/button` onto their Material 3 near-twins so the canvas could draw *something* for them.
+ * Every Wear id is drawn by Wear Compose now, so the table has no drawing left to do — but it had
+ * quietly acquired a second job, which is this one: `UiBuilderInspection` used "maps to `m3/text`"
+ * as its test for "is a text node", and deleting the table without replacing that would have
+ * silently stopped Wear text reporting its layout.
  *
- * One mapping rather than three duplicated branches, and a mapping rather than a borrow: the ids
- * used to *be* `m3/text` and friends, and a Wear design holding a component named after the mobile
- * Material library claimed something no watch screen can mean. The drawing is borrowed; the
- * identity is not.
- *
- * ## This table is shrinking, not capped
- *
- * It used to say "do not add a fourth", and gave a reason:
- * `androidx.wear.compose:compose-material3` is an Android AAR the Wasm build cannot link, so a Wear
- * component with no Material 3 counterpart — `CheckboxButton`, `Slider`, `DatePicker` — could only
- * be hand-assembled at sizes read off a screenshot, and that replica would be wrong silently in the
- * one surface an author trusts.
- *
- * The premise was right about the AAR and wrong about the conclusion. The canvas does not have to
- * link that artifact: `ee.schimke.wearcmp:*` is the same source built for Compose Multiplatform,
- * publishing `jvm` and `wasmJs` — this module's two targets — under the upstream package names.
- * `WearCanvasComponents` draws `ListHeader`, `ListSubHeader`, `SwitchButton`, `Slider` and
- * `TransformingLazyColumn` with it, so the argument above no longer forbids anything: none of those
- * is a replica, and `Slider` was named in the old rule as the type of component that could never
- * arrive.
- *
- * So the right move for a Wear id is a real component in `WearCanvasComponents`, and these three
- * entries are the ones not yet moved — `wear-m3/text` in particular is load-bearing beyond drawing,
- * since `UiBuilderInspection` uses this mapping to find text nodes. Shrinking the table to empty is
- * the direction; `docs/design/UI_BUILDER_WEAR_SCREEN.md` tracks what is left.
+ * A predicate rather than a mapping, because that is what the caller actually wanted to ask.
  */
-internal fun String.wearScreenStandIn(): String =
-  when (this) {
-    "wear-m3/text" -> "m3/text"
-    "wear-m3/card" -> "m3/card"
-    "wear-m3/button" -> "m3/button"
-    else -> this
-  }
+internal fun String.isUiBuilderTextComponent(): Boolean =
+  this == "m3/text" || this == "wear-m3/text"
 
 /**
  * A dialog drawn where it sits, with `AlertDialog`'s own surface, spacing and button row.
