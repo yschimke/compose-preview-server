@@ -19,7 +19,6 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.FlowRow
-import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
@@ -808,42 +807,45 @@ private fun RenderNode(
       ) { next ->
         slot("content").forEach { child(it, next) }
       }
-    // A plain Column, deliberately. `TransformingLazyColumn` scales and fades its rows against the
-    // round display through `SurfaceTransformation` and `Modifier.transformedHeight`, and neither
-    // exists off Android — approximating the curve with a hand-rolled scale would draw a
-    // *different*
-    // wrong picture and imply it was the right one. The running order is what this shows.
-    // 48dp, and the height is the point. `ListHeader` is what a Wear list puts at the top, the
-    // generator emits one, and a design that faked it with a padded Text made the canvas agree
-    // with itself while disagreeing with the screen it generates — which the round trip found.
-    "wear-m3/list-header" ->
-      Box(
-        measured.fillMaxWidth().height(WEAR_LIST_HEADER_HEIGHT_DP.dp),
-        contentAlignment = Alignment.Center,
-      ) {
-        Text(
-          node.string("text"),
-          Modifier,
-          color = WEAR_SCREEN_ON_SURFACE,
-          fontSize = WEAR_LIST_HEADER_SP.sp,
-          maxLines = node.integer("maxLines", Int.MAX_VALUE),
-        )
+    // Wear's own `ListHeader`, drawn by Wear Compose. This used to be a `Box` of
+    // `WEAR_LIST_HEADER_HEIGHT_DP` with a centred `Text` at `WEAR_LIST_HEADER_SP`, which is the
+    // hand-assembled replica `WearCanvasComponents`' KDoc explains the canvas no longer has to
+    // keep: those two numbers were read off upstream and nothing in this build could check them.
+    "wear-m3/list-header" -> WearCanvasListHeader(node.string("text"), measured)
+    // Previously undrawn entirely — there is no Material 3 component to rename a Wear sub-header
+    // to, so `google-home-wear`'s seven of these were dashed placeholders.
+    "wear-m3/list-sub-header" -> WearCanvasListSubHeader(node.string("text"), measured)
+    "wear-m3/switch-button" ->
+      WearCanvasSwitchButton(
+        label = node.string("label"),
+        secondaryLabel = node.string("secondaryLabel"),
+        checked = node.bool("checked"),
+        enabled = node.bool("enabled", true),
+        modifier = measured,
+      )
+    "wear-m3/slider" ->
+      WearCanvasSlider(
+        value = node.float("value"),
+        valueFrom = node.float("valueFrom"),
+        valueTo = node.float("valueTo", 1f),
+        steps = node.integer("steps"),
+        segmented = node.bool("segmented"),
+        enabled = node.bool("enabled", true),
+        modifier = measured,
+      )
+    "wear-m3/transforming-lazy-column" -> {
+      // The real lazy column, scaling and fading its rows through the library's own
+      // `transformedHeight`. The `Column` this replaces said in its own comment that the
+      // transformation "does not exist off Android"; it does now, via the CMP port.
+      val items = slot("items")
+      WearCanvasTransformingLazyColumn(
+        itemCount = items.size,
+        verticalSpacingDp = node.float("verticalSpacingDp", 4f),
+        modifier = measured,
+      ) { index, itemModifier ->
+        child(items[index], itemModifier)
       }
-    "wear-m3/transforming-lazy-column" ->
-      Column(
-        modifier = measured.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(node.float("verticalSpacingDp", 4f).dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-      ) {
-        // `IntrinsicSize.Min`, because a Wear list row has to wrap. `m3/card` — which is what a
-        // borrowed row is — used to draw its content slot in a `Box(Modifier.fillMaxSize())`, and
-        // inside a Column with a bounded parent that made the first card eat every remaining pixel
-        // and the rest of the list vanish; the card wraps its content now (#483, `cardContentFill`)
-        // and this stays as the list's own statement of it. The real `TransformingLazyColumn`
-        // measures each item's own height too, through `Modifier.transformedHeight`; this is the
-        // same question asked with the tool the canvas has.
-        slot("items").forEach { child(it, Modifier.fillMaxWidth().height(IntrinsicSize.Min)) }
-      }
+    }
     "layout/supporting-pane-scaffold" ->
       AdaptiveSupportingPaneScaffold(
         node,
@@ -1922,11 +1924,11 @@ private const val WEAR_TIME_TEXT_CENTRE_DP = 10.75f
 /** Sized so "10:10" measures the reference's 41.5dp; Wear's clock is bigger than it looks. */
 private const val WEAR_TIME_TEXT_SP = 14.5f
 
-/** `ListHeader`'s item height, measured at 192, 225 and 240dp alike. */
-private const val WEAR_LIST_HEADER_HEIGHT_DP = 48f
-
-/** Sized so the label measures the reference header's 53.5dp of glyphs. */
-private const val WEAR_LIST_HEADER_SP = 14.5f
+// `WEAR_LIST_HEADER_HEIGHT_DP` (48f) and `WEAR_LIST_HEADER_SP` (14.5f) stood here. Both were
+// measured off upstream renders to size a `Box`+`Text` replica of `ListHeader`, and both are gone
+// because the canvas draws the real `ListHeader` now — see `WearCanvasComponents`. A number read
+// off a screenshot that nothing in the build can re-check is the cost the old approach carried;
+// deleting the numbers rather than leaving them unreferenced is what makes that cost actually go.
 
 /** How far the edge button floats off the bottom cap, as a fraction of the diameter. */
 private const val WEAR_EDGE_BUTTON_INSET = 0.04f
@@ -3865,26 +3867,34 @@ private val JetcasterDarkColorScheme =
  *
  * `wear-m3/text`, `wear-m3/card` and `wear-m3/button` are Wear Material 3 components — the
  * generated screen names `Text`, `TitleCard` and `Button` from `androidx.wear.compose.material3` —
- * and this canvas cannot draw them, because that library is an Android AAR the Wasm build cannot
- * link. So it draws the nearest Material 3 shape, which is what the `wear-m3` catalog's
- * `wasm.notes` say it does.
+ * and these three are still drawn as their Material 3 near-equivalents. They are the **remainder**
+ * of an approach this module has otherwise left behind, not a rule.
  *
  * One mapping rather than three duplicated branches, and a mapping rather than a borrow: the ids
  * used to *be* `m3/text` and friends, and a Wear design holding a component named after the mobile
  * Material library claimed something no watch screen can mean. The drawing is borrowed; the
  * identity is not.
  *
- * ## Do not add a fourth
+ * ## This table is shrinking, not capped
  *
- * Each of these three is a *rename* of a Material 3 component this canvas was already drawing. That
- * is the only reason a lookalike is acceptable here. A Wear component with no Material 3
- * counterpart — `CheckboxButton`, `Slider`, `DatePicker` — cannot be added by extending this table:
- * it would have to be hand-assembled out of Material pieces at sizes read off a screenshot,
- * producing an impression of upstream that nothing in this build can check and that is wrong
- * silently in the one surface an author trusts. A `wear-m3` design gets its fidelity from the
- * streaming preview lane, which compiles the generated Wear Kotlin against a real classpath, not
- * from a replica maintained here. The decision and what it costs are in
- * `docs/design/UI_BUILDER_WEAR_SCREEN.md`; the cap is pinned by `WearCanvasStandInTest`.
+ * It used to say "do not add a fourth", and gave a reason:
+ * `androidx.wear.compose:compose-material3` is an Android AAR the Wasm build cannot link, so a Wear
+ * component with no Material 3 counterpart — `CheckboxButton`, `Slider`, `DatePicker` — could only
+ * be hand-assembled at sizes read off a screenshot, and that replica would be wrong silently in the
+ * one surface an author trusts.
+ *
+ * The premise was right about the AAR and wrong about the conclusion. The canvas does not have to
+ * link that artifact: `ee.schimke.wearcmp:*` is the same source built for Compose Multiplatform,
+ * publishing `jvm` and `wasmJs` — this module's two targets — under the upstream package names.
+ * `WearCanvasComponents` draws `ListHeader`, `ListSubHeader`, `SwitchButton`, `Slider` and
+ * `TransformingLazyColumn` with it, so the argument above no longer forbids anything: none of those
+ * is a replica, and `Slider` was named in the old rule as the type of component that could never
+ * arrive.
+ *
+ * So the right move for a Wear id is a real component in `WearCanvasComponents`, and these three
+ * entries are the ones not yet moved — `wear-m3/text` in particular is load-bearing beyond drawing,
+ * since `UiBuilderInspection` uses this mapping to find text nodes. Shrinking the table to empty is
+ * the direction; `docs/design/UI_BUILDER_WEAR_SCREEN.md` tracks what is left.
  */
 internal fun String.wearScreenStandIn(): String =
   when (this) {

@@ -4,27 +4,37 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 
 /**
- * The cap on canvas lookalikes: three Wear ids are drawn as Material 3 components, and no more.
+ * What is left of the Material 3 borrow, and what has stopped being one.
  *
- * The canvas is Compose Multiplatform for Wasm and `androidx.wear.compose:compose-material3` is an
- * Android AAR it cannot link, so a Wear component is either drawn as something else or not drawn.
- * The three below are renames of borrows this canvas was already drawing — `wear-m3/card` was
- * literally `m3/card` until the borrow rule landed — which is what makes them tolerable.
+ * ## What this test used to assert, and why it changed
  *
- * A fourth is not that. Wear's `CheckboxButton`, `Slider` and `DatePicker` have no Material 3
- * counterpart to rename, so adding one means hand-assembling a replica at sizes read off a
- * screenshot: an impression of upstream with nothing in this build to check it against, wrong
- * silently in the surface an author trusts, and one more thing to maintain against a library nobody
- * here compiles. That is the change this test exists to stop —
- * `docs/design/UI_BUILDER_WEAR_SCREEN.md` states the rule and what replaces it (the streaming
- * preview lane, which compiles the generated Wear Kotlin for real).
+ * It used to be called "only the three renamed borrows are drawn as Material 3", and it existed to
+ * stop a fourth being added. The reasoning was that the canvas is Compose Multiplatform for Wasm,
+ * `androidx.wear.compose:compose-material3` is an Android AAR it cannot link, and so a Wear
+ * component with no Material 3 counterpart could only ever be hand-assembled from Material pieces
+ * at sizes read off a screenshot — an impression of upstream with nothing in this build to check it
+ * against. It named `CheckboxButton`, `SwitchButton`, `Slider`, `DatePicker` and friends as the
+ * shapes a future change would reach for, and refused all of them.
  *
- * Asserted as a whole map rather than three membership checks, so growing it is an edit somebody
- * makes on purpose.
+ * The premise about the AAR is still true and still checkable — that artifact publishes two
+ * variants, both `releaseVariantRelease*Publication`, and one `.aar`. What was wrong was treating
+ * it as the only way to obtain Wear Compose. `ee.schimke.wearcmp:*` is the same library's source
+ * compiled for Compose Multiplatform with `jvm` and `wasmJs` variants, which are exactly this
+ * module's targets, and `WearCanvasComponents` now draws with it.
+ *
+ * So the rule inverted: a Wear component should be drawn by Wear Compose, and a Material 3 borrow
+ * is the exception to be retired. `SwitchButton` and `Slider` — two the old test listed as
+ * permanently impossible — are drawn for real today.
+ *
+ * ## What it asserts now
+ *
+ * The borrow table is exactly the three ids not yet moved, asserted as a whole map so that
+ * *growing* it is an edit somebody makes on purpose. Shrinking it is the expected direction of
+ * travel and only requires updating this list.
  */
 class WearCanvasStandInTest {
   @Test
-  fun `only the three renamed borrows are drawn as Material 3`() {
+  fun `the borrow table is down to the three ids not yet moved`() {
     val wearIds =
       listOf(
         "wear-m3/text",
@@ -33,11 +43,14 @@ class WearCanvasStandInTest {
         "wear-m3/list-header",
         "wear-m3/screen-scaffold",
         "wear-m3/transforming-lazy-column",
-        // Not components. Named here as the shapes a future change is most likely to reach for.
-        "wear-m3/checkbox-button",
+        // Drawn by Wear Compose in `WearCanvasComponents`, so they must NOT appear in the table.
+        "wear-m3/list-sub-header",
         "wear-m3/switch-button",
-        "wear-m3/radio-button",
         "wear-m3/slider",
+        // Not drawn at all yet. Named here so that if one is ever added, it is added as a real
+        // component rather than by extending this mapping.
+        "wear-m3/checkbox-button",
+        "wear-m3/radio-button",
         "wear-m3/stepper",
         "wear-m3/date-picker",
         "wear-m3/time-picker",
