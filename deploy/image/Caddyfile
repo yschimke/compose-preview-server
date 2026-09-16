@@ -35,6 +35,35 @@
 		format json
 	}
 
+	# meta-externalagent is blocked outright. It ignores robots.txt, and on this box it
+	# was not a tax on serving — it WAS the load.
+	#
+	# Measured over ~20k logged requests: 18,855 of them, 94% of ALL traffic, ~4.7 req/s
+	# sustained. Among them 4,126 /reference/, 2,356 /rc-compare/, 481 /compare, 342
+	# /api/ and 30 /playground — every one Disallowed by the robots.txt this server
+	# generates itself (ServeSiteIndex.robotsTxt), whose Crawl-delay: 10 it also ignores.
+	#
+	# Why it took the box down rather than merely slowing it: each catalog URL it walked
+	# OPENED that catalog's render daemon (~1.1 GB resident, 3 Robolectric sandboxes).
+	# It walked m3-catalog, remote-m3, wear-m3-catalog, horologist, m3-samples,
+	# compose-m3, meshcore-mobile and homeassistant-remotecompose — exactly the resident
+	# set that filled the container and had the kernel OOM-kill the serve JVM every
+	# 20-60 min. Raising PREVIEW_MEM_LIMIT 16g -> 24g only bought it more room to fill,
+	# because nothing sheds a resident daemon until #898 ships.
+	#
+	# THE COST, accepted deliberately: meta-externalagent is also Meta's link UNFURLER,
+	# so Facebook/WhatsApp/Instagram previews of shared preview URLs stop resolving —
+	# which is precisely what robots.txt's PREVIEW_FETCHERS carve-out exists to allow,
+	# and this rule overrides it. To restore unfurling while keeping the relief, narrow
+	# the matcher from `*` to the expensive lanes only:
+	#     @metabot header User-Agent *meta-externalagent*
+	#     @metalanes path /render/* /*/render/* /reference/* /*/reference/* /api/* ...
+	# and gate on both. Left blunt for now because the box was actively OOM-looping.
+	@metabot header User-Agent *meta-externalagent*
+	handle @metabot {
+		respond "blocked: this crawler ignores robots.txt" 403
+	}
+
 	# Deploy webhook: the image-publish CI POSTs here to roll `preview` immediately
 	# when a new image is published (instead of waiting for the rollout poll). Routed
 	# to the `hook` sidecar, which enforces the bearer-token check and runs a
