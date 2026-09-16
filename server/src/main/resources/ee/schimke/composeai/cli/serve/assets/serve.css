@@ -4529,6 +4529,65 @@ html:not(.cp-bg-transparent) #cp-reference-compare[data-cp-stage-clip] .cp-refer
 @media (prefers-reduced-motion: reduce) {
   .cp-page-canvas { transition: none; }
 }
+/* ── Shared background plates ──────────────────────────────────────────────────
+
+   The scene the sheet is drawn ON, painted beneath the export. Photographic and gradient
+   backplates cannot live inside the SVG — they inline as base64 and blow past the page-size cap —
+   so they are carried beside it, content-addressed, and composited here.
+
+   Positioned in PERCENTAGES of the stage, not pixels. The placement's box is in the page's own
+   coordinate space (the frame the SVG's viewBox defines), and the stage is that frame scaled to
+   whatever width the column gives it; a percentage is the one unit that survives both that scale
+   and the zoom transform without a second source of truth about the ratio.
+
+   Inside `.cp-page-canvas`, so the ONE zoom transform that moves the export and its overlays moves
+   the plates with them. A plate that panned independently of the drawing it backs would be worse
+   than no plate at all. */
+.cp-page-plate {
+  position: absolute;
+  display: block;
+  /* The plate is scenery: it must never swallow a click meant for a node hotspot above it. */
+  pointer-events: none;
+  /* Nothing here is a meaningful picture on its own — the sheet above it is the content — and a
+     screen reader announcing five backplates before the components would bury them. */
+  user-select: none;
+}
+/* `cover` is the default a placement omits; the other two are stated per layer. */
+.cp-page-plate[data-fit="cover"] { object-fit: cover; }
+.cp-page-plate[data-fit="contain"] { object-fit: contain; }
+.cp-page-plate[data-fit="fill"] { object-fit: fill; }
+
+/* ── Compositing ───────────────────────────────────────────────────────────────
+
+   The design layer and the render layer blend independently, and that separation is the point: a
+   kit authors its component sets `screen` over the plates, while an emissive capture of the same
+   components is additive radiance. Compositing each the way it was produced is what makes the two
+   lanes comparable pixel for pixel.
+
+   Driven by data attributes rather than inline style, so the only values that can reach
+   `mix-blend-mode` are the ones enumerated here — the manifest's own string never becomes CSS. */
+.cp-page-canvas[data-design-blend="screen"] > svg { mix-blend-mode: screen; }
+.cp-page-canvas[data-design-blend="multiply"] > svg { mix-blend-mode: multiply; }
+.cp-page-canvas[data-design-blend="plus-lighter"] > svg { mix-blend-mode: plus-lighter; }
+
+/* OUR render only (`.cp-page-render`), never the `compareWith` sibling's (`.cp-page-parallel`).
+   `renderBlend` states how THIS catalog's capture was produced; the other catalog's rendition was
+   produced by its own pipeline and may well be ordinary `source-over`. Forcing ours onto theirs
+   would make the diff a measurement of the assumption rather than of the difference. */
+.cp-page-canvas[data-render-blend="screen"] .cp-page-render { mix-blend-mode: screen; }
+.cp-page-canvas[data-render-blend="multiply"] .cp-page-render { mix-blend-mode: multiply; }
+.cp-page-canvas[data-render-blend="plus-lighter"] .cp-page-render { mix-blend-mode: plus-lighter; }
+
+.cp-page-plate[data-blend="screen"] { mix-blend-mode: screen; }
+.cp-page-plate[data-blend="multiply"] { mix-blend-mode: multiply; }
+.cp-page-plate[data-blend="plus-lighter"] { mix-blend-mode: plus-lighter; }
+
+/* A blended layer needs something to blend WITH. Without an explicit backdrop the stage is
+   transparent, and `screen` over transparency is a no-op that silently looks like the bug this
+   whole mechanism exists to fix. Only when plates are actually present — a sheet with no scene
+   keeps the background it always had. */
+.cp-page-canvas[data-has-plates] { background: #000; isolation: isolate; }
+
 /* The inlined export. `width/height: 100%` on the element and the frame's own aspect on the stage
    between them make the SVG's user units and the stage's pixels a fixed ratio, which is what lets
    a measured node box stay correct through any resize. */

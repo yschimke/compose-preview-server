@@ -69,7 +69,7 @@ graphics-shapes = "1.1.0"
 # (compose-ai-tools#5436); 2.13.1 is the design-pages kit guard (m3-catalog#398). Bumped by hand
 # rather than waiting for Renovate because the preview-host image resolves `tools_version` from
 # this line at release time, so the image ships whatever it says when 3.28.0 is cut.
-composeai-tools = "2.15.0"
+composeai-tools = "2.17.0"
 # The render daemons, the renderers, the preview annotations and data API, and the data extractors,
 # published from yschimke/compose-preview-daemon since its 3.0.0 (compose-ai-tools#5336). Layer 1a
 # in that repository's `docs/design/REPOSITORY_LAYERS.md`: between the contracts and
@@ -88,7 +88,22 @@ composeai-tools = "2.15.0"
 # but the pin. 3.4.4 rides along (contracts 2.18.0, third-party-rc-embedded-player 1.61.1).
 # 3.4.8 makes Glimmer Live start in touch mode, matching snapshots and physical devices, then enter
 # keyboard/focus mode only when pointer movement establishes gaze (compose-preview-daemon#111).
-composeai-preview-daemon = "3.4.9"
+#
+# 3.5.0 is the design-pages asset schema this change reads: `PageAsset`, `PageLayerPlacement`,
+# `PageBlendMode` and `DesignPage.background` (compose-preview-daemon#119). 3.6.1 then reverts the
+# `coerceInputValues` that shipped alongside it (compose-preview-daemon#128): the flag is Json-wide
+# rather than per-field, so it silently disabled the contract's unknown-enum rule for EVERY enum,
+# and ServeDesignPageStoreTest's "an unknown link method drops the manifest rather than
+# mis-colouring a node" -- which states that rule outright -- went red on 3.5.0. Do not pin 3.5.0.
+#
+# This pin CANNOT move without `composeai-tools`, whatever the comment above each of them implies.
+# `render-host` is consumed here as a published binary carrying its own daemon pin, and 3.5.0 added
+# defaulted properties to the published DTOs, which removes the old constructor and `copy`
+# signatures. Daemon 3.5.0 against tools 2.15.0 dies at runtime in
+# `ServeDesignPageStore.drawablePages()` with `NoSuchMethodError: DesignPage.copy$default(...)`,
+# failing every ServeDesignPageRoutingTest and ServeDesignPageParallelTest. Measured both ways:
+# 3.4.9 + 2.15.0 green, 3.5.0 + 2.15.0 red. They move together.
+composeai-preview-daemon = "3.6.1"
 # 2.9.0 is the first release carrying `DesignEnvironmentV1.exportDevices` and its Set/Reset
 # changes, which is the field a design names its export devices in. 2.14.0 adds the components a
 # design defines — `DesignDocumentV1.components`, `DesignNodeV1.component` and the `binding` value

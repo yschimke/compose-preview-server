@@ -10,6 +10,8 @@ import ee.schimke.composeai.data.render.PreviewBackdrop
 import ee.schimke.composeai.data.render.PreviewBackground
 import ee.schimke.composeai.data.render.PreviewClip
 import ee.schimke.composeai.designpages.DesignPage
+import ee.schimke.composeai.designpages.PageBlendMode
+import ee.schimke.composeai.designpages.PageLayerPlacement
 import ee.schimke.composeai.designpages.PageNode
 import ee.schimke.composeai.imagecrop.ContentCrop
 import ee.schimke.composeai.web.WebEscaping
@@ -13547,6 +13549,26 @@ $cards
     parallelLabel: String? = null,
     /** What THIS catalog's button reads. Falls back to a neutral "Ours". */
     ownLabel: String? = null,
+    /**
+     * The shared backplates to paint beneath the export, in paint order, already resolved against
+     * the catalog's verified asset table.
+     *
+     * Resolved by the CALLER rather than read off [page] here, and that is the whole safety
+     * property: [ServeDesignPageStore] is what proves a plate's file is the format, size and path
+     * its record claims, so a placement that reaches this function has already been checked. Taking
+     * `page.background` directly would draw whatever the manifest asked for.
+     *
+     * Empty — the default, and the state of every catalog that publishes no plates — renders the
+     * stage byte-identically to before this existed.
+     */
+    background: List<PageLayerPlacement> = emptyList(),
+    /**
+     * The URL for a verified plate's bytes, by asset id. Returning null drops that placement.
+     *
+     * A function rather than a map because the href carries this request's credential and base
+     * path, which are the caller's to mint — the same reason [parallelRenders] is passed in built.
+     */
+    assetHref: (String) -> String? = { null },
   ): String {
     // The session id links may carry. Null on a rooted site (and for the default session): the
     // URL already says which catalog this is. `sessionId` itself stays intact below — it keys the
@@ -13759,6 +13781,60 @@ $cards
     // LANG happened to be de_DE.
     val aspect = String.format(java.util.Locale.ROOT, "%.4f", page.frame.width / page.frame.height)
 
+    // The scene beneath the sheet. Each placement's box is in the page's own coordinate space, so
+    // it becomes a percentage of the stage — the one unit that survives both the column's width and
+    // the zoom transform without restating the ratio anywhere.
+    //
+    // A placement whose plate has no URL is dropped rather than drawn as a broken image: the caller
+    // returns null for an asset that did not survive verification, and a hole in the scene is worse
+    // than a scene without that layer.
+    val drawablePlates = background.filter { it.isWellFormed && assetHref(it.asset) != null }
+    val plates =
+      drawablePlates.joinToString("") { layer ->
+        val href = assetHref(layer.asset).orEmpty()
+        fun pct(value: Double, of: Double) =
+          String.format(java.util.Locale.ROOT, "%.4f%%", (value / of) * 100.0)
+        val style = buildString {
+          append("left:").append(pct(layer.x, page.frame.width)).append(';')
+          append("top:").append(pct(layer.y, page.frame.height)).append(';')
+          append("width:").append(pct(layer.width, page.frame.width)).append(';')
+          append("height:").append(pct(layer.height, page.frame.height)).append(';')
+          if (layer.opacity != 1.0) {
+            append("opacity:")
+              .append(String.format(java.util.Locale.ROOT, "%.3f", layer.opacity))
+              .append(';')
+          }
+          if (layer.radius > 0.0) {
+            // In page units like every other dimension here, so a clipped plate keeps its corner
+            // through a resize instead of drifting against the shape drawn over it.
+            append("border-radius:").append(pct(layer.radius, page.frame.width)).append(';')
+          }
+          if (layer.clip) append("overflow:hidden;")
+        }
+        // `alt=""` and `aria-hidden`: a backplate is scenery, and announcing five of them ahead of
+        // the components would bury the thing the sheet is actually about. `loading=eager` because
+        // the plate is the backdrop the drawing above it is composited against — lazy-loading it
+        // would show the sheet washing in against nothing first, which is the exact artefact this
+        // whole mechanism exists to remove.
+        """<img class="cp-page-plate" src="${WebEscaping.htmlEscape(href)}" alt="" aria-hidden="true" """ +
+          """loading="eager" decoding="async" data-fit="${WebEscaping.htmlEscape(layer.fit.lowercase())}" """ +
+          """data-blend="${layer.blend.wire}" style="${WebEscaping.htmlEscape(style)}">"""
+      }
+
+    // Blend modes reach the stylesheet as data ATTRIBUTES, never as inline style. The stylesheet
+    // enumerates the values it will act on, so the only compositing that can happen is compositing
+    // this server compiled in — a manifest string can no more become a `mix-blend-mode` than it can
+    // become a script. `source-over` is the default and is simply omitted.
+    val sceneAttrs = buildString {
+      if (drawablePlates.isNotEmpty()) append(" data-has-plates")
+      if (page.designBlend != PageBlendMode.SOURCE_OVER) {
+        append(" data-design-blend=\"").append(page.designBlend.wire).append('"')
+      }
+      if (page.renderBlend != PageBlendMode.SOURCE_OVER) {
+        append(" data-render-blend=\"").append(page.renderBlend.wire).append('"')
+      }
+    }
+
     return document(
       changelogHref = changelogHref,
       title = "${page.name} — page",
@@ -13828,8 +13904,8 @@ $cards
           </div>
           <div class="cp-page-layout">
             <div class="cp-page-stage" style="--cp-page-aspect:$aspect">
-              <div class="cp-page-canvas" data-cp-page-canvas>
-                $svg
+              <div class="cp-page-canvas" data-cp-page-canvas$sceneAttrs>
+                $plates$svg
                 <template data-cp-page-render-source>$renders</template>$parallelTemplate
                 <template data-cp-page-diff-links>$diffLinks</template>
                 $outlines
@@ -18631,3 +18707,24 @@ ${ServeSiteIcon.linkTags().prependIndent("        ")}
   private fun screenDevicesFor(isWearSystem: Boolean): List<ScreenDevice> =
     if (isWearSystem) WEAR_SCREEN_DEVICES else SCREEN_DEVICES
 }
+
+/**
+ * The contract's own spelling of a compositing mode — `screen`, `plus-lighter` — for the one place
+ * the value has to leave Kotlin: a `data-` attribute the stylesheet selects on.
+ *
+ * Taken from the enum's `@SerialName` rather than `name.lowercase()` so the CSS and the wire cannot
+ * drift apart on a hyphen, exactly as [PageNodeLink.wire] does for the link method.
+ *
+ * Deliberately NOT [PageBlendMode.css]: that is the CSS *keyword* (`source-over` is spelled
+ * `normal` there), and it is what a renderer emits as a property VALUE. This is an identifier the
+ * stylesheet matches, and the stylesheet is what turns it into a property — which is the whole
+ * reason a manifest string cannot become one.
+ */
+internal val PageBlendMode.wire: String
+  get() =
+    when (this) {
+      PageBlendMode.SOURCE_OVER -> "source-over"
+      PageBlendMode.SCREEN -> "screen"
+      PageBlendMode.MULTIPLY -> "multiply"
+      PageBlendMode.PLUS_LIGHTER -> "plus-lighter"
+    }

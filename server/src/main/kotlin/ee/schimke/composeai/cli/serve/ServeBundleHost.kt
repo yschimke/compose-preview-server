@@ -315,6 +315,23 @@ class ServeBundleHost(
 
   override fun designPages(): ServeDesignPageStore = designPages
 
+  /**
+   * The bytes of one shared backplate, or null.
+   *
+   * Resolved through [ServeDesignPageStore.asset] and nothing else. The store has already checked
+   * the record's declaration, that its `uri` stays inside the bundle, the file's signature and its
+   * size — so an id that answers here names a file this server decided to serve. Joining
+   * [bundleDir] to a `uri` taken straight from the manifest instead would be an arbitrary file read
+   * on behalf of a delivery branch nobody here wrote.
+   *
+   * Lives on this class because [bundleDir] does; `ServeHost` has no asset accessor to override.
+   */
+  fun designPageAssetBytes(id: String): ByteArray? {
+    val asset = designPages.asset(id) ?: return null
+    val file = File(File(bundleDir, ServeDesignPageStore.DIRECTORY), asset.uri)
+    return runCatching { file.readBytes() }.getOrNull()
+  }
+
   // The published player comparison, if the catalog's branch shipped one. Unlike the manifests
   // above this store resolves lazily: its lane PNGs land on the catalog's background fetch lane, so
   // a host built the moment `catalog.json` arrived must be able to see them once they do.
