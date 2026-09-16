@@ -11484,7 +11484,11 @@ class ServeHttpServer(
     val withoutPlayer =
       overrides.copy(
         remoteCompose =
-          rc.copy(player = null).takeIf { it.profile != null || it.namedValues.isNotEmpty() }
+          rc
+            .newBuilder()
+            .also { it.player = null }
+            .build()
+            .takeIf { it.profile != null || it.namedValues.isNotEmpty() }
       )
     if (
       CatalogLiveRouting.overridesAffectRender(

@@ -24,7 +24,9 @@ class CatalogLiveRoutingTest {
   private val lightId = "button-filled__ideal__default__light"
 
   private fun player(kind: RemoteComposePlayerKind) =
-    PreviewOverrides(remoteCompose = RemoteComposeOverride(player = kind))
+    PreviewOverrides(
+      remoteCompose = RemoteComposeOverride.Builder().also { it.player = kind }.build()
+    )
 
   /**
    * The player the request names is a no-op exactly when the capture went through it.
@@ -153,7 +155,7 @@ class CatalogLiveRoutingTest {
           density = 2f,
           localeTag = "fr",
           device = "id:pixel_5",
-          gestures = GestureOverride(showHints = true),
+          gestures = GestureOverride.Builder().also { it.showHints = true }.build(),
         ),
       ),
     )
@@ -168,10 +170,12 @@ class CatalogLiveRoutingTest {
         PreviewOverrides(
           namedOverrides = mapOf("label" to PreviewOverrideValue.StringValue("Tap me")),
           remoteCompose =
-            RemoteComposeOverride(
-              profile = RemoteComposeProfile.ANDROIDX,
-              namedValues = mapOf("stopColor" to RemoteNamedValue.ColorValue("#FF8800")),
-            ),
+            RemoteComposeOverride.Builder()
+              .also {
+                it.profile = RemoteComposeProfile.ANDROIDX
+                it.namedValues = mapOf("stopColor" to RemoteNamedValue.ColorValue("#FF8800"))
+              }
+              .build(),
         ),
       ),
     )
