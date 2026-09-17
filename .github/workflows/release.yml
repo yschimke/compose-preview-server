@@ -4,6 +4,14 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      publish_tag:
+        description: >-
+          Run the distribution lane for an EXISTING release tag (e.g. v3.40.0) instead of cutting a
+          new release. This is the recovery path for a release whose upload died: leave it empty for
+          the normal run.
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -36,9 +44,21 @@ jobs:
     outputs:
       release_created: ${{ steps.release.outputs.release_created }}
       tag_name: ${{ steps.release.outputs.tag_name }}
+      # What this run publishes, and for which tag. Every lane below gates on these rather than on
+      # `release_created`, because `release_created` answers "did I just cut a release?" and the
+      # question the lanes actually have is "is there a release to attach assets to?". Those came
+      # apart the first time an upload stalled: the release existed, the re-run found it already
+      # created, `release_created` was false, and publish-distributions, finish-release and the
+      # image all SKIPPED — so a re-run could never finish a release, and the only recovery was to
+      # delete the draft and its tag.
+      publish: ${{ steps.plan.outputs.publish }}
+      publish_tag: ${{ steps.plan.outputs.tag }}
     steps:
+      # Skipped when republishing: a recovery run must not be able to cut an unrelated release as a
+      # side effect of retrying an upload.
       - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
         id: release
+        if: ${{ !inputs.publish_tag }}
         with:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
@@ -66,6 +86,49 @@ jobs:
             -f "ref=refs/tags/${TAG}" -f "sha=${SHA}" >/dev/null
           echo "created tag ${TAG} at ${SHA}"
 
+      # One place decides what the rest of the run does, and it fails fast on a typo rather than
+      # after seven minutes of Gradle: a `publish_tag` naming no tag, or no release, stops here.
+      - name: Plan what this run publishes
+        id: plan
+        if: ${{ !cancelled() }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PUBLISH_TAG: ${{ inputs.publish_tag }}
+          RELEASE_CREATED: ${{ steps.release.outputs.release_created }}
+          RELEASE_TAG: ${{ steps.release.outputs.tag_name }}
+        run: |
+          set -euo pipefail
+          if [ -n "${PUBLISH_TAG}" ]; then
+            if ! gh api "repos/{owner}/{repo}/git/ref/tags/${PUBLISH_TAG}" >/dev/null 2>&1; then
+              echo "::error::no tag ${PUBLISH_TAG} in this repository"
+              exit 1
+            fi
+            # `gh release view` finds a draft, which is the whole point: the release this recovers
+            # is the one that never got its assets.
+            if ! draft=$(gh release view "${PUBLISH_TAG}" --json isDraft --jq .isDraft 2>/dev/null); then
+              echo "::error::no release for tag ${PUBLISH_TAG} — nothing to attach assets to"
+              exit 1
+            fi
+            if [ "${draft}" != "true" ]; then
+              # Allowed, not refused: replacing a bad asset on a published release is a real need,
+              # and the uploads below carry `--clobber`. Said out loud because `finish-release`
+              # will also re-point `--latest` at it.
+              echo "::warning::${PUBLISH_TAG} is already published; its assets will be replaced"
+            fi
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+            echo "tag=${PUBLISH_TAG}" >> "$GITHUB_OUTPUT"
+            echo "republishing ${PUBLISH_TAG}"
+          elif [ "${RELEASE_CREATED}" = "true" ]; then
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+            echo "tag=${RELEASE_TAG}" >> "$GITHUB_OUTPUT"
+            echo "releasing ${RELEASE_TAG}"
+          else
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            echo "tag=" >> "$GITHUB_OUTPUT"
+            echo "nothing to publish in this run"
+          fi
+
   # The distribution lane. Builds and attaches both standalone archives; `compose-preview serve` and
   # `compose-preview mcp serve` in the CLI fetch THESE, so a release missing either is a command
   # that cannot start. Deliberately does NOT un-draft - `finish-release` does that once every lane
@@ -77,17 +140,17 @@ jobs:
   # an existing `serve` at it with `--ui-builder-dir`.
   publish-distributions:
     needs: release-please
-    if: ${{ needs.release-please.outputs.release_created == 'true' }}
+    if: ${{ needs.release-please.outputs.publish == 'true' }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
     env:
-      PLUGIN_VERSION: ${{ needs.release-please.outputs.tag_name }}
+      PLUGIN_VERSION: ${{ needs.release-please.outputs.publish_tag }}
       GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ needs.release-please.outputs.tag_name }}
+          ref: ${{ needs.release-please.outputs.publish_tag }}
           persist-credentials: false
       - name: Derive version from tag
         run: echo "PLUGIN_VERSION=${PLUGIN_VERSION#v}" >> "$GITHUB_ENV"
@@ -124,12 +187,12 @@ jobs:
         run: ./gradlew :ui-builder-web:webArchive
       - name: Upload standalone server distribution
         run: >-
-          gh release upload "${{ needs.release-please.outputs.tag_name }}"
+          gh release upload "${{ needs.release-please.outputs.publish_tag }}"
           "server/build/distributions/compose-preview-server-${PLUGIN_VERSION}.tar.gz"
           --clobber
       - name: Upload standalone MCP server distribution
         run: >-
-          gh release upload "${{ needs.release-please.outputs.tag_name }}"
+          gh release upload "${{ needs.release-please.outputs.publish_tag }}"
           "mcp/build/distributions/compose-preview-mcp-${PLUGIN_VERSION}.tar.gz"
           --clobber
       # The standalone editor archive, named consistently with the copy inside the server
@@ -139,7 +202,7 @@ jobs:
       # editor on its own, for serving the bundle yourself or with `--ui-builder-dir`.
       - name: Upload UI-builder web bundle
         run: >-
-          gh release upload "${{ needs.release-please.outputs.tag_name }}"
+          gh release upload "${{ needs.release-please.outputs.publish_tag }}"
           "${ORG_GRADLE_PROJECT_composeUiBuilderDir}/ui-builder-web/build/distributions/compose-preview-ui-builder-web-${PLUGIN_VERSION}.zip"
           --clobber
 
@@ -159,11 +222,11 @@ jobs:
       GH_REPO: ${{ github.repository }}
     steps:
       - name: Publish the draft GitHub release
-        run: gh release edit "${{ needs.release-please.outputs.tag_name }}" --draft=false --latest
+        run: gh release edit "${{ needs.release-please.outputs.publish_tag }}" --draft=false --latest
 
   resolve-preview-host-tools:
     needs: release-please
-    if: ${{ needs.release-please.outputs.release_created == 'true' }}
+    if: ${{ needs.release-please.outputs.publish == 'true' }}
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.tools.outputs.version }}
@@ -171,7 +234,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ needs.release-please.outputs.tag_name }}
+          ref: ${{ needs.release-please.outputs.publish_tag }}
           persist-credentials: false
       - name: Read the compose-ai-tools and compose-preview-daemon versions used by the server
         id: tools
@@ -194,14 +257,14 @@ jobs:
 
   preview-host-image:
     needs: [release-please, finish-release, resolve-preview-host-tools]
-    if: ${{ needs.release-please.outputs.release_created == 'true' }}
+    if: ${{ needs.release-please.outputs.publish == 'true' }}
     permissions:
       contents: read
       packages: write
       pull-requests: write
     uses: ./.github/workflows/preview-host-image.yml
     with:
-      server_version: ${{ needs.release-please.outputs.tag_name }}
+      server_version: ${{ needs.release-please.outputs.publish_tag }}
       # The image's sidecars must be the same releases as the server's runtime dependencies. A
       # separate repository variable silently stayed at 1.53.0 while the Gradle pin moved on, so
       # new server images kept shipping an old Android daemon (#4822). Two pins since the daemons
@@ -224,6 +287,7 @@ jobs:
     needs: [release-please, finish-release]
     if: >-
       ${{ !cancelled()
+      && !inputs.publish_tag
       && (needs.release-please.outputs.release_created != 'true'
       || needs.finish-release.result == 'success') }}
     runs-on: ubuntu-latest
