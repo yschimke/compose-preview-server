@@ -1,5 +1,32 @@
 # Changelog
 
+## [3.40.0](https://github.com/yschimke/compose-preview-server/compare/v3.39.0...v3.40.0) (2026-09-17)
+
+
+### ⚠ BREAKING CHANGES
+
+* extract the UI builder, and consume it as a composite build ([#942](https://github.com/yschimke/compose-preview-server/issues/942))
+
+### Features
+
+* **ci:** the design-render lane, beside the CLI it drives ([#947](https://github.com/yschimke/compose-preview-server/issues/947)) ([3ca6c14](https://github.com/yschimke/compose-preview-server/commit/3ca6c14318faff98e0abee1a40ada2c47749ea87))
+
+
+### Bug Fixes
+
+* **ci:** the design render step runs under dash, not bash ([#948](https://github.com/yschimke/compose-preview-server/issues/948)) ([56c34a1](https://github.com/yschimke/compose-preview-server/commit/56c34a187d23d0f80d332fb6d6be5b3c7c89c8af))
+* **deps:** update compose-ai-tools ([#934](https://github.com/yschimke/compose-preview-server/issues/934)) ([71031f9](https://github.com/yschimke/compose-preview-server/commit/71031f91d793b793ec6a15f131d19e4e04333045))
+* **deps:** update compose-preview-daemon ([#935](https://github.com/yschimke/compose-preview-server/issues/935)) ([90ebb9a](https://github.com/yschimke/compose-preview-server/commit/90ebb9ae202da47d2d8b4d3f76240d70bf19ec01))
+* **deps:** update dependency ee.schimke.composeai:rc-player-compose to v1.65.0 ([#937](https://github.com/yschimke/compose-preview-server/issues/937)) ([4ed24a8](https://github.com/yschimke/compose-preview-server/commit/4ed24a828c2149f70308bba4b5472f39b2ade61a))
+* **deps:** update ktor to v3.6.0 ([#938](https://github.com/yschimke/compose-preview-server/issues/938)) ([fd6dbcd](https://github.com/yschimke/compose-preview-server/commit/fd6dbcd7ecab4e0756140e914e50bd99a62b9ad5))
+* **harness:** read the UI-builder checkout under the name CI sets ([#946](https://github.com/yschimke/compose-preview-server/issues/946)) ([82c809e](https://github.com/yschimke/compose-preview-server/commit/82c809e9b6a73791b064c8a5b26704808dbb1ac6))
+* **harness:** serve the UI-builder distributions from their own checkout ([#943](https://github.com/yschimke/compose-preview-server/issues/943)) ([0a0a93c](https://github.com/yschimke/compose-preview-server/commit/0a0a93ca596796cf9b25d47bf0f826b077fe9f74))
+
+
+### Build System
+
+* extract the UI builder, and consume it as a composite build ([#942](https://github.com/yschimke/compose-preview-server/issues/942)) ([c60c117](https://github.com/yschimke/compose-preview-server/commit/c60c11704ec26a3110c56fa93e275783d0e89d05))
+
 ## [3.39.0](https://github.com/yschimke/compose-preview-server/compare/v3.38.0...v3.39.0) (2026-09-17)
 
 
