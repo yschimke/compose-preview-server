@@ -1,5 +1,11 @@
 # Extracting the UI builder, and running it on the desktop
 
+**Status: §5 stage 5 is under way, in the opposite order to the one this document recommended.**
+The extraction happened first and publishing follows it — so the seams are resolved through a
+composite build rather than coordinates, and §2's publication project is still ahead rather than
+behind. The desktop sections (§5–§7) are untouched by that and still describe unstarted work.
+Everything below is as written.
+
 **Status: proposal.** Nothing here is enforced yet, and nothing here overrides
 [`UI_BUILDER_PROJECT_BOUNDARY.md`](UI_BUILDER_PROJECT_BOUNDARY.md), which is normative and says the
 builder stays in this repository. This document answers the question that was asked next — *if we

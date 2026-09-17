@@ -65,8 +65,13 @@ export function startServer(root, port = 0) {
                         rel,
                     );
                 if (rendererMatch) {
+                    // Built in yschimke/compose-ui-builder now. CI checks that repository out
+                    // inside the workspace and names it here; the default is the sibling
+                    // directory `settings.gradle.kts` also defaults to, so a two-repo checkout
+                    // needs no configuration.
                     const rendererRoot = resolve(
-                        harnessRoot,
+                        process.env.COMPOSE_UI_BUILDER_DIR ||
+                            resolve(harnessRoot, "../compose-ui-builder"),
                         "ui-builder-renderer/build/wasmRendererDist",
                     );
                     const requested = rendererMatch[1] || "index.html";

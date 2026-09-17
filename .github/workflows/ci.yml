@@ -13,6 +13,18 @@ on:
 permissions:
   contents: read
 
+# The UI builder is a separate repository (yschimke/compose-ui-builder) that this build includes as
+# a composite build -- see `settings.gradle.kts`. Every job that runs Gradle needs a checkout of it
+# on disk.
+#
+# It goes INSIDE the workspace rather than beside it, because `actions/checkout` refuses a path
+# outside `$GITHUB_WORKSPACE`, and `settings.gradle.kts` is pointed at it through this property
+# instead of its `../compose-ui-builder` default. `ORG_GRADLE_PROJECT_<name>` is Gradle's own
+# spelling for a project property in the environment, so it reaches every `./gradlew` in the file
+# without any of them naming it.
+env:
+  ORG_GRADLE_PROJECT_composeUiBuilderDir: ${{ github.workspace }}/.compose-ui-builder
+
 # A pull request cancels its own superseded runs; a push to `main` does not cancel anything.
 #
 # `${{ github.ref }}` alone puts every push to `main` in ONE group, so each merge cancelled the
@@ -40,23 +52,22 @@ jobs:
   # Its own job rather than a step in `gradle`: the check reads build files and needs no JDK, no
   # Gradle and no cache, so it answers in seconds and says which boundary broke rather than being
   # the twelfth line of a build log.
-  ui-builder-boundary:
+  # Was `ui-builder-boundary`, when the UI builder was a second project in this repository and a
+  # text scan kept the two apart. The modules are yschimke/compose-ui-builder now, so the boundary
+  # is a repository boundary and `ui-builder-project-boundary.sh` is gone: a module cannot join the
+  # wrong project when the projects are different repositories. `wear-port-canvas-only.sh` went
+  # with the modules it scans and runs in that repository's CI.
+  source-gates:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - run: .github/scripts/ui-builder-project-boundary.sh
-      # The canvas links a Compose Multiplatform port of Wear Compose so it can draw real
-      # components; code generation and the native lane must stay on the genuine AndroidX AARs.
-      # Runs here because nothing else would notice: adding the port to the exporter breaks no
-      # build and no test — it surfaces as a user compiling generated code against the wrong API.
-      - run: .github/scripts/wear-port-canvas-only.sh
       - name: Check tools-owned parser vendor
         run: python3 .github/scripts/check-usage-source-psi-vendor.py
       - run: python3 scripts/local-dependencies/test_stage.py
-      # The catalog names, which shrink to nothing over phases 4 and 5. Runs beside the project
-      # boundary because it is the same kind of line for the same reason: an undrawn one rots.
+      # The catalog names, which shrink to nothing over phases 4 and 5. Scoped to `:server` now;
+      # the builder modules' half of the rule went with them.
       - run: .github/scripts/ui-builder-catalog-literals.sh
 
   gradle:
@@ -64,6 +75,12 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
+      - name: Check out the UI builder
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: yschimke/compose-ui-builder
+          path: .compose-ui-builder
           persist-credentials: false
       - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
         with:
@@ -102,6 +119,12 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: Check out the UI builder
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: yschimke/compose-ui-builder
+          path: .compose-ui-builder
+          persist-credentials: false
       - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
         with:
           distribution: temurin
@@ -113,10 +136,13 @@ jobs:
           cache-provider: basic
       # The normal Gradle job proves the shipping default. Keep the opt-in code compiled and
       # exercised against released dependencies as well, without enabling it in distributions.
+      # The UI-builder half of this lane (`:ui-builder-export:jvmTest`, `:ui-builder:jvmTest`,
+      # `:ui-builder-runtime:test`, `:ui-builder:compileKotlinWasmJs`) runs in
+      # yschimke/compose-ui-builder's CI under the same flag. A release pairs the two: the flag is
+      # one compile-time choice made in two builds now, and they have to agree.
       - run: >-
           ./gradlew -PuiBuilderRemoteCompose=true
-          :ui-builder-export:jvmTest :ui-builder:jvmTest :ui-builder-runtime:test :mcp:test
-          :server:test :ui-builder:compileKotlinWasmJs
+          :mcp:test :server:test
 
   selector-fixtures:
     runs-on: ubuntu-latest
@@ -258,6 +284,12 @@ jobs:
           node-version: 24.21.0
           cache: npm
           cache-dependency-path: preview-harness/package-lock.json
+      - name: Check out the UI builder
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: yschimke/compose-ui-builder
+          path: .compose-ui-builder
+          persist-credentials: false
       - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
         with:
           distribution: temurin
@@ -281,12 +313,27 @@ jobs:
       - run: sudo rm -f /etc/apt/sources.list.d/google-chrome.list /etc/apt/sources.list.d/microsoft-prod.list
       - run: npx playwright install --with-deps chromium
         working-directory: preview-harness
-      - run: >-
+      # The four frontend distributions come from the UI-builder repository now, and a composite
+      # build does not expose an included build's tasks as task paths — `includeBuild` substitutes
+      # dependencies, it does not merge task namespaces. So they are built by that checkout's own
+      # wrapper, and `:server:installDist` by this one. Same tasks, same flags, two invocations.
+      #
+      # `--no-daemon --no-parallel --max-workers=1` is not caution: `gradle.properties` sizes the
+      # Kotlin daemon heap for ONE ir2wasm pass, and this job links four executables.
+      - name: Build the UI-builder distributions
+        working-directory: .compose-ui-builder
+        run: >-
           ./gradlew
           :ui-builder:wasmFrontendDist
           :ui-builder-renderer:wasmRendererDist
           :ui-builder-reference-jetcaster:wasmFrontendDist
           :ui-builder-generated-jetcaster:wasmFrontendDist
+          --no-daemon
+          --no-parallel
+          --max-workers=1
+          -Pkotlin.daemon.jvmargs=-Xmx6g
+      - run: >-
+          ./gradlew
           :server:installDist
           --no-daemon
           --no-parallel
