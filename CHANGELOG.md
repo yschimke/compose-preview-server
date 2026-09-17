@@ -1,5 +1,30 @@
 # Changelog
 
+## [3.38.0](https://github.com/yschimke/compose-preview-server/compare/v3.37.0...v3.38.0) (2026-09-17)
+
+
+### Features
+
+* **deps:** take contracts 3.0.0 and move to its builders ([#910](https://github.com/yschimke/compose-preview-server/issues/910)) ([31c0d3e](https://github.com/yschimke/compose-preview-server/commit/31c0d3e423379683be291cb3b127c6c468947056))
+* **deps:** take every upstream line by its BOM, and move to the daemon's builders ([#915](https://github.com/yschimke/compose-preview-server/issues/915)) ([18c45ec](https://github.com/yschimke/compose-preview-server/commit/18c45ecdf34fad6cc26bd8b690851ce1bbe8ab57))
+* **design-pages:** composite shared plates beneath the sheet ([#894](https://github.com/yschimke/compose-preview-server/issues/894)) ([e89a15a](https://github.com/yschimke/compose-preview-server/commit/e89a15a2f8805f21293815f79b68062ee7d6ad9a))
+* shed resident daemons under memory pressure instead of dying ([#898](https://github.com/yschimke/compose-preview-server/issues/898)) ([053df46](https://github.com/yschimke/compose-preview-server/commit/053df467285a151efcd0ac5c635abc234066e26e))
+* **ui-builder:** a Wear sample, and the two things building it found ([#908](https://github.com/yschimke/compose-preview-server/issues/908)) ([5847d2b](https://github.com/yschimke/compose-preview-server/commit/5847d2b7deda7f499c1c7f1c3a40f454af0532e8))
+* **ui-builder:** draw Wear components with Wear Compose on the canvas ([#912](https://github.com/yschimke/compose-preview-server/issues/912)) ([50a8e71](https://github.com/yschimke/compose-preview-server/commit/50a8e710d8a8dc7aa0c0a63a3288d014a72c7e64))
+* **ui-builder:** five Google app sample designs, at three window sizes ([#902](https://github.com/yschimke/compose-preview-server/issues/902)) ([8987d6b](https://github.com/yschimke/compose-preview-server/commit/8987d6bbe1115e96cce2d9307d104c998fffc2be))
+* **ui-builder:** key the canvas dispatch on the catalog's adapter id ([#916](https://github.com/yschimke/compose-preview-server/issues/916)) ([12374f0](https://github.com/yschimke/compose-preview-server/commit/12374f0d9a0dc85e563d578e30037539cc3dc6c5))
+* **ui-builder:** make the Screen dock's device section explain itself ([#905](https://github.com/yschimke/compose-preview-server/issues/905)) ([c7cea9e](https://github.com/yschimke/compose-preview-server/commit/c7cea9eee44e90497e623094fc6a0c57336ec13b))
+
+
+### Bug Fixes
+
+* charge daemon residency on the leased render path too ([#897](https://github.com/yschimke/compose-preview-server/issues/897)) ([b1a391c](https://github.com/yschimke/compose-preview-server/commit/b1a391ca1d45f7d76a11feac32b6a5b4199803d7))
+* **deploy:** block meta-externalagent, which was 94% of preview.coo.ee traffic ([#899](https://github.com/yschimke/compose-preview-server/issues/899)) ([09a0ff9](https://github.com/yschimke/compose-preview-server/commit/09a0ff9c851fc2672a663738a6ce12a0c49c1734))
+* leave focus indication in the live pane to the rendered UI ([#896](https://github.com/yschimke/compose-preview-server/issues/896)) ([e5c6ad6](https://github.com/yschimke/compose-preview-server/commit/e5c6ad6ccd09554a11c65d78bfed4562704a3acb))
+* **ui-builder-export:** format PropertyValueKinds, which is red on main ([#909](https://github.com/yschimke/compose-preview-server/issues/909)) ([6748610](https://github.com/yschimke/compose-preview-server/commit/6748610277bacaad71bfbc628c8a8561536fc88e))
+* **ui-builder:** Apply screen settings no longer clears the export devices ([#904](https://github.com/yschimke/compose-preview-server/issues/904)) ([0f7b0ef](https://github.com/yschimke/compose-preview-server/commit/0f7b0ef0a4e46e120b697ede5c863c2174cd9591))
+* **ui-builder:** refuse an unknown property wrapper locally, not at the server ([#906](https://github.com/yschimke/compose-preview-server/issues/906)) ([c72290e](https://github.com/yschimke/compose-preview-server/commit/c72290efd3839e4deddfd4d6c912da3191cfff75))
+
 ## [3.37.0](https://github.com/yschimke/compose-preview-server/compare/v3.36.0...v3.37.0) (2026-09-16)
 
 
