@@ -278,26 +278,34 @@ jobs:
           COMPONENTS: ${{ inputs.components }}
           ASSETS_DIR: ${{ inputs.assets-dir }}
           FORMAT: ${{ inputs.format }}
+        # POSIX sh, not bash, and deliberately: the host image carries no `bash` where the runner
+        # looks for one, so Actions falls back to `sh -e {0}` (dash) inside the container. An
+        # `args=()` array is a syntax error there, which is how the lane's first real run died —
+        # before it reached a single render. The argument list is built in the positional
+        # parameters instead, which every POSIX shell has, and the heredoc replaces a `<<<`
+        # herestring for the same reason. Declaring `shell: bash` would be the other fix and is
+        # the worse one: it asserts something about an image this workflow does not build.
         run: |
-          set -uo pipefail
           mkdir -p renders
           # Beside the renders, so one artifact carries the whole answer: what drew, and what did
           # not and why. The manifest is built in `publish`, which is where the script lives.
           : > renders/_refusals.txt
 
-          args=()
+          set --
           while IFS= read -r pair; do
             [ -n "$pair" ] || continue
-            args+=(--components "$pair")
-          done <<< "$COMPONENTS"
-          if [ -n "$ASSETS_DIR" ]; then args+=(--assets "$ASSETS_DIR"); fi
+            set -- "$@" --components "$pair"
+          done <<COMPONENT_PAIRS
+          $COMPONENTS
+          COMPONENT_PAIRS
+          if [ -n "$ASSETS_DIR" ]; then set -- "$@" --assets "$ASSETS_DIR"; fi
 
           for document in documents/*.json; do
             design=$(basename "$document" .json)
             # `design-sync.mjs publish` writes `index.json` beside the documents — the design
             # library's own table of contents, not a design. Rendering it would publish a picture
             # of nothing, or a refusal against a design id that does not exist.
-            [ "$design" = "index" ] && continue
+            if [ "$design" = "index" ]; then continue; fi
             echo "::group::design render $design"
             # `--no-authorize` because nobody is here to approve a grant, and `--local` never asks a
             # server for one anyway; passing it keeps a misconfiguration a failure rather than a
@@ -309,7 +317,7 @@ jobs:
                  --catalog catalog.bundle \
                  --format "$FORMAT" \
                  --no-authorize \
-                 "${args[@]}" \
+                 "$@" \
                  -o "renders/$design.$FORMAT" 2> "renders/$design.log"; then
               echo "rendered $design"
             else
