@@ -28,11 +28,22 @@ const harnessDir = dirname(fileURLToPath(import.meta.url));
 export const harnessRoot = resolve(harnessDir, "..");
 
 // The UI builder is a separate repository (yschimke/compose-ui-builder) whose modules this harness
-// serves build output from. CI checks it out inside the workspace and names it here; the default is
-// the sibling directory `settings.gradle.kts` also defaults to, so a two-repo checkout needs no
-// configuration.
+// serves build output from.
+//
+// TWO spellings, and the second is the one CI actually sets. `settings.gradle.kts` takes the
+// checkout as a Gradle project property, so the workflow exports it as
+// `ORG_GRADLE_PROJECT_composeUiBuilderDir` — Gradle's own environment spelling — once at the
+// workflow level, and every step inherits it. Reading only `COMPOSE_UI_BUILDER_DIR` meant this
+// server silently fell back to the sibling default, which does not exist on a runner: the workspace
+// cannot hold a directory above itself, so CI checks the builder out INSIDE it at
+// `.compose-ui-builder`. The editor's dist then 404'd and Playwright waited out its 60s
+// `webServer` timeout with no clue as to why.
+//
+// Both are read rather than one renamed, so neither build system's spelling has to know about the
+// other's, and a contributor can set whichever they already have.
 export const uiBuilderRoot = resolve(
     process.env.COMPOSE_UI_BUILDER_DIR ||
+        process.env.ORG_GRADLE_PROJECT_composeUiBuilderDir ||
         resolve(harnessRoot, "../compose-ui-builder"),
 );
 
