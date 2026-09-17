@@ -2959,7 +2959,15 @@ class ServeCatalogStore(
           val file = File(staging, "$dirName/$localName")
           file.parentFile?.mkdirs()
           file.writeBytes(bytes)
-          page.copy(image = page.image.copy(uri = localName))
+          // `newBuilder()`, not `copy()`: these wire types put their constructor and their
+          // generated `copy` behind `internal` so that a field added upstream cannot delete the
+          // signature a released consumer calls. Growth lands on a Builder setter instead.
+          page
+            .newBuilder()
+            .also {
+              it.image = page.image.newBuilder().also { image -> image.uri = localName }.build()
+            }
+            .build()
         }
       }
     if (accepted.isEmpty()) return
@@ -2968,7 +2976,7 @@ class ServeCatalogStore(
       .writeText(
         DesignPagesJson.encodeToString(
           DesignPagesManifest.serializer(),
-          manifest.copy(pages = accepted),
+          manifest.newBuilder().also { it.pages = accepted }.build(),
         )
       )
   }
