@@ -81,6 +81,34 @@ dependencyResolutionManagement {
       name = "wearComposeCmpPort"
       content { includeGroup("ee.schimke.wearcmp") }
     }
+
+    // ── The UI-builder editor archive, from its GitHub release ──────────────────────────────────
+    //
+    // `compose-preview-ui-builder-web` is a ~40 MB Wasm distribution that this build unpacks into
+    // the server distribution. Nothing compiles against it and nothing resolves it transitively,
+    // so yschimke/compose-ui-builder ships it as a release asset rather than putting a frontend
+    // distribution on Maven Central forever. Its three sibling coordinates — the runtime, the
+    // export projection and the render bundle — are on Central, because those are what `:server`
+    // actually compiles against.
+    //
+    // An ivy repository rather than a download task, so it stays an ordinary versioned dependency:
+    // the version catalog names it, Gradle caches it, and the day it moves to a real Maven
+    // repository this block is deleted and nothing else changes.
+    //
+    // `metadataSources { artifact() }` because a release asset is a bare file with no POM and no
+    // Gradle module metadata. That also means the `distribution` variant attributes this build
+    // matches on are NOT carried across — `:server`'s `uiBuilderWeb` configuration asks for the
+    // artifact by extension instead, and its build file says so where it declares the dependency.
+    //
+    // FENCED to the single module, like the Wear port above: this repository can never satisfy a
+    // request for anything else, and a typo in a coordinate fails loudly instead of reaching a
+    // GitHub 404 page and being parsed as a jar.
+    ivy("https://github.com/yschimke/compose-ui-builder/releases/download") {
+      name = "uiBuilderWebRelease"
+      patternLayout { artifact("[revision]/[module]-[revision].[ext]") }
+      content { includeModule("ee.schimke.composeai", "compose-preview-ui-builder-web") }
+      metadataSources { artifact() }
+    }
   }
 }
 

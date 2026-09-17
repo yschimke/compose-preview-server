@@ -325,6 +325,22 @@ tasks.named<Tar>("distTar") {
 // gate on, is its own change.
 
 dependencies {
+  // Resolved today by substituting yschimke/compose-ui-builder's `:ui-builder-web` project, which
+  // `settings.gradle.kts` includes as a composite build. That project advertises the
+  // `distribution` / `ui-builder-web` attributes this configuration matches on.
+  //
+  // When that repository cuts its first release, this coordinate comes from the GitHub release
+  // asset instead, through the group-fenced ivy repository already declared in
+  // `settings.gradle.kts`. Two things change on that day, and neither can be tested before it:
+  //
+  //   - the `includeBuild` block goes, and with it the substitution;
+  //   - a release asset is a bare ZIP with no Gradle module metadata, so it carries none of the
+  //     attributes above. This configuration has to ask for the artifact by extension
+  //     (`...:compose-preview-ui-builder-web:<version>@zip`) rather than by variant.
+  //
+  // The attribute matching is kept until then rather than pre-emptively removed, because it is
+  // what makes the composite path exact, and swapping it for an untested artifact-only dependency
+  // would trade a mechanism CI proves for one nothing does.
   add(
     "uiBuilderWeb",
     libs.composeai.ui.builder.web,
