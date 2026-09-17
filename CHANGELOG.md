@@ -1,5 +1,24 @@
 # Changelog
 
+## [3.39.0](https://github.com/yschimke/compose-preview-server/compare/v3.38.0...v3.39.0) (2026-09-17)
+
+
+### Features
+
+* **deploy:** gate readiness and the rollout on the design systems rendering ([#921](https://github.com/yschimke/compose-preview-server/issues/921)) ([e20ef81](https://github.com/yschimke/compose-preview-server/commit/e20ef8169db4bbf28690df8ea4b7cd6d167f36c2))
+* **ui-builder:** add `layout/flow-row`, a row that wraps ([#923](https://github.com/yschimke/compose-preview-server/issues/923)) ([68a5584](https://github.com/yschimke/compose-preview-server/commit/68a5584bac7dfdd4463b4e7c36ffcc4686c16e4a))
+* **ui-builder:** make /ui-builder/designs a file manager ([#927](https://github.com/yschimke/compose-preview-server/issues/927)) ([171d5e6](https://github.com/yschimke/compose-preview-server/commit/171d5e69c3bf199736329744871902f2237edf98))
+* **ui-builder:** write `asset/image` on a Wear screen ([#922](https://github.com/yschimke/compose-preview-server/issues/922)) ([83c6cd5](https://github.com/yschimke/compose-preview-server/commit/83c6cd580dbfe50f2147f150b7632b36eab5c7a1))
+
+
+### Bug Fixes
+
+* **harness:** converge the Jetcaster oracle on the design's pane widths ([#928](https://github.com/yschimke/compose-preview-server/issues/928)) ([994e74e](https://github.com/yschimke/compose-preview-server/commit/994e74e36fe5db78f3bc3fa72718e3924a81e1b0))
+* **ui-builder:** export and render the designs this repository ships ([#930](https://github.com/yschimke/compose-preview-server/issues/930)) ([6f03c7a](https://github.com/yschimke/compose-preview-server/commit/6f03c7affd3f3e1fadfb71514b068651803866e3))
+* **ui-builder:** read the pane scaffold's authored widths ([#924](https://github.com/yschimke/compose-preview-server/issues/924)) ([ebe0b78](https://github.com/yschimke/compose-preview-server/commit/ebe0b78302725b19370bd73a93af2c9c1d9b703b))
+* **ui-builder:** stop writing `transformation` on Wear components without one ([#925](https://github.com/yschimke/compose-preview-server/issues/925)) ([fd4c804](https://github.com/yschimke/compose-preview-server/commit/fd4c804249adbaab2108c7df614328724ef0d08f))
+* **ui-builder:** withdraw the Remote Compose seams from Wear's borrow set ([#918](https://github.com/yschimke/compose-preview-server/issues/918)) ([4a2d733](https://github.com/yschimke/compose-preview-server/commit/4a2d733481889461cdf5eb2d15566ec315dc1314))
+
 ## [3.38.0](https://github.com/yschimke/compose-preview-server/compare/v3.37.0...v3.38.0) (2026-09-17)
 
 
