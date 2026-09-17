@@ -47,6 +47,11 @@ jobs:
         with:
           persist-credentials: false
       - run: .github/scripts/ui-builder-project-boundary.sh
+      # The canvas links a Compose Multiplatform port of Wear Compose so it can draw real
+      # components; code generation and the native lane must stay on the genuine AndroidX AARs.
+      # Runs here because nothing else would notice: adding the port to the exporter breaks no
+      # build and no test — it surfaces as a user compiling generated code against the wrong API.
+      - run: .github/scripts/wear-port-canvas-only.sh
       - name: Check tools-owned parser vendor
         run: python3 .github/scripts/check-usage-source-psi-vendor.py
       - run: python3 scripts/local-dependencies/test_stage.py
