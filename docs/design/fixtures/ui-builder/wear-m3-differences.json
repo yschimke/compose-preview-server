@@ -351,13 +351,11 @@
   },
   {
     "field": "componentMenu.components.wear-m3/animated-text",
-    "why": "RE-PINNED, and the re-pin is this entry changing class rather than the catalog moving. It was accepted as `unchecked by the frozen catalog` — `frozen: null` — because this repository's builder did not offer the component at all, so it had no opinion to compare. It offers it now, drawn by Wear Compose through the Compose Multiplatform build of the library, so the frozen side has a shelf and the two can finally be compared. That comparison is the SAME difference every reshelved component above carries, for the same reason: the frozen shelf `Content` comes from the nine-shelf taxonomy this repository invented and states in `componentMenu.groupOrder`, and the policy's `Text` is the catalog's own `@file:CatalogGroup(name = …)`. Putting the catalog's name on the frozen side instead would have introduced a shelf this repository's own `groupOrder` does not list, which is a worse answer than the recorded difference. What was checked, and what makes this a shelf difference rather than a substitution: the record symbol is `androidx.wear.compose.material3.AnimatedTextKt.AnimatedText`, which is exactly the composable the canvas calls and the generator writes. Both values are pinned, so moving either side fails this gate again.",
+    "why": "Additive, and read rather than waved through (2026-09-12). The frozen catalog has no opinion about this component at all, so nothing in this repository had checked it — that is what made it unreviewed rather than agreed. The shelf is the catalog's own `@file:CatalogGroup(name = …)` on the file declaring the sticker, not a name this repository chose. What was checked: the id, the shelf and the record symbol `androidx.wear.compose.material3.AnimatedTextKt.AnimatedText` describe the same component. Pinned rather than blanket-waived, so a later re-shelving fails this gate instead of passing quietly.",
     "policy": {
       "group": "Text"
     },
-    "frozen": {
-      "group": "Content"
-    }
+    "frozen": null
   },
   {
     "field": "componentMenu.components.wear-m3/app-card",
@@ -441,13 +439,11 @@
   },
   {
     "field": "componentMenu.components.wear-m3/fading-expanding-label",
-    "why": "RE-PINNED, and the re-pin is this entry changing class rather than the catalog moving. It was accepted as `unchecked by the frozen catalog` — `frozen: null` — because this repository's builder did not offer the component at all, so it had no opinion to compare. It offers it now, drawn by Wear Compose through the Compose Multiplatform build of the library, so the frozen side has a shelf and the two can finally be compared. That comparison is the SAME difference every reshelved component above carries, for the same reason: the frozen shelf `Content` comes from the nine-shelf taxonomy this repository invented and states in `componentMenu.groupOrder`, and the policy's `Text` is the catalog's own `@file:CatalogGroup(name = …)`. Putting the catalog's name on the frozen side instead would have introduced a shelf this repository's own `groupOrder` does not list, which is a worse answer than the recorded difference. What was checked, and what makes this a shelf difference rather than a substitution: the record symbol is `androidx.wear.compose.material3.FadingExpandingLabelKt.FadingExpandingLabel`, which is exactly the composable the canvas calls and the generator writes. Both values are pinned, so moving either side fails this gate again.",
+    "why": "Additive, and read rather than waved through (2026-09-12). The frozen catalog has no opinion about this component at all, so nothing in this repository had checked it — that is what made it unreviewed rather than agreed. The shelf is the catalog's own `@file:CatalogGroup(name = …)` on the file declaring the sticker, not a name this repository chose. What was checked: the id, the shelf and the record symbol `androidx.wear.compose.material3.FadingExpandingLabelKt.FadingExpandingLabel` describe the same component. Pinned rather than blanket-waived, so a later re-shelving fails this gate instead of passing quietly.",
     "policy": {
       "group": "Text"
     },
-    "frozen": {
-      "group": "Content"
-    }
+    "frozen": null
   },
   {
     "field": "componentMenu.components.wear-m3/failure-confirmation-dialog-content",
@@ -499,13 +495,11 @@
   },
   {
     "field": "componentMenu.components.wear-m3/icon-toggle-button",
-    "why": "RE-PINNED, and the re-pin is this entry changing class rather than the catalog moving. It was accepted as `unchecked by the frozen catalog` — `frozen: null` — because this repository's builder did not offer the component at all, so it had no opinion to compare. It offers it now, drawn by Wear Compose through the Compose Multiplatform build of the library, so the frozen side has a shelf and the two can finally be compared. That comparison is the SAME difference every reshelved component above carries, for the same reason: the frozen shelf `Actions` comes from the nine-shelf taxonomy this repository invented and states in `componentMenu.groupOrder`, and the policy's `Toggle buttons` is the catalog's own `@file:CatalogGroup(name = …)`. Putting the catalog's name on the frozen side instead would have introduced a shelf this repository's own `groupOrder` does not list, which is a worse answer than the recorded difference. What was checked, and what makes this a shelf difference rather than a substitution: the record symbol is `androidx.wear.compose.material3.IconToggleButtonKt.IconToggleButton`, which is exactly the composable the canvas calls and the generator writes. Both values are pinned, so moving either side fails this gate again.",
+    "why": "Additive, and read rather than waved through (2026-09-12). The frozen catalog has no opinion about this component at all, so nothing in this repository had checked it — that is what made it unreviewed rather than agreed. The shelf is the catalog's own `@file:CatalogGroup(name = …)` on the file declaring the sticker, not a name this repository chose. What was checked: the id, the shelf and the record symbol `androidx.wear.compose.material3.IconToggleButtonKt.IconToggleButton` describe the same component. Pinned rather than blanket-waived, so a later re-shelving fails this gate instead of passing quietly.",
     "policy": {
       "group": "Toggle buttons"
     },
-    "frozen": {
-      "group": "Actions"
-    }
+    "frozen": null
   },
   {
     "field": "componentMenu.components.wear-m3/increase-icon",
@@ -517,13 +511,11 @@
   },
   {
     "field": "componentMenu.components.wear-m3/level-indicator",
-    "why": "RE-PINNED, and the re-pin is this entry changing class rather than the catalog moving. It was accepted as `unchecked by the frozen catalog` — `frozen: null` — because this repository's builder did not offer the component at all, so it had no opinion to compare. It offers it now, drawn by Wear Compose through the Compose Multiplatform build of the library, so the frozen side has a shelf and the two can finally be compared. That comparison is the SAME difference every reshelved component above carries, for the same reason: the frozen shelf `Communication` comes from the nine-shelf taxonomy this repository invented and states in `componentMenu.groupOrder`, and the policy's `Position indicators` is the catalog's own `@file:CatalogGroup(name = …)`. Putting the catalog's name on the frozen side instead would have introduced a shelf this repository's own `groupOrder` does not list, which is a worse answer than the recorded difference. What was checked, and what makes this a shelf difference rather than a substitution: the record symbol is `androidx.wear.compose.material3.LevelIndicatorKt.LevelIndicator`, which is exactly the composable the canvas calls and the generator writes. Both values are pinned, so moving either side fails this gate again.",
+    "why": "Additive, and read rather than waved through (2026-09-12). The frozen catalog has no opinion about this component at all, so nothing in this repository had checked it — that is what made it unreviewed rather than agreed. The shelf is the catalog's own `@file:CatalogGroup(name = …)` on the file declaring the sticker, not a name this repository chose. What was checked: the id, the shelf and the record symbol `androidx.wear.compose.material3.LevelIndicatorKt.LevelIndicator` describe the same component. Pinned rather than blanket-waived, so a later re-shelving fails this gate instead of passing quietly.",
     "policy": {
       "group": "Position indicators"
     },
-    "frozen": {
-      "group": "Communication"
-    }
+    "frozen": null
   },
   {
     "field": "componentMenu.components.wear-m3/linear-progress-indicator",
@@ -711,13 +703,11 @@
   },
   {
     "field": "componentMenu.components.wear-m3/text-toggle-button",
-    "why": "RE-PINNED, and the re-pin is this entry changing class rather than the catalog moving. It was accepted as `unchecked by the frozen catalog` — `frozen: null` — because this repository's builder did not offer the component at all, so it had no opinion to compare. It offers it now, drawn by Wear Compose through the Compose Multiplatform build of the library, so the frozen side has a shelf and the two can finally be compared. That comparison is the SAME difference every reshelved component above carries, for the same reason: the frozen shelf `Actions` comes from the nine-shelf taxonomy this repository invented and states in `componentMenu.groupOrder`, and the policy's `Toggle buttons` is the catalog's own `@file:CatalogGroup(name = …)`. Putting the catalog's name on the frozen side instead would have introduced a shelf this repository's own `groupOrder` does not list, which is a worse answer than the recorded difference. What was checked, and what makes this a shelf difference rather than a substitution: the record symbol is `androidx.wear.compose.material3.TextToggleButtonKt.TextToggleButton`, which is exactly the composable the canvas calls and the generator writes. Both values are pinned, so moving either side fails this gate again.",
+    "why": "Additive, and read rather than waved through (2026-09-12). The frozen catalog has no opinion about this component at all, so nothing in this repository had checked it — that is what made it unreviewed rather than agreed. The shelf is the catalog's own `@file:CatalogGroup(name = …)` on the file declaring the sticker, not a name this repository chose. What was checked: the id, the shelf and the record symbol `androidx.wear.compose.material3.TextToggleButtonKt.TextToggleButton` describe the same component. Pinned rather than blanket-waived, so a later re-shelving fails this gate instead of passing quietly.",
     "policy": {
       "group": "Toggle buttons"
     },
-    "frozen": {
-      "group": "Actions"
-    }
+    "frozen": null
   },
   {
     "field": "componentMenu.components.wear-m3/time-text",

@@ -1273,8 +1273,6 @@ internal fun wearComponentMenu(): JsonObject {
           "wear-m3/icon-button",
           "wear-m3/edge-button",
           "wear-m3/button-group",
-          "wear-m3/icon-toggle-button",
-          "wear-m3/text-toggle-button",
         ),
       "Selection" to
         listOf(
@@ -1293,15 +1291,8 @@ internal fun wearComponentMenu(): JsonObject {
           "wear-m3/confirmation-dialog",
           "wear-m3/open-on-phone-dialog",
         ),
-      "Communication" to listOf("wear-m3/progress-indicator", "wear-m3/level-indicator"),
-      "Content" to
-        listOf(
-          "wear-m3/text",
-          "wear-m3/animated-text",
-          "wear-m3/fading-expanding-label",
-          "wear-m3/icon",
-          "asset/image",
-        ),
+      "Communication" to listOf("wear-m3/progress-indicator"),
+      "Content" to listOf("wear-m3/text", "wear-m3/icon", "asset/image"),
       "Embedded" to
         listOf(
           "remote-compose/document",
@@ -1684,27 +1675,28 @@ private fun wearTransformingLazyColumnProperties(): List<PropertyCapabilityV1> =
  * [#395](https://github.com/yschimke/compose-preview-server/pull/395), which built
  * `CheckboxButton`, `SwitchButton` and `RadioButton` as hand-assembled Material 3 shapes at sizes
  * read off a screenshot — an impression of upstream with nothing in the build to check it against,
- * wrong silently in the one surface an author trusts.
+ * wrong silently in the one surface an author trusts. The same document says what would let them
+ * in: *they arrive with the streaming preview or they do not arrive*.
  *
- * The rule still stands and nothing here breaks it, but the reason it bit has gone. Its premise was
- * that the canvas *cannot link* Wear Compose, which was true of
- * `androidx.wear.compose:compose-material3` — an Android AAR with no browser variant — and was
- * never true of the library. A Compose Multiplatform build of the same source publishes `wasmJs`,
- * the canvas links it, and every component below is drawn by the real thing.
+ * They arrive with the streaming preview. `ServeUiBuilderNativePreview` now compiles a Wear
+ * design's own generated Kotlin against a bundle carrying `androidx.wear.compose:compose-material3`
+ * and renders it on the Android/Robolectric daemon, and `wear-m3` declares that lane authoritative
+ * and its own canvas approximate (`previewSurfaces`, read by `UiBuilderPreviewSurfaces`). So the
+ * premise the rule rests on — that the canvas is the surface an author trusts — is no longer true
+ * here, and the rule itself is kept rather than bent: **nothing below is drawn as a lookalike**.
+ * The canvas gives each of these a named placeholder occupying its place in the layout and claiming
+ * nothing about its size, colour or shape, and the picture comes from Android.
  *
- * So the answer to "fabricate a lookalike or draw nothing" turned out to be neither. Nothing here
- * is assembled at sizes read off a screenshot, which is what the rule forbids; nothing here is a
- * placeholder either.
+ * What that buys is the whole point. A Wear screen can now hold the controls Wear actually
+ * publishes — a labelled full-width `CheckboxButton`, a `Slider`, a `DatePicker` — instead of a
+ * palette of three renamed borrows and a container to put them in.
  *
- * This function keeps its name for now. It is misleading — these components are not native-only in
- * any sense the canvas still honours — and renaming it touches the catalog synthesis, its golden
- * and both tests that walk it, which is a change worth making on its own rather than inside this
- * one.
+ * ## The three that stay lookalikes
  *
- * What it buys is the point. A Wear screen can hold the controls Wear actually publishes — a
- * labelled full-width `CheckboxButton`, a `Slider`, a `DatePicker`, a toggle button, an animated
- * numeral — drawn as themselves, instead of a palette of three renamed borrows and a container to
- * put them in.
+ * `wear-m3/text`, `wear-m3/card` and `wear-m3/button` keep the Material 3 drawing they have, for
+ * the reason that made them acceptable in the first place: each is a *rename* of a borrow the
+ * canvas was already drawing, not a shape assembled for the occasion. `WearCanvasStandInTest` pins
+ * that map to exactly those three, and nothing here joins it.
  */
 private fun wearNativeOnlyComponents(
   supportedWasm: WasmCapabilityV1,
@@ -1713,13 +1705,13 @@ private fun wearNativeOnlyComponents(
 ): List<ComponentCapabilityV1> {
   /** The note every component in this group carries, with its own composable named. */
   fun note(composable: String, extra: String = "") =
-    "Wear Material 3's `$composable`, drawn on the canvas by Wear Compose itself." +
+    "Wear Material 3's `$composable`." +
       (if (extra.isEmpty()) "" else " $extra") +
-      " The canvas links a Compose Multiplatform build of the library, which is why it can draw " +
-      "this rather than a placeholder; `androidx.wear.compose:compose-material3` publishes an " +
-      "Android AAR with no browser variant and is what the generated Kotlin and the native render " +
-      "use. Switch the render surface to Android to see the two lanes agree — where they do not, " +
-      "that is a finding about the port."
+      " The canvas draws a named placeholder where this node sits rather than the component: " +
+      "`androidx.wear.compose:compose-material3` is an Android AAR a Wasm build cannot link, and a " +
+      "hand-drawn lookalike would be an impression of upstream with nothing in this build to check " +
+      "it against. Switch the render surface to Android for the real one — that lane compiles this " +
+      "design's own generated Kotlin against real Wear Compose."
 
   fun component(
     componentId: String,
@@ -1750,8 +1742,7 @@ private fun wearNativeOnlyComponents(
       svg =
         blockedSvg?.copy(
           notes =
-            "The canvas draws $composable itself, but structured SVG export is a separate " +
-              "capability this catalog does not claim."
+            "A placeholder on the canvas must not claim structured SVG parity with $composable."
         ),
     )
 
@@ -2132,80 +2123,6 @@ private fun wearNativeOnlyComponents(
         ),
       extra = "The time counterpart of `wear-m3/date-picker`, and the same full-screen shape.",
     ),
-    // ── Completing the vocabulary ───────────────────────────────────────────────────────────────
-    //
-    // The list above was the catalog's whole inventory, and it had gaps a Wear screen notices: a
-    // selection family with no toggle buttons, text with no animated or fading variant, and no
-    // indicator but a progress ring. Each of these is published by Wear Material 3 and each is
-    // drawn by it here.
-    component(
-      componentId = "wear-m3/icon-toggle-button",
-      displayName = "Icon toggle button",
-      composable = "IconToggleButton",
-      role = "Leaf",
-      traits = listOf("Action", "ToolbarItem"),
-      properties =
-        listOf(flag("checked", "Whether the button is on. Bindable to a state variable.")),
-      slots = listOf(singleSlot("content", listOf("Adornment"))),
-      extra =
-        "The compact end of selection. `wear-m3/checkbox-button` and its siblings are full-width " +
-          "labelled rows; this is a control that sits in a `wear-m3/button-group` with others of " +
-          "its kind.",
-    ),
-    component(
-      componentId = "wear-m3/text-toggle-button",
-      displayName = "Text toggle button",
-      composable = "TextToggleButton",
-      role = "Leaf",
-      traits = listOf("Action", "ToolbarItem"),
-      properties =
-        listOf(
-          text("label", "The glyph or short label the button carries."),
-          flag("checked", "Whether the button is on. Bindable to a state variable."),
-        ),
-      extra = "`wear-m3/icon-toggle-button` with a label instead of an icon.",
-    ),
-    component(
-      componentId = "wear-m3/animated-text",
-      displayName = "Animated text",
-      composable = "AnimatedText",
-      role = "Leaf",
-      traits = listOf("ScreenContent"),
-      properties =
-        listOf(
-          text("text", "The numeral or short string the component animates."),
-          number(
-            "progress",
-            "Where on the animation to draw, 0 to 1. Frozen rather than played: a design whose " +
-              "render changed every frame could not be diffed, which is the same reason " +
-              "`wear-m3/screen-scaffold` freezes its clock text.",
-          ),
-        ),
-      extra =
-        "A motion treatment rather than a text style — a numeral travelling along a variable " +
-          "font's weight axis and between two sizes.",
-    ),
-    component(
-      componentId = "wear-m3/fading-expanding-label",
-      displayName = "Fading label",
-      composable = "FadingExpandingLabel",
-      role = "Leaf",
-      traits = listOf("ScreenContent"),
-      properties = listOf(text("text", "The label. Overflow fades rather than clipping.")),
-      extra = "For a label whose length is not known in advance, on a display with a curved edge.",
-    ),
-    component(
-      componentId = "wear-m3/level-indicator",
-      displayName = "Level indicator",
-      composable = "LevelIndicator",
-      role = "Leaf",
-      traits = listOf("Adornment"),
-      properties = listOf(number("value", "Where the arc sits, 0 to 1.")),
-      extra =
-        "The arc a rotary control draws against the bezel. `sweepAngle` is left at upstream's " +
-          "default and is not offered as a property: the kit publishes no angles for its other " +
-          "two sizes, and a knob whose values had to be guessed is worse than a fixed one.",
-    ),
   )
 }
 
@@ -2234,14 +2151,7 @@ private fun wearNativeOnlyComponents(
  * `docs/design/UI_BUILDER_WEAR_SCREEN.md`: straight sides overstate the width a row actually gets
  * near the curve, and the row transformation is not drawn.
  *
- * ## ~~The rest is borrowed, and that is a limitation rather than a design~~
- *
- * No longer true, and worth reading as the record of a position rather than a description. The
- * content components WERE `m3-catalog`'s, borrowed because the alternative was shipping a scaffold
- * with nothing to put in it. Every Wear component is now its own, drawn by Wear Compose through the
- * Compose Multiplatform build of the library. The paragraph below stands as written because the
- * observation inside it is still correct — a Wear `Button` is not a Material 3 `Button`, it is a
- * pill 52dp tall with its own colour roles — and that is exactly why the borrow had to end.
+ * ## The rest is borrowed, and that is a limitation rather than a design
  *
  * The content components are `m3-catalog`'s. A Wear `Button` is not a Material 3 `Button` — it is a
  * pill 52dp tall with its own colour roles — and `TitleCard`, `ListHeader` and `EdgeButton` have no

@@ -305,17 +305,13 @@ class WearM3ScreenCatalogTest {
     assertEquals(
       listOf(
         "wear-m3/alert-dialog",
-        "wear-m3/animated-text",
         "wear-m3/button-group",
         "wear-m3/checkbox-button",
         "wear-m3/confirmation-dialog",
         "wear-m3/date-picker",
         "wear-m3/edge-button",
-        "wear-m3/fading-expanding-label",
         "wear-m3/icon",
         "wear-m3/icon-button",
-        "wear-m3/icon-toggle-button",
-        "wear-m3/level-indicator",
         "wear-m3/list-sub-header",
         "wear-m3/open-on-phone-dialog",
         "wear-m3/progress-indicator",
@@ -324,7 +320,6 @@ class WearM3ScreenCatalogTest {
         "wear-m3/stepper",
         "wear-m3/switch-button",
         "wear-m3/text-button",
-        "wear-m3/text-toggle-button",
         "wear-m3/time-picker",
       ),
       wear.components

@@ -92,7 +92,7 @@ class WearCatalogIsCompleteTest {
   fun `the catalog is not empty, so the comparison above means something`() {
     // Both sides are derived by regex. If either stopped matching, the test above would pass by
     // comparing two empty sets and would keep passing forever.
-    assertTrue(drawnIds().size >= 28, "found only ${drawnIds().size} renderer branches")
-    assertTrue(declaredSupportedIds().size >= 28, "found only ${declaredSupportedIds().size} ids")
+    assertTrue(drawnIds().size >= 20, "found only ${drawnIds().size} renderer branches")
+    assertTrue(declaredSupportedIds().size >= 20, "found only ${declaredSupportedIds().size} ids")
   }
 }
