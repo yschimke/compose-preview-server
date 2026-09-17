@@ -150,6 +150,28 @@ class ScreenDocumentProjectionTest {
     )
   }
 
+  /**
+   * A `colorToken` wrapper holding a literal, which is what every design committed before the
+   * editor's `colourWrapper` rule carries.
+   *
+   * The canvas has always drawn these: `UiBuilderRenderer.uiBuilderColor` tests `startsWith("#")`
+   * before it consults the token table, so the wrapper never decided. Reading it as a role asked
+   * the theme for one called `#FF0D0E11` and refused the whole export over a colour the design
+   * renders correctly.
+   */
+  @Test
+  fun `a colour token holding a literal is that literal`() {
+    val projected = projected(document(text("color" to ColorTokenValueV1("#FF0D0E11"))))
+    val color = projected.root.arguments.getValue("color") as ScreenValue.Construct
+    assertEquals(ScreenValue.Whole(0xFF0D0E11L), color.positional.single())
+    // Six digits keep the opaque-by-convention alpha, as they do under a `color` wrapper.
+    val short = projected(document(text("color" to ColorTokenValueV1("#0D0E11"))))
+    assertEquals(
+      ScreenValue.Whole(0xFF0D0E11L),
+      (short.root.arguments.getValue("color") as ScreenValue.Construct).positional.single(),
+    )
+  }
+
   @Test
   fun `a colour written as a string is refused as a colour, not as a Text`() {
     // Left to the generator this was "`Text`.`color` is androidx.compose.ui.graphics.Color, which

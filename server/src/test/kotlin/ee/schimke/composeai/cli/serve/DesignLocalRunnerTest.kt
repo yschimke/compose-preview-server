@@ -28,6 +28,22 @@ import kotlin.test.assertTrue
  */
 class DesignLocalRunnerTest {
 
+  /**
+   * The bug that made every successful local render look like a failure.
+   *
+   * The daemon drew the frame, the compile succeeded, and the lane threw the picture away because
+   * `PlaygroundRunResponse.image` is a data URL and this was the one reader that decoded it whole.
+   */
+  @Test
+  fun `a rendered frame is read whether it arrives as a data URL or as a bare payload`() {
+    val payload = "iVBORw0KGgo="
+    assertEquals(payload, renderedFrameBase64("data:image/png;base64,$payload"))
+    assertEquals(payload, renderedFrameBase64(payload))
+    // A data URL with no comma is malformed rather than a payload that happens to start `data:`;
+    // answering "" lets the decode fail and the lane say so, instead of decoding the prefix.
+    assertEquals("", renderedFrameBase64("data:image/png;base64"))
+  }
+
   private val logged = mutableListOf<String>()
   private val written = mutableMapOf<String, ByteArray>()
   private var documentsRead = 0
