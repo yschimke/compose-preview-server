@@ -71,6 +71,23 @@ internal interface DesignLocalLane {
 }
 
 /**
+ * The base64 payload of a rendered frame, whichever of the two shapes the render lane hands back.
+ *
+ * `PlaygroundRunResponse.image` is a **data URL**: the playground page assigns it straight to an
+ * `<img>`'s `src`, and `RemoteNativeRenderProofTest` reaches for the payload with
+ * `substringAfter(',')` on the same field the MCP tool republishes. [DesignLocalCompileLane] was
+ * the one reader that decoded it whole, so a render that compiled, drew and came back ended as "the
+ * render lane's frame is not valid base64" — the daemon did every part of its job and the one
+ * artifact `--local` exists to produce was dropped at the last step over a prefix.
+ *
+ * Both spellings are accepted rather than only the one observed. The field is named `imageBase64`
+ * where the MCP tool publishes it, so a producer that one day sends the bare payload that name
+ * promises must not break this lane in the other direction.
+ */
+internal fun renderedFrameBase64(image: String): String =
+  if (image.startsWith("data:")) image.substringAfter(',', missingDelimiterValue = "") else image
+
+/**
  * The production [DesignLocalLane]: a bundle on disk, this process, and no server anywhere.
  *
  * Everything is resolved lazily and remembered, because [describe] is only useful once it can
@@ -234,11 +251,13 @@ internal class DesignLocalCompileLane(
               "the render lane answered with neither a frame nor a reason"
             )
           else ->
-            runCatching { Base64.getDecoder().decode(image) }
+            runCatching { Base64.getDecoder().decode(renderedFrameBase64(image)) }
               .fold(
                 onSuccess = { DesignLocalLane.Frame.Rendered(it) },
                 onFailure = {
-                  DesignLocalLane.Frame.NoFrame("the render lane's frame is not valid base64")
+                  DesignLocalLane.Frame.NoFrame(
+                    "the render lane's frame is not valid base64 (${image.take(32)}…)"
+                  )
                 },
               )
         }

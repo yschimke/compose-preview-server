@@ -322,12 +322,67 @@ class DesignModifierExportTest {
     )
   }
 
+  /**
+   * The spelling every committed Google-app design actually uses.
+   *
+   * A modifier's `shape` is a free string, and the builder writes a NUMBER into it for a corner the
+   * designer sized by hand — `UiBuilderRenderer.shapeFor` draws `"16"` as a 16dp corner and the
+   * capability exporter's `shapeDp` writes the same. This projection refused it, which made the
+   * record-driven export unusable on the designs this repository ships.
+   */
+  @Test
+  fun `a numeric shape is the corner radius the canvas draws`() {
+    val corner =
+      ScreenValue.Construct(
+        callableFqn = "androidx.compose.foundation.shape.RoundedCornerShape",
+        positional =
+          listOf(
+            ScreenValue.Chain(
+              receiver = ScreenValue.Whole(16),
+              links = listOf(ChainLink("androidx.compose.ui.unit.dp", property = true)),
+              typeFqn = "androidx.compose.ui.unit.Dp",
+            )
+          ),
+        typeFqn = "androidx.compose.ui.graphics.Shape",
+      )
+    assertEquals(
+      listOf(ChainLink("androidx.compose.ui.draw.clip", positional = listOf(corner))),
+      links(ClipModifierV1(shape = "16")),
+    )
+    // …and wherever else a shape is taken, which is the half a `clip`-only fix would have missed.
+    assertEquals(
+      emptyList(),
+      reasonsFor(document(text(BackgroundModifierV1(ColorValueV1("#000000"), shape = "8")))),
+    )
+  }
+
+  /** A named role stays a role: `medium` follows a re-themed catalog, `12.dp` would not. */
+  @Test
+  fun `a theme shape is not collapsed into its dp equivalent`() {
+    assertEquals(
+      listOf(
+        ChainLink(
+          "androidx.compose.ui.draw.clip",
+          positional =
+            listOf(
+              ScreenValue.Reference(
+                "androidx.compose.material3.MaterialTheme",
+                listOf("shapes", "medium"),
+                typeFqn = "androidx.compose.ui.graphics.Shape",
+              )
+            ),
+        )
+      ),
+      links(ClipModifierV1(shape = "medium")),
+    )
+  }
+
   @Test
   fun `a shape nothing resolves is refused wherever it appears, not only on a clip`() {
     assertEquals(
       listOf(
         "node `text` fills with shape `squircle`, which is neither a theme shape (extraLarge, " +
-          "extraSmall, large, medium, small) nor one of circle, rectangle"
+          "extraSmall, large, medium, small), one of circle, rectangle, nor a corner radius in dp"
       ),
       reasonsFor(document(text(BackgroundModifierV1(ColorValueV1("#000000"), shape = "squircle")))),
     )
