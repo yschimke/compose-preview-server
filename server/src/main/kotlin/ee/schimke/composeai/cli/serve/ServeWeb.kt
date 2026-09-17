@@ -1267,8 +1267,25 @@ ${captureControlsHtml().prependIndent("          ")}
      * collapsed to an icon it costs the layout nothing on the pages that do have one.
      */
     search: String = "",
+    /**
+     * The UI builder's own **Designs** index, linked from the nav panel on every page that belongs
+     * to the builder.
+     *
+     * Empty everywhere else, and that is the point: `/ui-builder/designs` 404s on a host that
+     * serves no builder, and a catalog viewer has no business carrying a link to one. A builder
+     * page, on the other hand, is exactly where somebody asks *where is the thing I was working on*
+     * — and until this link existed the answer was a URL you had to already know.
+     */
+    designsHref: String = "",
   ): String {
     val actionHtml = action.takeIf { it.isNotBlank() }?.let { "\n          $it" } ?: ""
+    val designsHtml =
+      designsHref
+        .takeIf { it.isNotBlank() }
+        ?.let {
+          "\n            <a class=\"cp-site-designs-link\" href=\"${WebEscaping.htmlEscape(it)}\">Designs</a>"
+        }
+        .orEmpty()
     val crumb = breadcrumb.takeIf { it.isNotBlank() }?.let { "\n          $it" } ?: ""
     val name =
       siteName
@@ -1315,7 +1332,7 @@ ${captureControlsHtml().prependIndent("          ")}
           </details>
           <div class="cp-site-menu-panel" id="cp-site-menu-panel">
             <a class="cp-site-status-link" id="cp-status-link" href="/status$navSuffix">Status<span
-              class="cp-daemon-status" id="cp-daemon-status" aria-hidden="true" hidden></span></a>$actionHtml
+              class="cp-daemon-status" id="cp-daemon-status" aria-hidden="true" hidden></span></a>$designsHtml$actionHtml
             ${settingsMenuHtml(showPreviewThemeSetting, sessionSettings).prependIndent("            ").trimStart()}
           </div>
         </nav>
@@ -7303,6 +7320,8 @@ ${captureControlsHtml().prependIndent("          ")}
     grants: List<UiBuilderAccessRow>,
     viewerActorId: String,
     notice: String = "",
+    /** The Designs index, carried into the header's nav panel. See [siteHeader]. */
+    designsHref: String = "",
     navSuffix: String = "",
     version: String? = null,
     siteName: String = "",
@@ -7336,6 +7355,7 @@ ${captureControlsHtml().prependIndent("          ")}
       unfurlDescription = "Who can open this UI-builder design.",
       version = version,
       navSuffix = navSuffix,
+      headerDesignsHref = designsHref,
       siteName = siteName,
       themeCss = themeCss,
       body =
@@ -7390,6 +7410,25 @@ ${captureControlsHtml().prependIndent("          ")}
   }
 
   /**
+   * One catalog the **New design** form can create into, with the starting points it offers.
+   *
+   * The labels are the server's, because only the server knows which catalogs it authors; the
+   * template ids come from `UiBuilderNewDesignSeed`, so this page can never offer a starting point
+   * the create route would refuse.
+   */
+  data class UiBuilderNewDesignOption(
+    val systemId: String,
+    val label: String,
+    val templates: List<UiBuilderNewDesignTemplate>,
+  )
+
+  /** One starting point inside a [UiBuilderNewDesignOption]. */
+  data class UiBuilderNewDesignTemplate(
+    val id: String,
+    val label: String,
+  )
+
+  /**
    * One actor-scoped design on [uiBuilderDesignsPage]. Null [grants] means the caller is not owner.
    */
   data class UiBuilderDesignRow(
@@ -7405,40 +7444,148 @@ ${captureControlsHtml().prependIndent("          ")}
     val shareAction: String,
     val grants: List<UiBuilderAccessRow>?,
     val unopenableReason: String?,
+    /**
+     * The design's live SVG export, drawn as the card's thumbnail.
+     *
+     * A picture, because a list of ids is not a list a person recognises their own work in. It is
+     * the address `/api/ui-builder/v1/designs/{id}/export.svg` already serves — the same export,
+     * the same gate, the same actor — so the card costs no second renderer and no second capability
+     * check, and it follows the design because that URL renders the current revision. Empty (an
+     * export this viewer may not ask for, or a design that cannot be opened) draws the placeholder
+     * instead.
+     */
+    val previewHref: String = "",
+    /** POST target that creates a copy of this design. Empty when the viewer may not create one. */
+    val copyAction: String = "",
+    /** The id the Duplicate form starts with, so copying is one click. */
+    val copySuggestedId: String = "",
+    /** POST target that deletes it. Empty unless the viewer owns it. */
+    val deleteAction: String = "",
   )
 
-  /** `GET /ui-builder/designs` — the caller's own designs and the ones shared with them. */
+  /**
+   * `GET /ui-builder/designs` — the caller's own designs and the ones shared with them.
+   *
+   * This is the builder's **file manager**, and it is built around the one question a person opens
+   * it with: *which of these is the thing I was working on?* An id, a revision and a timestamp do
+   * not answer that, so every card leads with the design's own rendering
+   * ([UiBuilderDesignRow.previewHref]) and the page is a grid of pictures rather than a list of
+   * rows. Everything a design can have done to it from outside the editor is on its card — open,
+   * duplicate, share, delete — because the alternative was an admin page with a token.
+   *
+   * Creating lives here too, in both of the forms it takes: a blank design from a template
+   * ([createAction]), and a copy of something that already exists ([copyAction]). The second is the
+   * one that was missing: starting from an example, rather than from nothing, is how most designs
+   * actually begin, and the only way to do it was to rebuild the design by hand.
+   *
+   * The filter box is the page's only script, and it only hides cards. With scripting off the box
+   * is still there and every design is still listed, which is the whole page working.
+   */
   fun uiBuilderDesignsPage(
     rows: List<UiBuilderDesignRow>,
     viewerActorId: String,
+    /** `POST /ui-builder/designs`. Empty hides the New design form (a reader who may not write). */
+    createAction: String = "",
+    /** `POST /ui-builder/designs/copy`. Empty hides every Duplicate control for the same reason. */
+    copyAction: String = "",
+    catalogs: List<UiBuilderNewDesignOption> = emptyList(),
+    /** A generated `cheeky-raccoon`, so the New design form can be submitted without typing. */
+    suggestedDesignId: String = "",
+    /** What the last form submission did, shown once above the grid. */
+    notice: String = "",
     navSuffix: String = "",
     version: String? = null,
     siteName: String = "",
     themeCss: String = "",
   ): String {
     val esc = WebEscaping::htmlEscape
-    val body =
-      if (rows.isEmpty())
-        "<p class=\"cp-sub\">No designs are owned by or shared with this account yet.</p>"
-      else
-        rows.joinToString("\n") { row ->
-          val grants =
-            row.grants?.let { owned ->
-              val current =
-                if (owned.isEmpty()) "<p><strong>Shared with:</strong> Nobody else.</p>"
-                else
-                  owned.joinToString("\n", prefix = "<p><strong>Shared with:</strong></p>") {
-                    """
-                    <form method="post" action="${esc(row.shareAction)}">
-                      <input type="hidden" name="returnTo" value="designs">
-                      <input type="hidden" name="actorId" value="${esc(it.actorId)}">
-                      <code>${esc(it.actorId)}</code> (${esc(it.role)})
-                      <button class="cp-grant-deny" type="submit" name="action" value="revoke">Remove</button>
-                    </form>
-                    """
-                      .trimIndent()
-                  }
-              """
+    val noticeHtml =
+      notice
+        .takeIf { it.isNotBlank() }
+        ?.let { "<p class=\"cp-designs-notice\" role=\"status\">${esc(it)}</p>" }
+        .orEmpty()
+    val cards =
+      rows.joinToString("\n") { row ->
+        val title = if (row.title.isBlank()) row.designId else row.title
+        val updated =
+          row.updatedAtEpochMillis?.let { java.time.Instant.ofEpochMilli(it).toString() }
+            ?: "unknown"
+        // The thumbnail is `loading="lazy"` and `decoding="async"` on purpose: a page of twenty
+        // designs is twenty live exports, and none of them is worth blocking the list on. The
+        // `onerror` hides a picture that could not be produced rather than leaving a broken-image
+        // glyph where a design should be — an export can fail for reasons the list already
+        // explains in words underneath.
+        val thumbnail =
+          if (row.previewHref.isBlank())
+            """<span class="cp-design-thumb cp-design-thumb-empty" aria-hidden="true">◇</span>"""
+          else
+            """
+            <a class="cp-design-thumb" href="${esc(row.designHref)}" tabindex="-1" aria-hidden="true">
+              <img src="${esc(row.previewHref)}" alt="" loading="lazy" decoding="async"
+                onerror="this.closest('.cp-design-thumb').classList.add('cp-design-thumb-empty');this.remove();">
+            </a>
+            """
+              .trimIndent()
+        val unavailable =
+          row.unopenableReason
+            ?.let {
+              "\n            <p class=\"cp-grant-withheld\"><strong>This design cannot be opened:</strong> ${esc(it)}</p>"
+            }
+            .orEmpty()
+        val duplicate =
+          if (row.copyAction.isBlank()) ""
+          else
+            """
+            <details class="cp-design-more">
+              <summary>Duplicate</summary>
+              <form class="cp-design-form" method="post" action="${esc(row.copyAction)}">
+                <input type="hidden" name="sourceDesignId" value="${esc(row.designId)}">
+                <label class="cp-grant-ttl"><span>New design id</span><input type="text" name="designId"
+                  value="${esc(row.copySuggestedId)}" pattern="[A-Za-z0-9][A-Za-z0-9._-]*" required></label>
+                <button class="cp-grant-approve" type="submit">Create the copy</button>
+              </form>
+            </details>
+            """
+              .trimIndent()
+        val share =
+          if (row.grants == null) ""
+          else """<a class="cp-action-chip" href="${esc(row.shareAction)}">Share</a>"""
+        // Two deliberate steps, and no `confirm()`: the summary opens a panel that says what is
+        // about to be lost, and the button inside it is the only thing that posts. A one-click
+        // Delete beside Open on a grid of thumbnails is a mis-click away from somebody's week.
+        val delete =
+          if (row.deleteAction.isBlank()) ""
+          else
+            """
+            <details class="cp-design-more cp-design-danger">
+              <summary>Delete</summary>
+              <form class="cp-design-form" method="post" action="${esc(row.deleteAction)}">
+                <p class="cp-grant-fineprint">This removes <code>${esc(row.designId)}</code>, its history,
+                its comments and its access list. It cannot be undone.</p>
+                <button class="cp-grant-deny" type="submit" name="confirm" value="delete">Delete permanently</button>
+              </form>
+            </details>
+            """
+              .trimIndent()
+        val grants =
+          row.grants?.let { owned ->
+            val current =
+              if (owned.isEmpty()) "<p>Shared with nobody else.</p>"
+              else
+                owned.joinToString("\n", prefix = "<p><strong>Shared with:</strong></p>") {
+                  """
+                  <form method="post" action="${esc(row.shareAction)}">
+                    <input type="hidden" name="returnTo" value="designs">
+                    <input type="hidden" name="actorId" value="${esc(it.actorId)}">
+                    <code>${esc(it.actorId)}</code> (${esc(it.role)})
+                    <button class="cp-grant-deny" type="submit" name="action" value="revoke">Remove</button>
+                  </form>
+                  """
+                    .trimIndent()
+                }
+            """
+            <details class="cp-design-more">
+              <summary>Sharing</summary>
               $current
               <form class="cp-grant-form" method="post" action="${esc(row.shareAction)}">
                 <input type="hidden" name="returnTo" value="designs">
@@ -7447,42 +7594,162 @@ ${captureControlsHtml().prependIndent("          ")}
                 <label><input type="radio" name="role" value="editor"> editor</label>
                 <button class="cp-grant-approve" type="submit" name="action" value="share">Share</button>
               </form>
-              """
-                .trimIndent()
-            }
-              ?: "<p>Shared by <code>${esc(row.ownerActorId)}</code>; the owner manages its grants.</p>"
-          val unavailable =
-            row.unopenableReason
-              ?.let {
-                "\n            <p class=\"cp-grant-withheld\"><strong>This design cannot be opened:</strong> ${esc(it)}</p>"
-              }
-              .orEmpty()
-          val title = if (row.title.isBlank()) row.designId else row.title
-          val updated =
-            row.updatedAtEpochMillis?.let { java.time.Instant.ofEpochMilli(it).toString() }
-              ?: "unknown"
-          """
-          <article class="cp-card">
-            <h2><a href="${esc(row.designHref)}">${esc(title)}</a></h2>
-            <p><code>${esc(row.designId)}</code> · ${esc(row.catalogSystemId)} · revision ${row.revision}</p>
-            <p>${esc(row.requesterRole)} · may ${esc(row.requesterAllowed)} · updated ${esc(updated)}</p>$unavailable
+            </details>
+            """
+              .trimIndent()
+          }
+            ?: "<p class=\"cp-design-meta\">Shared by <code>${esc(row.ownerActorId)}</code>; the owner manages its grants.</p>"
+        // Everything the filter box matches on, in one attribute: the title a person remembers, the
+        // id they typed, and the catalog they were working in.
+        val haystack = "${row.title} ${row.designId} ${row.catalogSystemId}".lowercase()
+        """
+        <article class="cp-card cp-design-card" data-cp-design="${esc(haystack)}">
+          $thumbnail
+          <div class="cp-design-body">
+            <h2 class="cp-design-title"><a href="${esc(row.designHref)}">${esc(title)}</a></h2>
+            <p class="cp-design-meta"><code>${esc(row.designId)}</code> · ${esc(row.catalogSystemId)} · revision ${row.revision}</p>
+            <p class="cp-design-meta">${esc(row.requesterRole)} · may ${esc(row.requesterAllowed)} · updated ${esc(updated)}</p>$unavailable
+            <div class="cp-design-actions">
+              <a class="cp-action-chip" href="${esc(row.designHref)}">Open</a>
+              $share
+            </div>
+            $duplicate
             $grants
-          </article>
-          """
-            .trimIndent()
+            $delete
+          </div>
+        </article>
+        """
+          .trimIndent()
+      }
+    val grid =
+      if (rows.isEmpty())
+        """<p class="cp-sub" id="cp-designs-empty">No designs are owned by or shared with this account yet.</p>"""
+      else
+        """
+        <div class="cp-designs-grid">
+        ${cards.prependIndent("        ").trimStart()}
+        </div>
+        <p class="cp-sub" id="cp-designs-none" hidden>No design here matches that.</p>
+        """
+          .trimIndent()
+    val startOptions =
+      catalogs.joinToString("\n") { catalog ->
+        val options =
+          catalog.templates.joinToString("\n") { template ->
+            """<option value="${esc(catalog.systemId)}|${esc(template.id)}">${esc(template.label)}</option>"""
+          }
+        """
+        <optgroup label="${esc(catalog.label)}">
+        ${options.prependIndent("        ").trimStart()}
+        </optgroup>
+        """
+          .trimIndent()
+      }
+    // One control for "what am I making", not two. The catalog and the template are one choice from
+    // the reader's point of view — *a blank Wear screen*, *a Jetcaster page* — and splitting them
+    // across two selects made the second one's contents depend on the first, which is a thing a
+    // page without script cannot do.
+    val newDesign =
+      if (createAction.isBlank() || catalogs.isEmpty()) ""
+      else
+        """
+        <form class="cp-designs-new" method="post" action="${esc(createAction)}">
+          <h2 class="cp-designs-h2">Start a new design</h2>
+          <label class="cp-grant-ttl"><span>Starting point</span>
+            <select name="start">
+            ${startOptions.prependIndent("            ").trimStart()}
+            </select>
+          </label>
+          <label class="cp-grant-ttl"><span>Design id</span><input type="text" name="designId"
+            value="${esc(suggestedDesignId)}" pattern="[A-Za-z0-9][A-Za-z0-9._-]*" required></label>
+          <button class="cp-grant-approve" type="submit">Create</button>
+        </form>
+        """
+          .trimIndent()
+    val copyOptions =
+      rows
+        .filter { it.unopenableReason == null }
+        .joinToString("\n") {
+          val label = if (it.title.isBlank()) it.designId else "${it.title} (${it.designId})"
+          """<option value="${esc(it.designId)}">${esc(label)}</option>"""
         }
+    val fromExample =
+      if (copyAction.isBlank() || copyOptions.isEmpty()) ""
+      else
+        """
+        <form class="cp-designs-new" method="post" action="${esc(copyAction)}">
+          <h2 class="cp-designs-h2">Start from an existing design</h2>
+          <p class="cp-designs-hint">A copy at revision zero, with its own history. The design it was
+          copied from is left exactly as it is.</p>
+          <label class="cp-grant-ttl"><span>Copy</span>
+            <select name="sourceDesignId">
+            ${copyOptions.prependIndent("            ").trimStart()}
+            </select>
+          </label>
+          <label class="cp-grant-ttl"><span>New design id</span><input type="text" name="designId"
+            value="${esc(suggestedDesignId)}" pattern="[A-Za-z0-9][A-Za-z0-9._-]*" required></label>
+          <button class="cp-grant-approve" type="submit">Create the copy</button>
+        </form>
+        """
+          .trimIndent()
+    val create =
+      if (newDesign.isEmpty() && fromExample.isEmpty()) ""
+      else
+        """
+        <section class="cp-designs-create">
+        ${(newDesign + "\n" + fromExample).trim().prependIndent("        ").trimStart()}
+        </section>
+        """
+          .trimIndent()
+    val filter =
+      if (rows.isEmpty()) ""
+      else
+        """
+        <div class="cp-designs-toolbar">
+          <label class="cp-designs-filter"><span class="cp-visually-hidden">Filter designs</span>
+            <input type="search" id="cp-design-filter" placeholder="Filter by name, id or catalog"
+              autocomplete="off"></label>
+          <span class="cp-designs-count" id="cp-design-count">${rows.size} design${if (rows.size == 1) "" else "s"}</span>
+        </div>
+        <script>
+        (function () {
+          var box = document.getElementById("cp-design-filter");
+          var count = document.getElementById("cp-design-count");
+          var none = document.getElementById("cp-designs-none");
+          if (!box) return;
+          var cards = Array.prototype.slice.call(document.querySelectorAll(".cp-design-card"));
+          box.addEventListener("input", function () {
+            var q = box.value.trim().toLowerCase();
+            var shown = 0;
+            cards.forEach(function (card) {
+              var hit = q === "" || (card.getAttribute("data-cp-design") || "").indexOf(q) >= 0;
+              card.hidden = !hit;
+              if (hit) shown += 1;
+            });
+            if (count) count.textContent = shown + (shown === 1 ? " design" : " designs");
+            if (none) none.hidden = shown !== 0;
+          });
+        })();
+        </script>
+        """
+          .trimIndent()
     return document(
-      title = "My designs — compose-preview",
+      title = "Designs — compose-preview",
       unfurlDescription = "UI-builder designs owned by or shared with this account.",
       version = version,
       navSuffix = navSuffix,
       siteName = siteName,
       themeCss = themeCss,
+      wide = true,
       body =
         """
-        <h1 class="cp-head">My designs</h1>
-        <p class="cp-sub">Only designs this server permits <code>${esc(viewerActorId)}</code> to read are shown.</p>
-        $body
+        <h1 class="cp-head">Designs</h1>
+        <p class="cp-sub">Every design this server permits <code>${esc(viewerActorId)}</code> to open,
+        newest first. Open one to carry on with it, duplicate one to start from it.</p>
+        $noticeHtml
+        $create
+        $filter
+        $grid
         <a class="cp-back" href="/ui-builder/$navSuffix">← UI builder</a>
         """
           .trimIndent(),
@@ -17772,6 +18039,8 @@ ${scriptTag("known-differences.js")}
      * already home) renders nothing.
      */
     headerBreadcrumb: String = "",
+    /** The UI builder's Designs index, linked from the header's nav panel. See [siteHeader]. */
+    headerDesignsHref: String = "",
     /**
      * Running server version (the CLI's `SERVE_VERSION`), shown in the minimal [siteFooter] every
      * page ends with. Null omits just the build span; the fixture goldens pass a fixed string so a
@@ -17993,7 +18262,7 @@ ${ServeSiteIcon.linkTags().prependIndent("        ")}
       </head>
       <body${bodyClassAttr}>
         ${scriptTag("serve-chrome.js")}
-        ${siteHeader(navSuffix, headerAction, headerBreadcrumb, siteName, componentBrowser, interfaceModeControl, themeStorageKey.isNotBlank() && interfaceModeControl, headerSessionSettings, headerSearch)}
+        ${siteHeader(navSuffix, headerAction, headerBreadcrumb, siteName, componentBrowser, interfaceModeControl, themeStorageKey.isNotBlank() && interfaceModeControl, headerSessionSettings, headerSearch, headerDesignsHref)}
         <main class="cp-main">
         $body
         </main>$footerBlock$launcherBlock$interfaceModeControls
