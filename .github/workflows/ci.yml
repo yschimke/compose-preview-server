@@ -65,6 +65,11 @@ jobs:
           persist-credentials: false
       - name: Check tools-owned parser vendor
         run: python3 .github/scripts/check-usage-source-psi-vendor.py
+      # The design-render lane's manifest and its sticky comment. Pure stdlib and no image is
+      # opened — a design render is compared by the sha256 the manifest carries — so this belongs
+      # in the job that needs no JDK rather than in `gradle`.
+      - name: Design render lane tests
+        run: python3 .github/scripts/test_design_renders.py
       - run: python3 scripts/local-dependencies/test_stage.py
       # The catalog names, which shrink to nothing over phases 4 and 5. Scoped to `:server` now;
       # the builder modules' half of the rule went with them.
