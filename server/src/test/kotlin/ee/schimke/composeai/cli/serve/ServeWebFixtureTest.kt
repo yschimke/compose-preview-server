@@ -3602,6 +3602,11 @@ class ServeWebFixtureTest {
                   )
                 ),
               unopenableReason = null,
+              previewHref =
+                "/api/ui-builder/v1/designs/morning-player/export.svg?token=fixture-token",
+              copyAction = "/ui-builder/designs/copy?token=fixture-token",
+              copySuggestedId = "shady-raccoon",
+              deleteAction = "/ui-builder/morning-player/delete?token=fixture-token",
             ),
             ServeWeb.UiBuilderDesignRow(
               designId = "archived-dashboard",
@@ -3619,6 +3624,26 @@ class ServeWebFixtureTest {
             ),
           ),
         viewerActorId = "github:octocat",
+        createAction = "/ui-builder/designs?token=fixture-token",
+        copyAction = "/ui-builder/designs/copy?token=fixture-token",
+        catalogs =
+          listOf(
+            ServeWeb.UiBuilderNewDesignOption(
+              systemId = "m3-catalog",
+              label = "m3-catalog",
+              templates =
+                listOf(
+                  ServeWeb.UiBuilderNewDesignTemplate("blank", "Blank"),
+                  ServeWeb.UiBuilderNewDesignTemplate("jetcaster", "Jetcaster"),
+                ),
+            ),
+            ServeWeb.UiBuilderNewDesignOption(
+              systemId = "wear-m3",
+              label = "wear-m3",
+              templates = listOf(ServeWeb.UiBuilderNewDesignTemplate("wear-screen", "Wear screen")),
+            ),
+          ),
+        suggestedDesignId = "cheeky-raccoon",
         navSuffix = "?token=fixture-token",
         version = version,
       )

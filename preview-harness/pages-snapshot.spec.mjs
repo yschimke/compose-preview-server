@@ -128,6 +128,10 @@ const IMAGE_LANES = [
   // rather than the component placeholder, because a specimen sheet is wider than it is tall and
   // the card crops to the top of it.
   "**/pages/*.svg**",
+  // The designs index's thumbnails, which are the live export served as an ordinary image. They
+  // have no backend here, and without a stub the page's own `onerror` would draw the placeholder
+  // mark in every well — a deterministic capture of the failure path rather than of the grid.
+  "**/api/ui-builder/v1/designs/**/export.svg**",
 ];
 const REFERENCE_PLACEHOLDER = `
 <svg xmlns="http://www.w3.org/2000/svg" width="200" height="420" viewBox="0 0 200 420">
@@ -169,6 +173,23 @@ const PAGE_PLACEHOLDER = `
 // the same picture as our own stand-in: the whole point of the source is that the two catalogs
 // differ, and a stub identical to ours would capture a lane that looks like a no-op and score 0.0%
 // in every slot, which is the one thing this comparison must never say by accident.
+// A design's own export, as the designs index draws it: a phone-shaped screen rather than a
+// component on a canvas, because the well crops to `object-fit: contain` and what that has to prove
+// is that a tall design and a wide one sit on the same row without either being stretched.
+const DESIGN_EXPORT_PLACEHOLDER = `
+<svg xmlns="http://www.w3.org/2000/svg" width="200" height="420" viewBox="0 0 200 420">
+  <rect width="200" height="420" fill="#fffbff"/>
+  <rect x="0" y="0" width="200" height="56" fill="#6750A4"/>
+  <rect x="16" y="20" width="96" height="16" rx="8" fill="#ffffff"/>
+  <rect x="16" y="80" width="168" height="110" rx="16" fill="#e8def8"/>
+  <circle cx="52" cy="135" r="26" fill="#6750A4"/>
+  <rect x="90" y="120" width="78" height="12" rx="6" fill="#4a4458"/>
+  <rect x="90" y="142" width="54" height="10" rx="5" fill="#79747e"/>
+  <rect x="16" y="210" width="168" height="64" rx="16" fill="#f3edf7"/>
+  <rect x="16" y="288" width="168" height="64" rx="16" fill="#f3edf7"/>
+  <rect x="56" y="378" width="88" height="28" rx="14" fill="#6750A4"/>
+</svg>`;
+
 const SIBLING_RENDER_PLACEHOLDER = `
 <svg xmlns="http://www.w3.org/2000/svg" width="200" height="200" viewBox="0 0 200 200">
   <rect width="200" height="200" fill="#ffffff"/>
@@ -377,6 +398,10 @@ const STYLED_FIXTURES = new Set([
   // `/admin/ui-builder/designs`, so it needs the stylesheet for the table and the delete button.
   "serve-admin-ui-builder",
   "serve-admin-ui-builder-read",
+  // The person's own designs index. Its whole claim is a GRID of thumbnails — a design recognised
+  // by what it looks like rather than by its id — and captured bare that is a column of links with
+  // no cards, no wells and no crop, so a change to any of it would move no baseline at all.
+  "serve-ui-builder-designs",
   "serve-component-browser-home",
   "serve-component-browser-catalog",
   "serve-component-browser-component",
@@ -4136,6 +4161,12 @@ for (const fixture of listPageFixtures()) {
           if (lane.includes("pages")) {
             return route.fulfill({
               body: PAGE_PLACEHOLDER,
+              contentType: "image/svg+xml",
+            });
+          }
+          if (lane.includes("export.svg")) {
+            return route.fulfill({
+              body: DESIGN_EXPORT_PLACEHOLDER,
               contentType: "image/svg+xml",
             });
           }

@@ -23,6 +23,7 @@ import ee.schimke.composeai.discovery.ComponentRecordFile
 import ee.schimke.composeai.imagecrop.ContentCrop
 import ee.schimke.composeai.remotecompose.json.RemoteComposeJson
 import ee.schimke.composeai.remotecompose.json.RemoteComposeJsonException
+import ee.schimke.composeai.uibuilder.NewDesignNames
 import ee.schimke.composeai.uibuilder.UiBuilderNewDesignSeed
 import ee.schimke.composeai.uibuilder.decodeNewDesignStates
 import ee.schimke.composeai.uibuilder.protocol.DesignAccessActionV1
@@ -39,8 +40,10 @@ import ee.schimke.composeai.uibuilder.service.AuthenticatedUiBuilderActor
 import ee.schimke.composeai.uibuilder.service.ProtocolRequestMapping
 import ee.schimke.composeai.uibuilder.service.UiBuilderAssetPort
 import ee.schimke.composeai.uibuilder.service.UiBuilderProtocolMapper
+import ee.schimke.composeai.uibuilder.service.UiBuilderServiceCall
 import ee.schimke.composeai.uibuilder.service.UiBuilderServiceDiagnosticsSource
 import ee.schimke.composeai.uibuilder.service.UiBuilderServicePort
+import ee.schimke.composeai.uibuilder.service.UiBuilderServiceRequest
 import ee.schimke.composeai.uibuilder.service.UiBuilderServiceResponse
 import ee.schimke.composeai.web.WebEscaping
 import io.ktor.http.ContentType
@@ -1283,6 +1286,10 @@ class ServeHttpServer(
         // the `303` itself and lands on a URL that is safe to reload, bookmark and share — which
         // is the whole reason creation is not a navigation to a `?create=1` URL any more.
         post("/ui-builder/designs") { handleUiBuilderCreate() }
+        // Starting from a design that already exists rather than from a template. Registered
+        // before the compatibility route below, whose `{catalog}` would otherwise swallow
+        // `designs` — it is two segments, so nothing about the old form's target changes.
+        post("/ui-builder/designs/copy") { handleUiBuilderCopy() }
         // Compatibility for creation forms emitted by older builder bundles.
         post("/ui-builder/{catalog}") { handleUiBuilderCreate() }
         // Sharing one design, as a page rather than a hand-written protocol POST. Registered
@@ -1290,6 +1297,9 @@ class ServeHttpServer(
         // editor shell is still what every other path under a design serves.
         get("/ui-builder/{designId}/access") { handleUiBuilderAccess() }
         post("/ui-builder/{designId}/access") { handleUiBuilderAccessUpdate() }
+        // Removing one's own design, which until now only an operator's token or an MCP tool
+        // could do. Owner-only, and it is the service that says so.
+        post("/ui-builder/{designId}/delete") { handleUiBuilderDelete() }
         // Compatibility for bookmarks emitted before the catalog became document-only state.
         get("/ui-builder/{catalog}/{designId}/access") { handleUiBuilderAccess() }
         post("/ui-builder/{catalog}/{designId}/access") { handleUiBuilderAccessUpdate() }
@@ -13183,7 +13193,13 @@ class ServeHttpServer(
       return
     }
     val form = call.receiveParameters()
-    val catalog = form["catalog"]?.trim().orEmpty().ifEmpty { call.parameters["catalog"].orEmpty() }
+    // `start` is one control carrying both halves of one choice — *a blank Wear screen* — because
+    // the Designs page has no script with which to repopulate a second `<select>` when the first
+    // one changes. `catalog` and `template` remain exactly as they were for every other caller.
+    val start = form["start"].orEmpty().trim().takeIf { it.contains('|') }
+    val catalog =
+      start?.substringBefore('|')
+        ?: form["catalog"]?.trim().orEmpty().ifEmpty { call.parameters["catalog"].orEmpty() }
     if (catalog !in uiBuilderCatalogs) {
       call.respondText("not found", status = HttpStatusCode.NotFound)
       return
@@ -13226,7 +13242,9 @@ class ServeHttpServer(
       return
     }
     val template =
-      form["template"]?.takeIf { it.isNotBlank() } ?: UiBuilderNewDesignSeed.DEFAULT_TEMPLATE
+      start?.substringAfter('|')?.takeIf { it.isNotBlank() }
+        ?: form["template"]?.takeIf { it.isNotBlank() }
+        ?: UiBuilderNewDesignSeed.DEFAULT_TEMPLATE
     if (template !in UiBuilderNewDesignSeed.templateIds(catalog)) {
       call.respondText(
         "$template is not a template $catalog can start from",
@@ -13269,6 +13287,174 @@ class ServeHttpServer(
       }
       is ServeUiBuilderCreate.Outcome.Refused ->
         call.respondText(outcome.reason, status = HttpStatusCode.fromValue(outcome.status))
+    }
+  }
+
+  /**
+   * `POST /ui-builder/designs/copy` — start from a design that already exists, then `303` to the
+   * copy's permalink.
+   *
+   * The starting point most designs actually have is another design, and until this route the only
+   * way to take one was to rebuild it node by node: the New design form seeds from a template, and
+   * nothing at all seeded from a design. What the copy is, precisely, is the source's *current
+   * committed document* installed under a new id at revision zero — its own history, its own access
+   * list, its own comments. The source is opened, never written: a copy is a read of one design and
+   * a create of another.
+   *
+   * The source is read **as the caller**, so this grants nothing: a design this actor may not open
+   * cannot be copied here any more than it can be opened, and the refusal is the service's own.
+   * Installing goes through [ServeUiBuilderCreate.install], which is the same path a published
+   * library design is opened by — so an id that is taken is left alone rather than overwritten, and
+   * a catalog this host does not author is refused before anything is stored.
+   */
+  private suspend fun RoutingContext.handleUiBuilderCopy() {
+    val dir = uiBuilderDir
+    val service = uiBuilderService
+    val authorization = uiBuilderAuthorization
+    if (dir == null || service == null || authorization == null) {
+      call.respondText("not found", status = HttpStatusCode.NotFound)
+      return
+    }
+    if (!isSameOriginFormSubmission()) {
+      call.respondText("cross-site design creation is refused", status = HttpStatusCode.Forbidden)
+      return
+    }
+    val actor = authorizeUiBuilderPage(authorization, UiBuilderRouteCapability.WRITE) ?: return
+    val form = call.receiveParameters()
+    val sourceDesignId = form["sourceDesignId"].orEmpty().trim()
+    val designId = form["designId"].orEmpty().trim()
+    if (!isUiBuilderDesignSegment(sourceDesignId) || !isUiBuilderDesignSegment(designId)) {
+      call.respondText(
+        "a design id must start with a letter or number and use only path-safe characters",
+        status = HttpStatusCode.BadRequest,
+      )
+      return
+    }
+    if (sourceDesignId == designId) {
+      call.respondText(
+        "a copy needs an id of its own",
+        status = HttpStatusCode.BadRequest,
+      )
+      return
+    }
+    val source =
+      when (val opened = service.executeMapped(OpenDesignRequestV1(sourceDesignId), actor)) {
+        is UiBuilderServiceResponse.Snapshot -> opened.snapshot.state.document
+        is UiBuilderServiceResponse.Error -> {
+          call.respondText(
+            opened.error.message,
+            status = HttpStatusCode.fromValue(opened.httpStatusValue()),
+          )
+          return
+        }
+        else -> {
+          call.respondText(
+            "the design service did not answer with a document",
+            status = HttpStatusCode.InternalServerError,
+          )
+          return
+        }
+      }
+    // A new design, not a second copy of the old one's identity: revision zero because nothing has
+    // been done to it here, and the timestamps cleared because this document was created now. The
+    // title says where it came from, so a grid of thumbnails does not grow two identical captions.
+    val copy =
+      source.copy(
+        id = designId,
+        revision = 0,
+        title =
+          form["title"]?.trim()?.takeIf { it.isNotBlank() }
+            ?: "${source.title.ifBlank { sourceDesignId }} copy",
+        createdAtEpochMillis = null,
+        updatedAtEpochMillis = null,
+      )
+    val outcome =
+      withContext(Dispatchers.IO) { ServeUiBuilderCreate(service, dir).install(actor, copy) }
+    when (outcome) {
+      is ServeUiBuilderCreate.Outcome.Created,
+      is ServeUiBuilderCreate.Outcome.AlreadyExists -> {
+        call.response.headers.append(
+          HttpHeaders.Location,
+          uiBuilderPermalink(designId, call.request.queryParameters),
+        )
+        call.respond(HttpStatusCode.SeeOther)
+      }
+      is ServeUiBuilderCreate.Outcome.Refused ->
+        call.respondText(outcome.reason, status = HttpStatusCode.fromValue(outcome.status))
+    }
+  }
+
+  /**
+   * `POST /ui-builder/{designId}/delete` — remove one design, then `303` back to the index.
+   *
+   * Deleting a design used to be the operator's move alone: `DELETE /admin/ui-builder/designs/{id}`
+   * behind the admin token, which meant a person could fill a host with their own experiments and
+   * had no way to clear one away. The service has always had the owner-scoped answer
+   * ([UiBuilderServiceRequest.DeleteDesign], owner only, not a grantee however wide its grant) and
+   * only the MCP tools could reach it. This is that request, reached from the page the designs are
+   * listed on.
+   *
+   * The sidecars go with it, exactly as the admin path and the MCP tool sweep them: an overlay, a
+   * comment board or a links record left behind is inherited by whatever takes the id next. A
+   * failure there is logged rather than reported — the design is already gone, and telling the
+   * caller otherwise invites a retry of something that cannot be retried.
+   *
+   * `confirm=delete` is required, because the body is the only thing standing between a stray
+   * re-POST of a form and somebody's work; the page asks for it behind a disclosure that says what
+   * is about to be lost.
+   */
+  private suspend fun RoutingContext.handleUiBuilderDelete() {
+    if (!isSameOriginFormSubmission()) {
+      call.respondText("cross-site deletion is refused", status = HttpStatusCode.Forbidden)
+      return
+    }
+    val (actor, designId) = uiBuilderAccessTarget(UiBuilderRouteCapability.WRITE) ?: return
+    val service = uiBuilderService ?: return
+    if (call.receiveParameters()["confirm"] != "delete") {
+      call.respondText("deletion was not confirmed", status = HttpStatusCode.BadRequest)
+      return
+    }
+    val response =
+      service.execute(UiBuilderServiceCall(actor, UiBuilderServiceRequest.DeleteDesign(designId)))
+    when (response) {
+      is UiBuilderServiceResponse.DesignDeleted -> {
+        withContext(Dispatchers.IO) {
+          runCatching { uiBuilderReferenceStore?.delete(designId) }
+            .onFailure {
+              System.err.println(
+                "serve: reference overlay for $designId not removed (${it.message})"
+              )
+            }
+          runCatching { uiBuilderCommentStore?.delete(designId) }
+            .onFailure {
+              System.err.println("serve: comment board for $designId not removed (${it.message})")
+            }
+          runCatching {
+            if (uiBuilderLinksStore?.delete(designId) == LinksDeleteResult.FAILED) {
+              System.err.println("serve: links record for $designId not removed")
+            }
+          }
+            .onFailure {
+              System.err.println("serve: links record for $designId not removed (${it.message})")
+            }
+        }
+        call.response.headers.append(
+          HttpHeaders.Location,
+          "/ui-builder/designs${agentGrantTokenQuery()}",
+        )
+        call.respond(HttpStatusCode.SeeOther)
+      }
+      is UiBuilderServiceResponse.Error ->
+        respondUiBuilderDenied(
+          HttpStatusCode.fromValue(response.httpStatusValue()),
+          response.error.message,
+          response.error.message,
+        )
+      else ->
+        call.respondText(
+          "the design service answered a delete with something else",
+          status = HttpStatusCode.InternalServerError,
+        )
     }
   }
 
@@ -13334,6 +13520,15 @@ class ServeHttpServer(
       }
     } while (cursor != null)
 
+    val tokenQuery = agentGrantTokenQuery()
+    // Whether this reader may create at all, asked once: the create and copy forms and every
+    // Duplicate control on the page are the same capability, and offering a form the POST would
+    // refuse is worse than not offering it.
+    val mayCreate =
+      authorization.authorize(call, UiBuilderRouteCapability.WRITE) is
+        UiBuilderAuthorizationDecision.Authorized
+    val createAction = if (mayCreate) "/ui-builder/designs$tokenQuery" else ""
+    val copyAction = if (mayCreate) "/ui-builder/designs/copy$tokenQuery" else ""
     val rows = listed.map { item ->
       val openFailure =
         (service.executeMapped(OpenDesignRequestV1(item.designId), actor)
@@ -13372,15 +13567,38 @@ class ServeHttpServer(
             )
           },
         unopenableReason = openFailure,
+        // No thumbnail for a design that could not be opened: the export would answer with the
+        // same refusal the card already prints in words, and an `<img>` cannot say it.
+        previewHref =
+          if (openFailure != null) ""
+          else
+            "/api/ui-builder/v1/designs/" +
+              WebEscaping.urlEncodeSegment(item.designId) +
+              "/export.svg$tokenQuery",
+        copyAction = if (openFailure == null) copyAction else "",
+        copySuggestedId = NewDesignNames.random(),
+        // Owner-only, and it is the service that decides so — `DeleteDesign` refuses anybody else,
+        // however wide their grant. The page asks the same question the request would.
+        deleteAction =
+          if (item.requesterAccess.role == DesignAccessRoleV1.OWNER)
+            "/ui-builder/${WebEscaping.urlEncodeSegment(item.designId)}/delete$tokenQuery"
+          else "",
       )
     }
     val skin = call.siteSkin()
     markGeneration("static-page", "no-store")
     call.respondText(
       ServeWeb.uiBuilderDesignsPage(
-        rows = rows,
+        // Newest first. A file manager's default order is "what I was last working on", and this
+        // list was oldest-first, which put the design you just made at the bottom of the page.
+        rows = rows.sortedByDescending { it.updatedAtEpochMillis ?: 0L },
         viewerActorId = actor.actorId,
-        navSuffix = agentGrantTokenQuery(),
+        createAction = createAction,
+        copyAction = copyAction,
+        catalogs = if (mayCreate) uiBuilderNewDesignOptions() else emptyList(),
+        suggestedDesignId = NewDesignNames.random(),
+        notice = call.request.queryParameters["notice"].orEmpty().take(200),
+        navSuffix = tokenQuery,
         version = SERVE_VERSION,
         siteName = skin.first,
         themeCss = skin.second,
@@ -13388,6 +13606,28 @@ class ServeHttpServer(
       ContentType.Text.Html,
     )
   }
+
+  /**
+   * The catalogs the New design form offers, and the starting points each one seeds.
+   *
+   * Read from [UiBuilderNewDesignSeed] rather than restated, so the form cannot offer a template
+   * the create route would then refuse; the labels are this surface's own, because the seed names
+   * ids and a person picks a thing.
+   */
+  private fun uiBuilderNewDesignOptions(): List<ServeWeb.UiBuilderNewDesignOption> =
+    uiBuilderCatalogs.sorted().map { catalog ->
+      ServeWeb.UiBuilderNewDesignOption(
+        systemId = catalog,
+        label = catalog,
+        templates =
+          UiBuilderNewDesignSeed.templateIds(catalog).sorted().map { template ->
+            ServeWeb.UiBuilderNewDesignTemplate(
+              id = template,
+              label = template.replace('-', ' ').replaceFirstChar { it.uppercase() },
+            )
+          },
+      )
+    }
 
   /**
    * `POST /ui-builder/{designId}/access` — share it, or take the sharing back.
@@ -13584,6 +13824,7 @@ class ServeHttpServer(
           },
         viewerActorId = actor.actorId,
         notice = notice,
+        designsHref = "/ui-builder/designs${agentGrantTokenQuery()}",
         navSuffix = agentGrantTokenQuery(),
         version = SERVE_VERSION,
         siteName = skin.first,

@@ -3,7 +3,7 @@
       <head>
         <meta charset="utf-8">
         <meta name="viewport" content="width=device-width, initial-scale=1">
-        <title>My designs — compose-preview</title>
+        <title>Designs — compose-preview</title>
         <link rel="icon" href="/favicon.svg" type="image/svg+xml">
         <link rel="icon" href="/favicon.ico" sizes="32x32">
         <link rel="apple-touch-icon" href="/apple-touch-icon.png">
@@ -13,7 +13,7 @@
         <script>try{var b=new URLSearchParams(location.search).get("bg");if(b?b==="off":localStorage.getItem("cp-bg")==="off")document.documentElement.classList.add("cp-bg-transparent");}catch(e){}</script>
         <script>try{var p=new URLSearchParams(location.search),t=localStorage.getItem("cp-page-theme")==="system"?"":(p.get("theme")||(p.get("themeProvider")?"theme:"+p.get("themeProvider"):"")||p.get("uiMode"));if(t==="light"||t==="dark")document.documentElement.classList.add("cp-scheme-"+t);}catch(e){}</script>
       </head>
-      <body>
+      <body class="cp-wide">
         <script src="/assets/serve/fixture/serve-chrome.js"></script>
         <header class="cp-site-header">
   <div class="cp-site-lead">
@@ -53,13 +53,94 @@
   </nav>
 </header>
         <main class="cp-main">
-                <h1 class="cp-head">My designs</h1>
-        <p class="cp-sub">Only designs this server permits <code>github:octocat</code> to read are shown.</p>
-                  <article class="cp-card">
-            <h2><a href="/ui-builder/morning-player?token=fixture-token">Morning player</a></h2>
-            <p><code>morning-player</code> · wear-m3-catalog · revision 12</p>
-            <p>owner · may read, write, export, manage_access, delete · updated 2026-01-12T10:40:00Z</p>
-                          <p><strong>Shared with:</strong></p><form method="post" action="/ui-builder/morning-player/access?token=fixture-token">
+                <h1 class="cp-head">Designs</h1>
+        <p class="cp-sub">Every design this server permits <code>github:octocat</code> to open,
+        newest first. Open one to carry on with it, duplicate one to start from it.</p>
+        
+        <section class="cp-designs-create">
+<form class="cp-designs-new" method="post" action="/ui-builder/designs?token=fixture-token">
+  <h2 class="cp-designs-h2">Start a new design</h2>
+  <label class="cp-grant-ttl"><span>Starting point</span>
+    <select name="start">
+    <optgroup label="m3-catalog">
+    <option value="m3-catalog|blank">Blank</option>
+    <option value="m3-catalog|jetcaster">Jetcaster</option>
+    </optgroup>
+    <optgroup label="wear-m3">
+    <option value="wear-m3|wear-screen">Wear screen</option>
+    </optgroup>
+    </select>
+  </label>
+  <label class="cp-grant-ttl"><span>Design id</span><input type="text" name="designId"
+    value="cheeky-raccoon" pattern="[A-Za-z0-9][A-Za-z0-9._-]*" required></label>
+  <button class="cp-grant-approve" type="submit">Create</button>
+</form>
+<form class="cp-designs-new" method="post" action="/ui-builder/designs/copy?token=fixture-token">
+  <h2 class="cp-designs-h2">Start from an existing design</h2>
+  <p class="cp-designs-hint">A copy at revision zero, with its own history. The design it was
+  copied from is left exactly as it is.</p>
+  <label class="cp-grant-ttl"><span>Copy</span>
+    <select name="sourceDesignId">
+    <option value="morning-player">Morning player (morning-player)</option>
+    </select>
+  </label>
+  <label class="cp-grant-ttl"><span>New design id</span><input type="text" name="designId"
+    value="cheeky-raccoon" pattern="[A-Za-z0-9][A-Za-z0-9._-]*" required></label>
+  <button class="cp-grant-approve" type="submit">Create the copy</button>
+</form>
+</section>
+        <div class="cp-designs-toolbar">
+  <label class="cp-designs-filter"><span class="cp-visually-hidden">Filter designs</span>
+    <input type="search" id="cp-design-filter" placeholder="Filter by name, id or catalog"
+      autocomplete="off"></label>
+  <span class="cp-designs-count" id="cp-design-count">2 designs</span>
+</div>
+<script>
+(function () {
+  var box = document.getElementById("cp-design-filter");
+  var count = document.getElementById("cp-design-count");
+  var none = document.getElementById("cp-designs-none");
+  if (!box) return;
+  var cards = Array.prototype.slice.call(document.querySelectorAll(".cp-design-card"));
+  box.addEventListener("input", function () {
+    var q = box.value.trim().toLowerCase();
+    var shown = 0;
+    cards.forEach(function (card) {
+      var hit = q === "" || (card.getAttribute("data-cp-design") || "").indexOf(q) >= 0;
+      card.hidden = !hit;
+      if (hit) shown += 1;
+    });
+    if (count) count.textContent = shown + (shown === 1 ? " design" : " designs");
+    if (none) none.hidden = shown !== 0;
+  });
+})();
+</script>
+        <div class="cp-designs-grid">
+<article class="cp-card cp-design-card" data-cp-design="morning player morning-player wear-m3-catalog">
+          <a class="cp-design-thumb" href="/ui-builder/morning-player?token=fixture-token" tabindex="-1" aria-hidden="true">
+  <img src="/api/ui-builder/v1/designs/morning-player/export.svg?token=fixture-token" alt="" loading="lazy" decoding="async"
+    onerror="this.closest('.cp-design-thumb').classList.add('cp-design-thumb-empty');this.remove();">
+</a>
+          <div class="cp-design-body">
+            <h2 class="cp-design-title"><a href="/ui-builder/morning-player?token=fixture-token">Morning player</a></h2>
+            <p class="cp-design-meta"><code>morning-player</code> · wear-m3-catalog · revision 12</p>
+            <p class="cp-design-meta">owner · may read, write, export, manage_access, delete · updated 2026-01-12T10:40:00Z</p>
+            <div class="cp-design-actions">
+              <a class="cp-action-chip" href="/ui-builder/morning-player?token=fixture-token">Open</a>
+              <a class="cp-action-chip" href="/ui-builder/morning-player/access?token=fixture-token">Share</a>
+            </div>
+            <details class="cp-design-more">
+  <summary>Duplicate</summary>
+  <form class="cp-design-form" method="post" action="/ui-builder/designs/copy?token=fixture-token">
+    <input type="hidden" name="sourceDesignId" value="morning-player">
+    <label class="cp-grant-ttl"><span>New design id</span><input type="text" name="designId"
+      value="shady-raccoon" pattern="[A-Za-z0-9][A-Za-z0-9._-]*" required></label>
+    <button class="cp-grant-approve" type="submit">Create the copy</button>
+  </form>
+</details>
+                        <details class="cp-design-more">
+              <summary>Sharing</summary>
+              <p><strong>Shared with:</strong></p><form method="post" action="/ui-builder/morning-player/access?token=fixture-token">
   <input type="hidden" name="returnTo" value="designs">
   <input type="hidden" name="actorId" value="github:colleague">
   <code>github:colleague</code> (editor)
@@ -72,14 +153,35 @@
                 <label><input type="radio" name="role" value="editor"> editor</label>
                 <button class="cp-grant-approve" type="submit" name="action" value="share">Share</button>
               </form>
-          </article>
-<article class="cp-card">
-  <h2><a href="/ui-builder/archived-dashboard?token=fixture-token">Archived dashboard</a></h2>
-  <p><code>archived-dashboard</code> · m3-catalog · revision 7</p>
-  <p>viewer · may read, export · updated 2026-01-09T10:40:00Z</p>
-  <p class="cp-grant-withheld"><strong>This design cannot be opened:</strong> catalog unavailable for stored design archived-dashboard</p>
-  <p>Shared by <code>github:designer</code>; the owner manages its grants.</p>
+            </details>
+            <details class="cp-design-more cp-design-danger">
+  <summary>Delete</summary>
+  <form class="cp-design-form" method="post" action="/ui-builder/morning-player/delete?token=fixture-token">
+    <p class="cp-grant-fineprint">This removes <code>morning-player</code>, its history,
+    its comments and its access list. It cannot be undone.</p>
+    <button class="cp-grant-deny" type="submit" name="confirm" value="delete">Delete permanently</button>
+  </form>
+</details>
+          </div>
+        </article>
+<article class="cp-card cp-design-card" data-cp-design="archived dashboard archived-dashboard m3-catalog">
+  <span class="cp-design-thumb cp-design-thumb-empty" aria-hidden="true">◇</span>
+  <div class="cp-design-body">
+    <h2 class="cp-design-title"><a href="/ui-builder/archived-dashboard?token=fixture-token">Archived dashboard</a></h2>
+    <p class="cp-design-meta"><code>archived-dashboard</code> · m3-catalog · revision 7</p>
+    <p class="cp-design-meta">viewer · may read, export · updated 2026-01-09T10:40:00Z</p>
+    <p class="cp-grant-withheld"><strong>This design cannot be opened:</strong> catalog unavailable for stored design archived-dashboard</p>
+    <div class="cp-design-actions">
+      <a class="cp-action-chip" href="/ui-builder/archived-dashboard?token=fixture-token">Open</a>
+
+    </div>
+
+    <p class="cp-design-meta">Shared by <code>github:designer</code>; the owner manages its grants.</p>
+
+  </div>
 </article>
+</div>
+<p class="cp-sub" id="cp-designs-none" hidden>No design here matches that.</p>
         <a class="cp-back" href="/ui-builder/?token=fixture-token">← UI builder</a>
         </main>
         <footer class="cp-site-footer">
