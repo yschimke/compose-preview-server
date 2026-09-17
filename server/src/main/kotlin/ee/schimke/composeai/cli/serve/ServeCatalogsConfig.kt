@@ -123,10 +123,22 @@ data class ServeCatalogsConfig(
      *
      * It does **not** change what is served, or where a card renders — only what gets fetched
      * first. Nothing here is a guarantee of availability either: loading stays best-effort per
-     * catalog, and a prioritised catalog that fails to fetch just fails earlier.
+     * catalog, and a prioritised catalog that fails to fetch just fails earlier. The one exception
+     * is [isDesignSystem], which is a guarantee — see [DESIGN_SYSTEMS_GROUP].
      */
     val loadPriority: Int = 0,
-  )
+  ) {
+    /**
+     * This entry claims [DESIGN_SYSTEMS_GROUP]: fetched ahead of everything else, and required to
+     * render before the server reports ready.
+     *
+     * Read off the claimed [group] id rather than the resolved [Group], and deliberately so: a
+     * claim the group table does not define is still a claim, and resolving first would make an
+     * entry silently stop gating readiness the moment someone deleted its group heading.
+     */
+    val isDesignSystem: Boolean
+      get() = group == DESIGN_SYSTEMS_GROUP
+  }
 
   /**
    * One top-level site: a [host] that serves [system] at its root. The system must be one of this
@@ -187,6 +199,20 @@ data class ServeCatalogsConfig(
   companion object {
     /** The count noun a section uses when its group declares none. */
     const val DEFAULT_NOUN: String = "catalog(s)"
+
+    /**
+     * The [Group.id] whose catalogs this box exists to serve.
+     *
+     * Two things key off it, and they are deliberately the same list. These catalogs are fetched
+     * FIRST ([CatalogLoadTracker.loadOrder]), and the server is not READY until every one of them
+     * has rendered ([CatalogLoadTracker.Config.designSystem]) — so a rolling update never drains
+     * traffic onto a replica that would answer a design system's page with an empty grid.
+     *
+     * A group id rather than a hard-coded set of systems: which catalogs are design systems is the
+     * operator's statement in `catalogs.json`, and a list in Kotlin would be a second copy of it
+     * that goes stale the first time one is added.
+     */
+    const val DESIGN_SYSTEMS_GROUP: String = "design-systems"
 
     val EMPTY: ServeCatalogsConfig = ServeCatalogsConfig()
 

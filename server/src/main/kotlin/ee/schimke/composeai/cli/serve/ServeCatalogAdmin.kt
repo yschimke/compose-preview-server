@@ -152,7 +152,8 @@ class ServeCatalogAdmin(
         current.group == resolved &&
           current.listed == entry.listed &&
           current.loadPriority == entry.loadPriority &&
-          current.importedFrom == entry.importedFrom
+          current.importedFrom == entry.importedFrom &&
+          current.designSystem == entry.isDesignSystem
       ) {
         continue
       }
@@ -163,6 +164,7 @@ class ServeCatalogAdmin(
           group = resolved,
           loadPriority = entry.loadPriority,
           importedFrom = entry.importedFrom,
+          designSystem = entry.isDesignSystem,
         )
       ) {
         changed++
@@ -243,6 +245,7 @@ class ServeCatalogAdmin(
                 group = resolved,
                 loadPriority = entry.loadPriority,
                 importedFrom = entry.importedFrom,
+                designSystem = entry.isDesignSystem,
               )
             }
             loadFailure
@@ -300,6 +303,7 @@ class ServeCatalogAdmin(
         group = resolved,
         loadPriority = entry.loadPriority,
         importedFrom = entry.importedFrom,
+        designSystem = entry.isDesignSystem,
       )
       onLog("serve: catalog ${entry.system} listing updated via admin API")
       return Result.Ok(entry.system, persist { it.withEntry(entry.copy(repo = repo)) })
@@ -358,6 +362,7 @@ class ServeCatalogAdmin(
       // (compose-ai-tools#5012).
       importedFrom = entry.importedFrom,
       loadPriority = entry.loadPriority,
+      designSystem = entry.isDesignSystem,
     )
 
   /**
