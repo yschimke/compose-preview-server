@@ -1,5 +1,25 @@
 # Moving the UI builder's seed templates into the catalog repositories
 
+> **Superseded: the builder is a second REPOSITORY now.** The templates, the export lanes that
+> judge them and the readiness gate this document reports are
+> [`yschimke/compose-ui-builder`](https://github.com/yschimke/compose-ui-builder), which carries the
+> authoritative copy of this document along with the code. Read that one; this copy is kept because
+> the two catalog repositories' notes link to it by URL, and because the phase 3a paragraph in this
+> repository's [`UI_BUILDER_CATALOG_CONTRACT.md`](UI_BUILDER_CATALOG_CONTRACT.md) cites it by path.
+>
+> So **"this repository" below means `compose-ui-builder`**, and steps 1, 2, 4 and 6 are entirely
+> its. What is still this repository's is the serving half, and step 5 is where the two meet:
+> `ServeUiBuilderCreate` and `ServeWeb` call `UiBuilderNewDesignSeed` across the
+> `compose-preview-ui-builder-export` seam and validate a template id against
+> `templateIds(systemId)`, `ServeCatalogStore` fetches a catalog's `ui-builder.json`, and
+> `--ui-builder-published-catalogs` is the lever step 6 waits on. That step is two pull requests,
+> ordered by the seam version — the cost
+> [`UI_BUILDER_PROJECT_BOUNDARY.md`](UI_BUILDER_PROJECT_BOUNDARY.md) predicted for a split.
+>
+> `SeedTemplateCatalogReadinessTest` was merged here and extracted the same hour, which left it as a
+> file under a `ui-builder/` that no longer had a Gradle project. It now lives and runs in
+> compose-ui-builder; the measurement in the table below is unchanged, and still what it reports.
+
 The builder ships eight starting points — a blank Material screen, a blank and a worked Wear screen,
 two Wear widget host frames and two worked widget samples — and every one of them is Kotlin in
 **this** repository, under `ui-builder-export/src/commonMain/…/UiBuilderTemplates.kt` and
