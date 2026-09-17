@@ -164,7 +164,7 @@ private val UI_BUILDER_ASSET_EXTENSIONS =
  *   `GET /favicon.svg` / `/favicon.ico` / `/apple-touch-icon.png` the site icon ([ServeSiteIcon]) —
  *   all ungated, because a link unfurler presents no token when it fetches what a page pointed it
  *   at, and an icon fetcher never presents one at all,
- * - `GET /readyz` readiness (green only after a representative preview actually renders — the
+ * - `GET /readyz` readiness (green only after every configured design system renders — the
  *   rolling-update gate),
  * - `GET /index.json` Storybook stories index, `GET /iframe.html?id=` isolated story render
  *   (`&format=svg` serves the vector export as an inert SVG image for DOM-capture tools),
@@ -743,11 +743,18 @@ class ServeHttpServer(
 
   /**
    * Readiness latch for `/readyz` (the rolling-update gate). Unlike `/healthz` — a static "ok" that
-   * only proves the HTTP listener is up — readiness is `true` only once a representative preview
-   * has *actually rendered* on this host, so docker-rollout won't drain traffic onto (and retire
-   * the old replica for) a new container whose render pipeline is broken or whose catalogs failed
-   * to load. Latches on the first success and stays set: the probe render is a baked, override-free
-   * snapshot for a catalog session (cheap, never wakes the daemon — see
+   * only proves the HTTP listener is up — readiness is `true` only once **every configured design
+   * system** has *actually rendered* on this host, so docker-rollout won't drain traffic onto (and
+   * retire the old replica for) a new container whose render pipeline is broken, whose catalogs
+   * failed to load, or whose design systems have not finished warming.
+   *
+   * Every design system rather than one representative preview, because one was not enough: the
+   * gate went green off whichever catalog happened to be first while `glimmer-catalog` still had no
+   * renders, and the 3.38.0 rollout put a catalog page in front of visitors with all 24 of its
+   * images missing. See [ServeCatalogsConfig.DESIGN_SYSTEMS_GROUP] for why that group and only that
+   * group — waiting on all 22 catalogs would hold a rollout open for the slowest third-party fetch
+   * on the box. Latches on the first success and stays set: the probe render is a baked,
+   * override-free snapshot for a catalog session (cheap, never wakes the daemon — see
    * [ServeCatalogLiveHost.render]), but a plain daemon module would pay its cold render, so it runs
    * at most once (see [readinessProber]) and the poll only ever reads this flag.
    *
@@ -762,10 +769,10 @@ class ServeHttpServer(
   private val readinessProbeStarted = AtomicBoolean(false)
 
   /**
-   * The server-owned background thread that renders the representative preview until it succeeds,
-   * then latches [ready]. Kicked off lazily by the first `/readyz` poll (so a plain `serve` that's
-   * never health-checked pays no eager render) and interrupted on [stop]. Retries on failure so a
-   * daemon still cold-starting eventually flips ready without the request path ever blocking.
+   * The server-owned background thread that renders the design systems until they all succeed, then
+   * latches [ready]. Kicked off lazily by the first `/readyz` poll (so a plain `serve` that's never
+   * health-checked pays no eager render) and interrupted on [stop]. Retries on failure so a daemon
+   * still cold-starting eventually flips ready without the request path ever blocking.
    */
   @Volatile private var readinessProber: Thread? = null
 
@@ -1105,7 +1112,7 @@ class ServeHttpServer(
         // `/readyz` below, not this.
         get("/healthz") { call.respondText("ok") }
 
-        // `/readyz` — ungated READINESS: "ready" only once a representative preview has actually
+        // `/readyz` — ungated READINESS: "ready" only once every design system has actually
         // rendered on this host (see [ready]). This is the gate docker-rollout should wait on
         // before
         // it drains traffic onto a new replica and retires the old one — `/healthz` going green
@@ -7444,11 +7451,11 @@ class ServeHttpServer(
 
   /**
    * Start the server-owned readiness prober on the first `/readyz` poll (idempotent via
-   * [readinessProbeStarted]). It renders the representative preview off the request path, retrying
-   * on failure, and latches [ready] on the first success — so a client that times out mid-probe
-   * never discards the work. A daemon thread (interrupted on [stop]); it exits as soon as [ready]
-   * is set. Gated behind an actual `/readyz` hit so a plain `serve` that's never health-checked
-   * pays no eager render.
+   * [readinessProbeStarted]). It renders the design systems off the request path, retrying on
+   * failure, and latches [ready] on the first fully successful pass — so a client that times out
+   * mid-probe never discards the work. A daemon thread (interrupted on [stop]); it exits as soon as
+   * [ready] is set. Gated behind an actual `/readyz` hit so a plain `serve` that's never
+   * health-checked pays no eager render.
    */
   private fun ensureReadinessProbe() {
     if (!readinessProbeStarted.compareAndSet(false, true)) return
@@ -7475,24 +7482,55 @@ class ServeHttpServer(
   }
 
   /**
-   * One readiness attempt: lease a representative session and render its first preview
-   * override-free. A successful [RenderOutcome.Ok] means the render path works end-to-end —
-   * catalogs loaded, a preview exists, and the host can produce bytes (baked for a catalog session,
-   * a real daemon render for a plain module). Catalog-only starts can bind before their configured
-   * default session is loaded, so fall forward to the first usable catalog the tracker sees. Any
-   * failure — no session, no previews, a render error, or an exception — returns false so the
-   * prober retries. Runs on the [readinessProber] thread (the lease + render are blocking). Never
-   * throws.
+   * One readiness attempt: render one preview from **every configured design system**
+   * ([CatalogLoadTracker.designSystemSystems]), and report success only if all of them answer.
+   *
+   * A pass means the render path works end-to-end for the catalogs this box exists to serve —
+   * loaded, previews present, bytes produced. A single failure returns false so the prober retries;
+   * the systems still warming are logged by name, because "warming" with no names is the state this
+   * gate used to report for ten minutes before docker-rollout gave up.
+   *
+   * With no design systems configured at all — a plain `serve`, a dev box, an upload-only server —
+   * this falls back to the old representative-session probe rather than reporting ready for free:
+   * those servers have no design-system list to wait on, and a server that renders nothing is still
+   * not ready.
+   *
+   * Runs on the [readinessProber] thread (the leases and renders are blocking). Never throws.
    */
   private fun probeReadiness(): Boolean {
-    val lease =
-      readinessSessionIds().asSequence().mapNotNull { sessions.lease(it) }.firstOrNull()
-        ?: return false
+    val designSystems = catalogLoads?.designSystemSystems().orEmpty()
+    if (designSystems.isNotEmpty()) {
+      val notYet = designSystems.filterNot { renderableNow(it) }
+      if (notYet.isNotEmpty()) {
+        System.err.println(
+          "[serve] readiness: waiting for ${notYet.size} of ${designSystems.size} design " +
+            "system(s) to render: ${notYet.joinToString(", ")}"
+        )
+        return false
+      }
+      return true
+    }
+    return readinessSessionIds().any { renderableNow(it) }
+  }
+
+  /**
+   * Can [system] serve a render **right now**: lease its session and render one preview
+   * override-free. False for every way that can fail — not registered yet, registered with no
+   * previews, a render error, or an exception — because the prober's job is to keep waiting, not to
+   * distinguish them.
+   *
+   * The render is the whole point. A catalog counts as `loaded` the moment its previews are
+   * discovered, which is several steps before its lane can produce bytes, and that gap is what a
+   * visitor sees as a catalog page whose every image is missing. Rendering one preview is the
+   * cheapest question that cannot be answered yes in that window.
+   */
+  private fun renderableNow(system: String): Boolean {
+    val lease = sessions.lease(system) ?: return false
     return try {
       val preview = lease.host.previews.firstOrNull() ?: return false
       lease.host.render(preview.id, PreviewOverrides()) is RenderOutcome.Ok
     } catch (e: Exception) {
-      System.err.println("[serve] readiness probe failed: ${e.message}")
+      System.err.println("[serve] readiness probe failed for '$system': ${e.message}")
       false
     } finally {
       lease.close()

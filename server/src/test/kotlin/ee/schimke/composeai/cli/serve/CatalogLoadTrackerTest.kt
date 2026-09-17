@@ -163,6 +163,7 @@ class CatalogLoadTrackerTest {
         group = null,
         loadPriority = 5,
         importedFrom = null,
+        designSystem = false,
       )
     )
 
@@ -171,5 +172,99 @@ class CatalogLoadTrackerTest {
     assertFalse(reply.config.listed)
     assertTrue(reply.available, "a listing change must not drop the registered copy")
     assertEquals(listOf("reply", "jetnews"), tracker.loadOrder().map { it.config.system })
+  }
+
+  @Test
+  fun `design systems load ahead of everything, whatever the priority numbers say`() {
+    val tracker = tracker()
+    tracker.add(
+      CatalogLoadTracker.Config(
+        system = "shouty-sample",
+        listed = true,
+        repo = "yschimke/compose-samples",
+        branch = "design-artifacts/shouty-sample",
+        // Higher than either design system below. A sample cannot buy its way to the front of the
+        // queue with a number, because the queue exists to satisfy the readiness gate and the gate
+        // does not wait on samples.
+        loadPriority = 99,
+      )
+    )
+    tracker.add(
+      CatalogLoadTracker.Config(
+        system = "glimmer-catalog",
+        listed = true,
+        repo = "yschimke/m3-catalog",
+        branch = "design-artifacts/glimmer-catalog",
+        designSystem = true,
+      )
+    )
+    tracker.add(
+      CatalogLoadTracker.Config(
+        system = "m3-catalog",
+        listed = true,
+        repo = "yschimke/m3-catalog",
+        branch = "design-artifacts/m3-catalog",
+        loadPriority = 20,
+        designSystem = true,
+      )
+    )
+
+    // Both design systems first, ordered among themselves by priority; then the rest by theirs.
+    assertEquals(
+      listOf("m3-catalog", "glimmer-catalog", "shouty-sample", "jetnews", "reply"),
+      tracker.loadOrder().map { it.config.system },
+    )
+  }
+
+  @Test
+  fun `the design-system set is what is configured, not what has loaded`() {
+    val tracker = tracker()
+    tracker.add(
+      CatalogLoadTracker.Config(
+        system = "glimmer-catalog",
+        listed = true,
+        repo = "yschimke/m3-catalog",
+        branch = "design-artifacts/glimmer-catalog",
+        designSystem = true,
+      )
+    )
+
+    // Never fetched, so not available -- and still in the set. A readiness gate reading only the
+    // available ones would go green in precisely the window it exists to wait through.
+    assertEquals(listOf("glimmer-catalog"), tracker.designSystemSystems())
+    assertFalse(tracker.snapshot().single { it.config.system == "glimmer-catalog" }.available)
+  }
+
+  @Test
+  fun `a relist can move a catalog into and out of the design systems`() {
+    val tracker = tracker()
+    assertEquals(emptyList(), tracker.designSystemSystems())
+
+    // Re-publishing into the group is how a catalog becomes load-bearing; dropping the flag here
+    // would leave it fetched late and ungated, which is the `importedFrom` bug in another costume.
+    assertTrue(
+      tracker.relist(
+        "jetnews",
+        listed = true,
+        group = null,
+        loadPriority = 0,
+        importedFrom = null,
+        designSystem = true,
+      )
+    )
+    assertEquals(listOf("jetnews"), tracker.designSystemSystems())
+    assertEquals(listOf("jetnews", "reply"), tracker.loadOrder().map { it.config.system })
+
+    assertTrue(
+      tracker.relist(
+        "jetnews",
+        listed = true,
+        group = null,
+        loadPriority = 0,
+        importedFrom = null,
+        designSystem = false,
+      )
+    )
+    assertEquals(emptyList(), tracker.designSystemSystems())
   }
 }

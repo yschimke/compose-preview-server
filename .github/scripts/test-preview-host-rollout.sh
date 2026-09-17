@@ -71,31 +71,38 @@ deny() { # 1=label 2..=converged args -- expected to FAIL
   if converged "$@"; then bad "${label}" "converged said yes"; else ok "${label}"; fi
 }
 
-# Argument order: live status_version expected loaded total failed builder_ok
+# Argument order: live status_version expected loaded total failed builder_ok renders_ok
 echo "==> a real rollout"
-want "the new build, every catalog loaded, none failed" 3.27.0 3.27.0 3.27.0 37 37 0 1
+want "the new build, every catalog loaded, none failed" 3.27.0 3.27.0 3.27.0 37 37 0 1 1
 
 echo "==> the split this was written for"
-deny "/version is new but /status.json is still the old process" 3.27.0 3.26.0 3.27.0 37 37 0 1
-deny "/status.json is new but /version is still the old process" 3.26.0 3.27.0 3.27.0 37 37 0 1
-deny "neither endpoint has moved yet" 3.26.0 3.26.0 3.27.0 37 37 0 1
+deny "/version is new but /status.json is still the old process" 3.27.0 3.26.0 3.27.0 37 37 0 1 1
+deny "/status.json is new but /version is still the old process" 3.26.0 3.27.0 3.27.0 37 37 0 1 1
+deny "neither endpoint has moved yet" 3.26.0 3.26.0 3.27.0 37 37 0 1 1
 
 echo "==> the catalogs actually have to be loaded"
 # The case the old gate accepted: every count is >= 0, so it said yes to a server with nothing on it.
-deny "no catalogs loaded at all" 3.27.0 3.27.0 3.27.0 0 37 0 1
-deny "still warming up, most catalogs pending" 3.27.0 3.27.0 3.27.0 15 37 0 1
-deny "a catalog failed to load" 3.27.0 3.27.0 3.27.0 36 37 1 1
-deny "every catalog loaded but one failed" 3.27.0 3.27.0 3.27.0 37 37 2 1
+deny "no catalogs loaded at all" 3.27.0 3.27.0 3.27.0 0 37 0 1 1
+deny "still warming up, most catalogs pending" 3.27.0 3.27.0 3.27.0 15 37 0 1 1
+deny "a catalog failed to load" 3.27.0 3.27.0 3.27.0 36 37 1 1 1
+deny "every catalog loaded but one failed" 3.27.0 3.27.0 3.27.0 37 37 2 1 1
 
 echo "==> unreadable answers are not converged"
 # `-1` is what the jq fallbacks emit when the endpoint gave nothing back, and an empty version is
 # what the sed emits when /version did not answer. None of these may read as success.
-deny "status.json did not answer" 3.27.0 "" 3.27.0 -1 -1 -1 1
-deny "version did not answer" "" 3.27.0 3.27.0 37 37 0 1
-deny "neither answered" "" "" 3.27.0 -1 -1 -1 1
-deny "a total of zero is not a loaded fleet" 3.27.0 3.27.0 3.27.0 0 0 0 1
+deny "status.json did not answer" 3.27.0 "" 3.27.0 -1 -1 -1 1 1
+deny "version did not answer" "" 3.27.0 3.27.0 37 37 0 1 1
+deny "neither answered" "" "" 3.27.0 -1 -1 -1 1 1
+deny "a total of zero is not a loaded fleet" 3.27.0 3.27.0 3.27.0 0 0 0 1 1
 
 echo "==> the ui-builder still has to be served"
-deny "the builder assets are not up" 3.27.0 3.27.0 3.27.0 37 37 0 0
+deny "the builder assets are not up" 3.27.0 3.27.0 3.27.0 37 37 0 0 1
+
+echo "==> a loaded catalog is not a rendering one"
+# The 3.38.0 rollout: every field above agreed, and `glimmer-catalog` answered its page with all 24
+# of its images missing because the lane had no daemon yet. `loaded` counts discovery; only a render
+# proves the catalog can serve. Without this case the gate is back to reporting that deploy green.
+deny "every catalog loaded, but a design system cannot render yet" 3.27.0 3.27.0 3.27.0 37 37 0 1 0
+deny "nothing renders and the builder is down either" 3.27.0 3.27.0 3.27.0 37 37 0 0 0
 
 exit "${status}"

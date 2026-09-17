@@ -725,6 +725,12 @@ public class ServeRunner(
      * it was named in.
      */
     val loadPriority: Int = 0,
+    /**
+     * Published under [ServeCatalogsConfig.DESIGN_SYSTEMS_GROUP]: fetched first, and required to
+     * render before this server reports ready. Only a `--catalogs-file` entry can claim it — a bare
+     * `--catalogs` flag entry declares no group at all.
+     */
+    val designSystem: Boolean = false,
   )
 
   /**
@@ -759,6 +765,7 @@ public class ServeRunner(
           group = ServeCatalogAdmin.homeGroup(entry, repo, catalogsConfig.groups),
           importedFrom = entry.importedFrom,
           loadPriority = entry.loadPriority,
+          designSystem = entry.group == ServeCatalogsConfig.DESIGN_SYSTEMS_GROUP,
         )
       }
 
@@ -3955,6 +3962,7 @@ public class ServeRunner(
             group = ref.group,
             importedFrom = ref.importedFrom,
             loadPriority = ref.loadPriority,
+            designSystem = ref.designSystem,
           )
         }
       )
@@ -4133,6 +4141,7 @@ public class ServeRunner(
               group = contribution.homeGroup(entry),
               importedFrom = entry.importedFrom,
               loadPriority = entry.loadPriority,
+              designSystem = entry.group == ServeCatalogsConfig.DESIGN_SYSTEMS_GROUP,
             )
           if (!loads.add(config)) {
             "already published"

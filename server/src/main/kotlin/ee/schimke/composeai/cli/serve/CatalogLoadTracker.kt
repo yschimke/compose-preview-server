@@ -17,7 +17,9 @@ import java.util.concurrent.ConcurrentHashMap
  * [State.error] still records that the latest refresh failed. An initial failure has
  * `available=false`, remains visible in status, and stays eligible for refresh retry. Catalog
  * availability deliberately does not require every catalog for server readiness: a usable server
- * with a partial external catalog set should still deploy.
+ * with a partial external catalog set should still deploy. The exception is the design-systems
+ * group ([Config.designSystem]), which the readiness gate does require — see
+ * [ServeCatalogsConfig.DESIGN_SYSTEMS_GROUP] for why those and only those.
  */
 class CatalogLoadTracker(
   configured: List<Config>,
@@ -48,6 +50,19 @@ class CatalogLoadTracker(
      * same snapshot every other consumer does.
      */
     val loadPriority: Int = 0,
+    /**
+     * This catalog is published under [ServeCatalogsConfig.DESIGN_SYSTEMS_GROUP] — the group the
+     * box exists to serve.
+     *
+     * Carried as a resolved boolean rather than a group id because two unrelated consumers ask the
+     * same question and neither wants the group table: [loadOrder] fetches these first, and the
+     * readiness gate refuses to report ready until each of them has rendered.
+     *
+     * Not derivable from [group]: that is the resolved [ServeWeb.HomeGroup], which keeps the
+     * heading an operator chose to display and drops the id they keyed it by. Matching on the
+     * heading would make readiness depend on display text.
+     */
+    val designSystem: Boolean = false,
   )
 
   /** Immutable snapshot of one catalog's current availability and latest attempt. */
@@ -122,6 +137,11 @@ class CatalogLoadTracker(
     // Front-page attribution, and undefaulted for the same reason: a caller that forgot it would
     // silently strip an import's origin, which is the failure this parameter was added to close.
     importedFrom: String?,
+    // Undefaulted for the same reason again, and it is load-bearing twice over: a re-publish can
+    // move an entry INTO or OUT OF the design-systems group, and dropping that here would leave a
+    // catalog fetched in the wrong band and — worse — either gating readiness on a catalog that is
+    // no longer a design system, or not gating it on one that now is.
+    designSystem: Boolean,
   ): Boolean =
     synchronized(lock) {
       val existing = states[system] ?: return false
@@ -131,6 +151,7 @@ class CatalogLoadTracker(
           group = group,
           loadPriority = loadPriority,
           importedFrom = importedFrom,
+          designSystem = designSystem,
         )
       states[system] = existing.copy(config = updated)
       val at = ordered.indexOfFirst { it.system == system }
@@ -204,6 +225,17 @@ class CatalogLoadTracker(
   /** First currently usable catalog in configured order, or null while every catalog is pending. */
   fun firstAvailableSystem(): String? = snapshot().firstOrNull { it.available }?.config?.system
 
+  /**
+   * Every configured design-system catalog ([Config.designSystem]), whether or not it has loaded —
+   * the set the readiness gate must see render before it reports ready.
+   *
+   * Configured, not available, and that is the point: a design system still fetching is exactly the
+   * state readiness has to keep waiting through, and one reported only when available would let the
+   * gate go green in the window before it appears.
+   */
+  fun designSystemSystems(): List<String> =
+    snapshot().filter { it.config.designSystem }.map { it.config.system }
+
   fun record(result: ServeCatalogStore.Result) {
     when (result) {
       is ServeCatalogStore.Result.Ok -> recordSuccess(result.system, result.failedRenderCount)
@@ -240,8 +272,15 @@ class CatalogLoadTracker(
     synchronized(lock) { ordered.toList() }.mapNotNull { states[it.system] }
 
   /**
-   * The same catalogs as [snapshot], in the order the **initial fetch** should walk them: highest
-   * [Config.loadPriority] first, ties keeping configured order (the sort is stable).
+   * The same catalogs as [snapshot], in the order the **initial fetch** should walk them:
+   * [Config.designSystem] first, then highest [Config.loadPriority], ties keeping configured order
+   * (the sort is stable).
+   *
+   * Design systems lead unconditionally, ahead of any priority number, because they are what the
+   * readiness gate waits on: a replica is not ready until each of them renders, so fetching them
+   * last would hold the rollout open for the time it took to fetch everything else first. Explicit
+   * [Config.loadPriority] still orders within each of the two bands, so an operator can say which
+   * design system matters most without being able to accidentally demote the band.
    *
    * Separate from [snapshot] on purpose. Configured order is the front page's, and the two wants
    * genuinely differ: the queue wants the box's load-bearing catalogs back first after a restart,
@@ -249,7 +288,12 @@ class CatalogLoadTracker(
    * itself would have moved the cards — and moved [firstAvailableSystem], which is the session the
    * readiness probe renders — as a side effect of a fetch-order preference (issue #4231).
    */
-  fun loadOrder(): List<State> = snapshot().sortedByDescending { it.config.loadPriority }
+  fun loadOrder(): List<State> =
+    snapshot()
+      .sortedWith(
+        compareByDescending<State> { it.config.designSystem }
+          .thenByDescending { it.config.loadPriority }
+      )
 
   /** Catalogs with a usable registered copy; used to seed only successful branch heads. */
   /**

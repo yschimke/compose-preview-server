@@ -103,6 +103,10 @@ jobs:
         env:
           HOOK_URL: ${{ vars.DEPLOY_HOOK_URL || 'https://preview.coo.ee/__hooks/rollout' }}
           HOOK_TOKEN: ${{ secrets.DEPLOY_HOOK_TOKEN }}
+          # Resolved exactly as `Publish deployment config` resolves it below: the render probe
+          # reads the design systems out of this directory's `catalogs.json`, and the two steps
+          # disagreeing about where that lives is a deploy that fails on a path, not on the box.
+          DEPLOY_CONFIG_DIR: ${{ vars.DEPLOY_CONFIG_DIR || 'deploy/preview.coo.ee' }}
         run: |
           if [[ -z "${HOOK_TOKEN}" ]]; then
             echo "DEPLOY_HOOK_TOKEN is unset; skipping rollout notification"
@@ -132,12 +136,79 @@ jobs:
           # Catalogs load asynchronously after the process is up (37 of them take a few minutes
           # from a cold start), so `pending` is expected to be non-zero for a while; the loop is
           # what waits for it, and 30 attempts at 20s is ~10 minutes of room.
+          #   * A catalog that is LOADED but cannot RENDER. `catalogs.loaded` counts discovery, and
+          #     a lane can produce bytes only once its daemon is up -- so the gate could go green
+          #     while a design system's page answered with every one of its images missing, which
+          #     is what the 3.38.0 rollout served from `glimmer-catalog`. `renders_ok` is that
+          #     window closed: one real PNG per design system, checked below.
           converged() { # 1=live 2=status_version 3=expected 4=loaded 5=total 6=failed 7=builder_ok
+                        # 8=renders_ok
             [ -n "$1" ] && [ "$1" = "$3" ] || return 1
             [ -n "$2" ] && [ "$2" = "$3" ] || return 1
             [ "${5:--1}" -gt 0 ] && [ "${4:--1}" -eq "$5" ] || return 1
             [ "${6:--1}" -eq 0 ] || return 1
-            [ "${7:-0}" -eq 1 ]
+            [ "${7:-0}" -eq 1 ] || return 1
+            [ "${8:-0}" -eq 1 ]
+          }
+
+          # The design systems, read from the deployed config rather than listed here: the server
+          # gates its own readiness on the same group id, and a second copy in YAML is a copy that
+          # goes stale the first time one is added. Empty is not a pass -- a config this cannot read
+          # means the probe below has nothing to assert, which must not read as success.
+          design_systems="$(jq -r \
+            '.catalogs[] | select(.group == "design-systems") | .system' \
+            "${DEPLOY_CONFIG_DIR:-deploy/preview.coo.ee}/catalogs.json" 2>/dev/null || true)"
+          if [ -z "${design_systems}" ]; then
+            echo "::error::no design-systems catalogs in catalogs.json; the render probe would assert nothing"
+            exit 1
+          fi
+          echo "probing renders for: $(echo "${design_systems}" | tr '\n' ' ')"
+
+          # One real render per design system. Not the catalog PAGE -- that was already 200 with a
+          # full component tree while every image under it was missing. The page is where the render
+          # URL comes from; the render is the assertion.
+          #
+          # `-gt 512` because an error page is also a 200 and a placeholder PNG is tiny: the healthy
+          # responses measured on 3.38.0 were 5194 B (glimmer) and 3373 B (compose-m3).
+          renders_ready() {
+            for system in ${design_systems}; do
+              page="$(curl -fsS -m 20 "${base}/${system}/" 2>/dev/null || true)"
+              # The page is where the render URL comes from; the render is the assertion. The
+              # character class avoids quoting an HTML attribute delimiter inside a YAML block
+              # scalar inside a shell string, which is three layers of escaping for no gain.
+              render_path="$(printf '%s' "${page}" \
+                | grep -oE "/${system}/render/[A-Za-z0-9._-]+\.png(\?[A-Za-z0-9=&_-]+)?" \
+                | head -n1)"
+              if [ -z "${render_path}" ]; then
+                echo "  ${system}: no render URL on its page yet"
+                return 1
+              fi
+              # A cold lane's first render boots a daemon, so allow it real time -- far longer than
+              # the 10s the cheap endpoints above get.
+              probe="$(curl -sS -m 120 -o /dev/null \
+                -w '%{http_code} %{content_type} %{size_download}' \
+                "${base}${render_path}" 2>/dev/null || echo "000 - 0")"
+              code="${probe%% *}"
+              rest="${probe#* }"
+              type="${rest%% *}"
+              size="${rest##* }"
+              case "${code}:${type}" in
+                200:image/png*) ;;
+                *)
+                  echo "  ${system}: ${render_path} -> ${code} ${type}"
+                  return 1
+                  ;;
+              esac
+              # An error page is also a 200 and a placeholder PNG is tiny. Measured across all six
+              # design systems on the 3.38.0 box: 1209 B (an m3-catalog badge, the smallest real
+              # render on the box) to 25538 B (a remote-m3 app card). 512 sits below every real
+              # render and above an error body or a 1x1, which is the whole job of the number.
+              if [ "${size:-0}" -le 512 ]; then
+                echo "  ${system}: ${render_path} -> 200 but only ${size}B"
+                return 1
+              fi
+            done
+            return 0
           }
           for i in $(seq 1 30); do
             version_json=$(curl -fsS -m 10 "${base}/version" 2>/dev/null || true)
@@ -154,8 +225,16 @@ jobs:
             case "${builder_html}:${builder_mjs}:${builder_wasm}" in
               *"<title>Compose UI Builder Preview</title>"*:200:text/javascript*:200:application/wasm*) builder_ok=1 ;;
             esac
+            renders_ok=0
+            # Only worth the renders once the cheap fields agree -- otherwise every attempt pays a
+            # cold render against the replica that is still on its way out.
+            if [ "${live}" = "${{ steps.versions.outputs.server }}" ] &&
+              [ "${status_version}" = "${{ steps.versions.outputs.server }}" ] &&
+              renders_ready; then
+              renders_ok=1
+            fi
             if converged "${live}" "${status_version}" "${{ steps.versions.outputs.server }}" \
-              "${loaded}" "${total}" "${failed}" "${builder_ok}"; then
+              "${loaded}" "${total}" "${failed}" "${builder_ok}" "${renders_ok}"; then
               {
                 echo "deployed=true"
                 echo "base_url=${base}"
@@ -165,7 +244,7 @@ jobs:
               } >> "$GITHUB_OUTPUT"
               exit 0
             fi
-            echo "waiting for preview.coo.ee: version=${live:-?}/${status_version:-?} want ${{ steps.versions.outputs.server }}, catalogs=${loaded}/${total} failed=${failed}, ui-builder=${builder_ok} (attempt ${i}/30)"
+            echo "waiting for preview.coo.ee: version=${live:-?}/${status_version:-?} want ${{ steps.versions.outputs.server }}, catalogs=${loaded}/${total} failed=${failed}, ui-builder=${builder_ok}, renders=${renders_ok} (attempt ${i}/30)"
             sleep 20
           done
           echo "::error::preview.coo.ee did not converge within ~10 min"
