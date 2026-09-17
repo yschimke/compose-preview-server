@@ -82,14 +82,14 @@ tasks.named("check") { dependsOn(checkMaterialIconCatalogFixture) }
 
 tasks.named("check") {
   group = "verification"
+  // The UI-builder modules left for yschimke/compose-ui-builder, which checks them in its own CI.
+  // This build reaches four of them as an included build, so `:server:check` compiles against the
+  // checkout -- but it does not run their tests, and it should not: a composite build is a way to
+  // resolve a dependency, not a way to own somebody else's verification.
   dependsOn(
-    ":ui-builder-runtime:check",
-    ":ui-builder-renderer:check",
-    ":ui-builder-web:check",
     ":server:check",
-    ":ui-builder:check",
-    ":ui-builder-generated-jetcaster:check",
-    ":ui-builder-reference-jetcaster:check",
+    ":mcp:check",
+    ":native-catalog-m3:check",
     ":usage-source-psi:check",
     ":wasm-ui:check",
   )

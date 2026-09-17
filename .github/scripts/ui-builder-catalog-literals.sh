@@ -39,7 +39,10 @@ names='wear-m3|remote-m3|wear-m3-catalog'
 
 # The modules whose main sources are held to the rule. Tests are exempt: a test naming a catalog is
 # describing a fixture, not building one into the product.
-modules=(ui-builder ui-builder-export ui-builder-runtime server)
+# `ui-builder`, `ui-builder-export` and `ui-builder-runtime` left for
+# yschimke/compose-ui-builder. Their half of this gate goes with them; this copy holds the server
+# to the same rule, which is the half this repository can still see.
+modules=(server)
 
 # Files that carried a catalog name when this gate was written. SHRINKS EVERY STEP.
 allowed=(
@@ -60,34 +63,6 @@ allowed=(
   server/src/main/kotlin/ee/schimke/composeai/cli/serve/ServeUiBuilderInlineCapture.kt
   server/src/main/kotlin/ee/schimke/composeai/cli/serve/ServeUiBuilderNativePreview.kt
   server/src/main/kotlin/ee/schimke/composeai/cli/serve/ServeWeb.kt
-  ui-builder-export/src/commonMain/kotlin/ee/schimke/composeai/uibuilder/RemoteContentEmitter.kt
-  ui-builder-export/src/commonMain/kotlin/ee/schimke/composeai/uibuilder/RemoteScopes.kt
-  ui-builder-export/src/commonMain/kotlin/ee/schimke/composeai/uibuilder/UiBuilderCatalogPlatform.kt
-  ui-builder-export/src/commonMain/kotlin/ee/schimke/composeai/uibuilder/UiBuilderComponentPacks.kt
-  ui-builder-export/src/commonMain/kotlin/ee/schimke/composeai/uibuilder/UiBuilderNewDesignSeed.kt
-  ui-builder-export/src/commonMain/kotlin/ee/schimke/composeai/uibuilder/UiBuilderPreviewSurfaces.kt
-  ui-builder-export/src/commonMain/kotlin/ee/schimke/composeai/uibuilder/UiBuilderTemplates.kt
-  ui-builder-export/src/commonMain/kotlin/ee/schimke/composeai/uibuilder/WearScreenCodeExporter.kt
-  ui-builder-export/src/commonMain/kotlin/ee/schimke/composeai/uibuilder/WearWidgetCodeExporter.kt
-  ui-builder-export/src/commonMain/kotlin/ee/schimke/composeai/uibuilder/WearWidgetNativePreviewExporter.kt
-  ui-builder-runtime/src/main/kotlin/ee/schimke/composeai/uibuilder/service/ProductionUiBuilderRuntime.kt
-  ui-builder/src/commonMain/kotlin/ee/schimke/composeai/uibuilder/ComponentMenu.kt
-  ui-builder/src/commonMain/kotlin/ee/schimke/composeai/uibuilder/ComponentPackRecords.kt
-  ui-builder/src/commonMain/kotlin/ee/schimke/composeai/uibuilder/RemoteComposeSources.kt
-  ui-builder/src/commonMain/kotlin/ee/schimke/composeai/uibuilder/StarterContent.kt
-  ui-builder/src/commonMain/kotlin/ee/schimke/composeai/uibuilder/UiBuilderEditor.kt
-  ui-builder/src/commonMain/kotlin/ee/schimke/composeai/uibuilder/UiBuilderEditorState.kt
-  ui-builder/src/commonMain/kotlin/ee/schimke/composeai/uibuilder/UiBuilderInspection.kt
-  ui-builder/src/commonMain/kotlin/ee/schimke/composeai/uibuilder/UiBuilderRenderer.kt
-  ui-builder/src/commonMain/kotlin/ee/schimke/composeai/uibuilder/capability/CapabilityCatalog.kt
-  ui-builder/src/jvmMain/kotlin/ee/schimke/composeai/uibuilder/ComponentPackPreviews.kt
-  ui-builder/src/jvmMain/kotlin/ee/schimke/composeai/uibuilder/InlineRemoteContentPreview.kt
-  ui-builder/src/jvmMain/kotlin/ee/schimke/composeai/uibuilder/UiBuilderEditorChromePreview.kt
-  ui-builder/src/jvmMain/kotlin/ee/schimke/composeai/uibuilder/WearComponentPalettePreview.kt
-  ui-builder/src/jvmMain/kotlin/ee/schimke/composeai/uibuilder/WearScreenSamplePreview.kt
-  ui-builder/src/jvmMain/kotlin/ee/schimke/composeai/uibuilder/WearWidgetSamplePreview.kt
-  ui-builder/src/wasmJsMain/kotlin/ee/schimke/composeai/uibuilder/BrowserRequestUrl.kt
-  ui-builder/src/wasmJsMain/kotlin/ee/schimke/composeai/uibuilder/Main.kt
 )
 
 listing=false

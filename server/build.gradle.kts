@@ -327,7 +327,7 @@ tasks.named<Tar>("distTar") {
 dependencies {
   add(
     "uiBuilderWeb",
-    project(":ui-builder-web"),
+    libs.composeai.ui.builder.web,
   )
 
   // The render host, the bundle daemon and the git-backed preview history, split out so the CLI's
@@ -352,10 +352,10 @@ dependencies {
   implementation(libs.composeai.build.host.protocol)
   // Authoritative persistence, validation, collaboration and export orchestration. The server
   // supplies Ktor/auth and the narrow render-host adapter; the runtime has neither dependency.
-  api(project(":ui-builder-runtime"))
+  api(libs.composeai.ui.builder.runtime)
   // The saved-document projection and the generator behind it. Multiplatform, so the
   // browser editor reaches the same code rather than keeping an emitter of its own.
-  implementation(project(":ui-builder-export"))
+  implementation(libs.composeai.ui.builder.export)
 
   api(libs.composeai.common.web.escaping)
   // Published wire-format DTOs and the bundle format. `api` because they appear in this module's

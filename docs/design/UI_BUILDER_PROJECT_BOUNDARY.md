@@ -1,5 +1,20 @@
 # The UI builder is a second project in this repository
 
+> **Superseded: it is a second REPOSITORY now.** The nine modules are
+> [`yschimke/compose-ui-builder`](https://github.com/yschimke/compose-ui-builder), which carries the
+> authoritative copy of this document along with the code. Read that one; this copy is kept because
+> `:server` source comments cite it by path, and because the seam table below is still exactly what
+> this build consumes.
+>
+> What changed here: rule 3 and `.github/scripts/ui-builder-project-boundary.sh` are gone, because a
+> module cannot join the wrong project when the projects are different repositories. The four seams
+> in rule 2's table are now Maven coordinates, resolved — until the publishing lane lands — by
+> substituting an included build's projects for them. `settings.gradle.kts` holds that wiring.
+>
+> The cost this document predicted for a split is now being paid rather than predicted: a change
+> spanning the editor and the routes that serve it is two pull requests.
+
+
 **Status: normative.** The rule is enforced by
 [`.github/scripts/ui-builder-project-boundary.sh`](../../.github/scripts/ui-builder-project-boundary.sh),
 which CI runs on every pull request. Cited from [`AGENTS.md`](../../AGENTS.md); not restated there.

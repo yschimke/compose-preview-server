@@ -16,6 +16,12 @@ concurrency:
   group: "release-${{ github.ref }}-${{ github.event_name == 'push' && startsWith(github.event.head_commit.message, 'chore(main): release ') && github.sha || 'updates' }}"
   cancel-in-progress: false
 
+# The UI builder is a separate repository (yschimke/compose-ui-builder) that this build includes as
+# a composite build. The distribution lane needs a checkout of it on disk, inside the workspace
+# because `actions/checkout` refuses a path outside it, and named through this property.
+env:
+  ORG_GRADLE_PROJECT_composeUiBuilderDir: ${{ github.workspace }}/.compose-ui-builder
+
 jobs:
   # The release half. `skip-github-pull-request` is deliberate — the PR half is `update-release-pr`
   # below. A single invocation computes the next candidate PR in the same run that cuts the
@@ -85,6 +91,12 @@ jobs:
           persist-credentials: false
       - name: Derive version from tag
         run: echo "PLUGIN_VERSION=${PLUGIN_VERSION#v}" >> "$GITHUB_ENV"
+      - name: Check out the UI builder
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: yschimke/compose-ui-builder
+          path: .compose-ui-builder
+          persist-credentials: false
       - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
         with:
           distribution: temurin
@@ -102,7 +114,14 @@ jobs:
           cache-provider: basic
           cache-read-only: true
       - name: Build the standalone distributions
-        run: ./gradlew :server:distTar :mcp:distTar :ui-builder-web:webArchive
+        run: ./gradlew :server:distTar :mcp:distTar
+      # `:ui-builder-web:webArchive` belongs to the included build, and `includeBuild` substitutes
+      # dependencies rather than merging task namespaces — so it is driven by that checkout's own
+      # wrapper. PLUGIN_VERSION is exported for it too: that is what names the archive, and the
+      # upload step below reads the same number.
+      - name: Build the standalone editor archive
+        working-directory: .compose-ui-builder
+        run: ./gradlew :ui-builder-web:webArchive
       - name: Upload standalone server distribution
         run: >-
           gh release upload "${{ needs.release-please.outputs.tag_name }}"
@@ -114,11 +133,14 @@ jobs:
           "mcp/build/distributions/compose-preview-mcp-${PLUGIN_VERSION}.tar.gz"
           --clobber
       # The standalone editor archive, named consistently with the copy inside the server
-      # distribution.
+      # distribution. Built in yschimke/compose-ui-builder, which this build includes as a
+      # composite build, so the archive lands under that checkout rather than here. The server
+      # distribution already carries its own unpacked copy either way -- this asset is the
+      # editor on its own, for serving the bundle yourself or with `--ui-builder-dir`.
       - name: Upload UI-builder web bundle
         run: >-
           gh release upload "${{ needs.release-please.outputs.tag_name }}"
-          "ui-builder-web/build/distributions/compose-preview-ui-builder-web-${PLUGIN_VERSION}.zip"
+          "${ORG_GRADLE_PROJECT_composeUiBuilderDir}/ui-builder-web/build/distributions/compose-preview-ui-builder-web-${PLUGIN_VERSION}.zip"
           --clobber
 
   # One release goes out, or none does. The GitHub release stays a DRAFT until the distribution lane
