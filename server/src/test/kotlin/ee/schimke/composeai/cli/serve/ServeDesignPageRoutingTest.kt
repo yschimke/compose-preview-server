@@ -314,21 +314,25 @@ class ServeDesignPageRoutingTest {
         ServeWeb.designPage(
           moduleLabel = "m3-catalog",
           page =
-            ee.schimke.composeai.designpages.DesignPage(
-              id = "shape",
-              name = "Shape",
-              nodeId = "58548:7093",
-              frame = ee.schimke.composeai.designpages.PageFrame(1200.0, 800.0),
-              image = ee.schimke.composeai.designpages.PageImage("shape.svg"),
-              nodes =
-                listOf(
-                  ee.schimke.composeai.designpages.PageNode(
-                    nodeId = "1:1",
-                    name = "Shape=Circle",
-                    link = ee.schimke.composeai.designpages.PageNodeLink.MANIFEST,
+            ee.schimke.composeai.designpages.DesignPage.Builder(
+                id = "shape",
+                name = "Shape",
+                nodeId = "58548:7093",
+                frame = ee.schimke.composeai.designpages.PageFrame.Builder(1200.0, 800.0).build(),
+                image = ee.schimke.composeai.designpages.PageImage.Builder("shape.svg").build(),
+              )
+              .also {
+                it.nodes =
+                  listOf(
+                    ee.schimke.composeai.designpages.PageNode.Builder("1:1")
+                      .also { node ->
+                        node.name = "Shape=Circle"
+                        node.link = ee.schimke.composeai.designpages.PageNodeLink.MANIFEST
+                      }
+                      .build()
                   )
-                ),
-            ),
+              }
+              .build(),
           svg = svg,
           token = "t",
         )

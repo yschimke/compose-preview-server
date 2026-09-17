@@ -92,17 +92,18 @@ class ServeWebFixtureTest {
     depth: Int = 3,
     type: String? = null,
   ) =
-    PageNode(
-      nodeId = nodeId,
-      name = name,
-      depth = depth,
-      ref = "figma:ocdacdEsnHipMJD3egzxKb/$nodeId",
-      code = code,
-      previewId = previewId,
-      link = link,
-      confidence = confidence,
-      type = type,
-    )
+    PageNode.Builder(nodeId)
+      .also {
+        it.name = name
+        it.depth = depth
+        it.ref = "figma:ocdacdEsnHipMJD3egzxKb/$nodeId"
+        it.code = code
+        it.previewId = previewId
+        it.link = link
+        it.confidence = confidence
+        it.type = type
+      }
+      .build()
 
   private val token = "demo-token-fixture"
   private val moduleLabel = ":samples:cmp"
@@ -2715,58 +2716,67 @@ class ServeWebFixtureTest {
     // screenshot of the regression would show nothing — which is the one way this fixture could
     // pass while the bug it exists for was visible on the real sheet.
     val designPageFixture =
-      DesignPage(
-        id = "shape",
-        name = "Shape",
-        nodeId = "58548:7093",
-        frame = PageFrame(width = 1200.0, height = 800.0),
-        image = PageImage(uri = "shape.svg"),
-        nodes =
-          listOf(
-            pageNode(
-              "1:0",
-              "Shape set",
-              link = PageNodeLink.UNLINKED,
-              depth = 1,
-              type = "COMPONENT_SET",
-            ),
-            pageNode("1:9", ".Header", link = PageNodeLink.UNLINKED, depth = 2),
-            pageNode("1:10", "Header", link = PageNodeLink.UNLINKED, depth = 2, type = "INSTANCE"),
-            pageNode(
-              "1:1",
-              "Shape=Circle",
-              code = "ui/Shapes.kt#CircleShape",
-              previewId = "com.example.ProfileCardPreview",
-            ),
-            pageNode(
-              "1:2",
-              "Shape=Square",
-              code = "ui/Shapes.kt#SquareShape",
-              previewId = "com.example.ProfileCardPreview",
-            ),
-            pageNode(
-              "1:3",
-              "Shape=Triangle",
-              code = "ui/Shapes.kt#TriangleShape",
-              link = PageNodeLink.CONVENTION,
-              confidence = PageNodeConfidence.LOW,
-              previewId = "com.example.ProfileCardPreview",
-            ),
-            pageNode(
-              "1:4",
-              "Shape=Pill",
-              code = "ui/Shapes.kt#PillShape",
-              previewId = "com.example.NotInThisCatalog",
-            ),
-            pageNode("1:6", "Shape=Ghost-ish", link = PageNodeLink.UNLINKED),
-            pageNode(
-              "1:404",
-              "Shape=Flattened",
-              code = "ui/Shapes.kt#FlowerShape",
-              previewId = "com.example.ProfileCardPreview",
-            ),
-          ),
-      )
+      DesignPage.Builder(
+          id = "shape",
+          name = "Shape",
+          nodeId = "58548:7093",
+          frame = PageFrame.Builder(1200.0, 800.0).build(),
+          image = PageImage.Builder("shape.svg").build(),
+        )
+        .also {
+          it.nodes =
+            listOf(
+              pageNode(
+                "1:0",
+                "Shape set",
+                link = PageNodeLink.UNLINKED,
+                depth = 1,
+                type = "COMPONENT_SET",
+              ),
+              pageNode("1:9", ".Header", link = PageNodeLink.UNLINKED, depth = 2),
+              pageNode(
+                "1:10",
+                "Header",
+                link = PageNodeLink.UNLINKED,
+                depth = 2,
+                type = "INSTANCE",
+              ),
+              pageNode(
+                "1:1",
+                "Shape=Circle",
+                code = "ui/Shapes.kt#CircleShape",
+                previewId = "com.example.ProfileCardPreview",
+              ),
+              pageNode(
+                "1:2",
+                "Shape=Square",
+                code = "ui/Shapes.kt#SquareShape",
+                previewId = "com.example.ProfileCardPreview",
+              ),
+              pageNode(
+                "1:3",
+                "Shape=Triangle",
+                code = "ui/Shapes.kt#TriangleShape",
+                link = PageNodeLink.CONVENTION,
+                confidence = PageNodeConfidence.LOW,
+                previewId = "com.example.ProfileCardPreview",
+              ),
+              pageNode(
+                "1:4",
+                "Shape=Pill",
+                code = "ui/Shapes.kt#PillShape",
+                previewId = "com.example.NotInThisCatalog",
+              ),
+              pageNode("1:6", "Shape=Ghost-ish", link = PageNodeLink.UNLINKED),
+              pageNode(
+                "1:404",
+                "Shape=Flattened",
+                code = "ui/Shapes.kt#FlowerShape",
+                previewId = "com.example.ProfileCardPreview",
+              ),
+            )
+        }
+        .build()
 
     val designPageHtml =
       ServeWeb.designPage(

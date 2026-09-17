@@ -32,18 +32,24 @@ class ServeDesignPageSceneTest {
     designBlend: PageBlendMode = PageBlendMode.SOURCE_OVER,
     renderBlend: PageBlendMode = PageBlendMode.SOURCE_OVER,
   ) =
-    DesignPage(
-      id = "buttons",
-      name = "Buttons",
-      nodeId = "1:0",
-      frame = PageFrame(2000.0, 1000.0),
-      image = PageImage(uri = "buttons.svg"),
-      designBlend = designBlend,
-      renderBlend = renderBlend,
-    )
+    DesignPage.Builder(
+        id = "buttons",
+        name = "Buttons",
+        nodeId = "1:0",
+        frame = PageFrame.Builder(2000.0, 1000.0).build(),
+        image = PageImage.Builder("buttons.svg").build(),
+      )
+      .also {
+        it.designBlend = designBlend
+        it.renderBlend = renderBlend
+      }
+      .build()
 
-  private fun placement(over: PageLayerPlacement.() -> PageLayerPlacement = { this }) =
-    PageLayerPlacement(asset = plateId, x = 0.0, y = 0.0, width = 2000.0, height = 1000.0).over()
+  // Takes a Builder rather than returning a derived value: these wire types keep their constructor
+  // and `copy` internal so an added field cannot delete the signature a released consumer calls,
+  // so a test fixture composes the same way a caller does.
+  private fun placement(over: PageLayerPlacement.Builder.() -> Unit = {}) =
+    PageLayerPlacement.Builder(asset = plateId, width = 2000.0, height = 1000.0).also(over).build()
 
   private fun render(
     page: DesignPage = page(),
@@ -81,7 +87,14 @@ class ServeDesignPageSceneTest {
     val html =
       render(
         background =
-          listOf(placement { copy(x = 500.0, y = 250.0, width = 1000.0, height = 500.0) })
+          listOf(
+            placement {
+              x = 500.0
+              y = 250.0
+              width = 1000.0
+              height = 500.0
+            }
+          )
       )
     assertContains(html, "left:25.0000%")
     assertContains(html, "top:25.0000%")
@@ -91,7 +104,13 @@ class ServeDesignPageSceneTest {
 
   @Test
   fun `one plate serves many placements`() {
-    val five = (0 until 5).map { i -> placement { copy(x = i * 400.0, width = 400.0) } }
+    val five =
+      (0 until 5).map { i ->
+        placement {
+          x = i * 400.0
+          width = 400.0
+        }
+      }
     assertEquals(5, render(background = five).split("cp-page-plate").size - 1)
   }
 
@@ -126,7 +145,10 @@ class ServeDesignPageSceneTest {
       render(
         background =
           listOf(
-            placement { copy(blend = PageBlendMode.MULTIPLY, fit = PageLayerPlacement.CONTAIN) }
+            placement {
+              blend = PageBlendMode.MULTIPLY
+              fit = PageLayerPlacement.CONTAIN
+            }
           )
       )
     assertContains(html, """data-blend="multiply"""")
@@ -148,7 +170,7 @@ class ServeDesignPageSceneTest {
 
   @Test
   fun `a placement with no drawable box is dropped`() {
-    val html = render(background = listOf(placement { copy(width = 0.0) }))
+    val html = render(background = listOf(placement { width = 0.0 }))
     assertFalse(html.contains("cp-page-plate"))
   }
 
