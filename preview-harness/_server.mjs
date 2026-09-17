@@ -27,6 +27,31 @@ import { createServer } from "node:http";
 const harnessDir = dirname(fileURLToPath(import.meta.url));
 export const harnessRoot = resolve(harnessDir, "..");
 
+// The UI builder is a separate repository (yschimke/compose-ui-builder) whose modules this harness
+// serves build output from. CI checks it out inside the workspace and names it here; the default is
+// the sibling directory `settings.gradle.kts` also defaults to, so a two-repo checkout needs no
+// configuration.
+export const uiBuilderRoot = resolve(
+    process.env.COMPOSE_UI_BUILDER_DIR ||
+        resolve(harnessRoot, "../compose-ui-builder"),
+);
+
+// Path prefixes that resolve against that checkout rather than this repository.
+//
+// Matched on the FIRST SEGMENT, not as a string prefix: `ui-builder` is a prefix of
+// `ui-builder-renderer`, so a `startsWith` here would send the renderer's requests into the
+// editor's directory and serve 404s that look like a broken build.
+//
+// The specs and configs ask for these by their in-repo paths — `/ui-builder/build/wasmDist/...`,
+// `/ui-builder-reference-jetcaster/build/wasmDist/...` — and there are dozens of those spellings
+// across the harness. Mapping them once here is what keeps the extraction from rewriting every one.
+const UI_BUILDER_SEGMENTS = new Set([
+    "ui-builder",
+    "ui-builder-renderer",
+    "ui-builder-reference-jetcaster",
+    "ui-builder-generated-jetcaster",
+]);
+
 const mimeByExt = {
     ".html": "text/html; charset=utf-8",
     ".js": "text/javascript; charset=utf-8",
@@ -70,8 +95,7 @@ export function startServer(root, port = 0) {
                     // directory `settings.gradle.kts` also defaults to, so a two-repo checkout
                     // needs no configuration.
                     const rendererRoot = resolve(
-                        process.env.COMPOSE_UI_BUILDER_DIR ||
-                            resolve(harnessRoot, "../compose-ui-builder"),
+                        uiBuilderRoot,
                         "ui-builder-renderer/build/wasmRendererDist",
                     );
                     const requested = rendererMatch[1] || "index.html";
@@ -149,10 +173,13 @@ export function startServer(root, port = 0) {
                         return;
                     }
                 }
-                const target = normalize(resolve(root, rel));
+                const base = UI_BUILDER_SEGMENTS.has(rel.split("/")[0])
+                    ? uiBuilderRoot
+                    : root;
+                const target = normalize(resolve(base, rel));
                 if (
-                    relative(root, target).startsWith("..") ||
-                    target === root + sep + ".." // safety
+                    relative(base, target).startsWith("..") ||
+                    target === base + sep + ".." // safety
                 ) {
                     res.writeHead(403);
                     res.end("forbidden");
