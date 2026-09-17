@@ -147,7 +147,7 @@ composeai-tools = "2.18.1"
 # history records twice over, from the other side. Construction here moves to
 # `Type.Builder(...).build()` and derivation to `newBuilder()`, exactly as contracts 3.0.0 did in
 # #910; `ServeDesignPageStoreTest`'s unknown-enum case still asserts the drop.
-composeai-preview-daemon = "3.8.1"
+composeai-preview-daemon = "3.8.3"
 # 2.9.0 is the first release carrying `DesignEnvironmentV1.exportDevices` and its Set/Reset
 # changes, which is the field a design names its export devices in. 2.14.0 adds the components a
 # design defines — `DesignDocumentV1.components`, `DesignNodeV1.component` and the `binding` value
@@ -155,7 +155,7 @@ composeai-preview-daemon = "3.8.1"
 # component placements and loop rows this repository's canvas and exporter already draw from its
 # own document model.
 # 3.1.0 is the first release publishing `compose-preview-contracts-bom`.
-composeai-contracts = "3.1.0"
+composeai-contracts = "3.1.1"
 # 1.65.0 is the first release publishing `rc-players-bom`. (1.64.0 is a tag and a GitHub Release
 # whose Maven coordinates never reached Central -- rc-players#211 -- so it cannot be pinned.)
 rc-players = "1.65.0"
