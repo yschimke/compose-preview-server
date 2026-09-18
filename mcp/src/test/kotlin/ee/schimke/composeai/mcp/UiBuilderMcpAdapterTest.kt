@@ -241,7 +241,11 @@ class UiBuilderMcpAdapterTest {
   fun `apply_design_operations says the actor is bound rather than caller-supplied`() {
     val apply = adapter.toolDefs().single { it.name == "apply_design_operations" }
 
-    assertThat(apply.description).contains("Omit the submission's actorId")
+    // The description is the only place the wire shape is written down — the schema is an opaque
+    // object — so it pins the discriminator, the required clientId, and the bound actorId.
+    assertThat(apply.description).contains("Omit `actorId`")
+    assertThat(apply.description).contains("\"type\":\"batch\"")
+    assertThat(apply.description).contains("`clientId` is required")
   }
 
   @Test
