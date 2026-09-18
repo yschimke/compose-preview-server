@@ -298,7 +298,7 @@ internal object LocalUiBuilder {
       --module <path>   Build and serve one Gradle module. Omit it to discover every module in the
                         build (a build with more than one module of previews then asks you to pick).
       --variant <name>  Android build variant used for previews.
-      --port <n>        Preferred port (default 8791; the next free port is used).
+      --port <n>        Preferred port (default ${ServeDefaults.DEFAULT_PORT}; the next free port is used).
       --host <addr>     Bind address (default 127.0.0.1).
       --no-open         Print the URL instead of opening a browser (CI / headless shells).
       --build-host <path|none>
