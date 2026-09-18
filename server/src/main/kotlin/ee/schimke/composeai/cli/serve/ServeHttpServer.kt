@@ -14029,9 +14029,10 @@ class ServeHttpServer(
     parsed: ServeAgentGrants.OpenRequest,
   ): ServeAgentGrants.OpenResponse? {
     val scope = AgentGrantScope.parse(parsed.scope) ?: AgentGrantScope.DEFAULT_REQUEST
-    // Unknown names are dropped rather than refused — see [OpenRequest.capabilities]. The store
-    // narrows what survives to this box's ceiling, so asking for `images` on a box that offers
-    // none is not an error, it simply is not in the request that comes back.
+    // Unknown names are dropped rather than refused — see [OpenRequest.capabilities]. What this
+    // box would OFFER is decided when the approval page renders (selectable vs withheld, with the
+    // reason), and what it MINTS is clamped at approval; the request itself carries the whole ask,
+    // so the human sees what was wanted and what this box will not give.
     val capabilities = parsed.capabilities.mapNotNull { AgentGrantCapability.parse(it) }.toSet()
     val ttl = parsed.ttlSeconds.takeIf { it > 0 } ?: ServeAgentGrantStore.DEFAULT_GRANT_TTL_SECONDS
     val request =
@@ -14391,9 +14392,13 @@ class ServeHttpServer(
         store.maxCapabilities,
       )
     // Named separately from the scope's withheld list because the reason differs and the page says
-    // so: a capability the agent asked for that this approver may not pass on.
+    // so: a capability the agent asked for that this approver may not pass on. The cause splits
+    // once more, because the two remedies read differently — a capability the approver does not
+    // hold is about the approver, while one this box's ceiling excludes is an operator flag, and
+    // the page names it rather than leaving the approver to intuit that no tick could help.
     val withheldCapabilities =
       request.requestedCapabilities.filterNot { it in selectableCapabilities }
+    val storeNarrowedCapabilities = withheldCapabilities.filterNot { it in store.maxCapabilities }
     val skin = call.siteSkin()
     markGeneration("static-page", "no-store")
     call.respondText(
@@ -14420,8 +14425,12 @@ class ServeHttpServer(
         selectableCapabilities =
           AgentGrantCapability.entries.filter { it in selectableCapabilities },
         withheldScopes = withheld,
-        withheldCapabilities = withheldCapabilities,
+        withheldCapabilities = withheldCapabilities - storeNarrowedCapabilities.toSet(),
         withheldReason = "you do not hold it yourself on this server, so you cannot pass it on",
+        storeNarrowedCapabilities = storeNarrowedCapabilities,
+        storeNarrowedReason =
+          "this server's --agent-grant-capabilities does not include it, so no tick could " +
+            "grant it — the operator would have to add the capability and restart",
       ),
       ContentType.Text.Html,
     )

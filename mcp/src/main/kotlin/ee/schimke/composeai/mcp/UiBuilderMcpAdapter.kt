@@ -53,7 +53,12 @@ class UiBuilderMcpAdapter internal constructor(private val client: UiBuilderDesi
     listOfNotNull(
       tool(
         "create_design",
-        "Create and persist a UI-builder design from a complete v1 design document.",
+        "Create and persist a UI-builder design from a complete v1 design document " +
+          "(schema \"compose-ui-builder-document/v1-candidate\"): id, title, revision 0, the " +
+          "catalog pin, the environment (frame, theme, locale), roots and nodes. The document " +
+          "carries its own design id — path-safe, chosen by the caller; creation never " +
+          "overwrites, so an id that already exists is refused rather than replaced. Read the " +
+          "current catalog pin from list_components first: an invented pin is refused by name.",
         """{"type":"object","properties":{"document":{"type":"object"}},"required":["document"]}""",
       ),
       tool(
@@ -68,9 +73,16 @@ class UiBuilderMcpAdapter internal constructor(private val client: UiBuilderDesi
       ),
       tool(
         "apply_design_operations",
-        "Atomically apply a typed v1 operation submission. Omit the submission's actorId — it is " +
-          "bound to this connection's authenticated actor; supplying a different one is refused. " +
-          "Returns committed revision, sequence, document hash, and validation/conflict diagnostics.",
+        "Atomically apply a typed v1 operation submission. The submission is one v1 batch object: " +
+          "`{\"type\":\"batch\",\"designId\":…,\"operationId\":…,\"clientId\":…,\"baseRevision\":0," +
+          "\"operations\":[…]}` — the `type` discriminator is required at the top level and on " +
+          "every operation (`insertNode`, `setProperty`, `setModifiers`, `deleteNode`, …), and " +
+          "`operationId` is caller-chosen so a replay is idempotent. `clientId` is required: " +
+          "this caller's own stable session id, reused across calls so the collaboration log can " +
+          "group them. Omit `actorId` — it is bound to this connection's authenticated actor; " +
+          "supplying a different one is refused. `baseRevision` is the revision the submission " +
+          "was written against. Returns committed revision, sequence, document hash, and " +
+          "validation/conflict diagnostics.",
         """{"type":"object","properties":{"submission":{"type":"object"}},"required":["submission"]}""",
       ),
       tool(

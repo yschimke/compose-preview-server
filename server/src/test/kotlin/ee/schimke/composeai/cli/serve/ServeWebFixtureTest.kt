@@ -3830,6 +3830,20 @@ class ServeWebFixtureTest {
         denyCsrf = "fixed-deny-seal",
         formAction = "/agent-access/9c2Qk1pTf0Xb7hLm4nRzQA",
         version = version,
+        // The ask can carry capabilities the BOX will not offer at all — different cause from an
+        // approver who does not hold one, different remedy (an operator flag, not a different
+        // approver), so its own note naming the flag. This is the shape the ui-builder papercut
+        // wore: the agent asked for the three ui-builder capabilities, a default box's ceiling
+        // excludes all of them, and the page used to say nothing.
+        storeNarrowedCapabilities =
+          listOf(
+            AgentGrantCapability.UI_BUILDER_READ,
+            AgentGrantCapability.UI_BUILDER_WRITE,
+            AgentGrantCapability.UI_BUILDER_EXPORT,
+          ),
+        storeNarrowedReason =
+          "this server's --agent-grant-capabilities does not include it, so no tick could " +
+            "grant it — the operator would have to add the capability and restart",
       )
 
     // What the approver lands on afterwards.
@@ -5442,6 +5456,10 @@ class ServeWebFixtureTest {
     assertTrue(
       agentAccess.contains("Not offered: playground"),
       "a scope the approver may not pass on is named rather than silently dropped",
+    )
+    assertTrue(
+      agentAccessCapabilities.contains("--agent-grant-capabilities does not include it"),
+      "a capability the box's ceiling excludes is named with its remedy, not silently dropped",
     )
     assertTrue(
       agentAccess.contains("method=\"post\"") &&

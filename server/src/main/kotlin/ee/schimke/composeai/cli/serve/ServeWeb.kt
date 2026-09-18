@@ -7812,6 +7812,13 @@ ${captureControlsHtml().prependIndent("          ")}
     /** Capabilities the agent asked for that this approver may not pass on. Same treatment. */
     withheldCapabilities: List<AgentGrantCapability> = emptyList(),
     withheldReason: String = "",
+    /**
+     * Capabilities the agent asked for that THIS BOX's ceiling excludes — a different cause from
+     * [withheldCapabilities] (the approver's own holdings) and a different remedy, so the page says
+     * both rather than folding them into one sentence that fits neither.
+     */
+    storeNarrowedCapabilities: List<AgentGrantCapability> = emptyList(),
+    storeNarrowedReason: String = "",
   ): String {
     val esc = WebEscaping::htmlEscape
     // **Radios, not checkboxes**, because the scopes are cumulative and independent boxes lie about
@@ -7889,6 +7896,15 @@ ${captureControlsHtml().prependIndent("          ")}
         } — ${esc(withheldReason)}</p>
         """
           .trimIndent()
+    val storeNarrowedNote =
+      if (storeNarrowedCapabilities.isEmpty()) ""
+      else
+        """
+        <p class="cp-grant-withheld">Also asked for, not offered: ${
+          esc(storeNarrowedCapabilities.joinToString(", ") { it.wire })
+        } — ${esc(storeNarrowedReason)}</p>
+        """
+          .trimIndent()
     val withheld =
       if (withheldScopes.isEmpty()) ""
       else
@@ -7940,6 +7956,7 @@ ${captureControlsHtml().prependIndent("          ")}
           $capabilityFieldset
           $withheld
           $withheldCapabilityNote
+          $storeNarrowedNote
           <label class="cp-grant-ttl">
             <span>Access expires after</span>
             <select name="ttl">

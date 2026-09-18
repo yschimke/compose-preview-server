@@ -252,10 +252,14 @@ class ServeAgentGrantStore(
         client = sanitizeLabel(client),
         requestedScope = minOf(requestedScope, maxScope),
         requestedTtlSeconds = requestedTtlSeconds.coerceIn(1, maxGrantTtlSeconds),
-        // Narrowed at the door, like the scope: the approval page must never offer a capability
-        // this box would refuse to mint, and an agent asking for one it cannot have should learn
-        // that from the response it already reads rather than from a silent omission later.
-        requestedCapabilities = requestedCapabilities intersect maxCapabilities,
+        // The ask is kept whole. What this box will offer is decided where it is SHOWN — the
+        // approval page computes `selectable` from the same ceilings and renders the rest as
+        // withheld, with the reason — and what is MINTED is clamped again in [approve]. Narrowing
+        // here instead made the request forget what the agent had asked for, so a box whose
+        // ceiling excluded a capability showed the approver a page with no checkbox and no
+        // withheld note, the agent's own summary lost the line, and the first refused tool call
+        // offered no hint that the cause was this box's configuration.
+        requestedCapabilities = requestedCapabilities,
         createdAtMillis = now,
         expiresAtMillis = now + requestTtlSeconds * 1000,
       )
