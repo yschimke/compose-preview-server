@@ -1720,7 +1720,11 @@ class ServeCatalogMcp(
           )
         UiBuilderAuthorizationDecision.Forbidden ->
           return toolError(
-            "the presented identity lacks the UI-builder ${capability.name.lowercase()} capability"
+            "the presented identity lacks the UI-builder ${capability.name.lowercase()} capability. " +
+              "A grant only carries what this server's --agent-grant-capabilities allows and what " +
+              "the approver ticked, so either the ask was narrowed at approval or the box's " +
+              "ceiling excludes it — request again, and if the approval page says the box does " +
+              "not offer it, the operator has to add the capability and restart."
           )
       }
     return textResult(builder.call(name, args, actor, callId = name))

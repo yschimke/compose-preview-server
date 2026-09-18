@@ -3151,6 +3151,27 @@ public class ServeRunner(
     val uiBuilderAppDir = usableUiBuilderDir()
     val uiBuilderLane = openUiBuilderService(uiBuilderAppDir, catalogStore, catalogLoads)
     uiBuilderLaneOpen = uiBuilderLane != null
+    // Named at startup because the failure it prevents surfaces far from its cause: an agent
+    // requests the ui-builder capabilities, every approval page offers none of them, and the
+    // first tool call refuses with a message about the grant — three steps downstream of the
+    // operator decision that actually capped it. One line here closes that distance. (The
+    // approval page also says it per request; this is for the operator reading the boot log.)
+    if (agentGrantStore != null && uiBuilderLane != null) {
+      val builderCapabilities =
+        listOf(
+          AgentGrantCapability.UI_BUILDER_READ,
+          AgentGrantCapability.UI_BUILDER_WRITE,
+          AgentGrantCapability.UI_BUILDER_EXPORT,
+        )
+      val missing = builderCapabilities.filterNot { it in agentGrantStore.maxCapabilities }
+      if (missing.isNotEmpty()) {
+        System.err.println(
+          "serve: agent grants cannot carry ${missing.joinToString(", ") { it.wire }} — the " +
+            "UI-builder tools will refuse every agent call. Add them to --agent-grant-capabilities " +
+            "if approved agents should author designs on this box."
+        )
+      }
+    }
     landingServesSomething =
       defaultSessionId.isNotEmpty() || registry.anySessionId() != null || catalogRefs.isNotEmpty()
     // Fail-soft everywhere else — a host with previews to serve keeps serving them and simply has

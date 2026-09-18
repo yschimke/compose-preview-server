@@ -1,5 +1,6 @@
 package ee.schimke.composeai.cli.serve
 
+import ee.schimke.composeai.agentgrants.AgentGrantCapability
 import ee.schimke.composeai.agentgrants.AgentGrantProtocol
 import ee.schimke.composeai.agentgrants.AgentGrantScope
 import kotlin.test.Test
@@ -28,12 +29,14 @@ class ServeAgentGrantStoreTest {
     maxGrantTtlSeconds: Long = 3600,
     maxActiveGrants: Int = 16,
     maxPendingRequests: Int = 32,
+    maxCapabilities: Set<AgentGrantCapability> = emptySet(),
   ) =
     ServeAgentGrantStore(
       maxGrantTtlSeconds = maxGrantTtlSeconds,
       maxScope = maxScope,
       maxActiveGrants = maxActiveGrants,
       maxPendingRequests = maxPendingRequests,
+      maxCapabilities = maxCapabilities,
       clock = { now },
     )
 
@@ -118,6 +121,53 @@ class ServeAgentGrantStoreTest {
     val grant = store.approve(request.id, "@yuri", AgentGrantScope.PLAYGROUND, 600)!!
     assertEquals(AgentGrantScope.PREVIEW, grant.scope)
     assertFalse(grant.allows(AgentGrantScope.LIVE))
+  }
+
+  @Test
+  fun `a capability the ceiling excludes stays in the request and out of the grant`() {
+    // The ask is what the approval page renders — selectable checkboxes for what this box offers,
+    // a withheld note naming `--agent-grant-capabilities` for what it does not — so the request
+    // must remember it. The MINT is where the ceiling bites: the note can be read, and the grant
+    // still cannot carry what the box refuses.
+    val store =
+      store(
+        maxScope = AgentGrantScope.PLAYGROUND,
+        maxCapabilities = setOf(AgentGrantCapability.IMAGES),
+      )
+    val request =
+      store.openRequest(
+        label = "builder access",
+        client = "10.0.0.1",
+        requestedScope = AgentGrantScope.PREVIEW,
+        requestedTtlSeconds = 600,
+        requestedCapabilities =
+          setOf(
+            AgentGrantCapability.IMAGES,
+            AgentGrantCapability.UI_BUILDER_READ,
+            AgentGrantCapability.UI_BUILDER_WRITE,
+          ),
+      )!!
+    assertEquals(
+      setOf(
+        AgentGrantCapability.IMAGES,
+        AgentGrantCapability.UI_BUILDER_READ,
+        AgentGrantCapability.UI_BUILDER_WRITE,
+      ),
+      request.requestedCapabilities,
+      "the ask survives registration — the page, not the store, narrows what is offered",
+    )
+
+    // The approver ticks everything the page showed them as granted-able; the ceiling still keeps
+    // the ui-builder capability out of the mint.
+    val grant =
+      store.approve(
+        request.id,
+        "@yuri",
+        AgentGrantScope.PREVIEW,
+        600,
+        setOf(AgentGrantCapability.IMAGES, AgentGrantCapability.UI_BUILDER_READ),
+      )!!
+    assertEquals(setOf(AgentGrantCapability.IMAGES), grant.capabilities)
   }
 
   @Test
