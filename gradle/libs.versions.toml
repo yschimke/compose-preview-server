@@ -1,24 +1,26 @@
 [versions]
 # The two JVM floors this repository maintains, and the line between them.
 #
-# `java-server` is the floor of everything a *consumer* compiles or resolves against:
-# `:server`, `:mcp`, `:ui-builder-runtime`, `:ui-builder-export`, `:usage-source-psi`. It is 17
-# because `compose-ai-tools` pins every JVM module to a 17 toolchain and its `:cli` compiles its
-# tests against our published `compose-preview-serve`, so class file 65 anywhere in that graph
-# fails their build outright with "class file has wrong version 65.0, should be 61.0". That
+# `java-server` is the floor of everything a *consumer* compiles or resolves against: `:server`,
+# `:mcp`, `:usage-source-psi`, and — published from yschimke/compose-ui-builder — the UI-builder
+# runtime and export. It is 17 because `compose-ai-tools` pins every JVM module to a 17 toolchain
+# and its `:cli` compiles its tests against the released server, so class file 65 anywhere in that
+# graph fails their build outright with "class file has wrong version 65.0, should be 61.0". That
 # repository has ruled out moving while AGP and Robolectric target 17, so this number does not move
 # on our schedule. `:server:checkServerJvmFloor` proves nothing above it reaches the distribution.
 #
 # `java-ui-builder` is the floor of the UI-builder *frontend* JVM lane — `:ui-builder` and
-# `:ui-builder-artwork` — whose class files are published to nobody. They ship only inside
-# `:ui-builder-render-bundle`'s polyglot PNG, as opaque bytes a render daemon unpacks; no consumer
-# ever puts them on a compile classpath. That is what lets this lane sit above the line, and it is
-# the seam yschimke/compose-preview-server#346 built when it moved the bundle out of the published
-# runtime jar. The cost is a *runtime* one and it is real: the daemon that renders that bundle runs
-# under the server's own JVM (`java.home`), so a self-hoster on 17 loses UI-builder PNG/SVG export.
-# The bundle therefore carries this number as data and `ServeUiBuilderRenderPort` preflights it, so
-# that lands as one sentence naming both versions rather than an `UnsupportedClassVersionError`
-# from a daemon nobody knew existed (yschimke/compose-preview-server#344).
+# `:ui-builder-artwork`, which live in yschimke/compose-ui-builder now — whose class files are
+# published to nobody. They ship only inside `:ui-builder-render-bundle`'s polyglot PNG, as opaque
+# bytes a render daemon unpacks; no consumer ever puts them on a compile classpath. That is what
+# lets that lane sit above the line, and it is the seam yschimke/compose-preview-server#346 built
+# when it moved the bundle out of the published runtime jar. The cost is a *runtime* one and it is
+# real: the daemon that renders that bundle runs under the server's own JVM (`java.home`), so a
+# self-hoster on 17 loses UI-builder PNG/SVG export. The bundle therefore carries this number as
+# data and `ServeUiBuilderRenderPort` preflights it, so that lands as one sentence naming both
+# versions rather than an `UnsupportedClassVersionError` from a daemon nobody knew existed
+# (yschimke/compose-preview-server#344). Nothing in THIS build compiles at 21 except the
+# `visual-harness` lane's UI-builder checkout, which is built by that repository's own wrapper.
 java-server = "17"
 java-ui-builder = "21"
 kotlin = "2.4.20"
@@ -47,8 +49,9 @@ wearcmp-port = "1.7.0-beta02-cmp09"
 #
 # So the number to hold it at is whatever the adaptive artifacts resolve, NOT the newest published:
 # the sidecar copy is the one the render links against, so a higher one here would silently swap the
-# library out from under the bundle. `:ui-builder:checkWindowSidecarVersion` fails the build if the
-# two ever disagree rather than leaving it to a `NoSuchMethodError` mid-render.
+# library out from under the bundle. That agreement used to be checked in this build
+# (`:ui-builder:checkWindowSidecarVersion`); it is enforced in yschimke/compose-ui-builder now, and
+# this repository's half of the rule is to move this ref only alongside `composeai-ui-builder`.
 androidx-window = "1.4.0"
 material-icons-extended = "1.7.3"
 graphics-shapes = "1.1.0"
@@ -157,15 +160,23 @@ composeai-preview-daemon = "3.8.3"
 # 3.1.0 is the first release publishing `compose-preview-contracts-bom`.
 composeai-contracts = "3.1.1"
 
-# The extracted UI builder (yschimke/compose-ui-builder). Not on Maven Central yet: the four
-# coordinates below are resolved by substituting an included build's projects for them, wired in
-# `settings.gradle.kts`. The version is what that repository's `.release-please-manifest.json`
-# says, and it is not consulted while the substitution is in place -- a coordinate in a Gradle
-# dependency needs A version, and this is the one that will be true on the day publishing lands.
-composeai-ui-builder = "0.1.0"
+# The extracted UI builder (yschimke/compose-ui-builder), resolved from its RELEASES. Three jars
+# and a BOM on Maven Central, and the editor archive as a GitHub release asset reached through the
+# fenced ivy repository in `settings.gradle.kts`. This ref is what the default build resolves;
+# `-PcomposeUiBuilderDir` swaps all four seams for a checkout of that repository instead.
+#
+# The BOM names the three jars, for the reason every other composeai line here uses one: each
+# release publishes only the modules it changed, so a shared ref across them resolves until the
+# first reduced release and then fails on whichever module did not publish. The web archive is the
+# exception that still carries a version of its own -- it is deliberately not in the BOM, because
+# it is not a Maven module, and a BOM entry for a coordinate nobody uploaded is exactly the
+# failure this catalog's own history records.
+composeai-ui-builder = "3.28.0"
 # 1.65.0 is the first release publishing `rc-players-bom`. (1.64.0 is a tag and a GitHub Release
 # whose Maven coordinates never reached Central -- rc-players#211 -- so it cannot be pinned.)
-rc-players = "1.65.0"
+# 1.67.0 by hand, ahead of Renovate's soak: it pins the KMP player modules to a Java 17 toolchain
+# (rc-players#272), the floor every consumer of this repository resolves at.
+rc-players = "1.67.0"
 kotlinx-coroutines = "1.11.0"
 kotlinx-serialization = "1.11.0"
 ktor = "3.6.0"
@@ -181,17 +192,6 @@ okhttp = "5.5.0"
 okio = "3.18.2"
 classgraph = "4.8.195"
 jmdns = "3.6.3"
-# The UI builder's Kotlin syntax highlighter, behind the Code pane. Pure Kotlin with a published
-# wasmJs variant, which is the whole reason it is this library: the pane is a Compose `Text` on a
-# canvas, so a JS/DOM highlighter (the playground's vendored CodeMirror) cannot reach it.
-#
-# At 1.1.0, which the blocker that once held this at 1.0.0 no longer stops: 1.1.0's JVM artifact is
-# class file 65, and `:ui-builder` compiles against `java-ui-builder` (21), so it loads in
-# `:ui-builder:jvmTest` and in the JVM chrome preview the render evidence comes from. Read the two
-# floors at the top of this file before moving it again — the constraint that remains is that it
-# must not reach `java-server`'s lane, and `:server:checkServerJvmFloor` is what says so rather
-# than a comment.
-snipme-highlights = "1.1.0"
 
 [libraries]
 composeai-common-web-escaping = { module = "ee.schimke.composeai:common-web-escaping" }
@@ -214,16 +214,18 @@ composeai-remotecompose-json = { module = "ee.schimke.composeai:remotecompose-js
 # what lets `checkServeModuleBoundary` keep holding while the server gains the capability
 # yschimke/compose-preview-server#9 asked for.
 composeai-build-host-protocol = { module = "ee.schimke.composeai:build-host-protocol" }
-# The four upstream BOMs. THE only `ee.schimke.composeai` entries in this file that carry a
-# version: every coordinate below deliberately carries none of its own.
+# The five upstream BOMs. THE only `ee.schimke.composeai` entries in this file that carry a
+# version: every coordinate below deliberately carries none of its own. (`compose-preview-ui-builder-web`
+# is the one non-BOM entry with a version, and the UI-builder ref above says why.)
 #
-# The rule the daemon line arrived at now holds for all four. Each of those repositories publishes
+# The rule the daemon line arrived at now holds for all five. Each of those repositories publishes
 # only the modules a release changes -- compose-preview-daemon#123, and since then
-# compose-ai-tools#5485, compose-preview-contracts#80 and rc-players#196 -- so their coordinates no
-# longer all sit at the same version. Pinning a line's modules to one shared ref, which this
-# catalog used to do for three of the four, resolves until that line's first reduced release and
-# then fails on whichever module did not publish at the new version. It is not a slow failure
-# either: it arrives the first time a release skips a module this repository names.
+# compose-ai-tools#5485, compose-preview-contracts#80, rc-players#196 and the UI builder's own
+# reduced releases -- so their coordinates no longer all sit at the same version. Pinning a line's
+# modules to one shared ref, which this catalog used to do for three of the five, resolves until
+# that line's first reduced release and then fails on whichever module did not publish at the new
+# version. It is not a slow failure either: it arrives the first time a release skips a module this
+# repository names.
 #
 # A BOM is the published record of which versions belong together, so it is the only thing that
 # should name one. It also answers the question the shared ref was really being asked: given this
@@ -232,10 +234,13 @@ composeai-build-host-protocol = { module = "ee.schimke.composeai:build-host-prot
 # Consuming modules import them as platforms. `docs/design/PREVIEW_SERVER_SPLIT.md` requires these
 # to resolve by coordinate from a repository rather than from an included build, so a BOM that is
 # missing from Central is a build failure here rather than something silently satisfied locally.
+# The UI-builder entry is opt-in the other way round -- `-PcomposeUiBuilderDir` is the only way
+# a checkout is consulted, and the default build proves the published set resolves.
 composeai-tools-bom = { module = "ee.schimke.composeai:compose-ai-tools-bom", version.ref = "composeai-tools" }
 composeai-contracts-bom = { module = "ee.schimke.composeai:compose-preview-contracts-bom", version.ref = "composeai-contracts" }
 composeai-daemon-bom = { module = "ee.schimke.composeai:compose-preview-daemon-bom", version.ref = "composeai-preview-daemon" }
 composeai-rc-players-bom = { module = "ee.schimke.composeai:rc-players-bom", version.ref = "rc-players" }
+composeai-ui-builder-bom = { module = "ee.schimke.composeai:compose-preview-ui-builder-bom", version.ref = "composeai-ui-builder" }
 composeai-preview-data-api = { module = "ee.schimke.composeai:preview-data-api" }
 composeai-preview-discovery = { module = "ee.schimke.composeai:preview-discovery" }
 # `screen-model` is the generator compiled for wasmJs as well as the JVM, which is what lets the
@@ -267,10 +272,13 @@ composeai-data-preview-overrides-core = { module = "ee.schimke.composeai:data-pr
 composeai-data-preview-overrides-runtime = { module = "ee.schimke.composeai:data-preview-overrides-runtime" }
 composeai-data-render-core = { module = "ee.schimke.composeai:data-render-core" }
 composeai-ui-builder-protocol = { module = "ee.schimke.composeai:ui-builder-protocol" }
-composeai-ui-builder-runtime = { module = "ee.schimke.composeai:compose-preview-ui-builder-runtime", version.ref = "composeai-ui-builder" }
-composeai-ui-builder-export = { module = "ee.schimke.composeai:compose-preview-ui-builder-export", version.ref = "composeai-ui-builder" }
+composeai-ui-builder-runtime = { module = "ee.schimke.composeai:compose-preview-ui-builder-runtime" }
+composeai-ui-builder-export = { module = "ee.schimke.composeai:compose-preview-ui-builder-export" }
+# The editor archive, and the only coordinate here resolved from a GitHub release rather than from
+# Central. `@zip` at the use site, because an artifact-only dependency is the one shape an ivy
+# repository with no metadata can serve.
 composeai-ui-builder-web = { module = "ee.schimke.composeai:compose-preview-ui-builder-web", version.ref = "composeai-ui-builder" }
-composeai-ui-builder-render-bundle = { module = "ee.schimke.composeai:compose-preview-ui-builder-render-bundle", version.ref = "composeai-ui-builder" }
+composeai-ui-builder-render-bundle = { module = "ee.schimke.composeai:compose-preview-ui-builder-render-bundle" }
 composeai-rc-player-compose = { module = "ee.schimke.composeai:rc-player-compose" }
 
 kotlinx-coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "kotlinx-coroutines" }
@@ -289,7 +297,6 @@ truth = { module = "com.google.truth:truth", version.ref = "truth" }
 okhttp = { module = "com.squareup.okhttp3:okhttp", version.ref = "okhttp" }
 okio-fakefilesystem = { module = "com.squareup.okio:okio-fakefilesystem", version.ref = "okio" }
 classgraph = { module = "io.github.classgraph:classgraph", version.ref = "classgraph" }
-snipme-highlights = { module = "dev.snipme:highlights", version.ref = "snipme-highlights" }
 jmdns = { module = "org.jmdns:jmdns", version.ref = "jmdns" }
 graphics-shapes = { module = "androidx.graphics:graphics-shapes", version.ref = "graphics-shapes" }
 compose-ui-tooling-preview = { module = "org.jetbrains.compose.ui:ui-tooling-preview", version.ref = "compose-multiplatform" }

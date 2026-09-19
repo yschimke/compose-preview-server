@@ -100,12 +100,16 @@ dependencyResolutionManagement {
     // matches on are NOT carried across — `:server`'s `uiBuilderWeb` configuration asks for the
     // artifact by extension instead, and its build file says so where it declares the dependency.
     //
+    // The `v` in the pattern is the TAG's, not a typo: release-please cuts `v3.28.0`, while the
+    // asset it attaches is `compose-preview-ui-builder-web-3.28.0.zip`. The tag segment and the
+    // file name disagree about the prefix, so the layout has to spell both.
+    //
     // FENCED to the single module, like the Wear port above: this repository can never satisfy a
     // request for anything else, and a typo in a coordinate fails loudly instead of reaching a
     // GitHub 404 page and being parsed as a jar.
     ivy("https://github.com/yschimke/compose-ui-builder/releases/download") {
       name = "uiBuilderWebRelease"
-      patternLayout { artifact("[revision]/[module]-[revision].[ext]") }
+      patternLayout { artifact("v[revision]/[module]-[revision].[ext]") }
       content { includeModule("ee.schimke.composeai", "compose-preview-ui-builder-web") }
       metadataSources { artifact() }
     }
@@ -128,59 +132,12 @@ if (localDependencyVersions.isNotEmpty()) {
 
 rootProject.name = "compose-preview-server"
 
-// ── The UI builder, as a composite build ───────────────────────────────────────────────────────
-//
-// The nine UI-builder modules were extracted to `yschimke/compose-ui-builder`, where the boundary
-// `docs/design/UI_BUILDER_PROJECT_BOUNDARY.md` drew inside this repository became the repository
-// boundary. This build consumes the four modules that document's table names as seams, and nothing
-// else of that project.
-//
-// They are NOT on Maven Central yet -- publishing is the step after this one -- so the coordinates
-// below are resolved by substituting the included build's projects for them. The dependency
-// declarations in `server/build.gradle.kts` are already spelled as coordinates, which is the whole
-// point of doing it this way round: when the publishing lane lands, this block is deleted and
-// nothing else changes.
-//
-// The rules are EXPLICIT because Gradle's automatic substitution matches on group and project
-// name, and these four publish under artifact ids their projects are not named after
-// (`:ui-builder-runtime` -> `compose-preview-ui-builder-runtime`). Automatic matching would find
-// nothing and the build would fail asking Maven for an artifact that does not exist yet.
-//
-// A checkout beside this one is the default. CI sets the property instead, because a GitHub
-// Actions workspace cannot hold a sibling directory above itself.
-val uiBuilderCheckout =
-  file(providers.gradleProperty("composeUiBuilderDir").orNull ?: "../compose-ui-builder")
-    .canonicalFile
-
-require(uiBuilderCheckout.resolve("settings.gradle.kts").isFile) {
-  """
-  The UI builder is a separate repository and this build needs a checkout of it:
-
-      git clone https://github.com/yschimke/compose-ui-builder ${uiBuilderCheckout}
-
-  Or point at an existing one with -PcomposeUiBuilderDir=<path>.
-  """
-    .trimIndent()
-}
-
-includeBuild(uiBuilderCheckout) {
-  dependencySubstitution {
-    substitute(module("ee.schimke.composeai:compose-preview-ui-builder-runtime"))
-      .using(project(":ui-builder-runtime"))
-    substitute(module("ee.schimke.composeai:compose-preview-ui-builder-export"))
-      .using(project(":ui-builder-export"))
-    substitute(module("ee.schimke.composeai:compose-preview-ui-builder-web"))
-      .using(project(":ui-builder-web"))
-    substitute(module("ee.schimke.composeai:compose-preview-ui-builder-render-bundle"))
-      .using(project(":ui-builder-render-bundle"))
-  }
-}
-
 // ── Optional composite builds against sibling checkouts ────────────────────────────────────────
 //
-// The same mechanism for the upstream this build resolves as published coordinates -- the
-// compose-ai-tools line, the preview daemon, the contracts line. OPT-IN: naming no sibling
-// resolves everything from Maven exactly as before.
+// Everything this build resolves is a published coordinate by default -- the compose-ai-tools
+// line, the preview daemon, the contracts line, and the UI builder's four seams. Naming a sibling
+// swaps that coordinate for the checkout instead, so a change can be built in both repositories at
+// once:
 //
 //     ./gradlew check -PlocalBuilds=tools
 //     ./gradlew check -PlocalBuilds=tools,daemon
@@ -190,8 +147,26 @@ includeBuild(uiBuilderCheckout) {
 // directory is missing is an error rather than a silent fall back to Maven: "I asked for my local
 // tools and got the released one" is exactly the confusion this exists to remove.
 //
-// No substitution rules here, unlike the UI builder above: these upstreams publish the coordinates
-// their projects are named after, which is the case Gradle substitutes automatically.
+// The UI builder is deliberately NOT an entry in `localBuilds`. Gradle project properties are
+// global to the invocation, so the included build reads the same value, and
+// yschimke/compose-ui-builder's settings rejects a sibling name it does not know -- a UI-builder
+// entry there would be a repository including itself. It takes its own property instead:
+//
+//     ./gradlew check -PcomposeUiBuilderDir=../compose-ui-builder
+//
+// Unset resolves the releases; set resolves the checkout, which is why the default build -- and
+// the release -- proves the published coordinates are complete.
+//
+// The UI builder is the one entry with EXPLICIT substitution rules, because Gradle's automatic
+// matching keys on group and project name and these four publish under artifact ids their projects
+// are not named after (`:ui-builder-runtime` -> `compose-preview-ui-builder-runtime`). The other
+// upstreams publish the coordinates their projects are named after, which is the case Gradle
+// substitutes automatically.
+//
+// The web archive is the one seam that is not a Maven module -- released as a GitHub asset,
+// reached through the fenced ivy repository above, requested artifact-only. Substitution still
+// matches it: the included project's `runtimeElements` carries the archive, which is what the
+// artifact-only request resolves to.
 //
 // `scripts/stage-local-dependency.py` still exists and is the right tool for a different job --
 // pinning one FIXED upstream build into a workspace-local Maven repository, rather than following
@@ -226,6 +201,31 @@ providers
     logger.lifecycle("Composite build: $name -> $directory")
     includeBuild(directory)
   }
+
+// The UI builder, as an opt-in composite build. The checkout default is the sibling directory a
+// two-repository setup already has; the property is required to turn it on, so its absence is
+// what makes the released coordinates the default.
+providers.gradleProperty("composeUiBuilderDir").orNull?.let { path ->
+  val directory = file(path).canonicalFile
+  require(directory.resolve("settings.gradle.kts").isFile) {
+    "-PcomposeUiBuilderDir names $directory, which is not a Gradle build. Clone " +
+      "yschimke/compose-ui-builder there, or point at your checkout with " +
+      "-PcomposeUiBuilderDir=<path>."
+  }
+  logger.lifecycle("Composite build: uiBuilder -> $directory")
+  includeBuild(directory) {
+    dependencySubstitution {
+      substitute(module("ee.schimke.composeai:compose-preview-ui-builder-runtime"))
+        .using(project(":ui-builder-runtime"))
+      substitute(module("ee.schimke.composeai:compose-preview-ui-builder-export"))
+        .using(project(":ui-builder-export"))
+      substitute(module("ee.schimke.composeai:compose-preview-ui-builder-web"))
+        .using(project(":ui-builder-web"))
+      substitute(module("ee.schimke.composeai:compose-preview-ui-builder-render-bundle"))
+        .using(project(":ui-builder-render-bundle"))
+    }
+  }
+}
 
 include(":server")
 

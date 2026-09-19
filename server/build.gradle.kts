@@ -325,25 +325,18 @@ tasks.named<Tar>("distTar") {
 // gate on, is its own change.
 
 dependencies {
-  // Resolved today by substituting yschimke/compose-ui-builder's `:ui-builder-web` project, which
-  // `settings.gradle.kts` includes as a composite build. That project advertises the
-  // `distribution` / `ui-builder-web` attributes this configuration matches on.
+  // The editor archive, from yschimke/compose-ui-builder's GitHub release -- a bare ZIP with no
+  // Gradle module metadata, so it is requested artifact-only (`@zip`) rather than by variant: the
+  // `distribution` / `ui-builder-web` attributes on the configuration above describe the archive,
+  // but nothing in an ivy repository can match them.
   //
-  // When that repository cuts its first release, this coordinate comes from the GitHub release
-  // asset instead, through the group-fenced ivy repository already declared in
-  // `settings.gradle.kts`. Two things change on that day, and neither can be tested before it:
-  //
-  //   - the `includeBuild` block goes, and with it the substitution;
-  //   - a release asset is a bare ZIP with no Gradle module metadata, so it carries none of the
-  //     attributes above. This configuration has to ask for the artifact by extension
-  //     (`...:compose-preview-ui-builder-web:<version>@zip`) rather than by variant.
-  //
-  // The attribute matching is kept until then rather than pre-emptively removed, because it is
-  // what makes the composite path exact, and swapping it for an untested artifact-only dependency
-  // would trade a mechanism CI proves for one nothing does.
+  // `-PcomposeUiBuilderDir` substitutes the included build's `:ui-builder-web` project for this
+  // coordinate, and that project's `runtimeElements` carries the same archive. The artifact-only
+  // request is still what selects it, so both paths resolve the one artifact through the one
+  // declaration.
   add(
     "uiBuilderWeb",
-    libs.composeai.ui.builder.web,
+    "${libs.composeai.ui.builder.web.get()}@zip",
   )
 
   // The render host, the bundle daemon and the git-backed preview history, split out so the CLI's
@@ -382,6 +375,10 @@ dependencies {
   api(platform(libs.composeai.tools.bom))
   api(platform(libs.composeai.contracts.bom))
   api(platform(libs.composeai.daemon.bom))
+  // The UI-builder runtime, export and render bundle carry no version of their own; this platform
+  // is the release that names them, so the runtime and the export cannot skew into a projection
+  // that differs between the browser and the service.
+  api(platform(libs.composeai.ui.builder.bom))
   api(libs.composeai.preview.data.api)
   // `ScreenGenerator` and the component record it reads. Pure-JVM and published: the UI-builder
   // runtime cannot take it (its boundary forbids any composeai module but the protocol), which is
@@ -721,10 +718,16 @@ tasks.register<CheckServeModuleBoundary>("checkServeModuleBoundary") {
     }
   )
 
-  // The UI-builder runtime and its export module are the deliberately narrow libraries beneath the
-  // server. Everything else in this build reaching its classpath is still a failure.
+  // The UI-builder runtime, export and render bundle are the deliberately narrow libraries beneath
+  // the server. Everything else in this build reaching its classpath is still a failure.
   //
-  // `:ui-builder-render-bundle` is here because it is what the runtime's `api` edge now drags in:
+  // They are named as PROJECTS because of `-PcomposeUiBuilderDir`, the one way a UI-builder
+  // project appears here: the included build's projects substitute the published coordinates, so
+  // the same three libraries arrive with a project identity. The default build resolves them as
+  // modules and matches them in `allowedComposeAiModules` below instead. Both spellings have to be
+  // declared or the local path fails a check the released path passes.
+  //
+  // `:ui-builder-render-bundle` is here because it is what the runtime's `api` edge drags in:
   // the packaged preview `PackagedUiBuilderRenderBundle.copyTo` materializes, which used to be a
   // resource inside the runtime's own jar and is a packaged artifact of its own since #346. It
   // has no source set — the jar is one PNG — so nothing about it reaches this classpath as code.
@@ -787,6 +790,16 @@ tasks.register<CheckServeModuleBoundary>("checkServeModuleBoundary") {
       "ee.schimke.composeai:preview-discovery",
       "ee.schimke.composeai:render-session-api",
       "ee.schimke.composeai:render-session-subprocess",
+      // The UI-builder seams as PUBLISHED coordinates. The default build resolves these from
+      // yschimke/compose-ui-builder's releases; `-PcomposeUiBuilderDir` resolves them as projects
+      // instead, which `allowedProjects` above names. `-render-bundle` is not declared anywhere in
+      // this file -- it arrives as the runtime's `api` edge -- so this positive allowlist is the
+      // only thing that can name it, and `-export-jvm` is the KMP variant artifact the export
+      // module resolves to.
+      "ee.schimke.composeai:compose-preview-ui-builder-runtime",
+      "ee.schimke.composeai:compose-preview-ui-builder-export",
+      "ee.schimke.composeai:compose-preview-ui-builder-export-jvm",
+      "ee.schimke.composeai:compose-preview-ui-builder-render-bundle",
       // The offline screen model and generator, reached through `:ui-builder-export`. The server
       // does not call it directly; it arrives because the export module is built on it, which is
       // the point — the generator that writes the Kotlin is a published artefact, not a copy.
@@ -825,10 +838,12 @@ tasks.named("check") { dependsOn("checkServeModuleBoundary") }
  * anywhere in this graph fails a build in another repository with `class file has wrong version
  * 65.0, should be 61.0` — a failure nobody reading this build would connect to a change made here.
  *
- * It is a real risk and not a theoretical one, in both directions. `:ui-builder` now compiles at
- * `java-ui-builder` (21) and sits one `implementation(project(...))` away from this classpath;
- * `dev.snipme:highlights` 1.1.0, which `:ui-builder` takes, is 65 in a third-party jar. A positive
- * allowlist of *artifacts* sees neither: both are allowed coordinates carrying disallowed bytes.
+ * It is a real risk and not a theoretical one. The UI builder's *frontend* lane compiles at
+ * `java-ui-builder` (21) in its own repository, and a class file 65 that reached this classpath —
+ * through a bundle, a sidecar, or a third-party jar some future dependency takes — would be exactly
+ * the failure above. A positive allowlist of *artifacts* cannot see it: that is an allowed
+ * coordinate carrying disallowed bytes. `dev.snipme:highlights`, which the editor takes, is 65 in a
+ * third-party jar and is the concrete example of one.
  *
  * Scanned over the resolved `runtimeClasspath`, which is what the distribution ships and what a
  * consumer's POM resolves, rather than over this module's own output — the output is the half that

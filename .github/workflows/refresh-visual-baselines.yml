@@ -160,6 +160,11 @@ jobs:
     needs: resolve
     if: ${{ needs.resolve.outputs.run == 'true' }}
     runs-on: ubuntu-latest
+    env:
+      # The harness serves the four frontend distributions out of the checkout below. Gradle is not
+      # pointed at it: `:server:installDist` resolves the released editor archive, so this job
+      # exercises the same resolution a contributor's default build does.
+      COMPOSE_UI_BUILDER_DIR: ${{ github.workspace }}/.compose-ui-builder
     permissions:
       contents: write
       # `gh workflow run` below. A push made with GITHUB_TOKEN does not start a workflow, so
@@ -173,6 +178,12 @@ jobs:
           # Kept, unlike every other checkout in this repository: this job's product is a commit on
           # that branch.
           persist-credentials: true
+      - name: Check out the UI builder
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: yschimke/compose-ui-builder
+          path: .compose-ui-builder
+          persist-credentials: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 24.21.0
@@ -199,15 +210,27 @@ jobs:
       - run: sudo rm -f /etc/apt/sources.list.d/google-chrome.list /etc/apt/sources.list.d/microsoft-prod.list
       - run: npx playwright install --with-deps chromium
         working-directory: preview-harness
-      # The same five targets `visual-harness` builds. A narrower set is enough for the Jetcaster
-      # lane alone, but this workflow refreshes any of the three snapshot-owning harnesses, and CI
-      # proves this list serves all of them.
-      - run: >-
+      # The four frontend distributions are built from the UI-builder checkout -- only the editor
+      # is a release asset, and this workflow refreshes all three snapshot-owning harnesses. The
+      # server distribution is installed by this repository's own wrapper, resolving that released
+      # archive, exactly as CI's `visual-harness` job does.
+      #
+      # `--no-daemon --no-parallel --max-workers=1` is not caution: `gradle.properties` sizes the
+      # Kotlin daemon heap for ONE ir2wasm pass, and this job links four executables.
+      - name: Build the UI-builder distributions
+        working-directory: .compose-ui-builder
+        run: >-
           ./gradlew
           :ui-builder:wasmFrontendDist
           :ui-builder-renderer:wasmRendererDist
           :ui-builder-reference-jetcaster:wasmFrontendDist
           :ui-builder-generated-jetcaster:wasmFrontendDist
+          --no-daemon
+          --no-parallel
+          --max-workers=1
+          -Pkotlin.daemon.jvmargs=-Xmx6g
+      - run: >-
+          ./gradlew
           :server:installDist
           --no-daemon
           --no-parallel

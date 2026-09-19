@@ -35,10 +35,10 @@ boundaries.
   formatter that is correct by construction here: a standalone `ktfmt --google-style` preserves a
   hand-broken lambda that the Gradle plugin collapses, so it can produce files CI rejects, and the
   failure reads like a stale checkout rather than a formatter disagreement (#822).
-- `:ui-builder-runtime` compiles under `explicitApi()` and its public API is pinned by the committed
-  dump `ui-builder-runtime/api/ui-builder-runtime.api`, which `checkKotlinAbi` verifies as part of
-  `check`. When that module's API changes, run `./gradlew :ui-builder-runtime:updateKotlinAbi` and
-  commit the dump with the change. `:server` stays off the gate on purpose; its build file says why.
+- `:ui-builder-runtime`'s public API is pinned by a committed ABI dump that `checkKotlinAbi` verifies
+  in its own repository's `check` — not in this one, and that is the cost of the split: an API change
+  there is a release, then a catalog ref bump here. `:server` stays off the gate on purpose; its
+  build file says why.
 - Regenerate the committed goldens with `scripts/regenerate-goldens.sh`, and read the diff. On a
   Renovate branch the `Regenerate goldens` workflow does it for you when CI goes red; on any pull
   request `/regenerate-goldens` asks for the same thing.
@@ -80,9 +80,9 @@ build-brief doctor                            # read-only; never runs Gradle
 build-brief ./gradlew check
 ```
 
-This repository is a good fit for it: `check` here drags in `ktfmtCheckAll`, `checkKotlinAbi` and the
-`:ui-builder-*` test lanes, and the one line that says which gate rejected you is otherwise buried.
-A failure prints the raw log path — open that when the brief is not enough.
+This repository is a good fit for it: `check` here drags in `ktfmtCheckAll`, the `:server:` boundary
+and JVM-floor checks and the wasm-ui test lanes, and the one line that says which gate rejected you
+is otherwise buried. A failure prints the raw log path — open that when the brief is not enough.
 
 On a shared developer host, automated builds use [`scripts/agent-gradle.sh`](scripts/agent-gradle.sh)
 instead of invoking `build-brief` directly:
@@ -110,25 +110,28 @@ reduced form.
 The per-command rules live in the managed `build-brief` block at the end of this file;
 `build-brief --install` regenerates it, so edit it there rather than by hand.
 
-Wrapping changes none of the rules above: `ktfmtFormat`, `updateKotlinAbi` and
-`scripts/regenerate-goldens.sh` are still how those artefacts are regenerated, just run through
-`build-brief`.
+Wrapping changes none of the rules above: `ktfmtFormat` and `scripts/regenerate-goldens.sh` are still
+how those artefacts are regenerated, just run through `build-brief`.
 
 ## Boundary rules
 
 - Default builds resolve released coordinates from Maven Central. Do not add `mavenLocal()`, a
   composite include of `compose-ai-tools`, project substitution, or a shared catalog outside this
-  repository. For user-authorized local prototyping, use the opt-in staged-publication workflow in
-  [`docs/development/LOCAL_DEPENDENCIES.md`](docs/development/LOCAL_DEPENDENCIES.md); keep released
-  builds independent of local checkouts.
-- **The UI builder is a second project inside this repository, on the same release line.** Which
-  modules are in it, the four published seams the server may reach it through, and the rule that it
-  never depends on the server, are written once in
-  [`docs/design/UI_BUILDER_PROJECT_BOUNDARY.md`](docs/design/UI_BUILDER_PROJECT_BOUNDARY.md) and
-  enforced by [`.github/scripts/ui-builder-project-boundary.sh`](.github/scripts/ui-builder-project-boundary.sh)
-  on every pull request. Moving a module between the two projects, or adding a seam, is a change to
-  that document in the same pull request as the code
-  ([#346](https://github.com/yschimke/compose-preview-server/issues/346)).
+  repository. The two opt-in properties `settings.gradle.kts` already defines are the exception and
+  the only one: `-PlocalBuilds=tools,daemon,contracts` and `-PcomposeUiBuilderDir=<path>` swap a
+  released coordinate for a sibling checkout, unset nothing changes, and the default build — so the
+  release — proves the published set resolves. For user-authorized local prototyping without a
+  checkout to follow, use the staged-publication workflow in
+  [`docs/development/LOCAL_DEPENDENCIES.md`](docs/development/LOCAL_DEPENDENCIES.md).
+- The UI builder is a separate repository, [`yschimke/compose-ui-builder`](https://github.com/yschimke/compose-ui-builder),
+  consumed as RELEASES. Its three jars and a BOM come from Maven Central at `composeai-ui-builder` in
+  `gradle/libs.versions.toml`, and the editor archive from that repository's GitHub release through
+  the group-fenced ivy repository in `settings.gradle.kts`. Which modules are seams, and the rule
+  that the builder never depends on the server, are written once in
+  [`docs/design/UI_BUILDER_PROJECT_BOUNDARY.md`](docs/design/UI_BUILDER_PROJECT_BOUNDARY.md) (the
+  authoritative copy is in that repository). A change to this repository's consumption of the
+  builder moves the catalog ref; changing the builder itself is a pull request there, and a change
+  spanning the two needs a release of that repository first.
 - Which repository a module belongs in is decided by the layer rule, written once in
   [`docs/design/REPOSITORY_LAYERS.md`](https://github.com/yschimke/compose-ai-tools/blob/main/docs/design/REPOSITORY_LAYERS.md):
   contracts is shape, compose-ai-tools is offline behaviour, this repository is HTTP and the
@@ -140,12 +143,14 @@ Wrapping changes none of the rules above: `ktfmtFormat`, `updateKotlinAbi` and
   `compose-preview-contracts`; it does not link a Gradle driver
   ([#9](https://github.com/yschimke/compose-preview-server/issues/9),
   [#180](https://github.com/yschimke/compose-preview-server/issues/180)).
-- Three shipping Kotlin modules. `:server` depends on `:ui-builder-runtime`, never back; `:server`
-  holds the HTTP layer, the runner, the catalog store and the web surfaces, and
-  `:ui-builder-runtime` holds persistent design state, catalog validation and renderer-neutral
-  export orchestration. They share one release line and ship inside the standalone server archive;
-  this repository publishes no Maven coordinates. `checkUiBuilderRuntimeBoundary` and
-  `checkServeModuleBoundary` enforce the graph.
+- Three shipping Kotlin modules. `:server` holds the HTTP layer, the runner, the catalog store and
+  the web surfaces; `:mcp` is the Model Context Protocol server; `:usage-source-psi`, `:wasm-ui` and
+  `:native-catalog-m3` are the supporting build modules. The UI builder's service — `:ui-builder-runtime`
+  — is not here: it is a released coordinate from `yschimke/compose-ui-builder` that `:server` links,
+  and it holds persistent design state, catalog validation and renderer-neutral export orchestration
+  there. This repository publishes no Maven coordinates; the modules ship inside the standalone
+  server archive. `checkServeModuleBoundary` and `checkServerJvmFloor` enforce the graph and the
+  floor.
 - `:mcp` is the third, and it depends on neither of the other two. It is the Model Context Protocol
   server — `compose-preview mcp serve` — moved here from compose-ai-tools because the layer rule
   places a module that needs an HTTP server in this repository (compose-ai-tools#5176), and it
@@ -171,12 +176,13 @@ Wrapping changes none of the rules above: `ktfmtFormat`, `updateKotlinAbi` and
   owned upstream, vendored by `scripts/sync-preview-selector-fixtures.sh`, and run by
   `PreviewSelectorFixturesTest`. Change the rule, change the table upstream in the same change.
 - Two JVM floors, `java-server` (17) and `java-ui-builder` (21), declared once in
-  `gradle/libs.versions.toml` with the reasoning beside them. Everything a consumer compiles or
-  resolves against is 17, because compose-ai-tools' `:cli` compiles against published
-  `compose-preview-serve` on a 17 toolchain; only `:ui-builder` and `:ui-builder-artwork`, whose
-  class files leave the build solely inside `:ui-builder-render-bundle`'s polyglot, sit above it.
-  Building needs both JDKs. Never raise a module's toolchain by editing the module —
-  `:server:checkServerJvmFloor` scans the resolved distribution classpath and will say so.
+  `gradle/libs.versions.toml` with the reasoning beside them. Everything this repository compiles or
+  resolves against is 17, because compose-ai-tools' `:cli` compiles against the released server on a
+  17 toolchain. The 21 floor is the UI-builder frontend's, in its own repository; it reaches this
+  build only as data inside `compose-preview-ui-builder-render-bundle`'s polyglot PNG, which the
+  startup preflight reads. Building the `visual-harness` lane still needs both JDKs. Never raise a
+  module's toolchain by editing the module — `:server:checkServerJvmFloor` scans the resolved
+  distribution classpath and will say so.
 - **Never fabricate a component in the Wasm canvas to stand in for a library the canvas cannot
   link.** The editor's canvas is Compose Multiplatform for Wasm; `androidx.wear.compose` is an
   Android AAR it can never link, and hand-assembling a lookalike out of Material 3 pieces produces an
