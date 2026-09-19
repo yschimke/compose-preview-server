@@ -66,13 +66,20 @@ private fun run(command: String, args: List<String>) {
   // server's lifetime on any machine with the CLI on PATH — and a stale or unresponsive one could
   // block the unbounded handshake, so the self-contained command failed to open at all.
   val projectlessUi = command == ServerCommands.UI && LocalUiBuilder.isProjectless(args)
+  // The module the invocation asked for, read from raw argv before any lane rewriting: the spawn
+  // needs it, and `ServeCommandOptions` parses the same spelling later. A blank value is absent
+  // rather than an error here — the options parser owns what a malformed `--module` means.
+  val requestedModule = args.flagValue("--module")?.takeIf { it.isNotBlank() }
   val buildHost =
     if (projectlessUi) null
     else
       BuildHostDiscovery.choose(args)?.let { choice ->
-        ProcessBuildHost.spawn(choice.binary, workingDirectory = null)?.also {
-          System.err.println("compose-preview build host: ${choice.binary} (from ${choice.source})")
-        }
+        ProcessBuildHost.spawn(choice.binary, workingDirectory = null, module = requestedModule)
+          ?.also {
+            System.err.println(
+              "compose-preview build host: ${choice.binary} (from ${choice.source})"
+            )
+          }
       }
 
   try {

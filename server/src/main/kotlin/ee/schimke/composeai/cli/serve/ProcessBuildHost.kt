@@ -118,14 +118,22 @@ private constructor(private val process: Process, private val connection: BuildH
      * serve without one. Each is reported to stderr on the way past, since "the server quietly did
      * not use the build host you installed" is the failure mode worth avoiding.
      */
-    fun spawn(binary: String, workingDirectory: File?): ProcessBuildHost? {
+    fun spawn(binary: String, workingDirectory: File?, module: String? = null): ProcessBuildHost? {
       // The full argv is built here, from the binary alone, and that is deliberate. An earlier
       // shape
       // took the whole command and appended only `--stdio`, which left every caller responsible for
       // remembering the `build-host` subcommand — and the first caller that forgot got a CLI usage
       // banner instead of a handshake, spawn() returning null, and a server that quietly served
       // without a build host. One place builds it now, so there is nothing to forget.
-      val command = listOf(binary, SUBCOMMAND, BuildHostProtocol.STDIO_FLAG)
+      //
+      // `--module` travels here rather than in the discovery request because the build host
+      // resolves it through the same `Command.explicitModule` every CLI command uses: passing it at
+      // spawn scopes `resolveModules` before the render task is even configured, which is the
+      // difference between building one module and building every module and discarding the rest.
+      // The discovery request carries no module field, so there is nothing to forget there either.
+      val command =
+        listOf(binary, SUBCOMMAND, BuildHostProtocol.STDIO_FLAG) +
+          (module?.takeIf { it.isNotBlank() }?.let { listOf("--module", it) } ?: emptyList())
       val process =
         try {
           ProcessBuilder(command)

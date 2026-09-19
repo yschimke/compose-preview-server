@@ -78,6 +78,66 @@ class ProcessBuildHostTest {
     assertNull(ProcessBuildHost.spawn(File(dir, "not-installed").path, workingDirectory = dir))
   }
 
+  /**
+   * The module reaches the host's argv, where `Command.explicitModule` reads it and
+   * `resolveModules` scopes the render to one module. Without this the host renders every module
+   * and the server discovers them all — the flag's whole promise.
+   */
+  @Test
+  fun `spawn passes the module through to the build host argv`(@TempDir dir: File) {
+    val argvFile = File(dir, "argv.txt")
+    val script =
+      fakeHost(
+        dir,
+        """
+        printf '%s\n' "${'$'}@" > "${argvFile.path}"
+        while IFS= read -r line; do
+          id=${'$'}(printf '%s' "${'$'}line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
+          printf '{"id":%s,"response":{"kind":"handshake","protocolVersion":1,"hostVersion":"fake"}}\n' "${'$'}id"
+        done
+        """
+          .trimIndent(),
+      )
+
+    val host =
+      assertNotNull(
+        ProcessBuildHost.spawn(script.path, workingDirectory = dir, module = ":remote-catalog")
+      )
+    try {
+      assertEquals(
+        listOf("build-host", "--stdio", "--module", ":remote-catalog"),
+        argvFile.readLines(),
+      )
+    } finally {
+      host.close()
+    }
+  }
+
+  /** No module is no argument: a server that did not scope must not pretend it did. */
+  @Test
+  fun `spawn omits the module when none was asked for`(@TempDir dir: File) {
+    val argvFile = File(dir, "argv.txt")
+    val script =
+      fakeHost(
+        dir,
+        """
+        printf '%s\n' "${'$'}@" > "${argvFile.path}"
+        while IFS= read -r line; do
+          id=${'$'}(printf '%s' "${'$'}line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
+          printf '{"id":%s,"response":{"kind":"handshake","protocolVersion":1,"hostVersion":"fake"}}\n' "${'$'}id"
+        done
+        """
+          .trimIndent(),
+      )
+
+    val host = assertNotNull(ProcessBuildHost.spawn(script.path, workingDirectory = dir))
+    try {
+      assertEquals(listOf("build-host", "--stdio"), argvFile.readLines())
+    } finally {
+      host.close()
+    }
+  }
+
   /** A version this server does not speak means serve without one, not fail to start. */
   @Test
   fun `a version mismatch yields no build host`(@TempDir dir: File) {
