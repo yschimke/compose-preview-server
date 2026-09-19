@@ -97,13 +97,7 @@ class RootSurfaceGroundAnnotatedExporterTest {
       documentHash = "hash",
       document = document,
       catalog =
-        CatalogCapabilityV1(
-          schema = "compose-catalog-capabilities/v1",
-          benchmark =
-            CatalogBenchmarkV1("test", "source", "test-catalog", "candidate", "candidate"),
-          components = emptyList(),
-          exportCapabilities = ExportCapabilitiesV1(composeCode = true, svg = true, png = true),
-        ),
+        CatalogCapabilityV1.Builder("compose-catalog-capabilities/v1", CatalogBenchmarkV1.Builder("test", "source", "test-catalog", "candidate", "candidate").build(), emptyList()).also { it.exportCapabilities = ExportCapabilitiesV1.Builder().also { it.composeCode = true; it.svg = true; it.png = true }.build() }.build(),
       format = format,
     )
 }

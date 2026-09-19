@@ -313,7 +313,7 @@ class ServeUiBuilderMcp(
     val catalogs =
       listed.catalogs.map { catalog ->
         if (componentIds == null) catalog
-        else catalog.copy(components = catalog.components.filter { it.componentId in componentIds })
+        else catalog.newBuilder().also { it.components = catalog.components.filter { it.componentId in componentIds } }.build()
       }
     if (full) {
       return envelope(callId, UiBuilderServiceResponse.Catalogs(catalogs, listed.pins))
@@ -1721,7 +1721,7 @@ internal data class CatalogSummaryV1(
    * The exact pin a document must carry to resolve to this catalog. Absent if the host cannot say.
    */
   val catalogPin: CatalogReferenceV1? = null,
-  val exportCapabilities: ExportCapabilitiesV1 = ExportCapabilitiesV1(),
+  val exportCapabilities: ExportCapabilitiesV1 = ExportCapabilitiesV1.Builder().build(),
   /**
    * Every modifier type some component here accepts, once. Which component accepts which is in the
    * whole capability; nearly every component accepts nearly all of them, listing the set per

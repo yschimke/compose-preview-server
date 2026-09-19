@@ -67,7 +67,7 @@ import kotlinx.serialization.json.contentOrNull
 class PublishedM3CatalogEquivalenceTest {
 
   private val json = Json { ignoreUnknownKeys = true }
-  private val exports = ExportCapabilitiesV1(composeCode = true, svg = false, png = false)
+  private val exports = ExportCapabilitiesV1.Builder().also { it.composeCode = true; it.svg = false; it.png = false }.build()
 
   private fun fixture(name: String) = File("../docs/design/fixtures/ui-builder/$name").readText()
 
@@ -296,11 +296,7 @@ class PublishedM3CatalogEquivalenceTest {
   @Test
   fun `a published catalog is handed its own platform's builder vocabulary, not every catalog's`() {
     val wearShaped =
-      composed.copy(
-        benchmark = composed.benchmark.copy(catalogSystemId = "wear-m3"),
-        statusSemantics =
-          JsonObject(composed.statusSemantics + ("platform" to JsonPrimitive("wear"))),
-      )
+      composed.newBuilder().also { it.benchmark = composed.benchmark.newBuilder().also { it.catalogSystemId = "wear-m3" }.build(); it.statusSemantics = JsonObject(composed.statusSemantics + ("platform" to JsonPrimitive("wear"))) }.build()
     val served =
       CurrentM3UiBuilderCatalogExecutor(
           catalogSystemIds = linkedSetOf("wear-m3"),
@@ -526,7 +522,7 @@ class PublishedM3CatalogEquivalenceTest {
     val served =
       CurrentM3UiBuilderCatalogExecutor(
           catalogSystemIds = linkedSetOf("m3-catalog"),
-          published = mapOf("m3-catalog" to composed.copy(statusSemantics = ownRegistry)),
+          published = mapOf("m3-catalog" to composed.newBuilder().also { it.statusSemantics = ownRegistry }.build()),
         )
         .listCatalogs()
         .single()

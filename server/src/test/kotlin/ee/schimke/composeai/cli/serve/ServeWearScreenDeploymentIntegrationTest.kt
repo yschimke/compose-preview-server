@@ -226,11 +226,7 @@ class ServeWearScreenDeploymentIntegrationTest {
           CurrentM3UiBuilderCatalogExecutor(
             catalogSystemIds = PACKAGED_DEFAULT,
             exportCapabilities =
-              ee.schimke.composeai.uibuilder.protocol.ExportCapabilitiesV1(
-                composeCode = true,
-                svg = false,
-                png = false,
-              ),
+              ee.schimke.composeai.uibuilder.protocol.ExportCapabilitiesV1.Builder().also { it.composeCode = true; it.svg = false; it.png = false }.build(),
           ),
         // No component record, deliberately: a Wear screen is written by `RecordFreeExport`'s
         // emitter rather than from a recovered signature, and the packaged image passes a record

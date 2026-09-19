@@ -2717,12 +2717,8 @@ public class ServeRunner(
       documentExporter?.let { RemotePngExportExecutor(it, renderer) } ?: pictureExporter
     val pictureExports =
       ((pictureExporter as? ProductionUiBuilderExportExecutor)?.capabilities
-          ?: ee.schimke.composeai.uibuilder.protocol.ExportCapabilitiesV1(
-            composeCode = true,
-            svg = false,
-            png = false,
-          ))
-        .copy(composeCode = composeExportConfigured)
+          ?: ee.schimke.composeai.uibuilder.protocol.ExportCapabilitiesV1.Builder().also { it.composeCode = true; it.svg = false; it.png = false }.build())
+        .newBuilder().also { it.composeCode = composeExportConfigured }.build()
     val uiBuilderExports =
       RemoteDocumentExportSupport.capabilities(
         pictureExports,

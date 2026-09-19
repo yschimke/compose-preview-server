@@ -27,7 +27,7 @@ import kotlinx.serialization.json.Json
  */
 class PublishedUiBuilderCatalogCollisionTest {
 
-  private val exports = ExportCapabilitiesV1(composeCode = true, svg = false, png = false)
+  private val exports = ExportCapabilitiesV1.Builder().also { it.composeCode = true; it.svg = false; it.png = false }.build()
 
   /**
    * The canonical id [record] gives the entry at [index].
