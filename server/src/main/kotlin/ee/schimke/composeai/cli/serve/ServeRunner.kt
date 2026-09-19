@@ -974,8 +974,30 @@ public class ServeRunner(
       return
     }
 
-    // Discover + build the module(s) so manifests exist and previews resolve. `--module` scopes it.
-    val outcome = discoverAndBuild(silenceStdout = false)
+    // Discover + build the module(s) so manifests exist and previews resolve. `--module` scopes it,
+    // and the spawn passes the module to the build host so the render task itself is narrowed —
+    // this is not a post-hoc filter of a full multi-module build.
+    val discovered = discoverAndBuild(silenceStdout = false)
+    // Applied again here, for the hosts that predate the spawn argument: a `--module` that the
+    // build host ignored would otherwise render every module and then fail with "N modules
+    // discovered; narrow with --module <path>" — naming the flag the caller already passed. With
+    // the selection made here the flag's promise holds either way; the difference the spawn makes
+    // is the work not done, not the module served.
+    val outcome =
+      explicitModule?.let { requested ->
+        selectRequestedModule(discovered, requested)
+          ?: run {
+            System.err.println(
+              "serve: --module $requested matched no discovered preview module" +
+                if (discovered.manifests.isEmpty()) "."
+                else
+                  ": " +
+                    discovered.manifests.joinToString(", ") { (module, _) -> module.gradlePath } +
+                    "."
+            )
+            exitProcess(3)
+          }
+      } ?: discovered
     if (!outcome.buildOk) {
       System.err.println("serve: render build failed.")
       exitProcess(2)

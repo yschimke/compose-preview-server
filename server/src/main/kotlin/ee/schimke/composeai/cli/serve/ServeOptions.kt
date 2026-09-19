@@ -833,3 +833,27 @@ public class ServeDiscovery(
   public val buildOk: Boolean,
   public val manifests: List<Pair<PreviewModule, PreviewManifest>>,
 )
+
+/**
+ * [discovered] narrowed to the module [requested] names, or null when it is not among them.
+ *
+ * `--module` is scoped inside the build host — the spawn passes it, and `resolveModules` resolves
+ * exactly one module before the render task is configured. This is the server-side half of the same
+ * promise, applied to whatever came back: a build host older than the spawn argument ignores
+ * `--module` and reports every module, and without this the run would render them all and then fail
+ * with "N modules discovered; narrow with --module <path>" — naming the flag the caller already
+ * passed.
+ *
+ * The comparison mirrors `GradleConnector.findPreviewModule`: `PreviewModule.gradlePath` carries no
+ * leading colon (`:app` and `app` are the same module), and a nested path stays colon-separated.
+ * Both sides are normalised, because the driver's own modules are bare while a fixture or a
+ * hand-built `PreviewModule` may carry the colon.
+ */
+internal fun selectRequestedModule(
+  discovered: ServeDiscovery,
+  requested: String,
+): ServeDiscovery? {
+  val normalized = requested.removePrefix(":")
+  val selected = discovered.manifests.filter { it.first.gradlePath.removePrefix(":") == normalized }
+  return if (selected.isEmpty()) null else ServeDiscovery(discovered.buildOk, selected)
+}
