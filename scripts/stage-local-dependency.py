@@ -97,7 +97,7 @@ def main() -> None:
     manifest = stage(args.checkout, args.module, args.output)
     print(f"\nLocal dependencies staged. Build the existing application with:\n"
           f"./gradlew {shlex.quote('-PlocalDependencies=' + str(manifest))} "
-          ":ui-builder:jvmTest :ui-builder:compileKotlinWasmJs")
+          "-PcomposeUiBuilderDir=../compose-ui-builder :server:test")
 
 
 if __name__ == "__main__":

@@ -8,11 +8,16 @@
 >
 > What changed here: rule 3 and `.github/scripts/ui-builder-project-boundary.sh` are gone, because a
 > module cannot join the wrong project when the projects are different repositories. The four seams
-> in rule 2's table are now Maven coordinates, resolved — until the publishing lane lands — by
-> substituting an included build's projects for them. `settings.gradle.kts` holds that wiring.
+> in rule 2's table are Maven coordinates, and since 3.26.0 they resolve as RELEASES: the runtime,
+> the export projection and the render bundle from Maven Central through
+> `compose-preview-ui-builder-bom`, the editor archive from that repository's GitHub release through
+> a group-fenced ivy repository. `settings.gradle.kts` holds both, and `-PcomposeUiBuilderDir` opts
+> into a checkout as a composite build for working on the two repositories together.
 >
 > The cost this document predicted for a split is now being paid rather than predicted: a change
-> spanning the editor and the routes that serve it is two pull requests.
+> spanning the editor and the routes that serve it is two pull requests, and the release lines are
+> separate too — this repository's `3.x` and that repository's own numbering — so a builder change
+> that the server needs arrives as a release there and a catalog ref bump here.
 
 
 **Status: normative.** The rule is enforced by
@@ -95,7 +100,9 @@ server-side", would have put the boundary in the middle of the builder's own sta
 ## What the boundary is *not*
 
 - **Not a release boundary.** One version line, one `.release-please-manifest.json`, one tag. Both
-  projects ship together, and a change spanning them is still one pull request.
+  projects ship together, and a change spanning them is still one pull request. (Superseded, like
+  the rest of this section: the two repositories release on their own lines now, and the note at the
+  top of this copy says how the server consumes the other one's releases.)
 - **Not a directory boundary.** The modules stay where they are. Moving them would rewrite every
   path in CI and every reference in `docs/`, to express in the tree what the check already
   expresses in one file.

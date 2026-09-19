@@ -20,24 +20,32 @@ cd "$(dirname "$0")/.."
 # environment variable is not one of them, so without this a regeneration straight after a green
 # run is a no-op that reads as "the goldens were already correct". `--rerun` and not
 # `--rerun-tasks`, which would additionally recompile every task `:server:test` depends on.
-UPDATE_SERVE_WEB_FIXTURES=true UPDATE_UI_BUILDER_BEHAVIOR_FIXTURE=true ./gradlew -PuiBuilderRemoteCompose=true :server:test \
+#
+# `-PcomposeUiBuilderDir` because `BehaviorScreenExportTest` is gated on
+# `UiBuilderBuildFeatures.remoteCompose`, and that constant now comes from the UI-builder export's
+# own release build — where the flag is off. Without the checkout the test SKIPS and the two
+# `state-actions` fixtures silently stay as they were, which is the failure mode the `--rerun`
+# comment above exists to prevent. A missing checkout fails the require() in `settings.gradle.kts`
+# rather than skipping, which is the right shape for a regeneration.
+UPDATE_SERVE_WEB_FIXTURES=true UPDATE_UI_BUILDER_BEHAVIOR_FIXTURE=true ./gradlew -PcomposeUiBuilderDir=../compose-ui-builder -PuiBuilderRemoteCompose=true :server:test \
   --tests '*ServeWebFixtureTest*' \
   --tests '*ExplodedSvgFixtureTest*' \
   --tests '*BehaviorScreenExportTest*' \
   --rerun
 
-# The synthesised `wear-m3` / `remote-m3` catalogs, in a second module and behind a Gradle property
-# rather than an environment variable — `-D` on the command line reaches the Gradle JVM and not the
-# forked test JVM, which is a silent no-op and a confusing half hour. Same `--rerun` reasoning.
-./gradlew -PuiBuilderRemoteCompose=true :ui-builder-runtime:test \
-  --tests '*SynthesisedCatalogGoldenTest*' \
-  -PuiBuilderGoldens=write \
-  --rerun
-
-# Remote Kotlin is compiled verbatim by the standalone Android recording proof.
-UPDATE_UI_BUILDER_REMOTE_ROOT_FIXTURE=true ./gradlew -PuiBuilderRemoteCompose=true :ui-builder-export:jvmTest \
-  --tests '*RemoteRootSourceExportTest*' \
-  --rerun
+# The synthesised `wear-m3` / `remote-m3` catalogs are NOT regenerated here any more. They are
+# written by `SynthesisedCatalogGoldenTest`, which lives with the runtime that synthesises them
+# (yschimke/compose-ui-builder, `:ui-builder-runtime`), and this repository keeps a copy of the two
+# files because `ui-builder-contract` compares the published catalogs against them. Regenerate them
+# in a checkout of that repository and copy the two files across:
+#
+#   (cd ../compose-ui-builder && ./gradlew -PuiBuilderRemoteCompose=true \
+#     :ui-builder-runtime:test --tests '*SynthesisedCatalogGoldenTest*' -PuiBuilderGoldens=write)
+#   cp ../compose-ui-builder/docs/design/fixtures/ui-builder/{wear,remote}-m3-capabilities-v1.json \
+#     docs/design/fixtures/ui-builder/
+#
+# `RemoteRootSourceExportTest` moved with it for the same reason; `remote-root.kt.txt` in this
+# directory is generated there and copied the same way.
 
 echo
 echo "regenerated:"

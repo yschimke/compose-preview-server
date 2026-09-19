@@ -32,13 +32,14 @@ catalog to fetch. Designs are saved under `~/.compose-preview/ui-builder-state` 
 restart. A browser is opened on the builder; `--no-open` prints the URL instead.
 
 The builder bundle it serves is already inside the server distribution, so downloading
-`compose-preview-server-<version>.tar.gz` from a release is the whole install. Releases also carry
-`compose-preview-ui-builder-web-<version>.zip` on its own, for serving the bundle yourself or
-pointing an existing server at it with `--ui-builder-dir`. To build it from this repository
-instead:
+`compose-preview-server-<version>.tar.gz` from a release is the whole install. The editor also ships
+on its own as `compose-preview-ui-builder-web-<version>.zip` on
+[compose-ui-builder's releases](https://github.com/yschimke/compose-ui-builder/releases), for
+serving the bundle yourself or pointing an existing server at it with `--ui-builder-dir`. To build
+it from a checkout of that repository instead:
 
 ```bash
-./gradlew :ui-builder:wasmFrontendDist   # writes ui-builder/build/wasmDist
+(cd ../compose-ui-builder && ./gradlew :ui-builder:wasmFrontendDist)   # writes ui-builder/build/wasmDist
 ```
 
 ### Against your own project

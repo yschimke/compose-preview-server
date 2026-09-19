@@ -1,16 +1,24 @@
 # UI-builder compile-time features
 
-Remote Compose authoring is disabled by default. Enable the current experimental work when building:
+Remote Compose authoring is disabled by default. Enabling it is a build of **both** repositories,
+because the flag has two halves:
 
 ```sh
-./gradlew -PuiBuilderRemoteCompose=true :server:installDist :mcp:installDist
+# The MCP adapter's half is generated in this repository.
+./gradlew -PuiBuilderRemoteCompose=true :mcp:installDist
+
+# The server's half reads `UiBuilderBuildFeatures` out of the UI-builder export, and a release ships
+# the default (`false`), so this is the only way to turn it on:
+./gradlew -PcomposeUiBuilderDir=../compose-ui-builder -PuiBuilderRemoteCompose=true \
+  :server:installDist
 ```
 
 The same property generates Kotlin `const val` selections for the shared UI-builder code (JVM and
-WASM) and the independently published MCP adapter. Leaving it unset or passing `false` builds the
-default configuration. Any other value is rejected. Changing a query parameter, environment variable
-at runtime, catalog capability or MCP request cannot enable a disabled build. Rebuild and deploy the
-server and its packaged WASM frontend together when changing the option.
+WASM, in yschimke/compose-ui-builder) and the independently published MCP adapter. Leaving it unset
+or passing `false` builds the default configuration. Any other value is rejected. Changing a query
+parameter, environment variable at runtime, catalog capability or MCP request cannot enable a
+disabled build. Rebuild and deploy the server and its packaged WASM frontend together when changing
+the option.
 
 The option controls:
 
@@ -29,6 +37,11 @@ claim the experimental work covers the full Remote Compose operation set.
 For generator/player changes that have not been released, combine the option with the explicit
 [local dependency manifest](LOCAL_DEPENDENCIES.md). Local artifacts are optional; they are never
 selected implicitly. Main's released contracts already declare JSON/RC formats.
+
+Because the UI builder is consumed as releases, the server's half of the flag is only switchable
+against a checkout (`-PcomposeUiBuilderDir`). The CI lane that proves the enabled configuration
+(`ui-builder-remote-compose`) takes that checkout for exactly this reason, and no release of
+yschimke/compose-ui-builder enables the flag.
 
 ## Verification
 
