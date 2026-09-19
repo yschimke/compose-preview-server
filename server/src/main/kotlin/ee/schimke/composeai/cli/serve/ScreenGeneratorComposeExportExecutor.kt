@@ -389,6 +389,14 @@ internal class ScreenGeneratorComposeExportExecutor(
             document,
             packageName,
             tagNodes,
+            // The native lane **compiles** this source, against a catalog's runtime bundle — and
+            // that bundle carries neither `compose-ui-tooling` nor `preview-annotations`, because
+            // neither is a runtime artifact. An export artifact's preview fan-out is therefore
+            // unbuildable here: emitting it failed every Wear design with
+            // `Unresolved reference 'WearPreviewDevices'`, which reads as a broken design rather
+            // than as a file asking for artifacts the host does not have. This lane writes its own
+            // `@Preview` around the composable (`UiBuilderGeneratedPreviewAdapter`).
+            previews = false,
             packComponents =
               when (val resolved = recordFreeComponents(document, packRecords)) {
                 is RecordFreeComponents.Refused ->
