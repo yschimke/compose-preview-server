@@ -161,7 +161,17 @@ internal object ComponentRecordPacks {
   ): ComponentCapabilityV1 {
     val slots =
       component.slots.map { slot ->
-        SlotCapabilityV1.Builder(slot.name, SlotCardinalityV1.Builder().also { it.min = 0; it.max = null }.build(), true).build()
+        SlotCapabilityV1.Builder(
+            slot.name,
+            SlotCardinalityV1.Builder()
+              .also {
+                it.min = 0
+                it.max = null
+              }
+              .build(),
+            true,
+          )
+          .build()
       }
     val slotNames = slots.map { it.name }.toSet()
     val properties =
@@ -169,10 +179,19 @@ internal object ComponentRecordPacks {
         .filterNot { it.composableSlot || it.name in slotNames }
         .mapNotNull { parameter ->
           val jsonType = jsonTypeOf(parameter) ?: return@mapNotNull null
-          PropertyCapabilityV1.Builder(propertyNameOf(parameter), JsonPrimitive(jsonType)).also { it.required = !parameter.hasDefault && !parameter.nullable; it.notes = "`${parameter.name}: ${parameter.type}` on `${component.symbol.callable}`." }.build()
+          PropertyCapabilityV1.Builder(propertyNameOf(parameter), JsonPrimitive(jsonType))
+            .also {
+              it.required = !parameter.hasDefault && !parameter.nullable
+              it.notes = "`${parameter.name}: ${parameter.type}` on `${component.symbol.callable}`."
+            }
+            .build()
         }
     val container = slots.isNotEmpty()
-    return ComponentCapabilityV1.Builder(id, displayName(component.symbol.name), if (container) "Container" else "Leaf", WasmCapabilityV1.Builder(
+    return ComponentCapabilityV1.Builder(
+        id,
+        displayName(component.symbol.name),
+        if (container) "Container" else "Leaf",
+        WasmCapabilityV1.Builder(
             platformSupported = JsonPrimitive(false),
             adapterStatus = WasmAdapterStatusV1.UNSUPPORTED,
           )
@@ -182,7 +201,33 @@ internal object ComponentRecordPacks {
                 "classes. The native preview compiles `${component.symbol.callable}` against the " +
                 "served $packId bundle and renders the real component."
           }
-          .build()).also { it.traits = listOf(PACK_TRAIT); it.slots = slots; it.properties = properties; it.modifierCapabilities = structuralModifiers(container); it.code = CodeCapabilityV1.Builder(component.symbol.callable).also { it.imports = component.code?.imports.orEmpty().ifEmpty { listOf(component.symbol.callable) } }.build(); it.svg = SvgCapabilityV1.Builder(SvgCapabilityStatusV1.UNSUPPORTED, SvgFallbackV1.EMBEDDED_RASTER, false).also { it.notes = "A pack component has no vector adapter; SVG export embeds the native raster." }.build() }.build()
+          .build(),
+      )
+      .also {
+        it.traits = listOf(PACK_TRAIT)
+        it.slots = slots
+        it.properties = properties
+        it.modifierCapabilities = structuralModifiers(container)
+        it.code =
+          CodeCapabilityV1.Builder(component.symbol.callable)
+            .also {
+              it.imports =
+                component.code?.imports.orEmpty().ifEmpty { listOf(component.symbol.callable) }
+            }
+            .build()
+        it.svg =
+          SvgCapabilityV1.Builder(
+              SvgCapabilityStatusV1.UNSUPPORTED,
+              SvgFallbackV1.EMBEDDED_RASTER,
+              false,
+            )
+            .also {
+              it.notes =
+                "A pack component has no vector adapter; SVG export embeds the native raster."
+            }
+            .build()
+      }
+      .build()
   }
 
   /** The JSON Schema type a parameter's literal has, or null for a parameter with no literal. */

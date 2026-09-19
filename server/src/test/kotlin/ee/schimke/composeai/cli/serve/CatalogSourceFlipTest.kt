@@ -45,7 +45,14 @@ import kotlinx.serialization.json.Json
 class CatalogSourceFlipTest {
 
   private val json = Json { ignoreUnknownKeys = true }
-  private val exports = ExportCapabilitiesV1.Builder().also { it.composeCode = true; it.svg = false; it.png = false }.build()
+  private val exports =
+    ExportCapabilitiesV1.Builder()
+      .also {
+        it.composeCode = true
+        it.svg = false
+        it.png = false
+      }
+      .build()
 
   private fun fixture(name: String) = File("../docs/design/fixtures/ui-builder/$name").readText()
 

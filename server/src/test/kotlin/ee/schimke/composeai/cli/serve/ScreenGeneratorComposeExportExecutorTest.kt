@@ -134,7 +134,23 @@ class ScreenGeneratorComposeExportExecutorTest {
   }
 
   private val catalog =
-    CatalogCapabilityV1.Builder("compose-catalog-capabilities/v1", CatalogBenchmarkV1.Builder("test", "source", "test-catalog", "candidate", "candidate").build(), emptyList()).also { it.exportCapabilities = ExportCapabilitiesV1.Builder().also { it.composeCode = true; it.svg = false; it.png = false }.build() }.build()
+    CatalogCapabilityV1.Builder(
+        "compose-catalog-capabilities/v1",
+        CatalogBenchmarkV1.Builder("test", "source", "test-catalog", "candidate", "candidate")
+          .build(),
+        emptyList(),
+      )
+      .also {
+        it.exportCapabilities =
+          ExportCapabilitiesV1.Builder()
+            .also {
+              it.composeCode = true
+              it.svg = false
+              it.png = false
+            }
+            .build()
+      }
+      .build()
 
   private fun export(
     document: DesignDocumentV1 = ScreenGeneratorScreenFixture.document(),

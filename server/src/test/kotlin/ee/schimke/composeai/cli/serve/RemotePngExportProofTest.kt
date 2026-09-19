@@ -198,7 +198,12 @@ class RemotePngExportProofTest {
         catalogSystemIds = setOf("remote-m3"),
         exportCapabilities =
           ee.schimke.composeai.uibuilder.RemoteDocumentExportSupport.capabilities(
-            ExportCapabilitiesV1.Builder().also { it.png = true; it.composeCode = repetition }.build(),
+            ExportCapabilitiesV1.Builder()
+              .also {
+                it.png = true
+                it.composeCode = repetition
+              }
+              .build(),
             json = true,
             document = true,
           ),

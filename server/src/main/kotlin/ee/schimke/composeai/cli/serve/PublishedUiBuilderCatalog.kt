@@ -407,7 +407,23 @@ internal object PublishedUiBuilderCatalog {
     }
 
     val catalog =
-      CatalogCapabilityV1.Builder(CAPABILITY_SCHEMA, CatalogBenchmarkV1.Builder(id, file.record?.file ?: UI_BUILDER_CATALOG_FILE_NAME, id, revisionOf(publishedJson), NATIVE_RUNTIME_ID).build(), taken.values.toList()).also { it.exportCapabilities = exportCapabilities; it.statusSemantics = rawSemantics }.build()
+      CatalogCapabilityV1.Builder(
+          CAPABILITY_SCHEMA,
+          CatalogBenchmarkV1.Builder(
+              id,
+              file.record?.file ?: UI_BUILDER_CATALOG_FILE_NAME,
+              id,
+              revisionOf(publishedJson),
+              NATIVE_RUNTIME_ID,
+            )
+            .build(),
+          taken.values.toList(),
+        )
+        .also {
+          it.exportCapabilities = exportCapabilities
+          it.statusSemantics = rawSemantics
+        }
+        .build()
     val note =
       "$id — published ui-builder.json (${taken.size} component(s)" +
         (if (skipped.isEmpty()) "" else ", ${skipped.size} skipped") +
@@ -486,10 +502,34 @@ internal object PublishedUiBuilderCatalog {
     // `UiBuilderComponentPolicy.slotCapabilities`.
     val slots =
       policy?.slotCapabilities?.map { stated ->
-        SlotCapabilityV1.Builder(stated.name, SlotCardinalityV1.Builder().also { it.min = stated.cardinality.min; it.max = stated.cardinality.max }.build(), stated.ordered).also { it.acceptedRoles = stated.acceptedRoles; it.acceptedTraits = stated.acceptedTraits }.build()
+        SlotCapabilityV1.Builder(
+            stated.name,
+            SlotCardinalityV1.Builder()
+              .also {
+                it.min = stated.cardinality.min
+                it.max = stated.cardinality.max
+              }
+              .build(),
+            stated.ordered,
+          )
+          .also {
+            it.acceptedRoles = stated.acceptedRoles
+            it.acceptedTraits = stated.acceptedTraits
+          }
+          .build()
       }
         ?: component.slots.map { slot ->
-          SlotCapabilityV1.Builder(slot.name, SlotCardinalityV1.Builder().also { it.min = 0; it.max = null }.build(), true).build()
+          SlotCapabilityV1.Builder(
+              slot.name,
+              SlotCardinalityV1.Builder()
+                .also {
+                  it.min = 0
+                  it.max = null
+                }
+                .build(),
+              true,
+            )
+            .build()
         }
     val slotNames = slots.map { it.name }.toSet()
     // What the catalog says it offers, and only failing that what its call site happens to take.
@@ -500,7 +540,15 @@ internal object PublishedUiBuilderCatalog {
         .filterNot { it.composableSlot || it.name in slotNames }
         .mapNotNull { parameter ->
           val jsonType = ComponentRecordPacks.jsonTypeOf(parameter) ?: return@mapNotNull null
-          PropertyCapabilityV1.Builder(ComponentRecordPacks.propertyNameOf(parameter), JsonPrimitive(jsonType)).also { it.required = !parameter.hasDefault && !parameter.nullable; it.notes = "`${parameter.name}: ${parameter.type}` on `${component.symbol.callable}`." }.build()
+          PropertyCapabilityV1.Builder(
+              ComponentRecordPacks.propertyNameOf(parameter),
+              JsonPrimitive(jsonType),
+            )
+            .also {
+              it.required = !parameter.hasDefault && !parameter.nullable
+              it.notes = "`${parameter.name}: ${parameter.type}` on `${component.symbol.callable}`."
+            }
+            .build()
         }
     // Authored policy is the exception vocabulary — builder state, layout participation, roles on
     // another class — and overrides a convention of the same name. It no longer has to repeat the
@@ -508,18 +556,44 @@ internal object PublishedUiBuilderCatalog {
     val authoredProperties = policy?.propertyCapabilities?.map { it.toCapability() }.orEmpty()
     val authoredNames = authoredProperties.mapTo(mutableSetOf()) { it.name }
     val properties = authoredProperties + derivedProperties.filter { it.name !in authoredNames }
-    return ComponentCapabilityV1.Builder(componentId, policy?.displayName ?: component.symbol.name, if (slots.isNotEmpty()) "Container" else "Leaf", wasm(
+    return ComponentCapabilityV1.Builder(
+        componentId,
+        policy?.displayName ?: component.symbol.name,
+        if (slots.isNotEmpty()) "Container" else "Leaf",
+        wasm(
           policy?.canvas,
           policy?.nativeOnly == true,
           component.symbol.callable,
           policy?.unrolled,
-        )).also { it.traits = policy?.traits.orEmpty(); it.slots = slots; it.properties = properties; it.modifierCapabilities = (policy?.modifierCapabilities ?: structuralModifiers(slots.isNotEmpty())).writableOn(
-          platform
-        ); it.code = CodeCapabilityV1.Builder(component.symbol.callable).also { it.imports = component.code?.imports.orEmpty().ifEmpty { listOf(component.symbol.callable) } }.build() }.build()
+        ),
+      )
+      .also {
+        it.traits = policy?.traits.orEmpty()
+        it.slots = slots
+        it.properties = properties
+        it.modifierCapabilities =
+          (policy?.modifierCapabilities ?: structuralModifiers(slots.isNotEmpty())).writableOn(
+            platform
+          )
+        it.code =
+          CodeCapabilityV1.Builder(component.symbol.callable)
+            .also {
+              it.imports =
+                component.code?.imports.orEmpty().ifEmpty { listOf(component.symbol.callable) }
+            }
+            .build()
+      }
+      .build()
   }
 
   private fun UiBuilderPropertyPolicy.toCapability(): PropertyCapabilityV1 =
-    PropertyCapabilityV1.Builder(name, jsonType).also { it.required = required; it.allowedValues = allowedValues; it.notes = notes }.build()
+    PropertyCapabilityV1.Builder(name, jsonType)
+      .also {
+        it.required = required
+        it.allowedValues = allowedValues
+        it.notes = notes
+      }
+      .build()
 
   /**
    * What a component accepts when the catalog does not say.
@@ -591,28 +665,54 @@ internal object PublishedUiBuilderCatalog {
     platform: String,
     implementation: ComponentRecord?,
   ): ComponentCapabilityV1 =
-    ComponentCapabilityV1.Builder(id, builtin.displayName ?: id.substringAfterLast('/'), shelfRole(builtin), wasm(builtin.canvas, nativeOnly = false, callable = null, unrolled = builtin.unrolled)
-          .overriddenBy(builtin.wasm)).also { it.traits = builtin.traits; it.slots = builtin.slots.map { (name, slot) ->
-          SlotCapabilityV1.Builder(name, SlotCardinalityV1.Builder().also { it.min = if (slot.required) 1 else 0; it.max = slot.max }.build(), slot.ordered).also { it.acceptedRoles = slot.acceptedRoles; it.acceptedTraits = slot.acceptedTraits }.build()
-        }; it.properties = builtin.properties.orEmpty().map { it.toCapability() }; it.modifierCapabilities = (builtin.modifierCapabilities ?: structuralModifiers(builtin.slots.isNotEmpty()))
-          .writableOn(platform)
-      it.code =
-        implementation?.let { record ->
-          CodeCapabilityV1.Builder(record.symbol.callable)
-            .also {
-              it.imports =
-                record.code?.imports.orEmpty().ifEmpty { listOf(record.symbol.callable) }
-            }
-            .build()
-        }
-          ?: builtin.code?.let { code ->
-            CodeCapabilityV1.Builder(code.symbol)
-              .also { builder -> builder.imports = code.imports }
+    ComponentCapabilityV1.Builder(
+        id,
+        builtin.displayName ?: id.substringAfterLast('/'),
+        shelfRole(builtin),
+        wasm(builtin.canvas, nativeOnly = false, callable = null, unrolled = builtin.unrolled)
+          .overriddenBy(builtin.wasm),
+      )
+      .also {
+        it.traits = builtin.traits
+        it.slots =
+          builtin.slots.map { (name, slot) ->
+            SlotCapabilityV1.Builder(
+                name,
+                SlotCardinalityV1.Builder()
+                  .also {
+                    it.min = if (slot.required) 1 else 0
+                    it.max = slot.max
+                  }
+                  .build(),
+                slot.ordered,
+              )
+              .also {
+                it.acceptedRoles = slot.acceptedRoles
+                it.acceptedTraits = slot.acceptedTraits
+              }
               .build()
           }
-      it.svg = builtin.svg?.toCapability()
-    }
-    .build()
+        it.properties = builtin.properties.orEmpty().map { it.toCapability() }
+        it.modifierCapabilities =
+          (builtin.modifierCapabilities ?: structuralModifiers(builtin.slots.isNotEmpty()))
+            .writableOn(platform)
+        it.code =
+          implementation?.let { record ->
+            CodeCapabilityV1.Builder(record.symbol.callable)
+              .also {
+                it.imports =
+                  record.code?.imports.orEmpty().ifEmpty { listOf(record.symbol.callable) }
+              }
+              .build()
+          }
+            ?: builtin.code?.let { code ->
+              CodeCapabilityV1.Builder(code.symbol)
+                .also { builder -> builder.imports = code.imports }
+                .build()
+            }
+        it.svg = builtin.svg?.toCapability()
+      }
+      .build()
 
   /**
    * How the canvas draws this component.
@@ -705,7 +805,12 @@ internal object PublishedUiBuilderCatalog {
 
   /** The catalog's declaration as the wire carries it, nested under the `wasm` block. */
   private fun UiBuilderUnrolledMock.toContract() =
-    UnrolledMockV1.Builder(layout).also { it.cellWidthDp = cellWidthDp; it.spacingDp = spacingDp }.build()
+    UnrolledMockV1.Builder(layout)
+      .also {
+        it.cellWidthDp = cellWidthDp
+        it.spacingDp = spacingDp
+      }
+      .build()
 
   /**
    * The modifiers this platform's emitter can actually write, or null where every modifier the
@@ -996,7 +1101,10 @@ internal object PublishedUiBuilderCatalog {
     @SerialName("catalogId") val catalogId: String? = null,
     val displayName: String? = null,
     val canvas: String? = null,
-    /** See [UiBuilderUnrolledMock]: the same declaration a builtin states, carried to the same field. */
+    /**
+     * See [UiBuilderUnrolledMock]: the same declaration a builtin states, carried to the same
+     * field.
+     */
     val unrolled: UiBuilderUnrolledMock? = null,
     val nativeOnly: Boolean = false,
     val traits: List<String> = emptyList(),

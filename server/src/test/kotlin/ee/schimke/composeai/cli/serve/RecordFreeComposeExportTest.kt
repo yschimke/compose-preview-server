@@ -207,7 +207,12 @@ class RecordFreeComposeExportTest {
       )
     val document = original.copy(catalogPin = original.catalogPin.copy(systemId = "custom-remote"))
     val capabilities =
-      catalog.newBuilder().also { it.statusSemantics = JsonObject(mapOf("platform" to JsonPrimitive("remote-compose"))) }.build()
+      catalog
+        .newBuilder()
+        .also {
+          it.statusSemantics = JsonObject(mapOf("platform" to JsonPrimitive("remote-compose")))
+        }
+        .build()
     val artifact = export(document, capabilities)
     assertTrue(artifact.diagnostics.isEmpty(), artifact.diagnostics.toString())
     assertTrue("RemoteStateLayout" in artifact.content, artifact.content)
@@ -336,7 +341,13 @@ class RecordFreeComposeExportTest {
       PublishedUiBuilderCatalog.compose(
         fixtures.resolve("remote-m3-published-v1.json").readText(),
         record,
-        ExportCapabilitiesV1.Builder().also { it.composeCode = true; it.svg = false; it.png = false }.build(),
+        ExportCapabilitiesV1.Builder()
+          .also {
+            it.composeCode = true
+            it.svg = false
+            it.png = false
+          }
+          .build(),
       )
     assertTrue(composed is PublishedUiBuilderCatalog.Result.Composed, composed.toString())
     (composed as PublishedUiBuilderCatalog.Result.Composed).records
@@ -391,7 +402,12 @@ class RecordFreeComposeExportTest {
         )
         .source
     val remote =
-      catalog.newBuilder().also { it.statusSemantics = JsonObject(mapOf("platform" to JsonPrimitive("remote-compose"))) }.build()
+      catalog
+        .newBuilder()
+        .also {
+          it.statusSemantics = JsonObject(mapOf("platform" to JsonPrimitive("remote-compose")))
+        }
+        .build()
     val artifact = export(document.toDesignDocumentV1(), remote)
     assertEquals(emptyList(), artifact.diagnostics)
     assertTrue(artifact.content.endsWith(expected), artifact.content)
@@ -471,7 +487,22 @@ class RecordFreeComposeExportTest {
       .let { it as JsonObject }
 
   private val catalog =
-    CatalogCapabilityV1.Builder("compose-catalog-capabilities/v1", CatalogBenchmarkV1.Builder("test", "source", "remote-m3", "candidate", "candidate").build(), emptyList()).also { it.exportCapabilities = ExportCapabilitiesV1.Builder().also { it.composeCode = true; it.svg = false; it.png = false }.build() }.build()
+    CatalogCapabilityV1.Builder(
+        "compose-catalog-capabilities/v1",
+        CatalogBenchmarkV1.Builder("test", "source", "remote-m3", "candidate", "candidate").build(),
+        emptyList(),
+      )
+      .also {
+        it.exportCapabilities =
+          ExportCapabilitiesV1.Builder()
+            .also {
+              it.composeCode = true
+              it.svg = false
+              it.png = false
+            }
+            .build()
+      }
+      .build()
 
   private companion object {
     const val PACKAGE_NAME = "generated.uibuilder"

@@ -313,7 +313,11 @@ class ServeUiBuilderMcp(
     val catalogs =
       listed.catalogs.map { catalog ->
         if (componentIds == null) catalog
-        else catalog.newBuilder().also { it.components = catalog.components.filter { it.componentId in componentIds } }.build()
+        else
+          catalog
+            .newBuilder()
+            .also { it.components = catalog.components.filter { it.componentId in componentIds } }
+            .build()
       }
     if (full) {
       return envelope(callId, UiBuilderServiceResponse.Catalogs(catalogs, listed.pins))

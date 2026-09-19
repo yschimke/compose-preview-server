@@ -48,7 +48,22 @@ class OrdinaryScreenExportTest {
   private val record: ComponentRecordFile = ExportRecords.m3Catalog()
 
   private val catalog =
-    CatalogCapabilityV1.Builder("compose-catalog-capabilities/v1", CatalogBenchmarkV1.Builder("m3", "source", "m3-catalog", "candidate", "candidate").build(), emptyList()).also { it.exportCapabilities = ExportCapabilitiesV1.Builder().also { it.composeCode = true; it.svg = false; it.png = false }.build() }.build()
+    CatalogCapabilityV1.Builder(
+        "compose-catalog-capabilities/v1",
+        CatalogBenchmarkV1.Builder("m3", "source", "m3-catalog", "candidate", "candidate").build(),
+        emptyList(),
+      )
+      .also {
+        it.exportCapabilities =
+          ExportCapabilitiesV1.Builder()
+            .also {
+              it.composeCode = true
+              it.svg = false
+              it.png = false
+            }
+            .build()
+      }
+      .build()
 
   private fun document(roots: List<String>, nodes: Map<String, DesignNodeV1>) =
     ScreenGeneratorScreenFixture.document().copy(roots = roots, nodes = nodes)

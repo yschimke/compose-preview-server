@@ -182,7 +182,12 @@ class ServeUiBuilderScreenExportIntegrationTest {
           CurrentM3UiBuilderCatalogExecutor(
             catalogSystemIds = catalogs,
             exportCapabilities =
-              ee.schimke.composeai.uibuilder.protocol.ExportCapabilitiesV1.Builder().also { it.svg = false; it.png = false }.build(),
+              ee.schimke.composeai.uibuilder.protocol.ExportCapabilitiesV1.Builder()
+                .also {
+                  it.svg = false
+                  it.png = false
+                }
+                .build(),
             composeExportFor = { systemId -> systemId in records.keys },
           ),
         exporter = ScreenGeneratorComposeExportExecutor(source::record),
