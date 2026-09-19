@@ -33,7 +33,7 @@ class RemoteStringExportProofTest {
         catalogSystemIds = setOf("remote-m3"),
         exportCapabilities =
           RemoteDocumentExportSupport.capabilities(
-            ExportCapabilitiesV1(),
+            ExportCapabilitiesV1.Builder().build(),
             json = true,
             document = true,
           ),

@@ -266,11 +266,13 @@ class ServeUiBuilderSharedComponentIntegrationTest {
           CurrentM3UiBuilderCatalogExecutor(
             catalogSystemIds = setOf(CATALOG_SYSTEM_ID),
             exportCapabilities =
-              ee.schimke.composeai.uibuilder.protocol.ExportCapabilitiesV1(
-                composeCode = true,
-                svg = false,
-                png = false,
-              ),
+              ee.schimke.composeai.uibuilder.protocol.ExportCapabilitiesV1.Builder()
+                .also {
+                  it.composeCode = true
+                  it.svg = false
+                  it.png = false
+                }
+                .build(),
             composeExportFor = { it == CATALOG_SYSTEM_ID },
           ),
         exporter = ScreenGeneratorComposeExportExecutor(source::record),

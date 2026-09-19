@@ -49,14 +49,29 @@ class ServeUiBuilderCreateRoutesTest {
           is UiBuilderServiceRequest.ListCatalogs ->
             UiBuilderServiceResponse.Catalogs(
               listOf(
-                CatalogCapabilityV1(
-                  schema = "compose-catalog-capabilities/v1",
-                  benchmark =
-                    CatalogBenchmarkV1("m3", "source", "m3-catalog", "candidate", "candidate"),
-                  components = emptyList(),
-                  exportCapabilities =
-                    ExportCapabilitiesV1(composeCode = true, svg = false, png = false),
-                )
+                CatalogCapabilityV1.Builder(
+                    "compose-catalog-capabilities/v1",
+                    CatalogBenchmarkV1.Builder(
+                        "m3",
+                        "source",
+                        "m3-catalog",
+                        "candidate",
+                        "candidate",
+                      )
+                      .build(),
+                    emptyList(),
+                  )
+                  .also {
+                    it.exportCapabilities =
+                      ExportCapabilitiesV1.Builder()
+                        .also {
+                          it.composeCode = true
+                          it.svg = false
+                          it.png = false
+                        }
+                        .build()
+                  }
+                  .build()
               )
             )
           is UiBuilderServiceRequest.CreateDesign -> {

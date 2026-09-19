@@ -158,7 +158,7 @@ composeai-preview-daemon = "3.8.3"
 # component placements and loop rows this repository's canvas and exporter already draw from its
 # own document model.
 # 3.1.0 is the first release publishing `compose-preview-contracts-bom`.
-composeai-contracts = "3.1.1"
+composeai-contracts = "3.2.0"
 
 # The extracted UI builder (yschimke/compose-ui-builder), resolved from its RELEASES. Three jars
 # and a BOM on Maven Central, and the editor archive as a GitHub release asset reached through the
