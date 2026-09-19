@@ -1,5 +1,14 @@
 # Changelog
 
+## [3.41.0](https://github.com/yschimke/compose-preview-server/compare/v3.40.0...v3.41.0) (2026-09-19)
+
+
+### Bug Fixes
+
+* **release:** let the distribution lane be re-run for an existing tag ([#951](https://github.com/yschimke/compose-preview-server/issues/951)) ([a7e95b8](https://github.com/yschimke/compose-preview-server/commit/a7e95b8ba0f709541f7fb3984fb3346affbe0101))
+* **serve:** name the capability ceiling where an agent's ask is narrowed away ([#953](https://github.com/yschimke/compose-preview-server/issues/953)) ([d2735dd](https://github.com/yschimke/compose-preview-server/commit/d2735dd02464805d73216de416ceb750bed2579e))
+* **serve:** pass --module to the build host, and select it from discovery ([#956](https://github.com/yschimke/compose-preview-server/issues/956)) ([449f71d](https://github.com/yschimke/compose-preview-server/commit/449f71ddc845410ab702613e870db2dc685e2c53))
+
 ## [3.40.0](https://github.com/yschimke/compose-preview-server/compare/v3.39.0...v3.40.0) (2026-09-17)
 
 
