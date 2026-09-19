@@ -15,6 +15,7 @@ import ee.schimke.composeai.uibuilder.protocol.SlotCardinalityV1
 import ee.schimke.composeai.uibuilder.protocol.SvgCapabilityStatusV1
 import ee.schimke.composeai.uibuilder.protocol.SvgCapabilityV1
 import ee.schimke.composeai.uibuilder.protocol.SvgFallbackV1
+import ee.schimke.composeai.uibuilder.protocol.UnrolledMockV1
 import ee.schimke.composeai.uibuilder.protocol.WasmAdapterStatusV1
 import ee.schimke.composeai.uibuilder.protocol.WasmCapabilityV1
 import java.security.MessageDigest
@@ -547,7 +548,13 @@ internal object PublishedUiBuilderCatalog {
         (policy?.modifierCapabilities ?: structuralModifiers(slots.isNotEmpty())).writableOn(
           platform
         ),
-      wasm = wasm(policy?.canvas, policy?.nativeOnly == true, component.symbol.callable),
+      wasm =
+        wasm(
+          policy?.canvas,
+          policy?.nativeOnly == true,
+          component.symbol.callable,
+          policy?.unrolled,
+        ),
       code =
         CodeCapabilityV1(
           symbol = component.symbol.callable,
@@ -656,7 +663,9 @@ internal object PublishedUiBuilderCatalog {
       modifierCapabilities =
         (builtin.modifierCapabilities ?: structuralModifiers(builtin.slots.isNotEmpty()))
           .writableOn(platform),
-      wasm = wasm(builtin.canvas, nativeOnly = false, callable = null).overriddenBy(builtin.wasm),
+      wasm =
+        wasm(builtin.canvas, nativeOnly = false, callable = null, unrolled = builtin.unrolled)
+          .overriddenBy(builtin.wasm),
       code =
         implementation?.let {
           CodeCapabilityV1(
@@ -737,7 +746,12 @@ internal object PublishedUiBuilderCatalog {
       "unsupported" to WasmAdapterStatusV1.UNSUPPORTED,
     )
 
-  private fun wasm(canvas: String?, nativeOnly: Boolean, callable: String?): WasmCapabilityV1 {
+  private fun wasm(
+    canvas: String?,
+    nativeOnly: Boolean,
+    callable: String?,
+    unrolled: UiBuilderUnrolledMock? = null,
+  ): WasmCapabilityV1 {
     val drawn = !nativeOnly && canvas != null && canvas != PLACEHOLDER_CANVAS
     return WasmCapabilityV1(
       platformSupported = JsonPrimitive(drawn),
@@ -750,8 +764,13 @@ internal object PublishedUiBuilderCatalog {
           drawn -> "Drawn on the canvas by the `$canvas` adapter."
           else -> "Drawn on the canvas as a named placeholder: this catalog claims no adapter."
         },
+      unrolled = unrolled?.toContract(),
     )
   }
+
+  /** The catalog's declaration as the wire carries it, nested under the `wasm` block. */
+  private fun UiBuilderUnrolledMock.toContract() =
+    UnrolledMockV1(layout = layout, cellWidthDp = cellWidthDp, spacingDp = spacingDp)
 
   /**
    * The modifiers this platform's emitter can actually write, or null where every modifier the
@@ -886,6 +905,15 @@ internal object PublishedUiBuilderCatalog {
     val role: String = "",
     val displayName: String? = null,
     val canvas: String? = null,
+    /**
+     * The editing canvas's mock for this builtin, beside [canvas] rather than inside [wasm].
+     *
+     * The wire nests it under the component's `wasm` block, because that is the canvas-lane block
+     * there; the policy states it beside the adapter word, which is the declaration it belongs with
+     * — it is the same declaration for a builtin and for a record component, and the two do not
+     * share a `wasm` block.
+     */
+    val unrolled: UiBuilderUnrolledMock? = null,
     val traits: List<String> = emptyList(),
     val slots: Map<String, UiBuilderBuiltinSlot> = emptyMap(),
     /**
@@ -953,6 +981,25 @@ internal object PublishedUiBuilderCatalog {
     val notes: String? = null,
   )
 
+  /**
+   * The layout the editing canvas draws for a component while an author is inside it.
+   *
+   * A scrollable container drawn as itself cannot show a child past the frame's edge — the ninth
+   * row of a lazy column is not on the canvas and cannot be edited — so a catalog states how its
+   * children are laid out while editing. The CONSTRAINED surfaces never see it: the preview pane,
+   * each device frame, the native lane and every export draw the component itself.
+   *
+   * `layout` is the builder's vocabulary, exactly as `canvas` is, so a name this build does not
+   * know is carried rather than refused: the builder resolves it against its own registry and falls
+   * back to the component's own layout. The dimensions are `JsonElement`s, matching the contract.
+   */
+  @Serializable
+  internal data class UiBuilderUnrolledMock(
+    val layout: String,
+    val cellWidthDp: JsonElement? = null,
+    val spacingDp: JsonElement? = null,
+  )
+
   /** The export call a builtin may state. */
   @Serializable
   internal data class UiBuilderBuiltinCode(
@@ -1014,6 +1061,8 @@ internal object PublishedUiBuilderCatalog {
     @SerialName("catalogId") val catalogId: String? = null,
     val displayName: String? = null,
     val canvas: String? = null,
+    /** See [UiBuilderUnrolledMock]: the same declaration a builtin states, carried to the same field. */
+    val unrolled: UiBuilderUnrolledMock? = null,
     val nativeOnly: Boolean = false,
     val traits: List<String> = emptyList(),
     val excluded: String? = null,

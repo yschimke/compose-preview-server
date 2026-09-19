@@ -408,6 +408,65 @@ class PublishedUiBuilderCatalogTest {
   }
 
   @Test
+  fun `the editing canvas's mock reaches the wire for a component and a builtin`() {
+    // A container drawn as itself cannot show a child past the frame's edge, so a catalog states
+    // how the canvas lays its children out while an author is inside it. The policy states it
+    // beside `canvas` for both kinds of component; the wire nests it under `wasm`, because that is
+    // the canvas-lane block there — and this composition is what carries it across.
+    val document =
+      published(
+        extra =
+          """,
+        "components": {
+          "test-catalog/widget": {
+            "record": ":test-catalog/com.example.TestKt.Widget",
+            "displayName": "The Widget",
+            "canvas": "box",
+            "unrolled": { "layout": "stack" }
+          }
+        },
+        "builtins": {
+          "test-catalog/screen": { "role": "screen-root", "slots": { "content": {} } },
+          "test-catalog/lazy-list": {
+            "role": "list",
+            "canvas": "layout/lazy-column",
+            "unrolled": { "layout": "wrap", "cellWidthDp": 190, "spacingDp": 4 }
+          },
+          "test-catalog/tabs": {
+            "role": "list",
+            "canvas": "layout/scrollable-tab-row",
+            "unrolled": { "layout": "carousel-of-cards" }
+          }
+        }"""
+      )
+    val result = PublishedUiBuilderCatalog.compose(document, record, exports)
+    assertTrue(
+      result is PublishedUiBuilderCatalog.Result.Composed,
+      "the mock did not compose: ${(result as? PublishedUiBuilderCatalog.Result.Unusable)?.reason}",
+    )
+    val components = (result as PublishedUiBuilderCatalog.Result.Composed).catalog.components
+
+    val widget = components.single { it.componentId == "test-catalog/widget" }
+    assertEquals("stack", assertNotNull(widget.wasm.unrolled).layout)
+
+    val lazyList = components.single { it.componentId == "test-catalog/lazy-list" }
+    assertEquals("wrap", assertNotNull(lazyList.wasm.unrolled).layout)
+    assertEquals("190", assertNotNull(lazyList.wasm.unrolled).cellWidthDp.toString())
+    assertEquals("4", assertNotNull(lazyList.wasm.unrolled).spacingDp.toString())
+
+    // The layout word is the BUILDER's vocabulary, exactly as `canvas` is, so the server carries a
+    // name it has never heard of rather than refusing it — the builder resolves it against its own
+    // registry and an unknown name is inert.
+    val tabs = components.single { it.componentId == "test-catalog/tabs" }
+    assertEquals("carousel-of-cards", assertNotNull(tabs.wasm.unrolled).layout)
+
+    // Absence is the default and stays absence: a component that states no mock keeps its own
+    // layout while editing, which is what every component did before the field existed.
+    val screen = components.single { it.componentId == "test-catalog/screen" }
+    assertNull(screen.wasm.unrolled)
+  }
+
+  @Test
   fun `a word this build cannot decode costs its field, never the catalog`() {
     // `adapterStatus`, `svg.status` and `svg.fallback` are closed enums on the wire, and a
     // capability document carrying a word the builder cannot decode fails the WHOLE document
