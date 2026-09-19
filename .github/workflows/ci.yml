@@ -13,17 +13,15 @@ on:
 permissions:
   contents: read
 
-# The UI builder is a separate repository (yschimke/compose-ui-builder) that this build includes as
-# a composite build -- see `settings.gradle.kts`. Every job that runs Gradle needs a checkout of it
-# on disk.
+# The UI builder is a separate repository (yschimke/compose-ui-builder). The default build resolves
+# its four seams as RELEASES -- three from Maven Central, the editor archive from that repository's
+# GitHub release -- so `gradle` needs no checkout and CI proves the published set resolves.
 #
-# It goes INSIDE the workspace rather than beside it, because `actions/checkout` refuses a path
-# outside `$GITHUB_WORKSPACE`, and `settings.gradle.kts` is pointed at it through this property
-# instead of its `../compose-ui-builder` default. `ORG_GRADLE_PROJECT_<name>` is Gradle's own
-# spelling for a project property in the environment, so it reaches every `./gradlew` in the file
-# without any of them naming it.
-env:
-  ORG_GRADLE_PROJECT_composeUiBuilderDir: ${{ github.workspace }}/.compose-ui-builder
+# The one job that still needs the checkout is `visual-harness`, which builds the renderer and the
+# two Jetcaster fixtures that have no release asset. It checks the repository out INSIDE the
+# workspace (actions/checkout refuses a path outside `$GITHUB_WORKSPACE`) and points the harness
+# server at it with `COMPOSE_UI_BUILDER_DIR`; Gradle is not told about it, because the distribution
+# that job installs comes from the release.
 
 # A pull request cancels its own superseded runs; a push to `main` does not cancel anything.
 #
@@ -81,12 +79,6 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Check out the UI builder
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: yschimke/compose-ui-builder
-          path: .compose-ui-builder
-          persist-credentials: false
       - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
         with:
           distribution: temurin
@@ -124,6 +116,14 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      # The ONE job that still builds the UI builder from a checkout, and it is the flag that makes
+      # it necessary rather than convenience. `uiBuilderRemoteCompose` reaches the
+      # `UiBuilderBuildFeatures` object inside `:ui-builder-export`, and the released jar carries
+      # whatever that object was built with — `false`, because no release enables the flag. A
+      # released coordinate therefore cannot be asked to switch the server's remote-compose routes
+      # on, which is exactly what this lane exists to test, so it takes the checkout and the
+      # substitution (`-PcomposeUiBuilderDir`) and the global property reaches the included build.
+      # It is also the only CI coverage of that opt-in path.
       - name: Check out the UI builder
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -140,13 +140,13 @@ jobs:
         with:
           cache-provider: basic
       # The normal Gradle job proves the shipping default. Keep the opt-in code compiled and
-      # exercised against released dependencies as well, without enabling it in distributions.
+      # exercised as well, without enabling it in distributions.
       # The UI-builder half of this lane (`:ui-builder-export:jvmTest`, `:ui-builder:jvmTest`,
       # `:ui-builder-runtime:test`, `:ui-builder:compileKotlinWasmJs`) runs in
       # yschimke/compose-ui-builder's CI under the same flag. A release pairs the two: the flag is
       # one compile-time choice made in two builds now, and they have to agree.
       - run: >-
-          ./gradlew -PuiBuilderRemoteCompose=true
+          ./gradlew -PcomposeUiBuilderDir=.compose-ui-builder -PuiBuilderRemoteCompose=true
           :mcp:test :server:test
 
   selector-fixtures:
@@ -280,6 +280,11 @@ jobs:
 
   visual-harness:
     runs-on: ubuntu-latest
+    env:
+      # The harness server resolves `/ui-builder/...` and the renderer routes against this
+      # checkout. Gradle is deliberately not pointed at it: `:server:installDist` below resolves
+      # the editor archive from the UI-builder release, so this job exercises both paths.
+      COMPOSE_UI_BUILDER_DIR: ${{ github.workspace }}/.compose-ui-builder
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -318,10 +323,10 @@ jobs:
       - run: sudo rm -f /etc/apt/sources.list.d/google-chrome.list /etc/apt/sources.list.d/microsoft-prod.list
       - run: npx playwright install --with-deps chromium
         working-directory: preview-harness
-      # The four frontend distributions come from the UI-builder repository now, and a composite
-      # build does not expose an included build's tasks as task paths — `includeBuild` substitutes
-      # dependencies, it does not merge task namespaces. So they are built by that checkout's own
-      # wrapper, and `:server:installDist` by this one. Same tasks, same flags, two invocations.
+      # Four frontend distributions are built from the UI-builder checkout: only the editor is a
+      # release asset, and this job also needs the renderer and the two Jetcaster fixtures. They
+      # are built by that checkout's own wrapper and `:server:installDist` by this one, because the
+      # two repositories are separate builds — neither merges the other's task namespace.
       #
       # `--no-daemon --no-parallel --max-workers=1` is not caution: `gradle.properties` sizes the
       # Kotlin daemon heap for ONE ir2wasm pass, and this job links four executables.

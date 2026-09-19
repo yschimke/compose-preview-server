@@ -32,8 +32,11 @@ The UI-builder convergence gate additionally needs the standalone server distrib
 UI-builder Wasm, and the real compose-ai-tools MCP executable:
 
 ```
-./gradlew :server:installDist :ui-builder-reference-jetcaster:wasmFrontendDist
-GATE2_MCP_LAUNCHER=/absolute/path/to/compose-preview-mcp npm --prefix preview-harness run harness:ui-builder-gate2
+./gradlew :server:installDist
+(cd ../compose-ui-builder && ./gradlew :ui-builder-reference-jetcaster:wasmFrontendDist)
+COMPOSE_UI_BUILDER_DIR=../compose-ui-builder \
+  GATE2_MCP_LAUNCHER=/absolute/path/to/compose-preview-mcp \
+  npm --prefix preview-harness run harness:ui-builder-gate2
 ```
 
 The visual-replay case submits the checked-in 100-step Jetcaster fixture through the public HTTP

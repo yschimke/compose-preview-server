@@ -39,9 +39,12 @@ Import creates; if the id is taken, pass a fresh `--design-id` and let the serve
 
 1. Author it — in the browser, or through the MCP `ui_builder_*` tools — and `export` it here, or
    write the operations by hand against `m3-catalog-capabilities-v1.json`.
-2. Add a `@Preview` for it in `DesignFixturePreviews.kt` with the fixture's own frame size.
-3. `./gradlew :ui-builder:jvmTest --tests '*DesignFixturesTest*'` proves it replays, validates and
-   exports; `./gradlew :ui-builder:composePreviewRender` draws it.
+2. Add a `@Preview` for it in `DesignFixturePreviews.kt` with the fixture's own frame size — in a
+   checkout of yschimke/compose-ui-builder, where that test and the editor live.
+3. In that checkout, `./gradlew :ui-builder:jvmTest --tests '*DesignFixturesTest*'` proves it
+   replays, validates and exports; `./gradlew :ui-builder:composePreviewRender` draws it. The
+   fixture file is shared: this repository keeps the copy the server-side tools and the harness
+   read, so copy it across after the change.
 
 A file that stops validating is a real finding, not a fixture to patch around: either the design
 uses something the catalog no longer declares, or the catalog dropped something a design relies on.

@@ -13,7 +13,12 @@ launches this repository's distribution.
 | --- | --- |
 | `compose-preview-server-<v>.tar.gz` | the server: catalog hosting, the HTTP routes, the playground, the viewer surfaces. What `compose-preview serve`, `browse` and `ui-builder` launch |
 | `compose-preview-mcp-<v>.tar.gz` | the MCP server, behind `compose-preview mcp serve` |
-| `compose-preview-ui-builder-web-<v>.zip` | the Compose/Wasm frontend, for serving yourself or pointing an existing `serve` at with `--ui-builder-dir`. The server archive already carries a copy |
+
+The Compose/Wasm frontend is not an asset of these releases. It is built and released by
+[`yschimke/compose-ui-builder`](https://github.com/yschimke/compose-ui-builder) as
+`compose-preview-ui-builder-web-<v>.zip` on that repository's own releases, and this build resolves
+it from there — the server archive carries an unpacked copy either way, and the standalone zip is
+for serving the editor yourself or pointing an existing `serve` at with `--ui-builder-dir`.
 
 Nothing here is a Maven coordinate. Six modules used to publish — `compose-preview-serve`,
 `compose-preview-mcp`, and four more that existed on Central only because the first one's POM named
@@ -40,18 +45,25 @@ stays resolvable at its final 2.x for anyone pinned to it, and the new one is on
 version line. The measured before/after and the transitives it deliberately cannot drop are recorded
 in its build file there, and `checkRenderHostIsServerFree` moved with it.
 
-`:ui-builder-runtime` owns authoritative persistent design state, exact catalog validation and
-revision-pinned export orchestration. `:server` supplies HTTP/authentication and adapts its narrow
-render request onto the render host. The runtime therefore has no Ktor, daemon/render-host, MCP or
-Compose UI dependency, while the offline render host has no UI-builder protocol or service edge.
+The UI builder is a second repository —
+[`yschimke/compose-ui-builder`](https://github.com/yschimke/compose-ui-builder) — and `:server`
+consumes it as releases. Its `:ui-builder-runtime` owns authoritative persistent design state, exact
+catalog validation and revision-pinned export orchestration there; `:server` supplies
+HTTP/authentication and adapts its narrow render request onto the render host. The runtime therefore
+has no Ktor, daemon/render-host, MCP or Compose UI dependency, while the offline render host has no
+UI-builder protocol or service edge. Three jars and a BOM come from Maven Central at
+`composeai-ui-builder` in `gradle/libs.versions.toml`, and the editor archive from that repository's
+GitHub release; `-PcomposeUiBuilderDir` swaps all four for a checkout when working on both at once.
 
 The build is intentionally repository-independent. Compose Preview implementation artifacts resolve
 from Maven Central at the version in `gradle/libs.versions.toml`; wire contracts resolve separately
 from [`compose-preview-contracts`](https://github.com/yschimke/compose-preview-contracts). There is
-no composite build, project substitution, shared version catalog, or `mavenLocal()` repository.
-For unreleased contract or generator changes, an explicit
+no `mavenLocal()` repository and no shared version catalog outside this repository. A composite
+build is opt-in only — `-PlocalBuilds=tools,daemon,contracts` for the upstreams,
+`-PcomposeUiBuilderDir` for the UI builder — and for unreleased contract or generator changes an
+explicit
 [local dependency manifest](docs/development/LOCAL_DEPENDENCIES.md) selects artifacts compiled from
-local checkouts. Leaving that option unset retains the released dependency graph.
+local checkouts. Leaving those options unset retains the released dependency graph.
 
 ## Java
 
@@ -79,9 +91,10 @@ message cannot drift from the bytes it describes.
 
 ## Build
 
-Building needs **both** JDKs on the machine: Gradle runs on 17, and `:ui-builder` /
-`:ui-builder-artwork` compile through a 21 toolchain. Gradle finds a 21 installed anywhere it
-already scans (`/usr/lib/jvm`, SDKMAN, asdf, jabba); if it cannot, the failure is
+`./gradlew check` needs one JDK: 17. The UI builder's frontend lane compiles at 21 in its own
+repository, and the only lane here that still wants both JDKs is `visual-harness`, which builds that
+repository's Wasm distributions from a checkout. Gradle finds a 21 installed anywhere it already
+scans (`/usr/lib/jvm`, SDKMAN, asdf, jabba); if it cannot, the failure is
 `No matching toolchains found for requested specification: {languageVersion=21}` and the fix is to
 install one, not to lower the target.
 
@@ -92,24 +105,24 @@ npm --prefix serve-web run verify
 ```
 
 The independently installable visual harness lives in `preview-harness/`. The experimental
-Compose/Wasm frontend lives in `wasm-ui/`. The UI builder frontend incubates in the
-dependency-isolated `ui-builder/` module; its native Compose renderer and standalone Wasm visual
-fixture remain separate from the published JVM runtime. `ui-builder-reference-jetcaster/` is a
-separately compiled, provenance-pinned Compose/Wasm
-oracle for the primary Jetcaster visual benchmark and has no dependency on the builder module.
-The server distribution packages the builder's Jetcaster benchmark preview as a separate app at
-`/ui-builder/`; the existing catalog-scoped `/wasm/<system>/` preview application remains a
-distinct feature and route. The builder route opens an interactive Wasm editor around the frozen
-Jetcaster design; clean benchmark modes remain available to the independent visual harness.
-`:ui-builder-renderer` builds a separate renderer-only CMP/Wasm runtime directory and ZIP. The
-editor can mount an exact retained runtime under `/ui-builder/runtime/<runtimeId>/` in a sandboxed
-iframe and receive measured node/slot geometry without placing editor overlays in the Compose tree.
-The distribution consumes the frontend through the immutable `:ui-builder-web` archive variant;
-it no longer reaches into the frontend project's tasks or output directory.
+Compose/Wasm frontend lives in `wasm-ui/`. The UI builder itself — editor, renderer, artwork and the
+Jetcaster fixtures — lives in
+[`yschimke/compose-ui-builder`](https://github.com/yschimke/compose-ui-builder); this build resolves
+its editor archive, runtime and export from that repository's releases, and the harness builds the
+renderer and fixture distributions from a checkout of it. The server distribution packages the
+editor at `/ui-builder/`; the existing catalog-scoped `/wasm/<system>/` preview application remains
+a distinct feature and route. The editor route opens an interactive Wasm editor around the frozen
+Jetcaster design; clean benchmark modes remain available to the independent visual harness. The
+editor mounts an exact retained renderer runtime under `/ui-builder/runtime/<runtimeId>/` in a
+sandboxed iframe and receives measured node/slot geometry without placing editor overlays in the
+Compose tree.
 
 The Remote Compose authoring extension is behind the default-off compile-time option
-`-PuiBuilderRemoteCompose=true`. Build the server and WASM frontend together with that option;
-see [feature scope and verification](docs/development/UI_BUILDER_FEATURE_FLAGS.md).
+`-PuiBuilderRemoteCompose=true`. It spans two repositories — the MCP adapter's half is generated
+here, and the server's half is baked into the UI-builder export at *its* build time, so enabling the
+server half means building against a UI-builder checkout with the option
+(`-PcomposeUiBuilderDir=…`). See
+[feature scope and verification](docs/development/UI_BUILDER_FEATURE_FLAGS.md).
 
 ## Remote catalog MCP
 

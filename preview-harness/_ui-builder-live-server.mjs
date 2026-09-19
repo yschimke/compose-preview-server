@@ -7,9 +7,10 @@
 // checked-in Jetcaster fixture over the v1 envelope endpoint — pulled out here so the assertion
 // lane and the evidence capture boot the *same* server rather than two that drift apart.
 //
-// Needs `./gradlew :ui-builder:wasmFrontendDist :server:installDist` first, and JDK 21 on
-// JAVA_HOME: the start script resolves `java` from it, and the builder's renderer is compiled for
-// 21. CI's `visual-harness` job already does both.
+// Needs `./gradlew :server:installDist` and, in a checkout of yschimke/compose-ui-builder,
+// `./gradlew :ui-builder:wasmFrontendDist` first, with `COMPOSE_UI_BUILDER_DIR` pointing at that
+// checkout, and JDK 21 on JAVA_HOME: the start script resolves `java` from it, and the builder's
+// renderer is compiled for 21. CI's `visual-harness` job already does all of that.
 import { spawn } from "node:child_process";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";

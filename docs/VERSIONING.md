@@ -48,7 +48,8 @@ setting back:
 * A `!` typed into a PR title is the whole of the evidence release-please gets. `#389`
   (`refactor(ui-builder)!: borrow only foundation into the wear catalog`) changed which components
   the Wear catalog borrows — a candidate surface, with no change to the published coordinates and no
-  change to the `:ui-builder-runtime` ABI that `checkKotlinAbi` pins. It proposed `4.0.0` anyway,
+  change to the `:ui-builder-runtime` ABI (pinned by `checkKotlinAbi` in
+  yschimke/compose-ui-builder, which is where that module lives now). It proposed `4.0.0` anyway,
   from one character in a title.
 * The usual escape hatch does **not** work here. A `Release-As: 3.4.0` footer has to survive into
   the commit release-please reads, and a blank squash body drops it. Pinning `release-as` in the

@@ -27,20 +27,21 @@ import { createServer } from "node:http";
 const harnessDir = dirname(fileURLToPath(import.meta.url));
 export const harnessRoot = resolve(harnessDir, "..");
 
-// The UI builder is a separate repository (yschimke/compose-ui-builder) whose modules this harness
-// serves build output from.
+// The UI builder is a separate repository (yschimke/compose-ui-builder) whose build output this
+// harness serves. The server's own distribution resolves the editor from that repository's
+// RELEASES, but the renderer and the two Jetcaster fixtures have no release asset, so this harness
+// still reads them out of a checkout.
 //
-// TWO spellings, and the second is the one CI actually sets. `settings.gradle.kts` takes the
-// checkout as a Gradle project property, so the workflow exports it as
-// `ORG_GRADLE_PROJECT_composeUiBuilderDir` — Gradle's own environment spelling — once at the
-// workflow level, and every step inherits it. Reading only `COMPOSE_UI_BUILDER_DIR` meant this
-// server silently fell back to the sibling default, which does not exist on a runner: the workspace
-// cannot hold a directory above itself, so CI checks the builder out INSIDE it at
-// `.compose-ui-builder`. The editor's dist then 404'd and Playwright waited out its 60s
-// `webServer` timeout with no clue as to why.
+// TWO spellings, and the difference matters. `COMPOSE_UI_BUILDER_DIR` is the harness's own, and it
+// is what CI sets in the one job that checks the builder out inside the workspace (a runner cannot
+// hold a directory above itself). `ORG_GRADLE_PROJECT_composeUiBuilderDir` is Gradle's environment
+// spelling for `-PcomposeUiBuilderDir`, which turns the build itself into a composite against that
+// checkout -- so a developer who exports that one gets the local editor AND a harness that serves
+// it, with no second variable.
 //
-// Both are read rather than one renamed, so neither build system's spelling has to know about the
-// other's, and a contributor can set whichever they already have.
+// Reading only `COMPOSE_UI_BUILDER_DIR` once meant this server silently fell back to the sibling
+// default on a runner: the editor's dist 404'd and Playwright waited out its 60s `webServer`
+// timeout with no clue as to why.
 export const uiBuilderRoot = resolve(
     process.env.COMPOSE_UI_BUILDER_DIR ||
         process.env.ORG_GRADLE_PROJECT_composeUiBuilderDir ||
@@ -101,10 +102,9 @@ export function startServer(root, port = 0) {
                         rel,
                     );
                 if (rendererMatch) {
-                    // Built in yschimke/compose-ui-builder now. CI checks that repository out
-                    // inside the workspace and names it here; the default is the sibling
-                    // directory `settings.gradle.kts` also defaults to, so a two-repo checkout
-                    // needs no configuration.
+                    // Built in yschimke/compose-ui-builder now. The default is the sibling
+                    // directory a two-repository checkout already has; CI checks the repository
+                    // out inside the workspace and names it through `COMPOSE_UI_BUILDER_DIR`.
                     const rendererRoot = resolve(
                         uiBuilderRoot,
                         "ui-builder-renderer/build/wasmRendererDist",

@@ -68,24 +68,23 @@ lines or reduce `--local` to the HTTP client it exists to not be.
 
 ## Sequencing, which is the other reason
 
-`compose-ui-builder` was extracted **today**, its `main` is still red from extraction fallout, and
-[`UI_BUILDER_EXTRACTION_AND_DESKTOP.md`](UI_BUILDER_EXTRACTION_AND_DESKTOP.md)'s own status note
-records that the publishing half — the one that turns the composite build into coordinates — is
-still ahead of it rather than behind. Starting a second extraction out of the same repository before
-the first has coordinates is how three repositories end up half-finished at once, and the cost is
-paid in the place that is hardest to see: a change spanning the seam becomes two pull requests, as
-[`UI_BUILDER_PROJECT_BOUNDARY.md`](UI_BUILDER_PROJECT_BOUNDARY.md) predicted and the seed-template
-plan is now paying.
+`compose-ui-builder` was extracted first and has since published, so its seams are coordinates:
+three jars and a BOM on Maven Central and the editor archive as a GitHub release asset, with a
+composite build opt-in through `-PcomposeUiBuilderDir`
+([`UI_BUILDER_EXTRACTION_AND_DESKTOP.md`](UI_BUILDER_EXTRACTION_AND_DESKTOP.md)'s status note has
+the details). What remains ahead of a second extraction is the cost below, not resolvability.
+Starting it out of the same repository is how three repositories end up half-finished at once, and
+the cost is paid in the place that is hardest to see: a change spanning the seam becomes two pull
+requests, as [`UI_BUILDER_PROJECT_BOUNDARY.md`](UI_BUILDER_PROJECT_BOUNDARY.md) predicted and the
+seed-template plan is now paying.
 
 **The order that works:**
 
-1. Finish compose-ui-builder's publishing lane, so `:ui-builder-export` is a coordinate rather than
-   an `includeBuild`. Until then a design repository cannot depend on the generator at all.
-2. **Extract the render engine** — the `Playground*` compile and daemon services — as its own module
+1. **Extract the render engine** — the `Playground*` compile and daemon services — as its own module
    inside this repository first, consumed by `:server` through an interface. That is the whole
    substance of the split and it is worth doing on its own merits: ten consumers reaching into a
    6,000-line engine by same-package visibility is the coupling that made this measurement necessary.
-3. Only then does `compose-preview-design` become a move rather than a rewrite: the command, the
+2. Only then does `compose-preview-design` become a move rather than a rewrite: the command, the
    engine module, and a tarball that names its sidecars.
 
 Step 2 is the one to want. It is testable, reversible, and it makes the question in step 3 small.

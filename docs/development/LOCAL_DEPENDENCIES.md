@@ -16,9 +16,14 @@ python3 scripts/stage-local-dependency.py \
   --checkout ../compose-ai-tools --module :screen-model
 
 ./gradlew -PlocalDependencies=build/local-dependencies/local-dependencies.properties \
-  :ui-builder:jvmTest :ui-builder:compileKotlinWasmJs \
-  :ui-builder-export:jvmTest :server:test
+  -PcomposeUiBuilderDir=../compose-ui-builder :server:test
 ```
+
+The UI-builder half of that (`:ui-builder:jvmTest`, `:ui-builder-export:jvmTest`,
+`:ui-builder:compileKotlinWasmJs`) runs in yschimke/compose-ui-builder, against the same staged
+manifest — run it from that checkout with `-PlocalDependencies=<path>` pointing at the same
+properties file. `-PcomposeUiBuilderDir` is what makes the server compile against the builder's
+projects rather than its release while the staged upstream is in play.
 
 Pass the same `-PlocalDependencies=…` option when building the existing server distribution or
 running its development tasks. No alternate frontend is involved. The script does not modify the

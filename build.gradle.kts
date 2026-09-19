@@ -83,9 +83,9 @@ tasks.named("check") { dependsOn(checkMaterialIconCatalogFixture) }
 tasks.named("check") {
   group = "verification"
   // The UI-builder modules left for yschimke/compose-ui-builder, which checks them in its own CI.
-  // This build reaches four of them as an included build, so `:server:check` compiles against the
-  // checkout -- but it does not run their tests, and it should not: a composite build is a way to
-  // resolve a dependency, not a way to own somebody else's verification.
+  // This build reaches four of them as PUBLISHED releases by default, and as projects only under
+  // `-PcomposeUiBuilderDir` -- so `:server:check` does not run their tests either way, and it
+  // should not: resolving a dependency is not owning somebody else's verification.
   dependsOn(
     ":server:check",
     ":mcp:check",
@@ -161,10 +161,11 @@ subprojects {
 // No Maven set: this repository does not publish to Maven Central.
 // ---------------------------------------------------------------------------
 //
-// What it ships are the GitHub release assets — `compose-preview-server-<v>.tar.gz`,
-// `compose-preview-mcp-<v>.tar.gz` and `compose-preview-ui-builder-web-<v>.zip`, built by
-// `:server:distTar`, `:mcp:distTar` and `:ui-builder-web:webArchive`. `compose-preview serve`,
-// `browse`, `ui-builder` and `mcp serve` launch those; nothing links this build's classes.
+// What it ships are the GitHub release assets — `compose-preview-server-<v>.tar.gz` and
+// `compose-preview-mcp-<v>.tar.gz`, built by `:server:distTar` and `:mcp:distTar`.
+// `compose-preview serve`, `browse`, `ui-builder` and `mcp serve` launch those; nothing links this
+// build's classes. The editor archive inside the server distribution is no longer built here: it
+// is yschimke/compose-ui-builder's own release asset, and this build resolves it by coordinate.
 //
 // Six modules used to publish, and five of them only because the sixth's POM named them. A project
 // dependency reaches a published POM as a coordinate, so `:server` depending on
