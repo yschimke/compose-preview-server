@@ -981,12 +981,13 @@ class ServeUiBuilderMcpIntegrationTest {
             CurrentM3UiBuilderCatalogExecutor(
               catalogSystemIds = setOf(catalogSystemId),
               exportCapabilities =
-                ee.schimke.composeai.uibuilder.protocol
-                  .ExportCapabilitiesV1(
-                    composeCode = true,
-                    svg = false,
-                    png = false,
-                  )
+                ee.schimke.composeai.uibuilder.protocol.ExportCapabilitiesV1.Builder()
+                  .also {
+                    it.composeCode = true
+                    it.svg = false
+                    it.png = false
+                  }
+                  .build()
                   .let {
                     ee.schimke.composeai.uibuilder.RemoteDocumentExportSupport.capabilities(
                       it,

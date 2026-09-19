@@ -28,7 +28,7 @@ class RemoteDocumentExportExecutorTest {
         catalogSystemIds = setOf("remote-m3"),
         exportCapabilities =
           RemoteDocumentExportSupport.capabilities(
-            ExportCapabilitiesV1(),
+            ExportCapabilitiesV1.Builder().build(),
             json = true,
             document = true,
           ),
@@ -333,7 +333,7 @@ class RemoteDocumentExportExecutorTest {
           catalogSystemIds = setOf("m3-catalog", "remote-m3"),
           exportCapabilities =
             RemoteDocumentExportSupport.capabilities(
-              ExportCapabilitiesV1(),
+              ExportCapabilitiesV1.Builder().build(),
               json = true,
               document = true,
             ),

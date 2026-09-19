@@ -54,11 +54,13 @@ class ServeUiBuilderAssetRoutesTest {
           CurrentM3UiBuilderCatalogExecutor(
             catalogSystemIds = setOf(CATALOG_SYSTEM_ID),
             exportCapabilities =
-              ee.schimke.composeai.uibuilder.protocol.ExportCapabilitiesV1(
-                composeCode = false,
-                svg = false,
-                png = false,
-              ),
+              ee.schimke.composeai.uibuilder.protocol.ExportCapabilitiesV1.Builder()
+                .also {
+                  it.composeCode = false
+                  it.svg = false
+                  it.png = false
+                }
+                .build(),
           ),
         exporter = { error("no export in this test") },
         assets = FileUiBuilderAssetStore(stateDirectory.resolve("assets")),

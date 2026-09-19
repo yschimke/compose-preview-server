@@ -28,7 +28,14 @@ import kotlinx.serialization.json.Json
  */
 class PublishedUiBuilderCatalogHostileInputTest {
 
-  private val exports = ExportCapabilitiesV1(composeCode = true, svg = false, png = false)
+  private val exports =
+    ExportCapabilitiesV1.Builder()
+      .also {
+        it.composeCode = true
+        it.svg = false
+        it.png = false
+      }
+      .build()
 
   private val record = Json {
     ignoreUnknownKeys = true

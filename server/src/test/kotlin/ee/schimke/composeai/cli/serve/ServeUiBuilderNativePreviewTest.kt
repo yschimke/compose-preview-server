@@ -101,13 +101,23 @@ class ServeUiBuilderNativePreviewTest {
           documentHash = "hash",
           document = document(),
           catalog =
-            CatalogCapabilityV1(
-              schema = "compose-catalog-capabilities/v1",
-              benchmark = CatalogBenchmarkV1(CATALOG, "source", CATALOG, "candidate", "candidate"),
-              components = emptyList(),
-              exportCapabilities =
-                ExportCapabilitiesV1(composeCode = true, svg = false, png = false),
-            ),
+            CatalogCapabilityV1.Builder(
+                "compose-catalog-capabilities/v1",
+                CatalogBenchmarkV1.Builder(CATALOG, "source", CATALOG, "candidate", "candidate")
+                  .build(),
+                emptyList(),
+              )
+              .also {
+                it.exportCapabilities =
+                  ExportCapabilitiesV1.Builder()
+                    .also {
+                      it.composeCode = true
+                      it.svg = false
+                      it.png = false
+                    }
+                    .build()
+              }
+              .build(),
           format = ExportFormatV1.COMPOSE,
         )
       )
