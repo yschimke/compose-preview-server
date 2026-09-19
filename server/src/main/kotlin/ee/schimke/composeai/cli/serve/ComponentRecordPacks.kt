@@ -190,14 +190,17 @@ internal object ComponentRecordPacks {
       properties = properties,
       modifierCapabilities = structuralModifiers(container),
       wasm =
-        WasmCapabilityV1(
-          platformSupported = JsonPrimitive(false),
-          adapterStatus = WasmAdapterStatusV1.UNSUPPORTED,
-          notes =
-            "Drawn on the canvas as a named placeholder: the browser cannot link $packId's " +
-              "classes. The native preview compiles `${component.symbol.callable}` against the " +
-              "served $packId bundle and renders the real component.",
-        ),
+        WasmCapabilityV1.Builder(
+            platformSupported = JsonPrimitive(false),
+            adapterStatus = WasmAdapterStatusV1.UNSUPPORTED,
+          )
+          .also {
+            it.notes =
+              "Drawn on the canvas as a named placeholder: the browser cannot link $packId's " +
+                "classes. The native preview compiles `${component.symbol.callable}` against the " +
+                "served $packId bundle and renders the real component."
+          }
+          .build(),
       code =
         CodeCapabilityV1(
           symbol = component.symbol.callable,

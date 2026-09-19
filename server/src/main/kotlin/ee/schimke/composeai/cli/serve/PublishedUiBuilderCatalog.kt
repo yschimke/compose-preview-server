@@ -729,14 +729,16 @@ internal object PublishedUiBuilderCatalog {
    */
   private fun WasmCapabilityV1.overriddenBy(stated: UiBuilderBuiltinWasm?): WasmCapabilityV1 {
     if (stated == null) return this
-    return copy(
-      platformSupported = stated.platformSupported ?: platformSupported,
-      // An unknown status keeps the derived one rather than failing the load. A capability document
-      // carrying a word the builder cannot decode fails the WHOLE document, not one field, so a
-      // typo in one builtin would cost the catalog its entire palette.
-      adapterStatus = ADAPTER_STATUSES[stated.adapterStatus] ?: adapterStatus,
-      notes = stated.notes ?: notes,
-    )
+    return newBuilder()
+      .also {
+        it.platformSupported = stated.platformSupported ?: platformSupported
+        // An unknown status keeps the derived one rather than failing the load. A capability
+        // document carrying a word the builder cannot decode fails the WHOLE document, not one
+        // field, so a typo in one builtin would cost the catalog its entire palette.
+        it.adapterStatus = ADAPTER_STATUSES[stated.adapterStatus] ?: adapterStatus
+        it.notes = stated.notes ?: notes
+      }
+      .build()
   }
 
   private val ADAPTER_STATUSES =
@@ -753,19 +755,23 @@ internal object PublishedUiBuilderCatalog {
     unrolled: UiBuilderUnrolledMock? = null,
   ): WasmCapabilityV1 {
     val drawn = !nativeOnly && canvas != null && canvas != PLACEHOLDER_CANVAS
-    return WasmCapabilityV1(
-      platformSupported = JsonPrimitive(drawn),
-      adapterStatus = if (drawn) WasmAdapterStatusV1.SUPPORTED else WasmAdapterStatusV1.UNSUPPORTED,
-      notes =
-        when {
-          nativeOnly ->
-            "Rendered only on the native lane; the canvas draws a named placeholder." +
-              (callable?.let { " The native preview compiles `$it`." } ?: "")
-          drawn -> "Drawn on the canvas by the `$canvas` adapter."
-          else -> "Drawn on the canvas as a named placeholder: this catalog claims no adapter."
-        },
-      unrolled = unrolled?.toContract(),
-    )
+    return WasmCapabilityV1.Builder(
+        platformSupported = JsonPrimitive(drawn),
+        adapterStatus =
+          if (drawn) WasmAdapterStatusV1.SUPPORTED else WasmAdapterStatusV1.UNSUPPORTED,
+      )
+      .also {
+        it.notes =
+          when {
+            nativeOnly ->
+              "Rendered only on the native lane; the canvas draws a named placeholder." +
+                (callable?.let { " The native preview compiles `$it`." } ?: "")
+            drawn -> "Drawn on the canvas by the `$canvas` adapter."
+            else -> "Drawn on the canvas as a named placeholder: this catalog claims no adapter."
+          }
+        it.unrolled = unrolled?.toContract()
+      }
+      .build()
   }
 
   /** The catalog's declaration as the wire carries it, nested under the `wasm` block. */
