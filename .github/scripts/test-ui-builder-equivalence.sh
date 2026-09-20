@@ -1202,6 +1202,26 @@ check "a policy member of the wrong type is refused" 1 $?
 grep -q 'components\["wear-m3/button"\].record is not a string' "${work}/out" ||
   { echo "FAIL wrong-typed policy member not named"; failures=$((failures + 1)); }
 
+# A canvas adapter mapping's three tables are Kotlin maps. Their values are intentionally
+# free-form, but each container must still be a JSON object or the real decoder refuses it.
+for member in defaults properties slots; do
+  cat >"${work}/rec-bad-canvas-map.json" <<JSON
+{ "schema": "compose-ui-builder-catalog/v1", "catalog": { "id": "wear-m3" },
+  "statusSemantics": { "platform": "wear", "componentIdPrefix": "wear-m3/",
+    "components": { "wear-m3/button": { "record": ":w/A.Button",
+      "canvasMapping": { "${member}": "filled" } } },
+    "componentMenu": { "groupOrder": ["A"],
+      "components": { "wear-m3/button": { "group": "A" },
+                      "wear-m3/card": { "group": "A" } } } } }
+JSON
+  "${gate}" --policy "${work}/rec-bad-canvas-map.json" --golden "${work}/rec-golden.json" \
+    --catalog-id wear-m3 --component-id-prefix wear-m3/ --record "${work}/rec-ok.json" --strict \
+    >"${work}/out" 2>&1
+  check "a canvas mapping ${member} scalar is refused" 1 $?
+  grep -q "canvasMapping.${member} is not an object" "${work}/out" ||
+    { echo "FAIL wrong-typed canvas mapping ${member} not named"; failures=$((failures + 1)); }
+done
+
 # 6. `traits` is a `List<String>` with a default, so it may be ABSENT — but not null, and not a list
 #    of something else. Absent and null are different questions and only a table keeps them apart.
 cat >"${work}/rec-badtraits.json" <<'JSON'
