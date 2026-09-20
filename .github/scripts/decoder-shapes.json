@@ -360,6 +360,25 @@
                 "optional": true,
                 "nullable": true
             },
+            "canvasMapping": {
+                "kind": "object",
+                "members": {
+                    "defaults": {
+                        "kind": "any",
+                        "optional": true
+                    },
+                    "properties": {
+                        "kind": "any",
+                        "optional": true
+                    },
+                    "slots": {
+                        "kind": "any",
+                        "optional": true
+                    }
+                },
+                "optional": true,
+                "nullable": true
+            },
             "catalogId": {
                 "kind": "string",
                 "optional": true,
