@@ -2,16 +2,19 @@ package ee.schimke.composeai.cli.serve
 
 import ee.schimke.composeai.uibuilder.protocol.UI_BUILDER_RUNTIME_MANIFEST_NAME_V1
 import ee.schimke.composeai.uibuilder.protocol.UI_BUILDER_RUNTIME_MANIFEST_SCHEMA_V1
+import ee.schimke.composeai.uibuilder.protocol.UiBuilderRuntimeArtifactV1
 import ee.schimke.composeai.uibuilder.protocol.UiBuilderRuntimeManifestV1
 import ee.schimke.composeai.uibuilder.protocol.frameUiBuilderRuntimeTreeIntegrityV1
 import ee.schimke.composeai.uibuilder.protocol.isValidUiBuilderRuntimeIdV1
 import ee.schimke.composeai.uibuilder.protocol.normalizeUiBuilderRuntimeAssetPathV1
 import ee.schimke.composeai.uibuilder.protocol.validateContract
+import java.io.ByteArrayInputStream
 import java.io.File
 import java.nio.file.Files
 import java.nio.file.LinkOption
 import java.nio.file.Path
 import java.security.MessageDigest
+import java.util.zip.ZipInputStream
 import kotlinx.serialization.json.Json
 
 /**
@@ -90,6 +93,96 @@ private constructor(private val runtimes: Map<String, RuntimeBundle>) {
       return ServeUiBuilderRuntimeAssets(bundles)
     }
 
+    /**
+     * Verify and expand one catalog-delivered runtime into its generation staging tree.
+     *
+     * Nothing is written until the complete archive, manifest identity and tree digest have passed.
+     * The caller then activates the generation directory atomically with its catalog metadata.
+     */
+    internal fun stageArchive(
+      descriptor: UiBuilderRuntimeArtifactV1,
+      archive: ByteArray,
+      runtimeRoot: File,
+      supportedProtocolVersions: Set<Int> = SUPPORTED_PROTOCOL_VERSIONS,
+    ) {
+      val descriptorIssues = descriptor.validateContract()
+      require(descriptorIssues.isEmpty()) {
+        "UI-builder runtime descriptor is invalid: " +
+          descriptorIssues.joinToString { issue -> "${issue.field}:${issue.code}" }
+      }
+      require(descriptor.protocolVersion in supportedProtocolVersions) {
+        "UI-builder runtime protocol ${descriptor.protocolVersion} is not supported"
+      }
+      val bytes = readArchive(archive)
+      val manifestBytes =
+        requireNotNull(bytes[RUNTIME_MANIFEST_NAME]) {
+          "UI-builder runtime '${descriptor.runtimeId}' has no $RUNTIME_MANIFEST_NAME"
+        }
+      val manifest =
+        try {
+          JSON.decodeFromString(
+            UiBuilderRuntimeManifestV1.serializer(),
+            manifestBytes.decodeToString(),
+          )
+        } catch (failure: Exception) {
+          throw IllegalArgumentException(
+            "UI-builder runtime '${descriptor.runtimeId}' has an invalid $RUNTIME_MANIFEST_NAME",
+            failure,
+          )
+        }
+      require(manifest.runtimeId == descriptor.runtimeId) {
+        "UI-builder runtime descriptor id does not match its manifest"
+      }
+      require(manifest.protocolVersion == descriptor.protocolVersion) {
+        "UI-builder runtime descriptor protocol does not match its manifest"
+      }
+      require(manifest.integritySha256 == descriptor.integritySha256) {
+        "UI-builder runtime descriptor integrity does not match its manifest"
+      }
+      val actualIntegrity = treeIntegrity(bytes - RUNTIME_MANIFEST_NAME)
+      val manifestIssues = manifest.validateContract(bytes.keys, actualIntegrity)
+      require(manifestIssues.isEmpty()) {
+        "UI-builder runtime '${descriptor.runtimeId}' manifest is invalid: " +
+          manifestIssues.joinToString { issue -> "${issue.field}:${issue.code}" }
+      }
+
+      val target = File(runtimeRoot, descriptor.runtimeId)
+      require(!target.exists()) {
+        "UI-builder runtime target already exists: ${descriptor.runtimeId}"
+      }
+      bytes.forEach { (path, content) ->
+        val file = File(target, path)
+        require(file.canonicalFile.toPath().startsWith(target.canonicalFile.toPath())) {
+          "UI-builder runtime contains an unsafe asset path: $path"
+        }
+        file.parentFile.mkdirs()
+        file.writeBytes(content)
+      }
+    }
+
+    /** Read one already-verified generation asset without mutating its immutable bytes. */
+    internal fun assetFromDirectory(
+      runtimeRoot: File,
+      runtimeId: String,
+      segments: List<String>,
+    ): Asset? {
+      if (!isValidUiBuilderRuntimeIdV1(runtimeId)) return null
+      val relative =
+        if (segments.isEmpty()) RUNTIME_MANIFEST_NAME
+        else normalizeRelativePath(segments.joinToString("/")) ?: return null
+      val root = File(runtimeRoot, runtimeId).canonicalFile
+      val file = File(root, relative).canonicalFile
+      if (
+        !file.toPath().startsWith(root.toPath()) ||
+          !file.isFile ||
+          Files.isSymbolicLink(file.toPath())
+      ) {
+        return null
+      }
+      val bytes = file.readBytes()
+      return Asset(bytes, "\"sha256-${sha256(bytes)}\"")
+    }
+
     /** Canonical digest used by retained runtime manifests and their packaging tools. */
     internal fun treeIntegrity(assets: Map<String, ByteArray>): String {
       val digest = MessageDigest.getInstance("SHA-256")
@@ -122,9 +215,59 @@ private constructor(private val runtimes: Map<String, RuntimeBundle>) {
       return result
     }
 
+    private fun readArchive(archive: ByteArray): Map<String, ByteArray> {
+      require(archive.size <= MAX_ARCHIVE_BYTES) { "UI-builder runtime archive exceeds the cap" }
+      val result = linkedMapOf<String, ByteArray>()
+      var total = 0L
+      ZipInputStream(ByteArrayInputStream(archive)).use { zip ->
+        var entry = zip.nextEntry
+        while (entry != null) {
+          if (!entry.isDirectory) {
+            require(result.size < MAX_ARCHIVE_ENTRIES) {
+              "UI-builder runtime archive has too many entries"
+            }
+            val path = entry.name.replace('\\', '/')
+            require(normalizeRelativePath(path) == path) {
+              "UI-builder runtime contains an unsafe asset path: $path"
+            }
+            require(path !in result) { "UI-builder runtime contains a duplicate asset: $path" }
+            val content = zip.readBounded(MAX_ARCHIVE_ENTRY_BYTES)
+            total += content.size
+            require(total <= MAX_ARCHIVE_EXPANDED_BYTES) {
+              "UI-builder runtime expanded bytes exceed the cap"
+            }
+            result[path] = content
+          }
+          zip.closeEntry()
+          entry = zip.nextEntry
+        }
+      }
+      return result
+    }
+
+    private fun ZipInputStream.readBounded(maxBytes: Long): ByteArray {
+      val output = java.io.ByteArrayOutputStream()
+      val buffer = ByteArray(64 * 1024)
+      var total = 0L
+      while (true) {
+        val count = read(buffer)
+        if (count < 0) break
+        total += count
+        require(total <= maxBytes) { "UI-builder runtime archive entry exceeds the cap" }
+        output.write(buffer, 0, count)
+      }
+      return output.toByteArray()
+    }
+
     private fun sha256(bytes: ByteArray): String =
       MessageDigest.getInstance("SHA-256").digest(bytes).toHex()
 
     private fun ByteArray.toHex(): String = joinToString("") { "%02x".format(it) }
+
+    private const val MAX_ARCHIVE_BYTES = 64L * 1024 * 1024
+    private const val MAX_ARCHIVE_ENTRIES = 512
+    private const val MAX_ARCHIVE_ENTRY_BYTES = 128L * 1024 * 1024
+    private const val MAX_ARCHIVE_EXPANDED_BYTES = 256L * 1024 * 1024
+    private val SUPPORTED_PROTOCOL_VERSIONS = setOf(1, 2)
   }
 }

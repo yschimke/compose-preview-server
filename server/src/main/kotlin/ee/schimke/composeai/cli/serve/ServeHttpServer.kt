@@ -220,6 +220,12 @@ class ServeHttpServer(
   private val uiBuilderCatalogs: Set<String> = setOf("m3-catalog"),
   /** Retained native renderer directories, snapshotted before this server accepts requests. */
   uiBuilderRuntimeDirs: Map<String, File> = emptyMap(),
+  /** Runtime assets activated atomically with a refreshed catalog generation. */
+  private val catalogUiBuilderRuntimeAsset:
+    (runtimeId: String, segments: List<String>) -> Pair<ByteArray, String>? =
+    { _, _ ->
+      null
+    },
   /** Local auto-discovered apps that must use the credential-carrying `/wasm-private/` route. */
   private val privateWasmCatalogs: Set<String> = emptySet(),
   /**
@@ -13875,7 +13881,11 @@ class ServeHttpServer(
   private suspend fun RoutingContext.handleUiBuilderRuntimeAsset() {
     val runtimeId = call.parameters["runtimeId"].orEmpty()
     val segments = call.parameters.getAll("path").orEmpty().filter { it.isNotEmpty() }
-    val asset = uiBuilderRuntimeAssets.asset(runtimeId, segments)
+    val asset =
+      uiBuilderRuntimeAssets.asset(runtimeId, segments)
+        ?: catalogUiBuilderRuntimeAsset(runtimeId, segments)?.let { (bytes, etag) ->
+          ServeUiBuilderRuntimeAssets.Asset(bytes, etag)
+        }
     if (asset == null) {
       call.respondText("not found", status = HttpStatusCode.NotFound)
       return

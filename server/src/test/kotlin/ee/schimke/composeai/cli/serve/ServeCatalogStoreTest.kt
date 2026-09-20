@@ -12,7 +12,9 @@ import java.io.File
 import java.nio.file.Files
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CopyOnWriteArrayList
+import java.util.zip.ZipEntry
 import java.util.zip.ZipInputStream
+import java.util.zip.ZipOutputStream
 import javax.imageio.ImageIO
 import kotlin.test.Test
 import kotlin.test.assertContentEquals
@@ -51,6 +53,44 @@ class ServeCatalogStoreTest {
     ByteArrayOutputStream()
       .also { ImageIO.write(BufferedImage(2, 2, BufferedImage.TYPE_INT_RGB), "png", it) }
       .toByteArray()
+
+  private fun runtimeIntegrity(renderer: ByteArray): String =
+    ServeUiBuilderRuntimeAssets.treeIntegrity(
+      mapOf(
+        "index.html" to "<script src=renderer.mjs></script>".encodeToByteArray(),
+        "renderer.mjs" to renderer,
+      )
+    )
+
+  private fun runtimeArchive(runtimeId: String, renderer: ByteArray): ByteArray {
+    val assets =
+      linkedMapOf(
+        "index.html" to "<script src=renderer.mjs></script>".encodeToByteArray(),
+        "renderer.mjs" to renderer,
+      )
+    val manifest =
+      """{"schema":"compose-ui-builder-runtime/v1","runtimeId":"$runtimeId","protocolVersion":2,"entrypoint":"index.html","integritySha256":"${ServeUiBuilderRuntimeAssets.treeIntegrity(assets)}"}"""
+        .encodeToByteArray()
+    return ByteArrayOutputStream().use { output ->
+      ZipOutputStream(output).use { zip ->
+        (assets + (ServeUiBuilderRuntimeAssets.RUNTIME_MANIFEST_NAME to manifest)).forEach {
+          (path, bytes) ->
+          zip.putNextEntry(ZipEntry(path))
+          zip.write(bytes)
+          zip.closeEntry()
+        }
+      }
+      output.toByteArray()
+    }
+  }
+
+  private fun runtimeCatalog(runtimeId: String, integrity: String): String =
+    """
+    {"schema":"design-parity-catalog/v1","system":"compose-m3",
+     "uiBuilderRuntime":{"path":"ui-builder/runtime.zip","runtimeId":"$runtimeId","protocolVersion":2,"integritySha256":"$integrity"},
+     "components":[{"componentId":"Button/Filled","images":[{"path":"images/button.png"}]}]}
+    """
+      .trimIndent()
 
   private val catalogJson =
     """
@@ -3491,6 +3531,93 @@ class ServeCatalogStoreTest {
       assertNotNull(store.componentRecord("compose-m3"), "the record reached the generation")
     assertEquals(componentRecord, staged.readText())
     assertEquals(File(store.liveDir("compose-m3")!!, "components.json"), staged)
+  }
+
+  @Test
+  fun `catalog stages and activates its verified renderer runtime`() {
+    val runtimeId = "compose-m3-p2-revision"
+    val renderer = "export const generation = 'current'".encodeToByteArray()
+    val runtime = runtimeArchive(runtimeId, renderer)
+    val catalog = runtimeCatalog(runtimeId, runtimeIntegrity(renderer))
+    val store =
+      store(TrustStore.EMPTY) { url ->
+        when {
+          url.endsWith("/${ServeCatalogStore.CATALOG_FILE}") -> catalog.encodeToByteArray()
+          url.endsWith("/ui-builder/runtime.zip") -> runtime
+          url.endsWith("/images/button.png") -> png()
+          else -> null
+        }
+      }
+
+    assertTrue(store.load("compose-m3") is ServeCatalogStore.Result.Ok)
+
+    val asset = assertNotNull(store.uiBuilderRuntimeAsset(runtimeId, listOf("renderer.mjs")))
+    assertContentEquals(renderer, asset.bytes)
+    assertTrue(
+      File(
+          store.liveDir("compose-m3"),
+          "${ServeCatalogStore.UI_BUILDER_RUNTIME_DIR}/$runtimeId/renderer.mjs",
+        )
+        .isFile
+    )
+  }
+
+  @Test
+  fun `invalid catalog runtime leaves the previous generation active`() {
+    val runtimeId = "compose-m3-p2-revision"
+    val renderer = "export const generation = 'retained'".encodeToByteArray()
+    val runtime = runtimeArchive(runtimeId, renderer)
+    var catalog = runtimeCatalog(runtimeId, runtimeIntegrity(renderer))
+    val store =
+      store(TrustStore.EMPTY) { url ->
+        when {
+          url.endsWith("/${ServeCatalogStore.CATALOG_FILE}") -> catalog.encodeToByteArray()
+          url.endsWith("/ui-builder/runtime.zip") -> runtime
+          url.endsWith("/images/button.png") -> png()
+          else -> null
+        }
+      }
+    assertTrue(store.load("compose-m3") is ServeCatalogStore.Result.Ok)
+    val liveBefore = store.liveDir("compose-m3")
+
+    catalog = runtimeCatalog(runtimeId, "b".repeat(64))
+    val failed = store.load("compose-m3")
+
+    assertTrue(failed is ServeCatalogStore.Result.Failed)
+    assertEquals(liveBefore, store.liveDir("compose-m3"))
+    assertContentEquals(
+      renderer,
+      assertNotNull(store.uiBuilderRuntimeAsset(runtimeId, listOf("renderer.mjs"))).bytes,
+    )
+  }
+
+  @Test
+  fun `a runtime id collision across live catalogs serves neither implementation`() {
+    val runtimeId = "shared-p2-revision"
+    val firstRenderer = "export const owner = 'first'".encodeToByteArray()
+    val secondRenderer = "export const owner = 'second'".encodeToByteArray()
+    val firstArchive = runtimeArchive(runtimeId, firstRenderer)
+    val secondArchive = runtimeArchive(runtimeId, secondRenderer)
+    val store =
+      store(TrustStore.EMPTY) { url ->
+        val second = "/design-artifacts/second/" in url
+        when {
+          url.endsWith("/${ServeCatalogStore.CATALOG_FILE}") ->
+            runtimeCatalog(
+                runtimeId,
+                runtimeIntegrity(if (second) secondRenderer else firstRenderer),
+              )
+              .encodeToByteArray()
+          url.endsWith("/ui-builder/runtime.zip") -> if (second) secondArchive else firstArchive
+          url.endsWith("/images/button.png") -> png()
+          else -> null
+        }
+      }
+
+    assertTrue(store.load("first") is ServeCatalogStore.Result.Ok)
+    assertTrue(store.load("second") is ServeCatalogStore.Result.Ok)
+
+    assertNull(store.uiBuilderRuntimeAsset(runtimeId, listOf("renderer.mjs")))
   }
 
   @Test
