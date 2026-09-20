@@ -159,8 +159,9 @@ composeai-preview-daemon = "3.8.3"
 # own document model.
 # 3.1.0 is the first release publishing `compose-preview-contracts-bom`. 3.3.0 adds the optional
 # `WasmCapabilityV1.canvas` adapter id, so a published catalog can carry `frame/round-screen` to the
-# renderer instead of leaving the server to reduce that declaration to status prose.
-composeai-contracts = "3.3.0"
+# renderer instead of leaving the server to reduce that declaration to status prose. 3.4.0 owns the
+# catalog-renderer runtime manifest, validation and canonical tree-integrity framing.
+composeai-contracts = "3.4.0"
 
 # The extracted UI builder (yschimke/compose-ui-builder), resolved from its RELEASES. Three jars
 # and a BOM on Maven Central, and the editor archive as a GitHub release asset reached through the

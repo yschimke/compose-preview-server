@@ -1,14 +1,18 @@
 package ee.schimke.composeai.cli.serve
 
+import ee.schimke.composeai.uibuilder.protocol.UI_BUILDER_RUNTIME_MANIFEST_NAME_V1
+import ee.schimke.composeai.uibuilder.protocol.UI_BUILDER_RUNTIME_MANIFEST_SCHEMA_V1
+import ee.schimke.composeai.uibuilder.protocol.UiBuilderRuntimeManifestV1
+import ee.schimke.composeai.uibuilder.protocol.frameUiBuilderRuntimeTreeIntegrityV1
+import ee.schimke.composeai.uibuilder.protocol.isValidUiBuilderRuntimeIdV1
+import ee.schimke.composeai.uibuilder.protocol.normalizeUiBuilderRuntimeAssetPathV1
+import ee.schimke.composeai.uibuilder.protocol.validateContract
 import java.io.File
 import java.nio.file.Files
 import java.nio.file.LinkOption
 import java.nio.file.Path
 import java.security.MessageDigest
 import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.intOrNull
-import kotlinx.serialization.json.jsonObject
-import kotlinx.serialization.json.jsonPrimitive
 
 /**
  * An in-memory snapshot of retained, version-addressed UI-builder renderer assets.
@@ -34,18 +38,15 @@ private constructor(private val runtimes: Map<String, RuntimeBundle>) {
   private data class RuntimeBundle(val assets: Map<String, Asset>)
 
   internal companion object {
-    internal const val MANIFEST_SCHEMA = "compose-ui-builder-runtime/v1"
-    internal const val RUNTIME_MANIFEST_NAME = "runtime-manifest.json"
+    internal const val MANIFEST_SCHEMA = UI_BUILDER_RUNTIME_MANIFEST_SCHEMA_V1
+    internal const val RUNTIME_MANIFEST_NAME = UI_BUILDER_RUNTIME_MANIFEST_NAME_V1
 
     private val JSON = Json { ignoreUnknownKeys = false }
-    private val SAFE_RUNTIME_ID = Regex("[A-Za-z0-9._-]+")
-    private val SHA256 = Regex("[a-f0-9]{64}")
-    private val RESERVED_RUNTIME_IDS = setOf("current", "latest")
 
     internal fun load(inputs: Map<String, File>): ServeUiBuilderRuntimeAssets {
       val bundles = linkedMapOf<String, RuntimeBundle>()
       inputs.toSortedMap().forEach { (runtimeId, directory) ->
-        require(runtimeId.matches(SAFE_RUNTIME_ID) && runtimeId !in RESERVED_RUNTIME_IDS) {
+        require(isValidUiBuilderRuntimeIdV1(runtimeId)) {
           "UI-builder runtime id '$runtimeId' is unsafe or reserved"
         }
         val root = directory.toPath().toAbsolutePath().normalize()
@@ -59,45 +60,24 @@ private constructor(private val runtimes: Map<String, RuntimeBundle>) {
           }
         val manifest =
           try {
-            JSON.parseToJsonElement(manifestBytes.decodeToString()).jsonObject
+            JSON.decodeFromString(
+              UiBuilderRuntimeManifestV1.serializer(),
+              manifestBytes.decodeToString(),
+            )
           } catch (failure: Exception) {
             throw IllegalArgumentException(
               "UI-builder runtime '$runtimeId' has an invalid $RUNTIME_MANIFEST_NAME",
               failure,
             )
           }
-        val manifestFields =
-          setOf("schema", "runtimeId", "protocolVersion", "entrypoint", "integritySha256")
-        require(manifest.keys == manifestFields) {
-          "UI-builder runtime '$runtimeId' manifest fields do not match $MANIFEST_SCHEMA"
-        }
-        require(
-          manifest["schema"]?.jsonPrimitive?.takeIf { it.isString }?.content == MANIFEST_SCHEMA
-        ) {
-          "UI-builder runtime '$runtimeId' has an unsupported manifest schema"
-        }
-        require(
-          manifest["runtimeId"]?.jsonPrimitive?.takeIf { it.isString }?.content == runtimeId
-        ) {
+        require(manifest.runtimeId == runtimeId) {
           "UI-builder runtime directory '$runtimeId' does not match its manifest runtimeId"
         }
-        require((manifest["protocolVersion"]?.jsonPrimitive?.intOrNull ?: 0) > 0) {
-          "UI-builder runtime '$runtimeId' must declare a positive protocolVersion"
-        }
-        val entrypoint =
-          manifest["entrypoint"]?.jsonPrimitive?.takeIf { it.isString }?.content.orEmpty()
-        require(normalizeRelativePath(entrypoint) == entrypoint && entrypoint in bytes) {
-          "UI-builder runtime '$runtimeId' has an unsafe or missing entrypoint"
-        }
-        val declaredIntegrity =
-          manifest["integritySha256"]?.jsonPrimitive?.takeIf { it.isString }?.content.orEmpty()
-        require(declaredIntegrity.matches(SHA256)) {
-          "UI-builder runtime '$runtimeId' must declare a lowercase SHA-256 integrity digest"
-        }
         val actualIntegrity = treeIntegrity(bytes - RUNTIME_MANIFEST_NAME)
-        require(actualIntegrity == declaredIntegrity) {
-          "UI-builder runtime '$runtimeId' integrity mismatch: expected $declaredIntegrity, " +
-            "calculated $actualIntegrity"
+        val issues = manifest.validateContract(bytes.keys, actualIntegrity)
+        require(issues.isEmpty()) {
+          "UI-builder runtime '$runtimeId' manifest is invalid: " +
+            issues.joinToString { issue -> "${issue.field}:${issue.code}" }
         }
         bundles[runtimeId] =
           RuntimeBundle(
@@ -113,25 +93,12 @@ private constructor(private val runtimes: Map<String, RuntimeBundle>) {
     /** Canonical digest used by retained runtime manifests and their packaging tools. */
     internal fun treeIntegrity(assets: Map<String, ByteArray>): String {
       val digest = MessageDigest.getInstance("SHA-256")
-      assets.toSortedMap().forEach { (path, bytes) ->
-        require(normalizeRelativePath(path) == path && path != RUNTIME_MANIFEST_NAME) {
-          "Unsafe runtime asset path '$path'"
-        }
-        digest.update(path.encodeToByteArray())
-        digest.update(0)
-        digest.update(bytes.size.toString().encodeToByteArray())
-        digest.update(0)
-        digest.update(bytes)
-      }
+      frameUiBuilderRuntimeTreeIntegrityV1(assets, digest::update)
       return digest.digest().toHex()
     }
 
-    internal fun normalizeRelativePath(path: String): String? {
-      if (path.isBlank() || path.startsWith('/') || '\\' in path || '\u0000' in path) return null
-      val segments = path.split('/')
-      if (segments.any { it.isBlank() || it == "." || it == ".." }) return null
-      return segments.joinToString("/")
-    }
+    internal fun normalizeRelativePath(path: String): String? =
+      normalizeUiBuilderRuntimeAssetPathV1(path)
 
     private fun readSnapshot(root: Path): Map<String, ByteArray> {
       val result = linkedMapOf<String, ByteArray>()
