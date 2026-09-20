@@ -1,5 +1,20 @@
 # Changelog
 
+## [3.42.0](https://github.com/yschimke/compose-preview-server/compare/v3.41.0...v3.42.0) (2026-09-20)
+
+
+### Features
+
+* **ui-builder:** stage catalog renderer runtimes ([#964](https://github.com/yschimke/compose-preview-server/issues/964)) ([893d7f7](https://github.com/yschimke/compose-preview-server/commit/893d7f7843c74a935f9dfd6c9af47f0d0892f6bf))
+
+
+### Bug Fixes
+
+* **deps:** update compose ui builder to 3.32.0 ([#969](https://github.com/yschimke/compose-preview-server/issues/969)) ([6adc83b](https://github.com/yschimke/compose-preview-server/commit/6adc83bc808bb9b9304e2d851d20b4cf7a99aa78))
+* **ui-builder:** preserve runtime identity on refresh ([#968](https://github.com/yschimke/compose-preview-server/issues/968)) ([c20ea90](https://github.com/yschimke/compose-preview-server/commit/c20ea906f8606d6fdfafe098d4186f393d581f2c))
+* **ui-builder:** record canvas mapping decoder shape ([#965](https://github.com/yschimke/compose-preview-server/issues/965)) ([2675944](https://github.com/yschimke/compose-preview-server/commit/267594418290c47baf9345c862259cfe45e5785c))
+* **ui-builder:** validate canvas mapping objects ([#967](https://github.com/yschimke/compose-preview-server/issues/967)) ([5698534](https://github.com/yschimke/compose-preview-server/commit/56985348b4d9e341df5fd98603e06a43b5050437))
+
 ## [3.41.0](https://github.com/yschimke/compose-preview-server/compare/v3.40.0...v3.41.0) (2026-09-20)
 
 
