@@ -1,5 +1,21 @@
 # Changelog
 
+## [3.41.0](https://github.com/yschimke/compose-preview-server/compare/v3.40.0...v3.41.0) (2026-09-20)
+
+
+### Features
+
+* **ui-builder:** compose a catalog's unrolled mock onto the canvas lane ([#958](https://github.com/yschimke/compose-preview-server/issues/958)) ([78d0ed3](https://github.com/yschimke/compose-preview-server/commit/78d0ed3bce4030897f707c3bfad3dd5fb14f55aa))
+* **ui-builder:** compose catalog render declarations ([#963](https://github.com/yschimke/compose-preview-server/issues/963)) ([25c439a](https://github.com/yschimke/compose-preview-server/commit/25c439aa67ca45e4eb8c857bd0111ad6ec1405cf))
+
+
+### Bug Fixes
+
+* **release:** let the distribution lane be re-run for an existing tag ([#951](https://github.com/yschimke/compose-preview-server/issues/951)) ([a7e95b8](https://github.com/yschimke/compose-preview-server/commit/a7e95b8ba0f709541f7fb3984fb3346affbe0101))
+* **serve:** name the capability ceiling where an agent's ask is narrowed away ([#953](https://github.com/yschimke/compose-preview-server/issues/953)) ([d2735dd](https://github.com/yschimke/compose-preview-server/commit/d2735dd02464805d73216de416ceb750bed2579e))
+* **serve:** pass --module to the build host, and select it from discovery ([#956](https://github.com/yschimke/compose-preview-server/issues/956)) ([449f71d](https://github.com/yschimke/compose-preview-server/commit/449f71ddc845410ab702613e870db2dc685e2c53))
+* **ui-builder:** publish catalog canvas adapters ([#962](https://github.com/yschimke/compose-preview-server/issues/962)) ([2aefe07](https://github.com/yschimke/compose-preview-server/commit/2aefe07fd4de18df71f4f2850f5f267a0882cacf))
+
 ## [3.40.0](https://github.com/yschimke/compose-preview-server/compare/v3.39.0...v3.40.0) (2026-09-17)
 
 
