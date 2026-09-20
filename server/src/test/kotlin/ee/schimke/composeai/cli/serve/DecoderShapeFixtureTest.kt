@@ -13,6 +13,8 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.serializer
 
 /**
@@ -52,6 +54,22 @@ class DecoderShapeFixtureTest {
         "and commit .github/scripts/decoder-shapes.json — the " +
         "readiness gate validates records against this table and cannot see the decoders itself.",
     )
+  }
+
+  @Test
+  fun `canvas adapter maps require JSON objects`() {
+    val mapping =
+      shapes()["componentPolicy"]
+        ?.jsonObject
+        ?.get("members")
+        ?.jsonObject
+        ?.get("canvasMapping")
+        ?.jsonObject
+        ?.get("members")
+        ?.jsonObject
+    listOf("defaults", "properties", "slots").forEach { name ->
+      assertEquals("object", mapping?.get(name)?.jsonObject?.get("kind")?.jsonPrimitive?.content)
+    }
   }
 
   private fun shapes(): JsonObject =
@@ -134,8 +152,10 @@ class DecoderShapeFixtureTest {
         mapOf("kind" to JsonPrimitive("object")) +
           (described["members"]?.let { mapOf("members" to it) } ?: emptyMap())
       }
-      // A map or a free-form JsonElement is carried but not constrained: the reader accepts any
-      // shape there, so asserting one would refuse records it decodes.
+      // kotlinx decodes a map only from a JSON object. Its values remain free-form, but the
+      // container itself is not: accepting a scalar here certifies a record the server refuses.
+      StructureKind.MAP -> mapOf("kind" to JsonPrimitive("object"))
+      // A free-form JsonElement is carried but not constrained.
       else -> mapOf("kind" to JsonPrimitive("any"))
     }
 }
