@@ -4,6 +4,8 @@ import ee.schimke.composeai.discovery.ComponentRecord
 import ee.schimke.composeai.discovery.ComponentRecordFile
 import ee.schimke.composeai.uibuilder.REMOTE_CONTENT_MODIFIERS
 import ee.schimke.composeai.uibuilder.UiBuilderCatalogPlatform
+import ee.schimke.composeai.uibuilder.protocol.BrowserPreviewCapabilityV1
+import ee.schimke.composeai.uibuilder.protocol.CanvasAdapterMappingV1
 import ee.schimke.composeai.uibuilder.protocol.CatalogBenchmarkV1
 import ee.schimke.composeai.uibuilder.protocol.CatalogCapabilityV1
 import ee.schimke.composeai.uibuilder.protocol.CodeCapabilityV1
@@ -422,6 +424,7 @@ internal object PublishedUiBuilderCatalog {
         .also {
           it.exportCapabilities = exportCapabilities
           it.statusSemantics = rawSemantics
+          it.browserPreview = semantics.browserPreview
         }
         .build()
     val note =
@@ -565,6 +568,7 @@ internal object PublishedUiBuilderCatalog {
           policy?.nativeOnly == true,
           component.symbol.callable,
           policy?.unrolled,
+          policy?.canvasMapping,
         ),
       )
       .also {
@@ -782,6 +786,7 @@ internal object PublishedUiBuilderCatalog {
     nativeOnly: Boolean,
     callable: String?,
     unrolled: UiBuilderUnrolledMock? = null,
+    canvasMapping: CanvasAdapterMappingV1? = null,
   ): WasmCapabilityV1 {
     val drawn = !nativeOnly && canvas != null && canvas != PLACEHOLDER_CANVAS
     return WasmCapabilityV1.Builder(
@@ -800,6 +805,8 @@ internal object PublishedUiBuilderCatalog {
           }
         it.canvas = canvas
         it.unrolled = unrolled?.toContract()
+        it.canvas = canvas
+        it.canvasMapping = canvasMapping
       }
       .build()
   }
@@ -937,6 +944,7 @@ internal object PublishedUiBuilderCatalog {
      * structural default cannot be offered the difference. See [writableModifiers].
      */
     val platform: String = "",
+    val browserPreview: BrowserPreviewCapabilityV1? = null,
     val builtins: Map<String, UiBuilderBuiltin> = emptyMap(),
     val components: Map<String, UiBuilderComponentPolicy> = emptyMap(),
   )
@@ -1102,6 +1110,7 @@ internal object PublishedUiBuilderCatalog {
     @SerialName("catalogId") val catalogId: String? = null,
     val displayName: String? = null,
     val canvas: String? = null,
+    val canvasMapping: CanvasAdapterMappingV1? = null,
     /**
      * See [UiBuilderUnrolledMock]: the same declaration a builtin states, carried to the same
      * field.
