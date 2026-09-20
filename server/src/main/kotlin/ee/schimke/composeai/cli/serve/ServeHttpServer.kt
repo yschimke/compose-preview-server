@@ -13881,11 +13881,27 @@ class ServeHttpServer(
   private suspend fun RoutingContext.handleUiBuilderRuntimeAsset() {
     val runtimeId = call.parameters["runtimeId"].orEmpty()
     val segments = call.parameters.getAll("path").orEmpty().filter { it.isNotEmpty() }
+    val configuredManifest = uiBuilderRuntimeAssets.asset(runtimeId, emptyList())
+    val catalogManifest =
+      catalogUiBuilderRuntimeAsset(runtimeId, emptyList())?.let { (bytes, etag) ->
+        ServeUiBuilderRuntimeAssets.Asset(bytes, etag)
+      }
+    // Runtime ids are global immutable identities. A configured runtime and a catalog runtime may
+    // share one only when their verified manifests are identical; choosing configured precedence
+    // would make a catalog descriptor's integrity point at different executable bytes.
+    val collision =
+      configuredManifest != null &&
+        catalogManifest != null &&
+        configuredManifest.etag != catalogManifest.etag
     val asset =
-      uiBuilderRuntimeAssets.asset(runtimeId, segments)
-        ?: catalogUiBuilderRuntimeAsset(runtimeId, segments)?.let { (bytes, etag) ->
-          ServeUiBuilderRuntimeAssets.Asset(bytes, etag)
-        }
+      if (collision) {
+        null
+      } else {
+        uiBuilderRuntimeAssets.asset(runtimeId, segments)
+          ?: catalogUiBuilderRuntimeAsset(runtimeId, segments)?.let { (bytes, etag) ->
+            ServeUiBuilderRuntimeAssets.Asset(bytes, etag)
+          }
+      }
     if (asset == null) {
       call.respondText("not found", status = HttpStatusCode.NotFound)
       return

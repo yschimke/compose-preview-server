@@ -221,6 +221,43 @@ class ServeUiBuilderRuntimeAssetsTest {
   }
 
   @Test
+  fun `runtime route rejects configured and catalog identity collisions`() {
+    val runtimeId = "shared-p2-revision"
+    val configured = runtimeDirectory(runtimeId, "export const owner = 'configured'")
+    val catalog = runtimeDirectory(runtimeId, "export const owner = 'catalog'")
+    val catalogRoot = Files.createTempDirectory("serve-catalog-runtime-root").toFile()
+    check(catalog.renameTo(File(catalogRoot, runtimeId)))
+    val registry = ServeSessionRegistry(open = { null })
+    val server =
+      ServeHttpServer(
+          host = "127.0.0.1",
+          requestedPort = 0,
+          token = "private-token",
+          sessions = registry,
+          defaultSessionId = "none",
+          uiBuilderRuntimeDirs = mapOf(runtimeId to configured),
+          catalogUiBuilderRuntimeAsset = { requestedId, segments ->
+            ServeUiBuilderRuntimeAssets.assetFromDirectory(catalogRoot, requestedId, segments)
+              ?.let { it.bytes to it.etag }
+          },
+        )
+        .also { it.start() }
+    try {
+      OkHttpClient()
+        .newCall(
+          Request.Builder()
+            .url("http://127.0.0.1:${server.port}/ui-builder/runtime/$runtimeId/renderer.mjs")
+            .build()
+        )
+        .execute()
+        .use { response -> assertEquals(404, response.code) }
+    } finally {
+      server.stop()
+      registry.close()
+    }
+  }
+
+  @Test
   fun `tree integrity matches the shared non-ASCII contract vector`() {
     val assets =
       mapOf(
