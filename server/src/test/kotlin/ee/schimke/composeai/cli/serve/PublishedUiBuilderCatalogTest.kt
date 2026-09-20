@@ -390,6 +390,9 @@ class PublishedUiBuilderCatalogTest {
     // The derivation can produce SUPPORTED and UNSUPPORTED and never PLANNED, which is the
     // difference between an adapter that is coming and one that will never exist.
     assertEquals(WasmAdapterStatusV1.PLANNED, box.wasm.adapterStatus)
+    // The adapter id itself is executable catalog data, not only the source of status prose. A
+    // direct rendering host needs this exact word to dispatch the component without knowing its id.
+    assertEquals("layout/box", box.wasm.canvas)
     // ...and only the field the catalog stated moves. Platform support and the note still come
     // from the adapter id, so stating one field is not a claim about the other two.
     assertEquals("true", box.wasm.platformSupported.toString())

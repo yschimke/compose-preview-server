@@ -93,6 +93,22 @@ class ServeUiBuilderRuntimeAssetsTest {
     }
   }
 
+  @Test
+  fun `tree integrity matches the shared non-ASCII contract vector`() {
+    val assets =
+      mapOf(
+        "index.html" to "<!doctype html>".encodeToByteArray(),
+        "renderer.mjs" to "export const renderer = true".encodeToByteArray(),
+        "z.txt" to "z".encodeToByteArray(),
+        "é.txt" to "accent".encodeToByteArray(),
+      )
+
+    assertEquals(
+      "717fa7ba410f2bc0e7e28b0f7184815a02373a5f4127e0308c4636f421f54590",
+      ServeUiBuilderRuntimeAssets.treeIntegrity(assets),
+    )
+  }
+
   private fun runtimeDirectory(runtimeId: String, renderer: String): File {
     val directory =
       Files.createTempDirectory("serve-ui-builder-runtime").toFile().also { it.deleteOnExit() }

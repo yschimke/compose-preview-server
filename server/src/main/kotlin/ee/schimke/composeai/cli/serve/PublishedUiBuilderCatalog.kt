@@ -798,6 +798,7 @@ internal object PublishedUiBuilderCatalog {
             drawn -> "Drawn on the canvas by the `$canvas` adapter."
             else -> "Drawn on the canvas as a named placeholder: this catalog claims no adapter."
           }
+        it.canvas = canvas
         it.unrolled = unrolled?.toContract()
       }
       .build()

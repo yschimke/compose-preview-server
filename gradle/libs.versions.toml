@@ -157,8 +157,11 @@ composeai-preview-daemon = "3.8.3"
 # that reads the dictionary in scope (compose-preview-contracts#57) — which is the wire behind the
 # component placements and loop rows this repository's canvas and exporter already draw from its
 # own document model.
-# 3.1.0 is the first release publishing `compose-preview-contracts-bom`.
-composeai-contracts = "3.2.0"
+# 3.1.0 is the first release publishing `compose-preview-contracts-bom`. 3.3.0 adds the optional
+# `WasmCapabilityV1.canvas` adapter id, so a published catalog can carry `frame/round-screen` to the
+# renderer instead of leaving the server to reduce that declaration to status prose. 3.4.0 owns the
+# catalog-renderer runtime manifest, validation and canonical tree-integrity framing.
+composeai-contracts = "3.4.0"
 
 # The extracted UI builder (yschimke/compose-ui-builder), resolved from its RELEASES. Three jars
 # and a BOM on Maven Central, and the editor archive as a GitHub release asset reached through the
@@ -171,7 +174,10 @@ composeai-contracts = "3.2.0"
 # exception that still carries a version of its own -- it is deliberately not in the BOM, because
 # it is not a Maven module, and a BOM entry for a coordinate nobody uploaded is exactly the
 # failure this catalog's own history records.
-composeai-ui-builder = "3.28.0"
+# 3.29.0 replaces protocol data-class `copy` calls in the runtime with the contracts line's stable
+# builders. Required with contracts 3.3.0: the added optional fields intentionally change generated
+# copy signatures, while `newBuilder()` remains binary-compatible.
+composeai-ui-builder = "3.29.0"
 # 1.65.0 is the first release publishing `rc-players-bom`. (1.64.0 is a tag and a GitHub Release
 # whose Maven coordinates never reached Central -- rc-players#211 -- so it cannot be pinned.)
 # 1.67.0 by hand, ahead of Renovate's soak: it pins the KMP player modules to a Java 17 toolchain
