@@ -3592,6 +3592,41 @@ class ServeCatalogStoreTest {
   }
 
   @Test
+  fun `outgoing runtime remains readable for the generation grace period`() {
+    var runtimeId = "compose-m3-p2-first"
+    var renderer = "export const generation = 'first'".encodeToByteArray()
+    var runtime = runtimeArchive(runtimeId, renderer)
+    var catalog = runtimeCatalog(runtimeId, runtimeIntegrity(renderer))
+    val store =
+      store(TrustStore.EMPTY) { url ->
+        when {
+          url.endsWith("/${ServeCatalogStore.CATALOG_FILE}") -> catalog.encodeToByteArray()
+          url.endsWith("/ui-builder/runtime.zip") -> runtime
+          url.endsWith("/images/button.png") -> png()
+          else -> null
+        }
+      }
+    assertTrue(store.load("compose-m3") is ServeCatalogStore.Result.Ok)
+    val outgoingId = runtimeId
+    val outgoingRenderer = renderer
+
+    runtimeId = "compose-m3-p2-second"
+    renderer = "export const generation = 'second'".encodeToByteArray()
+    runtime = runtimeArchive(runtimeId, renderer)
+    catalog = runtimeCatalog(runtimeId, runtimeIntegrity(renderer))
+    assertTrue(store.load("compose-m3") is ServeCatalogStore.Result.Ok)
+
+    assertContentEquals(
+      outgoingRenderer,
+      assertNotNull(store.uiBuilderRuntimeAsset(outgoingId, listOf("renderer.mjs"))).bytes,
+    )
+    assertContentEquals(
+      renderer,
+      assertNotNull(store.uiBuilderRuntimeAsset(runtimeId, listOf("renderer.mjs"))).bytes,
+    )
+  }
+
+  @Test
   fun `a runtime id collision across live catalogs serves neither implementation`() {
     val runtimeId = "shared-p2-revision"
     val firstRenderer = "export const owner = 'first'".encodeToByteArray()

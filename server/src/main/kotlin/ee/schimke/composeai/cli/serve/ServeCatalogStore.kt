@@ -1675,7 +1675,12 @@ class ServeCatalogStore(
     runtimeId: String,
     segments: List<String>,
   ): ServeUiBuilderRuntimeAssets.Asset? {
-    val roots = liveDirs.values.map { generation -> File(generation, UI_BUILDER_RUNTIME_DIR) }
+    // A published generation remains on disk until the next refresh starts so requests already
+    // holding its immutable runtime id can finish. Runtime lookup must share that grace period;
+    // restricting it to liveDirs makes the outgoing id return 404 at the instant of activation
+    // even though its verified bytes are deliberately still retained.
+    runtimeRoots.removeIf { !it.isDirectory }
+    val roots = runtimeRoots.toList()
     val manifestEtags =
       roots
         .mapNotNull { runtimeRoot ->
@@ -4094,6 +4099,9 @@ class ServeCatalogStore(
    */
   private val liveDirs = ConcurrentHashMap<String, File>()
 
+  /** Verified runtime roots from published generations that have not yet been retired. */
+  private val runtimeRoots = ConcurrentHashMap.newKeySet<File>()
+
   /** Where [system]'s registered host reads its bytes from, or null if it has never published. */
   fun liveDir(system: String): File? = ServeBundleStore.sanitizeName(system)?.let { liveDirs[it] }
 
@@ -4107,6 +4115,7 @@ class ServeCatalogStore(
    */
   private fun publishGeneration(safe: String, dir: File, wasmDir: File?) {
     liveDirs[safe] = dir
+    File(dir, UI_BUILDER_RUNTIME_DIR).takeIf(File::isDirectory)?.let(runtimeRoots::add)
     // Always, including with null: an in-browser app registered by an earlier generation outlives
     // its host on disk, so a publish that carries none has to withdraw it rather than simply not
     // replace it. See [registerWasm].
