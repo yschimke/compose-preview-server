@@ -35,6 +35,7 @@ import ee.schimke.composeai.uibuilder.protocol.GrantActorAccessMutationV1
 import ee.schimke.composeai.uibuilder.protocol.ListDesignsRequestV1
 import ee.schimke.composeai.uibuilder.protocol.OpenDesignRequestV1
 import ee.schimke.composeai.uibuilder.protocol.RevokeActorAccessMutationV1
+import ee.schimke.composeai.uibuilder.protocol.ServiceErrorCodeV1
 import ee.schimke.composeai.uibuilder.protocol.UpdateDesignAccessRequestV1
 import ee.schimke.composeai.uibuilder.service.AuthenticatedUiBuilderActor
 import ee.schimke.composeai.uibuilder.service.ProtocolRequestMapping
@@ -12876,6 +12877,11 @@ class ServeHttpServer(
    * taken. Asking the service as the caller means the answer is exactly the one the design API
    * would already give them: whoever cannot open the design gets the same `404` they got before.
    *
+   * A stale catalog pin is the one exception to snapshot success: the recovery screen has to load
+   * before the design can produce a snapshot again. In that case the server asks for the read-only
+   * recovery preview. That request performs the same per-design READ check before saying anything
+   * about the catalog, so this fallback does not turn the shell into an existence oracle.
+   *
    * @return true when the shell may be served, false to leave the request to the static lane —
    *   which keeps a genuinely missing asset a 404 rather than a silent app shell.
    */
@@ -12895,7 +12901,25 @@ class ServeHttpServer(
       (mapping as? ProtocolRequestMapping.Mapped)?.let {
         withContext(Dispatchers.IO) { service.execute(it.call) }
       }
-    return response is UiBuilderServiceResponse.Snapshot
+    if (response is UiBuilderServiceResponse.Snapshot) return true
+    if (
+      response !is UiBuilderServiceResponse.Error ||
+        response.error.code != ServiceErrorCodeV1.CATALOG_UNAVAILABLE
+    ) {
+      return false
+    }
+    val recovery =
+      withContext(Dispatchers.IO) {
+        service.execute(
+          UiBuilderServiceCall(
+            actor,
+            UiBuilderServiceRequest.PreviewCurrentCatalogUpgrade(designId),
+          )
+        )
+      }
+    return recovery is UiBuilderServiceResponse.CatalogUpgradePreview ||
+      (recovery is UiBuilderServiceResponse.Error &&
+        recovery.error.code != ServiceErrorCodeV1.NOT_FOUND)
   }
 
   /**
