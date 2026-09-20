@@ -2,6 +2,7 @@ package ee.schimke.composeai.cli.serve
 
 import ee.schimke.composeai.discovery.ComponentRecordFile
 import ee.schimke.composeai.uibuilder.protocol.ExportCapabilitiesV1
+import ee.schimke.composeai.uibuilder.protocol.ExportFormatV1
 import ee.schimke.composeai.uibuilder.protocol.SvgCapabilityStatusV1
 import ee.schimke.composeai.uibuilder.protocol.SvgFallbackV1
 import ee.schimke.composeai.uibuilder.protocol.WasmAdapterStatusV1
@@ -12,6 +13,8 @@ import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 
 /**
  * The proof the catalog contract exists for: a catalog **this binary has never heard of** becomes a
@@ -96,6 +99,7 @@ class PublishedUiBuilderCatalogTest {
         "platform": "test",
         "platformLabel": "Test",
         "componentIdPrefix": "$prefix",
+        "browserPreview": { "renderer": "remote-compose-document", "format": "rc" },
         "frame": { "adapter": "frame/rect" },
         "componentMenu": { "groupOrder": ["Widgets"] },
         "builtins": {
@@ -106,6 +110,11 @@ class PublishedUiBuilderCatalogTest {
             "record": ":test-catalog/com.example.TestKt.Widget",
             "displayName": "The Widget",
             "canvas": "box",
+            "canvasMapping": {
+              "properties": { "targetLabel": "label" },
+              "slots": { "content": "children" },
+              "defaults": { "variant": { "type": "enum", "value": "filled" } }
+            },
             "traits": ["scrollable"]
           }
         }$extra
@@ -140,6 +149,22 @@ class PublishedUiBuilderCatalogTest {
       widget.properties.map { it.name to it.required },
     )
     assertEquals(WasmAdapterStatusV1.SUPPORTED, widget.wasm?.adapterStatus)
+    assertEquals("box", widget.wasm?.canvas)
+    assertEquals("label", widget.wasm?.canvasMapping?.properties?.get("targetLabel"))
+    assertEquals("children", widget.wasm?.canvasMapping?.slots?.get("content"))
+    assertEquals(
+      "filled",
+      widget.wasm
+        ?.canvasMapping
+        ?.defaults
+        ?.get("variant")
+        ?.jsonObject
+        ?.get("value")
+        ?.jsonPrimitive
+        ?.content,
+    )
+    assertEquals("remote-compose-document", catalog.browserPreview?.renderer)
+    assertEquals(ExportFormatV1.RC, catalog.browserPreview?.format)
 
     // The builtin is a container because the policy gave it a slot, and carries no code capability:
     // there is no call site to compile, which is what makes it a builtin.
