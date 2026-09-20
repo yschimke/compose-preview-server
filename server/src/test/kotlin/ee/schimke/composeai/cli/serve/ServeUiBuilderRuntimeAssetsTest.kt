@@ -1,7 +1,11 @@
 package ee.schimke.composeai.cli.serve
 
+import ee.schimke.composeai.uibuilder.protocol.UiBuilderRuntimeArtifactV1
+import java.io.ByteArrayOutputStream
 import java.io.File
 import java.nio.file.Files
+import java.util.zip.ZipEntry
+import java.util.zip.ZipOutputStream
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -94,6 +98,129 @@ class ServeUiBuilderRuntimeAssetsTest {
   }
 
   @Test
+  fun `catalog archive is fully verified before staging`() {
+    val source = runtimeDirectory("wear-m3-p2-revision", "export const wear = true")
+    val manifest = File(source, ServeUiBuilderRuntimeAssets.RUNTIME_MANIFEST_NAME).readText()
+    val integrity = Regex("\"integritySha256\":\"([a-f0-9]{64})\"").find(manifest)!!.groupValues[1]
+    val descriptor =
+      UiBuilderRuntimeArtifactV1(
+        runtimeId = "wear-m3-p2-revision",
+        protocolVersion = 1,
+        integritySha256 = integrity,
+      )
+    val staging = Files.createTempDirectory("serve-catalog-runtime").toFile()
+
+    ServeUiBuilderRuntimeAssets.stageArchive(descriptor, zipDirectory(source), staging)
+
+    val asset =
+      requireNotNull(
+        ServeUiBuilderRuntimeAssets.assetFromDirectory(
+          staging,
+          descriptor.runtimeId,
+          listOf("renderer.mjs"),
+        )
+      )
+    assertEquals("export const wear = true", asset.bytes.decodeToString())
+    assertFailsWith<IllegalArgumentException> {
+      ServeUiBuilderRuntimeAssets.stageArchive(
+        descriptor.copy(integritySha256 = "b".repeat(64)),
+        zipDirectory(source),
+        Files.createTempDirectory("serve-bad-catalog-runtime").toFile(),
+      )
+    }
+  }
+
+  @Test
+  fun `catalog archive rejects traversal before writing`() {
+    val archive =
+      ByteArrayOutputStream().use { output ->
+        ZipOutputStream(output).use { zip ->
+          zip.putNextEntry(ZipEntry("../outside.mjs"))
+          zip.write("escape".encodeToByteArray())
+          zip.closeEntry()
+        }
+        output.toByteArray()
+      }
+    val staging = Files.createTempDirectory("serve-unsafe-catalog-runtime").toFile()
+
+    assertFailsWith<IllegalArgumentException> {
+      ServeUiBuilderRuntimeAssets.stageArchive(
+        UiBuilderRuntimeArtifactV1("ui-builder/runtime.zip", "wear-m3-p2-bad", 2, "a".repeat(64)),
+        archive,
+        staging,
+      )
+    }
+    assertTrue(staging.walkTopDown().filter(File::isFile).none())
+  }
+
+  @Test
+  fun `catalog archive rejects a protocol the bundled editor cannot speak`() {
+    val source = runtimeDirectory("wear-m3-p3-future", "export const future = true")
+    val manifest = File(source, ServeUiBuilderRuntimeAssets.RUNTIME_MANIFEST_NAME).readText()
+    val integrity = Regex("\"integritySha256\":\"([a-f0-9]{64})\"").find(manifest)!!.groupValues[1]
+
+    assertFailsWith<IllegalArgumentException> {
+      ServeUiBuilderRuntimeAssets.stageArchive(
+        UiBuilderRuntimeArtifactV1(
+          runtimeId = "wear-m3-p3-future",
+          protocolVersion = 3,
+          integritySha256 = integrity,
+        ),
+        zipDirectory(source),
+        Files.createTempDirectory("serve-future-catalog-runtime").toFile(),
+      )
+    }
+  }
+
+  @Test
+  fun `runtime route serves an atomically activated catalog archive`() {
+    val runtimeId = "wear-m3-p2-revision"
+    val source = runtimeDirectory(runtimeId, "export const catalog = true")
+    val manifest = File(source, ServeUiBuilderRuntimeAssets.RUNTIME_MANIFEST_NAME).readText()
+    val integrity = Regex("\"integritySha256\":\"([a-f0-9]{64})\"").find(manifest)!!.groupValues[1]
+    val descriptor =
+      UiBuilderRuntimeArtifactV1(
+        runtimeId = runtimeId,
+        protocolVersion = 1,
+        integritySha256 = integrity,
+      )
+    val staging = Files.createTempDirectory("serve-active-catalog-runtime").toFile()
+    ServeUiBuilderRuntimeAssets.stageArchive(descriptor, zipDirectory(source), staging)
+    val registry = ServeSessionRegistry(open = { null })
+    val server =
+      ServeHttpServer(
+          host = "127.0.0.1",
+          requestedPort = 0,
+          token = "private-token",
+          sessions = registry,
+          defaultSessionId = "none",
+          catalogUiBuilderRuntimeAsset = { requestedId, segments ->
+            ServeUiBuilderRuntimeAssets.assetFromDirectory(staging, requestedId, segments)?.let {
+              it.bytes to it.etag
+            }
+          },
+        )
+        .also { it.start() }
+    try {
+      OkHttpClient()
+        .newCall(
+          Request.Builder()
+            .url("http://127.0.0.1:${server.port}/ui-builder/runtime/$runtimeId/renderer.mjs")
+            .build()
+        )
+        .execute()
+        .use { response ->
+          assertEquals(200, response.code)
+          assertEquals("export const catalog = true", response.body.string())
+          assertEquals("public, max-age=31536000, immutable", response.header("Cache-Control"))
+        }
+    } finally {
+      server.stop()
+      registry.close()
+    }
+  }
+
+  @Test
   fun `tree integrity matches the shared non-ASCII contract vector`() {
     val assets =
       mapOf(
@@ -126,4 +253,20 @@ class ServeUiBuilderRuntimeAssetsTest {
       )
     return directory
   }
+
+  private fun zipDirectory(directory: File): ByteArray =
+    ByteArrayOutputStream().use { output ->
+      ZipOutputStream(output).use { zip ->
+        directory
+          .walkTopDown()
+          .filter(File::isFile)
+          .sortedBy { it.relativeTo(directory).invariantSeparatorsPath }
+          .forEach { file ->
+            zip.putNextEntry(ZipEntry(file.relativeTo(directory).invariantSeparatorsPath))
+            zip.write(file.readBytes())
+            zip.closeEntry()
+          }
+      }
+      output.toByteArray()
+    }
 }

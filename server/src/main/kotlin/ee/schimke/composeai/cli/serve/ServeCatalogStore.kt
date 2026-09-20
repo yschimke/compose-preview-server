@@ -8,6 +8,8 @@ import ee.schimke.composeai.data.overrides.PreviewOverrideDeclaration
 import ee.schimke.composeai.data.remotecompose.RemoteComposeKnobDeclaration
 import ee.schimke.composeai.designpages.DesignPagesJson
 import ee.schimke.composeai.designpages.DesignPagesManifest
+import ee.schimke.composeai.uibuilder.protocol.UiBuilderRuntimeArtifactV1
+import ee.schimke.composeai.uibuilder.protocol.validateContract
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.File
@@ -881,6 +883,10 @@ class ServeCatalogStore(
     writeKnownDifferences(base, staging)
     writeComponentRecord(base, staging, catalog)
     writeUiBuilderCatalog(base, staging, catalog)
+    writeUiBuilderRuntime(base, staging, catalog)?.let { failure ->
+      staging.deleteRecursively()
+      return Result.Failed(system, failure)
+    }
 
     // The staged catalog is usable — move it into place as this load's generation. Nothing serves
     // from `dir` yet (no host names it until [publishGeneration] below), so this is a rename onto a
@@ -1624,11 +1630,73 @@ class ServeCatalogStore(
     .getOrDefault(false)
 
   /**
+   * Stage and verify the executable renderer declared by this exact catalog generation.
+   *
+   * Unlike metadata-only builder policy, a declared runtime is fail-closed: activating the new
+   * catalog without the executable its capabilities describe would pair two different generations.
+   */
+  private fun writeUiBuilderRuntime(base: String, staging: File, catalog: Catalog): String? {
+    val descriptor = catalog.uiBuilderRuntime ?: return null
+    descriptor
+      .validateContract()
+      .takeIf { it.isNotEmpty() }
+      ?.let { issues ->
+        return "catalog UI-builder runtime descriptor is invalid: " +
+          issues.joinToString { issue -> "${issue.field}:${issue.code}" }
+      }
+    val archive =
+      runCatching {
+        cachedBranchRead(base + descriptor.path, MAX_RUNTIME_ARCHIVE_FETCH_BYTES).bytesOrNull
+      }
+        .getOrNull() ?: return "catalog UI-builder runtime could not be fetched"
+    return runCatching {
+      ServeUiBuilderRuntimeAssets.stageArchive(
+        descriptor,
+        archive,
+        File(staging, UI_BUILDER_RUNTIME_DIR),
+      )
+    }
+      .exceptionOrNull()
+      ?.let { failure ->
+        "catalog UI-builder runtime is invalid: " +
+          (failure.message?.takeIf { it.isNotBlank() } ?: failure::class.simpleName.orEmpty())
+      }
+  }
+
+  /**
    * The builder catalog of [system]'s currently served generation, or null where the catalog
    * publishes none.
    */
   fun uiBuilderCatalog(system: String): File? =
     liveDir(system)?.let { File(it, UI_BUILDER_CATALOG_FILE) }?.takeIf { it.isFile }
+
+  /** Catalog-delivered runtime asset from an atomically published generation. */
+  internal fun uiBuilderRuntimeAsset(
+    runtimeId: String,
+    segments: List<String>,
+  ): ServeUiBuilderRuntimeAssets.Asset? {
+    val roots = liveDirs.values.map { generation -> File(generation, UI_BUILDER_RUNTIME_DIR) }
+    val manifestEtags =
+      roots
+        .mapNotNull { runtimeRoot ->
+          ServeUiBuilderRuntimeAssets.assetFromDirectory(
+            runtimeRoot,
+            runtimeId,
+            emptyList(),
+          )
+        }
+        .map { it.etag }
+        .distinct()
+    // A global runtime id resolving to different manifests is an identity collision, never a
+    // choice. Compare the identity first: two colliding runtimes can legitimately share one asset.
+    if (manifestEtags.size != 1) return null
+    return roots
+      .mapNotNull { runtimeRoot ->
+        ServeUiBuilderRuntimeAssets.assetFromDirectory(runtimeRoot, runtimeId, segments)
+      }
+      .distinctBy { it.etag }
+      .singleOrNull()
+  }
 
   /**
    * The discovered component record of [system]'s currently served generation, or null where the
@@ -3141,6 +3209,8 @@ class ServeCatalogStore(
      * falls back rather than refusing.
      */
     val uiBuilderFile: String? = null,
+    /** Verified executable renderer archive paired with this exact catalog generation. */
+    val uiBuilderRuntime: UiBuilderRuntimeArtifactV1? = null,
     /** Optional in-browser render descriptor (the CMP-Wasm app carried in the branch). */
     val webRender: WebRender? = null,
     /** Optional buildable source for trusted server-side re-render (`--allow-render-trusted`). */
@@ -3739,6 +3809,9 @@ class ServeCatalogStore(
      */
     const val UI_BUILDER_CATALOG_FILE = "ui-builder.json"
 
+    /** Expanded, verified catalog renderer runtimes under each immutable generation. */
+    const val UI_BUILDER_RUNTIME_DIR = "ui-builder/runtime"
+
     /**
      * Where [fetchComponentRecord] keeps a record read ahead of any load: under the store root, per
      * system, because a generation directory is swept by the next load and the UI builder keeps the
@@ -3820,6 +3893,7 @@ class ServeCatalogStore(
      */
     const val MAX_DESIGN_PAGES = 40
     private const val MAX_FETCH_BYTES = 25L * 1024 * 1024 // 25 MB per catalog asset
+    private const val MAX_RUNTIME_ARCHIVE_FETCH_BYTES = 64L * 1024 * 1024
 
     /**
      * A catalog's live directories are `<root>/<system>/g<generation>`; the staging tree it is
@@ -4200,13 +4274,18 @@ class ServeCatalogStore(
    * network side instead would leave the whole behaviour untested by the 48 tests that inject a
    * fetcher, which is how the two paths would drift.
    */
-  private fun cachedBranchRead(url: String): BranchFetch {
-    if (!ServeCatalogRevision.isCommitPinned(url)) return directBranchRead(url)
-    blobs.read(url)?.let {
-      branchFetchStats.recordCached()
-      return BranchFetch.Ok(it)
+  private fun cachedBranchRead(url: String, maxBytes: Long = MAX_FETCH_BYTES): BranchFetch {
+    if (!ServeCatalogRevision.isCommitPinned(url)) return directBranchRead(url, maxBytes)
+    blobs
+      .read(url)
+      ?.takeIf { it.size.toLong() <= maxBytes }
+      ?.let {
+        branchFetchStats.recordCached()
+        return BranchFetch.Ok(it)
+      }
+    return directBranchRead(url, maxBytes).also {
+      if (it is BranchFetch.Ok) blobs.write(url, it.bytes)
     }
-    return directBranchRead(url).also { if (it is BranchFetch.Ok) blobs.write(url, it.bytes) }
   }
 
   /**
@@ -4216,9 +4295,11 @@ class ServeCatalogStore(
    * this: bytes from the branch for a URL the pool almost certainly holds. Reaching for the
    * ordinary read there would compare the cache against itself and pass every time.
    */
-  private fun directBranchRead(url: String): BranchFetch =
-    if (fetch != null) fetch.invoke(url)?.let { BranchFetch.Ok(it) } ?: BranchFetch.NotFound
-    else branchRead(url, MAX_FETCH_BYTES)
+  private fun directBranchRead(url: String, maxBytes: Long = MAX_FETCH_BYTES): BranchFetch =
+    if (fetch != null)
+      fetch.invoke(url)?.takeIf { it.size.toLong() <= maxBytes }?.let { BranchFetch.Ok(it) }
+        ?: BranchFetch.NotFound
+    else branchRead(url, maxBytes)
 
   /**
    * Re-read a small sample of this catalog's cached assets from the branch and check them against

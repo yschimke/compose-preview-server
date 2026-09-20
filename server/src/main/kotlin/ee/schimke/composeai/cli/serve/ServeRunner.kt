@@ -3354,6 +3354,11 @@ public class ServeRunner(
         uiBuilderDir = uiBuilderAppDir,
         uiBuilderCatalogs = uiBuilderCatalogs,
         uiBuilderRuntimeDirs = uiBuilderRuntimeDirs,
+        catalogUiBuilderRuntimeAsset = { runtimeId, segments ->
+          catalogStore?.uiBuilderRuntimeAsset(runtimeId, segments)?.let { asset ->
+            asset.bytes to asset.etag
+          }
+        },
         privateWasmCatalogs = privateWasmCatalogs,
         rcPlayerWasmDir = rcPlayerWasmDir,
         // Preserve the CONFIGURED set, not only startup successes. Failed rows then stay visible on
