@@ -364,15 +364,15 @@
                 "kind": "object",
                 "members": {
                     "defaults": {
-                        "kind": "any",
+                        "kind": "object",
                         "optional": true
                     },
                     "properties": {
-                        "kind": "any",
+                        "kind": "object",
                         "optional": true
                     },
                     "slots": {
-                        "kind": "any",
+                        "kind": "object",
                         "optional": true
                     }
                 },
