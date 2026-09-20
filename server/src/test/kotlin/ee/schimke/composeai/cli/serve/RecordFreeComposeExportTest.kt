@@ -137,10 +137,10 @@ class RecordFreeComposeExportTest {
     assertTrue("fun HelloWidgetParams(): WearWidgetParams =" in generated.source, generated.source)
     assertFalse("GlanceWearWidget" in generated.source, generated.source)
     assertFalse("WearWidgetPreviewParams" in generated.source, generated.source)
-    // The Small container's own frame — 200×60dp of content inside 8dp of host padding — rather
-    // than the design environment, which describes a watch screen.
+    // The current Small host frame, including its own padding, rather than the design environment,
+    // which describes a watch screen. This follows the UI-builder exporter version the server pins.
     assertEquals(
-      ScreenGeneratorComposeExportExecutor.Generated.WidgetFrame(216, 76),
+      ScreenGeneratorComposeExportExecutor.Generated.WidgetFrame(224, 84),
       generated.widgetFrame,
     )
   }
@@ -161,9 +161,9 @@ class RecordFreeComposeExportTest {
         as ScreenGeneratorComposeExportExecutor.Generated.Emitted
 
     assertTrue("horizontalPaddingDp = 20f" in generated.source, generated.source)
-    // 200dp of content between 20dp of padding on each edge.
+    // The native frame follows the authored 20dp horizontal padding and the current host geometry.
     assertEquals(
-      ScreenGeneratorComposeExportExecutor.Generated.WidgetFrame(240, 76),
+      ScreenGeneratorComposeExportExecutor.Generated.WidgetFrame(232, 84),
       generated.widgetFrame,
     )
   }
@@ -221,33 +221,20 @@ class RecordFreeComposeExportTest {
   }
 
   /**
-   * The record fallback, through the executor a server actually builds.
+   * `remote-m3/remote-text` names the fixed Remote Material 3 API, not a discovered pack call.
    *
-   * `RemoteContentEmitter` falls back to the component record for a component it has no
-   * hand-written case for, and that fallback shipped unreachable: the only component map this
-   * executor could build was a **pack**'s, and `remote-m3` is not a pack of itself, so an ordinary
-   * widget holding an ordinary catalog component still refused. Unit tests passed the map directly
-   * and could not see it.
-   *
-   * So this asks the production question — build the executor the way `ServeRunner` builds it and
-   * export a design — and asks it BOTH ways, because only the pair is evidence. Without the publish
-   * the component refuses by name, which is the honest answer for a host that composed no catalog;
-   * with it the same design writes the call.
-   *
-   * `remote-m3/remote-text` is the subject because it is the plainest thing a Remote design is made
-   * of and the emitter has no case for it: one required parameter, a `RemoteString`.
+   * Catalog validation decides whether a design may contain it. Once accepted, both export lanes
+   * must emit `RemoteText` even when this executor has no component record; requiring one made a
+   * saved catalog design refuse in the Code pane despite the catalog having offered the component.
+   * The published half remains here to prove adding a record does not change that fixed-API path.
    */
   @Test
-  fun `a published catalog's own component exports, and refuses without the publish`() {
+  fun `remote text exports as a fixed API with or without a published component record`() {
     val design = widgetAroundRemoteText()
 
     val unpublished = export(design)
-    assertEquals(
-      listOf(ScreenGeneratorComposeExportExecutor.UNEXPRESSIBLE_DOCUMENT),
-      unpublished.diagnostics.map { it.code },
-      unpublished.content,
-    )
-    assertTrue("remote-m3/remote-text" in unpublished.diagnostics.single().message)
+    assertEquals(emptyList(), unpublished.diagnostics, unpublished.content)
+    assertTrue("RemoteText(" in unpublished.content, unpublished.content)
 
     val artifact =
       publishedExecutor.export(
@@ -272,10 +259,9 @@ class RecordFreeComposeExportTest {
     val preview =
       publishedExecutor.generate(design) as ScreenGeneratorComposeExportExecutor.Generated.Emitted
     assertTrue("RemoteText(" in preview.source, preview.source)
-    assertTrue(
-      executor.generate(design) is ScreenGeneratorComposeExportExecutor.Generated.Refused,
-      "the same design must refuse for the host that composed no catalog",
-    )
+    val unpublishedPreview =
+      executor.generate(design) as ScreenGeneratorComposeExportExecutor.Generated.Emitted
+    assertTrue("RemoteText(" in unpublishedPreview.source, unpublishedPreview.source)
   }
 
   /**

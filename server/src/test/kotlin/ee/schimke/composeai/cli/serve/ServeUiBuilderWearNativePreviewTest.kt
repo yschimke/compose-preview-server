@@ -164,10 +164,10 @@ class ServeUiBuilderWearNativePreviewTest {
     assertTrue("ContainerInfo.CONTAINER_TYPE_LARGE" in request.source, request.source)
     // No widget class: there is nothing here for the lane to construct one with.
     assertTrue("GlanceWearWidget" !in request.source, request.source)
-    // The Large container's frame — 200×108dp of content inside 8dp of padding — rather than the
-    // 192×496 watch screen this design's environment describes.
-    assertEquals(216, request.widthDp)
-    assertEquals(124, request.heightDp)
+    // With no explicit shape, the current UI-builder exporter chooses the broad rectangular host,
+    // rather than the 192×496 watch screen this design's environment describes.
+    assertEquals(232, request.widthDp)
+    assertEquals(144, request.heightDp)
     // Remote Compose carries no test tag, so the frame comes back as a picture with no overlay.
     // Reported as none rather than as every node, so a client does not look up bounds that a
     // tagless render was never going to have.
@@ -204,15 +204,15 @@ class ServeUiBuilderWearNativePreviewTest {
     assertEquals(144, request.heightDp)
   }
 
-  /** Asking for nothing draws the squircle, which is what every caller got before the shape. */
+  /** Asking for nothing draws the broad rectangular editing host. */
   @Test
-  fun `a widget with no shape asked for keeps the squircle frame`() {
+  fun `a widget with no shape asked for uses the rectangular frame`() {
     lane().render(wearWidget())
 
     val request = submitted.single()
-    assertTrue("cornerRadiusDp = 26f" in request.source, request.source)
-    assertEquals(216, request.widthDp)
-    assertEquals(124, request.heightDp)
+    assertTrue("cornerRadiusDp = 0f" in request.source, request.source)
+    assertEquals(232, request.widthDp)
+    assertEquals(144, request.heightDp)
   }
 
   /**
