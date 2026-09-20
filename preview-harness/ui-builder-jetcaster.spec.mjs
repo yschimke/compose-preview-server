@@ -501,17 +501,23 @@ test("editor overlay preserves clean design pixels and the inspection manifest",
     expect(cleanManifest.slots.length, "declared slots").toBeGreaterThan(20);
     // This title has authored 16dp start, 12dp end and 16dp bottom padding. Its node bounds must
     // cover that outer footprint, while its baselines remain absolute root-pixel coordinates for
-    // the inner two-line Text layout.
+    // the inner two-line Text layout. The fractional x is the real uncontained carousel's leading
+    // item placement; rounding it to 8 described the old LazyRow oracle rather than this component.
     const paddedTitle = cleanManifest.nodes.find(
         (node) => node.nodeId === "podcast-card-android-title",
     );
-    expect(paddedTitle.bounds).toEqual({ x: 8, y: 224, width: 128, height: 56 });
+    expect(paddedTitle.bounds).toEqual({
+        x: 7.328125,
+        y: 233,
+        width: 128,
+        height: 56,
+    });
     expect(paddedTitle.text).toMatchObject({
         text: "Android Developers Backstage",
         lineCount: 2,
     });
-    expect(paddedTitle.text.firstBaselineY).toBeCloseTo(238.578125, 4);
-    expect(paddedTitle.text.lastBaselineY).toBeCloseTo(258.578125, 4);
+    expect(paddedTitle.text.firstBaselineY).toBeCloseTo(247.578125, 4);
+    expect(paddedTitle.text.lastBaselineY).toBeCloseTo(267.578125, 4);
     expect(paddedTitle.text.firstBaselineY).toBeGreaterThan(
         paddedTitle.bounds.y,
     );
