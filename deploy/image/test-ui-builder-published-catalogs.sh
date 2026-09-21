@@ -6,8 +6,8 @@
 #    another preview catalog does not expose a builder for it. `wear-m3` spent a period off this
 #    list on cost grounds — a Wear/Android catalog needs Robolectric previews and an Android SDK
 #    for its native lane, and nobody was authoring against it — so both directions are asserted
-#    here: the default carries it, and an operator can still take it out with
-#    SERVE_UI_BUILDER_CATALOGS.
+#    here: the default carries it, and an operator can still take it out with the explicit
+#    SERVE_UI_BUILDER_WEAR opt-out.
 # 2. `--ui-builder-published-catalogs` now defaults to ALL THREE: every served catalog takes its
 #    definition from its own published `ui-builder.json` rather than from the catalog this build
 #    writes in Kotlin. The per-catalog reasons live in the entrypoint beside the lever, together
@@ -22,7 +22,7 @@ entrypoint="${ENTRYPOINT_FILE:-${here}/entrypoint.sh}"
 
 block="$(
   awk '
-    /^  args\+=\(--ui-builder-catalogs/ { capture = 1 }
+    /^  ui_builder_catalogs=/ { capture = 1 }
     capture && /^  args\+=\(--ui-builder-state-dir/ { exit }
     capture { print }
   ' "${entrypoint}"
@@ -48,6 +48,7 @@ run_case() {
   env -i PATH="${PATH}" \
     SERVE_UI_BUILDER_CATALOGS="${1:-}" \
     SERVE_UI_BUILDER_PUBLISHED_CATALOGS="${2:-}" \
+    SERVE_UI_BUILDER_WEAR="${3:-1}" \
     bash "${script}"
 }
 
@@ -119,11 +120,17 @@ expect "a served catalog with no published file falls back to none" \
   $'--ui-builder-published-catalogs\nnone' "${future}"
 
 # The symmetric guard, and the one the default no longer covers: a box that does not want to pay
-# for the Wear/Android lane can drop it, and dropping it must not disturb the other two.
-narrowed="$(run_case "m3-catalog,remote-m3")"
+# for the Wear/Android lane can drop it explicitly, and dropping it must not disturb the other two.
+# The exact two-catalog allowlist is the retired image default and now migrates forward; #911 was the
+# production box retaining that stale value while every fresh box got Wear.
+narrowed="$(run_case "" "" "0")"
 refute "an operator can take wear-m3 out" "wear-m3" "${narrowed}"
 expect "taking wear-m3 out leaves the other two published" \
   $'--ui-builder-published-catalogs\nm3-catalog,remote-m3' "${narrowed}"
+
+legacy="$(run_case "m3-catalog,remote-m3")"
+expect "the retired two-catalog default migrates forward" \
+  $'--ui-builder-catalogs\nm3-catalog,remote-m3,wear-m3' "${legacy}"
 
 # The other half of the derivation, added when wear-m3 joined remote-m3 on the published path: the
 # intersection has to work from EITHER side. Dropping remote-m3 must leave wear-m3 published rather

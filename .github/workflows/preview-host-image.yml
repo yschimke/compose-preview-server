@@ -142,13 +142,14 @@ jobs:
           #     is what the 3.38.0 rollout served from `glimmer-catalog`. `renders_ok` is that
           #     window closed: one real PNG per design system, checked below.
           converged() { # 1=live 2=status_version 3=expected 4=loaded 5=total 6=failed 7=builder_ok
-                        # 8=renders_ok
+                        # 8=renders_ok 9=wear_authorable
             [ -n "$1" ] && [ "$1" = "$3" ] || return 1
             [ -n "$2" ] && [ "$2" = "$3" ] || return 1
             [ "${5:--1}" -gt 0 ] && [ "${4:--1}" -eq "$5" ] || return 1
             [ "${6:--1}" -eq 0 ] || return 1
             [ "${7:-0}" -eq 1 ] || return 1
-            [ "${8:-0}" -eq 1 ]
+            [ "${8:-0}" -eq 1 ] || return 1
+            [ "${9:-0}" -eq 1 ]
           }
 
           # The design systems, read from the deployed config rather than listed here: the server
@@ -225,6 +226,15 @@ jobs:
             case "${builder_html}:${builder_mjs}:${builder_wasm}" in
               *"<title>Compose UI Builder Preview</title>"*:200:text/javascript*:200:application/wasm*) builder_ok=1 ;;
             esac
+            # Catalog selection happens before authentication on the New design route. A 401 is
+            # therefore a cheap, credential-free proof that Wear is in the running box's authoring
+            # allowlist; the stale pre-Wear host override that caused #911 answers 404 instead.
+            wear_create_code=$(curl -sS -o /dev/null -w '%{http_code}' -m 10 \
+              -X POST -H 'content-type: application/x-www-form-urlencoded' \
+              --data 'catalog=wear-m3&designId=rollout-wear-probe&template=wear-screen' \
+              "${base}/ui-builder/designs" 2>/dev/null || true)
+            wear_authorable=0
+            [ "${wear_create_code}" = "401" ] && wear_authorable=1
             renders_ok=0
             # Only worth the renders once the cheap fields agree -- otherwise every attempt pays a
             # cold render against the replica that is still on its way out.
@@ -234,7 +244,8 @@ jobs:
               renders_ok=1
             fi
             if converged "${live}" "${status_version}" "${{ steps.versions.outputs.server }}" \
-              "${loaded}" "${total}" "${failed}" "${builder_ok}" "${renders_ok}"; then
+              "${loaded}" "${total}" "${failed}" "${builder_ok}" "${renders_ok}" \
+              "${wear_authorable}"; then
               {
                 echo "deployed=true"
                 echo "base_url=${base}"
@@ -244,7 +255,7 @@ jobs:
               } >> "$GITHUB_OUTPUT"
               exit 0
             fi
-            echo "waiting for preview.coo.ee: version=${live:-?}/${status_version:-?} want ${{ steps.versions.outputs.server }}, catalogs=${loaded}/${total} failed=${failed}, ui-builder=${builder_ok}, renders=${renders_ok} (attempt ${i}/30)"
+            echo "waiting for preview.coo.ee: version=${live:-?}/${status_version:-?} want ${{ steps.versions.outputs.server }}, catalogs=${loaded}/${total} failed=${failed}, ui-builder=${builder_ok}, wear-authorable=${wear_authorable}, renders=${renders_ok} (attempt ${i}/30)"
             sleep 20
           done
           echo "::error::preview.coo.ee did not converge within ~10 min"
