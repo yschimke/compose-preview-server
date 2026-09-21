@@ -14,6 +14,7 @@ import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.InputStream
+import java.nio.file.Files
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
@@ -1655,6 +1656,7 @@ class ServeCatalogStore(
         archive,
         File(staging, UI_BUILDER_RUNTIME_DIR),
       )
+      rememberHistoricalRuntime(descriptor, base + descriptor.path)
     }
       .exceptionOrNull()
       ?.let { failure ->
@@ -1694,14 +1696,147 @@ class ServeCatalogStore(
         .distinct()
     // A global runtime id resolving to different manifests is an identity collision, never a
     // choice. Compare the identity first: two colliding runtimes can legitimately share one asset.
-    if (manifestEtags.size != 1) return null
-    return roots
-      .mapNotNull { runtimeRoot ->
-        ServeUiBuilderRuntimeAssets.assetFromDirectory(runtimeRoot, runtimeId, segments)
-      }
-      .distinctBy { it.etag }
-      .singleOrNull()
+    if (manifestEtags.size > 1) return null
+    if (manifestEtags.size == 1) {
+      return roots
+        .mapNotNull { runtimeRoot ->
+          ServeUiBuilderRuntimeAssets.assetFromDirectory(runtimeRoot, runtimeId, segments)
+        }
+        .distinctBy { it.etag }
+        .singleOrNull()
+    }
+    return historicalRuntimeAsset(runtimeId, segments)
   }
+
+  /**
+   * Remember how to recover an immutable runtime after its catalog generation has been swept.
+   *
+   * Only a commit-pinned source is durable identity. A branch fallback can stage the current
+   * generation, but recording that moving URL would let an old runtime id resolve to future bytes.
+   * One descriptor is kept per id+integrity pair, so a reused id remains an explicit collision
+   * rather than whichever source happened to be written last.
+   */
+  private fun rememberHistoricalRuntime(
+    artifact: UiBuilderRuntimeArtifactV1,
+    sourceUrl: String,
+  ) {
+    if (!ServeCatalogRevision.isCommitPinned(sourceUrl)) return
+    val directory = File(root, UI_BUILDER_RUNTIME_DESCRIPTOR_DIR)
+    if (!directory.isDirectory && !directory.mkdirs()) return
+    val descriptor =
+      HistoricalRuntimeDescriptor(
+        sourceUrl = sourceUrl,
+        artifact = artifact,
+      )
+    val target =
+      File(
+        directory,
+        "${artifact.runtimeId}-${artifact.integritySha256}.$RUNTIME_DESCRIPTOR_SUFFIX",
+      )
+    if (target.isFile) return
+    val staging = File(directory, ".${target.name}.${System.nanoTime()}.tmp")
+    runCatching {
+      staging.writeText(json.encodeToString(HistoricalRuntimeDescriptor.serializer(), descriptor))
+      if (!staging.renameTo(target) && !target.isFile) {
+        staging.copyTo(target, overwrite = false)
+      }
+    }
+    staging.delete()
+  }
+
+  /**
+   * Recover a historical runtime into a small, renewable extracted-tree lease.
+   *
+   * The compressed archive already lives in the bounded [CatalogBlobPool]. Extracted Wasm trees are
+   * much larger, so they are deliberately process-local, expire after inactivity and have a hard
+   * count ceiling. An iframe that asks for another asset renews its lease; an evicted iframe can
+   * transparently reacquire the same immutable bytes from the descriptor.
+   */
+  @Synchronized
+  private fun historicalRuntimeAsset(
+    runtimeId: String,
+    segments: List<String>,
+  ): ServeUiBuilderRuntimeAssets.Asset? {
+    val now = System.currentTimeMillis()
+    historicalRuntimeLeases.entries.removeIf { (_, lease) ->
+      if (lease.expiresAtMillis > now) false
+      else {
+        lease.root.deleteRecursively()
+        true
+      }
+    }
+    historicalRuntimeLeases[runtimeId]?.let { lease ->
+      if (lease.root.isDirectory) {
+        lease.expiresAtMillis = now + HISTORICAL_RUNTIME_LEASE_MILLIS
+        return ServeUiBuilderRuntimeAssets.assetFromDirectory(lease.root, runtimeId, segments)
+      }
+      historicalRuntimeLeases.remove(runtimeId)
+    }
+
+    val descriptors = historicalRuntimeDescriptors(runtimeId)
+    val identities =
+      descriptors.map { it.artifact.protocolVersion to it.artifact.integritySha256 }.distinct()
+    if (identities.size != 1) return null
+    val descriptor = descriptors.first()
+    val archive =
+      runCatching {
+        cachedBranchRead(descriptor.sourceUrl, MAX_RUNTIME_ARCHIVE_FETCH_BYTES).bytesOrNull
+      }
+        .getOrNull() ?: return null
+    val leaseRoot =
+      Files.createTempDirectory(historicalRuntimeLeaseRoot.toPath(), ".lease-").toFile()
+    try {
+      ServeUiBuilderRuntimeAssets.stageArchive(descriptor.artifact, archive, leaseRoot)
+    } catch (failure: Exception) {
+      leaseRoot.deleteRecursively()
+      return null
+    }
+    while (historicalRuntimeLeases.size >= MAX_HISTORICAL_RUNTIME_LEASES) {
+      val eldest = historicalRuntimeLeases.entries.firstOrNull() ?: break
+      historicalRuntimeLeases.remove(eldest.key)
+      eldest.value.root.deleteRecursively()
+    }
+    historicalRuntimeLeases[runtimeId] =
+      HistoricalRuntimeLease(leaseRoot, now + HISTORICAL_RUNTIME_LEASE_MILLIS)
+    return ServeUiBuilderRuntimeAssets.assetFromDirectory(leaseRoot, runtimeId, segments)
+  }
+
+  private fun historicalRuntimeDescriptors(runtimeId: String): List<HistoricalRuntimeDescriptor> {
+    val directory = File(root, UI_BUILDER_RUNTIME_DESCRIPTOR_DIR)
+    return directory
+      .listFiles { file ->
+        file.isFile &&
+          file.name.startsWith("$runtimeId-") &&
+          file.name.endsWith(".$RUNTIME_DESCRIPTOR_SUFFIX")
+      }
+      .orEmpty()
+      .sortedBy(File::getName)
+      .mapNotNull { file ->
+        runCatching {
+          json.decodeFromString(HistoricalRuntimeDescriptor.serializer(), file.readText())
+        }
+          .getOrNull()
+      }
+      .filter { descriptor ->
+        descriptor.schema == HISTORICAL_RUNTIME_DESCRIPTOR_SCHEMA &&
+          descriptor.artifact.runtimeId == runtimeId &&
+          descriptor.artifact.validateContract().isEmpty() &&
+          descriptor.sourceUrl.startsWith("https://raw.githubusercontent.com/") &&
+          ServeCatalogRevision.isCommitPinned(descriptor.sourceUrl)
+      }
+  }
+
+  @Serializable
+  private data class HistoricalRuntimeDescriptor(
+    val schema: String = HISTORICAL_RUNTIME_DESCRIPTOR_SCHEMA,
+    val sourceUrl: String,
+    val artifact: UiBuilderRuntimeArtifactV1,
+  )
+
+  private data class HistoricalRuntimeLease(
+    val root: File,
+    var expiresAtMillis: Long,
+  )
 
   /**
    * The discovered component record of [system]'s currently served generation, or null where the
@@ -3817,6 +3952,17 @@ class ServeCatalogStore(
     /** Expanded, verified catalog renderer runtimes under each immutable generation. */
     const val UI_BUILDER_RUNTIME_DIR = "ui-builder/runtime"
 
+    /** Persisted immutable fetch descriptors, separate from generation retirement. */
+    internal const val UI_BUILDER_RUNTIME_DESCRIPTOR_DIR = ".ui-builder-runtime-descriptors"
+
+    /** Process-local expanded historical runtime trees, bounded by renewable leases. */
+    internal const val UI_BUILDER_RUNTIME_LEASE_DIR = ".ui-builder-runtime-leases"
+
+    private const val HISTORICAL_RUNTIME_DESCRIPTOR_SCHEMA = "compose-ui-builder-runtime-source/v1"
+    private const val RUNTIME_DESCRIPTOR_SUFFIX = "json"
+    private const val MAX_HISTORICAL_RUNTIME_LEASES = 3
+    private val HISTORICAL_RUNTIME_LEASE_MILLIS = TimeUnit.MINUTES.toMillis(10)
+
     /**
      * Where [fetchComponentRecord] keeps a record read ahead of any load: under the store root, per
      * system, because a generation directory is swept by the next load and the UI builder keeps the
@@ -4101,6 +4247,23 @@ class ServeCatalogStore(
 
   /** Verified runtime roots from published generations that have not yet been retired. */
   private val runtimeRoots = ConcurrentHashMap.newKeySet<File>()
+
+  /**
+   * Access-ordered expanded historical runtimes; every mutation is under [historicalRuntimeAsset].
+   */
+  private val historicalRuntimeLeases =
+    LinkedHashMap<String, HistoricalRuntimeLease>(16, 0.75f, true)
+
+  /**
+   * Process-local by design. Compressed archives persist in [blobs]; expanded trees are recreated
+   * after restart and never become an unbounded second artifact store.
+   */
+  private val historicalRuntimeLeaseRoot: File by lazy {
+    File(root, UI_BUILDER_RUNTIME_LEASE_DIR).apply {
+      deleteRecursively()
+      check(mkdirs() || isDirectory) { "could not create historical runtime lease directory" }
+    }
+  }
 
   /** Where [system]'s registered host reads its bytes from, or null if it has never published. */
   fun liveDir(system: String): File? = ServeBundleStore.sanitizeName(system)?.let { liveDirs[it] }

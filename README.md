@@ -115,7 +115,11 @@ a distinct feature and route. The editor route opens an interactive Wasm editor 
 Jetcaster design; clean benchmark modes remain available to the independent visual harness. The
 editor mounts an exact retained renderer runtime under `/ui-builder/runtime/<runtimeId>/` in a
 sandboxed iframe and receives measured node/slot geometry without placing editor overlays in the
-Compose tree.
+Compose tree. Catalog runtimes retain a small commit-pinned source descriptor after their catalog
+generation is swept, so an older design revision can recover its exact runtime after a restart. The
+compressed archive shares the bounded catalog blob pool; expanded historical trees are
+process-local leases with an inactivity timeout and a hard count ceiling rather than an unbounded
+second artifact store.
 
 The Remote Compose authoring extension is behind the default-off compile-time option
 `-PuiBuilderRemoteCompose=true`. It spans two repositories — the MCP adapter's half is generated
