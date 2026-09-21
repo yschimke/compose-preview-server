@@ -3662,6 +3662,51 @@ class ServeCatalogStoreTest {
   }
 
   @Test
+  fun `historical runtime descriptor is recovered from delivery history after stateless restart`() {
+    val currentCommit = "2".repeat(40)
+    val historicalCommit = "1".repeat(40)
+    val currentId = "compose-m3-p2-current"
+    val historicalId = "compose-m3-p2-historical"
+    val currentRenderer = "export const generation = 'current'".encodeToByteArray()
+    val historicalRenderer = "export const generation = 'historical'".encodeToByteArray()
+    val currentRuntime = runtimeArchive(currentId, currentRenderer)
+    val historicalRuntime = runtimeArchive(historicalId, historicalRenderer)
+    val revisions =
+      """
+      <feed>
+        <entry><id>tag:github.com,2008:Grit::Commit/$currentCommit</id><updated>2026-09-21T09:00:00Z</updated></entry>
+        <entry><id>tag:github.com,2008:Grit::Commit/$historicalCommit</id><updated>2026-09-20T09:00:00Z</updated></entry>
+      </feed>
+      """
+        .trimIndent()
+    val fetch: (String) -> ByteArray? = { url ->
+      when {
+        url ==
+          ServeCatalogRevision.commitsFeedUrl(
+            "yschimke/compose-ai-tools",
+            "design-artifacts/compose-m3",
+          ) -> revisions.encodeToByteArray()
+        url.endsWith("/$currentCommit/${ServeCatalogStore.CATALOG_FILE}") ->
+          runtimeCatalog(currentId, runtimeIntegrity(currentRenderer)).encodeToByteArray()
+        url.endsWith("/$historicalCommit/${ServeCatalogStore.CATALOG_FILE}") ->
+          runtimeCatalog(historicalId, runtimeIntegrity(historicalRenderer)).encodeToByteArray()
+        url.endsWith("/$currentCommit/ui-builder/runtime.zip") -> currentRuntime
+        url.endsWith("/$historicalCommit/ui-builder/runtime.zip") -> historicalRuntime
+        url.endsWith("/images/button.png") -> png()
+        else -> null
+      }
+    }
+    val restartedStore = store(TrustStore.EMPTY, root = tempRoot(), fetch = fetch)
+    assertTrue(restartedStore.load("compose-m3") is ServeCatalogStore.Result.Ok)
+
+    assertContentEquals(
+      historicalRenderer,
+      assertNotNull(restartedStore.uiBuilderRuntimeAsset(historicalId, listOf("renderer.mjs")))
+        .bytes,
+    )
+  }
+
+  @Test
   fun `historical runtime extraction leases stay bounded`() {
     val root = tempRoot()
     val ids = (1..4).map { "compose-m3-p2-history-$it" }
