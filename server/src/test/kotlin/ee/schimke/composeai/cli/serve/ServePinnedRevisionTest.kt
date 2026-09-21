@@ -501,7 +501,7 @@ class ServePinnedRevisionTest {
   }
 
   @Test
-  fun `a load reads one commit rather than a moving branch`() {
+  fun `a load reads only immutable commits rather than a moving branch`() {
     // CopyOnWriteArrayList, not a synchronized list: a catalog load keeps background threads
     // fetching (vectors, rc-compare) after it returns, so they are still appending while the
     // assertions below read. A synchronized list needs the caller to hold its monitor to iterate —
@@ -513,13 +513,16 @@ class ServePinnedRevisionTest {
       fetch(url)
     }
 
-    // The feed is read first, and everything the load reads afterwards is addressed by the sha it
-    // resolved — so a publish landing mid-load cannot leave the pages advertising one revision
-    // while serving a mixture of two.
+    // The feed is read first, and everything the load reads afterwards is addressed by one of the
+    // immutable shas it returned. The head builds the live generation while the bounded tail
+    // rebuilds historical runtime descriptors; neither may fall back to the moving branch.
     val reads = asked.toList()
     assertEquals(ServeCatalogRevision.commitsFeedUrl(repo, branch), reads.first())
     assertTrue(
-      reads.drop(1).all { it.startsWith("https://raw.githubusercontent.com/$repo/$newCommit/") },
+      reads.drop(1).all {
+        it.startsWith("https://raw.githubusercontent.com/$repo/$newCommit/") ||
+          it.startsWith("https://raw.githubusercontent.com/$repo/$oldCommit/")
+      },
       "read by branch name rather than by sha: $reads",
     )
   }
