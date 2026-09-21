@@ -123,7 +123,7 @@ class ServeCatalogChangeFeedTest {
     val before =
       CatalogSnapshot.parse(
         catalogJson =
-          """{"title":"Demo","components":[
+          """{"title":"Demo","renderer":"compose-preview 1.0","components":[
             {"componentId":"Old","images":[{"path":"images/old/default.png"}]},
             {"componentId":"Button","section":"Controls","images":[{"path":"images/button/default.png","theme":"light"}]},
             {"componentId":"Label","images":[{"path":"images/label/default.png"}]}
@@ -142,7 +142,7 @@ class ServeCatalogChangeFeedTest {
     val after =
       CatalogSnapshot.parse(
         catalogJson =
-          """{"title":"Demo","components":[
+          """{"title":"Demo","renderer":"compose-preview 2.0","components":[
             {"componentId":"Button","section":"Controls","images":[{"path":"images/button/default.png","theme":"light"}]},
             {"componentId":"Label","section":"Typography","images":[{"path":"images/label/default.png"}]},
             {"componentId":"New","images":[{"path":"images/new/default.png"}]}
@@ -174,6 +174,10 @@ class ServeCatalogChangeFeedTest {
     assertTrue(figma.specChanged)
     assertEquals(80.0, figma.beforeMatch)
     assertEquals(92.5, figma.afterMatch)
+    assertEquals(
+      CatalogVersionChange("compose-preview 1.0", "compose-preview 2.0"),
+      batch.versionChange,
+    )
   }
 
   @Test
@@ -217,6 +221,113 @@ class ServeCatalogChangeFeedTest {
       xml.indexOf("alt=&quot;After&quot;") < xml.indexOf("alt=&quot;Before&quot;"),
       "the current render leads; a reader showing one image must not show the superseded one",
     )
+  }
+
+  @Test
+  fun `rss folds intermediate renderer updates into the next visual publication`() {
+    val first = oldRevision.copy(commit = "1".repeat(40))
+    val second = oldRevision.copy(commit = "2".repeat(40))
+    val third = oldRevision.copy(commit = "3".repeat(40))
+    val fourth = newRevision.copy(commit = "4".repeat(40))
+    val visual =
+      CatalogFeedBatch(
+        third,
+        fourth,
+        listOf(CatalogPreviewChange(CatalogPreviewChangeKind.CHANGED, "button", "Button")),
+        emptyList(),
+        CatalogVersionChange("compose-preview 3.0", "compose-preview 4.0"),
+      )
+    val versionOnly =
+      listOf(
+        CatalogFeedBatch(
+          second,
+          third,
+          emptyList(),
+          emptyList(),
+          CatalogVersionChange("compose-preview 2.0", "compose-preview 3.0"),
+        ),
+        CatalogFeedBatch(
+          first,
+          second,
+          emptyList(),
+          emptyList(),
+          CatalogVersionChange("compose-preview 1.0", "compose-preview 2.0"),
+        ),
+      )
+
+    val xml =
+      CatalogFeedXml.render(
+        "demo",
+        "https://preview.example/demo",
+        CatalogFeedHistory(
+          "Demo",
+          listOf(fourth, third, second, first),
+          listOf(visual) + versionOnly,
+        ),
+      )
+
+    assertEquals(1, Regex("<item>").findAll(xml).count(), xml)
+    assertTrue(xml.contains("1 visually changed"), xml)
+    assertTrue(
+      xml.contains("3 catalog renderer updates from compose-preview 1.0 to compose-preview 4.0"),
+      xml,
+    )
+  }
+
+  @Test
+  fun `rss keeps the latest renderer-only update visible`() {
+    val visual =
+      CatalogFeedBatch(
+        oldRevision,
+        newRevision,
+        listOf(CatalogPreviewChange(CatalogPreviewChangeKind.CHANGED, "button", "Button")),
+        emptyList(),
+      )
+    val latest =
+      CatalogFeedBatch(
+        newRevision,
+        newRevision.copy(commit = "c".repeat(40)),
+        emptyList(),
+        emptyList(),
+        CatalogVersionChange("compose-preview 4.0", "compose-preview 4.1"),
+      )
+
+    val xml =
+      CatalogFeedXml.render(
+        "demo",
+        "https://preview.example/demo",
+        CatalogFeedHistory(
+          "Demo",
+          listOf(latest.after, latest.before, oldRevision),
+          listOf(latest, visual),
+        ),
+      )
+
+    assertEquals(2, Regex("<item>").findAll(xml).count(), xml)
+    assertTrue(
+      xml.contains("Catalog renderer updated from compose-preview 4.0 to compose-preview 4.1"),
+      xml,
+    )
+  }
+
+  @Test
+  fun `rss omits metadata-only publications from its visual changelog`() {
+    val batch =
+      CatalogFeedBatch(
+        oldRevision,
+        newRevision,
+        listOf(CatalogPreviewChange(CatalogPreviewChangeKind.METADATA, "button", "Button")),
+        listOf(CatalogReferenceChange("spec", "Spec", "button", false, 80.0, 81.0)),
+      )
+
+    val xml =
+      CatalogFeedXml.render(
+        "demo",
+        "https://preview.example/demo",
+        CatalogFeedHistory("Demo", listOf(newRevision, oldRevision), listOf(batch)),
+      )
+
+    assertFalse(xml.contains("<item>"), xml)
   }
 
   @Test
