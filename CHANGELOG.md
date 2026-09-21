@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.44.0](https://github.com/yschimke/compose-preview-server/compare/v3.43.0...v3.44.0) (2026-09-21)
+
+
+### Bug Fixes
+
+* recover historical catalog runtimes ([#982](https://github.com/yschimke/compose-preview-server/issues/982)) ([e82178f](https://github.com/yschimke/compose-preview-server/commit/e82178f117f225f7ef522ebeb36ed644650ec2ea))
+
 ## [3.43.0](https://github.com/yschimke/compose-preview-server/compare/v3.42.0...v3.43.0) (2026-09-21)
 
 
