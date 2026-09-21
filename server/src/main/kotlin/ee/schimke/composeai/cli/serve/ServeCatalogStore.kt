@@ -453,6 +453,7 @@ class ServeCatalogStore(
         val detail = e.message?.takeIf { it.isNotBlank() } ?: e::class.simpleName ?: "unknown error"
         return Result.Failed(system, "could not parse catalog.json: $detail")
       }
+    rememberPublishedRuntimeHistory(repo, revisions.drop(1).map { it.commit }.distinct())
 
     // One compact file answers preview availability for the whole revision menu. Older branches
     // have no index and deliberately fail open; the pinned catalog remains authoritative on click.
@@ -1742,6 +1743,32 @@ class ServeCatalogStore(
       }
     }
     staging.delete()
+  }
+
+  /**
+   * Rebuild immutable runtime descriptors from the bounded delivery-feed tail during catalog load.
+   *
+   * This is deliberately outside the public runtime-asset request path: an unknown runtime id must
+   * remain a cheap miss, not permission to crawl GitHub synchronously. Every valid descriptor is
+   * retained so reused ids with different integrity hashes remain an explicit collision.
+   */
+  private fun rememberPublishedRuntimeHistory(repo: String, commits: List<String>) {
+    val bases = commits.map { commit -> "https://raw.githubusercontent.com/$repo/$commit/" }
+    val catalogUrls = bases.map { base -> base + CATALOG_FILE }
+    val catalogs = fetchCatalogAssets(catalogUrls)
+    for ((base, catalogUrl) in bases.zip(catalogUrls)) {
+      val catalog =
+        runCatching {
+          catalogs[catalogUrl]?.let {
+            json.decodeFromString(Catalog.serializer(), it.toString(Charsets.UTF_8))
+          }
+        }
+          .getOrNull() ?: continue
+      val artifact = catalog.uiBuilderRuntime ?: continue
+      if (artifact.validateContract().isEmpty()) {
+        rememberHistoricalRuntime(artifact, base + artifact.path)
+      }
+    }
   }
 
   /**
