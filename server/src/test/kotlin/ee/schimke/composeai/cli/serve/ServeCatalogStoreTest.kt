@@ -209,10 +209,11 @@ class ServeCatalogStoreTest {
     // The baked vectors are filled off the publish path, so tests run that pass inline by default
     // and assert against a settled catalog exactly as they did when it was synchronous.
     figmaExecutor: java.util.concurrent.Executor = java.util.concurrent.Executor { it.run() },
+    root: File = tempRoot(),
     fetch: (String) -> ByteArray? = fetcher(),
   ): ServeCatalogStore =
     ServeCatalogStore(
-      root = tempRoot(),
+      root = root,
       register = { n, h -> registered[n] = h },
       trust = { trust },
       fetch = fetch,
@@ -3624,6 +3625,93 @@ class ServeCatalogStoreTest {
       renderer,
       assertNotNull(store.uiBuilderRuntimeAsset(runtimeId, listOf("renderer.mjs"))).bytes,
     )
+  }
+
+  @Test
+  fun `historical runtime resolves from its persisted immutable descriptor after restart`() {
+    val root = tempRoot()
+    val commit = "1".repeat(40)
+    val runtimeId = "compose-m3-p2-historical"
+    val renderer = "export const generation = 'historical'".encodeToByteArray()
+    val runtime = runtimeArchive(runtimeId, renderer)
+    val catalog = runtimeCatalog(runtimeId, runtimeIntegrity(renderer))
+    val fetch: (String) -> ByteArray? = { url ->
+      when {
+        url ==
+          ServeCatalogRevision.commitsFeedUrl(
+            "yschimke/compose-ai-tools",
+            "design-artifacts/compose-m3",
+          ) -> feed(commit).encodeToByteArray()
+        url.endsWith("/$commit/${ServeCatalogStore.CATALOG_FILE}") -> catalog.encodeToByteArray()
+        url.endsWith("/$commit/ui-builder/runtime.zip") -> runtime
+        url.endsWith("/$commit/images/button.png") -> png()
+        else -> null
+      }
+    }
+    val publishingStore = store(TrustStore.EMPTY, root = root, fetch = fetch)
+    assertTrue(publishingStore.load("compose-m3") is ServeCatalogStore.Result.Ok)
+    assertTrue(File(root, ServeCatalogStore.UI_BUILDER_RUNTIME_DESCRIPTOR_DIR).isDirectory)
+
+    // A new store has no generation roots at all. Its only route back to these bytes is the
+    // persisted descriptor and the immutable commit URL it names.
+    val restartedStore = store(TrustStore.EMPTY, root = root, fetch = fetch)
+    assertContentEquals(
+      renderer,
+      assertNotNull(restartedStore.uiBuilderRuntimeAsset(runtimeId, listOf("renderer.mjs"))).bytes,
+    )
+  }
+
+  @Test
+  fun `historical runtime extraction leases stay bounded`() {
+    val root = tempRoot()
+    val ids = (1..4).map { "compose-m3-p2-history-$it" }
+    val commits = ids.indices.associateWith { index -> (index + 1).toString().repeat(40) }
+    val renderers = ids.associateWith { id -> "export const id = '$id'".encodeToByteArray() }
+    val archives = ids.associateWith { id -> runtimeArchive(id, renderers.getValue(id)) }
+    var current = 0
+    val fetch: (String) -> ByteArray? = { url ->
+      when {
+        url ==
+          ServeCatalogRevision.commitsFeedUrl(
+            "yschimke/compose-ai-tools",
+            "design-artifacts/compose-m3",
+          ) -> feed(commits.getValue(current)).encodeToByteArray()
+        url.endsWith("/${commits.getValue(current)}/${ServeCatalogStore.CATALOG_FILE}") -> {
+          val id = ids[current]
+          runtimeCatalog(id, runtimeIntegrity(renderers.getValue(id))).encodeToByteArray()
+        }
+        ids.indices.any { index ->
+          url.endsWith("/${commits.getValue(index)}/ui-builder/runtime.zip")
+        } -> {
+          val index =
+            ids.indices.single { candidate ->
+              url.endsWith("/${commits.getValue(candidate)}/ui-builder/runtime.zip")
+            }
+          archives.getValue(ids[index])
+        }
+        url.endsWith("/images/button.png") -> png()
+        else -> null
+      }
+    }
+    val publishingStore = store(TrustStore.EMPTY, root = root, fetch = fetch)
+    ids.indices.forEach { index ->
+      current = index
+      assertTrue(publishingStore.load("compose-m3") is ServeCatalogStore.Result.Ok)
+    }
+
+    val restartedStore = store(TrustStore.EMPTY, root = root, fetch = fetch)
+    ids.forEach { id ->
+      assertContentEquals(
+        renderers.getValue(id),
+        assertNotNull(restartedStore.uiBuilderRuntimeAsset(id, listOf("renderer.mjs"))).bytes,
+      )
+    }
+    val leaseDirectories =
+      File(root, ServeCatalogStore.UI_BUILDER_RUNTIME_LEASE_DIR)
+        .listFiles()
+        .orEmpty()
+        .filter(File::isDirectory)
+    assertEquals(3, leaseDirectories.size)
   }
 
   @Test
