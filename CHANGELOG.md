@@ -1,5 +1,20 @@
 # Changelog
 
+## [3.43.0](https://github.com/yschimke/compose-preview-server/compare/v3.42.0...v3.43.0) (2026-09-21)
+
+
+### Features
+
+* **ui-builder:** recover historical catalog runtimes ([#972](https://github.com/yschimke/compose-preview-server/issues/972)) ([e6012a9](https://github.com/yschimke/compose-preview-server/commit/e6012a9fc211375255e6dfddb45ac6e4a688fe71))
+
+
+### Bug Fixes
+
+* **deps:** update compose-ai-tools ([#977](https://github.com/yschimke/compose-preview-server/issues/977)) ([28aff63](https://github.com/yschimke/compose-preview-server/commit/28aff6396ec5f17782aadb61633ff96dc6c0496f))
+* **deps:** update dependency ee.schimke.composeai:compose-preview-contracts-bom to v3.6.0 ([#979](https://github.com/yschimke/compose-preview-server/issues/979)) ([89d8d2a](https://github.com/yschimke/compose-preview-server/commit/89d8d2a6b347ba5361ba57460e97570e104ed80d))
+* **deps:** update dependency ee.schimke.composeai:rc-player-compose to v1.69.0 ([#980](https://github.com/yschimke/compose-preview-server/issues/980)) ([7d05a52](https://github.com/yschimke/compose-preview-server/commit/7d05a52b72e3fd54aec66f7dbcd9cbea8ef0b541))
+* **ui-builder:** expose catalog pin recovery ([#971](https://github.com/yschimke/compose-preview-server/issues/971)) ([9ff9e3c](https://github.com/yschimke/compose-preview-server/commit/9ff9e3c2abced5345361d205cc315827b5f7edfc))
+
 ## [3.42.0](https://github.com/yschimke/compose-preview-server/compare/v3.41.0...v3.42.0) (2026-09-20)
 
 
