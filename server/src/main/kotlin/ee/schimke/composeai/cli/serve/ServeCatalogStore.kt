@@ -453,8 +453,7 @@ class ServeCatalogStore(
         val detail = e.message?.takeIf { it.isNotBlank() } ?: e::class.simpleName ?: "unknown error"
         return Result.Failed(system, "could not parse catalog.json: $detail")
       }
-    runtimeHistorySources[safe] =
-      RuntimeHistorySource(repo = repo, commits = revisions.drop(1).map { it.commit }.distinct())
+    rememberPublishedRuntimeHistory(repo, revisions.drop(1).map { it.commit }.distinct())
 
     // One compact file answers preview availability for the whole revision menu. Older branches
     // have no index and deliberately fail open; the pinned catalog remains authoritative on click.
@@ -1747,6 +1746,30 @@ class ServeCatalogStore(
   }
 
   /**
+   * Rebuild immutable runtime descriptors from the bounded delivery-feed tail during catalog load.
+   *
+   * This is deliberately outside the public runtime-asset request path: an unknown runtime id must
+   * remain a cheap miss, not permission to crawl GitHub synchronously. Every valid descriptor is
+   * retained so reused ids with different integrity hashes remain an explicit collision.
+   */
+  private fun rememberPublishedRuntimeHistory(repo: String, commits: List<String>) {
+    for (commit in commits) {
+      val base = "https://raw.githubusercontent.com/$repo/$commit/"
+      val catalog =
+        runCatching {
+          fetchCatalogAsset(base + CATALOG_FILE)?.let {
+            json.decodeFromString(Catalog.serializer(), it.toString(Charsets.UTF_8))
+          }
+        }
+          .getOrNull() ?: continue
+      val artifact = catalog.uiBuilderRuntime ?: continue
+      if (artifact.validateContract().isEmpty()) {
+        rememberHistoricalRuntime(artifact, base + artifact.path)
+      }
+    }
+  }
+
+  /**
    * Recover a historical runtime into a small, renewable extracted-tree lease.
    *
    * The compressed archive already lives in the bounded [CatalogBlobPool]. Extracted Wasm trees are
@@ -1804,17 +1827,6 @@ class ServeCatalogStore(
   }
 
   private fun historicalRuntimeDescriptors(runtimeId: String): List<HistoricalRuntimeDescriptor> {
-    var descriptors = readHistoricalRuntimeDescriptors(runtimeId)
-    if (descriptors.isEmpty()) {
-      recoverHistoricalRuntimeDescriptor(runtimeId)
-      descriptors = readHistoricalRuntimeDescriptors(runtimeId)
-    }
-    return descriptors
-  }
-
-  private fun readHistoricalRuntimeDescriptors(
-    runtimeId: String
-  ): List<HistoricalRuntimeDescriptor> {
     val directory = File(root, UI_BUILDER_RUNTIME_DESCRIPTOR_DIR)
     return directory
       .listFiles { file ->
@@ -1839,35 +1851,6 @@ class ServeCatalogStore(
       }
   }
 
-  /**
-   * Rebuild a descriptor after a host restart whose artifact root was not persisted.
-   *
-   * Delivery-branch history is already fetched for each loaded catalog. Read only that bounded feed
-   * tail, stopping at the first exact runtime id, and persist the same immutable commit URL a
-   * normal catalog activation would have recorded. The archive itself remains lazy in
-   * [CatalogBlobPool].
-   */
-  private fun recoverHistoricalRuntimeDescriptor(runtimeId: String) {
-    for (source in runtimeHistorySources.values) {
-      for (commit in source.commits) {
-        val base = "https://raw.githubusercontent.com/${source.repo}/$commit/"
-        val catalog =
-          runCatching {
-            fetchCatalogAsset(base + CATALOG_FILE)?.let {
-              json.decodeFromString(Catalog.serializer(), it.toString(Charsets.UTF_8))
-            }
-          }
-            .getOrNull() ?: continue
-        val artifact = catalog.uiBuilderRuntime ?: continue
-        if (artifact.runtimeId != runtimeId || artifact.validateContract().isNotEmpty()) {
-          continue
-        }
-        rememberHistoricalRuntime(artifact, base + artifact.path)
-        return
-      }
-    }
-  }
-
   @Serializable
   private data class HistoricalRuntimeDescriptor(
     val schema: String = HISTORICAL_RUNTIME_DESCRIPTOR_SCHEMA,
@@ -1879,8 +1862,6 @@ class ServeCatalogStore(
     val root: File,
     var expiresAtMillis: Long,
   )
-
-  private data class RuntimeHistorySource(val repo: String, val commits: List<String>)
 
   /**
    * The discovered component record of [system]'s currently served generation, or null where the
@@ -4291,11 +4272,6 @@ class ServeCatalogStore(
 
   /** Verified runtime roots from published generations that have not yet been retired. */
   private val runtimeRoots = ConcurrentHashMap.newKeySet<File>()
-
-  /**
-   * Bounded delivery-feed tails used to recover immutable descriptors after a stateless restart.
-   */
-  private val runtimeHistorySources = ConcurrentHashMap<String, RuntimeHistorySource>()
 
   /**
    * Access-ordered expanded historical runtimes; every mutation is under [historicalRuntimeAsset].
