@@ -57,6 +57,11 @@ import {
     type Bounds,
 } from "../annotate/match.js";
 import {
+    a11yDifferences,
+    a11yDifferenceValue,
+    type A11yDifference,
+} from "../annotate/a11yCompare.js";
+import {
     groupTypography,
     pairTypography,
     typographyComparableValue,
@@ -325,8 +330,13 @@ export class SpecCompare extends ControllerElement {
     private annotationPromise: Promise<unknown> | null = null;
     /** Annotation endpoint captured with the exact render normalised into [frames]. */
     private framesAnnotationUrl = "";
+    /** Accessibility endpoint captured with the actual frame normalised into [frames]. */
+    private framesA11yUrl = "";
     private typographyLegend: HTMLElement | null = null;
     private typographyLayers: HTMLElement[] = [];
+    private a11yLegend: HTMLElement | null = null;
+    private a11yKey = "";
+    private a11yPromise: Promise<unknown> | null = null;
 
     // `viewer.js` calls `window.cpSpecCompare` as it enters the lane, so the global has to be up as
     // soon as the markup exists rather than a parse later. Same shape as `<cp-rc-lanes>`.
@@ -343,6 +353,7 @@ export class SpecCompare extends ControllerElement {
         // Abandon anything in flight rather than letting it paint into a lane nobody is watching.
         this.generation++;
         this.clearTypography();
+        this.clearA11y();
         this.typographyLegend?.remove();
         this.typographyLegend = null;
         // Both of these live OUTSIDE this element — the loupe in the body, the toggles in the lane
@@ -352,6 +363,8 @@ export class SpecCompare extends ControllerElement {
         this.loupe = null;
         this.loupeControls?.remove();
         this.loupeControls = null;
+        this.a11yLegend?.remove();
+        this.a11yLegend = null;
         super.disconnectedCallback();
     }
 
@@ -476,11 +489,10 @@ export class SpecCompare extends ControllerElement {
             this.placeTypography();
             this.markScaling();
         });
-        this.on(
-            window,
-            "cp-inspect-change",
-            () => void this.refreshTypography(),
-        );
+        this.on(window, "cp-inspect-change", () => {
+            void this.refreshTypography();
+            void this.refreshA11y();
+        });
 
         window.cpSpecCompare = this.api;
         this.apply();
@@ -1024,7 +1036,7 @@ export class SpecCompare extends ControllerElement {
         const pair = this.frames;
         if (!pair || !key) return;
         if (this.alignKey === key && this.alignBoxes) return;
-        const reference = this.referenceAnnotations();
+        const reference = await this.referenceAnnotations();
         if (reference === null) {
             // No published reference annotations — a sibling catalog's raster, or a preview whose
             // kit carries none. There is nothing to match against, so alignment stays unavailable
@@ -1227,6 +1239,7 @@ export class SpecCompare extends ControllerElement {
         }
         if (this.open && view !== PLAIN_VIEW) void this.compute();
         else this.clearTypography();
+        if (!this.open || view === PLAIN_VIEW) this.clearA11y();
     }
 
     private setScore(text: string): void {
@@ -1291,6 +1304,7 @@ export class SpecCompare extends ControllerElement {
             this.frames = null;
             this.framesKey = "";
             this.framesAnnotationUrl = "";
+            this.framesA11yUrl = "";
             this.pickSettled = false;
             this.setScore(UNAVAILABLE);
             return;
@@ -1316,6 +1330,7 @@ export class SpecCompare extends ControllerElement {
             if (this.framesMatch !== null && this.sourceIsSpec)
                 this.setChipVerdict(this.framesMatch);
             void this.refreshTypography();
+            void this.refreshA11y();
             return;
         }
         const generation = ++this.generation;
@@ -1335,6 +1350,8 @@ export class SpecCompare extends ControllerElement {
             // hidden render image can advance while a comparison remains open; reading its URL
             // later would put new bounds and typography over old pixels.
             this.framesAnnotationUrl = annotationUrl ?? "";
+            if (this.alignOn) void this.ensureAlignment();
+            this.framesA11yUrl = dataUrlFor(annotationFrameUrl, "a11y") ?? "";
             if (this.alignOn) void this.ensureAlignment();
             this.copyInto(next.reference, this.canvas("cp-spec-reference"));
             this.copyInto(next.candidate, this.canvas("cp-spec-actual"));
@@ -1368,6 +1385,7 @@ export class SpecCompare extends ControllerElement {
                 this.framesMatch = null;
                 this.setChipVerdict(null);
                 void this.refreshTypography();
+                void this.refreshA11y();
                 return;
             }
             // Scored from the frames just decoded, NOT by re-requesting the two URLs. An
@@ -1393,15 +1411,18 @@ export class SpecCompare extends ControllerElement {
             // different comparison in the same clothes.
             this.setChipVerdict(this.sourceIsSpec ? result.percent : null);
             void this.refreshTypography();
+            void this.refreshA11y();
         } catch {
             if (generation !== this.generation) return;
             this.frames = null;
             this.framesKey = "";
             this.framesAnnotationUrl = "";
+            this.framesA11yUrl = "";
             this.framesMatch = null;
             this.scoreTip = null;
             this.setScore(UNAVAILABLE);
             this.clearTypography();
+            this.clearA11y();
         }
     }
 
@@ -1413,20 +1434,36 @@ export class SpecCompare extends ControllerElement {
         );
     }
 
-    private referenceAnnotations(): unknown {
-        // Published for the imported reference and for nothing else. With a sibling's raster in the
-        // panel there is no annotation set for those pixels, and matching the kit's against the
-        // render would draw markers over a picture they were never measured on.
-        if (!this.sourceIsSpec) return null;
+    private a11yOn(): boolean {
+        return Boolean(
+            document.querySelector<HTMLInputElement>('[data-cp-inspect="a11y"]')
+                ?.checked,
+        );
+    }
+
+    private referenceAnnotations(): Promise<unknown> {
+        if (!this.sourceIsSpec)
+            return this.fetchData(dataUrlFor(this.reference(), "annotations"));
         const node = document.getElementById("cp-spec-annotations");
-        if (!node) return null;
+        if (!node) return Promise.resolve(null);
         try {
-            return (
-                JSON.parse(node.textContent ?? "") as { reference?: unknown }
-            ).reference;
+            return Promise.resolve(
+                JSON.parse(node.textContent ?? "") as { reference?: unknown },
+            ).then((payload) => payload.reference ?? null);
         } catch {
-            return null;
+            return Promise.resolve(null);
         }
+    }
+
+    private fetchData(url: string | null): Promise<unknown> {
+        if (!url) return Promise.resolve(null);
+        const key = url;
+        if (this.a11yKey === key && this.a11yPromise) return this.a11yPromise;
+        this.a11yKey = key;
+        this.a11yPromise = fetch(url, { credentials: "same-origin" })
+            .then((response) => (response.ok ? response.json() : null))
+            .catch(() => null);
+        return this.a11yPromise;
     }
 
     private actualAnnotations(): Promise<unknown> {
@@ -1563,7 +1600,7 @@ export class SpecCompare extends ControllerElement {
             this.frames !== frames
         )
             return;
-        const reference = this.referenceAnnotations();
+        const reference = await this.referenceAnnotations();
         if (reference === null || actual === null) {
             this.clearTypography();
             return;
@@ -1575,6 +1612,96 @@ export class SpecCompare extends ControllerElement {
         ).filter((pair) => this.changedFields(pair).length > 0);
         this.drawTypographyLegend(pairs);
         this.drawTypographyLayers(pairs);
+    }
+
+    private ensureA11yLegend(): HTMLElement | null {
+        if (this.a11yLegend?.isConnected) return this.a11yLegend;
+        const controls = document.getElementById("cp-controls");
+        const parent = controls?.parentElement;
+        if (!parent || !controls) return null;
+        const legend = document.createElement("aside");
+        legend.id = "cp-spec-a11y-legend";
+        legend.className = "cp-inspect-legend cp-spec-a11y-legend";
+        legend.setAttribute("aria-label", "Accessibility differences");
+        legend.hidden = true;
+        parent.insertBefore(legend, controls);
+        this.a11yLegend = legend;
+        return legend;
+    }
+
+    private clearA11y(): void {
+        if (!this.a11yLegend) return;
+        this.a11yLegend.textContent = "";
+        this.a11yLegend.hidden = true;
+    }
+
+    private async refreshA11y(): Promise<void> {
+        const view = this.choice.view;
+        const frames = this.frames;
+        if (
+            !this.open ||
+            !frames ||
+            !this.a11yOn() ||
+            (view !== "diff" && view !== "triptych" && view !== "slider")
+        ) {
+            this.clearA11y();
+            return;
+        }
+        const [reference, actual] = await Promise.all([
+            this.fetchData(dataUrlFor(this.reference(), "a11y")),
+            this.fetchData(this.framesA11yUrl),
+        ]);
+        if (
+            !this.open ||
+            !this.a11yOn() ||
+            this.choice.view !== view ||
+            this.frames !== frames
+        )
+            return;
+        if (reference === null || actual === null) {
+            this.clearA11y();
+            return;
+        }
+        this.drawA11yLegend(a11yDifferences(reference, actual));
+    }
+
+    private drawA11yLegend(differences: A11yDifference[]): void {
+        const legend = this.ensureA11yLegend();
+        if (!legend) return;
+        legend.textContent = "";
+        legend.hidden = false;
+        const head = document.createElement("div");
+        head.className = "cp-inspect-legend-head";
+        head.textContent = differences.length
+            ? "Accessibility differences"
+            : "Accessibility matches";
+        const count = document.createElement("span");
+        count.className = "cp-inspect-legend-count";
+        count.textContent = String(differences.length);
+        head.appendChild(count);
+        legend.appendChild(head);
+        if (!differences.length) return;
+        const list = document.createElement("ol");
+        list.className = "cp-inspect-list";
+        for (const difference of differences) {
+            const row = document.createElement("li");
+            row.className = "cp-inspect-entry cp-spec-a11y-diff";
+            const badge = document.createElement("span");
+            badge.className = "cp-inspect-badge";
+            badge.textContent = difference.marker;
+            row.appendChild(badge);
+            const text = document.createElement("span");
+            text.className = "cp-inspect-text";
+            for (const field of difference.fields) {
+                const line = document.createElement("span");
+                line.className = "cp-spec-a11y-field";
+                line.textContent = `${field}: ${a11yDifferenceValue(difference, "reference", field)} → ${a11yDifferenceValue(difference, "actual", field)}`;
+                text.appendChild(line);
+            }
+            row.appendChild(text);
+            list.appendChild(row);
+        }
+        legend.appendChild(list);
     }
 
     private drawTypographyLegend(pairs: TypographyPair[]): void {

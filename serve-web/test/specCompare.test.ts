@@ -83,6 +83,7 @@ async function mount(options: { baseline?: boolean } = {}): Promise<void> {
         <span id="cp-spec-score" hidden></span>
         <span class="cp-spec-pick" id="cp-spec-pick" hidden></span>
         <span class="cp-spec-pick-live" id="cp-spec-pick-live" aria-live="polite"></span>
+        <label><input class="cp-inspect" data-cp-inspect="a11y" type="checkbox">Accessibility</label>
         <label><input class="cp-inspect" data-cp-inspect="typography" type="checkbox">Typography</label>
         <div class="cp-spec-compare" id="cp-spec-compare" hidden data-view="spec"
              data-reference="/reference/Button.png">
@@ -545,6 +546,7 @@ describe("<cp-spec-compare>", () => {
     it("shows only changed typography beside Diff and highlights it", async () => {
         stubCompare();
         const urls: string[] = [];
+        const previousFetch = globalThis.fetch;
         globalThis.fetch = (async (url: string) => {
             urls.push(String(url));
             return {
@@ -607,6 +609,46 @@ describe("<cp-spec-compare>", () => {
             ["/render/Button.annotations?theme=dark"],
             "the legend remains tied to the render already copied into the canvases",
         );
+        globalThis.fetch = previousFetch;
+    });
+
+    it("compares accessibility stops from both parallel renders", async () => {
+        stubCompare();
+        const previousFetch = globalThis.fetch;
+        globalThis.fetch = (async (url: string) => ({
+            ok: true,
+            json: async () => ({
+                nodes: [
+                    {
+                        label: String(url).includes("reference")
+                            ? "Save"
+                            : "Save changes",
+                        role: "Button",
+                        boundsInScreen: "1,1,5,3",
+                        states: ["clickable"],
+                    },
+                ],
+                findings: [],
+                touchTargets: [],
+            }),
+        })) as unknown as typeof fetch;
+        try {
+            await mount();
+            lane().open("/render/Button.png");
+            press("diff");
+            document.querySelector<HTMLInputElement>(
+                '[data-cp-inspect="a11y"]',
+            )!.checked = true;
+            window.dispatchEvent(new CustomEvent("cp-inspect-change"));
+            for (let i = 0; i < 8; i++) await flush();
+
+            const legend = document.getElementById("cp-spec-a11y-legend")!;
+            assert.equal(legend.hidden, false);
+            assert.match(legend.textContent ?? "", /Accessibility differences/);
+            assert.match(legend.textContent ?? "", /Save → Save changes/);
+        } finally {
+            globalThis.fetch = previousFetch;
+        }
     });
 
     it("puts the live verdict on the chip, and the published one back on the way out", async () => {
@@ -920,9 +962,10 @@ describe("<cp-spec-compare>", () => {
         assert.equal(caption(), "Spec");
     });
 
-    it("withholds the kit's typography from a sibling's panel", async () => {
-        // `#cp-spec-annotations` describes the imported reference. With another catalog's render in
-        // the panel there is nothing those markers were measured on.
+    it("uses the sibling's typography rather than the imported kit's", async () => {
+        // The peer source now carries its own annotations endpoint. The same fixture is returned
+        // for both endpoints here, proving the sibling pair is considered instead of silently
+        // suppressing typography because the imported-kit payload names another frame.
         stubCompare();
         globalThis.fetch = (async () => ({
             ok: true,
@@ -949,7 +992,7 @@ describe("<cp-spec-compare>", () => {
             document.querySelectorAll(
                 '[data-cp-spec-panel="diff"] .cp-spec-type-box',
             ).length,
-            0,
+            1,
         );
     });
 
