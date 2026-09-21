@@ -35,7 +35,7 @@ grep -Fq \
 }
 
 grep -Fq \
-  'args+=(--ui-builder-catalogs "${SERVE_UI_BUILDER_CATALOGS:-m3-catalog,remote-m3,wear-m3}")' \
+  'args+=(--ui-builder-catalogs "${ui_builder_catalogs}")' \
   "${entrypoint}" || {
   echo "FAIL: entrypoint does not pass the selective UI-builder catalog allowlist" >&2
   exit 1

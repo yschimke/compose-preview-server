@@ -255,7 +255,23 @@ if [[ -f /opt/compose-preview-server/ui-builder/index.html ]]; then
   #
   # Two paragraphs used to stand here saying the opposite things — one welcoming `wear-m3` into the
   # default, one stating it was off. The second was current and the first was the leftover.
-  args+=(--ui-builder-catalogs "${SERVE_UI_BUILDER_CATALOGS:-m3-catalog,remote-m3,wear-m3}")
+  #
+  # An older setup wrote that second default (`m3-catalog,remote-m3`) into `.env`. Image rollouts do
+  # not update the host checkout or its `.env`, so merely changing the default above left exactly
+  # preview.coo.ee on the old value: the image claimed Wear was on while the running box returned
+  # 404 before authentication. Treat that exact retired default as inherited, not as an operator
+  # choice. A box that deliberately cannot carry the Wear/Android lane says so with the explicit
+  # opt-out below; custom allowlists remain untouched.
+  ui_builder_catalogs="${SERVE_UI_BUILDER_CATALOGS:-m3-catalog,remote-m3,wear-m3}"
+  if [[ "${SERVE_UI_BUILDER_WEAR:-1}" == "0" ]]; then
+    ui_builder_catalogs=",${ui_builder_catalogs},"
+    ui_builder_catalogs="${ui_builder_catalogs//,wear-m3,/,}"
+    ui_builder_catalogs="${ui_builder_catalogs#,}"
+    ui_builder_catalogs="${ui_builder_catalogs%,}"
+  elif [[ "${ui_builder_catalogs}" == "m3-catalog,remote-m3" ]]; then
+    ui_builder_catalogs="${ui_builder_catalogs},wear-m3"
+  fi
+  args+=(--ui-builder-catalogs "${ui_builder_catalogs}")
   # Which of those may take their definition from the catalog repository's own published
   # `ui-builder.json` rather than from the catalog this build writes in Kotlin: `all`, `none`, or a
   # subset of the list above.
@@ -323,14 +339,14 @@ if [[ -f /opt/compose-preview-server/ui-builder/index.html ]]; then
   # `--ui-builder-catalogs` does not serve — `require(unknown.isEmpty())`, so a startup failure
   # rather than a warning, on the grounds that naming an unserved catalog is a typo with a silent
   # failure mode. That is right, and it means these two defaults cannot be chosen separately: an
-  # operator who narrows SERVE_UI_BUILDER_CATALOGS to drop the Wear/Android lane (a supported
-  # override, and one this image's own tests exercise) would otherwise have to know that a second
-  # variable needs narrowing too, or the box would not boot.
+  # operator who drops the Wear/Android lane with SERVE_UI_BUILDER_WEAR=0 (a supported override,
+  # and one this image's own tests exercise) would otherwise have to know that a second variable
+  # needs narrowing too, or the box would not boot.
   #
   # Both published catalogs are derived the same way, by intersecting the served list with the
   # set that HAS a usable published file. Adding wear-m3 to a literal string would have
   # reintroduced exactly the startup failure the paragraph above describes, one catalog later.
-  ui_builder_served=",${SERVE_UI_BUILDER_CATALOGS:-m3-catalog,remote-m3,wear-m3},"
+  ui_builder_served=",${ui_builder_catalogs},"
   if [[ -n "${SERVE_UI_BUILDER_PUBLISHED_CATALOGS:-}" ]]; then
     ui_builder_published="${SERVE_UI_BUILDER_PUBLISHED_CATALOGS}"
   else
@@ -359,10 +375,9 @@ if [[ -f /opt/compose-preview-server/ui-builder/index.html ]]; then
   fi
   # Which served bundle each builder catalog's designs are COMPILED against for the native preview.
   #
-  # `wear-m3` is the reason this exists. Its canvas is a stand-in by construction — Wear Material 3
-  # is an Android AAR and the browser renderer is Compose Multiplatform for Wasm — so the only
-  # honest picture of a Wear design comes from compiling its generated Kotlin against real Wear
-  # Compose, which lives in a different repository's catalog. That bundle is an Android one, so
+  # `wear-m3` is the reason this exists. Its interactive canvas uses the Compose Multiplatform port
+  # of Wear Material 3, while native verification deliberately compiles the generated Kotlin against
+  # genuine AndroidX Wear Compose from a different repository's catalog. That bundle is Android, so
   # mapping it here also sends the compile to the Robolectric daemon rather than to Skiko.
   #
   # A catalog absent from the map compiles against a served catalog of its own name, which is what

@@ -26,17 +26,18 @@ install="${tmp}/compose-preview-server"
 block="${block//\/opt\/compose-preview-server/${install}}"
 
 run_case() {
-  local env_value="${1:-}" state_dir="${2:-}" builder_catalogs="${3:-}"
+  local env_value="${1:-}" state_dir="${2:-}" builder_catalogs="${3:-}" wear="${4:-1}"
   env -i PATH="${PATH}" SERVE_WASM_DIR="${env_value}" \
     SERVE_UI_BUILDER_STATE_DIR="${state_dir}" SERVE_UI_BUILDER_CATALOGS="${builder_catalogs}" \
+    SERVE_UI_BUILDER_WEAR="${wear}" \
     bash -c \
     "set -euo pipefail; args=(); ${block}; printf '%s\n' \"\${args[@]}\""
 }
 
 expect() {
   local wanted="$1" description="$2" env_value="${3:-}" state_dir="${4:-}" \
-    builder_catalogs="${5:-}" actual
-  actual="$(run_case "${env_value}" "${state_dir}" "${builder_catalogs}")"
+    builder_catalogs="${5:-}" wear="${6:-1}" actual
+  actual="$(run_case "${env_value}" "${state_dir}" "${builder_catalogs}" "${wear}")"
   if [[ "${actual}" != "${wanted}" ]]; then
     echo "FAIL: ${description}" >&2
     echo "  wanted: ${wanted@Q}" >&2
@@ -81,5 +82,10 @@ expect $'--wasm-ui-dir\n'"${built_in}"$'\n--ui-builder-dir\n'"${built_in_builder
   "the builder preserves the explicit static-only opt-out" "" "none"
 expect $'--wasm-ui-dir\n'"${built_in}"$'\n--ui-builder-dir\n'"${built_in_builder}"$'\n--ui-builder-catalogs\nremote-m3\n--ui-builder-published-catalogs\nremote-m3\n--ui-builder-state-dir\n/config/ui-builder-state\n--ui-builder-native-catalog\nwear-m3=wear-m3-catalog' \
   "the builder catalog allowlist is operator-selectable" "" "" "remote-m3"
+expect $'--wasm-ui-dir\n'"${built_in}"$'\n--ui-builder-dir\n'"${built_in_builder}"$'\n--ui-builder-catalogs\n'"${default_builder_catalogs}"$'\n--ui-builder-published-catalogs\n'"${default_published_catalogs}"$'\n--ui-builder-state-dir\n/config/ui-builder-state\n--ui-builder-native-catalog\nwear-m3=wear-m3-catalog' \
+  "the retired two-catalog default migrates to Wear" "" "" "m3-catalog,remote-m3"
+expect $'--wasm-ui-dir\n'"${built_in}"$'\n--ui-builder-dir\n'"${built_in_builder}"$'\n--ui-builder-catalogs\nm3-catalog,remote-m3\n--ui-builder-published-catalogs\nm3-catalog,remote-m3\n--ui-builder-state-dir\n/config/ui-builder-state\n--ui-builder-native-catalog\nwear-m3=wear-m3-catalog' \
+  "the explicit Wear opt-out preserves the low-resource lane" "" "" \
+  "${default_builder_catalogs}" "0"
 
 echo "PASS: the packaged Wasm UI and standalone builder remain distinct and additive"
