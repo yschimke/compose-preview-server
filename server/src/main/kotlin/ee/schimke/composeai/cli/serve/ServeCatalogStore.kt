@@ -1753,11 +1753,13 @@ class ServeCatalogStore(
    * retained so reused ids with different integrity hashes remain an explicit collision.
    */
   private fun rememberPublishedRuntimeHistory(repo: String, commits: List<String>) {
-    for (commit in commits) {
-      val base = "https://raw.githubusercontent.com/$repo/$commit/"
+    val bases = commits.map { commit -> "https://raw.githubusercontent.com/$repo/$commit/" }
+    val catalogUrls = bases.map { base -> base + CATALOG_FILE }
+    val catalogs = fetchCatalogAssets(catalogUrls)
+    for ((base, catalogUrl) in bases.zip(catalogUrls)) {
       val catalog =
         runCatching {
-          fetchCatalogAsset(base + CATALOG_FILE)?.let {
+          catalogs[catalogUrl]?.let {
             json.decodeFromString(Catalog.serializer(), it.toString(Charsets.UTF_8))
           }
         }
