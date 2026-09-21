@@ -162,7 +162,7 @@ composeai-preview-daemon = "3.8.3"
 # renderer instead of leaving the server to reduce that declaration to status prose. 3.4.0 owns the
 # catalog-renderer runtime manifest, validation and canonical tree-integrity framing. 3.5.0 adds
 # Browser Preview renderer selection and canvas-only vocabulary projections.
-composeai-contracts = "3.5.0"
+composeai-contracts = "3.6.0"
 
 # The extracted UI builder (yschimke/compose-ui-builder), resolved from its RELEASES. Three jars
 # and a BOM on Maven Central, and the editor archive as a GitHub release asset reached through the
