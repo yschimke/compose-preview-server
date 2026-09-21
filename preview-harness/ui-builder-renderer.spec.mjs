@@ -16,7 +16,7 @@ async function waitForResponse(page, requestId) {
 
 async function openRenderer(page) {
     await page.goto(
-        "index.html?rendererRuntimeId=m3-2026.09-protocol1",
+        "index.html?rendererRuntimeId=m3-2026.09-protocol2",
     );
     await page.waitForFunction(
         () =>
@@ -187,7 +187,7 @@ test("sandbox semantic actions operate Jetcaster state and an independent scroll
         const forged = JSON.stringify({
             schema: "compose-ui-builder-renderer/v1",
             protocolVersion: 1,
-            runtimeId: "m3-2026.09-protocol1",
+            runtimeId: "m3-2026.09-protocol2",
             requestId,
             type: "actionDispatched",
             payload: { inspection: { documentRevision: 0 } },

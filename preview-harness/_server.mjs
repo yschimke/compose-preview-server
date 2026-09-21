@@ -98,7 +98,7 @@ export function startServer(root, port = 0) {
                 // the static harness means the browser test exercises opaque-origin iframe
                 // messaging rather than importing the renderer into the editor page.
                 const rendererMatch =
-                    /^ui-builder\/runtime\/m3-2026\.09-protocol1\/(.*)$/.exec(
+                    /^ui-builder\/runtime\/m3-2026\.09-protocol2\/(.*)$/.exec(
                         rel,
                     );
                 if (rendererMatch) {
