@@ -2734,6 +2734,7 @@ public class ServeRunner(
         document = documentExporter?.supportsBinary == true,
       )
     val publishedCatalogs = mutableMapOf<String, CatalogCapabilityV1>()
+    val publishedRuntimeIds = mutableMapOf<String, String>()
     // Which catalogs the operator lets read their own published file. Null is "every enabled one",
     // which is the behaviour the loader shipped with; an empty set turns the whole path off without
     // a release, and a named set opts in one catalog at a time.
@@ -2757,7 +2758,7 @@ public class ServeRunner(
         .filter { publishedAllowed?.contains(it) ?: true }
         .forEach { systemId ->
           val config = catalogLoads?.stateFor(systemId)?.config
-          val file =
+          val published =
             catalogStore.fetchUiBuilderCatalog(
               system = systemId,
               sourceRepo = config?.repo,
@@ -2786,10 +2787,15 @@ public class ServeRunner(
           val record = (records.record(systemId) as? ComponentRecordSource.Lookup.Found)?.record
           when (
             val composed =
-              PublishedUiBuilderCatalog.compose(file.readText(), record, uiBuilderExports)
+              PublishedUiBuilderCatalog.compose(published.file.readText(), record, uiBuilderExports)
           ) {
             is PublishedUiBuilderCatalog.Result.Composed -> {
               publishedCatalogs[systemId] = composed.catalog
+              // The runtime is the executable half of this catalog's exact document pin. Do not
+              // substitute a host default when the delivery catalog declares none: `candidate`
+              // must continue to mean the built-in renderer, while a published runtime must be
+              // named precisely so the browser and native export cannot drift apart.
+              published.runtimeId?.let { publishedRuntimeIds[systemId] = it }
               // The join only this composition can make: a design node names a builder id, and
               // which record component that id was derived from is stated by the published file.
               // Without it the Remote emitter's record fallback is unreachable in production —
@@ -2810,6 +2816,7 @@ public class ServeRunner(
       CurrentM3UiBuilderCatalogExecutor(
         catalogSystemIds = uiBuilderCatalogs,
         published = publishedCatalogs,
+        nativeRuntimeIds = publishedRuntimeIds,
         // `composeCode` answers a **configuration** question — is this host set up to export
         // Compose? — and deliberately not a filesystem one.
         //

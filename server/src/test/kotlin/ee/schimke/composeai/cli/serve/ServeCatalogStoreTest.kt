@@ -3936,6 +3936,31 @@ class ServeCatalogStoreTest {
     assertNull(fromNothing.fetchComponentRecord("compose-m3"))
   }
 
+  @Test
+  fun `a published builder catalog carries its declared runtime pin`() {
+    val runtimeId = "compose-m3-p2-published"
+    val catalog =
+      """
+      {"schema":"design-parity-catalog/v1","system":"compose-m3","uiBuilderFile":"ui-builder.json",
+       "uiBuilderRuntime":{"path":"ui-builder/runtime.zip","runtimeId":"$runtimeId","protocolVersion":2,"integritySha256":"${"a".repeat(64)}"},"components":[]}
+      """
+        .trimIndent()
+    val builder = """{"schema":"compose-ui-builder-catalog/v1","statusSemantics":{}}"""
+    val store =
+      store(TrustStore.EMPTY) { url ->
+        when {
+          url.endsWith("/${ServeCatalogStore.CATALOG_FILE}") -> catalog.encodeToByteArray()
+          url.endsWith("/ui-builder.json") -> builder.encodeToByteArray()
+          else -> null
+        }
+      }
+
+    val published = assertNotNull(store.fetchUiBuilderCatalog("compose-m3"))
+
+    assertEquals(runtimeId, published.runtimeId)
+    assertEquals(builder, published.file.readText())
+  }
+
   private fun polyglotBundle(
     manifest: String,
     extra: Map<String, ByteArray> = emptyMap(),
