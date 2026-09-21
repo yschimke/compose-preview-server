@@ -179,7 +179,8 @@ composeai-contracts = "3.6.0"
 # builders. Required with contracts 3.3.0: the added optional fields intentionally change generated
 # copy signatures, while `newBuilder()` remains binary-compatible. 3.32.0 adds protocol-v2 surface
 # handling to the bundled editor while retaining protocol v1, matching catalog runtime staging.
-composeai-ui-builder = "3.32.0"
+# 3.33.0 adds exact-pin catalog recovery for designs whose stored catalog is no longer served.
+composeai-ui-builder = "3.33.0"
 # 1.65.0 is the first release publishing `rc-players-bom`. (1.64.0 is a tag and a GitHub Release
 # whose Maven coordinates never reached Central -- rc-players#211 -- so it cannot be pinned.)
 # 1.67.0 by hand, ahead of Renovate's soak: it pins the KMP player modules to a Java 17 toolchain

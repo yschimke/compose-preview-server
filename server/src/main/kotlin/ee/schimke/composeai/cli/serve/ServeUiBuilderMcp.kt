@@ -157,6 +157,7 @@ class ServeUiBuilderMcp(
       LIST_CATALOGS,
       LIST_DESIGNS,
       GET_DESIGN,
+      PREVIEW_CATALOG_RECOVERY,
       // Reading a design's access list is gated at the door like any other read, and by the
       // service on top of that: only the owner is told who else holds a grant.
       DESIGN_ACCESS -> UiBuilderRouteCapability.READ
@@ -228,6 +229,16 @@ class ServeUiBuilderMcp(
           GetSnapshotRequestV1(
             designId = args.requiredText("designId"),
             revision = args.number("revision"),
+          )
+        PREVIEW_CATALOG_RECOVERY ->
+          return envelope(
+            callId,
+            service.execute(
+              UiBuilderServiceCall(
+                actor,
+                UiBuilderServiceRequest.PreviewCurrentCatalogUpgrade(args.requiredText("designId")),
+              )
+            ),
           )
         CREATE_DESIGN -> createDesign(args, actor)
         RENAME_DESIGN,
@@ -1151,6 +1162,7 @@ class ServeUiBuilderMcp(
     const val LIST_CATALOGS = "ui_builder_list_catalogs"
     const val LIST_DESIGNS = "ui_builder_list_designs"
     const val GET_DESIGN = "ui_builder_get_design"
+    const val PREVIEW_CATALOG_RECOVERY = "ui_builder_preview_catalog_recovery"
     const val CREATE_DESIGN = "ui_builder_create_design"
     const val APPLY = "ui_builder_apply"
     const val EXPORT = "ui_builder_export"
@@ -1215,6 +1227,7 @@ class ServeUiBuilderMcp(
         LIST_CATALOGS,
         LIST_DESIGNS,
         GET_DESIGN,
+        PREVIEW_CATALOG_RECOVERY,
         AWAIT_DESIGN,
         CREATE_DESIGN,
         APPLY,
@@ -1334,6 +1347,18 @@ class ServeUiBuilderMcp(
             "designId":{"type":"string"},
             "revision":{"type":"integer","description":"A past revision. Omit for the current one."},
             "$INCLUDE_CATALOG_ARGUMENT":{"type":"boolean","description":"Embed the pinned catalog's whole CatalogCapabilityV1 in the snapshot, as the released shape does. Defaults to false."}
+          },"required":["designId"],"additionalProperties":false}
+          """,
+        ),
+        tool(
+          PREVIEW_CATALOG_RECOVERY,
+          "Dry-run recovery of a design whose stored catalog pin no longer resolves. The server " +
+            "selects the exact currently served pin for the same catalog system and returns a " +
+            "CatalogUpgradePreviewV1 with changes, issues and the hashes required by a later " +
+            "`upgradeCatalog` mutation through $APPLY. This call never writes.",
+          """
+          {"type":"object","properties":{
+            "designId":{"type":"string"}
           },"required":["designId"],"additionalProperties":false}
           """,
         ),

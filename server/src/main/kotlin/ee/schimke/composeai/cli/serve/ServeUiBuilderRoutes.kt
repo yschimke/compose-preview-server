@@ -82,6 +82,7 @@ internal fun Route.installUiBuilderRoutes(
   liveNativeSession: ((token: String, previewId: String) -> UiBuilderNativeLiveSession?)? = null,
 ) {
   installUiBuilderLiveExportRoutes(service, authorization)
+  installUiBuilderCatalogRecoveryRoutes(service, authorization)
   post(UI_BUILDER_REQUEST_PATH) {
     call.response.headers.append(HttpHeaders.CacheControl, "no-store")
     val bytes =
