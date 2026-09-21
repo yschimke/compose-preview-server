@@ -309,7 +309,12 @@ public data class CatalogFeedBatch(
   val after: CatalogFeedRevision,
   val previews: List<CatalogPreviewChange>,
   val references: List<CatalogReferenceChange>,
+  /** The renderer/catalog build version changed without necessarily changing every preview. */
+  val versionChange: CatalogVersionChange? = null,
 )
+
+/** The version of the renderer that published a catalog revision. */
+public data class CatalogVersionChange(val before: String?, val after: String?)
 
 /** Source seam: real serving uses Git; tests can provide an already-built history. */
 public fun interface CatalogFeedSource {
@@ -501,6 +506,8 @@ private fun terminateCatalogFeedGit(process: Process, outThread: Thread, errThre
 
 public data class CatalogSnapshot(
   val title: String?,
+  /** `catalog.json`'s renderer field, e.g. `compose-preview 2.21.1`. */
+  val renderer: String?,
   val previews: LinkedHashMap<String, SnapshotPreview>,
   val references: LinkedHashMap<String, SnapshotReference>,
 ) {
@@ -516,6 +523,7 @@ public data class CatalogSnapshot(
         runCatching { JSON.parseToJsonElement(it).jsonObject }.getOrNull()
       }
       val title = catalog.string("title")
+      val renderer = catalog.string("renderer")
       val previews = linkedMapOf<String, SnapshotPreview>()
       val components = catalog?.get("components") as? JsonArray ?: JsonArray(emptyList())
       for (componentElement in components) {
@@ -580,7 +588,7 @@ public data class CatalogSnapshot(
           ),
         )
       }
-      return CatalogSnapshot(title, previews, references)
+      return CatalogSnapshot(title, renderer, previews, references)
     }
 
     private fun JsonObject?.string(name: String): String? =
@@ -754,7 +762,15 @@ public object CatalogFeedDiff {
         }
         .sortedWith(compareBy<CatalogReferenceChange> { it.order }.thenBy { it.id })
 
-    return CatalogFeedBatch(beforeRevision, afterRevision, previews, references)
+    return CatalogFeedBatch(
+      beforeRevision,
+      afterRevision,
+      previews,
+      references,
+      before.renderer
+        .takeIf { it != after.renderer }
+        ?.let { CatalogVersionChange(it, after.renderer) },
+    )
   }
 }
 
@@ -808,7 +824,9 @@ public object CatalogFeedXml {
       .append(xml(feedUrl(baseUrl, "/feed.xml", linkQuery)))
       .append("\" rel=\"self\" type=\"application/rss+xml\"/>\n")
     append("<lastBuildDate>${rfc822(generated)}</lastBuildDate>\n")
-    for (batch in batches) append(item(baseUrl, linkQuery, repo, batch))
+    for ((batch, versions) in displayedBatches(batches)) {
+      append(item(baseUrl, linkQuery, repo, batch, versions))
+    }
     append("</channel></rss>\n")
   }
 
@@ -817,8 +835,11 @@ public object CatalogFeedXml {
     linkQuery: String,
     repo: String?,
     batch: CatalogFeedBatch,
+    versionChanges: List<CatalogVersionChange>,
   ): String {
-    val p = batch.previews.groupingBy { it.kind }.eachCount()
+    val previews = batch.previews.filter { it.isVisual() }
+    val references = batch.references.filter { it.isVisual() }
+    val p = previews.groupingBy { it.kind }.eachCount()
     val summary = buildList {
       p[CatalogPreviewChangeKind.ADDED]?.let { add("$it added") }
       p[CatalogPreviewChangeKind.DELETED]?.let { add("$it deleted") }
@@ -827,14 +848,14 @@ public object CatalogFeedXml {
         add("$it visually and metadata changed")
       }
       p[CatalogPreviewChangeKind.METADATA]?.let { add("$it metadata changed") }
-      if (batch.references.isNotEmpty()) add("${batch.references.size} design reference changes")
-      if (isEmpty()) add("catalog metadata changed")
+      if (references.isNotEmpty()) add("${references.size} design reference changes")
+      if (isEmpty()) add(versionSummary(versionChanges))
     }
       .joinToString(", ")
     val commitUrl = ServeCatalogRevision.treeUrl(repo, batch.after.commit)
     val fallbackLink = feedUrl(baseUrl, query = withAt(batch.after.commit, linkQuery))
     val link = commitUrl ?: fallbackLink
-    val html = description(baseUrl, linkQuery, batch)
+    val html = description(baseUrl, linkQuery, batch, previews, references, versionChanges)
     return buildString {
       append("<item>\n")
       append("<title>${xml(summary)}</title>\n")
@@ -862,13 +883,16 @@ public object CatalogFeedXml {
     baseUrl: String,
     linkQuery: String,
     batch: CatalogFeedBatch,
+    previews: List<CatalogPreviewChange>,
+    references: List<CatalogReferenceChange>,
+    versionChanges: List<CatalogVersionChange>,
   ): String = buildString {
     append("<p>Catalog publication <code>${batch.after.commit.take(8)}</code>")
     batch.after.sourceSha?.let { append(" from source <code>${html(it)}</code>") }
     append(".</p>")
-    if (batch.previews.isNotEmpty()) {
+    if (previews.isNotEmpty()) {
       append("<h3>Previews</h3><ul>")
-      for ((key, group) in batch.previews.groupBy { it.label to it.kind }) {
+      for ((key, group) in previews.groupBy { it.label to it.kind }) {
         val (label, kind) = key
         val lead = group.first()
         val kindLabel = kindLabel(kind)
@@ -921,14 +945,14 @@ public object CatalogFeedXml {
       }
       append("</ul>")
     }
-    if (batch.references.isNotEmpty()) {
+    if (references.isNotEmpty()) {
       append("<h3>Design references</h3><ul>")
       // Keyed by the mapped preview's component as well as the label: a reference label is
       // presentation text a producer may repeat across components ("Figma", "Default"), and
       // collapsing two components under one entry would show one of them and silently speak for
       // the other. The preview id's component slug is the identity that cannot collide.
       for ((key, group) in
-        batch.references.groupBy { Triple(componentOf(it.previewId), it.label, it.specChanged) }) {
+        references.groupBy { Triple(componentOf(it.previewId), it.label, it.specChanged) }) {
         val (_, label, specChanged) = key
         val lead = group.first()
         append("<li><strong>${html(label)}</strong>: ")
@@ -975,6 +999,52 @@ public object CatalogFeedXml {
       }
       append("</ul>")
     }
+    if (versionChanges.isNotEmpty()) {
+      append("<p><small>${html(versionSummary(versionChanges))}.</small></p>")
+    }
+  }
+
+  /**
+   * Keep the RSS stream a visual changelog. Intermediate renderer-only publishes are not meaningful
+   * to a reader on their own, so carry them forward to the next visual publication as one footnote.
+   * The newest one remains an item: otherwise a quiet catalog has no way to announce its current
+   * renderer version.
+   */
+  private fun displayedBatches(
+    batches: List<CatalogFeedBatch>
+  ): List<Pair<CatalogFeedBatch, List<CatalogVersionChange>>> {
+    val displayed = mutableListOf<Pair<CatalogFeedBatch, List<CatalogVersionChange>>>()
+    val pendingVersions = mutableListOf<CatalogVersionChange>()
+    // Batches arrive newest first, while a version-only publication belongs to the visual event
+    // that follows it in time. Walk history forward, then restore RSS's newest-first order.
+    batches.asReversed().forEachIndexed { index, batch ->
+      val visual = batch.hasVisualChange()
+      val version = batch.versionChange
+      when {
+        visual -> {
+          val versions = pendingVersions.toList() + listOfNotNull(version)
+          displayed += batch to versions
+          pendingVersions.clear()
+        }
+        version != null && index == batches.lastIndex -> displayed += batch to listOf(version)
+        version != null -> pendingVersions += version
+      }
+    }
+    return displayed.asReversed()
+  }
+
+  private fun CatalogFeedBatch.hasVisualChange(): Boolean =
+    previews.any { it.isVisual() } || references.any { it.isVisual() }
+
+  private fun CatalogPreviewChange.isVisual(): Boolean = kind != CatalogPreviewChangeKind.METADATA
+
+  private fun CatalogReferenceChange.isVisual(): Boolean = specChanged
+
+  private fun versionSummary(changes: List<CatalogVersionChange>): String {
+    val first = changes.firstOrNull()?.before ?: "unknown"
+    val last = changes.lastOrNull()?.after ?: "unknown"
+    return if (changes.size == 1) "Catalog renderer updated from $first to $last"
+    else "${changes.size} catalog renderer updates from $first to $last"
   }
 
   /** `match a → b (+n pp)`, or empty when neither side published a score. */
