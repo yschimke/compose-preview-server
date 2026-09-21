@@ -2734,6 +2734,7 @@ public class ServeRunner(
         document = documentExporter?.supportsBinary == true,
       )
     val publishedCatalogs = mutableMapOf<String, CatalogCapabilityV1>()
+    val publishedRuntimeIds = mutableMapOf<String, String>()
     // Which catalogs the operator lets read their own published file. Null is "every enabled one",
     // which is the behaviour the loader shipped with; an empty set turns the whole path off without
     // a release, and a named set opts in one catalog at a time.
@@ -2757,7 +2758,7 @@ public class ServeRunner(
         .filter { publishedAllowed?.contains(it) ?: true }
         .forEach { systemId ->
           val config = catalogLoads?.stateFor(systemId)?.config
-          val file =
+          val published =
             catalogStore.fetchUiBuilderCatalog(
               system = systemId,
               sourceRepo = config?.repo,
@@ -2786,10 +2787,15 @@ public class ServeRunner(
           val record = (records.record(systemId) as? ComponentRecordSource.Lookup.Found)?.record
           when (
             val composed =
-              PublishedUiBuilderCatalog.compose(file.readText(), record, uiBuilderExports)
+              PublishedUiBuilderCatalog.compose(published.file.readText(), record, uiBuilderExports)
           ) {
             is PublishedUiBuilderCatalog.Result.Composed -> {
               publishedCatalogs[systemId] = composed.catalog
+              // The runtime is the executable half of this catalog's exact document pin. Do not
+              // substitute a host default when the delivery catalog declares none: `candidate`
+              // must continue to mean the built-in renderer, while a published runtime must be
+              // named precisely so the browser and native export cannot drift apart.
+              published.runtimeId?.let { publishedRuntimeIds[systemId] = it }
               // The join only this composition can make: a design node names a builder id, and
               // which record component that id was derived from is stated by the published file.
               // Without it the Remote emitter's record fallback is unreachable in production —
@@ -2807,54 +2813,64 @@ public class ServeRunner(
         }
     }
     val catalogs =
-      CurrentM3UiBuilderCatalogExecutor(
-        catalogSystemIds = uiBuilderCatalogs,
-        published = publishedCatalogs,
-        // `composeCode` answers a **configuration** question — is this host set up to export
-        // Compose? — and deliberately not a filesystem one.
-        //
-        // It has to, because this value is computed once and baked into every catalog by
-        // `CurrentM3UiBuilderCatalogExecutor`, and `PersistentUiBuilderService` then gates each
-        // request on it. Anything read from disk here is a cache of a mutable fact with no
-        // invalidation: a record repaired after startup could never lift the flag, which would
-        // defeat `ComponentRecordSource`'s hot reload outright — the source would re-read a file
-        // the service has already refused to ask it about.
-        //
-        // So the question is whether a catalog has a record **configured**, which is fixed for the
-        // process. It is asked per catalog: `exportCapabilities` is a field of each
-        // `CatalogCapabilityV1`, and collapsing it to one boolean meant a deployment serving
-        // `m3-catalog` beside `remote-m3` — which deliberately has no record, Remote Compose being
-        // outside the Compose exporter — advertised no export anywhere, withdrawing the action
-        // from the catalog that could have used it.
-        //
-        // The cost, stated: a configured record that is missing, malformed, or on a schema this
-        // generator will not read is still advertised, and every export of it refuses. That is the
-        // better failure. The refusal names the catalog, the file and the reason, an operator who
-        // repairs the file is served on the next request, and nothing needs a restart. The
-        // alternative trades a precise per-request diagnostic for a silent permanent one.
-        exportCapabilities = uiBuilderExports,
-        // A record, **or** a catalog whose designs are written by an emitter that needs none. The
-        // second half is what makes the Compose-export action appear for a Wear widget design: the
-        // source has existed since `WearWidgetCodeExporter` landed, and only the editor's Code pane
-        // could read it.
-        //
-        // The flag it sets is still `composeCode`, which now means "this catalog exports Kotlin
-        // source" rather than "…exports Jetpack Compose Material 3". Reused rather than given a
-        // format of its own because `ExportFormatV1` is published from compose-preview-contracts:
-        // a new member is a wire change across two repositories, and it is not one this repository
-        // can make. The artifact says what it is — a widget export declares `@RemoteComposable` and
-        // imports `androidx.compose.remote.creation.compose` in its first ten lines — and the MCP
-        // tool description says so too.
-        composeExportFor = { systemId ->
-          systemId in uiBuilderComponents.keys ||
-            systemId in RecordFreeExport.CATALOG_SYSTEM_IDS ||
-            (UiBuilderBuildFeatures.remoteCompose &&
-              publishedCatalogs[systemId]?.statusSemantics?.let {
-                UiBuilderCatalogPlatform.from(it) == UiBuilderCatalogPlatform.REMOTE_COMPOSE
-              } == true)
-        },
-        packs = packs,
-      )
+      CurrentM3UiBuilderCatalogExecutor.Builder()
+        .also {
+          it.catalogSystemIds = uiBuilderCatalogs
+          it.published = publishedCatalogs
+          it.nativeRuntimeIds = publishedRuntimeIds
+          // `composeCode` answers a **configuration** question — is this host set up to export
+          // Compose? — and deliberately not a filesystem one.
+          //
+          // It has to, because this value is computed once and baked into every catalog by
+          // `CurrentM3UiBuilderCatalogExecutor`, and `PersistentUiBuilderService` then gates each
+          // request on it. Anything read from disk here is a cache of a mutable fact with no
+          // invalidation: a record repaired after startup could never lift the flag, which would
+          // defeat `ComponentRecordSource`'s hot reload outright — the source would re-read a file
+          // the service has already refused to ask it about.
+          //
+          // So the question is whether a catalog has a record **configured**, which is fixed for
+          // the
+          // process. It is asked per catalog: `exportCapabilities` is a field of each
+          // `CatalogCapabilityV1`, and collapsing it to one boolean meant a deployment serving
+          // `m3-catalog` beside `remote-m3` — which deliberately has no record, Remote Compose
+          // being
+          // outside the Compose exporter — advertised no export anywhere, withdrawing the action
+          // from the catalog that could have used it.
+          //
+          // The cost, stated: a configured record that is missing, malformed, or on a schema this
+          // generator will not read is still advertised, and every export of it refuses. That is
+          // the
+          // better failure. The refusal names the catalog, the file and the reason, an operator who
+          // repairs the file is served on the next request, and nothing needs a restart. The
+          // alternative trades a precise per-request diagnostic for a silent permanent one.
+          it.exportCapabilities = uiBuilderExports
+          // A record, **or** a catalog whose designs are written by an emitter that needs none. The
+          // second half is what makes the Compose-export action appear for a Wear widget design:
+          // the
+          // source has existed since `WearWidgetCodeExporter` landed, and only the editor's Code
+          // pane
+          // could read it.
+          //
+          // The flag it sets is still `composeCode`, which now means "this catalog exports Kotlin
+          // source" rather than "…exports Jetpack Compose Material 3". Reused rather than given a
+          // format of its own because `ExportFormatV1` is published from compose-preview-contracts:
+          // a new member is a wire change across two repositories, and it is not one this
+          // repository
+          // can make. The artifact says what it is — a widget export declares `@RemoteComposable`
+          // and
+          // imports `androidx.compose.remote.creation.compose` in its first ten lines — and the MCP
+          // tool description says so too.
+          it.composeExportFor = { systemId ->
+            systemId in uiBuilderComponents.keys ||
+              systemId in RecordFreeExport.CATALOG_SYSTEM_IDS ||
+              (UiBuilderBuildFeatures.remoteCompose &&
+                publishedCatalogs[systemId]?.statusSemantics?.let {
+                  UiBuilderCatalogPlatform.from(it) == UiBuilderCatalogPlatform.REMOTE_COMPOSE
+                } == true)
+          }
+          it.packs = packs
+        }
+        .build()
     val nativeBackends =
       catalogs.listCatalogs().associate { catalog ->
         catalogPlatforms[catalog.benchmark.catalogSystemId] =

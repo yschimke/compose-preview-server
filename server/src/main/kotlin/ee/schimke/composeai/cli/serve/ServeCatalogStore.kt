@@ -1886,11 +1886,16 @@ class ServeCatalogStore(
    * simply not opted in, which is every catalog until it does, and returns null with nothing on
    * stderr. Only a declared file that will not fetch is worth a line.
    */
-  fun fetchUiBuilderCatalog(
+  internal data class PublishedUiBuilderCatalogAsset(
+    val file: File,
+    val runtimeId: String?,
+  )
+
+  internal fun fetchUiBuilderCatalog(
     system: String,
     sourceRepo: String? = null,
     sourceBranchPrefix: String? = null,
-  ): File? {
+  ): PublishedUiBuilderCatalogAsset? {
     val safe = ServeBundleStore.sanitizeName(system) ?: return null
     val repo = sourceRepo?.takeIf { it.isNotBlank() } ?: this.repo
     val branchPrefix = sourceBranchPrefix?.takeIf { it.isNotBlank() } ?: this.branchPrefix
@@ -1924,7 +1929,10 @@ class ServeCatalogStore(
     dir.mkdirs()
     val target = File(dir, UI_BUILDER_CATALOG_FILE)
     target.writeBytes(bytes)
-    return target
+    return PublishedUiBuilderCatalogAsset(
+      file = target,
+      runtimeId = catalog.uiBuilderRuntime?.takeIf { it.validateContract().isEmpty() }?.runtimeId,
+    )
   }
 
   /**
