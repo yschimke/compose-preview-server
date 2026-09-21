@@ -315,7 +315,7 @@ export function matchAnnotationItems(
                 });
             });
         }
-        if (kind === "typography") {
+        if (kind === "typography" || kind === "a11y") {
             refs.forEach((ref, index) => {
                 if (!usedRefs.has(index)) referenceOnly.push(ref);
             });
