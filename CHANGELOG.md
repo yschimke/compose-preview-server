@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.45.0](https://github.com/yschimke/compose-preview-server/compare/v3.44.0...v3.45.0) (2026-09-21)
+
+
+### Bug Fixes
+
+* **deploy:** enable Wear authoring on hosted builder ([#985](https://github.com/yschimke/compose-preview-server/issues/985)) ([96c9e61](https://github.com/yschimke/compose-preview-server/commit/96c9e610572f8d6797c78b326098548c5c466f74))
+
 ## [3.44.0](https://github.com/yschimke/compose-preview-server/compare/v3.43.0...v3.44.0) (2026-09-21)
 
 
