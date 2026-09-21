@@ -837,7 +837,12 @@ test("checked-in Jetcaster operations converge and production PNG matches the in
             "REVISION_PINNED_DAEMON_RENDER",
         );
         expect(svgArtifact.content.startsWith("<svg")).toBe(true);
-        expect(svgArtifact.content).toContain('data-material-icon="search"');
+        // SearchBar's platform text-field layer may be rasterized as one image, including its
+        // leading search icon. Check an independently composed icon so this still proves the SVG
+        // export retained editable Material-icon metadata rather than testing layer coalescing.
+        expect(svgArtifact.content).toContain(
+            'data-material-icon="play_circle"',
+        );
         expect(svgArtifact.contentDigest).toBe(sha256(artifactBytes(svgArtifact)));
         expect(
             svgArtifact.diagnostics.find(
