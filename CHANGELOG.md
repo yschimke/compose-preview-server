@@ -1,5 +1,17 @@
 # Changelog
 
+## [3.49.0](https://github.com/yschimke/compose-preview-server/compare/v3.48.0...v3.49.0) (2026-09-22)
+
+
+### Features
+
+* route source export through catalog adapters ([#998](https://github.com/yschimke/compose-preview-server/issues/998)) ([4ac4883](https://github.com/yschimke/compose-preview-server/commit/4ac488387eb2c3887df061c14a5550f83dc62c04))
+
+
+### Bug Fixes
+
+* pin server to source export adapter SDK ([#1000](https://github.com/yschimke/compose-preview-server/issues/1000)) ([c80edc2](https://github.com/yschimke/compose-preview-server/commit/c80edc23f5e79a051e1dd74cf312663f0177171c))
+
 ## [3.48.0](https://github.com/yschimke/compose-preview-server/compare/v3.47.0...v3.48.0) (2026-09-22)
 
 
