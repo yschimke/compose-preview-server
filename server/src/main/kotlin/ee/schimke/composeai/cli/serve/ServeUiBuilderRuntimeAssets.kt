@@ -2,8 +2,11 @@ package ee.schimke.composeai.cli.serve
 
 import ee.schimke.composeai.uibuilder.protocol.UI_BUILDER_RUNTIME_MANIFEST_NAME_V1
 import ee.schimke.composeai.uibuilder.protocol.UI_BUILDER_RUNTIME_MANIFEST_SCHEMA_V1
+import ee.schimke.composeai.uibuilder.protocol.UI_BUILDER_RUNTIME_MANIFEST_SCHEMA_V2
 import ee.schimke.composeai.uibuilder.protocol.UiBuilderRuntimeArtifactV1
 import ee.schimke.composeai.uibuilder.protocol.UiBuilderRuntimeManifestV1
+import ee.schimke.composeai.uibuilder.protocol.UiBuilderRuntimeManifestV2
+import ee.schimke.composeai.uibuilder.protocol.UiBuilderRuntimeValidationIssueV1
 import ee.schimke.composeai.uibuilder.protocol.frameUiBuilderRuntimeTreeIntegrityV1
 import ee.schimke.composeai.uibuilder.protocol.isValidUiBuilderRuntimeIdV1
 import ee.schimke.composeai.uibuilder.protocol.normalizeUiBuilderRuntimeAssetPathV1
@@ -16,6 +19,8 @@ import java.nio.file.Path
 import java.security.MessageDigest
 import java.util.zip.ZipInputStream
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 
 /**
  * An in-memory snapshot of retained, version-addressed UI-builder renderer assets.
@@ -42,6 +47,7 @@ private constructor(private val runtimes: Map<String, RuntimeBundle>) {
 
   internal companion object {
     internal const val MANIFEST_SCHEMA = UI_BUILDER_RUNTIME_MANIFEST_SCHEMA_V1
+    internal const val MANIFEST_SCHEMA_V2 = UI_BUILDER_RUNTIME_MANIFEST_SCHEMA_V2
     internal const val RUNTIME_MANIFEST_NAME = UI_BUILDER_RUNTIME_MANIFEST_NAME_V1
 
     private val JSON = Json { ignoreUnknownKeys = false }
@@ -61,23 +67,12 @@ private constructor(private val runtimes: Map<String, RuntimeBundle>) {
           requireNotNull(bytes[RUNTIME_MANIFEST_NAME]) {
             "UI-builder runtime '$runtimeId' has no $RUNTIME_MANIFEST_NAME"
           }
-        val manifest =
-          try {
-            JSON.decodeFromString(
-              UiBuilderRuntimeManifestV1.serializer(),
-              manifestBytes.decodeToString(),
-            )
-          } catch (failure: Exception) {
-            throw IllegalArgumentException(
-              "UI-builder runtime '$runtimeId' has an invalid $RUNTIME_MANIFEST_NAME",
-              failure,
-            )
-          }
+        val manifest = decodeManifest(runtimeId, manifestBytes)
         require(manifest.runtimeId == runtimeId) {
           "UI-builder runtime directory '$runtimeId' does not match its manifest runtimeId"
         }
         val actualIntegrity = treeIntegrity(bytes - RUNTIME_MANIFEST_NAME)
-        val issues = manifest.validateContract(bytes.keys, actualIntegrity)
+        val issues = manifest.validate(bytes.keys, actualIntegrity)
         require(issues.isEmpty()) {
           "UI-builder runtime '$runtimeId' manifest is invalid: " +
             issues.joinToString { issue -> "${issue.field}:${issue.code}" }
@@ -118,18 +113,7 @@ private constructor(private val runtimes: Map<String, RuntimeBundle>) {
         requireNotNull(bytes[RUNTIME_MANIFEST_NAME]) {
           "UI-builder runtime '${descriptor.runtimeId}' has no $RUNTIME_MANIFEST_NAME"
         }
-      val manifest =
-        try {
-          JSON.decodeFromString(
-            UiBuilderRuntimeManifestV1.serializer(),
-            manifestBytes.decodeToString(),
-          )
-        } catch (failure: Exception) {
-          throw IllegalArgumentException(
-            "UI-builder runtime '${descriptor.runtimeId}' has an invalid $RUNTIME_MANIFEST_NAME",
-            failure,
-          )
-        }
+      val manifest = decodeManifest(descriptor.runtimeId, manifestBytes)
       require(manifest.runtimeId == descriptor.runtimeId) {
         "UI-builder runtime descriptor id does not match its manifest"
       }
@@ -140,7 +124,7 @@ private constructor(private val runtimes: Map<String, RuntimeBundle>) {
         "UI-builder runtime descriptor integrity does not match its manifest"
       }
       val actualIntegrity = treeIntegrity(bytes - RUNTIME_MANIFEST_NAME)
-      val manifestIssues = manifest.validateContract(bytes.keys, actualIntegrity)
+      val manifestIssues = manifest.validate(bytes.keys, actualIntegrity)
       require(manifestIssues.isEmpty()) {
         "UI-builder runtime '${descriptor.runtimeId}' manifest is invalid: " +
           manifestIssues.joinToString { issue -> "${issue.field}:${issue.code}" }
@@ -192,6 +176,46 @@ private constructor(private val runtimes: Map<String, RuntimeBundle>) {
 
     internal fun normalizeRelativePath(path: String): String? =
       normalizeUiBuilderRuntimeAssetPathV1(path)
+
+    private data class DecodedRuntimeManifest(
+      val runtimeId: String,
+      val protocolVersion: Int,
+      val integritySha256: String,
+      val validate: (Set<String>, String?) -> List<UiBuilderRuntimeValidationIssueV1>,
+    )
+
+    private fun decodeManifest(runtimeId: String, bytes: ByteArray): DecodedRuntimeManifest =
+      try {
+        val document = JSON.parseToJsonElement(bytes.decodeToString()).jsonObject
+        when (document["schema"]?.jsonPrimitive?.content) {
+          UI_BUILDER_RUNTIME_MANIFEST_SCHEMA_V1 -> {
+            val manifest =
+              JSON.decodeFromJsonElement(UiBuilderRuntimeManifestV1.serializer(), document)
+            DecodedRuntimeManifest(
+              manifest.runtimeId,
+              manifest.protocolVersion,
+              manifest.integritySha256,
+              manifest::validateContract,
+            )
+          }
+          UI_BUILDER_RUNTIME_MANIFEST_SCHEMA_V2 -> {
+            val manifest =
+              JSON.decodeFromJsonElement(UiBuilderRuntimeManifestV2.serializer(), document)
+            DecodedRuntimeManifest(
+              manifest.runtimeId,
+              manifest.protocolVersion,
+              manifest.integritySha256,
+              manifest::validateContract,
+            )
+          }
+          else -> error("unsupported runtime manifest schema")
+        }
+      } catch (failure: Exception) {
+        throw IllegalArgumentException(
+          "UI-builder runtime '$runtimeId' has an invalid $RUNTIME_MANIFEST_NAME",
+          failure,
+        )
+      }
 
     private fun readSnapshot(root: Path): Map<String, ByteArray> {
       val result = linkedMapOf<String, ByteArray>()

@@ -98,15 +98,52 @@ class ServeUiBuilderRuntimeAssetsTest {
   }
 
   @Test
-  fun `runtime accepts Remote Compose implementation identities`() {
+  fun `runtime v2 accepts Remote Compose implementation identities`() {
     val remote =
       runtimeDirectory(
         runtimeId = "remote-m3-p3-revision",
         renderer = "renderer",
+        schema = ServeUiBuilderRuntimeAssets.MANIFEST_SCHEMA_V2,
+        protocolVersion = 2,
         extraManifest = ""","remoteComposeWriter":"4307936-ps17-cmp01","rcPlayer":"1.69.0"""",
       )
 
     ServeUiBuilderRuntimeAssets.load(mapOf("remote-m3-p3-revision" to remote))
+    val manifest = File(remote, ServeUiBuilderRuntimeAssets.RUNTIME_MANIFEST_NAME).readText()
+    val integrity = Regex("\"integritySha256\":\"([a-f0-9]{64})\"").find(manifest)!!.groupValues[1]
+    ServeUiBuilderRuntimeAssets.stageArchive(
+      UiBuilderRuntimeArtifactV1(
+        runtimeId = "remote-m3-p3-revision",
+        protocolVersion = 2,
+        integritySha256 = integrity,
+      ),
+      zipDirectory(remote),
+      Files.createTempDirectory("serve-remote-catalog-runtime").toFile(),
+    )
+  }
+
+  @Test
+  fun `runtime schema versions reject undeclared fields`() {
+    val v1WithV2Fields =
+      runtimeDirectory(
+        runtimeId = "remote-m3-p3-v1",
+        renderer = "renderer",
+        extraManifest = ""","remoteComposeWriter":"writer","rcPlayer":"player"""",
+      )
+    val v2WithUnknownField =
+      runtimeDirectory(
+        runtimeId = "remote-m3-p3-v2",
+        renderer = "renderer",
+        schema = ServeUiBuilderRuntimeAssets.MANIFEST_SCHEMA_V2,
+        extraManifest = ""","remoteComposeWriter":"writer","futureField":true""",
+      )
+
+    assertFailsWith<IllegalArgumentException> {
+      ServeUiBuilderRuntimeAssets.load(mapOf("remote-m3-p3-v1" to v1WithV2Fields))
+    }
+    assertFailsWith<IllegalArgumentException> {
+      ServeUiBuilderRuntimeAssets.load(mapOf("remote-m3-p3-v2" to v2WithUnknownField))
+    }
   }
 
   @Test
@@ -288,6 +325,8 @@ class ServeUiBuilderRuntimeAssetsTest {
   private fun runtimeDirectory(
     runtimeId: String,
     renderer: String,
+    schema: String = ServeUiBuilderRuntimeAssets.MANIFEST_SCHEMA,
+    protocolVersion: Int = 1,
     extraManifest: String = "",
   ): File {
     val directory =
@@ -302,7 +341,7 @@ class ServeUiBuilderRuntimeAssetsTest {
     val integrity = ServeUiBuilderRuntimeAssets.treeIntegrity(assets)
     File(directory, ServeUiBuilderRuntimeAssets.RUNTIME_MANIFEST_NAME)
       .writeText(
-        """{"schema":"${ServeUiBuilderRuntimeAssets.MANIFEST_SCHEMA}","runtimeId":"$runtimeId","protocolVersion":1,"entrypoint":"index.html","integritySha256":"$integrity"$extraManifest}"""
+        """{"schema":"$schema","runtimeId":"$runtimeId","protocolVersion":$protocolVersion,"entrypoint":"index.html","integritySha256":"$integrity"$extraManifest}"""
       )
     return directory
   }
