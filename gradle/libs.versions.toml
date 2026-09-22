@@ -94,7 +94,7 @@ graphics-shapes = "1.1.0"
 # 2.18.1 is the first release publishing `compose-ai-tools-bom`, which is why this line stops being
 # named by any coordinate below. (2.18.0 exists as a tag and a GitHub Release and is NOT on Central:
 # its publish job died in configuration. Do not pin it.)
-composeai-tools = "2.21.1"
+composeai-tools = "2.22.0"
 # The render daemons, the renderers, the preview annotations and data API, and the data extractors,
 # published from yschimke/compose-preview-daemon since its 3.0.0 (compose-ai-tools#5336). Layer 1a
 # in that repository's `docs/design/REPOSITORY_LAYERS.md`: between the contracts and
