@@ -28,7 +28,7 @@ grep -Fq \
 }
 
 grep -Fq \
-  'SERVE_UI_BUILDER_CATALOGS: "${SERVE_UI_BUILDER_CATALOGS:-m3-catalog,remote-m3,wear-m3-catalog}"' \
+  'SERVE_UI_BUILDER_CATALOGS: "${SERVE_UI_BUILDER_CATALOGS:-m3-catalog,remote-m3,wear-m3}"' \
   "${compose}" || {
   echo "FAIL: compose does not selectively enable the reviewed UI-builder catalogs" >&2
   exit 1

@@ -327,7 +327,7 @@ services:
       # replacements, so a design does not disappear when preview.coo.ee updates.
       SERVE_UI_BUILDER_STATE_DIR: "${SERVE_UI_BUILDER_STATE_DIR:-/config/ui-builder-state}"
       # Explicit authoring allowlist; publishing another preview catalog does not expose a builder.
-      SERVE_UI_BUILDER_CATALOGS: "${SERVE_UI_BUILDER_CATALOGS:-m3-catalog,remote-m3,wear-m3-catalog}"
+      SERVE_UI_BUILDER_CATALOGS: "${SERVE_UI_BUILDER_CATALOGS:-m3-catalog,remote-m3,wear-m3}"
       # Explicitly drop the Wear/Android lane. This separate switch lets a stale copy of the old
       # two-catalog default migrate forward while preserving a deliberate low-resource opt-out.
       SERVE_UI_BUILDER_WEAR: "${SERVE_UI_BUILDER_WEAR:-1}"
