@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.48.0](https://github.com/yschimke/compose-preview-server/compare/v3.47.0...v3.48.0) (2026-09-22)
+
+
+### Bug Fixes
+
+* load Wear builder policy by logical id ([#995](https://github.com/yschimke/compose-preview-server/issues/995)) ([f23b9fa](https://github.com/yschimke/compose-preview-server/commit/f23b9fadc28c3c584ec3f28aee641ba2d52d1809))
+
 ## [3.47.0](https://github.com/yschimke/compose-preview-server/compare/v3.46.0...v3.47.0) (2026-09-22)
 
 
