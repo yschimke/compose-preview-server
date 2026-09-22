@@ -180,6 +180,26 @@ class PublishedUiBuilderCatalogTest {
   }
 
   @Test
+  fun `a published catalog carries its Compose source adapter onto its capability`() {
+    val result =
+      PublishedUiBuilderCatalog.compose(
+        published(
+          extra =
+            ", \"composeSourceExport\": { \"adapter\": \"compose-material3\", \"version\": 1 }"
+        ),
+        record,
+        exports,
+      )
+    val catalog =
+      assertTrue(result is PublishedUiBuilderCatalog.Result.Composed).let {
+        (result as PublishedUiBuilderCatalog.Result.Composed).catalog
+      }
+
+    assertEquals("compose-material3", catalog.composeSourceExport?.adapter)
+    assertEquals(1, catalog.composeSourceExport?.version)
+  }
+
+  @Test
   fun `authored exceptions augment rather than replace record-derived properties`() {
     val document =
       published(

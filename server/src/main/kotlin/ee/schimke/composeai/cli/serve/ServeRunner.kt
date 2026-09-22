@@ -19,6 +19,7 @@ import ee.schimke.composeai.uibuilder.RemoteDocumentExportSupport
 import ee.schimke.composeai.uibuilder.UiBuilderBuildFeatures
 import ee.schimke.composeai.uibuilder.UiBuilderCatalogPlatform
 import ee.schimke.composeai.uibuilder.UiBuilderPreviewSurfaces
+import ee.schimke.composeai.uibuilder.export.CatalogComposeSourceExportAdapters
 import ee.schimke.composeai.uibuilder.protocol.CatalogCapabilityV1
 import ee.schimke.composeai.uibuilder.service.CurrentM3UiBuilderCatalogExecutor
 import ee.schimke.composeai.uibuilder.service.FileUiBuilderAssetStore
@@ -2882,6 +2883,10 @@ public class ServeRunner(
           // tool description says so too.
           it.composeExportFor = { systemId ->
             systemId in uiBuilderComponents.keys ||
+              publishedCatalogs[systemId]?.let { catalog ->
+                CatalogComposeSourceExportAdapters.resolve(catalog) is
+                  CatalogComposeSourceExportAdapters.Resolution.Supported
+              } == true ||
               systemId in RecordFreeExport.CATALOG_SYSTEM_IDS ||
               (UiBuilderBuildFeatures.remoteCompose &&
                 publishedCatalogs[systemId]?.statusSemantics?.let {

@@ -10,6 +10,7 @@ import ee.schimke.composeai.uibuilder.protocol.CatalogBenchmarkV1
 import ee.schimke.composeai.uibuilder.protocol.CatalogCapabilityV1
 import ee.schimke.composeai.uibuilder.protocol.CodeCapabilityV1
 import ee.schimke.composeai.uibuilder.protocol.ComponentCapabilityV1
+import ee.schimke.composeai.uibuilder.protocol.ComposeSourceExportCapabilityV1
 import ee.schimke.composeai.uibuilder.protocol.ExportCapabilitiesV1
 import ee.schimke.composeai.uibuilder.protocol.PropertyCapabilityV1
 import ee.schimke.composeai.uibuilder.protocol.SlotCapabilityV1
@@ -425,6 +426,7 @@ internal object PublishedUiBuilderCatalog {
           it.exportCapabilities = exportCapabilities
           it.statusSemantics = rawSemantics
           it.browserPreview = semantics.browserPreview
+          it.composeSourceExport = semantics.composeSourceExport
         }
         .build()
     val note =
@@ -945,6 +947,7 @@ internal object PublishedUiBuilderCatalog {
      */
     val platform: String = "",
     val browserPreview: BrowserPreviewCapabilityV1? = null,
+    val composeSourceExport: ComposeSourceExportCapabilityV1? = null,
     val builtins: Map<String, UiBuilderBuiltin> = emptyMap(),
     val components: Map<String, UiBuilderComponentPolicy> = emptyMap(),
   )
