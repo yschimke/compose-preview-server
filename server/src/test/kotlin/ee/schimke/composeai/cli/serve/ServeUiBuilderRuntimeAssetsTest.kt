@@ -98,6 +98,18 @@ class ServeUiBuilderRuntimeAssetsTest {
   }
 
   @Test
+  fun `runtime accepts Remote Compose implementation identities`() {
+    val remote =
+      runtimeDirectory(
+        runtimeId = "remote-m3-p3-revision",
+        renderer = "renderer",
+        extraManifest = ""","remoteComposeWriter":"4307936-ps17-cmp01","rcPlayer":"1.69.0"""",
+      )
+
+    ServeUiBuilderRuntimeAssets.load(mapOf("remote-m3-p3-revision" to remote))
+  }
+
+  @Test
   fun `catalog archive is fully verified before staging`() {
     val source = runtimeDirectory("wear-m3-p2-revision", "export const wear = true")
     val manifest = File(source, ServeUiBuilderRuntimeAssets.RUNTIME_MANIFEST_NAME).readText()
@@ -273,7 +285,11 @@ class ServeUiBuilderRuntimeAssetsTest {
     )
   }
 
-  private fun runtimeDirectory(runtimeId: String, renderer: String): File {
+  private fun runtimeDirectory(
+    runtimeId: String,
+    renderer: String,
+    extraManifest: String = "",
+  ): File {
     val directory =
       Files.createTempDirectory("serve-ui-builder-runtime").toFile().also { it.deleteOnExit() }
     val assets =
@@ -286,7 +302,7 @@ class ServeUiBuilderRuntimeAssetsTest {
     val integrity = ServeUiBuilderRuntimeAssets.treeIntegrity(assets)
     File(directory, ServeUiBuilderRuntimeAssets.RUNTIME_MANIFEST_NAME)
       .writeText(
-        """{"schema":"${ServeUiBuilderRuntimeAssets.MANIFEST_SCHEMA}","runtimeId":"$runtimeId","protocolVersion":1,"entrypoint":"index.html","integritySha256":"$integrity"}"""
+        """{"schema":"${ServeUiBuilderRuntimeAssets.MANIFEST_SCHEMA}","runtimeId":"$runtimeId","protocolVersion":1,"entrypoint":"index.html","integritySha256":"$integrity"$extraManifest}"""
       )
     return directory
   }
