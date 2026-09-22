@@ -9,6 +9,8 @@ import ee.schimke.composeai.uibuilder.RecordFreeExport
 import ee.schimke.composeai.uibuilder.UiBuilderBuildFeatures
 import ee.schimke.composeai.uibuilder.UiBuilderCatalogPlatform
 import ee.schimke.composeai.uibuilder.WidgetAssetBytes
+import ee.schimke.composeai.uibuilder.export.CatalogComposeSourceExportAdapter
+import ee.schimke.composeai.uibuilder.export.CatalogComposeSourceExportAdapters
 import ee.schimke.composeai.uibuilder.export.ScreenDocumentProjection
 import ee.schimke.composeai.uibuilder.export.ScreenExportGate
 import ee.schimke.composeai.uibuilder.export.callableAliases
@@ -159,6 +161,23 @@ internal class ScreenGeneratorComposeExportExecutor(
             is RecordFreeExport.Generated.Refused ->
               refused(UNEXPRESSIBLE_DOCUMENT, recordFree.reasons)
           }
+        }
+    }
+
+    // Published catalogs select a source adapter in their immutable capability pin. Resolve that
+    // declaration before reaching the generic record projection: this host never guesses a source
+    // language from a catalog id, and never executes a catalog-provided Kotlin snippet. An absent
+    // declaration keeps the legacy candidate path alive while catalog pins are being verified.
+    when (val adapter = CatalogComposeSourceExportAdapters.resolve(request.catalog)) {
+      CatalogComposeSourceExportAdapters.Resolution.NotDeclared -> Unit
+      is CatalogComposeSourceExportAdapters.Resolution.Unsupported ->
+        return refused(
+          UNSUPPORTED_SOURCE_ADAPTER,
+          listOf("${adapter.adapter}/v${adapter.version} is not shipped by this Preview Server"),
+        )
+      is CatalogComposeSourceExportAdapters.Resolution.Supported ->
+        when (adapter.adapter.strategy) {
+          CatalogComposeSourceExportAdapter.Strategy.COMPONENT_RECORDS -> Unit
         }
     }
 
@@ -868,6 +887,9 @@ internal class ScreenGeneratorComposeExportExecutor(
 
     /** The document holds something no Kotlin value expresses — state, an event, an asset. */
     const val UNEXPRESSIBLE_DOCUMENT = "UNEXPRESSIBLE_DOCUMENT"
+
+    /** The pinned catalog selected an adapter this server does not ship. */
+    const val UNSUPPORTED_SOURCE_ADAPTER = "UNSUPPORTED_CATALOG_SOURCE_EXPORT_ADAPTER"
 
     /** The document is expressible; the catalog cannot prove one of its call sites. */
     const val UNPROVEN_CALL_SITE = "UNPROVEN_CALL_SITE"

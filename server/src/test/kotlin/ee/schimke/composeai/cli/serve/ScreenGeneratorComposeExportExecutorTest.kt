@@ -5,6 +5,7 @@ import ee.schimke.composeai.uibuilder.export.ScreenExportGate
 import ee.schimke.composeai.uibuilder.protocol.CatalogBenchmarkV1
 import ee.schimke.composeai.uibuilder.protocol.CatalogCapabilityV1
 import ee.schimke.composeai.uibuilder.protocol.ColorValueV1
+import ee.schimke.composeai.uibuilder.protocol.ComposeSourceExportCapabilityV1
 import ee.schimke.composeai.uibuilder.protocol.DesignDocumentV1
 import ee.schimke.composeai.uibuilder.protocol.DesignNodeV1
 import ee.schimke.composeai.uibuilder.protocol.DiagnosticSeverityV1
@@ -154,6 +155,7 @@ class ScreenGeneratorComposeExportExecutorTest {
 
   private fun export(
     document: DesignDocumentV1 = ScreenGeneratorScreenFixture.document(),
+    catalog: CatalogCapabilityV1 = this.catalog,
     components: (String) -> ComponentRecordSource.Lookup = {
       ComponentRecordSource.Lookup.Found(ScreenGeneratorScreenFixture.components())
     },
@@ -179,6 +181,26 @@ class ScreenGeneratorComposeExportExecutorTest {
     assertEquals(ExportFormatV1.COMPOSE, artifact.format)
     assertEquals("text/x-kotlin; charset=utf-8", artifact.mediaType)
     assertEquals(ExportEncodingV1.UTF8, artifact.encoding)
+  }
+
+  @Test
+  fun `an unknown catalog source adapter refuses rather than falling back`() {
+    val unknownCatalog =
+      catalog
+        .newBuilder()
+        .also {
+          it.composeSourceExport =
+            ComposeSourceExportCapabilityV1.Builder("other-compose", 7).build()
+        }
+        .build()
+
+    val artifact = export(catalog = unknownCatalog)
+
+    assertTrue(artifact.content.orEmpty().contains("other-compose/v7"))
+    assertEquals(
+      ScreenGeneratorComposeExportExecutor.UNSUPPORTED_SOURCE_ADAPTER,
+      artifact.diagnostics.single().code,
+    )
   }
 
   @Test
