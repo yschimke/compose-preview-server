@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.50.0](https://github.com/yschimke/compose-preview-server/compare/v3.49.0...v3.50.0) (2026-09-22)
+
+
+### Bug Fixes
+
+* accept Remote Compose runtime metadata ([#1001](https://github.com/yschimke/compose-preview-server/issues/1001)) ([b3f3d11](https://github.com/yschimke/compose-preview-server/commit/b3f3d117ec2e19f4a0619191c00f2ac09c31a7aa))
+
 ## [3.49.0](https://github.com/yschimke/compose-preview-server/compare/v3.48.0...v3.49.0) (2026-09-22)
 
 
