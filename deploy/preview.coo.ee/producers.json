@@ -18,6 +18,10 @@
       "branch": "design-artifacts/*"
     },
     {
+      "repo": "yschimke/wear-m3-catalog-out",
+      "branch": "design-artifacts/*"
+    },
+    {
       "repo": "yschimke/meshcore-mobile",
       "branch": "design-artifacts/*"
     },
