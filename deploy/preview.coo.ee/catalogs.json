@@ -21,13 +21,13 @@
   "catalogs": [
     {
       "system": "compose-m3",
-      "repo": "yschimke/compose-ai-tools",
+      "repo": "yschimke/compose-ai-tools-out",
       "listed": false,
       "group": "design-systems"
     },
     {
       "system": "wear-m3",
-      "repo": "yschimke/compose-ai-tools",
+      "repo": "yschimke/compose-ai-tools-out",
       "listed": false,
       "group": "design-systems"
     },
