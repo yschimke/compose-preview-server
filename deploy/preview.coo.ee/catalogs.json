@@ -33,20 +33,20 @@
     },
     {
       "system": "remote-m3",
-      "repo": "yschimke/wear-m3-catalog",
+      "repo": "yschimke/wear-m3-catalog-out",
       "listed": true,
       "group": "design-systems"
     },
     {
       "system": "m3-catalog",
-      "repo": "yschimke/m3-catalog",
+      "repo": "yschimke/m3-catalog-out",
       "listed": true,
       "group": "design-systems",
       "loadPriority": 20
     },
     {
       "system": "m3-samples",
-      "repo": "yschimke/m3-catalog",
+      "repo": "yschimke/m3-catalog-out",
       "listed": false,
       "attributionRepos": [
         "androidx/androidx"
@@ -54,14 +54,14 @@
     },
     {
       "system": "wear-m3-catalog",
-      "repo": "yschimke/wear-m3-catalog",
+      "repo": "yschimke/wear-m3-catalog-out",
       "listed": true,
       "group": "design-systems",
       "loadPriority": 10
     },
     {
       "system": "wear-m3-samples",
-      "repo": "yschimke/wear-m3-catalog",
+      "repo": "yschimke/wear-m3-catalog-out",
       "listed": false,
       "attributionRepos": [
         "androidx/androidx"
@@ -69,13 +69,13 @@
     },
     {
       "system": "glimmer-catalog",
-      "repo": "yschimke/m3-catalog",
+      "repo": "yschimke/m3-catalog-out",
       "listed": true,
       "group": "design-systems"
     },
     {
       "system": "glimmer-samples",
-      "repo": "yschimke/m3-catalog",
+      "repo": "yschimke/m3-catalog-out",
       "listed": false,
       "attributionRepos": [
         "androidx/androidx"
