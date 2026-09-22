@@ -2774,7 +2774,8 @@ public class ServeRunner(
           // are normally the same. Wear is deliberately not: designs name `wear-m3`, while the
           // Android bundle and delivery branch are served as `wear-m3-catalog`. The native mapping
           // already states that one-to-one relationship for the compile lane; use the same source
-          // here so a published policy is composed under the identity its own `catalog.id` declares.
+          // here so a published policy is composed under the identity its own `catalog.id`
+          // declares.
           val sourceSystem = uiBuilderPublishedSourceSystem(systemId, uiBuilderNativeCatalogs)
           val config = catalogLoads?.stateFor(sourceSystem)?.config
           val published =

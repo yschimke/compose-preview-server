@@ -20,5 +20,4 @@ class UiBuilderPublishedCatalogSourceTest {
   fun `an unmapped Builder catalog loads policy from itself`() {
     assertEquals("remote-m3", uiBuilderPublishedSourceSystem("remote-m3", emptyMap()))
   }
-
 }
