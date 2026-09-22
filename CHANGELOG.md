@@ -1,5 +1,17 @@
 # Changelog
 
+## [3.47.0](https://github.com/yschimke/compose-preview-server/compare/v3.46.0...v3.47.0) (2026-09-22)
+
+
+### Features
+
+* **serve-web:** compare parallel preview semantics ([#991](https://github.com/yschimke/compose-preview-server/issues/991)) ([2e742d4](https://github.com/yschimke/compose-preview-server/commit/2e742d4ef7d1466507b4ba44bdfedfc3cb284337))
+
+
+### Bug Fixes
+
+* serve published Wear builder catalog ([#994](https://github.com/yschimke/compose-preview-server/issues/994)) ([7c1c2e2](https://github.com/yschimke/compose-preview-server/commit/7c1c2e298a3d3d2e1d241833c17f01816028e7ff))
+
 ## [3.46.0](https://github.com/yschimke/compose-preview-server/compare/v3.45.0...v3.46.0) (2026-09-22)
 
 
