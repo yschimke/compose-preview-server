@@ -1,5 +1,14 @@
 # Changelog
 
+## [3.46.0](https://github.com/yschimke/compose-preview-server/compare/v3.45.0...v3.46.0) (2026-09-22)
+
+
+### Bug Fixes
+
+* retain legacy UI builder canvas ([#992](https://github.com/yschimke/compose-preview-server/issues/992)) ([b61d83b](https://github.com/yschimke/compose-preview-server/commit/b61d83b575019eb7718387b5879144a5150ae4e0))
+* return delivered catalog runtime pins ([#988](https://github.com/yschimke/compose-preview-server/issues/988)) ([cd82b8b](https://github.com/yschimke/compose-preview-server/commit/cd82b8bdf56e584318f8eaf56ca08edf7891f6dc))
+* **serve:** tune catalog RSS changes ([#989](https://github.com/yschimke/compose-preview-server/issues/989)) ([a41981b](https://github.com/yschimke/compose-preview-server/commit/a41981b1b3bb4edb0bcf8223cdf36411d9c8a836))
+
 ## [3.45.0](https://github.com/yschimke/compose-preview-server/compare/v3.44.0...v3.45.0) (2026-09-21)
 
 
