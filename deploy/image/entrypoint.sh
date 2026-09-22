@@ -262,18 +262,21 @@ if [[ -f /opt/compose-preview-server/ui-builder/index.html ]]; then
   # 404 before authentication. Treat that exact retired default as inherited, not as an operator
   # choice. A box that deliberately cannot carry the Wear/Android lane says so with the explicit
   # opt-out below; custom allowlists remain untouched.
-  ui_builder_catalogs="${SERVE_UI_BUILDER_CATALOGS:-m3-catalog,remote-m3,wear-m3-catalog}"
+  # `wear-m3` is the Builder's logical id. Its delivery branch and Android compile bundle are
+  # `wear-m3-catalog`, named by the native mapping below. Do not put the delivery-system id here:
+  # the published policy itself declares `catalog.id: wear-m3`.
+  ui_builder_catalogs="${SERVE_UI_BUILDER_CATALOGS:-m3-catalog,remote-m3,wear-m3}"
   if [[ "${SERVE_UI_BUILDER_WEAR:-1}" == "0" ]]; then
     ui_builder_catalogs=",${ui_builder_catalogs},"
-    ui_builder_catalogs="${ui_builder_catalogs//,wear-m3-catalog,/,}"
+    ui_builder_catalogs="${ui_builder_catalogs//,wear-m3,/,}"
     ui_builder_catalogs="${ui_builder_catalogs#,}"
     ui_builder_catalogs="${ui_builder_catalogs%,}"
   elif [[ "${ui_builder_catalogs}" == "m3-catalog,remote-m3" ]]; then
-    ui_builder_catalogs="${ui_builder_catalogs},wear-m3-catalog"
-  elif [[ "${ui_builder_catalogs}" == "m3-catalog,remote-m3,wear-m3" ]]; then
-    # The previous image default named the compose-ai-tools harness. Migrate only that exact
-    # inherited value; an operator's custom catalog list remains their choice.
-    ui_builder_catalogs="m3-catalog,remote-m3,wear-m3-catalog"
+    ui_builder_catalogs="${ui_builder_catalogs},wear-m3"
+  elif [[ "${ui_builder_catalogs}" == "m3-catalog,remote-m3,wear-m3-catalog" ]]; then
+    # The previous image release named Wear's delivery system, not the Builder catalog declared by
+    # its policy. Migrate only that inherited broken default; custom allowlists remain untouched.
+    ui_builder_catalogs="m3-catalog,remote-m3,wear-m3"
   fi
   args+=(--ui-builder-catalogs "${ui_builder_catalogs}")
   # Which of those may take their definition from the catalog repository's own published
@@ -353,9 +356,14 @@ if [[ -f /opt/compose-preview-server/ui-builder/index.html ]]; then
   ui_builder_served=",${ui_builder_catalogs},"
   if [[ -n "${SERVE_UI_BUILDER_PUBLISHED_CATALOGS:-}" ]]; then
     ui_builder_published="${SERVE_UI_BUILDER_PUBLISHED_CATALOGS}"
+    if [[ "${ui_builder_published}" == "m3-catalog,remote-m3,wear-m3-catalog" ]]; then
+      # #994 documented this exact value before the logical/delivery identity distinction was
+      # corrected. It can only have been the broken image default, not a meaningful custom subset.
+      ui_builder_published="m3-catalog,remote-m3,wear-m3"
+    fi
   else
     ui_builder_published=""
-    for candidate in m3-catalog remote-m3 wear-m3-catalog; do
+    for candidate in m3-catalog remote-m3 wear-m3; do
       if [[ "${ui_builder_served}" == *",${candidate},"* ]]; then
         ui_builder_published="${ui_builder_published:+${ui_builder_published},}${candidate}"
       fi
@@ -391,7 +399,7 @@ if [[ -f /opt/compose-preview-server/ui-builder/index.html ]]; then
   # while the catalog was off — nothing asked for a wear-m3 compile — and keeping it meant putting
   # `wear-m3` back in SERVE_UI_BUILDER_CATALOGS restores the whole lane in one variable rather than
   # producing a catalog whose native render silently compiles against the wrong bundle.
-  args+=(--ui-builder-native-catalog "${SERVE_UI_BUILDER_NATIVE_CATALOGS:-wear-m3-catalog=wear-m3-catalog}")
+  args+=(--ui-builder-native-catalog "${SERVE_UI_BUILDER_NATIVE_CATALOGS:-wear-m3=wear-m3-catalog}")
   # Served catalogs offered as COMPONENT PACKS inside the builder's catalogs: `confetti-mobile=mobile`
   # puts Confetti's own composables on a shelf of their own in every Material 3 design, drawn as
   # placeholders on the canvas and rendered natively against the confetti-mobile bundle, and

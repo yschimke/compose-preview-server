@@ -40,6 +40,19 @@ import kotlinx.serialization.json.JsonPrimitive
 import okio.Path.Companion.toPath
 
 /**
+ * The delivery-system id from which a Builder catalog's published policy and component record load.
+ *
+ * A native mapping is also the necessary source relationship: the mapped served catalog owns the
+ * bundle whose library the Builder adapter represents, and therefore owns that adapter's published
+ * policy. Most catalogs are their own source. Wear is deliberately not: a design names `wear-m3`,
+ * while the `wear-m3-catalog` delivery branch owns its policy and Android bundle.
+ */
+internal fun uiBuilderPublishedSourceSystem(
+  builderSystem: String,
+  nativeCatalogs: Map<String, String>,
+): String = nativeCatalogs[builderSystem] ?: builderSystem
+
+/**
  * `compose-preview serve`, from the first port bind to the last shutdown hook.
  *
  * This is the body that used to live in `:cli`'s `ServeCommand`. It reaches its configuration
@@ -2757,12 +2770,18 @@ public class ServeRunner(
       uiBuilderCatalogs
         .filter { publishedAllowed?.contains(it) ?: true }
         .forEach { systemId ->
-          val config = catalogLoads?.stateFor(systemId)?.config
+          // A Builder catalog's public identity and the catalog whose delivery branch supplies it
+          // are normally the same. Wear is deliberately not: designs name `wear-m3`, while the
+          // Android bundle and delivery branch are served as `wear-m3-catalog`. The native mapping
+          // already states that one-to-one relationship for the compile lane; use the same source
+          // here so a published policy is composed under the identity its own `catalog.id` declares.
+          val sourceSystem = uiBuilderPublishedSourceSystem(systemId, uiBuilderNativeCatalogs)
+          val config = catalogLoads?.stateFor(sourceSystem)?.config
           val published =
             catalogStore.fetchUiBuilderCatalog(
-              system = systemId,
+              system = sourceSystem,
               sourceRepo = config?.repo,
-              sourceBranchPrefix = config?.branch?.removeSuffix(systemId),
+              sourceBranchPrefix = config?.branch?.removeSuffix(sourceSystem),
             ) ?: return@forEach
           // The catalog's own record, fetched now if this host has never loaded it.
           //
@@ -2776,9 +2795,9 @@ public class ServeRunner(
           if (records.record(systemId) !is ComponentRecordSource.Lookup.Found) {
             catalogStore
               .fetchComponentRecord(
-                system = systemId,
+                system = sourceSystem,
                 sourceRepo = config?.repo,
-                sourceBranchPrefix = config?.branch?.removeSuffix(systemId),
+                sourceBranchPrefix = config?.branch?.removeSuffix(sourceSystem),
               )
               ?.let { startupRecords[systemId] = it }
           }

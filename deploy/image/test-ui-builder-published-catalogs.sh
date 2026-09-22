@@ -2,7 +2,7 @@
 # Guard two decisions the image makes about UI-builder catalogs, both of which are invisible in a
 # running container until somebody notices the shelf changed.
 #
-# 1. The served allowlist is `m3-catalog,remote-m3,wear-m3-catalog`, and it is an ALLOWLIST: publishing
+# 1. The served allowlist is `m3-catalog,remote-m3,wear-m3`, and it is an ALLOWLIST: publishing
 #    another preview catalog does not expose a builder for it. `wear-m3` spent a period off this
 #    list on cost grounds — a Wear/Android catalog needs Robolectric previews and an Android SDK
 #    for its native lane, and nobody was authoring against it — so both directions are asserted
@@ -79,7 +79,7 @@ default="$(run_case)"
   echo "FAIL: the extracted block produced no arguments; the test is not exercising it" >&2
   exit 1
 }
-expect "the default serves m3-catalog, remote-m3 and wear-m3" "m3-catalog,remote-m3,wear-m3-catalog" \
+expect "the default serves m3-catalog, remote-m3 and wear-m3" "m3-catalog,remote-m3,wear-m3" \
   "${default}"
 # The FULL value, with the trailing newline, not a prefix of it. `expect` is a substring check, so
 # asserting `…published-catalogs\nremote-m3` kept passing when the default became
@@ -89,7 +89,7 @@ expect "the default serves m3-catalog, remote-m3 and wear-m3" "m3-catalog,remote
 # rather than the line end -- which still catches the regression that matters, a default that
 # silently loses wear-m3.)
 expect "the default serves all three catalogs from their published files" \
-  $'--ui-builder-published-catalogs\nm3-catalog,remote-m3,wear-m3-catalog' "${default}"
+  $'--ui-builder-published-catalogs\nm3-catalog,remote-m3,wear-m3' "${default}"
 
 # The reverse direction, and the one that matters most: a box can put every catalog back on the
 # catalog this build writes in Kotlin. `none` is the whole-fleet retreat this lever exists for,
@@ -130,14 +130,20 @@ expect "taking wear-m3 out leaves the other two published" \
 
 legacy="$(run_case "m3-catalog,remote-m3")"
 expect "the retired two-catalog default migrates forward" \
-  $'--ui-builder-catalogs\nm3-catalog,remote-m3,wear-m3-catalog' "${legacy}"
+  $'--ui-builder-catalogs\nm3-catalog,remote-m3,wear-m3' "${legacy}"
+
+broken_994="$(run_case "m3-catalog,remote-m3,wear-m3-catalog" "m3-catalog,remote-m3,wear-m3-catalog")"
+expect "the retired delivery-system value migrates to Wear's Builder id" \
+  $'--ui-builder-catalogs\nm3-catalog,remote-m3,wear-m3' "${broken_994}"
+expect "the retired published value migrates to Wear's Builder id" \
+  $'--ui-builder-published-catalogs\nm3-catalog,remote-m3,wear-m3' "${broken_994}"
 
 # The other half of the derivation, added when wear-m3 joined remote-m3 on the published path: the
 # intersection has to work from EITHER side. Dropping remote-m3 must leave wear-m3 published rather
 # than falling back to `none`, which is what a literal default or a single-catalog `if` would do.
-wear_only="$(run_case "m3-catalog,wear-m3-catalog")"
+wear_only="$(run_case "m3-catalog,wear-m3")"
 expect "dropping remote-m3 still publishes the rest" \
-  $'--ui-builder-published-catalogs\nm3-catalog,wear-m3-catalog' "${wear_only}"
+  $'--ui-builder-published-catalogs\nm3-catalog,wear-m3' "${wear_only}"
 refute "dropping remote-m3 does not publish it" "remote-m3" "${wear_only}"
 
 all="$(run_case "" "all")"
