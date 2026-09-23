@@ -542,6 +542,8 @@ class ServeHttpServer(
    * feature.
    */
   private val uiBuilderLinksStore: ServeUiBuilderLinksStore? = null,
+  /** Shared server-side folders for designs; null leaves folder organization unavailable. */
+  private val uiBuilderFolderStore: ServeUiBuilderFolderStore? = null,
   /**
    * The asset lane of [uiBuilderService] — the bytes behind a design's `assets` map. Null leaves
    * the asset routes and the `ui_builder_put_asset` tool unregistered, which is what a host with no
@@ -1083,6 +1085,13 @@ class ServeHttpServer(
               uiBuilderLinksStore,
             )
           }
+          if (uiBuilderFolderStore != null) {
+            installUiBuilderFolderRoutes(
+              uiBuilderService,
+              uiBuilderAuthorization,
+              uiBuilderFolderStore,
+            )
+          }
           if (uiBuilderAssets != null) {
             installUiBuilderAssetRoutes(uiBuilderAuthorization, uiBuilderAssets)
           }
@@ -1307,6 +1316,9 @@ class ServeHttpServer(
         // Removing one's own design, which until now only an operator's token or an MCP tool
         // could do. Owner-only, and it is the service that says so.
         post("/ui-builder/{designId}/delete") { handleUiBuilderDelete() }
+        // Shared file-manager metadata. A move changes no design revision, but it is visible to
+        // every collaborator, so the design's WRITE action gates the form.
+        post("/ui-builder/{designId}/folder") { handleUiBuilderFolderMove() }
         // Compatibility for bookmarks emitted before the catalog became document-only state.
         get("/ui-builder/{catalog}/{designId}/access") { handleUiBuilderAccess() }
         post("/ui-builder/{catalog}/{designId}/access") { handleUiBuilderAccessUpdate() }
@@ -13467,6 +13479,14 @@ class ServeHttpServer(
             .onFailure {
               System.err.println("serve: links record for $designId not removed (${it.message})")
             }
+          runCatching {
+            if (uiBuilderFolderStore?.move(designId, null) is FolderWriteResult.Failed) {
+              System.err.println("serve: folder record for $designId not removed")
+            }
+          }
+            .onFailure {
+              System.err.println("serve: folder record for $designId not removed (${it.message})")
+            }
         }
         call.response.headers.append(
           HttpHeaders.Location,
@@ -13485,6 +13505,47 @@ class ServeHttpServer(
           "the design service answered a delete with something else",
           status = HttpStatusCode.InternalServerError,
         )
+    }
+  }
+
+  /** `POST /ui-builder/{designId}/folder` — move a design in the shared server file manager. */
+  private suspend fun RoutingContext.handleUiBuilderFolderMove() {
+    if (!isSameOriginFormSubmission()) {
+      call.respondText("cross-site folder changes are refused", status = HttpStatusCode.Forbidden)
+      return
+    }
+    val (actor, designId) = uiBuilderAccessTarget(UiBuilderRouteCapability.WRITE) ?: return
+    val service = uiBuilderService ?: return
+    val store = uiBuilderFolderStore
+    if (store == null) {
+      call.respondText("folder storage is unavailable", status = HttpStatusCode.NotFound)
+      return
+    }
+    val actions = service.designActions(actor, designId)
+    if (actions == null) {
+      call.respondText("not found", status = HttpStatusCode.NotFound)
+      return
+    }
+    if (!actions.contains(DesignAccessActionV1.WRITE)) {
+      call.respondText(
+        "the design's own access control does not permit moving it",
+        status = HttpStatusCode.Forbidden,
+      )
+      return
+    }
+    val folder = call.receiveParameters()["folder"]
+    when (val result = withContext(Dispatchers.IO) { store.move(designId, folder) }) {
+      FolderWriteResult.Stored -> {
+        call.response.headers.append(
+          HttpHeaders.Location,
+          "/ui-builder/designs${agentGrantTokenQuery()}",
+        )
+        call.respond(HttpStatusCode.SeeOther)
+      }
+      is FolderWriteResult.Refused ->
+        call.respondText(result.reason, status = HttpStatusCode.UnprocessableEntity)
+      is FolderWriteResult.Failed ->
+        call.respondText(result.reason, status = HttpStatusCode.InternalServerError)
     }
   }
 
@@ -13559,6 +13620,7 @@ class ServeHttpServer(
         UiBuilderAuthorizationDecision.Authorized
     val createAction = if (mayCreate) "/ui-builder/designs$tokenQuery" else ""
     val copyAction = if (mayCreate) "/ui-builder/designs/copy$tokenQuery" else ""
+    val folders = withContext(Dispatchers.IO) { uiBuilderFolderStore?.readAll().orEmpty() }
     val rows = listed.map { item ->
       val openFailure =
         (service.executeMapped(OpenDesignRequestV1(item.designId), actor)
@@ -13612,6 +13674,14 @@ class ServeHttpServer(
         deleteAction =
           if (item.requesterAccess.role == DesignAccessRoleV1.OWNER)
             "/ui-builder/${WebEscaping.urlEncodeSegment(item.designId)}/delete$tokenQuery"
+          else "",
+        folder = folders[item.designId],
+        folderAction =
+          if (
+            uiBuilderFolderStore != null &&
+              item.requesterAccess.allowedActions.contains(DesignAccessActionV1.WRITE)
+          )
+            "/ui-builder/${WebEscaping.urlEncodeSegment(item.designId)}/folder$tokenQuery"
           else "",
       )
     }
