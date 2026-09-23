@@ -94,6 +94,9 @@ services:
       # Read-only diagnosis: UI-builder design summaries + unusable reasons, never documents or
       # mutations. Safe to give a narrower audience than SERVE_ADMIN_TOKEN.
       SERVE_ADMIN_READ_TOKEN: "${SERVE_ADMIN_READ_TOKEN:-}"
+      # UI Builder-only administrators. These GitHub actors can administer every shared design
+      # and its folder placement, but gain no catalog/trust/site/onboarding authority.
+      SERVE_UI_BUILDER_ADMIN_ACTORS: "${SERVE_UI_BUILDER_ADMIN_ACTORS:-}"
       # Privacy-minimal aggregate app/catalog + preview views, persisted on preview_config.
       SERVE_ENGAGEMENT_FILE: "${SERVE_ENGAGEMENT_FILE:-}"
       # Optional GitHub OAuth auth for code-running surfaces. Empty values keep public catalog

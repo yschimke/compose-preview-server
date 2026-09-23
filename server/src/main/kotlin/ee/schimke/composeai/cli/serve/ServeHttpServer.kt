@@ -379,9 +379,9 @@ class ServeHttpServer(
   private val siteAdmin: ServeSiteAdmin? = null,
   /**
    * Runtime **UI-builder** administration ([ServeUiBuilderAdmin]) — listing every design on the
-   * host and deleting one, whoever owns it. Gated by the same [adminToken]; null ⇒ the
-   * `/admin/ui-builder` routes are **not registered at all**. Deliberately outside
-   * [uiBuilderAuthorization]: no `ui-builder-*` grant reaches it.
+   * host and deleting one, whoever owns it. Gated by [adminToken], [adminReadToken], or a
+   * configured [uiBuilderAdministrators] identity; null ⇒ the `/admin/ui-builder` routes are not
+   * registered. The actor allowlist is deliberately narrower than the machine-wide admin token.
    */
   private val uiBuilderAdmin: ServeUiBuilderAdmin? = null,
   /**
@@ -428,6 +428,8 @@ class ServeHttpServer(
    * admits a document body or mutation; see [rejectBadAdminToken].
    */
   private val adminReadToken: String? = null,
+  /** GitHub identities that administer UI-builder designs, without reaching other admin lanes. */
+  uiBuilderAdminActors: Set<String> = emptySet(),
   /**
    * When non-null, enables the **document** lane: `GET /docs` (upload page), `POST /docs` (ingest a
    * known document format), and `GET /d/{id}` (the expiring permalink that plays it back). Supplied
@@ -619,6 +621,8 @@ class ServeHttpServer(
   /** Trusted module roots for local browse sessions, keyed by their session ids. */
   private val localSourceRoots: Map<String, File> = emptyMap(),
 ) {
+  private val uiBuilderAdministrators = ServeUiBuilderAdministrators(uiBuilderAdminActors)
+
   private val uiBuilderRuntimeAssets = ServeUiBuilderRuntimeAssets.load(uiBuilderRuntimeDirs)
 
   /**
@@ -829,11 +833,12 @@ class ServeHttpServer(
   /** As [adminEnabled], for the `/admin/sites` routes. Same token, separately supplied admin. */
   private val siteAdminEnabled: Boolean = siteAdmin != null && !adminToken.isNullOrBlank()
 
-  /**
-   * As [adminEnabled], for the `/admin/ui-builder` routes. Same token, separately supplied admin.
-   */
+  /** As [adminEnabled], for `/admin/ui-builder`, with the additional UI-builder-only actor gate. */
   private val uiBuilderAdminEnabled: Boolean =
-    uiBuilderAdmin != null && (!adminToken.isNullOrBlank() || !adminReadToken.isNullOrBlank())
+    uiBuilderAdmin != null &&
+      (!adminToken.isNullOrBlank() ||
+        !adminReadToken.isNullOrBlank() ||
+        uiBuilderAdministrators.configured)
 
   /** As [uiBuilderAdminEnabled], for the `/admin/ui-builder/library` routes. */
   private val uiBuilderDesignLibraryEnabled: Boolean =
@@ -1090,6 +1095,8 @@ class ServeHttpServer(
               uiBuilderService,
               uiBuilderAuthorization,
               uiBuilderFolderStore,
+              uiBuilderAdministrators,
+              uiBuilderAdmin,
             )
           }
           if (uiBuilderAssets != null) {
@@ -1804,28 +1811,25 @@ class ServeHttpServer(
         // Runtime UI-builder administration: the operator's list of every design on this host and
         // the only way to delete one. The page at `/admin/ui-builder` is the screen; the JSON
         // routes under `/admin/ui-builder/designs` are what it (and a script) drive. Same
-        // fail-closed shape as the other admin surfaces: no admin object or no token, no routes.
+        // fail-closed shape as the other admin surfaces: no admin object or no configured
+        // credential, no routes. Actor administrators are scoped to this surface only.
         if (uiBuilderAdminEnabled) {
           val admin = uiBuilderAdmin!!
           get("/admin/ui-builder") {
-            if (rejectBadAdminToken(allowReadToken = true)) return@get
+            val access = uiBuilderAdminAccess(allowReadToken = true) ?: return@get
             val pageToken = call.request.queryParameters["token"]
             call.response.headers.append(HttpHeaders.CacheControl, "no-store")
             call.respondText(
               ServeWeb.uiBuilderAdminPage(
                 adminToken = pageToken,
-                readOnly =
-                  !adminReadToken.isNullOrBlank() &&
-                    ServeUrls.tokensMatch(adminReadToken, pageToken.orEmpty()) &&
-                    (adminToken.isNullOrBlank() ||
-                      !ServeUrls.tokensMatch(adminToken, pageToken.orEmpty())),
+                readOnly = access.readOnly,
                 version = SERVE_VERSION,
               ),
               ContentType.Text.Html,
             )
           }
           get("/admin/ui-builder/designs") {
-            if (rejectBadAdminToken(allowReadToken = true)) return@get
+            if (uiBuilderAdminAccess(allowReadToken = true) == null) return@get
             respondAdminUiBuilderDesigns(admin)
           }
           // Copy a design out before deciding what to do with it. The one route here that is
@@ -1833,13 +1837,14 @@ class ServeHttpServer(
           // exactly what an operator needs in hand to repair it, and deleting is the only other
           // move available on one.
           get("/admin/ui-builder/designs/{designId}/document") {
-            if (rejectBadAdminToken()) return@get
+            if (uiBuilderAdminAccess() == null) return@get
             respondAdminUiBuilderDocument(admin, call.parameters["designId"].orEmpty())
           }
           // The return leg of the download above: a repaired document goes back in place of the
           // one the host cannot serve, and the design is served again without a restart.
           put("/admin/ui-builder/designs/{designId}/document") {
-            if (rejectBadAdminToken()) return@put
+            val access = uiBuilderAdminAccess() ?: return@put
+            if (rejectCrossOriginUiBuilderAdminMutation(access)) return@put
             val designId = call.parameters["designId"].orEmpty()
             val body = call.receiveText()
             respondAdminUiBuilderResult(
@@ -1847,7 +1852,8 @@ class ServeHttpServer(
             )
           }
           delete("/admin/ui-builder/designs/{designId}") {
-            if (rejectBadAdminToken()) return@delete
+            val access = uiBuilderAdminAccess() ?: return@delete
+            if (rejectCrossOriginUiBuilderAdminMutation(access)) return@delete
             val designId = call.parameters["designId"].orEmpty()
             respondAdminUiBuilderResult(withContext(Dispatchers.IO) { admin.delete(designId) })
           }
@@ -5075,6 +5081,56 @@ class ServeHttpServer(
       return false
     }
     call.respondText("not found", status = HttpStatusCode.NotFound)
+    return true
+  }
+
+  private data class UiBuilderAdminAccess(
+    val readOnly: Boolean,
+    val browserSession: Boolean,
+  )
+
+  /** UI-builder-only admin gate; never used by catalog, trust, site, or onboarding routes. */
+  private suspend fun RoutingContext.uiBuilderAdminAccess(
+    allowReadToken: Boolean = false
+  ): UiBuilderAdminAccess? {
+    val provided = call.request.queryParameters["token"] ?: call.request.headers[ADMIN_TOKEN_HEADER]
+    if (!adminToken.isNullOrBlank() && ServeUrls.tokensMatch(adminToken, provided.orEmpty())) {
+      return UiBuilderAdminAccess(readOnly = false, browserSession = false)
+    }
+    if (
+      allowReadToken &&
+        !adminReadToken.isNullOrBlank() &&
+        ServeUrls.tokensMatch(adminReadToken, provided.orEmpty())
+    ) {
+      return UiBuilderAdminAccess(readOnly = true, browserSession = false)
+    }
+
+    if (uiBuilderAdministrators.containsGithubLogin(githubAuth?.currentLogin(call))) {
+      return UiBuilderAdminAccess(readOnly = false, browserSession = true)
+    }
+
+    val capability =
+      if (allowReadToken) UiBuilderRouteCapability.READ else UiBuilderRouteCapability.WRITE
+    val actor =
+      (uiBuilderAuthorization?.authorize(call, capability)
+          as? UiBuilderAuthorizationDecision.Authorized)
+        ?.actor
+    if (actor != null && uiBuilderAdministrators.contains(actor)) {
+      return UiBuilderAdminAccess(readOnly = false, browserSession = false)
+    }
+
+    call.respondText("not found", status = HttpStatusCode.NotFound)
+    return null
+  }
+
+  private suspend fun RoutingContext.rejectCrossOriginUiBuilderAdminMutation(
+    access: UiBuilderAdminAccess
+  ): Boolean {
+    if (!access.browserSession || isSameOriginFormSubmission()) return false
+    call.respondText(
+      "cross-origin UI-builder administration is not allowed",
+      status = HttpStatusCode.Forbidden,
+    )
     return true
   }
 

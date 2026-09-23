@@ -7623,7 +7623,14 @@ ${captureControlsHtml().prependIndent("          ")}
         // Everything the filter box matches on, in one attribute: the title a person remembers, the
         // id they typed, and the catalog they were working in.
         val haystack =
-          "${row.title} ${row.designId} ${row.catalogSystemId} ${row.folder.orEmpty()}".lowercase()
+          listOf(row.title, row.designId, row.catalogSystemId, row.folder.orEmpty())
+            .filter(String::isNotBlank)
+            .joinToString(" ")
+            .lowercase()
+        val cardActions =
+          listOf(duplicate, folder, grants, delete)
+            .filter(String::isNotBlank)
+            .joinToString("\n            ")
         """
         <article class="cp-card cp-design-card" data-cp-design="${esc(haystack)}">
           $thumbnail
@@ -7635,10 +7642,7 @@ ${captureControlsHtml().prependIndent("          ")}
               <a class="cp-action-chip" href="${esc(row.designHref)}">Open</a>
               $share
             </div>
-            $duplicate
-            $folder
-            $grants
-            $delete
+            $cardActions
           </div>
         </article>
         """
@@ -9351,7 +9355,7 @@ ${captureControlsHtml().prependIndent("          ")}
       }
       function failure(response) {
         if (response.status === 404 && !token) {
-          return "This page needs the admin token: open it as /admin/ui-builder?token=…";
+          return "This page needs a configured UI Builder administrator sign-in or admin token.";
         }
         return response.text().then(function (t) {
           return "HTTP " + response.status + (t ? ": " + t : "");

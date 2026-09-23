@@ -463,6 +463,9 @@ public interface ServeOptions {
    */
   public val adminReadToken: String?
 
+  /** GitHub actor ids allowed to administer every shared UI-builder design on this host. */
+  public val uiBuilderAdminActors: Set<String>
+
   /** Optional durable aggregate counters. Null keeps local serve sessions in-memory only. */
   public val engagementFile: File?
 

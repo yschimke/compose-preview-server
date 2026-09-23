@@ -24,24 +24,33 @@ internal fun Route.installUiBuilderFolderRoutes(
   service: UiBuilderServicePort,
   authorization: ServeUiBuilderAuthorization,
   store: ServeUiBuilderFolderStore,
+  administrators: ServeUiBuilderAdministrators = ServeUiBuilderAdministrators(emptySet()),
+  admin: ServeUiBuilderAdmin? = null,
 ) {
   get(UI_BUILDER_FOLDERS_PATH) {
     call.response.headers.append(HttpHeaders.CacheControl, "no-store")
     val actor =
       call.authorizedFolderActor(authorization, UiBuilderRouteCapability.READ) ?: return@get
     val stored = withContext(Dispatchers.IO) { store.readAll() }
-    val readable = stored.filterKeys { service.canRead(actor, it) }
+    val readable =
+      if (administrators.contains(actor)) stored
+      else stored.filterKeys { service.canRead(actor, it) }
     call.respondFolders(readable)
   }
 
   put(UI_BUILDER_FOLDER_PATH) {
-    val actor = call.authorizedFolderDesign(service, authorization) ?: return@put
+    val actor =
+      call.authorizedFolderDesign(service, authorization, administrators, admin) ?: return@put
     val designId = call.parameters["designId"].orEmpty()
     val request = call.receiveFolderBody() ?: return@put
     when (val result = withContext(Dispatchers.IO) { store.move(designId, request.folder) }) {
       FolderWriteResult.Stored ->
         call.respondFolders(
-          withContext(Dispatchers.IO) { store.readAll() }.filterKeys { service.canRead(actor, it) }
+          withContext(Dispatchers.IO) { store.readAll() }
+            .let { stored ->
+              if (administrators.contains(actor)) stored
+              else stored.filterKeys { service.canRead(actor, it) }
+            }
         )
       is FolderWriteResult.Refused ->
         call.respondFolderError(HttpStatusCode.UnprocessableEntity, result.reason)
@@ -51,12 +60,17 @@ internal fun Route.installUiBuilderFolderRoutes(
   }
 
   delete(UI_BUILDER_FOLDER_PATH) {
-    val actor = call.authorizedFolderDesign(service, authorization) ?: return@delete
+    val actor =
+      call.authorizedFolderDesign(service, authorization, administrators, admin) ?: return@delete
     val designId = call.parameters["designId"].orEmpty()
     when (val result = withContext(Dispatchers.IO) { store.move(designId, null) }) {
       FolderWriteResult.Stored ->
         call.respondFolders(
-          withContext(Dispatchers.IO) { store.readAll() }.filterKeys { service.canRead(actor, it) }
+          withContext(Dispatchers.IO) { store.readAll() }
+            .let { stored ->
+              if (administrators.contains(actor)) stored
+              else stored.filterKeys { service.canRead(actor, it) }
+            }
         )
       is FolderWriteResult.Refused ->
         call.respondFolderError(HttpStatusCode.UnprocessableEntity, result.reason)
@@ -69,6 +83,8 @@ internal fun Route.installUiBuilderFolderRoutes(
 private suspend fun ApplicationCall.authorizedFolderDesign(
   service: UiBuilderServicePort,
   authorization: ServeUiBuilderAuthorization,
+  administrators: ServeUiBuilderAdministrators,
+  admin: ServeUiBuilderAdmin?,
 ): AuthenticatedUiBuilderActor? {
   response.headers.append(HttpHeaders.CacheControl, "no-store")
   val actor = authorizedFolderActor(authorization, UiBuilderRouteCapability.WRITE) ?: return null
@@ -76,6 +92,19 @@ private suspend fun ApplicationCall.authorizedFolderDesign(
   if (designId.isBlank()) {
     respondFolderError(HttpStatusCode.BadRequest, "a design id is required")
     return null
+  }
+  if (administrators.contains(actor)) {
+    val exists =
+      withContext(Dispatchers.IO) {
+        admin?.let { designAdmin ->
+          designAdmin.list().any { it.designId == designId } || designId in designAdmin.unusable()
+        }
+      } == true
+    if (!exists) {
+      respondFolderError(HttpStatusCode.NotFound, "the design was not found")
+      return null
+    }
+    return actor
   }
   val actions = service.designActions(actor, designId)
   if (actions == null) {

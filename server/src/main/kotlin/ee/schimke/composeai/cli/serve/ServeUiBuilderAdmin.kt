@@ -9,14 +9,14 @@ import ee.schimke.composeai.uibuilder.service.UiBuilderAdminRepair
  * serve, and removing one.
  *
  * The operator's tool, not a collaborator's: it lists every design regardless of ownership and
- * deletes without an ACL, which is why it is reachable only through the `--admin-token` routes
- * (`/admin/ui-builder`) and never through a `ui-builder-*` grant. Deleting a design also drops its
- * sidecars — the reference overlay ([ServeUiBuilderReferenceStore]) and the comment board
- * ([ServeUiBuilderCommentStore]) and the links record ([ServeUiBuilderLinksStore]) — so nothing is
- * left on disk that names a design no longer there. Leaving one behind is not merely untidy: a
- * design id recreated or re-imported later would inherit the previous design's issue, pull request
- * and thread. The sidecar removals are best-effort: the design state is the record, and a stray
- * overlay file is an orphan, not a resurrected design.
+ * deletes without an ACL, which is why it is reachable only through the UI-builder admin gate:
+ * `--admin-token`, a configured `--ui-builder-admin-actors` identity, or a UI-builder grant that
+ * identity approved. Deleting a design also drops its sidecars — the reference overlay
+ * ([ServeUiBuilderReferenceStore]), comment board ([ServeUiBuilderCommentStore]) and links record
+ * ([ServeUiBuilderLinksStore]) — so nothing is left on disk that names a design no longer there.
+ * Leaving one behind is not merely untidy: a design id recreated or re-imported later would inherit
+ * the previous design's issue, pull request and thread. The sidecar removals are best-effort: the
+ * design state is the record, and a stray overlay file is an orphan, not a resurrected design.
  */
 class ServeUiBuilderAdmin(
   private val service: UiBuilderAdminPort,

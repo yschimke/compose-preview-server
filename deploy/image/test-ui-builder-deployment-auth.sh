@@ -6,6 +6,7 @@ set -euo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 compose="${COMPOSE_FILE_UNDER_TEST:-${here}/docker-compose.yml}"
 entrypoint="${ENTRYPOINT_FILE:-${here}/entrypoint.sh}"
+example="${ENV_EXAMPLE_FILE:-${here}/.env.example}"
 
 # The three UI-builder capabilities are unconditional — the image always packages that lane. The
 # `images` half is conditional on the upload repo being named, because the server refuses to start
@@ -48,4 +49,23 @@ grep -Fq \
   exit 1
 }
 
-echo "PASS: preview image defaults to selective catalogs, durable state, and scoped capabilities"
+grep -Fq \
+  'SERVE_UI_BUILDER_ADMIN_ACTORS: "${SERVE_UI_BUILDER_ADMIN_ACTORS:-}"' \
+  "${compose}" || {
+  echo "FAIL: compose does not pass the UI-builder administrator actor allowlist" >&2
+  exit 1
+}
+
+grep -Fq \
+  'args+=(--ui-builder-admin-actors "${SERVE_UI_BUILDER_ADMIN_ACTORS}")' \
+  "${entrypoint}" || {
+  echo "FAIL: entrypoint does not pass the UI-builder administrator actor allowlist" >&2
+  exit 1
+}
+
+grep -Fxq 'SERVE_UI_BUILDER_ADMIN_ACTORS=github:yschimke' "${example}" || {
+  echo "FAIL: the preview host example does not configure github:yschimke as UI-builder admin" >&2
+  exit 1
+}
+
+echo "PASS: preview image defaults to selective catalogs, durable state, scoped capabilities, and the configured UI-builder administrator"

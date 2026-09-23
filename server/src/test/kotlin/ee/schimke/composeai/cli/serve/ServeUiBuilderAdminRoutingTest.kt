@@ -16,15 +16,18 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
+import okhttp3.Protocol
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import okhttp3.Response
+import okhttp3.ResponseBody.Companion.toResponseBody
 
 /**
- * `/admin/ui-builder`: the operator's screen over every design, gated by the admin token alone.
+ * `/admin/ui-builder`: the operator's screen over every design, gated by an operator credential.
  *
  * The server here is public and has no UI-builder actor authorization at all, which is the point:
- * neither browsing being open nor a `ui-builder-*` grant reaches this surface, only
- * `--admin-token`.
+ * neither browsing being open nor an ordinary `ui-builder-*` grant reaches this surface. The
+ * machine-wide admin token and configured UI-builder administrators do.
  */
 class ServeUiBuilderAdminRoutingTest {
   private val jsonMediaType = "application/json".toMediaType()
@@ -81,6 +84,9 @@ class ServeUiBuilderAdminRoutingTest {
     admin: ServeUiBuilderAdmin?,
     token: String? = adminToken,
     readToken: String? = null,
+    adminActors: Set<String> = emptySet(),
+    authorization: ServeUiBuilderAuthorization? = null,
+    githubAuth: ServeGithubAuth? = null,
   ) =
     ServeHttpServer(
         host = "127.0.0.1",
@@ -92,6 +98,9 @@ class ServeUiBuilderAdminRoutingTest {
         uiBuilderAdmin = admin,
         adminToken = token,
         adminReadToken = readToken,
+        uiBuilderAdminActors = adminActors,
+        uiBuilderAuthorization = authorization,
+        githubAuth = githubAuth,
       )
       .also(ServeHttpServer::start)
 
@@ -148,6 +157,89 @@ class ServeUiBuilderAdminRoutingTest {
     server!!.stop()
     server = server(ServeUiBuilderAdmin(port, onLog = {}), token = null)
     assertEquals(404, send("/admin/ui-builder", token = null).first)
+  }
+
+  @Test
+  fun `a grant approved by a configured actor administers every design`() {
+    server =
+      server(
+        admin = ServeUiBuilderAdmin(port, onLog = {}),
+        token = null,
+        adminActors = setOf("github:yschimke"),
+        authorization =
+          ServeUiBuilderAuthorization { _, _, _ ->
+            UiBuilderAuthorizationDecision.Authorized(
+              actorId = "agent-grant:temporary",
+              onBehalfOfActorId = "github:yschimke",
+            )
+          },
+      )
+
+    assertEquals(200, send("/admin/ui-builder", token = null).first)
+    assertEquals(200, send("/admin/ui-builder/designs", token = null).first)
+    assertEquals(
+      200,
+      send("/admin/ui-builder/designs/shady-goose", "DELETE", token = null).first,
+    )
+    assertEquals(listOf("shady-goose"), deleted)
+  }
+
+  @Test
+  fun `an ordinary UI builder grant is not an administrator`() {
+    server =
+      server(
+        admin = ServeUiBuilderAdmin(port, onLog = {}),
+        token = null,
+        adminActors = setOf("github:yschimke"),
+        authorization =
+          ServeUiBuilderAuthorization { _, _, _ ->
+            UiBuilderAuthorizationDecision.Authorized(actorId = "github:someone-else")
+          },
+      )
+
+    assertEquals(404, send("/admin/ui-builder", token = null).first)
+    assertEquals(404, send("/admin/ui-builder/designs", token = null).first)
+    assertEquals(
+      404,
+      send("/admin/ui-builder/designs/shady-goose", "DELETE", token = null).first,
+    )
+    assertTrue(deleted.isEmpty())
+  }
+
+  @Test
+  fun `a configured GitHub session administers designs and rejects cross-site mutation`() {
+    server =
+      server(
+        admin = ServeUiBuilderAdmin(port, onLog = {}),
+        token = null,
+        adminActors = setOf("github:yschimke"),
+        githubAuth = githubAuth("yschimke"),
+      )
+    val cookie = signIn()
+
+    assertEquals(200, sendWithCookie("/admin/ui-builder", cookie).first)
+    assertEquals(200, sendWithCookie("/admin/ui-builder/designs", cookie).first)
+    assertEquals(
+      403,
+      sendWithCookie(
+          "/admin/ui-builder/designs/shady-goose",
+          cookie,
+          method = "DELETE",
+          fetchSite = "cross-site",
+        )
+        .first,
+    )
+    assertTrue(deleted.isEmpty())
+    assertEquals(
+      200,
+      sendWithCookie(
+          "/admin/ui-builder/designs/shady-goose",
+          cookie,
+          method = "DELETE",
+          fetchSite = "same-origin",
+        )
+        .first,
+    )
   }
 
   @Test
@@ -334,6 +426,90 @@ class ServeUiBuilderAdminRoutingTest {
     // Writing a design is as much the operator's alone as reading or deleting one.
     assertEquals(404, send(path, "PUT", token = null, body = "{}").first)
     assertEquals(1, repaired.size, "no repair slipped past the token or the checks")
+  }
+
+  private fun githubAuth(login: String): ServeGithubAuth {
+    val fakeGitHub =
+      OkHttpClient.Builder()
+        .addInterceptor { chain ->
+          val request = chain.request()
+          val body =
+            when {
+              request.url.encodedPath == "/login/oauth/access_token" ->
+                """{"access_token":"token"}"""
+              request.url.encodedPath == "/user" -> """{"login":"$login"}"""
+              request.url.encodedPath.endsWith("/permission") -> """{"permission":"write"}"""
+              else -> """{"private":false}"""
+            }
+          Response.Builder()
+            .request(request)
+            .protocol(Protocol.HTTP_1_1)
+            .code(200)
+            .message("OK")
+            .body(body.toResponseBody(jsonMediaType))
+            .build()
+        }
+        .build()
+    return ServeGithubAuth(
+      ServeGithubAuthConfig(
+        clientId = "client",
+        clientSecret = "secret",
+        cookieSecret = "x".repeat(32),
+        repository = "yschimke/compose-preview-server",
+      ),
+      verifier = GitHubOAuthVerifier(fakeGitHub),
+      anonymousClient = fakeGitHub,
+    )
+  }
+
+  private fun signIn(): String {
+    val noRedirect = client.newBuilder().followRedirects(false).build()
+    val start =
+      noRedirect
+        .newCall(
+          Request.Builder()
+            .url("http://127.0.0.1:${server!!.port}/auth/github/start?return=/admin/ui-builder")
+            .build()
+        )
+        .execute()
+        .use { response ->
+          assertEquals(302, response.code)
+          response.header("Location").orEmpty() to
+            response.header("Set-Cookie").orEmpty().substringBefore(";")
+        }
+    val state = start.first.substringAfter("state=").substringBefore("&")
+    return noRedirect
+      .newCall(
+        Request.Builder()
+          .url("http://127.0.0.1:${server!!.port}/auth/github/callback?code=ok&state=$state")
+          .header("Cookie", start.second)
+          .build()
+      )
+      .execute()
+      .use { response ->
+        assertEquals(302, response.code)
+        response.headers("Set-Cookie").first { it.startsWith("cp_gh_auth=") }.substringBefore(";")
+      }
+  }
+
+  private fun sendWithCookie(
+    path: String,
+    cookie: String,
+    method: String = "GET",
+    fetchSite: String? = null,
+  ): Pair<Int, String> {
+    val request =
+      Request.Builder()
+        .url("http://127.0.0.1:${server!!.port}$path")
+        .header("Cookie", cookie)
+        .apply {
+          fetchSite?.let { header("Sec-Fetch-Site", it) }
+          if (method == "DELETE") delete()
+        }
+        .build()
+    client.newCall(request).execute().use {
+      return it.code to it.body.string()
+    }
   }
 
   private fun summary(id: String, title: String, owner: String) =
