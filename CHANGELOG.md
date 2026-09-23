@@ -1,5 +1,17 @@
 # Changelog
 
+## [3.52.0](https://github.com/yschimke/compose-preview-server/compare/v3.51.0...v3.52.0) (2026-09-23)
+
+
+### Features
+
+* **ui-builder:** configure administrator actors ([#1015](https://github.com/yschimke/compose-preview-server/issues/1015)) ([6aa7b0c](https://github.com/yschimke/compose-preview-server/commit/6aa7b0c21f8971b9d01bb080949953cf39e564ab))
+
+
+### Bug Fixes
+
+* **ui-builder:** authorize sidecars for unavailable designs ([#1014](https://github.com/yschimke/compose-preview-server/issues/1014)) ([5d6cf7f](https://github.com/yschimke/compose-preview-server/commit/5d6cf7f200da0b26f50f7c146bfe7795cc18ae4a))
+
 ## [3.51.0](https://github.com/yschimke/compose-preview-server/compare/v3.50.0...v3.51.0) (2026-09-23)
 
 
