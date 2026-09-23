@@ -1478,7 +1478,9 @@ public class ServeCommandOptions(
      * The platform words `--ui-builder-packs` accepts, as `UiBuilderCatalogPlatform` spells them.
      */
     val UI_BUILDER_PLATFORMS =
-      ee.schimke.composeai.uibuilder.UiBuilderCatalogPlatform.entries.map { it.wireValue }.toSet()
+      ee.schimke.composeai.uibuilder.export.UiBuilderCatalogPlatform.entries
+        .map { it.wireValue }
+        .toSet()
   }
 
   override fun previewIdMatchesRequest(

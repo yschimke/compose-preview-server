@@ -1,6 +1,6 @@
 package ee.schimke.composeai.cli.serve
 
-import ee.schimke.composeai.uibuilder.UiBuilderBuildFeatures
+import ee.schimke.composeai.uibuilder.export.UiBuilderBuildFeatures
 import ee.schimke.composeai.uibuilder.protocol.AcceptedOutcomeV1
 import ee.schimke.composeai.uibuilder.protocol.AnimationStateV1
 import ee.schimke.composeai.uibuilder.protocol.CatalogReferenceV1
@@ -352,7 +352,7 @@ class ServeUiBuilderMcpIntegrationTest {
       UiBuilderBuildFeatures.remoteCompose,
       "Enable with -PuiBuilderRemoteCompose=true",
     )
-    val format = ee.schimke.composeai.uibuilder.RemoteDocumentExportSupport.documentFormat
+    val format = ee.schimke.composeai.uibuilder.export.RemoteDocumentExportSupport.documentFormat
     if (System.getenv("VERIFY_REMOTE_DOCUMENT_EXPORTS") == "true") assertNotNull(format)
     org.junit.jupiter.api.Assumptions.assumeTrue(format != null)
     val server = start(recordFile = null, catalogSystemId = "remote-m3", withRemoteExports = true)
@@ -989,7 +989,7 @@ class ServeUiBuilderMcpIntegrationTest {
                   }
                   .build()
                   .let {
-                    ee.schimke.composeai.uibuilder.RemoteDocumentExportSupport.capabilities(
+                    ee.schimke.composeai.uibuilder.export.RemoteDocumentExportSupport.capabilities(
                       it,
                       json = withRemoteExports,
                       document = withRemoteExports,

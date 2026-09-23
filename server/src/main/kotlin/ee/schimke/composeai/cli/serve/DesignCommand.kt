@@ -491,7 +491,7 @@ internal fun ExportFormatV1?.extension(): String =
     ExportFormatV1.RC -> "rc"
     null -> "json"
     else ->
-      if (this in ee.schimke.composeai.uibuilder.RemoteDocumentExportSupport.formats)
+      if (this in ee.schimke.composeai.uibuilder.export.RemoteDocumentExportSupport.formats)
         name.lowercase()
       else error("Unknown export format $this")
   }

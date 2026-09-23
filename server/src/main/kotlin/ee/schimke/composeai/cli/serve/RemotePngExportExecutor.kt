@@ -1,8 +1,8 @@
 package ee.schimke.composeai.cli.serve
 
-import ee.schimke.composeai.uibuilder.RecordFreeExport
-import ee.schimke.composeai.uibuilder.RemoteDocumentExportSupport
-import ee.schimke.composeai.uibuilder.UiBuilderCatalogPlatform
+import ee.schimke.composeai.uibuilder.export.RecordFreeExport
+import ee.schimke.composeai.uibuilder.export.RemoteDocumentExportSupport
+import ee.schimke.composeai.uibuilder.export.UiBuilderCatalogPlatform
 import ee.schimke.composeai.uibuilder.protocol.*
 import ee.schimke.composeai.uibuilder.service.*
 import java.security.MessageDigest

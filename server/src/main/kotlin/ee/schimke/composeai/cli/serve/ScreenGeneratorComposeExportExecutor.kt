@@ -5,14 +5,14 @@ import ee.schimke.composeai.discovery.COMPONENT_RECORD_SCHEMA_VERSION
 import ee.schimke.composeai.discovery.ComponentRecord
 import ee.schimke.composeai.discovery.ComponentRecordFile
 import ee.schimke.composeai.discovery.ScreenGenerator
-import ee.schimke.composeai.uibuilder.RecordFreeExport
-import ee.schimke.composeai.uibuilder.UiBuilderBuildFeatures
-import ee.schimke.composeai.uibuilder.UiBuilderCatalogPlatform
-import ee.schimke.composeai.uibuilder.WidgetAssetBytes
 import ee.schimke.composeai.uibuilder.export.CatalogComposeSourceExportAdapter
 import ee.schimke.composeai.uibuilder.export.CatalogComposeSourceExportAdapters
+import ee.schimke.composeai.uibuilder.export.RecordFreeExport
 import ee.schimke.composeai.uibuilder.export.ScreenDocumentProjection
 import ee.schimke.composeai.uibuilder.export.ScreenExportGate
+import ee.schimke.composeai.uibuilder.export.UiBuilderBuildFeatures
+import ee.schimke.composeai.uibuilder.export.UiBuilderCatalogPlatform
+import ee.schimke.composeai.uibuilder.export.WidgetAssetBytes
 import ee.schimke.composeai.uibuilder.export.callableAliases
 import ee.schimke.composeai.uibuilder.protocol.DesignEnvironmentV1
 import ee.schimke.composeai.uibuilder.protocol.DiagnosticSeverityV1
@@ -296,8 +296,8 @@ internal class ScreenGeneratorComposeExportExecutor(
      * frame from `WearWidgetParams`. It arrives from whoever asked for the render, which is the
      * editor, whose canvas is drawing the same shape beside this render.
      */
-    widgetHostShape: ee.schimke.composeai.uibuilder.WearWidgetHostShape =
-      ee.schimke.composeai.uibuilder.WearWidgetHostShape.Default,
+    widgetHostShape: ee.schimke.composeai.uibuilder.export.WearWidgetHostShape =
+      ee.schimke.composeai.uibuilder.export.WearWidgetHostShape.Default,
   ): Generated {
     // A record-free design never reaches `ScreenGenerator` below — `remote-m3` and `wear-m3` have
     // no component record and the record-driven generator can only refuse them — so the emitter
