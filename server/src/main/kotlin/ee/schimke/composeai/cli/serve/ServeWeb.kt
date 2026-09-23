@@ -7623,7 +7623,14 @@ ${captureControlsHtml().prependIndent("          ")}
         // Everything the filter box matches on, in one attribute: the title a person remembers, the
         // id they typed, and the catalog they were working in.
         val haystack =
-          "${row.title} ${row.designId} ${row.catalogSystemId} ${row.folder.orEmpty()}".lowercase()
+          listOf(row.title, row.designId, row.catalogSystemId, row.folder.orEmpty())
+            .filter(String::isNotBlank)
+            .joinToString(" ")
+            .lowercase()
+        val cardActions =
+          listOf(duplicate, folder, grants, delete)
+            .filter(String::isNotBlank)
+            .joinToString("\n            ")
         """
         <article class="cp-card cp-design-card" data-cp-design="${esc(haystack)}">
           $thumbnail
@@ -7635,10 +7642,7 @@ ${captureControlsHtml().prependIndent("          ")}
               <a class="cp-action-chip" href="${esc(row.designHref)}">Open</a>
               $share
             </div>
-            $duplicate
-            $folder
-            $grants
-            $delete
+            $cardActions
           </div>
         </article>
         """
