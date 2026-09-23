@@ -82,6 +82,7 @@ class ServeCommandOptionsTest {
     assertFalse(options.uiBuilderMigrateState)
     assertFalse(options.catalogMcp)
     assertNull(options.adminReadToken)
+    assertEquals(emptySet(), options.uiBuilderAdminActors)
     assertEquals(setOf("m3-catalog"), options.uiBuilderCatalogs)
     assertEquals(
       "none",
@@ -97,6 +98,21 @@ class ServeCommandOptionsTest {
         .adminReadToken,
     )
     assertNull(options(listOf("--admin-read-token", " ")).adminReadToken)
+  }
+
+  @Test
+  fun `UI builder administrators are parsed as GitHub actor ids`() {
+    assertEquals(
+      setOf("github:yschimke", "github:octocat"),
+      options(listOf("--ui-builder-admin-actors", "github:yschimke, github:octocat"))
+        .uiBuilderAdminActors,
+    )
+    assertFailsWith<IllegalArgumentException> {
+      options(listOf("--ui-builder-admin-actors", "yschimke"))
+    }
+    assertFailsWith<IllegalArgumentException> {
+      options(listOf("--ui-builder-admin-actors", "github:yschimke,github:YSchimke"))
+    }
   }
 
   @Test

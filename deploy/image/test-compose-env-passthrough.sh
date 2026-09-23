@@ -89,8 +89,10 @@ for v in "${read_vars[@]}"; do
     continue
   fi
   [[ -n "${CONSTANT_OK[${v}]:-}" ]] && continue
-  # Accept ${VAR}, ${VAR:-…}, ${VAR:=…}, ${VAR:?…} — but the interpolation must be the WHOLE value,
-  # so the host's setting reaches the container unaltered. Anchoring is what rejects
+  # Accept ${VAR}, ${VAR:-…}, ${VAR-…}, ${VAR:=…}, ${VAR:?…} — but the interpolation must be the
+  # WHOLE value, so the host's setting reaches the container unaltered. The no-colon default is useful
+  # when an explicitly empty value must remain distinct from an unset variable; both forms still
+  # forward a host setting without changing it. Anchoring is what rejects
   # `"prefix-${SERVE_TIMEOUT:-}"`: a substring match would call that a pass, while `SERVE_TIMEOUT=60`
   # would arrive as `prefix-60` and go to `--timeout` as garbage. A knob that is forwarded but
   # mangled is no more usable than one that never arrives, which is the whole subject of this guard.
@@ -104,7 +106,7 @@ for v in "${read_vars[@]}"; do
   # DEFAULT varies. `${OTHER:-…}` is deliberately not accepted — a default that falls back to
   # another variable's value is the copy-paste bug in the comment above, not a conditional.
   nested='\$\{[A-Z0-9_]+:\+[^{}]*\}'
-  [[ "${mapped[${v}]}" =~ ^\"?\$\{${v}(:[-=?]([^{}]|${nested})*)?\}\"?$ ]] ||
+  [[ "${mapped[${v}]}" =~ ^\"?\$\{${v}((:[-=?]|-)([^{}]|${nested})*)?\}\"?$ ]] ||
     miswired+=("${v} → ${mapped[${v}]}")
 done
 

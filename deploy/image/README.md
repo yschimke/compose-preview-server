@@ -289,11 +289,19 @@ unaffected: a registry catalog badges `unverified` until its producer is added w
 
 ### Managing UI-builder designs (`/admin/ui-builder`)
 
-A box with a UI-builder lane and `SERVE_ADMIN_TOKEN` set serves an operator's screen over every
-design it holds, whoever owns it, at `/admin/ui-builder?token=<admin token>`. Each row names the
-design, its catalog, its owner, how many editors have it open, and carries a **Delete** — the only
-way a design leaves a host. A delete is durable, closes any open editor on the design, and drops
-its reference overlay and comment threads with it; there is no undo.
+A box with a UI-builder lane and either `SERVE_ADMIN_TOKEN` or `SERVE_UI_BUILDER_ADMIN_ACTORS` set
+serves an operator's screen over every design it holds, whoever owns it. The image deployment
+defaults the actor setting to `github:yschimke`; set it explicitly to a comma-separated replacement,
+or to an empty value to disable that default. Those people use `/admin/ui-builder` through their
+normal GitHub sign-in. Each row names the design, its catalog, its owner, how many editors have it
+open, and carries a **Delete** — the only way a design leaves a host. A delete is durable, closes any
+open editor on the design, and drops its reference overlay and comment threads with it; there is no
+undo.
+
+The actor setting is UI Builder-only. It does not grant `/admin/catalogs`, `/admin/trust`,
+`/admin/sites`, onboarding, or library administration. A UI-builder grant approved by a configured
+actor inherits the same all-design authority, including the shared folder map, so an approved agent
+can organize designs the actor does not own without receiving the machine-wide admin token.
 
 The page drives two JSON routes that a script can use directly, gated by the same header as the
 other admin routes and absent (404, not 401) without it:
@@ -314,8 +322,8 @@ curl -sH "X-Compose-Preview-Admin-Token: $SERVE_ADMIN_READ_TOKEN" \
   https://<host>/admin/ui-builder/designs
 ```
 
-No `ui-builder-read` / `ui-builder-write` grant reaches either route: the actor-scoped API can
-list only what its actor owns or was granted, and has no delete at all.
+An ordinary `ui-builder-read` / `ui-builder-write` grant remains actor-scoped. Only a grant approved
+by an identity in `SERVE_UI_BUILDER_ADMIN_ACTORS` reaches the all-design administration routes.
 
 ### Serving a catalog on its own hostname
 

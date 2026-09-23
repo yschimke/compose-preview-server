@@ -530,6 +530,22 @@ public class ServeCommandOptions(
   override val adminReadToken: String? =
     args.flagValue("--admin-read-token")?.takeIf { it.isNotBlank() }
 
+  override val uiBuilderAdminActors: Set<String> =
+    args
+      .flagValue("--ui-builder-admin-actors")
+      ?.split(",")
+      ?.map(String::trim)
+      ?.filter(String::isNotEmpty)
+      ?.also { entries ->
+        require(entries.all(UI_BUILDER_ADMIN_ACTOR::matches)) {
+          "--ui-builder-admin-actors accepts GitHub actor ids such as github:octocat"
+        }
+        require(entries.map(String::lowercase).distinct().size == entries.size) {
+          "--ui-builder-admin-actors contains a duplicate actor id"
+        }
+      }
+      ?.toSet() ?: emptySet()
+
   /** Optional durable aggregate counters. Null keeps local serve sessions in-memory only. */
   override val engagementFile: File? =
     args.flagValue("--engagement-file")?.takeIf { it.isNotBlank() }?.let(::File)
@@ -1295,6 +1311,12 @@ public class ServeCommandOptions(
                           reasons, but cannot download design documents, repair or delete designs,
                           or reach any other admin route. Separate from --admin-token so diagnosis
                           need not receive the code-execution-capable operator credential.
+        --ui-builder-admin-actors <actor>[,…]
+                          GitHub identities allowed to administer every shared UI-builder design,
+                          for example github:octocat. A configured actor can use its signed-in
+                          browser session, and an agent grant approved by it inherits the same
+                          design and folder authority. This does not grant access to catalog,
+                          trust, site, onboarding or library administration.
         --onboard-cache <dir>
                           Where POST /admin/onboard/scan checks repositories out to read them (one
                           directory per repo, reused). Nothing in them is executed. Default: a
@@ -1450,6 +1472,7 @@ public class ServeCommandOptions(
 
   private companion object {
     val UI_BUILDER_CATALOG_ID = Regex("[A-Za-z0-9][A-Za-z0-9._-]*")
+    val UI_BUILDER_ADMIN_ACTOR = Regex("github:[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?")
 
     /**
      * The platform words `--ui-builder-packs` accepts, as `UiBuilderCatalogPlatform` spells them.

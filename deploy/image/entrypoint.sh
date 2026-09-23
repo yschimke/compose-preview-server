@@ -133,6 +133,8 @@ fi
 # Unset (the default) means the admin routes don't exist at all.
 [[ -n "${SERVE_ADMIN_TOKEN:-}" ]] && args+=(--admin-token "${SERVE_ADMIN_TOKEN}")
 [[ -n "${SERVE_ADMIN_READ_TOKEN:-}" ]] && args+=(--admin-read-token "${SERVE_ADMIN_READ_TOKEN}")
+[[ -n "${SERVE_UI_BUILDER_ADMIN_ACTORS:-}" ]] &&
+  args+=(--ui-builder-admin-actors "${SERVE_UI_BUILDER_ADMIN_ACTORS}")
 # Aggregate view counts live beside catalog/trust config so container restarts and image updates do
 # not erase engagement. Set to `none` to keep counters process-local.
 : "${SERVE_ENGAGEMENT_FILE:=/config/engagement.json}"

@@ -3268,12 +3268,17 @@ public class ServeRunner(
       )
       exitProcess(1)
     }
-    // Runtime UI-builder administration. Needs the admin token and a builder lane, nothing else:
-    // it reads and removes designs through the service the routes already hold, so a host with
-    // no builder has no such page. The operator token enables every action; the diagnostic token
-    // constructs the same read port but its HTTP gate exposes only the summary page and list.
+    val uiBuilderAdministrators = ServeUiBuilderAdministrators(uiBuilderAdminActors)
+    // Runtime UI-builder administration. Needs an operator credential or configured UI-builder
+    // administrator and a builder lane: it reads and removes designs through the service the
+    // routes already hold, so a host with no builder has no such page. The operator token and a
+    // configured administrator enable every action; the diagnostic token constructs the same read
+    // port but its HTTP gate exposes only the summary page and list.
     val uiBuilderAdmin =
-      if ((adminToken != null || adminReadToken != null) && uiBuilderLane != null) {
+      if (
+        (adminToken != null || adminReadToken != null || uiBuilderAdministrators.configured) &&
+          uiBuilderLane != null
+      ) {
         ServeUiBuilderAdmin(
           service = uiBuilderLane.service,
           references = uiBuilderLane.references,
@@ -3447,6 +3452,7 @@ public class ServeRunner(
         trustAdmin = trustAdmin,
         adminToken = adminToken,
         adminReadToken = adminReadToken,
+        uiBuilderAdminActors = uiBuilderAdminActors,
         docStore = docStore,
         imageStore = imageLane?.store,
         imageUploadAuth = imageLane?.auth,

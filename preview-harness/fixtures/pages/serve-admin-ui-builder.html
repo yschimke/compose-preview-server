@@ -178,7 +178,7 @@
   }
   function failure(response) {
     if (response.status === 404 && !token) {
-      return "This page needs the admin token: open it as /admin/ui-builder?token=…";
+      return "This page needs a configured UI Builder administrator sign-in or admin token.";
     }
     return response.text().then(function (t) {
       return "HTTP " + response.status + (t ? ": " + t : "");
