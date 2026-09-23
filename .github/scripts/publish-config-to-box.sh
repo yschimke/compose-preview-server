@@ -183,7 +183,7 @@ delete() {
       last_delete=absent
       ;;
     409)
-      if [[ "${payload}" == *"is not published here"* ]]; then
+      if [[ "${payload}" == *"is not published here"* || "${payload}" == *"is not configured"* ]]; then
         echo "  ${label}: nothing to retire"
         last_delete=absent
       else
@@ -305,6 +305,40 @@ live_repo_for() {
     jq -er --arg s "${system}" \
       '.catalogs // [] | map(select(.system == $s)) | .[0].repo // ""' 2>/dev/null
 }
+
+# A catalog which is exposed as a top-level site cannot be retired while that site
+# still names it: the server deliberately refuses the DELETE so an operator never
+# strands a hostname.  That guard is correct, but a repository move needs the
+# inverse ordering: detach the hostname, replace the catalog registration, then
+# re-apply the declared site at the end of this script.  The public site is only
+# absent for the small delete/re-register window, rather than leaving the catalog
+# pointed at the old repository indefinitely.
+#
+# Do this only for an actual repository move reported by the live catalog listing.
+# A normal re-run sees the declared repo already in place and leaves sites alone.
+if [[ -n "${box_catalogs}" ]]; then
+  echo "Detaching top-level sites whose catalogs move repositories"
+  while IFS= read -r site; do
+    [[ -n "${site}" ]] || continue
+    host=$(printf '%s' "${site}" | jq -r '.host')
+    system=$(printf '%s' "${site}" | jq -r '.system')
+    current_repo=$(box_field_for "${system}" repo)
+    declared_repo=$(jq -r --arg s "${system}" \
+      '.catalogs // [] | map(select(.system == $s)) | .[0].repo // ""' \
+      "${CATALOGS_FILE}")
+    [[ -n "${current_repo}" && -n "${declared_repo}" && "${current_repo}" != "${declared_repo}" ]] || continue
+
+    echo "  site ${host}: temporarily detaching ${system} for ${current_repo} -> ${declared_repo}"
+    delete "/admin/sites/${host}" "site ${host}" || true
+    case "${last_delete}" in
+      ok | absent) ;;
+      *)
+        rejected=$((rejected + 1))
+        echo "::error::site ${host}: could not detach ${system} before its repository move; leaving the catalog registration unchanged."
+        ;;
+    esac
+  done < <(jq -c '.sites // [] | .[]' "${CATALOGS_FILE}")
+fi
 
 echo "Reconciling catalogs from ${CATALOGS_FILE#"${REPO_ROOT}/"}"
 while IFS= read -r entry; do
