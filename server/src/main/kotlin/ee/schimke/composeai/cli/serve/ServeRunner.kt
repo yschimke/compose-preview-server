@@ -2484,6 +2484,8 @@ public class ServeRunner(
      * every open client is holding.
      */
     val links: ServeUiBuilderLinksStore?,
+    /** Shared file-manager folders, stored beside design state without changing revisions. */
+    val folders: ServeUiBuilderFolderStore?,
     /**
      * The Compose half of the export, kept so the native render lane can ask it the same question
      * with node tagging on. Not reached through [service]: the service's exporter may be the
@@ -2988,6 +2990,15 @@ public class ServeRunner(
             )
           }
           .getOrNull(),
+      folders =
+        runCatching { ServeUiBuilderFolderStore(directory.resolve("folders").toPath()) }
+          .onFailure {
+            System.err.println(
+              "serve: UI-builder folders unavailable (${it.message}); " +
+                "the builder works, and designs remain unfiled"
+            )
+          }
+          .getOrNull(),
       compose = compose,
       nativeBackends = nativeBackends,
     )
@@ -3481,6 +3492,7 @@ public class ServeRunner(
         uiBuilderReferenceStore = uiBuilderLane?.references,
         uiBuilderCommentStore = uiBuilderLane?.comments,
         uiBuilderLinksStore = uiBuilderLane?.links,
+        uiBuilderFolderStore = uiBuilderLane?.folders,
         uiBuilderAssets = uiBuilderLane?.service,
         uiBuilderAuthorization =
           uiBuilderLane?.let {

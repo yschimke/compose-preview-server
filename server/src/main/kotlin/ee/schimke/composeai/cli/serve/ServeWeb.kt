@@ -7461,6 +7461,10 @@ ${captureControlsHtml().prependIndent("          ")}
     val copySuggestedId: String = "",
     /** POST target that deletes it. Empty unless the viewer owns it. */
     val deleteAction: String = "",
+    /** Shared server folder, or null while this design is unfiled. */
+    val folder: String? = null,
+    /** POST target that changes [folder]. Empty when this viewer may not move the design. */
+    val folderAction: String = "",
   )
 
   /**
@@ -7567,6 +7571,23 @@ ${captureControlsHtml().prependIndent("          ")}
             </details>
             """
               .trimIndent()
+        val folder =
+          if (row.folderAction.isBlank()) {
+            row.folder?.let { "<p class=\"cp-design-meta\">Folder · ${esc(it)}</p>" }.orEmpty()
+          } else {
+            """
+            <details class="cp-design-more">
+              <summary>${if (row.folder == null) "Move to folder" else "Folder · ${esc(row.folder)}"}</summary>
+              <form class="cp-design-form" method="post" action="${esc(row.folderAction)}">
+                <label class="cp-grant-ttl"><span>Folder</span><input type="text" name="folder"
+                  value="${esc(row.folder.orEmpty())}" maxlength="160"
+                  placeholder="Leave empty for no folder"></label>
+                <button class="cp-grant-approve" type="submit">Move</button>
+              </form>
+            </details>
+            """
+              .trimIndent()
+          }
         val grants =
           row.grants?.let { owned ->
             val current =
@@ -7601,7 +7622,8 @@ ${captureControlsHtml().prependIndent("          ")}
             ?: "<p class=\"cp-design-meta\">Shared by <code>${esc(row.ownerActorId)}</code>; the owner manages its grants.</p>"
         // Everything the filter box matches on, in one attribute: the title a person remembers, the
         // id they typed, and the catalog they were working in.
-        val haystack = "${row.title} ${row.designId} ${row.catalogSystemId}".lowercase()
+        val haystack =
+          "${row.title} ${row.designId} ${row.catalogSystemId} ${row.folder.orEmpty()}".lowercase()
         """
         <article class="cp-card cp-design-card" data-cp-design="${esc(haystack)}">
           $thumbnail
@@ -7614,6 +7636,7 @@ ${captureControlsHtml().prependIndent("          ")}
               $share
             </div>
             $duplicate
+            $folder
             $grants
             $delete
           </div>
