@@ -133,7 +133,13 @@ fi
 # Unset (the default) means the admin routes don't exist at all.
 [[ -n "${SERVE_ADMIN_TOKEN:-}" ]] && args+=(--admin-token "${SERVE_ADMIN_TOKEN}")
 [[ -n "${SERVE_ADMIN_READ_TOKEN:-}" ]] && args+=(--admin-read-token "${SERVE_ADMIN_READ_TOKEN}")
-[[ -n "${SERVE_UI_BUILDER_ADMIN_ACTORS:-}" ]] &&
+# The image default belongs here, not only in docker-compose.yml. Long-lived hosts keep the Compose
+# file they were installed with, and the pre-3.52 file forwards an empty value when its .env has no
+# override. Defaulting at the process boundary lets an image pull upgrade those hosts too. As with
+# SERVE_TRUST_STORE below, `none` is the explicit opt-out because empty is indistinguishable from
+# that legacy pass-through.
+: "${SERVE_UI_BUILDER_ADMIN_ACTORS:=github:yschimke}"
+[[ "${SERVE_UI_BUILDER_ADMIN_ACTORS}" != "none" ]] &&
   args+=(--ui-builder-admin-actors "${SERVE_UI_BUILDER_ADMIN_ACTORS}")
 # Aggregate view counts live beside catalog/trust config so container restarts and image updates do
 # not erase engagement. Set to `none` to keep counters process-local.

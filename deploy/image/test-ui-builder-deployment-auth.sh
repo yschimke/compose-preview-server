@@ -50,9 +50,23 @@ grep -Fq \
 }
 
 grep -Fq \
-  'SERVE_UI_BUILDER_ADMIN_ACTORS: "${SERVE_UI_BUILDER_ADMIN_ACTORS-github:yschimke}"' \
+  'SERVE_UI_BUILDER_ADMIN_ACTORS: "${SERVE_UI_BUILDER_ADMIN_ACTORS:-github:yschimke}"' \
   "${compose}" || {
   echo "FAIL: compose does not default the UI-builder administrator to github:yschimke" >&2
+  exit 1
+}
+
+grep -Fq \
+  ': "${SERVE_UI_BUILDER_ADMIN_ACTORS:=github:yschimke}"' \
+  "${entrypoint}" || {
+  echo "FAIL: the image entrypoint does not repair an empty legacy compose pass-through" >&2
+  exit 1
+}
+
+grep -Fq \
+  '[[ "${SERVE_UI_BUILDER_ADMIN_ACTORS}" != "none" ]]' \
+  "${entrypoint}" || {
+  echo "FAIL: the image entrypoint does not preserve a UI-builder administrator opt-out" >&2
   exit 1
 }
 
