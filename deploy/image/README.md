@@ -290,8 +290,9 @@ unaffected: a registry catalog badges `unverified` until its producer is added w
 ### Managing UI-builder designs (`/admin/ui-builder`)
 
 A box with a UI-builder lane and either `SERVE_ADMIN_TOKEN` or `SERVE_UI_BUILDER_ADMIN_ACTORS` set
-serves an operator's screen over every design it holds, whoever owns it. The actor setting is a
-comma-separated list such as `github:yschimke`; those people use `/admin/ui-builder` through their
+serves an operator's screen over every design it holds, whoever owns it. The image deployment
+defaults the actor setting to `github:yschimke`; set it explicitly to a comma-separated replacement,
+or to an empty value to disable that default. Those people use `/admin/ui-builder` through their
 normal GitHub sign-in. Each row names the design, its catalog, its owner, how many editors have it
 open, and carries a **Delete** — the only way a design leaves a host. A delete is durable, closes any
 open editor on the design, and drops its reference overlay and comment threads with it; there is no

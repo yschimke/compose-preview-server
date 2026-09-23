@@ -50,9 +50,9 @@ grep -Fq \
 }
 
 grep -Fq \
-  'SERVE_UI_BUILDER_ADMIN_ACTORS: "${SERVE_UI_BUILDER_ADMIN_ACTORS:-}"' \
+  'SERVE_UI_BUILDER_ADMIN_ACTORS: "${SERVE_UI_BUILDER_ADMIN_ACTORS-github:yschimke}"' \
   "${compose}" || {
-  echo "FAIL: compose does not pass the UI-builder administrator actor allowlist" >&2
+  echo "FAIL: compose does not default the UI-builder administrator to github:yschimke" >&2
   exit 1
 }
 
