@@ -50,7 +50,28 @@ internal suspend fun UiBuilderServicePort.designActions(
   if (designId.isBlank()) return null
   val response =
     execute(UiBuilderServiceCall(actor, UiBuilderServiceRequest.GetDesignActions(designId)))
-  return (response as? UiBuilderServiceResponse.DesignActions)?.actions
+  (response as? UiBuilderServiceResponse.DesignActions)?.let {
+    return it.actions
+  }
+
+  // A catalog-unavailable design is still listed with its access record, even though the service
+  // refuses every request that names the unusable document before GetDesignActions can run. Folder
+  // assignment and the other sidecars do not open that document, so recover the same caller-scoped
+  // answer from ListDesigns rather than making catalog availability a prerequisite for organizing
+  // or annotating the owner's stored content.
+  var cursor: String? = null
+  do {
+    val listed =
+      execute(UiBuilderServiceCall(actor, UiBuilderServiceRequest.ListDesigns(cursor, 200)))
+        as? UiBuilderServiceResponse.Designs ?: return null
+    listed.designs
+      .firstOrNull { it.designId == designId }
+      ?.let {
+        return it.requesterAccess.allowedActions
+      }
+    cursor = listed.nextCursor
+  } while (cursor != null)
+  return null
 }
 
 /**
