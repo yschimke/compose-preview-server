@@ -1,5 +1,19 @@
 # Changelog
 
+## [3.51.0](https://github.com/yschimke/compose-preview-server/compare/v3.50.0...v3.51.0) (2026-09-23)
+
+
+### Features
+
+* **ui-builder:** persist shared design folders ([#1013](https://github.com/yschimke/compose-preview-server/issues/1013)) ([ce8d2f1](https://github.com/yschimke/compose-preview-server/commit/ce8d2f12999b8483b1b204a0d3ae5c65669e3539))
+
+
+### Bug Fixes
+
+* **deps:** update compose-ai-tools ([#1010](https://github.com/yschimke/compose-preview-server/issues/1010)) ([57d64a7](https://github.com/yschimke/compose-preview-server/commit/57d64a7e09e338dbc6161ceee6db250a16bb245b))
+* **deps:** update compose-multiplatform to v1.12.1 ([#1008](https://github.com/yschimke/compose-preview-server/issues/1008)) ([c3a252d](https://github.com/yschimke/compose-preview-server/commit/c3a252d35838665090a3e7113e4ba755b1bf6523))
+* detach sites before catalog repository moves ([#1012](https://github.com/yschimke/compose-preview-server/issues/1012)) ([b951ba4](https://github.com/yschimke/compose-preview-server/commit/b951ba4208ebb038b00134b6984e4efeeb350bfd))
+
 ## [3.50.0](https://github.com/yschimke/compose-preview-server/compare/v3.49.0...v3.50.0) (2026-09-22)
 
 
