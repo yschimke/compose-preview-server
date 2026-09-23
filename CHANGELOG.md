@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.53.0](https://github.com/yschimke/compose-preview-server/compare/v3.52.0...v3.53.0) (2026-09-23)
+
+
+### Bug Fixes
+
+* **deploy:** apply UI builder admin image default ([#1017](https://github.com/yschimke/compose-preview-server/issues/1017)) ([ac0c36c](https://github.com/yschimke/compose-preview-server/commit/ac0c36cde15349b80a64a9c8f031f1c9cda10542))
+
 ## [3.52.0](https://github.com/yschimke/compose-preview-server/compare/v3.51.0...v3.52.0) (2026-09-23)
 
 
