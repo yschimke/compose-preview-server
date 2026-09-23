@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.54.0](https://github.com/yschimke/compose-preview-server/compare/v3.53.0...v3.54.0) (2026-09-23)
+
+
+### Bug Fixes
+
+* **ui-builder:** update editor to 3.42.0 ([#1019](https://github.com/yschimke/compose-preview-server/issues/1019)) ([5e43d9e](https://github.com/yschimke/compose-preview-server/commit/5e43d9e124bedc013371802f85c03a84cf9beebb))
+
 ## [3.53.0](https://github.com/yschimke/compose-preview-server/compare/v3.52.0...v3.53.0) (2026-09-23)
 
 
