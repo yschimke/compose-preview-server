@@ -26,7 +26,7 @@ java-ui-builder = "21"
 kotlin = "2.4.20"
 ktfmt = "0.27.0"
 ktfmt-cli = "0.64"
-compose-multiplatform = "1.12.0"
+compose-multiplatform = "1.12.1"
 # Material 3 adaptive, for the real `SupportingPaneScaffold` on the editor's canvas and preview
 # panes. Its own version line rather than the Compose Multiplatform one, which is why it is a
 # separate ref: the adaptive artifacts ship independently of the CMP bundle.
