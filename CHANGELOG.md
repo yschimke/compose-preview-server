@@ -1,5 +1,17 @@
 # Changelog
 
+## [3.58.0](https://github.com/yschimke/compose-preview-server/compare/v3.57.0...v3.58.0) (2026-09-24)
+
+
+### Features
+
+* **ui-builder:** pin the editor per instance in catalogs.json ([#1036](https://github.com/yschimke/compose-preview-server/issues/1036)) ([2b05545](https://github.com/yschimke/compose-preview-server/commit/2b05545b5af283b7d9a1c5b45a14b345bbb38427))
+
+
+### Bug Fixes
+
+* **deploy:** carry window-core onto the image's renderer sidecar ([#1038](https://github.com/yschimke/compose-preview-server/issues/1038)) ([c3b6096](https://github.com/yschimke/compose-preview-server/commit/c3b6096cd376ed0c774ca2e986677ba6b26da28e))
+
 ## [3.57.0](https://github.com/yschimke/compose-preview-server/compare/v3.56.0...v3.57.0) (2026-09-24)
 
 
