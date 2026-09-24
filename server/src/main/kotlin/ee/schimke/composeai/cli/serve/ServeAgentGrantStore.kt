@@ -484,14 +484,19 @@ class ServeAgentGrantStore(
 
   /**
    * The live grant a person asked for themselves and was given — see [Grant.requesterActorId] — so
-   * their own signed-in session can carry it without handling a bearer. The longest-lived one when
-   * there are several, which is the most recent decision about them.
+   * their own signed-in session can carry it without handling a bearer. With [capability], only a
+   * grant carrying it: two live approvals for different capabilities must each still count. The
+   * longest-lived match when there are several.
    */
-  fun activeGrantForRequester(requesterActorId: String?): Grant? {
+  fun activeGrantForRequester(
+    requesterActorId: String?,
+    capability: AgentGrantCapability? = null,
+  ): Grant? {
     if (requesterActorId.isNullOrBlank()) return null
     val now = clock()
     return grants.values
       .filter { it.requesterActorId == requesterActorId && it.expiresAtMillis > now }
+      .filter { capability == null || it.allows(capability) }
       .maxByOrNull { it.expiresAtMillis }
   }
 

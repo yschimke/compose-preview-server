@@ -113,9 +113,11 @@ class ServeMachineAuthorization(
     // grant, under their own name, on behalf of whoever approved it — exactly the reach the
     // approver chose to lend, and no bearer for the browser to hold.
     githubAuth?.currentSignedInLogin(call)?.let { signedIn ->
-      agentGrants?.activeGrantForRequester(ServeAgentGrants.githubActorId(signedIn))?.let { grant ->
-        if (grant.allows(required)) return grant.authorized()
-      }
+      agentGrants
+        ?.activeGrantForRequester(ServeAgentGrants.githubActorId(signedIn), required)
+        ?.let { grant ->
+          return grant.authorized()
+        }
     }
 
     // Reading the UI builder needs only an identity. Any account GitHub vouched for — a member

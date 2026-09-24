@@ -272,6 +272,34 @@ class ServeUiBuilderRequestAccessTest {
   }
 
   @Test
+  fun `a later, shorter approval still counts beside a longer one`() {
+    val cookie = signIn()
+    submit(cookie, csrfOf(page(cookie).second))
+    val first = grants.pendingRequests().single()
+    grants.approve(
+      first.id,
+      approvedBy = "@yschimke",
+      scope = AgentGrantScope.PREVIEW,
+      ttlSeconds = 8 * 3600,
+      capabilities = setOf(AgentGrantCapability.UI_BUILDER_WRITE),
+      approvedByActorId = "github:yschimke",
+    )
+    submit(cookie, csrfOf(page(cookie).second))
+    val second = grants.pendingRequests().single()
+    grants.approve(
+      second.id,
+      approvedBy = "@yschimke",
+      scope = AgentGrantScope.PREVIEW,
+      ttlSeconds = 3600,
+      capabilities = setOf(AgentGrantCapability.UI_BUILDER_EXPORT),
+      approvedByActorId = "github:yschimke",
+    )
+
+    val export = ExportDesignRequestV1("design", format = ExportFormatV1.SVG)
+    assertEquals(200, post(cookie, "github:stranger", export))
+  }
+
+  @Test
   fun `a revoked approval stops applying to the session`() {
     val cookie = signIn()
     submit(cookie, csrfOf(page(cookie).second))
