@@ -325,6 +325,38 @@ curl -sH "X-Compose-Preview-Admin-Token: $SERVE_ADMIN_READ_TOKEN" \
 An ordinary `ui-builder-read` / `ui-builder-write` grant remains actor-scoped. Only a grant approved
 by an identity in `SERVE_UI_BUILDER_ADMIN_ACTORS` reaches the all-design administration routes.
 
+### Pinning the UI-builder editor (`editor` in `catalogs.json`)
+
+The image bundles a UI-builder editor, but an instance can serve a different compose-ui-builder
+release without a server release or a deploy (#1035). Pin it beside the catalogs:
+
+```json
+{ "editor": { "version": "3.48.0", "sha256": "<contents of compose-preview-ui-builder-web-3.48.0.zip.sha256>" },
+  "catalogs": [ … ] }
+```
+
+At startup the server fetches `compose-preview-ui-builder-web-<version>.zip` from the
+compose-ui-builder GitHub release (or from `"url"`, which must be `https`), checks its SHA-256
+against the pin, unpacks it under `/config/ui-builder-editors/`, and serves it in place of the bundled
+editor. The archive's `ui-builder-web.json` declares the editor↔server API it speaks; a pin this
+server does not support is refused. Any failure (unreachable, wrong digest, unsupported API) is
+logged and the **bundled editor keeps serving**, so a bad pin never takes the builder down.
+
+Change it on a running box through the admin API. The pin is verified before it is written and
+takes effect on the next restart:
+
+```bash
+curl -H "X-Compose-Preview-Admin-Token: $ADMIN_TOKEN" https://<box>/admin/editor            # serving, bundled, pinned
+curl -X PUT -H "X-Compose-Preview-Admin-Token: $ADMIN_TOKEN" -H 'Content-Type: application/json' \
+  -d '{"version":"3.48.0","sha256":"…"}' https://<box>/admin/editor                          # pin (400 on a bad digest)
+curl -X DELETE -H "X-Compose-Preview-Admin-Token: $ADMIN_TOKEN" https://<box>/admin/editor   # roll back to bundled
+```
+
+`publish-config-to-box.sh` PUTs a committed `editor` entry the same way, and with `--prune` it clears
+a pin the committed file no longer declares. The runtime, export and render-bundle jars stay part of
+the server release. The editor↔server API version is what keeps a pinned editor compatible with
+them.
+
 ### Serving a catalog on its own hostname
 
 A published catalog can additionally be served on a hostname of its own, where it presents as the

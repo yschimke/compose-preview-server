@@ -378,6 +378,12 @@ class ServeHttpServer(
    */
   private val siteAdmin: ServeSiteAdmin? = null,
   /**
+   * The instance's **UI-builder editor pin** ([ServeUiBuilderEditorAdmin], #1035) — which editor
+   * release `catalogs.json` pins, verified before it is written. Gated by [adminToken]; null ⇒ the
+   * `/admin/editor` routes are not registered.
+   */
+  private val editorAdmin: ServeUiBuilderEditorAdmin? = null,
+  /**
    * Runtime **UI-builder** administration ([ServeUiBuilderAdmin]) — listing every design on the
    * host and deleting one, whoever owns it. Gated by [adminToken], [adminReadToken], or a
    * configured [uiBuilderAdministrators] identity; null ⇒ the `/admin/ui-builder` routes are not
@@ -832,6 +838,9 @@ class ServeHttpServer(
 
   /** As [adminEnabled], for the `/admin/sites` routes. Same token, separately supplied admin. */
   private val siteAdminEnabled: Boolean = siteAdmin != null && !adminToken.isNullOrBlank()
+
+  /** As [adminEnabled], for the `/admin/editor` routes. */
+  private val editorAdminEnabled: Boolean = editorAdmin != null && !adminToken.isNullOrBlank()
 
   /** As [adminEnabled], for `/admin/ui-builder`, with the additional UI-builder-only actor gate. */
   private val uiBuilderAdminEnabled: Boolean =
@@ -1814,6 +1823,24 @@ class ServeHttpServer(
             if (rejectBadAdminToken()) return@delete
             val host = call.parameters["host"].orEmpty()
             respondAdminSiteResult(withContext(Dispatchers.IO) { admin.remove(host) })
+          }
+        }
+
+        // The instance's editor pin (#1035). A PUT fetches and verifies the archive before writing
+        // the pin, so the reply can take a while; the pin applies at the next start.
+        if (editorAdminEnabled) {
+          val admin = editorAdmin!!
+          get("/admin/editor") {
+            if (rejectBadAdminToken(allowReadToken = true)) return@get
+            respondAdminEditor(admin)
+          }
+          put("/admin/editor") {
+            if (rejectBadAdminToken()) return@put
+            handleAdminEditorSet(admin)
+          }
+          delete("/admin/editor") {
+            if (rejectBadAdminToken()) return@delete
+            respondAdminEditorResult(withContext(Dispatchers.IO) { admin.clear() })
           }
         }
 
@@ -5395,6 +5422,72 @@ class ServeHttpServer(
       ),
       ContentType.Application.Json,
     )
+  }
+
+  /** `GET /admin/editor`: what is serving, what is bundled, and what the next start will pin. */
+  private suspend fun RoutingContext.respondAdminEditor(admin: ServeUiBuilderEditorAdmin) {
+    val configured = withContext(Dispatchers.IO) { admin.configuredPin() }
+    val state = admin.state()
+    call.respondText(
+      JSON.encodeToString(
+        AdminEditorResponse.serializer(),
+        AdminEditorResponse(
+          serving = state.servingVersion,
+          servingPinned = state.servingPin != null,
+          bundled = state.bundledVersion,
+          pinned = configured,
+          restartRequired = configured != state.servingPin,
+          supportedServerApi = ServeUiBuilderEditor.SUPPORTED_SERVER_API.sorted(),
+        ),
+      ),
+      ContentType.Application.Json,
+    )
+  }
+
+  /** `PUT /admin/editor`: pin an editor from a [ServeCatalogsConfig.EditorPin] JSON body. */
+  private suspend fun RoutingContext.handleAdminEditorSet(admin: ServeUiBuilderEditorAdmin) {
+    val body =
+      withContext(Dispatchers.IO) {
+        call.receiveStream().use { readCapped(it, MAX_ADMIN_BODY_BYTES) }
+      }
+    if (body == null) {
+      call.respondText("request body too large", status = HttpStatusCode.PayloadTooLarge)
+      return
+    }
+    val pin = runCatching {
+      JSON.decodeFromString(ServeCatalogsConfig.EditorPin.serializer(), body.decodeToString())
+    }
+      .getOrElse {
+        call.respondText("invalid editor pin: ${it.message}", status = HttpStatusCode.BadRequest)
+        return
+      }
+    respondAdminEditorResult(withContext(Dispatchers.IO) { admin.set(pin) })
+  }
+
+  private suspend fun RoutingContext.respondAdminEditorResult(
+    result: ServeUiBuilderEditorAdmin.Result
+  ) {
+    when (result) {
+      is ServeUiBuilderEditorAdmin.Result.Ok ->
+        call.respondText(
+          JSON.encodeToString(
+            AdminEditorResult.serializer(),
+            AdminEditorResult(
+              status = "ok",
+              pinned = result.pin,
+              restartRequired = result.restartRequired,
+              warning = result.warning,
+            ),
+          ),
+          ContentType.Application.Json,
+        )
+      is ServeUiBuilderEditorAdmin.Result.Invalid ->
+        call.respondText(result.reason, status = HttpStatusCode.BadRequest)
+      is ServeUiBuilderEditorAdmin.Result.Conflict ->
+        call.respondText(result.reason, status = HttpStatusCode.Conflict)
+      is ServeUiBuilderEditorAdmin.Result.Unavailable ->
+        call.respondText(result.reason, status = HttpStatusCode.ServiceUnavailable)
+    }
   }
 
   /** `POST /admin/sites`: publish a hostname from a [ServeCatalogsConfig.Site] JSON body. */
@@ -17141,6 +17234,27 @@ private data class AdminUiBuilderRepairResult(
 
 /** One configured hostname on `GET /admin/sites`. */
 @Serializable private data class AdminSiteDto(val host: String, val system: String)
+
+/** `GET /admin/editor`. [pinned] is what `catalogs.json` holds, i.e. what the next start serves. */
+@Serializable
+private data class AdminEditorResponse(
+  val schema: String = "compose-preview-serve/admin-editor/v1",
+  val serving: String?,
+  val servingPinned: Boolean,
+  val bundled: String?,
+  val pinned: ServeCatalogsConfig.EditorPin?,
+  val restartRequired: Boolean,
+  val supportedServerApi: List<Int>,
+)
+
+@Serializable
+private data class AdminEditorResult(
+  val schema: String = "compose-preview-serve/admin-editor-result/v1",
+  val status: String,
+  val pinned: ServeCatalogsConfig.EditorPin?,
+  val restartRequired: Boolean,
+  val warning: String? = null,
+)
 
 @Serializable
 private data class AdminSitesResponse(

@@ -52,7 +52,21 @@ data class ServeCatalogsConfig(
    * new vhost is a DNS record plus a line here, not an image rebuild.
    */
   val sites: List<Site> = emptyList(),
+  /**
+   * The **UI-builder editor** this instance serves, pinned by version and digest
+   * ([ServeUiBuilderEditor]). Null ⇒ the editor bundled in the distribution. Config rather than
+   * code so an editor fix ships as a compose-ui-builder release plus this one value, with no server
+   * release; rolling back is removing it.
+   */
+  val editor: EditorPin? = null,
 ) {
+  /**
+   * One pinned editor archive: compose-ui-builder's [version], the archive's [sha256], and an
+   * optional [url] for an archive hosted somewhere other than its GitHub release.
+   */
+  @Serializable
+  data class EditorPin(val version: String, val sha256: String, val url: String? = null)
+
   /** One front-page section: its stable [id], the [heading] shown, and its count [noun]. */
   @Serializable
   data class Group(
@@ -174,6 +188,7 @@ data class ServeCatalogsConfig(
         add("catalog '${entry.system}' names unknown group '${entry.group}'")
       }
     }
+    editor?.let { pin -> validateEditor(pin)?.let { add(it) } }
     val served = catalogs.map { it.system }.toSet()
     val seenHosts = mutableSetOf<String>()
     for (site in sites) {
@@ -251,6 +266,23 @@ data class ServeCatalogsConfig(
         group.heading.length > 120 -> "group '${group.id}' heading is too long (max 120)"
         group.noun.isBlank() -> "group '${group.id}' needs a noun"
         group.noun.length > 60 -> "group '${group.id}' noun is too long (max 60)"
+        else -> null
+      }
+
+    /**
+     * A release version as compose-ui-builder tags it. It lands in a URL path and a cache directory
+     * name, so the alphabet stays narrow whatever the operator typed.
+     */
+    private val EDITOR_VERSION_RE = Regex("[0-9]+\\.[0-9]+\\.[0-9]+(-[A-Za-z0-9.]{1,32})?")
+    private val SHA256_RE = Regex("[0-9a-fA-F]{64}")
+
+    /** Why [pin] is unusable, or null when it's well-formed. */
+    fun validateEditor(pin: EditorPin): String? =
+      when {
+        !EDITOR_VERSION_RE.matches(pin.version) -> "invalid editor version '${pin.version}'"
+        !SHA256_RE.matches(pin.sha256) -> "editor ${pin.version} needs a 64-hex-digit sha256"
+        pin.url != null && !pin.url.startsWith("https://") ->
+          "editor ${pin.version} url must be https"
         else -> null
       }
 

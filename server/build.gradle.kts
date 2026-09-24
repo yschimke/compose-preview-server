@@ -95,6 +95,13 @@ abstract class UnpackUiBuilderWeb : DefaultTask() {
   @get:PathSensitive(PathSensitivity.NONE)
   abstract val archiveFile: RegularFileProperty
 
+  /**
+   * The editor version the catalog resolves, stamped into `ui-builder-web.json` when the archive
+   * predates carrying one. The server reads that manifest to report which editor is bundled beside
+   * the one an instance pins (#1035); an archive that writes its own manifest keeps it.
+   */
+  @get:Input abstract val editorVersion: Property<String>
+
   @get:OutputDirectory abstract val outputDirectory: DirectoryProperty
 
   @get:Inject abstract val archiveOperations: ArchiveOperations
@@ -107,6 +114,15 @@ abstract class UnpackUiBuilderWeb : DefaultTask() {
       from(archiveOperations.zipTree(archiveFile))
       into(outputDirectory)
     }
+    val manifest = outputDirectory.file("ui-builder-web.json").get().asFile
+    if (!manifest.isFile) {
+      // serverApi 1: the bundled editor is the one this server is built and tested against, so it
+      // speaks this server's API by construction. See ServeUiBuilderEditor.SUPPORTED_SERVER_API.
+      manifest.writeText(
+        """{"schema":"compose-ui-builder-web/v1","version":"${editorVersion.get()}","serverApi":1}""" +
+          "\n"
+      )
+    }
   }
 }
 
@@ -118,6 +134,7 @@ val unpackUiBuilderWeb =
     archiveFile.set(
       layout.file(uiBuilderWeb.elements.map { artifacts -> artifacts.single().asFile })
     )
+    editorVersion.set(libs.versions.composeai.ui.builder)
     outputDirectory.set(layout.buildDirectory.dir("ui-builder-web"))
   }
 

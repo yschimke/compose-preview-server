@@ -18,6 +18,14 @@
 > spanning the editor and the routes that serve it is two pull requests, and the release lines are
 > separate too — this repository's `3.x` and that repository's own numbering — so a builder change
 > that the server needs arrives as a release there and a catalog ref bump here.
+>
+> The editor seam has since loosened further (#1035). The bump here is still what fixes the
+> **bundled** editor, but an instance can pin a different editor release in its `catalogs.json`
+> (`editor`), fetched from the same GitHub release and checked by digest. So an editor-only fix
+> reaches a box as a compose-ui-builder release plus a config change, with no server release. The
+> archive's `ui-builder-web.json` carries the editor↔server API version (`serverApi`), and
+> `ServeUiBuilderEditor.SUPPORTED_SERVER_API` must contain it. A change to the routes the editor
+> calls that an older editor cannot survive bumps that number in both repositories, server first.
 
 
 **Status: normative.** The rule is enforced by

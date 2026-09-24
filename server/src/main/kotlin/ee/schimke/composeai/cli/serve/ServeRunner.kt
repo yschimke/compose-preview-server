@@ -317,7 +317,11 @@ public class ServeRunner(
    * cannot save, so neither is a lane that should keep an otherwise empty server alive.
    */
   private val uiBuilderLaneConfigured: Boolean
-    get() = usableUiBuilderDir() != null && uiBuilderStateDirFlag != "none"
+    // The bundled check only: resolving a pin fetches, and this is asked before startup has
+    // decided anything. A pin is a lane too, even on a distribution that packages no editor.
+    get() =
+      (usableBundledUiBuilderDir() != null || catalogsConfig.editor != null) &&
+        uiBuilderStateDirFlag != "none"
 
   /**
    * Whether [openUiBuilderService] actually returned a lane, set once [bringUpServer] knows.
@@ -2444,11 +2448,61 @@ public class ServeRunner(
   }
 
   /** Validate the independently packaged builder once; it is not a catalog Wasm fallback. */
-  private fun usableUiBuilderDir(): File? {
+  private fun usableBundledUiBuilderDir(): File? {
     val dir = uiBuilderDir ?: return null
     if (File(dir, "index.html").isFile) return dir
     System.err.println("serve: --ui-builder-dir ${dir.path} has no index.html — skipping")
     return null
+  }
+
+  /**
+   * Where pinned editors are cached: beside `catalogs.json`, which on the prebuilt image is the
+   * durable `/config` volume, so a restart that re-applies a pin does not re-download it. Null ⇒ no
+   * catalogs file, which is also no pin to apply.
+   */
+  private val uiBuilderEditorStore: ServeUiBuilderEditorStore? by lazy {
+    catalogsFilePath?.let(::File)?.absoluteFile?.parentFile?.resolve("ui-builder-editors")?.let {
+      ServeUiBuilderEditorStore(it)
+    }
+  }
+
+  /** Which editor this process is serving; filled by [usableUiBuilderDir]. */
+  private var uiBuilderEditorState: ServeUiBuilderEditorState =
+    ServeUiBuilderEditorState(bundledVersion = null, servingPin = null, servingVersion = null)
+
+  /**
+   * The editor directory to serve: the `editor` pinned in `catalogs.json` when it fetches and
+   * verifies, else the bundled one (#1035). A pin that fails never takes the builder down — the
+   * bundled editor is the first-boot and offline fallback, and the failure is logged with its
+   * reason.
+   */
+  private fun usableUiBuilderDir(): File? {
+    val bundled = usableBundledUiBuilderDir()
+    val bundledVersion = bundled?.let { ServeUiBuilderEditor.readManifest(it)?.version }
+    uiBuilderEditorState = ServeUiBuilderEditorState(bundledVersion, null, bundledVersion)
+    val pin = catalogsConfig.editor ?: return bundled
+    val store = uiBuilderEditorStore ?: return bundled
+    if (ServeCatalogsConfig.validateEditor(pin) != null) return bundled // reported by problems()
+    return when (val resolved = store.resolve(pin)) {
+      is ServeUiBuilderEditorStore.Result.Ready -> {
+        resolved.warning?.let { System.err.println("serve: $it") }
+        System.err.println(
+          "serve: UI-builder editor ${pin.version} (pinned in catalogs.json)" +
+            (bundledVersion?.let { "; bundled is $it" } ?: "")
+        )
+        uiBuilderEditorState = ServeUiBuilderEditorState(bundledVersion, pin, pin.version)
+        runCatching { store.prune(keep = resolved.dir) }
+        resolved.dir
+      }
+      is ServeUiBuilderEditorStore.Result.Failed -> {
+        System.err.println(
+          "serve: pinned UI-builder editor ${pin.version} unavailable (${resolved.reason}) — " +
+            "serving the bundled editor" +
+            (bundledVersion?.let { " $it" } ?: "")
+        )
+        bundled
+      }
+    }
   }
 
   /**
@@ -3166,6 +3220,19 @@ public class ServeRunner(
       } else {
         null
       }
+    // Runtime editor-pin administration (#1035). Needs the admin token, somewhere to cache the
+    // archive it verifies, and the file the pin is written to — a pin that would not survive the
+    // restart that applies it is not one worth accepting.
+    val editorAdmin =
+      if (adminToken != null && uiBuilderEditorStore != null) {
+        ServeUiBuilderEditorAdmin(
+          store = uiBuilderEditorStore!!,
+          configFile = catalogsFile,
+          servingState = { uiBuilderEditorState },
+        )
+      } else {
+        null
+      }
     // Runtime producer-trust administration. Needs only the admin token: unlike the catalog admin
     // there's nothing to fetch, and a box with no trust store yet is exactly the one that most
     // needs
@@ -3439,6 +3506,7 @@ public class ServeRunner(
         onboarding = onboarding,
         sourceOnboarding = sourceOnboarding,
         siteAdmin = siteAdmin,
+        editorAdmin = editorAdmin,
         uiBuilderAdmin = uiBuilderAdmin,
         uiBuilderDesignLibrary = uiBuilderDesignLibrary,
         uiBuilderDesignCatalogs = {
@@ -3612,6 +3680,9 @@ public class ServeRunner(
     }
     if (uiBuilderAdmin != null) {
       System.err.println("serve: UI-builder admin page enabled at /admin/ui-builder")
+    }
+    if (editorAdmin != null) {
+      System.err.println("serve: editor pin admin API enabled at /admin/editor")
     }
     if (siteAdmin != null) {
       System.err.println(
