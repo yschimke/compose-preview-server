@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.56.0](https://github.com/yschimke/compose-preview-server/compare/v3.55.0...v3.56.0) (2026-09-24)
+
+
+### Features
+
+* **ui-builder:** let a signed-in reader request temporary edit access ([#1025](https://github.com/yschimke/compose-preview-server/issues/1025)) ([ab44080](https://github.com/yschimke/compose-preview-server/commit/ab44080714160536a531d55c05d25fd2e6b5bb77))
+
 ## [3.55.0](https://github.com/yschimke/compose-preview-server/compare/v3.54.0...v3.55.0) (2026-09-24)
 
 
