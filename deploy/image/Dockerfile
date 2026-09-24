@@ -322,6 +322,15 @@ COPY --from=android-daemon /opt/android-sdk /opt/android-sdk
 # served catalog resolves one, exactly like the Android pair above.
 COPY --from=desktop-daemon /opt/lib-daemon-desktop /opt/lib-daemon-desktop
 COPY --from=desktop-daemon /opt/lib-renderer /opt/lib-renderer
+# …plus the one jar the daemon's renderer tarball does not carry and the server's own `lib-renderer/`
+# does: `window-core-desktop`. `-Dcomposeai.cli.libRendererDir` points the lookup at THIS directory,
+# so the copy `server/build.gradle.kts` adds to the server distribution for #812 never reached the
+# daemon, and every UI-builder PNG export that drew a constrained frame died on
+# `NoClassDefFoundError: androidx/window/core/layout/WindowSizeClass` — a LinkageError, so the
+# breaker then disabled the lane for every design. Taken from the server tarball rather than
+# fetched, so its version is the one `checkServerDesktopSidecarPackaging` pins; a glob with no match
+# fails the build, which is the assertion. `test-renderer-window-core.sh` keeps the line here.
+COPY --from=server "/opt/compose-preview-server-${SERVER_VERSION}/lib-renderer/window-core-desktop-*.jar" /opt/lib-renderer/
 # …and the embedded JVM Remote Compose player the `cmp-jvm` render lane spawns
 # (`RcJvmServerRenderer`), whose subprocess classpath is `lib-rcjvm/*` + `lib-daemon-desktop/*`.
 # Only half of that pair was here, so every `?rcPlayer=cmp-jvm` on the deployed site answered 503
