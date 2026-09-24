@@ -108,6 +108,17 @@ class ServeMachineAuthorization(
         Decision.Forbidden("This agent grant does not include '${required.wire}'.")
       }
     }
+
+    // Reading the UI builder needs only an identity. Any account GitHub vouched for — a member
+    // without repository access, or a guest (`--github-auth-guests`) — may look, because what it
+    // can see is decided per design by the design service: a design nobody shared with it is not
+    // listed and does not open. Writing and exporting still need the repository access above or a
+    // grant, so an identity alone never reaches past read.
+    if (required == AgentGrantCapability.UI_BUILDER_READ) {
+      githubAuth?.currentSignedInLogin(call)?.let { signedIn ->
+        return Decision.Authorized(ServeAgentGrants.githubActorId(signedIn))
+      }
+    }
     return Decision.Missing
   }
 

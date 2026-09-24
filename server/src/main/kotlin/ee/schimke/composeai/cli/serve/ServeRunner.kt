@@ -5070,6 +5070,7 @@ public class ServeRunner(
         // costs nothing: no second repository means no second GitHub call at sign-in.
         imageRepository = imageUploadRepository,
         allowedUsers = githubAuthUsers,
+        allowGuests = githubAuthGuests,
         callbackBaseUrl = githubAuthCallbackBaseUrl,
         cookieDomain = githubAuthCookieDomain,
         oauthScope = githubAuthScope,

@@ -645,7 +645,10 @@ the whole zone. A public suffix, or a domain that doesn't cover the callback hos
 startup rather than producing cookies the browser drops silently. Empty `SERVE_GITHUB_AUTH_USERS` allows any
 signed-in GitHub user to use live previews; playground additionally requires **write** access to
 `SERVE_GITHUB_AUTH_REPO` (default `yschimke/compose-ai-tools`). Set `SERVE_GITHUB_AUTH_USERS` to a
-comma-separated login list only if you want to narrow sign-in for both surfaces. The OAuth app
+comma-separated login list only if you want to narrow sign-in for both surfaces. With a list set,
+`SERVE_GITHUB_AUTH_GUESTS=1` lets every other GitHub account sign in as a **guest**: it sees the
+UI-builder designs shared with it, read-only, can ask for edit access through an agent grant, and
+counts as signed out everywhere else. The OAuth app
 requests GitHub's `repo` scope so private repository access can be checked during sign-in; the
 server stores only the signed login and the access verdict, not the OAuth token.
 

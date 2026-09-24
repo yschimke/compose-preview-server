@@ -496,6 +496,14 @@ public interface ServeOptions {
   public val githubAuthUsers: Set<String>
 
   /**
+   * `--github-auth-guests`: admit GitHub accounts outside [githubAuthUsers] as guests, who can see
+   * the UI-builder designs shared with them, read-only, and ask for more through an access grant. A
+   * guest counts as signed out everywhere else. See [ServeGithubAuthConfig.allowGuests].
+   */
+  public val githubAuthGuests: Boolean
+    get() = false
+
+  /**
    * Agent access grants (`--agent-grants`): enable the device-grant flow at `/agent-access/…` so an
    * agent with no credential can ask for temporary, scoped, revocable access, and a human approves
    * it from a link the agent prints. See

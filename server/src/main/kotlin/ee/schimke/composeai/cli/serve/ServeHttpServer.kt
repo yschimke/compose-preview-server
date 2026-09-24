@@ -2504,7 +2504,9 @@ class ServeHttpServer(
         ServeWeb.GitHubAuthStatus(
           loginHref = auth.loginPath(call),
           logoutHref = auth.logoutPath(call),
-          login = auth.currentLogin(call),
+          // Who is signed in, guests included: the chip is an identity, not a permission, and a
+          // guest shown "Sign in" would sign in again and land back here none the wiser.
+          login = auth.currentSignedInLogin(call),
           restrictedToAllowedUsers = auth.isRestrictedToAllowedUsers(),
           lane = lane,
           accessRepository =
@@ -2533,7 +2535,9 @@ class ServeHttpServer(
   private fun RoutingContext.uiBuilderInvite(): ServeWeb.UiBuilderInvite? {
     val authorization = uiBuilderAuthorization ?: return null
     if (uiBuilderDir == null || uiBuilderCatalogs.isEmpty()) return null
-    val login = githubAuth?.currentLogin(call)
+    // Guests included: a guest is signed in, and told why it cannot create, rather than offered a
+    // sign-in it has already done.
+    val login = githubAuth?.currentSignedInLogin(call)
     val decision = authorization.authorize(call, UiBuilderRouteCapability.WRITE)
     val permitted = decision is UiBuilderAuthorizationDecision.Authorized
     return ServeWeb.UiBuilderInvite(

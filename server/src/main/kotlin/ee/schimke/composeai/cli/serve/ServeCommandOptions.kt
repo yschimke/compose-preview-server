@@ -589,6 +589,8 @@ public class ServeCommandOptions(
       ?.filter { it.isNotEmpty() }
       ?.toSet() ?: emptySet()
 
+  override val githubAuthGuests: Boolean = "--github-auth-guests" in args
+
   /**
    * Agent access grants (`--agent-grants`): enable the device-grant flow at `/agent-access/…` so an
    * agent with no credential can ask for temporary, scoped, revocable access, and a human approves
@@ -1105,6 +1107,11 @@ public class ServeCommandOptions(
         --github-auth-users <login>[,<login>…]
                           Optional sign-in allowlist. Empty means any signed-in GitHub user may use
                           live sessions; playground still requires access to --github-auth-repo.
+        --github-auth-guests
+                          With --github-auth-users set, let any other GitHub account sign in as a
+                          guest: it sees the UI-builder designs shared with it, read-only, and can
+                          request edit access through an agent grant. A guest counts as signed out
+                          everywhere else — no live sessions, playground, uploads or approvals.
         --agent-grants    Let an agent ask for temporary access it can't otherwise get. The agent
                           POSTs /agent-access/request and prints a link plus a verification code;
                           you open the link, check the code matches, and approve. It then collects a
