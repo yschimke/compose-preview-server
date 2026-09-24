@@ -1,5 +1,21 @@
 # Changelog
 
+## [3.55.0](https://github.com/yschimke/compose-preview-server/compare/v3.54.0...v3.55.0) (2026-09-24)
+
+
+### ⚠ BREAKING CHANGES
+
+* **ui-builder:** follow the export projection to its own package ([#1022](https://github.com/yschimke/compose-preview-server/issues/1022))
+
+### Features
+
+* **ui-builder:** read-only access for any signed-in GitHub account ([#1024](https://github.com/yschimke/compose-preview-server/issues/1024)) ([6466626](https://github.com/yschimke/compose-preview-server/commit/6466626674b78f48340d12bc7d3bf64805e13ec3))
+
+
+### Code Refactoring
+
+* **ui-builder:** follow the export projection to its own package ([#1022](https://github.com/yschimke/compose-preview-server/issues/1022)) ([1b41990](https://github.com/yschimke/compose-preview-server/commit/1b41990aec130a532d14085a97ee76c45cfac603))
+
 ## [3.54.0](https://github.com/yschimke/compose-preview-server/compare/v3.53.0...v3.54.0) (2026-09-23)
 
 
