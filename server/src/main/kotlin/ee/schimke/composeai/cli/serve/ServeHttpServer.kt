@@ -5453,15 +5453,15 @@ class ServeHttpServer(
 
   /** `GET /admin/ui-builder-addons`: what `catalogs.json` declares, and what is serving now. */
   private suspend fun RoutingContext.respondAdminAddons(admin: ServeUiBuilderAddonAdmin) {
-    val configured = withContext(Dispatchers.IO) { admin.configured() }
-    val serving = admin.serving()
+    val (configured, restartRequired) =
+      withContext(Dispatchers.IO) { admin.configured() to admin.restartRequired() }
     call.respondText(
       JSON.encodeToString(
         AdminAddonsResponse.serializer(),
         AdminAddonsResponse(
           addons = configured,
-          serving = serving.sorted(),
-          restartRequired = configured.any { it.id !in serving },
+          serving = admin.serving(),
+          restartRequired = restartRequired,
         ),
       ),
       ContentType.Application.Json,
@@ -17332,7 +17332,7 @@ private data class AdminUiBuilderRepairResult(
 private data class AdminAddonsResponse(
   val schema: String = "compose-preview-serve/admin-ui-builder-addons/v1",
   val addons: List<ServeCatalogsConfig.UiBuilderAddon>,
-  val serving: List<String>,
+  val serving: List<ServeCatalogsConfig.UiBuilderAddon>,
   val restartRequired: Boolean,
 )
 

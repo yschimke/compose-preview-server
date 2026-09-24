@@ -62,11 +62,11 @@ data class ServeCatalogsConfig(
   /**
    * The **UI-builder add-ons** this instance serves beside the default `m3-catalog`.
    *
-   * The image ships Material 3 as its one built-in builder catalog. Wear (`wear-m3`) and Remote
-   * Compose (`remote-m3`) are published by their own catalog repository, draw through the renderer
-   * runtime that repository publishes, and are something an instance opts into — here, so the
-   * choice is this deployment's tracked config rather than an image default every adopter inherits.
-   * Null ⇒ no add-ons.
+   * The image ships Material 3 as its one built-in builder catalog. Any other — Wear, Remote
+   * Compose — is published by its own catalog repository, draws through the renderer runtime that
+   * repository publishes, and is something an instance opts into — here, so the choice is this
+   * deployment's tracked config rather than an image default every adopter inherits. Null ⇒ no
+   * add-ons.
    */
   val uiBuilder: UiBuilder? = null,
 ) {
@@ -74,7 +74,7 @@ data class ServeCatalogsConfig(
   @Serializable data class UiBuilder(val addons: List<UiBuilderAddon> = emptyList())
 
   /**
-   * One add-on builder catalog: the [id] designs pin (`wear-m3`), and the [source] catalog whose
+   * One add-on builder catalog: the [id] designs pin, and the [source] catalog whose
    * `design-artifacts/<source>` branch publishes its `ui-builder.json`, renderer runtime and the
    * bundle its designs compile against natively. Null [source] ⇒ the same as [id].
    *
@@ -222,7 +222,10 @@ data class ServeCatalogsConfig(
         .filterValues { it.size > 1 }
         .keys
         .forEach { add("duplicate UI-builder add-on '$it'") }
-      addons.forEach { addon -> validateAddon(addon)?.let { add(it) } }
+      val systems = catalogs.map { it.system }.toSet()
+      addons.forEach { addon ->
+        (validateAddon(addon) ?: sourceProblem(addon, systems))?.let { add(it) }
+      }
     }
     val served = catalogs.map { it.system }.toSet()
     val seenHosts = mutableSetOf<String>()
@@ -337,6 +340,19 @@ data class ServeCatalogsConfig(
           "UI-builder add-on '${addon.id}' has an invalid source '${addon.source}'"
         else -> null
       }
+
+    /**
+     * Why [addon]'s source is not one of [systems], or null when it is.
+     *
+     * An add-on is read from its source catalog's delivery branch, and that catalog's entry is what
+     * says which repository the branch lives in. A source with no entry would be fetched from the
+     * server's default repository instead — a branch this config never named.
+     */
+    fun sourceProblem(addon: UiBuilderAddon, systems: Set<String>): String? =
+      if (addon.sourceSystem in systems) null
+      else
+        "UI-builder add-on '${addon.id}' reads from '${addon.sourceSystem}', which no catalog " +
+          "entry serves"
 
     /** Why [entry] is unusable, or null when it's well-formed. */
     fun validateEntry(entry: Entry): String? =

@@ -2470,10 +2470,14 @@ public class ServeRunner(
    * declared in config and the same catalog passed as flags are one code path.
    */
   private val uiBuilderAddons: List<ServeCatalogsConfig.UiBuilderAddon> by lazy {
+    val systems = catalogsConfig.catalogs.map { it.system }.toSet()
     catalogsConfig.uiBuilder
       ?.addons
       .orEmpty()
-      .filter { ServeCatalogsConfig.validateAddon(it) == null }
+      .filter {
+        ServeCatalogsConfig.validateAddon(it) == null &&
+          ServeCatalogsConfig.sourceProblem(it, systems) == null
+      }
       .distinctBy { it.id }
       .also { addons ->
         if (addons.isNotEmpty()) {
@@ -3306,7 +3310,10 @@ public class ServeRunner(
       if (adminToken != null && catalogsFile != null) {
         ServeUiBuilderAddonAdmin(
           configFile = catalogsFile,
-          serving = { servedUiBuilderCatalogs ?: emptySet() },
+          serving = {
+            val served = servedUiBuilderCatalogs ?: emptySet()
+            uiBuilderAddons.filter { it.id in served }
+          },
         )
       } else {
         null
