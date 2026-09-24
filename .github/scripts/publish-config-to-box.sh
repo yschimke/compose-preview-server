@@ -515,6 +515,50 @@ while IFS= read -r site; do
   }
 done < <(jq -c '.sites // [] | .[]' "${CATALOGS_FILE}")
 
+# The UI-builder editor pin (#1035). `editor` in catalogs.json names the compose-ui-builder release
+# this box serves, by version and archive digest, so an editor fix ships as a config change instead
+# of a server release. PUT /admin/editor fetches and verifies the archive BEFORE writing the pin —
+# a wrong digest or an editor speaking a server API this box does not is a 400 here, not a silent
+# fallback at the next boot — which is why its timeout is minutes, not the other routes' 30 s.
+#
+# The pin applies at the box's next START (the editor directory backs several caches that cannot be
+# swapped under a running server), so an accepted pin that differs from what is serving is reported
+# as owing a restart. Additive like everything else: a file with no `editor` leaves a box's pin
+# alone, except under --prune, where the file is the whole answer and the pin is cleared.
+editor_pin=$(jq -c '.editor // empty' "${CATALOGS_FILE}")
+if [[ -n "${editor_pin}" ]]; then
+  echo "Reconciling the UI-builder editor pin from ${CATALOGS_FILE#"${REPO_ROOT}/"}"
+  editor_version=$(printf '%s' "${editor_pin}" | jq -r '.version')
+  if [[ "${DRY_RUN}" == 1 ]]; then
+    echo "PUT /admin/editor ${editor_pin}"
+  else
+    response=$(curl -sS -w $'\n%{http_code}' -m 900 \
+      -X PUT -H "${ADMIN_TOKEN_HEADER}: ${ADMIN_TOKEN}" \
+      -H 'Content-Type: application/json' \
+      -d "${editor_pin}" "${BASE_URL}/admin/editor" 2>/dev/null || printf '\n000')
+    code="${response##*$'\n'}"
+    payload="${response%$'\n'*}"
+    case "${code}" in
+      200)
+        if [[ "$(printf '%s' "${payload}" | jq -r '.restartRequired // false' 2>/dev/null)" == true ]]; then
+          echo "::notice::editor ${editor_version} pinned — it serves from the box's next restart."
+        else
+          echo "  editor ${editor_version}: applied"
+        fi
+        ;;
+      409) echo "  editor ${editor_version}: already pinned" ;;
+      404) echo "::warning::/admin/editor returned 404 — this box predates editor pins; it keeps its bundled editor." ;;
+      *)
+        rejected=$((rejected + 1))
+        echo "::error::editor ${editor_version}: HTTP ${code} — ${payload}"
+        ;;
+    esac
+  fi
+elif [[ "${PRUNE}" == 1 ]]; then
+  echo "Clearing any UI-builder editor pin (catalogs.json declares none)"
+  delete /admin/editor "editor pin" || true
+fi
+
 if [[ "${groups_skipped}" == 1 ]]; then
   echo "::warning::front-page groups were not reconciled — this box predates /admin/groups. Catalogs are published ungrouped; the next publish against a newer image will group them."
 fi
