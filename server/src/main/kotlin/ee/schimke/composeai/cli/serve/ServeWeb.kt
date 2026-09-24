@@ -7520,38 +7520,36 @@ ${captureControlsHtml().prependIndent("          ")}
         .takeIf { it.isNotBlank() }
         ?.let { "<p class=\"cp-designs-notice\" role=\"status\">${esc(it)}</p>" }
         .orEmpty()
-    val cards =
-      rows.joinToString("\n") { row ->
-        val title = if (row.title.isBlank()) row.designId else row.title
-        val updated =
-          row.updatedAtEpochMillis?.let { java.time.Instant.ofEpochMilli(it).toString() }
-            ?: "unknown"
-        // The thumbnail is `loading="lazy"` and `decoding="async"` on purpose: a page of twenty
-        // designs is twenty live exports, and none of them is worth blocking the list on. The
-        // `onerror` hides a picture that could not be produced rather than leaving a broken-image
-        // glyph where a design should be — an export can fail for reasons the list already
-        // explains in words underneath.
-        val thumbnail =
-          if (row.previewHref.isBlank())
-            """<span class="cp-design-thumb cp-design-thumb-empty" aria-hidden="true">◇</span>"""
-          else
-            """
+    val card: (UiBuilderDesignRow) -> String = { row ->
+      val title = if (row.title.isBlank()) row.designId else row.title
+      val updated =
+        row.updatedAtEpochMillis?.let { java.time.Instant.ofEpochMilli(it).toString() } ?: "unknown"
+      // The thumbnail is `loading="lazy"` and `decoding="async"` on purpose: a page of twenty
+      // designs is twenty live exports, and none of them is worth blocking the list on. The
+      // `onerror` hides a picture that could not be produced rather than leaving a broken-image
+      // glyph where a design should be — an export can fail for reasons the list already
+      // explains in words underneath.
+      val thumbnail =
+        if (row.previewHref.isBlank())
+          """<span class="cp-design-thumb cp-design-thumb-empty" aria-hidden="true">◇</span>"""
+        else
+          """
             <a class="cp-design-thumb" href="${esc(row.designHref)}" tabindex="-1" aria-hidden="true">
               <img src="${esc(row.previewHref)}" alt="" loading="lazy" decoding="async"
                 onerror="this.closest('.cp-design-thumb').classList.add('cp-design-thumb-empty');this.remove();">
             </a>
             """
-              .trimIndent()
-        val unavailable =
-          row.unopenableReason
-            ?.let {
-              "\n            <p class=\"cp-grant-withheld\"><strong>This design cannot be opened:</strong> ${esc(it)}</p>"
-            }
-            .orEmpty()
-        val duplicate =
-          if (row.copyAction.isBlank()) ""
-          else
-            """
+            .trimIndent()
+      val unavailable =
+        row.unopenableReason
+          ?.let {
+            "\n            <p class=\"cp-grant-withheld\"><strong>This design cannot be opened:</strong> ${esc(it)}</p>"
+          }
+          .orEmpty()
+      val duplicate =
+        if (row.copyAction.isBlank()) ""
+        else
+          """
             <details class="cp-design-more">
               <summary>Duplicate</summary>
               <form class="cp-design-form" method="post" action="${esc(row.copyAction)}">
@@ -7562,17 +7560,17 @@ ${captureControlsHtml().prependIndent("          ")}
               </form>
             </details>
             """
-              .trimIndent()
-        val share =
-          if (row.grants == null) ""
-          else """<a class="cp-action-chip" href="${esc(row.shareAction)}">Share</a>"""
-        // Two deliberate steps, and no `confirm()`: the summary opens a panel that says what is
-        // about to be lost, and the button inside it is the only thing that posts. A one-click
-        // Delete beside Open on a grid of thumbnails is a mis-click away from somebody's week.
-        val delete =
-          if (row.deleteAction.isBlank()) ""
-          else
-            """
+            .trimIndent()
+      val share =
+        if (row.grants == null) ""
+        else """<a class="cp-action-chip" href="${esc(row.shareAction)}">Share</a>"""
+      // Two deliberate steps, and no `confirm()`: the summary opens a panel that says what is
+      // about to be lost, and the button inside it is the only thing that posts. A one-click
+      // Delete beside Open on a grid of thumbnails is a mis-click away from somebody's week.
+      val delete =
+        if (row.deleteAction.isBlank()) ""
+        else
+          """
             <details class="cp-design-more cp-design-danger">
               <summary>Delete</summary>
               <form class="cp-design-form" method="post" action="${esc(row.deleteAction)}">
@@ -7582,12 +7580,12 @@ ${captureControlsHtml().prependIndent("          ")}
               </form>
             </details>
             """
-              .trimIndent()
-        val folder =
-          if (row.folderAction.isBlank()) {
-            row.folder?.let { "<p class=\"cp-design-meta\">Folder · ${esc(it)}</p>" }.orEmpty()
-          } else {
-            """
+            .trimIndent()
+      val folder =
+        if (row.folderAction.isBlank()) {
+          row.folder?.let { "<p class=\"cp-design-meta\">Folder · ${esc(it)}</p>" }.orEmpty()
+        } else {
+          """
             <details class="cp-design-more">
               <summary>${if (row.folder == null) "Move to folder" else "Folder · ${esc(row.folder)}"}</summary>
               <form class="cp-design-form" method="post" action="${esc(row.folderAction)}">
@@ -7598,15 +7596,15 @@ ${captureControlsHtml().prependIndent("          ")}
               </form>
             </details>
             """
-              .trimIndent()
-          }
-        val grants =
-          row.grants?.let { owned ->
-            val current =
-              if (owned.isEmpty()) "<p>Shared with nobody else.</p>"
-              else
-                owned.joinToString("\n", prefix = "<p><strong>Shared with:</strong></p>") {
-                  """
+            .trimIndent()
+        }
+      val grants =
+        row.grants?.let { owned ->
+          val current =
+            if (owned.isEmpty()) "<p>Shared with nobody else.</p>"
+            else
+              owned.joinToString("\n", prefix = "<p><strong>Shared with:</strong></p>") {
+                """
                   <form method="post" action="${esc(row.shareAction)}">
                     <input type="hidden" name="returnTo" value="designs">
                     <input type="hidden" name="actorId" value="${esc(it.actorId)}">
@@ -7614,9 +7612,9 @@ ${captureControlsHtml().prependIndent("          ")}
                     <button class="cp-grant-deny" type="submit" name="action" value="revoke">Remove</button>
                   </form>
                   """
-                    .trimIndent()
-                }
-            """
+                  .trimIndent()
+              }
+          """
             <details class="cp-design-more">
               <summary>Sharing</summary>
               $current
@@ -7629,21 +7627,21 @@ ${captureControlsHtml().prependIndent("          ")}
               </form>
             </details>
             """
-              .trimIndent()
-          }
-            ?: "<p class=\"cp-design-meta\">Shared by <code>${esc(row.ownerActorId)}</code>; the owner manages its grants.</p>"
-        // Everything the filter box matches on, in one attribute: the title a person remembers, the
-        // id they typed, and the catalog they were working in.
-        val haystack =
-          listOf(row.title, row.designId, row.catalogSystemId, row.folder.orEmpty())
-            .filter(String::isNotBlank)
-            .joinToString(" ")
-            .lowercase()
-        val cardActions =
-          listOf(duplicate, folder, grants, delete)
-            .filter(String::isNotBlank)
-            .joinToString("\n            ")
-        """
+            .trimIndent()
+        }
+          ?: "<p class=\"cp-design-meta\">Shared by <code>${esc(row.ownerActorId)}</code>; the owner manages its grants.</p>"
+      // Everything the filter box matches on, in one attribute: the title a person remembers, the
+      // id they typed, and the catalog they were working in.
+      val haystack =
+        listOf(row.title, row.designId, row.catalogSystemId, row.folder.orEmpty())
+          .filter(String::isNotBlank)
+          .joinToString(" ")
+          .lowercase()
+      val cardActions =
+        listOf(duplicate, folder, grants, delete)
+          .filter(String::isNotBlank)
+          .joinToString("\n            ")
+      """
         <article class="cp-card cp-design-card" data-cp-design="${esc(haystack)}">
           $thumbnail
           <div class="cp-design-body">
@@ -7658,16 +7656,46 @@ ${captureControlsHtml().prependIndent("          ")}
           </div>
         </article>
         """
-          .trimIndent()
-      }
+        .trimIndent()
+    }
+    fun gridOf(group: List<UiBuilderDesignRow>): String =
+      """
+      <div class="cp-designs-grid">
+      ${group.joinToString("\n", transform = card).prependIndent("      ").trimStart()}
+      </div>
+      """
+        .trimIndent()
+    // A folder is a section of its own, named, in name order, with the designs nobody has filed
+    // last: a person who files designs opens this page looking for a folder, and a folder that is
+    // only a line on each card makes them read every card to find it. Until anything is filed the
+    // page stays the one grid it always was — a "No folder" heading over everything says nothing.
+    val sections =
+      if (rows.none { it.folder != null }) gridOf(rows)
+      else
+        rows
+          .groupBy { it.folder }
+          .entries
+          .sortedWith(
+            compareBy<Map.Entry<String?, List<UiBuilderDesignRow>>> { it.key == null }
+              .thenBy(String.CASE_INSENSITIVE_ORDER) { it.key.orEmpty() }
+          )
+          .joinToString("\n") { (folder, group) ->
+            val name = folder ?: "No folder"
+            val count = "${group.size} design${if (group.size == 1) "" else "s"}"
+            """
+            <section class="cp-design-folder" aria-label="${esc(name)}">
+              <h2 class="cp-designs-h2 cp-design-folder-name">${esc(name)} <span class="cp-designs-count cp-design-folder-count">$count</span></h2>
+              ${gridOf(group).prependIndent("              ").trimStart()}
+            </section>
+            """
+              .trimIndent()
+          }
     val grid =
       if (rows.isEmpty())
         """<p class="cp-sub" id="cp-designs-empty">No designs are owned by or shared with this account yet.</p>"""
       else
         """
-        <div class="cp-designs-grid">
-        ${cards.prependIndent("        ").trimStart()}
-        </div>
+        ${sections.prependIndent("        ").trimStart()}
         <p class="cp-sub" id="cp-designs-none" hidden>No design here matches that.</p>
         """
           .trimIndent()
@@ -7746,7 +7774,7 @@ ${captureControlsHtml().prependIndent("          ")}
         """
         <div class="cp-designs-toolbar">
           <label class="cp-designs-filter"><span class="cp-visually-hidden">Filter designs</span>
-            <input type="search" id="cp-design-filter" placeholder="Filter by name, id or catalog"
+            <input type="search" id="cp-design-filter" placeholder="Filter by name, id, catalog or folder"
               autocomplete="off"></label>
           <span class="cp-designs-count" id="cp-design-count">${rows.size} design${if (rows.size == 1) "" else "s"}</span>
         </div>
@@ -7756,8 +7784,10 @@ ${captureControlsHtml().prependIndent("          ")}
           var count = document.getElementById("cp-design-count");
           var none = document.getElementById("cp-designs-none");
           if (!box) return;
-          var cards = Array.prototype.slice.call(document.querySelectorAll(".cp-design-card"));
           box.addEventListener("input", function () {
+            // Looked up here, not when the script runs: the script sits above the grid, so at
+            // parse time there were no cards yet and the filter hid nothing and counted zero.
+            var cards = Array.prototype.slice.call(document.querySelectorAll(".cp-design-card"));
             var q = box.value.trim().toLowerCase();
             var shown = 0;
             cards.forEach(function (card) {
@@ -7765,6 +7795,15 @@ ${captureControlsHtml().prependIndent("          ")}
               card.hidden = !hit;
               if (hit) shown += 1;
             });
+            // A folder whose every card is filtered out goes with them, heading and all; one that
+            // keeps some counts only what it still shows, like the total does.
+            Array.prototype.slice.call(document.querySelectorAll(".cp-design-folder")).forEach(
+              function (folder) {
+                var left = folder.querySelectorAll(".cp-design-card:not([hidden])").length;
+                folder.hidden = left === 0;
+                var label = folder.querySelector(".cp-design-folder-count");
+                if (label) label.textContent = left + (left === 1 ? " design" : " designs");
+              });
             if (count) count.textContent = shown + (shown === 1 ? " design" : " designs");
             if (none) none.hidden = shown !== 0;
           });

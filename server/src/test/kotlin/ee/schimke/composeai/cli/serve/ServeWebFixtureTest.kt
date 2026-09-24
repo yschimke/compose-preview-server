@@ -3607,6 +3607,9 @@ class ServeWebFixtureTest {
               copyAction = "/ui-builder/designs/copy?token=fixture-token",
               copySuggestedId = "shady-raccoon",
               deleteAction = "/ui-builder/morning-player/delete?token=fixture-token",
+              // Filed, beside an unfiled design, so the page draws a named folder and "No folder".
+              folder = "Media",
+              folderAction = "/ui-builder/morning-player/folder?token=fixture-token",
             ),
             ServeWeb.UiBuilderDesignRow(
               designId = "archived-dashboard",

@@ -91,7 +91,7 @@
 </section>
         <div class="cp-designs-toolbar">
   <label class="cp-designs-filter"><span class="cp-visually-hidden">Filter designs</span>
-    <input type="search" id="cp-design-filter" placeholder="Filter by name, id or catalog"
+    <input type="search" id="cp-design-filter" placeholder="Filter by name, id, catalog or folder"
       autocomplete="off"></label>
   <span class="cp-designs-count" id="cp-design-count">2 designs</span>
 </div>
@@ -101,8 +101,10 @@
   var count = document.getElementById("cp-design-count");
   var none = document.getElementById("cp-designs-none");
   if (!box) return;
-  var cards = Array.prototype.slice.call(document.querySelectorAll(".cp-design-card"));
   box.addEventListener("input", function () {
+    // Looked up here, not when the script runs: the script sits above the grid, so at
+    // parse time there were no cards yet and the filter hid nothing and counted zero.
+    var cards = Array.prototype.slice.call(document.querySelectorAll(".cp-design-card"));
     var q = box.value.trim().toLowerCase();
     var shown = 0;
     cards.forEach(function (card) {
@@ -110,75 +112,101 @@
       card.hidden = !hit;
       if (hit) shown += 1;
     });
+    // A folder whose every card is filtered out goes with them, heading and all; one that
+    // keeps some counts only what it still shows, like the total does.
+    Array.prototype.slice.call(document.querySelectorAll(".cp-design-folder")).forEach(
+      function (folder) {
+        var left = folder.querySelectorAll(".cp-design-card:not([hidden])").length;
+        folder.hidden = left === 0;
+        var label = folder.querySelector(".cp-design-folder-count");
+        if (label) label.textContent = left + (left === 1 ? " design" : " designs");
+      });
     if (count) count.textContent = shown + (shown === 1 ? " design" : " designs");
     if (none) none.hidden = shown !== 0;
   });
 })();
 </script>
-        <div class="cp-designs-grid">
-<article class="cp-card cp-design-card" data-cp-design="morning player morning-player wear-m3-catalog">
-          <a class="cp-design-thumb" href="/ui-builder/morning-player?token=fixture-token" tabindex="-1" aria-hidden="true">
-  <img src="/api/ui-builder/v1/designs/morning-player/export.svg?token=fixture-token" alt="" loading="lazy" decoding="async"
-    onerror="this.closest('.cp-design-thumb').classList.add('cp-design-thumb-empty');this.remove();">
-</a>
-          <div class="cp-design-body">
-            <h2 class="cp-design-title"><a href="/ui-builder/morning-player?token=fixture-token">Morning player</a></h2>
-            <p class="cp-design-meta"><code>morning-player</code> · wear-m3-catalog · revision 12</p>
-            <p class="cp-design-meta">owner · may read, write, export, manage_access, delete · updated 2026-01-12T10:40:00Z</p>
-            <div class="cp-design-actions">
-              <a class="cp-action-chip" href="/ui-builder/morning-player?token=fixture-token">Open</a>
-              <a class="cp-action-chip" href="/ui-builder/morning-player/access?token=fixture-token">Share</a>
+        <section class="cp-design-folder" aria-label="Media">
+  <h2 class="cp-designs-h2 cp-design-folder-name">Media <span class="cp-designs-count cp-design-folder-count">1 design</span></h2>
+  <div class="cp-designs-grid">
+  <article class="cp-card cp-design-card" data-cp-design="morning player morning-player wear-m3-catalog media">
+            <a class="cp-design-thumb" href="/ui-builder/morning-player?token=fixture-token" tabindex="-1" aria-hidden="true">
+    <img src="/api/ui-builder/v1/designs/morning-player/export.svg?token=fixture-token" alt="" loading="lazy" decoding="async"
+      onerror="this.closest('.cp-design-thumb').classList.add('cp-design-thumb-empty');this.remove();">
+  </a>
+            <div class="cp-design-body">
+              <h2 class="cp-design-title"><a href="/ui-builder/morning-player?token=fixture-token">Morning player</a></h2>
+              <p class="cp-design-meta"><code>morning-player</code> · wear-m3-catalog · revision 12</p>
+              <p class="cp-design-meta">owner · may read, write, export, manage_access, delete · updated 2026-01-12T10:40:00Z</p>
+              <div class="cp-design-actions">
+                <a class="cp-action-chip" href="/ui-builder/morning-player?token=fixture-token">Open</a>
+                <a class="cp-action-chip" href="/ui-builder/morning-player/access?token=fixture-token">Share</a>
+              </div>
+              <details class="cp-design-more">
+    <summary>Duplicate</summary>
+    <form class="cp-design-form" method="post" action="/ui-builder/designs/copy?token=fixture-token">
+      <input type="hidden" name="sourceDesignId" value="morning-player">
+      <label class="cp-grant-ttl"><span>New design id</span><input type="text" name="designId"
+        value="shady-raccoon" pattern="[A-Za-z0-9][A-Za-z0-9._-]*" required></label>
+      <button class="cp-grant-approve" type="submit">Create the copy</button>
+    </form>
+  </details>
+              <details class="cp-design-more">
+    <summary>Folder · Media</summary>
+    <form class="cp-design-form" method="post" action="/ui-builder/morning-player/folder?token=fixture-token">
+      <label class="cp-grant-ttl"><span>Folder</span><input type="text" name="folder"
+        value="Media" maxlength="160"
+        placeholder="Leave empty for no folder"></label>
+      <button class="cp-grant-approve" type="submit">Move</button>
+    </form>
+  </details>
+                          <details class="cp-design-more">
+                <summary>Sharing</summary>
+                <p><strong>Shared with:</strong></p><form method="post" action="/ui-builder/morning-player/access?token=fixture-token">
+    <input type="hidden" name="returnTo" value="designs">
+    <input type="hidden" name="actorId" value="github:colleague">
+    <code>github:colleague</code> (editor)
+    <button class="cp-grant-deny" type="submit" name="action" value="revoke">Remove</button>
+  </form>
+                <form class="cp-grant-form" method="post" action="/ui-builder/morning-player/access?token=fixture-token">
+                  <input type="hidden" name="returnTo" value="designs">
+                  <label class="cp-grant-ttl"><span>Actor id</span><input type="text" name="actorId" placeholder="github:octocat" required></label>
+                  <label><input type="radio" name="role" value="viewer" checked> viewer</label>
+                  <label><input type="radio" name="role" value="editor"> editor</label>
+                  <button class="cp-grant-approve" type="submit" name="action" value="share">Share</button>
+                </form>
+              </details>
+              <details class="cp-design-more cp-design-danger">
+    <summary>Delete</summary>
+    <form class="cp-design-form" method="post" action="/ui-builder/morning-player/delete?token=fixture-token">
+      <p class="cp-grant-fineprint">This removes <code>morning-player</code>, its history,
+      its comments and its access list. It cannot be undone.</p>
+      <button class="cp-grant-deny" type="submit" name="confirm" value="delete">Delete permanently</button>
+    </form>
+  </details>
             </div>
-            <details class="cp-design-more">
-  <summary>Duplicate</summary>
-  <form class="cp-design-form" method="post" action="/ui-builder/designs/copy?token=fixture-token">
-    <input type="hidden" name="sourceDesignId" value="morning-player">
-    <label class="cp-grant-ttl"><span>New design id</span><input type="text" name="designId"
-      value="shady-raccoon" pattern="[A-Za-z0-9][A-Za-z0-9._-]*" required></label>
-    <button class="cp-grant-approve" type="submit">Create the copy</button>
-  </form>
-</details>
-                        <details class="cp-design-more">
-              <summary>Sharing</summary>
-              <p><strong>Shared with:</strong></p><form method="post" action="/ui-builder/morning-player/access?token=fixture-token">
-  <input type="hidden" name="returnTo" value="designs">
-  <input type="hidden" name="actorId" value="github:colleague">
-  <code>github:colleague</code> (editor)
-  <button class="cp-grant-deny" type="submit" name="action" value="revoke">Remove</button>
-</form>
-              <form class="cp-grant-form" method="post" action="/ui-builder/morning-player/access?token=fixture-token">
-                <input type="hidden" name="returnTo" value="designs">
-                <label class="cp-grant-ttl"><span>Actor id</span><input type="text" name="actorId" placeholder="github:octocat" required></label>
-                <label><input type="radio" name="role" value="viewer" checked> viewer</label>
-                <label><input type="radio" name="role" value="editor"> editor</label>
-                <button class="cp-grant-approve" type="submit" name="action" value="share">Share</button>
-              </form>
-            </details>
-            <details class="cp-design-more cp-design-danger">
-  <summary>Delete</summary>
-  <form class="cp-design-form" method="post" action="/ui-builder/morning-player/delete?token=fixture-token">
-    <p class="cp-grant-fineprint">This removes <code>morning-player</code>, its history,
-    its comments and its access list. It cannot be undone.</p>
-    <button class="cp-grant-deny" type="submit" name="confirm" value="delete">Delete permanently</button>
-  </form>
-</details>
-          </div>
-        </article>
-<article class="cp-card cp-design-card" data-cp-design="archived dashboard archived-dashboard m3-catalog">
-  <span class="cp-design-thumb cp-design-thumb-empty" aria-hidden="true">◇</span>
-  <div class="cp-design-body">
-    <h2 class="cp-design-title"><a href="/ui-builder/archived-dashboard?token=fixture-token">Archived dashboard</a></h2>
-    <p class="cp-design-meta"><code>archived-dashboard</code> · m3-catalog · revision 7</p>
-    <p class="cp-design-meta">viewer · may read, export · updated 2026-01-09T10:40:00Z</p>
-    <p class="cp-grant-withheld"><strong>This design cannot be opened:</strong> catalog unavailable for stored design archived-dashboard</p>
-    <div class="cp-design-actions">
-      <a class="cp-action-chip" href="/ui-builder/archived-dashboard?token=fixture-token">Open</a>
-
-    </div>
-    <p class="cp-design-meta">Shared by <code>github:designer</code>; the owner manages its grants.</p>
+          </article>
   </div>
-</article>
-</div>
+</section>
+<section class="cp-design-folder" aria-label="No folder">
+  <h2 class="cp-designs-h2 cp-design-folder-name">No folder <span class="cp-designs-count cp-design-folder-count">1 design</span></h2>
+  <div class="cp-designs-grid">
+  <article class="cp-card cp-design-card" data-cp-design="archived dashboard archived-dashboard m3-catalog">
+    <span class="cp-design-thumb cp-design-thumb-empty" aria-hidden="true">◇</span>
+    <div class="cp-design-body">
+      <h2 class="cp-design-title"><a href="/ui-builder/archived-dashboard?token=fixture-token">Archived dashboard</a></h2>
+      <p class="cp-design-meta"><code>archived-dashboard</code> · m3-catalog · revision 7</p>
+      <p class="cp-design-meta">viewer · may read, export · updated 2026-01-09T10:40:00Z</p>
+      <p class="cp-grant-withheld"><strong>This design cannot be opened:</strong> catalog unavailable for stored design archived-dashboard</p>
+      <div class="cp-design-actions">
+        <a class="cp-action-chip" href="/ui-builder/archived-dashboard?token=fixture-token">Open</a>
+
+      </div>
+      <p class="cp-design-meta">Shared by <code>github:designer</code>; the owner manages its grants.</p>
+    </div>
+  </article>
+  </div>
+</section>
 <p class="cp-sub" id="cp-designs-none" hidden>No design here matches that.</p>
         <a class="cp-back" href="/ui-builder/?token=fixture-token">← UI builder</a>
         </main>
