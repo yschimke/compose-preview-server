@@ -292,6 +292,30 @@ on, and a design keeps exactly one owner. An agent that needs to know which id t
 own from `GET /agent-access/whoami`, which now answers with `actorId` and — when it is acting for
 somebody — `onBehalfOfActorId`.
 
+## Asking for access yourself
+
+Sharing needs the owner to act first. The other direction — a person who can see the UI builder
+asking to edit it — goes through the same approval, from `/ui-builder/request-access`:
+
+- **Anyone GitHub vouched for may read.** `ui-builder-read` is satisfied by any signed-in account,
+  a member without repository access included, and — with `--github-auth-guests` — any account
+  outside the `--github-auth-users` allowlist too, as a **guest**. Which designs they see is still
+  the design service's per-design answer, so a new account sees what was shared with it and nothing
+  else. A guest is an identity only: `currentLogin()` answers null for one, so live sessions, the
+  playground, uploads, edit leases and approving grants all treat a guest as signed out.
+- **The request names its requester, verified.** The page opens it from the reader's session, with
+  a form seal minted for that login, rather than through the ungated JSON request route — so nobody
+  can open a request in someone else's name. The approval page's *Asked from* line, which the asker
+  cannot write, says `@login, signed in with GitHub`.
+- **The approval is carried by their own session.** There is no bearer for a browser to hold: while
+  the grant lives, the requester's signed-in session answers every UI-builder capability it carries.
+  A bearer minted for such a request, where a client does collect one, behaves the same way.
+- **They act under their own name, within the approver's reach.** The actor is `github:<requester>`
+  on behalf of the approver: what they can touch is what the approver can, capped by the capabilities
+  ticked and the lifetime chosen, and what they do is recorded as theirs. That is the one difference
+  from an agent's grant, whose authorship stays `agent:<fingerprint>` — a person asking for
+  themselves is somebody, and the design history should say who.
+
 ## What it is not
 
 - **Not a session.** No cookies, no refresh, no sliding expiry. It ends when it ends.
