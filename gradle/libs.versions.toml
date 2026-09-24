@@ -191,7 +191,10 @@ composeai-contracts = "3.9.0"
 # 3.45.0 adds the remote-m3 vocabulary for those components (compose-ui-builder#214), which is what
 # `RemoteM3VocabularyParityTest` holds 3.44.0 to, plus the Figma bridge and the experimental adaptive
 # Wear widget container; no API this server calls changed.
-composeai-ui-builder = "3.45.0"
+# 3.46.0 lets a pinned catalog runtime show through the editor canvas, which drew blank for every
+# remote-m3 design (compose-ui-builder#221), and imports the RemoteBox an empty widget's native
+# preview draws (compose-ui-builder#220); no API this server calls changed.
+composeai-ui-builder = "3.46.0"
 # 1.65.0 is the first release publishing `rc-players-bom`. (1.64.0 is a tag and a GitHub Release
 # whose Maven coordinates never reached Central -- rc-players#211 -- so it cannot be pinned.)
 # 1.67.0 by hand, ahead of Renovate's soak: it pins the KMP player modules to a Java 17 toolchain
