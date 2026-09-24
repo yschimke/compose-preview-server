@@ -5,6 +5,7 @@ import ee.schimke.composeai.discovery.ComponentRecordFile
 import ee.schimke.composeai.uibuilder.export.REMOTE_CONTENT_COMPONENT_IDS
 import ee.schimke.composeai.uibuilder.export.REMOTE_CONTENT_MODIFIERS
 import ee.schimke.composeai.uibuilder.export.REMOTE_TEXT_COMPONENT_ID
+import ee.schimke.composeai.uibuilder.export.RemoteMaterial3
 import ee.schimke.composeai.uibuilder.export.UiBuilderDocument
 import ee.schimke.composeai.uibuilder.export.UiBuilderNode
 import ee.schimke.composeai.uibuilder.export.WearWidgetCodeExporter
@@ -417,6 +418,14 @@ class PublishedRemoteM3CatalogEquivalenceTest {
    * record fallback could not write its type scale, its size or its alignment — six scalar types is
    * not a typography. So the list is one shorter, and the exclusion below is the statement that it
    * was shortened deliberately.
+   *
+   * Then it came for the rest of `RemoteMaterial3`. compose-ui-builder#202 taught the emitter to
+   * write those components from their embedded record, and compose-ui-builder#214 put them in the
+   * vocabulary, so against that checkout the list is down to what `RemoteMaterial3` leaves out on
+   * purpose: `remote-icon` and the two page indicators, whose required parameters have no writable
+   * value. The published 3.44.0 this repository pins has the record but not the vocabulary, so the
+   * exclusion is taken only when the vocabulary actually names them — all of them or none, never a
+   * partial list. Once the pin moves past 3.44.0 this can become the literal three.
    */
   @Test
   fun `the emitter has a hand-written case for one of the components the catalog adds`() {
@@ -426,11 +435,19 @@ class PublishedRemoteM3CatalogEquivalenceTest {
         .filterNot { it in REMOTE_CONTENT_COMPONENT_IDS }
         .filterNot { it.startsWith("remote-m3/widget-container-") }
         .sorted()
+    val recordWritten = RemoteMaterial3.components.map { it.componentId }.toSet()
+    val recordWrittenInVocabulary = recordWritten.filter { it in REMOTE_CONTENT_COMPONENT_IDS }
+    assertTrue(
+      recordWrittenInVocabulary.isEmpty() || recordWrittenInVocabulary.toSet() == recordWritten,
+      "the vocabulary names some of the record-written Remote Material 3 components but not " +
+        "others: ${recordWritten - recordWrittenInVocabulary.toSet()}",
+    )
     assertEquals(
       offered
         .filter { it.startsWith("remote-m3/") }
         .filterNot { it.startsWith("remote-m3/widget-container-") }
         .filterNot { it == REMOTE_TEXT_COMPONENT_ID }
+        .filterNot { it in recordWrittenInVocabulary }
         .sorted(),
       inexportable,
       "the set of offered-but-unexportable components has changed — if the emitter grew a case, " +
