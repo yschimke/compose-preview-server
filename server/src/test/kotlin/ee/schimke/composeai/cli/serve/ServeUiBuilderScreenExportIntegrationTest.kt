@@ -181,6 +181,7 @@ class ServeUiBuilderScreenExportIntegrationTest {
         catalogs =
           CurrentM3UiBuilderCatalogExecutor(
             catalogSystemIds = catalogs,
+            published = UiBuilderAddonFixtures.publishedFor(catalogs),
             exportCapabilities =
               ee.schimke.composeai.uibuilder.protocol.ExportCapabilitiesV1.Builder()
                 .also {

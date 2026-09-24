@@ -2485,6 +2485,12 @@ public class ServeRunner(
       }
   }
 
+  /**
+   * The builder catalogs this process actually serves: [uiBuilderCatalogs] minus any add-on whose
+   * published file could not be read. Null until the builder lane has been opened.
+   */
+  private var servedUiBuilderCatalogs: Set<String>? = null
+
   override val uiBuilderCatalogs: Set<String> by lazy {
     options.uiBuilderCatalogs + uiBuilderAddons.map { it.id }
   }
@@ -2932,10 +2938,28 @@ public class ServeRunner(
           }
         }
     }
+    // Material 3 is the one builder catalog this build defines. Every other one — an add-on — is
+    // served only from its published file, so one whose file could not be read or composed is left
+    // out with its reason rather than failing the whole builder at startup: a delivery branch that
+    // is briefly unreachable should cost that catalog, not every catalog on the box.
+    val served = uiBuilderCatalogs.filter {
+      it == ServeCatalogsConfig.DEFAULT_UI_BUILDER_CATALOG || it in publishedCatalogs
+    }
+    (uiBuilderCatalogs - served.toSet()).sorted().forEach {
+      System.err.println(
+        "serve: UI-builder catalog $it is not served — it is not built in, and no published " +
+          "ui-builder.json for it could be read (see the lines above)"
+      )
+    }
+    check(served.isNotEmpty()) {
+      "no UI-builder catalog could be served: ${uiBuilderCatalogs.sorted().joinToString()} are " +
+        "all add-ons and none of their published files could be read"
+    }
+    servedUiBuilderCatalogs = served.toSet()
     val catalogs =
       CurrentM3UiBuilderCatalogExecutor.Builder()
         .also {
-          it.catalogSystemIds = uiBuilderCatalogs
+          it.catalogSystemIds = servedUiBuilderCatalogs!!
           it.published = publishedCatalogs
           it.nativeRuntimeIds = publishedRuntimeIds
           // `composeCode` answers a **configuration** question — is this host set up to export
@@ -3280,7 +3304,10 @@ public class ServeRunner(
     // declared in; like the editor pin, a change applies at the next start.
     val addonAdmin =
       if (adminToken != null && catalogsFile != null) {
-        ServeUiBuilderAddonAdmin(configFile = catalogsFile, serving = { uiBuilderCatalogs })
+        ServeUiBuilderAddonAdmin(
+          configFile = catalogsFile,
+          serving = { servedUiBuilderCatalogs ?: emptySet() },
+        )
       } else {
         null
       }
@@ -3527,7 +3554,7 @@ public class ServeRunner(
         wasmCatalogs = wasmCatalogs,
         wasmUiDir = usableWasmUiDir(),
         uiBuilderDir = uiBuilderAppDir,
-        uiBuilderCatalogs = uiBuilderCatalogs,
+        uiBuilderCatalogs = servedUiBuilderCatalogs ?: uiBuilderCatalogs,
         uiBuilderRuntimeDirs = uiBuilderRuntimeDirs,
         catalogUiBuilderRuntimeAsset = { runtimeId, segments ->
           catalogStore?.uiBuilderRuntimeAsset(runtimeId, segments)?.let { asset ->

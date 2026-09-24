@@ -333,7 +333,7 @@ class LocalUiBuilderTest {
         "--ui-builder-dir",
         "/opt/compose-preview-server/ui-builder",
         "--ui-builder-catalogs",
-        "m3-catalog,remote-m3",
+        "m3-catalog",
         "--open-path",
         "/ui-builder/m3-catalog/",
         "--open-browser",

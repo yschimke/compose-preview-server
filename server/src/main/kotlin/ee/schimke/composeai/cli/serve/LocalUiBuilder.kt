@@ -28,10 +28,10 @@ import java.io.File
  *
  * ## The catalog stays a packaged one
  *
- * `--ui-builder-catalogs` names catalogs the builder has a packaged adapter for (`m3-catalog`,
- * `remote-m3`); a project is not one of them and inventing an id here would only produce "catalog
- * <id> has no packaged adapter" at startup. The palette is the design system; the local project
- * enters through the record the export generates call sites from. That is exactly the seam
+ * `--ui-builder-catalogs` names catalogs the builder can serve — the built-in `m3-catalog`, or an
+ * add-on read from its published file; a project is not one of them and inventing an id here would
+ * only be refused at startup. The palette is the design system; the local project enters through
+ * the record the export generates call sites from. That is exactly the seam
  * `--ui-builder-components` was built for — this command just fills it in for you.
  */
 internal object LocalUiBuilder {
@@ -102,13 +102,13 @@ internal object LocalUiBuilder {
   const val NO_PROJECT: String = "--no-project"
 
   /**
-   * The catalogs offered when a projectless builder names none.
+   * The catalogs offered when a projectless builder names none: the built-in Material 3 one.
    *
-   * Both are packaged adapters ([ProductionUiBuilderRuntime]), which is the whole reason this mode
-   * needs nothing fetched: `--catalogs` serves the browsable preview *sites*, a different feature,
-   * and a builder catalog with no packaged adapter is refused at startup rather than fetched.
+   * Built in is the whole reason this mode needs nothing fetched. Wear (`wear-m3`) and Remote
+   * Compose (`remote-m3`) are add-ons their own repository publishes, so they need a served catalog
+   * to read them from — `remote-m3` used to be offered here while this build still synthesised it.
    */
-  val DEFAULT_CATALOGS: List<String> = listOf(DEFAULT_CATALOG, "remote-m3")
+  val DEFAULT_CATALOGS: List<String> = listOf(DEFAULT_CATALOG)
 
   /** Whether this invocation is the projectless one. */
   fun isProjectless(args: List<String>): Boolean = NO_PROJECT in args
@@ -163,9 +163,8 @@ internal object LocalUiBuilder {
         add("$DEFAULT_CATALOG=${it.path}")
       }
     }
-    // Offer every packaged design system rather than only the one being opened: the reason to run
-    // this mode is to draw against them, and picking one at launch would mean relaunching to try
-    // the other.
+    // Offer every built-in design system rather than only the one being opened, so a catalog
+    // added to [DEFAULT_CATALOGS] later needs no relaunch to try.
     if (projectless && !args.hasFlag("--ui-builder-catalogs")) {
       add("--ui-builder-catalogs")
       add(DEFAULT_CATALOGS.joinToString(","))
@@ -285,7 +284,7 @@ internal object LocalUiBuilder {
 
         compose-preview-server ui --no-project
 
-    which opens the builder against the packaged design systems
+    which opens the builder against the built-in design system
     (${DEFAULT_CATALOGS.joinToString(", ")}) and needs nothing else — no build host, no Gradle
     project, no catalog to fetch. Designs are saved under ~/.compose-preview/ui-builder-state and
     survive a restart. The Compose export still writes code; what it cannot do is call your

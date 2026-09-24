@@ -225,6 +225,7 @@ class ServeWearScreenDeploymentIntegrationTest {
         catalogs =
           CurrentM3UiBuilderCatalogExecutor(
             catalogSystemIds = PACKAGED_DEFAULT,
+            published = UiBuilderAddonFixtures.publishedFor(PACKAGED_DEFAULT),
             exportCapabilities =
               ee.schimke.composeai.uibuilder.protocol.ExportCapabilitiesV1.Builder()
                 .also {

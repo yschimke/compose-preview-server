@@ -17,7 +17,7 @@ class RemotePngExportExecutorTest {
       )
     )
   private val remote =
-    CurrentM3UiBuilderCatalogExecutor(catalogSystemIds = setOf("remote-m3")).listCatalogs().single()
+    UiBuilderAddonFixtures.executor(catalogSystemIds = setOf("remote-m3")).listCatalogs().single()
 
   private fun request(doc: DesignDocumentV1 = document) =
     RevisionPinnedUiBuilderExport(
