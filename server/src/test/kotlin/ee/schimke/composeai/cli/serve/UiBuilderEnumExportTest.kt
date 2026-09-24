@@ -271,21 +271,22 @@ class UiBuilderEnumExportTest {
 
   @Test
   fun `a variant nothing selects still refuses as a variant, not as a missing entry`() {
-    // `layout/supporting-pane-scaffold` is an adaptive API whose panes are not plain composable
-    // slots, so nothing selects its `layoutMode`. The refusal must keep reading as a call-site
-    // decision rather than as a table entry somebody could add — and must describe an adaptive
-    // component's modes rather than a card's three callables.
+    // A carousel's `kind` names which carousel function to call, and no record selects one yet,
+    // so nothing selects it. The refusal must keep reading as a call-site decision rather than as
+    // a table entry somebody could add — and must describe the carousel rather than a card's three
+    // callables. (`layout/supporting-pane-scaffold`'s `layoutMode` was the example until the
+    // projection learned to write the scaffold, compose-ui-builder#230.)
     val refusals =
       ScreenExportGate.refusals(
         document(
-          roots = listOf("panes"),
+          roots = listOf("carousel"),
           nodes =
             linkedMapOf(
-              "panes" to
+              "carousel" to
                 DesignNodeV1(
-                  id = "panes",
-                  componentId = "layout/supporting-pane-scaffold",
-                  properties = mapOf("layoutMode" to EnumValueV1("expandedTwoPane")),
+                  id = "carousel",
+                  componentId = "layout/horizontal-carousel",
+                  properties = mapOf("kind" to EnumValueV1("uncontained")),
                 )
             ),
         ),
@@ -293,7 +294,7 @@ class UiBuilderEnumExportTest {
       )
 
     assertTrue(
-      refusals.any { "names a layout mode of one adaptive component rather than a value" in it },
+      refusals.any { "names which carousel function to call rather than an argument to one" in it },
       refusals.toString(),
     )
   }

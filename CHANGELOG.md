@@ -1,5 +1,28 @@
 # Changelog
 
+## [3.59.0](https://github.com/yschimke/compose-preview-server/compare/v3.58.0...v3.59.0) (2026-09-24)
+
+
+### Bug Fixes
+
+* **deps:** update androidx-compose to v1.0.0-alpha20 ([#1042](https://github.com/yschimke/compose-preview-server/issues/1042)) ([e8d9430](https://github.com/yschimke/compose-preview-server/commit/e8d9430342fee2f6bb4744f60d482311bdb334d3))
+* **deps:** update dependency ee.schimke.composeai:rc-player-compose to v1.70.0 ([#1045](https://github.com/yschimke/compose-preview-server/issues/1045)) ([bf878a3](https://github.com/yschimke/compose-preview-server/commit/bf878a33a47ec9377a26cb2bd955fe434b175f29))
+* **deps:** update dependency ee.schimke.composeai:rc-players-bom to v1.70.0 ([#1046](https://github.com/yschimke/compose-preview-server/issues/1046)) ([12102ef](https://github.com/yschimke/compose-preview-server/commit/12102efcbef48c6da4865eff80ebbfaf6bfd3321))
+* **deps:** update dependency io.github.classgraph:classgraph to v4.8.196 ([#1043](https://github.com/yschimke/compose-preview-server/issues/1043)) ([16e2b96](https://github.com/yschimke/compose-preview-server/commit/16e2b96ed3e87406da0b46086905f232aee38a63))
+* **deps:** update design-parity packages to v1.1.0 ([#1047](https://github.com/yschimke/compose-preview-server/issues/1047)) ([da8721c](https://github.com/yschimke/compose-preview-server/commit/da8721cd650ff08fa766c160bfc98fbea0a83aaf))
+
+## [3.58.0](https://github.com/yschimke/compose-preview-server/compare/v3.57.0...v3.58.0) (2026-09-24)
+
+
+### Features
+
+* **ui-builder:** pin the editor per instance in catalogs.json ([#1036](https://github.com/yschimke/compose-preview-server/issues/1036)) ([2b05545](https://github.com/yschimke/compose-preview-server/commit/2b05545b5af283b7d9a1c5b45a14b345bbb38427))
+
+
+### Bug Fixes
+
+* **deploy:** carry window-core onto the image's renderer sidecar ([#1038](https://github.com/yschimke/compose-preview-server/issues/1038)) ([c3b6096](https://github.com/yschimke/compose-preview-server/commit/c3b6096cd376ed0c774ca2e986677ba6b26da28e))
+
 ## [3.57.0](https://github.com/yschimke/compose-preview-server/compare/v3.56.0...v3.57.0) (2026-09-24)
 
 
