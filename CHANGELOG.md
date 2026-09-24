@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.57.0](https://github.com/yschimke/compose-preview-server/compare/v3.56.0...v3.57.0) (2026-09-24)
+
+
+### Features
+
+* **ui-builder:** group the designs page by folder ([#1031](https://github.com/yschimke/compose-preview-server/issues/1031)) ([e526a40](https://github.com/yschimke/compose-preview-server/commit/e526a40bdf243786db8519bfe3dafe5149fb4359))
+
 ## [3.56.0](https://github.com/yschimke/compose-preview-server/compare/v3.55.0...v3.56.0) (2026-09-24)
 
 
