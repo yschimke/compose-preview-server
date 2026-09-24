@@ -28,7 +28,8 @@ class ServeUiBuilderEditorTest {
   private val fetched = mutableListOf<String>()
 
   private fun fetch(url: String) =
-    (published[url] ?: throw IOException("GET $url answered HTTP 404")).also { fetched += url }
+    (published[url] ?: throw IOException("GET $url answered HTTP 404"))
+      .also { fetched += url }
       .inputStream()
 
   private fun store() = ServeUiBuilderEditorStore(File(tmp, "editors"), ::fetch, onLog = {})
@@ -89,7 +90,10 @@ class ServeUiBuilderEditorTest {
     val pin =
       release(
         "4.0.0",
-        mapOf("index.html" to "<html/>", "ui-builder-web.json" to manifest("4.0.0", serverApi = 99)),
+        mapOf(
+          "index.html" to "<html/>",
+          "ui-builder-web.json" to manifest("4.0.0", serverApi = 99),
+        ),
       )
     val failed = assertIs<ServeUiBuilderEditorStore.Result.Failed>(store().resolve(pin))
     assertTrue("server API 99" in failed.reason, failed.reason)

@@ -55,8 +55,8 @@ data class ServeCatalogsConfig(
   /**
    * The **UI-builder editor** this instance serves, pinned by version and digest
    * ([ServeUiBuilderEditor]). Null ⇒ the editor bundled in the distribution. Config rather than
-   * code so an editor fix ships as a compose-ui-builder release plus this one value, with no
-   * server release; rolling back is removing it.
+   * code so an editor fix ships as a compose-ui-builder release plus this one value, with no server
+   * release; rolling back is removing it.
    */
   val editor: EditorPin? = null,
 ) {

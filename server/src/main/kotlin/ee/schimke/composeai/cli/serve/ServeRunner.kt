@@ -2461,12 +2461,9 @@ public class ServeRunner(
    * catalogs file, which is also no pin to apply.
    */
   private val uiBuilderEditorStore: ServeUiBuilderEditorStore? by lazy {
-    catalogsFilePath
-      ?.let(::File)
-      ?.absoluteFile
-      ?.parentFile
-      ?.resolve("ui-builder-editors")
-      ?.let { ServeUiBuilderEditorStore(it) }
+    catalogsFilePath?.let(::File)?.absoluteFile?.parentFile?.resolve("ui-builder-editors")?.let {
+      ServeUiBuilderEditorStore(it)
+    }
   }
 
   /** Which editor this process is serving; filled by [usableUiBuilderDir]. */

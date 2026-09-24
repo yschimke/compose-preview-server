@@ -15,11 +15,11 @@ import okhttp3.Request
  * The **UI-builder editor as a per-instance pin** rather than a server release
  * ([#1035](https://github.com/yschimke/compose-preview-server/issues/1035)).
  *
- * An editor-only fix used to need four steps before a user saw it: a compose-ui-builder release,
- * a version bump here, a server release and a deploy — even when no server code changed. The
- * catalogs had already escaped that: which catalogs a box serves is `catalogs.json` under `/config`,
- * and their runtimes are fetched live. What stayed baked in was the editor itself, unpacked into
- * the distribution by `unpackUiBuilderWeb`.
+ * An editor-only fix used to need four steps before a user saw it: a compose-ui-builder release, a
+ * version bump here, a server release and a deploy — even when no server code changed. The catalogs
+ * had already escaped that: which catalogs a box serves is `catalogs.json` under `/config`, and
+ * their runtimes are fetched live. What stayed baked in was the editor itself, unpacked into the
+ * distribution by `unpackUiBuilderWeb`.
  *
  * Now the editor is served like a catalog runtime: a versioned, immutable archive named by the
  * instance's own config.
@@ -34,23 +34,23 @@ import okhttp3.Request
  * - **Pin.** `editor` in `catalogs.json`, or `PUT /admin/editor` ([ServeUiBuilderEditorAdmin]),
  *   which verifies the archive before it writes the pin. Rolling back is `DELETE /admin/editor` or
  *   deleting the key.
- * - **Fetch and cache.** [ServeUiBuilderEditorStore] downloads the archive once, checks its
- *   SHA-256 against the pin, unpacks it under `/config/ui-builder-editors/`, and serves that
- *   directory in place of the bundled one. Any failure falls back to the bundled editor, which
- *   stays for first boot and offline use.
+ * - **Fetch and cache.** [ServeUiBuilderEditorStore] downloads the archive once, checks its SHA-256
+ *   against the pin, unpacks it under `/config/ui-builder-editors/`, and serves that directory in
+ *   place of the bundled one. Any failure falls back to the bundled editor, which stays for first
+ *   boot and offline use.
  * - **Contract.** The archive's [EditorManifest] declares the editor↔server HTTP API it speaks
  *   ([EditorManifest.serverApi]); a pin outside [SUPPORTED_SERVER_API] is refused.
  *
  * A pin takes effect at **startup**. The editor directory is read by several lazily built caches in
  * [ServeHttpServer] (the bundle version, the icon cache, the new-design fixture), and swapping it
- * under them would serve a page from one editor with assets from another. A restart is cheap
- * beside the release-and-deploy chain this replaces, and the admin API says when one is owed.
+ * under them would serve a page from one editor with assets from another. A restart is cheap beside
+ * the release-and-deploy chain this replaces, and the admin API says when one is owed.
  *
  * The JVM-side pieces — runtime, export and render-bundle jars — stay build-time dependencies: they
  * run in-process or in the render subprocess. [SUPPORTED_SERVER_API] is what keeps a pinned editor
  * within range of them.
  */
-internal object ServeUiBuilderEditor {
+object ServeUiBuilderEditor {
   /** The manifest compose-ui-builder writes into the archive root. */
   const val MANIFEST_FILE: String = "ui-builder-web.json"
 
@@ -241,7 +241,8 @@ class ServeUiBuilderEditorStore(
           val n = input.read(buffer)
           if (n < 0) break
           total += n
-          if (total > MAX_ARCHIVE_BYTES) throw IOException("editor archive exceeds $MAX_ARCHIVE_BYTES bytes")
+          if (total > MAX_ARCHIVE_BYTES)
+            throw IOException("editor archive exceeds $MAX_ARCHIVE_BYTES bytes")
           sha.update(buffer, 0, n)
           out.write(buffer, 0, n)
         }
@@ -265,9 +266,7 @@ class ServeUiBuilderEditorStore(
       if (entries.size > MAX_ENTRIES) throw IOException("editor archive has too many entries")
       for (entry in entries) {
         val name = entry.name
-        if (
-          name.startsWith("/") || name.contains('\\') || name.split('/').any { it == ".." }
-        ) {
+        if (name.startsWith("/") || name.contains('\\') || name.split('/').any { it == ".." }) {
           throw IOException("editor archive contains unsafe path '$name'")
         }
         val out = File(into, name)
@@ -327,9 +326,9 @@ class ServeUiBuilderEditorStore(
 }
 
 /**
- * Which editor this server is serving, and what `catalogs.json` pins — the answer to
- * `GET /admin/editor`, and the pair [ServeUiBuilderEditorAdmin] compares to say whether a restart
- * is owed.
+ * Which editor this server is serving, and what `catalogs.json` pins — the answer to `GET
+ * /admin/editor`, and the pair [ServeUiBuilderEditorAdmin] compares to say whether a restart is
+ * owed.
  */
 data class ServeUiBuilderEditorState(
   /** The bundled editor's version, from its manifest, or null when unknown / not packaged. */
@@ -366,7 +365,9 @@ class ServeUiBuilderEditorAdmin(
     /** A malformed pin, or one whose archive failed its digest or contract check — a 400. */
     data class Invalid(val reason: String) : Result
 
-    /** Already pinned exactly so (or nothing to remove) — a 409, which a reconcile reads as done. */
+    /**
+     * Already pinned exactly so (or nothing to remove) — a 409, which a reconcile reads as done.
+     */
     data class Conflict(val reason: String) : Result
 
     /** No config file to write — a pin that would not survive the restart that applies it. */
@@ -374,8 +375,10 @@ class ServeUiBuilderEditorAdmin(
   }
 
   /** The pin `catalogs.json` holds now, which is what the next start will serve. */
-  fun configuredPin(): ServeCatalogsConfig.EditorPin? =
-    runCatching { configFile?.load()?.editor }.getOrNull()
+  fun configuredPin(): ServeCatalogsConfig.EditorPin? = runCatching {
+    configFile?.load()?.editor
+  }
+    .getOrNull()
 
   fun state(): ServeUiBuilderEditorState = servingState()
 
@@ -402,11 +405,14 @@ class ServeUiBuilderEditorAdmin(
     val file = configFile ?: return Result.Unavailable(NO_FILE)
     if (configuredPin() == null) return Result.Conflict("an editor pin is not configured")
     file.update { it.copy(editor = null) }
-    onLog("serve: UI-builder editor pin removed via admin API; the bundled editor serves next start")
+    onLog(
+      "serve: UI-builder editor pin removed via admin API; the bundled editor serves next start"
+    )
     return Result.Ok(null, restartRequired = servingState().servingPin != null)
   }
 
   private companion object {
-    const val NO_FILE = "no catalogs config file is configured; pass --catalogs-file to pin an editor"
+    const val NO_FILE =
+      "no catalogs config file is configured; pass --catalogs-file to pin an editor"
   }
 }
