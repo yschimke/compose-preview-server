@@ -5442,6 +5442,9 @@ cp-page-zoom button:focus-visible {
 
 .cp-designs-grid { display: grid; gap: 18px; margin: 0 0 24px;
   grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); }
+.cp-design-folder { margin: 0 0 8px; }
+.cp-design-folder[hidden] { display: none; }
+.cp-design-folder-name { display: flex; align-items: baseline; gap: 10px; margin: 0 0 12px; }
 .cp-card.cp-design-card { display: flex; flex-direction: column; overflow: hidden;
   padding: 0; text-align: left; }
 .cp-card.cp-design-card[hidden] { display: none; }
