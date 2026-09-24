@@ -59,7 +59,34 @@ data class ServeCatalogsConfig(
    * release; rolling back is removing it.
    */
   val editor: EditorPin? = null,
+  /**
+   * The **UI-builder add-ons** this instance serves beside the default `m3-catalog`.
+   *
+   * The image ships Material 3 as its one built-in builder catalog. Wear (`wear-m3`) and Remote
+   * Compose (`remote-m3`) are published by their own catalog repository, draw through the renderer
+   * runtime that repository publishes, and are something an instance opts into — here, so the
+   * choice is this deployment's tracked config rather than an image default every adopter inherits.
+   * Null ⇒ no add-ons.
+   */
+  val uiBuilder: UiBuilder? = null,
 ) {
+  /** The UI-builder section: which add-on builder catalogs this instance serves. */
+  @Serializable data class UiBuilder(val addons: List<UiBuilderAddon> = emptyList())
+
+  /**
+   * One add-on builder catalog: the [id] designs pin (`wear-m3`), and the [source] catalog whose
+   * `design-artifacts/<source>` branch publishes its `ui-builder.json`, renderer runtime and the
+   * bundle its designs compile against natively. Null [source] ⇒ the same as [id].
+   *
+   * An add-on is always read from its published file — there is no built-in definition to fall back
+   * to — so [source] must be a catalog this instance serves.
+   */
+  @Serializable
+  data class UiBuilderAddon(val id: String, val source: String? = null) {
+    val sourceSystem: String
+      get() = source ?: id
+  }
+
   /**
    * One pinned editor archive: compose-ui-builder's [version], the archive's [sha256], and an
    * optional [url] for an archive hosted somewhere other than its GitHub release.
@@ -189,6 +216,14 @@ data class ServeCatalogsConfig(
       }
     }
     editor?.let { pin -> validateEditor(pin)?.let { add(it) } }
+    uiBuilder?.addons.orEmpty().let { addons ->
+      addons
+        .groupBy { it.id }
+        .filterValues { it.size > 1 }
+        .keys
+        .forEach { add("duplicate UI-builder add-on '$it'") }
+      addons.forEach { addon -> validateAddon(addon)?.let { add(it) } }
+    }
     val served = catalogs.map { it.system }.toSet()
     val seenHosts = mutableSetOf<String>()
     for (site in sites) {
@@ -283,6 +318,23 @@ data class ServeCatalogsConfig(
         !SHA256_RE.matches(pin.sha256) -> "editor ${pin.version} needs a 64-hex-digit sha256"
         pin.url != null && !pin.url.startsWith("https://") ->
           "editor ${pin.version} url must be https"
+        else -> null
+      }
+
+    /**
+     * The builder catalog every instance serves; never an add-on. Declaring it as one would make it
+     * published-only, which is a different, narrower thing than what the image ships.
+     */
+    const val DEFAULT_UI_BUILDER_CATALOG: String = "m3-catalog"
+
+    /** Why [addon] is unusable, or null when it's well-formed. */
+    fun validateAddon(addon: UiBuilderAddon): String? =
+      when {
+        !SYSTEM_RE.matches(addon.id) -> "invalid UI-builder add-on id '${addon.id}'"
+        addon.id == DEFAULT_UI_BUILDER_CATALOG ->
+          "'${addon.id}' is the built-in UI-builder catalog, not an add-on"
+        addon.source != null && !SYSTEM_RE.matches(addon.source) ->
+          "UI-builder add-on '${addon.id}' has an invalid source '${addon.source}'"
         else -> null
       }
 

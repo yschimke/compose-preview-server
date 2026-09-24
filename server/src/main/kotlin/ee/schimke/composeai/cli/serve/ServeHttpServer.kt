@@ -384,6 +384,11 @@ class ServeHttpServer(
    */
   private val editorAdmin: ServeUiBuilderEditorAdmin? = null,
   /**
+   * The instance's **UI-builder add-ons** ([ServeUiBuilderAddonAdmin]) — the builder catalogs it
+   * serves beside `m3-catalog`. Gated by [adminToken]; null ⇒ the routes are not registered.
+   */
+  private val addonAdmin: ServeUiBuilderAddonAdmin? = null,
+  /**
    * Runtime **UI-builder** administration ([ServeUiBuilderAdmin]) — listing every design on the
    * host and deleting one, whoever owns it. Gated by [adminToken], [adminReadToken], or a
    * configured [uiBuilderAdministrators] identity; null ⇒ the `/admin/ui-builder` routes are not
@@ -841,6 +846,9 @@ class ServeHttpServer(
 
   /** As [adminEnabled], for the `/admin/editor` routes. */
   private val editorAdminEnabled: Boolean = editorAdmin != null && !adminToken.isNullOrBlank()
+
+  /** As [adminEnabled], for the `/admin/ui-builder-addons` routes. */
+  private val addonAdminEnabled: Boolean = addonAdmin != null && !adminToken.isNullOrBlank()
 
   /** As [adminEnabled], for `/admin/ui-builder`, with the additional UI-builder-only actor gate. */
   private val uiBuilderAdminEnabled: Boolean =
@@ -1841,6 +1849,25 @@ class ServeHttpServer(
           delete("/admin/editor") {
             if (rejectBadAdminToken()) return@delete
             respondAdminEditorResult(withContext(Dispatchers.IO) { admin.clear() })
+          }
+        }
+
+        // The instance's UI-builder add-ons: builder catalogs beyond m3-catalog, declared in
+        // catalogs.json. Applies at the next start, like the editor pin.
+        if (addonAdminEnabled) {
+          val admin = addonAdmin!!
+          get("/admin/ui-builder-addons") {
+            if (rejectBadAdminToken(allowReadToken = true)) return@get
+            respondAdminAddons(admin)
+          }
+          post("/admin/ui-builder-addons") {
+            if (rejectBadAdminToken()) return@post
+            handleAdminAddonAdd(admin)
+          }
+          delete("/admin/ui-builder-addons/{id}") {
+            if (rejectBadAdminToken()) return@delete
+            val id = call.parameters["id"].orEmpty()
+            respondAdminAddonResult(withContext(Dispatchers.IO) { admin.remove(id) })
           }
         }
 
@@ -5422,6 +5449,71 @@ class ServeHttpServer(
       ),
       ContentType.Application.Json,
     )
+  }
+
+  /** `GET /admin/ui-builder-addons`: what `catalogs.json` declares, and what is serving now. */
+  private suspend fun RoutingContext.respondAdminAddons(admin: ServeUiBuilderAddonAdmin) {
+    val configured = withContext(Dispatchers.IO) { admin.configured() }
+    val serving = admin.serving()
+    call.respondText(
+      JSON.encodeToString(
+        AdminAddonsResponse.serializer(),
+        AdminAddonsResponse(
+          addons = configured,
+          serving = serving.sorted(),
+          restartRequired = configured.any { it.id !in serving },
+        ),
+      ),
+      ContentType.Application.Json,
+    )
+  }
+
+  /** `POST /admin/ui-builder-addons`: declare a [ServeCatalogsConfig.UiBuilderAddon]. */
+  private suspend fun RoutingContext.handleAdminAddonAdd(admin: ServeUiBuilderAddonAdmin) {
+    val body =
+      withContext(Dispatchers.IO) {
+        call.receiveStream().use { readCapped(it, MAX_ADMIN_BODY_BYTES) }
+      }
+    if (body == null) {
+      call.respondText("request body too large", status = HttpStatusCode.PayloadTooLarge)
+      return
+    }
+    val addon = runCatching {
+      JSON.decodeFromString(
+        ServeCatalogsConfig.UiBuilderAddon.serializer(),
+        body.decodeToString(),
+      )
+    }
+      .getOrElse {
+        call.respondText("invalid add-on: ${it.message}", status = HttpStatusCode.BadRequest)
+        return
+      }
+    respondAdminAddonResult(withContext(Dispatchers.IO) { admin.add(addon) })
+  }
+
+  private suspend fun RoutingContext.respondAdminAddonResult(
+    result: ServeUiBuilderAddonAdmin.Result
+  ) {
+    when (result) {
+      is ServeUiBuilderAddonAdmin.Result.Ok ->
+        call.respondText(
+          JSON.encodeToString(
+            AdminAddonResult.serializer(),
+            AdminAddonResult(
+              id = result.id,
+              status = "ok",
+              restartRequired = result.restartRequired,
+            ),
+          ),
+          ContentType.Application.Json,
+        )
+      is ServeUiBuilderAddonAdmin.Result.Invalid ->
+        call.respondText(result.reason, status = HttpStatusCode.BadRequest)
+      is ServeUiBuilderAddonAdmin.Result.Conflict ->
+        call.respondText(result.reason, status = HttpStatusCode.Conflict)
+      is ServeUiBuilderAddonAdmin.Result.Unavailable ->
+        call.respondText(result.reason, status = HttpStatusCode.ServiceUnavailable)
+    }
   }
 
   /** `GET /admin/editor`: what is serving, what is bundled, and what the next start will pin. */
@@ -17234,6 +17326,23 @@ private data class AdminUiBuilderRepairResult(
 
 /** One configured hostname on `GET /admin/sites`. */
 @Serializable private data class AdminSiteDto(val host: String, val system: String)
+
+/** `GET /admin/ui-builder-addons`. [addons] is what the next start serves. */
+@Serializable
+private data class AdminAddonsResponse(
+  val schema: String = "compose-preview-serve/admin-ui-builder-addons/v1",
+  val addons: List<ServeCatalogsConfig.UiBuilderAddon>,
+  val serving: List<String>,
+  val restartRequired: Boolean,
+)
+
+@Serializable
+private data class AdminAddonResult(
+  val schema: String = "compose-preview-serve/admin-ui-builder-addon-result/v1",
+  val id: String,
+  val status: String,
+  val restartRequired: Boolean,
+)
 
 /** `GET /admin/editor`. [pinned] is what `catalogs.json` holds, i.e. what the next start serves. */
 @Serializable

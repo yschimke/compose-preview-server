@@ -189,5 +189,16 @@
       "host": "wear.preview.coo.ee",
       "system": "wear-m3-catalog"
     }
-  ]
+  ],
+  "uiBuilder": {
+    "addons": [
+      {
+        "id": "wear-m3",
+        "source": "wear-m3-catalog"
+      },
+      {
+        "id": "remote-m3"
+      }
+    ]
+  }
 }

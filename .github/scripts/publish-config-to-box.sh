@@ -559,6 +559,44 @@ elif [[ "${PRUNE}" == 1 ]]; then
   delete /admin/editor "editor pin" || true
 fi
 
+# UI-builder add-ons: builder catalogs this box serves beside the image's built-in m3-catalog
+# (`uiBuilder.addons` in catalogs.json — Wear and Remote Compose on preview.coo.ee). Additive like
+# everything else: POST each declared one (409 = already there). Under --prune, one the box has
+# configured and the file no longer declares is removed. Either way the change applies at the
+# box's next START, since the builder's catalog set is fixed when its runtime is built.
+echo "Reconciling UI-builder add-ons from ${CATALOGS_FILE#"${REPO_ROOT}/"}"
+addons_skipped=0
+while IFS= read -r addon; do
+  [[ -n "${addon}" ]] || continue
+  addon_id=$(printf '%s' "${addon}" | jq -r '.id')
+  post /admin/ui-builder-addons "${addon}" "UI-builder add-on ${addon_id}" || {
+    if [[ $? == 2 ]]; then
+      addons_skipped=1
+      break
+    fi
+  }
+done < <(jq -c '.uiBuilder.addons // [] | .[]' "${CATALOGS_FILE}")
+if [[ "${PRUNE}" == 1 && "${addons_skipped}" == 0 ]]; then
+  # Injectable so the self-test can drive the diff without a server; nothing else should set it.
+  addon_listing="${PRUNE_BOX_ADDONS_JSON:-}"
+  if [[ -z "${addon_listing}" && "${DRY_RUN}" != 1 ]]; then
+    addon_listing=$(curl -sS -m 30 -H "${ADMIN_TOKEN_HEADER}: ${ADMIN_TOKEN}" \
+      "${BASE_URL}/admin/ui-builder-addons" 2>/dev/null || true)
+  fi
+  declared_addons=$(jq -r '.uiBuilder.addons // [] | .[].id' "${CATALOGS_FILE}" | sort -u)
+  while IFS= read -r addon_id; do
+    [[ -n "${addon_id}" ]] || continue
+    grep -qxF "${addon_id}" <<<"${declared_addons}" && continue
+    delete "/admin/ui-builder-addons/${addon_id}" "UI-builder add-on ${addon_id}" || true
+  done < <(printf '%s' "${addon_listing}" | jq -r '.addons // [] | .[].id' 2>/dev/null)
+fi
+if [[ "${addons_skipped}" == 1 ]]; then
+  echo "::warning::UI-builder add-ons were not reconciled — this box predates /admin/ui-builder-addons. It keeps serving the builder catalogs its image defaults to."
+fi
+if [[ -n "$(jq -r '.uiBuilder.addons // [] | .[].id' "${CATALOGS_FILE}")" ]]; then
+  echo "::notice::UI-builder add-ons apply at the box's next restart."
+fi
+
 if [[ "${groups_skipped}" == 1 ]]; then
   echo "::warning::front-page groups were not reconciled — this box predates /admin/groups. Catalogs are published ungrouped; the next publish against a newer image will group them."
 fi

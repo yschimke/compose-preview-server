@@ -2460,6 +2460,49 @@ public class ServeRunner(
    * durable `/config` volume, so a restart that re-applies a pin does not re-download it. Null ⇒ no
    * catalogs file, which is also no pin to apply.
    */
+  /**
+   * The UI-builder add-ons `catalogs.json` declares (`uiBuilder.addons`), well-formed ones only —
+   * [ServeCatalogsConfig.problems] has already reported the rest.
+   *
+   * An add-on is a builder catalog beyond the image's built-in `m3-catalog`: served, read from its
+   * published `ui-builder.json`, and compiled natively against its `source` catalog. The three
+   * overrides below fold them into the options every other reader already consults, so an add-on
+   * declared in config and the same catalog passed as flags are one code path.
+   */
+  private val uiBuilderAddons: List<ServeCatalogsConfig.UiBuilderAddon> by lazy {
+    catalogsConfig.uiBuilder
+      ?.addons
+      .orEmpty()
+      .filter { ServeCatalogsConfig.validateAddon(it) == null }
+      .distinctBy { it.id }
+      .also { addons ->
+        if (addons.isNotEmpty()) {
+          System.err.println(
+            "serve: UI-builder add-ons from catalogs.json: " +
+              addons.joinToString { if (it.source == null) it.id else "${it.id} (${it.source})" }
+          )
+        }
+      }
+  }
+
+  override val uiBuilderCatalogs: Set<String> by lazy {
+    options.uiBuilderCatalogs + uiBuilderAddons.map { it.id }
+  }
+
+  /** An add-on's `source` is its native compile bundle too; an explicit flag still wins. */
+  override val uiBuilderNativeCatalogs: Map<String, String> by lazy {
+    uiBuilderAddons.filter { it.source != null }.associate { it.id to it.sourceSystem } +
+      options.uiBuilderNativeCatalogs
+  }
+
+  /**
+   * An add-on has no built-in definition to keep, so it is always allowed its published file, even
+   * on a host that narrowed `--ui-builder-published-catalogs` for the others.
+   */
+  override val uiBuilderPublishedCatalogs: Set<String>? by lazy {
+    options.uiBuilderPublishedCatalogs?.let { allowed -> allowed + uiBuilderAddons.map { it.id } }
+  }
+
   private val uiBuilderEditorStore: ServeUiBuilderEditorStore? by lazy {
     catalogsFilePath?.let(::File)?.absoluteFile?.parentFile?.resolve("ui-builder-editors")?.let {
       ServeUiBuilderEditorStore(it)
@@ -2808,7 +2851,7 @@ public class ServeRunner(
     // Which catalogs the operator lets read their own published file. Null is "every enabled one",
     // which is the behaviour the loader shipped with; an empty set turns the whole path off without
     // a release, and a named set opts in one catalog at a time.
-    val publishedAllowed = options.uiBuilderPublishedCatalogs
+    val publishedAllowed = uiBuilderPublishedCatalogs
     if (publishedAllowed != null) {
       // Said once, at startup, because the difference between "this catalog has no published file"
       // and "this host was told not to read it" is invisible in the per-catalog lines below and is
@@ -3233,6 +3276,14 @@ public class ServeRunner(
       } else {
         null
       }
+    // Runtime UI-builder add-on administration. Needs the admin token and the file the add-ons are
+    // declared in; like the editor pin, a change applies at the next start.
+    val addonAdmin =
+      if (adminToken != null && catalogsFile != null) {
+        ServeUiBuilderAddonAdmin(configFile = catalogsFile, serving = { uiBuilderCatalogs })
+      } else {
+        null
+      }
     // Runtime producer-trust administration. Needs only the admin token: unlike the catalog admin
     // there's nothing to fetch, and a box with no trust store yet is exactly the one that most
     // needs
@@ -3507,6 +3558,7 @@ public class ServeRunner(
         sourceOnboarding = sourceOnboarding,
         siteAdmin = siteAdmin,
         editorAdmin = editorAdmin,
+        addonAdmin = addonAdmin,
         uiBuilderAdmin = uiBuilderAdmin,
         uiBuilderDesignLibrary = uiBuilderDesignLibrary,
         uiBuilderDesignCatalogs = {
@@ -3683,6 +3735,9 @@ public class ServeRunner(
     }
     if (editorAdmin != null) {
       System.err.println("serve: editor pin admin API enabled at /admin/editor")
+    }
+    if (addonAdmin != null) {
+      System.err.println("serve: UI-builder add-on admin API enabled at /admin/ui-builder-addons")
     }
     if (siteAdmin != null) {
       System.err.println(

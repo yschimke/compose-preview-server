@@ -357,6 +357,28 @@ a pin the committed file no longer declares. The runtime, export and render-bund
 the server release. The editor↔server API version is what keeps a pinned editor compatible with
 them.
 
+### UI-builder add-ons (`uiBuilder.addons` in `catalogs.json`)
+
+Material 3 (`m3-catalog`) is the UI builder's built-in catalog. Other builder catalogs are
+**add-ons**: their own catalog repository publishes them (a `ui-builder.json` plus a renderer
+runtime on its `design-artifacts/<system>` branch), and an instance turns them on in its
+`catalogs.json`:
+
+```json
+{ "uiBuilder": { "addons": [ { "id": "wear-m3", "source": "wear-m3-catalog" }, { "id": "remote-m3" } ] },
+  "catalogs": [ … ] }
+```
+
+`id` is the builder catalog designs pin. `source` is the served catalog whose delivery branch
+publishes it and whose bundle its designs compile against natively; it defaults to `id`, and it
+must be one of `catalogs`. An add-on is always read from its published file. Wear and Remote Compose
+are the add-ons preview.coo.ee declares in `deploy/preview.coo.ee/catalogs.json`.
+
+On a running box, `GET /admin/ui-builder-addons` lists them, `POST` declares one and
+`DELETE /admin/ui-builder-addons/<id>` removes one. Like the editor pin, a change applies at the
+next restart. `publish-config-to-box.sh` posts the committed list, and with `--prune` removes an
+add-on the file no longer declares.
+
 ### Serving a catalog on its own hostname
 
 A published catalog can additionally be served on a hostname of its own, where it presents as the

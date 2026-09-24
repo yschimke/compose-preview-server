@@ -90,6 +90,22 @@ out="$(run "${BOX_LISTING}" "${STATUS_WITH_REGISTRY}")"
 check "puts the declared pin" 'PUT /admin/editor {"version":"3.48.0"' "${out}"
 check_absent "does not clear a declared pin" "DELETE /admin/editor" "${out}"
 
+echo "UI-builder add-ons are POSTed, and --prune removes one the file no longer declares"
+cat > "${work}/config/catalogs.json" <<'JSON'
+{ "uiBuilder": { "addons": [ { "id": "wear-m3", "source": "wear-m3-catalog" } ] },
+  "catalogs": [ { "system": "compose-m3", "repo": "yschimke/compose-ai-tools" } ], "sites": [] }
+JSON
+out="$(BASE_URL=https://example.invalid ADMIN_TOKEN=unused DEPLOY_CONFIG_DIR="${work}/config" \
+  PRUNE_BOX_CATALOGS_JSON="${BOX_LISTING}" PRUNE_STATUS_JSON="${STATUS_WITH_REGISTRY}" \
+  PRUNE_BOX_ADDONS_JSON='{"addons":[{"id":"wear-m3"},{"id":"retired-addon"}]}' \
+  bash "${SCRIPT}" --dry-run --prune 2>&1 || true)"
+check "posts the declared add-on" 'POST /admin/ui-builder-addons {"id":"wear-m3","source":"wear-m3-catalog"}' "${out}"
+check "removes an undeclared add-on under --prune" "DELETE /admin/ui-builder-addons/retired-addon" "${out}"
+check_absent "keeps the declared add-on" "DELETE /admin/ui-builder-addons/wear-m3" "${out}"
+out="$(BASE_URL=https://example.invalid ADMIN_TOKEN=unused DEPLOY_CONFIG_DIR="${work}/config" \
+  PRUNE_BOX_ADDONS_JSON='{"addons":[{"id":"retired-addon"}]}' bash "${SCRIPT}" --dry-run 2>&1 || true)"
+check_absent "removes nothing without --prune" "DELETE /admin/ui-builder-addons/" "${out}"
+
 if [[ "${failures}" -gt 0 ]]; then
   echo "${failures} check(s) failed"
   exit 1
