@@ -52,6 +52,20 @@ data class ServeGithubAuthConfig(
    */
   val imageRepository: String? = null,
   val allowedUsers: Set<String> = emptySet(),
+  /**
+   * `--github-auth-guests`: let a GitHub account outside [allowedUsers] sign in anyway, as a
+   * **guest**.
+   *
+   * A guest is deliberately invisible to every existing gate: [ServeGithubAuth.currentLogin]
+   * answers null for one, so live sessions, the playground, image uploads, edit leases and grant
+   * approval all treat a guest exactly as they treat an anonymous visitor. The one thing a guest
+   * session carries is an identity — [ServeGithubAuth.currentSignedInLogin] — which the UI builder
+   * reads to let the account see the designs shared with it, read-only, and to ask for more.
+   *
+   * No repository access is looked up for a guest, so none can be lent by one. Without an allowlist
+   * every account is already a member, and this has nothing to do.
+   */
+  val allowGuests: Boolean = false,
   val callbackBaseUrl: String? = null,
   /**
    * The domain the auth cookies are written for, so **one sign-in covers a parent host and every
@@ -219,7 +233,13 @@ class ServeGithubAuth(
     // that [refreshSession] may never slide a session past.
     val authenticatedAt = clock.millis()
     val session =
-      signedSession(user.login, user.repositoryAccess, user.imageRepositoryAccess, authenticatedAt)
+      signedSession(
+        user.login,
+        user.repositoryAccess,
+        user.imageRepositoryAccess,
+        authenticatedAt,
+        guest = user.guest,
+      )
     val secure = isSecure(call, config.callbackBaseUrl)
     call.response.cookies.append(authCookie(session, maxAge = SESSION_TTL_SECONDS, secure = secure))
     call.response.cookies.append(stateCookie("", maxAge = 0, secure = secure))
@@ -323,6 +343,7 @@ class ServeGithubAuth(
           session.imageRepositoryAccess,
           authenticatedAt,
           expiresAt,
+          guest = session.guest,
         ),
         // The cookie dies with the payload it carries, rather than outliving it as a cookie the
         // browser keeps sending and the server keeps rejecting.
@@ -332,14 +353,35 @@ class ServeGithubAuth(
     )
   }
 
+  /**
+   * The signed-in **member** — an account the allowlist admits, or any account when there is none.
+   * Null for a guest ([ServeGithubAuthConfig.allowGuests]), which is what keeps every gate written
+   * against this closed to one.
+   */
   fun currentLogin(call: ApplicationCall): String? {
+    val cookie = call.request.cookieValue(AUTH_COOKIE) ?: return null
+    return verifySession(cookie)?.takeIf { !it.guest }?.login
+  }
+
+  /**
+   * Whoever GitHub vouched for, member or guest — an identity, never a permission. Read only where
+   * a guest is meant to count: the UI builder's read-only access and the page chrome that says who
+   * is signed in.
+   */
+  fun currentSignedInLogin(call: ApplicationCall): String? {
     val cookie = call.request.cookieValue(AUTH_COOKIE) ?: return null
     return verifySession(cookie)?.login
   }
 
+  /** True when the session belongs to a guest rather than a member. */
+  fun isGuest(call: ApplicationCall): Boolean {
+    val cookie = call.request.cookieValue(AUTH_COOKIE) ?: return false
+    return verifySession(cookie)?.guest == true
+  }
+
   fun hasRepositoryAccess(call: ApplicationCall): Boolean {
     val cookie = call.request.cookieValue(AUTH_COOKIE) ?: return false
-    return verifySession(cookie)?.repositoryAccess == true
+    return verifySession(cookie)?.let { it.repositoryAccess && !it.guest } == true
   }
 
   /**
@@ -578,10 +620,14 @@ class ServeGithubAuth(
     imageRepositoryAccess: Boolean,
     authenticatedAt: Long,
     expiresAt: Long = clock.millis() + SESSION_TTL_SECONDS * 1000,
+    guest: Boolean = false,
   ): String {
-    val repoFlag = if (repositoryAccess) "repo" else "no-repo"
-    val imageFlag = if (imageRepositoryAccess) "image-repo" else "no-image-repo"
-    return sign("${login.lowercase()}|$repoFlag|$expiresAt|$authenticatedAt|$imageFlag")
+    val repoFlag = if (repositoryAccess && !guest) "repo" else "no-repo"
+    val imageFlag = if (imageRepositoryAccess && !guest) "image-repo" else "no-image-repo"
+    val payload = "${login.lowercase()}|$repoFlag|$expiresAt|$authenticatedAt|$imageFlag"
+    // Appended, like every field before it, and only for a guest: a member's cookie keeps the
+    // five-part shape older servers already read, so rolling this out signs nobody out.
+    return sign(if (guest) "$payload|$GUEST_FLAG" else payload)
   }
 
   private fun verifySession(value: String): SessionPayload? {
@@ -597,7 +643,8 @@ class ServeGithubAuth(
         // shapes carry are read below, by index, where absence has to mean something specific.
         3,
         4,
-        5 -> Triple(parts[0], parts[1] == "repo", parts[2].toLongOrNull())
+        5,
+        6 -> Triple(parts[0], parts[1] == "repo", parts[2].toLongOrNull())
         else -> return null
       }
     if (expiresAt == null || expiresAt <= clock.millis() || login.isBlank()) return null
@@ -611,12 +658,17 @@ class ServeGithubAuth(
     // cost is that a visitor holding such a cookie cannot pass on `images` until it is refreshed
     // through GitHub, which the absolute cap guarantees.
     val imageRepositoryAccess = parts.getOrNull(4) == "image-repo"
+    // A guest cookie is only ever minted while guests are allowed. One signed before the operator
+    // turned them off again is refused outright rather than read as a member, which it never was.
+    val guest = parts.getOrNull(5) == GUEST_FLAG
+    if (guest && !config.allowGuests) return null
     return SessionPayload(
       login,
-      repositoryAccess,
-      imageRepositoryAccess,
+      repositoryAccess && !guest,
+      imageRepositoryAccess && !guest,
       expiresAt,
       authenticatedAt,
+      guest,
     )
   }
 
@@ -691,6 +743,8 @@ class ServeGithubAuth(
     val expiresAt: Long,
     /** When GitHub last vouched for this visitor; null on a cookie minted before the stamp. */
     val authenticatedAt: Long?,
+    /** Signed in outside the allowlist; see [ServeGithubAuthConfig.allowGuests]. */
+    val guest: Boolean = false,
   )
 
   companion object {
@@ -704,6 +758,9 @@ class ServeGithubAuth(
     const val LOGOUT_PATH = "/auth/github/logout"
 
     private const val AUTH_COOKIE = "cp_gh_auth"
+
+    /** The sixth session field, present only on a guest cookie. */
+    private const val GUEST_FLAG = "guest"
     private const val STATE_COOKIE = "cp_gh_state"
     /**
      * Enough to read `/user` and a public repo's payload. No repository write, no private repos.
@@ -776,6 +833,8 @@ data class GitHubOAuthUser(
    * two repositories are the same — or when nobody asked about a second one.
    */
   val imageRepositoryAccess: Boolean = repositoryAccess,
+  /** Admitted as a guest — outside the allowlist — so carrying no access of its own. */
+  val guest: Boolean = false,
 )
 
 class GitHubOAuthVerifier(private val client: OkHttpClient = OkHttpClient()) {
@@ -787,7 +846,15 @@ class GitHubOAuthVerifier(private val client: OkHttpClient = OkHttpClient()) {
     val token = exchangeCode(code, redirectUri, config)
     val login = fetchLogin(token)
     if (config.allowedUsers.isNotEmpty() && login.lowercase() !in config.allowedUsers) {
-      error("GitHub user $login is not allowed")
+      if (!config.allowGuests) error("GitHub user $login is not allowed")
+      // A guest is an identity and nothing more. No repository is asked about, so no access bit
+      // exists for a later gate to misread.
+      return@runCatching GitHubOAuthUser(
+        login,
+        repositoryAccess = false,
+        imageRepositoryAccess = false,
+        guest = true,
+      )
     }
     val repositoryAccess = fetchRepositoryAccess(token, config.repository, login)
     GitHubOAuthUser(

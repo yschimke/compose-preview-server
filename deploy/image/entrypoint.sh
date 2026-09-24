@@ -195,6 +195,10 @@ if [[ -n "${SERVE_GITHUB_AUTH_CLIENT_ID:-}" ||
   [[ -n "${github_auth_cookie_domain}" && "${github_auth_cookie_domain}" != "none" ]] &&
     args+=(--github-auth-cookie-domain "${github_auth_cookie_domain}")
   [[ -n "${SERVE_GITHUB_AUTH_USERS:-}" ]] && args+=(--github-auth-users "${SERVE_GITHUB_AUTH_USERS}")
+  # With an allowlist set, admit every other GitHub account as a read-only UI-builder guest that can
+  # ask for edit access through an agent grant. Guests count as signed out everywhere else.
+  [[ "${SERVE_GITHUB_AUTH_GUESTS:-}" == "1" || "${SERVE_GITHUB_AUTH_GUESTS:-}" == "true" ]] &&
+    args+=(--github-auth-guests)
   # Unset derives the scope from the gating repo's visibility (public -> read:user, private ->
   # read:user repo). Only set this when a GitHub App or org policy demands a specific scope.
   [[ -n "${SERVE_GITHUB_AUTH_SCOPE:-}" ]] && args+=(--github-auth-scope "${SERVE_GITHUB_AUTH_SCOPE}")
