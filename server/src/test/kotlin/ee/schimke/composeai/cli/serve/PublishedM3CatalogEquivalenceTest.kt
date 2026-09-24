@@ -128,9 +128,18 @@ class PublishedM3CatalogEquivalenceTest {
       val actual = byId[expected.componentId] ?: continue
       differences += compare(expected, actual)
     }
+    // compose-ui-builder#230 let the frozen record's search field take a literal query as well as
+    // bound state; m3-catalog's published policy still says `object`, narrower rather than wrong.
+    // `PublishedGeneratedM3CatalogEquivalenceTest.REVIEWED_DIFFERENCES` records the same one.
+    val reviewed =
+      setOf(
+        "  m3/search-input-field.properties[value].jsonType: frozen=[\"object\",\"string\"] " +
+          "composed=\"object\""
+      )
+    val unreviewed = differences - reviewed
     assertTrue(
-      differences.isEmpty(),
-      "the composed shelf differs from the frozen one:\n" + differences.joinToString("\n"),
+      unreviewed.isEmpty(),
+      "the composed shelf differs from the frozen one:\n" + unreviewed.joinToString("\n"),
     )
   }
 
