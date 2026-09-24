@@ -1196,6 +1196,15 @@ class ServeHttpServer(
           post("${ServeAgentGrants.BASE_PATH}/{grantId}/revoke") {
             handleAgentGrantRevokeFromStatus(store)
           }
+          // A person asking for UI-builder edit access for themselves, from their own session.
+          if (githubAuth != null && uiBuilderService != null) {
+            get(UI_BUILDER_REQUEST_ACCESS_PATH) {
+              handleUiBuilderRequestAccess(store, submit = false)
+            }
+            post(UI_BUILDER_REQUEST_ACCESS_PATH) {
+              handleUiBuilderRequestAccess(store, submit = true)
+            }
+          }
 
           // The OAuth 2.1 façade over the same flow, for clients that cannot be told about it in
           // prose. An MCP client meeting a 401 follows exactly one script — resource metadata,
@@ -13679,6 +13688,17 @@ class ServeHttpServer(
       authorization.authorize(call, UiBuilderRouteCapability.WRITE) is
         UiBuilderAuthorizationDecision.Authorized
     val createAction = if (mayCreate) "/ui-builder/designs$tokenQuery" else ""
+    // A reader who may not create, but is signed in on a box that can grant access, is offered the
+    // way to ask for it rather than a dead end.
+    val requestAccessHref =
+      if (
+        !mayCreate &&
+          agentGrants != null &&
+          uiBuilderService != null &&
+          githubAuth?.currentSignedInLogin(call) != null
+      )
+        UI_BUILDER_REQUEST_ACCESS_PATH + tokenQuery
+      else ""
     val copyAction = if (mayCreate) "/ui-builder/designs/copy$tokenQuery" else ""
     val folders = withContext(Dispatchers.IO) { uiBuilderFolderStore?.readAll().orEmpty() }
     val rows = listed.map { item ->
@@ -13762,6 +13782,7 @@ class ServeHttpServer(
         version = SERVE_VERSION,
         siteName = skin.first,
         themeCss = skin.second,
+        requestAccessHref = requestAccessHref,
       ),
       ContentType.Text.Html,
     )
@@ -14245,6 +14266,111 @@ class ServeHttpServer(
       maxTtlSeconds = store.maxGrantTtlSeconds,
       requestedCapabilities = AgentGrantCapability.wireNames(request.requestedCapabilities),
       maxCapabilities = AgentGrantCapability.wireNames(store.maxCapabilities),
+    )
+  }
+
+  /**
+   * `GET`/`POST /ui-builder/request-access` — a signed-in reader, member or guest, asks for
+   * UI-builder edit access **for themselves**.
+   *
+   * The request is opened here, from the session, rather than through the JSON
+   * [ServeAgentGrants.REQUEST_PATH]: that route is ungated and cookie-blind by design, and a
+   * request that names its requester has to be one nobody else can open in their name. So the
+   * requester is read off the verified session, the form carries a seal minted for that login, and
+   * a cross-site POST — which arrives without the `SameSite=Lax` cookie anyway — fails the seal
+   * too.
+   *
+   * Nothing is handed to the browser to hold. An approval is carried by the requester's own session
+   * ([ServeAgentGrantStore.activeGrantForRequester]); the device secret is simply never collected.
+   */
+  private suspend fun RoutingContext.handleUiBuilderRequestAccess(
+    store: ServeAgentGrantStore,
+    submit: Boolean,
+  ) {
+    val auth = githubAuth ?: return
+    val login = auth.currentSignedInLogin(call)
+    if (login == null) {
+      call.respondRedirect(auth.loginPath(call))
+      return
+    }
+    val requester = ServeAgentGrants.githubActorId(login)
+    val skin = call.siteSkin()
+    val seal = agentGrantCsrf.seal(REQUEST_ACCESS_SEAL_ID, requester, REQUEST_ACCESS_SEAL_ACTION)
+    val ttlChoices =
+      ServeWeb.ttlChoices(store.maxGrantTtlSeconds, store.maxGrantTtlSeconds).filter {
+        it >= 60 * 60
+      }
+    val active = store.activeGrantForRequester(requester)
+    var requested: ServeWeb.RequestedAccess? = null
+    if (submit) {
+      val form = call.receiveFormParameters()
+      if (
+        !agentGrantCsrf.verify(
+          REQUEST_ACCESS_SEAL_ID,
+          requester,
+          REQUEST_ACCESS_SEAL_ACTION,
+          form["csrf"]?.firstOrNull(),
+        )
+      ) {
+        call.respondText(
+          "stale or forged form; reload and try again",
+          status = HttpStatusCode.Forbidden,
+        )
+        return
+      }
+      val permit = acquireAgentGrantPermit() ?: return
+      try {
+        val ttl =
+          form["ttl"]?.firstOrNull()?.toLongOrNull()?.takeIf { it > 0 } ?: store.maxGrantTtlSeconds
+        val request =
+          store.openRequest(
+            label = "UI-builder edit access for @$login",
+            // Written by this server from the verified session, which is what "Asked from" on the
+            // approval page is for: the one line there the asker cannot write.
+            client = "@$login, signed in with GitHub (from ${clientAddress()})",
+            requestedScope = AgentGrantScope.PREVIEW,
+            requestedTtlSeconds = ttl,
+            requestedCapabilities =
+              setOf(
+                AgentGrantCapability.UI_BUILDER_READ,
+                AgentGrantCapability.UI_BUILDER_WRITE,
+                AgentGrantCapability.UI_BUILDER_EXPORT,
+              ),
+            requesterActorId = requester,
+          )
+        if (request == null) {
+          call.response.headers.append(HttpHeaders.RetryAfter, "60")
+          call.respondText(
+            "too many pending access requests on this server; try again shortly",
+            status = HttpStatusCode.TooManyRequests,
+          )
+          return
+        }
+        requested =
+          ServeWeb.RequestedAccess(
+            approveUrl = externalOrigin() + ServeAgentGrants.approvalPath(request.id),
+            userCode = request.userCode,
+            expiresInSeconds = request.secondsUntilExpiry(System.currentTimeMillis()),
+          )
+      } finally {
+        permit.release()
+      }
+    }
+    markGeneration("static-page", "no-store")
+    call.respondText(
+      ServeWeb.uiBuilderRequestAccessPage(
+        login = login,
+        formAction = UI_BUILDER_REQUEST_ACCESS_PATH + agentGrantTokenQuery(),
+        csrf = seal,
+        ttlChoicesSeconds = ttlChoices.ifEmpty { listOf(store.maxGrantTtlSeconds) },
+        activeUntil = active?.let { java.time.Instant.ofEpochMilli(it.expiresAtMillis).toString() },
+        requested = requested,
+        navSuffix = agentGrantTokenQuery(),
+        version = SERVE_VERSION,
+        siteName = skin.first,
+        themeCss = skin.second,
+      ),
+      ContentType.Text.Html,
     )
   }
 
@@ -15422,6 +15548,13 @@ class ServeHttpServer(
     private val RELATED_INVERSES = AttributeKey<RelatedInverses>("composeai.relatedInverses")
 
     private const val MCP_PROTOCOL_VERSION_HEADER = "MCP-Protocol-Version"
+
+    /** Where a signed-in reader asks for UI-builder edit access for themselves. */
+    const val UI_BUILDER_REQUEST_ACCESS_PATH = "/ui-builder/request-access"
+
+    /** The seal's fixed `requestId` and action for that form; the login is the per-reader part. */
+    private const val REQUEST_ACCESS_SEAL_ID = "ui-builder-request-access"
+    private const val REQUEST_ACCESS_SEAL_ACTION = "request"
     private const val CATALOG_MCP_AGENT_ACCESS_HEADER = "X-Compose-Preview-Agent-Access"
     private const val MAX_CATALOG_MCP_BYTES = 1024L * 1024
     private const val UI_MODE_NIGHT_MASK = 0x30

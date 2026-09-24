@@ -7501,8 +7501,20 @@ ${captureControlsHtml().prependIndent("          ")}
     version: String? = null,
     siteName: String = "",
     themeCss: String = "",
+    /**
+     * `/ui-builder/request-access`, offered to a signed-in reader who may not create — the way from
+     * "I can look" to "I can edit" without an operator having to add them anywhere. Empty when
+     * there is no such way on this box.
+     */
+    requestAccessHref: String = "",
   ): String {
     val esc = WebEscaping::htmlEscape
+    val requestAccess =
+      if (createAction.isNotBlank() || requestAccessHref.isBlank()) ""
+      else
+        "<p class=\"cp-designs-notice\">You can open the designs shared with you, read-only. " +
+          "<a href=\"${esc(requestAccessHref)}\">Request edit access</a> to get a link to send " +
+          "to the owner.</p>"
     val noticeHtml =
       notice
         .takeIf { it.isNotBlank() }
@@ -7773,7 +7785,7 @@ ${captureControlsHtml().prependIndent("          ")}
         <h1 class="cp-head">Designs</h1>
         <p class="cp-sub">Every design this server permits <code>${esc(viewerActorId)}</code> to open,
         newest first. Open one to carry on with it, duplicate one to start from it.</p>
-        $noticeHtml
+        $noticeHtml$requestAccess
         $create
         $filter
         $grid
@@ -8037,6 +8049,100 @@ ${captureControlsHtml().prependIndent("          ")}
         """
           .trimIndent(),
     )
+
+  /** A request this reader just opened, shown so they can send its link to whoever approves it. */
+  data class RequestedAccess(
+    val approveUrl: String,
+    val userCode: String,
+    val expiresInSeconds: Long,
+  )
+
+  /**
+   * `/ui-builder/request-access` — a signed-in reader asks for UI-builder edit access for
+   * **themselves**, and gets a link to send to someone who can approve it.
+   *
+   * Three states on one page: an access grant already carried (say until when), a request just
+   * opened (show the link, the code and what happens next), or neither (the form). The request is
+   * opened by this server from the reader's own session, so the approver sees a verified login
+   * rather than a name the asker typed.
+   */
+  fun uiBuilderRequestAccessPage(
+    login: String,
+    formAction: String,
+    csrf: String,
+    ttlChoicesSeconds: List<Long>,
+    /** When a grant this reader asked for is live, its expiry, already formatted. */
+    activeUntil: String? = null,
+    requested: RequestedAccess? = null,
+    navSuffix: String = "",
+    version: String? = null,
+    siteName: String = "",
+    themeCss: String = "",
+  ): String {
+    val esc = WebEscaping::htmlEscape
+    val active =
+      activeUntil?.let {
+        "<p class=\"cp-designs-notice\" role=\"status\">You already have edit access, until " +
+          "${esc(it)}. Open the UI builder and it applies to your session.</p>"
+      } ?: ""
+    val body =
+      if (requested != null) {
+        val minutes = (requested.expiresInSeconds / 60).coerceAtLeast(1)
+        """
+        <p class="cp-sub">Send this link to the owner of the designs you want to edit. It is safe to
+        paste into a chat: it only lets them approve or decline, and whatever they approve is
+        applied to <strong>your</strong> signed-in session, never to whoever opens the link.</p>
+        <p class="cp-grant-detail"><input type="text" readonly value="${esc(requested.approveUrl)}"
+          onclick="this.select()" style="width:100%"></p>
+        <p class="cp-sub">They will be asked to confirm the code <strong>${esc(requested.userCode)}</strong>.
+        The link can be approved for the next $minutes minutes. Once it is, reload the UI builder:
+        you can edit what they can, as <code>github:${esc(login)}</code>, until the access they chose
+        runs out.</p>
+        """
+          .trimIndent()
+      } else {
+        val options =
+          ttlChoicesSeconds.joinToString("\n") { seconds ->
+            val hours = seconds / 3600
+            val label =
+              if (hours >= 1) "$hours hour${if (hours == 1L) "" else "s"}"
+              else "${seconds / 60} minutes"
+            val selected = if (seconds == ttlChoicesSeconds.last()) " selected" else ""
+            "<option value=\"$seconds\"$selected>${esc(label)}</option>"
+          }
+        """
+        <p class="cp-sub">Signed in as <code>github:${esc(login)}</code>, you can open the designs
+        shared with you, read-only. To edit, ask someone who can: this makes a link you send them, and
+        what they approve applies to your session for as long as they choose.</p>
+        <form method="post" action="${esc(formAction)}">
+          <input type="hidden" name="csrf" value="${esc(csrf)}">
+          <label class="cp-grant-ttl"><span>For</span>
+            <select name="ttl">
+            $options
+            </select>
+          </label>
+          <button type="submit" class="cp-grant-approve">Request edit access</button>
+        </form>
+        """
+          .trimIndent()
+      }
+    return document(
+      title = "Request edit access — compose-preview",
+      unfurlDescription = "Ask for UI-builder edit access",
+      version = version,
+      navSuffix = navSuffix,
+      siteName = siteName,
+      themeCss = themeCss,
+      body =
+        """
+        <h1 class="cp-head">Request edit access</h1>
+        $active
+        $body
+        <a class="cp-back" href="/ui-builder/designs$navSuffix">← Designs</a>
+        """
+          .trimIndent(),
+    )
+  }
 
   /**
    * The durations the approval page offers: a short ladder, plus whatever was actually requested,

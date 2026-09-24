@@ -85,6 +85,12 @@ class ServeAgentGrantStore(
      * may grant these or fewer — never more, for the same reason the scope can only be narrowed.
      */
     val requestedCapabilities: Set<AgentGrantCapability> = emptySet(),
+    /**
+     * The signed-in person asking for access **for themselves** (`github:<login>`), verified by
+     * this server from their session — never a field the asker wrote. Blank for an agent's request,
+     * which speaks for nobody until approved. See [Grant.requesterActorId].
+     */
+    val requesterActorId: String = "",
     val createdAtMillis: Long,
     val expiresAtMillis: Long,
     @Volatile var state: State = State.PENDING,
@@ -142,6 +148,16 @@ class ServeAgentGrantStore(
      * test that constructs one directly. A blank is read as "no delegation", never as an actor.
      */
     val approvedByActorId: String = "",
+    /**
+     * Who this grant is **for**, when a person asked for it themselves rather than an agent
+     * (`github:<login>`, from [Request.requesterActorId]).
+     *
+     * It changes whose name the grant acts under, not what it may do. The grant still acts on
+     * behalf of [approvedByActorId], so it reaches exactly the designs its approver does and no
+     * further, but the actor is the requester — so what they do is attributed to them, and their
+     * own signed-in session carries the grant for as long as it lives ([activeGrantForRequester]).
+     */
+    val requesterActorId: String = "",
     val issuedAtMillis: Long,
     val expiresAtMillis: Long,
   ) {
@@ -195,9 +211,17 @@ class ServeAgentGrantStore(
     requestedScope: AgentGrantScope,
     requestedTtlSeconds: Long,
     requestedCapabilities: Set<AgentGrantCapability> = emptySet(),
+    requesterActorId: String = "",
   ): Request? =
     synchronized(this) {
-      openRequestLocked(label, client, requestedScope, requestedTtlSeconds, requestedCapabilities)
+      openRequestLocked(
+        label,
+        client,
+        requestedScope,
+        requestedTtlSeconds,
+        requestedCapabilities,
+        requesterActorId,
+      )
     }
 
   /**
@@ -215,6 +239,7 @@ class ServeAgentGrantStore(
     requestedScope: AgentGrantScope,
     requestedTtlSeconds: Long,
     requestedCapabilities: Set<AgentGrantCapability>,
+    requesterActorId: String,
   ): Request? {
     val now = clock()
     purge(now)
@@ -260,6 +285,7 @@ class ServeAgentGrantStore(
         // withheld note, the agent's own summary lost the line, and the first refused tool call
         // offered no hint that the cause was this box's configuration.
         requestedCapabilities = requestedCapabilities,
+        requesterActorId = requesterActorId,
         createdAtMillis = now,
         expiresAtMillis = now + requestTtlSeconds * 1000,
       )
@@ -324,6 +350,7 @@ class ServeAgentGrantStore(
           label = request.label,
           approvedBy = approvedBy,
           approvedByActorId = approvedByActorId,
+          requesterActorId = request.requesterActorId,
           issuedAtMillis = now,
           expiresAtMillis = now + ttl * 1000,
         )
@@ -453,6 +480,24 @@ class ServeAgentGrantStore(
     // reported precisely. After the sweep the same token reads as UNKNOWN, which is honest: the
     // store genuinely no longer knows it.
     return if (grant.expiresAtMillis > clock()) TokenState.LIVE else TokenState.EXPIRED
+  }
+
+  /**
+   * The live grant a person asked for themselves and was given — see [Grant.requesterActorId] — so
+   * their own signed-in session can carry it without handling a bearer. With [capability], only a
+   * grant carrying it: two live approvals for different capabilities must each still count. The
+   * longest-lived match when there are several.
+   */
+  fun activeGrantForRequester(
+    requesterActorId: String?,
+    capability: AgentGrantCapability? = null,
+  ): Grant? {
+    if (requesterActorId.isNullOrBlank()) return null
+    val now = clock()
+    return grants.values
+      .filter { it.requesterActorId == requesterActorId && it.expiresAtMillis > now }
+      .filter { capability == null || it.allows(capability) }
+      .maxByOrNull { it.expiresAtMillis }
   }
 
   /** The live grant with this id, or null when unknown/expired. */

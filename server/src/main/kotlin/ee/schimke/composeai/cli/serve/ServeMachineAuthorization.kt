@@ -109,6 +109,17 @@ class ServeMachineAuthorization(
       }
     }
 
+    // A person who asked for access themselves and was given it: their own session carries the
+    // grant, under their own name, on behalf of whoever approved it — exactly the reach the
+    // approver chose to lend, and no bearer for the browser to hold.
+    githubAuth?.currentSignedInLogin(call)?.let { signedIn ->
+      agentGrants
+        ?.activeGrantForRequester(ServeAgentGrants.githubActorId(signedIn), required)
+        ?.let { grant ->
+          return grant.authorized()
+        }
+    }
+
     // Reading the UI builder needs only an identity. Any account GitHub vouched for — a member
     // without repository access, or a guest (`--github-auth-guests`) — may look, because what it
     // can see is decided per design by the design service: a design nobody shared with it is not
@@ -183,7 +194,10 @@ class ServeMachineAuthorization(
      */
     fun ServeAgentGrantStore.Grant.authorized(): Decision.Authorized =
       Decision.Authorized(
-        actorId = ServeAgentGrants.agentActorId(fingerprint),
+        // A grant a person asked for themselves acts under their name, so the design history says
+        // who did it; an agent's grant keeps its own fingerprinted identity.
+        actorId =
+          requesterActorId.takeIf { it.isNotBlank() } ?: ServeAgentGrants.agentActorId(fingerprint),
         onBehalfOfActorId = approvedByActorId.takeIf { it.isNotBlank() },
       )
   }
