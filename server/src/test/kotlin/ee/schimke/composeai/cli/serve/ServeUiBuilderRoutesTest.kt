@@ -2,7 +2,7 @@ package ee.schimke.composeai.cli.serve
 
 import ee.schimke.composeai.agentgrants.AgentGrantCapability
 import ee.schimke.composeai.agentgrants.AgentGrantScope
-import ee.schimke.composeai.uibuilder.UiBuilderBuildFeatures
+import ee.schimke.composeai.uibuilder.export.UiBuilderBuildFeatures
 import ee.schimke.composeai.uibuilder.protocol.CatalogReferenceV1
 import ee.schimke.composeai.uibuilder.protocol.DiagnosticSeverityV1
 import ee.schimke.composeai.uibuilder.protocol.ErrorResponseV1
@@ -491,7 +491,7 @@ class ServeUiBuilderRoutesTest {
 
   @Test
   fun `document routes preserve pinned bytes and refuse diagnostic errors as HTTP failures`() {
-    val formats = ee.schimke.composeai.uibuilder.RemoteDocumentExportSupport.formats
+    val formats = ee.schimke.composeai.uibuilder.export.RemoteDocumentExportSupport.formats
     if (System.getenv("VERIFY_REMOTE_DOCUMENT_EXPORTS") == "true") assertEquals(2, formats.size)
     org.junit.jupiter.api.Assumptions.assumeTrue(formats.isNotEmpty())
     for (format in formats) {

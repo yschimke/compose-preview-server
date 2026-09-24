@@ -1,9 +1,9 @@
 package ee.schimke.composeai.cli.serve
 
-import ee.schimke.composeai.uibuilder.InlineRemoteContentExporter
+import ee.schimke.composeai.uibuilder.export.InlineRemoteContentExporter
 import ee.schimke.composeai.uibuilder.export.ScreenExportGate
+import ee.schimke.composeai.uibuilder.export.toUiBuilderDocument
 import ee.schimke.composeai.uibuilder.protocol.DesignDocumentV1
-import ee.schimke.composeai.uibuilder.toUiBuilderDocument
 
 /**
  * One `remote-compose/inline` subtree, captured into the Remote Compose document it describes.

@@ -2,8 +2,8 @@ package ee.schimke.composeai.cli.serve
 
 import ee.schimke.composeai.discovery.ComponentRecord
 import ee.schimke.composeai.discovery.ComponentRecordFile
-import ee.schimke.composeai.uibuilder.REMOTE_CONTENT_MODIFIERS
-import ee.schimke.composeai.uibuilder.UiBuilderCatalogPlatform
+import ee.schimke.composeai.uibuilder.export.REMOTE_CONTENT_MODIFIERS
+import ee.schimke.composeai.uibuilder.export.UiBuilderCatalogPlatform
 import ee.schimke.composeai.uibuilder.protocol.BrowserPreviewCapabilityV1
 import ee.schimke.composeai.uibuilder.protocol.CanvasAdapterMappingV1
 import ee.schimke.composeai.uibuilder.protocol.CatalogBenchmarkV1

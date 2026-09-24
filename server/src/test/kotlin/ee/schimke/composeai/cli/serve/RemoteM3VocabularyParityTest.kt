@@ -1,7 +1,7 @@
 package ee.schimke.composeai.cli.serve
 
-import ee.schimke.composeai.uibuilder.REMOTE_CONTENT_COMPONENT_IDS
-import ee.schimke.composeai.uibuilder.REMOTE_CONTENT_MODIFIERS
+import ee.schimke.composeai.uibuilder.export.REMOTE_CONTENT_COMPONENT_IDS
+import ee.schimke.composeai.uibuilder.export.REMOTE_CONTENT_MODIFIERS
 import ee.schimke.composeai.uibuilder.service.CurrentM3UiBuilderCatalogExecutor
 import kotlin.test.Test
 import kotlin.test.assertEquals

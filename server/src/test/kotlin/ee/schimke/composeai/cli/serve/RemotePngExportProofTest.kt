@@ -197,7 +197,7 @@ class RemotePngExportProofTest {
       CurrentM3UiBuilderCatalogExecutor(
         catalogSystemIds = setOf("remote-m3"),
         exportCapabilities =
-          ee.schimke.composeai.uibuilder.RemoteDocumentExportSupport.capabilities(
+          ee.schimke.composeai.uibuilder.export.RemoteDocumentExportSupport.capabilities(
             ExportCapabilitiesV1.Builder()
               .also {
                 it.png = true
@@ -226,7 +226,7 @@ class RemotePngExportProofTest {
             ScreenGeneratorComposeExportExecutor(
               components = { ComponentRecordSource.Lookup.Unconfigured },
               catalogPlatform = {
-                ee.schimke.composeai.uibuilder.UiBuilderCatalogPlatform.REMOTE_COMPOSE
+                ee.schimke.composeai.uibuilder.export.UiBuilderCatalogPlatform.REMOTE_COMPOSE
               },
             )
           else UiBuilderExportExecutor { error("Remote PNG must not render the editor tree") }

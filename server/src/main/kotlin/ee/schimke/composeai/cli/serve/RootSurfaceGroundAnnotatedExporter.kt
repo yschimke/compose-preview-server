@@ -1,12 +1,12 @@
 package ee.schimke.composeai.cli.serve
 
-import ee.schimke.composeai.uibuilder.RootSurfaceGround
+import ee.schimke.composeai.uibuilder.export.RootSurfaceGround
+import ee.schimke.composeai.uibuilder.export.toUiBuilderDocument
 import ee.schimke.composeai.uibuilder.protocol.DiagnosticSeverityV1
 import ee.schimke.composeai.uibuilder.protocol.ExportArtifactV1
 import ee.schimke.composeai.uibuilder.protocol.ExportDiagnosticV1
 import ee.schimke.composeai.uibuilder.service.RevisionPinnedUiBuilderExport
 import ee.schimke.composeai.uibuilder.service.UiBuilderExportExecutor
-import ee.schimke.composeai.uibuilder.toUiBuilderDocument
 
 /**
  * The served export, with [RootSurfaceGround]'s notice on every artifact it applies to.

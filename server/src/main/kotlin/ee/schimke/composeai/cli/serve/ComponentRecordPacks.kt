@@ -4,8 +4,8 @@ import ee.schimke.composeai.discovery.ComponentOrigin
 import ee.schimke.composeai.discovery.ComponentRecord
 import ee.schimke.composeai.discovery.ComponentRecordFile
 import ee.schimke.composeai.discovery.TargetParameter
-import ee.schimke.composeai.uibuilder.UiBuilderCatalogPlatform
-import ee.schimke.composeai.uibuilder.UiBuilderComponentPack
+import ee.schimke.composeai.uibuilder.export.UiBuilderCatalogPlatform
+import ee.schimke.composeai.uibuilder.export.UiBuilderComponentPack
 import ee.schimke.composeai.uibuilder.protocol.CodeCapabilityV1
 import ee.schimke.composeai.uibuilder.protocol.ComponentCapabilityV1
 import ee.schimke.composeai.uibuilder.protocol.PropertyCapabilityV1

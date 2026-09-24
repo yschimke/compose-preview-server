@@ -23,9 +23,9 @@ import ee.schimke.composeai.discovery.ComponentRecordFile
 import ee.schimke.composeai.imagecrop.ContentCrop
 import ee.schimke.composeai.remotecompose.json.RemoteComposeJson
 import ee.schimke.composeai.remotecompose.json.RemoteComposeJsonException
-import ee.schimke.composeai.uibuilder.NewDesignNames
-import ee.schimke.composeai.uibuilder.UiBuilderNewDesignSeed
-import ee.schimke.composeai.uibuilder.decodeNewDesignStates
+import ee.schimke.composeai.uibuilder.export.NewDesignNames
+import ee.schimke.composeai.uibuilder.export.UiBuilderNewDesignSeed
+import ee.schimke.composeai.uibuilder.export.decodeNewDesignStates
 import ee.schimke.composeai.uibuilder.protocol.DesignAccessActionV1
 import ee.schimke.composeai.uibuilder.protocol.DesignAccessControlV1
 import ee.schimke.composeai.uibuilder.protocol.DesignAccessRoleV1

@@ -2,12 +2,12 @@ package ee.schimke.composeai.cli.serve
 
 import ee.schimke.composeai.discovery.ComponentRecord
 import ee.schimke.composeai.discovery.ComponentRecordFile
-import ee.schimke.composeai.uibuilder.REMOTE_CONTENT_COMPONENT_IDS
-import ee.schimke.composeai.uibuilder.REMOTE_CONTENT_MODIFIERS
-import ee.schimke.composeai.uibuilder.REMOTE_TEXT_COMPONENT_ID
-import ee.schimke.composeai.uibuilder.UiBuilderDocument
-import ee.schimke.composeai.uibuilder.UiBuilderNode
-import ee.schimke.composeai.uibuilder.WearWidgetCodeExporter
+import ee.schimke.composeai.uibuilder.export.REMOTE_CONTENT_COMPONENT_IDS
+import ee.schimke.composeai.uibuilder.export.REMOTE_CONTENT_MODIFIERS
+import ee.schimke.composeai.uibuilder.export.REMOTE_TEXT_COMPONENT_ID
+import ee.schimke.composeai.uibuilder.export.UiBuilderDocument
+import ee.schimke.composeai.uibuilder.export.UiBuilderNode
+import ee.schimke.composeai.uibuilder.export.WearWidgetCodeExporter
 import ee.schimke.composeai.uibuilder.protocol.CatalogCapabilityV1
 import ee.schimke.composeai.uibuilder.protocol.ExportCapabilitiesV1
 import ee.schimke.composeai.uibuilder.service.CurrentM3UiBuilderCatalogExecutor

@@ -7,7 +7,7 @@ import ee.schimke.composeai.discovery.ComponentRecordFile
 import ee.schimke.composeai.discovery.ComponentSlot
 import ee.schimke.composeai.discovery.ComponentSymbol
 import ee.schimke.composeai.discovery.TargetParameter
-import ee.schimke.composeai.uibuilder.UiBuilderCatalogPlatform
+import ee.schimke.composeai.uibuilder.export.UiBuilderCatalogPlatform
 import ee.schimke.composeai.uibuilder.protocol.WasmAdapterStatusV1
 import kotlin.test.Test
 import kotlin.test.assertEquals
