@@ -135,7 +135,6 @@ class M3CatalogComponentRecordTest {
       // and the slot is called per index rather than per child.
       "layout/horizontal-carousel" to
         "takes a CarouselState from rememberCarouselState { n }, whose argument is a lambda, and its content slot is called per item index rather than per child (compose-ai-tools#5218)",
-      "layout/supporting-pane-scaffold" to "adaptive API; panes are not plain composable slots",
       // Not a component at all in the generated source: a loop over the design's own rows becomes
       // a `forEach` around the template's call, which is the Compose exporter's to write and not
       // a symbol discovery could find. The record covers components the generator calls by name.
@@ -154,13 +153,7 @@ class M3CatalogComponentRecordTest {
           "projection will not invent",
       "m3/dialog" to
         "AlertDialog is a window and needs an onDismissRequest a design cannot write; the builder draws and emits its surface inline instead",
-      "m3/horizontal-floating-toolbar" to "experimental; content is a FlowRow-shaped scope",
-      "m3/primary-tab-row" to "tabs is a TabRow scope, and the row's own indicator takes a lambda",
-      "m3/search-bar" to "inputField is a typed lambda, not a plain composable slot",
-      "m3/search-input-field" to "SearchBarDefaults.InputField is a member of an object",
       "m3/snackbar-host" to "takes a SnackbarHostState, which no ScreenValue expresses",
-      "m3/tab" to
-        "onClick is required and a design's tab selection is not an action it can express",
       // Also not the factory, and unlike the date picker nothing about the component blocks it:
       // `hour`, `minute` and `is24Hour` map straight onto `rememberTimePickerState`'s defaulted
       // parameters, and `mode` picks between `TimePicker` and `TimeInput` exactly as `m3/card`'s
@@ -176,7 +169,6 @@ class M3CatalogComponentRecordTest {
         "the vocabulary switch: its subtree is @RemoteComposable and InlineRemoteContentExporter writes it, not the Compose exporter",
       "remote-compose/custom" to
         "a Remote Compose custom operation naming a host renderer; no published creation API writes one, so no record could back it",
-      "shape/linear-gradient" to "a Modifier, not a component",
       "shape/radial-gradient" to "a Modifier, not a component",
     )
 
