@@ -37,6 +37,7 @@ import java.util.concurrent.ScheduledExecutorService
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
 import kotlin.system.exitProcess
+import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import okio.Path.Companion.toPath
@@ -2998,6 +2999,8 @@ public class ServeRunner(
       }
     }
     deriveRouting()
+    // Set once the service exists, below; the refresher cannot fire before this lane is returned.
+    var recovery: ServeUiBuilderCatalogRecovery? = null
     val refreshPublished: (String) -> Unit = { sourceSystem ->
       val affected = uiBuilderCatalogs.filter {
         uiBuilderPublishedSourceSystem(it, uiBuilderNativeCatalogs) == sourceSystem
@@ -3018,6 +3021,13 @@ public class ServeRunner(
             "; runtime " +
             changed.joinToString { publishedRuntimeIds[it] ?: "built-in" }
         )
+        // Designs pinned to the runtime just replaced no longer open; move the ones that can move.
+        recovery?.let {
+          runCatching { runBlocking { it.recoverStranded() } }
+            .onFailure { e ->
+              System.err.println("serve: UI-builder catalog recovery failed: ${e.message}")
+            }
+        }
       }
     }
     val service =
@@ -3027,6 +3037,10 @@ public class ServeRunner(
         exporter = RootSurfaceGroundAnnotatedExporter(exporter),
         assets = assetStore,
       )
+    // A deploy can change a catalog's runtime too, so the same pass runs once at startup.
+    recovery = ServeUiBuilderCatalogRecovery(service, service, catalogs)
+    runCatching { runBlocking { recovery?.recoverStranded() } }
+      .onFailure { System.err.println("serve: UI-builder catalog recovery failed: ${it.message}") }
     // An unusable design is the one startup condition that is invisible by construction: the host
     // comes up healthy and serves everything else, so without this line the only evidence is a
     // diagnostics counter nobody reads until a design is reported missing. Named, not counted — the
