@@ -3047,10 +3047,9 @@ public class ServeRunner(
             )
           }
           .getOrNull(),
-      thumbnails =
-        runCatching {
-            ServeUiBuilderThumbnails(directory.resolve("thumbnails").toPath(), SERVE_VERSION)
-          }
+      thumbnails = runCatching {
+          ServeUiBuilderThumbnails(directory.resolve("thumbnails").toPath(), SERVE_VERSION)
+        }
           .onFailure {
             System.err.println(
               "serve: UI-builder thumbnails unavailable (${it.message}); " +
@@ -3365,6 +3364,7 @@ public class ServeRunner(
           references = uiBuilderLane.references,
           comments = uiBuilderLane.comments,
           links = uiBuilderLane.links,
+          thumbnails = uiBuilderLane.thumbnails,
         )
       } else {
         null

@@ -38,6 +38,8 @@ import okhttp3.Request
 class ServeUiBuilderThumbnailsTest {
   private val revision = AtomicLong(3)
   private val exports = AtomicInteger()
+  private val rendering = AtomicInteger()
+  private val mostAtOnce = AtomicInteger()
   private val actor = AuthenticatedUiBuilderActor(OWNER)
 
   private fun png(revision: Long) = byteArrayOf(0x89.toByte(), 'P'.code.toByte(), revision.toByte())
@@ -47,7 +49,7 @@ class ServeUiBuilderThumbnailsTest {
       override suspend fun execute(call: UiBuilderServiceCall): UiBuilderServiceResponse =
         when (val request = call.request) {
           is UiBuilderServiceRequest.GetDesignActions ->
-            if (call.actor.actorId == OWNER && request.designId == DESIGN)
+            if (call.actor.actorId == OWNER && request.designId in DESIGNS)
               UiBuilderServiceResponse.DesignActions(
                 request.designId,
                 DesignAccessActionV1.entries.toList(),
@@ -56,9 +58,15 @@ class ServeUiBuilderThumbnailsTest {
               UiBuilderServiceResponse.Error(
                 UiBuilderServiceError(ServiceErrorCodeV1.NOT_FOUND, "no design")
               )
-          is UiBuilderServiceRequest.ListDesigns -> UiBuilderServiceResponse.Designs(emptyList(), null)
+          is UiBuilderServiceRequest.ListDesigns ->
+            UiBuilderServiceResponse.Designs(emptyList(), null)
+          is UiBuilderServiceRequest.DeleteDesign ->
+            UiBuilderServiceResponse.DesignDeleted(request.designId)
           is UiBuilderServiceRequest.ExportDesign -> {
             exports.incrementAndGet()
+            mostAtOnce.accumulateAndGet(rendering.incrementAndGet(), ::maxOf)
+            Thread.sleep(50)
+            rendering.decrementAndGet()
             val served = revision.get()
             UiBuilderServiceResponse.Export(
               ExportArtifactV1(
@@ -88,10 +96,8 @@ class ServeUiBuilderThumbnailsTest {
     }
 
   private val directory = Files.createTempDirectory("serve-ui-builder-thumbnails")
-  private val thumbnails =
-    ServeUiBuilderThumbnails(directory, generation = "g1", onLog = {}).also {
-      it.warming(service)
-    }
+  private val thumbnails = ServeUiBuilderThumbnails(directory, generation = "g1", onLog = {})
+  private val wrapped = thumbnails.warming(service)
 
   private val authorization = ServeUiBuilderAuthorization { call, _, _ ->
     when (val actor = call.request.headers["X-Test-Actor"]) {
@@ -198,8 +204,32 @@ class ServeUiBuilderThumbnailsTest {
     assertNull(thumbnails.cached("../escape"))
   }
 
+  @Test
+  fun `a deleted design's picture is never what a new design under its id shows`() {
+    fetch(DESIGN, 3).use { assertEquals(200, it.code) }
+    runBlocking {
+      wrapped.execute(UiBuilderServiceCall(actor, UiBuilderServiceRequest.DeleteDesign(DESIGN)))
+    }
+    assertNull(thumbnails.cached(DESIGN), "gone from memory")
+    val reopened = ServeUiBuilderThumbnails(directory, generation = "g1", onLog = {})
+    assertNull(reopened.cached(DESIGN), "and from disk")
+    reopened.close()
+  }
+
+  @Test
+  fun `cards drawn for the first time all at once still render one at a time`() {
+    val pool = java.util.concurrent.Executors.newFixedThreadPool(DESIGNS.size)
+    val codes =
+      DESIGNS.map { design -> pool.submit<Int> { fetch(design, 3).use { it.code } } }
+        .map { it.get() }
+    pool.shutdown()
+    assertEquals(DESIGNS.map { 200 }, codes, "every card got a picture")
+    assertEquals(1, mostAtOnce.get(), "and the renderer was never asked twice at once")
+  }
+
   private companion object {
     const val OWNER = "github:owner"
     const val DESIGN = "morning-player"
+    val DESIGNS = listOf(DESIGN, "evening-player", "night-player", "dawn-player")
   }
 }

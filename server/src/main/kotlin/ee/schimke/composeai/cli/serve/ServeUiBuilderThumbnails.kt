@@ -22,11 +22,12 @@ import java.nio.file.Path
 import java.nio.file.StandardCopyOption
 import java.security.MessageDigest
 import java.util.Base64
+import java.util.concurrent.CompletableFuture
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.LinkedBlockingDeque
-import java.util.concurrent.ThreadPoolExecutor
-import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.future.await
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeoutOrNull
 
 /**
  * The picture on each card of `/ui-builder/designs`, kept on disk and redrawn ahead of the reader.
@@ -52,8 +53,8 @@ import kotlinx.coroutines.runBlocking
  * ## Ahead of the reader
  *
  * [warming] wraps the service so every accepted edit, from any lane — editor, MCP, admin — queues a
- * redraw of the design it changed, and the listing page queues every card it finds out of date.
- * One worker, because the renderer answers a second concurrent render with "busy" and the editor's
+ * redraw of the design it changed, and the listing page queues every card it finds out of date. One
+ * worker, because the renderer answers a second concurrent render with "busy" and the editor's
  * interactive exports matter more than a thumbnail.
  *
  * ## Access
@@ -63,7 +64,8 @@ import kotlinx.coroutines.runBlocking
  * export itself would have made. Queued redraws run as the actor whose edit or page view queued
  * them, so the redraw is an export that actor was already allowed to make.
  */
-class ServeUiBuilderThumbnails internal constructor(
+class ServeUiBuilderThumbnails
+internal constructor(
   private val directory: Path,
   val generation: String,
   private val onLog: (String) -> Unit = { System.err.println(it) },
@@ -72,47 +74,97 @@ class ServeUiBuilderThumbnails internal constructor(
   internal data class Entry(val revision: Long, val generation: String, val png: ByteArray)
 
   private val memory = ConcurrentHashMap<String, Entry>()
-  private val queued = ConcurrentHashMap.newKeySet<String>()
+
+  /** One render waiting for, or holding, the worker; every caller asking for it shares [result]. */
+  private class Job(
+    val designId: String,
+    val actor: AuthenticatedUiBuilderActor,
+    val result: CompletableFuture<Entry?> = CompletableFuture(),
+  )
+
+  private val jobs = LinkedBlockingDeque<Job>(QUEUE)
+  private val pending = ConcurrentHashMap<String, Job>()
 
   @Volatile private var service: UiBuilderServicePort? = null
 
-  private val executor =
-    ThreadPoolExecutor(
-        1,
-        1,
-        30,
-        TimeUnit.SECONDS,
-        LinkedBlockingDeque(QUEUE),
-        { runnable -> Thread(runnable, "ui-builder-thumbnails").apply { isDaemon = true } },
-        ThreadPoolExecutor.AbortPolicy(),
+  /**
+   * The one worker. Every render goes through it, a card's own request included, because the
+   * renderer answers a second concurrent render with "busy": a card waiting for its first picture
+   * jumps the queue ([submit] with `urgent`) rather than racing the redraws behind it.
+   */
+  private val worker =
+    Thread(
+        {
+          while (!Thread.currentThread().isInterrupted) {
+            val job =
+              try {
+                jobs.take()
+              } catch (interrupted: InterruptedException) {
+                break
+              }
+            val entry =
+              try {
+                runBlocking { retrying { render(job.designId, job.actor) } }
+              } catch (failure: Exception) {
+                onLog("serve: UI-builder thumbnail for ${job.designId} failed: ${failure.message}")
+                null
+              }
+            pending.remove(job.designId, job)
+            job.result.complete(entry)
+          }
+        },
+        "ui-builder-thumbnails",
       )
-      .apply { allowCoreThreadTimeOut(true) }
+      .apply { isDaemon = true }
 
   init {
     Files.createDirectories(directory)
+    worker.start()
   }
 
   /**
-   * [delegate], with every accepted edit queueing a redraw of the design it changed; the result is
-   * also what this cache renders through.
+   * [delegate], with every accepted edit queueing a redraw of the design it changed, and every
+   * deletion or creation forgetting the picture held under that id; the result is also what this
+   * cache renders through.
    */
   internal fun warming(delegate: UiBuilderServicePort): UiBuilderServicePort {
     val wrapped =
       object : UiBuilderServicePort by delegate {
         override suspend fun execute(call: UiBuilderServiceCall): UiBuilderServiceResponse {
+          val request = call.request
+          // Before as well as after: a picture of the design an id used to name must not be what
+          // a design created under that id shows, however the create itself turns out.
+          if (request is UiBuilderServiceRequest.CreateDesign) evict(request.document.id)
           val response = delegate.execute(call)
-          if (response !is UiBuilderServiceResponse.Error) {
-            when (val request = call.request) {
-              is UiBuilderServiceRequest.ApplyOperation ->
-                warm(request.submission.designId, call.actor)
-              else -> Unit
-            }
+          when {
+            response is UiBuilderServiceResponse.DesignDeleted -> evict(response.designId)
+            response is UiBuilderServiceResponse.Error -> Unit
+            request is UiBuilderServiceRequest.ApplyOperation ->
+              warm(request.submission.designId, call.actor)
           }
           return response
         }
       }
     service = delegate
     return wrapped
+  }
+
+  /**
+   * Forget [designId]'s picture, in memory and on disk.
+   *
+   * Pictures are keyed by id, and an id outlives its design: deleted, it can be created or put back
+   * as a different design by a different owner, who must never be served the old pixels. So every
+   * lane that deletes or replaces a design calls this — the service wrapper for the HTTP and MCP
+   * lanes, and the admin lane, which deletes beneath the service port.
+   */
+  internal fun evict(designId: String) {
+    memory.remove(designId)
+    runCatching {
+      val base = fileBase(designId)
+      Files.deleteIfExists(directory.resolve("$base.png"))
+      Files.deleteIfExists(directory.resolve("$base.meta"))
+    }
+      .onFailure { onLog("serve: UI-builder thumbnail for $designId not removed: ${it.message}") }
   }
 
   /** The cached picture for [designId], from memory or disk, whatever it was drawn at. */
@@ -130,30 +182,37 @@ class ServeUiBuilderThumbnails internal constructor(
    * [knownRevision] lets a caller that already knows the revision (the listing) skip a design the
    * cache already has current.
    */
-  internal fun warm(designId: String, actor: AuthenticatedUiBuilderActor, knownRevision: Long? = null) {
-    // A design with no picture at all is drawn by the card's own request, which is already on its
-    // way; queueing it too would only race that render for the one renderer.
-    if (knownRevision != null && (cached(designId) == null || isCurrent(designId, knownRevision)))
-      return
-    if (!queued.add(designId)) return
-    // A full queue would discard the task without running its `finally`, so the claim would stick.
-    if (executor.queue.remainingCapacity() == 0) {
-      queued.remove(designId)
-      return
+  internal fun warm(
+    designId: String,
+    actor: AuthenticatedUiBuilderActor,
+    knownRevision: Long? = null,
+  ) {
+    if (knownRevision != null && isCurrent(designId, knownRevision)) return
+    submit(designId, actor, urgent = false)
+  }
+
+  /**
+   * The render of [designId] that is queued or running, or a new one: at the front of the queue
+   * when [urgent], at the back otherwise. A full queue answers null at once.
+   */
+  internal fun submit(
+    designId: String,
+    actor: AuthenticatedUiBuilderActor,
+    urgent: Boolean,
+  ): CompletableFuture<Entry?> {
+    val job = Job(designId, actor)
+    val existing = pending.putIfAbsent(designId, job)
+    if (existing != null) {
+      // A card waiting on a redraw the listing queued moves that redraw to the front.
+      if (urgent && jobs.remove(existing)) jobs.offerFirst(existing)
+      return existing.result
     }
-    try {
-      executor.execute {
-        try {
-          runBlocking { render(designId, actor) }
-        } catch (failure: Exception) {
-          onLog("serve: UI-builder thumbnail for $designId failed: ${failure.message}")
-        } finally {
-          queued.remove(designId)
-        }
-      }
-    } catch (rejected: java.util.concurrent.RejectedExecutionException) {
-      queued.remove(designId)
+    val offered = if (urgent) jobs.offerFirst(job) else jobs.offerLast(job)
+    if (!offered) {
+      pending.remove(designId, job)
+      job.result.complete(null)
     }
+    return job.result
   }
 
   /** Render [designId] now at its latest revision and keep it; null when the export refused. */
@@ -182,15 +241,15 @@ class ServeUiBuilderThumbnails internal constructor(
   private fun store(designId: String, entry: Entry) {
     memory[designId] = entry
     runCatching {
-        val base = fileBase(designId)
-        val png = directory.resolve("$base.png")
-        val meta = directory.resolve("$base.meta")
-        writeAtomically(png, entry.png)
-        writeAtomically(
-          meta,
-          "${entry.revision}\n${entry.generation}\n$designId\n".toByteArray(Charsets.UTF_8),
-        )
-      }
+      val base = fileBase(designId)
+      val png = directory.resolve("$base.png")
+      val meta = directory.resolve("$base.meta")
+      writeAtomically(png, entry.png)
+      writeAtomically(
+        meta,
+        "${entry.revision}\n${entry.generation}\n$designId\n".toByteArray(Charsets.UTF_8),
+      )
+    }
       .onFailure { onLog("serve: UI-builder thumbnail for $designId not saved: ${it.message}") }
   }
 
@@ -220,7 +279,9 @@ class ServeUiBuilderThumbnails internal constructor(
   }
 
   override fun close() {
-    executor.shutdownNow()
+    worker.interrupt()
+    jobs.forEach { it.result.complete(null) }
+    jobs.clear()
   }
 
   internal companion object {
@@ -265,15 +326,19 @@ internal suspend fun ApplicationCall.serveUiBuilderThumbnail(
         thumbnails.warm(designId, actor)
         cached
       }
-      // The renderer answers "busy" rather than queueing, and a background redraw may hold it.
-      else -> retrying { thumbnails.render(designId, actor) }
+      // Drawn by the one worker, ahead of any redraw, and shared with the listing's own request.
+      else ->
+        withTimeoutOrNull(COLD_RENDER_TIMEOUT_MS) {
+          thumbnails.submit(designId, actor, urgent = true).await()
+        }
     }
   if (entry == null) {
     response.headers.append(HttpHeaders.CacheControl, "no-store")
     respondText("no thumbnail", status = HttpStatusCode.NotFound)
     return
   }
-  val fresh = revision != null && entry.revision == revision && entry.generation == thumbnails.generation
+  val fresh =
+    revision != null && entry.revision == revision && entry.generation == thumbnails.generation
   response.headers.append(
     HttpHeaders.CacheControl,
     // Keyed by revision in the URL, so a current picture never changes under it; private because
@@ -296,3 +361,6 @@ private suspend fun <T : Any> retrying(block: suspend () -> T?): T? {
 
 private const val THUMBNAIL_RENDER_ATTEMPTS = 3
 private const val THUMBNAIL_RETRY_DELAY_MS = 750L
+
+/** How long a card waits for its first picture before answering without one. */
+private const val COLD_RENDER_TIMEOUT_MS = 60_000L

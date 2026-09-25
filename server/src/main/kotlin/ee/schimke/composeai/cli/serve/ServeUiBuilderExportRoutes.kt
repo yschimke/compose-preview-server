@@ -99,9 +99,7 @@ internal fun Route.installUiBuilderThumbnailRoute(
   thumbnails: ServeUiBuilderThumbnails,
 ) {
   get("/api/ui-builder/v1/designs/{designId}/thumbnail.png") {
-    val actor =
-      call.authorizeExport(authorization)
-        ?: return@get
+    val actor = call.authorizeExport(authorization) ?: return@get
     val designId = call.parameters["designId"].orEmpty()
     val revision = call.request.queryParameters["revision"]?.toLongOrNull()
     call.serveUiBuilderThumbnail(thumbnails, service, actor, designId, revision)

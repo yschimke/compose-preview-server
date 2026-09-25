@@ -23,6 +23,8 @@ class ServeUiBuilderAdmin(
   private val references: ServeUiBuilderReferenceStore? = null,
   private val comments: ServeUiBuilderCommentStore? = null,
   private val links: ServeUiBuilderLinksStore? = null,
+  /** The design list's card pictures, forgotten with the design they were drawn from. */
+  private val thumbnails: ServeUiBuilderThumbnails? = null,
   private val onLog: (String) -> Unit = { System.err.println(it) },
 ) {
   sealed interface Result {
@@ -79,6 +81,8 @@ class ServeUiBuilderAdmin(
     val designId = rawDesignId.trim()
     if (designId.isEmpty()) return Result.Invalid("design id is required")
     if (documentJson.isBlank()) return Result.Invalid("a repaired design document is required")
+    // A repaired document is a new picture, whatever revision it lands at.
+    thumbnails?.evict(designId)
     return when (val outcome = service.adminRepairDesign(designId, documentJson)) {
       is UiBuilderAdminRepair.Repaired -> {
         onLog(
@@ -97,6 +101,7 @@ class ServeUiBuilderAdmin(
     if (designId.isEmpty()) return Result.Invalid("design id is required")
     if (!service.adminDeleteDesign(designId)) return Result.NotFound(designId)
     onLog("serve: admin deleted UI-builder design $designId")
+    thumbnails?.evict(designId)
     runCatching { references?.delete(designId) }
       .onFailure { onLog("serve: reference overlay for $designId not removed (${it.message})") }
     runCatching { comments?.delete(designId) }
