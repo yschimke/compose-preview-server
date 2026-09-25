@@ -1,5 +1,13 @@
 # Changelog
 
+## [3.65.0](https://github.com/yschimke/compose-preview-server/compare/v3.64.0...v3.65.0) (2026-09-25)
+
+
+### Bug Fixes
+
+* **ci:** bound each design render, and move compose-ui-builder to 3.53.0 ([#1066](https://github.com/yschimke/compose-preview-server/issues/1066)) ([4d9b967](https://github.com/yschimke/compose-preview-server/commit/4d9b96761c0d475062cbdebf53da7c17d5cf37db))
+* **playground:** pair a catalog's Skiko bindings with their own host native ([#1065](https://github.com/yschimke/compose-preview-server/issues/1065)) ([ef36004](https://github.com/yschimke/compose-preview-server/commit/ef3600419cc6c7bd82e15119f958963c9a1118c7))
+
 ## [3.64.0](https://github.com/yschimke/compose-preview-server/compare/v3.63.0...v3.64.0) (2026-09-25)
 
 
