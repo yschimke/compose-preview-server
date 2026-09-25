@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.62.0](https://github.com/yschimke/compose-preview-server/compare/v3.61.0...v3.62.0) (2026-09-25)
+
+
+### Bug Fixes
+
+* **ui-builder:** a republished builder catalog reaches a running server ([#1058](https://github.com/yschimke/compose-preview-server/issues/1058)) ([a9fd544](https://github.com/yschimke/compose-preview-server/commit/a9fd544643ccf462b6c417c4b09f4e7e09f8e8d9))
+
 ## [3.61.0](https://github.com/yschimke/compose-preview-server/compare/v3.60.0...v3.61.0) (2026-09-25)
 
 
