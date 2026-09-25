@@ -205,7 +205,7 @@ composeai-contracts = "3.10.0"
 # so remote-m3 designs draw their photos on the canvas instead of an `asset/image` placeholder, and
 # re-maps the runtime's inspection snapshot on canvas zoom, so the selection overlay no longer drifts
 # off the design (compose-ui-builder#240); no API this server calls changed.
-composeai-ui-builder = "3.49.0"
+composeai-ui-builder = "3.50.0"
 # 1.65.0 is the first release publishing `rc-players-bom`. (1.64.0 is a tag and a GitHub Release
 # whose Maven coordinates never reached Central -- rc-players#211 -- so it cannot be pinned.)
 # 1.67.0 by hand, ahead of Renovate's soak: it pins the KMP player modules to a Java 17 toolchain
