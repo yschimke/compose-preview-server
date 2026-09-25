@@ -86,7 +86,14 @@ object PlaygroundCatalogClasspath {
     }
 
     val libJars = BundleReader.extractEmbeddedLibs(zipBytes, libsDir, fileSystem)
-    val mavenCoords = manifest.classpath.filterIsInstance<BundleReader.ClasspathEntry.Maven>()
+    val recordedCoords = manifest.classpath.filterIsInstance<BundleReader.ClasspathEntry.Maven>()
+    val mavenCoords = withHostSkikoNative(recordedCoords)
+    mavenCoords.drop(recordedCoords.size).forEach {
+      onLog(
+        "playground $system: bundle carries Skiko bindings ${it.version} with no native for " +
+          "this host — adding ${it.group}:${it.artifact}:${it.version}"
+      )
+    }
     val resolutions =
       CoordinateResolver(
           warn = { onLog("playground $system: $it") },
@@ -161,6 +168,75 @@ object PlaygroundCatalogClasspath {
 
   /** `manifest.backend` for a bundle whose previews are drawn by Robolectric-backed Android. */
   private const val ANDROID_BACKEND = "android"
+
+  /**
+   * [coords], plus this host's `skiko-awt-runtime` when the bundle records Skiko bindings without
+   * the native for them.
+   *
+   * The repair compose-ai-tools' `SkikoNativePairing` applies on the live path
+   * (`ServeBundleDaemon.materialize`), which this twin skipped. A packed bundle records
+   * `skiko-awt:V` but not the platform jar carrying `libskiko` — a Gradle constraint, not a
+   * classpath entry — and the render path promotes those bindings ahead of the desktop sidecar
+   * ([ServeBundleDaemon.jarPrecedesDaemonSidecar]). So the only native left was the sidecar's own:
+   * m3-catalog's bundle on Skiko 0.150.1 linked against the image's 0.144.6 and every native render
+   * died on `UnsatisfiedLinkError: ParagraphKt._nGetUnresolvedCodepointsCount`, then waited out the
+   * render budget. The resolved native lands in the same Maven layout as its bindings, so it is
+   * promoted beside them.
+   *
+   * Narrow on purpose, as the original is: only a bundle that carries bindings and no native for
+   * this host at their version gains a coordinate. No `sha256`, because the bundle never recorded
+   * the artifact; the version comes from the bindings it did record.
+   */
+  internal fun withHostSkikoNative(
+    coords: List<BundleReader.ClasspathEntry.Maven>,
+    osName: String = System.getProperty("os.name").orEmpty(),
+    osArch: String = System.getProperty("os.arch").orEmpty(),
+  ): List<BundleReader.ClasspathEntry.Maven> {
+    val bindings =
+      coords.firstOrNull { it.group == SKIKO_GROUP && it.artifact in SKIKO_BINDINGS }
+        ?: return coords
+    val host = skikoHostRuntime(osName, osArch) ?: return coords
+    if (
+      coords.any {
+        it.group == SKIKO_GROUP && it.artifact == host && it.version == bindings.version
+      }
+    )
+      return coords
+    return coords +
+      BundleReader.ClasspathEntry.Maven(
+        group = SKIKO_GROUP,
+        artifact = host,
+        version = bindings.version,
+        type = "jar",
+        sha256 = null,
+      )
+  }
+
+  /** `skiko-awt-runtime-<os>-<arch>` for this host, or null where Skiko publishes no native. */
+  internal fun skikoHostRuntime(osName: String, osArch: String): String? {
+    val name = osName.lowercase()
+    val os =
+      when {
+        "mac" in name || "darwin" in name -> "macos"
+        "win" in name -> "windows"
+        "linux" in name -> "linux"
+        else -> return null
+      }
+    val arch =
+      when (osArch.lowercase()) {
+        "aarch64",
+        "arm64" -> "arm64"
+        "x86_64",
+        "amd64",
+        "x64" -> "x64"
+        else -> return null
+      }
+    return "$SKIKO_RUNTIME_PREFIX$os-$arch"
+  }
+
+  private const val SKIKO_GROUP = "org.jetbrains.skiko"
+  private val SKIKO_BINDINGS = setOf("skiko", "skiko-awt")
+  private const val SKIKO_RUNTIME_PREFIX = "skiko-awt-runtime-"
 
   /**
    * Every declared coordinate must resolve, or the compile classpath is **incomplete** and the mode
