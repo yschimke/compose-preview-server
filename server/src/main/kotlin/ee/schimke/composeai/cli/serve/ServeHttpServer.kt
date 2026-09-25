@@ -13740,7 +13740,17 @@ class ServeHttpServer(
           return
         }
       }
-    respondUiBuilderAccessPage(designId, actor, access, notice = "")
+    val query = call.request.queryParameters
+    val target = query["actor"].orEmpty()
+    val notice =
+      when {
+        target.isBlank() -> ""
+        query["changed"] == "removed" -> "$target can no longer open this design."
+        query["changed"] == "shared" && query["role"] in setOf("editor", "viewer") ->
+          "$target can now open this design as ${query["role"]}."
+        else -> ""
+      }
+    respondUiBuilderAccessPage(designId, actor, access, notice = notice)
   }
 
   /** `GET /ui-builder/designs` — owned and shared designs for the authenticated actor. */
@@ -13992,14 +14002,25 @@ class ServeHttpServer(
           call.respond(HttpStatusCode.SeeOther)
           return
         }
-        respondUiBuilderAccessPage(
-          designId,
-          actor,
-          updated.access,
-          notice =
-            if (revoking) "$target can no longer open this design."
-            else "$target can now open this design as ${role.name.lowercase()}.",
+        // POST, redirect, GET: the access page re-reads the list, and the notice travels as a
+        // fixed template plus its two values, so a refresh repeats the message and not the change.
+        val kept =
+          call.request.queryParameters
+            .entries()
+            .filter { (name, _) -> name !in ACCESS_NOTICE_PARAMS }
+            .flatMap { (name, values) -> values.map { name to it } }
+        val notice =
+          if (revoking) listOf("changed" to "removed", "actor" to target)
+          else listOf("changed" to "shared", "actor" to target, "role" to role.name.lowercase())
+        call.response.headers.append(
+          HttpHeaders.Location,
+          call.request.path() +
+            "?" +
+            (kept + notice).joinToString("&") { (name, value) ->
+              "${WebEscaping.urlEncodeSegment(name)}=${WebEscaping.urlEncodeSegment(value)}"
+            },
         )
+        call.respond(HttpStatusCode.SeeOther)
       }
       is UiBuilderServiceResponse.Error ->
         respondUiBuilderAccessPage(designId, actor, current, notice = updated.error.message)
@@ -14407,7 +14428,6 @@ class ServeHttpServer(
         it >= 60 * 60
       }
     val active = store.activeGrantForRequester(requester)
-    var requested: ServeWeb.RequestedAccess? = null
     if (submit) {
       val form = call.receiveFormParameters()
       if (
@@ -14422,6 +14442,13 @@ class ServeHttpServer(
           "stale or forged form; reload and try again",
           status = HttpStatusCode.Forbidden,
         )
+        return
+      }
+      // One waiting request per person. The seal is deterministic, so without this every refresh
+      // or double-click opened another request against the server-wide pending cap.
+      val waiting = store.pendingRequests().firstOrNull { it.requesterActorId == requester }
+      if (waiting != null) {
+        redirectToRequestedAccess(waiting.id)
         return
       }
       val permit = acquireAgentGrantPermit() ?: return
@@ -14452,16 +14479,29 @@ class ServeHttpServer(
           )
           return
         }
-        requested =
+        // POST, redirect, GET: the page showing the link to send is drawn by the GET below, so a
+        // refresh re-reads the same request instead of opening another.
+        redirectToRequestedAccess(request.id)
+        return
+      } finally {
+        permit.release()
+      }
+    }
+    // The landing of that redirect. Only the requester's own, still-waiting request is shown: the
+    // id is in the URL, and a URL is not a credential.
+    val requested =
+      call.request.queryParameters[REQUEST_ACCESS_ID_PARAM]
+        ?.let { store.request(it) }
+        ?.takeIf {
+          it.requesterActorId == requester && it.state == ServeAgentGrantStore.Request.State.PENDING
+        }
+        ?.let { request ->
           ServeWeb.RequestedAccess(
             approveUrl = externalOrigin() + ServeAgentGrants.approvalPath(request.id),
             userCode = request.userCode,
             expiresInSeconds = request.secondsUntilExpiry(System.currentTimeMillis()),
           )
-      } finally {
-        permit.release()
-      }
-    }
+        }
     markGeneration("static-page", "no-store")
     call.respondText(
       ServeWeb.uiBuilderRequestAccessPage(
@@ -14478,6 +14518,17 @@ class ServeHttpServer(
       ),
       ContentType.Text.Html,
     )
+  }
+
+  private suspend fun RoutingContext.redirectToRequestedAccess(requestId: String) {
+    val token = agentGrantTokenQuery().removePrefix("?")
+    call.response.headers.append(
+      HttpHeaders.Location,
+      "$UI_BUILDER_REQUEST_ACCESS_PATH?$REQUEST_ACCESS_ID_PARAM=" +
+        WebEscaping.urlEncodeSegment(requestId) +
+        (if (token.isEmpty()) "" else "&$token"),
+    )
+    call.respond(HttpStatusCode.SeeOther)
   }
 
   /**
@@ -14784,6 +14835,10 @@ class ServeHttpServer(
       return
     }
     val request = store.request(call.parameters["requestId"])
+    // Where the decision form lands once it has done its work (POST, redirect, GET): the outcome is
+    // read back from the store rather than rendered by the POST, so a refresh re-reads it instead
+    // of re-submitting a decision that has already been made.
+    if (request != null && respondAgentGrantOutcome(store, request)) return
     if (request == null || request.state != ServeAgentGrantStore.Request.State.PENDING) {
       respondAgentGrantNotice(
         heading = "Nothing to approve",
@@ -14899,10 +14954,7 @@ class ServeHttpServer(
           )
           return
         }
-        respondAgentGrantNotice(
-          heading = "Access declined",
-          message = "Nothing was granted. The agent has been told its request was declined.",
-        )
+        redirectToAgentGrantOutcome(requestId)
       } else {
         respondAgentGrantNotice(
           heading = "Already decided",
@@ -14967,22 +15019,65 @@ class ServeHttpServer(
       )
       return
     }
-    respondAgentGrantNotice(
-      heading = "Access granted",
-      message =
-        "The agent can now use this server for " +
-          AgentGrantProtocol.formatDuration(grant.secondsUntilExpiry(System.currentTimeMillis())) +
-          ". You can end it early from the server status page at any time.",
-      detail =
-        buildString {
-          append("Scopes: ${grant.scopes.joinToString(", ") { it.wire }}")
-          if (grant.capabilities.isNotEmpty()) {
-            val names = AgentGrantCapability.wireNames(grant.capabilities).joinToString(", ")
-            append(" · also: $names")
-          }
-          append(" · grant ${grant.fingerprint}")
-        },
+    redirectToAgentGrantOutcome(requestId)
+  }
+
+  /**
+   * `303` back to the approval link, which now shows the outcome — see [respondAgentGrantOutcome].
+   */
+  private suspend fun RoutingContext.redirectToAgentGrantOutcome(requestId: String) {
+    call.response.headers.append(
+      HttpHeaders.Location,
+      ServeAgentGrants.approvalPath(requestId) + agentGrantTokenQuery(),
     )
+    call.respond(HttpStatusCode.SeeOther)
+  }
+
+  /**
+   * The approval link, once the request has been decided: what was granted (while the grant lives)
+   * or that it was declined. False for a pending request — the caller draws the form — and for an
+   * approval whose grant has since expired or been revoked, which is "nothing to approve" again.
+   */
+  private suspend fun RoutingContext.respondAgentGrantOutcome(
+    store: ServeAgentGrantStore,
+    request: ServeAgentGrantStore.Request,
+  ): Boolean {
+    when (request.state) {
+      ServeAgentGrantStore.Request.State.PENDING -> return false
+      ServeAgentGrantStore.Request.State.DENIED -> {
+        respondAgentGrantNotice(
+          heading = "Access declined",
+          message =
+            "Nothing was granted" +
+              (request.resolvedBy?.let { " — declined by $it" } ?: "") +
+              ". The agent has been told its request was declined.",
+        )
+        return true
+      }
+      ServeAgentGrantStore.Request.State.APPROVED -> {
+        val grant = store.grant(request.grantId) ?: return false
+        respondAgentGrantNotice(
+          heading = "Access granted",
+          message =
+            "The agent can now use this server for " +
+              AgentGrantProtocol.formatDuration(
+                grant.secondsUntilExpiry(System.currentTimeMillis())
+              ) +
+              ". You can end it early from the server status page at any time.",
+          detail =
+            buildString {
+              append("Scopes: ${grant.scopes.joinToString(", ") { it.wire }}")
+              if (grant.capabilities.isNotEmpty()) {
+                val names = AgentGrantCapability.wireNames(grant.capabilities).joinToString(", ")
+                append(" · also: $names")
+              }
+              append(" · grant ${grant.fingerprint}")
+              append(" · approved by ${grant.approvedBy}")
+            },
+        )
+        return true
+      }
+    }
   }
 
   // ---------------------------------------------------------- OAuth façade
@@ -15657,6 +15752,12 @@ class ServeHttpServer(
 
     /** Where a signed-in reader asks for UI-builder edit access for themselves. */
     const val UI_BUILDER_REQUEST_ACCESS_PATH = "/ui-builder/request-access"
+
+    /** Query parameters the share page's redirect adds to say what just changed. */
+    private val ACCESS_NOTICE_PARAMS = setOf("changed", "actor", "role")
+
+    /** The request-access page's query parameter naming the request its POST just opened. */
+    private const val REQUEST_ACCESS_ID_PARAM = "request"
 
     /** The seal's fixed `requestId` and action for that form; the login is the per-reader part. */
     private const val REQUEST_ACCESS_SEAL_ID = "ui-builder-request-access"

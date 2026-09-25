@@ -53,6 +53,20 @@ data class ServeGithubAuthConfig(
   val imageRepository: String? = null,
   val allowedUsers: Set<String> = emptySet(),
   /**
+   * `--github-auth-orgs`: GitHub organizations whose members are admitted as **members**, exactly
+   * as if each were named in [allowedUsers]. It is the way to open a deployment to a whole team
+   * without maintaining a login list — `google` on preview.coo.ee — while every other account still
+   * lands as a guest (with [allowGuests]) or is refused.
+   *
+   * Membership is read once, at sign-in, with the visitor's own token, and baked into the session
+   * like every other bit here: it lasts until the session's absolute cap, so somebody who leaves
+   * the org keeps access for at most that long. Asking needs `read:org`, which
+   * [ServeGithubAuth.requestedScope] adds whenever this is non-empty. A private membership is only
+   * visible when the org allows this OAuth app; a public one always is — see
+   * [GitHubOAuthVerifier.isOrgMember].
+   */
+  val allowedOrgs: Set<String> = emptySet(),
+  /**
    * `--github-auth-guests`: let a GitHub account outside [allowedUsers] sign in anyway, as a
    * **guest**.
    *
@@ -102,6 +116,9 @@ data class ServeGithubAuthConfig(
     require(repository.matches(Regex("[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+"))) {
       "GitHub auth repository must be owner/repo"
     }
+    require(allowedOrgs.all { it.matches(GITHUB_ORG) }) {
+      "GitHub auth orgs must be organization logins such as 'google'"
+    }
     val domain = cookieDomain?.trim()?.removePrefix(".")?.takeIf { it.isNotEmpty() }
     if (domain != null) {
       val normalized = ServeSites.normalizeHost(domain)
@@ -133,8 +150,15 @@ data class ServeGithubAuthConfig(
     }
   }
 
+  /** Whether sign-in admits only some accounts as members — by login, by org, or both. */
+  val restrictsMembership: Boolean
+    get() = allowedUsers.isNotEmpty() || allowedOrgs.isNotEmpty()
+
   companion object {
     const val MIN_COOKIE_SECRET_CHARS = 32
+
+    /** GitHub's own rule for an organization login: alphanumerics and single inner hyphens. */
+    private val GITHUB_ORG = Regex("[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}")
 
     /**
      * Two-label names that are registries rather than registrable domains, so a cookie may not span
@@ -444,7 +468,7 @@ class ServeGithubAuth(
   fun imageAccessRepository(): String =
     config.imageRepository?.takeIf { it.isNotBlank() } ?: config.repository
 
-  fun isRestrictedToAllowedUsers(): Boolean = config.allowedUsers.isNotEmpty()
+  fun isRestrictedToAllowedUsers(): Boolean = config.restrictsMembership
 
   private fun authorizeUrl(call: ApplicationCall, state: String): String {
     val params =
@@ -475,9 +499,16 @@ class ServeGithubAuth(
    * [ServeGithubAuthConfig.oauthScope] overrides this outright for a deployment that needs
    * something else.
    */
-  internal fun requestedScope(): String =
-    config.oauthScope?.trim()?.takeIf { it.isNotEmpty() }
-      ?: if (gatingReposArePublic.value) PUBLIC_REPO_SCOPE else PRIVATE_REPO_SCOPE
+  internal fun requestedScope(): String {
+    val base =
+      config.oauthScope?.trim()?.takeIf { it.isNotEmpty() }
+        ?: if (gatingReposArePublic.value) PUBLIC_REPO_SCOPE else PRIVATE_REPO_SCOPE
+    // A private org membership is only readable with `read:org`, and the one reason to ask for it
+    // is `--github-auth-orgs` — so it rides on top of an override too: an operator who names orgs
+    // and pins a scope that forgot it would otherwise admit only the orgs' public members.
+    val needsOrg = config.allowedOrgs.isNotEmpty() && ORG_SCOPE !in base.split(' ', ',')
+    return if (needsOrg) "$base $ORG_SCOPE" else base
+  }
 
   /**
    * Whether **every** gating repo is publicly readable, probed **anonymously** and once.
@@ -773,6 +804,9 @@ class ServeGithubAuth(
      */
     const val PRIVATE_REPO_SCOPE = "read:user repo"
 
+    /** Added to the derived scope when `--github-auth-orgs` is set, so private membership reads. */
+    const val ORG_SCOPE = "read:org"
+
     /** Both OAuth routes, so [refreshSession] can leave the cookie-minting ones alone. */
     private const val AUTH_PATH_PREFIX = "/auth/github/"
 
@@ -845,7 +879,7 @@ class GitHubOAuthVerifier(private val client: OkHttpClient = OkHttpClient()) {
   ): Result<GitHubOAuthUser> = runCatching {
     val token = exchangeCode(code, redirectUri, config)
     val login = fetchLogin(token)
-    if (config.allowedUsers.isNotEmpty() && login.lowercase() !in config.allowedUsers) {
+    if (!isAdmitted(token, login, config.allowedUsers, config.allowedOrgs)) {
       if (!config.allowGuests) error("GitHub user $login is not allowed")
       // A guest is an identity and nothing more. No repository is asked about, so no access bit
       // exists for a later gate to misread.
@@ -887,12 +921,19 @@ class GitHubOAuthVerifier(private val client: OkHttpClient = OkHttpClient()) {
     token: String,
     repository: String,
     allowedUsers: Set<String> = emptySet(),
+    allowedOrgs: Set<String> = emptySet(),
   ): Result<GitHubOAuthUser> = runCatching {
     // Null when `/user` refuses the credential, which is the normal answer for a GitHub **App
     // installation** token rather than a sign of a bad one — see [verifyInstallationToken].
     val login = runCatching { fetchLogin(token) }.getOrNull()
-    if (login == null) return@runCatching verifyInstallationToken(token, repository, allowedUsers)
-    if (allowedUsers.isNotEmpty() && login.lowercase() !in allowedUsers) {
+    if (login == null) {
+      return@runCatching verifyInstallationToken(
+        token,
+        repository,
+        restricted = allowedUsers.isNotEmpty() || allowedOrgs.isNotEmpty(),
+      )
+    }
+    if (!isAdmitted(token, login, allowedUsers, allowedOrgs)) {
       error("GitHub user $login is not allowed")
     }
     GitHubOAuthUser(login, repositoryAccess = fetchRepositoryAccess(token, repository, login))
@@ -914,9 +955,9 @@ class GitHubOAuthVerifier(private val client: OkHttpClient = OkHttpClient()) {
    *   about a *person* somebody let in; a machine credential scoped by a workflow file is not that,
    *   and a read-only workflow token (what a fork's pull_request run gets) must not be able to post
    *   to the host.
-   * - **Refused outright when the operator narrowed sign-in** with `--github-auth-users`. That list
-   *   names people; an installation token is nobody on it, and silently admitting one would widen a
-   *   gate whose whole point is to be narrow.
+   * - **Refused outright when the operator narrowed sign-in** with `--github-auth-users` or
+   *   `--github-auth-orgs`. Those name people; an installation token is nobody on them, and
+   *   silently admitting one would widen a gate whose whole point is to be narrow.
    *
    * The identity returned is [INSTALLATION_LOGIN] rather than a name, because there isn't one: an
    * installation token cannot read `GET /app` (that needs the app's JWT). The audit trail says
@@ -925,15 +966,67 @@ class GitHubOAuthVerifier(private val client: OkHttpClient = OkHttpClient()) {
   private fun verifyInstallationToken(
     token: String,
     repository: String,
-    allowedUsers: Set<String>,
+    restricted: Boolean,
   ): GitHubOAuthUser {
-    if (allowedUsers.isNotEmpty()) {
+    if (restricted) {
       error("this host admits only named GitHub users, and that is not a user credential")
     }
     val permissions =
       repositoryView(token, repository)?.permissions
         ?: error("credential is not a GitHub user, and cannot read $repository as an installation")
     return GitHubOAuthUser(INSTALLATION_LOGIN, repositoryAccess = permissions.write())
+  }
+
+  /**
+   * Whether [login] is a member rather than a guest: no restriction at all, a name on
+   * [allowedUsers], or membership of any of [allowedOrgs]. The login list is checked first so a
+   * named user costs no GitHub round trip.
+   */
+  private fun isAdmitted(
+    token: String,
+    login: String,
+    allowedUsers: Set<String>,
+    allowedOrgs: Set<String>,
+  ): Boolean {
+    if (allowedUsers.isEmpty() && allowedOrgs.isEmpty()) return true
+    if (login.lowercase() in allowedUsers) return true
+    return allowedOrgs.any { isOrgMember(token, it, login) }
+  }
+
+  /**
+   * Whether [login] belongs to [org], asked two ways because GitHub answers them differently.
+   *
+   * `GET /user/memberships/orgs/{org}` sees a **private** membership, but only with `read:org` and
+   * only when the org has not restricted third-party OAuth apps (or has approved this one) — a
+   * large org such as `google` commonly has. `GET /orgs/{org}/public_members/{login}` sees only a
+   * **public** membership, but needs no scope and no approval at all. Either saying yes is enough;
+   * anything else — a 403 from an app restriction, a 404, a network failure — is a no, which is the
+   * safe direction for a gate: the visitor lands as a guest and can ask for more.
+   */
+  internal fun isOrgMember(token: String, org: String, login: String): Boolean {
+    val membership =
+      Request.Builder()
+        .url("https://api.github.com/user/memberships/orgs/$org")
+        .header(HttpHeaders.Authorization, "Bearer $token")
+        .header(HttpHeaders.Accept, "application/vnd.github+json")
+        .build()
+    val active = runCatching {
+      client.newCall(membership).execute().use { response ->
+        response.isSuccessful &&
+          JSON.decodeFromString(GitHubMembershipResponse.serializer(), response.body.string())
+            .state == "active"
+      }
+    }
+      .getOrDefault(false)
+    if (active) return true
+    val publicMember =
+      Request.Builder()
+        .url("https://api.github.com/orgs/$org/public_members/$login")
+        .header(HttpHeaders.Authorization, "Bearer $token")
+        .header(HttpHeaders.Accept, "application/vnd.github+json")
+        .build()
+    return runCatching { client.newCall(publicMember).execute().use { it.code == 204 } }
+      .getOrDefault(false)
   }
 
   private fun exchangeCode(
@@ -1086,6 +1179,8 @@ class GitHubOAuthVerifier(private val client: OkHttpClient = OkHttpClient()) {
 private data class GitHubTokenResponse(@SerialName("access_token") val accessToken: String? = null)
 
 @Serializable private data class GitHubUserResponse(val login: String)
+
+@Serializable private data class GitHubMembershipResponse(val state: String? = null)
 
 @Serializable
 private data class GitHubPermissionResponse(

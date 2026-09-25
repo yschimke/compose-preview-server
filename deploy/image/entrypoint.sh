@@ -195,6 +195,9 @@ if [[ -n "${SERVE_GITHUB_AUTH_CLIENT_ID:-}" ||
   [[ -n "${github_auth_cookie_domain}" && "${github_auth_cookie_domain}" != "none" ]] &&
     args+=(--github-auth-cookie-domain "${github_auth_cookie_domain}")
   [[ -n "${SERVE_GITHUB_AUTH_USERS:-}" ]] && args+=(--github-auth-users "${SERVE_GITHUB_AUTH_USERS}")
+  # Admit every member of these GitHub orgs as a member too (preview.coo.ee: `google`), so a team
+  # gets edit access without anyone maintaining SERVE_GITHUB_AUTH_USERS.
+  [[ -n "${SERVE_GITHUB_AUTH_ORGS:-}" ]] && args+=(--github-auth-orgs "${SERVE_GITHUB_AUTH_ORGS}")
   # With an allowlist set, admit every other GitHub account as a read-only UI-builder guest that can
   # ask for edit access through an agent grant. Guests count as signed out everywhere else.
   [[ "${SERVE_GITHUB_AUTH_GUESTS:-}" == "1" || "${SERVE_GITHUB_AUTH_GUESTS:-}" == "true" ]] &&

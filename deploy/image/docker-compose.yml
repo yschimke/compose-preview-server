@@ -113,7 +113,9 @@ services:
       # entrypoint.sh); `none` keeps cookies host-only, which withholds sign-in on every site host.
       SERVE_GITHUB_AUTH_COOKIE_DOMAIN: "${SERVE_GITHUB_AUTH_COOKIE_DOMAIN:-}"
       SERVE_GITHUB_AUTH_USERS: "${SERVE_GITHUB_AUTH_USERS:-}"
-      # `1` admits accounts outside SERVE_GITHUB_AUTH_USERS as read-only UI-builder guests.
+      # GitHub orgs whose members count as if listed in SERVE_GITHUB_AUTH_USERS (e.g. `google`).
+      SERVE_GITHUB_AUTH_ORGS: "${SERVE_GITHUB_AUTH_ORGS:-}"
+      # `1` admits accounts outside SERVE_GITHUB_AUTH_USERS / _ORGS as read-only UI-builder guests.
       SERVE_GITHUB_AUTH_GUESTS: "${SERVE_GITHUB_AUTH_GUESTS:-}"
       # Empty derives the OAuth scope from the gating repo's visibility (public ⇒ read:user,
       # private ⇒ read:user repo). Only set this when a GitHub App or org policy demands one.

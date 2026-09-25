@@ -589,6 +589,14 @@ public class ServeCommandOptions(
       ?.filter { it.isNotEmpty() }
       ?.toSet() ?: emptySet()
 
+  override val githubAuthOrgs: Set<String> =
+    args
+      .flagValue("--github-auth-orgs")
+      ?.split(",")
+      ?.map { it.trim().lowercase() }
+      ?.filter { it.isNotEmpty() }
+      ?.toSet() ?: emptySet()
+
   override val githubAuthGuests: Boolean = "--github-auth-guests" in args
 
   /**
@@ -1107,10 +1115,16 @@ public class ServeCommandOptions(
         --github-auth-users <login>[,<login>…]
                           Optional sign-in allowlist. Empty means any signed-in GitHub user may use
                           live sessions; playground still requires access to --github-auth-repo.
+        --github-auth-orgs <org>[,<org>…]
+                          Admit members of these GitHub organizations as if they were listed in
+                          --github-auth-users (e.g. google). Adds read:org to the requested scope;
+                          a private membership counts only where the org allows this OAuth app, a
+                          public one always does.
         --github-auth-guests
-                          With --github-auth-users set, let any other GitHub account sign in as a
-                          guest: it sees the UI-builder designs shared with it, read-only, and can
-                          request edit access through an agent grant. A guest counts as signed out
+                          With --github-auth-users or --github-auth-orgs set, let any other GitHub
+                          account sign in as a guest: it sees the UI-builder designs shared with
+                          it, read-only, and can request edit access through an agent grant. A
+                          guest counts as signed out
                           everywhere else — no live sessions, playground, uploads or approvals.
         --agent-grants    Let an agent ask for temporary access it can't otherwise get. The agent
                           POSTs /agent-access/request and prints a link plus a verification code;

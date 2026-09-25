@@ -209,7 +209,10 @@ class ServeUiBuilderAccessRoutesTest {
     val builder = Request.Builder().url(url(path)).post(form).header("Accept", "text/html")
     if (actor != null) builder.header("X-Test-Actor", actor)
     if (origin != null) builder.header("Origin", origin)
-    return client.newCall(builder.build()).execute().use { it.code to it.body.string() }
+    // A redirect answers with where it sends the browser, which is what these tests check.
+    return client.newCall(builder.build()).execute().use {
+      it.code to (if (it.isRedirect) it.header("Location").orEmpty() else it.body.string())
+    }
   }
 
   @Test
@@ -267,7 +270,8 @@ class ServeUiBuilderAccessRoutesTest {
         "/ui-builder/screen/access",
         FormBody.Builder().add("actorId", "github:colleague").add("role", "editor").build(),
       )
-    assertEquals(200, code)
+    // POST, redirect, GET: a refresh of the landing page repeats the notice, not the share.
+    assertEquals(303, code)
     val shared = mutations.single()
     assertEquals(3, shared.baseAccessRevision, "the revision comes from the read, not the form")
     val grant = shared.mutations.single() as GrantActorAccessMutationV1
@@ -278,7 +282,14 @@ class ServeUiBuilderAccessRoutesTest {
       grant.allowedActions,
       "neither shared role may manage access or delete",
     )
-    assertTrue(page.contains("github:colleague"), page)
+    assertEquals(
+      "/ui-builder/screen/access?changed=shared&actor=github%3Acolleague&role=editor",
+      page,
+    )
+    val (landedCode, landed) = get(page, actor = "github:owner")
+    assertEquals(200, landedCode)
+    assertTrue(landed.contains("github:colleague can now open this design as editor"), landed)
+    assertEquals(1, mutations.size, "reading the landing page changes nothing")
 
     mutations.clear()
     val (revokedCode, revokedPage) =
@@ -286,12 +297,13 @@ class ServeUiBuilderAccessRoutesTest {
         "/ui-builder/screen/access",
         FormBody.Builder().add("actorId", "github:colleague").add("action", "revoke").build(),
       )
-    assertEquals(200, revokedCode)
+    assertEquals(303, revokedCode)
     assertEquals(
       "github:colleague",
       (mutations.single().mutations.single() as RevokeActorAccessMutationV1).actorId,
     )
-    assertFalse(revokedPage.contains(">github:colleague<"), revokedPage)
+    val (_, revokedLanding) = get(revokedPage, actor = "github:owner")
+    assertTrue(revokedLanding.contains("github:colleague can no longer open"), revokedLanding)
   }
 
   @Test

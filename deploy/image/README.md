@@ -678,6 +678,10 @@ startup rather than producing cookies the browser drops silently. Empty `SERVE_G
 signed-in GitHub user to use live previews; playground additionally requires **write** access to
 `SERVE_GITHUB_AUTH_REPO` (default `yschimke/compose-ai-tools`). Set `SERVE_GITHUB_AUTH_USERS` to a
 comma-separated login list only if you want to narrow sign-in for both surfaces. With a list set,
+`SERVE_GITHUB_AUTH_ORGS` (comma-separated GitHub organizations, e.g. `google`) admits every member
+of those orgs as though they were on the list, which is how a whole team gets edit access without
+anyone maintaining logins; it adds `read:org` to the requested scope, and a private membership only
+counts where the org allows this OAuth app (a public membership always does). With a list or orgs set,
 `SERVE_GITHUB_AUTH_GUESTS=1` lets every other GitHub account sign in as a **guest**: it sees the
 UI-builder designs shared with it, read-only, can ask for edit access through an agent grant, and
 counts as signed out everywhere else. The OAuth app

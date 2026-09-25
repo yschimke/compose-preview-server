@@ -110,11 +110,12 @@ object ServeMcpOAuth {
    * That is not the loose end it looks like. RFC 6749 §4.1.2 asks for a short-lived code because a
    * code is a bearer of authorization; this one is not *disclosed* until the redirect that follows
    * approval, so the window that actually matters — issue to redemption, on the client's own
-   * redirect handler — is a second or two regardless of how long the human took. Ten minutes is the
-   * maximum §4.1.2 names, single use is enforced in [Store.redeem], and PKCE means a stolen code is
-   * inert without its verifier.
+   * redirect handler — is a second or two regardless of how long the human took. So the window
+   * matches the approval page's own ([ServeAgentGrantStore.DEFAULT_REQUEST_TTL_SECONDS]) rather
+   * than §4.1.2's ten minutes, which expired sign-ins that included a GitHub 2FA round trip; single
+   * use is enforced in [Store.redeem], and PKCE means a stolen code is inert without its verifier.
    */
-  const val AUTHORIZATION_TTL_SECONDS = 600L
+  const val AUTHORIZATION_TTL_SECONDS = ServeAgentGrantStore.DEFAULT_REQUEST_TTL_SECONDS
 
   /**
    * How long a dynamic registration survives.

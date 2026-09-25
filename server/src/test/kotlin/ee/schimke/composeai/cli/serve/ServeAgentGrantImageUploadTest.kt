@@ -141,7 +141,7 @@ class ServeAgentGrantImageUploadTest {
         contentType = "application/x-www-form-urlencoded",
         port = port,
       )
-    assertEquals(200, approveCode)
+    assertEquals(303, approveCode)
     val (_, polled) =
       post(
         "/agent-access/poll",
