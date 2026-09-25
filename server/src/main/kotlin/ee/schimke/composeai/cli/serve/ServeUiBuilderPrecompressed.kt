@@ -13,6 +13,7 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.Future
+import java.util.concurrent.RejectedExecutionException
 import java.util.zip.Deflater
 import java.util.zip.GZIPOutputStream
 
@@ -52,13 +53,36 @@ internal class UiBuilderPrecompressedAssets(
 ) {
   private val copies = ConcurrentHashMap<String, Future<File?>>()
 
-  private val worker: ExecutorService by lazy {
-    Executors.newSingleThreadExecutor { runnable ->
-      Thread(runnable, "ui-builder-gzip").apply {
-        isDaemon = true
-        priority = Thread.MIN_PRIORITY
-      }
-    }
+  /** Made on first use, because a server that never serves the builder needs no thread for it. */
+  private var worker: ExecutorService? = null
+
+  private var closed = false
+
+  /** The worker, or null once [close] has run: after that, requests get the originals. */
+  @Synchronized
+  private fun worker(): ExecutorService? {
+    if (closed) return null
+    return worker
+      ?: Executors.newSingleThreadExecutor { runnable ->
+          Thread(runnable, "ui-builder-gzip").apply {
+            isDaemon = true
+            priority = Thread.MIN_PRIORITY
+          }
+        }
+        .also { worker = it }
+  }
+
+  /**
+   * Stop compressing, with the server that owns this. Queued copies are dropped; one in progress
+   * finishes into its temporary file and is thrown away. Without this every server that served the
+   * builder shell left its thread parked behind it — once per start and stop, which a test suite
+   * does hundreds of times.
+   */
+  @Synchronized
+  fun close() {
+    closed = true
+    worker?.shutdownNow()
+    worker = null
   }
 
   /** Whether [file] is a kind worth compressing: text, Wasm and fonts, above a minimum size. */
@@ -71,8 +95,18 @@ internal class UiBuilderPrecompressedAssets(
    */
   fun ready(file: File): File? {
     if (!compressible(file)) return null
+    val key = key(file)
     val copy =
-      copies.computeIfAbsent(key(file)) { key -> worker.submit<File?> { compress(file, key) } }
+      copies[key]
+        ?: run {
+          val worker = worker() ?: return null
+          // Rejected only by a [close] racing this request, which then gets the original.
+          try {
+            copies.computeIfAbsent(key) { worker.submit<File?> { compress(file, it) } }
+          } catch (_: RejectedExecutionException) {
+            return null
+          }
+        }
     if (!copy.isDone) return null
     return runCatching { copy.get() }.getOrNull()?.takeIf { it.isFile }
   }
@@ -90,15 +124,22 @@ internal class UiBuilderPrecompressedAssets(
    * one's to compress.
    */
   fun warm(bundle: File) {
+    val worker = worker() ?: return
     if (!warmed.add(bundle.canonicalPath)) return
-    worker.execute {
-      bundle
-        .listFiles()
-        .orEmpty()
-        .filter { it.isFile && compressible(it) }
-        .sortedByDescending { it.length() }
-        .forEach { ready(it) }
+    try {
+      worker.execute { warmTopLevel(bundle) }
+    } catch (_: RejectedExecutionException) {
+      // Closed between the check and the submit: nothing left to warm for.
     }
+  }
+
+  private fun warmTopLevel(bundle: File) {
+    bundle
+      .listFiles()
+      .orEmpty()
+      .filter { it.isFile && compressible(it) }
+      .sortedByDescending { it.length() }
+      .forEach { ready(it) }
   }
 
   private fun compress(source: File, key: String): File? {

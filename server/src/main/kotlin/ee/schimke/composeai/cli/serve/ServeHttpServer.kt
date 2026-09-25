@@ -2158,6 +2158,7 @@ class ServeHttpServer(
     readinessProber?.interrupt()
     thumbWarmer.stop()
     server.stop(gracePeriodMillis = 500, timeoutMillis = 2000)
+    uiBuilderPrecompressed.close()
   }
 
   /**

@@ -86,6 +86,21 @@ class ServeUiBuilderPrecompressedTest {
   }
 
   @Test
+  fun `stopping the server stops its compression thread`() {
+    // One parked thread per start and stop is a leak a test suite multiplies by hundreds.
+    withBundle { base, _ -> awaitGzip(base, "app.wasm").close() }
+    val deadline = System.currentTimeMillis() + 5_000
+    while (gzipThreads().isNotEmpty() && System.currentTimeMillis() < deadline) Thread.sleep(20)
+    assertEquals(emptyList(), gzipThreads())
+  }
+
+  private fun gzipThreads(): List<String> =
+    Thread.getAllStackTraces()
+      .keys
+      .filter { it.isAlive && it.name == "ui-builder-gzip" }
+      .map { it.name }
+
+  @Test
   fun `accept-encoding is read with its qualities`() {
     val accepts = UiBuilderPrecompressedAssets::acceptsGzip
     assertTrue(accepts("gzip, deflate, br, zstd"))
