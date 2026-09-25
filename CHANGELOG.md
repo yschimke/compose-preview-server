@@ -1,5 +1,14 @@
 # Changelog
 
+## [3.66.0](https://github.com/yschimke/compose-preview-server/compare/v3.65.0...v3.66.0) (2026-09-25)
+
+
+### Bug Fixes
+
+* **daemon:** move compose-preview-daemon to 3.8.4, so a Skiko mismatch is diagnosed as classpath skew ([#1074](https://github.com/yschimke/compose-preview-server/issues/1074)) ([2b984e1](https://github.com/yschimke/compose-preview-server/commit/2b984e1cd5cb1ffa1b3b752333408d6cde9a6314))
+* **playground:** replace a stale host Skiko native instead of appending beside it ([#1070](https://github.com/yschimke/compose-preview-server/issues/1070)) ([44ce29b](https://github.com/yschimke/compose-preview-server/commit/44ce29b8a57d4eda6c144dc115f829c39ef09a8d))
+* **playground:** surface a native render's failure instead of timing out on it ([#1069](https://github.com/yschimke/compose-preview-server/issues/1069)) ([5de480a](https://github.com/yschimke/compose-preview-server/commit/5de480a60a53cab4cecd050362f62c3c9bea8d8a))
+
 ## [3.65.0](https://github.com/yschimke/compose-preview-server/compare/v3.64.0...v3.65.0) (2026-09-25)
 
 
