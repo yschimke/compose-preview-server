@@ -103,7 +103,7 @@ class StateSelectionExportTest {
     val source = assertIs<ScreenExportGate.Outcome.Emitted>(result, result.toString()).source
     assertTrue("when (page.value)" in source, source)
     assertTrue("10 ->" in source && "20 ->" in source && "else ->" in source, source)
-    assertTrue("padding(start = 12.dp" in source, source)
+    assertTrue("padding(12.dp)" in source, source)
     File("build/behavior-export/StateSelection.kt").apply {
       parentFile.mkdirs()
       writeText(source)
