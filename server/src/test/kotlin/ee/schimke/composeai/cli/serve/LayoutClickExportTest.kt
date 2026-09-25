@@ -40,7 +40,7 @@ class LayoutClickExportTest {
     assertEquals(fixture.readText(), source)
     assertTrue("when (page.value)" in source, source)
     assertTrue(".clickable(onClick = { page.value = 20 })" in source, source)
-    assertTrue(".padding(start = 24.dp" in source, source)
+    assertTrue(".padding(24.dp)" in source, source)
     assertFalse("Box(onClick" in source, source)
   }
 

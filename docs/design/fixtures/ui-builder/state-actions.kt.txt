@@ -11,10 +11,10 @@ fun StateActions() {
     val label = androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf<kotlin.String>("Ready") }
     val enabled = androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf<kotlin.Boolean>(true) }
     val progress = androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf<kotlin.Float>(0.0f) }
-    Column(content = {
-        Button(onClick = { label.value = "Updated"; enabled.value = !enabled.value; progress.value = 1.0f }, enabled = enabled.value, content = {
+    Column {
+        Button(onClick = { label.value = "Updated"; enabled.value = !enabled.value; progress.value = 1.0f }, enabled = enabled.value) {
             Text(text = label.value)
-        })
+        }
         LinearProgressIndicator(progress = { progress.value })
-    })
+    }
 }
