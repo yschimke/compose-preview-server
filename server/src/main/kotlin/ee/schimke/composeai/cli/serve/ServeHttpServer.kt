@@ -13422,7 +13422,7 @@ class ServeHttpServer(
         )
       val description =
         "A ${public.catalogPin.systemId} screen designed in the Compose UI builder, at revision " +
-          "${public.revision}. Open it to try it, comment on it or export its Kotlin."
+          "${public.revision}. Open it to see it, or fork it to make it your own."
       return title to ServeWeb.unfurlHeadHtml(title, description, unfurl)
     }
     val card =
