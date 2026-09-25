@@ -517,7 +517,16 @@ internal class ScreenGeneratorComposeExportExecutor(
           previewFor(document.environment),
         )
     ) {
-      is ScreenGenerator.Result.Refused -> Generated.Refused(UNPROVEN_CALL_SITE, generated.reasons)
+      is ScreenGenerator.Result.Refused ->
+        Generated.Refused(
+          UNPROVEN_CALL_SITE,
+          summarizeUnproven(
+            generated.reasons,
+            catalogSystemId,
+            designComponentIds = document.nodes.values.map { it.componentId }.toSet(),
+            recordComponentIds = merged.components.flatMapTo(mutableSetOf()) { it.componentIds },
+          ),
+        )
       is ScreenGenerator.Result.Emitted ->
         Generated.Emitted(generated.source, screenName, projection.assetPlaceholders)
     }
@@ -823,6 +832,56 @@ internal class ScreenGeneratorComposeExportExecutor(
     }
 
   companion object {
+    /**
+     * The generator's refusal, readable when it is long.
+     *
+     * The generator reports once per node, so a record that lacks `m3/text` refuses every `Text` on
+     * the screen, in the same words: a render of Keep against the wrong record printed forty lines
+     * to say eight things. Repeats collapse into one line with a count, in first-seen order.
+     *
+     * And when the record names **none** of the design's own catalog components, the problem is not
+     * any one component: it is the file. That is what handing `design render --local` a bundle's
+     * discovery `components.json` looks like, whose ids are the catalog's taxonomy
+     * (`Button/Filled`) rather than the builder's (`m3/button`). Said first, with an example of
+     * each vocabulary, so the reader fixes the path instead of the design.
+     */
+    internal fun summarizeUnproven(
+      reasons: List<String>,
+      catalogSystemId: String,
+      designComponentIds: Set<String>,
+      recordComponentIds: Set<String>,
+    ): List<String> {
+      val counts = LinkedHashMap<String, Int>()
+      reasons.forEach { counts.merge(it, 1, Int::plus) }
+      val collapsed = counts.map { (reason, n) -> if (n > 1) "$reason (×$n)" else reason }
+      val missing =
+        counts.keys.mapNotNull { MISSING_COMPONENT.matchEntire(it)?.groupValues?.get(1) }.toSet()
+      // The design's own components the record could have proven: everything but the builder's
+      // foundation, which every record carries whatever file it came from.
+      val own = designComponentIds.filterNot { it.substringBefore('/') in FOUNDATION_PREFIXES }
+      val wrongFile =
+        missing.size > 1 &&
+          own.isNotEmpty() &&
+          own.all { it in missing } &&
+          own.none { it in recordComponentIds }
+      if (!wrongFile) return collapsed
+      val example = recordComponentIds.filterNot { it.substringBefore('/') in FOUNDATION_PREFIXES }
+      return listOf(
+        "the component record for catalog `$catalogSystemId` proves none of this design's " +
+          "${own.size} components, so it is probably not the record this catalog's designs are " +
+          "written against" +
+          (example.minOrNull()?.let { " — it names ids like `$it`" } ?: "") +
+          ", and the design uses ids like `${own.min()}`; a catalog bundle's own discovery " +
+          "`components.json` is not that record"
+      ) + collapsed
+    }
+
+    /** The generator's words for a node whose id no record component claims. */
+    private val MISSING_COMPONENT = Regex("no component `([^`]+)` in this catalog")
+
+    /** The builder's own vocabulary, unioned onto every record by `ComponentRecordSource`. */
+    private val FOUNDATION_PREFIXES = setOf("layout", "shape", "asset")
+
     /**
      * The packs [document] draws on, in a stable order.
      *

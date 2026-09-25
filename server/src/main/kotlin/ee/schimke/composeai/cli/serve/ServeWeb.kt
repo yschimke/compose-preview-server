@@ -9013,7 +9013,10 @@ ${captureControlsHtml().prependIndent("          ")}
             if (editLeaseButton) editLeaseButton.disabled = false;
             renderDiags(res.diagnostics);
             var hasError = (res.diagnostics || []).some(function (d) { return d.severity === "error"; });
-            if (res.exception) {
+            // A snippet that compiled and whose first frame failed still minted a live session: say
+            // why there is no still image, and keep going so its link is offered anyway.
+            var frameFailed = !!(res.exception && res.previewToken);
+            if (res.exception && !frameFailed) {
               if (res.exception.indexOf("live-edit lease") >= 0) setEditLease(null, res.exception);
               setStatus(res.exception, true); return;
             }
@@ -9066,7 +9069,8 @@ ${captureControlsHtml().prependIndent("          ")}
                 previewList.appendChild(li);
               });
             }
-            setStatus("Done.", false);
+            if (frameFailed) setStatus(res.exception, true);
+            else setStatus("Done.", false);
             if (res.revision != null && editLeaseNote) {
               editLeaseNote.hidden = false;
               editLeaseNote.textContent = "Revision " + res.revision +

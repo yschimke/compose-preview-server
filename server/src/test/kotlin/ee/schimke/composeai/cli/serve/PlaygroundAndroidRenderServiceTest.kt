@@ -14,6 +14,8 @@ import kotlin.test.assertTrue
 import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.seconds
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import okio.Path.Companion.toPath
 
 /**
@@ -217,6 +219,97 @@ class PlaygroundAndroidRenderServiceTest {
       )
 
     assertNull(svc.render(snippet(previewId)))
+  }
+
+  @Test
+  fun `a failed render ends the wait at once and carries the daemon's cause`() {
+    val previewId = "com.example.SnippetKt.AndroidPreview"
+    lateinit var fake: FakeRenderSession
+    fake =
+      FakeRenderSession(
+        renderRoot = tmp(),
+        renderHook = { _, _ ->
+          fake.emitFailed(previewId, "UnsatisfiedLinkError: ParagraphKt._nGetUnresolvedCodepoints")
+        },
+      )
+    val svc =
+      PlaygroundAndroidRenderService(
+        openSession = { _, _, _, _ -> fake },
+        newWorkDir = { tmp() },
+        // Long enough that riding it out would fail the elapsed check below.
+        renderBudget = 60.seconds,
+      )
+
+    val started = System.nanoTime()
+    val frame = svc.renderFrame(snippet(previewId))
+    val elapsedMs = (System.nanoTime() - started) / 1_000_000
+
+    assertNull(frame.png)
+    assertEquals(
+      "daemon reported renderFailed: [renderBody] UnsatisfiedLinkError: " +
+        "ParagraphKt._nGetUnresolvedCodepoints",
+      frame.failure,
+      "the daemon's own words, not a budget that expired",
+    )
+    assertTrue(elapsedMs < 10_000, "a failure must not wait out the render budget: ${elapsedMs}ms")
+  }
+
+  @Test
+  fun `a frame that rendered carries no failure`() {
+    val svc =
+      PlaygroundAndroidRenderService(
+        openSession = { _, _, _, _ -> FakeRenderSession(renderRoot = tmp()) },
+        newWorkDir = { tmp() },
+      )
+
+    val frame = svc.renderFrame(snippet())
+    assertEquals("png:null:null:null", frame.png?.decodeToString())
+    assertNull(frame.failure)
+  }
+
+  @Test
+  fun `the daemon's RenderError keeps its kind and its suggestion`() {
+    val params = buildJsonObject {
+      put("id", "p")
+      put(
+        "error",
+        buildJsonObject {
+          put("kind", "classpathSkew")
+          put("message", "UnsatisfiedLinkError: _nMake")
+          put("suggestion", "Pair skiko-awt with its runtime.")
+        },
+      )
+    }
+    assertEquals(
+      "[classpathSkew] UnsatisfiedLinkError: _nMake — Pair skiko-awt with its runtime.",
+      PlaygroundAndroidRenderService.renderFailureDetail(params),
+    )
+  }
+
+  @Test
+  fun `a bare string cause is still read, and a payload with none yields null`() {
+    assertEquals(
+      "boom",
+      PlaygroundAndroidRenderService.renderFailureDetail(
+        buildJsonObject {
+          put("id", "p")
+          put("message", "boom")
+        }
+      ),
+    )
+    assertEquals(
+      "kaput",
+      PlaygroundAndroidRenderService.renderFailureDetail(buildJsonObject { put("error", "kaput") }),
+    )
+    assertNull(
+      PlaygroundAndroidRenderService.renderFailureDetail(buildJsonObject { put("id", "p") })
+    )
+    assertNull(
+      PlaygroundAndroidRenderService.renderFailureDetail(
+        buildJsonObject { put("error", buildJsonObject { put("kind", "runtime") }) }
+      ),
+      "a kind alone names no cause",
+    )
   }
 
   // The cold-start budget. Every render on this lane opens its own daemon and closes it again, so

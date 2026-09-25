@@ -7,10 +7,11 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.seconds
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
-import kotlinx.serialization.json.jsonPrimitive
 
 /**
  * Opens a bundle-less render session over a compiled playground snippet — the injected daemon seam
@@ -67,7 +68,16 @@ class PlaygroundAndroidRenderService(
    * The [PlaygroundCompileService] `renderFirstFrame` seam: snippet → first-frame PNG bytes, or
    * null.
    */
-  fun render(snippet: PlaygroundTokenStore.PlaygroundSnippet): ByteArray? {
+  fun render(snippet: PlaygroundTokenStore.PlaygroundSnippet): ByteArray? = renderFrame(snippet).png
+
+  /**
+   * [render], with the reason when there is no frame.
+   *
+   * The reason used to stop at the host log, so a render that died on an `UnsatisfiedLinkError`
+   * reached the UI builder as "this host's renderer produced no frame": true, and no help to anyone
+   * who could not read the operator's stderr. It now travels with the (absent) bytes.
+   */
+  fun renderFrame(snippet: PlaygroundTokenStore.PlaygroundSnippet): PlaygroundFirstFrame {
     val workDir = newWorkDir().apply { mkdirs() }
     return try {
       val previewsJson =
@@ -92,7 +102,7 @@ class PlaygroundAndroidRenderService(
         val png = attempt.png
         if (png == null) reportNoFrame(snippet, attempt.reason)
         if (png != null && knobsArmed) drainOverrideDeclarations(session, snippet)
-        png
+        PlaygroundFirstFrame(png, if (png == null) attempt.reason else null)
       } finally {
         runCatching { session.close() }
       }
@@ -100,8 +110,9 @@ class PlaygroundAndroidRenderService(
       // A render failure is a clean "no frame" to the caller; it must never escape as a throwable
       // out of the render seam. It must not vanish either: the caller sees a null it cannot explain
       // and the operator has the only copy of the cause, so say it here before dropping it.
-      reportNoFrame(snippet, "${t.javaClass.simpleName}: ${t.message ?: "no message"}")
-      null
+      val reason = "${t.javaClass.simpleName}: ${t.message ?: "no message"}"
+      reportNoFrame(snippet, reason)
+      PlaygroundFirstFrame(null, reason)
     } finally {
       runCatching { workDir.deleteRecursively() }
     }
@@ -139,23 +150,29 @@ class PlaygroundAndroidRenderService(
     val failure = AtomicReference<String?>()
     val handle = session.onNotification { method, params ->
       if (params == null) return@onNotification
-      val id = params["id"]?.jsonPrimitive?.contentOrNull ?: return@onNotification
+      val id = (params["id"] as? JsonPrimitive)?.contentOrNull ?: return@onNotification
       if (id != previewId) return@onNotification
       when (method) {
         "renderFinished" -> {
-          params["pngPath"]?.jsonPrimitive?.contentOrNull?.let { pngPath.set(it) }
-          latch.countDown()
+          try {
+            (params["pngPath"] as? JsonPrimitive)?.contentOrNull?.let { pngPath.set(it) }
+          } finally {
+            latch.countDown()
+          }
         }
         "renderFailed" -> {
-          // The daemon's own words where it sent any: "renderFailed" alone says a render was
-          // attempted and nothing about what went wrong in it.
-          val detail = FAILURE_DETAIL_KEYS.firstNotNullOfOrNull { key ->
-            params[key]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() }
+          // Released whatever the payload looks like. Reading it used to throw on the daemon's
+          // real shape (`error` is an object), inside the listener and before this count-down, so
+          // a render that failed in its first second was reported as "the render budget of 3m
+          // expired" three minutes later.
+          try {
+            failure.set(
+              renderFailureDetail(params)?.let { "daemon reported renderFailed: $it" }
+                ?: "daemon reported renderFailed"
+            )
+          } finally {
+            latch.countDown()
           }
-          failure.set(
-            detail?.let { "daemon reported renderFailed: $it" } ?: "daemon reported renderFailed"
-          )
-          latch.countDown()
         }
       }
     }
@@ -289,5 +306,36 @@ class PlaygroundAndroidRenderService(
      * reading three keys costs nothing next to logging "renderFailed" with no cause at all.
      */
     private val FAILURE_DETAIL_KEYS = listOf("message", "reason", "error")
+
+    /**
+     * The cause a `renderFailed` notification carries, as one line, or null when it names none.
+     *
+     * The daemon sends `error` as an object — `{kind, message, suggestion}`, its `RenderError` —
+     * and the kind and the suggestion are the half a reader can act on ("Skiko bindings and native
+     * differ; pair them"), so both are kept. A bare string under any of [FAILURE_DETAIL_KEYS] is
+     * still read, for a backend that spells it that way. Never throws: this runs inside a
+     * notification listener, where an exception is swallowed by the reader and the wait it was
+     * meant to end runs out its whole budget instead.
+     */
+    internal fun renderFailureDetail(params: JsonObject): String? {
+      val error = params["error"] as? JsonObject
+      if (error != null) {
+        fun text(key: String) =
+          (error[key] as? JsonPrimitive)?.contentOrNull?.trim()?.takeIf { it.isNotEmpty() }
+        val message = text("message")
+        val kind = text("kind")
+        val suggestion = text("suggestion")
+        if (message != null || suggestion != null) {
+          return buildString {
+            if (kind != null) append("[").append(kind).append("] ")
+            append(message ?: "no message")
+            if (suggestion != null) append(" — ").append(suggestion)
+          }
+        }
+      }
+      return FAILURE_DETAIL_KEYS.firstNotNullOfOrNull { key ->
+        (params[key] as? JsonPrimitive)?.contentOrNull?.trim()?.takeIf { it.isNotEmpty() }
+      }
+    }
   }
 }
