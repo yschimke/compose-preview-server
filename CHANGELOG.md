@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.68.0](https://github.com/yschimke/compose-preview-server/compare/v3.67.0...v3.68.0) (2026-09-25)
+
+
+### Bug Fixes
+
+* **ui-builder:** move compose-ui-builder to 3.56.0 for the visual property editors ([#1080](https://github.com/yschimke/compose-preview-server/issues/1080)) ([805214a](https://github.com/yschimke/compose-preview-server/commit/805214ad9cf8ec6e5ee9ad831251177d04316e8a))
+
 ## [3.67.0](https://github.com/yschimke/compose-preview-server/compare/v3.66.0...v3.67.0) (2026-09-25)
 
 
