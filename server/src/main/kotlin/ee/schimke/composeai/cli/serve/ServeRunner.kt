@@ -2769,7 +2769,7 @@ public class ServeRunner(
     // `uiBuilderExports` is computed FROM that wrapper and then handed to the composition, so
     // composing first would need the capabilities the wrapper has not been built to state yet.
     val publishedRecords = ConcurrentHashMap<String, Map<String, ComponentRecord>>()
-    val catalogPlatforms = mutableMapOf<String, UiBuilderCatalogPlatform>()
+    val catalogPlatforms = ConcurrentHashMap<String, UiBuilderCatalogPlatform>()
     val compose =
       ScreenGeneratorComposeExportExecutor(
         records::record,
@@ -2844,8 +2844,11 @@ public class ServeRunner(
     // when that branch moves (yschimke/compose-preview-server#1054): a republished runtime or
     // policy
     // reaches the builder without a restart. True when it composed.
-    fun composePublished(systemId: String): Boolean {
+    fun composePublished(systemId: String, refresh: Boolean = false): Boolean {
       if (catalogStore == null || publishedAllowed?.contains(systemId) == false) return false
+      // A catalog served under another name (`wear-m3` from `wear-m3-catalog`) keeps its record
+      // under the builder id, where the delivery branch's reload never replaces it: fetch it again.
+      if (refresh) startupRecords.remove(systemId)
       // A Builder catalog's public identity and the catalog whose delivery branch supplies it
       // are normally the same. Wear is deliberately not: designs name `wear-m3`, while the
       // Android bundle and delivery branch are served as `wear-m3-catalog`. The native mapping
@@ -2891,7 +2894,9 @@ public class ServeRunner(
           // substitute a host default when the delivery catalog declares none: `candidate`
           // must continue to mean the built-in renderer, while a published runtime must be
           // named precisely so the browser and native export cannot drift apart.
+          // A republish that drops its runtime returns the catalog to the built-in renderer.
           published.runtimeId?.let { publishedRuntimeIds[systemId] = it }
+            ?: publishedRuntimeIds.remove(systemId)
           // The join only this composition can make: a design node names a builder id, and
           // which record component that id was derived from is stated by the published file.
           // Without it the Remote emitter's record fallback is unreachable in production —
@@ -2900,10 +2905,17 @@ public class ServeRunner(
           publishedRecords[systemId] = composed.records
           System.err.println("serve: UI-builder catalog ${composed.note}")
         }
-        is PublishedUiBuilderCatalog.Result.Unusable ->
+        is PublishedUiBuilderCatalog.Result.Unusable -> {
           System.err.println(
             "serve: UI-builder catalog $systemId keeps its built-in definition — " + composed.reason
           )
+          // On a refresh this is a fall back, not a no-op: the policy an earlier publish composed
+          // must not outlive a publish that replaced it with something unusable.
+          publishedCatalogs.remove(systemId)
+          publishedRuntimeIds.remove(systemId)
+          publishedRecords.remove(systemId)
+          return false
+        }
       }
       return true
     }
@@ -2974,17 +2986,30 @@ public class ServeRunner(
     val catalogs = SwappableUiBuilderCatalogExecutor(buildCatalogExecutor())
     // What the catalog refresher calls when a delivery branch moves: every builder catalog that
     // system supplies is composed again and the service's catalogs are swapped in one step.
+    // Kept current by [refreshPublished] too: a republished policy can change a catalog's platform,
+    // and with it the Compose generator and the native preview backend.
+    val nativeBackends = ConcurrentHashMap<String, String>()
+    fun deriveRouting() {
+      catalogs.listCatalogs().forEach { catalog ->
+        catalogPlatforms[catalog.benchmark.catalogSystemId] =
+          UiBuilderCatalogPlatform.from(catalog.statusSemantics)
+        nativeBackends[catalog.benchmark.catalogSystemId] =
+          UiBuilderPreviewSurfaces.from(catalog.statusSemantics).native.backend
+      }
+    }
+    deriveRouting()
     val refreshPublished: (String) -> Unit = { sourceSystem ->
       val affected = uiBuilderCatalogs.filter {
         uiBuilderPublishedSourceSystem(it, uiBuilderNativeCatalogs) == sourceSystem
       }
       val before = affected.associateWith { publishedRuntimeIds[it] to publishedCatalogs[it] }
-      affected.forEach { composePublished(it) }
+      affected.forEach { composePublished(it, refresh = true) }
       val changed = affected.filter {
         (publishedRuntimeIds[it] to publishedCatalogs[it]) != before[it]
       }
       if (changed.isNotEmpty()) {
         catalogs.swap(buildCatalogExecutor())
+        deriveRouting()
         System.err.println(
           "serve: UI-builder catalog " +
             changed.joinToString() +
@@ -2995,13 +3020,6 @@ public class ServeRunner(
         )
       }
     }
-    val nativeBackends =
-      catalogs.listCatalogs().associate { catalog ->
-        catalogPlatforms[catalog.benchmark.catalogSystemId] =
-          UiBuilderCatalogPlatform.from(catalog.statusSemantics)
-        catalog.benchmark.catalogSystemId to
-          UiBuilderPreviewSurfaces.from(catalog.statusSemantics).native.backend
-      }
     val service =
       PersistentUiBuilderService(
         designStore = UiBuilderDesignStateStore.open(directory.toPath()),
