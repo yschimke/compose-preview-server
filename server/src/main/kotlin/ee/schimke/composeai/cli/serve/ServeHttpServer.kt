@@ -521,6 +521,8 @@ class ServeHttpServer(
   private val uiBuilderService: UiBuilderServicePort? = null,
   /** Independent human/operator/agent authorization for [uiBuilderService]. */
   private val uiBuilderAuthorization: ServeUiBuilderAuthorization? = null,
+  /** The design listing's cached card pictures; null draws cards from the live export. */
+  private val uiBuilderThumbnails: ServeUiBuilderThumbnails? = null,
   /**
    * Compiles and renders a design with real Compose on this host. Non-null only where the builder
    * and the playground compile lane are both configured, because a native render needs both.
@@ -1078,6 +1080,9 @@ class ServeHttpServer(
                 }
               },
           )
+          uiBuilderThumbnails?.let { thumbnails ->
+            installUiBuilderThumbnailRoute(uiBuilderService, uiBuilderAuthorization, thumbnails)
+          }
           if (uiBuilderReferenceStore != null) {
             installUiBuilderReferenceRoutes(
               uiBuilderService,
@@ -13836,7 +13841,15 @@ class ServeHttpServer(
         // same refusal the card already prints in words, and an `<img>` cannot say it.
         previewHref =
           if (openFailure != null) ""
-          else
+          else if (uiBuilderThumbnails != null) {
+            // Queued now so a card this page shows out of date is current on the next view.
+            uiBuilderThumbnails.warm(item.designId, actor, knownRevision = item.revision)
+            "/api/ui-builder/v1/designs/" +
+              WebEscaping.urlEncodeSegment(item.designId) +
+              "/thumbnail.png" +
+              (if (tokenQuery.isEmpty()) "?" else "$tokenQuery&") +
+              "revision=${item.revision}"
+          } else
             "/api/ui-builder/v1/designs/" +
               WebEscaping.urlEncodeSegment(item.designId) +
               "/export.svg$tokenQuery",
