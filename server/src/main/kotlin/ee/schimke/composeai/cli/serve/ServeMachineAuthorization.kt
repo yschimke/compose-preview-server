@@ -100,6 +100,14 @@ class ServeMachineAuthorization(
     if (login != null && githubAuth.hasRepositoryAccess(call)) {
       return Decision.Authorized(ServeAgentGrants.githubActorId(login))
     }
+    // A member of a box that names its members — `--github-auth-users` or `--github-auth-orgs` —
+    // was vouched for by the operator, so being one is enough to create and edit designs of their
+    // own; each design's ACL still decides what they may touch. Without a restriction every GitHub
+    // account is a member, so there repository access stays the bar and the UI builder is not an
+    // open book.
+    if (login != null && githubAuth.isRestrictedToAllowedUsers()) {
+      return Decision.Authorized(ServeAgentGrants.githubActorId(login))
+    }
 
     presentedGrant(call, presentedToken)?.let { grant ->
       return if (grant.allows(required)) {
@@ -129,6 +137,10 @@ class ServeMachineAuthorization(
       githubAuth?.currentSignedInLogin(call)?.let { signedIn ->
         return Decision.Authorized(ServeAgentGrants.githubActorId(signedIn))
       }
+      // A signed-out visitor on a `--public` box reads as the anonymous actor: the design service
+      // lets it open exactly the designs whose owner made them public and nothing else, so a
+      // public design's link works — and unfurls — without an account.
+      if (isPublic) return Decision.Authorized(ServeUiBuilderVisibility.ANONYMOUS_ACTOR_ID)
     }
     return Decision.Missing
   }

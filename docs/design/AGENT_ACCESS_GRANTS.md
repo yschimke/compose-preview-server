@@ -218,7 +218,8 @@ internet mint itself credentials.
 
 ## Lifetime, revocation, blast radius
 
-- **Request TTL** 10 minutes. A link nobody opens dies quickly.
+- **Request TTL** 30 minutes — room to sign in to GitHub (2FA included) and read the request, and a
+  link nobody opens still dies the same afternoon. The MCP OAuth authorization window matches it.
 - **Grant TTL** requested by the agent, capped by `--agent-grant-max-ttl` (default 8h, hard ceiling
   24h). Chosen by the approver on the page, so "give it 20 minutes" is available without the agent
   re-asking.

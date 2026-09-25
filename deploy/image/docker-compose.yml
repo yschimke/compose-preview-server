@@ -98,6 +98,9 @@ services:
       # and its folder placement, but gain no catalog/trust/site/onboarding authority. The hosted
       # preview box defaults to its operator; set `none` to disable the default.
       SERVE_UI_BUILDER_ADMIN_ACTORS: "${SERVE_UI_BUILDER_ADMIN_ACTORS:-github:yschimke}"
+      # `public` starts new UI-builder designs readable by anyone with the link (owners can make one
+      # private); `private` (the default) keeps them to their owner and whoever they share with.
+      SERVE_UI_BUILDER_DEFAULT_VISIBILITY: "${SERVE_UI_BUILDER_DEFAULT_VISIBILITY:-}"
       # Privacy-minimal aggregate app/catalog + preview views, persisted on preview_config.
       SERVE_ENGAGEMENT_FILE: "${SERVE_ENGAGEMENT_FILE:-}"
       # Optional GitHub OAuth auth for code-running surfaces. Empty values keep public catalog
@@ -113,7 +116,9 @@ services:
       # entrypoint.sh); `none` keeps cookies host-only, which withholds sign-in on every site host.
       SERVE_GITHUB_AUTH_COOKIE_DOMAIN: "${SERVE_GITHUB_AUTH_COOKIE_DOMAIN:-}"
       SERVE_GITHUB_AUTH_USERS: "${SERVE_GITHUB_AUTH_USERS:-}"
-      # `1` admits accounts outside SERVE_GITHUB_AUTH_USERS as read-only UI-builder guests.
+      # GitHub orgs whose members count as if listed in SERVE_GITHUB_AUTH_USERS (e.g. `google`).
+      SERVE_GITHUB_AUTH_ORGS: "${SERVE_GITHUB_AUTH_ORGS:-}"
+      # `1` admits accounts outside SERVE_GITHUB_AUTH_USERS / _ORGS as read-only UI-builder guests.
       SERVE_GITHUB_AUTH_GUESTS: "${SERVE_GITHUB_AUTH_GUESTS:-}"
       # Empty derives the OAuth scope from the gating repo's visibility (public ⇒ read:user,
       # private ⇒ read:user repo). Only set this when a GitHub App or org policy demands one.

@@ -1556,7 +1556,12 @@ public class ServeRunner(
     }
     return ImageLane(
       store = ServeImageStore(ttlSeconds = imageTtlSeconds),
-      auth = GithubTokenUploadAuth(repository = repository, allowedUsers = githubAuthUsers),
+      auth =
+        GithubTokenUploadAuth(
+          repository = repository,
+          allowedUsers = githubAuthUsers,
+          allowedOrgs = githubAuthOrgs,
+        ),
       limiter =
         if (imageRateLimit > 0) {
           ServeRateLimiter(
@@ -3652,7 +3657,12 @@ public class ServeRunner(
         machineAuthorization = machineAuthorization,
         // Wrapped so every accepted edit also queues a redraw of that design's listing card.
         uiBuilderService =
-          uiBuilderLane?.let { lane -> lane.thumbnails?.warming(lane.service) ?: lane.service },
+          uiBuilderLane?.let { lane ->
+            ServeUiBuilderVisibility.withDefault(
+              lane.thumbnails?.warming(lane.service) ?: lane.service,
+              uiBuilderDefaultVisibility,
+            )
+          },
         uiBuilderThumbnails = uiBuilderLane?.thumbnails,
         uiBuilderReferenceStore = uiBuilderLane?.references,
         uiBuilderCommentStore = uiBuilderLane?.comments,
@@ -3786,6 +3796,8 @@ public class ServeRunner(
       System.err.println(
         "serve: GitHub auth enabled for live sessions and playground" +
           (githubAuthUsers.takeIf { it.isNotEmpty() }?.let { " (${it.size} allowed user(s))" }
+            ?: "") +
+          (githubAuthOrgs.takeIf { it.isNotEmpty() }?.let { " (members of ${it.joinToString()})" }
             ?: "")
       )
     }
@@ -5239,6 +5251,7 @@ public class ServeRunner(
         // costs nothing: no second repository means no second GitHub call at sign-in.
         imageRepository = imageUploadRepository,
         allowedUsers = githubAuthUsers,
+        allowedOrgs = githubAuthOrgs,
         allowGuests = githubAuthGuests,
         callbackBaseUrl = githubAuthCallbackBaseUrl,
         cookieDomain = githubAuthCookieDomain,

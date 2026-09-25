@@ -466,6 +466,13 @@ public interface ServeOptions {
   /** GitHub actor ids allowed to administer every shared UI-builder design on this host. */
   public val uiBuilderAdminActors: Set<String>
 
+  /**
+   * Whether a new UI-builder design starts public or private (`--ui-builder-default-visibility`).
+   * See [UiBuilderDefaultVisibility]; the owner can change it per design either way.
+   */
+  public val uiBuilderDefaultVisibility: UiBuilderDefaultVisibility
+    get() = UiBuilderDefaultVisibility.PRIVATE
+
   /** Optional durable aggregate counters. Null keeps local serve sessions in-memory only. */
   public val engagementFile: File?
 
@@ -496,9 +503,17 @@ public interface ServeOptions {
   public val githubAuthUsers: Set<String>
 
   /**
-   * `--github-auth-guests`: admit GitHub accounts outside [githubAuthUsers] as guests, who can see
-   * the UI-builder designs shared with them, read-only, and ask for more through an access grant. A
-   * guest counts as signed out everywhere else. See [ServeGithubAuthConfig.allowGuests].
+   * `--github-auth-orgs`: GitHub organizations whose members sign in as members, as if each were
+   * listed in [githubAuthUsers]. See [ServeGithubAuthConfig.allowedOrgs].
+   */
+  public val githubAuthOrgs: Set<String>
+    get() = emptySet()
+
+  /**
+   * `--github-auth-guests`: admit GitHub accounts outside [githubAuthUsers] / [githubAuthOrgs] as
+   * guests, who can see the UI-builder designs shared with them, read-only, and ask for more
+   * through an access grant. A guest counts as signed out everywhere else. See
+   * [ServeGithubAuthConfig.allowGuests].
    */
   public val githubAuthGuests: Boolean
     get() = false

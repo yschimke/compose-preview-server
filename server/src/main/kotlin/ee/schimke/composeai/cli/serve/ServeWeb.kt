@@ -7326,15 +7326,43 @@ ${captureControlsHtml().prependIndent("          ")}
     version: String? = null,
     siteName: String = "",
     themeCss: String = "",
+    /** Whether anyone with the link may open this design, read-only. */
+    isPublic: Boolean = false,
+    /** Where the design's history lives, or null when this host shows none. */
+    historyHref: String? = null,
   ): String {
     val esc = WebEscaping::htmlEscape
     val noticeBlock =
       if (notice.isBlank()) "" else "<p class=\"cp-grant-withheld\">${esc(notice)}</p>"
+    // The public grant is shown as the visibility switch above, not as a row naming a pseudo-actor.
+    val people = grants.filterNot { ServeUiBuilderVisibility.isReservedActor(it.actorId) }
+    val visibilityBlock =
+      """
+      <form class="cp-grant-form" method="post" action="${esc(formAction)}">
+        <fieldset class="cp-grant-fieldset">
+          <legend>Visibility</legend>
+          <p class="cp-sub">${
+            if (isPublic)
+              "<strong>Public.</strong> Anyone with the link can open this design and export its " +
+                "code; only the people below can change it."
+            else
+              "<strong>Private.</strong> Only you and the people below can open this design."
+          }</p>
+        </fieldset>
+        <div class="cp-grant-actions">
+          <button class="${if (isPublic) "cp-grant-deny" else "cp-grant-approve"}" type="submit"
+            name="visibility" value="${if (isPublic) "private" else "public"}">${
+            if (isPublic) "Make private" else "Make public"
+          }</button>
+        </div>
+      </form>
+      """
+        .trimIndent()
     val rows =
-      if (grants.isEmpty())
+      if (people.isEmpty())
         "<tr><td colspan=\"4\"><em>Nobody else. This design is yours alone.</em></td></tr>"
       else
-        grants.joinToString("\n") { row ->
+        people.joinToString("\n") { row ->
           """
           <tr>
             <td><code>${esc(row.actorId)}</code></td>
@@ -7371,6 +7399,8 @@ ${captureControlsHtml().prependIndent("          ")}
           <dt>Owner</dt><dd><code>${esc(ownerActorId)}</code></dd>
         </dl>
 
+        $visibilityBlock
+
         <table class="cp-table">
           <thead><tr><th>Shared with</th><th>Role</th><th>May</th><th></th></tr></thead>
           <tbody>
@@ -7403,6 +7433,123 @@ ${captureControlsHtml().prependIndent("          ")}
 
         <p class="cp-grant-fineprint">Neither role may share this design on: only its owner can, which is
         why granting one is safe to do for somebody who only needs to look.</p>
+        ${historyHref?.let { "<p><a href=\"${esc(it)}\">History of this design →</a></p>" } ?: ""}
+        <a class="cp-back" href="${esc(designHref)}">← Back to the design</a>
+        """
+          .trimIndent(),
+    )
+  }
+
+  /** A design permalink's history page, keeping the permalink's query. */
+  private fun historyHref(designHref: String): String {
+    val query = designHref.substringAfter("?", "")
+    return designHref.substringBefore("?") + "/history" + if (query.isEmpty()) "" else "?$query"
+  }
+
+  /** One retained revision on the history page. Null actions are the ones this reader lacks. */
+  data class UiBuilderHistoryRow(
+    val revision: Long,
+    val updatedAt: String?,
+    val actorId: String?,
+    val thumbnailSrc: String,
+    val openHref: String,
+    val restoreAction: String?,
+    val forkAction: String?,
+  )
+
+  /**
+   * `/ui-builder/{designId}/history`: the design as it was at each retained revision, newest first,
+   * with Open (the read-only pinned view), Restore and Fork. Restore and Fork are forms that POST
+   * and redirect back, so a refresh repeats neither.
+   */
+  fun uiBuilderHistoryPage(
+    designId: String,
+    title: String,
+    currentRevision: Long,
+    rows: List<UiBuilderHistoryRow>,
+    omitted: Int,
+    designHref: String,
+    notice: String = "",
+    designsHref: String = "",
+    navSuffix: String = "",
+    version: String? = null,
+    siteName: String = "",
+    themeCss: String = "",
+  ): String {
+    val esc = WebEscaping::htmlEscape
+    val noticeBlock =
+      if (notice.isBlank()) "" else "<p class=\"cp-grant-withheld\">${esc(notice)}</p>"
+    val cards =
+      rows.joinToString("\n") { row ->
+        val current = row.revision == currentRevision
+        val restore =
+          row.restoreAction?.let {
+            """
+            <form class="cp-design-form" method="post" action="${esc(it)}">
+              <input type="hidden" name="baseRevision" value="$currentRevision">
+              <button class="cp-grant-approve" type="submit">Restore</button>
+            </form>
+            """
+              .trimIndent()
+          } ?: ""
+        val fork =
+          row.forkAction?.let {
+            """
+            <form class="cp-design-form" method="post" action="${esc(it)}">
+              <button class="cp-action-chip" type="submit">Fork</button>
+            </form>
+            """
+              .trimIndent()
+          } ?: ""
+        """
+        <article class="cp-card cp-design-card">
+          <a class="cp-design-thumb" href="${esc(row.openHref)}" tabindex="-1" aria-hidden="true">
+            <img src="${esc(row.thumbnailSrc)}" alt="" loading="lazy" decoding="async"
+              onerror="this.closest('.cp-design-thumb').classList.add('cp-design-thumb-empty');this.remove();">
+          </a>
+          <div class="cp-design-body">
+            <h2 class="cp-design-title"><a href="${esc(row.openHref)}">Revision ${row.revision}</a>${
+              if (current) " <span class=\"cp-design-meta\">(current)</span>" else ""
+            }</h2>
+            <p class="cp-design-meta">${esc(row.updatedAt ?: "created")}${
+              row.actorId?.let { " · <code>${esc(it)}</code>" } ?: ""
+            }</p>
+            <div class="cp-design-actions">
+              <a class="cp-action-chip" href="${esc(row.openHref)}">Open</a>
+              $fork
+              $restore
+            </div>
+          </div>
+        </article>
+        """
+          .trimIndent()
+      }
+    val older =
+      if (omitted > 0)
+        "<p class=\"cp-grant-fineprint\">$omitted older retained revision" +
+          (if (omitted == 1) " is" else "s are") +
+          " not shown.</p>"
+      else ""
+    return document(
+      title = "History of ${esc(title)} — compose-preview",
+      unfurlDescription = "Revision history of a UI-builder design.",
+      version = version,
+      navSuffix = navSuffix,
+      headerDesignsHref = designsHref,
+      siteName = siteName,
+      themeCss = themeCss,
+      body =
+        """
+        <h1 class="cp-head">History of ${esc(title)}</h1>
+        <p class="cp-sub">Every revision this server still keeps, newest first. <strong>Open</strong> shows
+        one read-only; <strong>Restore</strong> makes it current again as a new revision, keeping
+        everything since so it can be undone the same way; <strong>Fork</strong> starts a new design of
+        your own from it.</p>
+        $noticeBlock
+        <div class="cp-designs-grid">
+        $cards
+        </div>
+        $older
         <a class="cp-back" href="${esc(designHref)}">← Back to the design</a>
         """
           .trimIndent(),
@@ -7599,12 +7746,27 @@ ${captureControlsHtml().prependIndent("          ")}
             .trimIndent()
         }
       val grants =
-        row.grants?.let { owned ->
+        row.grants?.let { all ->
+          val isPublic = all.any { ServeUiBuilderVisibility.isReservedActor(it.actorId) }
+          val owned = all.filterNot { ServeUiBuilderVisibility.isReservedActor(it.actorId) }
+          val visibility =
+            """
+              <form method="post" action="${esc(row.shareAction)}">
+                <input type="hidden" name="returnTo" value="designs">
+                ${if (isPublic) "<strong>Public</strong> — anyone with the link can view."
+                  else "<strong>Private</strong>."}
+                <button class="${if (isPublic) "cp-grant-deny" else "cp-grant-approve"}" type="submit"
+                  name="visibility" value="${if (isPublic) "private" else "public"}">${
+                  if (isPublic) "Make private" else "Make public"}</button>
+              </form>
+              """
+              .trimIndent()
           val current =
-            if (owned.isEmpty()) "<p>Shared with nobody else.</p>"
-            else
-              owned.joinToString("\n", prefix = "<p><strong>Shared with:</strong></p>") {
-                """
+            visibility +
+              if (owned.isEmpty()) "<p>Shared with nobody else.</p>"
+              else
+                owned.joinToString("\n", prefix = "<p><strong>Shared with:</strong></p>") {
+                  """
                   <form method="post" action="${esc(row.shareAction)}">
                     <input type="hidden" name="returnTo" value="designs">
                     <input type="hidden" name="actorId" value="${esc(it.actorId)}">
@@ -7612,8 +7774,8 @@ ${captureControlsHtml().prependIndent("          ")}
                     <button class="cp-grant-deny" type="submit" name="action" value="revoke">Remove</button>
                   </form>
                   """
-                  .trimIndent()
-              }
+                    .trimIndent()
+                }
           """
             <details class="cp-design-more">
               <summary>Sharing</summary>
@@ -7650,6 +7812,7 @@ ${captureControlsHtml().prependIndent("          ")}
             <p class="cp-design-meta">${esc(row.requesterRole)} · may ${esc(row.requesterAllowed)} · updated ${esc(updated)}</p>$unavailable
             <div class="cp-design-actions">
               <a class="cp-action-chip" href="${esc(row.designHref)}">Open</a>
+              <a class="cp-action-chip" href="${esc(historyHref(row.designHref))}">History</a>
               $share
             </div>
             $cardActions
@@ -7759,12 +7922,68 @@ ${captureControlsHtml().prependIndent("          ")}
         </form>
         """
           .trimIndent()
+    // One press to a new design, first: a blank screen or the smallest sample is what most people
+    // arriving here want, and the full forms are one disclosure further in.
+    val quickStarts = catalogs.flatMap { catalog ->
+      catalog.templates
+        .filter { it.id in QUICK_START_TEMPLATES }
+        .sortedBy { QUICK_START_TEMPLATES.keys.indexOf(it.id) }
+        .map { template ->
+          val label = QUICK_START_TEMPLATES.getValue(template.id)
+          (if (catalogs.size > 1) "$label · ${catalog.label}" else label) to
+            "${catalog.systemId}|${template.id}"
+        }
+    }
+    val quickStart =
+      if (createAction.isBlank() || quickStarts.isEmpty()) ""
+      else
+        """
+        <form class="cp-designs-quick" method="post" action="${esc(createAction)}">
+          <input type="hidden" name="designId" value="${esc(suggestedDesignId)}">
+          <span class="cp-designs-h2">New design</span>
+          ${quickStarts.joinToString("\n          ") { (label, start) ->
+            "<button class=\"cp-grant-approve\" type=\"submit\" name=\"start\" value=\"${esc(start)}\">${esc(label)}</button>"
+          }}
+        </form>
+        """
+          .trimIndent()
     val create =
       if (newDesign.isEmpty() && fromExample.isEmpty()) ""
       else
         """
+        <details class="cp-designs-create-more"${if (quickStart.isEmpty()) " open" else ""}>
+        <summary>More ways to start</summary>
         <section class="cp-designs-create">
         ${(newDesign + "\n" + fromExample).trim().prependIndent("        ").trimStart()}
+        </section>
+        </details>
+        """
+          .trimIndent()
+    // The few designs changed last, as pictures, above the whole list: a way back into today's
+    // work without scanning folders. Not `cp-design-card`, so the filter below counts the list.
+    val recentRows =
+      rows
+        .filter { it.unopenableReason == null }
+        .sortedByDescending { it.updatedAtEpochMillis ?: 0L }
+        .take(RECENT_DESIGNS)
+    val recent =
+      if (rows.size <= RECENT_DESIGNS) ""
+      else
+        """
+        <section class="cp-designs-recent" aria-label="Recent">
+          <h2 class="cp-designs-h2">Recent</h2>
+          <div class="cp-designs-grid">
+          ${recentRows.joinToString("\n          ") { row ->
+            val title = esc(row.title.ifBlank { row.designId })
+            val picture =
+              if (row.previewHref.isBlank()) ""
+              else
+                "<img src=\"${esc(row.previewHref)}\" alt=\"\" loading=\"lazy\" decoding=\"async\" " +
+                  "onerror=\"this.remove();\">"
+            "<a class=\"cp-card cp-design-recent\" href=\"${esc(row.designHref)}\">" +
+              "<span class=\"cp-design-thumb\">$picture</span><span class=\"cp-design-title\">$title</span></a>"
+          }}
+          </div>
         </section>
         """
           .trimIndent()
@@ -7825,6 +8044,8 @@ ${captureControlsHtml().prependIndent("          ")}
         <p class="cp-sub">Every design this server permits <code>${esc(viewerActorId)}</code> to open,
         newest first. Open one to carry on with it, duplicate one to start from it.</p>
         $noticeHtml$requestAccess
+        $quickStart
+        $recent
         $create
         $filter
         $grid
@@ -7833,6 +8054,13 @@ ${captureControlsHtml().prependIndent("          ")}
           .trimIndent(),
     )
   }
+
+  /** The starting points the designs page offers as one-press buttons, in order, with labels. */
+  private val QUICK_START_TEMPLATES =
+    linkedMapOf("blank" to "Blank screen", "hello" to "Hello sample")
+
+  /** How many recently changed designs the designs page shows as pictures above the list. */
+  private const val RECENT_DESIGNS = 4
 
   /** One row of [uiBuilderAccessPage]'s table, already flattened for display. */
   data class UiBuilderAccessRow(
@@ -18207,6 +18435,58 @@ ${scriptTag("known-differences.js")}
     )
   }
 
+  /**
+   * The Open Graph and Twitter card tags for one page, from unescaped [title] and [description].
+   * Its own function so a page [document] does not lay out — the UI builder's app shell — carries
+   * the same unfurl as every page that does.
+   */
+  internal fun unfurlHeadHtml(title: String, description: String, unfurl: UnfurlMetadata): String {
+    val metaTitle = WebEscaping.htmlEscape(title)
+    val metaDescription = WebEscaping.htmlEscape(description)
+    val pageUrl = WebEscaping.htmlEscape(unfurl.pageUrl)
+    val imageUrl = unfurl.imageUrl?.let(WebEscaping::htmlEscape)
+    // Only when both are known: a card given one axis has to measure the image anyway, and a
+    // half-declared size is the one input an unfurler can't sanity-check against the pixels.
+    val dimensionsHtml =
+      if (unfurl.imageWidth == null || unfurl.imageHeight == null) ""
+      else
+        """
+
+          <meta property="og:image:width" content="${unfurl.imageWidth}">
+          <meta property="og:image:height" content="${unfurl.imageHeight}">"""
+          .trimIndent()
+    val imageHtml =
+      if (imageUrl == null) ""
+      else
+        """
+          <meta property="og:image" content="$imageUrl">
+          <meta property="og:image:type" content="image/png">
+          <meta property="og:image:alt" content="$metaTitle">$dimensionsHtml
+          """
+          .trimIndent()
+    val twitterImageHtml =
+      if (imageUrl == null) ""
+      else
+        """
+          <meta name="twitter:image" content="$imageUrl">
+          <meta name="twitter:image:alt" content="$metaTitle">
+          """
+          .trimIndent()
+    return """
+      <meta property="og:type" content="website">
+      <meta property="og:site_name" content="compose-preview">
+      <meta property="og:title" content="$metaTitle">
+      <meta property="og:description" content="$metaDescription">
+      <meta property="og:url" content="$pageUrl">
+      $imageHtml
+      <meta name="twitter:card" content="${twitterCard(unfurl)}">
+      <meta name="twitter:title" content="$metaTitle">
+      <meta name="twitter:description" content="$metaDescription">
+      $twitterImageHtml
+      """
+      .trimIndent()
+  }
+
   private fun document(
     title: String,
     body: String,
@@ -18326,53 +18606,12 @@ ${scriptTag("known-differences.js")}
   ): String {
     val unfurlHtml =
       if (unfurl == null) ""
-      else {
-        val metaTitle = WebEscaping.htmlEscape(unfurlTitle ?: title)
-        val description =
-          WebEscaping.htmlEscape(unfurlDescription ?: "Compose preview rendered by compose-preview")
-        val pageUrl = WebEscaping.htmlEscape(unfurl.pageUrl)
-        val imageUrl = unfurl.imageUrl?.let(WebEscaping::htmlEscape)
-        // Only when both are known: a card given one axis has to measure the image anyway, and a
-        // half-declared size is the one input an unfurler can't sanity-check against the pixels.
-        val dimensionsHtml =
-          if (unfurl.imageWidth == null || unfurl.imageHeight == null) ""
-          else
-            """
-
-            <meta property="og:image:width" content="${unfurl.imageWidth}">
-            <meta property="og:image:height" content="${unfurl.imageHeight}">"""
-              .trimIndent()
-        val imageHtml =
-          if (imageUrl == null) ""
-          else
-            """
-            <meta property="og:image" content="$imageUrl">
-            <meta property="og:image:type" content="image/png">
-            <meta property="og:image:alt" content="$metaTitle">$dimensionsHtml
-            """
-              .trimIndent()
-        val twitterImageHtml =
-          if (imageUrl == null) ""
-          else
-            """
-            <meta name="twitter:image" content="$imageUrl">
-            <meta name="twitter:image:alt" content="$metaTitle">
-            """
-              .trimIndent()
-        """
-        <meta property="og:type" content="website">
-        <meta property="og:site_name" content="compose-preview">
-        <meta property="og:title" content="$metaTitle">
-        <meta property="og:description" content="$description">
-        <meta property="og:url" content="$pageUrl">
-        $imageHtml
-        <meta name="twitter:card" content="${twitterCard(unfurl)}">
-        <meta name="twitter:title" content="$metaTitle">
-        <meta name="twitter:description" content="$description">
-        $twitterImageHtml
-        """
-          .trimIndent()
-      }
+      else
+        unfurlHeadHtml(
+          unfurlTitle ?: title,
+          unfurlDescription ?: "Compose preview rendered by compose-preview",
+          unfurl,
+        )
     val unfurlBlock = if (unfurlHtml.isEmpty()) "" else "\n${unfurlHtml.prependIndent("        ")}"
     val footerBlock =
       if (componentBrowser) ""

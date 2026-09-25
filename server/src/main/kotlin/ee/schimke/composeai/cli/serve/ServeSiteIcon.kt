@@ -39,6 +39,19 @@ internal object ServeSiteIcon {
 
   private const val APPLE_TOUCH_SIZE = 180
 
+  /**
+   * The installed app's icons ([appIcon]), at the two sizes Chrome's installability check reads.
+   */
+  const val APP_ICON_192_PATH = "/icons/app-192.png"
+
+  const val APP_ICON_512_PATH = "/icons/app-512.png"
+
+  /** The same mark inside a launcher's safe zone ([maskableIcon]). */
+  const val MASKABLE_ICON_PATH = "/icons/app-maskable-512.png"
+
+  /** The web app manifest ([manifest]): what makes the site installable as an app. */
+  const val MANIFEST_PATH = "/manifest.webmanifest"
+
   /** ICO carries a single 32×32 entry: the size every browser picks for a tab anyway. */
   private const val ICO_SIZE = 32
 
@@ -108,6 +121,108 @@ internal object ServeSiteIcon {
     Icon(bytes, "image/vnd.microsoft.icon", etagOf(bytes))
   }
 
+  /** 192×192, the smaller of the two sizes an installable app has to declare. */
+  val appIcon192: Icon by lazy { pngIcon(192) }
+
+  /** 512×512, the splash-screen and store size. */
+  val appIcon512: Icon by lazy { pngIcon(512) }
+
+  /**
+   * 512×512 with the mark inside the central 80% on a full-bleed background — the safe zone a
+   * launcher's mask (circle, squircle, teardrop) is guaranteed not to crop into. The plain icons
+   * are the round mark on transparency, which a mask would shrink into a disc inside a disc.
+   */
+  val maskableIcon: Icon by lazy {
+    val size = 512
+    val image = BufferedImage(size, size, BufferedImage.TYPE_INT_ARGB)
+    val g = image.createGraphics()
+    try {
+      ServeBrand.quality(g)
+      g.color = ServeBrand.MARK_BG
+      g.fillRect(0, 0, size, size)
+      val inset = size * 0.1
+      ServeBrand.drawMark(g, inset, inset, size - inset * 2)
+    } finally {
+      g.dispose()
+    }
+    val bytes = ServeBrand.encodePng(image) ?: ByteArray(0)
+    Icon(bytes, "image/png", etagOf(bytes))
+  }
+
+  /** One launcher shortcut — the long-press / right-click menu of the installed app. */
+  data class Shortcut(val name: String, val url: String, val description: String)
+
+  /**
+   * The web app manifest, which is all Chrome needs to offer **Install** (current Chrome no longer
+   * asks for a service worker): a name, a start URL, a standalone display and icons at 192 and 512.
+   * Installed, the site opens in its own window from the launcher, dock or start menu, and
+   * [shortcuts] — the UI builder and its designs, where this box has one — sit in its menu.
+   *
+   * The `id` is fixed at `/` so the installed app keeps its identity if [startUrl] ever moves.
+   */
+  fun manifest(name: String, shortName: String, startUrl: String, shortcuts: List<Shortcut>): Icon {
+    fun str(value: String) = kotlinx.serialization.json.JsonPrimitive(value)
+    val json =
+      kotlinx.serialization.json.buildJsonObject {
+        put("id", str("/"))
+        put("name", str(name))
+        put("short_name", str(shortName))
+        put("description", str("Compose previews, catalogs and the UI builder."))
+        put("start_url", str(startUrl))
+        put("scope", str("/"))
+        put("display", str("standalone"))
+        put("background_color", str(hex(ServeBrand.MARK_BG)))
+        put("theme_color", str(hex(ServeBrand.MARK_BG)))
+        put(
+          "icons",
+          kotlinx.serialization.json.buildJsonArray {
+            fun icon(src: String, sizes: String, type: String, purpose: String) =
+              add(
+                kotlinx.serialization.json.buildJsonObject {
+                  put("src", str(src))
+                  put("sizes", str(sizes))
+                  put("type", str(type))
+                  put("purpose", str(purpose))
+                }
+              )
+            icon(APP_ICON_192_PATH, "192x192", "image/png", "any")
+            icon(APP_ICON_512_PATH, "512x512", "image/png", "any")
+            icon(MASKABLE_ICON_PATH, "512x512", "image/png", "maskable")
+            icon(SVG_PATH, "any", "image/svg+xml", "any")
+          },
+        )
+        if (shortcuts.isNotEmpty()) {
+          put(
+            "shortcuts",
+            kotlinx.serialization.json.buildJsonArray {
+              shortcuts.forEach { shortcut ->
+                add(
+                  kotlinx.serialization.json.buildJsonObject {
+                    put("name", str(shortcut.name))
+                    put("url", str(shortcut.url))
+                    put("description", str(shortcut.description))
+                    put(
+                      "icons",
+                      kotlinx.serialization.json.buildJsonArray {
+                        add(
+                          kotlinx.serialization.json.buildJsonObject {
+                            put("src", str(APP_ICON_192_PATH))
+                            put("sizes", str("192x192"))
+                          }
+                        )
+                      },
+                    )
+                  }
+                )
+              }
+            },
+          )
+        }
+      }
+    val bytes = json.toString().toByteArray()
+    return Icon(bytes, "application/manifest+json", etagOf(bytes))
+  }
+
   /**
    * The `<head>` links every page carries. Constant, well-known paths rather than content-hashed
    * ones: an icon fetcher that guesses a URL guesses these, and unlike a page asset an icon is
@@ -118,6 +233,8 @@ internal object ServeSiteIcon {
     <link rel="icon" href="$SVG_PATH" type="image/svg+xml">
     <link rel="icon" href="$ICO_PATH" sizes="32x32">
     <link rel="apple-touch-icon" href="$APPLE_TOUCH_PATH">
+    <link rel="manifest" href="$MANIFEST_PATH">
+    <meta name="theme-color" content="${hex(ServeBrand.MARK_BG)}">
     """
       .trimIndent()
 

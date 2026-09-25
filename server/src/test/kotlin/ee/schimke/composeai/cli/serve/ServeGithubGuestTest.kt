@@ -84,7 +84,10 @@ class ServeGithubGuestTest {
     runCatching { registry.close() }
   }
 
-  private fun server(allowGuests: Boolean): ServeHttpServer {
+  private fun server(
+    allowGuests: Boolean,
+    allowedUsers: Set<String> = setOf("octo"),
+  ): ServeHttpServer {
     val auth =
       ServeGithubAuth(
         ServeGithubAuthConfig(
@@ -92,7 +95,7 @@ class ServeGithubGuestTest {
           clientSecret = "secret",
           cookieSecret = "x".repeat(32),
           repository = "yschimke/compose-ai-tools",
-          allowedUsers = setOf("octo"),
+          allowedUsers = allowedUsers,
           allowGuests = allowGuests,
         ),
         verifier = GitHubOAuthVerifier(fakeGitHub),
@@ -207,10 +210,26 @@ class ServeGithubGuestTest {
   }
 
   @Test
-  fun `a member without repository access can now read, and still not write`() {
+  fun `a named member without repository access reads and writes the UI builder`() {
+    // The operator named this login, so being a member is the vouching: `--github-auth-users` and
+    // `--github-auth-orgs` admit people to edit designs without also lending them the repository.
     login = "octo"
     pushAccess = false
     val server = server(allowGuests = false)
+    val cookie = signIn(server).second!!
+
+    assertEquals(200, post(server, cookie, "github:octo", ListDesignsRequestV1()))
+    val export = ExportDesignRequestV1("design", format = ExportFormatV1.SVG)
+    assertEquals(200, post(server, cookie, "github:octo", export))
+  }
+
+  @Test
+  fun `on a box that names nobody, being signed in is not enough to write`() {
+    // Without an allowlist or orgs every GitHub account is a member, so repository access stays
+    // the bar — the UI builder does not become an open book.
+    login = "octo"
+    pushAccess = false
+    val server = server(allowGuests = false, allowedUsers = emptySet())
     val cookie = signIn(server).second!!
 
     assertEquals(200, post(server, cookie, "github:octo", ListDesignsRequestV1()))

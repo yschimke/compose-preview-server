@@ -546,6 +546,9 @@ public class ServeCommandOptions(
       }
       ?.toSet() ?: emptySet()
 
+  override val uiBuilderDefaultVisibility: UiBuilderDefaultVisibility =
+    UiBuilderDefaultVisibility.parse(args.flagValue("--ui-builder-default-visibility"))
+
   /** Optional durable aggregate counters. Null keeps local serve sessions in-memory only. */
   override val engagementFile: File? =
     args.flagValue("--engagement-file")?.takeIf { it.isNotBlank() }?.let(::File)
@@ -584,6 +587,14 @@ public class ServeCommandOptions(
   override val githubAuthUsers: Set<String> =
     args
       .flagValue("--github-auth-users")
+      ?.split(",")
+      ?.map { it.trim().lowercase() }
+      ?.filter { it.isNotEmpty() }
+      ?.toSet() ?: emptySet()
+
+  override val githubAuthOrgs: Set<String> =
+    args
+      .flagValue("--github-auth-orgs")
       ?.split(",")
       ?.map { it.trim().lowercase() }
       ?.filter { it.isNotEmpty() }
@@ -1107,10 +1118,16 @@ public class ServeCommandOptions(
         --github-auth-users <login>[,<login>…]
                           Optional sign-in allowlist. Empty means any signed-in GitHub user may use
                           live sessions; playground still requires access to --github-auth-repo.
+        --github-auth-orgs <org>[,<org>…]
+                          Admit members of these GitHub organizations as if they were listed in
+                          --github-auth-users (e.g. google). Adds read:org to the requested scope;
+                          a private membership counts only where the org allows this OAuth app, a
+                          public one always does.
         --github-auth-guests
-                          With --github-auth-users set, let any other GitHub account sign in as a
-                          guest: it sees the UI-builder designs shared with it, read-only, and can
-                          request edit access through an agent grant. A guest counts as signed out
+                          With --github-auth-users or --github-auth-orgs set, let any other GitHub
+                          account sign in as a guest: it sees the UI-builder designs shared with
+                          it, read-only, and can request edit access through an agent grant. A
+                          guest counts as signed out
                           everywhere else — no live sessions, playground, uploads or approvals.
         --agent-grants    Let an agent ask for temporary access it can't otherwise get. The agent
                           POSTs /agent-access/request and prints a link plus a verification code;
@@ -1318,6 +1335,10 @@ public class ServeCommandOptions(
                           reasons, but cannot download design documents, repair or delete designs,
                           or reach any other admin route. Separate from --admin-token so diagnosis
                           need not receive the code-execution-capable operator credential.
+        --ui-builder-default-visibility private|public
+                          Whether a new UI-builder design starts public (anyone with the link may
+                          view it, read-only) or private to its owner and whoever they share it
+                          with. Owners change it per design from its share page. Default private.
         --ui-builder-admin-actors <actor>[,…]
                           GitHub identities allowed to administer every shared UI-builder design,
                           for example github:octocat. A configured actor can use its signed-in
