@@ -230,7 +230,10 @@ composeai-contracts = "3.11.0"
 # runtime from production Wasm, pads an exported Scaffold's content by the padding it is handed
 # (compose-ui-builder#279), and replays a retried restore (compose-ui-builder#280); no API this
 # server calls changed.
-composeai-ui-builder = "3.55.0"
+# 3.56.0 shows colour properties as swatches (the design's theme roles and presets) and opens enum
+# properties as a menu whose options preview what they mean (compose-ui-builder#284), and
+# re-renders the live runtime frame on an edit instead of rebooting it (compose-ui-builder#283).
+composeai-ui-builder = "3.56.0"
 # 1.65.0 is the first release publishing `rc-players-bom`. (1.64.0 is a tag and a GitHub Release
 # whose Maven coordinates never reached Central -- rc-players#211 -- so it cannot be pinned.)
 # 1.67.0 by hand, ahead of Renovate's soak: it pins the KMP player modules to a Java 17 toolchain
