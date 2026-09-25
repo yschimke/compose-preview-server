@@ -233,7 +233,13 @@ composeai-contracts = "3.11.0"
 # 3.56.0 shows colour properties as swatches (the design's theme roles and presets) and opens enum
 # properties as a menu whose options preview what they mean (compose-ui-builder#284), and
 # re-renders the live runtime frame on an edit instead of rebooting it (compose-ui-builder#283).
-composeai-ui-builder = "3.56.0"
+# 3.57.0 exports `m3/dialog` through the component record, as `AlertDialog` (compose-ui-builder#286);
+# 3.58.0 fills the pinned runtime frame on a high-density screen (compose-ui-builder#288).
+# 3.59.0 declares the editor shell's import map before its module preloads (compose-ui-builder#290).
+# With the map after them, a reload that took the preloads from the immutable cache resolved
+# `uiBuilder.mjs` before the map existed, `@js-joda/core` failed to resolve, and the editor never
+# started — the visual harness's performance step, the one check that reloads, timed out on it.
+composeai-ui-builder = "3.59.0"
 # 1.65.0 is the first release publishing `rc-players-bom`. (1.64.0 is a tag and a GitHub Release
 # whose Maven coordinates never reached Central -- rc-players#211 -- so it cannot be pinned.)
 # 1.67.0 by hand, ahead of Renovate's soak: it pins the KMP player modules to a Java 17 toolchain
