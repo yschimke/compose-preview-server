@@ -22,7 +22,7 @@ Two commands:
       that vanished from the manifest would read as a design nobody drew.
 
   comment   --head _designs.json [--baseline _designs.json] --repo owner/name
-            --head-branch <branch> [--baseline-branch <branch>] [--out comment.md]
+            --head-branch <branch> [--baseline-branch <branch>] [--lane <name>] [--out comment.md]
       The sticky comment: what changed, what appeared, what went away, what the export refuses, and
       a count of what stayed put. Unchanged designs are counted rather than shown — a comment that
       renders nineteen identical pictures on every pull request teaches a reviewer to scroll past it.
@@ -47,6 +47,16 @@ RENDER_SUFFIXES = (".png", ".svg")
 #: The marker that makes the comment sticky. A caller finds its previous comment by this exact
 #: string and edits it, so it must never carry a run id, a sha or a timestamp.
 MARKER = "<!-- ui-builder-design-renders -->"
+
+
+def marker(lane: str = "") -> str:
+    """The sticky marker for one lane of a repository's design renders.
+
+    A repository whose designs span catalogs calls the lane once per catalog, and two calls sharing
+    one marker would each overwrite the other's comment on every run. The default lane is exactly
+    [MARKER], so a caller that names no lane keeps finding the comment it already posted.
+    """
+    return MARKER if not lane else f"<!-- ui-builder-design-renders:{lane} -->"
 
 
 def _sha256(path: Path) -> str:
@@ -110,6 +120,7 @@ def build_comment(
     head_branch: str,
     baseline_branch: str | None,
     title: str = "UI-builder design renders",
+    lane: str = "",
 ) -> str:
     """The sticky comment body for a head manifest against a baseline.
 
@@ -138,7 +149,7 @@ def build_comment(
 
     removed = sorted(design for design in base_rows if design not in head_rows)
 
-    lines = [MARKER, f"## {title}", ""]
+    lines = [marker(lane), f"## {title}", ""]
 
     if not head_rows:
         lines += [
@@ -228,6 +239,7 @@ def cmd_comment(args: argparse.Namespace) -> int:
         head_branch=args.head_branch,
         baseline_branch=args.baseline_branch,
         title=args.title,
+        lane=args.lane,
     )
     if args.out:
         Path(args.out).write_text(body, encoding="utf-8")
@@ -260,6 +272,11 @@ def main() -> int:
     comment.add_argument("--head-branch", required=True)
     comment.add_argument("--baseline-branch")
     comment.add_argument("--title", default="UI-builder design renders")
+    comment.add_argument(
+        "--lane",
+        default="",
+        help="Which of a repository's render lanes this is; names the sticky marker.",
+    )
     comment.add_argument("--out")
     comment.set_defaults(func=cmd_comment)
 

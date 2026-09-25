@@ -102,6 +102,20 @@ class CommentTest(unittest.TestCase):
         body = self.comment(_manifest(_drawn("a", "1")))
         self.assertTrue(body.startswith(design_renders.MARKER))
 
+    def test_a_named_lane_has_its_own_marker_and_the_default_keeps_the_old_one(self):
+        wear = design_renders.build_comment(
+            head=_manifest(_drawn("a", "1")),
+            baseline=None,
+            repo="yschimke/compose-ui-builder",
+            head_branch="ui-builder-designs/wear-pr-5",
+            baseline_branch="ui-builder-designs/wear",
+            lane="wear-m3",
+        )
+        self.assertTrue(wear.startswith("<!-- ui-builder-design-renders:wear-m3 -->"))
+        # Neither marker is a prefix of the other, so each lane's `startswith` finds only its own.
+        self.assertFalse(wear.startswith(design_renders.MARKER))
+        self.assertEqual(design_renders.MARKER, design_renders.marker(""))
+
     def test_a_changed_design_shows_before_and_after_from_two_branches(self):
         body = self.comment(
             _manifest(_drawn("ui-builder-menus", "after")),
