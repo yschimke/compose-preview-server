@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.63.0](https://github.com/yschimke/compose-preview-server/compare/v3.62.0...v3.63.0) (2026-09-25)
+
+
+### Bug Fixes
+
+* **ui-builder:** move compose-ui-builder to 3.51.0, so a widget's background picture exports in the editor ([#1060](https://github.com/yschimke/compose-preview-server/issues/1060)) ([bb62ffa](https://github.com/yschimke/compose-preview-server/commit/bb62ffa5c0e966fa2a4ef2d5b75a4c7b3f2ddf84))
+
 ## [3.62.0](https://github.com/yschimke/compose-preview-server/compare/v3.61.0...v3.62.0) (2026-09-25)
 
 
