@@ -23,6 +23,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertIs
 import kotlin.test.assertTrue
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonObject
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -115,7 +116,7 @@ class ServeWearScreenDeploymentIntegrationTest {
 
   /** The empty template is reachable too, and generates a screen rather than a refusal. */
   @Test
-  fun `the empty Wear template creates a scaffold over an empty list`() {
+  fun `the empty Wear template creates a scaffold over a list with no rows`() {
     val running = startServer()
     try {
       assertEquals(303, createDesign(running, "wear-m3", "blank-watch", "wear-screen").first)
@@ -123,7 +124,11 @@ class ServeWearScreenDeploymentIntegrationTest {
       val snapshot =
         assertIs<SnapshotResponseV1>(response(running, OpenDesignRequestV1("blank-watch")))
       val document = snapshot.snapshot.state.document
-      assertTrue(document.nodes.getValue("wear-list").slots.getValue("items").isEmpty())
+      // No rows. A list written in the published vocabulary opens on its header, because the
+      // published `TransformingLazyColumn` requires an item.
+      assertTrue(
+        document.nodes.getValue("wear-list").slots.getValue("items").none { it.startsWith("row-") }
+      )
 
       val exported =
         assertIs<ExportResponseV1>(
@@ -209,15 +214,12 @@ class ServeWearScreenDeploymentIntegrationTest {
     // Every template reads its environment from the Jetcaster operations fixture the builder
     // distribution ships beside its Wasm bundle, so a directory without it is a 500 rather than a
     // created design. The packaged image has it; this stages the same file.
-    builderDirectory
-      .resolve("jetcaster-discover-operations-v1.json")
-      .writeText(
-        File("../docs/design/fixtures/ui-builder/jetcaster-discover-operations-v1.json")
-          .takeIf { it.isFile }
-          ?.readText()
-          ?: File("docs/design/fixtures/ui-builder/jetcaster-discover-operations-v1.json")
-            .readText()
-      )
+    val jetcaster =
+      File("../docs/design/fixtures/ui-builder/jetcaster-discover-operations-v1.json")
+        .takeIf { it.isFile }
+        ?.readText()
+        ?: File("docs/design/fixtures/ui-builder/jetcaster-discover-operations-v1.json").readText()
+    builderDirectory.resolve("jetcaster-discover-operations-v1.json").writeText(jetcaster)
     val registry = ServeSessionRegistry(open = { null })
     val service =
       PersistentUiBuilderService(
@@ -225,7 +227,14 @@ class ServeWearScreenDeploymentIntegrationTest {
         catalogs =
           CurrentM3UiBuilderCatalogExecutor(
             catalogSystemIds = PACKAGED_DEFAULT,
-            published = UiBuilderAddonFixtures.publishedFor(PACKAGED_DEFAULT),
+            // The Wear catalog the builder's own templates are written for; see
+            // [UiBuilderAddonFixtures.wearCatalogForTemplates].
+            published =
+              UiBuilderAddonFixtures.publishedFor(PACKAGED_DEFAULT) +
+                ("wear-m3" to
+                  UiBuilderAddonFixtures.wearCatalogForTemplates(
+                    Json.parseToJsonElement(jetcaster).jsonObject
+                  )),
             exportCapabilities =
               ee.schimke.composeai.uibuilder.protocol.ExportCapabilitiesV1.Builder()
                 .also {
