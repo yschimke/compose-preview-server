@@ -224,10 +224,15 @@ composeai-contracts = "3.11.0"
 # changed.
 # 3.54.0 adds the public-design grant (`UiBuilderPublicAccess`), `ListRevisions` and
 # `RestoreRevision`, which `--ui-builder-default-visibility` and the history page call, and the
-# `hello` template (compose-ui-builder#278). 3.56.0 shows colour properties as swatches (the
-# design's theme roles and presets) and opens enum properties as a menu whose options preview what
-# they mean (compose-ui-builder#284); it re-renders the live runtime frame on an edit instead of
-# rebooting it (compose-ui-builder#283).
+# `hello` template (compose-ui-builder#278).
+# 3.55.0 takes the editor's boot screen away at ready rather than fading it out after, which the
+# visual harness photographed half-transparent (compose-ui-builder#281), packages the renderer
+# runtime from production Wasm, pads an exported Scaffold's content by the padding it is handed
+# (compose-ui-builder#279), and replays a retried restore (compose-ui-builder#280); no API this
+# server calls changed.
+# 3.56.0 shows colour properties as swatches (the design's theme roles and presets) and opens enum
+# properties as a menu whose options preview what they mean (compose-ui-builder#284), and
+# re-renders the live runtime frame on an edit instead of rebooting it (compose-ui-builder#283).
 composeai-ui-builder = "3.56.0"
 # 1.65.0 is the first release publishing `rc-players-bom`. (1.64.0 is a tag and a GitHub Release
 # whose Maven coordinates never reached Central -- rc-players#211 -- so it cannot be pinned.)
