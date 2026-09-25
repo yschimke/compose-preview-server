@@ -7922,12 +7922,68 @@ ${captureControlsHtml().prependIndent("          ")}
         </form>
         """
           .trimIndent()
+    // One press to a new design, first: a blank screen or the smallest sample is what most people
+    // arriving here want, and the full forms are one disclosure further in.
+    val quickStarts = catalogs.flatMap { catalog ->
+      catalog.templates
+        .filter { it.id in QUICK_START_TEMPLATES }
+        .sortedBy { QUICK_START_TEMPLATES.keys.indexOf(it.id) }
+        .map { template ->
+          val label = QUICK_START_TEMPLATES.getValue(template.id)
+          (if (catalogs.size > 1) "$label · ${catalog.label}" else label) to
+            "${catalog.systemId}|${template.id}"
+        }
+    }
+    val quickStart =
+      if (createAction.isBlank() || quickStarts.isEmpty()) ""
+      else
+        """
+        <form class="cp-designs-quick" method="post" action="${esc(createAction)}">
+          <input type="hidden" name="designId" value="${esc(suggestedDesignId)}">
+          <span class="cp-designs-h2">New design</span>
+          ${quickStarts.joinToString("\n          ") { (label, start) ->
+            "<button class=\"cp-grant-approve\" type=\"submit\" name=\"start\" value=\"${esc(start)}\">${esc(label)}</button>"
+          }}
+        </form>
+        """
+          .trimIndent()
     val create =
       if (newDesign.isEmpty() && fromExample.isEmpty()) ""
       else
         """
+        <details class="cp-designs-create-more"${if (quickStart.isEmpty()) " open" else ""}>
+        <summary>More ways to start</summary>
         <section class="cp-designs-create">
         ${(newDesign + "\n" + fromExample).trim().prependIndent("        ").trimStart()}
+        </section>
+        </details>
+        """
+          .trimIndent()
+    // The few designs changed last, as pictures, above the whole list: a way back into today's
+    // work without scanning folders. Not `cp-design-card`, so the filter below counts the list.
+    val recentRows =
+      rows
+        .filter { it.unopenableReason == null }
+        .sortedByDescending { it.updatedAtEpochMillis ?: 0L }
+        .take(RECENT_DESIGNS)
+    val recent =
+      if (rows.size <= RECENT_DESIGNS) ""
+      else
+        """
+        <section class="cp-designs-recent" aria-label="Recent">
+          <h2 class="cp-designs-h2">Recent</h2>
+          <div class="cp-designs-grid">
+          ${recentRows.joinToString("\n          ") { row ->
+            val title = esc(row.title.ifBlank { row.designId })
+            val picture =
+              if (row.previewHref.isBlank()) ""
+              else
+                "<img src=\"${esc(row.previewHref)}\" alt=\"\" loading=\"lazy\" decoding=\"async\" " +
+                  "onerror=\"this.remove();\">"
+            "<a class=\"cp-card cp-design-recent\" href=\"${esc(row.designHref)}\">" +
+              "<span class=\"cp-design-thumb\">$picture</span><span class=\"cp-design-title\">$title</span></a>"
+          }}
+          </div>
         </section>
         """
           .trimIndent()
@@ -7988,6 +8044,8 @@ ${captureControlsHtml().prependIndent("          ")}
         <p class="cp-sub">Every design this server permits <code>${esc(viewerActorId)}</code> to open,
         newest first. Open one to carry on with it, duplicate one to start from it.</p>
         $noticeHtml$requestAccess
+        $quickStart
+        $recent
         $create
         $filter
         $grid
@@ -7996,6 +8054,13 @@ ${captureControlsHtml().prependIndent("          ")}
           .trimIndent(),
     )
   }
+
+  /** The starting points the designs page offers as one-press buttons, in order, with labels. */
+  private val QUICK_START_TEMPLATES =
+    linkedMapOf("blank" to "Blank screen", "hello" to "Hello sample")
+
+  /** How many recently changed designs the designs page shows as pictures above the list. */
+  private const val RECENT_DESIGNS = 4
 
   /** One row of [uiBuilderAccessPage]'s table, already flattened for display. */
   data class UiBuilderAccessRow(

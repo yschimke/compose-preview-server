@@ -14290,12 +14290,12 @@ class ServeHttpServer(
     }
 
   /**
-   * `POST /ui-builder/{designId}/access` — share it, or take the sharing back.
+   * `POST /ui-builder/{designId}/access` — share it, take the sharing back, or make it public or
+   * private.
    *
-   * Answers with the page again rather than a redirect: the outcome worth showing is the new access
-   * list, and re-rendering it puts the confirmation and the state it describes in one response.
-   * Nothing here is a navigation a reload would repeat harmfully — a re-submitted grant of the same
-   * role to the same actor is the state that already holds.
+   * A change answers `303` to the access page, which re-reads the list and shows what changed from
+   * a fixed template in the query — POST, redirect, GET — so a reload repeats the message and not
+   * the change. A refusal is answered with the page directly, since there is nothing to repeat.
    */
   private suspend fun RoutingContext.handleUiBuilderAccessUpdate() {
     if (!isSameOriginFormSubmission()) {

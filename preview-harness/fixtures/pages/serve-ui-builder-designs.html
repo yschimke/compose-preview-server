@@ -57,7 +57,15 @@
         <p class="cp-sub">Every design this server permits <code>github:octocat</code> to open,
         newest first. Open one to carry on with it, duplicate one to start from it.</p>
         
-        <section class="cp-designs-create">
+        <form class="cp-designs-quick" method="post" action="/ui-builder/designs?token=fixture-token">
+  <input type="hidden" name="designId" value="cheeky-raccoon">
+  <span class="cp-designs-h2">New design</span>
+  <button class="cp-grant-approve" type="submit" name="start" value="m3-catalog|blank">Blank screen · m3-catalog</button>
+</form>
+        
+        <details class="cp-designs-create-more">
+<summary>More ways to start</summary>
+<section class="cp-designs-create">
 <form class="cp-designs-new" method="post" action="/ui-builder/designs?token=fixture-token">
   <h2 class="cp-designs-h2">Start a new design</h2>
   <label class="cp-grant-ttl"><span>Starting point</span>
@@ -89,6 +97,7 @@
   <button class="cp-grant-approve" type="submit">Create the copy</button>
 </form>
 </section>
+</details>
         <div class="cp-designs-toolbar">
   <label class="cp-designs-filter"><span class="cp-visually-hidden">Filter designs</span>
     <input type="search" id="cp-design-filter" placeholder="Filter by name, id, catalog or folder"
