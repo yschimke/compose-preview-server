@@ -17,12 +17,12 @@ kotlin {
       implementation(compose.foundation)
       implementation(compose.material3)
       implementation(compose.ui)
-      implementation("ee.schimke.composeai:rc-player-compose:1.69.0")
+      implementation("ee.schimke.composeai:rc-player-compose:1.70.0")
     }
     jvmMain.dependencies {
       implementation(compose.desktop.currentOs)
       implementation("ee.schimke.composeai:remotecompose-json:2.21.2")
-      implementation("androidx.compose.remote:remote-creation-core:1.0.0-alpha19")
+      implementation("androidx.compose.remote:remote-creation-core:1.0.0-alpha20")
       implementation("org.json:json:20250517")
     }
     jvmTest.dependencies {

@@ -934,7 +934,7 @@ class PublishedGeneratedM3CatalogEquivalenceTest {
         }
 
     assertEquals(
-      84,
+      79,
       unknown.size,
       "how much of the published m3 shelf the record embedded in the editor cannot name has " +
         "changed: $unknown",
@@ -1257,8 +1257,19 @@ class PublishedGeneratedM3CatalogEquivalenceTest {
         "m3/wide-navigation-rail-item",
       )
 
-    /** Reviewed differences between an offered component and the frozen vocabulary. */
-    val REVIEWED_DIFFERENCES = listOf<String>()
+    /**
+     * Reviewed differences between an offered component and the frozen vocabulary.
+     *
+     * `m3/search-input-field`'s query: compose-ui-builder#230 let the frozen record accept a
+     * literal string as well as bound state, so an inserted field has a query to show. m3-catalog's
+     * published policy still says `object`, which is narrower rather than wrong — a published
+     * design can bind state and nothing more — and it widens when that policy does.
+     */
+    val REVIEWED_DIFFERENCES =
+      listOf(
+        "m3/search-input-field.properties[value].jsonType: frozen=[\"object\",\"string\"] " +
+          "composed=\"object\""
+      )
 
     /** Components no sticker declares, so no catalog id gives them a shelf; see the test above. */
     val UNSHELVED =

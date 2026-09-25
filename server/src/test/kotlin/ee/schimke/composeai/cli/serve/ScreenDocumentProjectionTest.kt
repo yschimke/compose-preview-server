@@ -224,25 +224,26 @@ class ScreenDocumentProjectionTest {
     // A variant property is not a value at all. Where `COMPONENT_VARIANTS` says which component it
     // names, the projection selects it; where nothing does, this is the sentence — and it has to
     // describe **this** property. It used to say "the catalog spells three Compose components as
-    // one id", which was true of `m3/card` and has never been true of `layoutMode`: `adaptive`,
-    // `expandedTwoPane`, `singlePane` and `twoPane` are modes of one adaptive component. The
-    // reason is authored per entry now, which is what keeps that from happening again.
-    assertEquals(
-      listOf(
-        "node `panes`.`layoutMode` is `expandedTwoPane`, which names a layout mode of one " +
-          "adaptive component rather than a value: `SupportingPaneScaffold` decides how many " +
-          "panes to show from a scaffold directive and the window it is measured in, so there " +
-          "is no parameter for a mode to be written to"
-      ),
-      refusal(
-        document(
-          DesignNodeV1(
-            id = "panes",
-            componentId = "layout/supporting-pane-scaffold",
-            properties = mapOf("layoutMode" to EnumValueV1("expandedTwoPane")),
+    // one id", which was true of `m3/card` and has never been true of a carousel's `kind`: it names
+    // which carousel function to call. The reason is authored per entry now, which is what keeps
+    // that from happening again.
+    //
+    // `layout/supporting-pane-scaffold`'s `layoutMode` was this test's example until the projection
+    // learned to write the scaffold's directive and value (compose-ui-builder#230); the carousel is
+    // the entry the table has left.
+    assertTrue(
+      "node `carousel`.`kind` is `uncontained`, which names which carousel function to call " +
+        "rather than an argument to one, and no record selects a carousel yet: its `items` is a " +
+        "`CarouselScope` DSL, which is a slot shape this projection cannot emit" in
+        reasonsFor(
+          document(
+            DesignNodeV1(
+              id = "carousel",
+              componentId = "layout/horizontal-carousel",
+              properties = mapOf("kind" to EnumValueV1("uncontained")),
+            )
           )
         )
-      ),
     )
   }
 
