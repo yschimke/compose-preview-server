@@ -86,20 +86,43 @@ class PlaygroundCatalogClasspathTest {
   }
 
   @Test
-  fun `a native at another version does not count as the pair`() {
+  fun `a native at another version is replaced, not joined`() {
     val coords =
       PlaygroundCatalogClasspath.withHostSkikoNative(
         listOf(
           maven("org.jetbrains.skiko", "skiko-awt", "0.150.1"),
           maven("org.jetbrains.skiko", "skiko-awt-runtime-macos-arm64", "0.144.6"),
+          maven("org.jetbrains.skiko", "skiko-awt-runtime-linux-x64", "0.144.6"),
         ),
         osName = "Mac OS X",
         osArch = "aarch64",
       )
     assertEquals(
-      maven("org.jetbrains.skiko", "skiko-awt-runtime-macos-arm64", "0.150.1"),
-      coords.last(),
+      listOf(
+        maven("org.jetbrains.skiko", "skiko-awt", "0.150.1"),
+        // Another host's native is never loaded here, so it is left as the bundle recorded it.
+        maven("org.jetbrains.skiko", "skiko-awt-runtime-linux-x64", "0.144.6"),
+        maven("org.jetbrains.skiko", "skiko-awt-runtime-macos-arm64", "0.150.1"),
+      ),
+      coords,
+      "the stale host native would be promoted first and loaded ahead of the right one",
     )
+  }
+
+  @Test
+  fun `a stale host native beside the matching one is dropped`() {
+    val matching = maven("org.jetbrains.skiko", "skiko-awt-runtime-linux-x64", "0.150.1")
+    val coords =
+      PlaygroundCatalogClasspath.withHostSkikoNative(
+        listOf(
+          maven("org.jetbrains.skiko", "skiko-awt", "0.150.1"),
+          maven("org.jetbrains.skiko", "skiko-awt-runtime-linux-x64", "0.144.6"),
+          matching,
+        ),
+        osName = "Linux",
+        osArch = "amd64",
+      )
+    assertEquals(listOf(maven("org.jetbrains.skiko", "skiko-awt", "0.150.1"), matching), coords)
   }
 
   @Test
