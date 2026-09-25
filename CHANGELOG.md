@@ -1,5 +1,13 @@
 # Changelog
 
+## [3.64.0](https://github.com/yschimke/compose-preview-server/compare/v3.63.0...v3.64.0) (2026-09-25)
+
+
+### Bug Fixes
+
+* **ui-builder:** a republished catalog moves the designs it stranded, when the move would succeed ([#1062](https://github.com/yschimke/compose-preview-server/issues/1062)) ([5227b9a](https://github.com/yschimke/compose-preview-server/commit/5227b9aec80560598d9cdb2c9cac6939131e2e54))
+* **ui-builder:** move compose-ui-builder to 3.52.0, so google-home-wear renders ([#1063](https://github.com/yschimke/compose-preview-server/issues/1063)) ([9b5ae9d](https://github.com/yschimke/compose-preview-server/commit/9b5ae9d5ce39ecc6dd4f8dc7d58f00ea0a680e12))
+
 ## [3.63.0](https://github.com/yschimke/compose-preview-server/compare/v3.62.0...v3.63.0) (2026-09-25)
 
 
