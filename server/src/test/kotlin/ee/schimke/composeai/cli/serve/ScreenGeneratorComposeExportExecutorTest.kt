@@ -451,4 +451,68 @@ fun ScheduleOperations() {
 
     assertFalse("@Preview" in source, source)
   }
+
+  @Test
+  fun `repeated refusals collapse into one line with a count`() {
+    assertEquals(
+      listOf("no component `m3/text` in this catalog (×3)", "`m3/icon` has no slot `x`"),
+      ScreenGeneratorComposeExportExecutor.summarizeUnproven(
+        listOf(
+          "no component `m3/text` in this catalog",
+          "`m3/icon` has no slot `x`",
+          "no component `m3/text` in this catalog",
+          "no component `m3/text` in this catalog",
+        ),
+        "m3-catalog",
+        designComponentIds = setOf("m3/text", "m3/icon"),
+        recordComponentIds = setOf("m3/icon"),
+      ),
+    )
+  }
+
+  @Test
+  fun `a record that proves none of the design's components is named as the wrong file`() {
+    val summary =
+      ScreenGeneratorComposeExportExecutor.summarizeUnproven(
+        listOf(
+          "no component `m3/text` in this catalog",
+          "no component `m3/icon` in this catalog",
+          "no component `m3/text` in this catalog",
+        ),
+        "m3-catalog",
+        designComponentIds = setOf("m3/text", "m3/icon", "layout/column"),
+        recordComponentIds = setOf("Button/Filled", "Card/Outlined", "layout/column"),
+      )
+
+    assertTrue(
+      summary.first().let {
+        "proves none of this design's 2 components" in it &&
+          "`Button/Filled`" in it &&
+          "`m3/icon`" in it &&
+          "discovery" in it
+      },
+      summary.first(),
+    )
+    assertEquals(
+      listOf(
+        "no component `m3/text` in this catalog (×2)",
+        "no component `m3/icon` in this catalog",
+      ),
+      summary.drop(1),
+    )
+  }
+
+  @Test
+  fun `one missing component in an otherwise proven design is not blamed on the file`() {
+    val reasons = listOf("no component `m3/navigation-suite-item` in this catalog")
+    assertEquals(
+      reasons,
+      ScreenGeneratorComposeExportExecutor.summarizeUnproven(
+        reasons,
+        "m3-catalog",
+        designComponentIds = setOf("m3/text", "m3/navigation-suite-item"),
+        recordComponentIds = setOf("m3/text"),
+      ),
+    )
+  }
 }
