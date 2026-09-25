@@ -141,6 +141,26 @@ on:
         required: false
         type: string
         default: '24.21.0'
+      catalog-id:
+        description: >-
+          Render only the designs whose `catalogPin.systemId` is this catalog, read from the design
+          itself (a document's `catalogPin`, or an operation log's `createDesign`). Empty renders
+          every design in `designs-dir`. A design compiles only against its own catalog's bundle,
+          so a repository whose designs span catalogs calls this workflow once per catalog over the
+          same directory, each call with its own `catalog-id`, `catalog-bundle` and `lane`.
+        required: false
+        type: string
+        default: ''
+      lane:
+        description: >-
+          Names this call when a repository makes more than one: it suffixes the artifacts this
+          run passes between its jobs and names the sticky comment's marker, so two lanes neither
+          overwrite each other's artifacts nor edit each other's comment. Give each call its own
+          `baseline-branch` and `render-branch-prefix` as well. Empty is the single-lane default
+          and keeps the marker every existing comment carries.
+        required: false
+        type: string
+        default: ''
       render-timeout-minutes:
         description: 'Budget for the render job. A design compiles before it draws.'
         required: false
@@ -174,6 +194,7 @@ jobs:
         env:
           DESIGNS_DIR: ${{ inputs.designs-dir }}
           CHANGED_ONLY: ${{ inputs.changed-only }}
+          CATALOG_ID: ${{ inputs.catalog-id }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           EVENT: ${{ github.event_name }}
         run: |
@@ -190,6 +211,17 @@ jobs:
               | grep '\.json$' > selected/paths.txt || true
           else
             find "$DESIGNS_DIR" -maxdepth 1 -name '*.json' | sort > selected/paths.txt
+          fi
+          if [ -n "$CATALOG_ID" ]; then
+            # The pin is the design's own statement of the catalog it compiles against: a
+            # document's `catalogPin`, or the `createDesign` operation at the head of a log.
+            : > selected/for-catalog.txt
+            while IFS= read -r path; do
+              [ -n "$path" ] || continue
+              pinned=$(jq -r '(.catalogPin.systemId // ([.operations[]? | select(.type == "createDesign") | .catalogPin.systemId] | first)) // ""' "$path")
+              if [ "$pinned" = "$CATALOG_ID" ]; then echo "$path" >> selected/for-catalog.txt; fi
+            done < selected/paths.txt
+            mv selected/for-catalog.txt selected/paths.txt
           fi
           count=$(wc -l < selected/paths.txt | tr -d ' ')
           echo "count=$count" >> "$GITHUB_OUTPUT"
@@ -227,7 +259,7 @@ jobs:
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: ${{ steps.select.outputs.count != '0' }}
         with:
-          name: ui-builder-design-documents
+          name: ui-builder-design-documents${{ inputs.lane && format('-{0}', inputs.lane) || '' }}
           path: documents/
           retention-days: 1
 
@@ -251,7 +283,7 @@ jobs:
 
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: ui-builder-design-documents
+          name: ui-builder-design-documents${{ inputs.lane && format('-{0}', inputs.lane) || '' }}
           path: documents
 
       - name: Resolve the catalog bundle
@@ -345,7 +377,7 @@ jobs:
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: ui-builder-design-renders
+          name: ui-builder-design-renders${{ inputs.lane && format('-{0}', inputs.lane) || '' }}
           path: renders/
           retention-days: 7
 
@@ -372,7 +404,7 @@ jobs:
 
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: ui-builder-design-renders
+          name: ui-builder-design-renders${{ inputs.lane && format('-{0}', inputs.lane) || '' }}
           path: renders
 
       - name: Manifest
@@ -449,6 +481,7 @@ jobs:
           REPO: ${{ github.repository }}
           HEAD_BRANCH: ${{ steps.push.outputs.branch }}
           BASELINE_BRANCH: ${{ inputs.baseline-branch }}
+          LANE: ${{ inputs.lane }}
         run: |
           set -euo pipefail
           baseline=()
@@ -459,6 +492,7 @@ jobs:
             --repo "$REPO" \
             --head-branch "$HEAD_BRANCH" \
             --baseline-branch "$BASELINE_BRANCH" \
+            --lane "$LANE" \
             --out comment.md
           cat comment.md
 
@@ -468,9 +502,16 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           NUMBER: ${{ github.event.pull_request.number }}
+          LANE: ${{ inputs.lane }}
         run: |
           set -euo pipefail
-          marker='<!-- ui-builder-design-renders -->'
+          # The same marker `design-renders.py comment --lane` wrote, so each lane edits only its
+          # own comment.
+          if [ -n "$LANE" ]; then
+            marker="<!-- ui-builder-design-renders:$LANE -->"
+          else
+            marker='<!-- ui-builder-design-renders -->'
+          fi
           existing=$(gh api "repos/$REPO/issues/$NUMBER/comments" --paginate \
             --jq "[.[] | select(.body | startswith(\"$marker\"))] | first | .id // empty")
           if [ -n "$existing" ]; then
