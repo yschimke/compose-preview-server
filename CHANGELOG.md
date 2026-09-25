@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.69.0](https://github.com/yschimke/compose-preview-server/compare/v3.68.0...v3.69.0) (2026-09-25)
+
+
+### Bug Fixes
+
+* **ui-builder:** move compose-ui-builder to 3.58.0, so a phone draws the canvas full size and an edit does not blank it ([#1082](https://github.com/yschimke/compose-preview-server/issues/1082)) ([46718a5](https://github.com/yschimke/compose-preview-server/commit/46718a52a2df2654d2664cdeda5c8a1e8cf6f5e4))
+
 ## [3.68.0](https://github.com/yschimke/compose-preview-server/compare/v3.67.0...v3.68.0) (2026-09-25)
 
 
