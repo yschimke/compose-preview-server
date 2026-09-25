@@ -30,7 +30,6 @@ import ee.schimke.composeai.uibuilder.protocol.DesignAccessActionV1
 import ee.schimke.composeai.uibuilder.protocol.DesignAccessControlV1
 import ee.schimke.composeai.uibuilder.protocol.DesignAccessRoleV1
 import ee.schimke.composeai.uibuilder.protocol.GetDesignAccessRequestV1
-import ee.schimke.composeai.uibuilder.protocol.GetSnapshotRequestV1
 import ee.schimke.composeai.uibuilder.protocol.GrantActorAccessMutationV1
 import ee.schimke.composeai.uibuilder.protocol.ListDesignsRequestV1
 import ee.schimke.composeai.uibuilder.protocol.OpenDesignRequestV1
@@ -38,9 +37,7 @@ import ee.schimke.composeai.uibuilder.protocol.RevokeActorAccessMutationV1
 import ee.schimke.composeai.uibuilder.protocol.ServiceErrorCodeV1
 import ee.schimke.composeai.uibuilder.protocol.UpdateDesignAccessRequestV1
 import ee.schimke.composeai.uibuilder.service.AuthenticatedUiBuilderActor
-import ee.schimke.composeai.uibuilder.service.ProtocolRequestMapping
 import ee.schimke.composeai.uibuilder.service.UiBuilderAssetPort
-import ee.schimke.composeai.uibuilder.service.UiBuilderProtocolMapper
 import ee.schimke.composeai.uibuilder.service.UiBuilderServiceCall
 import ee.schimke.composeai.uibuilder.service.UiBuilderServiceDiagnosticsSource
 import ee.schimke.composeai.uibuilder.service.UiBuilderServicePort
@@ -62,6 +59,7 @@ import io.ktor.server.application.install
 import io.ktor.server.cio.CIO
 import io.ktor.server.engine.EmbeddedServer
 import io.ktor.server.engine.embeddedServer
+import io.ktor.server.http.content.LocalFileContent
 import io.ktor.server.plugins.autohead.AutoHeadResponse
 import io.ktor.server.plugins.compression.Compression
 import io.ktor.server.plugins.compression.gzip
@@ -2160,6 +2158,7 @@ class ServeHttpServer(
     readinessProber?.interrupt()
     thumbWarmer.stop()
     server.stop(gracePeriodMillis = 500, timeoutMillis = 2000)
+    uiBuilderPrecompressed.close()
   }
 
   /**
@@ -13056,10 +13055,18 @@ class ServeHttpServer(
    * taken. Asking the service as the caller means the answer is exactly the one the design API
    * would already give them: whoever cannot open the design gets the same `404` they got before.
    *
-   * A stale catalog pin is the one exception to snapshot success: the recovery screen has to load
-   * before the design can produce a snapshot again. In that case the server asks for the read-only
-   * recovery preview. That request performs the same per-design READ check before saying anything
-   * about the catalog, so this fallback does not turn the shell into an existence oracle.
+   * The question is `GetDesignActions`, not a snapshot. It is the service's own "what may this
+   * actor do here" answer, which says not-found for a design the actor cannot read exactly as for
+   * one that does not exist — the same guarantee — without building the snapshot the shell
+   * discarded. That snapshot was the whole design, its history and its resolved catalog, built
+   * under the lock every live edit also takes, on the critical path of every page load and a moment
+   * before the page asked for the very same snapshot itself.
+   *
+   * A design the service has set aside because its catalog pin no longer resolves answers neither
+   * question, and is the one exception: the recovery screen has to load before the design can open
+   * again. In that case the server asks for the read-only recovery preview. That request performs
+   * the same per-design READ check before saying anything about the catalog, so this fallback does
+   * not turn the shell into an existence oracle.
    *
    * @return true when the shell may be served, false to leave the request to the static lane —
    *   which keeps a genuinely missing asset a 404 rather than a silent app shell.
@@ -13071,16 +13078,13 @@ class ServeHttpServer(
       (authorization.authorize(call, UiBuilderRouteCapability.READ)
           as? UiBuilderAuthorizationDecision.Authorized)
         ?.actor ?: return false
-    val mapping =
-      UiBuilderProtocolMapper.toServiceCall(
-        actor,
-        GetSnapshotRequestV1(designId = designId, revision = null),
-      )
     val response =
-      (mapping as? ProtocolRequestMapping.Mapped)?.let {
-        withContext(Dispatchers.IO) { service.execute(it.call) }
+      withContext(Dispatchers.IO) {
+        service.execute(
+          UiBuilderServiceCall(actor, UiBuilderServiceRequest.GetDesignActions(designId))
+        )
       }
-    if (response is UiBuilderServiceResponse.Snapshot) return true
+    if (response is UiBuilderServiceResponse.DesignActions) return true
     if (
       response !is UiBuilderServiceResponse.Error ||
         response.error.code != ServiceErrorCodeV1.CATALOG_UNAVAILABLE
@@ -13215,19 +13219,42 @@ class ServeHttpServer(
       respondUiBuilderShell(dir, file)
       return
     }
-    val etag = "\"${file.length().toString(16)}-${file.lastModified().toString(16)}\""
+    // The gzip copy when the browser takes gzip and the copy is ready; the file itself otherwise,
+    // which is what every request got before the copies existed. See
+    // [UiBuilderPrecompressedAssets].
+    val gzipped =
+      if (
+        UiBuilderPrecompressedAssets.acceptsGzip(call.request.headers[HttpHeaders.AcceptEncoding])
+      )
+        uiBuilderPrecompressed.ready(file)
+      else null
+    val identity = "${file.length().toString(16)}-${file.lastModified().toString(16)}"
+    // Each representation its own validator: a cache holding the gzip bytes must never have them
+    // confirmed as current by a 304 meant for the plain ones.
+    val etag = if (gzipped == null) "\"$identity\"" else "\"$identity-gzip\""
     call.response.headers.append(
       HttpHeaders.CacheControl,
       if (version == null) "no-cache" else UI_BUILDER_IMMUTABLE_CACHE_CONTROL,
     )
     call.response.headers.append(HttpHeaders.ETag, etag)
+    if (uiBuilderPrecompressed.compressible(file)) {
+      call.response.headers.append(HttpHeaders.Vary, HttpHeaders.AcceptEncoding)
+    }
     if (call.request.headers[HttpHeaders.IfNoneMatch] == etag) {
       call.respond(HttpStatusCode.NotModified)
       return
     }
-    val bytes = withContext(Dispatchers.IO) { file.readBytes() }
-    call.respondBytes(bytes, wasmContentType(file.name))
+    // Streamed from disk rather than read into a heap array: `uiBuilder.wasm` alone is tens of
+    // megabytes, and a burst of cold loads used to hold one copy of it per request in memory.
+    if (gzipped != null) {
+      call.respond(GzipEncodedContent(LocalFileContent(gzipped, wasmContentType(file.name))))
+    } else {
+      call.respond(LocalFileContent(file, wasmContentType(file.name)))
+    }
   }
+
+  /** The bundle's gzip copies. Per server, because the bundle directory is. */
+  private val uiBuilderPrecompressed = UiBuilderPrecompressedAssets()
 
   /**
    * A digest of the builder bundle's contents, used as its immutable URL prefix.
@@ -13289,6 +13316,10 @@ class ServeHttpServer(
       call.respond(HttpStatusCode.NotModified)
       return
     }
+    // The shell comes first on every cold open, a moment before the browser asks for the Wasm it
+    // names, so starting the bundle's gzip copies here gives them that head start. Only the first
+    // call does anything.
+    uiBuilderPrecompressed.warm(dir)
     val html = withContext(Dispatchers.IO) { index.readText() }
     call.respondBytes(
       versionUiBuilderShellReferences(dir, html, version).toByteArray(),
