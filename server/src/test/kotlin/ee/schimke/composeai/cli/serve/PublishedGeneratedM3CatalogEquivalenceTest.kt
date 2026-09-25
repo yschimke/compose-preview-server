@@ -197,6 +197,16 @@ class PublishedGeneratedM3CatalogEquivalenceTest {
           listOf("collapsedShadowElevationDp", "expandedShadowElevationDp", "shape"),
         "m3/icon" to listOf("tint"),
         "m3/list-item" to listOf("shadowElevationDp", "tonalElevationDp"),
+        "m3/navigation-suite-item" to listOf("enabled"),
+        "m3/navigation-suite-scaffold" to listOf("containerColor", "contentColor"),
+        "m3/primary-scrollable-tab-row" to
+          listOf(
+            "containerColor",
+            "contentColor",
+            "edgePaddingDp",
+            "minTabWidthDp",
+            "selectedTabIndex",
+          ),
         "m3/primary-tab-row" to listOf("containerColor", "contentColor", "selectedTabIndex"),
         "m3/progress-indicator" to listOf("color", "gapSizeDp", "trackColor"),
         "m3/search-bar" to listOf("shadowElevationDp", "shape"),
@@ -261,8 +271,15 @@ class PublishedGeneratedM3CatalogEquivalenceTest {
         .map { it.componentId }
         .filter { composedById.getValue(it).wasm.platformSupported == JsonPrimitive(false) }
         .sorted()
+    // The three compose-ui-builder#241 added are drawn, and m3-catalog's policy declares no
+    // `canvas` for them yet; the policy change that does (as m3-catalog#327 did for the rest)
+    // empties this list again.
     assertEquals(
-      emptyList(),
+      listOf(
+        "m3/navigation-suite-item",
+        "m3/navigation-suite-scaffold",
+        "m3/primary-scrollable-tab-row",
+      ),
       lostCanvas,
       "a drawn component lost its `wasm` status — the shelf is reporting a component " +
         "UNSUPPORTED that the builder draws, which is a surface lying about another surface",
@@ -934,7 +951,7 @@ class PublishedGeneratedM3CatalogEquivalenceTest {
         }
 
     assertEquals(
-      79,
+      76,
       unknown.size,
       "how much of the published m3 shelf the record embedded in the editor cannot name has " +
         "changed: $unknown",
@@ -1215,8 +1232,6 @@ class PublishedGeneratedM3CatalogEquivalenceTest {
         "m3/multi-choice-segmented-button-row",
         "m3/navigation-rail",
         "m3/navigation-rail-item",
-        "m3/navigation-suite-item",
-        "m3/navigation-suite-scaffold",
         "m3/outlined-button",
         "m3/outlined-card",
         "m3/outlined-icon-button",
@@ -1224,7 +1239,6 @@ class PublishedGeneratedM3CatalogEquivalenceTest {
         "m3/outlined-text-field",
         "m3/outlined-toggle-button",
         "m3/outlined-trailing-button",
-        "m3/primary-scrollable-tab-row",
         "m3/provide-text-style",
         "m3/range-slider",
         "m3/secondary-scrollable-tab-row",
@@ -1267,8 +1281,42 @@ class PublishedGeneratedM3CatalogEquivalenceTest {
      */
     val REVIEWED_DIFFERENCES =
       listOf(
+        // The three components compose-ui-builder#241 added to the frozen shelf. m3-catalog's
+        // policy does not describe them yet -- no slot roles, traits or cardinalities, no display
+        // name, no `selectedIndex` alias -- so each entry here is a line that policy removes.
+        "m3/navigation-suite-item.displayName: frozen=Navigation item composed=NavigationSuiteItem",
+        "m3/navigation-suite-item.modifierCapabilities: frozen=[align, alignHorizontal, alignVertical, alpha, aspectRatio, height, heightIn, offset, padding, rotate, scale, testTag, weight, width, widthIn, zIndex] composed=[align, alignHorizontal, alignVertical, alpha, aspectRatio, background, border, fillMaxHeight, fillMaxSize, fillMaxWidth, height, heightIn, offset, padding, rotate, scale, shadow, size, testTag, verticalScroll, weight, width, widthIn, wrapContentSize, zIndex]",
+        "m3/navigation-suite-item.properties[selected].jsonType: frozen=[\"boolean\",\"string\",\"object\"] composed=\"boolean\"",
+        "m3/navigation-suite-item.slots: frozen=[icon, label] composed=[badge, icon, label]",
+        "m3/navigation-suite-item.slots[icon].acceptedRoles: frozen=[Leaf] composed=[]",
+        "m3/navigation-suite-item.slots[icon].cardinality.max: frozen=1 composed=null",
+        "m3/navigation-suite-item.slots[icon].cardinality.min: frozen=1 composed=0",
+        "m3/navigation-suite-item.slots[icon].ordered: frozen=false composed=true",
+        "m3/navigation-suite-item.slots[label].acceptedRoles: frozen=[Leaf] composed=[]",
+        "m3/navigation-suite-item.slots[label].acceptedTraits: frozen=[TextContent] composed=[]",
+        "m3/navigation-suite-item.slots[label].cardinality.max: frozen=1 composed=null",
+        "m3/navigation-suite-item.slots[label].ordered: frozen=false composed=true",
+        "m3/navigation-suite-item.traits: frozen=[NavigationItem, SelectionControl] composed=[]",
+        "m3/navigation-suite-scaffold.displayName: frozen=Navigation suite composed=NavigationSuiteScaffold",
+        "m3/navigation-suite-scaffold.modifierCapabilities: frozen=[align, alignHorizontal, alignVertical, alpha, aspectRatio, background, border, fillMaxHeight, fillMaxSize, height, heightIn, offset, padding, rotate, scale, shadow, size, testTag, weight, width, widthIn, wrapContentSize, zIndex] composed=[align, alignHorizontal, alignVertical, alpha, aspectRatio, background, border, fillMaxHeight, fillMaxSize, fillMaxWidth, height, heightIn, offset, padding, rotate, scale, shadow, size, testTag, verticalScroll, weight, width, widthIn, wrapContentSize, zIndex]",
+        "m3/navigation-suite-scaffold.role: frozen=Scaffold composed=Container",
+        "m3/navigation-suite-scaffold.slots: frozen=[content, navigationItems, primaryAction] composed=[content, navigationItems, primaryActionContent]",
+        "m3/navigation-suite-scaffold.slots[content].acceptedRoles: frozen=[Container, Leaf, Scaffold] composed=[]",
+        "m3/navigation-suite-scaffold.slots[content].cardinality.min: frozen=1 composed=0",
+        "m3/navigation-suite-scaffold.slots[navigationItems].acceptedRoles: frozen=[Container] composed=[]",
+        "m3/navigation-suite-scaffold.slots[navigationItems].acceptedTraits: frozen=[NavigationItem] composed=[]",
+        "m3/navigation-suite-scaffold.slots[navigationItems].cardinality.min: frozen=1 composed=0",
+        "m3/navigation-suite-scaffold.traits: frozen=[AdaptiveNavigation, ScreenContent] composed=[]",
+        "m3/primary-scrollable-tab-row.displayName: frozen=Scrollable tab row composed=PrimaryScrollableTabRow",
+        "m3/primary-scrollable-tab-row.missingProperties: frozen=[] composed=[selectedIndex]",
+        "m3/primary-scrollable-tab-row.modifierCapabilities: frozen=[align, alignHorizontal, alignVertical, alpha, aspectRatio, fillMaxWidth, height, heightIn, offset, padding, rotate, scale, testTag, weight, width, widthIn, zIndex] composed=[align, alignHorizontal, alignVertical, alpha, aspectRatio, background, border, fillMaxHeight, fillMaxSize, fillMaxWidth, height, heightIn, offset, padding, rotate, scale, shadow, size, testTag, verticalScroll, weight, width, widthIn, wrapContentSize, zIndex]",
+        "m3/primary-scrollable-tab-row.slots: frozen=[tabs] composed=[divider, indicator, tabs]",
+        "m3/primary-scrollable-tab-row.slots[tabs].acceptedRoles: frozen=[Container] composed=[]",
+        "m3/primary-scrollable-tab-row.slots[tabs].acceptedTraits: frozen=[TabItem] composed=[]",
+        "m3/primary-scrollable-tab-row.slots[tabs].cardinality.min: frozen=1 composed=0",
+        "m3/primary-scrollable-tab-row.traits: frozen=[OrderedContent, TabBar] composed=[]",
         "m3/search-input-field.properties[value].jsonType: frozen=[\"object\",\"string\"] " +
-          "composed=\"object\""
+          "composed=\"object\"",
       )
 
     /** Components no sticker declares, so no catalog id gives them a shelf; see the test above. */

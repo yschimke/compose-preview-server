@@ -349,7 +349,8 @@ class OrdinaryScreenExportTest {
     )
     // The factory the catalog promised the value "reaches the generated Kotlin as".
     assertTrue("scrollBehavior = TopAppBarDefaults.enterAlwaysScrollBehavior()" in source, source)
-    assertTrue("androidx.compose.material3.ExperimentalMaterial3Api::class" in source, source)
+    assertTrue("@kotlin.OptIn(ExperimentalMaterial3Api::class)" in source, source)
+    assertTrue("import androidx.compose.material3.ExperimentalMaterial3Api" in source, source)
     assertTrue("title = {" in source, source)
   }
 
@@ -387,7 +388,7 @@ class OrdinaryScreenExportTest {
     assertTrue("enabled = false" in source, source)
     assertTrue("valueRange" !in source, source)
     // A whole number is still a `Float` on this parameter.
-    assertTrue("value = 1.0f" in source(slider("value" to IntegerValueV1(1))))
+    assertTrue("value = 1f" in source(slider("value" to IntegerValueV1(1))))
     // A range is `0f..100f`, and a range expression is outside the packages a screen may name.
     val refused = refusals(slider("value" to IntegerValueV1(50), "valueTo" to IntegerValueV1(100)))
     assertEquals(1, refused.size, refused.toString())

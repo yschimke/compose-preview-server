@@ -391,17 +391,17 @@ import androidx.compose.ui.unit.dp
 
 @Composable
 fun ScheduleOperations() {
-    Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.surfaceContainer, content = {
-        Column(modifier = Modifier.padding(start = 16.dp, top = 24.dp, end = 16.dp, bottom = 16.dp), content = {
+    Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.surfaceContainer) {
+        Column(modifier = Modifier.padding(start = 16.dp, top = 24.dp, end = 16.dp, bottom = 16.dp)) {
             Text(text = "Schedule", color = MaterialTheme.colorScheme.onBackground, style = MaterialTheme.typography.headlineSmall)
-            Card(modifier = Modifier.fillMaxWidth().clip(MaterialTheme.shapes.medium), shape = MaterialTheme.shapes.medium, content = {
-                Box(modifier = Modifier.fillMaxWidth(), content = {
+            Card(modifier = Modifier.fillMaxWidth().clip(MaterialTheme.shapes.medium), shape = MaterialTheme.shapes.medium) {
+                Box(modifier = Modifier.fillMaxWidth()) {
                     Text(text = "Opening keynote", modifier = Modifier.width(120.dp), style = MaterialTheme.typography.bodyMedium)
-                    Text(text = "09:00", color = Color(4284960932L))
-                })
-            })
-        })
-    })
+                    Text(text = "09:00", color = Color(0xFF6750A4))
+                }
+            }
+        }
+    }
 }
 """
         .trimStart('\n')
