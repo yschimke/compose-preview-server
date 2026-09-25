@@ -140,6 +140,7 @@
               <p class="cp-design-meta">owner · may read, write, export, manage_access, delete · updated 2026-01-12T10:40:00Z</p>
               <div class="cp-design-actions">
                 <a class="cp-action-chip" href="/ui-builder/morning-player?token=fixture-token">Open</a>
+                <a class="cp-action-chip" href="/ui-builder/morning-player/history?token=fixture-token">History</a>
                 <a class="cp-action-chip" href="/ui-builder/morning-player/access?token=fixture-token">Share</a>
               </div>
               <details class="cp-design-more">
@@ -162,7 +163,12 @@
   </details>
                           <details class="cp-design-more">
                 <summary>Sharing</summary>
-                <p><strong>Shared with:</strong></p><form method="post" action="/ui-builder/morning-player/access?token=fixture-token">
+                <form method="post" action="/ui-builder/morning-player/access?token=fixture-token">
+    <input type="hidden" name="returnTo" value="designs">
+    <strong>Private</strong>.
+    <button class="cp-grant-approve" type="submit"
+      name="visibility" value="public">Make public</button>
+  </form><p><strong>Shared with:</strong></p><form method="post" action="/ui-builder/morning-player/access?token=fixture-token">
     <input type="hidden" name="returnTo" value="designs">
     <input type="hidden" name="actorId" value="github:colleague">
     <code>github:colleague</code> (editor)
@@ -200,6 +206,7 @@
       <p class="cp-grant-withheld"><strong>This design cannot be opened:</strong> catalog unavailable for stored design archived-dashboard</p>
       <div class="cp-design-actions">
         <a class="cp-action-chip" href="/ui-builder/archived-dashboard?token=fixture-token">Open</a>
+        <a class="cp-action-chip" href="/ui-builder/archived-dashboard/history?token=fixture-token">History</a>
 
       </div>
       <p class="cp-design-meta">Shared by <code>github:designer</code>; the owner manages its grants.</p>
