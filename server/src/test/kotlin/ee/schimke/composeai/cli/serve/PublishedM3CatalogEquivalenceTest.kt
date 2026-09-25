@@ -102,6 +102,9 @@ class PublishedM3CatalogEquivalenceTest {
   private val knownAbsent =
     mapOf(
       "m3/date-picker" to "the record carries DateRangePicker but not DatePicker",
+      "m3/navigation-suite-item" to "added by compose-ui-builder#241; not in this hand-built file",
+      "m3/navigation-suite-scaffold" to "the same",
+      "m3/primary-scrollable-tab-row" to "the same",
       "m3/snackbar-host" to "the record carries Snackbar but not SnackbarHost",
       "m3/time-picker" to "the record carries neither TimePicker nor TimeInput",
     )

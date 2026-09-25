@@ -44,7 +44,7 @@ class CardContentBoxExportTest {
     val source = generate(card(FillMaxWidthModifierV1))
 
     assertTrue("Card(" in source, source)
-    assertTrue("Box(modifier = Modifier.fillMaxWidth(), content = {" in source, source)
+    assertTrue("Box(modifier = Modifier.fillMaxWidth()) {" in source, source)
     assertTrue("Modifier.matchParentSize()" in source, source)
     assertTrue("Modifier.align(Alignment.BottomStart)" in source, source)
     assertTrue("androidx.compose.foundation.layout.Box" in source, source)
@@ -56,18 +56,17 @@ class CardContentBoxExportTest {
   @Test
   fun `the box fills only the axes the card was sized on`() {
     assertTrue(
-      "Box(modifier = Modifier.fillMaxWidth(), content = {" in
-        generate(card(FillMaxWidthModifierV1))
+      "Box(modifier = Modifier.fillMaxWidth()) {" in generate(card(FillMaxWidthModifierV1))
     )
     assertTrue(
-      "Box(modifier = Modifier.fillMaxSize(), content = {" in
+      "Box(modifier = Modifier.fillMaxSize()) {" in
         generate(card(FillMaxWidthModifierV1, HeightModifierV1(heightDp = JsonPrimitive(200))))
     )
     assertTrue(
-      "Box(modifier = Modifier.fillMaxHeight(), content = {" in
+      "Box(modifier = Modifier.fillMaxHeight()) {" in
         generate(card(HeightModifierV1(heightDp = JsonPrimitive(200))))
     )
-    assertTrue("Box(content = {" in generate(card()))
+    assertTrue("Box {" in generate(card()))
   }
 
   private fun generate(document: DesignDocumentV1): String {
