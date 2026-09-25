@@ -137,6 +137,10 @@ class ServeMachineAuthorization(
       githubAuth?.currentSignedInLogin(call)?.let { signedIn ->
         return Decision.Authorized(ServeAgentGrants.githubActorId(signedIn))
       }
+      // A signed-out visitor on a `--public` box reads as the anonymous actor: the design service
+      // lets it open exactly the designs whose owner made them public and nothing else, so a
+      // public design's link works — and unfurls — without an account.
+      if (isPublic) return Decision.Authorized(ServeUiBuilderVisibility.ANONYMOUS_ACTOR_ID)
     }
     return Decision.Missing
   }

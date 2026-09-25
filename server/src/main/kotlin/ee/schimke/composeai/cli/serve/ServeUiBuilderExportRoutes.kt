@@ -98,11 +98,27 @@ internal fun Route.installUiBuilderThumbnailRoute(
   authorization: ServeUiBuilderAuthorization,
   thumbnails: ServeUiBuilderThumbnails,
 ) {
+  // Read, not export, at the route: a thumbnail is a picture of what the reader can already open,
+  // and the design's own EXPORT action is still checked per design — which a public design grants
+  // to everyone, so its picture can be an unfurl card's image.
   get("/api/ui-builder/v1/designs/{designId}/thumbnail.png") {
-    val actor = call.authorizeExport(authorization) ?: return@get
+    val actor = call.authorizeThumbnail(authorization) ?: return@get
     val designId = call.parameters["designId"].orEmpty()
     val revision = call.request.queryParameters["revision"]?.toLongOrNull()
     call.serveUiBuilderThumbnail(thumbnails, service, actor, designId, revision)
+  }
+  get("/api/ui-builder/v1/designs/{designId}/revisions/{revision}/thumbnail.png") {
+    val actor = call.authorizeThumbnail(authorization) ?: return@get
+    val designId = call.parameters["designId"].orEmpty()
+    val revision = call.parameters["revision"]?.toLongOrNull()?.takeIf { it >= 0 }
+    if (revision == null) {
+      call.respondText(
+        "revision must be a non-negative integer",
+        status = HttpStatusCode.BadRequest,
+      )
+      return@get
+    }
+    call.serveUiBuilderRevisionThumbnail(thumbnails, service, actor, designId, revision)
   }
 }
 
@@ -235,9 +251,19 @@ private suspend fun ApplicationCall.serveSuppliedDocument(
 
 private suspend fun ApplicationCall.authorizeExport(
   authorization: ServeUiBuilderAuthorization
+): AuthenticatedUiBuilderActor? = authorizeRoute(authorization, UiBuilderRouteCapability.EXPORT)
+
+/** A thumbnail asks the route for read; the design's own EXPORT action is checked per design. */
+private suspend fun ApplicationCall.authorizeThumbnail(
+  authorization: ServeUiBuilderAuthorization
+): AuthenticatedUiBuilderActor? = authorizeRoute(authorization, UiBuilderRouteCapability.READ)
+
+private suspend fun ApplicationCall.authorizeRoute(
+  authorization: ServeUiBuilderAuthorization,
+  capability: UiBuilderRouteCapability,
 ): AuthenticatedUiBuilderActor? {
   val actor =
-    when (val decision = authorization.authorize(this, UiBuilderRouteCapability.EXPORT)) {
+    when (val decision = authorization.authorize(this, capability)) {
       is UiBuilderAuthorizationDecision.Authorized -> decision.actor
       UiBuilderAuthorizationDecision.Missing -> {
         response.headers.append(HttpHeaders.WWWAuthenticate, "Bearer")

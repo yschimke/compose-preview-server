@@ -1343,6 +1343,11 @@ class ServeHttpServer(
         // editor shell is still what every other path under a design serves.
         get("/ui-builder/{designId}/access") { handleUiBuilderAccess() }
         post("/ui-builder/{designId}/access") { handleUiBuilderAccessUpdate() }
+        // A design's history: its retained revisions as pictures, each one openable, restorable
+        // (forward, as a new revision) and forkable into a design of its own.
+        get("/ui-builder/{designId}/history") { handleUiBuilderHistory() }
+        post("/ui-builder/{designId}/history/{revision}/restore") { handleUiBuilderRestore() }
+        post("/ui-builder/{designId}/history/{revision}/fork") { handleUiBuilderFork() }
         // Removing one's own design, which until now only an operator's token or an MCP tool
         // could do. Owner-only, and it is the service that says so.
         post("/ui-builder/{designId}/delete") { handleUiBuilderDelete() }
@@ -13198,7 +13203,7 @@ class ServeHttpServer(
           val suffix = call.request.queryString().let { if (it.isEmpty()) "" else "?$it" }
           call.respondRedirect("/ui-builder/${assetSegments[0]}$suffix")
         } else {
-          respondUiBuilderShell(dir, File(dir, "index.html"))
+          respondUiBuilderShell(dir, File(dir, "index.html"), designId = assetSegments[0])
         }
         return
       }
@@ -13276,13 +13281,22 @@ class ServeHttpServer(
    * it — a byte-identical `index.html` serves a different shell once anything else in the tree
    * changes, and a length-and-mtime ETag alone would call those two responses the same.
    */
-  private suspend fun RoutingContext.respondUiBuilderShell(dir: File, index: File) {
+  private suspend fun RoutingContext.respondUiBuilderShell(
+    dir: File,
+    index: File,
+    designId: String? = null,
+  ) {
     if (!index.isFile) {
       call.respondText("not found", status = HttpStatusCode.NotFound)
       return
     }
     val version = uiBuilderBundleVersion
-    val etag = "\"${index.length().toString(16)}-${index.lastModified().toString(16)}-$version\""
+    // The shell is one file for every design, so what makes a pasted link unfurl as *this* design
+    // is written into its head here. The ETag folds it in, because the body now depends on it.
+    val head = uiBuilderShellHead(designId)
+    val headTag = Integer.toHexString(head.second.hashCode())
+    val etag =
+      "\"${index.length().toString(16)}-${index.lastModified().toString(16)}-$version-$headTag\""
     call.response.headers.append(HttpHeaders.CacheControl, "no-cache")
     call.response.headers.append(HttpHeaders.ETag, etag)
     if (call.request.headers[HttpHeaders.IfNoneMatch] == etag) {
@@ -13291,9 +13305,110 @@ class ServeHttpServer(
     }
     val html = withContext(Dispatchers.IO) { index.readText() }
     call.respondBytes(
-      versionUiBuilderShellReferences(dir, html, version).toByteArray(),
+      withUiBuilderShellHead(versionUiBuilderShellReferences(dir, html, version), head)
+        .toByteArray(),
       wasmContentType(index.name),
     )
+  }
+
+  /**
+   * The `<title>` and unfurl tags for the builder's shell: `(title, meta tags)`.
+   *
+   * A **public** design unfurls as itself — its title, and its own picture as the image, the same
+   * thumbnail its card on the designs page shows. The question is asked as the anonymous reader
+   * rather than as the caller, because that is who fetches an unfurl, and a private design must not
+   * lend its title to a card just because its owner is the one pasting the link. Everything else —
+   * the editor's home, and any design that is not public — unfurls as the UI builder itself, with a
+   * drawn card, and says nothing about the design.
+   */
+  private suspend fun RoutingContext.uiBuilderShellHead(designId: String?): Pair<String?, String> {
+    val origin = externalOrigin()
+    val pageUrl = origin + call.request.path()
+    // Only a `--public` box has anonymous readers, so only there can a design be public.
+    val public =
+      designId
+        ?.takeIf { isPublic }
+        ?.let { id ->
+          uiBuilderService?.let { service ->
+            val anonymous = AuthenticatedUiBuilderActor(ServeUiBuilderVisibility.ANONYMOUS_ACTOR_ID)
+            (runCatching {
+                service.execute(
+                  UiBuilderServiceCall(anonymous, UiBuilderServiceRequest.OpenDesign(id))
+                )
+              }
+                .getOrNull() as? UiBuilderServiceResponse.Snapshot)
+              ?.snapshot
+              ?.state
+              ?.document
+              ?.also { uiBuilderThumbnails?.warm(id, anonymous, knownRevision = it.revision) }
+          }
+        }
+    if (public != null) {
+      val title = public.title.ifBlank { public.id }
+      val picture = uiBuilderThumbnails?.cached(public.id)
+      val size = picture?.png?.let(::pngSize)
+      val unfurl =
+        ServeWeb.UnfurlMetadata(
+          pageUrl = pageUrl,
+          imageUrl =
+            "$origin/api/ui-builder/v1/designs/${WebEscaping.urlEncodeSegment(public.id)}" +
+              "/thumbnail.png?revision=${public.revision}",
+          imageWidth = size?.first,
+          imageHeight = size?.second,
+        )
+      val description =
+        "A ${public.catalogPin.systemId} screen designed in the Compose UI builder, at revision " +
+          "${public.revision}. Open it to try it, comment on it or export its Kotlin."
+      return title to ServeWeb.unfurlHeadHtml(title, description, unfurl)
+    }
+    val card =
+      withContext(Dispatchers.IO) {
+        socialCards.cardFor(
+          ServeSocialCard.Spec(
+            title = UI_BUILDER_UNFURL_TITLE,
+            subtitle = UI_BUILDER_UNFURL_SUBTITLE,
+          )
+        )
+      }
+    val unfurl =
+      ServeWeb.UnfurlMetadata(
+        pageUrl = pageUrl,
+        imageUrl = card?.let { origin + ServeSocialCard.PATH_PREFIX + "/" + it.fileName },
+        imageWidth = card?.width,
+        imageHeight = card?.height,
+      )
+    val description =
+      if (designId == null) UI_BUILDER_UNFURL_SUBTITLE
+      else "A private Compose UI builder design. Sign in to open it if it was shared with you."
+    return null to ServeWeb.unfurlHeadHtml(UI_BUILDER_UNFURL_TITLE, description, unfurl)
+  }
+
+  /** [html] with [head]'s unfurl tags after its `<title>`. */
+  private fun withUiBuilderShellHead(html: String, head: Pair<String?, String>): String {
+    // A public design's own title; otherwise the shell keeps the title it was built with.
+    val existing = Regex("<title>.*?</title>", RegexOption.DOT_MATCHES_ALL)
+    val match = existing.find(html)
+    val title =
+      head.first?.let { "<title>${WebEscaping.htmlEscape(it)}</title>" } ?: match?.value.orEmpty()
+    val block = title + "\n" + head.second
+    return when {
+      match != null -> html.replaceRange(match.range, block)
+      "</head>" in html -> html.replaceFirst("</head>", "$block\n</head>")
+      else -> html
+    }
+  }
+
+  /** A PNG's pixel size from its IHDR chunk, or null for anything that is not one. */
+  private fun pngSize(bytes: ByteArray): Pair<Int, Int>? {
+    if (bytes.size < 24 || bytes[12] != 'I'.code.toByte() || bytes[15] != 'R'.code.toByte()) {
+      return null
+    }
+    fun int(at: Int) =
+      ((bytes[at].toInt() and 0xff) shl 24) or
+        ((bytes[at + 1].toInt() and 0xff) shl 16) or
+        ((bytes[at + 2].toInt() and 0xff) shl 8) or
+        (bytes[at + 3].toInt() and 0xff)
+    return int(16) to int(20)
   }
 
   /**
@@ -13594,6 +13709,236 @@ class ServeHttpServer(
   }
 
   /**
+   * `GET /ui-builder/{designId}/history` — the design's retained revisions, newest first, each with
+   * its picture, who made it and when, and what this reader may do with it.
+   *
+   * Read is all it takes to look; restoring needs the design's own WRITE action, and forking needs
+   * the host's write capability (a fork is a new design, owned by whoever forks it). Both are forms
+   * that POST and redirect back here, so a refresh never repeats one.
+   */
+  private suspend fun RoutingContext.handleUiBuilderHistory() {
+    val (actor, designId) = uiBuilderAccessTarget(UiBuilderRouteCapability.READ) ?: return
+    val service = uiBuilderService ?: return
+    val listed =
+      when (
+        val response =
+          service.execute(
+            UiBuilderServiceCall(actor, UiBuilderServiceRequest.ListRevisions(designId))
+          )
+      ) {
+        is UiBuilderServiceResponse.Revisions -> response
+        else -> {
+          call.respondText("not found", status = HttpStatusCode.NotFound)
+          return
+        }
+      }
+    val title =
+      (service.execute(UiBuilderServiceCall(actor, UiBuilderServiceRequest.OpenDesign(designId)))
+          as? UiBuilderServiceResponse.Snapshot)
+        ?.snapshot
+        ?.state
+        ?.document
+        ?.title
+        ?.takeIf { it.isNotBlank() } ?: designId
+    val actions = service.designActions(actor, designId).orEmpty()
+    val mayFork =
+      uiBuilderAuthorization?.authorize(call, UiBuilderRouteCapability.WRITE) is
+        UiBuilderAuthorizationDecision.Authorized &&
+        actor.actorId != ServeUiBuilderVisibility.ANONYMOUS_ACTOR_ID
+    val permalink = uiBuilderPermalink(designId, call.request.queryParameters)
+    val (path, query) = permalink.substringBefore("?") to permalink.substringAfter("?", "")
+    fun withQuery(target: String, extra: String? = null): String {
+      val parts = listOfNotNull(query.takeIf { it.isNotEmpty() }, extra)
+      return if (parts.isEmpty()) target else target + "?" + parts.joinToString("&")
+    }
+    val restored = call.request.queryParameters["restored"]?.toLongOrNull()
+    val notice =
+      when {
+        restored != null ->
+          "Restored revision $restored as revision ${listed.currentRevision}. The revisions " +
+            "in between are still here, so this can be undone by restoring again."
+        call.request.queryParameters["stale"] != null ->
+          "Somebody changed the design while you were looking, so nothing was restored. " +
+            "Here is the history as it is now."
+        else -> ""
+      }
+    val skin = call.siteSkin()
+    markGeneration("static-page", "no-store")
+    call.respondText(
+      ServeWeb.uiBuilderHistoryPage(
+        designId = designId,
+        title = title,
+        currentRevision = listed.currentRevision,
+        rows =
+          listed.revisions.take(UI_BUILDER_HISTORY_LIMIT).map { revision ->
+            ServeWeb.UiBuilderHistoryRow(
+              revision = revision.revision,
+              updatedAt =
+                revision.updatedAtEpochMillis?.let {
+                  java.time.Instant.ofEpochMilli(it).toString()
+                },
+              actorId = revision.actorId,
+              thumbnailSrc =
+                "/api/ui-builder/v1/designs/${WebEscaping.urlEncodeSegment(designId)}" +
+                  "/revisions/${revision.revision}/thumbnail.png" +
+                  agentGrantTokenQuery(),
+              openHref = withQuery(path, "revision=${revision.revision}"),
+              restoreAction =
+                withQuery("$path/history/${revision.revision}/restore").takeIf {
+                  DesignAccessActionV1.WRITE in actions &&
+                    revision.revision != listed.currentRevision
+                },
+              forkAction = withQuery("$path/history/${revision.revision}/fork").takeIf { mayFork },
+            )
+          },
+        omitted = (listed.revisions.size - UI_BUILDER_HISTORY_LIMIT).coerceAtLeast(0),
+        designHref = permalink,
+        notice = notice,
+        designsHref = "/ui-builder/designs${agentGrantTokenQuery()}",
+        navSuffix = agentGrantTokenQuery(),
+        version = SERVE_VERSION,
+        siteName = skin.first,
+        themeCss = skin.second,
+      ),
+      ContentType.Text.Html,
+    )
+  }
+
+  /** `POST /ui-builder/{designId}/history/{revision}/restore` — see [handleUiBuilderHistory]. */
+  private suspend fun RoutingContext.handleUiBuilderRestore() {
+    if (!isSameOriginFormSubmission()) {
+      call.respondText("cross-site restore is refused", status = HttpStatusCode.Forbidden)
+      return
+    }
+    val (actor, designId) = uiBuilderAccessTarget(UiBuilderRouteCapability.WRITE) ?: return
+    val service = uiBuilderService ?: return
+    val revision = call.parameters["revision"]?.toLongOrNull()
+    val base = call.receiveParameters()["baseRevision"]?.toLongOrNull()
+    if (revision == null || base == null) {
+      call.respondText(
+        "a revision and a base revision are required",
+        status = HttpStatusCode.BadRequest,
+      )
+      return
+    }
+    val response =
+      service.execute(
+        UiBuilderServiceCall(
+          actor,
+          UiBuilderServiceRequest.RestoreRevision(
+            designId,
+            revision,
+            base,
+            operationId = "restore-" + java.util.UUID.randomUUID(),
+          ),
+        )
+      )
+    val historyPath = call.request.path().substringBefore("/history/") + "/history"
+    val outcome = (response as? UiBuilderServiceResponse.OperationOutcome)?.outcome
+    val flag =
+      when {
+        outcome is ee.schimke.composeai.uibuilder.protocol.AcceptedOutcomeV1 -> "restored=$revision"
+        outcome is ee.schimke.composeai.uibuilder.protocol.RejectedOutcomeV1 &&
+          outcome.code ==
+            ee.schimke.composeai.uibuilder.protocol.RejectionCodeV1.REVISION_MISMATCH -> "stale=1"
+        response is UiBuilderServiceResponse.Error -> {
+          call.respondText(
+            response.error.message,
+            status = HttpStatusCode.fromValue(response.httpStatusValue()),
+          )
+          return
+        }
+        else -> {
+          call.respondText(
+            (outcome as? ee.schimke.composeai.uibuilder.protocol.RejectedOutcomeV1)?.message
+              ?: "nothing was restored",
+            status = HttpStatusCode.Conflict,
+          )
+          return
+        }
+      }
+    val token = agentGrantTokenQuery().removePrefix("?")
+    call.response.headers.append(
+      HttpHeaders.Location,
+      "$historyPath?$flag" + if (token.isEmpty()) "" else "&$token",
+    )
+    call.respond(HttpStatusCode.SeeOther)
+  }
+
+  /**
+   * `POST /ui-builder/{designId}/history/{revision}/fork` — a new design from one revision of this
+   * one, owned by whoever forks it, then `303` to it. The revision is read as the caller, so a fork
+   * grants nothing: a design this actor may not open cannot be forked either.
+   */
+  private suspend fun RoutingContext.handleUiBuilderFork() {
+    val dir = uiBuilderDir
+    if (dir == null) {
+      call.respondText("not found", status = HttpStatusCode.NotFound)
+      return
+    }
+    if (!isSameOriginFormSubmission()) {
+      call.respondText("cross-site design creation is refused", status = HttpStatusCode.Forbidden)
+      return
+    }
+    val (actor, designId) = uiBuilderAccessTarget(UiBuilderRouteCapability.WRITE) ?: return
+    val service = uiBuilderService ?: return
+    val revision = call.parameters["revision"]?.toLongOrNull()
+    if (revision == null) {
+      call.respondText("a revision is required", status = HttpStatusCode.BadRequest)
+      return
+    }
+    val source =
+      when (
+        val opened =
+          service.execute(
+            UiBuilderServiceCall(actor, UiBuilderServiceRequest.GetSnapshot(designId, revision))
+          )
+      ) {
+        is UiBuilderServiceResponse.Snapshot -> opened.snapshot.state.document
+        is UiBuilderServiceResponse.Error -> {
+          call.respondText(
+            opened.error.message,
+            status = HttpStatusCode.fromValue(opened.httpStatusValue()),
+          )
+          return
+        }
+        else -> {
+          call.respondText(
+            "the design service did not answer with a document",
+            status = HttpStatusCode.InternalServerError,
+          )
+          return
+        }
+      }
+    // Its own id — a fork is never an existing design — made from where it came from.
+    val forkId = "${designId.take(40)}-r$revision-" + java.util.UUID.randomUUID().toString().take(6)
+    val fork =
+      source.copy(
+        id = forkId,
+        revision = 0,
+        title = "${source.title.ifBlank { designId }} (from revision $revision)",
+        createdAtEpochMillis = null,
+        updatedAtEpochMillis = null,
+      )
+    when (
+      val outcome =
+        withContext(Dispatchers.IO) { ServeUiBuilderCreate(service, dir).install(actor, fork) }
+    ) {
+      is ServeUiBuilderCreate.Outcome.Created -> {
+        call.response.headers.append(
+          HttpHeaders.Location,
+          uiBuilderPermalink(forkId, call.request.queryParameters),
+        )
+        call.respond(HttpStatusCode.SeeOther)
+      }
+      is ServeUiBuilderCreate.Outcome.AlreadyExists ->
+        call.respondText("that fork id is taken; try again", status = HttpStatusCode.Conflict)
+      is ServeUiBuilderCreate.Outcome.Refused ->
+        call.respondText(outcome.reason, status = HttpStatusCode.fromValue(outcome.status))
+    }
+  }
+
+  /**
    * `POST /ui-builder/{designId}/delete` — remove one design, then `303` back to the index.
    *
    * Deleting a design used to be the operator's move alone: `DELETE /admin/ui-builder/designs/{id}`
@@ -13744,6 +14089,9 @@ class ServeHttpServer(
     val target = query["actor"].orEmpty()
     val notice =
       when {
+        query["changed"] == "public" ->
+          "This design is now public: anyone with its link can open it, read-only."
+        query["changed"] == "private" -> "This design is now private."
         target.isBlank() -> ""
         query["changed"] == "removed" -> "$target can no longer open this design."
         query["changed"] == "shared" && query["role"] in setOf("editor", "viewer") ->
@@ -13762,6 +14110,21 @@ class ServeHttpServer(
       return
     }
     val actor = authorizeUiBuilderPage(authorization, UiBuilderRouteCapability.READ) ?: return
+    // A signed-out visitor may open a public design by its link, but has no designs of their own:
+    // this page is "mine", so it asks them who they are, as it did before public designs existed.
+    if (actor.actorId == ServeUiBuilderVisibility.ANONYMOUS_ACTOR_ID) {
+      githubAuth?.let {
+        call.respondRedirect(it.loginPath(call))
+        return
+      }
+      call.response.headers.append(HttpHeaders.WWWAuthenticate, "Bearer")
+      respondUiBuilderDenied(
+        HttpStatusCode.Unauthorized,
+        "authentication is required",
+        uiBuilderDeniedReason(null),
+      )
+      return
+    }
     val listed = mutableListOf<ee.schimke.composeai.uibuilder.protocol.DesignListItemV1>()
     var cursor: String? = null
     do {
@@ -13944,6 +14307,7 @@ class ServeHttpServer(
     val form = call.receiveParameters()
     val target = form["actorId"].orEmpty().trim()
     val revoking = form["action"] == "revoke"
+    val visibility = form["visibility"]?.takeIf { it == "public" || it == "private" }
     val current =
       when (val response = service.executeMapped(GetDesignAccessRequestV1(designId), actor)) {
         is UiBuilderServiceResponse.DesignAccess -> response.access
@@ -13956,6 +14320,42 @@ class ServeHttpServer(
           return
         }
       }
+    if (visibility != null) {
+      val mutation =
+        if (visibility == "public") ServeUiBuilderVisibility.makePublic()
+        else ServeUiBuilderVisibility.makePrivate()
+      when (
+        val updated =
+          service.executeMapped(
+            UpdateDesignAccessRequestV1(designId, current.accessRevision, listOf(mutation)),
+            actor,
+          )
+      ) {
+        is UiBuilderServiceResponse.DesignAccess ->
+          if (form["returnTo"] == "designs") {
+            call.response.headers.append(
+              HttpHeaders.Location,
+              "/ui-builder/designs${agentGrantTokenQuery()}",
+            )
+            call.respond(HttpStatusCode.SeeOther)
+          } else {
+            redirectToAccessPage(listOf("changed" to visibility))
+          }
+        is UiBuilderServiceResponse.Error ->
+          respondUiBuilderAccessPage(designId, actor, current, notice = updated.error.message)
+        else -> respondUiBuilderAccessPage(designId, actor, current, notice = "nothing changed")
+      }
+      return
+    }
+    if (ServeUiBuilderVisibility.isReservedActor(target)) {
+      respondUiBuilderAccessPage(
+        designId,
+        actor,
+        current,
+        notice = "$target stands for everyone; use Make public or Make private instead.",
+      )
+      return
+    }
     if (target.isBlank() || target == current.ownerActorId) {
       respondUiBuilderAccessPage(
         designId,
@@ -14004,28 +14404,36 @@ class ServeHttpServer(
         }
         // POST, redirect, GET: the access page re-reads the list, and the notice travels as a
         // fixed template plus its two values, so a refresh repeats the message and not the change.
-        val kept =
-          call.request.queryParameters
-            .entries()
-            .filter { (name, _) -> name !in ACCESS_NOTICE_PARAMS }
-            .flatMap { (name, values) -> values.map { name to it } }
-        val notice =
+        redirectToAccessPage(
           if (revoking) listOf("changed" to "removed", "actor" to target)
           else listOf("changed" to "shared", "actor" to target, "role" to role.name.lowercase())
-        call.response.headers.append(
-          HttpHeaders.Location,
-          call.request.path() +
-            "?" +
-            (kept + notice).joinToString("&") { (name, value) ->
-              "${WebEscaping.urlEncodeSegment(name)}=${WebEscaping.urlEncodeSegment(value)}"
-            },
         )
-        call.respond(HttpStatusCode.SeeOther)
       }
       is UiBuilderServiceResponse.Error ->
         respondUiBuilderAccessPage(designId, actor, current, notice = updated.error.message)
       else -> respondUiBuilderAccessPage(designId, actor, current, notice = "nothing changed")
     }
+  }
+
+  /**
+   * `303` back to this design's access page with [notice] in the query, keeping whatever else the
+   * page was reached with (a `?token=`, a catalog): POST, redirect, GET.
+   */
+  private suspend fun RoutingContext.redirectToAccessPage(notice: List<Pair<String, String>>) {
+    val kept =
+      call.request.queryParameters
+        .entries()
+        .filter { (name, _) -> name !in ACCESS_NOTICE_PARAMS }
+        .flatMap { (name, values) -> values.map { name to it } }
+    call.response.headers.append(
+      HttpHeaders.Location,
+      call.request.path() +
+        "?" +
+        (kept + notice).joinToString("&") { (name, value) ->
+          "${WebEscaping.urlEncodeSegment(name)}=${WebEscaping.urlEncodeSegment(value)}"
+        },
+    )
+    call.respond(HttpStatusCode.SeeOther)
   }
 
   /**
@@ -14132,6 +14540,12 @@ class ServeHttpServer(
           },
         viewerActorId = actor.actorId,
         notice = notice,
+        isPublic = ServeUiBuilderVisibility.isPublic(access),
+        historyHref =
+          uiBuilderPermalink(designId, call.request.queryParameters).let { permalink ->
+            val (path, query) = permalink.substringBefore("?") to permalink.substringAfter("?", "")
+            "$path/history" + if (query.isEmpty()) "" else "?$query"
+          },
         designsHref = "/ui-builder/designs${agentGrantTokenQuery()}",
         navSuffix = agentGrantTokenQuery(),
         version = SERVE_VERSION,
@@ -15752,6 +16166,14 @@ class ServeHttpServer(
 
     /** Where a signed-in reader asks for UI-builder edit access for themselves. */
     const val UI_BUILDER_REQUEST_ACCESS_PATH = "/ui-builder/request-access"
+
+    private const val UI_BUILDER_UNFURL_TITLE = "Compose UI builder"
+
+    private const val UI_BUILDER_UNFURL_SUBTITLE =
+      "Design Compose screens in the browser, together, and export real Kotlin."
+
+    /** How many revisions the history page draws; older retained ones are counted, not shown. */
+    private const val UI_BUILDER_HISTORY_LIMIT = 48
 
     /** Query parameters the share page's redirect adds to say what just changed. */
     private val ACCESS_NOTICE_PARAMS = setOf("changed", "actor", "role")

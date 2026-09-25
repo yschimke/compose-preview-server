@@ -546,6 +546,9 @@ public class ServeCommandOptions(
       }
       ?.toSet() ?: emptySet()
 
+  override val uiBuilderDefaultVisibility: UiBuilderDefaultVisibility =
+    UiBuilderDefaultVisibility.parse(args.flagValue("--ui-builder-default-visibility"))
+
   /** Optional durable aggregate counters. Null keeps local serve sessions in-memory only. */
   override val engagementFile: File? =
     args.flagValue("--engagement-file")?.takeIf { it.isNotBlank() }?.let(::File)
@@ -1332,6 +1335,10 @@ public class ServeCommandOptions(
                           reasons, but cannot download design documents, repair or delete designs,
                           or reach any other admin route. Separate from --admin-token so diagnosis
                           need not receive the code-execution-capable operator credential.
+        --ui-builder-default-visibility private|public
+                          Whether a new UI-builder design starts public (anyone with the link may
+                          view it, read-only) or private to its owner and whoever they share it
+                          with. Owners change it per design from its share page. Default private.
         --ui-builder-admin-actors <actor>[,…]
                           GitHub identities allowed to administer every shared UI-builder design,
                           for example github:octocat. A configured actor can use its signed-in

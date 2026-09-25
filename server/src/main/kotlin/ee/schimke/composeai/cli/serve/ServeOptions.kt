@@ -466,6 +466,13 @@ public interface ServeOptions {
   /** GitHub actor ids allowed to administer every shared UI-builder design on this host. */
   public val uiBuilderAdminActors: Set<String>
 
+  /**
+   * Whether a new UI-builder design starts public or private (`--ui-builder-default-visibility`).
+   * See [UiBuilderDefaultVisibility]; the owner can change it per design either way.
+   */
+  public val uiBuilderDefaultVisibility: UiBuilderDefaultVisibility
+    get() = UiBuilderDefaultVisibility.PRIVATE
+
   /** Optional durable aggregate counters. Null keeps local serve sessions in-memory only. */
   public val engagementFile: File?
 

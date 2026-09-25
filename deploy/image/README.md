@@ -688,6 +688,15 @@ counts as signed out everywhere else. The OAuth app
 requests GitHub's `repo` scope so private repository access can be checked during sign-in; the
 server stores only the signed login and the access verdict, not the OAuth token.
 
+### UI-builder design visibility
+
+`SERVE_UI_BUILDER_DEFAULT_VISIBILITY=public` starts every new UI-builder design **public**: anyone
+with its link can open it read-only (and export its Kotlin), signed in or not, and the link unfurls
+with the design's own picture. Only the owner and the people they share with can change it, and a
+public design is not listed on anybody else's designs page. Owners switch any one design between
+public and private from its share page. Unset (or `private`) keeps the old behaviour: a design is
+private to its owner and whoever it is shared with. preview.coo.ee runs `public`.
+
 ### Playground on `preview.coo.ee`
 
 `/playground` is disabled unless the preview service is started with a catalog live bundle that can

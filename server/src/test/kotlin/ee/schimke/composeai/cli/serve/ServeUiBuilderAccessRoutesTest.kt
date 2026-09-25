@@ -10,6 +10,7 @@ import ee.schimke.composeai.uibuilder.protocol.DesignListItemV1
 import ee.schimke.composeai.uibuilder.protocol.GrantActorAccessMutationV1
 import ee.schimke.composeai.uibuilder.protocol.RevokeActorAccessMutationV1
 import ee.schimke.composeai.uibuilder.protocol.ServiceErrorCodeV1
+import ee.schimke.composeai.uibuilder.service.UiBuilderPublicAccess
 import ee.schimke.composeai.uibuilder.service.UiBuilderServiceCall
 import ee.schimke.composeai.uibuilder.service.UiBuilderServiceError
 import ee.schimke.composeai.uibuilder.service.UiBuilderServicePort
@@ -352,5 +353,49 @@ class ServeUiBuilderAccessRoutesTest {
     )
     post("/ui-builder/screen/access", FormBody.Builder().add("actorId", " ").build())
     assertTrue(mutations.isEmpty(), "no refusal may have changed access: $mutations")
+  }
+
+  @Test
+  fun `the owner makes a design public and private again, and nobody can share with everyone`() {
+    val (code, location) =
+      post("/ui-builder/screen/access", FormBody.Builder().add("visibility", "public").build())
+    assertEquals(303, code)
+    assertEquals("/ui-builder/screen/access?changed=public", location)
+    val grant = mutations.single().mutations.single() as GrantActorAccessMutationV1
+    assertEquals(UiBuilderPublicAccess.ANYONE_ACTOR_ID, grant.actorId)
+    assertEquals(DesignAccessRoleV1.VIEWER, grant.role)
+    assertEquals(UiBuilderPublicAccess.PUBLIC_ACTIONS, grant.allowedActions)
+
+    val (_, page) = get(location, actor = "github:owner")
+    assertTrue(page.contains("now public"), page)
+    assertTrue(page.contains("Make private"), page)
+    assertFalse(page.contains("<code>public:anyone</code>"), "shown as visibility, not a person")
+
+    mutations.clear()
+    post("/ui-builder/screen/access", FormBody.Builder().add("visibility", "private").build())
+    assertEquals(
+      UiBuilderPublicAccess.ANYONE_ACTOR_ID,
+      (mutations.single().mutations.single() as RevokeActorAccessMutationV1).actorId,
+    )
+
+    // The pseudo-actors that mean "everyone" cannot be typed into the share box, with any role.
+    mutations.clear()
+    for (reserved in listOf(UiBuilderPublicAccess.ANYONE_ACTOR_ID, "anonymous:visitor")) {
+      post(
+        "/ui-builder/screen/access",
+        FormBody.Builder().add("actorId", reserved).add("role", "editor").build(),
+      )
+    }
+    assertTrue(mutations.isEmpty(), "$mutations")
+    // Nor may somebody who does not own the design change who may see it.
+    assertEquals(
+      403,
+      post(
+          "/ui-builder/screen/access",
+          FormBody.Builder().add("visibility", "public").build(),
+          actor = "github:other",
+        )
+        .first,
+    )
   }
 }

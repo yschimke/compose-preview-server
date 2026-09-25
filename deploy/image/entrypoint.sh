@@ -141,6 +141,10 @@ fi
 : "${SERVE_UI_BUILDER_ADMIN_ACTORS:=github:yschimke}"
 [[ "${SERVE_UI_BUILDER_ADMIN_ACTORS}" != "none" ]] &&
   args+=(--ui-builder-admin-actors "${SERVE_UI_BUILDER_ADMIN_ACTORS}")
+# New UI-builder designs start `private` (the default) or `public` — readable by anyone with the
+# link, never writable. preview.coo.ee runs public; an owner makes any one design private.
+[[ -n "${SERVE_UI_BUILDER_DEFAULT_VISIBILITY:-}" ]] &&
+  args+=(--ui-builder-default-visibility "${SERVE_UI_BUILDER_DEFAULT_VISIBILITY}")
 # Aggregate view counts live beside catalog/trust config so container restarts and image updates do
 # not erase engagement. Set to `none` to keep counters process-local.
 : "${SERVE_ENGAGEMENT_FILE:=/config/engagement.json}"

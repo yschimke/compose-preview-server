@@ -3657,7 +3657,12 @@ public class ServeRunner(
         machineAuthorization = machineAuthorization,
         // Wrapped so every accepted edit also queues a redraw of that design's listing card.
         uiBuilderService =
-          uiBuilderLane?.let { lane -> lane.thumbnails?.warming(lane.service) ?: lane.service },
+          uiBuilderLane?.let { lane ->
+            ServeUiBuilderVisibility.withDefault(
+              lane.thumbnails?.warming(lane.service) ?: lane.service,
+              uiBuilderDefaultVisibility,
+            )
+          },
         uiBuilderThumbnails = uiBuilderLane?.thumbnails,
         uiBuilderReferenceStore = uiBuilderLane?.references,
         uiBuilderCommentStore = uiBuilderLane?.comments,

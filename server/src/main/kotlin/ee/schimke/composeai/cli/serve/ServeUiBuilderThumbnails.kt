@@ -79,8 +79,13 @@ internal constructor(
   private class Job(
     val designId: String,
     val actor: AuthenticatedUiBuilderActor,
+    /** A retained revision to draw, for the history view; null draws the latest. */
+    val revision: Long? = null,
     val result: CompletableFuture<Entry?> = CompletableFuture(),
-  )
+  ) {
+    val key: String
+      get() = revisionKey(designId, revision)
+  }
 
   private val jobs = LinkedBlockingDeque<Job>(QUEUE)
   private val pending = ConcurrentHashMap<String, Job>()
@@ -104,12 +109,12 @@ internal constructor(
               }
             val entry =
               try {
-                runBlocking { retrying { render(job.designId, job.actor) } }
+                runBlocking { retrying { render(job.designId, job.actor, job.revision) } }
               } catch (failure: Exception) {
                 onLog("serve: UI-builder thumbnail for ${job.designId} failed: ${failure.message}")
                 null
               }
-            pending.remove(job.designId, job)
+            pending.remove(job.key, job)
             job.result.complete(entry)
           }
         },
@@ -141,6 +146,7 @@ internal constructor(
             response is UiBuilderServiceResponse.Error -> Unit
             request is UiBuilderServiceRequest.ApplyOperation ->
               warm(request.submission.designId, call.actor)
+            request is UiBuilderServiceRequest.RestoreRevision -> warm(request.designId, call.actor)
           }
           return response
         }
@@ -159,12 +165,27 @@ internal constructor(
    */
   internal fun evict(designId: String) {
     memory.remove(designId)
+    memory.keys.removeIf { it.startsWith("$designId$REVISION_SEPARATOR") }
     runCatching {
       val base = fileBase(designId)
       Files.deleteIfExists(directory.resolve("$base.png"))
       Files.deleteIfExists(directory.resolve("$base.meta"))
+      // Every retained revision's picture goes with the design: the id may come back as another.
+      Files.newDirectoryStream(directory, "$base-r*").use { stale ->
+        stale.forEach { Files.deleteIfExists(it) }
+      }
     }
       .onFailure { onLog("serve: UI-builder thumbnail for $designId not removed: ${it.message}") }
+  }
+
+  /**
+   * The cached picture of [designId] as it was at [revision], for the history view. A retained
+   * revision never changes, so once drawn it is kept until the design is deleted.
+   */
+  internal fun cachedRevision(designId: String, revision: Long): Entry? {
+    val key = revisionKey(designId, revision)
+    return memory[key]
+      ?: runCatching { readEntry(designId, revision) }.getOrNull()?.also { memory[key] = it }
   }
 
   /** The cached picture for [designId], from memory or disk, whatever it was drawn at. */
@@ -199,9 +220,10 @@ internal constructor(
     designId: String,
     actor: AuthenticatedUiBuilderActor,
     urgent: Boolean,
+    revision: Long? = null,
   ): CompletableFuture<Entry?> {
-    val job = Job(designId, actor)
-    val existing = pending.putIfAbsent(designId, job)
+    val job = Job(designId, actor, revision)
+    val existing = pending.putIfAbsent(job.key, job)
     if (existing != null) {
       // A card waiting on a redraw the listing queued moves that redraw to the front.
       if (urgent && jobs.remove(existing)) jobs.offerFirst(existing)
@@ -209,19 +231,30 @@ internal constructor(
     }
     val offered = if (urgent) jobs.offerFirst(job) else jobs.offerLast(job)
     if (!offered) {
-      pending.remove(designId, job)
+      pending.remove(job.key, job)
       job.result.complete(null)
     }
     return job.result
   }
 
-  /** Render [designId] now at its latest revision and keep it; null when the export refused. */
-  internal suspend fun render(designId: String, actor: AuthenticatedUiBuilderActor): Entry? {
+  /**
+   * Render [designId] now — at its latest revision, or at [revision] for the history view — and
+   * keep it; null when the export refused.
+   */
+  internal suspend fun render(
+    designId: String,
+    actor: AuthenticatedUiBuilderActor,
+    revision: Long? = null,
+  ): Entry? {
     val port = service ?: return null
     val response =
       try {
         port.executeMapped(
-          ExportDesignRequestV1(designId = designId, revision = null, format = ExportFormatV1.PNG),
+          ExportDesignRequestV1(
+            designId = designId,
+            revision = revision,
+            format = ExportFormatV1.PNG,
+          ),
           actor,
         )
       } catch (failure: Exception) {
@@ -232,16 +265,16 @@ internal constructor(
     val artifact = (response as? UiBuilderServiceResponse.Export)?.artifact ?: return null
     if (artifact.diagnostics.any { it.severity == DiagnosticSeverityV1.ERROR }) return null
     if (artifact.encoding != ExportEncodingV1.BASE64) return null
-    val revision = artifact.servedRevision()?.toLongOrNull() ?: return null
-    val entry = Entry(revision, generation, Base64.getDecoder().decode(artifact.content))
-    store(designId, entry)
+    val servedRevision = artifact.servedRevision()?.toLongOrNull() ?: return null
+    val entry = Entry(servedRevision, generation, Base64.getDecoder().decode(artifact.content))
+    store(designId, entry, pinned = revision != null)
     return entry
   }
 
-  private fun store(designId: String, entry: Entry) {
-    memory[designId] = entry
+  private fun store(designId: String, entry: Entry, pinned: Boolean = false) {
+    memory[if (pinned) revisionKey(designId, entry.revision) else designId] = entry
     runCatching {
-      val base = fileBase(designId)
+      val base = fileBase(designId) + if (pinned) "-r${entry.revision}" else ""
       val png = directory.resolve("$base.png")
       val meta = directory.resolve("$base.meta")
       writeAtomically(png, entry.png)
@@ -253,8 +286,8 @@ internal constructor(
       .onFailure { onLog("serve: UI-builder thumbnail for $designId not saved: ${it.message}") }
   }
 
-  private fun readEntry(designId: String): Entry? {
-    val base = fileBase(designId)
+  private fun readEntry(designId: String, revision: Long? = null): Entry? {
+    val base = fileBase(designId) + (revision?.let { "-r$it" } ?: "")
     val meta = directory.resolve("$base.meta")
     val png = directory.resolve("$base.png")
     if (!Files.isRegularFile(meta) || !Files.isRegularFile(png)) return null
@@ -287,6 +320,12 @@ internal constructor(
   internal companion object {
     /** Deep enough for every card on a large listing; beyond it a card waits for the next view. */
     const val QUEUE = 512
+
+    /** Cannot appear in a design id segment, so a revision key never collides with a design. */
+    private const val REVISION_SEPARATOR = "\u0000r"
+
+    private fun revisionKey(designId: String, revision: Long?): String =
+      if (revision == null) designId else "$designId$REVISION_SEPARATOR$revision"
 
     /** A file name for [designId] that no id can escape the directory with. */
     fun fileBase(designId: String): String =
@@ -345,6 +384,39 @@ internal suspend fun ApplicationCall.serveUiBuilderThumbnail(
     // it was served behind the reader's own credential.
     if (fresh) "private, max-age=86400" else "no-store",
   )
+  response.headers.append(UI_BUILDER_REVISION_HEADER, entry.revision.toString())
+  respondBytes(entry.png, ContentType.Image.PNG, HttpStatusCode.OK)
+}
+
+/**
+ * `GET /api/ui-builder/v1/designs/{designId}/revisions/{revision}/thumbnail.png`: one retained
+ * revision's picture, for the history view. A revision never changes, so a drawn one is served as
+ * cacheable; the first request draws it through the same single worker the listing uses.
+ */
+internal suspend fun ApplicationCall.serveUiBuilderRevisionThumbnail(
+  thumbnails: ServeUiBuilderThumbnails,
+  service: UiBuilderServicePort,
+  actor: AuthenticatedUiBuilderActor,
+  designId: String,
+  revision: Long,
+) {
+  val allowed = service.designActions(actor, designId)
+  if (allowed == null || DesignAccessActionV1.EXPORT !in allowed) {
+    response.headers.append(HttpHeaders.CacheControl, "no-store")
+    respondText("not found", status = HttpStatusCode.NotFound)
+    return
+  }
+  val entry =
+    thumbnails.cachedRevision(designId, revision)
+      ?: withTimeoutOrNull(COLD_RENDER_TIMEOUT_MS) {
+        thumbnails.submit(designId, actor, urgent = false, revision = revision).await()
+      }
+  if (entry == null || entry.revision != revision) {
+    response.headers.append(HttpHeaders.CacheControl, "no-store")
+    respondText("no thumbnail", status = HttpStatusCode.NotFound)
+    return
+  }
+  response.headers.append(HttpHeaders.CacheControl, "private, max-age=604800, immutable")
   response.headers.append(UI_BUILDER_REVISION_HEADER, entry.revision.toString())
   respondBytes(entry.png, ContentType.Image.PNG, HttpStatusCode.OK)
 }
