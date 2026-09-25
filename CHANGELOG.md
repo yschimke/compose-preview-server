@@ -1,5 +1,24 @@
 # Changelog
 
+## [3.67.0](https://github.com/yschimke/compose-preview-server/compare/v3.66.0...v3.67.0) (2026-09-25)
+
+
+### Features
+
+* org sign-in, public designs, design history, unfurls, installable app, and redirect-after-POST ([#1073](https://github.com/yschimke/compose-preview-server/issues/1073)) ([ea376ea](https://github.com/yschimke/compose-preview-server/commit/ea376ea2a1222acea1c57189411e48bf61213ecf))
+
+
+### Bug Fixes
+
+* **ui-builder:** move compose-ui-builder to 3.55.0, so the editor's boot screen is gone at ready ([#1078](https://github.com/yschimke/compose-preview-server/issues/1078)) ([80aeafc](https://github.com/yschimke/compose-preview-server/commit/80aeafc083be2a1e8aa386700915e08637c5674c))
+* **ui-builder:** pad an exported Scaffold's content by the padding it is handed ([#1075](https://github.com/yschimke/compose-preview-server/issues/1075)) ([c544330](https://github.com/yschimke/compose-preview-server/commit/c5443303fdd13b560665a061f735e50f11e197f8))
+* unbreak main — compose-ui-builder 3.54.0, reserved app-install routes, public-default create response ([#1077](https://github.com/yschimke/compose-preview-server/issues/1077)) ([23b89ea](https://github.com/yschimke/compose-preview-server/commit/23b89ea060f7aef52ad67f4de04d36d32e38859d))
+
+
+### Performance Improvements
+
+* **ui-builder:** serve the editor bundle gzipped and streamed, and authorize its shell cheaply ([#1072](https://github.com/yschimke/compose-preview-server/issues/1072)) ([bc89196](https://github.com/yschimke/compose-preview-server/commit/bc891964a0b8e2b0da3d3c853ed77212344bc0a1))
+
 ## [3.66.0](https://github.com/yschimke/compose-preview-server/compare/v3.65.0...v3.66.0) (2026-09-25)
 
 
