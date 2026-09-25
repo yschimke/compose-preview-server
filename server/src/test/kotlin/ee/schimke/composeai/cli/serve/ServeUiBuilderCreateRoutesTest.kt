@@ -74,11 +74,29 @@ class ServeUiBuilderCreateRoutesTest {
                   .build()
               )
             )
-          is UiBuilderServiceRequest.CreateDesign -> {
-            created += request.document.id
-            existing += request.document.id
-            UiBuilderServiceResponse.Catalogs(emptyList())
-          }
+          // The service answers both of these as a bad request: a document its catalog does not
+          // declare, and — for a create that lost the race to another — an id that now exists.
+          is UiBuilderServiceRequest.CreateDesign ->
+            when {
+              request.document.id.startsWith("invalid") ->
+                UiBuilderServiceResponse.Error(
+                  UiBuilderServiceError(
+                    ServiceErrorCodeV1.BAD_REQUEST,
+                    "UNKNOWN_PROPERTY: property text is not declared by m3/text",
+                  )
+                )
+              request.document.id.startsWith("raced") -> {
+                existing += request.document.id
+                UiBuilderServiceResponse.Error(
+                  UiBuilderServiceError(ServiceErrorCodeV1.BAD_REQUEST, "design already exists")
+                )
+              }
+              else -> {
+                created += request.document.id
+                existing += request.document.id
+                UiBuilderServiceResponse.Catalogs(emptyList())
+              }
+            }
           else -> UiBuilderServiceResponse.Catalogs(emptyList())
         }
 
@@ -173,6 +191,40 @@ class ServeUiBuilderCreateRoutesTest {
         assertEquals("/ui-builder/mywidget3", response.header("Location"))
       }
     assertEquals(listOf("mywidget3"), created)
+  }
+
+  @Test
+  fun `a design the service refuses is reported, not redirected to`() {
+    fun post(designId: String) =
+      client
+        .newCall(
+          Request.Builder()
+            .url(url("/ui-builder/designs"))
+            .header("X-Test-Actor", "operator")
+            .header("Origin", "http://127.0.0.1:${server.port}")
+            .post(
+              FormBody.Builder()
+                .add("designId", designId)
+                .add("catalog", "m3-catalog")
+                .add("template", "blank")
+                .build()
+            )
+            .build()
+        )
+        .execute()
+
+    // Its catalog cannot validate the template: the reason reaches the person who asked, rather
+    // than a redirect to a permalink that does not exist.
+    post("invalid-design").use { response ->
+      assertEquals(400, response.code)
+      assertTrue("UNKNOWN_PROPERTY" in response.body.string())
+    }
+    // Another create of the same id got there first: that design exists, which is what was asked.
+    post("raced-design").use { response ->
+      assertEquals(303, response.code)
+      assertEquals("/ui-builder/raced-design", response.header("Location"))
+    }
+    assertTrue(created.isEmpty(), "neither create may have created a design: $created")
   }
 
   @Test

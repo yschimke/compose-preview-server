@@ -89,15 +89,7 @@ internal class ServeUiBuilderCreate(
         // its message is written for the person who typed the name.
         return Outcome.Refused(400, e.message ?: "the design cannot be created as described")
       }
-    return when (val created = service.executeMapped(CreateDesignRequestV1(document), actor)) {
-      is UiBuilderServiceResponse.Error ->
-        // The service reports "already exists" as a bad request, and the existence check above
-        // already passed, so a bad request here is the race between two creates of one id: the
-        // design exists, which is the outcome the caller wanted anyway.
-        if (created.error.code == ServiceErrorCodeV1.BAD_REQUEST) Outcome.AlreadyExists
-        else Outcome.Refused(created.httpStatusValue(), created.error.message)
-      else -> Outcome.Created
-    }
+    return createNew(actor, document)
   }
 
   /**
@@ -131,13 +123,33 @@ internal class ServeUiBuilderCreate(
         return Outcome.Refused(listed.httpStatusValue(), listed.error.message)
       else -> return Outcome.Refused(500, "the design service did not list its catalogs")
     }
-    return when (val created = service.executeMapped(CreateDesignRequestV1(document), actor)) {
+    return createNew(actor, document)
+  }
+
+  /**
+   * Create [document], which the caller has just found absent.
+   *
+   * The service answers both "already exists" and "this document is not valid for its catalog" as a
+   * bad request. Only the first is the race between two creates of one id, so the design is opened
+   * again to tell them apart. Reading every bad request as that race sent a design the service
+   * refused — a template its catalog cannot validate — to a permalink that then 404s, with the
+   * reason thrown away.
+   */
+  private suspend fun createNew(
+    actor: AuthenticatedUiBuilderActor,
+    document: DesignDocumentV1,
+  ): Outcome =
+    when (val created = service.executeMapped(CreateDesignRequestV1(document), actor)) {
       is UiBuilderServiceResponse.Error ->
-        if (created.error.code == ServiceErrorCodeV1.BAD_REQUEST) Outcome.AlreadyExists
-        else Outcome.Refused(created.httpStatusValue(), created.error.message)
+        when {
+          created.error.code != ServiceErrorCodeV1.BAD_REQUEST ->
+            Outcome.Refused(created.httpStatusValue(), created.error.message)
+          service.executeMapped(OpenDesignRequestV1(document.id), actor) !is
+            UiBuilderServiceResponse.Error -> Outcome.AlreadyExists
+          else -> Outcome.Refused(400, created.error.message)
+        }
       else -> Outcome.Created
     }
-  }
 
   private companion object {
     const val NEW_DESIGN_FIXTURE = "jetcaster-discover-operations-v1.json"
