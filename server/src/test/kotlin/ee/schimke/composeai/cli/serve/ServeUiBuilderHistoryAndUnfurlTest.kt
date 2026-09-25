@@ -100,6 +100,14 @@ class ServeUiBuilderHistoryAndUnfurlTest {
         page.contains("/api/ui-builder/v1/designs/$DESIGN_ID/thumbnail.png?revision="),
         "the design's own picture is the card image: $page",
       )
+      // Installable from inside the builder, as from any other page: the shell links the manifest,
+      // and the manifest (like the icons) is served without a credential.
+      assertTrue(page.contains("""<link rel="manifest" href="/manifest.webmanifest">"""), page)
+      val (manifestCode, manifest) = get(port, "/manifest.webmanifest", token = null)
+      assertEquals(200, manifestCode)
+      assertTrue(manifest.contains("\"display\":\"standalone\""), manifest)
+      assertTrue(manifest.contains("/ui-builder/designs"), "the designs shortcut: $manifest")
+      assertEquals(200, get(port, "/icons/app-512.png", token = null).first)
       // Signed out is still not "mine": the designs page asks who you are.
       assertEquals(401, get(port, "/ui-builder/designs", token = null).first)
     }

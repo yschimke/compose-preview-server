@@ -6,6 +6,9 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 
 /**
  * The site icon ([ServeSiteIcon]).
@@ -93,4 +96,59 @@ class ServeSiteIconTest {
     (bytes[at].toInt() and 0xff) or ((bytes[at + 1].toInt() and 0xff) shl 8)
 
   private fun le32(bytes: ByteArray, at: Int): Int = le16(bytes, at) or (le16(bytes, at + 2) shl 16)
+
+  /**
+   * What Chrome's installability check reads: a name, a start URL inside the scope, a standalone
+   * display, and PNG icons at 192 and 512 — plus a maskable one so a launcher's mask does not crop
+   * the mark.
+   */
+  @Test
+  fun `the manifest makes the site installable`() {
+    val manifest =
+      ServeSiteIcon.manifest(
+        name = "Compose Preview",
+        shortName = "Compose Preview",
+        startUrl = "/",
+        shortcuts = listOf(ServeSiteIcon.Shortcut("UI builder", "/ui-builder/", "Start")),
+      )
+    assertEquals("application/manifest+json", manifest.contentType)
+    val json = kotlinx.serialization.json.Json.parseToJsonElement(manifest.bytes.decodeToString())
+    val root = json.jsonObject
+    assertEquals("standalone", root.getValue("display").jsonPrimitive.content)
+    assertEquals("/", root.getValue("start_url").jsonPrimitive.content)
+    assertEquals("/", root.getValue("scope").jsonPrimitive.content)
+    val icons = root.getValue("icons").jsonArray.map { it.jsonObject }
+    val sizes = icons.map { it.getValue("sizes").jsonPrimitive.content }
+    assertTrue("192x192" in sizes && "512x512" in sizes, "$sizes")
+    assertTrue(icons.any { it.getValue("purpose").jsonPrimitive.content == "maskable" })
+    assertEquals(
+      "/ui-builder/",
+      root
+        .getValue("shortcuts")
+        .jsonArray
+        .single()
+        .jsonObject
+        .getValue("url")
+        .jsonPrimitive
+        .content,
+    )
+    assertTrue(ServeSiteIcon.linkTags().contains("rel=\"manifest\""))
+  }
+
+  @Test
+  fun `the app icons are the sizes the manifest declares`() {
+    for ((icon, size) in
+      listOf(
+        ServeSiteIcon.appIcon192 to 192,
+        ServeSiteIcon.appIcon512 to 512,
+        ServeSiteIcon.maskableIcon to 512,
+      )) {
+      val image = assertNotNull(ImageIO.read(ByteArrayInputStream(icon.bytes)))
+      assertEquals(size, image.width)
+      assertEquals(size, image.height)
+    }
+    // Full bleed: a maskable icon's corner is the background, never transparency.
+    val maskable = ImageIO.read(ByteArrayInputStream(ServeSiteIcon.maskableIcon.bytes))
+    assertEquals(0xff, maskable.getRGB(0, 0) ushr 24)
+  }
 }

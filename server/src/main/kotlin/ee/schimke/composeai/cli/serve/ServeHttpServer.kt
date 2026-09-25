@@ -1424,6 +1424,12 @@ class ServeHttpServer(
         get(ServeSiteIcon.SVG_PATH) { respondSiteIcon(ServeSiteIcon.svg) }
         get(ServeSiteIcon.ICO_PATH) { respondSiteIcon(ServeSiteIcon.ico) }
         get(ServeSiteIcon.APPLE_TOUCH_PATH) { respondSiteIcon(ServeSiteIcon.appleTouchIcon) }
+        get(ServeSiteIcon.APP_ICON_192_PATH) { respondSiteIcon(ServeSiteIcon.appIcon192) }
+        get(ServeSiteIcon.APP_ICON_512_PATH) { respondSiteIcon(ServeSiteIcon.appIcon512) }
+        get(ServeSiteIcon.MASKABLE_ICON_PATH) { respondSiteIcon(ServeSiteIcon.maskableIcon) }
+        // Installable as an app ([ServeSiteIcon.manifest]). Ungated like the icons it names: the
+        // browser fetches it without the page's query string, and it describes nothing private.
+        get(ServeSiteIcon.MANIFEST_PATH) { respondSiteIcon(siteManifest) }
 
         // The in-browser Remote Compose player: a single shared IIFE bundle (global `RC`), baked
         // into the CLI jar as a classpath resource and served here so the viewer's client-side
@@ -7010,6 +7016,33 @@ class ServeHttpServer(
    * caching plus the ETag is the trade — an icon is a few hundred bytes, and pinning a stale one
    * for a year in every visitor's browser would be the worse mistake.
    */
+  /**
+   * This box's web app manifest. Built once: its only inputs are whether this box serves a UI
+   * builder — which is what its launcher shortcuts lead to — and the fixed brand.
+   */
+  private val siteManifest: ServeSiteIcon.Icon by lazy {
+    ServeSiteIcon.manifest(
+      name = "Compose Preview",
+      shortName = "Compose Preview",
+      startUrl = "/",
+      shortcuts =
+        if (uiBuilderService == null) emptyList()
+        else
+          listOf(
+            ServeSiteIcon.Shortcut(
+              "UI builder",
+              "/ui-builder/",
+              "Start a design or carry on with one",
+            ),
+            ServeSiteIcon.Shortcut(
+              "My designs",
+              "/ui-builder/designs",
+              "Every design you own or that was shared with you",
+            ),
+          ),
+    )
+  }
+
   private suspend fun RoutingContext.respondSiteIcon(icon: ServeSiteIcon.Icon) {
     if (icon.bytes.isEmpty()) {
       call.respondText("icon unavailable", status = HttpStatusCode.NotFound)
@@ -13390,7 +13423,9 @@ class ServeHttpServer(
     val match = existing.find(html)
     val title =
       head.first?.let { "<title>${WebEscaping.htmlEscape(it)}</title>" } ?: match?.value.orEmpty()
-    val block = title + "\n" + head.second
+    // The shell is the builder's own page, so it carries the site's icons and manifest too:
+    // installing from inside the editor installs the same app as installing from anywhere else.
+    val block = title + "\n" + ServeSiteIcon.linkTags() + "\n" + head.second
     return when {
       match != null -> html.replaceRange(match.range, block)
       "</head>" in html -> html.replaceFirst("</head>", "$block\n</head>")
