@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.61.0](https://github.com/yschimke/compose-preview-server/compare/v3.60.0...v3.61.0) (2026-09-25)
+
+
+### Features
+
+* **ci:** let the design-render lane run once per catalog ([#1055](https://github.com/yschimke/compose-preview-server/issues/1055)) ([9001abe](https://github.com/yschimke/compose-preview-server/commit/9001abed94790556a96c36be6707e3420fe73b16))
+
 ## [3.60.0](https://github.com/yschimke/compose-preview-server/compare/v3.59.0...v3.60.0) (2026-09-25)
 
 
