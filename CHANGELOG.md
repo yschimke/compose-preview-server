@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.60.0](https://github.com/yschimke/compose-preview-server/compare/v3.59.0...v3.60.0) (2026-09-25)
+
+
+### Features
+
+* **ui-builder:** cache the design list's card pictures and draw them ahead of the reader ([#1052](https://github.com/yschimke/compose-preview-server/issues/1052)) ([af7720b](https://github.com/yschimke/compose-preview-server/commit/af7720b7935b7a7af55d6a93064c02aae638dfbd))
+
 ## [3.59.0](https://github.com/yschimke/compose-preview-server/compare/v3.58.0...v3.59.0) (2026-09-24)
 
 
