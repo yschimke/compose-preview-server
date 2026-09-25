@@ -92,6 +92,22 @@ internal fun Route.installUiBuilderLiveExportRoutes(
   }
 }
 
+/** The design listing's card picture; see [ServeUiBuilderThumbnails]. */
+internal fun Route.installUiBuilderThumbnailRoute(
+  service: UiBuilderServicePort,
+  authorization: ServeUiBuilderAuthorization,
+  thumbnails: ServeUiBuilderThumbnails,
+) {
+  get("/api/ui-builder/v1/designs/{designId}/thumbnail.png") {
+    val actor =
+      call.authorizeExport(authorization)
+        ?: return@get
+    val designId = call.parameters["designId"].orEmpty()
+    val revision = call.request.queryParameters["revision"]?.toLongOrNull()
+    call.serveUiBuilderThumbnail(thumbnails, service, actor, designId, revision)
+  }
+}
+
 private suspend fun ApplicationCall.serveLiveExport(
   service: UiBuilderServicePort,
   authorization: ServeUiBuilderAuthorization,
@@ -246,7 +262,7 @@ private suspend fun ApplicationCall.authorizeExport(
  * attaches. Absent from a diagnostic-free artifact, and then absent from the response too, rather
  * than guessed.
  */
-private fun ExportArtifactV1.servedRevision(): String? =
+internal fun ExportArtifactV1.servedRevision(): String? =
   diagnostics
     .asSequence()
     .filter {

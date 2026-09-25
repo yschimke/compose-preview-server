@@ -2540,6 +2540,8 @@ public class ServeRunner(
     val links: ServeUiBuilderLinksStore?,
     /** Shared file-manager folders, stored beside design state without changing revisions. */
     val folders: ServeUiBuilderFolderStore?,
+    /** The design listing's card pictures, drawn ahead of the reader and kept across restarts. */
+    val thumbnails: ServeUiBuilderThumbnails?,
     /**
      * The Compose half of the export, kept so the native render lane can ask it the same question
      * with node tagging on. Not reached through [service]: the service's exporter may be the
@@ -2559,6 +2561,7 @@ public class ServeRunner(
     val nativeBackends: Map<String, String>,
   ) : AutoCloseable {
     override fun close() {
+      thumbnails?.close()
       renderer?.close()
     }
   }
@@ -3041,6 +3044,17 @@ public class ServeRunner(
             System.err.println(
               "serve: UI-builder links unavailable (${it.message}); " +
                 "the builder works, and a design cannot say what it is for"
+            )
+          }
+          .getOrNull(),
+      thumbnails =
+        runCatching {
+            ServeUiBuilderThumbnails(directory.resolve("thumbnails").toPath(), SERVE_VERSION)
+          }
+          .onFailure {
+            System.err.println(
+              "serve: UI-builder thumbnails unavailable (${it.message}); " +
+                "the design list draws each card from the live export"
             )
           }
           .getOrNull(),
@@ -3562,7 +3576,10 @@ public class ServeRunner(
         agentGrantLimiter = agentGrantStore?.let { buildAgentGrantRateLimiter() },
         catalogMcpEnabled = catalogMcp,
         machineAuthorization = machineAuthorization,
-        uiBuilderService = uiBuilderLane?.service,
+        // Wrapped so every accepted edit also queues a redraw of that design's listing card.
+        uiBuilderService =
+          uiBuilderLane?.let { lane -> lane.thumbnails?.warming(lane.service) ?: lane.service },
+        uiBuilderThumbnails = uiBuilderLane?.thumbnails,
         uiBuilderReferenceStore = uiBuilderLane?.references,
         uiBuilderCommentStore = uiBuilderLane?.comments,
         uiBuilderLinksStore = uiBuilderLane?.links,
