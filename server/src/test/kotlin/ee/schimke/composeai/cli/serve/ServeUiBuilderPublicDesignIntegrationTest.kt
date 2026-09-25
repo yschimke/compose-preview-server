@@ -22,6 +22,7 @@ import java.nio.file.Path
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
+import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.io.TempDir
@@ -59,9 +60,15 @@ class ServeUiBuilderPublicDesignIntegrationTest {
   @Test
   fun `a public default lets anyone open a new design, read-only, and lists it to nobody else`() {
     val service = service(UiBuilderDefaultVisibility.PUBLIC)
-    assertIs<UiBuilderServiceResponse.Snapshot>(
-      service.run(owner, UiBuilderServiceRequest.CreateDesign(document()))
-    )
+    val created =
+      assertIs<UiBuilderServiceResponse.Snapshot>(
+        service.run(owner, UiBuilderServiceRequest.CreateDesign(document()))
+      )
+    // The answer describes the design as it now is — public, at the access revision the grant
+    // moved it to — so the creator's next access update is not refused as stale.
+    val access = assertNotNull(created.snapshot.access)
+    assertEquals(1, access.accessRevision)
+    assertTrue(access.actorGrants.any { ServeUiBuilderVisibility.isReservedActor(it.actorId) })
 
     for (reader in listOf(anonymous, stranger)) {
       assertIs<UiBuilderServiceResponse.Snapshot>(

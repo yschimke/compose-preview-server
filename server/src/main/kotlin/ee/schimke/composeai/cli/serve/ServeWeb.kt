@@ -7343,8 +7343,8 @@ ${captureControlsHtml().prependIndent("          ")}
           <legend>Visibility</legend>
           <p class="cp-sub">${
             if (isPublic)
-              "<strong>Public.</strong> Anyone with the link can open this design and export its " +
-                "code; only the people below can change it."
+              "<strong>Public.</strong> Anyone with the link can open this design, signed in or " +
+                "not; only the people below can change it."
             else
               "<strong>Private.</strong> Only you and the people below can open this design."
           }</p>

@@ -106,7 +106,18 @@ internal object ServeUiBuilderVisibility {
             System.err.println(
               "serve: ui-builder: $designId could not be made public by default; it stays private"
             )
+            return response
           }
+          // The grant moved the access revision on, so the create's own snapshot now describes an
+          // access list that no longer exists. Answer with the design as it is: a client that
+          // updates access next would otherwise send a stale revision and be refused.
+          return runCatching {
+            delegate.execute(
+              UiBuilderServiceCall(call.actor, UiBuilderServiceRequest.OpenDesign(designId))
+            )
+          }
+            .getOrNull()
+            ?.takeIf { it is UiBuilderServiceResponse.Snapshot } ?: response
         }
         return response
       }
