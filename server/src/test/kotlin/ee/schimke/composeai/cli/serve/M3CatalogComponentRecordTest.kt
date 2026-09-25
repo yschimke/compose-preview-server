@@ -355,7 +355,7 @@ class M3CatalogComponentRecordTest {
     )
     assertTrue(source.contains("Surface("), source)
     // The alias did its work: the catalog's `children` reached `Column`'s `content` parameter.
-    assertTrue(source.contains("Column(content = {"), source)
+    assertTrue(source.contains("Column {"), source)
     assertTrue(source.contains("""Text(text = "Discover""""), source)
     assertTrue(source.contains("HorizontalDivider("), source)
     assertTrue(source.contains("Image("), source)

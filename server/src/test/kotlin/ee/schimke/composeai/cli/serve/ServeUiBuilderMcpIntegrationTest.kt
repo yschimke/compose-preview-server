@@ -163,7 +163,7 @@ class ServeUiBuilderMcpIntegrationTest {
     assertEquals(emptyList(), artifact.diagnostics, artifact.content)
     assertTrue(artifact.content.contains("""Text(text = "Opening keynote""""), artifact.content)
     assertTrue(artifact.content.contains("""Text(text = "Two sessions today""""), artifact.content)
-    assertTrue(artifact.content.contains("Column("), artifact.content)
+    assertTrue(artifact.content.contains("Column {"), artifact.content)
   }
 
   @Test

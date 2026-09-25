@@ -280,7 +280,7 @@ class M3CatalogAuthoredExportTest {
     // The layout weight: a scoped modifier, supplied by the `Row`'s receiver, so it is written by
     // simple name and imported nowhere — and its argument is a `Float`, because `weight(1.0)` does
     // not compile.
-    assertTrue(source.contains("modifier = Modifier.weight(1.0f)"), source)
+    assertTrue(source.contains("modifier = Modifier.weight(1f)"), source)
     assertTrue(!source.contains("import androidx.compose.foundation.layout.RowScope"), source)
     assertTrue(
       source.contains("tint = MaterialTheme.colorScheme.onSurfaceVariant"),
@@ -354,7 +354,7 @@ class M3CatalogAuthoredExportTest {
     assertTrue(
       source.contains(
         "Modifier.background(color = MaterialTheme.colorScheme.surfaceVariant, " +
-          "shape = MaterialTheme.shapes.medium).border(width = 1.dp, color = Color(4284960932L))"
+          "shape = MaterialTheme.shapes.medium).border(width = 1.dp, color = Color(0xFF6750A4))"
       ),
       source,
     )
@@ -368,7 +368,7 @@ class M3CatalogAuthoredExportTest {
     // The scoped `align`, by simple name and imported nowhere, beside a `Float` the API takes as
     // one — and the `weight` the property already produced, on the same chain.
     assertTrue(
-      source.contains("modifier = Modifier.align(Alignment.Bottom).alpha(0.6f).weight(1.0f)"),
+      source.contains("modifier = Modifier.align(Alignment.Bottom).alpha(0.6f).weight(1f)"),
       source,
     )
     assertTrue(!source.contains("import androidx.compose.foundation.layout.RowScope"), source)
