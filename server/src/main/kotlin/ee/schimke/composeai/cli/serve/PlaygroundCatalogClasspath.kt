@@ -88,10 +88,16 @@ object PlaygroundCatalogClasspath {
     val libJars = BundleReader.extractEmbeddedLibs(zipBytes, libsDir, fileSystem)
     val recordedCoords = manifest.classpath.filterIsInstance<BundleReader.ClasspathEntry.Maven>()
     val mavenCoords = withHostSkikoNative(recordedCoords)
-    mavenCoords.drop(recordedCoords.size).forEach {
+    (recordedCoords - mavenCoords.toSet()).forEach {
+      onLog(
+        "playground $system: bundle's Skiko native ${it.version} does not match its bindings — " +
+          "dropping ${it.group}:${it.artifact}:${it.version}"
+      )
+    }
+    (mavenCoords - recordedCoords.toSet()).forEach {
       onLog(
         "playground $system: bundle carries Skiko bindings ${it.version} with no native for " +
-          "this host — adding ${it.group}:${it.artifact}:${it.version}"
+          "this host at that version — adding ${it.group}:${it.artifact}:${it.version}"
       )
     }
     val resolutions =
@@ -186,6 +192,11 @@ object PlaygroundCatalogClasspath {
    * Narrow on purpose, as the original is: only a bundle that carries bindings and no native for
    * this host at their version gains a coordinate. No `sha256`, because the bundle never recorded
    * the artifact; the version comes from the bindings it did record.
+   *
+   * A native for this host at **another** version is replaced, not joined. Both would be promoted
+   * together, in manifest order, and Skiko loads the first `libskiko` its resource lookup finds —
+   * the stale one — so appending the right jar behind it would reproduce the very link error this
+   * exists to prevent. Other hosts' natives are left alone: they are never loaded here.
    */
   internal fun withHostSkikoNative(
     coords: List<BundleReader.ClasspathEntry.Maven>,
@@ -196,13 +207,12 @@ object PlaygroundCatalogClasspath {
       coords.firstOrNull { it.group == SKIKO_GROUP && it.artifact in SKIKO_BINDINGS }
         ?: return coords
     val host = skikoHostRuntime(osName, osArch) ?: return coords
-    if (
-      coords.any {
-        it.group == SKIKO_GROUP && it.artifact == host && it.version == bindings.version
-      }
-    )
-      return coords
-    return coords +
+    fun isHostNative(it: BundleReader.ClasspathEntry.Maven) =
+      it.group == SKIKO_GROUP && it.artifact == host
+    if (coords.any { isHostNative(it) && it.version == bindings.version }) {
+      return coords.filterNot { isHostNative(it) && it.version != bindings.version }
+    }
+    return coords.filterNot(::isHostNative) +
       BundleReader.ClasspathEntry.Maven(
         group = SKIKO_GROUP,
         artifact = host,
