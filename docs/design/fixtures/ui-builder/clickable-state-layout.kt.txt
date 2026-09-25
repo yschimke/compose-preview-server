@@ -13,17 +13,17 @@ import androidx.compose.ui.unit.dp
 @Composable
 fun ClickableStateLayout() {
     val page = androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf<kotlin.Int>(10) }
-    Box(modifier = Modifier.fillMaxSize().padding(start = 24.dp, top = 24.dp, end = 24.dp, bottom = 24.dp), content = {
+    Box(modifier = Modifier.fillMaxSize().padding(24.dp)) {
         when (page.value) {
             10 -> {
-                Box(modifier = Modifier.fillMaxSize().background(color = Color(4284960932L)).clickable(onClick = { page.value = 20 }), content = {})
+                Box(modifier = Modifier.fillMaxSize().background(color = Color(0xFF6750A4)).clickable(onClick = { page.value = 20 }), content = {})
             }
             20 -> {
-                Box(modifier = Modifier.fillMaxSize().background(color = Color(4278224247L)).clickable(onClick = { page.value = 30 }), content = {})
+                Box(modifier = Modifier.fillMaxSize().background(color = Color(0xFF008577)).clickable(onClick = { page.value = 30 }), content = {})
             }
             else -> {
-                Box(modifier = Modifier.fillMaxSize().background(color = Color(4281944491L)).clickable(onClick = { page.value = 10 }), content = {})
+                Box(modifier = Modifier.fillMaxSize().background(color = Color(0xFF3949AB)).clickable(onClick = { page.value = 10 }), content = {})
             }
         }
-    })
+    }
 }
