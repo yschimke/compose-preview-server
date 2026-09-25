@@ -150,7 +150,12 @@ composeai-tools = "2.25.0"
 # history records twice over, from the other side. Construction here moves to
 # `Type.Builder(...).build()` and derivation to `newBuilder()`, exactly as contracts 3.0.0 did in
 # #910; `ServeDesignPageStoreTest`'s unknown-enum case still asserts the drop.
-composeai-preview-daemon = "3.8.3"
+#
+# 3.8.4 classifies a Skiko bindings/native mismatch (`UnsatisfiedLinkError` on a `org.jetbrains.skia.`
+# entry point, or a missing libskiko) as `classpathSkew` with a fix hint instead of `runtime`
+# (compose-preview-daemon#158), so the native render lane's `renderFailed` reason — surfaced since
+# #1069 — names the fix. No API this server calls changed.
+composeai-preview-daemon = "3.8.4"
 # 2.9.0 is the first release carrying `DesignEnvironmentV1.exportDevices` and its Set/Reset
 # changes, which is the field a design names its export devices in. 2.14.0 adds the components a
 # design defines — `DesignDocumentV1.components`, `DesignNodeV1.component` and the `binding` value
