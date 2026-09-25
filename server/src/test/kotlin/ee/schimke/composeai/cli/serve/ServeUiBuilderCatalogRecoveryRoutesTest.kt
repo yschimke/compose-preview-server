@@ -49,6 +49,9 @@ class ServeUiBuilderCatalogRecoveryRoutesTest {
                 previewDigest = "preview-digest",
               )
             )
+          // The service's quarantine gate answers every request naming a stranded design this way,
+          // the shell's `GetDesignActions` as much as a snapshot.
+          is UiBuilderServiceRequest.GetDesignActions,
           is UiBuilderServiceRequest.GetSnapshot ->
             UiBuilderServiceResponse.Error(
               UiBuilderServiceError(
@@ -136,7 +139,7 @@ class ServeUiBuilderCatalogRecoveryRoutesTest {
     assertTrue(stranded.second.contains("Recovery builder"), stranded.second)
     assertEquals(
       listOf(
-        UiBuilderServiceRequest.GetSnapshot::class,
+        UiBuilderServiceRequest.GetDesignActions::class,
         UiBuilderServiceRequest.PreviewCurrentCatalogUpgrade::class,
       ),
       calls.map { it.request::class },
