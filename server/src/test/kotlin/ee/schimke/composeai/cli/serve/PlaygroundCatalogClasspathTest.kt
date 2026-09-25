@@ -41,6 +41,76 @@ class PlaygroundCatalogClasspathTest {
     )
   }
 
+  private fun maven(group: String, artifact: String, version: String) =
+    BundleReader.ClasspathEntry.Maven(group, artifact, version, type = "jar", sha256 = null)
+
+  @Test
+  fun `skiko bindings without their native gain this host's runtime at the same version`() {
+    val bindings = maven("org.jetbrains.skiko", "skiko-awt", "0.150.1")
+    val material3 = maven("org.jetbrains.compose.material3", "material3-desktop", "1.12.0")
+
+    val coords =
+      PlaygroundCatalogClasspath.withHostSkikoNative(
+        listOf(material3, bindings),
+        osName = "Linux",
+        osArch = "amd64",
+      )
+
+    assertEquals(
+      listOf(
+        material3,
+        bindings,
+        maven("org.jetbrains.skiko", "skiko-awt-runtime-linux-x64", "0.150.1"),
+      ),
+      coords,
+      "the bindings must travel with their own libskiko, not pair with the sidecar's older one",
+    )
+  }
+
+  @Test
+  fun `a bundle that already carries the native, or no skiko at all, is left alone`() {
+    val paired =
+      listOf(
+        maven("org.jetbrains.skiko", "skiko-awt", "0.150.1"),
+        maven("org.jetbrains.skiko", "skiko-awt-runtime-linux-arm64", "0.150.1"),
+      )
+    assertEquals(
+      paired,
+      PlaygroundCatalogClasspath.withHostSkikoNative(paired, osName = "Linux", osArch = "aarch64"),
+    )
+    val android = listOf(maven("androidx.compose.material3", "material3", "1.4.0"))
+    assertEquals(
+      android,
+      PlaygroundCatalogClasspath.withHostSkikoNative(android, osName = "Linux", osArch = "amd64"),
+    )
+  }
+
+  @Test
+  fun `a native at another version does not count as the pair`() {
+    val coords =
+      PlaygroundCatalogClasspath.withHostSkikoNative(
+        listOf(
+          maven("org.jetbrains.skiko", "skiko-awt", "0.150.1"),
+          maven("org.jetbrains.skiko", "skiko-awt-runtime-macos-arm64", "0.144.6"),
+        ),
+        osName = "Mac OS X",
+        osArch = "aarch64",
+      )
+    assertEquals(
+      maven("org.jetbrains.skiko", "skiko-awt-runtime-macos-arm64", "0.150.1"),
+      coords.last(),
+    )
+  }
+
+  @Test
+  fun `a platform skiko publishes no native for gains nothing`() {
+    val coords = listOf(maven("org.jetbrains.skiko", "skiko-awt", "0.150.1"))
+    assertEquals(
+      coords,
+      PlaygroundCatalogClasspath.withHostSkikoNative(coords, osName = "SunOS", osArch = "sparcv9"),
+    )
+  }
+
   @Test
   fun `duplicate jars are collapsed while preserving first-seen order`() {
     val classes = File(root, "classes")
