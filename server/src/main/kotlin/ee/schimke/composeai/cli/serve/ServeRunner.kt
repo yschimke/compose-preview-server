@@ -1913,12 +1913,12 @@ public class ServeRunner(
         // Robolectric. REMOTE_COMPOSE never reaches this seam (it returns a documentUrl). A null
         // (no
         // sidecar for that mode) just omits the still image; it's never fatal to the run.
-        renderFirstFrame = { snippet ->
+        renderFirstFrameWithReason = { snippet ->
           when (snippet.mode) {
-            PlaygroundMode.CMP -> cmpRender?.render(snippet)
-            PlaygroundMode.ANDROID -> androidRender?.render(snippet)
+            PlaygroundMode.CMP -> cmpRender?.renderFrame(snippet)
+            PlaygroundMode.ANDROID -> androidRender?.renderFrame(snippet)
             PlaygroundMode.REMOTE_COMPOSE -> null
-          }
+          } ?: PlaygroundFirstFrame(null)
         },
         // Which served catalog each pinned mode compiles against, so the browsing surfaces can ask
         // "does this host compile <system>?" and get a true answer on a pin-only host — where the
