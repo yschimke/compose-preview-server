@@ -11250,9 +11250,13 @@ class ServeHttpServer(
       sessionId,
       onMissing = { respondNotFoundHtml("That design system was not found on this server.") },
     ) { renderHost ->
-      val preview = ServeWeb.a2uiDocumentPreview(renderHost.previews)
+      val requested = call.request.queryParameters["preview"]
+      val preview = ServeWeb.a2uiDocumentPreview(renderHost.previews, requested)
       if (preview == null) {
-        respondNotFoundHtml("This design system declares no A2UI document preview.")
+        respondNotFoundHtml(
+          if (requested.isNullOrBlank()) "This design system declares no A2UI document preview."
+          else "That preview is not an A2UI document preview."
+        )
         return@withLeasedSession
       }
       markGeneration("static-page", DYNAMIC_RESOURCE_CACHE_CONTROL)

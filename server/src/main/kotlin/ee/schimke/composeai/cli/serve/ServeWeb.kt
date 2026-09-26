@@ -1528,16 +1528,30 @@ ${captureControlsHtml().prependIndent("          ")}
     playgroundHref: String?,
     executableBundleHref: String?,
     parallelLayersHref: String,
+    a2uiPlaygroundHref: String? = null,
   ): String {
     val links =
       sourceLinkHtml(sourceHref, sourcePath) +
         playgroundLinkHtml(playgroundHref) +
+        a2uiPlaygroundLinkHtml(a2uiPlaygroundHref) +
         executableBundleLinkHtml(executableBundleHref) +
         parallelLayersLinkHtml(parallelLayersHref) +
         reportIssueHtml(report) +
         figmaSpecHtml(figmaSpec)
     if (links.isBlank()) return ""
     return "\n      <div class=\"cp-preview-links\">$links\n      </div>"
+  }
+
+  /**
+   * "A2UI playground" — for a preview declaring the A2UI `document` knob, the playground page
+   * opened on it: its document (the knob's default, e.g. a sample's payload) in an editor,
+   * re-rendered through this preview as it changes.
+   */
+  private fun a2uiPlaygroundLinkHtml(href: String?): String {
+    val url = href?.takeIf { it.isNotBlank() } ?: return ""
+    return "\n      <p class=\"cp-source\">" +
+      "<a class=\"cp-source-link\" href=\"${WebEscaping.htmlEscape(url)}\" " +
+      "title=\"Edit this A2UI document and render it\">▶ A2UI playground</a></p>"
   }
 
   private fun executableBundleLinkHtml(href: String?): String {
@@ -9604,6 +9618,15 @@ ${captureControlsHtml().prependIndent("          ")}
     previews.firstOrNull { preview ->
       a2uiDocumentKnob(preview) != null
     }
+
+  /**
+   * [a2uiDocumentPreview], or the preview [requested] names when it declares the knob — how the
+   * playground opens on one sample's payload rather than the catalog's first document preview. A
+   * requested id that does not declare it is null, not a silent fallback to another preview.
+   */
+  fun a2uiDocumentPreview(previews: List<ServePreview>, requested: String?): ServePreview? =
+    if (requested.isNullOrBlank()) a2uiDocumentPreview(previews)
+    else previews.firstOrNull { it.id == requested }?.takeIf { a2uiDocumentKnob(it) != null }
 
   private fun a2uiDocumentKnob(
     preview: ServePreview
@@ -18216,6 +18239,16 @@ ${scriptTag("known-differences.js")}
     // report alone — and the row omits itself entirely when that is null as well. Dropping the row
     // wholesale is what left the streamlined browser with no way to report a wrong render at all,
     // its site footer and floating launcher both being gone too (issue #4704).
+    // A preview that declares the A2UI playground's `document` knob can be opened in the playground
+    // itself — a sample catalog publishes each sample's payload that way. Not in Catalog mode, like
+    // the other developer affordances in this row.
+    val a2uiPlaygroundHref =
+      if (componentBrowser || a2uiDocumentKnob(preview) == null) null
+      else {
+        val q = querySuffix(linkQuery(token, linkSessionId, basePath, isPublic))
+        "$basePath/a2ui?preview=${java.net.URLEncoder.encode(preview.id, "UTF-8")}" +
+          q.removePrefix("?").takeIf { it.isNotEmpty() }?.let { "&$it" }.orEmpty()
+      }
     val previewLinks =
       previewLinksHtml(
         sourceHref,
@@ -18225,6 +18258,7 @@ ${scriptTag("known-differences.js")}
         playgroundHref,
         executableBundleHref,
         parallelLayersHref,
+        a2uiPlaygroundHref,
       )
     // Every disclosure the page has, in one group, at the end of the identity row: the component
     // list, the state/variant axes, the theme chips, the overrides drawer. They were scattered —

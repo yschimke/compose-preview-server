@@ -49,10 +49,14 @@ class ServeRenderPostTest {
     )
 
   /** Echoes the overrides it was asked for, so equal bytes mean equal parsed parameters. */
-  private fun host(label: String, overrides: List<PreviewOverrideDeclaration>) =
+  private fun host(
+    label: String,
+    overrides: List<PreviewOverrideDeclaration>,
+    previews: List<ServePreview> =
+      listOf(ServePreview(previewId, "A2UI document", overrides = overrides)),
+  ) =
     object : ServeHost {
-      override val previews =
-        listOf(ServePreview(previewId, "A2UI document", overrides = overrides))
+      override val previews = previews
       override val label = label
       override val canRenderOverrides = true
 
@@ -82,6 +86,23 @@ class ServeRenderPostTest {
   private val server: ServeHttpServer by lazy {
     registry.register("a2ui-catalog", host = host("A2UI", listOf(documentKnob)), pinned = true)
     registry.register("plain", host = host("Plain", emptyList()), pinned = true)
+    // A samples catalog: every sample publishes its own payload as the document knob, beside a
+    // preview that declares none.
+    registry.register(
+      "a2ui-samples",
+      host =
+        host(
+          "Samples",
+          emptyList(),
+          previews =
+            listOf(
+              ServePreview("ButtonSample", "Button", overrides = listOf(documentKnob)),
+              ServePreview("CardSample", "Card", overrides = listOf(documentKnob)),
+              ServePreview("ComponentList", "Component list"),
+            ),
+        ),
+      pinned = true,
+    )
     ServeHttpServer(
         host = "127.0.0.1",
         requestedPort = 0,
@@ -232,5 +253,25 @@ class ServeRenderPostTest {
     assertFalse(
       viewer.contains("<input type=\"text\" class=\"cp-knob\" data-knob-key=\"document\"")
     )
+  }
+
+  @Test
+  fun `the playground opens on the sample a link names`() {
+    val page = call("/a2ui-samples/a2ui?preview=CardSample")
+    assertEquals(200, page.code, page.text)
+    assertTrue(page.text.contains("/a2ui-samples/render/CardSample.png"), page.text)
+    assertFalse(page.text.contains("/a2ui-samples/render/ButtonSample.png"), page.text)
+    // Without a choice it is the first document preview, as before.
+    assertTrue(call("/a2ui-samples/a2ui").text.contains("/a2ui-samples/render/ButtonSample.png"))
+    // A named preview that declares no document knob is not quietly swapped for another.
+    assertEquals(404, call("/a2ui-samples/a2ui?preview=ComponentList").code)
+    assertEquals(404, call("/a2ui-samples/a2ui?preview=Missing").code)
+  }
+
+  @Test
+  fun `a preview declaring the document knob links to its playground`() {
+    val viewer = call("/a2ui-samples/p/CardSample").text
+    assertTrue(viewer.contains("/a2ui-samples/a2ui?preview=CardSample"), viewer)
+    assertFalse(call("/a2ui-samples/p/ComponentList").text.contains("A2UI playground"))
   }
 }
