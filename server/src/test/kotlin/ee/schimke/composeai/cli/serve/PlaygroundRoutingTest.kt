@@ -2,6 +2,8 @@ package ee.schimke.composeai.cli.serve
 
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicReference
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -469,7 +471,18 @@ class PlaygroundRoutingTest {
   /** Opens `/ws/{name}` and answers the upgrade's HTTP status: 101 when it opened. */
   private fun socketStatus(port: Int, query: String, headers: Map<String, String>): Int? {
     val done = CountDownLatch(1)
-    var status: Int? = null
+    // Only the handshake's answer counts. The server closes a socket for an unknown session
+    // straight
+    // after the upgrade, and OkHttp then reports that as a failure with no response, which must not
+    // replace the 101 already recorded.
+    val status = AtomicReference<Int?>()
+    val answered = AtomicBoolean(false)
+    fun answer(code: Int?) {
+      if (answered.compareAndSet(false, true)) {
+        status.set(code)
+        done.countDown()
+      }
+    }
     val socket =
       client.newWebSocket(
         Request.Builder()
@@ -477,20 +490,15 @@ class PlaygroundRoutingTest {
           .apply { headers.forEach { (name, value) -> header(name, value) } }
           .build(),
         object : WebSocketListener() {
-          override fun onOpen(webSocket: WebSocket, response: Response) {
-            status = response.code
-            done.countDown()
-          }
+          override fun onOpen(webSocket: WebSocket, response: Response) = answer(response.code)
 
-          override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-            status = response?.code
-            done.countDown()
-          }
+          override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) =
+            answer(response?.code)
         },
       )
     assertTrue(done.await(5, TimeUnit.SECONDS), "the upgrade should be answered")
     socket.cancel()
-    return status
+    return status.get()
   }
 
   @Test
