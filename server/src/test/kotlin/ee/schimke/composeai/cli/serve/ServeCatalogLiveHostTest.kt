@@ -447,6 +447,49 @@ class ServeCatalogLiveHostTest {
   }
 
   @Test
+  fun `the live bundle's A2UI playground is served though the catalog does not list it`() {
+    // A catalog lists its component cells only; the A2UI playground draws whatever document it is
+    // handed, so it has no cell. The live bundle carries it, and `/{system}/a2ui` finds it by its
+    // `document` knob — which it could not while `previews` came from the catalog alone.
+    val playgroundId = "ee.schimke.a2uicatalog.playground.PlaygroundKt.A2uiDocumentPreview"
+    val documentKnob =
+      PreviewOverrideDeclaration(
+        key = ServeWeb.A2UI_DOCUMENT_KNOB,
+        type = PreviewOverrideType.STRING,
+        default = PreviewOverrideValue.StringValue("{}"),
+      )
+    val baked = RecordingHost(previews = listOf(ServePreview(catalogId, catalogId)), tag = "baked")
+    val live =
+      RecordingHost(
+        previews =
+          listOf(
+            ServePreview(daemonId, daemonId),
+            ServePreview(playgroundId, playgroundId, overrides = listOf(documentKnob)),
+            // Any other preview the catalog left out stays out.
+            ServePreview("Unlisted", "Unlisted", overrides = listOf(labelKnob)),
+          ),
+        tag = "live",
+        streaming = true,
+      )
+    val composite = ServeCatalogLiveHost(mapOf(catalogId to daemonId), live, baked)
+
+    assertEquals(listOf(catalogId, playgroundId), composite.previews.map { it.id })
+    assertEquals(playgroundId, ServeWeb.a2uiDocumentPreview(composite.previews)?.id)
+    assertTrue(composite.canRenderOverridesFor(playgroundId))
+    assertTrue(playgroundId in composite.liveOnlyPreviewIds)
+    assertEquals(false, composite.canRenderOverridesFor("Unlisted"))
+
+    val document =
+      PreviewOverrides(
+        namedOverrides =
+          mapOf(ServeWeb.A2UI_DOCUMENT_KNOB to PreviewOverrideValue.StringValue("[]"))
+      )
+    val out = composite.render(playgroundId, document) as RenderOutcome.Ok
+    assertEquals("live:$playgroundId", out.png.decodeToString())
+    assertNull(baked.lastRenderId)
+  }
+
+  @Test
   fun `a knob-bearing SVG render on a mapped id routes to the daemon`() {
     val (composite, live, _) = host()
     val out = composite.renderSvg(catalogId, knobOverride()) as SvgOutcome.Ok
