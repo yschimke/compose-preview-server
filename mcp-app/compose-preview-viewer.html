@@ -510,6 +510,11 @@
         message.method === 'ui/notifications/resource-updated') &&
       message.params?.uri === resourceResult?.resource?.uri
     ) {
+      // A resources/read renders this URI, and this server announces that completed render before
+      // it returns the PNG. The response already carries those pixels; reading again here would
+      // create a render -> update -> read loop. Updates arriving after the read settles still
+      // trigger the next generation normally.
+      if (resourceReadUri === message.params.uri) return;
       readResource();
     }
   }, { passive: true });

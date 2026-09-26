@@ -28,6 +28,7 @@ window.addEventListener("message", async (event) => {
           serverResources: {
             subscribe:
               mode === "refresh" ||
+              mode === "read-notifies" ||
               mode === "same-uri-redraw" ||
               mode === "subscription-revisit" ||
               mode === "subscribe-late" ||
@@ -251,7 +252,7 @@ window.addEventListener("message", async (event) => {
       send({ jsonrpc: "2.0", id: message.id, result: {} });
     }
     window.__mcpSubscribedUri = message.params.uri;
-    if (stale || mode === "read-replaced-inline") return;
+    if (stale || mode === "read-replaced-inline" || mode === "read-notifies") return;
     window.setTimeout(() => {
       resourceUpdates += 1;
       send({
@@ -279,6 +280,13 @@ window.addEventListener("message", async (event) => {
   if (message.method === "resources/read") {
     reads += 1;
     window.__mcpReadCount = reads;
+    if (mode === "read-notifies") {
+      send({
+        jsonrpc: "2.0",
+        method: "notifications/resources/updated",
+        params: { uri: message.params.uri },
+      });
+    }
     await new Promise((resolve) =>
       setTimeout(
         resolve,

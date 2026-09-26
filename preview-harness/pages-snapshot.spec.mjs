@@ -4384,6 +4384,11 @@ for (const fixture of listPageFixtures()) {
           await expect(viewer.locator("#refresh")).toBeEnabled();
           await expect(image).not.toHaveAttribute("src", before);
         }
+        if (fixture === "mcp-app-viewer-read-notifies") {
+          await page.waitForTimeout(600);
+          expect(await page.evaluate(() => window.__mcpReadCount)).toBe(1);
+          await expect(viewer.locator("#refresh")).toBeEnabled();
+        }
         if (fixture === "mcp-app-viewer-subscribe-fallback") {
           await page.waitForFunction(() => window.__mcpReadCount >= 2, null, { timeout: 7_000 });
           await expect(viewer.locator("#refresh")).toBeEnabled();
