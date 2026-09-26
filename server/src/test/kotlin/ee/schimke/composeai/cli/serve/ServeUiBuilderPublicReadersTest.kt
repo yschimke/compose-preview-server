@@ -156,6 +156,35 @@ class ServeUiBuilderPublicReadersTest {
   }
 
   @Test
+  fun `the MCP unread-comment notice names nobody else to a public reader`() {
+    createShared()
+    val comments = ServeUiBuilderCommentStore(stateDirectory.resolve("comments"))
+    comments.post(
+      DESIGN_ID,
+      owner.actorId,
+      CommentPostRequest(body = "Card?", displayName = "Owner Name"),
+    )
+    val mcp = ServeUiBuilderMcp(service, comments = comments)
+
+    val reply = runBlocking {
+      mcp.call(
+        ServeUiBuilderMcp.GET_DESIGN,
+        kotlinx.serialization.json.buildJsonObject {
+          put("designId", kotlinx.serialization.json.JsonPrimitive(DESIGN_ID))
+        },
+        stranger,
+        "1",
+      )
+    }
+
+    assertTrue(ServeUiBuilderMcp.COMMENTS_NOTICE_KEY in reply, "precondition: a notice: $reply")
+    for (hidden in listOf(owner.actorId, "Owner Name")) {
+      assertTrue(hidden !in reply, "$hidden is not in the reply")
+    }
+    assertTrue(PublicReaderView.COLLABORATOR_DISPLAY_NAME in reply || "collaborator-" in reply)
+  }
+
+  @Test
   fun `a pseudonym is stable on one design and differs between designs`() {
     val here = PublicReaderView(DESIGN_ID, emptySet())
     assertEquals(here.actor("github:owner"), here.actor("github:Owner"))
