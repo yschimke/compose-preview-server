@@ -418,7 +418,12 @@ class ServeUiBuilderCommentsIntegrationTest {
     )
 
     val read = envelope(server, ServeUiBuilderMcp.GET_DESIGN, """{"designId":"$DESIGN_ID"}""")
-    val notice = Json.parseToJsonElement(read).jsonObject["comments"]!!.jsonObject
+    val readObject = Json.parseToJsonElement(read).jsonObject
+    assertEquals(
+      1,
+      readObject[ServeUiBuilderMcp.UNACKNOWLEDGED_COMMENTS_KEY]!!.jsonPrimitive.content.toInt(),
+    )
+    val notice = readObject["comments"]!!.jsonObject
     assertEquals(1, notice["unacknowledged"]!!.jsonPrimitive.content.toInt())
     // The excerpt is the part that survives an agent skimming: a count is easy to skip past, a
     // quoted sentence naming a node it is holding is not.
@@ -437,7 +442,17 @@ class ServeUiBuilderCommentsIntegrationTest {
     assertTrue(acknowledged.contains("\"resolved\":false"), acknowledged)
 
     val quiet = envelope(server, ServeUiBuilderMcp.GET_DESIGN, """{"designId":"$DESIGN_ID"}""")
-    assertEquals(null, Json.parseToJsonElement(quiet).jsonObject["comments"], quiet)
+    val quietObject = Json.parseToJsonElement(quiet).jsonObject
+    assertEquals(null, quietObject["comments"], quiet)
+    assertEquals(
+      0,
+      quietObject[ServeUiBuilderMcp.UNACKNOWLEDGED_COMMENTS_KEY]!!.jsonPrimitive.content.toInt(),
+    )
+
+    // An error is not a snapshot. It must not reveal whether a guessed design has a discussion.
+    val missing = envelope(server, ServeUiBuilderMcp.GET_DESIGN, """{"designId":"not-a-design"}""")
+    val missingObject = Json.parseToJsonElement(missing).jsonObject
+    assertEquals(null, missingObject[ServeUiBuilderMcp.UNACKNOWLEDGED_COMMENTS_KEY], missing)
   }
 
   @Test
