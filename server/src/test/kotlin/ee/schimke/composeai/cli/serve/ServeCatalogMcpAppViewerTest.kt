@@ -109,7 +109,16 @@ class ServeCatalogMcpAppViewerTest {
     assertTrue(html.contains("connectResourceUpdates(resource.uri, !image && !cells)"))
     assertTrue(html.contains("if (!initialReadPending) scheduleResourcePoll(uri);"))
     assertTrue(html.contains("result?.hostCapabilities?.serverResources?.subscribe === true"))
-    assertTrue(html.contains("await request('resources/subscribe', { uri });"))
+    assertTrue(
+      html.contains(
+        """await request(
+          'resources/subscribe',
+          { uri },
+          REQUEST_TIMEOUT_MS,
+          () => recoverLateSubscription(uri),
+        );"""
+      )
+    )
     assertTrue(html.contains("await request('resources/unsubscribe', { uri });"))
     assertTrue(html.contains("Unable to unsubscribe a stale Compose Preview resource"))
     assertTrue(html.contains("message.method === 'notifications/resources/updated'"))
