@@ -77,6 +77,10 @@ class ServeCatalogMcpAppViewerTest {
     assertTrue(html.contains("await request('resources/read', { uri: resource.uri })"))
     assertTrue(html.contains("typeof content.blob === 'string'"))
     assertTrue(html.contains("Refresh resource"))
+    assertTrue(html.contains("const REQUEST_TIMEOUT_MS = 5000;"))
+    assertTrue(html.contains("if (!pending.delete(id)) return;"))
+    assertTrue(html.contains("window.clearTimeout(request.timer);"))
+    assertTrue(html.contains("Viewer unavailable; use the complete text fallback."))
     assertTrue(
       html.indexOf("await request('ui/initialize'") <
         html.indexOf("notify('ui/notifications/initialized'"),
