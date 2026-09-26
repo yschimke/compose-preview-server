@@ -1818,7 +1818,92 @@ class ServeCatalogMcp(
               "not offer it, the operator has to add the capability and restart."
           )
       }
-    return textResult(builder.call(name, args, actor, callId = name))
+    return uiBuilderToolResult(name, builder.call(name, args, actor, callId = name))
+  }
+
+  /**
+   * Keeps the UI-builder protocol reply as a text fallback while giving MCP App hosts an ordinary
+   * image block for the two calls that can carry a PNG. The text fallback omits both the binary
+   * field represented by that block. The native render's short-lived playground capability stays in
+   * the ordinary MCP reply because clients use it to open the promised live preview stream; static
+   * packagers are responsible for applying their credential-free transport contract before
+   * serializing a result into a bounded URL fragment. The viewer intentionally only understands MCP
+   * content blocks; making it know every UI-builder response schema would couple a reusable viewer
+   * to a second protocol. Without this adapter, successful renders appear as base64 text.
+   */
+  internal fun uiBuilderToolResult(name: String, text: String): JsonObject {
+    val png = uiBuilderPng(name, text)
+    val fallback = uiBuilderViewerFallback(name, text, hasPng = png != null)
+    if (png == null) return textResult(fallback)
+    return buildJsonObject {
+      put(
+        "content",
+        buildJsonArray {
+          add(textContent(fallback))
+          add(
+            buildJsonObject {
+              put("type", "image")
+              put("data", png)
+              put("mimeType", "image/png")
+            }
+          )
+        },
+      )
+    }
+  }
+
+  private fun uiBuilderViewerFallback(name: String, text: String, hasPng: Boolean): String {
+    return runCatching {
+        val reply = JSON.parseToJsonElement(text) as? JsonObject ?: return@runCatching text
+        when (name) {
+          ServeUiBuilderMcp.RENDER_NATIVE -> JsonObject(reply - "imageBase64").toString()
+          ServeUiBuilderMcp.EXPORT_DOCUMENT -> {
+            if (!hasPng) return@runCatching text
+            val response = reply["response"] as? JsonObject ?: return@runCatching text
+            val artifact = response["artifact"] as? JsonObject ?: return@runCatching text
+            JsonObject(
+                reply +
+                  ("response" to
+                    JsonObject(response + ("artifact" to JsonObject(artifact - "content"))))
+              )
+              .toString()
+          }
+          else -> text
+        }
+      }
+      .getOrDefault(text)
+  }
+
+  private fun uiBuilderPng(name: String, text: String): String? = runCatching {
+    val reply = JSON.parseToJsonElement(text) as? JsonObject ?: return@runCatching null
+    when (name) {
+      ServeUiBuilderMcp.RENDER_NATIVE ->
+        reply["imageBase64"]?.jsonPrimitive?.contentOrNull?.let(::pngPayload)
+      ServeUiBuilderMcp.EXPORT_DOCUMENT -> {
+        val response = reply["response"] as? JsonObject
+        val artifact = response?.get("artifact") as? JsonObject
+        if (
+          artifact?.get("mediaType")?.jsonPrimitive?.contentOrNull?.substringBefore(';') !=
+            "image/png" || artifact["encoding"]?.jsonPrimitive?.contentOrNull != "base64"
+        ) {
+          null
+        } else {
+          artifact["content"]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() }
+        }
+      }
+      else -> null
+    }
+  }
+    .getOrNull()
+
+  private fun pngPayload(value: String): String? {
+    val payload =
+      when {
+        value.startsWith("data:image/png;base64,") -> value.substringAfter(',')
+        value.startsWith("data:") -> return null
+        else -> value
+      }
+    return payload.takeIf { it.isNotBlank() }
   }
 
   private fun tool(name: String, description: String, schema: String): JsonObject =
@@ -2003,6 +2088,9 @@ class ServeCatalogMcp(
       setOf(
         "render_preview",
         "render_matrix",
+        "diff_semantics",
+        ServeUiBuilderMcp.EXPORT_DOCUMENT,
+        ServeUiBuilderMcp.RENDER_NATIVE,
       )
     private const val STORY_ID_SEPARATOR = "::"
     private val OBSERVATION_MODES =

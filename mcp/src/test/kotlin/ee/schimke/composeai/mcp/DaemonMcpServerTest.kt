@@ -130,7 +130,7 @@ class DaemonMcpServerTest {
     assertThat(render.meta?.get("ui")?.jsonObject?.get("resourceUri")?.jsonPrimitive?.content)
       .isEqualTo(DaemonMcpServer.MCP_APP_VIEWER_URI)
     assertThat(tools.tools.single { it.name == "render_matrix" }.meta).isNotNull()
-    assertThat(tools.tools.single { it.name == "diff_semantics" }.meta).isNull()
+    assertThat(tools.tools.single { it.name == "diff_semantics" }.meta).isNotNull()
 
     val listed = client.request("resources/list")
     val viewer =
