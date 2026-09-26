@@ -35,6 +35,7 @@
   </section>
   <div class="actions">
     <button id="refresh" hidden>Refresh resource</button>
+    <button id="a11y" hidden>Show accessibility overlay</button>
     <button id="use" hidden>Use selected result</button>
   </div>
 </main>
@@ -44,6 +45,7 @@
   const canvas = q('#canvas');
   const meta = q('#meta');
   const refresh = q('#refresh');
+  const a11y = q('#a11y');
   const use = q('#use');
   const REQUEST_TIMEOUT_MS = 5000;
   const RESOURCE_READ_TIMEOUT_MS = 65000;
@@ -73,6 +75,15 @@
   let resourceSubscriptionTargetUri;
   let resourceSubscriptionQueue = Promise.resolve();
   let hostResourceSubscriptions = false;
+  let hostServerTools = false;
+  let overlayToolName;
+  let toolDiscoveryGeneration = 0;
+  let baseImageData;
+  let overlayImageData;
+  let overlayVisible = false;
+  let overlayGeneration = 0;
+  let overlayCall;
+  let baseMetaText = '';
 
   function request(method, params, timeoutMs = REQUEST_TIMEOUT_MS, onLateResult) {
     const id = nextId++;
@@ -205,6 +216,36 @@
     meta.textContent = label;
   }
 
+  function showImage(data, alt = 'Rendered Compose preview') {
+    const preview = document.createElement('img');
+    preview.alt = alt;
+    preview.src = `data:image/png;base64,${data}`;
+    canvas.replaceChildren(preview);
+  }
+
+  function clearAccessibilityOverlay() {
+    ++overlayGeneration;
+    baseImageData = undefined;
+    overlayImageData = undefined;
+    overlayVisible = false;
+    baseMetaText = '';
+    a11y.hidden = true;
+    a11y.disabled = false;
+    a11y.textContent = 'Show accessibility overlay';
+    a11y.removeAttribute('title');
+  }
+
+  function updateAccessibilityAction() {
+    if (staticMode || !baseImageData || !initialized || !overlayToolName) {
+      a11y.hidden = true;
+      return;
+    }
+    a11y.hidden = false;
+    a11y.disabled = false;
+    a11y.textContent = overlayVisible ? 'Show original preview' : 'Show accessibility overlay';
+    a11y.removeAttribute('title');
+  }
+
   function renderMatrix(value, cells) {
     const grid = document.createElement('div');
     grid.className = 'grid';
@@ -235,17 +276,106 @@
   }
 
   function renderImage(image, value, resource) {
-    const preview = document.createElement('img');
-    preview.alt = 'Rendered Compose preview';
-    preview.src = `data:image/png;base64,${image.data}`;
-    canvas.replaceChildren(preview);
+    ++overlayGeneration;
+    baseImageData = image.data;
+    overlayImageData = undefined;
+    overlayVisible = false;
+    showImage(baseImageData);
+    const label = value.previewId || toolArguments.previewId || 'Preview render';
     choose({
       kind: 'preview',
       uri: value.uri || resource?.uri || toolArguments.uri,
       arguments: toolArguments,
       overrides: toolArguments.overrides,
       semanticsRef: value.semanticsRef,
-    }, value.previewId || toolArguments.previewId || 'Preview render');
+    }, label);
+    baseMetaText = label;
+    updateAccessibilityAction();
+  }
+
+  function applyAccessibilityResult(result, generation) {
+    if (generation !== overlayGeneration || !baseImageData) return;
+    const image = png(result);
+    if (result?.isError || typeof image?.data !== 'string' || !image.data) {
+      showImage(baseImageData);
+      overlayImageData = undefined;
+      overlayVisible = false;
+      a11y.hidden = false;
+      a11y.disabled = true;
+      a11y.textContent = 'Accessibility overlay unavailable';
+      a11y.title = 'The host or preview backend did not provide an accessibility overlay.';
+      meta.textContent = 'Accessibility overlay unavailable; original preview shown.';
+      return;
+    }
+    overlayImageData = image.data;
+    overlayVisible = true;
+    showImage(overlayImageData, 'Compose preview with accessibility overlay');
+    meta.textContent = 'Accessibility overlay';
+    updateAccessibilityAction();
+  }
+
+  async function toggleAccessibilityOverlay() {
+    if (!baseImageData || !initialized || !overlayToolName) return;
+    if (overlayVisible) {
+      overlayVisible = false;
+      showImage(baseImageData);
+      meta.textContent = baseMetaText;
+      updateAccessibilityAction();
+      return;
+    }
+    if (overlayImageData) {
+      overlayVisible = true;
+      showImage(overlayImageData, 'Compose preview with accessibility overlay');
+      meta.textContent = 'Accessibility overlay';
+      updateAccessibilityAction();
+      return;
+    }
+    const uri = selected?.uri || toolArguments.uri;
+    if (typeof uri !== 'string' || !uri) {
+      applyAccessibilityResult({ isError: true }, overlayGeneration);
+      return;
+    }
+    const generation = overlayGeneration;
+    const argumentsValue = {
+      uri,
+      kind: 'a11y/overlay',
+      inline: true,
+      ...(selected?.overrides || toolArguments.overrides
+        ? { overrides: selected?.overrides || toolArguments.overrides }
+        : {}),
+      ...(resourceToken ? { token: resourceToken } : {}),
+    };
+    const call = { generation };
+    overlayCall = call;
+    stopResourcePolling();
+    refresh.disabled = true;
+    a11y.disabled = true;
+    a11y.textContent = 'Loading accessibility overlay…';
+    meta.textContent = 'Rendering accessibility overlay…';
+    try {
+      const result = await request(
+        'tools/call',
+        { name: overlayToolName, arguments: argumentsValue },
+        RESOURCE_READ_TIMEOUT_MS,
+      );
+      applyAccessibilityResult(result, generation);
+    } catch (error) {
+      applyAccessibilityResult({ isError: true }, generation);
+      console.warn('Failed to render the Compose Preview accessibility overlay:', error);
+    } finally {
+      window.setTimeout(() => {
+        if (overlayCall !== call) return;
+        overlayCall = undefined;
+        if (call.resourceUpdatePending && resourceResult?.resource?.uri === uri) {
+          readResource(true);
+        } else if (resourceResult?.resource?.uri) {
+          refresh.disabled = false;
+          if (subscribedResourceUri !== resourceResult.resource.uri) {
+            scheduleResourcePoll(resourceResult.resource.uri);
+          }
+        }
+      }, 250);
+    }
   }
 
   function fallbackText(result) {
@@ -394,7 +524,7 @@
     });
   }
 
-  async function readResource() {
+  async function readResource(preserveAccessibilityOverlay = false) {
     if (!resourceResult) return;
     stopResourcePolling();
     const { result: toolResult, resource, value } = resourceResult;
@@ -415,13 +545,24 @@
       const image = resourcePng(readResult);
       if (generation !== resourceReadGeneration || resourceResult?.resource?.uri !== resource.uri) return;
       if (!image) {
+        if (overlayCall) return;
         renderResourceFallback(toolResult, resource, 'The host returned no PNG for resource:');
         meta.textContent = 'Resource has no PNG; use the text fallback.';
+        return;
+      }
+      if (overlayCall || (preserveAccessibilityOverlay && overlayVisible)) {
+        baseImageData = image.blob;
+        baseMetaText = value.previewId || toolArguments.previewId || 'Preview render';
+        if (!overlayCall && overlayVisible) meta.textContent = 'Accessibility overlay';
         return;
       }
       renderImage({ data: image.blob }, value, resource);
     } catch (error) {
       if (generation !== resourceReadGeneration || resourceResult?.resource?.uri !== resource.uri) return;
+      if (overlayCall) {
+        console.warn('Failed to refresh the Compose Preview resource during overlay rendering:', error);
+        return;
+      }
       // Resource reads are optional in MCP Apps hosts. Keep the durable URI and text result useful.
       renderResourceFallback(toolResult, resource, 'Unable to read preview resource:');
       meta.textContent = 'Resource reads are unavailable; use the text fallback.';
@@ -429,8 +570,8 @@
     } finally {
       if (generation === resourceReadGeneration && resourceResult?.resource?.uri === resource.uri) {
         resourceReadUri = undefined;
-        refresh.disabled = false;
-        if (subscribedResourceUri !== resource.uri) scheduleResourcePoll(resource.uri);
+        refresh.disabled = overlayCall != null;
+        if (!overlayCall && subscribedResourceUri !== resource.uri) scheduleResourcePoll(resource.uri);
       }
     }
   }
@@ -444,6 +585,7 @@
     selected = undefined;
     use.hidden = true;
     refresh.hidden = true;
+    clearAccessibilityOverlay();
     disconnectResourceUpdates(resource?.uri);
     resourceResult = undefined;
     const cells = Array.isArray(value.cells) && value.cells;
@@ -498,21 +640,57 @@
     }
     if (message.method === 'ui/notifications/tool-input') {
       const incomingArguments = message.params?.arguments || {};
+      if (overlayCall && incomingArguments.kind === 'a11y/overlay') return;
       resourceToken = typeof incomingArguments.token === 'string' && incomingArguments.token
         ? incomingArguments.token
         : undefined;
       toolArguments = safeSelectionArguments(incomingArguments);
       return;
     }
-    if (message.method === 'ui/notifications/tool-result') draw(message.params?.result || message.params);
+    if (message.method === 'ui/notifications/tool-result') {
+      const incomingResult = message.params?.result || message.params;
+      if (overlayCall && (incomingResult?.isError || (png(incomingResult) && !link(incomingResult)))) {
+        applyAccessibilityResult(incomingResult, overlayCall.generation);
+        return;
+      }
+      draw(incomingResult);
+    }
     if (
       (message.method === 'notifications/resources/updated' ||
         message.method === 'ui/notifications/resource-updated') &&
       message.params?.uri === resourceResult?.resource?.uri
     ) {
-      readResource();
+      if (overlayCall) overlayCall.resourceUpdatePending = true;
+      else readResource();
+    }
+    if (
+      message.method === 'notifications/tools/list_changed' ||
+      message.method === 'ui/notifications/tools/list-changed'
+    ) {
+      discoverViewerActions();
     }
   }, { passive: true });
+
+  async function discoverViewerActions() {
+    const generation = ++toolDiscoveryGeneration;
+    if (!hostServerTools) {
+      overlayToolName = undefined;
+      updateAccessibilityAction();
+      return;
+    }
+    try {
+      const tools = await request('tools/list', {});
+      if (generation !== toolDiscoveryGeneration) return;
+      overlayToolName = tools?.tools
+        ?.map(tool => tool?.name)
+        .find(name => typeof name === 'string' && /(^|__|\/)render_preview_overlay$/.test(name));
+    } catch (error) {
+      if (generation !== toolDiscoveryGeneration) return;
+      overlayToolName = undefined;
+      console.debug('Unable to discover Compose Preview viewer actions:', error);
+    }
+    updateAccessibilityAction();
+  }
 
   async function initializeBridge() {
     try {
@@ -522,8 +700,11 @@
         protocolVersion: '2026-01-26',
       });
       hostResourceSubscriptions = result?.hostCapabilities?.serverResources?.subscribe === true;
+      hostServerTools = result?.hostCapabilities?.serverTools != null;
       initialized = true;
       notify('ui/notifications/initialized', {});
+      updateAccessibilityAction();
+      void discoverViewerActions();
     } catch (error) {
       use.hidden = true;
       refresh.hidden = true;
@@ -552,7 +733,10 @@
   }
 
   const bridgeReady = staticMode ? Promise.resolve() : initializeBridge();
-  refresh.addEventListener('click', () => readResource());
+  refresh.addEventListener('click', () => {
+    if (!overlayCall) readResource();
+  });
+  a11y.addEventListener('click', () => toggleAccessibilityOverlay());
   use.addEventListener('click', async () => {
     await bridgeReady;
     if (!initialized || !selected) return;

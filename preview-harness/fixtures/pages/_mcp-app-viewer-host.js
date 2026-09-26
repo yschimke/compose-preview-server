@@ -3,6 +3,9 @@ const mode = document.body.dataset.mode;
 let reads = 0;
 let resourceUpdates = 0;
 const activeSubscriptions = new Set();
+let toolCalls = 0;
+let toolLists = 0;
+let appInitialized = false;
 
 async function png(path) {
   const bytes = new Uint8Array(await (await fetch(path)).arrayBuffer());
@@ -19,6 +22,11 @@ window.addEventListener("message", async (event) => {
   if (event.source !== frame.contentWindow) return;
   const message = event.data;
   if (!message || message.jsonrpc !== "2.0" || !message.method) return;
+  if (message.method === "ui/notifications/initialized") {
+    appInitialized = true;
+    window.__mcpAppInitialized = true;
+    return;
+  }
   if (message.method === "ui/initialize") {
     send({
       jsonrpc: "2.0",
@@ -33,8 +41,10 @@ window.addEventListener("message", async (event) => {
               mode === "subscribe-late" ||
               mode === "read-replaced-inline" ||
               mode === "subscribe-fails" ||
-              mode === "stale-read-marker",
+              mode === "stale-read-marker" ||
+              mode === "a11y",
           },
+          ...(mode.startsWith("a11y") ? { serverTools: {} } : {}),
         },
       },
     });
@@ -52,6 +62,7 @@ window.addEventListener("message", async (event) => {
           redirects: [
             "https://preview.invalid/callback#access_token=array-must-not-travel",
           ],
+          ...(mode.startsWith("a11y") ? { token: "viewer-grant-secret" } : {}),
         },
       },
     });
@@ -219,6 +230,15 @@ window.addEventListener("message", async (event) => {
         });
       }, 100);
     }
+    if (mode === "a11y-list-changed") {
+      window.setTimeout(() => {
+        send({
+          jsonrpc: "2.0",
+          method: "notifications/tools/list_changed",
+          params: {},
+        });
+      }, 250);
+    }
     return;
   }
   if (message.method === "resources/subscribe") {
@@ -251,15 +271,17 @@ window.addEventListener("message", async (event) => {
       send({ jsonrpc: "2.0", id: message.id, result: {} });
     }
     window.__mcpSubscribedUri = message.params.uri;
-    if (stale || mode === "read-replaced-inline") return;
-    window.setTimeout(() => {
-      resourceUpdates += 1;
-      send({
-        jsonrpc: "2.0",
-        method: "notifications/resources/updated",
-        params: { uri: message.params.uri },
-      });
-    }, 300);
+    if (stale) return;
+    if (mode === "refresh") {
+      window.setTimeout(() => {
+        resourceUpdates += 1;
+        send({
+          jsonrpc: "2.0",
+          method: "notifications/resources/updated",
+          params: { uri: message.params.uri },
+        });
+      }, 300);
+    }
     return;
   }
   if (message.method === "resources/unsubscribe") {
@@ -320,6 +342,75 @@ window.addEventListener("message", async (event) => {
             uri: message.params.uri,
             mimeType: "image/png",
             blob: await png(path),
+          },
+        ],
+      },
+    });
+    return;
+  }
+  if (message.method === "tools/list") {
+    toolLists += 1;
+    window.__mcpToolListCount = toolLists;
+    if (mode === "a11y-handshake" && !appInitialized) {
+      send({
+        jsonrpc: "2.0",
+        id: message.id,
+        error: { code: -32002, message: "App initialization is incomplete" },
+      });
+      return;
+    }
+    send({
+      jsonrpc: "2.0",
+      id: message.id,
+      result: {
+        tools: mode.startsWith("a11y") &&
+          mode !== "a11y-no-overlay" &&
+          (mode !== "a11y-list-changed" || toolLists > 1)
+          ? [{ name: "render_preview_overlay", inputSchema: { type: "object" } }]
+          : [],
+      },
+    });
+    return;
+  }
+  if (message.method === "tools/call") {
+    toolCalls += 1;
+    window.__mcpToolCallCount = toolCalls;
+    window.__mcpToolCall = message.params;
+    if (mode === "a11y-unavailable") {
+      send({
+        jsonrpc: "2.0",
+        id: message.id,
+        result: {
+          isError: true,
+          content: [{ type: "text", text: "Accessibility overlays are unsupported" }],
+        },
+      });
+      return;
+    }
+    if (mode === "a11y") {
+      resourceUpdates += 1;
+      send({
+        jsonrpc: "2.0",
+        method: "notifications/resources/updated",
+        params: {
+          uri: "compose-preview://fixture/_app/com.example.Card?overrides=fixture",
+        },
+      });
+    }
+    if (mode === "a11y-polling") {
+      window.__mcpOverlayCallPending = true;
+      await new Promise((resolve) => setTimeout(resolve, 5250));
+      window.__mcpOverlayCallPending = false;
+    }
+    send({
+      jsonrpc: "2.0",
+      id: message.id,
+      result: {
+        content: [
+          {
+            type: "image",
+            mimeType: "image/png",
+            data: await png("/preview-harness/fixtures/pages/_design-render-placeholder.png"),
           },
         ],
       },
