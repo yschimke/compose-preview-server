@@ -3586,6 +3586,8 @@ public class ServeRunner(
       ServeHttpServer(
         host = host,
         requestedPort = requestedPort,
+        canonicalOrigin =
+          githubAuthCallbackBaseUrl?.trim()?.trimEnd('/')?.takeIf { it.isNotEmpty() },
         token = token,
         sessions = registry,
         defaultSessionId = defaultSessionId,

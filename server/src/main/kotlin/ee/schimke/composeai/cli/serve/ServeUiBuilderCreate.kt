@@ -5,6 +5,7 @@ import ee.schimke.composeai.uibuilder.export.UiBuilderNewDesignSeed
 import ee.schimke.composeai.uibuilder.export.toDesignDocumentV1
 import ee.schimke.composeai.uibuilder.protocol.CreateDesignRequestV1
 import ee.schimke.composeai.uibuilder.protocol.DesignDocumentV1
+import ee.schimke.composeai.uibuilder.protocol.DesignHomeV1
 import ee.schimke.composeai.uibuilder.protocol.ListCatalogsRequestV1
 import ee.schimke.composeai.uibuilder.protocol.OpenDesignRequestV1
 import ee.schimke.composeai.uibuilder.protocol.ServiceErrorCodeV1
@@ -27,6 +28,7 @@ import kotlinx.serialization.json.jsonObject
 internal class ServeUiBuilderCreate(
   private val service: UiBuilderServicePort,
   private val uiBuilderDir: File,
+  private val serverOrigin: String,
 ) {
 
   sealed interface Outcome {
@@ -51,6 +53,7 @@ internal class ServeUiBuilderCreate(
         if (existing.error.code != ServiceErrorCodeV1.NOT_FOUND) {
           return Outcome.Refused(existing.httpStatusValue(), existing.error.message)
         }
+      is UiBuilderServiceResponse.Snapshot -> return Outcome.AlreadyExists
       else -> return Outcome.AlreadyExists
     }
     val catalogs =
@@ -83,6 +86,7 @@ internal class ServeUiBuilderCreate(
             state = state,
           )
           .toDesignDocumentV1()
+          .withServerHome(serverOrigin)
       } catch (e: IllegalArgumentException) {
         // The template builders refuse a design they know cannot work — a state variable that
         // becomes a Kotlin keyword, two that collide once exported. That is a bad request, and
@@ -117,6 +121,8 @@ internal class ServeUiBuilderCreate(
         if (existing.error.code != ServiceErrorCodeV1.NOT_FOUND) {
           return Outcome.Refused(existing.httpStatusValue(), existing.error.message)
         }
+      is UiBuilderServiceResponse.Snapshot ->
+        return existingDesignOutcome(document.id, document, serverOrigin)
       else -> return Outcome.AlreadyExists
     }
     val catalogSystemId = document.catalogPin.systemId
@@ -131,7 +137,10 @@ internal class ServeUiBuilderCreate(
         return Outcome.Refused(listed.httpStatusValue(), listed.error.message)
       else -> return Outcome.Refused(500, "the design service did not list its catalogs")
     }
-    return when (val created = service.executeMapped(CreateDesignRequestV1(document), actor)) {
+    return when (
+      val created =
+        service.executeMapped(CreateDesignRequestV1(document.withServerHome(serverOrigin)), actor)
+    ) {
       is UiBuilderServiceResponse.Error ->
         if (created.error.code == ServiceErrorCodeV1.BAD_REQUEST) Outcome.AlreadyExists
         else Outcome.Refused(created.httpStatusValue(), created.error.message)
@@ -143,3 +152,30 @@ internal class ServeUiBuilderCreate(
     const val NEW_DESIGN_FIXTURE = "jetcaster-discover-operations-v1.json"
   }
 }
+
+/**
+ * A create or import makes this server the document's canonical home.
+ *
+ * The caller must inspect the incoming home before this is applied when deciding whether an import
+ * is an accidental re-import of the original. Once accepted, the server owns the new document and
+ * every export must point back here.
+ */
+internal fun DesignDocumentV1.withServerHome(serverOrigin: String): DesignDocumentV1 =
+  copy(home = DesignHomeV1.Server(serverOrigin.trimEnd('/'), id))
+
+/** A same-server duplicate is a request to edit the original, not an idempotent import. */
+internal fun existingDesignOutcome(
+  designId: String,
+  incoming: DesignDocumentV1,
+  serverOrigin: String,
+): ServeUiBuilderCreate.Outcome =
+  when (val home = incoming.home) {
+    is DesignHomeV1.Server if
+      (home.designId == designId && home.url.trimEnd('/') == serverOrigin.trimEnd('/'))
+     ->
+      ServeUiBuilderCreate.Outcome.Refused(
+        409,
+        "$designId already lives on this server; apply changes to the original instead",
+      )
+    else -> ServeUiBuilderCreate.Outcome.AlreadyExists
+  }
