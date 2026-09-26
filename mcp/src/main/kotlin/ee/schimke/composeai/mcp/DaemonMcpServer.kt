@@ -181,6 +181,14 @@ class DaemonMcpServer(
     ConcurrentHashMap()
 
   /**
+   * Last PNG digest each MCP client saw for a URI through `render_preview(inline=false)`. The
+   * direct-file response is deliberately session-scoped: a newly connected client has not seen a
+   * previous frame, while one agent's render must not make another agent's first frame look stale.
+   */
+  private val previousFileRenderHashes =
+    ConcurrentHashMap<Session, ConcurrentHashMap<String, String>>()
+
+  /**
    * Per-(workspace, module, previewId) FIFO of [PendingRenderGroup]s awaiting a render. The HEAD
    * group is the one whose `renderNow` has been sent to the daemon (in-flight); subsequent groups
    * wait for their predecessor's `renderFinished` before their own `renderNow` is sent. Groups are
@@ -419,6 +427,7 @@ class DaemonMcpServer(
     val released = subscriptions.forgetDataSubscriptions(session)
     released.forEach { key -> dispatchDataUnsubscribe(key) }
     subscriptions.forget(session)
+    previousFileRenderHashes.remove(session)
     synchronized(bootstrapNotifyLock) { bootstrapServedSessions.remove(session) }
     sessions.unregister(session)
   }
@@ -444,6 +453,10 @@ class DaemonMcpServer(
             name = entry.fqn.substringAfterLast('.'),
             description = entry.displayName ?: entry.fqn,
             mimeType = "image/png",
+            meta =
+              resolvePreviewSourceFile(uri, entry.sourceFile)?.canonicalPath?.let { sourceFile ->
+                buildJsonObject { put("sourceFile", sourceFile) }
+              },
           )
         )
       }
@@ -1050,7 +1063,8 @@ class DaemonMcpServer(
             "structured observation by default — the compose/semantics snapshot + sha256 + " +
             "dimensions, NO base64 PNG (the snapshot-default for an agent loop; issue #1787). " +
             "Pass `observe=\"png\"` to get the rendered PNG inline when you actually need to see " +
-            "pixels, or `observe=\"hash\"` for just the sha + dimensions. " +
+            "pixels, `inline=false` to return its on-disk PNG path and metadata for a local " +
+            "file-reading client, or `observe=\"hash\"` for just the sha + dimensions. " +
             "Pass `force={reason}` only when the freshness probe missed a real edit (this should be rare); " +
             "report each use on https://github.com/yschimke/compose-ai-tools/issues/924. " +
             "Do NOT delete `build/classes/...` or run `./gradlew clean` to chase a stale render.",
@@ -1062,11 +1076,33 @@ class DaemonMcpServer(
               "properties":{
                 "uri":{"type":"string","description":"compose-preview://<workspace>/<module>/<fqn>?config=<qualifier>"},
                 "observe":{"type":"string","enum":["png","semantics","hash"],"description":"Observation level (issue #1787). Default 'semantics' — the compose/semantics tree + sha256 + dimensions with NO base64, the token-frugal snapshot-default for an agent loop (fetch pixels only when you need them). 'png' returns the base64 image (request it when you need to see pixels); 'hash' returns just sha256 + dimensions."},
+                "inline":{"type":"boolean","description":"Default true. Set false on a local-FS client to return the rendered PNG's absolute pngPath plus sha256, dimensions, changed, and durationMs as text instead of an inline observation. Cannot be combined with crop."},
                 "crop":{"type":"object","description":"Return only ONE element's rectangle instead of the full frame (issue #1817) — far fewer tokens, and it focuses the view on the region you care about (the natural partner to diff_semantics: 'ref X changed' -> crop ref X). Set EITHER a semantic target (ref | testTag | role/text, resolved against compose/semantics) OR explicit render-pixel bounds {left,top,right,bottom}. Honours 'observe': png returns the cropped image (+ region metadata), hash/semantics return the crop's sha + dimensions only.","properties":{"ref":{"type":"string"},"testTag":{"type":"string"},"role":{"type":"string"},"text":{"type":"string"},"left":{"type":"integer"},"top":{"type":"integer"},"right":{"type":"integer"},"bottom":{"type":"integer"}}},
                 "overrides":{"type":"object","description":"Optional per-call display overrides."},
                 "force":{"type":"object","description":"Sanctioned escape hatch when the freshness probe missed an edit. Forwards fileChanged({kind:\"classpath\"}) before rendering, dropping the daemon's user classloader. Each use is logged + counted; please report on issue #924.","properties":{"reason":{"type":"string","description":"Human-readable reason for needing force (required)."}},"required":["reason"]}
               },
               "required":["uri"]
+            }
+            """
+              .trimIndent()
+          ),
+      ),
+      ToolDef(
+        name = "find_previews_for_file",
+        description =
+          "Find catalogued previews declared by a Kotlin source file. `path` may be absolute, or " +
+            "relative to the selected workspace (or every registered workspace when workspaceId is " +
+            "omitted). Returns an empty previews array when no discovered preview uses that file.",
+        inputSchema =
+          parseSchema(
+            """
+            {
+              "type":"object",
+              "properties":{
+                "path":{"type":"string","description":"Absolute source-file path, or a path relative to the workspace root."},
+                "workspaceId":{"type":"string","description":"Optional workspace to search. Omit to search every registered workspace."}
+              },
+              "required":["path"]
             }
             """
               .trimIndent()
@@ -1184,7 +1220,8 @@ class DaemonMcpServer(
           "Render a preview by URI, bypassing the in-memory render cache. Returns a token-frugal " +
             "structured observation by default (`observe=\"semantics\"`: the compose/semantics tree " +
             "+ sha256 + dimensions, NO base64; issue #1787) — pass `observe=\"png\"` for the rendered " +
-            "PNG inline, or `observe=\"hash\"` for just sha + dimensions. " +
+            "PNG inline, `inline=false` for its local on-disk PNG path + metadata, or " +
+            "`observe=\"hash\"` for just sha + dimensions. " +
             "Optional `overrides` apply per-call display-property overrides (size, density, " +
             "locale, fontScale, uiMode, orientation, device, inspectionMode) plus the connector- " +
             "driven extensions (material3Theme, wallpaper, ambient, focus, keyboard, touchOverlay, " +
@@ -1206,6 +1243,7 @@ class DaemonMcpServer(
               "properties":{
                 "uri":{"type":"string","description":"compose-preview://<workspace>/<module>/<fqn>?config=<qualifier>"},
                 "observe":{"type":"string","enum":["png","semantics","hash"],"description":"Observation level (issue #1787). Default 'semantics' returns the compose/semantics tree + sha256 + width/height with NO base64 — the token-frugal snapshot-default for a multi-step agent loop (fetch pixels only when you need them). 'png' returns the base64 image (request it when you need to see pixels); 'hash' returns just sha256 + dimensions."},
+                "inline":{"type":"boolean","description":"Default true. Set false on a local-FS client to return the rendered PNG's absolute pngPath plus sha256, dimensions, changed, and durationMs as text instead of an inline observation. Cannot be combined with crop."},
                 "overrides":{
                   "type":"object",
                   "description":"Per-call display overrides. Each field is optional; nulls fall back to the discovery-time RenderSpec. Backends that don't model a field (e.g. desktop has no Android resource qualifier system) ignore it.",
@@ -1329,6 +1367,27 @@ class DaemonMcpServer(
                 }
               },
               "required":["uri"]
+            }
+            """
+              .trimIndent()
+          ),
+      ),
+      ToolDef(
+        name = "find_previews_for_file",
+        description =
+          "Find catalogued previews declared by a Kotlin source file. `path` may be absolute, or " +
+            "relative to the selected workspace (or every registered workspace when workspaceId is " +
+            "omitted). Returns an empty previews array when no discovered preview uses that file.",
+        inputSchema =
+          parseSchema(
+            """
+            {
+              "type":"object",
+              "properties":{
+                "path":{"type":"string","description":"Absolute source-file path, or a path relative to the workspace root."},
+                "workspaceId":{"type":"string","description":"Optional workspace to search. Omit to search every registered workspace."}
+              },
+              "required":["path"]
             }
             """
               .trimIndent()
@@ -1938,7 +1997,8 @@ class DaemonMcpServer(
       "unregister_project" -> toolUnregisterProject(args)
       "list_projects" -> toolListProjects()
       "list_devices" -> toolListDevices()
-      "render_preview" -> toolRenderPreview(args)
+      "render_preview" -> toolRenderPreview(session, args)
+      "find_previews_for_file" -> toolFindPreviewsForFile(args)
       "render_matrix" -> toolRenderMatrix(args)
       "watch" -> toolWatch(session, args)
       "unwatch" -> toolUnwatch(session, args)
@@ -1951,7 +2011,7 @@ class DaemonMcpServer(
       "list_data_products" -> toolListDataProducts(args)
       "enable_extensions" -> toolEnableExtensions(args)
       "list_extension_commands" -> toolListExtensionCommands(args)
-      "run_extension_command" -> toolRunExtensionCommand(args)
+      "run_extension_command" -> toolRunExtensionCommand(session, args)
       "get_preview_data" -> toolGetPreviewData(args)
       "diff_semantics" -> toolDiffSemantics(args)
       "render_preview_overlay" -> toolRenderPreviewOverlay(args)
@@ -1962,7 +2022,7 @@ class DaemonMcpServer(
       // Storybook-MCP-compatible aliases → existing handlers via the story-id adapter.
       "list-all-documentation" -> toolStorybookListDocs()
       "get-documentation-for-story" -> toolStorybookGetDoc(args)
-      "preview-stories" -> toolStorybookPreviewStories(args)
+      "preview-stories" -> toolStorybookPreviewStories(session, args)
       "run-story-tests" -> toolStorybookRunTests(args)
       else ->
         if (profile == McpToolProfile.NATIVE) {
@@ -2034,7 +2094,7 @@ class DaemonMcpServer(
   }
 
   /** `preview-stories`: render one or more stories in isolation and return the images. */
-  private fun toolStorybookPreviewStories(args: JsonObject): CallToolResult {
+  private fun toolStorybookPreviewStories(session: Session, args: JsonObject): CallToolResult {
     val ids =
       storybookStoryIds(args)
         ?: return errorCallToolResult("preview-stories: provide 'storyIds' (array) or 'storyId'")
@@ -2057,7 +2117,7 @@ class DaemonMcpServer(
         put("observe", observe)
         if (overrides != null) put("overrides", overrides)
       }
-      val res = toolRenderPreview(sub)
+      val res = toolRenderPreview(session, sub)
       blocks.addAll(res.content)
       if (res.isError == true) anyError = true else anyOk = true
     }
@@ -2268,7 +2328,7 @@ class DaemonMcpServer(
     return CallToolResult(content = listOf(ContentBlock.Text(payload.toString())))
   }
 
-  private fun toolRenderPreview(args: JsonObject): CallToolResult {
+  private fun toolRenderPreview(session: Session, args: JsonObject): CallToolResult {
     val uriStr =
       args["uri"]?.jsonPrimitive?.contentOrNull
         ?: return errorCallToolResult("render_preview: missing 'uri'")
@@ -2277,6 +2337,7 @@ class DaemonMcpServer(
     if (observe !in setOf("png", "semantics", "hash")) {
       return errorCallToolResult("render_preview: 'observe' must be one of png | semantics | hash")
     }
+    val inline = args["inline"]?.jsonPrimitive?.contentOrNull?.toBooleanStrictOrNull() ?: true
     val cropArg =
       args["crop"]?.let {
         it as? JsonObject
@@ -2310,9 +2371,14 @@ class DaemonMcpServer(
         return errorCallToolResult("render_preview: ${violations.joinToString("; ")}")
       }
     }
+    if (!inline && cropArg != null) {
+      return errorCallToolResult("render_preview: 'inline=false' cannot be combined with 'crop'")
+    }
     if (forceReason != null) invalidateClasspathForForce(uri, forceReason)
     return runCatching {
-      if (cropArg != null) {
+      if (!inline) {
+        renderPreviewFile(session, uri, overrides)
+      } else if (cropArg != null) {
         renderCropped(uri, overrides, cropArg, observe)
       } else {
         val bytes = renderAndReadBytes(uri, overrides = overrides)
@@ -2324,6 +2390,91 @@ class DaemonMcpServer(
       }
     }
       .getOrElse { errorCallToolResult("render_preview failed: ${it.message}") }
+  }
+
+  /**
+   * Local-file variant of `render_preview`. Unlike [renderAndReadBytes], it leaves the daemon's PNG
+   * untouched (no response-size downscaling) and reports the exact path that a local client can
+   * read after this call returns.
+   */
+  private fun renderPreviewFile(
+    session: Session,
+    uri: PreviewUri,
+    overrides: PreviewOverrides?,
+  ): CallToolResult {
+    val startedAt = System.nanoTime()
+    val outcome = awaitNextRender(uri, session, overrides = overrides)
+    val pngFile = File(outcome.pngPath)
+    check(pngFile.isFile) { "render_preview: pngPath does not exist: ${outcome.pngPath}" }
+    val pngBytes = fileSystem.read(pngFile.path.toPath()) { readByteArray() }
+    val sha = sha256Hex(pngBytes)
+    val changed =
+      previousFileRenderHashes
+        .computeIfAbsent(session) { ConcurrentHashMap() }
+        .put(uri.toUri(), sha) != sha
+    val payload = buildJsonObject {
+      put("uri", uri.toUri())
+      put("pngPath", pngFile.canonicalPath)
+      pngDimensions(pngBytes)?.let {
+        put("widthPx", it.first)
+        put("heightPx", it.second)
+      }
+      put("sha256", sha)
+      put("changed", changed)
+      put("durationMs", TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedAt))
+    }
+    return textCallToolResult(payload.toString())
+  }
+
+  private fun toolFindPreviewsForFile(args: JsonObject): CallToolResult {
+    val requestedPath =
+      args["path"]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() }
+        ?: return errorCallToolResult("find_previews_for_file: missing 'path'")
+    val requestedWorkspaceId = args["workspaceId"]?.jsonPrimitive?.contentOrNull
+    val projects =
+      if (requestedWorkspaceId == null) {
+        supervisor.listProjects()
+      } else {
+        listOf(
+          supervisor.project(WorkspaceId(requestedWorkspaceId))
+            ?: return errorCallToolResult(
+              "find_previews_for_file: workspace '$requestedWorkspaceId' not registered"
+            )
+        )
+      }
+    val requestedFile = File(requestedPath)
+    val targetByWorkspace = projects.associate { project ->
+      val target =
+        if (requestedFile.isAbsolute) requestedFile else File(project.path, requestedPath)
+      project.workspaceId to target.canonicalPath
+    }
+    val previews = mutableListOf<JsonObject>()
+    for ((addr, byId) in catalog) {
+      val targetPath = targetByWorkspace[addr.workspaceId] ?: continue
+      for (entry in byId.values) {
+        val uri =
+          PreviewUri(
+            workspaceId = addr.workspaceId,
+            modulePath = addr.modulePath,
+            previewFqn = entry.fqn,
+            config = entry.config,
+          )
+        val sourcePath = resolvePreviewSourceFile(uri, entry.sourceFile)?.canonicalPath ?: continue
+        if (sourcePath != targetPath) continue
+        previews += buildJsonObject {
+          put("uri", uri.toUri())
+          put("fqn", entry.fqn)
+          entry.displayName?.let { put("displayName", it) }
+          entry.bodyLine?.let { put("bodyLine", it) }
+        }
+      }
+    }
+    val payload = buildJsonObject {
+      putJsonArray("previews") {
+        previews.sortedBy { it["uri"]?.jsonPrimitive?.contentOrNull }.forEach(::add)
+      }
+    }
+    return textCallToolResult(payload.toString())
   }
 
   /**
@@ -3369,7 +3520,7 @@ class DaemonMcpServer(
     return textCallToolResult(payload.toString())
   }
 
-  private fun toolRunExtensionCommand(args: JsonObject): CallToolResult {
+  private fun toolRunExtensionCommand(session: Session, args: JsonObject): CallToolResult {
     val commandId =
       args["commandId"]?.jsonPrimitive?.contentOrNull
         ?: return errorCallToolResult("run_extension_command: missing 'commandId'")
@@ -3404,7 +3555,7 @@ class DaemonMcpServer(
         copyArg(args, "uri")
         args["overrides"]?.let { put("overrides", it) }
       }
-      return toolRenderPreview(routed)
+      return toolRenderPreview(session, routed)
     }
     return when (commandId) {
       "render-device-clip.get" -> data("render/deviceClip")
@@ -4577,6 +4728,7 @@ class DaemonMcpServer(
           config = entry["config"]?.jsonPrimitive?.contentOrNull,
           sourceFile = sourceFile,
           functionName = entry["functionName"]?.jsonPrimitive?.contentOrNull,
+          bodyLine = entry["bodyLine"]?.jsonPrimitive?.intOrNull,
           sourceLastModifiedMs = sourceLastModifiedMs,
           sourceContentHash = sourceContentHash,
         )
@@ -4852,6 +5004,8 @@ class DaemonMcpServer(
      * compiles. See issue #1807.
      */
     val functionName: String? = null,
+    /** One-based declaration anchor from discovery, when the backend can provide it. */
+    val bodyLine: Int? = null,
     val sourceLastModifiedMs: Long? = null,
     /**
      * SHA-256 of the source file's bytes captured at discovery and refreshed on every

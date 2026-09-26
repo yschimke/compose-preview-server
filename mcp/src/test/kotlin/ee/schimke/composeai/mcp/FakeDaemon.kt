@@ -289,6 +289,7 @@ class FakeDaemon : DaemonSpawn {
     displayName: String = previewId,
     sourceFile: String? = null,
     functionName: String = previewId.substringAfterLast('.'),
+    bodyLine: Int? = null,
   ) {
     val params = buildJsonObject {
       putJsonArray("added") {
@@ -299,6 +300,7 @@ class FakeDaemon : DaemonSpawn {
             put("functionName", functionName)
             put("displayName", displayName)
             if (sourceFile != null) put("sourceFile", sourceFile)
+            if (bodyLine != null) put("bodyLine", bodyLine)
           }
         )
       }
