@@ -99,7 +99,6 @@ class ServeGithubGuestTest {
           allowGuests = allowGuests,
         ),
         verifier = GitHubOAuthVerifier(fakeGitHub),
-        anonymousClient = fakeGitHub,
       )
     return ServeHttpServer(
         host = "127.0.0.1",

@@ -85,7 +85,6 @@ class ServeHtmlEntityTagTest {
             ),
             verifier = GitHubOAuthVerifier(fakeGitHub),
             clock = clock,
-            anonymousClient = fakeGitHub,
           ),
       )
       .also { it.start() }

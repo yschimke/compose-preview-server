@@ -1095,10 +1095,10 @@ public class ServeCommandOptions(
                           signed-in GitHub user (unless --github-auth-users narrows sign-in);
                           playground additionally requires access to <owner/repo>. After sign-in
                           the server stores only a signed, expiring login cookie plus the repo
-                          access verdict. The OAuth scope follows the repo's visibility: a public
-                          <owner/repo> needs only read:user, a private one also needs repo (classic
-                          OAuth apps have no read-only repository scope). All four flags are
-                          required together.
+                          access verdict. The OAuth scope is read:user only (plus read:org with
+                          --github-auth-orgs): sign-in never asks for repository access, so a
+                          private <owner/repo> grants nobody access. All four flags are required
+                          together.
         --github-auth-callback-base-url <url>
                           External origin for the OAuth callback, e.g. https://preview.example.com.
                           Omit for local use; reverse-proxied deploys should set it explicitly.
@@ -1112,9 +1112,9 @@ public class ServeCommandOptions(
                           Every host under <domain> is inside the session's reach, so name the
                           narrowest one that covers your sites.
         --github-auth-scope <scope>
-                          Override the OAuth scope instead of deriving it from --github-auth-repo's
-                          visibility. Only needed when a GitHub App or org policy demands a specific
-                          one; the derived value is already the narrowest that works.
+                          Override the OAuth scope (default read:user). Only read-only identity
+                          scopes are accepted: read:user, user:email, read:org. Repository scopes
+                          such as repo or public_repo are refused at startup.
         --github-auth-users <login>[,<login>…]
                           Optional sign-in allowlist. Empty means any signed-in GitHub user may use
                           live sessions; playground still requires access to --github-auth-repo.
