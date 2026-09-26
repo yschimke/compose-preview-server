@@ -34,9 +34,9 @@ import org.junit.jupiter.api.io.TempDir
  *
  * ## Why the catalog list here is a literal
  *
- * `m3-catalog,remote-m3,wear-m3` is the packaged image's default again. The catalog contract's
- * phase 4 took `wear-m3` out of it on cost grounds and it is back (`SERVE_UI_BUILDER_CATALOGS` in
- * `deploy/image/entrypoint.sh` and `docker-compose.yml`, asserted by
+ * `m3-catalog,remote-m3,wear-m3` is the set a Wear-authoring deployment names in
+ * `SERVE_UI_BUILDER_CATALOGS`; the packaged image's default is `m3-catalog` alone
+ * (`deploy/image/entrypoint.sh` and `docker-compose.yml`, asserted by
  * `deploy/image/test-preview-ui-default.sh` and
  * `deploy/image/test-ui-builder-published-catalogs.sh`). It remains an operator-selectable value in
  * both directions, and the literal stays here on purpose: those scripts check that the entrypoint

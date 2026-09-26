@@ -2,13 +2,12 @@
 # Guard two decisions the image makes about UI-builder catalogs, both of which are invisible in a
 # running container until somebody notices the shelf changed.
 #
-# 1. The served allowlist is `m3-catalog,remote-m3,wear-m3`, and it is an ALLOWLIST: publishing
-#    another preview catalog does not expose a builder for it. `wear-m3` spent a period off this
-#    list on cost grounds — a Wear/Android catalog needs Robolectric previews and an Android SDK
-#    for its native lane, and nobody was authoring against it — so both directions are asserted
-#    here: the default carries it, and an operator can still take it out with the explicit
-#    SERVE_UI_BUILDER_WEAR opt-out.
-# 2. `--ui-builder-published-catalogs` now defaults to ALL THREE: every served catalog takes its
+# 1. The served allowlist defaults to `m3-catalog` alone, and it is an ALLOWLIST: publishing another
+#    preview catalog does not expose a builder for it. Wear, Remote Compose and A2UI are opt-ins a
+#    deployment names itself; an explicit list is kept as written, and SERVE_UI_BUILDER_WEAR=0
+#    still strips `wear-m3` from it.
+# 2. `--ui-builder-published-catalogs` defaults to every served catalog with a usable published
+#    file, each taking its
 #    definition from its own published `ui-builder.json` rather than from the catalog this build
 #    writes in Kotlin. The per-catalog reasons live in the entrypoint beside the lever, together
 #    with what each one costs. What is asserted here is the shape: the default is DERIVED from the
@@ -79,17 +78,17 @@ default="$(run_case)"
   echo "FAIL: the extracted block produced no arguments; the test is not exercising it" >&2
   exit 1
 }
-expect "the default serves m3-catalog, remote-m3 and wear-m3" "m3-catalog,remote-m3,wear-m3" \
-  "${default}"
-# The FULL value, with the trailing newline, not a prefix of it. `expect` is a substring check, so
-# asserting `…published-catalogs\nremote-m3` kept passing when the default became
-# `remote-m3,wear-m3` -- it matched the prefix. An assertion that cannot fail when the thing it
-# names changes is the failure this file exists to prevent, so it pins both ids and the end of the
-# argument. (Command substitution strips the trailing newline, so the assertion pins both ids
-# rather than the line end -- which still catches the regression that matters, a default that
-# silently loses wear-m3.)
-expect "the default serves all three catalogs from their published files" \
-  $'--ui-builder-published-catalogs\nm3-catalog,remote-m3,wear-m3' "${default}"
+expect "the default serves m3-catalog alone" $'--ui-builder-catalogs\nm3-catalog\n' "${default}"$'\n'
+refute "the default does not serve remote-m3" "remote-m3" "${default}"
+refute "the default does not serve wear-m3" "wear-m3" "${default}"
+expect "the default publishes the one catalog it serves" \
+  $'--ui-builder-published-catalogs\nm3-catalog\n' "${default}"$'\n'
+
+# The full set a deployment such as preview.coo.ee names itself: every catalog with a published
+# file takes it.
+full="$(run_case "m3-catalog,remote-m3,wear-m3")"
+expect "a named full set publishes all three" \
+  $'--ui-builder-published-catalogs\nm3-catalog,remote-m3,wear-m3' "${full}"
 
 # The reverse direction, and the one that matters most: a box can put every catalog back on the
 # catalog this build writes in Kotlin. `none` is the whole-fleet retreat this lever exists for,
@@ -119,18 +118,17 @@ future="$(run_case "some-future-catalog")"
 expect "a served catalog with no published file falls back to none" \
   $'--ui-builder-published-catalogs\nnone' "${future}"
 
-# The symmetric guard, and the one the default no longer covers: a box that does not want to pay
-# for the Wear/Android lane can drop it explicitly, and dropping it must not disturb the other two.
-# The exact two-catalog allowlist is the retired image default and now migrates forward; #911 was the
-# production box retaining that stale value while every fresh box got Wear.
-narrowed="$(run_case "" "" "0")"
+# A box that does not want to pay for the Wear/Android lane can drop it explicitly, and dropping it
+# must not disturb the other two.
+narrowed="$(run_case "m3-catalog,remote-m3,wear-m3" "" "0")"
 refute "an operator can take wear-m3 out" "wear-m3" "${narrowed}"
 expect "taking wear-m3 out leaves the other two published" \
   $'--ui-builder-published-catalogs\nm3-catalog,remote-m3' "${narrowed}"
 
-legacy="$(run_case "m3-catalog,remote-m3")"
-expect "the retired two-catalog default migrates forward" \
-  $'--ui-builder-catalogs\nm3-catalog,remote-m3,wear-m3' "${legacy}"
+# An explicit two-catalog list is an operator's choice now, not a stale default to migrate.
+two="$(run_case "m3-catalog,remote-m3")"
+expect "an explicit two-catalog list is kept as written" \
+  $'--ui-builder-catalogs\nm3-catalog,remote-m3\n' "${two}"$'\n'
 
 broken_994="$(run_case "m3-catalog,remote-m3,wear-m3-catalog" "m3-catalog,remote-m3,wear-m3-catalog")"
 expect "the retired delivery-system value migrates to Wear's Builder id" \

@@ -234,7 +234,8 @@ semantic component identity while its general adaptive Material adapter remains 
 unsupported. Inspect capability notes before treating a design as portable to another runtime.
 
 Operators select the reviewed adapters with `--ui-builder-catalogs`. The packaged deployment
-defaults to `m3-catalog,remote-m3,wear-m3`; a served catalog outside that list stays preview-only
+defaults to `m3-catalog` alone; `remote-m3`, `wear-m3` and `a2ui-catalog` are opt-ins a deployment
+names in `SERVE_UI_BUILDER_CATALOGS`, and a served catalog outside that list stays preview-only
 until added explicitly. Enabling an adapter is a claim that what an author sees is what they get,
 and `wear-m3` has a render behind that claim — the Kotlin it generates is compiled by real Wear
 Compose in compose-ai-tools' `wear-m3` harness catalog, and the stitched capture matches the canvas
