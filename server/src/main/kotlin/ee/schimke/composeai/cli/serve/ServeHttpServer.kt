@@ -907,6 +907,24 @@ class ServeHttpServer(
           finish()
         }
       }
+      // A browser opening a page with the browse token in its query trades it for the browse cookie
+      // ([ServeBrowseCookie]) and is sent to the same URL without it, so the token leaves the
+      // address bar, the history and every link the page then builds. Registered only on a gated
+      // box, and it answers a top-level page load carrying exactly the operator token and nothing
+      // else: an API call, a socket, an image, a grant or a wrong token falls straight through.
+      if (!isPublic && serverToken.isNotBlank()) {
+        intercept(ApplicationCallPipeline.Plugins) {
+          val current: ApplicationCall = context
+          val target = ServeBrowseCookie.exchangeTarget(current, serverToken) ?: return@intercept
+          current.response.cookies.append(
+            ServeBrowseCookie.cookie(serverToken, secure = isSecure(current))
+          )
+          current.response.headers.append(HttpHeaders.CacheControl, "no-store")
+          current.response.headers.append(HttpHeaders.Location, target)
+          current.respond(HttpStatusCode.Found)
+          finish()
+        }
+      }
       // Top-level sites ([ServeSites]): make the canonical `/<system>/…` spelling behave, on a site
       // host, as though this box served only that one catalog. Registered before routing (and only
       // when sites are configured, so an ordinary server has no interceptor at all) because it has
@@ -2322,7 +2340,7 @@ class ServeHttpServer(
       if (basePath.isEmpty() && siteSystem() == null && webSessionId != null) {
         add("session=${WebEscaping.urlEncodeSegment(webSessionId)}")
       }
-      if (!isPublic) add("token=${WebEscaping.urlEncodeSegment(linkToken())}")
+      if (linksCarryToken()) add("token=${WebEscaping.urlEncodeSegment(linkToken())}")
     }
     .joinToString("&")
 
@@ -3021,7 +3039,8 @@ class ServeHttpServer(
         // `/{session}/ws/{preview}` lane streams it and enforces the live-seat budget. Carry the
         // token so the token-gated viewer + WS accept the follow-on requests.
         val suffix =
-          if (isPublic) "" else "?token=" + java.net.URLEncoder.encode(linkToken(), Charsets.UTF_8)
+          if (!linksCarryToken()) ""
+          else "?token=" + java.net.URLEncoder.encode(linkToken(), Charsets.UTF_8)
         call.respondRedirect("/${outcome.sessionId}/p/${outcome.previewId}$suffix")
       }
     }
@@ -6137,7 +6156,8 @@ class ServeHttpServer(
     // generic sample, which is precisely the dead affordance this link is supposed to never be.
     if (catalogBundleHost(host)?.catalogSource == null) return null
     val from = WebEscaping.urlEncodeSegment(system) + "/" + WebEscaping.urlEncodeSegment(previewId)
-    val token = if (isPublic) "" else "&token=" + WebEscaping.urlEncodeSegment(linkToken())
+    val token =
+      if (!linksCarryToken()) "" else "&token=" + WebEscaping.urlEncodeSegment(linkToken())
     return "/playground?from=$from$token"
   }
 
@@ -6164,7 +6184,8 @@ class ServeHttpServer(
     if (!playgroundReachable()) return null
     if (playgroundService == null) return null
     if (!playgroundService.compilesCatalog(system)) return null
-    val token = if (isPublic) "" else "&token=" + WebEscaping.urlEncodeSegment(linkToken())
+    val token =
+      if (!linksCarryToken()) "" else "&token=" + WebEscaping.urlEncodeSegment(linkToken())
     return "/playground?catalog=${WebEscaping.urlEncodeSegment(system)}$token"
   }
 
@@ -6316,7 +6337,7 @@ class ServeHttpServer(
       WebEscaping.urlEncodeSegment(system) +
       "/pages/assets/" +
       WebEscaping.urlEncodeSegment(assetId) +
-      if (isPublic) "" else "?token=" + WebEscaping.urlEncodeSegment(linkToken())
+      if (!linksCarryToken()) "" else "?token=" + WebEscaping.urlEncodeSegment(linkToken())
 
   private fun RoutingContext.parallelRenderUrl(system: String, previewId: String): String =
     "/" +
@@ -6324,7 +6345,7 @@ class ServeHttpServer(
       "/render/" +
       WebEscaping.urlEncodeSegment(previewId) +
       ".png" +
-      if (isPublic) "" else "?token=" + WebEscaping.urlEncodeSegment(linkToken())
+      if (!linksCarryToken()) "" else "?token=" + WebEscaping.urlEncodeSegment(linkToken())
 
   private fun RoutingContext.parallelSpecSource(
     host: ServeHost,
@@ -6387,7 +6408,7 @@ class ServeHttpServer(
           "/reference/" +
           WebEscaping.urlEncodeSegment(reference.id) +
           ".png" +
-          if (isPublic) "" else "?token=" + WebEscaping.urlEncodeSegment(linkToken()),
+          if (!linksCarryToken()) "" else "?token=" + WebEscaping.urlEncodeSegment(linkToken()),
       provenance =
         "$label reference mapped by ${parallel.label}'s paired " +
           "${parallel.preview.componentId ?: parallel.componentId}${parallel.pairedOn}.",
@@ -6492,7 +6513,8 @@ class ServeHttpServer(
                 WebEscaping.urlEncodeSegment(parallel.system) +
                 "/p/" +
                 WebEscaping.urlEncodeSegment(parallel.preview.id) +
-                if (isPublic) "" else "?token=" + WebEscaping.urlEncodeSegment(linkToken()),
+                if (!linksCarryToken()) ""
+                else "?token=" + WebEscaping.urlEncodeSegment(linkToken()),
           pairedOn = parallel.pairedOn,
           cell = parallel.cell,
           diff = diff,
@@ -7442,7 +7464,7 @@ class ServeHttpServer(
         renderUrl =
           previewId?.let {
             val gate =
-              if (isPublic) ""
+              if (!linksCarryToken()) ""
               else
                 (if (overrideSuffix.isEmpty()) "?" else "&") +
                   "token=${WebEscaping.urlEncodeSegment(linkToken())}"
@@ -7453,7 +7475,7 @@ class ServeHttpServer(
         referenceUrl =
           stageReference?.let {
             val gate =
-              if (isPublic) ""
+              if (!linksCarryToken()) ""
               else
                 (if (overrideSuffix.isEmpty()) "?" else "&") +
                   "token=${WebEscaping.urlEncodeSegment(linkToken())}"
@@ -7476,7 +7498,8 @@ class ServeHttpServer(
         siteName = skin.first,
         themeCss = skin.second,
         themeStorageKey = skin.third,
-        navSuffix = if (isPublic) "" else "?token=${WebEscaping.urlEncodeSegment(linkToken())}",
+        navSuffix =
+          if (!linksCarryToken()) "" else "?token=${WebEscaping.urlEncodeSegment(linkToken())}",
         // Resolve THIS caller, not merely the existence of a resolver. The lane admits a
         // browser only when its OAuth session names a login with access to the *image*
         // repository, so a resolver that exists still answers null for an anonymous visitor
@@ -10077,7 +10100,8 @@ class ServeHttpServer(
       call.respondText("not found", status = HttpStatusCode.NotFound)
       return
     }
-    val suffix = if (isPublic) "" else "?token=" + WebEscaping.urlEncodeSegment(linkToken())
+    val suffix =
+      if (!linksCarryToken()) "" else "?token=" + WebEscaping.urlEncodeSegment(linkToken())
     val components =
       listedCatalogs().flatMap { system ->
         sessions.peekHost(system)?.let { rememberCatalogMeta(system, it, progress = false) }
@@ -10601,7 +10625,7 @@ class ServeHttpServer(
       val wasmSrc =
         if (!wasmCatalogs.containsKey(sessionId)) null
         else if (!isPublic && sessionId in privateWasmCatalogs)
-          ServeUrls.privateWasmAppSrc(sessionId, preview.id, linkToken())
+          ServeUrls.privateWasmAppSrc(sessionId, preview.id, wasmPrivateAccess())
         else ServeUrls.wasmAppSrc(sessionId, preview.id)
       // Grant the Wasm iframe its real origin only for a TRUSTED catalog's app — an unverified
       // catalog's `/wasm/` app stays opaque-origin sandboxed so it can't reach the parent viewer.
@@ -13046,7 +13070,8 @@ class ServeHttpServer(
 
   /**
    * Token gate: respond 404 (not 401 — don't confirm the server to a scanner) and return true when
-   * the request's `?token=` / `X-Compose-Preview-Token` doesn't match. Constant-time compare.
+   * the request's `?token=` / `X-Compose-Preview-Token` doesn't match and it carries no browse
+   * cookie ([ServeBrowseCookie]) minted from the same token. Constant-time compare.
    *
    * A live **agent grant** ([ServeAgentGrantStore]) presented in the same place is the other way to
    * pass, at [AgentGrantScope.PREVIEW] — the lowest rung, which every grant carries. That is the
@@ -13069,6 +13094,7 @@ class ServeHttpServer(
   private fun ApplicationCall.isAuthorizedCall(): Boolean {
     val provided = request.queryParameters["token"] ?: request.headers[TOKEN_HEADER]
     if (isAuthorized(serverToken, provided, isPublic)) return true
+    if (browsesByCookie()) return true
     return agentGrantFor(this)?.allows(AgentGrantScope.PREVIEW) == true
   }
 
@@ -13102,7 +13128,27 @@ class ServeHttpServer(
    */
   private fun RoutingContext.linkToken(): String = call.linkToken()
 
-  private fun ApplicationCall.linkToken(): String = agentGrantFor(this)?.token ?: serverToken
+  private fun ApplicationCall.linkToken(): String =
+    agentGrantFor(this)?.token ?: if (browsesByCookie()) "" else serverToken
+
+  /**
+   * Whether this call presents the browse cookie ([ServeBrowseCookie]) — a browser that exchanged
+   * its `?token=` link for the cookie. Such a browser needs no token in the links it is served, so
+   * [linkToken] answers empty for it and the pages it reads stay clean.
+   */
+  private fun ApplicationCall.browsesByCookie(): Boolean =
+    !isPublic && ServeBrowseCookie.presents(this, serverToken)
+
+  /** Whether the links of the page being built carry `token=` — see [linkToken]. */
+  private fun RoutingContext.linksCarryToken(): Boolean = !isPublic && linkToken().isNotEmpty()
+
+  /**
+   * The `{access}` segment of a `/wasm-private/…` URL embedded in this call's page: the caller's
+   * own grant token, as [linkToken] would give it, or else a value derived from the operator token
+   * — never the operator token itself.
+   */
+  private fun RoutingContext.wasmPrivateAccess(): String =
+    agentGrantFor(call)?.token ?: ServeBrowseCookie.wasmAccess(serverToken)
 
   /**
    * Whether a credential arriving as a **path** segment (`/wasm-private/{access}/…`) is one this
@@ -13111,7 +13157,8 @@ class ServeHttpServer(
    * whichever one its reader presented.
    */
   private fun isAuthorizedAccessParam(value: String?): Boolean =
-    ServeUrls.tokensMatch(serverToken, value) ||
+    ServeUrls.tokensMatch(ServeBrowseCookie.wasmAccess(serverToken), value) ||
+      ServeUrls.tokensMatch(serverToken, value) ||
       agentGrants?.grantForToken(value)?.allows(AgentGrantScope.PREVIEW) == true
 
   /**
@@ -13225,7 +13272,8 @@ class ServeHttpServer(
    */
   private suspend fun RoutingContext.rejectBadTokenForIngest(): Boolean {
     val provided = call.request.queryParameters["token"] ?: call.request.headers[TOKEN_HEADER]
-    if (isAuthorized(serverToken, provided, isPublic) && agentGrantFor(call) == null) return false
+    val operator = isAuthorized(serverToken, provided, isPublic) || call.browsesByCookie()
+    if (operator && agentGrantFor(call) == null) return false
     call.respondText("not found", status = HttpStatusCode.NotFound)
     return true
   }
@@ -16265,7 +16313,9 @@ class ServeHttpServer(
     // and approve it themselves — minting a grant into a server whose browse token they never had.
     // A private box's approver must hold that token; a `--public` box has no such door to pass.
     val provided = call.request.queryParameters["token"] ?: call.request.headers[TOKEN_HEADER]
-    if (!isPublic && !ServeUrls.tokensMatch(serverToken, provided)) return null
+    if (!isPublic && !ServeUrls.tokensMatch(serverToken, provided) && !call.browsesByCookie()) {
+      return null
+    }
     // …and then the identity, when there is one to have. Note neither branch can be satisfied by an
     // agent grant: a GitHub session lives in a cookie no agent holds, and the token compare above
     // is against `--token` specifically, which no minted bearer can equal. So a grant can never
@@ -16303,7 +16353,8 @@ class ServeHttpServer(
     // URL, which asks for OAuth again, forever. So a missing front door is answered with
     // instructions, and only a genuinely-missing session is answered with a sign-in.
     val provided = call.request.queryParameters["token"] ?: call.request.headers[TOKEN_HEADER]
-    val hasFrontDoor = isPublic || ServeUrls.tokensMatch(serverToken, provided)
+    val hasFrontDoor =
+      isPublic || ServeUrls.tokensMatch(serverToken, provided) || call.browsesByCookie()
     if (hasFrontDoor) {
       githubAuth?.let { auth ->
         call.respondRedirect(auth.loginPath(call))
