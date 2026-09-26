@@ -5955,7 +5955,11 @@ test("contract · static viewer bounds results and rejects credentials", async (
 
   await page.goto("/preview-harness/fixtures/pages/mcp-app-viewer-resource.html");
   const viewer = page.frameLocator('iframe[title="Compose Preview MCP App"]');
-  await expect(viewer.locator('#canvas img[alt="Rendered Compose preview"]')).toBeVisible();
+  // This fixture deliberately holds the read beyond the normal 5 s bridge timeout to prove the
+  // resource-specific 65 s budget. Leave enough room for that intentional delay plus decoding.
+  await expect(viewer.locator('#canvas img[alt="Rendered Compose preview"]')).toBeVisible({
+    timeout: 7_000,
+  });
   await viewer.locator("#use").click();
   await page.waitForFunction(() => window.__mcpModelContext != null);
   const modelContext = await page.evaluate(() => window.__mcpModelContext);
