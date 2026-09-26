@@ -108,6 +108,8 @@ class ServeCatalogMcpAppViewerTest {
     assertTrue(html.contains("const RESOURCE_POLL_INTERVAL_MS = 5000;"))
     assertTrue(html.contains("result?.hostCapabilities?.serverResources?.subscribe === true"))
     assertTrue(html.contains("await request('resources/subscribe', { uri });"))
+    assertTrue(html.contains("await request('resources/unsubscribe', { uri });"))
+    assertTrue(html.contains("Unable to unsubscribe a stale Compose Preview resource"))
     assertTrue(html.contains("message.method === 'notifications/resources/updated'"))
     assertTrue(html.contains("generation !== resourceReadGeneration"))
     assertTrue(html.contains("scheduleResourcePoll(resource.uri);"))

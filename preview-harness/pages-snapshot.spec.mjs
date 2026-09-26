@@ -4371,7 +4371,10 @@ for (const fixture of listPageFixtures()) {
         if (fixture === "mcp-app-viewer-refresh") {
           const image = viewer.locator('#canvas img[alt="Rendered Compose preview"]');
           const before = await image.getAttribute("src");
-          await page.waitForFunction(() => window.__mcpSubscribedUri != null);
+          await page.waitForFunction(() => window.__mcpSubscribedUri?.includes("overrides=fixture"));
+          await page.waitForFunction(() =>
+            window.__mcpUnsubscribedUris?.some((uri) => uri.includes("overrides=stale")),
+          );
           await page.waitForFunction(() => window.__mcpReadCount >= 2);
           await expect(viewer.locator("#refresh")).toBeEnabled();
           await expect(image).not.toHaveAttribute("src", before);

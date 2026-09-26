@@ -1,6 +1,7 @@
 const frame = document.querySelector("iframe");
 const mode = document.body.dataset.mode;
 let reads = 0;
+let resourceUpdates = 0;
 
 async function png(path) {
   const bytes = new Uint8Array(await (await fetch(path)).arrayBuffer());
@@ -52,7 +53,10 @@ window.addEventListener("message", async (event) => {
           content: [
             {
               type: "resource_link",
-              uri: "compose-preview://fixture/_app/com.example.Card?overrides=fixture",
+              uri:
+                mode === "refresh"
+                  ? "compose-preview://fixture/_app/com.example.Card?overrides=stale"
+                  : "compose-preview://fixture/_app/com.example.Card?overrides=fixture",
               name: "Compose Preview render",
               mimeType: "image/png",
             },
@@ -60,12 +64,39 @@ window.addEventListener("message", async (event) => {
         },
       },
     });
+    if (mode === "refresh") {
+      window.setTimeout(() => {
+        send({
+          jsonrpc: "2.0",
+          method: "ui/notifications/tool-result",
+          params: {
+            result: {
+              content: [
+                {
+                  type: "resource_link",
+                  uri: "compose-preview://fixture/_app/com.example.Card?overrides=fixture",
+                  name: "Compose Preview render",
+                  mimeType: "image/png",
+                },
+              ],
+            },
+          },
+        });
+      }, 100);
+    }
     return;
   }
   if (message.method === "resources/subscribe") {
-    send({ jsonrpc: "2.0", id: message.id, result: {} });
+    const stale = message.params.uri.includes("overrides=stale");
+    if (stale) {
+      window.setTimeout(() => send({ jsonrpc: "2.0", id: message.id, result: {} }), 250);
+    } else {
+      send({ jsonrpc: "2.0", id: message.id, result: {} });
+    }
     window.__mcpSubscribedUri = message.params.uri;
+    if (stale) return;
     window.setTimeout(() => {
+      resourceUpdates += 1;
       send({
         jsonrpc: "2.0",
         method: "notifications/resources/updated",
@@ -75,6 +106,10 @@ window.addEventListener("message", async (event) => {
     return;
   }
   if (message.method === "resources/unsubscribe") {
+    window.__mcpUnsubscribedUris = [
+      ...(window.__mcpUnsubscribedUris || []),
+      message.params.uri,
+    ];
     send({ jsonrpc: "2.0", id: message.id, result: {} });
     return;
   }
@@ -99,7 +134,7 @@ window.addEventListener("message", async (event) => {
       return;
     }
     const path =
-      mode === "refresh" && reads > 1
+      mode === "refresh" && resourceUpdates > 0
         ? "/preview-harness/fixtures/pages/_design-render-placeholder.png"
         : "/preview-harness/fixtures/pages/_render-placeholder.png";
     send({

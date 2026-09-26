@@ -317,10 +317,17 @@
         return;
       }
       await request('resources/subscribe', { uri });
-      if (generation === resourceSubscriptionGeneration && resourceResult?.resource?.uri === uri) {
-        subscribedResourceUri = uri;
+      if (!initialized || staticMode || resourceResult?.resource?.uri !== uri) {
+        try {
+          await request('resources/unsubscribe', { uri });
+        } catch (error) {
+          console.debug('Unable to unsubscribe a stale Compose Preview resource:', error);
+        }
+        return;
       }
+      subscribedResourceUri = uri;
     } catch (error) {
+      if (generation !== resourceSubscriptionGeneration || resourceResult?.resource?.uri !== uri) return;
       // MCP Apps 2026-01-26 exposes resources/read but not subscription proxying. A future host
       // may advertise serverResources.subscribe; if that path fails, retain today's bounded poll.
       hostResourceSubscriptions = false;
