@@ -18,7 +18,15 @@ window.addEventListener("message", async (event) => {
   const message = event.data;
   if (!message || message.jsonrpc !== "2.0" || !message.method) return;
   if (message.method === "ui/initialize") {
-    send({ jsonrpc: "2.0", id: message.id, result: {} });
+    send({
+      jsonrpc: "2.0",
+      id: message.id,
+      result: {
+        hostCapabilities: {
+          serverResources: { subscribe: mode === "refresh" },
+        },
+      },
+    });
     send({
       jsonrpc: "2.0",
       method: "ui/notifications/tool-input",
@@ -52,6 +60,22 @@ window.addEventListener("message", async (event) => {
         },
       },
     });
+    return;
+  }
+  if (message.method === "resources/subscribe") {
+    send({ jsonrpc: "2.0", id: message.id, result: {} });
+    window.__mcpSubscribedUri = message.params.uri;
+    window.setTimeout(() => {
+      send({
+        jsonrpc: "2.0",
+        method: "notifications/resources/updated",
+        params: { uri: message.params.uri },
+      });
+    }, 300);
+    return;
+  }
+  if (message.method === "resources/unsubscribe") {
+    send({ jsonrpc: "2.0", id: message.id, result: {} });
     return;
   }
   if (message.method === "resources/read") {

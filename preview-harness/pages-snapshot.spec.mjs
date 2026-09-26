@@ -4359,7 +4359,7 @@ for (const fixture of listPageFixtures()) {
             await expect(viewer.locator("#use")).toBeHidden();
           }
         } else {
-          await page.waitForFunction(() => window.__mcpReadCount === 1);
+          await page.waitForFunction(() => window.__mcpReadCount >= 1);
         }
         if (fixture === "mcp-app-viewer-fallback") {
           await expect(viewer.locator("#canvas")).toContainText(
@@ -4371,9 +4371,8 @@ for (const fixture of listPageFixtures()) {
         if (fixture === "mcp-app-viewer-refresh") {
           const image = viewer.locator('#canvas img[alt="Rendered Compose preview"]');
           const before = await image.getAttribute("src");
-          await viewer.locator("#refresh").click();
-          await expect(viewer.locator("#refresh")).toBeDisabled();
-          await page.waitForFunction(() => window.__mcpReadCount === 2);
+          await page.waitForFunction(() => window.__mcpSubscribedUri != null);
+          await page.waitForFunction(() => window.__mcpReadCount >= 2);
           await expect(viewer.locator("#refresh")).toBeEnabled();
           await expect(image).not.toHaveAttribute("src", before);
         }

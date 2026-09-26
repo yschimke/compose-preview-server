@@ -47,6 +47,7 @@
   const use = q('#use');
   const REQUEST_TIMEOUT_MS = 5000;
   const RESOURCE_READ_TIMEOUT_MS = 65000;
+  const RESOURCE_POLL_INTERVAL_MS = 5000;
   // Static host contract (for example Antigravity's <agent-embed>):
   // #compose-preview-result=<unpadded base64url UTF-8 JSON>
   // JSON shape: {"version":1,"arguments":{...},"result":<MCP CallToolResult>}
@@ -63,6 +64,11 @@
   let toolArguments = {};
   let resourceToken;
   let resourceResult;
+  let resourceReadGeneration = 0;
+  let resourcePollTimer;
+  let resourceSubscriptionGeneration = 0;
+  let subscribedResourceUri;
+  let hostResourceSubscriptions = false;
 
   function request(method, params, timeoutMs = REQUEST_TIMEOUT_MS) {
     const id = nextId++;
@@ -274,9 +280,71 @@
     meta.textContent = 'Static result unavailable; use the complete text fallback.';
   }
 
+  function stopResourcePolling() {
+    if (resourcePollTimer == null) return;
+    window.clearTimeout(resourcePollTimer);
+    resourcePollTimer = undefined;
+  }
+
+  function scheduleResourcePoll(uri) {
+    stopResourcePolling();
+    if (!initialized || staticMode || hostResourceSubscriptions || resourceResult?.resource?.uri !== uri) return;
+    resourcePollTimer = window.setTimeout(() => {
+      resourcePollTimer = undefined;
+      if (resourceResult?.resource?.uri === uri) readResource();
+    }, RESOURCE_POLL_INTERVAL_MS);
+  }
+
+  async function connectResourceUpdates(uri) {
+    const generation = ++resourceSubscriptionGeneration;
+    stopResourcePolling();
+    if (subscribedResourceUri === uri) return;
+    const previous = subscribedResourceUri;
+    subscribedResourceUri = undefined;
+    try {
+      await bridgeReady;
+      if (!initialized || staticMode || generation !== resourceSubscriptionGeneration) return;
+      if (previous && hostResourceSubscriptions) {
+        try {
+          await request('resources/unsubscribe', { uri: previous });
+        } catch (error) {
+          console.debug('Unable to unsubscribe the previous Compose Preview resource:', error);
+        }
+      }
+      if (generation !== resourceSubscriptionGeneration || resourceResult?.resource?.uri !== uri) return;
+      if (!hostResourceSubscriptions) {
+        scheduleResourcePoll(uri);
+        return;
+      }
+      await request('resources/subscribe', { uri });
+      if (generation === resourceSubscriptionGeneration && resourceResult?.resource?.uri === uri) {
+        subscribedResourceUri = uri;
+      }
+    } catch (error) {
+      // MCP Apps 2026-01-26 exposes resources/read but not subscription proxying. A future host
+      // may advertise serverResources.subscribe; if that path fails, retain today's bounded poll.
+      hostResourceSubscriptions = false;
+      scheduleResourcePoll(uri);
+      console.debug('Resource subscriptions are unavailable; polling instead:', error);
+    }
+  }
+
+  function disconnectResourceUpdates() {
+    ++resourceSubscriptionGeneration;
+    ++resourceReadGeneration;
+    stopResourcePolling();
+    const previous = subscribedResourceUri;
+    subscribedResourceUri = undefined;
+    if (!previous || !hostResourceSubscriptions || !initialized) return;
+    request('resources/unsubscribe', { uri: previous }).catch(error =>
+      console.debug('Unable to unsubscribe the previous Compose Preview resource:', error)
+    );
+  }
+
   async function readResource() {
     if (!resourceResult) return;
     const { result: toolResult, resource, value } = resourceResult;
+    const generation = ++resourceReadGeneration;
     refresh.disabled = true;
     meta.textContent = 'Reading preview resource…';
     try {
@@ -290,7 +358,7 @@
         RESOURCE_READ_TIMEOUT_MS,
       );
       const image = resourcePng(readResult);
-      if (resourceResult?.resource?.uri !== resource.uri) return;
+      if (generation !== resourceReadGeneration || resourceResult?.resource?.uri !== resource.uri) return;
       if (!image) {
         renderResourceFallback(toolResult, resource, 'The host returned no PNG for resource:');
         meta.textContent = 'Resource has no PNG; use the text fallback.';
@@ -298,13 +366,16 @@
       }
       renderImage({ data: image.blob }, value, resource);
     } catch (error) {
-      if (resourceResult?.resource?.uri !== resource.uri) return;
+      if (generation !== resourceReadGeneration || resourceResult?.resource?.uri !== resource.uri) return;
       // Resource reads are optional in MCP Apps hosts. Keep the durable URI and text result useful.
       renderResourceFallback(toolResult, resource, 'Unable to read preview resource:');
       meta.textContent = 'Resource reads are unavailable; use the text fallback.';
       console.warn('Failed to read Compose Preview resource:', error);
     } finally {
-      if (resourceResult?.resource?.uri === resource.uri) refresh.disabled = false;
+      if (generation === resourceReadGeneration && resourceResult?.resource?.uri === resource.uri) {
+        refresh.disabled = false;
+        if (subscribedResourceUri !== resource.uri) scheduleResourcePoll(resource.uri);
+      }
     }
   }
 
@@ -314,10 +385,16 @@
     selected = undefined;
     use.hidden = true;
     refresh.hidden = true;
+    disconnectResourceUpdates();
     resourceResult = undefined;
     const value = data(result);
     const image = png(result);
     const resource = link(result);
+    if (resource) {
+      resourceResult = { result, resource, value };
+      refresh.hidden = staticMode;
+      if (!staticMode) connectResourceUpdates(resource.uri);
+    }
     const cells = Array.isArray(value.cells) && value.cells;
     if (cells) {
       if (image && !cells.some(cell => typeof cell?.png === 'string' && cell.png.length > 0)) {
@@ -332,8 +409,6 @@
       return;
     }
     if (resource) {
-      resourceResult = { result, resource, value };
-      refresh.hidden = staticMode;
       renderResourceFallback(
         result,
         resource,
@@ -367,15 +442,23 @@
       return;
     }
     if (message.method === 'ui/notifications/tool-result') draw(message.params?.result || message.params);
+    if (
+      (message.method === 'notifications/resources/updated' ||
+        message.method === 'ui/notifications/resource-updated') &&
+      message.params?.uri === resourceResult?.resource?.uri
+    ) {
+      readResource();
+    }
   }, { passive: true });
 
   async function initializeBridge() {
     try {
-      await request('ui/initialize', {
+      const result = await request('ui/initialize', {
         appInfo: { name: 'compose-preview-viewer', version: '1' },
         appCapabilities: {},
         protocolVersion: '2026-01-26',
       });
+      hostResourceSubscriptions = result?.hostCapabilities?.serverResources?.subscribe === true;
       initialized = true;
       notify('ui/notifications/initialized', {});
     } catch (error) {
