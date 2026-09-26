@@ -6,6 +6,7 @@ import ee.schimke.composeai.daemon.client.WorkspaceId
 import ee.schimke.composeai.mcp.protocol.ReadResourceResult
 import ee.schimke.composeai.mcp.protocol.ResourceContents
 import io.modelcontextprotocol.kotlin.sdk.types.Implementation
+import io.modelcontextprotocol.kotlin.sdk.types.ListPromptsResult
 import io.modelcontextprotocol.kotlin.sdk.types.ListToolsResult
 import java.awt.image.BufferedImage
 import java.io.File
@@ -16,10 +17,12 @@ import java.net.InetAddress
 import java.net.ServerSocket
 import java.nio.file.Files
 import java.util.Base64
+import java.util.concurrent.CancellationException
 import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicLong
 import javax.imageio.ImageIO
+import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
@@ -33,6 +36,7 @@ import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
 import kotlinx.serialization.json.putJsonObject
 import org.junit.After
+import org.junit.Assert.assertThrows
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
@@ -84,6 +88,14 @@ class DaemonMcpServerTest {
   }
 
   @Test
+  fun `elicitation fallback propagates cancellation`() {
+    assertThrows(CancellationException::class.java) {
+      runBlocking { elicitationOrNull<Any> { throw CancellationException("cancelled") } }
+    }
+    assertThat(runBlocking { elicitationOrNull<Any> { error("unsupported") } }).isNull()
+  }
+
+  @Test
   fun `initialize and tools list returns expected tool surface`() {
     val initResult = client.initialize()
     val caps = initResult["capabilities"]?.jsonObject
@@ -122,6 +134,35 @@ class DaemonMcpServerTest {
         "get_preview_extras",
         "record_preview",
       )
+  }
+
+  @Test
+  fun `local MCP publishes preview and Wear migration prompts with complete text workflows`() {
+    client.initialize()
+
+    val prompts =
+      json.decodeFromJsonElement(ListPromptsResult.serializer(), client.request("prompts/list"))
+    assertThat(prompts.prompts.map { it.name }).containsExactly("preview-file", "migrate-wear-m3")
+
+    val previewFile =
+      client.request(
+        "prompts/get",
+        buildJsonObject {
+          put("name", "preview-file")
+          putJsonObject("arguments") { put("path", "/workspace/src/Main.kt") }
+        },
+      )
+    val previewText =
+      previewFile["messages"]!!.jsonArray.single().jsonObject["content"]!!.jsonObject
+    assertThat(previewText["text"]!!.jsonPrimitive.content).contains("find_previews_for_file")
+
+    val migration =
+      client.request("prompts/get", buildJsonObject { put("name", "migrate-wear-m3") })
+    val migrationText =
+      migration["messages"]!!.jsonArray.single().jsonObject["content"]!!.jsonObject
+    assertThat(migrationText["text"]!!.jsonPrimitive.content)
+      .contains("official Wear Compose M3 skill")
+    assertThat(migrationText["text"]!!.jsonPrimitive.content).contains("a11y/atf")
   }
 
   @Test
@@ -164,6 +205,9 @@ class DaemonMcpServerTest {
         )
       assertThat(tools.tools.map { it.name }).doesNotContain("render_preview")
       assertThat(tools.tools.map { it.name }).doesNotContain("create_design")
+      val prompts =
+        json.decodeFromJsonElement(ListPromptsResult.serializer(), sbClient.request("prompts/list"))
+      assertThat(prompts.prompts).isEmpty()
       val hidden = sbClient.callTool("list_components")
       assertThat(hidden.raw["isError"]?.jsonPrimitive?.contentOrNull).isEqualTo("true")
       assertThat(hidden.firstTextContent()).isEqualTo("unknown tool: list_components")
@@ -1607,6 +1651,7 @@ class DaemonMcpServerTest {
         "render_matrix",
         buildJsonObject {
           put("uri", uri)
+          put("choose", JsonPrimitive(true))
           putJsonObject("axes") {
             putJsonArray("uiMode") {
               add(JsonPrimitive("light"))
@@ -1634,6 +1679,60 @@ class DaemonMcpServerTest {
     assertThat(cells[0].jsonObject["widthPx"]?.jsonPrimitive?.content?.toInt()).isEqualTo(40)
     // First cell is the baseline, so it is never "changed".
     assertThat(cells[0].jsonObject["changed"]?.jsonPrimitive?.content?.toBoolean()).isFalse()
+    val selection = parsed["selection"]!!.jsonObject
+    assertThat(selection["mode"]!!.jsonPrimitive.content).isEqualTo("text")
+    assertThat(selection["choices"]!!.jsonArray).hasSize(2)
+  }
+
+  @Test
+  fun `render_matrix accepts form capability object but falls back for an invalid accepted variant`() {
+    client.close()
+    session.close()
+    val elicitations = AtomicLong()
+    val (clientToServer, serverFromClient) = pipedPair()
+    val (serverToClient, clientFromServer) = pipedPair()
+    session = server.newSession(input = serverFromClient, output = serverToClient)
+    session.start()
+    client =
+      McpTestClient(
+        input = clientFromServer,
+        output = clientToServer,
+        elicitationHandler = {
+          elicitations.incrementAndGet()
+          buildJsonObject {
+            put("action", "accept")
+            putJsonObject("content") { put("variant", "not one of the rendered choices") }
+          }
+        },
+      )
+    client.initialize(
+      capabilities = buildJsonObject { putJsonObject("elicitation") { putJsonObject("form") {} } }
+    )
+    val projectDir = tmp.newFolder("form-workspace")
+    tmp.newFolder("form-workspace", "module")
+    val workspaceId = registerWorkspace(projectDir, "form-demo")
+    val daemon = warmDaemonFor(workspaceId, ":module")
+    val previewId = "com.example.Form"
+    daemon.emitDiscovery(previewId)
+    client.expectNotification("notifications/resources/list_changed", 2_000)
+    val pngFile = tmp.newFile("form-matrix.png")
+    ImageIO.write(BufferedImage(2, 2, BufferedImage.TYPE_INT_ARGB), "png", pngFile)
+    daemon.autoRenderPngPath = { id -> if (id == previewId) pngFile.absolutePath else null }
+
+    val result =
+      client.callTool(
+        "render_matrix",
+        buildJsonObject {
+          put("uri", PreviewUri(workspaceId, ":module", previewId).toUri())
+          put("choose", true)
+          putJsonObject("axes") { putJsonArray("uiMode") { add(JsonPrimitive("light")) } }
+        },
+      )
+    val selection =
+      json.parseToJsonElement(result.firstTextContent()).jsonObject["selection"]!!.jsonObject
+    assertThat(elicitations.get()).isEqualTo(1)
+    assertThat(selection["mode"]!!.jsonPrimitive.content).isEqualTo("text")
+    assertThat(selection["choices"]!!.jsonArray).hasSize(1)
   }
 
   @Test
@@ -4609,7 +4708,11 @@ class DaemonMcpServerTest {
  * Minimal MCP client used by [DaemonMcpServerTest]. Speaks Content-Length-framed JSON-RPC over the
  * pipes the McpSession exposes.
  */
-class McpTestClient(private val input: InputStream, private val output: OutputStream) {
+class McpTestClient(
+  private val input: InputStream,
+  private val output: OutputStream,
+  private val elicitationHandler: ((JsonObject) -> JsonObject)? = null,
+) {
 
   private val json = Json {
     ignoreUnknownKeys = true
@@ -4620,6 +4723,7 @@ class McpTestClient(private val input: InputStream, private val output: OutputSt
     java.util.concurrent.ConcurrentHashMap<Long, LinkedBlockingQueue<JsonObject>>()
   private val notifications = LinkedBlockingQueue<NotificationFrame>()
   @Volatile private var closed = false
+  @Volatile private var readerFailure: Throwable? = null
 
   private val readerThread =
     Thread({ runReader() }, "mcp-test-client-reader").apply { isDaemon = true }
@@ -4628,10 +4732,13 @@ class McpTestClient(private val input: InputStream, private val output: OutputSt
     readerThread.start()
   }
 
-  fun initialize(timeoutMs: Long = 5_000): JsonObject {
+  fun initialize(
+    timeoutMs: Long = 5_000,
+    capabilities: JsonObject = JsonObject(emptyMap()),
+  ): JsonObject {
     val params = buildJsonObject {
       put("protocolVersion", "2025-06-18")
-      putJsonObject("capabilities") {}
+      put("capabilities", capabilities)
       putJsonObject("clientInfo") {
         put("name", "mcp-test-client")
         put("version", "0.0")
@@ -4654,7 +4761,7 @@ class McpTestClient(private val input: InputStream, private val output: OutputSt
     sendMessage(payload.toString())
     val resp =
       slot.poll(timeoutMs, TimeUnit.MILLISECONDS)
-        ?: error("request($method) timed out after ${timeoutMs}ms")
+        ?: error("request($method) timed out after ${timeoutMs}ms; reader failure: $readerFailure")
     responses.remove(id)
     if (resp["error"] != null) {
       error("request($method) error: ${resp["error"]}")
@@ -4722,18 +4829,31 @@ class McpTestClient(private val input: InputStream, private val output: OutputSt
       while (!closed) {
         val line = readMessage(input) ?: break
         val obj = json.parseToJsonElement(line).jsonObject
-        val id = obj["id"]?.jsonPrimitive?.intOrNull()
-        if (id != null) {
+        val method = obj["method"]?.jsonPrimitive?.contentOrNull
+        val requestId = obj["id"]
+        if (method == "elicitation/create" && requestId != null) {
+          val result = elicitationHandler?.invoke(obj) ?: continue
+          sendMessage(
+            buildJsonObject {
+              put("jsonrpc", "2.0")
+              put("id", requestId)
+              put("result", result)
+            }
+              .toString()
+          )
+        } else if (requestId?.jsonPrimitive?.intOrNull() != null) {
+          val id = requestId.jsonPrimitive.intOrNull()!!
           responses.computeIfAbsent(id.toLong()) { LinkedBlockingQueue() }.put(obj)
         } else {
-          val method = obj["method"]?.jsonPrimitive?.contentOrNull
           if (method != null) {
             notifications.put(NotificationFrame(method, obj["params"] as? JsonObject))
           }
         }
       }
-    } catch (_: IOException) {
-      // EOF
+    } catch (failure: IOException) {
+      if (!closed) readerFailure = failure
+    } catch (failure: Throwable) {
+      readerFailure = failure
     }
   }
 

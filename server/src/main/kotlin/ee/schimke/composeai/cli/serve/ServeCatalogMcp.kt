@@ -17,6 +17,7 @@ import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.add
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
@@ -27,6 +28,7 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.put
+import kotlinx.serialization.json.putJsonArray
 
 /**
  * Stateless MCP 2025-06-18 surface aggregating every served catalog.
@@ -115,6 +117,8 @@ class ServeCatalogMcp(
           "initialize" -> initialize(params)
           "ping" -> JsonObject(emptyMap())
           "tools/list" -> buildJsonObject { put("tools", tools(access != null)) }
+          "prompts/list" -> prompts()
+          "prompts/get" -> prompt(params)
           "tools/call" ->
             try {
               callTool(params, liveAuthorization, access, uiBuilderAuthorization)
@@ -149,6 +153,7 @@ class ServeCatalogMcp(
         buildJsonObject {
           put("tools", JsonObject(emptyMap()))
           put("resources", buildJsonObject { put("subscribe", false) })
+          if (uiBuilder != null) put("prompts", JsonObject(emptyMap()))
         },
       )
       put(
@@ -172,6 +177,109 @@ class ServeCatalogMcp(
       )
     }
   }
+
+  /** Remote UI-builder slash commands. Kept text-complete for clients that only render prompts. */
+  private fun prompts(): JsonObject = buildJsonObject {
+    putJsonArray("prompts") {
+      if (uiBuilder != null) {
+        add(
+          buildJsonObject {
+            put("name", "review-design")
+            put(
+              "description",
+              "Open a server-homed design, read its discussion, and report attention items.",
+            )
+            putJsonArray("arguments") {
+              add(
+                buildJsonObject {
+                  put("name", "designUrl")
+                  put("description", "The design URL or design id on this server.")
+                  put("required", true)
+                }
+              )
+            }
+          }
+        )
+        add(
+          buildJsonObject {
+            put("name", "design-status")
+            put(
+              "description",
+              "Report a design revision, discussion state, and known home/copy gaps.",
+            )
+            putJsonArray("arguments") {
+              add(
+                buildJsonObject {
+                  put("name", "designId")
+                  put("description", "The design id on this server.")
+                  put("required", true)
+                }
+              )
+            }
+          }
+        )
+      }
+    }
+  }
+
+  private fun prompt(params: JsonObject): JsonObject {
+    if (uiBuilder == null)
+      throw McpRequestException("This server does not expose UI-builder prompts")
+    val name = params.requiredString("name")
+    val arguments = params["arguments"] as? JsonObject ?: JsonObject(emptyMap())
+    val text =
+      when (name) {
+        "review-design" -> reviewDesignPrompt(arguments.requiredString("designUrl"))
+        "design-status" -> designStatusPrompt(arguments.requiredString("designId"))
+        else -> throw McpRequestException("unknown prompt: $name")
+      }
+    return buildJsonObject {
+      put("description", "Compose Preview UI-builder workflow")
+      putJsonArray("messages") {
+        add(
+          buildJsonObject {
+            put("role", "user")
+            put(
+              "content",
+              buildJsonObject {
+                put("type", "text")
+                put("text", text)
+              },
+            )
+          }
+        )
+      }
+    }
+  }
+
+  private fun reviewDesignPrompt(designUrl: String): String =
+    """
+    Review the UI-builder design `$designUrl` at its server home.
+
+    1. Extract the design id from the URL if necessary, then call `ui_builder_get_design`.
+    2. If `ui_builder_list_comments` is advertised, read it before proposing edits. Report each
+       unresolved or unacknowledged thread; discussion belongs on the design, not in a new PR.
+    3. Inspect the visual result using `ui_builder_export` with `format: "png"` or
+       `ui_builder_render_native` when that tool is advertised. Be precise: neither is the editor
+       view. `ui_builder_view` (selection, reference overlay and comment pins) is not available
+       until compose-preview-server#1114 lands.
+    4. Summarize concrete attention items, separating observed render evidence from document-only
+       checks. Do not claim to have seen editor-only state you could not view.
+    """
+      .trimIndent()
+
+  private fun designStatusPrompt(designId: String): String =
+    """
+    Report the current status of UI-builder design `$designId`.
+
+    1. Call `ui_builder_get_design` and report its current revision and catalog pin.
+    2. If `ui_builder_list_comments` is advertised, report unresolved and unacknowledged comments.
+       If it is absent, say this host has no design-discussion surface.
+    3. Canonical home and temporary-copy tracking are not yet represented by the document contract:
+       compose-ui-builder#320 and compose-preview-server#1114 are prerequisites. Say that this
+       server cannot yet report either field; do not infer a home or claim there are no copies.
+    """
+      .trimIndent()
 
   // `JsonArrayBuilder.addAll` is still experimental; the UI-builder block below is the only caller.
   @OptIn(ExperimentalSerializationApi::class)
@@ -1922,16 +2030,18 @@ class ServeCatalogMcp(
     /**
      * Methods answered before any credential is looked at.
      *
-     * Deliberately only the three that disclose nothing about this host's catalogs.
-     * `resources/list` is NOT here even though a client calls it during its opening handshake and a
-     * `401` there is what makes the whole server read as "needs authentication": that listing
-     * enumerates real previews, and ungating the *method* would skip the scope check entirely and
-     * serve it on a token-gated box. The fix for the handshake belongs one layer down, where
-     * [ServeMachineAuthorization] knows whether this box publishes anonymously — on a `--public`
-     * box `preview` scope is satisfied by presenting nothing, so this answers; on a private box it
-     * still refuses.
+     * Deliberately only the methods that disclose nothing about this host's catalogs. Prompts are
+     * static workflow text; opening their discovery is necessary because prompt requests cannot
+     * carry the token returned by the in-session grant flow. `resources/list` is NOT here even
+     * though a client calls it during its opening handshake and a `401` there is what makes the
+     * whole server read as "needs authentication": that listing enumerates real previews, and
+     * ungating the *method* would skip the scope check entirely and serve it on a token-gated box.
+     * The fix for the handshake belongs one layer down, where [ServeMachineAuthorization] knows
+     * whether this box publishes anonymously — on a `--public` box `preview` scope is satisfied by
+     * presenting nothing, so this answers; on a private box it still refuses.
      */
-    private val UNGATED_METHODS = setOf("initialize", "ping", "tools/list")
+    private val UNGATED_METHODS =
+      setOf("initialize", "ping", "tools/list", "prompts/list", "prompts/get")
 
     /**
      * Tools callable without a grant — the two that exist to obtain one. Everything else in [tools]
