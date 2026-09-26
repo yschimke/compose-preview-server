@@ -233,7 +233,7 @@ services:
       # Attribute a request to the X-Forwarded-For peer rather than the proxy's own address, so the
       # per-caller budget above counts real visitors instead of lumping them under Caddy. ONLY safe
       # behind a proxy that appends the peer address it saw — which the `caddy` service below is.
-      SERVE_TRUST_FORWARDED_FOR: "${SERVE_TRUST_FORWARDED_FOR:-}"
+      SERVE_TRUST_FORWARDED_FOR: "${SERVE_TRUST_FORWARDED_FOR:-1}"
       # Re-check each catalog's design-artifacts branch every N seconds and re-fetch on change, so a
       # regenerated branch reaches this running server without a restart (Watchtower only rolls the
       # image). Empty ⇒ the CLI default (600s); set 0 to disable and serve the boot snapshot only.
