@@ -3883,7 +3883,15 @@ public class ServeRunner(
     if (!opened) {
       // The URL itself rather than "the Local URL above": that one is the root landing page, which
       // is not where this server was asked to open, and on a projectless builder is a 404.
-      System.err.println("browse: could not open a desktop browser; open $url")
+      // A supplied token stays out of the log here too, as it does in [ServeBanner].
+      val shown =
+        if (public || tokenOverride == null) url
+        else
+          ServeUrls.origin(localHost, port) +
+            effectiveOpenPath +
+            "?token=" +
+            ServeBanner.redact(token)
+      System.err.println("browse: could not open a desktop browser; open $shown")
     }
   }
 
@@ -5261,6 +5269,7 @@ public class ServeRunner(
         callbackBaseUrl = githubAuthCallbackBaseUrl,
         cookieDomain = githubAuthCookieDomain,
         oauthScope = githubAuthScope,
+        trustForwardedHeaders = trustForwardedFor,
       )
     )
   }
@@ -5268,49 +5277,27 @@ public class ServeRunner(
   private fun printBanner(moduleLabel: String, port: Int, token: String, previewCount: Int) {
     val exposed = ServeUrls.isExposed(host)
     val localHost = if (exposed || host == ServeUrls.LOOPBACK) ServeUrls.LOOPBACK else host
-    // Public mode is open, so the link carries no token; otherwise the token gates every route.
-    val localUrl =
-      if (public) "${ServeUrls.origin(localHost, port)}/"
-      else ServeUrls.landingUrl(ServeUrls.origin(localHost, port), token)
-
-    System.err.println("compose-preview serve — module $moduleLabel")
-    if (public) {
-      System.err.println("  ⚠ Public mode — every route is open (no token required).")
-    }
-    System.err.println("  Local:   $localUrl")
-    if (exposed) {
-      val networks = ServeUrls.siteLocalIpv4Addresses()
-      if (networks.isEmpty()) {
-        System.err.println("  Network: (no site-local IPv4 address found)")
-      } else {
-        networks.forEach { ip ->
-          System.err.println(
-            "  Network: ${ServeUrls.landingUrl(ServeUrls.origin(ip, port), token)}"
-          )
-        }
-      }
-      System.err.println(
-        "  ⚠ Bound to all interfaces — reachable by anyone on your LAN. The token in the link is " +
-          "the only gate; share it only with people you'd let see these previews."
+    ServeBanner.lines(
+        moduleLabel = moduleLabel,
+        localOrigin = ServeUrls.origin(localHost, port),
+        networkOrigins =
+          if (exposed) ServeUrls.siteLocalIpv4Addresses().map { ServeUrls.origin(it, port) }
+          else null,
+        token = token,
+        tokenSupplied = tokenOverride != null,
+        public = public,
+        previewCount = previewCount,
+        // The page this server is actually about, when the builder is a lane. `--no-open` prints
+        // no URL of its own and the root landing page has no session behind a projectless server,
+        // so without this line a headless caller was handed a 404 as the way in. `/ui-builder`
+        // exactly, as well as anything under it: that spelling is a registered route which
+        // redirects to `/ui-builder/`, so a caller who passes it explicitly must not be sent back
+        // to the root landing page — the very case this line exists to fix.
+        builderPath =
+          effectiveOpenPath.takeIf { uiBuilderLaneOpen && isUiBuilderPath(openBrowserPath) },
+        acceptDocs = acceptDocs,
       )
-    }
-    System.err.println("  Previews: $previewCount")
-    // The page this server is actually about, when the builder is a lane. `--no-open` prints no
-    // URL of its own and the root landing page has no session behind a projectless server, so
-    // without this line a headless caller was handed a 404 as the way in.
-    // `/ui-builder` exactly, as well as anything under it: that spelling is a registered route
-    // which redirects to `/ui-builder/`, so a caller who passes it explicitly must not be sent back
-    // to the root landing page — the very case this line exists to fix.
-    if (uiBuilderLaneOpen && isUiBuilderPath(openBrowserPath)) {
-      System.err.println("  Builder: ${localUrlFor(localHost, port, token, effectiveOpenPath)}")
-    }
-    if (acceptDocs) {
-      val docsUrl =
-        if (public) "${ServeUrls.origin(localHost, port)}/docs"
-        else "${ServeUrls.origin(localHost, port)}/docs?token=$token"
-      System.err.println("  Documents: $docsUrl (drop a .rc / Lottie, get an expiring link)")
-    }
-    System.err.println("  Press Ctrl-C to stop.")
+      .forEach(System.err::println)
   }
 
   /**

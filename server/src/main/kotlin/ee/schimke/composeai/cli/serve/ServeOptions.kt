@@ -318,7 +318,10 @@ public interface ServeOptions {
 
   /**
    * `--trust-forwarded-for`: rate-limit an anonymous caller by the **last** `X-Forwarded-For` entry
-   * rather than the socket peer.
+   * rather than the socket peer, and take the public host and scheme (absolute links, OAuth
+   * metadata, top-level site routing) from `X-Forwarded-Host` / `X-Forwarded-Proto`. Off, those are
+   * the request's own `Host` and connection scheme. `--github-auth-callback-base-url`, when set,
+   * still decides the sign-in origin either way.
    *
    * Opt-in, because the header is client-supplied: on a directly-exposed host trusting it would let
    * a caller mint a fresh identity per request and walk straight past the limit. Set it only when

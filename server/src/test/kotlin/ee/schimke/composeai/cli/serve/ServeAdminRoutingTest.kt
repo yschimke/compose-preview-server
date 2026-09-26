@@ -269,6 +269,18 @@ class ServeAdminRoutingTest {
   }
 
   @Test
+  fun `the admin token is read from the header, never from the query string`() {
+    // A query string lands in proxy access logs and browser history; the header does not. The
+    // right token in `?token=` is therefore no token at all, on reads and writes alike.
+    assertEquals(404, send("/admin/catalogs?token=$adminToken", token = null).first)
+    assertEquals(
+      404,
+      send("/admin/groups?token=$adminToken", method = "POST", body = "{}", token = null).first,
+    )
+    assertEquals(200, send("/admin/catalogs?token=wrong").first, "the header alone decides")
+  }
+
+  @Test
   fun `onboarding a project publishes the catalogs its repository already delivers`() {
     // The whole point of the flow: a URL, and nothing about the delivery contract.
     val (code, body) =

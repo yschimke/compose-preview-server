@@ -594,6 +594,8 @@ class ServeHttpRoutingTest {
         maxProjectableDocumentBytes = PROJECTION_LIMIT,
         rcPlayerWasmDir = rcWasmDir,
         catalogSessions = listOf("compose-m3"),
+        // The unfurl tests send `X-Forwarded-Proto` the way the deployment's Caddy does.
+        trustForwardedFor = true,
         catalogRefresh = { system, force ->
           refreshes += if (force) "$system!force" else system
           if (blockRefresh) {

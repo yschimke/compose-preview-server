@@ -110,6 +110,13 @@ data class ServeGithubAuthConfig(
    * `public_repo`, …) or writes is refused at startup.
    */
   val oauthScope: String? = null,
+  /**
+   * Read the visitor's host and scheme from `X-Forwarded-Host` / `X-Forwarded-Proto` rather than
+   * the request's own `Host` and connection scheme. Set from `--trust-forwarded-for`, the one
+   * switch that says this server sits behind a reverse proxy it can believe. Off, a request's
+   * forwarded headers are ignored and [callbackBaseUrl], when set, still decides the public origin.
+   */
+  val trustForwardedHeaders: Boolean = false,
 ) {
   init {
     require(clientId.isNotBlank()) { "GitHub OAuth client id is required" }
@@ -211,7 +218,7 @@ class ServeGithubAuth(
     // Null on the ordinary same-host sign-in, which is then byte-for-byte what it always was.
     val originHost = originHostFor(call, siteHosts)
     val state = signedState(nonce(), returnTo, originHost)
-    val secure = isSecure(call, config.callbackBaseUrl)
+    val secure = isSecure(call, config.callbackBaseUrl, config.trustForwardedHeaders)
     // A host-only `cp_gh_state` left from before a cookie domain was configured would sit beside
     // the new one, and a callback that sees two values refuses both. The browser stores the two
     // separately, so the order of these lines does not matter to it.
@@ -256,7 +263,7 @@ class ServeGithubAuth(
     // open redirect off the back of a real sign-in. Anything unrecognised falls back to a
     // same-origin relative return, which is where this route always sent people.
     val returnHost = statePayload.originHost?.takeIf { it in siteHosts && withinCookieDomain(it) }
-    val secure = isSecure(call, config.callbackBaseUrl)
+    val secure = isSecure(call, config.callbackBaseUrl, config.trustForwardedHeaders)
     val user =
       withContext(Dispatchers.IO) { verifier.verify(code, callbackUrl(call), config) }
         .getOrElse { failure ->
@@ -356,7 +363,7 @@ class ServeGithubAuth(
    */
   suspend fun RoutingContext.handleLogout() {
     val returnTo = safeReturnTo(call.request.queryParameters["return"] ?: "/")
-    val secure = isSecure(call, config.callbackBaseUrl)
+    val secure = isSecure(call, config.callbackBaseUrl, config.trustForwardedHeaders)
     call.response.cookies.append(authCookie("", maxAge = 0, secure = secure))
     clearHostOnlyVariant(call, AUTH_COOKIE, secure)
     call.respondRedirect(returnTo)
@@ -418,7 +425,7 @@ class ServeGithubAuth(
    */
   fun refreshSession(call: ApplicationCall, contentCacheControl: List<String> = emptyList()) {
     if (call.request.uri.substringBefore('?').startsWith(AUTH_PATH_PREFIX)) return
-    val secure = isSecure(call, config.callbackBaseUrl)
+    val secure = isSecure(call, config.callbackBaseUrl, config.trustForwardedHeaders)
     // Before the public-cache check: a request carrying two session values reads as signed out,
     // so its page is served with the anonymous (public) cache policy, and returning early there
     // would leave the stale host-only copy in place for as long as the visitor browses. The
@@ -586,7 +593,7 @@ class ServeGithubAuth(
 
   private fun callbackUrl(call: ApplicationCall?): String =
     config.callbackBaseUrl?.trimEnd('/')?.plus(CALLBACK_PATH)
-      ?: call?.let { externalOrigin(it) + CALLBACK_PATH }
+      ?: call?.let { externalOrigin(it, config.trustForwardedHeaders) + CALLBACK_PATH }
       ?: CALLBACK_PATH
 
   /**
@@ -600,7 +607,7 @@ class ServeGithubAuth(
    */
   private fun originHostFor(call: ApplicationCall, siteHosts: Set<String>): String? {
     if (!hasPinnedCallback || siteHosts.isEmpty()) return null
-    val host = requestHost(call) ?: return null
+    val host = requestHost(call, config.trustForwardedHeaders) ?: return null
     if (host == pinnedCallbackHost()) return null
     return host.takeIf { it in siteHosts && withinCookieDomain(it) }
   }
@@ -1515,30 +1522,49 @@ private fun io.ktor.server.request.ApplicationRequest.soleCookieValue(name: Stri
  *
  * The configured `callbackBaseUrl` is the authoritative answer where it exists — it is the operator
  * stating the public origin — and it is what a reverse-proxied deployment is told to set. Otherwise
- * fall back to the request's own view, which behind a proxy means `X-Forwarded-Proto`.
+ * fall back to the request's own view, which behind a trusted proxy means `X-Forwarded-Proto`.
  */
-internal fun isSecure(call: ApplicationCall, callbackBaseUrl: String? = null): Boolean =
+internal fun isSecure(
+  call: ApplicationCall,
+  callbackBaseUrl: String? = null,
+  trustForwardedHeaders: Boolean = false,
+): Boolean =
   callbackBaseUrl?.trim()?.takeIf { it.isNotEmpty() }?.startsWith("https://", ignoreCase = true)
-    ?: externalOrigin(call).startsWith("https://", ignoreCase = true)
+    ?: externalOrigin(call, trustForwardedHeaders).startsWith("https://", ignoreCase = true)
 
 /**
  * The externally visible hostname of this request, normalised for comparison against the configured
- * site hosts — `X-Forwarded-Host` first (Caddy sets it, and behind a proxy it is the only view of
- * the name the visitor typed), else `Host`. Null when what arrives isn't a hostname at all, so a
- * junk header matches no site and simply gets the pre-handoff behaviour.
+ * site hosts. `X-Forwarded-Host` first when [trustForwardedHeaders] is set (behind a proxy that
+ * rewrites `Host` it is the only view of the name the visitor typed), else `Host`. Null when what
+ * arrives isn't a hostname at all, so a junk header matches no site and simply gets the pre-handoff
+ * behaviour.
  */
-internal fun requestHost(call: ApplicationCall): String? {
-  val forwarded = call.request.headers["X-Forwarded-Host"]?.substringBefore(',')?.trim()
-  val raw = forwarded?.takeIf { it.isNotEmpty() } ?: call.request.headers[HttpHeaders.Host]
+internal fun requestHost(call: ApplicationCall, trustForwardedHeaders: Boolean = false): String? {
+  val forwarded = forwardedHeader(call, "X-Forwarded-Host", trustForwardedHeaders)
+  val raw = forwarded ?: call.request.headers[HttpHeaders.Host]
   return raw?.let { ServeSites.normalizeHost(it) }
 }
 
-private fun externalOrigin(call: ApplicationCall): String {
-  val forwardedProto = call.request.headers["X-Forwarded-Proto"]?.substringBefore(",")?.trim()
-  val forwardedHost = call.request.headers["X-Forwarded-Host"]?.substringBefore(",")?.trim()
-  val proto = forwardedProto?.takeIf { it.isNotBlank() } ?: call.request.origin.scheme
-  val host = forwardedHost?.takeIf { it.isNotBlank() } ?: call.request.host()
-  return "$proto://$host"
+/**
+ * The first value of a proxy-set `X-Forwarded-*` header, or null — always null unless
+ * [trustForwardedHeaders] says a reverse proxy this server believes sets it. A request that reaches
+ * the listener directly chooses these headers itself, so they are read only on that say-so.
+ */
+internal fun forwardedHeader(
+  call: ApplicationCall,
+  name: String,
+  trustForwardedHeaders: Boolean,
+): String? =
+  if (!trustForwardedHeaders) null
+  else call.request.headers[name]?.substringBefore(',')?.trim()?.takeIf { it.isNotEmpty() }
+
+private fun externalOrigin(call: ApplicationCall, trustForwardedHeaders: Boolean): String {
+  val proto =
+    forwardedHeader(call, "X-Forwarded-Proto", trustForwardedHeaders)?.takeIf {
+      it.equals("http", true) || it.equals("https", true)
+    } ?: call.request.origin.scheme
+  val host = forwardedHeader(call, "X-Forwarded-Host", trustForwardedHeaders) ?: call.request.host()
+  return "${proto.lowercase()}://$host"
 }
 
 private fun urlEncode(value: String): String = URLEncoder.encode(value, Charsets.UTF_8)
