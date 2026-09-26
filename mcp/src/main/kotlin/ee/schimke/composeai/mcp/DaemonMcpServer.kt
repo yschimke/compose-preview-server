@@ -5255,6 +5255,7 @@ class DaemonMcpServer(
       setOf(
         "render_preview",
         "render_matrix",
+        "diff_semantics",
       )
 
     /**

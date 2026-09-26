@@ -1,5 +1,12 @@
 package ee.schimke.composeai.cli.serve
 
+import ee.schimke.composeai.uibuilder.export.RemoteDocumentExportSupport
+import ee.schimke.composeai.uibuilder.service.UiBuilderServiceCall
+import ee.schimke.composeai.uibuilder.service.UiBuilderServicePort
+import ee.schimke.composeai.uibuilder.service.UiBuilderServiceResponse
+import ee.schimke.composeai.uibuilder.service.UiBuilderServiceUpdate
+import ee.schimke.composeai.uibuilder.service.UiBuilderSubscriptionCall
+import java.io.Closeable
 import java.util.concurrent.Semaphore
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -12,8 +19,19 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 
 class ServeCatalogMcpAppViewerTest {
-  private fun request(method: String, params: String = "{}"): JsonObject {
-    val mcp = ServeCatalogMcp(ServeSessionRegistry(open = { null }), Semaphore(1))
+  private fun request(
+    method: String,
+    params: String = "{}",
+    uiBuilder: ServeUiBuilderMcp? = null,
+    uiBuilderNative: Boolean = false,
+  ): JsonObject {
+    val mcp =
+      ServeCatalogMcp(
+        ServeSessionRegistry(open = { null }),
+        Semaphore(1),
+        uiBuilder = uiBuilder,
+        uiBuilderNative = uiBuilderNative,
+      )
     val body =
       Json.parseToJsonElement("""{"jsonrpc":"2.0","id":1,"method":"$method","params":$params}""")
         .jsonObject
@@ -108,7 +126,7 @@ class ServeCatalogMcpAppViewerTest {
   @Test
   fun `render tools declare the portable viewer without losing their text fallback`() {
     val tools = request("tools/list")["result"]!!.jsonObject["tools"]!!.jsonArray
-    val viewerTools = setOf("render_preview", "render_matrix")
+    val viewerTools = setOf("render_preview", "render_matrix", "diff_semantics")
     viewerTools.forEach { name ->
       val tool = tools.single { it.jsonObject["name"]!!.jsonPrimitive.content == name }.jsonObject
       assertEquals(
@@ -116,7 +134,42 @@ class ServeCatalogMcpAppViewerTest {
         tool["_meta"]!!.jsonObject["ui"]!!.jsonObject["resourceUri"]!!.jsonPrimitive.content,
       )
     }
-    val diff = tools.single { it.jsonObject["name"]!!.jsonPrimitive.content == "diff_semantics" }
-    assertTrue(diff.jsonObject["_meta"] == null)
+  }
+
+  @Test
+  fun `visual UI builder tools declare the portable viewer`() {
+    val service =
+      object : UiBuilderServicePort {
+        override suspend fun execute(call: UiBuilderServiceCall): UiBuilderServiceResponse =
+          UiBuilderServiceResponse.Catalogs(emptyList())
+
+        override fun subscribe(
+          call: UiBuilderSubscriptionCall,
+          listener: (UiBuilderServiceUpdate) -> Unit,
+        ): Closeable = Closeable {}
+      }
+    val native = UiBuilderNativePreviewLane { _, _ -> error("not called by tools/list") }
+    val tools =
+      request(
+          "tools/list",
+          uiBuilder = ServeUiBuilderMcp(service, nativePreview = native),
+          uiBuilderNative = true,
+        )["result"]!!
+        .jsonObject["tools"]!!
+        .jsonArray
+
+    buildSet {
+      add(ServeUiBuilderMcp.RENDER_NATIVE)
+      if (RemoteDocumentExportSupport.formats.isNotEmpty()) {
+        add(ServeUiBuilderMcp.EXPORT_DOCUMENT)
+      }
+    }
+      .forEach { name ->
+        val tool = tools.single { it.jsonObject["name"]!!.jsonPrimitive.content == name }.jsonObject
+        assertEquals(
+          ServeCatalogMcp.MCP_APP_VIEWER_URI,
+          tool["_meta"]!!.jsonObject["ui"]!!.jsonObject["resourceUri"]!!.jsonPrimitive.content,
+        )
+      }
   }
 }

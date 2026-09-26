@@ -2003,6 +2003,9 @@ class ServeCatalogMcp(
       setOf(
         "render_preview",
         "render_matrix",
+        "diff_semantics",
+        ServeUiBuilderMcp.EXPORT_DOCUMENT,
+        ServeUiBuilderMcp.RENDER_NATIVE,
       )
     private const val STORY_ID_SEPARATOR = "::"
     private val OBSERVATION_MODES =
