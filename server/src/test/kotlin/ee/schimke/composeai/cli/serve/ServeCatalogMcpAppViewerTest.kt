@@ -7,6 +7,7 @@ import ee.schimke.composeai.uibuilder.service.UiBuilderServiceResponse
 import ee.schimke.composeai.uibuilder.service.UiBuilderServiceUpdate
 import ee.schimke.composeai.uibuilder.service.UiBuilderSubscriptionCall
 import java.io.Closeable
+import java.util.Base64
 import java.util.concurrent.Semaphore
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -181,15 +182,16 @@ class ServeCatalogMcpAppViewerTest {
     val nativeResult = mcp.uiBuilderToolResult(ServeUiBuilderMcp.RENDER_NATIVE, native)
     assertVisualReply(
       nativeResult,
-      """{"designId":"demo","imageBase64":"data:image/png;base64,AQID","compileError":null}""",
+      """{"designId":"demo","compileError":null}""",
     )
     assertTrue(!nativeResult.toString().contains("pg_secret"))
 
     val exported =
       """{"callId":"ui_builder_export_document","response":{"artifact":{"format":"png","mediaType":"image/png","encoding":"base64","content":"AQID","contentDigest":"abc","diagnostics":[]}}}"""
+    val exportResult = mcp.uiBuilderToolResult(ServeUiBuilderMcp.EXPORT_DOCUMENT, exported)
     assertVisualReply(
-      mcp.uiBuilderToolResult(ServeUiBuilderMcp.EXPORT_DOCUMENT, exported),
-      exported,
+      exportResult,
+      """{"callId":"ui_builder_export_document","response":{"artifact":{"format":"png","mediaType":"image/png","encoding":"base64","contentDigest":"abc","diagnostics":[]}}}""",
     )
 
     val refused = """{"code":"COMPILE_FAILED","reasons":["bad source"]}"""
@@ -199,6 +201,23 @@ class ServeCatalogMcpAppViewerTest {
       refused,
       fallback["content"]!!.jsonArray.single().jsonObject["text"]!!.jsonPrimitive.content,
     )
+  }
+
+  @Test
+  fun `visual UI builder reply keeps a representative PNG inside the static viewer bound`() {
+    val mcp = ServeCatalogMcp(ServeSessionRegistry(open = { null }), Semaphore(1))
+    val png = Base64.getEncoder().encodeToString(ByteArray(160_000) { it.toByte() })
+    val native =
+      """{"designId":"demo","previewToken":"pg_secret","previewUrl":"/pg/pg_secret","imageBase64":"$png","compileError":null}"""
+    val result = mcp.uiBuilderToolResult(ServeUiBuilderMcp.RENDER_NATIVE, native).toString()
+
+    assertTrue(result.indexOf(png) >= 0, "PNG image block is missing")
+    assertEquals(result.indexOf(png), result.lastIndexOf(png), "PNG must appear exactly once")
+    val fragment =
+      Base64.getUrlEncoder()
+        .withoutPadding()
+        .encodeToString("""{"version":1,"result":$result}""".encodeToByteArray())
+    assertTrue(fragment.length <= 500_000, "static viewer fragment was ${fragment.length} bytes")
   }
 
   private fun assertVisualReply(result: JsonObject, original: String) {

@@ -1823,12 +1823,13 @@ class ServeCatalogMcp(
 
   /**
    * Keeps the UI-builder protocol reply as a text fallback while giving MCP App hosts an ordinary
-   * image block for the two calls that can carry a PNG. The native-render fallback omits its
-   * short-lived playground capability: the image is already inline, and a static MCP Apps host may
-   * serialize the complete tool result into a URL fragment. The viewer intentionally only
-   * understands MCP content blocks; making it know every UI-builder response schema would couple a
-   * reusable viewer to a second protocol. Without this adapter, successful renders appear as base64
-   * text.
+   * image block for the two calls that can carry a PNG. The text fallback omits both the binary
+   * field represented by that block and the native render's short-lived playground capability: a
+   * static MCP Apps host may serialize the complete tool result into a bounded URL fragment, where
+   * duplicating the PNG would exceed the limit and carrying the capability would leak it. The
+   * viewer intentionally only understands MCP content blocks; making it know every UI-builder
+   * response schema would couple a reusable viewer to a second protocol. Without this adapter,
+   * successful renders appear as base64 text.
    */
   internal fun uiBuilderToolResult(name: String, text: String): JsonObject {
     val fallback = uiBuilderViewerFallback(name, text)
@@ -1852,10 +1853,23 @@ class ServeCatalogMcp(
   }
 
   private fun uiBuilderViewerFallback(name: String, text: String): String {
-    if (name != ServeUiBuilderMcp.RENDER_NATIVE) return text
     return runCatching {
         val reply = JSON.parseToJsonElement(text) as? JsonObject ?: return@runCatching text
-        JsonObject(reply - "previewToken" - "previewUrl").toString()
+        when (name) {
+          ServeUiBuilderMcp.RENDER_NATIVE ->
+            JsonObject(reply - "previewToken" - "previewUrl" - "imageBase64").toString()
+          ServeUiBuilderMcp.EXPORT_DOCUMENT -> {
+            val response = reply["response"] as? JsonObject ?: return@runCatching text
+            val artifact = response["artifact"] as? JsonObject ?: return@runCatching text
+            JsonObject(
+                reply +
+                  ("response" to
+                    JsonObject(response + ("artifact" to JsonObject(artifact - "content"))))
+              )
+              .toString()
+          }
+          else -> text
+        }
       }
       .getOrDefault(text)
   }
