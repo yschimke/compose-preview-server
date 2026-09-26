@@ -2255,6 +2255,10 @@ class ServeHttpServer(
         // The A2UI playground: a textarea bound to the catalog's `document` string knob, POSTed to
         // the route above. 404 on a catalog that declares no such preview.
         get("/{system}/a2ui") { handleA2uiPlayground(sessionInPath = true) }
+        // The root-mounted form, for a viewer served at `/p/{name}` (the default session, a
+        // query-selected one, or a top-level catalog site), whose playground link has no system
+        // segment to carry.
+        get("/a2ui") { handleA2uiPlayground(sessionInPath = false) }
 
         // The motion lane, beside `/render` rather than inside it: a capture is not a render of a
         // preview, it is a second artifact about the same component, and folding it into the render
@@ -11250,9 +11254,13 @@ class ServeHttpServer(
       sessionId,
       onMissing = { respondNotFoundHtml("That design system was not found on this server.") },
     ) { renderHost ->
-      val preview = ServeWeb.a2uiDocumentPreview(renderHost.previews)
+      val requested = call.request.queryParameters["preview"]
+      val preview = ServeWeb.a2uiDocumentPreview(renderHost.previews, requested)
       if (preview == null) {
-        respondNotFoundHtml("This design system declares no A2UI document preview.")
+        respondNotFoundHtml(
+          if (requested.isNullOrBlank()) "This design system declares no A2UI document preview."
+          else "That preview is not an A2UI document preview."
+        )
         return@withLeasedSession
       }
       markGeneration("static-page", DYNAMIC_RESOURCE_CACHE_CONTROL)
