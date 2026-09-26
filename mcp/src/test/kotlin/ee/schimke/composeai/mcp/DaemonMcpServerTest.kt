@@ -193,6 +193,10 @@ class DaemonMcpServerTest {
     assertThat(content["text"]!!.jsonPrimitive.content)
       .contains("{ name: overlayToolName, arguments: argumentsValue }")
     assertThat(content["text"]!!.jsonPrimitive.content).contains("await request('tools/list', {})")
+    assertThat(
+        content["text"]!!.jsonPrimitive.content.indexOf("notify('ui/notifications/initialized'")
+      )
+      .isLessThan(content["text"]!!.jsonPrimitive.content.indexOf("void discoverViewerActions();"))
     assertThat(content["text"]!!.jsonPrimitive.content)
       .contains("message.method === 'notifications/tools/list_changed'")
     assertThat(content["text"]!!.jsonPrimitive.content)

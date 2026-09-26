@@ -5,6 +5,7 @@ let resourceUpdates = 0;
 const activeSubscriptions = new Set();
 let toolCalls = 0;
 let toolLists = 0;
+let appInitialized = false;
 
 async function png(path) {
   const bytes = new Uint8Array(await (await fetch(path)).arrayBuffer());
@@ -21,6 +22,11 @@ window.addEventListener("message", async (event) => {
   if (event.source !== frame.contentWindow) return;
   const message = event.data;
   if (!message || message.jsonrpc !== "2.0" || !message.method) return;
+  if (message.method === "ui/notifications/initialized") {
+    appInitialized = true;
+    window.__mcpAppInitialized = true;
+    return;
+  }
   if (message.method === "ui/initialize") {
     send({
       jsonrpc: "2.0",
@@ -345,6 +351,14 @@ window.addEventListener("message", async (event) => {
   if (message.method === "tools/list") {
     toolLists += 1;
     window.__mcpToolListCount = toolLists;
+    if (mode === "a11y-handshake" && !appInitialized) {
+      send({
+        jsonrpc: "2.0",
+        id: message.id,
+        error: { code: -32002, message: "App initialization is incomplete" },
+      });
+      return;
+    }
     send({
       jsonrpc: "2.0",
       id: message.id,

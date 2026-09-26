@@ -701,10 +701,10 @@
       });
       hostResourceSubscriptions = result?.hostCapabilities?.serverResources?.subscribe === true;
       hostServerTools = result?.hostCapabilities?.serverTools != null;
-      await discoverViewerActions();
       initialized = true;
       notify('ui/notifications/initialized', {});
       updateAccessibilityAction();
+      void discoverViewerActions();
     } catch (error) {
       use.hidden = true;
       refresh.hidden = true;

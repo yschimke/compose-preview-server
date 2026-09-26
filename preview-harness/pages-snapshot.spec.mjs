@@ -4511,6 +4511,11 @@ for (const fixture of listPageFixtures()) {
             viewer.locator('#canvas img[alt="Compose preview with accessibility overlay"]'),
           ).toBeVisible();
         }
+        if (fixture === "mcp-app-viewer-a11y-handshake") {
+          await page.waitForFunction(() => window.__mcpAppInitialized === true);
+          expect(await page.evaluate(() => window.__mcpToolListCount)).toBe(1);
+          await expect(viewer.locator("#a11y")).toBeEnabled();
+        }
       }
 
       // The design page's renders are `loading="lazy"` — a live catalog serves one daemon
