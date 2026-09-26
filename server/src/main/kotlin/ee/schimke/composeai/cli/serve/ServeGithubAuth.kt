@@ -23,9 +23,12 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import okhttp3.Credentials
 import okhttp3.FormBody
+import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
 
 data class ServeGithubAuthConfig(
   val clientId: String,
@@ -254,10 +257,15 @@ class ServeGithubAuth(
     // open redirect off the back of a real sign-in. Anything unrecognised falls back to a
     // same-origin relative return, which is where this route always sent people.
     val returnHost = statePayload.originHost?.takeIf { it in siteHosts && withinCookieDomain(it) }
+    val secure = isSecure(call, config.callbackBaseUrl)
     val user =
       withContext(Dispatchers.IO) { verifier.verify(code, callbackUrl(call), config) }
-        .getOrElse {
-          call.respondText("GitHub sign-in failed.", status = HttpStatusCode.Forbidden)
+        .getOrElse { failure ->
+          if (failure is GitHubGrantTooBroadException) {
+            respondToTooBroadGrant(failure, statePayload.returnTo, returnHost, secure)
+          } else {
+            call.respondText("GitHub sign-in failed.", status = HttpStatusCode.Forbidden)
+          }
           return
         }
     // This is the moment GitHub actually vouched for the visitor, so it anchors the absolute cap
@@ -271,12 +279,44 @@ class ServeGithubAuth(
         authenticatedAt,
         guest = user.guest,
       )
-    val secure = isSecure(call, config.callbackBaseUrl)
     call.response.cookies.append(authCookie(session, maxAge = SESSION_TTL_SECONDS, secure = secure))
     call.response.cookies.append(stateCookie("", maxAge = 0, secure = secure))
+    call.response.cookies.append(regrantCookie("", maxAge = 0, secure = secure))
     call.respondRedirect(
       if (returnHost == null) statePayload.returnTo
       else "https://$returnHost${statePayload.returnTo}"
+    )
+  }
+
+  /**
+   * The visitor's GitHub authorization for this app carries more than [ALLOWED_SCOPES] — almost
+   * always a `repo` grant approved back when sign-in still asked for it. GitHub keeps handing a
+   * returning visitor the scopes they approved before, so asking for less does not shrink it.
+   *
+   * [GitHubOAuthVerifier.verify] has already tried to revoke that whole authorization. When it
+   * could, the visitor is sent straight back through sign-in, where GitHub shows a fresh consent
+   * screen for [requestedScope] alone. That happens once: a [REGRANT_COOKIE] marks the retry, so an
+   * authorization that somehow comes back broad again is explained instead of looping. When the
+   * revoke failed, the visitor is told how to remove it themselves.
+   */
+  private suspend fun RoutingContext.respondToTooBroadGrant(
+    failure: GitHubGrantTooBroadException,
+    returnTo: String,
+    returnHost: String?,
+    secure: Boolean,
+  ) {
+    val alreadyRetried = call.request.cookieValue(REGRANT_COOKIE) != null
+    if (failure.revoked && !alreadyRetried) {
+      call.response.cookies.append(regrantCookie("1", maxAge = STATE_TTL_SECONDS, secure = secure))
+      val start = "$START_PATH?return=${urlEncode(returnTo)}"
+      call.respondRedirect(if (returnHost == null) start else "https://$returnHost$start")
+      return
+    }
+    call.respondText(
+      "Your GitHub authorization for this site grants more than it needs " +
+        "(${failure.extraScopes.sorted().joinToString(" ")}). Revoke it at " +
+        "https://github.com/settings/applications, then sign in again.",
+      status = HttpStatusCode.Forbidden,
     )
   }
 
@@ -696,6 +736,9 @@ class ServeGithubAuth(
   private fun stateCookie(value: String, maxAge: Long, secure: Boolean): Cookie =
     sessionCookie(STATE_COOKIE, value, maxAge, secure)
 
+  private fun regrantCookie(value: String, maxAge: Long, secure: Boolean): Cookie =
+    sessionCookie(REGRANT_COOKIE, value, maxAge, secure)
+
   private fun authCookie(value: String, maxAge: Long, secure: Boolean): Cookie =
     sessionCookie(AUTH_COOKIE, value, maxAge, secure)
 
@@ -757,6 +800,9 @@ class ServeGithubAuth(
     /** The sixth session field, present only on a guest cookie. */
     private const val GUEST_FLAG = "guest"
     private const val STATE_COOKIE = "cp_gh_state"
+
+    /** Marks the one automatic re-sign-in after an over-broad grant was revoked. */
+    private const val REGRANT_COOKIE = "cp_gh_regrant"
     /**
      * Enough to read `/user` and a public repo's payload. No repository write, no private repos.
      */
@@ -812,8 +858,19 @@ class ServeGithubAuth(
     internal const val SESSION_REFRESH_AFTER_SECONDS = SESSION_TTL_SECONDS / 2
     private val SECURE_RANDOM = SecureRandom()
 
+    /**
+     * [value] when it is a same-origin path, else `/`. Browsers read `\` as `/` and drop tabs and
+     * newlines in http(s) URLs, so `/\evil.com` or `/\t/evil.com` would still leave the origin as
+     * `//evil.com`; any backslash or control character is refused along with `//`.
+     */
     fun safeReturnTo(value: String): String =
-      if (value.startsWith("/") && !value.startsWith("//")) value else "/"
+      if (
+        value.startsWith("/") &&
+          !value.startsWith("//") &&
+          value.none { it == '\\' || it.isISOControl() }
+      )
+        value
+      else "/"
 
     fun tokensMatch(expected: String, provided: String?): Boolean {
       if (provided == null) return false
@@ -841,13 +898,29 @@ class GitHubOAuthVerifier(private val client: OkHttpClient = OkHttpClient()) {
     redirectUri: String,
     config: ServeGithubAuthConfig,
   ): Result<GitHubOAuthUser> = runCatching {
-    val token = exchangeCode(code, redirectUri, config)
+    val grant = exchangeCode(code, redirectUri, config)
+    val token = grant.accessToken
+    val extraScopes = grant.scopes - ServeGithubAuth.ALLOWED_SCOPES
+    if (extraScopes.isNotEmpty()) {
+      // Revoking the grant revokes this token with it, and every other token the visitor issued
+      // to this app — which is exactly the old `repo` consent we want gone.
+      throw GitHubGrantTooBroadException(extraScopes, revoked = revokeGrant(token, config))
+    }
+    try {
+      identify(token, config)
+    } finally {
+      // Nothing keeps the token past this call, so nothing should be able to use it either.
+      revokeToken(token, config)
+    }
+  }
+
+  private fun identify(token: String, config: ServeGithubAuthConfig): GitHubOAuthUser {
     val login = fetchLogin(token)
     if (!isAdmitted(token, login, config.allowedUsers, config.allowedOrgs)) {
       if (!config.allowGuests) error("GitHub user $login is not allowed")
       // A guest is an identity and nothing more. No repository is asked about, so no access bit
       // exists for a later gate to misread.
-      return@runCatching GitHubOAuthUser(
+      return GitHubOAuthUser(
         login,
         repositoryAccess = false,
         imageRepositoryAccess = false,
@@ -855,7 +928,7 @@ class GitHubOAuthVerifier(private val client: OkHttpClient = OkHttpClient()) {
       )
     }
     val repositoryAccess = fetchRepositoryAccess(token, config.repository, login)
-    GitHubOAuthUser(
+    return GitHubOAuthUser(
       login,
       repositoryAccess = repositoryAccess,
       // Same token, same rule, one more round trip — and only when the operator actually gated a
@@ -997,7 +1070,7 @@ class GitHubOAuthVerifier(private val client: OkHttpClient = OkHttpClient()) {
     code: String,
     redirectUri: String,
     config: ServeGithubAuthConfig,
-  ): String {
+  ): GitHubGrant {
     val body =
       FormBody.Builder()
         .add("client_id", config.clientId)
@@ -1014,8 +1087,41 @@ class GitHubOAuthVerifier(private val client: OkHttpClient = OkHttpClient()) {
     return client.newCall(request).execute().use { response ->
       if (!response.isSuccessful) error("token exchange failed: ${response.code}")
       val payload = JSON.decodeFromString(GitHubTokenResponse.serializer(), response.body.string())
-      payload.accessToken ?: error("token exchange did not return access_token")
+      GitHubGrant(
+        accessToken = payload.accessToken ?: error("token exchange did not return access_token"),
+        scopes = payload.scope.orEmpty().split(',', ' ').filter { it.isNotBlank() }.toSet(),
+      )
     }
+  }
+
+  /**
+   * `DELETE /applications/{client_id}/grant`: removes the visitor's whole authorization of this
+   * app, every token included, so their next sign-in shows a fresh consent screen. True on success.
+   */
+  private fun revokeGrant(token: String, config: ServeGithubAuthConfig): Boolean =
+    deleteApplicationCredential("grant", token, config)
+
+  /** `DELETE /applications/{client_id}/token`: revokes this one token, leaving the grant. */
+  private fun revokeToken(token: String, config: ServeGithubAuthConfig): Boolean =
+    deleteApplicationCredential("token", token, config)
+
+  private fun deleteApplicationCredential(
+    kind: String,
+    token: String,
+    config: ServeGithubAuthConfig,
+  ): Boolean {
+    val body =
+      JSON.encodeToString(GitHubAccessTokenBody.serializer(), GitHubAccessTokenBody(token))
+        .toRequestBody("application/json".toMediaType())
+    val request =
+      Request.Builder()
+        .url("https://api.github.com/applications/${urlEncode(config.clientId)}/$kind")
+        .header(HttpHeaders.Authorization, Credentials.basic(config.clientId, config.clientSecret))
+        .header(HttpHeaders.Accept, "application/vnd.github+json")
+        .delete(body)
+        .build()
+    return runCatching { client.newCall(request).execute().use { it.code == 204 } }
+      .getOrDefault(false)
   }
 
   private fun fetchLogin(token: String): String {
@@ -1141,7 +1247,23 @@ class GitHubOAuthVerifier(private val client: OkHttpClient = OkHttpClient()) {
 }
 
 @Serializable
-private data class GitHubTokenResponse(@SerialName("access_token") val accessToken: String? = null)
+private data class GitHubTokenResponse(
+  @SerialName("access_token") val accessToken: String? = null,
+  /** What the visitor actually granted, comma-separated — which can be more than was asked for. */
+  val scope: String? = null,
+)
+
+private data class GitHubGrant(val accessToken: String, val scopes: Set<String>)
+
+@Serializable
+private data class GitHubAccessTokenBody(@SerialName("access_token") val accessToken: String)
+
+/**
+ * The token GitHub issued carries [extraScopes] beyond [ServeGithubAuth.ALLOWED_SCOPES], so sign-in
+ * refused it. [revoked] says whether the visitor's authorization of this app was revoked with it.
+ */
+class GitHubGrantTooBroadException(val extraScopes: Set<String>, val revoked: Boolean) :
+  IllegalStateException("GitHub granted more than sign-in allows: ${extraScopes.joinToString(" ")}")
 
 @Serializable private data class GitHubUserResponse(val login: String)
 

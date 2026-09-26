@@ -93,6 +93,11 @@ class ServeAuthTest {
     assertEquals("/compose-m3/p/Button", ServeGithubAuth.safeReturnTo("/compose-m3/p/Button"))
     assertEquals("/", ServeGithubAuth.safeReturnTo("https://evil.example/"))
     assertEquals("/", ServeGithubAuth.safeReturnTo("//evil.example/"))
+    // Browsers normalise `\` to `/` and strip tabs/newlines, so each of these is `//evil.example`.
+    assertEquals("/", ServeGithubAuth.safeReturnTo("/\\evil.example/"))
+    assertEquals("/", ServeGithubAuth.safeReturnTo("/\t/evil.example/"))
+    assertEquals("/", ServeGithubAuth.safeReturnTo("/\n/evil.example/"))
+    assertEquals("/a?b=%5C", ServeGithubAuth.safeReturnTo("/a?b=%5C"))
   }
 
   @Test
