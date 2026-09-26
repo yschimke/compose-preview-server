@@ -17,6 +17,19 @@ import kotlin.test.assertTrue
  */
 class ServeDocFormatsTest {
 
+  /** The vendored Lottie player is the light build: SVG only, without the expression engine. */
+  @Test
+  fun `the vendored Lottie player is the light build`() {
+    val player =
+      checkNotNull(javaClass.getResourceAsStream(ServeDocFormats.LOTTIE.playerResource)) {
+          "missing ${ServeDocFormats.LOTTIE.playerResource}"
+        }
+        .use { it.readBytes().decodeToString() }
+    assertTrue(player.contains("loadAnimation"), "not a Lottie player")
+    assertTrue("eval(" !in player, "expected the light Lottie build")
+    assertTrue("expression_function" !in player, "expected the light Lottie build")
+  }
+
   @Test
   fun `remote compose document is detected and summarised from its header`() {
     val doc =
