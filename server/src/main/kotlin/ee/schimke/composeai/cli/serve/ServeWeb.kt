@@ -9448,6 +9448,172 @@ ${captureControlsHtml().prependIndent("          ")}
     )
   }
 
+  /** The knob key the A2UI playground edits: `previewOverrideString("document", …)`. */
+  const val A2UI_DOCUMENT_KNOB: String = "document"
+
+  /** Longer than this, or multi-line, and a string knob is edited in a `<textarea>`. */
+  private const val LONG_TEXT_KNOB_CHARS = 120
+
+  private fun isLongTextKnob(default: String): Boolean =
+    default.contains('\n') || default.length > LONG_TEXT_KNOB_CHARS
+
+  /**
+   * The preview the A2UI playground drives: the first one declaring a **string** knob named
+   * [A2UI_DOCUMENT_KNOB]. Null when the catalog has none, which is what makes `/{system}/a2ui` a
+   * 404 there. Keyed on the declaration rather than a preview id so a catalog can move or rename
+   * its playground preview without this server learning about it.
+   */
+  fun a2uiDocumentPreview(previews: List<ServePreview>): ServePreview? =
+    previews.firstOrNull { preview ->
+      a2uiDocumentKnob(preview) != null
+    }
+
+  private fun a2uiDocumentKnob(
+    preview: ServePreview
+  ): ee.schimke.composeai.data.overrides.PreviewOverrideDeclaration? =
+    preview.overrides.firstOrNull {
+      it.seedKey == A2UI_DOCUMENT_KNOB &&
+        it.type == ee.schimke.composeai.data.overrides.PreviewOverrideType.STRING
+    }
+
+  /**
+   * `GET /{system}/a2ui`: edit an A2UI document and render it through the catalog's own renderer.
+   *
+   * A textarea prefilled with the preview's declared default, POSTed as `knob.document` to `POST
+   * <base>/render/<id>.png` — a document is kilobytes, which a GET query cannot carry. The PNG
+   * comes back as a blob URL; a refusal is shown in place with what to do about it. Ctrl/Cmd+Enter
+   * renders, and so does a pause in typing when auto-render is ticked.
+   */
+  fun a2uiPlaygroundPage(
+    moduleLabel: String,
+    preview: ServePreview,
+    token: String,
+    sessionId: String?,
+    basePath: String,
+    isPublic: Boolean,
+    /** Whether this catalog can render an override at all; a static bundle cannot. */
+    liveAvailable: Boolean,
+    unfurl: UnfurlMetadata? = null,
+    version: String? = null,
+  ): String {
+    val suffix = querySuffix(linkQuery(token, sessionId, basePath, isPublic))
+    val encodedId = WebEscaping.urlEncodeSegment(preview.id)
+    val renderUrl = "$basePath/render/$encodedId.png$suffix"
+    val viewerUrl = "$basePath/p/$encodedId$suffix"
+    val default = a2uiDocumentKnob(preview)?.default?.let(::overrideValueText).orEmpty()
+    val esc = WebEscaping::htmlEscape
+    val staticNote =
+      if (liveAvailable) ""
+      else
+        """
+        <p class="cp-pg-warn">This catalog is a static bundle: it can show the published render but
+          cannot render an edited document. Point it at a live catalog to use the playground.</p>"""
+    // Built by concatenation around the textarea: the default document is multi-line, and a
+    // `trimIndent()` over the interpolated page would re-indent it.
+    val head =
+      """
+      <link rel="stylesheet" href="${assetHref("playground.css")}">
+      <h1 class="cp-head">A2UI playground</h1>
+      <p class="cp-sub">Edit an A2UI document — JSON Lines of v0.9 messages, a JSON array of them, or
+        a <code>{"components":[…]}</code> shorthand — and render it with
+        <code>${esc(moduleLabel)}</code>'s own components. Rendering an edited document is a live
+        render, so it needs a signed-in session or a <code>live</code> agent grant.
+        <a href="${esc(viewerUrl)}">Open the ${esc(preview.label)} preview →</a></p>
+      <div class="cp-pg">$staticNote
+        <div class="cp-pg-bar">
+          <label class="cp-pg-modelabel"><input id="a2ui-auto" type="checkbox"> Auto-render</label>
+          <span class="cp-muted">Ctrl/⌘ + Enter renders</span>
+          <button id="a2ui-run" class="cp-doc-btn cp-pg-run" type="button">Render</button>
+        </div>
+      """
+        .trimIndent()
+    val tail =
+      """
+        <div id="a2ui-status" class="cp-pg-status" role="status" hidden></div>
+        <img id="a2ui-image" class="cp-pg-image" alt="Rendered A2UI document" hidden>
+      </div>
+      <script>${a2uiPlaygroundScript(renderUrl)}</script>
+      """
+        .trimIndent()
+    return document(
+      title = "A2UI playground — ${moduleLabel} — compose-preview",
+      unfurlDescription = "Edit an A2UI document and render it with the catalog's components.",
+      unfurl = unfurl,
+      version = version,
+      navSuffix = suffix,
+      body =
+        head +
+          "\n  <textarea id=\"a2ui-source\" class=\"cp-pg-source\" spellcheck=\"false\"" +
+          " aria-label=\"A2UI document\">\n" +
+          esc(default) +
+          "</textarea>\n" +
+          tail,
+    )
+  }
+
+  private fun a2uiPlaygroundScript(renderUrl: String): String =
+    """
+    (function () {
+      var source = document.getElementById("a2ui-source");
+      var run = document.getElementById("a2ui-run");
+      var auto = document.getElementById("a2ui-auto");
+      var status = document.getElementById("a2ui-status");
+      var image = document.getElementById("a2ui-image");
+      var url = ${jsString(renderUrl)};
+      var seq = 0, timer = null, objectUrl = null;
+      function show(text, isError) {
+        status.hidden = !text;
+        status.className = "cp-pg-status" + (isError ? " cp-doc-error" : "");
+        status.textContent = text || "";
+      }
+      function hint(res, body) {
+        if (res.status === 401 || res.status === 403)
+          return "Not allowed to render an edited document (HTTP " + res.status + "). Sign in, or " +
+            "ask for a live grant: compose-preview auth request --scope live. " + body;
+        if (res.status === 413) return "The document is larger than the 1 MiB render limit.";
+        if (res.status === 503) {
+          var after = res.headers.get("Retry-After");
+          return "The renderer is busy" + (after ? "; retry in " + after + "s." : ".") + " " + body;
+        }
+        return "HTTP " + res.status + ": " + body;
+      }
+      function render() {
+        var mine = ++seq;
+        show("Rendering…", false);
+        run.disabled = true;
+        fetch(url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ "knob.$A2UI_DOCUMENT_KNOB": source.value }),
+          credentials: "same-origin"
+        }).then(function (res) {
+          if (!res.ok) return res.text().then(function (t) { throw new Error(hint(res, t)); });
+          return res.blob();
+        }).then(function (blob) {
+          if (mine !== seq) return;
+          if (objectUrl) URL.revokeObjectURL(objectUrl);
+          objectUrl = URL.createObjectURL(blob);
+          image.src = objectUrl;
+          image.hidden = false;
+          show("", false);
+        }, function (e) {
+          if (mine !== seq) return;
+          show(e.message || String(e), true);
+        }).then(function () { if (mine === seq) run.disabled = false; });
+      }
+      run.addEventListener("click", render);
+      source.addEventListener("keydown", function (e) {
+        if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); render(); }
+      });
+      source.addEventListener("input", function () {
+        if (!auto.checked) return;
+        if (timer) clearTimeout(timer);
+        timer = setTimeout(render, 800);
+      });
+    })();
+    """
+      .trimIndent()
+
   /**
    * `GET /admin/ui-builder`: the operator's screen over every UI-builder design on the host.
    *
@@ -19170,6 +19336,16 @@ ${ServeSiteIcon.linkTags().prependIndent("        ")}
             </label>
             """
               .trimIndent()
+          } else if (inputType == "text" && isLongTextKnob(authorDefault)) {
+            // A multi-line or long string default — an A2UI document, a paragraph of copy — is
+            // unreadable in a one-line field. Same `.cp-knob` control, so the viewer JS (which
+            // reads `.value` off any control) needs no branch. Concatenated rather than a
+            // `trimIndent()` template: the value is multi-line, and trimming indent over it would
+            // change the text. The newline after the open tag is the one the HTML parser drops,
+            // so a value that itself starts with one keeps it.
+            "<label>$label\n  <textarea $attrs rows=\"6\" spellcheck=\"false\"$dis>\n" +
+              value +
+              "</textarea>\n</label>"
           } else {
             """
             <label>${label}

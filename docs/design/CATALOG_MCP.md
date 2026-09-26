@@ -392,6 +392,39 @@ Resource URIs use `compose-preview://catalog/<catalog>/<preview-id>`. Storybook-
 qualified as `<catalog>::<preview-id>` so identical preview ids in different catalogs cannot
 collide.
 
+### Large knob values: `POST /render` and the A2UI playground
+
+A knob value can be too large for a URL — the A2UI catalog's `A2UI document` preview renders
+`previewOverrideString("document", …)`, and a document is kilobytes of JSON Lines. Three ways in,
+all the same render:
+
+- **`POST /{system}/render/{id}.png`** takes the GET's parameters in the body: `application/json`
+  (an object of string, number or boolean values keyed exactly like the query) or
+  `application/x-www-form-urlencoded`. The body is merged over the query and handed to the GET's
+  handler, so the product suffixes, the `live` gate (403 for a grant below it, as on the GET), the
+  admission and the response are the GET's own. Bodies over 1 MiB — the MCP endpoint's bound — are a
+  413.
+
+  ```sh
+  jq -Rs '{"knob.document": .}' card.jsonl |
+    curl -sf -H "X-Compose-Preview-Token: $COMPOSE_PREVIEW_TOKEN" \
+      -H 'Content-Type: application/json' --data-binary @- \
+      "https://preview.coo.ee/a2ui-catalog/render/ee.schimke.a2uicatalog.playground.PlaygroundKt.A2uiDocumentPreview.png" \
+      -o card.png
+  ```
+
+- **`GET /{system}/a2ui`** is a playground page for a catalog with a preview declaring a string
+  `document` knob (404 otherwise): the declared default in a textarea, Render (or Ctrl/⌘+Enter, or
+  auto-render on a pause), the PNG shown in place, and a refusal explained where it happens. The
+  viewer's Overrides panel also edits any multi-line or long (>120 chars) string knob in a textarea.
+- **`compose-preview-server a2ui render --document <file|-> [--out <png|->]`** does the same from a
+  shell through this endpoint: it finds the preview by its `document` knob (`list_previews` now
+  reports each preview's declared `knobs`), or takes `--preview`, calls `render_preview` with
+  `observe=png` and the document as `knob.document`, and writes the PNG. `--catalog` defaults to
+  `a2ui-catalog`, `--server` to `$COMPOSE_PREVIEW_SERVER` or the local default; the credential comes
+  from `$COMPOSE_PREVIEW_TOKEN`, and without a `live` grant the command asks a human for one, as
+  `design` does. A render the catalog answered from its published bytes is a failure, not a file.
+
 ## Relationship to UI-builder MCP
 
 One endpoint, two authorization vocabularies:
