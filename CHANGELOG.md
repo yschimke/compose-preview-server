@@ -1,5 +1,20 @@
 # Changelog
 
+## [3.73.0](https://github.com/yschimke/compose-preview-server/compare/v3.72.0...v3.73.0) (2026-09-26)
+
+
+### Features
+
+* **deploy:** default the UI builder to m3-catalog alone ([#1115](https://github.com/yschimke/compose-preview-server/issues/1115)) ([5d5f2fb](https://github.com/yschimke/compose-preview-server/commit/5d5f2fb8b35fd8846bc30a24864060c8c4e0dff9))
+* **serve:** follow a delegating preview's imported call into its own file ([#1121](https://github.com/yschimke/compose-preview-server/issues/1121)) ([efff579](https://github.com/yschimke/compose-preview-server/commit/efff579467a6b9e1e4a1ed02e3f68acf83bb00b0))
+* **serve:** open any A2UI document preview in the playground, and link to it ([#1122](https://github.com/yschimke/compose-preview-server/issues/1122)) ([54e8d33](https://github.com/yschimke/compose-preview-server/commit/54e8d33ddc65f63751c5d3b74e56690a3eac8cea))
+
+
+### Bug Fixes
+
+* **serve:** report what the followed-call closure leaves out as residue ([#1123](https://github.com/yschimke/compose-preview-server/issues/1123)) ([66da42d](https://github.com/yschimke/compose-preview-server/commit/66da42dabde842a48696ac94c83c1df0fc16e825))
+* **serve:** serve a published catalog's A2UI playground from its live bundle ([#1118](https://github.com/yschimke/compose-preview-server/issues/1118)) ([99253f0](https://github.com/yschimke/compose-preview-server/commit/99253f08b744c025ace329ea72469cf896d25dab))
+
 ## [3.72.0](https://github.com/yschimke/compose-preview-server/compare/v3.71.0...v3.72.0) (2026-09-26)
 
 
