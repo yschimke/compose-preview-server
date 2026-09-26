@@ -120,8 +120,8 @@ services:
       SERVE_GITHUB_AUTH_ORGS: "${SERVE_GITHUB_AUTH_ORGS:-}"
       # `1` admits accounts outside SERVE_GITHUB_AUTH_USERS / _ORGS as read-only UI-builder guests.
       SERVE_GITHUB_AUTH_GUESTS: "${SERVE_GITHUB_AUTH_GUESTS:-}"
-      # Empty derives the OAuth scope from the gating repo's visibility (public ⇒ read:user,
-      # private ⇒ read:user repo). Only set this when a GitHub App or org policy demands one.
+      # Empty asks for read:user only (plus read:org with SERVE_GITHUB_AUTH_ORGS). Only read-only
+      # identity scopes (read:user, user:email, read:org) are accepted; repo is refused.
       SERVE_GITHUB_AUTH_SCOPE: "${SERVE_GITHUB_AUTH_SCOPE:-}"
       # Optional ADDITIONS to that file, for one extra catalog without editing config:
       # <system>@<owner>/<repo>, comma-separated. Empty (the default) = the file decides.

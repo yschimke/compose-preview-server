@@ -71,7 +71,6 @@ class ServeGithubSessionTest {
       ),
       verifier = GitHubOAuthVerifier(fakeGitHub),
       clock = clock,
-      anonymousClient = fakeGitHub,
     )
 
   private val registry = ServeSessionRegistry(open = { null })

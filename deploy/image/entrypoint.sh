@@ -206,8 +206,8 @@ if [[ -n "${SERVE_GITHUB_AUTH_CLIENT_ID:-}" ||
   # ask for edit access through an agent grant. Guests count as signed out everywhere else.
   [[ "${SERVE_GITHUB_AUTH_GUESTS:-}" == "1" || "${SERVE_GITHUB_AUTH_GUESTS:-}" == "true" ]] &&
     args+=(--github-auth-guests)
-  # Unset derives the scope from the gating repo's visibility (public -> read:user, private ->
-  # read:user repo). Only set this when a GitHub App or org policy demands a specific scope.
+  # Unset asks for read:user only (plus read:org with SERVE_GITHUB_AUTH_ORGS). Only read-only
+  # identity scopes (read:user, user:email, read:org) are accepted; repo is refused at startup.
   [[ -n "${SERVE_GITHUB_AUTH_SCOPE:-}" ]] && args+=(--github-auth-scope "${SERVE_GITHUB_AUTH_SCOPE}")
 fi
 # The producer-trust store is CONFIG, on the same /config volume as catalogs.json — for the

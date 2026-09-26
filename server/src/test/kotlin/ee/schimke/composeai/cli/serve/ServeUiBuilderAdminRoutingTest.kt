@@ -458,7 +458,6 @@ class ServeUiBuilderAdminRoutingTest {
         repository = "yschimke/compose-preview-server",
       ),
       verifier = GitHubOAuthVerifier(fakeGitHub),
-      anonymousClient = fakeGitHub,
     )
   }
 

@@ -194,7 +194,6 @@ class ServeGithubImageRepoSessionTest {
       ServeGithubAuth(
         config(IMAGE_REPO),
         verifier = GitHubOAuthVerifier(client),
-        anonymousClient = client,
       )
     val server =
       ServeHttpServer(

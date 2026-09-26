@@ -46,9 +46,9 @@ data class ServeGithubAuthConfig(
    * Null, or equal to [repository], means there is no second bit to compute: the flag mirrors
    * [GitHubOAuthUser.repositoryAccess] and no extra GitHub call is made.
    *
-   * It also widens the consent asked for at sign-in when it needs to: the token has to be able to
-   * read BOTH repositories, so a private one here forces the wider scope even beside a public
-   * [repository]. See [ServeGithubAuth.requestedScope].
+   * It never widens the consent asked for at sign-in: the token only ever carries
+   * [ServeGithubAuth.USER_SCOPE], so a **private** repository here reads as no access at all. See
+   * [ServeGithubAuth.requestedScope].
    */
   val imageRepository: String? = null,
   val allowedUsers: Set<String> = emptySet(),
@@ -101,9 +101,10 @@ data class ServeGithubAuthConfig(
    */
   val cookieDomain: String? = null,
   /**
-   * Overrides the OAuth scope entirely. Null (the default) derives it from the gating repo's
-   * visibility — see [ServeGithubAuth.requestedScope], which is what an operator wants unless their
-   * GitHub App or org policy needs something specific.
+   * Overrides the OAuth scope. Null (the default) asks for [ServeGithubAuth.USER_SCOPE] — see
+   * [ServeGithubAuth.requestedScope]. Only the read-only identity scopes in
+   * [ServeGithubAuth.ALLOWED_SCOPES] are accepted; anything that reaches repositories (`repo`,
+   * `public_repo`, …) or writes is refused at startup.
    */
   val oauthScope: String? = null,
 ) {
@@ -115,6 +116,14 @@ data class ServeGithubAuthConfig(
     }
     require(repository.matches(Regex("[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+"))) {
       "GitHub auth repository must be owner/repo"
+    }
+    val unsupportedScopes =
+      oauthScope.orEmpty().split(' ', ',').filter { it.isNotBlank() } -
+        ServeGithubAuth.ALLOWED_SCOPES
+    require(unsupportedScopes.isEmpty()) {
+      "GitHub auth scope ${unsupportedScopes.joinToString(" ")} is not allowed: sign-in only asks " +
+        "for read-only identity scopes (${ServeGithubAuth.ALLOWED_SCOPES.joinToString(" ")}), " +
+        "never repository access"
     }
     require(allowedOrgs.all { it.matches(GITHUB_ORG) }) {
       "GitHub auth orgs must be organization logins such as 'google'"
@@ -187,8 +196,6 @@ class ServeGithubAuth(
   private val config: ServeGithubAuthConfig,
   private val verifier: GitHubOAuthVerifier = GitHubOAuthVerifier(),
   private val clock: Clock = Clock.systemUTC(),
-  /** Unauthenticated client for the one-shot visibility probe behind [requestedScope]. */
-  private val anonymousClient: OkHttpClient = OkHttpClient(),
 ) {
   /**
    * `GET /auth/github/start`. [siteHosts] are the top-level site hostnames this server answers for
@@ -483,72 +490,29 @@ class ServeGithubAuth(
   }
 
   /**
-   * The OAuth scope to ask a visitor to consent to.
+   * The OAuth scope to ask a visitor to consent to: who they are, and nothing about their
+   * repositories.
    *
-   * This used to be a flat `read:user repo`. `repo` is GitHub's *full control of private
-   * repositories* — read and write, code and issues and settings, across every private repo the
-   * visitor can touch — and we were asking every signer-in for it in order to answer one question
-   * about one repository. On a public `--github-auth-repo` it buys nothing at all: `GET
-   * /repos/{owner}/{repo}`, which is now the only call the access check needs
-   * ([fetchRepositoryAccess]), is readable there by a token carrying no repo scope whatsoever.
+   * This used to be `read:user repo` whenever the gating repo was private — or merely *looked*
+   * private to an anonymous probe that a rate limit or network blip could fail. `repo` is GitHub's
+   * *full control of private repositories*: read and write, code, issues and settings, across every
+   * private repo the visitor can reach. Asking every signer-in for that to answer one question
+   * about one repository is far more than sign-in needs, so it is never asked for.
    *
-   * So the scope follows the gating repo: `read:user` alone when it is public, `read:user repo`
-   * when it is private or we couldn't tell. Classic OAuth apps have no read-only repository scope,
-   * so the private case genuinely needs `repo` — there is nothing narrower to ask for.
+   * [USER_SCOPE] is enough for everything the callback does: `GET /user` for the login, and `GET
+   * /repos/{owner}/{repo}` ([GitHubOAuthVerifier.fetchRepositoryAccess]), which reports the
+   * visitor's own `permissions` on a **public** repo to a token with no repository scope at all. A
+   * private gating repo is invisible to such a token, so it simply grants no access — the safe side
+   * for a gate on running code.
    *
-   * [ServeGithubAuthConfig.oauthScope] overrides this outright for a deployment that needs
-   * something else.
+   * `read:org` is added when `--github-auth-orgs` is set, so a private org membership can be read;
+   * it is read-only and names nothing about repositories. [ServeGithubAuthConfig.oauthScope]
+   * replaces the base, but only with scopes from [ALLOWED_SCOPES].
    */
   internal fun requestedScope(): String {
-    val base =
-      config.oauthScope?.trim()?.takeIf { it.isNotEmpty() }
-        ?: if (gatingReposArePublic.value) PUBLIC_REPO_SCOPE else PRIVATE_REPO_SCOPE
-    // A private org membership is only readable with `read:org`, and the one reason to ask for it
-    // is `--github-auth-orgs` — so it rides on top of an override too: an operator who names orgs
-    // and pins a scope that forgot it would otherwise admit only the orgs' public members.
+    val base = config.oauthScope?.trim()?.takeIf { it.isNotEmpty() } ?: USER_SCOPE
     val needsOrg = config.allowedOrgs.isNotEmpty() && ORG_SCOPE !in base.split(' ', ',')
     return if (needsOrg) "$base $ORG_SCOPE" else base
-  }
-
-  /**
-   * Whether **every** gating repo is publicly readable, probed **anonymously** and once.
-   *
-   * Anonymous on purpose: this runs before anyone has signed in, so there is no token to use, and a
-   * 200 from an unauthenticated read is exactly the definition of "public". Anything else — 404, a
-   * network failure, a rate limit — is treated as not-public, which asks for the *wider* scope.
-   * That is the safe direction here: over-requesting inconveniences the visitor, while
-   * under-requesting would fail their sign-in outright.
-   *
-   * Every repo, not just the sign-in one, because the scope has to cover every question the
-   * callback will ask this token — and since [ServeGithubAuthConfig.imageRepository] arrived that
-   * is two repositories, not one. A public sign-in repo beside a **private** image repo is the
-   * trap: `read:user` alone reads the first fine, cannot read the second, so
-   * [fetchRepositoryAccess] answers false for the image lane and nobody could ever be granted
-   * `images` — a feature that silently never works rather than one that visibly fails. So the
-   * narrow scope is asked for only when the anonymous probe succeeds on all of them.
-   *
-   * Note this is the opposite default from the visibility check inside [fetchRepositoryAccess],
-   * deliberately. That one decides whether `read` is good enough to run code, so its unknown case
-   * has to fall to the stricter *access* rule; this one only decides what to ask consent for, so
-   * its unknown case falls to the wider *scope*. Same principle, opposite directions.
-   */
-  private val gatingReposArePublic: Lazy<Boolean> = lazy {
-    val repositories = buildList {
-      add(config.repository)
-      config.imageRepository?.takeIf { it.isNotBlank() }?.let(::add)
-    }
-      .distinctBy { it.lowercase() }
-    repositories.all { repository ->
-      runCatching {
-          val request =
-            Request.Builder()
-              .url("https://api.github.com/repos/$repository")
-              .header(HttpHeaders.Accept, "application/vnd.github+json")
-              .build()
-          anonymousClient.newCall(request).execute().use { it.isSuccessful }
-        }
-        .getOrDefault(false)
-    }
   }
 
   /**
@@ -796,16 +760,16 @@ class ServeGithubAuth(
     /**
      * Enough to read `/user` and a public repo's payload. No repository write, no private repos.
      */
-    const val PUBLIC_REPO_SCOPE = "read:user"
+    const val USER_SCOPE = "read:user"
+
+    /** Added to the scope when `--github-auth-orgs` is set, so private membership reads. */
+    const val ORG_SCOPE = "read:org"
 
     /**
-     * A private gating repo needs `repo` to read at all. Classic OAuth apps have no read-only
-     * repository scope, so this is already the narrowest thing that works.
+     * Every scope sign-in may ask for, override included: read-only identity, nothing that reaches
+     * a repository.
      */
-    const val PRIVATE_REPO_SCOPE = "read:user repo"
-
-    /** Added to the derived scope when `--github-auth-orgs` is set, so private membership reads. */
-    const val ORG_SCOPE = "read:org"
+    val ALLOWED_SCOPES: Set<String> = setOf(USER_SCOPE, "user:email", ORG_SCOPE)
 
     /** Both OAuth routes, so [refreshSession] can leave the cookie-minting ones alone. */
     private const val AUTH_PATH_PREFIX = "/auth/github/"
@@ -1090,7 +1054,8 @@ class GitHubOAuthVerifier(private val client: OkHttpClient = OkHttpClient()) {
     // `GET /repos/{owner}/{repo}` answers both halves at once: `private` is the visibility, and
     // `permissions` is *this* user's access as GitHub computes it. That matters for scope as much
     // as for round-trips — this endpoint is readable on a public repo by a token carrying no repo
-    // scope at all, where `/collaborators/{login}/permission` is not. See [scopeFor].
+    // scope at all, where `/collaborators/{login}/permission` is not. See
+    // [ServeGithubAuth.requestedScope].
     repositoryView(token, repository)?.let { repo ->
       val access = repo.permissions ?: return@let // no permissions block — fall through below
       return if (repo.private == true) access.any() else access.write()

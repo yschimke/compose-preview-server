@@ -121,37 +121,17 @@ class GitHubOrgMembershipTest {
   }
 
   @Test
-  fun `orgs add read org to the derived and to a pinned scope`() {
-    val publicProbe =
-      OkHttpClient.Builder()
-        .addInterceptor { chain ->
-          Response.Builder()
-            .request(chain.request())
-            .protocol(Protocol.HTTP_1_1)
-            .code(200)
-            .message("OK")
-            .body("{}".toResponseBody("application/json".toMediaType()))
-            .build()
-        }
-        .build()
+  fun `orgs add read org to the default and to a pinned scope`() {
+    assertEquals("read:user read:org", ServeGithubAuth(config()).requestedScope())
     assertEquals(
-      "read:user read:org",
-      ServeGithubAuth(config(), anonymousClient = publicProbe).requestedScope(),
-    )
-    assertEquals(
-      "read:user repo read:org",
-      ServeGithubAuth(config(scope = "read:user repo"), anonymousClient = publicProbe)
-        .requestedScope(),
+      "user:email read:org",
+      ServeGithubAuth(config(scope = "user:email")).requestedScope(),
     )
     assertEquals(
       "read:user read:org",
-      ServeGithubAuth(config(scope = "read:user read:org"), anonymousClient = publicProbe)
-        .requestedScope(),
+      ServeGithubAuth(config(scope = "read:user read:org")).requestedScope(),
     )
-    assertEquals(
-      "read:user",
-      ServeGithubAuth(config(orgs = emptySet()), anonymousClient = publicProbe).requestedScope(),
-    )
+    assertEquals("read:user", ServeGithubAuth(config(orgs = emptySet())).requestedScope())
   }
 
   @Test

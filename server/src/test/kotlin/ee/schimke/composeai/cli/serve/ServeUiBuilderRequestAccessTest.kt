@@ -97,7 +97,6 @@ class ServeUiBuilderRequestAccessTest {
         allowGuests = true,
       ),
       verifier = GitHubOAuthVerifier(fakeGitHub),
-      anonymousClient = fakeGitHub,
     )
 
   private val registry = ServeSessionRegistry(open = { null })
