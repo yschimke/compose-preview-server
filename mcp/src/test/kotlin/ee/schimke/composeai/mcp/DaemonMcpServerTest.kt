@@ -194,6 +194,8 @@ class DaemonMcpServerTest {
       .contains("{ name: overlayToolName, arguments: argumentsValue }")
     assertThat(content["text"]!!.jsonPrimitive.content).contains("await request('tools/list', {})")
     assertThat(content["text"]!!.jsonPrimitive.content)
+      .contains("message.method === 'notifications/tools/list_changed'")
+    assertThat(content["text"]!!.jsonPrimitive.content)
       .contains("/(^|__|\\/)render_preview_overlay$/")
     assertThat(content["text"]!!.jsonPrimitive.content)
       .contains("Accessibility overlay unavailable; original preview shown.")
