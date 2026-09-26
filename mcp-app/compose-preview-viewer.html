@@ -295,7 +295,7 @@
     }, RESOURCE_POLL_INTERVAL_MS);
   }
 
-  async function connectResourceUpdates(uri) {
+  async function connectResourceUpdates(uri, initialReadPending) {
     const generation = ++resourceSubscriptionGeneration;
     stopResourcePolling();
     if (subscribedResourceUri === uri) return;
@@ -313,7 +313,7 @@
       }
       if (generation !== resourceSubscriptionGeneration || resourceResult?.resource?.uri !== uri) return;
       if (!hostResourceSubscriptions) {
-        scheduleResourcePoll(uri);
+        if (!initialReadPending) scheduleResourcePoll(uri);
         return;
       }
       await request('resources/subscribe', { uri });
@@ -331,7 +331,7 @@
       // MCP Apps 2026-01-26 exposes resources/read but not subscription proxying. A future host
       // may advertise serverResources.subscribe; if that path fails, retain today's bounded poll.
       hostResourceSubscriptions = false;
-      scheduleResourcePoll(uri);
+      if (!initialReadPending) scheduleResourcePoll(uri);
       console.debug('Resource subscriptions are unavailable; polling instead:', error);
     }
   }
@@ -397,12 +397,12 @@
     const value = data(result);
     const image = png(result);
     const resource = link(result);
+    const cells = Array.isArray(value.cells) && value.cells;
     if (resource) {
       resourceResult = { result, resource, value };
       refresh.hidden = staticMode;
-      if (!staticMode) connectResourceUpdates(resource.uri);
+      if (!staticMode) connectResourceUpdates(resource.uri, !image && !cells);
     }
-    const cells = Array.isArray(value.cells) && value.cells;
     if (cells) {
       if (image && !cells.some(cell => typeof cell?.png === 'string' && cell.png.length > 0)) {
         renderImage(image, value, resource);

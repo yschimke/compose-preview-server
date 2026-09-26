@@ -4366,7 +4366,12 @@ for (const fixture of listPageFixtures()) {
             "The host returned no PNG for resource",
           );
         } else if (!fixture.startsWith("mcp-app-viewer-static")) {
-          await expect(viewer.locator('#canvas img[alt="Rendered Compose preview"]')).toBeVisible();
+          await expect(viewer.locator('#canvas img[alt="Rendered Compose preview"]')).toBeVisible({
+            timeout: fixture === "mcp-app-viewer-resource" ? 8_000 : undefined,
+          });
+          if (fixture === "mcp-app-viewer-resource") {
+            expect(await page.evaluate(() => window.__mcpReadCount)).toBe(1);
+          }
         }
         if (fixture === "mcp-app-viewer-refresh") {
           const image = viewer.locator('#canvas img[alt="Rendered Compose preview"]');

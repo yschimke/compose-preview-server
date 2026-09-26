@@ -106,6 +106,8 @@ class ServeCatalogMcpAppViewerTest {
     assertTrue(html.contains("const RESOURCE_READ_TIMEOUT_MS = 65000;"))
     assertTrue(html.contains("RESOURCE_READ_TIMEOUT_MS,"))
     assertTrue(html.contains("const RESOURCE_POLL_INTERVAL_MS = 5000;"))
+    assertTrue(html.contains("connectResourceUpdates(resource.uri, !image && !cells)"))
+    assertTrue(html.contains("if (!initialReadPending) scheduleResourcePoll(uri);"))
     assertTrue(html.contains("result?.hostCapabilities?.serverResources?.subscribe === true"))
     assertTrue(html.contains("await request('resources/subscribe', { uri });"))
     assertTrue(html.contains("await request('resources/unsubscribe', { uri });"))

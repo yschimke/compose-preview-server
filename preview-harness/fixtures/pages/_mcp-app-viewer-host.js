@@ -116,7 +116,7 @@ window.addEventListener("message", async (event) => {
   if (message.method === "resources/read") {
     reads += 1;
     window.__mcpReadCount = reads;
-    await new Promise((resolve) => setTimeout(resolve, 150));
+    await new Promise((resolve) => setTimeout(resolve, mode === "slow-resource" ? 5250 : 150));
     if (mode === "fallback") {
       send({
         jsonrpc: "2.0",
