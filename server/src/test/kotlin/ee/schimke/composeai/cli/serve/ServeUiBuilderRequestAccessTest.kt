@@ -2,12 +2,18 @@ package ee.schimke.composeai.cli.serve
 
 import ee.schimke.composeai.agentgrants.AgentGrantCapability
 import ee.schimke.composeai.agentgrants.AgentGrantScope
+import ee.schimke.composeai.uibuilder.protocol.CatalogReferenceV1
+import ee.schimke.composeai.uibuilder.protocol.DesignAccessActionV1
+import ee.schimke.composeai.uibuilder.protocol.DesignAccessRoleV1
+import ee.schimke.composeai.uibuilder.protocol.DesignActorAccessV1
+import ee.schimke.composeai.uibuilder.protocol.DesignListItemV1
 import ee.schimke.composeai.uibuilder.protocol.ExportDesignRequestV1
 import ee.schimke.composeai.uibuilder.protocol.ExportFormatV1
 import ee.schimke.composeai.uibuilder.protocol.HttpRequestEnvelopeV1
 import ee.schimke.composeai.uibuilder.protocol.UiBuilderRequestV1
 import ee.schimke.composeai.uibuilder.service.UiBuilderServiceCall
 import ee.schimke.composeai.uibuilder.service.UiBuilderServicePort
+import ee.schimke.composeai.uibuilder.service.UiBuilderServiceRequest
 import ee.schimke.composeai.uibuilder.service.UiBuilderServiceResponse
 import ee.schimke.composeai.uibuilder.service.UiBuilderServiceUpdate
 import ee.schimke.composeai.uibuilder.service.UiBuilderSubscriptionCall
@@ -41,6 +47,9 @@ class ServeUiBuilderRequestAccessTest {
     explicitNulls = false
   }
 
+  /** Who the next sign-in is: the requester, unless a test signs the approver in. */
+  @Volatile private var login = "stranger"
+
   private val fakeGitHub =
     OkHttpClient.Builder()
       .addInterceptor { chain ->
@@ -48,7 +57,7 @@ class ServeUiBuilderRequestAccessTest {
         val body =
           when (request.url.encodedPath) {
             "/login/oauth/access_token" -> """{"access_token":"token"}"""
-            "/user" -> """{"login":"stranger"}"""
+            "/user" -> """{"login":"$login"}"""
             else -> """{"private":false,"permissions":{"push":true}}"""
           }
         Response.Builder()
@@ -66,6 +75,12 @@ class ServeUiBuilderRequestAccessTest {
     object : UiBuilderServicePort {
       override suspend fun execute(call: UiBuilderServiceCall): UiBuilderServiceResponse {
         calls += call
+        if (call.request is UiBuilderServiceRequest.ListDesigns) {
+          return UiBuilderServiceResponse.Designs(
+            listOf(listItem("design", "Checkout screen")),
+            null,
+          )
+        }
         return UiBuilderServiceResponse.Catalogs(emptyList())
       }
 
@@ -127,7 +142,8 @@ class ServeUiBuilderRequestAccessTest {
     runCatching { registry.close() }
   }
 
-  private fun signIn(): String {
+  private fun signIn(who: String = "stranger"): String {
+    login = who
     val (location, stateCookie) =
       noRedirect.newCall(Request.Builder().url("$base/auth/github/start").build()).execute().use {
         it.header("Location").orEmpty() to it.header("Set-Cookie").orEmpty()
@@ -146,15 +162,22 @@ class ServeUiBuilderRequestAccessTest {
       }
   }
 
-  private fun page(cookie: String?): Pair<Int, String> {
-    val builder = Request.Builder().url("$base${ServeHttpServer.UI_BUILDER_REQUEST_ACCESS_PATH}")
+  private fun page(cookie: String?, query: String = ""): Pair<Int, String> {
+    val builder =
+      Request.Builder().url("$base${ServeHttpServer.UI_BUILDER_REQUEST_ACCESS_PATH}$query")
     if (cookie != null) builder.header("Cookie", cookie)
     return noRedirect.newCall(builder.build()).execute().use { it.code to it.body.string() }
   }
 
-  private fun submit(cookie: String, csrf: String?, ttl: String = "3600"): Pair<Int, String> {
+  private fun submit(
+    cookie: String,
+    csrf: String?,
+    ttl: String = "3600",
+    design: String? = null,
+  ): Pair<Int, String> {
     val form = FormBody.Builder().add("ttl", ttl)
     if (csrf != null) form.add("csrf", csrf)
+    if (design != null) form.add("design", design)
     return noRedirect
       .newCall(
         Request.Builder()
@@ -169,6 +192,24 @@ class ServeUiBuilderRequestAccessTest {
 
   private fun csrfOf(html: String): String =
     html.substringAfter("name=\"csrf\" value=\"").substringBefore("\"")
+
+  /** The approver's session: an allowed member of this box, unlike the requester. */
+  private fun approver(): String = signIn(who = "yschimke").also { login = "stranger" }
+
+  /** The approval page, opened by a signed-in approver. */
+  private fun approvalPage(cookie: String, requestId: String): String =
+    noRedirect
+      .newCall(
+        Request.Builder()
+          .url("$base${ServeAgentGrants.approvalPath(requestId)}")
+          .header("Cookie", cookie)
+          .build()
+      )
+      .execute()
+      .use {
+        assertEquals(200, it.code)
+        it.body.string()
+      }
 
   private fun post(cookie: String, actorId: String, request: UiBuilderRequestV1): Int {
     val body =
@@ -415,4 +456,127 @@ class ServeUiBuilderRequestAccessTest {
     assertEquals("github:stranger", calls.last().actor.actorId)
     assertEquals("github:yschimke", calls.last().actor.onBehalfOfActorId)
   }
+
+  @Test
+  fun `a request made from a design names it, and the approval page names it too`() {
+    val cookie = signIn()
+    val (status, form) = page(cookie, "?design=design")
+    assertEquals(200, status)
+    assertTrue(form.contains("name=\"design\" value=\"design\""), "the form carries the design")
+
+    assertEquals(303, submit(cookie, csrfOf(form), design = "design").first)
+    val pending = grants.pendingRequests().single()
+    val approver = approver()
+    assertEquals(setOf("design"), pending.designIds)
+    assertTrue(landing(cookie, pending.id).contains("<code>design</code> only"))
+
+    val approval = approvalPage(approver, pending.id)
+    assertTrue(approval.contains("Edit access to"), "the page says what the access is to")
+    assertTrue(
+      approval.contains("Checkout screen (<code>design</code>)"),
+      "by the design's title and id",
+    )
+    assertTrue(approval.contains("name=\"designScope\" value=\"requested\" checked"))
+    assertTrue(approval.contains("name=\"designScope\" value=\"all\""))
+  }
+
+  @Test
+  fun `a request not made from a design asks for no design, and its page offers no choice`() {
+    val cookie = signIn()
+    submit(cookie, csrfOf(page(cookie).second))
+    val pending = grants.pendingRequests().single()
+    val approver = approver()
+    assertTrue(pending.designIds.isEmpty())
+    val approval = approvalPage(approver, pending.id)
+    assertFalse(approval.contains("designScope"))
+    assertFalse(approval.contains("Edit access to"))
+  }
+
+  @Test
+  fun `a malformed design is refused rather than dropped`() {
+    val cookie = signIn()
+    assertEquals(400, page(cookie, "?design=%2E%2E%2Fx").first)
+    assertEquals(400, submit(cookie, csrfOf(page(cookie).second), design = "../x").first)
+    assertTrue(grants.pendingRequests().isEmpty())
+  }
+
+  @Test
+  fun `a grant for one design lends its approver's authority on that design only`() {
+    val cookie = signIn()
+    submit(cookie, csrfOf(page(cookie, "?design=design").second), design = "design")
+    val pending = grants.pendingRequests().single()
+    grants.approve(
+      pending.id,
+      approvedBy = "@yschimke",
+      scope = AgentGrantScope.PREVIEW,
+      ttlSeconds = 3600,
+      capabilities = pending.requestedCapabilities,
+      approvedByActorId = "github:yschimke",
+    )
+
+    assertEquals(
+      200,
+      post(cookie, "github:stranger", ExportDesignRequestV1("design", format = ExportFormatV1.SVG)),
+    )
+    assertEquals("github:yschimke", calls.last().actor.onBehalfOfActorId)
+
+    assertEquals(
+      200,
+      post(cookie, "github:stranger", ExportDesignRequestV1("other", format = ExportFormatV1.SVG)),
+    )
+    val other = calls.last().actor
+    assertEquals("github:stranger", other.actorId)
+    assertNull(other.onBehalfOfActorId, "another design is reached as the requester alone")
+  }
+
+  @Test
+  fun `the approver may lend every design instead of the one asked for`() {
+    val cookie = signIn()
+    submit(cookie, csrfOf(page(cookie, "?design=design").second), design = "design")
+    val pending = grants.pendingRequests().single()
+    val approver = approver()
+    val approval = approvalPage(approver, pending.id)
+    val decided =
+      noRedirect
+        .newCall(
+          Request.Builder()
+            .url("$base${ServeAgentGrants.approvalPath(pending.id)}")
+            .header("Cookie", approver)
+            .header("Origin", base)
+            .post(
+              FormBody.Builder()
+                .add("csrf", csrfOf(approval))
+                .add("action", "approve")
+                .add("scope", "preview")
+                .add("capability", AgentGrantCapability.UI_BUILDER_WRITE.wire)
+                .add("ttl", "3600")
+                .add("designScope", "all")
+                .build()
+            )
+            .build()
+        )
+        .execute()
+        .use { it.code }
+    assertEquals(303, decided)
+    val grant = assertNotNull(grants.activeGrantForRequester("github:stranger"))
+    assertTrue(grant.designIds.isEmpty())
+  }
+
+  private fun listItem(id: String, title: String) =
+    DesignListItemV1(
+      designId = id,
+      title = title,
+      revision = 1,
+      accessRevision = 1,
+      catalogPin = CatalogReferenceV1("remote-m3", "v", "v", "v"),
+      createdAtEpochMillis = 1,
+      updatedAtEpochMillis = 2,
+      ownerActorId = "github:yschimke",
+      requesterAccess =
+        DesignActorAccessV1(
+          "github:yschimke",
+          DesignAccessRoleV1.OWNER,
+          DesignAccessActionV1.entries,
+        ),
+    )
 }

@@ -209,9 +209,10 @@ class ServeMachineAuthorization(
     fun ServeAgentGrantStore.Grant.authorized(): Decision.Authorized =
       Decision.Authorized(
         // A grant a person asked for themselves acts under their name, so the design history says
-        // who did it; an agent's grant keeps its own fingerprinted identity.
-        actorId =
-          requesterActorId.takeIf { it.isNotBlank() } ?: ServeAgentGrants.agentActorId(fingerprint),
+        // who did it; an agent's grant keeps its own fingerprinted identity. A grant that names its
+        // designs is held to them where the design service is called — see
+        // [ServeUiBuilderGrantScope] — because only there is the design known.
+        actorId = holderActorId,
         onBehalfOfActorId = approvedByActorId.takeIf { it.isNotBlank() },
       )
   }

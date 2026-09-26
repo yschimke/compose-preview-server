@@ -98,6 +98,11 @@ class ServeAgentGrantStore(
      * which speaks for nobody until approved. See [Grant.requesterActorId].
      */
     val requesterActorId: String = "",
+    /**
+     * The designs this request is for, when it was opened from one — see [Grant.designIds]. Empty
+     * for a request that names none, which asks for everything the approver can edit.
+     */
+    val designIds: Set<String> = emptySet(),
     val createdAtMillis: Long,
     val expiresAtMillis: Long,
     @Volatile var state: State = State.PENDING,
@@ -165,9 +170,30 @@ class ServeAgentGrantStore(
      * own signed-in session carries the grant for as long as it lives ([activeGrantForRequester]).
      */
     val requesterActorId: String = "",
+    /**
+     * The designs this grant lends its approver's authority on. Empty — every grant minted before
+     * the field existed, every agent grant, and an approval the approver widened — lends it on
+     * every design the approver can reach, as grants always did.
+     *
+     * Non-empty, the delegation applies to these designs only: on any other design the holder has
+     * its own identity's access and nothing more. [ServeUiBuilderGrantScope] is where that is
+     * applied, at the design service port.
+     */
+    val designIds: Set<String> = emptySet(),
     val issuedAtMillis: Long,
     val expiresAtMillis: Long,
   ) {
+    /**
+     * How the rest of the server names whoever holds this grant: the requester who asked for it
+     * themselves, or the agent's fingerprinted identity. [ServeMachineAuthorization] hands a route
+     * this as its actor id.
+     */
+    val holderActorId: String
+      get() = requesterActorId.ifBlank { ServeAgentGrants.agentActorId(fingerprint) }
+
+    /** True when this grant lends its approver's authority on [designId] — see [designIds]. */
+    fun coversDesign(designId: String): Boolean = designIds.isEmpty() || designId in designIds
+
     /** Every scope this grant confers, least-privileged first — the poll response's `scopes`. */
     val scopes: List<AgentGrantScope>
       get() = AgentGrantScope.upTo(scope)
@@ -226,6 +252,7 @@ class ServeAgentGrantStore(
     requestedTtlSeconds: Long,
     requestedCapabilities: Set<AgentGrantCapability> = emptySet(),
     requesterActorId: String = "",
+    designIds: Set<String> = emptySet(),
   ): Request? =
     synchronized(this) {
       openRequestLocked(
@@ -235,6 +262,7 @@ class ServeAgentGrantStore(
         requestedTtlSeconds,
         requestedCapabilities,
         requesterActorId,
+        designIds,
       )
     }
 
@@ -254,7 +282,13 @@ class ServeAgentGrantStore(
     requestedTtlSeconds: Long,
     requestedCapabilities: Set<AgentGrantCapability>,
     requesterActorId: String,
+    designIds: Set<String>,
   ): Request? {
+    // Refused rather than filtered: dropping a malformed id could leave the set empty, and an empty
+    // set asks for every design. Callers validate first; this is the backstop.
+    require(designIds.size <= MAX_REQUESTED_DESIGNS && designIds.all(::isWellFormedDesignId)) {
+      "a request names at most $MAX_REQUESTED_DESIGNS well-formed design ids"
+    }
     val now = clock()
     purge(now)
     // The cap counts what an anonymous caller can CREATE: rows that are pending, plus rows they got
@@ -300,6 +334,7 @@ class ServeAgentGrantStore(
         // offered no hint that the cause was this box's configuration.
         requestedCapabilities = requestedCapabilities,
         requesterActorId = requesterActorId,
+        designIds = designIds,
         createdAtMillis = now,
         expiresAtMillis = now + requestTtlSeconds * 1000,
       )
@@ -331,6 +366,10 @@ class ServeAgentGrantStore(
    * [enforceApproverCap] — when this approver already holds [maxActiveGrantsPerApprover]. Nothing
    * live is ever ended to make room: [capacityFor] says which limit a refusal hit, so the page can
    * tell the approver what to revoke.
+   *
+   * A request that names designs ([Request.designIds]) is approved for those designs unless
+   * [limitToRequestedDesigns] is false, which the approver chooses on the page to lend every design
+   * they can edit instead. It has no effect on a request that names none.
    */
   fun approve(
     id: String,
@@ -340,6 +379,7 @@ class ServeAgentGrantStore(
     capabilities: Set<AgentGrantCapability> = emptySet(),
     approvedByActorId: String = "",
     enforceApproverCap: Boolean = true,
+    limitToRequestedDesigns: Boolean = true,
   ): Grant? {
     synchronized(this) {
       // Lookup, expiry validation and the state transition all inside the lock. Split across it,
@@ -373,6 +413,7 @@ class ServeAgentGrantStore(
           approvedBy = approvedBy,
           approvedByActorId = approvedByActorId,
           requesterActorId = request.requesterActorId,
+          designIds = if (limitToRequestedDesigns) request.designIds else emptySet(),
           issuedAtMillis = now,
           expiresAtMillis = now + ttl * 1000,
         )
@@ -387,6 +428,7 @@ class ServeAgentGrantStore(
       audit(
         "agent-grant: minted ${grant.fingerprint} scope=${granted.wire} " +
           capabilityAuditField(grantedCapabilities) +
+          designAuditField(grant.designIds) +
           "ttl=${ttl}s approver=$approvedBy label=\"${grant.label}\""
       )
       return grant
@@ -552,6 +594,34 @@ class ServeAgentGrantStore(
       }
     }
 
+  /**
+   * The designs [holderActorId] may reach through [approvedByActorId]'s authority, or null when
+   * that delegation is not limited to named designs.
+   *
+   * The union of the designs named by every grant this approver gave this holder: two approvals for
+   * two designs reach both. Null — every design, exactly as before — only when none of those grants
+   * names a design. Once any of them does, grants that name none add nothing here. The service call
+   * this answers for carries the approver but not the grant that authorised it, and those grants
+   * may carry different rungs: an every-design read grant beside a one-design edit grant must not
+   * turn the edit into an every-design edit. Null too when no grant matches at all — a delegation
+   * this store did not mint, such as the server's own catalog recovery, is not this store's to
+   * narrow.
+   *
+   * Live grants decide. Only when none is live does an expired grant not yet purged answer, so a
+   * request authorised the instant before its grant ran out is still held to that grant's designs.
+   */
+  fun designScopeFor(holderActorId: String, approvedByActorId: String): Set<String>? {
+    if (holderActorId.isBlank() || approvedByActorId.isBlank()) return null
+    val now = clock()
+    val matching =
+      grants.values.filter {
+        it.approvedByActorId == approvedByActorId && it.holderActorId == holderActorId
+      }
+    val deciding = matching.filter { it.expiresAtMillis > now }.ifEmpty { matching }
+    val named = deciding.flatMapTo(mutableSetOf()) { it.designIds }
+    return named.ifEmpty { null }
+  }
+
   /** The live grant with this id, or null when unknown/expired. */
   fun grant(id: String?): Grant? {
     val key = id ?: return null
@@ -641,6 +711,10 @@ class ServeAgentGrantStore(
   private fun capabilityAuditField(capabilities: Set<AgentGrantCapability>): String =
     if (capabilities.isEmpty()) ""
     else "caps=${AgentGrantCapability.wireNames(capabilities).joinToString(",")} "
+
+  /** `designs=a,b ` for the audit line, or nothing for a grant that names no design. */
+  private fun designAuditField(designIds: Set<String>): String =
+    if (designIds.isEmpty()) "" else "designs=${designIds.sorted().joinToString(",")} "
 
   companion object {
     /**
@@ -757,6 +831,18 @@ class ServeAgentGrantStore(
     }
 
     private const val USER_CODE_ALPHABET = "ACDEFGHJKMNPQRTUVWXY34679"
+
+    /** The most designs one request may name. The approval page lists every one of them. */
+    const val MAX_REQUESTED_DESIGNS = 16
+
+    /**
+     * True for a design id a request may name: the alphabet the designs page lets a person type,
+     * bounded. Checked before the id is stored, shown on the approval page or written to the audit
+     * line, so neither ever carries anything else.
+     */
+    fun isWellFormedDesignId(designId: String): Boolean = designId.matches(DESIGN_ID_SHAPE)
+
+    private val DESIGN_ID_SHAPE = Regex("[A-Za-z0-9][A-Za-z0-9._-]{0,127}")
 
     /** Cheap shape check on a public id before a map lookup. */
     fun isWellFormedId(id: String): Boolean = id.matches(ID_SHAPE)

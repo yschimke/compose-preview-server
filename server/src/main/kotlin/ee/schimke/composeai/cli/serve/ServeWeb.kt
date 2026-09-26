@@ -7619,6 +7619,11 @@ ${captureControlsHtml().prependIndent("          ")}
     val folder: String? = null,
     /** POST target that changes [folder]. Empty when this viewer may not move the design. */
     val folderAction: String = "",
+    /**
+     * `/ui-builder/request-access?design=…` for this design, offered where the page offers a way to
+     * ask for edit access at all. Empty otherwise.
+     */
+    val requestAccessHref: String = "",
   )
 
   /**
@@ -7798,7 +7803,11 @@ ${captureControlsHtml().prependIndent("          ")}
             """
             .trimIndent()
         }
-          ?: "<p class=\"cp-design-meta\">Shared by <code>${esc(row.ownerActorId)}</code>; the owner manages its grants.</p>"
+          ?: ("<p class=\"cp-design-meta\">Shared by <code>${esc(row.ownerActorId)}</code>; the owner manages its grants." +
+            (if (row.requestAccessHref.isBlank()) ""
+            else
+              " <a href=\"${esc(row.requestAccessHref)}\">Request edit access to this design</a>") +
+            "</p>")
       // Everything the filter box matches on, in one attribute: the title a person remembers, the
       // id they typed, and the catalog they were working in.
       val haystack =
@@ -8076,6 +8085,13 @@ ${captureControlsHtml().prependIndent("          ")}
     val allowed: String,
   )
 
+  /** A design an access request names, with the title the approver knows it by (may be blank). */
+  data class RequestedDesign(val designId: String, val title: String)
+
+  /** The approval form's `designScope` values. */
+  const val DESIGN_SCOPE_REQUESTED = "requested"
+  const val DESIGN_SCOPE_ALL = "all"
+
   /**
    * `GET /agent-access/{requestId}` — the page a human opens because an agent asked them to, and
    * the only place a grant is ever created. See
@@ -8140,8 +8156,45 @@ ${captureControlsHtml().prependIndent("          ")}
      * then the client's self-chosen name and is shown as such, below the host.
      */
     oauthReturn: ServeMcpOAuth.RedirectTarget? = null,
+    /**
+     * The designs the request names, when it was asked for from one. The page names each, and
+     * offers to limit the grant to them (the default) or to lend every design the approver can
+     * edit. Empty for a request that names none, which the page draws exactly as before.
+     */
+    requestedDesigns: List<RequestedDesign> = emptyList(),
   ): String {
     val esc = WebEscaping::htmlEscape
+    val designNames =
+      requestedDesigns.joinToString(", ") { design ->
+        if (design.title.isBlank()) "<code>${esc(design.designId)}</code>"
+        else "${esc(design.title)} (<code>${esc(design.designId)}</code>)"
+      }
+    val designFacts =
+      if (requestedDesigns.isEmpty()) ""
+      else "\n          <dt>Edit access to</dt><dd>$designNames</dd>"
+    // Two radios rather than a checkbox, for the reason the scopes are radios: the choice is one of
+    // two outcomes, and the page names both. The named designs are the default because they are
+    // what was asked for.
+    val designFieldset =
+      if (requestedDesigns.isEmpty()) ""
+      else
+        "\n" +
+          """
+        <fieldset class="cp-grant-fieldset">
+          <legend>Which designs</legend>
+          <label class="cp-grant-scope">
+            <input type="radio" name="designScope" value="$DESIGN_SCOPE_REQUESTED" checked>
+            <span class="cp-grant-scope-name">${if (requestedDesigns.size == 1) "This design only" else "These designs only"}</span>
+            <span class="cp-grant-scope-what">$designNames. Other designs you own or can edit stay out of reach.</span>
+          </label>
+          <label class="cp-grant-scope">
+            <input type="radio" name="designScope" value="$DESIGN_SCOPE_ALL">
+            <span class="cp-grant-scope-name">Every design you can edit</span>
+            <span class="cp-grant-scope-what">Lends your edit access on all of your designs, as an approval without a named design does.</span>
+          </label>
+        </fieldset>
+        """
+            .trimIndent()
     // **Radios, not checkboxes**, because the scopes are cumulative and independent boxes lie about
     // that. With `playground` offered, an approver could untick `live` while leaving `playground`
     // ticked — the page then said live access was withheld, and the grant included it anyway,
@@ -8304,7 +8357,7 @@ ${captureControlsHtml().prependIndent("          ")}
         </div>
 
         $oauthReturnHtml<dl class="cp-grant-facts">
-          $askerFacts
+          $askerFacts$designFacts
           <dt>Approving as</dt><dd>${esc(approver)}</dd>
           <dt>This request expires in</dt><dd>${esc(AgentGrantProtocol.formatDuration(expiresInSeconds))}</dd>
         </dl>
@@ -8315,7 +8368,7 @@ ${captureControlsHtml().prependIndent("          ")}
             <legend>What the agent may do</legend>
             $scopeRows
           </fieldset>
-          $capabilityFieldset
+          $capabilityFieldset$designFieldset
           $withheld
           $withheldCapabilityNote
           $storeNarrowedNote
@@ -8378,6 +8431,8 @@ ${captureControlsHtml().prependIndent("          ")}
     val approveUrl: String,
     val userCode: String,
     val expiresInSeconds: Long,
+    /** The designs the request names; empty when it asks for everything the approver can edit. */
+    val designIds: List<String> = emptyList(),
   )
 
   /**
@@ -8397,21 +8452,36 @@ ${captureControlsHtml().prependIndent("          ")}
     /** When a grant this reader asked for is live, its expiry, already formatted. */
     activeUntil: String? = null,
     requested: RequestedAccess? = null,
+    /**
+     * The design this page was opened from (`?design=`), when it was: the request it makes is for
+     * that design alone, and the page says so.
+     */
+    designId: String? = null,
+    /** The designs the live grant in [activeUntil] names; empty when it names none. */
+    activeDesignIds: List<String> = emptyList(),
     navSuffix: String = "",
     version: String? = null,
     siteName: String = "",
     themeCss: String = "",
   ): String {
     val esc = WebEscaping::htmlEscape
+    val designList: (List<String>) -> String = { ids ->
+      ids.joinToString(", ") { "<code>${esc(it)}</code>" }
+    }
     val active =
       activeUntil?.let {
-        "<p class=\"cp-designs-notice\" role=\"status\">You already have edit access, until " +
+        val reach =
+          if (activeDesignIds.isEmpty()) "edit access"
+          else "edit access to ${designList(activeDesignIds)}"
+        "<p class=\"cp-designs-notice\" role=\"status\">You already have $reach, until " +
           "${esc(it)}. Open the UI builder and it applies to your session.</p>"
       } ?: ""
     val body =
       if (requested != null) {
         val minutes = (requested.expiresInSeconds / 60).coerceAtLeast(1)
         """
+        ${if (requested.designIds.isEmpty()) "" else
+          "<p class=\"cp-sub\">This request is for ${designList(requested.designIds)} only.</p>"}
         <p class="cp-sub">Send this link to the owner of the designs you want to edit. It is safe to
         paste into a chat: it only lets them approve or decline, and whatever they approve is
         applied to <strong>your</strong> signed-in session, never to whoever opens the link.</p>
@@ -8437,8 +8507,13 @@ ${captureControlsHtml().prependIndent("          ")}
         <p class="cp-sub">Signed in as <code>github:${esc(login)}</code>, you can open the designs
         shared with you, read-only. To edit, ask someone who can: this makes a link you send them, and
         what they approve applies to your session for as long as they choose.</p>
+        ${if (designId == null) "" else
+          "<p class=\"cp-sub\">This asks for edit access to the design <code>${esc(designId)}</code> " +
+            "only; your access to other designs stays as it is.</p>"}
         <form method="post" action="${esc(formAction)}">
           <input type="hidden" name="csrf" value="${esc(csrf)}">
+          ${if (designId == null) "" else
+            "<input type=\"hidden\" name=\"design\" value=\"${esc(designId)}\">"}
           <label class="cp-grant-ttl"><span>For</span>
             <select name="ttl">
             $options

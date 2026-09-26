@@ -336,6 +336,22 @@ asking to edit it — goes through the same approval, from `/ui-builder/request-
   ticked and the lifetime chosen, and what they do is recorded as theirs. That is the one difference
   from an agent's grant, whose authorship stays `agent:<fingerprint>` — a person asking for
   themselves is somebody, and the design history should say who.
+- **A request can name the design it is for.** On the designs page, a design shared with a reader
+  who may not edit carries *Request edit access to this design*, which opens the same page with
+  `?design=<id>`. The request records that id, the approval page names it (*Edit access to* its
+  title and id, read as the approver), and the approver chooses between **this design only** — the
+  default — and **every design you can edit**. The grant keeps the choice as `designIds`; `whoami`
+  reports it.
+- **A grant that names designs lends its approver's reach on those designs only.** Enforced at the
+  design service port (`ServeUiBuilderGrantScope`), which every route, sidecar, stream and MCP tool
+  reaches designs through: a call about a named design keeps `onBehalfOfActorId`, and a call about
+  any other design — or about none, such as a create — goes to the service as the holder alone, with
+  its own identity's access and nothing more. A listing is the holder's own, plus the named designs.
+  Several grants from one approver to one holder reach the union of the designs they name. Once
+  any of them names a design, one that names none does not widen that: the service call carries
+  the approver, not the grant that authorised it, so an every-design read grant beside a one-design
+  edit grant must not make the edit reach every design. A grant that names no design — every agent and MCP grant, and
+  a request made from the designs page itself — behaves exactly as before.
 
 ## What it is not
 

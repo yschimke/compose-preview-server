@@ -522,7 +522,7 @@ class ServeHttpServer(
   /** Shared bearer/session resolver used by catalog MCP and UI-builder authorization. */
   private val machineAuthorization: ServeMachineAuthorization? = null,
   /** Authoritative editable-design service. Null keeps the design API unregistered. */
-  private val uiBuilderService: UiBuilderServicePort? = null,
+  uiBuilderService: UiBuilderServicePort? = null,
   /** Independent human/operator/agent authorization for [uiBuilderService]. */
   private val uiBuilderAuthorization: ServeUiBuilderAuthorization? = null,
   /** The design listing's cached card pictures; null draws cards from the live export. */
@@ -563,7 +563,7 @@ class ServeHttpServer(
    * the asset routes and the `ui_builder_put_asset` tool unregistered, which is what a host with no
    * durable UI-builder state honestly has: a picture the next restart forgets is not the feature.
    */
-  private val uiBuilderAssets: UiBuilderAssetPort? = null,
+  uiBuilderAssets: UiBuilderAssetPort? = null,
   /**
    * Observability for the playground lane on `/status.json` — which posture admitted it, whether
    * the configured jail actually contains anything on this host, and whether each mode's classpath
@@ -634,6 +634,28 @@ class ServeHttpServer(
   /** Trusted module roots for local browse sessions, keyed by their session ids. */
   private val localSourceRoots: Map<String, File> = emptyMap(),
 ) {
+
+  /**
+   * The design service every route, sidecar, stream and MCP tool here reaches designs through, with
+   * a grant that names its designs held to them — see [ServeUiBuilderGrantScope]. Nothing in this
+   * class reaches the unwrapped port, which is why the constructor parameter is not a property.
+   */
+  private val designService: UiBuilderServicePort? = uiBuilderService?.let { service ->
+    agentGrants?.let {
+      ServeUiBuilderGrantScope.limit(service, ServeUiBuilderGrantScope.lookupOf(it))
+    } ?: service
+  }
+
+  /** The asset lane of [designService], under the same limit. */
+  private val designAssets: UiBuilderAssetPort? = uiBuilderAssets?.let { assets ->
+    agentGrants?.let {
+      ServeUiBuilderGrantScope.limit(assets, ServeUiBuilderGrantScope.lookupOf(it))
+    } ?: assets
+  }
+
+  /** Read off the service itself: the limit above is a decorator and reports nothing. */
+  private val uiBuilderDiagnostics = uiBuilderService as? UiBuilderServiceDiagnosticsSource
+
   private val uiBuilderAdministrators = ServeUiBuilderAdministrators(uiBuilderAdminActors)
 
   private val uiBuilderRuntimeAssets = ServeUiBuilderRuntimeAssets.load(uiBuilderRuntimeDirs)
@@ -751,14 +773,14 @@ class ServeHttpServer(
         renderSemaphore,
         projectHistory = projectHistory,
         uiBuilder =
-          uiBuilderService?.let {
+          designService?.let {
             ServeUiBuilderMcp(
               it,
               uiBuilderNativePreview,
               uiBuilderCommentStore,
               references = uiBuilderReferenceStore,
               links = uiBuilderLinksStore,
-              assets = uiBuilderAssets,
+              assets = designAssets,
             )
           },
         uiBuilderNative = uiBuilderNativePreview != null,
@@ -859,7 +881,7 @@ class ServeHttpServer(
   /** As [uiBuilderAdminEnabled], for the `/admin/ui-builder/library` routes. */
   private val uiBuilderDesignLibraryEnabled: Boolean =
     uiBuilderDesignLibrary != null &&
-      uiBuilderService != null &&
+      designService != null &&
       uiBuilderDir != null &&
       !adminToken.isNullOrBlank()
 
@@ -1105,7 +1127,7 @@ class ServeHttpServer(
         }
       }
       routing {
-        if (uiBuilderService != null && uiBuilderAuthorization != null) {
+        if (designService != null && uiBuilderAuthorization != null) {
           // The REST and protocol routes below read the same credentials the form routes do, and a
           // write carried by the session cookie is accepted only from a page this server served.
           val sameOriginUiBuilderAuthorization =
@@ -1113,7 +1135,7 @@ class ServeHttpServer(
               sites.hosts
             }
           installUiBuilderRoutes(
-            uiBuilderService,
+            designService,
             sameOriginUiBuilderAuthorization,
             uiBuilderNativePreview,
             uiBuilderInlineCapture,
@@ -1133,50 +1155,50 @@ class ServeHttpServer(
           )
           uiBuilderThumbnails?.let { thumbnails ->
             installUiBuilderThumbnailRoute(
-              uiBuilderService,
+              designService,
               sameOriginUiBuilderAuthorization,
               thumbnails,
             )
           }
           if (uiBuilderReferenceStore != null) {
             installUiBuilderReferenceRoutes(
-              uiBuilderService,
+              designService,
               sameOriginUiBuilderAuthorization,
               uiBuilderReferenceStore,
             )
           }
           if (uiBuilderCommentStore != null) {
             installUiBuilderCommentRoutes(
-              uiBuilderService,
+              designService,
               sameOriginUiBuilderAuthorization,
               uiBuilderCommentStore,
             )
           }
           if (uiBuilderLinksStore != null) {
             installUiBuilderLinksRoutes(
-              uiBuilderService,
+              designService,
               sameOriginUiBuilderAuthorization,
               uiBuilderLinksStore,
             )
           }
           if (uiBuilderFolderStore != null) {
             installUiBuilderFolderRoutes(
-              uiBuilderService,
+              designService,
               sameOriginUiBuilderAuthorization,
               uiBuilderFolderStore,
               uiBuilderAdministrators,
               uiBuilderAdmin,
             )
           }
-          if (uiBuilderAssets != null) {
-            installUiBuilderAssetRoutes(sameOriginUiBuilderAuthorization, uiBuilderAssets)
+          if (designAssets != null) {
+            installUiBuilderAssetRoutes(sameOriginUiBuilderAuthorization, designAssets)
           }
           // Whether a design's imported components still match the library they came from. Inside
           // this block rather than beside the library listing: it reads *a design*, so it needs the
           // service, and the design's own access control is what decides who may ask.
           if (uiBuilderComponentLibrary != null) {
             installUiBuilderComponentDriftRoutes(
-              uiBuilderService,
+              designService,
               sameOriginUiBuilderAuthorization,
               ServeUiBuilderComponentDrift(uiBuilderComponentLibrary),
               uiBuilderDesignCatalogs,
@@ -1266,7 +1288,7 @@ class ServeHttpServer(
             handleAgentGrantRevokeFromStatus(store)
           }
           // A person asking for UI-builder edit access for themselves, from their own session.
-          if (githubAuth != null && uiBuilderService != null) {
+          if (githubAuth != null && designService != null) {
             get(UI_BUILDER_REQUEST_ACCESS_PATH) {
               handleUiBuilderRequestAccess(store, submit = false)
             }
@@ -5869,7 +5891,7 @@ class ServeHttpServer(
     }
     val outcome =
       withContext(Dispatchers.IO) {
-        ServeUiBuilderCreate(uiBuilderService!!, uiBuilderDir!!)
+        ServeUiBuilderCreate(designService!!, uiBuilderDir!!)
           .install(actor = AuthenticatedUiBuilderActor(ADMIN_LIBRARY_ACTOR), document = document)
       }
     call.response.headers.append(HttpHeaders.CacheControl, "no-store")
@@ -7190,7 +7212,7 @@ class ServeHttpServer(
       shortName = "Compose Preview",
       startUrl = "/",
       shortcuts =
-        if (uiBuilderService == null) emptyList()
+        if (designService == null) emptyList()
         else
           listOf(
             ServeSiteIcon.Shortcut(
@@ -8793,7 +8815,7 @@ class ServeHttpServer(
               )
             },
         uiBuilder =
-          (uiBuilderService as? UiBuilderServiceDiagnosticsSource)
+          uiBuilderDiagnostics
             ?.takeIf { onlySystem == null }
             ?.diagnostics()
             ?.let { diagnostics ->
@@ -13414,7 +13436,7 @@ class ServeHttpServer(
    *   which keeps a genuinely missing asset a 404 rather than a silent app shell.
    */
   private suspend fun RoutingContext.canOpenUiBuilderDesign(designId: String): Boolean {
-    val service = uiBuilderService ?: return false
+    val service = designService ?: return false
     val authorization = uiBuilderAuthorization ?: return false
     val actor =
       (authorization.authorize(call, UiBuilderRouteCapability.READ)
@@ -13697,7 +13719,7 @@ class ServeHttpServer(
       designId
         ?.takeIf { isPublic }
         ?.let { id ->
-          uiBuilderService?.let { service ->
+          designService?.let { service ->
             val anonymous = AuthenticatedUiBuilderActor(ServeUiBuilderVisibility.ANONYMOUS_ACTOR_ID)
             (runCatching {
                 service.execute(
@@ -13880,7 +13902,7 @@ class ServeHttpServer(
    */
   private suspend fun RoutingContext.handleUiBuilderCreate() {
     val dir = uiBuilderDir
-    val service = uiBuilderService
+    val service = designService
     val authorization = uiBuilderAuthorization
     if (dir == null || service == null || authorization == null) {
       call.respondText("not found", status = HttpStatusCode.NotFound)
@@ -14003,7 +14025,7 @@ class ServeHttpServer(
    */
   private suspend fun RoutingContext.handleUiBuilderCopy() {
     val dir = uiBuilderDir
-    val service = uiBuilderService
+    val service = designService
     val authorization = uiBuilderAuthorization
     if (dir == null || service == null || authorization == null) {
       call.respondText("not found", status = HttpStatusCode.NotFound)
@@ -14088,7 +14110,7 @@ class ServeHttpServer(
    */
   private suspend fun RoutingContext.handleUiBuilderHistory() {
     val (actor, designId) = uiBuilderAccessTarget(UiBuilderRouteCapability.READ) ?: return
-    val service = uiBuilderService ?: return
+    val service = designService ?: return
     val listed =
       when (
         val response =
@@ -14184,7 +14206,7 @@ class ServeHttpServer(
       return
     }
     val (actor, designId) = uiBuilderAccessTarget(UiBuilderRouteCapability.WRITE) ?: return
-    val service = uiBuilderService ?: return
+    val service = designService ?: return
     val revision = call.parameters["revision"]?.toLongOrNull()
     val base = call.receiveParameters()["baseRevision"]?.toLongOrNull()
     if (revision == null || base == null) {
@@ -14254,7 +14276,7 @@ class ServeHttpServer(
       return
     }
     val (actor, designId) = uiBuilderAccessTarget(UiBuilderRouteCapability.WRITE) ?: return
-    val service = uiBuilderService ?: return
+    val service = designService ?: return
     val revision = call.parameters["revision"]?.toLongOrNull()
     if (revision == null) {
       call.respondText("a revision is required", status = HttpStatusCode.BadRequest)
@@ -14336,7 +14358,7 @@ class ServeHttpServer(
       return
     }
     val (actor, designId) = uiBuilderAccessTarget(UiBuilderRouteCapability.WRITE) ?: return
-    val service = uiBuilderService ?: return
+    val service = designService ?: return
     if (call.receiveParameters()["confirm"] != "delete") {
       call.respondText("deletion was not confirmed", status = HttpStatusCode.BadRequest)
       return
@@ -14400,7 +14422,7 @@ class ServeHttpServer(
       return
     }
     val (actor, designId) = uiBuilderAccessTarget(UiBuilderRouteCapability.WRITE) ?: return
-    val service = uiBuilderService ?: return
+    val service = designService ?: return
     val store = uiBuilderFolderStore
     if (store == null) {
       call.respondText("folder storage is unavailable", status = HttpStatusCode.NotFound)
@@ -14444,7 +14466,7 @@ class ServeHttpServer(
    */
   private suspend fun RoutingContext.handleUiBuilderAccess() {
     val (actor, designId) = uiBuilderAccessTarget(UiBuilderRouteCapability.READ) ?: return
-    val service = uiBuilderService ?: return
+    val service = designService ?: return
     val access =
       when (val response = service.executeMapped(GetDesignAccessRequestV1(designId), actor)) {
         is UiBuilderServiceResponse.DesignAccess -> response.access
@@ -14476,7 +14498,7 @@ class ServeHttpServer(
 
   /** `GET /ui-builder/designs` — owned and shared designs for the authenticated actor. */
   private suspend fun RoutingContext.handleUiBuilderDesigns() {
-    val service = uiBuilderService
+    val service = designService
     val authorization = uiBuilderAuthorization
     if (service == null || authorization == null || uiBuilderDir == null) {
       call.respondText("not found", status = HttpStatusCode.NotFound)
@@ -14538,7 +14560,7 @@ class ServeHttpServer(
       if (
         !mayCreate &&
           agentGrants != null &&
-          uiBuilderService != null &&
+          designService != null &&
           githubAuth?.currentSignedInLogin(call) != null
       )
         UI_BUILDER_REQUEST_ACCESS_PATH + tokenQuery
@@ -14615,6 +14637,15 @@ class ServeHttpServer(
           )
             "/ui-builder/${WebEscaping.urlEncodeSegment(item.designId)}/folder$tokenQuery"
           else "",
+        // The same way in as the page's own link, naming this design, so what the owner is asked
+        // to approve is edit access to this design rather than to everything they can edit.
+        requestAccessHref =
+          if (requestAccessHref.isEmpty() || item.requesterAccess.role == DesignAccessRoleV1.OWNER)
+            ""
+          else
+            "$UI_BUILDER_REQUEST_ACCESS_PATH?design=" +
+              WebEscaping.urlEncodeSegment(item.designId) +
+              tokenQuery.replaceFirst("?", "&"),
       )
     }
     val skin = call.siteSkin()
@@ -14676,7 +14707,7 @@ class ServeHttpServer(
       return
     }
     val (actor, designId) = uiBuilderAccessTarget(UiBuilderRouteCapability.WRITE) ?: return
-    val service = uiBuilderService ?: return
+    val service = designService ?: return
     val form = call.receiveParameters()
     val target = form["actorId"].orEmpty().trim()
     val revoking = form["action"] == "revoke"
@@ -14816,7 +14847,7 @@ class ServeHttpServer(
   private suspend fun RoutingContext.uiBuilderAccessTarget(
     capability: UiBuilderRouteCapability
   ): Pair<AuthenticatedUiBuilderActor, String>? {
-    val service = uiBuilderService
+    val service = designService
     val authorization = uiBuilderAuthorization
     if (service == null || authorization == null) {
       call.respondText("not found", status = HttpStatusCode.NotFound)
@@ -15234,8 +15265,19 @@ class ServeHttpServer(
         it >= 60 * 60
       }
     val active = store.activeGrantForRequester(requester)
-    if (submit) {
-      val form = call.receiveFormParameters()
+    val form = if (submit) call.receiveFormParameters() else null
+    // The design the request is for, when it was asked for from one: `?design=` on the link the
+    // designs page draws, carried through the form as a hidden field. Refused rather than dropped
+    // when malformed, because dropping it would turn a request for one design into one for all.
+    val designParam =
+      (if (form != null) form["design"]?.firstOrNull() else call.request.queryParameters["design"])
+        ?.takeIf { it.isNotEmpty() }
+    if (designParam != null && !ServeAgentGrantStore.isWellFormedDesignId(designParam)) {
+      call.respondText("not a design id", status = HttpStatusCode.BadRequest)
+      return
+    }
+    val designIds = setOfNotNull(designParam)
+    if (form != null) {
       if (
         !agentGrantCsrf.verify(
           REQUEST_ACCESS_SEAL_ID,
@@ -15250,9 +15292,12 @@ class ServeHttpServer(
         )
         return
       }
-      // One waiting request per person. The seal is deterministic, so without this every refresh
-      // or double-click opened another request against the server-wide pending cap.
-      val waiting = store.pendingRequests().firstOrNull { it.requesterActorId == requester }
+      // One waiting request per person and design. The seal is deterministic, so without this
+      // every refresh or double-click opened another request against the server-wide pending cap.
+      val waiting =
+        store.pendingRequests().firstOrNull {
+          it.requesterActorId == requester && it.designIds == designIds
+        }
       if (waiting != null) {
         redirectToRequestedAccess(waiting.id)
         return
@@ -15263,7 +15308,9 @@ class ServeHttpServer(
           form["ttl"]?.firstOrNull()?.toLongOrNull()?.takeIf { it > 0 } ?: store.maxGrantTtlSeconds
         val request =
           store.openRequest(
-            label = "UI-builder edit access for @$login",
+            label =
+              "UI-builder edit access for @$login" +
+                designParam?.let { " to design $it" }.orEmpty(),
             // Written by this server from the verified session, which is what "Asked from" on the
             // approval page is for: the one line there the asker cannot write.
             client = "@$login, signed in with GitHub (from ${clientAddress()})",
@@ -15276,6 +15323,7 @@ class ServeHttpServer(
                 AgentGrantCapability.UI_BUILDER_EXPORT,
               ),
             requesterActorId = requester,
+            designIds = designIds,
           )
         if (request == null) {
           call.response.headers.append(HttpHeaders.RetryAfter, "60")
@@ -15306,6 +15354,7 @@ class ServeHttpServer(
             approveUrl = externalOrigin() + ServeAgentGrants.approvalPath(request.id),
             userCode = request.userCode,
             expiresInSeconds = request.secondsUntilExpiry(System.currentTimeMillis()),
+            designIds = request.designIds.sorted(),
           )
         }
     markGeneration("static-page", "no-store")
@@ -15317,6 +15366,8 @@ class ServeHttpServer(
         ttlChoicesSeconds = ttlChoices.ifEmpty { listOf(store.maxGrantTtlSeconds) },
         activeUntil = active?.let { java.time.Instant.ofEpochMilli(it.expiresAtMillis).toString() },
         requested = requested,
+        designId = designParam,
+        activeDesignIds = active?.designIds?.sorted().orEmpty(),
         navSuffix = agentGrantTokenQuery(),
         version = SERVE_VERSION,
         siteName = skin.first,
@@ -15538,6 +15589,7 @@ class ServeHttpServer(
           fingerprint = grant.fingerprint,
           actorId = ServeAgentGrants.agentActorId(grant.fingerprint),
           onBehalfOfActorId = grant.approvedByActorId.takeIf { it.isNotBlank() },
+          designIds = grant.designIds.sorted(),
         )
     call.respondText(
       JSON.encodeToString(ServeAgentGrants.WhoamiResponse.serializer(), response),
@@ -15683,6 +15735,7 @@ class ServeHttpServer(
     val withheldCapabilities =
       request.requestedCapabilities.filterNot { it in selectableCapabilities }
     val storeNarrowedCapabilities = withheldCapabilities.filterNot { it in store.maxCapabilities }
+    val requestedDesigns = requestedDesigns(request, approver)
     val skin = call.siteSkin()
     markGeneration("static-page", "no-store")
     // Approving an OAuth authorization answers with a redirect to the client's own URI, and the
@@ -15720,9 +15773,33 @@ class ServeHttpServer(
             "grant it — the operator would have to add the capability and restart",
         oauthReturn =
           mcpOAuth.forRequest(request.id)?.let { ServeMcpOAuth.describeRedirect(it.redirectUri) },
+        requestedDesigns = requestedDesigns,
       ),
       ContentType.Text.Html,
     )
+  }
+
+  /**
+   * The designs [request] names, each with the title [approver] knows it by — read as the approver,
+   * so a design they cannot see is shown by its id alone and the page confirms nothing about it.
+   */
+  private suspend fun requestedDesigns(
+    request: ServeAgentGrantStore.Request,
+    approver: ServeAgentGrants.Approver,
+  ): List<ServeWeb.RequestedDesign> {
+    if (request.designIds.isEmpty()) return emptyList()
+    val service = designService
+    val titles =
+      if (service == null || approver.actorId.isBlank()) emptyMap()
+      else
+        with(ServeUiBuilderGrantScope) {
+            runCatching {
+                service.listed(AuthenticatedUiBuilderActor(approver.actorId), request.designIds)
+              }
+              .getOrDefault(emptyList())
+          }
+          .associate { it.designId to it.title }
+    return request.designIds.sorted().map { ServeWeb.RequestedDesign(it, titles[it].orEmpty()) }
   }
 
   /**
@@ -15809,6 +15886,9 @@ class ServeHttpServer(
     val ttl =
       form["ttl"]?.firstOrNull()?.let { AgentGrantProtocol.parseDurationSeconds(it) }
         ?: ServeAgentGrantStore.DEFAULT_GRANT_TTL_SECONDS
+    // A request that names a design is approved for it alone unless the approver chose every
+    // design they can edit instead. Anything but that explicit choice keeps the request's designs.
+    val limitToRequestedDesigns = form["designScope"]?.firstOrNull() != ServeWeb.DESIGN_SCOPE_ALL
     val grant =
       store.approve(
         requestId,
@@ -15818,6 +15898,7 @@ class ServeHttpServer(
         chosenCapabilities,
         approver.actorId,
         enforceApproverCap = !approver.administers,
+        limitToRequestedDesigns = limitToRequestedDesigns,
       )
     if (
       grant == null && store.request(requestId)?.state == ServeAgentGrantStore.Request.State.PENDING
@@ -15915,6 +15996,9 @@ class ServeHttpServer(
               if (grant.capabilities.isNotEmpty()) {
                 val names = AgentGrantCapability.wireNames(grant.capabilities).joinToString(", ")
                 append(" · also: $names")
+              }
+              if (grant.designIds.isNotEmpty()) {
+                append(" · designs: ${grant.designIds.sorted().joinToString(", ")}")
               }
               append(" · grant ${grant.fingerprint}")
               append(" · approved by ${grant.approvedBy}")
