@@ -1615,6 +1615,25 @@ class ServeCatalogMcp(
     put("scrollAvailable", host.hasScrollExportFor(preview.id))
     preview.state?.let { put("state", it) }
     preview.theme?.let { put("theme", it) }
+    // The declared `previewOverride*` knobs, by the wire key `render_preview` takes as
+    // `knob.<key>`. Omitted when there are none, which is most previews. This is how a client
+    // finds the preview that takes a given document — `a2ui render` picks the one declaring a
+    // string `document` knob — without a second call per preview.
+    if (preview.overrides.isNotEmpty()) {
+      put(
+        "knobs",
+        buildJsonArray {
+          preview.overrides.forEach { knob ->
+            add(
+              buildJsonObject {
+                put("key", knob.seedKey)
+                put("type", knob.type)
+              }
+            )
+          }
+        },
+      )
+    }
   }
 
   private fun resolvePreview(host: ServeHost, id: String): ServePreview =

@@ -258,35 +258,97 @@ class ServeAgentGrantStoreTest {
   }
 
   @Test
-  fun `the active-grant cap evicts the nearest to expiry, never the new one`() {
+  fun `a full box refuses a new approval rather than ending a live grant`() {
     val store = store(maxActiveGrants = 2)
-    fun mint(ttl: Long): ServeAgentGrantStore.Grant {
+    fun mint(approver: String, ttl: Long): ServeAgentGrantStore.Grant? {
       val request = store.ask(ttl = ttl)
-      return store.approve(request.id, "@yuri", AgentGrantScope.LIVE, ttl)!!
+      return store.approve(
+        request.id,
+        "@$approver",
+        AgentGrantScope.LIVE,
+        ttl,
+        emptySet(),
+        "github:$approver",
+      )
     }
-    val shortest = mint(60)
-    val middle = mint(600)
-    val newest = mint(3600)
-    assertNull(store.grantForToken(shortest.token))
-    assertNotNull(store.grantForToken(middle.token))
-    assertNotNull(store.grantForToken(newest.token))
+    val first = assertNotNull(mint("alice", 60))
+    val second = assertNotNull(mint("bob", 600))
+    assertEquals(
+      ServeAgentGrantStore.Capacity.BOX_FULL,
+      store.capacityFor("@carol", "github:carol"),
+    )
+    assertNull(mint("carol", 3600), "a full box refuses")
+    assertNotNull(store.grantForToken(first.token), "nothing live was ended to make room")
+    assertNotNull(store.grantForToken(second.token))
   }
 
   @Test
-  fun `a short-lived grant does not evict itself on a full map`() {
-    // The approver's choice of a *shorter* lifetime than everything already live used to make the
-    // new grant the nearest to expiry, so the cap evicted the grant it had just minted: the page
-    // said approved and the agent's next poll found nothing.
-    val store = store(maxActiveGrants = 2)
-    fun mint(ttl: Long): ServeAgentGrantStore.Grant {
-      val request = store.ask(ttl = ttl)
-      return store.approve(request.id, "@yuri", AgentGrantScope.LIVE, ttl)!!
-    }
-    mint(3600)
-    mint(1800)
-    val shortest = mint(900)
-    assertNotNull(store.grantForToken(shortest.token), "the new grant evicted itself")
-    assertEquals(2, store.activeGrants().size)
+  fun `a refused approval leaves the request waiting, so it can be approved once there is room`() {
+    val store = store(maxActiveGrants = 1)
+    val live = assertNotNull(store.approve(store.ask().id, "@yuri", AgentGrantScope.LIVE, 600))
+    val waiting = store.ask()
+    assertNull(store.approve(waiting.id, "@yuri", AgentGrantScope.LIVE, 600))
+    assertEquals(ServeAgentGrantStore.Request.State.PENDING, store.request(waiting.id)?.state)
+    store.revoke(live.id, "@yuri")
+    assertNotNull(store.approve(waiting.id, "@yuri", AgentGrantScope.LIVE, 600))
+  }
+
+  @Test
+  fun `the per-approver cap refuses that approver only`() {
+    val store =
+      ServeAgentGrantStore(
+        maxScope = AgentGrantScope.PLAYGROUND,
+        maxActiveGrants = 10,
+        maxActiveGrantsPerApprover = 2,
+        clock = { now },
+      )
+    fun mint(approver: String, enforce: Boolean = true): ServeAgentGrantStore.Grant? =
+      store.approve(
+        store.ask().id,
+        "@$approver",
+        AgentGrantScope.LIVE,
+        600,
+        emptySet(),
+        "github:$approver",
+        enforceApproverCap = enforce,
+      )
+    val mine = listOf(assertNotNull(mint("alice")), assertNotNull(mint("alice")))
+    assertEquals(
+      ServeAgentGrantStore.Capacity.APPROVER_FULL,
+      store.capacityFor("@alice", "github:alice"),
+    )
+    assertNull(mint("alice"), "a third grant for the same approver is refused")
+    assertNotNull(mint("bob"), "another approver is unaffected")
+    assertNotNull(
+      mint("alice", enforce = false),
+      "an administering approver is held to the box cap",
+    )
+    mine.forEach { assertNotNull(store.grantForToken(it.token)) }
+  }
+
+  @Test
+  fun `a grant knows who approved it, by actor id when it has one`() {
+    val store = store()
+    val grant =
+      assertNotNull(
+        store.approve(
+          store.ask().id,
+          "@alice",
+          AgentGrantScope.LIVE,
+          600,
+          emptySet(),
+          "github:alice",
+        )
+      )
+    assertTrue(grant.isApprovedBy("@alice", "github:alice"))
+    assertFalse(
+      grant.isApprovedBy("@alice", "github:mallory"),
+      "the actor id decides, not the name",
+    )
+    val legacy =
+      assertNotNull(store.approve(store.ask().id, "operator (token)", AgentGrantScope.LIVE, 600))
+    assertTrue(legacy.isApprovedBy("operator (token)", "operator"))
+    assertFalse(legacy.isApprovedBy("@alice", "github:alice"))
   }
 
   @Test

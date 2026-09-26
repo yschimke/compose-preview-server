@@ -38,12 +38,15 @@ internal object ServerCommands {
    */
   const val DESIGN: String = "design"
 
+  /** `a2ui render`: a document to a PNG through a running server, a client like [DESIGN]. */
+  const val A2UI: String = "a2ui"
+
   const val HELP: String = "help"
 
   /** Every command name, in the order `help` lists them. */
-  val NAMES: List<String> = listOf(SERVE, UI, PLAYGROUND, DESIGN, HELP)
+  val NAMES: List<String> = listOf(SERVE, UI, PLAYGROUND, DESIGN, A2UI, HELP)
 
-  /** The commands that run a server; [DESIGN] is a client and [HELP] prints instead. */
+  /** The commands that run a server; [DESIGN] and [A2UI] are clients and [HELP] prints instead. */
   private val RUNNABLE = setOf(SERVE, PLAYGROUND, UI)
 
   sealed interface Invocation {
@@ -69,7 +72,7 @@ internal object ServerCommands {
     val rest = rawArgs.drop(1)
     return when {
       first in RUNNABLE -> Invocation.Run(first, rest)
-      first == DESIGN -> Invocation.Client(DESIGN, rest)
+      first == DESIGN || first == A2UI -> Invocation.Client(first, rest)
       first == HELP -> {
         val topic = rest.firstOrNull()?.takeUnless { it.startsWith("-") }
         when {
@@ -122,14 +125,16 @@ internal object ServerCommands {
                         builder against the packaged design systems and needs nothing.
       playground        serve with the snippet compile lane admitted (POST /api/{v}/compiler/run).
       design            Render, export or read a UI-builder design from a server that is already
-                        up, and write it to a file. The one command here that does not serve.
+                        up, and write it to a file. A client: it does not serve.
+      a2ui              Render an A2UI document to a PNG with a running server's A2UI catalog.
+                        A client, like design.
       help [command]    Show this list, or one command's options.
 
     Flags may also be passed with no command at all — `compose-preview-server --module app` is
     exactly `compose-preview-server serve --module app`, and stays supported.
 
     `help serve` lists every server flag; `help ui` explains the builder lane; `help design`
-    lists the design verbs.
+    lists the design verbs; `help a2ui` the a2ui one.
     """
       .trimIndent()
 

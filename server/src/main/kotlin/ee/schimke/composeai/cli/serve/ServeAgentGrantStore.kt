@@ -12,8 +12,8 @@ import java.util.concurrent.ConcurrentHashMap
  * into. See
  * [docs/design/AGENT_ACCESS_GRANTS.md](../../../../../../../../docs/design/AGENT_ACCESS_GRANTS.md).
  *
- * Sibling of [PlaygroundTokenStore] in shape (unguessable ids, TTLs, a bounded map that evicts
- * nearest-expiry first) and deliberately unlike it in one respect: **two secrets, not one**.
+ * Sibling of [PlaygroundTokenStore] in shape (unguessable ids, TTLs, bounded maps) and deliberately
+ * unlike it in one respect: **two secrets, not one**.
  *
  * A [Request] has a public [Request.id] — the thing in the link a human is asked to open — and a
  * private [Request.deviceSecret] that only the agent that created it ever holds. The minted token
@@ -41,6 +41,13 @@ class ServeAgentGrantStore(
    */
   val maxCapabilities: Set<AgentGrantCapability> = emptySet(),
   private val maxActiveGrants: Int = DEFAULT_MAX_ACTIVE_GRANTS,
+  /**
+   * How many live grants one approver may hold at once, counted by [Grant.approvedByActorId]. A new
+   * approval over it is refused for that approver alone, rather than making room by ending grants
+   * somebody else approved. [approve] callers that administer the box pass `enforceApproverCap =
+   * false`; for them only [maxActiveGrants] applies.
+   */
+  private val maxActiveGrantsPerApprover: Int = DEFAULT_MAX_ACTIVE_GRANTS_PER_APPROVER,
   private val maxPendingRequests: Int = DEFAULT_MAX_PENDING_REQUESTS,
   private val clock: () -> Long = System::currentTimeMillis,
   private val mintId: () -> String = ::randomId,
@@ -184,6 +191,13 @@ class ServeAgentGrantStore(
     fun secondsUntilExpiry(nowMillis: Long): Long =
       ((expiresAtMillis - nowMillis) / 1000).coerceAtLeast(0)
 
+    /**
+     * True when this grant was approved by the named approver: by actor id when the grant recorded
+     * one, and by display name only when it did not (a grant constructed without one).
+     */
+    fun isApprovedBy(name: String, actorId: String): Boolean =
+      if (approvedByActorId.isNotBlank()) approvedByActorId == actorId else approvedBy == name
+
     override fun equals(other: Any?): Boolean = other is Grant && other.id == id
 
     override fun hashCode(): Int = id.hashCode()
@@ -312,7 +326,11 @@ class ServeAgentGrantStore(
    * never widen one, so a tampered form field buys nothing.
    *
    * Idempotent within the request's life: approving an already-approved request returns the same
-   * grant, so a double-submitted form does not mint two credentials.
+   * grant, so a double-submitted form does not mint two credentials. * Refused (null, the request
+   * left pending) when the box already holds [maxActiveGrants] live grants, or — with
+   * [enforceApproverCap] — when this approver already holds [maxActiveGrantsPerApprover]. Nothing
+   * live is ever ended to make room: [capacityFor] says which limit a refusal hit, so the page can
+   * tell the approver what to revoke.
    */
   fun approve(
     id: String,
@@ -321,6 +339,7 @@ class ServeAgentGrantStore(
     ttlSeconds: Long,
     capabilities: Set<AgentGrantCapability> = emptySet(),
     approvedByActorId: String = "",
+    enforceApproverCap: Boolean = true,
   ): Grant? {
     synchronized(this) {
       // Lookup, expiry validation and the state transition all inside the lock. Split across it,
@@ -332,6 +351,9 @@ class ServeAgentGrantStore(
         Request.State.APPROVED -> return request.grantId?.let { grants[it] }
         Request.State.DENIED -> return null
         Request.State.PENDING -> Unit
+      }
+      if (capacityFor(approvedBy, approvedByActorId, enforceApproverCap) != Capacity.OK) {
+        return null
       }
       val now = clock()
       val granted = minOf(scope, request.requestedScope, maxScope)
@@ -356,7 +378,6 @@ class ServeAgentGrantStore(
         )
       grants[grant.id] = grant
       byToken[grant.token] = grant.id
-      evictOverflow(keep = grant)
       // Data BEFORE the flag that says the data is there. The lock [poll] now takes is what makes
       // the intermediate state unobservable; this ordering is the belt to that pair of braces, and
       // is the right shape regardless of who else ever reads these.
@@ -500,6 +521,37 @@ class ServeAgentGrantStore(
       .maxByOrNull { it.expiresAtMillis }
   }
 
+  /**
+   * Which limit, if any, stands in the way of [approve] minting another grant for this approver.
+   */
+  enum class Capacity {
+    OK,
+    /** This approver already holds [maxActiveGrantsPerApprover] live grants. */
+    APPROVER_FULL,
+    /** The box already holds [maxActiveGrants] live grants. */
+    BOX_FULL,
+  }
+
+  /**
+   * Whether an approval by this approver would fit right now. [approve] asks the same question
+   * under its lock; this is for a caller that needs to say *why* a refusal happened.
+   */
+  fun capacityFor(
+    approvedBy: String,
+    approvedByActorId: String,
+    enforceApproverCap: Boolean = true,
+  ): Capacity =
+    synchronized(this) {
+      purgeLocked(clock())
+      when {
+        enforceApproverCap &&
+          grants.values.count { it.isApprovedBy(approvedBy, approvedByActorId) } >=
+            maxActiveGrantsPerApprover -> Capacity.APPROVER_FULL
+        grants.size >= maxActiveGrants -> Capacity.BOX_FULL
+        else -> Capacity.OK
+      }
+    }
+
   /** The live grant with this id, or null when unknown/expired. */
   fun grant(id: String?): Grant? {
     val key = id ?: return null
@@ -582,17 +634,6 @@ class ServeAgentGrantStore(
   }
 
   /**
-   * Hold the active-grant count at its cap by dropping the nearest-expiry first, so a burst sheds
-   * the grants closest to dying anyway rather than being refused.
-   *
-   * [keep] is the grant that was just minted, and it is excluded outright rather than trusted to
-   * survive on its expiry. The earlier version reasoned that a new grant is always the furthest
-   * from expiry — which is false the moment an approver chooses a shorter lifetime than everything
-   * already live. A full map plus "give it fifteen minutes" evicted the grant it had just created:
-   * the page said *approved*, and the agent's next poll found its id gone and was told the request
-   * had expired.
-   */
-  /**
    * `caps=images ` for the audit line, or nothing at all when a grant carries none — which is the
    * overwhelmingly common case, and a trailing `caps=` on every line would be noise that trains the
    * reader to skip the field on the lines where it matters.
@@ -600,15 +641,6 @@ class ServeAgentGrantStore(
   private fun capabilityAuditField(capabilities: Set<AgentGrantCapability>): String =
     if (capabilities.isEmpty()) ""
     else "caps=${AgentGrantCapability.wireNames(capabilities).joinToString(",")} "
-
-  private fun evictOverflow(keep: Grant) {
-    while (grants.size > maxActiveGrants) {
-      val oldest =
-        grants.values.filter { it.id != keep.id }.minByOrNull { it.expiresAtMillis } ?: return
-      grants.remove(oldest.id)?.let { byToken.remove(it.token) }
-      audit("agent-grant: evicted ${oldest.fingerprint} (over the $maxActiveGrants active cap)")
-    }
-  }
 
   companion object {
     /**
@@ -625,7 +657,14 @@ class ServeAgentGrantStore(
     /** What an agent gets when it names no TTL: long enough for one task. */
     const val DEFAULT_GRANT_TTL_SECONDS = 60 * 60L
 
-    const val DEFAULT_MAX_ACTIVE_GRANTS = 16
+    /**
+     * Across the whole box. A full box refuses a new approval rather than ending a live grant to
+     * make room, so this is set well above what one approver may hold.
+     */
+    const val DEFAULT_MAX_ACTIVE_GRANTS = 64
+
+    /** Per approver — see [maxActiveGrantsPerApprover]. */
+    const val DEFAULT_MAX_ACTIVE_GRANTS_PER_APPROVER = 8
 
     const val DEFAULT_MAX_PENDING_REQUESTS = 32
 

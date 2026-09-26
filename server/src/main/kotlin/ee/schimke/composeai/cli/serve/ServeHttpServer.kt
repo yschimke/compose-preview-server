@@ -48,6 +48,7 @@ import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpMethod
 import io.ktor.http.HttpStatusCode
+import io.ktor.http.Parameters
 import io.ktor.http.content.OutgoingContent
 import io.ktor.http.content.TextContent
 import io.ktor.http.decodeURLQueryComponent
@@ -55,6 +56,7 @@ import io.ktor.server.application.ApplicationCall
 import io.ktor.server.application.ApplicationCallPipeline
 import io.ktor.server.application.call
 import io.ktor.server.application.createApplicationPlugin
+import io.ktor.server.application.hooks.ResponseBodyReadyForSend
 import io.ktor.server.application.install
 import io.ktor.server.cio.CIO
 import io.ktor.server.engine.EmbeddedServer
@@ -112,6 +114,8 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonObject
 
 /** The query values a create link carries into the design's permalink: identity, never content. */
@@ -160,7 +164,9 @@ private val UI_BUILDER_ASSET_EXTENSIONS =
  * `/ui-builder/` static assets):
  * - `GET /` landing page, `GET /p/{id}` viewer page,
  * - `GET /{system}/feed.xml` demand-activated catalog change feed,
- * - `GET /render/{id}.png` PNG bytes, `GET /api/previews` JSON, `GET /healthz` liveness,
+ * - `GET /render/{id}.png` PNG bytes (`POST` with the parameters in the body, for a knob value too
+ *   large for a URL), `GET /{system}/a2ui` the A2UI document playground,
+ * - `GET /api/previews` JSON, `GET /healthz` liveness,
  * - `GET /hero/{system}/{hash}.png` a prebaked, immutable front-door thumbnail ([ServeHeroImages]),
  * - `GET /social/{hash}.png` the drawn link-unfurl card a page advertises ([ServeSocialCard]), and
  *   `GET /favicon.svg` / `/favicon.ico` / `/apple-touch-icon.png` the site icon ([ServeSiteIcon]) —
@@ -603,9 +609,10 @@ class ServeHttpServer(
    *
    * Off by default and opt-in for a reason: the header is client-supplied, so trusting it on a
    * directly-exposed host lets a caller forge a fresh identity per request and bypass the limit
-   * entirely. The *last* entry — not the first — is the one a single reverse proxy appended from
-   * the peer address it actually saw (nginx's `$proxy_add_x_forwarded_for`), which a client cannot
-   * forge. That is exactly one hop's worth of trust; behind two proxies this names the inner one.
+   * entirely. The *last* entry — not the first — is the one a single reverse proxy set from the
+   * peer address it actually saw (nginx's `$proxy_add_x_forwarded_for` appends it; Caddy without
+   * `trusted_proxies` replaces the header with it), which a client cannot forge. That is exactly
+   * one hop's worth of trust; behind two proxies this names the inner one.
    */
   private val trustForwardedFor: Boolean = false,
   /**
@@ -885,6 +892,21 @@ class ServeHttpServer(
   private val server: EmbeddedServer<*, *> =
     embeddedServer(CIO, host = host, port = port) {
       install(WebSockets)
+      // A socket opened with the GitHub session cookie is accepted only from a page this server
+      // served (see [ServeSameOriginRequests]). Answered here, before the upgrade, so the refusal
+      // is a plain 403 rather than a socket that opens and closes; every socket route — the live
+      // lane's `/ws/{name}` and the UI-builder design and comment feeds — goes through it. A
+      // client authenticated by a header or query token sends no session cookie and is unaffected.
+      intercept(ApplicationCallPipeline.Plugins) {
+        val current: ApplicationCall = context
+        if (
+          ServeSameOriginRequests.isWebSocketUpgrade(current) &&
+            ServeSameOriginRequests.isForeignSessionRequest(current, sites.hosts)
+        ) {
+          current.respondText("socket origin not accepted", status = HttpStatusCode.Forbidden)
+          finish()
+        }
+      }
       // Top-level sites ([ServeSites]): make the canonical `/<system>/…` spelling behave, on a site
       // host, as though this box served only that one catalog. Registered before routing (and only
       // when sites are configured, so an ordinary server has no interceptor at all) because it has
@@ -980,13 +1002,17 @@ class ServeHttpServer(
       // exactly — which is the whole point of the probe.
       install(AutoHeadResponse)
       // Sliding sessions: any request carrying a session past its half-life gets a freshly signed
-      // cookie, so a visitor who keeps coming back is never bounced through GitHub. Runs before
-      // routing so it covers every response, and no-ops (no `Set-Cookie` at all) for a young
-      // session or no session. See [ServeGithubAuth.refreshSession].
+      // cookie, so a visitor who keeps coming back is never bounced through GitHub. Runs once the
+      // response is ready to send, so it covers every response and can see the route's own
+      // `Cache-Control` (a `public` response is left without a session cookie), and no-ops (no
+      // `Set-Cookie` at all) for a young session or no session. See
+      // [ServeGithubAuth.refreshSession].
       githubAuth?.let { auth ->
         install(
           createApplicationPlugin("github-session-refresh") {
-            onCall { call -> auth.refreshSession(call) }
+            on(ResponseBodyReadyForSend) { call, content ->
+              auth.refreshSession(call, content.headers.getAll(HttpHeaders.CacheControl).orEmpty())
+            }
           }
         )
       }
@@ -1059,9 +1085,15 @@ class ServeHttpServer(
       }
       routing {
         if (uiBuilderService != null && uiBuilderAuthorization != null) {
+          // The REST and protocol routes below read the same credentials the form routes do, and a
+          // write carried by the session cookie is accepted only from a page this server served.
+          val sameOriginUiBuilderAuthorization =
+            uiBuilderAuthorization.acceptingSessionWritesFromSameOrigin {
+              sites.hosts
+            }
           installUiBuilderRoutes(
             uiBuilderService,
-            uiBuilderAuthorization,
+            sameOriginUiBuilderAuthorization,
             uiBuilderNativePreview,
             uiBuilderInlineCapture,
             // The native pane's live lane, on a host that has Stage-2 redemption. The token the
@@ -1079,40 +1111,44 @@ class ServeHttpServer(
               },
           )
           uiBuilderThumbnails?.let { thumbnails ->
-            installUiBuilderThumbnailRoute(uiBuilderService, uiBuilderAuthorization, thumbnails)
+            installUiBuilderThumbnailRoute(
+              uiBuilderService,
+              sameOriginUiBuilderAuthorization,
+              thumbnails,
+            )
           }
           if (uiBuilderReferenceStore != null) {
             installUiBuilderReferenceRoutes(
               uiBuilderService,
-              uiBuilderAuthorization,
+              sameOriginUiBuilderAuthorization,
               uiBuilderReferenceStore,
             )
           }
           if (uiBuilderCommentStore != null) {
             installUiBuilderCommentRoutes(
               uiBuilderService,
-              uiBuilderAuthorization,
+              sameOriginUiBuilderAuthorization,
               uiBuilderCommentStore,
             )
           }
           if (uiBuilderLinksStore != null) {
             installUiBuilderLinksRoutes(
               uiBuilderService,
-              uiBuilderAuthorization,
+              sameOriginUiBuilderAuthorization,
               uiBuilderLinksStore,
             )
           }
           if (uiBuilderFolderStore != null) {
             installUiBuilderFolderRoutes(
               uiBuilderService,
-              uiBuilderAuthorization,
+              sameOriginUiBuilderAuthorization,
               uiBuilderFolderStore,
               uiBuilderAdministrators,
               uiBuilderAdmin,
             )
           }
           if (uiBuilderAssets != null) {
-            installUiBuilderAssetRoutes(uiBuilderAuthorization, uiBuilderAssets)
+            installUiBuilderAssetRoutes(sameOriginUiBuilderAuthorization, uiBuilderAssets)
           }
           // Whether a design's imported components still match the library they came from. Inside
           // this block rather than beside the library listing: it reads *a design*, so it needs the
@@ -1120,7 +1156,7 @@ class ServeHttpServer(
           if (uiBuilderComponentLibrary != null) {
             installUiBuilderComponentDriftRoutes(
               uiBuilderService,
-              uiBuilderAuthorization,
+              sameOriginUiBuilderAuthorization,
               ServeUiBuilderComponentDrift(uiBuilderComponentLibrary),
               uiBuilderDesignCatalogs,
             )
@@ -1913,6 +1949,31 @@ class ServeHttpServer(
             val designId = call.parameters["designId"].orEmpty()
             respondAdminUiBuilderResult(withContext(Dispatchers.IO) { admin.delete(designId) })
           }
+          // Remove one person from every design's access list and anonymise what they said on the
+          // comment boards. Revision history keeps the id; see [ServeUiBuilderAdmin.eraseActor].
+          delete("/admin/ui-builder/actors/{actorId}") {
+            val access = uiBuilderAdminAccess() ?: return@delete
+            if (rejectCrossOriginUiBuilderAdminMutation(access)) return@delete
+            val erased =
+              withContext(Dispatchers.IO) { admin.eraseActor(call.parameters["actorId"].orEmpty()) }
+            if (erased == null) {
+              call.respondText("an actor id is required", status = HttpStatusCode.BadRequest)
+              return@delete
+            }
+            call.respondText(
+              JSON.encodeToString(
+                AdminUiBuilderActorErasureResult.serializer(),
+                AdminUiBuilderActorErasureResult(
+                  actorId = erased.actorId,
+                  revokedFrom = erased.revokedFrom,
+                  ownedDesigns = erased.ownedDesigns,
+                  commentBoards = erased.commentBoards,
+                  replacedWith = ERASED_ACTOR_ID,
+                ),
+              ),
+              ContentType.Application.Json,
+            )
+          }
         }
 
         // The designs catalog projects publish. Read-only until somebody opens one, which is an
@@ -2142,6 +2203,15 @@ class ServeHttpServer(
 
         get("/render/{name}") { handleRender(sessionInPath = false) }
         get("/{system}/render/{name}") { handleRender(sessionInPath = true) }
+        // The same render with its parameters in the BODY: a knob value too large for a URL — an
+        // A2UI document is kilobytes of JSON Lines — has no other way in. It is not a second
+        // render route: [handleRenderPost] reads the body and hands [handleRender] the merged
+        // parameters, so every gate and lane below is the GET's own.
+        post("/render/{name}") { handleRenderPost(sessionInPath = false) }
+        post("/{system}/render/{name}") { handleRenderPost(sessionInPath = true) }
+        // The A2UI playground: a textarea bound to the catalog's `document` string knob, POSTed to
+        // the route above. 404 on a catalog that declares no such preview.
+        get("/{system}/a2ui") { handleA2uiPlayground(sessionInPath = true) }
 
         // The motion lane, beside `/render` rather than inside it: a capture is not a render of a
         // preview, it is a second artifact about the same component, and folding it into the render
@@ -3042,6 +3112,7 @@ class ServeHttpServer(
     if (rejectBadToken()) return
     if (rejectMissingGithubAuth(api = true)) return
     if (rejectMissingGithubRepoAccess(api = true)) return
+    if (rejectForeignSessionRequest(json = true)) return
     // After the gates, before the body read: a throttled caller should cost this host a 429 and
     // nothing else — not 256 KB of buffered upload, and certainly not a compile slot.
     val permit = acquirePlaygroundPermit() ?: return
@@ -3102,6 +3173,7 @@ class ServeHttpServer(
     if (rejectBadToken()) return
     if (rejectMissingGithubAuth(api = true)) return
     if (rejectMissingGithubRepoAccess(api = true)) return
+    if (rejectForeignSessionRequest(json = true)) return
     val owner = githubAuth?.currentLogin(call)
     if (owner == null) {
       call.respondText(
@@ -3139,6 +3211,7 @@ class ServeHttpServer(
     if (rejectBadToken()) return
     if (rejectMissingGithubAuth(api = true)) return
     if (rejectMissingGithubRepoAccess(api = true)) return
+    if (rejectForeignSessionRequest(json = true)) return
     val owner = githubAuth?.currentLogin(call)
     if (owner == null) {
       call.respondText(
@@ -3162,6 +3235,26 @@ class ServeHttpServer(
       return
     }
     call.respondText("{\"released\":true}", ContentType.Application.Json)
+  }
+
+  /**
+   * Refuse a request authenticated by the GitHub session cookie alone that did not come from a page
+   * this server served, and — for a [json] route — one whose body is not declared as JSON. Header
+   * and bearer credentials pass untouched; see [ServeSameOriginRequests].
+   */
+  private suspend fun RoutingContext.rejectForeignSessionRequest(json: Boolean = false): Boolean {
+    if (ServeSameOriginRequests.isForeignSessionRequest(call, sites.hosts)) {
+      call.respondText("request origin not accepted", status = HttpStatusCode.Forbidden)
+      return true
+    }
+    if (json && ServeSameOriginRequests.isNonJsonSessionRequest(call)) {
+      call.respondText(
+        "Content-Type: application/json is required",
+        status = HttpStatusCode.UnsupportedMediaType,
+      )
+      return true
+    }
+    return false
   }
 
   /** Reject declared oversized bodies before the handler reads their content. */
@@ -3251,6 +3344,10 @@ class ServeHttpServer(
       call.respondText("image uploads unavailable", status = HttpStatusCode.Forbidden)
       return
     }
+    // Whether an anonymous visitor could open this host's pages at all. The capture bundle reads
+    // it to decide if a capture may be uploaded without asking: on a token-gated host every page
+    // is signed-in-only, and the image URL the upload returns is anonymous-read.
+    call.response.headers.append(CAPTURE_SCOPE_HEADER, if (isPublic) "public" else "private")
     call.respondText("", status = HttpStatusCode.NoContent)
   }
 
@@ -3301,6 +3398,9 @@ class ServeHttpServer(
     // stable identity, so charging its IP first would halve a one-upload budget just as the grant
     // path above would.
     imageBrowserLogin?.invoke(call, auth.repository)?.let { login ->
+      // Admitted by the session cookie alone, so only from a page this server served. A caller
+      // presenting a bearer, a grant or a token header is judged by its own gate as before.
+      if (rejectForeignSessionRequest()) return
       val permit = acquireImagePermit("browser:$login") ?: return
       try {
         acceptImageUpload(store, login)
@@ -3464,7 +3564,8 @@ class ServeHttpServer(
         )
         call.respondText(
           "Uploading preview images requires a GitHub token with access to ${auth.repository}. " +
-            "Send it as: Authorization: Bearer <token>  (e.g. \"\$(gh auth token)\").",
+            "Send it as: Authorization: Bearer <token>  (e.g. a GitHub Actions job's " +
+            "\$GITHUB_TOKEN, or a personal access token).",
           status = HttpStatusCode.Unauthorized,
         )
         null
@@ -3934,6 +4035,7 @@ class ServeHttpServer(
     // confusing way to say no; refuse the ticket instead. (The release counterpart is deliberately
     // ungated — handing capacity back is always welcome.)
     if (rejectGrantBelowScope(AgentGrantScope.LIVE, api = true)) return
+    if (rejectForeignSessionRequest()) return
     val sessionId = selectedSessionId(sessionInPath)
     withLeasedSession(sessionId) { renderHost ->
       val grant =
@@ -3979,6 +4081,7 @@ class ServeHttpServer(
     // `keepLiveWarm()` below starts or retains a daemon — the definition of `live`, however small
     // each individual ping looks.
     if (rejectGrantBelowScope(AgentGrantScope.LIVE, api = true)) return
+    if (rejectForeignSessionRequest()) return
     withLeasedSession(
       selectedSessionId(sessionInPath),
       onMissing = { call.respond(HttpStatusCode.NoContent) },
@@ -7087,7 +7190,7 @@ class ServeHttpServer(
    * prebaked grid thumbnail can answer. See the `?thumb=` lane in [handleRender] for why.
    */
   private fun RoutingContext.plainThumbRequest(): Boolean =
-    call.request.queryParameters.entries().none { (key, _) ->
+    renderParams().entries().none { (key, _) ->
       ServeOverrides.isOverrideParam(key) ||
         key == "scroll" ||
         key == "rcPlayer" ||
@@ -7146,11 +7249,13 @@ class ServeHttpServer(
         ContentType.Application.Json,
       )
     } else {
+      val grantRows = agentGrantStatusRows()
       call.respondText(
         ServeWeb.statusPage(
           data.toView(
-            agentGrants = agentGrantStatusRows(),
+            agentGrants = grantRows,
             agentGrantRequests = agentGrantRequestRows(),
+            hiddenAgentGrants = agentGrantHiddenCount(shown = grantRows.size),
           ),
           linkToken(),
           unfurl = ServeWeb.UnfurlMetadata(pageUrl = externalPageUrl()),
@@ -7410,6 +7515,9 @@ class ServeHttpServer(
           imageStore != null &&
             imageUploadAuth != null &&
             imageBrowserLogin?.invoke(call, imageUploadAuth.repository) != null,
+        // Only a public host's catalog pages are open to anyone; captures of anything else wait
+        // for the reporter's opt-in before reaching the anonymous-read image lane.
+        privateCaptures = !isPublic || ServeBugReport.isPrivatePath(from),
       ),
       ContentType.Text.Html,
     )
@@ -8761,6 +8869,7 @@ class ServeHttpServer(
     fun toView(
       agentGrants: List<ServeWeb.StatusAgentGrant> = emptyList(),
       agentGrantRequests: List<ServeWeb.StatusAgentRequest> = emptyList(),
+      hiddenAgentGrants: Int = 0,
     ): ServeWeb.StatusView {
       val seatsText =
         if (liveSeats.unbounded) "unbounded"
@@ -8991,6 +9100,7 @@ class ServeHttpServer(
       return ServeWeb.StatusView(
         agentGrants = agentGrants,
         agentGrantRequests = agentGrantRequests,
+        hiddenAgentGrants = hiddenAgentGrants,
         version = SERVE_VERSION,
         public = isPublic,
         nowMillis = nowMillis,
@@ -10984,6 +11094,114 @@ class ServeHttpServer(
   }
 
   /**
+   * The parameters [handleRender] and its lanes read: the query string, or — for a
+   * [handleRenderPost] — the query merged with the request body. Everything that shapes the pixels
+   * reads through here; URL-identity parameters (`at=`, `gen=`, `thumb=`, the token) stay on the
+   * query, because a body is not part of any address a cache or a permalink can key on.
+   */
+  private fun RoutingContext.renderParams(): Parameters =
+    call.attributes.getOrNull(RENDER_BODY_PARAMS) ?: call.request.queryParameters
+
+  /**
+   * `POST /render/{name}` and `POST /{system}/render/{name}`: [handleRender] with its parameters in
+   * the body, for a knob value no URL can carry (an A2UI document is kilobytes).
+   *
+   * The body is `application/json` — an object of string / number / boolean values keyed exactly
+   * like the GET query (`{"knob.document": "…", "fontScale": 1.5}`) — or
+   * `application/x-www-form-urlencoded`. It is merged over the query and handed to [handleRender]
+   * unchanged, so the LIVE gate, the product suffixes, the admission and the response are the GET's
+   * own, not a copy of them. Capped at [MAX_RENDER_BODY_BYTES] (413 above), the same bound the
+   * catalog MCP endpoint's `render_preview` has for the same document.
+   */
+  private suspend fun RoutingContext.handleRenderPost(sessionInPath: Boolean) {
+    // The credential first, so an unauthenticated caller cannot make this server buffer a body.
+    if (rejectBadToken()) return
+    val bytes =
+      withContext(Dispatchers.IO) {
+        call.receiveStream().use { readCapped(it, MAX_RENDER_BODY_BYTES) }
+      }
+    if (bytes == null) {
+      call.respondText(
+        "render parameters exceed ${MAX_RENDER_BODY_BYTES / 1024} KiB",
+        status = HttpStatusCode.PayloadTooLarge,
+      )
+      return
+    }
+    val contentType =
+      call.request.headers[HttpHeaders.ContentType]
+        ?.let { runCatching { ContentType.parse(it) }.getOrNull() }
+        ?.withoutParameters()
+    val body =
+      when {
+        bytes.isEmpty() -> emptyMap()
+        contentType == null || contentType.match(ContentType.Application.Json) ->
+          renderBodyJson(bytes.decodeToString())
+            ?: run {
+              call.respondText(
+                "render body must be a JSON object of string, number or boolean values",
+                status = HttpStatusCode.BadRequest,
+              )
+              return
+            }
+        contentType.match(ContentType.Application.FormUrlEncoded) ->
+          io.ktor.http.parseQueryString(bytes.decodeToString()).entries().associate { (k, v) ->
+            k to v.firstOrNull().orEmpty()
+          }
+        else -> {
+          call.respondText(
+            "render body must be application/json or application/x-www-form-urlencoded",
+            status = HttpStatusCode.UnsupportedMediaType,
+          )
+          return
+        }
+      }
+    val merged = Parameters.build {
+      call.request.queryParameters.entries().forEach { (key, values) ->
+        if (key !in body) appendAll(key, values)
+      }
+      body.forEach { (key, value) -> append(key, value) }
+    }
+    call.attributes.put(RENDER_BODY_PARAMS, merged)
+    handleRender(sessionInPath)
+  }
+
+  /**
+   * `GET /{system}/a2ui`: the A2UI playground — a document editor POSTing to the render route
+   * above. Answers only for a catalog with a [ServeWeb.a2uiDocumentPreview]; any other is a 404,
+   * because a page with nothing to render is not a page.
+   */
+  private suspend fun RoutingContext.handleA2uiPlayground(sessionInPath: Boolean) {
+    if (rejectBadToken()) return
+    val sessionId = selectedSessionId(sessionInPath)
+    val (webSessionId, basePath) = webSessionAndBase(sessionInPath)
+    withLeasedSession(
+      sessionId,
+      onMissing = { respondNotFoundHtml("That design system was not found on this server.") },
+    ) { renderHost ->
+      val preview = ServeWeb.a2uiDocumentPreview(renderHost.previews)
+      if (preview == null) {
+        respondNotFoundHtml("This design system declares no A2UI document preview.")
+        return@withLeasedSession
+      }
+      markGeneration("static-page", DYNAMIC_RESOURCE_CACHE_CONTROL)
+      call.respondText(
+        ServeWeb.a2uiPlaygroundPage(
+          moduleLabel = catalogBundleHost(renderHost)?.title ?: renderHost.label,
+          preview = preview,
+          token = linkToken(),
+          sessionId = webSessionId,
+          basePath = basePath,
+          isPublic = isPublic,
+          liveAvailable = renderHost.canRenderOverridesFor(preview.id),
+          unfurl = ServeWeb.UnfurlMetadata(pageUrl = externalPageUrl()),
+          version = SERVE_VERSION,
+        ),
+        ContentType.Text.Html,
+      )
+    }
+  }
+
+  /**
    * `GET /render/{name}` (query) and `GET /{system}/render/{name}` (path): a preview's rendered
    * bytes — a PNG for `<id>.png` (or no suffix), the figma-svg export for `<id>.svg`, the declared
    * preview slots as JSON for `<id>.slots`, the merged accessibility products as JSON for
@@ -11091,8 +11309,7 @@ class ServeHttpServer(
       // A blank value is treated as absent rather than as an error, because that is what an empty
       // form field or a stripped query leaves behind, and refusing it would break a link over
       // punctuation.
-      val requestedStage =
-        call.request.queryParameters[ServeRenderMatte.PARAM]?.takeIf { it.isNotBlank() }
+      val requestedStage = renderParams()[ServeRenderMatte.PARAM]?.takeIf { it.isNotBlank() }
       val stageMode = ServeRenderMatte.Mode.parse(requestedStage)
       if (requestedStage != null && stageMode == null) {
         call.respondText(
@@ -11177,10 +11394,10 @@ class ServeHttpServer(
       // where they are decided rather than shared, because they are not the same rule.
       val onDemand =
         requestCarriesOverrides() ||
-          call.request.queryParameters["scroll"] != null ||
-          call.request.queryParameters["rcPlayer"] != null ||
-          call.request.queryParameters["mode"] != null ||
-          ServeExplodedSvg.PARAMS.any { call.request.queryParameters[it] != null }
+          renderParams()["scroll"] != null ||
+          renderParams()["rcPlayer"] != null ||
+          renderParams()["mode"] != null ||
+          ServeExplodedSvg.PARAMS.any { renderParams()[it] != null }
       // A **pinned** render (`?at=<sha>`): the bytes this preview had at that delivery-branch
       // commit, read from the branch rather than from the catalog on disk. This is what makes a
       // published URL a permalink (issue #3723) — see [ServeCatalogRevision].
@@ -11215,10 +11432,10 @@ class ServeHttpServer(
       // shared link straight back out of the coupling, with a 200 and no sign of it.
       val madeToOrder =
         requestCarriesOverrides() ||
-          call.request.queryParameters["scroll"] != null ||
-          call.request.queryParameters["rcPlayer"] != null ||
-          (wantSvg && call.request.queryParameters["mode"] != null) ||
-          ServeExplodedSvg.PARAMS.any { call.request.queryParameters[it] != null }
+          renderParams()["scroll"] != null ||
+          renderParams()["rcPlayer"] != null ||
+          (wantSvg && renderParams()["mode"] != null) ||
+          ServeExplodedSvg.PARAMS.any { renderParams()[it] != null }
       val staleGeneration = if (madeToOrder) null else staleGeneration(renderHost)
       // A stale generation on a **non-raster product** refuses, exactly as a pin does. These are
       // the products whose whole purpose is to *describe* the frame — a semantics tree, an a11y
@@ -11337,7 +11554,7 @@ class ServeHttpServer(
       if (!wantSvg && !wantSlots && !wantA11y && !wantAnnotations && bareRcPlayerRequest()) {
         val stagedRaster =
           renderHost.publishedRcPlayerRender(previewId, RcPlayerBackend.CMP_JVM).takeIf {
-            call.request.queryParameters["rcPlayer"]?.lowercase() == RcPlayerBackend.CMP_JVM.wire
+            renderParams()["rcPlayer"]?.lowercase() == RcPlayerBackend.CMP_JVM.wire
           }
         if (stagedRaster != null) {
           // Cached exactly like the daemon-backed player lanes below, and for the same reason:
@@ -11359,7 +11576,7 @@ class ServeHttpServer(
         !wantSlots &&
           !wantA11y &&
           !wantAnnotations &&
-          call.request.queryParameters["rcPlayer"]?.lowercase() == RcPlayerBackend.CMP_JVM.wire
+          renderParams()["rcPlayer"]?.lowercase() == RcPlayerBackend.CMP_JVM.wire
       ) {
         // Past the staged-raster shortcut above, so this really does spawn the desktop player
         // (~4.3s of one-shot JVM). That is a commission, not a replay, whatever the query looked
@@ -11369,7 +11586,7 @@ class ServeHttpServer(
           return@withLeasedSession
         }
         val format = if (wantSvg) RcJvmServerRenderer.Format.SVG else RcJvmServerRenderer.Format.PNG
-        val webMode = wantSvg && call.request.queryParameters["mode"]?.lowercase() == "web"
+        val webMode = wantSvg && renderParams()["mode"]?.lowercase() == "web"
         // A bare `?rcPlayer=cmp-jvm` raster is the same fixed answer to a fixed URL the staged
         // shortcut above serves, drawn rather than read: `uiMode` and every `rc.<name>=` seed is an
         // override param, so a query this predicate calls bare leaves the pixels determined by the
@@ -11399,7 +11616,7 @@ class ServeHttpServer(
       // `rc.<name>=…` Remote Compose seeds, neither in SUPPORTED_KEYS) so a live knob / Remote
       // Compose edit reaches ServeOverrides.parse instead of being silently dropped.
       val overrideParams =
-        call.request.queryParameters
+        renderParams()
           .entries()
           .mapNotNull { (key, values) ->
             val value = values.firstOrNull() ?: return@mapNotNull null
@@ -11425,8 +11642,7 @@ class ServeHttpServer(
           // Wear/watch surfaces are always dark. Ignore a generic or hand-authored uiMode query so
           // it cannot wake the live daemon and produce another render for an unsupported mode.
           val overrides = parsed.overrides
-          val scroll =
-            call.request.queryParameters["scroll"]?.lowercase() in setOf("long", "full", "page")
+          val scroll = renderParams()["scroll"]?.lowercase() in setOf("long", "full", "page")
           if (wantSvg) {
             // `?scroll=long` (or `full`/`page`) asks for the full-page export of a scrolling
             // preview (compose/figma-svg-long) instead of the viewport-sized one.
@@ -11441,7 +11657,7 @@ class ServeHttpServer(
             // same bytes: the layered export pulled apart into one sheet per composable nesting
             // level. It composes with `mode=web` and `scroll=long` because all three are
             // post-processing steps over one render.
-            val webMode = call.request.queryParameters["mode"]?.lowercase() == "web"
+            val webMode = renderParams()["mode"]?.lowercase() == "web"
             renderSvgResponse(
               renderHost,
               previewId,
@@ -11971,13 +12187,13 @@ class ServeHttpServer(
    * parsed-override path already spells that rule out as `cached = if (scroll) null`.
    */
   private fun RoutingContext.bareRcPlayerRequest(): Boolean =
-    call.request.queryParameters.entries().none { (key, _) ->
+    renderParams().entries().none { (key, _) ->
       (ServeOverrides.isOverrideParam(key) && key != "rcPlayer") || key == "scroll"
     }
 
   /** Whether the caller passed `?fallback=baked` — an explicit "serve the snapshot anyway". */
   private fun RoutingContext.acceptsBakedFallback(): Boolean =
-    call.request.queryParameters[FALLBACK_PARAM]?.lowercase() == FALLBACK_BAKED
+    renderParams()[FALLBACK_PARAM]?.lowercase() == FALLBACK_BAKED
 
   /**
    * Name the un-applied overrides on a response that carries the baked artifact regardless — the
@@ -12077,7 +12293,7 @@ class ServeHttpServer(
         expandThemeProvider(
             renderHost,
             previewId,
-            call.request.queryParameters.entries().associate { (key, values) ->
+            renderParams().entries().associate { (key, values) ->
               key to (values.firstOrNull() ?: "")
             },
           )
@@ -12090,7 +12306,7 @@ class ServeHttpServer(
     // silently render the light branch.
     val theme =
       cmpJvmRenderTheme(
-        call.request.queryParameters["uiMode"],
+        renderParams()["uiMode"],
         renderHost.previews.firstOrNull { it.id == previewId }?.uiMode ?: 0,
         ServeWeb.SystemDisplay.resolveDarkFirst(
           sessionId,
@@ -12191,7 +12407,7 @@ class ServeHttpServer(
    * image).
    */
   private fun RoutingContext.requestCarriesOverrides(): Boolean =
-    call.request.queryParameters.entries().any { (key, _) -> ServeOverrides.isOverrideParam(key) }
+    renderParams().entries().any { (key, _) -> ServeOverrides.isOverrideParam(key) }
 
   /**
    * The `/render/{name}` suffixes that are **never** a baked replay: the figma-svg export, the slot
@@ -12437,7 +12653,7 @@ class ServeHttpServer(
    * override set that decides cache identity or gets reported as "dropped".
    */
   private fun RoutingContext.explodedOptions(): ExplodedSvg.Options? {
-    val params = { key: String -> call.request.queryParameters[key] }
+    val params = { key: String -> renderParams()[key] }
     return if (ServeExplodedSvg.enabled(params)) ServeExplodedSvg.optionsFrom(params) else null
   }
 
@@ -12656,7 +12872,7 @@ class ServeHttpServer(
    * does change the response body on the published lane, which the content ETag already covers.
    */
   private fun RoutingContext.requestedInspectLayers(): Set<String>? =
-    AnnotationKind.parseLayers(call.request.queryParameters["layers"])
+    AnnotationKind.parseLayers(renderParams()["layers"])
 
   private suspend fun RoutingContext.renderAnnotationsResponse(
     renderHost: ServeHost,
@@ -13814,8 +14030,11 @@ class ServeHttpServer(
     val listed =
       when (
         val response =
-          service.execute(
-            UiBuilderServiceCall(actor, UiBuilderServiceRequest.ListRevisions(designId))
+          service.shapeForReader(
+            actor,
+            service.execute(
+              UiBuilderServiceCall(actor, UiBuilderServiceRequest.ListRevisions(designId))
+            ),
           )
       ) {
         is UiBuilderServiceResponse.Revisions -> response
@@ -14731,12 +14950,14 @@ class ServeHttpServer(
   // ------------------------------------------------------------ agent grants
 
   /**
-   * The live-grant rows for `/status`, with a revoke seal **only** when this reader is an operator.
+   * The live-grant rows for `/status`, each with its revoke seal — shown **only** to an approver,
+   * and only the rows that approver manages ([ServeAgentGrants.Approver.manages]): every grant for
+   * the operator, the ones they approved themselves for a signed-in visitor on a `--public` box.
    *
-   * A grant-bearing agent that fetches `/status` sees the table (it passes the token gate, so it
-   * would see the page regardless) but gets no seals, so it cannot revoke anything — including its
-   * neighbours. Nothing here ever carries a token: [ServeAgentGrantStore.Grant.fingerprint] is the
-   * only form of one this page knows.
+   * A row names logins (the purpose of a request opened for oneself, the approver), so a reader who
+   * is not an approver — including a grant-bearing agent, which passes the token gate — gets no
+   * rows at all; [agentGrantHiddenCount] is what they are told instead. Nothing here ever carries a
+   * token: [ServeAgentGrantStore.Grant.fingerprint] is the only form of one this page knows.
    */
   private fun RoutingContext.agentGrantStatusRows(): List<ServeWeb.StatusAgentGrant> {
     // A top-level site's `/status` reports on THAT app only — every other box-wide field is already
@@ -14744,28 +14965,42 @@ class ServeHttpServer(
     // omitted rather than filtered: there is no per-site subset of them to show.
     if (siteSystem() != null) return emptyList()
     val store = agentGrants ?: return emptyList()
-    val approver = agentGrantApprover(store)
+    val approver = agentGrantApprover(store) ?: return emptyList()
     val now = System.currentTimeMillis()
-    return store.activeGrants().map { grant ->
-      ServeWeb.StatusAgentGrant(
-        id = grant.id,
-        fingerprint = grant.fingerprint,
-        scopes = grant.scopes.joinToString(", ") { it.wire },
-        capabilities = AgentGrantCapability.wireNames(grant.capabilities).joinToString(", "),
-        label = grant.label,
-        approvedBy = grant.approvedBy,
-        expiresInText = AgentGrantProtocol.formatDuration(grant.secondsUntilExpiry(now)),
-        revokeCsrf =
-          approver?.let {
-            agentGrantCsrf.seal(grant.id, it.name, ServeAgentGrants.Csrf.ACTION_DENY)
-          } ?: "",
-      )
-    }
+    return store
+      .activeGrants()
+      .filter { approver.manages(it) }
+      .map { grant ->
+        ServeWeb.StatusAgentGrant(
+          id = grant.id,
+          fingerprint = grant.fingerprint,
+          scopes = grant.scopes.joinToString(", ") { it.wire },
+          capabilities = AgentGrantCapability.wireNames(grant.capabilities).joinToString(", "),
+          label = grant.label,
+          approvedBy = grant.approvedBy,
+          expiresInText = AgentGrantProtocol.formatDuration(grant.secondsUntilExpiry(now)),
+          revokeCsrf =
+            agentGrantCsrf.seal(grant.id, approver.name, ServeAgentGrants.Csrf.ACTION_DENY),
+        )
+      }
   }
 
   /**
-   * Requests still waiting on a human — shown **only to an operator**, because this table is a list
-   * of decisions to make and a "Review →" link straight into the approval page.
+   * How many live grants this `/status` reader is not shown a row for — a count and nothing more,
+   * the same number `/status.json` already publishes as `agentAccess.activeGrants`.
+   */
+  private fun RoutingContext.agentGrantHiddenCount(shown: Int): Int {
+    if (siteSystem() != null) return 0
+    val store = agentGrants ?: return 0
+    return (store.activeGrants().size - shown).coerceAtLeast(0)
+  }
+
+  /**
+   * Requests still waiting on a human — shown **only to an approver**, because this table is a list
+   * of decisions to make and a "Review →" link straight into the approval page. A signed-in visitor
+   * on a `--public` box is shown only the requests they opened for themselves
+   * ([ServeAgentGrants.Approver.sees]); an agent's request reaches them through the link the agent
+   * printed, not through this table.
    *
    * It also solves the token-gated box's awkward moment: the agent's printed link has no `?token=`,
    * so an operator can instead reach the request from the `/status` they already have open with the
@@ -14774,18 +15009,21 @@ class ServeHttpServer(
   private fun RoutingContext.agentGrantRequestRows(): List<ServeWeb.StatusAgentRequest> {
     if (siteSystem() != null) return emptyList()
     val store = agentGrants ?: return emptyList()
-    agentGrantApprover(store) ?: return emptyList()
+    val approver = agentGrantApprover(store) ?: return emptyList()
     val now = System.currentTimeMillis()
-    return store.pendingRequests().map { request ->
-      ServeWeb.StatusAgentRequest(
-        id = request.id,
-        userCode = request.userCode,
-        label = request.label,
-        client = request.client,
-        requestedScope = request.requestedScope.wire,
-        expiresInText = AgentGrantProtocol.formatDuration(request.secondsUntilExpiry(now)),
-      )
-    }
+    return store
+      .pendingRequests()
+      .filter { approver.sees(it) }
+      .map { request ->
+        ServeWeb.StatusAgentRequest(
+          id = request.id,
+          userCode = request.userCode,
+          label = request.label,
+          client = request.client,
+          requestedScope = request.requestedScope.wire,
+          expiresInText = AgentGrantProtocol.formatDuration(request.secondsUntilExpiry(now)),
+        )
+      }
   }
 
   /**
@@ -15296,6 +15534,7 @@ class ServeHttpServer(
   private suspend fun RoutingContext.handleAgentGrantRevoke(store: ServeAgentGrantStore) {
     val grant = agentGrantFor(call)
     val revoked = grant != null && store.revoke(grant.id, "the agent itself")
+    if (grant != null) mcpOAuth.forgetRefreshFor(grant.id)
     call.respondText(
       JSON.encodeToString(
         ServeAgentGrants.RevokeResponse.serializer(),
@@ -15310,7 +15549,9 @@ class ServeHttpServer(
 
   /**
    * `POST /agent-access/{grantId}/revoke` — the `/status` page's revoke button. Requires an
-   * operator identity, exactly like approving does; a grant may not revoke another grant.
+   * approver identity, exactly like approving does; a grant may not revoke another grant. On a
+   * `--public` box a signed-in visitor may revoke only a grant they approved themselves — the same
+   * rows [agentGrantStatusRows] shows them — and anything else answers exactly like an unknown id.
    */
   private suspend fun RoutingContext.handleAgentGrantRevokeFromStatus(store: ServeAgentGrantStore) {
     val approver = agentGrantApprover(store)
@@ -15324,7 +15565,15 @@ class ServeHttpServer(
       call.respondText("not found", status = HttpStatusCode.NotFound)
       return
     }
+    val grant = store.grant(grantId)
+    if (grant != null && !approver.manages(grant)) {
+      call.respondText("not found", status = HttpStatusCode.NotFound)
+      return
+    }
     store.revoke(grantId, approver.name)
+    // Its refresh tokens go with it now rather than sitting in the bounded map until someone
+    // presents one.
+    mcpOAuth.forgetRefreshFor(grantId)
     call.respondRedirect("/status" + agentGrantTokenQuery())
   }
 
@@ -15404,6 +15653,8 @@ class ServeHttpServer(
         storeNarrowedReason =
           "this server's --agent-grant-capabilities does not include it, so no tick could " +
             "grant it — the operator would have to add the capability and restart",
+        oauthReturn =
+          mcpOAuth.forRequest(request.id)?.let { ServeMcpOAuth.describeRedirect(it.redirectUri) },
       ),
       ContentType.Text.Html,
     )
@@ -15501,7 +15752,30 @@ class ServeHttpServer(
         ttl,
         chosenCapabilities,
         approver.actorId,
+        enforceApproverCap = !approver.administers,
       )
+    if (
+      grant == null && store.request(requestId)?.state == ServeAgentGrantStore.Request.State.PENDING
+    ) {
+      // Still pending, so the refusal was a limit on live grants, not a stale request. The request
+      // stays open: revoking a grant and pressing Approve again completes it.
+      val full =
+        store.capacityFor(approver.name, approver.actorId, !approver.administers) ==
+          ServeAgentGrantStore.Capacity.APPROVER_FULL
+      respondAgentGrantNotice(
+        heading = "No room for another grant",
+        message =
+          if (full)
+            "You already have as many live grants on this server as one approver may hold. " +
+              "Revoke one you no longer need from the server status page, then open this link " +
+              "again and approve."
+          else
+            "This server already holds as many live grants as it allows. Revoke one from the " +
+              "server status page, or wait for one to expire, then open this link again and approve.",
+        status = HttpStatusCode.Conflict,
+      )
+      return
+    }
     if (grant == null) {
       respondAgentGrantNotice(
         heading = "Nothing to approve",
@@ -15779,8 +16053,8 @@ class ServeHttpServer(
     val wanted = ServeMcpOAuth.parseScope(query["scope"])
     val request =
       store.openRequest(
-        // The client's registered name, which it wrote, presented as the label the approval page
-        // already treats as the asker's own words. "Who is asking" stays the address.
+        // The client's registered name, which it wrote. The approval page shows it as the client's
+        // own choice, below the redirect host it leads with; see [ServeWeb.agentGrantApprovalPage].
         label = client!!.clientName.ifBlank { "MCP client" },
         client = clientAddress(),
         requestedScope = wanted.scope,
@@ -15918,7 +16192,8 @@ class ServeHttpServer(
             accessToken = grant.token,
             expiresIn = grant.secondsUntilExpiry(System.currentTimeMillis()),
             scope = ServeMcpOAuth.formatScope(grant),
-            refreshToken = mcpOAuth.issueRefresh(grant.id, authorization.clientId),
+            refreshToken =
+              mcpOAuth.issueRefresh(grant.id, authorization.clientId) { store.grant(it) != null },
           ),
         ),
         ContentType.Application.Json,
@@ -15977,7 +16252,8 @@ class ServeHttpServer(
           accessToken = grant.token,
           expiresIn = grant.secondsUntilExpiry(System.currentTimeMillis()),
           scope = ServeMcpOAuth.formatScope(grant),
-          refreshToken = mcpOAuth.issueRefresh(grant.id, binding.clientId),
+          refreshToken =
+            mcpOAuth.issueRefresh(grant.id, binding.clientId) { store.grant(it) != null },
         ),
       ),
       ContentType.Application.Json,
@@ -16029,6 +16305,13 @@ class ServeHttpServer(
         auth.hasImageRepositoryAccess(call),
         store.maxScope,
         store.maxCapabilities,
+        // On a `--public` box any signed-in visitor approves, so being one says nothing about the
+        // rest of the box. The `--token` holder and a configured UI-builder administrator still
+        // answer for all of it; on a private box every approver has already shown the token.
+        administers =
+          !isPublic ||
+            (serverToken.isNotBlank() && ServeUrls.tokensMatch(serverToken, provided)) ||
+            uiBuilderAdministrators.containsGithubLogin(login),
       )
     }
     return ServeAgentGrants.Approver.operator(store.maxScope, store.maxCapabilities)
@@ -16250,6 +16533,27 @@ class ServeHttpServer(
      */
     private val RESOLVED_AGENT_GRANT = AttributeKey<ResolvedAgentGrant>("composeai.agentGrant")
 
+    /** A `POST /render/{name}`'s query merged with its body; see [renderParams]. */
+    private val RENDER_BODY_PARAMS = AttributeKey<Parameters>("composeai.renderBodyParams")
+
+    /** The `POST /render/{name}` body bound — the catalog MCP endpoint's, for the same document. */
+    internal const val MAX_RENDER_BODY_BYTES: Long = 1024L * 1024
+
+    /**
+     * A render body's JSON object as query-shaped params, or null when it is not an object of
+     * scalars. A number or boolean is spelled as the GET query would spell it, so
+     * [ServeOverrides.parse] types it exactly as it does `?knob.count=3`.
+     */
+    internal fun renderBodyJson(text: String): Map<String, String>? {
+      val obj =
+        runCatching { Json.parseToJsonElement(text) as? JsonObject }.getOrNull() ?: return null
+      return obj.mapValues { (_, value) ->
+        val primitive = value as? JsonPrimitive ?: return null
+        if (primitive is kotlinx.serialization.json.JsonNull) return null
+        primitive.content
+      }
+    }
+
     /** Per-call memo for [resolveParallel], scoped like [RESOLVED_AGENT_GRANT]. */
     private val RESOLVED_PARALLELS = AttributeKey<ParallelPairings>("composeai.parallelPairings")
     private val RELATED_INVERSES = AttributeKey<RelatedInverses>("composeai.relatedInverses")
@@ -16322,6 +16626,12 @@ class ServeHttpServer(
       linkedMapOf(".apng" to "image/apng", ".gif" to "image/gif")
 
     const val TOKEN_HEADER: String = "X-Compose-Preview-Token"
+
+    /**
+     * On `GET /images/capability`: `public` when anyone can open this host's pages, `private` when
+     * it is token-gated. Read by `serve-web/src/report/ui.ts`.
+     */
+    const val CAPTURE_SCOPE_HEADER: String = "X-Compose-Preview-Capture-Scope"
 
     /** `Authorization: Bearer <grant>` — the other place an agent's HTTP client puts a token. */
     private const val BEARER_PREFIX: String = "Bearer "
@@ -17841,6 +18151,20 @@ private data class AdminUiBuilderLibraryResponse(
 /** The result of `POST /admin/ui-builder/library/{system}/{designId}`. */
 @Serializable
 private data class AdminUiBuilderLibraryOpenResult(val designId: String, val status: String)
+
+/**
+ * The result of `DELETE /admin/ui-builder/actors/{actorId}`.
+ *
+ * [ownedDesigns] were left as they are: a design keeps an owner, so those are the operator's call.
+ */
+@Serializable
+private data class AdminUiBuilderActorErasureResult(
+  val actorId: String,
+  val revokedFrom: List<String>,
+  val ownedDesigns: List<String>,
+  val commentBoards: Int,
+  val replacedWith: String,
+)
 
 /** The result of `DELETE /admin/ui-builder/designs/{designId}`. */
 @Serializable

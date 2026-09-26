@@ -71,7 +71,16 @@ internal class DesignHttpTransport(
 
   private val base: URI = normalize(server)
 
-  override fun call(tool: String, arguments: JsonObject): JsonObject {
+  override fun call(tool: String, arguments: JsonObject): JsonObject =
+    unwrap(tool, callRaw(tool, arguments))
+
+  /**
+   * One `tools/call`, answered with the reply body as it came — JSON or an SSE frame — for a caller
+   * whose tool does not answer with the UI-builder envelope [unwrap] peels. `a2ui render` is one:
+   * the catalog's `render_preview` answers with an image block. The 401/403 and transport handling
+   * is shared, so both commands refuse and retry the same way.
+   */
+  fun callRaw(tool: String, arguments: JsonObject): String {
     val body = buildJsonObject {
       put("jsonrpc", "2.0")
       put("id", 1)
@@ -123,7 +132,7 @@ internal class DesignHttpTransport(
         "$tool: $base answered HTTP ${response.statusCode()} — ${response.body().firstLine()}"
       )
     }
-    return unwrap(tool, response.body())
+    return response.body()
   }
 
   /** The `agentAccessRequestUrl` the 401 body carries, or the header that says the same thing. */

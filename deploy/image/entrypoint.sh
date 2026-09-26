@@ -513,7 +513,9 @@ fi
 # Per-caller compile budget (issue #3214). Every other playground bound is a whole-host one, so
 # without this one caller can hold every compile slot. Default 10/min, 1 concurrent; set
 # SERVE_PLAYGROUND_RATE_LIMIT=0 to turn the limiter off. SERVE_TRUST_FORWARDED_FOR is only safe
-# behind a reverse proxy that APPENDS the peer address it saw — see the CLI flag's docs.
+# behind a reverse proxy that sets the final X-Forwarded-For entry from the peer address it saw —
+# the bundled Caddy replaces the header outright, so docker-compose.yml defaults it to 1 there;
+# empty or 0 keys on the socket peer. See the CLI flag's docs.
 [[ -n "${SERVE_PLAYGROUND_RATE_LIMIT:-}" ]] &&
   args+=(--playground-rate-limit "${SERVE_PLAYGROUND_RATE_LIMIT}")
 [[ -n "${SERVE_PLAYGROUND_CALLER_CONCURRENCY:-}" ]] &&
@@ -740,6 +742,10 @@ if [[ "${SERVE_ACCEPT_IMAGES:-}" == "1" || "${SERVE_ACCEPT_IMAGES:-}" == "true" 
   [[ -n "${SERVE_IMAGE_TTL:-}" ]] && args+=(--image-ttl "${SERVE_IMAGE_TTL}")
   [[ -n "${SERVE_IMAGE_RATE_LIMIT:-}" ]] &&
     args+=(--image-rate-limit "${SERVE_IMAGE_RATE_LIMIT}")
+  # Which GitHub token kinds may upload (app, personal, other-apps, installation). Unset takes the
+  # server's default, which depends on whether SERVE_GITHUB_AUTH_* is configured; see README.md.
+  [[ -n "${SERVE_IMAGE_UPLOAD_TOKENS:-}" ]] &&
+    args+=(--image-upload-tokens "${SERVE_IMAGE_UPLOAD_TOKENS}")
 fi
 
 # Agent access grants: an agent with no credential POSTs /agent-access/request, prints a link and a

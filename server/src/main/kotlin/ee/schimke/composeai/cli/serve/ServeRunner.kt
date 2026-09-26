@@ -1544,9 +1544,17 @@ public class ServeRunner(
       System.err.println(ServeDefaults.IMAGE_LANE_NO_REPO)
       return null
     }
+    // Only the id and secret are needed to recognise this app's tokens, not the rest of sign-in.
+    val oauthApp =
+      if (!githubAuthClientId.isNullOrBlank() && !githubAuthClientSecret.isNullOrBlank()) {
+        GitHubOAuthApp(githubAuthClientId!!, githubAuthClientSecret!!)
+      } else null
+    val tokens =
+      ImageUploadTokenPolicy.parse(imageUploadTokensFlag, appConfigured = oauthApp != null)
     System.err.println(
       "serve: image uploads enabled (POST /images) — ${ServeImageFormats.knownSummary()}; " +
-        "links expire after ${imageTtlSeconds}s; uploaders must have access to $repository"
+        "links expire after ${imageTtlSeconds}s; uploaders must have access to $repository; " +
+        "tokens accepted: ${tokens.describe(appConfigured = oauthApp != null)}"
     )
     if (imageRateLimit <= 0) {
       System.err.println(
@@ -1561,6 +1569,8 @@ public class ServeRunner(
           repository = repository,
           allowedUsers = githubAuthUsers,
           allowedOrgs = githubAuthOrgs,
+          tokens = tokens,
+          app = oauthApp,
         ),
       limiter =
         if (imageRateLimit > 0) {
@@ -2635,6 +2645,9 @@ public class ServeRunner(
     if (!(directory.isDirectory || directory.mkdirs()) || !directory.canWrite()) {
       throw IllegalStateException("UI-builder state directory is not writable: $directory")
     }
+    // Owner-only, so the designs, comments and access lists under it are not readable by other
+    // accounts on the host; see [ServeOwnerOnlyFiles].
+    ServeOwnerOnlyFiles.restrictDirectory(directory.toPath())
     System.err.println("serve: UI-builder design API persisting to ${directory.absolutePath}")
     // Whether a Compose export survives the renderer failing is the same question the capability
     // below answers, so it is asked once, here, and both read it. The handler used to promise
@@ -3444,6 +3457,7 @@ public class ServeRunner(
           comments = uiBuilderLane.comments,
           links = uiBuilderLane.links,
           thumbnails = uiBuilderLane.thumbnails,
+          designs = uiBuilderLane.service,
         )
       } else {
         null

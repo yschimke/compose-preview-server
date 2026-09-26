@@ -212,6 +212,23 @@ Neither part can be satisfied by an agent grant — a GitHub session lives in a 
 and the token compare is against `--token` specifically, which no minted bearer can equal. So a
 grant can never approve or revoke another.
 
+### Who manages which grants
+
+On a box that is not `--public` every approver has presented `--token`, so every approver answers
+for the whole box. On a `--public` box any signed-in member approves, and that alone says nothing
+about anyone else's grants, so a member there:
+
+- sees on `/status` only the live grants they approved, and only the waiting requests they opened
+  for themselves (an agent's request reaches them through the link the agent printed);
+- may revoke only a grant they approved — any other id answers like an unknown one;
+- may hold at most 8 live grants at once, and is refused a ninth rather than ending someone else's.
+
+The `--token` holder (signed in, with the token in the URL) and a configured UI-builder
+administrator (`--ui-builder-admin-actors`) still see, and may revoke, every grant, and are held only to
+the box-wide cap. A reader who is not an approver at all — an anonymous visitor, or an agent
+reading `/status` with its grant — gets no grant rows, only a count of live grants, the same number
+`/status.json` publishes.
+
 A `--public` server with **no** GitHub auth has neither part: everyone is anonymous, and there is no
 front door to pass. `--agent-grants` is refused at startup there rather than silently letting the
 internet mint itself credentials.
@@ -223,11 +240,14 @@ internet mint itself credentials.
 - **Grant TTL** requested by the agent, capped by `--agent-grant-max-ttl` (default 8h, hard ceiling
   24h). Chosen by the approver on the page, so "give it 20 minutes" is available without the agent
   re-asking.
-- **Revocation** from `/status` (one button per live grant), by the agent itself
-  (`POST /agent-access/revoke`), and implicitly at expiry.
-- **Bounded** — `--agent-grant-max-active` (default 16) live grants, nearest-expiry evicted first
-  *excluding the one just minted* (an approver choosing a short lifetime on a full box would
-  otherwise evict the grant the page had just reported as approved). Requests are bounded too, and
+- **Revocation** from `/status` (one button per live grant the reader may manage — see
+  [Who manages which grants](#who-manages-which-grants)), by the agent itself
+  (`POST /agent-access/revoke`), and implicitly at expiry. Revoking also drops the grant's MCP
+  OAuth refresh tokens.
+- **Bounded** — `--agent-grant-max-active` (default 64) live grants on the box, and on a `--public`
+  box at most 8 per signed-in approver. An approval over either limit is **refused**, with the
+  request left waiting so it can be approved once a grant is revoked or expires; nothing live is
+  ended to make room for it. Requests are bounded too, and
   shed only once denied or collected — an approval nobody has polled for yet still owes its owner a
   credential. The store is in memory, so a restart drops every grant. That is deliberate: the
   TTLs are short, and a credential that cannot survive a redeploy has a much smaller worst case than
@@ -447,6 +467,14 @@ actually made.
 **Nothing is configured client-side.** Registration is dynamic and the token is discovered, so a
 session never edits an `mcp.json`, never holds a pasted secret, and never needs to be talked into
 using the flow. A token that rotates mid-session is the ordinary `401` path, not a reconfiguration.
+
+**The approval page leads with the redirect host.** A client registers its own `client_name` and
+redirect URIs, so the name says nothing about where the code will go. For a request that came
+through `/oauth/authorize` the page therefore shows the registered redirect's host under *Access
+goes to*, labelled *External site* for anything that is not loopback (`127.0.0.1`, `[::1]`,
+`localhost`) or an app scheme, with the client's name beneath it marked as the client's own choice.
+It omits the *Asked from* line the device flow shows: here that address is the approver's own
+browser, which followed the client's link to the page.
 
 Two security choices are worth naming because getting either wrong is silent. A bad `redirect_uri`
 is **rendered, never redirected to** — bouncing an error to an unvalidated URI is an open

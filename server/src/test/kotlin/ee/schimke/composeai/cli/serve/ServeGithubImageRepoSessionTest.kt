@@ -122,44 +122,30 @@ class ServeGithubImageRepoSessionTest {
   /**
    * The bit has to reach the approval page, and the only thing that carries it there is the cookie.
    * Read back through the signed payload rather than a route, because that is where the wire shape
-   * — an appended field, so older cookies still parse — actually lives.
+   * — an appended field, so the earlier fields keep their positions — actually lives.
    */
   @Test
   fun `the session cookie carries the image bit`() {
     val cookie = signInCookie(gitHub(authPush = true, imagePush = true))
-    assertTrue(cookie.endsWith("|image-repo"), cookie)
+    assertEquals("image-repo", cookie.split("|")[4], cookie)
     val refused = signInCookie(gitHub(authPush = true, imagePush = false))
-    assertTrue(refused.endsWith("|no-image-repo"), refused)
-    // The sign-in bit is still its own field, unmoved, so the older parsers keep reading it.
+    assertEquals("no-image-repo", refused.split("|")[4], refused)
+    // The sign-in bit is still its own field, unmoved.
     assertTrue(refused.split("|")[1] == "repo", refused)
   }
 
   /**
-   * What the *upload* paths ask, on the cookie shapes a running box actually holds.
-   *
-   * The image bit reaches every gate through this one call — the bug-report page's uploader as well
-   * as the agent-grant approval page — so its treatment of a cookie minted before the field existed
-   * decides whether shipping the field signs everybody's uploads out for a week.
+   * A cookie minted before sessions recorded the sign-in configuration they were decided under is
+   * refused, whichever repository the image lane gates on: the visitor signs in again and gets a
+   * cookie whose image bit was computed for this box.
    */
   @Test
-  fun `a legacy cookie still uploads when both lanes gate on one repository`() {
-    val sameRepo = ServeGithubAuth(config(imageRepository = null))
-    assertTrue(sameRepo.hasImageRepositoryAccess(legacyCookie(repositoryAccess = true)))
-    assertFalse(sameRepo.hasImageRepositoryAccess(legacyCookie(repositoryAccess = false)))
-    // Naming the same repository explicitly is the same box, so it answers the same.
-    val named = ServeGithubAuth(config(imageRepository = AUTH_REPO.uppercase()))
-    assertTrue(named.hasImageRepositoryAccess(legacyCookie(repositoryAccess = true)))
-  }
-
-  /**
-   * …and never on a box whose lanes gate on different repositories: there the sign-in bit is an
-   * answer about a repository the image lane does not publish to, which is the conflation the
-   * appended field exists to end. Such a visitor gets the capability back by signing in again.
-   */
-  @Test
-  fun `a legacy cookie confers nothing when the image lane gates elsewhere`() {
-    val split = ServeGithubAuth(config(IMAGE_REPO))
-    assertFalse(split.hasImageRepositoryAccess(legacyCookie(repositoryAccess = true)))
+  fun `a legacy cookie confers nothing`() {
+    for (imageRepository in listOf(null, AUTH_REPO.uppercase(), IMAGE_REPO)) {
+      val auth = ServeGithubAuth(config(imageRepository))
+      assertFalse(auth.hasImageRepositoryAccess(legacyCookie(repositoryAccess = true)))
+      assertEquals(null, auth.sessionLogin(legacyCookie(repositoryAccess = true)))
+    }
   }
 
   /** The repository a session's image verdict speaks for — what an upload path compares against. */

@@ -339,6 +339,23 @@ internal object ServeBugReport {
   }
 
   /**
+   * Route prefixes whose pages an anonymous visitor can never open: the UI builder (a signed-in
+   * session with access to the design) and the operator's admin screens. Mirrored by
+   * `serve-web/src/report/visibility.ts`.
+   */
+  private val PRIVATE_PREFIXES = listOf("/ui-builder", "/admin", "/api/ui-builder", "/agent-access")
+
+  /**
+   * Whether [path] (a [sanitizeFrom] result, query allowed) is a page only a signed-in user can
+   * open. Captures taken there are not uploaded to the anonymous-read image lane unless the
+   * reporter opts in, because the issue that would link them is public.
+   */
+  fun isPrivatePath(path: String?): Boolean {
+    val bare = path?.substringBefore('?')?.substringBefore('#') ?: return false
+    return PRIVATE_PREFIXES.any { bare == it || bare.startsWith("$it/") }
+  }
+
+  /**
    * The visitor's own page, as a path this server can safely echo into a report and a link.
    *
    * The value arrives from the browser (the footer form's hidden `from` input, filled by the page

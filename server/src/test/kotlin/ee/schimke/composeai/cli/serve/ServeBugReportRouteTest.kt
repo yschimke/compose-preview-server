@@ -373,6 +373,43 @@ class ServeBugReportRouteTest {
   }
 
   @Test
+  fun `a signed-in-only reported page asks before uploading captures`() {
+    // Captures are hosted at an anonymous-read URL and linked from a public issue, so a picture of
+    // a page only a signed-in user can open waits for an explicit opt-in.
+    val page =
+      ServeWeb.bugReportPage(
+        report =
+          ServeWeb.BugReport(
+            action = ServeBugReport.action(),
+            body = "### Screenshot\n\n",
+            bodyTemplate = "### Screenshot\n\n",
+            repo = ServeBugReport.REPO,
+          ),
+        sections = emptyList(),
+        canUploadCaptures = true,
+        privateCaptures = true,
+      )
+    assertTrue(page.contains("data-cp-capture-scope=\"private\""), page)
+    assertTrue(page.contains("are <strong>not</strong> uploaded unless you tick"), page)
+    assertFalse(page.contains("uploaded to this preview server"), page)
+  }
+
+  @Test
+  fun `only a public host's catalog pages keep the automatic capture upload`() {
+    server = newServer(public = true, token = "unused")
+    val (_, catalog) = get("/report-bug?from=%2Fcompose-m3%2Fp%2Fbutton-filled")
+    assertFalse(catalog.contains("data-cp-capture-scope"), catalog)
+    val (_, builder) = get("/report-bug?from=%2Fui-builder%2Fdesigns")
+    assertTrue(builder.contains("data-cp-capture-scope=\"private\""), builder)
+    val (_, admin) = get("/report-bug?from=%2Fadmin%2Fui-builder")
+    assertTrue(admin.contains("data-cp-capture-scope=\"private\""), admin)
+    server?.stop()
+    server = newServer(public = false, token = "secret")
+    val (_, gated) = get("/report-bug?from=%2Fcompose-m3%2Fp%2Fbutton-filled", token = "secret")
+    assertTrue(gated.contains("data-cp-capture-scope=\"private\""), gated)
+  }
+
+  @Test
   fun `a report from a browser-composed view says which view, and labels the render as the base one`() {
     // Issue #4261: the embedded PNG is the only picture of a preview this server can make, and on
     // a lane that composes its own view it is not what the reporter was looking at. The motion

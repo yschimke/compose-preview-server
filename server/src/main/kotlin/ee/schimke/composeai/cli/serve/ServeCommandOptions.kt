@@ -378,9 +378,11 @@ public class ServeCommandOptions(
    *
    * Opt-in, because the header is client-supplied: on a directly-exposed host trusting it would let
    * a caller mint a fresh identity per request and walk straight past the limit. Set it only when
-   * this server sits behind a reverse proxy you control that *appends* the peer address it saw
-   * (nginx's `$proxy_add_x_forwarded_for`) — that appended last entry is the one a client can't
-   * forge. Without it, every caller behind the proxy shares one bucket.
+   * this server sits behind a reverse proxy you control that sets the last entry from the peer
+   * address it saw — nginx's `$proxy_add_x_forwarded_for` appends it, and Caddy without
+   * `trusted_proxies` replaces the header with that one address. Either way the last entry is the
+   * one a client can't forge. Without it, every caller behind the proxy shares one bucket. The
+   * bundled `deploy/image` compose file turns it on, since `preview` is reachable only via Caddy.
    */
   override val trustForwardedFor: Boolean = "--trust-forwarded-for" in args
 
@@ -679,6 +681,10 @@ public class ServeCommandOptions(
   override val imageRateLimit: Int =
     args.flagValue("--image-rate-limit")?.toIntOrNull()?.takeIf { it >= 0 }
       ?: ServeDefaults.DEFAULT_IMAGE_RATE_LIMIT
+
+  /** Raw `--image-upload-tokens`; the server parses it (an unknown kind throws there). */
+  override val imageUploadTokensFlag: String? =
+    args.flagValue("--image-upload-tokens")?.takeIf { it.isNotBlank() }
 
   /**
    * Server-wide admission for the catalogs' background theme optimization: it parks while any
@@ -1156,8 +1162,9 @@ public class ServeCommandOptions(
                           Longest grant this server will mint, e.g. 90m / 2h / 3600 (default 8h,
                           hard ceiling 24h). The approver picks the actual lifetime on the page.
         --agent-grant-max-active <n>
-                          Live grants allowed at once (default ${ServeDefaults.AGENT_GRANT_MAX_ACTIVE}); a new one evicts the
-                          nearest to expiry.
+                          Live grants allowed at once (default ${ServeDefaults.AGENT_GRANT_MAX_ACTIVE}); over it a new
+                          approval is refused. On --public each signed-in approver may also hold at
+                          most ${ServeDefaults.AGENT_GRANT_MAX_ACTIVE_PER_APPROVER} live grants.
         --agent-grant-rate-limit <n>
                           Requests per minute per address on the two ungated grant routes (default
                           ${ServeDefaults.DEFAULT_AGENT_GRANT_RATE_LIMIT}; 0 disables the budget entirely).
@@ -1248,6 +1255,15 @@ public class ServeCommandOptions(
         --image-upload-repo <owner/repo>
                           Repository an uploader must have access to. Defaults to --github-auth-repo
                           when that is set; without either, --accept-images refuses to start.
+        --image-upload-tokens <kind>[,<kind>…]
+                          Which GitHub tokens may upload: app (a user token issued to this server's
+                          --github-auth-client-id; always accepted when that is set), personal
+                          (personal access tokens), other-apps (user tokens issued to any other
+                          OAuth or GitHub App, e.g. `gh auth token`), installation (GitHub App
+                          installation tokens with write, e.g. a GitHub Actions GITHUB_TOKEN — any
+                          app installed on the repo with write passes). Default:
+                          personal,installation with GitHub OAuth configured, otherwise
+                          personal,other-apps,installation.
         --image-ttl <seconds>
                           How long a /i/<id> image link lives (default ${ServeDefaults.IMAGE_TTL_SECONDS}s = 7 days). Held in
                           memory and dropped when it expires; ${ServeDefaults.IMAGE_MAX_IMAGES} images / ${ServeDefaults.IMAGE_MAX_TOTAL_BYTES / (1024 * 1024)}MB max, the
