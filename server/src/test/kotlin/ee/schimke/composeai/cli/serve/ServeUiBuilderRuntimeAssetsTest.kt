@@ -54,6 +54,16 @@ class ServeUiBuilderRuntimeAssetsTest {
         get("/ui-builder/runtime/m3-2026.09/renderer.mjs", etag).use { cached ->
           assertEquals(304, cached.code)
         }
+        assertNull(response.header(ServePagePolicy.HEADER), "a script is not a page")
+      }
+      // The renderer's shell is mounted in the editor's opaque-origin frame: framable, and
+      // allowed to compile Wasm but not to evaluate strings.
+      get("/ui-builder/runtime/m3-2026.09/index.html").use { response ->
+        assertEquals(200, response.code)
+        val policy = requireNotNull(response.header(ServePagePolicy.HEADER))
+        assertTrue(policy.contains("'wasm-unsafe-eval'"), policy)
+        assertTrue(!policy.contains("'unsafe-eval'"), policy)
+        assertTrue(!policy.contains("frame-ancestors"), policy)
       }
       get("/ui-builder/runtime/m3-2026.09/").use { response ->
         assertEquals(200, response.code)
