@@ -563,7 +563,8 @@ object ServeMcpOAuth {
     val uri = runCatching { URI(redirectUri) }.getOrNull()
     val scheme = (uri?.scheme ?: redirectUri.substringBefore(':', "")).lowercase()
     val host = uri?.host?.takeIf { it.isNotBlank() }
-    if (host == null || (scheme != "http" && scheme != "https")) {
+    val fetchedFromHost = scheme == "http" || scheme == "https" || scheme in NETWORK_SCHEMES
+    if (host == null || !fetchedFromHost) {
       // A private-use scheme is opened by whichever app registered it, not fetched from a host.
       return RedirectTarget(
         display =
@@ -581,8 +582,17 @@ object ServeMcpOAuth {
       if (isLoopbackHost(lower) || lower == "localhost") RedirectTarget.Kind.LOOPBACK
       else RedirectTarget.Kind.EXTERNAL
     val port = uri.port.takeIf { it > 0 }?.let { ":$it" }.orEmpty()
-    return RedirectTarget(display = lower + port, kind = kind, uri = redirectUri)
+    val prefix = if (scheme == "http" || scheme == "https") "" else "$scheme://"
+    return RedirectTarget(display = prefix + lower + port, kind = kind, uri = redirectUri)
   }
+
+  /**
+   * Non-http(s) schemes that still name a host on the network, so a redirect to one is shown as a
+   * site rather than as an app on this device. Custom app schemes (`vscode://`, `cursor://…`) are
+   * not on this list and stay [RedirectTarget.Kind.APP].
+   */
+  private val NETWORK_SCHEMES =
+    setOf("ftp", "ftps", "sftp", "ws", "wss", "file", "gopher", "telnet", "ldap", "ldaps", "smb")
 
   /**
    * RFC 7636 §4.6: the challenge is the base64url-of-SHA256 of the verifier, unpadded. Compared in

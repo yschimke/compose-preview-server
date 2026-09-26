@@ -348,5 +348,13 @@ class ServeMcpOAuthTest {
     val schemeOnly = ServeMcpOAuth.describeRedirect("com.example.app:/oauth2redirect")
     assertEquals("com.example.app://", schemeOnly.display)
     assertEquals(ServeMcpOAuth.RedirectTarget.Kind.APP, schemeOnly.kind)
+    // A network scheme with a host is a site, not an app, whatever its scheme.
+    val ftp = ServeMcpOAuth.describeRedirect("ftp://Files.Example.org/callback")
+    assertEquals(ServeMcpOAuth.RedirectTarget.Kind.EXTERNAL, ftp.kind)
+    assertEquals("ftp://files.example.org", ftp.display)
+    assertEquals(
+      ServeMcpOAuth.RedirectTarget.Kind.LOOPBACK,
+      ServeMcpOAuth.describeRedirect("wss://127.0.0.1:9000/cb").kind,
+    )
   }
 }
