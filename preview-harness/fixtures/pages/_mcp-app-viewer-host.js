@@ -24,7 +24,12 @@ window.addEventListener("message", async (event) => {
       id: message.id,
       result: {
         hostCapabilities: {
-          serverResources: { subscribe: mode === "refresh" || mode === "subscribe-fails" },
+          serverResources: {
+            subscribe:
+              mode === "refresh" ||
+              mode === "subscribe-fails" ||
+              mode === "stale-read-marker",
+          },
         },
       },
     });
@@ -84,10 +89,58 @@ window.addEventListener("message", async (event) => {
         });
       }, 100);
     }
+    if (mode === "stale-read-marker") {
+      window.setTimeout(async () => {
+        send({
+          jsonrpc: "2.0",
+          method: "ui/notifications/tool-result",
+          params: {
+            result: {
+              content: [
+                {
+                  type: "image",
+                  mimeType: "image/png",
+                  data: await png("/preview-harness/fixtures/pages/_render-placeholder.png"),
+                },
+                {
+                  type: "resource_link",
+                  uri: "compose-preview://fixture/_app/com.example.Card?overrides=other",
+                  name: "Compose Preview render",
+                  mimeType: "image/png",
+                },
+              ],
+            },
+          },
+        });
+      }, 50);
+      window.setTimeout(async () => {
+        send({
+          jsonrpc: "2.0",
+          method: "ui/notifications/tool-result",
+          params: {
+            result: {
+              content: [
+                {
+                  type: "image",
+                  mimeType: "image/png",
+                  data: await png("/preview-harness/fixtures/pages/_render-placeholder.png"),
+                },
+                {
+                  type: "resource_link",
+                  uri: "compose-preview://fixture/_app/com.example.Card?overrides=fixture",
+                  name: "Compose Preview render",
+                  mimeType: "image/png",
+                },
+              ],
+            },
+          },
+        });
+      }, 100);
+    }
     return;
   }
   if (message.method === "resources/subscribe") {
-    if (mode === "subscribe-fails") {
+    if (mode === "subscribe-fails" || mode === "stale-read-marker") {
       window.setTimeout(
         () =>
           send({
@@ -128,7 +181,12 @@ window.addEventListener("message", async (event) => {
   if (message.method === "resources/read") {
     reads += 1;
     window.__mcpReadCount = reads;
-    await new Promise((resolve) => setTimeout(resolve, mode === "slow-resource" ? 5250 : 150));
+    await new Promise((resolve) =>
+      setTimeout(
+        resolve,
+        mode === "slow-resource" ? 5250 : mode === "stale-read-marker" ? 500 : 150,
+      ),
+    );
     if (mode === "fallback") {
       send({
         jsonrpc: "2.0",

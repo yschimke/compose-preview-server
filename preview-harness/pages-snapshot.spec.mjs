@@ -4388,6 +4388,10 @@ for (const fixture of listPageFixtures()) {
           await page.waitForFunction(() => window.__mcpReadCount >= 2, null, { timeout: 7_000 });
           await expect(viewer.locator("#refresh")).toBeEnabled();
         }
+        if (fixture === "mcp-app-viewer-stale-read-marker") {
+          await page.waitForFunction(() => window.__mcpReadCount >= 2, null, { timeout: 7_000 });
+          await expect(viewer.locator("#refresh")).toBeEnabled();
+        }
       }
 
       // The design page's renders are `loading="lazy"` — a live catalog serves one daemon

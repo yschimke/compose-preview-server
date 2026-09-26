@@ -342,6 +342,7 @@
   function disconnectResourceUpdates() {
     ++resourceSubscriptionGeneration;
     ++resourceReadGeneration;
+    resourceReadUri = undefined;
     stopResourcePolling();
     const previous = subscribedResourceUri;
     subscribedResourceUri = undefined;
