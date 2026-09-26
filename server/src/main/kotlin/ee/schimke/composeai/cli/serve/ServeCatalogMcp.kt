@@ -366,7 +366,7 @@ class ServeCatalogMcp(
     val args = if (TOKEN_ARGUMENT in rawArgs) JsonObject(rawArgs - TOKEN_ARGUMENT) else rawArgs
     val liveAuthorization = { authorizeLive(presented) }
     uiBuilderTool(name, args, presented, uiBuilderAuthorization)?.let {
-      return it
+      return withStructuredContent(it)
     }
     return when (name) {
       "request_access" -> {
@@ -489,7 +489,7 @@ class ServeCatalogMcp(
         }
       }
       else -> toolError("unknown tool: $name")
-    }
+    }.let(::withStructuredContent)
   }
 
   private suspend fun listResources(): JsonObject {
@@ -1754,7 +1754,32 @@ class ServeCatalogMcp(
       put("name", name)
       put("description", description)
       put("inputSchema", withTokenArgument(name, JSON.parseToJsonElement(schema).jsonObject))
+      put("outputSchema", buildJsonObject { put("type", "object") })
     }
+
+  /**
+   * MCP output schemas validate `structuredContent`, not the backwards-compatible text block.
+   * Preserve that text for existing clients while exposing the same JSON object to typed clients.
+   * Image-only and non-JSON text results use an empty object; their primary payload remains in
+   * `content`, and the universal object output contract still holds.
+   */
+  private fun withStructuredContent(result: JsonObject): JsonObject {
+    if (result["isError"]?.jsonPrimitive?.booleanOrNull == true || "structuredContent" in result) {
+      return result
+    }
+    val structured =
+      (result["content"] as? JsonArray)
+        ?.asSequence()
+        ?.mapNotNull { it as? JsonObject }
+        ?.firstNotNullOfOrNull { block ->
+          if (block["type"]?.jsonPrimitive?.contentOrNull != "text")
+            return@firstNotNullOfOrNull null
+          block["text"]?.jsonPrimitive?.contentOrNull?.let {
+            runCatching { JSON.parseToJsonElement(it) }.getOrNull() as? JsonObject
+          }
+        } ?: JsonObject(emptyMap())
+    return JsonObject(result + ("structuredContent" to structured))
+  }
 
   /**
    * Adds the in-band credential to a gated tool's input schema.

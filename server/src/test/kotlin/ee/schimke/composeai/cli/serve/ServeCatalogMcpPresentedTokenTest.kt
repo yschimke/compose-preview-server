@@ -85,7 +85,35 @@ class ServeCatalogMcpPresentedTokenTest {
     access.forEach { assertTrue(ServeCatalogMcp.TOKEN_ARGUMENT !in it.properties, it.name) }
   }
 
-  private data class Tool(val name: String, val properties: Set<String>)
+  @Test
+  fun `every tool declares an object output schema`() {
+    val invalid = tools().filter { it.outputSchema["type"]?.jsonPrimitive?.content != "object" }
+    assertTrue(invalid.isEmpty(), "tools without object output schemas: ${invalid.map { it.name }}")
+  }
+
+  @Test
+  fun `json text results also carry matching structured content`() {
+    val result =
+      runBlocking {
+          mcp.handle(
+            json(
+              """{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"status","arguments":{}}}"""
+            )
+          ) {
+            ServeMachineAuthorization.Decision.Missing
+          }
+        }
+        .body!!["result"]!!
+        .jsonObject
+    val text = result["content"]!!.jsonArray.first().jsonObject["text"]!!.jsonPrimitive.content
+    assertEquals(Json.parseToJsonElement(text), result["structuredContent"])
+  }
+
+  private data class Tool(
+    val name: String,
+    val properties: Set<String>,
+    val outputSchema: JsonObject,
+  )
 
   /**
    * The access tools are listed only where the grant flow exists, so this stub makes them exist.
@@ -120,6 +148,7 @@ class ServeCatalogMcpPresentedTokenTest {
           name = tool.jsonObject["name"]!!.jsonPrimitive.content,
           properties =
             tool.jsonObject["inputSchema"]!!.jsonObject["properties"]?.jsonObject?.keys.orEmpty(),
+          outputSchema = tool.jsonObject["outputSchema"]!!.jsonObject,
         )
       }
 
