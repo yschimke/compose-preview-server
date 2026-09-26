@@ -8,6 +8,7 @@ import ee.schimke.composeai.mcp.protocol.ResourceContents
 import io.modelcontextprotocol.kotlin.sdk.types.Implementation
 import io.modelcontextprotocol.kotlin.sdk.types.ListToolsResult
 import java.awt.image.BufferedImage
+import java.io.File
 import java.io.IOException
 import java.io.InputStream
 import java.io.OutputStream
@@ -99,6 +100,7 @@ class DaemonMcpServerTest {
         "list_projects",
         "list_devices",
         "render_preview",
+        "find_previews_for_file",
         "render_matrix",
         "watch",
         "unwatch",
@@ -970,6 +972,199 @@ class DaemonMcpServerTest {
     // The first (only) content block is text JSON — firstTextContent() above would have errored on
     // an image block, so the token-frugal path returned no base64 PNG.
     assertThat(resp.textContents()).hasSize(1)
+  }
+
+  @Test
+  fun `render_preview inline false returns png path and tracks file changes per session`() {
+    client.initialize()
+    val projectDir = tmp.newFolder("workspace")
+    val moduleDir = tmp.newFolder("workspace", "module")
+    val sourceFile = moduleDir.resolve("src/main/kotlin/com/example/Preview.kt")
+    sourceFile.parentFile.mkdirs()
+    sourceFile.writeText("@Preview fun Red() {}")
+    val workspaceId = registerWorkspace(projectDir, "demo")
+    val daemon = warmDaemonFor(workspaceId, ":module")
+    val previewId = "com.example.Red"
+    daemon.emitDiscovery(previewId, sourceFile = "src/main/kotlin/com/example/Preview.kt")
+    client.expectNotification("notifications/resources/list_changed", 2_000)
+
+    val firstPng = tmp.newFile("file-render-first.png")
+    val secondPng = tmp.newFile("file-render-second.png")
+    val header =
+      byteArrayOf(
+        0x89.toByte(),
+        0x50,
+        0x4e,
+        0x47,
+        0x0d,
+        0x0a,
+        0x1a,
+        0x0a,
+        0x00,
+        0x00,
+        0x00,
+        0x0d,
+        0x49,
+        0x48,
+        0x44,
+        0x52,
+        0x00,
+        0x00,
+        0x00,
+        0x28,
+        0x00,
+        0x00,
+        0x00,
+        0x1e,
+      )
+    Files.write(firstPng.toPath(), header + byteArrayOf(1))
+    Files.write(secondPng.toPath(), header + byteArrayOf(2))
+    var activePng = firstPng
+    daemon.autoRenderPngPath = { id -> if (id == previewId) activePng.absolutePath else null }
+
+    val uri = PreviewUri(workspaceId, ":module", previewId).toUri()
+    fun renderFile() =
+      json
+        .parseToJsonElement(
+          client
+            .callTool(
+              "render_preview",
+              buildJsonObject {
+                put("uri", uri)
+                put("inline", false)
+              },
+              timeoutMs = 10_000,
+            )
+            .firstTextContent()
+        )
+        .jsonObject
+
+    val first = renderFile()
+    assertThat(first["pngPath"]?.jsonPrimitive?.contentOrNull).isEqualTo(firstPng.canonicalPath)
+    assertThat(File(first["pngPath"]!!.jsonPrimitive.content).isFile).isTrue()
+    assertThat(first["widthPx"]?.jsonPrimitive?.contentOrNull).isEqualTo("40")
+    assertThat(first["heightPx"]?.jsonPrimitive?.contentOrNull).isEqualTo("30")
+    assertThat(first["sha256"]?.jsonPrimitive?.contentOrNull).isNotEmpty()
+    assertThat(first["changed"]?.jsonPrimitive?.contentOrNull).isEqualTo("true")
+    assertThat(first["durationMs"]?.jsonPrimitive?.contentOrNull?.toLong()).isAtLeast(0L)
+
+    val unchanged = renderFile()
+    assertThat(unchanged["changed"]?.jsonPrimitive?.contentOrNull).isEqualTo("false")
+
+    sourceFile.writeText("@Preview fun Red() { /* edited */ }")
+    activePng = secondPng
+    client.callTool(
+      "notify_file_changed",
+      buildJsonObject {
+        put("workspaceId", workspaceId.value)
+        put("path", sourceFile.absolutePath)
+      },
+    )
+    assertThat(daemon.fileChanges.poll(2_000, TimeUnit.MILLISECONDS)).isNotNull()
+
+    val changed = renderFile()
+    assertThat(changed["changed"]?.jsonPrimitive?.contentOrNull).isEqualTo("true")
+    assertThat(changed["sha256"]?.jsonPrimitive?.contentOrNull)
+      .isNotEqualTo(first["sha256"]?.jsonPrimitive?.contentOrNull)
+  }
+
+  @Test
+  fun `find_previews_for_file resolves workspace relative sources and returns no match as empty`() {
+    client.initialize()
+    val projectDir = tmp.newFolder("workspace")
+    val moduleDir = tmp.newFolder("workspace", "module")
+    val previewFile = moduleDir.resolve("src/main/kotlin/com/example/Preview.kt")
+    previewFile.parentFile.mkdirs()
+    previewFile.writeText("@Preview fun Red() {}\n@Preview fun Blue() {}")
+    val unrelatedFile = moduleDir.resolve("src/main/kotlin/com/example/Other.kt")
+    unrelatedFile.writeText("fun Other() = Unit")
+    val workspaceId = registerWorkspace(projectDir, "demo")
+    val daemon = warmDaemonFor(workspaceId, ":module")
+    daemon.emitDiscovery(
+      "com.example.Red",
+      sourceFile = "src/main/kotlin/com/example/Preview.kt",
+      bodyLine = 10,
+    )
+    daemon.emitDiscovery(
+      "com.example.Blue",
+      sourceFile = "src/main/kotlin/com/example/Preview.kt",
+      bodyLine = 24,
+    )
+    client.expectNotification("notifications/resources/list_changed", 2_000)
+    client.expectNotification("notifications/resources/list_changed", 2_000)
+
+    val listed =
+      json.decodeFromJsonElement(
+        io.modelcontextprotocol.kotlin.sdk.types.ListResourcesResult.serializer(),
+        client.request("resources/list"),
+      )
+    assertThat(
+        listed.resources
+          .first { it.uri.contains("com.example.Red") }
+          .meta
+          ?.get("sourceFile")
+          ?.jsonPrimitive
+          ?.contentOrNull
+      )
+      .isEqualTo(previewFile.canonicalPath)
+
+    val found =
+      json
+        .parseToJsonElement(
+          client
+            .callTool(
+              "find_previews_for_file",
+              buildJsonObject {
+                put("workspaceId", workspaceId.value)
+                put("path", "module/src/main/kotlin/com/example/Preview.kt")
+              },
+            )
+            .firstTextContent()
+        )
+        .jsonObject["previews"]!!
+        .jsonArray
+        .map { it.jsonObject }
+    assertThat(found.map { it["fqn"]?.jsonPrimitive?.contentOrNull })
+      .containsExactly("com.example.Blue", "com.example.Red")
+    assertThat(
+        found
+          .map { it["uri"]?.jsonPrimitive?.contentOrNull }
+          .all { it!!.startsWith("compose-preview://${workspaceId.value}/") }
+      )
+      .isTrue()
+    assertThat(found.map { it["bodyLine"]?.jsonPrimitive?.contentOrNull })
+      .containsExactly("24", "10")
+
+    val foundFromAbsolutePath =
+      json
+        .parseToJsonElement(
+          client
+            .callTool(
+              "find_previews_for_file",
+              buildJsonObject { put("path", previewFile.absolutePath) },
+            )
+            .firstTextContent()
+        )
+        .jsonObject["previews"]!!
+        .jsonArray
+    assertThat(foundFromAbsolutePath).hasSize(2)
+
+    val missing =
+      json
+        .parseToJsonElement(
+          client
+            .callTool(
+              "find_previews_for_file",
+              buildJsonObject {
+                put("workspaceId", workspaceId.value)
+                put("path", unrelatedFile.absolutePath)
+              },
+            )
+            .firstTextContent()
+        )
+        .jsonObject["previews"]!!
+        .jsonArray
+    assertThat(missing).isEmpty()
   }
 
   @Test
