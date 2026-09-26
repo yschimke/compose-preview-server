@@ -15,13 +15,20 @@ class ServeUiBuilderAdministratorsTest {
   }
 
   @Test
-  fun `an approved agent inherits its human administrator identity`() {
-    assertTrue(
+  fun `only the actor's own id makes it an administrator`() {
+    assertTrue(administrators.contains(AuthenticatedUiBuilderActor("github:yschimke")))
+    assertFalse(
       administrators.contains(
         AuthenticatedUiBuilderActor(
           actorId = "agent-grant:temporary",
           onBehalfOfActorId = "github:yschimke",
         )
+      ),
+      "a grant approved by an administrator does not administer the host",
+    )
+    assertFalse(
+      administrators.contains(
+        AuthenticatedUiBuilderActor("github:guest", onBehalfOfActorId = "github:yschimke")
       )
     )
     assertFalse(administrators.contains(AuthenticatedUiBuilderActor("github:someone-else")))

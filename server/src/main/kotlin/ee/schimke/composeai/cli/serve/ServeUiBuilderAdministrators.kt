@@ -9,8 +9,12 @@ internal class ServeUiBuilderAdministrators(actorIds: Set<String>) {
   val configured: Boolean
     get() = actorIds.isNotEmpty()
 
+  /**
+   * Whether [actor] is itself an administrator. Only its own id counts: a grant acting for an
+   * administrator edits what they can edit, but administering the host is never delegated.
+   */
   fun contains(actor: AuthenticatedUiBuilderActor): Boolean =
-    actor.accessIdentities.any { canonicalActorId(it) in actorIds }
+    canonicalActorId(actor.actorId) in actorIds
 
   fun containsGithubLogin(login: String?): Boolean =
     login?.let { canonicalActorId(ServeAgentGrants.githubActorId(it)) in actorIds } == true
