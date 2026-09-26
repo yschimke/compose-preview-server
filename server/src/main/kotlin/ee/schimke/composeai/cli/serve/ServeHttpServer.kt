@@ -7120,11 +7120,13 @@ class ServeHttpServer(
         ContentType.Application.Json,
       )
     } else {
+      val grantRows = agentGrantStatusRows()
       call.respondText(
         ServeWeb.statusPage(
           data.toView(
-            agentGrants = agentGrantStatusRows(),
+            agentGrants = grantRows,
             agentGrantRequests = agentGrantRequestRows(),
+            hiddenAgentGrants = agentGrantHiddenCount(shown = grantRows.size),
           ),
           linkToken(),
           unfurl = ServeWeb.UnfurlMetadata(pageUrl = externalPageUrl()),
@@ -8735,6 +8737,7 @@ class ServeHttpServer(
     fun toView(
       agentGrants: List<ServeWeb.StatusAgentGrant> = emptyList(),
       agentGrantRequests: List<ServeWeb.StatusAgentRequest> = emptyList(),
+      hiddenAgentGrants: Int = 0,
     ): ServeWeb.StatusView {
       val seatsText =
         if (liveSeats.unbounded) "unbounded"
@@ -8965,6 +8968,7 @@ class ServeHttpServer(
       return ServeWeb.StatusView(
         agentGrants = agentGrants,
         agentGrantRequests = agentGrantRequests,
+        hiddenAgentGrants = hiddenAgentGrants,
         version = SERVE_VERSION,
         public = isPublic,
         nowMillis = nowMillis,
@@ -14705,12 +14709,14 @@ class ServeHttpServer(
   // ------------------------------------------------------------ agent grants
 
   /**
-   * The live-grant rows for `/status`, with a revoke seal **only** when this reader is an operator.
+   * The live-grant rows for `/status`, each with its revoke seal — shown **only** to an approver,
+   * and only the rows that approver manages ([ServeAgentGrants.Approver.manages]): every grant for
+   * the operator, the ones they approved themselves for a signed-in visitor on a `--public` box.
    *
-   * A grant-bearing agent that fetches `/status` sees the table (it passes the token gate, so it
-   * would see the page regardless) but gets no seals, so it cannot revoke anything — including its
-   * neighbours. Nothing here ever carries a token: [ServeAgentGrantStore.Grant.fingerprint] is the
-   * only form of one this page knows.
+   * A row names logins (the purpose of a request opened for oneself, the approver), so a reader who
+   * is not an approver — including a grant-bearing agent, which passes the token gate — gets no
+   * rows at all; [agentGrantHiddenCount] is what they are told instead. Nothing here ever carries a
+   * token: [ServeAgentGrantStore.Grant.fingerprint] is the only form of one this page knows.
    */
   private fun RoutingContext.agentGrantStatusRows(): List<ServeWeb.StatusAgentGrant> {
     // A top-level site's `/status` reports on THAT app only — every other box-wide field is already
@@ -14718,28 +14724,42 @@ class ServeHttpServer(
     // omitted rather than filtered: there is no per-site subset of them to show.
     if (siteSystem() != null) return emptyList()
     val store = agentGrants ?: return emptyList()
-    val approver = agentGrantApprover(store)
+    val approver = agentGrantApprover(store) ?: return emptyList()
     val now = System.currentTimeMillis()
-    return store.activeGrants().map { grant ->
-      ServeWeb.StatusAgentGrant(
-        id = grant.id,
-        fingerprint = grant.fingerprint,
-        scopes = grant.scopes.joinToString(", ") { it.wire },
-        capabilities = AgentGrantCapability.wireNames(grant.capabilities).joinToString(", "),
-        label = grant.label,
-        approvedBy = grant.approvedBy,
-        expiresInText = AgentGrantProtocol.formatDuration(grant.secondsUntilExpiry(now)),
-        revokeCsrf =
-          approver?.let {
-            agentGrantCsrf.seal(grant.id, it.name, ServeAgentGrants.Csrf.ACTION_DENY)
-          } ?: "",
-      )
-    }
+    return store
+      .activeGrants()
+      .filter { approver.manages(it) }
+      .map { grant ->
+        ServeWeb.StatusAgentGrant(
+          id = grant.id,
+          fingerprint = grant.fingerprint,
+          scopes = grant.scopes.joinToString(", ") { it.wire },
+          capabilities = AgentGrantCapability.wireNames(grant.capabilities).joinToString(", "),
+          label = grant.label,
+          approvedBy = grant.approvedBy,
+          expiresInText = AgentGrantProtocol.formatDuration(grant.secondsUntilExpiry(now)),
+          revokeCsrf =
+            agentGrantCsrf.seal(grant.id, approver.name, ServeAgentGrants.Csrf.ACTION_DENY),
+        )
+      }
   }
 
   /**
-   * Requests still waiting on a human — shown **only to an operator**, because this table is a list
-   * of decisions to make and a "Review →" link straight into the approval page.
+   * How many live grants this `/status` reader is not shown a row for — a count and nothing more,
+   * the same number `/status.json` already publishes as `agentAccess.activeGrants`.
+   */
+  private fun RoutingContext.agentGrantHiddenCount(shown: Int): Int {
+    if (siteSystem() != null) return 0
+    val store = agentGrants ?: return 0
+    return (store.activeGrants().size - shown).coerceAtLeast(0)
+  }
+
+  /**
+   * Requests still waiting on a human — shown **only to an approver**, because this table is a list
+   * of decisions to make and a "Review →" link straight into the approval page. A signed-in visitor
+   * on a `--public` box is shown only the requests they opened for themselves
+   * ([ServeAgentGrants.Approver.sees]); an agent's request reaches them through the link the agent
+   * printed, not through this table.
    *
    * It also solves the token-gated box's awkward moment: the agent's printed link has no `?token=`,
    * so an operator can instead reach the request from the `/status` they already have open with the
@@ -14748,18 +14768,21 @@ class ServeHttpServer(
   private fun RoutingContext.agentGrantRequestRows(): List<ServeWeb.StatusAgentRequest> {
     if (siteSystem() != null) return emptyList()
     val store = agentGrants ?: return emptyList()
-    agentGrantApprover(store) ?: return emptyList()
+    val approver = agentGrantApprover(store) ?: return emptyList()
     val now = System.currentTimeMillis()
-    return store.pendingRequests().map { request ->
-      ServeWeb.StatusAgentRequest(
-        id = request.id,
-        userCode = request.userCode,
-        label = request.label,
-        client = request.client,
-        requestedScope = request.requestedScope.wire,
-        expiresInText = AgentGrantProtocol.formatDuration(request.secondsUntilExpiry(now)),
-      )
-    }
+    return store
+      .pendingRequests()
+      .filter { approver.sees(it) }
+      .map { request ->
+        ServeWeb.StatusAgentRequest(
+          id = request.id,
+          userCode = request.userCode,
+          label = request.label,
+          client = request.client,
+          requestedScope = request.requestedScope.wire,
+          expiresInText = AgentGrantProtocol.formatDuration(request.secondsUntilExpiry(now)),
+        )
+      }
   }
 
   /**
@@ -15270,6 +15293,7 @@ class ServeHttpServer(
   private suspend fun RoutingContext.handleAgentGrantRevoke(store: ServeAgentGrantStore) {
     val grant = agentGrantFor(call)
     val revoked = grant != null && store.revoke(grant.id, "the agent itself")
+    if (grant != null) mcpOAuth.forgetRefreshFor(grant.id)
     call.respondText(
       JSON.encodeToString(
         ServeAgentGrants.RevokeResponse.serializer(),
@@ -15284,7 +15308,9 @@ class ServeHttpServer(
 
   /**
    * `POST /agent-access/{grantId}/revoke` — the `/status` page's revoke button. Requires an
-   * operator identity, exactly like approving does; a grant may not revoke another grant.
+   * approver identity, exactly like approving does; a grant may not revoke another grant. On a
+   * `--public` box a signed-in visitor may revoke only a grant they approved themselves — the same
+   * rows [agentGrantStatusRows] shows them — and anything else answers exactly like an unknown id.
    */
   private suspend fun RoutingContext.handleAgentGrantRevokeFromStatus(store: ServeAgentGrantStore) {
     val approver = agentGrantApprover(store)
@@ -15298,7 +15324,15 @@ class ServeHttpServer(
       call.respondText("not found", status = HttpStatusCode.NotFound)
       return
     }
+    val grant = store.grant(grantId)
+    if (grant != null && !approver.manages(grant)) {
+      call.respondText("not found", status = HttpStatusCode.NotFound)
+      return
+    }
     store.revoke(grantId, approver.name)
+    // Its refresh tokens go with it now rather than sitting in the bounded map until someone
+    // presents one.
+    mcpOAuth.forgetRefreshFor(grantId)
     call.respondRedirect("/status" + agentGrantTokenQuery())
   }
 
@@ -15378,6 +15412,8 @@ class ServeHttpServer(
         storeNarrowedReason =
           "this server's --agent-grant-capabilities does not include it, so no tick could " +
             "grant it — the operator would have to add the capability and restart",
+        oauthReturn =
+          mcpOAuth.forRequest(request.id)?.let { ServeMcpOAuth.describeRedirect(it.redirectUri) },
       ),
       ContentType.Text.Html,
     )
@@ -15475,7 +15511,30 @@ class ServeHttpServer(
         ttl,
         chosenCapabilities,
         approver.actorId,
+        enforceApproverCap = !approver.administers,
       )
+    if (
+      grant == null && store.request(requestId)?.state == ServeAgentGrantStore.Request.State.PENDING
+    ) {
+      // Still pending, so the refusal was a limit on live grants, not a stale request. The request
+      // stays open: revoking a grant and pressing Approve again completes it.
+      val full =
+        store.capacityFor(approver.name, approver.actorId, !approver.administers) ==
+          ServeAgentGrantStore.Capacity.APPROVER_FULL
+      respondAgentGrantNotice(
+        heading = "No room for another grant",
+        message =
+          if (full)
+            "You already have as many live grants on this server as one approver may hold. " +
+              "Revoke one you no longer need from the server status page, then open this link " +
+              "again and approve."
+          else
+            "This server already holds as many live grants as it allows. Revoke one from the " +
+              "server status page, or wait for one to expire, then open this link again and approve.",
+        status = HttpStatusCode.Conflict,
+      )
+      return
+    }
     if (grant == null) {
       respondAgentGrantNotice(
         heading = "Nothing to approve",
@@ -15753,8 +15812,8 @@ class ServeHttpServer(
     val wanted = ServeMcpOAuth.parseScope(query["scope"])
     val request =
       store.openRequest(
-        // The client's registered name, which it wrote, presented as the label the approval page
-        // already treats as the asker's own words. "Who is asking" stays the address.
+        // The client's registered name, which it wrote. The approval page shows it as the client's
+        // own choice, below the redirect host it leads with; see [ServeWeb.agentGrantApprovalPage].
         label = client!!.clientName.ifBlank { "MCP client" },
         client = clientAddress(),
         requestedScope = wanted.scope,
@@ -15892,7 +15951,8 @@ class ServeHttpServer(
             accessToken = grant.token,
             expiresIn = grant.secondsUntilExpiry(System.currentTimeMillis()),
             scope = ServeMcpOAuth.formatScope(grant),
-            refreshToken = mcpOAuth.issueRefresh(grant.id, authorization.clientId),
+            refreshToken =
+              mcpOAuth.issueRefresh(grant.id, authorization.clientId) { store.grant(it) != null },
           ),
         ),
         ContentType.Application.Json,
@@ -15951,7 +16011,8 @@ class ServeHttpServer(
           accessToken = grant.token,
           expiresIn = grant.secondsUntilExpiry(System.currentTimeMillis()),
           scope = ServeMcpOAuth.formatScope(grant),
-          refreshToken = mcpOAuth.issueRefresh(grant.id, binding.clientId),
+          refreshToken =
+            mcpOAuth.issueRefresh(grant.id, binding.clientId) { store.grant(it) != null },
         ),
       ),
       ContentType.Application.Json,
@@ -16003,6 +16064,13 @@ class ServeHttpServer(
         auth.hasImageRepositoryAccess(call),
         store.maxScope,
         store.maxCapabilities,
+        // On a `--public` box any signed-in visitor approves, so being one says nothing about the
+        // rest of the box. The `--token` holder and a configured UI-builder administrator still
+        // answer for all of it; on a private box every approver has already shown the token.
+        administers =
+          !isPublic ||
+            (serverToken.isNotBlank() && ServeUrls.tokensMatch(serverToken, provided)) ||
+            uiBuilderAdministrators.containsGithubLogin(login),
       )
     }
     return ServeAgentGrants.Approver.operator(store.maxScope, store.maxCapabilities)

@@ -390,8 +390,17 @@ object ServeMcpOAuth {
     /**
      * Mint a refresh token for [grantId]. Called once per authorization-code exchange and again on
      * every rotation.
+     *
+     * [isLive] answers whether a grant still exists. Bindings to grants that do not are dropped
+     * first, so tokens left behind by lapsed grants — whose clients never came back to be refused —
+     * do not hold places under [MAX_REFRESH_TOKENS] that live sessions need.
      */
-    fun issueRefresh(grantId: String, clientId: String): String? {
+    fun issueRefresh(
+      grantId: String,
+      clientId: String,
+      isLive: (grantId: String) -> Boolean = { true },
+    ): String? {
+      forgetRefreshUnless(isLive)
       if (refreshTokens.size >= MAX_REFRESH_TOKENS) return null
       val binding = RefreshBinding(randomId(), grantId, clientId)
       refreshTokens[binding.token] = binding
@@ -415,6 +424,13 @@ object ServeMcpOAuth {
     /** Drop every refresh token bound to [grantId] — used when its grant is gone. */
     fun forgetRefreshFor(grantId: String) {
       refreshTokens.entries.removeIf { (_, binding) -> binding.grantId == grantId }
+    }
+
+    /** Drop every refresh token whose grant [isLive] no longer recognises. */
+    fun forgetRefreshUnless(isLive: (grantId: String) -> Boolean) {
+      val dead = refreshTokens.values.map { it.grantId }.distinct().filterNot(isLive).toSet()
+      if (dead.isNotEmpty())
+        refreshTokens.entries.removeIf { (_, binding) -> binding.grantId in dead }
     }
 
     fun refreshCount(): Int = refreshTokens.size
@@ -525,6 +541,48 @@ object ServeMcpOAuth {
 
   private fun isLoopbackHost(host: String?): Boolean =
     host == "127.0.0.1" || host == "::1" || host == "[::1]"
+
+  /**
+   * Where an approval sends the browser — and so the authorization code — as the approval page
+   * shows it. [display] is the host (with a non-default port), or `scheme://` for a private-use
+   * scheme that has no host.
+   */
+  data class RedirectTarget(val display: String, val kind: Kind, val uri: String) {
+    enum class Kind {
+      /** `127.0.0.1`, `[::1]` or `localhost`: a program on the approver's own machine. */
+      LOOPBACK,
+      /** A non-http(s) scheme (`cursor://…`): whatever app on this device registered it. */
+      APP,
+      /** Any other host: a site elsewhere on the network. */
+      EXTERNAL,
+    }
+  }
+
+  /** Classify a registered redirect URI for the approval page. Never throws. */
+  fun describeRedirect(redirectUri: String): RedirectTarget {
+    val uri = runCatching { URI(redirectUri) }.getOrNull()
+    val scheme = (uri?.scheme ?: redirectUri.substringBefore(':', "")).lowercase()
+    val host = uri?.host?.takeIf { it.isNotBlank() }
+    if (host == null || (scheme != "http" && scheme != "https")) {
+      // A private-use scheme is opened by whichever app registered it, not fetched from a host.
+      return RedirectTarget(
+        display =
+          when {
+            scheme.isBlank() -> redirectUri
+            host == null -> "$scheme://"
+            else -> "$scheme://${host.lowercase()}"
+          },
+        kind = RedirectTarget.Kind.APP,
+        uri = redirectUri,
+      )
+    }
+    val lower = host.lowercase()
+    val kind =
+      if (isLoopbackHost(lower) || lower == "localhost") RedirectTarget.Kind.LOOPBACK
+      else RedirectTarget.Kind.EXTERNAL
+    val port = uri.port.takeIf { it > 0 }?.let { ":$it" }.orEmpty()
+    return RedirectTarget(display = lower + port, kind = kind, uri = redirectUri)
+  }
 
   /**
    * RFC 7636 §4.6: the challenge is the base64url-of-SHA256 of the verifier, unpadded. Compared in

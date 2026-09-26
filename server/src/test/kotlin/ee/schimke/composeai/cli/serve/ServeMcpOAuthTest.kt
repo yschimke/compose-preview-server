@@ -307,4 +307,46 @@ class ServeMcpOAuthTest {
     )
     assertTrue(challenge.startsWith("Bearer "))
   }
+
+  @Test
+  fun `issuing a refresh token first drops the ones whose grant is gone`() {
+    val store = ServeMcpOAuth.Store()
+    repeat(ServeMcpOAuth.MAX_REFRESH_TOKENS) { store.issueRefresh("dead-$it", "client") }
+    assertNull(store.issueRefresh("live", "client"), "a full map with no liveness check refuses")
+    val issued = store.issueRefresh("live", "client") { it == "live" }
+    assertNotNull(issued, "dead bindings no longer hold places a live grant needs")
+    assertEquals(1, store.refreshCount())
+  }
+
+  @Test
+  fun `forgetting a grant's refresh tokens leaves other grants' alone`() {
+    val store = ServeMcpOAuth.Store()
+    store.issueRefresh("a", "client")
+    store.issueRefresh("a", "client")
+    val kept = assertNotNull(store.issueRefresh("b", "client"))
+    store.forgetRefreshFor("a")
+    assertEquals(1, store.refreshCount())
+    assertNotNull(store.redeemRefresh(kept, "client"))
+  }
+
+  @Test
+  fun `a redirect is described by its host, and only loopback reads as this computer`() {
+    val external = ServeMcpOAuth.describeRedirect("https://Example.net/oauth/cb")
+    assertEquals("example.net", external.display)
+    assertEquals(ServeMcpOAuth.RedirectTarget.Kind.EXTERNAL, external.kind)
+    val loopback = ServeMcpOAuth.describeRedirect("http://127.0.0.1:8976/callback")
+    assertEquals("127.0.0.1:8976", loopback.display)
+    assertEquals(ServeMcpOAuth.RedirectTarget.Kind.LOOPBACK, loopback.kind)
+    assertEquals(
+      ServeMcpOAuth.RedirectTarget.Kind.LOOPBACK,
+      ServeMcpOAuth.describeRedirect("http://localhost/cb").kind,
+    )
+    val app = ServeMcpOAuth.describeRedirect("cursor://anysphere.cursor-retrieval/oauth/callback")
+    // A private-use scheme is an app on this device, whether or not it carries an authority part.
+    assertEquals(ServeMcpOAuth.RedirectTarget.Kind.APP, app.kind)
+    assertEquals("cursor://anysphere.cursor-retrieval", app.display)
+    val schemeOnly = ServeMcpOAuth.describeRedirect("com.example.app:/oauth2redirect")
+    assertEquals("com.example.app://", schemeOnly.display)
+    assertEquals(ServeMcpOAuth.RedirectTarget.Kind.APP, schemeOnly.kind)
+  }
 }

@@ -3810,6 +3810,30 @@ class ServeWebFixtureTest {
         withheldReason = "you do not hold it yourself on this server, so you cannot pass it on",
       )
 
+    // The same page for a request that came through the MCP OAuth façade, registered with a
+    // redirect to another host: the page leads with that host and labels it an external site,
+    // shows the client's self-chosen name as such, and has no "Asked from" line (that address would
+    // be the approver's own browser).
+    val agentAccessOAuth =
+      ServeWeb.agentGrantApprovalPage(
+        requestId = "9c2Qk1pTf0Xb7hLm4nRzQA",
+        userCode = "KX7M-9QD4",
+        label = "Claude Desktop",
+        client = "203.0.113.42",
+        requestedScope = AgentGrantScope.LIVE,
+        requestedTtlSeconds = 3600,
+        expiresInSeconds = 1740,
+        approver = "@yschimke",
+        selectableScopes = listOf(AgentGrantScope.PREVIEW, AgentGrantScope.LIVE),
+        maxTtlSeconds = 8 * 3600,
+        approveCsrf = "fixed-approve-seal",
+        denyCsrf = "fixed-deny-seal",
+        formAction = "/agent-access/9c2Qk1pTf0Xb7hLm4nRzQA",
+        version = version,
+        oauthReturn =
+          ServeMcpOAuth.describeRedirect("https://mcp-client.example.net/oauth/callback"),
+      )
+
     // The same page on a box that offers a CAPABILITY beside the scopes — the second fieldset, its
     // checkboxes ticked (every row is an ask this approver may grant), and one capability the
     // approver may not pass on. Its own fixture rather
@@ -4455,6 +4479,7 @@ class ServeWebFixtureTest {
         "serve-notfound.html" to notFound,
         "serve-agent-access.html" to agentAccess,
         "serve-agent-access-capabilities.html" to agentAccessCapabilities,
+        "serve-agent-access-oauth.html" to agentAccessOAuth,
         "serve-agent-access-granted.html" to agentAccessGranted,
         "serve-docs-upload.html" to docUpload,
         "serve-admin-ui-builder.html" to uiBuilderAdmin,
