@@ -79,7 +79,10 @@ internal fun Route.installUiBuilderLiveExportRoutes(
       call.serveSuppliedDocument(service, authorization, ExportFormatV1.PNG)
     }
   }
-  RemoteDocumentExportSupport.formats.forEach { format ->
+  // JSON in every build: an A2UI catalog's JSON is its A2UI messages, which no build flag gates.
+  // A design on any other catalog is refused by the service's capability gate unless this is a
+  // Remote Compose build, exactly as before.
+  (RemoteDocumentExportSupport.formats + ExportFormatV1.JSON).distinct().forEach { format ->
     post("/api/ui-builder/v1/documents/export.${format.name.lowercase()}") {
       call.serveSuppliedDocument(service, authorization, format)
     }

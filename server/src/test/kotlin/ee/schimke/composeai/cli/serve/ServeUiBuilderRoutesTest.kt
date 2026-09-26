@@ -128,7 +128,20 @@ class ServeUiBuilderRoutesTest {
   @Test
   fun `disabled document routes cannot reach the service`() {
     if (UiBuilderBuildFeatures.remoteCompose) return
-    for (format in listOf("png", "json", "rc")) {
+    // JSON is served in every build, because an A2UI catalog's JSON is its messages; the capability
+    // gate in the service still refuses it for any other catalog. `{}` is not a design document,
+    // so it is turned away before the service is called.
+    client
+      .newCall(
+        Request.Builder()
+          .url("http://127.0.0.1:${server.port}/api/ui-builder/v1/documents/export.json")
+          .header(ACTOR_HEADER, "tester")
+          .post("{}".toRequestBody())
+          .build()
+      )
+      .execute()
+      .use { assertEquals(400, it.code) }
+    for (format in listOf("png", "rc")) {
       client
         .newCall(
           Request.Builder()
