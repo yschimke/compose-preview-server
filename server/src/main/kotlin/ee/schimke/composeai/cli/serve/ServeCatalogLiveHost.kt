@@ -206,8 +206,9 @@ class ServeCatalogLiveHost(
    * whatever document it is handed, so it has no sticker to publish. The live bundle still carries
    * it, with its knob sidecar, but [previews] is built from the catalog, so `/{system}/a2ui` said
    * the system "declares no A2UI document preview" and a render of it was "no such preview".
-   * Exposed here under its own daemon id as a live-only preview. Only the playground: any other
-   * preview the catalog left out stays out, so the grid does not change.
+   * Exposed here under its own daemon id as a live-only preview, and kept off the landing grid
+   * ([playgroundPreviewIds]). Only the playground: any other preview the catalog left out stays
+   * out.
    */
   private val liveOnlyPlaygrounds: List<ServePreview> =
     ServeWeb.a2uiDocumentPreview(
@@ -220,6 +221,13 @@ class ServeCatalogLiveHost(
       .orEmpty()
 
   private val alias: Map<String, String> = alias + liveOnlyPlaygrounds.associate { it.id to it.id }
+
+  /**
+   * The ids [liveOnlyPlaygrounds] added to [previews]. Listed there so `/{system}/a2ui`, the render
+   * routes and `/api/previews` find the playground and its knob; the landing grid leaves them out,
+   * because the catalog did not list the playground as a card.
+   */
+  val playgroundPreviewIds: Set<String> = liveOnlyPlaygrounds.mapTo(HashSet()) { it.id }
 
   override fun canDownloadExecutableBundle(previewId: String): Boolean =
     alias[previewId]?.let { daemonId ->

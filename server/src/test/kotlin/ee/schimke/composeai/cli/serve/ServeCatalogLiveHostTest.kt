@@ -477,6 +477,8 @@ class ServeCatalogLiveHostTest {
     assertEquals(playgroundId, ServeWeb.a2uiDocumentPreview(composite.previews)?.id)
     assertTrue(composite.canRenderOverridesFor(playgroundId))
     assertTrue(playgroundId in composite.liveOnlyPreviewIds)
+    // Listed for the playground route, but not a card: the landing grid leaves it out.
+    assertEquals(setOf(playgroundId), composite.playgroundPreviewIds)
     assertEquals(false, composite.canRenderOverridesFor("Unlisted"))
 
     val document =
