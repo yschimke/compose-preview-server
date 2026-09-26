@@ -4341,6 +4341,27 @@ for (const fixture of listPageFixtures()) {
         `/preview-harness/fixtures/pages/${fixture}.html${FIXTURE_QUERY[fixture] || ""}`,
       );
 
+      if (fixture.startsWith("mcp-app-viewer-")) {
+        const viewer = page.frameLocator('iframe[title="Compose Preview MCP App"]');
+        await page.waitForFunction(() => window.__mcpReadCount === 1);
+        if (fixture === "mcp-app-viewer-fallback") {
+          await expect(viewer.locator("#canvas")).toContainText(
+            "The host returned no PNG for resource",
+          );
+        } else {
+          await expect(viewer.locator('#canvas img[alt="Rendered Compose preview"]')).toBeVisible();
+        }
+        if (fixture === "mcp-app-viewer-refresh") {
+          const image = viewer.locator('#canvas img[alt="Rendered Compose preview"]');
+          const before = await image.getAttribute("src");
+          await viewer.locator("#refresh").click();
+          await expect(viewer.locator("#refresh")).toBeDisabled();
+          await page.waitForFunction(() => window.__mcpReadCount === 2);
+          await expect(viewer.locator("#refresh")).toBeEnabled();
+          await expect(image).not.toHaveAttribute("src", before);
+        }
+      }
+
       // The design page's renders are `loading="lazy"` — a live catalog serves one daemon
       // render per node and the sheet is taller than the fold, so the production page must
       // not ask for all of them at once. A full-page screenshot does not itself scroll, so

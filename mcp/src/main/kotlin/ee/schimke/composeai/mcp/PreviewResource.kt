@@ -1,6 +1,7 @@
 package ee.schimke.composeai.mcp
 
 import ee.schimke.composeai.daemon.client.WorkspaceId
+import java.util.Base64
 
 /**
  * Parsed `compose-preview://<workspace>/<module>/<fqn>?config=<qualifier>` URI. The three-segment
@@ -16,6 +17,7 @@ data class PreviewUri(
   val modulePath: String,
   val previewFqn: String,
   val config: String? = null,
+  val overridesJson: String? = null,
 ) {
   init {
     require(modulePath.startsWith(":")) {
@@ -29,7 +31,14 @@ data class PreviewUri(
   fun toUri(): String {
     val moduleSegment = encodeModule(modulePath)
     val base = "$SCHEME://${workspaceId.value}/$moduleSegment/$previewFqn"
-    return if (config == null) base else "$base?config=$config"
+    val query = buildList {
+      config?.let { add("config=$it") }
+      overridesJson?.let {
+        val encoded = Base64.getUrlEncoder().withoutPadding().encodeToString(it.encodeToByteArray())
+        add("overrides=$encoded")
+      }
+    }
+    return if (query.isEmpty()) base else "$base?${query.joinToString("&")}"
   }
 
   override fun toString(): String = toUri()
@@ -55,14 +64,25 @@ data class PreviewUri(
       val configValue =
         query
           ?.split('&')
-          ?.firstOrNull { it.startsWith("config=") }
+          ?.firstOrNull { it.substringBefore('=') == "config" }
           ?.removePrefix("config=")
           ?.takeIf { it.isNotEmpty() }
+      val overridesJson =
+        query
+          ?.split('&')
+          ?.firstOrNull { it.substringBefore('=') == "overrides" }
+          ?.removePrefix("overrides=")
+          ?.takeIf { it.isNotEmpty() }
+          ?.let { encoded ->
+            runCatching { Base64.getUrlDecoder().decode(encoded).decodeToString() }.getOrNull()
+              ?: return null
+          }
       return PreviewUri(
         workspaceId = WorkspaceId(workspace),
         modulePath = decodeModule(moduleEncoded),
         previewFqn = fqn,
         config = configValue,
+        overridesJson = overridesJson,
       )
     }
 

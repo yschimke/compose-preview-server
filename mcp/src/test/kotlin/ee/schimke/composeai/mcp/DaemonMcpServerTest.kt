@@ -162,20 +162,33 @@ class DaemonMcpServerTest {
     assertThat(content["text"]!!.jsonPrimitive.content).contains("use.hidden = true;")
     assertThat(content["text"]!!.jsonPrimitive.content)
       .contains("message.method === 'ui/notifications/tool-input'")
-    assertThat(content["text"]!!.jsonPrimitive.content).contains("delete copy.token;")
     assertThat(content["text"]!!.jsonPrimitive.content)
-      .contains("toolArguments = safeToolArguments(message.params?.arguments);")
+      .contains("toolArguments = safeSelectionArguments(message.params?.arguments || {});")
+    assertThat(content["text"]!!.jsonPrimitive.content)
+      .contains("function safeSelectionArguments(value)")
+    assertThat(content["text"]!!.jsonPrimitive.content)
+      .contains("/(token|authorization|password|secret|api[-_]?key)/i")
     assertThat(content["text"]!!.jsonPrimitive.content).contains("arguments: toolArguments")
     assertThat(content["text"]!!.jsonPrimitive.content)
       .contains("structuredContent: { composePreviewSelection: selected }")
     assertThat(content["text"]!!.jsonPrimitive.content)
       .contains("await request('ui/update-model-context'")
+    assertThat(content["text"]!!.jsonPrimitive.content).contains("const REQUEST_TIMEOUT_MS = 5000;")
+    assertThat(content["text"]!!.jsonPrimitive.content)
+      .contains("const RESOURCE_READ_TIMEOUT_MS = 65000;")
+    assertThat(content["text"]!!.jsonPrimitive.content)
+      .contains("window.clearTimeout(request.timer);")
+    assertThat(content["text"]!!.jsonPrimitive.content)
+      .contains("Viewer unavailable; use the complete text fallback.")
     assertThat(content["text"]!!.jsonPrimitive.content)
       .doesNotContain("notify('ui/update-model-context'")
     assertThat(content["text"]!!.jsonPrimitive.content)
       .contains(
         "if (image && !cells.some(cell => typeof cell?.png === 'string' && cell.png.length > 0))"
       )
+    assertThat(content["text"]!!.jsonPrimitive.content).contains("RESOURCE_READ_TIMEOUT_MS,")
+    assertThat(content["text"]!!.jsonPrimitive.content).contains("typeof content.blob === 'string'")
+    assertThat(content["text"]!!.jsonPrimitive.content).contains("Refresh resource")
   }
 
   @Test
@@ -425,6 +438,80 @@ class DaemonMcpServerTest {
     val update = client.expectNotification("notifications/resources/updated", 2_000)
     val updatedUri = update.params?.get("uri")?.jsonPrimitive?.contentOrNull
     assertThat(updatedUri).isEqualTo(expectedUri)
+  }
+
+  @Test
+  fun `override subscription rerenders and receives its exact uri after file change`() {
+    client.initialize()
+    val projectDir = tmp.newFolder("workspace")
+    tmp.newFolder("workspace", "module")
+    val workspaceId = registerWorkspace(projectDir, "demo")
+
+    val previewId = "com.example.Red"
+    val daemon = warmDaemonFor(workspaceId, ":module")
+    daemon.emitDiscovery(previewId)
+    client.expectNotification("notifications/resources/list_changed", 2_000)
+
+    val rawOverrides = buildJsonObject {
+      put("widthPx", 600)
+      put("uiMode", "dark")
+    }
+    val overrideUri =
+      PreviewUri(
+          workspaceId = workspaceId,
+          modulePath = ":module",
+          previewFqn = previewId,
+          overridesJson = rawOverrides.toString(),
+        )
+        .toUri()
+    client.request("resources/subscribe", buildJsonObject { put("uri", overrideUri) })
+
+    val response =
+      client.callTool(
+        "notify_file_changed",
+        buildJsonObject {
+          put("workspaceId", workspaceId.value)
+          put("path", "src/main/kotlin/com/example/Preview.kt")
+          put("kind", "source")
+          put("changeType", "modified")
+        },
+      )
+    assertThat(response.firstTextContent()).contains("re-rendered 1 watched preview(s)")
+
+    val rendered = daemon.renderRequests.poll(2_000, TimeUnit.MILLISECONDS)
+    assertThat(rendered).isEqualTo(listOf(previewId))
+    assertThat(daemon.renderOverrides).hasSize(1)
+    assertThat(daemon.renderOverrides.single()!!.widthPx).isEqualTo(600)
+    assertThat(daemon.renderOverrides.single()!!.uiMode)
+      .isEqualTo(ee.schimke.composeai.daemon.protocol.UiMode.DARK)
+
+    // A second edit with the same override set must queue another render rather than deduplicating
+    // onto the in-flight generation. The first render may already have captured the old source.
+    val secondResponse =
+      client.callTool(
+        "notify_file_changed",
+        buildJsonObject {
+          put("workspaceId", workspaceId.value)
+          put("path", "src/main/kotlin/com/example/Preview.kt")
+          put("kind", "source")
+          put("changeType", "modified")
+        },
+      )
+    assertThat(secondResponse.firstTextContent()).contains("re-rendered 1 watched preview(s)")
+    assertThat(daemon.renderRequests.poll(200, TimeUnit.MILLISECONDS)).isNull()
+    assertThat(daemon.renderOverrides).hasSize(1)
+
+    daemon.emitRenderFinished(previewId, "/tmp/override-refresh-1.png")
+    val firstUpdate = client.expectNotification("notifications/resources/updated", 2_000)
+    assertThat(firstUpdate.params?.get("uri")?.jsonPrimitive?.contentOrNull).isEqualTo(overrideUri)
+    val secondRender = daemon.renderRequests.poll(2_000, TimeUnit.MILLISECONDS)
+    assertThat(secondRender).isEqualTo(listOf(previewId))
+    assertThat(daemon.renderOverrides).hasSize(2)
+    assertThat(daemon.renderOverrides[1]!!.widthPx).isEqualTo(600)
+
+    daemon.emitRenderFinished(previewId, "/tmp/override-refresh-2.png")
+    val secondUpdate = client.expectNotification("notifications/resources/updated", 2_000)
+    assertThat(secondUpdate.params?.get("uri")?.jsonPrimitive?.contentOrNull).isEqualTo(overrideUri)
   }
 
   @Test
@@ -906,38 +993,40 @@ class DaemonMcpServerTest {
     daemon.autoRenderPngPath = { id -> if (id == previewId) pngFile.absolutePath else null }
 
     val uri = PreviewUri(workspaceId, ":module", previewId).toUri()
-    client.callTool(
-      "render_preview",
-      buildJsonObject {
-        put("uri", uri)
-        put(
-          "overrides",
-          buildJsonObject {
-            put("widthPx", 600)
-            put("heightPx", 800)
-            put("uiMode", "dark")
-            put("device", "id:pixel_5")
-            put("captureAdvanceMs", 250)
-            put("inspectionMode", false)
-            putJsonObject("material3Theme") {
-              putJsonObject("colorScheme") {
-                put("primary", "#FF336699")
-                put("onPrimary", "#FFFFFFFF")
-              }
-              putJsonObject("typography") {
-                putJsonObject("bodyLarge") {
-                  put("fontSizeSp", 18)
-                  put("lineHeightSp", 24)
-                  put("fontWeight", 700)
+    val rendered =
+      client.callTool(
+        "render_preview",
+        buildJsonObject {
+          put("uri", uri)
+          put("observe", "png")
+          put(
+            "overrides",
+            buildJsonObject {
+              put("widthPx", 600)
+              put("heightPx", 800)
+              put("uiMode", "dark")
+              put("device", "id:pixel_5")
+              put("captureAdvanceMs", 250)
+              put("inspectionMode", false)
+              putJsonObject("material3Theme") {
+                putJsonObject("colorScheme") {
+                  put("primary", "#FF336699")
+                  put("onPrimary", "#FFFFFFFF")
                 }
+                putJsonObject("typography") {
+                  putJsonObject("bodyLarge") {
+                    put("fontSizeSp", 18)
+                    put("lineHeightSp", 24)
+                    put("fontWeight", 700)
+                  }
+                }
+                putJsonObject("shapes") { put("medium", 16) }
               }
-              putJsonObject("shapes") { put("medium", 16) }
-            }
-          },
-        )
-      },
-      timeoutMs = 10_000,
-    )
+            },
+          )
+        },
+        timeoutMs = 10_000,
+      )
 
     // The daemon recorded one renderNow whose overrides match what we sent. Without the
     // compile fix, `renderOverrides[0]` would be `null` because the param was dropped on the
@@ -956,12 +1045,32 @@ class DaemonMcpServerTest {
     assertThat(material3Theme.typography["bodyLarge"]!!.fontWeight).isEqualTo(700)
     assertThat(material3Theme.shapes["medium"]).isEqualTo(16.0f)
 
+    val resourceUri =
+      rendered.raw["content"]!!
+        .jsonArray
+        .single { it.jsonObject["type"]!!.jsonPrimitive.content == "resource_link" }
+        .jsonObject["uri"]!!
+        .jsonPrimitive
+        .content
+    assertThat(resourceUri).contains("overrides=")
+    client.request(
+      "resources/read",
+      buildJsonObject { put("uri", resourceUri) },
+      timeoutMs = 10_000,
+    )
+    assertThat(daemon.renderOverrides).hasSize(2)
+    val resourceOverrides = daemon.renderOverrides[1]
+    assertThat(resourceOverrides).isNotNull()
+    assertThat(resourceOverrides!!.widthPx).isEqualTo(600)
+    assertThat(resourceOverrides.uiMode).isEqualTo(ee.schimke.composeai.daemon.protocol.UiMode.DARK)
+    assertThat(resourceOverrides.material3Theme!!.colorScheme["primary"]).isEqualTo("#FF336699")
+
     // A second render_preview call WITHOUT overrides now uses a different RenderKey and triggers
     // a fresh renderNow rather than dedup'ing onto the first. Pre-fix, the now-stale shared key
     // path would have skipped the renderNow and the request would have hung.
     client.callTool("render_preview", buildJsonObject { put("uri", uri) }, timeoutMs = 10_000)
-    assertThat(daemon.renderOverrides).hasSize(2)
-    assertThat(daemon.renderOverrides[1]).isNull()
+    assertThat(daemon.renderOverrides).hasSize(3)
+    assertThat(daemon.renderOverrides[2]).isNull()
   }
 
   @Test

@@ -59,8 +59,13 @@ class ServeCatalogMcpAppViewerTest {
     assertTrue(html.contains("selected = undefined;"))
     assertTrue(html.contains("use.hidden = true;"))
     assertTrue(html.contains("message.method === 'ui/notifications/tool-input'"))
-    assertTrue(html.contains("delete copy.token;"))
-    assertTrue(html.contains("toolArguments = safeToolArguments(message.params?.arguments);"))
+    assertTrue(html.contains("toolArguments = safeSelectionArguments(incomingArguments);"))
+    assertTrue(html.contains("resourceToken = typeof incomingArguments.token === 'string'"))
+    assertTrue(
+      html.contains("if (resourceToken) params._meta = { 'compose-preview/token': resourceToken };")
+    )
+    assertTrue(html.contains("function safeSelectionArguments(value)"))
+    assertTrue(html.contains("/(token|authorization|password|secret|api[-_]?key)/i"))
     assertTrue(html.contains("arguments: toolArguments"))
     assertTrue(html.contains("structuredContent: { composePreviewSelection: selected }"))
     assertTrue(html.contains("await request('ui/update-model-context'"))
@@ -71,6 +76,14 @@ class ServeCatalogMcpAppViewerTest {
       )
     )
     assertTrue(html.contains("renderImage(image, value, resource);"))
+    assertTrue(html.contains("const RESOURCE_READ_TIMEOUT_MS = 65000;"))
+    assertTrue(html.contains("RESOURCE_READ_TIMEOUT_MS,"))
+    assertTrue(html.contains("typeof content.blob === 'string'"))
+    assertTrue(html.contains("Refresh resource"))
+    assertTrue(html.contains("const REQUEST_TIMEOUT_MS = 5000;"))
+    assertTrue(html.contains("if (!pending.delete(id)) return;"))
+    assertTrue(html.contains("window.clearTimeout(request.timer);"))
+    assertTrue(html.contains("Viewer unavailable; use the complete text fallback."))
     assertTrue(
       html.indexOf("await request('ui/initialize'") <
         html.indexOf("notify('ui/notifications/initialized'"),

@@ -184,10 +184,11 @@ class DaemonMcpServer(
    * Per-(workspace, module, previewId) FIFO of [PendingRenderGroup]s awaiting a render. The HEAD
    * group is the one whose `renderNow` has been sent to the daemon (in-flight); subsequent groups
    * wait for their predecessor's `renderFinished` before their own `renderNow` is sent. Groups are
-   * created per distinct `PreviewOverrides` value: same-overrides waiters dedup onto the tail group
-   * (multi-waiter dedup, preserving the pre-#432 contract for concurrent same-call reads),
-   * different-overrides waiters serialize behind their predecessor (the load-bearing fix versus the
-   * daemon-side coalesce rule, PROTOCOL.md § 5).
+   * created per distinct `PreviewOverrides` value for reads: same-overrides waiters dedup onto the
+   * tail group (multi-waiter dedup, preserving the pre-#432 contract for concurrent same-call
+   * reads), while each source-change refresh appends a separate group even when its overrides match
+   * the previous generation. Different groups serialize behind their predecessor (the load-bearing
+   * fix versus the daemon-side coalesce rule, PROTOCOL.md § 5).
    *
    * Without this serialization, two concurrent override-bearing calls for the same URI would race
    * the daemon's coalesce: only one `renderNow` is accepted, the second is rejected, and the MCP
@@ -250,6 +251,18 @@ class DaemonMcpServer(
   private val daemonLifecycleExecutor: java.util.concurrent.ExecutorService =
     java.util.concurrent.Executors.newFixedThreadPool(DAEMON_LIFECYCLE_THREADS) { r ->
       Thread(r, "mcp-daemon-lifecycle").apply { isDaemon = true }
+    }
+
+  /**
+   * Worker for follow-up render dispatches promoted by daemon completion notifications. A
+   * `renderFinished` callback runs on the daemon client's reader thread; issuing a synchronous
+   * `renderNow` request from that callback would wait for a response that the same reader thread
+   * must consume. Dispatching here avoids that nested-request deadlock while retaining per-preview
+   * ordering in [previewQueues].
+   */
+  private val renderDispatchExecutor: java.util.concurrent.ExecutorService =
+    java.util.concurrent.Executors.newFixedThreadPool(RENDER_DISPATCH_THREADS) { r ->
+      Thread(r, "mcp-render-dispatch").apply { isDaemon = true }
     }
 
   /**
@@ -370,12 +383,13 @@ class DaemonMcpServer(
   }
 
   /**
-   * Stops the freshness poller + sampler and shuts the executor down. Idempotent. Tests call this
-   * from `tearDown` so background tasks don't stretch into the next test; production never calls it
+   * Stops background polling and follow-up render dispatch. Idempotent. Tests call this from
+   * `tearDown` so background tasks don't stretch into the next test; production never calls it
    * because the executors are daemon-flagged and the JVM exits cleanly.
    */
   fun shutdown() {
     runCatching { freshnessExecutor.shutdownNow() }
+    runCatching { renderDispatchExecutor.shutdownNow() }
   }
 
   // -------------------------------------------------------------------------
@@ -483,8 +497,22 @@ class DaemonMcpServer(
     HistoryUri.parseOrNull(uri)?.let { historyUri ->
       return readHistoryResource(uri, historyUri)
     }
-    val parsed = PreviewUri.parseOrNull(uri) ?: error("Invalid compose-preview URI: '$uri'")
-    val pngBytes = renderAndReadBytes(parsed, session, progressToken)
+    val resourceUri = PreviewUri.parseOrNull(uri) ?: error("Invalid compose-preview URI: '$uri'")
+    val overrides =
+      resourceUri.overridesJson?.let { raw ->
+        val decoded = runCatching {
+          decodePreviewOverrides(json.parseToJsonElement(raw))
+        }
+          .getOrElse { error("Invalid compose-preview resource overrides") }
+        val daemon = supervisor.daemonFor(resourceUri.workspaceId, resourceUri.modulePath)
+        val violations = validateOverrides(decoded, daemon)
+        check(violations.isEmpty()) {
+          "Invalid compose-preview resource overrides: ${violations.joinToString("; ")}"
+        }
+        decoded
+      }
+    val parsed = resourceUri.copy(overridesJson = null)
+    val pngBytes = renderAndReadBytes(parsed, session, progressToken, overrides)
     val encoded = Base64.getEncoder().encodeToString(pngBytes)
     return ReadResourceResult(
       contents = listOf(ResourceContents.Blob(uri = uri, mimeType = "image/png", blob = encoded))
@@ -613,7 +641,7 @@ class DaemonMcpServer(
       } catch (e: java.util.concurrent.TimeoutException) {
         // Best-effort cleanup. Drop our future from its group; if the group becomes empty AND
         // it's not the in-flight head, drop the group from the queue. (An empty head stays —
-        // the daemon's eventual renderFinished will pop it cleanly via popHeadAndPromoteNext.)
+        // the daemon's eventual renderFinished will pop it cleanly via popHeadAndPrepareNext.)
         previewQueues.computeIfPresent(key) { _, q ->
           val containing = q.firstOrNull { it.futures.contains(future) }
           containing?.futures?.remove(future)
@@ -946,35 +974,85 @@ class DaemonMcpServer(
 
   /**
    * Pop the head group of [previewQueues]'s entry for [key], wake its waiters with [outcome], and
-   * dispatch the next group's `renderNow` if one is queued. Called from `onRenderFinished` and
-   * `onRenderFailed`. The dispatch happens outside the per-key compute lambda so we never hold the
-   * lock across IPC. Returns silently if the queue is missing or empty (defensive — the daemon
-   * could in principle emit a stray `renderFinished` for a previewId we never queued).
+   * prepare the next group for dispatch. Called from `onRenderFinished` and `onRenderFailed`.
+   * Returns silently if the queue is missing or empty (defensive — the daemon could in principle
+   * emit a stray `renderFinished` for a previewId we never queued).
    */
-  private fun popHeadAndPromoteNext(
+  private fun popHeadAndPrepareNext(
     daemon: SupervisedDaemon,
     key: PreviewIdKey,
     outcome: RenderOutcome,
-  ) {
+  ): RenderQueueTransition {
+    var poppedGroup: PendingRenderGroup? = null
     var poppedFutures: List<java.util.concurrent.CompletableFuture<RenderOutcome>> = emptyList()
     var nextHead: PendingRenderGroup? = null
     previewQueues.compute(key) { _, queue ->
       if (queue == null || queue.isEmpty()) return@compute queue
-      poppedFutures = queue.removeFirst().futures.toList()
+      poppedGroup = queue.removeFirst()
+      poppedFutures = poppedGroup!!.futures.toList()
       nextHead = queue.firstOrNull()?.also { it.sent = true }
       if (queue.isEmpty()) null else queue
     }
     poppedFutures.forEach { it.complete(outcome) }
-    val next = nextHead
+    return RenderQueueTransition(completed = poppedGroup, next = nextHead)
+  }
+
+  private fun dispatchPreparedNext(
+    daemon: SupervisedDaemon,
+    key: PreviewIdKey,
+    next: PendingRenderGroup?,
+  ) {
     if (next != null) {
-      // clientForRender's hash routes by previewFqn, same as the original dispatch in
-      // awaitNextRender; preserves cache-locality / replica-affinity across promoted groups.
+      renderDispatchExecutor.execute {
+        // clientForRender's hash routes by previewFqn, same as the original dispatch in
+        // awaitNextRender; preserves cache-locality / replica-affinity across promoted groups.
+        daemon
+          .clientForRender(key.previewId)
+          .renderNow(
+            previews = listOf(key.previewId),
+            tier = RenderTier.FULL,
+            overrides = next.overrides,
+          )
+      }
+    }
+  }
+
+  /**
+   * Queues a source-change refresh through the same per-preview serialization used by resource
+   * reads. Keeping refreshes in [previewQueues] lets [onRenderFinished] recover the exact override
+   * set that completed and notify only subscriptions for that resource variant.
+   */
+  private fun enqueueRefresh(
+    daemon: SupervisedDaemon,
+    uri: PreviewUri,
+    overrides: PreviewOverrides?,
+    notificationUris: Set<String>,
+    reason: String,
+  ) {
+    val key = PreviewIdKey(uri.workspaceId, uri.modulePath, uri.previewFqn)
+    var becameFront = false
+    previewQueues.compute(key) { _, queue ->
+      val q = queue ?: ArrayDeque()
+      val group = PendingRenderGroup(overrides = overrides)
+      group.notificationUris.addAll(notificationUris)
+      if (q.isEmpty()) {
+        group.sent = true
+        becameFront = true
+      }
+      // A refresh represents one concrete file-change generation. Unlike concurrent reads, two
+      // refreshes with equal overrides must not deduplicate: the first render may already have
+      // captured the source before the second edit arrived.
+      q.addLast(group)
+      q
+    }
+    if (becameFront) {
       daemon
-        .clientForRender(key.previewId)
+        .clientForRender(uri.previewFqn)
         .renderNow(
-          previews = listOf(key.previewId),
+          previews = listOf(uri.previewFqn),
           tier = RenderTier.FULL,
-          overrides = next.overrides,
+          overrides = overrides,
+          reason = reason,
         )
     }
   }
@@ -2364,7 +2442,10 @@ class DaemonMcpServer(
               listOf(
                 ContentBlock.Image(Base64.getEncoder().encodeToString(bytes), "image/png"),
                 ContentBlock.ResourceLink(
-                  uri = uriStr,
+                  uri =
+                    uri
+                      .copy(overridesJson = (args["overrides"] as? JsonObject)?.toString())
+                      .toUri(),
                   name = "Compose Preview render",
                   mimeType = "image/png",
                   description =
@@ -4566,24 +4647,34 @@ class DaemonMcpServer(
             config = entry.config,
           )
         }
-      val ofInterest = candidates.filter { uri ->
-        subscriptions.sessionsWatching(uri).isNotEmpty() ||
-          subscriptions.sessionsSubscribedTo(uri.toUri()).isNotEmpty()
-      }
-      if (ofInterest.isNotEmpty()) {
-        // Group renders by their target replica so we issue one renderNow per replica with the
-        // subset of previews it owns. Same hash function as `clientForRender` so the dispatch
-        // here matches what `renderAndReadBytes` would do for the same previewFqn.
-        val byReplica = ofInterest.groupBy { daemon.clientForRender(it.previewFqn) }
-        byReplica.forEach { (client, group) ->
+      candidates.forEach { uri ->
+        val subscribedUris = subscriptions.subscribedUrisMatching(uri)
+        val refreshes = mutableMapOf<PreviewOverrides?, MutableSet<String>>()
+        if (
+          subscriptions.sessionsWatching(uri).isNotEmpty() ||
+            subscribedUris.containsKey(uri.toUri())
+        ) {
+          refreshes.getOrPut(null) { mutableSetOf() }.add(uri.toUri())
+        }
+        subscribedUris.keys.forEach { subscribedUri ->
+          val parsed = PreviewUri.parseOrNull(subscribedUri) ?: return@forEach
+          val rawOverrides = parsed.overridesJson ?: return@forEach
+          val overrides =
+            runCatching { decodePreviewOverrides(json.parseToJsonElement(rawOverrides)) }
+              .getOrNull() ?: return@forEach
+          refreshes.getOrPut(overrides) { mutableSetOf() }.add(subscribedUri)
+        }
+        refreshes.forEach { (overrides, notificationUris) ->
           runCatching {
-            client.renderNow(
-              previews = group.map { it.previewFqn },
-              tier = RenderTier.FULL,
+            enqueueRefresh(
+              daemon = daemon,
+              uri = uri,
+              overrides = overrides,
+              notificationUris = notificationUris,
               reason = "notify_file_changed:$path",
             )
           }
-          rendered += group.size
+          rendered++
         }
       }
     }
@@ -4646,7 +4737,7 @@ class DaemonMcpServer(
     val key = PreviewIdKey(daemon.workspaceId, daemon.modulePath, previewId)
     // 0. Sampling attribution. If a sampling probe was pending for this previewId, claim it and
     //    classify the render's `unchanged` flag as deterministic / non-deterministic. Probes
-    //    never enqueue futures, so step 1's `popHeadAndPromoteNext` stays a no-op for them
+    //    never enqueue futures, so step 1's `popHeadAndPrepareNext` stays a no-op for them
     //    (empty queue) and they don't disturb the user-driven serialization.
     var probeClaimed = false
     pendingProbes.computeIfPresent(key) { _, counter ->
@@ -4673,8 +4764,9 @@ class DaemonMcpServer(
     // 1. Pop the head group of this URI's queue, wake its waiters with the rendered bytes, and
     //    promote-and-dispatch the next group's renderNow if one is queued. This is the
     //    serialization core that PR #432's by-previewId fanout (now removed) tried to paper
-    //    over — see `popHeadAndPromoteNext` and `awaitNextRender`'s kdoc for the rationale.
-    popHeadAndPromoteNext(daemon, key, RenderOutcome.Finished(pngPath))
+    //    over — see `popHeadAndPrepareNext` and `awaitNextRender`'s kdoc for the rationale.
+    val transition = popHeadAndPrepareNext(daemon, key, RenderOutcome.Finished(pngPath))
+    val completedGroup = transition.completed
     // 2. Refresh the data-product attachment cache for this `(uri)`. Any kind the daemon attached
     //    on this render is the new fresh payload; any kind it didn't attach is stale and gets
     //    dropped (the daemon stops attaching kinds the MCP server unsubscribed from, so a missing
@@ -4691,12 +4783,38 @@ class DaemonMcpServer(
         config = entry?.config,
       )
     val uriStr = uri.toUri()
-    val targets = mutableSetOf<Session>()
-    targets.addAll(subscriptions.sessionsSubscribedTo(uriStr))
-    targets.addAll(subscriptions.sessionsWatching(uri))
-    targets.forEach { it.notifyResourceUpdated(uriStr) }
+    val notifications = mutableMapOf<String, MutableSet<Session>>()
+    if (!completedGroup?.notificationUris.isNullOrEmpty()) {
+      completedGroup!!.notificationUris.forEach { updatedUri ->
+        notifications
+          .getOrPut(updatedUri) { mutableSetOf() }
+          .addAll(subscriptions.sessionsSubscribedTo(updatedUri))
+      }
+    } else if (completedGroup?.overrides == null) {
+      notifications
+        .getOrPut(uriStr) { mutableSetOf() }
+        .addAll(subscriptions.sessionsSubscribedTo(uriStr))
+    } else {
+      subscriptions.subscribedUrisMatching(uri).forEach { (subscribedUri, targets) ->
+        val parsed = PreviewUri.parseOrNull(subscribedUri) ?: return@forEach
+        val rawOverrides = parsed.overridesJson ?: return@forEach
+        val subscribedOverrides =
+          runCatching { decodePreviewOverrides(json.parseToJsonElement(rawOverrides)) }.getOrNull()
+            ?: return@forEach
+        if (subscribedOverrides == completedGroup.overrides) {
+          notifications.getOrPut(subscribedUri) { mutableSetOf() }.addAll(targets)
+        }
+      }
+    }
+    notifications.getOrPut(uriStr) { mutableSetOf() }.addAll(subscriptions.sessionsWatching(uri))
+    notifications.forEach { (updatedUri, targets) ->
+      targets.forEach { it.notifyResourceUpdated(updatedUri) }
+    }
     // 4. Record history (no-op default).
     runCatching { historyStore.record(uri, pngPath, Instant.now()) }
+    // Dispatch only after the completed generation's exact resource updates are visible. This
+    // preserves notification ordering when another same-overrides file-change generation is queued.
+    dispatchPreparedNext(daemon, key, transition.next)
   }
 
   /**
@@ -4755,7 +4873,9 @@ class DaemonMcpServer(
     // next group's renderNow normally. If a follow-up group's render also fails, the same path
     // surfaces it.
     val key = PreviewIdKey(daemon.workspaceId, daemon.modulePath, previewId)
-    popHeadAndPromoteNext(daemon, key, RenderOutcome.Failed(kind, message, suggestion))
+    val transition =
+      popHeadAndPrepareNext(daemon, key, RenderOutcome.Failed(kind, message, suggestion))
+    dispatchPreparedNext(daemon, key, transition.next)
   }
 
   /**
@@ -4833,7 +4953,7 @@ class DaemonMcpServer(
     // Fail any in-flight render waiters for this daemon — the daemon is exiting and won't
     // produce `renderFinished` for them. Drain every group of every previewQueue belonging to
     // this (workspace, module): the head AND any queued follow-ups, since the next-group
-    // dispatch in popHeadAndPromoteNext is only triggered by a daemon notification we'll
+    // dispatch in dispatchPreparedNext is only triggered by a daemon notification we'll
     // never receive.
     val matchingKeys =
       previewQueues.keys.filter { it.workspaceId == workspaceId && it.modulePath == modulePath }
@@ -4944,7 +5064,13 @@ class DaemonMcpServer(
         java.util.concurrent.CompletableFuture<RenderOutcome>
       > =
       java.util.concurrent.CopyOnWriteArrayList(),
+    val notificationUris: MutableSet<String> = ConcurrentHashMap.newKeySet(),
     @Volatile var sent: Boolean = false,
+  )
+
+  private data class RenderQueueTransition(
+    val completed: PendingRenderGroup?,
+    val next: PendingRenderGroup?,
   )
 
   /**
@@ -5139,6 +5265,9 @@ class DaemonMcpServer(
      * replica-spawn pool cap.
      */
     private const val DAEMON_LIFECYCLE_THREADS: Int = 4
+
+    /** Worker count for follow-up render dispatches; matches the daemon lifecycle pool cap. */
+    private const val RENDER_DISPATCH_THREADS: Int = 4
 
     /** Suggested delay before polling `watch(awaitDiscovery=false)` readiness again. */
     private const val WATCH_DISCOVERY_RETRY_AFTER_MS: Long = 500

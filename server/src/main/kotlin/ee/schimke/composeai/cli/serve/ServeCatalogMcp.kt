@@ -122,7 +122,7 @@ class ServeCatalogMcp(
               toolError(e.message ?: "Tool call failed")
             }
           "resources/list" -> listResources()
-          "resources/read" -> readResource(params)
+          "resources/read" -> readResource(params, presentedToken(request), liveAuthorization)
           else -> return Reply(error(id, METHOD_NOT_FOUND, "Unknown method '$method'"))
         }
       } catch (e: McpRequestException) {
@@ -422,6 +422,7 @@ class ServeCatalogMcp(
             overrides,
             args["observe"]?.jsonPrimitive?.contentOrNull?.lowercase() ?: "semantics",
             rawOverrides?.keys.orEmpty().toList(),
+            rawOverrides,
           )
         }
       }
@@ -472,6 +473,7 @@ class ServeCatalogMcp(
                   overrides,
                   observe,
                   rawOverrides?.keys.orEmpty().toList(),
+                  rawOverrides,
                 )
                 .forEach(::add)
             }
@@ -524,7 +526,11 @@ class ServeCatalogMcp(
     return buildJsonObject { put("resources", resources) }
   }
 
-  private suspend fun readResource(params: JsonObject): JsonObject {
+  private suspend fun readResource(
+    params: JsonObject,
+    presentedToken: String?,
+    liveAuthorization: (String?) -> ServeMachineAuthorization.Decision,
+  ): JsonObject {
     val uri = params.requiredString("uri")
     if (uri == MCP_APP_VIEWER_URI) {
       return buildJsonObject {
@@ -546,7 +552,16 @@ class ServeCatalogMcp(
     val target = targetFromUri(uri)
     return withCatalog(target.catalog) { host ->
       val preview = resolvePreview(host, target.previewId)
-      val png = renderPng(host, preview.id, PreviewOverrides(), preferPublished = true).png
+      val rawOverrides = resourceOverrides(uri)
+      if (rawOverrides != null) requireLive { liveAuthorization(presentedToken) }
+      val png =
+        renderPng(
+            host,
+            preview.id,
+            parseOverrides(preview, rawOverrides),
+            preferPublished = rawOverrides == null,
+          )
+          .png
       buildJsonObject {
         put(
           "contents",
@@ -1209,10 +1224,13 @@ class ServeCatalogMcp(
     overrides: PreviewOverrides,
     observe: String,
     requestedKeys: List<String> = emptyList(),
+    rawOverrides: JsonObject? = null,
   ): JsonObject = buildJsonObject {
     put(
       "content",
-      JsonArray(renderContent(host, previewId, uri, overrides, observe, requestedKeys)),
+      JsonArray(
+        renderContent(host, previewId, uri, overrides, observe, requestedKeys, rawOverrides)
+      ),
     )
   }
 
@@ -1223,6 +1241,7 @@ class ServeCatalogMcp(
     overrides: PreviewOverrides,
     observe: String,
     requestedKeys: List<String> = emptyList(),
+    rawOverrides: JsonObject? = null,
   ): List<JsonObject> {
     if (observe !in OBSERVATION_MODES) {
       throw McpRequestException("'observe' must be one of ${OBSERVATION_MODES.orList()}")
@@ -1243,11 +1262,13 @@ class ServeCatalogMcp(
       // question that actually matters to the caller: did my override reach the renderer? Two
       // different overrides can produce byte-identical output either because both applied and
       // neither moved anything, or because a baked lane answered and ignored them both.
-      return if (requestedKeys.isEmpty()) listOf(imageContent(png), resourceLinkContent(uri))
+      val renderedUri = resourceUriWithOverrides(uri, rawOverrides)
+      return if (requestedKeys.isEmpty())
+        listOf(imageContent(png), resourceLinkContent(renderedUri))
       else
         listOf(
           imageContent(png),
-          resourceLinkContent(uri),
+          resourceLinkContent(renderedUri),
           textContent(JsonObject(provenance(rendered, requestedKeys)).toString()),
         )
     }
@@ -1701,9 +1722,32 @@ class ServeCatalogMcp(
     if (!uri.startsWith(RESOURCE_URI_PREFIX)) {
       throw McpRequestException("invalid compose-preview resource URI")
     }
-    val parts = uri.removePrefix(RESOURCE_URI_PREFIX).split('/', limit = 2)
+    val parts = uri.substringBefore('?').removePrefix(RESOURCE_URI_PREFIX).split('/', limit = 2)
     if (parts.size != 2) throw McpRequestException("invalid compose-preview resource URI")
     return PreviewTarget(decode(parts[0]), decode(parts[1]))
+  }
+
+  private fun resourceUriWithOverrides(uri: String, overrides: JsonObject?): String {
+    if (overrides == null || overrides.isEmpty()) return uri
+    val encoded =
+      Base64.getUrlEncoder()
+        .withoutPadding()
+        .encodeToString(overrides.toString().encodeToByteArray())
+    return "$uri?overrides=$encoded"
+  }
+
+  private fun resourceOverrides(uri: String): JsonObject? {
+    val encoded =
+      uri
+        .substringAfter('?', missingDelimiterValue = "")
+        .split('&')
+        .firstOrNull { it.substringBefore('=') == "overrides" }
+        ?.removePrefix("overrides=")
+        ?.takeIf { it.isNotEmpty() } ?: return null
+    return runCatching {
+      JSON.parseToJsonElement(Base64.getUrlDecoder().decode(encoded).decodeToString()).jsonObject
+    }
+      .getOrElse { throw McpRequestException("invalid compose-preview resource overrides") }
   }
 
   private fun decode(value: String): String =
@@ -1868,17 +1912,16 @@ class ServeCatalogMcp(
     put("mimeType", "image/png")
   }
 
-  /**
-   * The catalog preview resource is already readable and subscribable on the local MCP surface.
-   * Keeping this beside PNG bytes makes that durable address discoverable without weakening the
-   * complete inline/text fallback on clients that do not render resource links.
-   */
+  /** Keeps the replayable render address beside PNG bytes for hosts that render resource links. */
   private fun resourceLinkContent(uri: String): JsonObject = buildJsonObject {
     put("type", "resource_link")
     put("uri", uri)
     put("name", "Compose Preview render")
     put("mimeType", "image/png")
-    put("description", "Published preview resource; read it for bytes.")
+    put(
+      "description",
+      "Preview render resource; override-bearing reads require the same live scope.",
+    )
   }
 
   private fun success(id: JsonElement, result: JsonObject): JsonObject = buildJsonObject {
@@ -2033,6 +2076,8 @@ class ServeCatalogMcp(
      */
     const val TOKEN_ARGUMENT = "token"
 
+    private const val RESOURCE_TOKEN_META_KEY = "compose-preview/token"
+
     private const val TOKEN_ARGUMENT_DESCRIPTION =
       "A grant token from poll_access, when you cannot set the X-Compose-Preview-Token header " +
         "yourself — an MCP client fixes its headers at connect time, so this is how a token " +
@@ -2042,12 +2087,20 @@ class ServeCatalogMcp(
      * The grant token this message presents in-band, if any.
      *
      * Read by the transport as well as by [callTool], so the gate in front of the endpoint and the
-     * tool behind it agree about what was presented. Blank is treated as absent: a client
+     * operation behind it agree about what was presented. Tool calls carry the token in
+     * `params.arguments`; resource reads carry it in the standard extensible `params._meta` object
+     * because MCP's read request has no arguments object. Blank is treated as absent: a client
      * templating an unset environment variable sends `""`, and that is nothing, not a bad token.
      */
     fun presentedToken(request: JsonObject): String? {
       val params = request["params"] as? JsonObject ?: return null
-      return tokenArgument(params["arguments"] as? JsonObject ?: return null)
+      val method = (request["method"] as? JsonPrimitive)?.contentOrNull
+      return if (method == "resources/read") {
+        val metadata = params["_meta"] as? JsonObject ?: return null
+        (metadata[RESOURCE_TOKEN_META_KEY] as? JsonPrimitive)?.contentOrNull?.takeIf {
+          it.isNotBlank()
+        }
+      } else tokenArgument(params["arguments"] as? JsonObject ?: return null)
     }
 
     internal fun tokenArgument(arguments: JsonObject): String? =
