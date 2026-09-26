@@ -378,6 +378,10 @@ services:
       SERVE_IMAGE_UPLOAD_REPO: "${SERVE_IMAGE_UPLOAD_REPO:-}"
       SERVE_IMAGE_TTL: "${SERVE_IMAGE_TTL:-}"
       SERVE_IMAGE_RATE_LIMIT: "${SERVE_IMAGE_RATE_LIMIT:-}"
+      # Which GitHub token kinds may upload: app, personal, other-apps, installation. Empty takes the
+      # server's default (personal,installation plus this box's own OAuth app when
+      # SERVE_GITHUB_AUTH_* is set; personal,other-apps,installation when it is not).
+      SERVE_IMAGE_UPLOAD_TOKENS: "${SERVE_IMAGE_UPLOAD_TOKENS:-}"
       # Extra Maven repositories the live-daemon classpath resolver may fetch from, beyond Central +
       # Google. Empty inherits the entrypoint's baked default (jitpack, apollo-snapshots, a8c-libs),
       # which is what the published catalogs need; `none` sends only Central + Google.

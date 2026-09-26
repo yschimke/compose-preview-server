@@ -65,4 +65,66 @@ class ServeImageUploadAuthTest {
     assertEquals(403, refused.status)
     assertTrue(refused.reason.contains("stranger"), refused.reason)
   }
+
+  @Test
+  fun `a verified token is asked about again after a minute`() {
+    var now = 0L
+    var calls = 0
+    val gate =
+      GithubTokenUploadAuth(
+        repository = "yschimke/compose-ai-tools",
+        verifier = { _, _, _ ->
+          calls++
+          Result.success(GitHubOAuthUser("octocat", repositoryAccess = true))
+        },
+        clock = { now },
+      )
+    gate.identify("t")
+    now += 59_000
+    gate.identify("t")
+    assertEquals(1, calls, "a batch verifies once")
+    now += 2_000
+    gate.identify("t")
+    assertEquals(2, calls, "a minute later GitHub is asked again")
+  }
+
+  @Test
+  fun `GitHub not answering is retried on the next request, not cached`() {
+    var down = true
+    val gate =
+      GithubTokenUploadAuth(
+        repository = "yschimke/compose-ai-tools",
+        verifier = { _, _, _ ->
+          if (down) Result.failure(GitHubCheckUnavailableException("user lookup failed: 502"))
+          else Result.success(GitHubOAuthUser("octocat", repositoryAccess = true))
+        },
+        clock = { 0L },
+      )
+    val refused = gate.identify("t") as ServeImageUploadAuth.Identity.Refused
+    assertEquals(503, refused.status)
+    down = false
+    assertTrue(gate.identify("t") is ServeImageUploadAuth.Identity.Ok)
+  }
+
+  @Test
+  fun `a token kind this host does not accept is a 403 naming what it does`() {
+    val gate =
+      GithubTokenUploadAuth(
+        repository = "yschimke/compose-ai-tools",
+        tokens = ImageUploadTokenPolicy.parse(null, appConfigured = true),
+        app = GitHubOAuthApp("id", "secret"),
+        verifier = { _, _, _ ->
+          Result.failure(
+            ImageUploadTokenRefusedException(
+              "that token was issued to a different OAuth app than this server's"
+            )
+          )
+        },
+      )
+    val refused = gate.identify("gho_x") as ServeImageUploadAuth.Identity.Refused
+    assertEquals(403, refused.status)
+    assertTrue(refused.reason.startsWith("That token was issued"), refused.reason)
+    assertTrue(refused.reason.contains("app,personal,installation"), refused.reason)
+    assertTrue("gho_x" !in refused.reason)
+  }
 }

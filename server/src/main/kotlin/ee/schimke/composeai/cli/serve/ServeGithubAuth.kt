@@ -952,28 +952,129 @@ class GitHubOAuthVerifier(private val client: OkHttpClient = OkHttpClient()) {
    * code path is the point: a second, subtly different notion of "has access" is how a gate ends up
    * admitting people one of its doors was meant to refuse.
    *
-   * The token is used for the two reads and dropped; nothing here retains or logs it.
+   * Which tokens count at all is [tokens]: a user token issued to [app] (this server's own OAuth
+   * app) always does; a personal access token, a user token issued to some other app, and an
+   * installation token each only when [tokens] says so. See [ImageUploadTokenPolicy].
+   *
+   * The token is used for the reads and dropped; nothing here retains or logs it. A failure to get
+   * an answer from GitHub at all is a [GitHubCheckUnavailableException], which callers must not
+   * treat as a verdict on the token.
    */
   fun verifyAccessToken(
     token: String,
     repository: String,
     allowedUsers: Set<String> = emptySet(),
     allowedOrgs: Set<String> = emptySet(),
+    tokens: ImageUploadTokenPolicy = ImageUploadTokenPolicy.ANY,
+    app: GitHubOAuthApp? = null,
   ): Result<GitHubOAuthUser> = runCatching {
+    val kind = GitHubTokenKind.of(token)
+    // Refused by shape before any round trip: the prefix is part of the token, so it can't be
+    // dressed up as another kind.
+    if (kind == GitHubTokenKind.INSTALLATION && !tokens.installation) {
+      throw ImageUploadTokenRefusedException(
+        "this host does not accept GitHub App installation tokens for image uploads"
+      )
+    }
+    if (kind == GitHubTokenKind.PERSONAL && !tokens.personal) {
+      throw ImageUploadTokenRefusedException(
+        "this host does not accept personal access tokens for image uploads"
+      )
+    }
     // Null when `/user` refuses the credential, which is the normal answer for a GitHub **App
     // installation** token rather than a sign of a bad one — see [verifyInstallationToken].
-    val login = runCatching { fetchLogin(token) }.getOrNull()
+    val login = lookupLogin(token)
     if (login == null) {
+      if (!tokens.installation) {
+        error("user lookup refused that token, and this host does not accept installation tokens")
+      }
       return@runCatching verifyInstallationToken(
         token,
         repository,
         restricted = allowedUsers.isNotEmpty() || allowedOrgs.isNotEmpty(),
       )
     }
+    if (kind == GitHubTokenKind.APP_USER && !tokens.otherApps) {
+      // A personal access token is the user's own; any other user token was issued to *some* app,
+      // and only this server's own is one we can recognise.
+      if (app == null) {
+        throw ImageUploadTokenRefusedException(
+          "this host does not accept user tokens issued to OAuth apps"
+        )
+      }
+      if (!isIssuedToApp(token, app)) {
+        throw ImageUploadTokenRefusedException(
+          "that token was issued to a different OAuth app than this server's"
+        )
+      }
+    }
     if (!isAdmitted(token, login, allowedUsers, allowedOrgs)) {
       error("GitHub user $login is not allowed")
     }
     GitHubOAuthUser(login, repositoryAccess = fetchRepositoryAccess(token, repository, login))
+  }
+
+  /**
+   * `GET /user` for [verifyAccessToken]: the login, or null when GitHub refuses the token as a user
+   * credential (`401` / `403`). Anything that isn't an answer about the token — the network, a
+   * `429`, a `5xx` — is a [GitHubCheckUnavailableException] instead, so an outage is not cached
+   * against a good token.
+   */
+  private fun lookupLogin(token: String): String? {
+    val request =
+      Request.Builder()
+        .url("https://api.github.com/user")
+        .header(HttpHeaders.Authorization, "Bearer $token")
+        .header(HttpHeaders.Accept, "application/vnd.github+json")
+        .build()
+    val response =
+      try {
+        client.newCall(request).execute()
+      } catch (e: java.io.IOException) {
+        throw GitHubCheckUnavailableException("user lookup failed: ${e.javaClass.simpleName}")
+      }
+    return response.use {
+      when {
+        it.isSuccessful ->
+          JSON.decodeFromString(GitHubUserResponse.serializer(), it.body.string()).login
+        it.code == 429 || it.code >= 500 ->
+          throw GitHubCheckUnavailableException("user lookup failed: ${it.code}")
+        else -> null
+      }
+    }
+  }
+
+  /**
+   * Whether [token] was issued to [app]: `POST /applications/{client_id}/token`, authenticated as
+   * the app. `200` is yes; `404` and `422` are GitHub's no. Anything else — including a `401` for
+   * this server's own client credentials — says nothing about the token, and is a
+   * [GitHubCheckUnavailableException].
+   */
+  internal fun isIssuedToApp(token: String, app: GitHubOAuthApp): Boolean {
+    val body =
+      JSON.encodeToString(GitHubAccessTokenBody.serializer(), GitHubAccessTokenBody(token))
+        .toRequestBody("application/json".toMediaType())
+    val request =
+      Request.Builder()
+        .url("https://api.github.com/applications/${urlEncode(app.clientId)}/token")
+        .header(HttpHeaders.Authorization, Credentials.basic(app.clientId, app.clientSecret))
+        .header(HttpHeaders.Accept, "application/vnd.github+json")
+        .post(body)
+        .build()
+    val response =
+      try {
+        client.newCall(request).execute()
+      } catch (e: java.io.IOException) {
+        throw GitHubCheckUnavailableException("app token check failed: ${e.javaClass.simpleName}")
+      }
+    return response.use {
+      when (it.code) {
+        200 -> true
+        404,
+        422 -> false
+        else -> throw GitHubCheckUnavailableException("app token check failed: ${it.code}")
+      }
+    }
   }
 
   /**
@@ -997,8 +1098,11 @@ class GitHubOAuthVerifier(private val client: OkHttpClient = OkHttpClient()) {
    *   silently admitting one would widen a gate whose whole point is to be narrow.
    *
    * The identity returned is [INSTALLATION_LOGIN] rather than a name, because there isn't one: an
-   * installation token cannot read `GET /app` (that needs the app's JWT). The audit trail says
-   * "some app installation with write on this repo", which is exactly what was verified.
+   * installation token cannot read `GET /app` (that needs the app's JWT), and neither `GET
+   * /repos/{owner}/{repo}/installation` (JWT again) nor `GET /installation/repositories` names the
+   * app. So this admits **any** GitHub App installed on the repository with write — not only GitHub
+   * Actions — which is why an operator can turn it off with `--image-upload-tokens`. The audit
+   * trail says "some app installation with write on this repo", which is exactly what was verified.
    */
   private fun verifyInstallationToken(
     token: String,

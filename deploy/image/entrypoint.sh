@@ -740,6 +740,10 @@ if [[ "${SERVE_ACCEPT_IMAGES:-}" == "1" || "${SERVE_ACCEPT_IMAGES:-}" == "true" 
   [[ -n "${SERVE_IMAGE_TTL:-}" ]] && args+=(--image-ttl "${SERVE_IMAGE_TTL}")
   [[ -n "${SERVE_IMAGE_RATE_LIMIT:-}" ]] &&
     args+=(--image-rate-limit "${SERVE_IMAGE_RATE_LIMIT}")
+  # Which GitHub token kinds may upload (app, personal, other-apps, installation). Unset takes the
+  # server's default, which depends on whether SERVE_GITHUB_AUTH_* is configured; see README.md.
+  [[ -n "${SERVE_IMAGE_UPLOAD_TOKENS:-}" ]] &&
+    args+=(--image-upload-tokens "${SERVE_IMAGE_UPLOAD_TOKENS}")
 fi
 
 # Agent access grants: an agent with no credential POSTs /agent-access/request, prints a link and a
