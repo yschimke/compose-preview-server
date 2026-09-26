@@ -230,6 +230,33 @@ class ServeAgentGrantStoreTest {
   }
 
   @Test
+  fun `a browser credential is derived and shares grant expiry and revocation`() {
+    val store = store()
+    val expiring = store.approve(store.ask().id, "@yuri", AgentGrantScope.LIVE, 60)!!
+    val expiringCredential = requireNotNull(store.browserCredentialFor(expiring))
+    assertFalse(expiringCredential.value.contains(expiring.token))
+    assertNotEquals(expiring.token, expiringCredential.value)
+    assertEquals(60, expiringCredential.maxAgeSeconds)
+    assertEquals(expiring, store.grantForBrowserCredential(expiringCredential.value))
+    assertNull(store.grantForBrowserCredential(expiring.token))
+    val wasmCredential = requireNotNull(store.wasmCredentialFor(expiring))
+    assertNotEquals(expiring.token, wasmCredential)
+    assertNotEquals(expiringCredential.value, wasmCredential)
+    assertEquals(expiring, store.grantForWasmCredential(wasmCredential))
+
+    now += 61_000
+    assertNull(store.grantForBrowserCredential(expiringCredential.value))
+    assertNull(store.grantForWasmCredential(wasmCredential))
+
+    val revoked = store.approve(store.ask().id, "@yuri", AgentGrantScope.LIVE, 60)!!
+    val revokedCredential = requireNotNull(store.browserCredentialFor(revoked)).value
+    val revokedWasmCredential = requireNotNull(store.wasmCredentialFor(revoked))
+    assertTrue(store.revoke(revoked.id, "@yuri"))
+    assertNull(store.grantForBrowserCredential(revokedCredential))
+    assertNull(store.grantForWasmCredential(revokedWasmCredential))
+  }
+
+  @Test
   fun `a revoked grant stops authorising immediately`() {
     val store = store()
     val request = store.ask()

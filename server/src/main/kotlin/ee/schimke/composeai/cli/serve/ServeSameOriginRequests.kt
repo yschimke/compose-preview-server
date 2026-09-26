@@ -8,7 +8,7 @@ import io.ktor.server.request.contentType
 import io.ktor.server.request.httpMethod
 
 /**
- * Which requests carrying the browser's GitHub session are accepted from where.
+ * Which requests carrying an ambient browser credential are accepted from where.
  *
  * The session cookie is `SameSite=Lax`, so a browser attaches it to a request from any page on the
  * same *site*, and the cookie domain can make that site a whole family of hosts. The routes that
@@ -75,11 +75,17 @@ internal object ServeSameOriginRequests {
   fun isWebSocketUpgrade(call: ApplicationCall): Boolean =
     call.request.headers[HttpHeaders.Upgrade]?.equals("websocket", ignoreCase = true) == true
 
-  /** A session or browse cookie ([ServeBrowseCookie]) is present and no header credential is. */
+  /** A session or browser-auth cookie is present and no header credential is. */
   private fun carriesSessionOnly(call: ApplicationCall): Boolean {
     val request = call.request
     val cookies = request.cookies.rawCookies
-    if (cookies[SESSION_COOKIE] == null && cookies[ServeBrowseCookie.NAME] == null) return false
+    if (
+      cookies[SESSION_COOKIE] == null &&
+        cookies[ServeBrowseCookie.NAME] == null &&
+        cookies[ServeAgentGrantCookie.NAME] == null
+    ) {
+      return false
+    }
     val headers = request.headers
     return headers[ServeHttpServer.TOKEN_HEADER] == null &&
       headers[ServeHttpServer.ADMIN_TOKEN_HEADER] == null &&
