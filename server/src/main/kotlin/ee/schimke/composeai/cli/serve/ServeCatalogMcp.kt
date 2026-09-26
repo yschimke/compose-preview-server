@@ -173,10 +173,13 @@ class ServeCatalogMcp(
           else
             " A UI-builder document's `home` is canonical: edit that original, and never " +
               "re-import it as a second design or move, save back, or discard it without the " +
-              "human explicitly choosing. Keep design discussion at that home: read and " +
-              "acknowledge its pending comments and post design-specific findings there; an " +
-              "external issue or pull-request link supplements but never replaces that " +
-              "discussion.",
+              "human explicitly choosing." +
+              if (uiBuilder?.supportsComments != true) ""
+              else
+                " Keep design discussion at that home: read and " +
+                  "acknowledge its pending comments and post design-specific findings there; an " +
+                  "external issue or pull-request link supplements but never replaces that " +
+                  "discussion.",
       )
     }
   }
