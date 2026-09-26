@@ -890,6 +890,21 @@ class ServeHttpServer(
   private val server: EmbeddedServer<*, *> =
     embeddedServer(CIO, host = host, port = port) {
       install(WebSockets)
+      // A socket opened with the GitHub session cookie is accepted only from a page this server
+      // served (see [ServeSameOriginRequests]). Answered here, before the upgrade, so the refusal
+      // is a plain 403 rather than a socket that opens and closes; every socket route — the live
+      // lane's `/ws/{name}` and the UI-builder design and comment feeds — goes through it. A
+      // client authenticated by a header or query token sends no session cookie and is unaffected.
+      intercept(ApplicationCallPipeline.Plugins) {
+        val current: ApplicationCall = context
+        if (
+          ServeSameOriginRequests.isWebSocketUpgrade(current) &&
+            ServeSameOriginRequests.isForeignSessionRequest(current, sites.hosts)
+        ) {
+          current.respondText("socket origin not accepted", status = HttpStatusCode.Forbidden)
+          finish()
+        }
+      }
       // Top-level sites ([ServeSites]): make the canonical `/<system>/…` spelling behave, on a site
       // host, as though this box served only that one catalog. Registered before routing (and only
       // when sites are configured, so an ordinary server has no interceptor at all) because it has
@@ -1064,9 +1079,15 @@ class ServeHttpServer(
       }
       routing {
         if (uiBuilderService != null && uiBuilderAuthorization != null) {
+          // The REST and protocol routes below read the same credentials the form routes do, and a
+          // write carried by the session cookie is accepted only from a page this server served.
+          val sameOriginUiBuilderAuthorization =
+            uiBuilderAuthorization.acceptingSessionWritesFromSameOrigin {
+              sites.hosts
+            }
           installUiBuilderRoutes(
             uiBuilderService,
-            uiBuilderAuthorization,
+            sameOriginUiBuilderAuthorization,
             uiBuilderNativePreview,
             uiBuilderInlineCapture,
             // The native pane's live lane, on a host that has Stage-2 redemption. The token the
@@ -1084,40 +1105,44 @@ class ServeHttpServer(
               },
           )
           uiBuilderThumbnails?.let { thumbnails ->
-            installUiBuilderThumbnailRoute(uiBuilderService, uiBuilderAuthorization, thumbnails)
+            installUiBuilderThumbnailRoute(
+              uiBuilderService,
+              sameOriginUiBuilderAuthorization,
+              thumbnails,
+            )
           }
           if (uiBuilderReferenceStore != null) {
             installUiBuilderReferenceRoutes(
               uiBuilderService,
-              uiBuilderAuthorization,
+              sameOriginUiBuilderAuthorization,
               uiBuilderReferenceStore,
             )
           }
           if (uiBuilderCommentStore != null) {
             installUiBuilderCommentRoutes(
               uiBuilderService,
-              uiBuilderAuthorization,
+              sameOriginUiBuilderAuthorization,
               uiBuilderCommentStore,
             )
           }
           if (uiBuilderLinksStore != null) {
             installUiBuilderLinksRoutes(
               uiBuilderService,
-              uiBuilderAuthorization,
+              sameOriginUiBuilderAuthorization,
               uiBuilderLinksStore,
             )
           }
           if (uiBuilderFolderStore != null) {
             installUiBuilderFolderRoutes(
               uiBuilderService,
-              uiBuilderAuthorization,
+              sameOriginUiBuilderAuthorization,
               uiBuilderFolderStore,
               uiBuilderAdministrators,
               uiBuilderAdmin,
             )
           }
           if (uiBuilderAssets != null) {
-            installUiBuilderAssetRoutes(uiBuilderAuthorization, uiBuilderAssets)
+            installUiBuilderAssetRoutes(sameOriginUiBuilderAuthorization, uiBuilderAssets)
           }
           // Whether a design's imported components still match the library they came from. Inside
           // this block rather than beside the library listing: it reads *a design*, so it needs the
@@ -1125,7 +1150,7 @@ class ServeHttpServer(
           if (uiBuilderComponentLibrary != null) {
             installUiBuilderComponentDriftRoutes(
               uiBuilderService,
-              uiBuilderAuthorization,
+              sameOriginUiBuilderAuthorization,
               ServeUiBuilderComponentDrift(uiBuilderComponentLibrary),
               uiBuilderDesignCatalogs,
             )
@@ -3047,6 +3072,7 @@ class ServeHttpServer(
     if (rejectBadToken()) return
     if (rejectMissingGithubAuth(api = true)) return
     if (rejectMissingGithubRepoAccess(api = true)) return
+    if (rejectForeignSessionRequest(json = true)) return
     // After the gates, before the body read: a throttled caller should cost this host a 429 and
     // nothing else — not 256 KB of buffered upload, and certainly not a compile slot.
     val permit = acquirePlaygroundPermit() ?: return
@@ -3107,6 +3133,7 @@ class ServeHttpServer(
     if (rejectBadToken()) return
     if (rejectMissingGithubAuth(api = true)) return
     if (rejectMissingGithubRepoAccess(api = true)) return
+    if (rejectForeignSessionRequest(json = true)) return
     val owner = githubAuth?.currentLogin(call)
     if (owner == null) {
       call.respondText(
@@ -3144,6 +3171,7 @@ class ServeHttpServer(
     if (rejectBadToken()) return
     if (rejectMissingGithubAuth(api = true)) return
     if (rejectMissingGithubRepoAccess(api = true)) return
+    if (rejectForeignSessionRequest(json = true)) return
     val owner = githubAuth?.currentLogin(call)
     if (owner == null) {
       call.respondText(
@@ -3167,6 +3195,26 @@ class ServeHttpServer(
       return
     }
     call.respondText("{\"released\":true}", ContentType.Application.Json)
+  }
+
+  /**
+   * Refuse a request authenticated by the GitHub session cookie alone that did not come from a page
+   * this server served, and — for a [json] route — one whose body is not declared as JSON. Header
+   * and bearer credentials pass untouched; see [ServeSameOriginRequests].
+   */
+  private suspend fun RoutingContext.rejectForeignSessionRequest(json: Boolean = false): Boolean {
+    if (ServeSameOriginRequests.isForeignSessionRequest(call, sites.hosts)) {
+      call.respondText("request origin not accepted", status = HttpStatusCode.Forbidden)
+      return true
+    }
+    if (json && ServeSameOriginRequests.isNonJsonSessionRequest(call)) {
+      call.respondText(
+        "Content-Type: application/json is required",
+        status = HttpStatusCode.UnsupportedMediaType,
+      )
+      return true
+    }
+    return false
   }
 
   /** Reject declared oversized bodies before the handler reads their content. */
@@ -3306,6 +3354,9 @@ class ServeHttpServer(
     // stable identity, so charging its IP first would halve a one-upload budget just as the grant
     // path above would.
     imageBrowserLogin?.invoke(call, auth.repository)?.let { login ->
+      // Admitted by the session cookie alone, so only from a page this server served. A caller
+      // presenting a bearer, a grant or a token header is judged by its own gate as before.
+      if (rejectForeignSessionRequest()) return
       val permit = acquireImagePermit("browser:$login") ?: return
       try {
         acceptImageUpload(store, login)
@@ -3939,6 +3990,7 @@ class ServeHttpServer(
     // confusing way to say no; refuse the ticket instead. (The release counterpart is deliberately
     // ungated — handing capacity back is always welcome.)
     if (rejectGrantBelowScope(AgentGrantScope.LIVE, api = true)) return
+    if (rejectForeignSessionRequest()) return
     val sessionId = selectedSessionId(sessionInPath)
     withLeasedSession(sessionId) { renderHost ->
       val grant =
@@ -3984,6 +4036,7 @@ class ServeHttpServer(
     // `keepLiveWarm()` below starts or retains a daemon — the definition of `live`, however small
     // each individual ping looks.
     if (rejectGrantBelowScope(AgentGrantScope.LIVE, api = true)) return
+    if (rejectForeignSessionRequest()) return
     withLeasedSession(
       selectedSessionId(sessionInPath),
       onMissing = { call.respond(HttpStatusCode.NoContent) },
