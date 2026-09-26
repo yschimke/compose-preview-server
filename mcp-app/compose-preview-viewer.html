@@ -159,6 +159,13 @@
       if (envelope.arguments != null && (typeof envelope.arguments !== 'object' || Array.isArray(envelope.arguments))) {
         throw new Error('arguments must be an object when present');
       }
+      const value = data(envelope.result);
+      if (
+        Array.isArray(value?.cells) &&
+        !value.cells.every(cell => cell && typeof cell === 'object' && !Array.isArray(cell))
+      ) {
+        throw new Error('matrix cells must be objects');
+      }
       const credentialKey = credentialKeyIn(envelope);
       if (credentialKey) throw new Error(`credential field "${credentialKey}" is not allowed`);
       return { present: true, envelope };
@@ -192,21 +199,21 @@
       const button = document.createElement('button');
       button.type = 'button';
       button.className = 'cell';
-      if (typeof cell.png === 'string') {
+      if (typeof cell?.png === 'string') {
         const image = document.createElement('img');
         image.alt = `Matrix cell ${index + 1}`;
         image.src = `data:image/png;base64,${cell.png}`;
         button.append(image);
       }
       const overrides = document.createElement('code');
-      overrides.textContent = JSON.stringify(cell.overrides || {});
+      overrides.textContent = JSON.stringify(cell?.overrides || {});
       button.append(overrides);
       button.addEventListener('click', () =>
         choose({
           kind: 'matrix-cell',
           uri: value.uri || toolArguments.uri,
           arguments: toolArguments,
-          overrides: cell.overrides || {},
+          overrides: cell?.overrides || {},
         }, 'Selected matrix cell')
       );
       grid.append(button);

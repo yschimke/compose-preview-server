@@ -198,6 +198,8 @@ class DaemonMcpServerTest {
       .contains("!Array.isArray(envelope.result.content)")
     assertThat(content["text"]!!.jsonPrimitive.content)
       .contains("envelope.result.content.every(block => block && typeof block === 'object'")
+    assertThat(content["text"]!!.jsonPrimitive.content)
+      .contains("value.cells.every(cell => cell && typeof cell === 'object'")
   }
 
   @Test

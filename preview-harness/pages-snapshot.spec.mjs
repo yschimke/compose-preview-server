@@ -5875,6 +5875,22 @@ test("contract · static viewer bounds results and rejects credentials", async (
     await expect(page.locator("#use")).toBeHidden();
   }
 
+  for (const result of [
+    { content: [], structuredContent: { cells: [null] } },
+    { content: [{ type: "text", text: '{"cells":[null]}' }] },
+  ]) {
+    const malformedMatrix = Buffer.from(
+      JSON.stringify({ version: 1, result }),
+    ).toString("base64url");
+    await page.goto("about:blank");
+    await page.goto(
+      `/mcp-app/compose-preview-viewer.html#compose-preview-result=${malformedMatrix}`,
+    );
+    await expect(page.locator("#canvas")).toContainText("matrix cells must be objects");
+    await expect(page.locator("#refresh")).toBeHidden();
+    await expect(page.locator("#use")).toBeHidden();
+  }
+
   const credentialEnvelope = Buffer.from(
     JSON.stringify({
       version: 1,
