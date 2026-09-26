@@ -1071,7 +1071,7 @@ class DaemonMcpServerTest {
     // The daemon reused and overwrote its output, but the earlier result remains replayable.
     assertThat(firstStablePng.readBytes()).isEqualTo(firstBytes)
     val cacheDir = firstStablePng.parentFile
-    server.shutdown()
+    DaemonMcpMain.shutdown(server, supervisor)
     assertThat(cacheDir.exists()).isFalse()
   }
 
