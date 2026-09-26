@@ -186,6 +186,15 @@ class PlaygroundJailedCompiler(
       )
   }
 
+  /**
+   * Narrow the compile child's environment to [CHILD_ENVIRONMENT]. The child needs nothing from the
+   * server's own environment (its `java` is an absolute path and everything else is argv), so it
+   * shouldn't inherit it, whichever sandbox profile it runs under.
+   */
+  internal fun retainChildEnvironment(environment: MutableMap<String, String>) {
+    environment.keys.retainAll(CHILD_ENVIRONMENT)
+  }
+
   /** Read the child's one report line, or explain — as a diagnostic — why there wasn't one. */
   internal fun parse(launch: PlaygroundSandboxProbe.Launch): List<PlaygroundDiagnostic> {
     val line = launch.stdout.lineSequence().firstOrNull { it.startsWith(REPORT_PREFIX) }
@@ -211,6 +220,7 @@ class PlaygroundJailedCompiler(
   private fun spawn(argv: List<String>, workDir: File): PlaygroundSandboxProbe.Launch {
     val process =
       ProcessBuilder(argv)
+        .also { retainChildEnvironment(it.environment()) }
         .directory(workDir)
         .redirectOutput(ProcessBuilder.Redirect.PIPE)
         .redirectError(ProcessBuilder.Redirect.PIPE)
@@ -254,6 +264,10 @@ class PlaygroundJailedCompiler(
     const val REPORT_PREFIX = "PLAYGROUND_COMPILE "
 
     const val PLAYGROUND_COMPILE_MAIN = "ee.schimke.composeai.cli.serve.PlaygroundCompileMain"
+
+    /** The only variables the compile child keeps from the server's environment. */
+    internal val CHILD_ENVIRONMENT: Set<String> =
+      setOf("PATH", "HOME", "LANG", "LC_ALL", "TZ", "TMPDIR")
 
     /**
      * A cold BTA bootstrap plus a snippet compile; generous, because the cost of being wrong is a
