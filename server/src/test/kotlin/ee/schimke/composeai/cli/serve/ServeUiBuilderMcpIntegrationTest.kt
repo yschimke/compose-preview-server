@@ -844,19 +844,34 @@ class ServeUiBuilderMcpIntegrationTest {
   }
 
   @Test
-  fun `the native render tool appears only where the host can compile`() {
-    // Two absences, not one: a box with no builder has no UI-builder tools at all, and a box with
-    // a builder but no compiler has the six that need no compiler and not the seventh. A client
-    // reads which of the three it is talking to off `tools/list` rather than off a failed call.
-    val withoutCompiler = tools(start())
+  fun `the native render tool returns a stable refusal where the host cannot compile`() {
+    // A server with a builder advertises the same authoring surface regardless of whether this
+    // particular deployment carries a compiler. A client can therefore call one stable tool and
+    // branch on a stable code instead of treating an absent declaration as an ambiguous version or
+    // configuration mismatch.
+    val server = start()
+    val withoutCompiler = tools(server)
     assertTrue(
       ServeUiBuilderMcp.TOOL_NAMES.all { it in withoutCompiler },
       withoutCompiler.toString(),
     )
-    assertTrue(
-      ServeUiBuilderMcp.NATIVE_TOOL_NAMES.none { it in withoutCompiler },
-      withoutCompiler.toString(),
+    assertTrue(ServeUiBuilderMcp.NATIVE_TOOL_NAMES.all { it in withoutCompiler })
+
+    envelope(
+      server,
+      ServeUiBuilderMcp.CREATE_DESIGN,
+      """{"designId":"agent-screen","document":${json.encodeToString(DesignDocumentV1.serializer(), document())}}""",
     )
+    val refusal =
+      json.decodeFromString<NativePreviewRefusalV1>(
+        envelope(
+          server,
+          ServeUiBuilderMcp.RENDER_NATIVE,
+          """{"designId":"agent-screen"}""",
+        )
+      )
+    assertEquals(ServeUiBuilderMcp.NATIVE_RENDER_UNAVAILABLE, refusal.code)
+    assertTrue(refusal.reasons.single().contains("no native render lane"), refusal.toString())
   }
 
   @Test
