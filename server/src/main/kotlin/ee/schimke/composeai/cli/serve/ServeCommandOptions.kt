@@ -1341,10 +1341,10 @@ public class ServeCommandOptions(
                           with. Owners change it per design from its share page. Default private.
         --ui-builder-admin-actors <actor>[,…]
                           GitHub identities allowed to administer every shared UI-builder design,
-                          for example github:octocat. A configured actor can use its signed-in
-                          browser session, and an agent grant approved by it inherits the same
-                          design and folder authority. This does not grant access to catalog,
-                          trust, site, onboarding or library administration.
+                          for example github:octocat. A configured actor administers through its
+                          own signed-in browser session; grants it approves act with ordinary
+                          design access, not administration. This does not grant access to
+                          catalog, trust, site, onboarding or library administration.
         --onboard-cache <dir>
                           Where POST /admin/onboard/scan checks repositories out to read them (one
                           directory per repo, reused). Nothing in them is executed. Default: a
