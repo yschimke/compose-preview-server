@@ -423,4 +423,117 @@ class PlaygroundSeedResolverTest {
     assertEquals(stickerFile, seed.text)
     assertTrue(fetched.none { it.endsWith(PlaygroundSeedResolver.USAGE_RULES_FILE) })
   }
+
+  @Test
+  fun `a delegating preview's source follows its imported call one level down`() {
+    // The A2UI samples shape: the preview is a one-line call into a vendored sample, whose package
+    // lives under `upstream/` rather than where the preview file's own package points.
+    val preview =
+      """
+      package ee.schimke.a2uicatalog.samples
+
+      import androidx.compose.runtime.Composable
+      import androidx.compose.ui.tooling.preview.Preview
+      import androidx.demo.samples.ChoicePickerSample
+
+      @Preview
+      @Composable
+      fun ChoicePickerSamplePreview() =
+        SampleScreen("choice") { ChoicePickerSample(onPayloadUpdated = it) }
+      """
+        .trimIndent()
+    val sample =
+      """
+      package androidx.demo.samples
+
+      import androidx.compose.runtime.Composable
+
+      @Composable
+      internal fun ChoicePickerSample(onPayloadUpdated: (String) -> Unit) {
+        updatePayload(onPayloadUpdated)
+      }
+
+      private fun updatePayload(onPayloadUpdated: (String) -> Unit) {
+        onPayloadUpdated("{\"component\":\"ChoicePicker\"}")
+      }
+
+      private fun unrelated() = Unit
+      """
+        .trimIndent()
+    val base = "https://raw.githubusercontent.com/yschimke/a2ui-catalog/main/samples-catalog/"
+    val where =
+      PlaygroundSeedResolver.Location(
+        repo = "yschimke/a2ui-catalog",
+        ref = "main",
+        module = ":samples-catalog",
+        sourceFile = "src/main/kotlin/ee/schimke/a2uicatalog/samples/SamplePreviews.kt",
+        bodyLine = 10,
+      )
+    val seed =
+      resolver(
+          locate = { _, _ -> where },
+          body = { url ->
+            when {
+              url.endsWith("/compose-usage.json") ->
+                """{"sourceRoots": ["src/main/kotlin/upstream"]}""".toByteArray()
+              url == base + "src/main/kotlin/ee/schimke/a2uicatalog/samples/SamplePreviews.kt" ->
+                preview.toByteArray()
+              url ==
+                base + "src/main/kotlin/upstream/androidx/demo/samples/ChoicePickerSample.kt" ->
+                sample.toByteArray()
+              else -> null
+            }
+          },
+        )
+        .seed("a2ui-samples", "ChoicePickerSamplePreview")
+
+    assertNotNull(seed)
+    assertTrue("fun ChoicePickerSamplePreview()" in seed.text, seed.text)
+    assertTrue("internal fun ChoicePickerSample(" in seed.text, seed.text)
+    assertTrue("private fun updatePayload(" in seed.text, seed.text)
+    assertFalse("unrelated" in seed.text, seed.text)
+    // The implied root is tried first and misses; `sourceRoots` finds the file. The library
+    // imports are not calls, so nothing is fetched for them.
+    assertTrue(
+      base + "src/main/kotlin/androidx/demo/samples/ChoicePickerSample.kt" in fetched,
+      fetched.toString(),
+    )
+    assertEquals(
+      0,
+      fetched.count { "Composable.kt" in it || "Preview.kt" in it },
+      fetched.toString(),
+    )
+  }
+
+  @Test
+  fun `followed call paths use the implied root and any declared roots`() {
+    val text =
+      """
+      package com.example.previews
+
+      import com.example.ui.Card
+      import com.example.ui.Chip as ChipAlias
+      import com.example.ui.Sample
+
+      @Sample(name = "annotation, not a call")
+      @Composable
+      fun P() = Card { ChipAlias() }
+
+      @Composable
+      fun Local() = Unit
+      """
+        .trimIndent()
+    assertEquals(
+      listOf(
+        "Card" to "src/main/kotlin/com/example/ui/Card.kt",
+        "Card" to "extra/com/example/ui/Card.kt",
+      ),
+      PlaygroundSeedResolver.followedCallPaths(
+        text,
+        bodyLine = 9,
+        sourceFile = "src/main/kotlin/com/example/previews/Previews.kt",
+        extraRoots = listOf("extra/"),
+      ),
+    )
+  }
 }

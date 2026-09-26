@@ -270,6 +270,7 @@ class PlaygroundSeedResolver(
             rules = rules,
             strings = stringsFor(where, rules),
             helperSources = helperSourcesFor(where, rules),
+            followedSources = followedSourcesFor(where, text, rules),
           )
         }
       } catch (e: Exception) {
@@ -450,6 +451,61 @@ class PlaygroundSeedResolver(
     return texts
   }
 
+  private val followedCache = ConcurrentHashMap<Pair<String, String>, Pair<String?, Long>>()
+
+  /**
+   * The files behind the imported functions the preview calls, one level down: the source panel's
+   * view of a preview that only delegates.
+   *
+   * A sample catalog's preview is often a one-line call into the sample it shows — `SampleScreen(…)
+   * { ChoicePickerSample(onPayloadUpdated = it) }` — and the interesting code is the function
+   * called, in another file. For each imported name the preview's declaration calls, this reads
+   * `<root>/<package path>/<Name>.kt` at the same `ref` (Kotlin's convention of naming a file after
+   * its main declaration), under the root the preview file's own package implies and any
+   * [UsageRules.sourceRoots]. A name that is not there (a library import, a function in a file
+   * named otherwise) is simply not followed, and its absence is cached like a hit.
+   */
+  private fun followedSourcesFor(where: Location, text: String, rules: UsageRules): List<String> {
+    val candidates =
+      followedCallPaths(text, where.bodyLine, where.sourceFile, rules.sourceRoots)
+        .take(MAX_FOLLOWED_PATHS)
+    if (candidates.isEmpty()) return emptyList()
+    val now = clock()
+    return candidates
+      .groupBy({ it.first }, { it.second })
+      .values
+      .mapNotNull { paths ->
+        // The first root that has the file wins; the rest are not asked for.
+        paths.firstNotNullOfOrNull { path -> followedSource(where, path, now) }
+      }
+      .take(MAX_FOLLOWED_FILES)
+  }
+
+  private fun followedSource(where: Location, path: String, now: Long): String? {
+    val key = where.repo to "${where.ref}:${where.module.orEmpty()}:$path"
+    followedCache[key]
+      ?.takeIf { now - it.second < ttlSeconds * 1000 }
+      ?.let {
+        return it.first
+      }
+    val url = ServeUrls.githubRawUrl(where.repo, where.ref, where.module, path)
+    val text =
+      url
+        ?.let { u ->
+          try {
+            fetch(u)
+          } catch (_: Exception) {
+            null
+          }
+        }
+        ?.takeIf { it.size <= maxBytes }
+        ?.decodeToString()
+        ?.takeIf { !it.contains('\uFFFD') }
+    evictExpired(followedCache, now)
+    if (followedCache.size < maxEntries) followedCache[key] = text to now
+    return text
+  }
+
   /** Drops every entry past its TTL. Called before an insert, so the caps stay reachable. */
   private fun <K, V> evictExpired(cache: ConcurrentHashMap<K, Pair<V, Long>>, now: Long) {
     cache.entries.removeIf { now - it.value.second >= ttlSeconds * 1000 }
@@ -486,6 +542,83 @@ class PlaygroundSeedResolver(
      * that keeps a mistaken rules file from turning one Source panel into a repo crawl.
      */
     const val MAX_SCAFFOLD_SOURCES = 12
+
+    /** Imported calls followed out of one preview: a delegating preview calls one or two. */
+    const val MAX_FOLLOWED_FILES = 3
+
+    /** Candidate paths tried for them, across every root. Bounds the misses a page can cost. */
+    const val MAX_FOLLOWED_PATHS = 8
+
+    /**
+     * `(importedName, modulePath)` candidates for the imported functions the declaration at
+     * [bodyLine] calls, in call order: `<root>/<package path>/<Name>.kt` for the root the file's
+     * own package implies, then each of [extraRoots].
+     *
+     * A call is a capitalised imported name followed by `(` or `{` — a composable's shape, and the
+     * only one a delegating preview has. A name the file declares itself is the same-file closure's
+     * business and is not followed. Aliased imports are skipped: the alias is not the file name.
+     */
+    internal fun followedCallPaths(
+      text: String,
+      bodyLine: Int?,
+      sourceFile: String,
+      extraRoots: List<String>,
+    ): List<Pair<String, String>> {
+      val lines = text.lines()
+      // The anchored declaration's own lines, not [sliceDeclaration]: that one declines a file that
+      // is nothing but the declaration, which is exactly the one-preview file this is for.
+      val entry =
+        declarationLines(lines, bodyLine)
+          ?.let { lines.subList(it.first, it.last + 1) }
+          ?.joinToString("\n") ?: return emptyList()
+      val pkg =
+        lines
+          .firstOrNull { it.startsWith("package ") }
+          ?.removePrefix("package ")
+          ?.trim()
+          ?.removeSuffix(";")
+          .orEmpty()
+      val imports =
+        lines
+          .asSequence()
+          .filter { it.startsWith("import ") && " as " !in it }
+          .map { it.removePrefix("import ").trim().removeSuffix(";") }
+          .filter { !it.endsWith(".*") && it.contains('.') }
+          .associateBy { it.substringAfterLast('.') }
+      val declared =
+        Regex(
+            """^(?:[a-z]+\s+)*(?:fun|val|var|class|object|interface)\s+(\w+)""",
+            RegexOption.MULTILINE,
+          )
+          .findAll(text)
+          .map { it.groupValues[1] }
+          .toSet()
+      val called =
+        Regex("""(?<![.\w@])([A-Z]\w*)\s*[({]""")
+          .findAll(entry)
+          .map { it.groupValues[1] }
+          .filter { it in imports && it !in declared }
+          .distinct()
+          .toList()
+      if (called.isEmpty()) return emptyList()
+      val dir = sourceFile.substringBeforeLast('/', "")
+      val pkgPath = pkg.replace('.', '/')
+      val impliedRoot =
+        when {
+          pkgPath.isEmpty() -> dir
+          dir == pkgPath -> ""
+          dir.endsWith("/$pkgPath") -> dir.removeSuffix("/$pkgPath")
+          else -> null
+        }
+      val roots =
+        (listOfNotNull(impliedRoot) + extraRoots.map { it.trim().trim('/') }).distinct().filter {
+          !it.split('/').contains("..")
+        }
+      return called.flatMap { name ->
+        val path = imports.getValue(name).substringBeforeLast('.').replace('.', '/') + "/$name.kt"
+        roots.map { root -> name to (if (root.isEmpty()) path else "$root/$path") }
+      }
+    }
 
     /** A preview source file. Well above any real one, well below "somebody linked a blob". */
     const val DEFAULT_MAX_BYTES = 256 * 1024
