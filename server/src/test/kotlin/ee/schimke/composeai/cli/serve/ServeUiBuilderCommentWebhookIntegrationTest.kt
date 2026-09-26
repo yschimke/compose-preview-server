@@ -143,6 +143,34 @@ class ServeUiBuilderCommentWebhookIntegrationTest {
   }
 
   @Test
+  fun `a public design on a host that is not public reaches the webhook as a link alone`() {
+    val receiver = receiver()
+    val server = start(receiver.url, public = true, hostIsPublic = false)
+    createDesign(server)
+
+    val posted =
+      comments(
+        server,
+        "/api/ui-builder/v1/designs/$DESIGN_ID/comments",
+        """{"body":"This row should be a card.","displayName":"Yuri","anchor":{"nodeId":"row"}}""",
+      )
+    assertEquals(201, posted.first, posted.second)
+
+    val raw = receiver.awaitOne()
+    assertEquals(
+      "",
+      Json.parseToJsonElement(raw)
+        .jsonObject["comment"]!!
+        .jsonObject["excerpt"]!!
+        .jsonPrimitive
+        .content,
+    )
+    for (word in listOf("This row", "Yuri", "node row")) {
+      assertTrue(!raw.contains(word), "$word in $raw")
+    }
+  }
+
+  @Test
   fun `a reply and a resolution are told, and a reaction is not`() {
     val receiver = receiver()
     val server = start(receiver.url)
@@ -391,6 +419,7 @@ class ServeUiBuilderCommentWebhookIntegrationTest {
     webhookUrl: String,
     format: String = "plain",
     public: Boolean = true,
+    hostIsPublic: Boolean = true,
   ): ServeHttpServer {
     val comments = ServeUiBuilderCommentStore(stateDirectory.resolve("comments"))
     val links = ServeUiBuilderLinksStore(stateDirectory.resolve("links")).also { linksStore = it }
@@ -440,7 +469,9 @@ class ServeUiBuilderCommentWebhookIntegrationTest {
     val webhook =
       ServeUiBuilderCommentWebhook(
         config = CommentWebhookConfig(webhookUrl, CommentWebhookFormat.parse(format)!!),
-        designs = { designId -> commentWebhookDesign(service, service, links, designId) },
+        designs = { designId ->
+          commentWebhookDesign(service, service, links, designId, hostIsPublic = hostIsPublic)
+        },
         baseUrl = { ServeUrls.origin("127.0.0.1", server.port) },
       )
     closeables += webhook.attach(comments)

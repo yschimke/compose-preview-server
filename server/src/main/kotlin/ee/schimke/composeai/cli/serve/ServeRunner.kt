@@ -3518,6 +3518,7 @@ public class ServeRunner(
               service = uiBuilderLane.service,
               links = uiBuilderLane.links,
               designId = designId,
+              hostIsPublic = public,
             )
           },
           baseUrl = {

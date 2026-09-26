@@ -465,28 +465,32 @@ internal data class CommentWebhookDesign(
  * comment with another's conversation. It is a small local file beside the one the comment write is
  * already writing, and never a network read.
  *
- * [CommentWebhookDesign.readableByAnyone] asks the design's own access control whether a signed-out
- * visitor could open it — the same question the shell's unfurl asks. It is a keyed, in-memory
- * access lookup under the service's lock, like the summary; a failure answers false, so an event
- * about a design this cannot decide on is posted as a link.
+ * [CommentWebhookDesign.readableByAnyone] asks whether a signed-out visitor could open it: the host
+ * must admit signed-out visitors at all ([hostIsPublic], `--public`), and the design's own access
+ * control must allow the anonymous actor — the same two questions the shell's unfurl asks. It is a
+ * keyed, in-memory access lookup under the service's lock, like the summary; a failure answers
+ * false, so an event about a design this cannot decide on is posted as a link.
  */
 internal fun commentWebhookDesign(
   admin: UiBuilderAdminPort,
   service: UiBuilderServicePort,
   links: ServeUiBuilderLinksStore?,
   designId: String,
+  hostIsPublic: Boolean,
 ): CommentWebhookDesign? {
   val summary = runCatching { admin.adminDesignSummary(designId) }.getOrNull() ?: return null
   val chatThread = runCatching { links?.read(designId)?.thread }.getOrNull()
-  val readableByAnyone = runCatching {
-    runBlocking {
-      service.canRead(
-        AuthenticatedUiBuilderActor(ServeUiBuilderVisibility.ANONYMOUS_ACTOR_ID),
-        designId,
-      )
-    }
-  }
-    .getOrDefault(false)
+  val readableByAnyone =
+    hostIsPublic &&
+      runCatching {
+          runBlocking {
+            service.canRead(
+              AuthenticatedUiBuilderActor(ServeUiBuilderVisibility.ANONYMOUS_ACTOR_ID),
+              designId,
+            )
+          }
+        }
+        .getOrDefault(false)
   return CommentWebhookDesign(
     summary.title,
     summary.catalogPin.systemId,
