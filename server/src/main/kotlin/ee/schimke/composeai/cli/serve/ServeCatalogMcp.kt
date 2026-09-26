@@ -1822,20 +1822,23 @@ class ServeCatalogMcp(
   }
 
   /**
-   * Keeps the UI-builder protocol reply as the complete text fallback while giving MCP App hosts an
-   * ordinary image block for the two calls that can carry a PNG. The viewer intentionally only
+   * Keeps the UI-builder protocol reply as a text fallback while giving MCP App hosts an ordinary
+   * image block for the two calls that can carry a PNG. The native-render fallback omits its
+   * short-lived playground capability: the image is already inline, and a static MCP Apps host may
+   * serialize the complete tool result into a URL fragment. The viewer intentionally only
    * understands MCP content blocks; making it know every UI-builder response schema would couple a
    * reusable viewer to a second protocol. Without this adapter, successful renders appear as base64
    * text.
    */
   internal fun uiBuilderToolResult(name: String, text: String): JsonObject {
+    val fallback = uiBuilderViewerFallback(name, text)
     val png = uiBuilderPng(name, text)
-    if (png == null) return textResult(text)
+    if (png == null) return textResult(fallback)
     return buildJsonObject {
       put(
         "content",
         buildJsonArray {
-          add(textContent(text))
+          add(textContent(fallback))
           add(
             buildJsonObject {
               put("type", "image")
@@ -1846,6 +1849,15 @@ class ServeCatalogMcp(
         },
       )
     }
+  }
+
+  private fun uiBuilderViewerFallback(name: String, text: String): String {
+    if (name != ServeUiBuilderMcp.RENDER_NATIVE) return text
+    return runCatching {
+        val reply = JSON.parseToJsonElement(text) as? JsonObject ?: return@runCatching text
+        JsonObject(reply - "previewToken" - "previewUrl").toString()
+      }
+      .getOrDefault(text)
   }
 
   private fun uiBuilderPng(name: String, text: String): String? = runCatching {

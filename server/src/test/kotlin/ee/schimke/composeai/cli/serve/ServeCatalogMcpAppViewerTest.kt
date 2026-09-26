@@ -177,8 +177,13 @@ class ServeCatalogMcpAppViewerTest {
   fun `visual UI builder replies keep text fallback and expose PNG image blocks`() {
     val mcp = ServeCatalogMcp(ServeSessionRegistry(open = { null }), Semaphore(1))
     val native =
-      """{"designId":"demo","imageBase64":"data:image/png;base64,AQID","compileError":null}"""
-    assertVisualReply(mcp.uiBuilderToolResult(ServeUiBuilderMcp.RENDER_NATIVE, native), native)
+      """{"designId":"demo","previewToken":"pg_secret","previewUrl":"/pg/pg_secret","imageBase64":"data:image/png;base64,AQID","compileError":null}"""
+    val nativeResult = mcp.uiBuilderToolResult(ServeUiBuilderMcp.RENDER_NATIVE, native)
+    assertVisualReply(
+      nativeResult,
+      """{"designId":"demo","imageBase64":"data:image/png;base64,AQID","compileError":null}""",
+    )
+    assertTrue(!nativeResult.toString().contains("pg_secret"))
 
     val exported =
       """{"callId":"ui_builder_export_document","response":{"artifact":{"format":"png","mediaType":"image/png","encoding":"base64","content":"AQID","contentDigest":"abc","diagnostics":[]}}}"""
