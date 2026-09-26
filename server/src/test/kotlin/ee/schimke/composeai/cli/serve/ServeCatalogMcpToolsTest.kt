@@ -124,6 +124,33 @@ class ServeCatalogMcpToolsTest {
 
   private fun JsonObject.parsed(): JsonObject = Json.parseToJsonElement(firstText()).jsonObject
 
+  @Test
+  fun `preview stories preserves every structured observation`() {
+    val body =
+      call(
+        ToolHost(png = pixel),
+        "preview-stories",
+        """{"storyIds":["m3::card","m3::other"],"observe":"hash"}""",
+      )
+    val legacy =
+      body.content().map {
+        Json.parseToJsonElement(it.jsonObject["text"]!!.jsonPrimitive.content).jsonObject
+      }
+    val observations =
+      body["result"]!!
+        .jsonObject["structuredContent"]!!
+        .jsonObject["observations"]!!
+        .jsonArray
+        .map { it.jsonObject }
+
+    assertEquals(2, observations.size)
+    assertEquals(legacy, observations)
+    assertEquals(
+      setOf("compose-preview://catalog/m3/card", "compose-preview://catalog/m3/other"),
+      observations.map { it["uri"]!!.jsonPrimitive.content }.toSet(),
+    )
+  }
+
   // ---- list_devices ---------------------------------------------------------------------------
 
   @Test

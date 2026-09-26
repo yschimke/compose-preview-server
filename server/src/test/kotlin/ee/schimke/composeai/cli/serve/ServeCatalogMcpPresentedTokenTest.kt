@@ -85,7 +85,85 @@ class ServeCatalogMcpPresentedTokenTest {
     access.forEach { assertTrue(ServeCatalogMcp.TOKEN_ARGUMENT !in it.properties, it.name) }
   }
 
-  private data class Tool(val name: String, val properties: Set<String>)
+  @Test
+  fun `every tool declares an object output schema`() {
+    val invalid = tools().filter { it.outputSchema["type"]?.jsonPrimitive?.content != "object" }
+    assertTrue(invalid.isEmpty(), "tools without object output schemas: ${invalid.map { it.name }}")
+  }
+
+  @Test
+  fun `json text results also carry matching structured content`() {
+    val result =
+      runBlocking {
+          mcp.handle(
+            json(
+              """{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"status","arguments":{}}}"""
+            )
+          ) {
+            ServeMachineAuthorization.Decision.Missing
+          }
+        }
+        .body!!["result"]!!
+        .jsonObject
+    val text = result["content"]!!.jsonArray.first().jsonObject["text"]!!.jsonPrimitive.content
+    assertEquals(Json.parseToJsonElement(text), result["structuredContent"])
+  }
+
+  @Test
+  fun `data-product array text is wrapped for its object output schema`() {
+    val tool = tools().single { it.name == "list_data_products" }
+    assertEquals(
+      "array",
+      tool.outputSchema["properties"]!!
+        .jsonObject["dataProducts"]!!
+        .jsonObject["type"]!!
+        .jsonPrimitive
+        .content,
+    )
+    assertEquals(
+      listOf("dataProducts"),
+      tool.outputSchema["required"]!!.jsonArray.map { it.jsonPrimitive.content },
+    )
+
+    val result =
+      runBlocking {
+          mcp.handle(
+            json(
+              """{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_data_products","arguments":{}}}"""
+            )
+          ) {
+            ServeMachineAuthorization.Decision.Missing
+          }
+        }
+        .body!!["result"]!!
+        .jsonObject
+    val text = result["content"]!!.jsonArray.first().jsonObject["text"]!!.jsonPrimitive.content
+    val legacyArray = Json.parseToJsonElement(text).jsonArray
+    assertEquals(legacyArray, result["structuredContent"]!!.jsonObject["dataProducts"])
+  }
+
+  @Test
+  fun `multi-story output schema declares aggregated observations`() {
+    val tool = tools().single { it.name == "preview-stories" }
+    assertEquals(
+      "array",
+      tool.outputSchema["properties"]!!
+        .jsonObject["observations"]!!
+        .jsonObject["type"]!!
+        .jsonPrimitive
+        .content,
+    )
+    assertEquals(
+      listOf("observations"),
+      tool.outputSchema["required"]!!.jsonArray.map { it.jsonPrimitive.content },
+    )
+  }
+
+  private data class Tool(
+    val name: String,
+    val properties: Set<String>,
+    val outputSchema: JsonObject,
+  )
 
   /**
    * The access tools are listed only where the grant flow exists, so this stub makes them exist.
@@ -120,6 +198,7 @@ class ServeCatalogMcpPresentedTokenTest {
           name = tool.jsonObject["name"]!!.jsonPrimitive.content,
           properties =
             tool.jsonObject["inputSchema"]!!.jsonObject["properties"]?.jsonObject?.keys.orEmpty(),
+          outputSchema = tool.jsonObject["outputSchema"]!!.jsonObject,
         )
       }
 

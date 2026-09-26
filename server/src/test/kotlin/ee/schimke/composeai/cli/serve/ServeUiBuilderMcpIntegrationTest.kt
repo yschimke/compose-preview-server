@@ -88,6 +88,24 @@ class ServeUiBuilderMcpIntegrationTest {
   }
 
   @Test
+  fun `every catalog and UI builder tool declares an object output schema`() {
+    val server = start()
+    val declarations =
+      post(server, """{"jsonrpc":"2.0","id":1,"method":"tools/list"}""")["result"]!!
+        .jsonObject["tools"]!!
+        .jsonArray
+        .map { it.jsonObject }
+    val invalid = declarations.filter {
+      it["outputSchema"]?.jsonObject?.get("type")?.jsonPrimitive?.content != "object"
+    }
+
+    assertTrue(
+      invalid.isEmpty(),
+      "tools without object output schemas: ${invalid.map { it["name"] }}",
+    )
+  }
+
+  @Test
   fun `an agent creates, edits and exports a design without touching a browser`() {
     val server = start()
 
@@ -1038,6 +1056,7 @@ class ServeUiBuilderMcpIntegrationTest {
     val result = call(server, tool, arguments)
     val text = result["content"]!!.jsonArray.first().jsonObject["text"]!!.jsonPrimitive.content
     assertEquals(null, result["isError"], text)
+    assertEquals(Json.parseToJsonElement(text), result["structuredContent"], text)
     return text
   }
 
