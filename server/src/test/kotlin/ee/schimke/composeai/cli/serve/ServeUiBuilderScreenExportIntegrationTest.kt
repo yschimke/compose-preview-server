@@ -19,7 +19,6 @@ import ee.schimke.composeai.uibuilder.protocol.ThemeV1
 import ee.schimke.composeai.uibuilder.protocol.UiBuilderRequestV1
 import ee.schimke.composeai.uibuilder.protocol.UiBuilderResponseV1
 import ee.schimke.composeai.uibuilder.protocol.WindowPostureV1
-import ee.schimke.composeai.uibuilder.service.CurrentM3UiBuilderCatalogExecutor
 import ee.schimke.composeai.uibuilder.service.FileUiBuilderStateStorage
 import ee.schimke.composeai.uibuilder.service.PersistentUiBuilderService
 import java.io.File
@@ -179,7 +178,7 @@ class ServeUiBuilderScreenExportIntegrationTest {
       PersistentUiBuilderService(
         storage = FileUiBuilderStateStorage(stateDirectory),
         catalogs =
-          CurrentM3UiBuilderCatalogExecutor(
+          UiBuilderCheckoutCatalogFixtures.executor(
             catalogSystemIds = catalogs,
             exportCapabilities =
               ee.schimke.composeai.uibuilder.protocol.ExportCapabilitiesV1.Builder()

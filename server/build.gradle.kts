@@ -552,6 +552,19 @@ tasks.withType<Test>().configureEach {
   // compiling.
   useJUnitPlatform()
 
+  // The UI-builder checkout gate substitutes seam jars from a sibling checkout. Its catalog
+  // fixtures are the other half of that seam: when a checkout has retired an in-process catalog,
+  // tests that intentionally enable it must supply the same published capability snapshot the
+  // host would fetch. Keep the path test-only and absent from ordinary released builds.
+  providers.gradleProperty("composeUiBuilderDir").orNull?.let { path ->
+    val directory = file(path).canonicalFile
+    inputs
+      .dir(directory.resolve("ui-builder/src/jvmTest/resources/published"))
+      .withPropertyName("composeUiBuilderPublishedCatalogFixtures")
+      .withPathSensitivity(PathSensitivity.RELATIVE)
+    systemProperty("composeUiBuilderDir", directory.absolutePath)
+  }
+
   // Catalog checkouts for the usage-snippet corpus (`UsageSnippetCorpusTest`, which moved here with
   // the serve sources). Absent by default, so the corpus is a no-op in a normal build;
   // `scripts/usage-corpus.sh` supplies them. Forwarded rather than read from the environment so the

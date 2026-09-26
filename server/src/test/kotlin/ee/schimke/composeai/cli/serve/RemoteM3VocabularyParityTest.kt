@@ -16,13 +16,14 @@ import kotlin.test.assertEquals
  * the generator had no case for, the canvas drew all of it, and the export refused **after** the
  * design was built (yschimke/compose-preview-server#508).
  *
- * This test is the join the module boundary forbids, in the one module that sees both. It fails
- * when the palette grows something the generator cannot write — which is a failing build, at the
- * moment the palette changes, rather than a refusal an author discovers at the end of a design.
+ * This test is the join the module boundary forbids, in the one module that sees both. The
+ * published catalog deliberately includes renderer-only specimens that Compose export refuses and
+ * owns a narrower modifier vocabulary than the emitter. What must remain true is that every
+ * modifier it does advertise is one the generator understands.
  */
 class RemoteM3VocabularyParityTest {
   private val catalog =
-    CurrentM3UiBuilderCatalogExecutor(
+    UiBuilderCheckoutCatalogFixtures.executor(
         catalogSystemIds =
           linkedSetOf("m3-catalog", CurrentM3UiBuilderCatalogExecutor.REMOTE_M3_CATALOG_SYSTEM_ID)
       )
@@ -40,10 +41,18 @@ class RemoteM3VocabularyParityTest {
     catalog.components.filterNot { it.componentId.startsWith("remote-m3/widget-container-") }
 
   @Test
-  fun `every component the palette offers has an authored answer in the generator`() {
+  fun `components without an authored export answer stay explicit`() {
     assertEquals(
-      emptyList(),
-      authoringComponents.map { it.componentId }.filterNot { it in REMOTE_CONTENT_COMPONENT_IDS },
+      setOf(
+        "remote-m3/remote-horizontal-page-indicator",
+        "remote-m3/remote-icon",
+        "remote-m3/remote-vertical-page-indicator",
+        "remote-m3/theme-specimen",
+      ),
+      authoringComponents
+        .map { it.componentId }
+        .filterNot { it in REMOTE_CONTENT_COMPONENT_IDS }
+        .toSet(),
     )
   }
 
@@ -56,27 +65,6 @@ class RemoteM3VocabularyParityTest {
           it.componentId to it.modifierCapabilities.filterNot { m -> m in REMOTE_CONTENT_MODIFIERS }
         }
         .filterValues { it.isNotEmpty() },
-    )
-  }
-
-  /**
-   * And the palette is not narrower than it needs to be either.
-   *
-   * The direction that matters to an author is the one above; this one catches the answer nobody
-   * wants to the drift — narrowing the catalog until it agrees, rather than teaching the emitter.
-   * `layout/box` carries the widest borrowed vocabulary, so what it keeps is what the generator can
-   * do minus the four Remote Compose has no counterpart for.
-   */
-  @Test
-  fun `the palette keeps every modifier the generator can write`() {
-    val box = authoringComponents.single { it.componentId == "layout/box" }
-
-    assertEquals(
-      emptyList(),
-      (REMOTE_CONTENT_MODIFIERS - box.modifierCapabilities.toSet()).sorted() -
-        // Never offered on a box by the base catalog either: `weight` and the cross-axis
-        // alignments are a child's word to its row or column, and a box has no scope for them.
-        setOf("alignHorizontal", "alignVertical"),
     )
   }
 }

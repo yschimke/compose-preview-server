@@ -11,7 +11,6 @@ import ee.schimke.composeai.uibuilder.protocol.OpenDesignRequestV1
 import ee.schimke.composeai.uibuilder.protocol.SnapshotResponseV1
 import ee.schimke.composeai.uibuilder.protocol.UiBuilderRequestV1
 import ee.schimke.composeai.uibuilder.protocol.UiBuilderResponseV1
-import ee.schimke.composeai.uibuilder.service.CurrentM3UiBuilderCatalogExecutor
 import ee.schimke.composeai.uibuilder.service.FileUiBuilderStateStorage
 import ee.schimke.composeai.uibuilder.service.PersistentUiBuilderService
 import java.io.File
@@ -113,9 +112,9 @@ class ServeWearScreenDeploymentIntegrationTest {
     }
   }
 
-  /** The empty template is reachable too, and generates a screen rather than a refusal. */
+  /** The minimal template is reachable too, and generates a screen rather than a refusal. */
   @Test
-  fun `the empty Wear template creates a scaffold over an empty list`() {
+  fun `the minimal Wear template creates a scaffold over its required list header`() {
     val running = startServer()
     try {
       assertEquals(303, createDesign(running, "wear-m3", "blank-watch", "wear-screen").first)
@@ -123,13 +122,17 @@ class ServeWearScreenDeploymentIntegrationTest {
       val snapshot =
         assertIs<SnapshotResponseV1>(response(running, OpenDesignRequestV1("blank-watch")))
       val document = snapshot.snapshot.state.document
-      assertTrue(document.nodes.getValue("wear-list").slots.getValue("items").isEmpty())
+      val items = document.nodes.getValue("wear-list").slots.getValue("items")
+      assertEquals(listOf("list-header"), items)
+      assertEquals("wear-m3/list-header", document.nodes.getValue(items.single()).componentId)
 
       val exported =
         assertIs<ExportResponseV1>(
           response(running, ExportDesignRequestV1("blank-watch", format = ExportFormatV1.COMPOSE))
         )
-      assertTrue("TransformingLazyColumn(" in exported.artifact?.content.orEmpty())
+      val source = exported.artifact?.content.orEmpty()
+      assertTrue("TransformingLazyColumn(" in source, source)
+      assertTrue("ListHeader(" in source, source)
     } finally {
       running.close()
     }
@@ -223,7 +226,7 @@ class ServeWearScreenDeploymentIntegrationTest {
       PersistentUiBuilderService(
         storage = FileUiBuilderStateStorage(stateDirectory),
         catalogs =
-          CurrentM3UiBuilderCatalogExecutor(
+          UiBuilderCheckoutCatalogFixtures.executor(
             catalogSystemIds = PACKAGED_DEFAULT,
             exportCapabilities =
               ee.schimke.composeai.uibuilder.protocol.ExportCapabilitiesV1.Builder()
