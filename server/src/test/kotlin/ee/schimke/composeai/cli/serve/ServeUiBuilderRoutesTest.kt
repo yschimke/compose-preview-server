@@ -35,6 +35,7 @@ import java.util.concurrent.TimeUnit
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -253,6 +254,161 @@ class ServeUiBuilderRoutesTest {
           serverToken = "operator-token",
         ),
       )
+    } finally {
+      isolated.stop()
+      isolatedRegistry.close()
+    }
+  }
+
+  @Test
+  fun `browser exchange keeps the grant actor and capabilities without carrying its token`() {
+    val grantStore =
+      ServeAgentGrantStore(
+        maxCapabilities =
+          setOf(
+            AgentGrantCapability.UI_BUILDER_READ,
+            AgentGrantCapability.UI_BUILDER_WRITE,
+            AgentGrantCapability.UI_BUILDER_EXPORT,
+          )
+      )
+    val request =
+      requireNotNull(
+        grantStore.openRequest(
+          label = "browser collaborator",
+          client = "test",
+          requestedScope = AgentGrantScope.PREVIEW,
+          requestedTtlSeconds = 600,
+          requestedCapabilities = setOf(AgentGrantCapability.UI_BUILDER_READ),
+        )
+      )
+    val grant =
+      requireNotNull(
+        grantStore.approve(
+          id = request.id,
+          approvedBy = "operator (token)",
+          approvedByActorId = "operator",
+          scope = AgentGrantScope.PREVIEW,
+          ttlSeconds = 600,
+          capabilities = setOf(AgentGrantCapability.UI_BUILDER_READ),
+        )
+      )
+    val isolatedRegistry = ServeSessionRegistry(open = { null })
+    val isolated =
+      ServeHttpServer(
+          host = "127.0.0.1",
+          requestedPort = 0,
+          token = "operator-token",
+          sessions = isolatedRegistry,
+          defaultSessionId = "unused",
+          agentGrants = grantStore,
+          uiBuilderService = service,
+          uiBuilderAuthorization =
+            ServeUiBuilderAuthorization.fromServeIdentity(
+              serverToken = "operator-token",
+              githubAuth = null,
+              agentGrants = grantStore,
+            ),
+        )
+        .also(ServeHttpServer::start)
+    val browser = OkHttpClient.Builder().followRedirects(false).build()
+    try {
+      val cookie =
+        browser
+          .newCall(
+            Request.Builder()
+              .url(
+                "http://127.0.0.1:${isolated.port}/ui-builder/?session=live&" +
+                  "actor=agent%3A${grant.fingerprint}&token=${grant.token}"
+              )
+              .header("Accept", "text/html,application/xhtml+xml")
+              .build()
+          )
+          .execute()
+          .use { response ->
+            assertEquals(302, response.code)
+            assertEquals(
+              "/ui-builder/?session=live&actor=agent%3A${grant.fingerprint}",
+              response.header("Location"),
+            )
+            val setCookie =
+              response.headers("Set-Cookie").single {
+                it.startsWith("${ServeAgentGrantCookie.NAME}=")
+              }
+            assertFalse(setCookie.contains(grant.token), "the cookie must not contain the bearer")
+            assertTrue(setCookie.contains("HttpOnly"), setCookie)
+            assertTrue(setCookie.contains("SameSite=Lax"), setCookie)
+            assertTrue(setCookie.contains("Path=/"), setCookie)
+            setCookie.substringBefore(';')
+          }
+
+      val identityBody =
+        browser
+          .newCall(
+            Request.Builder()
+              .url("http://127.0.0.1:${isolated.port}$UI_BUILDER_IDENTITY_PATH")
+              .header("Cookie", cookie)
+              .build()
+          )
+          .execute()
+          .use {
+            assertEquals(200, it.code)
+            it.body.string()
+          }
+      assertEquals(
+        "agent:${grant.fingerprint}",
+        json.decodeFromString(UiBuilderIdentityV1.serializer(), identityBody).actorId,
+      )
+      browser
+        .newCall(
+          Request.Builder()
+            .url("http://127.0.0.1:${isolated.port}/status")
+            .header("Cookie", cookie)
+            .build()
+        )
+        .execute()
+        .use {
+          assertEquals(200, it.code)
+          assertFalse(it.body.string().contains(grant.token), "browser links must stay token-free")
+        }
+      assertEquals(
+        200,
+        authenticatedPost(
+          isolated.port,
+          actorId = "agent:${grant.fingerprint}",
+          request = ListCatalogsRequestV1,
+          cookie = cookie,
+        ),
+      )
+      assertEquals(
+        403,
+        authenticatedPost(
+          isolated.port,
+          actorId = "agent:${grant.fingerprint}",
+          request = ExportDesignRequestV1("design", format = ExportFormatV1.SVG),
+          cookie = cookie,
+        ),
+      )
+      assertEquals(
+        403,
+        authenticatedPost(
+          isolated.port,
+          actorId = "agent:${grant.fingerprint}",
+          request = ListCatalogsRequestV1,
+          cookie = cookie,
+          origin = "https://attacker.example",
+        ),
+      )
+
+      assertTrue(grantStore.revoke(grant.id, "test"))
+      browser
+        .newCall(
+          Request.Builder()
+            .url("http://127.0.0.1:${isolated.port}$UI_BUILDER_IDENTITY_PATH")
+            .header("Cookie", cookie)
+            .build()
+        )
+        .execute()
+        .use { assertEquals(401, it.code) }
     } finally {
       isolated.stop()
       isolatedRegistry.close()
@@ -608,6 +764,8 @@ class ServeUiBuilderRoutesTest {
     request: ee.schimke.composeai.uibuilder.protocol.UiBuilderRequestV1,
     bearer: String? = null,
     serverToken: String? = null,
+    cookie: String? = null,
+    origin: String? = null,
   ): Int {
     val body =
       json.encodeToString(
@@ -619,6 +777,8 @@ class ServeUiBuilderRoutesTest {
         .post(body.toRequestBody())
     if (bearer != null) builder.header("Authorization", "Bearer $bearer")
     if (serverToken != null) builder.header(ServeHttpServer.TOKEN_HEADER, serverToken)
+    if (cookie != null) builder.header("Cookie", cookie)
+    if (origin != null) builder.header("Origin", origin)
     return client.newCall(builder.build()).execute().use { it.code }
   }
 

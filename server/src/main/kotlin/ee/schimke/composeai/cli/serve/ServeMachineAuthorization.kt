@@ -171,7 +171,7 @@ class ServeMachineAuthorization(
         call.request.queryParameters["token"],
         presentedToken,
       )
-      .firstNotNullOfOrNull(store::grantForToken)
+      .firstNotNullOfOrNull(store::grantForToken) ?: ServeAgentGrantCookie.grant(call, store)
   }
 
   /**

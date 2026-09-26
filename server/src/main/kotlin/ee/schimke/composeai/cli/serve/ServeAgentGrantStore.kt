@@ -6,6 +6,8 @@ import ee.schimke.composeai.agentgrants.AgentGrantScope
 import java.security.SecureRandom
 import java.util.Base64
 import java.util.concurrent.ConcurrentHashMap
+import javax.crypto.Mac
+import javax.crypto.spec.SecretKeySpec
 
 /**
  * The state behind `/agent-access/…` — pending grant *requests* and the live *grants* they turn
@@ -238,6 +240,13 @@ class ServeAgentGrantStore(
    */
   private val byToken = ConcurrentHashMap<String, String>()
 
+  /**
+   * Derived browser credential → grant id. The browser cookie never contains the `cpat_` bearer:
+   * its value is a domain-separated HMAC keyed by that bearer, and this index resolves it back to
+   * the same live grant without scanning every active grant on every browser request.
+   */
+  private val byBrowserCredential = ConcurrentHashMap<String, String>()
+
   // ---------------------------------------------------------------- requests
 
   /**
@@ -419,6 +428,7 @@ class ServeAgentGrantStore(
         )
       grants[grant.id] = grant
       byToken[grant.token] = grant.id
+      byBrowserCredential[browserCredentialValue(grant.token)] = grant.id
       // Data BEFORE the flag that says the data is there. The lock [poll] now takes is what makes
       // the intermediate state unobservable; this ordering is the belt to that pair of braces, and
       // is the right shape regardless of who else ever reads these.
@@ -514,6 +524,39 @@ class ServeAgentGrantStore(
     val grant = grants[id] ?: return null
     return grant.takeIf { it.expiresAtMillis > clock() }
   }
+
+  /** The live grant named by an HttpOnly browser credential, or null. */
+  fun grantForBrowserCredential(presented: String?): Grant? {
+    val credential = presented?.takeIf { isWellFormedBrowserCredential(it) } ?: return null
+    val id = byBrowserCredential[credential] ?: return null
+    val grant = grants[id] ?: return null
+    return grant.takeIf { it.expiresAtMillis > clock() }
+  }
+
+  /**
+   * The non-reversible credential a browser cookie carries for [grant], while that grant is live.
+   * Its lifetime is still decided from the grant on every request, so revocation and expiry retain
+   * exactly the same actor, capabilities and authority as presenting the original bearer.
+   */
+  fun browserCredentialFor(grant: Grant): BrowserCredential? {
+    val now = clock()
+    val live =
+      grants[grant.id]?.takeIf { it.token == grant.token && it.expiresAtMillis > now }
+        ?: return null
+    val seconds = ((live.expiresAtMillis - now + 999) / 1000).coerceAtLeast(1)
+    return BrowserCredential(
+      value = browserCredentialValue(live.token),
+      maxAgeSeconds = seconds.coerceAtMost(Int.MAX_VALUE.toLong()).toInt(),
+    )
+  }
+
+  /** Whether [presented] is the derived browser credential for [grant], without re-resolving it. */
+  fun browserCredentialMatches(presented: String?, grant: Grant): Boolean =
+    presented != null &&
+      isWellFormedBrowserCredential(presented) &&
+      ServeUrls.tokensMatch(browserCredentialValue(grant.token), presented)
+
+  data class BrowserCredential(val value: String, val maxAgeSeconds: Int)
 
   /**
    * Why a presented token is not a live grant — the thing `/agent-access/whoami` could not say.
@@ -633,6 +676,7 @@ class ServeAgentGrantStore(
   fun revoke(id: String, by: String): Boolean {
     val grant = grants.remove(id) ?: return false
     byToken.remove(grant.token)
+    byBrowserCredential.remove(browserCredentialValue(grant.token))
     audit("agent-grant: revoked ${grant.fingerprint} by $by label=\"${grant.label}\"")
     return true
   }
@@ -670,6 +714,7 @@ class ServeAgentGrantStore(
     requests.clear()
     grants.clear()
     byToken.clear()
+    byBrowserCredential.clear()
   }
 
   /** Drop every expired request and grant; returns how many went in total. */
@@ -696,6 +741,7 @@ class ServeAgentGrantStore(
       (g.expiresAtMillis <= nowMillis).also {
         if (it) {
           byToken.remove(g.token)
+          byBrowserCredential.remove(browserCredentialValue(g.token))
           dropped++
         }
       }
@@ -850,7 +896,23 @@ class ServeAgentGrantStore(
     /** Cheap shape check on a presented bearer, so an ordinary `--token` never reaches the map. */
     fun isWellFormedToken(token: String): Boolean = token.matches(TOKEN_SHAPE)
 
+    /** A browser-only, non-reversible stand-in for one short-lived grant bearer. */
+    internal fun browserCredentialValue(token: String): String {
+      val mac = Mac.getInstance("HmacSHA256")
+      mac.init(SecretKeySpec(token.toByteArray(Charsets.UTF_8), "HmacSHA256"))
+      val digest = mac.doFinal(BROWSER_CREDENTIAL_LABEL.toByteArray(Charsets.UTF_8))
+      return BROWSER_CREDENTIAL_PREFIX +
+        Base64.getUrlEncoder().withoutPadding().encodeToString(digest)
+    }
+
+    internal fun isWellFormedBrowserCredential(value: String): Boolean =
+      value.matches(BROWSER_CREDENTIAL_SHAPE)
+
     private val ID_SHAPE = Regex("[A-Za-z0-9_-]{16,64}")
     private val TOKEN_SHAPE = Regex("${Regex.escape(TOKEN_PREFIX)}[A-Za-z0-9_-]{16,64}")
+    private const val BROWSER_CREDENTIAL_PREFIX = "cpag_"
+    private const val BROWSER_CREDENTIAL_LABEL = "compose-preview/agent-grant-browser/v1"
+    private val BROWSER_CREDENTIAL_SHAPE =
+      Regex("${Regex.escape(BROWSER_CREDENTIAL_PREFIX)}[A-Za-z0-9_-]{43}")
   }
 }

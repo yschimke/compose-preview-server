@@ -230,6 +230,26 @@ class ServeAgentGrantStoreTest {
   }
 
   @Test
+  fun `a browser credential is derived and shares grant expiry and revocation`() {
+    val store = store()
+    val expiring = store.approve(store.ask().id, "@yuri", AgentGrantScope.LIVE, 60)!!
+    val expiringCredential = requireNotNull(store.browserCredentialFor(expiring))
+    assertFalse(expiringCredential.value.contains(expiring.token))
+    assertNotEquals(expiring.token, expiringCredential.value)
+    assertEquals(60, expiringCredential.maxAgeSeconds)
+    assertEquals(expiring, store.grantForBrowserCredential(expiringCredential.value))
+    assertNull(store.grantForBrowserCredential(expiring.token))
+
+    now += 61_000
+    assertNull(store.grantForBrowserCredential(expiringCredential.value))
+
+    val revoked = store.approve(store.ask().id, "@yuri", AgentGrantScope.LIVE, 60)!!
+    val revokedCredential = requireNotNull(store.browserCredentialFor(revoked)).value
+    assertTrue(store.revoke(revoked.id, "@yuri"))
+    assertNull(store.grantForBrowserCredential(revokedCredential))
+  }
+
+  @Test
   fun `a revoked grant stops authorising immediately`() {
     val store = store()
     val request = store.ask()

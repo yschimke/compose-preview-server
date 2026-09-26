@@ -947,6 +947,23 @@ class ServeHttpServer(
           finish()
         }
       }
+      // A browser may also arrive with a short-lived agent grant. Exchange that bearer for a
+      // derived HttpOnly credential backed by the same live grant, then remove it from the URL.
+      // Unlike the operator cookie this is installed on public boxes too: a public catalog still
+      // needs a grant for UI-builder write/export capabilities.
+      agentGrants?.let { store ->
+        intercept(ApplicationCallPipeline.Plugins) {
+          val current: ApplicationCall = context
+          val exchange = ServeAgentGrantCookie.exchange(current, store) ?: return@intercept
+          current.response.cookies.append(
+            ServeAgentGrantCookie.cookie(exchange.credential, secure = isSecure(current))
+          )
+          current.response.headers.append(HttpHeaders.CacheControl, "no-store")
+          current.response.headers.append(HttpHeaders.Location, exchange.target)
+          current.respond(HttpStatusCode.Found)
+          finish()
+        }
+      }
       // Top-level sites ([ServeSites]): make the canonical `/<system>/…` spelling behave, on a site
       // host, as though this box served only that one catalog. Registered before routing (and only
       // when sites are configured, so an ordinary server has no interceptor at all) because it has
@@ -13201,17 +13218,25 @@ class ServeHttpServer(
    *
    * The fix is to stop treating "the server's token" and "the token this page's links should carry"
    * as the same thing. A caller presenting a live grant gets pages wired with **their own** grant
-   * token — which passes every gate they are entitled to pass, so the UI is fully navigable — and
-   * everyone else gets [serverToken] exactly as before. A `--public` server puts no token in its
-   * links at all, so none of this applies there.
+   * token — which passes every gate they are entitled to pass, so the UI is fully navigable. Once a
+   * browser has exchanged that token for [ServeAgentGrantCookie], its links are clean instead.
+   * Everyone else gets [serverToken] exactly as before. A `--public` server puts no operator token
+   * in its links at all.
    *
    * See also [isAuthorizedAccessParam], the one place a credential arrives in a *path* segment
    * rather than a query string, which has to accept the same two answers.
    */
   private fun RoutingContext.linkToken(): String = call.linkToken()
 
-  private fun ApplicationCall.linkToken(): String =
-    agentGrantFor(this)?.token ?: if (browsesByCookie()) "" else serverToken
+  private fun ApplicationCall.linkToken(): String {
+    val grant = agentGrantFor(this)
+    return when {
+      grant != null && browsesByAgentGrantCookie(grant) -> ""
+      grant != null -> grant.token
+      browsesByCookie() -> ""
+      else -> serverToken
+    }
+  }
 
   /**
    * Whether this call presents the browse cookie ([ServeBrowseCookie]) — a browser that exchanged
@@ -13221,6 +13246,15 @@ class ServeHttpServer(
   private fun ApplicationCall.browsesByCookie(): Boolean =
     !isPublic && ServeBrowseCookie.presents(this, serverToken)
 
+  /** Whether this call's resolved grant came from the short-lived browser cookie. */
+  private fun ApplicationCall.browsesByAgentGrantCookie(
+    grant: ServeAgentGrantStore.Grant
+  ): Boolean =
+    agentGrants?.browserCredentialMatches(
+      request.cookies.rawCookies[ServeAgentGrantCookie.NAME],
+      grant,
+    ) == true
+
   /** Whether the links of the page being built carry `token=` — see [linkToken]. */
   private fun RoutingContext.linksCarryToken(): Boolean = !isPublic && linkToken().isNotEmpty()
 
@@ -13229,8 +13263,14 @@ class ServeHttpServer(
    * own grant token, as [linkToken] would give it, or else a value derived from the operator token
    * — never the operator token itself.
    */
-  private fun RoutingContext.wasmPrivateAccess(): String =
-    agentGrantFor(call)?.token ?: ServeBrowseCookie.wasmAccess(serverToken)
+  private fun RoutingContext.wasmPrivateAccess(): String {
+    val grant = agentGrantFor(call)
+    return when {
+      grant != null && call.browsesByAgentGrantCookie(grant) -> ServeAgentGrantCookie.WASM_ACCESS
+      grant != null -> grant.token
+      else -> ServeBrowseCookie.wasmAccess(serverToken)
+    }
+  }
 
   /**
    * Whether a credential arriving as a **path** segment (`/wasm-private/{access}/…`) is one this
@@ -13238,10 +13278,14 @@ class ServeHttpServer(
    * the same two answers [linkToken] can produce, because the page that builds these URLs embeds
    * whichever one its reader presented.
    */
-  private fun isAuthorizedAccessParam(value: String?): Boolean =
+  private fun isAuthorizedAccessParam(call: ApplicationCall, value: String?): Boolean =
     ServeUrls.tokensMatch(ServeBrowseCookie.wasmAccess(serverToken), value) ||
       ServeUrls.tokensMatch(serverToken, value) ||
-      agentGrants?.grantForToken(value)?.allows(AgentGrantScope.PREVIEW) == true
+      agentGrants?.grantForToken(value)?.allows(AgentGrantScope.PREVIEW) == true ||
+      (value == ServeAgentGrantCookie.WASM_ACCESS &&
+        agentGrantFor(call)?.let { grant ->
+          call.browsesByAgentGrantCookie(grant) && grant.allows(AgentGrantScope.PREVIEW)
+        } == true)
 
   /**
    * The live grant this call presents, or null — resolved **once per request** and remembered.
@@ -13262,8 +13306,8 @@ class ServeHttpServer(
    * its grant once at connection setup ([socketGrant]) and never asks again.
    *
    * Reads the same two places the operator token is read from, plus `Authorization: Bearer` — an
-   * agent's HTTP client reaches for that header without being told to, and refusing it would be a
-   * papercut with no security value: the bearer is checked identically wherever it arrives.
+   * agent's HTTP client reaches for that header without being told to — and the derived HttpOnly
+   * browser cookie. The cookie is tried last so an explicit live grant still decides the request.
    */
   private fun agentGrantFor(call: ApplicationCall): ServeAgentGrantStore.Grant? =
     call.attributes
@@ -13334,7 +13378,7 @@ class ServeHttpServer(
         bearer,
         call.request.queryParameters["token"],
       )
-      .firstNotNullOfOrNull { store.grantForToken(it) }
+      .firstNotNullOfOrNull { store.grantForToken(it) } ?: ServeAgentGrantCookie.grant(call, store)
   }
 
   /**
@@ -13389,7 +13433,8 @@ class ServeHttpServer(
     }
     val privateSystem = system in privateWasmCatalogs
     if (
-      (privateRoute && (!privateSystem || !isAuthorizedAccessParam(call.parameters["access"]))) ||
+      (privateRoute &&
+        (!privateSystem || !isAuthorizedAccessParam(call, call.parameters["access"]))) ||
         (!privateRoute && privateSystem && !isPublic)
     ) {
       call.respondText("not found", status = HttpStatusCode.NotFound)

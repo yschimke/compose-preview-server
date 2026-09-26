@@ -98,7 +98,7 @@ internal object ServeBrowseCookie {
     return path + queryWithoutToken(call.request.queryString())
   }
 
-  private fun isDocumentNavigation(call: ApplicationCall): Boolean {
+  internal fun isDocumentNavigation(call: ApplicationCall): Boolean {
     val headers = call.request.headers
     val mode = headers["Sec-Fetch-Mode"]
     if (mode != null) {
