@@ -66,7 +66,8 @@ internal class DesignHttpTransport(
    */
   private val token: () -> String?,
   private val timeout: Duration,
-  private val http: HttpClient = HttpClient.newBuilder().connectTimeout(CONNECT_TIMEOUT).build(),
+  private val http: HttpClient =
+    HttpClient.newBuilder().connectTimeout(minOf(CONNECT_TIMEOUT, timeout)).build(),
 ) : DesignMcpTransport {
 
   private val base: URI = normalize(server)
