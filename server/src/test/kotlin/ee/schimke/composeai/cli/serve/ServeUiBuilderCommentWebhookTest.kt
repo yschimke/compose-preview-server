@@ -388,7 +388,7 @@ class ServeUiBuilderCommentWebhookTest {
           config = CommentWebhookConfig("https://hooks.example/hook"),
           designs = {
             lookups.incrementAndGet()
-            CommentWebhookDesign("Checkout", "m3-catalog")
+            CommentWebhookDesign("Checkout", "m3-catalog", readableByAnyone = true)
           },
           baseUrl = { "https://preview.example" },
           send = {
@@ -421,7 +421,9 @@ class ServeUiBuilderCommentWebhookTest {
     try {
       val store = ServeUiBuilderCommentStore(root)
       val current =
-        java.util.concurrent.atomic.AtomicReference(CommentWebhookDesign("Checkout", "m3-catalog"))
+        java.util.concurrent.atomic.AtomicReference(
+          CommentWebhookDesign("Checkout", "m3-catalog", readableByAnyone = true)
+        )
       val delivered = CopyOnWriteArrayList<String>()
       val releaseFirst = CountDownLatch(1)
       val firstEntered = CountDownLatch(1)
@@ -446,7 +448,9 @@ class ServeUiBuilderCommentWebhookTest {
           assertTrue(firstEntered.await(10, TimeUnit.SECONDS), "the first send never ran")
 
           // The id now means a different design. The comment written next belongs to that one.
-          current.set(CommentWebhookDesign("Something else", "other-catalog"))
+          current.set(
+            CommentWebhookDesign("Something else", "other-catalog", readableByAnyone = true)
+          )
           store.post("design-1", "Yuri", CommentPostRequest(body = "On the new one."))
 
           releaseFirst.countDown()
@@ -486,6 +490,81 @@ class ServeUiBuilderCommentWebhookTest {
     val body = CommentWebhookFormat.PLAIN.body(event(authorId = "github:someone-else"))
     val comment = Json.parseToJsonElement(body).jsonObject.getValue("comment").jsonObject
     assertEquals("github:someone-else", comment.getValue("authorId").jsonPrimitive.content)
+  }
+
+  @Test
+  fun `a design that is not public is announced as a link, with nothing that was said`() {
+    for (design in
+      listOf(
+        CommentWebhookDesign("Secret checkout", "m3-catalog", "https://chat.example/c/1"),
+        null,
+      )) {
+      val root = Files.createTempDirectory("comment-webhook-private")
+      try {
+        val store = ServeUiBuilderCommentStore(root)
+        val delivered = CopyOnWriteArrayList<String>()
+        val slack = CopyOnWriteArrayList<String>()
+        val webhook =
+          ServeUiBuilderCommentWebhook(
+            config = CommentWebhookConfig("https://hooks.example/hook"),
+            designs = { design },
+            baseUrl = { "https://preview.example" },
+            send = {
+              delivered += it
+              true
+            },
+            onLog = {},
+          )
+        webhook.use {
+          it.attach(store).use {
+            store.post(
+              "design-1",
+              "github:yuri",
+              CommentPostRequest(
+                body = "The pricing row is wrong.",
+                displayName = "Yuri",
+                anchor = StoredCommentAnchor(nodeId = "price"),
+              ),
+            )
+            awaitDeliveries(delivered, 1)
+          }
+        }
+        val body = delivered.single()
+        val event = Json.parseToJsonElement(body).jsonObject
+        assertEquals("thread", event.getValue("event").jsonPrimitive.content)
+        assertEquals("design-1", titleOf(body))
+        assertTrue(
+          event
+            .getValue("url")
+            .jsonPrimitive
+            .content
+            .startsWith("https://preview.example/ui-builder/design-1#thread=")
+        )
+        val comment = event.getValue("comment").jsonObject
+        assertEquals("", comment.getValue("excerpt").jsonPrimitive.content)
+        assertTrue("author" !in comment && "authorId" !in comment, comment.toString())
+        assertTrue("anchor" !in event.getValue("thread").jsonObject, body)
+        for (word in listOf("pricing", "Yuri", "yuri", "Secret", "m3-catalog", "price")) {
+          assertTrue(!body.contains(word), "$word in $body")
+        }
+
+        // The chat adapters render it as a sentence and a link, without an empty quote.
+        val text =
+          Json.parseToJsonElement(
+              CommentWebhookFormat.SLACK.body(
+                Json.decodeFromString(DesignCommentWebhookEventV1.serializer(), body)
+              )
+            )
+            .jsonObject
+            .getValue("text")
+            .jsonPrimitive
+            .content
+        assertTrue(text.startsWith("A new thread on <https://preview.example/"), text)
+        assertTrue(!text.contains("\n> "), text)
+      } finally {
+        root.toFile().deleteRecursively()
+      }
+    }
   }
 
   /** The design title inside a delivered plain body. */

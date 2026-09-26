@@ -116,6 +116,33 @@ class ServeUiBuilderCommentWebhookIntegrationTest {
   }
 
   @Test
+  fun `a private design's comment reaches the webhook as a link alone`() {
+    val receiver = receiver()
+    val server = start(receiver.url, public = false)
+    createDesign(server)
+
+    val posted =
+      comments(
+        server,
+        "/api/ui-builder/v1/designs/$DESIGN_ID/comments",
+        """{"body":"This row should be a card.","displayName":"Yuri","anchor":{"nodeId":"row"}}""",
+      )
+    assertEquals(201, posted.first, posted.second)
+
+    val raw = receiver.awaitOne()
+    val body = Json.parseToJsonElement(raw).jsonObject
+    assertEquals("thread", body["event"]!!.jsonPrimitive.content)
+    assertEquals(
+      "http://127.0.0.1:${server.port}/ui-builder/$DESIGN_ID#thread=${threadIdOf(posted.second)}",
+      body["url"]!!.jsonPrimitive.content,
+    )
+    assertEquals("", body["comment"]!!.jsonObject["excerpt"]!!.jsonPrimitive.content)
+    for (word in listOf("This row", "Yuri", "Discussed screen", "node row", CATALOG_SYSTEM_ID)) {
+      assertTrue(!raw.contains(word), "$word in $raw")
+    }
+  }
+
+  @Test
   fun `a reply and a resolution are told, and a reaction is not`() {
     val receiver = receiver()
     val server = start(receiver.url)
@@ -355,7 +382,16 @@ class ServeUiBuilderCommentWebhookIntegrationTest {
     }
   }
 
-  private fun start(webhookUrl: String, format: String = "plain"): ServeHttpServer {
+  /**
+   * [public] makes every design this server creates readable by anyone, the way
+   * `--ui-builder-default-visibility public` does. Most tests here are about what a full event
+   * says, and only a public design's event says it.
+   */
+  private fun start(
+    webhookUrl: String,
+    format: String = "plain",
+    public: Boolean = true,
+  ): ServeHttpServer {
     val comments = ServeUiBuilderCommentStore(stateDirectory.resolve("comments"))
     val links = ServeUiBuilderLinksStore(stateDirectory.resolve("links")).also { linksStore = it }
     val registry = ServeSessionRegistry(open = { null })
@@ -389,7 +425,11 @@ class ServeUiBuilderCommentWebhookIntegrationTest {
         sessions = registry,
         defaultSessionId = "unused",
         machineAuthorization = ServeMachineAuthorization(OPERATOR_TOKEN, null, null),
-        uiBuilderService = service,
+        uiBuilderService =
+          ServeUiBuilderVisibility.withDefault(
+            service,
+            if (public) UiBuilderDefaultVisibility.PUBLIC else UiBuilderDefaultVisibility.PRIVATE,
+          ),
         uiBuilderAuthorization =
           ServeUiBuilderAuthorization.fromServeIdentity(OPERATOR_TOKEN, null, null),
         uiBuilderCommentStore = comments,
@@ -400,15 +440,7 @@ class ServeUiBuilderCommentWebhookIntegrationTest {
     val webhook =
       ServeUiBuilderCommentWebhook(
         config = CommentWebhookConfig(webhookUrl, CommentWebhookFormat.parse(format)!!),
-        designs = { designId ->
-          service.adminDesignSummary(designId)?.let {
-            CommentWebhookDesign(
-              it.title,
-              it.catalogPin.systemId,
-              links.read(designId)?.thread,
-            )
-          }
-        },
+        designs = { designId -> commentWebhookDesign(service, service, links, designId) },
         baseUrl = { ServeUrls.origin("127.0.0.1", server.port) },
       )
     closeables += webhook.attach(comments)

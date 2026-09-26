@@ -706,11 +706,11 @@ class ServeUiBuilderMcp(
                     .takeIf { !it.isEmpty },
                 body = args.requiredText("body"),
                 displayName = args.text("displayName") ?: actor.actorId,
-                // Declared rather than inferred, but defaulted to `agent` here: everything
-                // reaching this class arrived over MCP. A tool that wanted to post as a person
-                // would be posting somebody else's words under their own grant.
-                authorKind = StoredComment.AUTHOR_KIND_AGENT,
               ),
+              // Set by the server, never by an argument: everything reaching this class arrived
+              // over MCP, so the caller is an agent whichever credential it holds. A tool that
+              // could post as a person would be posting somebody else's words under its grant.
+              authorKind = StoredComment.AUTHOR_KIND_AGENT,
             )
             .orThrow()
         RESOLVE_COMMENT_THREAD ->

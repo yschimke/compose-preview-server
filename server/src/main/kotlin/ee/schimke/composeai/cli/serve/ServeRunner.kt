@@ -3513,22 +3513,12 @@ public class ServeRunner(
         ServeUiBuilderCommentWebhook(
           config = CommentWebhookConfig(url, format),
           designs = { designId ->
-            // Keyed, not a scan: this runs on the thread accepting a comment, and it runs there
-            // so the title and catalog belong to the design the comment was actually written on.
-            runCatching { uiBuilderLane.service.adminDesignSummary(designId) }
-              .getOrNull()
-              ?.let { summary ->
-                // The design's own chat thread, read here for the same reason and at the same
-                // moment as its title: a design id can come to mean a different design, and a
-                // notification must not pair one design's comment with another's conversation.
-                // A small local file beside the one the comment write is already writing, and
-                // never a network read — the comment must not wait on anything remote.
-                val chatThread = runCatching {
-                  uiBuilderLane.links?.read(designId)?.thread
-                }
-                  .getOrNull()
-                CommentWebhookDesign(summary.title, summary.catalogPin.systemId, chatThread)
-              }
+            commentWebhookDesign(
+              admin = uiBuilderLane.service,
+              service = uiBuilderLane.service,
+              links = uiBuilderLane.links,
+              designId = designId,
+            )
           },
           baseUrl = {
             configuredOrigin ?: ServeUrls.origin(linkHost, startedServer?.port ?: requestedPort)

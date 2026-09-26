@@ -15,7 +15,8 @@ import kotlinx.coroutines.runBlocking
 
 class ServeUiBuilderCommentStoreTest {
   private val root = Files.createTempDirectory("comment-store")
-  private val store = ServeUiBuilderCommentStore(root)
+  private val logged = java.util.concurrent.CopyOnWriteArrayList<String>()
+  private val store = ServeUiBuilderCommentStore(root, onLog = { logged += it })
 
   @AfterTest
   fun cleanUp() {
@@ -217,9 +218,64 @@ class ServeUiBuilderCommentStoreTest {
   fun `a deleted thread takes its comments with it and still advances the sequence`() {
     val opened = board(post())
     val threadId = opened.threads.single().id
-    val deleted = board(store.deleteThread("design-1", threadId))
+    val deleted =
+      board(store.deleteThread("design-1", "designer", threadId, mayDeleteAnyThread = false))
     assertTrue(deleted.threads.isEmpty())
     assertEquals(2, deleted.sequence)
+  }
+
+  @Test
+  fun `only the thread's opener or an editor may delete it, and the removal is logged`() {
+    val threadId = board(post(author = "github:designer")).threads.single().id
+    // A reply does not make the replier the thread's owner.
+    board(post(author = "github:reviewer", threadId = threadId, body = "Agreed."))
+
+    val refused =
+      store.deleteThread("design-1", "github:reviewer", threadId, mayDeleteAnyThread = false)
+    val reason = assertIs<CommentWriteResult.Refused>(refused)
+    assertTrue(reason.forbidden, reason.toString())
+    assertEquals(1, store.readOrEmpty("design-1").threads.size)
+    assertTrue(logged.isEmpty(), logged.toString())
+
+    val removed =
+      board(store.deleteThread("design-1", "github:owner", threadId, mayDeleteAnyThread = true))
+    assertTrue(removed.threads.isEmpty())
+    val line = logged.single()
+    assertTrue(line.contains("deleted by github:owner"), line)
+    assertTrue(line.contains("opened by github:designer"), line)
+  }
+
+  @Test
+  fun `a missing thread is not a forbidden one`() {
+    board(post())
+    val missing = store.deleteThread("design-1", "designer", "t-none", mayDeleteAnyThread = false)
+    assertTrue(!assertIs<CommentWriteResult.Refused>(missing).forbidden)
+  }
+
+  @Test
+  fun `the author kind comes from the identity, not the request body`() {
+    val claimed =
+      CommentPostRequest(body = "Posted by a person.", authorKind = StoredComment.AUTHOR_KIND_AGENT)
+    val person = board(store.post("design-1", "github:designer", claimed))
+    assertEquals(
+      StoredComment.AUTHOR_KIND_HUMAN,
+      person.threads.single().comments.single().authorKind,
+    )
+
+    val agent =
+      board(
+        store.post(
+          "design-2",
+          ServeAgentGrants.agentActorId("abc123"),
+          CommentPostRequest(body = "Hi."),
+        )
+      )
+    val comment = agent.threads.single().comments.single()
+    assertEquals(StoredComment.AUTHOR_KIND_AGENT, comment.authorKind)
+    // The label is the caller's; the identity beside it is always the authenticated actor.
+    assertEquals(ServeAgentGrants.agentActorId("abc123"), comment.authorId)
+
+    assertEquals(StoredComment.AUTHOR_KIND_HUMAN, commentAuthorKindOf("operator"))
   }
 
   @Test

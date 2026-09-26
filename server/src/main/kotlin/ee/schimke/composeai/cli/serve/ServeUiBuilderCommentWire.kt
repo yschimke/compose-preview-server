@@ -67,7 +67,15 @@ data class CommentPostRequest(
   val threadId: String? = null,
   val anchor: StoredCommentAnchor? = null,
   val body: String,
+  /**
+   * A label beside the author, and only a label: [StoredComment.authorId] is the authenticated
+   * actor and is stored and returned alongside it.
+   */
   val displayName: String = "",
+  /**
+   * Accepted so an older client's body still parses, and ignored: the kind is derived from the
+   * credential ([commentAuthorKindOf]).
+   */
   val authorKind: String = StoredComment.AUTHOR_KIND_HUMAN,
 )
 

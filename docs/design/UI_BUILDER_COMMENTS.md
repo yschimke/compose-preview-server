@@ -85,7 +85,7 @@ request for any of this.
 | `GET` | `…/designs/{id}/comments` | the whole board |
 | `POST` | `…/designs/{id}/comments` | a comment: a reply into `threadId`, or a new thread where `anchor` says |
 | `POST` | `…/designs/{id}/comments/{threadId}/resolution` | close a thread, or reopen it |
-| `DELETE` | `…/designs/{id}/comments/{threadId}` | remove a thread and everything said in it |
+| `DELETE` | `…/designs/{id}/comments/{threadId}` | remove a thread and everything said in it — its opener, or an actor with the design's WRITE action; `403` otherwise |
 | `POST` | `…/designs/{id}/comments/acknowledgement` | mark the whole discussion as read, for this actor |
 | `POST` | `…/designs/{id}/comments/{threadId}/acknowledgement` | mark one thread as read, for this actor |
 | `POST` | `…/designs/{id}/comments/{threadId}/{commentId}/reactions` | add an emoji to one comment, or take it back with `on: false` |
@@ -100,9 +100,19 @@ open and enumerate which design ids exist by watching which writes succeeded.
 
 An author is **always** the authenticated actor. `CommentPostRequest` has no author field at all: the
 only way an author reaches the store is the parameter the route fills in. `authorKind` (`human` or
-`agent`) is declared rather than derived, and is cosmetic — it decides a badge, never a permission,
-because the host cannot tell a designer's browser from an agent's MCP session by the credential
-alone.
+`agent`) is derived by the server, not read from the body: an agent grant's own identity
+(`agent:<fingerprint>`) and every MCP post are `agent`; a GitHub session, a grant a person requested
+for their own session, and the operator token are `human` (the contract has no third kind, and
+clients read an unknown one as `human`). A body's `authorKind` is accepted for older clients and
+ignored. It is still cosmetic — it decides a badge, never a permission. `displayName` stays a label
+the author chooses; `authorId` is stored and returned beside it on every comment, and a client that
+wants to show who actually wrote something shows that.
+
+**Deleting a thread is narrower than resolving one.** Anybody who may comment may resolve or reopen
+any thread, because that is attributed and reversible. A delete is neither, so only the actor who
+opened the thread, or an actor holding the design's own WRITE action (its owner and editors), may
+remove it; anybody else gets `403`. The board keeps nothing of a removed thread, so the server logs
+who removed it, whose it was and how many comments it held.
 
 ## Seen, worked on, settled — three different claims
 
@@ -215,7 +225,15 @@ review loop, and `--ui-builder-comment-webhook <url>` (container
 **What fires** is what somebody *said* — four events, each carrying the author, their `authorKind`,
 the excerpt trimmed by the same 160-character rule the `comments` notice uses, where the thread is
 pinned, the design's id and title, and the thread permalink
-`https://<host>/ui-builder/<designId>#thread=<threadId>`:
+`https://<host>/ui-builder/<designId>#thread=<threadId>`.
+
+**Only a public design is posted in full.** The hook is one channel for the whole host, and its
+readers are not the people each design was shared with. So the title, anchor, excerpt and author
+travel only for a design a signed-out visitor may read. Every other design — and one the host could
+not name — is posted as a link: the event kind, the design id as its title, the thread id and
+comment count, the permalink, and `design.thread` where one is set, with an empty excerpt and no
+author. Whoever may open the design follows the link to the thread. There is no switch to post full
+content for private designs.
 
 | event | when |
 | --- | --- |

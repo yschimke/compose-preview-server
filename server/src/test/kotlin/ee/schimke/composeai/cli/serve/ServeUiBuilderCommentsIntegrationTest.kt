@@ -245,6 +245,81 @@ class ServeUiBuilderCommentsIntegrationTest {
     assertTrue(read.second.contains("looks like a cross"), read.second)
   }
 
+  @Test
+  fun `a viewer may delete their own thread and nobody else's, and the owner may delete any`() {
+    val server = start()
+    createDesign(server)
+    shareAsViewer(server, "github:reviewer")
+    val base = "/api/ui-builder/v1/designs/$DESIGN_ID/comments"
+
+    val ownersThread =
+      threadIdOf(comments(server, "POST", base, """{"body":"Owner's question."}""").second)
+    val refused = comments(server, "DELETE", "$base/$ownersThread", null, token = REVIEWER_TOKEN)
+    assertEquals(403, refused.first, refused.second)
+    assertTrue(
+      comments(server, "GET", base, null).second.contains("Owner's question."),
+      "a refused delete must leave the thread in place",
+    )
+
+    val reviewersThread =
+      comments(server, "POST", base, """{"body":"Reviewer's question."}""", token = REVIEWER_TOKEN)
+        .second
+        .let(::threadIdOfLast)
+    val ownDelete =
+      comments(server, "DELETE", "$base/$reviewersThread", null, token = REVIEWER_TOKEN)
+    assertEquals(200, ownDelete.first, ownDelete.second)
+
+    val reviewersSecond =
+      comments(server, "POST", base, """{"body":"Another one."}""", token = REVIEWER_TOKEN)
+        .second
+        .let(::threadIdOfLast)
+    // The owner holds the design's WRITE action, so may tidy anybody's thread away.
+    val ownerDelete = comments(server, "DELETE", "$base/$reviewersSecond", null)
+    assertEquals(200, ownerDelete.first, ownerDelete.second)
+    assertTrue(!ownerDelete.second.contains("Another one."), ownerDelete.second)
+  }
+
+  @Test
+  fun `a browser post cannot claim to be an agent`() {
+    val server = start()
+    createDesign(server)
+    shareAsViewer(server, "github:reviewer")
+    val posted =
+      comments(
+        server,
+        "POST",
+        "/api/ui-builder/v1/designs/$DESIGN_ID/comments",
+        """{"body":"Hello.","displayName":"Review agent","authorKind":"agent"}""",
+        token = REVIEWER_TOKEN,
+      )
+    assertEquals(201, posted.first, posted.second)
+    val comment =
+      json
+        .parseToJsonElement(posted.second)
+        .jsonObject["threads"]!!
+        .jsonArray
+        .single()
+        .jsonObject["comments"]!!
+        .jsonArray
+        .single()
+        .jsonObject
+    assertEquals("human", comment["authorKind"]!!.jsonPrimitive.content)
+    // The label is kept as typed; the identity is carried beside it for a client to show.
+    assertEquals("Review agent", comment["displayName"]!!.jsonPrimitive.content)
+    assertEquals("github:reviewer", comment["authorId"]!!.jsonPrimitive.content)
+  }
+
+  /** The id of the newest thread on a board. */
+  private fun threadIdOfLast(board: String): String =
+    json
+      .parseToJsonElement(board)
+      .jsonObject["threads"]!!
+      .jsonArray
+      .last()
+      .jsonObject["id"]!!
+      .jsonPrimitive
+      .content
+
   /** Share the design with [actorId] as a viewer, as its owner. */
   private fun shareAsViewer(server: RunningServer, actorId: String) {
     val envelope =
