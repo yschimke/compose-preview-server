@@ -1050,13 +1050,16 @@ is every compile — and the client address otherwise. Over budget answers `429`
 before the request body is read, so a throttled caller costs the box nothing. Watch it on
 `/status.json` at `playground.rateLimit` (`activeCallers`, `trackedCallers`).
 
-> **Behind a reverse proxy, anonymous callers share one bucket** unless you opt in with
-> `SERVE_TRUST_FORWARDED_FOR=1`. That makes the limiter key on the **last** `X-Forwarded-For` entry
-> — the one nginx's `$proxy_add_x_forwarded_for` appended from the peer address it actually saw,
-> which a client cannot forge. Do **not** set it on a directly-exposed host: the header is
-> client-supplied there, so a caller could mint a fresh identity per request and bypass the limit
-> entirely. It assumes exactly one proxy hop. This matters much less than it sounds on this image,
-> where the playground is repo-access-gated and every compile therefore carries a GitHub login.
+> **Anonymous callers are told apart by `X-Forwarded-For`.** The compose file sets
+> `SERVE_TRUST_FORWARDED_FOR=1` by default, which makes the limiter (and the grant approval page's
+> "Asked from") key on the **last** `X-Forwarded-For` entry rather than the socket peer. That value
+> is not client-chosen here: the bundled Caddy, which has no `trusted_proxies` configured,
+> **replaces** any `X-Forwarded-For` a client sends with the peer address it saw, and `preview`
+> publishes no host port of its own. Without it every anonymous caller shares the bucket keyed on
+> Caddy's container address. Set `SERVE_TRUST_FORWARDED_FOR=0` if you publish `8080` directly or run
+> the image without a proxy — the header is client-supplied there, so a caller could mint a fresh
+> identity per request. Behind a different proxy, turn it on only if that proxy sets the final entry
+> itself (nginx's `$proxy_add_x_forwarded_for` appends it). It assumes exactly one proxy hop.
 
 ### Containment
 
@@ -1264,6 +1267,21 @@ Requirements / options:
   `docker compose pull preview && docker compose up -d preview` (recreates in place).
 - **Don't want any of it:** comment out both `rollout` and `watchtower` and update
   by hand with `docker compose pull && docker compose up -d`.
+
+### Access log
+
+Caddy writes one JSON line per request to stdout, which lands in the `caddy` container's json-file
+log (`docker compose logs caddy`). Retention is by size only, from the compose file's `x-logging`
+anchor: 50 MB × 5 files per container, roughly a day of history on a busy box, then the oldest file
+is dropped. There is no time-based expiry beyond that.
+
+Each line records the method, host, URI, status, sizes, timing, the response headers, and the
+request headers — which include the client IP, `User-Agent` and `Referer`. The `Caddyfile`'s
+`format filter` removes credentials before a line is written: `X-Compose-Preview-Token`,
+`X-Compose-Preview-Admin-Token` and `X-Compose-Preview-Agent-Access` are dropped, the `token`,
+`code` and `state` query parameters read `REDACTED` in the URI and in `Referer`, and Caddy itself
+already masks `Cookie`, `Set-Cookie` and `Authorization`. Change `max-size` / `max-file` in
+`docker-compose.yml` to keep more or less.
 
 ### Even simpler (no Caddy/TLS — quick test)
 

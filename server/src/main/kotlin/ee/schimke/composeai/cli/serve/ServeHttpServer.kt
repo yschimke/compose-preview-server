@@ -603,9 +603,10 @@ class ServeHttpServer(
    *
    * Off by default and opt-in for a reason: the header is client-supplied, so trusting it on a
    * directly-exposed host lets a caller forge a fresh identity per request and bypass the limit
-   * entirely. The *last* entry — not the first — is the one a single reverse proxy appended from
-   * the peer address it actually saw (nginx's `$proxy_add_x_forwarded_for`), which a client cannot
-   * forge. That is exactly one hop's worth of trust; behind two proxies this names the inner one.
+   * entirely. The *last* entry — not the first — is the one a single reverse proxy set from the
+   * peer address it actually saw (nginx's `$proxy_add_x_forwarded_for` appends it; Caddy without
+   * `trusted_proxies` replaces the header with it), which a client cannot forge. That is exactly
+   * one hop's worth of trust; behind two proxies this names the inner one.
    */
   private val trustForwardedFor: Boolean = false,
   /**
