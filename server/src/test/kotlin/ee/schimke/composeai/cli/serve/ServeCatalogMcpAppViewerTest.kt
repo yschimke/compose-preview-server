@@ -69,7 +69,7 @@ class ServeCatalogMcpAppViewerTest {
       html.contains("if (resourceToken) params._meta = { 'compose-preview/token': resourceToken };")
     )
     assertTrue(html.contains("function safeSelectionArguments(value)"))
-    assertTrue(html.contains("/(token|authorization|password|secret|api[-_]?key)/i"))
+    assertTrue(html.contains("/(token|authorization|password|secret|api[-_]?key|cookie|session)/i"))
     assertTrue(html.contains("arguments: toolArguments"))
     assertTrue(html.contains("structuredContent: { composePreviewSelection: selected }"))
     assertTrue(html.contains("await request('ui/update-model-context'"))

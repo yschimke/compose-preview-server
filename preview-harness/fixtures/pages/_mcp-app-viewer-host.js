@@ -27,6 +27,7 @@ window.addEventListener("message", async (event) => {
           uri: "compose-preview://fixture/_app/com.example.Card",
           previewId: "CardPreview",
           overrides: { uiMode: "dark" },
+          sessionId: "must-not-travel",
         },
       },
     });
@@ -85,6 +86,11 @@ window.addEventListener("message", async (event) => {
         ],
       },
     });
+    return;
+  }
+  if (message.method === "ui/update-model-context") {
+    window.__mcpModelContext = message.params;
+    send({ jsonrpc: "2.0", id: message.id, result: {} });
   }
 });
 
