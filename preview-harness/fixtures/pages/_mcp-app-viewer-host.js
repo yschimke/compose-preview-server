@@ -27,6 +27,7 @@ window.addEventListener("message", async (event) => {
           serverResources: {
             subscribe:
               mode === "refresh" ||
+              mode === "same-uri-redraw" ||
               mode === "subscribe-fails" ||
               mode === "stale-read-marker",
           },
@@ -137,9 +138,35 @@ window.addEventListener("message", async (event) => {
         });
       }, 100);
     }
+    if (mode === "same-uri-redraw") {
+      window.setTimeout(async () => {
+        send({
+          jsonrpc: "2.0",
+          method: "ui/notifications/tool-result",
+          params: {
+            result: {
+              content: [
+                {
+                  type: "image",
+                  mimeType: "image/png",
+                  data: await png("/preview-harness/fixtures/pages/_design-render-placeholder.png"),
+                },
+                {
+                  type: "resource_link",
+                  uri: "compose-preview://fixture/_app/com.example.Card?overrides=fixture",
+                  name: "Compose Preview render",
+                  mimeType: "image/png",
+                },
+              ],
+            },
+          },
+        });
+      }, 250);
+    }
     return;
   }
   if (message.method === "resources/subscribe") {
+    window.__mcpSubscribeCount = (window.__mcpSubscribeCount || 0) + 1;
     if (mode === "subscribe-fails" || mode === "stale-read-marker") {
       window.setTimeout(
         () =>

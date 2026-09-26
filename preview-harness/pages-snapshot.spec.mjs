@@ -4392,6 +4392,12 @@ for (const fixture of listPageFixtures()) {
           await page.waitForFunction(() => window.__mcpReadCount >= 2, null, { timeout: 7_000 });
           await expect(viewer.locator("#refresh")).toBeEnabled();
         }
+        if (fixture === "mcp-app-viewer-same-uri-redraw") {
+          await page.waitForFunction(() => window.__mcpSubscribeCount >= 1);
+          await expect(viewer.locator('#canvas img[alt="Rendered Compose preview"]')).toBeVisible();
+          expect(await page.evaluate(() => window.__mcpSubscribeCount)).toBe(1);
+          expect(await page.evaluate(() => window.__mcpUnsubscribedUris || [])).toEqual([]);
+        }
       }
 
       // The design page's renders are `loading="lazy"` — a live catalog serves one daemon

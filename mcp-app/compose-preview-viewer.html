@@ -339,11 +339,12 @@
     }
   }
 
-  function disconnectResourceUpdates() {
+  function disconnectResourceUpdates(nextUri) {
     ++resourceSubscriptionGeneration;
     ++resourceReadGeneration;
     resourceReadUri = undefined;
     stopResourcePolling();
+    if (subscribedResourceUri === nextUri) return;
     const previous = subscribedResourceUri;
     subscribedResourceUri = undefined;
     if (!previous || !hostResourceSubscriptions || !initialized) return;
@@ -395,14 +396,14 @@
   function draw(result) {
     hasToolResult = true;
     if (staticMode) meta.textContent = 'Static preview result';
-    selected = undefined;
-    use.hidden = true;
-    refresh.hidden = true;
-    disconnectResourceUpdates();
-    resourceResult = undefined;
     const value = data(result);
     const image = png(result);
     const resource = link(result);
+    selected = undefined;
+    use.hidden = true;
+    refresh.hidden = true;
+    disconnectResourceUpdates(resource?.uri);
+    resourceResult = undefined;
     const cells = Array.isArray(value.cells) && value.cells;
     if (resource) {
       resourceResult = { result, resource, value };
