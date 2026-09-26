@@ -162,7 +162,8 @@ composeai-tools = "2.26.1"
 # (compose-preview-daemon#158), so the native render lane's `renderFailed` reason — surfaced since
 # #1069 — names the fix. No API this server calls changed.
 # 3.9.0 starts daemon and spare-worker JVMs with an allowlisted environment by default
-# (compose-preview-daemon#161); moved with composeai-tools 2.26.1.
+# (compose-preview-daemon#161); moved with composeai-tools 2.26.1. 3.9.0 republished only
+# `daemon-client`, so `server/build.gradle.kts` takes the desktop sidecars through the BOM.
 composeai-preview-daemon = "3.9.0"
 # 2.9.0 is the first release carrying `DesignEnvironmentV1.exportDevices` and its Set/Reset
 # changes, which is the field a design names its export devices in. 2.14.0 adds the components a
