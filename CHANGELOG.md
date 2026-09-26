@@ -1,5 +1,34 @@
 # Changelog
 
+## [3.72.0](https://github.com/yschimke/compose-preview-server/compare/v3.71.0...v3.72.0) (2026-09-26)
+
+
+### Features
+
+* A2UI playground — POST render, /{system}/a2ui page and a2ui render CLI ([#1095](https://github.com/yschimke/compose-preview-server/issues/1095)) ([7d93842](https://github.com/yschimke/compose-preview-server/commit/7d9384212047a22b6a3bb284a3e40c907d92951c))
+* **auth:** tidy GitHub sign-in token lifecycle and return paths ([#1091](https://github.com/yschimke/compose-preview-server/issues/1091)) ([497178a](https://github.com/yschimke/compose-preview-server/commit/497178a8967799e96484010248c7c0a81fd758bd))
+* **deploy:** serve the A2UI catalog and its AndroidX samples on preview.coo.ee ([#1089](https://github.com/yschimke/compose-preview-server/issues/1089)) ([2240d54](https://github.com/yschimke/compose-preview-server/commit/2240d54bca44dd7121f7bd8b07bbede7f926a0a0))
+* **serve:** let an access request name the design it is for ([#1112](https://github.com/yschimke/compose-preview-server/issues/1112)) ([4d67f0d](https://github.com/yschimke/compose-preview-server/commit/4d67f0d4370f9a69295ae51790127d58b66f5002))
+* **server:** set a Content-Security-Policy on rendered pages ([#1111](https://github.com/yschimke/compose-preview-server/issues/1111)) ([3862e76](https://github.com/yschimke/compose-preview-server/commit/3862e76d055913769928bd12098bc653ff20588d))
+* **ui-builder:** serve the A2UI catalog's JSON and Compose exports on compose-ui-builder 3.62.0 ([#1110](https://github.com/yschimke/compose-preview-server/issues/1110)) ([a508468](https://github.com/yschimke/compose-preview-server/commit/a508468c839263a1a0dc0a2745d6c3e1da0aaa63))
+* **ui-builder:** tidy public-reader payloads and store file modes ([#1104](https://github.com/yschimke/compose-preview-server/issues/1104)) ([ac9f0cb](https://github.com/yschimke/compose-preview-server/commit/ac9f0cbe43c85c0faa592565ef46b77b10f251f5))
+
+
+### Bug Fixes
+
+* **auth:** never ask GitHub sign-in for repository access ([#1088](https://github.com/yschimke/compose-preview-server/issues/1088)) ([9a41e4c](https://github.com/yschimke/compose-preview-server/commit/9a41e4ce1cfd494c1efb379c401bdf7fd9c16d22))
+* **deps:** move to compose-ui-builder 3.63.0, compose-ai-tools 2.26.1 and daemon 3.9.0 ([#1113](https://github.com/yschimke/compose-preview-server/issues/1113)) ([7660562](https://github.com/yschimke/compose-preview-server/commit/7660562d1209e661458dc59fb227789561da6caa))
+* **report:** only attach screenshots from public pages by default ([#1103](https://github.com/yschimke/compose-preview-server/issues/1103)) ([c71516a](https://github.com/yschimke/compose-preview-server/commit/c71516a39739245d62a128e5321d1a9b21305036))
+* **serve:** check image-upload tokens against this app ([#1101](https://github.com/yschimke/compose-preview-server/issues/1101)) ([427a8eb](https://github.com/yschimke/compose-preview-server/commit/427a8eb05f7195ecd2c449f40423a84545ccfbe4))
+* **serve:** keep the browse token in a cookie instead of page URLs ([#1107](https://github.com/yschimke/compose-preview-server/issues/1107)) ([ba1f354](https://github.com/yschimke/compose-preview-server/commit/ba1f35401e8bcf2cadbf3d67acb2b96439e26894))
+* **serve:** require same-origin requests for browser-session writes ([#1100](https://github.com/yschimke/compose-preview-server/issues/1100)) ([db162d5](https://github.com/yschimke/compose-preview-server/commit/db162d54eb49a8ba9d6320daf6a212fc727f5609))
+* **serve:** tidy admin token handling and forwarded-header use ([#1099](https://github.com/yschimke/compose-preview-server/issues/1099)) ([e91cbb6](https://github.com/yschimke/compose-preview-server/commit/e91cbb65a13fc5deca88ff78f92ff8bfb60490cb))
+* **serve:** tidy agent-grant approval and status pages ([#1097](https://github.com/yschimke/compose-preview-server/issues/1097)) ([f74aaa7](https://github.com/yschimke/compose-preview-server/commit/f74aaa774954445afcefb9550babfacc211e9475))
+* **serve:** tidy session cookie handling ([#1098](https://github.com/yschimke/compose-preview-server/issues/1098)) ([fe25194](https://github.com/yschimke/compose-preview-server/commit/fe25194c83d2fda1d68b54c8408cf467640747c0))
+* **ui-builder:** match administrators by the actor's own id ([#1094](https://github.com/yschimke/compose-preview-server/issues/1094)) ([cf540c0](https://github.com/yschimke/compose-preview-server/commit/cf540c02fc9b559acf58d8349cf66d967e57f1d1))
+* **ui-builder:** shape the MCP comment notice for public readers ([#1106](https://github.com/yschimke/compose-preview-server/issues/1106)) ([b11e2bf](https://github.com/yschimke/compose-preview-server/commit/b11e2bff6b06b344da32f246c7e9ac84b9c6583e))
+* **ui-builder:** tidy comment thread permissions and webhook payloads ([#1102](https://github.com/yschimke/compose-preview-server/issues/1102)) ([31741a4](https://github.com/yschimke/compose-preview-server/commit/31741a495d4d9cb692f98d1e6c9bcd3a6b0c7f6e))
+
 ## [3.71.0](https://github.com/yschimke/compose-preview-server/compare/v3.70.0...v3.71.0) (2026-09-26)
 
 
