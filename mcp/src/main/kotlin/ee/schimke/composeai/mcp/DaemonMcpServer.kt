@@ -394,7 +394,7 @@ class DaemonMcpServer(
           installComposePreviewHandlers(
             sdkSession = sdkSession,
             session = session,
-            listTools = { currentToolDefs(session) },
+            listTools = { viewerLinkedToolDefs(currentToolDefs(session)) },
             callTool = { name, arguments -> handleCallTool(session, name, arguments) },
             listResources = { catalogResources() },
             readResource = { uri, progressToken ->
@@ -428,7 +428,16 @@ class DaemonMcpServer(
   // -------------------------------------------------------------------------
 
   private fun catalogResources(): List<ResourceDescriptor> {
-    val out = mutableListOf<ResourceDescriptor>()
+    val out =
+      mutableListOf(
+        ResourceDescriptor(
+          uri = MCP_APP_VIEWER_URI,
+          name = "Compose Preview viewer",
+          description = "Interactive render and matrix viewer for Compose Preview tools.",
+          mimeType = MCP_APP_MIME_TYPE,
+          meta = viewerResourceMeta(),
+        )
+      )
     for ((addr, byId) in catalog) {
       for (entry in byId.values) {
         val uri =
@@ -456,6 +465,19 @@ class DaemonMcpServer(
     uri: String,
     progressToken: JsonElement?,
   ): ReadResourceResult {
+    if (uri == MCP_APP_VIEWER_URI) {
+      return ReadResourceResult(
+        contents =
+          listOf(
+            ResourceContents.Text(
+              uri = uri,
+              mimeType = MCP_APP_MIME_TYPE,
+              text = viewerHtml(),
+              meta = viewerResourceMeta(),
+            )
+          )
+      )
+    }
     // History URIs short-circuit to `history/read` against the daemon — historical bytes are
     // immutable so there's no render path involved.
     HistoryUri.parseOrNull(uri)?.let { historyUri ->
@@ -960,6 +982,26 @@ class DaemonMcpServer(
   // -------------------------------------------------------------------------
   // Tool surface
   // -------------------------------------------------------------------------
+
+  /** The viewer is an optional presentation layer: every linked tool keeps its text result. */
+  private fun viewerLinkedToolDefs(toolDefs: List<ToolDef>): List<ToolDef> = toolDefs.map { tool ->
+    if (tool.name in VIEWER_TOOL_NAMES) tool.copy(meta = viewerToolMeta()) else tool
+  }
+
+  private fun viewerHtml(): String =
+    checkNotNull(javaClass.classLoader.getResourceAsStream(MCP_APP_VIEWER_ASSET)) {
+        "missing bundled MCP App viewer: $MCP_APP_VIEWER_ASSET"
+      }
+      .bufferedReader()
+      .use { it.readText() }
+
+  private fun viewerToolMeta(): JsonObject = buildJsonObject {
+    put("ui", buildJsonObject { put("resourceUri", MCP_APP_VIEWER_URI) })
+  }
+
+  private fun viewerResourceMeta(): JsonObject = buildJsonObject {
+    put("ui", buildJsonObject { put("prefersBorder", true) })
+  }
 
   private fun currentToolDefs(session: Session): List<ToolDef> {
     if (fullToolDefsFuture.isDone) {
@@ -2317,7 +2359,19 @@ class DaemonMcpServer(
       } else {
         val bytes = renderAndReadBytes(uri, overrides = overrides)
         if (observe == "png") {
-          pngCallToolResult(Base64.getEncoder().encodeToString(bytes))
+          CallToolResult(
+            content =
+              listOf(
+                ContentBlock.Image(Base64.getEncoder().encodeToString(bytes), "image/png"),
+                ContentBlock.ResourceLink(
+                  uri = uriStr,
+                  name = "Compose Preview render",
+                  mimeType = "image/png",
+                  description =
+                    "The current preview resource; subscribe to refresh it after edits.",
+                ),
+              )
+          )
         } else {
           renderObservation(uri, bytes, includeSemantics = observe == "semantics")
         }
@@ -5048,6 +5102,17 @@ class DaemonMcpServer(
   }
 
   companion object {
+    const val MCP_APP_VIEWER_URI: String = "ui://compose-preview/viewer"
+    const val MCP_APP_MIME_TYPE: String = "text/html;profile=mcp-app"
+    private const val MCP_APP_VIEWER_ASSET: String = "compose-preview-viewer.html"
+
+    /** Tools whose existing text output gains an optional, portable MCP Apps presentation. */
+    private val VIEWER_TOOL_NAMES =
+      setOf(
+        "render_preview",
+        "render_matrix",
+      )
+
     /**
      * Cap on consecutive `classpathDirty` self-loops before the supervisor stops respawning. One
      * legitimate retry covers the common case where the user/VS Code re-ran

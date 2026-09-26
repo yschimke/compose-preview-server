@@ -123,6 +123,62 @@ class DaemonMcpServerTest {
   }
 
   @Test
+  fun `MCP App viewer is listed readable and linked to render tools`() {
+    client.initialize()
+    val tools = client.awaitToolsContaining("render_preview")
+    val render = tools.tools.single { it.name == "render_preview" }
+    assertThat(render.meta?.get("ui")?.jsonObject?.get("resourceUri")?.jsonPrimitive?.content)
+      .isEqualTo(DaemonMcpServer.MCP_APP_VIEWER_URI)
+    assertThat(tools.tools.single { it.name == "render_matrix" }.meta).isNotNull()
+    assertThat(tools.tools.single { it.name == "diff_semantics" }.meta).isNull()
+
+    val listed = client.request("resources/list")
+    val viewer =
+      listed["resources"]!!
+        .jsonArray
+        .single { entry ->
+          entry.jsonObject["uri"]!!.jsonPrimitive.content == DaemonMcpServer.MCP_APP_VIEWER_URI
+        }
+        .jsonObject
+    assertThat(viewer["mimeType"]!!.jsonPrimitive.content).isEqualTo("text/html;profile=mcp-app")
+    assertThat(
+        viewer["_meta"]!!.jsonObject["ui"]!!.jsonObject["prefersBorder"]!!.jsonPrimitive.content
+      )
+      .isEqualTo("true")
+
+    val read =
+      client.request(
+        "resources/read",
+        buildJsonObject { put("uri", DaemonMcpServer.MCP_APP_VIEWER_URI) },
+      )
+    val content = read["contents"]!!.jsonArray.single().jsonObject
+    assertThat(content["mimeType"]!!.jsonPrimitive.content).isEqualTo("text/html;profile=mcp-app")
+    assertThat(content["text"]!!.jsonPrimitive.content).contains("Compose Preview")
+    assertThat(content["text"]!!.jsonPrimitive.content).contains("await request('ui/initialize'")
+    assertThat(content["text"]!!.jsonPrimitive.content)
+      .contains("if (event.source !== window.parent) return;")
+    assertThat(content["text"]!!.jsonPrimitive.content).doesNotContain("innerHTML")
+    assertThat(content["text"]!!.jsonPrimitive.content).contains("selected = undefined;")
+    assertThat(content["text"]!!.jsonPrimitive.content).contains("use.hidden = true;")
+    assertThat(content["text"]!!.jsonPrimitive.content)
+      .contains("message.method === 'ui/notifications/tool-input'")
+    assertThat(content["text"]!!.jsonPrimitive.content).contains("delete copy.token;")
+    assertThat(content["text"]!!.jsonPrimitive.content)
+      .contains("toolArguments = safeToolArguments(message.params?.arguments);")
+    assertThat(content["text"]!!.jsonPrimitive.content).contains("arguments: toolArguments")
+    assertThat(content["text"]!!.jsonPrimitive.content)
+      .contains("structuredContent: { composePreviewSelection: selected }")
+    assertThat(content["text"]!!.jsonPrimitive.content)
+      .contains("await request('ui/update-model-context'")
+    assertThat(content["text"]!!.jsonPrimitive.content)
+      .doesNotContain("notify('ui/update-model-context'")
+    assertThat(content["text"]!!.jsonPrimitive.content)
+      .contains(
+        "if (image && !cells.some(cell => typeof cell?.png === 'string' && cell.png.length > 0))"
+      )
+  }
+
+  @Test
   fun `storybook profile exposes only the storybook tools`() {
     val sbSupervisor =
       DaemonSupervisor(

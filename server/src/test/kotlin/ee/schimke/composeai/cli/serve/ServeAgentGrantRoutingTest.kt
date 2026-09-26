@@ -227,6 +227,22 @@ class ServeAgentGrantRoutingTest {
     }
   }
 
+  @Test
+  fun `a private host permits only the static viewer resource before a grant`() {
+    val viewer =
+      mcpAnonymous(
+        """{"jsonrpc":"2.0","id":1,"method":"resources/read","params":{"uri":"${ServeCatalogMcp.MCP_APP_VIEWER_URI}"}}"""
+      )
+    assertEquals(200, viewer.first, viewer.second)
+    assertTrue(viewer.second.contains("Compose Preview"), viewer.second)
+
+    val catalogResource =
+      mcpAnonymous(
+        """{"jsonrpc":"2.0","id":2,"method":"resources/read","params":{"uri":"compose-preview://catalog/demo/previews/example"}}"""
+      )
+    assertEquals(401, catalogResource.first, catalogResource.second)
+  }
+
   /**
    * Discovery is open, and it is open for one reason: a client that cannot finish `initialize`
    * cannot reach the tool that asks a human for a credential either, so an agent holding nothing
@@ -534,7 +550,7 @@ class ServeAgentGrantRoutingTest {
         """{"jsonrpc":"2.0","id":2,"method":"resources/list","params":{}}""",
       )
     val resources = json(listed.second)["result"]!!.jsonObject["resources"]!!.jsonArray
-    assertEquals(2, resources.size)
+    assertEquals(3, resources.size)
     val uri =
       resources
         .single { it.jsonObject["uri"]!!.jsonPrimitive.content.contains("/demo/") }
@@ -607,7 +623,14 @@ class ServeAgentGrantRoutingTest {
         """{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"render_preview","arguments":{"catalog":"demo","previewId":"example","observe":"png"}}}""",
       )
     val content = json(rendered.second)["result"]!!.jsonObject["content"]!!.jsonArray
-    assertEquals("image", content.single().jsonObject["type"]!!.jsonPrimitive.content)
+    assertEquals(
+      "image",
+      content
+        .single { it.jsonObject["type"]!!.jsonPrimitive.content == "image" }
+        .jsonObject["type"]!!
+        .jsonPrimitive
+        .content,
+    )
 
     val observed =
       mcp(
