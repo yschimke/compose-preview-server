@@ -55,6 +55,8 @@ import kotlinx.serialization.json.Json
 internal fun Route.installUiBuilderRoutes(
   service: UiBuilderServicePort,
   authorization: ServeUiBuilderAuthorization,
+  /** Stable server address for documents created through the REST transport. */
+  serverOrigin: () -> String,
   /**
    * The native render lane, on a host that can compile. Null simply leaves the route out: a box
    * with no playground bundle has no Kotlin compiler and no catalog classpath, and a route that
@@ -232,7 +234,7 @@ internal fun Route.installUiBuilderRoutes(
       call.respondText("request body too large", status = HttpStatusCode.PayloadTooLarge)
       return@put
     }
-    val document =
+    val incoming =
       try {
         UI_BUILDER_JSON.decodeFromString(
           DesignDocumentV1.serializer(),
@@ -242,9 +244,9 @@ internal fun Route.installUiBuilderRoutes(
         call.respondText("body is not a DesignDocumentV1", status = HttpStatusCode.BadRequest)
         return@put
       }
-    if (document.id != designId) {
+    if (incoming.id != designId) {
       call.respondText(
-        "the document's id (${document.id}) is not the design this URL names",
+        "the document's id (${incoming.id}) is not the design this URL names",
         status = HttpStatusCode.BadRequest,
       )
       return@put
@@ -262,12 +264,21 @@ internal fun Route.installUiBuilderRoutes(
         call.respondText(existing.error.message, status = existing.httpStatus())
         return@put
       }
-      call.respondText(
-        "$designId already exists; If-None-Match: * requires that it does not",
-        status = HttpStatusCode.PreconditionFailed,
-      )
+      val outcome =
+        (existing as? UiBuilderServiceResponse.Snapshot)?.let {
+          existingDesignOutcome(designId, incoming, serverOrigin())
+        }
+      if (outcome is ServeUiBuilderCreate.Outcome.Refused) {
+        call.respondText(outcome.reason, status = HttpStatusCode.Conflict)
+      } else {
+        call.respondText(
+          "$designId already exists; If-None-Match: * requires that it does not",
+          status = HttpStatusCode.PreconditionFailed,
+        )
+      }
       return@put
     }
+    val document = incoming.withServerHome(serverOrigin())
     when (val created = service.executeMapped(CreateDesignRequestV1(document), actor)) {
       is UiBuilderServiceResponse.Error -> {
         val status =

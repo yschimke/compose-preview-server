@@ -10,6 +10,7 @@ import ee.schimke.composeai.uibuilder.protocol.DesignAccessResponseV1
 import ee.schimke.composeai.uibuilder.protocol.DesignAccessRoleV1
 import ee.schimke.composeai.uibuilder.protocol.DesignDocumentV1
 import ee.schimke.composeai.uibuilder.protocol.DesignEnvironmentV1
+import ee.schimke.composeai.uibuilder.protocol.DesignHomeV1
 import ee.schimke.composeai.uibuilder.protocol.DesignMutationV1
 import ee.schimke.composeai.uibuilder.protocol.DesignNodeV1
 import ee.schimke.composeai.uibuilder.protocol.DesignsResponseV1
@@ -103,7 +104,7 @@ class ServeUiBuilderMcpIntegrationTest {
       envelope(
         server,
         ServeUiBuilderMcp.CREATE_DESIGN,
-        """{"designId":"agent-screen","includeCatalog":true,"document":${json.encodeToString(DesignDocumentV1.serializer(), document())}}""",
+        """{"designId":"agent-screen","includeCatalog":true,"document":${json.encodeToString(DesignDocumentV1.serializer(), document().copy(home = DesignHomeV1.Repo("designs/agent-screen.uid")))}}""",
       )
     assertIs<SnapshotResponseV1>(response(created))
 
@@ -120,6 +121,10 @@ class ServeUiBuilderMcpIntegrationTest {
         )
       )
     assertEquals("agent-screen", snapshot.snapshot.designId)
+    assertEquals(
+      DesignHomeV1.Server("http://127.0.0.1:${server.server.port}", "agent-screen"),
+      snapshot.snapshot.state.document.home,
+    )
     val revision = snapshot.snapshot.state.document.revision
 
     // 4. The edit: a second text in the column, which is "add a component to a container" — the
@@ -159,11 +164,39 @@ class ServeUiBuilderMcpIntegrationTest {
         ServeUiBuilderMcp.EXPORT,
         """{"designId":"agent-screen","format":"compose"}""",
       )
-    val artifact = assertIs<ExportResponseV1>(response(exported)).artifact
+    val artifact = assertIs<ExportResponseV1>(response(exported), exported).artifact
     assertEquals(emptyList(), artifact.diagnostics, artifact.content)
     assertTrue(artifact.content.contains("""Text(text = "Opening keynote""""), artifact.content)
     assertTrue(artifact.content.contains("""Text(text = "Two sessions today""""), artifact.content)
     assertTrue(artifact.content.contains("Column {"), artifact.content)
+  }
+
+  @Test
+  fun `MCP refuses a create onto this server's canonical design with an apply hint`() {
+    val server = start()
+    val initial =
+      """{"designId":"agent-screen","document":${json.encodeToString(DesignDocumentV1.serializer(), document())}}"""
+    envelope(server, ServeUiBuilderMcp.CREATE_DESIGN, initial)
+
+    val canonical =
+      document()
+        .copy(
+          home =
+            DesignHomeV1.Server(
+              "http://127.0.0.1:${server.server.port}",
+              "agent-screen",
+            )
+        )
+    val reimport =
+      """{"designId":"agent-screen","document":${json.encodeToString(DesignDocumentV1.serializer(), canonical)}}"""
+
+    val duplicate = call(server, ServeUiBuilderMcp.CREATE_DESIGN, reimport)
+    assertEquals(true, duplicate["isError"]?.jsonPrimitive?.content?.toBoolean())
+    val text = duplicate["content"]!!.jsonArray.first().jsonObject["text"]!!.jsonPrimitive.content
+    assertEquals(
+      "agent-screen already lives on this server; apply changes to the original instead",
+      text,
+    )
   }
 
   @Test

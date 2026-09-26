@@ -23,6 +23,7 @@ import ee.schimke.composeai.uibuilder.protocol.GrantActorAccessMutationV1
 import ee.schimke.composeai.uibuilder.protocol.ListCatalogsRequestV1
 import ee.schimke.composeai.uibuilder.protocol.ListDesignsRequestV1
 import ee.schimke.composeai.uibuilder.protocol.McpResponseEnvelopeV1
+import ee.schimke.composeai.uibuilder.protocol.OpenDesignRequestV1
 import ee.schimke.composeai.uibuilder.protocol.PropertyCapabilityV1
 import ee.schimke.composeai.uibuilder.protocol.RevokeActorAccessMutationV1
 import ee.schimke.composeai.uibuilder.protocol.ServiceErrorCodeV1
@@ -85,6 +86,8 @@ import kotlinx.serialization.json.longOrNull
  */
 class ServeUiBuilderMcp(
   private val service: UiBuilderServicePort,
+  /** Stable public origin for documents created through the stateless MCP transport. */
+  private val serverOrigin: () -> String = { "http://localhost" },
   /**
    * The native render lane, on a box that has one.
    *
@@ -978,9 +981,21 @@ class ServeUiBuilderMcp(
             ?: throw McpRequestException("`fromDesignId` names no design this actor can read")
         snapshot.snapshot.state.document
       }
-    return CreateDesignRequestV1(
+    val incoming =
       document.copy(id = designId, revision = 0, title = args.text("title") ?: document.title)
-    )
+    when (val existing = execute(OpenDesignRequestV1(designId), actor)) {
+      is UiBuilderServiceResponse.Snapshot -> {
+        val outcome = existingDesignOutcome(designId, incoming, serverOrigin())
+        if (outcome is ServeUiBuilderCreate.Outcome.Refused)
+          throw McpRequestException(outcome.reason)
+      }
+      is UiBuilderServiceResponse.Error ->
+        if (existing.error.code != ServiceErrorCodeV1.NOT_FOUND) {
+          throw McpRequestException(existing.error.message)
+        }
+      else -> Unit
+    }
+    return CreateDesignRequestV1(incoming.withServerHome(serverOrigin()))
   }
 
   /**

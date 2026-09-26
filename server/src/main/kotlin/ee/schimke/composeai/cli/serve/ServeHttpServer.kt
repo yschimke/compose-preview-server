@@ -186,6 +186,8 @@ private val UI_BUILDER_ASSET_EXTENSIONS =
 class ServeHttpServer(
   private val host: String,
   requestedPort: Int,
+  /** Public origin an imported or newly created design should retain as its canonical home. */
+  private val canonicalOrigin: String? = null,
   /** The operator's own browse token (`--token`). Read through [serverToken]. */
   token: String,
   private val sessions: ServeSessionRegistry,
@@ -752,6 +754,10 @@ class ServeHttpServer(
   /** The actual bound port — may differ from the requested one if it was taken (auto-picked). */
   val port: Int = pickPort(host, requestedPort, portRange)
 
+  private fun canonicalServerOrigin(): String =
+    canonicalOrigin?.trimEnd('/')
+      ?: ServeUrls.origin(if (ServeUrls.isExposed(host)) ServeUrls.LOOPBACK else host, port)
+
   /** Concurrent-render slot count (the `/render` load-shed bound), surfaced on `/status`. */
   private val renderSlots: Int = maxConcurrentRenders.coerceAtLeast(1)
 
@@ -776,6 +782,7 @@ class ServeHttpServer(
           designService?.let {
             ServeUiBuilderMcp(
               it,
+              ::canonicalServerOrigin,
               uiBuilderNativePreview,
               uiBuilderCommentStore,
               references = uiBuilderReferenceStore,
@@ -1137,6 +1144,7 @@ class ServeHttpServer(
           installUiBuilderRoutes(
             designService,
             sameOriginUiBuilderAuthorization,
+            ::canonicalServerOrigin,
             uiBuilderNativePreview,
             uiBuilderInlineCapture,
             // The native pane's live lane, on a host that has Stage-2 redemption. The token the
@@ -5896,7 +5904,7 @@ class ServeHttpServer(
     }
     val outcome =
       withContext(Dispatchers.IO) {
-        ServeUiBuilderCreate(designService!!, uiBuilderDir!!)
+        ServeUiBuilderCreate(designService!!, uiBuilderDir!!, externalOrigin())
           .install(actor = AuthenticatedUiBuilderActor(ADMIN_LIBRARY_ACTOR), document = document)
       }
     call.response.headers.append(HttpHeaders.CacheControl, "no-store")
@@ -14000,7 +14008,7 @@ class ServeHttpServer(
       }
     val outcome =
       withContext(Dispatchers.IO) {
-        ServeUiBuilderCreate(service, dir)
+        ServeUiBuilderCreate(service, dir, externalOrigin())
           .create(
             actor = actor,
             catalogSystemId = catalog,
@@ -14105,7 +14113,9 @@ class ServeHttpServer(
         updatedAtEpochMillis = null,
       )
     val outcome =
-      withContext(Dispatchers.IO) { ServeUiBuilderCreate(service, dir).install(actor, copy) }
+      withContext(Dispatchers.IO) {
+        ServeUiBuilderCreate(service, dir, externalOrigin()).install(actor, copy)
+      }
     when (outcome) {
       is ServeUiBuilderCreate.Outcome.Created,
       is ServeUiBuilderCreate.Outcome.AlreadyExists -> {
@@ -14337,7 +14347,9 @@ class ServeHttpServer(
       )
     when (
       val outcome =
-        withContext(Dispatchers.IO) { ServeUiBuilderCreate(service, dir).install(actor, fork) }
+        withContext(Dispatchers.IO) {
+          ServeUiBuilderCreate(service, dir, externalOrigin()).install(actor, fork)
+        }
     ) {
       is ServeUiBuilderCreate.Outcome.Created -> {
         call.response.headers.append(
