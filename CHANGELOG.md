@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.70.0](https://github.com/yschimke/compose-preview-server/compare/v3.69.0...v3.70.0) (2026-09-26)
+
+
+### Bug Fixes
+
+* **ui-builder:** move compose-ui-builder to 3.59.0, so a reloaded editor starts ([#1083](https://github.com/yschimke/compose-preview-server/issues/1083)) ([3796ffa](https://github.com/yschimke/compose-preview-server/commit/3796ffae3c20f8bb189c3cc2a985bee9a8d93921))
+
 ## [3.69.0](https://github.com/yschimke/compose-preview-server/compare/v3.68.0...v3.69.0) (2026-09-25)
 
 
