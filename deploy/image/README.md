@@ -122,10 +122,10 @@ catalog-scoped form.
 
 The Compose UI builder's Jetcaster benchmark preview is packaged alongside that browser and served
 at `/ui-builder/`, with explicitly enabled catalog instances at `/ui-builder/<catalog>/`. The
-packaged preview deployment enables `m3-catalog`, `remote-m3` and `wear-m3`; override the selective
-allowlist with `SERVE_UI_BUILDER_CATALOGS`. The exact retired default
-`m3-catalog,remote-m3` migrates forward because old installations commonly persisted it; use
-`SERVE_UI_BUILDER_WEAR=0` for an intentional Wear/Android opt-out. `remote-m3` is the reviewed
+packaged preview deployment enables `m3-catalog` only; name more in the selective allowlist
+`SERVE_UI_BUILDER_CATALOGS`, for example `m3-catalog,remote-m3,wear-m3,a2ui-catalog`. An explicit
+list is kept as written; `SERVE_UI_BUILDER_WEAR=0` strips `wear-m3` from it for an intentional
+Wear/Android opt-out. `remote-m3` is the reviewed
 Wear-widget subset (Small and Large host scaffolds plus the few components needed to fill them), not
 a clone of all M3 capabilities. It is not a `compose=1` mode, a fake catalog, or a replacement for
 `/wasm/<system>/`; both apps are installed and routed independently. The static Wasm shell is

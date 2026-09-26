@@ -260,38 +260,24 @@ if [[ -f /opt/compose-preview-server/ui-builder/index.html ]]; then
   # Catalog publication does not imply authoring support. Enable only the explicitly reviewed
   # catalog adapters; this deployment carries M3, the Remote Compose M3 catalog, and Wear M3.
   #
-  # `wear-m3` is IN the default. Enabling an adapter is a claim that what an author sees is what
-  # they get, and that claim has a render behind it: the Kotlin it generates is rendered by real
-  # Wear Compose in compose-ai-tools' `wear-m3` harness catalog, and the stitched `ScrollMode.LONG`
-  # capture matches the builder's own picture to a dp.
+  # The default is `m3-catalog` alone: Material 3 is the one catalog the builder defines and draws
+  # itself, and it needs nothing beyond this image. Wear (`wear-m3`), Remote Compose (`remote-m3`)
+  # and A2UI (`a2ui-catalog`) are opt-ins a deployment names in SERVE_UI_BUILDER_CATALOGS — each
+  # carries a cost the image should not impose on every adopter (a Wear/Android native lane needs
+  # Robolectric and an Android SDK). preview.coo.ee names its full set in its own `.env`.
   #
-  # It was dropped from this list once, on the grounds that nobody was authoring against it and a
-  # Wear/Android catalog is not free — its previews need Robolectric and its native lane an Android
-  # SDK. That was a cost decision rather than a doubt about the adapter, and it is reversed here
-  # deliberately: the lane is wanted again. Every adapter, render and template it had kept working
-  # throughout, which is why putting it back is this one variable and why the
-  # `wear-m3=wear-m3-catalog` native mapping below was kept inert rather than deleted.
-  #
-  # Two paragraphs used to stand here saying the opposite things — one welcoming `wear-m3` into the
-  # default, one stating it was off. The second was current and the first was the leftover.
-  #
-  # An older setup wrote that second default (`m3-catalog,remote-m3`) into `.env`. Image rollouts do
-  # not update the host checkout or its `.env`, so merely changing the default above left exactly
-  # preview.coo.ee on the old value: the image claimed Wear was on while the running box returned
-  # 404 before authentication. Treat that exact retired default as inherited, not as an operator
-  # choice. A box that deliberately cannot carry the Wear/Android lane says so with the explicit
-  # opt-out below; custom allowlists remain untouched.
-  # `wear-m3` is the Builder's logical id. Its delivery branch and Android compile bundle are
-  # `wear-m3-catalog`, named by the native mapping below. Do not put the delivery-system id here:
-  # the published policy itself declares `catalog.id: wear-m3`.
-  ui_builder_catalogs="${SERVE_UI_BUILDER_CATALOGS:-m3-catalog,remote-m3,wear-m3}"
+  # An explicit value is an operator's choice and is kept as written. The one exception is
+  # `m3-catalog,remote-m3,wear-m3-catalog`, a broken image default that named Wear's delivery
+  # system rather than its Builder id; it is corrected to `wear-m3` below. `wear-m3` is the
+  # Builder's logical id — its delivery branch and Android compile bundle are `wear-m3-catalog`,
+  # named by the native mapping further down — so the delivery-system id never belongs here.
+  # SERVE_UI_BUILDER_WEAR=0 still strips `wear-m3` from whatever list is in force.
+  ui_builder_catalogs="${SERVE_UI_BUILDER_CATALOGS:-m3-catalog}"
   if [[ "${SERVE_UI_BUILDER_WEAR:-1}" == "0" ]]; then
     ui_builder_catalogs=",${ui_builder_catalogs},"
     ui_builder_catalogs="${ui_builder_catalogs//,wear-m3,/,}"
     ui_builder_catalogs="${ui_builder_catalogs#,}"
     ui_builder_catalogs="${ui_builder_catalogs%,}"
-  elif [[ "${ui_builder_catalogs}" == "m3-catalog,remote-m3" ]]; then
-    ui_builder_catalogs="${ui_builder_catalogs},wear-m3"
   elif [[ "${ui_builder_catalogs}" == "m3-catalog,remote-m3,wear-m3-catalog" ]]; then
     # The previous image release named Wear's delivery system, not the Builder catalog declared by
     # its policy. Migrate only that inherited broken default; custom allowlists remain untouched.
