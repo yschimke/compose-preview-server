@@ -900,7 +900,7 @@ class ServeUiBuilderMcp(
    * A reply that is not a JSON object is handed back as it is: a notice is worth having, and never
    * worth mangling the answer the agent asked for.
    */
-  private fun withCommentNotice(
+  private suspend fun withCommentNotice(
     tool: String,
     args: JsonObject,
     actor: AuthenticatedUiBuilderActor,
@@ -914,7 +914,10 @@ class ServeUiBuilderMcp(
     // of a design nobody may read is never consulted here — the tool refused before this point.
     val notice =
       try {
-        store.readOrEmpty(designId).noticeFor(actor.actorId)
+        val board = store.readOrEmpty(designId)
+        // A reader who reaches a public design only through its public grant sees other people
+        // under pseudonyms here too, exactly as the board itself is shaped for them.
+        (service.publicReaderView(actor, designId)?.board(board) ?: board).noticeFor(actor.actorId)
       } catch (cancelled: CancellationException) {
         throw cancelled
       } catch (_: Exception) {
