@@ -157,7 +157,9 @@ internal fun Route.installUiBuilderRoutes(
       when (mapping) {
         is ProtocolRequestMapping.Mapped ->
           try {
-            service.execute(mapping.call)
+            // A public reader is told who is on the design no more than it needs; see
+            // [PublicReaderView]. Everyone else gets the service's answer untouched.
+            service.shapeForReader(actor, service.execute(mapping.call))
           } catch (cancelled: CancellationException) {
             throw cancelled
           } catch (_: Exception) {
@@ -573,6 +575,7 @@ internal fun Route.installUiBuilderRoutes(
       return@webSocket
     }
 
+    val view = service.publicReaderView(actor, designId)
     val updates = Channel<ee.schimke.composeai.uibuilder.service.UiBuilderServiceUpdate>(256)
     val overflowed = AtomicBoolean(false)
     val subscription =
@@ -598,7 +601,8 @@ internal fun Route.installUiBuilderRoutes(
       coroutineScope {
         val sender = launch {
           for (update in updates) {
-            val envelope = UiBuilderProtocolMapper.toProtocolUpdate(designId, update)
+            val shaped = view?.update(update) ?: update
+            val envelope = UiBuilderProtocolMapper.toProtocolUpdate(designId, shaped)
             send(Frame.Text(UI_BUILDER_JSON.encodeToString(envelope)))
           }
           if (overflowed.get()) {

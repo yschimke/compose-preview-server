@@ -189,6 +189,7 @@ the document. So the operator's surface carries the whole loop, on the admin tok
 | `GET /admin/ui-builder/designs/{id}/document` | the stored document, as JSON |
 | `PUT /admin/ui-builder/designs/{id}/document` | a repaired document, put back |
 | `DELETE /admin/ui-builder/designs/{id}` | retire it |
+| `DELETE /admin/ui-builder/actors/{actorId}` | revoke one actor's grants on every design and replace their id with `removed-user` on the comment boards; designs they own are listed, not changed, and revision history keeps the id |
 
 Download, edit until it satisfies the rule that changed, put it back. `adminDesignDocument` reads
 what is on disk and consults neither the catalog nor the limits, which is what makes it work on the

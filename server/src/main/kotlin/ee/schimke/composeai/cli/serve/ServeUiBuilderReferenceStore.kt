@@ -64,7 +64,7 @@ class ServeUiBuilderReferenceStore(
   private val maximumDesigns: Int = DEFAULT_MAXIMUM_DESIGNS,
 ) {
   init {
-    Files.createDirectories(root)
+    ServeOwnerOnlyFiles.createDirectories(root)
     require(Files.isDirectory(root)) { "UI-builder reference root is not a directory: $root" }
   }
 

@@ -2645,6 +2645,9 @@ public class ServeRunner(
     if (!(directory.isDirectory || directory.mkdirs()) || !directory.canWrite()) {
       throw IllegalStateException("UI-builder state directory is not writable: $directory")
     }
+    // Owner-only, so the designs, comments and access lists under it are not readable by other
+    // accounts on the host; see [ServeOwnerOnlyFiles].
+    ServeOwnerOnlyFiles.restrictDirectory(directory.toPath())
     System.err.println("serve: UI-builder design API persisting to ${directory.absolutePath}")
     // Whether a Compose export survives the renderer failing is the same question the capability
     // below answers, so it is asked once, here, and both read it. The handler used to promise
@@ -3454,6 +3457,7 @@ public class ServeRunner(
           comments = uiBuilderLane.comments,
           links = uiBuilderLane.links,
           thumbnails = uiBuilderLane.thumbnails,
+          designs = uiBuilderLane.service,
         )
       } else {
         null

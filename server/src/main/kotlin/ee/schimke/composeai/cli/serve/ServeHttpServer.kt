@@ -1943,6 +1943,31 @@ class ServeHttpServer(
             val designId = call.parameters["designId"].orEmpty()
             respondAdminUiBuilderResult(withContext(Dispatchers.IO) { admin.delete(designId) })
           }
+          // Remove one person from every design's access list and anonymise what they said on the
+          // comment boards. Revision history keeps the id; see [ServeUiBuilderAdmin.eraseActor].
+          delete("/admin/ui-builder/actors/{actorId}") {
+            val access = uiBuilderAdminAccess() ?: return@delete
+            if (rejectCrossOriginUiBuilderAdminMutation(access)) return@delete
+            val erased =
+              withContext(Dispatchers.IO) { admin.eraseActor(call.parameters["actorId"].orEmpty()) }
+            if (erased == null) {
+              call.respondText("an actor id is required", status = HttpStatusCode.BadRequest)
+              return@delete
+            }
+            call.respondText(
+              JSON.encodeToString(
+                AdminUiBuilderActorErasureResult.serializer(),
+                AdminUiBuilderActorErasureResult(
+                  actorId = erased.actorId,
+                  revokedFrom = erased.revokedFrom,
+                  ownedDesigns = erased.ownedDesigns,
+                  commentBoards = erased.commentBoards,
+                  replacedWith = ERASED_ACTOR_ID,
+                ),
+              ),
+              ContentType.Application.Json,
+            )
+          }
         }
 
         // The designs catalog projects publish. Read-only until somebody opens one, which is an
@@ -13972,8 +13997,11 @@ class ServeHttpServer(
     val listed =
       when (
         val response =
-          service.execute(
-            UiBuilderServiceCall(actor, UiBuilderServiceRequest.ListRevisions(designId))
+          service.shapeForReader(
+            actor,
+            service.execute(
+              UiBuilderServiceCall(actor, UiBuilderServiceRequest.ListRevisions(designId))
+            ),
           )
       ) {
         is UiBuilderServiceResponse.Revisions -> response
@@ -18084,6 +18112,20 @@ private data class AdminUiBuilderLibraryResponse(
 /** The result of `POST /admin/ui-builder/library/{system}/{designId}`. */
 @Serializable
 private data class AdminUiBuilderLibraryOpenResult(val designId: String, val status: String)
+
+/**
+ * The result of `DELETE /admin/ui-builder/actors/{actorId}`.
+ *
+ * [ownedDesigns] were left as they are: a design keeps an owner, so those are the operator's call.
+ */
+@Serializable
+private data class AdminUiBuilderActorErasureResult(
+  val actorId: String,
+  val revokedFrom: List<String>,
+  val ownedDesigns: List<String>,
+  val commentBoards: Int,
+  val replacedWith: String,
+)
 
 /** The result of `DELETE /admin/ui-builder/designs/{designId}`. */
 @Serializable
