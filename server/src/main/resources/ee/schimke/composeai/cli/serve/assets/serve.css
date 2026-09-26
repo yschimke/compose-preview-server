@@ -2553,6 +2553,11 @@ cp-history-menu { display: contents; }
 .cp-overlays { border-top: 1px solid var(--cp-border); padding-top: 12px; display: flex; flex-direction: column; gap: 8px; }
 .cp-overlays-head { font-size: 0.72rem; color: var(--cp-fg-muted); }
 .cp-knobs input:disabled { opacity: 0.7; }
+/* A long or multi-line string knob (an A2UI document) is a textarea: monospace, full width of the
+   drawer, and resizable downwards only so it cannot push the drawer wider. */
+.cp-knobs textarea { width: 100%; box-sizing: border-box; min-height: 6em; resize: vertical;
+  font-family: var(--md-sys-typescale-mono-font); font-size: 12px; }
+.cp-knobs textarea:disabled { opacity: 0.7; }
 /* The Exploded 3D group's camera axes. A range + a live readout on one row: the drawer column is
    240px, and the stacked `label { flex-direction: column }` default would give each of four
    sliders three lines. `font-variant-numeric: tabular-nums` on the readout stops the row twitching

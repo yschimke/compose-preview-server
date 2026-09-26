@@ -49,10 +49,13 @@ class ServeCatalogMcpToolsTest {
     private val png: ByteArray,
     private val annotationsFor: Map<String, ByteArray> = emptyMap(),
     private val scrollSvg: String? = null,
+    override val previews: List<ServePreview> =
+      listOf(
+        ServePreview(id = "card", label = "Card"),
+        ServePreview(id = "other", label = "Other"),
+      ),
   ) : ServeHost {
     override val label: String = "tools"
-    override val previews: List<ServePreview> =
-      listOf(ServePreview(id = "card", label = "Card"), ServePreview(id = "other", label = "Other"))
     val scrollRenders = AtomicInteger()
 
     override fun render(previewId: String, overrides: PreviewOverrides): RenderOutcome =
@@ -275,6 +278,39 @@ class ServeCatalogMcpToolsTest {
       body.parsed()["catalogs"]!!.jsonArray[0].jsonObject["previews"]!!.jsonArray[0].jsonObject
 
     assertEquals(true, preview["scrollAvailable"]!!.jsonPrimitive.content.toBoolean())
+  }
+
+  /** How `a2ui render` finds the preview that takes a document without a call per preview. */
+  @Test
+  fun `list_previews reports declared knobs, and omits the field when there are none`() {
+    val document =
+      ee.schimke.composeai.data.overrides.PreviewOverrideDeclaration(
+        key = "document",
+        type = ee.schimke.composeai.data.overrides.PreviewOverrideType.STRING,
+        label = "Document",
+        default = ee.schimke.composeai.daemon.protocol.PreviewOverrideValue.StringValue("{}"),
+      )
+    val host =
+      ToolHost(
+        png = pixel,
+        previews =
+          listOf(
+            ServePreview(id = "card", label = "Card"),
+            ServePreview(id = "doc", label = "Doc", overrides = listOf(document)),
+          ),
+      )
+    val previews =
+      call(host, "list_previews")
+        .parsed()["catalogs"]!!
+        .jsonArray[0]
+        .jsonObject["previews"]!!
+        .jsonArray
+        .map { it.jsonObject }
+
+    assertEquals(null, previews[0]["knobs"])
+    val knob = previews[1]["knobs"]!!.jsonArray.single().jsonObject
+    assertEquals("document", knob["key"]!!.jsonPrimitive.content)
+    assertEquals("string", knob["type"]!!.jsonPrimitive.content)
   }
 
   @Test

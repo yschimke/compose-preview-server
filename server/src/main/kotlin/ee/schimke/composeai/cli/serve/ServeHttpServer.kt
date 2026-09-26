@@ -48,6 +48,7 @@ import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpMethod
 import io.ktor.http.HttpStatusCode
+import io.ktor.http.Parameters
 import io.ktor.http.content.OutgoingContent
 import io.ktor.http.content.TextContent
 import io.ktor.http.decodeURLQueryComponent
@@ -112,6 +113,8 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonObject
 
 /** The query values a create link carries into the design's permalink: identity, never content. */
@@ -160,7 +163,9 @@ private val UI_BUILDER_ASSET_EXTENSIONS =
  * `/ui-builder/` static assets):
  * - `GET /` landing page, `GET /p/{id}` viewer page,
  * - `GET /{system}/feed.xml` demand-activated catalog change feed,
- * - `GET /render/{id}.png` PNG bytes, `GET /api/previews` JSON, `GET /healthz` liveness,
+ * - `GET /render/{id}.png` PNG bytes (`POST` with the parameters in the body, for a knob value too
+ *   large for a URL), `GET /{system}/a2ui` the A2UI document playground,
+ * - `GET /api/previews` JSON, `GET /healthz` liveness,
  * - `GET /hero/{system}/{hash}.png` a prebaked, immutable front-door thumbnail ([ServeHeroImages]),
  * - `GET /social/{hash}.png` the drawn link-unfurl card a page advertises ([ServeSocialCard]), and
  *   `GET /favicon.svg` / `/favicon.ico` / `/apple-touch-icon.png` the site icon ([ServeSiteIcon]) —
@@ -2136,6 +2141,15 @@ class ServeHttpServer(
 
         get("/render/{name}") { handleRender(sessionInPath = false) }
         get("/{system}/render/{name}") { handleRender(sessionInPath = true) }
+        // The same render with its parameters in the BODY: a knob value too large for a URL — an
+        // A2UI document is kilobytes of JSON Lines — has no other way in. It is not a second
+        // render route: [handleRenderPost] reads the body and hands [handleRender] the merged
+        // parameters, so every gate and lane below is the GET's own.
+        post("/render/{name}") { handleRenderPost(sessionInPath = false) }
+        post("/{system}/render/{name}") { handleRenderPost(sessionInPath = true) }
+        // The A2UI playground: a textarea bound to the catalog's `document` string knob, POSTed to
+        // the route above. 404 on a catalog that declares no such preview.
+        get("/{system}/a2ui") { handleA2uiPlayground(sessionInPath = true) }
 
         // The motion lane, beside `/render` rather than inside it: a capture is not a render of a
         // preview, it is a second artifact about the same component, and folding it into the render
@@ -7061,7 +7075,7 @@ class ServeHttpServer(
    * prebaked grid thumbnail can answer. See the `?thumb=` lane in [handleRender] for why.
    */
   private fun RoutingContext.plainThumbRequest(): Boolean =
-    call.request.queryParameters.entries().none { (key, _) ->
+    renderParams().entries().none { (key, _) ->
       ServeOverrides.isOverrideParam(key) ||
         key == "scroll" ||
         key == "rcPlayer" ||
@@ -10958,6 +10972,114 @@ class ServeHttpServer(
   }
 
   /**
+   * The parameters [handleRender] and its lanes read: the query string, or — for a
+   * [handleRenderPost] — the query merged with the request body. Everything that shapes the pixels
+   * reads through here; URL-identity parameters (`at=`, `gen=`, `thumb=`, the token) stay on the
+   * query, because a body is not part of any address a cache or a permalink can key on.
+   */
+  private fun RoutingContext.renderParams(): Parameters =
+    call.attributes.getOrNull(RENDER_BODY_PARAMS) ?: call.request.queryParameters
+
+  /**
+   * `POST /render/{name}` and `POST /{system}/render/{name}`: [handleRender] with its parameters in
+   * the body, for a knob value no URL can carry (an A2UI document is kilobytes).
+   *
+   * The body is `application/json` — an object of string / number / boolean values keyed exactly
+   * like the GET query (`{"knob.document": "…", "fontScale": 1.5}`) — or
+   * `application/x-www-form-urlencoded`. It is merged over the query and handed to [handleRender]
+   * unchanged, so the LIVE gate, the product suffixes, the admission and the response are the GET's
+   * own, not a copy of them. Capped at [MAX_RENDER_BODY_BYTES] (413 above), the same bound the
+   * catalog MCP endpoint's `render_preview` has for the same document.
+   */
+  private suspend fun RoutingContext.handleRenderPost(sessionInPath: Boolean) {
+    // The credential first, so an unauthenticated caller cannot make this server buffer a body.
+    if (rejectBadToken()) return
+    val bytes =
+      withContext(Dispatchers.IO) {
+        call.receiveStream().use { readCapped(it, MAX_RENDER_BODY_BYTES) }
+      }
+    if (bytes == null) {
+      call.respondText(
+        "render parameters exceed ${MAX_RENDER_BODY_BYTES / 1024} KiB",
+        status = HttpStatusCode.PayloadTooLarge,
+      )
+      return
+    }
+    val contentType =
+      call.request.headers[HttpHeaders.ContentType]
+        ?.let { runCatching { ContentType.parse(it) }.getOrNull() }
+        ?.withoutParameters()
+    val body =
+      when {
+        bytes.isEmpty() -> emptyMap()
+        contentType == null || contentType.match(ContentType.Application.Json) ->
+          renderBodyJson(bytes.decodeToString())
+            ?: run {
+              call.respondText(
+                "render body must be a JSON object of string, number or boolean values",
+                status = HttpStatusCode.BadRequest,
+              )
+              return
+            }
+        contentType.match(ContentType.Application.FormUrlEncoded) ->
+          io.ktor.http.parseQueryString(bytes.decodeToString()).entries().associate { (k, v) ->
+            k to v.firstOrNull().orEmpty()
+          }
+        else -> {
+          call.respondText(
+            "render body must be application/json or application/x-www-form-urlencoded",
+            status = HttpStatusCode.UnsupportedMediaType,
+          )
+          return
+        }
+      }
+    val merged = Parameters.build {
+      call.request.queryParameters.entries().forEach { (key, values) ->
+        if (key !in body) appendAll(key, values)
+      }
+      body.forEach { (key, value) -> append(key, value) }
+    }
+    call.attributes.put(RENDER_BODY_PARAMS, merged)
+    handleRender(sessionInPath)
+  }
+
+  /**
+   * `GET /{system}/a2ui`: the A2UI playground — a document editor POSTing to the render route
+   * above. Answers only for a catalog with a [ServeWeb.a2uiDocumentPreview]; any other is a 404,
+   * because a page with nothing to render is not a page.
+   */
+  private suspend fun RoutingContext.handleA2uiPlayground(sessionInPath: Boolean) {
+    if (rejectBadToken()) return
+    val sessionId = selectedSessionId(sessionInPath)
+    val (webSessionId, basePath) = webSessionAndBase(sessionInPath)
+    withLeasedSession(
+      sessionId,
+      onMissing = { respondNotFoundHtml("That design system was not found on this server.") },
+    ) { renderHost ->
+      val preview = ServeWeb.a2uiDocumentPreview(renderHost.previews)
+      if (preview == null) {
+        respondNotFoundHtml("This design system declares no A2UI document preview.")
+        return@withLeasedSession
+      }
+      markGeneration("static-page", DYNAMIC_RESOURCE_CACHE_CONTROL)
+      call.respondText(
+        ServeWeb.a2uiPlaygroundPage(
+          moduleLabel = catalogBundleHost(renderHost)?.title ?: renderHost.label,
+          preview = preview,
+          token = linkToken(),
+          sessionId = webSessionId,
+          basePath = basePath,
+          isPublic = isPublic,
+          liveAvailable = renderHost.canRenderOverridesFor(preview.id),
+          unfurl = ServeWeb.UnfurlMetadata(pageUrl = externalPageUrl()),
+          version = SERVE_VERSION,
+        ),
+        ContentType.Text.Html,
+      )
+    }
+  }
+
+  /**
    * `GET /render/{name}` (query) and `GET /{system}/render/{name}` (path): a preview's rendered
    * bytes — a PNG for `<id>.png` (or no suffix), the figma-svg export for `<id>.svg`, the declared
    * preview slots as JSON for `<id>.slots`, the merged accessibility products as JSON for
@@ -11065,8 +11187,7 @@ class ServeHttpServer(
       // A blank value is treated as absent rather than as an error, because that is what an empty
       // form field or a stripped query leaves behind, and refusing it would break a link over
       // punctuation.
-      val requestedStage =
-        call.request.queryParameters[ServeRenderMatte.PARAM]?.takeIf { it.isNotBlank() }
+      val requestedStage = renderParams()[ServeRenderMatte.PARAM]?.takeIf { it.isNotBlank() }
       val stageMode = ServeRenderMatte.Mode.parse(requestedStage)
       if (requestedStage != null && stageMode == null) {
         call.respondText(
@@ -11151,10 +11272,10 @@ class ServeHttpServer(
       // where they are decided rather than shared, because they are not the same rule.
       val onDemand =
         requestCarriesOverrides() ||
-          call.request.queryParameters["scroll"] != null ||
-          call.request.queryParameters["rcPlayer"] != null ||
-          call.request.queryParameters["mode"] != null ||
-          ServeExplodedSvg.PARAMS.any { call.request.queryParameters[it] != null }
+          renderParams()["scroll"] != null ||
+          renderParams()["rcPlayer"] != null ||
+          renderParams()["mode"] != null ||
+          ServeExplodedSvg.PARAMS.any { renderParams()[it] != null }
       // A **pinned** render (`?at=<sha>`): the bytes this preview had at that delivery-branch
       // commit, read from the branch rather than from the catalog on disk. This is what makes a
       // published URL a permalink (issue #3723) — see [ServeCatalogRevision].
@@ -11189,10 +11310,10 @@ class ServeHttpServer(
       // shared link straight back out of the coupling, with a 200 and no sign of it.
       val madeToOrder =
         requestCarriesOverrides() ||
-          call.request.queryParameters["scroll"] != null ||
-          call.request.queryParameters["rcPlayer"] != null ||
-          (wantSvg && call.request.queryParameters["mode"] != null) ||
-          ServeExplodedSvg.PARAMS.any { call.request.queryParameters[it] != null }
+          renderParams()["scroll"] != null ||
+          renderParams()["rcPlayer"] != null ||
+          (wantSvg && renderParams()["mode"] != null) ||
+          ServeExplodedSvg.PARAMS.any { renderParams()[it] != null }
       val staleGeneration = if (madeToOrder) null else staleGeneration(renderHost)
       // A stale generation on a **non-raster product** refuses, exactly as a pin does. These are
       // the products whose whole purpose is to *describe* the frame — a semantics tree, an a11y
@@ -11311,7 +11432,7 @@ class ServeHttpServer(
       if (!wantSvg && !wantSlots && !wantA11y && !wantAnnotations && bareRcPlayerRequest()) {
         val stagedRaster =
           renderHost.publishedRcPlayerRender(previewId, RcPlayerBackend.CMP_JVM).takeIf {
-            call.request.queryParameters["rcPlayer"]?.lowercase() == RcPlayerBackend.CMP_JVM.wire
+            renderParams()["rcPlayer"]?.lowercase() == RcPlayerBackend.CMP_JVM.wire
           }
         if (stagedRaster != null) {
           // Cached exactly like the daemon-backed player lanes below, and for the same reason:
@@ -11333,7 +11454,7 @@ class ServeHttpServer(
         !wantSlots &&
           !wantA11y &&
           !wantAnnotations &&
-          call.request.queryParameters["rcPlayer"]?.lowercase() == RcPlayerBackend.CMP_JVM.wire
+          renderParams()["rcPlayer"]?.lowercase() == RcPlayerBackend.CMP_JVM.wire
       ) {
         // Past the staged-raster shortcut above, so this really does spawn the desktop player
         // (~4.3s of one-shot JVM). That is a commission, not a replay, whatever the query looked
@@ -11343,7 +11464,7 @@ class ServeHttpServer(
           return@withLeasedSession
         }
         val format = if (wantSvg) RcJvmServerRenderer.Format.SVG else RcJvmServerRenderer.Format.PNG
-        val webMode = wantSvg && call.request.queryParameters["mode"]?.lowercase() == "web"
+        val webMode = wantSvg && renderParams()["mode"]?.lowercase() == "web"
         // A bare `?rcPlayer=cmp-jvm` raster is the same fixed answer to a fixed URL the staged
         // shortcut above serves, drawn rather than read: `uiMode` and every `rc.<name>=` seed is an
         // override param, so a query this predicate calls bare leaves the pixels determined by the
@@ -11373,7 +11494,7 @@ class ServeHttpServer(
       // `rc.<name>=…` Remote Compose seeds, neither in SUPPORTED_KEYS) so a live knob / Remote
       // Compose edit reaches ServeOverrides.parse instead of being silently dropped.
       val overrideParams =
-        call.request.queryParameters
+        renderParams()
           .entries()
           .mapNotNull { (key, values) ->
             val value = values.firstOrNull() ?: return@mapNotNull null
@@ -11399,8 +11520,7 @@ class ServeHttpServer(
           // Wear/watch surfaces are always dark. Ignore a generic or hand-authored uiMode query so
           // it cannot wake the live daemon and produce another render for an unsupported mode.
           val overrides = parsed.overrides
-          val scroll =
-            call.request.queryParameters["scroll"]?.lowercase() in setOf("long", "full", "page")
+          val scroll = renderParams()["scroll"]?.lowercase() in setOf("long", "full", "page")
           if (wantSvg) {
             // `?scroll=long` (or `full`/`page`) asks for the full-page export of a scrolling
             // preview (compose/figma-svg-long) instead of the viewport-sized one.
@@ -11415,7 +11535,7 @@ class ServeHttpServer(
             // same bytes: the layered export pulled apart into one sheet per composable nesting
             // level. It composes with `mode=web` and `scroll=long` because all three are
             // post-processing steps over one render.
-            val webMode = call.request.queryParameters["mode"]?.lowercase() == "web"
+            val webMode = renderParams()["mode"]?.lowercase() == "web"
             renderSvgResponse(
               renderHost,
               previewId,
@@ -11945,13 +12065,13 @@ class ServeHttpServer(
    * parsed-override path already spells that rule out as `cached = if (scroll) null`.
    */
   private fun RoutingContext.bareRcPlayerRequest(): Boolean =
-    call.request.queryParameters.entries().none { (key, _) ->
+    renderParams().entries().none { (key, _) ->
       (ServeOverrides.isOverrideParam(key) && key != "rcPlayer") || key == "scroll"
     }
 
   /** Whether the caller passed `?fallback=baked` — an explicit "serve the snapshot anyway". */
   private fun RoutingContext.acceptsBakedFallback(): Boolean =
-    call.request.queryParameters[FALLBACK_PARAM]?.lowercase() == FALLBACK_BAKED
+    renderParams()[FALLBACK_PARAM]?.lowercase() == FALLBACK_BAKED
 
   /**
    * Name the un-applied overrides on a response that carries the baked artifact regardless — the
@@ -12051,7 +12171,7 @@ class ServeHttpServer(
         expandThemeProvider(
             renderHost,
             previewId,
-            call.request.queryParameters.entries().associate { (key, values) ->
+            renderParams().entries().associate { (key, values) ->
               key to (values.firstOrNull() ?: "")
             },
           )
@@ -12064,7 +12184,7 @@ class ServeHttpServer(
     // silently render the light branch.
     val theme =
       cmpJvmRenderTheme(
-        call.request.queryParameters["uiMode"],
+        renderParams()["uiMode"],
         renderHost.previews.firstOrNull { it.id == previewId }?.uiMode ?: 0,
         ServeWeb.SystemDisplay.resolveDarkFirst(
           sessionId,
@@ -12165,7 +12285,7 @@ class ServeHttpServer(
    * image).
    */
   private fun RoutingContext.requestCarriesOverrides(): Boolean =
-    call.request.queryParameters.entries().any { (key, _) -> ServeOverrides.isOverrideParam(key) }
+    renderParams().entries().any { (key, _) -> ServeOverrides.isOverrideParam(key) }
 
   /**
    * The `/render/{name}` suffixes that are **never** a baked replay: the figma-svg export, the slot
@@ -12411,7 +12531,7 @@ class ServeHttpServer(
    * override set that decides cache identity or gets reported as "dropped".
    */
   private fun RoutingContext.explodedOptions(): ExplodedSvg.Options? {
-    val params = { key: String -> call.request.queryParameters[key] }
+    val params = { key: String -> renderParams()[key] }
     return if (ServeExplodedSvg.enabled(params)) ServeExplodedSvg.optionsFrom(params) else null
   }
 
@@ -12630,7 +12750,7 @@ class ServeHttpServer(
    * does change the response body on the published lane, which the content ETag already covers.
    */
   private fun RoutingContext.requestedInspectLayers(): Set<String>? =
-    AnnotationKind.parseLayers(call.request.queryParameters["layers"])
+    AnnotationKind.parseLayers(renderParams()["layers"])
 
   private suspend fun RoutingContext.renderAnnotationsResponse(
     renderHost: ServeHost,
@@ -16223,6 +16343,27 @@ class ServeHttpServer(
      * the request and carries nothing between them.
      */
     private val RESOLVED_AGENT_GRANT = AttributeKey<ResolvedAgentGrant>("composeai.agentGrant")
+
+    /** A `POST /render/{name}`'s query merged with its body; see [renderParams]. */
+    private val RENDER_BODY_PARAMS = AttributeKey<Parameters>("composeai.renderBodyParams")
+
+    /** The `POST /render/{name}` body bound — the catalog MCP endpoint's, for the same document. */
+    internal const val MAX_RENDER_BODY_BYTES: Long = 1024L * 1024
+
+    /**
+     * A render body's JSON object as query-shaped params, or null when it is not an object of
+     * scalars. A number or boolean is spelled as the GET query would spell it, so
+     * [ServeOverrides.parse] types it exactly as it does `?knob.count=3`.
+     */
+    internal fun renderBodyJson(text: String): Map<String, String>? {
+      val obj =
+        runCatching { Json.parseToJsonElement(text) as? JsonObject }.getOrNull() ?: return null
+      return obj.mapValues { (_, value) ->
+        val primitive = value as? JsonPrimitive ?: return null
+        if (primitive is kotlinx.serialization.json.JsonNull) return null
+        primitive.content
+      }
+    }
 
     /** Per-call memo for [resolveParallel], scoped like [RESOLVED_AGENT_GRANT]. */
     private val RESOLVED_PARALLELS = AttributeKey<ParallelPairings>("composeai.parallelPairings")
