@@ -156,14 +156,16 @@ check() {
 # ---------------------------------------------------------------------------
 real_dockerfile="${DOCKERFILE_UNDER_TEST:-${here}/Dockerfile}"
 real_readme="${README_UNDER_TEST:-${here}/README.md}"
-for f in "${real_dockerfile}" "${real_readme}"; do
+# The example env is copied onto real boxes, so what it assigns is what actually runs.
+real_env_example="${ENV_EXAMPLE_UNDER_TEST:-${here}/.env.example}"
+for f in "${real_dockerfile}" "${real_readme}" "${real_env_example}"; do
   [[ -f "${f}" ]] || {
     echo "FAIL: missing ${f}" >&2
     exit 1
   }
 done
 
-check "${real_dockerfile}" "${real_readme}" || exit 1
+check "${real_dockerfile}" "${real_readme}" "${real_env_example}" || exit 1
 echo "PASS: every recommended sandbox profile is launchable in this image"
 
 # ---------------------------------------------------------------------------

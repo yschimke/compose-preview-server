@@ -39,6 +39,23 @@ class PlaygroundJailedCompilerTest {
       launcher = launcher,
     )
 
+  @Test
+  fun `the compile child keeps only an allow-listed environment`() {
+    val environment =
+      mutableMapOf(
+        "PATH" to "/usr/bin",
+        "HOME" to "/root",
+        "LANG" to "C.UTF-8",
+        "SERVE_ADMIN_TOKEN" to "x",
+        "SERVE_GITHUB_AUTH_COOKIE_SECRET" to "x",
+        "JAVA_TOOL_OPTIONS" to "-javaagent:/tmp/a.jar",
+      )
+
+    compiler { _, _ -> report() }.retainChildEnvironment(environment)
+
+    assertEquals(setOf("PATH", "HOME", "LANG"), environment.keys)
+  }
+
   private fun report(vararg diagnostics: PlaygroundDiagnostic) =
     PlaygroundSandboxProbe.Launch(
       exitCode = 0,
