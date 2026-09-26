@@ -332,6 +332,18 @@ window.addEventListener("message", async (event) => {
     });
     return;
   }
+  if (message.method === "tools/list") {
+    send({
+      jsonrpc: "2.0",
+      id: message.id,
+      result: {
+        tools: mode.startsWith("a11y") && mode !== "a11y-no-overlay"
+          ? [{ name: "render_preview_overlay", inputSchema: { type: "object" } }]
+          : [],
+      },
+    });
+    return;
+  }
   if (message.method === "tools/call") {
     toolCalls += 1;
     window.__mcpToolCallCount = toolCalls;
@@ -356,6 +368,11 @@ window.addEventListener("message", async (event) => {
           uri: "compose-preview://fixture/_app/com.example.Card?overrides=fixture",
         },
       });
+    }
+    if (mode === "a11y-polling") {
+      window.__mcpOverlayCallPending = true;
+      await new Promise((resolve) => setTimeout(resolve, 5250));
+      window.__mcpOverlayCallPending = false;
     }
     send({
       jsonrpc: "2.0",

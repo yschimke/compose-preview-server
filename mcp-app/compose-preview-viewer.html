@@ -76,6 +76,7 @@
   let resourceSubscriptionQueue = Promise.resolve();
   let hostResourceSubscriptions = false;
   let hostServerTools = false;
+  let overlayToolName;
   let baseImageData;
   let overlayImageData;
   let overlayVisible = false;
@@ -234,7 +235,7 @@
   }
 
   function updateAccessibilityAction() {
-    if (staticMode || !baseImageData || !initialized || !hostServerTools) {
+    if (staticMode || !baseImageData || !initialized || !overlayToolName) {
       a11y.hidden = true;
       return;
     }
@@ -313,7 +314,7 @@
   }
 
   async function toggleAccessibilityOverlay() {
-    if (!baseImageData || !initialized || !hostServerTools) return;
+    if (!baseImageData || !initialized || !overlayToolName) return;
     if (overlayVisible) {
       overlayVisible = false;
       showImage(baseImageData);
@@ -345,13 +346,15 @@
     };
     const call = { generation };
     overlayCall = call;
+    stopResourcePolling();
+    refresh.disabled = true;
     a11y.disabled = true;
     a11y.textContent = 'Loading accessibility overlay…';
     meta.textContent = 'Rendering accessibility overlay…';
     try {
       const result = await request(
         'tools/call',
-        { name: 'render_preview_overlay', arguments: argumentsValue },
+        { name: overlayToolName, arguments: argumentsValue },
         RESOURCE_READ_TIMEOUT_MS,
       );
       applyAccessibilityResult(result, generation);
@@ -364,6 +367,11 @@
         overlayCall = undefined;
         if (call.resourceUpdatePending && resourceResult?.resource?.uri === uri) {
           readResource(true);
+        } else if (resourceResult?.resource?.uri) {
+          refresh.disabled = false;
+          if (subscribedResourceUri !== resourceResult.resource.uri) {
+            scheduleResourcePoll(resourceResult.resource.uri);
+          }
         }
       }, 250);
     }
@@ -536,11 +544,12 @@
       const image = resourcePng(readResult);
       if (generation !== resourceReadGeneration || resourceResult?.resource?.uri !== resource.uri) return;
       if (!image) {
+        if (overlayCall) return;
         renderResourceFallback(toolResult, resource, 'The host returned no PNG for resource:');
         meta.textContent = 'Resource has no PNG; use the text fallback.';
         return;
       }
-      if (preserveAccessibilityOverlay && overlayVisible) {
+      if (overlayCall || (preserveAccessibilityOverlay && overlayVisible)) {
         baseImageData = image.blob;
         baseMetaText = value.previewId || toolArguments.previewId || 'Preview render';
         return;
@@ -548,6 +557,10 @@
       renderImage({ data: image.blob }, value, resource);
     } catch (error) {
       if (generation !== resourceReadGeneration || resourceResult?.resource?.uri !== resource.uri) return;
+      if (overlayCall) {
+        console.warn('Failed to refresh the Compose Preview resource during overlay rendering:', error);
+        return;
+      }
       // Resource reads are optional in MCP Apps hosts. Keep the durable URI and text result useful.
       renderResourceFallback(toolResult, resource, 'Unable to read preview resource:');
       meta.textContent = 'Resource reads are unavailable; use the text fallback.';
@@ -555,8 +568,8 @@
     } finally {
       if (generation === resourceReadGeneration && resourceResult?.resource?.uri === resource.uri) {
         resourceReadUri = undefined;
-        refresh.disabled = false;
-        if (subscribedResourceUri !== resource.uri) scheduleResourcePoll(resource.uri);
+        refresh.disabled = overlayCall != null;
+        if (!overlayCall && subscribedResourceUri !== resource.uri) scheduleResourcePoll(resource.uri);
       }
     }
   }
@@ -659,6 +672,16 @@
       });
       hostResourceSubscriptions = result?.hostCapabilities?.serverResources?.subscribe === true;
       hostServerTools = result?.hostCapabilities?.serverTools != null;
+      if (hostServerTools) {
+        try {
+          const tools = await request('tools/list', {});
+          overlayToolName = tools?.tools
+            ?.map(tool => tool?.name)
+            .find(name => typeof name === 'string' && /(^|__|\/)render_preview_overlay$/.test(name));
+        } catch (error) {
+          console.debug('Unable to discover Compose Preview viewer actions:', error);
+        }
+      }
       initialized = true;
       notify('ui/notifications/initialized', {});
       updateAccessibilityAction();
@@ -690,7 +713,9 @@
   }
 
   const bridgeReady = staticMode ? Promise.resolve() : initializeBridge();
-  refresh.addEventListener('click', () => readResource());
+  refresh.addEventListener('click', () => {
+    if (!overlayCall) readResource();
+  });
   a11y.addEventListener('click', () => toggleAccessibilityOverlay());
   use.addEventListener('click', async () => {
     await bridgeReady;

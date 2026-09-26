@@ -4485,6 +4485,22 @@ for (const fixture of listPageFixtures()) {
           await expect(viewer.locator("#meta")).toContainText("original preview shown");
           await expect(image).toHaveAttribute("src", before);
         }
+        if (fixture === "mcp-app-viewer-a11y-no-overlay") {
+          await expect(viewer.locator("#a11y")).toBeHidden();
+          expect(await page.evaluate(() => window.__mcpToolCallCount || 0)).toBe(0);
+        }
+        if (fixture === "mcp-app-viewer-a11y-polling") {
+          await expect(viewer.locator("#a11y")).toBeEnabled();
+          await viewer.locator("#a11y").click();
+          await page.waitForFunction(() => window.__mcpOverlayCallPending === true);
+          await expect(viewer.locator("#refresh")).toBeDisabled();
+          await page.waitForTimeout(5100);
+          expect(await page.evaluate(() => window.__mcpReadCount)).toBe(1);
+          await expect(
+            viewer.locator('#canvas img[alt="Compose preview with accessibility overlay"]'),
+          ).toBeVisible({ timeout: 2000 });
+          await expect(viewer.locator("#refresh")).toBeEnabled();
+        }
       }
 
       // The design page's renders are `loading="lazy"` — a live catalog serves one daemon
