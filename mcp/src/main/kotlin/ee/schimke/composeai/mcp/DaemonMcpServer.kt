@@ -969,12 +969,14 @@ class DaemonMcpServer(
     daemon: SupervisedDaemon,
     key: PreviewIdKey,
     outcome: RenderOutcome,
-  ) {
+  ): PendingRenderGroup? {
+    var poppedGroup: PendingRenderGroup? = null
     var poppedFutures: List<java.util.concurrent.CompletableFuture<RenderOutcome>> = emptyList()
     var nextHead: PendingRenderGroup? = null
     previewQueues.compute(key) { _, queue ->
       if (queue == null || queue.isEmpty()) return@compute queue
-      poppedFutures = queue.removeFirst().futures.toList()
+      poppedGroup = queue.removeFirst()
+      poppedFutures = poppedGroup!!.futures.toList()
       nextHead = queue.firstOrNull()?.also { it.sent = true }
       if (queue.isEmpty()) null else queue
     }
@@ -989,6 +991,44 @@ class DaemonMcpServer(
           previews = listOf(key.previewId),
           tier = RenderTier.FULL,
           overrides = next.overrides,
+        )
+    }
+    return poppedGroup
+  }
+
+  /**
+   * Queues a source-change refresh through the same per-preview serialization used by resource
+   * reads. Keeping refreshes in [previewQueues] lets [onRenderFinished] recover the exact override
+   * set that completed and notify only subscriptions for that resource variant.
+   */
+  private fun enqueueRefresh(
+    daemon: SupervisedDaemon,
+    uri: PreviewUri,
+    overrides: PreviewOverrides?,
+    reason: String,
+  ) {
+    val key = PreviewIdKey(uri.workspaceId, uri.modulePath, uri.previewFqn)
+    var becameFront = false
+    previewQueues.compute(key) { _, queue ->
+      val q = queue ?: ArrayDeque()
+      if (q.lastOrNull()?.overrides != overrides) {
+        val group = PendingRenderGroup(overrides = overrides)
+        if (q.isEmpty()) {
+          group.sent = true
+          becameFront = true
+        }
+        q.addLast(group)
+      }
+      q
+    }
+    if (becameFront) {
+      daemon
+        .clientForRender(uri.previewFqn)
+        .renderNow(
+          previews = listOf(uri.previewFqn),
+          tier = RenderTier.FULL,
+          overrides = overrides,
+          reason = reason,
         )
     }
   }
@@ -4583,24 +4623,33 @@ class DaemonMcpServer(
             config = entry.config,
           )
         }
-      val ofInterest = candidates.filter { uri ->
-        subscriptions.sessionsWatching(uri).isNotEmpty() ||
-          subscriptions.sessionsSubscribedTo(uri.toUri()).isNotEmpty()
-      }
-      if (ofInterest.isNotEmpty()) {
-        // Group renders by their target replica so we issue one renderNow per replica with the
-        // subset of previews it owns. Same hash function as `clientForRender` so the dispatch
-        // here matches what `renderAndReadBytes` would do for the same previewFqn.
-        val byReplica = ofInterest.groupBy { daemon.clientForRender(it.previewFqn) }
-        byReplica.forEach { (client, group) ->
+      candidates.forEach { uri ->
+        val subscribedUris = subscriptions.subscribedUrisMatching(uri)
+        val refreshOverrides = mutableSetOf<PreviewOverrides?>()
+        if (
+          subscriptions.sessionsWatching(uri).isNotEmpty() ||
+            subscribedUris.containsKey(uri.toUri())
+        ) {
+          refreshOverrides.add(null)
+        }
+        subscribedUris.keys.forEach { subscribedUri ->
+          val parsed = PreviewUri.parseOrNull(subscribedUri) ?: return@forEach
+          val rawOverrides = parsed.overridesJson ?: return@forEach
+          val overrides =
+            runCatching { decodePreviewOverrides(json.parseToJsonElement(rawOverrides)) }
+              .getOrNull() ?: return@forEach
+          refreshOverrides.add(overrides)
+        }
+        refreshOverrides.forEach { overrides ->
           runCatching {
-            client.renderNow(
-              previews = group.map { it.previewFqn },
-              tier = RenderTier.FULL,
+            enqueueRefresh(
+              daemon = daemon,
+              uri = uri,
+              overrides = overrides,
               reason = "notify_file_changed:$path",
             )
           }
-          rendered += group.size
+          rendered++
         }
       }
     }
@@ -4691,7 +4740,7 @@ class DaemonMcpServer(
     //    promote-and-dispatch the next group's renderNow if one is queued. This is the
     //    serialization core that PR #432's by-previewId fanout (now removed) tried to paper
     //    over — see `popHeadAndPromoteNext` and `awaitNextRender`'s kdoc for the rationale.
-    popHeadAndPromoteNext(daemon, key, RenderOutcome.Finished(pngPath))
+    val completedGroup = popHeadAndPromoteNext(daemon, key, RenderOutcome.Finished(pngPath))
     // 2. Refresh the data-product attachment cache for this `(uri)`. Any kind the daemon attached
     //    on this render is the new fresh payload; any kind it didn't attach is stale and gets
     //    dropped (the daemon stops attaching kinds the MCP server unsubscribed from, so a missing
@@ -4708,10 +4757,27 @@ class DaemonMcpServer(
         config = entry?.config,
       )
     val uriStr = uri.toUri()
-    val targets = mutableSetOf<Session>()
-    targets.addAll(subscriptions.sessionsSubscribedTo(uriStr))
-    targets.addAll(subscriptions.sessionsWatching(uri))
-    targets.forEach { it.notifyResourceUpdated(uriStr) }
+    val notifications = mutableMapOf<String, MutableSet<Session>>()
+    if (completedGroup?.overrides == null) {
+      notifications
+        .getOrPut(uriStr) { mutableSetOf() }
+        .addAll(subscriptions.sessionsSubscribedTo(uriStr))
+    } else {
+      subscriptions.subscribedUrisMatching(uri).forEach { (subscribedUri, targets) ->
+        val parsed = PreviewUri.parseOrNull(subscribedUri) ?: return@forEach
+        val rawOverrides = parsed.overridesJson ?: return@forEach
+        val subscribedOverrides =
+          runCatching { decodePreviewOverrides(json.parseToJsonElement(rawOverrides)) }.getOrNull()
+            ?: return@forEach
+        if (subscribedOverrides == completedGroup.overrides) {
+          notifications.getOrPut(subscribedUri) { mutableSetOf() }.addAll(targets)
+        }
+      }
+    }
+    notifications.getOrPut(uriStr) { mutableSetOf() }.addAll(subscriptions.sessionsWatching(uri))
+    notifications.forEach { (updatedUri, targets) ->
+      targets.forEach { it.notifyResourceUpdated(updatedUri) }
+    }
     // 4. Record history (no-op default).
     runCatching { historyStore.record(uri, pngPath, Instant.now()) }
   }

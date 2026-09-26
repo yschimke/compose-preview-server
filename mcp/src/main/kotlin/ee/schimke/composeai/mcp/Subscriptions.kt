@@ -133,6 +133,22 @@ class Subscriptions {
   /** Sessions currently subscribed to [uri]. */
   fun sessionsSubscribedTo(uri: String): Set<Session> = byUri[uri]?.toSet() ?: emptySet()
 
+  /**
+   * Exact subscribed resource URIs for the same preview as [uri], including override-bearing
+   * variants. The returned keys stay byte-for-byte identical to what each client subscribed to so
+   * `notifications/resources/updated` can name the resource the client actually knows.
+   */
+  fun subscribedUrisMatching(uri: PreviewUri): Map<String, Set<Session>> {
+    val base = uri.copy(overridesJson = null)
+    return byUri.entries
+      .mapNotNull { (subscribedUri, sessions) ->
+        val parsed = PreviewUri.parseOrNull(subscribedUri) ?: return@mapNotNull null
+        if (parsed.copy(overridesJson = null) != base) return@mapNotNull null
+        subscribedUri to sessions.toSet()
+      }
+      .toMap()
+  }
+
   /** Watch entries registered by [session], snapshot. */
   fun watchesFor(session: Session): List<WatchEntry> =
     watches[session]?.let { synchronized(it) { it.toList() } } ?: emptyList()

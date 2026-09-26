@@ -441,6 +441,59 @@ class DaemonMcpServerTest {
   }
 
   @Test
+  fun `override subscription rerenders and receives its exact uri after file change`() {
+    client.initialize()
+    val projectDir = tmp.newFolder("workspace")
+    tmp.newFolder("workspace", "module")
+    val workspaceId = registerWorkspace(projectDir, "demo")
+
+    val previewId = "com.example.Red"
+    val daemon = warmDaemonFor(workspaceId, ":module")
+    daemon.emitDiscovery(previewId)
+    client.expectNotification("notifications/resources/list_changed", 2_000)
+
+    val pngFile = tmp.newFile("override-refresh.png")
+    Files.write(pngFile.toPath(), byteArrayOf(0x89.toByte(), 0x50, 0x4e, 0x47))
+    daemon.autoRenderPngPath = { id -> if (id == previewId) pngFile.absolutePath else null }
+
+    val rawOverrides = buildJsonObject {
+      put("widthPx", 600)
+      put("uiMode", "dark")
+    }
+    val overrideUri =
+      PreviewUri(
+          workspaceId = workspaceId,
+          modulePath = ":module",
+          previewFqn = previewId,
+          overridesJson = rawOverrides.toString(),
+        )
+        .toUri()
+    client.request("resources/subscribe", buildJsonObject { put("uri", overrideUri) })
+
+    val response =
+      client.callTool(
+        "notify_file_changed",
+        buildJsonObject {
+          put("workspaceId", workspaceId.value)
+          put("path", "src/main/kotlin/com/example/Preview.kt")
+          put("kind", "source")
+          put("changeType", "modified")
+        },
+      )
+    assertThat(response.firstTextContent()).contains("re-rendered 1 watched preview(s)")
+
+    val rendered = daemon.renderRequests.poll(2_000, TimeUnit.MILLISECONDS)
+    assertThat(rendered).isEqualTo(listOf(previewId))
+    assertThat(daemon.renderOverrides).hasSize(1)
+    assertThat(daemon.renderOverrides.single()!!.widthPx).isEqualTo(600)
+    assertThat(daemon.renderOverrides.single()!!.uiMode)
+      .isEqualTo(ee.schimke.composeai.daemon.protocol.UiMode.DARK)
+
+    val update = client.expectNotification("notifications/resources/updated", 2_000)
+    assertThat(update.params?.get("uri")?.jsonPrimitive?.contentOrNull).isEqualTo(overrideUri)
+  }
+
+  @Test
   fun `watch propagates setVisible and setFocus to matching daemon`() {
     client.initialize()
     val projectDir = tmp.newFolder("workspace")
