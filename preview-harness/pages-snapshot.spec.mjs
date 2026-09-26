@@ -4444,10 +4444,12 @@ for (const fixture of listPageFixtures()) {
           await expect(
             viewer.locator('#canvas img[alt="Compose preview with accessibility overlay"]'),
           ).toBeVisible();
+          await expect(viewer.locator("#meta")).toHaveText("Accessibility overlay");
           await page.waitForFunction(() => window.__mcpReadCount >= 2);
           await expect(
             viewer.locator('#canvas img[alt="Compose preview with accessibility overlay"]'),
           ).toBeVisible();
+          await expect(viewer.locator("#meta")).toHaveText("Accessibility overlay");
           await expect(viewer.locator("#a11y")).toHaveText("Show original preview");
           const toolCall = await page.evaluate(() => window.__mcpToolCall);
           expect(toolCall).toEqual({
@@ -4500,6 +4502,14 @@ for (const fixture of listPageFixtures()) {
             viewer.locator('#canvas img[alt="Compose preview with accessibility overlay"]'),
           ).toBeVisible({ timeout: 2000 });
           await expect(viewer.locator("#refresh")).toBeEnabled();
+        }
+        if (fixture === "mcp-app-viewer-a11y-list-changed") {
+          await page.waitForFunction(() => window.__mcpToolListCount >= 2);
+          await expect(viewer.locator("#a11y")).toBeEnabled();
+          await viewer.locator("#a11y").click();
+          await expect(
+            viewer.locator('#canvas img[alt="Compose preview with accessibility overlay"]'),
+          ).toBeVisible();
         }
       }
 

@@ -77,6 +77,7 @@
   let hostResourceSubscriptions = false;
   let hostServerTools = false;
   let overlayToolName;
+  let toolDiscoveryGeneration = 0;
   let baseImageData;
   let overlayImageData;
   let overlayVisible = false;
@@ -552,6 +553,7 @@
       if (overlayCall || (preserveAccessibilityOverlay && overlayVisible)) {
         baseImageData = image.blob;
         baseMetaText = value.previewId || toolArguments.previewId || 'Preview render';
+        if (!overlayCall && overlayVisible) meta.textContent = 'Accessibility overlay';
         return;
       }
       renderImage({ data: image.blob }, value, resource);
@@ -661,7 +663,34 @@
       if (overlayCall) overlayCall.resourceUpdatePending = true;
       else readResource();
     }
+    if (
+      message.method === 'notifications/tools/list_changed' ||
+      message.method === 'ui/notifications/tools/list-changed'
+    ) {
+      discoverViewerActions();
+    }
   }, { passive: true });
+
+  async function discoverViewerActions() {
+    const generation = ++toolDiscoveryGeneration;
+    if (!hostServerTools) {
+      overlayToolName = undefined;
+      updateAccessibilityAction();
+      return;
+    }
+    try {
+      const tools = await request('tools/list', {});
+      if (generation !== toolDiscoveryGeneration) return;
+      overlayToolName = tools?.tools
+        ?.map(tool => tool?.name)
+        .find(name => typeof name === 'string' && /(^|__|\/)render_preview_overlay$/.test(name));
+    } catch (error) {
+      if (generation !== toolDiscoveryGeneration) return;
+      overlayToolName = undefined;
+      console.debug('Unable to discover Compose Preview viewer actions:', error);
+    }
+    updateAccessibilityAction();
+  }
 
   async function initializeBridge() {
     try {
@@ -672,16 +701,7 @@
       });
       hostResourceSubscriptions = result?.hostCapabilities?.serverResources?.subscribe === true;
       hostServerTools = result?.hostCapabilities?.serverTools != null;
-      if (hostServerTools) {
-        try {
-          const tools = await request('tools/list', {});
-          overlayToolName = tools?.tools
-            ?.map(tool => tool?.name)
-            .find(name => typeof name === 'string' && /(^|__|\/)render_preview_overlay$/.test(name));
-        } catch (error) {
-          console.debug('Unable to discover Compose Preview viewer actions:', error);
-        }
-      }
+      await discoverViewerActions();
       initialized = true;
       notify('ui/notifications/initialized', {});
       updateAccessibilityAction();

@@ -4,6 +4,7 @@ let reads = 0;
 let resourceUpdates = 0;
 const activeSubscriptions = new Set();
 let toolCalls = 0;
+let toolLists = 0;
 
 async function png(path) {
   const bytes = new Uint8Array(await (await fetch(path)).arrayBuffer());
@@ -223,6 +224,15 @@ window.addEventListener("message", async (event) => {
         });
       }, 100);
     }
+    if (mode === "a11y-list-changed") {
+      window.setTimeout(() => {
+        send({
+          jsonrpc: "2.0",
+          method: "notifications/tools/list_changed",
+          params: {},
+        });
+      }, 250);
+    }
     return;
   }
   if (message.method === "resources/subscribe") {
@@ -333,11 +343,15 @@ window.addEventListener("message", async (event) => {
     return;
   }
   if (message.method === "tools/list") {
+    toolLists += 1;
+    window.__mcpToolListCount = toolLists;
     send({
       jsonrpc: "2.0",
       id: message.id,
       result: {
-        tools: mode.startsWith("a11y") && mode !== "a11y-no-overlay"
+        tools: mode.startsWith("a11y") &&
+          mode !== "a11y-no-overlay" &&
+          (mode !== "a11y-list-changed" || toolLists > 1)
           ? [{ name: "render_preview_overlay", inputSchema: { type: "object" } }]
           : [],
       },
