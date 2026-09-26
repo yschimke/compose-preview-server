@@ -9,7 +9,12 @@ function base64Url(value) {
 }
 
 const content = [];
-if (mode === "comparison") {
+if (mode === "comparison-error") {
+  content.push({
+    type: "text",
+    text: "diff_semantics: base semantics are unavailable",
+  });
+} else if (mode === "comparison") {
   content.push({
     type: "text",
     text: JSON.stringify({
@@ -28,7 +33,7 @@ if (mode === "comparison") {
   for (const byte of bytes) binary += String.fromCharCode(byte);
   content.push({ type: "image", mimeType: "image/png", data: btoa(binary) });
 }
-if (mode !== "comparison") {
+if (!mode.startsWith("comparison")) {
   content.push({
     type: "text",
     text: JSON.stringify({
@@ -51,7 +56,7 @@ if (mode !== "comparison") {
 const envelope = {
   version: 1,
   arguments: {
-    ...(mode === "comparison"
+    ...(mode.startsWith("comparison")
       ? {
           baseUri: "compose-preview://fixture/_app/com.example.Card?version=before",
           headUri: "compose-preview://fixture/_app/com.example.Card?version=after",
@@ -62,6 +67,6 @@ const envelope = {
           overrides: { uiMode: "dark" },
         }),
   },
-  result: { content },
+  result: { ...(mode === "comparison-error" ? { isError: true } : {}), content },
 };
 frame.src = `${frame.dataset.src}#compose-preview-result=${base64Url(envelope)}`;

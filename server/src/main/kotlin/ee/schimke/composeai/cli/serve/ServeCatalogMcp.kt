@@ -1107,9 +1107,11 @@ class ServeCatalogMcp(
       args["other"] as? JsonObject
         ?: throw McpRequestException("diff_semantics requires an 'other' preview to compare with")
     val right = other.previewTarget()
+    val leftOverrides = args["overrides"] as? JsonObject
+    val rightOverrides = args["otherOverrides"] as? JsonObject
 
-    val leftTags = tagIndex(left, args["overrides"] as? JsonObject)
-    val rightTags = tagIndex(right, args["otherOverrides"] as? JsonObject)
+    val leftTags = tagIndex(left, leftOverrides)
+    val rightTags = tagIndex(right, rightOverrides)
 
     val onlyLeft = (leftTags.keys - rightTags.keys).sorted()
     val onlyRight = (rightTags.keys - leftTags.keys).sorted()
@@ -1160,14 +1162,26 @@ class ServeCatalogMcp(
         put(
           "left",
           buildJsonObject {
-            put("uri", resourceUri(left.catalog, left.previewId))
+            put(
+              "uri",
+              resourceUriWithOverrides(
+                resourceUri(left.catalog, left.previewId),
+                leftOverrides,
+              ),
+            )
             put("taggedNodes", leftTags.size)
           },
         )
         put(
           "right",
           buildJsonObject {
-            put("uri", resourceUri(right.catalog, right.previewId))
+            put(
+              "uri",
+              resourceUriWithOverrides(
+                resourceUri(right.catalog, right.previewId),
+                rightOverrides,
+              ),
+            )
             put("taggedNodes", rightTags.size)
           },
         )

@@ -4352,6 +4352,12 @@ for (const fixture of listPageFixtures()) {
               "compose-preview://fixture/_app/com.example.Card?overrides=fixture",
             );
             await expect(viewer.locator("#refresh")).toBeHidden();
+          } else if (fixture === "mcp-app-viewer-static-before-after-error") {
+            await expect(viewer.locator("#canvas")).toContainText(
+              "diff_semantics: base semantics are unavailable",
+            );
+            await expect(viewer.locator("#canvas")).not.toContainText("Before:");
+            await expect(viewer.locator("#canvas")).not.toContainText("After:");
           } else if (fixture === "mcp-app-viewer-static-before-after") {
             await expect(viewer.locator("#canvas")).toContainText(
               "Static comparison result",

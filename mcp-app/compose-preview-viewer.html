@@ -309,9 +309,11 @@
     updateAccessibilityAction();
   }
 
-  function beforeAfterModel(value) {
-    const beforeUri = value?.left?.uri || value?.baseUri || toolArguments.baseUri;
-    const afterUri = value?.right?.uri || value?.headUri || toolArguments.headUri;
+  function beforeAfterModel(result, value) {
+    const inputBeforeUri = result?.isError ? undefined : toolArguments.baseUri;
+    const inputAfterUri = result?.isError ? undefined : toolArguments.headUri;
+    const beforeUri = value?.left?.uri || value?.baseUri || inputBeforeUri;
+    const afterUri = value?.right?.uri || value?.headUri || inputAfterUri;
     if (typeof beforeUri !== 'string' || !beforeUri || typeof afterUri !== 'string' || !afterUri) {
       return undefined;
     }
@@ -725,7 +727,7 @@
     refresh.hidden = true;
     clearAccessibilityOverlay();
     const comparisonGeneration = ++comparisonReadGeneration;
-    const comparison = beforeAfterModel(value);
+    const comparison = beforeAfterModel(result, value);
     disconnectResourceUpdates(comparison ? undefined : resource?.uri);
     resourceResult = undefined;
     if (comparison) {
