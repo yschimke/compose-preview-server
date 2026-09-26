@@ -3,6 +3,7 @@ package ee.schimke.composeai.mcp
 import com.google.common.truth.Truth.assertThat
 import com.google.common.truth.Truth.assertWithMessage
 import ee.schimke.composeai.daemon.client.WorkspaceId
+import ee.schimke.composeai.daemon.protocol.DaemonLaunchDescriptor
 import ee.schimke.composeai.mcp.protocol.ReadResourceResult
 import ee.schimke.composeai.mcp.protocol.ResourceContents
 import io.modelcontextprotocol.kotlin.sdk.types.Implementation
@@ -367,7 +368,8 @@ class DaemonMcpServerTest {
     val subResp = client.request("resources/subscribe", buildJsonObject { put("uri", expectedUri) })
     assertThat(subResp).isInstanceOf(JsonObject::class.java)
 
-    daemon.emitRenderFinished(previewId, "/tmp/fake.png")
+    val renderedPng = tmp.newFile("subscribed-render.png").apply { writeBytes(byteArrayOf(1)) }
+    daemon.emitRenderFinished(previewId, renderedPng.absolutePath)
     val update = client.expectNotification("notifications/resources/updated", 2_000)
     val updatedUri = update.params?.get("uri")?.jsonPrimitive?.contentOrNull
     assertThat(updatedUri).isEqualTo(expectedUri)
@@ -1268,6 +1270,100 @@ class DaemonMcpServerTest {
         .jsonObject["previews"]!!
         .jsonArray
     assertThat(missing).isEmpty()
+  }
+
+  @Test
+  fun `find_previews_for_file resolves sources from a remapped module project directory`() {
+    val projectDir = tmp.newFolder("remapped-workspace")
+    val moduleDir = tmp.newFolder("remapped-workspace", "shared", "features", "tasks")
+    val sourcePath = "src/main/kotlin/com/example/TasksPreview.kt"
+    val previewFile = moduleDir.resolve(sourcePath)
+    previewFile.parentFile.mkdirs()
+    previewFile.writeText("@Preview fun Tasks() {}")
+
+    val remappedFactory = FakeDaemonClientFactory()
+    val remappedSupervisor =
+      DaemonSupervisor(
+        descriptorProvider =
+          DescriptorProvider { _, modulePath ->
+            DaemonLaunchDescriptor(
+              schemaVersion = 1,
+              modulePath = modulePath,
+              variant = "debug",
+              enabled = true,
+              mainClass = "fake.Main",
+              classpath = emptyList(),
+              jvmArgs = emptyList(),
+              systemProperties = emptyMap(),
+              workingDirectory = moduleDir.absolutePath,
+              manifestPath = "",
+            )
+          },
+        clientFactory = remappedFactory,
+      )
+    val remappedServer = DaemonMcpServer(remappedSupervisor)
+    val (clientToServer, serverFromClient) = pipedPair()
+    val (serverToClient, clientFromServer) = pipedPair()
+    val remappedSession =
+      remappedServer.newSession(input = serverFromClient, output = serverToClient).also {
+        it.start()
+      }
+    val remappedClient = McpTestClient(input = clientFromServer, output = clientToServer)
+
+    try {
+      remappedClient.initialize()
+      val registered =
+        json
+          .parseToJsonElement(
+            remappedClient
+              .callTool(
+                "register_project",
+                buildJsonObject {
+                  put("path", projectDir.absolutePath)
+                  put("rootProjectName", "remapped-demo")
+                },
+              )
+              .firstTextContent()
+          )
+          .jsonObject
+      val workspaceId = WorkspaceId(registered["workspaceId"]!!.jsonPrimitive.content)
+      remappedClient.expectNotification("notifications/resources/list_changed", 2_000)
+      remappedSupervisor.daemonFor(workspaceId, ":featureTasks")
+      val daemon = remappedFactory.daemons.getValue(workspaceId to ":featureTasks")
+      daemon.emitDiscovery(
+        "com.example.TasksPreview.Tasks",
+        sourceFile = sourcePath,
+        bodyLine = 7,
+      )
+      remappedClient.expectNotification("notifications/resources/list_changed", 2_000)
+
+      val listed =
+        json.decodeFromJsonElement(
+          io.modelcontextprotocol.kotlin.sdk.types.ListResourcesResult.serializer(),
+          remappedClient.request("resources/list"),
+        )
+      assertThat(listed.resources.single().meta?.get("sourceFile")?.jsonPrimitive?.contentOrNull)
+        .isEqualTo(previewFile.canonicalPath)
+
+      val found =
+        json
+          .parseToJsonElement(
+            remappedClient
+              .callTool(
+                "find_previews_for_file",
+                buildJsonObject { put("path", previewFile.absolutePath) },
+              )
+              .firstTextContent()
+          )
+          .jsonObject["previews"]!!
+          .jsonArray
+      assertThat(found).hasSize(1)
+      assertThat(found.single().jsonObject["bodyLine"]?.jsonPrimitive?.contentOrNull).isEqualTo("7")
+    } finally {
+      runCatching { remappedClient.close() }
+      runCatching { remappedSession.close() }
+      runCatching { remappedSupervisor.shutdown() }
+    }
   }
 
   @Test
@@ -4315,9 +4411,10 @@ class DaemonMcpServerTest {
 
     // Daemon ships an attached payload on a renderFinished — simulating the post-subscribe
     // attach-on-render path. The supervisor caches it.
+    val renderedPng = tmp.newFile("attached-data-render.png").apply { writeBytes(byteArrayOf(1)) }
     daemon.emitRenderFinishedWithDataProducts(
       previewId,
-      "/tmp/red.png",
+      renderedPng.absolutePath,
       listOf(
         buildJsonObject {
           put("kind", "a11y/atf")
@@ -4386,9 +4483,10 @@ class DaemonMcpServerTest {
     client.request("resources/subscribe", buildJsonObject { put("uri", uri) })
 
     // First render: a11y/atf is attached. Cache is warm.
+    val firstPng = tmp.newFile("cache-first-render.png").apply { writeBytes(byteArrayOf(1)) }
     daemon.emitRenderFinishedWithDataProducts(
       previewId,
-      "/tmp/red-1.png",
+      firstPng.absolutePath,
       listOf(
         buildJsonObject {
           put("kind", "a11y/atf")
@@ -4401,9 +4499,10 @@ class DaemonMcpServerTest {
 
     // Second render: NO data products attached (e.g. session unsubscribed in between). Cache for
     // a11y/atf must be evicted so a follow-up get_preview_data falls through to the wire.
+    val secondPng = tmp.newFile("cache-second-render.png").apply { writeBytes(byteArrayOf(2)) }
     daemon.emitRenderFinishedWithDataProducts(
       previewId,
-      "/tmp/red-2.png",
+      secondPng.absolutePath,
       attachments = emptyList(),
     )
     client.expectNotification("notifications/resources/updated", 2_000)
@@ -4462,9 +4561,10 @@ class DaemonMcpServerTest {
     client.request("resources/subscribe", buildJsonObject { put("uri", uri) })
 
     // Warm the cache with the no-params variant.
+    val renderedPng = tmp.newFile("per-kind-cache-render.png").apply { writeBytes(byteArrayOf(1)) }
     daemon.emitRenderFinishedWithDataProducts(
       previewId,
-      "/tmp/red.png",
+      renderedPng.absolutePath,
       listOf(
         buildJsonObject {
           put("kind", "layout/inspector")

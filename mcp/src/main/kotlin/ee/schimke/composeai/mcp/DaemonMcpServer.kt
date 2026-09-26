@@ -923,15 +923,18 @@ class DaemonMcpServer(
       }
   }
 
-  private fun resolvePreviewSourceFile(uri: PreviewUri, sourceFile: String?): File? {
+  private fun resolvePreviewSourceFile(daemon: SupervisedDaemon, sourceFile: String?): File? {
     if (sourceFile.isNullOrBlank()) return null
     val direct = File(sourceFile)
     if (direct.isAbsolute) return direct.takeIf { it.isFile }
-    val project = supervisor.project(uri.workspaceId) ?: return null
-    val moduleDir = moduleDir(project.path, uri.modulePath)
-    val fromModule = File(moduleDir, sourceFile)
-    if (fromModule.isFile) return fromModule
-    return null
+    val project = supervisor.project(daemon.workspaceId) ?: return null
+    val descriptorModuleDir = daemon.moduleProjectDirPath?.let(::File)
+    val layoutModuleDir = moduleDir(project.path, daemon.modulePath)
+    return sequenceOf(descriptorModuleDir, layoutModuleDir)
+      .filterNotNull()
+      .distinctBy { it.absolutePath }
+      .map { File(it, sourceFile) }
+      .firstOrNull { it.isFile }
   }
 
   private fun moduleDir(projectRoot: File, modulePath: String): File {
@@ -4747,16 +4750,7 @@ class DaemonMcpServer(
     for (entry in added + changed) {
       val id = entry["id"]?.jsonPrimitive?.contentOrNull ?: continue
       val sourceFile = entry["sourceFile"]?.jsonPrimitive?.contentOrNull
-      val resolved =
-        resolvePreviewSourceFile(
-          PreviewUri(
-            workspaceId = daemon.workspaceId,
-            modulePath = daemon.modulePath,
-            previewFqn = id,
-            config = entry["config"]?.jsonPrimitive?.contentOrNull,
-          ),
-          sourceFile,
-        )
+      val resolved = resolvePreviewSourceFile(daemon, sourceFile)
       val sourceLastModifiedMs = resolved?.lastModified()?.takeIf { it > 0L }
       // Seed the content hash at discovery so the very first frozen-mtime edit is caught
       // against this baseline. Failures (unreadable file, permissions) just leave the hash
