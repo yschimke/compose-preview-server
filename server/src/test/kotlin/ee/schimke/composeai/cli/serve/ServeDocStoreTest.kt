@@ -80,6 +80,15 @@ class ServeDocStoreTest {
   }
 
   @Test
+  fun `a Lottie upload that relies on expressions is refused`() {
+    val bytes =
+      """{"fr":30,"ip":0,"op":60,"layers":[{"ks":{"o":{"a":0,"k":100,"x":"var ${'$'}bm_rt = 1;"}}}]}"""
+        .toByteArray()
+
+    assertTrue(failure(store().add("expr.json", bytes, true)).contains("expressions"))
+  }
+
+  @Test
   fun `a name is only ever a label — path separators and control characters are stripped`() {
     val store = store()
 

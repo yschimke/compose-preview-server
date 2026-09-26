@@ -2,7 +2,9 @@ package ee.schimke.composeai.cli.serve
 
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonPrimitive
 
 /** One labelled fact about an ingested document, shown on the document page's detail list. */
@@ -47,6 +49,11 @@ data class ServeDocFormat(
   val detect: (ByteArray) -> Boolean,
   val describe: (ByteArray) -> List<ServeDocFact>,
   val size: (ByteArray) -> ServeDocSize?,
+  /**
+   * Why an otherwise-recognised document can't be played here, or null when it can. Checked at
+   * upload, so the uploader gets a clear refusal rather than a permalink that plays wrong.
+   */
+  val unsupported: (ByteArray) -> String? = { null },
 ) {
   /** URL of this format's browser player bundle (mounted by `ServeHttpServer`). */
   val playerPath: String
@@ -99,6 +106,7 @@ object ServeDocFormats {
       detect = { bytes -> parseLottie(bytes) != null },
       describe = ::describeLottie,
       size = ::lottieSize,
+      unsupported = ::lottieUnsupported,
     )
 
   /** Every known format, in the order the upload path sniffs them. */
@@ -215,6 +223,28 @@ object ServeDocFormats {
   private val LENIENT_JSON = Json { ignoreUnknownKeys = true }
 
   /** The parsed animation object when [bytes] are a Bodymovin/Lottie document; null otherwise. */
+  /**
+   * The vendored player is lottie-web's light build, which has no expression engine: a document
+   * that animates through expressions would play with their static fallbacks instead. Expressions
+   * are the string `x` on an animatable property (numeric `x` values are easing handles).
+   */
+  private fun lottieUnsupported(bytes: ByteArray): String? {
+    val root = parseLottie(bytes) ?: return null
+    return if (usesExpressions(root)) {
+      "Lottie expressions aren't supported here — bake them into keyframes on export and upload again"
+    } else {
+      null
+    }
+  }
+
+  private fun usesExpressions(element: JsonElement): Boolean =
+    when (element) {
+      is JsonObject ->
+        (element["x"] as? JsonPrimitive)?.isString == true || element.values.any(::usesExpressions)
+      is JsonArray -> element.any(::usesExpressions)
+      else -> false
+    }
+
   private fun parseLottie(bytes: ByteArray): JsonObject? {
     // Cheap pre-filter: a Lottie document is a JSON object, so anything that doesn't open like one
     // never reaches the parser (which would otherwise buffer a large binary upload as text).
