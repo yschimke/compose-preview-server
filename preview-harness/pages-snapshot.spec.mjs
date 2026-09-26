@@ -4358,7 +4358,7 @@ for (const fixture of listPageFixtures()) {
             ).toBeVisible();
             await expect(viewer.locator("#use")).toBeHidden();
           }
-        } else {
+        } else if (fixture !== "mcp-app-viewer-a11y-non-full") {
           await page.waitForFunction(() => window.__mcpReadCount >= 1);
         }
         if (fixture === "mcp-app-viewer-fallback") {
@@ -4507,6 +4507,18 @@ for (const fixture of listPageFixtures()) {
             viewer.locator('#canvas img[alt="Compose preview with accessibility overlay"]'),
           ).toBeVisible({ timeout: 2000 });
           await expect(viewer.locator("#refresh")).toBeEnabled();
+          await page.waitForFunction(() => window.__mcpReadCount >= 2, null, { timeout: 7_000 });
+          await expect(
+            viewer.locator('#canvas img[alt="Compose preview with accessibility overlay"]'),
+          ).toBeVisible();
+          await expect(viewer.locator("#meta")).toHaveText("Accessibility overlay");
+        }
+        if (fixture === "mcp-app-viewer-a11y-non-full") {
+          await page.waitForFunction(
+            () => window.__mcpCropOverlayHidden === true && window.__mcpMatrixOverlayHidden === true,
+          );
+          await expect(viewer.locator("#a11y")).toBeHidden();
+          expect(await page.evaluate(() => window.__mcpToolCallCount || 0)).toBe(0);
         }
         if (fixture === "mcp-app-viewer-a11y-list-changed") {
           await page.waitForFunction(() => window.__mcpToolListCount >= 2);

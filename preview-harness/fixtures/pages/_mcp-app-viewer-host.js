@@ -67,6 +67,54 @@ window.addEventListener("message", async (event) => {
         },
       },
     });
+    if (mode === "a11y-non-full") {
+      const imageData = await png("/preview-harness/fixtures/pages/_render-placeholder.png");
+      send({
+        jsonrpc: "2.0",
+        method: "ui/notifications/tool-result",
+        params: {
+          result: {
+            content: [
+              { type: "image", mimeType: "image/png", data: imageData },
+              {
+                type: "text",
+                text: JSON.stringify({
+                  uri: "compose-preview://fixture/_app/com.example.Card",
+                  crop: { left: 12, top: 16, right: 120, bottom: 96 },
+                }),
+              },
+            ],
+          },
+        },
+      });
+      window.setTimeout(() => {
+        window.__mcpCropOverlayHidden = frame.contentDocument.querySelector("#a11y")?.hidden;
+      }, 300);
+      window.setTimeout(() => {
+        send({
+          jsonrpc: "2.0",
+          method: "ui/notifications/tool-result",
+          params: {
+            result: {
+              content: [
+                { type: "image", mimeType: "image/png", data: imageData },
+                {
+                  type: "text",
+                  text: JSON.stringify({
+                    uri: "compose-preview://fixture/_app/com.example.Card",
+                    cells: [{ overrides: { uiMode: "light" } }, { overrides: { uiMode: "dark" } }],
+                  }),
+                },
+              ],
+            },
+          },
+        });
+      }, 400);
+      window.setTimeout(() => {
+        window.__mcpMatrixOverlayHidden = frame.contentDocument.querySelector("#a11y")?.hidden;
+      }, 700);
+      return;
+    }
     send({
       jsonrpc: "2.0",
       method: "ui/notifications/tool-result",

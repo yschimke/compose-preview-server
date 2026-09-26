@@ -81,6 +81,7 @@
   let baseImageData;
   let overlayImageData;
   let overlayVisible = false;
+  let overlayEligible = false;
   let overlayGeneration = 0;
   let overlayCall;
   let baseMetaText = '';
@@ -228,6 +229,7 @@
     baseImageData = undefined;
     overlayImageData = undefined;
     overlayVisible = false;
+    overlayEligible = false;
     baseMetaText = '';
     a11y.hidden = true;
     a11y.disabled = false;
@@ -236,7 +238,7 @@
   }
 
   function updateAccessibilityAction() {
-    if (staticMode || !baseImageData || !initialized || !overlayToolName) {
+    if (staticMode || !overlayEligible || !baseImageData || !initialized || !overlayToolName) {
       a11y.hidden = true;
       return;
     }
@@ -280,11 +282,17 @@
     baseImageData = image.data;
     overlayImageData = undefined;
     overlayVisible = false;
+    const uri = value.uri || resource?.uri || toolArguments.uri;
+    overlayEligible =
+      typeof uri === 'string' &&
+      uri.startsWith('compose-preview://') &&
+      !value?.crop &&
+      !Array.isArray(value?.cells);
     showImage(baseImageData);
     const label = value.previewId || toolArguments.previewId || 'Preview render';
     choose({
       kind: 'preview',
-      uri: value.uri || resource?.uri || toolArguments.uri,
+      uri,
       arguments: toolArguments,
       overrides: toolArguments.overrides,
       semanticsRef: value.semanticsRef,
@@ -429,7 +437,7 @@
     if (!initialized || staticMode || hostResourceSubscriptions || resourceResult?.resource?.uri !== uri) return;
     resourcePollTimer = window.setTimeout(() => {
       resourcePollTimer = undefined;
-      if (resourceResult?.resource?.uri === uri) readResource();
+      if (resourceResult?.resource?.uri === uri) readResource(true, true);
     }, RESOURCE_POLL_INTERVAL_MS);
   }
 
@@ -524,7 +532,10 @@
     });
   }
 
-  async function readResource(preserveAccessibilityOverlay = false) {
+  async function readResource(
+    preserveAccessibilityOverlay = false,
+    preserveOnlyIfUnchanged = false,
+  ) {
     if (!resourceResult) return;
     stopResourcePolling();
     const { result: toolResult, resource, value } = resourceResult;
@@ -550,7 +561,12 @@
         meta.textContent = 'Resource has no PNG; use the text fallback.';
         return;
       }
-      if (overlayCall || (preserveAccessibilityOverlay && overlayVisible)) {
+      if (
+        overlayCall ||
+        (preserveAccessibilityOverlay &&
+          overlayVisible &&
+          (!preserveOnlyIfUnchanged || image.blob === baseImageData))
+      ) {
         baseImageData = image.blob;
         baseMetaText = value.previewId || toolArguments.previewId || 'Preview render';
         if (!overlayCall && overlayVisible) meta.textContent = 'Accessibility overlay';
@@ -739,7 +755,7 @@
 
   const bridgeReady = staticMode ? Promise.resolve() : initializeBridge();
   refresh.addEventListener('click', () => {
-    if (!overlayCall) readResource();
+    if (!overlayCall) readResource(true, true);
   });
   a11y.addEventListener('click', () => toggleAccessibilityOverlay());
   use.addEventListener('click', async () => {
