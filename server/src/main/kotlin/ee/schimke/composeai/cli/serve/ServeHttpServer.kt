@@ -56,6 +56,7 @@ import io.ktor.server.application.ApplicationCall
 import io.ktor.server.application.ApplicationCallPipeline
 import io.ktor.server.application.call
 import io.ktor.server.application.createApplicationPlugin
+import io.ktor.server.application.hooks.ResponseBodyReadyForSend
 import io.ktor.server.application.install
 import io.ktor.server.cio.CIO
 import io.ktor.server.engine.EmbeddedServer
@@ -1001,13 +1002,17 @@ class ServeHttpServer(
       // exactly — which is the whole point of the probe.
       install(AutoHeadResponse)
       // Sliding sessions: any request carrying a session past its half-life gets a freshly signed
-      // cookie, so a visitor who keeps coming back is never bounced through GitHub. Runs before
-      // routing so it covers every response, and no-ops (no `Set-Cookie` at all) for a young
-      // session or no session. See [ServeGithubAuth.refreshSession].
+      // cookie, so a visitor who keeps coming back is never bounced through GitHub. Runs once the
+      // response is ready to send, so it covers every response and can see the route's own
+      // `Cache-Control` (a `public` response is left without a session cookie), and no-ops (no
+      // `Set-Cookie` at all) for a young session or no session. See
+      // [ServeGithubAuth.refreshSession].
       githubAuth?.let { auth ->
         install(
           createApplicationPlugin("github-session-refresh") {
-            onCall { call -> auth.refreshSession(call) }
+            on(ResponseBodyReadyForSend) { call, content ->
+              auth.refreshSession(call, content.headers.getAll(HttpHeaders.CacheControl).orEmpty())
+            }
           }
         )
       }
