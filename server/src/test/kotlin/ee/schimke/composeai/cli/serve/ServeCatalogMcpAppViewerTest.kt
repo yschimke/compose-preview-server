@@ -131,6 +131,8 @@ class ServeCatalogMcpAppViewerTest {
     assertTrue(html.contains("if (!pending.delete(id)) return;"))
     assertTrue(html.contains("window.clearTimeout(request.timer);"))
     assertTrue(html.contains("Viewer unavailable; use the complete text fallback."))
+    assertTrue(html.contains("const resultUri = value.uri || resource?.uri;"))
+    assertTrue(html.contains("if (!overlayEligible || !baseImageData"))
     assertTrue(html.contains("!value?.crop"))
     assertTrue(html.contains("!Array.isArray(value?.cells)"))
     assertTrue(html.contains("readResource(true, true)"))

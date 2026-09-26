@@ -282,10 +282,11 @@
     baseImageData = image.data;
     overlayImageData = undefined;
     overlayVisible = false;
-    const uri = value.uri || resource?.uri || toolArguments.uri;
+    const resultUri = value.uri || resource?.uri;
+    const uri = resultUri || toolArguments.uri;
     overlayEligible =
-      typeof uri === 'string' &&
-      uri.startsWith('compose-preview://') &&
+      typeof resultUri === 'string' &&
+      resultUri.startsWith('compose-preview://') &&
       !value?.crop &&
       !Array.isArray(value?.cells);
     showImage(baseImageData);
@@ -323,7 +324,7 @@
   }
 
   async function toggleAccessibilityOverlay() {
-    if (!baseImageData || !initialized || !overlayToolName) return;
+    if (!overlayEligible || !baseImageData || !initialized || !overlayToolName) return;
     if (overlayVisible) {
       overlayVisible = false;
       showImage(baseImageData);
