@@ -1154,21 +1154,25 @@ class DaemonMcpServerTest {
     client.initialize()
     val projectDir = tmp.newFolder("workspace")
     val moduleDir = tmp.newFolder("workspace", "module")
-    val previewFile = moduleDir.resolve("src/main/kotlin/com/example/Preview.kt")
-    previewFile.parentFile.mkdirs()
+    // Deliberately collide with a real process-working-directory path. Relative discovery paths
+    // belong to the daemon's module, never to the MCP process working directory.
+    val sourcePath = "build.gradle.kts"
+    assertThat(File(sourcePath).isFile).isTrue()
+    val previewFile = moduleDir.resolve(sourcePath)
     previewFile.writeText("@Preview fun Red() {}\n@Preview fun Blue() {}")
     val unrelatedFile = moduleDir.resolve("src/main/kotlin/com/example/Other.kt")
+    unrelatedFile.parentFile.mkdirs()
     unrelatedFile.writeText("fun Other() = Unit")
     val workspaceId = registerWorkspace(projectDir, "demo")
     val daemon = warmDaemonFor(workspaceId, ":module")
     daemon.emitDiscovery(
       "com.example.Red",
-      sourceFile = "src/main/kotlin/com/example/Preview.kt",
+      sourceFile = sourcePath,
       bodyLine = 10,
     )
     daemon.emitDiscovery(
       "com.example.Blue",
-      sourceFile = "src/main/kotlin/com/example/Preview.kt",
+      sourceFile = sourcePath,
       bodyLine = 24,
     )
     client.expectNotification("notifications/resources/list_changed", 2_000)
@@ -1197,7 +1201,7 @@ class DaemonMcpServerTest {
               "find_previews_for_file",
               buildJsonObject {
                 put("workspaceId", workspaceId.value)
-                put("path", "module/src/main/kotlin/com/example/Preview.kt")
+                put("path", "module/$sourcePath")
               },
             )
             .firstTextContent()

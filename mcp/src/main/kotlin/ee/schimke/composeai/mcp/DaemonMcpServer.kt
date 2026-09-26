@@ -926,7 +926,7 @@ class DaemonMcpServer(
   private fun resolvePreviewSourceFile(uri: PreviewUri, sourceFile: String?): File? {
     if (sourceFile.isNullOrBlank()) return null
     val direct = File(sourceFile)
-    if (direct.isFile) return direct
+    if (direct.isAbsolute) return direct.takeIf { it.isFile }
     val project = supervisor.project(uri.workspaceId) ?: return null
     val moduleDir = moduleDir(project.path, uri.modulePath)
     val fromModule = File(moduleDir, sourceFile)
