@@ -473,6 +473,7 @@ class ServeCatalogMcp(
                   overrides,
                   observe,
                   rawOverrides?.keys.orEmpty().toList(),
+                  rawOverrides,
                 )
                 .forEach(::add)
             }

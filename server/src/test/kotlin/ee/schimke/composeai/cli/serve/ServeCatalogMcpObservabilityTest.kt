@@ -222,6 +222,26 @@ class ServeCatalogMcpObservabilityTest {
     assertEquals("spec:width=400dp,height=800dp,dpi=320", host.seen[1].device)
   }
 
+  @Test
+  fun `preview-stories links preserve the requested overrides`() {
+    val body =
+      call(
+        FakeHost(png = pixel),
+        """{"storyId":"m3::card","observe":"png","overrides":{"uiMode":"dark"}}""",
+        tool = "preview-stories",
+      )
+
+    val resourceUri =
+      body
+        .content()
+        .single { it.jsonObject["type"]!!.jsonPrimitive.content == "resource_link" }
+        .jsonObject["uri"]!!
+        .jsonPrimitive
+        .content
+    assertTrue(resourceUri.startsWith("compose-preview://catalog/m3/card?"), resourceUri)
+    assertTrue(resourceUri.contains("overrides="), resourceUri)
+  }
+
   // ---- strict override keys -------------------------------------------------------------------
 
   @Test
