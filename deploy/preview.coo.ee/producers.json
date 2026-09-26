@@ -26,6 +26,14 @@
       "branch": "design-artifacts/*"
     },
     {
+      "repo": "yschimke/a2ui-catalog",
+      "branch": "design-artifacts/*"
+    },
+    {
+      "repo": "yschimke/a2ui-catalog-out",
+      "branch": "design-artifacts/*"
+    },
+    {
       "repo": "yschimke/meshcore-mobile",
       "branch": "design-artifacts/*"
     },
