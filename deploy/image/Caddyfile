@@ -37,7 +37,7 @@
 	# carries it) plus the OAuth callback's `code` and `state` are replaced in the
 	# logged URI. The same parameters are masked in a logged Referer, because a page
 	# opened with `?token=` sends its full URL as the Referer of its same-origin
-	# sub-requests. Everything else — method, host, path, status, timings, client IP,
+	# sub-requests, and in a logged `Location`, because a redirect keeps the query. Everything else — method, host, path, status, timings, client IP,
 	# User-Agent — is logged as before.
 	log {
 		output stdout
@@ -52,6 +52,11 @@
 				replace state REDACTED
 			}
 			request>headers>Referer query {
+				replace token REDACTED
+				replace code REDACTED
+				replace state REDACTED
+			}
+			resp_headers>Location query {
 				replace token REDACTED
 				replace code REDACTED
 				replace state REDACTED

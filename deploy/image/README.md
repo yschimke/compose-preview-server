@@ -1279,7 +1279,7 @@ Each line records the method, host, URI, status, sizes, timing, the response hea
 request headers — which include the client IP, `User-Agent` and `Referer`. The `Caddyfile`'s
 `format filter` removes credentials before a line is written: `X-Compose-Preview-Token`,
 `X-Compose-Preview-Admin-Token` and `X-Compose-Preview-Agent-Access` are dropped, the `token`,
-`code` and `state` query parameters read `REDACTED` in the URI and in `Referer`, and Caddy itself
+`code` and `state` query parameters read `REDACTED` in the URI, in `Referer` and in a redirect's `Location`, and Caddy itself
 already masks `Cookie`, `Set-Cookie` and `Authorization`. Change `max-size` / `max-file` in
 `docker-compose.yml` to keep more or less.
 
