@@ -59,8 +59,10 @@ class ServeCatalogMcpAppViewerTest {
     assertTrue(html.contains("selected = undefined;"))
     assertTrue(html.contains("use.hidden = true;"))
     assertTrue(html.contains("message.method === 'ui/notifications/tool-input'"))
+    assertTrue(html.contains("toolArguments = safeSelectionArguments(incomingArguments);"))
+    assertTrue(html.contains("resourceToken = typeof incomingArguments.token === 'string'"))
     assertTrue(
-      html.contains("toolArguments = safeSelectionArguments(message.params?.arguments || {});")
+      html.contains("if (resourceToken) params._meta = { 'compose-preview/token': resourceToken };")
     )
     assertTrue(html.contains("function safeSelectionArguments(value)"))
     assertTrue(html.contains("/(token|authorization|password|secret|api[-_]?key)/i"))

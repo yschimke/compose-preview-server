@@ -13,6 +13,7 @@ import kotlin.test.assertTrue
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
@@ -209,13 +210,28 @@ class ServeCatalogMcpObservabilityTest {
       )
     assertTrue(denied["error"] != null, "override-bearing resource reads require live access")
     assertEquals(1, host.seen.size)
+    val presentedReadRequest =
+      JsonObject(
+        readRequest +
+          ("params" to
+            JsonObject(
+              readRequest["params"]!!.jsonObject +
+                ("_meta" to
+                  buildJsonObject { put("compose-preview/token", JsonPrimitive("cpat_live")) })
+            ))
+      )
+    var presentedToken: String? = null
     requireNotNull(
       runBlocking {
-        mcp.handle(readRequest) { ServeMachineAuthorization.Decision.Authorized("agent:test") }
+        mcp.handle(presentedReadRequest) { token ->
+          presentedToken = token
+          ServeMachineAuthorization.Decision.Authorized("agent:test")
+        }
       }
         .body
     )
 
+    assertEquals("cpat_live", presentedToken)
     assertEquals(2, host.seen.size)
     assertEquals(host.seen[0], host.seen[1])
     assertEquals(ee.schimke.composeai.daemon.protocol.UiMode.DARK, host.seen[1].uiMode)

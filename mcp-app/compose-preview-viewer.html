@@ -50,6 +50,7 @@
   let hasToolResult = false;
   let selected;
   let toolArguments = {};
+  let resourceToken;
   let resourceResult;
 
   function request(method, params, timeoutMs = REQUEST_TIMEOUT_MS) {
@@ -164,9 +165,11 @@
     try {
       await bridgeReady;
       if (!initialized) throw new Error('MCP Apps bridge is unavailable');
+      const params = { uri: resource.uri };
+      if (resourceToken) params._meta = { 'compose-preview/token': resourceToken };
       const result = await request(
         'resources/read',
-        { uri: resource.uri },
+        params,
         RESOURCE_READ_TIMEOUT_MS,
       );
       const image = resourcePng(result);
@@ -236,7 +239,11 @@
       return;
     }
     if (message.method === 'ui/notifications/tool-input') {
-      toolArguments = safeSelectionArguments(message.params?.arguments || {});
+      const incomingArguments = message.params?.arguments || {};
+      resourceToken = typeof incomingArguments.token === 'string' && incomingArguments.token
+        ? incomingArguments.token
+        : undefined;
+      toolArguments = safeSelectionArguments(incomingArguments);
       return;
     }
     if (message.method === 'ui/notifications/tool-result') draw(message.params?.result || message.params);

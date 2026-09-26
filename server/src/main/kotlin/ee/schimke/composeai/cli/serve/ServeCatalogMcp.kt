@@ -122,7 +122,7 @@ class ServeCatalogMcp(
               toolError(e.message ?: "Tool call failed")
             }
           "resources/list" -> listResources()
-          "resources/read" -> readResource(params, liveAuthorization)
+          "resources/read" -> readResource(params, presentedToken(request), liveAuthorization)
           else -> return Reply(error(id, METHOD_NOT_FOUND, "Unknown method '$method'"))
         }
       } catch (e: McpRequestException) {
@@ -528,6 +528,7 @@ class ServeCatalogMcp(
 
   private suspend fun readResource(
     params: JsonObject,
+    presentedToken: String?,
     liveAuthorization: (String?) -> ServeMachineAuthorization.Decision,
   ): JsonObject {
     val uri = params.requiredString("uri")
@@ -552,7 +553,7 @@ class ServeCatalogMcp(
     return withCatalog(target.catalog) { host ->
       val preview = resolvePreview(host, target.previewId)
       val rawOverrides = resourceOverrides(uri)
-      if (rawOverrides != null) requireLive { liveAuthorization(null) }
+      if (rawOverrides != null) requireLive { liveAuthorization(presentedToken) }
       val png =
         renderPng(
             host,
@@ -2075,6 +2076,8 @@ class ServeCatalogMcp(
      */
     const val TOKEN_ARGUMENT = "token"
 
+    private const val RESOURCE_TOKEN_META_KEY = "compose-preview/token"
+
     private const val TOKEN_ARGUMENT_DESCRIPTION =
       "A grant token from poll_access, when you cannot set the X-Compose-Preview-Token header " +
         "yourself — an MCP client fixes its headers at connect time, so this is how a token " +
@@ -2084,12 +2087,20 @@ class ServeCatalogMcp(
      * The grant token this message presents in-band, if any.
      *
      * Read by the transport as well as by [callTool], so the gate in front of the endpoint and the
-     * tool behind it agree about what was presented. Blank is treated as absent: a client
+     * operation behind it agree about what was presented. Tool calls carry the token in
+     * `params.arguments`; resource reads carry it in the standard extensible `params._meta` object
+     * because MCP's read request has no arguments object. Blank is treated as absent: a client
      * templating an unset environment variable sends `""`, and that is nothing, not a bad token.
      */
     fun presentedToken(request: JsonObject): String? {
       val params = request["params"] as? JsonObject ?: return null
-      return tokenArgument(params["arguments"] as? JsonObject ?: return null)
+      val method = (request["method"] as? JsonPrimitive)?.contentOrNull
+      return if (method == "resources/read") {
+        val metadata = params["_meta"] as? JsonObject ?: return null
+        (metadata[RESOURCE_TOKEN_META_KEY] as? JsonPrimitive)?.contentOrNull?.takeIf {
+          it.isNotBlank()
+        }
+      } else tokenArgument(params["arguments"] as? JsonObject ?: return null)
     }
 
     internal fun tokenArgument(arguments: JsonObject): String? =
