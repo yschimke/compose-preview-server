@@ -28,6 +28,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNotEquals
 import kotlin.test.assertNotNull
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
@@ -1076,6 +1077,37 @@ class ServeHttpRoutingTest {
       getFull("/compose-m3/iframe.html?id=$previewId&fontScale=2.0&fallback=baked")
     assertEquals(200, okCode)
     assertEquals(ServeHttpServer.RENDER_BAKED_FALLBACK, okHeaders[ServeHttpServer.RENDER_HEADER])
+  }
+
+  /**
+   * Every rendered page carries the one policy [ServePagePolicy] writes; nothing that is not a page
+   * does. The Storybook story render is framed from other origins by design, so it is the one page
+   * here without `frame-ancestors`.
+   */
+  @Test
+  fun `html pages carry the content policy and other responses do not`() {
+    for (path in
+      listOf("/", "/compose-m3/", "/compose-m3/p/$previewId", "/playground", "/nope-not-a-page")) {
+      val (_, _, headers) = getFull(path)
+      assertTrue(headers["Content-Type"].orEmpty().startsWith("text/html"), "$path is a page")
+      val policy = assertNotNull(headers[ServePagePolicy.HEADER], "$path has no policy")
+      assertFalse(policy.contains("unsafe-eval"), "$path: $policy")
+      assertTrue(policy.contains("object-src 'none'"), "$path: $policy")
+      assertTrue(policy.contains("base-uri 'self'"), "$path: $policy")
+      assertTrue(policy.contains("frame-ancestors 'self'"), "$path: $policy")
+    }
+
+    val (storyCode, _, story) = getFull("/compose-m3/iframe.html?id=$previewId")
+    assertEquals(200, storyCode)
+    val storyPolicy = assertNotNull(story[ServePagePolicy.HEADER])
+    assertFalse(storyPolicy.contains("frame-ancestors"), storyPolicy)
+    assertFalse(storyPolicy.contains("unsafe-eval"), storyPolicy)
+
+    for (path in listOf("/version", "/healthz", "/compose-m3/render/$previewId.png")) {
+      val (code, _, headers) = getFullBytes(path)
+      assertEquals(200, code, path)
+      assertNull(headers[ServePagePolicy.HEADER], "$path is not a page")
+    }
   }
 
   @Test
@@ -2147,6 +2179,22 @@ class ServeHttpRoutingTest {
         response.use {
           assertEquals(200, code)
           assertTrue(response.body.string().contains("existing Wasm app"))
+          // A Wasm app shell may compile Wasm, never evaluate strings, and is framable by the
+          // viewer's sandboxed (opaque-origin) frame, so it names no frame-ancestors.
+          val policy = assertNotNull(response.header(ServePagePolicy.HEADER))
+          assertTrue(policy.contains("'wasm-unsafe-eval'"), policy)
+          assertFalse(policy.contains("'unsafe-eval'"), policy)
+          assertFalse(policy.contains("frame-ancestors"), policy)
+        }
+      }
+      // The editor shell is a Wasm app too, but not a framed one.
+      fetch("/ui-builder/").let { (code, response) ->
+        response.use {
+          assertEquals(200, code)
+          val policy = assertNotNull(response.header(ServePagePolicy.HEADER))
+          assertTrue(policy.contains("'wasm-unsafe-eval'"), policy)
+          assertFalse(policy.contains("'unsafe-eval'"), policy)
+          assertTrue(policy.contains("frame-ancestors 'self'"), policy)
         }
       }
     } finally {

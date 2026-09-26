@@ -3,6 +3,9 @@ package ee.schimke.composeai.cli.serve
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlin.test.assertNotNull
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
@@ -103,12 +106,18 @@ class ServeDocRoutingTest {
       assertTrue(html.contains("200 × 100") && html.contains("Spinner"))
       // An expiring capability URL must never be cached by a shared proxy.
       assertEquals("private, no-store", response.header("Cache-Control"))
+      // The player runs under the page policy: no string evaluation, no Wasm, not framable.
+      val policy = assertNotNull(response.header(ServePagePolicy.HEADER))
+      assertFalse(policy.contains("unsafe-eval"), policy)
+      assertTrue(policy.contains("script-src 'self' 'unsafe-inline';"), policy)
+      assertTrue(policy.contains("frame-ancestors 'self'"), policy)
     }
 
     get("$path/raw").use { response ->
       assertEquals(200, response.code)
       assertTrue(response.body.contentType().toString().startsWith("application/json"))
       assertEquals("nosniff", response.header("X-Content-Type-Options"))
+      assertNull(response.header(ServePagePolicy.HEADER), "the raw document is not a page")
       assertEquals(bytes.toList(), response.body.bytes().toList())
     }
 

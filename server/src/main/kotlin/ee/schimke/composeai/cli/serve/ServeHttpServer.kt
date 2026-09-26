@@ -1034,6 +1034,9 @@ class ServeHttpServer(
           }
         )
       }
+      // The Content-Security-Policy on every HTML response ([ServePagePolicy]). Installed before
+      // the entity-tag phase, so a page's header is staged before a `304` can short-circuit it.
+      ServePagePolicy.install(this) { pagePolicyFormActions() }
       // A strong validator on every HTML page a cache is allowed to keep, so the revalidation the
       // page's own lifetime *demands* can end in a `304` instead of a full re-render.
       //
@@ -2551,6 +2554,17 @@ class ServeHttpServer(
       }
     call.response.headers.append(HttpHeaders.CacheControl, "no-store")
     call.respondText("{\"status\":\"$status\"}", ContentType.Application.Json, code)
+  }
+
+  /**
+   * Where a form on one of this server's pages may end up after GitHub sign-in: a POST that needs
+   * an identity redirects into `/auth/github/start`, GitHub, the pinned callback host, and back to
+   * the top-level site the visitor started on. Browsers check `form-action` against every hop, so
+   * each host in that chain is listed ([ServePagePolicy]). Empty without GitHub sign-in.
+   */
+  private fun pagePolicyFormActions(): List<String> {
+    val auth = githubAuth ?: return emptyList()
+    return listOfNotNull(auth.callbackOrigin()) + sites.hosts.sorted().map { "https://$it" }
   }
 
   /**
@@ -15671,6 +15685,9 @@ class ServeHttpServer(
     val storeNarrowedCapabilities = withheldCapabilities.filterNot { it in store.maxCapabilities }
     val skin = call.siteSkin()
     markGeneration("static-page", "no-store")
+    // Approving an OAuth authorization answers with a redirect to the client's own URI, and the
+    // page's `form-action` has to admit that destination for the browser to follow it.
+    mcpOAuth.forRequest(request.id)?.let { ServePagePolicy.allowFormAction(call, it.redirectUri) }
     call.respondText(
       ServeWeb.agentGrantApprovalPage(
         requestId = request.id,

@@ -90,7 +90,9 @@
 	#     and these are generic client bundles already served with ACAO:* for that
 	#     sandbox, so they are left frameable.
 	# No Content-Security-Policy here: the pages carry inline scripts and styles, and a
-	# policy for them belongs in the app next to the markup it describes.
+	# policy for them belongs in the app next to the markup it describes. The app sets one
+	# on every HTML response (ServePagePolicy.kt), omitting frame-ancestors on these same
+	# framable paths.
 	@sameOriginFramesOnly not path /iframe.html /*/iframe.html /wasm/* /ui-builder/runtime/*
 	header @sameOriginFramesOnly ?X-Frame-Options SAMEORIGIN
 

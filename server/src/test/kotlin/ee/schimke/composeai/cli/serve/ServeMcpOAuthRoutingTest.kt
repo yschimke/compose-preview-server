@@ -500,6 +500,38 @@ class ServeMcpOAuthRoutingTest {
     return get(assertNotNull(approvalLocation), operatorToken).second
   }
 
+  /**
+   * Approving answers with a redirect to the client, and browsers apply the page's `form-action` to
+   * that redirect too, so the approval page admits exactly the client's origin — and ordinary pages
+   * admit no client at all.
+   */
+  @Test
+  fun `the approval page's form-action admits the client's redirect origin`() {
+    val clientId = registerClient()
+    val (_, _, approvalLocation) =
+      get(
+        "${ServeMcpOAuth.AUTHORIZE_PATH}?response_type=code&client_id=$clientId" +
+          "&redirect_uri=$redirectUri&code_challenge=$challenge&code_challenge_method=S256" +
+          "&scope=live",
+        token = operatorToken,
+      )
+    fun policyAt(path: String): String {
+      val request =
+        Request.Builder().url(url(path)).header(ServeHttpServer.TOKEN_HEADER, operatorToken).build()
+      client.newCall(request).execute().use {
+        assertEquals(200, it.code, path)
+        return assertNotNull(it.header(ServePagePolicy.HEADER), path)
+      }
+    }
+    val approval = policyAt(assertNotNull(approvalLocation))
+    assertTrue(
+      approval.contains("form-action 'self' https://github.com http://127.0.0.1:8976;"),
+      approval,
+    )
+    assertFalse(approval.contains("unsafe-eval"), approval)
+    assertFalse(policyAt("/").contains("127.0.0.1:8976"))
+  }
+
   @Test
   fun `the approval page leads with where the access goes, not where the browser is`() {
     val page = approvalPage(registerClient())

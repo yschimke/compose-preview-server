@@ -530,6 +530,13 @@ class ServeGithubAuth(
     return "$LOGOUT_PATH?return=${urlEncode(current)}"
   }
 
+  /**
+   * The origin of the pinned callback (`--github-auth-callback-base-url`), or `null` when the
+   * callback follows the request's own host. Listed in the pages' `form-action`
+   * ([ServePagePolicy]).
+   */
+  fun callbackOrigin(): String? = config.callbackBaseUrl?.let(ServePagePolicy::formActionSource)
+
   fun accessRepository(): String = config.repository
 
   /**
