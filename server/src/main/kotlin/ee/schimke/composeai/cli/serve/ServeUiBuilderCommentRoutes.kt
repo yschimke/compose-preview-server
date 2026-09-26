@@ -328,6 +328,15 @@ private suspend fun ApplicationCall.authorizedCommentActor(
 private suspend fun <T> ApplicationCall.receiveCommentBody(
   serializer: kotlinx.serialization.DeserializationStrategy<T>
 ): T? {
+  // The editor's own requests label their JSON; a session-cookie request that does not is not one
+  // of them. Header-credential clients are left to the parser as before.
+  if (ServeSameOriginRequests.isNonJsonSessionRequest(this)) {
+    respondCommentError(
+      HttpStatusCode.UnsupportedMediaType,
+      "the comment request must be application/json",
+    )
+    return null
+  }
   val bytes =
     withContext(Dispatchers.IO) {
       receiveStream().use { it.readNBytes(MAX_COMMENT_BODY_BYTES + 1) }
