@@ -3256,6 +3256,10 @@ class ServeHttpServer(
       call.respondText("image uploads unavailable", status = HttpStatusCode.Forbidden)
       return
     }
+    // Whether an anonymous visitor could open this host's pages at all. The capture bundle reads
+    // it to decide if a capture may be uploaded without asking: on a token-gated host every page
+    // is signed-in-only, and the image URL the upload returns is anonymous-read.
+    call.response.headers.append(CAPTURE_SCOPE_HEADER, if (isPublic) "public" else "private")
     call.respondText("", status = HttpStatusCode.NoContent)
   }
 
@@ -7398,6 +7402,9 @@ class ServeHttpServer(
           imageStore != null &&
             imageUploadAuth != null &&
             imageBrowserLogin?.invoke(call, imageUploadAuth.repository) != null,
+        // Only a public host's catalog pages are open to anyone; captures of anything else wait
+        // for the reporter's opt-in before reaching the anonymous-read image lane.
+        privateCaptures = !isPublic || ServeBugReport.isPrivatePath(from),
       ),
       ContentType.Text.Html,
     )
@@ -16437,6 +16444,12 @@ class ServeHttpServer(
       linkedMapOf(".apng" to "image/apng", ".gif" to "image/gif")
 
     const val TOKEN_HEADER: String = "X-Compose-Preview-Token"
+
+    /**
+     * On `GET /images/capability`: `public` when anyone can open this host's pages, `private` when
+     * it is token-gated. Read by `serve-web/src/report/ui.ts`.
+     */
+    const val CAPTURE_SCOPE_HEADER: String = "X-Compose-Preview-Capture-Scope"
 
     /** `Authorization: Bearer <grant>` — the other place an agent's HTTP client puts a token. */
     private const val BEARER_PREFIX: String = "Bearer "

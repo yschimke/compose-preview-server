@@ -237,6 +237,8 @@ class ServeImageRoutingTest {
   fun `only a repository-matched browser session discovers capture hosting`() {
     get("/images/capability", port = browserServer.port).use { response ->
       assertEquals(204, response.code)
+      // A public host: captures of its catalog pages are uploaded without asking.
+      assertEquals("public", response.header(ServeHttpServer.CAPTURE_SCOPE_HEADER))
     }
     get("/images/capability").use { response -> assertEquals(403, response.code) }
     get("/images/capability", port = plainServer.port).use { response ->
