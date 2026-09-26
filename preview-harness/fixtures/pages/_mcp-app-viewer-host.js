@@ -34,7 +34,8 @@ window.addEventListener("message", async (event) => {
               mode === "subscribe-late" ||
               mode === "read-replaced-inline" ||
               mode === "subscribe-fails" ||
-              mode === "stale-read-marker",
+              mode === "stale-read-marker" ||
+              mode === "a11y",
           },
           ...(mode.startsWith("a11y") ? { serverTools: {} } : {}),
         },
@@ -254,15 +255,17 @@ window.addEventListener("message", async (event) => {
       send({ jsonrpc: "2.0", id: message.id, result: {} });
     }
     window.__mcpSubscribedUri = message.params.uri;
-    if (stale || mode === "read-replaced-inline") return;
-    window.setTimeout(() => {
-      resourceUpdates += 1;
-      send({
-        jsonrpc: "2.0",
-        method: "notifications/resources/updated",
-        params: { uri: message.params.uri },
-      });
-    }, 300);
+    if (stale) return;
+    if (mode === "refresh") {
+      window.setTimeout(() => {
+        resourceUpdates += 1;
+        send({
+          jsonrpc: "2.0",
+          method: "notifications/resources/updated",
+          params: { uri: message.params.uri },
+        });
+      }, 300);
+    }
     return;
   }
   if (message.method === "resources/unsubscribe") {
@@ -343,6 +346,16 @@ window.addEventListener("message", async (event) => {
         },
       });
       return;
+    }
+    if (mode === "a11y") {
+      resourceUpdates += 1;
+      send({
+        jsonrpc: "2.0",
+        method: "notifications/resources/updated",
+        params: {
+          uri: "compose-preview://fixture/_app/com.example.Card?overrides=fixture",
+        },
+      });
     }
     send({
       jsonrpc: "2.0",

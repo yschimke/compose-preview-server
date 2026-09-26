@@ -360,7 +360,11 @@
       console.warn('Failed to render the Compose Preview accessibility overlay:', error);
     } finally {
       window.setTimeout(() => {
-        if (overlayCall === call) overlayCall = undefined;
+        if (overlayCall !== call) return;
+        overlayCall = undefined;
+        if (call.resourceUpdatePending && resourceResult?.resource?.uri === uri) {
+          readResource(true);
+        }
       }, 250);
     }
   }
@@ -511,7 +515,7 @@
     });
   }
 
-  async function readResource() {
+  async function readResource(preserveAccessibilityOverlay = false) {
     if (!resourceResult) return;
     stopResourcePolling();
     const { result: toolResult, resource, value } = resourceResult;
@@ -534,6 +538,11 @@
       if (!image) {
         renderResourceFallback(toolResult, resource, 'The host returned no PNG for resource:');
         meta.textContent = 'Resource has no PNG; use the text fallback.';
+        return;
+      }
+      if (preserveAccessibilityOverlay && overlayVisible) {
+        baseImageData = image.blob;
+        baseMetaText = value.previewId || toolArguments.previewId || 'Preview render';
         return;
       }
       renderImage({ data: image.blob }, value, resource);
@@ -636,7 +645,8 @@
         message.method === 'ui/notifications/resource-updated') &&
       message.params?.uri === resourceResult?.resource?.uri
     ) {
-      readResource();
+      if (overlayCall) overlayCall.resourceUpdatePending = true;
+      else readResource();
     }
   }, { passive: true });
 

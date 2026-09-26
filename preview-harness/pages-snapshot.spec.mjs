@@ -4444,6 +4444,10 @@ for (const fixture of listPageFixtures()) {
           await expect(
             viewer.locator('#canvas img[alt="Compose preview with accessibility overlay"]'),
           ).toBeVisible();
+          await page.waitForFunction(() => window.__mcpReadCount >= 2);
+          await expect(
+            viewer.locator('#canvas img[alt="Compose preview with accessibility overlay"]'),
+          ).toBeVisible();
           await expect(viewer.locator("#a11y")).toHaveText("Show original preview");
           const toolCall = await page.evaluate(() => window.__mcpToolCall);
           expect(toolCall).toEqual({
