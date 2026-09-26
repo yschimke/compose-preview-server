@@ -858,8 +858,19 @@ class ServeGithubAuth(
     internal const val SESSION_REFRESH_AFTER_SECONDS = SESSION_TTL_SECONDS / 2
     private val SECURE_RANDOM = SecureRandom()
 
+    /**
+     * [value] when it is a same-origin path, else `/`. Browsers read `\` as `/` and drop tabs and
+     * newlines in http(s) URLs, so `/\evil.com` or `/\t/evil.com` would still leave the origin as
+     * `//evil.com`; any backslash or control character is refused along with `//`.
+     */
     fun safeReturnTo(value: String): String =
-      if (value.startsWith("/") && !value.startsWith("//")) value else "/"
+      if (
+        value.startsWith("/") &&
+          !value.startsWith("//") &&
+          value.none { it == '\\' || it.isISOControl() }
+      )
+        value
+      else "/"
 
     fun tokensMatch(expected: String, provided: String?): Boolean {
       if (provided == null) return false
