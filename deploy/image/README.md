@@ -790,6 +790,27 @@ nothing but this lane — naming it and still getting a 404 from `POST /images` 
 and the miss is silent at both ends. Set `SERVE_ACCEPT_IMAGES=0` to keep the lane shut with the
 repository named, or `=1` without one to get the server's own startup refusal.
 
+**Which tokens may upload** is `SERVE_IMAGE_UPLOAD_TOKENS` (`--image-upload-tokens`), a comma
+list of:
+
+| Kind | What it is | Default |
+|---|---|---|
+| `app` | A user token issued to this box's own `SERVE_GITHUB_AUTH_CLIENT_ID`, checked with `POST /applications/{client_id}/token` | Always accepted when GitHub auth is configured |
+| `personal` | Personal access tokens (`ghp_…`, `github_pat_…`) | On |
+| `other-apps` | User tokens issued to any other OAuth or GitHub App — `gh auth token` is one, issued to the GitHub CLI | Off when GitHub auth is configured, on when it is not |
+| `installation` | GitHub App installation tokens with write on the repository — a GitHub Actions job's `GITHUB_TOKEN` | On |
+
+A user token says who the user is but not who holds it, so with GitHub auth configured a token
+issued to some other app is refused (`403`, naming what this host accepts). Without GitHub auth
+there is no app to check against, and user tokens are accepted as before. `installation` cannot be
+narrowed to GitHub Actions: an installation token cannot name its app (`GET /app` and
+`GET /repos/{owner}/{repo}/installation` both need the app's own JWT), so it admits every app
+installed on the repository with write. Set `SERVE_IMAGE_UPLOAD_TOKENS=app,personal` to refuse
+them. An agent with none of these asks for an agent access grant carrying `images` instead.
+
+A verified token is reused for 60 seconds; a refusal from GitHub for 30. When GitHub can't be
+reached the upload gets a `503` and nothing is cached.
+
 The derivation deliberately does **not** key on GitHub auth being configured, the way
 `SERVE_AGENT_GRANTS` does. The gating repository falls back to `SERVE_GITHUB_AUTH_REPO`, which this
 image defaults to `yschimke/compose-ai-tools` for the playground — so keying on auth would open an
@@ -803,7 +824,7 @@ the same route answering rather than a 404:
 curl -s https://preview.coo.ee/status.json | jq '.config | {acceptImages, imageUploadRepository}'
 curl -sS -o /dev/null -w '%{http_code}\n' -X POST --data-binary @render.png \
   'https://preview.coo.ee/images?name=after.png'                       # 401 — lane is up, no credential
-curl -sS -H "Authorization: Bearer $(gh auth token)" --data-binary @render.png \
+curl -sS -H "Authorization: Bearer $GITHUB_TOKEN" --data-binary @render.png \
   'https://preview.coo.ee/images?name=after.png'                       # 201 + the markdown to paste
 ```
 
@@ -1050,13 +1071,16 @@ is every compile — and the client address otherwise. Over budget answers `429`
 before the request body is read, so a throttled caller costs the box nothing. Watch it on
 `/status.json` at `playground.rateLimit` (`activeCallers`, `trackedCallers`).
 
-> **Behind a reverse proxy, anonymous callers share one bucket** unless you opt in with
-> `SERVE_TRUST_FORWARDED_FOR=1`. That makes the limiter key on the **last** `X-Forwarded-For` entry
-> — the one nginx's `$proxy_add_x_forwarded_for` appended from the peer address it actually saw,
-> which a client cannot forge. Do **not** set it on a directly-exposed host: the header is
-> client-supplied there, so a caller could mint a fresh identity per request and bypass the limit
-> entirely. It assumes exactly one proxy hop. This matters much less than it sounds on this image,
-> where the playground is repo-access-gated and every compile therefore carries a GitHub login.
+> **Anonymous callers are told apart by `X-Forwarded-For`.** The compose file sets
+> `SERVE_TRUST_FORWARDED_FOR=1` by default, which makes the limiter (and the grant approval page's
+> "Asked from") key on the **last** `X-Forwarded-For` entry rather than the socket peer. That value
+> is not client-chosen here: the bundled Caddy, which has no `trusted_proxies` configured,
+> **replaces** any `X-Forwarded-For` a client sends with the peer address it saw, and `preview`
+> publishes no host port of its own. Without it every anonymous caller shares the bucket keyed on
+> Caddy's container address. Set `SERVE_TRUST_FORWARDED_FOR=0` if you publish `8080` directly or run
+> the image without a proxy — the header is client-supplied there, so a caller could mint a fresh
+> identity per request. Behind a different proxy, turn it on only if that proxy sets the final entry
+> itself (nginx's `$proxy_add_x_forwarded_for` appends it). It assumes exactly one proxy hop.
 
 ### Containment
 
@@ -1264,6 +1288,21 @@ Requirements / options:
   `docker compose pull preview && docker compose up -d preview` (recreates in place).
 - **Don't want any of it:** comment out both `rollout` and `watchtower` and update
   by hand with `docker compose pull && docker compose up -d`.
+
+### Access log
+
+Caddy writes one JSON line per request to stdout, which lands in the `caddy` container's json-file
+log (`docker compose logs caddy`). Retention is by size only, from the compose file's `x-logging`
+anchor: 50 MB × 5 files per container, roughly a day of history on a busy box, then the oldest file
+is dropped. There is no time-based expiry beyond that.
+
+Each line records the method, host, URI, status, sizes, timing, the response headers, and the
+request headers — which include the client IP, `User-Agent` and `Referer`. The `Caddyfile`'s
+`format filter` removes credentials before a line is written: `X-Compose-Preview-Token`,
+`X-Compose-Preview-Admin-Token` and `X-Compose-Preview-Agent-Access` are dropped, the `token`,
+`code` and `state` query parameters read `REDACTED` in the URI, in `Referer` and in a redirect's `Location`, and Caddy itself
+already masks `Cookie`, `Set-Cookie` and `Authorization`. Change `max-size` / `max-file` in
+`docker-compose.yml` to keep more or less.
 
 ### Even simpler (no Caddy/TLS — quick test)
 

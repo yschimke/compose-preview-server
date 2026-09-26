@@ -55,13 +55,15 @@ internal fun Route.installUiBuilderCommentRoutes(
   store: ServeUiBuilderCommentStore,
 ) {
   get(UI_BUILDER_COMMENTS_PATH) {
-    val designId =
-      call.authorizedCommentDesign(service, authorization, UiBuilderRouteCapability.READ)
+    val actor =
+      call.authorizedCommentActor(service, authorization, UiBuilderRouteCapability.READ)
         ?: return@get
     // An empty board rather than a 404: "nobody has commented yet" is the answer, and a design
     // with no discussion is not a design that is missing. The reference route says the opposite
     // because there an empty record and no record are genuinely different states.
-    call.respondBoard(withContext(Dispatchers.IO) { store.readOrEmpty(designId) })
+    call.respondBoard(
+      actor.shape(withContext(Dispatchers.IO) { store.readOrEmpty(actor.designId) })
+    )
   }
 
   post(UI_BUILDER_COMMENTS_PATH) {
@@ -77,7 +79,8 @@ internal fun Route.installUiBuilderCommentRoutes(
         // 422 rather than 400: the body parsed and the request was understood; this is a fact
         // about what the caller asked for rather than about how they asked for it.
         call.respondCommentError(HttpStatusCode.UnprocessableEntity, result.reason)
-      is CommentWriteResult.Stored -> call.respondBoard(result.board, HttpStatusCode.Created)
+      is CommentWriteResult.Stored ->
+        call.respondBoard(actor.shape(result.board), HttpStatusCode.Created)
     }
   }
 
@@ -99,7 +102,7 @@ internal fun Route.installUiBuilderCommentRoutes(
     ) {
       is CommentWriteResult.Refused ->
         call.respondCommentError(HttpStatusCode.NotFound, result.reason)
-      is CommentWriteResult.Stored -> call.respondBoard(result.board)
+      is CommentWriteResult.Stored -> call.respondBoard(actor.shape(result.board))
     }
   }
 
@@ -161,7 +164,7 @@ internal fun Route.installUiBuilderCommentRoutes(
           else HttpStatusCode.UnprocessableEntity,
           result.reason,
         )
-      is CommentWriteResult.Stored -> call.respondBoard(result.board)
+      is CommentWriteResult.Stored -> call.respondBoard(actor.shape(result.board))
     }
   }
 
@@ -183,7 +186,7 @@ internal fun Route.installUiBuilderCommentRoutes(
           if (result.forbidden) HttpStatusCode.Forbidden else HttpStatusCode.NotFound,
           result.reason,
         )
-      is CommentWriteResult.Stored -> call.respondBoard(result.board)
+      is CommentWriteResult.Stored -> call.respondBoard(actor.shape(result.board))
     }
   }
 
@@ -195,9 +198,10 @@ internal fun Route.installUiBuilderCommentRoutes(
    * client cannot pin a request thread here indefinitely.
    */
   get(UI_BUILDER_COMMENTS_WATCH_PATH) {
-    val designId =
-      call.authorizedCommentDesign(service, authorization, UiBuilderRouteCapability.READ)
+    val actor =
+      call.authorizedCommentActor(service, authorization, UiBuilderRouteCapability.READ)
         ?: return@get
+    val designId = actor.designId
     val afterSequence = call.request.queryParameters["afterSequence"]?.toLongOrNull() ?: 0
     if (afterSequence < 0) {
       call.respondCommentError(HttpStatusCode.BadRequest, "afterSequence must not be negative")
@@ -208,7 +212,7 @@ internal fun Route.installUiBuilderCommentRoutes(
         .coerceIn(0, MAX_COMMENT_WAIT_SECONDS)
     val board = store.awaitBoardAfter(designId, afterSequence, waitSeconds * 1000)
     if (board == null) call.respondText("", status = HttpStatusCode.NoContent)
-    else call.respondBoard(board)
+    else call.respondBoard(actor.shape(board))
   }
 
   /**
@@ -236,6 +240,7 @@ internal fun Route.installUiBuilderCommentRoutes(
       close(CloseReason(CloseReason.Codes.VIOLATED_POLICY, "no such design"))
       return@webSocket
     }
+    val view = service.publicReaderView(actor, designId)
 
     val boards = Channel<StoredCommentBoard>(COMMENT_SOCKET_BUFFER)
     val overflowed = AtomicBoolean(false)
@@ -250,8 +255,9 @@ internal fun Route.installUiBuilderCommentRoutes(
       coroutineScope {
         val sender = launch {
           for (board in boards) {
+            val shaped = view?.board(board) ?: board
             send(
-              Frame.Text(COMMENT_ROUTE_JSON.encodeToString(StoredCommentBoard.serializer(), board))
+              Frame.Text(COMMENT_ROUTE_JSON.encodeToString(StoredCommentBoard.serializer(), shaped))
             )
           }
           if (overflowed.get()) {
@@ -281,12 +287,18 @@ internal fun Route.installUiBuilderCommentRoutes(
  *
  * [identity] is the whole authenticated actor, delegation included, for the questions only the
  * design's access control can answer (may this actor delete somebody else's thread).
+ *
+ * [view] is set when the caller reads the design only because it is public; see [PublicReaderView].
  */
 private data class CommentActor(
   val actorId: String,
   val designId: String,
   val identity: AuthenticatedUiBuilderActor,
-)
+  val view: PublicReaderView? = null,
+) {
+  /** [board] as this caller may see it. */
+  fun shape(board: StoredCommentBoard): StoredCommentBoard = view?.board(board) ?: board
+}
 
 /** The board once [threadId] — or all of it — is marked as read by this actor. */
 private suspend fun ApplicationCall.respondAcknowledgement(
@@ -299,15 +311,9 @@ private suspend fun ApplicationCall.respondAcknowledgement(
       withContext(Dispatchers.IO) { store.acknowledge(actor.designId, actor.actorId, threadId) }
   ) {
     is CommentWriteResult.Refused -> respondCommentError(HttpStatusCode.NotFound, result.reason)
-    is CommentWriteResult.Stored -> respondBoard(result.board)
+    is CommentWriteResult.Stored -> respondBoard(actor.shape(result.board))
   }
 }
-
-private suspend fun ApplicationCall.authorizedCommentDesign(
-  service: UiBuilderServicePort,
-  authorization: ServeUiBuilderAuthorization,
-  capability: UiBuilderRouteCapability,
-): String? = authorizedCommentActor(service, authorization, capability)?.designId
 
 /** The caller and the design they may act on, or null once the refusal has been written. */
 private suspend fun ApplicationCall.authorizedCommentActor(
@@ -340,12 +346,26 @@ private suspend fun ApplicationCall.authorizedCommentActor(
   }
   // Authored under the agent's own id even when its authority came from the human who approved its
   // grant: a comment says who wrote it, and delegation decides what may be read, never who spoke.
-  return CommentActor(actorId = actor.actorId, designId = designId, identity = actor)
+  return CommentActor(
+    actorId = actor.actorId,
+    designId = designId,
+    identity = actor,
+    view = service.publicReaderView(actor, designId),
+  )
 }
 
 private suspend fun <T> ApplicationCall.receiveCommentBody(
   serializer: kotlinx.serialization.DeserializationStrategy<T>
 ): T? {
+  // The editor's own requests label their JSON; a session-cookie request that does not is not one
+  // of them. Header-credential clients are left to the parser as before.
+  if (ServeSameOriginRequests.isNonJsonSessionRequest(this)) {
+    respondCommentError(
+      HttpStatusCode.UnsupportedMediaType,
+      "the comment request must be application/json",
+    )
+    return null
+  }
   val bytes =
     withContext(Dispatchers.IO) {
       receiveStream().use { it.readNBytes(MAX_COMMENT_BODY_BYTES + 1) }

@@ -640,7 +640,10 @@ class ServeUiBuilderMcp(
     val envelope =
       UI_BUILDER_JSON.encodeToJsonElement(
         DesignUpdateEnvelopeV1.serializer(),
-        UiBuilderProtocolMapper.toProtocolUpdate(designId, update),
+        UiBuilderProtocolMapper.toProtocolUpdate(
+          designId,
+          service.publicReaderView(actor, designId)?.update(update) ?: update,
+        ),
       )
     // A resync answers with a whole snapshot, catalog included; the same argument as on
     // [GET_DESIGN] keeps it to the document.
@@ -738,7 +741,8 @@ class ServeUiBuilderMcp(
             .orThrow()
         else -> throw McpRequestException("unknown UI-builder comment tool '$tool'")
       }
-    return UI_BUILDER_JSON.encodeToString(StoredCommentBoard.serializer(), board)
+    val shaped = service.publicReaderView(actor, designId)?.board(board) ?: board
+    return UI_BUILDER_JSON.encodeToString(StoredCommentBoard.serializer(), shaped)
   }
 
   /**
@@ -1058,7 +1062,7 @@ class ServeUiBuilderMcp(
     when (val mapping = UiBuilderProtocolMapper.toServiceCall(actor, request)) {
       is ProtocolRequestMapping.Mapped ->
         try {
-          service.execute(mapping.call)
+          service.shapeForReader(actor, service.execute(mapping.call))
         } catch (cancelled: CancellationException) {
           throw cancelled
         } catch (_: Exception) {

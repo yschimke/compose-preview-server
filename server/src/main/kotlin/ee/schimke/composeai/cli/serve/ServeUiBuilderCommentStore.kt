@@ -64,7 +64,7 @@ class ServeUiBuilderCommentStore(
   private val onLog: (String) -> Unit = { System.err.println(it) },
 ) {
   init {
-    Files.createDirectories(root)
+    ServeOwnerOnlyFiles.createDirectories(root)
     require(Files.isDirectory(root)) { "UI-builder comment root is not a directory: $root" }
   }
 
@@ -562,6 +562,89 @@ class ServeUiBuilderCommentStore(
         false
       }
     }
+
+  /**
+   * Replace [actorId] with [placeholder] on every board on this host: as the author of a comment,
+   * the resolver of a thread, a reader in `acknowledgedBy` and an actor behind a reaction. The
+   * words stay — a reply is part of the conversation other people had — and only who said them
+   * goes.
+   *
+   * The display name typed beside each of their comments goes too, since it is usually a name.
+   * Reaction counts are kept: two erased actors who left the same reaction are two placeholders,
+   * not one. Each board is rewritten through [mutate], so an open page is sent the new board.
+   *
+   * Returns how many boards changed. For the administrator, through [ServeUiBuilderAdmin].
+   */
+  fun eraseActor(actorId: String, placeholder: String): Int {
+    val target = actorId.trim()
+    if (target.isEmpty()) return 0
+    fun matches(candidate: String) = candidate.equals(target, ignoreCase = true)
+    val designIds =
+      try {
+          Files.list(root).use { entries ->
+            entries.filter { it.toString().endsWith(".json") }.toList()
+          }
+        } catch (_: IOException) {
+          return 0
+        }
+        .mapNotNull { file ->
+          try {
+            if (Files.size(file) > MAX_BOARD_BYTES) null
+            else
+              COMMENT_JSON.decodeFromString(
+                  StoredCommentBoard.serializer(),
+                  Files.readString(file, StandardCharsets.UTF_8),
+                )
+                .designId
+          } catch (_: IOException) {
+            null
+          } catch (_: SerializationException) {
+            null
+          }
+        }
+    var changed = 0
+    for (designId in designIds) {
+      var applied = false
+      val result =
+        mutate(designId) { board, _ ->
+          val threads =
+            board.threads.map { thread ->
+              val acknowledged = thread.acknowledgedBy.entries.partition { matches(it.key) }
+              thread.copy(
+                resolvedBy = thread.resolvedBy?.let { if (matches(it)) placeholder else it },
+                acknowledgedBy =
+                  if (acknowledged.first.isEmpty()) thread.acknowledgedBy
+                  else
+                    acknowledged.second.associate { it.key to it.value } +
+                      (placeholder to
+                        maxOf(
+                          acknowledged.first.maxOf { it.value },
+                          thread.acknowledgedBy[placeholder] ?: 0L,
+                        )),
+                comments =
+                  thread.comments.map { comment ->
+                    val authored = matches(comment.authorId)
+                    comment.copy(
+                      authorId = if (authored) placeholder else comment.authorId,
+                      displayName = if (authored) placeholder else comment.displayName,
+                      reactions =
+                        comment.reactions.mapValues { (_, actors) ->
+                          actors.map { if (matches(it)) placeholder else it }
+                        },
+                    )
+                  },
+              )
+            }
+          if (threads == board.threads) CommentMutation.Unchanged
+          else {
+            applied = true
+            CommentMutation.Applied(board.copy(threads = threads))
+          }
+        }
+      if (applied && result is CommentWriteResult.Stored) changed++
+    }
+    return changed
+  }
 
   private fun storedDesigns(): Int =
     try {

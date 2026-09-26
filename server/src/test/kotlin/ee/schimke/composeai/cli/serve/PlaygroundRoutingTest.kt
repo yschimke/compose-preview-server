@@ -1,5 +1,7 @@
 package ee.schimke.composeai.cli.serve
 
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -15,6 +17,8 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
 import okhttp3.ResponseBody.Companion.toResponseBody
+import okhttp3.WebSocket
+import okhttp3.WebSocketListener
 import okio.Path.Companion.toPath
 import okio.fakefilesystem.FakeFileSystem
 
@@ -364,6 +368,152 @@ class PlaygroundRoutingTest {
         assertEquals(lease, json["lease"]?.jsonPrimitive?.content)
         assertEquals("1", json["revision"]?.jsonPrimitive?.content)
       }
+  }
+
+  private fun postWith(
+    path: String,
+    port: Int,
+    body: String = """{"client":"tab-a"}""",
+    mediaType: String = "application/json",
+    headers: Map<String, String> = emptyMap(),
+  ): Response {
+    val request =
+      Request.Builder()
+        .url("http://127.0.0.1:$port$path")
+        .post(body.toRequestBody(mediaType.toMediaType()))
+        .apply { headers.forEach { (name, value) -> header(name, value) } }
+        .build()
+    return client.newCall(request).execute()
+  }
+
+  @Test
+  fun `a session-cookie write from another origin is refused`() {
+    val cookie = githubSessionCookie(githubRepoServer.port)
+    postWith(
+        "/api/1/compiler/edit-lease",
+        githubRepoServer.port,
+        headers = mapOf("Cookie" to cookie, "Origin" to "https://elsewhere.example"),
+      )
+      .use { resp -> assertEquals(403, resp.code) }
+    postWith(
+        "/api/1/compiler/edit-lease",
+        githubRepoServer.port,
+        headers = mapOf("Cookie" to cookie, "Sec-Fetch-Site" to "same-site"),
+      )
+      .use { resp -> assertEquals(403, resp.code) }
+  }
+
+  @Test
+  fun `a session-cookie write from this server's own page is accepted`() {
+    val cookie = githubSessionCookie(githubRepoServer.port)
+    val port = githubRepoServer.port
+    val lease =
+      postWith(
+          "/api/1/compiler/edit-lease",
+          port,
+          headers = mapOf("Cookie" to cookie, "Origin" to "http://127.0.0.1:$port"),
+        )
+        .use { resp ->
+          assertEquals(200, resp.code)
+          Json.parseToJsonElement(resp.body.string()).jsonObject["lease"]!!.jsonPrimitive.content
+        }
+    postWith(
+        "/api/1/compiler/edit-lease/release",
+        port,
+        body = """{"lease":"$lease","client":"tab-a"}""",
+        headers = mapOf("Cookie" to cookie, "Sec-Fetch-Site" to "same-origin"),
+      )
+      .use { resp -> assertEquals(200, resp.code) }
+  }
+
+  @Test
+  fun `a session-cookie compile must declare a JSON body`() {
+    val cookie = githubSessionCookie(githubRepoServer.port)
+    val body =
+      """{"files":[{"name":"Snippet.kt","text":"@Preview fun P(){}"}],"confType":"compose-cmp"}"""
+    postWith(
+        "/api/1/compiler/run",
+        githubRepoServer.port,
+        body = body,
+        mediaType = "text/plain",
+        headers = mapOf("Cookie" to cookie),
+      )
+      .use { resp -> assertEquals(415, resp.code) }
+  }
+
+  @Test
+  fun `token-authenticated compiles are unaffected by origin`() {
+    val body =
+      """{"files":[{"name":"Snippet.kt","text":"@Preview @Composable fun P(){}"}],"confType":"compose-cmp"}"""
+    // A header credential beside a stray cookie, from a foreign origin, with a non-JSON label: the
+    // header is what authenticates it, so none of the session-cookie rules apply.
+    postWith(
+        "/api/1/compiler/run",
+        gatedServer.port,
+        body = body,
+        mediaType = "text/plain",
+        headers =
+          mapOf(
+            ServeHttpServer.TOKEN_HEADER to "sekret",
+            "Cookie" to "${ServeSameOriginRequests.SESSION_COOKIE}=stale",
+            "Origin" to "https://elsewhere.example",
+          ),
+      )
+      .use { resp -> assertEquals(200, resp.code) }
+    // …and a query token with no Origin at all, the shape a script sends.
+    postWith("/api/1/compiler/run?token=sekret", gatedServer.port, body = body).use { resp ->
+      assertEquals(200, resp.code)
+    }
+  }
+
+  /** Opens `/ws/{name}` and answers the upgrade's HTTP status: 101 when it opened. */
+  private fun socketStatus(port: Int, query: String, headers: Map<String, String>): Int? {
+    val done = CountDownLatch(1)
+    var status: Int? = null
+    val socket =
+      client.newWebSocket(
+        Request.Builder()
+          .url("ws://127.0.0.1:$port/ws/P$query")
+          .apply { headers.forEach { (name, value) -> header(name, value) } }
+          .build(),
+        object : WebSocketListener() {
+          override fun onOpen(webSocket: WebSocket, response: Response) {
+            status = response.code
+            done.countDown()
+          }
+
+          override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+            status = response?.code
+            done.countDown()
+          }
+        },
+      )
+    assertTrue(done.await(5, TimeUnit.SECONDS), "the upgrade should be answered")
+    socket.cancel()
+    return status
+  }
+
+  @Test
+  fun `a session-cookie socket is upgraded only from this server's own page`() {
+    val cookie = githubSessionCookie(githubRepoServer.port)
+    val port = githubRepoServer.port
+    assertEquals(
+      403,
+      socketStatus(port, "", mapOf("Cookie" to cookie, "Origin" to "https://elsewhere.example")),
+    )
+    assertEquals(
+      101,
+      socketStatus(port, "", mapOf("Cookie" to cookie, "Origin" to "http://127.0.0.1:$port")),
+    )
+    // A token-authenticated socket carries no session cookie and is not judged by its origin.
+    assertEquals(
+      101,
+      socketStatus(
+        gatedServer.port,
+        "?token=sekret",
+        mapOf("Origin" to "https://elsewhere.example"),
+      ),
+    )
   }
 
   @Test

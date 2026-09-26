@@ -73,7 +73,7 @@ handle() {
     respond "405 Method Not Allowed" "POST only"
     return 0
   fi
-  if [ -z "$TOKEN" ] || [ "$auth" != "Bearer $TOKEN" ]; then
+  if [ -z "$TOKEN" ] || ! token_matches "$auth"; then
     log "rejected ${method} ${path} (bad or missing token)"
     respond "401 Unauthorized" "bad token"
     return 0
@@ -92,6 +92,17 @@ handle() {
     log "authorized — rollout already in progress"
     respond "200 OK" "rollout already in progress"
   fi
+}
+
+# Compare the presented Authorization value with "Bearer $TOKEN" by their SHA-256
+# digests rather than the strings themselves. A shell `!=` stops at the first
+# differing byte, so its timing depends on how much of the prefix matched; the
+# digests are fixed-length and unrelated to that prefix, so how long the comparison
+# takes says nothing about the token. sha256sum is busybox/coreutils, present on
+# the docker:*-cli base without an apk add.
+digest() { printf '%s' "$1" | sha256sum | cut -d' ' -f1; }
+token_matches() {
+  [ "$(digest "$1")" = "$(digest "Bearer $TOKEN")" ]
 }
 
 # HTTP/1.1 response with an explicit Content-Length + Connection: close, so the

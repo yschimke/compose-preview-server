@@ -211,13 +211,12 @@ class ServeGithubAuth(
     // Null on the ordinary same-host sign-in, which is then byte-for-byte what it always was.
     val originHost = originHostFor(call, siteHosts)
     val state = signedState(nonce(), returnTo, originHost)
-    call.response.cookies.append(
-      stateCookie(
-        state,
-        maxAge = STATE_TTL_SECONDS,
-        secure = isSecure(call, config.callbackBaseUrl),
-      )
-    )
+    val secure = isSecure(call, config.callbackBaseUrl)
+    // A host-only `cp_gh_state` left from before a cookie domain was configured would sit beside
+    // the new one, and a callback that sees two values refuses both. The browser stores the two
+    // separately, so the order of these lines does not matter to it.
+    clearHostOnlyVariant(call, STATE_COOKIE, secure)
+    call.response.cookies.append(stateCookie(state, maxAge = STATE_TTL_SECONDS, secure = secure))
     call.respondRedirect(authorizeUrl(call, state))
   }
 
@@ -242,7 +241,7 @@ class ServeGithubAuth(
    */
   suspend fun RoutingContext.handleCallback(siteHosts: Set<String> = emptySet()) {
     val state = call.request.queryParameters["state"].orEmpty()
-    val expected = call.request.cookieValue(STATE_COOKIE).orEmpty()
+    val expected = call.request.soleCookieValue(STATE_COOKIE).orEmpty()
     val code = call.request.queryParameters["code"].orEmpty()
     val statePayload = verifyState(state)
     if (
@@ -282,6 +281,10 @@ class ServeGithubAuth(
     call.response.cookies.append(authCookie(session, maxAge = SESSION_TTL_SECONDS, secure = secure))
     call.response.cookies.append(stateCookie("", maxAge = 0, secure = secure))
     call.response.cookies.append(regrantCookie("", maxAge = 0, secure = secure))
+    // Written after the session above, and distinct from it in the browser's store (no `Domain`),
+    // so this removes only a host-only leftover and never the cookie just minted.
+    clearHostOnlyVariant(call, AUTH_COOKIE, secure)
+    clearHostOnlyVariant(call, STATE_COOKIE, secure)
     call.respondRedirect(
       if (returnHost == null) statePayload.returnTo
       else "https://$returnHost${statePayload.returnTo}"
@@ -305,7 +308,8 @@ class ServeGithubAuth(
     returnHost: String?,
     secure: Boolean,
   ) {
-    val alreadyRetried = call.request.cookieValue(REGRANT_COOKIE) != null
+    // Any value at all counts: this cookie only ever stops a retry, so more than one is still one.
+    val alreadyRetried = call.request.cookieValues(REGRANT_COOKIE).isNotEmpty()
     if (failure.revoked && !alreadyRetried) {
       call.response.cookies.append(regrantCookie("1", maxAge = STATE_TTL_SECONDS, secure = secure))
       val start = "$START_PATH?return=${urlEncode(returnTo)}"
@@ -340,6 +344,11 @@ class ServeGithubAuth(
    * empty string carries no signature, so [verifySession] rejects it and this server treats the
    * visitor as signed out from the next request onward.
    *
+   * With a cookie domain configured, the host-only variant is cleared as well. A browser can hold
+   * both — one written before the domain was set, one after — and requests carrying two session
+   * values are read as signed out, so leaving the older one behind would keep the visitor signed
+   * out of their next sign-in too.
+   *
    * What this cannot do is revoke: the cookie is stateless and self-signed, so a copy taken off the
    * wire is unaffected. This ends *a browser's* session, which is the affordance that was missing;
    * server-side revocation is a different design
@@ -347,9 +356,9 @@ class ServeGithubAuth(
    */
   suspend fun RoutingContext.handleLogout() {
     val returnTo = safeReturnTo(call.request.queryParameters["return"] ?: "/")
-    call.response.cookies.append(
-      authCookie("", maxAge = 0, secure = isSecure(call, config.callbackBaseUrl))
-    )
+    val secure = isSecure(call, config.callbackBaseUrl)
+    call.response.cookies.append(authCookie("", maxAge = 0, secure = secure))
+    clearHostOnlyVariant(call, AUTH_COOKIE, secure)
     call.respondRedirect(returnTo)
   }
 
@@ -394,15 +403,37 @@ class ServeGithubAuth(
    *
    * Skipped on the OAuth routes: [handleCallback] mints the authoritative cookie itself, and a
    * second `Set-Cookie` for the same name in one response is a coin flip between them.
+   *
+   * Also skipped on any response marked `Cache-Control: public` (a vendored bundle, a font, an
+   * image). A shared cache may store such a response headers and all, so it must never carry one
+   * visitor's session; the next ordinary page view slides the session instead. That is why this
+   * runs once the response is ready to send ([ServeHttpServer] installs it on
+   * `ResponseBodyReadyForSend`) rather than before routing: only then is the route's own
+   * `Cache-Control` known. [contentCacheControl] is whatever the outgoing content itself declares,
+   * on top of the headers the route appended to the call.
+   *
+   * When a cookie domain is configured and the request carries two session values, the host-only
+   * one is cleared here: such a request reads as signed out ([soleCookieValue]), and this is what
+   * lets the next request read as signed in again.
    */
-  fun refreshSession(call: ApplicationCall) {
+  fun refreshSession(call: ApplicationCall, contentCacheControl: List<String> = emptyList()) {
     if (call.request.uri.substringBefore('?').startsWith(AUTH_PATH_PREFIX)) return
-    val session = call.request.cookieValue(AUTH_COOKIE)?.let { verifySession(it) } ?: return
+    val secure = isSecure(call, config.callbackBaseUrl)
+    // Before the public-cache check: a request carrying two session values reads as signed out,
+    // so its page is served with the anonymous (public) cache policy, and returning early there
+    // would leave the stale host-only copy in place for as long as the visitor browses. The
+    // clearing cookie is empty and already expired, so it carries nobody's session even when a
+    // shared cache keeps it.
+    if (call.request.cookieValues(AUTH_COOKIE).size > 1) {
+      clearHostOnlyVariant(call, AUTH_COOKIE, secure)
+      return
+    }
+    val cacheControl = call.response.headers.values(HttpHeaders.CacheControl) + contentCacheControl
+    if (cacheControl.any { directive -> isPublicCacheControl(directive) }) return
+    val session = call.request.soleCookieValue(AUTH_COOKIE)?.let { verifySession(it) } ?: return
     val now = clock.millis()
     if (session.expiresAt - now > SESSION_REFRESH_AFTER_SECONDS * 1000) return
-    // Legacy cookies (minted before the sign-in stamp existed) carry no anchor, so they cannot be
-    // shown to be inside the cap and are left to expire on their own terms.
-    val authenticatedAt = session.authenticatedAt ?: return
+    val authenticatedAt = session.authenticatedAt
     val expiresAt =
       minOf(now + SESSION_TTL_SECONDS * 1000, authenticatedAt + SESSION_ABSOLUTE_TTL_SECONDS * 1000)
     if (expiresAt <= session.expiresAt) return
@@ -419,7 +450,7 @@ class ServeGithubAuth(
         // The cookie dies with the payload it carries, rather than outliving it as a cookie the
         // browser keeps sending and the server keeps rejecting.
         maxAge = (expiresAt - now) / 1000,
-        secure = isSecure(call, config.callbackBaseUrl),
+        secure = secure,
       )
     )
   }
@@ -430,7 +461,7 @@ class ServeGithubAuth(
    * against this closed to one.
    */
   fun currentLogin(call: ApplicationCall): String? {
-    val cookie = call.request.cookieValue(AUTH_COOKIE) ?: return null
+    val cookie = call.request.soleCookieValue(AUTH_COOKIE) ?: return null
     return verifySession(cookie)?.takeIf { !it.guest }?.login
   }
 
@@ -440,18 +471,21 @@ class ServeGithubAuth(
    * is signed in.
    */
   fun currentSignedInLogin(call: ApplicationCall): String? {
-    val cookie = call.request.cookieValue(AUTH_COOKIE) ?: return null
+    val cookie = call.request.soleCookieValue(AUTH_COOKIE) ?: return null
     return verifySession(cookie)?.login
   }
 
+  /** The login a raw session cookie value speaks for, member or guest; null when it is refused. */
+  internal fun sessionLogin(cookie: String): String? = verifySession(cookie)?.login
+
   /** True when the session belongs to a guest rather than a member. */
   fun isGuest(call: ApplicationCall): Boolean {
-    val cookie = call.request.cookieValue(AUTH_COOKIE) ?: return false
+    val cookie = call.request.soleCookieValue(AUTH_COOKIE) ?: return false
     return verifySession(cookie)?.guest == true
   }
 
   fun hasRepositoryAccess(call: ApplicationCall): Boolean {
-    val cookie = call.request.cookieValue(AUTH_COOKIE) ?: return false
+    val cookie = call.request.soleCookieValue(AUTH_COOKIE) ?: return false
     return verifySession(cookie)?.let { it.repositoryAccess && !it.guest } == true
   }
 
@@ -462,32 +496,17 @@ class ServeGithubAuth(
    * of the repository the grant would actually publish to rather than of the sign-in one.
    */
   fun hasImageRepositoryAccess(call: ApplicationCall): Boolean {
-    val cookie = call.request.cookieValue(AUTH_COOKIE) ?: return false
+    val cookie = call.request.soleCookieValue(AUTH_COOKIE) ?: return false
     return hasImageRepositoryAccess(cookie)
   }
 
   /** [hasImageRepositoryAccess] on a raw cookie value, so the rule can be tested without a call. */
   internal fun hasImageRepositoryAccess(cookie: String): Boolean {
-    val session = verifySession(cookie) ?: return false
-    // A cookie minted before this field existed carries no image bit, and [verifySession] reads
-    // that absence as `false` rather than as a copy of the sign-in bit — correctly, because it
-    // cannot know which repository the signing server asked about. THIS layer can: when the box
-    // gates both lanes on one repository, the sign-in bit was computed against exactly the
-    // repository being asked about, so reading it here is the same question answered, not the
-    // conflation the field exists to end. Without this, deploying the field would refuse every
-    // live session's uploads on a single-repo box until each visitor happened to sign in again.
-    return session.imageRepositoryAccess ||
-      (imageGatesOnSignInRepository && session.repositoryAccess)
+    // Every accepted cookie carries its own image bit: [GitHubOAuthVerifier] copies the sign-in
+    // answer into it when both lanes gate on one repository, and a cookie minted before the field
+    // existed no longer verifies at all (see [verifySession]).
+    return verifySession(cookie)?.imageRepositoryAccess == true
   }
-
-  /**
-   * Whether the image lane gates on the sign-in repository — either because no separate
-   * `--image-upload-repo` was given, or because it names the same repository.
-   */
-  private val imageGatesOnSignInRepository: Boolean
-    get() =
-      config.imageRepository.isNullOrBlank() ||
-        config.imageRepository.equals(config.repository, ignoreCase = true)
 
   fun loginPath(call: ApplicationCall): String {
     val current = call.uriWithQuery()
@@ -617,37 +636,37 @@ class ServeGithubAuth(
       ?.let { ServeSites.normalizeHost(it) }
 
   /**
-   * `nonce|originHost|returnTo`, with an empty origin host on the same-host flow. The nonce is
-   * base64url and the origin host is a validated hostname, so neither can contain the separator and
-   * `returnTo` keeps its rest-of-string reading — which matters, since a return path may carry a
-   * query string containing anything at all.
+   * `nonce|issuedAt|originHost|returnTo`, with an empty origin host on the same-host flow. The
+   * nonce is base64url, the issue time is digits and the origin host is a validated hostname, so
+   * none can contain the separator and `returnTo` keeps its rest-of-string reading — which matters,
+   * since a return path may carry a query string containing anything at all.
+   *
+   * The issue time lets [verifyState] hold a state to [STATE_TTL_SECONDS] itself rather than
+   * relying on the browser to drop the cookie on time.
    */
   private fun signedState(nonce: String, returnTo: String, originHost: String?): String =
-    sign("$nonce|${originHost.orEmpty()}|$returnTo")
+    sign(STATE_PURPOSE, "$nonce|${clock.millis()}|${originHost.orEmpty()}|$returnTo")
 
+  /**
+   * Null for anything but a state this server minted in the last [STATE_TTL_SECONDS]. A state from
+   * before the issue time was added carries a different shape and a signature over a different
+   * input, so it is refused; the only visitor that affects is one mid-sign-in across the deploy,
+   * who starts the sign-in again.
+   */
   private fun verifyState(value: String): StatePayload? {
-    val payload = verifySigned(value) ?: return null
-    val firstPipe = payload.indexOf('|')
-    if (firstPipe <= 0) return null
-    val nonce = payload.substring(0, firstPipe)
-    val rest = payload.substring(firstPipe + 1)
-    val secondPipe = rest.indexOf('|')
-    // No second separator ⇒ a state minted before handoff existed: the remainder is the return path
-    // and there is no origin host. Kept so sign-ins already in flight across a restart still land.
-    if (secondPipe < 0) return StatePayload(nonce, safeReturnTo(rest), null)
-    val originField = rest.substring(0, secondPipe)
-    val originHost = originField.takeIf { it.isNotEmpty() }?.let { ServeSites.normalizeHost(it) }
-    // A non-empty middle field that isn't a hostname means this is the legacy shape after all and
-    // the return path simply contained a separator — read it whole rather than truncating it.
-    if (originField.isNotEmpty() && originHost == null) {
-      return StatePayload(nonce, safeReturnTo(rest), null)
-    }
-    return StatePayload(nonce, safeReturnTo(rest.substring(secondPipe + 1)), originHost)
+    val parts = verifySigned(STATE_PURPOSE, value)?.split("|", limit = 4) ?: return null
+    if (parts.size != 4 || parts[0].isEmpty()) return null
+    val issuedAt = parts[1].toLongOrNull() ?: return null
+    if (clock.millis() - issuedAt !in 0..STATE_TTL_SECONDS * 1000) return null
+    val originHost =
+      if (parts[2].isEmpty()) null else ServeSites.normalizeHost(parts[2]) ?: return null
+    return StatePayload(parts[0], safeReturnTo(parts[3]), originHost)
   }
 
   /**
-   * The image flag is **appended**, never interleaved: every older cookie shape stays parseable by
-   * [verifySession] on its own terms, so a running box does not sign everybody out to gain a field.
+   * `login|repo|expiresAt|authenticatedAt|image|role|configFingerprint`. Fields are **appended**,
+   * never interleaved, so the older ones keep their positions: the role (`member`/`guest`) and the
+   * [configFingerprint] were the last two to arrive.
    */
   private fun signedSession(
     login: String,
@@ -659,64 +678,80 @@ class ServeGithubAuth(
   ): String {
     val repoFlag = if (repositoryAccess && !guest) "repo" else "no-repo"
     val imageFlag = if (imageRepositoryAccess && !guest) "image-repo" else "no-image-repo"
-    val payload = "${login.lowercase()}|$repoFlag|$expiresAt|$authenticatedAt|$imageFlag"
-    // Appended, like every field before it, and only for a guest: a member's cookie keeps the
-    // five-part shape older servers already read, so rolling this out signs nobody out.
-    return sign(if (guest) "$payload|$GUEST_FLAG" else payload)
-  }
-
-  private fun verifySession(value: String): SessionPayload? {
-    val payload = verifySigned(value) ?: return null
-    val parts = payload.split("|")
-    val (login, repositoryAccess, expiresAt) =
-      when (parts.size) {
-        // Backwards compatible with cookies minted before playground repo-rights gating. They stay
-        // authenticated for live preview, but do not satisfy the stricter playground gate.
-        2 -> Triple(parts[0], false, parts[1].toLongOrNull())
-        // One branch for every shape from the 3-part form on: each later field was APPENDED, so
-        // the login, the repo flag and the expiry have never moved. The trailing fields the newer
-        // shapes carry are read below, by index, where absence has to mean something specific.
-        3,
-        4,
-        5,
-        6 -> Triple(parts[0], parts[1] == "repo", parts[2].toLongOrNull())
-        else -> return null
-      }
-    if (expiresAt == null || expiresAt <= clock.millis() || login.isBlank()) return null
-    // Absent on the 2- and 3-part forms: those predate the sign-in stamp, so their session simply
-    // can't be slid ([refreshSession]) and runs out at its own expiry.
-    val authenticatedAt = parts.getOrNull(3)?.toLongOrNull()
-    // Absent on every shape minted before the image lane could gate on a second repository. Read as
-    // FALSE rather than as a copy of [repositoryAccess]: an older cookie was signed by a server
-    // that never asked GitHub about the image repository, so treating its one bit as an answer
-    // about a repository it never named is exactly the conflation this field exists to end. The
-    // cost is that a visitor holding such a cookie cannot pass on `images` until it is refreshed
-    // through GitHub, which the absolute cap guarantees.
-    val imageRepositoryAccess = parts.getOrNull(4) == "image-repo"
-    // A guest cookie is only ever minted while guests are allowed. One signed before the operator
-    // turned them off again is refused outright rather than read as a member, which it never was.
-    val guest = parts.getOrNull(5) == GUEST_FLAG
-    if (guest && !config.allowGuests) return null
-    return SessionPayload(
-      login,
-      repositoryAccess && !guest,
-      imageRepositoryAccess && !guest,
-      expiresAt,
-      authenticatedAt,
-      guest,
+    val role = if (guest) GUEST_FLAG else MEMBER_FLAG
+    return sign(
+      SESSION_PURPOSE,
+      "${login.lowercase()}|$repoFlag|$expiresAt|$authenticatedAt|$imageFlag|$role|$configFingerprint",
     )
   }
 
-  private fun sign(payload: String): String {
+  /**
+   * Null unless [value] is a session this server signed, still inside its expiry, **under the
+   * sign-in configuration it is running with now** ([configFingerprint]).
+   *
+   * The fingerprint is what makes a configuration change take effect for people already signed in:
+   * the bits a session carries (member or guest, repository access) were decided against the
+   * allowlist and repositories of the day, so a session from before `--github-auth-users` was added
+   * would otherwise keep reading as a member for up to [SESSION_ABSOLUTE_TTL_SECONDS]. On a
+   * mismatch the visitor is simply signed out and signs in again — an OAuth app they have already
+   * approved re-authorises without a consent screen.
+   *
+   * Cookies minted before the fingerprint existed are refused too, deliberately: they carry no
+   * record of the configuration they were decided under, so none of their bits can be trusted to
+   * match the current one. Deploying this therefore signs everybody out once. The shorter shapes
+   * are not parsed at all any more for the same reason; their signatures were also computed without
+   * the purpose tag [sign] now includes, so they would not verify regardless.
+   */
+  private fun verifySession(value: String): SessionPayload? {
+    val parts = verifySigned(SESSION_PURPOSE, value)?.split("|") ?: return null
+    if (parts.size != 7) return null
+    if (!tokensMatch(configFingerprint, parts[6])) return null
+    val login = parts[0]
+    val expiresAt = parts[2].toLongOrNull() ?: return null
+    val authenticatedAt = parts[3].toLongOrNull() ?: return null
+    if (expiresAt <= clock.millis() || login.isBlank()) return null
+    val guest =
+      when (parts[5]) {
+        GUEST_FLAG -> true
+        MEMBER_FLAG -> false
+        else -> return null
+      }
+    // Covered by the fingerprint already (it includes the guest setting), and kept as its own rule:
+    // a guest cookie is never read while guests are turned off.
+    if (guest && !config.allowGuests) return null
+    return SessionPayload(
+      login = login,
+      repositoryAccess = parts[1] == "repo" && !guest,
+      imageRepositoryAccess = parts[4] == "image-repo" && !guest,
+      expiresAt = expiresAt,
+      authenticatedAt = authenticatedAt,
+      guest = guest,
+    )
+  }
+
+  /**
+   * The sign-in configuration a session is decided against, reduced to a short digest; see
+   * [verifySession]. Order-insensitive in the lists and case-insensitive throughout, matching how
+   * each value is compared at sign-in, so restarting with the same settings keeps everybody signed
+   * in.
+   */
+  private val configFingerprint: String by lazy { configFingerprint(config) }
+
+  /**
+   * `base64url(payload).mac`, where the MAC also covers [purpose] ([SESSION_PURPOSE] or
+   * [STATE_PURPOSE]). One secret signs both cookies, so without the tag a value signed as one kind
+   * would verify as the other; with it, each only ever verifies for the purpose it was signed for.
+   */
+  private fun sign(purpose: String, payload: String): String {
     val bytes = payload.toByteArray(Charsets.UTF_8)
     val encoded = Base64.getUrlEncoder().withoutPadding().encodeToString(bytes)
-    val sig = hmac(encoded)
+    val sig = hmac("$purpose:$encoded")
     return "$encoded.$sig"
   }
 
-  private fun verifySigned(value: String): String? {
+  private fun verifySigned(purpose: String, value: String): String? {
     val parts = value.split(".", limit = 2)
-    if (parts.size != 2 || !tokensMatch(hmac(parts[0]), parts[1])) return null
+    if (parts.size != 2 || !tokensMatch(hmac("$purpose:${parts[0]}"), parts[1])) return null
     return runCatching { Base64.getUrlDecoder().decode(parts[0]).toString(Charsets.UTF_8) }
       .getOrNull()
   }
@@ -725,6 +760,17 @@ class ServeGithubAuth(
     val mac = Mac.getInstance("HmacSHA256")
     mac.init(SecretKeySpec(config.cookieSecret.toByteArray(Charsets.UTF_8), "HmacSHA256"))
     return Base64.getUrlEncoder().withoutPadding().encodeToString(mac.doFinal(value.toByteArray()))
+  }
+
+  /**
+   * With a cookie domain configured, expire the **host-only** cookie called [name] on this host.
+   * The browser keeps a host-only cookie and a domain cookie of the same name side by side, and one
+   * written before the domain was set would otherwise linger beside the current one. A no-op when
+   * cookies are host-only already: the ordinary clear covers that cookie.
+   */
+  private fun clearHostOnlyVariant(call: ApplicationCall, name: String, secure: Boolean) {
+    if (cookieDomain == null) return
+    call.response.cookies.append(sessionCookie(name, "", 0, secure, domain = null))
   }
 
   private fun nonce(): String {
@@ -747,7 +793,13 @@ class ServeGithubAuth(
    * must not hand the session cookie back over a plaintext downgrade, while `serve` on
    * `http://localhost` would never see the cookie again if it were always set. See [isSecure].
    */
-  private fun sessionCookie(name: String, value: String, maxAge: Long, secure: Boolean): Cookie =
+  private fun sessionCookie(
+    name: String,
+    value: String,
+    maxAge: Long,
+    secure: Boolean,
+    domain: String? = cookieDomain,
+  ): Cookie =
     Cookie(
       name = name,
       value = value,
@@ -757,7 +809,7 @@ class ServeGithubAuth(
       // Set, it scopes the cookie to the parent domain and every site host under it, which is what
       // lets one sign-in cover preview.coo.ee and m3.preview.coo.ee alike. Always the operator's
       // configured value, never anything derived from the request.
-      domain = cookieDomain,
+      domain = domain,
       secure = secure,
       httpOnly = true,
       encoding = CookieEncoding.URI_ENCODING,
@@ -779,8 +831,8 @@ class ServeGithubAuth(
      */
     val imageRepositoryAccess: Boolean,
     val expiresAt: Long,
-    /** When GitHub last vouched for this visitor; null on a cookie minted before the stamp. */
-    val authenticatedAt: Long?,
+    /** When GitHub last vouched for this visitor. */
+    val authenticatedAt: Long,
     /** Signed in outside the allowlist; see [ServeGithubAuthConfig.allowGuests]. */
     val guest: Boolean = false,
   )
@@ -797,8 +849,13 @@ class ServeGithubAuth(
 
     private const val AUTH_COOKIE = "cp_gh_auth"
 
-    /** The sixth session field, present only on a guest cookie. */
+    /** The sixth session field: who the session belongs to. */
     private const val GUEST_FLAG = "guest"
+    private const val MEMBER_FLAG = "member"
+
+    /** Mixed into each signature so a value signed as one kind never verifies as the other. */
+    private const val SESSION_PURPOSE = "session"
+    private const val STATE_PURPOSE = "state"
     private const val STATE_COOKIE = "cp_gh_state"
 
     /** Marks the one automatic re-sign-in after an over-broad grant was revoked. */
@@ -820,7 +877,34 @@ class ServeGithubAuth(
     /** Both OAuth routes, so [refreshSession] can leave the cookie-minting ones alone. */
     private const val AUTH_PATH_PREFIX = "/auth/github/"
 
-    private const val STATE_TTL_SECONDS = 10L * 60
+    internal const val STATE_TTL_SECONDS = 10L * 60
+
+    /** Length of [configFingerprint] in hex characters: 64 bits of SHA-256. */
+    private const val CONFIG_FINGERPRINT_CHARS = 16
+
+    /**
+     * A short digest of everything that decides what a session may carry: the sign-in repository,
+     * the image lane's repository, the allowed logins and orgs, and whether guests are admitted.
+     */
+    internal fun configFingerprint(config: ServeGithubAuthConfig): String {
+      val imageRepository = config.imageRepository?.takeIf { it.isNotBlank() } ?: config.repository
+      val canonical =
+        listOf(
+            config.repository.lowercase(),
+            imageRepository.lowercase(),
+            config.allowedUsers.map { it.lowercase() }.sorted().joinToString(","),
+            config.allowedOrgs.map { it.lowercase() }.sorted().joinToString(","),
+            config.allowGuests.toString(),
+          )
+          .joinToString("\n")
+      val digest =
+        MessageDigest.getInstance("SHA-256").digest(canonical.toByteArray(Charsets.UTF_8))
+      return digest.joinToString("") { "%02x".format(it) }.take(CONFIG_FINGERPRINT_CHARS)
+    }
+
+    /** Whether a `Cache-Control` value lets a shared cache store the response. */
+    internal fun isPublicCacheControl(value: String): Boolean =
+      value.split(',').any { it.trim().equals("public", ignoreCase = true) }
 
     /**
      * The **idle** expiry: how long a session survives without a visit. [refreshSession] slides it
@@ -952,28 +1036,129 @@ class GitHubOAuthVerifier(private val client: OkHttpClient = OkHttpClient()) {
    * code path is the point: a second, subtly different notion of "has access" is how a gate ends up
    * admitting people one of its doors was meant to refuse.
    *
-   * The token is used for the two reads and dropped; nothing here retains or logs it.
+   * Which tokens count at all is [tokens]: a user token issued to [app] (this server's own OAuth
+   * app) always does; a personal access token, a user token issued to some other app, and an
+   * installation token each only when [tokens] says so. See [ImageUploadTokenPolicy].
+   *
+   * The token is used for the reads and dropped; nothing here retains or logs it. A failure to get
+   * an answer from GitHub at all is a [GitHubCheckUnavailableException], which callers must not
+   * treat as a verdict on the token.
    */
   fun verifyAccessToken(
     token: String,
     repository: String,
     allowedUsers: Set<String> = emptySet(),
     allowedOrgs: Set<String> = emptySet(),
+    tokens: ImageUploadTokenPolicy = ImageUploadTokenPolicy.ANY,
+    app: GitHubOAuthApp? = null,
   ): Result<GitHubOAuthUser> = runCatching {
+    val kind = GitHubTokenKind.of(token)
+    // Refused by shape before any round trip: the prefix is part of the token, so it can't be
+    // dressed up as another kind.
+    if (kind == GitHubTokenKind.INSTALLATION && !tokens.installation) {
+      throw ImageUploadTokenRefusedException(
+        "this host does not accept GitHub App installation tokens for image uploads"
+      )
+    }
+    if (kind == GitHubTokenKind.PERSONAL && !tokens.personal) {
+      throw ImageUploadTokenRefusedException(
+        "this host does not accept personal access tokens for image uploads"
+      )
+    }
     // Null when `/user` refuses the credential, which is the normal answer for a GitHub **App
     // installation** token rather than a sign of a bad one — see [verifyInstallationToken].
-    val login = runCatching { fetchLogin(token) }.getOrNull()
+    val login = lookupLogin(token)
     if (login == null) {
+      if (!tokens.installation) {
+        error("user lookup refused that token, and this host does not accept installation tokens")
+      }
       return@runCatching verifyInstallationToken(
         token,
         repository,
         restricted = allowedUsers.isNotEmpty() || allowedOrgs.isNotEmpty(),
       )
     }
+    if (kind == GitHubTokenKind.APP_USER && !tokens.otherApps) {
+      // A personal access token is the user's own; any other user token was issued to *some* app,
+      // and only this server's own is one we can recognise.
+      if (app == null) {
+        throw ImageUploadTokenRefusedException(
+          "this host does not accept user tokens issued to OAuth apps"
+        )
+      }
+      if (!isIssuedToApp(token, app)) {
+        throw ImageUploadTokenRefusedException(
+          "that token was issued to a different OAuth app than this server's"
+        )
+      }
+    }
     if (!isAdmitted(token, login, allowedUsers, allowedOrgs)) {
       error("GitHub user $login is not allowed")
     }
     GitHubOAuthUser(login, repositoryAccess = fetchRepositoryAccess(token, repository, login))
+  }
+
+  /**
+   * `GET /user` for [verifyAccessToken]: the login, or null when GitHub refuses the token as a user
+   * credential (`401` / `403`). Anything that isn't an answer about the token — the network, a
+   * `429`, a `5xx` — is a [GitHubCheckUnavailableException] instead, so an outage is not cached
+   * against a good token.
+   */
+  private fun lookupLogin(token: String): String? {
+    val request =
+      Request.Builder()
+        .url("https://api.github.com/user")
+        .header(HttpHeaders.Authorization, "Bearer $token")
+        .header(HttpHeaders.Accept, "application/vnd.github+json")
+        .build()
+    val response =
+      try {
+        client.newCall(request).execute()
+      } catch (e: java.io.IOException) {
+        throw GitHubCheckUnavailableException("user lookup failed: ${e.javaClass.simpleName}")
+      }
+    return response.use {
+      when {
+        it.isSuccessful ->
+          JSON.decodeFromString(GitHubUserResponse.serializer(), it.body.string()).login
+        it.code == 429 || it.code >= 500 ->
+          throw GitHubCheckUnavailableException("user lookup failed: ${it.code}")
+        else -> null
+      }
+    }
+  }
+
+  /**
+   * Whether [token] was issued to [app]: `POST /applications/{client_id}/token`, authenticated as
+   * the app. `200` is yes; `404` and `422` are GitHub's no. Anything else — including a `401` for
+   * this server's own client credentials — says nothing about the token, and is a
+   * [GitHubCheckUnavailableException].
+   */
+  internal fun isIssuedToApp(token: String, app: GitHubOAuthApp): Boolean {
+    val body =
+      JSON.encodeToString(GitHubAccessTokenBody.serializer(), GitHubAccessTokenBody(token))
+        .toRequestBody("application/json".toMediaType())
+    val request =
+      Request.Builder()
+        .url("https://api.github.com/applications/${urlEncode(app.clientId)}/token")
+        .header(HttpHeaders.Authorization, Credentials.basic(app.clientId, app.clientSecret))
+        .header(HttpHeaders.Accept, "application/vnd.github+json")
+        .post(body)
+        .build()
+    val response =
+      try {
+        client.newCall(request).execute()
+      } catch (e: java.io.IOException) {
+        throw GitHubCheckUnavailableException("app token check failed: ${e.javaClass.simpleName}")
+      }
+    return response.use {
+      when (it.code) {
+        200 -> true
+        404,
+        422 -> false
+        else -> throw GitHubCheckUnavailableException("app token check failed: ${it.code}")
+      }
+    }
   }
 
   /**
@@ -997,8 +1182,11 @@ class GitHubOAuthVerifier(private val client: OkHttpClient = OkHttpClient()) {
    *   silently admitting one would widen a gate whose whole point is to be narrow.
    *
    * The identity returned is [INSTALLATION_LOGIN] rather than a name, because there isn't one: an
-   * installation token cannot read `GET /app` (that needs the app's JWT). The audit trail says
-   * "some app installation with write on this repo", which is exactly what was verified.
+   * installation token cannot read `GET /app` (that needs the app's JWT), and neither `GET
+   * /repos/{owner}/{repo}/installation` (JWT again) nor `GET /installation/repositories` names the
+   * app. So this admits **any** GitHub App installed on the repository with write — not only GitHub
+   * Actions — which is why an operator can turn it off with `--image-upload-tokens`. The audit
+   * trail says "some app installation with write on this repo", which is exactly what was verified.
    */
   private fun verifyInstallationToken(
     token: String,
@@ -1301,14 +1489,26 @@ private data class GitHubRepositoryPermissions(
 
 private fun ApplicationCall.uriWithQuery(): String = request.uri
 
-private fun io.ktor.server.request.ApplicationRequest.cookieValue(name: String): String? =
-  headers[HttpHeaders.Cookie]
-    ?.split(";")
-    ?.map { it.trim() }
-    ?.firstNotNullOfOrNull { part ->
+/** Every value sent for the cookie [name], across all `Cookie` headers, in the order received. */
+private fun io.ktor.server.request.ApplicationRequest.cookieValues(name: String): List<String> =
+  headers.getAll(HttpHeaders.Cookie).orEmpty().flatMap { header ->
+    header.split(";").mapNotNull { raw ->
+      val part = raw.trim()
       val idx = part.indexOf('=')
       if (idx > 0 && part.substring(0, idx) == name) part.substring(idx + 1) else null
     }
+  }
+
+/**
+ * The value of the cookie [name] when the request carries exactly one, else null.
+ *
+ * A browser sends two cookies of one name when it holds two that match — for example a host-only
+ * one and a domain one — and gives the server no way to tell which is which. Picking either would
+ * be a guess, so a request carrying more than one reads as carrying none: signed out for the
+ * session, a failed check for the sign-in state.
+ */
+private fun io.ktor.server.request.ApplicationRequest.soleCookieValue(name: String): String? =
+  cookieValues(name).singleOrNull()
 
 /**
  * Whether this request reached us over TLS, so the cookies can be marked `secure`.

@@ -231,9 +231,14 @@ services:
       SERVE_PLAYGROUND_EDITING: "${SERVE_PLAYGROUND_EDITING:-0}"
       SERVE_PLAYGROUND_EDIT_LEASE_TTL: "${SERVE_PLAYGROUND_EDIT_LEASE_TTL:-}"
       # Attribute a request to the X-Forwarded-For peer rather than the proxy's own address, so the
-      # per-caller budget above counts real visitors instead of lumping them under Caddy. ONLY safe
-      # behind a proxy that appends the peer address it saw — which the `caddy` service below is.
-      SERVE_TRUST_FORWARDED_FOR: "${SERVE_TRUST_FORWARDED_FOR:-}"
+      # per-caller budgets (playground compiles, agent grant requests, image-token checks) count
+      # real visitors instead of lumping every one of them under Caddy's container address. On by
+      # default because this service is reachable only through the `caddy` service below (it
+      # `expose`s 8080, it publishes no host port), and Caddy — with no `trusted_proxies`
+      # configured — REPLACES any client-sent X-Forwarded-For with the peer address it saw, so the
+      # value the app reads is never client-chosen. Set SERVE_TRUST_FORWARDED_FOR=0 to key on the
+      # socket peer instead, e.g. if you publish 8080 directly or put another proxy in front.
+      SERVE_TRUST_FORWARDED_FOR: "${SERVE_TRUST_FORWARDED_FOR:-1}"
       # Re-check each catalog's design-artifacts branch every N seconds and re-fetch on change, so a
       # regenerated branch reaches this running server without a restart (Watchtower only rolls the
       # image). Empty ⇒ the CLI default (600s); set 0 to disable and serve the boot snapshot only.
@@ -378,6 +383,10 @@ services:
       SERVE_IMAGE_UPLOAD_REPO: "${SERVE_IMAGE_UPLOAD_REPO:-}"
       SERVE_IMAGE_TTL: "${SERVE_IMAGE_TTL:-}"
       SERVE_IMAGE_RATE_LIMIT: "${SERVE_IMAGE_RATE_LIMIT:-}"
+      # Which GitHub token kinds may upload: app, personal, other-apps, installation. Empty takes the
+      # server's default (personal,installation plus this box's own OAuth app when
+      # SERVE_GITHUB_AUTH_* is set; personal,other-apps,installation when it is not).
+      SERVE_IMAGE_UPLOAD_TOKENS: "${SERVE_IMAGE_UPLOAD_TOKENS:-}"
       # Extra Maven repositories the live-daemon classpath resolver may fetch from, beyond Central +
       # Google. Empty inherits the entrypoint's baked default (jitpack, apollo-snapshots, a8c-libs),
       # which is what the published catalogs need; `none` sends only Central + Google.

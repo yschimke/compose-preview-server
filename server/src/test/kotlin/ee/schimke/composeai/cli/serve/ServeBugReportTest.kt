@@ -32,6 +32,18 @@ class ServeBugReportTest {
     )
 
   @Test
+  fun `ui-builder and admin pages are the signed-in-only routes`() {
+    assertTrue(ServeBugReport.isPrivatePath("/ui-builder"))
+    assertTrue(ServeBugReport.isPrivatePath("/ui-builder/abc/history?x=1"))
+    assertTrue(ServeBugReport.isPrivatePath("/agent-access/req-1"))
+    assertTrue(ServeBugReport.isPrivatePath("/admin/ui-builder"))
+    assertTrue(ServeBugReport.isPrivatePath("/api/ui-builder/v1/designs/x"))
+    assertFalse(ServeBugReport.isPrivatePath("/ui-builderish"))
+    assertFalse(ServeBugReport.isPrivatePath("/compose-m3/p/button-filled"))
+    assertFalse(ServeBugReport.isPrivatePath(null))
+  }
+
+  @Test
   fun `a server bug is always filed against the repo that ships the server`() {
     // The whole point of the split from ServeIssueReport: a catalog's repo cannot fix the server.
     // And the server's repo is this one, not the compose-ai-tools the code was extracted from.

@@ -227,4 +227,67 @@ class ServeAgentGrantsTest {
     assertEquals("2h", parsed["ttl"]?.first())
     assertEquals("", parsed["junk"]?.first())
   }
+
+  @Test
+  fun `a public-box approver manages only what they approved, an administering one everything`() {
+    fun grant(approvedBy: String, actorId: String) =
+      ServeAgentGrantStore.Grant(
+        id = "g-$actorId",
+        token = "cpat_x",
+        scope = AgentGrantScope.LIVE,
+        label = "",
+        approvedBy = approvedBy,
+        approvedByActorId = actorId,
+        issuedAtMillis = 0,
+        expiresAtMillis = 1,
+      )
+    val alice =
+      ServeAgentGrants.Approver.github(
+        "alice",
+        repositoryAccess = true,
+        storeCeiling = AgentGrantScope.LIVE,
+        administers = false,
+      )
+    val admin =
+      ServeAgentGrants.Approver.github(
+        "admin",
+        repositoryAccess = true,
+        storeCeiling = AgentGrantScope.LIVE,
+      )
+    val operator = ServeAgentGrants.Approver.operator(AgentGrantScope.LIVE)
+    val alicesGrant = grant("@alice", "github:alice")
+    val operatorsGrant = grant("operator (token)", ServeAgentGrants.OPERATOR_ACTOR_ID)
+    assertTrue(alice.manages(alicesGrant))
+    assertFalse(alice.manages(operatorsGrant))
+    assertTrue(admin.manages(operatorsGrant))
+    assertTrue(operator.manages(alicesGrant))
+  }
+
+  @Test
+  fun `a public-box approver sees only the requests they opened for themselves`() {
+    fun request(requester: String) =
+      ServeAgentGrantStore.Request(
+        id = "r-$requester",
+        deviceSecret = "s",
+        userCode = "AAAA-AAAA",
+        label = "",
+        client = "",
+        requestedScope = AgentGrantScope.PREVIEW,
+        requestedTtlSeconds = 60,
+        requesterActorId = requester,
+        createdAtMillis = 0,
+        expiresAtMillis = 1,
+      )
+    val alice =
+      ServeAgentGrants.Approver.github(
+        "alice",
+        repositoryAccess = true,
+        storeCeiling = AgentGrantScope.LIVE,
+        administers = false,
+      )
+    assertTrue(alice.sees(request("github:alice")))
+    assertFalse(alice.sees(request("github:bob")))
+    assertFalse(alice.sees(request("")), "an agent's request reaches her through its link")
+    assertTrue(ServeAgentGrants.Approver.operator(AgentGrantScope.LIVE).sees(request("")))
+  }
 }

@@ -30,10 +30,69 @@
 	#
 	# stdout (not a file) so it lands in the json-file driver the compose `x-logging`
 	# anchor now caps; without that cap this would grow unbounded.
+	#
+	# The `filter` encoder keeps credentials out of that log. Caddy already masks
+	# Cookie, Set-Cookie, Authorization and Proxy-Authorization; the app's own token
+	# headers are deleted here, and the `token` query parameter (every shared link
+	# carries it) plus the OAuth callback's `code` and `state` are replaced in the
+	# logged URI. The same parameters are masked in a logged Referer, because a page
+	# opened with `?token=` sends its full URL as the Referer of its same-origin
+	# sub-requests, and in a logged `Location`, because a redirect keeps the query. Everything else — method, host, path, status, timings, client IP,
+	# User-Agent — is logged as before.
 	log {
 		output stdout
-		format json
+		format filter {
+			wrap json
+			request>headers>X-Compose-Preview-Admin-Token delete
+			request>headers>X-Compose-Preview-Token delete
+			request>headers>X-Compose-Preview-Agent-Access delete
+			request>uri query {
+				replace token REDACTED
+				replace code REDACTED
+				replace state REDACTED
+			}
+			request>headers>Referer query {
+				replace token REDACTED
+				replace code REDACTED
+				replace state REDACTED
+			}
+			resp_headers>Location query {
+				replace token REDACTED
+				replace code REDACTED
+				replace state REDACTED
+			}
+		}
 	}
+
+	# Response headers for every page this host serves. `?` sets each one only when the
+	# app has not set it itself, so a route can still choose its own value.
+	#   * Referrer-Policy same-origin: a link out to GitHub (or anywhere else) sends no
+	#     Referer, so a `?token=` URL stays on this host; same-origin requests keep the
+	#     full Referer the app's own pages rely on.
+	#   * Strict-Transport-Security: this block only ever serves HTTPS (Caddy redirects
+	#     :80), so browsers are told to skip the http:// hop next time. No
+	#     includeSubDomains — sibling hosts under the same parent are not ours to pin.
+	#   * X-Content-Type-Options nosniff: the app labels its JS/Wasm/CSS explicitly
+	#     (ServeHttpServer's asset content types), so nothing depends on sniffing.
+	header {
+		?Referrer-Policy same-origin
+		?Strict-Transport-Security "max-age=31536000"
+		?X-Content-Type-Options nosniff
+	}
+
+	# X-Frame-Options SAMEORIGIN on everything EXCEPT the pages that are framed by design:
+	#   * /iframe.html and /<system>/iframe.html — the Storybook-compatible isolated
+	#     story render, which a Storybook host on another origin embeds (composition) and
+	#     screenshot tools load in a frame.
+	#   * /wasm/* and /ui-builder/runtime/* — mounted in sandboxed (opaque-origin)
+	#     iframes by the viewer and the UI builder editor. Their parent is same-origin,
+	#     but a frame nested inside an opaque-origin one would fail a SAMEORIGIN check,
+	#     and these are generic client bundles already served with ACAO:* for that
+	#     sandbox, so they are left frameable.
+	# No Content-Security-Policy here: the pages carry inline scripts and styles, and a
+	# policy for them belongs in the app next to the markup it describes.
+	@sameOriginFramesOnly not path /iframe.html /*/iframe.html /wasm/* /ui-builder/runtime/*
+	header @sameOriginFramesOnly ?X-Frame-Options SAMEORIGIN
 
 	# meta-externalagent is blocked outright. It ignores robots.txt, and on this box it
 	# was not a tax on serving — it WAS the load.

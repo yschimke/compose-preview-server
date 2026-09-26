@@ -8125,6 +8125,14 @@ ${captureControlsHtml().prependIndent("          ")}
      */
     storeNarrowedCapabilities: List<AgentGrantCapability> = emptyList(),
     storeNarrowedReason: String = "",
+    /**
+     * Set when the request came through the MCP OAuth façade: where approving sends the browser,
+     * and with it the code that redeems this grant. The page then leads with that host, and drops
+     * the "Asked from" line — for an OAuth request that address is the approver's own browser,
+     * which followed the client's link here, so it says nothing about who is asking. [label] is
+     * then the client's self-chosen name and is shown as such, below the host.
+     */
+    oauthReturn: ServeMcpOAuth.RedirectTarget? = null,
   ): String {
     val esc = WebEscaping::htmlEscape
     // **Radios, not checkboxes**, because the scopes are cumulative and independent boxes lie about
@@ -8225,6 +8233,48 @@ ${captureControlsHtml().prependIndent("          ")}
         val selected = if (seconds == requestedTtlSeconds) " selected" else ""
         "<option value=\"$seconds\"$selected>${esc(AgentGrantProtocol.formatDuration(seconds))}</option>"
       }
+    val oauthReturnHtml =
+      if (oauthReturn == null) ""
+      else {
+        val (kindClass, kindText) =
+          when (oauthReturn.kind) {
+            ServeMcpOAuth.RedirectTarget.Kind.EXTERNAL ->
+              "cp-grant-return-kind--external" to "External site"
+            ServeMcpOAuth.RedirectTarget.Kind.LOOPBACK ->
+              "cp-grant-return-kind--local" to "This computer"
+            ServeMcpOAuth.RedirectTarget.Kind.APP -> "cp-grant-return-kind--local" to "App link"
+          }
+        val hint =
+          when (oauthReturn.kind) {
+            ServeMcpOAuth.RedirectTarget.Kind.EXTERNAL ->
+              "Approving sends this access to a site elsewhere on the internet, not to a program on " +
+                "your computer. Approve only if you recognise this host and meant to connect it."
+            ServeMcpOAuth.RedirectTarget.Kind.LOOPBACK ->
+              "Approving sends this access to a program listening on your own computer."
+            ServeMcpOAuth.RedirectTarget.Kind.APP ->
+              "Approving sends this access to whichever app on this device handles these links."
+          }
+        // Joined at the body's own indentation, so the page's `trimIndent` below still finds it.
+        listOf(
+            "<div class=\"cp-grant-return\">",
+            "  <span class=\"cp-grant-code-label\">Access goes to</span>",
+            "  <span class=\"cp-grant-return-host\"><code>${esc(oauthReturn.display)}</code> " +
+              "<span class=\"cp-grant-return-kind $kindClass\">${esc(kindText)}</span></span>",
+            "  <span class=\"cp-grant-code-hint\">${esc(hint)}</span>",
+            "  <span class=\"cp-grant-return-uri\">${esc(oauthReturn.uri)}</span>",
+            "</div>",
+            "",
+          )
+          .joinToString("\n        ")
+      }
+    val askerFacts =
+      if (oauthReturn == null)
+        "<dt>Purpose</dt><dd>${if (label.isBlank()) "<em>none given</em>" else esc(label)}</dd>\n" +
+          "          <dt>Asked from</dt><dd>${esc(client)}</dd>"
+      else
+        "<dt>Client calls itself</dt><dd>" +
+          (if (label.isBlank()) "<em>no name given</em>" else esc(label)) +
+          " <span class=\"cp-grant-self-named\">(chosen by the client)</span></dd>"
     return document(
       title = "Grant agent access — compose-preview",
       unfurlDescription = "An agent is asking for temporary access to this preview server.",
@@ -8246,9 +8296,8 @@ ${captureControlsHtml().prependIndent("          ")}
           you are looking at someone else's request — close this page.</span>
         </div>
 
-        <dl class="cp-grant-facts">
-          <dt>Purpose</dt><dd>${if (label.isBlank()) "<em>none given</em>" else esc(label)}</dd>
-          <dt>Asked from</dt><dd>${esc(client)}</dd>
+        $oauthReturnHtml<dl class="cp-grant-facts">
+          $askerFacts
           <dt>Approving as</dt><dd>${esc(approver)}</dd>
           <dt>This request expires in</dt><dd>${esc(AgentGrantProtocol.formatDuration(expiresInSeconds))}</dd>
         </dl>
@@ -10364,6 +10413,11 @@ ${captureControlsHtml().prependIndent("          ")}
      */
     val agentGrants: List<StatusAgentGrant> = emptyList(),
     val agentGrantRequests: List<StatusAgentRequest> = emptyList(),
+    /**
+     * Live grants this reader is not shown a row for, because they did not approve them (or are not
+     * an approver at all). Rendered as a count only: a row names logins.
+     */
+    val hiddenAgentGrants: Int = 0,
   )
 
   /**
@@ -10380,10 +10434,25 @@ ${captureControlsHtml().prependIndent("          ")}
     esc: (String) -> String,
   ): String {
     // Empty string, not an empty section: see the call site in [statusPage].
-    if (view.agentGrants.isEmpty() && view.agentGrantRequests.isEmpty()) return ""
+    if (
+      view.agentGrants.isEmpty() && view.agentGrantRequests.isEmpty() && view.hiddenAgentGrants == 0
+    )
+      return ""
+    val hiddenNote =
+      when (view.hiddenAgentGrants) {
+        0 -> ""
+        1 ->
+          "<p class=\"cp-status-note\">1 more live grant is listed only for whoever approved it.</p>"
+        else ->
+          "<p class=\"cp-status-note\">${view.hiddenAgentGrants} more live grants are listed only " +
+            "for whoever approved them.</p>"
+      }
     val liveRows =
       if (view.agentGrants.isEmpty())
-        "<tr><td colspan=\"7\" class=\"cp-empty\">No agent currently holds access.</td></tr>"
+        "<tr><td colspan=\"7\" class=\"cp-empty\">" +
+          (if (view.hiddenAgentGrants == 0) "No agent currently holds access."
+          else "No grant you approved is live.") +
+          "</td></tr>"
       else
         view.agentGrants.joinToString("\n") { grant ->
           val revoke =
@@ -10431,7 +10500,7 @@ ${captureControlsHtml().prependIndent("          ")}
         $liveRows
         </tbody>
       </table></div>
-      $pending
+      $hiddenNote$pending
       """
         .trimIndent()
   }
@@ -10854,6 +10923,13 @@ ${captureControlsHtml().prependIndent("          ")}
     themeStorageKey: String = "",
     navSuffix: String = "",
     canUploadCaptures: Boolean = false,
+    /**
+     * The reported page is one an anonymous visitor could not open — a UI-builder or admin page, or
+     * any page of a token-gated host. Its captures are then uploaded only after the reporter ticks
+     * the opt-in `report-capture.js` shows, since the image URL is anonymous-read and the issue
+     * that links it is public.
+     */
+    privateCaptures: Boolean = false,
   ): String {
     fun esc(s: String) = WebEscaping.htmlEscape(s)
     val who =
@@ -10880,10 +10956,11 @@ ${captureControlsHtml().prependIndent("          ")}
     // and rendered by `report-capture.js` — see [captureControlsHtml]. Server-rendered as an
     // empty mount rather than left entirely to the script, so the section has a fixed place in the
     // page and the "nothing came across" wording is written here with the rest of the page's prose.
+    val scopeAttr = if (privateCaptures) " data-cp-capture-scope=\"private\"" else ""
     val captures =
       """
       <div class="cp-shots" data-cp-capture-src="${esc(assetHref("report-capture.js"))}"
-        data-cp-image-upload="$canUploadCaptures">
+        data-cp-image-upload="$canUploadCaptures"$scopeAttr>
         <p class="cp-sub cp-shots-empty">No captures came across from the page you reported. Take
           one there with the &ldquo;Report a problem&rdquo; button, or paste an ordinary screenshot
           straight into the issue.</p>
@@ -10899,7 +10976,18 @@ ${captureControlsHtml().prependIndent("          ")}
     // the issue by being pasted, and nothing on the page said so until the reporter had already
     // opened a screenshot-less issue in another tab (#556).
     val screenshotProse =
-      if (canUploadCaptures)
+      if (canUploadCaptures && privateCaptures)
+        """
+        <p class="cp-sub">The page you reported is only visible to signed-in users, so captures of
+          it are <strong>not</strong> uploaded unless you tick the box beside them. An uploaded
+          capture can be opened by anyone with its link, and the GitHub issue that links it is
+          public. Unticked, pressing the button above puts the newest capture on the clipboard;
+          paste it into the Screenshot section if you want it there. Use <strong>Mark up</strong>
+          to add boxes, arrows, pen marks, or text first.</p>
+        """
+          .trimIndent()
+          .replace("\n", "\n      ")
+      else if (canUploadCaptures)
         """
         <p class="cp-sub">Captured images are uploaded to this preview server and embedded in the
           report automatically. Use <strong>Mark up</strong> to add boxes, arrows, pen marks, or text
