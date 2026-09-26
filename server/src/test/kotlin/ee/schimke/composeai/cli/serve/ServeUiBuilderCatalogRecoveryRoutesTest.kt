@@ -132,22 +132,20 @@ class ServeUiBuilderCatalogRecoveryRoutesTest {
   }
 
   @Test
-  fun `a stranded design may load the recovery shell without becoming an existence oracle`() {
+  fun `stranded and unknown design URLs load the same shell without querying the service`() {
     val stranded = getPath("/ui-builder/stranded-design", TOKEN)
 
     assertEquals(200, stranded.first, stranded.second)
     assertTrue(stranded.second.contains("Recovery builder"), stranded.second)
-    assertEquals(
-      listOf(
-        UiBuilderServiceRequest.GetDesignActions::class,
-        UiBuilderServiceRequest.PreviewCurrentCatalogUpgrade::class,
-      ),
-      calls.map { it.request::class },
-    )
+    assertTrue(calls.isEmpty(), "the shell must not probe design state: $calls")
 
-    calls.clear()
+    // The shell carries no design data. A guessed or missing id therefore gets the same response;
+    // the authenticated API decides whether a document or recovery preview may be read.
     refusal = UiBuilderServiceError(ServiceErrorCodeV1.NOT_FOUND, "not found")
-    assertEquals(404, getPath("/ui-builder/private-design", TOKEN).first)
+    val unknown = getPath("/ui-builder/private-design", TOKEN)
+    assertEquals(200, unknown.first, unknown.second)
+    assertTrue(unknown.second.contains("Recovery builder"), unknown.second)
+    assertTrue(calls.isEmpty(), "an unknown design must not be queried by the shell: $calls")
   }
 
   private fun get(token: String?): Pair<Int, String> {
