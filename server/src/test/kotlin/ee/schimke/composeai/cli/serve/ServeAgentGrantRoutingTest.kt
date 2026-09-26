@@ -591,6 +591,20 @@ class ServeAgentGrantRoutingTest {
   }
 
   @Test
+  fun `catalog MCP does not accept an ambient browser grant cookie`() {
+    val token = grantedToken(scope = "preview")
+    val grant = assertNotNull(grants.grantForToken(token))
+    val credential = assertNotNull(grants.browserCredentialFor(grant))
+    val response =
+      mcpAnonymous(
+        """{"jsonrpc":"2.0","id":8,"method":"resources/list","params":{}}""",
+        cookie = "${ServeAgentGrantCookie.NAME}=${credential.value}",
+      )
+    assertEquals(401, response.first)
+    assertTrue(response.second.contains("short-lived preview grant"), response.second)
+  }
+
+  @Test
   fun `made to order MCP render requires live scope`() {
     val previewToken = grantedToken(scope = "preview")
     val refused =
@@ -624,12 +638,13 @@ class ServeAgentGrantRoutingTest {
     """{"jsonrpc":"2.0","id":$id,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"test","version":"1"}}}"""
 
   /** The same call with no credential at all — what a client that has never been granted sends. */
-  private fun mcpAnonymous(body: String): Pair<Int, String> {
+  private fun mcpAnonymous(body: String, cookie: String? = null): Pair<Int, String> {
     val request =
       Request.Builder()
         .url(url("/mcp"))
         .header("Accept", "application/json, text/event-stream")
         .header("MCP-Protocol-Version", ServeCatalogMcp.MCP_PROTOCOL_VERSION)
+        .apply { cookie?.let { header("Cookie", it) } }
         .post(body.toRequestBody("application/json".toMediaType()))
         .build()
     client.newCall(request).execute().use {

@@ -427,6 +427,11 @@ class ServeUiBuilderRoutesTest {
         .execute()
         .use {
           assertEquals(204, it.code, "the preview-only ambient grant must not block a live lane")
+          assertTrue(
+            it.headers("Set-Cookie").any { value ->
+              value.startsWith("${ServeAgentGrantCookie.NAME}=") && value.contains("Max-Age=0")
+            }
+          )
         }
       browser
         .newCall(
@@ -443,6 +448,24 @@ class ServeUiBuilderRoutesTest {
         .execute()
         .use {
           assertEquals(204, it.code, "the operator browse cookie must outrank an ambient grant")
+        }
+      browser
+        .newCall(
+          Request.Builder()
+            .url("http://127.0.0.1:${isolated.port}${ServeAgentGrants.LEAVE_PATH}")
+            .header("Cookie", cookie)
+            .post("".toRequestBody())
+            .build()
+        )
+        .execute()
+        .use {
+          assertEquals(204, it.code)
+          val cleared =
+            it.headers("Set-Cookie").single { value ->
+              value.startsWith("${ServeAgentGrantCookie.NAME}=")
+            }
+          assertTrue(cleared.contains("Max-Age=0"), cleared)
+          assertTrue(cleared.contains("HttpOnly"), cleared)
         }
 
       assertTrue(grantStore.revoke(grant.id, "test"))

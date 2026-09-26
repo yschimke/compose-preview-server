@@ -29,6 +29,7 @@ object ServeAgentGrants {
   const val POLL_PATH = "$BASE_PATH/poll"
   const val REVOKE_PATH = "$BASE_PATH/revoke"
   const val WHOAMI_PATH = "$BASE_PATH/whoami"
+  const val LEAVE_PATH = "$BASE_PATH/leave"
 
   /**
    * The longest a poll may be held open. Chosen well inside the reverse proxies and load balancers

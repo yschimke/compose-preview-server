@@ -954,7 +954,29 @@ class ServeHttpServer(
       agentGrants?.let { store ->
         intercept(ApplicationCallPipeline.Plugins) {
           val current: ApplicationCall = context
-          val exchange = ServeAgentGrantCookie.exchange(current, store) ?: return@intercept
+          val exchange = ServeAgentGrantCookie.exchange(current, store)
+          // A human identity wins over an ambient grant. Still strip a cpat URL they opened, but
+          // clear any previous grant cookie instead of silently switching their browser identity.
+          val humanPresent =
+            current.presentsOperatorCredential() ||
+              githubAuth?.currentSignedInLogin(current) != null
+          if (humanPresent) {
+            if (
+              exchange != null ||
+                current.request.cookies.rawCookies[ServeAgentGrantCookie.NAME] != null
+            ) {
+              current.response.cookies.append(
+                ServeAgentGrantCookie.clearedCookie(secure = isSecure(current))
+              )
+            }
+            if (exchange == null) return@intercept
+            current.response.headers.append(HttpHeaders.CacheControl, "no-store")
+            current.response.headers.append(HttpHeaders.Location, exchange.target)
+            current.respond(HttpStatusCode.Found)
+            finish()
+            return@intercept
+          }
+          if (exchange == null) return@intercept
           current.response.cookies.append(
             ServeAgentGrantCookie.cookie(exchange.credential, secure = isSecure(current))
           )
@@ -1299,6 +1321,13 @@ class ServeHttpServer(
           post(ServeAgentGrants.POLL_PATH) { handleAgentGrantPoll(store) }
           post(ServeAgentGrants.REVOKE_PATH) { handleAgentGrantRevoke(store) }
           get(ServeAgentGrants.WHOAMI_PATH) { handleAgentGrantWhoami(store) }
+          post(ServeAgentGrants.LEAVE_PATH) {
+            call.response.cookies.append(
+              ServeAgentGrantCookie.clearedCookie(secure = isSecure(call))
+            )
+            call.response.headers.append(HttpHeaders.CacheControl, "no-store")
+            call.respond(HttpStatusCode.NoContent)
+          }
           get("${ServeAgentGrants.BASE_PATH}/{requestId}") { handleAgentGrantPage(store) }
           post("${ServeAgentGrants.BASE_PATH}/{requestId}") { handleAgentGrantDecision(store) }
           post("${ServeAgentGrants.BASE_PATH}/{grantId}/revoke") {
@@ -9838,7 +9867,13 @@ class ServeHttpServer(
 
     if (ServeCatalogMcp.requiresGrant(request)) {
       when (
-        val decision = authorization.authorizeScope(call, AgentGrantScope.PREVIEW, presentedToken)
+        val decision =
+          authorization.authorizeScope(
+            call,
+            AgentGrantScope.PREVIEW,
+            presentedToken,
+            allowBrowserGrantCookie = false,
+          )
       ) {
         is ServeMachineAuthorization.Decision.Authorized -> Unit
         ServeMachineAuthorization.Decision.Missing -> {
@@ -9866,7 +9901,12 @@ class ServeHttpServer(
             ?: UiBuilderAuthorizationDecision.Missing
         },
       ) { presented ->
-        authorization.authorizeScope(call, AgentGrantScope.LIVE, presented)
+        authorization.authorizeScope(
+          call,
+          AgentGrantScope.LIVE,
+          presented,
+          allowBrowserGrantCookie = false,
+        )
       }
     if (reply.accepted) {
       call.respond(HttpStatusCode.Accepted)
@@ -13278,7 +13318,8 @@ class ServeHttpServer(
   private fun RoutingContext.wasmPrivateAccess(): String {
     val grant = agentGrantFor(call)
     return when {
-      grant != null && call.browsesByAgentGrantCookie(grant) -> ServeAgentGrantCookie.WASM_ACCESS
+      grant != null && call.browsesByAgentGrantCookie(grant) ->
+        agentGrants?.wasmCredentialFor(grant) ?: grant.token
       grant != null -> grant.token
       else -> ServeBrowseCookie.wasmAccess(serverToken)
     }
@@ -13294,10 +13335,7 @@ class ServeHttpServer(
     ServeUrls.tokensMatch(ServeBrowseCookie.wasmAccess(serverToken), value) ||
       ServeUrls.tokensMatch(serverToken, value) ||
       agentGrants?.grantForToken(value)?.allows(AgentGrantScope.PREVIEW) == true ||
-      (value == ServeAgentGrantCookie.WASM_ACCESS &&
-        agentGrantFor(call)?.let { grant ->
-          call.browsesByAgentGrantCookie(grant) && grant.allows(AgentGrantScope.PREVIEW)
-        } == true)
+      agentGrants?.grantForWasmCredential(value)?.allows(AgentGrantScope.PREVIEW) == true
 
   /**
    * The live grant this call presents, or null — resolved **once per request** and remembered.
@@ -13390,12 +13428,19 @@ class ServeHttpServer(
     // is exactly the shape `share-preview --mechanism serve` sends: the host credential in the
     // query, a GitHub token in the bearer for the upload's own gate. First source that resolves to
     // a live grant wins; one carrying something else simply does not answer.
-    return sequenceOf(
-        call.request.headers[TOKEN_HEADER],
-        bearer,
-        call.request.queryParameters["token"],
-      )
-      .firstNotNullOfOrNull { store.grantForToken(it) } ?: ServeAgentGrantCookie.grant(call, store)
+    val explicitlyPresented =
+      sequenceOf(
+          call.request.headers[TOKEN_HEADER],
+          bearer,
+          call.request.queryParameters["token"],
+        )
+        .firstNotNullOfOrNull { store.grantForToken(it) }
+    if (explicitlyPresented != null) return explicitlyPresented
+    // A person's signed-in browser identity also outranks an ambient grant cookie. An explicit
+    // cpat above remains explicit, while merely having exchanged one in this browser cannot make
+    // later work look like the grant holder's after the person signs in.
+    if (githubAuth?.currentSignedInLogin(call) != null) return null
+    return ServeAgentGrantCookie.grant(call, store, sites.hosts)
   }
 
   /**
@@ -13482,7 +13527,12 @@ class ServeHttpServer(
     // The sandboxed iframe has an opaque origin, so its ES-module and Wasm requests require CORS.
     call.response.headers.append(HttpHeaders.AccessControlAllowOrigin, "*")
     val etag = "\"${file.length().toString(16)}-${file.lastModified().toString(16)}\""
-    call.response.headers.append(HttpHeaders.CacheControl, "public, max-age=3600")
+    call.response.headers.append(
+      HttpHeaders.CacheControl,
+      // The access segment can expire or be revoked while the bytes stay the same. A private cache
+      // may retain them, but it must revalidate through the authorization gate before reuse.
+      if (privateRoute) "private, no-cache" else "public, max-age=3600",
+    )
     call.response.headers.append(HttpHeaders.ETag, etag)
     if (call.request.headers[HttpHeaders.IfNoneMatch] == etag) {
       call.respond(HttpStatusCode.NotModified)

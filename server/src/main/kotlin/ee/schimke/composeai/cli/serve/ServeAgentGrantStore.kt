@@ -247,6 +247,9 @@ class ServeAgentGrantStore(
    */
   private val byBrowserCredential = ConcurrentHashMap<String, String>()
 
+  /** Grant-specific path credential for opaque private-Wasm iframe subresources. */
+  private val byWasmCredential = ConcurrentHashMap<String, String>()
+
   // ---------------------------------------------------------------- requests
 
   /**
@@ -429,6 +432,7 @@ class ServeAgentGrantStore(
       grants[grant.id] = grant
       byToken[grant.token] = grant.id
       byBrowserCredential[browserCredentialValue(grant.token)] = grant.id
+      byWasmCredential[wasmCredentialValue(grant.token)] = grant.id
       // Data BEFORE the flag that says the data is there. The lock [poll] now takes is what makes
       // the intermediate state unobservable; this ordering is the belt to that pair of braces, and
       // is the right shape regardless of who else ever reads these.
@@ -556,6 +560,22 @@ class ServeAgentGrantStore(
       isWellFormedBrowserCredential(presented) &&
       ServeUrls.tokensMatch(browserCredentialValue(grant.token), presented)
 
+  /** A non-cookie, non-cpat path credential for this live grant's private Wasm assets. */
+  fun wasmCredentialFor(grant: Grant): String? {
+    val live =
+      grants[grant.id]?.takeIf { it.token == grant.token && it.expiresAtMillis > clock() }
+        ?: return null
+    return wasmCredentialValue(live.token)
+  }
+
+  /** Resolve a private-Wasm path credential back to its authoritative live grant. */
+  fun grantForWasmCredential(presented: String?): Grant? {
+    val credential = presented?.takeIf { isWellFormedWasmCredential(it) } ?: return null
+    val id = byWasmCredential[credential] ?: return null
+    val grant = grants[id] ?: return null
+    return grant.takeIf { it.expiresAtMillis > clock() }
+  }
+
   data class BrowserCredential(val value: String, val maxAgeSeconds: Int)
 
   /**
@@ -677,6 +697,7 @@ class ServeAgentGrantStore(
     val grant = grants.remove(id) ?: return false
     byToken.remove(grant.token)
     byBrowserCredential.remove(browserCredentialValue(grant.token))
+    byWasmCredential.remove(wasmCredentialValue(grant.token))
     audit("agent-grant: revoked ${grant.fingerprint} by $by label=\"${grant.label}\"")
     return true
   }
@@ -715,6 +736,7 @@ class ServeAgentGrantStore(
     grants.clear()
     byToken.clear()
     byBrowserCredential.clear()
+    byWasmCredential.clear()
   }
 
   /** Drop every expired request and grant; returns how many went in total. */
@@ -742,6 +764,7 @@ class ServeAgentGrantStore(
         if (it) {
           byToken.remove(g.token)
           byBrowserCredential.remove(browserCredentialValue(g.token))
+          byWasmCredential.remove(wasmCredentialValue(g.token))
           dropped++
         }
       }
@@ -908,11 +931,26 @@ class ServeAgentGrantStore(
     internal fun isWellFormedBrowserCredential(value: String): Boolean =
       value.matches(BROWSER_CREDENTIAL_SHAPE)
 
+    /** A domain-separated credential safe to expose only in private-Wasm asset paths. */
+    internal fun wasmCredentialValue(token: String): String {
+      val mac = Mac.getInstance("HmacSHA256")
+      mac.init(SecretKeySpec(token.toByteArray(Charsets.UTF_8), "HmacSHA256"))
+      val digest = mac.doFinal(WASM_CREDENTIAL_LABEL.toByteArray(Charsets.UTF_8))
+      return WASM_CREDENTIAL_PREFIX + Base64.getUrlEncoder().withoutPadding().encodeToString(digest)
+    }
+
+    internal fun isWellFormedWasmCredential(value: String): Boolean =
+      value.matches(WASM_CREDENTIAL_SHAPE)
+
     private val ID_SHAPE = Regex("[A-Za-z0-9_-]{16,64}")
     private val TOKEN_SHAPE = Regex("${Regex.escape(TOKEN_PREFIX)}[A-Za-z0-9_-]{16,64}")
     private const val BROWSER_CREDENTIAL_PREFIX = "cpag_"
     private const val BROWSER_CREDENTIAL_LABEL = "compose-preview/agent-grant-browser/v1"
     private val BROWSER_CREDENTIAL_SHAPE =
       Regex("${Regex.escape(BROWSER_CREDENTIAL_PREFIX)}[A-Za-z0-9_-]{43}")
+    private const val WASM_CREDENTIAL_PREFIX = "cpaw_"
+    private const val WASM_CREDENTIAL_LABEL = "compose-preview/agent-grant-wasm-access/v1"
+    private val WASM_CREDENTIAL_SHAPE =
+      Regex("${Regex.escape(WASM_CREDENTIAL_PREFIX)}[A-Za-z0-9_-]{43}")
   }
 }

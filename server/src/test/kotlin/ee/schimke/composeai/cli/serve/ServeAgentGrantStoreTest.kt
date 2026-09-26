@@ -239,14 +239,21 @@ class ServeAgentGrantStoreTest {
     assertEquals(60, expiringCredential.maxAgeSeconds)
     assertEquals(expiring, store.grantForBrowserCredential(expiringCredential.value))
     assertNull(store.grantForBrowserCredential(expiring.token))
+    val wasmCredential = requireNotNull(store.wasmCredentialFor(expiring))
+    assertNotEquals(expiring.token, wasmCredential)
+    assertNotEquals(expiringCredential.value, wasmCredential)
+    assertEquals(expiring, store.grantForWasmCredential(wasmCredential))
 
     now += 61_000
     assertNull(store.grantForBrowserCredential(expiringCredential.value))
+    assertNull(store.grantForWasmCredential(wasmCredential))
 
     val revoked = store.approve(store.ask().id, "@yuri", AgentGrantScope.LIVE, 60)!!
     val revokedCredential = requireNotNull(store.browserCredentialFor(revoked)).value
+    val revokedWasmCredential = requireNotNull(store.wasmCredentialFor(revoked))
     assertTrue(store.revoke(revoked.id, "@yuri"))
     assertNull(store.grantForBrowserCredential(revokedCredential))
+    assertNull(store.grantForWasmCredential(revokedWasmCredential))
   }
 
   @Test

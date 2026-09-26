@@ -20,7 +20,6 @@ import io.ktor.server.request.queryString
  */
 internal object ServeAgentGrantCookie {
   const val NAME: String = "cp_agent_grant"
-  const val WASM_ACCESS: String = "agent-cookie"
 
   data class Exchange(
     val target: String,
@@ -31,8 +30,16 @@ internal object ServeAgentGrantCookie {
   fun grant(
     call: ApplicationCall,
     store: ServeAgentGrantStore,
-  ): ServeAgentGrantStore.Grant? =
-    store.grantForBrowserCredential(call.request.cookies.rawCookies[NAME])
+    siteHosts: Set<String> = emptySet(),
+  ): ServeAgentGrantStore.Grant? {
+    if (
+      ServeSameOriginRequests.isStateChangingOrUpgrade(call) &&
+        !ServeSameOriginRequests.isSameOrigin(call, siteHosts)
+    ) {
+      return null
+    }
+    return store.grantForBrowserCredential(call.request.cookies.rawCookies[NAME])
+  }
 
   /**
    * Resolve a top-level browser navigation carrying exactly one live `cpat_` grant. Machine/API
@@ -52,7 +59,9 @@ internal object ServeAgentGrantCookie {
     val grant = store.grantForToken(presented.single()) ?: return null
     val credential = store.browserCredentialFor(grant) ?: return null
     return Exchange(
-      target = path + ServeBrowseCookie.queryWithoutToken(call.request.queryString()),
+      target =
+        ServeBrowseCookie.localRedirectPath(path) +
+          ServeBrowseCookie.queryWithoutToken(call.request.queryString()),
       credential = credential,
     )
   }
@@ -63,6 +72,18 @@ internal object ServeAgentGrantCookie {
       value = credential.value,
       path = "/",
       maxAge = credential.maxAgeSeconds,
+      secure = secure,
+      httpOnly = true,
+      encoding = CookieEncoding.RAW,
+      extensions = mapOf("SameSite" to "Lax"),
+    )
+
+  fun clearedCookie(secure: Boolean): Cookie =
+    Cookie(
+      name = NAME,
+      value = "",
+      path = "/",
+      maxAge = 0,
       secure = secure,
       httpOnly = true,
       encoding = CookieEncoding.RAW,

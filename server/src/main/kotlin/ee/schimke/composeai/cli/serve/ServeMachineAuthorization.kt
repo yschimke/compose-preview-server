@@ -17,6 +17,7 @@ class ServeMachineAuthorization(
   private val serverToken: String,
   private val githubAuth: ServeGithubAuth?,
   private val agentGrants: ServeAgentGrantStore?,
+  private val siteHosts: () -> Set<String> = { emptySet() },
   /**
    * Whether this box serves its published catalogs token-free — `--public`.
    *
@@ -55,10 +56,11 @@ class ServeMachineAuthorization(
     call: ApplicationCall,
     required: AgentGrantScope,
     presentedToken: String? = null,
+    allowBrowserGrantCookie: Boolean = true,
   ): Decision {
     if (hasOperatorToken(call)) return Decision.Authorized(OPERATOR_ACTOR_ID)
 
-    presentedGrant(call, presentedToken)?.let { grant ->
+    presentedGrant(call, presentedToken, allowBrowserGrantCookie)?.let { grant ->
       return if (grant.allows(required)) {
         grant.authorized()
       } else {
@@ -158,6 +160,7 @@ class ServeMachineAuthorization(
   fun presentedGrant(
     call: ApplicationCall,
     presentedToken: String? = null,
+    allowBrowserGrantCookie: Boolean = true,
   ): ServeAgentGrantStore.Grant? {
     val store = agentGrants ?: return null
     // A body token or ambient grant cookie cannot re-identify a transport that already presented
@@ -169,13 +172,20 @@ class ServeMachineAuthorization(
         ?.takeIf { it.startsWith(BEARER_PREFIX, ignoreCase = true) }
         ?.substring(BEARER_PREFIX.length)
         ?.trim()
-    return sequenceOf(
-        call.request.headers[ServeHttpServer.TOKEN_HEADER],
-        bearer,
-        call.request.queryParameters["token"],
-        presentedToken,
-      )
-      .firstNotNullOfOrNull(store::grantForToken) ?: ServeAgentGrantCookie.grant(call, store)
+    val explicitlyPresented =
+      sequenceOf(
+          call.request.headers[ServeHttpServer.TOKEN_HEADER],
+          bearer,
+          call.request.queryParameters["token"],
+          presentedToken,
+        )
+        .firstNotNullOfOrNull(store::grantForToken)
+    if (explicitlyPresented != null) return explicitlyPresented
+    // The browser cookie is ambient; unlike an explicit cpat above, it must not replace the
+    // person's own signed-in identity.
+    if (githubAuth?.currentSignedInLogin(call) != null) return null
+    if (!allowBrowserGrantCookie) return null
+    return ServeAgentGrantCookie.grant(call, store, siteHosts())
   }
 
   /**
