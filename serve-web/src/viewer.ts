@@ -12,6 +12,7 @@
 // `window.cpViewerQuery` handle that existed only because this file used to live in another build.
 
 // Types only: the player bundle is script-injected at runtime, never imported.
+import { renderRequest } from "./viewer/renderRequest.js";
 import type { RcPlayer, RemoteContext } from "./rc/player.js";
 import {
     FrameQueue,
@@ -990,19 +991,20 @@ function refreshSnapshot(isRetry?: boolean) {
     var gen = ++snapshotGen;
     setSnapshotLoading(true);
     var qs = withSnapshotFormat(snapshotExt, query());
-    var url =
-        base +
-        "/render/" +
-        encodeURIComponent(previewId) +
-        snapshotExt +
-        (qs ? "?" + qs : "");
+    // A long override — an A2UI document in a string knob — goes out as POST instead of a URL no
+    // server will accept. See `renderRequest`.
+    var request = renderRequest(
+        base + "/render/" + encodeURIComponent(previewId) + snapshotExt,
+        qs,
+    );
+    var url = request.url;
     var requestedExt = snapshotExt;
     // Override-bearing renders are deliberately `no-store`. Preloading with `new Image()` and
     // then assigning the same URL to the visible image therefore performs two server renders,
     // and the second one can race the first through the daemon's shared override state. Fetch the
     // bytes once and hand the resulting blob URL to the image instead. This also keeps the current
     // frame visible until the replacement has decoded.
-    fetch(url, { credentials: "same-origin" })
+    fetch(url, request.init)
         .then(function (response) {
             if (!response.ok) {
                 // Everything the refusal told us, read once and handed to the rules next door.
