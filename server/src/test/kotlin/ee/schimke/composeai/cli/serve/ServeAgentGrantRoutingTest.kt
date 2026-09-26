@@ -684,7 +684,11 @@ class ServeAgentGrantRoutingTest {
         """{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"render_preview","arguments":{"catalog":"demo","previewId":"example"}}}""",
       )
     val observation =
-      json(observed.second)["result"]!!.jsonObject["content"]!!.jsonArray.single().jsonObject
+      json(observed.second)["result"]!!
+        .jsonObject["content"]!!
+        .jsonArray
+        .single { it.jsonObject["type"]!!.jsonPrimitive.content == "text" }
+        .jsonObject
     assertEquals("text", observation["type"]!!.jsonPrimitive.content)
     assertTrue(observation["text"]!!.jsonPrimitive.content.contains("\"sha256\""))
   }
