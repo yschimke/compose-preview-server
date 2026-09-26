@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.71.0](https://github.com/yschimke/compose-preview-server/compare/v3.70.0...v3.71.0) (2026-09-26)
+
+
+### Bug Fixes
+
+* **ui-builder:** move compose-ui-builder to 3.60.0, so Wear device previews draw the widget and the selection card can be closed ([#1086](https://github.com/yschimke/compose-preview-server/issues/1086)) ([0e36394](https://github.com/yschimke/compose-preview-server/commit/0e36394fe1f9d7c3a1dcd24d7093dcb01305901b))
+
 ## [3.70.0](https://github.com/yschimke/compose-preview-server/compare/v3.69.0...v3.70.0) (2026-09-26)
 
 
