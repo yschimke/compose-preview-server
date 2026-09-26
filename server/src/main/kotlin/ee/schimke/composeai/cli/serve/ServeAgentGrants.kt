@@ -189,6 +189,11 @@ object ServeAgentGrants {
      */
     val onBehalfOfActorId: String? = null,
     /**
+     * The designs this grant lends [onBehalfOfActorId]'s authority on. Empty — and absent from
+     * older replies — when it names none and so reaches every design that person can.
+     */
+    val designIds: List<String> = emptyList(),
+    /**
      * Why this is not a live grant ([ServeAgentGrantStore.TokenState] wire name), absent when
      * [active]. An inactive answer used to carry no fields at all, which left an agent unable to
      * choose between retrying, re-running the approval flow, and stopping because a human revoked
