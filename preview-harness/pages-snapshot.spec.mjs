@@ -4343,12 +4343,29 @@ for (const fixture of listPageFixtures()) {
 
       if (fixture.startsWith("mcp-app-viewer-")) {
         const viewer = page.frameLocator('iframe[title="Compose Preview MCP App"]');
-        await page.waitForFunction(() => window.__mcpReadCount === 1);
+        if (fixture.startsWith("mcp-app-viewer-static")) {
+          if (fixture === "mcp-app-viewer-static-fallback") {
+            await expect(viewer.locator("#canvas")).toContainText(
+              '"testTag":"static-card"',
+            );
+            await expect(viewer.locator("#canvas")).toContainText(
+              "compose-preview://fixture/_app/com.example.Card?overrides=fixture",
+            );
+            await expect(viewer.locator("#refresh")).toBeHidden();
+          } else {
+            await expect(
+              viewer.locator('#canvas img[alt="Rendered Compose preview"]'),
+            ).toBeVisible();
+            await expect(viewer.locator("#use")).toBeHidden();
+          }
+        } else {
+          await page.waitForFunction(() => window.__mcpReadCount === 1);
+        }
         if (fixture === "mcp-app-viewer-fallback") {
           await expect(viewer.locator("#canvas")).toContainText(
             "The host returned no PNG for resource",
           );
-        } else {
+        } else if (!fixture.startsWith("mcp-app-viewer-static")) {
           await expect(viewer.locator('#canvas img[alt="Rendered Compose preview"]')).toBeVisible();
         }
         if (fixture === "mcp-app-viewer-refresh") {
@@ -5833,4 +5850,29 @@ test("contract · a refused UI Builder explains itself inside the card", async (
   });
   expect(fits.insideRight).toBe(true);
   expect(fits.lines).toBeGreaterThan(1);
+});
+
+test("contract · static viewer bounds results and rejects credentials", async ({ page }) => {
+  await page.goto(
+    `/mcp-app/compose-preview-viewer.html#compose-preview-result=${"A".repeat(500_001)}`,
+  );
+  await expect(page.locator("#canvas")).toContainText("larger than 500 KB");
+  await expect(page.locator("#refresh")).toBeHidden();
+  await expect(page.locator("#use")).toBeHidden();
+
+  const credentialEnvelope = Buffer.from(
+    JSON.stringify({
+      version: 1,
+      arguments: { uri: "compose-preview://fixture/card", token: "must-not-travel" },
+      result: { content: [{ type: "text", text: "safe fallback" }] },
+    }),
+  ).toString("base64url");
+  await page.goto("about:blank");
+  await page.goto(
+    `/mcp-app/compose-preview-viewer.html#compose-preview-result=${credentialEnvelope}`,
+  );
+  await expect(page.locator("#canvas")).toContainText(
+    'credential field "token" is not allowed',
+  );
+  await expect(page.locator("#canvas")).not.toContainText("must-not-travel");
 });

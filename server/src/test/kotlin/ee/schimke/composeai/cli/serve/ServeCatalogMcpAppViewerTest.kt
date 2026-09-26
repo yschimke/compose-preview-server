@@ -51,6 +51,10 @@ class ServeCatalogMcpAppViewerTest {
         .jsonObject
     assertEquals("text/html;profile=mcp-app", read["mimeType"]!!.jsonPrimitive.content)
     val html = read["text"]!!.jsonPrimitive.content
+    assertTrue(
+      html.encodeToByteArray().size <= 500_000,
+      "the portable viewer bundle must stay at or below 500 KB",
+    )
     assertTrue(html.contains("Compose Preview"))
     assertTrue(html.contains("const pending = new Map();"))
     assertTrue(html.contains("await request('ui/initialize'"))
@@ -84,6 +88,12 @@ class ServeCatalogMcpAppViewerTest {
     assertTrue(html.contains("if (!pending.delete(id)) return;"))
     assertTrue(html.contains("window.clearTimeout(request.timer);"))
     assertTrue(html.contains("Viewer unavailable; use the complete text fallback."))
+    assertTrue(html.contains("const STATIC_RESULT_PARAM = 'compose-preview-result';"))
+    assertTrue(html.contains("const MAX_STATIC_RESULT_BYTES = 500000;"))
+    assertTrue(html.contains("#compose-preview-result=<unpadded base64url UTF-8 JSON>"))
+    assertTrue(html.contains("credential field"))
+    assertTrue(html.contains("const bridgeReady = staticMode ? Promise.resolve()"))
+    assertTrue(html.contains("Complete text and structured output:"))
     assertTrue(
       html.indexOf("await request('ui/initialize'") <
         html.indexOf("notify('ui/notifications/initialized'"),

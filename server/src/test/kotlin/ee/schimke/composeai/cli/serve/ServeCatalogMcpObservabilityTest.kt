@@ -109,6 +109,27 @@ class ServeCatalogMcpObservabilityTest {
     // No overrides were asked for, so there is nothing to say about them.
     assertNull(observation["requestedOverrides"])
     assertNull(observation["overridesApplied"])
+    val link =
+      body.content().single { it.jsonObject["type"]!!.jsonPrimitive.content == "resource_link" }
+    assertEquals(
+      "compose-preview://catalog/m3/card",
+      link.jsonObject["uri"]!!.jsonPrimitive.content,
+    )
+  }
+
+  @Test
+  fun `the default semantics observation carries a replayable override resource`() {
+    val body =
+      call(
+        FakeHost(png = pixel),
+        """{"catalog":"m3","previewId":"card","overrides":{"uiMode":"dark"}}""",
+      )
+
+    val observation = Json.parseToJsonElement(body.firstText()).jsonObject
+    assertEquals("semantics", observation["observe"]!!.jsonPrimitive.content)
+    val link =
+      body.content().single { it.jsonObject["type"]!!.jsonPrimitive.content == "resource_link" }
+    assertTrue(link.jsonObject["uri"]!!.jsonPrimitive.content.contains("overrides="))
   }
 
   @Test
