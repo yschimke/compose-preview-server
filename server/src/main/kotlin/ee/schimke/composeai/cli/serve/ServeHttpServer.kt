@@ -2255,6 +2255,10 @@ class ServeHttpServer(
         // The A2UI playground: a textarea bound to the catalog's `document` string knob, POSTed to
         // the route above. 404 on a catalog that declares no such preview.
         get("/{system}/a2ui") { handleA2uiPlayground(sessionInPath = true) }
+        // The root-mounted form, for a viewer served at `/p/{name}` (the default session, a
+        // query-selected one, or a top-level catalog site), whose playground link has no system
+        // segment to carry.
+        get("/a2ui") { handleA2uiPlayground(sessionInPath = false) }
 
         // The motion lane, beside `/render` rather than inside it: a capture is not a render of a
         // preview, it is a second artifact about the same component, and folding it into the render

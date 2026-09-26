@@ -274,4 +274,14 @@ class ServeRenderPostTest {
     assertTrue(viewer.contains("/a2ui-samples/a2ui?preview=CardSample"), viewer)
     assertFalse(call("/a2ui-samples/p/ComponentList").text.contains("A2UI playground"))
   }
+
+  @Test
+  fun `a root-mounted viewer's playground link resolves`() {
+    // The default session's viewer is served without a system segment, so its link is `/a2ui?…`.
+    val viewer = call("/p/$previewId").text
+    assertTrue(viewer.contains("href=\"/a2ui?preview="), viewer)
+    val page = call("/a2ui?preview=$previewId")
+    assertEquals(200, page.code, page.text)
+    assertTrue(page.text.contains("<textarea id=\"a2ui-source\""), page.text)
+  }
 }
