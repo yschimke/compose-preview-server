@@ -9,10 +9,15 @@ import io.modelcontextprotocol.kotlin.sdk.server.StdioServerTransport
 import io.modelcontextprotocol.kotlin.sdk.types.BlobResourceContents
 import io.modelcontextprotocol.kotlin.sdk.types.CallToolRequest
 import io.modelcontextprotocol.kotlin.sdk.types.ContentBlock as SdkContentBlock
+import io.modelcontextprotocol.kotlin.sdk.types.ElicitRequestParams
+import io.modelcontextprotocol.kotlin.sdk.types.ElicitResult
 import io.modelcontextprotocol.kotlin.sdk.types.EmbeddedResource
 import io.modelcontextprotocol.kotlin.sdk.types.EmptyResult
+import io.modelcontextprotocol.kotlin.sdk.types.GetPromptRequest
 import io.modelcontextprotocol.kotlin.sdk.types.ImageContent
 import io.modelcontextprotocol.kotlin.sdk.types.Implementation
+import io.modelcontextprotocol.kotlin.sdk.types.ListPromptsRequest
+import io.modelcontextprotocol.kotlin.sdk.types.ListPromptsResult
 import io.modelcontextprotocol.kotlin.sdk.types.ListResourcesRequest
 import io.modelcontextprotocol.kotlin.sdk.types.ListResourcesResult
 import io.modelcontextprotocol.kotlin.sdk.types.ListToolsRequest
@@ -38,6 +43,7 @@ import java.io.Closeable
 import java.io.InputStream
 import java.io.OutputStream
 import java.util.UUID
+import java.util.concurrent.CancellationException
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.Dispatchers
@@ -46,10 +52,12 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.io.asSink
 import kotlinx.io.asSource
 import kotlinx.io.buffered
+import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.decodeFromJsonElement
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 
@@ -185,7 +193,35 @@ class McpSession(
       )
     }
   }
+
+  /**
+   * Ask through a typed MCP form only when this client explicitly declared form elicitation.
+   * Callers receive null for older clients and must include their own complete text fallback.
+   */
+  suspend fun elicitForm(message: String, requestedSchema: JsonObject): ElicitResult? {
+    val session = sdkSession ?: return null
+    // A standards-compliant client advertises form support as `form: {}`, while older clients
+    // advertised only the enclosing `elicitation` object. Both mean it accepts a form request.
+    if (session.clientCapabilities?.elicitation == null) return null
+    val schema = Json {
+      ignoreUnknownKeys = true
+    }
+      .decodeFromJsonElement<ElicitRequestParams.RequestedSchema>(requestedSchema)
+    return elicitationOrNull { session.createElicitation(message, schema) }
+  }
 }
+
+internal suspend fun <T> elicitationOrNull(request: suspend () -> T): T? =
+  try {
+    request()
+  } catch (cancelled: CancellationException) {
+    throw cancelled
+  } catch (_: Exception) {
+    // Treat rejected or malformed client replies like an unsupported elicitation request. The
+    // caller always includes an equivalent text workflow. Coroutine cancellation is rethrown so
+    // cancelling tools/call actually terminates the suspended handler.
+    null
+  }
 
 /** Tracks every live [Session] so notifications can fan out to multiple connected clients. */
 class SessionRegistry {
@@ -208,7 +244,13 @@ internal fun installComposePreviewHandlers(
   sdkSession: ServerSession,
   session: Session,
   listTools: () -> List<ToolDef>,
-  callTool: (name: String, arguments: JsonElement?) -> CallToolResult,
+  listPrompts: () -> List<io.modelcontextprotocol.kotlin.sdk.types.Prompt>,
+  getPrompt:
+    (
+      name: String,
+      arguments: Map<String, String>,
+    ) -> io.modelcontextprotocol.kotlin.sdk.types.GetPromptResult,
+  callTool: suspend (name: String, arguments: JsonElement?) -> CallToolResult,
   listResources: () -> List<ee.schimke.composeai.mcp.protocol.ResourceDescriptor>,
   readResource:
     (
@@ -220,6 +262,12 @@ internal fun installComposePreviewHandlers(
 ) {
   sdkSession.setRequestHandler<ListToolsRequest>(Method.Defined.ToolsList) { _, _ ->
     ListToolsResult(tools = listTools().map { it.toSdkTool() }, nextCursor = null)
+  }
+  sdkSession.setRequestHandler<ListPromptsRequest>(Method.Defined.PromptsList) { _, _ ->
+    ListPromptsResult(prompts = listPrompts(), nextCursor = null)
+  }
+  sdkSession.setRequestHandler<GetPromptRequest>(Method.Defined.PromptsGet) { request, _ ->
+    getPrompt(request.name, request.arguments.orEmpty())
   }
   sdkSession.setRequestHandler<CallToolRequest>(Method.Defined.ToolsCall) { request, _ ->
     callTool(request.name, request.arguments).toSdkCallToolResult()
@@ -248,6 +296,7 @@ internal fun composePreviewServerOptions(): ServerOptions =
       ServerCapabilities(
         tools = ServerCapabilities.Tools(listChanged = true),
         resources = ServerCapabilities.Resources(subscribe = true, listChanged = true),
+        prompts = ServerCapabilities.Prompts(listChanged = false),
       )
   )
 

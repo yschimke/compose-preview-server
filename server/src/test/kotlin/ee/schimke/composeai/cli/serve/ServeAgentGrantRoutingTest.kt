@@ -255,6 +255,10 @@ class ServeAgentGrantRoutingTest {
     assertTrue(names.contains("render_preview"))
 
     assertEquals(200, mcpAnonymous("""{"jsonrpc":"2.0","id":3,"method":"ping"}""").first)
+    assertEquals(
+      200,
+      mcpAnonymous("""{"jsonrpc":"2.0","id":4,"method":"prompts/list","params":{}}""").first,
+    )
   }
 
   /** Opening the handshake must not open anything that reads a catalog. */
