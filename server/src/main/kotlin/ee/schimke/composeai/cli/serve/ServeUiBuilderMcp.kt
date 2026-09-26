@@ -521,6 +521,14 @@ class ServeUiBuilderMcp(
    * would be a way to render a design you cannot open.
    */
   private suspend fun renderNative(args: JsonObject, actor: AuthenticatedUiBuilderActor): String {
+    val designId = args.requiredText("designId")
+    // Read through the service before reporting host capability. Besides keeping missing and
+    // private designs indistinguishable, this establishes the access check that
+    // withCommentNotice relies on before it may inspect this design's discussion.
+    val snapshot =
+      execute(GetSnapshotRequestV1(designId = designId, revision = args.number("revision")), actor)
+        as? UiBuilderServiceResponse.Snapshot
+        ?: throw McpRequestException("no design `$designId` this actor can read")
     val lane =
       nativePreview
         ?: return UI_BUILDER_JSON.encodeToString(
@@ -534,11 +542,6 @@ class ServeUiBuilderMcp(
               ),
           ),
         )
-    val designId = args.requiredText("designId")
-    val snapshot =
-      execute(GetSnapshotRequestV1(designId = designId, revision = args.number("revision")), actor)
-        as? UiBuilderServiceResponse.Snapshot
-        ?: throw McpRequestException("no design `$designId` this actor can read")
     val document = snapshot.snapshot.state.document
     return when (val outcome = lane.render(document)) {
       is UiBuilderNativePreviewOutcome.Refused ->

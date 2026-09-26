@@ -857,6 +857,11 @@ class ServeUiBuilderMcpIntegrationTest {
     )
     assertTrue(ServeUiBuilderMcp.NATIVE_TOOL_NAMES.all { it in withoutCompiler })
 
+    envelope(
+      server,
+      ServeUiBuilderMcp.CREATE_DESIGN,
+      """{"designId":"agent-screen","document":${json.encodeToString(DesignDocumentV1.serializer(), document())}}""",
+    )
     val refusal =
       json.decodeFromString<NativePreviewRefusalV1>(
         envelope(
