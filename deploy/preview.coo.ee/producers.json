@@ -34,6 +34,10 @@
       "branch": "design-artifacts/*"
     },
     {
+      "repo": "yschimke/glimmer-catalog-out",
+      "branch": "design-artifacts/*"
+    },
+    {
       "repo": "yschimke/meshcore-mobile",
       "branch": "design-artifacts/*"
     },
