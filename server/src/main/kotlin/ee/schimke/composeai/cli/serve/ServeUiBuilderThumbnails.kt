@@ -123,7 +123,7 @@ internal constructor(
       .apply { isDaemon = true }
 
   init {
-    Files.createDirectories(directory)
+    ServeOwnerOnlyFiles.createDirectories(directory)
     worker.start()
   }
 

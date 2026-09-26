@@ -1,8 +1,14 @@
 package ee.schimke.composeai.cli.serve
 
+import ee.schimke.composeai.uibuilder.protocol.RevokeActorAccessMutationV1
+import ee.schimke.composeai.uibuilder.service.AuthenticatedUiBuilderActor
 import ee.schimke.composeai.uibuilder.service.UiBuilderAdminDesignSummary
 import ee.schimke.composeai.uibuilder.service.UiBuilderAdminPort
 import ee.schimke.composeai.uibuilder.service.UiBuilderAdminRepair
+import ee.schimke.composeai.uibuilder.service.UiBuilderServiceCall
+import ee.schimke.composeai.uibuilder.service.UiBuilderServicePort
+import ee.schimke.composeai.uibuilder.service.UiBuilderServiceRequest
+import ee.schimke.composeai.uibuilder.service.UiBuilderServiceResponse
 
 /**
  * Runtime UI-builder administration: what designs this host holds, repairing one the host cannot
@@ -26,6 +32,12 @@ class ServeUiBuilderAdmin(
   private val links: ServeUiBuilderLinksStore? = null,
   /** The design list's card pictures, forgotten with the design they were drawn from. */
   private val thumbnails: ServeUiBuilderThumbnails? = null,
+  /**
+   * The same design service as an actor port, for [eraseActor]: a grant is revoked the way its
+   * owner would revoke it, through the service's own access update, so the change is revisioned and
+   * audited like every other. Null leaves grants alone and only [comments] are rewritten.
+   */
+  private val designs: UiBuilderServicePort? = null,
   private val onLog: (String) -> Unit = { System.err.println(it) },
 ) {
   sealed interface Result {
@@ -97,6 +109,93 @@ class ServeUiBuilderAdmin(
     }
   }
 
+  /**
+   * What [eraseActor] did.
+   *
+   * [ownedDesigns] are designs the actor owns. Those are not changed: a design cannot be left
+   * without an owner, so the operator decides — delete it here, or have its owner transfer it.
+   */
+  data class ActorErasure(
+    val actorId: String,
+    val revokedFrom: List<String>,
+    val ownedDesigns: List<String>,
+    val commentBoards: Int,
+  )
+
+  /**
+   * Remove one person from this host's UI-builder records, for an operator asked to.
+   *
+   * Their grant is revoked on every design that names them, and on every comment board their id is
+   * replaced by [ERASED_ACTOR_ID] — as author, resolver, reader and reactor
+   * ([ServeUiBuilderCommentStore.eraseActor]).
+   *
+   * Revision history is not rewritten. The runtime's operation log and commit audit are append-only
+   * and hash-bound to the documents they produced, so each revision this actor committed still
+   * names them until it ages out of retention or the design is deleted. That is stated here, and in
+   * the log line, rather than discovered later.
+   */
+  suspend fun eraseActor(rawActorId: String): ActorErasure? {
+    val actorId = rawActorId.trim()
+    if (actorId.isEmpty() || actorId.equals(ERASED_ACTOR_ID, ignoreCase = true)) return null
+    val revoked = mutableListOf<String>()
+    val owned = mutableListOf<String>()
+    val port = designs
+    for (design in service.adminListDesigns()) {
+      if (design.ownerActorId.equals(actorId, ignoreCase = true)) {
+        owned += design.designId
+        continue
+      }
+      if (port == null) continue
+      if (revokeGrant(port, design, actorId)) revoked += design.designId
+    }
+    val boards =
+      comments?.let { store ->
+        runCatching { store.eraseActor(actorId, ERASED_ACTOR_ID) }.getOrDefault(0)
+      } ?: 0
+    onLog(
+      "serve: admin removed UI-builder actor $actorId: grants revoked on ${revoked.size} " +
+        "design(s), ${boards} comment board(s) rewritten, ${owned.size} owned design(s) left " +
+        "for the operator; revision history keeps the id"
+    )
+    return ActorErasure(actorId, revoked, owned, boards)
+  }
+
+  /** Revoke [actorId]'s grant on [design] as its owner; true when there was one to revoke. */
+  private suspend fun revokeGrant(
+    port: UiBuilderServicePort,
+    design: UiBuilderAdminDesignSummary,
+    actorId: String,
+  ): Boolean {
+    if (design.collaborators == 0) return false
+    val owner =
+      runCatching { AuthenticatedUiBuilderActor(design.ownerActorId) }.getOrNull() ?: return false
+    // Twice at most: an owner changing the access list between the read and the revoke moves its
+    // revision on, and one retry against the new revision is enough for an operator's action.
+    repeat(2) {
+      val access =
+        (port.execute(
+            UiBuilderServiceCall(owner, UiBuilderServiceRequest.GetDesignAccess(design.designId))
+          ) as? UiBuilderServiceResponse.DesignAccess)
+          ?.access ?: return false
+      val grants = access.actorGrants.filter { it.actorId.equals(actorId, ignoreCase = true) }
+      if (grants.isEmpty()) return false
+      val updated =
+        port.execute(
+          UiBuilderServiceCall(
+            owner,
+            UiBuilderServiceRequest.UpdateDesignAccess(
+              design.designId,
+              access.accessRevision,
+              grants.map { RevokeActorAccessMutationV1(it.actorId) },
+            ),
+          )
+        )
+      if (updated is UiBuilderServiceResponse.DesignAccess) return true
+    }
+    onLog("serve: grant for $actorId on UI-builder design ${design.designId} not revoked")
+    return false
+  }
+
   fun delete(rawDesignId: String): Result {
     val designId = rawDesignId.trim()
     if (designId.isEmpty()) return Result.Invalid("design id is required")
@@ -116,3 +215,11 @@ class ServeUiBuilderAdmin(
     return Result.Deleted(designId)
   }
 }
+
+/**
+ * What an erased actor's id is replaced with in the records that keep what they said.
+ *
+ * One value for everybody rather than one per person: a per-person placeholder would still tie
+ * every comment one person wrote together, which is most of what the id was.
+ */
+const val ERASED_ACTOR_ID: String = "removed-user"

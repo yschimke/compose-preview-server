@@ -19,7 +19,7 @@ import kotlinx.serialization.json.Json
  */
 class ServeUiBuilderFolderStore(private val root: Path) {
   init {
-    Files.createDirectories(root)
+    ServeOwnerOnlyFiles.createDirectories(root)
     require(Files.isDirectory(root)) { "UI-builder folders root is not a directory: $root" }
   }
 

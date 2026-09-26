@@ -56,7 +56,7 @@ import kotlinx.serialization.json.Json
  */
 class ServeUiBuilderLinksStore(private val root: Path) {
   init {
-    Files.createDirectories(root)
+    ServeOwnerOnlyFiles.createDirectories(root)
     require(Files.isDirectory(root)) { "UI-builder links root is not a directory: $root" }
   }
 
