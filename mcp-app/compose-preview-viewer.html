@@ -114,10 +114,6 @@
 
   function credentialKeyInUri(key, value) {
     if (typeof value !== 'string') return undefined;
-    const normalized = key.replace(/[-_]/g, '').toLowerCase();
-    if (!(normalized === 'href' || normalized === 'src' || normalized.endsWith('uri') || normalized.endsWith('url'))) {
-      return undefined;
-    }
     try {
       const url = new URL(value, 'https://compose-preview.invalid/');
       if (url.username || url.password) return `${key} userinfo`;
@@ -177,7 +173,10 @@
   // Selection context must be complete enough to replay a render, but never leak a transport
   // credential from the host's original tool input into the model context.
   function safeSelectionArguments(value) {
-    if (Array.isArray(value)) return value.map(safeSelectionArguments);
+    if (Array.isArray(value)) {
+      return value.map(safeSelectionArguments).filter(child => child !== undefined);
+    }
+    if (typeof value === 'string' && credentialKeyInUri('value', value)) return undefined;
     if (!value || typeof value !== 'object') return value;
     return Object.fromEntries(
       Object.entries(value)

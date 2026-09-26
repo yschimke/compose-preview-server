@@ -30,6 +30,9 @@ window.addEventListener("message", async (event) => {
           sessionId: "must-not-travel",
           sourceUrl: "https://preview.invalid/render?cookie=also-must-not-travel",
           callbackUrl: "https://preview.invalid/callback#access_token=fragment-must-not-travel",
+          redirects: [
+            "https://preview.invalid/callback#access_token=array-must-not-travel",
+          ],
         },
       },
     });

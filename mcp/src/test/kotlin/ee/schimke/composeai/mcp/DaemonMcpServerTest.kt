@@ -200,6 +200,8 @@ class DaemonMcpServerTest {
       .contains("envelope.result.content.every(block => block && typeof block === 'object'")
     assertThat(content["text"]!!.jsonPrimitive.content)
       .contains("value.cells.every(cell => cell && typeof cell === 'object'")
+    assertThat(content["text"]!!.jsonPrimitive.content)
+      .contains("filter(child => child !== undefined)")
   }
 
   @Test

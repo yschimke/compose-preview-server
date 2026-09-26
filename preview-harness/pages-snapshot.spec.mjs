@@ -5930,6 +5930,22 @@ test("contract · static viewer bounds results and rejects credentials", async (
     await expect(page.locator("#canvas")).not.toContainText("password");
   }
 
+  const nestedUriEnvelope = Buffer.from(
+    JSON.stringify({
+      version: 1,
+      arguments: {
+        redirects: ["https://preview.invalid/callback#access_token=nested-secret"],
+      },
+      result: { content: [{ type: "text", text: "safe fallback" }] },
+    }),
+  ).toString("base64url");
+  await page.goto("about:blank");
+  await page.goto(
+    `/mcp-app/compose-preview-viewer.html#compose-preview-result=${nestedUriEnvelope}`,
+  );
+  await expect(page.locator("#canvas")).toContainText('credential field "access_token"');
+  await expect(page.locator("#canvas")).not.toContainText("nested-secret");
+
   await page.goto("/preview-harness/fixtures/pages/mcp-app-viewer-resource.html");
   const viewer = page.frameLocator('iframe[title="Compose Preview MCP App"]');
   await expect(viewer.locator('#canvas img[alt="Rendered Compose preview"]')).toBeVisible();
@@ -5941,5 +5957,6 @@ test("contract · static viewer bounds results and rejects credentials", async (
   expect(JSON.stringify(modelContext)).not.toContain("sourceUrl");
   expect(JSON.stringify(modelContext)).not.toContain("also-must-not-travel");
   expect(JSON.stringify(modelContext)).not.toContain("fragment-must-not-travel");
+  expect(JSON.stringify(modelContext)).not.toContain("array-must-not-travel");
   expect(JSON.stringify(modelContext)).toContain("CardPreview");
 });
