@@ -1,5 +1,17 @@
 # Changelog
 
+## [3.74.0](https://github.com/yschimke/compose-preview-server/compare/v3.73.0...v3.74.0) (2026-09-26)
+
+
+### Features
+
+* **config:** repoint Glimmer catalogs ([#1125](https://github.com/yschimke/compose-preview-server/issues/1125)) ([dd0d76c](https://github.com/yschimke/compose-preview-server/commit/dd0d76c9416d26004e99ea118eb070c554271349))
+
+
+### Bug Fixes
+
+* **serve:** reserve the /a2ui route segment for site hosts ([#1131](https://github.com/yschimke/compose-preview-server/issues/1131)) ([5bd122f](https://github.com/yschimke/compose-preview-server/commit/5bd122f16dec9b3ca98d7c40da73c742c12cf5f3))
+
 ## [3.73.0](https://github.com/yschimke/compose-preview-server/compare/v3.72.0...v3.73.0) (2026-09-26)
 
 
