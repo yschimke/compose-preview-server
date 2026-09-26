@@ -22,6 +22,7 @@ import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicLong
 import javax.imageio.ImageIO
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
@@ -93,6 +94,15 @@ class DaemonMcpServerTest {
       runBlocking { elicitationOrNull<Any> { throw CancellationException("cancelled") } }
     }
     assertThat(runBlocking { elicitationOrNull<Any> { error("unsupported") } }).isNull()
+    assertThat(
+        runBlocking {
+          elicitationOrNull<Any>(timeoutMs = 10) {
+            delay(1_000)
+            Any()
+          }
+        }
+      )
+      .isNull()
   }
 
   @Test
@@ -1685,54 +1695,94 @@ class DaemonMcpServerTest {
   }
 
   @Test
-  fun `render_matrix accepts form capability object but falls back for an invalid accepted variant`() {
-    client.close()
-    session.close()
-    val elicitations = AtomicLong()
-    val (clientToServer, serverFromClient) = pipedPair()
-    val (serverToClient, clientFromServer) = pipedPair()
-    session = server.newSession(input = serverFromClient, output = serverToClient)
-    session.start()
-    client =
-      McpTestClient(
-        input = clientFromServer,
-        output = clientToServer,
-        elicitationHandler = {
-          elicitations.incrementAndGet()
-          buildJsonObject {
-            put("action", "accept")
-            putJsonObject("content") { put("variant", "not one of the rendered choices") }
-          }
-        },
-      )
-    client.initialize(
-      capabilities = buildJsonObject { putJsonObject("elicitation") { putJsonObject("form") {} } }
+  fun `render_matrix distinguishes form acceptance decline cancellation and text fallback`() {
+    data class Case(
+      val action: String,
+      val variant: String? = null,
+      val formCapability: Boolean = true,
+      val expectedMode: String,
+      val expectedRequests: Long = 1,
     )
-    val projectDir = tmp.newFolder("form-workspace")
-    tmp.newFolder("form-workspace", "module")
-    val workspaceId = registerWorkspace(projectDir, "form-demo")
-    val daemon = warmDaemonFor(workspaceId, ":module")
-    val previewId = "com.example.Form"
-    daemon.emitDiscovery(previewId)
-    client.expectNotification("notifications/resources/list_changed", 2_000)
-    val pngFile = tmp.newFile("form-matrix.png")
-    ImageIO.write(BufferedImage(2, 2, BufferedImage.TYPE_INT_ARGB), "png", pngFile)
-    daemon.autoRenderPngPath = { id -> if (id == previewId) pngFile.absolutePath else null }
-
-    val result =
-      client.callTool(
-        "render_matrix",
-        buildJsonObject {
-          put("uri", PreviewUri(workspaceId, ":module", previewId).toUri())
-          put("choose", true)
-          putJsonObject("axes") { putJsonArray("uiMode") { add(JsonPrimitive("light")) } }
-        },
+    val cases =
+      listOf(
+        Case("accept", "__FIRST__", expectedMode = "elicitation"),
+        Case("decline", expectedMode = "declined"),
+        Case("cancel", expectedMode = "cancelled"),
+        Case("accept", "not one of the rendered choices", expectedMode = "text"),
+        Case(
+          "accept",
+          "__FIRST__",
+          formCapability = false,
+          expectedMode = "text",
+          expectedRequests = 0,
+        ),
       )
-    val selection =
-      json.parseToJsonElement(result.firstTextContent()).jsonObject["selection"]!!.jsonObject
-    assertThat(elicitations.get()).isEqualTo(1)
-    assertThat(selection["mode"]!!.jsonPrimitive.content).isEqualTo("text")
-    assertThat(selection["choices"]!!.jsonArray).hasSize(1)
+
+    cases.forEachIndexed { index, case ->
+      client.close()
+      session.close()
+      val elicitations = AtomicLong()
+      val (clientToServer, serverFromClient) = pipedPair()
+      val (serverToClient, clientFromServer) = pipedPair()
+      session = server.newSession(input = serverFromClient, output = serverToClient)
+      session.start()
+      client =
+        McpTestClient(
+          input = clientFromServer,
+          output = clientToServer,
+          elicitationHandler = { request ->
+            elicitations.incrementAndGet()
+            buildJsonObject {
+              put("action", case.action)
+              case.variant?.let { variant ->
+                val selected =
+                  if (variant == "__FIRST__") {
+                    request["params"]!!
+                      .jsonObject["requestedSchema"]!!
+                      .jsonObject["properties"]!!
+                      .jsonObject["variant"]!!
+                      .jsonObject["enum"]!!
+                      .jsonArray
+                      .first()
+                      .jsonPrimitive
+                      .content
+                  } else variant
+                putJsonObject("content") { put("variant", selected) }
+              }
+            }
+          },
+        )
+      client.initialize(
+        capabilities =
+          buildJsonObject {
+            putJsonObject("elicitation") { if (case.formCapability) putJsonObject("form") {} }
+          }
+      )
+      val projectDir = tmp.newFolder("form-workspace-$index")
+      tmp.newFolder("form-workspace-$index", "module")
+      val workspaceId = registerWorkspace(projectDir, "form-demo-$index")
+      val daemon = warmDaemonFor(workspaceId, ":module")
+      val previewId = "com.example.Form$index"
+      daemon.emitDiscovery(previewId)
+      client.expectNotification("notifications/resources/list_changed", 2_000)
+      val pngFile = tmp.newFile("form-matrix-$index.png")
+      ImageIO.write(BufferedImage(2, 2, BufferedImage.TYPE_INT_ARGB), "png", pngFile)
+      daemon.autoRenderPngPath = { id -> if (id == previewId) pngFile.absolutePath else null }
+
+      val result =
+        client.callTool(
+          "render_matrix",
+          buildJsonObject {
+            put("uri", PreviewUri(workspaceId, ":module", previewId).toUri())
+            put("choose", true)
+            putJsonObject("axes") { putJsonArray("uiMode") { add(JsonPrimitive("light")) } }
+          },
+        )
+      val selection =
+        json.parseToJsonElement(result.firstTextContent()).jsonObject["selection"]!!.jsonObject
+      assertThat(elicitations.get()).isEqualTo(case.expectedRequests)
+      assertThat(selection["mode"]!!.jsonPrimitive.content).isEqualTo(case.expectedMode)
+    }
   }
 
   @Test

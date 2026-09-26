@@ -42,6 +42,7 @@ import ee.schimke.composeai.mcp.protocol.ToolDef
 import ee.schimke.composeai.render.matrix.ContactSheet
 import ee.schimke.composeai.render.matrix.MatrixAxes
 import ee.schimke.composeai.render.matrix.MatrixCell
+import io.modelcontextprotocol.kotlin.sdk.types.ElicitResult
 import io.modelcontextprotocol.kotlin.sdk.types.Implementation
 import java.io.File
 import java.security.MessageDigest
@@ -2826,7 +2827,19 @@ class DaemonMcpServer(
             putJsonArray("required") { add(JsonPrimitive("variant")) }
           },
       ) ?: return fallback
-    if (result.action.name != "Accept") return fallback
+    when (result.action) {
+      ElicitResult.Action.Decline ->
+        return buildJsonObject {
+          put("mode", "declined")
+          put("message", "The user declined to choose a rendered variant.")
+        }
+      ElicitResult.Action.Cancel ->
+        return buildJsonObject {
+          put("mode", "cancelled")
+          put("message", "The user cancelled variant selection.")
+        }
+      ElicitResult.Action.Accept -> Unit
+    }
     val variant =
       (result.content?.get("variant") as? JsonPrimitive)
         ?.takeIf { it.isString }
