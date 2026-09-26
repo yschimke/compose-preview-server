@@ -5879,6 +5879,10 @@ test("contract · static viewer bounds results and rejects credentials", async (
   for (const [uri, rejected] of [
     ["https://preview.invalid/render?token=query-secret", 'credential field "token"'],
     ["https://user:password@preview.invalid/render", 'credential field "uri userinfo"'],
+    [
+      "https://preview.invalid/callback#access_token=fragment-secret",
+      'credential field "access_token"',
+    ],
   ]) {
     const encoded = Buffer.from(
       JSON.stringify({
@@ -5891,6 +5895,7 @@ test("contract · static viewer bounds results and rejects credentials", async (
     await page.goto(`/mcp-app/compose-preview-viewer.html#compose-preview-result=${encoded}`);
     await expect(page.locator("#canvas")).toContainText(rejected);
     await expect(page.locator("#canvas")).not.toContainText("query-secret");
+    await expect(page.locator("#canvas")).not.toContainText("fragment-secret");
     await expect(page.locator("#canvas")).not.toContainText("password");
   }
 
@@ -5904,5 +5909,6 @@ test("contract · static viewer bounds results and rejects credentials", async (
   expect(JSON.stringify(modelContext)).not.toContain("must-not-travel");
   expect(JSON.stringify(modelContext)).not.toContain("sourceUrl");
   expect(JSON.stringify(modelContext)).not.toContain("also-must-not-travel");
+  expect(JSON.stringify(modelContext)).not.toContain("fragment-must-not-travel");
   expect(JSON.stringify(modelContext)).toContain("CardPreview");
 });

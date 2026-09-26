@@ -73,6 +73,7 @@ class ServeCatalogMcpAppViewerTest {
     assertTrue(html.contains("function credentialKeyInUri(key, value)"))
     assertTrue(html.contains("if (url.username || url.password)"))
     assertTrue(html.contains("for (const [parameter] of url.searchParams)"))
+    assertTrue(html.contains("new URLSearchParams(url.hash.slice(1))"))
     assertTrue(html.contains("arguments: toolArguments"))
     assertTrue(html.contains("structuredContent: { composePreviewSelection: selected }"))
     assertTrue(html.contains("await request('ui/update-model-context'"))

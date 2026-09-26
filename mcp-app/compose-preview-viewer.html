@@ -124,6 +124,9 @@
       for (const [parameter] of url.searchParams) {
         if (CREDENTIAL_KEY.test(parameter)) return parameter;
       }
+      for (const [parameter] of new URLSearchParams(url.hash.slice(1))) {
+        if (CREDENTIAL_KEY.test(parameter)) return parameter;
+      }
     } catch {
       // A malformed URI is handled by its consumer; it carries no parseable URL credential here.
     }

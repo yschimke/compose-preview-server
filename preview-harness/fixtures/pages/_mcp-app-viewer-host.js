@@ -29,6 +29,7 @@ window.addEventListener("message", async (event) => {
           overrides: { uiMode: "dark" },
           sessionId: "must-not-travel",
           sourceUrl: "https://preview.invalid/render?cookie=also-must-not-travel",
+          callbackUrl: "https://preview.invalid/callback#access_token=fragment-must-not-travel",
         },
       },
     });
