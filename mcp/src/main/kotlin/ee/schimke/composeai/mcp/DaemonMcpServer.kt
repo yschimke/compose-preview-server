@@ -483,8 +483,22 @@ class DaemonMcpServer(
     HistoryUri.parseOrNull(uri)?.let { historyUri ->
       return readHistoryResource(uri, historyUri)
     }
-    val parsed = PreviewUri.parseOrNull(uri) ?: error("Invalid compose-preview URI: '$uri'")
-    val pngBytes = renderAndReadBytes(parsed, session, progressToken)
+    val resourceUri = PreviewUri.parseOrNull(uri) ?: error("Invalid compose-preview URI: '$uri'")
+    val overrides =
+      resourceUri.overridesJson?.let { raw ->
+        val decoded = runCatching {
+          decodePreviewOverrides(json.parseToJsonElement(raw))
+        }
+          .getOrElse { error("Invalid compose-preview resource overrides") }
+        val daemon = supervisor.daemonFor(resourceUri.workspaceId, resourceUri.modulePath)
+        val violations = validateOverrides(decoded, daemon)
+        check(violations.isEmpty()) {
+          "Invalid compose-preview resource overrides: ${violations.joinToString("; ")}"
+        }
+        decoded
+      }
+    val parsed = resourceUri.copy(overridesJson = null)
+    val pngBytes = renderAndReadBytes(parsed, session, progressToken, overrides)
     val encoded = Base64.getEncoder().encodeToString(pngBytes)
     return ReadResourceResult(
       contents = listOf(ResourceContents.Blob(uri = uri, mimeType = "image/png", blob = encoded))
@@ -2364,7 +2378,10 @@ class DaemonMcpServer(
               listOf(
                 ContentBlock.Image(Base64.getEncoder().encodeToString(bytes), "image/png"),
                 ContentBlock.ResourceLink(
-                  uri = uriStr,
+                  uri =
+                    uri
+                      .copy(overridesJson = (args["overrides"] as? JsonObject)?.toString())
+                      .toUri(),
                   name = "Compose Preview render",
                   mimeType = "image/png",
                   description =

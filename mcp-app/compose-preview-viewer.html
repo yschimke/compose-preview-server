@@ -43,6 +43,7 @@
   const refresh = q('#refresh');
   const use = q('#use');
   const REQUEST_TIMEOUT_MS = 5000;
+  const RESOURCE_READ_TIMEOUT_MS = 65000;
   const pending = new Map();
   let nextId = 1;
   let initialized = false;
@@ -163,7 +164,11 @@
     try {
       await bridgeReady;
       if (!initialized) throw new Error('MCP Apps bridge is unavailable');
-      const result = await request('resources/read', { uri: resource.uri });
+      const result = await request(
+        'resources/read',
+        { uri: resource.uri },
+        RESOURCE_READ_TIMEOUT_MS,
+      );
       const image = resourcePng(result);
       if (resourceResult?.resource?.uri !== resource.uri) return;
       if (!image) {

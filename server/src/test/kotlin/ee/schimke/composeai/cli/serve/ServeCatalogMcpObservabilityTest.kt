@@ -13,9 +13,11 @@ import kotlin.test.assertTrue
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.put
 
 /**
  * What the catalog MCP tells a caller about a render *besides* the pixels.
@@ -147,8 +149,11 @@ class ServeCatalogMcpObservabilityTest {
     val body =
       call(FakeHost(png = pixel), """{"catalog":"m3","previewId":"card","observe":"png"}""")
 
-    assertEquals(1, body.content().size, "an override-free browse returns pixels and nothing else")
+    assertEquals(2, body.content().size)
     assertEquals("image", body.content()[0].jsonObject["type"]!!.jsonPrimitive.content)
+    val link = body.content()[1].jsonObject
+    assertEquals("resource_link", link["type"]!!.jsonPrimitive.content)
+    assertEquals("compose-preview://catalog/m3/card", link["uri"]!!.jsonPrimitive.content)
   }
 
   @Test
@@ -159,10 +164,62 @@ class ServeCatalogMcpObservabilityTest {
         """{"catalog":"m3","previewId":"card","observe":"png","overrides":{"uiMode":"dark"}}""",
       )
 
-    assertEquals(2, body.content().size)
+    assertEquals(3, body.content().size)
     assertEquals("image", body.content()[0].jsonObject["type"]!!.jsonPrimitive.content)
+    assertTrue(body.content()[1].jsonObject["uri"]!!.jsonPrimitive.content.contains("overrides="))
     val provenance = Json.parseToJsonElement(body.firstText()).jsonObject
     assertEquals("daemon", provenance["generation"]!!.jsonPrimitive.content)
+  }
+
+  @Test
+  fun `an override-bearing resource link replays the same render state`() {
+    val host = FakeHost(png = pixel)
+    val registry = ServeSessionRegistry(open = { null })
+    registry.register("m3", host = host)
+    val mcp = ServeCatalogMcp(registry, Semaphore(1))
+    val toolRequest =
+      Json.parseToJsonElement(
+          """{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"render_preview","arguments":{"catalog":"m3","previewId":"card","observe":"png","overrides":{"uiMode":"dark","device":"spec:width=400dp,height=800dp,dpi=320"}}}}"""
+        )
+        .jsonObject
+    val toolBody =
+      requireNotNull(
+          runBlocking {
+            mcp.handle(toolRequest) { ServeMachineAuthorization.Decision.Authorized("agent:test") }
+          }
+            .body
+        )
+        .content()
+    val resourceUri =
+      toolBody
+        .single { it.jsonObject["type"]!!.jsonPrimitive.content == "resource_link" }
+        .jsonObject["uri"]!!
+        .jsonPrimitive
+        .content
+
+    val readRequest = buildJsonObject {
+      put("jsonrpc", "2.0")
+      put("id", 2)
+      put("method", "resources/read")
+      put("params", buildJsonObject { put("uri", resourceUri) })
+    }
+    val denied =
+      requireNotNull(
+        runBlocking { mcp.handle(readRequest) { ServeMachineAuthorization.Decision.Missing } }.body
+      )
+    assertTrue(denied["error"] != null, "override-bearing resource reads require live access")
+    assertEquals(1, host.seen.size)
+    requireNotNull(
+      runBlocking {
+        mcp.handle(readRequest) { ServeMachineAuthorization.Decision.Authorized("agent:test") }
+      }
+        .body
+    )
+
+    assertEquals(2, host.seen.size)
+    assertEquals(host.seen[0], host.seen[1])
+    assertEquals(ee.schimke.composeai.daemon.protocol.UiMode.DARK, host.seen[1].uiMode)
+    assertEquals("spec:width=400dp,height=800dp,dpi=320", host.seen[1].device)
   }
 
   // ---- strict override keys -------------------------------------------------------------------

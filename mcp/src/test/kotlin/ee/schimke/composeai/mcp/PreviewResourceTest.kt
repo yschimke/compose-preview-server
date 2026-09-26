@@ -61,6 +61,29 @@ class PreviewResourceTest {
   }
 
   @Test
+  fun `PreviewUri round-trip preserves config and encoded overrides`() {
+    val uri =
+      PreviewUri(
+        workspaceId = WorkspaceId("workspace-abc12345"),
+        modulePath = ":app",
+        previewFqn = "com.example.Card",
+        config = "phone-portrait",
+        overridesJson = """{"uiMode":"dark","label":"A&B + ü"}""",
+      )
+
+    val encoded = uri.toUri()
+    assertThat(encoded).contains("?config=phone-portrait&overrides=")
+    assertThat(encoded).doesNotContain("A&B")
+    assertThat(PreviewUri.parse(encoded)).isEqualTo(uri)
+    assertThat(
+        PreviewUri.parseOrNull(
+          "compose-preview://workspace-abc12345/_app/com.example.Card?overrides=%%%"
+        )
+      )
+      .isNull()
+  }
+
+  @Test
   fun `FqnGlob matches single and double-star semantics`() {
     val singleStar = FqnGlob("com.example.*")
     assertThat(singleStar.matches("com.example.RedSquare")).isTrue()
