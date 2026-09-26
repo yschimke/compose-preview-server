@@ -243,6 +243,10 @@ class ServeAgentGrantRoutingTest {
     )
     // The instructions have to say how to get in, or an open handshake just moves the dead end.
     assertTrue(result["instructions"]!!.jsonPrimitive.content.contains("request_access"))
+    assertFalse(
+      result["instructions"]!!.jsonPrimitive.content.contains("`home` is canonical"),
+      "a catalog-only host must not advertise UI-builder rules",
+    )
 
     val listed = mcpAnonymous("""{"jsonrpc":"2.0","id":2,"method":"tools/list"}""")
     assertEquals(200, listed.first)

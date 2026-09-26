@@ -89,6 +89,41 @@ class ServeUiBuilderMcpIntegrationTest {
   }
 
   @Test
+  fun `initialize states the canonical home rules when the builder is present`() {
+    val server = start()
+
+    val instructions =
+      post(
+          server,
+          """{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"${ServeCatalogMcp.MCP_PROTOCOL_VERSION}"}}""",
+        )["result"]!!
+        .jsonObject["instructions"]!!
+        .jsonPrimitive
+        .content
+
+    assertTrue(instructions.contains("`home` is canonical"), instructions)
+    assertTrue(instructions.contains("explicitly choosing"), instructions)
+    assertFalse(instructions.contains("pending comments"), instructions)
+  }
+
+  @Test
+  fun `initialize states the discussion rules when comments are supported`() {
+    val server = start(withComments = true)
+
+    val instructions =
+      post(
+          server,
+          """{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"${ServeCatalogMcp.MCP_PROTOCOL_VERSION}"}}""",
+        )["result"]!!
+        .jsonObject["instructions"]!!
+        .jsonPrimitive
+        .content
+
+    assertTrue(instructions.contains("pending comments"), instructions)
+    assertTrue(instructions.contains("never replaces that discussion"), instructions)
+  }
+
+  @Test
   fun `an agent creates, edits and exports a design without touching a browser`() {
     val server = start()
 
@@ -1003,6 +1038,7 @@ class ServeUiBuilderMcpIntegrationTest {
     recordFile: File? = ScreenGeneratorScreenFixture.componentsFile(),
     catalogSystemId: String = CATALOG_SYSTEM_ID,
     withRemoteExports: Boolean = false,
+    withComments: Boolean = false,
   ): RunningServer {
     val registry = ServeSessionRegistry(open = { null })
     val service =
@@ -1049,6 +1085,9 @@ class ServeUiBuilderMcpIntegrationTest {
           machineAuthorization = ServeMachineAuthorization(OPERATOR_TOKEN, null, null),
           uiBuilderService = service,
           uiBuilderAssets = if (withAssets) service else null,
+          uiBuilderCommentStore =
+            if (withComments) ServeUiBuilderCommentStore(stateDirectory.resolve("comments"))
+            else null,
           uiBuilderAuthorization =
             if (withAuthorization)
               ServeUiBuilderAuthorization.fromServeIdentity(OPERATOR_TOKEN, null, null)
