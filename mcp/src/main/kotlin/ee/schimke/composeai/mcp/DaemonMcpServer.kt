@@ -42,6 +42,7 @@ import ee.schimke.composeai.mcp.protocol.ToolDef
 import ee.schimke.composeai.render.matrix.ContactSheet
 import ee.schimke.composeai.render.matrix.MatrixAxes
 import ee.schimke.composeai.render.matrix.MatrixCell
+import io.modelcontextprotocol.kotlin.sdk.types.ElicitResult
 import io.modelcontextprotocol.kotlin.sdk.types.Implementation
 import java.io.File
 import java.nio.file.AtomicMoveNotSupportedException
@@ -50,6 +51,7 @@ import java.nio.file.StandardCopyOption
 import java.security.MessageDigest
 import java.time.Instant
 import java.util.Base64
+import java.util.concurrent.CancellationException
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
@@ -406,6 +408,13 @@ class DaemonMcpServer(
             sdkSession = sdkSession,
             session = session,
             listTools = { currentToolDefs(session) },
+            listPrompts = {
+              if (profile == McpToolProfile.NATIVE) ComposePreviewPrompts.list() else emptyList()
+            },
+            getPrompt = { name, arguments ->
+              require(profile == McpToolProfile.NATIVE) { "unknown prompt: $name" }
+              ComposePreviewPrompts.get(name, arguments)
+            },
             callTool = { name, arguments -> handleCallTool(session, name, arguments) },
             listResources = { catalogResources() },
             readResource = { uri, progressToken ->
@@ -1707,7 +1716,8 @@ class DaemonMcpServer(
                     "fontScale":{"type":"array","items":{"type":"number"},"description":"Font-scale multipliers, e.g. [1.0, 2.0]."}
                   }
                 },
-                "contactSheet":{"type":"boolean","description":"When true, also return a single stitched contact-sheet PNG (one labelled tile per cell) alongside the per-cell summary. Default false (token-frugal: hashes only)."}
+                "contactSheet":{"type":"boolean","description":"When true, also return a single stitched contact-sheet PNG (one labelled tile per cell) alongside the per-cell summary. Default false (token-frugal: hashes only)."},
+                "choose":{"type":"boolean","description":"When true, ask an elicitation-capable client to choose one rendered variant. Clients without elicitation receive the same labelled choices as text."}
               },
               "required":["uri","axes"]
             }
@@ -1988,7 +1998,7 @@ class DaemonMcpServer(
       ),
     ) + (uiBuilderMcp?.toolDefs() ?: emptyList())
 
-  private fun handleCallTool(
+  private suspend fun handleCallTool(
     session: Session,
     name: String,
     arguments: JsonElement?,
@@ -2000,9 +2010,9 @@ class DaemonMcpServer(
       "unregister_project" -> toolUnregisterProject(args)
       "list_projects" -> toolListProjects()
       "list_devices" -> toolListDevices()
-      "render_preview" -> toolRenderPreview(session, args)
       "find_previews_for_file" -> toolFindPreviewsForFile(args)
-      "render_matrix" -> toolRenderMatrix(args)
+      "render_preview" -> toolRenderPreview(session, args)
+      "render_matrix" -> toolRenderMatrix(session, args)
       "watch" -> toolWatch(session, args)
       "unwatch" -> toolUnwatch(session, args)
       "list_watches" -> toolListWatches(session)
@@ -2708,7 +2718,7 @@ class DaemonMcpServer(
    * or passes `contactSheet:true` to also receive one stitched grid image of every cell. Bounded so
    * a careless cross-product can't fan out unboundedly.
    */
-  private fun toolRenderMatrix(args: JsonObject): CallToolResult {
+  private suspend fun toolRenderMatrix(session: Session, args: JsonObject): CallToolResult {
     val uriStr =
       args["uri"]?.jsonPrimitive?.contentOrNull
         ?: return errorCallToolResult("render_matrix: missing 'uri'")
@@ -2720,6 +2730,7 @@ class DaemonMcpServer(
         ?: return errorCallToolResult("render_matrix: missing 'axes' (object of arrays)")
     val contactSheet =
       args["contactSheet"]?.jsonPrimitive?.contentOrNull?.toBooleanStrictOrNull() ?: false
+    val choose = args["choose"]?.jsonPrimitive?.contentOrNull?.toBooleanStrictOrNull() ?: false
 
     fun stringAxis(key: String): List<String>? =
       (axes[key] as? JsonArray)
@@ -2772,7 +2783,7 @@ class DaemonMcpServer(
       return errorCallToolResult("render_matrix: ${violations.distinct().joinToString("; ")}")
     }
 
-    return runCatching {
+    return try {
       var baselineSha: String? = null
       // Render every cell, keeping the bytes around so an optional contact sheet can stitch them.
       val rendered = decodedCells.map { (cell, overrides) ->
@@ -2799,6 +2810,7 @@ class DaemonMcpServer(
         put("cellCount", cells.size)
         if (contactSheet) put("contactSheet", true)
         putJsonArray("cells") { cells.forEach { add(it) } }
+        if (choose) put("selection", matrixSelection(session, cells))
       }
       val blocks = buildList {
         if (contactSheet) {
@@ -2816,8 +2828,61 @@ class DaemonMcpServer(
         add(ContentBlock.Text(payload.toString()))
       }
       CallToolResult(content = blocks)
+    } catch (cancelled: CancellationException) {
+      throw cancelled
+    } catch (failure: Throwable) {
+      errorCallToolResult("render_matrix failed: ${failure.message}")
     }
-      .getOrElse { errorCallToolResult("render_matrix failed: ${it.message}") }
+  }
+
+  /** Form chooser for a completed matrix, with an equivalent text answer for older harnesses. */
+  private suspend fun matrixSelection(session: Session, cells: List<JsonObject>): JsonObject {
+    val choices = cells.map { it["label"]!!.jsonPrimitive.content }
+    val fallback = buildJsonObject {
+      put("mode", "text")
+      put("message", "Choose one rendered variant by label: ${choices.joinToString(" | ")}")
+      putJsonArray("choices") { choices.forEach { add(JsonPrimitive(it)) } }
+    }
+    val result =
+      (session as? McpSession)?.elicitForm(
+        message = "Choose the rendered variant to use. Each label names its display overrides.",
+        requestedSchema =
+          buildJsonObject {
+            put("type", "object")
+            putJsonObject("properties") {
+              put(
+                "variant",
+                buildJsonObject {
+                  put("type", "string")
+                  putJsonArray("enum") { choices.forEach { add(JsonPrimitive(it)) } }
+                },
+              )
+            }
+            putJsonArray("required") { add(JsonPrimitive("variant")) }
+          },
+      ) ?: return fallback
+    when (result.action) {
+      ElicitResult.Action.Decline ->
+        return buildJsonObject {
+          put("mode", "declined")
+          put("message", "The user declined to choose a rendered variant.")
+        }
+      ElicitResult.Action.Cancel ->
+        return buildJsonObject {
+          put("mode", "cancelled")
+          put("message", "The user cancelled variant selection.")
+        }
+      ElicitResult.Action.Accept -> Unit
+    }
+    val variant =
+      (result.content?.get("variant") as? JsonPrimitive)
+        ?.takeIf { it.isString }
+        ?.contentOrNull
+        ?.takeIf { it in choices } ?: return fallback
+    return buildJsonObject {
+      put("mode", "elicitation")
+      put("variant", variant)
+    }
   }
 
   /** A rendered matrix cell held in memory so the optional contact sheet can stitch the bytes. */

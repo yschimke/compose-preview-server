@@ -167,6 +167,67 @@ class ServeUiBuilderMcpIntegrationTest {
   }
 
   @Test
+  fun `remote MCP publishes design review and status prompts with honest unavailable-feature fallbacks`() {
+    val server = start()
+    val initialized =
+      post(
+          server,
+          """{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"test","version":"1"}}}""",
+        )["result"]!!
+        .jsonObject
+    assertTrue(initialized["capabilities"]!!.jsonObject.containsKey("prompts"))
+
+    val listed =
+      post(server, """{"jsonrpc":"2.0","id":2,"method":"prompts/list","params":{}}""")["result"]!!
+        .jsonObject["prompts"]!!
+        .jsonArray
+        .map { it.jsonObject["name"]!!.jsonPrimitive.content }
+    assertEquals(listOf("review-design", "design-status"), listed)
+
+    val review =
+      post(
+          server,
+          """{"jsonrpc":"2.0","id":3,"method":"prompts/get","params":{"name":"review-design","arguments":{"designId":"login"}}}""",
+        )["result"]!!
+        .jsonObject
+    val reviewText =
+      review["messages"]!!
+        .jsonArray
+        .single()
+        .jsonObject["content"]!!
+        .jsonObject["text"]!!
+        .jsonPrimitive
+        .content
+    assertTrue(reviewText.contains("ui_builder_list_comments"), reviewText)
+    assertTrue(reviewText.contains("ui_builder_view"), reviewText)
+    assertTrue(reviewText.contains("#1114"), reviewText)
+
+    val invalid =
+      post(
+        server,
+        """{"jsonrpc":"2.0","id":31,"method":"prompts/get","params":{"name":"review-design","arguments":{"designId":"https://foreign.test/ui-builder/login"}}}""",
+      )
+    assertEquals(-32602, invalid["error"]!!.jsonObject["code"]!!.jsonPrimitive.content.toInt())
+
+    val status =
+      post(
+          server,
+          """{"jsonrpc":"2.0","id":4,"method":"prompts/get","params":{"name":"design-status","arguments":{"designId":"login"}}}""",
+        )["result"]!!
+        .jsonObject
+    val statusText =
+      status["messages"]!!
+        .jsonArray
+        .single()
+        .jsonObject["content"]!!
+        .jsonObject["text"]!!
+        .jsonPrimitive
+        .content
+    assertTrue(statusText.contains("#320"), statusText)
+    assertTrue(statusText.contains("cannot yet report"), statusText)
+  }
+
+  @Test
   fun `MCP authors and reads the state and ordered actions edited by the browser`() {
     val server = start()
     envelope(
