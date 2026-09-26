@@ -1,5 +1,13 @@
 # Changelog
 
+## [3.75.0](https://github.com/yschimke/compose-preview-server/compare/v3.74.0...v3.75.0) (2026-09-26)
+
+
+### Bug Fixes
+
+* **serve:** keep grant browser sessions authenticated ([#1134](https://github.com/yschimke/compose-preview-server/issues/1134)) ([bc36b12](https://github.com/yschimke/compose-preview-server/commit/bc36b120eb116586b1c3b872d61e21a9123fe290))
+* **ui-builder:** keep create redirect reachable ([#1141](https://github.com/yschimke/compose-preview-server/issues/1141)) ([1d97cfe](https://github.com/yschimke/compose-preview-server/commit/1d97cfe2439dbef13f9bdddb134ffb84c09debe1))
+
 ## [3.74.0](https://github.com/yschimke/compose-preview-server/compare/v3.73.0...v3.74.0) (2026-09-26)
 
 
