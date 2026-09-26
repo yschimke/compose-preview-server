@@ -378,6 +378,7 @@
     ++resourceSubscriptionGeneration;
     ++resourceReadGeneration;
     resourceReadUri = undefined;
+    refresh.disabled = false;
     resourceSubscriptionTargetUri = nextUri;
     stopResourcePolling();
     if (subscribedResourceUri === nextUri) return;
@@ -395,6 +396,7 @@
 
   async function readResource() {
     if (!resourceResult) return;
+    stopResourcePolling();
     const { result: toolResult, resource, value } = resourceResult;
     const generation = ++resourceReadGeneration;
     resourceReadUri = resource.uri;

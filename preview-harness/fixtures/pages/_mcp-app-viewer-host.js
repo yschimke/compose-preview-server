@@ -31,6 +31,7 @@ window.addEventListener("message", async (event) => {
               mode === "same-uri-redraw" ||
               mode === "subscription-revisit" ||
               mode === "subscribe-late" ||
+              mode === "read-replaced-inline" ||
               mode === "subscribe-fails" ||
               mode === "stale-read-marker",
           },
@@ -193,6 +194,31 @@ window.addEventListener("message", async (event) => {
         }, delay);
       }
     }
+    if (mode === "read-replaced-inline") {
+      window.setTimeout(async () => {
+        send({
+          jsonrpc: "2.0",
+          method: "ui/notifications/tool-result",
+          params: {
+            result: {
+              content: [
+                {
+                  type: "image",
+                  mimeType: "image/png",
+                  data: await png("/preview-harness/fixtures/pages/_design-render-placeholder.png"),
+                },
+                {
+                  type: "resource_link",
+                  uri: "compose-preview://fixture/_app/com.example.Card?overrides=inline",
+                  name: "Compose Preview render",
+                  mimeType: "image/png",
+                },
+              ],
+            },
+          },
+        });
+      }, 100);
+    }
     return;
   }
   if (message.method === "resources/subscribe") {
@@ -225,7 +251,7 @@ window.addEventListener("message", async (event) => {
       send({ jsonrpc: "2.0", id: message.id, result: {} });
     }
     window.__mcpSubscribedUri = message.params.uri;
-    if (stale) return;
+    if (stale || mode === "read-replaced-inline") return;
     window.setTimeout(() => {
       resourceUpdates += 1;
       send({
@@ -256,7 +282,13 @@ window.addEventListener("message", async (event) => {
     await new Promise((resolve) =>
       setTimeout(
         resolve,
-        mode === "slow-resource" ? 5250 : mode === "stale-read-marker" ? 500 : 150,
+        mode === "slow-resource"
+          ? 5250
+          : mode === "stale-read-marker" || mode === "read-replaced-inline"
+            ? 500
+            : mode === "manual-poll" && reads === 2
+              ? 1000
+              : 150,
       ),
     );
     if (mode === "fallback") {

@@ -4419,6 +4419,22 @@ for (const fixture of listPageFixtures()) {
           await page.waitForFunction(() => window.__mcpReadCount >= 2, null, { timeout: 12_000 });
           await expect(viewer.locator("#refresh")).toBeEnabled();
         }
+        if (fixture === "mcp-app-viewer-read-replaced-inline") {
+          await expect(
+            viewer.locator('#canvas img[alt="Rendered Compose preview"]'),
+          ).toBeVisible();
+          await page.waitForTimeout(600);
+          expect(await page.evaluate(() => window.__mcpReadCount)).toBe(1);
+          await expect(viewer.locator("#refresh")).toBeEnabled();
+        }
+        if (fixture === "mcp-app-viewer-manual-poll") {
+          await page.waitForTimeout(4500);
+          await viewer.locator("#refresh").click();
+          await page.waitForFunction(() => window.__mcpReadCount === 2);
+          await page.waitForTimeout(1100);
+          expect(await page.evaluate(() => window.__mcpReadCount)).toBe(2);
+          await expect(viewer.locator("#refresh")).toBeEnabled();
+        }
       }
 
       // The design page's renders are `loading="lazy"` — a live catalog serves one daemon
