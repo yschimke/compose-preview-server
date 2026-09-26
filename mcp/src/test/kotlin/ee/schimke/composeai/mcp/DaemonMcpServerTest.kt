@@ -988,8 +988,7 @@ class DaemonMcpServerTest {
     daemon.emitDiscovery(previewId, sourceFile = "src/main/kotlin/com/example/Preview.kt")
     client.expectNotification("notifications/resources/list_changed", 2_000)
 
-    val firstPng = tmp.newFile("file-render-first.png")
-    val secondPng = tmp.newFile("file-render-second.png")
+    val sharedPng = tmp.newFile("file-render-shared.png")
     val header =
       byteArrayOf(
         0x89.toByte(),
@@ -1017,10 +1016,10 @@ class DaemonMcpServerTest {
         0x00,
         0x1e,
       )
-    Files.write(firstPng.toPath(), header + byteArrayOf(1))
-    Files.write(secondPng.toPath(), header + byteArrayOf(2))
-    var activePng = firstPng
-    daemon.autoRenderPngPath = { id -> if (id == previewId) activePng.absolutePath else null }
+    val firstBytes = header + byteArrayOf(1)
+    val secondBytes = header + byteArrayOf(2)
+    Files.write(sharedPng.toPath(), firstBytes)
+    daemon.autoRenderPngPath = { id -> if (id == previewId) sharedPng.absolutePath else null }
 
     val uri = PreviewUri(workspaceId, ":module", previewId).toUri()
     fun renderFile() =
@@ -1040,8 +1039,10 @@ class DaemonMcpServerTest {
         .jsonObject
 
     val first = renderFile()
-    assertThat(first["pngPath"]?.jsonPrimitive?.contentOrNull).isEqualTo(firstPng.canonicalPath)
-    assertThat(File(first["pngPath"]!!.jsonPrimitive.content).isFile).isTrue()
+    val firstStablePng = File(first["pngPath"]!!.jsonPrimitive.content)
+    assertThat(firstStablePng.canonicalPath).isNotEqualTo(sharedPng.canonicalPath)
+    assertThat(firstStablePng.name).isEqualTo("${first["sha256"]!!.jsonPrimitive.content}.png")
+    assertThat(firstStablePng.readBytes()).isEqualTo(firstBytes)
     assertThat(first["widthPx"]?.jsonPrimitive?.contentOrNull).isEqualTo("40")
     assertThat(first["heightPx"]?.jsonPrimitive?.contentOrNull).isEqualTo("30")
     assertThat(first["sha256"]?.jsonPrimitive?.contentOrNull).isNotEmpty()
@@ -1052,7 +1053,7 @@ class DaemonMcpServerTest {
     assertThat(unchanged["changed"]?.jsonPrimitive?.contentOrNull).isEqualTo("false")
 
     sourceFile.writeText("@Preview fun Red() { /* edited */ }")
-    activePng = secondPng
+    Files.write(sharedPng.toPath(), secondBytes)
     client.callTool(
       "notify_file_changed",
       buildJsonObject {
@@ -1066,6 +1067,83 @@ class DaemonMcpServerTest {
     assertThat(changed["changed"]?.jsonPrimitive?.contentOrNull).isEqualTo("true")
     assertThat(changed["sha256"]?.jsonPrimitive?.contentOrNull)
       .isNotEqualTo(first["sha256"]?.jsonPrimitive?.contentOrNull)
+    assertThat(File(changed["pngPath"]!!.jsonPrimitive.content).readBytes()).isEqualTo(secondBytes)
+    // The daemon reused and overwrote its output, but the earlier result remains replayable.
+    assertThat(firstStablePng.readBytes()).isEqualTo(firstBytes)
+  }
+
+  @Test
+  fun `render_preview inline false tracks changes independently per override set`() {
+    client.initialize()
+    val projectDir = tmp.newFolder("override-workspace")
+    tmp.newFolder("override-workspace", "module")
+    val workspaceId = registerWorkspace(projectDir, "override-demo")
+    val daemon = warmDaemonFor(workspaceId, ":module")
+    val previewId = "com.example.OverridePreview"
+    daemon.emitDiscovery(previewId)
+    client.expectNotification("notifications/resources/list_changed", 2_000)
+
+    val header =
+      byteArrayOf(
+        0x89.toByte(),
+        0x50,
+        0x4e,
+        0x47,
+        0x0d,
+        0x0a,
+        0x1a,
+        0x0a,
+        0x00,
+        0x00,
+        0x00,
+        0x0d,
+        0x49,
+        0x48,
+        0x44,
+        0x52,
+        0x00,
+        0x00,
+        0x00,
+        0x28,
+        0x00,
+        0x00,
+        0x00,
+        0x1e,
+      )
+    val frenchBytes = header + byteArrayOf(1)
+    val defaultBytes = header + byteArrayOf(2)
+    val sharedPng = tmp.newFile("override-shared.png")
+    daemon.autoRenderPngPath = { id ->
+      if (id != previewId) {
+        null
+      } else {
+        val locale = daemon.renderOverrides.lastOrNull()?.localeTag
+        Files.write(sharedPng.toPath(), if (locale == "fr") frenchBytes else defaultBytes)
+        sharedPng.absolutePath
+      }
+    }
+    val uri = PreviewUri(workspaceId, ":module", previewId).toUri()
+
+    fun render(locale: String?): JsonObject =
+      json
+        .parseToJsonElement(
+          client
+            .callTool(
+              "render_preview",
+              buildJsonObject {
+                put("uri", uri)
+                put("inline", false)
+                if (locale != null) putJsonObject("overrides") { put("localeTag", locale) }
+              },
+              timeoutMs = 10_000,
+            )
+            .firstTextContent()
+        )
+        .jsonObject
+
+    assertThat(render("fr")["changed"]?.jsonPrimitive?.contentOrNull).isEqualTo("true")
+    assertThat(render(null)["changed"]?.jsonPrimitive?.contentOrNull).isEqualTo("true")
+    assertThat(render("fr")["changed"]?.jsonPrimitive?.contentOrNull).isEqualTo("false")
   }
 
   @Test
@@ -1148,6 +1226,24 @@ class DaemonMcpServerTest {
         .jsonObject["previews"]!!
         .jsonArray
     assertThat(foundFromAbsolutePath).hasSize(2)
+
+    // Discovery resolves and caches the canonical source once. Resource listing does no per-call
+    // filesystem work, so the descriptor remains stable if the source disappears between lists.
+    assertThat(previewFile.delete()).isTrue()
+    val listedAfterDelete =
+      json.decodeFromJsonElement(
+        io.modelcontextprotocol.kotlin.sdk.types.ListResourcesResult.serializer(),
+        client.request("resources/list"),
+      )
+    assertThat(
+        listedAfterDelete.resources
+          .first { it.uri.contains("com.example.Red") }
+          .meta
+          ?.get("sourceFile")
+          ?.jsonPrimitive
+          ?.contentOrNull
+      )
+      .isEqualTo(previewFile.canonicalPath)
 
     val missing =
       json
