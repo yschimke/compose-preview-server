@@ -2169,8 +2169,20 @@ class ServeHttpRoutingTest {
       }
       assertEquals(404, fetch("/ui-builder/m3-catalog/missing.mjs").second.use { it.code })
       assertEquals(404, fetch("/ui-builder/m3-catalog/my/widget").second.use { it.code })
-      assertEquals(404, fetch("/ui-builder/mywidget3").second.use { it.code })
-      assertEquals(404, fetch("/ui-builder/wear-m3-catalog/").second.use { it.code })
+      // The shell is deliberately served before a design service is wired: a design created in a
+      // browser may arrive here while its authenticated API session is still being established.
+      fetch("/ui-builder/mywidget3").let { (code, response) ->
+        response.use {
+          assertEquals(200, code)
+          assertTrue(response.body.string().contains("Compose UI builder"))
+        }
+      }
+      fetch("/ui-builder/wear-m3-catalog/", noRedirects).let { (code, response) ->
+        response.use {
+          assertEquals(302, code)
+          assertEquals("/ui-builder/wear-m3-catalog", response.header("Location"))
+        }
+      }
       assertEquals(404, fetch("/ui-builder/../secret").second.use { it.code })
       assertEquals(404, fetch("/ui-builder/linked-secret.txt").second.use { it.code })
 
