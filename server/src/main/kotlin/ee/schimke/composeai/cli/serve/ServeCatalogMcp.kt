@@ -1824,12 +1824,12 @@ class ServeCatalogMcp(
   /**
    * Keeps the UI-builder protocol reply as a text fallback while giving MCP App hosts an ordinary
    * image block for the two calls that can carry a PNG. The text fallback omits both the binary
-   * field represented by that block and the native render's short-lived playground capability: a
-   * static MCP Apps host may serialize the complete tool result into a bounded URL fragment, where
-   * duplicating the PNG would exceed the limit and carrying the capability would leak it. The
-   * viewer intentionally only understands MCP content blocks; making it know every UI-builder
-   * response schema would couple a reusable viewer to a second protocol. Without this adapter,
-   * successful renders appear as base64 text.
+   * field represented by that block. The native render's short-lived playground capability stays in
+   * the ordinary MCP reply because clients use it to open the promised live preview stream; static
+   * packagers are responsible for applying their credential-free transport contract before
+   * serializing a result into a bounded URL fragment. The viewer intentionally only understands MCP
+   * content blocks; making it know every UI-builder response schema would couple a reusable viewer
+   * to a second protocol. Without this adapter, successful renders appear as base64 text.
    */
   internal fun uiBuilderToolResult(name: String, text: String): JsonObject {
     val png = uiBuilderPng(name, text)
@@ -1856,8 +1856,7 @@ class ServeCatalogMcp(
     return runCatching {
         val reply = JSON.parseToJsonElement(text) as? JsonObject ?: return@runCatching text
         when (name) {
-          ServeUiBuilderMcp.RENDER_NATIVE ->
-            JsonObject(reply - "previewToken" - "previewUrl" - "imageBase64").toString()
+          ServeUiBuilderMcp.RENDER_NATIVE -> JsonObject(reply - "imageBase64").toString()
           ServeUiBuilderMcp.EXPORT_DOCUMENT -> {
             if (!hasPng) return@runCatching text
             val response = reply["response"] as? JsonObject ?: return@runCatching text

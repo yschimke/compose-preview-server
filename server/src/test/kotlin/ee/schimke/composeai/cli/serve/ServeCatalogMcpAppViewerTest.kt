@@ -182,9 +182,9 @@ class ServeCatalogMcpAppViewerTest {
     val nativeResult = mcp.uiBuilderToolResult(ServeUiBuilderMcp.RENDER_NATIVE, native)
     assertVisualReply(
       nativeResult,
-      """{"designId":"demo","compileError":null}""",
+      """{"designId":"demo","previewToken":"pg_secret","previewUrl":"/pg/pg_secret","compileError":null}""",
     )
-    assertTrue(!nativeResult.toString().contains("pg_secret"))
+    assertTrue(nativeResult.toString().contains("pg_secret"))
 
     val exported =
       """{"callId":"ui_builder_export_document","response":{"artifact":{"format":"png","mediaType":"image/png","encoding":"base64","content":"AQID","contentDigest":"abc","diagnostics":[]}}}"""
