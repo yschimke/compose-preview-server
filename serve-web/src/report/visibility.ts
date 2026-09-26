@@ -13,7 +13,12 @@
 //    gated. The server knows its own posture; the path alone cannot.
 
 /** Route prefixes whose pages always need a signed-in session or an operator credential. */
-const PRIVATE_PREFIXES = ["/ui-builder", "/admin", "/api/ui-builder"];
+const PRIVATE_PREFIXES = [
+    "/ui-builder",
+    "/admin",
+    "/api/ui-builder",
+    "/agent-access",
+];
 
 /** The attribute and value that mark a page's captures as needing consent to upload. */
 export const SCOPE_ATTR = "data-cp-capture-scope";

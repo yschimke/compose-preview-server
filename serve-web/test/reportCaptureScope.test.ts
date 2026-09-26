@@ -124,6 +124,7 @@ describe("capture upload scope", () => {
         assert.equal(isPrivatePath("/ui-builder/abc/history"), true);
         assert.equal(isPrivatePath("/admin/ui-builder"), true);
         assert.equal(isPrivatePath("/api/ui-builder/v1/designs/x"), true);
+        assert.equal(isPrivatePath("/agent-access/req-1"), true);
         assert.equal(isPrivatePath("/ui-builderish"), false);
         assert.equal(isPrivatePath(PUBLIC_PAGE), false);
         assert.equal(isPrivatePath(null), false);

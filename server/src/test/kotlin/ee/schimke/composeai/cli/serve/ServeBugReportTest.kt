@@ -35,6 +35,7 @@ class ServeBugReportTest {
   fun `ui-builder and admin pages are the signed-in-only routes`() {
     assertTrue(ServeBugReport.isPrivatePath("/ui-builder"))
     assertTrue(ServeBugReport.isPrivatePath("/ui-builder/abc/history?x=1"))
+    assertTrue(ServeBugReport.isPrivatePath("/agent-access/req-1"))
     assertTrue(ServeBugReport.isPrivatePath("/admin/ui-builder"))
     assertTrue(ServeBugReport.isPrivatePath("/api/ui-builder/v1/designs/x"))
     assertFalse(ServeBugReport.isPrivatePath("/ui-builderish"))

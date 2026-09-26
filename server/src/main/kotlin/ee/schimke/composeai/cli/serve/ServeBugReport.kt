@@ -343,7 +343,7 @@ internal object ServeBugReport {
    * session with access to the design) and the operator's admin screens. Mirrored by
    * `serve-web/src/report/visibility.ts`.
    */
-  private val PRIVATE_PREFIXES = listOf("/ui-builder", "/admin", "/api/ui-builder")
+  private val PRIVATE_PREFIXES = listOf("/ui-builder", "/admin", "/api/ui-builder", "/agent-access")
 
   /**
    * Whether [path] (a [sanitizeFrom] result, query allowed) is a page only a signed-in user can
