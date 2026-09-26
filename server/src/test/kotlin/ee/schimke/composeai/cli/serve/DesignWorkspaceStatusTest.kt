@@ -80,6 +80,30 @@ class DesignWorkspaceStatusTest {
   }
 
   @Test
+  fun `supported shorthand selected server matches an absolute home origin`() {
+    val root =
+      workspace(
+        index("local"),
+        "local.json" to
+          """{"home":{"kind":"server","url":"http://localhost:8080","designId":"local"}}""",
+      )
+    var called = false
+    val result =
+      DesignWorkspaceStatus(options(root.toString()).copy(server = "localhost:8080")) { _, _ ->
+          called = true
+          response(
+            """{"home":{"kind":"server","url":"http://localhost:8080","designId":"local"}}""",
+            0,
+          )
+        }
+        .inspect()
+
+    assertTrue(called)
+    assertEquals("clean", result.designs.single().state)
+    assertEquals(0, result.unavailable)
+  }
+
+  @Test
   fun `authorization failures are redacted and never start a grant flow`() {
     val root = workspace(index("private"), "private.json" to serverDocument("private", "local"))
     val result =

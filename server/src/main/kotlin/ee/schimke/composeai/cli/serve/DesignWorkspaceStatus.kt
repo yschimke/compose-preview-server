@@ -320,7 +320,11 @@ internal class DesignWorkspaceStatus(
 
     private fun sameTrustedOrigin(home: String, selected: String): Boolean {
       val homeUri = safeUri(home) ?: return false
-      val selectedUri = safeUri(selected) ?: return false
+      // `--server localhost:8080` is an existing supported spelling. Normalize the independently
+      // selected server exactly as the transport does, while still requiring the tracked home to
+      // be an absolute URL rather than letting repository data opt into shorthand semantics.
+      val selectedSpelling = selected.trim().let { if ("://" in it) it else "http://$it" }
+      val selectedUri = safeUri(selectedSpelling) ?: return false
       return homeUri.scheme.equals(selectedUri.scheme, ignoreCase = true) &&
         homeUri.host.equals(selectedUri.host, ignoreCase = true) &&
         effectivePort(homeUri) == effectivePort(selectedUri)
