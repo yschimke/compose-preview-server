@@ -89,6 +89,24 @@ class ServeUiBuilderMcpIntegrationTest {
   }
 
   @Test
+  fun `initialize states the canonical home and discussion rules when the builder is present`() {
+    val server = start()
+
+    val instructions =
+      post(
+          server,
+          """{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"${ServeCatalogMcp.MCP_PROTOCOL_VERSION}"}}""",
+        )["result"]!!
+        .jsonObject["instructions"]!!
+        .jsonPrimitive
+        .content
+
+    assertTrue(instructions.contains("`home` is canonical"), instructions)
+    assertTrue(instructions.contains("never replaces that discussion"), instructions)
+    assertTrue(instructions.contains("explicitly choosing"), instructions)
+  }
+
+  @Test
   fun `an agent creates, edits and exports a design without touching a browser`() {
     val server = start()
 

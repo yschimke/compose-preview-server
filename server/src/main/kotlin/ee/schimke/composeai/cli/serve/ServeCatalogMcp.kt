@@ -168,7 +168,15 @@ class ServeCatalogMcp(
           "X-Compose-Preview-Token header if you control your own headers; if you cannot set " +
           "them — an MCP client fixes its headers when it connects — pass the token as the " +
           "'token' argument of each gated tool instead, and access approved during this session " +
-          "works in it.",
+          "works in it." +
+          if (uiBuilder == null) ""
+          else
+            " A UI-builder document's `home` is canonical: edit that original, and never " +
+              "re-import it as a second design or move, save back, or discard it without the " +
+              "human explicitly choosing. Keep design discussion at that home: read and " +
+              "acknowledge its pending comments and post design-specific findings there; an " +
+              "external issue or pull-request link supplements but never replaces that " +
+              "discussion.",
       )
     }
   }
