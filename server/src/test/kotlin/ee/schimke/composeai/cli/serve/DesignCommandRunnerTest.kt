@@ -12,7 +12,9 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.add
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.int
 import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 
 /**
@@ -253,6 +255,18 @@ class DesignEnvelopeTest {
   fun `the response object comes out of a plain JSON reply`() {
     val response = unwrap("t", rpc("""{"callId":"1","response":{"type":"designs","designs":[]}}"""))
     assertEquals("designs", response["type"].toString().trim('"'))
+  }
+
+  @Test
+  fun `GET design comment count survives response unwrapping`() {
+    val response =
+      unwrap(
+        ServeUiBuilderMcp.GET_DESIGN,
+        rpc(
+          """{"callId":"1","response":{"type":"snapshot","snapshot":{"state":{"document":{}}}},"unacknowledgedComments":3}"""
+        ),
+      )
+    assertEquals(3, response[ServeUiBuilderMcp.UNACKNOWLEDGED_COMMENTS_KEY]?.jsonPrimitive?.int)
   }
 
   /** Which transport framing arrives depends on the deployment; callers should not have to care. */

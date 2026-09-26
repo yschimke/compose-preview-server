@@ -222,7 +222,13 @@ internal fun unwrap(tool: String, raw: String): JsonObject {
     }
     throw DesignCommandFailure("$tool: $detail" + if (code.isBlank()) "" else " ($code)")
   }
-  return response
+  // GET_DESIGN's exact pending-discussion count is envelope metadata, beside `response`. Keep it
+  // attached to the object this transport returns so a caller can consume the snapshot and its
+  // status without dropping one while unwrapping the other. Preserve only the field whose CLI
+  // contract needs it rather than flattening every future envelope key into a protocol response.
+  return envelope[ServeUiBuilderMcp.UNACKNOWLEDGED_COMMENTS_KEY]?.let { count ->
+    JsonObject(response + (ServeUiBuilderMcp.UNACKNOWLEDGED_COMMENTS_KEY to count))
+  } ?: response
 }
 
 private fun String.containsAuthorizationRefusal(): Boolean =
