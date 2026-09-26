@@ -162,6 +162,14 @@ class ServeCatalogMcpToolsTest {
 
     assertEquals(true, diff["identical"]!!.jsonPrimitive.content.toBoolean())
     assertEquals("testTag", diff["identity"]!!.jsonPrimitive.content)
+    assertEquals(
+      "compose-preview://catalog/m3/card",
+      diff["left"]!!.jsonObject["uri"]!!.jsonPrimitive.content,
+    )
+    assertEquals(
+      "compose-preview://catalog/m3/other",
+      diff["right"]!!.jsonObject["uri"]!!.jsonPrimitive.content,
+    )
   }
 
   @Test

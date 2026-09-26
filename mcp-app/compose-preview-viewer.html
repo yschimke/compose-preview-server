@@ -12,6 +12,12 @@
   .muted { color: var(--color-text-secondary, #666); font-size: 12px; }
   .canvas { min-height: 120px; border: 1px solid var(--color-border, #d8d8dd); border-radius: 10px; background: var(--color-background-secondary, #f8f8fa); display: grid; place-items: center; overflow: auto; }
   .canvas img { max-width: 100%; max-height: 560px; object-fit: contain; }
+  .comparison { width: 100%; padding: 10px; box-sizing: border-box; }
+  .comparison-stage { position: relative; display: grid; place-items: center; min-height: 120px; overflow: hidden; }
+  .comparison-stage img { grid-area: 1 / 1; display: block; }
+  .comparison-after { position: absolute; inset: 0; width: 100%; height: 100%; }
+  .comparison-labels { display: flex; justify-content: space-between; margin: 8px 2px 4px; font-size: 12px; font-weight: 650; }
+  .comparison-slider { width: 100%; margin: 0; }
   .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; width: 100%; padding: 8px; box-sizing: border-box; }
   .cell { border: 1px solid var(--color-border, #d8d8dd); border-radius: 8px; padding: 6px; background: var(--color-background-primary, #fff); cursor: pointer; }
   .cell img { width: 100%; display: block; }
@@ -85,6 +91,7 @@
   let overlayGeneration = 0;
   let overlayCall;
   let baseMetaText = '';
+  let comparisonReadGeneration = 0;
 
   function request(method, params, timeoutMs = REQUEST_TIMEOUT_MS, onLateResult) {
     const id = nextId++;
@@ -300,6 +307,120 @@
     }, label);
     baseMetaText = label;
     updateAccessibilityAction();
+  }
+
+  function beforeAfterModel(value) {
+    const beforeUri = value?.left?.uri || value?.baseUri || toolArguments.baseUri;
+    const afterUri = value?.right?.uri || value?.headUri || toolArguments.headUri;
+    if (typeof beforeUri !== 'string' || !beforeUri || typeof afterUri !== 'string' || !afterUri) {
+      return undefined;
+    }
+    return {
+      kind: 'before-after',
+      before: { uri: beforeUri, label: 'Before' },
+      after: { uri: afterUri, label: 'After' },
+    };
+  }
+
+  function renderBeforeAfterFallback(result, comparison, reason) {
+    const message = document.createElement('div');
+    message.className = 'fallback';
+    const summary = document.createElement('p');
+    summary.textContent = reason;
+    message.append(summary);
+    for (const artifact of [comparison.before, comparison.after]) {
+      const label = document.createElement('p');
+      label.textContent = `${artifact.label}: `;
+      const uri = document.createElement('code');
+      uri.textContent = artifact.uri;
+      label.append(uri);
+      message.append(label);
+    }
+    const text = fallbackText(result);
+    if (text) {
+      const output = document.createElement('pre');
+      output.textContent = text;
+      message.append(output);
+    }
+    canvas.replaceChildren(message);
+  }
+
+  function showBeforeAfter(comparison, beforeData, afterData) {
+    const container = document.createElement('div');
+    container.className = 'comparison';
+    const stage = document.createElement('div');
+    stage.className = 'comparison-stage';
+    const before = document.createElement('img');
+    before.alt = 'Before Compose preview';
+    before.src = `data:image/png;base64,${beforeData}`;
+    const after = document.createElement('img');
+    after.className = 'comparison-after';
+    after.alt = 'After Compose preview';
+    after.src = `data:image/png;base64,${afterData}`;
+    const labels = document.createElement('div');
+    labels.className = 'comparison-labels';
+    const beforeLabel = document.createElement('span');
+    beforeLabel.textContent = comparison.before.label;
+    const afterLabel = document.createElement('span');
+    afterLabel.textContent = comparison.after.label;
+    labels.append(beforeLabel, afterLabel);
+    const slider = document.createElement('input');
+    slider.className = 'comparison-slider';
+    slider.type = 'range';
+    slider.min = '0';
+    slider.max = '100';
+    slider.value = '50';
+    slider.setAttribute('aria-label', 'Reveal after preview');
+    const reveal = () => {
+      after.style.clipPath = `inset(0 ${100 - Number(slider.value)}% 0 0)`;
+      slider.setAttribute('aria-valuetext', `${slider.value}% after preview`);
+    };
+    slider.addEventListener('input', reveal);
+    reveal();
+    stage.append(before, after);
+    container.append(stage, labels, slider);
+    canvas.replaceChildren(container);
+    choose(comparison, 'Before and after preview comparison');
+  }
+
+  async function renderBeforeAfter(result, comparison, generation) {
+    if (staticMode) {
+      renderBeforeAfterFallback(
+        result,
+        comparison,
+        'Static comparison result. Open both replayable resources in an MCP host to view the slider.',
+      );
+      meta.textContent = 'Static before and after result; complete text fallback shown.';
+      return;
+    }
+    meta.textContent = 'Reading before and after preview resources…';
+    try {
+      await bridgeReady;
+      if (!initialized) throw new Error('MCP Apps bridge is unavailable');
+      const read = uri => {
+        const params = { uri };
+        if (resourceToken) params._meta = { 'compose-preview/token': resourceToken };
+        return request('resources/read', params, RESOURCE_READ_TIMEOUT_MS);
+      };
+      const [beforeResult, afterResult] = await Promise.all([
+        read(comparison.before.uri),
+        read(comparison.after.uri),
+      ]);
+      if (generation !== comparisonReadGeneration) return;
+      const before = resourcePng(beforeResult);
+      const after = resourcePng(afterResult);
+      if (!before || !after) throw new Error('one or both comparison resources have no PNG');
+      showBeforeAfter(comparison, before.blob, after.blob);
+    } catch (error) {
+      if (generation !== comparisonReadGeneration) return;
+      renderBeforeAfterFallback(
+        result,
+        comparison,
+        'Unable to read both comparison resources; complete two-artifact fallback:',
+      );
+      choose(comparison, 'Comparison resources unavailable; complete text fallback shown.');
+      console.warn('Failed to read Compose Preview comparison resources:', error);
+    }
   }
 
   function applyAccessibilityResult(result, generation) {
@@ -603,8 +724,14 @@
     use.hidden = true;
     refresh.hidden = true;
     clearAccessibilityOverlay();
-    disconnectResourceUpdates(resource?.uri);
+    const comparisonGeneration = ++comparisonReadGeneration;
+    const comparison = beforeAfterModel(value);
+    disconnectResourceUpdates(comparison ? undefined : resource?.uri);
     resourceResult = undefined;
+    if (comparison) {
+      void renderBeforeAfter(result, comparison, comparisonGeneration);
+      return;
+    }
     const cells = Array.isArray(value.cells) && value.cells;
     if (resource) {
       resourceResult = { result, resource, value };

@@ -143,6 +143,11 @@ class ServeCatalogMcpAppViewerTest {
     assertTrue(html.contains("credential field"))
     assertTrue(html.contains("const bridgeReady = staticMode ? Promise.resolve()"))
     assertTrue(html.contains("Complete text and structured output:"))
+    assertTrue(html.contains("function beforeAfterModel(value)"))
+    assertTrue(html.contains("value?.left?.uri || value?.baseUri || toolArguments.baseUri"))
+    assertTrue(html.contains("await Promise.all(["))
+    assertTrue(html.contains("complete two-artifact fallback"))
+    assertTrue(html.contains("aria-label', 'Reveal after preview"))
     assertTrue(
       html.indexOf("await request('ui/initialize'") <
         html.indexOf("notify('ui/notifications/initialized'"),

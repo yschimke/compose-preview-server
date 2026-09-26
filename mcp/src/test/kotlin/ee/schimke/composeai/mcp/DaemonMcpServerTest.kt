@@ -3878,6 +3878,8 @@ class DaemonMcpServerTest {
     val parsed = json.parseToJsonElement(resp.firstTextContent()).jsonObject
     assertThat(parsed["schema"]?.jsonPrimitive?.contentOrNull)
       .isEqualTo("compose-semantics-diff/v1")
+    assertThat(parsed["baseUri"]?.jsonPrimitive?.contentOrNull).isEqualTo(baseUri)
+    assertThat(parsed["headUri"]?.jsonPrimitive?.contentOrNull).isEqualTo(headUri)
     assertThat(parsed["summary"]?.jsonPrimitive?.contentOrNull).contains("changed")
     val changed = parsed["delta"]!!.jsonObject["changed"]!!.jsonArray
     val change = changed.single().jsonObject

@@ -9,7 +9,18 @@ function base64Url(value) {
 }
 
 const content = [];
-if (mode === "image") {
+if (mode === "comparison") {
+  content.push({
+    type: "text",
+    text: JSON.stringify({
+      schema: "compose-semantics-diff/v1",
+      baseUri: "compose-preview://fixture/_app/com.example.Card?version=before",
+      headUri: "compose-preview://fixture/_app/com.example.Card?version=after",
+      summary: "1 semantics node changed",
+      delta: { changed: [{ ref: "r/tag:title" }] },
+    }),
+  });
+} else if (mode === "image") {
   const bytes = new Uint8Array(
     await (await fetch("/preview-harness/fixtures/pages/_render-placeholder.png")).arrayBuffer(),
   );
@@ -17,30 +28,39 @@ if (mode === "image") {
   for (const byte of bytes) binary += String.fromCharCode(byte);
   content.push({ type: "image", mimeType: "image/png", data: btoa(binary) });
 }
-content.push({
-  type: "text",
-  text: JSON.stringify({
-    observe: "semantics",
-    uri: "compose-preview://fixture/_app/com.example.Card",
-    sha256: "fixture-sha256",
-    widthPx: 200,
-    heightPx: 420,
-    semantics: { root: { testTag: "static-card", role: "Card" } },
-  }),
-});
-content.push({
-  type: "resource_link",
-  uri: "compose-preview://fixture/_app/com.example.Card?overrides=fixture",
-  name: "Compose Preview render",
-  mimeType: "image/png",
-});
+if (mode !== "comparison") {
+  content.push({
+    type: "text",
+    text: JSON.stringify({
+      observe: "semantics",
+      uri: "compose-preview://fixture/_app/com.example.Card",
+      sha256: "fixture-sha256",
+      widthPx: 200,
+      heightPx: 420,
+      semantics: { root: { testTag: "static-card", role: "Card" } },
+    }),
+  });
+  content.push({
+    type: "resource_link",
+    uri: "compose-preview://fixture/_app/com.example.Card?overrides=fixture",
+    name: "Compose Preview render",
+    mimeType: "image/png",
+  });
+}
 
 const envelope = {
   version: 1,
   arguments: {
-    uri: "compose-preview://fixture/_app/com.example.Card",
-    previewId: "CardPreview",
-    overrides: { uiMode: "dark" },
+    ...(mode === "comparison"
+      ? {
+          baseUri: "compose-preview://fixture/_app/com.example.Card?version=before",
+          headUri: "compose-preview://fixture/_app/com.example.Card?version=after",
+        }
+      : {
+          uri: "compose-preview://fixture/_app/com.example.Card",
+          previewId: "CardPreview",
+          overrides: { uiMode: "dark" },
+        }),
   },
   result: { content },
 };

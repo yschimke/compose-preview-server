@@ -3911,7 +3911,8 @@ class DaemonMcpServer(
    * `diff_semantics` — fetch `compose/semantics` for two preview URIs and report the structural
    * delta between their trees (issue #1785). The cheap, deterministic, pixel-free regression
    * signal: nodes are matched by their stable `ref`, so a copy edit is a field change on the same
-   * ref rather than a remove + add. Returns `{ schema, summary, delta }` as a single text block.
+   * ref rather than a remove + add. Returns `{ schema, baseUri, headUri, summary, delta }` as a
+   * single text block so text-only clients retain both replayable artifacts.
    */
   private fun toolDiffSemantics(args: JsonObject): CallToolResult {
     val baseUriStr =
@@ -3927,6 +3928,8 @@ class DaemonMcpServer(
     val delta = SemanticsDiff.diff(base, head)
     val out = buildJsonObject {
       put("schema", delta.schema)
+      put("baseUri", baseUriStr)
+      put("headUri", headUriStr)
       put("summary", summarizeSemanticsDelta(delta))
       put("delta", json.encodeToJsonElement(SemanticsDelta.serializer(), delta))
     }

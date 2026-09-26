@@ -4352,6 +4352,16 @@ for (const fixture of listPageFixtures()) {
               "compose-preview://fixture/_app/com.example.Card?overrides=fixture",
             );
             await expect(viewer.locator("#refresh")).toBeHidden();
+          } else if (fixture === "mcp-app-viewer-static-before-after") {
+            await expect(viewer.locator("#canvas")).toContainText(
+              "Static comparison result",
+            );
+            await expect(viewer.locator("#canvas")).toContainText("version=before");
+            await expect(viewer.locator("#canvas")).toContainText("version=after");
+            await expect(viewer.locator("#canvas")).toContainText(
+              "1 semantics node changed",
+            );
+            await expect(viewer.locator("#refresh")).toBeHidden();
           } else {
             await expect(
               viewer.locator('#canvas img[alt="Rendered Compose preview"]'),
@@ -4359,19 +4369,45 @@ for (const fixture of listPageFixtures()) {
             await expect(viewer.locator("#use")).toBeHidden();
           }
         } else if (fixture !== "mcp-app-viewer-a11y-non-full") {
-          await page.waitForFunction(() => window.__mcpReadCount >= 1);
+          await page.waitForFunction(
+            (count) => window.__mcpReadCount >= count,
+            fixture === "mcp-app-viewer-before-after" ? 2 : 1,
+          );
         }
         if (fixture === "mcp-app-viewer-fallback") {
           await expect(viewer.locator("#canvas")).toContainText(
             "The host returned no PNG for resource",
           );
-        } else if (!fixture.startsWith("mcp-app-viewer-static")) {
+        } else if (
+          !fixture.startsWith("mcp-app-viewer-static") &&
+          fixture !== "mcp-app-viewer-before-after"
+        ) {
           await expect(viewer.locator('#canvas img[alt="Rendered Compose preview"]')).toBeVisible({
             timeout: fixture === "mcp-app-viewer-resource" ? 8_000 : undefined,
           });
           if (fixture === "mcp-app-viewer-resource") {
             expect(await page.evaluate(() => window.__mcpReadCount)).toBe(1);
           }
+        }
+        if (fixture === "mcp-app-viewer-before-after") {
+          await expect(viewer.locator('img[alt="Before Compose preview"]')).toBeVisible();
+          await expect(viewer.locator('img[alt="After Compose preview"]')).toBeVisible();
+          await expect(viewer.locator(".comparison-labels")).toContainText("Before");
+          await expect(viewer.locator(".comparison-labels")).toContainText("After");
+          const slider = viewer.locator('input[aria-label="Reveal after preview"]');
+          await expect(slider).toHaveValue("50");
+          const beforeClip = await viewer.locator(".comparison-after").getAttribute("style");
+          await slider.fill("80");
+          await slider.dispatchEvent("input");
+          await expect(slider).toHaveAttribute("aria-valuetext", "80% after preview");
+          await expect(viewer.locator(".comparison-after")).not.toHaveAttribute(
+            "style",
+            beforeClip,
+          );
+          expect(await page.evaluate(() => window.__mcpReadUris)).toEqual([
+            "compose-preview://fixture/_app/com.example.Card?version=before",
+            "compose-preview://fixture/_app/com.example.Card?version=after",
+          ]);
         }
         if (fixture === "mcp-app-viewer-refresh") {
           const image = viewer.locator('#canvas img[alt="Rendered Compose preview"]');

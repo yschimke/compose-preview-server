@@ -67,6 +67,32 @@ window.addEventListener("message", async (event) => {
         },
       },
     });
+    if (mode === "before-after") {
+      const comparison = {
+        schema: "compose-preview/catalog-mcp-semantics-diff/v1",
+        left: {
+          uri: "compose-preview://fixture/_app/com.example.Card?version=before",
+          taggedNodes: 3,
+        },
+        right: {
+          uri: "compose-preview://fixture/_app/com.example.Card?version=after",
+          taggedNodes: 4,
+        },
+        changed: [{ testTag: "title" }],
+        identical: false,
+      };
+      send({
+        jsonrpc: "2.0",
+        method: "ui/notifications/tool-result",
+        params: {
+          result: {
+            structuredContent: comparison,
+            content: [{ type: "text", text: JSON.stringify(comparison) }],
+          },
+        },
+      });
+      return;
+    }
     if (mode === "a11y-non-full") {
       const imageData = await png("/preview-harness/fixtures/pages/_render-placeholder.png");
       send({
@@ -357,6 +383,7 @@ window.addEventListener("message", async (event) => {
         params: { uri: message.params.uri },
       });
     }
+    window.__mcpReadUris = [...(window.__mcpReadUris || []), message.params.uri];
     await new Promise((resolve) =>
       setTimeout(
         resolve,
@@ -386,7 +413,9 @@ window.addEventListener("message", async (event) => {
       return;
     }
     const path =
-      mode === "refresh" && resourceUpdates > 0
+      mode === "before-after" && message.params.uri.includes("version=after")
+        ? "/preview-harness/fixtures/pages/_design-render-placeholder.png"
+        : mode === "refresh" && resourceUpdates > 0
         ? "/preview-harness/fixtures/pages/_design-render-placeholder.png"
         : "/preview-harness/fixtures/pages/_render-placeholder.png";
     send({
