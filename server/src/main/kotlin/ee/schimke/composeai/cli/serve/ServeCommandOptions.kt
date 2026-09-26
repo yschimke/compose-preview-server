@@ -1153,8 +1153,9 @@ public class ServeCommandOptions(
                           Longest grant this server will mint, e.g. 90m / 2h / 3600 (default 8h,
                           hard ceiling 24h). The approver picks the actual lifetime on the page.
         --agent-grant-max-active <n>
-                          Live grants allowed at once (default ${ServeDefaults.AGENT_GRANT_MAX_ACTIVE}); a new one evicts the
-                          nearest to expiry.
+                          Live grants allowed at once (default ${ServeDefaults.AGENT_GRANT_MAX_ACTIVE}); over it a new
+                          approval is refused. On --public each signed-in approver may also hold at
+                          most ${ServeDefaults.AGENT_GRANT_MAX_ACTIVE_PER_APPROVER} live grants.
         --agent-grant-rate-limit <n>
                           Requests per minute per address on the two ungated grant routes (default
                           ${ServeDefaults.DEFAULT_AGENT_GRANT_RATE_LIMIT}; 0 disables the budget entirely).

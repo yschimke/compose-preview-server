@@ -238,7 +238,27 @@ object ServeAgentGrants {
      * is asked about, because a box may gate uploads on one repository and sign-in on another.
      */
     val capabilityCeiling: Set<AgentGrantCapability> = emptySet(),
+    /**
+     * True when this approver answers for the whole box rather than only for what they approved
+     * themselves: the `--token` holder (every approver on a box that is not `--public` has to
+     * present it), or a configured UI-builder administrator. Such an approver sees every pending
+     * request and live grant on `/status`, may revoke any grant, and is held only to the box-wide
+     * cap on live grants.
+     *
+     * False for an ordinary signed-in visitor on a `--public` box, who sees and revokes only the
+     * grants they approved (and the requests they opened for themselves), and may hold at most the
+     * store's per-approver number of live grants.
+     */
+    val administers: Boolean = true,
   ) {
+    /** True when this approver may see and revoke [grant]. */
+    fun manages(grant: ServeAgentGrantStore.Grant): Boolean =
+      administers || grant.isApprovedBy(name, actorId)
+
+    /** True when this approver is shown [request] among the waiting requests on `/status`. */
+    fun sees(request: ServeAgentGrantStore.Request): Boolean =
+      administers || (request.requesterActorId.isNotBlank() && request.requesterActorId == actorId)
+
     companion object {
       /** The holder of `--token` on a box with no GitHub auth: the operator, so no narrowing. */
       fun operator(
@@ -263,9 +283,11 @@ object ServeAgentGrants {
         imageRepositoryAccess: Boolean = repositoryAccess,
         storeCeiling: AgentGrantScope,
         storeCapabilities: Set<AgentGrantCapability> = emptySet(),
+        administers: Boolean = true,
       ) =
         Approver(
           name = "@$login",
+          administers = administers,
           actorId = githubActorId(login),
           ceiling =
             if (repositoryAccess) storeCeiling else minOf(storeCeiling, AgentGrantScope.LIVE),
