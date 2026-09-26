@@ -109,6 +109,17 @@ data class UsageRules(
   @SerialName("scaffoldSources") val scaffoldSources: List<String> = emptyList(),
 
   /**
+   * Module-relative source roots, besides the one the preview file's own package implies, under
+   * which an imported function the preview calls is looked for as `<root>/<package path>/<Name>.kt`
+   * (see [PlaygroundSeedResolver]'s followed calls).
+   *
+   * The implied root covers a conventional tree. This is for one that is not: a catalog that
+   * vendors upstream code under a directory of its own (`src/main/kotlin/upstream`) keeps its
+   * packages below that directory, where the preview file's package cannot point.
+   */
+  @SerialName("sourceRoots") val sourceRoots: List<String> = emptyList(),
+
+  /**
    * Packages the [scaffolds] themselves live in, so a **package-qualified** call
    * (`ee.schimke.composeai.overrides.previewOverrideString(…)`) is recognised as the same call.
    *

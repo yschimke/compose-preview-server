@@ -86,6 +86,7 @@ object PlaygroundSourceCleaner {
     strings: Map<String, String> = emptyMap(),
     parser: UsageSourceParser? = UsageSourceParser.of(),
     helperSources: List<String> = emptyList(),
+    followedSources: List<String> = emptyList(),
   ): Result? {
     if (bodyLine == null) return null
     val lines = source.lines()
@@ -164,6 +165,26 @@ object PlaygroundSourceCleaner {
         extraImports = extraImports,
       )
 
+    // Then one level down into the files behind the preview's imported calls (see
+    // PlaygroundSeedResolver's followed calls): the function a delegating preview calls, and what
+    // that function's own file declares for it. Unlike the scaffold closure above, this is the
+    // code the reader came for, so it is bounded by its own, larger limits — a sample is a screen,
+    // not a helper — and nothing it reaches is residue: a cap that stops it only shortens the view.
+    val followedHelpers =
+      closeOverHelpers(
+        seeds = cleanedByIndex.values + cleanedHelpers,
+        helpers = helperIndex(followedSources),
+        skip = declaredAt.keys + rules.scaffolds.keys + closureHelpers.keys,
+        rules = rules,
+        strings = strings,
+        residue = mutableSetOf(),
+        addedImports = addedImports,
+        parser = parser,
+        extraImports = extraImports,
+        maxClosures = MAX_FOLLOWED_CLOSURES,
+        maxBytes = MAX_FOLLOWED_BYTES,
+      )
+
     // Entry first, then its helpers in file order — a reader wants the composable they clicked at
     // the top, not after two private helpers they did not ask about.
     val bodies = buildList {
@@ -173,6 +194,7 @@ object PlaygroundSourceCleaner {
         .filter { it != entryIndex }
         .forEach { add(cleanedByIndex.getValue(it)) }
       addAll(cleanedHelpers)
+      addAll(followedHelpers)
     }
     val body = bodies.joinToString("\n\n").trimEnd()
     if (body.isBlank()) return null
@@ -1034,6 +1056,12 @@ object PlaygroundSourceCleaner {
   /** And no single one larger than this: past it the helper *is* the snippet. */
   private const val MAX_HELPER_BYTES = 4_000
 
+  /** Declarations pulled in one level down, through a preview's followed calls. */
+  private const val MAX_FOLLOWED_CLOSURES = 16
+
+  /** And no single one larger than this: a whole sample screen fits, a generated table does not. */
+  private const val MAX_FOLLOWED_BYTES = 24_000
+
   /**
    * Name → declaration across every scaffold source.
    *
@@ -1163,6 +1191,8 @@ object PlaygroundSourceCleaner {
     addedImports: MutableSet<String>,
     parser: UsageSourceParser?,
     extraImports: MutableSet<Import>,
+    maxClosures: Int = MAX_HELPER_CLOSURES,
+    maxBytes: Int = MAX_HELPER_BYTES,
   ): List<String> {
     if (helpers.isEmpty()) return emptyList()
     val cleaned = LinkedHashMap<String, String>()
@@ -1182,12 +1212,12 @@ object PlaygroundSourceCleaner {
       }
     }
     seeds.forEach(::enqueue)
-    while (queue.isNotEmpty() && cleaned.size < MAX_HELPER_CLOSURES) {
+    while (queue.isNotEmpty() && cleaned.size < maxClosures) {
       val name = queue.removeFirst()
       val helper = helpers.getValue(name)
       // Too big to be an example. Left uncopied and named in the residue, so the note says the
       // snippet still refers to something it did not bring along.
-      if (helper.text.length > MAX_HELPER_BYTES) {
+      if (helper.text.length > maxBytes) {
         residue.add(name)
         continue
       }
