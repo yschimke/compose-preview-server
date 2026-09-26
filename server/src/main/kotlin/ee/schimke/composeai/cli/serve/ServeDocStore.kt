@@ -104,6 +104,9 @@ class ServeDocStore(
         ?: return Result.Failed(
           "unrecognised document format — this host accepts ${ServeDocFormats.knownSummary()}"
         )
+    format.unsupported(bytes)?.let {
+      return Result.Failed(it)
+    }
     val now = clock()
     purgeExpired(now)
     val doc =
