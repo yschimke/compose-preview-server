@@ -223,6 +223,11 @@ data class ServeSites(private val byHost: Map<String, String>) {
         "favicon.svg",
         "favicon.ico",
         "apple-touch-icon.png",
+        // The installable-app icons (`/icons/app-*.png`) and the web app manifest they are named
+        // in. A browser fetches both from the site host's own origin, so a catalog claiming either
+        // would make every site host uninstallable.
+        "icons",
+        "manifest.webmanifest",
         "assets",
         "ui-builder",
         "wasm",

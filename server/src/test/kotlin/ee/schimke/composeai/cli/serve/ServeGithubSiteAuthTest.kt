@@ -75,7 +75,6 @@ class ServeGithubSiteAuthTest {
       ),
       verifier = GitHubOAuthVerifier(fakeGitHub),
       clock = clock,
-      anonymousClient = fakeGitHub,
     )
 
   private val sites =

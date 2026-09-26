@@ -10,6 +10,7 @@ import ee.schimke.composeai.uibuilder.protocol.DesignListItemV1
 import ee.schimke.composeai.uibuilder.protocol.GrantActorAccessMutationV1
 import ee.schimke.composeai.uibuilder.protocol.RevokeActorAccessMutationV1
 import ee.schimke.composeai.uibuilder.protocol.ServiceErrorCodeV1
+import ee.schimke.composeai.uibuilder.service.UiBuilderPublicAccess
 import ee.schimke.composeai.uibuilder.service.UiBuilderServiceCall
 import ee.schimke.composeai.uibuilder.service.UiBuilderServiceError
 import ee.schimke.composeai.uibuilder.service.UiBuilderServicePort
@@ -209,7 +210,10 @@ class ServeUiBuilderAccessRoutesTest {
     val builder = Request.Builder().url(url(path)).post(form).header("Accept", "text/html")
     if (actor != null) builder.header("X-Test-Actor", actor)
     if (origin != null) builder.header("Origin", origin)
-    return client.newCall(builder.build()).execute().use { it.code to it.body.string() }
+    // A redirect answers with where it sends the browser, which is what these tests check.
+    return client.newCall(builder.build()).execute().use {
+      it.code to (if (it.isRedirect) it.header("Location").orEmpty() else it.body.string())
+    }
   }
 
   @Test
@@ -267,7 +271,8 @@ class ServeUiBuilderAccessRoutesTest {
         "/ui-builder/screen/access",
         FormBody.Builder().add("actorId", "github:colleague").add("role", "editor").build(),
       )
-    assertEquals(200, code)
+    // POST, redirect, GET: a refresh of the landing page repeats the notice, not the share.
+    assertEquals(303, code)
     val shared = mutations.single()
     assertEquals(3, shared.baseAccessRevision, "the revision comes from the read, not the form")
     val grant = shared.mutations.single() as GrantActorAccessMutationV1
@@ -278,7 +283,14 @@ class ServeUiBuilderAccessRoutesTest {
       grant.allowedActions,
       "neither shared role may manage access or delete",
     )
-    assertTrue(page.contains("github:colleague"), page)
+    assertEquals(
+      "/ui-builder/screen/access?changed=shared&actor=github%3Acolleague&role=editor",
+      page,
+    )
+    val (landedCode, landed) = get(page, actor = "github:owner")
+    assertEquals(200, landedCode)
+    assertTrue(landed.contains("github:colleague can now open this design as editor"), landed)
+    assertEquals(1, mutations.size, "reading the landing page changes nothing")
 
     mutations.clear()
     val (revokedCode, revokedPage) =
@@ -286,12 +298,13 @@ class ServeUiBuilderAccessRoutesTest {
         "/ui-builder/screen/access",
         FormBody.Builder().add("actorId", "github:colleague").add("action", "revoke").build(),
       )
-    assertEquals(200, revokedCode)
+    assertEquals(303, revokedCode)
     assertEquals(
       "github:colleague",
       (mutations.single().mutations.single() as RevokeActorAccessMutationV1).actorId,
     )
-    assertFalse(revokedPage.contains(">github:colleague<"), revokedPage)
+    val (_, revokedLanding) = get(revokedPage, actor = "github:owner")
+    assertTrue(revokedLanding.contains("github:colleague can no longer open"), revokedLanding)
   }
 
   @Test
@@ -340,5 +353,49 @@ class ServeUiBuilderAccessRoutesTest {
     )
     post("/ui-builder/screen/access", FormBody.Builder().add("actorId", " ").build())
     assertTrue(mutations.isEmpty(), "no refusal may have changed access: $mutations")
+  }
+
+  @Test
+  fun `the owner makes a design public and private again, and nobody can share with everyone`() {
+    val (code, location) =
+      post("/ui-builder/screen/access", FormBody.Builder().add("visibility", "public").build())
+    assertEquals(303, code)
+    assertEquals("/ui-builder/screen/access?changed=public", location)
+    val grant = mutations.single().mutations.single() as GrantActorAccessMutationV1
+    assertEquals(UiBuilderPublicAccess.ANYONE_ACTOR_ID, grant.actorId)
+    assertEquals(DesignAccessRoleV1.VIEWER, grant.role)
+    assertEquals(UiBuilderPublicAccess.PUBLIC_ACTIONS, grant.allowedActions)
+
+    val (_, page) = get(location, actor = "github:owner")
+    assertTrue(page.contains("now public"), page)
+    assertTrue(page.contains("Make private"), page)
+    assertFalse(page.contains("<code>public:anyone</code>"), "shown as visibility, not a person")
+
+    mutations.clear()
+    post("/ui-builder/screen/access", FormBody.Builder().add("visibility", "private").build())
+    assertEquals(
+      UiBuilderPublicAccess.ANYONE_ACTOR_ID,
+      (mutations.single().mutations.single() as RevokeActorAccessMutationV1).actorId,
+    )
+
+    // The pseudo-actors that mean "everyone" cannot be typed into the share box, with any role.
+    mutations.clear()
+    for (reserved in listOf(UiBuilderPublicAccess.ANYONE_ACTOR_ID, "anonymous:visitor")) {
+      post(
+        "/ui-builder/screen/access",
+        FormBody.Builder().add("actorId", reserved).add("role", "editor").build(),
+      )
+    }
+    assertTrue(mutations.isEmpty(), "$mutations")
+    // Nor may somebody who does not own the design change who may see it.
+    assertEquals(
+      403,
+      post(
+          "/ui-builder/screen/access",
+          FormBody.Builder().add("visibility", "public").build(),
+          actor = "github:other",
+        )
+        .first,
+    )
   }
 }

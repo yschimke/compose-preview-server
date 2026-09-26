@@ -7,6 +7,8 @@
         <link rel="icon" href="/favicon.svg" type="image/svg+xml">
         <link rel="icon" href="/favicon.ico" sizes="32x32">
         <link rel="apple-touch-icon" href="/apple-touch-icon.png">
+        <link rel="manifest" href="/manifest.webmanifest">
+        <meta name="theme-color" content="#4f378b">
         <link rel="stylesheet" href="/assets/serve/fixture/serve.css">
         <!-- Apply the Transparent choice before first paint (no checkerboard flash).
              A `?bg=` on the URL is an explicit, shareable choice and outranks the sticky one. -->
@@ -531,7 +533,10 @@ fun Greeting() {
         if (editLeaseButton) editLeaseButton.disabled = false;
         renderDiags(res.diagnostics);
         var hasError = (res.diagnostics || []).some(function (d) { return d.severity === "error"; });
-        if (res.exception) {
+        // A snippet that compiled and whose first frame failed still minted a live session: say
+        // why there is no still image, and keep going so its link is offered anyway.
+        var frameFailed = !!(res.exception && res.previewToken);
+        if (res.exception && !frameFailed) {
           if (res.exception.indexOf("live-edit lease") >= 0) setEditLease(null, res.exception);
           setStatus(res.exception, true); return;
         }
@@ -584,7 +589,8 @@ fun Greeting() {
             previewList.appendChild(li);
           });
         }
-        setStatus("Done.", false);
+        if (frameFailed) setStatus(res.exception, true);
+        else setStatus("Done.", false);
         if (res.revision != null && editLeaseNote) {
           editLeaseNote.hidden = false;
           editLeaseNote.textContent = "Revision " + res.revision +

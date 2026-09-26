@@ -1,5 +1,77 @@
 # Changelog
 
+## [3.71.0](https://github.com/yschimke/compose-preview-server/compare/v3.70.0...v3.71.0) (2026-09-26)
+
+
+### Bug Fixes
+
+* **ui-builder:** move compose-ui-builder to 3.60.0, so Wear device previews draw the widget and the selection card can be closed ([#1086](https://github.com/yschimke/compose-preview-server/issues/1086)) ([0e36394](https://github.com/yschimke/compose-preview-server/commit/0e36394fe1f9d7c3a1dcd24d7093dcb01305901b))
+
+## [3.70.0](https://github.com/yschimke/compose-preview-server/compare/v3.69.0...v3.70.0) (2026-09-26)
+
+
+### Bug Fixes
+
+* **ui-builder:** move compose-ui-builder to 3.59.0, so a reloaded editor starts ([#1083](https://github.com/yschimke/compose-preview-server/issues/1083)) ([3796ffa](https://github.com/yschimke/compose-preview-server/commit/3796ffae3c20f8bb189c3cc2a985bee9a8d93921))
+
+## [3.69.0](https://github.com/yschimke/compose-preview-server/compare/v3.68.0...v3.69.0) (2026-09-25)
+
+
+### Bug Fixes
+
+* **ui-builder:** move compose-ui-builder to 3.58.0, so a phone draws the canvas full size and an edit does not blank it ([#1082](https://github.com/yschimke/compose-preview-server/issues/1082)) ([46718a5](https://github.com/yschimke/compose-preview-server/commit/46718a52a2df2654d2664cdeda5c8a1e8cf6f5e4))
+
+## [3.68.0](https://github.com/yschimke/compose-preview-server/compare/v3.67.0...v3.68.0) (2026-09-25)
+
+
+### Bug Fixes
+
+* **ui-builder:** move compose-ui-builder to 3.56.0 for the visual property editors ([#1080](https://github.com/yschimke/compose-preview-server/issues/1080)) ([805214a](https://github.com/yschimke/compose-preview-server/commit/805214ad9cf8ec6e5ee9ad831251177d04316e8a))
+
+## [3.67.0](https://github.com/yschimke/compose-preview-server/compare/v3.66.0...v3.67.0) (2026-09-25)
+
+
+### Features
+
+* org sign-in, public designs, design history, unfurls, installable app, and redirect-after-POST ([#1073](https://github.com/yschimke/compose-preview-server/issues/1073)) ([ea376ea](https://github.com/yschimke/compose-preview-server/commit/ea376ea2a1222acea1c57189411e48bf61213ecf))
+
+
+### Bug Fixes
+
+* **ui-builder:** move compose-ui-builder to 3.55.0, so the editor's boot screen is gone at ready ([#1078](https://github.com/yschimke/compose-preview-server/issues/1078)) ([80aeafc](https://github.com/yschimke/compose-preview-server/commit/80aeafc083be2a1e8aa386700915e08637c5674c))
+* **ui-builder:** pad an exported Scaffold's content by the padding it is handed ([#1075](https://github.com/yschimke/compose-preview-server/issues/1075)) ([c544330](https://github.com/yschimke/compose-preview-server/commit/c5443303fdd13b560665a061f735e50f11e197f8))
+* unbreak main — compose-ui-builder 3.54.0, reserved app-install routes, public-default create response ([#1077](https://github.com/yschimke/compose-preview-server/issues/1077)) ([23b89ea](https://github.com/yschimke/compose-preview-server/commit/23b89ea060f7aef52ad67f4de04d36d32e38859d))
+
+
+### Performance Improvements
+
+* **ui-builder:** serve the editor bundle gzipped and streamed, and authorize its shell cheaply ([#1072](https://github.com/yschimke/compose-preview-server/issues/1072)) ([bc89196](https://github.com/yschimke/compose-preview-server/commit/bc891964a0b8e2b0da3d3c853ed77212344bc0a1))
+
+## [3.66.0](https://github.com/yschimke/compose-preview-server/compare/v3.65.0...v3.66.0) (2026-09-25)
+
+
+### Bug Fixes
+
+* **daemon:** move compose-preview-daemon to 3.8.4, so a Skiko mismatch is diagnosed as classpath skew ([#1074](https://github.com/yschimke/compose-preview-server/issues/1074)) ([2b984e1](https://github.com/yschimke/compose-preview-server/commit/2b984e1cd5cb1ffa1b3b752333408d6cde9a6314))
+* **playground:** replace a stale host Skiko native instead of appending beside it ([#1070](https://github.com/yschimke/compose-preview-server/issues/1070)) ([44ce29b](https://github.com/yschimke/compose-preview-server/commit/44ce29b8a57d4eda6c144dc115f829c39ef09a8d))
+* **playground:** surface a native render's failure instead of timing out on it ([#1069](https://github.com/yschimke/compose-preview-server/issues/1069)) ([5de480a](https://github.com/yschimke/compose-preview-server/commit/5de480a60a53cab4cecd050362f62c3c9bea8d8a))
+
+## [3.65.0](https://github.com/yschimke/compose-preview-server/compare/v3.64.0...v3.65.0) (2026-09-25)
+
+
+### Bug Fixes
+
+* **ci:** bound each design render, and move compose-ui-builder to 3.53.0 ([#1066](https://github.com/yschimke/compose-preview-server/issues/1066)) ([4d9b967](https://github.com/yschimke/compose-preview-server/commit/4d9b96761c0d475062cbdebf53da7c17d5cf37db))
+* **playground:** pair a catalog's Skiko bindings with their own host native ([#1065](https://github.com/yschimke/compose-preview-server/issues/1065)) ([ef36004](https://github.com/yschimke/compose-preview-server/commit/ef3600419cc6c7bd82e15119f958963c9a1118c7))
+
+## [3.64.0](https://github.com/yschimke/compose-preview-server/compare/v3.63.0...v3.64.0) (2026-09-25)
+
+
+### Bug Fixes
+
+* **ui-builder:** a republished catalog moves the designs it stranded, when the move would succeed ([#1062](https://github.com/yschimke/compose-preview-server/issues/1062)) ([5227b9a](https://github.com/yschimke/compose-preview-server/commit/5227b9aec80560598d9cdb2c9cac6939131e2e54))
+* **ui-builder:** move compose-ui-builder to 3.52.0, so google-home-wear renders ([#1063](https://github.com/yschimke/compose-preview-server/issues/1063)) ([9b5ae9d](https://github.com/yschimke/compose-preview-server/commit/9b5ae9d5ce39ecc6dd4f8dc7d58f00ea0a680e12))
+
 ## [3.63.0](https://github.com/yschimke/compose-preview-server/compare/v3.62.0...v3.63.0) (2026-09-25)
 
 

@@ -16,6 +16,7 @@ import java.util.concurrent.CopyOnWriteArrayList
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -96,7 +97,6 @@ class ServeUiBuilderRequestAccessTest {
         allowGuests = true,
       ),
       verifier = GitHubOAuthVerifier(fakeGitHub),
-      anonymousClient = fakeGitHub,
     )
 
   private val registry = ServeSessionRegistry(open = { null })
@@ -200,10 +200,12 @@ class ServeUiBuilderRequestAccessTest {
     val (status, form) = page(cookie)
     assertEquals(200, status)
 
-    val (submitted, landed) = submit(cookie, csrfOf(form))
+    val (submitted, _) = submit(cookie, csrfOf(form))
 
-    assertEquals(200, submitted)
+    // POST, redirect, GET: the page with the link is drawn by a GET, so a refresh re-reads it.
+    assertEquals(303, submitted)
     val pending = grants.pendingRequests().single()
+    val landed = landing(cookie, pending.id)
     assertEquals("github:stranger", pending.requesterActorId)
     assertTrue(pending.client.startsWith("@stranger, signed in with GitHub"), pending.client)
     assertEquals(
@@ -217,6 +219,45 @@ class ServeUiBuilderRequestAccessTest {
     assertTrue(landed.contains(ServeAgentGrants.approvalPath(pending.id)), "the link to send")
     assertTrue(landed.contains(pending.userCode), "the code the approver confirms")
   }
+
+  @Test
+  fun `submitting again reuses the waiting request rather than opening another`() {
+    val cookie = signIn()
+    val csrf = csrfOf(page(cookie).second)
+    assertEquals(303, submit(cookie, csrf).first)
+    assertEquals(303, submit(cookie, csrf).first)
+    assertEquals(1, grants.pendingRequests().size)
+  }
+
+  @Test
+  fun `the landing page does not show somebody else's request`() {
+    val other =
+      checkNotNull(
+        grants.openRequest(
+          label = "edit",
+          client = "x",
+          requestedScope = AgentGrantScope.PREVIEW,
+          requestedTtlSeconds = 3600,
+          requesterActorId = "github:someone-else",
+        )
+      )
+    val landed = landing(signIn(), other.id)
+    assertFalse(landed.contains(other.userCode))
+  }
+
+  private fun landing(cookie: String, requestId: String): String =
+    noRedirect
+      .newCall(
+        Request.Builder()
+          .url("$base${ServeHttpServer.UI_BUILDER_REQUEST_ACCESS_PATH}?request=$requestId")
+          .header("Cookie", cookie)
+          .build()
+      )
+      .execute()
+      .use {
+        assertEquals(200, it.code)
+        it.body.string()
+      }
 
   @Test
   fun `a form without this reader's seal opens nothing`() {

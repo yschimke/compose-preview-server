@@ -60,6 +60,17 @@ class PlaygroundCompileService(
   /** Optional first-frame render; returns PNG bytes or null. Defaults to no image (wired later). */
   private val renderFirstFrame: (PlaygroundTokenStore.PlaygroundSnippet) -> ByteArray? = { null },
   /**
+   * [renderFirstFrame], with the reason when it drew nothing. That reason is returned as
+   * [PlaygroundRunResponse.exception] beside the minted token, so "the renderer threw
+   * `UnsatisfiedLinkError`" reaches the caller instead of only the host log. Defaults to
+   * [renderFirstFrame] with no reason, which is the absence of a renderer rather than a failure.
+   */
+  private val renderFirstFrameWithReason:
+    (PlaygroundTokenStore.PlaygroundSnippet) -> PlaygroundFirstFrame =
+    {
+      PlaygroundFirstFrame(renderFirstFrame(it))
+    },
+  /**
    * [PlaygroundMode.REMOTE_COMPOSE] capture: run the compiled snippet's `@Preview` under the
    * RC-capable render and return the serialized `.rc` document bytes, or null when the snippet
    * emitted none (a non-RC `@Preview`) or no capture engine is wired here. Like [renderFirstFrame],
@@ -765,12 +776,16 @@ class PlaygroundCompileService(
       return remoteComposeResult(snippet, previews, diagnostics, workDir, isSecurityChecked)
     }
 
-    val image = renderFirstFrame(snippet)?.let(::toDataUri)
+    val frame = renderFirstFrameWithReason(snippet)
+    val image = frame.png?.let(::toDataUri)
     // From here the token owns workDir; do NOT cleanup on this path.
     val token = tokenStore.add(snippet, isSecurityChecked = isSecurityChecked)
     return PlaygroundRunResponse(
       diagnostics = diagnostics,
       errors = PlaygroundErrorsWire.project(diagnostics),
+      // A server-side failure that is not a compile error, which is what the field is for. The
+      // token is still minted: the snippet compiled, and a live session may yet draw it.
+      exception = frame.failure?.let { "$FIRST_FRAME_FAILED$it" },
       image = image,
       previewToken = token.id,
       previewUrl = token.path,
@@ -961,5 +976,18 @@ class PlaygroundCompileService(
 
     internal fun toDataUri(png: ByteArray): String =
       "data:image/png;base64," + Base64.getEncoder().encodeToString(png)
+
+    /**
+     * How [PlaygroundRunResponse.exception] opens when the snippet compiled and its first frame
+     * failed. The playground page keys on it to keep the live-preview link it would drop for a
+     * failure that minted no token.
+     */
+    internal const val FIRST_FRAME_FAILED: String = "compiled, but the first frame failed: "
   }
 }
+
+/**
+ * A first-frame render: the PNG, or why there is none. [failure] is null both on success and when
+ * no renderer is wired for the mode, which is an absent still image rather than a fault.
+ */
+class PlaygroundFirstFrame(val png: ByteArray?, val failure: String? = null)

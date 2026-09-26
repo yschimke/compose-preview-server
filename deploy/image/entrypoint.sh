@@ -141,6 +141,10 @@ fi
 : "${SERVE_UI_BUILDER_ADMIN_ACTORS:=github:yschimke}"
 [[ "${SERVE_UI_BUILDER_ADMIN_ACTORS}" != "none" ]] &&
   args+=(--ui-builder-admin-actors "${SERVE_UI_BUILDER_ADMIN_ACTORS}")
+# New UI-builder designs start `private` (the default) or `public` — readable by anyone with the
+# link, never writable. preview.coo.ee runs public; an owner makes any one design private.
+[[ -n "${SERVE_UI_BUILDER_DEFAULT_VISIBILITY:-}" ]] &&
+  args+=(--ui-builder-default-visibility "${SERVE_UI_BUILDER_DEFAULT_VISIBILITY}")
 # Aggregate view counts live beside catalog/trust config so container restarts and image updates do
 # not erase engagement. Set to `none` to keep counters process-local.
 : "${SERVE_ENGAGEMENT_FILE:=/config/engagement.json}"
@@ -195,12 +199,15 @@ if [[ -n "${SERVE_GITHUB_AUTH_CLIENT_ID:-}" ||
   [[ -n "${github_auth_cookie_domain}" && "${github_auth_cookie_domain}" != "none" ]] &&
     args+=(--github-auth-cookie-domain "${github_auth_cookie_domain}")
   [[ -n "${SERVE_GITHUB_AUTH_USERS:-}" ]] && args+=(--github-auth-users "${SERVE_GITHUB_AUTH_USERS}")
+  # Admit every member of these GitHub orgs as a member too (preview.coo.ee: `google`), so a team
+  # gets edit access without anyone maintaining SERVE_GITHUB_AUTH_USERS.
+  [[ -n "${SERVE_GITHUB_AUTH_ORGS:-}" ]] && args+=(--github-auth-orgs "${SERVE_GITHUB_AUTH_ORGS}")
   # With an allowlist set, admit every other GitHub account as a read-only UI-builder guest that can
   # ask for edit access through an agent grant. Guests count as signed out everywhere else.
   [[ "${SERVE_GITHUB_AUTH_GUESTS:-}" == "1" || "${SERVE_GITHUB_AUTH_GUESTS:-}" == "true" ]] &&
     args+=(--github-auth-guests)
-  # Unset derives the scope from the gating repo's visibility (public -> read:user, private ->
-  # read:user repo). Only set this when a GitHub App or org policy demands a specific scope.
+  # Unset asks for read:user only (plus read:org with SERVE_GITHUB_AUTH_ORGS). Only read-only
+  # identity scopes (read:user, user:email, read:org) are accepted; repo is refused at startup.
   [[ -n "${SERVE_GITHUB_AUTH_SCOPE:-}" ]] && args+=(--github-auth-scope "${SERVE_GITHUB_AUTH_SCOPE}")
 fi
 # The producer-trust store is CONFIG, on the same /config volume as catalogs.json — for the

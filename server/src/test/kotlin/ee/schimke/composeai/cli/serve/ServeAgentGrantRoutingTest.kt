@@ -151,7 +151,7 @@ class ServeAgentGrantRoutingTest {
         "action=approve&csrf=${field(page, "csrf")}&scope=$scope&ttl=1800",
         contentType = "application/x-www-form-urlencoded",
       )
-    assertEquals(200, approve.first)
+    assertEquals(303, approve.first)
     val (_, polled) =
       post("/agent-access/poll", """{"requestId":"$requestId","deviceSecret":"$secret"}""")
     assertEquals("approved", str(polled, "status"))
@@ -162,6 +162,34 @@ class ServeAgentGrantRoutingTest {
   fun tearDown() {
     server.stop()
     registry.close()
+  }
+
+  @Test
+  fun `approving redirects to the approval link, which then shows what was granted`() {
+    val (_, opened) = post("/agent-access/request", """{"scope":"live","label":"fix #1"}""")
+    val requestId = str(opened, "requestId")
+    val (_, page) = get("/agent-access/$requestId?token=$operatorToken")
+    val request =
+      Request.Builder()
+        .url(url("/agent-access/$requestId?token=$operatorToken"))
+        .post(
+          "action=approve&csrf=${field(page, "csrf")}&scope=live&ttl=1800"
+            .toRequestBody("application/x-www-form-urlencoded".toMediaType())
+        )
+        .build()
+    val location =
+      client.newCall(request).execute().use {
+        assertEquals(303, it.code)
+        it.header("Location")
+      }
+    assertEquals("/agent-access/$requestId?token=$operatorToken", location)
+    // A refresh of the landing page is a GET: it reports the grant again and mints nothing new.
+    repeat(2) {
+      val (code, body) = get(location!!)
+      assertEquals(200, code)
+      assertTrue(body.contains("Access granted"), body)
+    }
+    assertEquals(1, grants.activeGrants().size)
   }
 
   @Test
@@ -766,7 +794,12 @@ class ServeAgentGrantRoutingTest {
         "action=deny&denyCsrf=${field(page, "denyCsrf")}",
         contentType = "application/x-www-form-urlencoded",
       )
-    assertEquals(200, code)
+    assertEquals(303, code)
+    // The redirect lands on the approval link, which now reports the outcome — so a refresh
+    // re-reads the decision rather than re-posting it.
+    val (outcomeCode, outcome) = get("/agent-access/$requestId?token=$operatorToken")
+    assertEquals(200, outcomeCode)
+    assertTrue(outcome.contains("Access declined"))
     val (_, polled) =
       post(
         "/agent-access/poll",

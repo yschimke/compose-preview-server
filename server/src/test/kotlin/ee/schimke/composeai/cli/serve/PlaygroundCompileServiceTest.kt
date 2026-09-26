@@ -376,6 +376,38 @@ class PlaygroundCompileServiceTest {
   }
 
   @Test
+  fun `a first frame that failed says why, and the compiled snippet keeps its token`() {
+    val svc =
+      PlaygroundCompileService(
+        catalogClasspath = { _, _ -> cmpClasspath },
+        compiler = PlaygroundCompileService.Compiler { _, _, _ -> emptyList() },
+        discoverer = PlaygroundCompileService.PreviewDiscoverer { _, _ -> listOf("x") },
+        tokenStore = tokenStore,
+        newWorkDir = { "/work/run".toPath() },
+        fileSystem = fs,
+        renderFirstFrameWithReason = {
+          PlaygroundFirstFrame(null, "daemon reported renderFailed: UnsatisfiedLinkError")
+        },
+      )
+
+    val resp = svc.run(request(), isSecurityChecked = true)
+
+    assertNull(resp.image)
+    assertEquals(
+      "compiled, but the first frame failed: daemon reported renderFailed: UnsatisfiedLinkError",
+      resp.exception,
+    )
+    assertNotNull(resp.previewToken, "the snippet compiled; a live session may still draw it")
+  }
+
+  @Test
+  fun `no renderer for the mode is an absent image, not a failure`() {
+    val resp = service().run(request(), isSecurityChecked = true)
+    assertNull(resp.image)
+    assertNull(resp.exception)
+  }
+
+  @Test
   fun `a remote-compose snippet publishes a document permalink and mints no token`() {
     var publishedName: String? = null
     var publishedChecked: Boolean? = null

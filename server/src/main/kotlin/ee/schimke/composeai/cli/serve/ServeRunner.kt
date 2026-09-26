@@ -37,6 +37,7 @@ import java.util.concurrent.ScheduledExecutorService
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
 import kotlin.system.exitProcess
+import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import okio.Path.Companion.toPath
@@ -1555,7 +1556,12 @@ public class ServeRunner(
     }
     return ImageLane(
       store = ServeImageStore(ttlSeconds = imageTtlSeconds),
-      auth = GithubTokenUploadAuth(repository = repository, allowedUsers = githubAuthUsers),
+      auth =
+        GithubTokenUploadAuth(
+          repository = repository,
+          allowedUsers = githubAuthUsers,
+          allowedOrgs = githubAuthOrgs,
+        ),
       limiter =
         if (imageRateLimit > 0) {
           ServeRateLimiter(
@@ -1912,12 +1918,12 @@ public class ServeRunner(
         // Robolectric. REMOTE_COMPOSE never reaches this seam (it returns a documentUrl). A null
         // (no
         // sidecar for that mode) just omits the still image; it's never fatal to the run.
-        renderFirstFrame = { snippet ->
+        renderFirstFrameWithReason = { snippet ->
           when (snippet.mode) {
-            PlaygroundMode.CMP -> cmpRender?.render(snippet)
-            PlaygroundMode.ANDROID -> androidRender?.render(snippet)
+            PlaygroundMode.CMP -> cmpRender?.renderFrame(snippet)
+            PlaygroundMode.ANDROID -> androidRender?.renderFrame(snippet)
             PlaygroundMode.REMOTE_COMPOSE -> null
-          }
+          } ?: PlaygroundFirstFrame(null)
         },
         // Which served catalog each pinned mode compiles against, so the browsing surfaces can ask
         // "does this host compile <system>?" and get a true answer on a pin-only host — where the
@@ -3076,6 +3082,8 @@ public class ServeRunner(
       }
     }
     deriveRouting()
+    // Set once the service exists, below; the refresher cannot fire before this lane is returned.
+    var recovery: ServeUiBuilderCatalogRecovery? = null
     val refreshPublished: (String) -> Unit = { sourceSystem ->
       val affected = uiBuilderCatalogs.filter {
         uiBuilderPublishedSourceSystem(it, uiBuilderNativeCatalogs) == sourceSystem
@@ -3096,6 +3104,13 @@ public class ServeRunner(
             "; runtime " +
             changed.joinToString { publishedRuntimeIds[it] ?: "built-in" }
         )
+        // Designs pinned to the runtime just replaced no longer open; move the ones that can move.
+        recovery?.let {
+          runCatching { runBlocking { it.recoverStranded() } }
+            .onFailure { e ->
+              System.err.println("serve: UI-builder catalog recovery failed: ${e.message}")
+            }
+        }
       }
     }
     val service =
@@ -3105,6 +3120,10 @@ public class ServeRunner(
         exporter = RootSurfaceGroundAnnotatedExporter(exporter),
         assets = assetStore,
       )
+    // A deploy can change a catalog's runtime too, so the same pass runs once at startup.
+    recovery = ServeUiBuilderCatalogRecovery(service, service, catalogs)
+    runCatching { runBlocking { recovery?.recoverStranded() } }
+      .onFailure { System.err.println("serve: UI-builder catalog recovery failed: ${it.message}") }
     // An unusable design is the one startup condition that is invisible by construction: the host
     // comes up healthy and serves everything else, so without this line the only evidence is a
     // diagnostics counter nobody reads until a design is reported missing. Named, not counted — the
@@ -3731,7 +3750,12 @@ public class ServeRunner(
         machineAuthorization = machineAuthorization,
         // Wrapped so every accepted edit also queues a redraw of that design's listing card.
         uiBuilderService =
-          uiBuilderLane?.let { lane -> lane.thumbnails?.warming(lane.service) ?: lane.service },
+          uiBuilderLane?.let { lane ->
+            ServeUiBuilderVisibility.withDefault(
+              lane.thumbnails?.warming(lane.service) ?: lane.service,
+              uiBuilderDefaultVisibility,
+            )
+          },
         uiBuilderThumbnails = uiBuilderLane?.thumbnails,
         uiBuilderReferenceStore = uiBuilderLane?.references,
         uiBuilderCommentStore = uiBuilderLane?.comments,
@@ -3868,6 +3892,8 @@ public class ServeRunner(
       System.err.println(
         "serve: GitHub auth enabled for live sessions and playground" +
           (githubAuthUsers.takeIf { it.isNotEmpty() }?.let { " (${it.size} allowed user(s))" }
+            ?: "") +
+          (githubAuthOrgs.takeIf { it.isNotEmpty() }?.let { " (members of ${it.joinToString()})" }
             ?: "")
       )
     }
@@ -5321,6 +5347,7 @@ public class ServeRunner(
         // costs nothing: no second repository means no second GitHub call at sign-in.
         imageRepository = imageUploadRepository,
         allowedUsers = githubAuthUsers,
+        allowedOrgs = githubAuthOrgs,
         allowGuests = githubAuthGuests,
         callbackBaseUrl = githubAuthCallbackBaseUrl,
         cookieDomain = githubAuthCookieDomain,

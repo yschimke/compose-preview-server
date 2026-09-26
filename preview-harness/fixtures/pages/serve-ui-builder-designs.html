@@ -7,6 +7,8 @@
         <link rel="icon" href="/favicon.svg" type="image/svg+xml">
         <link rel="icon" href="/favicon.ico" sizes="32x32">
         <link rel="apple-touch-icon" href="/apple-touch-icon.png">
+        <link rel="manifest" href="/manifest.webmanifest">
+        <meta name="theme-color" content="#4f378b">
         <link rel="stylesheet" href="/assets/serve/fixture/serve.css">
         <!-- Apply the Transparent choice before first paint (no checkerboard flash).
              A `?bg=` on the URL is an explicit, shareable choice and outranks the sticky one. -->
@@ -57,7 +59,15 @@
         <p class="cp-sub">Every design this server permits <code>github:octocat</code> to open,
         newest first. Open one to carry on with it, duplicate one to start from it.</p>
         
-        <section class="cp-designs-create">
+        <form class="cp-designs-quick" method="post" action="/ui-builder/designs?token=fixture-token">
+  <input type="hidden" name="designId" value="cheeky-raccoon">
+  <span class="cp-designs-h2">New design</span>
+  <button class="cp-grant-approve" type="submit" name="start" value="m3-catalog|blank">Blank screen · m3-catalog</button>
+</form>
+        
+        <details class="cp-designs-create-more">
+<summary>More ways to start</summary>
+<section class="cp-designs-create">
 <form class="cp-designs-new" method="post" action="/ui-builder/designs?token=fixture-token">
   <h2 class="cp-designs-h2">Start a new design</h2>
   <label class="cp-grant-ttl"><span>Starting point</span>
@@ -89,6 +99,7 @@
   <button class="cp-grant-approve" type="submit">Create the copy</button>
 </form>
 </section>
+</details>
         <div class="cp-designs-toolbar">
   <label class="cp-designs-filter"><span class="cp-visually-hidden">Filter designs</span>
     <input type="search" id="cp-design-filter" placeholder="Filter by name, id, catalog or folder"
@@ -140,6 +151,7 @@
               <p class="cp-design-meta">owner · may read, write, export, manage_access, delete · updated 2026-01-12T10:40:00Z</p>
               <div class="cp-design-actions">
                 <a class="cp-action-chip" href="/ui-builder/morning-player?token=fixture-token">Open</a>
+                <a class="cp-action-chip" href="/ui-builder/morning-player/history?token=fixture-token">History</a>
                 <a class="cp-action-chip" href="/ui-builder/morning-player/access?token=fixture-token">Share</a>
               </div>
               <details class="cp-design-more">
@@ -162,7 +174,12 @@
   </details>
                           <details class="cp-design-more">
                 <summary>Sharing</summary>
-                <p><strong>Shared with:</strong></p><form method="post" action="/ui-builder/morning-player/access?token=fixture-token">
+                <form method="post" action="/ui-builder/morning-player/access?token=fixture-token">
+    <input type="hidden" name="returnTo" value="designs">
+    <strong>Private</strong>.
+    <button class="cp-grant-approve" type="submit"
+      name="visibility" value="public">Make public</button>
+  </form><p><strong>Shared with:</strong></p><form method="post" action="/ui-builder/morning-player/access?token=fixture-token">
     <input type="hidden" name="returnTo" value="designs">
     <input type="hidden" name="actorId" value="github:colleague">
     <code>github:colleague</code> (editor)
@@ -200,6 +217,7 @@
       <p class="cp-grant-withheld"><strong>This design cannot be opened:</strong> catalog unavailable for stored design archived-dashboard</p>
       <div class="cp-design-actions">
         <a class="cp-action-chip" href="/ui-builder/archived-dashboard?token=fixture-token">Open</a>
+        <a class="cp-action-chip" href="/ui-builder/archived-dashboard/history?token=fixture-token">History</a>
 
       </div>
       <p class="cp-design-meta">Shared by <code>github:designer</code>; the owner manages its grants.</p>

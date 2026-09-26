@@ -166,6 +166,17 @@ on:
         required: false
         type: number
         default: 30
+      design-render-seconds:
+        description: >-
+          The render budget for ONE design's first frame, once it has compiled. The host image
+          sets the server's own budget to 900s, which is right for a live server's cold start and
+          wrong here: a design whose daemon fails to draw (a Skiko native that did not match the
+          catalog's bindings answered `UnsatisfiedLinkError` at once, #1065) then waited the full 900s,
+          and two of those spend the whole job before anything is published. The whole design,
+          compile included, is also capped at this plus five minutes.
+        required: false
+        type: number
+        default: 180
 
 permissions: {}
 
@@ -310,6 +321,7 @@ jobs:
           COMPONENTS: ${{ inputs.components }}
           ASSETS_DIR: ${{ inputs.assets-dir }}
           FORMAT: ${{ inputs.format }}
+          DESIGN_RENDER_SECONDS: ${{ inputs.design-render-seconds }}
         # POSIX sh, not bash, and deliberately: the host image carries no `bash` where the runner
         # looks for one, so Actions falls back to `sh -e {0}` (dash) inside the container. An
         # `args=()` array is a syntax error there, which is how the lane's first real run died —
@@ -319,6 +331,12 @@ jobs:
         # the worse one: it asserts something about an image this workflow does not build.
         run: |
           mkdir -p renders
+          # The per-design budget. Appended, so it wins over the image's own
+          # `-Dcomposeai.serve.renderTimeoutSeconds` while every sidecar flag the image sets stays.
+          JAVA_TOOL_OPTIONS="${JAVA_TOOL_OPTIONS:-} -Dcomposeai.serve.renderTimeoutSeconds=$DESIGN_RENDER_SECONDS"
+          export JAVA_TOOL_OPTIONS
+          # The backstop, for a render that hangs somewhere the budget above does not reach.
+          design_limit=$((DESIGN_RENDER_SECONDS + 300))
           # Beside the renders, so one artifact carries the whole answer: what drew, and what did
           # not and why. The manifest is built in `publish`, which is where the script lives.
           : > renders/_refusals.txt
@@ -343,7 +361,7 @@ jobs:
             # server for one anyway; passing it keeps a misconfiguration a failure rather than a
             # hang. A refusal is CAPTURED, not fatal: the comment reports it, which is the whole
             # reason a refusal is interesting.
-            if compose-preview-server design render \
+            if timeout "$design_limit" compose-preview-server design render \
                  --local \
                  --document "$document" \
                  --catalog catalog.bundle \
@@ -353,7 +371,16 @@ jobs:
                  -o "renders/$design.$FORMAT" 2> "renders/$design.log"; then
               echo "rendered $design"
             else
+              status=$?
               reason=$(tr '\n' ' ' < "renders/$design.log" | tail -c 300)
+              # "No frame" says only that nothing was drawn; the daemon's own failure is why, and it
+              # is the half a reader can act on.
+              cause=$(grep -m1 -E 'failed: |UnsatisfiedLinkError|Exception: ' "renders/$design.log" \
+                | sed 's/^\[daemon[^]]*\] *//' | cut -c1-200)
+              if [ "$status" = 124 ]; then
+                reason="gave up after ${design_limit}s without an answer. $reason"
+              fi
+              if [ -n "$cause" ]; then reason="$reason (daemon: $cause)"; fi
               echo "$design=${reason:-the render refused and said nothing}" >> renders/_refusals.txt
               echo "::warning title=design render refused::$design: $reason"
             fi

@@ -90,13 +90,19 @@ class GithubTokenUploadAuth(
   override val repository: String,
   /** When non-empty, only these logins may upload, whatever GitHub says about repo access. */
   private val allowedUsers: Set<String> = emptySet(),
+  /** Organizations whose members pass the same bar as a login in [allowedUsers]. */
+  private val allowedOrgs: Set<String> = emptySet(),
   /**
    * The GitHub round-trip, as a function so a test can stand in for it: identity + repo access for
    * a presented credential. Defaults to the real [GitHubOAuthVerifier], whose rule the playground
    * already shares.
    */
   private val verifier: (String, String, Set<String>) -> Result<GitHubOAuthUser> =
-    GitHubOAuthVerifier()::verifyAccessToken,
+    GitHubOAuthVerifier().let { verifier ->
+      { token, repository, users ->
+        verifier.verifyAccessToken(token, repository, users, allowedOrgs)
+      }
+    },
   private val clock: () -> Long = System::currentTimeMillis,
 ) : ServeImageUploadAuth {
 

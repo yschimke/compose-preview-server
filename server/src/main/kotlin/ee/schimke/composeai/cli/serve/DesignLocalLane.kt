@@ -179,9 +179,11 @@ internal class DesignLocalCompileLane(
           File(workRoot, "snippet-${snippets.incrementAndGet()}").absolutePath.toPath()
         },
         // A null renderer is not fatal to the compile, exactly as on the server — and it is one of
-        // the three states [describe] reports, because it is indistinguishable on the wire from a
-        // render that threw.
-        renderFirstFrame = { snippet -> renderer?.render(snippet) },
+        // the three states [describe] reports. It is the frameless response with no reason; a
+        // render that threw carries the daemon's cause as the response's `exception`.
+        renderFirstFrameWithReason = { snippet ->
+          renderer?.renderFrame(snippet) ?: PlaygroundFirstFrame(null)
+        },
       )
     val adapter = UiBuilderGeneratedPreviewAdapter(service)
     ServeUiBuilderNativePreview(

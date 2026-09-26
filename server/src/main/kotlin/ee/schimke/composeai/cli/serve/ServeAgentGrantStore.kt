@@ -611,17 +611,16 @@ class ServeAgentGrantStore(
   }
 
   companion object {
-    /** Ten minutes. A link nobody opens should not stay openable all afternoon. */
-    const val DEFAULT_REQUEST_TTL_SECONDS = 600L
+    /**
+     * Thirty minutes. Long enough for the human to notice the link in another window, sign in to
+     * GitHub (which can itself mean a 2FA round trip) and read what they are approving — ten
+     * minutes routinely expired requests mid-approval — and still short enough that a link nobody
+     * opens is not openable all afternoon.
+     */
+    const val DEFAULT_REQUEST_TTL_SECONDS = 30 * 60L
 
     /** Eight hours — a working day's debugging, and gone by morning. */
     const val DEFAULT_MAX_GRANT_TTL_SECONDS = 8 * 60 * 60L
-
-    /**
-     * The absolute ceiling an operator may raise `--agent-grant-max-ttl` to. A grant that outlives
-     * a day stops being "temporary access for this task" and becomes a credential nobody remembers
-     * issuing, which is the thing this feature exists to replace.
-     */
 
     /** What an agent gets when it names no TTL: long enough for one task. */
     const val DEFAULT_GRANT_TTL_SECONDS = 60 * 60L

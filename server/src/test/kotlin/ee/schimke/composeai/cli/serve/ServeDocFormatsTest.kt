@@ -17,6 +17,43 @@ import kotlin.test.assertTrue
  */
 class ServeDocFormatsTest {
 
+  /** The vendored Lottie player is the light build: SVG only, without the expression engine. */
+  @Test
+  fun `the vendored Lottie player is the light build`() {
+    val player =
+      checkNotNull(javaClass.getResourceAsStream(ServeDocFormats.LOTTIE.playerResource)) {
+          "missing ${ServeDocFormats.LOTTIE.playerResource}"
+        }
+        .use { it.readBytes().decodeToString() }
+    assertTrue(player.contains("loadAnimation"), "not a Lottie player")
+    assertTrue("eval(" !in player, "expected the light Lottie build")
+    assertTrue("expression_function" !in player, "expected the light Lottie build")
+  }
+
+  @Test
+  fun `a Lottie document that uses expressions is refused with a reason`() {
+    val withExpression =
+      """
+      {"v":"5.7.4","fr":30,"ip":0,"op":60,"w":100,"h":100,
+       "layers":[{"ind":1,"ty":4,"ks":{"o":{"a":0,"k":100,"x":"var ${'$'}bm_rt = 50;"}}}]}
+      """
+        .trimIndent()
+        .toByteArray()
+    val easingOnly =
+      """
+      {"v":"5.7.4","fr":30,"ip":0,"op":60,"w":100,"h":100,
+       "layers":[{"ind":1,"ty":4,"ks":{"r":{"a":1,"k":[
+         {"t":0,"s":[0],"i":{"x":[0.5],"y":[0.5]},"o":{"x":[0.5],"y":[0.5]}},{"t":60,"s":[360]}]}}}]}
+      """
+        .trimIndent()
+        .toByteArray()
+
+    assertEquals(ServeDocFormats.LOTTIE, ServeDocFormats.detect(withExpression))
+    assertTrue(ServeDocFormats.LOTTIE.unsupported(withExpression).orEmpty().contains("expressions"))
+    assertNull(ServeDocFormats.LOTTIE.unsupported(easingOnly))
+    assertNull(ServeDocFormats.LOTTIE.unsupported(ServeDocFixtures.lottieDoc()))
+  }
+
   @Test
   fun `remote compose document is detected and summarised from its header`() {
     val doc =
