@@ -435,16 +435,14 @@ dependencies {
   implementation(libs.jmdns)
 
   // The renderer and the daemon publish from compose-preview-daemon on their own line since
-  // compose-ai-tools#5336; the `composeai-preview-daemon` pin names it.
-  val previewDaemonVersion = libs.versions.composeai.preview.daemon.get()
-  add(
-    "composePreviewRenderer",
-    "ee.schimke.composeai:renderer-desktop:$previewDaemonVersion",
-  )
-  add(
-    "composePreviewDaemonDesktop",
-    "ee.schimke.composeai:daemon-desktop:$previewDaemonVersion",
-  )
+  // compose-ai-tools#5336; the `composeai-preview-daemon` pin names it. Versions come from that
+  // release's BOM rather than from the pin itself: a release republishes only the modules that
+  // changed (compose-preview-daemon#123), so 3.9.0's BOM still names `renderer-desktop` and
+  // `daemon-desktop` 3.8.4, and `…:daemon-desktop:3.9.0` does not exist.
+  add("composePreviewRenderer", platform(libs.composeai.daemon.bom))
+  add("composePreviewRenderer", "ee.schimke.composeai:renderer-desktop")
+  add("composePreviewDaemonDesktop", platform(libs.composeai.daemon.bom))
+  add("composePreviewDaemonDesktop", "ee.schimke.composeai:daemon-desktop")
 
   // `androidx.window` on the renderer sidecar, because the daemon's class loader forces it there.
   //
