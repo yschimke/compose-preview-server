@@ -59,8 +59,9 @@ import java.util.concurrent.atomic.AtomicReference
 class ServeCatalogLiveHost(
   /**
    * Catalog id (`button-filled__ideal__default__dark`) → daemon preview id (`FilledButton_Dark`).
+   * Widened by [liveOnlyPlaygrounds] into the property of the same name every lookup below reads.
    */
-  private val alias: Map<String, String>,
+  alias: Map<String, String>,
   /** The daemon-backed host, keyed by daemon preview ids (the [alias] values). */
   private val live: ServeHost,
   /** The static baked-PNG host, keyed by catalog ids (the browse + snapshot surface). */
@@ -197,6 +198,37 @@ class ServeCatalogLiveHost(
   private val residencySeatWeight: () -> Int = { 1 },
   private val clock: () -> Long = System::currentTimeMillis,
 ) : ServeHost {
+  /**
+   * The live bundle's A2UI playground (a preview declaring the `document` string knob,
+   * [ServeWeb.a2uiDocumentPreview]) when the catalog does not list it.
+   *
+   * A catalog lists only its component cells, and the playground is deliberately not one: it draws
+   * whatever document it is handed, so it has no sticker to publish. The live bundle still carries
+   * it, with its knob sidecar, but [previews] is built from the catalog, so `/{system}/a2ui` said
+   * the system "declares no A2UI document preview" and a render of it was "no such preview".
+   * Exposed here under its own daemon id as a live-only preview, and kept off the landing grid
+   * ([playgroundPreviewIds]). Only the playground: any other preview the catalog left out stays
+   * out.
+   */
+  private val liveOnlyPlaygrounds: List<ServePreview> =
+    ServeWeb.a2uiDocumentPreview(
+        live.previews.filter { preview ->
+          preview.id !in alias.values && baked.previews.none { it.id == preview.id }
+        }
+      )
+      ?.takeIf { ServeWeb.a2uiDocumentPreview(baked.previews) == null }
+      ?.let(::listOf)
+      .orEmpty()
+
+  private val alias: Map<String, String> = alias + liveOnlyPlaygrounds.associate { it.id to it.id }
+
+  /**
+   * The ids [liveOnlyPlaygrounds] added to [previews]. Listed there so `/{system}/a2ui`, the render
+   * routes and `/api/previews` find the playground and its knob; the landing grid leaves them out,
+   * because the catalog did not list the playground as a card.
+   */
+  val playgroundPreviewIds: Set<String> = liveOnlyPlaygrounds.mapTo(HashSet()) { it.id }
+
   override fun canDownloadExecutableBundle(previewId: String): Boolean =
     alias[previewId]?.let { daemonId ->
       executableBundleProvider != null && executableBundleAvailable?.invoke(daemonId) == true
@@ -213,7 +245,8 @@ class ServeCatalogLiveHost(
    * knob declarations across from its daemon twin via [alias]; an unmapped (Android-only) preview
    * keeps the baked entry as-is (no live lane, no editable knobs).
    */
-  override val previews: List<ServePreview> = mergeDeclaredKnobs(baked.previews, live.previews)
+  override val previews: List<ServePreview> =
+    mergeDeclaredKnobs(baked.previews, live.previews) + liveOnlyPlaygrounds
 
   override fun designReferencesFor(previewId: String): List<DesignReference> =
     baked.designReferencesFor(previewId)
@@ -273,7 +306,8 @@ class ServeCatalogLiveHost(
    * the catalog publishes for on-demand render. Carried through so the routing below sends them to
    * the daemon on every request (there is nothing to replay) and `/api/previews` can badge them.
    */
-  override val liveOnlyPreviewIds: Set<String> = baked.liveOnlyPreviewIds
+  override val liveOnlyPreviewIds: Set<String> =
+    baked.liveOnlyPreviewIds + liveOnlyPlaygrounds.map { it.id }
 
   // The sticker is the baked host's, so the mode it was drawn in is the baked host's answer — the
   // routing below asks it rather than the id, so an untagged half of a folded light/dark pair

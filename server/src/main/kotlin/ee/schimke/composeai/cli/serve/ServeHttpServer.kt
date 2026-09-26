@@ -3830,9 +3830,10 @@ class ServeHttpServer(
       val systemViews =
         if (isViewRequest()) engagementStore.incrementSystem(selectedSessionId)
         else engagementStore.systemViews(listOf(selectedSessionId)).getValue(selectedSessionId)
+      val gridPreviews = landingPreviews(renderHost)
       val heroId =
         catalogBundleHost(renderHost)?.declaredHeroPreviewId
-          ?: ServeWeb.representativePreviewId(renderHost.previews)
+          ?: ServeWeb.representativePreviewId(gridPreviews)
       val heroUrl = heroId?.let {
         externalOrigin() +
           basePath +
@@ -3873,7 +3874,7 @@ class ServeHttpServer(
               socialCards.cardFor(
                 ServeSocialCard.Spec(
                   title = heading,
-                  subtitle = ServeWeb.catalogCardSubtitle(renderHost.previews.size),
+                  subtitle = ServeWeb.catalogCardSubtitle(gridPreviews.size),
                   heroes = listOf(hero),
                   system = selectedSessionId,
                 )
@@ -3902,7 +3903,7 @@ class ServeHttpServer(
       call.respondText(
         ServeWeb.landingPage(
           renderHost.label,
-          renderHost.previews,
+          gridPreviews,
           linkToken(),
           webSessionId,
           trust = catalogBundleHost(renderHost)?.let { BundleVerifier.summary(it.trust) },
@@ -6943,6 +6944,17 @@ class ServeHttpServer(
         }
         if (rows.isEmpty()) null else ServeWeb.ComponentDirectory("related", heading, rows)
       }
+  }
+
+  /**
+   * The previews a system's landing grid shows: all of them, less a published catalog's A2UI
+   * playground, which the host lists for `/{system}/a2ui` but the catalog never made a card of
+   * ([ServeCatalogLiveHost.playgroundPreviewIds]).
+   */
+  private fun landingPreviews(host: ServeHost): List<ServePreview> {
+    val playgrounds = (host as? ServeCatalogLiveHost)?.playgroundPreviewIds.orEmpty()
+    return if (playgrounds.isEmpty()) host.previews
+    else host.previews.filterNot { it.id in playgrounds }
   }
 
   private fun catalogBundleHost(host: ServeHost): ServeBundleHost? =
