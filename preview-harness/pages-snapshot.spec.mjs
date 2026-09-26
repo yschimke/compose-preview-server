@@ -4359,23 +4359,81 @@ for (const fixture of listPageFixtures()) {
             await expect(viewer.locator("#use")).toBeHidden();
           }
         } else {
-          await page.waitForFunction(() => window.__mcpReadCount === 1);
+          await page.waitForFunction(() => window.__mcpReadCount >= 1);
         }
         if (fixture === "mcp-app-viewer-fallback") {
           await expect(viewer.locator("#canvas")).toContainText(
             "The host returned no PNG for resource",
           );
         } else if (!fixture.startsWith("mcp-app-viewer-static")) {
-          await expect(viewer.locator('#canvas img[alt="Rendered Compose preview"]')).toBeVisible();
+          await expect(viewer.locator('#canvas img[alt="Rendered Compose preview"]')).toBeVisible({
+            timeout: fixture === "mcp-app-viewer-resource" ? 8_000 : undefined,
+          });
+          if (fixture === "mcp-app-viewer-resource") {
+            expect(await page.evaluate(() => window.__mcpReadCount)).toBe(1);
+          }
         }
         if (fixture === "mcp-app-viewer-refresh") {
           const image = viewer.locator('#canvas img[alt="Rendered Compose preview"]');
           const before = await image.getAttribute("src");
-          await viewer.locator("#refresh").click();
-          await expect(viewer.locator("#refresh")).toBeDisabled();
-          await page.waitForFunction(() => window.__mcpReadCount === 2);
+          await page.waitForFunction(() => window.__mcpSubscribedUri?.includes("overrides=fixture"));
+          await page.waitForFunction(() =>
+            window.__mcpUnsubscribedUris?.some((uri) => uri.includes("overrides=stale")),
+          );
+          await page.waitForFunction(() => window.__mcpReadCount >= 2);
           await expect(viewer.locator("#refresh")).toBeEnabled();
           await expect(image).not.toHaveAttribute("src", before);
+        }
+        if (fixture === "mcp-app-viewer-subscribe-fallback") {
+          await page.waitForFunction(() => window.__mcpReadCount >= 2, null, { timeout: 7_000 });
+          await expect(viewer.locator("#refresh")).toBeEnabled();
+        }
+        if (fixture === "mcp-app-viewer-stale-read-marker") {
+          await page.waitForFunction(() => window.__mcpReadCount >= 2, null, { timeout: 7_000 });
+          await expect(viewer.locator("#refresh")).toBeEnabled();
+        }
+        if (fixture === "mcp-app-viewer-same-uri-redraw") {
+          await page.waitForFunction(() => window.__mcpSubscribeCount >= 1);
+          await expect(viewer.locator('#canvas img[alt="Rendered Compose preview"]')).toBeVisible();
+          expect(await page.evaluate(() => window.__mcpSubscribeCount)).toBe(1);
+          expect(await page.evaluate(() => window.__mcpUnsubscribedUris || [])).toEqual([]);
+        }
+        if (fixture === "mcp-app-viewer-subscription-revisit") {
+          await page.waitForFunction(
+            () => window.__mcpActiveSubscriptions?.length === 1 &&
+              window.__mcpActiveSubscriptions[0].includes("overrides=fixture"),
+            null,
+            { timeout: 7_000 },
+          );
+          expect(await page.evaluate(() => window.__mcpActiveSubscriptions)).toEqual([
+            "compose-preview://fixture/_app/com.example.Card?overrides=fixture",
+          ]);
+        }
+        if (fixture === "mcp-app-viewer-subscribe-late") {
+          await page.waitForFunction(
+            () => Array.isArray(window.__mcpActiveSubscriptions) &&
+              window.__mcpActiveSubscriptions.length === 0,
+            null,
+            { timeout: 7_000 },
+          );
+          await page.waitForFunction(() => window.__mcpReadCount >= 2, null, { timeout: 12_000 });
+          await expect(viewer.locator("#refresh")).toBeEnabled();
+        }
+        if (fixture === "mcp-app-viewer-read-replaced-inline") {
+          await expect(
+            viewer.locator('#canvas img[alt="Rendered Compose preview"]'),
+          ).toBeVisible();
+          await page.waitForTimeout(600);
+          expect(await page.evaluate(() => window.__mcpReadCount)).toBe(1);
+          await expect(viewer.locator("#refresh")).toBeEnabled();
+        }
+        if (fixture === "mcp-app-viewer-manual-poll") {
+          await page.waitForTimeout(4500);
+          await viewer.locator("#refresh").click();
+          await page.waitForFunction(() => window.__mcpReadCount === 2);
+          await page.waitForTimeout(1100);
+          expect(await page.evaluate(() => window.__mcpReadCount)).toBe(2);
+          await expect(viewer.locator("#refresh")).toBeEnabled();
         }
       }
 
@@ -5948,7 +6006,11 @@ test("contract · static viewer bounds results and rejects credentials", async (
 
   await page.goto("/preview-harness/fixtures/pages/mcp-app-viewer-resource.html");
   const viewer = page.frameLocator('iframe[title="Compose Preview MCP App"]');
-  await expect(viewer.locator('#canvas img[alt="Rendered Compose preview"]')).toBeVisible();
+  // This fixture deliberately holds the read beyond the normal 5 s bridge timeout to prove the
+  // resource-specific 65 s budget. Leave enough room for that intentional delay plus decoding.
+  await expect(viewer.locator('#canvas img[alt="Rendered Compose preview"]')).toBeVisible({
+    timeout: 7_000,
+  });
   await viewer.locator("#use").click();
   await page.waitForFunction(() => window.__mcpModelContext != null);
   const modelContext = await page.evaluate(() => window.__mcpModelContext);

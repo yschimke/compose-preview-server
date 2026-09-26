@@ -47,6 +47,7 @@
   const use = q('#use');
   const REQUEST_TIMEOUT_MS = 5000;
   const RESOURCE_READ_TIMEOUT_MS = 65000;
+  const RESOURCE_POLL_INTERVAL_MS = 5000;
   // Static host contract (for example Antigravity's <agent-embed>):
   // #compose-preview-result=<unpadded base64url UTF-8 JSON>
   // JSON shape: {"version":1,"arguments":{...},"result":<MCP CallToolResult>}
@@ -55,6 +56,7 @@
   const MAX_STATIC_RESULT_BYTES = 500000;
   const CREDENTIAL_KEY = /(token|authorization|password|secret|api[-_]?key|cookie|session)/i;
   const pending = new Map();
+  const lateResponses = new Map();
   let nextId = 1;
   let initialized = false;
   let hasToolResult = false;
@@ -63,12 +65,24 @@
   let toolArguments = {};
   let resourceToken;
   let resourceResult;
+  let resourceReadGeneration = 0;
+  let resourceReadUri;
+  let resourcePollTimer;
+  let resourceSubscriptionGeneration = 0;
+  let subscribedResourceUri;
+  let resourceSubscriptionTargetUri;
+  let resourceSubscriptionQueue = Promise.resolve();
+  let hostResourceSubscriptions = false;
 
-  function request(method, params, timeoutMs = REQUEST_TIMEOUT_MS) {
+  function request(method, params, timeoutMs = REQUEST_TIMEOUT_MS, onLateResult) {
     const id = nextId++;
     return new Promise((resolve, reject) => {
       const timer = window.setTimeout(() => {
         if (!pending.delete(id)) return;
+        if (onLateResult) {
+          const expiry = window.setTimeout(() => lateResponses.delete(id), RESOURCE_READ_TIMEOUT_MS);
+          lateResponses.set(id, { handle: onLateResult, expiry });
+        }
         reject(new Error(`${method} request timed out after ${timeoutMs} ms`));
       }, timeoutMs);
       pending.set(id, { resolve, reject, timer });
@@ -274,9 +288,118 @@
     meta.textContent = 'Static result unavailable; use the complete text fallback.';
   }
 
+  function stopResourcePolling() {
+    if (resourcePollTimer == null) return;
+    window.clearTimeout(resourcePollTimer);
+    resourcePollTimer = undefined;
+  }
+
+  function scheduleResourcePoll(uri) {
+    stopResourcePolling();
+    if (!initialized || staticMode || hostResourceSubscriptions || resourceResult?.resource?.uri !== uri) return;
+    resourcePollTimer = window.setTimeout(() => {
+      resourcePollTimer = undefined;
+      if (resourceResult?.resource?.uri === uri) readResource();
+    }, RESOURCE_POLL_INTERVAL_MS);
+  }
+
+  function queueResourceSubscription(task) {
+    const queued = resourceSubscriptionQueue.then(task, task);
+    resourceSubscriptionQueue = queued.catch(() => {});
+    return queued;
+  }
+
+  function recoverLateSubscription(uri) {
+    void queueResourceSubscription(async () => {
+      try {
+        await request('resources/unsubscribe', { uri });
+      } catch (error) {
+        console.debug('Unable to clean up a late Compose Preview subscription:', error);
+      }
+      if (subscribedResourceUri === uri) subscribedResourceUri = undefined;
+      if (resourceSubscriptionTargetUri === uri && hostResourceSubscriptions) {
+        connectResourceUpdates(uri, false);
+      }
+    });
+  }
+
+  async function connectResourceUpdates(uri, initialReadPending) {
+    const generation = ++resourceSubscriptionGeneration;
+    stopResourcePolling();
+    if (subscribedResourceUri === uri) return;
+    try {
+      await bridgeReady;
+      if (!initialized || staticMode || generation !== resourceSubscriptionGeneration) return;
+      if (!hostResourceSubscriptions) {
+        if (!initialReadPending) scheduleResourcePoll(uri);
+        return;
+      }
+      await queueResourceSubscription(async () => {
+        if (
+          generation !== resourceSubscriptionGeneration ||
+          resourceSubscriptionTargetUri !== uri ||
+          resourceResult?.resource?.uri !== uri
+        ) return;
+        await request(
+          'resources/subscribe',
+          { uri },
+          REQUEST_TIMEOUT_MS,
+          () => recoverLateSubscription(uri),
+        );
+        if (
+          !initialized ||
+          staticMode ||
+          generation !== resourceSubscriptionGeneration ||
+          resourceSubscriptionTargetUri !== uri ||
+          resourceResult?.resource?.uri !== uri
+        ) {
+          try {
+            await request('resources/unsubscribe', { uri });
+          } catch (error) {
+            console.debug('Unable to unsubscribe a stale Compose Preview resource:', error);
+          }
+          return;
+        }
+        subscribedResourceUri = uri;
+      });
+    } catch (error) {
+      if (generation !== resourceSubscriptionGeneration || resourceResult?.resource?.uri !== uri) return;
+      // MCP Apps 2026-01-26 exposes resources/read but not subscription proxying. A future host
+      // may advertise serverResources.subscribe; if that path fails, retain today's bounded poll.
+      hostResourceSubscriptions = false;
+      // If the initial read is still running, its finally block observes the capability downgrade
+      // and arms the poll. If it already settled, this failure must do so itself.
+      if (resourceReadUri !== uri) scheduleResourcePoll(uri);
+      console.debug('Resource subscriptions are unavailable; polling instead:', error);
+    }
+  }
+
+  function disconnectResourceUpdates(nextUri) {
+    ++resourceSubscriptionGeneration;
+    ++resourceReadGeneration;
+    resourceReadUri = undefined;
+    refresh.disabled = false;
+    resourceSubscriptionTargetUri = nextUri;
+    stopResourcePolling();
+    if (subscribedResourceUri === nextUri) return;
+    const previous = subscribedResourceUri;
+    subscribedResourceUri = undefined;
+    if (!previous || !hostResourceSubscriptions || !initialized) return;
+    void queueResourceSubscription(async () => {
+      try {
+        await request('resources/unsubscribe', { uri: previous });
+      } catch (error) {
+        console.debug('Unable to unsubscribe the previous Compose Preview resource:', error);
+      }
+    });
+  }
+
   async function readResource() {
     if (!resourceResult) return;
+    stopResourcePolling();
     const { result: toolResult, resource, value } = resourceResult;
+    const generation = ++resourceReadGeneration;
+    resourceReadUri = resource.uri;
     refresh.disabled = true;
     meta.textContent = 'Reading preview resource…';
     try {
@@ -290,7 +413,7 @@
         RESOURCE_READ_TIMEOUT_MS,
       );
       const image = resourcePng(readResult);
-      if (resourceResult?.resource?.uri !== resource.uri) return;
+      if (generation !== resourceReadGeneration || resourceResult?.resource?.uri !== resource.uri) return;
       if (!image) {
         renderResourceFallback(toolResult, resource, 'The host returned no PNG for resource:');
         meta.textContent = 'Resource has no PNG; use the text fallback.';
@@ -298,27 +421,37 @@
       }
       renderImage({ data: image.blob }, value, resource);
     } catch (error) {
-      if (resourceResult?.resource?.uri !== resource.uri) return;
+      if (generation !== resourceReadGeneration || resourceResult?.resource?.uri !== resource.uri) return;
       // Resource reads are optional in MCP Apps hosts. Keep the durable URI and text result useful.
       renderResourceFallback(toolResult, resource, 'Unable to read preview resource:');
       meta.textContent = 'Resource reads are unavailable; use the text fallback.';
       console.warn('Failed to read Compose Preview resource:', error);
     } finally {
-      if (resourceResult?.resource?.uri === resource.uri) refresh.disabled = false;
+      if (generation === resourceReadGeneration && resourceResult?.resource?.uri === resource.uri) {
+        resourceReadUri = undefined;
+        refresh.disabled = false;
+        if (subscribedResourceUri !== resource.uri) scheduleResourcePoll(resource.uri);
+      }
     }
   }
 
   function draw(result) {
     hasToolResult = true;
     if (staticMode) meta.textContent = 'Static preview result';
-    selected = undefined;
-    use.hidden = true;
-    refresh.hidden = true;
-    resourceResult = undefined;
     const value = data(result);
     const image = png(result);
     const resource = link(result);
+    selected = undefined;
+    use.hidden = true;
+    refresh.hidden = true;
+    disconnectResourceUpdates(resource?.uri);
+    resourceResult = undefined;
     const cells = Array.isArray(value.cells) && value.cells;
+    if (resource) {
+      resourceResult = { result, resource, value };
+      refresh.hidden = staticMode;
+      if (!staticMode) connectResourceUpdates(resource.uri, !image && !cells);
+    }
     if (cells) {
       if (image && !cells.some(cell => typeof cell?.png === 'string' && cell.png.length > 0)) {
         renderImage(image, value, resource);
@@ -332,8 +465,6 @@
       return;
     }
     if (resource) {
-      resourceResult = { result, resource, value };
-      refresh.hidden = staticMode;
       renderResourceFallback(
         result,
         resource,
@@ -358,6 +489,13 @@
       else request.resolve(message.result);
       return;
     }
+    if (lateResponses.has(message.id)) {
+      const late = lateResponses.get(message.id);
+      lateResponses.delete(message.id);
+      window.clearTimeout(late.expiry);
+      if (!message.error) late.handle(message.result);
+      return;
+    }
     if (message.method === 'ui/notifications/tool-input') {
       const incomingArguments = message.params?.arguments || {};
       resourceToken = typeof incomingArguments.token === 'string' && incomingArguments.token
@@ -367,15 +505,23 @@
       return;
     }
     if (message.method === 'ui/notifications/tool-result') draw(message.params?.result || message.params);
+    if (
+      (message.method === 'notifications/resources/updated' ||
+        message.method === 'ui/notifications/resource-updated') &&
+      message.params?.uri === resourceResult?.resource?.uri
+    ) {
+      readResource();
+    }
   }, { passive: true });
 
   async function initializeBridge() {
     try {
-      await request('ui/initialize', {
+      const result = await request('ui/initialize', {
         appInfo: { name: 'compose-preview-viewer', version: '1' },
         appCapabilities: {},
         protocolVersion: '2026-01-26',
       });
+      hostResourceSubscriptions = result?.hostCapabilities?.serverResources?.subscribe === true;
       initialized = true;
       notify('ui/notifications/initialized', {});
     } catch (error) {
