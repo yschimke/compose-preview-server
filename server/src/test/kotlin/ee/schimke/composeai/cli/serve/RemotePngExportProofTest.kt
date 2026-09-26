@@ -286,17 +286,14 @@ class RemotePngExportProofTest {
           .getValue("result")
           .jsonObject
       assertTrue(result["isError"] != JsonPrimitive(true), result.toString())
+      val content = result.getValue("content").jsonArray
+      if (name == "ui_builder_export_document") {
+        val image = content.single { it.jsonObject["type"] == JsonPrimitive("image") }.jsonObject
+        assertEquals("image/png", image.getValue("mimeType").jsonPrimitive.content)
+        assertTrue(image.getValue("data").jsonPrimitive.content.isNotBlank())
+      }
       return json
-        .parseToJsonElement(
-          result
-            .getValue("content")
-            .jsonArray
-            .first()
-            .jsonObject
-            .getValue("text")
-            .jsonPrimitive
-            .content
-        )
+        .parseToJsonElement(content.first().jsonObject.getValue("text").jsonPrimitive.content)
         .jsonObject
         .getValue("response")
         .jsonObject

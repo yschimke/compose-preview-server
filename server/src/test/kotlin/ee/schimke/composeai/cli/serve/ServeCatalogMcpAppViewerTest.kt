@@ -172,4 +172,37 @@ class ServeCatalogMcpAppViewerTest {
         )
       }
   }
+
+  @Test
+  fun `visual UI builder replies keep text fallback and expose PNG image blocks`() {
+    val mcp = ServeCatalogMcp(ServeSessionRegistry(open = { null }), Semaphore(1))
+    val native =
+      """{"designId":"demo","imageBase64":"data:image/png;base64,AQID","compileError":null}"""
+    assertVisualReply(mcp.uiBuilderToolResult(ServeUiBuilderMcp.RENDER_NATIVE, native), native)
+
+    val exported =
+      """{"callId":"ui_builder_export_document","response":{"artifact":{"format":"png","mediaType":"image/png","encoding":"base64","content":"AQID","contentDigest":"abc","diagnostics":[]}}}"""
+    assertVisualReply(
+      mcp.uiBuilderToolResult(ServeUiBuilderMcp.EXPORT_DOCUMENT, exported),
+      exported,
+    )
+
+    val refused = """{"code":"COMPILE_FAILED","reasons":["bad source"]}"""
+    val fallback = mcp.uiBuilderToolResult(ServeUiBuilderMcp.RENDER_NATIVE, refused)
+    assertEquals(1, fallback["content"]!!.jsonArray.size)
+    assertEquals(
+      refused,
+      fallback["content"]!!.jsonArray.single().jsonObject["text"]!!.jsonPrimitive.content,
+    )
+  }
+
+  private fun assertVisualReply(result: JsonObject, original: String) {
+    val content = result["content"]!!.jsonArray
+    assertEquals(2, content.size)
+    assertEquals("text", content[0].jsonObject["type"]!!.jsonPrimitive.content)
+    assertEquals(original, content[0].jsonObject["text"]!!.jsonPrimitive.content)
+    assertEquals("image", content[1].jsonObject["type"]!!.jsonPrimitive.content)
+    assertEquals("AQID", content[1].jsonObject["data"]!!.jsonPrimitive.content)
+    assertEquals("image/png", content[1].jsonObject["mimeType"]!!.jsonPrimitive.content)
+  }
 }

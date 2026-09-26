@@ -1818,7 +1818,66 @@ class ServeCatalogMcp(
               "not offer it, the operator has to add the capability and restart."
           )
       }
-    return textResult(builder.call(name, args, actor, callId = name))
+    return uiBuilderToolResult(name, builder.call(name, args, actor, callId = name))
+  }
+
+  /**
+   * Keeps the UI-builder protocol reply as the complete text fallback while giving MCP App hosts an
+   * ordinary image block for the two calls that can carry a PNG. The viewer intentionally only
+   * understands MCP content blocks; making it know every UI-builder response schema would couple a
+   * reusable viewer to a second protocol. Without this adapter, successful renders appear as base64
+   * text.
+   */
+  internal fun uiBuilderToolResult(name: String, text: String): JsonObject {
+    val png = uiBuilderPng(name, text)
+    if (png == null) return textResult(text)
+    return buildJsonObject {
+      put(
+        "content",
+        buildJsonArray {
+          add(textContent(text))
+          add(
+            buildJsonObject {
+              put("type", "image")
+              put("data", png)
+              put("mimeType", "image/png")
+            }
+          )
+        },
+      )
+    }
+  }
+
+  private fun uiBuilderPng(name: String, text: String): String? = runCatching {
+    val reply = JSON.parseToJsonElement(text) as? JsonObject ?: return@runCatching null
+    when (name) {
+      ServeUiBuilderMcp.RENDER_NATIVE ->
+        reply["imageBase64"]?.jsonPrimitive?.contentOrNull?.let(::pngPayload)
+      ServeUiBuilderMcp.EXPORT_DOCUMENT -> {
+        val response = reply["response"] as? JsonObject
+        val artifact = response?.get("artifact") as? JsonObject
+        if (
+          artifact?.get("mediaType")?.jsonPrimitive?.contentOrNull?.substringBefore(';') !=
+            "image/png" || artifact["encoding"]?.jsonPrimitive?.contentOrNull != "base64"
+        ) {
+          null
+        } else {
+          artifact["content"]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() }
+        }
+      }
+      else -> null
+    }
+  }
+    .getOrNull()
+
+  private fun pngPayload(value: String): String? {
+    val payload =
+      when {
+        value.startsWith("data:image/png;base64,") -> value.substringAfter(',')
+        value.startsWith("data:") -> return null
+        else -> value
+      }
+    return payload.takeIf { it.isNotBlank() }
   }
 
   private fun tool(name: String, description: String, schema: String): JsonObject =
