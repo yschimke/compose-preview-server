@@ -366,7 +366,7 @@ class ServeCatalogMcp(
     val args = if (TOKEN_ARGUMENT in rawArgs) JsonObject(rawArgs - TOKEN_ARGUMENT) else rawArgs
     val liveAuthorization = { authorizeLive(presented) }
     uiBuilderTool(name, args, presented, uiBuilderAuthorization)?.let {
-      return withStructuredContent(it)
+      return withStructuredContent(name, it)
     }
     return when (name) {
       "request_access" -> {
@@ -489,7 +489,7 @@ class ServeCatalogMcp(
         }
       }
       else -> toolError("unknown tool: $name")
-    }.let(::withStructuredContent)
+    }.let { withStructuredContent(name, it) }
   }
 
   private suspend fun listResources(): JsonObject {
@@ -1754,16 +1754,40 @@ class ServeCatalogMcp(
       put("name", name)
       put("description", description)
       put("inputSchema", withTokenArgument(name, JSON.parseToJsonElement(schema).jsonObject))
-      put("outputSchema", buildJsonObject { put("type", "object") })
+      put("outputSchema", outputSchema(name))
+    }
+
+  private fun outputSchema(name: String): JsonObject =
+    if (name == "list_data_products") {
+      buildJsonObject {
+        put("type", "object")
+        put(
+          "properties",
+          buildJsonObject {
+            put(
+              "dataProducts",
+              buildJsonObject {
+                put("type", "array")
+                put("items", buildJsonObject { put("type", "object") })
+              },
+            )
+          },
+        )
+        put("required", buildJsonArray { add(JsonPrimitive("dataProducts")) })
+        put("additionalProperties", false)
+      }
+    } else {
+      buildJsonObject { put("type", "object") }
     }
 
   /**
    * MCP output schemas validate `structuredContent`, not the backwards-compatible text block.
    * Preserve that text for existing clients while exposing the same JSON object to typed clients.
-   * Image-only and non-JSON text results use an empty object; their primary payload remains in
-   * `content`, and the universal object output contract still holds.
+   * The one legacy array result is wrapped under the field its output schema declares. Image-only
+   * and non-JSON text results use an empty object; their primary payload remains in `content`, and
+   * the universal object output contract still holds.
    */
-  private fun withStructuredContent(result: JsonObject): JsonObject {
+  private fun withStructuredContent(name: String, result: JsonObject): JsonObject {
     if (result["isError"]?.jsonPrimitive?.booleanOrNull == true || "structuredContent" in result) {
       return result
     }
@@ -1774,8 +1798,17 @@ class ServeCatalogMcp(
         ?.firstNotNullOfOrNull { block ->
           if (block["type"]?.jsonPrimitive?.contentOrNull != "text")
             return@firstNotNullOfOrNull null
-          block["text"]?.jsonPrimitive?.contentOrNull?.let {
-            runCatching { JSON.parseToJsonElement(it) }.getOrNull() as? JsonObject
+          block["text"]?.jsonPrimitive?.contentOrNull?.let { text ->
+            runCatching { JSON.parseToJsonElement(text) }
+              .getOrNull()
+              ?.let { parsed ->
+                when {
+                  parsed is JsonObject -> parsed
+                  name == "list_data_products" && parsed is JsonArray ->
+                    buildJsonObject { put("dataProducts", parsed) }
+                  else -> null
+                }
+              }
           }
         } ?: JsonObject(emptyMap())
     return JsonObject(result + ("structuredContent" to structured))

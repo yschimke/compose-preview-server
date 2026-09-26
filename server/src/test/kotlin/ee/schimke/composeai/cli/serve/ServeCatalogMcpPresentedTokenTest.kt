@@ -109,6 +109,39 @@ class ServeCatalogMcpPresentedTokenTest {
     assertEquals(Json.parseToJsonElement(text), result["structuredContent"])
   }
 
+  @Test
+  fun `data-product array text is wrapped for its object output schema`() {
+    val tool = tools().single { it.name == "list_data_products" }
+    assertEquals(
+      "array",
+      tool.outputSchema["properties"]!!
+        .jsonObject["dataProducts"]!!
+        .jsonObject["type"]!!
+        .jsonPrimitive
+        .content,
+    )
+    assertEquals(
+      listOf("dataProducts"),
+      tool.outputSchema["required"]!!.jsonArray.map { it.jsonPrimitive.content },
+    )
+
+    val result =
+      runBlocking {
+          mcp.handle(
+            json(
+              """{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_data_products","arguments":{}}}"""
+            )
+          ) {
+            ServeMachineAuthorization.Decision.Missing
+          }
+        }
+        .body!!["result"]!!
+        .jsonObject
+    val text = result["content"]!!.jsonArray.first().jsonObject["text"]!!.jsonPrimitive.content
+    val legacyArray = Json.parseToJsonElement(text).jsonArray
+    assertEquals(legacyArray, result["structuredContent"]!!.jsonObject["dataProducts"])
+  }
+
   private data class Tool(
     val name: String,
     val properties: Set<String>,
