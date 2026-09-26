@@ -375,9 +375,11 @@ public class ServeCommandOptions(
    *
    * Opt-in, because the header is client-supplied: on a directly-exposed host trusting it would let
    * a caller mint a fresh identity per request and walk straight past the limit. Set it only when
-   * this server sits behind a reverse proxy you control that *appends* the peer address it saw
-   * (nginx's `$proxy_add_x_forwarded_for`) — that appended last entry is the one a client can't
-   * forge. Without it, every caller behind the proxy shares one bucket.
+   * this server sits behind a reverse proxy you control that sets the last entry from the peer
+   * address it saw — nginx's `$proxy_add_x_forwarded_for` appends it, and Caddy without
+   * `trusted_proxies` replaces the header with that one address. Either way the last entry is the
+   * one a client can't forge. Without it, every caller behind the proxy shares one bucket. The
+   * bundled `deploy/image` compose file turns it on, since `preview` is reachable only via Caddy.
    */
   override val trustForwardedFor: Boolean = "--trust-forwarded-for" in args
 
