@@ -28,6 +28,7 @@ window.addEventListener("message", async (event) => {
           previewId: "CardPreview",
           overrides: { uiMode: "dark" },
           sessionId: "must-not-travel",
+          sourceUrl: "https://preview.invalid/render?cookie=also-must-not-travel",
         },
       },
     });

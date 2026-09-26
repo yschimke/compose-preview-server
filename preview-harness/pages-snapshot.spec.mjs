@@ -5876,6 +5876,24 @@ test("contract · static viewer bounds results and rejects credentials", async (
   );
   await expect(page.locator("#canvas")).not.toContainText("must-not-travel");
 
+  for (const [uri, rejected] of [
+    ["https://preview.invalid/render?token=query-secret", 'credential field "token"'],
+    ["https://user:password@preview.invalid/render", 'credential field "uri userinfo"'],
+  ]) {
+    const encoded = Buffer.from(
+      JSON.stringify({
+        version: 1,
+        arguments: { uri },
+        result: { content: [{ type: "text", text: "safe fallback" }] },
+      }),
+    ).toString("base64url");
+    await page.goto("about:blank");
+    await page.goto(`/mcp-app/compose-preview-viewer.html#compose-preview-result=${encoded}`);
+    await expect(page.locator("#canvas")).toContainText(rejected);
+    await expect(page.locator("#canvas")).not.toContainText("query-secret");
+    await expect(page.locator("#canvas")).not.toContainText("password");
+  }
+
   await page.goto("/preview-harness/fixtures/pages/mcp-app-viewer-resource.html");
   const viewer = page.frameLocator('iframe[title="Compose Preview MCP App"]');
   await expect(viewer.locator('#canvas img[alt="Rendered Compose preview"]')).toBeVisible();
@@ -5884,5 +5902,7 @@ test("contract · static viewer bounds results and rejects credentials", async (
   const modelContext = await page.evaluate(() => window.__mcpModelContext);
   expect(JSON.stringify(modelContext)).not.toContain("sessionId");
   expect(JSON.stringify(modelContext)).not.toContain("must-not-travel");
+  expect(JSON.stringify(modelContext)).not.toContain("sourceUrl");
+  expect(JSON.stringify(modelContext)).not.toContain("also-must-not-travel");
   expect(JSON.stringify(modelContext)).toContain("CardPreview");
 });

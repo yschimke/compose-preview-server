@@ -104,8 +104,28 @@
       if (!current || typeof current !== 'object') continue;
       for (const [key, child] of Object.entries(current)) {
         if (CREDENTIAL_KEY.test(key)) return key;
+        const uriCredential = credentialKeyInUri(key, child);
+        if (uriCredential) return uriCredential;
         if (child && typeof child === 'object') remaining.push(child);
       }
+    }
+    return undefined;
+  }
+
+  function credentialKeyInUri(key, value) {
+    if (typeof value !== 'string') return undefined;
+    const normalized = key.replace(/[-_]/g, '').toLowerCase();
+    if (!(normalized === 'href' || normalized === 'src' || normalized.endsWith('uri') || normalized.endsWith('url'))) {
+      return undefined;
+    }
+    try {
+      const url = new URL(value, 'https://compose-preview.invalid/');
+      if (url.username || url.password) return `${key} userinfo`;
+      for (const [parameter] of url.searchParams) {
+        if (CREDENTIAL_KEY.test(parameter)) return parameter;
+      }
+    } catch {
+      // A malformed URI is handled by its consumer; it carries no parseable URL credential here.
     }
     return undefined;
   }
@@ -145,7 +165,7 @@
     if (!value || typeof value !== 'object') return value;
     return Object.fromEntries(
       Object.entries(value)
-        .filter(([key]) => !CREDENTIAL_KEY.test(key))
+        .filter(([key, child]) => !CREDENTIAL_KEY.test(key) && !credentialKeyInUri(key, child))
         .map(([key, child]) => [key, safeSelectionArguments(child)])
     );
   }
