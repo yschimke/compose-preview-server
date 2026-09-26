@@ -399,6 +399,52 @@ class ServeUiBuilderRoutesTest {
         ),
       )
 
+      browser
+        .newCall(
+          Request.Builder()
+            .url("http://127.0.0.1:${isolated.port}/status")
+            .header(ServeHttpServer.TOKEN_HEADER, "operator-token")
+            .header("Cookie", cookie)
+            .build()
+        )
+        .execute()
+        .use {
+          assertEquals(200, it.code)
+          assertTrue(
+            it.body.string().contains("token=operator-token"),
+            "an ambient grant cookie must not replace explicit operator authority",
+          )
+        }
+      browser
+        .newCall(
+          Request.Builder()
+            .url("http://127.0.0.1:${isolated.port}/api/presence")
+            .header(ServeHttpServer.TOKEN_HEADER, "operator-token")
+            .header("Cookie", cookie)
+            .post("{}".toRequestBody())
+            .build()
+        )
+        .execute()
+        .use {
+          assertEquals(204, it.code, "the preview-only ambient grant must not block a live lane")
+        }
+      browser
+        .newCall(
+          Request.Builder()
+            .url("http://127.0.0.1:${isolated.port}/api/presence")
+            .header(
+              "Cookie",
+              "$cookie; ${ServeBrowseCookie.NAME}=${ServeBrowseCookie.value("operator-token")}",
+            )
+            .header("Origin", "http://127.0.0.1:${isolated.port}")
+            .post("{}".toRequestBody())
+            .build()
+        )
+        .execute()
+        .use {
+          assertEquals(204, it.code, "the operator browse cookie must outrank an ambient grant")
+        }
+
       assertTrue(grantStore.revoke(grant.id, "test"))
       browser
         .newCall(

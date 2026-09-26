@@ -160,6 +160,10 @@ class ServeMachineAuthorization(
     presentedToken: String? = null,
   ): ServeAgentGrantStore.Grant? {
     val store = agentGrants ?: return null
+    // A body token or ambient grant cookie cannot re-identify a transport that already presented
+    // the operator's standing credential. The authorization entry points check this too, but keep
+    // this public resolver's answer safe for every caller.
+    if (hasOperatorToken(call)) return null
     val bearer =
       call.request.headers[HttpHeaders.Authorization]
         ?.takeIf { it.startsWith(BEARER_PREFIX, ignoreCase = true) }

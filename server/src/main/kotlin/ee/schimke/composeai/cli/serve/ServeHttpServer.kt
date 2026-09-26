@@ -13246,6 +13246,18 @@ class ServeHttpServer(
   private fun ApplicationCall.browsesByCookie(): Boolean =
     !isPublic && ServeBrowseCookie.presents(this, serverToken)
 
+  /** Whether this call already speaks with the operator's standing authority. */
+  private fun ApplicationCall.presentsOperatorCredential(): Boolean {
+    if (serverToken.isBlank()) return false
+    if (browsesByCookie()) return true
+    return sequenceOf(
+        request.headers[TOKEN_HEADER],
+        request.queryParameters["token"],
+      )
+      .filterNotNull()
+      .any { ServeUrls.tokensMatch(serverToken, it) }
+  }
+
   /** Whether this call's resolved grant came from the short-lived browser cookie. */
   private fun ApplicationCall.browsesByAgentGrantCookie(
     grant: ServeAgentGrantStore.Grant
@@ -13363,6 +13375,11 @@ class ServeHttpServer(
 
   private fun resolveAgentGrant(call: ApplicationCall): ServeAgentGrantStore.Grant? {
     val store = agentGrants ?: return null
+    // An ambient browser grant must not reduce a request that also carries the operator's standing
+    // credential. In particular, live/playground and ingest gates inspect the resolved grant to
+    // enforce its narrower scope, so resolving the cookie here would turn full operator authority
+    // into whichever short-lived grant happened to be exchanged earlier in this browser.
+    if (call.presentsOperatorCredential()) return null
     val bearer =
       call.request.headers[HttpHeaders.Authorization]
         ?.takeIf { it.startsWith(BEARER_PREFIX, ignoreCase = true) }
