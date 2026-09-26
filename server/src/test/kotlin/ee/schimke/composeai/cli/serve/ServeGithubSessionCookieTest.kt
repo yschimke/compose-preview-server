@@ -291,6 +291,29 @@ class ServeGithubSessionCookieTest {
   }
 
   @Test
+  fun `a stray host-only session is cleared on a publicly cacheable response too`() {
+    val server = server(auth(config(cookieDomain = "preview.coo.ee")))
+    val cookie = signIn(server)
+    val (cacheControl, cleared) =
+      noRedirect
+        .newCall(
+          Request.Builder()
+            .url(url(server, "/rc-player/bundle.js"))
+            .header("Cookie", "cp_gh_auth=stale; cp_gh_auth=$cookie")
+            .build()
+        )
+        .execute()
+        .use { resp ->
+          resp.header("Cache-Control") to
+            resp.headers("Set-Cookie").filter { it.startsWith("cp_gh_auth=") }
+        }
+    assertTrue(cacheControl.orEmpty().contains("public"), "precondition: $cacheControl")
+    assertEquals(1, cleared.size, cleared.toString())
+    assertTrue(cleared.single().startsWith("cp_gh_auth=;"), "only an empty clearing cookie")
+    assertFalse(cleared.single().contains("Domain=", ignoreCase = true), cleared.toString())
+  }
+
+  @Test
   fun `the fingerprint is short and stable`() {
     val fingerprint = ServeGithubAuth.configFingerprint(config())
     assertEquals(16, fingerprint.length)

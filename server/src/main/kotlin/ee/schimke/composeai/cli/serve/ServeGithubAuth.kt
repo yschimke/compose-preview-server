@@ -418,13 +418,18 @@ class ServeGithubAuth(
    */
   fun refreshSession(call: ApplicationCall, contentCacheControl: List<String> = emptyList()) {
     if (call.request.uri.substringBefore('?').startsWith(AUTH_PATH_PREFIX)) return
-    val cacheControl = call.response.headers.values(HttpHeaders.CacheControl) + contentCacheControl
-    if (cacheControl.any { directive -> isPublicCacheControl(directive) }) return
     val secure = isSecure(call, config.callbackBaseUrl)
+    // Before the public-cache check: a request carrying two session values reads as signed out,
+    // so its page is served with the anonymous (public) cache policy, and returning early there
+    // would leave the stale host-only copy in place for as long as the visitor browses. The
+    // clearing cookie is empty and already expired, so it carries nobody's session even when a
+    // shared cache keeps it.
     if (call.request.cookieValues(AUTH_COOKIE).size > 1) {
       clearHostOnlyVariant(call, AUTH_COOKIE, secure)
       return
     }
+    val cacheControl = call.response.headers.values(HttpHeaders.CacheControl) + contentCacheControl
+    if (cacheControl.any { directive -> isPublicCacheControl(directive) }) return
     val session = call.request.soleCookieValue(AUTH_COOKIE)?.let { verifySession(it) } ?: return
     val now = clock.millis()
     if (session.expiresAt - now > SESSION_REFRESH_AFTER_SECONDS * 1000) return
