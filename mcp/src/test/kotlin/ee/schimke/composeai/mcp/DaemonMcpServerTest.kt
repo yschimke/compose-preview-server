@@ -162,9 +162,12 @@ class DaemonMcpServerTest {
     assertThat(content["text"]!!.jsonPrimitive.content).contains("use.hidden = true;")
     assertThat(content["text"]!!.jsonPrimitive.content)
       .contains("message.method === 'ui/notifications/tool-input'")
-    assertThat(content["text"]!!.jsonPrimitive.content).contains("delete copy.token;")
     assertThat(content["text"]!!.jsonPrimitive.content)
-      .contains("toolArguments = safeToolArguments(message.params?.arguments);")
+      .contains("toolArguments = safeSelectionArguments(message.params?.arguments || {});")
+    assertThat(content["text"]!!.jsonPrimitive.content)
+      .contains("function safeSelectionArguments(value)")
+    assertThat(content["text"]!!.jsonPrimitive.content)
+      .contains("/(token|authorization|password|secret|api[-_]?key)/i")
     assertThat(content["text"]!!.jsonPrimitive.content).contains("arguments: toolArguments")
     assertThat(content["text"]!!.jsonPrimitive.content)
       .contains("structuredContent: { composePreviewSelection: selected }")
@@ -176,6 +179,10 @@ class DaemonMcpServerTest {
       .contains(
         "if (image && !cells.some(cell => typeof cell?.png === 'string' && cell.png.length > 0))"
       )
+    assertThat(content["text"]!!.jsonPrimitive.content)
+      .contains("await request('resources/read', { uri: resource.uri })")
+    assertThat(content["text"]!!.jsonPrimitive.content).contains("typeof content.blob === 'string'")
+    assertThat(content["text"]!!.jsonPrimitive.content).contains("Refresh resource")
   }
 
   @Test
