@@ -13541,7 +13541,8 @@ class ServeHttpServer(
     call.respondBytes(bytes, wasmContentType(file.name))
   }
 
-  /** Whether a path segment can name a design rather than an asset.
+  /**
+   * Whether a path segment can name a design rather than an asset.
    *
    * The same path-safe shape the New design dialog validates, which allows a `.`, minus anything
    * carrying a static-asset extension. Without that exclusion a mistyped `uiBuilder.mjs` would

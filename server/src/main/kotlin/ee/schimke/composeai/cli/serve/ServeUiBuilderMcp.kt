@@ -879,7 +879,7 @@ class ServeUiBuilderMcp(
       SNAPSHOT_RESPONSE_TYPE
 
   /**
-   * The reply, plus what this actor has not been told, when there is any.
+   * The reply, plus the pending-discussion count and what this actor has not been told.
    *
    * ## Why it is spliced onto the reply rather than left to the agent to ask for
    *
@@ -892,10 +892,9 @@ class ServeUiBuilderMcp(
    * ## What it costs
    *
    * One board read per reply on the tools in [COMMENT_NOTICE_TOOLS], and nothing at all on a host
-   * that keeps no discussions. The reply is re-parsed only when there is something to add, so a
-   * design nobody has commented on — the common case, and the one where a native render's base64
-   * frame would be expensive to walk — pays a stat call and hands the original string back
-   * untouched.
+   * that keeps no discussions. A successful [GET_DESIGN] is always parsed once to attach the exact
+   * [UNACKNOWLEDGED_COMMENTS_KEY] count, including zero; the other replies are re-parsed only when
+   * there is a notice to add, so a native render's base64 frame is not walked without a reason.
    *
    * A reply that is not a JSON object is handed back as it is: a notice is worth having, and never
    * worth mangling the answer the agent asked for.
@@ -909,6 +908,19 @@ class ServeUiBuilderMcp(
     val store = comments ?: return reply
     if (tool !in COMMENT_NOTICE_TOOLS) return reply
     val designId = args.text("designId") ?: return reply
+    // The count on GET_DESIGN must only accompany a successful snapshot. An error envelope means
+    // the service refused to open the design; reading or attaching its discussion metadata there
+    // would leak that a guessed private design has activity.
+    val parsedSnapshot =
+      if (tool != GET_DESIGN) null
+      else
+        try {
+          (UI_BUILDER_JSON.parseToJsonElement(reply) as? JsonObject)?.takeIf {
+            it.isSnapshotReply()
+          } ?: return reply
+        } catch (_: SerializationException) {
+          return reply
+        }
     // The design was read as this actor by the call that produced `reply`, so the access check has
     // already happened; a reply that never reached the design carries no notice because the board
     // of a design nobody may read is never consulted here — the tool refused before this point.
@@ -921,19 +933,31 @@ class ServeUiBuilderMcp(
       } catch (cancelled: CancellationException) {
         throw cancelled
       } catch (_: Exception) {
-        // A discussion this host cannot read must never cost the agent the answer it asked for.
-        null
-      } ?: return reply
-    val parsed =
-      try {
-        UI_BUILDER_JSON.parseToJsonElement(reply) as? JsonObject ?: return reply
-      } catch (_: SerializationException) {
+        // A discussion this host cannot read must never cost the agent the answer it asked for or
+        // be misreported as an authoritative zero.
         return reply
       }
+    if (notice == null && tool != GET_DESIGN) return reply
+    val parsed =
+      parsedSnapshot
+        ?: try {
+          UI_BUILDER_JSON.parseToJsonElement(reply) as? JsonObject ?: return reply
+        } catch (_: SerializationException) {
+          return reply
+        }
     return JsonObject(
-        parsed +
-          (COMMENTS_NOTICE_KEY to
-            UI_BUILDER_JSON.encodeToJsonElement(CommentNoticeV1.serializer(), notice))
+        buildMap {
+          putAll(parsed)
+          if (tool == GET_DESIGN) {
+            put(UNACKNOWLEDGED_COMMENTS_KEY, JsonPrimitive(notice?.unacknowledged ?: 0))
+          }
+          if (notice != null) {
+            put(
+              COMMENTS_NOTICE_KEY,
+              UI_BUILDER_JSON.encodeToJsonElement(CommentNoticeV1.serializer(), notice),
+            )
+          }
+        }
       )
       .toString()
   }
@@ -1298,6 +1322,9 @@ class ServeUiBuilderMcp(
     /** The key [CommentNoticeV1] is spliced onto a reply under. */
     internal const val COMMENTS_NOTICE_KEY = "comments"
 
+    /** The exact pending-discussion count attached to successful [GET_DESIGN] replies. */
+    internal const val UNACKNOWLEDGED_COMMENTS_KEY = "unacknowledgedComments"
+
     /** The key [StoredLinks] is spliced onto a $GET_DESIGN reply under. */
     internal const val LINKS_KEY = "links"
 
@@ -1348,7 +1375,9 @@ class ServeUiBuilderMcp(
             "variables and catalog pin — plus the revision to quote as `baseRevision` when " +
             "editing it. The catalog the design pins is left out unless `$INCLUDE_CATALOG_ARGUMENT` " +
             "is true: it is the same for every design on the pin, $LIST_CATALOGS serves it, and " +
-            "it is most of the bytes.",
+            "it is most of the bytes. On hosts with design discussions, " +
+            "`$UNACKNOWLEDGED_COMMENTS_KEY` is the number of comment threads this actor has not " +
+            "acknowledged; a nonzero count also carries the bounded `comments` notice.",
           """
           {"type":"object","properties":{
             "designId":{"type":"string"},
