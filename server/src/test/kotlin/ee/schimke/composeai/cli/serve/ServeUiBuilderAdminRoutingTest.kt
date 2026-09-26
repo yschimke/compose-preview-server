@@ -160,7 +160,7 @@ class ServeUiBuilderAdminRoutingTest {
   }
 
   @Test
-  fun `a grant approved by a configured actor administers every design`() {
+  fun `a grant approved by a configured actor does not administer designs`() {
     server =
       server(
         admin = ServeUiBuilderAdmin(port, onLog = {}),
@@ -175,13 +175,13 @@ class ServeUiBuilderAdminRoutingTest {
           },
       )
 
-    assertEquals(200, send("/admin/ui-builder", token = null).first)
-    assertEquals(200, send("/admin/ui-builder/designs", token = null).first)
+    assertEquals(404, send("/admin/ui-builder", token = null).first)
+    assertEquals(404, send("/admin/ui-builder/designs", token = null).first)
     assertEquals(
-      200,
+      404,
       send("/admin/ui-builder/designs/shady-goose", "DELETE", token = null).first,
     )
-    assertEquals(listOf("shady-goose"), deleted)
+    assertTrue(deleted.isEmpty())
   }
 
   @Test

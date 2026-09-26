@@ -488,6 +488,47 @@ class ServeMcpOAuthRoutingTest {
     assertEquals("unsupported_grant_type", str(body, "error"))
   }
 
+  /** Open an authorization for [clientId] and return the approval page it leads to. */
+  private fun approvalPage(clientId: String, redirect: String = redirectUri): String {
+    val (_, _, approvalLocation) =
+      get(
+        "${ServeMcpOAuth.AUTHORIZE_PATH}?response_type=code&client_id=$clientId" +
+          "&redirect_uri=$redirect&code_challenge=$challenge&code_challenge_method=S256" +
+          "&scope=live",
+        token = operatorToken,
+      )
+    return get(assertNotNull(approvalLocation), operatorToken).second
+  }
+
+  @Test
+  fun `the approval page leads with where the access goes, not where the browser is`() {
+    val page = approvalPage(registerClient())
+    assertTrue(page.contains("Access goes to"), page)
+    assertTrue(page.contains("<code>127.0.0.1:8976</code>"), page)
+    assertTrue(page.contains("This computer"), page)
+    // The client's name is still shown, as the client's own choice.
+    assertTrue(page.contains("Client calls itself"), page)
+    assertTrue(page.contains("Test MCP client"), page)
+    // The browser that followed the client's link here is the approver's own; naming its address
+    // as "Asked from" said nothing about the client.
+    assertFalse(page.contains("Asked from"), page)
+  }
+
+  @Test
+  fun `a redirect to another host is labelled an external site`() {
+    val external = "https://example.net/oauth/cb"
+    val (code, body, _) =
+      post(
+        ServeMcpOAuth.REGISTER_PATH,
+        """{"client_name":"Claude Desktop","redirect_uris":["$external"]}""",
+      )
+    assertEquals(201, code)
+    val page = approvalPage(str(body, "client_id"), external)
+    assertTrue(page.contains("<code>example.net</code>"), page)
+    assertTrue(page.contains("External site"), page)
+    assertFalse(page.contains("This computer"), page)
+  }
+
   /** Drive an authorization to approval and return the code the client would receive. */
   private fun approvedCode(clientId: String): String {
     val (_, _, approvalLocation) =

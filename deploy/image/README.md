@@ -299,9 +299,9 @@ open editor on the design, and drops its reference overlay and comment threads w
 undo.
 
 The actor setting is UI Builder-only. It does not grant `/admin/catalogs`, `/admin/trust`,
-`/admin/sites`, onboarding, or library administration. A UI-builder grant approved by a configured
-actor inherits the same all-design authority, including the shared folder map, so an approved agent
-can organize designs the actor does not own without receiving the machine-wide admin token.
+`/admin/sites`, onboarding, or library administration. Administration is not delegated: a UI-builder
+grant approved by a configured actor edits the designs that actor can edit, but does not reach the
+admin pages or the shared folder map. Use the actor's own signed-in session for those.
 
 The page drives two JSON routes that a script can use directly, gated by the same header as the
 other admin routes and absent (404, not 401) without it:

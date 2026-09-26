@@ -102,6 +102,8 @@ public object ServeDefaults {
   public const val AGENT_GRANT_HARD_MAX_TTL_SECONDS: Long =
     AgentGrantProtocol.HARD_MAX_GRANT_TTL_SECONDS
   public const val AGENT_GRANT_MAX_ACTIVE: Int = ServeAgentGrantStore.DEFAULT_MAX_ACTIVE_GRANTS
+  public const val AGENT_GRANT_MAX_ACTIVE_PER_APPROVER: Int =
+    ServeAgentGrantStore.DEFAULT_MAX_ACTIVE_GRANTS_PER_APPROVER
   public const val AGENT_GRANT_MAX_TTL_SECONDS: Long =
     ServeAgentGrantStore.DEFAULT_MAX_GRANT_TTL_SECONDS
   public const val PLAYGROUND_SANDBOX_TTL_SECONDS: Long = PlaygroundSandbox.DEFAULT_TTL_SECONDS

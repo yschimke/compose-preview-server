@@ -8125,6 +8125,14 @@ ${captureControlsHtml().prependIndent("          ")}
      */
     storeNarrowedCapabilities: List<AgentGrantCapability> = emptyList(),
     storeNarrowedReason: String = "",
+    /**
+     * Set when the request came through the MCP OAuth façade: where approving sends the browser,
+     * and with it the code that redeems this grant. The page then leads with that host, and drops
+     * the "Asked from" line — for an OAuth request that address is the approver's own browser,
+     * which followed the client's link here, so it says nothing about who is asking. [label] is
+     * then the client's self-chosen name and is shown as such, below the host.
+     */
+    oauthReturn: ServeMcpOAuth.RedirectTarget? = null,
   ): String {
     val esc = WebEscaping::htmlEscape
     // **Radios, not checkboxes**, because the scopes are cumulative and independent boxes lie about
@@ -8225,6 +8233,48 @@ ${captureControlsHtml().prependIndent("          ")}
         val selected = if (seconds == requestedTtlSeconds) " selected" else ""
         "<option value=\"$seconds\"$selected>${esc(AgentGrantProtocol.formatDuration(seconds))}</option>"
       }
+    val oauthReturnHtml =
+      if (oauthReturn == null) ""
+      else {
+        val (kindClass, kindText) =
+          when (oauthReturn.kind) {
+            ServeMcpOAuth.RedirectTarget.Kind.EXTERNAL ->
+              "cp-grant-return-kind--external" to "External site"
+            ServeMcpOAuth.RedirectTarget.Kind.LOOPBACK ->
+              "cp-grant-return-kind--local" to "This computer"
+            ServeMcpOAuth.RedirectTarget.Kind.APP -> "cp-grant-return-kind--local" to "App link"
+          }
+        val hint =
+          when (oauthReturn.kind) {
+            ServeMcpOAuth.RedirectTarget.Kind.EXTERNAL ->
+              "Approving sends this access to a site elsewhere on the internet, not to a program on " +
+                "your computer. Approve only if you recognise this host and meant to connect it."
+            ServeMcpOAuth.RedirectTarget.Kind.LOOPBACK ->
+              "Approving sends this access to a program listening on your own computer."
+            ServeMcpOAuth.RedirectTarget.Kind.APP ->
+              "Approving sends this access to whichever app on this device handles these links."
+          }
+        // Joined at the body's own indentation, so the page's `trimIndent` below still finds it.
+        listOf(
+            "<div class=\"cp-grant-return\">",
+            "  <span class=\"cp-grant-code-label\">Access goes to</span>",
+            "  <span class=\"cp-grant-return-host\"><code>${esc(oauthReturn.display)}</code> " +
+              "<span class=\"cp-grant-return-kind $kindClass\">${esc(kindText)}</span></span>",
+            "  <span class=\"cp-grant-code-hint\">${esc(hint)}</span>",
+            "  <span class=\"cp-grant-return-uri\">${esc(oauthReturn.uri)}</span>",
+            "</div>",
+            "",
+          )
+          .joinToString("\n        ")
+      }
+    val askerFacts =
+      if (oauthReturn == null)
+        "<dt>Purpose</dt><dd>${if (label.isBlank()) "<em>none given</em>" else esc(label)}</dd>\n" +
+          "          <dt>Asked from</dt><dd>${esc(client)}</dd>"
+      else
+        "<dt>Client calls itself</dt><dd>" +
+          (if (label.isBlank()) "<em>no name given</em>" else esc(label)) +
+          " <span class=\"cp-grant-self-named\">(chosen by the client)</span></dd>"
     return document(
       title = "Grant agent access — compose-preview",
       unfurlDescription = "An agent is asking for temporary access to this preview server.",
@@ -8246,9 +8296,8 @@ ${captureControlsHtml().prependIndent("          ")}
           you are looking at someone else's request — close this page.</span>
         </div>
 
-        <dl class="cp-grant-facts">
-          <dt>Purpose</dt><dd>${if (label.isBlank()) "<em>none given</em>" else esc(label)}</dd>
-          <dt>Asked from</dt><dd>${esc(client)}</dd>
+        $oauthReturnHtml<dl class="cp-grant-facts">
+          $askerFacts
           <dt>Approving as</dt><dd>${esc(approver)}</dd>
           <dt>This request expires in</dt><dd>${esc(AgentGrantProtocol.formatDuration(expiresInSeconds))}</dd>
         </dl>
@@ -9448,6 +9497,172 @@ ${captureControlsHtml().prependIndent("          ")}
     )
   }
 
+  /** The knob key the A2UI playground edits: `previewOverrideString("document", …)`. */
+  const val A2UI_DOCUMENT_KNOB: String = "document"
+
+  /** Longer than this, or multi-line, and a string knob is edited in a `<textarea>`. */
+  private const val LONG_TEXT_KNOB_CHARS = 120
+
+  private fun isLongTextKnob(default: String): Boolean =
+    default.contains('\n') || default.length > LONG_TEXT_KNOB_CHARS
+
+  /**
+   * The preview the A2UI playground drives: the first one declaring a **string** knob named
+   * [A2UI_DOCUMENT_KNOB]. Null when the catalog has none, which is what makes `/{system}/a2ui` a
+   * 404 there. Keyed on the declaration rather than a preview id so a catalog can move or rename
+   * its playground preview without this server learning about it.
+   */
+  fun a2uiDocumentPreview(previews: List<ServePreview>): ServePreview? =
+    previews.firstOrNull { preview ->
+      a2uiDocumentKnob(preview) != null
+    }
+
+  private fun a2uiDocumentKnob(
+    preview: ServePreview
+  ): ee.schimke.composeai.data.overrides.PreviewOverrideDeclaration? =
+    preview.overrides.firstOrNull {
+      it.seedKey == A2UI_DOCUMENT_KNOB &&
+        it.type == ee.schimke.composeai.data.overrides.PreviewOverrideType.STRING
+    }
+
+  /**
+   * `GET /{system}/a2ui`: edit an A2UI document and render it through the catalog's own renderer.
+   *
+   * A textarea prefilled with the preview's declared default, POSTed as `knob.document` to `POST
+   * <base>/render/<id>.png` — a document is kilobytes, which a GET query cannot carry. The PNG
+   * comes back as a blob URL; a refusal is shown in place with what to do about it. Ctrl/Cmd+Enter
+   * renders, and so does a pause in typing when auto-render is ticked.
+   */
+  fun a2uiPlaygroundPage(
+    moduleLabel: String,
+    preview: ServePreview,
+    token: String,
+    sessionId: String?,
+    basePath: String,
+    isPublic: Boolean,
+    /** Whether this catalog can render an override at all; a static bundle cannot. */
+    liveAvailable: Boolean,
+    unfurl: UnfurlMetadata? = null,
+    version: String? = null,
+  ): String {
+    val suffix = querySuffix(linkQuery(token, sessionId, basePath, isPublic))
+    val encodedId = WebEscaping.urlEncodeSegment(preview.id)
+    val renderUrl = "$basePath/render/$encodedId.png$suffix"
+    val viewerUrl = "$basePath/p/$encodedId$suffix"
+    val default = a2uiDocumentKnob(preview)?.default?.let(::overrideValueText).orEmpty()
+    val esc = WebEscaping::htmlEscape
+    val staticNote =
+      if (liveAvailable) ""
+      else
+        """
+        <p class="cp-pg-warn">This catalog is a static bundle: it can show the published render but
+          cannot render an edited document. Point it at a live catalog to use the playground.</p>"""
+    // Built by concatenation around the textarea: the default document is multi-line, and a
+    // `trimIndent()` over the interpolated page would re-indent it.
+    val head =
+      """
+      <link rel="stylesheet" href="${assetHref("playground.css")}">
+      <h1 class="cp-head">A2UI playground</h1>
+      <p class="cp-sub">Edit an A2UI document — JSON Lines of v0.9 messages, a JSON array of them, or
+        a <code>{"components":[…]}</code> shorthand — and render it with
+        <code>${esc(moduleLabel)}</code>'s own components. Rendering an edited document is a live
+        render, so it needs a signed-in session or a <code>live</code> agent grant.
+        <a href="${esc(viewerUrl)}">Open the ${esc(preview.label)} preview →</a></p>
+      <div class="cp-pg">$staticNote
+        <div class="cp-pg-bar">
+          <label class="cp-pg-modelabel"><input id="a2ui-auto" type="checkbox"> Auto-render</label>
+          <span class="cp-muted">Ctrl/⌘ + Enter renders</span>
+          <button id="a2ui-run" class="cp-doc-btn cp-pg-run" type="button">Render</button>
+        </div>
+      """
+        .trimIndent()
+    val tail =
+      """
+        <div id="a2ui-status" class="cp-pg-status" role="status" hidden></div>
+        <img id="a2ui-image" class="cp-pg-image" alt="Rendered A2UI document" hidden>
+      </div>
+      <script>${a2uiPlaygroundScript(renderUrl)}</script>
+      """
+        .trimIndent()
+    return document(
+      title = "A2UI playground — ${moduleLabel} — compose-preview",
+      unfurlDescription = "Edit an A2UI document and render it with the catalog's components.",
+      unfurl = unfurl,
+      version = version,
+      navSuffix = suffix,
+      body =
+        head +
+          "\n  <textarea id=\"a2ui-source\" class=\"cp-pg-source\" spellcheck=\"false\"" +
+          " aria-label=\"A2UI document\">\n" +
+          esc(default) +
+          "</textarea>\n" +
+          tail,
+    )
+  }
+
+  private fun a2uiPlaygroundScript(renderUrl: String): String =
+    """
+    (function () {
+      var source = document.getElementById("a2ui-source");
+      var run = document.getElementById("a2ui-run");
+      var auto = document.getElementById("a2ui-auto");
+      var status = document.getElementById("a2ui-status");
+      var image = document.getElementById("a2ui-image");
+      var url = ${jsString(renderUrl)};
+      var seq = 0, timer = null, objectUrl = null;
+      function show(text, isError) {
+        status.hidden = !text;
+        status.className = "cp-pg-status" + (isError ? " cp-doc-error" : "");
+        status.textContent = text || "";
+      }
+      function hint(res, body) {
+        if (res.status === 401 || res.status === 403)
+          return "Not allowed to render an edited document (HTTP " + res.status + "). Sign in, or " +
+            "ask for a live grant: compose-preview auth request --scope live. " + body;
+        if (res.status === 413) return "The document is larger than the 1 MiB render limit.";
+        if (res.status === 503) {
+          var after = res.headers.get("Retry-After");
+          return "The renderer is busy" + (after ? "; retry in " + after + "s." : ".") + " " + body;
+        }
+        return "HTTP " + res.status + ": " + body;
+      }
+      function render() {
+        var mine = ++seq;
+        show("Rendering…", false);
+        run.disabled = true;
+        fetch(url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ "knob.$A2UI_DOCUMENT_KNOB": source.value }),
+          credentials: "same-origin"
+        }).then(function (res) {
+          if (!res.ok) return res.text().then(function (t) { throw new Error(hint(res, t)); });
+          return res.blob();
+        }).then(function (blob) {
+          if (mine !== seq) return;
+          if (objectUrl) URL.revokeObjectURL(objectUrl);
+          objectUrl = URL.createObjectURL(blob);
+          image.src = objectUrl;
+          image.hidden = false;
+          show("", false);
+        }, function (e) {
+          if (mine !== seq) return;
+          show(e.message || String(e), true);
+        }).then(function () { if (mine === seq) run.disabled = false; });
+      }
+      run.addEventListener("click", render);
+      source.addEventListener("keydown", function (e) {
+        if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); render(); }
+      });
+      source.addEventListener("input", function () {
+        if (!auto.checked) return;
+        if (timer) clearTimeout(timer);
+        timer = setTimeout(render, 800);
+      });
+    })();
+    """
+      .trimIndent()
+
   /**
    * `GET /admin/ui-builder`: the operator's screen over every UI-builder design on the host.
    *
@@ -10198,6 +10413,11 @@ ${captureControlsHtml().prependIndent("          ")}
      */
     val agentGrants: List<StatusAgentGrant> = emptyList(),
     val agentGrantRequests: List<StatusAgentRequest> = emptyList(),
+    /**
+     * Live grants this reader is not shown a row for, because they did not approve them (or are not
+     * an approver at all). Rendered as a count only: a row names logins.
+     */
+    val hiddenAgentGrants: Int = 0,
   )
 
   /**
@@ -10214,10 +10434,25 @@ ${captureControlsHtml().prependIndent("          ")}
     esc: (String) -> String,
   ): String {
     // Empty string, not an empty section: see the call site in [statusPage].
-    if (view.agentGrants.isEmpty() && view.agentGrantRequests.isEmpty()) return ""
+    if (
+      view.agentGrants.isEmpty() && view.agentGrantRequests.isEmpty() && view.hiddenAgentGrants == 0
+    )
+      return ""
+    val hiddenNote =
+      when (view.hiddenAgentGrants) {
+        0 -> ""
+        1 ->
+          "<p class=\"cp-status-note\">1 more live grant is listed only for whoever approved it.</p>"
+        else ->
+          "<p class=\"cp-status-note\">${view.hiddenAgentGrants} more live grants are listed only " +
+            "for whoever approved them.</p>"
+      }
     val liveRows =
       if (view.agentGrants.isEmpty())
-        "<tr><td colspan=\"7\" class=\"cp-empty\">No agent currently holds access.</td></tr>"
+        "<tr><td colspan=\"7\" class=\"cp-empty\">" +
+          (if (view.hiddenAgentGrants == 0) "No agent currently holds access."
+          else "No grant you approved is live.") +
+          "</td></tr>"
       else
         view.agentGrants.joinToString("\n") { grant ->
           val revoke =
@@ -10265,7 +10500,7 @@ ${captureControlsHtml().prependIndent("          ")}
         $liveRows
         </tbody>
       </table></div>
-      $pending
+      $hiddenNote$pending
       """
         .trimIndent()
   }
@@ -19170,6 +19405,16 @@ ${ServeSiteIcon.linkTags().prependIndent("        ")}
             </label>
             """
               .trimIndent()
+          } else if (inputType == "text" && isLongTextKnob(authorDefault)) {
+            // A multi-line or long string default — an A2UI document, a paragraph of copy — is
+            // unreadable in a one-line field. Same `.cp-knob` control, so the viewer JS (which
+            // reads `.value` off any control) needs no branch. Concatenated rather than a
+            // `trimIndent()` template: the value is multi-line, and trimming indent over it would
+            // change the text. The newline after the open tag is the one the HTML parser drops,
+            // so a value that itself starts with one keeps it.
+            "<label>$label\n  <textarea $attrs rows=\"6\" spellcheck=\"false\"$dis>\n" +
+              value +
+              "</textarea>\n</label>"
           } else {
             """
             <label>${label}
