@@ -3469,7 +3469,8 @@ class ServeHttpServer(
         )
         call.respondText(
           "Uploading preview images requires a GitHub token with access to ${auth.repository}. " +
-            "Send it as: Authorization: Bearer <token>  (e.g. \"\$(gh auth token)\").",
+            "Send it as: Authorization: Bearer <token>  (e.g. a GitHub Actions job's " +
+            "\$GITHUB_TOKEN, or a personal access token).",
           status = HttpStatusCode.Unauthorized,
         )
         null

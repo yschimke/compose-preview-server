@@ -593,6 +593,14 @@ public interface ServeOptions {
   public val imageRateLimit: Int
 
   /**
+   * Raw `--image-upload-tokens`, unparsed: which GitHub token kinds the image lane accepts. Null
+   * takes the default, which depends on whether GitHub OAuth is configured — see
+   * [ImageUploadTokenPolicy.parse].
+   */
+  public val imageUploadTokensFlag: String?
+    get() = null
+
+  /**
    * Server-wide admission for the catalogs' background theme optimization: it parks while any
    * catalog is loading, and bounds how many of them render at once. Shared by every catalog host
    * this server opens — see [ServeBackgroundWork] for why both halves matter on a public box.

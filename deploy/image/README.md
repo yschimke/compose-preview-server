@@ -790,6 +790,27 @@ nothing but this lane — naming it and still getting a 404 from `POST /images` 
 and the miss is silent at both ends. Set `SERVE_ACCEPT_IMAGES=0` to keep the lane shut with the
 repository named, or `=1` without one to get the server's own startup refusal.
 
+**Which tokens may upload** is `SERVE_IMAGE_UPLOAD_TOKENS` (`--image-upload-tokens`), a comma
+list of:
+
+| Kind | What it is | Default |
+|---|---|---|
+| `app` | A user token issued to this box's own `SERVE_GITHUB_AUTH_CLIENT_ID`, checked with `POST /applications/{client_id}/token` | Always accepted when GitHub auth is configured |
+| `personal` | Personal access tokens (`ghp_…`, `github_pat_…`) | On |
+| `other-apps` | User tokens issued to any other OAuth or GitHub App — `gh auth token` is one, issued to the GitHub CLI | Off when GitHub auth is configured, on when it is not |
+| `installation` | GitHub App installation tokens with write on the repository — a GitHub Actions job's `GITHUB_TOKEN` | On |
+
+A user token says who the user is but not who holds it, so with GitHub auth configured a token
+issued to some other app is refused (`403`, naming what this host accepts). Without GitHub auth
+there is no app to check against, and user tokens are accepted as before. `installation` cannot be
+narrowed to GitHub Actions: an installation token cannot name its app (`GET /app` and
+`GET /repos/{owner}/{repo}/installation` both need the app's own JWT), so it admits every app
+installed on the repository with write. Set `SERVE_IMAGE_UPLOAD_TOKENS=app,personal` to refuse
+them. An agent with none of these asks for an agent access grant carrying `images` instead.
+
+A verified token is reused for 60 seconds; a refusal from GitHub for 30. When GitHub can't be
+reached the upload gets a `503` and nothing is cached.
+
 The derivation deliberately does **not** key on GitHub auth being configured, the way
 `SERVE_AGENT_GRANTS` does. The gating repository falls back to `SERVE_GITHUB_AUTH_REPO`, which this
 image defaults to `yschimke/compose-ai-tools` for the playground — so keying on auth would open an
@@ -803,7 +824,7 @@ the same route answering rather than a 404:
 curl -s https://preview.coo.ee/status.json | jq '.config | {acceptImages, imageUploadRepository}'
 curl -sS -o /dev/null -w '%{http_code}\n' -X POST --data-binary @render.png \
   'https://preview.coo.ee/images?name=after.png'                       # 401 — lane is up, no credential
-curl -sS -H "Authorization: Bearer $(gh auth token)" --data-binary @render.png \
+curl -sS -H "Authorization: Bearer $GITHUB_TOKEN" --data-binary @render.png \
   'https://preview.coo.ee/images?name=after.png'                       # 201 + the markdown to paste
 ```
 

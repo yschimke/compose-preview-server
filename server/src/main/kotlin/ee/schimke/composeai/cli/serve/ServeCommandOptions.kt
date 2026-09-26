@@ -677,6 +677,10 @@ public class ServeCommandOptions(
     args.flagValue("--image-rate-limit")?.toIntOrNull()?.takeIf { it >= 0 }
       ?: ServeDefaults.DEFAULT_IMAGE_RATE_LIMIT
 
+  /** Raw `--image-upload-tokens`; the server parses it (an unknown kind throws there). */
+  override val imageUploadTokensFlag: String? =
+    args.flagValue("--image-upload-tokens")?.takeIf { it.isNotBlank() }
+
   /**
    * Server-wide admission for the catalogs' background theme optimization: it parks while any
    * catalog is loading, and bounds how many of them render at once. Shared by every catalog host
@@ -1245,6 +1249,15 @@ public class ServeCommandOptions(
         --image-upload-repo <owner/repo>
                           Repository an uploader must have access to. Defaults to --github-auth-repo
                           when that is set; without either, --accept-images refuses to start.
+        --image-upload-tokens <kind>[,<kind>…]
+                          Which GitHub tokens may upload: app (a user token issued to this server's
+                          --github-auth-client-id; always accepted when that is set), personal
+                          (personal access tokens), other-apps (user tokens issued to any other
+                          OAuth or GitHub App, e.g. `gh auth token`), installation (GitHub App
+                          installation tokens with write, e.g. a GitHub Actions GITHUB_TOKEN — any
+                          app installed on the repo with write passes). Default:
+                          personal,installation with GitHub OAuth configured, otherwise
+                          personal,other-apps,installation.
         --image-ttl <seconds>
                           How long a /i/<id> image link lives (default ${ServeDefaults.IMAGE_TTL_SECONDS}s = 7 days). Held in
                           memory and dropped when it expires; ${ServeDefaults.IMAGE_MAX_IMAGES} images / ${ServeDefaults.IMAGE_MAX_TOTAL_BYTES / (1024 * 1024)}MB max, the
