@@ -1070,6 +1070,9 @@ class DaemonMcpServerTest {
     assertThat(File(changed["pngPath"]!!.jsonPrimitive.content).readBytes()).isEqualTo(secondBytes)
     // The daemon reused and overwrote its output, but the earlier result remains replayable.
     assertThat(firstStablePng.readBytes()).isEqualTo(firstBytes)
+    val cacheDir = firstStablePng.parentFile
+    server.shutdown()
+    assertThat(cacheDir.exists()).isFalse()
   }
 
   @Test
@@ -3109,8 +3112,7 @@ class DaemonMcpServerTest {
 
     val pngBytesA = byteArrayOf(0x89.toByte(), 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 1, 1)
     val pngBytesB = byteArrayOf(0x89.toByte(), 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 2, 2, 2)
-    val pngFileA = tmp.newFile("a.png").also { Files.write(it.toPath(), pngBytesA) }
-    val pngFileB = tmp.newFile("b.png").also { Files.write(it.toPath(), pngBytesB) }
+    val sharedPng = tmp.newFile("shared.png").also { Files.write(it.toPath(), pngBytesA) }
     // Deliberately NO autoRenderPngPath — we drive renderFinished manually so the test
     // controls timing.
     val uri = PreviewUri(workspaceId, ":module", previewId).toUri()
@@ -3127,6 +3129,7 @@ class DaemonMcpServerTest {
             "render_preview",
             buildJsonObject {
               put("uri", uri)
+              put("inline", false)
               putJsonObject("overrides") { put("widthPx", 100) }
             },
             timeoutMs = 10_000,
@@ -3147,6 +3150,7 @@ class DaemonMcpServerTest {
             "render_preview",
             buildJsonObject {
               put("uri", uri)
+              put("inline", false)
               putJsonObject("overrides") { put("widthPx", 200) }
             },
             timeoutMs = 10_000,
@@ -3160,7 +3164,7 @@ class DaemonMcpServerTest {
       assertThat(daemon.renderOverrides).hasSize(1)
 
       // Drain A — the head pop should promote B and dispatch B's renderNow.
-      daemon.emitRenderFinished(previewId, pngFileA.absolutePath)
+      daemon.emitRenderFinished(previewId, sharedPng.absolutePath)
 
       // B's renderNow now arrives, with B's overrides (not A's).
       val secondPreviews = daemon.renderRequests.poll(5, TimeUnit.SECONDS)
@@ -3168,15 +3172,23 @@ class DaemonMcpServerTest {
       assertThat(daemon.renderOverrides).hasSize(2)
       assertThat(daemon.renderOverrides[1]?.widthPx).isEqualTo(200)
 
-      // Drain B.
-      daemon.emitRenderFinished(previewId, pngFileB.absolutePath)
+      // Reuse and overwrite the SAME daemon path before B finishes. A must already have snapshotted
+      // its bytes on the notification thread, before promoting this render.
+      Files.write(sharedPng.toPath(), pngBytesB)
+      daemon.emitRenderFinished(previewId, sharedPng.absolutePath)
 
       // Both calls returned successfully — pre-fix B would have completed early with A's bytes
       // (wrong-bytes); post-fix B blocks until its own renderFinished and gets B's bytes. The
       // load-bearing wire-side assertion is the order and count of renderNows the daemon
       // observed above; we just confirm both callers unblocked here.
-      callA.get(5, TimeUnit.SECONDS)
-      callB.get(5, TimeUnit.SECONDS)
+      val resultA =
+        json.parseToJsonElement(callA.get(5, TimeUnit.SECONDS).firstTextContent()).jsonObject
+      val resultB =
+        json.parseToJsonElement(callB.get(5, TimeUnit.SECONDS).firstTextContent()).jsonObject
+      assertThat(File(resultA["pngPath"]!!.jsonPrimitive.content).readBytes()).isEqualTo(pngBytesA)
+      assertThat(File(resultB["pngPath"]!!.jsonPrimitive.content).readBytes()).isEqualTo(pngBytesB)
+      assertThat(resultA["sha256"]!!.jsonPrimitive.content)
+        .isNotEqualTo(resultB["sha256"]!!.jsonPrimitive.content)
     } finally {
       callerExecutor.shutdownNow()
     }

@@ -191,6 +191,11 @@ class DaemonMcpServer(
   private val previousFileRenderHashes =
     ConcurrentHashMap<Session, ConcurrentHashMap<FileRenderKey, String>>()
 
+  /** Process-owned, bounded cache for immutable path-shaped render results. */
+  private val fileRenderCacheDir = Files.createTempDirectory("compose-preview-mcp-").toFile()
+
+  private val fileRenderCacheLock = Any()
+
   /**
    * Per-(workspace, module, previewId) FIFO of [PendingRenderGroup]s awaiting a render. The HEAD
    * group is the one whose `renderNow` has been sent to the daemon (in-flight); subsequent groups
@@ -387,6 +392,7 @@ class DaemonMcpServer(
    */
   fun shutdown() {
     runCatching { freshnessExecutor.shutdownNow() }
+    synchronized(fileRenderCacheLock) { runCatching { fileRenderCacheDir.deleteRecursively() } }
   }
 
   // -------------------------------------------------------------------------
@@ -516,9 +522,7 @@ class DaemonMcpServer(
     overrides: PreviewOverrides? = null,
   ): ByteArray {
     val outcome = awaitNextRender(uri, session, progressToken, overrides)
-    val file = File(outcome.pngPath)
-    check(file.isFile) { "renderAndReadBytes: pngPath does not exist: ${outcome.pngPath}" }
-    return applyImageSizeOverride(fileSystem.read(file.path.toPath()) { readByteArray() })
+    return applyImageSizeOverride(outcome.pngBytes)
   }
 
   /**
@@ -529,9 +533,7 @@ class DaemonMcpServer(
    */
   private fun renderAndReadRawBytes(uri: PreviewUri, overrides: PreviewOverrides?): ByteArray {
     val outcome = awaitNextRender(uri, overrides = overrides)
-    val file = File(outcome.pngPath)
-    check(file.isFile) { "renderAndReadRawBytes: pngPath does not exist: ${outcome.pngPath}" }
-    return fileSystem.read(file.path.toPath()) { readByteArray() }
+    return outcome.pngBytes
   }
 
   /**
@@ -2407,11 +2409,9 @@ class DaemonMcpServer(
   ): CallToolResult {
     val startedAt = System.nanoTime()
     val outcome = awaitNextRender(uri, session, overrides = overrides)
-    val pngFile = File(outcome.pngPath)
-    check(pngFile.isFile) { "render_preview: pngPath does not exist: ${outcome.pngPath}" }
-    val pngBytes = fileSystem.read(pngFile.path.toPath()) { readByteArray() }
+    val pngBytes = outcome.pngBytes
     val sha = sha256Hex(pngBytes)
-    val stablePng = cacheRenderedPng(pngFile, pngBytes, sha)
+    val stablePng = cacheRenderedPng(pngBytes, sha)
     val changed =
       previousFileRenderHashes
         .computeIfAbsent(session) { ConcurrentHashMap() }
@@ -2431,34 +2431,41 @@ class DaemonMcpServer(
   }
 
   /**
-   * Copies a daemon-owned render into an immutable, content-addressed sibling cache. Daemons may
-   * reuse one output path per preview, so returning [pngFile] directly creates a race where a later
+   * Copies a daemon-owned render into an immutable, content-addressed process cache. Daemons may
+   * reuse one output path per preview, so returning that path directly creates a race where a later
    * override or watch render replaces the bytes before the caller reads them.
    */
-  private fun cacheRenderedPng(pngFile: File, pngBytes: ByteArray, sha: String): File {
-    val cacheDir = File(pngFile.absoluteFile.parentFile, ".compose-preview-mcp")
-    Files.createDirectories(cacheDir.toPath())
-    val target = File(cacheDir, "$sha.png")
-    if (!target.isFile || runCatching { sha256Hex(target) }.getOrNull() != sha) {
-      val temporary = Files.createTempFile(cacheDir.toPath(), "$sha-", ".tmp")
-      try {
-        Files.write(temporary, pngBytes)
+  private fun cacheRenderedPng(pngBytes: ByteArray, sha: String): File =
+    synchronized(fileRenderCacheLock) {
+      val target = File(fileRenderCacheDir, "$sha.png")
+      if (!target.isFile || runCatching { sha256Hex(target) }.getOrNull() != sha) {
+        val temporary = Files.createTempFile(fileRenderCacheDir.toPath(), "$sha-", ".tmp")
         try {
-          Files.move(
-            temporary,
-            target.toPath(),
-            StandardCopyOption.ATOMIC_MOVE,
-            StandardCopyOption.REPLACE_EXISTING,
-          )
-        } catch (_: AtomicMoveNotSupportedException) {
-          Files.move(temporary, target.toPath(), StandardCopyOption.REPLACE_EXISTING)
+          Files.write(temporary, pngBytes)
+          try {
+            Files.move(
+              temporary,
+              target.toPath(),
+              StandardCopyOption.ATOMIC_MOVE,
+              StandardCopyOption.REPLACE_EXISTING,
+            )
+          } catch (_: AtomicMoveNotSupportedException) {
+            Files.move(temporary, target.toPath(), StandardCopyOption.REPLACE_EXISTING)
+          }
+        } finally {
+          Files.deleteIfExists(temporary)
         }
-      } finally {
-        Files.deleteIfExists(temporary)
       }
+      target.setLastModified(System.currentTimeMillis())
+      fileRenderCacheDir
+        .listFiles { file -> file.extension == "png" }
+        .orEmpty()
+        .filterNot { it == target }
+        .sortedByDescending(File::lastModified)
+        .drop(MAX_CACHED_FILE_RENDERS - 1)
+        .forEach { stale -> runCatching { stale.delete() } }
+      target
     }
-    return target
-  }
 
   private fun toolFindPreviewsForFile(args: JsonObject): CallToolResult {
     val requestedPath =
@@ -4807,7 +4814,20 @@ class DaemonMcpServer(
     //    promote-and-dispatch the next group's renderNow if one is queued. This is the
     //    serialization core that PR #432's by-previewId fanout (now removed) tried to paper
     //    over — see `popHeadAndPromoteNext` and `awaitNextRender`'s kdoc for the rationale.
-    popHeadAndPromoteNext(daemon, key, RenderOutcome.Finished(pngPath))
+    val pngBytes = runCatching {
+      val file = File(pngPath)
+      check(file.isFile) { "renderFinished pngPath does not exist: $pngPath" }
+      fileSystem.read(file.path.toPath()) { readByteArray() }
+    }
+      .getOrElse { failure ->
+        popHeadAndPromoteNext(
+          daemon,
+          key,
+          RenderOutcome.Failed("RenderOutputMissing", failure.message ?: "PNG read failed"),
+        )
+        return
+      }
+    popHeadAndPromoteNext(daemon, key, RenderOutcome.Finished(pngPath, pngBytes))
     // 2. Refresh the data-product attachment cache for this `(uri)`. Any kind the daemon attached
     //    on this render is the new fresh payload; any kind it didn't attach is stale and gets
     //    dropped (the daemon stops attaching kinds the MCP server unsubscribed from, so a missing
@@ -5119,7 +5139,7 @@ class DaemonMcpServer(
   )
 
   private sealed interface RenderOutcome {
-    data class Finished(val pngPath: String) : RenderOutcome
+    data class Finished(val pngPath: String, val pngBytes: ByteArray) : RenderOutcome
 
     data class Failed(
       val kind: String,
@@ -5255,6 +5275,7 @@ class DaemonMcpServer(
      * balance between "responsive UI updates" and "not flooding the wire on a fast render".
      */
     private const val PROGRESS_BEAT_INTERVAL_MS: Long = 500
+    private const val MAX_CACHED_FILE_RENDERS = 128
 
     /**
      * If the full MCP tool catalog is still loading after this grace period, clients should keep
