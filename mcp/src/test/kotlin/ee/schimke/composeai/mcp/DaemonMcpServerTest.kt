@@ -167,7 +167,7 @@ class DaemonMcpServerTest {
     assertThat(content["text"]!!.jsonPrimitive.content)
       .contains("function safeSelectionArguments(value)")
     assertThat(content["text"]!!.jsonPrimitive.content)
-      .contains("/(token|authorization|password|secret|api[-_]?key)/i")
+      .contains("/(token|authorization|password|secret|api[-_]?key|cookie|session)/i")
     assertThat(content["text"]!!.jsonPrimitive.content).contains("arguments: toolArguments")
     assertThat(content["text"]!!.jsonPrimitive.content)
       .contains("structuredContent: { composePreviewSelection: selected }")
@@ -194,6 +194,8 @@ class DaemonMcpServerTest {
       .contains("const STATIC_RESULT_PARAM = 'compose-preview-result';")
     assertThat(content["text"]!!.jsonPrimitive.content)
       .contains("const MAX_STATIC_RESULT_BYTES = 500000;")
+    assertThat(content["text"]!!.jsonPrimitive.content)
+      .contains("if (!Array.isArray(envelope.result.content))")
   }
 
   @Test

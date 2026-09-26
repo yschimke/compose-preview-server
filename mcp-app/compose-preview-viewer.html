@@ -150,6 +150,9 @@
       if (!envelope || envelope.version !== 1 || typeof envelope.result !== 'object' || !envelope.result || Array.isArray(envelope.result)) {
         throw new Error('expected a version 1 envelope containing an MCP tool result');
       }
+      if (!Array.isArray(envelope.result.content)) {
+        throw new Error('the MCP tool result content must be an array');
+      }
       if (envelope.arguments != null && (typeof envelope.arguments !== 'object' || Array.isArray(envelope.arguments))) {
         throw new Error('arguments must be an object when present');
       }
