@@ -5860,18 +5860,20 @@ test("contract · static viewer bounds results and rejects credentials", async (
   await expect(page.locator("#refresh")).toBeHidden();
   await expect(page.locator("#use")).toBeHidden();
 
-  const malformedEnvelope = Buffer.from(
-    JSON.stringify({ version: 1, result: { content: {} } }),
-  ).toString("base64url");
-  await page.goto("about:blank");
-  await page.goto(
-    `/mcp-app/compose-preview-viewer.html#compose-preview-result=${malformedEnvelope}`,
-  );
-  await expect(page.locator("#canvas")).toContainText(
-    "the MCP tool result content must be an array",
-  );
-  await expect(page.locator("#refresh")).toBeHidden();
-  await expect(page.locator("#use")).toBeHidden();
+  for (const content of [{}, [null], ["text"]]) {
+    const malformedEnvelope = Buffer.from(
+      JSON.stringify({ version: 1, result: { content } }),
+    ).toString("base64url");
+    await page.goto("about:blank");
+    await page.goto(
+      `/mcp-app/compose-preview-viewer.html#compose-preview-result=${malformedEnvelope}`,
+    );
+    await expect(page.locator("#canvas")).toContainText(
+      "the MCP tool result content must be an array of objects",
+    );
+    await expect(page.locator("#refresh")).toBeHidden();
+    await expect(page.locator("#use")).toBeHidden();
+  }
 
   const credentialEnvelope = Buffer.from(
     JSON.stringify({

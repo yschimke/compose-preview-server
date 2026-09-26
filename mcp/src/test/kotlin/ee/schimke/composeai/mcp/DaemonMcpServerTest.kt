@@ -195,7 +195,9 @@ class DaemonMcpServerTest {
     assertThat(content["text"]!!.jsonPrimitive.content)
       .contains("const MAX_STATIC_RESULT_BYTES = 500000;")
     assertThat(content["text"]!!.jsonPrimitive.content)
-      .contains("if (!Array.isArray(envelope.result.content))")
+      .contains("!Array.isArray(envelope.result.content)")
+    assertThat(content["text"]!!.jsonPrimitive.content)
+      .contains("envelope.result.content.every(block => block && typeof block === 'object'")
   }
 
   @Test
