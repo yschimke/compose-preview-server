@@ -269,6 +269,7 @@ class RemotePngExportProofTest {
         bytes
       }
     }
+    var mcpPng: String? = null
     fun mcp(name: String, args: JsonObject): JsonObject {
       val body = buildJsonObject {
         put("jsonrpc", "2.0")
@@ -290,7 +291,8 @@ class RemotePngExportProofTest {
       if (name == "ui_builder_export_document") {
         val image = content.single { it.jsonObject["type"] == JsonPrimitive("image") }.jsonObject
         assertEquals("image/png", image.getValue("mimeType").jsonPrimitive.content)
-        assertTrue(image.getValue("data").jsonPrimitive.content.isNotBlank())
+        mcpPng = image.getValue("data").jsonPrimitive.content
+        assertTrue(mcpPng!!.isNotBlank())
       }
       return json
         .parseToJsonElement(content.first().jsonObject.getValue("text").jsonPrimitive.content)
@@ -314,7 +316,12 @@ class RemotePngExportProofTest {
             put("format", "png")
           },
         )
-      val mcpArtifact = json.decodeFromJsonElement<ExportArtifactV1>(exported.getValue("artifact"))
+      val mcpArtifactJson =
+        JsonObject(
+          exported.getValue("artifact").jsonObject +
+            ("content" to JsonPrimitive(assertNotNull(mcpPng)))
+        )
+      val mcpArtifact = json.decodeFromJsonElement<ExportArtifactV1>(mcpArtifactJson)
       assertEquals(artifact, mcpArtifact)
       val unsupported =
         json.encodeToString(

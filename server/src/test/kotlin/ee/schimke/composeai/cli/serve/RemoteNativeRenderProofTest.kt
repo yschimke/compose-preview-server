@@ -239,14 +239,10 @@ class RemoteNativeRenderProofTest {
           content.first().jsonObject.getValue("text").jsonPrimitive.content
         )
       assertNull(result.compileError)
-      val mcpPng = Base64.getDecoder().decode(assertNotNull(result.imageBase64).substringAfter(','))
-      assertContentEquals(png, mcpPng)
       val mcpImage = content.single { it.jsonObject["type"] == JsonPrimitive("image") }.jsonObject
       assertEquals("image/png", mcpImage.getValue("mimeType").jsonPrimitive.content)
-      assertContentEquals(
-        png,
-        Base64.getDecoder().decode(mcpImage.getValue("data").jsonPrimitive.content),
-      )
+      val mcpPng = Base64.getDecoder().decode(mcpImage.getValue("data").jsonPrimitive.content)
+      assertContentEquals(png, mcpPng)
       Files.write(output.resolve("mcp.png"), mcpPng)
       Files.writeString(
         output.resolve("verification.json"),

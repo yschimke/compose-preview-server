@@ -1832,8 +1832,8 @@ class ServeCatalogMcp(
    * successful renders appear as base64 text.
    */
   internal fun uiBuilderToolResult(name: String, text: String): JsonObject {
-    val fallback = uiBuilderViewerFallback(name, text)
     val png = uiBuilderPng(name, text)
+    val fallback = uiBuilderViewerFallback(name, text, hasPng = png != null)
     if (png == null) return textResult(fallback)
     return buildJsonObject {
       put(
@@ -1852,13 +1852,14 @@ class ServeCatalogMcp(
     }
   }
 
-  private fun uiBuilderViewerFallback(name: String, text: String): String {
+  private fun uiBuilderViewerFallback(name: String, text: String, hasPng: Boolean): String {
     return runCatching {
         val reply = JSON.parseToJsonElement(text) as? JsonObject ?: return@runCatching text
         when (name) {
           ServeUiBuilderMcp.RENDER_NATIVE ->
             JsonObject(reply - "previewToken" - "previewUrl" - "imageBase64").toString()
           ServeUiBuilderMcp.EXPORT_DOCUMENT -> {
+            if (!hasPng) return@runCatching text
             val response = reply["response"] as? JsonObject ?: return@runCatching text
             val artifact = response["artifact"] as? JsonObject ?: return@runCatching text
             JsonObject(

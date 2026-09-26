@@ -194,6 +194,15 @@ class ServeCatalogMcpAppViewerTest {
       """{"callId":"ui_builder_export_document","response":{"artifact":{"format":"png","mediaType":"image/png","encoding":"base64","contentDigest":"abc","diagnostics":[]}}}""",
     )
 
+    val jsonExported =
+      """{"callId":"ui_builder_export_document","response":{"artifact":{"format":"json","mediaType":"application/json","encoding":"utf8","content":"document bytes","contentDigest":"def","diagnostics":[]}}}"""
+    val jsonResult = mcp.uiBuilderToolResult(ServeUiBuilderMcp.EXPORT_DOCUMENT, jsonExported)
+    assertEquals(1, jsonResult["content"]!!.jsonArray.size)
+    assertEquals(
+      jsonExported,
+      jsonResult["content"]!!.jsonArray.single().jsonObject["text"]!!.jsonPrimitive.content,
+    )
+
     val refused = """{"code":"COMPILE_FAILED","reasons":["bad source"]}"""
     val fallback = mcp.uiBuilderToolResult(ServeUiBuilderMcp.RENDER_NATIVE, refused)
     assertEquals(1, fallback["content"]!!.jsonArray.size)
