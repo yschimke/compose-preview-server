@@ -35,6 +35,7 @@ import {
     withClipboardHint,
     withUploadedCaptures,
 } from "./upload.js";
+import { PRIVATE_SCOPE, SCOPE_ATTR, needsUploadConsent } from "./visibility.js";
 
 type Mode = "view" | "region" | "element";
 
@@ -44,6 +45,9 @@ export function installCapture(): void {
     document.documentElement.setAttribute("data-cp-capture-ready", "1");
     // A fresh page has established nothing about this host yet, whatever the last one learned.
     hostingRuledOut = false;
+    // Consent to host a capture from a signed-in-only page is given per page view and never
+    // remembered: the default is always "not uploaded".
+    shareOptIn = false;
     if (captureSupported()) {
         document
             .querySelectorAll<HTMLElement>(".cp-shot")
@@ -205,10 +209,9 @@ function handOff(): void {
     // already either confirmed each restored URL or replaced it, so re-deriving "unverified" would
     // only mis-fire on the page that has no image lane at all — where nothing can be uploaded and
     // the clipboard is already the path.
-    if (
-        embedded &&
-        mine.every((capture) => !!hostedCaptureUrl(capture.uploadedUrl))
-    ) {
+    const carried = (capture: Capture) =>
+        shareable(capture) && !!hostedCaptureUrl(capture.uploadedUrl);
+    if (embedded && mine.every(carried)) {
         note(
             mine.length === 1
                 ? "Your capture is embedded in the report."
@@ -221,9 +224,7 @@ function handOff(): void {
     // the URL, and neither is a reason to reach for it last: copying an already
     // embedded `latest` sends the same picture twice and drops the edited one on
     // the floor. When nothing was embedded at all, this is `latest` anyway.
-    const unhosted = mine.filter(
-        (capture) => !embedded || !hostedCaptureUrl(capture.uploadedUrl),
-    );
+    const unhosted = mine.filter((capture) => !embedded || !carried(capture));
     const copying = unhosted[unhosted.length - 1] ?? latest;
     const rest =
         mine.length > 1
@@ -302,6 +303,68 @@ function render(): void {
     document
         .querySelectorAll<HTMLElement>(".cp-shots-empty")
         .forEach((note) => (note.hidden = captures.length > 0));
+    syncShareConsent();
+}
+
+/**
+ * Whether the reporter ticked "upload and embed" for captures of a signed-in-only page.
+ *
+ * Off by default on every page load. Those captures are still taken, listed, marked up and put on
+ * the clipboard exactly as before — only the automatic upload to an anonymous-read URL waits for
+ * this, because the issue that URL is embedded in is public.
+ */
+let shareOptIn = false;
+
+/** True when this capture may be uploaded and embedded without asking first, or was allowed. */
+function shareable(capture: Capture): boolean {
+    return shareOptIn || !needsUploadConsent(capture.page);
+}
+
+/**
+ * Show the opt-in beside every capture list, but only where it means something: this host can
+ * embed captures, and at least one capture for this report came from a page that needs consent.
+ */
+function syncShareConsent(): void {
+    const wanted =
+        imageUploadEnabled() &&
+        capturesForThisReport().some((capture) =>
+            needsUploadConsent(capture.page),
+        );
+    document.querySelectorAll<HTMLElement>(".cp-shot-list").forEach((list) => {
+        let box = list.parentElement?.querySelector<HTMLLabelElement>(
+            ":scope > .cp-shot-share",
+        );
+        if (!box && wanted) {
+            box = shareConsentControl();
+            list.before(box);
+        }
+        if (!box) return;
+        box.hidden = !wanted;
+        const input = box.querySelector<HTMLInputElement>("input");
+        if (input) input.checked = shareOptIn;
+    });
+}
+
+function shareConsentControl(): HTMLLabelElement {
+    const label = document.createElement("label");
+    label.className = "cp-shot-share";
+    const input = document.createElement("input");
+    input.type = "checkbox";
+    input.className = "cp-shot-share-input";
+    input.checked = shareOptIn;
+    input.addEventListener("change", () => {
+        shareOptIn = input.checked;
+        syncShareConsent();
+        void uploadReportCaptures();
+    });
+    const text = document.createElement("span");
+    text.textContent =
+        "Upload my captures and embed them in the issue. This page is only visible to signed-in " +
+        "users, but the uploaded image can be opened by anyone with its link, and the GitHub " +
+        "issue that links it is public. Left unticked, opening the issue puts your newest " +
+        "capture on the clipboard instead.";
+    label.append(input, text);
+    return label;
 }
 
 /** Pay back a render deferred while the editor held the row. */
@@ -347,9 +410,16 @@ async function discoverImageUpload(): Promise<void> {
             noteClipboardFallback();
             return;
         }
-        document
-            .querySelector<HTMLElement>(".cp-fab, .cp-shots")
-            ?.setAttribute("data-cp-image-upload", "true");
+        const mount = document.querySelector<HTMLElement>(".cp-fab, .cp-shots");
+        mount?.setAttribute("data-cp-image-upload", "true");
+        // The server says whether an anonymous visitor could open this host's pages at all. A
+        // token-gated host answers "private", and its captures then wait for the reporter's opt-in
+        // like a UI-builder page's do.
+        if (
+            response.headers?.get?.("X-Compose-Preview-Capture-Scope") ===
+            PRIVATE_SCOPE
+        )
+            mount?.setAttribute(SCOPE_ATTR, PRIVATE_SCOPE);
         await uploadReportCaptures();
     } catch {
         // Hosting is optional. The submit-time clipboard hand-off remains the fallback.
@@ -391,7 +461,10 @@ async function uploadReportCaptures(): Promise<void> {
     // Includes a capture whose restored URL has not been re-checked yet, so Submit stays down
     // while that check runs — the reporter must not be able to file a report whose evidence this
     // page has not confirmed is there.
-    const pending = mine.filter(needsUpload);
+    const pending = mine.filter(
+        (capture) => shareable(capture) && needsUpload(capture),
+    );
+    syncShareConsent();
     // An edit clears `uploadedUrl`. Remove the old embed immediately, before the replacement
     // upload begins; if that upload fails, falling back to the clipboard must not leave the issue
     // body pointing at the unannotated pixels.
@@ -400,6 +473,11 @@ async function uploadReportCaptures(): Promise<void> {
         ".cp-bug-submit, .cp-report-submit",
     );
     if (!pending.length) {
+        if (mine.some((capture) => !shareable(capture)))
+            note(
+                "Captures from this page are not uploaded unless you tick the box above. " +
+                    "Opening the issue puts your newest one on the clipboard instead.",
+            );
         // Nothing to wait for, so nothing may still be holding the button down.
         // Removing the last capture mid-upload arrives exactly here: this call
         // took the generation, so the in-flight one's `finally` sees a mismatch
@@ -510,9 +588,18 @@ function applyHostedCaptures(
     if (!originalBodies.has(input) || lastWritten.get(input) !== input.value) {
         originalBodies.set(input, input.value);
     }
+    // Only captures that may be embedded, and those from a signed-in-only page under a neutral
+    // alt text: an element label is built from the page's own ids and classes, and the issue it
+    // lands in is public.
     const embedded = withUploadedCaptures(
         originalBodies.get(input) ?? input.value,
-        captures,
+        captures
+            .filter(shareable)
+            .map((capture) =>
+                needsUploadConsent(capture.page)
+                    ? { ...capture, label: "screenshot" }
+                    : capture,
+            ),
     );
     // Rebuilt from the cached base every time, so the hint is written once however often this runs.
     const next = clipboard

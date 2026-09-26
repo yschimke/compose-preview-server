@@ -10923,6 +10923,13 @@ ${captureControlsHtml().prependIndent("          ")}
     themeStorageKey: String = "",
     navSuffix: String = "",
     canUploadCaptures: Boolean = false,
+    /**
+     * The reported page is one an anonymous visitor could not open — a UI-builder or admin page, or
+     * any page of a token-gated host. Its captures are then uploaded only after the reporter ticks
+     * the opt-in `report-capture.js` shows, since the image URL is anonymous-read and the issue
+     * that links it is public.
+     */
+    privateCaptures: Boolean = false,
   ): String {
     fun esc(s: String) = WebEscaping.htmlEscape(s)
     val who =
@@ -10949,10 +10956,11 @@ ${captureControlsHtml().prependIndent("          ")}
     // and rendered by `report-capture.js` — see [captureControlsHtml]. Server-rendered as an
     // empty mount rather than left entirely to the script, so the section has a fixed place in the
     // page and the "nothing came across" wording is written here with the rest of the page's prose.
+    val scopeAttr = if (privateCaptures) " data-cp-capture-scope=\"private\"" else ""
     val captures =
       """
       <div class="cp-shots" data-cp-capture-src="${esc(assetHref("report-capture.js"))}"
-        data-cp-image-upload="$canUploadCaptures">
+        data-cp-image-upload="$canUploadCaptures"$scopeAttr>
         <p class="cp-sub cp-shots-empty">No captures came across from the page you reported. Take
           one there with the &ldquo;Report a problem&rdquo; button, or paste an ordinary screenshot
           straight into the issue.</p>
@@ -10968,7 +10976,18 @@ ${captureControlsHtml().prependIndent("          ")}
     // the issue by being pasted, and nothing on the page said so until the reporter had already
     // opened a screenshot-less issue in another tab (#556).
     val screenshotProse =
-      if (canUploadCaptures)
+      if (canUploadCaptures && privateCaptures)
+        """
+        <p class="cp-sub">The page you reported is only visible to signed-in users, so captures of
+          it are <strong>not</strong> uploaded unless you tick the box beside them. An uploaded
+          capture can be opened by anyone with its link, and the GitHub issue that links it is
+          public. Unticked, pressing the button above puts the newest capture on the clipboard;
+          paste it into the Screenshot section if you want it there. Use <strong>Mark up</strong>
+          to add boxes, arrows, pen marks, or text first.</p>
+        """
+          .trimIndent()
+          .replace("\n", "\n      ")
+      else if (canUploadCaptures)
         """
         <p class="cp-sub">Captured images are uploaded to this preview server and embedded in the
           report automatically. Use <strong>Mark up</strong> to add boxes, arrows, pen marks, or text
