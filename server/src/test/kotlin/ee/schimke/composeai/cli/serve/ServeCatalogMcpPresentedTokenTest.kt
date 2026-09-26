@@ -142,6 +142,23 @@ class ServeCatalogMcpPresentedTokenTest {
     assertEquals(legacyArray, result["structuredContent"]!!.jsonObject["dataProducts"])
   }
 
+  @Test
+  fun `multi-story output schema declares aggregated observations`() {
+    val tool = tools().single { it.name == "preview-stories" }
+    assertEquals(
+      "array",
+      tool.outputSchema["properties"]!!
+        .jsonObject["observations"]!!
+        .jsonObject["type"]!!
+        .jsonPrimitive
+        .content,
+    )
+    assertEquals(
+      listOf("observations"),
+      tool.outputSchema["required"]!!.jsonArray.map { it.jsonPrimitive.content },
+    )
+  }
+
   private data class Tool(
     val name: String,
     val properties: Set<String>,

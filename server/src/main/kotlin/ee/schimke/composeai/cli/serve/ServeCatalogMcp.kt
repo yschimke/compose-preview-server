@@ -1758,14 +1758,15 @@ class ServeCatalogMcp(
     }
 
   private fun outputSchema(name: String): JsonObject =
-    if (name == "list_data_products") {
+    if (name == "list_data_products" || name == "preview-stories") {
+      val field = if (name == "list_data_products") "dataProducts" else "observations"
       buildJsonObject {
         put("type", "object")
         put(
           "properties",
           buildJsonObject {
             put(
-              "dataProducts",
+              field,
               buildJsonObject {
                 put("type", "array")
                 put("items", buildJsonObject { put("type", "object") })
@@ -1773,7 +1774,7 @@ class ServeCatalogMcp(
             )
           },
         )
-        put("required", buildJsonArray { add(JsonPrimitive("dataProducts")) })
+        put("required", buildJsonArray { add(JsonPrimitive(field)) })
         put("additionalProperties", false)
       }
     } else {
@@ -1783,34 +1784,38 @@ class ServeCatalogMcp(
   /**
    * MCP output schemas validate `structuredContent`, not the backwards-compatible text block.
    * Preserve that text for existing clients while exposing the same JSON object to typed clients.
-   * The one legacy array result is wrapped under the field its output schema declares. Image-only
-   * and non-JSON text results use an empty object; their primary payload remains in `content`, and
-   * the universal object output contract still holds.
+   * Legacy array results are wrapped under the field their output schema declares, and a batched
+   * story call aggregates every JSON observation instead of dropping all but the first. Image-only
+   * and non-JSON text results keep their primary payload in `content`.
    */
   private fun withStructuredContent(name: String, result: JsonObject): JsonObject {
     if (result["isError"]?.jsonPrimitive?.booleanOrNull == true || "structuredContent" in result) {
       return result
     }
-    val structured =
+    val parsedText =
       (result["content"] as? JsonArray)
         ?.asSequence()
         ?.mapNotNull { it as? JsonObject }
-        ?.firstNotNullOfOrNull { block ->
-          if (block["type"]?.jsonPrimitive?.contentOrNull != "text")
-            return@firstNotNullOfOrNull null
+        ?.mapNotNull { block ->
+          if (block["type"]?.jsonPrimitive?.contentOrNull != "text") return@mapNotNull null
           block["text"]?.jsonPrimitive?.contentOrNull?.let { text ->
-            runCatching { JSON.parseToJsonElement(text) }
-              .getOrNull()
-              ?.let { parsed ->
-                when {
-                  parsed is JsonObject -> parsed
-                  name == "list_data_products" && parsed is JsonArray ->
-                    buildJsonObject { put("dataProducts", parsed) }
-                  else -> null
-                }
-              }
+            runCatching { JSON.parseToJsonElement(text) }.getOrNull()
           }
-        } ?: JsonObject(emptyMap())
+        }
+        ?.toList()
+        .orEmpty()
+    val structured =
+      when (name) {
+        "list_data_products" ->
+          (parsedText.firstOrNull() as? JsonArray)?.let {
+            buildJsonObject { put("dataProducts", it) }
+          }
+        "preview-stories" ->
+          buildJsonObject {
+            put("observations", JsonArray(parsedText.filterIsInstance<JsonObject>()))
+          }
+        else -> parsedText.firstOrNull() as? JsonObject
+      } ?: JsonObject(emptyMap())
     return JsonObject(result + ("structuredContent" to structured))
   }
 
