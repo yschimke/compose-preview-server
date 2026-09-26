@@ -2663,8 +2663,12 @@ public class ServeRunner(
     // read. Before this it was counted as unconfigured, which made the renderer-failure message
     // name `remote-m3` as the reason this host offered no export while its designs generated
     // source perfectly well through `WearWidgetCodeExporter`.
+    // The packaged A2UI catalog is record-free too: its Kotlin is the app-side program that sends
+    // the design's A2UI payload, written by `A2uiComposeExporter` from the design alone.
     val catalogsWithoutRecords = uiBuilderCatalogs.filterNot {
-      it in uiBuilderComponents.keys || it in RecordFreeExport.CATALOG_SYSTEM_IDS
+      it in uiBuilderComponents.keys ||
+        it in RecordFreeExport.CATALOG_SYSTEM_IDS ||
+        it == CurrentM3UiBuilderCatalogExecutor.A2UI_CATALOG_SYSTEM_ID
     }
     val composeExportConfigured = catalogsWithoutRecords.isEmpty()
     val renderer = runCatching {
@@ -2817,8 +2821,12 @@ public class ServeRunner(
     val documentExporter =
       if (UiBuilderBuildFeatures.remoteCompose) RemoteDocumentExportExecutor(pictureExporter)
       else null
+    // An A2UI catalog's JSON (its A2UI messages) is written whatever the Remote Compose flag says;
+    // every other design passes through to the Remote Compose / picture chain below it.
     val exporter =
-      documentExporter?.let { RemotePngExportExecutor(it, renderer) } ?: pictureExporter
+      A2uiJsonExportExecutor(
+        documentExporter?.let { RemotePngExportExecutor(it, renderer) } ?: pictureExporter
+      )
     val pictureExports =
       ((pictureExporter as? ProductionUiBuilderExportExecutor)?.capabilities
           ?: ee.schimke.composeai.uibuilder.protocol.ExportCapabilitiesV1.Builder()
@@ -2831,12 +2839,19 @@ public class ServeRunner(
         .newBuilder()
         .also { it.composeCode = composeExportConfigured }
         .build()
+    // `remoteJson` is the host saying its executor writes JSON, which [A2uiJsonExportExecutor] now
+    // does in every build. The runtime narrows it per catalog: an A2UI catalog offers it as its
+    // messages, a Remote Compose one only in a `-PuiBuilderRemoteCompose=true` build, and nothing
+    // else offers it at all.
     val uiBuilderExports =
       RemoteDocumentExportSupport.capabilities(
-        pictureExports,
-        json = true,
-        document = documentExporter?.supportsBinary == true,
-      )
+          pictureExports,
+          json = true,
+          document = documentExporter?.supportsBinary == true,
+        )
+        .newBuilder()
+        .also { it.remoteJson = true }
+        .build()
     val publishedCatalogs = ConcurrentHashMap<String, CatalogCapabilityV1>()
     val publishedRuntimeIds = ConcurrentHashMap<String, String>()
     // Which catalogs the operator lets read their own published file. Null is "every enabled one",
@@ -2994,6 +3009,12 @@ public class ServeRunner(
                   CatalogComposeSourceExportAdapters.Resolution.Supported
               } == true ||
               systemId in RecordFreeExport.CATALOG_SYSTEM_IDS ||
+              // An A2UI catalog, packaged or published: `RecordFreeExport` routes its designs to
+              // `A2uiComposeExporter` by platform, so every one of them has Kotlin.
+              systemId == CurrentM3UiBuilderCatalogExecutor.A2UI_CATALOG_SYSTEM_ID ||
+              publishedCatalogs[systemId]?.statusSemantics?.let {
+                UiBuilderCatalogPlatform.from(it) == UiBuilderCatalogPlatform.A2UI
+              } == true ||
               (UiBuilderBuildFeatures.remoteCompose &&
                 publishedCatalogs[systemId]?.statusSemantics?.let {
                   UiBuilderCatalogPlatform.from(it) == UiBuilderCatalogPlatform.REMOTE_COMPOSE
