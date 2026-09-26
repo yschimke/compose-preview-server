@@ -5904,7 +5904,7 @@ class ServeHttpServer(
     }
     val outcome =
       withContext(Dispatchers.IO) {
-        ServeUiBuilderCreate(designService!!, uiBuilderDir!!, externalOrigin())
+        ServeUiBuilderCreate(designService!!, uiBuilderDir!!, canonicalServerOrigin())
           .install(actor = AuthenticatedUiBuilderActor(ADMIN_LIBRARY_ACTOR), document = document)
       }
     call.response.headers.append(HttpHeaders.CacheControl, "no-store")
@@ -14008,7 +14008,7 @@ class ServeHttpServer(
       }
     val outcome =
       withContext(Dispatchers.IO) {
-        ServeUiBuilderCreate(service, dir, externalOrigin())
+        ServeUiBuilderCreate(service, dir, canonicalServerOrigin())
           .create(
             actor = actor,
             catalogSystemId = catalog,
@@ -14114,7 +14114,7 @@ class ServeHttpServer(
       )
     val outcome =
       withContext(Dispatchers.IO) {
-        ServeUiBuilderCreate(service, dir, externalOrigin()).install(actor, copy)
+        ServeUiBuilderCreate(service, dir, canonicalServerOrigin()).install(actor, copy)
       }
     when (outcome) {
       is ServeUiBuilderCreate.Outcome.Created,
@@ -14348,7 +14348,7 @@ class ServeHttpServer(
     when (
       val outcome =
         withContext(Dispatchers.IO) {
-          ServeUiBuilderCreate(service, dir, externalOrigin()).install(actor, fork)
+          ServeUiBuilderCreate(service, dir, canonicalServerOrigin()).install(actor, fork)
         }
     ) {
       is ServeUiBuilderCreate.Outcome.Created -> {
