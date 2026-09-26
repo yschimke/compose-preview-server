@@ -1973,4 +1973,36 @@ class PlaygroundSourceCleanerTest {
 
   private fun lineIn(text: String, needle: String): Int =
     text.lines().indexOfFirst { it.contains(needle) } + 1
+
+  @Test
+  fun `a followed declaration left out by its limits is reported as residue`() {
+    val preview =
+      """
+      package com.example.previews
+
+      import androidx.compose.runtime.Composable
+      import com.example.samples.HugeSample
+
+      @Composable
+      fun HugePreview() = HugeSample()
+      """
+        .trimIndent()
+    val huge =
+      "package com.example.samples\n\n" +
+        "fun HugeSample() {\n  val text = \"" +
+        "x".repeat(30_000) +
+        "\"\n}\n"
+    val result =
+      assertNotNull(
+        PlaygroundSourceCleaner.clean(
+          source = preview,
+          bodyLine = 7,
+          rules = UsageRules.GENERIC,
+          parser = null,
+          followedSources = listOf(huge),
+        )
+      )
+    assertFalse("fun HugeSample" in result.text, result.text)
+    assertEquals(listOf("HugeSample"), result.residue)
+  }
 }

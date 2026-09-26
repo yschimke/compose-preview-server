@@ -169,7 +169,8 @@ object PlaygroundSourceCleaner {
     // PlaygroundSeedResolver's followed calls): the function a delegating preview calls, and what
     // that function's own file declares for it. Unlike the scaffold closure above, this is the
     // code the reader came for, so it is bounded by its own, larger limits — a sample is a screen,
-    // not a helper — and nothing it reaches is residue: a cap that stops it only shortens the view.
+    // not a helper. What those limits leave out is still referenced by what was emitted, so it is
+    // residue like any other omission: the note must not call a truncated closure runnable.
     val followedHelpers =
       closeOverHelpers(
         seeds = cleanedByIndex.values + cleanedHelpers,
@@ -177,7 +178,7 @@ object PlaygroundSourceCleaner {
         skip = declaredAt.keys + rules.scaffolds.keys + closureHelpers.keys,
         rules = rules,
         strings = strings,
-        residue = mutableSetOf(),
+        residue = residue,
         addedImports = addedImports,
         parser = parser,
         extraImports = extraImports,
