@@ -15632,6 +15632,9 @@ class ServeHttpServer(
           permit.release()
         }
       }
+
+      override fun approvalUrl(requestId: String): String =
+        externalOrigin() + ServeAgentGrants.approvalPath(requestId)
     }
 
   /**

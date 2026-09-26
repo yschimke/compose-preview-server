@@ -29,6 +29,7 @@ import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
+import kotlinx.serialization.json.putJsonObject
 
 /**
  * Stateless MCP 2025-06-18 surface aggregating every served catalog.
@@ -76,7 +77,16 @@ class ServeCatalogMcp(
     ): String?
 
     suspend fun poll(requestId: String, deviceSecret: String, waitSeconds: Long): String?
+
+    /** The canonical browser approval URL for [requestId], on this request's public origin. */
+    fun approvalUrl(requestId: String): String?
   }
+
+  private data class UrlElicitationRequired(
+    val elicitationId: String,
+    val url: String,
+    override val message: String,
+  ) : RuntimeException(message)
 
   private data class PreviewTarget(val catalog: String, val previewId: String)
 
@@ -131,6 +141,8 @@ class ServeCatalogMcp(
         }
       } catch (e: McpRequestException) {
         return Reply(error(id, INVALID_PARAMS, e.message ?: "Invalid parameters"))
+      } catch (e: UrlElicitationRequired) {
+        return Reply(urlElicitationRequired(id, e))
       } catch (e: Exception) {
         return Reply(error(id, INTERNAL_ERROR, e.message ?: "Catalog MCP request failed"))
       }
@@ -302,7 +314,9 @@ class ServeCatalogMcp(
           "request_access",
           "Ask a human for access to this server. Returns an approveUrl and a userCode: show " +
             "BOTH to the person you are working with, ask them to open the link and check that " +
-            "the code on the page matches, then call poll_access. The link grants nothing by " +
+            "the code on the page matches, then call poll_access. When the client supports URL " +
+            "elicitation, call poll_access with urlMode=true instead of pasting the link into " +
+            "chat; clients without it keep this complete text fallback. The link grants nothing by " +
             "itself — keep the deviceSecret this returns, it is what collects the token. Use " +
             "this when a call answered 'authorization_required', or when your token stopped " +
             "working (a server restart drops every grant).",
@@ -316,13 +330,16 @@ class ServeCatalogMcp(
             "It HOLDS THE CALL OPEN and answers the moment the human decides — one call " +
             "instead of a dozen, since each poll here costs a whole round trip through you. It " +
             "waits 8 seconds by default; pass waitSeconds (up to 30) if your client tolerates a " +
-            "longer call. A wait that times out answers status=pending, and you simply call " +
+            "longer call. Pass urlMode=true when the client supports URL elicitation: while the " +
+            "request is pending this returns the standard -32042 URL-elicitation-required error, " +
+            "and retrying the same call after the browser decision returns the outcome. A wait " +
+            "that times out answers status=pending, and you simply call " +
             "again. Then approved (with the token) or denied/expired. Use the token on every " +
             "later call: as the X-Compose-Preview-Token header where you control headers, and " +
             "otherwise as each gated tool's 'token' argument — which is what an MCP client " +
             "reaching this flow mid-session needs, since its headers were fixed when it " +
             "connected.",
-          """{"type":"object","properties":{"requestId":{"type":"string"},"deviceSecret":{"type":"string"},"waitSeconds":{"type":"integer","minimum":0,"maximum":30}},"required":["requestId","deviceSecret"]}""",
+          """{"type":"object","properties":{"requestId":{"type":"string"},"deviceSecret":{"type":"string"},"waitSeconds":{"type":"integer","minimum":0,"maximum":30},"urlMode":{"type":"boolean","description":"Use the protocol-standard URL elicitation UI while this request is pending."}},"required":["requestId","deviceSecret"]}""",
         )
       )
     }
@@ -502,16 +519,33 @@ class ServeCatalogMcp(
       }
       "poll_access" -> {
         val broker = access ?: return toolError(ACCESS_DISABLED)
+        val urlMode = args["urlMode"]?.jsonPrimitive?.booleanOrNull == true
         val body =
           broker.poll(
             args.requiredString("requestId"),
             args.requiredString("deviceSecret"),
             // Default to waiting rather than to spinning: a client that says nothing is a client
             // that would otherwise call this again in three seconds, through a model.
-            args["waitSeconds"]?.jsonPrimitive?.longOrNull
-              ?: ServeAgentGrants.DEFAULT_POLL_WAIT_SECONDS,
+            if (urlMode) 0L
+            else
+              args["waitSeconds"]?.jsonPrimitive?.longOrNull
+                ?: ServeAgentGrants.DEFAULT_POLL_WAIT_SECONDS,
           )
-        body?.let { textResult(it) } ?: toolError(ACCESS_THROTTLED)
+        if (body == null) return toolError(ACCESS_THROTTLED)
+        if (urlMode && pendingAccess(body)) {
+          val requestId = args.requiredString("requestId")
+          val approvalUrl = broker.approvalUrl(requestId)
+          if (approvalUrl != null) {
+            throw UrlElicitationRequired(
+              elicitationId = requestId,
+              url = approvalUrl,
+              message =
+                "Approve or decline this access request in the browser, checking the user code " +
+                  "returned by request_access, then continue the same poll_access call.",
+            )
+          }
+        }
+        textResult(body)
       }
       "status" -> textResult(statusJson().toString())
       "list_projects" -> textResult(projectsJson().toString())
@@ -1946,6 +1980,36 @@ class ServeCatalogMcp(
     put("result", result)
   }
 
+  private fun urlElicitationRequired(
+    id: JsonElement?,
+    required: UrlElicitationRequired,
+  ): JsonObject = buildJsonObject {
+    put("jsonrpc", "2.0")
+    put("id", id ?: JsonNull)
+    putJsonObject("error") {
+      put("code", URL_ELICITATION_REQUIRED)
+      put("message", "This access request needs a browser decision.")
+      putJsonObject("data") {
+        putJsonArray("elicitations") {
+          add(
+            buildJsonObject {
+              put("mode", "url")
+              put("elicitationId", required.elicitationId)
+              put("url", required.url)
+              put("message", required.message)
+            }
+          )
+        }
+      }
+    }
+  }
+
+  private fun pendingAccess(body: String): Boolean = runCatching {
+    JSON.parseToJsonElement(body).jsonObject["status"]?.jsonPrimitive?.contentOrNull ==
+      ServeAgentGrants.PollResponse.PENDING
+  }
+    .getOrDefault(false)
+
   private fun error(id: JsonElement?, code: Int, message: String): JsonObject = buildJsonObject {
     put("jsonrpc", "2.0")
     put("id", id ?: JsonNull)
@@ -2053,6 +2117,8 @@ class ServeCatalogMcp(
      */
     private val UNGATED_METHODS =
       setOf("initialize", "ping", "tools/list", "prompts/list", "prompts/get")
+
+    private const val URL_ELICITATION_REQUIRED = -32042
 
     /**
      * Tools callable without a grant — the two that exist to obtain one. Everything else in [tools]
