@@ -1,5 +1,6 @@
 package ee.schimke.composeai.cli.serve
 
+import ee.schimke.composeai.uibuilder.service.AuthenticatedUiBuilderActor
 import ee.schimke.composeai.uibuilder.service.UiBuilderServicePort
 import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
@@ -172,11 +173,19 @@ internal fun Route.installUiBuilderCommentRoutes(
       call.authorizedCommentActor(service, authorization, UiBuilderRouteCapability.WRITE)
         ?: return@delete
     val threadId = call.parameters["threadId"].orEmpty()
+    // The thread's opener may remove it; anybody else needs the design's own WRITE action.
+    val editor = service.canWrite(actor.identity, actor.designId)
     when (
-      val result = withContext(Dispatchers.IO) { store.deleteThread(actor.designId, threadId) }
+      val result =
+        withContext(Dispatchers.IO) {
+          store.deleteThread(actor.designId, actor.actorId, threadId, mayDeleteAnyThread = editor)
+        }
     ) {
       is CommentWriteResult.Refused ->
-        call.respondCommentError(HttpStatusCode.NotFound, result.reason)
+        call.respondCommentError(
+          if (result.forbidden) HttpStatusCode.Forbidden else HttpStatusCode.NotFound,
+          result.reason,
+        )
       is CommentWriteResult.Stored -> call.respondBoard(actor.shape(result.board))
     }
   }
@@ -276,11 +285,15 @@ internal fun Route.installUiBuilderCommentRoutes(
 /**
  * One caller admitted to one design's discussion.
  *
+ * [identity] is the whole authenticated actor, delegation included, for the questions only the
+ * design's access control can answer (may this actor delete somebody else's thread).
+ *
  * [view] is set when the caller reads the design only because it is public; see [PublicReaderView].
  */
 private data class CommentActor(
   val actorId: String,
   val designId: String,
+  val identity: AuthenticatedUiBuilderActor,
   val view: PublicReaderView? = null,
 ) {
   /** [board] as this caller may see it. */
@@ -336,6 +349,7 @@ private suspend fun ApplicationCall.authorizedCommentActor(
   return CommentActor(
     actorId = actor.actorId,
     designId = designId,
+    identity = actor,
     view = service.publicReaderView(actor, designId),
   )
 }

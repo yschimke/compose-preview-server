@@ -71,7 +71,8 @@ Both modes are `serve` with flags added, and every flag stays available:
 - **`--ui-builder-comment-webhook <url>`** — announce a design's **Talk** activity outward. A new
   thread, a reply and a resolution are posted to one incoming-webhook URL with the thread's
   permalink, so somebody reading a chat window hears about a comment without opening the builder.
-  Reactions and acknowledgements deliberately do not fire. Only `https` is accepted (`http://` on
+  Reactions and acknowledgements deliberately do not fire. Only a public design's event carries its
+  title, the excerpt and the author; a private design's is the permalink alone. Only `https` is accepted (`http://` on
   loopback aside, for a test receiver), because a Slack or Teams hook URL is a credential — it is
   never logged, and the server names it by a digest. Off unless you set it. Set
   `--github-auth-callback-base-url` too on any host behind a proxy: the permalink is built from it,

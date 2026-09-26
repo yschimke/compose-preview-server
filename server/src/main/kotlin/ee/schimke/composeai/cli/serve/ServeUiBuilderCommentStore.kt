@@ -57,6 +57,11 @@ class ServeUiBuilderCommentStore(
    */
   private val maximumDesigns: Int = DEFAULT_MAXIMUM_DESIGNS,
   private val now: () -> Long = System::currentTimeMillis,
+  /**
+   * Where a removal is recorded. The board keeps no trace of a deleted thread — the contract shape
+   * has nowhere to put one — so the operator's log is the record of who removed what.
+   */
+  private val onLog: (String) -> Unit = { System.err.println(it) },
 ) {
   init {
     ServeOwnerOnlyFiles.createDirectories(root)
@@ -121,11 +126,15 @@ class ServeUiBuilderCommentStore(
    * Say something: a new thread, or a reply under an existing one.
    *
    * [authorId] is the authenticated actor and is never read from [request]; see [StoredComment].
+   * [authorKind] is not read from it either: it comes from the credential ([commentAuthorKindOf])
+   * unless the caller knows the channel better — the MCP lane, where every caller is an agent.
+   * [CommentPostRequest.authorKind] is accepted for older clients and ignored.
    */
   fun post(
     designId: String,
     authorId: String,
     request: CommentPostRequest,
+    authorKind: String = commentAuthorKindOf(authorId),
   ): CommentWriteResult {
     val body = request.body.trim()
     if (body.isEmpty()) return CommentWriteResult.Refused("a comment needs something in it")
@@ -133,7 +142,7 @@ class ServeUiBuilderCommentStore(
       return CommentWriteResult.Refused("a comment must be under $MAX_COMMENT_BODY characters")
     }
     val kind =
-      request.authorKind.takeIf { it in StoredComment.KNOWN_AUTHOR_KINDS }
+      authorKind.takeIf { it in StoredComment.KNOWN_AUTHOR_KINDS }
         ?: StoredComment.AUTHOR_KIND_HUMAN
     return mutate(designId) { board, sequence ->
       val timestamp = now()
@@ -327,14 +336,50 @@ class ServeUiBuilderCommentStore(
     }
   }
 
-  /** Remove a thread and everything said in it. */
-  fun deleteThread(designId: String, threadId: String): CommentWriteResult =
-    mutate(designId) { board, _ ->
-      if (board.threads.none { it.id == threadId }) {
-        return@mutate CommentMutation.Refused("no such comment thread")
+  /**
+   * Remove a thread and everything said in it.
+   *
+   * Unlike [resolve], this is not reversible and is not attributed on the board, so it is narrower:
+   * the actor who opened the thread may remove it, and so may an actor the caller has established
+   * holds the design's own WRITE action ([mayDeleteAnyThread]) — its owner and editors. A reviewer
+   * who may comment may still remove their own question, and may not remove anybody else's.
+   *
+   * Who removed it, and whose thread it was, goes to the log: the board keeps nothing of a deleted
+   * thread, and the contract shape has no field to keep it in.
+   */
+  fun deleteThread(
+    designId: String,
+    actorId: String,
+    threadId: String,
+    mayDeleteAnyThread: Boolean,
+  ): CommentWriteResult {
+    var removed: StoredCommentThread? = null
+    val result =
+      mutate(designId) { board, _ ->
+        val thread =
+          board.threads.firstOrNull { it.id == threadId }
+            ?: return@mutate CommentMutation.Refused("no such comment thread")
+        val openedBy = thread.comments.firstOrNull()?.authorId
+        if (!mayDeleteAnyThread && openedBy != actorId) {
+          return@mutate CommentMutation.Refused(
+            "only the actor who opened this thread, or an editor of the design, may delete it",
+            forbidden = true,
+          )
+        }
+        removed = thread
+        CommentMutation.Applied(board.copy(threads = board.threads.filterNot { it.id == threadId }))
       }
-      CommentMutation.Applied(board.copy(threads = board.threads.filterNot { it.id == threadId }))
+    removed?.let { thread ->
+      if (result is CommentWriteResult.Stored) {
+        onLog(
+          "serve: comment thread $threadId on design $designId deleted by $actorId " +
+            "(opened by ${thread.comments.firstOrNull()?.authorId ?: "nobody"}, " +
+            "${thread.comments.size} comments)"
+        )
+      }
     }
+    return result
+  }
 
   /**
    * The board once it is past [afterSequence], or null when nothing was said in time.
@@ -413,7 +458,7 @@ class ServeUiBuilderCommentStore(
      */
     data object Unchanged : CommentMutation
 
-    data class Refused(val reason: String) : CommentMutation
+    data class Refused(val reason: String, val forbidden: Boolean = false) : CommentMutation
   }
 
   /**
@@ -447,7 +492,8 @@ class ServeUiBuilderCommentStore(
         // sequence it was made at, and neither can be written by a caller that does not know it.
         val applied =
           when (val outcome = change(board, board.sequence + 1)) {
-            is CommentMutation.Refused -> return CommentWriteResult.Refused(outcome.reason)
+            is CommentMutation.Refused ->
+              return CommentWriteResult.Refused(outcome.reason, outcome.forbidden)
             is CommentMutation.Unchanged -> return CommentWriteResult.Stored(board)
             is CommentMutation.Applied -> {
               val next =
@@ -697,6 +743,23 @@ private const val MAXIMUM_ACKNOWLEDGERS = 200
 sealed interface CommentWriteResult {
   data class Stored(val board: StoredCommentBoard) : CommentWriteResult
 
-  /** A sentence the route hands back verbatim; it is written to be read by an operator. */
-  data class Refused(val reason: String) : CommentWriteResult
+  /**
+   * A sentence the route hands back verbatim; it is written to be read by an operator.
+   *
+   * [forbidden] is true when the thing exists and this actor may not do it to it, which a route
+   * answers 403 rather than as a missing thread.
+   */
+  data class Refused(val reason: String, val forbidden: Boolean = false) : CommentWriteResult
 }
+
+/**
+ * What kind of author [actorId] is, from the identity the authorization layer established.
+ *
+ * An agent grant's own identity (`agent:<fingerprint>`) is an agent. Everything else — a GitHub
+ * session, a grant a person requested for their own session (which acts under their `github:` id),
+ * the operator token — is a person. The published contract knows only these two kinds, and clients
+ * read anything else as a person, so the operator is recorded as one rather than as a third kind.
+ */
+internal fun commentAuthorKindOf(actorId: String): String =
+  if (actorId.startsWith(ServeAgentGrants.agentActorId(""))) StoredComment.AUTHOR_KIND_AGENT
+  else StoredComment.AUTHOR_KIND_HUMAN

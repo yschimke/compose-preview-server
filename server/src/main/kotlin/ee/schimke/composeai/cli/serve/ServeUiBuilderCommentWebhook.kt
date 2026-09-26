@@ -4,6 +4,9 @@ import ee.schimke.composeai.uibuilder.protocol.DesignCommentWebhookCommentV1
 import ee.schimke.composeai.uibuilder.protocol.DesignCommentWebhookDesignV1
 import ee.schimke.composeai.uibuilder.protocol.DesignCommentWebhookEventV1
 import ee.schimke.composeai.uibuilder.protocol.DesignCommentWebhookThreadV1
+import ee.schimke.composeai.uibuilder.service.AuthenticatedUiBuilderActor
+import ee.schimke.composeai.uibuilder.service.UiBuilderAdminPort
+import ee.schimke.composeai.uibuilder.service.UiBuilderServicePort
 import ee.schimke.composeai.web.WebEscaping
 import java.io.Closeable
 import java.net.URI
@@ -57,6 +60,16 @@ import kotlinx.serialization.json.putJsonObject
  * picked up, answered and closed, and a channel that posts noise is a channel people mute. Deleting
  * a thread is silent too: the news is that a question went away, and there is nothing left to link
  * to.
+ *
+ * ## Private designs are announced as a link
+ *
+ * The destination is one channel for the whole host, and its readers are not the people each design
+ * was shared with. So only a public design — one a signed-out visitor may read — is posted with its
+ * title, the excerpt and the author. Every other design gets a link-only event: the kind of change,
+ * the design id, the thread id, the permalink, and the design's own chat thread where one is set,
+ * with no title, anchor, excerpt or author. Somebody who may open the design follows the link;
+ * somebody who may not learns only that something happened on an id. There is no switch to post
+ * full content for private designs.
  *
  * ## How it cannot drift from what the editor sees
  *
@@ -205,10 +218,45 @@ internal class ServeUiBuilderCommentWebhook(
     }
   }
 
-  /** The change, plus everything the store does not know: the design's name and where to click. */
+  /**
+   * The change, plus everything the store does not know: the design's name and where to click.
+   *
+   * Full content — title, catalog, anchor, excerpt and author — only for a design anybody may read
+   * ([CommentWebhookDesign.readableByAnyone]). For any other design, including one the host could
+   * not name, the event is a link: what happened, the design id and the permalink, and nothing that
+   * was said or who said it. The channel is shared with people the design was never shared with,
+   * and the permalink still takes somebody who may open the design straight to the thread.
+   */
   private fun describe(queued: QueuedCommentChange): DesignCommentWebhookEventV1 {
     val change = queued.change
     val design = queued.design
+    if (design?.readableByAnyone != true) {
+      return DesignCommentWebhookEventV1(
+        event = change.kind.wire,
+        design =
+          DesignCommentWebhookDesignV1(
+            id = change.designId,
+            title = change.designId,
+            catalog = null,
+            thread = design?.chatThread,
+          ),
+        thread =
+          DesignCommentWebhookThreadV1(
+            id = change.thread.id,
+            anchor = null,
+            comments = change.thread.comments.size,
+            resolved = change.thread.resolved,
+          ),
+        comment =
+          DesignCommentWebhookCommentV1(
+            author = null,
+            authorId = null,
+            authorKind = null,
+            excerpt = "",
+          ),
+        url = threadUrl(baseUrl(), change.designId, change.thread.id),
+      )
+    }
     return DesignCommentWebhookEventV1(
       event = change.kind.wire,
       design =
@@ -401,7 +449,55 @@ internal data class CommentWebhookDesign(
   val catalogSystemId: String?,
   /** The chat thread this design is discussed in, from its `links`. Null where none is set. */
   val chatThread: String? = null,
+  /**
+   * Whether the design is public — readable by a signed-out visitor. Only then does an event carry
+   * the title, excerpt and author; see [ServeUiBuilderCommentWebhook.describe].
+   */
+  val readableByAnyone: Boolean = false,
 )
+
+/**
+ * What the webhook needs to know about [designId], read on the thread accepting the comment.
+ *
+ * Keyed, not a scan: it runs there so the title and catalog belong to the design the comment was
+ * actually written on. The design's own chat thread is read at the same moment for the same reason
+ * — a design id can come to mean a different design, and a notification must not pair one design's
+ * comment with another's conversation. It is a small local file beside the one the comment write is
+ * already writing, and never a network read.
+ *
+ * [CommentWebhookDesign.readableByAnyone] asks whether a signed-out visitor could open it: the host
+ * must admit signed-out visitors at all ([hostIsPublic], `--public`), and the design's own access
+ * control must allow the anonymous actor — the same two questions the shell's unfurl asks. It is a
+ * keyed, in-memory access lookup under the service's lock, like the summary; a failure answers
+ * false, so an event about a design this cannot decide on is posted as a link.
+ */
+internal fun commentWebhookDesign(
+  admin: UiBuilderAdminPort,
+  service: UiBuilderServicePort,
+  links: ServeUiBuilderLinksStore?,
+  designId: String,
+  hostIsPublic: Boolean,
+): CommentWebhookDesign? {
+  val summary = runCatching { admin.adminDesignSummary(designId) }.getOrNull() ?: return null
+  val chatThread = runCatching { links?.read(designId)?.thread }.getOrNull()
+  val readableByAnyone =
+    hostIsPublic &&
+      runCatching {
+          runBlocking {
+            service.canRead(
+              AuthenticatedUiBuilderActor(ServeUiBuilderVisibility.ANONYMOUS_ACTOR_ID),
+              designId,
+            )
+          }
+        }
+        .getOrDefault(false)
+  return CommentWebhookDesign(
+    summary.title,
+    summary.catalogPin.systemId,
+    chatThread,
+    readableByAnyone = readableByAnyone,
+  )
+}
 
 /** Which of the four things happened. */
 internal enum class CommentBoardChangeKind(val wire: String) {
@@ -574,7 +670,9 @@ private fun teamsBody(event: DesignCommentWebhookEventV1): JsonObject = buildJso
           put("version", "1.4")
           putJsonArray("body") {
             add(textBlock(event.headline(plain = true), bold = true))
-            add(textBlock("“${event.comment.excerpt}”", bold = false))
+            if (event.comment.excerpt.isNotBlank()) {
+              add(textBlock("“${event.comment.excerpt}”", bold = false))
+            }
             event.contextLine()?.let { add(textBlock(it, bold = false, subtle = true)) }
           }
           putJsonArray("actions") {
@@ -641,7 +739,8 @@ private fun DesignCommentWebhookEventV1.chatText(
   link: (String, String) -> String,
 ): String = buildString {
   append(headline(plain = false, escape = escape, link = link))
-  append("\n> ").append(escape(comment.excerpt))
+  // Blank only on a link-only event for a design that is not public, which has no quote to show.
+  if (comment.excerpt.isNotBlank()) append("\n> ").append(escape(comment.excerpt))
   contextLine()?.let { append("\n").append(escape(it)) }
   // Where the design is already being talked about, when that is somewhere other than here. A
   // notification often lands in a team channel while the design's own conversation is elsewhere,
