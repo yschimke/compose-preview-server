@@ -11,7 +11,6 @@ import ee.schimke.composeai.uibuilder.protocol.LayoutDirectionV1
 import ee.schimke.composeai.uibuilder.protocol.StringValueV1
 import ee.schimke.composeai.uibuilder.protocol.ThemeV1
 import ee.schimke.composeai.uibuilder.protocol.WindowPostureV1
-import ee.schimke.composeai.uibuilder.service.CurrentM3UiBuilderCatalogExecutor
 import ee.schimke.composeai.uibuilder.service.FileUiBuilderStateStorage
 import ee.schimke.composeai.uibuilder.service.PersistentUiBuilderService
 import java.io.File
@@ -92,7 +91,9 @@ class ServeUiBuilderDesignUrlRedirectTest {
 
   /** Pinned to each catalog's own revision, which is what `catalogUnavailable` refuses without. */
   private val catalogs =
-    CurrentM3UiBuilderCatalogExecutor(catalogSystemIds = linkedSetOf("m3-catalog", "remote-m3"))
+    UiBuilderCheckoutCatalogFixtures.executor(
+      catalogSystemIds = linkedSetOf("m3-catalog", "remote-m3")
+    )
 
   private fun pin(catalog: String): CatalogReferenceV1 =
     catalogs
@@ -197,7 +198,7 @@ class ServeUiBuilderDesignUrlRedirectTest {
           "text" to
             DesignNodeV1(
               id = "text",
-              componentId = "m3/text",
+              componentId = if (catalog == "remote-m3") "remote-m3/remote-text" else "m3/text",
               properties = mapOf("text" to StringValueV1("Hello")),
             )
         ),
