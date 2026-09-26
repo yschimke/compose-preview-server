@@ -3,6 +3,7 @@ const mode = document.body.dataset.mode;
 let reads = 0;
 let resourceUpdates = 0;
 const activeSubscriptions = new Set();
+let toolCalls = 0;
 
 async function png(path) {
   const bytes = new Uint8Array(await (await fetch(path)).arrayBuffer());
@@ -35,6 +36,7 @@ window.addEventListener("message", async (event) => {
               mode === "subscribe-fails" ||
               mode === "stale-read-marker",
           },
+          ...(mode.startsWith("a11y") ? { serverTools: {} } : {}),
         },
       },
     });
@@ -52,6 +54,7 @@ window.addEventListener("message", async (event) => {
           redirects: [
             "https://preview.invalid/callback#access_token=array-must-not-travel",
           ],
+          ...(mode.startsWith("a11y") ? { token: "viewer-grant-secret" } : {}),
         },
       },
     });
@@ -320,6 +323,36 @@ window.addEventListener("message", async (event) => {
             uri: message.params.uri,
             mimeType: "image/png",
             blob: await png(path),
+          },
+        ],
+      },
+    });
+    return;
+  }
+  if (message.method === "tools/call") {
+    toolCalls += 1;
+    window.__mcpToolCallCount = toolCalls;
+    window.__mcpToolCall = message.params;
+    if (mode === "a11y-unavailable") {
+      send({
+        jsonrpc: "2.0",
+        id: message.id,
+        result: {
+          isError: true,
+          content: [{ type: "text", text: "Accessibility overlays are unsupported" }],
+        },
+      });
+      return;
+    }
+    send({
+      jsonrpc: "2.0",
+      id: message.id,
+      result: {
+        content: [
+          {
+            type: "image",
+            mimeType: "image/png",
+            data: await png("/preview-harness/fixtures/pages/_design-render-placeholder.png"),
           },
         ],
       },

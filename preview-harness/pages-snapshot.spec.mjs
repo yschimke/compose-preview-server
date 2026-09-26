@@ -4435,6 +4435,52 @@ for (const fixture of listPageFixtures()) {
           expect(await page.evaluate(() => window.__mcpReadCount)).toBe(2);
           await expect(viewer.locator("#refresh")).toBeEnabled();
         }
+        if (fixture === "mcp-app-viewer-a11y") {
+          const image = viewer.locator('#canvas img[alt="Rendered Compose preview"]');
+          const before = await image.getAttribute("src");
+          await expect(viewer.locator("#a11y")).toBeEnabled();
+          await viewer.locator("#a11y").click();
+          await page.waitForFunction(() => window.__mcpToolCallCount === 1);
+          await expect(
+            viewer.locator('#canvas img[alt="Compose preview with accessibility overlay"]'),
+          ).toBeVisible();
+          await expect(viewer.locator("#a11y")).toHaveText("Show original preview");
+          const toolCall = await page.evaluate(() => window.__mcpToolCall);
+          expect(toolCall).toEqual({
+            name: "render_preview_overlay",
+            arguments: {
+              uri: "compose-preview://fixture/_app/com.example.Card?overrides=fixture",
+              kind: "a11y/overlay",
+              inline: true,
+              overrides: { uiMode: "dark" },
+              token: "viewer-grant-secret",
+            },
+          });
+          expect(JSON.stringify(toolCall)).not.toContain("must-not-travel");
+          expect(JSON.stringify(toolCall)).not.toContain("fragment-must-not-travel");
+          await viewer.locator("#a11y").click();
+          await expect(viewer.locator('#canvas img[alt="Rendered Compose preview"]')).toHaveAttribute(
+            "src",
+            before,
+          );
+          await viewer.locator("#a11y").click();
+          await expect(
+            viewer.locator('#canvas img[alt="Compose preview with accessibility overlay"]'),
+          ).toBeVisible();
+          expect(await page.evaluate(() => window.__mcpToolCallCount)).toBe(1);
+        }
+        if (fixture === "mcp-app-viewer-a11y-unavailable") {
+          const image = viewer.locator('#canvas img[alt="Rendered Compose preview"]');
+          const before = await image.getAttribute("src");
+          await viewer.locator("#a11y").click();
+          await page.waitForFunction(() => window.__mcpToolCallCount === 1);
+          await expect(viewer.locator("#a11y")).toBeDisabled();
+          await expect(viewer.locator("#a11y")).toHaveText(
+            "Accessibility overlay unavailable",
+          );
+          await expect(viewer.locator("#meta")).toContainText("original preview shown");
+          await expect(image).toHaveAttribute("src", before);
+        }
       }
 
       // The design page's renders are `loading="lazy"` — a live catalog serves one daemon
