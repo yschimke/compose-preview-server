@@ -4398,6 +4398,27 @@ for (const fixture of listPageFixtures()) {
           expect(await page.evaluate(() => window.__mcpSubscribeCount)).toBe(1);
           expect(await page.evaluate(() => window.__mcpUnsubscribedUris || [])).toEqual([]);
         }
+        if (fixture === "mcp-app-viewer-subscription-revisit") {
+          await page.waitForFunction(
+            () => window.__mcpActiveSubscriptions?.length === 1 &&
+              window.__mcpActiveSubscriptions[0].includes("overrides=fixture"),
+            null,
+            { timeout: 7_000 },
+          );
+          expect(await page.evaluate(() => window.__mcpActiveSubscriptions)).toEqual([
+            "compose-preview://fixture/_app/com.example.Card?overrides=fixture",
+          ]);
+        }
+        if (fixture === "mcp-app-viewer-subscribe-late") {
+          await page.waitForFunction(
+            () => Array.isArray(window.__mcpActiveSubscriptions) &&
+              window.__mcpActiveSubscriptions.length === 0,
+            null,
+            { timeout: 7_000 },
+          );
+          await page.waitForFunction(() => window.__mcpReadCount >= 2, null, { timeout: 12_000 });
+          await expect(viewer.locator("#refresh")).toBeEnabled();
+        }
       }
 
       // The design page's renders are `loading="lazy"` — a live catalog serves one daemon

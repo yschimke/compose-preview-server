@@ -2,6 +2,7 @@ const frame = document.querySelector("iframe");
 const mode = document.body.dataset.mode;
 let reads = 0;
 let resourceUpdates = 0;
+const activeSubscriptions = new Set();
 
 async function png(path) {
   const bytes = new Uint8Array(await (await fetch(path)).arrayBuffer());
@@ -28,6 +29,8 @@ window.addEventListener("message", async (event) => {
             subscribe:
               mode === "refresh" ||
               mode === "same-uri-redraw" ||
+              mode === "subscription-revisit" ||
+              mode === "subscribe-late" ||
               mode === "subscribe-fails" ||
               mode === "stale-read-marker",
           },
@@ -163,6 +166,33 @@ window.addEventListener("message", async (event) => {
         });
       }, 250);
     }
+    if (mode === "subscription-revisit") {
+      for (const [delay, overrides] of [[250, "other"], [350, "fixture"]]) {
+        window.setTimeout(async () => {
+          send({
+            jsonrpc: "2.0",
+            method: "ui/notifications/tool-result",
+            params: {
+              result: {
+                content: [
+                  {
+                    type: "image",
+                    mimeType: "image/png",
+                    data: await png("/preview-harness/fixtures/pages/_design-render-placeholder.png"),
+                  },
+                  {
+                    type: "resource_link",
+                    uri: `compose-preview://fixture/_app/com.example.Card?overrides=${overrides}`,
+                    name: "Compose Preview render",
+                    mimeType: "image/png",
+                  },
+                ],
+              },
+            },
+          });
+        }, delay);
+      }
+    }
     return;
   }
   if (message.method === "resources/subscribe") {
@@ -176,6 +206,15 @@ window.addEventListener("message", async (event) => {
             error: { code: -32601, message: "subscriptions unavailable" },
           }),
         250,
+      );
+      return;
+    }
+    activeSubscriptions.add(message.params.uri);
+    window.__mcpActiveSubscriptions = [...activeSubscriptions];
+    if (mode === "subscribe-late") {
+      window.setTimeout(
+        () => send({ jsonrpc: "2.0", id: message.id, result: {} }),
+        5250,
       );
       return;
     }
@@ -202,7 +241,13 @@ window.addEventListener("message", async (event) => {
       ...(window.__mcpUnsubscribedUris || []),
       message.params.uri,
     ];
-    send({ jsonrpc: "2.0", id: message.id, result: {} });
+    const finish = () => {
+      activeSubscriptions.delete(message.params.uri);
+      window.__mcpActiveSubscriptions = [...activeSubscriptions];
+      send({ jsonrpc: "2.0", id: message.id, result: {} });
+    };
+    if (mode === "subscription-revisit") window.setTimeout(finish, 400);
+    else finish();
     return;
   }
   if (message.method === "resources/read") {

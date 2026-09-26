@@ -56,6 +56,7 @@
   const MAX_STATIC_RESULT_BYTES = 500000;
   const CREDENTIAL_KEY = /(token|authorization|password|secret|api[-_]?key|cookie|session)/i;
   const pending = new Map();
+  const lateResponses = new Map();
   let nextId = 1;
   let initialized = false;
   let hasToolResult = false;
@@ -69,13 +70,19 @@
   let resourcePollTimer;
   let resourceSubscriptionGeneration = 0;
   let subscribedResourceUri;
+  let resourceSubscriptionTargetUri;
+  let resourceSubscriptionQueue = Promise.resolve();
   let hostResourceSubscriptions = false;
 
-  function request(method, params, timeoutMs = REQUEST_TIMEOUT_MS) {
+  function request(method, params, timeoutMs = REQUEST_TIMEOUT_MS, onLateResult) {
     const id = nextId++;
     return new Promise((resolve, reject) => {
       const timer = window.setTimeout(() => {
         if (!pending.delete(id)) return;
+        if (onLateResult) {
+          const expiry = window.setTimeout(() => lateResponses.delete(id), RESOURCE_READ_TIMEOUT_MS);
+          lateResponses.set(id, { handle: onLateResult, expiry });
+        }
         reject(new Error(`${method} request timed out after ${timeoutMs} ms`));
       }, timeoutMs);
       pending.set(id, { resolve, reject, timer });
@@ -296,37 +303,65 @@
     }, RESOURCE_POLL_INTERVAL_MS);
   }
 
+  function queueResourceSubscription(task) {
+    const queued = resourceSubscriptionQueue.then(task, task);
+    resourceSubscriptionQueue = queued.catch(() => {});
+    return queued;
+  }
+
+  function recoverLateSubscription(uri) {
+    void queueResourceSubscription(async () => {
+      try {
+        await request('resources/unsubscribe', { uri });
+      } catch (error) {
+        console.debug('Unable to clean up a late Compose Preview subscription:', error);
+      }
+      if (subscribedResourceUri === uri) subscribedResourceUri = undefined;
+      if (resourceSubscriptionTargetUri === uri && hostResourceSubscriptions) {
+        connectResourceUpdates(uri, false);
+      }
+    });
+  }
+
   async function connectResourceUpdates(uri, initialReadPending) {
     const generation = ++resourceSubscriptionGeneration;
     stopResourcePolling();
     if (subscribedResourceUri === uri) return;
-    const previous = subscribedResourceUri;
-    subscribedResourceUri = undefined;
     try {
       await bridgeReady;
       if (!initialized || staticMode || generation !== resourceSubscriptionGeneration) return;
-      if (previous && hostResourceSubscriptions) {
-        try {
-          await request('resources/unsubscribe', { uri: previous });
-        } catch (error) {
-          console.debug('Unable to unsubscribe the previous Compose Preview resource:', error);
-        }
-      }
-      if (generation !== resourceSubscriptionGeneration || resourceResult?.resource?.uri !== uri) return;
       if (!hostResourceSubscriptions) {
         if (!initialReadPending) scheduleResourcePoll(uri);
         return;
       }
-      await request('resources/subscribe', { uri });
-      if (!initialized || staticMode || resourceResult?.resource?.uri !== uri) {
-        try {
-          await request('resources/unsubscribe', { uri });
-        } catch (error) {
-          console.debug('Unable to unsubscribe a stale Compose Preview resource:', error);
+      await queueResourceSubscription(async () => {
+        if (
+          generation !== resourceSubscriptionGeneration ||
+          resourceSubscriptionTargetUri !== uri ||
+          resourceResult?.resource?.uri !== uri
+        ) return;
+        await request(
+          'resources/subscribe',
+          { uri },
+          REQUEST_TIMEOUT_MS,
+          () => recoverLateSubscription(uri),
+        );
+        if (
+          !initialized ||
+          staticMode ||
+          generation !== resourceSubscriptionGeneration ||
+          resourceSubscriptionTargetUri !== uri ||
+          resourceResult?.resource?.uri !== uri
+        ) {
+          try {
+            await request('resources/unsubscribe', { uri });
+          } catch (error) {
+            console.debug('Unable to unsubscribe a stale Compose Preview resource:', error);
+          }
+          return;
         }
-        return;
-      }
-      subscribedResourceUri = uri;
+        subscribedResourceUri = uri;
+      });
     } catch (error) {
       if (generation !== resourceSubscriptionGeneration || resourceResult?.resource?.uri !== uri) return;
       // MCP Apps 2026-01-26 exposes resources/read but not subscription proxying. A future host
@@ -343,14 +378,19 @@
     ++resourceSubscriptionGeneration;
     ++resourceReadGeneration;
     resourceReadUri = undefined;
+    resourceSubscriptionTargetUri = nextUri;
     stopResourcePolling();
     if (subscribedResourceUri === nextUri) return;
     const previous = subscribedResourceUri;
     subscribedResourceUri = undefined;
     if (!previous || !hostResourceSubscriptions || !initialized) return;
-    request('resources/unsubscribe', { uri: previous }).catch(error =>
-      console.debug('Unable to unsubscribe the previous Compose Preview resource:', error)
-    );
+    void queueResourceSubscription(async () => {
+      try {
+        await request('resources/unsubscribe', { uri: previous });
+      } catch (error) {
+        console.debug('Unable to unsubscribe the previous Compose Preview resource:', error);
+      }
+    });
   }
 
   async function readResource() {
@@ -445,6 +485,13 @@
       window.clearTimeout(request.timer);
       if (message.error) request.reject(message.error);
       else request.resolve(message.result);
+      return;
+    }
+    if (lateResponses.has(message.id)) {
+      const late = lateResponses.get(message.id);
+      lateResponses.delete(message.id);
+      window.clearTimeout(late.expiry);
+      if (!message.error) late.handle(message.result);
       return;
     }
     if (message.method === 'ui/notifications/tool-input') {
