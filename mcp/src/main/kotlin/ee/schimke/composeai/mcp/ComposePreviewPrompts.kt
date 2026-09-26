@@ -47,7 +47,7 @@ internal object ComposePreviewPrompts {
 
       1. Call `find_previews_for_file` with `path: "$path"`.
       2. Render each returned URI with `render_preview`. Start with `observe: "hash"`; request
-         `observe: "png"` for screens that need visual inspection.
+         `observe: "png"` and show the result in the viewer for screens that need visual inspection.
       3. Report a file with no previews plainly. Do not guess a preview URI from the Kotlin name.
       4. If the source changed outside the daemon watcher, call `notify_file_changed` before
          rendering and then repeat the lookup.

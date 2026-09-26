@@ -22,9 +22,11 @@ import io.modelcontextprotocol.kotlin.sdk.types.ListResourcesRequest
 import io.modelcontextprotocol.kotlin.sdk.types.ListResourcesResult
 import io.modelcontextprotocol.kotlin.sdk.types.ListToolsRequest
 import io.modelcontextprotocol.kotlin.sdk.types.ListToolsResult
+import io.modelcontextprotocol.kotlin.sdk.types.McpException
 import io.modelcontextprotocol.kotlin.sdk.types.Method
 import io.modelcontextprotocol.kotlin.sdk.types.ProgressNotification
 import io.modelcontextprotocol.kotlin.sdk.types.ProgressNotificationParams
+import io.modelcontextprotocol.kotlin.sdk.types.RPCError
 import io.modelcontextprotocol.kotlin.sdk.types.ReadResourceRequest
 import io.modelcontextprotocol.kotlin.sdk.types.ReadResourceResult
 import io.modelcontextprotocol.kotlin.sdk.types.RequestId
@@ -49,6 +51,7 @@ import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.io.asSink
 import kotlinx.io.asSource
 import kotlinx.io.buffered
@@ -198,22 +201,31 @@ class McpSession(
    * Ask through a typed MCP form only when this client explicitly declared form elicitation.
    * Callers receive null for older clients and must include their own complete text fallback.
    */
-  suspend fun elicitForm(message: String, requestedSchema: JsonObject): ElicitResult? {
+  suspend fun elicitForm(
+    message: String,
+    requestedSchema: JsonObject,
+    timeoutMs: Long = DEFAULT_ELICITATION_TIMEOUT_MS,
+  ): ElicitResult? {
     val session = sdkSession ?: return null
-    // A standards-compliant client advertises form support as `form: {}`, while older clients
-    // advertised only the enclosing `elicitation` object. Both mean it accepts a form request.
-    if (session.clientCapabilities?.elicitation == null) return null
+    if (session.clientCapabilities?.elicitation?.form == null) return null
     val schema = Json {
       ignoreUnknownKeys = true
     }
       .decodeFromJsonElement<ElicitRequestParams.RequestedSchema>(requestedSchema)
-    return elicitationOrNull { session.createElicitation(message, schema) }
+    return elicitationOrNull(timeoutMs) { session.createElicitation(message, schema) }
+  }
+
+  private companion object {
+    const val DEFAULT_ELICITATION_TIMEOUT_MS = 60_000L
   }
 }
 
-internal suspend fun <T> elicitationOrNull(request: suspend () -> T): T? =
+internal suspend fun <T> elicitationOrNull(
+  timeoutMs: Long = 60_000L,
+  request: suspend () -> T,
+): T? =
   try {
-    request()
+    withTimeoutOrNull(timeoutMs) { request() }
   } catch (cancelled: CancellationException) {
     throw cancelled
   } catch (_: Exception) {
@@ -267,7 +279,11 @@ internal fun installComposePreviewHandlers(
     ListPromptsResult(prompts = listPrompts(), nextCursor = null)
   }
   sdkSession.setRequestHandler<GetPromptRequest>(Method.Defined.PromptsGet) { request, _ ->
-    getPrompt(request.name, request.arguments.orEmpty())
+    try {
+      getPrompt(request.name, request.arguments.orEmpty())
+    } catch (invalid: IllegalArgumentException) {
+      throw McpException(RPCError.ErrorCode.INVALID_PARAMS, invalid.message ?: "Invalid prompt")
+    }
   }
   sdkSession.setRequestHandler<CallToolRequest>(Method.Defined.ToolsCall) { request, _ ->
     callTool(request.name, request.arguments).toSdkCallToolResult()

@@ -192,8 +192,8 @@ class ServeCatalogMcp(
             putJsonArray("arguments") {
               add(
                 buildJsonObject {
-                  put("name", "designUrl")
-                  put("description", "The design URL or design id on this server.")
+                  put("name", "designId")
+                  put("description", "The design id on this server.")
                   put("required", true)
                 }
               )
@@ -229,8 +229,8 @@ class ServeCatalogMcp(
     val arguments = params["arguments"] as? JsonObject ?: JsonObject(emptyMap())
     val text =
       when (name) {
-        "review-design" -> reviewDesignPrompt(arguments.requiredString("designUrl"))
-        "design-status" -> designStatusPrompt(arguments.requiredString("designId"))
+        "review-design" -> reviewDesignPrompt(arguments.validatedDesignId())
+        "design-status" -> designStatusPrompt(arguments.validatedDesignId())
         else -> throw McpRequestException("unknown prompt: $name")
       }
     return buildJsonObject {
@@ -252,11 +252,21 @@ class ServeCatalogMcp(
     }
   }
 
-  private fun reviewDesignPrompt(designUrl: String): String =
-    """
-    Review the UI-builder design `$designUrl` at its server home.
+  private fun JsonObject.validatedDesignId(): String {
+    val designId = requiredString("designId")
+    if (!designId.matches(PROMPT_DESIGN_ID)) {
+      throw McpRequestException(
+        "designId must be 1-64 URL-safe letters, digits, dots, underscores, or hyphens"
+      )
+    }
+    return designId
+  }
 
-    1. Extract the design id from the URL if necessary, then call `ui_builder_get_design`.
+  private fun reviewDesignPrompt(designId: String): String =
+    """
+    Review the UI-builder design `$designId` at its server home.
+
+    1. Call `ui_builder_get_design` with designId `$designId`.
     2. If `ui_builder_list_comments` is advertised, read it before proposing edits. Report each
        unresolved or unacknowledged thread; discussion belongs on the design, not in a new PR.
     3. Inspect the visual result using `ui_builder_export` with `format: "png"` or
@@ -1995,6 +2005,7 @@ class ServeCatalogMcp(
      */
     private const val MAX_MATRIX_CELLS = 24
     private val MATRIX_OBSERVATION_MODES = setOf("png", "hash")
+    private val PROMPT_DESIGN_ID = Regex("[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
 
     /** `a, b, or c` — the list keeps its grammar as observations are added to it. */
     private fun Collection<String>.orList(): String {

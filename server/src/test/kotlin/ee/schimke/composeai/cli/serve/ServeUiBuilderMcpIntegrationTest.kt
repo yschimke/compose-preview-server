@@ -187,7 +187,7 @@ class ServeUiBuilderMcpIntegrationTest {
     val review =
       post(
           server,
-          """{"jsonrpc":"2.0","id":3,"method":"prompts/get","params":{"name":"review-design","arguments":{"designUrl":"https://preview.test/ui-builder/login"}}}""",
+          """{"jsonrpc":"2.0","id":3,"method":"prompts/get","params":{"name":"review-design","arguments":{"designId":"login"}}}""",
         )["result"]!!
         .jsonObject
     val reviewText =
@@ -201,6 +201,13 @@ class ServeUiBuilderMcpIntegrationTest {
     assertTrue(reviewText.contains("ui_builder_list_comments"), reviewText)
     assertTrue(reviewText.contains("ui_builder_view"), reviewText)
     assertTrue(reviewText.contains("#1114"), reviewText)
+
+    val invalid =
+      post(
+        server,
+        """{"jsonrpc":"2.0","id":31,"method":"prompts/get","params":{"name":"review-design","arguments":{"designId":"https://foreign.test/ui-builder/login"}}}""",
+      )
+    assertEquals(-32602, invalid["error"]!!.jsonObject["code"]!!.jsonPrimitive.content.toInt())
 
     val status =
       post(
