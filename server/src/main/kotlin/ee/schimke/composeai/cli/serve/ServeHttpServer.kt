@@ -34,7 +34,6 @@ import ee.schimke.composeai.uibuilder.protocol.GrantActorAccessMutationV1
 import ee.schimke.composeai.uibuilder.protocol.ListDesignsRequestV1
 import ee.schimke.composeai.uibuilder.protocol.OpenDesignRequestV1
 import ee.schimke.composeai.uibuilder.protocol.RevokeActorAccessMutationV1
-import ee.schimke.composeai.uibuilder.protocol.ServiceErrorCodeV1
 import ee.schimke.composeai.uibuilder.protocol.UpdateDesignAccessRequestV1
 import ee.schimke.composeai.uibuilder.service.AuthenticatedUiBuilderActor
 import ee.schimke.composeai.uibuilder.service.UiBuilderAssetPort
@@ -13542,67 +13541,7 @@ class ServeHttpServer(
     call.respondBytes(bytes, wasmContentType(file.name))
   }
 
-  /**
-   * Whether this caller may open the design named by a catalog-free UI-builder URL.
-   *
-   * Gated on a **READ authorization and the store's own answer**, which keeps the shell from being
-   * an existence oracle. Designs are private to their owner and collaborators, so serving the shell
-   * for any id that exists would tell an unauthenticated stranger that a `cheeky-raccoon` id is
-   * taken. Asking the service as the caller means the answer is exactly the one the design API
-   * would already give them: whoever cannot open the design gets the same `404` they got before.
-   *
-   * The question is `GetDesignActions`, not a snapshot. It is the service's own "what may this
-   * actor do here" answer, which says not-found for a design the actor cannot read exactly as for
-   * one that does not exist — the same guarantee — without building the snapshot the shell
-   * discarded. That snapshot was the whole design, its history and its resolved catalog, built
-   * under the lock every live edit also takes, on the critical path of every page load and a moment
-   * before the page asked for the very same snapshot itself.
-   *
-   * A design the service has set aside because its catalog pin no longer resolves answers neither
-   * question, and is the one exception: the recovery screen has to load before the design can open
-   * again. In that case the server asks for the read-only recovery preview. That request performs
-   * the same per-design READ check before saying anything about the catalog, so this fallback does
-   * not turn the shell into an existence oracle.
-   *
-   * @return true when the shell may be served, false to leave the request to the static lane —
-   *   which keeps a genuinely missing asset a 404 rather than a silent app shell.
-   */
-  private suspend fun RoutingContext.canOpenUiBuilderDesign(designId: String): Boolean {
-    val service = designService ?: return false
-    val authorization = uiBuilderAuthorization ?: return false
-    val actor =
-      (authorization.authorize(call, UiBuilderRouteCapability.READ)
-          as? UiBuilderAuthorizationDecision.Authorized)
-        ?.actor ?: return false
-    val response =
-      withContext(Dispatchers.IO) {
-        service.execute(
-          UiBuilderServiceCall(actor, UiBuilderServiceRequest.GetDesignActions(designId))
-        )
-      }
-    if (response is UiBuilderServiceResponse.DesignActions) return true
-    if (
-      response !is UiBuilderServiceResponse.Error ||
-        response.error.code != ServiceErrorCodeV1.CATALOG_UNAVAILABLE
-    ) {
-      return false
-    }
-    val recovery =
-      withContext(Dispatchers.IO) {
-        service.execute(
-          UiBuilderServiceCall(
-            actor,
-            UiBuilderServiceRequest.PreviewCurrentCatalogUpgrade(designId),
-          )
-        )
-      }
-    return recovery is UiBuilderServiceResponse.CatalogUpgradePreview ||
-      (recovery is UiBuilderServiceResponse.Error &&
-        recovery.error.code != ServiceErrorCodeV1.NOT_FOUND)
-  }
-
-  /**
-   * Whether a path segment can name a design rather than an asset.
+  /** Whether a path segment can name a design rather than an asset.
    *
    * The same path-safe shape the New design dialog validates, which allows a `.`, minus anything
    * carrying a static-asset extension. Without that exclusion a mistyped `uiBuilder.mjs` would
@@ -13691,9 +13630,11 @@ class ServeHttpServer(
         return
       }
     } else if (assetSegments.size == 1 && isUiBuilderDesignSegment(assetSegments[0])) {
-      // The canonical design URL. Authorize before serving the public shell so a design id cannot
-      // be used as an existence oracle; the API then reads its catalog from the document.
-      if (!File(dir, assetSegments[0]).isFile && canOpenUiBuilderDesign(assetSegments[0])) {
+      // The canonical design URL. The shell is not design data, so serve it for every path-shaped
+      // id. That makes a creator's POST/303/GET handoff independent of how the browser presents
+      // its credential. It also cannot become an existence oracle: an unknown id gets the same
+      // shell, while the authenticated design API decides whether any document is readable.
+      if (!File(dir, assetSegments[0]).isFile) {
         if (call.request.path().endsWith("/")) {
           val suffix = call.request.queryString().let { if (it.isEmpty()) "" else "?$it" }
           call.respondRedirect("/ui-builder/${assetSegments[0]}$suffix")
