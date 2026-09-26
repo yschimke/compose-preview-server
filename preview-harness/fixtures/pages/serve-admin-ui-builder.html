@@ -19,7 +19,7 @@
         <script src="/assets/serve/fixture/serve-chrome.js"></script>
         <header class="cp-site-header">
   <div class="cp-site-lead">
-    <a class="cp-site-brand" href="/?token=demo-token-fixture" aria-label="compose-preview home">
+    <a class="cp-site-brand" href="/" aria-label="compose-preview home">
       <span class="cp-site-mark" aria-hidden="true">◇</span>
       <span class="cp-site-wordmark">compose-preview</span>
     </a>
@@ -30,7 +30,7 @@
         aria-controls="cp-site-menu-panel"><span aria-hidden="true">⋮</span></summary>
     </details>
     <div class="cp-site-menu-panel" id="cp-site-menu-panel">
-      <a class="cp-site-status-link" id="cp-status-link" href="/status?token=demo-token-fixture">Status<span
+      <a class="cp-site-status-link" id="cp-status-link" href="/status">Status<span
         class="cp-daemon-status" id="cp-daemon-status" aria-hidden="true" hidden></span></a>
       <details class="cp-settings">
         <summary class="cp-settings-btn" title="Settings" aria-label="Settings">
@@ -80,6 +80,15 @@
   var token = "demo-token-fixture";
   var readOnly = false;
   var headers = token ? { "X-Compose-Preview-Admin-Token": token } : {};
+  // The token opened this page and lives on in `headers`; keep it out of the address bar,
+  // history and any link copied from here.
+  try {
+    var here = new URL(window.location.href);
+    if (here.searchParams.has("token")) {
+      here.searchParams.delete("token");
+      window.history.replaceState(null, "", here.pathname + here.search + here.hash);
+    }
+  } catch (e) {}
   function show(text, isError) {
     status.hidden = false;
     status.className = "cp-doc-result" + (isError ? " cp-doc-error" : "");
@@ -285,7 +294,6 @@
   var reload = document.getElementById("cp-library-reload");
   var token = "demo-token-fixture";
   var headers = token ? { "X-Compose-Preview-Admin-Token": token } : {};
-  var query = token ? "?token=" + encodeURIComponent(token) : "";
   function show(text, isError) {
     status.hidden = false;
     status.className = "cp-doc-result" + (isError ? " cp-doc-error" : "");

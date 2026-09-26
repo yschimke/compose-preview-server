@@ -304,7 +304,10 @@ grant approved by a configured actor edits the designs that actor can edit, but 
 admin pages or the shared folder map. Use the actor's own signed-in session for those.
 
 The page drives two JSON routes that a script can use directly, gated by the same header as the
-other admin routes and absent (404, not 401) without it:
+other admin routes and absent (404, not 401) without it. Every admin route reads the token from the
+`X-Compose-Preview-Admin-Token` header only; a `?token=` query parameter is ignored. The one
+exception is opening the page itself in a browser, which cannot set a header: `/admin/ui-builder?token=…`
+still loads it, the page then drops `token` from the address bar and sends the header on every call.
 
 ```bash
 curl -sH "X-Compose-Preview-Admin-Token: $SERVE_ADMIN_TOKEN" https://<host>/admin/ui-builder/designs
@@ -392,7 +395,9 @@ the caddy container derives `SITE_DOMAINS` from the same file at start
 ([`caddy-entrypoint.sh`](caddy-entrypoint.sh)), which is what makes Caddy match the name **and**
 provision its Let's Encrypt certificate. There is nothing else to configure for TLS, and no second
 list to keep in step — the failure this used to invite was a name in one place and not the other,
-which is either a site nothing routes to or a hostname the app doesn't recognise.
+which is either a site nothing routes to or a hostname the app doesn't recognise. Caddy passes the
+visitor's `Host` through unchanged, so this works whether or not the app is told to read
+`X-Forwarded-Host` (it does only with `SERVE_TRUST_FORWARDED_FOR` set).
 
 It reaches a **running** box the same way a catalog does: `publish-config-to-box.sh` POSTs each
 entry to `/admin/sites` on every push to `main`, after the catalogs (a site may only name a catalog
@@ -1274,6 +1279,11 @@ docker run -d --restart always -p 8080:8080 \
 ```
 
 (Token rides in the clear over HTTP — throwaway only.)
+
+Leave `SERVE_TRUST_FORWARDED_FOR` unset (or `0`) on a box with nothing in front of it. With it set,
+the server takes the client address, the public host and the scheme from `X-Forwarded-For`,
+`X-Forwarded-Host` and `X-Forwarded-Proto`; without a proxy those are whatever the caller sends.
+Unset, it uses the socket peer, the request's `Host` and the connection scheme.
 
 ## Files
 

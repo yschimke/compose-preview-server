@@ -93,7 +93,7 @@ class ServeTopLevelSiteTest {
   private val client =
     OkHttpClient.Builder().followRedirects(false).followSslRedirects(false).build()
 
-  private fun newServer(): ServeHttpServer {
+  private fun newServer(trustForwardedFor: Boolean = false): ServeHttpServer {
     registry.register(
       "compose-m3",
       host = bundle("compose-m3", listOf("button-filled", "switch-on"), "Compose Material 3"),
@@ -111,8 +111,20 @@ class ServeTopLevelSiteTest {
         catalogSessions = listOf("compose-m3", "wear-m3"),
         appCatalogSessions = listOf("cadence"),
         sites = ServeSiteRegistry.of(listOf(siteHost to "compose-m3")),
+        trustForwardedFor = trustForwardedFor,
       )
       .also { it.start() }
+  }
+
+  private fun getForwarded(path: String, headers: Map<String, String>): String {
+    val req =
+      Request.Builder()
+        .url("http://127.0.0.1:${server!!.port}$path")
+        .apply { headers.forEach { (name, value) -> header(name, value) } }
+        .build()
+    client.newCall(req).execute().use {
+      return it.body.string()
+    }
   }
 
   /** A request whose `Host` header is [host] — how a vhost actually reaches this listener. */
@@ -157,6 +169,40 @@ class ServeTopLevelSiteTest {
     val (mainCode, mainBody, _) = get("/")
     assertEquals(200, mainCode)
     assertTrue(mainBody.contains("Wear M3"), "the main front door still lists every system")
+  }
+
+  @Test
+  fun `X-Forwarded-Host picks a site only when the proxy is trusted`() {
+    server = newServer()
+    val headers = mapOf("Host" to "preview.example.test", "X-Forwarded-Host" to siteHost)
+    // A direct caller chooses its own forwarded headers, so without the proxy switch they are
+    // ignored and `Host` decides: this is the main host's front door.
+    assertTrue(getForwarded("/", headers).contains("Wear M3"), "untrusted: the main front door")
+    server!!.stop()
+
+    server = newServer(trustForwardedFor = true)
+    val body = getForwarded("/", headers)
+    assertTrue(body.contains("Compose Material 3"), "trusted: the site's own landing: $body")
+    assertFalse(body.contains("Wear M3"), "trusted: the site's own landing: $body")
+  }
+
+  @Test
+  fun `absolute links take the forwarded host and scheme only from a trusted proxy`() {
+    val headers =
+      mapOf(
+        "Host" to "preview.example.test",
+        "X-Forwarded-Host" to "elsewhere.example.test",
+        "X-Forwarded-Proto" to "https",
+      )
+    server = newServer()
+    val direct = getForwarded("/sitemap.xml", headers)
+    assertTrue(direct.contains("<loc>http://preview.example.test/</loc>"), direct)
+    assertFalse(direct.contains("elsewhere.example.test"), direct)
+    server!!.stop()
+
+    server = newServer(trustForwardedFor = true)
+    val proxied = getForwarded("/sitemap.xml", headers)
+    assertTrue(proxied.contains("<loc>https://elsewhere.example.test/</loc>"), proxied)
   }
 
   @Test

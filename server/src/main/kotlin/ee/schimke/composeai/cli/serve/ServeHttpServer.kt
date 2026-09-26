@@ -1866,8 +1866,14 @@ class ServeHttpServer(
         if (uiBuilderAdminEnabled) {
           val admin = uiBuilderAdmin!!
           get("/admin/ui-builder") {
-            val access = uiBuilderAdminAccess(allowReadToken = true) ?: return@get
-            val pageToken = call.request.queryParameters["token"]
+            val access =
+              uiBuilderAdminAccess(allowReadToken = true, allowPageQueryToken = true) ?: return@get
+            // Only a token that opened the page is handed to its script; a header-authenticated
+            // or signed-in caller gets a page that relies on its own credentials.
+            val pageToken =
+              call.request.queryParameters["token"]?.takeIf {
+                !access.browserSession && call.request.headers[ADMIN_TOKEN_HEADER] == null
+              }
             call.response.headers.append(HttpHeaders.CacheControl, "no-store")
             call.respondText(
               ServeWeb.uiBuilderAdminPage(
@@ -2278,16 +2284,16 @@ class ServeHttpServer(
    * The catalog this request's **host** publishes as a top-level site, or null on the main host
    * (and on every server with no sites configured, which is the fast path). See [ServeSites].
    *
-   * Read from the same forwarded headers [externalOrigin] trusts, because the only thing in front
-   * of this server is the deployment's own reverse proxy — a request that reaches the listener
-   * direct carries its `Host` verbatim, which is what a local `curl -H 'Host: m3.preview.coo.ee'`
-   * needs.
+   * Read the way [externalOrigin] reads the host: `X-Forwarded-Host` only when [trustForwardedFor]
+   * says a reverse proxy we believe sets it, else the request's own `Host`. A request that reaches
+   * the listener direct carries its `Host` verbatim, which is what a local `curl -H 'Host:
+   * m3.preview.coo.ee'` needs, and Caddy passes the visitor's `Host` through too.
    */
   private fun ApplicationCall.siteSystem(): String? {
     if (sites.isEmpty) return null
-    val forwarded = request.headers["X-Forwarded-Host"]?.substringBefore(',')?.trim()
     return sites.systemFor(
-      forwarded?.takeIf { it.isNotEmpty() } ?: request.headers[HttpHeaders.Host]
+      forwardedHeader(this, "X-Forwarded-Host", trustForwardedFor)
+        ?: request.headers[HttpHeaders.Host]
     )
   }
 
@@ -2344,7 +2350,7 @@ class ServeHttpServer(
    * visitor back signed-out, and offering the link would still be advertising a dead end.
    */
   private fun RoutingContext.oauthCanRoundTrip(): Boolean =
-    githubAuth?.canRoundTrip(requestHost(call), sites.hosts) ?: true
+    githubAuth?.canRoundTrip(requestHost(call, trustForwardedFor), sites.hosts) ?: true
 
   /**
    * The session id to hand [ServeWeb] for nav-marking + link building, and the URL [basePath] its
@@ -2464,18 +2470,21 @@ class ServeHttpServer(
    * `X-Forwarded-Proto` while terminating TLS; direct/local serve requests fall back to Ktor's
    * connection scheme and Host header. Only the first proxy value is relevant when a request
    * crossed more than one hop.
+   *
+   * The `X-Forwarded-*` values are read only with [trustForwardedFor] — the switch that says a
+   * reverse proxy sets them. Without it they are whatever the caller chose to send, so the origin
+   * comes from the connection and `Host` alone.
    */
   private fun RoutingContext.externalOrigin(): String {
-    fun firstHeader(name: String): String? =
-      call.request.headers[name]?.substringBefore(',')?.trim()?.takeIf { it.isNotEmpty() }
-
-    val forwardedScheme = firstHeader("X-Forwarded-Proto")
+    val forwardedScheme = forwardedHeader(call, "X-Forwarded-Proto", trustForwardedFor)
     val scheme =
       forwardedScheme?.takeIf { it.equals("http", true) || it.equals("https", true) }
         ?: call.request.origin.scheme
     val authority =
-      firstHeader("X-Forwarded-Host")
-        ?: firstHeader(HttpHeaders.Host)
+      forwardedHeader(call, "X-Forwarded-Host", trustForwardedFor)
+        ?: call.request.headers[HttpHeaders.Host]?.substringBefore(',')?.trim()?.takeIf {
+          it.isNotEmpty()
+        }
         ?: "${call.request.origin.serverHost}:${call.request.origin.serverPort}"
     return "${scheme.lowercase()}://$authority"
   }
@@ -5113,11 +5122,17 @@ class ServeHttpServer(
    * never open in `--public` mode (a public box publishes its browse URL to the world). Responds
    * 404 like the browse gate so the surface isn't confirmed to a scanner, and compares in constant
    * time.
+   *
+   * The credential is read from the [ADMIN_TOKEN_HEADER] header only — never a `?token=` query
+   * parameter. A query string is written to proxy access logs and browser history, and carried in
+   * `Referer`; a header is not. Every in-repo caller (the CI publish script, the admin page's
+   * script, the documented `curl` lines) already sends the header.
    */
   private suspend fun RoutingContext.rejectBadAdminToken(allowReadToken: Boolean = false): Boolean {
-    val provided = call.request.queryParameters["token"] ?: call.request.headers[ADMIN_TOKEN_HEADER]
+    val provided = call.request.headers[ADMIN_TOKEN_HEADER]
     // An unconfigured token is not a token everyone matches. `tokensMatch` compares bytes, so a
-    // blank expected value is satisfied by `?token=` — which would turn "the operator never set a
+    // blank expected value is satisfied by an empty header — which would turn "the operator never
+    // set a
     // credential" into "no credential is required", the exact inversion the `*Enabled` flags below
     // exist to prevent. They gate registration; this gates the check, so a route that forgets to
     // pair itself with one still fails closed rather than open.
@@ -5144,11 +5159,22 @@ class ServeHttpServer(
     val browserSession: Boolean,
   )
 
-  /** UI-builder-only admin gate; never used by catalog, trust, site, or onboarding routes. */
+  /**
+   * UI-builder-only admin gate; never used by catalog, trust, site, or onboarding routes.
+   *
+   * Like [rejectBadAdminToken] it reads the token from [ADMIN_TOKEN_HEADER] only. The single
+   * exception is [allowPageQueryToken], which `GET /admin/ui-builder` alone sets: a browser can
+   * only open a page by URL, so the HTML shell still accepts `?token=`. That page carries no design
+   * data — its script strips the parameter from the address bar on load and sends the token in the
+   * header to every JSON route, none of which accepts the query form.
+   */
   private suspend fun RoutingContext.uiBuilderAdminAccess(
-    allowReadToken: Boolean = false
+    allowReadToken: Boolean = false,
+    allowPageQueryToken: Boolean = false,
   ): UiBuilderAdminAccess? {
-    val provided = call.request.queryParameters["token"] ?: call.request.headers[ADMIN_TOKEN_HEADER]
+    val provided =
+      call.request.headers[ADMIN_TOKEN_HEADER]
+        ?: call.request.queryParameters["token"]?.takeIf { allowPageQueryToken }
     if (!adminToken.isNullOrBlank() && ServeUrls.tokensMatch(adminToken, provided.orEmpty())) {
       return UiBuilderAdminAccess(readOnly = false, browserSession = false)
     }

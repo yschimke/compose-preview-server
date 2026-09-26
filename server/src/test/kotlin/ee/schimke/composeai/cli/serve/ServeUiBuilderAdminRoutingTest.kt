@@ -150,6 +150,31 @@ class ServeUiBuilderAdminRoutingTest {
   }
 
   @Test
+  fun `only the page shell reads the token from the query, every JSON route wants the header`() {
+    server = server(ServeUiBuilderAdmin(port, onLog = {}))
+    // The routes that return or change designs never accept `?token=`: a query string is kept in
+    // access logs and history, and the page's own script sends the header instead.
+    assertEquals(404, send("/admin/ui-builder/designs?token=$adminToken", token = null).first)
+    assertEquals(
+      404,
+      send("/admin/ui-builder/designs/shady-goose/document?token=$adminToken", token = null).first,
+    )
+    assertEquals(
+      404,
+      send("/admin/ui-builder/designs/shady-goose?token=$adminToken", "DELETE", token = null).first,
+    )
+    assertEquals(listOf("cheeky-raccoon", "shady-goose"), designs.keys.toList(), "nothing deleted")
+    assertEquals(200, send("/admin/ui-builder/designs").first)
+
+    // The shell that a browser opens by URL still does, and then keeps the token to itself: it is
+    // removed from the address bar and not carried into the navigation links.
+    val (code, page) = send("/admin/ui-builder?token=$adminToken", token = null)
+    assertEquals(200, code)
+    assertTrue(page.contains("history.replaceState"), "the script strips ?token= on load")
+    assertFalse(page.contains("?token=$adminToken"), "no link carries the admin token: $page")
+  }
+
+  @Test
   fun `without an admin or a token the routes do not exist`() {
     server = server(admin = null)
     assertEquals(404, send("/admin/ui-builder").first)

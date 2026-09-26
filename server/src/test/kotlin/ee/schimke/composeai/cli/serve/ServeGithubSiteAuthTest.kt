@@ -72,6 +72,8 @@ class ServeGithubSiteAuthTest {
         repository = "yschimke/compose-ai-tools",
         callbackBaseUrl = "https://preview.coo.ee",
         cookieDomain = cookieDomain,
+        // These requests stand in for Caddy, which sets `X-Forwarded-Host`.
+        trustForwardedHeaders = true,
       ),
       verifier = GitHubOAuthVerifier(fakeGitHub),
       clock = clock,
@@ -96,6 +98,7 @@ class ServeGithubSiteAuthTest {
           defaultSessionId = "none",
           isPublic = true,
           githubAuth = auth(cookieDomain),
+          trustForwardedFor = true,
           sites = sites,
         )
         .also {
@@ -128,6 +131,75 @@ class ServeGithubSiteAuthTest {
         }
       state to resp.header("Set-Cookie").orEmpty().substringBefore(";")
     }
+
+  /**
+   * The OAuth `redirect_uri` a sign-in starts with, from a server with [callbackBaseUrl] (or none)
+   * and the given proxy trust, for a request that claims to have been forwarded for another host.
+   */
+  private fun redirectUriFor(callbackBaseUrl: String?, trust: Boolean): String {
+    val oauth =
+      ServeGithubAuth(
+        ServeGithubAuthConfig(
+          clientId = "client",
+          clientSecret = "secret",
+          cookieSecret = "x".repeat(32),
+          repository = "yschimke/compose-ai-tools",
+          callbackBaseUrl = callbackBaseUrl,
+          trustForwardedHeaders = trust,
+        ),
+        verifier = GitHubOAuthVerifier(fakeGitHub),
+        clock = clock,
+      )
+    val sessions = ServeSessionRegistry(open = { null })
+    val direct =
+      ServeHttpServer(
+          host = "127.0.0.1",
+          requestedPort = 0,
+          token = "unused-in-public",
+          sessions = sessions,
+          defaultSessionId = "none",
+          isPublic = true,
+          githubAuth = oauth,
+          trustForwardedFor = trust,
+        )
+        .also { it.start() }
+    try {
+      val request =
+        Request.Builder()
+          .url("http://127.0.0.1:${direct.port}/auth/github/start")
+          .header("Host", "preview.example.test")
+          .header("X-Forwarded-Host", "elsewhere.example.test")
+          .header("X-Forwarded-Proto", "https")
+          .build()
+      return noRedirect.newCall(request).execute().use {
+        java.net.URLDecoder.decode(
+          it.header("Location").orEmpty().substringAfter("redirect_uri=").substringBefore("&"),
+          "UTF-8",
+        )
+      }
+    } finally {
+      runCatching { direct.stop() }
+      runCatching { sessions.close() }
+    }
+  }
+
+  @Test
+  fun `the sign-in origin reads forwarded headers only from a trusted proxy`() {
+    assertEquals(
+      "http://preview.example.test/auth/github/callback",
+      redirectUriFor(callbackBaseUrl = null, trust = false),
+      "a direct caller's X-Forwarded-* are ignored; Host and the connection decide",
+    )
+    assertEquals(
+      "https://elsewhere.example.test/auth/github/callback",
+      redirectUriFor(callbackBaseUrl = null, trust = true),
+    )
+    assertEquals(
+      "https://preview.coo.ee/auth/github/callback",
+      redirectUriFor(callbackBaseUrl = "https://preview.coo.ee", trust = true),
+      "a pinned callback base URL wins over any forwarded header",
+    )
+  }
 
   @Test
   fun `a sign-in started on a site host comes back to that site host`() {
@@ -186,6 +258,7 @@ class ServeGithubSiteAuthTest {
           defaultSessionId = "none",
           isPublic = true,
           githubAuth = auth(),
+          trustForwardedFor = true,
           // Same auth config and secret, but m3 is NOT a site here.
           sites = ServeSiteRegistry.of(listOf("wear.preview.coo.ee" to "wear-m3")),
         )
@@ -308,6 +381,7 @@ class ServeGithubSiteAuthTest {
           defaultSessionId = "none",
           isPublic = true,
           githubAuth = auth(cookieDomain = null),
+          trustForwardedFor = true,
           sites = sites,
         )
         .also { it.start() }

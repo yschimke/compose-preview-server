@@ -9454,9 +9454,11 @@ ${captureControlsHtml().prependIndent("          ")}
    * The list and the delete both go through the JSON routes under `/admin/ui-builder/designs`,
    * carrying the admin token in the
    * [ee.schimke.composeai.cli.serve.ServeHttpServer.ADMIN_TOKEN_HEADER] header — the page only ever
-   * sees the token a browser opened it with (`?token=`), and re-sends that. No token in the URL
-   * means the page renders but every call answers 404, which the script says in place rather than
-   * showing an empty host.
+   * sees the token a browser opened it with (`?token=`), and re-sends that. It is the one admin
+   * route that reads the query form, and only to open the page: the script removes `token` from the
+   * address bar on load, and the navigation links do not carry it, so the credential goes no
+   * further than the request that delivered it. No token in the URL means the page renders but
+   * every call answers 404, which the script says in place rather than showing an empty host.
    *
    * Delete is a confirm-then-DELETE: there is no soft delete and no undo on the service, so the
    * prompt names the design and its owner before the request is made.
@@ -9466,7 +9468,6 @@ ${captureControlsHtml().prependIndent("          ")}
     readOnly: Boolean = false,
     version: String? = null,
   ): String {
-    val suffix = querySuffix(adminToken?.let { "token=" + WebEscaping.urlEncodeSegment(it) } ?: "")
     val warning =
       if (readOnly)
         "\n        <p class=\"cp-grant-withheld\">Read-only diagnosis: document bodies and every change are withheld.</p>"
@@ -9495,7 +9496,6 @@ ${captureControlsHtml().prependIndent("          ")}
     return document(
       title = "UI-builder designs — admin — compose-preview",
       version = version,
-      navSuffix = suffix,
       body =
         """
         <h1 class="cp-head">UI-builder designs</h1>
@@ -9537,7 +9537,6 @@ ${captureControlsHtml().prependIndent("          ")}
       var reload = document.getElementById("cp-library-reload");
       var token = ${jsString(adminToken.orEmpty())};
       var headers = token ? { "X-Compose-Preview-Admin-Token": token } : {};
-      var query = token ? "?token=" + encodeURIComponent(token) : "";
       function show(text, isError) {
         status.hidden = false;
         status.className = "cp-doc-result" + (isError ? " cp-doc-error" : "");
@@ -9632,6 +9631,15 @@ ${captureControlsHtml().prependIndent("          ")}
       var token = ${jsString(adminToken.orEmpty())};
       var readOnly = $readOnly;
       var headers = token ? { "X-Compose-Preview-Admin-Token": token } : {};
+      // The token opened this page and lives on in `headers`; keep it out of the address bar,
+      // history and any link copied from here.
+      try {
+        var here = new URL(window.location.href);
+        if (here.searchParams.has("token")) {
+          here.searchParams.delete("token");
+          window.history.replaceState(null, "", here.pathname + here.search + here.hash);
+        }
+      } catch (e) {}
       function show(text, isError) {
         status.hidden = false;
         status.className = "cp-doc-result" + (isError ? " cp-doc-error" : "");
