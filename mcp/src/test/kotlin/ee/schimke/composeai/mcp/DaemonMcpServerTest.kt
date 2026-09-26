@@ -163,11 +163,11 @@ class DaemonMcpServerTest {
     assertThat(content["text"]!!.jsonPrimitive.content)
       .contains("message.method === 'ui/notifications/tool-input'")
     assertThat(content["text"]!!.jsonPrimitive.content)
-      .contains("toolArguments = safeSelectionArguments(message.params?.arguments || {});")
+      .contains("toolArguments = safeSelectionArguments(incomingArguments);")
     assertThat(content["text"]!!.jsonPrimitive.content)
       .contains("function safeSelectionArguments(value)")
     assertThat(content["text"]!!.jsonPrimitive.content)
-      .contains("/(token|authorization|password|secret|api[-_]?key)/i")
+      .contains("/(token|authorization|password|secret|api[-_]?key|cookie|session)/i")
     assertThat(content["text"]!!.jsonPrimitive.content).contains("arguments: toolArguments")
     assertThat(content["text"]!!.jsonPrimitive.content)
       .contains("structuredContent: { composePreviewSelection: selected }")
@@ -189,6 +189,19 @@ class DaemonMcpServerTest {
     assertThat(content["text"]!!.jsonPrimitive.content).contains("RESOURCE_READ_TIMEOUT_MS,")
     assertThat(content["text"]!!.jsonPrimitive.content).contains("typeof content.blob === 'string'")
     assertThat(content["text"]!!.jsonPrimitive.content).contains("Refresh resource")
+    assertThat(content["text"]!!.jsonPrimitive.content.encodeToByteArray().size).isAtMost(500_000)
+    assertThat(content["text"]!!.jsonPrimitive.content)
+      .contains("const STATIC_RESULT_PARAM = 'compose-preview-result';")
+    assertThat(content["text"]!!.jsonPrimitive.content)
+      .contains("const MAX_STATIC_RESULT_BYTES = 500000;")
+    assertThat(content["text"]!!.jsonPrimitive.content)
+      .contains("!Array.isArray(envelope.result.content)")
+    assertThat(content["text"]!!.jsonPrimitive.content)
+      .contains("envelope.result.content.every(block => block && typeof block === 'object'")
+    assertThat(content["text"]!!.jsonPrimitive.content)
+      .contains("value.cells.every(cell => cell && typeof cell === 'object'")
+    assertThat(content["text"]!!.jsonPrimitive.content)
+      .contains("filter(child => child !== undefined)")
   }
 
   @Test
@@ -1132,8 +1145,7 @@ class DaemonMcpServerTest {
     assertThat(parsed["heightPx"]?.jsonPrimitive?.contentOrNull).isEqualTo("30")
     assertThat(parsed["sizeBytes"]?.jsonPrimitive?.contentOrNull).isEqualTo("24")
     assertThat(parsed["sha256"]?.jsonPrimitive?.contentOrNull).isNotEmpty()
-    // The first (only) content block is text JSON — firstTextContent() above would have errored on
-    // an image block, so the token-frugal path returned no base64 PNG.
+    // The observation has text plus its replayable resource link, but no inline base64 image.
     assertThat(resp.textContents()).hasSize(1)
   }
 
@@ -1304,8 +1316,13 @@ class DaemonMcpServerTest {
     assertThat(parsed["widthPx"]?.jsonPrimitive?.contentOrNull).isEqualTo("40")
     assertThat(parsed["heightPx"]?.jsonPrimitive?.contentOrNull).isEqualTo("30")
     assertThat(parsed["sha256"]?.jsonPrimitive?.contentOrNull).isNotEmpty()
-    // Single text block — no base64 PNG content rode along (firstTextContent would have errored on
-    // an image block).
+    val link =
+      resp.raw["content"]!!
+        .jsonArray
+        .single { it.jsonObject["type"]!!.jsonPrimitive.content == "resource_link" }
+        .jsonObject
+    assertThat(link["uri"]!!.jsonPrimitive.content).isEqualTo(uri)
+    // One text block plus the replayable link — no base64 PNG content rode along.
     assertThat(resp.textContents()).hasSize(1)
   }
 

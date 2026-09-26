@@ -27,6 +27,12 @@ window.addEventListener("message", async (event) => {
           uri: "compose-preview://fixture/_app/com.example.Card",
           previewId: "CardPreview",
           overrides: { uiMode: "dark" },
+          sessionId: "must-not-travel",
+          sourceUrl: "https://preview.invalid/render?cookie=also-must-not-travel",
+          callbackUrl: "https://preview.invalid/callback#access_token=fragment-must-not-travel",
+          redirects: [
+            "https://preview.invalid/callback#access_token=array-must-not-travel",
+          ],
         },
       },
     });
@@ -85,6 +91,11 @@ window.addEventListener("message", async (event) => {
         ],
       },
     });
+    return;
+  }
+  if (message.method === "ui/update-model-context") {
+    window.__mcpModelContext = message.params;
+    send({ jsonrpc: "2.0", id: message.id, result: {} });
   }
 });
 

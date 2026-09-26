@@ -4343,12 +4343,29 @@ for (const fixture of listPageFixtures()) {
 
       if (fixture.startsWith("mcp-app-viewer-")) {
         const viewer = page.frameLocator('iframe[title="Compose Preview MCP App"]');
-        await page.waitForFunction(() => window.__mcpReadCount === 1);
+        if (fixture.startsWith("mcp-app-viewer-static")) {
+          if (fixture === "mcp-app-viewer-static-fallback") {
+            await expect(viewer.locator("#canvas")).toContainText(
+              '"testTag":"static-card"',
+            );
+            await expect(viewer.locator("#canvas")).toContainText(
+              "compose-preview://fixture/_app/com.example.Card?overrides=fixture",
+            );
+            await expect(viewer.locator("#refresh")).toBeHidden();
+          } else {
+            await expect(
+              viewer.locator('#canvas img[alt="Rendered Compose preview"]'),
+            ).toBeVisible();
+            await expect(viewer.locator("#use")).toBeHidden();
+          }
+        } else {
+          await page.waitForFunction(() => window.__mcpReadCount === 1);
+        }
         if (fixture === "mcp-app-viewer-fallback") {
           await expect(viewer.locator("#canvas")).toContainText(
             "The host returned no PNG for resource",
           );
-        } else {
+        } else if (!fixture.startsWith("mcp-app-viewer-static")) {
           await expect(viewer.locator('#canvas img[alt="Rendered Compose preview"]')).toBeVisible();
         }
         if (fixture === "mcp-app-viewer-refresh") {
@@ -5833,4 +5850,113 @@ test("contract · a refused UI Builder explains itself inside the card", async (
   });
   expect(fits.insideRight).toBe(true);
   expect(fits.lines).toBeGreaterThan(1);
+});
+
+test("contract · static viewer bounds results and rejects credentials", async ({ page }) => {
+  await page.goto(
+    `/mcp-app/compose-preview-viewer.html#compose-preview-result=${"A".repeat(500_001)}`,
+  );
+  await expect(page.locator("#canvas")).toContainText("larger than 500 KB");
+  await expect(page.locator("#refresh")).toBeHidden();
+  await expect(page.locator("#use")).toBeHidden();
+
+  for (const content of [{}, [null], ["text"]]) {
+    const malformedEnvelope = Buffer.from(
+      JSON.stringify({ version: 1, result: { content } }),
+    ).toString("base64url");
+    await page.goto("about:blank");
+    await page.goto(
+      `/mcp-app/compose-preview-viewer.html#compose-preview-result=${malformedEnvelope}`,
+    );
+    await expect(page.locator("#canvas")).toContainText(
+      "the MCP tool result content must be an array of objects",
+    );
+    await expect(page.locator("#refresh")).toBeHidden();
+    await expect(page.locator("#use")).toBeHidden();
+  }
+
+  for (const result of [
+    { content: [], structuredContent: { cells: [null] } },
+    { content: [{ type: "text", text: '{"cells":[null]}' }] },
+  ]) {
+    const malformedMatrix = Buffer.from(
+      JSON.stringify({ version: 1, result }),
+    ).toString("base64url");
+    await page.goto("about:blank");
+    await page.goto(
+      `/mcp-app/compose-preview-viewer.html#compose-preview-result=${malformedMatrix}`,
+    );
+    await expect(page.locator("#canvas")).toContainText("matrix cells must be objects");
+    await expect(page.locator("#refresh")).toBeHidden();
+    await expect(page.locator("#use")).toBeHidden();
+  }
+
+  const credentialEnvelope = Buffer.from(
+    JSON.stringify({
+      version: 1,
+      arguments: { uri: "compose-preview://fixture/card", cookie: "must-not-travel" },
+      result: { content: [{ type: "text", text: "safe fallback" }] },
+    }),
+  ).toString("base64url");
+  await page.goto("about:blank");
+  await page.goto(
+    `/mcp-app/compose-preview-viewer.html#compose-preview-result=${credentialEnvelope}`,
+  );
+  await expect(page.locator("#canvas")).toContainText(
+    'credential field "cookie" is not allowed',
+  );
+  await expect(page.locator("#canvas")).not.toContainText("must-not-travel");
+
+  for (const [uri, rejected] of [
+    ["https://preview.invalid/render?token=query-secret", 'credential field "token"'],
+    ["https://user:password@preview.invalid/render", 'credential field "uri userinfo"'],
+    [
+      "https://preview.invalid/callback#access_token=fragment-secret",
+      'credential field "access_token"',
+    ],
+  ]) {
+    const encoded = Buffer.from(
+      JSON.stringify({
+        version: 1,
+        arguments: { uri },
+        result: { content: [{ type: "text", text: "safe fallback" }] },
+      }),
+    ).toString("base64url");
+    await page.goto("about:blank");
+    await page.goto(`/mcp-app/compose-preview-viewer.html#compose-preview-result=${encoded}`);
+    await expect(page.locator("#canvas")).toContainText(rejected);
+    await expect(page.locator("#canvas")).not.toContainText("query-secret");
+    await expect(page.locator("#canvas")).not.toContainText("fragment-secret");
+    await expect(page.locator("#canvas")).not.toContainText("password");
+  }
+
+  const nestedUriEnvelope = Buffer.from(
+    JSON.stringify({
+      version: 1,
+      arguments: {
+        redirects: ["https://preview.invalid/callback#access_token=nested-secret"],
+      },
+      result: { content: [{ type: "text", text: "safe fallback" }] },
+    }),
+  ).toString("base64url");
+  await page.goto("about:blank");
+  await page.goto(
+    `/mcp-app/compose-preview-viewer.html#compose-preview-result=${nestedUriEnvelope}`,
+  );
+  await expect(page.locator("#canvas")).toContainText('credential field "access_token"');
+  await expect(page.locator("#canvas")).not.toContainText("nested-secret");
+
+  await page.goto("/preview-harness/fixtures/pages/mcp-app-viewer-resource.html");
+  const viewer = page.frameLocator('iframe[title="Compose Preview MCP App"]');
+  await expect(viewer.locator('#canvas img[alt="Rendered Compose preview"]')).toBeVisible();
+  await viewer.locator("#use").click();
+  await page.waitForFunction(() => window.__mcpModelContext != null);
+  const modelContext = await page.evaluate(() => window.__mcpModelContext);
+  expect(JSON.stringify(modelContext)).not.toContain("sessionId");
+  expect(JSON.stringify(modelContext)).not.toContain("must-not-travel");
+  expect(JSON.stringify(modelContext)).not.toContain("sourceUrl");
+  expect(JSON.stringify(modelContext)).not.toContain("also-must-not-travel");
+  expect(JSON.stringify(modelContext)).not.toContain("fragment-must-not-travel");
+  expect(JSON.stringify(modelContext)).not.toContain("array-must-not-travel");
+  expect(JSON.stringify(modelContext)).toContain("CardPreview");
 });

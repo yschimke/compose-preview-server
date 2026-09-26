@@ -2454,7 +2454,13 @@ class DaemonMcpServer(
               )
           )
         } else {
-          renderObservation(uri, bytes, includeSemantics = observe == "semantics")
+          renderObservation(
+            uri,
+            bytes,
+            includeSemantics = observe == "semantics",
+            resourceUri =
+              uri.copy(overridesJson = (args["overrides"] as? JsonObject)?.toString()).toUri(),
+          )
         }
       }
     }
@@ -2788,6 +2794,7 @@ class DaemonMcpServer(
     uri: PreviewUri,
     pngBytes: ByteArray,
     includeSemantics: Boolean,
+    resourceUri: String,
   ): CallToolResult {
     val dimensions = pngDimensions(pngBytes)
     val payload = buildJsonObject {
@@ -2811,7 +2818,18 @@ class DaemonMcpServer(
         }
       }
     }
-    return CallToolResult(content = listOf(ContentBlock.Text(payload.toString())))
+    return CallToolResult(
+      content =
+        listOf(
+          ContentBlock.Text(payload.toString()),
+          ContentBlock.ResourceLink(
+            uri = resourceUri,
+            name = "Compose Preview render",
+            mimeType = "image/png",
+            description = "The current preview resource; subscribe to refresh it after edits.",
+          ),
+        )
+    )
   }
 
   /**

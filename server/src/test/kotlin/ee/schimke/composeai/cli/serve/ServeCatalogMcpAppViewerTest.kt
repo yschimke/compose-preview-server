@@ -51,6 +51,10 @@ class ServeCatalogMcpAppViewerTest {
         .jsonObject
     assertEquals("text/html;profile=mcp-app", read["mimeType"]!!.jsonPrimitive.content)
     val html = read["text"]!!.jsonPrimitive.content
+    assertTrue(
+      html.encodeToByteArray().size <= 500_000,
+      "the portable viewer bundle must stay at or below 500 KB",
+    )
     assertTrue(html.contains("Compose Preview"))
     assertTrue(html.contains("const pending = new Map();"))
     assertTrue(html.contains("await request('ui/initialize'"))
@@ -65,7 +69,11 @@ class ServeCatalogMcpAppViewerTest {
       html.contains("if (resourceToken) params._meta = { 'compose-preview/token': resourceToken };")
     )
     assertTrue(html.contains("function safeSelectionArguments(value)"))
-    assertTrue(html.contains("/(token|authorization|password|secret|api[-_]?key)/i"))
+    assertTrue(html.contains("/(token|authorization|password|secret|api[-_]?key|cookie|session)/i"))
+    assertTrue(html.contains("function credentialKeyInUri(key, value)"))
+    assertTrue(html.contains("if (url.username || url.password)"))
+    assertTrue(html.contains("for (const [parameter] of url.searchParams)"))
+    assertTrue(html.contains("new URLSearchParams(url.hash.slice(1))"))
     assertTrue(html.contains("arguments: toolArguments"))
     assertTrue(html.contains("structuredContent: { composePreviewSelection: selected }"))
     assertTrue(html.contains("await request('ui/update-model-context'"))
@@ -84,6 +92,12 @@ class ServeCatalogMcpAppViewerTest {
     assertTrue(html.contains("if (!pending.delete(id)) return;"))
     assertTrue(html.contains("window.clearTimeout(request.timer);"))
     assertTrue(html.contains("Viewer unavailable; use the complete text fallback."))
+    assertTrue(html.contains("const STATIC_RESULT_PARAM = 'compose-preview-result';"))
+    assertTrue(html.contains("const MAX_STATIC_RESULT_BYTES = 500000;"))
+    assertTrue(html.contains("#compose-preview-result=<unpadded base64url UTF-8 JSON>"))
+    assertTrue(html.contains("credential field"))
+    assertTrue(html.contains("const bridgeReady = staticMode ? Promise.resolve()"))
+    assertTrue(html.contains("Complete text and structured output:"))
     assertTrue(
       html.indexOf("await request('ui/initialize'") <
         html.indexOf("notify('ui/notifications/initialized'"),

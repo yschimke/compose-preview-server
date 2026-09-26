@@ -1300,10 +1300,8 @@ class ServeCatalogMcp(
       }
     }
     return listOf(
-      buildJsonObject {
-        put("type", "text")
-        put("text", observation.toString())
-      }
+      textContent(observation.toString()),
+      resourceLinkContent(resourceUriWithOverrides(uri, rawOverrides)),
     )
   }
 
