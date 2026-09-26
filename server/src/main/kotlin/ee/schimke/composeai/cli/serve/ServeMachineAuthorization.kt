@@ -184,6 +184,8 @@ class ServeMachineAuthorization(
    */
   private fun hasOperatorToken(call: ApplicationCall): Boolean {
     if (serverToken.isBlank()) return false
+    // A browser that exchanged its `?token=` link for the browse cookie holds the same credential.
+    if (ServeBrowseCookie.presents(call, serverToken)) return true
     return sequenceOf(
         call.request.headers[ServeHttpServer.TOKEN_HEADER],
         call.request.queryParameters["token"],

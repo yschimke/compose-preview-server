@@ -75,10 +75,11 @@ internal object ServeSameOriginRequests {
   fun isWebSocketUpgrade(call: ApplicationCall): Boolean =
     call.request.headers[HttpHeaders.Upgrade]?.equals("websocket", ignoreCase = true) == true
 
-  /** The session cookie is present and no header credential is. */
+  /** A session or browse cookie ([ServeBrowseCookie]) is present and no header credential is. */
   private fun carriesSessionOnly(call: ApplicationCall): Boolean {
     val request = call.request
-    if (request.cookies.rawCookies[SESSION_COOKIE] == null) return false
+    val cookies = request.cookies.rawCookies
+    if (cookies[SESSION_COOKIE] == null && cookies[ServeBrowseCookie.NAME] == null) return false
     val headers = request.headers
     return headers[ServeHttpServer.TOKEN_HEADER] == null &&
       headers[ServeHttpServer.ADMIN_TOKEN_HEADER] == null &&

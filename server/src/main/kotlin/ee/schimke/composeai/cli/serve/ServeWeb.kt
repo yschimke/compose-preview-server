@@ -514,7 +514,7 @@ object ServeWeb {
    */
   private fun queryString(token: String, sessionId: String?, isPublic: Boolean): String {
     val parts = buildList {
-      if (!isPublic) add("token=" + WebEscaping.urlEncodeSegment(token))
+      if (!isPublic && token.isNotEmpty()) add("token=" + WebEscaping.urlEncodeSegment(token))
       if (sessionId != null) add("session=" + WebEscaping.urlEncodeSegment(sessionId))
     }
     return parts.joinToString("&")
@@ -539,7 +539,7 @@ object ServeWeb {
     isPublic: Boolean,
   ): String =
     if (basePath.isEmpty()) queryString(token, sessionId, isPublic)
-    else if (isPublic) "" else "token=" + WebEscaping.urlEncodeSegment(token)
+    else if (isPublic || token.isEmpty()) "" else "token=" + WebEscaping.urlEncodeSegment(token)
 
   /**
    * Prefix a query with `?` when non-empty, else the empty string (no dangling `?` on token-free
@@ -6527,7 +6527,8 @@ ${captureControlsHtml().prependIndent("          ")}
     val headerAction = if (componentBrowser) "" else githubAuthControl(githubAuth)
     val headerSessionSettings = if (componentBrowser) "" else githubSessionSettings(githubAuth)
     // Public routes are open — no token param on the cards; a token-gated box keeps it.
-    val tokenParam = if (isPublic) "" else "token=" + WebEscaping.urlEncodeSegment(token)
+    val tokenParam =
+      if (isPublic || token.isEmpty()) "" else "token=" + WebEscaping.urlEncodeSegment(token)
     val suffix = querySuffix(tokenParam)
     /**
      * The card's comparison destinations, shortest label that still identifies them.
@@ -7218,7 +7219,10 @@ ${captureControlsHtml().prependIndent("          ")}
     componentBrowser: Boolean = false,
     githubAuth: GitHubAuthStatus? = null,
   ): String {
-    val suffix = querySuffix(if (isPublic) "" else "token=" + WebEscaping.urlEncodeSegment(token))
+    val suffix =
+      querySuffix(
+        if (isPublic || token.isEmpty()) "" else "token=" + WebEscaping.urlEncodeSegment(token)
+      )
     return document(
       title = "Not found — compose-preview",
       unfurlDescription = message,
@@ -7268,7 +7272,10 @@ ${captureControlsHtml().prependIndent("          ")}
     githubAuth: GitHubAuthStatus? = null,
     componentBrowser: Boolean = false,
   ): String {
-    val suffix = querySuffix(if (isPublic) "" else "token=" + WebEscaping.urlEncodeSegment(token))
+    val suffix =
+      querySuffix(
+        if (isPublic || token.isEmpty()) "" else "token=" + WebEscaping.urlEncodeSegment(token)
+      )
     val signIn =
       signInHref
         ?.takeIf { it.isNotBlank() }
@@ -8517,7 +8524,10 @@ ${captureControlsHtml().prependIndent("          ")}
     val message =
       if (pin.isBlank()) "That preview does not exist in this catalog."
       else "This preview was not published in catalog revision $pin."
-    val suffix = querySuffix(if (isPublic) "" else "token=" + WebEscaping.urlEncodeSegment(token))
+    val suffix =
+      querySuffix(
+        if (isPublic || token.isEmpty()) "" else "token=" + WebEscaping.urlEncodeSegment(token)
+      )
     return document(
       title = "Preview unavailable — compose-preview",
       unfurlDescription = message,
@@ -9375,7 +9385,10 @@ ${captureControlsHtml().prependIndent("          ")}
      */
     version: String? = null,
   ): String {
-    val suffix = querySuffix(if (isPublic) "" else "token=" + WebEscaping.urlEncodeSegment(token))
+    val suffix =
+      querySuffix(
+        if (isPublic || token.isEmpty()) "" else "token=" + WebEscaping.urlEncodeSegment(token)
+      )
     return document(
       title = "Playground unavailable — compose-preview",
       unfurlDescription = "The playground is not enabled on this server.",
@@ -10539,7 +10552,8 @@ ${captureControlsHtml().prependIndent("          ")}
   ): String {
     fun esc(s: String) = WebEscaping.htmlEscape(s)
     // Gated-link suffix: token-gated ⇒ carry the token; public ⇒ nothing (routes are open).
-    val suffix = if (view.public) "" else "?token=" + WebEscaping.urlEncodeSegment(token)
+    val suffix =
+      if (view.public || token.isEmpty()) "" else "?token=" + WebEscaping.urlEncodeSegment(token)
     fun stat(s: Stat): String {
       val meter =
         s.meter?.let { meter ->
@@ -11631,7 +11645,9 @@ ${captureControlsHtml().prependIndent("          ")}
     val themeLeaseUrl =
       if (themeRenderBurstCapacity > 1) "$basePath/api/theme-render-lease$q" else ""
     val navSuffix =
-      querySuffix(if (isPublic) "" else "token=" + WebEscaping.urlEncodeSegment(token))
+      querySuffix(
+        if (isPublic || token.isEmpty()) "" else "token=" + WebEscaping.urlEncodeSegment(token)
+      )
     val heading = catalogHeading(displayTitle, moduleLabel)
     val catalogId =
       if (componentBrowser || heading == moduleLabel) ""
@@ -12429,7 +12445,9 @@ ${captureControlsHtml().prependIndent("          ")}
     // — it is always the current catalog — so the generation is the whole of it.
     val assetQ = ServeCacheGeneration.scope(q, generation)
     val navSuffix =
-      querySuffix(if (isPublic) "" else "token=" + WebEscaping.urlEncodeSegment(token))
+      querySuffix(
+        if (isPublic || token.isEmpty()) "" else "token=" + WebEscaping.urlEncodeSegment(token)
+      )
     val heading = catalogHeading(displayTitle, moduleLabel)
     // Native-format rows retain the catalog's one-default-card presentation. A design reference,
     // however, names one exact preview state/props/size mapping, so that referenced variant must
@@ -13556,7 +13574,9 @@ $rows
         .joinToString("&")
     val q = querySuffix(linkQuery)
     val navSuffix =
-      querySuffix(if (isPublic) "" else "token=" + WebEscaping.urlEncodeSegment(token))
+      querySuffix(
+        if (isPublic || token.isEmpty()) "" else "token=" + WebEscaping.urlEncodeSegment(token)
+      )
     val heading = catalogHeading(displayTitle, moduleLabel)
     // Both panels take the pin, or neither does. A pinned render scored against the current mock
     // would be a comparison across time rather than between the two sides. Unpinned, both take the
@@ -13910,7 +13930,9 @@ ${scriptTag("known-differences.js")}
     val linkSessionId = if (sessionInOrigin) null else sessionId
     val q = querySuffix(linkQuery(token, linkSessionId, basePath, isPublic))
     val navSuffix =
-      querySuffix(if (isPublic) "" else "token=" + WebEscaping.urlEncodeSegment(token))
+      querySuffix(
+        if (isPublic || token.isEmpty()) "" else "token=" + WebEscaping.urlEncodeSegment(token)
+      )
     val heading = catalogHeading(displayTitle, moduleLabel)
     val cards =
       pages.joinToString("\n") { page ->
@@ -14041,7 +14063,9 @@ ${scriptTag("known-differences.js")}
     val query = linkQuery(token, linkSessionId, basePath, isPublic)
     val q = querySuffix(query)
     val navSuffix =
-      querySuffix(if (isPublic) "" else "token=" + WebEscaping.urlEncodeSegment(token))
+      querySuffix(
+        if (isPublic || token.isEmpty()) "" else "token=" + WebEscaping.urlEncodeSegment(token)
+      )
     val heading = catalogHeading(displayTitle, moduleLabel)
 
     // Authoring order where the catalog published one, so the sections read in the order the
@@ -14518,7 +14542,9 @@ $cards
     val linkSessionId = if (sessionInOrigin) null else sessionId
     val q = querySuffix(linkQuery(token, linkSessionId, basePath, isPublic))
     val navSuffix =
-      querySuffix(if (isPublic) "" else "token=" + WebEscaping.urlEncodeSegment(token))
+      querySuffix(
+        if (isPublic || token.isEmpty()) "" else "token=" + WebEscaping.urlEncodeSegment(token)
+      )
     val heading = catalogHeading(displayTitle, moduleLabel)
 
     /** The preview this node can be drawn with on this session, or null. */
@@ -14979,7 +15005,9 @@ $cards
     // number about nothing.
     val assetQ = ServeCacheGeneration.scope(q, generation)
     val navSuffix =
-      querySuffix(if (isPublic) "" else "token=" + WebEscaping.urlEncodeSegment(token))
+      querySuffix(
+        if (isPublic || token.isEmpty()) "" else "token=" + WebEscaping.urlEncodeSegment(token)
+      )
     val heading = catalogHeading(displayTitle, moduleLabel)
     val coverage = dashboard.coverage
 
@@ -16115,7 +16143,9 @@ ${scriptTag("known-differences.js")}
     val executableBundleHref = executableBundleHref?.takeIf { pinned == null && !componentBrowser }
     val q = querySuffix(linkQuery(token, linkSessionId, basePath, isPublic))
     val navSuffix =
-      querySuffix(if (isPublic) "" else "token=" + WebEscaping.urlEncodeSegment(token))
+      querySuffix(
+        if (isPublic || token.isEmpty()) "" else "token=" + WebEscaping.urlEncodeSegment(token)
+      )
     val displayName = previewDisplayName(preview)
     val issueRows =
       if (componentBrowser) ""
@@ -18584,7 +18614,9 @@ ${scriptTag("known-differences.js")}
     val linkSessionId = if (sessionInOrigin) null else sessionId
     val q = querySuffix(linkQuery(token, linkSessionId, basePath, isPublic))
     val navSuffix =
-      querySuffix(if (isPublic) "" else "token=" + WebEscaping.urlEncodeSegment(token))
+      querySuffix(
+        if (isPublic || token.isEmpty()) "" else "token=" + WebEscaping.urlEncodeSegment(token)
+      )
     val heading = catalogHeading(displayTitle, moduleLabel)
     val subject = preview.componentId ?: preview.label
     val cellSuffix = if (cell.isEmpty()) "" else " · $cell"
