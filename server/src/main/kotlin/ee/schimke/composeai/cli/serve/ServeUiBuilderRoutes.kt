@@ -269,7 +269,7 @@ internal fun Route.installUiBuilderRoutes(
           existingDesignOutcome(designId, incoming, serverOrigin())
         }
       if (outcome is ServeUiBuilderCreate.Outcome.Refused) {
-        call.respondText(outcome.reason, status = HttpStatusCode.Conflict)
+        call.respondText(outcome.reason, status = HttpStatusCode.PreconditionFailed)
       } else {
         call.respondText(
           "$designId already exists; If-None-Match: * requires that it does not",

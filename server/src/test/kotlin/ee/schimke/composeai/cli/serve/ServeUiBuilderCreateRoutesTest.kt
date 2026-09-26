@@ -2,8 +2,11 @@ package ee.schimke.composeai.cli.serve
 
 import ee.schimke.composeai.uibuilder.protocol.CatalogBenchmarkV1
 import ee.schimke.composeai.uibuilder.protocol.CatalogCapabilityV1
+import ee.schimke.composeai.uibuilder.protocol.DesignDocumentV1
+import ee.schimke.composeai.uibuilder.protocol.DesignStateV1
 import ee.schimke.composeai.uibuilder.protocol.ExportCapabilitiesV1
 import ee.schimke.composeai.uibuilder.protocol.ServiceErrorCodeV1
+import ee.schimke.composeai.uibuilder.protocol.ServiceSnapshotV1
 import ee.schimke.composeai.uibuilder.service.UiBuilderServiceCall
 import ee.schimke.composeai.uibuilder.service.UiBuilderServiceError
 import ee.schimke.composeai.uibuilder.service.UiBuilderServicePort
@@ -14,6 +17,7 @@ import ee.schimke.composeai.uibuilder.service.UiBuilderSubscriptionCall
 import java.io.Closeable
 import java.io.File
 import java.nio.file.Files
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CopyOnWriteArrayList
 import kotlin.test.AfterTest
 import kotlin.test.Test
@@ -34,49 +38,56 @@ import okhttp3.RequestBody.Companion.toRequestBody
  */
 class ServeUiBuilderCreateRoutesTest {
   private val created = CopyOnWriteArrayList<String>()
-  private val existing = CopyOnWriteArrayList<String>()
+  private val documents = ConcurrentHashMap<String, DesignDocumentV1>()
+
+  private val catalog =
+    CatalogCapabilityV1.Builder(
+        "compose-catalog-capabilities/v1",
+        CatalogBenchmarkV1.Builder(
+            "m3",
+            "source",
+            "m3-catalog",
+            "candidate",
+            "candidate",
+          )
+          .build(),
+        emptyList(),
+      )
+      .also {
+        it.exportCapabilities =
+          ExportCapabilitiesV1.Builder()
+            .also {
+              it.composeCode = true
+              it.svg = false
+              it.png = false
+            }
+            .build()
+      }
+      .build()
 
   private val service =
     object : UiBuilderServicePort {
       override suspend fun execute(call: UiBuilderServiceCall): UiBuilderServiceResponse =
         when (val request = call.request) {
           is UiBuilderServiceRequest.OpenDesign ->
-            if (request.designId in existing) UiBuilderServiceResponse.Catalogs(emptyList())
-            else
-              UiBuilderServiceResponse.Error(
+            documents[request.designId]?.let { document ->
+              UiBuilderServiceResponse.Snapshot(
+                ServiceSnapshotV1(
+                  designId = document.id,
+                  state = DesignStateV1(lastSequence = 0, document = document),
+                  catalog = catalog,
+                  retainedFromSequence = 0,
+                )
+              )
+            }
+              ?: UiBuilderServiceResponse.Error(
                 UiBuilderServiceError(ServiceErrorCodeV1.NOT_FOUND, "missing")
               )
           is UiBuilderServiceRequest.ListCatalogs ->
-            UiBuilderServiceResponse.Catalogs(
-              listOf(
-                CatalogCapabilityV1.Builder(
-                    "compose-catalog-capabilities/v1",
-                    CatalogBenchmarkV1.Builder(
-                        "m3",
-                        "source",
-                        "m3-catalog",
-                        "candidate",
-                        "candidate",
-                      )
-                      .build(),
-                    emptyList(),
-                  )
-                  .also {
-                    it.exportCapabilities =
-                      ExportCapabilitiesV1.Builder()
-                        .also {
-                          it.composeCode = true
-                          it.svg = false
-                          it.png = false
-                        }
-                        .build()
-                  }
-                  .build()
-              )
-            )
+            UiBuilderServiceResponse.Catalogs(listOf(catalog))
           is UiBuilderServiceRequest.CreateDesign -> {
             created += request.document.id
-            existing += request.document.id
+            documents[request.document.id] = request.document
             UiBuilderServiceResponse.Catalogs(emptyList())
           }
           else -> UiBuilderServiceResponse.Catalogs(emptyList())
@@ -269,6 +280,29 @@ class ServeUiBuilderCreateRoutesTest {
     // The second one fails its own precondition rather than replacing the first.
     assertEquals(412, put("put-design", document).first)
     assertEquals(listOf("put-design"), created)
+
+    // A re-import of the canonical server copy is still a failed conditional create. The body
+    // gives the more useful R3 instruction without changing HTTP precondition semantics.
+    val canonical =
+      document.replace(
+        "\"stateVariables\":{}",
+        "\"home\":{\"kind\":\"server\",\"url\":\"http://127.0.0.1:${server.port}\",\"designId\":\"put-design\"},\"stateVariables\":{}",
+      )
+    val refused =
+      client
+        .newCall(
+          Request.Builder()
+            .url(url("/api/ui-builder/v1/designs/put-design"))
+            .header("X-Test-Actor", "operator")
+            .header("If-None-Match", "*")
+            .put(canonical.toRequestBody())
+            .build()
+        )
+        .execute()
+    refused.use { response ->
+      assertEquals(412, response.code)
+      assertTrue(response.body.string().contains("apply changes to the original instead"))
+    }
 
     // The URL names the design, so a document that claims to be another one is a bad request.
     assertEquals(400, put("elsewhere", document).first)
