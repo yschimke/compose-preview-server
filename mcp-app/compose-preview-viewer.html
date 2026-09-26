@@ -65,6 +65,7 @@
   let resourceToken;
   let resourceResult;
   let resourceReadGeneration = 0;
+  let resourceReadUri;
   let resourcePollTimer;
   let resourceSubscriptionGeneration = 0;
   let subscribedResourceUri;
@@ -331,7 +332,9 @@
       // MCP Apps 2026-01-26 exposes resources/read but not subscription proxying. A future host
       // may advertise serverResources.subscribe; if that path fails, retain today's bounded poll.
       hostResourceSubscriptions = false;
-      if (!initialReadPending) scheduleResourcePoll(uri);
+      // If the initial read is still running, its finally block observes the capability downgrade
+      // and arms the poll. If it already settled, this failure must do so itself.
+      if (resourceReadUri !== uri) scheduleResourcePoll(uri);
       console.debug('Resource subscriptions are unavailable; polling instead:', error);
     }
   }
@@ -352,6 +355,7 @@
     if (!resourceResult) return;
     const { result: toolResult, resource, value } = resourceResult;
     const generation = ++resourceReadGeneration;
+    resourceReadUri = resource.uri;
     refresh.disabled = true;
     meta.textContent = 'Reading preview resource…';
     try {
@@ -380,6 +384,7 @@
       console.warn('Failed to read Compose Preview resource:', error);
     } finally {
       if (generation === resourceReadGeneration && resourceResult?.resource?.uri === resource.uri) {
+        resourceReadUri = undefined;
         refresh.disabled = false;
         if (subscribedResourceUri !== resource.uri) scheduleResourcePoll(resource.uri);
       }

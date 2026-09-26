@@ -24,7 +24,7 @@ window.addEventListener("message", async (event) => {
       id: message.id,
       result: {
         hostCapabilities: {
-          serverResources: { subscribe: mode === "refresh" },
+          serverResources: { subscribe: mode === "refresh" || mode === "subscribe-fails" },
         },
       },
     });
@@ -87,6 +87,18 @@ window.addEventListener("message", async (event) => {
     return;
   }
   if (message.method === "resources/subscribe") {
+    if (mode === "subscribe-fails") {
+      window.setTimeout(
+        () =>
+          send({
+            jsonrpc: "2.0",
+            id: message.id,
+            error: { code: -32601, message: "subscriptions unavailable" },
+          }),
+        250,
+      );
+      return;
+    }
     const stale = message.params.uri.includes("overrides=stale");
     if (stale) {
       window.setTimeout(() => send({ jsonrpc: "2.0", id: message.id, result: {} }), 250);

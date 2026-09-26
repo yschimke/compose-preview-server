@@ -4384,6 +4384,10 @@ for (const fixture of listPageFixtures()) {
           await expect(viewer.locator("#refresh")).toBeEnabled();
           await expect(image).not.toHaveAttribute("src", before);
         }
+        if (fixture === "mcp-app-viewer-subscribe-fallback") {
+          await page.waitForFunction(() => window.__mcpReadCount >= 2, null, { timeout: 7_000 });
+          await expect(viewer.locator("#refresh")).toBeEnabled();
+        }
       }
 
       // The design page's renders are `loading="lazy"` — a live catalog serves one daemon
