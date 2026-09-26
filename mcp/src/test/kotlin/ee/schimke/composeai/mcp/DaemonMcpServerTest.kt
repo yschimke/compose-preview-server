@@ -452,10 +452,6 @@ class DaemonMcpServerTest {
     daemon.emitDiscovery(previewId)
     client.expectNotification("notifications/resources/list_changed", 2_000)
 
-    val pngFile = tmp.newFile("override-refresh.png")
-    Files.write(pngFile.toPath(), byteArrayOf(0x89.toByte(), 0x50, 0x4e, 0x47))
-    daemon.autoRenderPngPath = { id -> if (id == previewId) pngFile.absolutePath else null }
-
     val rawOverrides = buildJsonObject {
       put("widthPx", 600)
       put("uiMode", "dark")
@@ -489,8 +485,33 @@ class DaemonMcpServerTest {
     assertThat(daemon.renderOverrides.single()!!.uiMode)
       .isEqualTo(ee.schimke.composeai.daemon.protocol.UiMode.DARK)
 
-    val update = client.expectNotification("notifications/resources/updated", 2_000)
-    assertThat(update.params?.get("uri")?.jsonPrimitive?.contentOrNull).isEqualTo(overrideUri)
+    // A second edit with the same override set must queue another render rather than deduplicating
+    // onto the in-flight generation. The first render may already have captured the old source.
+    val secondResponse =
+      client.callTool(
+        "notify_file_changed",
+        buildJsonObject {
+          put("workspaceId", workspaceId.value)
+          put("path", "src/main/kotlin/com/example/Preview.kt")
+          put("kind", "source")
+          put("changeType", "modified")
+        },
+      )
+    assertThat(secondResponse.firstTextContent()).contains("re-rendered 1 watched preview(s)")
+    assertThat(daemon.renderRequests.poll(200, TimeUnit.MILLISECONDS)).isNull()
+    assertThat(daemon.renderOverrides).hasSize(1)
+
+    daemon.emitRenderFinished(previewId, "/tmp/override-refresh-1.png")
+    val firstUpdate = client.expectNotification("notifications/resources/updated", 2_000)
+    assertThat(firstUpdate.params?.get("uri")?.jsonPrimitive?.contentOrNull).isEqualTo(overrideUri)
+    val secondRender = daemon.renderRequests.poll(2_000, TimeUnit.MILLISECONDS)
+    assertThat(secondRender).isEqualTo(listOf(previewId))
+    assertThat(daemon.renderOverrides).hasSize(2)
+    assertThat(daemon.renderOverrides[1]!!.widthPx).isEqualTo(600)
+
+    daemon.emitRenderFinished(previewId, "/tmp/override-refresh-2.png")
+    val secondUpdate = client.expectNotification("notifications/resources/updated", 2_000)
+    assertThat(secondUpdate.params?.get("uri")?.jsonPrimitive?.contentOrNull).isEqualTo(overrideUri)
   }
 
   @Test
