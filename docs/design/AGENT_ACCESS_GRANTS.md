@@ -347,8 +347,10 @@ asking to edit it — goes through the same approval, from `/ui-builder/request-
   reaches designs through: a call about a named design keeps `onBehalfOfActorId`, and a call about
   any other design — or about none, such as a create — goes to the service as the holder alone, with
   its own identity's access and nothing more. A listing is the holder's own, plus the named designs.
-  Several grants from one approver to one holder reach the union of their designs, and any of them
-  that names none reaches everything. A grant that names no design — every agent and MCP grant, and
+  Several grants from one approver to one holder reach the union of the designs they name. Once
+  any of them names a design, one that names none does not widen that: the service call carries
+  the approver, not the grant that authorised it, so an every-design read grant beside a one-design
+  edit grant must not make the edit reach every design. A grant that names no design — every agent and MCP grant, and
   a request made from the designs page itself — behaves exactly as before.
 
 ## What it is not

@@ -201,14 +201,35 @@ class ServeUiBuilderGrantScopeTest {
   }
 
   @Test
-  fun `two grants for two designs reach both, and one without designs reaches all`() {
+  fun `two grants for two designs reach both`() {
     grant(setOf("asked-for"))
     assertFalse(reads("other"))
     grant(setOf("other"))
     assertTrue(reads("other"))
     assertEquals(setOf("asked-for", "other"), grants.designScopeFor(REQUESTER, OWNER))
+  }
+
+  /**
+   * The service call carries the approver, not the grant that authorised it, so an every-design
+   * grant beside a one-design grant (say a read-only one beside an edit one) must not stretch the
+   * one-design grant to every design.
+   */
+  @Test
+  fun `a grant without designs does not widen one that names a design`() {
+    grant(setOf("asked-for"))
+    grant(emptySet())
+    assertEquals(setOf("asked-for"), grants.designScopeFor(REQUESTER, OWNER))
+    assertTrue(writes("asked-for"))
+    assertFalse(writes("other"))
+    assertFalse(reads("other"))
+  }
+
+  @Test
+  fun `grants that all name no design reach every design`() {
+    grant(emptySet())
     grant(emptySet())
     assertNull(grants.designScopeFor(REQUESTER, OWNER))
+    assertTrue(writes("other"))
   }
 
   @Test

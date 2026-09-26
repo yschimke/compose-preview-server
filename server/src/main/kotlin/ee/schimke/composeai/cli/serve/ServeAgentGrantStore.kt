@@ -598,11 +598,14 @@ class ServeAgentGrantStore(
    * The designs [holderActorId] may reach through [approvedByActorId]'s authority, or null when
    * that delegation is not limited to named designs.
    *
-   * The union over every grant this approver gave this holder, because each is authority they chose
-   * to lend: two approvals for two designs reach both, and any approval that names no design
-   * reaches everything, exactly as it always did. Null too when no grant matches at all — a
-   * delegation this store did not mint, such as the server's own catalog recovery, is not this
-   * store's to narrow.
+   * The union of the designs named by every grant this approver gave this holder: two approvals for
+   * two designs reach both. Null — every design, exactly as before — only when none of those grants
+   * names a design. Once any of them does, grants that name none add nothing here. The service call
+   * this answers for carries the approver but not the grant that authorised it, and those grants
+   * may carry different rungs: an every-design read grant beside a one-design edit grant must not
+   * turn the edit into an every-design edit. Null too when no grant matches at all — a delegation
+   * this store did not mint, such as the server's own catalog recovery, is not this store's to
+   * narrow.
    *
    * Live grants decide. Only when none is live does an expired grant not yet purged answer, so a
    * request authorised the instant before its grant ran out is still held to that grant's designs.
@@ -615,8 +618,8 @@ class ServeAgentGrantStore(
         it.approvedByActorId == approvedByActorId && it.holderActorId == holderActorId
       }
     val deciding = matching.filter { it.expiresAtMillis > now }.ifEmpty { matching }
-    if (deciding.isEmpty() || deciding.any { it.designIds.isEmpty() }) return null
-    return deciding.flatMapTo(mutableSetOf()) { it.designIds }
+    val named = deciding.flatMapTo(mutableSetOf()) { it.designIds }
+    return named.ifEmpty { null }
   }
 
   /** The live grant with this id, or null when unknown/expired. */
