@@ -1,0 +1,207 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Compose Preview</title>
+<style>
+  :root { color-scheme: light dark; font: 14px system-ui, sans-serif; color: var(--color-text-primary, #1b1b1f); background: var(--color-background-primary, #fff); }
+  body { margin: 0; }
+  .app { padding: 12px; }
+  .bar { display: flex; gap: 8px; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+  .title { font-weight: 650; }
+  .muted { color: var(--color-text-secondary, #666); font-size: 12px; }
+  .canvas { min-height: 120px; border: 1px solid var(--color-border, #d8d8dd); border-radius: 10px; background: var(--color-background-secondary, #f8f8fa); display: grid; place-items: center; overflow: auto; }
+  .canvas img { max-width: 100%; max-height: 560px; object-fit: contain; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; width: 100%; padding: 8px; box-sizing: border-box; }
+  .cell { border: 1px solid var(--color-border, #d8d8dd); border-radius: 8px; padding: 6px; background: var(--color-background-primary, #fff); cursor: pointer; }
+  .cell img { width: 100%; display: block; }
+  .cell code { font-size: 11px; overflow-wrap: anywhere; }
+  .actions { display: flex; gap: 8px; margin-top: 10px; }
+  button { font: inherit; padding: 6px 9px; border-radius: 6px; border: 1px solid var(--color-border, #aaa); background: var(--color-background-primary, #fff); color: inherit; cursor: pointer; }
+</style>
+<body>
+<main class="app">
+  <div class="bar">
+    <div>
+      <div class="title">Compose Preview</div>
+      <div id="meta" class="muted">Waiting for a preview result…</div>
+    </div>
+  </div>
+  <section id="canvas" class="canvas">
+    <div class="empty">This viewer displays render and matrix results when the host supplies them.</div>
+  </section>
+  <div class="actions"><button id="use" hidden>Use selected result</button></div>
+</main>
+<script>
+(() => {
+  const q = selector => document.querySelector(selector);
+  const canvas = q('#canvas');
+  const meta = q('#meta');
+  const use = q('#use');
+  const pending = new Map();
+  let nextId = 1;
+  let initialized = false;
+  let selected;
+  let toolArguments = {};
+
+  function request(method, params) {
+    const id = nextId++;
+    return new Promise((resolve, reject) => {
+      pending.set(id, { resolve, reject });
+      window.parent.postMessage({ jsonrpc: '2.0', id, method, params }, '*');
+    });
+  }
+
+  function notify(method, params) {
+    window.parent.postMessage({ jsonrpc: '2.0', method, params }, '*');
+  }
+
+  const parse = source => {
+    try {
+      return JSON.parse(source);
+    } catch {
+      return null;
+    }
+  };
+
+  const data = result =>
+    result?.structuredContent ||
+    result?.content?.filter(block => block.type === 'text').map(block => parse(block.text)).find(Boolean) ||
+    {};
+  const png = result => result?.content?.find(block => block.type === 'image' && block.mimeType === 'image/png');
+  const link = result => result?.content?.find(block => block.type === 'resource_link');
+  const safeToolArguments = value => {
+    const copy = value && typeof value === 'object' && !Array.isArray(value) ? { ...value } : {};
+    delete copy.token;
+    return copy;
+  };
+
+  function choose(value, label) {
+    selected = value;
+    use.hidden = false;
+    meta.textContent = label;
+  }
+
+  function renderMatrix(value, cells) {
+    const grid = document.createElement('div');
+    grid.className = 'grid';
+    cells.forEach((cell, index) => {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'cell';
+      if (typeof cell.png === 'string') {
+        const image = document.createElement('img');
+        image.alt = `Matrix cell ${index + 1}`;
+        image.src = `data:image/png;base64,${cell.png}`;
+        button.append(image);
+      }
+      const overrides = document.createElement('code');
+      overrides.textContent = JSON.stringify(cell.overrides || {});
+      button.append(overrides);
+      button.addEventListener('click', () =>
+        choose({
+          kind: 'matrix-cell',
+          uri: value.uri || toolArguments.uri,
+          arguments: toolArguments,
+          overrides: cell.overrides || {},
+        }, 'Selected matrix cell')
+      );
+      grid.append(button);
+    });
+    canvas.replaceChildren(grid);
+  }
+
+  function renderImage(image, value, resource) {
+    const preview = document.createElement('img');
+    preview.alt = 'Rendered Compose preview';
+    preview.src = `data:image/png;base64,${image.data}`;
+    canvas.replaceChildren(preview);
+    choose({
+      kind: 'preview',
+      uri: value.uri || resource?.uri || toolArguments.uri,
+      arguments: toolArguments,
+      overrides: toolArguments.overrides,
+      semanticsRef: value.semanticsRef,
+    }, value.previewId || toolArguments.previewId || 'Preview render');
+  }
+
+  function draw(result) {
+    selected = undefined;
+    use.hidden = true;
+    const value = data(result);
+    const image = png(result);
+    const resource = link(result);
+    const cells = Array.isArray(value.cells) && value.cells;
+    if (cells) {
+      if (image && !cells.some(cell => typeof cell?.png === 'string' && cell.png.length > 0)) {
+        renderImage(image, value, resource);
+        return;
+      }
+      renderMatrix(value, cells);
+      return;
+    }
+    if (image) {
+      renderImage(image, value, resource);
+      return;
+    }
+    if (resource) {
+      const message = document.createElement('div');
+      message.className = 'empty';
+      message.append('A render resource is available: ');
+      const uri = document.createElement('code');
+      uri.textContent = resource.uri;
+      message.append(uri);
+      canvas.replaceChildren(message);
+      choose({ kind: 'resource', uri: resource.uri }, 'Preview resource');
+      return;
+    }
+    const empty = document.createElement('div');
+    empty.className = 'empty';
+    empty.textContent = 'The result has no PNG. Text and structured output remain available to the agent.';
+    canvas.replaceChildren(empty);
+  }
+
+  window.addEventListener('message', event => {
+    if (event.source !== window.parent) return;
+    const message = event.data;
+    if (!message || message.jsonrpc !== '2.0') return;
+    if (pending.has(message.id)) {
+      const request = pending.get(message.id);
+      pending.delete(message.id);
+      if (message.error) request.reject(message.error);
+      else request.resolve(message.result);
+      return;
+    }
+    if (message.method === 'ui/notifications/tool-input') {
+      toolArguments = safeToolArguments(message.params?.arguments);
+      return;
+    }
+    if (message.method === 'ui/notifications/tool-result') draw(message.params?.result || message.params);
+  }, { passive: true });
+
+  async function initializeBridge() {
+    try {
+      await request('ui/initialize', {
+        appInfo: { name: 'compose-preview-viewer', version: '1' },
+        appCapabilities: {},
+        protocolVersion: '2026-01-26',
+      });
+      initialized = true;
+      notify('ui/notifications/initialized', {});
+    } catch (error) {
+      meta.textContent = 'Viewer unavailable; use the text fallback.';
+      console.error('Failed to initialize the MCP Apps bridge:', error);
+    }
+  }
+
+  const bridgeReady = initializeBridge();
+  use.addEventListener('click', async () => {
+    await bridgeReady;
+    if (!initialized || !selected) return;
+    await request('ui/update-model-context', {
+      content: [{ type: 'text', text: `User selected Compose Preview context: ${JSON.stringify(selected)}` }],
+      structuredContent: { composePreviewSelection: selected },
+    });
+  });
+})();
+</script>

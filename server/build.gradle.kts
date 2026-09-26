@@ -46,6 +46,10 @@ group = "ee.schimke.composeai"
 
 kotlin { jvmToolchain(libs.versions.java.server.get().toInt()) }
 
+// The small MCP App is shipped by both independently installable MCP servers. It renders results
+// from the existing tool surface; it is deliberately not a second UI Builder editor.
+kotlin.sourceSets.named("main") { resources.srcDir(rootProject.file("mcp-app")) }
+
 ktfmt { googleStyle() }
 
 // Same derivation as `:cli` (PLUGIN_VERSION in CI, a patch-bumped SNAPSHOT off
