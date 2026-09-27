@@ -142,6 +142,7 @@ class ServeCatalogMcpAppViewerTest {
     assertTrue(html.contains("Complete comment data"))
     assertTrue(html.contains("renderCommentPins()"))
     assertTrue(html.contains("Click the preview to pin this comment"))
+    assertTrue(html.contains("Refresh comments"))
     assertTrue(html.contains("Reading comments requires <code>ui-builder-read</code>"))
     assertTrue(html.contains("Posting requires ui-builder-write"))
     assertTrue(html.contains("...(resourceToken ? { token: resourceToken } : {})"))

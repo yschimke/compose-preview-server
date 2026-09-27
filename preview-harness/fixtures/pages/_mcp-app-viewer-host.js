@@ -37,6 +37,27 @@ let commentBoard = {
     },
   ],
 };
+window.__mcpAddExternalComment = () => {
+  commentBoard = {
+    ...commentBoard,
+    sequence: commentBoard.sequence + 1,
+    threads: [
+      ...commentBoard.threads,
+      {
+        id: "thread-external",
+        resolved: false,
+        comments: [
+          {
+            id: "comment-external",
+            authorId: "github:reviewer",
+            displayName: "External reviewer",
+            body: "This arrived after the inline render.",
+          },
+        ],
+      },
+    ],
+  };
+};
 
 async function png(path) {
   const bytes = new Uint8Array(await (await fetch(path)).arrayBuffer());
@@ -524,6 +545,7 @@ window.addEventListener("message", async (event) => {
     if (mode.startsWith("comments")) {
       if (message.params.name === "ui_builder_list_comments") {
         window.__mcpCommentListCall = message.params;
+        window.__mcpCommentListCalls = (window.__mcpCommentListCalls || 0) + 1;
       } else if (message.params.name === "ui_builder_post_comment") {
         window.__mcpCommentPostCall = message.params;
         commentBoard = {

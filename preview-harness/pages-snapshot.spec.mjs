@@ -4433,6 +4433,15 @@ for (const fixture of listPageFixtures()) {
             name: "ui_builder_list_comments",
             arguments: { designId: "design-comments", token: "viewer-grant-secret" },
           });
+          await page.evaluate(() => window.__mcpAddExternalComment());
+          await expect(viewer.locator("#comment-list")).not.toContainText(
+            "This arrived after the inline render.",
+          );
+          await viewer.locator("#comment-refresh").click();
+          await page.waitForFunction(() => window.__mcpCommentListCalls >= 2);
+          await expect(viewer.locator("#comment-list")).toContainText(
+            "This arrived after the inline render.",
+          );
 
           const image = viewer.locator(".preview-stage > img");
           await image.click({ position: { x: 180, y: 180 } });

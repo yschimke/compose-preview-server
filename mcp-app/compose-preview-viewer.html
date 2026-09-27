@@ -33,7 +33,7 @@
   .actions { display: flex; gap: 8px; margin-top: 10px; }
   .comments { margin-top: 10px; padding: 10px; border: 1px solid var(--color-border, #d8d8dd); border-radius: 10px; }
   .comments[hidden] { display: none; }
-  .comments-heading { font-weight: 650; margin-bottom: 8px; }
+  .comments-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-weight: 650; margin-bottom: 8px; }
   .comment-list { display: grid; gap: 7px; }
   .comment-thread { padding: 8px; border-radius: 7px; background: var(--color-background-secondary, #f8f8fa); }
   .comment-thread:target { outline: 2px solid #315da8; }
@@ -58,7 +58,7 @@
     <div class="empty">This viewer displays render and matrix results when the host supplies them.</div>
   </section>
   <section id="comments" class="comments" aria-label="Design comments" hidden>
-    <div class="comments-heading">Design comments</div>
+    <div class="comments-heading"><span>Design comments</span><button id="comment-refresh" type="button" hidden>Refresh comments</button></div>
     <p class="muted">Reading comments requires <code>ui-builder-read</code>; posting requires <code>ui-builder-write</code>. The current viewer grant is used only when it carries that capability.</p>
     <div id="comment-list" class="comment-list"></div>
     <div id="comment-compose" class="comment-compose" hidden>
@@ -91,6 +91,7 @@
   const use = q('#use');
   const comments = q('#comments');
   const commentList = q('#comment-list');
+  const commentRefresh = q('#comment-refresh');
   const commentCompose = q('#comment-compose');
   const commentBody = q('#comment-body');
   const commentPost = q('#comment-post');
@@ -283,6 +284,8 @@
     commentPoint = undefined;
     comments.hidden = true;
     commentList.replaceChildren();
+    commentRefresh.hidden = true;
+    commentRefresh.disabled = false;
     commentCompose.hidden = true;
     commentBody.value = '';
     commentPost.disabled = false;
@@ -403,6 +406,7 @@
       return;
     }
     comments.hidden = false;
+    commentRefresh.hidden = false;
     commentCompose.hidden = !postCommentToolName;
   }
 
@@ -414,6 +418,7 @@
     }
     const generation = ++commentGeneration;
     comments.hidden = false;
+    commentRefresh.disabled = true;
     commentStatus.textContent = 'Loading comments…';
     try {
       const argumentsValue = { designId, ...(resourceToken ? { token: resourceToken } : {}) };
@@ -439,6 +444,10 @@
       commentList.replaceChildren();
       commentStatus.textContent = 'Comments are unavailable.';
       rawCommentFallback(`Unable to load comments: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      if (generation === commentGeneration && commentDesignId === designId) {
+        commentRefresh.disabled = false;
+      }
     }
     updateCommentAction();
   }
@@ -1193,6 +1202,7 @@
     if (!overlayCall) readResource(true, true);
   });
   a11y.addEventListener('click', () => toggleAccessibilityOverlay());
+  commentRefresh.addEventListener('click', () => loadComments());
   commentPost.addEventListener('click', () => postComment());
   use.addEventListener('click', async () => {
     await bridgeReady;
