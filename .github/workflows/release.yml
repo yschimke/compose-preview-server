@@ -182,6 +182,14 @@ jobs:
           gh release upload "${{ needs.release-please.outputs.publish_tag }}"
           "mcp/build/distributions/compose-preview-mcp-${PLUGIN_VERSION}.tar.gz"
           --clobber
+      # The same self-contained MCP App both servers embed, as a static file for hosts with no MCP
+      # Apps bridge (for example an Antigravity <agent-embed>): they pass a result in the URL
+      # fragment, `#compose-preview-result=<base64url envelope>`, documented in the file itself.
+      - name: Upload portable MCP App viewer
+        run: >-
+          gh release upload "${{ needs.release-please.outputs.publish_tag }}"
+          "mcp-app/compose-preview-viewer.html"
+          --clobber
 
   # One release goes out, or none does. The GitHub release stays a DRAFT until the distribution lane
   # has succeeded, so a failed build cannot leave a tag whose assets do not exist - which is the

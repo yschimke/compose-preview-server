@@ -1,0 +1,1248 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Compose Preview</title>
+<style>
+  :root { color-scheme: light dark; font: 14px system-ui, sans-serif; color: var(--color-text-primary, #1b1b1f); background: var(--color-background-primary, #fff); }
+  body { margin: 0; }
+  .app { padding: 12px; }
+  .bar { display: flex; gap: 8px; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+  .title { font-weight: 650; }
+  .muted { color: var(--color-text-secondary, #666); font-size: 12px; }
+  .canvas { min-height: 120px; border: 1px solid var(--color-border, #d8d8dd); border-radius: 10px; background: var(--color-background-secondary, #f8f8fa); display: grid; place-items: center; overflow: auto; }
+  .canvas img { max-width: 100%; max-height: 560px; object-fit: contain; }
+  .preview-stage { position: relative; display: inline-block; max-width: 100%; line-height: 0; }
+  .preview-stage > img { display: block; }
+  .comment-pin { position: absolute; transform: translate(-50%, -50%); z-index: 2; display: grid; place-items: center; width: 26px; height: 26px; padding: 0; border-radius: 999px; border: 2px solid #fff; background: #315da8; color: #fff; font-size: 12px; font-weight: 700; line-height: 1; box-shadow: 0 1px 4px #0008; }
+  .comment-pin.resolved { background: #62646a; }
+  .comment-pin.pending { background: #9b4d00; }
+  .comparison { width: 100%; padding: 10px; box-sizing: border-box; }
+  .comparison-stage { position: relative; display: grid; place-items: center; min-height: 120px; overflow: hidden; }
+  .comparison-stage img { grid-area: 1 / 1; display: block; }
+  .comparison-after { position: absolute; inset: 0; width: 100%; height: 100%; }
+  .comparison-labels { display: flex; justify-content: space-between; margin: 8px 2px 4px; font-size: 12px; font-weight: 650; }
+  .comparison-slider { width: 100%; margin: 0; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; width: 100%; padding: 8px; box-sizing: border-box; }
+  .cell { border: 1px solid var(--color-border, #d8d8dd); border-radius: 8px; padding: 6px; background: var(--color-background-primary, #fff); cursor: pointer; }
+  .cell img { width: 100%; display: block; }
+  .cell code { font-size: 11px; overflow-wrap: anywhere; }
+  .fallback { width: 100%; padding: 12px; box-sizing: border-box; }
+  .fallback p { margin: 0 0 8px; }
+  .fallback pre { margin: 0; padding: 10px; border-radius: 7px; background: var(--color-background-primary, #fff); white-space: pre-wrap; overflow-wrap: anywhere; }
+  .actions { display: flex; gap: 8px; margin-top: 10px; }
+  .comments { margin-top: 10px; padding: 10px; border: 1px solid var(--color-border, #d8d8dd); border-radius: 10px; }
+  .comments[hidden] { display: none; }
+  .comments-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-weight: 650; margin-bottom: 8px; }
+  .comment-list { display: grid; gap: 7px; }
+  .comment-thread { padding: 8px; border-radius: 7px; background: var(--color-background-secondary, #f8f8fa); }
+  .comment-thread:target { outline: 2px solid #315da8; }
+  .comment-thread p { margin: 4px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .comment-thread-meta { font-size: 12px; font-weight: 650; }
+  .comment-compose { display: grid; gap: 7px; margin-top: 10px; }
+  .comment-compose textarea { min-height: 64px; resize: vertical; box-sizing: border-box; width: 100%; padding: 7px; font: inherit; color: inherit; background: var(--color-background-primary, #fff); border: 1px solid var(--color-border, #aaa); border-radius: 6px; }
+  .comment-compose-row { display: flex; gap: 8px; align-items: center; }
+  .comment-raw { margin-top: 8px; }
+  .comment-raw pre { max-height: 180px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
+  button { font: inherit; padding: 6px 9px; border-radius: 6px; border: 1px solid var(--color-border, #aaa); background: var(--color-background-primary, #fff); color: inherit; cursor: pointer; }
+</style>
+<body>
+<main class="app">
+  <div class="bar">
+    <div>
+      <div class="title">Compose Preview</div>
+      <div id="meta" class="muted">Waiting for a preview result…</div>
+    </div>
+  </div>
+  <section id="canvas" class="canvas">
+    <div class="empty">This viewer displays render and matrix results when the host supplies them.</div>
+  </section>
+  <section id="comments" class="comments" aria-label="Design comments" hidden>
+    <div class="comments-heading"><span>Design comments</span><button id="comment-refresh" type="button" hidden>Refresh comments</button></div>
+    <p class="muted">Reading comments requires <code>ui-builder-read</code>; posting requires <code>ui-builder-write</code>. The current viewer grant is used only when it carries that capability.</p>
+    <div id="comment-list" class="comment-list"></div>
+    <div id="comment-compose" class="comment-compose" hidden>
+      <label for="comment-body">Post a comment</label>
+      <textarea id="comment-body" maxlength="4000" placeholder="Describe what should change"></textarea>
+      <div class="comment-compose-row">
+        <button id="comment-post" type="button">Post comment</button>
+        <span id="comment-anchor" class="muted">Click the preview to pin this comment, or post it unpinned.</span>
+      </div>
+    </div>
+    <div id="comment-status" class="muted" role="status"></div>
+    <details id="comment-raw" class="comment-raw">
+      <summary>Complete comment data</summary>
+      <pre></pre>
+    </details>
+  </section>
+  <div class="actions">
+    <button id="refresh" hidden>Refresh resource</button>
+    <button id="a11y" hidden>Show accessibility overlay</button>
+    <button id="use" hidden>Use selected result</button>
+  </div>
+</main>
+<script>
+(() => {
+  const q = selector => document.querySelector(selector);
+  const canvas = q('#canvas');
+  const meta = q('#meta');
+  const refresh = q('#refresh');
+  const a11y = q('#a11y');
+  const use = q('#use');
+  const comments = q('#comments');
+  const commentList = q('#comment-list');
+  const commentRefresh = q('#comment-refresh');
+  const commentCompose = q('#comment-compose');
+  const commentBody = q('#comment-body');
+  const commentPost = q('#comment-post');
+  const commentAnchorLabel = q('#comment-anchor');
+  const commentStatus = q('#comment-status');
+  const commentRaw = q('#comment-raw');
+  const REQUEST_TIMEOUT_MS = 5000;
+  const RESOURCE_READ_TIMEOUT_MS = 65000;
+  const RESOURCE_POLL_INTERVAL_MS = 5000;
+  // Every poll is a resources/read, and every read is a render. Back off while the pixels do not
+  // change and stop after a bounded run of unchanged reads; Refresh or a new result re-arms it.
+  const RESOURCE_POLL_MAX_INTERVAL_MS = 60000;
+  const RESOURCE_POLL_MAX_UNCHANGED = 12;
+  const MAX_COMMENT_BODY_LENGTH = 4000;
+  // Static host contract (for example Antigravity's <agent-embed>):
+  // #compose-preview-result=<unpadded base64url UTF-8 JSON>
+  // JSON shape: {"version":1,"arguments":{...},"result":<MCP CallToolResult>}
+  // The hash is intentionally credential-free and bounded so the same file is safe to package.
+  const STATIC_RESULT_PARAM = 'compose-preview-result';
+  const MAX_STATIC_RESULT_BYTES = 500000;
+  const CREDENTIAL_KEY = /(token|authorization|password|secret|api[-_]?key|cookie|session)/i;
+  const pending = new Map();
+  const lateResponses = new Map();
+  let nextId = 1;
+  let initialized = false;
+  let hasToolResult = false;
+  let staticMode = false;
+  let selected;
+  let toolArguments = {};
+  let resourceToken;
+  let resourceResult;
+  let resourceReadGeneration = 0;
+  let resourceReadUri;
+  let resourcePollTimer;
+  let resourcePollUnchanged = 0;
+  let resourceSubscriptionGeneration = 0;
+  let subscribedResourceUri;
+  let resourceSubscriptionTargetUri;
+  let resourceSubscriptionQueue = Promise.resolve();
+  let hostResourceSubscriptions = false;
+  let hostServerTools = false;
+  let overlayToolName;
+  let toolDiscoveryGeneration = 0;
+  let baseImageData;
+  let overlayImageData;
+  let overlayVisible = false;
+  let overlayEligible = false;
+  let overlayGeneration = 0;
+  let overlayCall;
+  let baseMetaText = '';
+  let comparisonReadGeneration = 0;
+  let listCommentsToolName;
+  let postCommentToolName;
+  let commentDesignId;
+  let commentRenderValue;
+  let commentBoard;
+  let commentPoint;
+  let commentGeneration = 0;
+  let commentPostPending = false;
+
+  function request(method, params, timeoutMs = REQUEST_TIMEOUT_MS, onLateResult) {
+    const id = nextId++;
+    return new Promise((resolve, reject) => {
+      const timer = window.setTimeout(() => {
+        if (!pending.delete(id)) return;
+        if (onLateResult) {
+          const expiry = window.setTimeout(() => lateResponses.delete(id), RESOURCE_READ_TIMEOUT_MS);
+          lateResponses.set(id, { handle: onLateResult, expiry });
+        }
+        reject(new Error(`${method} request timed out after ${timeoutMs} ms`));
+      }, timeoutMs);
+      pending.set(id, { resolve, reject, timer });
+      window.parent.postMessage({ jsonrpc: '2.0', id, method, params }, '*');
+    });
+  }
+
+  function notify(method, params) {
+    window.parent.postMessage({ jsonrpc: '2.0', method, params }, '*');
+  }
+
+  const parse = source => {
+    try {
+      return JSON.parse(source);
+    } catch {
+      return null;
+    }
+  };
+
+  const data = result =>
+    result?.structuredContent ||
+    result?.content?.filter(block => block.type === 'text').map(block => parse(block.text)).find(Boolean) ||
+    {};
+  const png = result => result?.content?.find(block => block.type === 'image' && block.mimeType === 'image/png');
+  const link = result => result?.content?.find(block => block.type === 'resource_link');
+  const resourcePng = result =>
+    result?.contents?.find(content => content?.mimeType === 'image/png' && typeof content.blob === 'string');
+
+  function credentialKeyIn(value) {
+    const remaining = [value];
+    while (remaining.length) {
+      const current = remaining.pop();
+      if (!current || typeof current !== 'object') continue;
+      for (const [key, child] of Object.entries(current)) {
+        if (CREDENTIAL_KEY.test(key)) return key;
+        const uriCredential = credentialKeyInUri(key, child);
+        if (uriCredential) return uriCredential;
+        if (child && typeof child === 'object') remaining.push(child);
+      }
+    }
+    return undefined;
+  }
+
+  function credentialKeyInUri(key, value) {
+    if (typeof value !== 'string') return undefined;
+    try {
+      const url = new URL(value, 'https://compose-preview.invalid/');
+      if (url.username || url.password) return `${key} userinfo`;
+      for (const [parameter] of url.searchParams) {
+        if (CREDENTIAL_KEY.test(parameter)) return parameter;
+      }
+      for (const [parameter] of new URLSearchParams(url.hash.slice(1))) {
+        if (CREDENTIAL_KEY.test(parameter)) return parameter;
+      }
+    } catch {
+      // A malformed URI is handled by its consumer; it carries no parseable URL credential here.
+    }
+    return undefined;
+  }
+
+  function staticInput() {
+    const encoded = new URLSearchParams(location.hash.slice(1)).get(STATIC_RESULT_PARAM);
+    if (encoded == null) return { present: false };
+    try {
+      if (!encoded || encoded.length > MAX_STATIC_RESULT_BYTES || !/^[A-Za-z0-9_-]+$/.test(encoded)) {
+        throw new Error('the encoded result is empty, malformed, or larger than 500 KB');
+      }
+      const base64 = encoded.replace(/-/g, '+').replace(/_/g, '/');
+      const binary = atob(base64 + '='.repeat((4 - base64.length % 4) % 4));
+      if (binary.length > MAX_STATIC_RESULT_BYTES) {
+        throw new Error('the decoded result is larger than 500 KB');
+      }
+      const bytes = Uint8Array.from(binary, character => character.charCodeAt(0));
+      const envelope = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes));
+      if (!envelope || envelope.version !== 1 || typeof envelope.result !== 'object' || !envelope.result || Array.isArray(envelope.result)) {
+        throw new Error('expected a version 1 envelope containing an MCP tool result');
+      }
+      if (
+        !Array.isArray(envelope.result.content) ||
+        !envelope.result.content.every(block => block && typeof block === 'object' && !Array.isArray(block))
+      ) {
+        throw new Error('the MCP tool result content must be an array of objects');
+      }
+      if (envelope.arguments != null && (typeof envelope.arguments !== 'object' || Array.isArray(envelope.arguments))) {
+        throw new Error('arguments must be an object when present');
+      }
+      const value = data(envelope.result);
+      if (
+        Array.isArray(value?.cells) &&
+        !value.cells.every(cell => cell && typeof cell === 'object' && !Array.isArray(cell))
+      ) {
+        throw new Error('matrix cells must be objects');
+      }
+      const credentialKey = credentialKeyIn(envelope);
+      if (credentialKey) throw new Error(`credential field "${credentialKey}" is not allowed`);
+      return { present: true, envelope };
+    } catch (error) {
+      return { present: true, error: error instanceof Error ? error.message : String(error) };
+    }
+  }
+
+  // Selection context must be complete enough to replay a render, but never leak a transport
+  // credential from the host's original tool input into the model context.
+  function safeSelectionArguments(value) {
+    if (Array.isArray(value)) {
+      return value.map(safeSelectionArguments).filter(child => child !== undefined);
+    }
+    if (typeof value === 'string' && credentialKeyInUri('value', value)) return undefined;
+    if (!value || typeof value !== 'object') return value;
+    return Object.fromEntries(
+      Object.entries(value)
+        .filter(([key, child]) => !CREDENTIAL_KEY.test(key) && !credentialKeyInUri(key, child))
+        .map(([key, child]) => [key, safeSelectionArguments(child)])
+    );
+  }
+
+  function choose(value, label) {
+    selected = value;
+    use.hidden = staticMode;
+    meta.textContent = label;
+  }
+
+  function clearComments() {
+    ++commentGeneration;
+    commentDesignId = undefined;
+    commentRenderValue = undefined;
+    commentBoard = undefined;
+    commentPoint = undefined;
+    commentPostPending = false;
+    comments.hidden = true;
+    commentList.replaceChildren();
+    commentRefresh.hidden = true;
+    commentRefresh.disabled = false;
+    commentCompose.hidden = true;
+    commentBody.value = '';
+    commentPost.disabled = false;
+    commentAnchorLabel.textContent = 'Click the preview to pin this comment, or post it unpinned.';
+    commentStatus.textContent = '';
+    commentRaw.hidden = true;
+    commentRaw.querySelector('pre').textContent = '';
+  }
+
+  function commentExcerpt(thread) {
+    const entries = Array.isArray(thread?.comments) ? thread.comments : [];
+    return entries.map(comment => comment?.body).find(body => typeof body === 'string' && body) || 'Comment';
+  }
+
+  function commentAnchorText(anchor) {
+    if (!anchor || typeof anchor !== 'object') return 'Unpinned';
+    if (typeof anchor.nodeId === 'string' && anchor.nodeId) return `Node ${anchor.nodeId}`;
+    if (typeof anchor.markId === 'string' && anchor.markId) return `Mark ${anchor.markId}`;
+    if (Number.isFinite(anchor.x) && Number.isFinite(anchor.y)) {
+      return `Frame ${Math.round(anchor.x * 100)}%, ${Math.round(anchor.y * 100)}%`;
+    }
+    return 'Unpinned';
+  }
+
+  function commentPosition(anchor, image) {
+    if (!anchor || typeof anchor !== 'object') return undefined;
+    if (Number.isFinite(anchor.x) && Number.isFinite(anchor.y)) {
+      return {
+        x: Math.min(1, Math.max(0, anchor.x)),
+        y: Math.min(1, Math.max(0, anchor.y)),
+      };
+    }
+    const bounds = typeof anchor.nodeId === 'string'
+      ? commentRenderValue?.nodeBounds?.[anchor.nodeId]
+      : undefined;
+    if (!bounds || !image?.naturalWidth || !image?.naturalHeight) return undefined;
+    const x = (Number(bounds.x) + Number(bounds.width) / 2) / image.naturalWidth;
+    const y = (Number(bounds.y) + Number(bounds.height) / 2) / image.naturalHeight;
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return undefined;
+    return { x: Math.min(1, Math.max(0, x)), y: Math.min(1, Math.max(0, y)) };
+  }
+
+  function renderCommentPins() {
+    const stage = canvas.querySelector('.preview-stage');
+    const image = stage?.querySelector('img');
+    if (!stage || !image) return;
+    stage.querySelectorAll('.comment-pin').forEach(pin => pin.remove());
+    const threads = Array.isArray(commentBoard?.threads) ? commentBoard.threads : [];
+    threads.forEach((thread, index) => {
+      const position = commentPosition(thread?.anchor, image);
+      if (!position) return;
+      const pin = document.createElement('button');
+      pin.type = 'button';
+      pin.className = `comment-pin${thread?.resolved ? ' resolved' : ''}`;
+      pin.style.left = `${position.x * 100}%`;
+      pin.style.top = `${position.y * 100}%`;
+      pin.textContent = String(index + 1);
+      const excerpt = commentExcerpt(thread);
+      pin.title = excerpt;
+      pin.setAttribute('aria-label', `Comment ${index + 1}: ${excerpt}`);
+      pin.addEventListener('click', event => {
+        event.stopPropagation();
+        document.getElementById(`comment-thread-${index + 1}`)?.scrollIntoView({ block: 'nearest' });
+      });
+      stage.append(pin);
+    });
+    if (commentPoint) {
+      const pending = document.createElement('span');
+      pending.className = 'comment-pin pending';
+      pending.style.left = `${commentPoint.x * 100}%`;
+      pending.style.top = `${commentPoint.y * 100}%`;
+      pending.textContent = '+';
+      pending.setAttribute('aria-label', 'New comment pin');
+      stage.append(pending);
+    }
+  }
+
+  function rawCommentFallback(value) {
+    commentRaw.hidden = false;
+    commentRaw.querySelector('pre').textContent =
+      typeof value === 'string' ? value : JSON.stringify(value, null, 2);
+  }
+
+  function renderCommentBoard(board) {
+    commentBoard = board;
+    commentList.replaceChildren();
+    const threads = Array.isArray(board?.threads) ? board.threads : [];
+    if (!threads.length) {
+      const empty = document.createElement('div');
+      empty.className = 'muted';
+      empty.textContent = 'No comments yet.';
+      commentList.append(empty);
+    }
+    threads.forEach((thread, index) => {
+      const card = document.createElement('article');
+      card.className = 'comment-thread';
+      card.id = `comment-thread-${index + 1}`;
+      const heading = document.createElement('div');
+      heading.className = 'comment-thread-meta';
+      heading.textContent = `${index + 1}. ${commentAnchorText(thread?.anchor)}${thread?.resolved ? ' · Resolved' : ''}`;
+      card.append(heading);
+      const entries = Array.isArray(thread?.comments) ? thread.comments : [];
+      entries.forEach(comment => {
+        const body = document.createElement('p');
+        const author = comment?.displayName || comment?.authorId || 'Unknown author';
+        body.textContent = `${author}: ${typeof comment?.body === 'string' ? comment.body : ''}`;
+        card.append(body);
+      });
+      commentList.append(card);
+    });
+    rawCommentFallback(board || {});
+    renderCommentPins();
+  }
+
+  function updateCommentAction() {
+    if (staticMode || !commentDesignId || !initialized || !listCommentsToolName) {
+      comments.hidden = true;
+      return;
+    }
+    comments.hidden = false;
+    commentRefresh.hidden = false;
+    commentCompose.hidden = !postCommentToolName;
+  }
+
+  async function loadComments() {
+    const designId = commentDesignId;
+    if (!designId || !initialized || !listCommentsToolName || staticMode) {
+      updateCommentAction();
+      return;
+    }
+    const generation = ++commentGeneration;
+    comments.hidden = false;
+    commentRefresh.disabled = true;
+    commentStatus.textContent = 'Loading comments…';
+    try {
+      const argumentsValue = { designId, ...(resourceToken ? { token: resourceToken } : {}) };
+      const result = await request(
+        'tools/call',
+        { name: listCommentsToolName, arguments: argumentsValue },
+        RESOURCE_READ_TIMEOUT_MS,
+      );
+      if (generation !== commentGeneration || commentDesignId !== designId) return;
+      const board = data(result);
+      if (result?.isError || !board || !Array.isArray(board.threads)) {
+        commentList.replaceChildren();
+        commentStatus.textContent = result?.isError
+          ? 'Comment access was not granted. Reading requires ui-builder-read; complete server response shown.'
+          : 'Comments are unavailable; complete text fallback shown.';
+        rawCommentFallback(fallbackText(result) || board || 'The host returned no comment board.');
+        return;
+      }
+      renderCommentBoard(board);
+      commentStatus.textContent = `${board.threads.length} comment thread${board.threads.length === 1 ? '' : 's'}.`;
+    } catch (error) {
+      if (generation !== commentGeneration || commentDesignId !== designId) return;
+      commentList.replaceChildren();
+      commentStatus.textContent = 'Comments are unavailable.';
+      rawCommentFallback(`Unable to load comments: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      if (generation === commentGeneration && commentDesignId === designId) {
+        commentRefresh.disabled = commentPostPending;
+      }
+    }
+    updateCommentAction();
+  }
+
+  function configureComments(value) {
+    const designId = typeof value?.designId === 'string' && value.designId ? value.designId : undefined;
+    if (!designId) return;
+    commentDesignId = designId;
+    commentRenderValue = value;
+    updateCommentAction();
+    if (listCommentsToolName) void loadComments();
+  }
+
+  function showImage(data, alt = 'Rendered Compose preview') {
+    const preview = document.createElement('img');
+    preview.alt = alt;
+    preview.src = `data:image/png;base64,${data}`;
+    const stage = document.createElement('div');
+    stage.className = 'preview-stage';
+    stage.append(preview);
+    stage.addEventListener('click', event => {
+      if (!commentDesignId || !postCommentToolName || commentCompose.hidden) return;
+      const bounds = preview.getBoundingClientRect();
+      if (!bounds.width || !bounds.height) return;
+      commentPoint = {
+        x: Math.min(1, Math.max(0, (event.clientX - bounds.left) / bounds.width)),
+        y: Math.min(1, Math.max(0, (event.clientY - bounds.top) / bounds.height)),
+      };
+      commentAnchorLabel.textContent =
+        `Pinned at ${Math.round(commentPoint.x * 100)}%, ${Math.round(commentPoint.y * 100)}%.`;
+      renderCommentPins();
+    });
+    preview.addEventListener('load', renderCommentPins, { once: true });
+    canvas.replaceChildren(stage);
+    renderCommentPins();
+  }
+
+  function clearAccessibilityOverlay() {
+    ++overlayGeneration;
+    baseImageData = undefined;
+    overlayImageData = undefined;
+    overlayVisible = false;
+    overlayEligible = false;
+    baseMetaText = '';
+    a11y.hidden = true;
+    a11y.disabled = false;
+    a11y.textContent = 'Show accessibility overlay';
+    a11y.removeAttribute('title');
+  }
+
+  function updateAccessibilityAction() {
+    if (staticMode || !overlayEligible || !baseImageData || !initialized || !overlayToolName) {
+      a11y.hidden = true;
+      return;
+    }
+    a11y.hidden = false;
+    a11y.disabled = false;
+    a11y.textContent = overlayVisible ? 'Show original preview' : 'Show accessibility overlay';
+    a11y.removeAttribute('title');
+  }
+
+  function renderMatrix(value, cells) {
+    const grid = document.createElement('div');
+    grid.className = 'grid';
+    cells.forEach((cell, index) => {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'cell';
+      if (typeof cell?.png === 'string') {
+        const image = document.createElement('img');
+        image.alt = `Matrix cell ${index + 1}`;
+        image.src = `data:image/png;base64,${cell.png}`;
+        button.append(image);
+      }
+      const overrides = document.createElement('code');
+      overrides.textContent = JSON.stringify(cell?.overrides || {});
+      button.append(overrides);
+      button.addEventListener('click', () =>
+        choose({
+          kind: 'matrix-cell',
+          uri: value.uri || toolArguments.uri,
+          arguments: toolArguments,
+          overrides: cell?.overrides || {},
+        }, 'Selected matrix cell')
+      );
+      grid.append(button);
+    });
+    canvas.replaceChildren(grid);
+  }
+
+  function renderImage(image, value, resource) {
+    ++overlayGeneration;
+    baseImageData = image.data;
+    overlayImageData = undefined;
+    overlayVisible = false;
+    const resultUri = value.uri || resource?.uri;
+    const uri = resultUri || toolArguments.uri;
+    overlayEligible =
+      typeof resultUri === 'string' &&
+      resultUri.startsWith('compose-preview://') &&
+      !value?.crop &&
+      !Array.isArray(value?.cells);
+    showImage(baseImageData);
+    const label = value.previewId || toolArguments.previewId || 'Preview render';
+    choose({
+      kind: 'preview',
+      uri,
+      arguments: toolArguments,
+      overrides: toolArguments.overrides,
+      semanticsRef: value.semanticsRef,
+    }, label);
+    baseMetaText = label;
+    updateAccessibilityAction();
+    configureComments(value);
+  }
+
+  function beforeAfterModel(result, value) {
+    const inputBeforeUri = result?.isError ? undefined : toolArguments.baseUri;
+    const inputAfterUri = result?.isError ? undefined : toolArguments.headUri;
+    const beforeUri = value?.left?.uri || value?.baseUri || inputBeforeUri;
+    const afterUri = value?.right?.uri || value?.headUri || inputAfterUri;
+    if (typeof beforeUri !== 'string' || !beforeUri || typeof afterUri !== 'string' || !afterUri) {
+      return undefined;
+    }
+    return {
+      kind: 'before-after',
+      before: { uri: beforeUri, label: 'Before' },
+      after: { uri: afterUri, label: 'After' },
+    };
+  }
+
+  function renderBeforeAfterFallback(result, comparison, reason) {
+    const message = document.createElement('div');
+    message.className = 'fallback';
+    const summary = document.createElement('p');
+    summary.textContent = reason;
+    message.append(summary);
+    for (const artifact of [comparison.before, comparison.after]) {
+      const label = document.createElement('p');
+      label.textContent = `${artifact.label}: `;
+      const uri = document.createElement('code');
+      uri.textContent = artifact.uri;
+      label.append(uri);
+      message.append(label);
+    }
+    const text = fallbackText(result);
+    if (text) {
+      const output = document.createElement('pre');
+      output.textContent = text;
+      message.append(output);
+    }
+    canvas.replaceChildren(message);
+  }
+
+  function showBeforeAfter(comparison, beforeData, afterData) {
+    const container = document.createElement('div');
+    container.className = 'comparison';
+    const stage = document.createElement('div');
+    stage.className = 'comparison-stage';
+    const before = document.createElement('img');
+    before.alt = 'Before Compose preview';
+    before.src = `data:image/png;base64,${beforeData}`;
+    const after = document.createElement('img');
+    after.className = 'comparison-after';
+    after.alt = 'After Compose preview';
+    after.src = `data:image/png;base64,${afterData}`;
+    const labels = document.createElement('div');
+    labels.className = 'comparison-labels';
+    const beforeLabel = document.createElement('span');
+    beforeLabel.textContent = comparison.before.label;
+    const afterLabel = document.createElement('span');
+    afterLabel.textContent = comparison.after.label;
+    labels.append(beforeLabel, afterLabel);
+    const slider = document.createElement('input');
+    slider.className = 'comparison-slider';
+    slider.type = 'range';
+    slider.min = '0';
+    slider.max = '100';
+    slider.value = '50';
+    slider.setAttribute('aria-label', 'Reveal after preview');
+    const reveal = () => {
+      after.style.clipPath = `inset(0 ${100 - Number(slider.value)}% 0 0)`;
+      slider.setAttribute('aria-valuetext', `${slider.value}% after preview`);
+    };
+    slider.addEventListener('input', reveal);
+    reveal();
+    stage.append(before, after);
+    container.append(stage, labels, slider);
+    canvas.replaceChildren(container);
+    choose(comparison, 'Before and after preview comparison');
+  }
+
+  async function renderBeforeAfter(result, comparison, generation) {
+    if (staticMode) {
+      renderBeforeAfterFallback(
+        result,
+        comparison,
+        'Static comparison result. Open both replayable resources in an MCP host to view the slider.',
+      );
+      meta.textContent = 'Static before and after result; complete text fallback shown.';
+      return;
+    }
+    meta.textContent = 'Reading before and after preview resources…';
+    try {
+      await bridgeReady;
+      if (!initialized) throw new Error('MCP Apps bridge is unavailable');
+      const read = uri => {
+        const params = { uri };
+        if (resourceToken) params._meta = { 'compose-preview/token': resourceToken };
+        return request('resources/read', params, RESOURCE_READ_TIMEOUT_MS);
+      };
+      const [beforeResult, afterResult] = await Promise.all([
+        read(comparison.before.uri),
+        read(comparison.after.uri),
+      ]);
+      if (generation !== comparisonReadGeneration) return;
+      const before = resourcePng(beforeResult);
+      const after = resourcePng(afterResult);
+      if (!before || !after) throw new Error('one or both comparison resources have no PNG');
+      showBeforeAfter(comparison, before.blob, after.blob);
+    } catch (error) {
+      if (generation !== comparisonReadGeneration) return;
+      renderBeforeAfterFallback(
+        result,
+        comparison,
+        'Unable to read both comparison resources; complete two-artifact fallback:',
+      );
+      choose(comparison, 'Comparison resources unavailable; complete text fallback shown.');
+      console.warn('Failed to read Compose Preview comparison resources:', error);
+    }
+  }
+
+  function applyAccessibilityResult(result, generation) {
+    if (generation !== overlayGeneration || !baseImageData) return;
+    const image = png(result);
+    if (result?.isError || typeof image?.data !== 'string' || !image.data) {
+      showImage(baseImageData);
+      overlayImageData = undefined;
+      overlayVisible = false;
+      a11y.hidden = false;
+      a11y.disabled = true;
+      a11y.textContent = 'Accessibility overlay unavailable';
+      a11y.title = 'The host or preview backend did not provide an accessibility overlay.';
+      meta.textContent = 'Accessibility overlay unavailable; original preview shown.';
+      return;
+    }
+    overlayImageData = image.data;
+    overlayVisible = true;
+    showImage(overlayImageData, 'Compose preview with accessibility overlay');
+    meta.textContent = 'Accessibility overlay';
+    updateAccessibilityAction();
+  }
+
+  async function toggleAccessibilityOverlay() {
+    if (!overlayEligible || !baseImageData || !initialized || !overlayToolName) return;
+    if (overlayVisible) {
+      overlayVisible = false;
+      showImage(baseImageData);
+      meta.textContent = baseMetaText;
+      updateAccessibilityAction();
+      return;
+    }
+    if (overlayImageData) {
+      overlayVisible = true;
+      showImage(overlayImageData, 'Compose preview with accessibility overlay');
+      meta.textContent = 'Accessibility overlay';
+      updateAccessibilityAction();
+      return;
+    }
+    const uri = selected?.uri || toolArguments.uri;
+    if (typeof uri !== 'string' || !uri) {
+      applyAccessibilityResult({ isError: true }, overlayGeneration);
+      return;
+    }
+    const generation = overlayGeneration;
+    const argumentsValue = {
+      uri,
+      kind: 'a11y/overlay',
+      inline: true,
+      ...(selected?.overrides || toolArguments.overrides
+        ? { overrides: selected?.overrides || toolArguments.overrides }
+        : {}),
+      ...(resourceToken ? { token: resourceToken } : {}),
+    };
+    const call = { generation };
+    overlayCall = call;
+    stopResourcePolling();
+    refresh.disabled = true;
+    a11y.disabled = true;
+    a11y.textContent = 'Loading accessibility overlay…';
+    meta.textContent = 'Rendering accessibility overlay…';
+    try {
+      const result = await request(
+        'tools/call',
+        { name: overlayToolName, arguments: argumentsValue },
+        RESOURCE_READ_TIMEOUT_MS,
+      );
+      applyAccessibilityResult(result, generation);
+    } catch (error) {
+      applyAccessibilityResult({ isError: true }, generation);
+      console.warn('Failed to render the Compose Preview accessibility overlay:', error);
+    } finally {
+      window.setTimeout(() => {
+        if (overlayCall !== call) return;
+        overlayCall = undefined;
+        if (call.resourceUpdatePending && resourceResult?.resource?.uri === uri) {
+          readResource(true);
+        } else if (resourceResult?.resource?.uri) {
+          refresh.disabled = false;
+          if (subscribedResourceUri !== resourceResult.resource.uri) {
+            scheduleResourcePoll(resourceResult.resource.uri);
+          }
+        }
+      }, 250);
+    }
+  }
+
+  async function postComment() {
+    const designId = commentDesignId;
+    const body = commentBody.value.trim();
+    if (!designId || !postCommentToolName || !initialized || !body) {
+      if (!body) commentStatus.textContent = 'Write a comment before posting.';
+      return;
+    }
+    if (body.length > MAX_COMMENT_BODY_LENGTH) {
+      commentStatus.textContent = `Comments are limited to ${MAX_COMMENT_BODY_LENGTH.toLocaleString()} characters.`;
+      return;
+    }
+    const generation = commentGeneration;
+    const argumentsValue = {
+      designId,
+      body,
+      ...(commentPoint ? { x: commentPoint.x, y: commentPoint.y } : {}),
+      ...(resourceToken ? { token: resourceToken } : {}),
+    };
+    commentPostPending = true;
+    commentPost.disabled = true;
+    commentRefresh.disabled = true;
+    commentStatus.textContent = 'Posting comment…';
+    try {
+      const result = await request(
+        'tools/call',
+        { name: postCommentToolName, arguments: argumentsValue },
+        RESOURCE_READ_TIMEOUT_MS,
+      );
+      if (generation !== commentGeneration || commentDesignId !== designId) return;
+      const board = data(result);
+      if (result?.isError || !board || !Array.isArray(board.threads)) {
+        commentStatus.textContent = result?.isError
+          ? 'Comment was not posted. Posting requires ui-builder-write; complete server response shown.'
+          : 'Unable to post comment; complete text fallback shown.';
+        rawCommentFallback(fallbackText(result) || board || 'The host returned no comment board.');
+        return;
+      }
+      commentBody.value = '';
+      commentPoint = undefined;
+      commentAnchorLabel.textContent = 'Click the preview to pin this comment, or post it unpinned.';
+      renderCommentBoard(board);
+      commentStatus.textContent = 'Comment posted.';
+    } catch (error) {
+      if (generation !== commentGeneration || commentDesignId !== designId) return;
+      commentStatus.textContent = 'Unable to post comment.';
+      rawCommentFallback(`Unable to post comment: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      if (commentDesignId === designId) {
+        commentPostPending = false;
+        commentPost.disabled = false;
+        commentRefresh.disabled = false;
+      }
+    }
+  }
+
+  function fallbackText(result) {
+    const text = result?.content
+      ?.filter(block => block?.type === 'text' && typeof block.text === 'string')
+      .map(block => block.text)
+      .join('\n\n');
+    if (text) return text;
+    if (result?.structuredContent) return JSON.stringify(result.structuredContent, null, 2);
+    return '';
+  }
+
+  function renderFallback(result, reason, resource) {
+    const message = document.createElement('div');
+    message.className = 'fallback';
+    const summary = document.createElement('p');
+    summary.textContent = reason;
+    message.append(summary);
+    if (resource) {
+      const uri = document.createElement('code');
+      uri.textContent = resource.uri;
+      message.append(uri);
+    }
+    const text = fallbackText(result);
+    if (text) {
+      const output = document.createElement('pre');
+      output.textContent = text;
+      message.append(output);
+    }
+    canvas.replaceChildren(message);
+  }
+
+  function renderResourceFallback(result, resource, reason) {
+    renderFallback(result, reason || 'A render resource is available:', resource);
+  }
+
+  function renderStaticError(reason) {
+    hasToolResult = true;
+    renderFallback(undefined, `Unable to load the static preview result: ${reason}`);
+    meta.textContent = 'Static result unavailable; use the complete text fallback.';
+  }
+
+  function stopResourcePolling() {
+    if (resourcePollTimer == null) return;
+    window.clearTimeout(resourcePollTimer);
+    resourcePollTimer = undefined;
+  }
+
+  function scheduleResourcePoll(uri) {
+    stopResourcePolling();
+    if (!initialized || staticMode || hostResourceSubscriptions || resourceResult?.resource?.uri !== uri) return;
+    if (resourcePollUnchanged >= RESOURCE_POLL_MAX_UNCHANGED) return;
+    const delay = Math.min(
+      RESOURCE_POLL_INTERVAL_MS * 2 ** resourcePollUnchanged,
+      RESOURCE_POLL_MAX_INTERVAL_MS,
+    );
+    resourcePollTimer = window.setTimeout(() => {
+      resourcePollTimer = undefined;
+      if (resourceResult?.resource?.uri !== uri) return;
+      // A hidden viewer does not need fresh pixels; check again later without rendering.
+      if (document.hidden) {
+        scheduleResourcePoll(uri);
+        return;
+      }
+      readResource(true, true);
+    }, delay);
+  }
+
+  function queueResourceSubscription(task) {
+    const queued = resourceSubscriptionQueue.then(task, task);
+    resourceSubscriptionQueue = queued.catch(() => {});
+    return queued;
+  }
+
+  function recoverLateSubscription(uri) {
+    void queueResourceSubscription(async () => {
+      try {
+        await request('resources/unsubscribe', { uri });
+      } catch (error) {
+        console.debug('Unable to clean up a late Compose Preview subscription:', error);
+      }
+      if (subscribedResourceUri === uri) subscribedResourceUri = undefined;
+      if (resourceSubscriptionTargetUri === uri && hostResourceSubscriptions) {
+        connectResourceUpdates(uri, false);
+      }
+    });
+  }
+
+  async function connectResourceUpdates(uri, initialReadPending) {
+    const generation = ++resourceSubscriptionGeneration;
+    stopResourcePolling();
+    if (subscribedResourceUri === uri) return;
+    try {
+      await bridgeReady;
+      if (!initialized || staticMode || generation !== resourceSubscriptionGeneration) return;
+      if (!hostResourceSubscriptions) {
+        if (!initialReadPending) scheduleResourcePoll(uri);
+        return;
+      }
+      await queueResourceSubscription(async () => {
+        if (
+          generation !== resourceSubscriptionGeneration ||
+          resourceSubscriptionTargetUri !== uri ||
+          resourceResult?.resource?.uri !== uri
+        ) return;
+        await request(
+          'resources/subscribe',
+          { uri },
+          REQUEST_TIMEOUT_MS,
+          () => recoverLateSubscription(uri),
+        );
+        if (
+          !initialized ||
+          staticMode ||
+          generation !== resourceSubscriptionGeneration ||
+          resourceSubscriptionTargetUri !== uri ||
+          resourceResult?.resource?.uri !== uri
+        ) {
+          try {
+            await request('resources/unsubscribe', { uri });
+          } catch (error) {
+            console.debug('Unable to unsubscribe a stale Compose Preview resource:', error);
+          }
+          return;
+        }
+        subscribedResourceUri = uri;
+      });
+    } catch (error) {
+      if (generation !== resourceSubscriptionGeneration || resourceResult?.resource?.uri !== uri) return;
+      // MCP Apps 2026-01-26 exposes resources/read but not subscription proxying. A future host
+      // may advertise serverResources.subscribe; if that path fails, retain today's bounded poll.
+      hostResourceSubscriptions = false;
+      // If the initial read is still running, its finally block observes the capability downgrade
+      // and arms the poll. If it already settled, this failure must do so itself.
+      if (resourceReadUri !== uri) scheduleResourcePoll(uri);
+      console.debug('Resource subscriptions are unavailable; polling instead:', error);
+    }
+  }
+
+  function disconnectResourceUpdates(nextUri) {
+    ++resourceSubscriptionGeneration;
+    ++resourceReadGeneration;
+    resourceReadUri = undefined;
+    refresh.disabled = false;
+    resourceSubscriptionTargetUri = nextUri;
+    stopResourcePolling();
+    if (subscribedResourceUri === nextUri) return;
+    const previous = subscribedResourceUri;
+    subscribedResourceUri = undefined;
+    if (!previous || !hostResourceSubscriptions || !initialized) return;
+    void queueResourceSubscription(async () => {
+      try {
+        await request('resources/unsubscribe', { uri: previous });
+      } catch (error) {
+        console.debug('Unable to unsubscribe the previous Compose Preview resource:', error);
+      }
+    });
+  }
+
+  async function readResource(
+    preserveAccessibilityOverlay = false,
+    preserveOnlyIfUnchanged = false,
+  ) {
+    if (!resourceResult) return;
+    stopResourcePolling();
+    const { result: toolResult, resource, value } = resourceResult;
+    const generation = ++resourceReadGeneration;
+    resourceReadUri = resource.uri;
+    refresh.disabled = true;
+    meta.textContent = 'Reading preview resource…';
+    try {
+      await bridgeReady;
+      if (!initialized) throw new Error('MCP Apps bridge is unavailable');
+      const params = { uri: resource.uri };
+      if (resourceToken) params._meta = { 'compose-preview/token': resourceToken };
+      const readResult = await request(
+        'resources/read',
+        params,
+        RESOURCE_READ_TIMEOUT_MS,
+      );
+      const image = resourcePng(readResult);
+      if (generation !== resourceReadGeneration || resourceResult?.resource?.uri !== resource.uri) return;
+      resourcePollUnchanged = image && image.blob === baseImageData ? resourcePollUnchanged + 1 : 0;
+      if (!image) {
+        if (overlayCall) return;
+        renderResourceFallback(toolResult, resource, 'The host returned no PNG for resource:');
+        meta.textContent = 'Resource has no PNG; use the text fallback.';
+        return;
+      }
+      if (
+        overlayCall ||
+        (preserveAccessibilityOverlay &&
+          overlayVisible &&
+          (!preserveOnlyIfUnchanged || image.blob === baseImageData))
+      ) {
+        baseImageData = image.blob;
+        baseMetaText = value.previewId || toolArguments.previewId || 'Preview render';
+        if (!overlayCall && overlayVisible) meta.textContent = 'Accessibility overlay';
+        return;
+      }
+      renderImage({ data: image.blob }, value, resource);
+    } catch (error) {
+      if (generation !== resourceReadGeneration || resourceResult?.resource?.uri !== resource.uri) return;
+      // A failing read is not retried every five seconds forever either.
+      resourcePollUnchanged += 1;
+      if (overlayCall) {
+        console.warn('Failed to refresh the Compose Preview resource during overlay rendering:', error);
+        return;
+      }
+      // Resource reads are optional in MCP Apps hosts. Keep the durable URI and text result useful.
+      renderResourceFallback(toolResult, resource, 'Unable to read preview resource:');
+      meta.textContent = 'Resource reads are unavailable; use the text fallback.';
+      console.warn('Failed to read Compose Preview resource:', error);
+    } finally {
+      if (generation === resourceReadGeneration && resourceResult?.resource?.uri === resource.uri) {
+        resourceReadUri = undefined;
+        refresh.disabled = overlayCall != null;
+        if (!overlayCall && subscribedResourceUri !== resource.uri) scheduleResourcePoll(resource.uri);
+      }
+    }
+  }
+
+  function draw(result) {
+    hasToolResult = true;
+    if (staticMode) meta.textContent = 'Static preview result';
+    const value = data(result);
+    const image = png(result);
+    const resource = link(result);
+    selected = undefined;
+    use.hidden = true;
+    refresh.hidden = true;
+    clearAccessibilityOverlay();
+    clearComments();
+    const comparisonGeneration = ++comparisonReadGeneration;
+    const comparison = beforeAfterModel(result, value);
+    disconnectResourceUpdates(comparison ? undefined : resource?.uri);
+    resourceResult = undefined;
+    resourcePollUnchanged = 0;
+    if (comparison) {
+      void renderBeforeAfter(result, comparison, comparisonGeneration);
+      return;
+    }
+    const cells = Array.isArray(value.cells) && value.cells;
+    if (resource) {
+      resourceResult = { result, resource, value };
+      refresh.hidden = staticMode;
+      if (!staticMode) connectResourceUpdates(resource.uri, !image && !cells);
+    }
+    if (cells) {
+      if (image && !cells.some(cell => typeof cell?.png === 'string' && cell.png.length > 0)) {
+        renderImage(image, value, resource);
+        return;
+      }
+      renderMatrix(value, cells);
+      return;
+    }
+    if (image) {
+      renderImage(image, value, resource);
+      return;
+    }
+    if (resource) {
+      renderResourceFallback(
+        result,
+        resource,
+        staticMode ? 'Static result links to this replayable render resource:' : undefined,
+      );
+      if (!staticMode) readResource();
+      return;
+    }
+    renderFallback(result, 'The result has no PNG. Complete text and structured output:');
+  }
+
+  window.addEventListener('message', event => {
+    if (staticMode) return;
+    if (event.source !== window.parent) return;
+    const message = event.data;
+    if (!message || message.jsonrpc !== '2.0') return;
+    if (pending.has(message.id)) {
+      const request = pending.get(message.id);
+      pending.delete(message.id);
+      window.clearTimeout(request.timer);
+      if (message.error) request.reject(message.error);
+      else request.resolve(message.result);
+      return;
+    }
+    if (lateResponses.has(message.id)) {
+      const late = lateResponses.get(message.id);
+      lateResponses.delete(message.id);
+      window.clearTimeout(late.expiry);
+      if (!message.error) late.handle(message.result);
+      return;
+    }
+    if (message.method === 'ui/notifications/tool-input') {
+      const incomingArguments = message.params?.arguments || {};
+      if (overlayCall && incomingArguments.kind === 'a11y/overlay') return;
+      resourceToken = typeof incomingArguments.token === 'string' && incomingArguments.token
+        ? incomingArguments.token
+        : undefined;
+      toolArguments = safeSelectionArguments(incomingArguments);
+      return;
+    }
+    if (message.method === 'ui/notifications/tool-result') {
+      const incomingResult = message.params?.result || message.params;
+      if (overlayCall && (incomingResult?.isError || (png(incomingResult) && !link(incomingResult)))) {
+        applyAccessibilityResult(incomingResult, overlayCall.generation);
+        return;
+      }
+      draw(incomingResult);
+    }
+    if (
+      (message.method === 'notifications/resources/updated' ||
+        message.method === 'ui/notifications/resource-updated') &&
+      message.params?.uri === resourceResult?.resource?.uri
+    ) {
+      // A resources/read renders this URI, and this server announces that completed render before
+      // it returns the PNG. The response already carries those pixels; reading again here would
+      // create a render -> update -> read loop. Updates arriving after the read settles still
+      // trigger the next generation normally.
+      if (resourceReadUri === message.params.uri) return;
+      if (overlayCall) overlayCall.resourceUpdatePending = true;
+      else readResource();
+    }
+    if (
+      message.method === 'notifications/tools/list_changed' ||
+      message.method === 'ui/notifications/tools/list-changed'
+    ) {
+      discoverViewerActions();
+    }
+  }, { passive: true });
+
+  async function discoverViewerActions() {
+    const generation = ++toolDiscoveryGeneration;
+    if (!hostServerTools) {
+      overlayToolName = undefined;
+      listCommentsToolName = undefined;
+      postCommentToolName = undefined;
+      updateAccessibilityAction();
+      updateCommentAction();
+      return;
+    }
+    try {
+      const tools = await request('tools/list', {});
+      if (generation !== toolDiscoveryGeneration) return;
+      const names = tools?.tools?.map(tool => tool?.name) || [];
+      overlayToolName = names
+        .find(name => typeof name === 'string' && /(^|__|\/)render_preview_overlay$/.test(name));
+      listCommentsToolName = names
+        .find(name => typeof name === 'string' && /(^|__|\/)ui_builder_list_comments$/.test(name));
+      postCommentToolName = names
+        .find(name => typeof name === 'string' && /(^|__|\/)ui_builder_post_comment$/.test(name));
+    } catch (error) {
+      if (generation !== toolDiscoveryGeneration) return;
+      overlayToolName = undefined;
+      listCommentsToolName = undefined;
+      postCommentToolName = undefined;
+      console.debug('Unable to discover Compose Preview viewer actions:', error);
+    }
+    updateAccessibilityAction();
+    updateCommentAction();
+    if (commentDesignId && listCommentsToolName) void loadComments();
+  }
+
+  async function initializeBridge() {
+    try {
+      const result = await request('ui/initialize', {
+        appInfo: { name: 'compose-preview-viewer', version: '1' },
+        appCapabilities: {},
+        protocolVersion: '2026-01-26',
+      });
+      hostResourceSubscriptions = result?.hostCapabilities?.serverResources?.subscribe === true;
+      hostServerTools = result?.hostCapabilities?.serverTools != null;
+      initialized = true;
+      notify('ui/notifications/initialized', {});
+      updateAccessibilityAction();
+      void discoverViewerActions();
+    } catch (error) {
+      use.hidden = true;
+      refresh.hidden = true;
+      if (hasToolResult) {
+        meta.textContent = `${meta.textContent}; viewer actions unavailable.`;
+      } else {
+        const message = document.createElement('div');
+        message.className = 'empty';
+        message.textContent = 'The MCP Apps bridge is unavailable. Use the complete text fallback in the surrounding response.';
+        canvas.replaceChildren(message);
+        meta.textContent = 'Viewer unavailable; use the complete text fallback.';
+      }
+      console.error('Failed to initialize the MCP Apps bridge:', error);
+    }
+  }
+
+  const fromHash = staticInput();
+  if (fromHash.present) {
+    staticMode = true;
+    if (fromHash.error) {
+      renderStaticError(fromHash.error);
+    } else {
+      toolArguments = safeSelectionArguments(fromHash.envelope.arguments || {});
+      draw(fromHash.envelope.result);
+    }
+  }
+
+  const bridgeReady = staticMode ? Promise.resolve() : initializeBridge();
+  refresh.addEventListener('click', () => {
+    resourcePollUnchanged = 0;
+    if (!overlayCall) readResource(true, true);
+  });
+  a11y.addEventListener('click', () => toggleAccessibilityOverlay());
+  commentRefresh.addEventListener('click', () => loadComments());
+  commentPost.addEventListener('click', () => postComment());
+  use.addEventListener('click', async () => {
+    await bridgeReady;
+    if (!initialized || !selected) return;
+    await request('ui/update-model-context', {
+      content: [{ type: 'text', text: `User selected Compose Preview context: ${JSON.stringify(selected)}` }],
+      structuredContent: { composePreviewSelection: selected },
+    });
+  });
+})();
+</script>

@@ -228,6 +228,22 @@ class ServeAgentGrantRoutingTest {
     }
   }
 
+  @Test
+  fun `a private host permits only the static viewer resource before a grant`() {
+    val viewer =
+      mcpAnonymous(
+        """{"jsonrpc":"2.0","id":1,"method":"resources/read","params":{"uri":"${ServeCatalogMcp.MCP_APP_VIEWER_URI}"}}"""
+      )
+    assertEquals(200, viewer.first, viewer.second)
+    assertTrue(viewer.second.contains("Compose Preview"), viewer.second)
+
+    val catalogResource =
+      mcpAnonymous(
+        """{"jsonrpc":"2.0","id":2,"method":"resources/read","params":{"uri":"compose-preview://catalog/demo/previews/example"}}"""
+      )
+    assertEquals(401, catalogResource.first, catalogResource.second)
+  }
+
   /**
    * Discovery is open, and it is open for one reason: a client that cannot finish `initialize`
    * cannot reach the tool that asks a human for a credential either, so an agent holding nothing
@@ -443,6 +459,129 @@ class ServeAgentGrantRoutingTest {
     assertFalse(toolText(rendered.second).contains("live grant scope"), rendered.second)
   }
 
+  @Test
+  fun `an in-band token authorizes the resource linked by its render`() {
+    val opened =
+      mcpAnonymous(
+        """{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"request_access","arguments":{"scope":"live"}}}"""
+      )
+    val request = json(toolText(opened.second))
+    val requestId = request["requestId"]!!.jsonPrimitive.content
+    val deviceSecret = request["deviceSecret"]!!.jsonPrimitive.content
+    val (_, page) = get("/agent-access/$requestId?token=$operatorToken")
+    post(
+      "/agent-access/$requestId?token=$operatorToken",
+      "action=approve&csrf=${field(page, "csrf")}&scope=live&ttl=1800",
+      contentType = "application/x-www-form-urlencoded",
+    )
+    val polled =
+      mcpAnonymous(
+        """{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"poll_access","arguments":{"requestId":"$requestId","deviceSecret":"$deviceSecret"}}}"""
+      )
+    val token = json(toolText(polled.second))["token"]!!.jsonPrimitive.content
+
+    val rendered =
+      mcpAnonymous(
+        """{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"render_preview","arguments":{"catalog":"demo","previewId":"example","observe":"png","overrides":{"uiMode":"dark"},"token":"$token"}}}"""
+      )
+    assertEquals(200, rendered.first, rendered.second)
+    val resourceUri =
+      json(rendered.second)["result"]!!
+        .jsonObject["content"]!!
+        .jsonArray
+        .single { it.jsonObject["type"]!!.jsonPrimitive.content == "resource_link" }
+        .jsonObject["uri"]!!
+        .jsonPrimitive
+        .content
+    assertFalse(resourceUri.contains(token), "the replayable URI must not carry the grant secret")
+    assertFalse(rendered.second.contains(token), "the tool result must not echo the grant secret")
+
+    val read =
+      mcpAnonymous(
+        """{"jsonrpc":"2.0","id":4,"method":"resources/read","params":{"uri":"$resourceUri","_meta":{"compose-preview/token":"$token"}}}"""
+      )
+    assertEquals(200, read.first, read.second)
+    val contents = json(read.second)["result"]!!.jsonObject["contents"]!!.jsonArray
+    assertTrue(contents.single().jsonObject["blob"]!!.jsonPrimitive.content.isNotBlank())
+
+    // A host that reads the link itself cannot attach the in-band token. The link is signed for
+    // exactly this render, so that read succeeds with no credential at all...
+    assertTrue(resourceUri.contains("&exp=") && resourceUri.contains("&sig="), resourceUri)
+    val hostRead =
+      mcpAnonymous(
+        """{"jsonrpc":"2.0","id":5,"method":"resources/read","params":{"uri":"$resourceUri"}}"""
+      )
+    assertEquals(200, hostRead.first, hostRead.second)
+    assertTrue(
+      json(hostRead.second)["result"]!!
+        .jsonObject["contents"]!!
+        .jsonArray
+        .single()
+        .jsonObject["blob"]!!
+        .jsonPrimitive
+        .content
+        .isNotBlank(),
+      hostRead.second,
+    )
+
+    // ...but a tampered signature, or a different override state, still needs live scope.
+    val tampered =
+      mcpAnonymous(
+        """{"jsonrpc":"2.0","id":6,"method":"resources/read","params":{"uri":"${resourceUri.substringBeforeLast("&sig=")}&sig=AAAA"}}"""
+      )
+    assertTrue(tampered.second.contains("live grant scope is required"), tampered.second)
+    val otherState =
+      resourceUri.replace(
+        Regex("overrides=[^&]+"),
+        "overrides=" +
+          java.util.Base64.getUrlEncoder()
+            .withoutPadding()
+            .encodeToString("""{"uiMode":"light"}""".encodeToByteArray()),
+      )
+    val swapped =
+      mcpAnonymous(
+        """{"jsonrpc":"2.0","id":7,"method":"resources/read","params":{"uri":"$otherState"}}"""
+      )
+    assertTrue(swapped.second.contains("live grant scope is required"), swapped.second)
+    // An unsigned default-state read is still gated at the door.
+    val unsigned =
+      mcpAnonymous(
+        """{"jsonrpc":"2.0","id":8,"method":"resources/read","params":{"uri":"${resourceUri.substringBefore('?')}"}}"""
+      )
+    assertEquals(401, unsigned.first, unsigned.second)
+
+    // Replaying the link through render_preview renders the state it names, not the default.
+    val replayed =
+      mcpAnonymous(
+        """{"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"render_preview","arguments":{"uri":"$resourceUri","observe":"png","token":"$token"}}}"""
+      )
+    val replayedUri =
+      json(replayed.second)["result"]!!
+        .jsonObject["content"]!!
+        .jsonArray
+        .single { it.jsonObject["type"]!!.jsonPrimitive.content == "resource_link" }
+        .jsonObject["uri"]!!
+        .jsonPrimitive
+        .content
+    assertEquals(
+      Regex("overrides=[^&]+").find(resourceUri)!!.value,
+      Regex("overrides=[^&]+").find(replayedUri)!!.value,
+    )
+    val conflicting =
+      mcpAnonymous(
+        """{"jsonrpc":"2.0","id":10,"method":"tools/call","params":{"name":"render_preview","arguments":{"uri":"$resourceUri","overrides":{"uiMode":"light"},"token":"$token"}}}"""
+      )
+    assertTrue(
+      conflicting.second.contains("differ from the 'overrides' argument"),
+      conflicting.second,
+    )
+    val unsupported =
+      mcpAnonymous(
+        """{"jsonrpc":"2.0","id":11,"method":"tools/call","params":{"name":"history_list","arguments":{"uri":"$resourceUri","token":"$token"}}}"""
+      )
+    assertTrue(unsupported.second.contains("does not apply"), unsupported.second)
+  }
+
   /** A bad token in the argument is no token, not a way past the gate. */
   @Test
   fun `an unknown token argument is refused like none at all`() {
@@ -622,7 +761,7 @@ class ServeAgentGrantRoutingTest {
         """{"jsonrpc":"2.0","id":2,"method":"resources/list","params":{}}""",
       )
     val resources = json(listed.second)["result"]!!.jsonObject["resources"]!!.jsonArray
-    assertEquals(2, resources.size)
+    assertEquals(3, resources.size)
     val uri =
       resources
         .single { it.jsonObject["uri"]!!.jsonPrimitive.content.contains("/demo/") }
@@ -709,7 +848,14 @@ class ServeAgentGrantRoutingTest {
         """{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"render_preview","arguments":{"catalog":"demo","previewId":"example","observe":"png"}}}""",
       )
     val content = json(rendered.second)["result"]!!.jsonObject["content"]!!.jsonArray
-    assertEquals("image", content.single().jsonObject["type"]!!.jsonPrimitive.content)
+    assertEquals(
+      "image",
+      content
+        .single { it.jsonObject["type"]!!.jsonPrimitive.content == "image" }
+        .jsonObject["type"]!!
+        .jsonPrimitive
+        .content,
+    )
 
     val observed =
       mcp(
@@ -717,7 +863,11 @@ class ServeAgentGrantRoutingTest {
         """{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"render_preview","arguments":{"catalog":"demo","previewId":"example"}}}""",
       )
     val observation =
-      json(observed.second)["result"]!!.jsonObject["content"]!!.jsonArray.single().jsonObject
+      json(observed.second)["result"]!!
+        .jsonObject["content"]!!
+        .jsonArray
+        .single { it.jsonObject["type"]!!.jsonPrimitive.content == "text" }
+        .jsonObject
     assertEquals("text", observation["type"]!!.jsonPrimitive.content)
     assertTrue(observation["text"]!!.jsonPrimitive.content.contains("\"sha256\""))
   }
