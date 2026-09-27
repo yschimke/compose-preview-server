@@ -6137,6 +6137,175 @@ test("contract · a refused UI Builder explains itself inside the card", async (
   expect(fits.lines).toBeGreaterThan(1);
 });
 
+// Antigravity 1.2.12 renders `<agent-embed src="file:///…/viewer.html">` by reading the file into
+// `<iframe srcdoc>`: location is about:srcdoc, so the fragment never arrives and only an inline
+// `<script type="application/json" id="compose-preview-result">` block can carry the result.
+function inlineResultBlock(envelope, { raw } = {}) {
+  const json = raw ?? JSON.stringify(envelope).replace(/<\//g, "<\\/").replace(/<!--/g, "\\u003c!--");
+  return `<script type="application/json" id="compose-preview-result">${json}</script>`;
+}
+
+async function openSrcdocViewer(page, block) {
+  const viewerHtml = await (await page.request.get("/mcp-app/compose-preview-viewer.html")).text();
+  await page.goto("/preview-harness/index.html");
+  await page.evaluate((srcdoc) => {
+    document.body.replaceChildren();
+    const frame = document.createElement("iframe");
+    frame.title = "Compose Preview MCP App";
+    frame.style.width = "620px";
+    frame.style.height = "650px";
+    window.__viewerMessages = 0;
+    // Nothing may reach the host: a static viewer sends no JSON-RPC at all.
+    window.addEventListener("message", () => window.__viewerMessages++);
+    frame.srcdoc = srcdoc;
+    document.body.append(frame);
+  }, viewerHtml + block);
+  return page.frameLocator('iframe[title="Compose Preview MCP App"]');
+}
+
+test("contract · static viewer reads an inline result block in an srcdoc frame", async ({ page }) => {
+  const png = readFileSync(renderPlaceholder).toString("base64");
+  const imageEnvelope = {
+    version: 1,
+    arguments: { uri: "compose-preview://fixture/_app/com.example.Card", previewId: "CardPreview" },
+    result: {
+      content: [
+        { type: "image", mimeType: "image/png", data: png },
+        {
+          type: "text",
+          text: JSON.stringify({
+            uri: "compose-preview://fixture/_app/com.example.Card",
+            previewId: "InlineCardPreview",
+            semantics: { root: { testTag: "static-card" } },
+          }),
+        },
+      ],
+    },
+  };
+  let viewer = await openSrcdocViewer(page, inlineResultBlock(imageEnvelope));
+  const image = viewer.locator('#canvas img[alt="Rendered Compose preview"]');
+  await expect(image).toBeVisible();
+  expect(await image.getAttribute("src")).toBe(`data:image/png;base64,${png}`);
+  await expect(viewer.locator("#meta")).toHaveText("InlineCardPreview");
+  expect(await viewer.locator("html").evaluate(() => location.href)).toBe("about:srcdoc");
+  await expect(viewer.locator("#use")).toBeHidden();
+  await expect(viewer.locator("#refresh")).toBeHidden();
+  await expect(viewer.locator("#canvas")).not.toContainText("MCP Apps bridge is unavailable");
+  // No initialize request (or any other message) goes out to the host in static mode.
+  await page.waitForTimeout(500);
+  expect(await page.evaluate(() => window.__viewerMessages)).toBe(0);
+
+  // Text-only result, with markup a producer must escape so it cannot close the block early.
+  const hostile = 'before </script><script>window.parent.__escaped = true</script> <!-- <script> after';
+  viewer = await openSrcdocViewer(
+    page,
+    inlineResultBlock({
+      version: 1,
+      arguments: { uri: "compose-preview://fixture/_app/com.example.Card" },
+      result: { content: [{ type: "text", text: hostile }] },
+    }),
+  );
+  await expect(viewer.locator("#canvas")).toContainText(hostile);
+  await expect(viewer.locator("#meta")).toHaveText("Static preview result");
+  expect(await page.evaluate(() => window.__escaped)).toBeUndefined();
+
+  // Every "<" escaped as < is the other documented producer escape.
+  viewer = await openSrcdocViewer(
+    page,
+    inlineResultBlock(null, {
+      raw: JSON.stringify({
+        version: 1,
+        result: { content: [{ type: "text", text: hostile }] },
+      }).replace(/</g, "\\u003c"),
+    }),
+  );
+  await expect(viewer.locator("#canvas")).toContainText(hostile);
+
+  // Over 500 KB of UTF-8, though under 500 000 UTF-16 code units: bytes are what is bounded.
+  viewer = await openSrcdocViewer(
+    page,
+    inlineResultBlock({
+      version: 1,
+      result: { content: [{ type: "text", text: "é".repeat(250_000) }] },
+    }),
+  );
+  await expect(viewer.locator("#canvas")).toContainText("the inline result is larger than 500 KB");
+  await expect(viewer.locator("#meta")).toHaveText(
+    "Static result unavailable; use the complete text fallback.",
+  );
+
+  viewer = await openSrcdocViewer(
+    page,
+    inlineResultBlock({
+      version: 1,
+      arguments: { uri: "compose-preview://fixture/card", sessionId: "must-not-travel" },
+      result: { content: [{ type: "text", text: "safe fallback" }] },
+    }),
+  );
+  await expect(viewer.locator("#canvas")).toContainText('credential field "sessionId" is not allowed');
+  await expect(viewer.locator("#canvas")).not.toContainText("must-not-travel");
+
+  viewer = await openSrcdocViewer(
+    page,
+    inlineResultBlock({
+      version: 1,
+      arguments: { uri: "https://preview.invalid/render?token=query-secret" },
+      result: { content: [{ type: "text", text: "safe fallback" }] },
+    }),
+  );
+  await expect(viewer.locator("#canvas")).toContainText('credential field "token"');
+  await expect(viewer.locator("#canvas")).not.toContainText("query-secret");
+
+  for (const [raw, reason] of [
+    ["{not json", "the result is not valid JSON"],
+    ["", "the inline result is empty"],
+    [JSON.stringify({ version: 2, result: { content: [] } }), "expected a version 1 envelope"],
+    [JSON.stringify({ version: 1, result: { content: [null] } }), "must be an array of objects"],
+  ]) {
+    viewer = await openSrcdocViewer(page, inlineResultBlock(null, { raw }));
+    await expect(viewer.locator("#canvas")).toContainText(reason);
+    await expect(viewer.locator("#canvas")).toContainText("Unable to load the static preview result");
+    await expect(viewer.locator("#use")).toBeHidden();
+    await expect(viewer.locator("#refresh")).toBeHidden();
+  }
+  expect(await page.evaluate(() => window.__viewerMessages)).toBe(0);
+});
+
+test("contract · the static fragment takes precedence over an inline result block", async ({ page }) => {
+  const inline = inlineResultBlock({
+    version: 1,
+    result: { content: [{ type: "text", text: "from the inline block" }] },
+  });
+  const viewerHtml = await (await page.request.get("/mcp-app/compose-preview-viewer.html")).text();
+  // Served as a real URL, which is the only way a fragment can arrive alongside the block.
+  await page.route("**/inline-viewer.html", (route) =>
+    route.fulfill({ contentType: "text/html", body: viewerHtml + inline }),
+  );
+  const fragment = Buffer.from(
+    JSON.stringify({
+      version: 1,
+      result: { content: [{ type: "text", text: "from the fragment" }] },
+    }),
+  ).toString("base64url");
+
+  await page.goto(`/mcp-app/inline-viewer.html#compose-preview-result=${fragment}`);
+  await expect(page.locator("#canvas")).toContainText("from the fragment");
+  await expect(page.locator("#canvas")).not.toContainText("from the inline block");
+
+  await page.goto("about:blank");
+  await page.goto("/mcp-app/inline-viewer.html");
+  await expect(page.locator("#canvas")).toContainText("from the inline block");
+
+  // The fragment alone still works, and an invalid fragment is not rescued by the block.
+  await page.goto("about:blank");
+  await page.goto(`/mcp-app/compose-preview-viewer.html#compose-preview-result=${fragment}`);
+  await expect(page.locator("#canvas")).toContainText("from the fragment");
+  await page.goto("about:blank");
+  await page.goto(`/mcp-app/inline-viewer.html#compose-preview-result=${"A".repeat(500_001)}`);
+  await expect(page.locator("#canvas")).toContainText("larger than 500 KB");
+  await expect(page.locator("#canvas")).not.toContainText("from the inline block");
+});
+
 test("contract · static viewer bounds results and rejects credentials", async ({ page }) => {
   await page.goto(
     `/mcp-app/compose-preview-viewer.html#compose-preview-result=${"A".repeat(500_001)}`,
