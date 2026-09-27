@@ -1,5 +1,19 @@
 # Changelog
 
+## [3.82.0](https://github.com/yschimke/compose-preview-server/compare/v3.81.0...v3.82.0) (2026-09-27)
+
+
+### Bug Fixes
+
+* **mcp:** clear error state in the viewer and suggestions on preview misses ([#1195](https://github.com/yschimke/compose-preview-server/issues/1195)) ([5cfcab0](https://github.com/yschimke/compose-preview-server/commit/5cfcab0c1b97c2dd8fb9445d1674d4381c827094))
+* **mcp:** recompile on render when sources changed ([#1186](https://github.com/yschimke/compose-preview-server/issues/1186)) ([0647918](https://github.com/yschimke/compose-preview-server/commit/064791853e4e3043108a1e52bca6e016c242106f))
+* **mcp:** render_matrix resolves multipreview names and renders their variants ([#1198](https://github.com/yschimke/compose-preview-server/issues/1198)) ([989467c](https://github.com/yschimke/compose-preview-server/commit/989467c3e0ba9846e1385581994427a0003f7605))
+
+
+### Performance Improvements
+
+* **mcp:** compile Kotlin edits in the daemon before falling back to Gradle ([#1197](https://github.com/yschimke/compose-preview-server/issues/1197)) ([5988c36](https://github.com/yschimke/compose-preview-server/commit/5988c36d788e2dd2ee7ab54ec340db535f7a66ae))
+
 ## [3.81.0](https://github.com/yschimke/compose-preview-server/compare/v3.80.0...v3.81.0) (2026-09-27)
 
 
