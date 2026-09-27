@@ -345,7 +345,8 @@ internal fun installComposePreviewHandlers(
       name: String,
       arguments: Map<String, String>,
     ) -> io.modelcontextprotocol.kotlin.sdk.types.GetPromptResult,
-  callTool: suspend (name: String, arguments: JsonElement?) -> CallToolResult,
+  callTool:
+    suspend (name: String, arguments: JsonElement?, progressToken: JsonElement?) -> CallToolResult,
   listResources: () -> List<ee.schimke.composeai.mcp.protocol.ResourceDescriptor>,
   readResource:
     (
@@ -369,7 +370,8 @@ internal fun installComposePreviewHandlers(
     }
   }
   sdkSession.setRequestHandler<CallToolRequest>(Method.Defined.ToolsCall) { request, _ ->
-    callTool(request.name, request.arguments).toSdkCallToolResult()
+    callTool(request.name, request.arguments, request.meta?.json?.get("progressToken"))
+      .toSdkCallToolResult()
   }
   sdkSession.setRequestHandler<ListResourcesRequest>(Method.Defined.ResourcesList) { _, _ ->
     ListResourcesResult(resources = listResources().map { it.toSdkResource() }, nextCursor = null)
