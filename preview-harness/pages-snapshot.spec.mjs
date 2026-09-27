@@ -6306,6 +6306,107 @@ test("contract · the static fragment takes precedence over an inline result blo
   await expect(page.locator("#canvas")).not.toContainText("from the inline block");
 });
 
+// render_preview `details` (#1170): the card carries the a11y overlay, the findings and the layout
+// boxes after the render, marked in `_meta`, and the static viewer toggles between them with no call.
+test("contract · static card toggles a11y overlay and layout bounds from embedded details", async ({ page }) => {
+  const png = readFileSync(renderPlaceholder).toString("base64");
+  const overlayPng =
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg==";
+  const uri = "compose-preview://fixture/_app/com.example.Card";
+  const details = {
+    a11y: {
+      summary: "a11y: 1 error, 1 warning (TouchTargetSize ×1, TextContrast ×1)",
+      overlay: true,
+      findings: [
+        { level: "ERROR", rule: "TouchTargetSize", message: "Target is 24dp", node: "Icon", bounds: [0, 0, 10, 10] },
+        { level: "WARNING", rule: "TextContrast", message: "Contrast 3.1:1", node: "Title" },
+      ],
+    },
+    layout: {
+      summary: "layout: 3 nodes (layout/inspector)",
+      kind: "layout/inspector",
+      nodes: 3,
+      boxes: [
+        { label: "Column", depth: 0, bounds: [0, 0, 100, 100] },
+        { label: "Text", depth: 1, bounds: [10, 10, 90, 30] },
+      ],
+    },
+  };
+  const envelope = {
+    version: 1,
+    arguments: { uri },
+    result: {
+      content: [
+        { type: "image", mimeType: "image/png", data: png },
+        { type: "text", text: JSON.stringify({ uri, widthPx: 100, heightPx: 100, sha256: "abc" }) },
+        { type: "image", mimeType: "image/png", data: overlayPng, _meta: { "composePreview/detail": "a11y/overlay" } },
+        { type: "text", text: JSON.stringify(details), _meta: { "composePreview/detail": "details" } },
+      ],
+    },
+  };
+  let viewer = await openSrcdocViewer(page, inlineResultBlock(envelope));
+  const image = viewer.locator("#canvas .preview-stage > img");
+  await expect(image).toBeVisible();
+  // The render, not the overlay, is what the card opens on.
+  expect(await image.getAttribute("src")).toBe(`data:image/png;base64,${png}`);
+  const modes = viewer.locator("#detail-modes button");
+  await expect(modes).toHaveText(["Plain", "A11y overlay", "Layout bounds"]);
+  await expect(modes.nth(0)).toHaveAttribute("aria-pressed", "true");
+  await expect(viewer.locator("#findings li")).toHaveCount(2);
+  await expect(viewer.locator("#findings li").first()).toContainText("ERROR");
+  await expect(viewer.locator("#findings li").first()).toContainText("TouchTargetSize Target is 24dp (Icon)");
+  await expect(viewer.locator("#detail-summary")).toContainText("layout: 3 nodes");
+
+  await modes.nth(1).click();
+  await expect(modes.nth(1)).toHaveAttribute("aria-pressed", "true");
+  expect(await image.getAttribute("src")).toBe(`data:image/png;base64,${overlayPng}`);
+  await expect(viewer.locator(".detail-boxes")).toHaveCount(0);
+
+  await modes.nth(2).click();
+  expect(await image.getAttribute("src")).toBe(`data:image/png;base64,${png}`);
+  const boxes = viewer.locator(".detail-boxes rect.layout");
+  await expect(boxes).toHaveCount(2);
+  await expect(viewer.locator(".detail-boxes")).toHaveAttribute("viewBox", "0 0 100 100");
+  expect(await boxes.nth(1).getAttribute("width")).toBe("80");
+
+  await modes.nth(0).click();
+  await expect(viewer.locator(".detail-boxes")).toHaveCount(0);
+  // Every toggle is local: nothing reaches the host.
+  await page.waitForTimeout(300);
+  expect(await page.evaluate(() => window.__viewerMessages)).toBe(0);
+
+  // Unavailable products get a line and no toggle.
+  viewer = await openSrcdocViewer(
+    page,
+    inlineResultBlock({
+      version: 1,
+      arguments: { uri },
+      result: {
+        content: [
+          envelope.result.content[0],
+          envelope.result.content[1],
+          {
+            type: "text",
+            text: JSON.stringify({ layout: details.layout, unavailable: { a11y: "this daemon does not produce a11y/atf" } }),
+            _meta: { "composePreview/detail": "details" },
+          },
+        ],
+      },
+    }),
+  );
+  await expect(viewer.locator("#detail-modes button")).toHaveText(["Plain", "Layout bounds"]);
+  await expect(viewer.locator("#detail-summary")).toContainText("a11y: unavailable (this daemon does not produce a11y/atf)");
+  await expect(viewer.locator("#findings li")).toHaveCount(0);
+
+  // A card without details shows none of it.
+  viewer = await openSrcdocViewer(
+    page,
+    inlineResultBlock({ version: 1, arguments: { uri }, result: { content: envelope.result.content.slice(0, 2) } }),
+  );
+  await expect(viewer.locator("#canvas .preview-stage > img")).toBeVisible();
+  await expect(viewer.locator("#details")).toBeHidden();
+});
+
 test("contract · static viewer bounds results and rejects credentials", async ({ page }) => {
   await page.goto(
     `/mcp-app/compose-preview-viewer.html#compose-preview-result=${"A".repeat(500_001)}`,
