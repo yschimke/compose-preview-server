@@ -32,7 +32,7 @@ import kotlinx.serialization.json.putJsonArray
 import kotlinx.serialization.json.putJsonObject
 
 /**
- * Stateless MCP 2025-06-18 surface aggregating every served catalog.
+ * MCP 2025-06-18 surface aggregating every served catalog.
  *
  * Transport is owned by [ServeHttpServer]; this class owns only MCP lifecycle messages and the
  * catalog-facing resources/tools. It shares the HTTP server's render semaphore, so a remote agent
@@ -58,6 +58,44 @@ class ServeCatalogMcp(
   private val uiBuilderNative: Boolean = false,
 ) {
   data class Reply(val body: JsonObject?, val accepted: Boolean = false)
+
+  /**
+   * Request-scoped client interaction available only on a negotiated Streamable HTTP session.
+   * Stateless JSON callers keep [Unsupported], so every tool must retain a complete text fallback.
+   */
+  interface ClientInteraction {
+    val formElicitationSupported: Boolean
+
+    suspend fun elicitForm(
+      message: String,
+      requestedSchema: JsonObject,
+      timeoutMillis: Long,
+    ): FormElicitationResult?
+
+    companion object {
+      val Unsupported =
+        object : ClientInteraction {
+          override val formElicitationSupported = false
+
+          override suspend fun elicitForm(
+            message: String,
+            requestedSchema: JsonObject,
+            timeoutMillis: Long,
+          ): FormElicitationResult? = null
+        }
+    }
+  }
+
+  enum class FormElicitationAction {
+    ACCEPT,
+    DECLINE,
+    CANCEL,
+  }
+
+  data class FormElicitationResult(
+    val action: FormElicitationAction,
+    val content: JsonObject? = null,
+  )
 
   /**
    * The grant flow, as much of it as an MCP client needs and no more.
@@ -98,6 +136,11 @@ class ServeCatalogMcp(
     request: JsonObject,
     access: AgentAccess? = null,
     /**
+     * A bounded request-scoped interaction channel. It is deliberately optional until a tool opts
+     * into elicitation; merely adding transport support must not alter stateless call behaviour.
+     */
+    clientInteraction: ClientInteraction = ClientInteraction.Unsupported,
+    /**
      * The UI-builder capability check for this particular request, asked of the transport because
      * only it holds the call the credential arrived on. Defaults to refusing, so a caller that
      * forgets to pass one cannot accidentally open the builder to an unauthenticated agent.
@@ -131,7 +174,13 @@ class ServeCatalogMcp(
           "prompts/get" -> prompt(params)
           "tools/call" ->
             try {
-              callTool(params, liveAuthorization, access, uiBuilderAuthorization)
+              callTool(
+                params,
+                liveAuthorization,
+                access,
+                uiBuilderAuthorization,
+                clientInteraction,
+              )
             } catch (e: McpRequestException) {
               toolError(e.message ?: "Tool call failed")
             }
@@ -492,6 +541,7 @@ class ServeCatalogMcp(
     authorizeLive: (String?) -> ServeMachineAuthorization.Decision,
     access: AgentAccess?,
     uiBuilderAuthorization: (UiBuilderRouteCapability, String?) -> UiBuilderAuthorizationDecision,
+    clientInteraction: ClientInteraction,
   ): JsonObject {
     val name = params.requiredString("name")
     val rawArgs = params["arguments"] as? JsonObject ?: JsonObject(emptyMap())
@@ -500,7 +550,7 @@ class ServeCatalogMcp(
     val presented = tokenArgument(rawArgs)
     val args = if (TOKEN_ARGUMENT in rawArgs) JsonObject(rawArgs - TOKEN_ARGUMENT) else rawArgs
     val liveAuthorization = { authorizeLive(presented) }
-    uiBuilderTool(name, args, presented, uiBuilderAuthorization)?.let {
+    uiBuilderTool(name, args, presented, uiBuilderAuthorization, clientInteraction)?.let {
       return it
     }
     return when (name) {
@@ -1876,6 +1926,7 @@ class ServeCatalogMcp(
     args: JsonObject,
     presentedToken: String?,
     authorize: (UiBuilderRouteCapability, String?) -> UiBuilderAuthorizationDecision,
+    clientInteraction: ClientInteraction,
   ): JsonObject? {
     val builder = uiBuilder ?: return null
     val capability = builder.capabilityFor(name) ?: return null
@@ -1898,7 +1949,9 @@ class ServeCatalogMcp(
               "not offer it, the operator has to add the capability and restart."
           )
       }
-    return textResult(builder.call(name, args, actor, callId = name))
+    return textResult(
+      builder.call(name, args, actor, callId = name, clientInteraction = clientInteraction)
+    )
   }
 
   private fun tool(name: String, description: String, schema: String): JsonObject =

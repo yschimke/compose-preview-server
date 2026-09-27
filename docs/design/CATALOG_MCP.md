@@ -131,9 +131,20 @@ for a new grant the same way it asked for the first.
 ## MCP surface
 
 The endpoint implements Streamable HTTP MCP protocol versions `2025-06-18` and `2025-03-26`.
-Catalog calls are independent, so the server does not allocate sessions or advertise subscriptions:
-JSON-RPC messages use `POST`, notifications receive `202 Accepted`, and optional `GET`/SSE and
-`DELETE` operations return `405 Method Not Allowed`.
+Catalog calls remain independent by default: JSON-RPC messages use `POST`, notifications receive
+`202 Accepted`, and optional `GET`/SSE returns `405 Method Not Allowed`. A 2025 client that sends
+both Streamable HTTP media types and advertises form elicitation may receive an opaque
+`MCP-Session-Id` on `initialize`. A later request using that id can keep its own POST open as SSE
+while the server sends `elicitation/create` and waits for the client's response on a second POST.
+The scope is bounded, expires after inactivity and can be closed with `DELETE`; it stores only the
+pending request correlation, never a design, grant, actor or authorization decision. Clients that
+do not negotiate this capability continue to receive the original JSON response mode with no
+session allocation.
+
+This is a compatibility path for the negotiated 2025 protocols and the current Kotlin MCP SDK.
+When the server and target clients move to the 2026 protocol generation, task-level
+`input_required` plus `inputResponses`/`requestState` should replace this request-scoped rendezvous;
+that protocol/SDK migration is deliberately not bundled into the compatibility transport.
 
 | Operation | Access | Purpose |
 | --- | --- | --- |
@@ -243,14 +254,12 @@ brief behind it without a second call. Read it on its own with `ui_builder_get_l
 with `ui_builder_set_links`, which replaces the whole record.
 [`UI_BUILDER_LINKS.md`](UI_BUILDER_LINKS.md) has the record and its routes.
 
-**Why a blocking call and not an MCP notification.** MCP has server-to-client notifications, and this
-endpoint deliberately cannot send one: `/mcp` is stateless JSON-RPC, `GET /mcp` — the
-Streamable-HTTP listening stream a notification travels on — answers `405`, and `initialize`
-advertises `resources: {"subscribe": false}` rather than claiming otherwise. Honouring
-`resources/subscribe` would mean session ids, a per-session SSE stream, resumability and
-server-held subscription state: a stateful transport, which is the property this endpoint is built
-not to have. A call that blocks needs none of it, and it is the shape `poll_access` already uses
-here.
+**Why a blocking call and not an MCP notification.** MCP has server-to-client notifications, but
+this endpoint does not advertise subscriptions: `GET /mcp` answers `405`, and `initialize`
+advertises `resources: {"subscribe": false}`. The optional elicitation scope does not change that:
+its SSE stream belongs to one in-flight POST, closes with that request's final response and has no
+resumable notification cursor. A blocking call still needs none of it, and it is the shape
+`poll_access` already uses here.
 
 Presence never wakes `ui_builder_await_design`. Who is looking at a design, and what they have
 selected, is excluded by design from the document, the revision and the durable sequence; waking an
@@ -438,16 +447,15 @@ One endpoint, two authorization vocabularies:
 
 | Surface | Endpoint/transport | Authorization | State model |
 | --- | --- | --- | --- |
-| Catalog tools | `/mcp`, Streamable HTTP | `preview` / `live` scopes | Stateless aggregate catalog queries and renders |
-| UI-builder tools | `/mcp`, same transport | `ui-builder-read`, `ui-builder-write`, `ui-builder-export` capabilities | Stateless per call; a design's revision is carried explicitly as `baseRevision` |
+| Catalog tools | `/mcp`, Streamable HTTP | `preview` / `live` scopes | Independent calls; optional bounded request scope for 2025 elicitation |
+| UI-builder tools | `/mcp`, same transport | `ui-builder-read`, `ui-builder-write`, `ui-builder-export` capabilities | Explicit `baseRevision`; optional request-scoped elicitation carries no design state |
 
-This was planned as a separate sidecar on a path of its own, with a stateful session. It is one
-endpoint instead, and the session is stateless, for two reasons. An agent already holds exactly one
-bearer for the box, and a second endpoint would have meant a second origin check, a second body cap
-and a second place for the two to drift about what a grant means. And the stateful session it would
-have kept turned out to buy nothing: the Design API already carries the revision in the request, so
-`baseRevision` does the work a session cursor would have done, and does it in a form a retry can
-repeat.
+This was planned as a separate sidecar on a path of its own, with authoritative state in a session.
+It is one endpoint instead. An agent already holds exactly one bearer for the box, and a second
+endpoint would have meant a second origin check, a second body cap and a second place for the two to
+drift about what a grant means. The Design API carries its revision explicitly, so `baseRevision`
+does the work an application session cursor would have done in a form a retry can repeat. The small
+transport scope used by elicitation is only a response rendezvous and never replaces that rule.
 
 What did not change is the capability model. `ui-builder-read`, `ui-builder-write` and
 `ui-builder-export` are checked per call through the same mapping the HTTP routes use, so a grant
@@ -458,6 +466,8 @@ that reaches the browser's Design API reaches these tools and nothing more.
 - Browser-originated MCP calls must have an `Origin` matching the request host, limiting DNS
   rebinding attacks. Non-browser clients normally omit `Origin`.
 - Request bodies are capped at 1 MiB and responses disable caching.
+- Request scopes use cryptographically random ids, admit one pending interaction, are globally
+  bounded, expire after five minutes of inactivity and can be explicitly deleted.
 - Catalog leases protect a catalog while a request is in flight.
 - Remote renders use the same server-wide semaphore and queue timeout as browser renders; enabling
   MCP does not create an unmetered rendering lane.

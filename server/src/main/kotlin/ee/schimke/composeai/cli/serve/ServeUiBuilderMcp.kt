@@ -208,15 +208,25 @@ class ServeUiBuilderMcp(
     args: JsonObject,
     actor: AuthenticatedUiBuilderActor,
     callId: String,
+    /** Optional 2025 request-scoped interaction; every operation must retain a text fallback. */
+    clientInteraction: ServeCatalogMcp.ClientInteraction =
+      ServeCatalogMcp.ClientInteraction.Unsupported,
   ): String =
-    withCommentNotice(tool, args, actor, withLinks(tool, args, run(tool, args, actor, callId)))
+    withCommentNotice(
+      tool,
+      args,
+      actor,
+      withLinks(tool, args, run(tool, args, actor, callId, clientInteraction)),
+    )
 
   private suspend fun run(
     tool: String,
     args: JsonObject,
     actor: AuthenticatedUiBuilderActor,
     callId: String,
+    clientInteraction: ServeCatalogMcp.ClientInteraction,
   ): String {
+    @Suppress("UNUSED_VARIABLE") val interaction = clientInteraction
     val request =
       when (tool) {
         LIST_CATALOGS -> return listCatalogs(args, actor, callId)
@@ -562,13 +572,13 @@ class ServeUiBuilderMcp(
    *
    * ## Why a tool and not an MCP notification
    *
-   * MCP does have server-to-client notifications, and this surface deliberately cannot send one:
-   * `/mcp` is a stateless JSON-RPC endpoint, `GET /mcp` — the Streamable-HTTP listening stream a
-   * notification would travel on — answers 405, and `initialize` says as much by advertising
-   * `resources: {"subscribe": false}`. Honouring `resources/subscribe` would mean session ids, a
-   * per-session SSE stream, resumability and server-held subscription state: a stateful transport,
-   * which is the property this endpoint is built not to have. A call that blocks needs none of
-   * that, and it is the shape the grant flow's `poll_access` and [AWAIT_COMMENTS] already use here.
+   * MCP does have server-to-client notifications, but this surface deliberately does not advertise
+   * resource subscriptions: `GET /mcp` — the long-lived Streamable-HTTP listening stream a
+   * notification would travel on — answers 405, and `initialize` advertises `resources:
+   * {"subscribe": false}`. The bounded request-scoped POST stream used for elicitation lives only
+   * until that call's final response; it has no resumable notification cursor. A call that blocks
+   * needs neither, and it is the shape the grant flow's `poll_access` and [AWAIT_COMMENTS] already
+   * use here.
    *
    * ## What it is
    *
