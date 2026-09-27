@@ -3239,24 +3239,105 @@ class DaemonMcpServerTest {
     assertThat(resp.firstTextContent()).contains("exceeds the cap")
   }
 
+  /** A registered module holding a multipreview function's variants, each a solid PNG. */
+  private fun multipreviewModule(vararg variants: String): Pair<WorkspaceId, List<String>> {
+    val workspaceId = registerWorkspace(tmp.newFolder("multi"), "multi")
+    val daemon = warmDaemonFor(workspaceId, ":app")
+    val ids = variants.map { "com.example.MainActivityKt.ListScreenPreview_$it" }
+    ids.forEach {
+      daemon.emitDiscovery(it, functionName = "ListScreenPreview")
+      client.expectNotification("notifications/resources/list_changed", 2_000)
+    }
+    val png = tmp.newFile("multi.png")
+    val img = BufferedImage(40, 40, BufferedImage.TYPE_INT_ARGB)
+    img.createGraphics().apply {
+      color = java.awt.Color.BLUE
+      fillRect(0, 0, 40, 40)
+      dispose()
+    }
+    ImageIO.write(img, "png", png)
+    daemon.autoRenderPngPath = { png.absolutePath }
+    return workspaceId to ids
+  }
+
   @Test
-  fun `render_matrix requires at least one axis`() {
+  fun `render_matrix with only preview renders every multipreview variant on one contact sheet`() {
     client.initialize()
-    val projectDir = tmp.newFolder("workspace")
-    tmp.newFolder("workspace", "module")
-    val workspaceId = registerWorkspace(projectDir, "demo")
-    warmDaemonFor(workspaceId, ":module")
-    val uri = PreviewUri(workspaceId, ":module", "com.example.Red").toUri()
+    multipreviewModule("Devices - Large Round", "Devices - Small Round", "Fonts - Small")
+    val resp =
+      client.callTool(
+        "render_matrix",
+        buildJsonObject { put("preview", "ListScreenPreview") },
+        timeoutMs = 10_000,
+      )
+    assertThat(resp.isError()).isFalse()
+    val parsed = json.parseToJsonElement(resp.textContents().first()).jsonObject
+    assertThat(parsed["mode"]!!.jsonPrimitive.content).isEqualTo("variants")
+    assertThat(parsed["cells"]!!.jsonArray.map { it.jsonObject["label"]!!.jsonPrimitive.content })
+      .containsExactly(
+        "ListScreenPreview_Devices - Large Round",
+        "ListScreenPreview_Devices - Small Round",
+        "ListScreenPreview_Fonts - Small",
+      )
+    val images =
+      resp.raw["content"]!!.jsonArray.filter {
+        it.jsonObject["type"]!!.jsonPrimitive.content == "image"
+      }
+    assertThat(images).hasSize(1)
+  }
+
+  @Test
+  fun `render_matrix resolves a multipreview function's bare id and applies axes to one variant`() {
+    // Regression: the bare function id reached the daemon and surfaced
+    // "PreviewManifestRouter: no manifest entry for previewId".
+    client.initialize()
+    val (workspaceId, ids) = multipreviewModule("Devices - Large Round", "Fonts - Small")
+    val bare = PreviewUri(workspaceId, ":app", "com.example.MainActivityKt.ListScreenPreview")
     val resp =
       client.callTool(
         "render_matrix",
         buildJsonObject {
-          put("uri", uri)
-          putJsonObject("axes") {}
+          put("uri", bare.toUri())
+          putJsonObject("axes") {
+            putJsonArray("fontScale") {
+              add(JsonPrimitive(1.0))
+              add(JsonPrimitive(2.0))
+            }
+          }
         },
         timeoutMs = 10_000,
       )
-    assertThat(resp.firstTextContent()).contains("at least one of device")
+    assertThat(resp.isError()).isFalse()
+    val parsed = json.parseToJsonElement(resp.textContents().first()).jsonObject
+    assertThat(parsed["uri"]!!.jsonPrimitive.content)
+      .isEqualTo(PreviewUri(workspaceId, ":app", ids.first()).toUri())
+    assertThat(parsed["variant"]!!.jsonPrimitive.content)
+      .isEqualTo("ListScreenPreview_Devices - Large Round")
+    assertThat(parsed["cellCount"]!!.jsonPrimitive.content).isEqualTo("2")
+    assertThat(resp.firstTextContent()).doesNotContain("PreviewManifestRouter")
+  }
+
+  @Test
+  fun `render_matrix names the variants for an id the catalog does not hold`() {
+    client.initialize()
+    val (workspaceId, _) = multipreviewModule("Devices - Large Round")
+    val resp =
+      client.callTool(
+        "render_matrix",
+        buildJsonObject {
+          put(
+            "uri",
+            PreviewUri(workspaceId, ":app", "com.example.MainActivityKt.ListScreenPrevew").toUri(),
+          )
+        },
+        timeoutMs = 10_000,
+      )
+    assertThat(resp.isError()).isTrue()
+    assertThat(resp.firstTextContent())
+      .startsWith(
+        "render_matrix: no preview matches 'com.example.MainActivityKt.ListScreenPrevew'."
+      )
+    assertThat(resp.firstTextContent()).contains("Closest: ListScreenPreview")
   }
 
   @Test
@@ -3298,6 +3379,8 @@ class DaemonMcpServerTest {
         timeoutMs = 10_000,
       )
     assertThat(resp.firstTextContent()).contains("id:typo_phone")
+    // The error names the valid ids, so an agent never has to go looking for them.
+    assertThat(resp.firstTextContent()).contains("valid ids: id:pixel_5")
   }
 
   @Test

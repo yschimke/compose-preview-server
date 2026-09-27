@@ -2203,7 +2203,10 @@ class DaemonMcpServer(
       ToolDef(
         name = "render_matrix",
         description =
-          "Render one preview across a cross-product of display axes in a single call and return a token-frugal per-cell summary — for 'does this survive small screen + RTL + large font?' without looping render_preview and reading N PNGs (issue #1788). `axes` sets any of device / locale / uiMode / fontScale (each a non-empty array); the result has one cell per combination with its `overrides`, `label`, `sha256`, `widthPx`/`heightPx`, and `changed` (sha differs from the first cell — the quick 'which configs render differently?' signal). No base64 by default; fetch a specific cell's pixels with render_preview + those overrides when you need to look, or set `contactSheet:true` to also get one stitched grid image of every cell. Bounded at 24 cells; narrow the axes if you exceed it. Pairs with diff_semantics for per-cell structural diffs.",
+          "With just `preview` (a @Preview function name), renders all of its @Preview variants " +
+            "(the annotation's own devices, font scales, …; up to 12) with one labelled contact " +
+            "sheet. " +
+            "Render one preview across a cross-product of display axes in a single call and return a token-frugal per-cell summary — for 'does this survive small screen + RTL + large font?' without looping render_preview and reading N PNGs (issue #1788). `axes` sets any of device / locale / uiMode / fontScale (each a non-empty array); the result has one cell per combination with its `overrides`, `label`, `sha256`, `widthPx`/`heightPx`, and `changed` (sha differs from the first cell — the quick 'which configs render differently?' signal). No base64 by default; fetch a specific cell's pixels with render_preview + those overrides when you need to look, or set `contactSheet:true` to also get one stitched grid image of every cell. Bounded at 24 cells; narrow the axes if you exceed it. Pairs with diff_semantics for per-cell structural diffs.",
         inputSchema =
           parseSchema(
             """
@@ -2211,12 +2214,13 @@ class DaemonMcpServer(
               "type":"object",
               "properties":{
                 "uri":{"type":"string","description":"compose-preview://<workspace>/<module>/<fqn>"},
+                "preview":{"type":"string","description":"Alternative to uri: a @Preview function name or FQN suffix, e.g. 'ListScreenPreview'. Without axes, every @Preview variant it names is rendered; with axes, they apply to the first variant (named in the result)."},
                 "project":{"type":"string","description":"Absolute path to the project (or any folder in it). Only needed when the host sends no workspace roots."},
                 "axes":{
                   "type":"object",
-                  "description":"Cross-product axes; set at least one. Each is a non-empty array.",
+                  "description":"Optional cross-product axes. Each is a non-empty array. Omit to render the preview's own @Preview variants.",
                   "properties":{
-                    "device":{"type":"array","items":{"type":"string"},"description":"@Preview(device=...) ids/specs, e.g. ['id:pixel_5','id:pixel_tablet']."},
+                    "device":{"type":"array","items":{"type":"string"},"description":"@Preview(device=...) ids or specs. Phone/tablet: 'id:pixel_5', 'id:pixel_7', 'id:pixel_tablet', 'id:pixel_fold'. Wear OS: 'id:wearos_small_round', 'id:wearos_large_round', 'id:wearos_square'. Or 'spec:width=411dp,height=891dp,dpi=420'. list_devices has every id; an unknown id is rejected with the valid ones."},
                     "locale":{"type":"array","items":{"type":"string"},"description":"BCP-47 locale tags, e.g. ['en','ar','ja-JP']."},
                     "uiMode":{"type":"array","items":{"type":"string","enum":["light","dark"]}},
                     "fontScale":{"type":"array","items":{"type":"number"},"description":"Font-scale multipliers, e.g. [1.0, 2.0]."}
@@ -2225,7 +2229,7 @@ class DaemonMcpServer(
                 "contactSheet":{"type":"boolean","description":"When true, also return a single stitched contact-sheet PNG (one labelled tile per cell) alongside the per-cell summary. Default false (token-frugal: hashes only)."},
                 "choose":{"type":"boolean","description":"When true, ask an elicitation-capable client to choose one rendered variant. Clients without elicitation receive the same labelled choices as text."}
               },
-              "required":["uri","axes"]
+              "required":[]
             }
             """
               .trimIndent()
@@ -4082,18 +4086,20 @@ class DaemonMcpServer(
    * a careless cross-product can't fan out unboundedly.
    */
   private suspend fun toolRenderMatrix(session: Session, args: JsonObject): CallToolResult {
-    val uriStr =
-      args["uri"]?.jsonPrimitive?.contentOrNull
-        ?: return errorCallToolResult("render_matrix: missing 'uri'")
-    val uri =
-      PreviewUri.parseOrNull(uriStr)
-        ?: return errorCallToolResult("render_matrix: invalid uri: $uriStr")
-    val axes =
-      args["axes"] as? JsonObject
-        ?: return errorCallToolResult("render_matrix: missing 'axes' (object of arrays)")
+    val uriArg = args["uri"]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() }
+    val previewArg = args["preview"]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() }
+    val variantUris =
+      when (val resolved = matrixVariants(uriArg, previewArg)) {
+        is PreviewNameResolution.Missing ->
+          return errorCallToolResult("render_matrix: ${resolved.message}", resolved.structured)
+        is PreviewNameResolution.Found -> listOf(resolved.uri) + resolved.others
+      }
+    val axes = (args["axes"] as? JsonObject)?.takeIf { it.isNotEmpty() }
+    val choose = args["choose"]?.jsonPrimitive?.contentOrNull?.toBooleanStrictOrNull() ?: false
+    if (axes == null) return renderVariantMatrix(session, variantUris, args, choose)
+    val uri = PreviewUri.parseOrNull(variantUris.first())!!
     val contactSheet =
       args["contactSheet"]?.jsonPrimitive?.contentOrNull?.toBooleanStrictOrNull() ?: false
-    val choose = args["choose"]?.jsonPrimitive?.contentOrNull?.toBooleanStrictOrNull() ?: false
 
     fun stringAxis(key: String): List<String>? =
       (axes[key] as? JsonArray)
@@ -4170,6 +4176,11 @@ class DaemonMcpServer(
       val payload = buildJsonObject {
         put("schema", "compose-preview-matrix/v1")
         put("uri", uri.toUri())
+        if (variantUris.size > 1) {
+          // A multipreview name: the axes apply to one variant; say which, and name the rest.
+          put("variant", variantLabel(uri))
+          putJsonArray("otherVariants") { variantUris.drop(1).forEach { add(JsonPrimitive(it)) } }
+        }
         put("cellCount", cells.size)
         if (contactSheet) put("contactSheet", true)
         putJsonArray("cells") { cells.forEach { add(it) } }
@@ -4194,8 +4205,124 @@ class DaemonMcpServer(
     } catch (cancelled: CancellationException) {
       throw cancelled
     } catch (failure: Throwable) {
-      errorCallToolResult("render_matrix failed: ${failure.message}")
+      matrixFailure(uri, failure)
     }
+  }
+
+  /**
+   * The previews a `render_matrix` call covers: `preview=<name>` resolves like `render_preview`
+   * (every `@Preview` variant it names); a `uri` whose id is a multipreview function's bare id (the
+   * manifest only holds `…Preview_Devices - Large Round` and friends) resolves to those variants
+   * too, instead of reaching the daemon as an id it has never seen.
+   */
+  private fun matrixVariants(uriArg: String?, previewArg: String?): PreviewNameResolution {
+    if (uriArg == null) {
+      return previewArg?.let { resolvePreviewName(it) }
+        ?: PreviewNameResolution.Missing("missing 'uri' or 'preview'")
+    }
+    val uri =
+      PreviewUri.parseOrNull(uriArg) ?: return PreviewNameResolution.Missing("invalid uri: $uriArg")
+    val byId = catalog[DaemonAddr(uri.workspaceId, uri.modulePath)]
+    if (byId.isNullOrEmpty() || byId.values.any { it.fqn == uri.previewFqn }) {
+      return PreviewNameResolution.Found(uriArg, emptyList())
+    }
+    val variants =
+      previewNameMatches(uri.previewFqn).filter { candidate ->
+        PreviewUri.parseOrNull(candidate)?.let {
+          it.workspaceId == uri.workspaceId && it.modulePath == uri.modulePath
+        } == true
+      }
+    return if (variants.isEmpty()) noPreviewMatches(uri.previewFqn)
+    else PreviewNameResolution.Found(variants.first(), variants.drop(1))
+  }
+
+  /** A variant's short name: `ListScreenPreview_Devices - Large Round`, plus its config if any. */
+  private fun variantLabel(uri: PreviewUri): String {
+    val id = uri.previewFqn.substringAfterLast('.')
+    return if (uri.config == null) id else "$id (${uri.config})"
+  }
+
+  /**
+   * `render_matrix` with no `axes`: one cell per `@Preview` variant of the name (the annotation's
+   * own devices, font scales, …), capped at [MAX_VARIANT_CELLS], with one labelled contact sheet
+   * for the model instead of N images.
+   */
+  private suspend fun renderVariantMatrix(
+    session: Session,
+    variantUris: List<String>,
+    args: JsonObject,
+    choose: Boolean,
+  ): CallToolResult {
+    val contactSheet =
+      args["contactSheet"]?.jsonPrimitive?.contentOrNull?.toBooleanStrictOrNull() ?: true
+    val rendered = variantUris.take(MAX_VARIANT_CELLS).map { PreviewUri.parseOrNull(it)!! }
+    val first = rendered.first()
+    return try {
+      var baselineSha: String? = null
+      val cells = rendered.map { variant ->
+        val bytes = renderAndReadBytes(variant)
+        val sha = sha256Hex(bytes)
+        if (baselineSha == null) baselineSha = sha
+        Triple(variant, bytes, sha)
+      }
+      val cellJson = cells.map { (variant, bytes, sha) ->
+        buildJsonObject {
+          put("uri", variant.toUri())
+          put("label", variantLabel(variant))
+          put("sha256", sha)
+          pngDimensions(bytes)?.let {
+            put("widthPx", it.first)
+            put("heightPx", it.second)
+          }
+          put("changed", sha != baselineSha)
+        }
+      }
+      val payload = buildJsonObject {
+        put("schema", "compose-preview-matrix/v1")
+        put("mode", "variants")
+        put("uri", first.toUri())
+        put("cellCount", cellJson.size)
+        if (contactSheet) put("contactSheet", true)
+        putJsonArray("cells") { cellJson.forEach { add(it) } }
+        if (variantUris.size > MAX_VARIANT_CELLS) {
+          putJsonArray("notRendered") {
+            variantUris.drop(MAX_VARIANT_CELLS).forEach { add(JsonPrimitive(it)) }
+          }
+        }
+        if (choose) put("selection", matrixSelection(session, cellJson))
+      }
+      val blocks = buildList {
+        if (contactSheet) {
+          ContactSheet.stitch(
+              cells.map { (variant, bytes, _) -> ContactSheet.Cell(variantLabel(variant), bytes) }
+            )
+            ?.let { add(ContentBlock.Image(Base64.getEncoder().encodeToString(it), "image/png")) }
+        }
+        add(ContentBlock.Text(payload.toString()))
+      }
+      CallToolResult(content = blocks)
+    } catch (cancelled: CancellationException) {
+      throw cancelled
+    } catch (failure: Throwable) {
+      matrixFailure(first, failure)
+    }
+  }
+
+  /**
+   * A render failure, with the daemon's missing-manifest-entry error (an id the manifest does not
+   * hold, such as a multipreview function's bare id) mapped to the variants that do exist.
+   */
+  private fun matrixFailure(uri: PreviewUri, failure: Throwable): CallToolResult {
+    val message = failure.message.orEmpty()
+    if ("no manifest entry" in message || "PreviewManifestRouter" in message) {
+      val variants = previewNameMatches(uri.previewFqn)
+      val hint =
+        if (variants.isEmpty()) ""
+        else
+          "; did you mean ${variants.take(5).joinToString(", ") { variantLabel(PreviewUri.parseOrNull(it)!!) }}"
+      return errorCallToolResult("render_matrix: no preview ${uri.previewFqn}$hint")
+    }
+    return errorCallToolResult("render_matrix failed: $message")
   }
 
   /** Form chooser for a completed matrix, with an equivalent text answer for older harnesses. */
@@ -4448,8 +4575,9 @@ class DaemonMcpServer(
         deviceOverride !in knownIds
     ) {
       violations +=
-        "device='$deviceOverride' is not in the daemon's catalog (call list_devices to see valid ids; " +
-          "or use 'spec:width=…,height=…,dpi=…' for ad-hoc geometry)"
+        "device='$deviceOverride' is not in the daemon's catalog; valid ids: " +
+          knownIds.sorted().joinToString(", ") +
+          " (list_devices has their sizes; or 'spec:width=…,height=…,dpi=…' for ad-hoc geometry)"
     }
     return violations
   }
@@ -6943,6 +7071,9 @@ class DaemonMcpServer(
         "render_matrix",
         "diff_semantics",
       )
+
+    /** Most `@Preview` variants one `render_matrix` (no axes) renders. */
+    private const val MAX_VARIANT_CELLS: Int = 12
 
     /** Tools the viewer calls through the MCP Apps bridge. */
     private val APP_TOOL_NAMES =
