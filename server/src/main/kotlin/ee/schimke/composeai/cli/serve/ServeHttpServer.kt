@@ -976,6 +976,15 @@ class ServeHttpServer(
             return@intercept
           }
           if (exchange == null) return@intercept
+          // A browser already acting as a different live grant is not switched by a link alone:
+          // the link could be someone else's. Ask on a page of our own, whose form only a
+          // same-origin POST can submit.
+          val conflicting = ServeAgentGrantCookie.conflictingGrant(current, store, exchange)
+          if (conflicting != null) {
+            respondAgentGrantSwitchConfirmation(current, conflicting, exchange)
+            finish()
+            return@intercept
+          }
           current.response.cookies.append(
             ServeAgentGrantCookie.cookie(exchange.credential, secure = isSecure(current))
           )
@@ -1320,7 +1329,15 @@ class ServeHttpServer(
           post(ServeAgentGrants.POLL_PATH) { handleAgentGrantPoll(store) }
           post(ServeAgentGrants.REVOKE_PATH) { handleAgentGrantRevoke(store) }
           get(ServeAgentGrants.WHOAMI_PATH) { handleAgentGrantWhoami(store) }
+          post(ServeAgentGrants.SWITCH_PATH) { handleAgentGrantSwitch(store) }
           post(ServeAgentGrants.LEAVE_PATH) {
+            // Same-origin only: a foreign page must not be able to sign this browser out of its
+            // grant any more than into one.
+            if (!ServeSameOriginRequests.isSameOrigin(call, sites.hosts)) {
+              call.response.headers.append(HttpHeaders.CacheControl, "no-store")
+              call.respond(HttpStatusCode.Forbidden)
+              return@post
+            }
             call.response.cookies.append(
               ServeAgentGrantCookie.clearedCookie(secure = isSecure(call))
             )
@@ -13408,6 +13425,67 @@ class ServeHttpServer(
       indexes.getOrPut(sourceSystem to targetSystem) {
         ServeRelatedCatalogs.inverse(entries, targetSystem)
       }
+  }
+
+  /**
+   * The page a grant link gets instead of a silent identity switch, when this browser already acts
+   * as a different live grant. `Keep` is the clean URL (no token, no cookie change); `Switch` is a
+   * same-origin POST to [ServeAgentGrants.SWITCH_PATH]. The bearer is written into this one
+   * `no-store` page's form, never into a link, so it does not leak through history or `Referer`.
+   */
+  private suspend fun respondAgentGrantSwitchConfirmation(
+    call: ApplicationCall,
+    current: ServeAgentGrantStore.Grant,
+    exchange: ServeAgentGrantCookie.Exchange,
+  ) {
+    val skin = call.siteSkin()
+    call.response.headers.append(HttpHeaders.CacheControl, "no-store")
+    call.response.headers.append("Referrer-Policy", "no-referrer")
+    call.respondText(
+      ServeWeb.agentGrantSwitchPage(
+        currentLabel = current.label,
+        currentFingerprint = current.fingerprint,
+        nextLabel = exchange.grant.label,
+        nextFingerprint = exchange.grant.fingerprint,
+        formAction = ServeAgentGrants.SWITCH_PATH,
+        token = exchange.grant.token,
+        target = exchange.target,
+        version = SERVE_VERSION,
+        siteName = skin.first,
+        themeCss = skin.second,
+      ),
+      ContentType.Text.Html,
+      HttpStatusCode.OK,
+    )
+  }
+
+  /**
+   * `POST /agent-access/switch` — the person confirmed replacing this browser's grant. Accepted
+   * only from a page this server served, only for a live grant, and never over a human identity.
+   */
+  private suspend fun RoutingContext.handleAgentGrantSwitch(store: ServeAgentGrantStore) {
+    call.response.headers.append(HttpHeaders.CacheControl, "no-store")
+    val sameOrigin =
+      call.request.headers["Sec-Fetch-Site"] == "same-origin" ||
+        (call.request.headers[HttpHeaders.Origin] != null &&
+          ServeSameOriginRequests.isSameOrigin(call, sites.hosts))
+    if (!sameOrigin) {
+      call.respond(HttpStatusCode.Forbidden)
+      return
+    }
+    val form = call.receiveParameters()
+    val target = ServeAgentGrantCookie.safeLocalTarget(form["next"])
+    val humanPresent =
+      call.presentsOperatorCredential() || githubAuth?.currentSignedInLogin(call) != null
+    val grant = store.grantForToken(form["token"])
+    val credential = grant?.let(store::browserCredentialFor)
+    if (humanPresent || credential == null) {
+      call.respond(HttpStatusCode.Forbidden)
+      return
+    }
+    call.response.cookies.append(ServeAgentGrantCookie.cookie(credential, secure = isSecure(call)))
+    call.response.headers.append(HttpHeaders.Location, target)
+    call.respond(HttpStatusCode.SeeOther)
   }
 
   private fun resolveAgentGrant(call: ApplicationCall): ServeAgentGrantStore.Grant? {

@@ -32,6 +32,13 @@ object ServeAgentGrants {
   const val LEAVE_PATH = "$BASE_PATH/leave"
 
   /**
+   * Where the confirmation page shown when a grant link would replace the browser's current grant
+   * posts. POST only and same-origin only, so an agent-grant link can never switch a browser's
+   * identity without the person confirming it on a page this server served.
+   */
+  const val SWITCH_PATH = "$BASE_PATH/switch"
+
+  /**
    * The longest a poll may be held open. Chosen well inside the reverse proxies and load balancers
    * a box sits behind (Caddy's defaults included), and short enough that a client which loses
    * interest is not holding a connection for minutes.

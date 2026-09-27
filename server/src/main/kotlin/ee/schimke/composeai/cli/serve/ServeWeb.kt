@@ -8440,6 +8440,47 @@ ${captureControlsHtml().prependIndent("          ")}
           .trimIndent(),
     )
 
+  /**
+   * A grant link opened in a browser that already acts as a different live grant. Nothing changes
+   * unless the person presses `Switch`, a same-origin POST; `Keep` goes to the same page unchanged.
+   */
+  fun agentGrantSwitchPage(
+    currentLabel: String,
+    currentFingerprint: String,
+    nextLabel: String,
+    nextFingerprint: String,
+    formAction: String,
+    token: String,
+    target: String,
+    version: String? = null,
+    siteName: String = "",
+    themeCss: String = "",
+  ): String =
+    document(
+      title = "Switch agent access? — compose-preview",
+      unfurlDescription = "This link would switch this browser to a different agent grant.",
+      version = version,
+      siteName = siteName,
+      themeCss = themeCss,
+      body =
+        """
+        <h1 class="cp-head">Switch agent access?</h1>
+        <p class="cp-sub">This browser is using the agent grant
+          <strong>${WebEscaping.htmlEscape(currentLabel)}</strong>
+          (<code>${WebEscaping.htmlEscape(currentFingerprint)}</code>). The link you opened would
+          replace it with <strong>${WebEscaping.htmlEscape(nextLabel)}</strong>
+          (<code>${WebEscaping.htmlEscape(nextFingerprint)}</code>), and anything you do next would
+          be recorded under that grant. Only switch if you expected this link.</p>
+        <form method="post" action="${WebEscaping.htmlEscape(formAction)}">
+          <input type="hidden" name="token" value="${WebEscaping.htmlEscape(token)}">
+          <input type="hidden" name="next" value="${WebEscaping.htmlEscape(target)}">
+          <button type="submit">Switch</button>
+          <a class="cp-back" href="${WebEscaping.htmlEscape(target)}">Keep current access</a>
+        </form>
+        """
+          .trimIndent(),
+    )
+
   /** A request this reader just opened, shown so they can send its link to whoever approves it. */
   data class RequestedAccess(
     val approveUrl: String,
