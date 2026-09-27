@@ -207,8 +207,8 @@ class GradleSourceCompiler(
 
     /**
      * The first Kotlin `e:` diagnostic, else Gradle's "What went wrong" line plus its root cause
-     * (the deepest `> …` line under it: "SDK location not found" hides behind "Could not
-     * determine the dependencies of task"), else the tail.
+     * (the deepest `> …` line under it: "SDK location not found" hides behind "Could not determine
+     * the dependencies of task"), else the tail.
      */
     internal fun summarizeGradleFailure(output: String): String {
       val lines = output.lines().map(String::trim).filter(String::isNotEmpty)

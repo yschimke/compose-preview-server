@@ -56,6 +56,7 @@ class SourceRecompileTest {
         listOf(
           ":app:preBuild UP-TO-DATE",
           ":app:generateDebugResValues UP-TO-DATE",
+          ":app:packageDebugResources UP-TO-DATE",
           ":app:compileDebugKotlin",
           ":app:compileDebugJavaWithJavac NO-SOURCE",
           ":app:composePreviewCompile",
@@ -391,6 +392,9 @@ class SourceRecompileTest {
             ":app:compileDebugUnitTestKotlin",
             ":app:testDebugUnitTest",
             ":app:bundleDebugAar",
+            ":app:packageDebug",
+            // The R class inputs a Kotlin compile needs: allowed, unlike the APK above.
+            ":app:packageDebugResources UP-TO-DATE",
             ":wear:compileDebugKotlin",
             ":app:composePreviewCompile",
           ),
@@ -402,6 +406,7 @@ class SourceRecompileTest {
         ":app:compileDebugUnitTestKotlin",
         ":app:testDebugUnitTest",
         ":app:bundleDebugAar",
+        ":app:packageDebug",
         ":wear:compileDebugKotlin",
       )
       .inOrder()
@@ -578,8 +583,7 @@ class SourceRecompileTest {
     assertThat(daemon.fileChanges).isEmpty()
     render(fixture)
     assertThat(compiles).isEmpty()
-    assertThat(client.callTool("list_projects").firstTextContent())
-      .contains(worktree.canonicalPath)
+    assertThat(client.callTool("list_projects").firstTextContent()).contains(worktree.canonicalPath)
   }
 
   @Test

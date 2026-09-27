@@ -40,7 +40,10 @@ class AndroidSdks(
   private fun sdkDir(localProperties: File): File? {
     if (!localProperties.isFile) return null
     val properties = Properties()
-    runCatching { localProperties.reader().use(properties::load) }.getOrElse { return null }
+    runCatching { localProperties.reader().use(properties::load) }
+      .getOrElse {
+        return null
+      }
     return properties.getProperty("sdk.dir")?.takeIf { it.isNotBlank() }?.let(::File)
   }
 

@@ -5853,9 +5853,8 @@ class DaemonMcpServer(
     val root = runCatching { project.path.canonicalFile }.getOrDefault(project.path)
     val inside = canonical.startsWith(root)
     val hidden =
-      inside && canonical.relativeTo(root).invariantSeparatorsPath.split('/').any {
-        it.startsWith(".")
-      }
+      inside &&
+        canonical.relativeTo(root).invariantSeparatorsPath.split('/').any { it.startsWith(".") }
     if (inside && !hidden) return null
     var dir = canonical.parentFile
     while (dir != null) {
@@ -5863,7 +5862,8 @@ class DaemonMcpServer(
       dir = dir.parentFile
     }
     val build = dir ?: return null
-    val registered = supervisor.listProjects().map { runCatching { it.path.canonicalFile }.getOrDefault(it.path) }
+    val registered =
+      supervisor.listProjects().map { runCatching { it.path.canonicalFile }.getOrDefault(it.path) }
     return build.takeIf { it !in registered }
   }
 
@@ -5878,19 +5878,22 @@ class DaemonMcpServer(
     val path =
       args["path"]?.jsonPrimitive?.contentOrNull
         ?: return errorCallToolResult("notify_file_changed: missing 'path'")
-    File(path).takeIf(File::isAbsolute)?.let { otherBuildFor(it, project) }?.let { build ->
-      // The edit landed in another Gradle build than the one registered, typically a Claude Code
-      // worktree of it: compiling and rendering the registered build would show the unedited
-      // tree. Register the edited build so renders (and `preview` names) resolve to it.
-      val registered = registerProjectAt(build, rootName = null, modules = emptyList())
-      preferredRoots = listOf(build)
-      return textCallToolResult(
-        "edited file $path is not in registered project ${project.rootProjectName} " +
-          "(${project.path}); rendering from ${registered.path} instead: registered it as " +
-          "workspace ${registered.workspaceId.value}. Render its previews by name, or with " +
-          "compose-preview://${registered.workspaceId.value}/… URIs."
-      )
-    }
+    File(path)
+      .takeIf(File::isAbsolute)
+      ?.let { otherBuildFor(it, project) }
+      ?.let { build ->
+        // The edit landed in another Gradle build than the one registered, typically a Claude Code
+        // worktree of it: compiling and rendering the registered build would show the unedited
+        // tree. Register the edited build so renders (and `preview` names) resolve to it.
+        val registered = registerProjectAt(build, rootName = null, modules = emptyList())
+        preferredRoots = listOf(build)
+        return textCallToolResult(
+          "edited file $path is not in registered project ${project.rootProjectName} " +
+            "(${project.path}); rendering from ${registered.path} instead: registered it as " +
+            "workspace ${registered.workspaceId.value}. Render its previews by name, or with " +
+            "compose-preview://${registered.workspaceId.value}/… URIs."
+        )
+      }
     val kind =
       when (args["kind"]?.jsonPrimitive?.contentOrNull) {
         "resource" -> FileKind.RESOURCE
