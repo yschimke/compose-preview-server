@@ -48,6 +48,7 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -960,6 +961,20 @@ class ServeUiBuilderMcpIntegrationTest {
   }
 
   @Test
+  fun `home mutation schema advertises the closed server and repo variants`() {
+    val move =
+      toolDefinitions(start()).single {
+        it["name"]!!.jsonPrimitive.content == ServeUiBuilderMcp.MOVE_DESIGN_HOME
+      }
+    val properties = move["inputSchema"]!!.jsonObject["properties"]!!.jsonObject
+    val target = properties["targetHome"]!!.jsonObject
+    val sourceChoices = properties["sourceHome"]!!.jsonObject["anyOf"]!!.jsonArray
+    assertEquals("null", sourceChoices.first().jsonObject["type"]!!.jsonPrimitive.content)
+    assertHomeSchema(sourceChoices.last().jsonObject)
+    assertHomeSchema(target)
+  }
+
+  @Test
   fun `the native render tool appears only where the host can compile`() {
     // Two absences, not one: a box with no builder has no UI-builder tools at all, and a box with
     // a builder but no compiler has the six that need no compiler and not the seventh. A client
@@ -1161,10 +1176,32 @@ class ServeUiBuilderMcpIntegrationTest {
     json.decodeFromString(McpResponseEnvelopeV1.serializer(), envelope).response
 
   private fun tools(server: RunningServer): List<String> =
+    toolDefinitions(server).map { it["name"]!!.jsonPrimitive.content }
+
+  private fun toolDefinitions(server: RunningServer): List<JsonObject> =
     post(server, """{"jsonrpc":"2.0","id":1,"method":"tools/list"}""")["result"]!!
       .jsonObject["tools"]!!
       .jsonArray
-      .map { it.jsonObject["name"]!!.jsonPrimitive.content }
+      .map { it.jsonObject }
+
+  private fun assertHomeSchema(schema: JsonObject) {
+    val variants = schema["oneOf"]!!.jsonArray.map { it.jsonObject }
+    assertEquals(
+      listOf("server", "repo"),
+      variants.map { variant ->
+        variant["properties"]!!.jsonObject["kind"]!!.jsonObject["const"]!!.jsonPrimitive.content
+      },
+    )
+    assertEquals(
+      setOf("kind", "url", "designId"),
+      variants.first()["required"]!!.jsonArray.map { it.jsonPrimitive.content }.toSet(),
+    )
+    assertEquals(
+      setOf("kind", "path"),
+      variants.last()["required"]!!.jsonArray.map { it.jsonPrimitive.content }.toSet(),
+    )
+    variants.forEach { assertEquals("false", it["additionalProperties"]!!.jsonPrimitive.content) }
+  }
 
   private fun post(server: RunningServer, body: String) =
     client

@@ -1280,6 +1280,10 @@ class ServeUiBuilderMcp(
     private const val FULL_ARGUMENT = "full"
     private const val COMPONENT_IDS_ARGUMENT = "componentIds"
 
+    /** Closed, discriminated DesignHomeV1 schema shared by both mutation arguments. */
+    private const val DESIGN_HOME_SCHEMA =
+      """{"oneOf":[{"type":"object","properties":{"kind":{"const":"server"},"url":{"type":"string","minLength":1},"designId":{"type":"string","minLength":1}},"required":["kind","url","designId"],"additionalProperties":false},{"type":"object","properties":{"kind":{"const":"repo"},"path":{"type":"string","minLength":1}},"required":["kind","path"],"additionalProperties":false}]}"""
+
     /** The `statusSemantics` key a catalog declares its platform under; the runtime's own. */
     private const val PLATFORM_KEY = "platform"
 
@@ -1541,8 +1545,8 @@ class ServeUiBuilderMcp(
             "designId":{"type":"string"},
             "operationId":{"type":"string","description":"Your stable id; makes a retry idempotent."},
             "baseRevision":{"type":"integer","description":"The exact current revision read from the design."},
-            "sourceHome":{"description":"The exact current DesignHomeV1, or null when the design is unhomed.","anyOf":[{"type":"null"},{"type":"object"}]},
-            "targetHome":{"type":"object","description":"A DesignHomeV1: {kind:server,url,designId} or {kind:repo,path}."}
+            "sourceHome":{"description":"The exact current DesignHomeV1, or null when the design is unhomed.","anyOf":[{"type":"null"},$DESIGN_HOME_SCHEMA]},
+            "targetHome":$DESIGN_HOME_SCHEMA
           },"required":["designId","operationId","baseRevision","sourceHome","targetHome"],"additionalProperties":false}
           """,
         ),
