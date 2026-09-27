@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.77.0](https://github.com/yschimke/compose-preview-server/compare/v3.76.0...v3.77.0) (2026-09-27)
+
+
+### Features
+
+* **mcp:** read the viewer's static result from an inline block ([#1161](https://github.com/yschimke/compose-preview-server/issues/1161)) ([1c065b5](https://github.com/yschimke/compose-preview-server/commit/1c065b55ac889d98df155dda0f6e9676327a57b6))
+
 ## [3.76.0](https://github.com/yschimke/compose-preview-server/compare/v3.75.0...v3.76.0) (2026-09-27)
 
 
