@@ -63,7 +63,7 @@
     <div id="comment-list" class="comment-list"></div>
     <div id="comment-compose" class="comment-compose" hidden>
       <label for="comment-body">Post a comment</label>
-      <textarea id="comment-body" maxlength="10000" placeholder="Describe what should change"></textarea>
+      <textarea id="comment-body" maxlength="4000" placeholder="Describe what should change"></textarea>
       <div class="comment-compose-row">
         <button id="comment-post" type="button">Post comment</button>
         <span id="comment-anchor" class="muted">Click the preview to pin this comment, or post it unpinned.</span>
@@ -101,6 +101,7 @@
   const REQUEST_TIMEOUT_MS = 5000;
   const RESOURCE_READ_TIMEOUT_MS = 65000;
   const RESOURCE_POLL_INTERVAL_MS = 5000;
+  const MAX_COMMENT_BODY_LENGTH = 4000;
   // Static host contract (for example Antigravity's <agent-embed>):
   // #compose-preview-result=<unpadded base64url UTF-8 JSON>
   // JSON shape: {"version":1,"arguments":{...},"result":<MCP CallToolResult>}
@@ -144,6 +145,7 @@
   let commentBoard;
   let commentPoint;
   let commentGeneration = 0;
+  let commentPostPending = false;
 
   function request(method, params, timeoutMs = REQUEST_TIMEOUT_MS, onLateResult) {
     const id = nextId++;
@@ -282,6 +284,7 @@
     commentRenderValue = undefined;
     commentBoard = undefined;
     commentPoint = undefined;
+    commentPostPending = false;
     comments.hidden = true;
     commentList.replaceChildren();
     commentRefresh.hidden = true;
@@ -446,7 +449,7 @@
       rawCommentFallback(`Unable to load comments: ${error instanceof Error ? error.message : String(error)}`);
     } finally {
       if (generation === commentGeneration && commentDesignId === designId) {
-        commentRefresh.disabled = false;
+        commentRefresh.disabled = commentPostPending;
       }
     }
     updateCommentAction();
@@ -772,6 +775,10 @@
       if (!body) commentStatus.textContent = 'Write a comment before posting.';
       return;
     }
+    if (body.length > MAX_COMMENT_BODY_LENGTH) {
+      commentStatus.textContent = `Comments are limited to ${MAX_COMMENT_BODY_LENGTH.toLocaleString()} characters.`;
+      return;
+    }
     const generation = commentGeneration;
     const argumentsValue = {
       designId,
@@ -779,7 +786,9 @@
       ...(commentPoint ? { x: commentPoint.x, y: commentPoint.y } : {}),
       ...(resourceToken ? { token: resourceToken } : {}),
     };
+    commentPostPending = true;
     commentPost.disabled = true;
+    commentRefresh.disabled = true;
     commentStatus.textContent = 'Posting comment…';
     try {
       const result = await request(
@@ -806,8 +815,10 @@
       commentStatus.textContent = 'Unable to post comment.';
       rawCommentFallback(`Unable to post comment: ${error instanceof Error ? error.message : String(error)}`);
     } finally {
-      if (generation === commentGeneration && commentDesignId === designId) {
+      if (commentDesignId === designId) {
+        commentPostPending = false;
         commentPost.disabled = false;
+        commentRefresh.disabled = false;
       }
     }
   }

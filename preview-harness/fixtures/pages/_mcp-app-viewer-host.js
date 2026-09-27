@@ -570,6 +570,9 @@ window.addEventListener("message", async (event) => {
             },
           ],
         };
+        if (mode === "comments") {
+          await new Promise((resolve) => window.setTimeout(resolve, 250));
+        }
       }
       if (mode === "comments-denied") {
         const capability = message.params.name === "ui_builder_post_comment" ? "write" : "read";

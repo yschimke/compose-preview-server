@@ -4429,6 +4429,7 @@ for (const fixture of listPageFixtures()) {
           await viewer.locator("#comment-raw summary").click();
           await expect(viewer.locator("#comment-raw pre")).toBeVisible();
           await expect(viewer.locator("#comment-raw pre")).toContainText("stroke-7");
+          await expect(viewer.locator("#comment-body")).toHaveAttribute("maxlength", "4000");
           expect(await page.evaluate(() => window.__mcpCommentListCall)).toEqual({
             name: "ui_builder_list_comments",
             arguments: { designId: "design-comments", token: "viewer-grant-secret" },
@@ -4446,9 +4447,19 @@ for (const fixture of listPageFixtures()) {
           const image = viewer.locator(".preview-stage > img");
           await image.click({ position: { x: 180, y: 180 } });
           await expect(viewer.locator("#comment-anchor")).toContainText("Pinned at");
+          await viewer.locator("#comment-body").evaluate((field) => {
+            field.value = "x".repeat(4001);
+          });
+          await viewer.locator("#comment-post").click();
+          await expect(viewer.locator("#comment-status")).toContainText(
+            "limited to 4,000 characters",
+          );
+          expect(await page.evaluate(() => window.__mcpCommentPostCall)).toBeUndefined();
           await viewer.locator("#comment-body").fill("Increase the touch target.");
           await viewer.locator("#comment-post").click();
           await page.waitForFunction(() => window.__mcpCommentPostCall != null);
+          await expect(viewer.locator("#comment-post")).toBeDisabled();
+          await expect(viewer.locator("#comment-refresh")).toBeDisabled();
           const posted = await page.evaluate(() => window.__mcpCommentPostCall);
           expect(posted.name).toBe("ui_builder_post_comment");
           expect(posted.arguments.designId).toBe("design-comments");
@@ -4463,6 +4474,8 @@ for (const fixture of listPageFixtures()) {
           );
           await expect(viewer.locator(".comment-pin")).toHaveCount(3);
           await expect(viewer.locator("#comment-status")).toHaveText("Comment posted.");
+          await expect(viewer.locator("#comment-post")).toBeEnabled();
+          await expect(viewer.locator("#comment-refresh")).toBeEnabled();
         }
         if (fixture === "mcp-app-viewer-comments-denied") {
           await expect(viewer.locator("#comments")).toBeVisible();
@@ -4475,6 +4488,7 @@ for (const fixture of listPageFixtures()) {
           await expect(viewer.locator("#comment-compose")).toContainText(
             "Post a comment",
           );
+          await expect(viewer.locator("#comment-body")).toHaveAttribute("maxlength", "4000");
           await expect(viewer.locator("#comments")).toContainText(
             "posting requires ui-builder-write",
           );
