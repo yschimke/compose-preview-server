@@ -144,10 +144,13 @@ class ServeMcpRequestScopesTest {
     val first = assertNotNull(scopes.open(protocolVersion, formElicitationSupported = true))
     assertNotNull(scopes.find(first.id))
 
-    assertNull(scopes.open(protocolVersion, formElicitationSupported = true))
-    assertNotNull(scopes.find(first.id))
-    assertTrue(scopes.close(first.id))
-    assertFalse(scopes.close(first.id))
+    // A full registry evicts its least recently used idle scope instead of refusing: initialize is
+    // ungated, so refusing would let an anonymous caller lock everyone else out.
+    val second = assertNotNull(scopes.open(protocolVersion, formElicitationSupported = true))
+    assertNull(scopes.find(first.id))
+    assertNotNull(scopes.find(second.id))
+    assertTrue(scopes.close(second.id))
+    assertFalse(scopes.close(second.id))
 
     val expiring = assertNotNull(scopes.open(protocolVersion, formElicitationSupported = true))
     now += 101
@@ -207,4 +210,77 @@ class ServeMcpRequestScopesTest {
       )
       assertEquals(ServeCatalogMcp.FormElicitationAction.ACCEPT, first.await()?.action)
     }
+
+  @Test
+  fun `a registry full of pending interactions issues no new scope`() = runBlocking {
+    val scopes = ServeMcpRequestScopes(maxSessions = 1)
+    val busy = assertNotNull(scopes.open(protocolVersion, formElicitationSupported = true))
+    val emitted = CompletableDeferred<JsonObject>()
+    val waiting = async {
+      scopes
+        .interaction(busy) { emitted.complete(it) }
+        .elicitForm("Choose", JsonObject(emptyMap()), timeoutMillis = 5_000)
+    }
+    emitted.await()
+    assertNull(scopes.open(protocolVersion, formElicitationSupported = true))
+    assertTrue(scopes.close(busy.id))
+    waiting.cancel()
+  }
+
+  @Test
+  fun `a call that never elicits is answered without opening a stream`() = runBlocking {
+    val scopes = ServeMcpRequestScopes()
+    val scope = assertNotNull(scopes.open(protocolVersion, formElicitationSupported = true))
+    var replied: String? = null
+    var streamed = false
+    scopes.dispatchLazily(
+      scope,
+      dispatch = { "plain" },
+      onReply = { replied = it },
+      onStream = { _, _, _ -> streamed = true },
+    )
+    assertEquals("plain", replied)
+    assertFalse(streamed)
+  }
+
+  @Test
+  fun `the first emitted message switches the call to a stream`() = runBlocking {
+    val scopes = ServeMcpRequestScopes()
+    val scope = assertNotNull(scopes.open(protocolVersion, formElicitationSupported = true))
+    val streamed = mutableListOf<JsonObject>()
+    var finalReply: String? = null
+    var replied = false
+    scopes.dispatchLazily(
+      scope,
+      dispatch = { interaction ->
+        val answer = async {
+          interaction.elicitForm("Choose", JsonObject(emptyMap()), timeoutMillis = 5_000)
+        }
+        // Answer the elicitation the moment it is pending, as the client's second POST would.
+        while (scope.pending.isEmpty()) delay(1)
+        val id = scope.pending.keys.single()
+        assertEquals(
+          ServeMcpRequestScopes.ResponseDisposition.ACCEPTED,
+          scopes.acceptResponse(
+            scope.id,
+            buildJsonObject {
+              put("jsonrpc", "2.0")
+              put("id", id)
+              put("result", buildJsonObject { put("action", "decline") })
+            },
+          ),
+        )
+        "done:${answer.await()?.action}"
+      },
+      onReply = { replied = true },
+      onStream = { first, rest, reply ->
+        streamed += first
+        for (message in rest) streamed += message
+        finalReply = reply.await()
+      },
+    )
+    assertFalse(replied)
+    assertEquals("elicitation/create", streamed.single()["method"]!!.jsonPrimitive.content)
+    assertEquals("done:${ServeCatalogMcp.FormElicitationAction.DECLINE}", finalReply)
+  }
 }

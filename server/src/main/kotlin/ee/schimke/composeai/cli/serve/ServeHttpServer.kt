@@ -9860,19 +9860,15 @@ class ServeHttpServer(
         return
       }
 
+    // A session id is only a hint that elicitation may be possible. An unknown, expired or evicted
+    // id — or one sent with a different protocol version than it was negotiated under — does NOT
+    // answer 404/400: the request is served on the stateless JSON path, exactly as it was before
+    // request scopes existed. Idle expiry, eviction and server restarts therefore never break a
+    // client (preview.coo.ee's callers included); at worst they lose elicitation and see the text
+    // fallback every tool keeps.
     val sessionId = call.request.headers[MCP_SESSION_ID_HEADER]
-    val requestScope = sessionId?.let(requestScopes::find)
-    if (sessionId != null && requestScope == null) {
-      call.respondText("unknown or expired MCP session", status = HttpStatusCode.NotFound)
-      return
-    }
-    if (requestScope != null && protocolVersion != requestScope.protocolVersion) {
-      call.respondText(
-        "MCP-Protocol-Version must match the negotiated session version",
-        status = HttpStatusCode.BadRequest,
-      )
-      return
-    }
+    val requestScope =
+      sessionId?.let(requestScopes::find)?.takeIf { protocolVersion == it.protocolVersion }
 
     // A JSON-RPC response is the second half of a server request previously emitted on another
     // in-flight POST. Its unguessable session id is the correlation credential; it is not a
@@ -9965,46 +9961,52 @@ class ServeHttpServer(
             protocolVersion = ServeCatalogMcp.MCP_PROTOCOL_VERSION,
             formElicitationSupported = true,
           )
-        if (scope == null) {
-          call.respondText(
-            "MCP request scope capacity exhausted",
-            status = HttpStatusCode.ServiceUnavailable,
-          )
-          return
-        }
-        call.response.headers.append(MCP_SESSION_ID_HEADER, scope.id)
+        // Capacity exhausted by pending interactions: stay stateless rather than refuse.
+        scope?.let { call.response.headers.append(MCP_SESSION_ID_HEADER, it.id) }
       }
       call.response.headers.append(HttpHeaders.CacheControl, "no-store")
       call.respondText(reply.body.toString(), ContentType.Application.Json, HttpStatusCode.OK)
       return
     }
 
-    // Request-scoped SSE is intentionally opened only for a JSON-RPC request carrying a valid
-    // negotiated session. Notifications still receive 202, and old clients see byte-for-byte JSON.
-    if (requestScope != null && request["id"] != null && acceptsRequestScope) {
-      call.response.headers.append(HttpHeaders.CacheControl, "no-store")
-      call.respondBytesWriter(contentType = ContentType.Text.EventStream) {
-        suspend fun emit(message: JsonObject) {
-          writeStringUtf8("event: message\ndata: $message\n\n")
-          flush()
-        }
-        val reply = dispatch(requestScopes.interaction(requestScope, ::emit))
-        reply.body?.let { emit(it) }
+    suspend fun respondReply(reply: ServeCatalogMcp.Reply) {
+      if (reply.accepted) {
+        call.respond(HttpStatusCode.Accepted)
+      } else {
+        call.response.headers.append(HttpHeaders.CacheControl, "no-store")
+        call.respondText(
+          reply.body.toString(),
+          ContentType.Application.Json,
+          HttpStatusCode.OK,
+        )
       }
+    }
+
+    // A request on a negotiated session may elicit, but the response only becomes an SSE stream
+    // once the call actually sends the client a message. Every call that does not elicit — all of
+    // them today — answers with the same JSON body and headers as the stateless path.
+    if (requestScope != null && request["id"] != null && acceptsRequestScope) {
+      requestScopes.dispatchLazily(
+        requestScope,
+        dispatch = { interaction -> dispatch(interaction) },
+        onReply = { reply -> respondReply(reply) },
+        onStream = { first, rest, reply ->
+          call.response.headers.append(HttpHeaders.CacheControl, "no-store")
+          call.respondBytesWriter(contentType = ContentType.Text.EventStream) {
+            suspend fun emit(message: JsonObject) {
+              writeStringUtf8("event: message\ndata: $message\n\n")
+              flush()
+            }
+            emit(first)
+            for (message in rest) emit(message)
+            reply.await().body?.let { emit(it) }
+          }
+        },
+      )
       return
     }
 
-    val reply = dispatch()
-    if (reply.accepted) {
-      call.respond(HttpStatusCode.Accepted)
-    } else {
-      call.response.headers.append(HttpHeaders.CacheControl, "no-store")
-      call.respondText(
-        reply.body.toString(),
-        ContentType.Application.Json,
-        HttpStatusCode.OK,
-      )
-    }
+    respondReply(dispatch())
   }
 
   /** This implementation needs only per-POST streams, not a long-lived notification channel. */
@@ -10064,7 +10066,10 @@ class ServeHttpServer(
       return false
     }
     val capabilities = params["capabilities"] as? JsonObject ?: return false
-    return capabilities["elicitation"] is JsonObject
+    val elicitation = capabilities["elicitation"] as? JsonObject ?: return false
+    // Form support is `form` declared, or a bare `{}` (the shape before form/url split). A
+    // URL-only client never gets a form, so it gets no request scope either.
+    return elicitation["form"] != null || elicitation["url"] == null
   }
 
   /** MCP's DNS-rebinding guard: browser-originated calls may only come from this request's host. */

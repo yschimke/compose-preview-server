@@ -134,14 +134,22 @@ The endpoint implements Streamable HTTP MCP protocol versions `2025-06-18` and `
 Catalog calls remain independent by default: JSON-RPC messages use `POST`, notifications receive
 `202 Accepted`, and optional `GET`/SSE returns `405 Method Not Allowed`. A 2025 client that sends
 both Streamable HTTP media types and advertises form elicitation may receive an opaque
-`MCP-Session-Id` on `initialize`. A later request using that id can keep its own POST open as SSE
-while the server sends `elicitation/create` and waits for the client's response on a second POST.
+`MCP-Session-Id` on `initialize`. A later request using that id may elicit: only at the moment a call sends
+`elicitation/create` does its POST switch to SSE, and the server then waits for the client's
+response on a second POST. A call that does not elicit answers with the same JSON body as the
+stateless path, so negotiating the scope changes nothing on the wire until a tool asks a question.
 The scope is bounded, expires after inactivity and can be closed with `DELETE`; it stores only the
 pending request correlation, never a design, grant, actor or authorization decision. Clients that
 do not negotiate this capability continue to receive the original JSON response mode with no
-session allocation. Every request carrying the session id must also repeat the exact negotiated
-`MCP-Protocol-Version`; a missing or different version is rejected rather than silently changing
-the session's wire contract.
+session allocation.
+
+The session id is a hint, never a requirement. A request whose id is unknown, expired or evicted,
+or whose `MCP-Protocol-Version` differs from the negotiated one, is served on the stateless JSON
+path instead of answering `404`/`400`: idle expiry, eviction and a server restart must not break a
+client that has been working statelessly all along. It only loses elicitation, and every tool keeps
+its text fallback. A full registry evicts its least recently used idle scope (and, if every scope
+is waiting on a person, simply issues no id), because `initialize` is ungated and an anonymous
+caller must not be able to lock legitimate clients out.
 
 This is a compatibility path for the negotiated 2025 protocols and the current Kotlin MCP SDK.
 When the server and target clients move to the 2026 protocol generation, task-level

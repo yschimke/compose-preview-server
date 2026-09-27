@@ -304,14 +304,14 @@ class ServeAgentGrantRoutingTest {
             .toRequestBody("application/json".toMediaType())
         )
         .build()
-    client.newCall(pingCall).execute().use {
-      assertEquals(200, it.code)
-      assertTrue(it.header("Content-Type")!!.startsWith("text/event-stream"))
-      val body = it.body.string()
-      assertTrue(body.startsWith("event: message\ndata: "), body)
-      assertTrue(body.contains("\"id\":21"), body)
-      assertTrue(body.endsWith("\n\n"), body)
-    }
+    // A call that does not elicit answers with plain JSON even on a negotiated session.
+    fun assertPlainJsonPing(call: Request) =
+      client.newCall(call).execute().use {
+        assertEquals(200, it.code)
+        assertTrue(it.header("Content-Type")!!.startsWith("application/json"))
+        assertEquals(21, json(it.body.string())["id"]!!.jsonPrimitive.content.toInt())
+      }
+    assertPlainJsonPing(pingCall)
 
     val unknownResponse =
       Request.Builder()
@@ -325,8 +325,10 @@ class ServeAgentGrantRoutingTest {
         .build()
     client.newCall(unknownResponse).execute().use { assertEquals(400, it.code) }
 
+    // A version mismatch or an unknown session falls back to the stateless path, never an error.
     val wrongVersion = pingCall.newBuilder().header("MCP-Protocol-Version", "2025-03-26").build()
-    client.newCall(wrongVersion).execute().use { assertEquals(400, it.code) }
+    assertPlainJsonPing(wrongVersion)
+    assertPlainJsonPing(pingCall.newBuilder().header("MCP-Session-Id", "never-issued").build())
 
     val deleteCall =
       Request.Builder()
@@ -336,7 +338,25 @@ class ServeAgentGrantRoutingTest {
         .delete()
         .build()
     client.newCall(deleteCall).execute().use { assertEquals(204, it.code) }
-    client.newCall(pingCall).execute().use { assertEquals(404, it.code) }
+    client.newCall(deleteCall).execute().use { assertEquals(404, it.code) }
+    assertPlainJsonPing(pingCall)
+  }
+
+  @Test
+  fun `a URL-only elicitation client gets no request scope`() {
+    val initialize =
+      """{"jsonrpc":"2.0","id":23,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{"elicitation":{"url":{}}},"clientInfo":{"name":"url-only","version":"1"}}}"""
+    val call =
+      Request.Builder()
+        .url(url("/mcp"))
+        .header("Accept", "application/json, text/event-stream")
+        .header("MCP-Protocol-Version", ServeCatalogMcp.MCP_PROTOCOL_VERSION)
+        .post(initialize.toRequestBody("application/json".toMediaType()))
+        .build()
+    client.newCall(call).execute().use {
+      assertEquals(200, it.code)
+      assertNull(it.header("MCP-Session-Id"))
+    }
   }
 
   @Test

@@ -6,6 +6,12 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Semaphore
 import java.util.concurrent.atomic.AtomicLong
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Deferred
+import kotlinx.coroutines.async
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.channels.ReceiveChannel
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.selects.select
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -53,11 +59,23 @@ internal class ServeMcpRequestScopes(
   private val random = SecureRandom()
   private val scopes = ConcurrentHashMap<String, Scope>()
 
+  /**
+   * Opens a scope, or returns null when every slot holds a pending interaction. `initialize` is
+   * ungated, so a full registry evicts its least recently used idle scope rather than refusing: an
+   * anonymous caller refreshing 64 sessions must not lock legitimate clients out. An evicted client
+   * loses nothing but elicitation, because an unknown session id falls back to the stateless JSON
+   * path.
+   */
   @Synchronized
   fun open(protocolVersion: String, formElicitationSupported: Boolean): Scope? {
     require(protocolVersion.isNotBlank())
     expireIdle()
-    if (scopes.size >= maxSessions) return null
+    if (scopes.size >= maxSessions) {
+      val evictable =
+        scopes.values.filter { it.pending.isEmpty() }.minByOrNull { it.lastUsedMillis.get() }
+          ?: return null
+      close(evictable.id)
+    }
     while (true) {
       val scope =
         Scope(
@@ -151,6 +169,35 @@ internal class ServeMcpRequestScopes(
         }
       }
     }
+
+  /**
+   * Runs one request inside [scope] and picks the response shape lazily. A call that never sends
+   * the client anything completes through [onReply] exactly as the stateless JSON path would; only
+   * once the first server-to-client message is emitted does [onStream] take over, receiving that
+   * message, the rest of the outbound queue (closed when the call finishes) and the final reply.
+   */
+  suspend fun <R> dispatchLazily(
+    scope: Scope,
+    dispatch: suspend (ServeCatalogMcp.ClientInteraction) -> R,
+    onReply: suspend (R) -> Unit,
+    onStream:
+      suspend (first: JsonObject, rest: ReceiveChannel<JsonObject>, reply: Deferred<R>) -> Unit,
+  ) = coroutineScope {
+    val outbound = Channel<JsonObject>(Channel.UNLIMITED)
+    val reply = async {
+      try {
+        dispatch(interaction(scope) { outbound.send(it) })
+      } finally {
+        outbound.close()
+      }
+    }
+    val first =
+      select<JsonObject?> {
+        reply.onAwait { null }
+        outbound.onReceiveCatching { it.getOrNull() }
+      }
+    if (first == null) onReply(reply.await()) else onStream(first, outbound, reply)
+  }
 
   private fun parseElicitationResponse(
     response: JsonObject
