@@ -268,7 +268,7 @@ internal fun ToolDef.toSdkTool(): Tool {
 }
 
 private fun ee.schimke.composeai.mcp.protocol.ResourceDescriptor.toSdkResource(): Resource =
-  Resource(uri = uri, name = name, description = description, mimeType = mimeType)
+  Resource(uri = uri, name = name, description = description, mimeType = mimeType, meta = meta)
 
 private fun ee.schimke.composeai.mcp.protocol.ReadResourceResult.toSdkReadResourceResult():
   ReadResourceResult = ReadResourceResult(contents = contents.map { it.toSdkResourceContents() })
