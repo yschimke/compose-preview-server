@@ -1,5 +1,15 @@
 # Changelog
 
+## [3.80.0](https://github.com/yschimke/compose-preview-server/compare/v3.79.0...v3.80.0) (2026-09-27)
+
+
+### Bug Fixes
+
+* **mcp-app:** fit the whole preview in the host frame ([#1187](https://github.com/yschimke/compose-preview-server/issues/1187)) ([56bb6b2](https://github.com/yschimke/compose-preview-server/commit/56bb6b2bedb507c08d4956dc22282ff617dd5106))
+* **mcp:** keep workspace registrations consistent across failures and restarts ([#1188](https://github.com/yschimke/compose-preview-server/issues/1188)) ([122bdff](https://github.com/yschimke/compose-preview-server/commit/122bdff1807783b23aa718f7c2851c93cc5bd34a))
+* **mcp:** report the release version in serverInfo ([#1183](https://github.com/yschimke/compose-preview-server/issues/1183)) ([4403858](https://github.com/yschimke/compose-preview-server/commit/4403858bd409b8f5e02aab6a240c2ec0266c911c))
+* **serve:** answer a refused PUT create with its own status, not 412 ([#1182](https://github.com/yschimke/compose-preview-server/issues/1182)) ([845f033](https://github.com/yschimke/compose-preview-server/commit/845f033eb92acacc9c00c73b85449205d3fbb343))
+
 ## [3.79.0](https://github.com/yschimke/compose-preview-server/compare/v3.78.0...v3.79.0) (2026-09-27)
 
 
