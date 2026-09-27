@@ -676,9 +676,9 @@ fun interface DescriptorProvider {
      * Gradle/IDE metadata, `node_modules`, `src`, and non-`compose-previews` `build/` subtrees so
      * the walk stays cheap.
      */
-    private fun indexDescriptorsByModulePath(
+    internal fun indexDescriptorsByModulePath(
       projectRoot: File,
-      fileSystem: FileSystem,
+      fileSystem: FileSystem = SystemFileSystem,
     ): Map<String, File> {
       val index = HashMap<String, File>()
       projectRoot
