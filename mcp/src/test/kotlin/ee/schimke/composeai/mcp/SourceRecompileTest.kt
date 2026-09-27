@@ -2,6 +2,9 @@ package ee.schimke.composeai.mcp
 
 import com.google.common.truth.Truth.assertThat
 import ee.schimke.composeai.daemon.client.WorkspaceId
+import ee.schimke.composeai.daemon.protocol.CompileErrorDetail
+import ee.schimke.composeai.daemon.protocol.CompileResultKind
+import ee.schimke.composeai.daemon.protocol.CompileSourcesResult
 import java.io.File
 import java.io.InputStream
 import java.io.OutputStream
@@ -169,6 +172,124 @@ class SourceRecompileTest {
       changed = payload["changed"]!!.jsonPrimitive.content.toBoolean(),
       work = result.raw["_meta"]?.jsonObject?.get("work")?.jsonObject,
     )
+  }
+
+  /** #1189: a daemon that can compile in process does, and Gradle never runs. */
+  @Test
+  fun `a daemon with the in-process compiler compiles a Kotlin edit without Gradle`() {
+    lateinit var fixture: Fixture
+    start(fakeCompiler { fixture.classes })
+    fixture = fixture()
+    val inProcess = CopyOnWriteArrayList<List<String>>()
+    daemon.onCompileSources = { sources ->
+      inProcess += sources
+      fixture.classes.writeText(File(sources.single()).readText())
+      CompileSourcesResult(result = CompileResultKind.OK, durationMs = 5)
+    }
+    render(fixture)
+    inProcess.clear()
+    val gradleBefore = compiles.size
+
+    edit(fixture, """@Preview fun Header() { Text("In process") }""")
+    val fresh = render(fixture)
+
+    assertThat(fresh.bytes).contains("In process")
+    assertThat(inProcess).containsExactly(listOf(fixture.source.absolutePath))
+    assertThat(compiles).hasSize(gradleBefore)
+    assertThat(fresh.work.toString()).contains(DaemonMcpServer.IN_PROCESS_COMPILE_TASK)
+  }
+
+  /** #1189: `fallback` (no BTA wiring, KSP, …) falls back to Gradle, and is remembered. */
+  @Test
+  fun `a daemon that declines the in-process compile falls back to Gradle`() {
+    lateinit var fixture: Fixture
+    start(fakeCompiler { fixture.classes })
+    fixture = fixture()
+    val asked = java.util.concurrent.atomic.AtomicInteger()
+    daemon.onCompileSources = {
+      asked.incrementAndGet()
+      CompileSourcesResult(result = CompileResultKind.FALLBACK, durationMs = 1)
+    }
+    render(fixture)
+    val gradleBefore = compiles.size
+
+    edit(fixture, """@Preview fun Header() { Text("Via Gradle") }""")
+    assertThat(render(fixture).bytes).contains("Via Gradle")
+    assertThat(compiles).hasSize(gradleBefore + 1)
+
+    edit(fixture, """@Preview fun Header() { Text("Via Gradle again") }""")
+    assertThat(render(fixture).bytes).contains("Via Gradle again")
+    assertThat(compiles).hasSize(gradleBefore + 2)
+    // Declined once, never asked again.
+    assertThat(asked.get()).isEqualTo(1)
+  }
+
+  private fun inProcessCompileError(asked: java.util.concurrent.atomic.AtomicInteger) =
+    { sources: List<String> ->
+      asked.incrementAndGet()
+      CompileSourcesResult(
+        result = CompileResultKind.COMPILE_ERROR,
+        errors =
+          listOf(
+            CompileErrorDetail(
+              file = sources.single(),
+              line = 1,
+              column = 25,
+              message = "Unresolved reference 'Txt'.",
+            )
+          ),
+        durationMs = 3,
+      )
+    }
+
+  /** #1189: an in-process compile error Gradle agrees with is reported as stale. */
+  @Test
+  fun `an in-process compile error that Gradle confirms marks the render stale`() {
+    lateinit var fixture: Fixture
+    start(fakeCompiler { fixture.classes })
+    fixture = fixture()
+    val asked = java.util.concurrent.atomic.AtomicInteger()
+    daemon.onCompileSources = inProcessCompileError(asked)
+    render(fixture)
+    val gradleBefore = compiles.size
+    val askedBefore = asked.get()
+
+    nextFailure =
+      SourceCompileOutcome.Failed("compileDebugKotlin failed: Unresolved reference 'Txt'.")
+    edit(fixture, """@Preview fun Header() { Txt("broken") }""")
+    val stale = render(fixture)
+
+    assertThat(asked.get()).isEqualTo(askedBefore + 1)
+    assertThat(compiles).hasSize(gradleBefore + 1)
+    assertThat(stale.texts.any { it.startsWith("stale:") && it.contains("Unresolved reference") })
+      .isTrue()
+
+    // The in-process compiler was right, so it is still trusted for the next edit.
+    nextFailure = null
+    edit(fixture, """@Preview fun Header() { Text("fixed") }""")
+    render(fixture)
+    assertThat(asked.get()).isEqualTo(askedBefore + 2)
+  }
+
+  /** #1189: when Gradle compiles what the daemon rejected, the daemon's compiler is not trusted. */
+  @Test
+  fun `an in-process compile error Gradle does not reproduce falls back for good`() {
+    lateinit var fixture: Fixture
+    start(fakeCompiler { fixture.classes })
+    fixture = fixture()
+    val asked = java.util.concurrent.atomic.AtomicInteger()
+    daemon.onCompileSources = inProcessCompileError(asked)
+    render(fixture)
+    val askedBefore = asked.get()
+
+    edit(fixture, """@Preview fun Header() { Text("Gradle is right") }""")
+    val fresh = render(fixture)
+    assertThat(fresh.bytes).contains("Gradle is right")
+    assertThat(fresh.texts.none { it.startsWith("stale:") }).isTrue()
+
+    edit(fixture, """@Preview fun Header() { Text("again") }""")
+    assertThat(render(fixture).bytes).contains("again")
+    assertThat(asked.get()).isAtMost(askedBefore + 1)
   }
 
   @Test
