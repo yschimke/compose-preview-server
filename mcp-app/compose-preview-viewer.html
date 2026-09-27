@@ -19,6 +19,17 @@
   .muted { color: var(--color-text-secondary, #666); font-size: 12px; }
   .canvas { min-height: 120px; border: 1px solid var(--color-border, #d8d8dd); border-radius: 10px; background: var(--color-background-secondary, #f8f8fa); display: grid; place-items: center; overflow: auto; }
   .canvas.has-image { min-height: 0; overflow: hidden; }
+  #meta.error { color: var(--color-text-danger, #c5221f); font-weight: 650; }
+  .notice { width: 100%; padding: 10px 12px; box-sizing: border-box; border-radius: 0 8px 8px 0; border-left: 4px solid var(--color-border-secondary, #8a8f98); }
+  .notice.error { border-left-color: var(--color-border-danger, #c5221f); background: var(--color-background-danger, #fce8e6); }
+  .notice strong { display: block; }
+  .notice.error strong { color: var(--color-text-danger, #c5221f); }
+  .notice p { margin: 4px 0 0; overflow-wrap: anywhere; }
+  .notice details { margin-top: 6px; font-size: 12px; }
+  .notice pre { margin: 6px 0 0; padding: 8px; border-radius: 6px; background: var(--color-background-primary, #fff); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 240px; overflow: auto; }
+  .variant-list { display: flex; flex-wrap: wrap; gap: 4px; margin: 6px 0 0; padding: 0; list-style: none; font-size: 12px; }
+  .variant-list button { padding: 2px 7px; font-size: 12px; }
+  .refused { font-size: 11px; color: var(--color-text-secondary, #666); }
   .canvas img { max-width: 100%; max-height: var(--image-max, 560px); object-fit: contain; }
   .preview-stage { position: relative; display: inline-block; max-width: 100%; line-height: 0; }
   .preview-stage > img { display: block; }
@@ -1071,6 +1082,11 @@
   const sourceLocations = new Map();
 
   const liveReady = () => initialized && !staticMode;
+  // Tools the host refused to call for the app: only that control is disabled, with the reason.
+  const refusedTools = new Set();
+  const HOST_REFUSED = "The host doesn't allow this from the viewer.";
+  // A JSON-RPC error (not a timeout, not a tool-level isError) means the host refused the call.
+  const refusedByHost = error => error && typeof error === 'object' && typeof error.code === 'number';
 
   function decodeBase64Url(encoded) {
     const base64 = encoded.replace(/-/g, '+').replace(/_/g, '/');
@@ -1134,6 +1150,16 @@
     return [];
   }
 
+  // Every URI the result names as a match: otherMatches, plus a text-mode variantChoice.
+  function variantUrisOf(result, value) {
+    const choices = [];
+    for (const candidate of [value, ...(result?.content || []).map(block =>
+      block?.type === 'text' && typeof block.text === 'string' ? parse(block.text) : undefined)]) {
+      if (Array.isArray(candidate?.variantChoice?.choices)) choices.push(...candidate.variantChoice.choices);
+    }
+    return [...otherMatchesOf(result, value), ...choices];
+  }
+
   // render_preview `details` (#1170) embed the a11y overlay and layout boxes in the result; those
   // toggles then need no call, so the live buttons for the same data stay hidden.
   function embeddedDetailsOf(result) {
@@ -1163,7 +1189,7 @@
     liveTarget = comparison || !uri ? undefined : { uri, ...(overrides ? { overrides } : {}) };
     layoutEligible = !!liveTarget && !Array.isArray(value?.cells) && !value?.crop;
     if (!own) {
-      const others = otherMatchesOf(result, value).filter(other => typeof other === 'string' && other);
+      const others = variantUrisOf(result, value).filter(other => typeof other === 'string' && other);
       variants = liveTarget && others.length
         ? [liveTarget.uri, ...others.filter(other => other !== liveTarget.uri)]
         : [];
@@ -1186,9 +1212,15 @@
     }
     variantSelect.disabled = liveBusy;
     rerender.hidden = !(ready && renderToolName && layoutEligible);
-    rerender.disabled = liveBusy;
+    const renderRefused = refusedTools.has(renderToolName);
+    rerender.disabled = liveBusy || renderRefused;
+    variantSelect.disabled = liveBusy || renderRefused;
+    for (const [control, name] of [[rerender, renderToolName], [variantSelect, renderToolName], [layoutToggle, dataToolName]]) {
+      if (refusedTools.has(name)) control.title = HOST_REFUSED;
+      else control.removeAttribute('title');
+    }
     layoutToggle.hidden = !(ready && dataToolName && layoutEligible && !embeddedDetails.layout);
-    layoutToggle.disabled = liveBusy || layoutUnavailable;
+    layoutToggle.disabled = liveBusy || layoutUnavailable || refusedTools.has(dataToolName);
     layoutToggle.textContent = layoutUnavailable
       ? 'Layout bounds unavailable'
       : layoutVisible ? 'Hide layout bounds' : 'Show layout bounds';
@@ -1196,6 +1228,10 @@
     // The location comes from resources/list; offer it alongside this server's own tools.
     sourceButton.hidden = !(ready && renderToolName);
     live.hidden = [rerender, layoutToggle, sourceButton].every(node => node.hidden);
+    const canRender = liveReady() && !!renderToolName && !renderRefused && !liveBusy;
+    canvas.querySelectorAll('.variant-list button').forEach(button => {
+      button.disabled = !canRender;
+    });
   }
 
   async function renderLive(target, contextLine) {
@@ -1227,7 +1263,12 @@
       if (contextLine) void updateModelContext(contextLine);
     } catch (error) {
       if (generation !== liveGeneration) return;
-      meta.textContent = 'Render failed; the previous preview is still shown.';
+      if (refusedByHost(error)) {
+        refusedTools.add(renderToolName);
+        meta.textContent = `Re-render unavailable: ${HOST_REFUSED}`;
+      } else {
+        meta.textContent = 'Render failed; the previous preview is still shown.';
+      }
       console.warn('Failed to re-render the Compose Preview:', error);
     } finally {
       if (generation === liveGeneration) {
@@ -1456,6 +1497,67 @@
     renderFallback(result, reason || 'A render resource is available:', resource);
   }
 
+  // A result that arrived but has nothing to draw. The header says so plainly instead of staying
+  // on "Waiting…", which reads as still pending; the complete text stays one click away.
+  function renderNotice(result, { error, heading, summary }) {
+    const text = fallbackText(result).trim();
+    const firstLine = (text.split('\n').find(line => line.trim()) || '').trim();
+    const box = document.createElement('div');
+    box.className = error ? 'notice error' : 'notice';
+    if (error) box.setAttribute('role', 'alert');
+    const title = document.createElement('strong');
+    title.textContent = heading;
+    const line = document.createElement('p');
+    line.textContent = summary || firstLine || 'The result carried no image.';
+    box.append(title, line);
+    const list = variantList(result);
+    if (list) box.append(list);
+    if (text && text !== line.textContent) {
+      const more = document.createElement('details');
+      const label = document.createElement('summary');
+      label.textContent = 'Full message';
+      const output = document.createElement('pre');
+      output.textContent = text;
+      more.append(label, output);
+      box.append(more);
+    }
+    canvas.replaceChildren(box);
+    // A static card keeps its "Static preview result" header unless the result is an error.
+    if (error || !staticMode) meta.textContent = heading;
+    meta.classList.toggle('error', !!error);
+  }
+
+  // otherMatches / variantChoice are labels the agent already has; list them even without pixels
+  // so the person sees what exists. Choosing one needs a live bridge.
+  function variantList(result) {
+    const value = data(result);
+    const uris = [...new Set([
+      ...(typeof value?.uri === 'string' ? [value.uri] : []),
+      ...variantUrisOf(result, value),
+    ])].filter(uri => typeof uri === 'string' && uri);
+    if (uris.length < 2) return undefined;
+    const list = document.createElement('ul');
+    list.className = 'variant-list';
+    list.setAttribute('aria-label', 'Matching previews');
+    for (const uri of uris) {
+      const item = document.createElement('li');
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.textContent = previewName(uri);
+      button.title = uri;
+      button.dataset.uri = uri;
+      const live = liveReady() && !!renderToolName && !refusedTools.has(renderToolName);
+      button.disabled = !live;
+      if (!live) button.title = `${uri} (rendering from the viewer is unavailable here)`;
+      button.addEventListener('click', () => {
+        void renderLive({ uri }, `the user chose variant ${previewName(uri)} (${uri})`);
+      });
+      item.append(button);
+      list.append(item);
+    }
+    return list;
+  }
+
   function renderStaticError(reason) {
     hasToolResult = true;
     renderFallback(undefined, `Unable to load the static preview result: ${reason}`);
@@ -1674,6 +1776,7 @@
       renderResourceFallback(toolResult, resource, 'Unable to read preview resource:');
       meta.textContent = 'Resource reads are unavailable; use the text fallback.';
       console.warn('Failed to read Compose Preview resource:', error);
+      if (liveTarget && splitPreviewUri(resource.uri).uri === liveTarget.uri) requestImageFor(liveTarget);
     } finally {
       if (generation === resourceReadGeneration && resourceResult?.resource?.uri === resource.uri) {
         resourceReadUri = undefined;
@@ -1686,6 +1789,7 @@
   function draw(result) {
     hasToolResult = true;
     canvas.classList.remove('has-image');
+    meta.classList.remove('error');
     if (staticMode) meta.textContent = 'Static preview result';
     const value = data(result);
     const image = png(result);
@@ -1734,7 +1838,38 @@
       if (!staticMode) readResource();
       return;
     }
-    renderFallback(result, 'The result has no PNG. Complete text and structured output:');
+    if (result?.isError) {
+      renderNotice(result, { error: true, heading: 'Render failed' });
+      return;
+    }
+    // A semantics or hash observation: fine for the agent, but nothing for the viewer to show.
+    // With a live bridge, ask for the pixels once.
+    renderNotice(result, {
+      heading: 'No image in this result',
+      summary: liveTarget && liveReady()
+        ? `Re-rendering ${previewName(liveTarget.uri)} with an image…`
+        : 'Re-render with observe="png" to see it here.',
+    });
+    requestImageFor(liveTarget);
+  }
+
+  const imageRequests = new Set();
+  let pendingImage;
+
+  // Ask for the PNG of a result that arrived without one (semantics observation, or a host that
+  // dropped the resource_link or refused resources/read). Once per URI, so a failure cannot loop.
+  function requestImageFor(target) {
+    if (!target || staticMode || imageRequests.has(target.uri)) return;
+    imageRequests.add(target.uri);
+    pendingImage = target;
+    void bridgeReady.then(sendPendingImageRequest);
+  }
+
+  function sendPendingImageRequest() {
+    if (!pendingImage || !liveReady() || !renderToolName || refusedTools.has(renderToolName)) return;
+    const target = pendingImage;
+    pendingImage = undefined;
+    void renderLive(target);
   }
 
   window.addEventListener('message', event => {
@@ -1795,17 +1930,25 @@
     }
   }, { passive: true });
 
+  // The viewer ships with this server, so its own tools are known by name. A host that does not
+  // offer tools/list (or refuses it) still gets the live actions; a refused call disables only its
+  // control. A successful listing stays authoritative.
+  function assumeOwnTools() {
+    overlayToolName = 'render_preview_overlay';
+    renderToolName = 'render_preview';
+    dataToolName = 'get_preview_data';
+    listCommentsToolName = undefined;
+    postCommentToolName = undefined;
+  }
+
   async function discoverViewerActions() {
     const generation = ++toolDiscoveryGeneration;
     if (!hostServerTools) {
-      overlayToolName = undefined;
-      listCommentsToolName = undefined;
-      postCommentToolName = undefined;
-      renderToolName = undefined;
-      dataToolName = undefined;
+      assumeOwnTools();
       updateLiveActions();
       updateAccessibilityAction();
       updateCommentAction();
+      sendPendingImageRequest();
       return;
     }
     try {
@@ -1822,17 +1965,14 @@
       dataToolName = names.find(name => typeof name === 'string' && /(^|__|\/)get_preview_data$/.test(name));
     } catch (error) {
       if (generation !== toolDiscoveryGeneration) return;
-      overlayToolName = undefined;
-      listCommentsToolName = undefined;
-      postCommentToolName = undefined;
-      renderToolName = undefined;
-      dataToolName = undefined;
-      console.debug('Unable to discover Compose Preview viewer actions:', error);
+      assumeOwnTools();
+      console.debug('The host did not list tools; using the viewer\'s own tool names:', error);
     }
     updateLiveActions();
     updateAccessibilityAction();
     updateCommentAction();
     if (commentDesignId && listCommentsToolName) void loadComments();
+    sendPendingImageRequest();
   }
 
   async function initializeBridge() {

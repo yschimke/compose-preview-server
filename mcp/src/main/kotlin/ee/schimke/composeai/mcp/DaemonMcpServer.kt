@@ -1357,7 +1357,24 @@ class DaemonMcpServer(
 
   /** The viewer is an optional presentation layer: every linked tool keeps its text result. */
   private fun viewerLinkedToolDefs(toolDefs: List<ToolDef>): List<ToolDef> = toolDefs.map { tool ->
-    if (tool.name in VIEWER_TOOL_NAMES) tool.copy(meta = viewerToolMeta()) else tool
+    when (tool.name) {
+      in VIEWER_TOOL_NAMES ->
+        tool.copy(meta = viewerToolMeta(appCallable = tool.name in APP_TOOL_NAMES))
+      in APP_TOOL_NAMES -> tool.copy(meta = buildJsonObject { put("ui", appVisibility()) })
+      else -> tool
+    }
+  }
+
+  /**
+   * MCP Apps `_meta.ui.visibility` (2026-01-26): the viewer calls these tools itself (re-render,
+   * a11y overlay, layout bounds), and a host lets an app call a tool only when it is visible to the
+   * app.
+   */
+  private fun appVisibility(): JsonObject = buildJsonObject {
+    putJsonArray("visibility") {
+      add(JsonPrimitive("model"))
+      add(JsonPrimitive("app"))
+    }
   }
 
   private fun viewerHtml(): String =
@@ -1367,8 +1384,14 @@ class DaemonMcpServer(
       .bufferedReader()
       .use { it.readText() }
 
-  private fun viewerToolMeta(): JsonObject = buildJsonObject {
-    put("ui", buildJsonObject { put("resourceUri", MCP_APP_VIEWER_URI) })
+  private fun viewerToolMeta(appCallable: Boolean): JsonObject = buildJsonObject {
+    put(
+      "ui",
+      buildJsonObject {
+        put("resourceUri", MCP_APP_VIEWER_URI)
+        if (appCallable) appVisibility().forEach { (key, value) -> put(key, value) }
+      },
+    )
     // Pre-2026-01-26 MCP Apps hosts read the flat key; current hosts read `ui.resourceUri`.
     put("ui/resourceUri", MCP_APP_VIEWER_URI)
   }
@@ -1485,7 +1508,7 @@ class DaemonMcpServer(
                 "preview":{"type":"string","description":"Alternative to uri: a @Preview function name or unique FQN suffix, e.g. 'ListScreenPreview'. With several matches (such as @WearPreviewDevices variants) the first is rendered and the rest are listed as otherMatches."},
                 "project":{"type":"string","description":"Absolute path to the project (or any folder in it). Only needed when the host sends no workspace roots."},
                 "card":{"type":"boolean","description":"With inline=false, also write a self-contained viewer card (HTML) and return cardPath plus an <agent-embed> line for the reply. Implies inline=false. Default true for Antigravity."},
-                "observe":{"type":"string","enum":["png","semantics","hash"],"description":"Observation level (issue #1787). Default 'semantics' — the compose/semantics tree + sha256 + dimensions with NO base64, the token-frugal snapshot-default for an agent loop (fetch pixels only when you need them). 'png' returns the base64 image (request it when you need to see pixels); 'hash' returns just sha256 + dimensions."},
+                "observe":{"type":"string","enum":["png","semantics","hash"],"description":"Observation level (issue #1787). Default 'semantics' ('png' for a client that declares the MCP Apps extension, whose viewer shows the image; semantics falls back to the image when unavailable) — the compose/semantics tree + sha256 + dimensions with NO base64, the token-frugal snapshot-default for an agent loop (fetch pixels only when you need them). 'png' returns the base64 image (request it when you need to see pixels); 'hash' returns just sha256 + dimensions."},
                 "inline":{"type":"boolean","description":"Default true. Set false on a local-FS client to return the rendered PNG's absolute pngPath plus sha256, dimensions, changed, and durationMs as text instead of an inline observation. inline=false takes precedence over observe, so it returns no semantics or image content. Cannot be combined with crop. Antigravity defaults to false when observe and crop are omitted."},
                 "crop":{"type":"object","description":"Return only ONE element's rectangle instead of the full frame (issue #1817) — far fewer tokens, and it focuses the view on the region you care about (the natural partner to diff_semantics: 'ref X changed' -> crop ref X). Set EITHER a semantic target (ref | testTag | role/text, resolved against compose/semantics) OR explicit render-pixel bounds {left,top,right,bottom}. Honours 'observe': png returns the cropped image (+ region metadata), hash/semantics return the crop's sha + dimensions only.","properties":{"ref":{"type":"string"},"testTag":{"type":"string"},"role":{"type":"string"},"text":{"type":"string"},"left":{"type":"integer"},"top":{"type":"integer"},"right":{"type":"integer"},"bottom":{"type":"integer"}}},
                 "overrides":{"type":"object","description":"Optional per-call display overrides."},
@@ -1661,7 +1684,7 @@ class DaemonMcpServer(
                 "preview":{"type":"string","description":"Alternative to uri: a @Preview function name or unique FQN suffix, e.g. 'ListScreenPreview'. With several matches (such as @WearPreviewDevices variants) the first is rendered and the rest are listed as otherMatches."},
                 "project":{"type":"string","description":"Absolute path to the project (or any folder in it). Only needed when the host sends no workspace roots."},
                 "card":{"type":"boolean","description":"With inline=false, also write a self-contained viewer card (HTML) and return cardPath plus an <agent-embed> line for the reply. Implies inline=false. Default true for Antigravity."},
-                "observe":{"type":"string","enum":["png","semantics","hash"],"description":"Observation level (issue #1787). Default 'semantics' returns the compose/semantics tree + sha256 + width/height with NO base64 — the token-frugal snapshot-default for a multi-step agent loop (fetch pixels only when you need them). 'png' returns the base64 image (request it when you need to see pixels); 'hash' returns just sha256 + dimensions."},
+                "observe":{"type":"string","enum":["png","semantics","hash"],"description":"Observation level (issue #1787). Default 'semantics' ('png' for a client that declares the MCP Apps extension, whose viewer shows the image; semantics falls back to the image when unavailable) returns the compose/semantics tree + sha256 + width/height with NO base64 — the token-frugal snapshot-default for a multi-step agent loop (fetch pixels only when you need them). 'png' returns the base64 image (request it when you need to see pixels); 'hash' returns just sha256 + dimensions."},
                 "inline":{"type":"boolean","description":"Default true. Set false on a local-FS client to return the rendered PNG's absolute pngPath plus sha256, dimensions, changed, and durationMs as text instead of an inline observation. inline=false takes precedence over observe, so it returns no semantics or image content. Cannot be combined with crop. Antigravity defaults to false when observe and crop are omitted."},
                 "overrides":{
                   "type":"object",
@@ -2911,7 +2934,8 @@ class DaemonMcpServer(
   private sealed interface PreviewNameResolution {
     data class Found(val uri: String, val others: List<String>) : PreviewNameResolution
 
-    data class Missing(val message: String) : PreviewNameResolution
+    data class Missing(val message: String, val structured: JsonObject? = null) :
+      PreviewNameResolution
   }
 
   /**
@@ -2948,15 +2972,36 @@ class DaemonMcpServer(
           }
       )
     }
-    if (matches.isEmpty()) {
-      val candidates = closePreviewNames(trimmed)
-      return PreviewNameResolution.Missing(
-        "no preview matches '$trimmed'" +
-          if (candidates.isEmpty()) "" else "; close matches: ${candidates.joinToString(", ")}"
-      )
-    }
+    if (matches.isEmpty()) return noPreviewMatches(trimmed)
     return PreviewNameResolution.Found(matches.first(), matches.drop(1))
   }
+
+  /**
+   * The no-match error: up to five nearest function names and the catalog's size, in the text and
+   * as `structuredContent.suggestions`, so the agent can retry without listing every preview.
+   */
+  private fun noPreviewMatches(name: String): PreviewNameResolution.Missing {
+    val previewCount = catalog.values.sumOf { it.size }
+    val moduleCount = catalog.values.count { it.isNotEmpty() }
+    val suggestions = closePreviewNames(name)
+    val message = buildString {
+      append("no preview matches '").append(name).append("'.")
+      if (suggestions.isNotEmpty()) append(" Closest: ").append(suggestions.joinToString(", "))
+      append(" (").append(plural(previewCount, "preview")).append(" in ")
+      append(plural(moduleCount, "module")).append(").")
+      append(" Call list_previews to see all.")
+    }
+    return PreviewNameResolution.Missing(
+      message,
+      buildJsonObject {
+        putJsonArray("suggestions") { suggestions.forEach { add(JsonPrimitive(it)) } }
+        put("previewCount", previewCount)
+        put("moduleCount", moduleCount)
+      },
+    )
+  }
+
+  private fun plural(count: Int, noun: String) = if (count == 1) "1 $noun" else "$count ${noun}s"
 
   /**
    * Matching URIs: an exact (non-variant) match first, then the build that holds the session's
@@ -2997,7 +3042,7 @@ class DaemonMcpServer(
       .map { entry -> entry.functionName ?: entry.fqn.substringAfterLast('.') }
       .distinct()
       .sortedWith(
-        compareBy<String> { !it.lowercase().contains(needle) }
+        compareBy<String> { !it.lowercase().contains(needle) && !needle.contains(it.lowercase()) }
           .thenBy { editDistance(it.lowercase(), needle) }
           .thenBy { it }
       )
@@ -3446,14 +3491,18 @@ class DaemonMcpServer(
         ?: when (val resolved = preResolved ?: previewName?.let { resolvePreviewName(it) }) {
           null -> return errorCallToolResult("render_preview: missing 'uri' or 'preview'")
           is PreviewNameResolution.Missing ->
-            return errorCallToolResult("render_preview: ${resolved.message}")
+            return errorCallToolResult("render_preview: ${resolved.message}", resolved.structured)
           is PreviewNameResolution.Found -> {
             otherMatches = resolved.others
             resolved.uri
           }
         }
     val uri = PreviewUri.parseOrNull(uriStr) ?: return errorCallToolResult("invalid uri: $uriStr")
-    val observe = args["observe"]?.jsonPrimitive?.contentOrNull?.lowercase() ?: "semantics"
+    // An MCP Apps client shows the result in the viewer, which needs the pixels; everyone else
+    // gets the token-frugal semantics observation by default.
+    val observe =
+      args["observe"]?.jsonPrimitive?.contentOrNull?.lowercase()
+        ?: if ((session as? McpSession)?.supportsMcpApps == true) "png" else "semantics"
     if (observe !in setOf("png", "semantics", "hash")) {
       return errorCallToolResult("render_preview: 'observe' must be one of png | semantics | hash")
     }
@@ -4170,6 +4219,7 @@ class DaemonMcpServer(
     resourceUri: String,
   ): CallToolResult {
     val dimensions = pngDimensions(pngBytes)
+    var imageFallback = false
     val payload = buildJsonObject {
       put("observe", if (includeSemantics) "semantics" else "hash")
       put("uri", uri.toUri())
@@ -4187,14 +4237,21 @@ class DaemonMcpServer(
             json.encodeToJsonElement(ComposeSemanticsPayload.serializer(), semantics),
           )
         } else {
-          put("semanticsUnavailable", error ?: "compose/semantics not available for this preview")
+          val reason = error ?: "compose/semantics not available for this preview"
+          put("semanticsUnavailable", reason)
+          // Never answer with neither semantics nor pixels: show the image instead.
+          put("note", "semantics unavailable ($reason); showing the image instead")
+          imageFallback = true
         }
       }
     }
     return CallToolResult(
       content =
-        listOf(
+        listOfNotNull(
           ContentBlock.Text(payload.toString()),
+          if (imageFallback) {
+            ContentBlock.Image(Base64.getEncoder().encodeToString(pngBytes), "image/png")
+          } else null,
           ContentBlock.ResourceLink(
             uri = resourceUri,
             name = "Compose Preview render",
@@ -6809,6 +6866,10 @@ class DaemonMcpServer(
         "render_matrix",
         "diff_semantics",
       )
+
+    /** Tools the viewer calls through the MCP Apps bridge. */
+    private val APP_TOOL_NAMES =
+      setOf("render_preview", "render_preview_overlay", "get_preview_data")
 
     /** Tools that accept an `overrides` argument, so an override-bearing `uri` can be folded in. */
     private val URI_OVERRIDE_TOOLS =
