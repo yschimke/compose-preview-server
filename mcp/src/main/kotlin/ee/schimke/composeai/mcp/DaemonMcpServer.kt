@@ -1453,6 +1453,7 @@ class DaemonMcpServer(
                 "preview":{"type":"string","description":"Alternative to uri: a @Preview function name or unique FQN suffix, e.g. 'ListScreenPreview'. With several matches (such as @WearPreviewDevices variants) the first is rendered and the rest are listed as otherMatches."},
                 "card":{"type":"boolean","description":"With inline=false, also write a self-contained viewer card (HTML) and return cardPath plus an <agent-embed> line for the reply. Implies inline=false. Default true for Antigravity."},
                 "observe":{"type":"string","enum":["png","semantics","hash"],"description":"Observation level (issue #1787). Default 'semantics' ('png' for a client that declares the MCP Apps extension, whose viewer shows the image; semantics falls back to the image when unavailable) — the compose/semantics tree + sha256 + dimensions with NO base64, the token-frugal snapshot-default for an agent loop (fetch pixels only when you need them). 'png' returns the base64 image (request it when you need to see pixels); 'hash' returns just sha256 + dimensions."},
+                "imageScale":{"type":"string","enum":["default","full"],"description":"Size of the inline image the model reads. 'default' caps the long edge at 768px (never upscales); the file on disk and the preview resource stay full size. 'full' only for pixel-level checks; costs more tokens."},
                 "inline":{"type":"boolean","description":"Default true. Set false on a local-FS client to return the rendered PNG's absolute pngPath plus sha256, dimensions, changed, and durationMs as text instead of an inline observation. inline=false takes precedence over observe, so it returns no semantics or image content. Cannot be combined with crop. Antigravity defaults to false when observe and crop are omitted."},
                 "crop":{"type":"object","description":"Return only ONE element's rectangle instead of the full frame (issue #1817) — far fewer tokens, and it focuses the view on the region you care about (the natural partner to diff_semantics: 'ref X changed' -> crop ref X). Set EITHER a semantic target (ref | testTag | role/text, resolved against compose/semantics) OR explicit render-pixel bounds {left,top,right,bottom}. Honours 'observe': png returns the cropped image (+ region metadata), hash/semantics return the crop's sha + dimensions only.","properties":{"ref":{"type":"string"},"testTag":{"type":"string"},"role":{"type":"string"},"text":{"type":"string"},"left":{"type":"integer"},"top":{"type":"integer"},"right":{"type":"integer"},"bottom":{"type":"integer"}}},
                 "overrides":{"type":"object","description":"Optional per-call display overrides."},
@@ -1627,6 +1628,7 @@ class DaemonMcpServer(
                 "preview":{"type":"string","description":"Alternative to uri: a @Preview function name or unique FQN suffix, e.g. 'ListScreenPreview'. With several matches (such as @WearPreviewDevices variants) the first is rendered and the rest are listed as otherMatches."},
                 "card":{"type":"boolean","description":"With inline=false, also write a self-contained viewer card (HTML) and return cardPath plus an <agent-embed> line for the reply. Implies inline=false. Default true for Antigravity."},
                 "observe":{"type":"string","enum":["png","semantics","hash"],"description":"Observation level (issue #1787). Default 'semantics' ('png' for a client that declares the MCP Apps extension, whose viewer shows the image; semantics falls back to the image when unavailable) returns the compose/semantics tree + sha256 + width/height with NO base64 — the token-frugal snapshot-default for a multi-step agent loop (fetch pixels only when you need them). 'png' returns the base64 image (request it when you need to see pixels); 'hash' returns just sha256 + dimensions."},
+                "imageScale":{"type":"string","enum":["default","full"],"description":"Size of the inline image the model reads. 'default' caps the long edge at 768px (never upscales); the file on disk and the preview resource stay full size. 'full' only for pixel-level checks; costs more tokens."},
                 "inline":{"type":"boolean","description":"Default true. Set false on a local-FS client to return the rendered PNG's absolute pngPath plus sha256, dimensions, changed, and durationMs as text instead of an inline observation. inline=false takes precedence over observe, so it returns no semantics or image content. Cannot be combined with crop. Antigravity defaults to false when observe and crop are omitted."},
                 "overrides":{
                   "type":"object",
@@ -3138,6 +3140,29 @@ class DaemonMcpServer(
       return toolRenderPreview(session, args, resolved)
     }
     val choices = listOf(resolved.uri) + resolved.others
+    // Several matches (such as @WearPreviewDevices + @WearPreviewFontScales variants) render as one
+    // grid: every variant, one labelled contact sheet for the model. The chooser is kept for more
+    // matches than a grid holds, and for file results.
+    val inlineResult =
+      args["inline"]?.jsonPrimitive?.contentOrNull?.toBooleanStrictOrNull() != false &&
+        args["card"]?.jsonPrimitive?.contentOrNull?.toBooleanStrictOrNull() != true &&
+        args["crop"] == null &&
+        (session as? McpSession)?.clientName != ANTIGRAVITY_CLIENT_NAME
+    if (inlineResult && choices.size <= MAX_VARIANT_CELLS) {
+      val grid = renderVariantMatrix(session, choices, args, choose = false)
+      if (grid.isError == true) return grid
+      val choice = buildJsonObject {
+        putJsonObject("variantChoice") {
+          put("mode", "text")
+          put(
+            "message",
+            "Several previews match; all were rendered as a grid. Render one by uri to look closer.",
+          )
+          putJsonArray("choices") { choices.forEach { add(JsonPrimitive(it)) } }
+        }
+      }
+      return grid.copy(content = grid.content + ContentBlock.Text(choice.toString()))
+    }
     val labels = variantLabels(choices)
     val elicitation =
       (session as? McpSession)?.elicitForm(
@@ -3242,6 +3267,16 @@ class DaemonMcpServer(
     if (observe !in setOf("png", "semantics", "hash")) {
       return errorCallToolResult("render_preview: 'observe' must be one of png | semantics | hash")
     }
+    val fullScale =
+      when (val scale = args["imageScale"]?.jsonPrimitive?.contentOrNull?.lowercase()) {
+        null,
+        "default" -> false
+        "full" -> true
+        else ->
+          return errorCallToolResult(
+            "render_preview: 'imageScale' must be default | full (got '$scale')"
+          )
+      }
     val cropArg =
       args["crop"]?.let {
         it as? JsonObject
@@ -3326,10 +3361,33 @@ class DaemonMcpServer(
       } else {
         val bytes = renderAndReadBytes(uri, overrides = overrides)
         if (observe == "png") {
+          val inlineBytes = if (fullScale) bytes else scaleToMaxEdge(bytes, INLINE_MAX_EDGE_PX)
+          val sizes =
+            if (inlineBytes === bytes) null
+            else {
+              val full = pngDimensions(bytes)
+              val shown = pngDimensions(inlineBytes)
+              buildJsonObject {
+                put("uri", uri.toUri())
+                full?.let {
+                  put("widthPx", it.first)
+                  put("heightPx", it.second)
+                }
+                shown?.let {
+                  put("inlineWidthPx", it.first)
+                  put("inlineHeightPx", it.second)
+                }
+                put(
+                  "note",
+                  "inline image downscaled; pass imageScale=\"full\" only for pixel-level checks",
+                )
+              }
+            }
           CallToolResult(
             content =
-              listOf(
-                ContentBlock.Image(Base64.getEncoder().encodeToString(bytes), "image/png"),
+              listOfNotNull(
+                ContentBlock.Image(Base64.getEncoder().encodeToString(inlineBytes), "image/png"),
+                sizes?.let { ContentBlock.Text(it.toString()) },
                 ContentBlock.ResourceLink(
                   uri =
                     uri
@@ -3848,7 +3906,14 @@ class DaemonMcpServer(
       val blocks = buildList {
         if (contactSheet) {
           val sheet =
-            ContactSheet.stitch(rendered.map { ContactSheet.Cell(it.cell.label, it.bytes) })
+            ContactSheet.stitch(
+              rendered.map {
+                ContactSheet.Cell(
+                  it.cell.label,
+                  scaleToMaxEdge(it.bytes, CONTACT_SHEET_CELL_EDGE_PX),
+                )
+              }
+            )
           if (sheet != null) {
             add(
               ContentBlock.Image(
@@ -3911,6 +3976,7 @@ class DaemonMcpServer(
     variantUris: List<String>,
     args: JsonObject,
     choose: Boolean,
+    viewerCells: Boolean = true,
   ): CallToolResult {
     val contactSheet =
       args["contactSheet"]?.jsonPrimitive?.contentOrNull?.toBooleanStrictOrNull() ?: true
@@ -3953,13 +4019,34 @@ class DaemonMcpServer(
       val blocks = buildList {
         if (contactSheet) {
           ContactSheet.stitch(
-              cells.map { (variant, bytes, _) -> ContactSheet.Cell(variantLabel(variant), bytes) }
+              cells.map { (variant, bytes, _) ->
+                ContactSheet.Cell(
+                  variantLabel(variant),
+                  scaleToMaxEdge(bytes, CONTACT_SHEET_CELL_EDGE_PX),
+                )
+              }
             )
             ?.let { add(ContentBlock.Image(Base64.getEncoder().encodeToString(it), "image/png")) }
         }
         add(ContentBlock.Text(payload.toString()))
       }
-      CallToolResult(content = blocks)
+      // Each cell's pixels go to the viewer in `_meta`, which the model does not read: it gets
+      // the one contact sheet.
+      val meta =
+        if (!viewerCells) null
+        else
+          buildJsonObject {
+            putJsonArray("composePreview/cellPngs") {
+              cells.forEach { (_, bytes, _) ->
+                add(
+                  JsonPrimitive(
+                    Base64.getEncoder().encodeToString(scaleToMaxEdge(bytes, INLINE_MAX_EDGE_PX))
+                  )
+                )
+              }
+            }
+          }
+      CallToolResult(content = blocks, meta = meta)
     } catch (cancelled: CancellationException) {
       throw cancelled
     } catch (failure: Throwable) {
@@ -4109,7 +4196,10 @@ class DaemonMcpServer(
         listOfNotNull(
           ContentBlock.Text(payload.toString()),
           if (imageFallback) {
-            ContentBlock.Image(Base64.getEncoder().encodeToString(pngBytes), "image/png")
+            ContentBlock.Image(
+              Base64.getEncoder().encodeToString(scaleToMaxEdge(pngBytes, INLINE_MAX_EDGE_PX)),
+              "image/png",
+            )
           } else null,
           ContentBlock.ResourceLink(
             uri = resourceUri,
@@ -6591,6 +6681,14 @@ class DaemonMcpServer(
 
   private fun applyImageSizeOverride(pngBytes: ByteArray): ByteArray {
     val maxEdgePx = imageSizeOverride.maxEdgePx ?: return pngBytes
+    return scaleToMaxEdge(pngBytes, maxEdgePx)
+  }
+
+  /**
+   * The inline image the model reads: long edge at most [maxEdgePx] (never upscaled). The file on
+   * disk and the preview resource keep the full-size render.
+   */
+  private fun scaleToMaxEdge(pngBytes: ByteArray, maxEdgePx: Int): ByteArray {
     val source = runCatching { ImageIO.read(pngBytes.inputStream()) }.getOrNull() ?: return pngBytes
     if (source.width <= maxEdgePx && source.height <= maxEdgePx) return pngBytes
     val scale = minOf(maxEdgePx.toDouble() / source.width, maxEdgePx.toDouble() / source.height)
@@ -6682,6 +6780,12 @@ class DaemonMcpServer(
         "render_matrix",
         "diff_semantics",
       )
+
+    /** Long edge of the inline image the model reads by default; `imageScale="full"` skips it. */
+    private const val INLINE_MAX_EDGE_PX: Int = 768
+
+    /** Long edge of each contact-sheet cell. */
+    private const val CONTACT_SHEET_CELL_EDGE_PX: Int = 256
 
     /** Most `@Preview` variants one `render_matrix` (no axes) renders. */
     private const val MAX_VARIANT_CELLS: Int = 12

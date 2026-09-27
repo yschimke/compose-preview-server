@@ -3115,6 +3115,80 @@ class DaemonMcpServerTest {
   }
 
   @Test
+  fun `render_preview with several matches returns one contact sheet and cell pixels for the viewer`() {
+    client.initialize()
+    val (workspaceId, ids) = multipreviewModule("Devices - Large Round", "Devices - Small Round")
+    val resp =
+      client.callTool(
+        "render_preview",
+        buildJsonObject {
+          put("preview", "ListScreenPreview")
+          put("observe", "png")
+        },
+        timeoutMs = 10_000,
+      )
+    assertThat(resp.isError()).isFalse()
+    assertThat(resp.contentTypes().count { it == "image" }).isEqualTo(1)
+    val texts = resp.textContents().map { json.parseToJsonElement(it).jsonObject }
+    val grid = texts.first { it["cells"] != null }
+    assertThat(grid["cells"]!!.jsonArray.map { it.jsonObject["uri"]!!.jsonPrimitive.content })
+      .containsExactlyElementsIn(ids.map { PreviewUri(workspaceId, ":app", it).toUri() })
+    assertThat(
+        texts
+          .first { it["variantChoice"] != null }["variantChoice"]!!
+          .jsonObject["mode"]!!
+          .jsonPrimitive
+          .content
+      )
+      .isEqualTo("text")
+    assertThat(resp.raw["_meta"]!!.jsonObject["composePreview/cellPngs"]!!.jsonArray).hasSize(2)
+  }
+
+  @Test
+  fun `render_preview downscales the inline image and keeps the file full size`() {
+    client.initialize()
+    val workspaceId = registerWorkspace(tmp.newFolder("phone"), "phone")
+    val daemon = warmDaemonFor(workspaceId, ":app")
+    val previewId = "com.example.PhonePreview"
+    daemon.emitDiscovery(previewId)
+    client.expectNotification("notifications/resources/list_changed", 2_000)
+    val png = tmp.newFile("phone.png")
+    ImageIO.write(BufferedImage(900, 1600, BufferedImage.TYPE_INT_ARGB), "png", png)
+    daemon.autoRenderPngPath = { png.absolutePath }
+    val uri = PreviewUri(workspaceId, ":app", previewId).toUri()
+    fun render(vararg extra: Pair<String, Any>) =
+      client.callTool(
+        "render_preview",
+        buildJsonObject {
+          put("uri", uri)
+          extra.forEach { (key, value) ->
+            if (value is Boolean) put(key, value) else put(key, value.toString())
+          }
+        },
+        timeoutMs = 10_000,
+      )
+    fun McpToolResult.imageSize(): Pair<Int, Int> {
+      val image = ImageIO.read(Base64.getDecoder().decode(firstImageContent().first).inputStream())
+      return image.width to image.height
+    }
+
+    val scaled = render("observe" to "png")
+    assertThat(scaled.imageSize()).isEqualTo(432 to 768)
+    val sizes = json.parseToJsonElement(scaled.textContents().single()).jsonObject
+    assertThat(sizes["widthPx"]!!.jsonPrimitive.content).isEqualTo("900")
+    assertThat(sizes["heightPx"]!!.jsonPrimitive.content).isEqualTo("1600")
+    assertThat(sizes["inlineWidthPx"]!!.jsonPrimitive.content).isEqualTo("432")
+    assertThat(sizes["inlineHeightPx"]!!.jsonPrimitive.content).isEqualTo("768")
+
+    assertThat(render("observe" to "png", "imageScale" to "full").imageSize())
+      .isEqualTo(900 to 1600)
+
+    val file = json.parseToJsonElement(render("inline" to false).firstTextContent()).jsonObject
+    val onDisk = ImageIO.read(File(file["pngPath"]!!.jsonPrimitive.content))
+    assertThat(onDisk.width to onDisk.height).isEqualTo(900 to 1600)
+  }
+
+  @Test
   fun `render_matrix resolves a multipreview function's bare id and applies axes to one variant`() {
     // Regression: the bare function id reached the daemon and surfaced
     // "PreviewManifestRouter: no manifest entry for previewId".

@@ -107,6 +107,7 @@
       <button id="refresh" hidden>Refresh resource</button>
       <button id="a11y" hidden>Show accessibility overlay</button>
       <button id="use" hidden>Use selected result</button>
+      <button id="grid-back" type="button" hidden>All variants</button>
     </div>
     <div id="live" class="live" aria-label="Live viewer actions" hidden>
       <button id="rerender" type="button" hidden>Re-render</button>
@@ -147,6 +148,8 @@
   const refresh = q('#refresh');
   const a11y = q('#a11y');
   const use = q('#use');
+  const gridBack = q('#grid-back');
+  let lastGrid;
   const comments = q('#comments');
   const commentList = q('#comment-list');
   const commentRefresh = q('#comment-refresh');
@@ -740,7 +743,19 @@
     });
   }
 
+  function enlargeVariant(value, cells, cell) {
+    lastGrid = { value, cells };
+    showImage(cell.png, `Compose preview variant ${cell.label || ''}`.trim());
+    canvas.classList.add('has-image');
+    meta.textContent = cell.label || previewName(cell.uri);
+    gridBack.hidden = false;
+    void updateModelContext(`the user enlarged variant ${cell.label || previewName(cell.uri)} (${cell.uri})`);
+    scheduleFit();
+  }
+
   function renderMatrix(value, cells) {
+    gridBack.hidden = true;
+    canvas.classList.remove('has-image');
     const grid = document.createElement('div');
     grid.className = 'grid';
     cells.forEach((cell, index) => {
@@ -754,9 +769,16 @@
         button.append(image);
       }
       const overrides = document.createElement('code');
-      overrides.textContent = JSON.stringify(cell?.overrides || {});
+      overrides.textContent = typeof cell?.label === 'string' && cell.uri
+        ? cell.label
+        : JSON.stringify(cell?.overrides || {});
       button.append(overrides);
       button.addEventListener('click', () => {
+        // A @Preview variant grid: a click enlarges that variant; "All variants" goes back.
+        if (typeof cell?.uri === 'string' && typeof cell.png === 'string') {
+          enlargeVariant(value, cells, cell);
+          return;
+        }
         choose({
           kind: 'matrix-cell',
           uri: value.uri || toolArguments.uri,
@@ -1811,6 +1833,14 @@
       return;
     }
     const cells = Array.isArray(value.cells) && value.cells;
+    // Variant grids carry each cell's PNG in `_meta`, which the model never reads.
+    const cellPngs = result?._meta?.['composePreview/cellPngs'];
+    if (cells && Array.isArray(cellPngs)) {
+      cells.forEach((cell, index) => {
+        if (cell && typeof cellPngs[index] === 'string' && !cell.png) cell.png = cellPngs[index];
+      });
+    }
+    gridBack.hidden = true;
     if (resource) {
       resourceResult = { result, resource, value };
       refresh.hidden = staticMode;
@@ -2026,6 +2056,12 @@
     document.readyState === 'loading'
       ? new Promise(resolve => document.addEventListener('DOMContentLoaded', resolve, { once: true })).then(startViewer)
       : startViewer();
+  gridBack.addEventListener('click', () => {
+    if (!lastGrid) return;
+    renderMatrix(lastGrid.value, lastGrid.cells);
+    meta.textContent = `${lastGrid.cells.length} variants`;
+    scheduleFit();
+  });
   refresh.addEventListener('click', () => {
     resourcePollUnchanged = 0;
     if (!overlayCall) readResource(true, true);
