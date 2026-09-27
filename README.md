@@ -137,6 +137,16 @@ short-lived `preview` grant, while made-to-order renders and structured data pro
 use the same authenticated user approval and revocation flow. See
 [the catalog MCP design and setup guide](docs/design/CATALOG_MCP.md).
 
+## Local daemon MCP
+
+`compose-preview-mcp` also exposes the local stdio MCP server used by editor and agent plugins.
+`render_preview` remains a token-frugal semantics observation by default; a local client that can
+read the same filesystem passes `inline: false` to receive the rendered PNG's absolute `pngPath`,
+dimensions, SHA-256, elapsed render time, and a per-session `changed` signal instead of image bytes.
+After discovery, `find_previews_for_file` maps an absolute source path — or one relative to a
+registered workspace — to the preview URIs declared there. Both returned URIs can be passed
+directly to `render_preview`.
+
 ## Spatial and WebXR previews
 
 A portable bundle can publish an XR preview as a version-one `SpatialScene` document and its panel

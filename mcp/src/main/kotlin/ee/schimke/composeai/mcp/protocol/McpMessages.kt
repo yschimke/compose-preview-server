@@ -10,6 +10,7 @@ import kotlinx.serialization.encoding.Encoder
 import kotlinx.serialization.json.JsonDecoder
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonEncoder
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.decodeFromJsonElement
 import kotlinx.serialization.json.jsonObject
 
@@ -97,6 +98,8 @@ data class ResourceDescriptor(
   val description: String? = null,
   val mimeType: String? = null,
   val size: Long? = null,
+  /** Optional MCP `_meta` payload for local client-only resource details. */
+  val meta: JsonObject? = null,
 )
 
 @Serializable data class ReadResourceResult(val contents: List<ResourceContents>)
