@@ -403,6 +403,12 @@ the same request and poll bodies documented above, produced by the same code, ch
 per-address budget. Nothing about the design changes — the link is still a handle, the token still
 rides the poll leg to whoever holds the device secret, and a human still approves in a browser.
 
+For clients that support MCP URL elicitation, `poll_access` also accepts `urlMode: true`. A pending
+request then produces the protocol-standard `-32042` error containing the existing approval URL,
+and the client retries the same poll after the browser interaction completes. The error never
+contains the device secret or bearer; decline, cancellation and timeout mint nothing. Omitting the
+flag preserves the link-and-code text fallback and held-poll behavior for every other client.
+
 What did change is the gate. MCP used to authorize the whole endpoint before parsing, so a client
 holding nothing could not complete `initialize` and therefore could not reach a tool that asks for a
 credential; the flow existed and was unreachable from the transport that needed it most. The gate is

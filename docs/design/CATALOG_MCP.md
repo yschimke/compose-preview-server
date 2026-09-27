@@ -83,6 +83,13 @@ transport does not need the other:
    client's read timeout — and may be raised to 30 by a client that tolerates longer calls; a wait
    that times out answers `pending` and you simply call again.
 
+A client that implements MCP URL elicitation passes `urlMode: true` to `poll_access`. While the
+request is pending, the server returns the standard `-32042` error with the existing `approveUrl`;
+after the browser decision, the client retries that same call to collect the ordinary approved or
+denied result. The URL error contains neither the device secret nor a bearer. Declining or
+cancelling the client interaction therefore grants nothing, and clients without URL elicitation
+keep the complete link-and-code text flow above.
+
 **`initialize`, `ping`, `tools/list` and these two tools need no credential**; everything that reads
 a catalog still does. The gate is per message, not per endpoint, because a client that cannot finish
 `initialize` cannot reach the tool that asks for a credential either — the endpoint was a dead end
