@@ -19,10 +19,15 @@ fun interface SourceCompiler {
 }
 
 sealed interface SourceCompileOutcome {
-  data class Ok(val durationMs: Long) : SourceCompileOutcome
+  /** What the compile did, when it ran one: see [CompileWork]. */
+  val work: CompileWork?
+    get() = null
+
+  data class Ok(val durationMs: Long, override val work: CompileWork? = null) : SourceCompileOutcome
 
   /** The compile ran and failed, usually a compile error; [reason] is one line for the agent. */
-  data class Failed(val reason: String) : SourceCompileOutcome
+  data class Failed(val reason: String, override val work: CompileWork? = null) :
+    SourceCompileOutcome
 
   /** No compile could run at all (no Gradle wrapper, disabled, …). */
   data class Unavailable(val reason: String) : SourceCompileOutcome
@@ -86,16 +91,22 @@ class GradleSourceCompiler(
           first is GradleRun.Finished &&
           TASK_NOT_FOUND.containsMatchIn(first.output)
       ) {
-        SourceCompileOutcome.Failed(
-          "${result.reason} (the project does not apply the Compose Preview plugin and no " +
-            "compose-preview init script was found; run `compose-preview mcp install` once)"
+        result.copy(
+          reason =
+            "${result.reason} (the project does not apply the Compose Preview plugin and no " +
+              "compose-preview init script was found; run `compose-preview mcp install` once)"
         )
       } else result
     }
   }
 
   private sealed interface GradleRun {
-    data class Finished(val exitCode: Int, val output: String, val durationMs: Long) : GradleRun
+    data class Finished(
+      val exitCode: Int,
+      val output: String,
+      val durationMs: Long,
+      val initScript: Boolean,
+    ) : GradleRun
 
     data class TimedOut(val timeoutMs: Long) : GradleRun
 
@@ -107,9 +118,18 @@ class GradleSourceCompiler(
       is GradleRun.NotStarted -> SourceCompileOutcome.Unavailable(run.reason)
       is GradleRun.TimedOut ->
         SourceCompileOutcome.Failed("$task timed out after ${run.timeoutMs}ms")
-      is GradleRun.Finished ->
-        if (run.exitCode == 0) SourceCompileOutcome.Ok(run.durationMs)
-        else SourceCompileOutcome.Failed("$task failed: ${summarizeGradleFailure(run.output)}")
+      is GradleRun.Finished -> {
+        val work =
+          CompileWork(
+            task = task,
+            ms = run.durationMs,
+            initScript = run.initScript,
+            tasks = CompileWork.parseTaskLines(run.output),
+          )
+        if (run.exitCode == 0) SourceCompileOutcome.Ok(run.durationMs, work)
+        else
+          SourceCompileOutcome.Failed("$task failed: ${summarizeGradleFailure(run.output)}", work)
+      }
     }
 
   private fun run(
@@ -122,7 +142,10 @@ class GradleSourceCompiler(
       initScript?.let { listOf("--init-script", it.absolutePath) + ISOLATED_PROJECTS_OFF }.orEmpty()
     val startedAt = System.nanoTime()
     val process = runCatching {
-      ProcessBuilder(command + injection + listOf("--quiet", "--console=plain", task))
+      // Not `--quiet`: the plain console's `> Task :x` lines are how [CompileWork] learns which
+      // tasks the compile ran. The output is captured and only summarized, so the extra lines
+      // cost nothing the agent sees.
+      ProcessBuilder(command + injection + listOf("--console=plain", task))
         .directory(projectRoot)
         .redirectErrorStream(true)
         .start()
@@ -160,6 +183,7 @@ class GradleSourceCompiler(
       exitCode = process.exitValue(),
       output = synchronized(output) { output.toString() },
       durationMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedAt),
+      initScript = initScript != null,
     )
   }
 

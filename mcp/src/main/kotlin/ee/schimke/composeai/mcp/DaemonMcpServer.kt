@@ -207,6 +207,18 @@ class DaemonMcpServer(
   private data class StaleNote(val sources: List<String>, val reason: String)
 
   /**
+   * The recompile each module ran since its last render, consumed by that render's [EditCycleWork]
+   * (issue #1174). Absent means the render compiled nothing, which is what an unchanged render must
+   * show.
+   */
+  private val compileWorkSinceRender = ConcurrentHashMap<DaemonAddr, CompileWork>()
+
+  /**
+   * The latest edit→render cycle's work per preview, returned as `render_preview`'s `_meta.work`.
+   */
+  private val lastCycleWork = ConcurrentHashMap<PreviewIdKey, EditCycleWork>()
+
+  /**
    * Per-(workspace, module) catalog: preview-id → minimal metadata. Updated from `discoveryUpdated`
    * on the daemon's reader thread; read by `resources/list` and the watch propagator on session
    * threads.
@@ -657,6 +669,7 @@ class DaemonMcpServer(
     ensureSourceFreshBeforeRender(uri, daemon)
     recompilePendingSources(daemon)
     val key = PreviewIdKey(uri.workspaceId, uri.modulePath, uri.previewFqn)
+    val renderStartedAt = System.nanoTime()
     val future = java.util.concurrent.CompletableFuture<RenderOutcome>()
     // Atomically join the right group. `becameFront` (captured outside the compute lambda)
     // tracks whether we created a brand-new head group: in that case we own the `renderNow`
@@ -727,7 +740,19 @@ class DaemonMcpServer(
             outcome.suggestion?.let { append(" — suggestion: $it") }
           }
         )
-      is RenderOutcome.Finished -> outcome
+      is RenderOutcome.Finished -> {
+        val work =
+          EditCycleWork(
+            compile = compileWorkSinceRender.remove(DaemonAddr(uri.workspaceId, uri.modulePath)),
+            renderMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - renderStartedAt),
+            daemonTrace = outcome.daemonTrace,
+          )
+        lastCycleWork[key] = work
+        if (work.compile != null) {
+          System.err.println("compose-preview-mcp: edit cycle ${uri.previewFqn}: ${work.toJson()}")
+        }
+        outcome
+      }
     }
   }
 
@@ -878,6 +903,16 @@ class DaemonMcpServer(
           runCatching { compiler.compile(root, daemon.modulePath, sources.map(::File)) }
             .getOrElse { SourceCompileOutcome.Failed(it.message ?: it.javaClass.simpleName) }
         }
+      outcome.work?.let { work ->
+        compileWorkSinceRender[addr] = work
+        val disallowed = work.disallowedTasks()
+        if (disallowed.isNotEmpty()) {
+          System.err.println(
+            "compose-preview-mcp: recompile of ${daemon.modulePath} ran tasks an edit loop " +
+              "should not need: ${disallowed.joinToString(", ")}"
+          )
+        }
+      }
       when (outcome) {
         is SourceCompileOutcome.Ok -> staleNotes.remove(addr)
         is SourceCompileOutcome.Failed -> staleNotes[addr] = StaleNote(sources, outcome.reason)
@@ -3289,6 +3324,13 @@ class DaemonMcpServer(
         val stale = staleRenderLine(uri)
         if (stale == null || result.isError == true) result
         else result.copy(content = result.content + ContentBlock.Text(stale))
+      }
+      .map { result ->
+        // Issue #1174: what this edit→render cycle did, for tests and debugging. `_meta` keeps it
+        // out of the content the agent reads.
+        val work = lastCycleWork[PreviewIdKey(uri.workspaceId, uri.modulePath, uri.previewFqn)]
+        if (work == null || result.isError == true) result
+        else result.copy(meta = buildJsonObject { put("work", work.toJson()) })
       }
       .getOrElse { errorCallToolResult("render_preview failed: ${it.message}") }
   }
@@ -5760,12 +5802,15 @@ class DaemonMcpServer(
         declaring.ifEmpty { project.daemons.keys.toSet() }
       } else emptySet()
     val compileLines = mutableListOf<String>()
+    val compileWork = sortedMapOf<String, CompileWork>()
     project.daemons.values.forEach { daemon ->
       val addr = DaemonAddr(daemon.workspaceId, daemon.modulePath)
       if (daemon.modulePath in compileTargets) {
         pendingSources.computeIfAbsent(addr) { ConcurrentHashMap.newKeySet() }.add(path)
         markSourceSeen(addr, File(path))
-        when (val outcome = recompilePendingSources(daemon)) {
+        val outcome = recompilePendingSources(daemon)
+        outcome?.work?.let { compileWork[daemon.modulePath] = it }
+        when (outcome) {
           is SourceCompileOutcome.Ok ->
             compileLines += "recompiled ${daemon.modulePath} in ${outcome.durationMs}ms"
           null -> {}
@@ -5823,11 +5868,26 @@ class DaemonMcpServer(
       }
     }
     return textCallToolResult(
-      (listOf(
-          "fileChanged forwarded to $forwarded daemon(s); re-rendered $rendered watched preview(s)"
-        ) + compileLines)
-        .joinToString("\n")
-    )
+        (listOf(
+            "fileChanged forwarded to $forwarded daemon(s); re-rendered $rendered watched preview(s)"
+          ) + compileLines)
+          .joinToString("\n")
+      )
+      .let { result ->
+        // Issue #1174: each module's recompile, as `_meta.work.compile`, keyed by module path.
+        if (compileWork.isEmpty()) result
+        else
+          result.copy(
+            meta =
+              buildJsonObject {
+                putJsonObject("work") {
+                  putJsonObject("compile") {
+                    compileWork.forEach { (module, work) -> put(module, work.toJson()) }
+                  }
+                }
+              }
+          )
+      }
   }
 
   // -------------------------------------------------------------------------
@@ -5920,7 +5980,12 @@ class DaemonMcpServer(
         dispatchPreparedNext(daemon, key, failed.next)
         return
       }
-    val transition = popHeadAndPrepareNext(daemon, key, RenderOutcome.Finished(pngPath, pngBytes))
+    val transition =
+      popHeadAndPrepareNext(
+        daemon,
+        key,
+        RenderOutcome.Finished(pngPath, pngBytes, params?.get("workTrace")),
+      )
     val completedGroup = transition.completed
     // 2. Refresh the data-product attachment cache for this `(uri)`. Any kind the daemon attached
     //    on this render is the new fresh payload; any kind it didn't attach is stale and gets
@@ -6267,7 +6332,12 @@ class DaemonMcpServer(
   )
 
   private sealed interface RenderOutcome {
-    data class Finished(val pngPath: String, val pngBytes: ByteArray) : RenderOutcome
+    data class Finished(
+      val pngPath: String,
+      val pngBytes: ByteArray,
+      /** The daemon's per-render work trace, when it sends one; see [EditCycleWork]. */
+      val daemonTrace: JsonElement? = null,
+    ) : RenderOutcome
 
     data class Failed(
       val kind: String,
