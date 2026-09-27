@@ -112,6 +112,7 @@ data class ResourceDescriptor(
   val description: String? = null,
   val mimeType: String? = null,
   val size: Long? = null,
+  /** Optional MCP `_meta` payload (MCP App UI hints, local client-only resource details). */
   val meta: JsonObject? = null,
 )
 
