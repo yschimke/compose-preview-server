@@ -1,6 +1,7 @@
 package ee.schimke.composeai.mcp
 
 import java.io.File
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 
 /**
@@ -32,10 +33,21 @@ sealed interface SourceCompileOutcome {
  * Preview Gradle plugin registers for exactly this save loop. It runs the same Kotlin compile task
  * the daemon's class directories come from, without the discovery scan.
  *
+ * A project that does not apply the plugin itself has it injected by the compose-preview CLI's init
+ * script (`AutoInject`), and without that script the task does not exist (issue #1174). The CLI
+ * does not tell this server where the script is, so [InitScripts] finds it the way the CLI writes
+ * it, and the compile passes it exactly as the CLI does: `--init-script <path>` plus Isolated
+ * Projects off.
+ *
  * The child's output is captured, never inherited: this process's stdout is the MCP transport.
  */
-class GradleSourceCompiler(private val timeoutMs: Long = TimeUnit.MINUTES.toMillis(5)) :
-  SourceCompiler {
+class GradleSourceCompiler(
+  private val timeoutMs: Long = TimeUnit.MINUTES.toMillis(5),
+  private val initScripts: InitScripts = InitScripts(),
+) : SourceCompiler {
+
+  /** Per project root: whether its compile needs the CLI's init script. */
+  private val needsInitScript = ConcurrentHashMap<String, Boolean>()
 
   override fun compile(
     projectRoot: File,
@@ -50,15 +62,73 @@ class GradleSourceCompiler(private val timeoutMs: Long = TimeUnit.MINUTES.toMill
     val task = if (modulePath == ":" || modulePath.isBlank()) ":$TASK" else "$modulePath:$TASK"
     val command =
       if (windows) listOf("cmd", "/c", wrapper.absolutePath) else listOf(wrapper.absolutePath)
+    val key = projectRoot.absolutePath
+    val initScript = initScripts.forProject(projectRoot)
+    val inject =
+      initScript != null &&
+        needsInitScript.computeIfAbsent(key) { !initScripts.projectAppliesPlugin(projectRoot) }
+    val first = run(projectRoot, command, task, if (inject) initScript else null)
+    if (
+      first is GradleRun.Finished &&
+        first.exitCode != 0 &&
+        !inject &&
+        initScript != null &&
+        TASK_NOT_FOUND.containsMatchIn(first.output)
+    ) {
+      // The scan missed a build that does not apply the plugin; remember that and retry.
+      needsInitScript[key] = true
+      return outcome(task, run(projectRoot, command, task, initScript))
+    }
+    return outcome(task, first).let { result ->
+      if (
+        result is SourceCompileOutcome.Failed &&
+          initScript == null &&
+          first is GradleRun.Finished &&
+          TASK_NOT_FOUND.containsMatchIn(first.output)
+      ) {
+        SourceCompileOutcome.Failed(
+          "${result.reason} (the project does not apply the Compose Preview plugin and no " +
+            "compose-preview init script was found; run `compose-preview mcp install` once)"
+        )
+      } else result
+    }
+  }
+
+  private sealed interface GradleRun {
+    data class Finished(val exitCode: Int, val output: String, val durationMs: Long) : GradleRun
+
+    data class TimedOut(val timeoutMs: Long) : GradleRun
+
+    data class NotStarted(val reason: String) : GradleRun
+  }
+
+  private fun outcome(task: String, run: GradleRun): SourceCompileOutcome =
+    when (run) {
+      is GradleRun.NotStarted -> SourceCompileOutcome.Unavailable(run.reason)
+      is GradleRun.TimedOut ->
+        SourceCompileOutcome.Failed("$task timed out after ${run.timeoutMs}ms")
+      is GradleRun.Finished ->
+        if (run.exitCode == 0) SourceCompileOutcome.Ok(run.durationMs)
+        else SourceCompileOutcome.Failed("$task failed: ${summarizeGradleFailure(run.output)}")
+    }
+
+  private fun run(
+    projectRoot: File,
+    command: List<String>,
+    task: String,
+    initScript: File?,
+  ): GradleRun {
+    val injection =
+      initScript?.let { listOf("--init-script", it.absolutePath) + ISOLATED_PROJECTS_OFF }.orEmpty()
     val startedAt = System.nanoTime()
     val process = runCatching {
-      ProcessBuilder(command + listOf("--quiet", "--console=plain", task))
+      ProcessBuilder(command + injection + listOf("--quiet", "--console=plain", task))
         .directory(projectRoot)
         .redirectErrorStream(true)
         .start()
     }
       .getOrElse {
-        return SourceCompileOutcome.Unavailable("could not start ${wrapper.name}: ${it.message}")
+        return GradleRun.NotStarted("could not start ${command.last()}: ${it.message}")
       }
     process.outputStream.close()
     val output = StringBuilder()
@@ -83,18 +153,27 @@ class GradleSourceCompiler(private val timeoutMs: Long = TimeUnit.MINUTES.toMill
         }
     if (!process.waitFor(timeoutMs, TimeUnit.MILLISECONDS)) {
       process.destroyForcibly()
-      return SourceCompileOutcome.Failed("$task timed out after ${timeoutMs}ms")
+      return GradleRun.TimedOut(timeoutMs)
     }
     reader.join(2_000)
-    val durationMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedAt)
-    if (process.exitValue() == 0) return SourceCompileOutcome.Ok(durationMs)
-    val text = synchronized(output) { output.toString() }
-    return SourceCompileOutcome.Failed("$task failed: ${summarizeGradleFailure(text)}")
+    return GradleRun.Finished(
+      exitCode = process.exitValue(),
+      output = synchronized(output) { output.toString() },
+      durationMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedAt),
+    )
   }
 
   companion object {
     const val TASK = "composePreviewCompile"
     private const val MAX_CAPTURED_CHARS = 64 * 1024
+    private val TASK_NOT_FOUND = Regex("""task '$TASK' not found|Task '[^']*$TASK' not found""")
+
+    /**
+     * Mirrors the CLI's `ISOLATED_PROJECTS_OFF_ARGS`: the injected script cannot run under Isolated
+     * Projects, and both spellings go out because Gradle 9.7 renamed the property.
+     */
+    private val ISOLATED_PROJECTS_OFF =
+      listOf("-Dorg.gradle.unsafe.isolated-projects=false", "-Dorg.gradle.isolated-projects=false")
 
     /** The first Kotlin `e:` diagnostic, else Gradle's "What went wrong" line, else the tail. */
     internal fun summarizeGradleFailure(output: String): String {
@@ -108,5 +187,89 @@ class GradleSourceCompiler(private val timeoutMs: Long = TimeUnit.MINUTES.toMill
       if (wrong >= 0 && wrong + 1 < lines.size) return lines[wrong + 1].take(300)
       return lines.lastOrNull()?.take(300) ?: "exit code non-zero"
     }
+  }
+}
+
+/**
+ * Finds the compose-preview CLI's plugin init script (`apply-compose-ai-preview.init.gradle.kts`)
+ * where the CLI materialises it: `$XDG_CACHE_HOME/composeai/init/<version>/`, else
+ * `~/.cache/composeai/init/<version>/`, newest version first. `COMPOSE_PREVIEW_INIT_SCRIPT` names
+ * one explicitly. The CLI's opt-outs apply here too: `COMPOSE_PREVIEW_NO_AUTO_INJECT=1`, and a
+ * build whose settings `includeBuild("gradle-plugin")`.
+ */
+class InitScripts(
+  private val environment: Map<String, String> = System.getenv(),
+  private val userHome: File = File(System.getProperty("user.home") ?: "."),
+) {
+
+  fun forProject(projectRoot: File): File? {
+    if (environment["COMPOSE_PREVIEW_NO_AUTO_INJECT"] == "1") return null
+    if (settingsText(projectRoot).contains(INCLUDED_PLUGIN_BUILD)) return null
+    environment["COMPOSE_PREVIEW_INIT_SCRIPT"]
+      ?.takeIf { it.isNotBlank() }
+      ?.let {
+        return File(it).takeIf(File::isFile)
+      }
+    val cacheRoot =
+      environment["XDG_CACHE_HOME"]?.takeIf { it.isNotBlank() }?.let { File(it, "composeai/init") }
+        ?: File(userHome, ".cache/composeai/init")
+    return cacheRoot
+      .listFiles(File::isDirectory)
+      .orEmpty()
+      .sortedWith(compareByDescending<File, List<Int>>(VERSION_ORDER) { versionKey(it.name) })
+      .map { File(it, FILE_NAME) }
+      .firstOrNull(File::isFile)
+  }
+
+  /**
+   * Whether the build applies `ee.schimke.composeai.preview` itself: in its settings, root or
+   * module build scripts, version catalog, or `build-logic` / `buildSrc` convention plugins. A
+   * cheap text scan; a miss only costs one retry, see [GradleSourceCompiler].
+   */
+  fun projectAppliesPlugin(projectRoot: File): Boolean {
+    val candidates = buildList {
+      addAll(listOf("settings.gradle.kts", "settings.gradle", "build.gradle.kts", "build.gradle"))
+      add("gradle/libs.versions.toml")
+      projectRoot.listFiles(File::isDirectory).orEmpty().forEach { module ->
+        add("${module.name}/build.gradle.kts")
+        add("${module.name}/build.gradle")
+      }
+    }
+    val files =
+      candidates.map { File(projectRoot, it) }.filter(File::isFile) +
+        listOf("build-logic", "buildSrc").flatMap { dir ->
+          File(projectRoot, dir)
+            .takeIf(File::isDirectory)
+            ?.walkTopDown()
+            ?.maxDepth(8)
+            ?.filter { it.isFile && (it.extension == "kts" || it.extension == "kt") }
+            ?.take(200)
+            ?.toList()
+            .orEmpty()
+        }
+    return files.any { runCatching { it.readText() }.getOrDefault("").contains(PLUGIN_ID) }
+  }
+
+  private fun settingsText(projectRoot: File): String =
+    listOf("settings.gradle.kts", "settings.gradle")
+      .map { File(projectRoot, it) }
+      .firstOrNull(File::isFile)
+      ?.let { runCatching { it.readText() }.getOrNull() }
+      .orEmpty()
+
+  companion object {
+    const val FILE_NAME = "apply-compose-ai-preview.init.gradle.kts"
+    private const val PLUGIN_ID = "ee.schimke.composeai.preview"
+    private val INCLUDED_PLUGIN_BUILD = Regex("""includeBuild\s*\(\s*["']gradle-plugin["']\s*\)""")
+
+    private fun versionKey(name: String): List<Int> =
+      name.split('.', '-').map { it.toIntOrNull() ?: -1 }
+
+    private val VERSION_ORDER =
+      Comparator<List<Int>> { a, b ->
+        (0 until maxOf(a.size, b.size))
+          .map { (a.getOrElse(it) { 0 }).compareTo(b.getOrElse(it) { 0 }) }
+          .firstOrNull { it != 0 } ?: 0
+      }
   }
 }

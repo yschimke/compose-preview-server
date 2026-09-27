@@ -298,6 +298,123 @@ class SourceRecompileTest {
     assertThat(line).contains("timed out")
   }
 
+  /** A stub `gradlew` that appends its arguments to `args.txt` and runs [body]. */
+  private fun stubWrapper(root: File, body: String): File {
+    val args = File(root, "args.txt")
+    File(root, "gradlew").apply {
+      writeText("#!/bin/sh\necho \"$@\" >> '${args.absolutePath}'\n$body\n")
+      setExecutable(true)
+    }
+    return args
+  }
+
+  private fun cliInitScript(home: File, version: String): File =
+    File(home, ".cache/composeai/init/$version/${InitScripts.FILE_NAME}").apply {
+      parentFile.mkdirs()
+      writeText("// init script $version")
+    }
+
+  @Test
+  fun `gradle compile injects the CLI's newest init script when the build does not apply the plugin`() {
+    assumeFalse(System.getProperty("os.name").orEmpty().startsWith("Windows"))
+    val home = tmp.newFolder("home")
+    cliInitScript(home, "2.9.0")
+    val newest = cliInitScript(home, "2.28.0")
+    val root = tmp.newFolder("starter")
+    File(root, "settings.gradle.kts").writeText("include(\":app\")")
+    val args = stubWrapper(root, "exit 0")
+
+    val outcome =
+      GradleSourceCompiler(initScripts = InitScripts(environment = emptyMap(), userHome = home))
+        .compile(root, ":app", emptyList())
+
+    assertThat(outcome).isInstanceOf(SourceCompileOutcome.Ok::class.java)
+    assertThat(args.readText().trim())
+      .isEqualTo(
+        "--init-script ${newest.absolutePath} -Dorg.gradle.unsafe.isolated-projects=false " +
+          "-Dorg.gradle.isolated-projects=false --quiet --console=plain :app:composePreviewCompile"
+      )
+  }
+
+  @Test
+  fun `gradle compile retries with the init script once when the task is missing`() {
+    assumeFalse(System.getProperty("os.name").orEmpty().startsWith("Windows"))
+    val home = tmp.newFolder("home")
+    val script = cliInitScript(home, "2.28.0")
+    val root = tmp.newFolder("mentions-plugin")
+    // The scan sees the plugin id (say, only in a comment) but the build does not apply it.
+    File(root, "build.gradle.kts").writeText("// ee.schimke.composeai.preview is applied elsewhere")
+    val args =
+      stubWrapper(
+        root,
+        """
+        |case "$*" in *--init-script*) exit 0;; esac
+        |echo "* What went wrong:"
+        |echo "Cannot locate tasks that match ':app:composePreviewCompile' as task 'composePreviewCompile' not found in project ':app'."
+        |exit 1
+        """
+          .trimMargin(),
+      )
+    val compiler =
+      GradleSourceCompiler(initScripts = InitScripts(environment = emptyMap(), userHome = home))
+
+    assertThat(compiler.compile(root, ":app", emptyList()))
+      .isInstanceOf(SourceCompileOutcome.Ok::class.java)
+    assertThat(compiler.compile(root, ":app", emptyList()))
+      .isInstanceOf(SourceCompileOutcome.Ok::class.java)
+    val calls = args.readLines()
+    // Plain, then the retry, then straight to the init script on the next edit.
+    assertThat(calls).hasSize(3)
+    assertThat(calls[0]).doesNotContain("--init-script")
+    assertThat(calls[1]).contains("--init-script ${script.absolutePath}")
+    assertThat(calls[2]).contains("--init-script ${script.absolutePath}")
+  }
+
+  @Test
+  fun `init scripts honour the CLI's opt-outs and say what to do when none exists`() {
+    assumeFalse(System.getProperty("os.name").orEmpty().startsWith("Windows"))
+    val home = tmp.newFolder("home")
+    cliInitScript(home, "2.28.0")
+    val root = tmp.newFolder("plain")
+    assertThat(InitScripts(mapOf("COMPOSE_PREVIEW_NO_AUTO_INJECT" to "1"), home).forProject(root))
+      .isNull()
+    val explicit = tmp.newFile("explicit.init.gradle.kts")
+    assertThat(
+        InitScripts(mapOf("COMPOSE_PREVIEW_INIT_SCRIPT" to explicit.absolutePath), home)
+          .forProject(root)
+      )
+      .isEqualTo(explicit)
+    val xdg = tmp.newFolder("xdg")
+    val xdgScript =
+      File(xdg, "composeai/init/3.0.0/${InitScripts.FILE_NAME}").apply {
+        parentFile.mkdirs()
+        writeText("//")
+      }
+    assertThat(InitScripts(mapOf("XDG_CACHE_HOME" to xdg.absolutePath), home).forProject(root))
+      .isEqualTo(xdgScript)
+    val devLoop = tmp.newFolder("dev-loop")
+    File(devLoop, "settings.gradle.kts").writeText("includeBuild(\"gradle-plugin\")")
+    assertThat(InitScripts(emptyMap(), home).forProject(devLoop)).isNull()
+
+    stubWrapper(
+      root,
+      "echo \"* What went wrong:\"; echo \"Task 'composePreviewCompile' not found in project ':app'.\"; exit 1",
+    )
+    val failed =
+      GradleSourceCompiler(initScripts = InitScripts(emptyMap(), tmp.newFolder("empty-home")))
+        .compile(root, ":app", emptyList())
+    assertThat((failed as SourceCompileOutcome.Failed).reason)
+      .contains("compose-preview mcp install")
+  }
+
+  @Test
+  fun `default sandbox replicas scale with the machine`() {
+    assertThat(DaemonSupervisor.defaultReplicasFor(2)).isEqualTo(0)
+    assertThat(DaemonSupervisor.defaultReplicasFor(4)).isEqualTo(1)
+    assertThat(DaemonSupervisor.defaultReplicasFor(8)).isEqualTo(3)
+    assertThat(DaemonSupervisor.defaultReplicasFor(64)).isEqualTo(4)
+  }
+
   @Test
   fun `gradle failure summary falls back to what went wrong`() {
     assertThat(
