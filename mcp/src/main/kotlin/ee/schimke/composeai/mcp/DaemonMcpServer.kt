@@ -173,6 +173,11 @@ class DaemonMcpServer(
    * continuous build) to have written fresh classes; [DaemonMcpMain] wires [GradleSourceCompiler].
    */
   private val sourceCompiler: SourceCompiler? = null,
+  /**
+   * Prepares a registered build that has no daemon launch descriptor yet (`compose-preview mcp
+   * install` never ran there) on first use. `null` turns that off; tests pass a fake runner.
+   */
+  private val projectBootstrap: ProjectBootstrap? = ProjectBootstrap(),
 ) {
 
   private val fullToolDefsLoader: () -> List<ToolDef> =
@@ -476,7 +481,9 @@ class DaemonMcpServer(
               require(profile == McpToolProfile.NATIVE) { "unknown prompt: $name" }
               ComposePreviewPrompts.get(name, arguments)
             },
-            callTool = { name, arguments -> handleCallTool(session, name, arguments) },
+            callTool = { name, arguments, progressToken ->
+              handleCallTool(session, name, arguments, progressToken)
+            },
             listResources = { catalogResources() },
             readResource = { uri, progressToken ->
               handleReadResource(session, uri, progressToken)
@@ -1428,6 +1435,7 @@ class DaemonMcpServer(
               "properties":{
                 "uri":{"type":"string","description":"compose-preview://<workspace>/<module>/<fqn>?config=<qualifier>"},
                 "preview":{"type":"string","description":"Alternative to uri: a @Preview function name or unique FQN suffix, e.g. 'ListScreenPreview'. With several matches (such as @WearPreviewDevices variants) the first is rendered and the rest are listed as otherMatches."},
+                "project":{"type":"string","description":"Absolute path to the project (or any folder in it). Only needed when the host sends no workspace roots."},
                 "card":{"type":"boolean","description":"With inline=false, also write a self-contained viewer card (HTML) and return cardPath plus an <agent-embed> line for the reply. Implies inline=false. Default true for Antigravity."},
                 "observe":{"type":"string","enum":["png","semantics","hash"],"description":"Observation level (issue #1787). Default 'semantics' — the compose/semantics tree + sha256 + dimensions with NO base64, the token-frugal snapshot-default for an agent loop (fetch pixels only when you need them). 'png' returns the base64 image (request it when you need to see pixels); 'hash' returns just sha256 + dimensions."},
                 "inline":{"type":"boolean","description":"Default true. Set false on a local-FS client to return the rendered PNG's absolute pngPath plus sha256, dimensions, changed, and durationMs as text instead of an inline observation. inline=false takes precedence over observe, so it returns no semantics or image content. Cannot be combined with crop. Antigravity defaults to false when observe and crop are omitted."},
@@ -1455,7 +1463,8 @@ class DaemonMcpServer(
               "type":"object",
               "properties":{
                 "path":{"type":"string","description":"Absolute source-file path, or a path relative to the workspace root."},
-                "workspaceId":{"type":"string","description":"Optional workspace to search. Omit to search every registered workspace."}
+                "workspaceId":{"type":"string","description":"Optional workspace to search. Omit to search every registered workspace."},
+                "project":{"type":"string","description":"Absolute path to the project (or any folder in it). Only needed when the host sends no workspace roots."}
               },
               "required":["path"]
             }
@@ -1602,6 +1611,7 @@ class DaemonMcpServer(
               "properties":{
                 "uri":{"type":"string","description":"compose-preview://<workspace>/<module>/<fqn>?config=<qualifier>"},
                 "preview":{"type":"string","description":"Alternative to uri: a @Preview function name or unique FQN suffix, e.g. 'ListScreenPreview'. With several matches (such as @WearPreviewDevices variants) the first is rendered and the rest are listed as otherMatches."},
+                "project":{"type":"string","description":"Absolute path to the project (or any folder in it). Only needed when the host sends no workspace roots."},
                 "card":{"type":"boolean","description":"With inline=false, also write a self-contained viewer card (HTML) and return cardPath plus an <agent-embed> line for the reply. Implies inline=false. Default true for Antigravity."},
                 "observe":{"type":"string","enum":["png","semantics","hash"],"description":"Observation level (issue #1787). Default 'semantics' returns the compose/semantics tree + sha256 + width/height with NO base64 — the token-frugal snapshot-default for a multi-step agent loop (fetch pixels only when you need them). 'png' returns the base64 image (request it when you need to see pixels); 'hash' returns just sha256 + dimensions."},
                 "inline":{"type":"boolean","description":"Default true. Set false on a local-FS client to return the rendered PNG's absolute pngPath plus sha256, dimensions, changed, and durationMs as text instead of an inline observation. inline=false takes precedence over observe, so it returns no semantics or image content. Cannot be combined with crop. Antigravity defaults to false when observe and crop are omitted."},
@@ -1747,7 +1757,8 @@ class DaemonMcpServer(
               "type":"object",
               "properties":{
                 "path":{"type":"string","description":"Absolute source-file path, or a path relative to the workspace root."},
-                "workspaceId":{"type":"string","description":"Optional workspace to search. Omit to search every registered workspace."}
+                "workspaceId":{"type":"string","description":"Optional workspace to search. Omit to search every registered workspace."},
+                "project":{"type":"string","description":"Absolute path to the project (or any folder in it). Only needed when the host sends no workspace roots."}
               },
               "required":["path"]
             }
@@ -2056,6 +2067,7 @@ class DaemonMcpServer(
               "type":"object",
               "properties":{
                 "uri":{"type":"string","description":"compose-preview://<workspace>/<module>/<fqn>"},
+                "project":{"type":"string","description":"Absolute path to the project (or any folder in it). Only needed when the host sends no workspace roots."},
                 "axes":{
                   "type":"object",
                   "description":"Cross-product axes; set at least one. Each is a non-empty array.",
@@ -2352,6 +2364,7 @@ class DaemonMcpServer(
     session: Session,
     name: String,
     arguments: JsonElement?,
+    progressToken: JsonElement? = null,
   ): CallToolResult {
     val args =
       when (
@@ -2361,6 +2374,17 @@ class DaemonMcpServer(
         is UriOverridesFold.Folded -> normalized.args
         is UriOverridesFold.Rejected -> return errorCallToolResult(normalized.message)
       }
+    val projectArg =
+      args["project"]?.jsonPrimitive?.contentOrNull?.takeIf {
+        it.isNotBlank() && name in PROJECT_ARGUMENT_TOOLS
+      }
+    val scope = projectArg?.let { path ->
+      when (val registered = registerProjectArgument(path)) {
+        is ProjectArgument.Registered -> registered.workspaceIds
+        is ProjectArgument.Rejected -> return errorCallToolResult("$name: ${registered.message}")
+      }
+    }
+    val progress = progressReporter(session, progressToken)
     return when (name) {
       "status" -> toolStatus()
       "register_project" -> toolRegisterProject(args)
@@ -2369,8 +2393,8 @@ class DaemonMcpServer(
       "list_devices" -> toolListDevices()
       "find_previews_for_file" -> toolFindPreviewsForFile(args)
       "render_preview" -> {
-        autoRegisterWorkspace(session)
-        renderPreviewChoosingVariant(session, args)
+        if (scope == null) autoRegisterWorkspace(session)
+        renderPreviewChoosingVariant(session, args, scope, progress)
       }
       "render_matrix" -> toolRenderMatrix(session, args)
       "watch" -> toolWatch(session, args)
@@ -2656,17 +2680,131 @@ class DaemonMcpServer(
     if (supervisor.listProjects().isNotEmpty()) return
     val roots = (session as? McpSession)?.rootDirectories().orEmpty()
     val candidates = roots.ifEmpty { listOfNotNull(workingDirectory) }
+    lastTried = Tried(candidates, fromRoots = roots.isNotEmpty())
     // After a restart, a build registered before (workspaces.json) comes back under its old id.
     if (supervisor.restoreMatching(candidates).isNotEmpty()) {
       sessions.forEach { it.notifyResourceListChanged() }
       return
     }
-    candidates
-      .filter { dir -> GRADLE_BUILD_FILES.any { File(dir, it).isFile } }
-      .forEach { dir ->
-        runCatching { registerProjectAt(dir, rootName = null, modules = emptyList()) }
-          .onFailure { System.err.println("auto-register failed for $dir: ${it.message}") }
+    // A root that is not a build itself: the build around it, else the builds up to two levels
+    // below it (wear-os-samples keeps one build per sample under its git root).
+    val builds = candidates.flatMap { ProjectDiscovery.buildsFor(it) }.distinct()
+    if (builds.size == 1) {
+      registerQuietly(builds.single())
+    } else {
+      // Several: registered on the first `preview=` lookup, which then searches all of them.
+      pendingBuilds = builds
+    }
+  }
+
+  private fun registerQuietly(dir: File): RegisteredProject? = runCatching {
+    registerProjectAt(dir, rootName = null, modules = emptyList())
+  }
+    .onFailure { System.err.println("auto-register failed for $dir: ${it.message}") }
+    .getOrNull()
+
+  /** What the last auto-registration looked at, for the "nothing registered" message. */
+  private data class Tried(val dirs: List<File>, val fromRoots: Boolean)
+
+  @Volatile private var lastTried: Tried? = null
+
+  /** Builds found under the roots when there were several; registered on a `preview=` lookup. */
+  @Volatile private var pendingBuilds: List<File> = emptyList()
+
+  private sealed interface ProjectArgument {
+    data class Registered(val workspaceIds: Set<WorkspaceId>) : ProjectArgument
+
+    data class Rejected(val message: String) : ProjectArgument
+  }
+
+  /**
+   * The `project` argument: an absolute path to a build or any folder in one. Registers the build
+   * (or the builds below a folder that holds several) so a host that sends no roots (Claude
+   * Desktop's chat launches the server from `/`) needs no separate register_project call.
+   */
+  private fun registerProjectArgument(path: String): ProjectArgument {
+    val dir = File(path)
+    if (!dir.isAbsolute) {
+      return ProjectArgument.Rejected("project '$path' must be an absolute path")
+    }
+    if (!dir.exists()) return ProjectArgument.Rejected("project '$path' does not exist")
+    val builds = ProjectDiscovery.buildsFor(dir)
+    if (builds.isEmpty()) {
+      return ProjectArgument.Rejected(
+        "project '$path' is not in a Gradle build: no settings.gradle(.kts) there, above it, or " +
+          "up to ${ProjectDiscovery.SEARCH_DEPTH} levels below it"
+      )
+    }
+    val ids = builds.mapNotNull { registerQuietly(it)?.workspaceId }.toSet()
+    return if (ids.isEmpty()) ProjectArgument.Rejected("project '$path' could not be registered")
+    else ProjectArgument.Registered(ids)
+  }
+
+  /**
+   * The error when no project is registered: what was tried and why it did not qualify, how to name
+   * a project, and the builds found or used before (up to ten).
+   */
+  private fun notRegisteredMessage(): String {
+    val tried = lastTried
+    val triedText =
+      if (tried == null || tried.dirs.isEmpty()) {
+        "The client sent no workspace roots and the server has no working directory."
+      } else {
+        val source =
+          if (tried.fromRoots) "the client's workspace roots" else "the working directory"
+        "Tried ${tried.dirs.joinToString(", ") { it.path }} ($source): not Gradle builds, with " +
+          "no settings.gradle(.kts) above them or up to ${ProjectDiscovery.SEARCH_DEPTH} levels " +
+          "below."
       }
+    val candidates =
+      (pendingBuilds.map { it.path } + supervisor.workspaceStore.all().map { it.path })
+        .distinct()
+        .filter { File(it).isDirectory }
+        .take(10)
+    return buildString {
+      append("no project registered. ")
+      append(triedText)
+      append(" Pass project=<absolute path> (the Gradle build, or any folder in it).")
+      if (candidates.isNotEmpty()) append(" Candidate builds: ${candidates.joinToString(", ")}.")
+    }
+  }
+
+  /** Progress lines for a tool call: `notifications/progress` when the client sent a token. */
+  private fun progressReporter(session: Session, token: JsonElement?): (String) -> Unit {
+    var step = 0
+    return { message ->
+      System.err.println("compose-preview-mcp: $message")
+      if (token != null) {
+        step++
+        runCatching { session.notifyProgress(token, step.toDouble(), message = message) }
+      }
+    }
+  }
+
+  /**
+   * Runs [projectBootstrap] for each registered project in [scope] that cannot start a daemon yet:
+   * no known modules, no live daemon and no launch descriptor on disk. Returns the reason for each
+   * one that is still not prepared.
+   */
+  private fun prepareProjects(
+    scope: Set<WorkspaceId>?,
+    progress: (String) -> Unit,
+  ): Map<RegisteredProject, String> {
+    val bootstrap = projectBootstrap ?: return emptyMap()
+    return supervisor
+      .listProjects()
+      .filter { scope == null || it.workspaceId in scope }
+      .filter { project ->
+        project.daemons.isEmpty() &&
+          synchronized(project.knownModules) { project.knownModules.isEmpty() }
+      }
+      .mapNotNull { project ->
+        when (val outcome = bootstrap.ensurePrepared(project.path, progress)) {
+          is ProjectBootstrap.Outcome.Ready -> null
+          is ProjectBootstrap.Outcome.NotPrepared -> project to outcome.reason
+        }
+      }
+      .toMap()
   }
 
   private sealed interface PreviewNameResolution {
@@ -2681,17 +2819,33 @@ class DaemonMcpServer(
    * (known modules plus any with a launch descriptor on disk) so their discovery seeds the catalog,
    * then looks again.
    */
-  private fun resolvePreviewName(name: String): PreviewNameResolution {
+  private fun resolvePreviewName(
+    name: String,
+    scope: Set<WorkspaceId>? = null,
+    progress: (String) -> Unit = {},
+  ): PreviewNameResolution {
     val trimmed = name.trim()
-    var matches = previewNameMatches(trimmed)
+    var matches = previewNameMatches(trimmed, scope)
+    var unprepared = emptyMap<RegisteredProject, String>()
     if (matches.isEmpty()) {
-      if (supervisor.listProjects().isEmpty()) {
-        return PreviewNameResolution.Missing(
-          "no project registered; call register_project with the Gradle build's path"
-        )
+      if (scope == null) {
+        pendingBuilds.also { pendingBuilds = emptyList() }.forEach { registerQuietly(it) }
       }
-      spawnUndiscoveredModules()
-      matches = previewNameMatches(trimmed)
+      if (supervisor.listProjects().isEmpty()) {
+        return PreviewNameResolution.Missing(notRegisteredMessage())
+      }
+      unprepared = prepareProjects(scope, progress)
+      spawnUndiscoveredModules(scope)
+      matches = previewNameMatches(trimmed, scope)
+    }
+    if (matches.isEmpty() && unprepared.isNotEmpty()) {
+      // Never "no preview matches" for a build that could not even be discovered.
+      return PreviewNameResolution.Missing(
+        "project not prepared: " +
+          unprepared.entries.joinToString("; ") { (project, reason) ->
+            if (unprepared.size == 1) reason else "${project.path}: $reason"
+          }
+      )
     }
     if (matches.isEmpty()) {
       val candidates = closePreviewNames(trimmed)
@@ -2704,9 +2858,10 @@ class DaemonMcpServer(
   }
 
   /** Matching URIs: an exact (non-variant) match first, then in URI order. */
-  private fun previewNameMatches(name: String): List<String> {
+  private fun previewNameMatches(name: String, scope: Set<WorkspaceId>? = null): List<String> {
     fun matchesName(id: String) = id == name || id.endsWith(".$name")
     return catalog
+      .filter { (addr, _) -> scope == null || addr.workspaceId in scope }
       .flatMap { (addr, byId) ->
         byId.values.mapNotNull { entry ->
           val exact = matchesName(entry.fqn)
@@ -2758,21 +2913,24 @@ class DaemonMcpServer(
   /**
    * Starts each registered module's daemon that is not running; its discovery seeds the catalog.
    */
-  private fun spawnUndiscoveredModules() {
-    supervisor.listProjects().forEach { project ->
-      val modules =
-        synchronized(project.knownModules) { project.knownModules.toSet() } +
-          runCatching { DescriptorProvider.indexDescriptorsByModulePath(project.path).keys }
-            .getOrDefault(emptySet())
-      modules
-        .filterNot { project.daemons.containsKey(it) }
-        .forEach { module ->
-          runCatching { supervisor.daemonFor(project.workspaceId, module) }
-            .onFailure {
-              System.err.println("render_preview: could not start $module: ${it.message}")
-            }
-        }
-    }
+  private fun spawnUndiscoveredModules(scope: Set<WorkspaceId>? = null) {
+    supervisor
+      .listProjects()
+      .filter { scope == null || it.workspaceId in scope }
+      .forEach { project ->
+        val modules =
+          synchronized(project.knownModules) { project.knownModules.toSet() } +
+            runCatching { DescriptorProvider.indexDescriptorsByModulePath(project.path).keys }
+              .getOrDefault(emptySet())
+        modules
+          .filterNot { project.daemons.containsKey(it) }
+          .forEach { module ->
+            runCatching { supervisor.daemonFor(project.workspaceId, module) }
+              .onFailure {
+                System.err.println("render_preview: could not start $module: ${it.message}")
+              }
+          }
+      }
   }
 
   private sealed interface PreviewCard {
@@ -3081,10 +3239,12 @@ class DaemonMcpServer(
   private suspend fun renderPreviewChoosingVariant(
     session: Session,
     args: JsonObject,
+    scope: Set<WorkspaceId>? = null,
+    progress: (String) -> Unit = {},
   ): CallToolResult {
     val previewName = args["preview"]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() }
     if (args["uri"] != null || previewName == null) return toolRenderPreview(session, args)
-    val resolved = resolvePreviewName(previewName)
+    val resolved = resolvePreviewName(previewName, scope, progress)
     if (resolved !is PreviewNameResolution.Found || resolved.others.isEmpty()) {
       return toolRenderPreview(session, args, resolved)
     }
@@ -6478,8 +6638,9 @@ class DaemonMcpServer(
     private const val MAX_CARD_RESULT_BYTES: Int = 500_000
 
     /** A directory holding one of these is a Gradle build the server may auto-register. */
-    private val GRADLE_BUILD_FILES =
-      listOf("settings.gradle.kts", "settings.gradle", "build.gradle.kts", "build.gradle")
+    /** Tools that take a `project` path and register its build on the fly. */
+    private val PROJECT_ARGUMENT_TOOLS =
+      setOf("render_preview", "render_matrix", "find_previews_for_file", "list_previews")
 
     /** Short `initialize` instructions for the local server (#1163, #1165). */
     internal const val LOCAL_INSTRUCTIONS: String =
