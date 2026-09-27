@@ -158,6 +158,8 @@ internal object ServeUiBuilderGrantScope {
       is UiBuilderServiceRequest.DeleteDesign -> designId
       is UiBuilderServiceRequest.ListRevisions -> designId
       is UiBuilderServiceRequest.RestoreRevision -> designId
+      is UiBuilderServiceRequest.MoveDesignHome -> designId
+      is UiBuilderServiceRequest.ReplaceDesignDocument -> designId
       // A new design belongs to whoever creates it; under a limited grant that is the holder.
       is UiBuilderServiceRequest.CreateDesign,
       is UiBuilderServiceRequest.ExportDocument,

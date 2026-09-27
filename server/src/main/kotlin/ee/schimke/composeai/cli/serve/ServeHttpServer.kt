@@ -185,6 +185,8 @@ private val UI_BUILDER_ASSET_EXTENSIONS =
 class ServeHttpServer(
   private val host: String,
   requestedPort: Int,
+  /** Public origin an imported or newly created design should retain as its canonical home. */
+  private val canonicalOrigin: String? = null,
   /** The operator's own browse token (`--token`). Read through [serverToken]. */
   token: String,
   private val sessions: ServeSessionRegistry,
@@ -751,6 +753,22 @@ class ServeHttpServer(
   /** The actual bound port — may differ from the requested one if it was taken (auto-picked). */
   val port: Int = pickPort(host, requestedPort, portRange)
 
+  /**
+   * The server home a created or imported design is stamped with, or null to stamp none.
+   *
+   * Only an origin the operator stated counts (`--ui-builder-public-origin`, else
+   * `--github-auth-callback-base-url`). A bind address is not an identity: an auto-picked port
+   * changes on restart and two local servers on one port would each claim the other's designs, so a
+   * server without a configured origin leaves new designs unhomed, as they were before homes.
+   */
+  private val canonicalServerOriginValue: String? = canonicalOrigin?.let { configured ->
+    requireNotNull(normalizeServerHomeUrl(configured)) {
+      "the configured public origin '$configured' is not an absolute HTTP(S) URL"
+    }
+  }
+
+  private fun canonicalServerOrigin(): String? = canonicalServerOriginValue
+
   /** Concurrent-render slot count (the `/render` load-shed bound), surfaced on `/status`. */
   private val renderSlots: Int = maxConcurrentRenders.coerceAtLeast(1)
 
@@ -775,6 +793,7 @@ class ServeHttpServer(
           designService?.let {
             ServeUiBuilderMcp(
               it,
+              ::canonicalServerOrigin,
               uiBuilderNativePreview,
               uiBuilderCommentStore,
               references = uiBuilderReferenceStore,
@@ -1184,6 +1203,7 @@ class ServeHttpServer(
           installUiBuilderRoutes(
             designService,
             sameOriginUiBuilderAuthorization,
+            ::canonicalServerOrigin,
             uiBuilderNativePreview,
             uiBuilderInlineCapture,
             // The native pane's live lane, on a host that has Stage-2 redemption. The token the
@@ -5958,8 +5978,11 @@ class ServeHttpServer(
     }
     val outcome =
       withContext(Dispatchers.IO) {
-        ServeUiBuilderCreate(designService!!, uiBuilderDir!!)
-          .install(actor = AuthenticatedUiBuilderActor(ADMIN_LIBRARY_ACTOR), document = document)
+        ServeUiBuilderCreate(designService!!, uiBuilderDir!!, canonicalServerOrigin())
+          .installPublished(
+            actor = AuthenticatedUiBuilderActor(ADMIN_LIBRARY_ACTOR),
+            document = document,
+          )
       }
     call.response.headers.append(HttpHeaders.CacheControl, "no-store")
     if (outcome is ServeUiBuilderCreate.Outcome.Created) {
@@ -14132,7 +14155,7 @@ class ServeHttpServer(
       }
     val outcome =
       withContext(Dispatchers.IO) {
-        ServeUiBuilderCreate(service, dir)
+        ServeUiBuilderCreate(service, dir, canonicalServerOrigin())
           .create(
             actor = actor,
             catalogSystemId = catalog,
@@ -14235,9 +14258,12 @@ class ServeHttpServer(
             ?: "${source.title.ifBlank { sourceDesignId }} copy",
         createdAtEpochMillis = null,
         updatedAtEpochMillis = null,
+        home = null,
       )
     val outcome =
-      withContext(Dispatchers.IO) { ServeUiBuilderCreate(service, dir).install(actor, copy) }
+      withContext(Dispatchers.IO) {
+        ServeUiBuilderCreate(service, dir, canonicalServerOrigin()).install(actor, copy)
+      }
     when (outcome) {
       is ServeUiBuilderCreate.Outcome.Created,
       is ServeUiBuilderCreate.Outcome.AlreadyExists -> {
@@ -14466,10 +14492,13 @@ class ServeHttpServer(
         title = "${source.title.ifBlank { designId }} (from revision $revision)",
         createdAtEpochMillis = null,
         updatedAtEpochMillis = null,
+        home = null,
       )
     when (
       val outcome =
-        withContext(Dispatchers.IO) { ServeUiBuilderCreate(service, dir).install(actor, fork) }
+        withContext(Dispatchers.IO) {
+          ServeUiBuilderCreate(service, dir, canonicalServerOrigin()).install(actor, fork)
+        }
     ) {
       is ServeUiBuilderCreate.Outcome.Created -> {
         call.response.headers.append(

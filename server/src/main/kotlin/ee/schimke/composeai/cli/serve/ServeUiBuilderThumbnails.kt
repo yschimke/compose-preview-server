@@ -147,6 +147,9 @@ internal constructor(
             request is UiBuilderServiceRequest.ApplyOperation ->
               warm(request.submission.designId, call.actor)
             request is UiBuilderServiceRequest.RestoreRevision -> warm(request.designId, call.actor)
+            request is UiBuilderServiceRequest.MoveDesignHome -> warm(request.designId, call.actor)
+            request is UiBuilderServiceRequest.ReplaceDesignDocument ->
+              warm(request.designId, call.actor)
           }
           return response
         }

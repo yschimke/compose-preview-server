@@ -10,6 +10,7 @@ import ee.schimke.composeai.uibuilder.protocol.DesignAccessResponseV1
 import ee.schimke.composeai.uibuilder.protocol.DesignAccessRoleV1
 import ee.schimke.composeai.uibuilder.protocol.DesignDocumentV1
 import ee.schimke.composeai.uibuilder.protocol.DesignEnvironmentV1
+import ee.schimke.composeai.uibuilder.protocol.DesignHomeV1
 import ee.schimke.composeai.uibuilder.protocol.DesignMutationV1
 import ee.schimke.composeai.uibuilder.protocol.DesignNodeV1
 import ee.schimke.composeai.uibuilder.protocol.DesignsResponseV1
@@ -47,6 +48,7 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -88,6 +90,41 @@ class ServeUiBuilderMcpIntegrationTest {
   }
 
   @Test
+  fun `initialize states the canonical home rules when the builder is present`() {
+    val server = start()
+
+    val instructions =
+      post(
+          server,
+          """{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"${ServeCatalogMcp.MCP_PROTOCOL_VERSION}"}}""",
+        )["result"]!!
+        .jsonObject["instructions"]!!
+        .jsonPrimitive
+        .content
+
+    assertTrue(instructions.contains("`home` is canonical"), instructions)
+    assertTrue(instructions.contains("explicitly choosing"), instructions)
+    assertFalse(instructions.contains("pending comments"), instructions)
+  }
+
+  @Test
+  fun `initialize states the discussion rules when comments are supported`() {
+    val server = start(withComments = true)
+
+    val instructions =
+      post(
+          server,
+          """{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"${ServeCatalogMcp.MCP_PROTOCOL_VERSION}"}}""",
+        )["result"]!!
+        .jsonObject["instructions"]!!
+        .jsonPrimitive
+        .content
+
+    assertTrue(instructions.contains("pending comments"), instructions)
+    assertTrue(instructions.contains("never replaces that discussion"), instructions)
+  }
+
+  @Test
   fun `an agent creates, edits and exports a design without touching a browser`() {
     val server = start()
 
@@ -120,6 +157,10 @@ class ServeUiBuilderMcpIntegrationTest {
         )
       )
     assertEquals("agent-screen", snapshot.snapshot.designId)
+    assertEquals(
+      DesignHomeV1.Server(PUBLIC_ORIGIN, "agent-screen"),
+      snapshot.snapshot.state.document.home,
+    )
     val revision = snapshot.snapshot.state.document.revision
 
     // 4. The edit: a second text in the column, which is "add a component to a container" — the
@@ -159,11 +200,72 @@ class ServeUiBuilderMcpIntegrationTest {
         ServeUiBuilderMcp.EXPORT,
         """{"designId":"agent-screen","format":"compose"}""",
       )
-    val artifact = assertIs<ExportResponseV1>(response(exported)).artifact
+    val artifact = assertIs<ExportResponseV1>(response(exported), exported).artifact
     assertEquals(emptyList(), artifact.diagnostics, artifact.content)
     assertTrue(artifact.content.contains("""Text(text = "Opening keynote""""), artifact.content)
     assertTrue(artifact.content.contains("""Text(text = "Two sessions today""""), artifact.content)
     assertTrue(artifact.content.contains("Column {"), artifact.content)
+    assertTrue(
+      artifact.content.contains("// Canonical home: server $PUBLIC_ORIGIN design agent-screen."),
+      artifact.content,
+    )
+  }
+
+  @Test
+  fun `MCP refuses a create onto this server's canonical design with an apply hint`() {
+    val server = start()
+    val initial =
+      """{"designId":"agent-screen","document":${json.encodeToString(DesignDocumentV1.serializer(), document())}}"""
+    envelope(server, ServeUiBuilderMcp.CREATE_DESIGN, initial)
+
+    val canonical =
+      document()
+        .copy(
+          home =
+            DesignHomeV1.Server(
+              // Equivalent to the configured origin once normalized.
+              "HTTPS://Designs.Example:443/",
+              "agent-screen",
+            )
+        )
+    val reimport =
+      """{"designId":"agent-screen","document":${json.encodeToString(DesignDocumentV1.serializer(), canonical)}}"""
+
+    val duplicate = call(server, ServeUiBuilderMcp.CREATE_DESIGN, reimport)
+    assertEquals(true, duplicate["isError"]?.jsonPrimitive?.content?.toBoolean())
+    val text = duplicate["content"]!!.jsonArray.first().jsonObject["text"]!!.jsonPrimitive.content
+    assertEquals(
+      "agent-screen already lives on this server; apply changes to the original instead",
+      text,
+    )
+  }
+
+  @Test
+  fun `MCP refuses to adopt a repository or foreign server home implicitly`() {
+    val server = start()
+    for ((designId, home) in
+      listOf(
+        "repo-owned" to DesignHomeV1.Repo("designs/repo-owned.uid"),
+        "foreign-owned" to DesignHomeV1.Server("https://other.example", "foreign-owned"),
+      )) {
+      val supplied = document().copy(id = designId, home = home)
+      val result =
+        call(
+          server,
+          ServeUiBuilderMcp.CREATE_DESIGN,
+          """{"designId":"$designId","document":${json.encodeToString(DesignDocumentV1.serializer(), supplied)}}""",
+        )
+      assertEquals(true, result["isError"]?.jsonPrimitive?.content?.toBoolean())
+      assertTrue(
+        result["content"]!!
+          .jsonArray
+          .first()
+          .jsonObject["text"]!!
+          .jsonPrimitive
+          .content
+          .contains("move it explicitly")
+      )
+    }
   }
 
   @Test
@@ -821,6 +923,89 @@ class ServeUiBuilderMcpIntegrationTest {
   }
 
   @Test
+  fun `an agent replaces a document and moves its canonical home with idempotent retries`() {
+    val server = start()
+    envelope(
+      server,
+      ServeUiBuilderMcp.CREATE_DESIGN,
+      """{"designId":"authoritative","document":${json.encodeToString(DesignDocumentV1.serializer(), document().copy(id = "authoritative"))}}""",
+    )
+    fun snapshot() =
+      assertIs<SnapshotResponseV1>(
+          response(
+            envelope(
+              server,
+              ServeUiBuilderMcp.GET_DESIGN,
+              """{"designId":"authoritative","includeCatalog":true}""",
+            )
+          )
+        )
+        .snapshot
+
+    val initial = snapshot().state.document
+    val replacement = initial.copy(title = "Saved from a temporary copy")
+    val replaceArguments =
+      """{"designId":"authoritative","operationId":"replace-1","baseRevision":0,"document":${json.encodeToString(DesignDocumentV1.serializer(), replacement)}}"""
+    val replaced =
+      assertIs<AcceptedOutcomeV1>(
+        assertIs<OperationOutcomeResponseV1>(
+            response(envelope(server, ServeUiBuilderMcp.REPLACE_DESIGN_DOCUMENT, replaceArguments))
+          )
+          .outcome
+      )
+    assertEquals(1, replaced.committedRevision)
+    assertEquals("Saved from a temporary copy", snapshot().state.document.title)
+    // A retry with the same operation id returns the original outcome without a second revision.
+    val replaceReplay =
+      assertIs<AcceptedOutcomeV1>(
+        assertIs<OperationOutcomeResponseV1>(
+            response(envelope(server, ServeUiBuilderMcp.REPLACE_DESIGN_DOCUMENT, replaceArguments))
+          )
+          .outcome
+      )
+    assertEquals(replaced.copy(idempotentReplay = true), replaceReplay)
+    assertEquals(1, snapshot().state.document.revision)
+
+    val sourceHome = assertNotNull(snapshot().state.document.home)
+    val targetHome = DesignHomeV1.Repo("designs/authoritative.uid")
+    val moveArguments =
+      """{"designId":"authoritative","operationId":"move-1","baseRevision":1,"sourceHome":${json.encodeToString(DesignHomeV1.serializer(), sourceHome)},"targetHome":${json.encodeToString(DesignHomeV1.serializer(), targetHome)}}"""
+    val moved =
+      assertIs<AcceptedOutcomeV1>(
+        assertIs<OperationOutcomeResponseV1>(
+            response(envelope(server, ServeUiBuilderMcp.MOVE_DESIGN_HOME, moveArguments))
+          )
+          .outcome
+      )
+    assertEquals(2, moved.committedRevision)
+    assertEquals(targetHome, snapshot().state.document.home)
+    val moveReplay =
+      assertIs<AcceptedOutcomeV1>(
+        assertIs<OperationOutcomeResponseV1>(
+            response(envelope(server, ServeUiBuilderMcp.MOVE_DESIGN_HOME, moveArguments))
+          )
+          .outcome
+      )
+    assertEquals(moved.copy(idempotentReplay = true), moveReplay)
+    assertEquals(2, snapshot().state.document.revision)
+
+    val stale =
+      assertIs<RejectedOutcomeV1>(
+        assertIs<OperationOutcomeResponseV1>(
+            response(
+              envelope(
+                server,
+                ServeUiBuilderMcp.MOVE_DESIGN_HOME,
+                """{"designId":"authoritative","operationId":"stale-move","baseRevision":1,"sourceHome":${json.encodeToString(DesignHomeV1.serializer(), sourceHome)},"targetHome":${json.encodeToString(DesignHomeV1.serializer(), targetHome)}}""",
+              )
+            )
+          )
+          .outcome
+      )
+    assertEquals(RejectionCodeV1.REVISION_MISMATCH, stale.code)
+  }
+
+  @Test
   fun `an agent renames its design and deletes it when it is done`() {
     val server = start()
     envelope(
@@ -902,6 +1087,20 @@ class ServeUiBuilderMcpIntegrationTest {
     val without = tools(start(withUiBuilder = false))
     assertTrue(ServeUiBuilderMcp.TOOL_NAMES.none { it in without }, without.toString())
     assertTrue("render_preview" in without, without.toString())
+  }
+
+  @Test
+  fun `home mutation schema advertises the closed server and repo variants`() {
+    val move =
+      toolDefinitions(start()).single {
+        it["name"]!!.jsonPrimitive.content == ServeUiBuilderMcp.MOVE_DESIGN_HOME
+      }
+    val properties = move["inputSchema"]!!.jsonObject["properties"]!!.jsonObject
+    val target = properties["targetHome"]!!.jsonObject
+    val sourceChoices = properties["sourceHome"]!!.jsonObject["anyOf"]!!.jsonArray
+    assertEquals("null", sourceChoices.first().jsonObject["type"]!!.jsonPrimitive.content)
+    assertHomeSchema(sourceChoices.last().jsonObject)
+    assertHomeSchema(target)
   }
 
   @Test
@@ -1046,6 +1245,7 @@ class ServeUiBuilderMcpIntegrationTest {
     recordFile: File? = ScreenGeneratorScreenFixture.componentsFile(),
     catalogSystemId: String = CATALOG_SYSTEM_ID,
     withRemoteExports: Boolean = false,
+    withComments: Boolean = false,
   ): RunningServer {
     val registry = ServeSessionRegistry(open = { null })
     val service =
@@ -1085,6 +1285,7 @@ class ServeUiBuilderMcpIntegrationTest {
       ServeHttpServer(
           host = "127.0.0.1",
           requestedPort = 0,
+          canonicalOrigin = PUBLIC_ORIGIN,
           token = OPERATOR_TOKEN,
           sessions = registry,
           defaultSessionId = "unused",
@@ -1092,6 +1293,9 @@ class ServeUiBuilderMcpIntegrationTest {
           machineAuthorization = ServeMachineAuthorization(OPERATOR_TOKEN, null, null),
           uiBuilderService = service,
           uiBuilderAssets = if (withAssets) service else null,
+          uiBuilderCommentStore =
+            if (withComments) ServeUiBuilderCommentStore(stateDirectory.resolve("comments"))
+            else null,
           uiBuilderAuthorization =
             if (withAuthorization)
               ServeUiBuilderAuthorization.fromServeIdentity(OPERATOR_TOKEN, null, null)
@@ -1121,10 +1325,32 @@ class ServeUiBuilderMcpIntegrationTest {
     json.decodeFromString(McpResponseEnvelopeV1.serializer(), envelope).response
 
   private fun tools(server: RunningServer): List<String> =
+    toolDefinitions(server).map { it["name"]!!.jsonPrimitive.content }
+
+  private fun toolDefinitions(server: RunningServer): List<JsonObject> =
     post(server, """{"jsonrpc":"2.0","id":1,"method":"tools/list"}""")["result"]!!
       .jsonObject["tools"]!!
       .jsonArray
-      .map { it.jsonObject["name"]!!.jsonPrimitive.content }
+      .map { it.jsonObject }
+
+  private fun assertHomeSchema(schema: JsonObject) {
+    val variants = schema["oneOf"]!!.jsonArray.map { it.jsonObject }
+    assertEquals(
+      listOf("server", "repo"),
+      variants.map { variant ->
+        variant["properties"]!!.jsonObject["kind"]!!.jsonObject["const"]!!.jsonPrimitive.content
+      },
+    )
+    assertEquals(
+      setOf("kind", "url", "designId"),
+      variants.first()["required"]!!.jsonArray.map { it.jsonPrimitive.content }.toSet(),
+    )
+    assertEquals(
+      setOf("kind", "path"),
+      variants.last()["required"]!!.jsonArray.map { it.jsonPrimitive.content }.toSet(),
+    )
+    variants.forEach { assertEquals("false", it["additionalProperties"]!!.jsonPrimitive.content) }
+  }
 
   private fun post(server: RunningServer, body: String) =
     client
@@ -1204,6 +1430,7 @@ class ServeUiBuilderMcpIntegrationTest {
         byteArrayOf(8, 6, 0, 0, 0) +
         ByteArray(4)
     const val OPERATOR_TOKEN = "ui-builder-mcp-operator-token"
+    const val PUBLIC_ORIGIN = "https://designs.example"
     const val CATALOG_SYSTEM_ID = "m3-catalog"
     val JSON_MEDIA_TYPE = "application/json".toMediaType()
   }

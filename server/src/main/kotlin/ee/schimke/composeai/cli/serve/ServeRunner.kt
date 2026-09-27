@@ -3592,6 +3592,11 @@ public class ServeRunner(
       ServeHttpServer(
         host = host,
         requestedPort = requestedPort,
+        // Only an origin the operator stated is an identity a copy can point back at. An unusable
+        // callback base URL only costs the home stamp here; OAuth reports it on its own.
+        canonicalOrigin =
+          uiBuilderPublicOrigin
+            ?: githubAuthCallbackBaseUrl?.takeIf { it.isNotBlank() }?.let(::normalizeServerHomeUrl),
         token = token,
         sessions = registry,
         defaultSessionId = defaultSessionId,

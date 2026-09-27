@@ -478,6 +478,15 @@ public interface ServeOptions {
   public val uiBuilderDefaultVisibility: UiBuilderDefaultVisibility
     get() = UiBuilderDefaultVisibility.PRIVATE
 
+  /**
+   * `--ui-builder-public-origin <url>`: the stable public origin this server's UI-builder designs
+   * are canonical at, recorded as their `home`. Unset falls back to
+   * `--github-auth-callback-base-url`; with neither, designs are left unhomed rather than stamped
+   * with a bind address that is not an identity.
+   */
+  public val uiBuilderPublicOrigin: String?
+    get() = null
+
   /** Optional durable aggregate counters. Null keeps local serve sessions in-memory only. */
   public val engagementFile: File?
 
