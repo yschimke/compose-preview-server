@@ -81,6 +81,13 @@ class DaemonSupervisor(
    */
   private val defaultExtensions: List<String> = emptyList(),
   private val fileSystem: FileSystem = SystemFileSystem,
+  /**
+   * Where registrations live beyond this object: the id → path map [project] and [daemonFor] fall
+   * back to when asked for an id they do not hold. In memory by default; [DaemonMcpMain] passes the
+   * persistent one so a registration survives a restart and is shared with sibling server
+   * processes.
+   */
+  val workspaceStore: WorkspaceStore = WorkspaceStore(file = null),
 ) {
 
   init {
@@ -126,6 +133,7 @@ class DaemonSupervisor(
           knownModules = knownModules.toMutableList(),
         )
       }
+    workspaceStore.remember(workspaceId.value, canonical, name)
     // Idempotent: merge module hints if the second call learned more.
     if (knownModules.isNotEmpty()) {
       synchronized(project.knownModules) {
@@ -140,6 +148,7 @@ class DaemonSupervisor(
    * an unknown id is a no-op.
    */
   fun unregisterProject(workspaceId: WorkspaceId) {
+    workspaceStore.forget(workspaceId.value)
     val project = projects.remove(workspaceId) ?: return
     project.daemons.values.forEach { runCatching { it.shutdown() } }
     project.daemons.clear()
@@ -147,7 +156,43 @@ class DaemonSupervisor(
 
   fun listProjects(): List<RegisteredProject> = projects.values.toList()
 
-  fun project(workspaceId: WorkspaceId): RegisteredProject? = projects[workspaceId]
+  /**
+   * The project for [workspaceId], registering it again from [workspaceStore] when this supervisor
+   * does not hold it (a restart, or a registration made by another server process): a known id
+   * never answers "workspace not registered".
+   */
+  fun project(workspaceId: WorkspaceId): RegisteredProject? =
+    projects[workspaceId] ?: restore(workspaceId)
+
+  /**
+   * Re-registers every stored workspace whose path is one of [dirs], lies inside one, or holds one:
+   * after a restart, the client's roots (or the working directory) bring their builds back without
+   * a `register_project`. Returns the projects restored or already live.
+   */
+  fun restoreMatching(dirs: List<File>): List<RegisteredProject> {
+    val wanted = dirs.map { runCatching { it.canonicalFile }.getOrDefault(it.absoluteFile) }
+    return workspaceStore
+      .all()
+      .filter { entry ->
+        val path = File(entry.path)
+        wanted.any { path.startsWith(it) || it.startsWith(path) }
+      }
+      .mapNotNull { project(WorkspaceId(it.id)) }
+  }
+
+  /** Re-registers a stored id from its path, under the same id; null when unknown or gone. */
+  private fun restore(workspaceId: WorkspaceId): RegisteredProject? {
+    val entry = workspaceStore.get(workspaceId.value) ?: return null
+    val dir = File(entry.path).takeIf(File::isDirectory) ?: return null
+    return projects.computeIfAbsent(workspaceId) {
+      RegisteredProject(
+        workspaceId = workspaceId,
+        rootProjectName = entry.name?.takeIf { it.isNotBlank() } ?: dir.name,
+        path = runCatching { dir.canonicalFile }.getOrDefault(dir.absoluteFile),
+        knownModules = mutableListOf(),
+      )
+    }
+  }
 
   /**
    * Forgets the [SupervisedDaemon] for [workspaceId] + [modulePath] and tears down any peer
@@ -176,7 +221,8 @@ class DaemonSupervisor(
    * cold-start time (3-10s for Robolectric, ~600ms for desktop).
    */
   fun daemonFor(workspaceId: WorkspaceId, modulePath: String): SupervisedDaemon {
-    val project = projects[workspaceId] ?: error("workspace not registered: $workspaceId")
+    val project = project(workspaceId) ?: error("workspace not registered: $workspaceId")
+    workspaceStore.touch(workspaceId.value)
     return project.daemons.computeIfAbsent(modulePath) { spawn(project, modulePath) }
   }
 

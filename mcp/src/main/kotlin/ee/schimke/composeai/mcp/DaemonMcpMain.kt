@@ -65,6 +65,7 @@ object DaemonMcpMain {
         descriptorProvider = DescriptorProvider.readingFromDisk(),
         clientFactory = SubprocessDaemonClientFactory(),
         replicasPerDaemon = replicasPerDaemon,
+        workspaceStore = WorkspaceStore(WorkspaceStore.defaultFile()),
       )
     val server =
       if (storybookProfile) {
