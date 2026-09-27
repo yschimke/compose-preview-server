@@ -219,6 +219,23 @@ class DaemonMcpServer(
   private val compileWorkSinceRender = ConcurrentHashMap<DaemonAddr, CompileWork>()
 
   /**
+   * Per workspace, the cached source walk that tells a render whether anything changed since the
+   * module last compiled, so an edit nobody notified us about still recompiles first.
+   */
+  private val sourceTrees = ConcurrentHashMap<WorkspaceId, SourceTree>()
+
+  /** The [SourceTree.generation] each module's last recompile covered. */
+  private val compiledGeneration = ConcurrentHashMap<DaemonAddr, Long>()
+
+  /**
+   * Why a module's pending sources are pending: `notify` or `detected`; see [CompileWork.trigger].
+   */
+  private val pendingTrigger = ConcurrentHashMap<DaemonAddr, String>()
+
+  /** The last change-detection pass per module, reported as `_meta.work.scan`. */
+  private val lastScan = ConcurrentHashMap<DaemonAddr, SourceTree.Refresh>()
+
+  /**
    * The latest edit→render cycle's work per preview, returned as `render_preview`'s `_meta.work`.
    */
   private val lastCycleWork = ConcurrentHashMap<PreviewIdKey, EditCycleWork>()
@@ -674,6 +691,7 @@ class DaemonMcpServer(
   ): RenderOutcome.Finished {
     val daemon = supervisor.daemonFor(uri.workspaceId, uri.modulePath)
     ensureSourceFreshBeforeRender(uri, daemon)
+    detectSourceChanges(daemon)
     recompilePendingSources(daemon)
     val key = PreviewIdKey(uri.workspaceId, uri.modulePath, uri.previewFqn)
     val renderStartedAt = System.nanoTime()
@@ -753,6 +771,7 @@ class DaemonMcpServer(
             compile = compileWorkSinceRender.remove(DaemonAddr(uri.workspaceId, uri.modulePath)),
             renderMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - renderStartedAt),
             daemonTrace = outcome.daemonTrace,
+            scan = lastScan[DaemonAddr(uri.workspaceId, uri.modulePath)],
           )
         lastCycleWork[key] = work
         if (work.compile != null) {
@@ -900,6 +919,10 @@ class DaemonMcpServer(
     synchronized(compileLocks.computeIfAbsent(addr) { Any() }) {
       val sources =
         pendingSources.remove(addr)?.toList()?.sorted()?.takeIf { it.isNotEmpty() } ?: return null
+      val trigger = pendingTrigger.remove(addr) ?: TRIGGER_DETECTED
+      // Whatever the outcome, this compile answers every change seen so far: a failure is reported
+      // as stale until the next edit, not retried on every render.
+      sourceTrees[daemon.workspaceId]?.let { compiledGeneration[addr] = it.generation }
       val root = supervisor.project(daemon.workspaceId)?.path
       val outcome =
         if (root == null) {
@@ -910,7 +933,7 @@ class DaemonMcpServer(
           runCatching { compiler.compile(root, daemon.modulePath, sources.map(::File)) }
             .getOrElse { SourceCompileOutcome.Failed(it.message ?: it.javaClass.simpleName) }
         }
-      outcome.work?.let { work ->
+      outcome.work?.copy(trigger = trigger)?.let { work ->
         compileWorkSinceRender[addr] = work
         val disallowed = work.disallowedTasks()
         if (disallowed.isNotEmpty()) {
@@ -947,6 +970,31 @@ class DaemonMcpServer(
       }
       return outcome
     }
+  }
+
+  /**
+   * Queues a recompile of [daemon]'s module when any source in its build changed since the module
+   * last compiled, whether or not anyone called `notify_file_changed`: host edit tools never do.
+   * The check is a stat pass over [SourceTree]'s cache, so an unchanged build costs no walk.
+   */
+  private fun detectSourceChanges(daemon: SupervisedDaemon) {
+    if (sourceCompiler == null) return
+    val root = supervisor.project(daemon.workspaceId)?.path ?: return
+    val addr = DaemonAddr(daemon.workspaceId, daemon.modulePath)
+    val tree = sourceTrees.computeIfAbsent(daemon.workspaceId) { SourceTree(root) }
+    val refresh = runCatching {
+      tree.refresh()
+    }
+      .getOrElse {
+        return
+      }
+    lastScan[addr] = refresh
+    val compiled = compiledGeneration.getOrPut(addr) { 0L }
+    if (tree.generation <= compiled) return
+    val changed = tree.changedSince(compiled).map { it.absolutePath }
+    if (changed.isEmpty()) return
+    pendingSources.computeIfAbsent(addr) { ConcurrentHashMap.newKeySet() }.addAll(changed)
+    pendingTrigger.putIfAbsent(addr, TRIGGER_DETECTED)
   }
 
   /** One line for a render result when [uri]'s module may be showing code older than its source. */
@@ -2700,12 +2748,18 @@ class DaemonMcpServer(
    * a server started from an unrelated directory stays empty and the tools keep their errors.
    */
   private suspend fun autoRegisterWorkspace(session: Session) {
-    if (supervisor.listProjects().isNotEmpty()) return
-    val roots = (session as? McpSession)?.rootDirectories().orEmpty()
-    val candidates = roots.ifEmpty { listOfNotNull(workingDirectory) }
-    lastTried = Tried(candidates, fromRoots = roots.isNotEmpty())
+    val tried = sessionRoots(session)
+    val candidates = tried.dirs
+    preferredRoots = candidates
+    if (supervisor.listProjects().isNotEmpty()) {
+      registerNestedBuilds(candidates)
+      return
+    }
+    lastTried = tried
     // After a restart, a build registered before (workspaces.json) comes back under its old id.
-    if (supervisor.restoreMatching(candidates).isNotEmpty()) {
+    if (
+      supervisor.listProjects().isEmpty() && supervisor.restoreMatching(candidates).isNotEmpty()
+    ) {
       sessions.forEach { it.notifyResourceListChanged() }
       return
     }
@@ -2830,6 +2884,53 @@ class DaemonMcpServer(
       .toMap()
   }
 
+  /** The client's MCP roots, else [workingDirectory]; asked once per session. */
+  private suspend fun sessionRoots(session: Session): Tried {
+    sessionRootsCache[session]?.let {
+      return it
+    }
+    val roots = (session as? McpSession)?.rootDirectories().orEmpty()
+    val tried =
+      Tried(roots.ifEmpty { listOfNotNull(workingDirectory) }, fromRoots = roots.isNotEmpty())
+    sessionRootsCache[session] = tried
+    return tried
+  }
+
+  private val sessionRootsCache = ConcurrentHashMap<Session, Tried>()
+
+  /**
+   * Beside builds already registered, registers a session root's build that is nested in one of
+   * them or holds one: a git worktree under `.claude/worktrees/`, where the edits land in the
+   * worktree's copy and rendering the registered checkout would show the unedited tree.
+   */
+  private fun registerNestedBuilds(candidates: List<File>) {
+    val registered =
+      supervisor.listProjects().map { runCatching { it.path.canonicalFile }.getOrDefault(it.path) }
+    candidates
+      .flatMap { ProjectDiscovery.buildsFor(it) }
+      .distinct()
+      .filter { build ->
+        build !in registered && registered.any { build.startsWith(it) || it.startsWith(build) }
+      }
+      .forEach { registerQuietly(it) }
+  }
+
+  /**
+   * The latest session's roots. When a preview name matches in several registered builds (a
+   * checkout and its worktree), the build containing these wins, the innermost first.
+   */
+  @Volatile private var preferredRoots: List<File> = emptyList()
+
+  /** How strongly [workspaceRoot] contains one of [preferredRoots]: its path length, else -1. */
+  private fun rootPreference(workspaceRoot: File?): Int {
+    val root = workspaceRoot?.let { runCatching { it.canonicalFile }.getOrDefault(it) } ?: return -1
+    return if (
+      preferredRoots.any { runCatching { it.canonicalFile }.getOrDefault(it).startsWith(root) }
+    )
+      root.path.length
+    else -1
+  }
+
   private sealed interface PreviewNameResolution {
     data class Found(val uri: String, val others: List<String>) : PreviewNameResolution
 
@@ -2902,21 +3003,28 @@ class DaemonMcpServer(
 
   private fun plural(count: Int, noun: String) = if (count == 1) "1 $noun" else "$count ${noun}s"
 
-  /** Matching URIs: an exact (non-variant) match first, then in URI order. */
+  /**
+   * Matching URIs: an exact (non-variant) match first, then the build that holds the session's
+   * roots (so a worktree beats the checkout it lives in), then in URI order.
+   */
   private fun previewNameMatches(name: String, scope: Set<WorkspaceId>? = null): List<String> {
     fun matchesName(id: String) = id == name || id.endsWith(".$name")
+    data class Match(val exact: Boolean, val preference: Int, val uri: String)
     return catalog
       .filter { (addr, _) -> scope == null || addr.workspaceId in scope }
       .flatMap { (addr, byId) ->
+        val preference = rootPreference(supervisor.project(addr.workspaceId)?.path)
         byId.values.mapNotNull { entry ->
           val exact = matchesName(entry.fqn)
           if (!exact && previewBaseIds(entry).none(::matchesName)) return@mapNotNull null
           val uri = PreviewUri(addr.workspaceId, addr.modulePath, entry.fqn, entry.config).toUri()
-          exact to uri
+          Match(exact, preference, uri)
         }
       }
-      .sortedWith(compareBy<Pair<Boolean, String>> { !it.first }.thenBy { it.second })
-      .map { it.second }
+      .sortedWith(
+        compareBy<Match> { !it.exact }.thenByDescending { it.preference }.thenBy { it.uri }
+      )
+      .map { it.uri }
   }
 
   /** The function's own FQN for a variant id such as `…Kt.ListPreview_Devices - Small Round`. */
@@ -5970,6 +6078,25 @@ class DaemonMcpServer(
       .getOrElse { errorCallToolResult("$toolName failed: ${it.message}") }
   }
 
+  /**
+   * The Gradle build [file] belongs to when that is not [project] nor any other registered build:
+   * the nearest ancestor holding a settings file, when [file] lies outside [project]'s root or
+   * under a hidden directory inside it (`.claude/worktrees/<name>/…`). Null otherwise.
+   */
+  private fun otherBuildFor(file: File, project: RegisteredProject): File? {
+    val canonical = runCatching { file.absoluteFile.canonicalFile }.getOrDefault(file.absoluteFile)
+    val root = runCatching { project.path.canonicalFile }.getOrDefault(project.path)
+    val inside = canonical.startsWith(root)
+    val hidden =
+      inside &&
+        canonical.relativeTo(root).invariantSeparatorsPath.split('/').any { it.startsWith(".") }
+    if (inside && !hidden) return null
+    val build = canonical.parentFile?.let(ProjectDiscovery::enclosingBuild) ?: return null
+    val registered =
+      supervisor.listProjects().map { runCatching { it.path.canonicalFile }.getOrDefault(it.path) }
+    return build.takeIf { it !in registered }
+  }
+
   private fun toolNotifyFileChanged(args: JsonObject): CallToolResult {
     val ws =
       args["workspaceId"]?.jsonPrimitive?.contentOrNull
@@ -5981,6 +6108,22 @@ class DaemonMcpServer(
     val path =
       args["path"]?.jsonPrimitive?.contentOrNull
         ?: return errorCallToolResult("notify_file_changed: missing 'path'")
+    File(path)
+      .takeIf(File::isAbsolute)
+      ?.let { otherBuildFor(it, project) }
+      ?.let { build ->
+        // The edit landed in another Gradle build than the one registered, typically a Claude Code
+        // worktree of it: compiling and rendering the registered build would show the unedited
+        // tree. Register the edited build so renders (and `preview` names) resolve to it.
+        val registered = registerProjectAt(build, rootName = null, modules = emptyList())
+        preferredRoots = listOf(build)
+        return textCallToolResult(
+          "edited file $path is not in registered project ${project.rootProjectName} " +
+            "(${project.path}); rendering from ${registered.path} instead: registered it as " +
+            "workspace ${registered.workspaceId.value}. Render its previews by name, or with " +
+            "compose-preview://${registered.workspaceId.value}/… URIs."
+        )
+      }
     val kind =
       when (args["kind"]?.jsonPrimitive?.contentOrNull) {
         "resource" -> FileKind.RESOURCE
@@ -6030,8 +6173,10 @@ class DaemonMcpServer(
       if (daemon.modulePath in compileTargets) {
         pendingSources.computeIfAbsent(addr) { ConcurrentHashMap.newKeySet() }.add(path)
         markSourceSeen(addr, File(path))
+        detectSourceChanges(daemon)
+        pendingTrigger[addr] = TRIGGER_NOTIFY
         val outcome = recompilePendingSources(daemon)
-        outcome?.work?.let { compileWork[daemon.modulePath] = it }
+        outcome?.work?.let { compileWork[daemon.modulePath] = it.copy(trigger = TRIGGER_NOTIFY) }
         when (outcome) {
           is SourceCompileOutcome.Ok ->
             compileLines += "recompiled ${daemon.modulePath} in ${outcome.durationMs}ms"
@@ -6682,6 +6827,12 @@ class DaemonMcpServer(
   }
 
   companion object {
+    /** [CompileWork.trigger]: `notify_file_changed` asked for the recompile. */
+    const val TRIGGER_NOTIFY = "notify"
+
+    /** [CompileWork.trigger]: a render found the change itself. */
+    const val TRIGGER_DETECTED = "detected"
+
     const val MCP_APP_VIEWER_URI: String = "ui://compose-preview/viewer"
     const val MCP_APP_MIME_TYPE: String = "text/html;profile=mcp-app"
     private const val MCP_APP_VIEWER_ASSET: String = "compose-preview-viewer.html"

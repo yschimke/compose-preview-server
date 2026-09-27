@@ -98,6 +98,9 @@ class EditLoopIntegrationTest {
               initScript!!.absolutePath,
               "-Dorg.gradle.unsafe.isolated-projects=false",
               "-Dorg.gradle.isolated-projects=false",
+              // The daemon seeds the server's catalog from the `previews.json` discovery writes;
+              // without it no preview URI ever appears.
+              ":app:composePreviewDiscover",
               ":app:composePreviewDaemonStart",
             ),
             timeoutMinutes = 20,
@@ -119,10 +122,13 @@ class EditLoopIntegrationTest {
         val text = "Edit loop $cycle"
         source.writeText(source.readText().replace(Regex("""text = "[^"]*""""), "text = \"$text\""))
         source.setLastModified(System.currentTimeMillis() + cycle * 2_000L)
-        val notified = measure { notify(workspaceId, source) }
+        // Even cycles edit the way host tools do (Claude Code's Edit, an IDE save): no
+        // notify_file_changed, so the render has to find the change itself.
+        val notifies = cycle % 2 == 1
+        val notified = if (notifies) measure { notify(workspaceId, source) } else null
         val rendered = measure { render(uri) }
-        val cycleMs = notified.ms + rendered.ms
-        val record = cycleJson("warm-$cycle", cycleMs, notified.ms, rendered.value)
+        val cycleMs = (notified?.ms ?: 0L) + rendered.ms
+        val record = cycleJson("warm-$cycle", cycleMs, notified?.ms, rendered.value)
         cycles += record
 
         val current = rendered.value
@@ -131,13 +137,16 @@ class EditLoopIntegrationTest {
         assertThat(current.changed).isTrue()
         assertThat(pixelsDiffer(previous.png, current.png)).isTrue()
 
-        // The recompile the edit caused: notify_file_changed ran it, the render reports it.
-        val compile = notifiedCompile(notified.value)
+        // The recompile the edit caused, which the render reports whoever asked for it.
+        val compile = renderedCompile(current)
         assertThat(compile).isNotNull()
-        assertThat(compile!!.initScript).isTrue()
+        assertThat(compile!!.trigger)
+          .isEqualTo(
+            if (notifies) DaemonMcpServer.TRIGGER_NOTIFY else DaemonMcpServer.TRIGGER_DETECTED
+          )
+        assertThat(compile.initScript).isTrue()
         assertThat(compile.taskPaths).contains(":app:${GradleSourceCompiler.TASK}")
         assertThat(compile.disallowedTasks(allowedModules = setOf(":app"))).isEmpty()
-        assertThat(current.work?.get("compile")).isNotNull()
 
         // TODO(#1181): once the daemon sends `renderFinished.workTrace` (a trace of the
         //  post-capture processors and data kinds it ran), require it here and assert that no
@@ -242,23 +251,24 @@ class EditLoopIntegrationTest {
 
   /** The preview's URI once the daemon's discovery has put it in the resource list. */
   private fun awaitPreviewUri(function: String): String {
-    val deadline = System.nanoTime() + TimeUnit.MINUTES.toNanos(10)
+    val deadline = System.nanoTime() + TimeUnit.MINUTES.toNanos(5)
+    var seen: List<String> = emptyList()
     while (System.nanoTime() < deadline) {
       val resources = runCatching {
         client.request("resources/list", timeoutMs = 30_000)
       }
         .getOrNull()
-      resources
-        ?.get("resources")
-        ?.jsonArray
-        ?.map { it.jsonObject["uri"]!!.jsonPrimitive.content }
-        ?.firstOrNull { it.contains(function) }
+      seen =
+        resources?.get("resources")?.jsonArray?.map { it.jsonObject["uri"]!!.jsonPrimitive.content }
+          ?: seen
+      seen
+        .firstOrNull { it.contains(function) }
         ?.let {
           return it
         }
       Thread.sleep(1_000)
     }
-    error("no preview matching $function was discovered")
+    error("no preview matching $function was discovered; resources: $seen")
   }
 
   private fun notify(workspaceId: WorkspaceId, file: File): McpToolResult =
@@ -291,21 +301,14 @@ class EditLoopIntegrationTest {
     )
   }
 
-  private fun notifiedCompile(result: McpToolResult): CompileWork? {
-    val compile =
-      result.raw["_meta"]
-        ?.jsonObject
-        ?.get("work")
-        ?.jsonObject
-        ?.get("compile")
-        ?.jsonObject
-        ?.get(":app")
-        ?.jsonObject ?: return null
+  private fun renderedCompile(rendered: Rendered): CompileWork? {
+    val compile = rendered.work?.get("compile")?.jsonObject ?: return null
     return CompileWork(
       task = compile["task"]!!.jsonPrimitive.content,
       ms = compile["ms"]!!.jsonPrimitive.content.toLong(),
       initScript = compile["initScript"]!!.jsonPrimitive.content.toBoolean(),
       tasks = compile["tasks"]!!.jsonArray.map { it.jsonPrimitive.content },
+      trigger = compile["trigger"]?.jsonPrimitive?.content,
     )
   }
 
