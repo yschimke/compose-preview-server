@@ -98,16 +98,33 @@ internal class ServeUiBuilderCreate(
         // its message is written for the person who typed the name.
         return Outcome.Refused(400, e.message ?: "the design cannot be created as described")
       }
-    return when (val created = service.executeMapped(CreateDesignRequestV1(document), actor)) {
+    return createOutcome(actor, document)
+  }
+
+  /**
+   * Create [document], and say what became of it.
+   *
+   * The service reports "already exists" as a bad request, so a bad request can be the race between
+   * two creates of one id — but it is also every other refusal: a design limit, a quarantined id, a
+   * document the catalog does not validate. Treating them all as "already exists" sent the browser
+   * a `303` to a design that was never stored, which then opened as "not found". So a bad request
+   * counts as the race only when the design is there to open afterwards.
+   */
+  private suspend fun createOutcome(
+    actor: AuthenticatedUiBuilderActor,
+    document: DesignDocumentV1,
+  ): Outcome =
+    when (val created = service.executeMapped(CreateDesignRequestV1(document), actor)) {
       is UiBuilderServiceResponse.Error ->
-        // The service reports "already exists" as a bad request, and the existence check above
-        // already passed, so a bad request here is the race between two creates of one id: the
-        // design exists, which is the outcome the caller wanted anyway.
-        if (created.error.code == ServiceErrorCodeV1.BAD_REQUEST) Outcome.AlreadyExists
+        if (
+          created.error.code == ServiceErrorCodeV1.BAD_REQUEST &&
+            service.executeMapped(OpenDesignRequestV1(document.id), actor) is
+              UiBuilderServiceResponse.Snapshot
+        )
+          Outcome.AlreadyExists
         else Outcome.Refused(created.httpStatusValue(), created.error.message)
       else -> Outcome.Created
     }
-  }
 
   /**
    * Create a design from a whole document somebody else authored — a catalog project's published
@@ -169,12 +186,7 @@ internal class ServeUiBuilderCreate(
         return Outcome.Refused(listed.httpStatusValue(), listed.error.message)
       else -> return Outcome.Refused(500, "the design service did not list its catalogs")
     }
-    return when (val created = service.executeMapped(CreateDesignRequestV1(homed), actor)) {
-      is UiBuilderServiceResponse.Error ->
-        if (created.error.code == ServiceErrorCodeV1.BAD_REQUEST) Outcome.AlreadyExists
-        else Outcome.Refused(created.httpStatusValue(), created.error.message)
-      else -> Outcome.Created
-    }
+    return createOutcome(actor, homed)
   }
 
   private companion object {
