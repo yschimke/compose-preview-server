@@ -114,10 +114,19 @@ class ServeUiBuilderHistoryAndUnfurlTest {
   }
 
   @Test
-  fun `a private design is not reachable signed out and never lends its title to a card`() {
+  fun `a private design serves only the generic shell signed out and never lends its title`() {
     withServer(UiBuilderDefaultVisibility.PRIVATE) { port ->
       create(port)
-      assertEquals(404, get(port, "/ui-builder/$DESIGN_ID", token = null).first)
+      val (signedOutCode, signedOutPage) = get(port, "/ui-builder/$DESIGN_ID", token = null)
+      assertEquals(200, signedOutCode)
+      assertFalse(
+        signedOutPage.contains("Keynote schedule"),
+        "a private design must not unfurl signed out: $signedOutPage",
+      )
+      assertTrue(
+        signedOutPage.contains("""<meta property="og:title" content="Compose UI builder">"""),
+        signedOutPage,
+      )
       val (code, page) = get(port, "/ui-builder/$DESIGN_ID", OPERATOR_TOKEN)
       assertEquals(200, code)
       assertFalse(page.contains("Keynote schedule"), "a private design unfurls generically: $page")

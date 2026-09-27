@@ -44,6 +44,9 @@ import ee.schimke.composeai.render.matrix.MatrixAxes
 import ee.schimke.composeai.render.matrix.MatrixCell
 import io.modelcontextprotocol.kotlin.sdk.types.Implementation
 import java.io.File
+import java.nio.file.AtomicMoveNotSupportedException
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
 import java.security.MessageDigest
 import java.time.Instant
 import java.util.Base64
@@ -179,6 +182,19 @@ class DaemonMcpServer(
    */
   private val catalog: ConcurrentHashMap<DaemonAddr, ConcurrentHashMap<String, PreviewEntry>> =
     ConcurrentHashMap()
+
+  /**
+   * Last PNG digest each MCP client saw for a URI through `render_preview(inline=false)`. The
+   * direct-file response is deliberately session-scoped: a newly connected client has not seen a
+   * previous frame, while one agent's render must not make another agent's first frame look stale.
+   */
+  private val previousFileRenderHashes =
+    ConcurrentHashMap<Session, ConcurrentHashMap<FileRenderKey, String>>()
+
+  /** Process-owned, bounded cache for immutable path-shaped render results. */
+  private val fileRenderCacheDir = Files.createTempDirectory("compose-preview-mcp-").toFile()
+
+  private val fileRenderCacheLock = Any()
 
   /**
    * Per-(workspace, module, previewId) FIFO of [PendingRenderGroup]s awaiting a render. The HEAD
@@ -376,6 +392,7 @@ class DaemonMcpServer(
    */
   fun shutdown() {
     runCatching { freshnessExecutor.shutdownNow() }
+    synchronized(fileRenderCacheLock) { runCatching { fileRenderCacheDir.deleteRecursively() } }
   }
 
   // -------------------------------------------------------------------------
@@ -419,6 +436,7 @@ class DaemonMcpServer(
     val released = subscriptions.forgetDataSubscriptions(session)
     released.forEach { key -> dispatchDataUnsubscribe(key) }
     subscriptions.forget(session)
+    previousFileRenderHashes.remove(session)
     synchronized(bootstrapNotifyLock) { bootstrapServedSessions.remove(session) }
     sessions.unregister(session)
   }
@@ -444,6 +462,10 @@ class DaemonMcpServer(
             name = entry.fqn.substringAfterLast('.'),
             description = entry.displayName ?: entry.fqn,
             mimeType = "image/png",
+            meta =
+              entry.resolvedSourcePath?.let { sourceFile ->
+                buildJsonObject { put("sourceFile", sourceFile) }
+              },
           )
         )
       }
@@ -500,9 +522,7 @@ class DaemonMcpServer(
     overrides: PreviewOverrides? = null,
   ): ByteArray {
     val outcome = awaitNextRender(uri, session, progressToken, overrides)
-    val file = File(outcome.pngPath)
-    check(file.isFile) { "renderAndReadBytes: pngPath does not exist: ${outcome.pngPath}" }
-    return applyImageSizeOverride(fileSystem.read(file.path.toPath()) { readByteArray() })
+    return applyImageSizeOverride(outcome.pngBytes)
   }
 
   /**
@@ -513,9 +533,7 @@ class DaemonMcpServer(
    */
   private fun renderAndReadRawBytes(uri: PreviewUri, overrides: PreviewOverrides?): ByteArray {
     val outcome = awaitNextRender(uri, overrides = overrides)
-    val file = File(outcome.pngPath)
-    check(file.isFile) { "renderAndReadRawBytes: pngPath does not exist: ${outcome.pngPath}" }
-    return fileSystem.read(file.path.toPath()) { readByteArray() }
+    return outcome.pngBytes
   }
 
   /**
@@ -656,7 +674,7 @@ class DaemonMcpServer(
           return false
         }
     val sourceFile =
-      resolvePreviewSourceFile(uri, entry.sourceFile)
+      entry.resolvedSourcePath?.let(::File)
         ?: run {
           freshnessMetrics.probesNoSource.incrementAndGet()
           return false
@@ -905,15 +923,18 @@ class DaemonMcpServer(
       }
   }
 
-  private fun resolvePreviewSourceFile(uri: PreviewUri, sourceFile: String?): File? {
+  private fun resolvePreviewSourceFile(daemon: SupervisedDaemon, sourceFile: String?): File? {
     if (sourceFile.isNullOrBlank()) return null
     val direct = File(sourceFile)
-    if (direct.isFile) return direct
-    val project = supervisor.project(uri.workspaceId) ?: return null
-    val moduleDir = moduleDir(project.path, uri.modulePath)
-    val fromModule = File(moduleDir, sourceFile)
-    if (fromModule.isFile) return fromModule
-    return null
+    if (direct.isAbsolute) return direct.takeIf { it.isFile }
+    val project = supervisor.project(daemon.workspaceId) ?: return null
+    val descriptorModuleDir = daemon.moduleProjectDirPath?.let(::File)
+    val layoutModuleDir = moduleDir(project.path, daemon.modulePath)
+    return sequenceOf(descriptorModuleDir, layoutModuleDir)
+      .filterNotNull()
+      .distinctBy { it.absolutePath }
+      .map { File(it, sourceFile) }
+      .firstOrNull { it.isFile }
   }
 
   private fun moduleDir(projectRoot: File, modulePath: String): File {
@@ -1050,7 +1071,8 @@ class DaemonMcpServer(
             "structured observation by default — the compose/semantics snapshot + sha256 + " +
             "dimensions, NO base64 PNG (the snapshot-default for an agent loop; issue #1787). " +
             "Pass `observe=\"png\"` to get the rendered PNG inline when you actually need to see " +
-            "pixels, or `observe=\"hash\"` for just the sha + dimensions. " +
+            "pixels, `inline=false` to return its on-disk PNG path and metadata for a local " +
+            "file-reading client, or `observe=\"hash\"` for just the sha + dimensions. " +
             "Pass `force={reason}` only when the freshness probe missed a real edit (this should be rare); " +
             "report each use on https://github.com/yschimke/compose-ai-tools/issues/924. " +
             "Do NOT delete `build/classes/...` or run `./gradlew clean` to chase a stale render.",
@@ -1062,11 +1084,33 @@ class DaemonMcpServer(
               "properties":{
                 "uri":{"type":"string","description":"compose-preview://<workspace>/<module>/<fqn>?config=<qualifier>"},
                 "observe":{"type":"string","enum":["png","semantics","hash"],"description":"Observation level (issue #1787). Default 'semantics' — the compose/semantics tree + sha256 + dimensions with NO base64, the token-frugal snapshot-default for an agent loop (fetch pixels only when you need them). 'png' returns the base64 image (request it when you need to see pixels); 'hash' returns just sha256 + dimensions."},
+                "inline":{"type":"boolean","description":"Default true. Set false on a local-FS client to return the rendered PNG's absolute pngPath plus sha256, dimensions, changed, and durationMs as text instead of an inline observation. inline=false takes precedence over observe, so it returns no semantics or image content. Cannot be combined with crop."},
                 "crop":{"type":"object","description":"Return only ONE element's rectangle instead of the full frame (issue #1817) — far fewer tokens, and it focuses the view on the region you care about (the natural partner to diff_semantics: 'ref X changed' -> crop ref X). Set EITHER a semantic target (ref | testTag | role/text, resolved against compose/semantics) OR explicit render-pixel bounds {left,top,right,bottom}. Honours 'observe': png returns the cropped image (+ region metadata), hash/semantics return the crop's sha + dimensions only.","properties":{"ref":{"type":"string"},"testTag":{"type":"string"},"role":{"type":"string"},"text":{"type":"string"},"left":{"type":"integer"},"top":{"type":"integer"},"right":{"type":"integer"},"bottom":{"type":"integer"}}},
                 "overrides":{"type":"object","description":"Optional per-call display overrides."},
                 "force":{"type":"object","description":"Sanctioned escape hatch when the freshness probe missed an edit. Forwards fileChanged({kind:\"classpath\"}) before rendering, dropping the daemon's user classloader. Each use is logged + counted; please report on issue #924.","properties":{"reason":{"type":"string","description":"Human-readable reason for needing force (required)."}},"required":["reason"]}
               },
               "required":["uri"]
+            }
+            """
+              .trimIndent()
+          ),
+      ),
+      ToolDef(
+        name = "find_previews_for_file",
+        description =
+          "Find catalogued previews declared by a Kotlin source file. `path` may be absolute, or " +
+            "relative to the selected workspace (or every registered workspace when workspaceId is " +
+            "omitted). Returns an empty previews array when no discovered preview uses that file.",
+        inputSchema =
+          parseSchema(
+            """
+            {
+              "type":"object",
+              "properties":{
+                "path":{"type":"string","description":"Absolute source-file path, or a path relative to the workspace root."},
+                "workspaceId":{"type":"string","description":"Optional workspace to search. Omit to search every registered workspace."}
+              },
+              "required":["path"]
             }
             """
               .trimIndent()
@@ -1184,7 +1228,8 @@ class DaemonMcpServer(
           "Render a preview by URI, bypassing the in-memory render cache. Returns a token-frugal " +
             "structured observation by default (`observe=\"semantics\"`: the compose/semantics tree " +
             "+ sha256 + dimensions, NO base64; issue #1787) — pass `observe=\"png\"` for the rendered " +
-            "PNG inline, or `observe=\"hash\"` for just sha + dimensions. " +
+            "PNG inline, `inline=false` for its local on-disk PNG path + metadata, or " +
+            "`observe=\"hash\"` for just sha + dimensions. " +
             "Optional `overrides` apply per-call display-property overrides (size, density, " +
             "locale, fontScale, uiMode, orientation, device, inspectionMode) plus the connector- " +
             "driven extensions (material3Theme, wallpaper, ambient, focus, keyboard, touchOverlay, " +
@@ -1206,6 +1251,7 @@ class DaemonMcpServer(
               "properties":{
                 "uri":{"type":"string","description":"compose-preview://<workspace>/<module>/<fqn>?config=<qualifier>"},
                 "observe":{"type":"string","enum":["png","semantics","hash"],"description":"Observation level (issue #1787). Default 'semantics' returns the compose/semantics tree + sha256 + width/height with NO base64 — the token-frugal snapshot-default for a multi-step agent loop (fetch pixels only when you need them). 'png' returns the base64 image (request it when you need to see pixels); 'hash' returns just sha256 + dimensions."},
+                "inline":{"type":"boolean","description":"Default true. Set false on a local-FS client to return the rendered PNG's absolute pngPath plus sha256, dimensions, changed, and durationMs as text instead of an inline observation. inline=false takes precedence over observe, so it returns no semantics or image content. Cannot be combined with crop."},
                 "overrides":{
                   "type":"object",
                   "description":"Per-call display overrides. Each field is optional; nulls fall back to the discovery-time RenderSpec. Backends that don't model a field (e.g. desktop has no Android resource qualifier system) ignore it.",
@@ -1329,6 +1375,27 @@ class DaemonMcpServer(
                 }
               },
               "required":["uri"]
+            }
+            """
+              .trimIndent()
+          ),
+      ),
+      ToolDef(
+        name = "find_previews_for_file",
+        description =
+          "Find catalogued previews declared by a Kotlin source file. `path` may be absolute, or " +
+            "relative to the selected workspace (or every registered workspace when workspaceId is " +
+            "omitted). Returns an empty previews array when no discovered preview uses that file.",
+        inputSchema =
+          parseSchema(
+            """
+            {
+              "type":"object",
+              "properties":{
+                "path":{"type":"string","description":"Absolute source-file path, or a path relative to the workspace root."},
+                "workspaceId":{"type":"string","description":"Optional workspace to search. Omit to search every registered workspace."}
+              },
+              "required":["path"]
             }
             """
               .trimIndent()
@@ -1938,7 +2005,8 @@ class DaemonMcpServer(
       "unregister_project" -> toolUnregisterProject(args)
       "list_projects" -> toolListProjects()
       "list_devices" -> toolListDevices()
-      "render_preview" -> toolRenderPreview(args)
+      "render_preview" -> toolRenderPreview(session, args)
+      "find_previews_for_file" -> toolFindPreviewsForFile(args)
       "render_matrix" -> toolRenderMatrix(args)
       "watch" -> toolWatch(session, args)
       "unwatch" -> toolUnwatch(session, args)
@@ -1951,7 +2019,7 @@ class DaemonMcpServer(
       "list_data_products" -> toolListDataProducts(args)
       "enable_extensions" -> toolEnableExtensions(args)
       "list_extension_commands" -> toolListExtensionCommands(args)
-      "run_extension_command" -> toolRunExtensionCommand(args)
+      "run_extension_command" -> toolRunExtensionCommand(session, args)
       "get_preview_data" -> toolGetPreviewData(args)
       "diff_semantics" -> toolDiffSemantics(args)
       "render_preview_overlay" -> toolRenderPreviewOverlay(args)
@@ -1962,7 +2030,7 @@ class DaemonMcpServer(
       // Storybook-MCP-compatible aliases → existing handlers via the story-id adapter.
       "list-all-documentation" -> toolStorybookListDocs()
       "get-documentation-for-story" -> toolStorybookGetDoc(args)
-      "preview-stories" -> toolStorybookPreviewStories(args)
+      "preview-stories" -> toolStorybookPreviewStories(session, args)
       "run-story-tests" -> toolStorybookRunTests(args)
       else ->
         if (profile == McpToolProfile.NATIVE) {
@@ -2034,7 +2102,7 @@ class DaemonMcpServer(
   }
 
   /** `preview-stories`: render one or more stories in isolation and return the images. */
-  private fun toolStorybookPreviewStories(args: JsonObject): CallToolResult {
+  private fun toolStorybookPreviewStories(session: Session, args: JsonObject): CallToolResult {
     val ids =
       storybookStoryIds(args)
         ?: return errorCallToolResult("preview-stories: provide 'storyIds' (array) or 'storyId'")
@@ -2057,7 +2125,7 @@ class DaemonMcpServer(
         put("observe", observe)
         if (overrides != null) put("overrides", overrides)
       }
-      val res = toolRenderPreview(sub)
+      val res = toolRenderPreview(session, sub)
       blocks.addAll(res.content)
       if (res.isError == true) anyError = true else anyOk = true
     }
@@ -2268,7 +2336,7 @@ class DaemonMcpServer(
     return CallToolResult(content = listOf(ContentBlock.Text(payload.toString())))
   }
 
-  private fun toolRenderPreview(args: JsonObject): CallToolResult {
+  private fun toolRenderPreview(session: Session, args: JsonObject): CallToolResult {
     val uriStr =
       args["uri"]?.jsonPrimitive?.contentOrNull
         ?: return errorCallToolResult("render_preview: missing 'uri'")
@@ -2277,6 +2345,7 @@ class DaemonMcpServer(
     if (observe !in setOf("png", "semantics", "hash")) {
       return errorCallToolResult("render_preview: 'observe' must be one of png | semantics | hash")
     }
+    val inline = args["inline"]?.jsonPrimitive?.contentOrNull?.toBooleanStrictOrNull() ?: true
     val cropArg =
       args["crop"]?.let {
         it as? JsonObject
@@ -2310,9 +2379,14 @@ class DaemonMcpServer(
         return errorCallToolResult("render_preview: ${violations.joinToString("; ")}")
       }
     }
+    if (!inline && cropArg != null) {
+      return errorCallToolResult("render_preview: 'inline=false' cannot be combined with 'crop'")
+    }
     if (forceReason != null) invalidateClasspathForForce(uri, forceReason)
     return runCatching {
-      if (cropArg != null) {
+      if (!inline) {
+        renderPreviewFile(session, uri, overrides)
+      } else if (cropArg != null) {
         renderCropped(uri, overrides, cropArg, observe)
       } else {
         val bytes = renderAndReadBytes(uri, overrides = overrides)
@@ -2324,6 +2398,127 @@ class DaemonMcpServer(
       }
     }
       .getOrElse { errorCallToolResult("render_preview failed: ${it.message}") }
+  }
+
+  /**
+   * Local-file variant of `render_preview`. Unlike [renderAndReadBytes], it leaves the daemon's PNG
+   * untouched (no response-size downscaling) and reports the exact path that a local client can
+   * read after this call returns.
+   */
+  private fun renderPreviewFile(
+    session: Session,
+    uri: PreviewUri,
+    overrides: PreviewOverrides?,
+  ): CallToolResult {
+    val startedAt = System.nanoTime()
+    val outcome = awaitNextRender(uri, session, overrides = overrides)
+    val pngBytes = outcome.pngBytes
+    val sha = sha256Hex(pngBytes)
+    val stablePng = cacheRenderedPng(pngBytes, sha)
+    val changed =
+      previousFileRenderHashes
+        .computeIfAbsent(session) { ConcurrentHashMap() }
+        .put(FileRenderKey(uri.toUri(), overrides), sha) != sha
+    val payload = buildJsonObject {
+      put("uri", uri.toUri())
+      put("pngPath", stablePng.canonicalPath)
+      pngDimensions(pngBytes)?.let {
+        put("widthPx", it.first)
+        put("heightPx", it.second)
+      }
+      put("sha256", sha)
+      put("changed", changed)
+      put("durationMs", TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedAt))
+    }
+    return textCallToolResult(payload.toString())
+  }
+
+  /**
+   * Copies a daemon-owned render into an immutable, content-addressed process cache. Daemons may
+   * reuse one output path per preview, so returning that path directly creates a race where a later
+   * override or watch render replaces the bytes before the caller reads them.
+   */
+  private fun cacheRenderedPng(pngBytes: ByteArray, sha: String): File =
+    synchronized(fileRenderCacheLock) {
+      val target = File(fileRenderCacheDir, "$sha.png")
+      if (!target.isFile || runCatching { sha256Hex(target) }.getOrNull() != sha) {
+        val temporary = Files.createTempFile(fileRenderCacheDir.toPath(), "$sha-", ".tmp")
+        try {
+          Files.write(temporary, pngBytes)
+          try {
+            Files.move(
+              temporary,
+              target.toPath(),
+              StandardCopyOption.ATOMIC_MOVE,
+              StandardCopyOption.REPLACE_EXISTING,
+            )
+          } catch (_: AtomicMoveNotSupportedException) {
+            Files.move(temporary, target.toPath(), StandardCopyOption.REPLACE_EXISTING)
+          }
+        } finally {
+          Files.deleteIfExists(temporary)
+        }
+      }
+      target.setLastModified(System.currentTimeMillis())
+      fileRenderCacheDir
+        .listFiles { file -> file.extension == "png" }
+        .orEmpty()
+        .filterNot { it == target }
+        .sortedByDescending(File::lastModified)
+        .drop(MAX_CACHED_FILE_RENDERS - 1)
+        .forEach { stale -> runCatching { stale.delete() } }
+      target
+    }
+
+  private fun toolFindPreviewsForFile(args: JsonObject): CallToolResult {
+    val requestedPath =
+      args["path"]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() }
+        ?: return errorCallToolResult("find_previews_for_file: missing 'path'")
+    val requestedWorkspaceId = args["workspaceId"]?.jsonPrimitive?.contentOrNull
+    val projects =
+      if (requestedWorkspaceId == null) {
+        supervisor.listProjects()
+      } else {
+        listOf(
+          supervisor.project(WorkspaceId(requestedWorkspaceId))
+            ?: return errorCallToolResult(
+              "find_previews_for_file: workspace '$requestedWorkspaceId' not registered"
+            )
+        )
+      }
+    val requestedFile = File(requestedPath)
+    val targetByWorkspace = projects.associate { project ->
+      val target =
+        if (requestedFile.isAbsolute) requestedFile else File(project.path, requestedPath)
+      project.workspaceId to target.canonicalPath
+    }
+    val previews = mutableListOf<JsonObject>()
+    for ((addr, byId) in catalog) {
+      val targetPath = targetByWorkspace[addr.workspaceId] ?: continue
+      for (entry in byId.values) {
+        val uri =
+          PreviewUri(
+            workspaceId = addr.workspaceId,
+            modulePath = addr.modulePath,
+            previewFqn = entry.fqn,
+            config = entry.config,
+          )
+        val sourcePath = entry.resolvedSourcePath ?: continue
+        if (sourcePath != targetPath) continue
+        previews += buildJsonObject {
+          put("uri", uri.toUri())
+          put("fqn", entry.fqn)
+          entry.displayName?.let { put("displayName", it) }
+          entry.bodyLine?.let { put("bodyLine", it) }
+        }
+      }
+    }
+    val payload = buildJsonObject {
+      putJsonArray("previews") {
+        previews.sortedBy { it["uri"]?.jsonPrimitive?.contentOrNull }.forEach(::add)
+      }
+    }
+    return textCallToolResult(payload.toString())
   }
 
   /**
@@ -3369,7 +3564,7 @@ class DaemonMcpServer(
     return textCallToolResult(payload.toString())
   }
 
-  private fun toolRunExtensionCommand(args: JsonObject): CallToolResult {
+  private fun toolRunExtensionCommand(session: Session, args: JsonObject): CallToolResult {
     val commandId =
       args["commandId"]?.jsonPrimitive?.contentOrNull
         ?: return errorCallToolResult("run_extension_command: missing 'commandId'")
@@ -3404,7 +3599,7 @@ class DaemonMcpServer(
         copyArg(args, "uri")
         args["overrides"]?.let { put("overrides", it) }
       }
-      return toolRenderPreview(routed)
+      return toolRenderPreview(session, routed)
     }
     return when (commandId) {
       "render-device-clip.get" -> data("render/deviceClip")
@@ -4555,16 +4750,7 @@ class DaemonMcpServer(
     for (entry in added + changed) {
       val id = entry["id"]?.jsonPrimitive?.contentOrNull ?: continue
       val sourceFile = entry["sourceFile"]?.jsonPrimitive?.contentOrNull
-      val resolved =
-        resolvePreviewSourceFile(
-          PreviewUri(
-            workspaceId = daemon.workspaceId,
-            modulePath = daemon.modulePath,
-            previewFqn = id,
-            config = entry["config"]?.jsonPrimitive?.contentOrNull,
-          ),
-          sourceFile,
-        )
+      val resolved = resolvePreviewSourceFile(daemon, sourceFile)
       val sourceLastModifiedMs = resolved?.lastModified()?.takeIf { it > 0L }
       // Seed the content hash at discovery so the very first frozen-mtime edit is caught
       // against this baseline. Failures (unreadable file, permissions) just leave the hash
@@ -4576,7 +4762,9 @@ class DaemonMcpServer(
           displayName = entry["displayName"]?.jsonPrimitive?.contentOrNull,
           config = entry["config"]?.jsonPrimitive?.contentOrNull,
           sourceFile = sourceFile,
+          resolvedSourcePath = resolved?.canonicalPath,
           functionName = entry["functionName"]?.jsonPrimitive?.contentOrNull,
+          bodyLine = entry["bodyLine"]?.jsonPrimitive?.intOrNull,
           sourceLastModifiedMs = sourceLastModifiedMs,
           sourceContentHash = sourceContentHash,
         )
@@ -4620,7 +4808,20 @@ class DaemonMcpServer(
     //    promote-and-dispatch the next group's renderNow if one is queued. This is the
     //    serialization core that PR #432's by-previewId fanout (now removed) tried to paper
     //    over — see `popHeadAndPromoteNext` and `awaitNextRender`'s kdoc for the rationale.
-    popHeadAndPromoteNext(daemon, key, RenderOutcome.Finished(pngPath))
+    val pngBytes = runCatching {
+      val file = File(pngPath)
+      check(file.isFile) { "renderFinished pngPath does not exist: $pngPath" }
+      fileSystem.read(file.path.toPath()) { readByteArray() }
+    }
+      .getOrElse { failure ->
+        popHeadAndPromoteNext(
+          daemon,
+          key,
+          RenderOutcome.Failed("RenderOutputMissing", failure.message ?: "PNG read failed"),
+        )
+        return
+      }
+    popHeadAndPromoteNext(daemon, key, RenderOutcome.Finished(pngPath, pngBytes))
     // 2. Refresh the data-product attachment cache for this `(uri)`. Any kind the daemon attached
     //    on this render is the new fresh payload; any kind it didn't attach is stale and gets
     //    dropped (the daemon stops attaching kinds the MCP server unsubscribed from, so a missing
@@ -4842,6 +5043,8 @@ class DaemonMcpServer(
     val displayName: String?,
     val config: String?,
     val sourceFile: String?,
+    /** Canonical source path resolved once when discovery updates this entry. */
+    val resolvedSourcePath: String? = null,
     /**
      * Bare `@Composable` method name of the `@Preview` function (the wire field `functionName` on a
      * `discoveryUpdated` entry — `PreviewInfoDto.methodName`). Distinct from [fqn]/[displayName]: a
@@ -4852,6 +5055,8 @@ class DaemonMcpServer(
      * compiles. See issue #1807.
      */
     val functionName: String? = null,
+    /** One-based declaration anchor from discovery, when the backend can provide it. */
+    val bodyLine: Int? = null,
     val sourceLastModifiedMs: Long? = null,
     /**
      * SHA-256 of the source file's bytes captured at discovery and refreshed on every
@@ -4863,6 +5068,9 @@ class DaemonMcpServer(
      */
     val sourceContentHash: String? = null,
   )
+
+  /** Session-local comparison identity for path-shaped renders. */
+  private data class FileRenderKey(val uri: String, val overrides: PreviewOverrides?)
 
   /**
    * Per-previewId queue key for [previewQueues]. `(workspace, module, previewId)` identifies the
@@ -4925,7 +5133,7 @@ class DaemonMcpServer(
   )
 
   private sealed interface RenderOutcome {
-    data class Finished(val pngPath: String) : RenderOutcome
+    data class Finished(val pngPath: String, val pngBytes: ByteArray) : RenderOutcome
 
     data class Failed(
       val kind: String,
@@ -5061,6 +5269,7 @@ class DaemonMcpServer(
      * balance between "responsive UI updates" and "not flooding the wire on a fast render".
      */
     private const val PROGRESS_BEAT_INTERVAL_MS: Long = 500
+    private const val MAX_CACHED_FILE_RENDERS = 128
 
     /**
      * If the full MCP tool catalog is still loading after this grace period, clients should keep
