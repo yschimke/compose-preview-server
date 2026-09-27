@@ -101,6 +101,10 @@
   const REQUEST_TIMEOUT_MS = 5000;
   const RESOURCE_READ_TIMEOUT_MS = 65000;
   const RESOURCE_POLL_INTERVAL_MS = 5000;
+  // Every poll is a resources/read, and every read is a render. Back off while the pixels do not
+  // change and stop after a bounded run of unchanged reads; Refresh or a new result re-arms it.
+  const RESOURCE_POLL_MAX_INTERVAL_MS = 60000;
+  const RESOURCE_POLL_MAX_UNCHANGED = 12;
   const MAX_COMMENT_BODY_LENGTH = 4000;
   // Static host contract (for example Antigravity's <agent-embed>):
   // #compose-preview-result=<unpadded base64url UTF-8 JSON>
@@ -122,6 +126,7 @@
   let resourceReadGeneration = 0;
   let resourceReadUri;
   let resourcePollTimer;
+  let resourcePollUnchanged = 0;
   let resourceSubscriptionGeneration = 0;
   let subscribedResourceUri;
   let resourceSubscriptionTargetUri;
@@ -872,10 +877,21 @@
   function scheduleResourcePoll(uri) {
     stopResourcePolling();
     if (!initialized || staticMode || hostResourceSubscriptions || resourceResult?.resource?.uri !== uri) return;
+    if (resourcePollUnchanged >= RESOURCE_POLL_MAX_UNCHANGED) return;
+    const delay = Math.min(
+      RESOURCE_POLL_INTERVAL_MS * 2 ** resourcePollUnchanged,
+      RESOURCE_POLL_MAX_INTERVAL_MS,
+    );
     resourcePollTimer = window.setTimeout(() => {
       resourcePollTimer = undefined;
-      if (resourceResult?.resource?.uri === uri) readResource(true, true);
-    }, RESOURCE_POLL_INTERVAL_MS);
+      if (resourceResult?.resource?.uri !== uri) return;
+      // A hidden viewer does not need fresh pixels; check again later without rendering.
+      if (document.hidden) {
+        scheduleResourcePoll(uri);
+        return;
+      }
+      readResource(true, true);
+    }, delay);
   }
 
   function queueResourceSubscription(task) {
@@ -992,6 +1008,7 @@
       );
       const image = resourcePng(readResult);
       if (generation !== resourceReadGeneration || resourceResult?.resource?.uri !== resource.uri) return;
+      resourcePollUnchanged = image && image.blob === baseImageData ? resourcePollUnchanged + 1 : 0;
       if (!image) {
         if (overlayCall) return;
         renderResourceFallback(toolResult, resource, 'The host returned no PNG for resource:');
@@ -1012,6 +1029,8 @@
       renderImage({ data: image.blob }, value, resource);
     } catch (error) {
       if (generation !== resourceReadGeneration || resourceResult?.resource?.uri !== resource.uri) return;
+      // A failing read is not retried every five seconds forever either.
+      resourcePollUnchanged += 1;
       if (overlayCall) {
         console.warn('Failed to refresh the Compose Preview resource during overlay rendering:', error);
         return;
@@ -1044,6 +1063,7 @@
     const comparison = beforeAfterModel(result, value);
     disconnectResourceUpdates(comparison ? undefined : resource?.uri);
     resourceResult = undefined;
+    resourcePollUnchanged = 0;
     if (comparison) {
       void renderBeforeAfter(result, comparison, comparisonGeneration);
       return;
@@ -1210,6 +1230,7 @@
 
   const bridgeReady = staticMode ? Promise.resolve() : initializeBridge();
   refresh.addEventListener('click', () => {
+    resourcePollUnchanged = 0;
     if (!overlayCall) readResource(true, true);
   });
   a11y.addEventListener('click', () => toggleAccessibilityOverlay());

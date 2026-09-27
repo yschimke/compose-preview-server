@@ -1061,6 +1061,57 @@ class DaemonMcpServer(
   // Tool surface
   // -------------------------------------------------------------------------
 
+  private sealed interface UriOverridesFold {
+    data class Folded(val args: JsonObject) : UriOverridesFold
+
+    data class Rejected(val message: String) : UriOverridesFold
+  }
+
+  /**
+   * A `resource_link` returned by `render_preview` names the exact rendered state, so its URI may
+   * carry `?overrides=`. When an agent passes that URI back to a tool, the overrides must either be
+   * applied or refused — never silently dropped, which would answer with default pixels. Tools that
+   * take an `overrides` argument get the URI's overrides folded into it (a conflicting explicit
+   * argument is refused); `diff_semantics` already replays URI overrides itself; every other tool
+   * refuses an override-bearing URI because it has no way to honour it.
+   */
+  private fun foldUriOverrides(name: String, args: JsonObject): UriOverridesFold {
+    val raw =
+      args["uri"]?.let { (it as? JsonPrimitive)?.contentOrNull }
+        ?: return UriOverridesFold.Folded(args)
+    val uri = PreviewUri.parseOrNull(raw) ?: return UriOverridesFold.Folded(args)
+    val uriOverridesJson = uri.overridesJson ?: return UriOverridesFold.Folded(args)
+    if (name !in URI_OVERRIDE_TOOLS) {
+      return UriOverridesFold.Rejected(
+        "$name: 'uri' carries render overrides (?overrides=) that this tool does not apply; " +
+          "pass the preview URI without the overrides query"
+      )
+    }
+    val uriOverrides =
+      runCatching { json.parseToJsonElement(uriOverridesJson) as JsonObject }.getOrNull()
+        ?: return UriOverridesFold.Rejected("$name: 'uri' carries malformed render overrides")
+    val explicit = args["overrides"]
+    if (
+      explicit != null &&
+        explicit !is kotlinx.serialization.json.JsonNull &&
+        explicit != uriOverrides
+    ) {
+      return UriOverridesFold.Rejected(
+        "$name: 'uri' carries render overrides that differ from the 'overrides' argument; " +
+          "pass one or the other"
+      )
+    }
+    return UriOverridesFold.Folded(
+      JsonObject(
+        args +
+          mapOf(
+            "uri" to JsonPrimitive(uri.copy(overridesJson = null).toUri()),
+            "overrides" to uriOverrides,
+          )
+      )
+    )
+  }
+
   /** The viewer is an optional presentation layer: every linked tool keeps its text result. */
   private fun viewerLinkedToolDefs(toolDefs: List<ToolDef>): List<ToolDef> = toolDefs.map { tool ->
     if (tool.name in VIEWER_TOOL_NAMES) tool.copy(meta = viewerToolMeta()) else tool
@@ -1075,6 +1126,8 @@ class DaemonMcpServer(
 
   private fun viewerToolMeta(): JsonObject = buildJsonObject {
     put("ui", buildJsonObject { put("resourceUri", MCP_APP_VIEWER_URI) })
+    // Pre-2026-01-26 MCP Apps hosts read the flat key; current hosts read `ui.resourceUri`.
+    put("ui/resourceUri", MCP_APP_VIEWER_URI)
   }
 
   private fun viewerResourceMeta(): JsonObject = buildJsonObject {
@@ -2051,7 +2104,14 @@ class DaemonMcpServer(
     name: String,
     arguments: JsonElement?,
   ): CallToolResult {
-    val args = (arguments as? JsonObject) ?: JsonObject(emptyMap())
+    val args =
+      when (
+        val normalized =
+          foldUriOverrides(name, (arguments as? JsonObject) ?: JsonObject(emptyMap()))
+      ) {
+        is UriOverridesFold.Folded -> normalized.args
+        is UriOverridesFold.Rejected -> return errorCallToolResult(normalized.message)
+      }
     return when (name) {
       "status" -> toolStatus()
       "register_project" -> toolRegisterProject(args)
@@ -5287,6 +5347,15 @@ class DaemonMcpServer(
         "render_preview",
         "render_matrix",
         "diff_semantics",
+      )
+
+    /** Tools that accept an `overrides` argument, so an override-bearing `uri` can be folded in. */
+    private val URI_OVERRIDE_TOOLS =
+      setOf(
+        "render_preview",
+        "render_preview_overlay",
+        "record_preview",
+        "run_extension_command",
       )
 
     /**

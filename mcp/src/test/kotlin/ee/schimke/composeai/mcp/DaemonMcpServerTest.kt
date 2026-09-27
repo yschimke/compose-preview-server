@@ -1099,6 +1099,58 @@ class DaemonMcpServerTest {
     client.callTool("render_preview", buildJsonObject { put("uri", uri) }, timeoutMs = 10_000)
     assertThat(daemon.renderOverrides).hasSize(3)
     assertThat(daemon.renderOverrides[2]).isNull()
+
+    // Passing the returned resource_link back to render_preview replays its overrides instead of
+    // silently rendering the default state.
+    val replayed =
+      client.callTool(
+        "render_preview",
+        buildJsonObject {
+          put("uri", resourceUri)
+          put("observe", "png")
+        },
+        timeoutMs = 10_000,
+      )
+    assertThat(replayed.isError()).isFalse()
+    assertThat(daemon.renderOverrides).hasSize(4)
+    assertThat(daemon.renderOverrides[3]!!.widthPx).isEqualTo(600)
+    assertThat(daemon.renderOverrides[3]!!.uiMode)
+      .isEqualTo(ee.schimke.composeai.daemon.protocol.UiMode.DARK)
+    val replayedLink =
+      replayed.raw["content"]!!
+        .jsonArray
+        .single { it.jsonObject["type"]!!.jsonPrimitive.content == "resource_link" }
+        .jsonObject["uri"]!!
+        .jsonPrimitive
+        .content
+    assertThat(PreviewUri.parseOrNull(replayedLink)!!.overridesJson)
+      .isEqualTo(PreviewUri.parseOrNull(resourceUri)!!.overridesJson)
+
+    // A conflicting explicit argument, or a tool that cannot apply overrides, is refused rather
+    // than answering with pixels from a different state.
+    val conflicting =
+      client.callTool(
+        "render_preview",
+        buildJsonObject {
+          put("uri", resourceUri)
+          putJsonObject("overrides") { put("widthPx", 320) }
+        },
+        timeoutMs = 10_000,
+      )
+    assertThat(conflicting.isError()).isTrue()
+    assertThat(conflicting.firstTextContent()).contains("differ from the 'overrides' argument")
+    val unsupported =
+      client.callTool(
+        "get_preview_data",
+        buildJsonObject {
+          put("uri", resourceUri)
+          put("kind", "compose/semantics")
+        },
+        timeoutMs = 10_000,
+      )
+    assertThat(unsupported.isError()).isTrue()
+    assertThat(unsupported.firstTextContent()).contains("does not apply")
+    assertThat(daemon.renderOverrides).hasSize(4)
   }
 
   @Test

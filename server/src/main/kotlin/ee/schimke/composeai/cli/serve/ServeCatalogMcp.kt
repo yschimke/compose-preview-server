@@ -5,9 +5,13 @@ import ee.schimke.composeai.daemon.protocol.PreviewOverrides
 import ee.schimke.composeai.web.WebEscaping
 import java.net.URLDecoder
 import java.nio.charset.StandardCharsets
+import java.security.MessageDigest
+import java.security.SecureRandom
 import java.util.Base64
 import java.util.concurrent.Semaphore
 import java.util.concurrent.TimeUnit
+import javax.crypto.Mac
+import javax.crypto.spec.SecretKeySpec
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.ExperimentalSerializationApi
@@ -53,7 +57,15 @@ class ServeCatalogMcp(
   private val uiBuilder: ServeUiBuilderMcp? = null,
   /** Whether this box can also compile a design natively; see [ServeUiBuilderMcp.RENDER_NATIVE]. */
   private val uiBuilderNative: Boolean = false,
+  /** Wall clock for [signResourceLink] expiry; a seam so tests can age a signed link. */
+  private val nowMillis: () -> Long = System::currentTimeMillis,
 ) {
+  /**
+   * Per-process key for short-lived signed resource links. A restart drops it, exactly as a restart
+   * drops every grant, so a signed link never outlives the process that minted it.
+   */
+  private val resourceLinkKey: ByteArray = ByteArray(32).also { SecureRandom().nextBytes(it) }
+
   data class Reply(val body: JsonObject?, val accepted: Boolean = false)
 
   /**
@@ -368,6 +380,19 @@ class ServeCatalogMcp(
     uiBuilderTool(name, args, presented, uiBuilderAuthorization)?.let {
       return it
     }
+    val result = catalogTool(name, foldUriOverrides(name, args), liveAuthorization, access)
+    // A caller that authorized in-band cannot attach its token to a host's own `resources/read`
+    // of a returned link. Sign each override-bearing link so that one exact render stays readable
+    // for a few minutes without the token ever entering the URI.
+    return if (presented != null) signResourceLinks(result) else result
+  }
+
+  private suspend fun catalogTool(
+    name: String,
+    args: JsonObject,
+    liveAuthorization: () -> ServeMachineAuthorization.Decision,
+    access: AgentAccess?,
+  ): JsonObject {
     return when (name) {
       "request_access" -> {
         val broker = access ?: return toolError(ACCESS_DISABLED)
@@ -550,10 +575,14 @@ class ServeCatalogMcp(
       }
     }
     val target = targetFromUri(uri)
+    // Checked before a catalog is leased: a signed link is admitted at the door without a grant
+    // (see [requiresGrant]), so anything short of a valid signature must hold live scope here.
+    val rawOverrides = resourceOverrides(uri)
+    if ((rawOverrides != null || isSignedOverrideUri(uri)) && !hasValidResourceSignature(uri)) {
+      requireLive { liveAuthorization(presentedToken) }
+    }
     return withCatalog(target.catalog) { host ->
       val preview = resolvePreview(host, target.previewId)
-      val rawOverrides = resourceOverrides(uri)
-      if (rawOverrides != null) requireLive { liveAuthorization(presentedToken) }
       val png =
         renderPng(
             host,
@@ -1710,7 +1739,14 @@ class ServeCatalogMcp(
   }
 
   private fun storyTarget(value: String): PreviewTarget {
-    if (value.startsWith(RESOURCE_URI_PREFIX)) return targetFromUri(value)
+    if (value.startsWith(RESOURCE_URI_PREFIX)) {
+      if (resourceOverrides(value) != null) {
+        throw McpRequestException(
+          "story id '$value' carries render overrides; pass them as the 'overrides' argument"
+        )
+      }
+      return targetFromUri(value)
+    }
     val separator = value.indexOf(STORY_ID_SEPARATOR)
     if (separator <= 0 || separator + STORY_ID_SEPARATOR.length >= value.length) {
       throw McpRequestException(
@@ -1746,6 +1782,125 @@ class ServeCatalogMcp(
         .withoutPadding()
         .encodeToString(overrides.toString().encodeToByteArray())
     return "$uri?overrides=$encoded"
+  }
+
+  /**
+   * Folds `?overrides=` from a returned `resource_link` back into the call, so replaying a link
+   * renders the state it names instead of silently answering with defaults. A tool that takes no
+   * overrides refuses such a URI; an explicit `overrides` argument that disagrees is refused too.
+   * `diff_semantics` folds its `other.uri` into `otherOverrides` the same way.
+   */
+  private fun foldUriOverrides(name: String, args: JsonObject): JsonObject {
+    val folded = foldOne(name, args, "overrides")
+    if (name != "diff_semantics") return folded
+    val other = folded["other"] as? JsonObject ?: return folded
+    val otherUri = (other["uri"] as? JsonPrimitive)?.contentOrNull ?: return folded
+    if (!otherUri.startsWith(RESOURCE_URI_PREFIX)) return folded
+    val otherOverrides = resourceOverrides(otherUri) ?: return folded
+    val explicit = folded["otherOverrides"]
+    if (explicit != null && explicit !is JsonNull && explicit != otherOverrides) {
+      throw McpRequestException(
+        "diff_semantics: 'other.uri' carries render overrides that differ from " +
+          "'otherOverrides'; pass one or the other"
+      )
+    }
+    return JsonObject(
+      folded +
+        mapOf(
+          "other" to JsonObject(other + ("uri" to JsonPrimitive(otherUri.substringBefore('?')))),
+          "otherOverrides" to otherOverrides,
+        )
+    )
+  }
+
+  private fun foldOne(name: String, args: JsonObject, overridesKey: String): JsonObject {
+    val uri = (args["uri"] as? JsonPrimitive)?.contentOrNull ?: return args
+    if (!uri.startsWith(RESOURCE_URI_PREFIX)) return args
+    val uriOverrides = resourceOverrides(uri) ?: return args
+    if (name !in URI_OVERRIDE_TOOLS) {
+      throw McpRequestException(
+        "$name: 'uri' carries render overrides (?overrides=) that this tool does not apply; " +
+          "pass the preview URI without the overrides query"
+      )
+    }
+    val explicit = args[overridesKey]
+    if (explicit != null && explicit !is JsonNull && explicit != uriOverrides) {
+      throw McpRequestException(
+        "$name: 'uri' carries render overrides that differ from the '$overridesKey' argument; " +
+          "pass one or the other"
+      )
+    }
+    return JsonObject(
+      args + mapOf("uri" to JsonPrimitive(uri.substringBefore('?')), overridesKey to uriOverrides)
+    )
+  }
+
+  /** Adds a short-lived signature to every override-bearing `resource_link` in [result]. */
+  private fun signResourceLinks(result: JsonObject): JsonObject {
+    val content = result["content"] as? JsonArray ?: return result
+    if (
+      content.none {
+        (it as? JsonObject)?.get("type")?.jsonPrimitive?.contentOrNull == "resource_link"
+      }
+    ) {
+      return result
+    }
+    val signed =
+      JsonArray(
+        content.map { block ->
+          val obj = block as? JsonObject ?: return@map block
+          if (obj["type"]?.jsonPrimitive?.contentOrNull != "resource_link") return@map block
+          val uri = obj["uri"]?.jsonPrimitive?.contentOrNull ?: return@map block
+          if (resourceOverrides(uri) == null) return@map block
+          JsonObject(obj + ("uri" to JsonPrimitive(signResourceUri(uri))))
+        }
+      )
+    return JsonObject(result + ("content" to signed))
+  }
+
+  /**
+   * `<uri>&exp=<epoch seconds>&sig=<HMAC-SHA256>` over the unsigned URI and its expiry. The
+   * signature authorizes exactly one thing — reading that preview in that override state until
+   * [SIGNED_RESOURCE_TTL_SECONDS] pass — and carries no part of the grant token.
+   */
+  internal fun signResourceUri(uri: String): String {
+    val unsigned = unsignedResourceUri(uri)
+    val expiry = nowMillis() / 1000 + SIGNED_RESOURCE_TTL_SECONDS
+    val separator = if ('?' in unsigned) '&' else '?'
+    return "$unsigned${separator}exp=$expiry&sig=${resourceSignature(unsigned, expiry)}"
+  }
+
+  private fun hasValidResourceSignature(uri: String): Boolean {
+    val query = uri.substringAfter('?', missingDelimiterValue = "").split('&')
+    fun param(name: String) =
+      query.firstOrNull { it.substringBefore('=') == name }?.substringAfter('=', "")
+    val expiry = param("exp")?.toLongOrNull() ?: return false
+    val signature = param("sig")?.takeIf { it.isNotEmpty() } ?: return false
+    if (query.count { it.substringBefore('=') == "exp" || it.substringBefore('=') == "sig" } != 2) {
+      return false
+    }
+    if (nowMillis() / 1000 > expiry) return false
+    val expected = resourceSignature(unsignedResourceUri(uri), expiry)
+    return MessageDigest.isEqual(
+      expected.encodeToByteArray(),
+      signature.encodeToByteArray(),
+    )
+  }
+
+  private fun unsignedResourceUri(uri: String): String {
+    val base = uri.substringBefore('?')
+    val query =
+      uri.substringAfter('?', missingDelimiterValue = "").split('&').filter {
+        it.isNotEmpty() && it.substringBefore('=') != "exp" && it.substringBefore('=') != "sig"
+      }
+    return if (query.isEmpty()) base else "$base?${query.joinToString("&")}"
+  }
+
+  private fun resourceSignature(unsignedUri: String, expiry: Long): String {
+    val mac = Mac.getInstance("HmacSHA256")
+    mac.init(SecretKeySpec(resourceLinkKey, "HmacSHA256"))
+    val digest = mac.doFinal("$unsignedUri\n$expiry".encodeToByteArray())
+    return Base64.getUrlEncoder().withoutPadding().encodeToString(digest)
   }
 
   private fun resourceOverrides(uri: String): JsonObject? {
@@ -1937,6 +2092,8 @@ class ServeCatalogMcp(
 
   private fun viewerToolMeta(): JsonObject = buildJsonObject {
     put("ui", buildJsonObject { put("resourceUri", MCP_APP_VIEWER_URI) })
+    // Pre-2026-01-26 MCP Apps hosts read the flat key; current hosts read `ui.resourceUri`.
+    put("ui/resourceUri", MCP_APP_VIEWER_URI)
   }
 
   private fun viewerResourceMeta(): JsonObject = buildJsonObject {
@@ -2095,6 +2252,15 @@ class ServeCatalogMcp(
     }
 
     private const val RESOURCE_URI_PREFIX = "compose-preview://catalog/"
+
+    /** Lifetime of a signed override-bearing resource link; see [signResourceUri]. */
+    internal const val SIGNED_RESOURCE_TTL_SECONDS = 600L
+
+    /**
+     * Catalog tools that accept an `overrides` argument, so a link's overrides can be folded in.
+     */
+    private val URI_OVERRIDE_TOOLS =
+      setOf("render_preview", "render_matrix", "get_preview_data", "diff_semantics")
     const val MCP_APP_VIEWER_URI = "ui://compose-preview/viewer"
     private const val MCP_APP_MIME_TYPE = "text/html;profile=mcp-app"
     private const val MCP_APP_VIEWER_ASSET = "compose-preview-viewer.html"
@@ -2203,6 +2369,19 @@ class ServeCatalogMcp(
       } else tokenArgument(params["arguments"] as? JsonObject ?: return null)
     }
 
+    /** Shape check only: an override-bearing catalog URI that carries `exp` and `sig`. */
+    internal fun isSignedOverrideUri(uri: String): Boolean {
+      if (!uri.startsWith(RESOURCE_URI_PREFIX)) return false
+      val params = uri.substringAfter('?', missingDelimiterValue = "").split('&')
+      // Same first-match rule as the handler's own parse, so the door and the handler agree.
+      fun present(name: String) =
+        params
+          .firstOrNull { it.substringBefore('=') == name }
+          ?.substringAfter('=', "")
+          ?.isNotEmpty() == true
+      return present("overrides") && present("exp") && present("sig")
+    }
+
     internal fun tokenArgument(arguments: JsonObject): String? =
       (arguments[TOKEN_ARGUMENT] as? JsonPrimitive)?.contentOrNull?.takeIf { it.isNotBlank() }
 
@@ -2224,7 +2403,9 @@ class ServeCatalogMcp(
       if (method == "resources/read") {
         val params = request["params"] as? JsonObject ?: return true
         val uri = (params["uri"] as? JsonPrimitive)?.contentOrNull
-        return uri != MCP_APP_VIEWER_URI
+        // A signed override link is admitted without a grant; the handler verifies the signature
+        // (or demands live scope) before it touches a catalog. See [signResourceUri].
+        return uri != MCP_APP_VIEWER_URI && (uri == null || !isSignedOverrideUri(uri))
       }
       if (method != "tools/call") return true
       val params = request["params"] as? JsonObject ?: return true

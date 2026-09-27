@@ -421,6 +421,83 @@ class ServeAgentGrantRoutingTest {
     assertEquals(200, read.first, read.second)
     val contents = json(read.second)["result"]!!.jsonObject["contents"]!!.jsonArray
     assertTrue(contents.single().jsonObject["blob"]!!.jsonPrimitive.content.isNotBlank())
+
+    // A host that reads the link itself cannot attach the in-band token. The link is signed for
+    // exactly this render, so that read succeeds with no credential at all...
+    assertTrue(resourceUri.contains("&exp=") && resourceUri.contains("&sig="), resourceUri)
+    val hostRead =
+      mcpAnonymous(
+        """{"jsonrpc":"2.0","id":5,"method":"resources/read","params":{"uri":"$resourceUri"}}"""
+      )
+    assertEquals(200, hostRead.first, hostRead.second)
+    assertTrue(
+      json(hostRead.second)["result"]!!
+        .jsonObject["contents"]!!
+        .jsonArray
+        .single()
+        .jsonObject["blob"]!!
+        .jsonPrimitive
+        .content
+        .isNotBlank(),
+      hostRead.second,
+    )
+
+    // ...but a tampered signature, or a different override state, still needs live scope.
+    val tampered =
+      mcpAnonymous(
+        """{"jsonrpc":"2.0","id":6,"method":"resources/read","params":{"uri":"${resourceUri.substringBeforeLast("&sig=")}&sig=AAAA"}}"""
+      )
+    assertTrue(tampered.second.contains("live grant scope is required"), tampered.second)
+    val otherState =
+      resourceUri.replace(
+        Regex("overrides=[^&]+"),
+        "overrides=" +
+          java.util.Base64.getUrlEncoder()
+            .withoutPadding()
+            .encodeToString("""{"uiMode":"light"}""".encodeToByteArray()),
+      )
+    val swapped =
+      mcpAnonymous(
+        """{"jsonrpc":"2.0","id":7,"method":"resources/read","params":{"uri":"$otherState"}}"""
+      )
+    assertTrue(swapped.second.contains("live grant scope is required"), swapped.second)
+    // An unsigned default-state read is still gated at the door.
+    val unsigned =
+      mcpAnonymous(
+        """{"jsonrpc":"2.0","id":8,"method":"resources/read","params":{"uri":"${resourceUri.substringBefore('?')}"}}"""
+      )
+    assertEquals(401, unsigned.first, unsigned.second)
+
+    // Replaying the link through render_preview renders the state it names, not the default.
+    val replayed =
+      mcpAnonymous(
+        """{"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"render_preview","arguments":{"uri":"$resourceUri","observe":"png","token":"$token"}}}"""
+      )
+    val replayedUri =
+      json(replayed.second)["result"]!!
+        .jsonObject["content"]!!
+        .jsonArray
+        .single { it.jsonObject["type"]!!.jsonPrimitive.content == "resource_link" }
+        .jsonObject["uri"]!!
+        .jsonPrimitive
+        .content
+    assertEquals(
+      Regex("overrides=[^&]+").find(resourceUri)!!.value,
+      Regex("overrides=[^&]+").find(replayedUri)!!.value,
+    )
+    val conflicting =
+      mcpAnonymous(
+        """{"jsonrpc":"2.0","id":10,"method":"tools/call","params":{"name":"render_preview","arguments":{"uri":"$resourceUri","overrides":{"uiMode":"light"},"token":"$token"}}}"""
+      )
+    assertTrue(
+      conflicting.second.contains("differ from the 'overrides' argument"),
+      conflicting.second,
+    )
+    val unsupported =
+      mcpAnonymous(
+        """{"jsonrpc":"2.0","id":11,"method":"tools/call","params":{"name":"history_list","arguments":{"uri":"$resourceUri","token":"$token"}}}"""
+      )
+    assertTrue(unsupported.second.contains("does not apply"), unsupported.second)
   }
 
   /** A bad token in the argument is no token, not a way past the gate. */
