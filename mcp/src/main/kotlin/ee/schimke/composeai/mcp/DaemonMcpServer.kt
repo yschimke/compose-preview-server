@@ -177,6 +177,14 @@ class DaemonMcpServer(
    */
   private val sourceCompiler: SourceCompiler? = null,
   /**
+   * Whether a recompile first tries the daemon's in-process `compileSources` (#1189). Off by
+   * default: on wear-os-samples ComposeStarter a warm in-process compile inside the daemon took
+   * 4.8–8.2 s against 2.2–3.7 s for the warm Gradle `composePreviewCompile` (the Gradle Kotlin
+   * daemon compiles incrementally; the in-process compile shares the render daemon's 1 GB heap and
+   * CPU with its sandbox). `COMPOSE_PREVIEW_COMPILE_IN_PROCESS=1` turns it on to measure it.
+   */
+  private val compileInProcess: Boolean = environment[COMPILE_IN_PROCESS_ENV] == "1",
+  /**
    * Prepares a registered build that has no daemon launch descriptor yet (`compose-preview mcp
    * install` never ran there) on first use. `null` turns that off; tests pass a fake runner.
    */
@@ -996,8 +1004,8 @@ class DaemonMcpServer(
 
   /**
    * Stage-2 compile (#1189): asks the daemon to compile [sources] in process with the Kotlin Build
-   * Tools API, into the class directory its classloader loads, instead of running Gradle. Seconds
-   * faster on a warm daemon, which is most of a warm edit loop.
+   * Tools API, into the class directory its classloader loads, instead of running Gradle. Only when
+   * [compileInProcess] is on; see there for why it is off by default.
    *
    * An `Ok` is final. A compile error is returned as `Failed` and the caller confirms it with
    * Gradle (see [recompilePendingSources]), so a misconfigured in-process compiler can never leave
@@ -1010,6 +1018,7 @@ class DaemonMcpServer(
     daemon: SupervisedDaemon,
     sources: List<String>,
   ): SourceCompileOutcome? {
+    if (!compileInProcess) return null
     if (sources.any { !it.endsWith(".kt") }) return null
     val client = daemon.allClients().firstOrNull() ?: return null
     if (inProcessDeclined.contains(client)) return null
@@ -7036,6 +7045,9 @@ class DaemonMcpServer(
 
     /** [CompileWork.task] of an in-process (Build Tools API) compile inside the daemon. */
     const val IN_PROCESS_COMPILE_TASK = "daemon:compileSources"
+
+    /** Set to `1` to try the daemon's in-process compile before Gradle; see `compileInProcess`. */
+    const val COMPILE_IN_PROCESS_ENV = "COMPOSE_PREVIEW_COMPILE_IN_PROCESS"
     private val IN_PROCESS_COMPILE_TIMEOUT = 120.seconds
 
     const val MCP_APP_VIEWER_URI: String = "ui://compose-preview/viewer"
