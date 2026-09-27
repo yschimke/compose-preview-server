@@ -6879,6 +6879,44 @@ test("contract · a result without an image is re-rendered with one, and lists i
   await expect(refused.locator(".notice > p")).not.toContainText("{");
 });
 
+test("contract · a variant grid shows every variant and enlarges the one clicked", async ({ page }) => {
+  const pngs = livePngs();
+  const base = "compose-preview://fixture/_app/com.example.Card_Devices%20-%20Large";
+  const small = "compose-preview://fixture/_app/com.example.Card_Devices%20-%20Small";
+  const viewer = await openLiveViewer(page, pngs, {
+    firstResult: {
+      content: [
+        { type: "image", mimeType: "image/png", data: pngs.refreshed },
+        {
+          type: "text",
+          text: JSON.stringify({
+            schema: "compose-preview-matrix/v1",
+            mode: "variants",
+            uri: base,
+            cells: [
+              { uri: base, label: "Card_Devices - Large", sha256: "a" },
+              { uri: small, label: "Card_Devices - Small", sha256: "b" },
+            ],
+          }),
+        },
+      ],
+      _meta: { "composePreview/cellPngs": [pngs.base, pngs.round] },
+    },
+  });
+  await expect(viewer.locator(".cell")).toHaveCount(2);
+  await expect(viewer.locator(".cell code")).toHaveText(["Card_Devices - Large", "Card_Devices - Small"]);
+  await expect(viewer.locator(".cell img")).toHaveCount(2);
+  await viewer.locator(".cell").nth(1).click();
+  await expect(viewer.locator("#canvas .preview-stage > img")).toHaveAttribute(
+    "src",
+    `data:image/png;base64,${pngs.round}`,
+  );
+  await expect(viewer.locator("#meta")).toHaveText("Card_Devices - Small");
+  await viewer.locator("#grid-back").click();
+  await expect(viewer.locator(".cell")).toHaveCount(2);
+  await expect(viewer.locator("#grid-back")).toBeHidden();
+});
+
 test("contract · static viewer shows no live actions", async ({ page }) => {
   const png = readFileSync(renderPlaceholder).toString("base64");
   const viewer = await openSrcdocViewer(
