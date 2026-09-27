@@ -60,6 +60,7 @@ import javax.imageio.ImageIO
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonObjectBuilder
 import kotlinx.serialization.json.JsonPrimitive
@@ -1330,13 +1331,13 @@ class DaemonMcpServer(
       ToolDef(
         name = "status",
         description =
-          "Report MCP server readiness, tool-catalog loading state, registered projects, and spawned daemon discovery state. Available immediately after initialize.",
+          "Not needed before render_preview — the workspace registers itself on first render. Report MCP server readiness, tool-catalog loading state, registered projects, and spawned daemon discovery state. Available immediately after initialize.",
         inputSchema = parseSchema("""{"type":"object","properties":{}}"""),
       ),
       ToolDef(
         name = "register_project",
         description =
-          "Register a project (workspace) so its previews can be listed and watched. Returns the assigned workspaceId.",
+          "Not needed before render_preview — the workspace registers itself on first render. Register a project (workspace) so its previews can be listed and watched. Returns the assigned workspaceId.",
         inputSchema =
           parseSchema(
             """
@@ -1355,7 +1356,8 @@ class DaemonMcpServer(
       ),
       ToolDef(
         name = "list_projects",
-        description = "List every registered project with its workspaceId, name, and path.",
+        description =
+          "Not needed before render_preview — the workspace registers itself on first render. List every registered project with its workspaceId, name, and path.",
         inputSchema = parseSchema("""{"type":"object","properties":{}}"""),
       ),
       ToolDef(
@@ -1367,7 +1369,10 @@ class DaemonMcpServer(
       ToolDef(
         name = "render_preview",
         description =
-          "Render a preview by URI (or by `preview` function name), bypassing the in-memory render cache. Returns a token-frugal " +
+          "Call this FIRST with preview=<FunctionName> (e.g. ListScreenPreview); it registers the " +
+            "workspace and resolves the name itself. Only explore (list_previews, source files) if " +
+            "this call fails. " +
+            "Render a preview by URI (or by `preview` function name), bypassing the in-memory render cache. Returns a token-frugal " +
             "structured observation by default — the compose/semantics snapshot + sha256 + " +
             "dimensions, NO base64 PNG (the snapshot-default for an agent loop; issue #1787). " +
             "Pass `observe=\"png\"` to get the rendered PNG inline when you actually need to see " +
@@ -1389,6 +1394,7 @@ class DaemonMcpServer(
                 "inline":{"type":"boolean","description":"Default true. Set false on a local-FS client to return the rendered PNG's absolute pngPath plus sha256, dimensions, changed, and durationMs as text instead of an inline observation. inline=false takes precedence over observe, so it returns no semantics or image content. Cannot be combined with crop. Antigravity defaults to false when observe and crop are omitted."},
                 "crop":{"type":"object","description":"Return only ONE element's rectangle instead of the full frame (issue #1817) — far fewer tokens, and it focuses the view on the region you care about (the natural partner to diff_semantics: 'ref X changed' -> crop ref X). Set EITHER a semantic target (ref | testTag | role/text, resolved against compose/semantics) OR explicit render-pixel bounds {left,top,right,bottom}. Honours 'observe': png returns the cropped image (+ region metadata), hash/semantics return the crop's sha + dimensions only.","properties":{"ref":{"type":"string"},"testTag":{"type":"string"},"role":{"type":"string"},"text":{"type":"string"},"left":{"type":"integer"},"top":{"type":"integer"},"right":{"type":"integer"},"bottom":{"type":"integer"}}},
                 "overrides":{"type":"object","description":"Optional per-call display overrides."},
+                "details":{"type":"array","items":{"type":"string","enum":["a11y","layout"]},"description":"Opt-in, default none. Also fetch the accessibility findings and overlay (a11y) and the layout bounds (layout) in this call. Each adds ONE summary line to the result; the full detail goes only into the card, where the person toggles Plain / A11y overlay / Layout. Pass it only when the person asks about accessibility or layout."},
                 "force":{"type":"object","description":"Sanctioned escape hatch when the freshness probe missed an edit. Forwards fileChanged({kind:\"classpath\"}) before rendering, dropping the daemon's user classloader. Each use is logged + counted; please report on issue #924.","properties":{"reason":{"type":"string","description":"Human-readable reason for needing force (required)."}},"required":["reason"]}
               },
               "required":[]
@@ -1469,13 +1475,13 @@ class DaemonMcpServer(
       ToolDef(
         name = "status",
         description =
-          "Report MCP server readiness, tool-catalog loading state, registered projects, and spawned daemon discovery state.",
+          "Not needed before render_preview — the workspace registers itself on first render. Report MCP server readiness, tool-catalog loading state, registered projects, and spawned daemon discovery state.",
         inputSchema = parseSchema("""{"type":"object","properties":{}}"""),
       ),
       ToolDef(
         name = "register_project",
         description =
-          "Register a project (workspace) so its previews can be listed and watched. Returns the assigned workspaceId.",
+          "Not needed before render_preview — the workspace registers itself on first render. Register a project (workspace) so its previews can be listed and watched. Returns the assigned workspaceId.",
         inputSchema =
           parseSchema(
             """
@@ -1505,7 +1511,8 @@ class DaemonMcpServer(
       ),
       ToolDef(
         name = "list_projects",
-        description = "List every registered project with its workspaceId, name, and path.",
+        description =
+          "Not needed before render_preview — the workspace registers itself on first render. List every registered project with its workspaceId, name, and path.",
         inputSchema = parseSchema("""{"type":"object","properties":{}}"""),
       ),
       ToolDef(
@@ -1527,7 +1534,10 @@ class DaemonMcpServer(
       ToolDef(
         name = "render_preview",
         description =
-          "Render a preview by URI (or by `preview` function name), bypassing the in-memory render cache. Returns a token-frugal " +
+          "Call this FIRST with preview=<FunctionName> (e.g. ListScreenPreview); it registers the " +
+            "workspace and resolves the name itself. Only explore (list_previews, source files) if " +
+            "this call fails. " +
+            "Render a preview by URI (or by `preview` function name), bypassing the in-memory render cache. Returns a token-frugal " +
             "structured observation by default (`observe=\"semantics\"`: the compose/semantics tree " +
             "+ sha256 + dimensions, NO base64; issue #1787) — pass `observe=\"png\"` for the rendered " +
             "PNG inline, `inline=false` for its local on-disk PNG path + metadata, or " +
@@ -1655,6 +1665,7 @@ class DaemonMcpServer(
                     }
                   }
                 },
+                "details":{"type":"array","items":{"type":"string","enum":["a11y","layout"]},"description":"Opt-in, default none. Also fetch the accessibility findings and overlay (a11y) and the layout bounds (layout) in this call. Each adds ONE summary line to the result; the full detail goes only into the card, where the person toggles Plain / A11y overlay / Layout. Pass it only when the person asks about accessibility or layout."},
                 "force":{
                   "type":"object",
                   "description":"Sanctioned escape hatch for stale renders. Forwards a fileChanged({kind:\"classpath\"}) to every replica of this URI's daemon before issuing renderNow, dropping the daemon's user classloader. Each use bumps a `forces.used` counter and is logged in `recent` (see `status`). Please report on https://github.com/yschimke/compose-ai-tools/issues/924.",
@@ -2721,10 +2732,134 @@ class DaemonMcpServer(
   }
 
   private sealed interface PreviewCard {
-    data class Written(val file: File) : PreviewCard
+    /** [detailsDropped] says why the requested details were left out to fit the size cap. */
+    data class Written(val file: File, val detailsDropped: String? = null) : PreviewCard
 
     data class Skipped(val reason: String) : PreviewCard
   }
+
+  /**
+   * Fetches `render_preview`'s opt-in [details] for the render that just finished (issue #1170).
+   * Never throws: a detail the daemon does not produce, or whose fetch fails, becomes an
+   * `unavailable` summary line and is left out of the card, so its toggle is not shown.
+   */
+  private fun fetchRenderDetails(uri: PreviewUri, details: Set<RenderDetail>): RenderDetails {
+    if (details.isEmpty()) return RenderDetails.NONE
+    val daemon = runCatching {
+      supervisor.daemonFor(uri.workspaceId, uri.modulePath)
+    }
+      .getOrElse { error ->
+        val reason = "daemon unavailable (${error.message})"
+        return RenderDetails(
+          summaries = details.sorted().map { "${it.wire}: unavailable ($reason)" },
+          card =
+            buildJsonObject {
+              putJsonObject("unavailable") { details.forEach { put(it.wire, reason) } }
+            },
+          overlayPng = null,
+        )
+      }
+    val kinds = daemon.dataProductCapabilities.map { it.kind }.toSet()
+    val unavailable = linkedMapOf<String, String>()
+    var overlay: ByteArray? = null
+    var a11y: RenderDetailReaders.A11y? = null
+    var layout: Pair<String, RenderDetailReaders.Layout>? = null
+
+    if (RenderDetail.A11Y in details) {
+      if (A11Y_FINDINGS_KIND !in kinds) {
+        unavailable["a11y"] = "this daemon does not produce $A11Y_FINDINGS_KIND"
+      } else {
+        runCatching {
+          RenderDetailReaders.a11y(fetchDetailPayload(uri, daemon, A11Y_FINDINGS_KIND))
+        }
+          .onSuccess { a11y = it }
+          .onFailure { unavailable["a11y"] = detailFailure(it) }
+        if (a11y != null && DEFAULT_OVERLAY_KIND in kinds) {
+          overlay = runCatching { fetchOverlayPng(uri, daemon) }.getOrNull()
+        }
+      }
+    }
+    if (RenderDetail.LAYOUT in details) {
+      val kind = LAYOUT_DETAIL_KINDS.firstOrNull { it in kinds }
+      if (kind == null) {
+        unavailable["layout"] =
+          "this daemon produces neither ${LAYOUT_DETAIL_KINDS.joinToString(" nor ")}"
+      } else {
+        runCatching {
+          kind to RenderDetailReaders.layout(kind, fetchDetailPayload(uri, daemon, kind))
+        }
+          .onSuccess { layout = it }
+          .onFailure { unavailable["layout"] = detailFailure(it) }
+      }
+    }
+    val summaries = buildList {
+      a11y?.let { add(it.summary) }
+      unavailable["a11y"]?.let { add("a11y: unavailable ($it)") }
+      layout?.let { add(it.second.summary) }
+      unavailable["layout"]?.let { add("layout: unavailable ($it)") }
+    }
+    val card = buildJsonObject {
+      a11y?.let { found ->
+        putJsonObject("a11y") {
+          put("summary", found.summary)
+          put("overlay", overlay != null)
+          put("findings", found.findings)
+        }
+      }
+      layout?.let { (kind, found) ->
+        putJsonObject("layout") {
+          put("summary", found.summary)
+          put("kind", kind)
+          put("nodes", found.nodeCount)
+          put("boxes", found.boxes)
+        }
+      }
+      if (unavailable.isNotEmpty()) {
+        putJsonObject("unavailable") { unavailable.forEach { (key, reason) -> put(key, reason) } }
+      }
+    }
+    return RenderDetails(summaries, card, overlay)
+  }
+
+  /** `data/fetch` of [kind] as JSON, rendering once first if the daemon has nothing yet. */
+  private fun fetchDetailPayload(
+    uri: PreviewUri,
+    daemon: SupervisedDaemon,
+    kind: String,
+  ): JsonElement? {
+    val result =
+      try {
+        daemon.client.dataFetch(uri.previewFqn, kind, null, inline = true)
+      } catch (e: DataProductWireException) {
+        if (e.code != DataProductWireException.NOT_AVAILABLE) throw e
+        awaitNextRender(uri)
+        daemon.client.dataFetch(uri.previewFqn, kind, null, inline = true)
+      }
+    result.payload?.let {
+      return it
+    }
+    result.bytes?.let {
+      return json.parseToJsonElement(String(Base64.getDecoder().decode(it), Charsets.UTF_8))
+    }
+    result.path?.let {
+      return json.parseToJsonElement(File(it).readText())
+    }
+    return null
+  }
+
+  private fun fetchOverlayPng(uri: PreviewUri, daemon: SupervisedDaemon): ByteArray? {
+    val path =
+      daemon.client
+        .dataFetch(uri.previewFqn, DEFAULT_OVERLAY_KIND, params = null, inline = false)
+        .path ?: return null
+    return File(path).takeIf { it.isFile }?.readBytes()
+  }
+
+  private fun detailFailure(error: Throwable): String =
+    when (error) {
+      is DataProductWireException -> "${nameOf(error.code)}: ${error.wireMessage}"
+      else -> error.message ?: error.javaClass.simpleName
+    }
 
   /**
    * Writes an Antigravity preview card: the bundled viewer plus the render as an inline static
@@ -2737,6 +2872,7 @@ class DaemonMcpServer(
     pngBytes: ByteArray,
     sha: String,
     stablePng: File,
+    details: RenderDetails = RenderDetails.NONE,
   ): PreviewCard {
     val summary = buildJsonObject {
       put("uri", uri.toUri())
@@ -2746,7 +2882,7 @@ class DaemonMcpServer(
       }
       put("sha256", sha)
     }
-    val envelope = buildJsonObject {
+    fun envelope(withDetails: Boolean) = buildJsonObject {
       put("version", 1)
       putJsonObject("arguments") { put("uri", uri.toUri()) }
       putJsonObject("result") {
@@ -2764,11 +2900,43 @@ class DaemonMcpServer(
               put("text", summary.toString())
             }
           )
+          if (withDetails) {
+            // Detail blocks come after the render and carry a `_meta` marker, so a viewer that
+            // does not know them still draws the first image and reads the first text.
+            details.overlayPng?.let { overlay ->
+              add(
+                buildJsonObject {
+                  put("type", "image")
+                  put("data", Base64.getEncoder().encodeToString(overlay))
+                  put("mimeType", "image/png")
+                  putJsonObject("_meta") { put(RenderDetails.META_KEY, DEFAULT_OVERLAY_KIND) }
+                }
+              )
+            }
+            add(
+              buildJsonObject {
+                put("type", "text")
+                put("text", details.card.toString())
+                putJsonObject("_meta") { put(RenderDetails.META_KEY, "details") }
+              }
+            )
+          }
         }
       }
     }
-    val payload = envelope.toString()
-    if (payload.toByteArray(Charsets.UTF_8).size > MAX_CARD_RESULT_BYTES) {
+    fun fits(text: String) = text.toByteArray(Charsets.UTF_8).size <= MAX_CARD_RESULT_BYTES
+    // Over the cap, the details go first and the card only after them (issue #1170).
+    var detailsDropped: String? = null
+    val payload =
+      if (details.isEmpty) {
+        envelope(withDetails = false).toString()
+      } else {
+        envelope(withDetails = true).toString().takeIf(::fits)
+          ?: envelope(withDetails = false).toString().also {
+            detailsDropped = "the details did not fit the card's 500,000-byte cap"
+          }
+      }
+    if (!fits(payload)) {
       return PreviewCard.Skipped("the render is too large for a card (over 500,000 bytes)")
     }
     return runCatching {
@@ -2780,7 +2948,7 @@ class DaemonMcpServer(
       val target =
         File(previewCardDirectory(stablePng), "compose-preview-card-${sha.take(12)}.html")
       target.writeText(viewerHtml() + block, Charsets.UTF_8)
-      PreviewCard.Written(target)
+      PreviewCard.Written(target, detailsDropped)
     }
       .getOrElse { PreviewCard.Skipped("could not write the card: ${it.message}") }
   }
@@ -2929,6 +3097,21 @@ class DaemonMcpServer(
     if (!inline && cropArg != null) {
       return errorCallToolResult("render_preview: 'inline=false' cannot be combined with 'crop'")
     }
+    val details =
+      when (val raw = args["details"]) {
+        null,
+        JsonNull -> emptySet()
+        is JsonArray ->
+          raw
+            .map { element ->
+              (element as? JsonPrimitive)?.takeIf { it.isString }?.content?.let(RenderDetail::parse)
+                ?: return errorCallToolResult(
+                  "render_preview: 'details' entries must be \"a11y\" or \"layout\""
+                )
+            }
+            .toSet()
+        else -> return errorCallToolResult("render_preview: 'details' must be an array")
+      }
     if (forceReason != null) invalidateClasspathForForce(uri, forceReason)
     return runCatching {
       if (!inline) {
@@ -2940,6 +3123,7 @@ class DaemonMcpServer(
             uri.copy(overridesJson = (args["overrides"] as? JsonObject)?.toString()).toUri(),
           card = card,
           otherMatches = otherMatches,
+          details = details,
         )
       } else if (cropArg != null) {
         renderCropped(uri, overrides, cropArg, observe)
@@ -2988,6 +3172,16 @@ class DaemonMcpServer(
           )
       }
       .map { result ->
+        // Issue #1170: the file path carries its own details (they also go into the card).
+        if (!inline || details.isEmpty() || result.isError == true) result
+        else {
+          val fetched = fetchRenderDetails(uri, details)
+          result.copy(
+            content = result.content + ContentBlock.Text(fetched.summaries.joinToString("\n"))
+          )
+        }
+      }
+      .map { result ->
         // Issue #1169: never hand back an old image as if it were current.
         val stale = staleRenderLine(uri)
         if (stale == null || result.isError == true) result
@@ -3008,9 +3202,11 @@ class DaemonMcpServer(
     resourceUri: String,
     card: Boolean = false,
     otherMatches: List<String> = emptyList(),
+    details: Set<RenderDetail> = emptySet(),
   ): CallToolResult {
     val startedAt = System.nanoTime()
     val outcome = awaitNextRender(uri, session, overrides = overrides)
+    val fetchedDetails = fetchRenderDetails(uri, details)
     val pngBytes = outcome.pngBytes
     val sha = sha256Hex(pngBytes)
     val stablePng = cacheRenderedPng(pngBytes, sha)
@@ -3031,9 +3227,10 @@ class DaemonMcpServer(
       if (otherMatches.isNotEmpty())
         putJsonArray("otherMatches") { otherMatches.forEach { add(JsonPrimitive(it)) } }
       if (card) {
-        when (val written = writePreviewCard(uri, pngBytes, sha, stablePng)) {
+        when (val written = writePreviewCard(uri, pngBytes, sha, stablePng, fetchedDetails)) {
           is PreviewCard.Written -> {
             put("cardPath", written.file.canonicalPath)
+            written.detailsDropped?.let { put("cardDetailsDropped", it) }
             put("embed", "<agent-embed src=\"${written.file.toPath().toUri()}\"></agent-embed>")
           }
           is PreviewCard.Skipped -> put("cardSkipped", written.reason)
@@ -3044,8 +3241,11 @@ class DaemonMcpServer(
     // clients keep the local path above.
     return CallToolResult(
       content =
-        listOf(
+        listOfNotNull(
           ContentBlock.Text(payload.toString()),
+          fetchedDetails.summaries
+            .takeIf { it.isNotEmpty() }
+            ?.let { ContentBlock.Text(it.joinToString("\n")) },
           ContentBlock.ResourceLink(
             uri = resourceUri,
             name = "Compose Preview render",
@@ -6189,5 +6389,11 @@ class DaemonMcpServer(
      * valid arguments without code changes here.
      */
     private const val DEFAULT_OVERLAY_KIND: String = "a11y/overlay"
+
+    /** ATF findings, fetched for `render_preview`'s `details: ["a11y"]`. */
+    private const val A11Y_FINDINGS_KIND: String = "a11y/atf"
+
+    /** Layout sources for `details: ["layout"]`, in order of preference. */
+    private val LAYOUT_DETAIL_KINDS: List<String> = listOf("layout/inspector", "compose/semantics")
   }
 }
