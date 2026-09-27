@@ -1484,13 +1484,16 @@
     let wanted = Math.ceil(root.scrollHeight);
     if (image) {
       const shown = image.getBoundingClientRect().height;
-      const chrome = Math.max(0, root.scrollHeight - shown);
+      // Only the header, the toolbar and the source line must share the first screen with the
+      // image; details and comments may sit below the fold.
+      const firstScreenBottom = q('#source-location').getBoundingClientRect().bottom + window.scrollY + 8;
+      const chrome = Math.max(0, firstScreenBottom - shown);
       const screenCap = Math.round((window.screen?.availHeight || 800) * 0.7);
       root.style.setProperty('--image-max', `${Math.max(32, Math.floor(window.innerHeight - chrome))}px`);
       const natural = image.naturalWidth && image.naturalHeight
         ? image.naturalHeight * Math.min(1, canvas.clientWidth / image.naturalWidth)
         : shown;
-      wanted = Math.ceil(chrome + Math.min(natural, screenCap));
+      wanted = Math.ceil(root.scrollHeight - shown + Math.min(natural, screenCap));
     }
     if (!initialized || staticMode || wanted === lastReportedHeight) return;
     lastReportedHeight = wanted;
