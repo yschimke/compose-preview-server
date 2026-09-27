@@ -158,6 +158,14 @@ class DaemonMcpServer(
   private val profile: McpToolProfile = McpToolProfile.NATIVE,
   /** Optional remote Design API facade; never gives MCP direct reducer or store access. */
   private val uiBuilderMcp: UiBuilderMcpAdapter? = null,
+  /**
+   * Workspace to auto-register on the first `render_preview` when nothing is registered and the
+   * client offers no MCP roots; used only when it is a Gradle build. Null disables the fallback.
+   */
+  private val workingDirectory: File? = File(System.getProperty("user.dir")),
+  /** Environment read for `ANTIGRAVITY_CONVERSATION_ID` when choosing where a preview card goes. */
+  private val environment: Map<String, String> = System.getenv(),
+  private val homeDirectory: File = File(System.getProperty("user.home")),
 ) {
 
   private val fullToolDefsLoader: () -> List<ToolDef> =
@@ -445,6 +453,7 @@ class DaemonMcpServer(
           )
         },
         onClose = { closeSession(session) },
+        instructions = if (profile == McpToolProfile.NATIVE) LOCAL_INSTRUCTIONS else null,
       )
     sessions.register(session)
     return session
@@ -1249,7 +1258,7 @@ class DaemonMcpServer(
       ToolDef(
         name = "render_preview",
         description =
-          "Render a preview by URI, bypassing the in-memory render cache. Returns a token-frugal " +
+          "Render a preview by URI (or by `preview` function name), bypassing the in-memory render cache. Returns a token-frugal " +
             "structured observation by default — the compose/semantics snapshot + sha256 + " +
             "dimensions, NO base64 PNG (the snapshot-default for an agent loop; issue #1787). " +
             "Pass `observe=\"png\"` to get the rendered PNG inline when you actually need to see " +
@@ -1265,13 +1274,15 @@ class DaemonMcpServer(
               "type":"object",
               "properties":{
                 "uri":{"type":"string","description":"compose-preview://<workspace>/<module>/<fqn>?config=<qualifier>"},
+                "preview":{"type":"string","description":"Alternative to uri: a @Preview function name or unique FQN suffix, e.g. 'ListScreenPreview'. With several matches (such as @WearPreviewDevices variants) the first is rendered and the rest are listed as otherMatches."},
+                "card":{"type":"boolean","description":"With inline=false, also write a self-contained viewer card (HTML) and return cardPath plus an <agent-embed> line for the reply. Implies inline=false. Default true for Antigravity."},
                 "observe":{"type":"string","enum":["png","semantics","hash"],"description":"Observation level (issue #1787). Default 'semantics' — the compose/semantics tree + sha256 + dimensions with NO base64, the token-frugal snapshot-default for an agent loop (fetch pixels only when you need them). 'png' returns the base64 image (request it when you need to see pixels); 'hash' returns just sha256 + dimensions."},
-                "inline":{"type":"boolean","description":"Default true. Set false on a local-FS client to return the rendered PNG's absolute pngPath plus sha256, dimensions, changed, and durationMs as text instead of an inline observation. inline=false takes precedence over observe, so it returns no semantics or image content. Cannot be combined with crop."},
+                "inline":{"type":"boolean","description":"Default true. Set false on a local-FS client to return the rendered PNG's absolute pngPath plus sha256, dimensions, changed, and durationMs as text instead of an inline observation. inline=false takes precedence over observe, so it returns no semantics or image content. Cannot be combined with crop. Antigravity defaults to false when observe and crop are omitted."},
                 "crop":{"type":"object","description":"Return only ONE element's rectangle instead of the full frame (issue #1817) — far fewer tokens, and it focuses the view on the region you care about (the natural partner to diff_semantics: 'ref X changed' -> crop ref X). Set EITHER a semantic target (ref | testTag | role/text, resolved against compose/semantics) OR explicit render-pixel bounds {left,top,right,bottom}. Honours 'observe': png returns the cropped image (+ region metadata), hash/semantics return the crop's sha + dimensions only.","properties":{"ref":{"type":"string"},"testTag":{"type":"string"},"role":{"type":"string"},"text":{"type":"string"},"left":{"type":"integer"},"top":{"type":"integer"},"right":{"type":"integer"},"bottom":{"type":"integer"}}},
                 "overrides":{"type":"object","description":"Optional per-call display overrides."},
                 "force":{"type":"object","description":"Sanctioned escape hatch when the freshness probe missed an edit. Forwards fileChanged({kind:\"classpath\"}) before rendering, dropping the daemon's user classloader. Each use is logged + counted; please report on issue #924.","properties":{"reason":{"type":"string","description":"Human-readable reason for needing force (required)."}},"required":["reason"]}
               },
-              "required":["uri"]
+              "required":[]
             }
             """
               .trimIndent()
@@ -1407,7 +1418,7 @@ class DaemonMcpServer(
       ToolDef(
         name = "render_preview",
         description =
-          "Render a preview by URI, bypassing the in-memory render cache. Returns a token-frugal " +
+          "Render a preview by URI (or by `preview` function name), bypassing the in-memory render cache. Returns a token-frugal " +
             "structured observation by default (`observe=\"semantics\"`: the compose/semantics tree " +
             "+ sha256 + dimensions, NO base64; issue #1787) — pass `observe=\"png\"` for the rendered " +
             "PNG inline, `inline=false` for its local on-disk PNG path + metadata, or " +
@@ -1432,8 +1443,10 @@ class DaemonMcpServer(
               "type":"object",
               "properties":{
                 "uri":{"type":"string","description":"compose-preview://<workspace>/<module>/<fqn>?config=<qualifier>"},
+                "preview":{"type":"string","description":"Alternative to uri: a @Preview function name or unique FQN suffix, e.g. 'ListScreenPreview'. With several matches (such as @WearPreviewDevices variants) the first is rendered and the rest are listed as otherMatches."},
+                "card":{"type":"boolean","description":"With inline=false, also write a self-contained viewer card (HTML) and return cardPath plus an <agent-embed> line for the reply. Implies inline=false. Default true for Antigravity."},
                 "observe":{"type":"string","enum":["png","semantics","hash"],"description":"Observation level (issue #1787). Default 'semantics' returns the compose/semantics tree + sha256 + width/height with NO base64 — the token-frugal snapshot-default for a multi-step agent loop (fetch pixels only when you need them). 'png' returns the base64 image (request it when you need to see pixels); 'hash' returns just sha256 + dimensions."},
-                "inline":{"type":"boolean","description":"Default true. Set false on a local-FS client to return the rendered PNG's absolute pngPath plus sha256, dimensions, changed, and durationMs as text instead of an inline observation. inline=false takes precedence over observe, so it returns no semantics or image content. Cannot be combined with crop."},
+                "inline":{"type":"boolean","description":"Default true. Set false on a local-FS client to return the rendered PNG's absolute pngPath plus sha256, dimensions, changed, and durationMs as text instead of an inline observation. inline=false takes precedence over observe, so it returns no semantics or image content. Cannot be combined with crop. Antigravity defaults to false when observe and crop are omitted."},
                 "overrides":{
                   "type":"object",
                   "description":"Per-call display overrides. Each field is optional; nulls fall back to the discovery-time RenderSpec. Backends that don't model a field (e.g. desktop has no Android resource qualifier system) ignore it.",
@@ -1556,7 +1569,7 @@ class DaemonMcpServer(
                   }
                 }
               },
-              "required":["uri"]
+              "required":[]
             }
             """
               .trimIndent()
@@ -2196,7 +2209,10 @@ class DaemonMcpServer(
       "list_projects" -> toolListProjects()
       "list_devices" -> toolListDevices()
       "find_previews_for_file" -> toolFindPreviewsForFile(args)
-      "render_preview" -> toolRenderPreview(session, args)
+      "render_preview" -> {
+        autoRegisterWorkspace(session)
+        toolRenderPreview(session, args)
+      }
       "render_matrix" -> toolRenderMatrix(session, args)
       "watch" -> toolWatch(session, args)
       "unwatch" -> toolUnwatch(session, args)
@@ -2451,15 +2467,223 @@ class DaemonMcpServer(
     val file = File(path)
     if (!file.isDirectory)
       return errorCallToolResult("register_project: '$path' is not a directory")
-    val project = supervisor.registerProject(file, rootName, modules)
+    val project = registerProjectAt(file, rootName, modules)
     val payload = buildJsonObject {
       put("workspaceId", project.workspaceId.value)
       put("rootProjectName", project.rootProjectName)
       put("path", project.path.absolutePath)
       putJsonArray("modules") { project.knownModules.forEach { add(JsonPrimitive(it)) } }
     }
-    sessions.forEach { it.notifyResourceListChanged() }
     return CallToolResult(content = listOf(ContentBlock.Text(payload.toString())))
+  }
+
+  /** The `register_project` path, shared with [autoRegisterWorkspace]. */
+  private fun registerProjectAt(
+    dir: File,
+    rootName: String?,
+    modules: List<String>,
+  ): RegisteredProject {
+    val project = supervisor.registerProject(dir, rootName, modules)
+    sessions.forEach { it.notifyResourceListChanged() }
+    return project
+  }
+
+  /**
+   * Registers the client's workspace on first use when nothing is registered yet (#1165): the MCP
+   * roots when the client offers them, otherwise [workingDirectory]. Only Gradle builds qualify, so
+   * a server started from an unrelated directory stays empty and the tools keep their errors.
+   */
+  private suspend fun autoRegisterWorkspace(session: Session) {
+    if (supervisor.listProjects().isNotEmpty()) return
+    val roots = (session as? McpSession)?.rootDirectories().orEmpty()
+    val candidates = roots.ifEmpty { listOfNotNull(workingDirectory) }
+    candidates
+      .filter { dir -> GRADLE_BUILD_FILES.any { File(dir, it).isFile } }
+      .forEach { dir ->
+        runCatching { registerProjectAt(dir, rootName = null, modules = emptyList()) }
+          .onFailure { System.err.println("auto-register failed for $dir: ${it.message}") }
+      }
+  }
+
+  private sealed interface PreviewNameResolution {
+    data class Found(val uri: String, val others: List<String>) : PreviewNameResolution
+
+    data class Missing(val message: String) : PreviewNameResolution
+  }
+
+  /**
+   * Resolves `render_preview`'s `preview` argument (a function name or a unique suffix of the FQN)
+   * against the catalog. When nothing matches yet, it first starts the registered modules' daemons
+   * (known modules plus any with a launch descriptor on disk) so their discovery seeds the catalog,
+   * then looks again.
+   */
+  private fun resolvePreviewName(name: String): PreviewNameResolution {
+    val trimmed = name.trim()
+    var matches = previewNameMatches(trimmed)
+    if (matches.isEmpty()) {
+      if (supervisor.listProjects().isEmpty()) {
+        return PreviewNameResolution.Missing(
+          "no project registered; call register_project with the Gradle build's path"
+        )
+      }
+      spawnUndiscoveredModules()
+      matches = previewNameMatches(trimmed)
+    }
+    if (matches.isEmpty()) {
+      val candidates = closePreviewNames(trimmed)
+      return PreviewNameResolution.Missing(
+        "no preview matches '$trimmed'" +
+          if (candidates.isEmpty()) "" else "; close matches: ${candidates.joinToString(", ")}"
+      )
+    }
+    return PreviewNameResolution.Found(matches.first(), matches.drop(1))
+  }
+
+  /** Matching URIs: an exact (non-variant) match first, then in URI order. */
+  private fun previewNameMatches(name: String): List<String> {
+    fun matchesName(id: String) = id == name || id.endsWith(".$name")
+    return catalog
+      .flatMap { (addr, byId) ->
+        byId.values.mapNotNull { entry ->
+          val exact = matchesName(entry.fqn)
+          if (!exact && previewBaseIds(entry).none(::matchesName)) return@mapNotNull null
+          val uri = PreviewUri(addr.workspaceId, addr.modulePath, entry.fqn, entry.config).toUri()
+          exact to uri
+        }
+      }
+      .sortedWith(compareBy<Pair<Boolean, String>> { !it.first }.thenBy { it.second })
+      .map { it.second }
+  }
+
+  /** The function's own FQN for a variant id such as `…Kt.ListPreview_Devices - Small Round`. */
+  private fun previewBaseIds(entry: PreviewEntry): List<String> {
+    val functionName = entry.functionName ?: return emptyList()
+    val owner = entry.fqn.substringBeforeLast('.', "")
+    return listOf(if (owner.isEmpty()) functionName else "$owner.$functionName")
+  }
+
+  /** Up to five catalogued function names nearest to [name], for the no-match error. */
+  private fun closePreviewNames(name: String): List<String> {
+    val needle = name.substringAfterLast('.').lowercase()
+    return catalog.values
+      .flatMap { it.values }
+      .map { entry -> entry.functionName ?: entry.fqn.substringAfterLast('.') }
+      .distinct()
+      .sortedWith(
+        compareBy<String> { !it.lowercase().contains(needle) }
+          .thenBy { editDistance(it.lowercase(), needle) }
+          .thenBy { it }
+      )
+      .take(5)
+  }
+
+  private fun editDistance(a: String, b: String): Int {
+    var previous = IntArray(b.length + 1) { it }
+    for (i in 1..a.length) {
+      val current = IntArray(b.length + 1)
+      current[0] = i
+      for (j in 1..b.length) {
+        val cost = if (a[i - 1] == b[j - 1]) 0 else 1
+        current[j] = minOf(previous[j] + 1, current[j - 1] + 1, previous[j - 1] + cost)
+      }
+      previous = current
+    }
+    return previous[b.length]
+  }
+
+  /**
+   * Starts each registered module's daemon that is not running; its discovery seeds the catalog.
+   */
+  private fun spawnUndiscoveredModules() {
+    supervisor.listProjects().forEach { project ->
+      val modules =
+        synchronized(project.knownModules) { project.knownModules.toSet() } +
+          runCatching { DescriptorProvider.indexDescriptorsByModulePath(project.path).keys }
+            .getOrDefault(emptySet())
+      modules
+        .filterNot { project.daemons.containsKey(it) }
+        .forEach { module ->
+          runCatching { supervisor.daemonFor(project.workspaceId, module) }
+            .onFailure {
+              System.err.println("render_preview: could not start $module: ${it.message}")
+            }
+        }
+    }
+  }
+
+  private sealed interface PreviewCard {
+    data class Written(val file: File) : PreviewCard
+
+    data class Skipped(val reason: String) : PreviewCard
+  }
+
+  /**
+   * Writes an Antigravity preview card: the bundled viewer plus the render as an inline static
+   * result block (the v3.77.0 viewer contract). Antigravity loads `<agent-embed src="file://…">`
+   * into an `iframe srcdoc`, so the result has to travel inside the file. Mirrors compose-ag-plugin
+   * `assets/compose-preview-card.py`, including its 500,000-byte cap.
+   */
+  private fun writePreviewCard(
+    uri: PreviewUri,
+    pngBytes: ByteArray,
+    sha: String,
+    stablePng: File,
+  ): PreviewCard {
+    val summary = buildJsonObject {
+      put("uri", uri.toUri())
+      pngDimensions(pngBytes)?.let {
+        put("widthPx", it.first)
+        put("heightPx", it.second)
+      }
+      put("sha256", sha)
+    }
+    val envelope = buildJsonObject {
+      put("version", 1)
+      putJsonObject("arguments") { put("uri", uri.toUri()) }
+      putJsonObject("result") {
+        putJsonArray("content") {
+          add(
+            buildJsonObject {
+              put("type", "image")
+              put("data", Base64.getEncoder().encodeToString(pngBytes))
+              put("mimeType", "image/png")
+            }
+          )
+          add(
+            buildJsonObject {
+              put("type", "text")
+              put("text", summary.toString())
+            }
+          )
+        }
+      }
+    }
+    val payload = envelope.toString()
+    if (payload.toByteArray(Charsets.UTF_8).size > MAX_CARD_RESULT_BYTES) {
+      return PreviewCard.Skipped("the render is too large for a card (over 500,000 bytes)")
+    }
+    return runCatching {
+      // `<` for every `<` keeps `</script>` and `<!--` out of the block; JSON.parse undoes it.
+      val block =
+        "<script type=\"application/json\" id=\"compose-preview-result\">" +
+          payload.replace("<", "\\u003c") +
+          "</script>\n"
+      val target =
+        File(previewCardDirectory(stablePng), "compose-preview-card-${sha.take(12)}.html")
+      target.writeText(viewerHtml() + block, Charsets.UTF_8)
+      PreviewCard.Written(target)
+    }
+      .getOrElse { PreviewCard.Skipped("could not write the card: ${it.message}") }
+  }
+
+  /** Antigravity's per-conversation artifact directory when it exists, else next to the PNG. */
+  private fun previewCardDirectory(stablePng: File): File {
+    val conversation = environment["ANTIGRAVITY_CONVERSATION_ID"]?.trim().orEmpty()
+    if (conversation.isNotEmpty() && '/' !in conversation && conversation !in setOf(".", "..")) {
+      val brain = File(homeDirectory, ".gemini/antigravity/brain/$conversation")
+      if (brain.isDirectory) return brain
+    }
+    return stablePng.parentFile
   }
 
   private fun toolUnregisterProject(args: JsonObject): CallToolResult {
@@ -2527,15 +2751,24 @@ class DaemonMcpServer(
   }
 
   private fun toolRenderPreview(session: Session, args: JsonObject): CallToolResult {
+    val previewName = args["preview"]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() }
+    var otherMatches = emptyList<String>()
     val uriStr =
       args["uri"]?.jsonPrimitive?.contentOrNull
-        ?: return errorCallToolResult("render_preview: missing 'uri'")
+        ?: when (val resolved = previewName?.let { resolvePreviewName(it) }) {
+          null -> return errorCallToolResult("render_preview: missing 'uri' or 'preview'")
+          is PreviewNameResolution.Missing ->
+            return errorCallToolResult("render_preview: ${resolved.message}")
+          is PreviewNameResolution.Found -> {
+            otherMatches = resolved.others
+            resolved.uri
+          }
+        }
     val uri = PreviewUri.parseOrNull(uriStr) ?: return errorCallToolResult("invalid uri: $uriStr")
     val observe = args["observe"]?.jsonPrimitive?.contentOrNull?.lowercase() ?: "semantics"
     if (observe !in setOf("png", "semantics", "hash")) {
       return errorCallToolResult("render_preview: 'observe' must be one of png | semantics | hash")
     }
-    val inline = args["inline"]?.jsonPrimitive?.contentOrNull?.toBooleanStrictOrNull() ?: true
     val cropArg =
       args["crop"]?.let {
         it as? JsonObject
@@ -2544,6 +2777,21 @@ class DaemonMcpServer(
               "bounds {left,top,right,bottom})"
           )
       }
+    // Antigravity shows a render through a card built from the on-disk PNG, so it defaults to the
+    // file result (and the card) unless the caller asked for an inline observation or a crop.
+    val antigravity = (session as? McpSession)?.clientName == ANTIGRAVITY_CLIENT_NAME
+    val cardArg = args["card"]?.jsonPrimitive?.contentOrNull?.toBooleanStrictOrNull()
+    val inline =
+      args["inline"]?.jsonPrimitive?.contentOrNull?.toBooleanStrictOrNull()
+        ?: when {
+          cardArg == true -> false
+          antigravity && args["observe"] == null && cropArg == null -> false
+          else -> true
+        }
+    val card = cardArg ?: (antigravity && !inline)
+    if (card && inline) {
+      return errorCallToolResult("render_preview: 'card' needs the file result (inline=false)")
+    }
     val overrides =
       args["overrides"]?.let {
         runCatching { decodePreviewOverrides(it) }
@@ -2581,6 +2829,8 @@ class DaemonMcpServer(
           overrides,
           resourceUri =
             uri.copy(overridesJson = (args["overrides"] as? JsonObject)?.toString()).toUri(),
+          card = card,
+          otherMatches = otherMatches,
         )
       } else if (cropArg != null) {
         renderCropped(uri, overrides, cropArg, observe)
@@ -2614,6 +2864,20 @@ class DaemonMcpServer(
         }
       }
     }
+      .map { result ->
+        if (!inline || otherMatches.isEmpty() || result.isError == true) result
+        else
+          result.copy(
+            content =
+              result.content +
+                ContentBlock.Text(
+                  buildJsonObject {
+                    putJsonArray("otherMatches") { otherMatches.forEach { add(JsonPrimitive(it)) } }
+                  }
+                    .toString()
+                )
+          )
+      }
       .getOrElse { errorCallToolResult("render_preview failed: ${it.message}") }
   }
 
@@ -2627,6 +2891,8 @@ class DaemonMcpServer(
     uri: PreviewUri,
     overrides: PreviewOverrides?,
     resourceUri: String,
+    card: Boolean = false,
+    otherMatches: List<String> = emptyList(),
   ): CallToolResult {
     val startedAt = System.nanoTime()
     val outcome = awaitNextRender(uri, session, overrides = overrides)
@@ -2647,6 +2913,17 @@ class DaemonMcpServer(
       put("sha256", sha)
       put("changed", changed)
       put("durationMs", TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedAt))
+      if (otherMatches.isNotEmpty())
+        putJsonArray("otherMatches") { otherMatches.forEach { add(JsonPrimitive(it)) } }
+      if (card) {
+        when (val written = writePreviewCard(uri, pngBytes, sha, stablePng)) {
+          is PreviewCard.Written -> {
+            put("cardPath", written.file.canonicalPath)
+            put("embed", "<agent-embed src=\"${written.file.toPath().toUri()}\"></agent-embed>")
+          }
+          is PreviewCard.Skipped -> put("cardSkipped", written.reason)
+        }
+      }
     }
     // The link lets an MCP App host show the render even though no bytes are inline; text-only
     // clients keep the local path above.
@@ -5658,6 +5935,27 @@ class DaemonMcpServer(
     const val MCP_APP_VIEWER_URI: String = "ui://compose-preview/viewer"
     const val MCP_APP_MIME_TYPE: String = "text/html;profile=mcp-app"
     private const val MCP_APP_VIEWER_ASSET: String = "compose-preview-viewer.html"
+
+    /**
+     * `clientInfo.name` Antigravity sends; it gets the file result and a preview card by default.
+     */
+    private const val ANTIGRAVITY_CLIENT_NAME: String = "antigravity-client"
+
+    /** Largest static result a preview card embeds (UTF-8 bytes), as in compose-preview-card.py. */
+    private const val MAX_CARD_RESULT_BYTES: Int = 500_000
+
+    /** A directory holding one of these is a Gradle build the server may auto-register. */
+    private val GRADLE_BUILD_FILES =
+      listOf("settings.gradle.kts", "settings.gradle", "build.gradle.kts", "build.gradle")
+
+    /** Short `initialize` instructions for the local server (#1163, #1165). */
+    internal const val LOCAL_INSTRUCTIONS: String =
+      "Renders the person's own Compose @Preview functions from their Gradle workspace, " +
+        "which is registered automatically on first use.\n" +
+        "Render one with render_preview preview=<FunctionName> (a function name or FQN suffix); " +
+        "no URI lookup, register_project or source search is needed.\n" +
+        "With inline=false it returns pngPath, and in Antigravity also cardPath plus an " +
+        "<agent-embed> line to paste into the reply."
 
     /** Tools whose existing text output gains an optional, portable MCP Apps presentation. */
     private val VIEWER_TOOL_NAMES =

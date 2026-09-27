@@ -45,9 +45,9 @@ import io.modelcontextprotocol.kotlin.sdk.types.Tool
 import io.modelcontextprotocol.kotlin.sdk.types.ToolSchema
 import io.modelcontextprotocol.kotlin.sdk.types.UnsubscribeRequest
 import java.io.Closeable
+import java.io.File
 import java.io.InputStream
 import java.io.OutputStream
-import java.util.UUID
 import java.util.concurrent.CancellationException
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.ConcurrentHashMap
@@ -102,6 +102,8 @@ class McpSession(
   private val output: OutputStream,
   private val configure: (ServerSession) -> Unit,
   private val onClose: () -> Unit,
+  /** Sent as the `initialize` result's `instructions`; null sends none. */
+  private val instructions: String? = null,
 ) : Closeable, Session {
   private val closed = CompletableFuture<Unit>()
   @Volatile private var sdkSession: ServerSession? = null
@@ -120,7 +122,8 @@ class McpSession(
               // replies "Tool <name> not found". Constructing the ServerSession directly lets us
               // set every handler first, then connect, so no request is ever served by the SDK
               // defaults. ServerSession's constructor wires up initialize/ping/logging itself.
-              val session = ServerSession(serverInfo, options, UUID.randomUUID().toString())
+              // The third argument is the initialize `instructions`, not a session id (#1163).
+              val session = ServerSession(serverInfo, options, instructions)
               sdkSession = session
               session.onClose {
                 closed.complete(Unit)
@@ -226,7 +229,36 @@ class McpSession(
     }
   }
 
+  /** The client's `clientInfo.name` from `initialize`, or null before the handshake. */
+  val clientName: String?
+    get() = sdkSession?.clientVersion?.name
+
+  /**
+   * Local directories the client offers as MCP roots. Empty when the client declared no `roots`
+   * capability, did not answer in time, or offered only non-`file:` roots.
+   */
+  suspend fun rootDirectories(timeoutMs: Long = ROOTS_TIMEOUT_MS): List<File> {
+    val session = sdkSession ?: return emptyList()
+    if (session.clientCapabilities?.roots == null) return emptyList()
+    val roots =
+      try {
+        withTimeoutOrNull(timeoutMs) {
+          session.listRoots(options = RequestOptions(timeout = timeoutMs.milliseconds)).roots
+        }
+      } catch (cancelled: CancellationException) {
+        throw cancelled
+      } catch (_: Exception) {
+        null
+      } ?: return emptyList()
+    return roots.mapNotNull { root ->
+      runCatching { File(java.net.URI(root.uri)) }.getOrNull()?.takeIf { it.isDirectory }
+    }
+  }
+
   internal companion object {
+    /** Bound on a `roots/list` round trip; a client that never answers must not stall a render. */
+    const val ROOTS_TIMEOUT_MS = 5_000L
+
     /**
      * A person answering a form needs longer than the SDK's 60-second request default; a shorter
      * bound would silently fall back while their dialog is still open.
