@@ -3,6 +3,7 @@ package ee.schimke.composeai.mcp
 import com.google.common.truth.Truth.assertThat
 import com.google.common.truth.Truth.assertWithMessage
 import ee.schimke.composeai.daemon.client.WorkspaceId
+import ee.schimke.composeai.data.layoutinspector.ComposeSemanticsProduct
 import ee.schimke.composeai.mcp.protocol.ReadResourceResult
 import ee.schimke.composeai.mcp.protocol.ResourceContents
 import io.modelcontextprotocol.kotlin.sdk.types.Implementation
@@ -3888,6 +3889,89 @@ class DaemonMcpServerTest {
     assertThat(fieldChange["field"]?.jsonPrimitive?.contentOrNull).isEqualTo("text")
     assertThat(fieldChange["from"]?.jsonPrimitive?.contentOrNull).isEqualTo("Hello")
     assertThat(fieldChange["to"]?.jsonPrimitive?.contentOrNull).isEqualTo("Goodbye")
+  }
+
+  @Test
+  fun `diff_semantics renders each replay URI override before fetching its semantics`() {
+    client.initialize()
+    val projectDir = tmp.newFolder("workspace")
+    tmp.newFolder("workspace", "module")
+    val workspaceId = registerWorkspace(projectDir, "demo")
+    val previewId = "com.example.Responsive"
+    val pngFile = tmp.newFile("semantic-overrides.png")
+    Files.write(pngFile.toPath(), byteArrayOf(0x89.toByte(), 0x50, 0x4e, 0x47))
+
+    factory.daemonConfigurer = { daemon ->
+      daemon.advertisedDataProducts =
+        listOf(
+          ee.schimke.composeai.daemon.protocol.DataProductCapability(
+            kind = ComposeSemanticsProduct.KIND,
+            schemaVersion = 2,
+            transport = ee.schimke.composeai.daemon.protocol.DataProductTransport.INLINE,
+            attachable = true,
+            fetchable = true,
+            requiresRerender = false,
+          )
+        )
+      daemon.advertisedSupportedOverrides = listOf("widthPx")
+      daemon.autoRenderPngPath = { id -> if (id == previewId) pngFile.absolutePath else null }
+      daemon.dataFetchHandler = { _, kind, _, _ ->
+        val renderedWidth = daemon.renderOverrides.lastOrNull()?.widthPx
+        FakeDaemon.DataFetchOutcome.Ok(
+          kind = kind,
+          schemaVersion = 2,
+          payload =
+            buildJsonObject {
+              putJsonObject("root") {
+                put("nodeId", "1")
+                put("boundsInRoot", "0,0,64,64")
+                putJsonArray("children") {
+                  add(
+                    buildJsonObject {
+                      put("nodeId", "2")
+                      put("boundsInRoot", "0,0,20,20")
+                      put("testTag", "width")
+                      put("text", renderedWidth.toString())
+                    }
+                  )
+                }
+              }
+            },
+        )
+      }
+    }
+    val daemon = warmDaemonFor(workspaceId, ":module")
+
+    fun replayUri(width: Int) =
+      PreviewUri(
+          workspaceId,
+          ":module",
+          previewId,
+          overridesJson = buildJsonObject { put("widthPx", width) }.toString(),
+        )
+        .toUri()
+
+    val response =
+      client.callTool(
+        "diff_semantics",
+        buildJsonObject {
+          put("baseUri", replayUri(320))
+          put("headUri", replayUri(640))
+        },
+        timeoutMs = 10_000,
+      )
+
+    assertThat(daemon.renderRequests.poll(2_000, TimeUnit.MILLISECONDS))
+      .isEqualTo(listOf(previewId))
+    assertThat(daemon.renderRequests.poll(2_000, TimeUnit.MILLISECONDS))
+      .isEqualTo(listOf(previewId))
+    assertThat(daemon.renderOverrides.map { it?.widthPx }).containsExactly(320, 640).inOrder()
+    val parsed = json.parseToJsonElement(response.firstTextContent()).jsonObject
+    val changed = parsed["delta"]!!.jsonObject["changed"]!!.jsonArray.single().jsonObject
+    val fieldChange = changed["changes"]!!.jsonArray.single().jsonObject
+    assertThat(fieldChange["field"]?.jsonPrimitive?.contentOrNull).isEqualTo("text")
+    assertThat(fieldChange["from"]?.jsonPrimitive?.contentOrNull).isEqualTo("320")
+    assertThat(fieldChange["to"]?.jsonPrimitive?.contentOrNull).isEqualTo("640")
   }
 
   @Test

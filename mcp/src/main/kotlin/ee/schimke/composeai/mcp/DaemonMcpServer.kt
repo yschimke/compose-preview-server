@@ -3964,23 +3964,51 @@ class DaemonMcpServer(
       .getOrElse {
         return null to "$side daemon spawn failed: ${it.message}"
       }
+    val overrides =
+      uri.overridesJson?.let { raw ->
+        runCatching {
+          val decoded = decodePreviewOverrides(json.parseToJsonElement(raw))
+          val violations = validateOverrides(decoded, daemon)
+          check(violations.isEmpty()) {
+            "Invalid compose-preview resource overrides: ${violations.joinToString("; ")}"
+          }
+          decoded
+        }
+          .getOrElse {
+            return null to "$side invalid resource overrides: ${it.message}"
+          }
+      }
+    val renderUri = uri.copy(overridesJson = null)
     val result = runCatching {
-      try {
+      if (overrides != null) {
+        // The daemon's data/fetch call is keyed by preview id, so it reads the products attached
+        // to the most recent render. Force the URI's replay state first; otherwise the semantics
+        // could describe defaults while the viewer reads overridden pixels from the same URI.
+        awaitNextRender(renderUri, overrides = overrides)
         daemon.client.dataFetch(
           uri.previewFqn,
           ComposeSemanticsProduct.KIND,
           null,
           inline = true,
         )
-      } catch (e: DataProductWireException) {
-        if (e.code != DataProductWireException.NOT_AVAILABLE) throw e
-        awaitNextRender(uri)
-        daemon.client.dataFetch(
-          uri.previewFqn,
-          ComposeSemanticsProduct.KIND,
-          null,
-          inline = true,
-        )
+      } else {
+        try {
+          daemon.client.dataFetch(
+            uri.previewFqn,
+            ComposeSemanticsProduct.KIND,
+            null,
+            inline = true,
+          )
+        } catch (e: DataProductWireException) {
+          if (e.code != DataProductWireException.NOT_AVAILABLE) throw e
+          awaitNextRender(renderUri)
+          daemon.client.dataFetch(
+            uri.previewFqn,
+            ComposeSemanticsProduct.KIND,
+            null,
+            inline = true,
+          )
+        }
       }
     }
       .getOrElse { e ->
