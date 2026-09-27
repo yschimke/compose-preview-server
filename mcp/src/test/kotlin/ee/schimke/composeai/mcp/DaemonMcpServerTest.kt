@@ -213,6 +213,14 @@ class DaemonMcpServerTest {
       .isEqualTo(DaemonMcpServer.MCP_APP_VIEWER_URI)
     assertThat(tools.tools.single { it.name == "render_matrix" }.meta).isNotNull()
     assertThat(tools.tools.single { it.name == "diff_semantics" }.meta).isNotNull()
+    // The viewer calls these itself, so hosts must see them as visible to the app.
+    for (name in listOf("render_preview", "render_preview_overlay", "get_preview_data")) {
+      val visibility =
+        tools.tools.single { it.name == name }.meta!!["ui"]!!.jsonObject["visibility"]!!.jsonArray
+      com.google.common.truth.Truth.assertWithMessage(name)
+        .that(visibility.map { it.jsonPrimitive.content })
+        .containsExactly("model", "app")
+    }
 
     val listed = client.request("resources/list")
     val viewer =
@@ -1563,7 +1571,18 @@ class DaemonMcpServerTest {
 
     val missing = render("ListScreenPrevew")
     assertThat(missing.isError()).isTrue()
-    assertThat(missing.firstTextContent()).contains("close matches: ListScreenPreview")
+    assertThat(missing.firstTextContent())
+      .isEqualTo(
+        "render_preview: no preview matches 'ListScreenPrevew'. Closest: ListScreenPreview, " +
+          "DetailPreview (3 previews in 1 module). Call list_previews to see all."
+      )
+    assertThat(
+        missing.raw["structuredContent"]!!.jsonObject["suggestions"]!!.jsonArray.map {
+          it.jsonPrimitive.content
+        }
+      )
+      .containsExactly("ListScreenPreview", "DetailPreview")
+      .inOrder()
   }
 
   @Test
@@ -2323,6 +2342,53 @@ class DaemonMcpServerTest {
     assertThat(root["testTag"]?.jsonPrimitive?.contentOrNull).isEqualTo("hero")
     // ref assigned by SemanticsRefs on the producer side round-trips through.
     assertThat(parsed["sha256"]?.jsonPrimitive?.contentOrNull).isNotEmpty()
+  }
+
+  /** One registered preview whose render is a solid 2x2 PNG; returns its URI. */
+  private fun solidPreview(name: String): String {
+    val workspaceId = registerWorkspace(tmp.newFolder(name), name)
+    val daemon = warmDaemonFor(workspaceId, ":module")
+    val previewId = "com.example.$name"
+    daemon.emitDiscovery(previewId)
+    client.expectNotification("notifications/resources/list_changed", 2_000)
+    val png = tmp.newFile("$name.png")
+    writeSolidPng(png, 0xff00ff00.toInt())
+    daemon.autoRenderPngPath = { png.absolutePath }
+    return PreviewUri(workspaceId, ":module", previewId).toUri()
+  }
+
+  private fun McpToolResult.contentTypes(): List<String> =
+    raw["content"]!!.jsonArray.map { it.jsonObject["type"]!!.jsonPrimitive.content }
+
+  @Test
+  fun `render_preview defaults to an image for a client that declares MCP Apps`() {
+    client.initialize(
+      capabilities =
+        buildJsonObject {
+          putJsonObject("extensions") {
+            putJsonObject("io.modelcontextprotocol/ui") {
+              putJsonArray("mimeTypes") { add(JsonPrimitive("text/html;profile=mcp-app")) }
+            }
+          }
+        }
+    )
+    val uri = solidPreview("AppsClient")
+    val result =
+      client.callTool("render_preview", buildJsonObject { put("uri", uri) }, timeoutMs = 10_000)
+    assertThat(result.isError()).isFalse()
+    assertThat(result.contentTypes()).contains("image")
+  }
+
+  @Test
+  fun `render_preview semantics falls back to the image when semantics are unavailable`() {
+    client.initialize()
+    val uri = solidPreview("NoSemantics")
+    val result =
+      client.callTool("render_preview", buildJsonObject { put("uri", uri) }, timeoutMs = 10_000)
+    val parsed = json.parseToJsonElement(result.firstTextContent()).jsonObject
+    assertThat(parsed["semanticsUnavailable"]).isNotNull()
+    assertThat(parsed["note"]!!.jsonPrimitive.content).startsWith("semantics unavailable (")
+    assertThat(result.contentTypes()).containsExactly("text", "image", "resource_link").inOrder()
   }
 
   @Test

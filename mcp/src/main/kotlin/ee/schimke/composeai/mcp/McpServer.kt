@@ -229,6 +229,18 @@ class McpSession(
     }
   }
 
+  /**
+   * True when the client declared the MCP Apps extension (`io.modelcontextprotocol/ui`, under
+   * `capabilities.extensions`, or `experimental` for earlier hosts): it renders the viewer, so a
+   * result without an image leaves the viewer empty.
+   */
+  val supportsMcpApps: Boolean
+    get() {
+      val capabilities = sdkSession?.clientCapabilities ?: return false
+      return capabilities.extensions?.containsKey(MCP_APPS_EXTENSION) == true ||
+        capabilities.experimental?.containsKey(MCP_APPS_EXTENSION) == true
+    }
+
   /** The client's `clientInfo.name` from `initialize`, or null before the handshake. */
   val clientName: String?
     get() = sdkSession?.clientVersion?.name
@@ -425,6 +437,7 @@ internal fun CallToolResult.toSdkCallToolResult():
     content = content.map { it.toSdkContent() },
     isError = isError ?: false,
     meta = meta,
+    structuredContent = structuredContent,
   )
 
 private fun ContentBlock.toSdkContent(): SdkContentBlock =
@@ -458,5 +471,12 @@ fun pngCallToolResult(bytesBase64: String): CallToolResult =
   CallToolResult(content = listOf(ContentBlock.Image(data = bytesBase64, mimeType = "image/png")))
 
 /** Convenience: error response — `isError = true` per MCP spec for tool-level errors. */
-fun errorCallToolResult(message: String): CallToolResult =
-  CallToolResult(content = listOf(ContentBlock.Text(message)), isError = true)
+fun errorCallToolResult(message: String, structured: JsonObject? = null): CallToolResult =
+  CallToolResult(
+    content = listOf(ContentBlock.Text(message)),
+    isError = true,
+    structuredContent = structured,
+  )
+
+/** The MCP Apps client capability key (MCP Apps spec 2026-01-26). */
+internal const val MCP_APPS_EXTENSION: String = "io.modelcontextprotocol/ui"

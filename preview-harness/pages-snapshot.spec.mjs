@@ -6522,9 +6522,13 @@ test("contract · static viewer bounds results and rejects credentials", async (
 
 // A fake MCP Apps host (2026-01-26 `ui/*` bridge) that proxies a compose-preview server's tools
 // and resources, so the live viewer actions can be driven end to end (#1119).
-async function openLiveViewer(page, pngs, { frameHeight = 700 } = {}) {
+async function openLiveViewer(
+  page,
+  pngs,
+  { frameHeight = 700, listTools = true, refuseCalls = false, firstResult } = {},
+) {
   await page.goto("/preview-harness/index.html");
-  await page.evaluate(({ pngs, frameHeight }) => {
+  await page.evaluate(({ pngs, frameHeight, listTools, refuseCalls, firstResult }) => {
     const base = "compose-preview://fixture/_app/com.example.Card";
     const round = "compose-preview://fixture/_app/com.example.Card_Round?config=round";
     const log = (window.__live = {
@@ -6559,7 +6563,7 @@ async function openLiveViewer(page, pngs, { frameHeight = 700 } = {}) {
         send({ method: "ui/notifications/tool-input", params: { arguments: { preview: "Card" } } });
         send({
           method: "ui/notifications/tool-result",
-          params: {
+          params: firstResult || {
             content: [
               { type: "text", text: JSON.stringify({ observe: "semantics", uri: base, sha256: "a" }) },
               { type: "text", text: JSON.stringify({ otherMatches: [round] }) },
@@ -6567,6 +6571,12 @@ async function openLiveViewer(page, pngs, { frameHeight = 700 } = {}) {
             ],
           },
         });
+      } else if (method === "tools/list" && !listTools) {
+        log.lists += 1;
+        send({ id, error: { code: -32601, message: "Method not found" } });
+      } else if (method === "tools/call" && refuseCalls) {
+        log.calls.push(params);
+        send({ id, error: { code: -32603, message: "Tool calls from apps are not allowed" } });
       } else if (method === "tools/list") {
         reply({
           tools: ["render_preview", "render_preview_overlay", "get_preview_data"].map((name) => ({
@@ -6628,7 +6638,7 @@ async function openLiveViewer(page, pngs, { frameHeight = 700 } = {}) {
     });
     frame.src = "/mcp-app/compose-preview-viewer.html";
     document.body.append(frame);
-  }, { pngs, frameHeight });
+  }, { pngs, frameHeight, listTools, refuseCalls, firstResult: firstResult ?? null });
   return page.frameLocator('iframe[title="Compose Preview MCP App"]');
 }
 
@@ -6776,6 +6786,97 @@ test("contract · a 160px host frame shows the whole preview and the toolbar", a
   const sizes = await page.evaluate(() => window.__live.sizes);
   expect(Math.max(...sizes.map((size) => size.height))).toBeGreaterThan(shown.height);
   expect(Math.max(...sizes.map((size) => size.height))).toBeGreaterThan(160);
+});
+
+const livePngs = () => ({
+  base: readFileSync(renderPlaceholder).toString("base64"),
+  round: readFileSync(resolve(pagesDir, "_render-placeholder-round.png")).toString("base64"),
+  refreshed: readFileSync(designRenderPlaceholder).toString("base64"),
+});
+
+test("contract · live actions work when the host refuses tools/list", async ({ page }) => {
+  const viewer = await openLiveViewer(page, livePngs(), { listTools: false });
+  const live = () => page.evaluate(() => window.__live);
+  const { round } = await page.evaluate(() => window.__liveUris);
+  await expect(viewer.locator("#canvas .preview-stage > img")).toBeVisible();
+  await expect(viewer.locator("#variant")).toBeVisible();
+  await expect(viewer.locator("#rerender")).toBeVisible();
+  await expect(viewer.locator("#layout")).toBeVisible();
+  await expect(viewer.locator("#a11y")).toBeVisible();
+  await viewer.locator("#variant").selectOption(round);
+  await expect.poll(async () => (await live()).calls.at(-1)).toEqual({
+    name: "render_preview",
+    arguments: { uri: round, observe: "png", inline: true },
+  });
+  await viewer.locator("#layout").click();
+  await expect(viewer.locator(".layout-boxes rect")).toHaveCount(2);
+});
+
+test("contract · a refused tool call disables only its control", async ({ page }) => {
+  const viewer = await openLiveViewer(page, livePngs(), { refuseCalls: true });
+  await expect(viewer.locator("#canvas .preview-stage > img")).toBeVisible();
+  await viewer.locator("#rerender").click();
+  await expect(viewer.locator("#rerender")).toBeDisabled();
+  await expect(viewer.locator("#rerender")).toHaveAttribute("title", "The host doesn't allow this from the viewer.");
+  await expect(viewer.locator("#meta")).toContainText("Re-render unavailable");
+  await expect(viewer.locator("#layout")).toBeEnabled();
+  await expect(viewer.locator("#canvas .preview-stage > img")).toBeVisible();
+});
+
+test("contract · an error result shows a clear error state, not Waiting", async ({ page }) => {
+  const message =
+    "render_preview: no preview matches 'ListScreenPrevew'. Closest: ListScreenPreview (3 previews in 1 module).";
+  const viewer = await openLiveViewer(page, livePngs(), {
+    firstResult: {
+      isError: true,
+      content: [{ type: "text", text: `${message}\nCall list_previews to see all.` }],
+    },
+  });
+  await expect(viewer.locator("#meta")).toHaveText("Render failed");
+  await expect(viewer.locator("#meta")).toHaveClass(/error/);
+  const notice = viewer.locator("#canvas .notice.error");
+  await expect(notice.locator("p")).toHaveText(message);
+  await expect(notice.locator("details pre")).toBeHidden();
+  await notice.locator("summary").click();
+  await expect(notice.locator("details pre")).toContainText("Call list_previews to see all.");
+  await expect(viewer.locator("#canvas")).not.toContainText("Waiting");
+});
+
+test("contract · a result without an image is re-rendered with one, and lists its variants", async ({ page }) => {
+  const pngs = livePngs();
+  const base = "compose-preview://fixture/_app/com.example.Card";
+  const round = "compose-preview://fixture/_app/com.example.Card_Round?config=round";
+  const viewer = await openLiveViewer(page, pngs, {
+    firstResult: {
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify({
+            observe: "semantics",
+            uri: base,
+            semanticsUnavailable: "kind not advertised: compose/semantics",
+            variantChoice: { mode: "text", choices: [base, round] },
+          }),
+        },
+      ],
+    },
+  });
+  await expect
+    .poll(() => page.evaluate(() => window.__live.calls[0]))
+    .toEqual({ name: "render_preview", arguments: { uri: base, observe: "png", inline: true } });
+  await expect(viewer.locator("#canvas .preview-stage > img")).toBeVisible();
+  await expect(viewer.locator("#canvas")).not.toContainText("semanticsUnavailable");
+
+  // Refused calls: the variants are still listed as labels, and the raw JSON is not the content.
+  const refused = await openLiveViewer(page, pngs, {
+    refuseCalls: true,
+    firstResult: {
+      content: [{ type: "text", text: JSON.stringify({ observe: "semantics", uri: base, variantChoice: { mode: "text", choices: [base, round] } }) }],
+    },
+  });
+  await expect(refused.locator(".notice strong")).toHaveText("No image in this result");
+  await expect(refused.locator(".variant-list button")).toHaveText(["Card", "Card_Round (round)"]);
+  await expect(refused.locator(".notice > p")).not.toContainText("{");
 });
 
 test("contract · static viewer shows no live actions", async ({ page }) => {

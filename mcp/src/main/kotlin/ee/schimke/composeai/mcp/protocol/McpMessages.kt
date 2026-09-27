@@ -71,6 +71,8 @@ data class CallToolResult(
   val isError: Boolean? = null,
   /** MCP `_meta`: debug data for clients and tests, kept out of what the agent reads. */
   val meta: JsonObject? = null,
+  /** MCP `structuredContent`: the machine-readable form of the result, for apps and agents. */
+  val structuredContent: JsonObject? = null,
 )
 
 @Serializable
