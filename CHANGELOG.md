@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.78.0](https://github.com/yschimke/compose-preview-server/compare/v3.77.0...v3.78.0) (2026-09-27)
+
+
+### Features
+
+* **mcp:** one-call preview render for agents ([#1167](https://github.com/yschimke/compose-preview-server/issues/1167)) ([a7db054](https://github.com/yschimke/compose-preview-server/commit/a7db05424559ab0956a7db713f0fb58ab2d2b26c))
+
 ## [3.77.0](https://github.com/yschimke/compose-preview-server/compare/v3.76.0...v3.77.0) (2026-09-27)
 
 
