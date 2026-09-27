@@ -114,18 +114,18 @@ class ServeUiBuilderHistoryAndUnfurlTest {
   }
 
   @Test
-  fun `a private design serves the neutral shell signed out and never lends its title to a card`() {
+  fun `a private design serves only the generic shell signed out and never lends its title`() {
     withServer(UiBuilderDefaultVisibility.PRIVATE) { port ->
       create(port)
-      // Every path-shaped design id receives the same shell. The authenticated API remains the
-      // existence boundary, while this response stays useful across a creator redirect whose
-      // browser presents its credential only after the app starts.
-      val (anonymousCode, anonymousPage) = get(port, "/ui-builder/$DESIGN_ID", token = null)
-      assertEquals(200, anonymousCode)
-      assertFalse(anonymousPage.contains("Keynote schedule"), anonymousPage)
+      val (signedOutCode, signedOutPage) = get(port, "/ui-builder/$DESIGN_ID", token = null)
+      assertEquals(200, signedOutCode)
+      assertFalse(
+        signedOutPage.contains("Keynote schedule"),
+        "a private design must not unfurl signed out: $signedOutPage",
+      )
       assertTrue(
-        anonymousPage.contains("""<meta property="og:title" content="Compose UI builder">"""),
-        anonymousPage,
+        signedOutPage.contains("""<meta property="og:title" content="Compose UI builder">"""),
+        signedOutPage,
       )
       val (code, page) = get(port, "/ui-builder/$DESIGN_ID", OPERATOR_TOKEN)
       assertEquals(200, code)
