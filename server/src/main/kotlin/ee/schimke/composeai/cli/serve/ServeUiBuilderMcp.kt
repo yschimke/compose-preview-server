@@ -982,7 +982,14 @@ class ServeUiBuilderMcp(
         snapshot.snapshot.state.document
       }
     val incoming =
-      document.copy(id = designId, revision = 0, title = args.text("title") ?: document.title)
+      document.copy(
+        id = designId,
+        revision = 0,
+        title = args.text("title") ?: document.title,
+        // `fromDesignId` explicitly creates a new copy. It does not move the source's canonical
+        // home; an explicit supplied document, by contrast, must not be adopted silently.
+        home = if (source != null) null else document.home,
+      )
     when (val existing = execute(OpenDesignRequestV1(designId), actor)) {
       is UiBuilderServiceResponse.Snapshot -> {
         val outcome = existingDesignOutcome(designId, incoming, serverOrigin())
@@ -995,6 +1002,7 @@ class ServeUiBuilderMcp(
         }
       else -> Unit
     }
+    incomingHomeRefusal(incoming, serverOrigin())?.let { throw McpRequestException(it) }
     return CreateDesignRequestV1(incoming.withServerHome(serverOrigin()))
   }
 

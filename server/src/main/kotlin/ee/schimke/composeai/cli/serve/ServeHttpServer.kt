@@ -755,8 +755,10 @@ class ServeHttpServer(
   val port: Int = pickPort(host, requestedPort, portRange)
 
   private fun canonicalServerOrigin(): String =
-    canonicalOrigin?.trimEnd('/')
-      ?: ServeUrls.origin(if (ServeUrls.isExposed(host)) ServeUrls.LOOPBACK else host, port)
+    normalizeServerHomeUrl(
+      canonicalOrigin
+        ?: ServeUrls.origin(if (ServeUrls.isExposed(host)) ServeUrls.LOOPBACK else host, port)
+    ) ?: error("the configured canonical server origin is not an absolute HTTP(S) URL")
 
   /** Concurrent-render slot count (the `/render` load-shed bound), surfaced on `/status`. */
   private val renderSlots: Int = maxConcurrentRenders.coerceAtLeast(1)
@@ -5905,7 +5907,10 @@ class ServeHttpServer(
     val outcome =
       withContext(Dispatchers.IO) {
         ServeUiBuilderCreate(designService!!, uiBuilderDir!!, canonicalServerOrigin())
-          .install(actor = AuthenticatedUiBuilderActor(ADMIN_LIBRARY_ACTOR), document = document)
+          .installPublished(
+            actor = AuthenticatedUiBuilderActor(ADMIN_LIBRARY_ACTOR),
+            document = document,
+          )
       }
     call.response.headers.append(HttpHeaders.CacheControl, "no-store")
     if (outcome is ServeUiBuilderCreate.Outcome.Created) {
@@ -14111,6 +14116,7 @@ class ServeHttpServer(
             ?: "${source.title.ifBlank { sourceDesignId }} copy",
         createdAtEpochMillis = null,
         updatedAtEpochMillis = null,
+        home = null,
       )
     val outcome =
       withContext(Dispatchers.IO) {
@@ -14344,6 +14350,7 @@ class ServeHttpServer(
         title = "${source.title.ifBlank { designId }} (from revision $revision)",
         createdAtEpochMillis = null,
         updatedAtEpochMillis = null,
+        home = null,
       )
     when (
       val outcome =

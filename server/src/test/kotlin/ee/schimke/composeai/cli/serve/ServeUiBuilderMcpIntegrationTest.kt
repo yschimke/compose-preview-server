@@ -104,7 +104,7 @@ class ServeUiBuilderMcpIntegrationTest {
       envelope(
         server,
         ServeUiBuilderMcp.CREATE_DESIGN,
-        """{"designId":"agent-screen","includeCatalog":true,"document":${json.encodeToString(DesignDocumentV1.serializer(), document().copy(home = DesignHomeV1.Repo("designs/agent-screen.uid")))}}""",
+        """{"designId":"agent-screen","includeCatalog":true,"document":${json.encodeToString(DesignDocumentV1.serializer(), document())}}""",
       )
     assertIs<SnapshotResponseV1>(response(created))
 
@@ -197,6 +197,34 @@ class ServeUiBuilderMcpIntegrationTest {
       "agent-screen already lives on this server; apply changes to the original instead",
       text,
     )
+  }
+
+  @Test
+  fun `MCP refuses to adopt a repository or foreign server home implicitly`() {
+    val server = start()
+    for ((designId, home) in
+      listOf(
+        "repo-owned" to DesignHomeV1.Repo("designs/repo-owned.uid"),
+        "foreign-owned" to DesignHomeV1.Server("https://other.example", "foreign-owned"),
+      )) {
+      val supplied = document().copy(id = designId, home = home)
+      val result =
+        call(
+          server,
+          ServeUiBuilderMcp.CREATE_DESIGN,
+          """{"designId":"$designId","document":${json.encodeToString(DesignDocumentV1.serializer(), supplied)}}""",
+        )
+      assertEquals(true, result["isError"]?.jsonPrimitive?.content?.toBoolean())
+      assertTrue(
+        result["content"]!!
+          .jsonArray
+          .first()
+          .jsonObject["text"]!!
+          .jsonPrimitive
+          .content
+          .contains("move it explicitly")
+      )
+    }
   }
 
   @Test

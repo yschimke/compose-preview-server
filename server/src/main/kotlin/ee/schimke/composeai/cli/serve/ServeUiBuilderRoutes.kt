@@ -278,6 +278,10 @@ internal fun Route.installUiBuilderRoutes(
       }
       return@put
     }
+    incomingHomeRefusal(incoming, serverOrigin())?.let { reason ->
+      call.respondText(reason, status = HttpStatusCode.Conflict)
+      return@put
+    }
     val document = incoming.withServerHome(serverOrigin())
     when (val created = service.executeMapped(CreateDesignRequestV1(document), actor)) {
       is UiBuilderServiceResponse.Error -> {

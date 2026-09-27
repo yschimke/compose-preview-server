@@ -3,6 +3,7 @@ package ee.schimke.composeai.cli.serve
 import ee.schimke.composeai.uibuilder.protocol.CatalogBenchmarkV1
 import ee.schimke.composeai.uibuilder.protocol.CatalogCapabilityV1
 import ee.schimke.composeai.uibuilder.protocol.DesignDocumentV1
+import ee.schimke.composeai.uibuilder.protocol.DesignHomeV1
 import ee.schimke.composeai.uibuilder.protocol.DesignStateV1
 import ee.schimke.composeai.uibuilder.protocol.ExportCapabilitiesV1
 import ee.schimke.composeai.uibuilder.protocol.ServiceErrorCodeV1
@@ -22,7 +23,9 @@ import java.util.concurrent.CopyOnWriteArrayList
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertIs
 import kotlin.test.assertTrue
+import kotlinx.coroutines.runBlocking
 import okhttp3.FormBody
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -272,6 +275,24 @@ class ServeUiBuilderCreateRoutesTest {
     assertEquals(428, put("put-design", document, ifNoneMatch = null).first)
     assertTrue(created.isEmpty())
 
+    val repoOwned =
+      document
+        .replace("put-design", "repo-owned")
+        .replace(
+          "\"stateVariables\":{}",
+          "\"home\":{\"kind\":\"repo\",\"path\":\"designs/repo-owned.uid\"},\"stateVariables\":{}",
+        )
+    assertEquals(409, put("repo-owned", repoOwned).first)
+    val foreignServer =
+      document
+        .replace("put-design", "foreign-owned")
+        .replace(
+          "\"stateVariables\":{}",
+          "\"home\":{\"kind\":\"server\",\"url\":\"https://other.example\",\"designId\":\"foreign-owned\"},\"stateVariables\":{}",
+        )
+    assertEquals(409, put("foreign-owned", foreignServer).first)
+    assertTrue(created.isEmpty(), "refused canonical homes must not be adopted")
+
     val (code, location) = put("put-design", document)
     assertEquals(201, code)
     assertEquals("/ui-builder/put-design", location)
@@ -306,5 +327,36 @@ class ServeUiBuilderCreateRoutesTest {
 
     // The URL names the design, so a document that claims to be another one is a bad request.
     assertEquals(400, put("elsewhere", document).first)
+  }
+
+  @Test
+  fun `published library reopen is idempotent across equivalent canonical origins`() = runBlocking {
+    val document =
+      UI_BUILDER_JSON.decodeFromString(
+        DesignDocumentV1.serializer(),
+        """
+        {"schema":"compose-ui-builder/v1","id":"published","title":"Published","revision":0,
+         "catalogPin":{"systemId":"m3-catalog","catalogRevision":"candidate",
+         "capabilityDigest":"candidate","nativeRuntimeId":"candidate"},
+         "environment":{"widthDp":1280,"heightDp":800,"density":1.0,"theme":"dark","locale":"en-US",
+         "fontScale":1.0,"layoutDirection":"ltr"},"stateVariables":{},"roots":[],"nodes":{}}
+        """
+          .trimIndent(),
+      )
+    val origin = "http://127.0.0.1:${server.port}"
+    val creator = ServeUiBuilderCreate(service, builderDir, origin)
+    val actor = ee.schimke.composeai.uibuilder.service.AuthenticatedUiBuilderActor("library")
+
+    assertIs<ServeUiBuilderCreate.Outcome.Created>(creator.installPublished(actor, document))
+    val equivalent =
+      document.copy(home = DesignHomeV1.Server("HTTP://127.0.0.1:${server.port}/", "published"))
+    assertIs<ServeUiBuilderCreate.Outcome.AlreadyExists>(
+      creator.installPublished(actor, equivalent)
+    )
+    assertEquals(1, created.count { it == "published" })
+    assertEquals(
+      "https://preview.coo.ee/base",
+      normalizeServerHomeUrl("HTTPS://Preview.Coo.Ee:443/base/"),
+    )
   }
 }

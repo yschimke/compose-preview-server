@@ -13,6 +13,7 @@ import ee.schimke.composeai.uibuilder.service.AuthenticatedUiBuilderActor
 import ee.schimke.composeai.uibuilder.service.UiBuilderServicePort
 import ee.schimke.composeai.uibuilder.service.UiBuilderServiceResponse
 import java.io.File
+import java.net.URI
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
 
@@ -115,15 +116,36 @@ internal class ServeUiBuilderCreate(
    * shape: the service validates every node against the catalog it resolves, and duplicating that
    * here would be a second opinion that can disagree with the one that counts.
    */
-  suspend fun install(actor: AuthenticatedUiBuilderActor, document: DesignDocumentV1): Outcome {
+  suspend fun install(actor: AuthenticatedUiBuilderActor, document: DesignDocumentV1): Outcome =
+    install(actor, document, canonicalDuplicateIsAlreadyOpen = false)
+
+  /** A published library entry is idempotent when that exact canonical design is already open. */
+  suspend fun installPublished(
+    actor: AuthenticatedUiBuilderActor,
+    document: DesignDocumentV1,
+  ): Outcome = install(actor, document, canonicalDuplicateIsAlreadyOpen = true)
+
+  private suspend fun install(
+    actor: AuthenticatedUiBuilderActor,
+    document: DesignDocumentV1,
+    canonicalDuplicateIsAlreadyOpen: Boolean,
+  ): Outcome {
     when (val existing = service.executeMapped(OpenDesignRequestV1(document.id), actor)) {
       is UiBuilderServiceResponse.Error ->
         if (existing.error.code != ServiceErrorCodeV1.NOT_FOUND) {
           return Outcome.Refused(existing.httpStatusValue(), existing.error.message)
         }
       is UiBuilderServiceResponse.Snapshot ->
-        return existingDesignOutcome(document.id, document, serverOrigin)
+        return existingDesignOutcome(
+          document.id,
+          document,
+          serverOrigin,
+          canonicalDuplicateIsAlreadyOpen,
+        )
       else -> return Outcome.AlreadyExists
+    }
+    incomingHomeRefusal(document, serverOrigin)?.let {
+      return Outcome.Refused(409, it)
     }
     val catalogSystemId = document.catalogPin.systemId
     when (val listed = service.executeMapped(ListCatalogsRequestV1, actor)) {
@@ -156,26 +178,79 @@ internal class ServeUiBuilderCreate(
 /**
  * A create or import makes this server the document's canonical home.
  *
- * The caller must inspect the incoming home before this is applied when deciding whether an import
- * is an accidental re-import of the original. Once accepted, the server owns the new document and
- * every export must point back here.
+ * The install paths inspect the incoming home before this is applied, so adopting a repository or
+ * another server's canonical document cannot be mistaken for an ordinary create. Once accepted,
+ * the server owns the new document and every export must point back here.
  */
 internal fun DesignDocumentV1.withServerHome(serverOrigin: String): DesignDocumentV1 =
-  copy(home = DesignHomeV1.Server(serverOrigin.trimEnd('/'), id))
+  copy(
+    home =
+      DesignHomeV1.Server(
+        requireNotNull(normalizeServerHomeUrl(serverOrigin)) {
+          "the canonical server origin must be an absolute HTTP(S) URL"
+        },
+        id,
+      )
+  )
 
 /** A same-server duplicate is a request to edit the original, not an idempotent import. */
 internal fun existingDesignOutcome(
   designId: String,
   incoming: DesignDocumentV1,
   serverOrigin: String,
+  canonicalDuplicateIsAlreadyOpen: Boolean = false,
 ): ServeUiBuilderCreate.Outcome =
   when (val home = incoming.home) {
-    is DesignHomeV1.Server if
-      (home.designId == designId && home.url.trimEnd('/') == serverOrigin.trimEnd('/'))
-     ->
-      ServeUiBuilderCreate.Outcome.Refused(
-        409,
-        "$designId already lives on this server; apply changes to the original instead",
-      )
+    is DesignHomeV1.Server if sameCanonicalServerHome(home, designId, serverOrigin) ->
+      if (canonicalDuplicateIsAlreadyOpen) ServeUiBuilderCreate.Outcome.AlreadyExists
+      else
+        ServeUiBuilderCreate.Outcome.Refused(
+          409,
+          "$designId already lives on this server; apply changes to the original instead",
+        )
     else -> ServeUiBuilderCreate.Outcome.AlreadyExists
   }
+
+/** Refuse implicit adoption; moving a canonical home is a distinct revision-pinned operation. */
+internal fun incomingHomeRefusal(
+  incoming: DesignDocumentV1,
+  serverOrigin: String,
+): String? =
+  when (val home = incoming.home) {
+    null -> null
+    is DesignHomeV1.Server ->
+      if (sameCanonicalServerHome(home, incoming.id, serverOrigin)) {
+        null
+      } else {
+        "${incoming.id} already has a different canonical server home; move it explicitly before importing it here"
+      }
+    is DesignHomeV1.Repo ->
+      "${incoming.id} already has a canonical repository home; move it explicitly before importing it here"
+  }
+
+private fun sameCanonicalServerHome(
+  home: DesignHomeV1.Server,
+  designId: String,
+  serverOrigin: String,
+): Boolean {
+  if (home.designId != designId) return false
+  val homeUrl = normalizeServerHomeUrl(home.url) ?: return false
+  val originUrl = normalizeServerHomeUrl(serverOrigin) ?: return false
+  return homeUrl == originUrl
+}
+
+/**
+ * Mirrors the design-sync URL identity rule: host/scheme case, default ports and trailing slash.
+ */
+internal fun normalizeServerHomeUrl(raw: String): String? {
+  val parsed = runCatching { URI(raw.trim()) }.getOrNull() ?: return null
+  val scheme = parsed.scheme?.lowercase()?.takeIf { it == "http" || it == "https" } ?: return null
+  val host = parsed.host?.lowercase() ?: return null
+  if (parsed.userInfo != null || parsed.rawQuery != null || parsed.rawFragment != null) return null
+  val port =
+    parsed.port.takeUnless { (scheme == "http" && it == 80) || (scheme == "https" && it == 443) }
+      ?: -1
+  val path = parsed.rawPath.orEmpty().let { if (it == "/") "" else it.trimEnd('/') }
+  val renderedHost = if (':' in host) "[$host]" else host
+  return "$scheme://$renderedHost${if (port == -1) "" else ":$port"}$path"
+}
