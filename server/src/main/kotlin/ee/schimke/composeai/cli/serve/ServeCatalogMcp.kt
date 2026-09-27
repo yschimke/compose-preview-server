@@ -143,7 +143,12 @@ class ServeCatalogMcp(
           "prompts/get" -> prompt(params)
           "tools/call" ->
             try {
-              callTool(params, liveAuthorization, access, uiBuilderAuthorization)
+              callTool(
+                withDeclaredUrlElicitation(params),
+                liveAuthorization,
+                access,
+                uiBuilderAuthorization,
+              )
             } catch (e: McpRequestException) {
               toolError(e.message ?: "Tool call failed")
             }
@@ -168,6 +173,7 @@ class ServeCatalogMcp(
         null,
         MCP_PROTOCOL_VERSION -> MCP_PROTOCOL_VERSION
         MCP_PROTOCOL_VERSION_2025_03 -> MCP_PROTOCOL_VERSION_2025_03
+        MCP_PROTOCOL_VERSION_2025_11 -> MCP_PROTOCOL_VERSION_2025_11
         else -> MCP_PROTOCOL_VERSION
       }
     return buildJsonObject {
@@ -198,6 +204,7 @@ class ServeCatalogMcp(
           "them — an MCP client fixes its headers when it connects — pass the token as the " +
           "'token' argument of each gated tool instead, and access approved during this session " +
           "works in it." +
+          accessElicitationInstruction(params) +
           if (uiBuilder == null) ""
           else
             " A UI-builder document's `home` is canonical: edit that original, and never " +
@@ -211,6 +218,44 @@ class ServeCatalogMcp(
                   "discussion.",
       )
     }
+  }
+
+  /**
+   * This endpoint is stateless, so the capabilities a client declares in `initialize` are not
+   * remembered for its later `tools/call`. The handshake's own instructions carry the decision
+   * instead: a client that declared URL elicitation is told to use it for the access grant, and
+   * every other client is told to keep the text flow (show approveUrl and userCode in chat).
+   */
+  private fun accessElicitationInstruction(initializeParams: JsonObject): String {
+    val elicitation =
+      (initializeParams["capabilities"] as? JsonObject)?.get("elicitation") as? JsonObject
+    return if (elicitation?.get("url") is JsonObject) {
+      " Your client declared URL elicitation: call poll_access with urlMode=true so the person " +
+        "approves in the browser dialog your client opens."
+    } else {
+      " Your client did not declare URL elicitation: omit urlMode and show approveUrl and " +
+        "userCode in chat."
+    }
+  }
+
+  /**
+   * Honours a per-request capability declaration on `tools/call` (`params._meta`, the stateless
+   * shape [CLIENT_CAPABILITIES_META] names). When one is present it decides `poll_access`'s URL
+   * mode outright: a client that declared URL elicitation gets it without asking, and one that
+   * declared capabilities without it keeps the text result even if `urlMode` was passed, since a
+   * -32042 error it cannot show would strand the access request. Absent a declaration the explicit
+   * `urlMode` argument stands.
+   */
+  private fun withDeclaredUrlElicitation(params: JsonObject): JsonObject {
+    if ((params["name"] as? JsonPrimitive)?.contentOrNull != "poll_access") return params
+    val declared =
+      ((params["_meta"] as? JsonObject)?.get(CLIENT_CAPABILITIES_META) as? JsonObject)
+        ?: return params
+    val urlMode = (declared["elicitation"] as? JsonObject)?.get("url") is JsonObject
+    val arguments = params["arguments"] as? JsonObject ?: JsonObject(emptyMap())
+    return JsonObject(
+      params + ("arguments" to JsonObject(arguments + ("urlMode" to JsonPrimitive(urlMode))))
+    )
   }
 
   /** Remote UI-builder slash commands. Kept text-complete for clients that only render prompts. */
@@ -315,14 +360,14 @@ class ServeCatalogMcp(
 
   private fun designStatusPrompt(designId: String): String =
     """
-    Report the current status of UI-builder design `$designId`.
+    Report the status of UI-builder design `$designId`.
 
-    1. Call `ui_builder_get_design` and report its current revision and catalog pin.
-    2. If `ui_builder_list_comments` is advertised, report unresolved and unacknowledged comments.
-       If it is absent, say this host has no design-discussion surface.
-    3. Canonical home and temporary-copy tracking are not yet represented by the document contract:
-       compose-ui-builder#320 and compose-preview-server#1114 are prerequisites. Say that this
-       server cannot yet report either field; do not infer a home or claim there are no copies.
+    1. Call `ui_builder_get_design`; report its revision, catalog pin and `home`.
+    2. If `ui_builder_list_comments` is advertised, report unresolved and unacknowledged comments;
+       otherwise say this host has no design-discussion surface.
+    3. Temporary copies live in checkouts, which this server cannot see. Say so, and point to
+       `compose-preview design status` in the checkout; never claim there are no copies.
+    4. Do not move, save back or discard anything from this prompt: those need the person's choice.
     """
       .trimIndent()
 
@@ -2421,7 +2466,17 @@ class ServeCatalogMcp(
   companion object {
     const val MCP_PROTOCOL_VERSION = "2025-06-18"
     const val MCP_PROTOCOL_VERSION_2025_03 = "2025-03-26"
-    val SUPPORTED_PROTOCOL_VERSIONS = setOf(MCP_PROTOCOL_VERSION, MCP_PROTOCOL_VERSION_2025_03)
+    /**
+     * The revision that defines URL-mode elicitation and the -32042 error `poll_access` returns.
+     * 2026-07-28 is not negotiated: this hand-rolled endpoint has not been checked against it, and
+     * the MCP Kotlin SDK this repository pins (0.15.0) knows nothing newer than 2025-11-25.
+     */
+    const val MCP_PROTOCOL_VERSION_2025_11 = "2025-11-25"
+    val SUPPORTED_PROTOCOL_VERSIONS =
+      setOf(MCP_PROTOCOL_VERSION, MCP_PROTOCOL_VERSION_2025_03, MCP_PROTOCOL_VERSION_2025_11)
+
+    /** Per-request client capabilities, for clients that declare them on each stateless call. */
+    const val CLIENT_CAPABILITIES_META = "io.modelcontextprotocol/clientCapabilities"
 
     private const val EMPTY_SCHEMA = """{"type":"object","properties":{}}"""
     private const val INVALID_REQUEST = -32600

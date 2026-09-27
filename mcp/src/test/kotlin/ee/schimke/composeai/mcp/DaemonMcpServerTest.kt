@@ -2409,6 +2409,107 @@ class DaemonMcpServerTest {
   }
 
   @Test
+  fun `render_preview asks which matching variant to render and falls back to listed choices`() {
+    data class Case(
+      val action: String?,
+      val form: Boolean = true,
+      val url: Boolean = false,
+      val expectedMode: String,
+      val expectedRequests: Long = 1,
+      val rendersSmall: Boolean = false,
+      val renders: Boolean = true,
+    )
+    val cases =
+      listOf(
+        Case("accept", expectedMode = "elicitation", rendersSmall = true),
+        Case("decline", expectedMode = "declined", renders = false),
+        Case("cancel", expectedMode = "cancelled", renders = false),
+        // No elicitation capability at all, and a URL-only client: never asked, text fallback.
+        Case(null, form = false, expectedMode = "text", expectedRequests = 0),
+        Case(null, form = false, url = true, expectedMode = "text", expectedRequests = 0),
+      )
+    cases.forEachIndexed { index, case ->
+      val elicitations = AtomicLong()
+      client.close()
+      session.close()
+      val (clientToServer, serverFromClient) = pipedPair()
+      val (serverToClient, clientFromServer) = pipedPair()
+      session = server.newSession(input = serverFromClient, output = serverToClient)
+      session.start()
+      client =
+        McpTestClient(
+          input = clientFromServer,
+          output = clientToServer,
+          elicitationHandler = { request ->
+            elicitations.incrementAndGet()
+            buildJsonObject {
+              put("action", case.action ?: "accept")
+              if (case.action == "accept") {
+                val options =
+                  request["params"]!!
+                    .jsonObject["requestedSchema"]!!
+                    .jsonObject["properties"]!!
+                    .jsonObject["variant"]!!
+                    .jsonObject["enum"]!!
+                    .jsonArray
+                    .map { it.jsonPrimitive.content }
+                putJsonObject("content") { put("variant", options.single { it.endsWith("Small") }) }
+              }
+            }
+          },
+        )
+      client.initialize(
+        capabilities =
+          if (!case.form && !case.url) JsonObject(emptyMap())
+          else
+            buildJsonObject {
+              putJsonObject("elicitation") {
+                if (case.form) putJsonObject("form") {}
+                if (case.url) putJsonObject("url") {}
+              }
+            }
+      )
+      val workspaceId = registerWorkspace(tmp.newFolder("variants-$index"), "variants-$index")
+      val daemon = warmDaemonFor(workspaceId, ":app")
+      val small = "com.example.V${index}Kt.Screen${index}_Devices - Small"
+      val large = "com.example.V${index}Kt.Screen${index}_Devices - Large"
+      listOf(small, large).forEach {
+        daemon.emitDiscovery(it, functionName = "Screen$index")
+        client.expectNotification("notifications/resources/list_changed", 2_000)
+      }
+      val png = tmp.newFile("variants-$index.png")
+      writeSolidPng(png, 0xff00ff00.toInt())
+      daemon.autoRenderPngPath = { png.absolutePath }
+
+      val result =
+        client.callTool(
+          "render_preview",
+          buildJsonObject {
+            put("preview", "Screen$index")
+            put("inline", false)
+          },
+          timeoutMs = 10_000,
+        )
+      assertThat(elicitations.get()).isEqualTo(case.expectedRequests)
+      val texts = result.textContents()
+      val choice = json.parseToJsonElement(texts.last()).jsonObject["variantChoice"]!!.jsonObject
+      assertThat(choice["mode"]!!.jsonPrimitive.content).isEqualTo(case.expectedMode)
+      assertThat(choice["choices"]!!.jsonArray.map { it.jsonPrimitive.content })
+        .containsExactly(
+          PreviewUri(workspaceId, ":app", large).toUri(),
+          PreviewUri(workspaceId, ":app", small).toUri(),
+        )
+      if (case.renders) {
+        val rendered = if (case.rendersSmall) small else large
+        assertThat(json.parseToJsonElement(texts.first()).jsonObject["uri"]!!.jsonPrimitive.content)
+          .isEqualTo(PreviewUri(workspaceId, ":app", rendered).toUri())
+      } else {
+        assertThat(texts).hasSize(1)
+      }
+    }
+  }
+
+  @Test
   fun `render_matrix distinguishes form acceptance decline cancellation and text fallback`() {
     data class Case(
       val action: String,
