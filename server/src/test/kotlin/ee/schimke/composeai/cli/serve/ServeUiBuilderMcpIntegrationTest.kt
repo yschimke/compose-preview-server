@@ -167,6 +167,67 @@ class ServeUiBuilderMcpIntegrationTest {
   }
 
   @Test
+  fun `remote MCP publishes design review and status prompts with honest unavailable-feature fallbacks`() {
+    val server = start()
+    val initialized =
+      post(
+          server,
+          """{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"test","version":"1"}}}""",
+        )["result"]!!
+        .jsonObject
+    assertTrue(initialized["capabilities"]!!.jsonObject.containsKey("prompts"))
+
+    val listed =
+      post(server, """{"jsonrpc":"2.0","id":2,"method":"prompts/list","params":{}}""")["result"]!!
+        .jsonObject["prompts"]!!
+        .jsonArray
+        .map { it.jsonObject["name"]!!.jsonPrimitive.content }
+    assertEquals(listOf("review-design", "design-status"), listed)
+
+    val review =
+      post(
+          server,
+          """{"jsonrpc":"2.0","id":3,"method":"prompts/get","params":{"name":"review-design","arguments":{"designId":"login"}}}""",
+        )["result"]!!
+        .jsonObject
+    val reviewText =
+      review["messages"]!!
+        .jsonArray
+        .single()
+        .jsonObject["content"]!!
+        .jsonObject["text"]!!
+        .jsonPrimitive
+        .content
+    assertTrue(reviewText.contains("ui_builder_list_comments"), reviewText)
+    assertTrue(reviewText.contains("ui_builder_view"), reviewText)
+    assertTrue(reviewText.contains("#1114"), reviewText)
+
+    val invalid =
+      post(
+        server,
+        """{"jsonrpc":"2.0","id":31,"method":"prompts/get","params":{"name":"review-design","arguments":{"designId":"https://foreign.test/ui-builder/login"}}}""",
+      )
+    assertEquals(-32602, invalid["error"]!!.jsonObject["code"]!!.jsonPrimitive.content.toInt())
+
+    val status =
+      post(
+          server,
+          """{"jsonrpc":"2.0","id":4,"method":"prompts/get","params":{"name":"design-status","arguments":{"designId":"login"}}}""",
+        )["result"]!!
+        .jsonObject
+    val statusText =
+      status["messages"]!!
+        .jsonArray
+        .single()
+        .jsonObject["content"]!!
+        .jsonObject["text"]!!
+        .jsonPrimitive
+        .content
+    assertTrue(statusText.contains("#320"), statusText)
+    assertTrue(statusText.contains("cannot yet report"), statusText)
+  }
+
+  @Test
   fun `MCP authors and reads the state and ordered actions edited by the browser`() {
     val server = start()
     envelope(
@@ -844,19 +905,34 @@ class ServeUiBuilderMcpIntegrationTest {
   }
 
   @Test
-  fun `the native render tool appears only where the host can compile`() {
-    // Two absences, not one: a box with no builder has no UI-builder tools at all, and a box with
-    // a builder but no compiler has the six that need no compiler and not the seventh. A client
-    // reads which of the three it is talking to off `tools/list` rather than off a failed call.
-    val withoutCompiler = tools(start())
+  fun `the native render tool returns a stable refusal where the host cannot compile`() {
+    // A server with a builder advertises the same authoring surface regardless of whether this
+    // particular deployment carries a compiler. A client can therefore call one stable tool and
+    // branch on a stable code instead of treating an absent declaration as an ambiguous version or
+    // configuration mismatch.
+    val server = start()
+    val withoutCompiler = tools(server)
     assertTrue(
       ServeUiBuilderMcp.TOOL_NAMES.all { it in withoutCompiler },
       withoutCompiler.toString(),
     )
-    assertTrue(
-      ServeUiBuilderMcp.NATIVE_TOOL_NAMES.none { it in withoutCompiler },
-      withoutCompiler.toString(),
+    assertTrue(ServeUiBuilderMcp.NATIVE_TOOL_NAMES.all { it in withoutCompiler })
+
+    envelope(
+      server,
+      ServeUiBuilderMcp.CREATE_DESIGN,
+      """{"designId":"agent-screen","document":${json.encodeToString(DesignDocumentV1.serializer(), document())}}""",
     )
+    val refusal =
+      json.decodeFromString<NativePreviewRefusalV1>(
+        envelope(
+          server,
+          ServeUiBuilderMcp.RENDER_NATIVE,
+          """{"designId":"agent-screen"}""",
+        )
+      )
+    assertEquals(ServeUiBuilderMcp.NATIVE_RENDER_UNAVAILABLE, refusal.code)
+    assertTrue(refusal.reasons.single().contains("no native render lane"), refusal.toString())
   }
 
   @Test

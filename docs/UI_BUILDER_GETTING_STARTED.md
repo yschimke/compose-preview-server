@@ -1173,9 +1173,10 @@ with the same bearer. One tool per protocol request, plus the ones the contract 
 | `ui_builder_react_to_comment` | `ui-builder-write` | An emoji on one comment, or `on: false` to take it back; the lightest acknowledgement |
 | `ui_builder_resolve_comment_thread` | `ui-builder-write` | Closes a thread once it is answered, or reopens one |
 
-They are absent from `tools/list` on a box that serves no builder, and `ui_builder_render_native` is
-absent on one that cannot compile — a client reads what this server can do off the tool list rather
-than off a failed call. Replies are the released `McpResponseEnvelopeV1`, except the native render,
+They are absent from `tools/list` on a box that serves no builder. A builder always lists
+`ui_builder_render_native`; on a host that cannot compile, it returns the stable
+`NATIVE_RENDER_UNAVAILABLE` refusal after checking that the caller may read the design. Replies are
+the released `McpResponseEnvelopeV1`, except the native render,
 the rename and the delete, which have no request type in the contract and say so in their own
 descriptions; and a snapshot's `catalog` is left out unless asked for, because an agent pays for it
 as context on every call and the design's `catalogPin` already names it.

@@ -42,6 +42,7 @@ import ee.schimke.composeai.mcp.protocol.ToolDef
 import ee.schimke.composeai.render.matrix.ContactSheet
 import ee.schimke.composeai.render.matrix.MatrixAxes
 import ee.schimke.composeai.render.matrix.MatrixCell
+import io.modelcontextprotocol.kotlin.sdk.types.ElicitResult
 import io.modelcontextprotocol.kotlin.sdk.types.Implementation
 import java.io.File
 import java.nio.file.AtomicMoveNotSupportedException
@@ -50,6 +51,7 @@ import java.nio.file.StandardCopyOption
 import java.security.MessageDigest
 import java.time.Instant
 import java.util.Base64
+import java.util.concurrent.CancellationException
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
@@ -200,10 +202,11 @@ class DaemonMcpServer(
    * Per-(workspace, module, previewId) FIFO of [PendingRenderGroup]s awaiting a render. The HEAD
    * group is the one whose `renderNow` has been sent to the daemon (in-flight); subsequent groups
    * wait for their predecessor's `renderFinished` before their own `renderNow` is sent. Groups are
-   * created per distinct `PreviewOverrides` value: same-overrides waiters dedup onto the tail group
-   * (multi-waiter dedup, preserving the pre-#432 contract for concurrent same-call reads),
-   * different-overrides waiters serialize behind their predecessor (the load-bearing fix versus the
-   * daemon-side coalesce rule, PROTOCOL.md § 5).
+   * created per distinct `PreviewOverrides` value for reads: same-overrides waiters dedup onto the
+   * tail group (multi-waiter dedup, preserving the pre-#432 contract for concurrent same-call
+   * reads), while each source-change refresh appends a separate group even when its overrides match
+   * the previous generation. Different groups serialize behind their predecessor (the load-bearing
+   * fix versus the daemon-side coalesce rule, PROTOCOL.md § 5).
    *
    * Without this serialization, two concurrent override-bearing calls for the same URI would race
    * the daemon's coalesce: only one `renderNow` is accepted, the second is rejected, and the MCP
@@ -266,6 +269,18 @@ class DaemonMcpServer(
   private val daemonLifecycleExecutor: java.util.concurrent.ExecutorService =
     java.util.concurrent.Executors.newFixedThreadPool(DAEMON_LIFECYCLE_THREADS) { r ->
       Thread(r, "mcp-daemon-lifecycle").apply { isDaemon = true }
+    }
+
+  /**
+   * Worker for follow-up render dispatches promoted by daemon completion notifications. A
+   * `renderFinished` callback runs on the daemon client's reader thread; issuing a synchronous
+   * `renderNow` request from that callback would wait for a response that the same reader thread
+   * must consume. Dispatching here avoids that nested-request deadlock while retaining per-preview
+   * ordering in [previewQueues].
+   */
+  private val renderDispatchExecutor: java.util.concurrent.ExecutorService =
+    java.util.concurrent.Executors.newFixedThreadPool(RENDER_DISPATCH_THREADS) { r ->
+      Thread(r, "mcp-render-dispatch").apply { isDaemon = true }
     }
 
   /**
@@ -386,12 +401,13 @@ class DaemonMcpServer(
   }
 
   /**
-   * Stops the freshness poller + sampler and shuts the executor down. Idempotent. Tests call this
-   * from `tearDown` so background tasks don't stretch into the next test; production never calls it
+   * Stops background polling and follow-up render dispatch. Idempotent. Tests call this from
+   * `tearDown` so background tasks don't stretch into the next test; production never calls it
    * because the executors are daemon-flagged and the JVM exits cleanly.
    */
   fun shutdown() {
     runCatching { freshnessExecutor.shutdownNow() }
+    runCatching { renderDispatchExecutor.shutdownNow() }
     synchronized(fileRenderCacheLock) { runCatching { fileRenderCacheDir.deleteRecursively() } }
   }
 
@@ -411,7 +427,14 @@ class DaemonMcpServer(
           installComposePreviewHandlers(
             sdkSession = sdkSession,
             session = session,
-            listTools = { currentToolDefs(session) },
+            listTools = { viewerLinkedToolDefs(currentToolDefs(session)) },
+            listPrompts = {
+              if (profile == McpToolProfile.NATIVE) ComposePreviewPrompts.list() else emptyList()
+            },
+            getPrompt = { name, arguments ->
+              require(profile == McpToolProfile.NATIVE) { "unknown prompt: $name" }
+              ComposePreviewPrompts.get(name, arguments)
+            },
             callTool = { name, arguments -> handleCallTool(session, name, arguments) },
             listResources = { catalogResources() },
             readResource = { uri, progressToken ->
@@ -446,7 +469,16 @@ class DaemonMcpServer(
   // -------------------------------------------------------------------------
 
   private fun catalogResources(): List<ResourceDescriptor> {
-    val out = mutableListOf<ResourceDescriptor>()
+    val out =
+      mutableListOf(
+        ResourceDescriptor(
+          uri = MCP_APP_VIEWER_URI,
+          name = "Compose Preview viewer",
+          description = "Interactive render and matrix viewer for Compose Preview tools.",
+          mimeType = MCP_APP_MIME_TYPE,
+          meta = viewerResourceMeta(),
+        )
+      )
     for ((addr, byId) in catalog) {
       for (entry in byId.values) {
         val uri =
@@ -478,13 +510,40 @@ class DaemonMcpServer(
     uri: String,
     progressToken: JsonElement?,
   ): ReadResourceResult {
+    if (uri == MCP_APP_VIEWER_URI) {
+      return ReadResourceResult(
+        contents =
+          listOf(
+            ResourceContents.Text(
+              uri = uri,
+              mimeType = MCP_APP_MIME_TYPE,
+              text = viewerHtml(),
+              meta = viewerResourceMeta(),
+            )
+          )
+      )
+    }
     // History URIs short-circuit to `history/read` against the daemon — historical bytes are
     // immutable so there's no render path involved.
     HistoryUri.parseOrNull(uri)?.let { historyUri ->
       return readHistoryResource(uri, historyUri)
     }
-    val parsed = PreviewUri.parseOrNull(uri) ?: error("Invalid compose-preview URI: '$uri'")
-    val pngBytes = renderAndReadBytes(parsed, session, progressToken)
+    val resourceUri = PreviewUri.parseOrNull(uri) ?: error("Invalid compose-preview URI: '$uri'")
+    val overrides =
+      resourceUri.overridesJson?.let { raw ->
+        val decoded = runCatching {
+          decodePreviewOverrides(json.parseToJsonElement(raw))
+        }
+          .getOrElse { error("Invalid compose-preview resource overrides") }
+        val daemon = supervisor.daemonFor(resourceUri.workspaceId, resourceUri.modulePath)
+        val violations = validateOverrides(decoded, daemon)
+        check(violations.isEmpty()) {
+          "Invalid compose-preview resource overrides: ${violations.joinToString("; ")}"
+        }
+        decoded
+      }
+    val parsed = resourceUri.copy(overridesJson = null)
+    val pngBytes = renderAndReadBytes(parsed, session, progressToken, overrides)
     val encoded = Base64.getEncoder().encodeToString(pngBytes)
     return ReadResourceResult(
       contents = listOf(ResourceContents.Blob(uri = uri, mimeType = "image/png", blob = encoded))
@@ -609,7 +668,7 @@ class DaemonMcpServer(
       } catch (e: java.util.concurrent.TimeoutException) {
         // Best-effort cleanup. Drop our future from its group; if the group becomes empty AND
         // it's not the in-flight head, drop the group from the queue. (An empty head stays —
-        // the daemon's eventual renderFinished will pop it cleanly via popHeadAndPromoteNext.)
+        // the daemon's eventual renderFinished will pop it cleanly via popHeadAndPrepareNext.)
         previewQueues.computeIfPresent(key) { _, q ->
           val containing = q.firstOrNull { it.futures.contains(future) }
           containing?.futures?.remove(future)
@@ -945,35 +1004,85 @@ class DaemonMcpServer(
 
   /**
    * Pop the head group of [previewQueues]'s entry for [key], wake its waiters with [outcome], and
-   * dispatch the next group's `renderNow` if one is queued. Called from `onRenderFinished` and
-   * `onRenderFailed`. The dispatch happens outside the per-key compute lambda so we never hold the
-   * lock across IPC. Returns silently if the queue is missing or empty (defensive — the daemon
-   * could in principle emit a stray `renderFinished` for a previewId we never queued).
+   * prepare the next group for dispatch. Called from `onRenderFinished` and `onRenderFailed`.
+   * Returns silently if the queue is missing or empty (defensive — the daemon could in principle
+   * emit a stray `renderFinished` for a previewId we never queued).
    */
-  private fun popHeadAndPromoteNext(
+  private fun popHeadAndPrepareNext(
     daemon: SupervisedDaemon,
     key: PreviewIdKey,
     outcome: RenderOutcome,
-  ) {
+  ): RenderQueueTransition {
+    var poppedGroup: PendingRenderGroup? = null
     var poppedFutures: List<java.util.concurrent.CompletableFuture<RenderOutcome>> = emptyList()
     var nextHead: PendingRenderGroup? = null
     previewQueues.compute(key) { _, queue ->
       if (queue == null || queue.isEmpty()) return@compute queue
-      poppedFutures = queue.removeFirst().futures.toList()
+      poppedGroup = queue.removeFirst()
+      poppedFutures = poppedGroup!!.futures.toList()
       nextHead = queue.firstOrNull()?.also { it.sent = true }
       if (queue.isEmpty()) null else queue
     }
     poppedFutures.forEach { it.complete(outcome) }
-    val next = nextHead
+    return RenderQueueTransition(completed = poppedGroup, next = nextHead)
+  }
+
+  private fun dispatchPreparedNext(
+    daemon: SupervisedDaemon,
+    key: PreviewIdKey,
+    next: PendingRenderGroup?,
+  ) {
     if (next != null) {
-      // clientForRender's hash routes by previewFqn, same as the original dispatch in
-      // awaitNextRender; preserves cache-locality / replica-affinity across promoted groups.
+      renderDispatchExecutor.execute {
+        // clientForRender's hash routes by previewFqn, same as the original dispatch in
+        // awaitNextRender; preserves cache-locality / replica-affinity across promoted groups.
+        daemon
+          .clientForRender(key.previewId)
+          .renderNow(
+            previews = listOf(key.previewId),
+            tier = RenderTier.FULL,
+            overrides = next.overrides,
+          )
+      }
+    }
+  }
+
+  /**
+   * Queues a source-change refresh through the same per-preview serialization used by resource
+   * reads. Keeping refreshes in [previewQueues] lets [onRenderFinished] recover the exact override
+   * set that completed and notify only subscriptions for that resource variant.
+   */
+  private fun enqueueRefresh(
+    daemon: SupervisedDaemon,
+    uri: PreviewUri,
+    overrides: PreviewOverrides?,
+    notificationUris: Set<String>,
+    reason: String,
+  ) {
+    val key = PreviewIdKey(uri.workspaceId, uri.modulePath, uri.previewFqn)
+    var becameFront = false
+    previewQueues.compute(key) { _, queue ->
+      val q = queue ?: ArrayDeque()
+      val group = PendingRenderGroup(overrides = overrides)
+      group.notificationUris.addAll(notificationUris)
+      if (q.isEmpty()) {
+        group.sent = true
+        becameFront = true
+      }
+      // A refresh represents one concrete file-change generation. Unlike concurrent reads, two
+      // refreshes with equal overrides must not deduplicate: the first render may already have
+      // captured the source before the second edit arrived.
+      q.addLast(group)
+      q
+    }
+    if (becameFront) {
       daemon
-        .clientForRender(key.previewId)
+        .clientForRender(uri.previewFqn)
         .renderNow(
-          previews = listOf(key.previewId),
+          previews = listOf(uri.previewFqn),
           tier = RenderTier.FULL,
-          overrides = next.overrides,
+          overrides = overrides,
+          reason = reason,
         )
     }
   }
@@ -981,6 +1090,79 @@ class DaemonMcpServer(
   // -------------------------------------------------------------------------
   // Tool surface
   // -------------------------------------------------------------------------
+
+  private sealed interface UriOverridesFold {
+    data class Folded(val args: JsonObject) : UriOverridesFold
+
+    data class Rejected(val message: String) : UriOverridesFold
+  }
+
+  /**
+   * A `resource_link` returned by `render_preview` names the exact rendered state, so its URI may
+   * carry `?overrides=`. When an agent passes that URI back to a tool, the overrides must either be
+   * applied or refused — never silently dropped, which would answer with default pixels. Tools that
+   * take an `overrides` argument get the URI's overrides folded into it (a conflicting explicit
+   * argument is refused); `diff_semantics` already replays URI overrides itself; every other tool
+   * refuses an override-bearing URI because it has no way to honour it.
+   */
+  private fun foldUriOverrides(name: String, args: JsonObject): UriOverridesFold {
+    val raw =
+      args["uri"]?.let { (it as? JsonPrimitive)?.contentOrNull }
+        ?: return UriOverridesFold.Folded(args)
+    val uri = PreviewUri.parseOrNull(raw) ?: return UriOverridesFold.Folded(args)
+    val uriOverridesJson = uri.overridesJson ?: return UriOverridesFold.Folded(args)
+    if (name !in URI_OVERRIDE_TOOLS) {
+      return UriOverridesFold.Rejected(
+        "$name: 'uri' carries render overrides (?overrides=) that this tool does not apply; " +
+          "pass the preview URI without the overrides query"
+      )
+    }
+    val uriOverrides =
+      runCatching { json.parseToJsonElement(uriOverridesJson) as JsonObject }.getOrNull()
+        ?: return UriOverridesFold.Rejected("$name: 'uri' carries malformed render overrides")
+    val explicit = args["overrides"]
+    if (
+      explicit != null &&
+        explicit !is kotlinx.serialization.json.JsonNull &&
+        explicit != uriOverrides
+    ) {
+      return UriOverridesFold.Rejected(
+        "$name: 'uri' carries render overrides that differ from the 'overrides' argument; " +
+          "pass one or the other"
+      )
+    }
+    return UriOverridesFold.Folded(
+      JsonObject(
+        args +
+          mapOf(
+            "uri" to JsonPrimitive(uri.copy(overridesJson = null).toUri()),
+            "overrides" to uriOverrides,
+          )
+      )
+    )
+  }
+
+  /** The viewer is an optional presentation layer: every linked tool keeps its text result. */
+  private fun viewerLinkedToolDefs(toolDefs: List<ToolDef>): List<ToolDef> = toolDefs.map { tool ->
+    if (tool.name in VIEWER_TOOL_NAMES) tool.copy(meta = viewerToolMeta()) else tool
+  }
+
+  private fun viewerHtml(): String =
+    checkNotNull(javaClass.classLoader.getResourceAsStream(MCP_APP_VIEWER_ASSET)) {
+        "missing bundled MCP App viewer: $MCP_APP_VIEWER_ASSET"
+      }
+      .bufferedReader()
+      .use { it.readText() }
+
+  private fun viewerToolMeta(): JsonObject = buildJsonObject {
+    put("ui", buildJsonObject { put("resourceUri", MCP_APP_VIEWER_URI) })
+    // Pre-2026-01-26 MCP Apps hosts read the flat key; current hosts read `ui.resourceUri`.
+    put("ui/resourceUri", MCP_APP_VIEWER_URI)
+  }
+
+  private fun viewerResourceMeta(): JsonObject = buildJsonObject {
+    put("ui", buildJsonObject { put("prefersBorder", true) })
+  }
 
   private fun currentToolDefs(session: Session): List<ToolDef> {
     if (fullToolDefsFuture.isDone) {
@@ -1712,7 +1894,8 @@ class DaemonMcpServer(
                     "fontScale":{"type":"array","items":{"type":"number"},"description":"Font-scale multipliers, e.g. [1.0, 2.0]."}
                   }
                 },
-                "contactSheet":{"type":"boolean","description":"When true, also return a single stitched contact-sheet PNG (one labelled tile per cell) alongside the per-cell summary. Default false (token-frugal: hashes only)."}
+                "contactSheet":{"type":"boolean","description":"When true, also return a single stitched contact-sheet PNG (one labelled tile per cell) alongside the per-cell summary. Default false (token-frugal: hashes only)."},
+                "choose":{"type":"boolean","description":"When true, ask an elicitation-capable client to choose one rendered variant. Clients without elicitation receive the same labelled choices as text."}
               },
               "required":["uri","axes"]
             }
@@ -1993,21 +2176,28 @@ class DaemonMcpServer(
       ),
     ) + (uiBuilderMcp?.toolDefs() ?: emptyList())
 
-  private fun handleCallTool(
+  private suspend fun handleCallTool(
     session: Session,
     name: String,
     arguments: JsonElement?,
   ): CallToolResult {
-    val args = (arguments as? JsonObject) ?: JsonObject(emptyMap())
+    val args =
+      when (
+        val normalized =
+          foldUriOverrides(name, (arguments as? JsonObject) ?: JsonObject(emptyMap()))
+      ) {
+        is UriOverridesFold.Folded -> normalized.args
+        is UriOverridesFold.Rejected -> return errorCallToolResult(normalized.message)
+      }
     return when (name) {
       "status" -> toolStatus()
       "register_project" -> toolRegisterProject(args)
       "unregister_project" -> toolUnregisterProject(args)
       "list_projects" -> toolListProjects()
       "list_devices" -> toolListDevices()
-      "render_preview" -> toolRenderPreview(session, args)
       "find_previews_for_file" -> toolFindPreviewsForFile(args)
-      "render_matrix" -> toolRenderMatrix(args)
+      "render_preview" -> toolRenderPreview(session, args)
+      "render_matrix" -> toolRenderMatrix(session, args)
       "watch" -> toolWatch(session, args)
       "unwatch" -> toolUnwatch(session, args)
       "list_watches" -> toolListWatches(session)
@@ -2385,15 +2575,42 @@ class DaemonMcpServer(
     if (forceReason != null) invalidateClasspathForForce(uri, forceReason)
     return runCatching {
       if (!inline) {
-        renderPreviewFile(session, uri, overrides)
+        renderPreviewFile(
+          session,
+          uri,
+          overrides,
+          resourceUri =
+            uri.copy(overridesJson = (args["overrides"] as? JsonObject)?.toString()).toUri(),
+        )
       } else if (cropArg != null) {
         renderCropped(uri, overrides, cropArg, observe)
       } else {
         val bytes = renderAndReadBytes(uri, overrides = overrides)
         if (observe == "png") {
-          pngCallToolResult(Base64.getEncoder().encodeToString(bytes))
+          CallToolResult(
+            content =
+              listOf(
+                ContentBlock.Image(Base64.getEncoder().encodeToString(bytes), "image/png"),
+                ContentBlock.ResourceLink(
+                  uri =
+                    uri
+                      .copy(overridesJson = (args["overrides"] as? JsonObject)?.toString())
+                      .toUri(),
+                  name = "Compose Preview render",
+                  mimeType = "image/png",
+                  description =
+                    "The current preview resource; subscribe to refresh it after edits.",
+                ),
+              )
+          )
         } else {
-          renderObservation(uri, bytes, includeSemantics = observe == "semantics")
+          renderObservation(
+            uri,
+            bytes,
+            includeSemantics = observe == "semantics",
+            resourceUri =
+              uri.copy(overridesJson = (args["overrides"] as? JsonObject)?.toString()).toUri(),
+          )
         }
       }
     }
@@ -2409,6 +2626,7 @@ class DaemonMcpServer(
     session: Session,
     uri: PreviewUri,
     overrides: PreviewOverrides?,
+    resourceUri: String,
   ): CallToolResult {
     val startedAt = System.nanoTime()
     val outcome = awaitNextRender(uri, session, overrides = overrides)
@@ -2430,7 +2648,20 @@ class DaemonMcpServer(
       put("changed", changed)
       put("durationMs", TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedAt))
     }
-    return textCallToolResult(payload.toString())
+    // The link lets an MCP App host show the render even though no bytes are inline; text-only
+    // clients keep the local path above.
+    return CallToolResult(
+      content =
+        listOf(
+          ContentBlock.Text(payload.toString()),
+          ContentBlock.ResourceLink(
+            uri = resourceUri,
+            name = "Compose Preview render",
+            mimeType = "image/png",
+            description = "The current preview resource; subscribe to refresh it after edits.",
+          ),
+        )
+    )
   }
 
   /**
@@ -2718,7 +2949,7 @@ class DaemonMcpServer(
    * or passes `contactSheet:true` to also receive one stitched grid image of every cell. Bounded so
    * a careless cross-product can't fan out unboundedly.
    */
-  private fun toolRenderMatrix(args: JsonObject): CallToolResult {
+  private suspend fun toolRenderMatrix(session: Session, args: JsonObject): CallToolResult {
     val uriStr =
       args["uri"]?.jsonPrimitive?.contentOrNull
         ?: return errorCallToolResult("render_matrix: missing 'uri'")
@@ -2730,6 +2961,7 @@ class DaemonMcpServer(
         ?: return errorCallToolResult("render_matrix: missing 'axes' (object of arrays)")
     val contactSheet =
       args["contactSheet"]?.jsonPrimitive?.contentOrNull?.toBooleanStrictOrNull() ?: false
+    val choose = args["choose"]?.jsonPrimitive?.contentOrNull?.toBooleanStrictOrNull() ?: false
 
     fun stringAxis(key: String): List<String>? =
       (axes[key] as? JsonArray)
@@ -2782,7 +3014,7 @@ class DaemonMcpServer(
       return errorCallToolResult("render_matrix: ${violations.distinct().joinToString("; ")}")
     }
 
-    return runCatching {
+    return try {
       var baselineSha: String? = null
       // Render every cell, keeping the bytes around so an optional contact sheet can stitch them.
       val rendered = decodedCells.map { (cell, overrides) ->
@@ -2809,6 +3041,7 @@ class DaemonMcpServer(
         put("cellCount", cells.size)
         if (contactSheet) put("contactSheet", true)
         putJsonArray("cells") { cells.forEach { add(it) } }
+        if (choose) put("selection", matrixSelection(session, cells))
       }
       val blocks = buildList {
         if (contactSheet) {
@@ -2826,8 +3059,84 @@ class DaemonMcpServer(
         add(ContentBlock.Text(payload.toString()))
       }
       CallToolResult(content = blocks)
+    } catch (cancelled: CancellationException) {
+      throw cancelled
+    } catch (failure: Throwable) {
+      errorCallToolResult("render_matrix failed: ${failure.message}")
     }
-      .getOrElse { errorCallToolResult("render_matrix failed: ${it.message}") }
+  }
+
+  /** Form chooser for a completed matrix, with an equivalent text answer for older harnesses. */
+  private suspend fun matrixSelection(session: Session, cells: List<JsonObject>): JsonObject {
+    val choices = cells.map { it["label"]!!.jsonPrimitive.content }
+    val fallback = buildJsonObject {
+      put("mode", "text")
+      put("message", "Choose one rendered variant by label: ${choices.joinToString(" | ")}")
+      putJsonArray("choices") { choices.forEach { add(JsonPrimitive(it)) } }
+    }
+    val elicitation =
+      (session as? McpSession)?.elicitForm(
+        message = "Choose the rendered variant to use. Each label names its display overrides.",
+        requestedSchema =
+          buildJsonObject {
+            put("type", "object")
+            putJsonObject("properties") {
+              put(
+                "variant",
+                buildJsonObject {
+                  put("type", "string")
+                  putJsonArray("enum") { choices.forEach { add(JsonPrimitive(it)) } }
+                },
+              )
+            }
+            putJsonArray("required") { add(JsonPrimitive("variant")) }
+          },
+      ) ?: FormElicitation.Unsupported
+    val result =
+      when (elicitation) {
+        FormElicitation.Unsupported -> return fallback
+        FormElicitation.TimedOut ->
+          return buildJsonObject {
+            put("mode", "timeout")
+            put(
+              "message",
+              "The variant chooser was not answered in time. Do not re-open it or ask again " +
+                "unprompted; report the labelled choices and let the user pick when they return.",
+            )
+            putJsonArray("choices") { choices.forEach { add(JsonPrimitive(it)) } }
+          }
+        is FormElicitation.Answered -> elicitation.result
+      }
+    when (result.action) {
+      ElicitResult.Action.Decline ->
+        return buildJsonObject {
+          put("mode", "declined")
+          put(
+            "message",
+            "The user declined to choose a rendered variant. Respect that: do not ask again " +
+              "for a choice, in a form or in chat, unless the user brings it up.",
+          )
+        }
+      ElicitResult.Action.Cancel ->
+        return buildJsonObject {
+          put("mode", "cancelled")
+          put(
+            "message",
+            "The user cancelled variant selection. Do not re-ask for a choice unless the user " +
+              "asks to pick one.",
+          )
+        }
+      ElicitResult.Action.Accept -> Unit
+    }
+    val variant =
+      (result.content?.get("variant") as? JsonPrimitive)
+        ?.takeIf { it.isString }
+        ?.contentOrNull
+        ?.takeIf { it in choices } ?: return fallback
+    return buildJsonObject {
+      put("mode", "elicitation")
+      put("variant", variant)
+    }
   }
 
   /** A rendered matrix cell held in memory so the optional contact sheet can stitch the bytes. */
@@ -2848,6 +3157,7 @@ class DaemonMcpServer(
     uri: PreviewUri,
     pngBytes: ByteArray,
     includeSemantics: Boolean,
+    resourceUri: String,
   ): CallToolResult {
     val dimensions = pngDimensions(pngBytes)
     val payload = buildJsonObject {
@@ -2871,7 +3181,18 @@ class DaemonMcpServer(
         }
       }
     }
-    return CallToolResult(content = listOf(ContentBlock.Text(payload.toString())))
+    return CallToolResult(
+      content =
+        listOf(
+          ContentBlock.Text(payload.toString()),
+          ContentBlock.ResourceLink(
+            uri = resourceUri,
+            name = "Compose Preview render",
+            mimeType = "image/png",
+            description = "The current preview resource; subscribe to refresh it after edits.",
+          ),
+        )
+    )
   }
 
   /**
@@ -3953,7 +4274,8 @@ class DaemonMcpServer(
    * `diff_semantics` — fetch `compose/semantics` for two preview URIs and report the structural
    * delta between their trees (issue #1785). The cheap, deterministic, pixel-free regression
    * signal: nodes are matched by their stable `ref`, so a copy edit is a field change on the same
-   * ref rather than a remove + add. Returns `{ schema, summary, delta }` as a single text block.
+   * ref rather than a remove + add. Returns `{ schema, baseUri, headUri, summary, delta }` as a
+   * single text block so text-only clients retain both replayable artifacts.
    */
   private fun toolDiffSemantics(args: JsonObject): CallToolResult {
     val baseUriStr =
@@ -3969,6 +4291,8 @@ class DaemonMcpServer(
     val delta = SemanticsDiff.diff(base, head)
     val out = buildJsonObject {
       put("schema", delta.schema)
+      put("baseUri", baseUriStr)
+      put("headUri", headUriStr)
       put("summary", summarizeSemanticsDelta(delta))
       put("delta", json.encodeToJsonElement(SemanticsDelta.serializer(), delta))
     }
@@ -4003,23 +4327,51 @@ class DaemonMcpServer(
       .getOrElse {
         return null to "$side daemon spawn failed: ${it.message}"
       }
+    val overrides =
+      uri.overridesJson?.let { raw ->
+        runCatching {
+          val decoded = decodePreviewOverrides(json.parseToJsonElement(raw))
+          val violations = validateOverrides(decoded, daemon)
+          check(violations.isEmpty()) {
+            "Invalid compose-preview resource overrides: ${violations.joinToString("; ")}"
+          }
+          decoded
+        }
+          .getOrElse {
+            return null to "$side invalid resource overrides: ${it.message}"
+          }
+      }
+    val renderUri = uri.copy(overridesJson = null)
     val result = runCatching {
-      try {
+      if (overrides != null) {
+        // The daemon's data/fetch call is keyed by preview id, so it reads the products attached
+        // to the most recent render. Force the URI's replay state first; otherwise the semantics
+        // could describe defaults while the viewer reads overridden pixels from the same URI.
+        awaitNextRender(renderUri, overrides = overrides)
         daemon.client.dataFetch(
           uri.previewFqn,
           ComposeSemanticsProduct.KIND,
           null,
           inline = true,
         )
-      } catch (e: DataProductWireException) {
-        if (e.code != DataProductWireException.NOT_AVAILABLE) throw e
-        awaitNextRender(uri)
-        daemon.client.dataFetch(
-          uri.previewFqn,
-          ComposeSemanticsProduct.KIND,
-          null,
-          inline = true,
-        )
+      } else {
+        try {
+          daemon.client.dataFetch(
+            uri.previewFqn,
+            ComposeSemanticsProduct.KIND,
+            null,
+            inline = true,
+          )
+        } catch (e: DataProductWireException) {
+          if (e.code != DataProductWireException.NOT_AVAILABLE) throw e
+          awaitNextRender(renderUri)
+          daemon.client.dataFetch(
+            uri.previewFqn,
+            ComposeSemanticsProduct.KIND,
+            null,
+            inline = true,
+          )
+        }
       }
     }
       .getOrElse { e ->
@@ -4707,24 +5059,34 @@ class DaemonMcpServer(
             config = entry.config,
           )
         }
-      val ofInterest = candidates.filter { uri ->
-        subscriptions.sessionsWatching(uri).isNotEmpty() ||
-          subscriptions.sessionsSubscribedTo(uri.toUri()).isNotEmpty()
-      }
-      if (ofInterest.isNotEmpty()) {
-        // Group renders by their target replica so we issue one renderNow per replica with the
-        // subset of previews it owns. Same hash function as `clientForRender` so the dispatch
-        // here matches what `renderAndReadBytes` would do for the same previewFqn.
-        val byReplica = ofInterest.groupBy { daemon.clientForRender(it.previewFqn) }
-        byReplica.forEach { (client, group) ->
+      candidates.forEach { uri ->
+        val subscribedUris = subscriptions.subscribedUrisMatching(uri)
+        val refreshes = mutableMapOf<PreviewOverrides?, MutableSet<String>>()
+        if (
+          subscriptions.sessionsWatching(uri).isNotEmpty() ||
+            subscribedUris.containsKey(uri.toUri())
+        ) {
+          refreshes.getOrPut(null) { mutableSetOf() }.add(uri.toUri())
+        }
+        subscribedUris.keys.forEach { subscribedUri ->
+          val parsed = PreviewUri.parseOrNull(subscribedUri) ?: return@forEach
+          val rawOverrides = parsed.overridesJson ?: return@forEach
+          val overrides =
+            runCatching { decodePreviewOverrides(json.parseToJsonElement(rawOverrides)) }
+              .getOrNull() ?: return@forEach
+          refreshes.getOrPut(overrides) { mutableSetOf() }.add(subscribedUri)
+        }
+        refreshes.forEach { (overrides, notificationUris) ->
           runCatching {
-            client.renderNow(
-              previews = group.map { it.previewFqn },
-              tier = RenderTier.FULL,
+            enqueueRefresh(
+              daemon = daemon,
+              uri = uri,
+              overrides = overrides,
+              notificationUris = notificationUris,
               reason = "notify_file_changed:$path",
             )
           }
-          rendered += group.size
+          rendered++
         }
       }
     }
@@ -4780,7 +5142,7 @@ class DaemonMcpServer(
     val key = PreviewIdKey(daemon.workspaceId, daemon.modulePath, previewId)
     // 0. Sampling attribution. If a sampling probe was pending for this previewId, claim it and
     //    classify the render's `unchanged` flag as deterministic / non-deterministic. Probes
-    //    never enqueue futures, so step 1's `popHeadAndPromoteNext` stays a no-op for them
+    //    never enqueue futures, so step 1's `popHeadAndPrepareNext` stays a no-op for them
     //    (empty queue) and they don't disturb the user-driven serialization.
     var probeClaimed = false
     pendingProbes.computeIfPresent(key) { _, counter ->
@@ -4807,21 +5169,24 @@ class DaemonMcpServer(
     // 1. Pop the head group of this URI's queue, wake its waiters with the rendered bytes, and
     //    promote-and-dispatch the next group's renderNow if one is queued. This is the
     //    serialization core that PR #432's by-previewId fanout (now removed) tried to paper
-    //    over — see `popHeadAndPromoteNext` and `awaitNextRender`'s kdoc for the rationale.
+    //    over — see `popHeadAndPrepareNext` and `awaitNextRender`'s kdoc for the rationale.
     val pngBytes = runCatching {
       val file = File(pngPath)
       check(file.isFile) { "renderFinished pngPath does not exist: $pngPath" }
       fileSystem.read(file.path.toPath()) { readByteArray() }
     }
       .getOrElse { failure ->
-        popHeadAndPromoteNext(
-          daemon,
-          key,
-          RenderOutcome.Failed("RenderOutputMissing", failure.message ?: "PNG read failed"),
-        )
+        val failed =
+          popHeadAndPrepareNext(
+            daemon,
+            key,
+            RenderOutcome.Failed("RenderOutputMissing", failure.message ?: "PNG read failed"),
+          )
+        dispatchPreparedNext(daemon, key, failed.next)
         return
       }
-    popHeadAndPromoteNext(daemon, key, RenderOutcome.Finished(pngPath, pngBytes))
+    val transition = popHeadAndPrepareNext(daemon, key, RenderOutcome.Finished(pngPath, pngBytes))
+    val completedGroup = transition.completed
     // 2. Refresh the data-product attachment cache for this `(uri)`. Any kind the daemon attached
     //    on this render is the new fresh payload; any kind it didn't attach is stale and gets
     //    dropped (the daemon stops attaching kinds the MCP server unsubscribed from, so a missing
@@ -4838,12 +5203,38 @@ class DaemonMcpServer(
         config = entry?.config,
       )
     val uriStr = uri.toUri()
-    val targets = mutableSetOf<Session>()
-    targets.addAll(subscriptions.sessionsSubscribedTo(uriStr))
-    targets.addAll(subscriptions.sessionsWatching(uri))
-    targets.forEach { it.notifyResourceUpdated(uriStr) }
+    val notifications = mutableMapOf<String, MutableSet<Session>>()
+    if (!completedGroup?.notificationUris.isNullOrEmpty()) {
+      completedGroup!!.notificationUris.forEach { updatedUri ->
+        notifications
+          .getOrPut(updatedUri) { mutableSetOf() }
+          .addAll(subscriptions.sessionsSubscribedTo(updatedUri))
+      }
+    } else if (completedGroup?.overrides == null) {
+      notifications
+        .getOrPut(uriStr) { mutableSetOf() }
+        .addAll(subscriptions.sessionsSubscribedTo(uriStr))
+    } else {
+      subscriptions.subscribedUrisMatching(uri).forEach { (subscribedUri, targets) ->
+        val parsed = PreviewUri.parseOrNull(subscribedUri) ?: return@forEach
+        val rawOverrides = parsed.overridesJson ?: return@forEach
+        val subscribedOverrides =
+          runCatching { decodePreviewOverrides(json.parseToJsonElement(rawOverrides)) }.getOrNull()
+            ?: return@forEach
+        if (subscribedOverrides == completedGroup.overrides) {
+          notifications.getOrPut(subscribedUri) { mutableSetOf() }.addAll(targets)
+        }
+      }
+    }
+    notifications.getOrPut(uriStr) { mutableSetOf() }.addAll(subscriptions.sessionsWatching(uri))
+    notifications.forEach { (updatedUri, targets) ->
+      targets.forEach { it.notifyResourceUpdated(updatedUri) }
+    }
     // 4. Record history (no-op default).
     runCatching { historyStore.record(uri, pngPath, Instant.now()) }
+    // Dispatch only after the completed generation's exact resource updates are visible. This
+    // preserves notification ordering when another same-overrides file-change generation is queued.
+    dispatchPreparedNext(daemon, key, transition.next)
   }
 
   /**
@@ -4902,7 +5293,9 @@ class DaemonMcpServer(
     // next group's renderNow normally. If a follow-up group's render also fails, the same path
     // surfaces it.
     val key = PreviewIdKey(daemon.workspaceId, daemon.modulePath, previewId)
-    popHeadAndPromoteNext(daemon, key, RenderOutcome.Failed(kind, message, suggestion))
+    val transition =
+      popHeadAndPrepareNext(daemon, key, RenderOutcome.Failed(kind, message, suggestion))
+    dispatchPreparedNext(daemon, key, transition.next)
   }
 
   /**
@@ -4980,7 +5373,7 @@ class DaemonMcpServer(
     // Fail any in-flight render waiters for this daemon — the daemon is exiting and won't
     // produce `renderFinished` for them. Drain every group of every previewQueue belonging to
     // this (workspace, module): the head AND any queued follow-ups, since the next-group
-    // dispatch in popHeadAndPromoteNext is only triggered by a daemon notification we'll
+    // dispatch in dispatchPreparedNext is only triggered by a daemon notification we'll
     // never receive.
     val matchingKeys =
       previewQueues.keys.filter { it.workspaceId == workspaceId && it.modulePath == modulePath }
@@ -5098,7 +5491,13 @@ class DaemonMcpServer(
         java.util.concurrent.CompletableFuture<RenderOutcome>
       > =
       java.util.concurrent.CopyOnWriteArrayList(),
+    val notificationUris: MutableSet<String> = ConcurrentHashMap.newKeySet(),
     @Volatile var sent: Boolean = false,
+  )
+
+  private data class RenderQueueTransition(
+    val completed: PendingRenderGroup?,
+    val next: PendingRenderGroup?,
   )
 
   /**
@@ -5256,6 +5655,27 @@ class DaemonMcpServer(
   }
 
   companion object {
+    const val MCP_APP_VIEWER_URI: String = "ui://compose-preview/viewer"
+    const val MCP_APP_MIME_TYPE: String = "text/html;profile=mcp-app"
+    private const val MCP_APP_VIEWER_ASSET: String = "compose-preview-viewer.html"
+
+    /** Tools whose existing text output gains an optional, portable MCP Apps presentation. */
+    private val VIEWER_TOOL_NAMES =
+      setOf(
+        "render_preview",
+        "render_matrix",
+        "diff_semantics",
+      )
+
+    /** Tools that accept an `overrides` argument, so an override-bearing `uri` can be folded in. */
+    private val URI_OVERRIDE_TOOLS =
+      setOf(
+        "render_preview",
+        "render_preview_overlay",
+        "record_preview",
+        "run_extension_command",
+      )
+
     /**
      * Cap on consecutive `classpathDirty` self-loops before the supervisor stops respawning. One
      * legitimate retry covers the common case where the user/VS Code re-ran
@@ -5283,6 +5703,9 @@ class DaemonMcpServer(
      * replica-spawn pool cap.
      */
     private const val DAEMON_LIFECYCLE_THREADS: Int = 4
+
+    /** Worker count for follow-up render dispatches; matches the daemon lifecycle pool cap. */
+    private const val RENDER_DISPATCH_THREADS: Int = 4
 
     /** Suggested delay before polling `watch(awaitDiscovery=false)` readiness again. */
     private const val WATCH_DISCOVERY_RETRY_AFTER_MS: Long = 500
