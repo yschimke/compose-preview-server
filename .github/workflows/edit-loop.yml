@@ -20,6 +20,8 @@ on:
       - mcp/src/editLoopFixture/**
       - mcp/src/main/kotlin/ee/schimke/composeai/mcp/SourceCompiler.kt
       - mcp/src/main/kotlin/ee/schimke/composeai/mcp/EditLoopWork.kt
+      - mcp/src/main/kotlin/ee/schimke/composeai/mcp/SourceTree.kt
+      - mcp/src/main/kotlin/ee/schimke/composeai/mcp/AndroidSdks.kt
       - mcp/src/test/kotlin/ee/schimke/composeai/mcp/EditLoopIntegrationTest.kt
   schedule:
     - cron: "17 3 * * *"

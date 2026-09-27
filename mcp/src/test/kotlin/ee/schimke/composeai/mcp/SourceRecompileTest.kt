@@ -2,6 +2,9 @@ package ee.schimke.composeai.mcp
 
 import com.google.common.truth.Truth.assertThat
 import ee.schimke.composeai.daemon.client.WorkspaceId
+import ee.schimke.composeai.daemon.protocol.CompileErrorDetail
+import ee.schimke.composeai.daemon.protocol.CompileResultKind
+import ee.schimke.composeai.daemon.protocol.CompileSourcesResult
 import java.io.File
 import java.io.InputStream
 import java.io.OutputStream
@@ -56,6 +59,7 @@ class SourceRecompileTest {
         listOf(
           ":app:preBuild UP-TO-DATE",
           ":app:generateDebugResValues UP-TO-DATE",
+          ":app:packageDebugResources UP-TO-DATE",
           ":app:compileDebugKotlin",
           ":app:compileDebugJavaWithJavac NO-SOURCE",
           ":app:composePreviewCompile",
@@ -98,6 +102,8 @@ class SourceRecompileTest {
     val source = File(projectDir, "app/src/main/kotlin/com/example/MainActivity.kt")
     source.parentFile.mkdirs()
     source.writeText("""@Preview fun Header() { Text("Header") }""")
+    // A module is a `src/` beside a build file, which is where change detection looks.
+    File(projectDir, "app/build.gradle.kts").writeText("")
     val classes = tmp.newFile("compiled-render.png")
     classes.writeText(source.readText())
     val workspaceId = registerWorkspace(projectDir)
@@ -166,6 +172,124 @@ class SourceRecompileTest {
       changed = payload["changed"]!!.jsonPrimitive.content.toBoolean(),
       work = result.raw["_meta"]?.jsonObject?.get("work")?.jsonObject,
     )
+  }
+
+  /** #1189: a daemon that can compile in process does, and Gradle never runs. */
+  @Test
+  fun `a daemon with the in-process compiler compiles a Kotlin edit without Gradle`() {
+    lateinit var fixture: Fixture
+    start(fakeCompiler { fixture.classes })
+    fixture = fixture()
+    val inProcess = CopyOnWriteArrayList<List<String>>()
+    daemon.onCompileSources = { sources ->
+      inProcess += sources
+      fixture.classes.writeText(File(sources.single()).readText())
+      CompileSourcesResult(result = CompileResultKind.OK, durationMs = 5)
+    }
+    render(fixture)
+    inProcess.clear()
+    val gradleBefore = compiles.size
+
+    edit(fixture, """@Preview fun Header() { Text("In process") }""")
+    val fresh = render(fixture)
+
+    assertThat(fresh.bytes).contains("In process")
+    assertThat(inProcess).containsExactly(listOf(fixture.source.absolutePath))
+    assertThat(compiles).hasSize(gradleBefore)
+    assertThat(fresh.work.toString()).contains(DaemonMcpServer.IN_PROCESS_COMPILE_TASK)
+  }
+
+  /** #1189: `fallback` (no BTA wiring, KSP, …) falls back to Gradle, and is remembered. */
+  @Test
+  fun `a daemon that declines the in-process compile falls back to Gradle`() {
+    lateinit var fixture: Fixture
+    start(fakeCompiler { fixture.classes })
+    fixture = fixture()
+    val asked = java.util.concurrent.atomic.AtomicInteger()
+    daemon.onCompileSources = {
+      asked.incrementAndGet()
+      CompileSourcesResult(result = CompileResultKind.FALLBACK, durationMs = 1)
+    }
+    render(fixture)
+    val gradleBefore = compiles.size
+
+    edit(fixture, """@Preview fun Header() { Text("Via Gradle") }""")
+    assertThat(render(fixture).bytes).contains("Via Gradle")
+    assertThat(compiles).hasSize(gradleBefore + 1)
+
+    edit(fixture, """@Preview fun Header() { Text("Via Gradle again") }""")
+    assertThat(render(fixture).bytes).contains("Via Gradle again")
+    assertThat(compiles).hasSize(gradleBefore + 2)
+    // Declined once, never asked again.
+    assertThat(asked.get()).isEqualTo(1)
+  }
+
+  private fun inProcessCompileError(asked: java.util.concurrent.atomic.AtomicInteger) =
+    { sources: List<String> ->
+      asked.incrementAndGet()
+      CompileSourcesResult(
+        result = CompileResultKind.COMPILE_ERROR,
+        errors =
+          listOf(
+            CompileErrorDetail(
+              file = sources.single(),
+              line = 1,
+              column = 25,
+              message = "Unresolved reference 'Txt'.",
+            )
+          ),
+        durationMs = 3,
+      )
+    }
+
+  /** #1189: an in-process compile error Gradle agrees with is reported as stale. */
+  @Test
+  fun `an in-process compile error that Gradle confirms marks the render stale`() {
+    lateinit var fixture: Fixture
+    start(fakeCompiler { fixture.classes })
+    fixture = fixture()
+    val asked = java.util.concurrent.atomic.AtomicInteger()
+    daemon.onCompileSources = inProcessCompileError(asked)
+    render(fixture)
+    val gradleBefore = compiles.size
+    val askedBefore = asked.get()
+
+    nextFailure =
+      SourceCompileOutcome.Failed("compileDebugKotlin failed: Unresolved reference 'Txt'.")
+    edit(fixture, """@Preview fun Header() { Txt("broken") }""")
+    val stale = render(fixture)
+
+    assertThat(asked.get()).isEqualTo(askedBefore + 1)
+    assertThat(compiles).hasSize(gradleBefore + 1)
+    assertThat(stale.texts.any { it.startsWith("stale:") && it.contains("Unresolved reference") })
+      .isTrue()
+
+    // The in-process compiler was right, so it is still trusted for the next edit.
+    nextFailure = null
+    edit(fixture, """@Preview fun Header() { Text("fixed") }""")
+    render(fixture)
+    assertThat(asked.get()).isEqualTo(askedBefore + 2)
+  }
+
+  /** #1189: when Gradle compiles what the daemon rejected, the daemon's compiler is not trusted. */
+  @Test
+  fun `an in-process compile error Gradle does not reproduce falls back for good`() {
+    lateinit var fixture: Fixture
+    start(fakeCompiler { fixture.classes })
+    fixture = fixture()
+    val asked = java.util.concurrent.atomic.AtomicInteger()
+    daemon.onCompileSources = inProcessCompileError(asked)
+    render(fixture)
+    val askedBefore = asked.get()
+
+    edit(fixture, """@Preview fun Header() { Text("Gradle is right") }""")
+    val fresh = render(fixture)
+    assertThat(fresh.bytes).contains("Gradle is right")
+    assertThat(fresh.texts.none { it.startsWith("stale:") }).isTrue()
+
+    edit(fixture, """@Preview fun Header() { Text("again") }""")
+    assertThat(render(fixture).bytes).contains("again")
+    assertThat(asked.get()).isAtMost(askedBefore + 1)
   }
 
   @Test
@@ -389,6 +513,9 @@ class SourceRecompileTest {
             ":app:compileDebugUnitTestKotlin",
             ":app:testDebugUnitTest",
             ":app:bundleDebugAar",
+            ":app:packageDebug",
+            // The R class inputs a Kotlin compile needs: allowed, unlike the APK above.
+            ":app:packageDebugResources UP-TO-DATE",
             ":wear:compileDebugKotlin",
             ":app:composePreviewCompile",
           ),
@@ -400,6 +527,7 @@ class SourceRecompileTest {
         ":app:compileDebugUnitTestKotlin",
         ":app:testDebugUnitTest",
         ":app:bundleDebugAar",
+        ":app:packageDebug",
         ":wear:compileDebugKotlin",
       )
       .inOrder()
@@ -456,7 +584,203 @@ class SourceRecompileTest {
       ms = compile["ms"]!!.jsonPrimitive.content.toLong(),
       initScript = compile["initScript"]!!.jsonPrimitive.content.toBoolean(),
       tasks = compile["tasks"]!!.jsonArray.map { it.jsonPrimitive.content },
+      trigger = compile["trigger"]?.jsonPrimitive?.content,
     )
+  }
+
+  @Test
+  fun `an edit nobody notified is detected and recompiled before the render`() {
+    lateinit var fixture: Fixture
+    start(fakeCompiler { fixture.classes })
+    fixture = fixture()
+    // A second file the preview uses: host edit tools change it and never call notify.
+    val strings = File(fixture.source.parentFile, "Strings.kt")
+    strings.writeText("""const val HEADER = "Header"""")
+    val cold = render(fixture)
+    assertThat(cold.bytes).contains("\"Header\"")
+
+    strings.writeText("""const val HEADER = "Hello Android"""")
+    strings.setLastModified(strings.lastModified() + 2_000)
+    val fresh = render(fixture)
+
+    assertThat(fresh.bytes).contains("Hello Android")
+    assertThat(fresh.changed).isTrue()
+    assertThat(compiles).containsExactly(listOf(strings))
+    val work = recordedCompile(fresh)
+    assertThat(work.trigger).isEqualTo(DaemonMcpServer.TRIGGER_DETECTED)
+    assertThat(work.task).isEqualTo(":app:composePreviewCompile")
+    assertThat(fresh.work!!["scan"]!!.jsonObject["changed"]!!.jsonPrimitive.content).isEqualTo("1")
+  }
+
+  @Test
+  fun `an unchanged render compiles nothing and lists no directory`() {
+    lateinit var fixture: Fixture
+    start(fakeCompiler { fixture.classes })
+    fixture = fixture()
+    render(fixture)
+    val unchanged = render(fixture)
+
+    assertThat(compiles).isEmpty()
+    assertThat(unchanged.work!!.containsKey("compile")).isFalse()
+    val scan = unchanged.work!!["scan"]!!.jsonObject
+    assertThat(scan["initial"]!!.jsonPrimitive.content).isEqualTo("false")
+    assertThat(scan["listed"]!!.jsonPrimitive.content).isEqualTo("0")
+    assertThat(scan["changed"]!!.jsonPrimitive.content).isEqualTo("0")
+    assertThat(scan["complete"]!!.jsonPrimitive.content).isEqualTo("true")
+  }
+
+  @Test
+  fun `notify records its trigger and the render does not compile the same edit again`() {
+    lateinit var fixture: Fixture
+    start(fakeCompiler { fixture.classes })
+    fixture = fixture()
+    render(fixture)
+    edit(fixture, """@Preview fun Header() { Text("Hello Android") }""")
+    notifyChanged(fixture)
+    val fresh = render(fixture)
+    assertThat(fresh.bytes).contains("Hello Android")
+    assertThat(compiles).hasSize(1)
+    assertThat(recordedCompile(fresh).trigger).isEqualTo(DaemonMcpServer.TRIGGER_NOTIFY)
+  }
+
+  @Test
+  fun `a failed compile then a fixed edit without notify renders fresh with no stale line`() {
+    lateinit var fixture: Fixture
+    start(fakeCompiler { fixture.classes })
+    fixture = fixture()
+    render(fixture)
+
+    nextFailure =
+      SourceCompileOutcome.Failed(
+        ":app:composePreviewCompile failed: MainActivity.kt:1:30 Unresolved reference 'Txt'"
+      )
+    edit(fixture, """@Preview fun Header() { Txt("Hello Android") }""")
+    val broken = render(fixture)
+    assertThat(broken.texts.filter { it.startsWith("stale:") }).hasSize(1)
+    // A failure is not retried on every render: the next unchanged render compiles nothing.
+    render(fixture)
+    assertThat(compiles).hasSize(1)
+
+    nextFailure = null
+    edit(fixture, """@Preview fun Header() { Text("Hello Android") }""")
+    val fixed = render(fixture)
+    assertThat(fixed.bytes).contains("Hello Android")
+    assertThat(fixed.texts.none { it.startsWith("stale:") }).isTrue()
+    assertThat(compiles).hasSize(2)
+  }
+
+  @Test
+  fun `an edit in a worktree nested in the registered build registers the worktree`() {
+    lateinit var fixture: Fixture
+    start(fakeCompiler { fixture.classes })
+    fixture = fixture()
+    val workspaceRoot = File(tmp.root, "workspace")
+    val worktree = File(workspaceRoot, ".claude/worktrees/build-verification")
+    File(worktree, "settings.gradle.kts").apply {
+      parentFile.mkdirs()
+      writeText("include(\":app\")")
+    }
+    val edited = File(worktree, "app/src/main/kotlin/com/example/MainActivity.kt")
+    edited.parentFile.mkdirs()
+    edited.writeText("""@Preview fun Header() { Text("Hello Android") }""")
+
+    val result =
+      client
+        .callTool(
+          "notify_file_changed",
+          buildJsonObject {
+            put("workspaceId", fixture.workspaceId.value)
+            put("path", edited.absolutePath)
+          },
+          timeoutMs = 10_000,
+        )
+        .firstTextContent()
+
+    assertThat(result).contains("edited file ${edited.absolutePath} is not in registered project")
+    assertThat(result).contains("rendering from ${worktree.canonicalPath}")
+    // The registered build was neither compiled nor told about a file that is not its own, and
+    // its own change detection does not look inside the hidden worktree directory either.
+    assertThat(compiles).isEmpty()
+    assertThat(daemon.fileChanges).isEmpty()
+    render(fixture)
+    assertThat(compiles).isEmpty()
+    assertThat(client.callTool("list_projects").firstTextContent()).contains(worktree.canonicalPath)
+  }
+
+  @Test
+  fun `the stale line carries gradle's root cause`() {
+    assumeFalse(System.getProperty("os.name").orEmpty().startsWith("Windows"))
+    val root = tmp.newFolder("no-sdk")
+    stubWrapper(
+      root,
+      """
+      |echo 'FAILURE: Build failed with an exception.'
+      |echo ''
+      |echo '* What went wrong:'
+      |echo "Could not determine the dependencies of task ':app:compileDebugKotlin'."
+      |echo '> SDK location not found. Define a valid SDK location with an ANDROID_HOME environment variable.'
+      |echo ''
+      |echo '* Try:'
+      |exit 1
+      """
+        .trimMargin(),
+    )
+    val failed =
+      GradleSourceCompiler(
+          initScripts = InitScripts(emptyMap(), tmp.newFolder("home-a")),
+          androidSdks = AndroidSdks(emptyMap(), tmp.newFolder("home-b")),
+        )
+        .compile(root, ":app", emptyList())
+
+    val reason = (failed as SourceCompileOutcome.Failed).reason
+    assertThat(reason)
+      .contains("Could not determine the dependencies of task ':app:compileDebugKotlin'")
+    assertThat(reason).contains("Cause: SDK location not found")
+
+    // And through the server, on the render's stale line.
+    lateinit var fixture: Fixture
+    start(SourceCompiler { _, _, _ -> failed })
+    fixture = fixture()
+    render(fixture)
+    edit(fixture, """@Preview fun Header() { Text("Hello Android") }""")
+    val line = render(fixture).texts.single { it.startsWith("stale:") }
+    assertThat(line).contains("SDK location not found")
+  }
+
+  @Test
+  fun `a worktree build gets the main checkout's sdk as ANDROID_HOME`() {
+    assumeFalse(System.getProperty("os.name").orEmpty().startsWith("Windows"))
+    val sdk = tmp.newFolder("sdk")
+    val main = tmp.newFolder("ComposeStarterRepo")
+    File(main, "ComposeStarter").mkdirs()
+    File(main, "ComposeStarter/local.properties").writeText("sdk.dir=${sdk.absolutePath}\n")
+    val gitDir = File(main, ".git/worktrees/build-verification").apply { mkdirs() }
+    File(gitDir, "commondir").writeText("../..\n")
+    val worktree = File(main, ".claude/worktrees/build-verification").apply { mkdirs() }
+    File(worktree, ".git").writeText("gitdir: ${gitDir.absolutePath}\n")
+    val build = File(worktree, "ComposeStarter").apply { mkdirs() }
+
+    val home = tmp.newFolder("empty-home")
+    assertThat(AndroidSdks.mainCheckoutOf(build)?.canonicalFile)
+      .isEqualTo(File(main, "ComposeStarter").canonicalFile)
+    assertThat(AndroidSdks(emptyMap(), home).forBuild(build)).isEqualTo(sdk)
+    // An SDK the environment already names wins; so does the build's own local.properties.
+    assertThat(AndroidSdks(mapOf("ANDROID_HOME" to "/opt/sdk"), home).forBuild(build)).isNull()
+    File(build, "local.properties").writeText("sdk.dir=/elsewhere\n")
+    assertThat(AndroidSdks(emptyMap(), home).forBuild(build)).isNull()
+    File(build, "local.properties").delete()
+
+    val seen = File(build, "android-home.txt")
+    File(build, "gradlew").apply {
+      writeText("#!/bin/sh\necho \"${'$'}ANDROID_HOME\" > '${seen.absolutePath}'\nexit 0\n")
+      setExecutable(true)
+    }
+    GradleSourceCompiler(
+        initScripts = InitScripts(emptyMap(), home),
+        androidSdks = AndroidSdks(emptyMap(), home),
+      )
+      .compile(build, ":app", emptyList())
+    assertThat(seen.readText().trim()).isEqualTo(sdk.absolutePath)
   }
 
   /** A stub `gradlew` that appends its arguments to `args.txt` and runs [body]. */
