@@ -376,15 +376,19 @@ class ServeCatalogMcp(
     add(
       tool(
         "list_projects",
-        "List every remote catalog with its stable id and preview count.",
+        "List every remote catalog with its stable id and preview count. Call this first: " +
+          "list_previews and list_data_products take one of these ids as 'catalog'.",
         EMPTY_SCHEMA,
       )
     )
     add(
       tool(
         "list_previews",
-        "List Compose previews and published metadata across every catalog, or one named catalog.",
-        CATALOG_FILTER_SCHEMA,
+        "List the Compose previews and published metadata of one hosted catalog. 'catalog' is " +
+          "required (ids from list_projects). This server holds published library catalogs " +
+          "only: previews of the project you are editing come from the local " +
+          "compose-preview-mcp server, not from here.",
+        CATALOG_REQUIRED_SCHEMA,
       )
     )
     add(
@@ -475,8 +479,9 @@ class ServeCatalogMcp(
     add(
       tool(
         "list_data_products",
-        "List structured data-product kinds across catalogs, optionally filtered by target.",
-        """{"type":"object","properties":{"catalog":{"type":"string"},"previewId":{"type":"string"},"uri":{"type":"string"}}}""",
+        "List the structured data-product kinds of one catalog, optionally one preview. Name " +
+          "the catalog with 'catalog' (ids from list_projects) or a preview 'uri'.",
+        """{"type":"object","properties":{"catalog":{"type":"string"},"previewId":{"type":"string"},"uri":{"type":"string"}},"anyOf":[{"required":["catalog"]},{"required":["uri"]}]}""",
       )
     )
     add(
@@ -585,7 +590,7 @@ class ServeCatalogMcp(
       }
       "status" -> textResult(statusJson().toString())
       "list_projects" -> textResult(projectsJson().toString())
-      "list_previews" -> textResult(previewsJson(args.optionalString("catalog")).toString())
+      "list_previews" -> textResult(previewsJson(requireCatalog("list_previews", args)).toString())
       "list_data_products" -> textResult(dataProductsJson(args).toString())
       "list-all-documentation" -> textResult(storiesJson().toString())
       "get-documentation-for-story" -> {
@@ -697,17 +702,16 @@ class ServeCatalogMcp(
         }
       )
       catalogIds().forEach { catalog ->
-        withCatalog(catalog) { host ->
-          host.previews.forEach { preview ->
-            add(
-              buildJsonObject {
-                put("uri", resourceUri(catalog, preview.id))
-                put("name", "${host.label}: ${preview.label}")
-                put("description", "$catalog: ${preview.id}")
-                put("mimeType", "image/png")
-              }
-            )
-          }
+        val view = peekCatalog(catalog)
+        view.previews?.forEach { preview ->
+          add(
+            buildJsonObject {
+              put("uri", resourceUri(catalog, preview.id))
+              put("name", "${view.label}: ${preview.label}")
+              put("description", "$catalog: ${preview.id}")
+              put("mimeType", "image/png")
+            }
+          )
         }
       }
     }
@@ -1725,11 +1729,8 @@ class ServeCatalogMcp(
 
   private suspend fun dataProductsJson(args: JsonObject): JsonArray {
     val uriTarget = args.optionalString("uri")?.let(::targetFromUri)
-    val selectedCatalog = uriTarget?.catalog ?: args.optionalString("catalog")
+    val selectedCatalog = uriTarget?.catalog ?: requireCatalog("list_data_products", args)
     val selectedPreview = uriTarget?.previewId ?: args.optionalString("previewId")
-    if (selectedPreview != null && selectedCatalog == null) {
-      throw McpRequestException("'catalog' is required when filtering by 'previewId'")
-    }
     return buildJsonArray {
       catalogIds(selectedCatalog).forEach { catalog ->
         withCatalog(catalog) { host ->
@@ -1773,19 +1774,17 @@ class ServeCatalogMcp(
     put(
       "projects",
       buildJsonArray {
-        catalogIds().forEach { catalog ->
-          withCatalog(catalog) { host -> add(projectJson(catalog, host)) }
-        }
+        catalogIds().forEach { catalog -> add(projectJson(catalog, peekCatalog(catalog))) }
       },
     )
   }
 
-  private fun projectJson(catalog: String, host: ServeHost): JsonObject = buildJsonObject {
+  private fun projectJson(catalog: String, view: CatalogView): JsonObject = buildJsonObject {
     put("workspaceId", catalog)
-    put("rootProjectName", host.label)
+    put("rootProjectName", view.label)
     put("catalog", catalog)
-    put("label", host.label)
-    put("previewCount", host.previews.size)
+    put("label", view.label)
+    view.previews?.let { put("previewCount", it.size) }
     put("remote", true)
   }
 
@@ -1811,7 +1810,7 @@ class ServeCatalogMcp(
   private suspend fun storiesJson(): JsonObject = buildJsonObject {
     val stories = buildJsonArray {
       catalogIds().forEach { catalog ->
-        withCatalog(catalog) { host -> host.previews.forEach { add(storyJson(catalog, it)) } }
+        peekCatalog(catalog).previews?.forEach { add(storyJson(catalog, it)) }
       }
     }
     put("schema", "compose-preview-mcp-storybook/v1")
@@ -2088,6 +2087,54 @@ class ServeCatalogMcp(
     if (selected == null) return ids
     if (selected !in ids) throw McpRequestException("no such catalog '$selected'")
     return listOf(selected)
+  }
+
+  /**
+   * The one catalog a per-catalog listing reads. A server holding a single catalog answers for it;
+   * otherwise the caller must name one (#1162).
+   *
+   * Listing every catalog here used to lease each in turn — resuming a suspended one reopens its
+   * host — and then serialise thousands of previews: 38 catalogs, m3-catalog alone 4,108 previews,
+   * well past three minutes, which a client reports only as its own timeout. The refusal costs one
+   * registry read, and it names the ids and the local server, because an agent that reached for
+   * this without a catalog was usually after its own project's previews.
+   */
+  private fun requireCatalog(tool: String, args: JsonObject): String {
+    args.optionalString("catalog")?.let {
+      return it
+    }
+    val ids = catalogIds()
+    ids.singleOrNull()?.let {
+      return it
+    }
+    val shown = ids.take(MAX_CATALOGS_IN_ERROR)
+    val more = if (ids.size > shown.size) ", and ${ids.size - shown.size} more" else ""
+    throw McpRequestException(
+      "$tool needs a 'catalog' argument; this hosted server does not list every catalog at " +
+        "once. Available catalogs: ${if (shown.isEmpty()) "(none)" else shown.joinToString()}" +
+        "$more. Call list_projects for their labels and preview counts. Previews of the project " +
+        "you are working on are not hosted here: use the local compose-preview-mcp server."
+    )
+  }
+
+  /** What an enumeration may say about one catalog, read without resuming it. */
+  private class CatalogView(val label: String, val previews: List<ServePreview>?)
+
+  /**
+   * [catalog]'s label and previews as the registry already holds them: the resident host, else the
+   * retained state of a suspended one. Never leases, so an enumeration across every catalog
+   * (list_projects, status, resources/list, list-all-documentation) cannot wake each idle daemon in
+   * turn — the same rule the `/status` page keeps. Null previews means the registry holds neither;
+   * the catalog is still listed by id.
+   */
+  private fun peekCatalog(catalog: String): CatalogView {
+    sessions.peekHost(catalog)?.let {
+      return CatalogView(it.label, it.previews)
+    }
+    sessions.peekState(catalog)?.let {
+      return CatalogView(it.label, it.previews)
+    }
+    return CatalogView(catalog, null)
   }
 
   private suspend fun <T> withCatalog(catalog: String, block: suspend (ServeHost) -> T): T {
@@ -2469,8 +2516,10 @@ class ServeCatalogMcp(
     private const val STORY_ID_SEPARATOR = "::"
     private val OBSERVATION_MODES =
       setOf("png", "svg", "scroll-png", "scroll-svg", "semantics", "hash")
-    private const val CATALOG_FILTER_SCHEMA =
-      """{"type":"object","properties":{"catalog":{"type":"string"}}}"""
+    private const val CATALOG_REQUIRED_SCHEMA =
+      """{"type":"object","properties":{"catalog":{"type":"string","description":"A catalog id from list_projects."}},"required":["catalog"]}"""
+    /** Enough ids to pick from in a refusal without the refusal becoming the listing. */
+    private const val MAX_CATALOGS_IN_ERROR = 50
     private val ANNOTATION_KINDS =
       setOf("compose/annotations", "compose/semantics", "compose/typography", "compose/tags")
     private val JSON = Json { ignoreUnknownKeys = false }
