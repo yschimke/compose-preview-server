@@ -333,6 +333,10 @@ class ServeUiBuilderCreateRoutesTest {
     assertEquals(412, put("put-design", document).first)
     assertEquals(listOf("put-design"), created)
 
+    // A refusal that is not "already exists" is not a failed precondition either.
+    assertEquals(400, put("refused-put", document.replace("put-design", "refused-put")).first)
+    assertEquals(listOf("put-design"), created)
+
     // A re-import of the canonical server copy is still a failed conditional create. The body
     // gives the more useful R3 instruction without changing HTTP precondition semantics.
     val canonical =
