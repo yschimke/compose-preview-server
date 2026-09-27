@@ -1,5 +1,17 @@
 # Changelog
 
+## [3.83.0](https://github.com/yschimke/compose-preview-server/compare/v3.82.0...v3.83.0) (2026-09-27)
+
+
+### Features
+
+* **mcp:** render several preview matches as a grid and size the model's image ([#1199](https://github.com/yschimke/compose-preview-server/issues/1199)) ([a02606a](https://github.com/yschimke/compose-preview-server/commit/a02606a8826bbc866f4d0a618d0816e02b0569b7))
+
+
+### Performance Improvements
+
+* **mcp:** make the in-process compile opt-in until it beats Gradle ([#1200](https://github.com/yschimke/compose-preview-server/issues/1200)) ([8f70404](https://github.com/yschimke/compose-preview-server/commit/8f70404938567960a07a5099b8f4feaf3c5bed4d))
+
 ## [3.82.0](https://github.com/yschimke/compose-preview-server/compare/v3.81.0...v3.82.0) (2026-09-27)
 
 
