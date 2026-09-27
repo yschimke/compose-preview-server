@@ -2331,7 +2331,7 @@ class DaemonMcpServer(
       "find_previews_for_file" -> toolFindPreviewsForFile(args)
       "render_preview" -> {
         autoRegisterWorkspace(session)
-        toolRenderPreview(session, args)
+        renderPreviewChoosingVariant(session, args)
       }
       "render_matrix" -> toolRenderMatrix(session, args)
       "watch" -> toolWatch(session, args)
@@ -3027,12 +3027,111 @@ class DaemonMcpServer(
     return CallToolResult(content = listOf(ContentBlock.Text(payload.toString())))
   }
 
-  private fun toolRenderPreview(session: Session, args: JsonObject): CallToolResult {
+  /**
+   * `render_preview preview=` with several matches (such as `@WearPreviewDevices` variants) asks
+   * the person which one through a form when the client declared form elicitation. Every other
+   * outcome keeps a complete text result: an unsupported client or an unanswered form renders the
+   * first match as before and lists every match under `variantChoice`; a decline or cancel renders
+   * nothing and returns the choices, so the agent does not re-ask.
+   */
+  private suspend fun renderPreviewChoosingVariant(
+    session: Session,
+    args: JsonObject,
+  ): CallToolResult {
+    val previewName = args["preview"]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() }
+    if (args["uri"] != null || previewName == null) return toolRenderPreview(session, args)
+    val resolved = resolvePreviewName(previewName)
+    if (resolved !is PreviewNameResolution.Found || resolved.others.isEmpty()) {
+      return toolRenderPreview(session, args, resolved)
+    }
+    val choices = listOf(resolved.uri) + resolved.others
+    val labels = variantLabels(choices)
+    val elicitation =
+      (session as? McpSession)?.elicitForm(
+        message = "Several previews match '$previewName'. Choose the one to render.",
+        requestedSchema =
+          buildJsonObject {
+            put("type", "object")
+            putJsonObject("properties") {
+              putJsonObject("variant") {
+                put("type", "string")
+                put("title", "Preview")
+                putJsonArray("enum") { labels.forEach { add(JsonPrimitive(it)) } }
+              }
+            }
+            putJsonArray("required") { add(JsonPrimitive("variant")) }
+          },
+      ) ?: FormElicitation.Unsupported
+    fun choiceBlock(mode: String, message: String) =
+      ContentBlock.Text(
+        buildJsonObject {
+          putJsonObject("variantChoice") {
+            put("mode", mode)
+            put("message", message)
+            putJsonArray("choices") { choices.forEach { add(JsonPrimitive(it)) } }
+          }
+        }
+          .toString()
+      )
+    fun renderFirst(mode: String, message: String): CallToolResult {
+      val result = toolRenderPreview(session, args, resolved)
+      return result.copy(content = result.content + choiceBlock(mode, message))
+    }
+    val textFallback =
+      "Several previews match; the first was rendered. Ask the user which one they meant and " +
+        "call render_preview with that uri."
+    val answer =
+      when (elicitation) {
+        FormElicitation.Unsupported -> return renderFirst("text", textFallback)
+        FormElicitation.TimedOut ->
+          return renderFirst(
+            "timeout",
+            "The chooser was not answered in time; the first match was rendered. Do not re-open " +
+              "it; list the choices and let the user pick.",
+          )
+        is FormElicitation.Answered -> elicitation.result
+      }
+    if (answer.action != ElicitResult.Action.Accept) {
+      val mode = if (answer.action == ElicitResult.Action.Decline) "declined" else "cancelled"
+      return CallToolResult(
+        content =
+          listOf(
+            choiceBlock(
+              mode,
+              "The user $mode the preview choice, so nothing was rendered. Do not ask again " +
+                "unless they bring it up; render one by uri if they do.",
+            )
+          )
+      )
+    }
+    val picked =
+      (answer.content?.get("variant") as? JsonPrimitive)?.contentOrNull?.let { label ->
+        choices.getOrNull(labels.indexOf(label))
+      } ?: return renderFirst("text", textFallback)
+    val result = toolRenderPreview(session, args, PreviewNameResolution.Found(picked, emptyList()))
+    return result.copy(
+      content =
+        result.content +
+          choiceBlock("elicitation", "The user chose this preview in a form: $picked")
+    )
+  }
+
+  /** Short, unique labels for a form: the preview id, or the whole URI when ids collide. */
+  private fun variantLabels(uris: List<String>): List<String> {
+    val ids = uris.map { PreviewUri.parseOrNull(it)?.previewFqn ?: it }
+    return if (ids.toSet().size == ids.size) ids else uris
+  }
+
+  private fun toolRenderPreview(
+    session: Session,
+    args: JsonObject,
+    preResolved: PreviewNameResolution? = null,
+  ): CallToolResult {
     val previewName = args["preview"]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() }
     var otherMatches = emptyList<String>()
     val uriStr =
       args["uri"]?.jsonPrimitive?.contentOrNull
-        ?: when (val resolved = previewName?.let { resolvePreviewName(it) }) {
+        ?: when (val resolved = preResolved ?: previewName?.let { resolvePreviewName(it) }) {
           null -> return errorCallToolResult("render_preview: missing 'uri' or 'preview'")
           is PreviewNameResolution.Missing ->
             return errorCallToolResult("render_preview: ${resolved.message}")

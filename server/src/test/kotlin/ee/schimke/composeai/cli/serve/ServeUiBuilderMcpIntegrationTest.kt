@@ -325,8 +325,9 @@ class ServeUiBuilderMcpIntegrationTest {
         .jsonObject["text"]!!
         .jsonPrimitive
         .content
-    assertTrue(statusText.contains("#320"), statusText)
-    assertTrue(statusText.contains("cannot yet report"), statusText)
+    assertTrue(statusText.contains("`home`"), statusText)
+    assertTrue(statusText.contains("compose-preview design status"), statusText)
+    assertTrue(statusText.contains("never claim there are no copies"), statusText)
   }
 
   @Test
@@ -946,6 +947,35 @@ class ServeUiBuilderMcpIntegrationTest {
     val replacement = initial.copy(title = "Saved from a temporary copy")
     val replaceArguments =
       """{"designId":"authoritative","operationId":"replace-1","baseRevision":0,"document":${json.encodeToString(DesignDocumentV1.serializer(), replacement)}}"""
+    // The R3 text fallback: a dry run validates, writes nothing, and lists the person's choices.
+    fun decision(tool: String, arguments: String): JsonObject =
+      json.parseToJsonElement(envelope(server, tool, arguments)).jsonObject
+    val replaceDecision =
+      decision(
+        ServeUiBuilderMcp.REPLACE_DESIGN_DOCUMENT,
+        replaceArguments.dropLast(1) + ""","dryRun":true}""",
+      )
+    assertEquals(
+      ServeUiBuilderMcp.DECISION_SCHEMA,
+      replaceDecision["schema"]!!.jsonPrimitive.content,
+    )
+    assertEquals(
+      listOf("save-back", "create-new", "discard", "keep"),
+      replaceDecision["options"]!!.jsonArray.map { it.jsonObject["id"]!!.jsonPrimitive.content },
+    )
+    assertEquals(0, snapshot().state.document.revision)
+    val dryMoveHome = assertNotNull(initial.home)
+    val moveDecision =
+      decision(
+        ServeUiBuilderMcp.MOVE_DESIGN_HOME,
+        """{"designId":"authoritative","operationId":"dry-move","baseRevision":0,"sourceHome":${json.encodeToString(DesignHomeV1.serializer(), dryMoveHome)},"targetHome":${json.encodeToString(DesignHomeV1.serializer(), DesignHomeV1.Repo("designs/authoritative.uid"))},"dryRun":true}""",
+      )
+    assertEquals("move-design-home", moveDecision["decision"]!!.jsonPrimitive.content)
+    assertEquals(
+      listOf("move", "cancel"),
+      moveDecision["options"]!!.jsonArray.map { it.jsonObject["id"]!!.jsonPrimitive.content },
+    )
+    assertEquals(dryMoveHome, snapshot().state.document.home)
     val replaced =
       assertIs<AcceptedOutcomeV1>(
         assertIs<OperationOutcomeResponseV1>(

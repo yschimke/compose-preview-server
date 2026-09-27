@@ -492,6 +492,9 @@ class ServeUiBuilderMcp(
     val designId = args.requiredText("designId")
     val operationId = args.requiredText("operationId")
     val baseRevision = args.requiredNumber("baseRevision")
+    if ((args[DRY_RUN_ARGUMENT] as? JsonPrimitive)?.booleanOrNull == true) {
+      return homeDecision(tool, designId, baseRevision, args).toString()
+    }
     val request =
       when (tool) {
         MOVE_DESIGN_HOME ->
@@ -511,6 +514,68 @@ class ServeUiBuilderMcp(
           )
       }
     return envelope(callId, service.execute(UiBuilderServiceCall(actor, request)))
+  }
+
+  /**
+   * The R3 decision behind a home move or a save-back / re-import, as a complete text result.
+   *
+   * This endpoint answers each POST on its own and keeps no channel open to the client, so it
+   * cannot send `elicitation/create` mid-call. The dry run is the fallback every client gets: the
+   * same validation as the real call, nothing written, and the options for the agent to put to the
+   * person in chat before it repeats the call without `dryRun`.
+   */
+  private fun homeDecision(
+    tool: String,
+    designId: String,
+    baseRevision: Long,
+    args: JsonObject,
+  ): JsonObject {
+    fun option(id: String, label: String) =
+      JsonObject(mapOf("id" to JsonPrimitive(id), "label" to JsonPrimitive(label)))
+    val fields = linkedMapOf<String, JsonElement>()
+    fields["schema"] = JsonPrimitive(DECISION_SCHEMA)
+    fields["designId"] = JsonPrimitive(designId)
+    fields["baseRevision"] = JsonPrimitive(baseRevision)
+    if (tool == MOVE_DESIGN_HOME) {
+      args.requiredNullableHome("sourceHome")
+      args.requiredHome("targetHome")
+      fields["decision"] = JsonPrimitive("move-design-home")
+      fields["sourceHome"] = args["sourceHome"] ?: JsonNull
+      fields["targetHome"] = args.getValue("targetHome")
+      fields["question"] =
+        JsonPrimitive("Move the canonical home of design `$designId` to the target home?")
+      fields["options"] =
+        JsonArray(
+          listOf(
+            option("move", "Move the home; the old record stays as a copy pointing to it"),
+            option("cancel", "Keep the current home"),
+          )
+        )
+    } else {
+      val document = args.requiredDocument()
+      fields["decision"] = JsonPrimitive("save-back-or-reimport")
+      fields["home"] = (args["document"] as? JsonObject)?.get("home") ?: JsonNull
+      fields["title"] = JsonPrimitive(document.title)
+      fields["question"] =
+        JsonPrimitive(
+          "This document's home is design `$designId` on this server. What should happen to it?"
+        )
+      fields["options"] =
+        JsonArray(
+          listOf(
+            option("save-back", "Save back onto the original (replaces revision $baseRevision)"),
+            option("create-new", "Create a new design instead, with a new id"),
+            option("discard", "Discard the copy; the original stays as it is"),
+            option("keep", "Keep the copy for now and change nothing"),
+          )
+        )
+    }
+    fields["elicitation"] =
+      JsonPrimitive(
+        "No form: this endpoint is stateless. Ask the person to pick one option in chat. " +
+          "Repeat the call without dryRun only for `move` or `save-back`."
+      )
+    return JsonObject(fields)
   }
 
   /**
@@ -1306,6 +1371,10 @@ class ServeUiBuilderMcp(
     const val CREATE_DESIGN = "ui_builder_create_design"
     const val APPLY = "ui_builder_apply"
     const val MOVE_DESIGN_HOME = "ui_builder_move_design_home"
+    const val DRY_RUN_ARGUMENT = "dryRun"
+    const val DECISION_SCHEMA = "compose-preview-decision/v1"
+    private const val DRY_RUN_SCHEMA =
+      """{"type":"boolean","description":"Validate and return the person's choices without changing anything."}"""
     const val REPLACE_DESIGN_DOCUMENT = "ui_builder_replace_design_document"
     const val EXPORT = "ui_builder_export"
     const val EXPORT_DOCUMENT = "ui_builder_export_document"
@@ -1600,14 +1669,17 @@ class ServeUiBuilderMcp(
             "`sourceHome` from $GET_DESIGN, provide a stable `operationId`, and name the new " +
             "`targetHome`. The old server record remains as a retained copy pointing at the new " +
             "home. The reply is an idempotent operation outcome with the new revision; a stale " +
-            "revision or changed source home is refused rather than overwriting a concurrent move.",
+            "revision or changed source home is refused rather than overwriting a concurrent move. " +
+            "Unless the person already chose this move, call first with `dryRun: true`: it " +
+            "changes nothing and returns the choices to put to them.",
           """
           {"type":"object","properties":{
             "designId":{"type":"string"},
             "operationId":{"type":"string","description":"Your stable id; makes a retry idempotent."},
             "baseRevision":{"type":"integer","description":"The exact current revision read from the design."},
             "sourceHome":{"description":"The exact current DesignHomeV1, or null when the design is unhomed.","anyOf":[{"type":"null"},$DESIGN_HOME_SCHEMA]},
-            "targetHome":$DESIGN_HOME_SCHEMA
+            "targetHome":$DESIGN_HOME_SCHEMA,
+            "dryRun":$DRY_RUN_SCHEMA
           },"required":["designId","operationId","baseRevision","sourceHome","targetHome"],"additionalProperties":false}
           """,
         ),
@@ -1619,13 +1691,16 @@ class ServeUiBuilderMcp(
             "The runtime validates the complete document and quotas, preserves server-owned " +
             "identity, access and creation time, retains the old revision, and broadcasts a " +
             "whole snapshot. Retry with the same `operationId`; never invent a new id after a " +
-            "lost response.",
+            "lost response. Unless the person already chose to save back or re-import onto " +
+            "this home, call first with `dryRun: true`: it changes nothing and returns the " +
+            "choices to put to them.",
           """
           {"type":"object","properties":{
             "designId":{"type":"string"},
             "operationId":{"type":"string","description":"Your stable id; makes a retry idempotent."},
             "baseRevision":{"type":"integer","description":"The exact current revision being replaced."},
-            "document":{"type":"object","description":"The complete replacement DesignDocumentV1, including the existing home."}
+            "document":{"type":"object","description":"The complete replacement DesignDocumentV1, including the existing home."},
+            "dryRun":$DRY_RUN_SCHEMA
           },"required":["designId","operationId","baseRevision","document"],"additionalProperties":false}
           """,
         ),

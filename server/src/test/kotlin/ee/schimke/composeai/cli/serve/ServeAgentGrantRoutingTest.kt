@@ -399,6 +399,57 @@ class ServeAgentGrantRoutingTest {
   }
 
   @Test
+  fun `the handshake tells each client which access flow its declared elicitation supports`() {
+    fun instructions(capabilities: String, version: String = "2025-06-18"): Pair<String, String> {
+      val result =
+        json(
+            mcpAnonymous(
+                """{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"$version","capabilities":$capabilities,"clientInfo":{"name":"test","version":"1"}}}"""
+              )
+              .second
+          )["result"]!!
+          .jsonObject
+      return result["protocolVersion"]!!.jsonPrimitive.content to
+        result["instructions"]!!.jsonPrimitive.content
+    }
+    val (urlVersion, url) = instructions("""{"elicitation":{"form":{},"url":{}}}""", "2025-11-25")
+    assertEquals("2025-11-25", urlVersion)
+    assertTrue(url.contains("declared URL elicitation: call poll_access with urlMode=true"), url)
+    for (capabilities in
+      listOf("{}", """{"elicitation":{}}""", """{"elicitation":{"form":{}}}""")) {
+      val (version, text) = instructions(capabilities)
+      assertEquals("2025-06-18", version)
+      assertTrue(text.contains("did not declare URL elicitation: omit urlMode"), text)
+    }
+  }
+
+  @Test
+  fun `a per-request capability declaration decides poll_access URL mode`() {
+    val opened =
+      mcpAnonymous(
+        """{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"request_access","arguments":{}}}"""
+      )
+    val payload = json(toolText(opened.second))
+    val requestId = payload["requestId"]!!.jsonPrimitive.content
+    val secret = payload["deviceSecret"]!!.jsonPrimitive.content
+    fun poll(meta: String, urlMode: Boolean?) =
+      mcpAnonymous(
+          """{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"poll_access","_meta":{"${ServeCatalogMcp.CLIENT_CAPABILITIES_META}":$meta},"arguments":{"requestId":"$requestId","deviceSecret":"$secret","waitSeconds":0${urlMode?.let { ",\"urlMode\":$it" }.orEmpty()}}}}"""
+        )
+        .second
+
+    // Declared URL support: URL mode without the agent having to ask for it.
+    val declared = json(poll("""{"elicitation":{"url":{}}}""", urlMode = null))
+    assertEquals(-32042, declared["error"]!!.jsonObject["code"]!!.jsonPrimitive.content.toInt())
+
+    // Declared capabilities without URL mode: the text result, even if urlMode was passed.
+    val formOnly = poll("""{"elicitation":{"form":{}}}""", urlMode = true)
+    assertEquals("pending", json(toolText(formOnly))["status"]!!.jsonPrimitive.content)
+    val none = poll("{}", urlMode = true)
+    assertEquals("pending", json(toolText(none))["status"]!!.jsonPrimitive.content)
+  }
+
+  @Test
   fun `a denied URL-mode access request returns text and never a token`() {
     val opened =
       mcpAnonymous(
