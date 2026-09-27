@@ -6519,3 +6519,241 @@ test("contract · static viewer bounds results and rejects credentials", async (
   expect(JSON.stringify(modelContext)).not.toContain("array-must-not-travel");
   expect(JSON.stringify(modelContext)).toContain("CardPreview");
 });
+
+// A fake MCP Apps host (2026-01-26 `ui/*` bridge) that proxies a compose-preview server's tools
+// and resources, so the live viewer actions can be driven end to end (#1119).
+async function openLiveViewer(page, pngs) {
+  await page.goto("/preview-harness/index.html");
+  await page.evaluate((pngs) => {
+    const base = "compose-preview://fixture/_app/com.example.Card";
+    const round = "compose-preview://fixture/_app/com.example.Card_Round?config=round";
+    const log = (window.__live = {
+      calls: [],
+      reads: [],
+      subscribes: [],
+      contexts: [],
+      links: [],
+      lists: 0,
+    });
+    document.body.replaceChildren();
+    const frame = document.createElement("iframe");
+    frame.title = "Compose Preview MCP App";
+    frame.style.width = "620px";
+    frame.style.height = "700px";
+    const send = (message) => frame.contentWindow.postMessage({ jsonrpc: "2.0", ...message }, "*");
+    const image = (data) => ({ type: "image", mimeType: "image/png", data });
+    const resourceLink = (uri) => ({ type: "resource_link", uri, name: "Compose Preview render", mimeType: "image/png" });
+    window.__liveSend = send;
+    window.__liveUris = { base, round };
+    window.addEventListener("message", (event) => {
+      if (event.source !== frame.contentWindow) return;
+      const { id, method, params } = event.data || {};
+      const reply = (result) => send({ id, result });
+      if (method === "ui/initialize") {
+        reply({ hostCapabilities: { serverTools: {}, serverResources: { subscribe: true } } });
+        send({ method: "ui/notifications/tool-input", params: { arguments: { preview: "Card" } } });
+        send({
+          method: "ui/notifications/tool-result",
+          params: {
+            content: [
+              { type: "text", text: JSON.stringify({ observe: "semantics", uri: base, sha256: "a" }) },
+              { type: "text", text: JSON.stringify({ otherMatches: [round] }) },
+              resourceLink(base),
+            ],
+          },
+        });
+      } else if (method === "tools/list") {
+        reply({
+          tools: ["render_preview", "render_preview_overlay", "get_preview_data"].map((name) => ({
+            name,
+            inputSchema: { type: "object" },
+          })),
+        });
+      } else if (method === "resources/read") {
+        log.reads.push(params.uri);
+        const data = params.uri === round ? pngs.refreshed : pngs.base;
+        reply({ contents: [{ uri: params.uri, mimeType: "image/png", blob: data }] });
+      } else if (method === "resources/subscribe") {
+        log.subscribes.push(params.uri);
+        reply({});
+      } else if (method === "resources/unsubscribe") {
+        reply({});
+      } else if (method === "resources/list") {
+        log.lists += 1;
+        reply({
+          resources: [base, round].map((uri) => ({
+            uri,
+            name: uri,
+            mimeType: "image/png",
+            _meta: { sourceFile: "/work/app/src/Card.kt", sourceLine: uri === round ? 30 : 12 },
+          })),
+        });
+      } else if (method === "tools/call") {
+        log.calls.push(params);
+        if (params.name === "render_preview") {
+          reply({ content: [image(pngs.round), resourceLink(params.arguments.uri)] });
+        } else if (params.name === "render_preview_overlay") {
+          reply({ content: [image(pngs.base)] });
+        } else if (params.name === "get_preview_data") {
+          reply({
+            content: [
+              {
+                type: "text",
+                text: JSON.stringify({
+                  kind: params.arguments.kind,
+                  payload: {
+                    root: {
+                      displayName: "Column",
+                      bounds: { left: 0, top: 0, right: 240, bottom: 240 },
+                      children: [{ displayName: "Text", bounds: { left: 10, top: 10, right: 120, bottom: 40 } }],
+                    },
+                  },
+                }),
+              },
+            ],
+          });
+        }
+      } else if (method === "ui/update-model-context") {
+        log.contexts.push(params);
+        reply({});
+      } else if (method === "ui/open-link") {
+        log.links.push(params.url);
+        reply({});
+      }
+    });
+    frame.src = "/mcp-app/compose-preview-viewer.html";
+    document.body.append(frame);
+  }, pngs);
+  return page.frameLocator('iframe[title="Compose Preview MCP App"]');
+}
+
+test("contract · live viewer actions go over the MCP Apps bridge", async ({ page }) => {
+  const pngs = {
+    base: readFileSync(renderPlaceholder).toString("base64"),
+    round: readFileSync(resolve(pagesDir, "_render-placeholder-round.png")).toString("base64"),
+    refreshed: readFileSync(designRenderPlaceholder).toString("base64"),
+  };
+  const viewer = await openLiveViewer(page, pngs);
+  const live = () => page.evaluate(() => window.__live);
+  const { base, round } = await page.evaluate(() => window.__liveUris);
+  const image = viewer.locator("#canvas .preview-stage > img");
+  // Name the PNG on screen rather than printing base64 on a mismatch.
+  const shown = async () => {
+    const src = await image.getAttribute("src");
+    return Object.keys(pngs).find((key) => src === `data:image/png;base64,${pngs[key]}`) || "other";
+  };
+  const lastContext = async () => {
+    const { contexts } = await live();
+    const text = contexts.at(-1)?.content?.[0]?.text || "";
+    expect(contexts.at(-1).content).toHaveLength(1);
+    expect(text).not.toContain("\n");
+    expect(text).not.toContain(pngs.base.slice(0, 40));
+    expect(text).not.toContain("data:image");
+    return text;
+  };
+
+  // A resource_link with no inline image is read through the bridge, then subscribed.
+  await expect.poll(shown).toBe("base");
+  await expect.poll(async () => (await live()).subscribes).toEqual([base]);
+  expect((await live()).reads).toEqual([base]);
+
+  // Choose a variant: render_preview for the other match, the view and subscription follow it.
+  const variant = viewer.locator("#variant");
+  await expect(variant).toBeVisible();
+  await expect(variant.locator("option")).toHaveText(["Card", "Card_Round (round)"]);
+  await variant.selectOption(round);
+  await expect.poll(shown).toBe("round");
+  await expect(viewer.locator("#meta")).toHaveText("Card_Round (round)");
+  expect((await live()).calls).toEqual([
+    { name: "render_preview", arguments: { uri: round, observe: "png", inline: true } },
+  ]);
+  await expect.poll(async () => (await live()).subscribes).toEqual([base, round]);
+  expect(await lastContext()).toContain(`switched to variant Card_Round (round) (${round})`);
+  await expect(variant).toHaveValue(round);
+
+  // Layout bounds: get_preview_data, drawn over the render in its pixel space.
+  await viewer.locator("#layout").click();
+  await expect(viewer.locator(".layout-boxes rect")).toHaveCount(2);
+  await expect(viewer.locator("#layout")).toHaveAttribute("aria-pressed", "true");
+  expect((await live()).calls.at(-1)).toEqual({
+    name: "get_preview_data",
+    arguments: { uri: round, kind: "layout/inspector" },
+  });
+  expect(await lastContext()).toContain("layout bounds shown on Card_Round (round) (2 boxes)");
+
+  // The a11y overlay keeps the boxes, and tells the agent it is showing.
+  await viewer.locator("#a11y").click();
+  await expect(viewer.locator('#canvas img[alt="Compose preview with accessibility overlay"]')).toBeVisible();
+  await expect(viewer.locator(".layout-boxes rect")).toHaveCount(2);
+  expect((await live()).calls.at(-1).name).toBe("render_preview_overlay");
+  await expect.poll(lastContext).toContain("accessibility overlay shown on Card_Round (round)");
+  await viewer.locator("#a11y").click();
+  await viewer.locator("#layout").click();
+  await expect(viewer.locator(".layout-boxes")).toHaveCount(0);
+  await expect.poll(lastContext).toContain("layout bounds hidden on Card_Round (round)");
+
+  // Re-render the current variant.
+  const callsBefore = (await live()).calls.length;
+  await viewer.locator("#rerender").click();
+  await expect.poll(async () => (await live()).calls.length).toBe(callsBefore + 1);
+  expect((await live()).calls.at(-1)).toEqual({
+    name: "render_preview",
+    arguments: { uri: round, observe: "png", inline: true },
+  });
+
+  // Open in editor: the location from resources/list, as plain text and a file link.
+  await viewer.locator("#source").click();
+  await expect(viewer.locator("#source-location")).toHaveText("Source: /work/app/src/Card.kt:30");
+  expect(await lastContext()).toContain("open Card_Round (round) in the editor at /work/app/src/Card.kt:30");
+  await viewer.locator("#source-location a").click();
+  await expect.poll(async () => (await live()).links).toEqual(["file:///work/app/src/Card.kt"]);
+
+  // Live refresh: a resource update for the subscribed variant reads and redraws it.
+  const readsBefore = (await live()).reads.length;
+  await page.evaluate((uri) => window.__liveSend({ method: "notifications/resources/updated", params: { uri } }), round);
+  await expect.poll(shown).toBe("refreshed");
+  expect((await live()).reads.slice(readsBefore)).toEqual([round]);
+
+  // A matrix result: choosing a cell is model context, one line.
+  await page.evaluate((uri) =>
+    window.__liveSend({
+      method: "ui/notifications/tool-result",
+      params: {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({ uri, cells: [{ overrides: { uiMode: "dark" } }, { overrides: { fontScale: 2 } }] }),
+          },
+        ],
+      },
+    }), base);
+  await expect(viewer.locator(".cell")).toHaveCount(2);
+  await expect(viewer.locator("#rerender")).toBeHidden();
+  await expect(viewer.locator("#layout")).toBeHidden();
+  await viewer.locator(".cell").nth(1).click();
+  await expect(viewer.locator(".cell").nth(1)).toHaveAttribute("aria-pressed", "true");
+  await expect.poll(lastContext).toContain('matrix variant {"fontScale":2} of Card');
+});
+
+test("contract · static viewer shows no live actions", async ({ page }) => {
+  const png = readFileSync(renderPlaceholder).toString("base64");
+  const viewer = await openSrcdocViewer(
+    page,
+    inlineResultBlock({
+      version: 1,
+      arguments: { uri: "compose-preview://fixture/_app/com.example.Card" },
+      result: {
+        content: [
+          { type: "image", mimeType: "image/png", data: png },
+          { type: "text", text: JSON.stringify({ otherMatches: ["compose-preview://fixture/_app/com.example.Card_Round"] }) },
+          { type: "resource_link", uri: "compose-preview://fixture/_app/com.example.Card", name: "render" },
+        ],
+      },
+    }),
+  );
+  await expect(viewer.locator('#canvas img[alt="Rendered Compose preview"]')).toBeVisible();
+  await expect(viewer.locator("#live")).toBeHidden();
+  await expect(viewer.locator("#source-location")).toBeEmpty();
+  await page.waitForTimeout(500);
+  expect(await page.evaluate(() => window.__viewerMessages)).toBe(0);
+});

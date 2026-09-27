@@ -2008,6 +2008,15 @@ class DaemonMcpServerTest {
           ?.contentOrNull
       )
       .isEqualTo(previewFile.canonicalPath)
+    assertThat(
+        listed.resources
+          .first { it.uri.contains("com.example.Blue") }
+          .meta
+          ?.get("sourceLine")
+          ?.jsonPrimitive
+          ?.contentOrNull
+      )
+      .isEqualTo("24")
 
     val found =
       json

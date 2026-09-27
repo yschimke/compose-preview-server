@@ -524,9 +524,13 @@ class DaemonMcpServer(
             name = entry.fqn.substringAfterLast('.'),
             description = entry.displayName ?: entry.fqn,
             mimeType = "image/png",
+            // The viewer's "open in editor" action reads the source location from here.
             meta =
               entry.resolvedSourcePath?.let { sourceFile ->
-                buildJsonObject { put("sourceFile", sourceFile) }
+                buildJsonObject {
+                  put("sourceFile", sourceFile)
+                  entry.bodyLine?.let { put("sourceLine", it) }
+                }
               },
           )
         )
