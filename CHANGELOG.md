@@ -1,5 +1,22 @@
 # Changelog
 
+## [3.79.0](https://github.com/yschimke/compose-preview-server/compare/v3.78.0...v3.79.0) (2026-09-27)
+
+
+### Features
+
+* **mcp-app:** live viewer actions over the MCP Apps bridge ([#1177](https://github.com/yschimke/compose-preview-server/issues/1177)) ([eaac172](https://github.com/yschimke/compose-preview-server/commit/eaac172e6972b4cc47e3317f89ff336179118363))
+* **mcp:** elicitation and prompts with text fallbacks ([#1179](https://github.com/yschimke/compose-preview-server/issues/1179)) ([a6f72eb](https://github.com/yschimke/compose-preview-server/commit/a6f72eb7f54b75e8774babad9a022ed399ada95d))
+* **mcp:** opt-in a11y and layout details in the render card ([#1175](https://github.com/yschimke/compose-preview-server/issues/1175)) ([8a1ee2f](https://github.com/yschimke/compose-preview-server/commit/8a1ee2fc488cef1c1d4e474d5357b679f39ae210))
+
+
+### Bug Fixes
+
+* **mcp:** recompile CLI-injected projects through the CLI's init script ([#1178](https://github.com/yschimke/compose-preview-server/issues/1178)) ([5a98bea](https://github.com/yschimke/compose-preview-server/commit/5a98bea257a80e16c5b2ba40392258f831a78b98))
+* **mcp:** recompile edited sources before the daemon swaps classes ([#1171](https://github.com/yschimke/compose-preview-server/issues/1171)) ([c1f58bf](https://github.com/yschimke/compose-preview-server/commit/c1f58bfc19538dde80092fc35a14132ae57f396f))
+* **serve:** fail fast when list_previews has no catalog ([#1176](https://github.com/yschimke/compose-preview-server/issues/1176)) ([b0a72da](https://github.com/yschimke/compose-preview-server/commit/b0a72dae4d3eeb5599761df2a5bdb663b6dff665)), closes [#1162](https://github.com/yschimke/compose-preview-server/issues/1162)
+* **serve:** report a refused design create instead of redirecting to it ([#1180](https://github.com/yschimke/compose-preview-server/issues/1180)) ([73b6727](https://github.com/yschimke/compose-preview-server/commit/73b6727124a1bbfa6a2f91b3d782611f667cf43b))
+
 ## [3.78.0](https://github.com/yschimke/compose-preview-server/compare/v3.77.0...v3.78.0) (2026-09-27)
 
 
