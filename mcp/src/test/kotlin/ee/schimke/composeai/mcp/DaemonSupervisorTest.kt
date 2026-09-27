@@ -22,6 +22,50 @@ class DaemonSupervisorTest {
   }
 
   @Test
+  fun `a restarted supervisor re-registers a stored workspace id from workspaces json`() {
+    val root = createTempDirectory("cp-supervisor-store").toFile()
+    val project = File(root, "ComposeStarter").apply { mkdirs() }
+    val storeFile = File(root, "cache/composeai/mcp/workspaces.json")
+    val first =
+      DaemonSupervisor(
+        descriptorProvider = FakeDescriptorProvider(),
+        clientFactory = FakeDaemonClientFactory(),
+        workspaceStore = WorkspaceStore(storeFile),
+      )
+    val id = first.registerProject(project).workspaceId
+    first.shutdown()
+    assertThat(storeFile.readText()).contains(project.canonicalPath)
+
+    // A new process: nothing registered in memory, but the id still resolves, lazily.
+    val restarted =
+      DaemonSupervisor(
+        descriptorProvider = FakeDescriptorProvider(),
+        clientFactory = FakeDaemonClientFactory(),
+        workspaceStore = WorkspaceStore(storeFile),
+      )
+    assertThat(restarted.listProjects()).isEmpty()
+    assertThat(restarted.daemonFor(id, ":app").workspaceId).isEqualTo(id)
+    assertThat(restarted.project(id)?.path).isEqualTo(project.canonicalFile)
+    assertThat(restarted.registerProject(project).workspaceId).isEqualTo(id)
+    restarted.shutdown()
+
+    // Roots or the cwd inside a stored build bring it back too.
+    val third =
+      DaemonSupervisor(
+        descriptorProvider = FakeDescriptorProvider(),
+        clientFactory = FakeDaemonClientFactory(),
+        workspaceStore = WorkspaceStore(storeFile),
+      )
+    assertThat(third.restoreMatching(listOf(File(project, "app/src"))).map { it.workspaceId })
+      .containsExactly(id)
+
+    // Only unregister_project forgets an id.
+    third.unregisterProject(id)
+    assertThat(WorkspaceStore(storeFile).get(id.value)).isNull()
+    third.shutdown()
+  }
+
+  @Test
   fun `readingFromDisk resolves descriptor for a projectDir-remapped module`() {
     val root = createTempDirectory("cp-supervisor-test").toFile()
     // `:featureTasks` can be remapped to shared/features/tasks in settings.gradle.kts, so the

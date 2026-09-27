@@ -5,13 +5,21 @@
 <title>Compose Preview</title>
 <style>
   :root { color-scheme: light dark; font: 14px system-ui, sans-serif; color: var(--color-text-primary, #1b1b1f); background: var(--color-background-primary, #fff); }
-  body { margin: 0; }
-  .app { padding: 12px; }
-  .bar { display: flex; gap: 8px; align-items: center; justify-content: space-between; margin-bottom: 10px; }
-  .title { font-weight: 650; }
+  body { margin: 0; background: var(--color-background-primary, #fff); }
+  .app { padding: 8px; }
+  /* One compact header line, so a short host frame (Claude Desktop starts near 160px) still fits
+     the image and the toolbar. --image-max is set from the measured chrome, see fitToFrame(). */
+  .bar { display: flex; gap: 8px; align-items: center; min-width: 0; margin-bottom: 6px; }
+  .bar-text { display: flex; gap: 8px; align-items: baseline; min-width: 0; flex: 1 1 auto; }
+  .title { font-weight: 650; white-space: nowrap; }
+  #meta { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+  .bar label { font-size: 12px; white-space: nowrap; }
+  .bar label[hidden] { display: none; }
+  .bar select { font: inherit; padding: 2px 4px; border-radius: 6px; max-width: 14em; }
   .muted { color: var(--color-text-secondary, #666); font-size: 12px; }
   .canvas { min-height: 120px; border: 1px solid var(--color-border, #d8d8dd); border-radius: 10px; background: var(--color-background-secondary, #f8f8fa); display: grid; place-items: center; overflow: auto; }
-  .canvas img { max-width: 100%; max-height: 560px; object-fit: contain; }
+  .canvas.has-image { min-height: 0; overflow: hidden; }
+  .canvas img { max-width: 100%; max-height: var(--image-max, 560px); object-fit: contain; }
   .preview-stage { position: relative; display: inline-block; max-width: 100%; line-height: 0; }
   .preview-stage > img { display: block; }
   .comment-pin { position: absolute; transform: translate(-50%, -50%); z-index: 2; display: grid; place-items: center; width: 26px; height: 26px; padding: 0; border-radius: 999px; border: 2px solid #fff; background: #315da8; color: #fff; font-size: 12px; font-weight: 700; line-height: 1; box-shadow: 0 1px 4px #0008; }
@@ -30,8 +38,10 @@
   .fallback { width: 100%; padding: 12px; box-sizing: border-box; }
   .fallback p { margin: 0 0 8px; }
   .fallback pre { margin: 0; padding: 10px; border-radius: 7px; background: var(--color-background-primary, #fff); white-space: pre-wrap; overflow-wrap: anywhere; }
-  .actions { display: flex; gap: 8px; margin-top: 10px; }
-  .live { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 10px; }
+  .toolbar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 6px; }
+  .toolbar button { padding: 3px 8px; font-size: 12px; }
+  .actions { display: contents; }
+  .live { display: contents; }
   .live[hidden], .live [hidden] { display: none; }
   .live select { font: inherit; padding: 5px; border-radius: 6px; max-width: 100%; }
   .source { margin-top: 6px; overflow-wrap: anywhere; }
@@ -72,14 +82,28 @@
 <body>
 <main class="app">
   <div class="bar">
-    <div>
-      <div class="title">Compose Preview</div>
-      <div id="meta" class="muted">Waiting for a preview result…</div>
+    <div class="bar-text">
+      <span class="title">Compose Preview</span>
+      <span id="meta" class="muted" role="status">Waiting for a preview result…</span>
     </div>
+    <label id="variant-label" hidden>Variant <select id="variant"></select></label>
   </div>
   <section id="canvas" class="canvas">
     <div class="empty">This viewer displays render and matrix results when the host supplies them.</div>
   </section>
+  <div id="toolbar" class="toolbar">
+    <div class="actions">
+      <button id="refresh" hidden>Refresh resource</button>
+      <button id="a11y" hidden>Show accessibility overlay</button>
+      <button id="use" hidden>Use selected result</button>
+    </div>
+    <div id="live" class="live" aria-label="Live viewer actions" hidden>
+      <button id="rerender" type="button" hidden>Re-render</button>
+      <button id="layout" type="button" aria-pressed="false" hidden>Show layout bounds</button>
+      <button id="source" type="button" hidden>Open in editor</button>
+    </div>
+  </div>
+  <div id="source-location" class="muted source" role="status"></div>
   <section id="details" class="details" aria-label="Render details" hidden>
     <div id="detail-modes" class="detail-modes" role="group" aria-label="Render view"></div>
     <div id="detail-summary" class="muted"></div>
@@ -103,18 +127,6 @@
       <pre></pre>
     </details>
   </section>
-  <div class="actions">
-    <button id="refresh" hidden>Refresh resource</button>
-    <button id="a11y" hidden>Show accessibility overlay</button>
-    <button id="use" hidden>Use selected result</button>
-  </div>
-  <div id="live" class="live" aria-label="Live viewer actions" hidden>
-    <label id="variant-label" hidden>Variant <select id="variant"></select></label>
-    <button id="rerender" type="button" hidden>Re-render</button>
-    <button id="layout" type="button" aria-pressed="false" hidden>Show layout bounds</button>
-    <button id="source" type="button" hidden>Open in editor</button>
-  </div>
-  <div id="source-location" class="muted source" role="status"></div>
 </main>
 <script>
 (() => {
@@ -574,8 +586,12 @@
         `Pinned at ${Math.round(commentPoint.x * 100)}%, ${Math.round(commentPoint.y * 100)}%.`;
       renderCommentPins();
     });
-    preview.addEventListener('load', renderCommentPins, { once: true });
+    preview.addEventListener('load', () => {
+      renderCommentPins();
+      scheduleFit();
+    }, { once: true });
     canvas.replaceChildren(stage);
+    canvas.classList.add('has-image');
     renderCommentPins();
     if (layoutVisible) drawLayoutBounds();
   }
@@ -1179,7 +1195,7 @@
     layoutToggle.setAttribute('aria-pressed', String(layoutVisible));
     // The location comes from resources/list; offer it alongside this server's own tools.
     sourceButton.hidden = !(ready && renderToolName);
-    live.hidden = [variantLabel, rerender, layoutToggle, sourceButton].every(node => node.hidden);
+    live.hidden = [rerender, layoutToggle, sourceButton].every(node => node.hidden);
   }
 
   async function renderLive(target, contextLine) {
@@ -1446,6 +1462,44 @@
     meta.textContent = 'Static result unavailable; use the complete text fallback.';
   }
 
+  // Sizing (MCP Apps `ui/notifications/size-changed`). The image is capped to what the frame can
+  // show under the header and toolbar, so hosts that ignore the notification still show the whole
+  // preview; the notification asks for the height the image wants (fit to width, capped at about
+  // 70% of the screen), so hosts that honour it grow the frame to match.
+  let fitScheduled = false;
+  let lastReportedHeight = 0;
+
+  function scheduleFit() {
+    if (fitScheduled) return;
+    fitScheduled = true;
+    window.requestAnimationFrame(() => {
+      fitScheduled = false;
+      fitToFrame();
+    });
+  }
+
+  function fitToFrame() {
+    const root = document.documentElement;
+    const image = canvas.classList.contains('has-image') ? canvas.querySelector('.preview-stage > img') : null;
+    let wanted = Math.ceil(root.scrollHeight);
+    if (image) {
+      const shown = image.getBoundingClientRect().height;
+      const chrome = Math.max(0, root.scrollHeight - shown);
+      const screenCap = Math.round((window.screen?.availHeight || 800) * 0.7);
+      root.style.setProperty('--image-max', `${Math.max(32, Math.floor(window.innerHeight - chrome))}px`);
+      const natural = image.naturalWidth && image.naturalHeight
+        ? image.naturalHeight * Math.min(1, canvas.clientWidth / image.naturalWidth)
+        : shown;
+      wanted = Math.ceil(chrome + Math.min(natural, screenCap));
+    }
+    if (!initialized || staticMode || wanted === lastReportedHeight) return;
+    lastReportedHeight = wanted;
+    notify('ui/notifications/size-changed', { height: wanted });
+  }
+
+  if (typeof ResizeObserver === 'function') new ResizeObserver(scheduleFit).observe(document.body);
+  window.addEventListener('resize', scheduleFit, { passive: true });
+
   function stopResourcePolling() {
     if (resourcePollTimer == null) return;
     window.clearTimeout(resourcePollTimer);
@@ -1628,6 +1682,7 @@
 
   function draw(result) {
     hasToolResult = true;
+    canvas.classList.remove('has-image');
     if (staticMode) meta.textContent = 'Static preview result';
     const value = data(result);
     const image = png(result);
@@ -1788,6 +1843,7 @@
       hostServerTools = result?.hostCapabilities?.serverTools != null;
       initialized = true;
       notify('ui/notifications/initialized', {});
+      scheduleFit();
       updateAccessibilityAction();
       void discoverViewerActions();
     } catch (error) {

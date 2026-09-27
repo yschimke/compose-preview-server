@@ -2703,6 +2703,15 @@ class DaemonMcpServer(
   private suspend fun autoRegisterWorkspace(session: Session) {
     val candidates = sessionRoots(session)
     preferredRoots = candidates
+    // After a restart, a build registered before (workspaces.json) comes back under its old id.
+    if (
+      supervisor.listProjects().isEmpty() && supervisor.restoreMatching(candidates).isNotEmpty()
+    ) {
+      sessions.forEach { it.notifyResourceListChanged() }
+      return
+    }
+    // Everything below goes through the supervisor (and so its workspace store), as
+    // register_project does.
     val registered = supervisor.listProjects().map { it.path.canonicalFile }
     candidates
       .filter { dir -> GRADLE_BUILD_FILES.any { File(dir, it).isFile } }
