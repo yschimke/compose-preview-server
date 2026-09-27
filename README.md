@@ -203,6 +203,7 @@ generated source to a file, which is what a session otherwise re-invents as a `c
 ```shell
 export COMPOSE_PREVIEW_TOKEN=...          # or let the command ask a human to approve a grant
 compose-preview-server design list --server https://preview.coo.ee
+compose-preview-server design status --workspace . --summary
 compose-preview-server design render spotify-wear-widget -o cover.png
 compose-preview-server design export spotify-wear-widget -o Widget.kt
 compose-preview-server design get spotify-wear-widget > design.json
@@ -214,6 +215,12 @@ flag. With neither set — or after a restart has dropped the grant — the comm
 own device-code flow: it prints an approval link and a code, waits for a human, and carries on.
 A refused export prints the generator's own diagnostics to stderr and exits non-zero, writing
 nothing, so it composes in CI.
+
+`design status` is the bounded SessionStart probe: it reads the checkout's
+`ui-builder/designs/index.json`, totals unacknowledged comments on server-home designs, and compares
+each tracked temporary copy with the server's current document. It never starts an authorization
+flow, never follows a tracked server URL to another origin, and `--summary` prints one redacted line
+(or nothing when there is nothing to act on). `--json` emits the versioned status envelope.
 
 `--local` is the half of that command which needs no server at all: it runs the same generator,
 compiler and render daemon a server would, **here**, against a catalog bundle on disk — and says

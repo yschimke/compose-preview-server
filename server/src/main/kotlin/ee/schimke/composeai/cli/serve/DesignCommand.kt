@@ -44,12 +44,13 @@ internal object DesignCommand {
   const val NAME: String = "design"
 
   const val LIST: String = "list"
+  const val STATUS: String = "status"
   const val GET: String = "get"
   const val RENDER: String = "render"
   const val EXPORT: String = "export"
 
   /** Every verb, in the order [usage] lists them. */
-  val VERBS: List<String> = listOf(LIST, GET, RENDER, EXPORT)
+  val VERBS: List<String> = listOf(LIST, STATUS, GET, RENDER, EXPORT)
 
   /**
    * The verbs `--local` has an answer for.
@@ -87,6 +88,7 @@ internal object DesignCommand {
 
   private const val DEFAULT_LIMIT = 50
   private const val DEFAULT_TIMEOUT_SECONDS = 120L
+  private const val DEFAULT_STATUS_TIMEOUT_SECONDS = 5L
 
   /** What one invocation asks for, once argv and the environment have both been read. */
   data class Options(
@@ -129,6 +131,12 @@ internal object DesignCommand {
     val assets: String? = null,
     /** `<catalog>=<components.json>`, as `serve --ui-builder-components` takes. */
     val components: Map<String, String> = emptyMap(),
+    /** Checkout whose published design index [STATUS] inventories. */
+    val workspace: String = ".",
+    /** Emit the complete, machine-readable status envelope. */
+    val json: Boolean = false,
+    /** Emit only a fixed, credential-free SessionStart sentence. */
+    val summary: Boolean = false,
   ) {
 
     /**
@@ -202,13 +210,20 @@ internal object DesignCommand {
     var revision: Long? = null
     var limit = DEFAULT_LIMIT
     var server: String? = null
-    var authorize = true
-    var timeout = DEFAULT_TIMEOUT_SECONDS
+    var authorize = verb != STATUS
+    var timeout = if (verb == STATUS) DEFAULT_STATUS_TIMEOUT_SECONDS else DEFAULT_TIMEOUT_SECONDS
     var local = false
     var document: String? = null
     var catalog: String? = null
     var assets: String? = null
     val components = linkedMapOf<String, String>()
+    var workspace = "."
+    var json = false
+    var summary = false
+    var workspaceWasSet = false
+    var outWasSet = false
+    var revisionWasSet = false
+    var limitWasSet = false
 
     var index = 0
     while (index < rest.size) {
@@ -223,6 +238,7 @@ internal object DesignCommand {
         }
         argument == "--out" || argument == "-o" -> {
           out = value() ?: return missingValue(argument)
+          outWasSet = true
           index++
         }
         argument == "--format" -> {
@@ -236,6 +252,7 @@ internal object DesignCommand {
               ?: return Parsed.Invalid(
                 "design: --revision must be a non-negative integer, not '$raw'"
               )
+          revisionWasSet = true
           index++
         }
         argument == "--limit" -> {
@@ -243,6 +260,7 @@ internal object DesignCommand {
           limit =
             raw.toIntOrNull()?.takeIf { it in 1..1000 }
               ?: return Parsed.Invalid("design: --limit must be between 1 and 1000, not '$raw'")
+          limitWasSet = true
           index++
         }
         argument == "--timeout" -> {
@@ -279,6 +297,13 @@ internal object DesignCommand {
           components[catalogId] = file
           index++
         }
+        argument == "--workspace" -> {
+          workspace = value() ?: return missingValue(argument)
+          workspaceWasSet = true
+          index++
+        }
+        argument == "--json" -> json = true
+        argument == "--summary" -> summary = true
         argument == "--no-authorize" -> authorize = false
         argument == "--token" ->
           // Named explicitly rather than falling through to "unknown flag", because the reason it
@@ -296,12 +321,12 @@ internal object DesignCommand {
       index++
     }
 
-    if (verb == LIST && designId != null) {
-      return Parsed.Invalid("design list: takes no design id")
+    if (verb in setOf(LIST, STATUS) && designId != null) {
+      return Parsed.Invalid("design $verb: takes no design id")
     }
     // A document read off disk IS the design, so it stands in for the id every other spelling
     // needs — including for `--out`, whose default is derived from one below.
-    if (verb != LIST && designId.isNullOrBlank() && document == null) {
+    if (verb !in setOf(LIST, STATUS) && designId.isNullOrBlank() && document == null) {
       return Parsed.Invalid("design $verb: a design id is required")
     }
     if (designId != null && document != null) {
@@ -337,6 +362,15 @@ internal object DesignCommand {
       return Parsed.Invalid(
         "design $verb: --revision pins which revision a server hands over; a file is already one"
       )
+    }
+    if (verb != STATUS && (workspaceWasSet || json || summary)) {
+      return Parsed.Invalid("design $verb: --workspace, --json and --summary apply to status only")
+    }
+    if (verb == STATUS && json && summary) {
+      return Parsed.Invalid("design status: --json and --summary are mutually exclusive")
+    }
+    if (verb == STATUS && (outWasSet || revisionWasSet || limitWasSet)) {
+      return Parsed.Invalid("design status: --out, --revision and --limit do not apply")
     }
 
     val resolvedFormat =
@@ -377,6 +411,9 @@ internal object DesignCommand {
         catalog = catalog,
         assets = assets,
         components = components,
+        workspace = workspace,
+        json = json,
+        summary = summary,
       )
     )
   }
@@ -392,6 +429,7 @@ internal object DesignCommand {
     when (verb) {
       // Both of these are text, and a pipe is the obvious thing to do with them.
       LIST,
+      STATUS,
       GET -> STDOUT
       EXPORT -> if (format == ExportFormatV1.COMPOSE) STDOUT else "$designId.${format.extension()}"
       // Bytes are not something to spray at a terminal unless asked for by name.
@@ -407,6 +445,7 @@ internal object DesignCommand {
 
     Verbs:
       list                      Designs this credential can see, one per line.
+      status                    Workspace-linked design comments and unsaved temporary copies.
       get <designId>            The design document, as JSON.
       render <designId>         The design as a picture: PNG, or SVG with --format svg.
       export <designId>         The generated source (Kotlin), with its diagnostics.
@@ -431,6 +470,9 @@ internal object DesignCommand {
                                 proves each call site against. Repeatable. A record-free catalog
                                 (wear-m3, remote-m3) needs none.
       --server <url>            The server to ask (default ${defaultServer()}, or ${'$'}$SERVER_ENV).
+      --workspace <dir>         status: checkout to inventory (default current directory).
+      --json                    status: emit the redacted machine-readable envelope.
+      --summary                 status: emit one fixed SessionStart sentence, or nothing when clean.
       --out, -o <path>          Where to write it; `-` is stdout. Text verbs default to stdout,
                                 a render defaults to <designId>.<png|svg>.
       --format <format>         render: png (default) or svg. export: compose (default).
@@ -439,11 +481,14 @@ internal object DesignCommand {
       --limit <n>               list: how many designs to ask for (default $DEFAULT_LIMIT).
       --no-authorize            Fail on a missing or expired grant instead of asking a human for
                                 one. For CI, where nobody is there to approve.
-      --timeout <seconds>       Give up on one call after this long (default $DEFAULT_TIMEOUT_SECONDS).
+      --timeout <seconds>       Give up within this total budget (status default
+                                $DEFAULT_STATUS_TIMEOUT_SECONDS; other verbs $DEFAULT_TIMEOUT_SECONDS).
 
     Credentials come from ${'$'}$TOKEN_ENV (or the older ${'$'}$LEGACY_TOKEN_ENV), never from a
     flag. With neither set — or when a server restart has dropped the grant — this command asks the
     server for one and prints a link and a code for a human to approve, unless --no-authorize.
+    `status` is always non-authorizing: it reports AUTHORIZATION_REQUIRED instead of starting a
+    device flow, so a SessionStart probe cannot ask for new access.
 
     Diagnostics from a refused export are printed to stderr and the exit code is non-zero, so a
     refusal fails a pipeline instead of writing an empty file into it.

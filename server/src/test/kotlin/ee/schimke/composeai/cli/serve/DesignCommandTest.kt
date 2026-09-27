@@ -165,6 +165,20 @@ class DesignCommandTest {
     assertTrue(!run("render", "w", "--no-authorize").authorize)
   }
 
+  @Test
+  fun `status is bounded non-authorising and takes workspace output modes`() {
+    val options = run("status", "--workspace", "/work", "--summary")
+    assertEquals(DesignCommand.STATUS, options.verb)
+    assertEquals("/work", options.workspace)
+    assertTrue(options.summary)
+    assertTrue(!options.authorize)
+    assertEquals(5L, options.timeoutSeconds)
+    assertEquals(3L, run("status", "--timeout", "3", "--json").timeoutSeconds)
+    assertTrue(invalid("status", "design-id").contains("takes no design id"))
+    assertTrue(invalid("status", "--json", "--summary").contains("mutually exclusive"))
+    assertTrue(invalid("list", "--json").contains("apply to status only"))
+  }
+
   /** `design` is reachable from the binary's front door, and it is not a serving command. */
   @Test
   fun `the binary routes design to a client invocation`() {
