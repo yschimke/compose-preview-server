@@ -127,7 +127,7 @@ class DaemonMcpServer(
   private val subscriptions: Subscriptions = Subscriptions(),
   private val historyStore: HistoryStore = HistoryStore.NOOP,
   private val serverInfo: Implementation =
-    Implementation(name = "compose-preview-mcp", version = "v0"),
+    Implementation(name = "compose-preview-mcp", version = MCP_VERSION),
   private val renderTimeoutMs: Long = 60_000,
   /**
    * Cadence (ms) of the background source-freshness poller. The poller walks the catalog and runs

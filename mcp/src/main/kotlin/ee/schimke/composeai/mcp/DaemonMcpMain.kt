@@ -73,7 +73,7 @@ object DaemonMcpMain {
         // Storybook surface. Same daemon core + handlers underneath.
         DaemonMcpServer(
           supervisor,
-          serverInfo = Implementation(name = "compose-preview-storybook", version = "v0"),
+          serverInfo = Implementation(name = "compose-preview-storybook", version = MCP_VERSION),
           profile = McpToolProfile.STORYBOOK,
           sourceCompiler = GradleSourceCompiler(),
         )
