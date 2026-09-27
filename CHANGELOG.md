@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.76.0](https://github.com/yschimke/compose-preview-server/compare/v3.75.0...v3.76.0) (2026-09-27)
+
+
+### Features
+
+* **ui-builder:** record canonical design homes ([#1157](https://github.com/yschimke/compose-preview-server/issues/1157)) ([47a70b3](https://github.com/yschimke/compose-preview-server/commit/47a70b3265b50065a7308ffdc477f432191a5939))
+
 ## [3.75.0](https://github.com/yschimke/compose-preview-server/compare/v3.74.0...v3.75.0) (2026-09-27)
 
 
