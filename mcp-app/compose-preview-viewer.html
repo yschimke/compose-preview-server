@@ -31,6 +31,13 @@
   .fallback p { margin: 0 0 8px; }
   .fallback pre { margin: 0; padding: 10px; border-radius: 7px; background: var(--color-background-primary, #fff); white-space: pre-wrap; overflow-wrap: anywhere; }
   .actions { display: flex; gap: 8px; margin-top: 10px; }
+  .live { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 10px; }
+  .live[hidden], .live [hidden] { display: none; }
+  .live select { font: inherit; padding: 5px; border-radius: 6px; max-width: 100%; }
+  .source { margin-top: 6px; overflow-wrap: anywhere; }
+  .cell[aria-pressed="true"] { outline: 2px solid #315da8; }
+  .layout-boxes { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+  .layout-boxes rect { fill: none; stroke: #1a73e8; stroke-width: 1.5; vector-effect: non-scaling-stroke; }
   .comments { margin-top: 10px; padding: 10px; border: 1px solid var(--color-border, #d8d8dd); border-radius: 10px; }
   .comments[hidden] { display: none; }
   .comments-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-weight: 650; margin-bottom: 8px; }
@@ -80,6 +87,13 @@
     <button id="a11y" hidden>Show accessibility overlay</button>
     <button id="use" hidden>Use selected result</button>
   </div>
+  <div id="live" class="live" aria-label="Live viewer actions" hidden>
+    <label id="variant-label" hidden>Variant <select id="variant"></select></label>
+    <button id="rerender" type="button" hidden>Re-render</button>
+    <button id="layout" type="button" aria-pressed="false" hidden>Show layout bounds</button>
+    <button id="source" type="button" hidden>Open in editor</button>
+  </div>
+  <div id="source-location" class="muted source" role="status"></div>
 </main>
 <script>
 (() => {
@@ -532,6 +546,7 @@
     preview.addEventListener('load', renderCommentPins, { once: true });
     canvas.replaceChildren(stage);
     renderCommentPins();
+    if (layoutVisible) drawLayoutBounds();
   }
 
   function clearAccessibilityOverlay() {
@@ -548,7 +563,7 @@
   }
 
   function updateAccessibilityAction() {
-    if (staticMode || !overlayEligible || !baseImageData || !initialized || !overlayToolName) {
+    if (staticMode || !overlayEligible || !baseImageData || !initialized || !overlayToolName || embeddedDetails.a11y) {
       a11y.hidden = true;
       return;
     }
@@ -574,20 +589,22 @@
       const overrides = document.createElement('code');
       overrides.textContent = JSON.stringify(cell?.overrides || {});
       button.append(overrides);
-      button.addEventListener('click', () =>
+      button.addEventListener('click', () => {
         choose({
           kind: 'matrix-cell',
           uri: value.uri || toolArguments.uri,
           arguments: toolArguments,
           overrides: cell?.overrides || {},
-        }, 'Selected matrix cell')
-      );
+        }, 'Selected matrix cell');
+        chooseMatrixCell(button, value, cell);
+      });
       grid.append(button);
     });
     canvas.replaceChildren(grid);
   }
 
   function renderImage(image, value, resource) {
+    if (image.data !== baseImageData) resetLayoutBounds();
     ++overlayGeneration;
     baseImageData = image.data;
     overlayImageData = undefined;
@@ -869,6 +886,387 @@
     }
   }
 
+  // Live actions (#1119): each one is a tool call (or a bridge request) over the MCP Apps bridge,
+  // offered only when the host proxies the server's tools. Static mode never shows them. Choosing a
+  // variant or toggling an overlay also sends one line of model context, so the agent knows what
+  // the person is looking at (R1); it names the preview, never the pixels.
+  const live = q('#live');
+  const variantLabel = q('#variant-label');
+  const variantSelect = q('#variant');
+  const rerender = q('#rerender');
+  const layoutToggle = q('#layout');
+  const sourceButton = q('#source');
+  const sourceLocation = q('#source-location');
+  const DETAIL_META_KEY = 'composePreview/detail';
+  const MAX_LAYOUT_BOXES = 400;
+  const MAX_RESOURCE_LIST_PAGES = 10;
+  let renderToolName;
+  let dataToolName;
+  let liveTarget;
+  let variants = [];
+  let liveGeneration = 0;
+  let liveBusy = false;
+  let ownDraw = false;
+  let embeddedDetails = {};
+  let layoutEligible = false;
+  let layoutBoxes;
+  let layoutVisible = false;
+  let layoutUnavailable = false;
+  let layoutGeneration = 0;
+  const sourceLocations = new Map();
+
+  const liveReady = () => initialized && !staticMode;
+
+  function decodeBase64Url(encoded) {
+    const base64 = encoded.replace(/-/g, '+').replace(/_/g, '/');
+    const binary = atob(base64 + '='.repeat((4 - base64.length % 4) % 4));
+    return new TextDecoder().decode(Uint8Array.from(binary, character => character.charCodeAt(0)));
+  }
+
+  // compose-preview://<workspace>/<module>/<fqn>?config=<qualifier>&overrides=<base64url JSON>
+  function splitPreviewUri(uri) {
+    if (typeof uri !== 'string' || !uri.startsWith('compose-preview://')) return {};
+    const [base, query = ''] = uri.split('?', 2);
+    const kept = [];
+    let overrides;
+    for (const part of query.split('&').filter(Boolean)) {
+      if (!part.startsWith('overrides=')) {
+        kept.push(part);
+        continue;
+      }
+      try {
+        overrides = JSON.parse(decodeBase64Url(part.slice('overrides='.length)));
+      } catch {
+        overrides = undefined;
+      }
+    }
+    return { uri: kept.length ? `${base}?${kept.join('&')}` : base, overrides };
+  }
+
+  function previewName(uri) {
+    if (typeof uri !== 'string' || !uri) return 'the preview';
+    const [path, query = ''] = uri.split('?', 2);
+    const name = path.slice(path.lastIndexOf('/') + 1).split('.').pop() || path;
+    const config = query.split('&').find(part => part.startsWith('config='))?.slice('config='.length);
+    return config ? `${name} (${decodeURIComponent(config)})` : name;
+  }
+
+  function oneLine(text) {
+    return `Compose Preview viewer: ${text}`.replace(/\s+/g, ' ').slice(0, 300);
+  }
+
+  function updateModelContext(text) {
+    if (!liveReady()) return Promise.resolve();
+    return request('ui/update-model-context', { content: [{ type: 'text', text: oneLine(text) }] })
+      .catch(error => console.debug('The host did not accept a model-context update:', error));
+  }
+
+  function callTool(name, argumentsValue) {
+    return request(
+      'tools/call',
+      { name, arguments: { ...argumentsValue, ...(resourceToken ? { token: resourceToken } : {}) } },
+      RESOURCE_READ_TIMEOUT_MS,
+    );
+  }
+
+  function otherMatchesOf(result, value) {
+    if (Array.isArray(value?.otherMatches)) return value.otherMatches;
+    for (const block of result?.content || []) {
+      if (block?.type !== 'text' || typeof block.text !== 'string') continue;
+      const parsed = parse(block.text);
+      if (Array.isArray(parsed?.otherMatches)) return parsed.otherMatches;
+    }
+    return [];
+  }
+
+  // render_preview `details` (#1170) embed the a11y overlay and layout boxes in the result; those
+  // toggles then need no call, so the live buttons for the same data stay hidden.
+  function embeddedDetailsOf(result) {
+    const block = result?.content?.find(
+      candidate => candidate?.type === 'text' && candidate?._meta?.[DETAIL_META_KEY] === 'details',
+    );
+    const details = block && parse(block.text);
+    return {
+      a11y: !!details?.a11y,
+      layout: !!details?.layout,
+    };
+  }
+
+  function configureLiveActions(result, value, resource, comparison) {
+    const own = ownDraw;
+    ownDraw = false;
+    ++liveGeneration;
+    liveBusy = false;
+    resetLayoutBounds();
+    sourceLocation.replaceChildren();
+    embeddedDetails = embeddedDetailsOf(result);
+    const fromResource = splitPreviewUri(resource?.uri);
+    const fromArguments = splitPreviewUri(toolArguments.uri);
+    const uri =
+      (typeof value?.uri === 'string' && splitPreviewUri(value.uri).uri) || fromArguments.uri || fromResource.uri;
+    const overrides = toolArguments.overrides || fromArguments.overrides || fromResource.overrides;
+    liveTarget = comparison || !uri ? undefined : { uri, ...(overrides ? { overrides } : {}) };
+    layoutEligible = !!liveTarget && !Array.isArray(value?.cells) && !value?.crop;
+    if (!own) {
+      const others = otherMatchesOf(result, value).filter(other => typeof other === 'string' && other);
+      variants = liveTarget && others.length
+        ? [liveTarget.uri, ...others.filter(other => other !== liveTarget.uri)]
+        : [];
+    }
+    updateLiveActions();
+  }
+
+  function updateLiveActions() {
+    const ready = liveReady() && !!liveTarget;
+    const showVariants = ready && !!renderToolName && variants.length > 1;
+    variantLabel.hidden = !showVariants;
+    if (showVariants) {
+      variantSelect.replaceChildren(...variants.map(uri => {
+        const option = document.createElement('option');
+        option.value = uri;
+        option.textContent = previewName(uri);
+        option.selected = uri === liveTarget.uri;
+        return option;
+      }));
+    }
+    variantSelect.disabled = liveBusy;
+    rerender.hidden = !(ready && renderToolName && layoutEligible);
+    rerender.disabled = liveBusy;
+    layoutToggle.hidden = !(ready && dataToolName && layoutEligible && !embeddedDetails.layout);
+    layoutToggle.disabled = liveBusy || layoutUnavailable;
+    layoutToggle.textContent = layoutUnavailable
+      ? 'Layout bounds unavailable'
+      : layoutVisible ? 'Hide layout bounds' : 'Show layout bounds';
+    layoutToggle.setAttribute('aria-pressed', String(layoutVisible));
+    // The location comes from resources/list; offer it alongside this server's own tools.
+    sourceButton.hidden = !(ready && renderToolName);
+    live.hidden = [variantLabel, rerender, layoutToggle, sourceButton].every(node => node.hidden);
+  }
+
+  async function renderLive(target, contextLine) {
+    if (!liveReady() || !renderToolName || !target || liveBusy) return;
+    const generation = ++liveGeneration;
+    liveBusy = true;
+    updateLiveActions();
+    meta.textContent = `Rendering ${previewName(target.uri)}…`;
+    try {
+      const result = await callTool(renderToolName, {
+        uri: target.uri,
+        ...(target.overrides ? { overrides: target.overrides } : {}),
+        observe: 'png',
+        inline: true,
+      });
+      if (generation !== liveGeneration) return;
+      if (result?.isError || (!png(result) && !link(result))) {
+        const reason = fallbackText(result).split('\n')[0];
+        meta.textContent = `Render failed${reason ? `: ${reason}` : ''}; the previous preview is still shown.`;
+        return;
+      }
+      toolArguments = safeSelectionArguments({
+        uri: target.uri,
+        previewId: previewName(target.uri),
+        ...(target.overrides ? { overrides: target.overrides } : {}),
+      });
+      ownDraw = true;
+      draw(result);
+      if (contextLine) void updateModelContext(contextLine);
+    } catch (error) {
+      if (generation !== liveGeneration) return;
+      meta.textContent = 'Render failed; the previous preview is still shown.';
+      console.warn('Failed to re-render the Compose Preview:', error);
+    } finally {
+      if (generation === liveGeneration) {
+        liveBusy = false;
+        updateLiveActions();
+      }
+    }
+  }
+
+  function chooseVariant(uri) {
+    if (!liveTarget || uri === liveTarget.uri || !variants.includes(uri)) return;
+    void renderLive(
+      { uri, ...(liveTarget.overrides ? { overrides: liveTarget.overrides } : {}) },
+      `the user switched to variant ${previewName(uri)} (${uri})`,
+    );
+  }
+
+  function chooseMatrixCell(button, value, cell) {
+    if (!liveReady()) return;
+    canvas.querySelectorAll('.cell').forEach(node => node.setAttribute('aria-pressed', String(node === button)));
+    void updateModelContext(
+      `the user chose the matrix variant ${JSON.stringify(cell?.overrides || {})} of ${previewName(value?.uri || toolArguments.uri)}`,
+    );
+  }
+
+  function resetLayoutBounds() {
+    ++layoutGeneration;
+    layoutBoxes = undefined;
+    layoutVisible = false;
+    layoutUnavailable = false;
+    canvas.querySelectorAll('.layout-boxes').forEach(node => node.remove());
+  }
+
+  function boundsOf(node) {
+    const box = node?.bounds;
+    if (box && typeof box === 'object' && !Array.isArray(box)) {
+      return [box.left, box.top, box.right, box.bottom].map(Number);
+    }
+    const wire = typeof node?.boundsInRoot === 'string' ? node.boundsInRoot : undefined;
+    return wire ? wire.split(',').map(Number) : undefined;
+  }
+
+  // layout/inspector ({root:{bounds:{left,top,right,bottom},children}}) or compose/semantics
+  // ({root:{boundsInRoot:"l,t,r,b",children}}), both in render pixels.
+  function layoutBoxesFrom(payload) {
+    const boxes = [];
+    const remaining = payload?.root ? [payload.root] : [];
+    while (remaining.length && boxes.length < MAX_LAYOUT_BOXES) {
+      const node = remaining.shift();
+      if (!node || typeof node !== 'object') continue;
+      const bounds = boundsOf(node);
+      if (bounds?.length === 4 && bounds.every(Number.isFinite) && bounds[2] > bounds[0] && bounds[3] > bounds[1]) {
+        const label = [node.displayName, node.component, node.testTag, node.text, node.label, node.role]
+          .find(candidate => typeof candidate === 'string' && candidate);
+        boxes.push({ bounds, label: label || '' });
+      }
+      if (Array.isArray(node.children)) remaining.push(...node.children);
+    }
+    return boxes;
+  }
+
+  async function fetchLayoutBoxes(target) {
+    for (const kind of ['layout/inspector', 'compose/semantics']) {
+      const result = await callTool(dataToolName, { uri: target.uri, kind });
+      if (result?.isError) continue;
+      const boxes = layoutBoxesFrom(data(result)?.payload);
+      if (boxes.length) return boxes;
+    }
+    return undefined;
+  }
+
+  function drawLayoutBounds() {
+    const stage = canvas.querySelector('.preview-stage');
+    const image = stage?.querySelector(':scope > img');
+    if (!stage || !image || !layoutBoxes) return;
+    if (!image.complete || !image.naturalWidth) {
+      image.addEventListener('load', () => layoutVisible && drawLayoutBounds(), { once: true });
+      return;
+    }
+    stage.querySelectorAll('.layout-boxes').forEach(node => node.remove());
+    const namespace = 'http://www.w3.org/2000/svg';
+    const svg = document.createElementNS(namespace, 'svg');
+    svg.setAttribute('class', 'layout-boxes');
+    svg.setAttribute('viewBox', `0 0 ${image.naturalWidth} ${image.naturalHeight}`);
+    svg.setAttribute('preserveAspectRatio', 'none');
+    svg.setAttribute('aria-hidden', 'true');
+    for (const box of layoutBoxes) {
+      const [left, top, right, bottom] = box.bounds;
+      const rect = document.createElementNS(namespace, 'rect');
+      rect.setAttribute('x', left);
+      rect.setAttribute('y', top);
+      rect.setAttribute('width', right - left);
+      rect.setAttribute('height', bottom - top);
+      const title = document.createElementNS(namespace, 'title');
+      title.textContent = box.label;
+      rect.append(title);
+      svg.append(rect);
+    }
+    stage.append(svg);
+  }
+
+  async function toggleLayoutBounds() {
+    if (!liveReady() || !liveTarget || !dataToolName || liveBusy) return;
+    const name = previewName(liveTarget.uri);
+    if (layoutVisible) {
+      layoutVisible = false;
+      canvas.querySelectorAll('.layout-boxes').forEach(node => node.remove());
+      updateLiveActions();
+      void updateModelContext(`layout bounds hidden on ${name}`);
+      return;
+    }
+    if (!layoutBoxes) {
+      const generation = layoutGeneration;
+      layoutToggle.disabled = true;
+      layoutToggle.textContent = 'Loading layout bounds…';
+      let boxes;
+      try {
+        boxes = await fetchLayoutBoxes(liveTarget);
+      } catch (error) {
+        console.warn('Failed to read Compose Preview layout bounds:', error);
+      }
+      if (generation !== layoutGeneration) return;
+      layoutBoxes = boxes;
+      layoutUnavailable = !boxes;
+      if (!boxes) {
+        updateLiveActions();
+        return;
+      }
+    }
+    layoutVisible = true;
+    drawLayoutBounds();
+    updateLiveActions();
+    void updateModelContext(`layout bounds shown on ${name} (${layoutBoxes.length} boxes)`);
+  }
+
+  async function findSourceLocation(uri) {
+    if (sourceLocations.has(uri)) return sourceLocations.get(uri);
+    let cursor;
+    for (let page = 0; page < MAX_RESOURCE_LIST_PAGES; page++) {
+      const listed = await request('resources/list', cursor ? { cursor } : {});
+      const match = listed?.resources?.find(resource => resource?.uri === uri);
+      if (match) {
+        const file = match._meta?.sourceFile;
+        const line = Number(match._meta?.sourceLine);
+        const location = typeof file === 'string' && file
+          ? { file, ...(Number.isInteger(line) && line > 0 ? { line } : {}) }
+          : undefined;
+        sourceLocations.set(uri, location);
+        return location;
+      }
+      cursor = listed?.nextCursor;
+      if (!cursor) break;
+    }
+    return undefined;
+  }
+
+  function fileUrl(path) {
+    const normalized = path.replace(/\\/g, '/');
+    return `file://${encodeURI(normalized.startsWith('/') ? normalized : `/${normalized}`)}`;
+  }
+
+  async function openInEditor() {
+    if (!liveReady() || !liveTarget) return;
+    const target = liveTarget;
+    const name = previewName(target.uri);
+    sourceButton.disabled = true;
+    let location;
+    try {
+      location = await findSourceLocation(target.uri);
+    } catch (error) {
+      console.debug('The host did not list preview resources:', error);
+    } finally {
+      sourceButton.disabled = false;
+    }
+    if (liveTarget !== target) return;
+    sourceLocation.replaceChildren();
+    if (!location) {
+      sourceLocation.textContent = `Source location unavailable for ${name}; the agent has been told which preview to open.`;
+      void updateModelContext(`the user asked to open ${name} (${target.uri}) in the editor`);
+      return;
+    }
+    const text = location.line ? `${location.file}:${location.line}` : location.file;
+    const anchor = document.createElement('a');
+    anchor.href = fileUrl(location.file);
+    anchor.textContent = text;
+    anchor.addEventListener('click', event => {
+      event.preventDefault();
+      request('ui/open-link', { url: anchor.href })
+        .catch(error => console.debug('The host did not open the source link:', error));
+    });
+    sourceLocation.append('Source: ', anchor);
+    void updateModelContext(`the user asked to open ${name} in the editor at ${text}`);
+  }
+
   function fallbackText(result) {
     const text = result?.content
       ?.filter(block => block?.type === 'text' && typeof block.text === 'string')
@@ -1105,6 +1503,7 @@
     disconnectResourceUpdates(comparison ? undefined : resource?.uri);
     resourceResult = undefined;
     resourcePollUnchanged = 0;
+    configureLiveActions(result, value, resource, comparison);
     if (comparison) {
       void renderBeforeAfter(result, comparison, comparisonGeneration);
       return;
@@ -1203,6 +1602,9 @@
       overlayToolName = undefined;
       listCommentsToolName = undefined;
       postCommentToolName = undefined;
+      renderToolName = undefined;
+      dataToolName = undefined;
+      updateLiveActions();
       updateAccessibilityAction();
       updateCommentAction();
       return;
@@ -1217,13 +1619,18 @@
         .find(name => typeof name === 'string' && /(^|__|\/)ui_builder_list_comments$/.test(name));
       postCommentToolName = names
         .find(name => typeof name === 'string' && /(^|__|\/)ui_builder_post_comment$/.test(name));
+      renderToolName = names.find(name => typeof name === 'string' && /(^|__|\/)render_preview$/.test(name));
+      dataToolName = names.find(name => typeof name === 'string' && /(^|__|\/)get_preview_data$/.test(name));
     } catch (error) {
       if (generation !== toolDiscoveryGeneration) return;
       overlayToolName = undefined;
       listCommentsToolName = undefined;
       postCommentToolName = undefined;
+      renderToolName = undefined;
+      dataToolName = undefined;
       console.debug('Unable to discover Compose Preview viewer actions:', error);
     }
+    updateLiveActions();
     updateAccessibilityAction();
     updateCommentAction();
     if (commentDesignId && listCommentsToolName) void loadComments();
@@ -1283,7 +1690,19 @@
     resourcePollUnchanged = 0;
     if (!overlayCall) readResource(true, true);
   });
-  a11y.addEventListener('click', () => toggleAccessibilityOverlay());
+  a11y.addEventListener('click', async () => {
+    const wasVisible = overlayVisible;
+    await toggleAccessibilityOverlay();
+    if (overlayVisible !== wasVisible) {
+      void updateModelContext(
+        `accessibility overlay ${overlayVisible ? 'shown' : 'hidden'} on ${previewName(selected?.uri || toolArguments.uri)}`,
+      );
+    }
+  });
+  variantSelect.addEventListener('change', () => chooseVariant(variantSelect.value));
+  rerender.addEventListener('click', () => renderLive(liveTarget));
+  layoutToggle.addEventListener('click', () => toggleLayoutBounds());
+  sourceButton.addEventListener('click', () => openInEditor());
   commentRefresh.addEventListener('click', () => loadComments());
   commentPost.addEventListener('click', () => postComment());
   use.addEventListener('click', async () => {
