@@ -554,6 +554,16 @@ public class ServeCommandOptions(
   override val uiBuilderDefaultVisibility: UiBuilderDefaultVisibility =
     UiBuilderDefaultVisibility.parse(args.flagValue("--ui-builder-default-visibility"))
 
+  override val uiBuilderPublicOrigin: String? =
+    args
+      .flagValue("--ui-builder-public-origin")
+      ?.takeIf { it.isNotBlank() }
+      ?.let { origin ->
+        requireNotNull(normalizeServerHomeUrl(origin)) {
+          "--ui-builder-public-origin must be an absolute http(s) URL, got '$origin'"
+        }
+      }
+
   /** Optional durable aggregate counters. Null keeps local serve sessions in-memory only. */
   override val engagementFile: File? =
     args.flagValue("--engagement-file")?.takeIf { it.isNotBlank() }?.let(::File)
@@ -1358,6 +1368,11 @@ public class ServeCommandOptions(
                           Whether a new UI-builder design starts public (anyone with the link may
                           view it, read-only) or private to its owner and whoever they share it
                           with. Owners change it per design from its share page. Default private.
+        --ui-builder-public-origin <url>
+                          The stable public origin designs on this server are canonical at, e.g.
+                          https://preview.example.com; recorded as each new design's home.
+                          Defaults to --github-auth-callback-base-url. With neither, new designs
+                          are left unhomed.
         --ui-builder-admin-actors <actor>[,…]
                           GitHub identities allowed to administer every shared UI-builder design,
                           for example github:octocat. A configured actor administers through its

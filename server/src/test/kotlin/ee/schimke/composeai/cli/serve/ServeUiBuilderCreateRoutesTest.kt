@@ -2,8 +2,12 @@ package ee.schimke.composeai.cli.serve
 
 import ee.schimke.composeai.uibuilder.protocol.CatalogBenchmarkV1
 import ee.schimke.composeai.uibuilder.protocol.CatalogCapabilityV1
+import ee.schimke.composeai.uibuilder.protocol.DesignDocumentV1
+import ee.schimke.composeai.uibuilder.protocol.DesignHomeV1
+import ee.schimke.composeai.uibuilder.protocol.DesignStateV1
 import ee.schimke.composeai.uibuilder.protocol.ExportCapabilitiesV1
 import ee.schimke.composeai.uibuilder.protocol.ServiceErrorCodeV1
+import ee.schimke.composeai.uibuilder.protocol.ServiceSnapshotV1
 import ee.schimke.composeai.uibuilder.service.UiBuilderServiceCall
 import ee.schimke.composeai.uibuilder.service.UiBuilderServiceError
 import ee.schimke.composeai.uibuilder.service.UiBuilderServicePort
@@ -14,11 +18,14 @@ import ee.schimke.composeai.uibuilder.service.UiBuilderSubscriptionCall
 import java.io.Closeable
 import java.io.File
 import java.nio.file.Files
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CopyOnWriteArrayList
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertIs
 import kotlin.test.assertTrue
+import kotlinx.coroutines.runBlocking
 import okhttp3.FormBody
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -34,49 +41,58 @@ import okhttp3.RequestBody.Companion.toRequestBody
  */
 class ServeUiBuilderCreateRoutesTest {
   private val created = CopyOnWriteArrayList<String>()
-  private val existing = CopyOnWriteArrayList<String>()
+  private val createdDocuments = java.util.concurrent.ConcurrentHashMap<String, DesignDocumentV1>()
+  private val documents = ConcurrentHashMap<String, DesignDocumentV1>()
+
+  private val catalog =
+    CatalogCapabilityV1.Builder(
+        "compose-catalog-capabilities/v1",
+        CatalogBenchmarkV1.Builder(
+            "m3",
+            "source",
+            "m3-catalog",
+            "candidate",
+            "candidate",
+          )
+          .build(),
+        emptyList(),
+      )
+      .also {
+        it.exportCapabilities =
+          ExportCapabilitiesV1.Builder()
+            .also {
+              it.composeCode = true
+              it.svg = false
+              it.png = false
+            }
+            .build()
+      }
+      .build()
 
   private val service =
     object : UiBuilderServicePort {
       override suspend fun execute(call: UiBuilderServiceCall): UiBuilderServiceResponse =
         when (val request = call.request) {
           is UiBuilderServiceRequest.OpenDesign ->
-            if (request.designId in existing) UiBuilderServiceResponse.Catalogs(emptyList())
-            else
-              UiBuilderServiceResponse.Error(
+            documents[request.designId]?.let { document ->
+              UiBuilderServiceResponse.Snapshot(
+                ServiceSnapshotV1(
+                  designId = document.id,
+                  state = DesignStateV1(lastSequence = 0, document = document),
+                  catalog = catalog,
+                  retainedFromSequence = 0,
+                )
+              )
+            }
+              ?: UiBuilderServiceResponse.Error(
                 UiBuilderServiceError(ServiceErrorCodeV1.NOT_FOUND, "missing")
               )
           is UiBuilderServiceRequest.ListCatalogs ->
-            UiBuilderServiceResponse.Catalogs(
-              listOf(
-                CatalogCapabilityV1.Builder(
-                    "compose-catalog-capabilities/v1",
-                    CatalogBenchmarkV1.Builder(
-                        "m3",
-                        "source",
-                        "m3-catalog",
-                        "candidate",
-                        "candidate",
-                      )
-                      .build(),
-                    emptyList(),
-                  )
-                  .also {
-                    it.exportCapabilities =
-                      ExportCapabilitiesV1.Builder()
-                        .also {
-                          it.composeCode = true
-                          it.svg = false
-                          it.png = false
-                        }
-                        .build()
-                  }
-                  .build()
-              )
-            )
+            UiBuilderServiceResponse.Catalogs(listOf(catalog))
           is UiBuilderServiceRequest.CreateDesign -> {
             created += request.document.id
-            existing += request.document.id
+            createdDocuments[request.document.id] = request.document
+            documents[request.document.id] = request.document
             UiBuilderServiceResponse.Catalogs(emptyList())
           }
           else -> UiBuilderServiceResponse.Catalogs(emptyList())
@@ -115,6 +131,7 @@ class ServeUiBuilderCreateRoutesTest {
     ServeHttpServer(
         host = "127.0.0.1",
         requestedPort = 0,
+        canonicalOrigin = PUBLIC_ORIGIN,
         token = "operator-token",
         sessions = registry,
         defaultSessionId = "unused",
@@ -261,6 +278,24 @@ class ServeUiBuilderCreateRoutesTest {
     assertEquals(428, put("put-design", document, ifNoneMatch = null).first)
     assertTrue(created.isEmpty())
 
+    val repoOwned =
+      document
+        .replace("put-design", "repo-owned")
+        .replace(
+          "\"stateVariables\":{}",
+          "\"home\":{\"kind\":\"repo\",\"path\":\"designs/repo-owned.uid\"},\"stateVariables\":{}",
+        )
+    assertEquals(409, put("repo-owned", repoOwned).first)
+    val foreignServer =
+      document
+        .replace("put-design", "foreign-owned")
+        .replace(
+          "\"stateVariables\":{}",
+          "\"home\":{\"kind\":\"server\",\"url\":\"https://other.example\",\"designId\":\"foreign-owned\"},\"stateVariables\":{}",
+        )
+    assertEquals(409, put("foreign-owned", foreignServer).first)
+    assertTrue(created.isEmpty(), "refused canonical homes must not be adopted")
+
     val (code, location) = put("put-design", document)
     assertEquals(201, code)
     assertEquals("/ui-builder/put-design", location)
@@ -270,7 +305,85 @@ class ServeUiBuilderCreateRoutesTest {
     assertEquals(412, put("put-design", document).first)
     assertEquals(listOf("put-design"), created)
 
+    // A re-import of the canonical server copy is still a failed conditional create. The body
+    // gives the more useful R3 instruction without changing HTTP precondition semantics.
+    val canonical =
+      document.replace(
+        "\"stateVariables\":{}",
+        "\"home\":{\"kind\":\"server\",\"url\":\"$PUBLIC_ORIGIN\",\"designId\":\"put-design\"},\"stateVariables\":{}",
+      )
+    val refused =
+      client
+        .newCall(
+          Request.Builder()
+            .url(url("/api/ui-builder/v1/designs/put-design"))
+            .header("X-Test-Actor", "operator")
+            .header("If-None-Match", "*")
+            .put(canonical.toRequestBody())
+            .build()
+        )
+        .execute()
+    refused.use { response ->
+      assertEquals(412, response.code)
+      assertTrue(response.body.string().contains("apply changes to the original instead"))
+    }
+
     // The URL names the design, so a document that claims to be another one is a bad request.
     assertEquals(400, put("elsewhere", document).first)
   }
+
+  @Test
+  fun `published library reopen is idempotent across equivalent canonical origins`() = runBlocking {
+    val document =
+      UI_BUILDER_JSON.decodeFromString(
+        DesignDocumentV1.serializer(),
+        """
+        {"schema":"compose-ui-builder/v1","id":"published","title":"Published","revision":0,
+         "catalogPin":{"systemId":"m3-catalog","catalogRevision":"candidate",
+         "capabilityDigest":"candidate","nativeRuntimeId":"candidate"},
+         "environment":{"widthDp":1280,"heightDp":800,"density":1.0,"theme":"dark","locale":"en-US",
+         "fontScale":1.0,"layoutDirection":"ltr"},"stateVariables":{},"roots":[],"nodes":{}}
+        """
+          .trimIndent(),
+      )
+    val creator = ServeUiBuilderCreate(service, builderDir, PUBLIC_ORIGIN)
+    val actor = ee.schimke.composeai.uibuilder.service.AuthenticatedUiBuilderActor("library")
+
+    assertIs<ServeUiBuilderCreate.Outcome.Created>(creator.installPublished(actor, document))
+    val equivalent =
+      document.copy(home = DesignHomeV1.Server("HTTPS://Designs.Example:443/", "published"))
+    assertIs<ServeUiBuilderCreate.Outcome.AlreadyExists>(
+      creator.installPublished(actor, equivalent)
+    )
+    assertEquals(1, created.count { it == "published" })
+    // Reopening is idempotent whatever home the entry carries.
+    assertIs<ServeUiBuilderCreate.Outcome.AlreadyExists>(
+      creator.installPublished(actor, document.copy(home = DesignHomeV1.Repo("designs/p.uid")))
+    )
+    // A library entry whose canonical home is its repository opens as a copy pointing back at it,
+    // rather than being refused like an ad-hoc import.
+    val repoHomed =
+      document.copy(id = "repo-published", home = DesignHomeV1.Repo("designs/repo-published.uid"))
+    assertIs<ServeUiBuilderCreate.Outcome.Created>(creator.installPublished(actor, repoHomed))
+    assertEquals(
+      DesignHomeV1.Repo("designs/repo-published.uid"),
+      createdDocuments.getValue("repo-published").home,
+    )
+    assertEquals(
+      DesignHomeV1.Server(PUBLIC_ORIGIN, "published"),
+      createdDocuments.getValue("published").home,
+    )
+    // With no configured public origin nothing is stamped: a bind address is not an identity.
+    val unconfigured = ServeUiBuilderCreate(service, builderDir, serverOrigin = null)
+    assertIs<ServeUiBuilderCreate.Outcome.Created>(
+      unconfigured.installPublished(actor, document.copy(id = "unhomed"))
+    )
+    assertEquals(null, createdDocuments.getValue("unhomed").home)
+    assertEquals(
+      "https://preview.coo.ee/base",
+      normalizeServerHomeUrl("HTTPS://Preview.Coo.Ee:443/base/"),
+    )
+  }
 }
+
+private const val PUBLIC_ORIGIN = "https://designs.example"
