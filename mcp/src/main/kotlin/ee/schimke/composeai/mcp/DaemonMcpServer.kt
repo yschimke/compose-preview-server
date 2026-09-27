@@ -5,6 +5,8 @@ import ee.schimke.composeai.daemon.client.DataProductWireException
 import ee.schimke.composeai.daemon.client.WorkspaceId
 import ee.schimke.composeai.daemon.protocol.AmbientOverride
 import ee.schimke.composeai.daemon.protocol.ChangeType
+import ee.schimke.composeai.daemon.protocol.CompileResultKind
+import ee.schimke.composeai.daemon.protocol.CompileSourcesParams
 import ee.schimke.composeai.daemon.protocol.FileKind
 import ee.schimke.composeai.daemon.protocol.FocusOverride
 import ee.schimke.composeai.daemon.protocol.KeyboardOverride
@@ -57,6 +59,7 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import javax.imageio.ImageIO
+import kotlin.time.Duration.Companion.seconds
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
@@ -231,6 +234,12 @@ class DaemonMcpServer(
    * Why a module's pending sources are pending: `notify` or `detected`; see [CompileWork.trigger].
    */
   private val pendingTrigger = ConcurrentHashMap<DaemonAddr, String>()
+
+  /** Daemon clients that declined `compileSources`; their modules compile through Gradle. */
+  private val inProcessDeclined: MutableSet<Any> =
+    java.util.Collections.synchronizedSet(
+      java.util.Collections.newSetFromMap(java.util.WeakHashMap())
+    )
 
   /** The last change-detection pass per module, reported as `_meta.work.scan`. */
   private val lastScan = ConcurrentHashMap<DaemonAddr, SourceTree.Refresh>()
@@ -930,8 +939,20 @@ class DaemonMcpServer(
             "workspace ${daemon.workspaceId.value} is not registered"
           )
         } else {
-          runCatching { compiler.compile(root, daemon.modulePath, sources.map(::File)) }
-            .getOrElse { SourceCompileOutcome.Failed(it.message ?: it.javaClass.simpleName) }
+          val inProcess = compileInProcess(daemon, sources)
+          if (inProcess is SourceCompileOutcome.Ok) inProcess
+          else {
+            val gradle = runCatching {
+              compiler.compile(root, daemon.modulePath, sources.map(::File))
+            }.getOrElse { SourceCompileOutcome.Failed(it.message ?: it.javaClass.simpleName) }
+            // An in-process compile error is confirmed by Gradle before it is reported: if Gradle
+            // compiles the same sources, the in-process compiler is misconfigured for this module
+            // and later edits skip it.
+            if (inProcess is SourceCompileOutcome.Failed && gradle is SourceCompileOutcome.Ok) {
+              daemon.allClients().firstOrNull()?.let(inProcessDeclined::add)
+            }
+            gradle
+          }
         }
       outcome.work?.copy(trigger = trigger)?.let { work ->
         compileWorkSinceRender[addr] = work
@@ -969,6 +990,57 @@ class DaemonMcpServer(
         }
       }
       return outcome
+    }
+  }
+
+  /**
+   * Stage-2 compile (#1189): asks the daemon to compile [sources] in process with the Kotlin Build
+   * Tools API, into the class directory its classloader loads, instead of running Gradle. Seconds
+   * faster on a warm daemon, which is most of a warm edit loop.
+   *
+   * An `Ok` is final. A compile error is returned as `Failed` and the caller confirms it with
+   * Gradle (see [recompilePendingSources]), so a misconfigured in-process compiler can never leave
+   * a render stale on its own. Returns `null` — "use Gradle" — when the edit touches anything but
+   * Kotlin sources (resources and Java need the Gradle build), when the daemon answers `fallback`
+   * (no BTA wiring, or a module using KSP/KAPT), or when it cannot answer at all (a daemon older
+   * than `compileSources`). A declining daemon is remembered, so later edits go straight to Gradle.
+   */
+  private fun compileInProcess(
+    daemon: SupervisedDaemon,
+    sources: List<String>,
+  ): SourceCompileOutcome? {
+    if (sources.any { !it.endsWith(".kt") }) return null
+    val client = daemon.allClients().firstOrNull() ?: return null
+    if (inProcessDeclined.contains(client)) return null
+    val startedAt = System.nanoTime()
+    val result = runCatching {
+      client.compileSources(
+        CompileSourcesParams(sources = sources),
+        timeout = IN_PROCESS_COMPILE_TIMEOUT,
+      )
+    }
+      .getOrElse {
+        inProcessDeclined.add(client)
+        return null
+      }
+    val ms = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedAt)
+    val work =
+      CompileWork(task = IN_PROCESS_COMPILE_TASK, ms = ms, initScript = false, tasks = emptyList())
+    return when (result.result) {
+      CompileResultKind.OK -> SourceCompileOutcome.Ok(ms, work)
+      CompileResultKind.COMPILE_ERROR ->
+        SourceCompileOutcome.Failed(
+          "$IN_PROCESS_COMPILE_TASK failed: " +
+            result.errors
+              .take(3)
+              .joinToString("; ") { e -> "${File(e.file).name}:${e.line}:${e.column} ${e.message}" }
+              .ifEmpty { "compile error" },
+          work,
+        )
+      else -> {
+        inProcessDeclined.add(client)
+        null
+      }
     }
   }
 
@@ -6775,6 +6847,10 @@ class DaemonMcpServer(
 
     /** [CompileWork.trigger]: a render found the change itself. */
     const val TRIGGER_DETECTED = "detected"
+
+    /** [CompileWork.task] of an in-process (Build Tools API) compile inside the daemon. */
+    const val IN_PROCESS_COMPILE_TASK = "daemon:compileSources"
+    private val IN_PROCESS_COMPILE_TIMEOUT = 120.seconds
 
     const val MCP_APP_VIEWER_URI: String = "ui://compose-preview/viewer"
     const val MCP_APP_MIME_TYPE: String = "text/html;profile=mcp-app"
