@@ -12,6 +12,7 @@ import java.util.concurrent.TimeUnit
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
@@ -44,6 +45,22 @@ class SourceRecompileTest {
 
   /** What the fake compiler returns next; null compiles successfully. */
   @Volatile private var nextFailure: SourceCompileOutcome? = null
+  /** The work record the fake compiler reports, shaped like a real Android `:app` recompile. */
+  @Volatile
+  private var nextWork: CompileWork =
+    CompileWork(
+      task = ":app:composePreviewCompile",
+      ms = 1,
+      initScript = true,
+      tasks =
+        listOf(
+          ":app:preBuild UP-TO-DATE",
+          ":app:generateDebugResValues UP-TO-DATE",
+          ":app:compileDebugKotlin",
+          ":app:compileDebugJavaWithJavac NO-SOURCE",
+          ":app:composePreviewCompile",
+        ),
+    )
   private val compiles = CopyOnWriteArrayList<List<File>>()
   /** `fileChanged` notifications the daemon had already received when each compile ran. */
   private val fileChangesSeenAtCompile = CopyOnWriteArrayList<Int>()
@@ -100,7 +117,7 @@ class SourceRecompileTest {
       nextFailure
         ?: run {
           classes().writeText(sources.single().readText())
-          SourceCompileOutcome.Ok(durationMs = 1)
+          SourceCompileOutcome.Ok(durationMs = 1, work = nextWork)
         }
     }
 
@@ -121,7 +138,14 @@ class SourceRecompileTest {
       )
       .firstTextContent()
 
-  private class Render(val bytes: String, val texts: List<String>)
+  private class Render(
+    val bytes: String,
+    val texts: List<String>,
+    val sha256: String,
+    val changed: Boolean,
+    /** `_meta.work` of the result: this edit→render cycle's [EditCycleWork]. */
+    val work: kotlinx.serialization.json.JsonObject?,
+  )
 
   private fun render(fixture: Fixture): Render {
     val result =
@@ -135,7 +159,13 @@ class SourceRecompileTest {
       )
     val payload = json.parseToJsonElement(result.firstTextContent()).jsonObject
     val png = File(payload["pngPath"]!!.jsonPrimitive.content)
-    return Render(png.readText(), result.textContents())
+    return Render(
+      png.readText(),
+      result.textContents(),
+      sha256 = payload["sha256"]!!.jsonPrimitive.content,
+      changed = payload["changed"]!!.jsonPrimitive.content.toBoolean(),
+      work = result.raw["_meta"]?.jsonObject?.get("work")?.jsonObject,
+    )
   }
 
   @Test
@@ -298,6 +328,137 @@ class SourceRecompileTest {
     assertThat(line).contains("timed out")
   }
 
+  @Test
+  fun `each edit cycle records only the module's compile tasks and renders fresh`() {
+    lateinit var fixture: Fixture
+    start(fakeCompiler { fixture.classes })
+    fixture = fixture()
+    var previous = render(fixture)
+    assertThat(previous.work).isNotNull()
+    assertThat(previous.work!!.containsKey("compile")).isFalse()
+
+    listOf("Hello Android", "Hello Wear", "Hello again").forEachIndexed { cycle, text ->
+      edit(fixture, """@Preview fun Header() { Text("$text") }""")
+      val notified =
+        client.callTool(
+          "notify_file_changed",
+          buildJsonObject {
+            put("workspaceId", fixture.workspaceId.value)
+            put("path", fixture.source.absolutePath)
+          },
+          timeoutMs = 10_000,
+        )
+      val notifiedWork =
+        notified.raw["_meta"]!!.jsonObject["work"]!!.jsonObject["compile"]!!.jsonObject[":app"]!!
+      assertThat(notifiedWork.jsonObject["initScript"]!!.jsonPrimitive.content).isEqualTo("true")
+
+      val fresh = render(fixture)
+      // Fresh: the bytes carry the edit and the hash moved.
+      assertThat(fresh.bytes).contains(text)
+      assertThat(fresh.changed).isTrue()
+      assertThat(fresh.sha256).isNotEqualTo(previous.sha256)
+      // Structural: exactly one compile per edit, and it ran only the allowed task set.
+      assertThat(compiles).hasSize(cycle + 1)
+      val work = recordedCompile(fresh)
+      assertThat(work.task).isEqualTo(":app:composePreviewCompile")
+      assertThat(work.disallowedTasks(allowedModules = setOf(":app"))).isEmpty()
+      assertThat(work.executed)
+        .containsExactly(":app:compileDebugKotlin", ":app:composePreviewCompile")
+      previous = fresh
+    }
+
+    // An unchanged render compiles nothing and says so.
+    val unchanged = render(fixture)
+    assertThat(compiles).hasSize(3)
+    assertThat(unchanged.work!!.containsKey("compile")).isFalse()
+    assertThat(unchanged.work!!["renderMs"]).isNotNull()
+  }
+
+  @Test
+  fun `the task policy rejects packaging, lint, tests and other modules`() {
+    val work =
+      CompileWork(
+        task = ":app:composePreviewCompile",
+        ms = 1,
+        initScript = false,
+        tasks =
+          listOf(
+            ":app:compileDebugKotlin",
+            ":app:assembleDebug",
+            ":app:lintAnalyzeDebug UP-TO-DATE",
+            ":app:compileDebugUnitTestKotlin",
+            ":app:testDebugUnitTest",
+            ":app:bundleDebugAar",
+            ":wear:compileDebugKotlin",
+            ":app:composePreviewCompile",
+          ),
+      )
+    assertThat(work.disallowedTasks(allowedModules = setOf(":app")))
+      .containsExactly(
+        ":app:assembleDebug",
+        ":app:lintAnalyzeDebug",
+        ":app:compileDebugUnitTestKotlin",
+        ":app:testDebugUnitTest",
+        ":app:bundleDebugAar",
+        ":wear:compileDebugKotlin",
+      )
+      .inOrder()
+    // Without a module constraint only the name rule applies.
+    assertThat(work.disallowedTasks()).doesNotContain(":wear:compileDebugKotlin")
+  }
+
+  @Test
+  fun `gradle compiler records the tasks Gradle ran and whether it injected the init script`() {
+    assumeFalse(System.getProperty("os.name").orEmpty().startsWith("Windows"))
+    val home = tmp.newFolder("home")
+    cliInitScript(home, "2.28.0")
+    val root = tmp.newFolder("starter")
+    File(root, "settings.gradle.kts").writeText("include(\":app\")")
+    stubWrapper(
+      root,
+      """
+      |echo '> Task :app:preBuild UP-TO-DATE'
+      |echo '> Task :app:compileDebugKotlin'
+      |echo 'w: some warning'
+      |echo '> Task :app:compileDebugJavaWithJavac NO-SOURCE'
+      |echo '> Task :app:composePreviewCompile'
+      |echo ''
+      |echo 'BUILD SUCCESSFUL in 3s'
+      |exit 0
+      """
+        .trimMargin(),
+    )
+
+    val outcome =
+      GradleSourceCompiler(initScripts = InitScripts(environment = emptyMap(), userHome = home))
+        .compile(root, ":app", emptyList())
+
+    val work = (outcome as SourceCompileOutcome.Ok).work!!
+    assertThat(work.initScript).isTrue()
+    assertThat(work.task).isEqualTo(":app:composePreviewCompile")
+    assertThat(work.tasks)
+      .containsExactly(
+        ":app:preBuild UP-TO-DATE",
+        ":app:compileDebugKotlin",
+        ":app:compileDebugJavaWithJavac NO-SOURCE",
+        ":app:composePreviewCompile",
+      )
+      .inOrder()
+    assertThat(work.executed)
+      .containsExactly(":app:compileDebugKotlin", ":app:composePreviewCompile")
+    assertThat(work.disallowedTasks(setOf(":app"))).isEmpty()
+  }
+
+  private fun recordedCompile(render: Render): CompileWork {
+    val compile = render.work!!["compile"]!!.jsonObject
+    return CompileWork(
+      task = compile["task"]!!.jsonPrimitive.content,
+      ms = compile["ms"]!!.jsonPrimitive.content.toLong(),
+      initScript = compile["initScript"]!!.jsonPrimitive.content.toBoolean(),
+      tasks = compile["tasks"]!!.jsonArray.map { it.jsonPrimitive.content },
+    )
+  }
+
   /** A stub `gradlew` that appends its arguments to `args.txt` and runs [body]. */
   private fun stubWrapper(root: File, body: String): File {
     val args = File(root, "args.txt")
@@ -332,7 +493,7 @@ class SourceRecompileTest {
     assertThat(args.readText().trim())
       .isEqualTo(
         "--init-script ${newest.absolutePath} -Dorg.gradle.unsafe.isolated-projects=false " +
-          "-Dorg.gradle.isolated-projects=false --quiet --console=plain :app:composePreviewCompile"
+          "-Dorg.gradle.isolated-projects=false --console=plain :app:composePreviewCompile"
       )
   }
 

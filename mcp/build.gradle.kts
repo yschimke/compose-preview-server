@@ -167,6 +167,22 @@ tasks.withType<Test>().configureEach {
   providers.gradleProperty("mcp.workdir").orNull?.let {
     systemProperty("composeai.mcp.workdir", it)
   }
+  // Opt-in edit→render loop on a real Android fixture (`EditLoopIntegrationTest`, issue #1174):
+  // `-Pmcp.editLoop=true`. It copies `src/editLoopFixture` and this build's Gradle wrapper, and
+  // always writes its timings and work records to the report file, which CI uploads.
+  systemProperty(
+    "composeai.mcp.editLoop",
+    (providers.gradleProperty("mcp.editLoop").orNull == "true").toString(),
+  )
+  systemProperty("composeai.mcp.repoRoot", rootDir.absolutePath)
+  // `ANDROID_HOME` otherwise; for a launcher that does not pass the environment through.
+  providers.gradleProperty("mcp.androidSdk").orNull?.let {
+    systemProperty("composeai.mcp.androidSdk", it)
+  }
+  systemProperty(
+    "composeai.mcp.editLoopReport",
+    layout.buildDirectory.file("edit-loop/edit-loop-report.json").get().asFile.absolutePath,
+  )
 }
 
 // Boundary check, ported with the module: `:mcp` must NOT pull `gradle-tooling-api`, directly or
