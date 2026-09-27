@@ -6,20 +6,29 @@ import ee.schimke.composeai.mcp.protocol.ToolDef
 import io.modelcontextprotocol.kotlin.sdk.server.ServerOptions
 import io.modelcontextprotocol.kotlin.sdk.server.ServerSession
 import io.modelcontextprotocol.kotlin.sdk.server.StdioServerTransport
+import io.modelcontextprotocol.kotlin.sdk.shared.RequestOptions
 import io.modelcontextprotocol.kotlin.sdk.types.BlobResourceContents
 import io.modelcontextprotocol.kotlin.sdk.types.CallToolRequest
+import io.modelcontextprotocol.kotlin.sdk.types.ClientCapabilities
 import io.modelcontextprotocol.kotlin.sdk.types.ContentBlock as SdkContentBlock
+import io.modelcontextprotocol.kotlin.sdk.types.ElicitRequestParams
+import io.modelcontextprotocol.kotlin.sdk.types.ElicitResult
 import io.modelcontextprotocol.kotlin.sdk.types.EmbeddedResource
 import io.modelcontextprotocol.kotlin.sdk.types.EmptyResult
+import io.modelcontextprotocol.kotlin.sdk.types.GetPromptRequest
 import io.modelcontextprotocol.kotlin.sdk.types.ImageContent
 import io.modelcontextprotocol.kotlin.sdk.types.Implementation
+import io.modelcontextprotocol.kotlin.sdk.types.ListPromptsRequest
+import io.modelcontextprotocol.kotlin.sdk.types.ListPromptsResult
 import io.modelcontextprotocol.kotlin.sdk.types.ListResourcesRequest
 import io.modelcontextprotocol.kotlin.sdk.types.ListResourcesResult
 import io.modelcontextprotocol.kotlin.sdk.types.ListToolsRequest
 import io.modelcontextprotocol.kotlin.sdk.types.ListToolsResult
+import io.modelcontextprotocol.kotlin.sdk.types.McpException
 import io.modelcontextprotocol.kotlin.sdk.types.Method
 import io.modelcontextprotocol.kotlin.sdk.types.ProgressNotification
 import io.modelcontextprotocol.kotlin.sdk.types.ProgressNotificationParams
+import io.modelcontextprotocol.kotlin.sdk.types.RPCError
 import io.modelcontextprotocol.kotlin.sdk.types.ReadResourceRequest
 import io.modelcontextprotocol.kotlin.sdk.types.ReadResourceResult
 import io.modelcontextprotocol.kotlin.sdk.types.RequestId
@@ -38,18 +47,23 @@ import java.io.Closeable
 import java.io.InputStream
 import java.io.OutputStream
 import java.util.UUID
+import java.util.concurrent.CancellationException
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.ConcurrentHashMap
+import kotlin.time.Duration.Companion.milliseconds
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.io.asSink
 import kotlinx.io.asSource
 import kotlinx.io.buffered
+import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.decodeFromJsonElement
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 
@@ -185,7 +199,79 @@ class McpSession(
       )
     }
   }
+
+  /**
+   * Ask through a typed MCP form when this client supports form elicitation: it declared
+   * `elicitation.form`, or declared a bare `elicitation: {}` (the pre-2025-11 shape, which means
+   * form). A URL-only client is never sent a form. [FormElicitation.Unsupported] tells the caller
+   * to use its complete text fallback; a timeout is reported separately so the caller can say the
+   * question went unanswered instead of silently re-asking.
+   */
+  suspend fun elicitForm(
+    message: String,
+    requestedSchema: JsonObject,
+    timeoutMs: Long = DEFAULT_ELICITATION_TIMEOUT_MS,
+  ): FormElicitation {
+    val session = sdkSession ?: return FormElicitation.Unsupported
+    if (!supportsFormElicitation(session.clientCapabilities?.elicitation)) {
+      return FormElicitation.Unsupported
+    }
+    val schema = Json {
+      ignoreUnknownKeys = true
+    }
+      .decodeFromJsonElement<ElicitRequestParams.RequestedSchema>(requestedSchema)
+    return awaitElicitation(timeoutMs) {
+      session.createElicitation(message, schema, RequestOptions(timeout = timeoutMs.milliseconds))
+    }
+  }
+
+  internal companion object {
+    /**
+     * A person answering a form needs longer than the SDK's 60-second request default; a shorter
+     * bound would silently fall back while their dialog is still open.
+     */
+    const val DEFAULT_ELICITATION_TIMEOUT_MS = 5 * 60_000L
+  }
 }
+
+/** Outcome of asking the client for a form answer. */
+sealed interface FormElicitation {
+  /** The client cannot show a form (or rejected the request); use the text fallback. */
+  data object Unsupported : FormElicitation
+
+  /** The person did not answer within the bound. The form may have been dismissed by the client. */
+  data object TimedOut : FormElicitation
+
+  data class Answered(val result: ElicitResult) : FormElicitation
+}
+
+/** `form != null || (form == null && url == null)`: an empty capability object means form. */
+internal fun supportsFormElicitation(capability: ClientCapabilities.Elicitation?): Boolean =
+  capability != null && (capability.form != null || capability.url == null)
+
+internal suspend fun awaitElicitation(
+  timeoutMs: Long,
+  request: suspend () -> ElicitResult,
+): FormElicitation =
+  try {
+    // The SDK enforces the same bound through RequestOptions; this outer guard (with a little
+    // slack) also covers a request implementation that ignores it.
+    withTimeoutOrNull(timeoutMs + ELICITATION_TIMEOUT_SLACK_MS) {
+      FormElicitation.Answered(request())
+    } ?: FormElicitation.TimedOut
+  } catch (cancelled: CancellationException) {
+    // Coroutine cancellation is rethrown so cancelling tools/call terminates the handler.
+    throw cancelled
+  } catch (failure: McpException) {
+    if (failure.code == RPCError.ErrorCode.REQUEST_TIMEOUT) FormElicitation.TimedOut
+    else FormElicitation.Unsupported
+  } catch (_: Exception) {
+    // A rejected or malformed client reply is treated like an unsupported client: the caller
+    // always includes an equivalent text workflow.
+    FormElicitation.Unsupported
+  }
+
+private const val ELICITATION_TIMEOUT_SLACK_MS = 1_000L
 
 /** Tracks every live [Session] so notifications can fan out to multiple connected clients. */
 class SessionRegistry {
@@ -208,7 +294,13 @@ internal fun installComposePreviewHandlers(
   sdkSession: ServerSession,
   session: Session,
   listTools: () -> List<ToolDef>,
-  callTool: (name: String, arguments: JsonElement?) -> CallToolResult,
+  listPrompts: () -> List<io.modelcontextprotocol.kotlin.sdk.types.Prompt>,
+  getPrompt:
+    (
+      name: String,
+      arguments: Map<String, String>,
+    ) -> io.modelcontextprotocol.kotlin.sdk.types.GetPromptResult,
+  callTool: suspend (name: String, arguments: JsonElement?) -> CallToolResult,
   listResources: () -> List<ee.schimke.composeai.mcp.protocol.ResourceDescriptor>,
   readResource:
     (
@@ -220,6 +312,16 @@ internal fun installComposePreviewHandlers(
 ) {
   sdkSession.setRequestHandler<ListToolsRequest>(Method.Defined.ToolsList) { _, _ ->
     ListToolsResult(tools = listTools().map { it.toSdkTool() }, nextCursor = null)
+  }
+  sdkSession.setRequestHandler<ListPromptsRequest>(Method.Defined.PromptsList) { _, _ ->
+    ListPromptsResult(prompts = listPrompts(), nextCursor = null)
+  }
+  sdkSession.setRequestHandler<GetPromptRequest>(Method.Defined.PromptsGet) { request, _ ->
+    try {
+      getPrompt(request.name, request.arguments.orEmpty())
+    } catch (invalid: IllegalArgumentException) {
+      throw McpException(RPCError.ErrorCode.INVALID_PARAMS, invalid.message ?: "Invalid prompt")
+    }
   }
   sdkSession.setRequestHandler<CallToolRequest>(Method.Defined.ToolsCall) { request, _ ->
     callTool(request.name, request.arguments).toSdkCallToolResult()
@@ -248,6 +350,7 @@ internal fun composePreviewServerOptions(): ServerOptions =
       ServerCapabilities(
         tools = ServerCapabilities.Tools(listChanged = true),
         resources = ServerCapabilities.Resources(subscribe = true, listChanged = true),
+        prompts = ServerCapabilities.Prompts(listChanged = false),
       )
   )
 
