@@ -11,6 +11,7 @@ import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -271,6 +272,10 @@ class ServeAgentGrantRoutingTest {
     assertTrue(names.contains("render_preview"))
 
     assertEquals(200, mcpAnonymous("""{"jsonrpc":"2.0","id":3,"method":"ping"}""").first)
+    assertEquals(
+      200,
+      mcpAnonymous("""{"jsonrpc":"2.0","id":4,"method":"prompts/list","params":{}}""").first,
+    )
   }
 
   /** Opening the handshake must not open anything that reads a catalog. */
@@ -336,6 +341,83 @@ class ServeAgentGrantRoutingTest {
     val listed = mcp(token, """{"jsonrpc":"2.0","id":4,"method":"resources/list","params":{}}""")
     assertEquals(200, listed.first)
     assertTrue(json(listed.second)["result"]!!.jsonObject["resources"]!!.jsonArray.isNotEmpty())
+  }
+
+  @Test
+  fun `URL elicitation opens the existing grant request and the retry collects its token`() {
+    val opened =
+      mcpAnonymous(
+        """{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"request_access","arguments":{"scope":"live","label":"url mode"}}}"""
+      )
+    val payload = json(toolText(opened.second))
+    val requestId = payload["requestId"]!!.jsonPrimitive.content
+    val secret = payload["deviceSecret"]!!.jsonPrimitive.content
+    val approveUrl = payload["approveUrl"]!!.jsonPrimitive.content
+
+    val required =
+      mcpAnonymous(
+        """{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"poll_access","arguments":{"requestId":"$requestId","deviceSecret":"$secret","urlMode":true}}}"""
+      )
+    assertEquals(200, required.first)
+    val error = json(required.second)["error"]!!.jsonObject
+    assertEquals(-32042, error["code"]!!.jsonPrimitive.content.toInt())
+    val elicitation = error["data"]!!.jsonObject["elicitations"]!!.jsonArray.single().jsonObject
+    assertEquals("url", elicitation["mode"]!!.jsonPrimitive.content)
+    assertEquals(requestId, elicitation["elicitationId"]!!.jsonPrimitive.content)
+    assertEquals(approveUrl, elicitation["url"]!!.jsonPrimitive.content)
+    assertFalse(required.second.contains(secret), "the URL error must not echo the device secret")
+    assertFalse(required.second.contains("token"), "pending, declined or cancelled mints no token")
+    assertTrue(grants.activeGrants().isEmpty())
+
+    // A client with no URL-elicitation support omits urlMode and retains the complete text result.
+    val fallback =
+      mcpAnonymous(
+        """{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"poll_access","arguments":{"requestId":"$requestId","deviceSecret":"$secret","waitSeconds":0}}}"""
+      )
+    assertEquals("pending", json(toolText(fallback.second))["status"]!!.jsonPrimitive.content)
+
+    val (_, page) = get("/agent-access/$requestId?token=$operatorToken")
+    post(
+      "/agent-access/$requestId?token=$operatorToken",
+      "action=approve&csrf=${field(page, "csrf")}&scope=live&ttl=1800",
+      contentType = "application/x-www-form-urlencoded",
+    )
+
+    // URL clients retry the same poll after accepting the browser interaction. It now returns the
+    // ordinary approved result instead of demanding the same URL again.
+    val approved =
+      mcpAnonymous(
+        """{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"poll_access","arguments":{"requestId":"$requestId","deviceSecret":"$secret","urlMode":true}}}"""
+      )
+    val outcome = json(toolText(approved.second))
+    assertEquals("approved", outcome["status"]!!.jsonPrimitive.content)
+    assertTrue(outcome["token"]!!.jsonPrimitive.content.startsWith("cpat_"))
+  }
+
+  @Test
+  fun `a denied URL-mode access request returns text and never a token`() {
+    val opened =
+      mcpAnonymous(
+        """{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"request_access","arguments":{}}}"""
+      )
+    val payload = json(toolText(opened.second))
+    val requestId = payload["requestId"]!!.jsonPrimitive.content
+    val secret = payload["deviceSecret"]!!.jsonPrimitive.content
+    val (_, page) = get("/agent-access/$requestId?token=$operatorToken")
+    post(
+      "/agent-access/$requestId?token=$operatorToken",
+      "action=deny&denyCsrf=${field(page, "denyCsrf")}",
+      contentType = "application/x-www-form-urlencoded",
+    )
+
+    val denied =
+      mcpAnonymous(
+        """{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"poll_access","arguments":{"requestId":"$requestId","deviceSecret":"$secret","urlMode":true}}}"""
+      )
+    val outcome = json(toolText(denied.second))
+    assertEquals("denied", outcome["status"]!!.jsonPrimitive.content)
+    assertEquals(null, outcome["token"]?.jsonPrimitive?.contentOrNull)
+    assertTrue(grants.activeGrants().isEmpty())
   }
 
   /**
@@ -579,6 +661,12 @@ class ServeAgentGrantRoutingTest {
     val elapsed = System.currentTimeMillis() - started
     assertEquals(200, code)
     assertEquals("pending", str(polled, "status"))
+    assertEquals(
+      null,
+      json(polled)["token"]?.jsonPrimitive?.contentOrNull,
+      "a timed-out request must not mint a token",
+    )
+    assertTrue(grants.activeGrants().isEmpty())
     assertTrue(elapsed >= 900, "did not actually wait: ${elapsed}ms")
   }
 

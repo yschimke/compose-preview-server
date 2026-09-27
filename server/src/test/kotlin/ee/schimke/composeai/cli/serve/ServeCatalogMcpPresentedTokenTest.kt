@@ -116,6 +116,9 @@ class ServeCatalogMcpPresentedTokenTest {
         deviceSecret: String,
         waitSeconds: Long,
       ): String = "{}"
+
+      override fun approvalUrl(requestId: String): String =
+        "https://preview.example/access/$requestId"
     }
 
   private fun tools(): List<Tool> =

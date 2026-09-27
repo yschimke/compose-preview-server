@@ -21,6 +21,7 @@ import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.add
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
@@ -31,6 +32,8 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.put
+import kotlinx.serialization.json.putJsonArray
+import kotlinx.serialization.json.putJsonObject
 
 /**
  * Stateless MCP 2025-06-18 surface aggregating every served catalog.
@@ -86,7 +89,16 @@ class ServeCatalogMcp(
     ): String?
 
     suspend fun poll(requestId: String, deviceSecret: String, waitSeconds: Long): String?
+
+    /** The canonical browser approval URL for [requestId], on this request's public origin. */
+    fun approvalUrl(requestId: String): String?
   }
+
+  private data class UrlElicitationRequired(
+    val elicitationId: String,
+    val url: String,
+    override val message: String,
+  ) : RuntimeException(message)
 
   private data class PreviewTarget(val catalog: String, val previewId: String)
 
@@ -127,6 +139,8 @@ class ServeCatalogMcp(
           "initialize" -> initialize(params)
           "ping" -> JsonObject(emptyMap())
           "tools/list" -> buildJsonObject { put("tools", tools(access != null)) }
+          "prompts/list" -> prompts()
+          "prompts/get" -> prompt(params)
           "tools/call" ->
             try {
               callTool(params, liveAuthorization, access, uiBuilderAuthorization)
@@ -139,6 +153,8 @@ class ServeCatalogMcp(
         }
       } catch (e: McpRequestException) {
         return Reply(error(id, INVALID_PARAMS, e.message ?: "Invalid parameters"))
+      } catch (e: UrlElicitationRequired) {
+        return Reply(urlElicitationRequired(id, e))
       } catch (e: Exception) {
         return Reply(error(id, INTERNAL_ERROR, e.message ?: "Catalog MCP request failed"))
       }
@@ -161,6 +177,7 @@ class ServeCatalogMcp(
         buildJsonObject {
           put("tools", JsonObject(emptyMap()))
           put("resources", buildJsonObject { put("subscribe", false) })
+          if (uiBuilder != null) put("prompts", JsonObject(emptyMap()))
         },
       )
       put(
@@ -185,6 +202,119 @@ class ServeCatalogMcp(
     }
   }
 
+  /** Remote UI-builder slash commands. Kept text-complete for clients that only render prompts. */
+  private fun prompts(): JsonObject = buildJsonObject {
+    putJsonArray("prompts") {
+      if (uiBuilder != null) {
+        add(
+          buildJsonObject {
+            put("name", "review-design")
+            put(
+              "description",
+              "Open a server-homed design, read its discussion, and report attention items.",
+            )
+            putJsonArray("arguments") {
+              add(
+                buildJsonObject {
+                  put("name", "designId")
+                  put("description", "The design id on this server.")
+                  put("required", true)
+                }
+              )
+            }
+          }
+        )
+        add(
+          buildJsonObject {
+            put("name", "design-status")
+            put(
+              "description",
+              "Report a design revision, discussion state, and known home/copy gaps.",
+            )
+            putJsonArray("arguments") {
+              add(
+                buildJsonObject {
+                  put("name", "designId")
+                  put("description", "The design id on this server.")
+                  put("required", true)
+                }
+              )
+            }
+          }
+        )
+      }
+    }
+  }
+
+  private fun prompt(params: JsonObject): JsonObject {
+    if (uiBuilder == null)
+      throw McpRequestException("This server does not expose UI-builder prompts")
+    val name = params.requiredString("name")
+    val arguments = params["arguments"] as? JsonObject ?: JsonObject(emptyMap())
+    val text =
+      when (name) {
+        "review-design" -> reviewDesignPrompt(arguments.validatedDesignId())
+        "design-status" -> designStatusPrompt(arguments.validatedDesignId())
+        else -> throw McpRequestException("unknown prompt: $name")
+      }
+    return buildJsonObject {
+      put("description", "Compose Preview UI-builder workflow")
+      putJsonArray("messages") {
+        add(
+          buildJsonObject {
+            put("role", "user")
+            put(
+              "content",
+              buildJsonObject {
+                put("type", "text")
+                put("text", text)
+              },
+            )
+          }
+        )
+      }
+    }
+  }
+
+  private fun JsonObject.validatedDesignId(): String {
+    val designId = requiredString("designId")
+    if (!designId.matches(PROMPT_DESIGN_ID)) {
+      throw McpRequestException(
+        "designId must be 1-64 URL-safe letters, digits, dots, underscores, or hyphens"
+      )
+    }
+    return designId
+  }
+
+  private fun reviewDesignPrompt(designId: String): String =
+    """
+    Review the UI-builder design `$designId` at its server home.
+
+    1. Call `ui_builder_get_design` with designId `$designId`.
+    2. If `ui_builder_list_comments` is advertised, read it before proposing edits. Report each
+       unresolved or unacknowledged thread; discussion belongs on the design, not in a new PR.
+    3. Inspect the visual result using `ui_builder_export` with `format: "png"` or
+       `ui_builder_render_native` when that tool is advertised. Be precise: neither is the editor
+       view. `ui_builder_view` (selection, reference overlay and comment pins) is not available
+       until compose-preview-server#1114 lands.
+    4. Summarize concrete attention items, separating observed render evidence from document-only
+       checks. Do not claim to have seen editor-only state you could not view.
+    """
+      .trimIndent()
+
+  private fun designStatusPrompt(designId: String): String =
+    """
+    Report the current status of UI-builder design `$designId`.
+
+    1. Call `ui_builder_get_design` and report its current revision and catalog pin.
+    2. If `ui_builder_list_comments` is advertised, report unresolved and unacknowledged comments.
+       If it is absent, say this host has no design-discussion surface.
+    3. Canonical home and temporary-copy tracking are not yet represented by the document contract:
+       compose-ui-builder#320 and compose-preview-server#1114 are prerequisites. Say that this
+       server cannot yet report either field; do not infer a home or claim there are no copies.
+    """
+      .trimIndent()
+
   // `JsonArrayBuilder.addAll` is still experimental; the UI-builder block below is the only caller.
   @OptIn(ExperimentalSerializationApi::class)
   private fun tools(accessEnabled: Boolean): JsonArray = buildJsonArray {
@@ -196,7 +326,9 @@ class ServeCatalogMcp(
           "request_access",
           "Ask a human for access to this server. Returns an approveUrl and a userCode: show " +
             "BOTH to the person you are working with, ask them to open the link and check that " +
-            "the code on the page matches, then call poll_access. The link grants nothing by " +
+            "the code on the page matches, then call poll_access. When the client supports URL " +
+            "elicitation, call poll_access with urlMode=true instead of pasting the link into " +
+            "chat; clients without it keep this complete text fallback. The link grants nothing by " +
             "itself — keep the deviceSecret this returns, it is what collects the token. Use " +
             "this when a call answered 'authorization_required', or when your token stopped " +
             "working (a server restart drops every grant).",
@@ -210,13 +342,16 @@ class ServeCatalogMcp(
             "It HOLDS THE CALL OPEN and answers the moment the human decides — one call " +
             "instead of a dozen, since each poll here costs a whole round trip through you. It " +
             "waits 8 seconds by default; pass waitSeconds (up to 30) if your client tolerates a " +
-            "longer call. A wait that times out answers status=pending, and you simply call " +
+            "longer call. Pass urlMode=true when the client supports URL elicitation: while the " +
+            "request is pending this returns the standard -32042 URL-elicitation-required error, " +
+            "and retrying the same call after the browser decision returns the outcome. A wait " +
+            "that times out answers status=pending, and you simply call " +
             "again. Then approved (with the token) or denied/expired. Use the token on every " +
             "later call: as the X-Compose-Preview-Token header where you control headers, and " +
             "otherwise as each gated tool's 'token' argument — which is what an MCP client " +
             "reaching this flow mid-session needs, since its headers were fixed when it " +
             "connected.",
-          """{"type":"object","properties":{"requestId":{"type":"string"},"deviceSecret":{"type":"string"},"waitSeconds":{"type":"integer","minimum":0,"maximum":30}},"required":["requestId","deviceSecret"]}""",
+          """{"type":"object","properties":{"requestId":{"type":"string"},"deviceSecret":{"type":"string"},"waitSeconds":{"type":"integer","minimum":0,"maximum":30},"urlMode":{"type":"boolean","description":"Use the protocol-standard URL elicitation UI while this request is pending."}},"required":["requestId","deviceSecret"]}""",
         )
       )
     }
@@ -409,16 +544,33 @@ class ServeCatalogMcp(
       }
       "poll_access" -> {
         val broker = access ?: return toolError(ACCESS_DISABLED)
+        val urlMode = args["urlMode"]?.jsonPrimitive?.booleanOrNull == true
         val body =
           broker.poll(
             args.requiredString("requestId"),
             args.requiredString("deviceSecret"),
             // Default to waiting rather than to spinning: a client that says nothing is a client
             // that would otherwise call this again in three seconds, through a model.
-            args["waitSeconds"]?.jsonPrimitive?.longOrNull
-              ?: ServeAgentGrants.DEFAULT_POLL_WAIT_SECONDS,
+            if (urlMode) 0L
+            else
+              args["waitSeconds"]?.jsonPrimitive?.longOrNull
+                ?: ServeAgentGrants.DEFAULT_POLL_WAIT_SECONDS,
           )
-        body?.let { textResult(it) } ?: toolError(ACCESS_THROTTLED)
+        if (body == null) return toolError(ACCESS_THROTTLED)
+        if (urlMode && pendingAccess(body)) {
+          val requestId = args.requiredString("requestId")
+          val approvalUrl = broker.approvalUrl(requestId)
+          if (approvalUrl != null) {
+            throw UrlElicitationRequired(
+              elicitationId = requestId,
+              url = approvalUrl,
+              message =
+                "Approve or decline this access request in the browser, checking the user code " +
+                  "returned by request_access, then continue the same poll_access call.",
+            )
+          }
+        }
+        textResult(body)
       }
       "status" -> textResult(statusJson().toString())
       "list_projects" -> textResult(projectsJson().toString())
@@ -2184,6 +2336,36 @@ class ServeCatalogMcp(
     put("result", result)
   }
 
+  private fun urlElicitationRequired(
+    id: JsonElement?,
+    required: UrlElicitationRequired,
+  ): JsonObject = buildJsonObject {
+    put("jsonrpc", "2.0")
+    put("id", id ?: JsonNull)
+    putJsonObject("error") {
+      put("code", URL_ELICITATION_REQUIRED)
+      put("message", "This access request needs a browser decision.")
+      putJsonObject("data") {
+        putJsonArray("elicitations") {
+          add(
+            buildJsonObject {
+              put("mode", "url")
+              put("elicitationId", required.elicitationId)
+              put("url", required.url)
+              put("message", required.message)
+            }
+          )
+        }
+      }
+    }
+  }
+
+  private fun pendingAccess(body: String): Boolean = runCatching {
+    JSON.parseToJsonElement(body).jsonObject["status"]?.jsonPrimitive?.contentOrNull ==
+      ServeAgentGrants.PollResponse.PENDING
+  }
+    .getOrDefault(false)
+
   private fun error(id: JsonElement?, code: Int, message: String): JsonObject = buildJsonObject {
     put("jsonrpc", "2.0")
     put("id", id ?: JsonNull)
@@ -2243,6 +2425,7 @@ class ServeCatalogMcp(
      */
     private const val MAX_MATRIX_CELLS = 24
     private val MATRIX_OBSERVATION_MODES = setOf("png", "hash")
+    private val PROMPT_DESIGN_ID = Regex("[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
 
     /** `a, b, or c` — the list keeps its grammar as observations are added to it. */
     private fun Collection<String>.orList(): String {
@@ -2298,16 +2481,20 @@ class ServeCatalogMcp(
     /**
      * Methods answered before any credential is looked at.
      *
-     * Deliberately only the three that disclose nothing about this host's catalogs.
-     * `resources/list` is NOT here even though a client calls it during its opening handshake and a
-     * `401` there is what makes the whole server read as "needs authentication": that listing
-     * enumerates real previews, and ungating the *method* would skip the scope check entirely and
-     * serve it on a token-gated box. The fix for the handshake belongs one layer down, where
-     * [ServeMachineAuthorization] knows whether this box publishes anonymously — on a `--public`
-     * box `preview` scope is satisfied by presenting nothing, so this answers; on a private box it
-     * still refuses.
+     * Deliberately only the methods that disclose nothing about this host's catalogs. Prompts are
+     * static workflow text; opening their discovery is necessary because prompt requests cannot
+     * carry the token returned by the in-session grant flow. `resources/list` is NOT here even
+     * though a client calls it during its opening handshake and a `401` there is what makes the
+     * whole server read as "needs authentication": that listing enumerates real previews, and
+     * ungating the *method* would skip the scope check entirely and serve it on a token-gated box.
+     * The fix for the handshake belongs one layer down, where [ServeMachineAuthorization] knows
+     * whether this box publishes anonymously — on a `--public` box `preview` scope is satisfied by
+     * presenting nothing, so this answers; on a private box it still refuses.
      */
-    private val UNGATED_METHODS = setOf("initialize", "ping", "tools/list")
+    private val UNGATED_METHODS =
+      setOf("initialize", "ping", "tools/list", "prompts/list", "prompts/get")
+
+    private const val URL_ELICITATION_REQUIRED = -32042
 
     /**
      * Tools callable without a grant — the two that exist to obtain one. Everything else in [tools]

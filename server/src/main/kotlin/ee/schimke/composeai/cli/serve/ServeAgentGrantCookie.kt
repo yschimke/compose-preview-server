@@ -24,6 +24,7 @@ internal object ServeAgentGrantCookie {
   data class Exchange(
     val target: String,
     val credential: ServeAgentGrantStore.BrowserCredential,
+    val grant: ServeAgentGrantStore.Grant,
   )
 
   /** A live grant cookie on [call], if any. */
@@ -63,7 +64,35 @@ internal object ServeAgentGrantCookie {
         ServeBrowseCookie.localRedirectPath(path) +
           ServeBrowseCookie.queryWithoutToken(call.request.queryString()),
       credential = credential,
+      grant = grant,
     )
+  }
+
+  /**
+   * The live grant this browser already holds under a *different* identity than [exchange]'s, if
+   * any. A grant link opened in such a browser must not silently replace it: that is how someone
+   * else's `cpat_` link would make this person's later work land under the sender's grant.
+   */
+  fun conflictingGrant(
+    call: ApplicationCall,
+    store: ServeAgentGrantStore,
+    exchange: Exchange,
+  ): ServeAgentGrantStore.Grant? {
+    val current =
+      store.grantForBrowserCredential(call.request.cookies.rawCookies[NAME]) ?: return null
+    return current.takeIf { it.id != exchange.grant.id }
+  }
+
+  /**
+   * [next], a same-origin path chosen by the confirmation form, made safe to emit as `Location`: a
+   * single leading `/` (so `//host` and `/\host` cannot leave this origin), no control characters,
+   * and never a `token` parameter.
+   */
+  fun safeLocalTarget(next: String?): String {
+    if (next.isNullOrEmpty() || next.any { it.code < 0x20 || it.code == 0x7f }) return "/"
+    val path = next.substringBefore('?')
+    val query = if ('?' in next) next.substringAfter('?') else ""
+    return ServeBrowseCookie.localRedirectPath(path) + ServeBrowseCookie.queryWithoutToken(query)
   }
 
   fun cookie(credential: ServeAgentGrantStore.BrowserCredential, secure: Boolean): Cookie =
