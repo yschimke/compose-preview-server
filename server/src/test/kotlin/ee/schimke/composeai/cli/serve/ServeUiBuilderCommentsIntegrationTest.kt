@@ -441,6 +441,30 @@ class ServeUiBuilderCommentsIntegrationTest {
   }
 
   @Test
+  fun `native lane capability refusal does not expose comments on a private design`() {
+    val server = start()
+    createDesign(server)
+    server.comments!!.post(
+      DESIGN_ID,
+      "github:yuri",
+      CommentPostRequest(body = "Private review note."),
+    )
+
+    val refused =
+      call(
+        server,
+        ServeUiBuilderMcp.RENDER_NATIVE,
+        """{"designId":"$DESIGN_ID","token":"$REVIEWER_TOKEN"}""",
+      )
+    assertEquals(true, refused["isError"]!!.jsonPrimitive.content.toBoolean())
+    assertTrue("Private review note." !in refused.toString(), refused.toString())
+    assertTrue(
+      ServeUiBuilderMcp.NATIVE_RENDER_UNAVAILABLE !in refused.toString(),
+      refused.toString(),
+    )
+  }
+
+  @Test
   fun `a reaction is the lightest acknowledgement, and reaches the page as one`() {
     val server = start()
     createDesign(server)

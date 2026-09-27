@@ -89,8 +89,9 @@ class ServeUiBuilderMcp(
    * The native render lane, on a box that has one.
    *
    * Null on a host without a playground bundle — compiling a design needs a Kotlin compiler and the
-   * catalog's own classpath, which not every deployment carries. The tool is then absent rather
-   * than present and failing, exactly as the whole surface is on a box with no builder.
+   * catalog's own classpath, which not every deployment carries. The tool remains discoverable and
+   * returns [NATIVE_RENDER_UNAVAILABLE], so a client gets the same stable operation and can report
+   * the gap instead of guessing why a tool is absent.
    */
   private val nativePreview: UiBuilderNativePreviewLane? = null,
   /**
@@ -192,8 +193,10 @@ class ServeUiBuilderMcp(
       SET_LINKS -> if (links == null) null else UiBuilderRouteCapability.WRITE
       // The same capability as an export, and for the same reason: a native render compiles and
       // runs the Kotlin an export hands back, so an actor who may not read that source may not
-      // run it. Absent entirely on a host that cannot compile.
-      RENDER_NATIVE -> if (nativePreview == null) null else UiBuilderRouteCapability.EXPORT
+      // run it. It stays discoverable on a host that cannot compile: the call then returns the
+      // stable NATIVE_RENDER_UNAVAILABLE refusal below instead of making clients infer capability
+      // from a tool disappearing between otherwise equivalent hosts.
+      RENDER_NATIVE -> UiBuilderRouteCapability.EXPORT
       else -> null
     }
 
@@ -518,12 +521,27 @@ class ServeUiBuilderMcp(
    * would be a way to render a design you cannot open.
    */
   private suspend fun renderNative(args: JsonObject, actor: AuthenticatedUiBuilderActor): String {
-    val lane = nativePreview ?: throw McpRequestException("this host has no native render lane")
     val designId = args.requiredText("designId")
+    // Read through the service before reporting host capability. Besides keeping missing and
+    // private designs indistinguishable, this establishes the access check that
+    // withCommentNotice relies on before it may inspect this design's discussion.
     val snapshot =
       execute(GetSnapshotRequestV1(designId = designId, revision = args.number("revision")), actor)
         as? UiBuilderServiceResponse.Snapshot
         ?: throw McpRequestException("no design `$designId` this actor can read")
+    val lane =
+      nativePreview
+        ?: return UI_BUILDER_JSON.encodeToString(
+          NativePreviewRefusalV1.serializer(),
+          NativePreviewRefusalV1(
+            code = NATIVE_RENDER_UNAVAILABLE,
+            reasons =
+              listOf(
+                "this host has no native render lane; configure a UI-builder native catalog " +
+                  "and compiler to render this design with Compose"
+              ),
+          ),
+        )
     val document = snapshot.snapshot.state.document
     return when (val outcome = lane.render(document)) {
       is UiBuilderNativePreviewOutcome.Refused ->
@@ -1246,8 +1264,11 @@ class ServeUiBuilderMcp(
         DELETE_DESIGN,
       )
 
-    /** Separate because it exists only where the host can compile. */
+    /** Kept separate for callers that group native-render capabilities. */
     val NATIVE_TOOL_NAMES = listOf(RENDER_NATIVE)
+
+    /** Stable refusal code returned when the host advertises the tool but cannot compile. */
+    const val NATIVE_RENDER_UNAVAILABLE = "NATIVE_RENDER_UNAVAILABLE"
 
     /** Separate because it exists only where the host keeps design assets. */
     val ASSET_TOOL_NAMES = listOf(PUT_ASSET)
@@ -1691,24 +1712,26 @@ class ServeUiBuilderMcp(
             },"required":["designId","afterSequence"],"additionalProperties":false}
             """,
           ),
-        if (!native) null
-        else
-          tool(
-            RENDER_NATIVE,
-            "Compile a design and render it with real Compose on this host, rather than in the " +
-              "browser's Wasm canvas — the way to see what a design looks like on Android. " +
-              "Returns the first frame, the token the live frame stream is opened with, and the " +
-              "design node ids the render is tagged with, so `get_preview_data` can report each " +
-              "node's bounds and a client can put selectable regions over the image. The reply " +
-              "is not an McpResponseEnvelopeV1: the released contract defines no request type " +
-              "for a native render.",
-            """
+        tool(
+          RENDER_NATIVE,
+          "Compile a design and render it with real Compose on this host, rather than in the " +
+            "browser's Wasm canvas — the way to see what a design looks like on Android. " +
+            "Returns the first frame, the token the live frame stream is opened with, and the " +
+            "design node ids the render is tagged with, so `get_preview_data` can report each " +
+            "node's bounds and a client can put selectable regions over the image. " +
+            (if (native) "This host has a native render lane. "
+            else
+              "This host currently has no native render lane, so calls return a refusal with " +
+                "code `$NATIVE_RENDER_UNAVAILABLE` until one is configured. ") +
+            "The reply is not an McpResponseEnvelopeV1: the released contract defines no " +
+            "request type for a native render.",
+          """
             {"type":"object","properties":{
               "designId":{"type":"string"},
               "revision":{"type":"integer","description":"A past revision. Omit for the current one."}
             },"required":["designId"],"additionalProperties":false}
             """,
-          ),
+        ),
       )
   }
 }
