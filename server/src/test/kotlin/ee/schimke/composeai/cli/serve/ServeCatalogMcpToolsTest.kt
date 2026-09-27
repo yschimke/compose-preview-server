@@ -162,6 +162,34 @@ class ServeCatalogMcpToolsTest {
 
     assertEquals(true, diff["identical"]!!.jsonPrimitive.content.toBoolean())
     assertEquals("testTag", diff["identity"]!!.jsonPrimitive.content)
+    assertEquals(
+      "compose-preview://catalog/m3/card",
+      diff["left"]!!.jsonObject["uri"]!!.jsonPrimitive.content,
+    )
+    assertEquals(
+      "compose-preview://catalog/m3/other",
+      diff["right"]!!.jsonObject["uri"]!!.jsonPrimitive.content,
+    )
+  }
+
+  @Test
+  fun `diff resource URIs preserve each side's overrides`() {
+    val same = annotations("submit" to entry())
+    val body =
+      call(
+        diffHost(same, same),
+        "diff_semantics",
+        """{"catalog":"m3","previewId":"card","overrides":{"uiMode":"dark"},"other":{"catalog":"m3","previewId":"other"},"otherOverrides":{"fontScale":1.3}}""",
+      )
+    val diff = body.parsed()
+
+    fun overrides(side: String): String {
+      val uri = diff[side]!!.jsonObject["uri"]!!.jsonPrimitive.content
+      return Base64.getUrlDecoder().decode(uri.substringAfter("?overrides=")).decodeToString()
+    }
+
+    assertEquals("""{"uiMode":"dark"}""", overrides("left"))
+    assertEquals("""{"fontScale":1.3}""", overrides("right"))
   }
 
   @Test

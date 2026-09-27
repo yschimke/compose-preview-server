@@ -44,7 +44,10 @@ val publishedArtifactId = "compose-preview-mcp"
 
 kotlin {
   jvmToolchain(libs.versions.java.server.get().toInt())
-  sourceSets.named("main") { kotlin.srcDir(rootProject.tasks.named("generateMcpBuildFeatures")) }
+  sourceSets.named("main") {
+    kotlin.srcDir(rootProject.tasks.named("generateMcpBuildFeatures"))
+    resources.srcDir(rootProject.file("mcp-app"))
+  }
 }
 
 ktfmt { googleStyle() }

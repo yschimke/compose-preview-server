@@ -38,9 +38,19 @@ class ServeCatalogMcpGateTest {
   }
 
   @Test
-  fun `everything that reads a catalog is gated`() {
+  fun `only the static viewer resource is readable without a grant`() {
     assertTrue(gated("""{"jsonrpc":"2.0","id":1,"method":"resources/list"}"""))
     assertTrue(gated("""{"jsonrpc":"2.0","id":1,"method":"resources/read","params":{"uri":"x"}}"""))
+    assertFalse(
+      gated(
+        """{"jsonrpc":"2.0","id":1,"method":"resources/read","params":{"uri":"${ServeCatalogMcp.MCP_APP_VIEWER_URI}"}}"""
+      )
+    )
+    assertTrue(
+      gated(
+        """{"jsonrpc":"2.0","id":1,"method":"resources/read","params":{"uri":"${ServeCatalogMcp.MCP_APP_VIEWER_URI}/other"}}"""
+      )
+    )
     assertTrue(
       gated("""{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_projects"}}""")
     )

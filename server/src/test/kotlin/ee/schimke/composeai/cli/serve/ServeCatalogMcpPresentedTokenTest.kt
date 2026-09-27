@@ -55,6 +55,18 @@ class ServeCatalogMcpPresentedTokenTest {
     assertNull(ServeCatalogMcp.presentedToken(json("""{"jsonrpc":"2.0","id":1,"method":"ping"}""")))
   }
 
+  @Test
+  fun `a resource read presents its token directly in params`() {
+    assertEquals(
+      "cpat_resource",
+      ServeCatalogMcp.presentedToken(
+        json(
+          """{"jsonrpc":"2.0","id":1,"method":"resources/read","params":{"uri":"compose-preview://catalog/m3/card","_meta":{"compose-preview/token":"cpat_resource"}}}"""
+        )
+      ),
+    )
+  }
+
   private fun presented(params: String): String? =
     ServeCatalogMcp.presentedToken(
       json("""{"jsonrpc":"2.0","id":1,"method":"tools/call","params":$params}""")

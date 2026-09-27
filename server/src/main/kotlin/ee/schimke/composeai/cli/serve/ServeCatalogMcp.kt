@@ -122,7 +122,7 @@ class ServeCatalogMcp(
               toolError(e.message ?: "Tool call failed")
             }
           "resources/list" -> listResources()
-          "resources/read" -> readResource(params)
+          "resources/read" -> readResource(params, presentedToken(request), liveAuthorization)
           else -> return Reply(error(id, METHOD_NOT_FOUND, "Unknown method '$method'"))
         }
       } catch (e: McpRequestException) {
@@ -422,6 +422,7 @@ class ServeCatalogMcp(
             overrides,
             args["observe"]?.jsonPrimitive?.contentOrNull?.lowercase() ?: "semantics",
             rawOverrides?.keys.orEmpty().toList(),
+            rawOverrides,
           )
         }
       }
@@ -472,6 +473,7 @@ class ServeCatalogMcp(
                   overrides,
                   observe,
                   rawOverrides?.keys.orEmpty().toList(),
+                  rawOverrides,
                 )
                 .forEach(::add)
             }
@@ -494,6 +496,18 @@ class ServeCatalogMcp(
 
   private suspend fun listResources(): JsonObject {
     val resources = buildJsonArray {
+      add(
+        buildJsonObject {
+          put("uri", MCP_APP_VIEWER_URI)
+          put("name", "Compose Preview viewer")
+          put(
+            "description",
+            "Interactive render and matrix viewer for Compose Preview tools.",
+          )
+          put("mimeType", MCP_APP_MIME_TYPE)
+          put("_meta", viewerResourceMeta())
+        }
+      )
       catalogIds().forEach { catalog ->
         withCatalog(catalog) { host ->
           host.previews.forEach { preview ->
@@ -512,12 +526,42 @@ class ServeCatalogMcp(
     return buildJsonObject { put("resources", resources) }
   }
 
-  private suspend fun readResource(params: JsonObject): JsonObject {
+  private suspend fun readResource(
+    params: JsonObject,
+    presentedToken: String?,
+    liveAuthorization: (String?) -> ServeMachineAuthorization.Decision,
+  ): JsonObject {
     val uri = params.requiredString("uri")
+    if (uri == MCP_APP_VIEWER_URI) {
+      return buildJsonObject {
+        put(
+          "contents",
+          buildJsonArray {
+            add(
+              buildJsonObject {
+                put("uri", uri)
+                put("mimeType", MCP_APP_MIME_TYPE)
+                put("text", viewerHtml())
+                put("_meta", viewerResourceMeta())
+              }
+            )
+          },
+        )
+      }
+    }
     val target = targetFromUri(uri)
     return withCatalog(target.catalog) { host ->
       val preview = resolvePreview(host, target.previewId)
-      val png = renderPng(host, preview.id, PreviewOverrides(), preferPublished = true).png
+      val rawOverrides = resourceOverrides(uri)
+      if (rawOverrides != null) requireLive { liveAuthorization(presentedToken) }
+      val png =
+        renderPng(
+            host,
+            preview.id,
+            parseOverrides(preview, rawOverrides),
+            preferPublished = rawOverrides == null,
+          )
+          .png
       buildJsonObject {
         put(
           "contents",
@@ -1063,9 +1107,11 @@ class ServeCatalogMcp(
       args["other"] as? JsonObject
         ?: throw McpRequestException("diff_semantics requires an 'other' preview to compare with")
     val right = other.previewTarget()
+    val leftOverrides = args["overrides"] as? JsonObject
+    val rightOverrides = args["otherOverrides"] as? JsonObject
 
-    val leftTags = tagIndex(left, args["overrides"] as? JsonObject)
-    val rightTags = tagIndex(right, args["otherOverrides"] as? JsonObject)
+    val leftTags = tagIndex(left, leftOverrides)
+    val rightTags = tagIndex(right, rightOverrides)
 
     val onlyLeft = (leftTags.keys - rightTags.keys).sorted()
     val onlyRight = (rightTags.keys - leftTags.keys).sorted()
@@ -1116,14 +1162,26 @@ class ServeCatalogMcp(
         put(
           "left",
           buildJsonObject {
-            put("uri", resourceUri(left.catalog, left.previewId))
+            put(
+              "uri",
+              resourceUriWithOverrides(
+                resourceUri(left.catalog, left.previewId),
+                leftOverrides,
+              ),
+            )
             put("taggedNodes", leftTags.size)
           },
         )
         put(
           "right",
           buildJsonObject {
-            put("uri", resourceUri(right.catalog, right.previewId))
+            put(
+              "uri",
+              resourceUriWithOverrides(
+                resourceUri(right.catalog, right.previewId),
+                rightOverrides,
+              ),
+            )
             put("taggedNodes", rightTags.size)
           },
         )
@@ -1180,10 +1238,13 @@ class ServeCatalogMcp(
     overrides: PreviewOverrides,
     observe: String,
     requestedKeys: List<String> = emptyList(),
+    rawOverrides: JsonObject? = null,
   ): JsonObject = buildJsonObject {
     put(
       "content",
-      JsonArray(renderContent(host, previewId, uri, overrides, observe, requestedKeys)),
+      JsonArray(
+        renderContent(host, previewId, uri, overrides, observe, requestedKeys, rawOverrides)
+      ),
     )
   }
 
@@ -1194,6 +1255,7 @@ class ServeCatalogMcp(
     overrides: PreviewOverrides,
     observe: String,
     requestedKeys: List<String> = emptyList(),
+    rawOverrides: JsonObject? = null,
   ): List<JsonObject> {
     if (observe !in OBSERVATION_MODES) {
       throw McpRequestException("'observe' must be one of ${OBSERVATION_MODES.orList()}")
@@ -1214,10 +1276,13 @@ class ServeCatalogMcp(
       // question that actually matters to the caller: did my override reach the renderer? Two
       // different overrides can produce byte-identical output either because both applied and
       // neither moved anything, or because a baked lane answered and ignored them both.
-      return if (requestedKeys.isEmpty()) listOf(imageContent(png))
+      val renderedUri = resourceUriWithOverrides(uri, rawOverrides)
+      return if (requestedKeys.isEmpty())
+        listOf(imageContent(png), resourceLinkContent(renderedUri))
       else
         listOf(
           imageContent(png),
+          resourceLinkContent(renderedUri),
           textContent(JsonObject(provenance(rendered, requestedKeys)).toString()),
         )
     }
@@ -1249,10 +1314,8 @@ class ServeCatalogMcp(
       }
     }
     return listOf(
-      buildJsonObject {
-        put("type", "text")
-        put("text", observation.toString())
-      }
+      textContent(observation.toString()),
+      resourceLinkContent(resourceUriWithOverrides(uri, rawOverrides)),
     )
   }
 
@@ -1671,9 +1734,32 @@ class ServeCatalogMcp(
     if (!uri.startsWith(RESOURCE_URI_PREFIX)) {
       throw McpRequestException("invalid compose-preview resource URI")
     }
-    val parts = uri.removePrefix(RESOURCE_URI_PREFIX).split('/', limit = 2)
+    val parts = uri.substringBefore('?').removePrefix(RESOURCE_URI_PREFIX).split('/', limit = 2)
     if (parts.size != 2) throw McpRequestException("invalid compose-preview resource URI")
     return PreviewTarget(decode(parts[0]), decode(parts[1]))
+  }
+
+  private fun resourceUriWithOverrides(uri: String, overrides: JsonObject?): String {
+    if (overrides == null || overrides.isEmpty()) return uri
+    val encoded =
+      Base64.getUrlEncoder()
+        .withoutPadding()
+        .encodeToString(overrides.toString().encodeToByteArray())
+    return "$uri?overrides=$encoded"
+  }
+
+  private fun resourceOverrides(uri: String): JsonObject? {
+    val encoded =
+      uri
+        .substringAfter('?', missingDelimiterValue = "")
+        .split('&')
+        .firstOrNull { it.substringBefore('=') == "overrides" }
+        ?.removePrefix("overrides=")
+        ?.takeIf { it.isNotEmpty() } ?: return null
+    return runCatching {
+      JSON.parseToJsonElement(Base64.getUrlDecoder().decode(encoded).decodeToString()).jsonObject
+    }
+      .getOrElse { throw McpRequestException("invalid compose-preview resource overrides") }
   }
 
   private fun decode(value: String): String =
@@ -1746,7 +1832,92 @@ class ServeCatalogMcp(
               "not offer it, the operator has to add the capability and restart."
           )
       }
-    return textResult(builder.call(name, args, actor, callId = name))
+    return uiBuilderToolResult(name, builder.call(name, args, actor, callId = name))
+  }
+
+  /**
+   * Keeps the UI-builder protocol reply as a text fallback while giving MCP App hosts an ordinary
+   * image block for the two calls that can carry a PNG. The text fallback omits both the binary
+   * field represented by that block. The native render's short-lived playground capability stays in
+   * the ordinary MCP reply because clients use it to open the promised live preview stream; static
+   * packagers are responsible for applying their credential-free transport contract before
+   * serializing a result into a bounded URL fragment. The viewer intentionally only understands MCP
+   * content blocks; making it know every UI-builder response schema would couple a reusable viewer
+   * to a second protocol. Without this adapter, successful renders appear as base64 text.
+   */
+  internal fun uiBuilderToolResult(name: String, text: String): JsonObject {
+    val png = uiBuilderPng(name, text)
+    val fallback = uiBuilderViewerFallback(name, text, hasPng = png != null)
+    if (png == null) return textResult(fallback)
+    return buildJsonObject {
+      put(
+        "content",
+        buildJsonArray {
+          add(textContent(fallback))
+          add(
+            buildJsonObject {
+              put("type", "image")
+              put("data", png)
+              put("mimeType", "image/png")
+            }
+          )
+        },
+      )
+    }
+  }
+
+  private fun uiBuilderViewerFallback(name: String, text: String, hasPng: Boolean): String {
+    return runCatching {
+        val reply = JSON.parseToJsonElement(text) as? JsonObject ?: return@runCatching text
+        when (name) {
+          ServeUiBuilderMcp.RENDER_NATIVE -> JsonObject(reply - "imageBase64").toString()
+          ServeUiBuilderMcp.EXPORT_DOCUMENT -> {
+            if (!hasPng) return@runCatching text
+            val response = reply["response"] as? JsonObject ?: return@runCatching text
+            val artifact = response["artifact"] as? JsonObject ?: return@runCatching text
+            JsonObject(
+                reply +
+                  ("response" to
+                    JsonObject(response + ("artifact" to JsonObject(artifact - "content"))))
+              )
+              .toString()
+          }
+          else -> text
+        }
+      }
+      .getOrDefault(text)
+  }
+
+  private fun uiBuilderPng(name: String, text: String): String? = runCatching {
+    val reply = JSON.parseToJsonElement(text) as? JsonObject ?: return@runCatching null
+    when (name) {
+      ServeUiBuilderMcp.RENDER_NATIVE ->
+        reply["imageBase64"]?.jsonPrimitive?.contentOrNull?.let(::pngPayload)
+      ServeUiBuilderMcp.EXPORT_DOCUMENT -> {
+        val response = reply["response"] as? JsonObject
+        val artifact = response?.get("artifact") as? JsonObject
+        if (
+          artifact?.get("mediaType")?.jsonPrimitive?.contentOrNull?.substringBefore(';') !=
+            "image/png" || artifact["encoding"]?.jsonPrimitive?.contentOrNull != "base64"
+        ) {
+          null
+        } else {
+          artifact["content"]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() }
+        }
+      }
+      else -> null
+    }
+  }
+    .getOrNull()
+
+  private fun pngPayload(value: String): String? {
+    val payload =
+      when {
+        value.startsWith("data:image/png;base64,") -> value.substringAfter(',')
+        value.startsWith("data:") -> return null
+        else -> value
+      }
+    return payload.takeIf { it.isNotBlank() }
   }
 
   private fun tool(name: String, description: String, schema: String): JsonObject =
@@ -1754,7 +1925,23 @@ class ServeCatalogMcp(
       put("name", name)
       put("description", description)
       put("inputSchema", withTokenArgument(name, JSON.parseToJsonElement(schema).jsonObject))
+      if (name in VIEWER_TOOL_NAMES) put("_meta", viewerToolMeta())
     }
+
+  private fun viewerHtml(): String =
+    checkNotNull(javaClass.classLoader.getResourceAsStream(MCP_APP_VIEWER_ASSET)) {
+        "missing bundled MCP App viewer: $MCP_APP_VIEWER_ASSET"
+      }
+      .bufferedReader()
+      .use { it.readText() }
+
+  private fun viewerToolMeta(): JsonObject = buildJsonObject {
+    put("ui", buildJsonObject { put("resourceUri", MCP_APP_VIEWER_URI) })
+  }
+
+  private fun viewerResourceMeta(): JsonObject = buildJsonObject {
+    put("ui", buildJsonObject { put("prefersBorder", true) })
+  }
 
   /**
    * Adds the in-band credential to a gated tool's input schema.
@@ -1820,6 +2007,18 @@ class ServeCatalogMcp(
     put("type", "image")
     put("data", Base64.getEncoder().encodeToString(png))
     put("mimeType", "image/png")
+  }
+
+  /** Keeps the replayable render address beside PNG bytes for hosts that render resource links. */
+  private fun resourceLinkContent(uri: String): JsonObject = buildJsonObject {
+    put("type", "resource_link")
+    put("uri", uri)
+    put("name", "Compose Preview render")
+    put("mimeType", "image/png")
+    put(
+      "description",
+      "Preview render resource; override-bearing reads require the same live scope.",
+    )
   }
 
   private fun success(id: JsonElement, result: JsonObject): JsonObject = buildJsonObject {
@@ -1896,6 +2095,17 @@ class ServeCatalogMcp(
     }
 
     private const val RESOURCE_URI_PREFIX = "compose-preview://catalog/"
+    const val MCP_APP_VIEWER_URI = "ui://compose-preview/viewer"
+    private const val MCP_APP_MIME_TYPE = "text/html;profile=mcp-app"
+    private const val MCP_APP_VIEWER_ASSET = "compose-preview-viewer.html"
+    private val VIEWER_TOOL_NAMES =
+      setOf(
+        "render_preview",
+        "render_matrix",
+        "diff_semantics",
+        ServeUiBuilderMcp.EXPORT_DOCUMENT,
+        ServeUiBuilderMcp.RENDER_NATIVE,
+      )
     private const val STORY_ID_SEPARATOR = "::"
     private val OBSERVATION_MODES =
       setOf("png", "svg", "scroll-png", "scroll-svg", "semantics", "hash")
@@ -1966,6 +2176,8 @@ class ServeCatalogMcp(
      */
     const val TOKEN_ARGUMENT = "token"
 
+    private const val RESOURCE_TOKEN_META_KEY = "compose-preview/token"
+
     private const val TOKEN_ARGUMENT_DESCRIPTION =
       "A grant token from poll_access, when you cannot set the X-Compose-Preview-Token header " +
         "yourself — an MCP client fixes its headers at connect time, so this is how a token " +
@@ -1975,12 +2187,20 @@ class ServeCatalogMcp(
      * The grant token this message presents in-band, if any.
      *
      * Read by the transport as well as by [callTool], so the gate in front of the endpoint and the
-     * tool behind it agree about what was presented. Blank is treated as absent: a client
+     * operation behind it agree about what was presented. Tool calls carry the token in
+     * `params.arguments`; resource reads carry it in the standard extensible `params._meta` object
+     * because MCP's read request has no arguments object. Blank is treated as absent: a client
      * templating an unset environment variable sends `""`, and that is nothing, not a bad token.
      */
     fun presentedToken(request: JsonObject): String? {
       val params = request["params"] as? JsonObject ?: return null
-      return tokenArgument(params["arguments"] as? JsonObject ?: return null)
+      val method = (request["method"] as? JsonPrimitive)?.contentOrNull
+      return if (method == "resources/read") {
+        val metadata = params["_meta"] as? JsonObject ?: return null
+        (metadata[RESOURCE_TOKEN_META_KEY] as? JsonPrimitive)?.contentOrNull?.takeIf {
+          it.isNotBlank()
+        }
+      } else tokenArgument(params["arguments"] as? JsonObject ?: return null)
     }
 
     internal fun tokenArgument(arguments: JsonObject): String? =
@@ -1999,6 +2219,13 @@ class ServeCatalogMcp(
       // A notification (no `id`) is accepted and dropped without being handled at all.
       if (request["id"] == null) return false
       if (method in UNGATED_METHODS) return false
+      // The MCP App loader reads this public, static asset before it can present a token returned
+      // by a tool. Do not open resource reads generally: hosted preview resources remain private.
+      if (method == "resources/read") {
+        val params = request["params"] as? JsonObject ?: return true
+        val uri = (params["uri"] as? JsonPrimitive)?.contentOrNull
+        return uri != MCP_APP_VIEWER_URI
+      }
       if (method != "tools/call") return true
       val params = request["params"] as? JsonObject ?: return true
       val name = (params["name"] as? JsonPrimitive)?.contentOrNull ?: return true

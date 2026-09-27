@@ -25,6 +25,7 @@ import io.modelcontextprotocol.kotlin.sdk.types.ReadResourceResult
 import io.modelcontextprotocol.kotlin.sdk.types.RequestId
 import io.modelcontextprotocol.kotlin.sdk.types.Resource
 import io.modelcontextprotocol.kotlin.sdk.types.ResourceContents
+import io.modelcontextprotocol.kotlin.sdk.types.ResourceLink
 import io.modelcontextprotocol.kotlin.sdk.types.ResourceUpdatedNotification
 import io.modelcontextprotocol.kotlin.sdk.types.ResourceUpdatedNotificationParams
 import io.modelcontextprotocol.kotlin.sdk.types.ServerCapabilities
@@ -264,11 +265,12 @@ internal fun ToolDef.toSdkTool(): Tool {
           },
       ),
     description = description,
+    meta = meta,
   )
 }
 
 private fun ee.schimke.composeai.mcp.protocol.ResourceDescriptor.toSdkResource(): Resource =
-  Resource(uri = uri, name = name, description = description, mimeType = mimeType)
+  Resource(uri = uri, name = name, description = description, mimeType = mimeType, meta = meta)
 
 private fun ee.schimke.composeai.mcp.protocol.ReadResourceResult.toSdkReadResourceResult():
   ReadResourceResult = ReadResourceResult(contents = contents.map { it.toSdkResourceContents() })
@@ -277,9 +279,9 @@ private fun ee.schimke.composeai.mcp.protocol.ResourceContents.toSdkResourceCont
   ResourceContents =
   when (this) {
     is ee.schimke.composeai.mcp.protocol.ResourceContents.Text ->
-      TextResourceContents(text = text, uri = uri, mimeType = mimeType)
+      TextResourceContents(text = text, uri = uri, mimeType = mimeType, meta = meta)
     is ee.schimke.composeai.mcp.protocol.ResourceContents.Blob ->
-      BlobResourceContents(blob = blob, uri = uri, mimeType = mimeType)
+      BlobResourceContents(blob = blob, uri = uri, mimeType = mimeType, meta = meta)
   }
 
 internal fun CallToolResult.toSdkCallToolResult():
@@ -293,6 +295,8 @@ private fun ContentBlock.toSdkContent(): SdkContentBlock =
   when (this) {
     is ContentBlock.Text -> TextContent(text = text)
     is ContentBlock.Image -> ImageContent(data = data, mimeType = mimeType)
+    is ContentBlock.ResourceLink ->
+      ResourceLink(uri = uri, name = name, mimeType = mimeType, description = description)
     is ContentBlock.EmbeddedResource ->
       EmbeddedResource(resource = resource.toSdkResourceContents())
   }
