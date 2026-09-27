@@ -44,6 +44,22 @@
   .comment-compose-row { display: flex; gap: 8px; align-items: center; }
   .comment-raw { margin-top: 8px; }
   .comment-raw pre { max-height: 180px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .details { margin-top: 10px; display: grid; gap: 8px; }
+  .details[hidden] { display: none; }
+  .detail-modes { display: flex; gap: 0; }
+  .detail-modes button { border-radius: 0; margin-left: -1px; }
+  .detail-modes button:first-child { border-radius: 6px 0 0 6px; margin-left: 0; }
+  .detail-modes button:last-child { border-radius: 0 6px 6px 0; }
+  .detail-modes button[aria-pressed="true"] { background: var(--color-background-secondary, #e8ecf6); font-weight: 650; }
+  .detail-boxes { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+  .detail-boxes rect { fill: none; stroke-width: 1.5; vector-effect: non-scaling-stroke; }
+  .detail-boxes rect.layout { stroke: #1a73e8; }
+  .detail-boxes rect.finding { stroke: #d93025; stroke-width: 2; }
+  .findings { margin: 0; padding: 0; list-style: none; display: grid; gap: 4px; font-size: 12px; }
+  .findings li { padding: 5px 7px; border-radius: 6px; background: var(--color-background-secondary, #f8f8fa); overflow-wrap: anywhere; }
+  .findings .level { font-weight: 700; margin-right: 6px; }
+  .findings .level.error { color: #c5221f; }
+  .findings .level.warning { color: #b06000; }
   button { font: inherit; padding: 6px 9px; border-radius: 6px; border: 1px solid var(--color-border, #aaa); background: var(--color-background-primary, #fff); color: inherit; cursor: pointer; }
 </style>
 <body>
@@ -56,6 +72,11 @@
   </div>
   <section id="canvas" class="canvas">
     <div class="empty">This viewer displays render and matrix results when the host supplies them.</div>
+  </section>
+  <section id="details" class="details" aria-label="Render details" hidden>
+    <div id="detail-modes" class="detail-modes" role="group" aria-label="Render view"></div>
+    <div id="detail-summary" class="muted"></div>
+    <ol id="findings" class="findings" aria-label="Accessibility findings"></ol>
   </section>
   <section id="comments" class="comments" aria-label="Design comments" hidden>
     <div class="comments-heading"><span>Design comments</span><button id="comment-refresh" type="button" hidden>Refresh comments</button></div>
@@ -98,6 +119,14 @@
   const commentAnchorLabel = q('#comment-anchor');
   const commentStatus = q('#comment-status');
   const commentRaw = q('#comment-raw');
+  const detailsSection = q('#details');
+  const detailModes = q('#detail-modes');
+  const detailSummary = q('#detail-summary');
+  const findingsList = q('#findings');
+  // render_preview `details` (#1170): blocks after the render, marked in `_meta`, carrying the a11y
+  // overlay PNG and the findings + layout boxes. Everything is embedded, so a static card toggles
+  // between them with no call.
+  const DETAIL_META = 'composePreview/detail';
   const REQUEST_TIMEOUT_MS = 5000;
   const RESOURCE_READ_TIMEOUT_MS = 65000;
   const RESOURCE_POLL_INTERVAL_MS = 5000;
@@ -197,11 +226,13 @@
     }
   };
 
+  const detailOf = block => block?._meta?.[DETAIL_META];
   const data = result =>
     result?.structuredContent ||
-    result?.content?.filter(block => block.type === 'text').map(block => parse(block.text)).find(Boolean) ||
+    result?.content?.filter(block => block.type === 'text' && !detailOf(block)).map(block => parse(block.text)).find(Boolean) ||
     {};
-  const png = result => result?.content?.find(block => block.type === 'image' && block.mimeType === 'image/png');
+  const png = result =>
+    result?.content?.find(block => block.type === 'image' && block.mimeType === 'image/png' && !detailOf(block));
   const link = result => result?.content?.find(block => block.type === 'resource_link');
   const resourcePng = result =>
     result?.contents?.find(content => content?.mimeType === 'image/png' && typeof content.blob === 'string');
@@ -556,6 +587,115 @@
     a11y.disabled = false;
     a11y.textContent = overlayVisible ? 'Show original preview' : 'Show accessibility overlay';
     a11y.removeAttribute('title');
+  }
+
+  function clearDetails() {
+    detailsSection.hidden = true;
+    detailModes.replaceChildren();
+    detailSummary.textContent = '';
+    findingsList.replaceChildren();
+  }
+
+  function detailBoxes(boxes, className, width, height) {
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('class', 'detail-boxes');
+    svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
+    svg.setAttribute('preserveAspectRatio', 'none');
+    svg.setAttribute('aria-hidden', 'true');
+    for (const box of boxes) {
+      const [left, top, right, bottom] = box.bounds.map(Number);
+      const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+      rect.setAttribute('class', className);
+      rect.setAttribute('x', left);
+      rect.setAttribute('y', top);
+      rect.setAttribute('width', Math.max(0, right - left));
+      rect.setAttribute('height', Math.max(0, bottom - top));
+      const title = document.createElementNS('http://www.w3.org/2000/svg', 'title');
+      title.textContent = box.label || '';
+      rect.append(title);
+      svg.append(rect);
+    }
+    return svg;
+  }
+
+  const hasBounds = item =>
+    Array.isArray(item?.bounds) && item.bounds.length === 4 && item.bounds.every(n => Number.isFinite(Number(n)));
+
+  function renderDetails(result, image) {
+    const block = result?.content?.find(candidate => candidate.type === 'text' && detailOf(candidate) === 'details');
+    const details = block && parse(block.text);
+    if (!details || typeof details !== 'object') return;
+    const overlay = result.content.find(
+      candidate => candidate.type === 'image' && candidate.mimeType === 'image/png' && detailOf(candidate) === 'a11y/overlay'
+    );
+    const a11yDetail = details.a11y && typeof details.a11y === 'object' ? details.a11y : undefined;
+    const layoutDetail = details.layout && typeof details.layout === 'object' ? details.layout : undefined;
+    const findings = Array.isArray(a11yDetail?.findings) ? a11yDetail.findings.filter(f => f && typeof f === 'object') : [];
+    const layoutBoxes = Array.isArray(layoutDetail?.boxes) ? layoutDetail.boxes.filter(hasBounds) : [];
+    const modes = [{ id: 'plain', label: 'Plain' }];
+    if (a11yDetail) modes.push({ id: 'a11y', label: 'A11y overlay' });
+    if (layoutDetail) modes.push({ id: 'layout', label: 'Layout bounds' });
+    const unavailable = details.unavailable && typeof details.unavailable === 'object' ? details.unavailable : {};
+    const notes = [a11yDetail?.summary, layoutDetail?.summary]
+      .concat(Object.entries(unavailable).map(([key, reason]) => `${key}: unavailable (${reason})`))
+      .filter(text => typeof text === 'string' && text);
+    if (modes.length === 1 && !notes.length) return;
+    detailsSection.hidden = false;
+    detailSummary.textContent = notes.join(' · ');
+    const stage = canvas.querySelector('.preview-stage');
+    const preview = stage?.querySelector(':scope > img');
+    // Boxes are in the render's pixel space, so size them against the render, not the overlay.
+    const value = data(result);
+    const size = { width: Number(value.widthPx) || 0, height: Number(value.heightPx) || 0 };
+    const measure = () => {
+      if (!size.width || !size.height) {
+        size.width = preview.naturalWidth || 1;
+        size.height = preview.naturalHeight || 1;
+      }
+    };
+    const setMode = mode => {
+      if (!stage || !preview) return;
+      measure();
+      stage.querySelectorAll('.detail-boxes').forEach(node => node.remove());
+      const { width, height } = size;
+      preview.src = `data:image/png;base64,${mode === 'a11y' && overlay ? overlay.data : image.data}`;
+      if (mode === 'layout') stage.append(detailBoxes(layoutBoxes, 'layout', width, height));
+      if (mode === 'a11y' && !overlay) {
+        stage.append(detailBoxes(findings.filter(hasBounds).map(f => ({ bounds: f.bounds, label: f.message })), 'finding', width, height));
+      }
+      stage.dataset.detailMode = mode;
+      detailModes.querySelectorAll('button').forEach(button =>
+        button.setAttribute('aria-pressed', String(button.dataset.mode === mode))
+      );
+      meta.textContent = mode === 'plain' ? baseMetaText : `${baseMetaText} · ${modes.find(m => m.id === mode).label}`;
+    };
+    if (modes.length > 1) {
+      for (const mode of modes) {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.dataset.mode = mode.id;
+        button.textContent = mode.label;
+        button.setAttribute('aria-pressed', String(mode.id === 'plain'));
+        button.addEventListener('click', () => {
+          // Bounds are in render pixels; wait for the natural size before drawing them.
+          if (preview && !preview.complete) preview.addEventListener('load', () => setMode(mode.id), { once: true });
+          else setMode(mode.id);
+        });
+        detailModes.append(button);
+      }
+    }
+    findings.forEach(finding => {
+      const item = document.createElement('li');
+      const level = document.createElement('span');
+      const levelText = String(finding.level || 'INFO').toUpperCase();
+      level.className = `level ${levelText.toLowerCase()}`;
+      level.textContent = levelText;
+      const rule = document.createElement('strong');
+      rule.textContent = String(finding.rule || '');
+      item.append(level, rule, document.createTextNode(` ${finding.message || ''}`));
+      if (finding.node) item.append(document.createTextNode(` (${finding.node})`));
+      findingsList.append(item);
+    });
   }
 
   function renderMatrix(value, cells) {
@@ -1100,6 +1240,7 @@
     refresh.hidden = true;
     clearAccessibilityOverlay();
     clearComments();
+    clearDetails();
     const comparisonGeneration = ++comparisonReadGeneration;
     const comparison = beforeAfterModel(result, value);
     disconnectResourceUpdates(comparison ? undefined : resource?.uri);
@@ -1125,6 +1266,7 @@
     }
     if (image) {
       renderImage(image, value, resource);
+      renderDetails(result, image);
       return;
     }
     if (resource) {
