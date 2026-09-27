@@ -75,9 +75,14 @@ object DaemonMcpMain {
           supervisor,
           serverInfo = Implementation(name = "compose-preview-storybook", version = "v0"),
           profile = McpToolProfile.STORYBOOK,
+          sourceCompiler = GradleSourceCompiler(),
         )
       } else {
-        DaemonMcpServer(supervisor, uiBuilderMcp = uiBuilderMcp)
+        DaemonMcpServer(
+          supervisor,
+          uiBuilderMcp = uiBuilderMcp,
+          sourceCompiler = GradleSourceCompiler(),
+        )
       }
 
     parseProjects(args).forEach { (path, name) ->
