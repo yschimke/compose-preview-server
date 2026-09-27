@@ -141,7 +141,7 @@ JSON-RPC messages use `POST`, notifications receive `202 Accepted`, and optional
 | `request_access`, `poll_access` | none | Obtain a grant without leaving MCP (above) |
 | `status` | `preview` | Report readiness and the aggregate catalog set |
 | `resources/list`, `resources/read` | `preview` | List and read published preview PNGs |
-| `list_projects`, `list_previews` | `preview` | Discover catalogs and preview metadata |
+| `list_projects`, `list_previews` | `preview` | Discover catalogs, then one catalog's preview metadata (`list_previews` requires `catalog` unless the server holds only one) |
 | `render_preview` | `live` | Render with optional overrides; defaults to a token-frugal semantics/hash observation, with `observe=png` for pixels and `observe=svg` for the `compose/figma-svg` vector export |
 | `render_matrix` | `live` | Render one preview across a cross-product of override axes in a single call |
 | `list_devices` | `preview` | The `device` override's accepted vocabulary, with each frame's dp size and density |
@@ -149,7 +149,7 @@ JSON-RPC messages use `POST`, notifications receive `202 Accepted`, and optional
 | `history_diff` | `preview` | Compare two of its recorded renders |
 | `history_read` | `preview` | One historical render's pixels, by commit or blob |
 | `diff_semantics` | `live` | Compare two previews' semantics by authored `testTag` |
-| `list_data_products` | `preview` | Discover structured products exposed by previews |
+| `list_data_products` | `preview` | Discover structured products exposed by one catalog's previews (`catalog` or `uri` required) |
 | `get_preview_data` | `live` | Retrieve accessibility or Compose annotation data |
 | `list-all-documentation`, `get-documentation-for-story` | `preview` | Storybook-MCP-compatible discovery aliases |
 | `preview-stories` | `live` | Storybook-MCP-compatible preview rendering alias |
@@ -166,6 +166,11 @@ JSON-RPC messages use `POST`, notifications receive `202 Accepted`, and optional
 | `ui_builder_list_comments`, `ui_builder_await_comments` | `ui-builder-read` | Read a design's discussion, and **wait** for the next thing said in it |
 | `ui_builder_post_comment`, `ui_builder_resolve_comment_thread` | `ui-builder-write` | Say something on a design, and close a thread once it is answered |
 | `ui_builder_acknowledge_comment`, `ui_builder_react_to_comment` | `ui-builder-write` | Say you have **read** a thread — which is not resolving it — or react to one comment with an emoji |
+
+Enumerations across every catalog (`status`, `list_projects`, `resources/list`,
+`list-all-documentation`) read what the registry already holds and never resume a suspended catalog.
+`list_previews` and `list_data_products` without a catalog refuse at once with the available ids and a
+pointer to the local `compose-preview-mcp` server, rather than serialising every catalog (#1162).
 
 The `ui_builder_*` tools appear in `tools/list` only on a box that actually serves a UI builder
 (`--ui-builder-dir`). A box without one does not advertise them, because listed-and-failing tells an
