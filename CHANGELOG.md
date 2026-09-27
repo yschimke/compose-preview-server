@@ -1,5 +1,19 @@
 # Changelog
 
+## [3.81.0](https://github.com/yschimke/compose-preview-server/compare/v3.80.0...v3.81.0) (2026-09-27)
+
+
+### Features
+
+* **mcp:** find, register and prepare any project automatically ([#1191](https://github.com/yschimke/compose-preview-server/issues/1191)) ([53b901e](https://github.com/yschimke/compose-preview-server/commit/53b901e6a82f7e1d7e3cc58aa5c48a746d376783))
+
+
+### Bug Fixes
+
+* **deps:** update the preview daemon to 3.9.1 ([#1193](https://github.com/yschimke/compose-preview-server/issues/1193)) ([4a3ff28](https://github.com/yschimke/compose-preview-server/commit/4a3ff2802d03a10ec0883d2f4a029c9f3cc37d52))
+* **deps:** update the UI builder to 3.66.0 ([#1192](https://github.com/yschimke/compose-preview-server/issues/1192)) ([f852869](https://github.com/yschimke/compose-preview-server/commit/f852869ea7de75b0aafd5b546f0f336c7eb07594))
+* **mcp-app:** reserve only the header and toolbar when fitting the image ([#1190](https://github.com/yschimke/compose-preview-server/issues/1190)) ([8d2c7da](https://github.com/yschimke/compose-preview-server/commit/8d2c7dae2b31c11847c9cb162e8bf680dca6ffe7))
+
 ## [3.80.0](https://github.com/yschimke/compose-preview-server/compare/v3.79.0...v3.80.0) (2026-09-27)
 
 
