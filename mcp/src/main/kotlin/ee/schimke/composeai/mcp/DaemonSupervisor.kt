@@ -345,6 +345,16 @@ class DaemonSupervisor(
      * `--replicas-per-daemon N` flag or the `composeai.mcp.replicasPerDaemon` system property.
      */
     const val DEFAULT_REPLICAS_PER_DAEMON: Int = 4
+
+    /**
+     * The out-of-the-box replica count for a machine with [cores] processors: half the cores less
+     * the primary, capped at [DEFAULT_REPLICAS_PER_DAEMON]. Each replica is a sandbox JVM that
+     * boots in the background (6–14 s each on a 4-core machine) and competes with the first renders
+     * (issue #1174), so a 4-core machine gets 1 and an 8-core one 3. `--replicas-per-daemon` and
+     * `composeai.mcp.replicasPerDaemon` still override it.
+     */
+    fun defaultReplicasFor(cores: Int): Int =
+      (cores / 2 - 1).coerceIn(0, DEFAULT_REPLICAS_PER_DAEMON)
   }
 }
 
