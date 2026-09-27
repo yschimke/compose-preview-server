@@ -103,6 +103,29 @@ class ServeMcpRequestScopesTest {
         }
       assertNull(malformed.elicitForm("Choose", JsonObject(emptyMap()), 10))
 
+      val nonPrimitiveAction =
+        scopes.interaction(supported) { request ->
+          val id = request["id"]!!.jsonPrimitive.content
+          assertEquals(
+            ServeMcpRequestScopes.ResponseDisposition.ACCEPTED,
+            scopes.acceptResponse(
+              supported.id,
+              buildJsonObject {
+                put("jsonrpc", "2.0")
+                put("id", id)
+                put(
+                  "result",
+                  buildJsonObject { put("action", buildJsonObject { put("type", "accept") }) },
+                )
+              },
+            ),
+          )
+        }
+      assertNull(
+        nonPrimitiveAction.elicitForm("Choose", JsonObject(emptyMap()), 1_000),
+        "a non-primitive action is malformed and must preserve the caller's text fallback",
+      )
+
       assertNull(scopes.interaction(supported) {}.elicitForm("Choose", JsonObject(emptyMap()), 10))
 
       val bounded =

@@ -11,7 +11,6 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
-import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 
 /**
@@ -159,7 +158,7 @@ internal class ServeMcpRequestScopes(
     if (response["error"] != null) return null
     val result = response["result"] as? JsonObject ?: return null
     val action =
-      when (result["action"]?.jsonPrimitive?.contentOrNull) {
+      when ((result["action"] as? JsonPrimitive)?.contentOrNull) {
         "accept" -> ServeCatalogMcp.FormElicitationAction.ACCEPT
         "decline" -> ServeCatalogMcp.FormElicitationAction.DECLINE
         "cancel" -> ServeCatalogMcp.FormElicitationAction.CANCEL
