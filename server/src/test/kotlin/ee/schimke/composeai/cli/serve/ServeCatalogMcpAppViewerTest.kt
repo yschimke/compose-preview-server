@@ -158,7 +158,9 @@ class ServeCatalogMcpAppViewerTest {
       !html.substringAfter("<script>").substringBeforeLast("</script>").contains("</script"),
       "the viewer's own script must not contain a closing script tag",
     )
-    assertTrue(html.contains("Complete text and structured output:"))
+    assertTrue(html.contains("Render failed"))
+    assertTrue(html.contains("No image in this result"))
+    assertTrue(html.contains("Full message"))
     assertTrue(html.contains("function beforeAfterModel(result, value)"))
     assertTrue(html.contains("const inputBeforeUri = result?.isError ? undefined"))
     assertTrue(html.contains("value?.left?.uri || value?.baseUri || inputBeforeUri"))
