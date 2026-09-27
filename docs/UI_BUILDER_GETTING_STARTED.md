@@ -791,6 +791,7 @@ The menu is the browser's door. The shell's is `design`, a command on the server
 
 ```shell
 compose-preview-server design list                       # what this credential can see
+compose-preview-server design status --workspace . --summary  # comments and temporary copies
 compose-preview-server design render my-widget -o cover.png   # or --format svg
 compose-preview-server design export my-widget -o Widget.kt   # the generated Kotlin
 compose-preview-server design get    my-widget > design.json  # the document
@@ -815,6 +816,13 @@ Three things it does deliberately:
 - **A refusal is not an empty file.** When the generator cannot express a design — `asset/image`
   has no Remote Compose counterpart, an image background needs a `RemoteImageBitmap` — those
   diagnostics go to stderr, nothing is written, and the exit code is non-zero.
+
+`status` is deliberately different from the interactive verbs. It inventories only the bounded
+`ui-builder/designs/index.json` in `--workspace`, contacts only the independently selected
+`--server` when a document's server home has the same origin, and shares one timeout across all
+remote reads. It never requests a new grant. `--summary` is a fixed, credential-free one-line
+SessionStart result (silent when clean); `--json` returns the redacted
+`compose-preview-design-status/v1` envelope for other callers.
 
 ### When the server is the thing that is broken
 
