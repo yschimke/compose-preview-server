@@ -190,10 +190,16 @@ tasks.withType<Test>().configureEach {
   // Opt-in edit→render loop on a real Android fixture (`EditLoopIntegrationTest`, issue #1174):
   // `-Pmcp.editLoop=true`. It copies `src/editLoopFixture` and this build's Gradle wrapper, and
   // always writes its timings and work records to the report file, which CI uploads.
-  systemProperty(
-    "composeai.mcp.editLoop",
-    (providers.gradleProperty("mcp.editLoop").orNull == "true").toString(),
-  )
+  val editLoop = providers.gradleProperty("mcp.editLoop").orNull == "true"
+  systemProperty("composeai.mcp.editLoop", editLoop.toString())
+  if (editLoop) {
+    // The CI log is where a failing edit loop is read: the full assertion (which tasks, which
+    // cycle) and the report the test prints, not just the exception class.
+    testLogging {
+      exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL
+      showStandardStreams = true
+    }
+  }
   systemProperty("composeai.mcp.repoRoot", rootDir.absolutePath)
   // `ANDROID_HOME` otherwise; for a launcher that does not pass the environment through.
   providers.gradleProperty("mcp.androidSdk").orNull?.let {
