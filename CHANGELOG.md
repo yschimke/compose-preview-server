@@ -1,5 +1,23 @@
 # Changelog
 
+## [3.75.0](https://github.com/yschimke/compose-preview-server/compare/v3.74.0...v3.75.0) (2026-09-27)
+
+
+### Features
+
+* **mcp:** add interactive workflow elicitation ([#1128](https://github.com/yschimke/compose-preview-server/issues/1128)) ([127a0f9](https://github.com/yschimke/compose-preview-server/commit/127a0f978a1fe9c1b4a09d275bdcdba3dfd13589))
+* **mcp:** add local preview file fallbacks ([#1124](https://github.com/yschimke/compose-preview-server/issues/1124)) ([b5d409e](https://github.com/yschimke/compose-preview-server/commit/b5d409e60bdaf6a1cfd077844f0acd7783ceed80))
+* **mcp:** add portable MCP App preview viewer ([#1156](https://github.com/yschimke/compose-preview-server/issues/1156)) ([57f69e9](https://github.com/yschimke/compose-preview-server/commit/57f69e972c92d23e32a6b34cdc556829fe7dd4f1))
+* **mcp:** report design comment counts, native-render availability and workspace status ([#1144](https://github.com/yschimke/compose-preview-server/issues/1144)) ([1ea3fcd](https://github.com/yschimke/compose-preview-server/commit/1ea3fcd3725a1869a144ab19ebf137c173321280))
+* **mcp:** report unavailable native rendering ([#1143](https://github.com/yschimke/compose-preview-server/issues/1143)) ([75422f1](https://github.com/yschimke/compose-preview-server/commit/75422f1bb4da0ead7a666f8126b38a1647524a07))
+
+
+### Bug Fixes
+
+* **serve:** confirm before a grant link replaces a browser's grant ([#1155](https://github.com/yschimke/compose-preview-server/issues/1155)) ([fc7d79f](https://github.com/yschimke/compose-preview-server/commit/fc7d79fcb854221040a876de72272b05b0e3c040))
+* **serve:** keep grant browser sessions authenticated ([#1134](https://github.com/yschimke/compose-preview-server/issues/1134)) ([bc36b12](https://github.com/yschimke/compose-preview-server/commit/bc36b120eb116586b1c3b872d61e21a9123fe290))
+* **ui-builder:** keep create redirect reachable ([#1141](https://github.com/yschimke/compose-preview-server/issues/1141)) ([1d97cfe](https://github.com/yschimke/compose-preview-server/commit/1d97cfe2439dbef13f9bdddb134ffb84c09debe1))
+
 ## [3.74.0](https://github.com/yschimke/compose-preview-server/compare/v3.73.0...v3.74.0) (2026-09-26)
 
 
