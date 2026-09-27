@@ -263,6 +263,42 @@ class SourceRecompileTest {
   }
 
   @Test
+  fun `an unchanged render neither recompiles nor swaps the classloader`() {
+    lateinit var fixture: Fixture
+    start(fakeCompiler { fixture.classes })
+    fixture = fixture()
+    render(fixture)
+    render(fixture)
+    render(fixture)
+    assertThat(compiles).isEmpty()
+    assertThat(daemon.fileChanges).isEmpty()
+  }
+
+  @Test
+  fun `a compile that outlives its budget is killed and reported as stale`() {
+    assumeFalse(System.getProperty("os.name").orEmpty().startsWith("Windows"))
+    val wrapperDir = tmp.newFolder("slow-root")
+    File(wrapperDir, "gradlew").apply {
+      writeText("#!/bin/sh\nsleep 30\n")
+      setExecutable(true)
+    }
+    val startedAt = System.nanoTime()
+    val outcome = GradleSourceCompiler(timeoutMs = 300).compile(wrapperDir, ":app", emptyList())
+    assertThat(TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedAt)).isLessThan(10_000L)
+    assertThat(outcome).isInstanceOf(SourceCompileOutcome.Failed::class.java)
+    assertThat((outcome as SourceCompileOutcome.Failed).reason).contains("timed out")
+
+    // Through the server, the timeout surfaces as the render's stale line, not silence.
+    lateinit var fixture: Fixture
+    start(SourceCompiler { _, _, _ -> outcome })
+    fixture = fixture()
+    render(fixture)
+    edit(fixture, """@Preview fun Header() { Text("Hello Android") }""")
+    val line = render(fixture).texts.single { it.startsWith("stale:") }
+    assertThat(line).contains("timed out")
+  }
+
+  @Test
   fun `gradle failure summary falls back to what went wrong`() {
     assertThat(
         GradleSourceCompiler.summarizeGradleFailure(

@@ -83,7 +83,7 @@ class GradleSourceCompiler(private val timeoutMs: Long = TimeUnit.MINUTES.toMill
         }
     if (!process.waitFor(timeoutMs, TimeUnit.MILLISECONDS)) {
       process.destroyForcibly()
-      return SourceCompileOutcome.Failed("$task timed out after ${timeoutMs / 1000}s")
+      return SourceCompileOutcome.Failed("$task timed out after ${timeoutMs}ms")
     }
     reader.join(2_000)
     val durationMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedAt)
