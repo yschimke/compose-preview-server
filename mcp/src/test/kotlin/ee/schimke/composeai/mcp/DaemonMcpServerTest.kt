@@ -1527,6 +1527,178 @@ class DaemonMcpServerTest {
     assertThat(render().isError()).isFalse()
   }
 
+  /** Two sample builds under a git root that is not a build, as in wear-os-samples. */
+  private fun samplesRepo(): File {
+    val repo = tmp.newFolder("samples-repo")
+    for (sample in listOf("ComposeStarter", "ComposeAdvanced")) {
+      File(repo, "$sample/app/src").mkdirs()
+      File(repo, "$sample/settings.gradle.kts").writeText("")
+    }
+    return repo
+  }
+
+  private fun rootsHandler(vararg dirs: File) =
+    mapOf(
+      "roots/list" to
+        { _: JsonObject ->
+          buildJsonObject {
+            putJsonArray("roots") {
+              dirs.forEach { add(buildJsonObject { put("uri", it.toPath().toUri().toString()) }) }
+            }
+          }
+        }
+    )
+
+  @Test
+  fun `several builds under the root are registered and searched on a preview lookup`() {
+    val repo = samplesRepo()
+    restartSession(server, requestHandlers = rootsHandler(repo))
+    client.initialize(capabilities = buildJsonObject { putJsonObject("roots") {} })
+
+    client.callTool("render_preview", buildJsonObject { put("preview", "Missing") })
+
+    assertThat(supervisor.listProjects().map { it.path.canonicalPath })
+      .containsExactly(
+        File(repo, "ComposeStarter").canonicalPath,
+        File(repo, "ComposeAdvanced").canonicalPath,
+      )
+  }
+
+  @Test
+  fun `the project argument registers the build around any folder in one call`() {
+    val repo = samplesRepo()
+    // Claude Desktop's chat: no roots, and the server was started from `/`.
+    val desktop = DaemonMcpServer(supervisor, workingDirectory = File("/"))
+    restartSession(desktop)
+    client.initialize()
+
+    val result =
+      client.callTool(
+        "render_preview",
+        buildJsonObject {
+          put("preview", "StarterPreview")
+          put("project", File(repo, "ComposeStarter/app/src").absolutePath)
+        },
+      )
+
+    assertThat(supervisor.listProjects().map { it.path.canonicalPath })
+      .containsExactly(File(repo, "ComposeStarter").canonicalPath)
+    // No gradlew in the fixture: reported as unprepared, never as a missing preview.
+    assertThat(result.firstTextContent())
+      .startsWith("render_preview: project not prepared: no Gradle wrapper")
+    assertThat(result.firstTextContent()).doesNotContain("no preview matches")
+
+    val relative =
+      client.callTool(
+        "render_preview",
+        buildJsonObject {
+          put("preview", "StarterPreview")
+          put("project", "ComposeStarter")
+        },
+      )
+    assertThat(relative.firstTextContent()).contains("must be an absolute path")
+    val schema =
+      client.awaitToolsContaining("render_matrix").tools.filter {
+        it.name in setOf("render_preview", "render_matrix", "find_previews_for_file")
+      }
+    assertThat(schema).hasSize(3)
+    schema.forEach { assertThat(it.inputSchema.toString()).contains("Only needed when the host") }
+    desktop.shutdown()
+  }
+
+  @Test
+  fun `nothing registered says what was tried and how to name a project`() {
+    val plain = tmp.newFolder("not-a-build")
+    val used = samplesRepo().resolve("ComposeAdvanced")
+    supervisor.workspaceStore.remember("ComposeAdvanced-0", used, "ComposeAdvanced")
+    val cwdServer = DaemonMcpServer(supervisor, workingDirectory = plain)
+    restartSession(cwdServer)
+    client.initialize()
+
+    val text =
+      client
+        .callTool("render_preview", buildJsonObject { put("preview", "Anything") })
+        .firstTextContent()
+
+    assertThat(text).contains("Tried ${plain.path} (the working directory): not Gradle builds")
+    assertThat(text).contains("Pass project=<absolute path>")
+    assertThat(text).contains("Candidate builds: ${used.absolutePath}")
+    assertThat(text.indexOf("Tried")).isLessThan(text.indexOf("Pass project="))
+    assertThat(text.indexOf("Pass project=")).isLessThan(text.indexOf("Candidate builds"))
+    cwdServer.shutdown()
+  }
+
+  @Test
+  fun `an unprepared build is bootstrapped through the init script on first use`() {
+    val project = tmp.newFolder("no-descriptor")
+    File(project, "settings.gradle.kts").writeText("include(\":app\")")
+    File(project, "gradlew").writeText("#!/bin/sh\n")
+    val initScript = tmp.newFile("apply-compose-ai-preview.init.gradle.kts")
+    val calls = mutableListOf<List<String>>()
+    var writeDescriptor = false
+    val runner = GradleTaskRunner { root, _, arguments, onLine ->
+      calls += arguments
+      onLine("> Task :app:composePreviewDiscover")
+      if (!writeDescriptor)
+        return@GradleTaskRunner GradleTaskRunner.Result(1, "* What went wrong:\nboom")
+      val dir = File(root, "app/build/compose-previews").apply { mkdirs() }
+      File(dir, "daemon-launch.json")
+        .writeText(
+          """{"schemaVersion":2,"modulePath":":app","variant":"desktop","enabled":true,""" +
+            """"mainClass":"x","classpath":[],"jvmArgs":[],"systemProperties":{},""" +
+            """"workingDirectory":"${dir.parentFile.parent}","manifestPath":"manifest.json"}"""
+        )
+      GradleTaskRunner.Result(0, "BUILD SUCCESSFUL")
+    }
+    val bootstrap =
+      ProjectBootstrap(
+        initScripts =
+          InitScripts(
+            environment = mapOf("COMPOSE_PREVIEW_INIT_SCRIPT" to initScript.absolutePath),
+            userHome = tmp.root,
+          ),
+        runner = runner,
+      )
+    val bootServer =
+      DaemonMcpServer(supervisor, workingDirectory = null, projectBootstrap = bootstrap)
+    restartSession(bootServer)
+    client.initialize()
+
+    fun render() =
+      client.callTool(
+        "render_preview",
+        buildJsonObject {
+          put("preview", "AppPreview")
+          put("project", project.absolutePath)
+        },
+      )
+
+    val failed = render().firstTextContent()
+    assertThat(failed)
+      .startsWith("render_preview: project not prepared: ./gradlew composePreviewDiscover")
+    assertThat(failed).contains("boom")
+    assertThat(failed).doesNotContain("no preview matches")
+
+    writeDescriptor = true
+    val prepared = render().firstTextContent()
+    assertThat(prepared).doesNotContain("project not prepared")
+    assertThat(calls).hasSize(2)
+    assertThat(calls.last())
+      .containsAtLeast(
+        "--init-script",
+        initScript.absolutePath,
+        "composePreviewDiscover",
+        "composePreviewDaemonStart",
+      )
+    val id = supervisor.listProjects().single().workspaceId
+    assertThat(factory.daemons.keys).contains(id to ":app")
+
+    // Prepared now: no further Gradle run.
+    render()
+    assertThat(calls).hasSize(2)
+    bootServer.shutdown()
+  }
+
   @Test
   fun `render_preview resolves a preview name and lists the other variant matches`() {
     client.initialize()
