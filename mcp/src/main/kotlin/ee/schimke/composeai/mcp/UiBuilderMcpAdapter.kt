@@ -203,7 +203,7 @@ class UiBuilderMcpAdapter internal constructor(private val client: UiBuilderDesi
   /** A remote-safe MCP server containing only the shared UI-builder tools. */
   internal fun sdkServer(): Server =
     Server(
-      serverInfo = Implementation(name = "compose-preview-ui-builder", version = "v1"),
+      serverInfo = Implementation(name = "compose-preview-ui-builder", version = MCP_VERSION),
       options =
         ServerOptions(
           capabilities = ServerCapabilities(tools = ServerCapabilities.Tools(listChanged = false))
