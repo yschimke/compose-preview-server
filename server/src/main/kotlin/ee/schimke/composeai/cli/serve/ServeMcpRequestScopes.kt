@@ -25,12 +25,14 @@ internal class ServeMcpRequestScopes(
   private val maxSessions: Int = 64,
   private val maxPendingPerSession: Int = 1,
   private val idleTimeoutMillis: Long = 5 * 60 * 1000L,
+  private val maxInteractionTimeoutMillis: Long = 2 * 60 * 1000L,
   private val nowMillis: () -> Long = System::currentTimeMillis,
 ) {
   init {
     require(maxSessions > 0)
     require(maxPendingPerSession > 0)
     require(idleTimeoutMillis > 0)
+    require(maxInteractionTimeoutMillis > 0)
   }
 
   enum class ResponseDisposition {
@@ -127,21 +129,23 @@ internal class ServeMcpRequestScopes(
         }
         scope.lastUsedMillis.set(nowMillis())
         return try {
-          emit(
-            buildJsonObject {
-              put("jsonrpc", "2.0")
-              put("id", id)
-              put("method", "elicitation/create")
-              put(
-                "params",
-                buildJsonObject {
-                  put("message", message)
-                  put("requestedSchema", requestedSchema)
-                },
-              )
-            }
-          )
-          withTimeoutOrNull(timeoutMillis) { response.await() }?.let(::parseElicitationResponse)
+          withTimeoutOrNull(timeoutMillis.coerceAtMost(maxInteractionTimeoutMillis)) {
+            emit(
+              buildJsonObject {
+                put("jsonrpc", "2.0")
+                put("id", id)
+                put("method", "elicitation/create")
+                put(
+                  "params",
+                  buildJsonObject {
+                    put("message", message)
+                    put("requestedSchema", requestedSchema)
+                  },
+                )
+              }
+            )
+            parseElicitationResponse(response.await())
+          }
         } finally {
           scope.pending.remove(id, response)
           scope.pendingPermits.release()

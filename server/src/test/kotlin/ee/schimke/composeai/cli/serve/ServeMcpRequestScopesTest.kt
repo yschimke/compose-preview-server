@@ -8,6 +8,7 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.async
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
@@ -103,6 +104,13 @@ class ServeMcpRequestScopesTest {
       assertNull(malformed.elicitForm("Choose", JsonObject(emptyMap()), 10))
 
       assertNull(scopes.interaction(supported) {}.elicitForm("Choose", JsonObject(emptyMap()), 10))
+
+      val bounded =
+        ServeMcpRequestScopes(maxInteractionTimeoutMillis = 10).let { registry ->
+          val scope = assertNotNull(registry.open(protocolVersion, true))
+          registry.interaction(scope) { delay(1_000) }
+        }
+      assertNull(bounded.elicitForm("Choose", JsonObject(emptyMap()), Long.MAX_VALUE))
     }
 
   @Test

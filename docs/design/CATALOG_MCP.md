@@ -469,7 +469,8 @@ that reaches the browser's Design API reaches these tools and nothing more.
   rebinding attacks. Non-browser clients normally omit `Origin`.
 - Request bodies are capped at 1 MiB and responses disable caching.
 - Request scopes use cryptographically random ids, admit one pending interaction, are globally
-  bounded, expire after five minutes of inactivity and can be explicitly deleted.
+  bounded, cap the complete send-and-wait interaction at two minutes, expire after five minutes of
+  inactivity and can be explicitly deleted.
 - Catalog leases protect a catalog while a request is in flight.
 - Remote renders use the same server-wide semaphore and queue timeout as browser renders; enabling
   MCP does not create an unmetered rendering lane.
