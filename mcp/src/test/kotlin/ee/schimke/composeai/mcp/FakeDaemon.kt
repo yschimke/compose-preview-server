@@ -196,6 +196,15 @@ class FakeDaemon : DaemonSpawn {
   @Volatile var onInitializeReceived: (JsonObject) -> Unit = {}
 
   /**
+   * Answers `compileSources` (stage-2 in-process compile). Null — the default — answers "method not
+   * found", like a daemon that predates it.
+   */
+  @Volatile
+  var onCompileSources:
+    ((List<String>) -> ee.schimke.composeai.daemon.protocol.CompileSourcesResult)? =
+    null
+
+  /**
    * Outcome the fake's `data/fetch` handler returns. Mirrors the daemon's
    * [`DataProductRegistry.Outcome`] but deliberately decouples — the fake doesn't depend on the
    * registry interface.
@@ -627,6 +636,25 @@ class FakeDaemon : DaemonSpawn {
             ),
           ),
         )
+      }
+      "compileSources" -> {
+        val handler = onCompileSources
+        if (handler == null) {
+          // A daemon without the in-process compiler, as before compileSources existed.
+          sendError(id, -32601, "method not found: $method")
+        } else {
+          val sources =
+            (params?.get("sources") as? kotlinx.serialization.json.JsonArray)
+              ?.map { it.jsonPrimitive.content }
+              .orEmpty()
+          sendResponse(
+            id,
+            json.encodeToJsonElement(
+              ee.schimke.composeai.daemon.protocol.CompileSourcesResult.serializer(),
+              handler(sources),
+            ),
+          )
+        }
       }
       else -> {
         // Unknown methods: error response so the client doesn't hang.
