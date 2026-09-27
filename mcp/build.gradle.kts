@@ -71,6 +71,26 @@ application {
   mainClass.set("ee.schimke.composeai.mcp.DaemonMcpMain")
 }
 
+// The version this module reports in the MCP `initialize` handshake's `serverInfo.version`. Same
+// shape as `:server`'s `generateServeVersionResource` for `SERVE_VERSION`: both derive from
+// `project.version`, generated into a resource this module's own classloader reads at runtime
+// (`McpVersion.kt`), rather than the `"v0"` / `"v1"` literals a client's `initialize` used to see
+// regardless of which release was actually running.
+val generateMcpVersionResource =
+  tasks.register("generateMcpVersionResource") {
+    val outputDir = layout.buildDirectory.dir("generated/mcp-version-resource")
+    val mcpVersion = project.version.toString()
+    inputs.property("version", mcpVersion)
+    outputs.dir(outputDir)
+    doLast {
+      val file = outputDir.get().file("ee/schimke/composeai/mcp/mcp-version.properties").asFile
+      file.parentFile.mkdirs()
+      file.writeText("version=$mcpVersion\n")
+    }
+  }
+
+sourceSets.main.get().resources.srcDir(generateMcpVersionResource)
+
 // `archiveExtension = "tar.gz"` keeps the in-archive root as `compose-preview-mcp-<version>/`
 // rather than leaking `.tar.gz` into the directory name. Carried over from compose-ai-tools,
 // where the GitHub Release artifact this produces is what `compose-preview mcp serve` runs.
@@ -167,6 +187,22 @@ tasks.withType<Test>().configureEach {
   providers.gradleProperty("mcp.workdir").orNull?.let {
     systemProperty("composeai.mcp.workdir", it)
   }
+  // Opt-in edit→render loop on a real Android fixture (`EditLoopIntegrationTest`, issue #1174):
+  // `-Pmcp.editLoop=true`. It copies `src/editLoopFixture` and this build's Gradle wrapper, and
+  // always writes its timings and work records to the report file, which CI uploads.
+  systemProperty(
+    "composeai.mcp.editLoop",
+    (providers.gradleProperty("mcp.editLoop").orNull == "true").toString(),
+  )
+  systemProperty("composeai.mcp.repoRoot", rootDir.absolutePath)
+  // `ANDROID_HOME` otherwise; for a launcher that does not pass the environment through.
+  providers.gradleProperty("mcp.androidSdk").orNull?.let {
+    systemProperty("composeai.mcp.androidSdk", it)
+  }
+  systemProperty(
+    "composeai.mcp.editLoopReport",
+    layout.buildDirectory.file("edit-loop/edit-loop-report.json").get().asFile.absolutePath,
+  )
 }
 
 // Boundary check, ported with the module: `:mcp` must NOT pull `gradle-tooling-api`, directly or

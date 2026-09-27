@@ -1,0 +1,77 @@
+name: Edit loop
+
+# The edit→compile→render regression test (`EditLoopIntegrationTest`, issue #1174) on a real
+# Android fixture. It is its own workflow rather than a step in CI's `gradle` job because no CI job
+# renders Android previews: it needs the Android SDK, the compose-preview CLI's init script, and
+# the Android daemon plus Robolectric's runtime, which together cost several minutes on a cold
+# runner. So it runs on pushes to main, nightly, on demand, and on pull requests that touch the
+# recompile path or the test itself; everything else keeps CI's current speed.
+#
+# The report (timings and each cycle's work record) is uploaded whether the test passes or not, so
+# the trend is visible across runs.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/edit-loop.yml
+      - mcp/src/editLoopFixture/**
+      - mcp/src/main/kotlin/ee/schimke/composeai/mcp/SourceCompiler.kt
+      - mcp/src/main/kotlin/ee/schimke/composeai/mcp/EditLoopWork.kt
+      - mcp/src/test/kotlin/ee/schimke/composeai/mcp/EditLoopIntegrationTest.kt
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'push' && github.run_id || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  # The compose-preview CLI whose init script the recompile injects. The fixture does not apply the
+  # plugin, like most projects the CLI drives, so this version also picks the plugin under test.
+  COMPOSE_PREVIEW_CLI_VERSION: 2.28.0
+
+jobs:
+  edit-loop:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          # The same two JDKs as CI's `gradle` job; see the comment there.
+          java-version: |
+            21
+            17
+      - uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
+        with:
+          cache-provider: basic
+      - name: Install the compose-preview CLI's init script
+        run: |
+          cli_dir="${RUNNER_TEMP}/compose-preview"
+          mkdir -p "${cli_dir}"
+          curl -fsSL \
+            "https://github.com/yschimke/compose-ai-tools/releases/download/v${COMPOSE_PREVIEW_CLI_VERSION}/compose-preview-${COMPOSE_PREVIEW_CLI_VERSION}.tar.gz" \
+            | tar -xz -C "${cli_dir}"
+          script=$("${cli_dir}/compose-preview-${COMPOSE_PREVIEW_CLI_VERSION}/bin/compose-preview" init-script | tail -n 1)
+          test -f "${script}"
+          echo "COMPOSE_PREVIEW_INIT_SCRIPT=${script}" >> "${GITHUB_ENV}"
+      - run: ./gradlew :mcp:test --tests '*EditLoopIntegrationTest*' -Pmcp.editLoop=true
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: ${{ !cancelled() }}
+        with:
+          name: edit-loop-report
+          path: |
+            mcp/build/edit-loop/
+            mcp/build/test-results/test/TEST-ee.schimke.composeai.mcp.EditLoopIntegrationTest.xml
+          if-no-files-found: warn
+          retention-days: 30

@@ -66,7 +66,12 @@ data class ToolDef(
 )
 
 @Serializable
-data class CallToolResult(val content: List<ContentBlock>, val isError: Boolean? = null)
+data class CallToolResult(
+  val content: List<ContentBlock>,
+  val isError: Boolean? = null,
+  /** MCP `_meta`: debug data for clients and tests, kept out of what the agent reads. */
+  val meta: JsonObject? = null,
+)
 
 @Serializable
 sealed interface ContentBlock {

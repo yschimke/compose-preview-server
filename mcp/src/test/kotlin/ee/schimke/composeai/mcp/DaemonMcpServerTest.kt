@@ -161,6 +161,15 @@ class DaemonMcpServerTest {
     assertThat(caps?.get("resources")?.jsonObject?.get("subscribe")?.jsonPrimitive?.contentOrNull)
       .isEqualTo("true")
 
+    // serverInfo.version must be the build's actual version (McpVersion.kt / MCP_VERSION), not the
+    // "v0" literal it used to carry regardless of which release was running.
+    val serverInfo = initResult["serverInfo"]?.jsonObject
+    assertThat(serverInfo?.get("name")?.jsonPrimitive?.contentOrNull)
+      .isEqualTo("compose-preview-mcp")
+    val reportedVersion = serverInfo?.get("version")?.jsonPrimitive?.contentOrNull
+    assertThat(reportedVersion).isEqualTo(MCP_VERSION)
+    assertThat(reportedVersion).isNotEqualTo("v0")
+
     val tools = client.awaitToolsContaining("record_preview")
     val names = tools.tools.map { it.name }.toSet()
     assertThat(names)

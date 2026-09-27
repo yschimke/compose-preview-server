@@ -424,6 +424,7 @@ internal fun CallToolResult.toSdkCallToolResult():
   io.modelcontextprotocol.kotlin.sdk.types.CallToolResult(
     content = content.map { it.toSdkContent() },
     isError = isError ?: false,
+    meta = meta,
   )
 
 private fun ContentBlock.toSdkContent(): SdkContentBlock =

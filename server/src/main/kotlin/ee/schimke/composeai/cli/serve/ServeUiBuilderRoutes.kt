@@ -285,10 +285,14 @@ internal fun Route.installUiBuilderRoutes(
     val document = incoming.withServerHome(serverOrigin())
     when (val created = service.executeMapped(CreateDesignRequestV1(document), actor)) {
       is UiBuilderServiceResponse.Error -> {
-        val status =
-          if (created.error.code == ServiceErrorCodeV1.BAD_REQUEST)
-            HttpStatusCode.PreconditionFailed
-          else created.httpStatus()
+        // A bad request is the race with another create only when the design is there now. The
+        // service says "bad request" for every other refusal too — a design limit, a quota, a
+        // document its catalog does not validate — and those are not a failed precondition.
+        val raced =
+          created.error.code == ServiceErrorCodeV1.BAD_REQUEST &&
+            (service.executeMapped(OpenDesignRequestV1(designId), actor)
+              is UiBuilderServiceResponse.Snapshot)
+        val status = if (raced) HttpStatusCode.PreconditionFailed else created.httpStatus()
         call.respondText(created.error.message, status = status)
       }
       else -> {
