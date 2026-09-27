@@ -6522,9 +6522,9 @@ test("contract · static viewer bounds results and rejects credentials", async (
 
 // A fake MCP Apps host (2026-01-26 `ui/*` bridge) that proxies a compose-preview server's tools
 // and resources, so the live viewer actions can be driven end to end (#1119).
-async function openLiveViewer(page, pngs) {
+async function openLiveViewer(page, pngs, { frameHeight = 700 } = {}) {
   await page.goto("/preview-harness/index.html");
-  await page.evaluate((pngs) => {
+  await page.evaluate(({ pngs, frameHeight }) => {
     const base = "compose-preview://fixture/_app/com.example.Card";
     const round = "compose-preview://fixture/_app/com.example.Card_Round?config=round";
     const log = (window.__live = {
@@ -6533,13 +6533,14 @@ async function openLiveViewer(page, pngs) {
       subscribes: [],
       contexts: [],
       links: [],
+      sizes: [],
       lists: 0,
     });
     document.body.replaceChildren();
     const frame = document.createElement("iframe");
     frame.title = "Compose Preview MCP App";
     frame.style.width = "620px";
-    frame.style.height = "700px";
+    frame.style.height = `${frameHeight}px`;
     const send = (message) => frame.contentWindow.postMessage({ jsonrpc: "2.0", ...message }, "*");
     const image = (data) => ({ type: "image", mimeType: "image/png", data });
     const resourceLink = (uri) => ({ type: "resource_link", uri, name: "Compose Preview render", mimeType: "image/png" });
@@ -6549,6 +6550,10 @@ async function openLiveViewer(page, pngs) {
       if (event.source !== frame.contentWindow) return;
       const { id, method, params } = event.data || {};
       const reply = (result) => send({ id, result });
+      if (method === "ui/notifications/size-changed") {
+        log.sizes.push(params);
+        return;
+      }
       if (method === "ui/initialize") {
         reply({ hostCapabilities: { serverTools: {}, serverResources: { subscribe: true } } });
         send({ method: "ui/notifications/tool-input", params: { arguments: { preview: "Card" } } });
@@ -6623,7 +6628,7 @@ async function openLiveViewer(page, pngs) {
     });
     frame.src = "/mcp-app/compose-preview-viewer.html";
     document.body.append(frame);
-  }, pngs);
+  }, { pngs, frameHeight });
   return page.frameLocator('iframe[title="Compose Preview MCP App"]');
 }
 
@@ -6733,6 +6738,44 @@ test("contract · live viewer actions go over the MCP Apps bridge", async ({ pag
   await viewer.locator(".cell").nth(1).click();
   await expect(viewer.locator(".cell").nth(1)).toHaveAttribute("aria-pressed", "true");
   await expect.poll(lastContext).toContain('matrix variant {"fontScale":2} of Card');
+});
+
+test("contract · a 160px host frame shows the whole preview and the toolbar", async ({ page }) => {
+  const pngs = {
+    base: readFileSync(resolve(pagesDir, "_render-placeholder-round.png")).toString("base64"),
+    round: readFileSync(resolve(pagesDir, "_render-placeholder-round.png")).toString("base64"),
+    refreshed: readFileSync(designRenderPlaceholder).toString("base64"),
+  };
+  const viewer = await openLiveViewer(page, pngs, { frameHeight: 160 });
+  const frame = page.locator('iframe[title="Compose Preview MCP App"]');
+  const image = viewer.locator("#canvas .preview-stage > img");
+  await expect(image).toBeVisible();
+  await expect(viewer.locator("#rerender")).toBeVisible();
+  const inside = (box, outer) =>
+    !!box &&
+    box.width > 0 &&
+    box.height > 0 &&
+    box.x >= outer.x - 0.5 &&
+    box.y >= outer.y - 0.5 &&
+    box.x + box.width <= outer.x + outer.width + 0.5 &&
+    box.y + box.height <= outer.y + outer.height + 0.5;
+  const outer = await frame.boundingBox();
+  // Fallback for hosts that ignore size-changed: the image shrinks to the frame, whole and unclipped.
+  await expect.poll(async () => inside(await image.boundingBox(), outer)).toBe(true);
+  const natural = await image.evaluate((img) => img.naturalWidth / img.naturalHeight);
+  const shown = await image.boundingBox();
+  expect(Math.abs(shown.width / shown.height - natural)).toBeLessThan(0.05);
+  expect(await viewer.locator("#canvas").evaluate((node) => node.scrollHeight <= node.clientHeight + 1)).toBe(true);
+  for (const id of ["#toolbar", "#rerender", "#layout", "#source", "#variant"]) {
+    expect(inside(await viewer.locator(id).boundingBox(), outer), `${id} is inside the frame`).toBe(true);
+  }
+  // Hosts that honour size-changed are asked for more than the image is given here.
+  await expect
+    .poll(async () => (await page.evaluate(() => window.__live.sizes)).map((size) => size.height))
+    .toContainEqual(expect.any(Number));
+  const sizes = await page.evaluate(() => window.__live.sizes);
+  expect(Math.max(...sizes.map((size) => size.height))).toBeGreaterThan(shown.height);
+  expect(Math.max(...sizes.map((size) => size.height))).toBeGreaterThan(160);
 });
 
 test("contract · static viewer shows no live actions", async ({ page }) => {
