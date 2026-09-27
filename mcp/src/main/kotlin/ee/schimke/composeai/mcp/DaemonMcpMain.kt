@@ -87,13 +87,20 @@ object DaemonMcpMain {
         }
     }
 
-    Runtime.getRuntime().addShutdownHook(Thread { runCatching { supervisor.shutdown() } })
+    Runtime.getRuntime().addShutdownHook(Thread { shutdown(server, supervisor) })
 
     val session = server.newSession(input = System.`in`, output = System.out)
     session.start()
     // Block main thread until stdin EOF (reader exits), then exit cleanly. The reader is a daemon
     // thread so the JVM would otherwise terminate immediately; awaitClose pins main here.
     session.awaitClose()
+    shutdown(server, supervisor)
+  }
+
+  internal fun shutdown(server: DaemonMcpServer, supervisor: DaemonSupervisor) {
+    // The server owns process-scoped executors and its immutable render-result cache; the
+    // supervisor owns daemon subprocesses. Both paths (stdin EOF and JVM shutdown) must close both.
+    runCatching { server.shutdown() }
     runCatching { supervisor.shutdown() }
   }
 
