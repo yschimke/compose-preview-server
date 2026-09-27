@@ -944,7 +944,8 @@ class DaemonMcpServer(
           else {
             val gradle = runCatching {
               compiler.compile(root, daemon.modulePath, sources.map(::File))
-            }.getOrElse { SourceCompileOutcome.Failed(it.message ?: it.javaClass.simpleName) }
+            }
+              .getOrElse { SourceCompileOutcome.Failed(it.message ?: it.javaClass.simpleName) }
             // An in-process compile error is confirmed by Gradle before it is reported: if Gradle
             // compiles the same sources, the in-process compiler is misconfigured for this module
             // and later edits skip it.
