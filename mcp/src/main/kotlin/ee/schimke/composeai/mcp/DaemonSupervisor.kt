@@ -205,6 +205,18 @@ class DaemonSupervisor(
     // `DescriptorProvider.readingFromDisk` and shared across `daemonFor` calls.
     val descriptor = baseDescriptor.withSandboxCount(1 + replicasPerDaemon)
     val supervised = SupervisedDaemon(workspaceId = project.workspaceId, modulePath = modulePath)
+    val descriptorWorkingDirectory = File(descriptor.workingDirectory)
+    supervised.moduleProjectDirPath =
+      runCatching {
+        (if (descriptorWorkingDirectory.isAbsolute) descriptorWorkingDirectory
+          else File(project.path, descriptor.workingDirectory))
+          .canonicalPath
+      }
+        .getOrElse {
+          (if (descriptorWorkingDirectory.isAbsolute) descriptorWorkingDirectory
+            else File(project.path, descriptor.workingDirectory))
+            .absolutePath
+        }
 
     // Single synchronous spawn — the calling thread blocks on cold-start and the catalog is seeded
     // before `daemonFor` returns. With sandboxCount > 1 the daemon's per-sandbox bootstrap is
@@ -480,6 +492,14 @@ class SupervisedDaemon(val workspaceId: WorkspaceId, val modulePath: String) {
   @Volatile internal var workspaceRootPath: String? = null
 
   /**
+   * Actual Gradle project directory recorded by the launch descriptor. This can differ from the
+   * directory reconstructed from [modulePath] when settings.gradle.kts remaps a project's
+   * `projectDir` (for example `:featureTasks` to `shared/features/tasks`). Discovery source paths
+   * are module-relative, so the MCP catalog resolves them against this directory.
+   */
+  @Volatile internal var moduleProjectDirPath: String? = null
+
+  /**
    * Notification fan-out installed by [DaemonSupervisor.spawn]. The supervisor's existing
    * `onNotification` callback dispatches both into its own [NotificationRouter] and into this
    * fanout; [session] consumers can register listeners via
@@ -566,6 +586,7 @@ class SupervisedDaemon(val workspaceId: WorkspaceId, val modulePath: String) {
     this.spawn = null
     this.initializeResult = null
     this.workspaceRootPath = null
+    this.moduleProjectDirPath = null
     notificationFanout.clear()
     return true
   }
@@ -575,6 +596,7 @@ class SupervisedDaemon(val workspaceId: WorkspaceId, val modulePath: String) {
     spawn = null
     initializeResult = null
     workspaceRootPath = null
+    moduleProjectDirPath = null
     notificationFanout.clear()
     runCatching { s.shutdown() }
   }
