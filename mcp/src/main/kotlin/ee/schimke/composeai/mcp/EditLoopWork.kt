@@ -21,6 +21,11 @@ data class CompileWork(
   val ms: Long,
   val initScript: Boolean,
   val tasks: List<String>,
+  /**
+   * What asked for the recompile: `notify` (`notify_file_changed`) or `detected` (a render found a
+   * changed source itself). Null when the compiler ran outside the server's edit loop.
+   */
+  val trigger: String? = null,
 ) {
 
   /** Task paths without Gradle's outcome suffix. */
@@ -50,6 +55,7 @@ data class CompileWork(
     put("task", task)
     put("ms", ms)
     put("initScript", initScript)
+    trigger?.let { put("trigger", it) }
     putJsonArray("tasks") { tasks.forEach { add(JsonPrimitive(it)) } }
   }
 
@@ -92,10 +98,25 @@ data class EditCycleWork(
   val compile: CompileWork?,
   val renderMs: Long,
   val daemonTrace: JsonElement? = null,
+  /** The change-detection pass this render ran before compiling; see [SourceTree]. */
+  val scan: SourceTree.Refresh? = null,
 ) {
   fun toJson(): JsonObject = buildJsonObject {
     compile?.let { put("compile", it.toJson()) }
     put("renderMs", renderMs)
+    scan?.let { scan ->
+      put(
+        "scan",
+        buildJsonObject {
+          put("changed", scan.changed.size)
+          put("statted", scan.statted)
+          put("listed", scan.listed)
+          put("ms", scan.ms)
+          put("complete", scan.complete)
+          put("initial", scan.initial)
+        },
+      )
+    }
     // TODO(#1181): the daemon does not send a per-render trace of the post-capture processors and
     //  data kinds it ran (e.g. `compose/figma-svg`) yet. `renderFinished.params.workTrace` is the
     //  provisional name; until a daemon release sends it this stays absent.

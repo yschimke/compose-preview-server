@@ -49,6 +49,7 @@ sealed interface SourceCompileOutcome {
 class GradleSourceCompiler(
   private val timeoutMs: Long = TimeUnit.MINUTES.toMillis(5),
   private val initScripts: InitScripts = InitScripts(),
+  private val androidSdks: AndroidSdks = AndroidSdks(),
 ) : SourceCompiler {
 
   /** Per project root: whether its compile needs the CLI's init script. */
@@ -148,6 +149,11 @@ class GradleSourceCompiler(
       ProcessBuilder(command + injection + listOf("--console=plain", task))
         .directory(projectRoot)
         .redirectErrorStream(true)
+        .apply {
+          // A worktree has no untracked local.properties, and a server an app launched often has
+          // no ANDROID_HOME: without one of them AGP cannot configure the build at all.
+          androidSdks.forBuild(projectRoot)?.let { environment()["ANDROID_HOME"] = it.absolutePath }
+        }
         .start()
     }
       .getOrElse {
@@ -199,7 +205,11 @@ class GradleSourceCompiler(
     private val ISOLATED_PROJECTS_OFF =
       listOf("-Dorg.gradle.unsafe.isolated-projects=false", "-Dorg.gradle.isolated-projects=false")
 
-    /** The first Kotlin `e:` diagnostic, else Gradle's "What went wrong" line, else the tail. */
+    /**
+     * The first Kotlin `e:` diagnostic, else Gradle's "What went wrong" line plus its root cause
+     * (the deepest `> …` line under it: "SDK location not found" hides behind "Could not
+     * determine the dependencies of task"), else the tail.
+     */
     internal fun summarizeGradleFailure(output: String): String {
       val lines = output.lines().map(String::trim).filter(String::isNotEmpty)
       lines
@@ -208,7 +218,18 @@ class GradleSourceCompiler(
           return it.removePrefix("e: ").take(300)
         }
       val wrong = lines.indexOfFirst { it.startsWith("* What went wrong") }
-      if (wrong >= 0 && wrong + 1 < lines.size) return lines[wrong + 1].take(300)
+      if (wrong >= 0 && wrong + 1 < lines.size) {
+        val headline = lines[wrong + 1]
+        val cause =
+          lines
+            .drop(wrong + 2)
+            .takeWhile { !it.startsWith("* ") && !it.startsWith("BUILD ") }
+            .lastOrNull { it.startsWith(">") }
+            ?.trimStart('>', ' ')
+            ?.takeIf { it.isNotEmpty() && it != headline }
+        return if (cause == null) headline.take(300)
+        else "${headline.take(200)} Cause: ${cause.take(200)}"
+      }
       return lines.lastOrNull()?.take(300) ?: "exit code non-zero"
     }
   }
