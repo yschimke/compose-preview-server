@@ -85,7 +85,9 @@ internal class ServeMcpRequestScopes(
     if ((response["jsonrpc"] as? JsonPrimitive)?.contentOrNull != "2.0") {
       return ResponseDisposition.INVALID_RESPONSE
     }
-    if (response["method"] != null || (response["result"] == null && response["error"] == null)) {
+    val hasResult = response["result"] != null
+    val hasError = response["error"] != null
+    if (response["method"] != null || hasResult == hasError) {
       return ResponseDisposition.INVALID_RESPONSE
     }
     val id =
