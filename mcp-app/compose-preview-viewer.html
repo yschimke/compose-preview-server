@@ -59,6 +59,7 @@
   </section>
   <section id="comments" class="comments" aria-label="Design comments" hidden>
     <div class="comments-heading">Design comments</div>
+    <p class="muted">Reading comments requires <code>ui-builder-read</code>; posting requires <code>ui-builder-write</code>. The current viewer grant is used only when it carries that capability.</p>
     <div id="comment-list" class="comment-list"></div>
     <div id="comment-compose" class="comment-compose" hidden>
       <label for="comment-body">Post a comment</label>
@@ -425,7 +426,9 @@
       const board = data(result);
       if (result?.isError || !board || !Array.isArray(board.threads)) {
         commentList.replaceChildren();
-        commentStatus.textContent = 'Comments are unavailable; complete text fallback shown.';
+        commentStatus.textContent = result?.isError
+          ? 'Comment access was not granted. Reading requires ui-builder-read; complete server response shown.'
+          : 'Comments are unavailable; complete text fallback shown.';
         rawCommentFallback(fallbackText(result) || board || 'The host returned no comment board.');
         return;
       }
@@ -778,7 +781,9 @@
       if (generation !== commentGeneration || commentDesignId !== designId) return;
       const board = data(result);
       if (result?.isError || !board || !Array.isArray(board.threads)) {
-        commentStatus.textContent = 'Unable to post comment; complete text fallback shown.';
+        commentStatus.textContent = result?.isError
+          ? 'Comment was not posted. Posting requires ui-builder-write; complete server response shown.'
+          : 'Unable to post comment; complete text fallback shown.';
         rawCommentFallback(fallbackText(result) || board || 'The host returned no comment board.');
         return;
       }

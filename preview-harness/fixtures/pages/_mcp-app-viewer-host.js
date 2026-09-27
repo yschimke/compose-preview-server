@@ -76,7 +76,7 @@ window.addEventListener("message", async (event) => {
               mode === "stale-read-marker" ||
               mode === "a11y",
           },
-          ...(mode.startsWith("a11y") || mode === "comments" ? { serverTools: {} } : {}),
+          ...(mode.startsWith("a11y") || mode.startsWith("comments") ? { serverTools: {} } : {}),
         },
       },
     });
@@ -94,13 +94,13 @@ window.addEventListener("message", async (event) => {
           redirects: [
             "https://preview.invalid/callback#access_token=array-must-not-travel",
           ],
-          ...(mode.startsWith("a11y") || mode === "comments"
+          ...(mode.startsWith("a11y") || mode.startsWith("comments")
             ? { token: "viewer-grant-secret" }
             : {}),
         },
       },
     });
-    if (mode === "comments") {
+    if (mode.startsWith("comments")) {
       const imageData = await png("/preview-harness/fixtures/pages/_design-render-placeholder.png");
       const result = {
         schema: "compose-preview/ui-builder-native-preview/v1",
@@ -503,7 +503,7 @@ window.addEventListener("message", async (event) => {
       jsonrpc: "2.0",
       id: message.id,
       result: {
-        tools: mode === "comments"
+        tools: mode.startsWith("comments")
           ? [
               { name: "ui_builder_list_comments", inputSchema: { type: "object" } },
               { name: "ui_builder_post_comment", inputSchema: { type: "object" } },
@@ -521,7 +521,7 @@ window.addEventListener("message", async (event) => {
     toolCalls += 1;
     window.__mcpToolCallCount = toolCalls;
     window.__mcpToolCall = message.params;
-    if (mode === "comments") {
+    if (mode.startsWith("comments")) {
       if (message.params.name === "ui_builder_list_comments") {
         window.__mcpCommentListCall = message.params;
       } else if (message.params.name === "ui_builder_post_comment") {
@@ -548,6 +548,23 @@ window.addEventListener("message", async (event) => {
             },
           ],
         };
+      }
+      if (mode === "comments-denied") {
+        const capability = message.params.name === "ui_builder_post_comment" ? "write" : "read";
+        send({
+          jsonrpc: "2.0",
+          id: message.id,
+          result: {
+            isError: true,
+            content: [
+              {
+                type: "text",
+                text: `the presented identity lacks the UI-builder ${capability} capability`,
+              },
+            ],
+          },
+        });
+        return;
       }
       send({
         jsonrpc: "2.0",

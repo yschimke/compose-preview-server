@@ -4376,7 +4376,7 @@ for (const fixture of listPageFixtures()) {
           }
         } else if (
           fixture !== "mcp-app-viewer-a11y-non-full" &&
-          fixture !== "mcp-app-viewer-comments"
+          !fixture.startsWith("mcp-app-viewer-comments")
         ) {
           await page.waitForFunction(
             (count) => window.__mcpReadCount >= count,
@@ -4454,6 +4454,30 @@ for (const fixture of listPageFixtures()) {
           );
           await expect(viewer.locator(".comment-pin")).toHaveCount(3);
           await expect(viewer.locator("#comment-status")).toHaveText("Comment posted.");
+        }
+        if (fixture === "mcp-app-viewer-comments-denied") {
+          await expect(viewer.locator("#comments")).toBeVisible();
+          await expect(viewer.locator("#comment-status")).toContainText(
+            "Reading requires ui-builder-read",
+          );
+          await expect(viewer.locator("#comment-raw pre")).toContainText(
+            "lacks the UI-builder read capability",
+          );
+          await expect(viewer.locator("#comment-compose")).toContainText(
+            "Post a comment",
+          );
+          await expect(viewer.locator("#comments")).toContainText(
+            "posting requires ui-builder-write",
+          );
+          await viewer.locator("#comment-body").fill("This grant cannot post.");
+          await viewer.locator("#comment-post").click();
+          await page.waitForFunction(() => window.__mcpCommentPostCall != null);
+          await expect(viewer.locator("#comment-status")).toContainText(
+            "Posting requires ui-builder-write",
+          );
+          await expect(viewer.locator("#comment-raw pre")).toContainText(
+            "lacks the UI-builder write capability",
+          );
         }
         if (fixture === "mcp-app-viewer-refresh") {
           const image = viewer.locator('#canvas img[alt="Rendered Compose preview"]');
