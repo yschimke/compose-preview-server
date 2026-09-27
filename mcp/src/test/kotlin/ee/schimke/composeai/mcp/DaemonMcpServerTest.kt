@@ -533,7 +533,9 @@ class DaemonMcpServerTest {
     assertThat(daemon.renderRequests.poll(200, TimeUnit.MILLISECONDS)).isNull()
     assertThat(daemon.renderOverrides).hasSize(1)
 
-    daemon.emitRenderFinished(previewId, "/tmp/override-refresh-1.png")
+    val refreshPng1 =
+      tmp.newFile("override-refresh-1.png").apply { writeBytes(byteArrayOf(1.toByte())) }
+    daemon.emitRenderFinished(previewId, refreshPng1.absolutePath)
     val firstUpdate = client.expectNotification("notifications/resources/updated", 2_000)
     assertThat(firstUpdate.params?.get("uri")?.jsonPrimitive?.contentOrNull).isEqualTo(overrideUri)
     val secondRender = daemon.renderRequests.poll(2_000, TimeUnit.MILLISECONDS)
@@ -541,7 +543,9 @@ class DaemonMcpServerTest {
     assertThat(daemon.renderOverrides).hasSize(2)
     assertThat(daemon.renderOverrides[1]!!.widthPx).isEqualTo(600)
 
-    daemon.emitRenderFinished(previewId, "/tmp/override-refresh-2.png")
+    val refreshPng2 =
+      tmp.newFile("override-refresh-2.png").apply { writeBytes(byteArrayOf(2.toByte())) }
+    daemon.emitRenderFinished(previewId, refreshPng2.absolutePath)
     val secondUpdate = client.expectNotification("notifications/resources/updated", 2_000)
     assertThat(secondUpdate.params?.get("uri")?.jsonPrimitive?.contentOrNull).isEqualTo(overrideUri)
   }
@@ -1586,7 +1590,14 @@ class DaemonMcpServerTest {
           io.modelcontextprotocol.kotlin.sdk.types.ListResourcesResult.serializer(),
           remappedClient.request("resources/list"),
         )
-      assertThat(listed.resources.single().meta?.get("sourceFile")?.jsonPrimitive?.contentOrNull)
+      assertThat(
+          listed.resources
+            .single { it.uri.startsWith("compose-preview://") }
+            .meta
+            ?.get("sourceFile")
+            ?.jsonPrimitive
+            ?.contentOrNull
+        )
         .isEqualTo(previewFile.canonicalPath)
 
       val found =
