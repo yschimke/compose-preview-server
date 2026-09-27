@@ -2656,6 +2656,11 @@ class DaemonMcpServer(
     if (supervisor.listProjects().isNotEmpty()) return
     val roots = (session as? McpSession)?.rootDirectories().orEmpty()
     val candidates = roots.ifEmpty { listOfNotNull(workingDirectory) }
+    // After a restart, a build registered before (workspaces.json) comes back under its old id.
+    if (supervisor.restoreMatching(candidates).isNotEmpty()) {
+      sessions.forEach { it.notifyResourceListChanged() }
+      return
+    }
     candidates
       .filter { dir -> GRADLE_BUILD_FILES.any { File(dir, it).isFile } }
       .forEach { dir ->

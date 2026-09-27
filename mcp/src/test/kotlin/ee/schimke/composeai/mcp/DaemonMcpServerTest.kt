@@ -1486,6 +1486,40 @@ class DaemonMcpServerTest {
   }
 
   @Test
+  fun `render recovers when a failure made the supervisor forget the workspace`() {
+    client.initialize()
+    val projectDir = tmp.newFolder("ComposeStarter")
+    val workspaceId = registerWorkspace(projectDir, "ComposeStarter")
+    val png = tmp.newFile("desync.png")
+    writeSolidPng(png, 0xff00ff00.toInt())
+    factory.daemonConfigurer = { it.autoRenderPngPath = { png.absolutePath } }
+    val uri = PreviewUri(workspaceId, ":app", "com.example.StarterKt.StarterPreview").toUri()
+    fun render() =
+      client.callTool(
+        "render_preview",
+        buildJsonObject {
+          put("uri", uri)
+          put("inline", false)
+        },
+        timeoutMs = 10_000,
+      )
+    assertThat(render().isError()).isFalse()
+
+    // 3.79.0: a render failure tore the daemon down and every later call said "workspace not
+    // registered". Losing the live project must not lose the registration.
+    supervisor.shutdown()
+    assertThat(supervisor.listProjects()).isEmpty()
+    val recovered = render()
+    assertThat(recovered.firstTextContent()).doesNotContain("not registered")
+    assertThat(recovered.isError()).isFalse()
+
+    // register_project on the same path keeps the id, and the next render works.
+    supervisor.shutdown()
+    assertThat(registerWorkspace(projectDir, "ComposeStarter")).isEqualTo(workspaceId)
+    assertThat(render().isError()).isFalse()
+  }
+
+  @Test
   fun `render_preview resolves a preview name and lists the other variant matches`() {
     client.initialize()
     val workspaceId = registerWorkspace(tmp.newFolder("named"), "named")
