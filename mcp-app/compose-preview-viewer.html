@@ -1037,7 +1037,6 @@
   const layoutToggle = q('#layout');
   const sourceButton = q('#source');
   const sourceLocation = q('#source-location');
-  const DETAIL_META_KEY = 'composePreview/detail';
   const MAX_LAYOUT_BOXES = 400;
   const MAX_RESOURCE_LIST_PAGES = 10;
   let renderToolName;
@@ -1123,7 +1122,7 @@
   // toggles then need no call, so the live buttons for the same data stay hidden.
   function embeddedDetailsOf(result) {
     const block = result?.content?.find(
-      candidate => candidate?.type === 'text' && candidate?._meta?.[DETAIL_META_KEY] === 'details',
+      candidate => candidate?.type === 'text' && detailOf(candidate) === 'details',
     );
     const details = block && parse(block.text);
     return {
