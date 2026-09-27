@@ -166,6 +166,12 @@ class DaemonMcpServer(
   /** Environment read for `ANTIGRAVITY_CONVERSATION_ID` when choosing where a preview card goes. */
   private val environment: Map<String, String> = System.getenv(),
   private val homeDirectory: File = File(System.getProperty("user.home")),
+  /**
+   * Recompiles a module before its daemon is told a source changed (issue #1169). `null` keeps the
+   * older behaviour of forwarding `fileChanged` and trusting something else (an IDE, a Gradle
+   * continuous build) to have written fresh classes; [DaemonMcpMain] wires [GradleSourceCompiler].
+   */
+  private val sourceCompiler: SourceCompiler? = null,
 ) {
 
   private val fullToolDefsLoader: () -> List<ToolDef> =
@@ -184,6 +190,20 @@ class DaemonMcpServer(
    * digging through wire traces.
    */
   private val freshnessMetrics = FreshnessMetrics()
+
+  /**
+   * Source files whose edit a daemon has not been recompiled for yet. The background poller only
+   * records here; the next render (or `notify_file_changed`) runs [sourceCompiler] and then
+   * forwards `fileChanged`, so the classloader swap reads classes built from the edited source.
+   */
+  private val pendingSources = ConcurrentHashMap<DaemonAddr, MutableSet<String>>()
+
+  /** Why the last recompile of a module failed or could not run; cleared by the next success. */
+  private val staleNotes = ConcurrentHashMap<DaemonAddr, StaleNote>()
+
+  private val compileLocks = ConcurrentHashMap<DaemonAddr, Any>()
+
+  private data class StaleNote(val sources: List<String>, val reason: String)
 
   /**
    * Per-(workspace, module) catalog: preview-id → minimal metadata. Updated from `discoveryUpdated`
@@ -630,6 +650,7 @@ class DaemonMcpServer(
   ): RenderOutcome.Finished {
     val daemon = supervisor.daemonFor(uri.workspaceId, uri.modulePath)
     ensureSourceFreshBeforeRender(uri, daemon)
+    recompilePendingSources(daemon)
     val key = PreviewIdKey(uri.workspaceId, uri.modulePath, uri.previewFqn)
     val future = java.util.concurrent.CompletableFuture<RenderOutcome>()
     // Atomically join the right group. `becameFront` (captured outside the compute lambda)
@@ -799,13 +820,20 @@ class DaemonMcpServer(
       }
     if (!needsNotify) return false
 
-    daemon.allClients().forEach { client ->
-      runCatching {
-        client.fileChanged(
-          path = sourceFile.absolutePath,
-          kind = FileKind.SOURCE,
-          changeType = ChangeType.MODIFIED,
-        )
+    if (sourceCompiler != null) {
+      // Recompile first, forward `fileChanged` after: see [recompilePendingSources].
+      pendingSources
+        .computeIfAbsent(addr) { ConcurrentHashMap.newKeySet() }
+        .add(sourceFile.absolutePath)
+    } else {
+      daemon.allClients().forEach { client ->
+        runCatching {
+          client.fileChanged(
+            path = sourceFile.absolutePath,
+            kind = FileKind.SOURCE,
+            changeType = ChangeType.MODIFIED,
+          )
+        }
       }
     }
     val refreshedHash = runCatching { sha256Hex(sourceFile) }.getOrNull()
@@ -816,6 +844,87 @@ class DaemonMcpServer(
       )
     }
     return true
+  }
+
+  /**
+   * Runs [sourceCompiler] for [daemon]'s module when an edit is waiting for it, then forwards
+   * `fileChanged({kind:"source"})` for each edited file so the daemon swaps its classloader onto
+   * the fresh classes. The daemon's `fileChanged` handler only swaps; it never compiles, which is
+   * why forwarding it alone rendered the old code (issue #1169). A failed or impossible compile is
+   * remembered in [staleNotes] so `render_preview` can say the image may be stale and why.
+   *
+   * Serialized per module, so concurrent renders of one module wait for a single compile.
+   *
+   * @return the compile outcome, or `null` when nothing was pending or no compiler is configured.
+   */
+  private fun recompilePendingSources(daemon: SupervisedDaemon): SourceCompileOutcome? {
+    val compiler = sourceCompiler ?: return null
+    val addr = DaemonAddr(daemon.workspaceId, daemon.modulePath)
+    synchronized(compileLocks.computeIfAbsent(addr) { Any() }) {
+      val sources =
+        pendingSources.remove(addr)?.toList()?.sorted()?.takeIf { it.isNotEmpty() } ?: return null
+      val root = supervisor.project(daemon.workspaceId)?.path
+      val outcome =
+        if (root == null) {
+          SourceCompileOutcome.Unavailable(
+            "workspace ${daemon.workspaceId.value} is not registered"
+          )
+        } else {
+          runCatching { compiler.compile(root, daemon.modulePath, sources.map(::File)) }
+            .getOrElse { SourceCompileOutcome.Failed(it.message ?: it.javaClass.simpleName) }
+        }
+      when (outcome) {
+        is SourceCompileOutcome.Ok -> staleNotes.remove(addr)
+        is SourceCompileOutcome.Failed -> staleNotes[addr] = StaleNote(sources, outcome.reason)
+        is SourceCompileOutcome.Unavailable ->
+          staleNotes[addr] =
+            StaleNote(
+              sources,
+              "could not recompile ${daemon.modulePath} (${outcome.reason}); build it " +
+                "(`${daemon.modulePath.trimEnd(':')}:${GradleSourceCompiler.TASK}`) and call " +
+                "notify_file_changed",
+            )
+      }
+      // Forward even after a failed compile: the swap is cheap, and classes that something else
+      // (an IDE, a continuous build) wrote in the meantime are then picked up.
+      daemon.allClients().forEach { client ->
+        sources.forEach { path ->
+          runCatching {
+            client.fileChanged(
+              path = path,
+              kind = FileKind.SOURCE,
+              changeType = ChangeType.MODIFIED,
+            )
+          }
+        }
+      }
+      return outcome
+    }
+  }
+
+  /** One line for a render result when [uri]'s module may be showing code older than its source. */
+  private fun staleRenderLine(uri: PreviewUri): String? =
+    staleRenderLine(DaemonAddr(uri.workspaceId, uri.modulePath))
+
+  private fun staleRenderLine(addr: DaemonAddr): String? {
+    val note = staleNotes[addr] ?: return null
+    val files = note.sources.joinToString(", ") { File(it).name }
+    return "stale: this render may not include the latest edit to $files — ${note.reason}"
+  }
+
+  /**
+   * Records [file]'s current mtime + hash on every catalog entry of [addr] declared in it, so the
+   * render-time probe does not queue a second compile for an edit `notify_file_changed` handled.
+   */
+  private fun markSourceSeen(addr: DaemonAddr, file: File) {
+    val canonical = runCatching { file.canonicalPath }.getOrNull() ?: return
+    val mtime = file.lastModified().takeIf { it > 0L } ?: return
+    val hash = runCatching { sha256Hex(file) }.getOrNull()
+    catalog[addr]?.replaceAll { _, entry ->
+      if (entry.resolvedSourcePath == canonical)
+        entry.copy(sourceLastModifiedMs = mtime, sourceContentHash = hash)
+      else entry
+    }
   }
 
   /**
@@ -1334,7 +1443,7 @@ class DaemonMcpServer(
       ToolDef(
         name = "notify_file_changed",
         description =
-          "Tell every daemon in the matched workspace that a file changed so it can re-run discovery or mark previews stale.",
+          "Tell every daemon in the matched workspace that a file changed so it can re-run discovery or mark previews stale. A .kt/.java edit is recompiled first, so there is no need to run Gradle yourself.",
         inputSchema =
           parseSchema(
             """
@@ -1645,7 +1754,7 @@ class DaemonMcpServer(
       ToolDef(
         name = "notify_file_changed",
         description =
-          "Tell every daemon in the matched workspace that a file changed. Forwards a `fileChanged` notification to the daemon so it can re-run discovery / mark previews stale. Use after editing source files outside the MCP server's view (e.g. via a coding agent that doesn't run a file watcher).",
+          "Tell every daemon in the matched workspace that a file changed. Forwards a `fileChanged` notification to the daemon so it can re-run discovery / mark previews stale. Use after editing source files outside the MCP server's view (e.g. via a coding agent that doesn't run a file watcher). A .kt/.java edit is recompiled (`composePreviewCompile`) before the daemon swaps its classloader, and the result says whether that compile succeeded, so there is no need to run Gradle yourself.",
         inputSchema =
           parseSchema(
             """
@@ -2877,6 +2986,12 @@ class DaemonMcpServer(
                     .toString()
                 )
           )
+      }
+      .map { result ->
+        // Issue #1169: never hand back an old image as if it were current.
+        val stale = staleRenderLine(uri)
+        if (stale == null || result.isError == true) result
+        else result.copy(content = result.content + ContentBlock.Text(stale))
       }
       .getOrElse { errorCallToolResult("render_preview failed: ${it.message}") }
   }
@@ -5318,12 +5433,49 @@ class DaemonMcpServer(
     // out via the existing `renderFinished` → `notifications/resources/updated` path.
     var forwarded = 0
     var rendered = 0
+    // A Kotlin/Java edit needs a recompile before the daemon's classloader swap can see it
+    // (issue #1169). Compile the modules that declare a preview in this file; when none does
+    // (a shared component, a library module), compile every module's daemon — each module's
+    // compile task depends on the libraries it uses.
+    val compileTargets: Set<String> =
+      if (
+        sourceCompiler != null &&
+          kind == FileKind.SOURCE &&
+          changeType != ChangeType.DELETED &&
+          File(path).extension in COMPILED_SOURCE_EXTENSIONS
+      ) {
+        val canonical = runCatching { File(path).canonicalPath }.getOrDefault(path)
+        val declaring =
+          project.daemons.values
+            .filter { daemon ->
+              catalog[DaemonAddr(daemon.workspaceId, daemon.modulePath)]?.values?.any {
+                it.resolvedSourcePath == canonical
+              } == true
+            }
+            .map { it.modulePath }
+            .toSet()
+        declaring.ifEmpty { project.daemons.keys.toSet() }
+      } else emptySet()
+    val compileLines = mutableListOf<String>()
     project.daemons.values.forEach { daemon ->
-      // File invalidation must reach EVERY replica — each replica has its own independent
-      // discovery + render cache, so missing one would leave it serving stale bytes.
-      daemon.allClients().forEach { client ->
-        runCatching { client.fileChanged(path = path, kind = kind, changeType = changeType) }
-          .onSuccess { forwarded++ }
+      val addr = DaemonAddr(daemon.workspaceId, daemon.modulePath)
+      if (daemon.modulePath in compileTargets) {
+        pendingSources.computeIfAbsent(addr) { ConcurrentHashMap.newKeySet() }.add(path)
+        markSourceSeen(addr, File(path))
+        when (val outcome = recompilePendingSources(daemon)) {
+          is SourceCompileOutcome.Ok ->
+            compileLines += "recompiled ${daemon.modulePath} in ${outcome.durationMs}ms"
+          null -> {}
+          else -> staleRenderLine(addr)?.let { compileLines += "${daemon.modulePath}: $it" }
+        }
+        forwarded += daemon.allClients().size
+      } else {
+        // File invalidation must reach EVERY replica — each replica has its own independent
+        // discovery + render cache, so missing one would leave it serving stale bytes.
+        daemon.allClients().forEach { client ->
+          runCatching { client.fileChanged(path = path, kind = kind, changeType = changeType) }
+            .onSuccess { forwarded++ }
+        }
       }
       val byId = catalog[DaemonAddr(daemon.workspaceId, daemon.modulePath)] ?: return@forEach
       // Build the candidate URI set for this daemon and intersect with current watches/subs.
@@ -5368,7 +5520,10 @@ class DaemonMcpServer(
       }
     }
     return textCallToolResult(
-      "fileChanged forwarded to $forwarded daemon(s); re-rendered $rendered watched preview(s)"
+      (listOf(
+          "fileChanged forwarded to $forwarded daemon(s); re-rendered $rendered watched preview(s)"
+        ) + compileLines)
+        .joinToString("\n")
     )
   }
 
@@ -6015,6 +6170,9 @@ class DaemonMcpServer(
      * `sourcePollIntervalMs`; pass `0` to disable.
      */
     const val DEFAULT_SOURCE_POLL_INTERVAL_MS: Long = 30_000
+
+    /** Source extensions whose edit needs a recompile before the daemon can render it. */
+    private val COMPILED_SOURCE_EXTENSIONS = setOf("kt", "java")
 
     /**
      * Default cadence for the random-sampling deterministic-render probe. 10 minutes keeps the
