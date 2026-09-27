@@ -106,10 +106,26 @@
   const RESOURCE_POLL_MAX_INTERVAL_MS = 60000;
   const RESOURCE_POLL_MAX_UNCHANGED = 12;
   const MAX_COMMENT_BODY_LENGTH = 4000;
-  // Static host contract (for example Antigravity's <agent-embed>):
-  // #compose-preview-result=<unpadded base64url UTF-8 JSON>
+  // Static host contract, for hosts with no MCP Apps bridge (for example Antigravity's
+  // <agent-embed>). One envelope, two ways to deliver it:
+  //   1. URL fragment: #compose-preview-result=<unpadded base64url UTF-8 JSON>
+  //   2. Inline block, anywhere in the document (the <head>, or appended after this script):
+  //      <script type="application/json" id="compose-preview-result">JSON<\/script>
   // JSON shape: {"version":1,"arguments":{...},"result":<MCP CallToolResult>}
-  // The hash is intentionally credential-free and bounded so the same file is safe to package.
+  // The inline block exists because Antigravity 1.2.12 does not load <agent-embed src="file://...">
+  // as a URL: it reads the file and injects its text into <iframe srcdoc>, so location.href is
+  // about:srcdoc and the fragment (or query) never reaches the viewer. Relative and file:/// URLs do
+  // not resolve there either; images must travel as base64 image content, drawn as data: URIs.
+  // A producer inlining the JSON must keep it inside the element: escape every "<" + "/" as "<\/" and
+  // every "<" + "!--" as "\u003c!--" (escaping every "<" as "\u003c" also works). Both are ordinary JSON
+  // string escapes, so JSON.parse reads the original text back unchanged.
+  // The fragment takes precedence: when it is present the inline block is ignored, so a host that
+  // does pass URLs can override a result baked into the file.
+  // Both inputs are held to the same rules and share one path after decoding: at most 500 KB of
+  // UTF-8 JSON, version 1, no credential-named field or credential-bearing URI anywhere, and static
+  // mode (no bridge, no polling, no postMessage handling; an input that fails any rule shows why and
+  // points at the complete text fallback in the surrounding response).
+  // Either way the result is intentionally credential-free and bounded so the file is safe to package.
   const STATIC_RESULT_PARAM = 'compose-preview-result';
   const MAX_STATIC_RESULT_BYTES = 500000;
   const CREDENTIAL_KEY = /(token|authorization|password|secret|api[-_]?key|cookie|session)/i;
@@ -119,6 +135,7 @@
   let initialized = false;
   let hasToolResult = false;
   let staticMode = false;
+  let inputResolved = false;
   let selected;
   let toolArguments = {};
   let resourceToken;
@@ -221,20 +238,44 @@
     return undefined;
   }
 
+  function fragmentJson(encoded) {
+    if (!encoded || encoded.length > MAX_STATIC_RESULT_BYTES || !/^[A-Za-z0-9_-]+$/.test(encoded)) {
+      throw new Error('the encoded result is empty, malformed, or larger than 500 KB');
+    }
+    const base64 = encoded.replace(/-/g, '+').replace(/_/g, '/');
+    const binary = atob(base64 + '='.repeat((4 - base64.length % 4) % 4));
+    if (binary.length > MAX_STATIC_RESULT_BYTES) {
+      throw new Error('the decoded result is larger than 500 KB');
+    }
+    const bytes = Uint8Array.from(binary, character => character.charCodeAt(0));
+    return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+  }
+
+  function inlineJson(block) {
+    if (block.localName !== 'script' || block.type !== 'application/json') {
+      throw new Error('the inline result must be a <script type="application/json"> element');
+    }
+    const text = block.textContent || '';
+    // UTF-16 length never exceeds the UTF-8 byte count, so this cheap check can only reject early.
+    if (text.length > MAX_STATIC_RESULT_BYTES || new TextEncoder().encode(text).length > MAX_STATIC_RESULT_BYTES) {
+      throw new Error('the inline result is larger than 500 KB');
+    }
+    if (!text.trim()) throw new Error('the inline result is empty');
+    return text;
+  }
+
   function staticInput() {
     const encoded = new URLSearchParams(location.hash.slice(1)).get(STATIC_RESULT_PARAM);
-    if (encoded == null) return { present: false };
+    const block = encoded == null ? document.getElementById(STATIC_RESULT_PARAM) : null;
+    if (encoded == null && !block) return { present: false };
     try {
-      if (!encoded || encoded.length > MAX_STATIC_RESULT_BYTES || !/^[A-Za-z0-9_-]+$/.test(encoded)) {
-        throw new Error('the encoded result is empty, malformed, or larger than 500 KB');
+      const json = encoded != null ? fragmentJson(encoded) : inlineJson(block);
+      let envelope;
+      try {
+        envelope = JSON.parse(json);
+      } catch {
+        throw new Error('the result is not valid JSON');
       }
-      const base64 = encoded.replace(/-/g, '+').replace(/_/g, '/');
-      const binary = atob(base64 + '='.repeat((4 - base64.length % 4) % 4));
-      if (binary.length > MAX_STATIC_RESULT_BYTES) {
-        throw new Error('the decoded result is larger than 500 KB');
-      }
-      const bytes = Uint8Array.from(binary, character => character.charCodeAt(0));
-      const envelope = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes));
       if (!envelope || envelope.version !== 1 || typeof envelope.result !== 'object' || !envelope.result || Array.isArray(envelope.result)) {
         throw new Error('expected a version 1 envelope containing an MCP tool result');
       }
@@ -1099,7 +1140,7 @@
   }
 
   window.addEventListener('message', event => {
-    if (staticMode) return;
+    if (staticMode || !inputResolved) return;
     if (event.source !== window.parent) return;
     const message = event.data;
     if (!message || message.jsonrpc !== '2.0') return;
@@ -1217,18 +1258,27 @@
     }
   }
 
-  const fromHash = staticInput();
-  if (fromHash.present) {
-    staticMode = true;
-    if (fromHash.error) {
-      renderStaticError(fromHash.error);
-    } else {
-      toolArguments = safeSelectionArguments(fromHash.envelope.arguments || {});
-      draw(fromHash.envelope.result);
+  // An inline result block may follow this script, so decide static mode once the whole document
+  // has been parsed. Until then no host message is handled (see inputResolved).
+  function startViewer() {
+    const staticResult = staticInput();
+    if (staticResult.present) {
+      staticMode = true;
+      if (staticResult.error) {
+        renderStaticError(staticResult.error);
+      } else {
+        toolArguments = safeSelectionArguments(staticResult.envelope.arguments || {});
+        draw(staticResult.envelope.result);
+      }
     }
+    inputResolved = true;
+    return staticMode ? Promise.resolve() : initializeBridge();
   }
 
-  const bridgeReady = staticMode ? Promise.resolve() : initializeBridge();
+  const bridgeReady =
+    document.readyState === 'loading'
+      ? new Promise(resolve => document.addEventListener('DOMContentLoaded', resolve, { once: true })).then(startViewer)
+      : startViewer();
   refresh.addEventListener('click', () => {
     resourcePollUnchanged = 0;
     if (!overlayCall) readResource(true, true);

@@ -150,7 +150,14 @@ class ServeCatalogMcpAppViewerTest {
     assertTrue(html.contains("const MAX_STATIC_RESULT_BYTES = 500000;"))
     assertTrue(html.contains("#compose-preview-result=<unpadded base64url UTF-8 JSON>"))
     assertTrue(html.contains("credential field"))
-    assertTrue(html.contains("const bridgeReady = staticMode ? Promise.resolve()"))
+    assertTrue(html.contains("return staticMode ? Promise.resolve() : initializeBridge();"))
+    assertTrue(html.contains("document.getElementById(STATIC_RESULT_PARAM)"))
+    assertTrue(html.contains("new TextEncoder().encode(text).length > MAX_STATIC_RESULT_BYTES"))
+    assertTrue(html.contains("if (staticMode || !inputResolved) return;"))
+    assertTrue(
+      !html.substringAfter("<script>").substringBeforeLast("</script>").contains("</script"),
+      "the viewer's own script must not contain a closing script tag",
+    )
     assertTrue(html.contains("Complete text and structured output:"))
     assertTrue(html.contains("function beforeAfterModel(result, value)"))
     assertTrue(html.contains("const inputBeforeUri = result?.isError ? undefined"))
