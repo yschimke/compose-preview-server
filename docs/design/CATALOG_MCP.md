@@ -139,7 +139,9 @@ while the server sends `elicitation/create` and waits for the client's response 
 The scope is bounded, expires after inactivity and can be closed with `DELETE`; it stores only the
 pending request correlation, never a design, grant, actor or authorization decision. Clients that
 do not negotiate this capability continue to receive the original JSON response mode with no
-session allocation.
+session allocation. Every request carrying the session id must also repeat the exact negotiated
+`MCP-Protocol-Version`; a missing or different version is rejected rather than silently changing
+the session's wire contract.
 
 This is a compatibility path for the negotiated 2025 protocols and the current Kotlin MCP SDK.
 When the server and target clients move to the 2026 protocol generation, task-level

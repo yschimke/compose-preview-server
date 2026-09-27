@@ -15,10 +15,12 @@ import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 
 class ServeMcpRequestScopesTest {
+  private val protocolVersion = ServeCatalogMcp.MCP_PROTOCOL_VERSION
+
   @Test
   fun `form elicitation correlates accepted declined and cancelled responses`() = runBlocking {
     val scopes = ServeMcpRequestScopes()
-    val scope = assertNotNull(scopes.open(formElicitationSupported = true))
+    val scope = assertNotNull(scopes.open(protocolVersion, formElicitationSupported = true))
 
     for ((wire, expected) in
       listOf(
@@ -72,7 +74,8 @@ class ServeMcpRequestScopesTest {
   fun `unsupported malformed and timed out interactions return text fallback signal`() =
     runBlocking {
       val scopes = ServeMcpRequestScopes()
-      val unsupported = assertNotNull(scopes.open(formElicitationSupported = false))
+      val unsupported =
+        assertNotNull(scopes.open(protocolVersion, formElicitationSupported = false))
       var emitted = false
       assertNull(
         scopes
@@ -81,7 +84,7 @@ class ServeMcpRequestScopesTest {
       )
       assertFalse(emitted)
 
-      val supported = assertNotNull(scopes.open(formElicitationSupported = true))
+      val supported = assertNotNull(scopes.open(protocolVersion, formElicitationSupported = true))
       val malformed =
         scopes.interaction(supported) { request ->
           val id = request["id"]!!.jsonPrimitive.content
@@ -107,15 +110,15 @@ class ServeMcpRequestScopesTest {
     var now = 1_000L
     val scopes =
       ServeMcpRequestScopes(maxSessions = 1, idleTimeoutMillis = 100, nowMillis = { now })
-    val first = assertNotNull(scopes.open(formElicitationSupported = true))
+    val first = assertNotNull(scopes.open(protocolVersion, formElicitationSupported = true))
     assertNotNull(scopes.find(first.id))
 
-    assertNull(scopes.open(formElicitationSupported = true))
+    assertNull(scopes.open(protocolVersion, formElicitationSupported = true))
     assertNotNull(scopes.find(first.id))
     assertTrue(scopes.close(first.id))
     assertFalse(scopes.close(first.id))
 
-    val expiring = assertNotNull(scopes.open(formElicitationSupported = true))
+    val expiring = assertNotNull(scopes.open(protocolVersion, formElicitationSupported = true))
     now += 101
     assertNull(scopes.find(expiring.id))
   }
@@ -125,7 +128,7 @@ class ServeMcpRequestScopesTest {
     runBlocking {
       var now = 1_000L
       val scopes = ServeMcpRequestScopes(idleTimeoutMillis = 100, nowMillis = { now })
-      val active = assertNotNull(scopes.open(formElicitationSupported = true))
+      val active = assertNotNull(scopes.open(protocolVersion, formElicitationSupported = true))
       val emitted = CompletableDeferred<JsonObject>()
       val interaction = scopes.interaction(active) { emitted.complete(it) }
       val first = async {
@@ -136,7 +139,7 @@ class ServeMcpRequestScopesTest {
 
       now += 101
       assertNotNull(scopes.find(active.id), "a pending request must pin its session")
-      val other = assertNotNull(scopes.open(formElicitationSupported = true))
+      val other = assertNotNull(scopes.open(protocolVersion, formElicitationSupported = true))
       assertNull(
         interaction.elicitForm("Second", JsonObject(emptyMap()), timeoutMillis = 10),
         "a concurrent interaction must not disturb the first",

@@ -9866,6 +9866,13 @@ class ServeHttpServer(
       call.respondText("unknown or expired MCP session", status = HttpStatusCode.NotFound)
       return
     }
+    if (requestScope != null && protocolVersion != requestScope.protocolVersion) {
+      call.respondText(
+        "MCP-Protocol-Version must match the negotiated session version",
+        status = HttpStatusCode.BadRequest,
+      )
+      return
+    }
 
     // A JSON-RPC response is the second half of a server request previously emitted on another
     // in-flight POST. Its unguessable session id is the correlation credential; it is not a
@@ -9953,7 +9960,11 @@ class ServeHttpServer(
         return
       }
       if (acceptsRequestScope && requestsFormElicitation(request)) {
-        val scope = requestScopes.open(formElicitationSupported = true)
+        val scope =
+          requestScopes.open(
+            protocolVersion = ServeCatalogMcp.MCP_PROTOCOL_VERSION,
+            formElicitationSupported = true,
+          )
         if (scope == null) {
           call.respondText(
             "MCP request scope capacity exhausted",
@@ -10014,7 +10025,19 @@ class ServeHttpServer(
       call.respondText("MCP-Session-Id is required", status = HttpStatusCode.BadRequest)
       return
     }
-    if (catalogMcpRequestScopes?.close(sessionId) == true) {
+    val scope = catalogMcpRequestScopes?.find(sessionId)
+    if (scope == null) {
+      call.respondText("unknown or expired MCP session", status = HttpStatusCode.NotFound)
+      return
+    }
+    if (call.request.headers[MCP_PROTOCOL_VERSION_HEADER] != scope.protocolVersion) {
+      call.respondText(
+        "MCP-Protocol-Version must match the negotiated session version",
+        status = HttpStatusCode.BadRequest,
+      )
+      return
+    }
+    if (catalogMcpRequestScopes.close(sessionId)) {
       call.respond(HttpStatusCode.NoContent)
     } else {
       call.respondText("unknown or expired MCP session", status = HttpStatusCode.NotFound)

@@ -325,8 +325,16 @@ class ServeAgentGrantRoutingTest {
         .build()
     client.newCall(unknownResponse).execute().use { assertEquals(400, it.code) }
 
+    val wrongVersion = pingCall.newBuilder().header("MCP-Protocol-Version", "2025-03-26").build()
+    client.newCall(wrongVersion).execute().use { assertEquals(400, it.code) }
+
     val deleteCall =
-      Request.Builder().url(url("/mcp")).header("MCP-Session-Id", sessionId).delete().build()
+      Request.Builder()
+        .url(url("/mcp"))
+        .header("MCP-Protocol-Version", ServeCatalogMcp.MCP_PROTOCOL_VERSION)
+        .header("MCP-Session-Id", sessionId)
+        .delete()
+        .build()
     client.newCall(deleteCall).execute().use { assertEquals(204, it.code) }
     client.newCall(pingCall).execute().use { assertEquals(404, it.code) }
   }

@@ -42,6 +42,7 @@ internal class ServeMcpRequestScopes(
 
   internal data class Scope(
     val id: String,
+    val protocolVersion: String,
     val formElicitationSupported: Boolean,
     val lastUsedMillis: AtomicLong,
     val pendingPermits: Semaphore,
@@ -52,13 +53,15 @@ internal class ServeMcpRequestScopes(
   private val scopes = ConcurrentHashMap<String, Scope>()
 
   @Synchronized
-  fun open(formElicitationSupported: Boolean): Scope? {
+  fun open(protocolVersion: String, formElicitationSupported: Boolean): Scope? {
+    require(protocolVersion.isNotBlank())
     expireIdle()
     if (scopes.size >= maxSessions) return null
     while (true) {
       val scope =
         Scope(
           id = newId(),
+          protocolVersion = protocolVersion,
           formElicitationSupported = formElicitationSupported,
           lastUsedMillis = AtomicLong(nowMillis()),
           pendingPermits = Semaphore(maxPendingPerSession),
