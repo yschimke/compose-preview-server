@@ -137,17 +137,16 @@ class ServeUiBuilderCatalogRecoveryRoutesTest {
 
     assertEquals(200, stranded.first, stranded.second)
     assertTrue(stranded.second.contains("Recovery builder"), stranded.second)
-    assertEquals(
-      listOf(
-        UiBuilderServiceRequest.GetDesignActions::class,
-        UiBuilderServiceRequest.PreviewCurrentCatalogUpgrade::class,
-      ),
-      calls.map { it.request::class },
-    )
+    // The canonical design URL serves one existence-neutral shell for every path-shaped id. The
+    // app asks the authenticated design API after loading; opening the shell itself must neither
+    // probe the design nor start recovery work.
+    assertTrue(calls.isEmpty())
 
-    calls.clear()
     refusal = UiBuilderServiceError(ServiceErrorCodeV1.NOT_FOUND, "not found")
-    assertEquals(404, getPath("/ui-builder/private-design", TOKEN).first)
+    val private = getPath("/ui-builder/private-design", TOKEN)
+    assertEquals(200, private.first, private.second)
+    assertTrue(private.second.contains("Recovery builder"), private.second)
+    assertTrue(calls.isEmpty())
   }
 
   private fun get(token: String?): Pair<Int, String> {
