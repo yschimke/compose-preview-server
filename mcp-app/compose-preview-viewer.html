@@ -12,6 +12,11 @@
   .muted { color: var(--color-text-secondary, #666); font-size: 12px; }
   .canvas { min-height: 120px; border: 1px solid var(--color-border, #d8d8dd); border-radius: 10px; background: var(--color-background-secondary, #f8f8fa); display: grid; place-items: center; overflow: auto; }
   .canvas img { max-width: 100%; max-height: 560px; object-fit: contain; }
+  .preview-stage { position: relative; display: inline-block; max-width: 100%; line-height: 0; }
+  .preview-stage > img { display: block; }
+  .comment-pin { position: absolute; transform: translate(-50%, -50%); z-index: 2; display: grid; place-items: center; width: 26px; height: 26px; padding: 0; border-radius: 999px; border: 2px solid #fff; background: #315da8; color: #fff; font-size: 12px; font-weight: 700; line-height: 1; box-shadow: 0 1px 4px #0008; }
+  .comment-pin.resolved { background: #62646a; }
+  .comment-pin.pending { background: #9b4d00; }
   .comparison { width: 100%; padding: 10px; box-sizing: border-box; }
   .comparison-stage { position: relative; display: grid; place-items: center; min-height: 120px; overflow: hidden; }
   .comparison-stage img { grid-area: 1 / 1; display: block; }
@@ -26,6 +31,19 @@
   .fallback p { margin: 0 0 8px; }
   .fallback pre { margin: 0; padding: 10px; border-radius: 7px; background: var(--color-background-primary, #fff); white-space: pre-wrap; overflow-wrap: anywhere; }
   .actions { display: flex; gap: 8px; margin-top: 10px; }
+  .comments { margin-top: 10px; padding: 10px; border: 1px solid var(--color-border, #d8d8dd); border-radius: 10px; }
+  .comments[hidden] { display: none; }
+  .comments-heading { font-weight: 650; margin-bottom: 8px; }
+  .comment-list { display: grid; gap: 7px; }
+  .comment-thread { padding: 8px; border-radius: 7px; background: var(--color-background-secondary, #f8f8fa); }
+  .comment-thread:target { outline: 2px solid #315da8; }
+  .comment-thread p { margin: 4px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .comment-thread-meta { font-size: 12px; font-weight: 650; }
+  .comment-compose { display: grid; gap: 7px; margin-top: 10px; }
+  .comment-compose textarea { min-height: 64px; resize: vertical; box-sizing: border-box; width: 100%; padding: 7px; font: inherit; color: inherit; background: var(--color-background-primary, #fff); border: 1px solid var(--color-border, #aaa); border-radius: 6px; }
+  .comment-compose-row { display: flex; gap: 8px; align-items: center; }
+  .comment-raw { margin-top: 8px; }
+  .comment-raw pre { max-height: 180px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
   button { font: inherit; padding: 6px 9px; border-radius: 6px; border: 1px solid var(--color-border, #aaa); background: var(--color-background-primary, #fff); color: inherit; cursor: pointer; }
 </style>
 <body>
@@ -38,6 +56,23 @@
   </div>
   <section id="canvas" class="canvas">
     <div class="empty">This viewer displays render and matrix results when the host supplies them.</div>
+  </section>
+  <section id="comments" class="comments" aria-label="Design comments" hidden>
+    <div class="comments-heading">Design comments</div>
+    <div id="comment-list" class="comment-list"></div>
+    <div id="comment-compose" class="comment-compose" hidden>
+      <label for="comment-body">Post a comment</label>
+      <textarea id="comment-body" maxlength="10000" placeholder="Describe what should change"></textarea>
+      <div class="comment-compose-row">
+        <button id="comment-post" type="button">Post comment</button>
+        <span id="comment-anchor" class="muted">Click the preview to pin this comment, or post it unpinned.</span>
+      </div>
+    </div>
+    <div id="comment-status" class="muted" role="status"></div>
+    <details id="comment-raw" class="comment-raw">
+      <summary>Complete comment data</summary>
+      <pre></pre>
+    </details>
   </section>
   <div class="actions">
     <button id="refresh" hidden>Refresh resource</button>
@@ -53,6 +88,14 @@
   const refresh = q('#refresh');
   const a11y = q('#a11y');
   const use = q('#use');
+  const comments = q('#comments');
+  const commentList = q('#comment-list');
+  const commentCompose = q('#comment-compose');
+  const commentBody = q('#comment-body');
+  const commentPost = q('#comment-post');
+  const commentAnchorLabel = q('#comment-anchor');
+  const commentStatus = q('#comment-status');
+  const commentRaw = q('#comment-raw');
   const REQUEST_TIMEOUT_MS = 5000;
   const RESOURCE_READ_TIMEOUT_MS = 65000;
   const RESOURCE_POLL_INTERVAL_MS = 5000;
@@ -92,6 +135,13 @@
   let overlayCall;
   let baseMetaText = '';
   let comparisonReadGeneration = 0;
+  let listCommentsToolName;
+  let postCommentToolName;
+  let commentDesignId;
+  let commentRenderValue;
+  let commentBoard;
+  let commentPoint;
+  let commentGeneration = 0;
 
   function request(method, params, timeoutMs = REQUEST_TIMEOUT_MS, onLateResult) {
     const id = nextId++;
@@ -224,11 +274,203 @@
     meta.textContent = label;
   }
 
+  function clearComments() {
+    ++commentGeneration;
+    commentDesignId = undefined;
+    commentRenderValue = undefined;
+    commentBoard = undefined;
+    commentPoint = undefined;
+    comments.hidden = true;
+    commentList.replaceChildren();
+    commentCompose.hidden = true;
+    commentBody.value = '';
+    commentPost.disabled = false;
+    commentAnchorLabel.textContent = 'Click the preview to pin this comment, or post it unpinned.';
+    commentStatus.textContent = '';
+    commentRaw.hidden = true;
+    commentRaw.querySelector('pre').textContent = '';
+  }
+
+  function commentExcerpt(thread) {
+    const entries = Array.isArray(thread?.comments) ? thread.comments : [];
+    return entries.map(comment => comment?.body).find(body => typeof body === 'string' && body) || 'Comment';
+  }
+
+  function commentAnchorText(anchor) {
+    if (!anchor || typeof anchor !== 'object') return 'Unpinned';
+    if (typeof anchor.nodeId === 'string' && anchor.nodeId) return `Node ${anchor.nodeId}`;
+    if (typeof anchor.markId === 'string' && anchor.markId) return `Mark ${anchor.markId}`;
+    if (Number.isFinite(anchor.x) && Number.isFinite(anchor.y)) {
+      return `Frame ${Math.round(anchor.x * 100)}%, ${Math.round(anchor.y * 100)}%`;
+    }
+    return 'Unpinned';
+  }
+
+  function commentPosition(anchor, image) {
+    if (!anchor || typeof anchor !== 'object') return undefined;
+    if (Number.isFinite(anchor.x) && Number.isFinite(anchor.y)) {
+      return {
+        x: Math.min(1, Math.max(0, anchor.x)),
+        y: Math.min(1, Math.max(0, anchor.y)),
+      };
+    }
+    const bounds = typeof anchor.nodeId === 'string'
+      ? commentRenderValue?.nodeBounds?.[anchor.nodeId]
+      : undefined;
+    if (!bounds || !image?.naturalWidth || !image?.naturalHeight) return undefined;
+    const x = (Number(bounds.x) + Number(bounds.width) / 2) / image.naturalWidth;
+    const y = (Number(bounds.y) + Number(bounds.height) / 2) / image.naturalHeight;
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return undefined;
+    return { x: Math.min(1, Math.max(0, x)), y: Math.min(1, Math.max(0, y)) };
+  }
+
+  function renderCommentPins() {
+    const stage = canvas.querySelector('.preview-stage');
+    const image = stage?.querySelector('img');
+    if (!stage || !image) return;
+    stage.querySelectorAll('.comment-pin').forEach(pin => pin.remove());
+    const threads = Array.isArray(commentBoard?.threads) ? commentBoard.threads : [];
+    threads.forEach((thread, index) => {
+      const position = commentPosition(thread?.anchor, image);
+      if (!position) return;
+      const pin = document.createElement('button');
+      pin.type = 'button';
+      pin.className = `comment-pin${thread?.resolved ? ' resolved' : ''}`;
+      pin.style.left = `${position.x * 100}%`;
+      pin.style.top = `${position.y * 100}%`;
+      pin.textContent = String(index + 1);
+      const excerpt = commentExcerpt(thread);
+      pin.title = excerpt;
+      pin.setAttribute('aria-label', `Comment ${index + 1}: ${excerpt}`);
+      pin.addEventListener('click', event => {
+        event.stopPropagation();
+        document.getElementById(`comment-thread-${index + 1}`)?.scrollIntoView({ block: 'nearest' });
+      });
+      stage.append(pin);
+    });
+    if (commentPoint) {
+      const pending = document.createElement('span');
+      pending.className = 'comment-pin pending';
+      pending.style.left = `${commentPoint.x * 100}%`;
+      pending.style.top = `${commentPoint.y * 100}%`;
+      pending.textContent = '+';
+      pending.setAttribute('aria-label', 'New comment pin');
+      stage.append(pending);
+    }
+  }
+
+  function rawCommentFallback(value) {
+    commentRaw.hidden = false;
+    commentRaw.querySelector('pre').textContent =
+      typeof value === 'string' ? value : JSON.stringify(value, null, 2);
+  }
+
+  function renderCommentBoard(board) {
+    commentBoard = board;
+    commentList.replaceChildren();
+    const threads = Array.isArray(board?.threads) ? board.threads : [];
+    if (!threads.length) {
+      const empty = document.createElement('div');
+      empty.className = 'muted';
+      empty.textContent = 'No comments yet.';
+      commentList.append(empty);
+    }
+    threads.forEach((thread, index) => {
+      const card = document.createElement('article');
+      card.className = 'comment-thread';
+      card.id = `comment-thread-${index + 1}`;
+      const heading = document.createElement('div');
+      heading.className = 'comment-thread-meta';
+      heading.textContent = `${index + 1}. ${commentAnchorText(thread?.anchor)}${thread?.resolved ? ' · Resolved' : ''}`;
+      card.append(heading);
+      const entries = Array.isArray(thread?.comments) ? thread.comments : [];
+      entries.forEach(comment => {
+        const body = document.createElement('p');
+        const author = comment?.displayName || comment?.authorId || 'Unknown author';
+        body.textContent = `${author}: ${typeof comment?.body === 'string' ? comment.body : ''}`;
+        card.append(body);
+      });
+      commentList.append(card);
+    });
+    rawCommentFallback(board || {});
+    renderCommentPins();
+  }
+
+  function updateCommentAction() {
+    if (staticMode || !commentDesignId || !initialized || !listCommentsToolName) {
+      comments.hidden = true;
+      return;
+    }
+    comments.hidden = false;
+    commentCompose.hidden = !postCommentToolName;
+  }
+
+  async function loadComments() {
+    const designId = commentDesignId;
+    if (!designId || !initialized || !listCommentsToolName || staticMode) {
+      updateCommentAction();
+      return;
+    }
+    const generation = ++commentGeneration;
+    comments.hidden = false;
+    commentStatus.textContent = 'Loading comments…';
+    try {
+      const argumentsValue = { designId, ...(resourceToken ? { token: resourceToken } : {}) };
+      const result = await request(
+        'tools/call',
+        { name: listCommentsToolName, arguments: argumentsValue },
+        RESOURCE_READ_TIMEOUT_MS,
+      );
+      if (generation !== commentGeneration || commentDesignId !== designId) return;
+      const board = data(result);
+      if (result?.isError || !board || !Array.isArray(board.threads)) {
+        commentList.replaceChildren();
+        commentStatus.textContent = 'Comments are unavailable; complete text fallback shown.';
+        rawCommentFallback(fallbackText(result) || board || 'The host returned no comment board.');
+        return;
+      }
+      renderCommentBoard(board);
+      commentStatus.textContent = `${board.threads.length} comment thread${board.threads.length === 1 ? '' : 's'}.`;
+    } catch (error) {
+      if (generation !== commentGeneration || commentDesignId !== designId) return;
+      commentList.replaceChildren();
+      commentStatus.textContent = 'Comments are unavailable.';
+      rawCommentFallback(`Unable to load comments: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    updateCommentAction();
+  }
+
+  function configureComments(value) {
+    const designId = typeof value?.designId === 'string' && value.designId ? value.designId : undefined;
+    if (!designId) return;
+    commentDesignId = designId;
+    commentRenderValue = value;
+    updateCommentAction();
+    if (listCommentsToolName) void loadComments();
+  }
+
   function showImage(data, alt = 'Rendered Compose preview') {
     const preview = document.createElement('img');
     preview.alt = alt;
     preview.src = `data:image/png;base64,${data}`;
-    canvas.replaceChildren(preview);
+    const stage = document.createElement('div');
+    stage.className = 'preview-stage';
+    stage.append(preview);
+    stage.addEventListener('click', event => {
+      if (!commentDesignId || !postCommentToolName || commentCompose.hidden) return;
+      const bounds = preview.getBoundingClientRect();
+      if (!bounds.width || !bounds.height) return;
+      commentPoint = {
+        x: Math.min(1, Math.max(0, (event.clientX - bounds.left) / bounds.width)),
+        y: Math.min(1, Math.max(0, (event.clientY - bounds.top) / bounds.height)),
+      };
+      commentAnchorLabel.textContent =
+        `Pinned at ${Math.round(commentPoint.x * 100)}%, ${Math.round(commentPoint.y * 100)}%.`;
+      renderCommentPins();
+    });
+    preview.addEventListener('load', renderCommentPins, { once: true });
+    canvas.replaceChildren(stage);
+    renderCommentPins();
   }
 
   function clearAccessibilityOverlay() {
@@ -307,6 +549,7 @@
     }, label);
     baseMetaText = label;
     updateAccessibilityAction();
+    configureComments(value);
   }
 
   function beforeAfterModel(result, value) {
@@ -507,6 +750,51 @@
           }
         }
       }, 250);
+    }
+  }
+
+  async function postComment() {
+    const designId = commentDesignId;
+    const body = commentBody.value.trim();
+    if (!designId || !postCommentToolName || !initialized || !body) {
+      if (!body) commentStatus.textContent = 'Write a comment before posting.';
+      return;
+    }
+    const generation = commentGeneration;
+    const argumentsValue = {
+      designId,
+      body,
+      ...(commentPoint ? { x: commentPoint.x, y: commentPoint.y } : {}),
+      ...(resourceToken ? { token: resourceToken } : {}),
+    };
+    commentPost.disabled = true;
+    commentStatus.textContent = 'Posting comment…';
+    try {
+      const result = await request(
+        'tools/call',
+        { name: postCommentToolName, arguments: argumentsValue },
+        RESOURCE_READ_TIMEOUT_MS,
+      );
+      if (generation !== commentGeneration || commentDesignId !== designId) return;
+      const board = data(result);
+      if (result?.isError || !board || !Array.isArray(board.threads)) {
+        commentStatus.textContent = 'Unable to post comment; complete text fallback shown.';
+        rawCommentFallback(fallbackText(result) || board || 'The host returned no comment board.');
+        return;
+      }
+      commentBody.value = '';
+      commentPoint = undefined;
+      commentAnchorLabel.textContent = 'Click the preview to pin this comment, or post it unpinned.';
+      renderCommentBoard(board);
+      commentStatus.textContent = 'Comment posted.';
+    } catch (error) {
+      if (generation !== commentGeneration || commentDesignId !== designId) return;
+      commentStatus.textContent = 'Unable to post comment.';
+      rawCommentFallback(`Unable to post comment: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      if (generation === commentGeneration && commentDesignId === designId) {
+        commentPost.disabled = false;
+      }
     }
   }
 
@@ -726,6 +1014,7 @@
     use.hidden = true;
     refresh.hidden = true;
     clearAccessibilityOverlay();
+    clearComments();
     const comparisonGeneration = ++comparisonReadGeneration;
     const comparison = beforeAfterModel(result, value);
     disconnectResourceUpdates(comparison ? undefined : resource?.uri);
@@ -826,21 +1115,32 @@
     const generation = ++toolDiscoveryGeneration;
     if (!hostServerTools) {
       overlayToolName = undefined;
+      listCommentsToolName = undefined;
+      postCommentToolName = undefined;
       updateAccessibilityAction();
+      updateCommentAction();
       return;
     }
     try {
       const tools = await request('tools/list', {});
       if (generation !== toolDiscoveryGeneration) return;
-      overlayToolName = tools?.tools
-        ?.map(tool => tool?.name)
+      const names = tools?.tools?.map(tool => tool?.name) || [];
+      overlayToolName = names
         .find(name => typeof name === 'string' && /(^|__|\/)render_preview_overlay$/.test(name));
+      listCommentsToolName = names
+        .find(name => typeof name === 'string' && /(^|__|\/)ui_builder_list_comments$/.test(name));
+      postCommentToolName = names
+        .find(name => typeof name === 'string' && /(^|__|\/)ui_builder_post_comment$/.test(name));
     } catch (error) {
       if (generation !== toolDiscoveryGeneration) return;
       overlayToolName = undefined;
+      listCommentsToolName = undefined;
+      postCommentToolName = undefined;
       console.debug('Unable to discover Compose Preview viewer actions:', error);
     }
     updateAccessibilityAction();
+    updateCommentAction();
+    if (commentDesignId && listCommentsToolName) void loadComments();
   }
 
   async function initializeBridge() {
@@ -888,6 +1188,7 @@
     if (!overlayCall) readResource(true, true);
   });
   a11y.addEventListener('click', () => toggleAccessibilityOverlay());
+  commentPost.addEventListener('click', () => postComment());
   use.addEventListener('click', async () => {
     await bridgeReady;
     if (!initialized || !selected) return;

@@ -4374,7 +4374,10 @@ for (const fixture of listPageFixtures()) {
             ).toBeVisible();
             await expect(viewer.locator("#use")).toBeHidden();
           }
-        } else if (fixture !== "mcp-app-viewer-a11y-non-full") {
+        } else if (
+          fixture !== "mcp-app-viewer-a11y-non-full" &&
+          fixture !== "mcp-app-viewer-comments"
+        ) {
           await page.waitForFunction(
             (count) => window.__mcpReadCount >= count,
             fixture === "mcp-app-viewer-before-after" ? 2 : 1,
@@ -4414,6 +4417,43 @@ for (const fixture of listPageFixtures()) {
             "compose-preview://fixture/_app/com.example.Card?version=before",
             "compose-preview://fixture/_app/com.example.Card?version=after",
           ]);
+        }
+        if (fixture === "mcp-app-viewer-comments") {
+          await expect(viewer.locator("#comments")).toBeVisible();
+          await expect(viewer.locator("#comment-list")).toContainText("Align this heading.");
+          await expect(viewer.locator("#comment-list")).toContainText("Node button · Resolved");
+          await expect(viewer.locator("#comment-list")).toContainText("Mark stroke-7");
+          await expect(viewer.locator(".comment-pin")).toHaveCount(2);
+          await expect(viewer.locator('.comment-pin[aria-label^="Comment 1:"]')).toBeVisible();
+          await expect(viewer.locator('.comment-pin[aria-label^="Comment 2:"]')).toBeVisible();
+          await viewer.locator("#comment-raw summary").click();
+          await expect(viewer.locator("#comment-raw pre")).toBeVisible();
+          await expect(viewer.locator("#comment-raw pre")).toContainText("stroke-7");
+          expect(await page.evaluate(() => window.__mcpCommentListCall)).toEqual({
+            name: "ui_builder_list_comments",
+            arguments: { designId: "design-comments", token: "viewer-grant-secret" },
+          });
+
+          const image = viewer.locator(".preview-stage > img");
+          await image.click({ position: { x: 180, y: 180 } });
+          await expect(viewer.locator("#comment-anchor")).toContainText("Pinned at");
+          await viewer.locator("#comment-body").fill("Increase the touch target.");
+          await viewer.locator("#comment-post").click();
+          await page.waitForFunction(() => window.__mcpCommentPostCall != null);
+          const posted = await page.evaluate(() => window.__mcpCommentPostCall);
+          expect(posted.name).toBe("ui_builder_post_comment");
+          expect(posted.arguments.designId).toBe("design-comments");
+          expect(posted.arguments.body).toBe("Increase the touch target.");
+          expect(posted.arguments.token).toBe("viewer-grant-secret");
+          expect(posted.arguments.x).toBeGreaterThan(0.7);
+          expect(posted.arguments.x).toBeLessThan(0.8);
+          expect(posted.arguments.y).toBeGreaterThan(0.7);
+          expect(posted.arguments.y).toBeLessThan(0.8);
+          await expect(viewer.locator("#comment-list")).toContainText(
+            "Increase the touch target.",
+          );
+          await expect(viewer.locator(".comment-pin")).toHaveCount(3);
+          await expect(viewer.locator("#comment-status")).toHaveText("Comment posted.");
         }
         if (fixture === "mcp-app-viewer-refresh") {
           const image = viewer.locator('#canvas img[alt="Rendered Compose preview"]');

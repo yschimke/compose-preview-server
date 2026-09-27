@@ -6,6 +6,37 @@ const activeSubscriptions = new Set();
 let toolCalls = 0;
 let toolLists = 0;
 let appInitialized = false;
+let commentBoard = {
+  schema: "compose-ui-builder-comments/v1",
+  designId: "design-comments",
+  sequence: 3,
+  threads: [
+    {
+      id: "thread-point",
+      anchor: { x: 0.25, y: 0.2 },
+      resolved: false,
+      comments: [
+        { id: "comment-point", authorId: "github:yuri", displayName: "Yuri", body: "Align this heading." },
+      ],
+    },
+    {
+      id: "thread-node",
+      anchor: { nodeId: "button" },
+      resolved: true,
+      comments: [
+        { id: "comment-node", authorId: "agent:reviewer", displayName: "Review agent", body: "The button label is fixed." },
+      ],
+    },
+    {
+      id: "thread-mark",
+      anchor: { markId: "stroke-7" },
+      resolved: false,
+      comments: [
+        { id: "comment-mark", authorId: "github:yuri", displayName: "Yuri", body: "Follow the reference stroke." },
+      ],
+    },
+  ],
+};
 
 async function png(path) {
   const bytes = new Uint8Array(await (await fetch(path)).arrayBuffer());
@@ -45,7 +76,7 @@ window.addEventListener("message", async (event) => {
               mode === "stale-read-marker" ||
               mode === "a11y",
           },
-          ...(mode.startsWith("a11y") ? { serverTools: {} } : {}),
+          ...(mode.startsWith("a11y") || mode === "comments" ? { serverTools: {} } : {}),
         },
       },
     });
@@ -63,10 +94,34 @@ window.addEventListener("message", async (event) => {
           redirects: [
             "https://preview.invalid/callback#access_token=array-must-not-travel",
           ],
-          ...(mode.startsWith("a11y") ? { token: "viewer-grant-secret" } : {}),
+          ...(mode.startsWith("a11y") || mode === "comments"
+            ? { token: "viewer-grant-secret" }
+            : {}),
         },
       },
     });
+    if (mode === "comments") {
+      const imageData = await png("/preview-harness/fixtures/pages/_design-render-placeholder.png");
+      const result = {
+        schema: "compose-preview/ui-builder-native-preview/v1",
+        designId: "design-comments",
+        revision: 4,
+        nodeBounds: { button: { x: 80, y: 80, width: 80, height: 40 } },
+      };
+      send({
+        jsonrpc: "2.0",
+        method: "ui/notifications/tool-result",
+        params: {
+          result: {
+            content: [
+              { type: "image", mimeType: "image/png", data: imageData },
+              { type: "text", text: JSON.stringify(result) },
+            ],
+          },
+        },
+      });
+      return;
+    }
     if (mode === "before-after") {
       const comparison = {
         schema: "compose-preview/catalog-mcp-semantics-diff/v1",
@@ -448,11 +503,16 @@ window.addEventListener("message", async (event) => {
       jsonrpc: "2.0",
       id: message.id,
       result: {
-        tools: mode.startsWith("a11y") &&
-          mode !== "a11y-no-overlay" &&
-          (mode !== "a11y-list-changed" || toolLists > 1)
-          ? [{ name: "render_preview_overlay", inputSchema: { type: "object" } }]
-          : [],
+        tools: mode === "comments"
+          ? [
+              { name: "ui_builder_list_comments", inputSchema: { type: "object" } },
+              { name: "ui_builder_post_comment", inputSchema: { type: "object" } },
+            ]
+          : mode.startsWith("a11y") &&
+              mode !== "a11y-no-overlay" &&
+              (mode !== "a11y-list-changed" || toolLists > 1)
+            ? [{ name: "render_preview_overlay", inputSchema: { type: "object" } }]
+            : [],
       },
     });
     return;
@@ -461,6 +521,41 @@ window.addEventListener("message", async (event) => {
     toolCalls += 1;
     window.__mcpToolCallCount = toolCalls;
     window.__mcpToolCall = message.params;
+    if (mode === "comments") {
+      if (message.params.name === "ui_builder_list_comments") {
+        window.__mcpCommentListCall = message.params;
+      } else if (message.params.name === "ui_builder_post_comment") {
+        window.__mcpCommentPostCall = message.params;
+        commentBoard = {
+          ...commentBoard,
+          sequence: commentBoard.sequence + 1,
+          threads: [
+            ...commentBoard.threads,
+            {
+              id: "thread-posted",
+              anchor: message.params.arguments.x == null
+                ? undefined
+                : { x: message.params.arguments.x, y: message.params.arguments.y },
+              resolved: false,
+              comments: [
+                {
+                  id: "comment-posted",
+                  authorId: "agent:viewer",
+                  displayName: "Viewer agent",
+                  body: message.params.arguments.body,
+                },
+              ],
+            },
+          ],
+        };
+      }
+      send({
+        jsonrpc: "2.0",
+        id: message.id,
+        result: { content: [{ type: "text", text: JSON.stringify(commentBoard) }] },
+      });
+      return;
+    }
     if (mode === "a11y-unavailable") {
       send({
         jsonrpc: "2.0",
