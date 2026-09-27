@@ -70,7 +70,7 @@ class SourceRecompileTest {
   private val fileChangesSeenAtCompile = CopyOnWriteArrayList<Int>()
   private lateinit var daemon: FakeDaemon
 
-  private fun start(compiler: SourceCompiler?) {
+  private fun start(compiler: SourceCompiler?, compileInProcess: Boolean = true) {
     server =
       DaemonMcpServer(
         supervisor,
@@ -78,6 +78,7 @@ class SourceRecompileTest {
         sourcePollIntervalMs = 0,
         samplingIntervalMs = 0,
         sourceCompiler = compiler,
+        compileInProcess = compileInProcess,
       )
     val (clientToServer, serverFromClient) = pipedPair()
     val (serverToClient, clientFromServer) = pipedPair()
@@ -197,6 +198,26 @@ class SourceRecompileTest {
     assertThat(inProcess).containsExactly(listOf(fixture.source.absolutePath))
     assertThat(compiles).hasSize(gradleBefore)
     assertThat(fresh.work.toString()).contains(DaemonMcpServer.IN_PROCESS_COMPILE_TASK)
+  }
+
+  /** The in-process compile is opt-in; by default the daemon is never asked. */
+  @Test
+  fun `the in-process compile is off unless enabled`() {
+    lateinit var fixture: Fixture
+    start(fakeCompiler { fixture.classes }, compileInProcess = false)
+    fixture = fixture()
+    val asked = java.util.concurrent.atomic.AtomicInteger()
+    daemon.onCompileSources = {
+      asked.incrementAndGet()
+      CompileSourcesResult(result = CompileResultKind.OK, durationMs = 1)
+    }
+    render(fixture)
+    val gradleBefore = compiles.size
+
+    edit(fixture, """@Preview fun Header() { Text("Gradle by default") }""")
+    assertThat(render(fixture).bytes).contains("Gradle by default")
+    assertThat(compiles).hasSize(gradleBefore + 1)
+    assertThat(asked.get()).isEqualTo(0)
   }
 
   /** #1189: `fallback` (no BTA wiring, KSP, …) falls back to Gradle, and is remembered. */
