@@ -89,12 +89,19 @@ class ServeUiBuilderCreateRoutesTest {
               )
           is UiBuilderServiceRequest.ListCatalogs ->
             UiBuilderServiceResponse.Catalogs(listOf(catalog))
-          is UiBuilderServiceRequest.CreateDesign -> {
-            created += request.document.id
-            createdDocuments[request.document.id] = request.document
-            documents[request.document.id] = request.document
-            UiBuilderServiceResponse.Catalogs(emptyList())
-          }
+          is UiBuilderServiceRequest.CreateDesign ->
+            if (request.document.id.startsWith("refused")) {
+              // The service says "bad request" for every refusal, a design limit as much as a
+              // duplicate id.
+              UiBuilderServiceResponse.Error(
+                UiBuilderServiceError(ServiceErrorCodeV1.BAD_REQUEST, "design limit reached")
+              )
+            } else {
+              created += request.document.id
+              createdDocuments[request.document.id] = request.document
+              documents[request.document.id] = request.document
+              UiBuilderServiceResponse.Catalogs(emptyList())
+            }
           else -> UiBuilderServiceResponse.Catalogs(emptyList())
         }
 
@@ -190,6 +197,27 @@ class ServeUiBuilderCreateRoutesTest {
         assertEquals("/ui-builder/mywidget3", response.header("Location"))
       }
     assertEquals(listOf("mywidget3"), created)
+  }
+
+  @Test
+  fun `a create the service refuses is reported, not redirected to a design that is not there`() {
+    val request =
+      Request.Builder()
+        .url(url("/ui-builder/designs"))
+        .header("X-Test-Actor", "operator")
+        .post(
+          FormBody.Builder()
+            .add("designId", "refused-design")
+            .add("catalog", "m3-catalog")
+            .add("template", "blank")
+            .build()
+        )
+        .build()
+    client.newCall(request).execute().use { response ->
+      assertEquals(400, response.code)
+      assertTrue("design limit reached" in response.body.string())
+    }
+    assertTrue(created.isEmpty())
   }
 
   @Test
