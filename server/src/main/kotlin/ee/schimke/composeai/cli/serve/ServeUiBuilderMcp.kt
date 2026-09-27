@@ -11,6 +11,7 @@ import ee.schimke.composeai.uibuilder.protocol.DesignAccessActionV1
 import ee.schimke.composeai.uibuilder.protocol.DesignAccessRoleV1
 import ee.schimke.composeai.uibuilder.protocol.DesignCommandV1
 import ee.schimke.composeai.uibuilder.protocol.DesignDocumentV1
+import ee.schimke.composeai.uibuilder.protocol.DesignHomeV1
 import ee.schimke.composeai.uibuilder.protocol.DesignListItemV1
 import ee.schimke.composeai.uibuilder.protocol.DesignMutationV1
 import ee.schimke.composeai.uibuilder.protocol.DesignUpdateEnvelopeV1
@@ -52,6 +53,7 @@ import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
@@ -176,6 +178,8 @@ class ServeUiBuilderMcp(
       REACT_TO_COMMENT -> if (comments == null) null else UiBuilderRouteCapability.WRITE
       CREATE_DESIGN,
       APPLY,
+      MOVE_DESIGN_HOME,
+      REPLACE_DESIGN_DOCUMENT,
       RENAME_DESIGN,
       // Sharing writes to the design's access control, and the service admits only its owner.
       SHARE_DESIGN,
@@ -244,6 +248,8 @@ class ServeUiBuilderMcp(
             ),
           )
         CREATE_DESIGN -> createDesign(args, actor)
+        MOVE_DESIGN_HOME,
+        REPLACE_DESIGN_DOCUMENT -> return authoritativeDocumentMutation(tool, args, actor, callId)
         RENAME_DESIGN,
         DELETE_DESIGN -> return manageDesign(tool, args, actor, callId)
         DESIGN_ACCESS -> GetDesignAccessRequestV1(designId = args.requiredText("designId"))
@@ -256,16 +262,7 @@ class ServeUiBuilderMcp(
               UiBuilderServiceCall(
                 actor,
                 UiBuilderServiceRequest.ExportDocument(
-                  try {
-                    UI_BUILDER_JSON.decodeFromJsonElement(
-                      DesignDocumentV1.serializer(),
-                      args["document"] ?: throw McpRequestException("document is required"),
-                    )
-                  } catch (failure: kotlinx.serialization.SerializationException) {
-                    throw McpRequestException(
-                      "document is not a DesignDocumentV1: ${failure.message}"
-                    )
-                  },
+                  args.requiredDocument(),
                   args.exportFormat(),
                 ),
               )
@@ -470,6 +467,44 @@ class ServeUiBuilderMcp(
       }
       else -> envelope(callId, response)
     }
+  }
+
+  /**
+   * The two complete-document writes that deliberately do not pretend to be v1 design mutations.
+   *
+   * Their requests are typed at the service seam and their replies are the released operation
+   * outcome envelope. The host only translates JSON and authenticated identity; exact revisions,
+   * idempotency, authorization, validation, retention and broadcast stay authoritative in the
+   * runtime.
+   */
+  private suspend fun authoritativeDocumentMutation(
+    tool: String,
+    args: JsonObject,
+    actor: AuthenticatedUiBuilderActor,
+    callId: String,
+  ): String {
+    val designId = args.requiredText("designId")
+    val operationId = args.requiredText("operationId")
+    val baseRevision = args.requiredNumber("baseRevision")
+    val request =
+      when (tool) {
+        MOVE_DESIGN_HOME ->
+          UiBuilderServiceRequest.MoveDesignHome(
+            designId = designId,
+            sourceHome = args.requiredNullableHome("sourceHome"),
+            targetHome = args.requiredHome("targetHome"),
+            baseRevision = baseRevision,
+            operationId = operationId,
+          )
+        else ->
+          UiBuilderServiceRequest.ReplaceDesignDocument(
+            designId = designId,
+            document = args.requiredDocument(),
+            baseRevision = baseRevision,
+            operationId = operationId,
+          )
+      }
+    return envelope(callId, service.execute(UiBuilderServiceCall(actor, request)))
   }
 
   /**
@@ -1134,6 +1169,36 @@ class ServeUiBuilderMcp(
 
   private fun JsonObject.number(name: String): Long? = this[name]?.jsonPrimitive?.longOrNull
 
+  private fun JsonObject.requiredNumber(name: String): Long =
+    number(name) ?: throw McpRequestException("`$name` is required and must be an integer")
+
+  private fun JsonObject.requiredDocument(): DesignDocumentV1 =
+    decodeRequired("document", DesignDocumentV1.serializer(), "DesignDocumentV1")
+
+  private fun JsonObject.requiredHome(name: String): DesignHomeV1 =
+    decodeRequired(name, DesignHomeV1.serializer(), "DesignHomeV1")
+
+  private fun JsonObject.requiredNullableHome(name: String): DesignHomeV1? {
+    val value =
+      this[name] ?: throw McpRequestException("`$name` is required (use null for no home)")
+    if (value is JsonNull) return null
+    return decodeRequired(name, DesignHomeV1.serializer(), "DesignHomeV1")
+  }
+
+  private fun <T> JsonObject.decodeRequired(
+    name: String,
+    serializer: kotlinx.serialization.KSerializer<T>,
+    typeName: String,
+  ): T =
+    try {
+      UI_BUILDER_JSON.decodeFromJsonElement(
+        serializer,
+        this[name] ?: throw McpRequestException("`$name` is required"),
+      )
+    } catch (failure: SerializationException) {
+      throw McpRequestException("`$name` is not a $typeName: ${failure.message}")
+    }
+
   /** A frame fraction; `0.5` never survives [number], and an anchor is written in fractions. */
   private fun JsonObject.decimal(name: String): Float? = this[name]?.jsonPrimitive?.floatOrNull
 
@@ -1187,6 +1252,8 @@ class ServeUiBuilderMcp(
     const val PREVIEW_CATALOG_RECOVERY = "ui_builder_preview_catalog_recovery"
     const val CREATE_DESIGN = "ui_builder_create_design"
     const val APPLY = "ui_builder_apply"
+    const val MOVE_DESIGN_HOME = "ui_builder_move_design_home"
+    const val REPLACE_DESIGN_DOCUMENT = "ui_builder_replace_design_document"
     const val EXPORT = "ui_builder_export"
     const val EXPORT_DOCUMENT = "ui_builder_export_document"
     const val RENDER_NATIVE = "ui_builder_render_native"
@@ -1253,6 +1320,8 @@ class ServeUiBuilderMcp(
         AWAIT_DESIGN,
         CREATE_DESIGN,
         APPLY,
+        MOVE_DESIGN_HOME,
+        REPLACE_DESIGN_DOCUMENT,
         EXPORT,
         EXPORT_DOCUMENT.takeIf { RemoteDocumentExportSupport.formats.isNotEmpty() },
         DESIGN_ACCESS,
@@ -1290,7 +1359,16 @@ class ServeUiBuilderMcp(
      * news twice.
      */
     val COMMENT_NOTICE_TOOLS =
-      setOf(GET_DESIGN, APPLY, EXPORT, RENDER_NATIVE, PUT_ASSET, AWAIT_DESIGN)
+      setOf(
+        GET_DESIGN,
+        APPLY,
+        MOVE_DESIGN_HOME,
+        REPLACE_DESIGN_DOCUMENT,
+        EXPORT,
+        RENDER_NATIVE,
+        PUT_ASSET,
+        AWAIT_DESIGN,
+      )
 
     private const val DEFAULT_DESIGN_PAGE = 50
 
@@ -1448,6 +1526,42 @@ class ServeUiBuilderMcp(
             "clientId":{"type":"string"},
             "operations":{"type":"array","items":{"type":"object"},"description":"DesignMutationV1 objects. State example: {\"type\":\"setStateVariable\",\"name\":\"expanded\",\"declaration\":{\"type\":\"value\",\"valueType\":\"bool\",\"initialValue\":false,\"nullable\":false,\"persistence\":\"preview\"}}. Event example: {\"type\":\"setEventBinding\",\"nodeId\":\"button\",\"event\":\"click\",\"actions\":[{\"type\":\"toggle\",\"variable\":\"expanded\"}]}. Declare state before binding it in the batch."}
           },"required":["designId","operationId","baseRevision","operations"],"additionalProperties":false}
+          """,
+        ),
+        tool(
+          MOVE_DESIGN_HOME,
+          "Move a design's canonical home between this server and a repository checkout. This " +
+            "changes real authoritative state: quote the exact `baseRevision` and current " +
+            "`sourceHome` from $GET_DESIGN, provide a stable `operationId`, and name the new " +
+            "`targetHome`. The old server record remains as a retained copy pointing at the new " +
+            "home. The reply is an idempotent operation outcome with the new revision; a stale " +
+            "revision or changed source home is refused rather than overwriting a concurrent move.",
+          """
+          {"type":"object","properties":{
+            "designId":{"type":"string"},
+            "operationId":{"type":"string","description":"Your stable id; makes a retry idempotent."},
+            "baseRevision":{"type":"integer","description":"The exact current revision read from the design."},
+            "sourceHome":{"description":"The exact current DesignHomeV1, or null when the design is unhomed.","anyOf":[{"type":"null"},{"type":"object"}]},
+            "targetHome":{"type":"object","description":"A DesignHomeV1: {kind:server,url,designId} or {kind:repo,path}."}
+          },"required":["designId","operationId","baseRevision","sourceHome","targetHome"],"additionalProperties":false}
+          """,
+        ),
+        tool(
+          REPLACE_DESIGN_DOCUMENT,
+          "Replace one stored design from a complete DesignDocumentV1 copy — the authoritative " +
+            "save-back and re-import operation. The document must name the same design and the " +
+            "same canonical home you read from $GET_DESIGN; `baseRevision` must still be current. " +
+            "The runtime validates the complete document and quotas, preserves server-owned " +
+            "identity, access and creation time, retains the old revision, and broadcasts a " +
+            "whole snapshot. Retry with the same `operationId`; never invent a new id after a " +
+            "lost response.",
+          """
+          {"type":"object","properties":{
+            "designId":{"type":"string"},
+            "operationId":{"type":"string","description":"Your stable id; makes a retry idempotent."},
+            "baseRevision":{"type":"integer","description":"The exact current revision being replaced."},
+            "document":{"type":"object","description":"The complete replacement DesignDocumentV1, including the existing home."}
+          },"required":["designId","operationId","baseRevision","document"],"additionalProperties":false}
           """,
         ),
         tool(

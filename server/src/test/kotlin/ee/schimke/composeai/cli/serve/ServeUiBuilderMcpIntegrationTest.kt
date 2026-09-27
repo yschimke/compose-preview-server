@@ -793,6 +793,89 @@ class ServeUiBuilderMcpIntegrationTest {
   }
 
   @Test
+  fun `an agent replaces a document and moves its canonical home with idempotent retries`() {
+    val server = start()
+    envelope(
+      server,
+      ServeUiBuilderMcp.CREATE_DESIGN,
+      """{"designId":"authoritative","document":${json.encodeToString(DesignDocumentV1.serializer(), document().copy(id = "authoritative"))}}""",
+    )
+    fun snapshot() =
+      assertIs<SnapshotResponseV1>(
+          response(
+            envelope(
+              server,
+              ServeUiBuilderMcp.GET_DESIGN,
+              """{"designId":"authoritative","includeCatalog":true}""",
+            )
+          )
+        )
+        .snapshot
+
+    val initial = snapshot().state.document
+    val replacement = initial.copy(title = "Saved from a temporary copy")
+    val replaceArguments =
+      """{"designId":"authoritative","operationId":"replace-1","baseRevision":0,"document":${json.encodeToString(DesignDocumentV1.serializer(), replacement)}}"""
+    val replaced =
+      assertIs<AcceptedOutcomeV1>(
+        assertIs<OperationOutcomeResponseV1>(
+            response(envelope(server, ServeUiBuilderMcp.REPLACE_DESIGN_DOCUMENT, replaceArguments))
+          )
+          .outcome
+      )
+    assertEquals(1, replaced.committedRevision)
+    assertEquals("Saved from a temporary copy", snapshot().state.document.title)
+    // A retry with the same operation id returns the original outcome without a second revision.
+    val replaceReplay =
+      assertIs<AcceptedOutcomeV1>(
+        assertIs<OperationOutcomeResponseV1>(
+            response(envelope(server, ServeUiBuilderMcp.REPLACE_DESIGN_DOCUMENT, replaceArguments))
+          )
+          .outcome
+      )
+    assertEquals(replaced.copy(idempotentReplay = true), replaceReplay)
+    assertEquals(1, snapshot().state.document.revision)
+
+    val sourceHome = assertNotNull(snapshot().state.document.home)
+    val targetHome = DesignHomeV1.Repo("designs/authoritative.uid")
+    val moveArguments =
+      """{"designId":"authoritative","operationId":"move-1","baseRevision":1,"sourceHome":${json.encodeToString(DesignHomeV1.serializer(), sourceHome)},"targetHome":${json.encodeToString(DesignHomeV1.serializer(), targetHome)}}"""
+    val moved =
+      assertIs<AcceptedOutcomeV1>(
+        assertIs<OperationOutcomeResponseV1>(
+            response(envelope(server, ServeUiBuilderMcp.MOVE_DESIGN_HOME, moveArguments))
+          )
+          .outcome
+      )
+    assertEquals(2, moved.committedRevision)
+    assertEquals(targetHome, snapshot().state.document.home)
+    val moveReplay =
+      assertIs<AcceptedOutcomeV1>(
+        assertIs<OperationOutcomeResponseV1>(
+            response(envelope(server, ServeUiBuilderMcp.MOVE_DESIGN_HOME, moveArguments))
+          )
+          .outcome
+      )
+    assertEquals(moved.copy(idempotentReplay = true), moveReplay)
+    assertEquals(2, snapshot().state.document.revision)
+
+    val stale =
+      assertIs<RejectedOutcomeV1>(
+        assertIs<OperationOutcomeResponseV1>(
+            response(
+              envelope(
+                server,
+                ServeUiBuilderMcp.MOVE_DESIGN_HOME,
+                """{"designId":"authoritative","operationId":"stale-move","baseRevision":1,"sourceHome":${json.encodeToString(DesignHomeV1.serializer(), sourceHome)},"targetHome":${json.encodeToString(DesignHomeV1.serializer(), targetHome)}}""",
+              )
+            )
+          )
+          .outcome
+      )
+    assertEquals(RejectionCodeV1.REVISION_MISMATCH, stale.code)
+  }
+
+  @Test
   fun `an agent renames its design and deletes it when it is done`() {
     val server = start()
     envelope(
