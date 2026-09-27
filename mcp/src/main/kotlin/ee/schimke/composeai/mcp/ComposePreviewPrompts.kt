@@ -11,6 +11,7 @@ import io.modelcontextprotocol.kotlin.sdk.types.TextContent
 internal object ComposePreviewPrompts {
   private const val PREVIEW_FILE = "preview-file"
   private const val MIGRATE_WEAR_M3 = "migrate-wear-m3"
+  private const val MAX_PATH_LENGTH = 1024
 
   fun list(): List<Prompt> =
     listOf(
@@ -41,13 +42,21 @@ internal object ComposePreviewPrompts {
 
   private fun previewFile(path: String?): GetPromptResult {
     require(!path.isNullOrBlank()) { "preview-file requires a path" }
+    require(path.length <= MAX_PATH_LENGTH) {
+      "preview-file path must be at most $MAX_PATH_LENGTH characters"
+    }
+    // The path is echoed into prompt text inside backticks and a quoted string; refuse the
+    // characters that could break out of either rather than escaping them.
+    require(path.none { it.isISOControl() || it == '`' || it == '"' }) {
+      "preview-file path must not contain control characters, backticks, or double quotes"
+    }
     return result(
       """
       Render the Compose previews declared by `$path`.
 
       1. Call `find_previews_for_file` with `path: "$path"`.
       2. Render each returned URI with `render_preview`. Start with `observe: "hash"`; request
-         `observe: "png"` and show the result in the viewer for screens that need visual inspection.
+         `observe: "png"` only for screens that need visual inspection.
       3. Report a file with no previews plainly. Do not guess a preview URI from the Kotlin name.
       4. If the source changed outside the daemon watcher, call `notify_file_changed` before
          rendering and then repeat the lookup.

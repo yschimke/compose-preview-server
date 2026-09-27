@@ -2853,7 +2853,7 @@ class DaemonMcpServer(
       put("message", "Choose one rendered variant by label: ${choices.joinToString(" | ")}")
       putJsonArray("choices") { choices.forEach { add(JsonPrimitive(it)) } }
     }
-    val result =
+    val elicitation =
       (session as? McpSession)?.elicitForm(
         message = "Choose the rendered variant to use. Each label names its display overrides.",
         requestedSchema =
@@ -2870,17 +2870,40 @@ class DaemonMcpServer(
             }
             putJsonArray("required") { add(JsonPrimitive("variant")) }
           },
-      ) ?: return fallback
+      ) ?: FormElicitation.Unsupported
+    val result =
+      when (elicitation) {
+        FormElicitation.Unsupported -> return fallback
+        FormElicitation.TimedOut ->
+          return buildJsonObject {
+            put("mode", "timeout")
+            put(
+              "message",
+              "The variant chooser was not answered in time. Do not re-open it or ask again " +
+                "unprompted; report the labelled choices and let the user pick when they return.",
+            )
+            putJsonArray("choices") { choices.forEach { add(JsonPrimitive(it)) } }
+          }
+        is FormElicitation.Answered -> elicitation.result
+      }
     when (result.action) {
       ElicitResult.Action.Decline ->
         return buildJsonObject {
           put("mode", "declined")
-          put("message", "The user declined to choose a rendered variant.")
+          put(
+            "message",
+            "The user declined to choose a rendered variant. Respect that: do not ask again " +
+              "for a choice, in a form or in chat, unless the user brings it up.",
+          )
         }
       ElicitResult.Action.Cancel ->
         return buildJsonObject {
           put("mode", "cancelled")
-          put("message", "The user cancelled variant selection.")
+          put(
+            "message",
+            "The user cancelled variant selection. Do not re-ask for a choice unless the user " +
+              "asks to pick one.",
+          )
         }
       ElicitResult.Action.Accept -> Unit
     }

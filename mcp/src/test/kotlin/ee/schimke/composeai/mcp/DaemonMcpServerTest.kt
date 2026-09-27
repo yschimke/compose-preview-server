@@ -6,9 +6,13 @@ import ee.schimke.composeai.daemon.client.WorkspaceId
 import ee.schimke.composeai.daemon.protocol.DaemonLaunchDescriptor
 import ee.schimke.composeai.mcp.protocol.ReadResourceResult
 import ee.schimke.composeai.mcp.protocol.ResourceContents
+import io.modelcontextprotocol.kotlin.sdk.types.ClientCapabilities
+import io.modelcontextprotocol.kotlin.sdk.types.ElicitResult
 import io.modelcontextprotocol.kotlin.sdk.types.Implementation
 import io.modelcontextprotocol.kotlin.sdk.types.ListPromptsResult
 import io.modelcontextprotocol.kotlin.sdk.types.ListToolsResult
+import io.modelcontextprotocol.kotlin.sdk.types.McpException
+import io.modelcontextprotocol.kotlin.sdk.types.RPCError
 import java.awt.image.BufferedImage
 import java.io.File
 import java.io.IOException
@@ -90,20 +94,61 @@ class DaemonMcpServerTest {
   }
 
   @Test
-  fun `elicitation fallback propagates cancellation`() {
+  fun `elicitation propagates cancellation and distinguishes timeout from unsupported`() {
     assertThrows(CancellationException::class.java) {
-      runBlocking { elicitationOrNull<Any> { throw CancellationException("cancelled") } }
+      runBlocking { awaitElicitation(60_000) { throw CancellationException("cancelled") } }
     }
-    assertThat(runBlocking { elicitationOrNull<Any> { error("unsupported") } }).isNull()
+    assertThat(runBlocking { awaitElicitation(60_000) { error("unsupported") } })
+      .isEqualTo(FormElicitation.Unsupported)
     assertThat(
         runBlocking {
-          elicitationOrNull<Any>(timeoutMs = 10) {
-            delay(1_000)
-            Any()
+          awaitElicitation(60_000) {
+            throw McpException(RPCError.ErrorCode.REQUEST_TIMEOUT, "Request timed out")
           }
         }
       )
-      .isNull()
+      .isEqualTo(FormElicitation.TimedOut)
+    assertThat(
+        runBlocking {
+          awaitElicitation(timeoutMs = 10) {
+            delay(5_000)
+            ElicitResult(action = ElicitResult.Action.Accept)
+          }
+        }
+      )
+      .isEqualTo(FormElicitation.TimedOut)
+    val declined = ElicitResult(action = ElicitResult.Action.Decline)
+    assertThat(runBlocking { awaitElicitation(60_000) { declined } })
+      .isEqualTo(FormElicitation.Answered(declined))
+    assertThat(McpSession.DEFAULT_ELICITATION_TIMEOUT_MS).isAtLeast(120_000L)
+  }
+
+  @Test
+  fun `form elicitation capability follows the spec's form-or-bare rule`() {
+    val empty = JsonObject(emptyMap())
+    assertThat(supportsFormElicitation(null)).isFalse()
+    assertThat(supportsFormElicitation(ClientCapabilities.Elicitation())).isTrue()
+    assertThat(supportsFormElicitation(ClientCapabilities.Elicitation(form = empty))).isTrue()
+    assertThat(supportsFormElicitation(ClientCapabilities.Elicitation(form = empty, url = empty)))
+      .isTrue()
+    assertThat(supportsFormElicitation(ClientCapabilities.Elicitation(url = empty))).isFalse()
+  }
+
+  @Test
+  fun `preview-file prompt rejects oversized and breakout paths as invalid params`() {
+    client.initialize()
+    for (path in listOf("x".repeat(2_000), "/a`b.kt", "/a\"b.kt", "/a\nb.kt")) {
+      val error =
+        client.requestError(
+          "prompts/get",
+          buildJsonObject {
+            put("name", "preview-file")
+            putJsonObject("arguments") { put("path", path) }
+          },
+        )
+      assertThat(error["code"]!!.jsonPrimitive.content.toInt())
+        .isEqualTo(RPCError.ErrorCode.INVALID_PARAMS)
+    }
   }
 
   @Test
@@ -1899,6 +1944,7 @@ class DaemonMcpServerTest {
       val action: String,
       val variant: String? = null,
       val formCapability: Boolean = true,
+      val urlCapability: Boolean = true,
       val expectedMode: String,
       val expectedRequests: Long = 1,
     )
@@ -1914,6 +1960,14 @@ class DaemonMcpServerTest {
           formCapability = false,
           expectedMode = "text",
           expectedRequests = 0,
+        ),
+        // A bare `elicitation: {}` predates the form/url split and means form support.
+        Case(
+          "accept",
+          "__FIRST__",
+          formCapability = false,
+          urlCapability = false,
+          expectedMode = "elicitation",
         ),
       )
 
@@ -1954,7 +2008,10 @@ class DaemonMcpServerTest {
       client.initialize(
         capabilities =
           buildJsonObject {
-            putJsonObject("elicitation") { if (case.formCapability) putJsonObject("form") {} }
+            putJsonObject("elicitation") {
+              if (case.formCapability) putJsonObject("form") {}
+              if (case.urlCapability) putJsonObject("url") {}
+            }
           }
       )
       val projectDir = tmp.newFolder("form-workspace-$index")
@@ -5012,6 +5069,23 @@ class McpTestClient(
   }
 
   fun request(method: String, params: JsonElement? = null, timeoutMs: Long = 5_000): JsonObject {
+    val resp = rawRequest(method, params, timeoutMs)
+    if (resp["error"] != null) {
+      error("request($method) error: ${resp["error"]}")
+    }
+    return resp["result"]?.jsonObject ?: error("request($method): no result in $resp")
+  }
+
+  /** Sends a request that is expected to fail and returns its JSON-RPC `error` object. */
+  fun requestError(
+    method: String,
+    params: JsonElement? = null,
+    timeoutMs: Long = 5_000,
+  ): JsonObject =
+    rawRequest(method, params, timeoutMs)["error"]?.jsonObject
+      ?: error("requestError($method): expected an error response")
+
+  private fun rawRequest(method: String, params: JsonElement?, timeoutMs: Long): JsonObject {
     val id = nextId.getAndIncrement()
     val slot = responses.computeIfAbsent(id) { LinkedBlockingQueue() }
     val payload = buildJsonObject {
@@ -5025,10 +5099,7 @@ class McpTestClient(
       slot.poll(timeoutMs, TimeUnit.MILLISECONDS)
         ?: error("request($method) timed out after ${timeoutMs}ms; reader failure: $readerFailure")
     responses.remove(id)
-    if (resp["error"] != null) {
-      error("request($method) error: ${resp["error"]}")
-    }
-    return resp["result"]?.jsonObject ?: error("request($method): no result in $resp")
+    return resp
   }
 
   fun callTool(

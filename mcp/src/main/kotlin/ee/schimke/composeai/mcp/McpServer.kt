@@ -6,8 +6,10 @@ import ee.schimke.composeai.mcp.protocol.ToolDef
 import io.modelcontextprotocol.kotlin.sdk.server.ServerOptions
 import io.modelcontextprotocol.kotlin.sdk.server.ServerSession
 import io.modelcontextprotocol.kotlin.sdk.server.StdioServerTransport
+import io.modelcontextprotocol.kotlin.sdk.shared.RequestOptions
 import io.modelcontextprotocol.kotlin.sdk.types.BlobResourceContents
 import io.modelcontextprotocol.kotlin.sdk.types.CallToolRequest
+import io.modelcontextprotocol.kotlin.sdk.types.ClientCapabilities
 import io.modelcontextprotocol.kotlin.sdk.types.ContentBlock as SdkContentBlock
 import io.modelcontextprotocol.kotlin.sdk.types.ElicitRequestParams
 import io.modelcontextprotocol.kotlin.sdk.types.ElicitResult
@@ -48,6 +50,7 @@ import java.util.UUID
 import java.util.concurrent.CancellationException
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.ConcurrentHashMap
+import kotlin.time.Duration.Companion.milliseconds
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
@@ -198,42 +201,77 @@ class McpSession(
   }
 
   /**
-   * Ask through a typed MCP form only when this client explicitly declared form elicitation.
-   * Callers receive null for older clients and must include their own complete text fallback.
+   * Ask through a typed MCP form when this client supports form elicitation: it declared
+   * `elicitation.form`, or declared a bare `elicitation: {}` (the pre-2025-11 shape, which means
+   * form). A URL-only client is never sent a form. [FormElicitation.Unsupported] tells the caller
+   * to use its complete text fallback; a timeout is reported separately so the caller can say the
+   * question went unanswered instead of silently re-asking.
    */
   suspend fun elicitForm(
     message: String,
     requestedSchema: JsonObject,
     timeoutMs: Long = DEFAULT_ELICITATION_TIMEOUT_MS,
-  ): ElicitResult? {
-    val session = sdkSession ?: return null
-    if (session.clientCapabilities?.elicitation?.form == null) return null
+  ): FormElicitation {
+    val session = sdkSession ?: return FormElicitation.Unsupported
+    if (!supportsFormElicitation(session.clientCapabilities?.elicitation)) {
+      return FormElicitation.Unsupported
+    }
     val schema = Json {
       ignoreUnknownKeys = true
     }
       .decodeFromJsonElement<ElicitRequestParams.RequestedSchema>(requestedSchema)
-    return elicitationOrNull(timeoutMs) { session.createElicitation(message, schema) }
+    return awaitElicitation(timeoutMs) {
+      session.createElicitation(message, schema, RequestOptions(timeout = timeoutMs.milliseconds))
+    }
   }
 
-  private companion object {
-    const val DEFAULT_ELICITATION_TIMEOUT_MS = 60_000L
+  internal companion object {
+    /**
+     * A person answering a form needs longer than the SDK's 60-second request default; a shorter
+     * bound would silently fall back while their dialog is still open.
+     */
+    const val DEFAULT_ELICITATION_TIMEOUT_MS = 5 * 60_000L
   }
 }
 
-internal suspend fun <T> elicitationOrNull(
-  timeoutMs: Long = 60_000L,
-  request: suspend () -> T,
-): T? =
+/** Outcome of asking the client for a form answer. */
+sealed interface FormElicitation {
+  /** The client cannot show a form (or rejected the request); use the text fallback. */
+  data object Unsupported : FormElicitation
+
+  /** The person did not answer within the bound. The form may have been dismissed by the client. */
+  data object TimedOut : FormElicitation
+
+  data class Answered(val result: ElicitResult) : FormElicitation
+}
+
+/** `form != null || (form == null && url == null)`: an empty capability object means form. */
+internal fun supportsFormElicitation(capability: ClientCapabilities.Elicitation?): Boolean =
+  capability != null && (capability.form != null || capability.url == null)
+
+internal suspend fun awaitElicitation(
+  timeoutMs: Long,
+  request: suspend () -> ElicitResult,
+): FormElicitation =
   try {
-    withTimeoutOrNull(timeoutMs) { request() }
+    // The SDK enforces the same bound through RequestOptions; this outer guard (with a little
+    // slack) also covers a request implementation that ignores it.
+    withTimeoutOrNull(timeoutMs + ELICITATION_TIMEOUT_SLACK_MS) {
+      FormElicitation.Answered(request())
+    } ?: FormElicitation.TimedOut
   } catch (cancelled: CancellationException) {
+    // Coroutine cancellation is rethrown so cancelling tools/call terminates the handler.
     throw cancelled
+  } catch (failure: McpException) {
+    if (failure.code == RPCError.ErrorCode.REQUEST_TIMEOUT) FormElicitation.TimedOut
+    else FormElicitation.Unsupported
   } catch (_: Exception) {
-    // Treat rejected or malformed client replies like an unsupported elicitation request. The
-    // caller always includes an equivalent text workflow. Coroutine cancellation is rethrown so
-    // cancelling tools/call actually terminates the suspended handler.
-    null
+    // A rejected or malformed client reply is treated like an unsupported client: the caller
+    // always includes an equivalent text workflow.
+    FormElicitation.Unsupported
   }
+
+private const val ELICITATION_TIMEOUT_SLACK_MS = 1_000L
 
 /** Tracks every live [Session] so notifications can fan out to multiple connected clients. */
 class SessionRegistry {
