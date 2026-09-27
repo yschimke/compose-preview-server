@@ -34,6 +34,7 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.add
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonArray
@@ -1632,6 +1633,262 @@ class DaemonMcpServerTest {
     val tooBig = render()
     assertThat(tooBig["cardPath"]).isNull()
     assertThat(tooBig["cardSkipped"]!!.jsonPrimitive.content).contains("500,000")
+  }
+
+  private fun capability(
+    kind: String,
+    transport: ee.schimke.composeai.daemon.protocol.DataProductTransport =
+      ee.schimke.composeai.daemon.protocol.DataProductTransport.INLINE,
+  ) =
+    ee.schimke.composeai.daemon.protocol.DataProductCapability(
+      kind = kind,
+      schemaVersion = 1,
+      transport = transport,
+      attachable = false,
+      fetchable = true,
+      requiresRerender = false,
+    )
+
+  private fun finding(level: String, type: String, node: String) = buildJsonObject {
+    put("level", level)
+    put("type", type)
+    put("message", "$type on $node")
+    put("viewDescription", node)
+    put("boundsInScreen", "0,0,20,10")
+  }
+
+  /**
+   * Serves `a11y/atf`, `a11y/overlay` (from [overlay]) and `layout/inspector` for every preview.
+   */
+  private fun serveDetails(overlay: File) {
+    factory.daemonConfigurer = { d ->
+      d.advertisedDataProducts =
+        listOf(
+          capability("a11y/atf"),
+          capability(
+            "a11y/overlay",
+            ee.schimke.composeai.daemon.protocol.DataProductTransport.PATH,
+          ),
+          capability("layout/inspector"),
+        )
+      d.dataFetchHandler = { _, kind, _, _ ->
+        when (kind) {
+          "a11y/atf" ->
+            FakeDaemon.DataFetchOutcome.Ok(
+              kind = kind,
+              schemaVersion = 1,
+              payload =
+                buildJsonObject {
+                  putJsonArray("findings") {
+                    add(finding("ERROR", "TouchTargetSizeCheck", "Button"))
+                    add(finding("WARNING", "TextContrastCheck", "Title"))
+                    add(finding("ERROR", "TouchTargetSizeCheck", "Icon"))
+                  }
+                },
+            )
+          "a11y/overlay" -> FakeDaemon.DataFetchOutcome.Ok(kind, 1, path = overlay.absolutePath)
+          "layout/inspector" ->
+            FakeDaemon.DataFetchOutcome.Ok(
+              kind = kind,
+              schemaVersion = 1,
+              payload =
+                buildJsonObject {
+                  putJsonObject("root") {
+                    put("component", "Column")
+                    putJsonObject("bounds") {
+                      put("left", 0)
+                      put("top", 0)
+                      put("right", 2)
+                      put("bottom", 2)
+                    }
+                    putJsonArray("children") {
+                      add(
+                        buildJsonObject {
+                          put("displayName", "Text")
+                          putJsonObject("bounds") {
+                            put("left", 0)
+                            put("top", 0)
+                            put("right", 2)
+                            put("bottom", 1)
+                          }
+                        }
+                      )
+                      add(buildJsonObject { put("component", "Spacer") })
+                    }
+                  }
+                },
+            )
+          else -> FakeDaemon.DataFetchOutcome.Unknown
+        }
+      }
+    }
+  }
+
+  private fun cardEnvelope(result: JsonObject): JsonObject {
+    val html = File(result["cardPath"]!!.jsonPrimitive.content).readText()
+    val block =
+      html
+        .substringAfterLast("<script type=\"application/json\" id=\"compose-preview-result\">")
+        .substringBefore("</script>")
+    return json.parseToJsonElement(block).jsonObject
+  }
+
+  @Test
+  fun `render_preview details embed a11y and layout in the card and one summary line each`() {
+    client.initialize()
+    val workspaceId = registerWorkspace(tmp.newFolder("details"), "details")
+    val overlay = tmp.newFile("overlay.png")
+    writeSolidPng(overlay, 0xff00ff00.toInt())
+    serveDetails(overlay)
+    val daemon = warmDaemonFor(workspaceId, ":app")
+    daemon.emitDiscovery("com.example.DetailPreview")
+    client.expectNotification("notifications/resources/list_changed", 2_000)
+    val png = tmp.newFile("detail.png")
+    writeSolidPng(png, 0xff0000ff.toInt())
+    daemon.autoRenderPngPath = { png.absolutePath }
+
+    val call =
+      client.callTool(
+        "render_preview",
+        buildJsonObject {
+          put("preview", "DetailPreview")
+          put("card", true)
+          putJsonArray("details") {
+            add("a11y")
+            add("layout")
+          }
+        },
+        timeoutMs = 10_000,
+      )
+    val texts = call.textContents()
+    // The model sees one line per detail, not the findings or the boxes.
+    assertThat(texts[1].lines())
+      .containsExactly(
+        "a11y: 2 errors, 1 warning (TouchTargetSize ×2, TextContrast ×1)",
+        "layout: 3 nodes (layout/inspector)",
+      )
+      .inOrder()
+    assertThat(texts.joinToString()).doesNotContain("Icon")
+
+    val result = json.parseToJsonElement(texts[0]).jsonObject
+    assertThat(result["cardDetailsDropped"]).isNull()
+    val content = cardEnvelope(result)["result"]!!.jsonObject["content"]!!.jsonArray
+    assertThat(content).hasSize(4)
+    // The render stays the first image and the summary the first text.
+    assertThat(Base64.getDecoder().decode(content[0].jsonObject["data"]!!.jsonPrimitive.content))
+      .isEqualTo(png.readBytes())
+    val overlayBlock = content[2].jsonObject
+    assertThat(overlayBlock["_meta"]!!.jsonObject["composePreview/detail"]!!.jsonPrimitive.content)
+      .isEqualTo("a11y/overlay")
+    assertThat(Base64.getDecoder().decode(overlayBlock["data"]!!.jsonPrimitive.content))
+      .isEqualTo(overlay.readBytes())
+    val detailsBlock = content[3].jsonObject
+    assertThat(detailsBlock["_meta"]!!.jsonObject["composePreview/detail"]!!.jsonPrimitive.content)
+      .isEqualTo("details")
+    val details = json.parseToJsonElement(detailsBlock["text"]!!.jsonPrimitive.content).jsonObject
+    val findings = details["a11y"]!!.jsonObject["findings"]!!.jsonArray
+    assertThat(findings.map { it.jsonObject["level"]!!.jsonPrimitive.content })
+      .containsExactly("ERROR", "ERROR", "WARNING")
+      .inOrder()
+    assertThat(findings[0].jsonObject["rule"]!!.jsonPrimitive.content).isEqualTo("TouchTargetSize")
+    assertThat(findings[0].jsonObject["bounds"]!!.jsonArray.map { it.jsonPrimitive.content })
+      .containsExactly("0", "0", "20", "10")
+      .inOrder()
+    val layout = details["layout"]!!.jsonObject
+    assertThat(layout["nodes"]!!.jsonPrimitive.content).isEqualTo("3")
+    // The Spacer has no bounds, so only two boxes are drawn.
+    assertThat(layout["boxes"]!!.jsonArray.map { it.jsonObject["label"]!!.jsonPrimitive.content })
+      .containsExactly("Column", "Text")
+      .inOrder()
+
+    // Without details the call costs nothing extra: no fetch, no summary line, no detail blocks.
+    val plain =
+      client.callTool(
+        "render_preview",
+        buildJsonObject {
+          put("preview", "DetailPreview")
+          put("card", true)
+        },
+        timeoutMs = 10_000,
+      )
+    assertThat(plain.textContents()).hasSize(1)
+    val plainContent =
+      cardEnvelope(json.parseToJsonElement(plain.firstTextContent()).jsonObject)["result"]!!
+        .jsonObject["content"]!!
+        .jsonArray
+    assertThat(plainContent).hasSize(2)
+  }
+
+  @Test
+  fun `render_preview details name unavailable products and are dropped first over the card cap`() {
+    client.initialize()
+    val workspaceId = registerWorkspace(tmp.newFolder("details-cap"), "cap")
+    // A noisy overlay far over the cap on its own; the render itself is tiny.
+    val overlay = tmp.newFile("big-overlay.png")
+    val noise = BufferedImage(400, 400, BufferedImage.TYPE_INT_ARGB)
+    val random = java.util.Random(7)
+    for (y in 0 until 400) for (x in 0 until 400) noise.setRGB(x, y, random.nextInt())
+    ImageIO.write(noise, "png", overlay)
+    serveDetails(overlay)
+    val daemon = warmDaemonFor(workspaceId, ":app")
+    daemon.emitDiscovery("com.example.CapPreview")
+    client.expectNotification("notifications/resources/list_changed", 2_000)
+    val png = tmp.newFile("cap.png")
+    writeSolidPng(png, 0xff0000ff.toInt())
+    daemon.autoRenderPngPath = { png.absolutePath }
+
+    val call =
+      client.callTool(
+        "render_preview",
+        buildJsonObject {
+          put("preview", "CapPreview")
+          put("card", true)
+          putJsonArray("details") { add("a11y") }
+        },
+        timeoutMs = 10_000,
+      )
+    val result = json.parseToJsonElement(call.firstTextContent()).jsonObject
+    assertThat(result["cardDetailsDropped"]!!.jsonPrimitive.content).contains("500,000")
+    val content = cardEnvelope(result)["result"]!!.jsonObject["content"]!!.jsonArray
+    assertThat(content).hasSize(2)
+    assertThat(call.textContents()[1]).startsWith("a11y: 2 errors")
+
+    // A module whose daemon produces none of the kinds says so, one line per detail.
+    factory.daemonConfigurer = {}
+    val bare = warmDaemonFor(workspaceId, ":bare")
+    bare.emitDiscovery("com.example.BarePreview")
+    client.expectNotification("notifications/resources/list_changed", 2_000)
+    bare.autoRenderPngPath = { png.absolutePath }
+    val missing =
+      client.callTool(
+        "render_preview",
+        buildJsonObject {
+          put("preview", "BarePreview")
+          put("inline", true)
+          put("observe", "hash")
+          putJsonArray("details") {
+            add("layout")
+            add("a11y")
+          }
+        },
+        timeoutMs = 10_000,
+      )
+    assertThat(missing.textContents().last().lines())
+      .containsExactly(
+        "a11y: unavailable (this daemon does not produce a11y/atf)",
+        "layout: unavailable (this daemon produces neither layout/inspector nor compose/semantics)",
+      )
+      .inOrder()
+
+    val invalid =
+      client.callTool(
+        "render_preview",
+        buildJsonObject {
+          put("preview", "BarePreview")
+          putJsonArray("details") { add("pixels") }
+        },
+      )
+    assertThat(invalid.firstTextContent()).contains("'details' entries must be")
   }
 
   @Test
