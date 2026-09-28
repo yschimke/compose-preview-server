@@ -19,6 +19,7 @@ import { test, expect } from "@playwright/test";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { PNG } from "pngjs";
 import { listThemes } from "./_themes.mjs";
 
 const harnessDir = dirname(fileURLToPath(import.meta.url));
@@ -6525,10 +6526,10 @@ test("contract · static viewer bounds results and rejects credentials", async (
 async function openLiveViewer(
   page,
   pngs,
-  { frameHeight = 700, listTools = true, refuseCalls = false, firstResult } = {},
+  { frameHeight = 700, listTools = true, refuseCalls = false, firstResult, hostContext } = {},
 ) {
   await page.goto("/preview-harness/index.html");
-  await page.evaluate(({ pngs, frameHeight, listTools, refuseCalls, firstResult }) => {
+  await page.evaluate(({ pngs, frameHeight, listTools, refuseCalls, firstResult, hostContext }) => {
     const base = "compose-preview://fixture/_app/com.example.Card";
     const round = "compose-preview://fixture/_app/com.example.Card_Round?config=round";
     const log = (window.__live = {
@@ -6559,7 +6560,10 @@ async function openLiveViewer(
         return;
       }
       if (method === "ui/initialize") {
-        reply({ hostCapabilities: { serverTools: {}, serverResources: { subscribe: true } } });
+        reply({
+          hostCapabilities: { serverTools: {}, serverResources: { subscribe: true } },
+          ...(hostContext ? { hostContext } : {}),
+        });
         send({ method: "ui/notifications/tool-input", params: { arguments: { preview: "Card" } } });
         send({
           method: "ui/notifications/tool-result",
@@ -6638,7 +6642,7 @@ async function openLiveViewer(
     });
     frame.src = "/mcp-app/compose-preview-viewer.html";
     document.body.append(frame);
-  }, { pngs, frameHeight, listTools, refuseCalls, firstResult: firstResult ?? null });
+  }, { pngs, frameHeight, listTools, refuseCalls, firstResult: firstResult ?? null, hostContext: hostContext ?? null });
   return page.frameLocator('iframe[title="Compose Preview MCP App"]');
 }
 
@@ -6786,6 +6790,116 @@ test("contract · a 160px host frame shows the whole preview and the toolbar", a
   const sizes = await page.evaluate(() => window.__live.sizes);
   expect(Math.max(...sizes.map((size) => size.height))).toBeGreaterThan(shown.height);
   expect(Math.max(...sizes.map((size) => size.height))).toBeGreaterThan(160);
+});
+
+// A solid PNG of the given size, base64: tall enough to overflow any sensible host frame.
+function solidPng(width, height) {
+  const png = new PNG({ width, height });
+  for (let offset = 0; offset < png.data.length; offset += 4) {
+    png.data[offset] = 0x31;
+    png.data[offset + 1] = 0x5d;
+    png.data[offset + 2] = 0xa8;
+    png.data[offset + 3] = 0xff;
+  }
+  return PNG.sync.write(png).toString("base64");
+}
+
+const tallPngs = () => {
+  const tall = solidPng(400, 1600);
+  return { base: tall, round: tall, refreshed: tall };
+};
+
+// Claude Desktop gives the iframe the height it asks for but shows it inside a shorter
+// container, so window.innerHeight is large; the host's hostContext.containerDimensions is the
+// real limit (MCP Apps SEP-1865).
+const firstScreenBottom = (viewer) =>
+  viewer.locator("#source-location").evaluate((node) => node.getBoundingClientRect().bottom);
+const reportedHeights = async (page) =>
+  (await page.evaluate(() => window.__live.sizes)).map((size) => size.height);
+
+test("contract · the viewer fits a tall preview to the host's containerDimensions.maxHeight", async ({ page }) => {
+  const viewer = await openLiveViewer(page, tallPngs(), {
+    frameHeight: 1200,
+    hostContext: { containerDimensions: { maxHeight: 300, maxWidth: 620 } },
+  });
+  const image = viewer.locator("#canvas .preview-stage > img");
+  await expect(image).toBeVisible();
+  await expect(viewer.locator("#rerender")).toBeVisible();
+  await expect.poll(() => firstScreenBottom(viewer)).toBeLessThanOrEqual(300);
+  const shown = await image.boundingBox();
+  expect(shown.height).toBeGreaterThan(100);
+  expect(Math.abs(shown.width / shown.height - 400 / 1600)).toBeLessThan(0.05);
+  await expect.poll(() => reportedHeights(page)).toContainEqual(expect.any(Number));
+  expect(Math.max(...(await reportedHeights(page)))).toBeLessThanOrEqual(300);
+
+  // host-context-changed replaces the limit: a taller container lets the image grow.
+  await page.evaluate(() =>
+    window.__liveSend({
+      method: "ui/notifications/host-context-changed",
+      params: { containerDimensions: { maxHeight: 420 } },
+    }),
+  );
+  await expect.poll(async () => (await image.boundingBox()).height).toBeGreaterThan(shown.height + 60);
+  await expect.poll(() => firstScreenBottom(viewer)).toBeLessThanOrEqual(420);
+  await expect.poll(async () => Math.max(...(await reportedHeights(page)))).toBeGreaterThan(300);
+  expect(Math.max(...(await reportedHeights(page)))).toBeLessThanOrEqual(420);
+
+  // A fixed height is a limit too.
+  await page.evaluate(() =>
+    window.__liveSend({
+      method: "ui/notifications/host-context-changed",
+      params: { containerDimensions: { height: 250, width: 620 } },
+    }),
+  );
+  await expect.poll(() => firstScreenBottom(viewer)).toBeLessThanOrEqual(250);
+  expect((await reportedHeights(page)).at(-1)).toBeLessThanOrEqual(250);
+});
+
+test("contract · with no containerDimensions a tall preview fits about 480px", async ({ page }) => {
+  const viewer = await openLiveViewer(page, tallPngs(), { frameHeight: 1200 });
+  const image = viewer.locator("#canvas .preview-stage > img");
+  await expect(image).toBeVisible();
+  await expect.poll(() => firstScreenBottom(viewer)).toBeLessThanOrEqual(480);
+  expect((await image.boundingBox()).height).toBeGreaterThan(250);
+  await expect.poll(() => reportedHeights(page)).toContainEqual(expect.any(Number));
+  // Details and comments may sit below the fold, but this result has neither.
+  expect(Math.max(...(await reportedHeights(page)))).toBeLessThanOrEqual(480);
+});
+
+test("contract · a render_matrix grid fits the host's containerDimensions.maxHeight", async ({ page }) => {
+  const tall = solidPng(400, 1600);
+  const viewer = await openLiveViewer(page, tallPngs(), {
+    frameHeight: 1200,
+    hostContext: { containerDimensions: { maxHeight: 360 } },
+  });
+  await expect(viewer.locator("#canvas .preview-stage > img")).toBeVisible();
+  const { base } = await page.evaluate(() => window.__liveUris);
+  await page.evaluate(({ uri, tall }) =>
+    window.__liveSend({
+      method: "ui/notifications/tool-result",
+      params: {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({
+              uri,
+              cells: Array.from({ length: 6 }, (_, index) => ({ overrides: { fontScale: 1 + index / 4 }, png: tall })),
+            }),
+          },
+        ],
+      },
+    }), { uri: base, tall });
+  const cells = viewer.locator(".cell");
+  await expect(cells).toHaveCount(6);
+  await expect(cells.first().locator("img")).toBeVisible();
+  await expect.poll(async () => {
+    const boxes = await cells.evaluateAll((nodes) => nodes.map((node) => node.getBoundingClientRect().bottom));
+    return Math.max(...boxes);
+  }).toBeLessThanOrEqual(360);
+  await expect.poll(() => firstScreenBottom(viewer)).toBeLessThanOrEqual(360);
+  const image = await cells.first().locator("img").boundingBox();
+  expect(image.height).toBeGreaterThan(40);
+  expect(Math.max(...(await reportedHeights(page)))).toBeLessThanOrEqual(360);
 });
 
 const livePngs = () => ({

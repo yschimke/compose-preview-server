@@ -463,6 +463,25 @@ class DaemonMcpServerTest {
   }
 
   @Test
+  fun `status reports the server version and each running daemon's version`() {
+    client.initialize()
+    val projectDir = tmp.newFolder("versioned")
+    tmp.newFolder("versioned", "module")
+    val workspaceId = registerWorkspace(projectDir, "demo")
+    warmDaemonFor(workspaceId, ":module")
+
+    val payload = json.parseToJsonElement(client.callTool("status").firstTextContent()).jsonObject
+    assertThat(payload["schema"]?.jsonPrimitive?.contentOrNull)
+      .isEqualTo("compose-preview-mcp-status/v1")
+    assertThat(payload["serverVersion"]?.jsonPrimitive?.contentOrNull).isEqualTo(MCP_VERSION)
+    val daemon =
+      payload["projects"]!!.jsonArray.single().jsonObject["daemons"]!!.jsonArray.single().jsonObject
+    assertThat(daemon["module"]?.jsonPrimitive?.contentOrNull).isEqualTo(":module")
+    assertThat(daemon["daemonVersion"]?.jsonPrimitive?.contentOrNull).isEqualTo("fake")
+    assertThat(daemon["protocolVersion"]?.jsonPrimitive?.contentOrNull).isEqualTo("2")
+  }
+
+  @Test
   fun `bootstrap tools list_changed fires when full catalog completes inside grace period`() {
     // Race covered by issue #670: a client receives bootstrapToolDefs from tools/list, the full
     // catalog finishes loading well under TOOL_CATALOG_NOTIFY_DELAY_MS, and without this fix no
@@ -1697,6 +1716,105 @@ class DaemonMcpServerTest {
     render()
     assertThat(calls).hasSize(2)
     bootServer.shutdown()
+  }
+
+  @Test
+  fun `a cold render past the call budget returns pending and the retry attaches to the bootstrap`() {
+    val project = tmp.newFolder("slow-bootstrap")
+    File(project, "settings.gradle.kts").writeText("include(\":app\")")
+    File(project, "gradlew").writeText("#!/bin/sh\n")
+    val release = java.util.concurrent.CountDownLatch(1)
+    val runs = java.util.concurrent.atomic.AtomicInteger()
+    val runner = GradleTaskRunner { root, _, _, _ ->
+      runs.incrementAndGet()
+      release.await(30, TimeUnit.SECONDS)
+      val dir = File(root, "app/build/compose-previews").apply { mkdirs() }
+      File(dir, "daemon-launch.json")
+        .writeText(
+          """{"schemaVersion":2,"modulePath":":app","variant":"desktop","enabled":true,""" +
+            """"mainClass":"x","classpath":[],"jvmArgs":[],"systemProperties":{},""" +
+            """"workingDirectory":"${dir.parentFile.parent}","manifestPath":"manifest.json"}"""
+        )
+      GradleTaskRunner.Result(0, "BUILD SUCCESSFUL")
+    }
+    val budgetServer =
+      DaemonMcpServer(
+        supervisor,
+        workingDirectory = null,
+        projectBootstrap = ProjectBootstrap(runner = runner),
+        callBudgetMs = 500,
+      )
+    restartSession(budgetServer)
+    client.initialize()
+    val args = buildJsonObject {
+      put("preview", "AppPreview")
+      put("project", project.absolutePath)
+    }
+
+    val first = client.callTool("render_preview", args)
+    assertThat(first.isError()).isFalse()
+    val pending = json.parseToJsonElement(first.firstTextContent()).jsonObject
+    assertThat(pending["pending"]?.jsonPrimitive?.contentOrNull).isEqualTo("true")
+    assertThat(pending["phase"]?.jsonPrimitive?.contentOrNull).isEqualTo("starting")
+    assertThat(pending["retryAfterMs"]?.jsonPrimitive?.contentOrNull).isNotNull()
+    assertThat(pending["message"]?.jsonPrimitive?.contentOrNull).contains("render_preview again")
+
+    // Still bootstrapping: the retry waits on the same run rather than starting another.
+    val second = client.callTool("render_preview", args)
+    assertThat(second.firstTextContent()).contains("\"pending\":true")
+    assertThat(runs.get()).isEqualTo(1)
+
+    release.countDown()
+    val done = client.callTool("render_preview", args, timeoutMs = 10_000)
+    assertThat(done.firstTextContent()).doesNotContain("\"pending\"")
+    assertThat(runs.get()).isEqualTo(1)
+    assertThat(factory.daemons.keys)
+      .contains(supervisor.listProjects().single().workspaceId to ":app")
+    budgetServer.shutdown()
+  }
+
+  @Test
+  fun `a slow render past the call budget returns pending and the retry collects the same render`() {
+    supervisor.shutdown()
+    factory = FakeDaemonClientFactory()
+    supervisor =
+      DaemonSupervisor(descriptorProvider = FakeDescriptorProvider(), clientFactory = factory)
+    val budgetServer = DaemonMcpServer(supervisor, workingDirectory = null, callBudgetMs = 500)
+    restartSession(budgetServer)
+    client.initialize()
+    val projectDir = tmp.newFolder("slow-render")
+    tmp.newFolder("slow-render", "module")
+    val workspaceId = registerWorkspace(projectDir, "demo")
+    val daemon = warmDaemonFor(workspaceId, ":module")
+    val previewId = "com.example.Slow"
+    daemon.emitDiscovery(previewId)
+    client.expectNotification("notifications/resources/list_changed", 2_000)
+    val args = buildJsonObject {
+      put("uri", PreviewUri(workspaceId, ":module", previewId).toUri())
+      put("observe", "hash")
+    }
+
+    // No autoRenderPngPath: the daemon accepts renderNow and never finishes on its own.
+    val first = client.callTool("render_preview", args)
+    assertThat(first.isError()).isFalse()
+    val pending = json.parseToJsonElement(first.firstTextContent()).jsonObject
+    assertThat(pending["pending"]?.jsonPrimitive?.contentOrNull).isEqualTo("true")
+    assertThat(pending["phase"]?.jsonPrimitive?.contentOrNull).isEqualTo("rendering")
+    assertThat(daemon.renderRequests.poll(2, TimeUnit.SECONDS)).containsExactly(previewId)
+
+    val second = client.callTool("render_preview", args)
+    assertThat(second.firstTextContent()).contains("\"pending\":true")
+    assertThat(daemon.renderRequests.poll(200, TimeUnit.MILLISECONDS)).isNull()
+
+    val png = tmp.newFile("slow-render.png")
+    writeSolidPng(png, 0xFFFF0000.toInt())
+    daemon.emitRenderFinished(previewId, png.absolutePath)
+    val done = client.callTool("render_preview", args, timeoutMs = 10_000)
+    assertThat(done.isError()).isFalse()
+    val parsed = json.parseToJsonElement(done.firstTextContent()).jsonObject
+    assertThat(parsed["observe"]?.jsonPrimitive?.contentOrNull).isEqualTo("hash")
+    assertThat(daemon.renderRequests.poll(200, TimeUnit.MILLISECONDS)).isNull()
+    budgetServer.shutdown()
   }
 
   @Test

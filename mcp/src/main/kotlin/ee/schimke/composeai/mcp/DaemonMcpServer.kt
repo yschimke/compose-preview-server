@@ -60,6 +60,13 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import javax.imageio.ImageIO
 import kotlin.time.Duration.Companion.seconds
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
@@ -189,6 +196,15 @@ class DaemonMcpServer(
    * install` never ran there) on first use. `null` turns that off; tests pass a fake runner.
    */
   private val projectBootstrap: ProjectBootstrap? = ProjectBootstrap(),
+  /**
+   * Wall-clock budget (ms) for one `render_preview` / `render_matrix` call, counted from the start
+   * of the call and including workspace registration, Gradle bootstrap and daemon spawn. Claude
+   * Desktop and Claude Code abort a request at about 60 s, so past the budget the call returns a
+   * `pending` result while the work carries on, and the agent's retry attaches to it. `0` or less
+   * turns the budget off. `COMPOSE_PREVIEW_MCP_CALL_BUDGET_MS` overrides the 45 s default.
+   */
+  private val callBudgetMs: Long =
+    environment[CALL_BUDGET_ENV]?.toLongOrNull() ?: DEFAULT_CALL_BUDGET_MS,
 ) {
 
   private val fullToolDefsLoader: () -> List<ToolDef> =
@@ -488,6 +504,7 @@ class DaemonMcpServer(
   fun shutdown() {
     runCatching { freshnessExecutor.shutdownNow() }
     runCatching { renderDispatchExecutor.shutdownNow() }
+    runCatching { budgetedCallScope.cancel() }
     synchronized(fileRenderCacheLock) { runCatching { fileRenderCacheDir.deleteRecursively() } }
   }
 
@@ -2551,11 +2568,13 @@ class DaemonMcpServer(
       "list_projects" -> toolListProjects()
       "list_devices" -> toolListDevices()
       "find_previews_for_file" -> toolFindPreviewsForFile(args)
-      "render_preview" -> {
-        if (scope == null) autoRegisterWorkspace(session)
-        renderPreviewChoosingVariant(session, args, scope, progress)
-      }
-      "render_matrix" -> toolRenderMatrix(session, args)
+      "render_preview" ->
+        withCallBudget(session, name, args, progress) { report ->
+          if (scope == null) autoRegisterWorkspace(session)
+          renderPreviewChoosingVariant(session, args, scope, report)
+        }
+      "render_matrix" ->
+        withCallBudget(session, name, args, progress) { toolRenderMatrix(session, args) }
       "watch" -> toolWatch(session, args)
       "unwatch" -> toolUnwatch(session, args)
       "list_watches" -> toolListWatches(session)
@@ -2587,6 +2606,93 @@ class DaemonMcpServer(
           errorCallToolResult("unknown tool: $name")
         }
     }
+  }
+
+  /** A budgeted render call still running or not yet collected; see [withCallBudget]. */
+  private class InFlightCall {
+    val result = CompletableDeferred<CallToolResult>()
+    @Volatile var completedAtNanos: Long = 0
+
+    /** Where progress goes: the latest caller still waiting, else only stderr. */
+    @Volatile var reportTo: ((String) -> Unit)? = null
+  }
+
+  private data class InFlightCallKey(val session: Session, val tool: String, val args: JsonObject)
+
+  private val inFlightCalls = ConcurrentHashMap<InFlightCallKey, InFlightCall>()
+
+  private val budgetedCallScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+  /**
+   * Runs [block] under [callBudgetMs]. The work runs detached from the request, so when the budget
+   * runs out the call returns a non-error `pending` result and the bootstrap or render carries on.
+   * A later call with the same session, tool and arguments attaches to that work instead of
+   * starting it again, and gets its result (or its error, such as the render timeout) once done. A
+   * finished result nobody collected is dropped after [UNCOLLECTED_CALL_RESULT_TTL_MS].
+   */
+  private suspend fun withCallBudget(
+    session: Session,
+    tool: String,
+    args: JsonObject,
+    progress: (String) -> Unit,
+    block: suspend (progress: (String) -> Unit) -> CallToolResult,
+  ): CallToolResult {
+    if (callBudgetMs <= 0) return block(progress)
+    val startedAt = System.nanoTime()
+    val key = InFlightCallKey(session, tool, args)
+    var created: InFlightCall? = null
+    val call =
+      inFlightCalls.compute(key) { _, existing ->
+        val stale =
+          existing != null &&
+            existing.completedAtNanos != 0L &&
+            System.nanoTime() - existing.completedAtNanos >
+              TimeUnit.MILLISECONDS.toNanos(UNCOLLECTED_CALL_RESULT_TTL_MS)
+        if (existing != null && !stale) existing else InFlightCall().also { created = it }
+      }!!
+    call.reportTo = progress
+    created?.let { work ->
+      budgetedCallScope.launch {
+        val outcome = runCatching {
+          block { message ->
+            work.reportTo?.invoke(message) ?: System.err.println("compose-preview-mcp: $message")
+          }
+        }
+        work.completedAtNanos = System.nanoTime()
+        outcome.fold(work.result::complete, work.result::completeExceptionally)
+      }
+    }
+    val remainingMs = callBudgetMs - TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedAt)
+    if (withTimeoutOrNull(remainingMs.coerceAtLeast(1)) { call.result.join() } == null) {
+      if (call.reportTo === progress) call.reportTo = null
+      return pendingCallResult(tool)
+    }
+    inFlightCalls.remove(key, call)
+    return call.result.await()
+  }
+
+  /** The `pending` result [withCallBudget] returns when the budget runs out. */
+  private fun pendingCallResult(tool: String): CallToolResult {
+    val rendering =
+      supervisor.listProjects().any { project ->
+        project.daemons.values.any { it.initialDiscoveryComplete }
+      }
+    val payload = buildJsonObject {
+      put("pending", true)
+      put("phase", if (rendering) "rendering" else "starting")
+      put("retryAfterMs", PENDING_CALL_RETRY_AFTER_MS)
+      put(
+        "message",
+        (if (rendering) "The preview is still rendering"
+        else "The project is still starting (Gradle bootstrap and render daemon)") +
+          "; the work continues in the background. Call $tool again with the same arguments " +
+          "to get the result.",
+      )
+    }
+    return CallToolResult(
+      content = listOf(ContentBlock.Text(payload.toString())),
+      structuredContent = payload,
+    )
   }
 
   // -------------------------------------------------------------------------
@@ -2756,6 +2862,7 @@ class DaemonMcpServer(
     val payload = buildJsonObject {
       put("schema", "compose-preview-mcp-status/v1")
       put("ready", true)
+      put("serverVersion", serverInfo.version)
       putJsonObject("toolCatalog") {
         put("status", catalogState)
         put("bootstrapToolCount", bootstrapToolDefs.size)
@@ -2781,6 +2888,10 @@ class DaemonMcpServer(
                     buildJsonObject {
                       put("module", module)
                       put("spawned", daemon.replicaCount() > 0)
+                      daemon.initializeResult?.let { init ->
+                        put("daemonVersion", init.daemonVersion)
+                        put("protocolVersion", init.protocolVersion)
+                      }
                       put("initialDiscoveryComplete", daemon.initialDiscoveryComplete)
                       put(
                         "previewCount",
@@ -7205,7 +7316,9 @@ class DaemonMcpServer(
         "Render one with render_preview preview=<FunctionName> (a function name or FQN suffix); " +
         "no URI lookup, register_project or source search is needed.\n" +
         "With inline=false it returns pngPath, and in Antigravity also cardPath plus an " +
-        "<agent-embed> line to paste into the reply."
+        "<agent-embed> line to paste into the reply. " +
+        "Never fake a render: don't hand-build an HTML, CSS or SVG mock of a preview; " +
+        "if rendering fails, report the error."
 
     /** Tools whose existing text output gains an optional, portable MCP Apps presentation. */
     private val VIEWER_TOOL_NAMES =
@@ -7270,6 +7383,18 @@ class DaemonMcpServer(
 
     /** Suggested delay before polling `watch(awaitDiscovery=false)` readiness again. */
     private const val WATCH_DISCOVERY_RETRY_AFTER_MS: Long = 500
+
+    /** Overrides [DEFAULT_CALL_BUDGET_MS]; see `callBudgetMs`. */
+    const val CALL_BUDGET_ENV = "COMPOSE_PREVIEW_MCP_CALL_BUDGET_MS"
+
+    /** Below the ~60 s at which Claude Desktop and Claude Code abort a request. */
+    const val DEFAULT_CALL_BUDGET_MS: Long = 45_000
+
+    /** `retryAfterMs` of a `pending` render result; the retry itself waits up to the budget. */
+    private const val PENDING_CALL_RETRY_AFTER_MS: Long = 1_000
+
+    /** How long a budgeted call's finished result waits for its retry before it is dropped. */
+    private const val UNCOLLECTED_CALL_RESULT_TTL_MS: Long = 60_000
 
     /**
      * Default cadence for the background source-freshness poller. 30 s is slow enough to be cheap
