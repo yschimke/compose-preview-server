@@ -100,7 +100,7 @@ graphics-shapes = "1.1.0"
 # and the compose-ui-builder release that projects the binding.
 # 2.26.1 starts playground snippet JVMs with a minimal environment unless the sandbox already
 # clears it (compose-ai-tools#5585).
-composeai-tools = "2.26.1"
+composeai-tools = "2.28.3"
 # The render daemons, the renderers, the preview annotations and data API, and the data extractors,
 # published from yschimke/compose-preview-daemon since its 3.0.0 (compose-ai-tools#5336). Layer 1a
 # in that repository's `docs/design/REPOSITORY_LAYERS.md`: between the contracts and
@@ -168,7 +168,7 @@ composeai-tools = "2.26.1"
 # post-capture work each render did (`postCapture.<kind>` / `postCaptureSkipped.<kind>` in the
 # `render/trace` metrics), enables `compose/semantics` by default (#1166) and adds
 # `DaemonSession.compileSources` (#1174, compose-preview-daemon#163).
-composeai-preview-daemon = "3.9.1"
+composeai-preview-daemon = "3.9.2"
 # 2.9.0 is the first release carrying `DesignEnvironmentV1.exportDevices` and its Set/Reset
 # changes, which is the field a design names its export devices in. 2.14.0 adds the components a
 # design defines — `DesignDocumentV1.components`, `DesignNodeV1.component` and the `binding` value
