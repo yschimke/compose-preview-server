@@ -8,7 +8,8 @@
   body { margin: 0; background: var(--color-background-primary, #fff); }
   .app { padding: 8px; }
   /* One compact header line, so a short host frame (Claude Desktop starts near 160px) still fits
-     the image and the toolbar. --image-max is set from the measured chrome, see fitToFrame(). */
+     the image and the toolbar. --image-max and --cell-image-max are set from the measured chrome
+     and the host's containerDimensions, see fitToFrame(). */
   .bar { display: flex; gap: 8px; align-items: center; min-width: 0; margin-bottom: 6px; }
   .bar-text { display: flex; gap: 8px; align-items: baseline; min-width: 0; flex: 1 1 auto; }
   .title { font-weight: 650; white-space: nowrap; }
@@ -44,7 +45,7 @@
   .comparison-slider { width: 100%; margin: 0; }
   .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; width: 100%; padding: 8px; box-sizing: border-box; }
   .cell { border: 1px solid var(--color-border, #d8d8dd); border-radius: 8px; padding: 6px; background: var(--color-background-primary, #fff); cursor: pointer; }
-  .cell img { width: 100%; display: block; }
+  .cell img { width: 100%; height: auto; max-height: var(--cell-image-max, none); object-fit: contain; display: block; }
   .cell code { font-size: 11px; overflow-wrap: anywhere; }
   .fallback { width: 100%; padding: 12px; box-sizing: border-box; }
   .fallback p { margin: 0 0 8px; }
@@ -1586,12 +1587,32 @@
     meta.textContent = 'Static result unavailable; use the complete text fallback.';
   }
 
-  // Sizing (MCP Apps `ui/notifications/size-changed`). The image is capped to what the frame can
-  // show under the header and toolbar, so hosts that ignore the notification still show the whole
-  // preview; the notification asks for the height the image wants (fit to width, capped at about
-  // 70% of the screen), so hosts that honour it grow the frame to match.
+  // Sizing (MCP Apps `ui/notifications/size-changed` and `hostContext.containerDimensions`).
+  // A host may give the iframe the height it asks for but show it inside a shorter container, so
+  // window.innerHeight alone is not the visible height. The host's containerDimensions is: a fixed
+  // `height`, or a flexible `maxHeight` (the View sizes itself up to it). Whichever is known caps
+  // the image (or the grid of matrix cells) to that height less the header, toolbar and source
+  // line, and caps what size-changed asks for. With no dimensions the first screen is held to
+  // DEFAULT_FRAME_HEIGHT rather than growing to most of the screen.
+  const DEFAULT_FRAME_HEIGHT = 480;
+  let containerDimensions;
   let fitScheduled = false;
   let lastReportedHeight = 0;
+
+  function applyHostContext(context) {
+    if (!context || typeof context !== 'object' || !('containerDimensions' in context)) return;
+    const dimensions = context.containerDimensions;
+    containerDimensions = dimensions && typeof dimensions === 'object' ? dimensions : undefined;
+    lastReportedHeight = 0;
+    scheduleFit();
+  }
+
+  const positive = value => typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : undefined;
+
+  // The height the host will show: a fixed height wins over a maximum; undefined when unbounded.
+  function hostHeightLimit() {
+    return positive(containerDimensions?.height) ?? positive(containerDimensions?.maxHeight);
+  }
 
   function scheduleFit() {
     if (fitScheduled) return;
@@ -1602,23 +1623,61 @@
     });
   }
 
+  // Groups the matrix cells into rows by their top edge, and returns each row's tallest image as
+  // drawn (`shown`) and as it would be at the cell's width with no height cap (`natural`).
+  function gridRows(grid) {
+    const rows = new Map();
+    grid.querySelectorAll('.cell').forEach(cell => {
+      const top = Math.round(cell.offsetTop);
+      const image = cell.querySelector('img');
+      const shown = image ? image.getBoundingClientRect().height : 0;
+      const natural = image?.naturalWidth && image.naturalHeight
+        ? image.naturalHeight * (image.clientWidth / image.naturalWidth)
+        : shown;
+      const row = rows.get(top) || { shown: 0, natural: 0 };
+      rows.set(top, { shown: Math.max(row.shown, shown), natural: Math.max(row.natural, natural) });
+    });
+    return [...rows.values()];
+  }
+
   function fitToFrame() {
     const root = document.documentElement;
+    const limit = hostHeightLimit();
+    // `target` is the most the first screen may take: the host's limit, else the default. The
+    // image is drawn to fit the smaller of that and the current frame (for hosts that ignore
+    // size-changed), and size-changed asks for up to `target` so the frame can grow to it.
+    const target = limit ?? DEFAULT_FRAME_HEIGHT;
+    const frame = Math.min(window.innerHeight || Infinity, target);
+    // Only the header, the toolbar and the source line must share the first screen with the
+    // image; details and comments may sit below the fold.
+    const firstScreenBottom = q('#source-location').getBoundingClientRect().bottom + window.scrollY + 8;
     const image = canvas.classList.contains('has-image') ? canvas.querySelector('.preview-stage > img') : null;
-    let wanted = Math.ceil(root.scrollHeight);
+    const grid = image ? null : canvas.querySelector('.grid');
+    // The content's own height. The root's scrollHeight is never less than the frame, so a frame
+    // the host already made tall would keep being asked for.
+    const content = q('.app').getBoundingClientRect().height;
+    let wanted = Math.ceil(content);
     if (image) {
       const shown = image.getBoundingClientRect().height;
-      // Only the header, the toolbar and the source line must share the first screen with the
-      // image; details and comments may sit below the fold.
-      const firstScreenBottom = q('#source-location').getBoundingClientRect().bottom + window.scrollY + 8;
       const chrome = Math.max(0, firstScreenBottom - shown);
-      const screenCap = Math.round((window.screen?.availHeight || 800) * 0.7);
-      root.style.setProperty('--image-max', `${Math.max(32, Math.floor(window.innerHeight - chrome))}px`);
+      root.style.setProperty('--image-max', `${Math.max(32, Math.floor(frame - chrome))}px`);
       const natural = image.naturalWidth && image.naturalHeight
         ? image.naturalHeight * Math.min(1, canvas.clientWidth / image.naturalWidth)
         : shown;
-      wanted = Math.ceil(root.scrollHeight - shown + Math.min(natural, screenCap));
+      wanted = Math.ceil(content - shown + Math.min(natural, Math.max(32, target - chrome)));
+    } else if (grid) {
+      const rows = gridRows(grid);
+      const imagesHeight = rows.reduce((sum, row) => sum + row.shown, 0);
+      if (rows.length && imagesHeight > 0) {
+        const chrome = Math.max(0, firstScreenBottom - imagesHeight);
+        const perRow = available => Math.max(32, Math.floor((available - chrome) / rows.length));
+        root.style.setProperty('--cell-image-max', `${perRow(frame)}px`);
+        // Ask for the grid as it would be drawn at `target`, not as the current frame squeezed it.
+        const cappedImages = rows.reduce((sum, row) => sum + Math.min(row.natural, perRow(target)), 0);
+        wanted = Math.ceil(content - imagesHeight + cappedImages);
+      }
     }
+    if (limit !== undefined) wanted = Math.min(wanted, Math.floor(limit));
     if (!initialized || staticMode || wanted === lastReportedHeight) return;
     lastReportedHeight = wanted;
     notify('ui/notifications/size-changed', { height: wanted });
@@ -1922,6 +1981,11 @@
       if (!message.error) late.handle(message.result);
       return;
     }
+    if (message.method === 'ui/notifications/host-context-changed') {
+      // A partial HostContext: containerDimensions is replaced when present, kept otherwise.
+      applyHostContext(message.params);
+      return;
+    }
     if (message.method === 'ui/notifications/tool-input') {
       const incomingArguments = message.params?.arguments || {};
       if (overlayCall && incomingArguments.kind === 'a11y/overlay') return;
@@ -2014,6 +2078,7 @@
       });
       hostResourceSubscriptions = result?.hostCapabilities?.serverResources?.subscribe === true;
       hostServerTools = result?.hostCapabilities?.serverTools != null;
+      applyHostContext(result?.hostContext);
       initialized = true;
       notify('ui/notifications/initialized', {});
       scheduleFit();
