@@ -10,6 +10,8 @@ import ee.schimke.composeai.daemon.protocol.DataProductCapability
 import ee.schimke.composeai.io.SystemFileSystem
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
+import kotlin.time.Duration
+import kotlin.time.Duration.Companion.seconds
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.contentOrNull
@@ -56,6 +58,13 @@ class DaemonSupervisor(
    * (workspace, module), and that daemon fans renders out to its workers internally.
    */
   private val replicasPerDaemon: Int = DEFAULT_REPLICAS_PER_DAEMON,
+  /**
+   * How long [spawn] waits for the `initialize` response. A Robolectric daemon reads nothing until
+   * its first sandbox is up, which took ~45s for a Wear OS module; the client's 30s default then
+   * failed the handshake and left the cached capabilities, devices and discovery empty for the
+   * daemon's lifetime even though renders worked. See [DEFAULT_INITIALIZE_TIMEOUT].
+   */
+  private val initializeTimeout: Duration = DEFAULT_INITIALIZE_TIMEOUT,
   /**
    * D1 — kinds the supervisor passes through `initialize.options.attachDataProducts` to every
    * spawned daemon. Configures "always-on" data products (e.g. `a11y/atf` for ambient diagnostic
@@ -295,6 +304,7 @@ class DaemonSupervisor(
           moduleId = descriptor.modulePath,
           moduleProjectDir = descriptor.workingDirectory,
           attachDataProducts = globalAttachDataProducts.takeIf { it.isNotEmpty() },
+          timeout = initializeTimeout,
         )
       // Cache the full result so the public RenderSession view (`supervised.session`) can
       // expose it through `RenderSession.initializeResult`. Subsequent successful re-spawns
@@ -391,6 +401,13 @@ class DaemonSupervisor(
      * `--replicas-per-daemon N` flag or the `composeai.mcp.replicasPerDaemon` system property.
      */
     const val DEFAULT_REPLICAS_PER_DAEMON: Int = 4
+
+    /**
+     * Default [initializeTimeout]: long enough for a cold Robolectric sandbox boot on a busy
+     * machine. Override via the `composeai.mcp.initializeTimeoutSeconds` system property or the
+     * `COMPOSE_PREVIEW_INITIALIZE_TIMEOUT_SECONDS` environment variable.
+     */
+    val DEFAULT_INITIALIZE_TIMEOUT: Duration = 120.seconds
 
     /**
      * The out-of-the-box replica count for a machine with [cores] processors: half the cores less

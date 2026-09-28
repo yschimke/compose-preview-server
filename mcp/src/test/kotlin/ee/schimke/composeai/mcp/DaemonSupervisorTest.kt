@@ -4,6 +4,8 @@ import com.google.common.truth.Truth.assertThat
 import ee.schimke.composeai.daemon.client.WorkspaceId
 import java.io.File
 import kotlin.io.path.createTempDirectory
+import kotlin.time.Duration.Companion.milliseconds
+import kotlin.time.Duration.Companion.seconds
 import org.junit.Test
 
 class DaemonSupervisorTest {
@@ -63,6 +65,60 @@ class DaemonSupervisorTest {
     third.unregisterProject(id)
     assertThat(WorkspaceStore(storeFile).get(id.value)).isNull()
     third.shutdown()
+  }
+
+  @Test
+  fun `a handshake slower than the client default still caches the capabilities`() {
+    val factory = FakeDaemonClientFactory()
+    factory.daemonConfigurer = { daemon ->
+      daemon.advertisedDataProducts =
+        listOf(
+          ee.schimke.composeai.daemon.protocol.DataProductCapability(
+            kind = "compose/semantics",
+            schemaVersion = 1,
+            transport = ee.schimke.composeai.daemon.protocol.DataProductTransport.INLINE,
+            attachable = false,
+            fetchable = true,
+            requiresRerender = false,
+          )
+        )
+      daemon.advertisedSupportedOverrides = listOf("device")
+      // A Robolectric daemon answers only once its sandbox is up.
+      daemon.onInitializeReceived = { Thread.sleep(1_500) }
+    }
+    fun spawnWith(timeout: kotlin.time.Duration): SupervisedDaemon {
+      val supervisor =
+        DaemonSupervisor(
+          descriptorProvider = FakeDescriptorProvider(),
+          clientFactory = factory,
+          initializeTimeout = timeout,
+        )
+      val root = createTempDirectory("cp-supervisor-slow").toFile()
+      return supervisor.daemonFor(supervisor.registerProject(root).workspaceId, ":app")
+    }
+
+    // The failure mode: a timed-out handshake leaves the caches empty for the daemon's lifetime.
+    val timedOut = spawnWith(500.milliseconds)
+    assertThat(timedOut.dataProductCapabilities).isEmpty()
+    timedOut.shutdown()
+
+    val slow = spawnWith(10.seconds)
+    assertThat(slow.dataProductCapabilities.map { it.kind }).containsExactly("compose/semantics")
+    assertThat(slow.supportedOverrides).containsExactly("device")
+    slow.shutdown()
+
+    assertThat(DaemonSupervisor.DEFAULT_INITIALIZE_TIMEOUT).isAtLeast(120.seconds)
+  }
+
+  @Test
+  fun `initialize timeout reads positive seconds and falls back otherwise`() {
+    assertThat(DaemonMcpMain.parseInitializeTimeout("300")).isEqualTo(300.seconds)
+    assertThat(DaemonMcpMain.parseInitializeTimeout(null))
+      .isEqualTo(DaemonSupervisor.DEFAULT_INITIALIZE_TIMEOUT)
+    assertThat(DaemonMcpMain.parseInitializeTimeout("0"))
+      .isEqualTo(DaemonSupervisor.DEFAULT_INITIALIZE_TIMEOUT)
+    assertThat(DaemonMcpMain.parseInitializeTimeout("soon"))
+      .isEqualTo(DaemonSupervisor.DEFAULT_INITIALIZE_TIMEOUT)
   }
 
   @Test

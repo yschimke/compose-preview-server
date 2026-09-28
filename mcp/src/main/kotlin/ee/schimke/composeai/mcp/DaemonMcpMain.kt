@@ -3,6 +3,8 @@ package ee.schimke.composeai.mcp
 import ee.schimke.composeai.daemon.client.SubprocessDaemonClientFactory
 import io.modelcontextprotocol.kotlin.sdk.types.Implementation
 import java.io.File
+import kotlin.time.Duration
+import kotlin.time.Duration.Companion.seconds
 
 /**
  * Entry point for the standalone MCP server. Stdio transport in v0; remote / HTTP transports are a
@@ -65,6 +67,7 @@ object DaemonMcpMain {
         descriptorProvider = DescriptorProvider.readingFromDisk(),
         clientFactory = SubprocessDaemonClientFactory(),
         replicasPerDaemon = replicasPerDaemon,
+        initializeTimeout = parseInitializeTimeout(),
         workspaceStore = WorkspaceStore(WorkspaceStore.defaultFile()),
       )
     val server =
@@ -240,6 +243,27 @@ object DaemonMcpMain {
     val idx = raw.lastIndexOf(':')
     return if (idx <= 0) raw to null
     else raw.substring(0, idx) to raw.substring(idx + 1).takeIf { it.isNotEmpty() }
+  }
+
+  /**
+   * `composeai.mcp.initializeTimeoutSeconds`, then `COMPOSE_PREVIEW_INITIALIZE_TIMEOUT_SECONDS`.
+   */
+  internal fun parseInitializeTimeout(
+    raw: String? =
+      System.getProperty("composeai.mcp.initializeTimeoutSeconds")
+        ?: System.getenv("COMPOSE_PREVIEW_INITIALIZE_TIMEOUT_SECONDS")
+  ): Duration {
+    val default = DaemonSupervisor.DEFAULT_INITIALIZE_TIMEOUT
+    if (raw.isNullOrBlank()) return default
+    val seconds = raw.trim().toLongOrNull()
+    if (seconds == null || seconds <= 0) {
+      System.err.println(
+        "compose-preview-mcp: ignoring invalid initialize timeout '$raw' (want positive seconds); " +
+          "falling back to default $default"
+      )
+      return default
+    }
+    return seconds.seconds
   }
 
   private fun parseReplicasPerDaemon(args: Array<String>): Int {
