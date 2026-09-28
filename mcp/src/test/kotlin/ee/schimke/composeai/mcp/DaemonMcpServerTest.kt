@@ -758,7 +758,10 @@ class DaemonMcpServerTest {
     val payload = json.parseToJsonElement(watchResp.firstTextContent()).jsonObject
     assertThat(payload["awaitDiscovery"]?.jsonPrimitive?.contentOrNull).isEqualTo("true")
     assertThat(payload["ready"]?.jsonPrimitive?.contentOrNull).isEqualTo("true")
-    assertThat(payload["spawning"]?.jsonPrimitive?.contentOrNull?.toInt()).isEqualTo(1)
+    // register_project's warm-up may have spawned the module first; either way it is one daemon.
+    val alreadyUp = payload["alreadyUp"]?.jsonPrimitive?.contentOrNull?.toInt() ?: 0
+    val spawning = payload["spawning"]?.jsonPrimitive?.contentOrNull?.toInt() ?: 0
+    assertThat(alreadyUp + spawning).isEqualTo(1)
     val moduleState = payload["modules"]!!.jsonArray.single().jsonObject
     assertThat(moduleState["module"]?.jsonPrimitive?.contentOrNull).isEqualTo(":module")
     assertThat(moduleState["spawned"]?.jsonPrimitive?.contentOrNull).isEqualTo("true")
@@ -1771,6 +1774,142 @@ class DaemonMcpServerTest {
     assertThat(factory.daemons.keys)
       .contains(supervisor.listProjects().single().workspaceId to ":app")
     budgetServer.shutdown()
+  }
+
+  /** Writes the `:app` daemon launch descriptor [ProjectBootstrap] looks for under [root]. */
+  private fun writeAppDescriptor(root: File) {
+    val dir = File(root, "app/build/compose-previews").apply { mkdirs() }
+    File(dir, "daemon-launch.json")
+      .writeText(
+        """{"schemaVersion":2,"modulePath":":app","variant":"desktop","enabled":true,""" +
+          """"mainClass":"x","classpath":[],"jvmArgs":[],"systemProperties":{},""" +
+          """"workingDirectory":"${dir.parentFile.parent}","manifestPath":"manifest.json"}"""
+      )
+  }
+
+  private fun awaitCondition(what: String, timeoutMs: Long = 10_000, condition: () -> Boolean) {
+    val deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMs)
+    while (!condition()) {
+      if (System.nanoTime() > deadline) error("timed out waiting for $what")
+      Thread.sleep(20)
+    }
+  }
+
+  @Test
+  fun `register_project returns at once and warms the project in the background`() {
+    val project = tmp.newFolder("warm-on-register")
+    File(project, "settings.gradle.kts").writeText("include(\":app\")")
+    File(project, "gradlew").writeText("#!/bin/sh\n")
+    val release = java.util.concurrent.CountDownLatch(1)
+    val runs = java.util.concurrent.atomic.AtomicInteger()
+    val runner = GradleTaskRunner { root, _, _, _ ->
+      runs.incrementAndGet()
+      release.await(30, TimeUnit.SECONDS)
+      writeAppDescriptor(root)
+      GradleTaskRunner.Result(0, "BUILD SUCCESSFUL")
+    }
+    val warmServer =
+      DaemonMcpServer(
+        supervisor,
+        workingDirectory = null,
+        projectBootstrap = ProjectBootstrap(runner = runner),
+      )
+    restartSession(warmServer)
+    client.initialize()
+
+    val started = System.nanoTime()
+    val result =
+      client.callTool("register_project", buildJsonObject { put("path", project.absolutePath) })
+    val elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started)
+    // The Gradle bootstrap is still blocked on the latch: registration did not wait for it.
+    assertThat(release.count).isEqualTo(1)
+    assertThat(elapsedMs).isLessThan(5_000)
+    val payload = json.parseToJsonElement(result.firstTextContent()).jsonObject
+    assertThat(payload["warming"]?.jsonPrimitive?.contentOrNull).isEqualTo("true")
+    val id = WorkspaceId(payload["workspaceId"]!!.jsonPrimitive.content)
+    awaitCondition("the warm-up's Gradle bootstrap") { runs.get() == 1 }
+
+    release.countDown()
+    awaitCondition("the warm-up's daemon spawn") { factory.daemons.containsKey(id to ":app") }
+    assertThat(runs.get()).isEqualTo(1)
+    assertThat(factory.spawnHistory).hasSize(1)
+    warmServer.shutdown()
+  }
+
+  @Test
+  fun `only the project named in register_project is warmed, never auto-registered siblings`() {
+    val repo = samplesRepo()
+    listOf("ComposeStarter", "ComposeAdvanced").forEach {
+      File(repo, "$it/gradlew").writeText("#!/bin/sh\n")
+    }
+    val preparedRoots = java.util.concurrent.CopyOnWriteArrayList<String>()
+    val runner = GradleTaskRunner { root, _, _, _ ->
+      preparedRoots += root.canonicalPath
+      writeAppDescriptor(root)
+      GradleTaskRunner.Result(0, "BUILD SUCCESSFUL")
+    }
+    val warmServer =
+      DaemonMcpServer(
+        supervisor,
+        workingDirectory = null,
+        projectBootstrap = ProjectBootstrap(runner = runner),
+      )
+    restartSession(warmServer)
+    client.initialize()
+
+    // A project argument naming the folder above both builds registers them as siblings.
+    client.callTool(
+      "find_previews_for_file",
+      buildJsonObject {
+        put("path", File(repo, "ComposeStarter/app/src/Missing.kt").absolutePath)
+        put("project", repo.absolutePath)
+      },
+    )
+    assertThat(supervisor.listProjects()).hasSize(2)
+    Thread.sleep(300)
+    assertThat(preparedRoots).isEmpty()
+    assertThat(factory.spawnHistory).isEmpty()
+
+    val starter = File(repo, "ComposeStarter")
+    client.callTool("register_project", buildJsonObject { put("path", starter.absolutePath) })
+    awaitCondition("the warm-up's daemon spawn") { factory.spawnHistory.size == 1 }
+    Thread.sleep(300)
+    assertThat(preparedRoots).containsExactly(starter.canonicalPath)
+    assertThat(factory.daemons.keys.map { it.first })
+      .containsExactly(
+        supervisor.listProjects().single { it.path == starter.canonicalFile }.workspaceId
+      )
+    warmServer.shutdown()
+  }
+
+  @Test
+  fun `a render right after register_project attaches to the warm-up's daemon`() {
+    client.initialize()
+    val project = tmp.newFolder("WarmStarter")
+    writeAppDescriptor(project)
+    val png = tmp.newFile("warm.png")
+    writeSolidPng(png, 0xff00ff00.toInt())
+    // A slow spawn, so the render arrives while the warm-up is still inside it.
+    factory.daemonConfigurer = { daemon ->
+      Thread.sleep(500)
+      daemon.autoRenderPngPath = { png.absolutePath }
+    }
+    val workspaceId = registerWorkspace(project, "WarmStarter")
+    val uri = PreviewUri(workspaceId, ":app", "com.example.StarterKt.StarterPreview").toUri()
+
+    val result =
+      client.callTool(
+        "render_preview",
+        buildJsonObject {
+          put("uri", uri)
+          put("inline", false)
+        },
+        timeoutMs = 10_000,
+      )
+
+    assertThat(result.isError()).isFalse()
+    assertThat(factory.spawnHistory).hasSize(1)
+    assertThat(factory.daemons.keys).containsExactly(workspaceId to ":app")
   }
 
   @Test
