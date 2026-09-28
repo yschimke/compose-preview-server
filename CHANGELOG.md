@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.86.0](https://github.com/yschimke/compose-preview-server/compare/v3.85.0...v3.86.0) (2026-09-28)
+
+
+### Features
+
+* **mcp:** warm the project's daemon on register_project ([#1214](https://github.com/yschimke/compose-preview-server/issues/1214)) ([c14063a](https://github.com/yschimke/compose-preview-server/commit/c14063a36e8c02b2e9839f9cd979d64ef228092c))
+
 ## [3.85.0](https://github.com/yschimke/compose-preview-server/compare/v3.84.0...v3.85.0) (2026-09-28)
 
 
