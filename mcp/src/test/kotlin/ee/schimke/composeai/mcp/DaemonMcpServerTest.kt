@@ -2011,18 +2011,25 @@ class DaemonMcpServerTest {
 
   /**
    * Serves `a11y/atf`, `a11y/overlay` (from [overlay]) and `layout/inspector` for every preview.
+   * With [inactive] the daemon advertises none of them until `extensions/enable` turns on `a11y`
+   * and `layout/inspector`, as a real daemon does (PROTOCOL.md § 3a).
    */
-  private fun serveDetails(overlay: File) {
+  private fun serveDetails(overlay: File, inactive: Boolean = false) {
     factory.daemonConfigurer = { d ->
-      d.advertisedDataProducts =
+      val a11y =
         listOf(
           capability("a11y/atf"),
           capability(
             "a11y/overlay",
             ee.schimke.composeai.daemon.protocol.DataProductTransport.PATH,
           ),
-          capability("layout/inspector"),
         )
+      val layout = listOf(capability("layout/inspector"))
+      if (inactive) {
+        d.enableableExtensions = mapOf("a11y" to a11y, "layout/inspector" to layout)
+      } else {
+        d.advertisedDataProducts = a11y + layout
+      }
       d.dataFetchHandler = { _, kind, _, _ ->
         when (kind) {
           "a11y/atf" ->
@@ -2169,6 +2176,58 @@ class DaemonMcpServerTest {
         .jsonObject["content"]!!
         .jsonArray
     assertThat(plainContent).hasSize(2)
+  }
+
+  @Test
+  fun `render_preview details enable the extensions a daemon started without`() {
+    client.initialize()
+    val workspaceId = registerWorkspace(tmp.newFolder("details-enable"), "enable")
+    val overlay = tmp.newFile("enable-overlay.png")
+    writeSolidPng(overlay, 0xff00ff00.toInt())
+    serveDetails(overlay, inactive = true)
+    val daemon = warmDaemonFor(workspaceId, ":app")
+    daemon.emitDiscovery("com.example.EnablePreview")
+    client.expectNotification("notifications/resources/list_changed", 2_000)
+    val png = tmp.newFile("enable.png")
+    writeSolidPng(png, 0xff0000ff.toInt())
+    daemon.autoRenderPngPath = { png.absolutePath }
+
+    val call =
+      client.callTool(
+        "render_preview",
+        buildJsonObject {
+          put("preview", "EnablePreview")
+          put("inline", true)
+          put("observe", "hash")
+          putJsonArray("details") {
+            add("a11y")
+            add("layout")
+          }
+        },
+        timeoutMs = 10_000,
+      )
+    assertThat(call.textContents().last().lines())
+      .containsExactly(
+        "a11y: 2 errors, 1 warning (TouchTargetSize ×2, TextContrast ×1)",
+        "layout: 3 nodes (layout/inspector)",
+      )
+      .inOrder()
+    assertThat(daemon.enabledExtensionRequests.poll())
+      .containsExactly("a11y", "layout/inspector", "compose/semantics")
+      .inOrder()
+
+    // Once enabled, the cached capabilities hold the kinds, so a second call enables nothing.
+    client.callTool(
+      "render_preview",
+      buildJsonObject {
+        put("preview", "EnablePreview")
+        put("inline", true)
+        put("observe", "hash")
+        putJsonArray("details") { add("a11y") }
+      },
+      timeoutMs = 10_000,
+    )
+    assertThat(daemon.enabledExtensionRequests).isEmpty()
   }
 
   @Test
