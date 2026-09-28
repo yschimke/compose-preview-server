@@ -2862,6 +2862,7 @@ class DaemonMcpServer(
     val payload = buildJsonObject {
       put("schema", "compose-preview-mcp-status/v1")
       put("ready", true)
+      put("serverVersion", serverInfo.version)
       putJsonObject("toolCatalog") {
         put("status", catalogState)
         put("bootstrapToolCount", bootstrapToolDefs.size)
@@ -2887,6 +2888,10 @@ class DaemonMcpServer(
                     buildJsonObject {
                       put("module", module)
                       put("spawned", daemon.replicaCount() > 0)
+                      daemon.initializeResult?.let { init ->
+                        put("daemonVersion", init.daemonVersion)
+                        put("protocolVersion", init.protocolVersion)
+                      }
                       put("initialDiscoveryComplete", daemon.initialDiscoveryComplete)
                       put(
                         "previewCount",

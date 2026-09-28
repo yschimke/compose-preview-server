@@ -463,6 +463,25 @@ class DaemonMcpServerTest {
   }
 
   @Test
+  fun `status reports the server version and each running daemon's version`() {
+    client.initialize()
+    val projectDir = tmp.newFolder("versioned")
+    tmp.newFolder("versioned", "module")
+    val workspaceId = registerWorkspace(projectDir, "demo")
+    warmDaemonFor(workspaceId, ":module")
+
+    val payload = json.parseToJsonElement(client.callTool("status").firstTextContent()).jsonObject
+    assertThat(payload["schema"]?.jsonPrimitive?.contentOrNull)
+      .isEqualTo("compose-preview-mcp-status/v1")
+    assertThat(payload["serverVersion"]?.jsonPrimitive?.contentOrNull).isEqualTo(MCP_VERSION)
+    val daemon =
+      payload["projects"]!!.jsonArray.single().jsonObject["daemons"]!!.jsonArray.single().jsonObject
+    assertThat(daemon["module"]?.jsonPrimitive?.contentOrNull).isEqualTo(":module")
+    assertThat(daemon["daemonVersion"]?.jsonPrimitive?.contentOrNull).isEqualTo("fake")
+    assertThat(daemon["protocolVersion"]?.jsonPrimitive?.contentOrNull).isEqualTo("2")
+  }
+
+  @Test
   fun `bootstrap tools list_changed fires when full catalog completes inside grace period`() {
     // Race covered by issue #670: a client receives bootstrapToolDefs from tools/list, the full
     // catalog finishes loading well under TOOL_CATALOG_NOTIFY_DELAY_MS, and without this fix no
