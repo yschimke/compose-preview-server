@@ -99,6 +99,15 @@ class FakeDaemon : DaemonSpawn {
    */
   @Volatile var advertisedRecordingFormats: List<String> = emptyList()
 
+  /**
+   * Extensions `extensions/enable` can turn on, by id, with the data products each adds to
+   * [advertisedDataProducts] (PROTOCOL.md § 3a). Ids absent here are reported as `unknown`.
+   */
+  @Volatile var enableableExtensions: Map<String, List<DataProductCapability>> = emptyMap()
+
+  /** Ids the fake observed across every `extensions/enable` call. */
+  val enabledExtensionRequests = java.util.concurrent.LinkedBlockingQueue<List<String>>()
+
   /** Data extensions advertised in `initialize.capabilities.dataExtensions`. */
   @Volatile
   var advertisedDataExtensions: List<ee.schimke.composeai.daemon.protocol.DataExtensionDescriptor> =
@@ -634,6 +643,32 @@ class FakeDaemon : DaemonSpawn {
               mimeType = mime,
               sizeBytes = out.length(),
             ),
+          ),
+        )
+      }
+      "extensions/enable" -> {
+        val ids =
+          (params?.get("ids") as? kotlinx.serialization.json.JsonArray)
+            ?.map { it.jsonPrimitive.content }
+            .orEmpty()
+        enabledExtensionRequests.add(ids)
+        val (known, unknown) = ids.partition { it in enableableExtensions }
+        val added = known.flatMap { enableableExtensions.getValue(it) }
+        advertisedDataProducts =
+          advertisedDataProducts +
+            added.filter { cap -> advertisedDataProducts.none { it.kind == cap.kind } }
+        sendResponse(
+          id,
+          json.encodeToJsonElement(
+            ee.schimke.composeai.daemon.protocol.ExtensionsEnableResult.serializer(),
+            ee.schimke.composeai.daemon.protocol.ExtensionsEnableResult.Builder()
+              .apply {
+                newlyEnabled = known
+                this.unknown = unknown
+                dataProducts = advertisedDataProducts
+                dataExtensions = advertisedDataExtensions
+              }
+              .build(),
           ),
         )
       }

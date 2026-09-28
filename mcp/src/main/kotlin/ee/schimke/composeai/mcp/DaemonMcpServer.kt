@@ -3202,7 +3202,7 @@ class DaemonMcpServer(
           overlayPng = null,
         )
       }
-    val kinds = daemon.dataProductCapabilities.map { it.kind }.toSet()
+    val kinds = enableDetailExtensions(daemon, details)
     val unavailable = linkedMapOf<String, String>()
     var overlay: ByteArray? = null
     var a11y: RenderDetailReaders.A11y? = null
@@ -3262,6 +3262,39 @@ class DaemonMcpServer(
       }
     }
     return RenderDetails(summaries, card, overlay)
+  }
+
+  /**
+   * The data-product kinds [daemon] advertises for [details], opting it in first. Daemons start
+   * with most extensions inactive (PROTOCOL.md § 3a) and the standalone server enables none, so
+   * `a11y` was never available; and an `initialize` that times out on a slow Robolectric boot
+   * leaves the cached capabilities empty, hiding even the default-enabled `compose/semantics`.
+   * Asking for a detail is the opt-in, so enable its extensions and refresh the cached capability
+   * snapshot, the same as `enable_extensions`. A daemon that rejects the call keeps its cached
+   * kinds.
+   */
+  private fun enableDetailExtensions(
+    daemon: SupervisedDaemon,
+    details: Set<RenderDetail>,
+  ): Set<String> {
+    val kinds = daemon.dataProductCapabilities.map { it.kind }.toSet()
+    val wanted = buildList {
+      if (RenderDetail.A11Y in details && A11Y_FINDINGS_KIND !in kinds) add(A11Y_EXTENSION_ID)
+      if (RenderDetail.LAYOUT in details && LAYOUT_DETAIL_KINDS.none { it in kinds }) {
+        addAll(LAYOUT_DETAIL_KINDS)
+      }
+    }
+    if (wanted.isEmpty()) return kinds
+    return runCatching { daemon.client.extensionsEnable(wanted) }
+      .onSuccess {
+        daemon.dataProductCapabilities = it.dataProducts
+        daemon.dataExtensionDescriptors = it.dataExtensions
+      }
+      .onFailure {
+        System.err.println("render_preview: extensions/enable $wanted failed: ${it.message}")
+      }
+      .map { result -> result.dataProducts.map { it.kind }.toSet() }
+      .getOrDefault(kinds)
   }
 
   /** `data/fetch` of [kind] as JSON, rendering once first if the daemon has nothing yet. */
@@ -7268,7 +7301,13 @@ class DaemonMcpServer(
     /** ATF findings, fetched for `render_preview`'s `details: ["a11y"]`. */
     private const val A11Y_FINDINGS_KIND: String = "a11y/atf"
 
-    /** Layout sources for `details: ["layout"]`, in order of preference. */
+    /** The daemon extension that produces [A11Y_FINDINGS_KIND] and [DEFAULT_OVERLAY_KIND]. */
+    private const val A11Y_EXTENSION_ID: String = "a11y"
+
+    /**
+     * Layout sources for `details: ["layout"]`, in order of preference. Each is also the id of the
+     * daemon extension that produces it.
+     */
     private val LAYOUT_DETAIL_KINDS: List<String> = listOf("layout/inspector", "compose/semantics")
   }
 }
