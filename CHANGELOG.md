@@ -1,5 +1,16 @@
 # Changelog
 
+## [3.84.0](https://github.com/yschimke/compose-preview-server/compare/v3.83.0...v3.84.0) (2026-09-28)
+
+
+### Bug Fixes
+
+* **ci:** pin the edit-loop fixture's Compose BOM and keep Renovate out of it ([#1208](https://github.com/yschimke/compose-preview-server/issues/1208)) ([4687ad5](https://github.com/yschimke/compose-preview-server/commit/4687ad504cb3e025d21c3c6b01af55c5a623fbbc))
+* **deps:** update compose-ai-tools ([#1202](https://github.com/yschimke/compose-preview-server/issues/1202)) ([499bcc7](https://github.com/yschimke/compose-preview-server/commit/499bcc7ccc383f5847a92aa91789cb821eb3ce08))
+* **deps:** update dependency androidx.compose:compose-bom to v2026.09.00 ([#1204](https://github.com/yschimke/compose-preview-server/issues/1204)) ([8ccb5d0](https://github.com/yschimke/compose-preview-server/commit/8ccb5d0dcc4fa07e200eef856b398bbd096a59ce))
+* **deps:** update design-parity packages to v1.2.0 ([#1205](https://github.com/yschimke/compose-preview-server/issues/1205)) ([22f07bd](https://github.com/yschimke/compose-preview-server/commit/22f07bdc61ac64e2e691b5b72c170ed8641dd969))
+* **deps:** update rc-players to v1.75.0 ([#1206](https://github.com/yschimke/compose-preview-server/issues/1206)) ([f7c4d64](https://github.com/yschimke/compose-preview-server/commit/f7c4d64f9fdb1952dd386b32dcff8bbe203b8d3e))
+
 ## [3.83.0](https://github.com/yschimke/compose-preview-server/compare/v3.82.0...v3.83.0) (2026-09-27)
 
 
