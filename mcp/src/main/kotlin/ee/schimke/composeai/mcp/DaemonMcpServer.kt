@@ -62,7 +62,9 @@ import javax.imageio.ImageIO
 import kotlin.time.Duration.Companion.seconds
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
@@ -1553,7 +1555,7 @@ class DaemonMcpServer(
       ToolDef(
         name = "register_project",
         description =
-          "Not needed before render_preview — the workspace registers itself on first render. Register a project (workspace) so its previews can be listed and watched. Returns the assigned workspaceId.",
+          "Not needed before render_preview — the workspace registers itself on first render. Register a project (workspace) so its previews can be listed and watched. Returns the assigned workspaceId and starts preparing that project (Gradle bootstrap and render daemon) in the background, so the first render is warm.",
         inputSchema =
           parseSchema(
             """
@@ -1700,7 +1702,7 @@ class DaemonMcpServer(
       ToolDef(
         name = "register_project",
         description =
-          "Not needed before render_preview — the workspace registers itself on first render. Register a project (workspace) so its previews can be listed and watched. Returns the assigned workspaceId.",
+          "Not needed before render_preview — the workspace registers itself on first render. Register a project (workspace) so its previews can be listed and watched. Returns the assigned workspaceId and starts preparing that project (Gradle bootstrap and render daemon) in the background, so the first render is warm.",
         inputSchema =
           parseSchema(
             """
@@ -2921,13 +2923,55 @@ class DaemonMcpServer(
     if (!file.isDirectory)
       return errorCallToolResult("register_project: '$path' is not a directory")
     val project = registerProjectAt(file, rootName, modules)
+    warmUp(project)
     val payload = buildJsonObject {
       put("workspaceId", project.workspaceId.value)
       put("rootProjectName", project.rootProjectName)
       put("path", project.path.absolutePath)
       putJsonArray("modules") { project.knownModules.forEach { add(JsonPrimitive(it)) } }
+      put("warming", true)
     }
     return CallToolResult(content = listOf(ContentBlock.Text(payload.toString())))
+  }
+
+  /** Background warm-ups started by `register_project`, one per workspace while it runs. */
+  private val warmUps = ConcurrentHashMap<WorkspaceId, Job>()
+
+  /**
+   * Starts preparing [project] in the background so the first render finds it warm: the Gradle
+   * bootstrap when the build has no launch descriptor, then each module's daemon spawn and
+   * `initialize` handshake — the same [prepareProjects] and [spawnUndiscoveredModules] a first
+   * `render_preview` by name runs. Only an explicit `register_project` warms: the siblings that
+   * auto-discovery registers and the workspaces restored from [WorkspaceStore] stay lazy, so a
+   * monorepo does not start a daemon for every build in it.
+   *
+   * Nothing here is started twice. [ProjectBootstrap.ensurePrepared] shares one Gradle run per
+   * build and [DaemonSupervisor.daemonFor] one spawn per module (`computeIfAbsent`), so a render
+   * that arrives mid warm-up blocks on the same run or spawn and gets the same daemon; a repeated
+   * `register_project` while one is in flight joins it. A failure is only logged: the next render
+   * runs the same steps and reports it the way it does today.
+   */
+  private fun warmUp(project: RegisteredProject) {
+    val id = project.workspaceId
+    warmUps
+      .computeIfAbsent(id) {
+        budgetedCallScope.launch(start = CoroutineStart.LAZY) {
+          val log: (String) -> Unit = { System.err.println("compose-preview-mcp: warm-up: $it") }
+          try {
+            prepareProjects(setOf(id), log).forEach { (unprepared, reason) ->
+              log("${unprepared.path} not prepared: $reason")
+            }
+            spawnUndiscoveredModules(setOf(id), caller = "warm-up")
+          } catch (e: CancellationException) {
+            throw e
+          } catch (e: Throwable) {
+            log("failed for ${project.path}: ${e.message}")
+          } finally {
+            warmUps.remove(id, coroutineContext[Job])
+          }
+        }
+      }
+      .start()
   }
 
   /** The `register_project` path, shared with [autoRegisterWorkspace]. */
@@ -3265,7 +3309,10 @@ class DaemonMcpServer(
   /**
    * Starts each registered module's daemon that is not running; its discovery seeds the catalog.
    */
-  private fun spawnUndiscoveredModules(scope: Set<WorkspaceId>? = null) {
+  private fun spawnUndiscoveredModules(
+    scope: Set<WorkspaceId>? = null,
+    caller: String = "render_preview",
+  ) {
     supervisor
       .listProjects()
       .filter { scope == null || it.workspaceId in scope }
@@ -3278,9 +3325,7 @@ class DaemonMcpServer(
           .filterNot { project.daemons.containsKey(it) }
           .forEach { module ->
             runCatching { supervisor.daemonFor(project.workspaceId, module) }
-              .onFailure {
-                System.err.println("render_preview: could not start $module: ${it.message}")
-              }
+              .onFailure { System.err.println("$caller: could not start $module: ${it.message}") }
           }
       }
   }
