@@ -7172,7 +7172,9 @@ class DaemonMcpServer(
         "Render one with render_preview preview=<FunctionName> (a function name or FQN suffix); " +
         "no URI lookup, register_project or source search is needed.\n" +
         "With inline=false it returns pngPath, and in Antigravity also cardPath plus an " +
-        "<agent-embed> line to paste into the reply."
+        "<agent-embed> line to paste into the reply. " +
+        "Never fake a render: don't hand-build an HTML, CSS or SVG mock of a preview; " +
+        "if rendering fails, report the error."
 
     /** Tools whose existing text output gains an optional, portable MCP Apps presentation. */
     private val VIEWER_TOOL_NAMES =
