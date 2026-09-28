@@ -1,5 +1,15 @@
 # Changelog
 
+## [3.85.0](https://github.com/yschimke/compose-preview-server/compare/v3.84.0...v3.85.0) (2026-09-28)
+
+
+### Bug Fixes
+
+* **mcp:** enable the a11y and layout extensions render_preview details need ([#1212](https://github.com/yschimke/compose-preview-server/issues/1212)) ([0e34a29](https://github.com/yschimke/compose-preview-server/commit/0e34a2948410ac1bb306c32dcd5d470bb96fd154))
+* **mcp:** never fake a preview render with a hand-built mock ([#1209](https://github.com/yschimke/compose-preview-server/issues/1209)) ([49c2f2a](https://github.com/yschimke/compose-preview-server/commit/49c2f2a1c705f451ba276c1e67d4f225b65c2e2b))
+* **mcp:** return a pending result before the client timeout on cold renders ([#1210](https://github.com/yschimke/compose-preview-server/issues/1210)) ([e8f7834](https://github.com/yschimke/compose-preview-server/commit/e8f783499ce329bedc715f1388166bc4cf7bc900))
+* **viewer:** fit previews to the host container height ([#1211](https://github.com/yschimke/compose-preview-server/issues/1211)) ([2ee8cec](https://github.com/yschimke/compose-preview-server/commit/2ee8cec7dcfa0fd06b3e1cf369e2489e7d793404))
+
 ## [3.84.0](https://github.com/yschimke/compose-preview-server/compare/v3.83.0...v3.84.0) (2026-09-28)
 
 
