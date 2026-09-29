@@ -3658,6 +3658,38 @@ class DaemonMcpServerTest {
   }
 
   @Test
+  fun `render_preview with several matches and overrides renders one match with them`() {
+    client.initialize()
+    val (workspaceId, ids) = multipreviewModule("Devices - Large Round", "Devices - Small Round")
+    val daemon = factory.daemons.getValue(workspaceId to ":app")
+    val resp =
+      client.callTool(
+        "render_preview",
+        buildJsonObject {
+          put("preview", "ListScreenPreview")
+          put("observe", "png")
+          putJsonObject("overrides") { put("uiMode", "dark") }
+        },
+        timeoutMs = 10_000,
+      )
+    assertThat(resp.isError()).isFalse()
+    // #1199: the grid rendered each variant without the overrides; one match renders with them.
+    val texts = resp.textContents().map { json.parseToJsonElement(it).jsonObject }
+    assertThat(texts.none { it["cells"] != null }).isTrue()
+    assertThat(
+        texts
+          .first { it["variantChoice"] != null }["variantChoice"]!!
+          .jsonObject["choices"]!!
+          .jsonArray
+          .map { it.jsonPrimitive.content }
+      )
+      .containsExactlyElementsIn(ids.map { PreviewUri(workspaceId, ":app", it).toUri() })
+    assertThat(daemon.renderOverrides).hasSize(1)
+    assertThat(daemon.renderOverrides.single()!!.uiMode)
+      .isEqualTo(ee.schimke.composeai.daemon.protocol.UiMode.DARK)
+  }
+
+  @Test
   fun `render_preview downscales the inline image and keeps the file full size`() {
     client.initialize()
     val workspaceId = registerWorkspace(tmp.newFolder("phone"), "phone")

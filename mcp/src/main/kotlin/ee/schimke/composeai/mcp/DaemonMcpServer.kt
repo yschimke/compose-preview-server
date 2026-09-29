@@ -3688,7 +3688,20 @@ class DaemonMcpServer(
         args["card"]?.jsonPrimitive?.contentOrNull?.toBooleanStrictOrNull() != true &&
         args["crop"] == null &&
         (session as? McpSession)?.clientName != ANTIGRAVITY_CLIENT_NAME
-    if (inlineResult && choices.size <= MAX_VARIANT_CELLS) {
+    // The grid renders each variant plainly (#1199): a call that shapes the render or its result
+    // (overrides, a non-png observation, details, full-scale pixels, force) renders one match
+    // through the single-preview path, which honours all of them.
+    val plainRender =
+      args["overrides"].isAbsent() &&
+        args["details"].let { it.isAbsent() || (it as? JsonArray)?.isEmpty() == true } &&
+        args["observe"].let {
+          it.isAbsent() || (it as? JsonPrimitive)?.contentOrNull?.lowercase() == "png"
+        } &&
+        args["imageScale"].let {
+          it.isAbsent() || (it as? JsonPrimitive)?.contentOrNull?.lowercase() == "default"
+        } &&
+        args["force"].isAbsent()
+    if (inlineResult && plainRender && choices.size <= MAX_VARIANT_CELLS) {
       val grid = renderVariantMatrix(session, choices, args, choose = false)
       if (grid.isError == true) return grid
       val choice = buildJsonObject {
@@ -3773,6 +3786,8 @@ class DaemonMcpServer(
           choiceBlock("elicitation", "The user chose this preview in a form: $picked")
     )
   }
+
+  private fun JsonElement?.isAbsent(): Boolean = this == null || this is JsonNull
 
   /** Short, unique labels for a form: the preview id, or the whole URI when ids collide. */
   private fun variantLabels(uris: List<String>): List<String> {
