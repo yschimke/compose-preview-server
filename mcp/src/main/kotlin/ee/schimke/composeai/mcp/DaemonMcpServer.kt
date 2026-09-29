@@ -3000,20 +3000,21 @@ class DaemonMcpServer(
     }
     lastTried = tried
     // After a restart, a build registered before (workspaces.json) comes back under its old id.
-    if (
-      supervisor.listProjects().isEmpty() && supervisor.restoreMatching(candidates).isNotEmpty()
-    ) {
+    if (supervisor.restoreMatching(candidates).isNotEmpty()) {
       sessions.forEach { it.notifyResourceListChanged() }
-      return
     }
     // A root that is not a build itself: the build around it, else the builds up to two levels
-    // below it (wear-os-samples keeps one build per sample under its git root).
+    // below it (wear-os-samples keeps one build per sample under its git root). A sibling of a
+    // restored build is still discovered (#1188): only the builds already live are skipped.
     val builds = candidates.flatMap { ProjectDiscovery.buildsFor(it) }.distinct()
-    if (builds.size == 1) {
-      registerQuietly(builds.single())
+    val live =
+      supervisor.listProjects().map { runCatching { it.path.canonicalFile }.getOrDefault(it.path) }
+    val fresh = builds.filter { it !in live }
+    if (builds.size == 1 && fresh.size == 1) {
+      registerQuietly(fresh.single())
     } else {
       // Several: registered on the first `preview=` lookup, which then searches all of them.
-      pendingBuilds = builds
+      pendingBuilds = fresh
     }
   }
 

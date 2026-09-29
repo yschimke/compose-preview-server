@@ -1587,6 +1587,31 @@ class DaemonMcpServerTest {
   }
 
   @Test
+  fun `a sibling of a restored build is still discovered on a preview lookup`() {
+    val repo = samplesRepo()
+    // Only ComposeStarter was saved before the restart (#1188).
+    supervisor.workspaceStore.remember(
+      "ComposeStarter-0",
+      File(repo, "ComposeStarter"),
+      "ComposeStarter",
+    )
+    restartSession(server, requestHandlers = rootsHandler(repo))
+    client.initialize(capabilities = buildJsonObject { putJsonObject("roots") {} })
+
+    client.callTool("render_preview", buildJsonObject { put("preview", "Missing") })
+
+    assertThat(supervisor.listProjects().map { it.path.canonicalPath })
+      .containsExactly(
+        File(repo, "ComposeStarter").canonicalPath,
+        File(repo, "ComposeAdvanced").canonicalPath,
+      )
+    assertThat(
+        supervisor.listProjects().single { it.path.name == "ComposeStarter" }.workspaceId.value
+      )
+      .isEqualTo("ComposeStarter-0")
+  }
+
+  @Test
   fun `the project argument registers the build around any folder in one call`() {
     val repo = samplesRepo()
     // Claude Desktop's chat: no roots, and the server was started from `/`.
