@@ -1,5 +1,18 @@
 # Changelog
 
+## [3.87.0](https://github.com/yschimke/compose-preview-server/compare/v3.86.0...v3.87.0) (2026-09-29)
+
+
+### Features
+
+* **ui-builder:** identity reports write access and where to sign in ([#1217](https://github.com/yschimke/compose-preview-server/issues/1217)) ([9da060d](https://github.com/yschimke/compose-preview-server/commit/9da060d7924bfaae5594066c69f444fdee2f10d8))
+
+
+### Bug Fixes
+
+* **deps:** update rc-players to v2 ([#1216](https://github.com/yschimke/compose-preview-server/issues/1216)) ([3003869](https://github.com/yschimke/compose-preview-server/commit/3003869f809bb6e998ba163464da8a6383699a48))
+* **deps:** update the UI builder to 3.68.0 ([#1219](https://github.com/yschimke/compose-preview-server/issues/1219)) ([9131ed3](https://github.com/yschimke/compose-preview-server/commit/9131ed3c57a5532776b549a2ea715d0a3434d7e4))
+
 ## [3.86.0](https://github.com/yschimke/compose-preview-server/compare/v3.85.0...v3.86.0) (2026-09-28)
 
 
