@@ -2827,9 +2827,9 @@ class ServeHttpServer(
    * in, why a write would be refused, and where to sign in.
    *
    * [canWrite] arrives already decided by the route — the same WRITE question [uiBuilderInvite]
-   * asks — so the reason is only ever attached to a refusal the write routes would really make.
-   * The sign-in link returns to the page the editor was loaded on, so signing in lands the person
-   * back on the design they were looking at rather than on the home page.
+   * asks — so the reason is only ever attached to a refusal the write routes would really make. The
+   * sign-in link returns to the page the editor was loaded on, so signing in lands the person back
+   * on the design they were looking at rather than on the home page.
    */
   private fun uiBuilderIdentityDetails(
     call: ApplicationCall,
@@ -2852,16 +2852,20 @@ class ServeHttpServer(
   }
 
   /**
-   * The same-host page the identity request came from, or the builder's home. Only a path is kept
-   * — never another host — and the sign-in route sanitizes it again on the way back.
+   * The same-host page the identity request came from, or the builder's home. Only a path is kept —
+   * never another host — and the sign-in route sanitizes it again on the way back.
    */
   private fun uiBuilderReturnPath(call: ApplicationCall): String {
     val fallback = "/ui-builder"
     val referer = call.request.headers[HttpHeaders.Referrer] ?: return fallback
     val uri = runCatching { java.net.URI(referer) }.getOrNull() ?: return fallback
     val sameHost =
-      uri.host == null || uri.host.equals(call.request.local.serverHost, ignoreCase = true) ||
-        uri.host.equals(call.request.headers[HttpHeaders.Host]?.substringBefore(':'), ignoreCase = true)
+      uri.host == null ||
+        uri.host.equals(call.request.local.serverHost, ignoreCase = true) ||
+        uri.host.equals(
+          call.request.headers[HttpHeaders.Host]?.substringBefore(':'),
+          ignoreCase = true,
+        )
     val path = uri.rawPath?.takeIf { it.startsWith("/") && sameHost } ?: return fallback
     return ServeGithubAuth.safeReturnTo(path + (uri.rawQuery?.let { "?$it" } ?: ""))
   }

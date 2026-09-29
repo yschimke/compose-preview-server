@@ -27,9 +27,9 @@ import ee.schimke.composeai.uibuilder.service.UiBuilderServicePort
 import ee.schimke.composeai.uibuilder.service.UiBuilderServiceResponse
 import ee.schimke.composeai.uibuilder.service.UiBuilderSubscriptionCall
 import io.ktor.http.ContentType
-import io.ktor.server.application.ApplicationCall
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
+import io.ktor.server.application.ApplicationCall
 import io.ktor.server.request.receiveStream
 import io.ktor.server.response.respondText
 import io.ktor.server.routing.Route
@@ -71,9 +71,10 @@ internal fun Route.installUiBuilderRoutes(
    * the host, which knows the GitHub session and the allowlist; null details leave those fields
    * out, and the editor behaves as it did before they existed.
    */
-  identityDetails: (call: ApplicationCall, canWrite: Boolean) -> UiBuilderIdentityDetails? = { _, _ ->
-    null
-  },
+  identityDetails: (call: ApplicationCall, canWrite: Boolean) -> UiBuilderIdentityDetails? =
+    { _, _ ->
+      null
+    },
   /**
    * Turns the token a native render already minted into a live, streamed session, or null where
    * this host cannot.
@@ -760,10 +761,10 @@ internal data class UiBuilderIdentityV1(
    */
   val signedIn: Boolean? = null,
   /**
-   * Whether this caller may create designs and apply edits here — asked of the same authorizer
-   * with the same capability the write routes demand, off the same call, so the editor and the
-   * server cannot disagree. A hint for what to offer, never a gate: every write is still
-   * authorized where it lands. Absent from an older host, which a client reads as "may write".
+   * Whether this caller may create designs and apply edits here — asked of the same authorizer with
+   * the same capability the write routes demand, off the same call, so the editor and the server
+   * cannot disagree. A hint for what to offer, never a gate: every write is still authorized where
+   * it lands. Absent from an older host, which a client reads as "may write".
    */
   val canWrite: Boolean? = null,
   /** Why [canWrite] is false, in words the person can act on. */
@@ -783,7 +784,9 @@ internal data class UiBuilderIdentityRefusalV1(
   val signInUrl: String? = null,
 )
 
-/** What the identity endpoint says beyond the actor, from the host that knows how people sign in. */
+/**
+ * What the identity endpoint says beyond the actor, from the host that knows how people sign in.
+ */
 internal data class UiBuilderIdentityDetails(
   val signedIn: Boolean,
   val writeDeniedReason: String?,

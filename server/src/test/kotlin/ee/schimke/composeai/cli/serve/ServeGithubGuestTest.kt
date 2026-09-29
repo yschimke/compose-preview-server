@@ -172,8 +172,7 @@ class ServeGithubGuestTest {
     cookie: String?,
     referer: String? = null,
   ): Pair<Int, String> {
-    val request =
-      Request.Builder().url("http://127.0.0.1:${server.port}$UI_BUILDER_IDENTITY_PATH")
+    val request = Request.Builder().url("http://127.0.0.1:${server.port}$UI_BUILDER_IDENTITY_PATH")
     if (cookie != null) request.header("Cookie", cookie)
     if (referer != null) request.header("Referer", referer)
     return noRedirect.newCall(request.build()).execute().use { it.code to it.body.string() }
@@ -182,7 +181,8 @@ class ServeGithubGuestTest {
   @Test
   fun `identity tells a guest outside the org that it may read but not write, and why`() {
     // No org membership in the fake GitHub's answers, so `stranger` signs in as a guest.
-    val server = server(allowGuests = true, allowedUsers = emptySet(), allowedOrgs = setOf("google"))
+    val server =
+      server(allowGuests = true, allowedUsers = emptySet(), allowedOrgs = setOf("google"))
     val cookie = signIn(server).second!!
 
     val (status, body) = identity(server, cookie)
@@ -220,7 +220,11 @@ class ServeGithubGuestTest {
     val server = server(allowGuests = true)
 
     val (status, body) =
-      identity(server, cookie = null, referer = "http://127.0.0.1:${server.port}/ui-builder/shameless-potato?node=a")
+      identity(
+        server,
+        cookie = null,
+        referer = "http://127.0.0.1:${server.port}/ui-builder/shameless-potato?node=a",
+      )
 
     // Still a refusal a bearer client understands, now carrying the way in.
     assertEquals(401, status)
