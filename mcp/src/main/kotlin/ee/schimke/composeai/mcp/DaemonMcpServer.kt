@@ -2576,7 +2576,10 @@ class DaemonMcpServer(
           renderPreviewChoosingVariant(session, args, scope, report)
         }
       "render_matrix" ->
-        withCallBudget(session, name, args, progress) { toolRenderMatrix(session, args) }
+        withCallBudget(session, name, args, progress) { report ->
+          if (scope == null) autoRegisterWorkspace(session)
+          toolRenderMatrix(session, args, scope, report)
+        }
       "watch" -> toolWatch(session, args)
       "unwatch" -> toolUnwatch(session, args)
       "list_watches" -> toolListWatches(session)
@@ -4357,11 +4360,16 @@ class DaemonMcpServer(
    * or passes `contactSheet:true` to also receive one stitched grid image of every cell. Bounded so
    * a careless cross-product can't fan out unboundedly.
    */
-  private suspend fun toolRenderMatrix(session: Session, args: JsonObject): CallToolResult {
+  private suspend fun toolRenderMatrix(
+    session: Session,
+    args: JsonObject,
+    scope: Set<WorkspaceId>? = null,
+    progress: (String) -> Unit = {},
+  ): CallToolResult {
     val uriArg = args["uri"]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() }
     val previewArg = args["preview"]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() }
     val variantUris =
-      when (val resolved = matrixVariants(uriArg, previewArg)) {
+      when (val resolved = matrixVariants(uriArg, previewArg, scope, progress)) {
         is PreviewNameResolution.Missing ->
           return errorCallToolResult("render_matrix: ${resolved.message}", resolved.structured)
         is PreviewNameResolution.Found -> listOf(resolved.uri) + resolved.others
@@ -4494,9 +4502,14 @@ class DaemonMcpServer(
    * manifest only holds `…Preview_Devices - Large Round` and friends) resolves to those variants
    * too, instead of reaching the daemon as an id it has never seen.
    */
-  private fun matrixVariants(uriArg: String?, previewArg: String?): PreviewNameResolution {
+  private fun matrixVariants(
+    uriArg: String?,
+    previewArg: String?,
+    scope: Set<WorkspaceId>? = null,
+    progress: (String) -> Unit = {},
+  ): PreviewNameResolution {
     if (uriArg == null) {
-      return previewArg?.let { resolvePreviewName(it) }
+      return previewArg?.let { resolvePreviewName(it, scope, progress) }
         ?: PreviewNameResolution.Missing("missing 'uri' or 'preview'")
     }
     val uri =

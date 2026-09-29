@@ -1500,6 +1500,33 @@ class DaemonMcpServerTest {
   }
 
   @Test
+  fun `render_matrix auto-registers the client's Gradle root and honours project`() {
+    val projectDir = tmp.newFolder("matrix-rooted")
+    projectDir.resolve("settings.gradle.kts").writeText("rootProject.name = \"matrix-rooted\"")
+    restartSession(server, requestHandlers = rootsHandler(projectDir))
+    client.initialize(capabilities = buildJsonObject { putJsonObject("roots") {} })
+
+    // #1198: render_matrix preview= registered nothing on first use.
+    val result = client.callTool("render_matrix", buildJsonObject { put("preview", "Missing") })
+    assertThat(result.isError()).isTrue()
+    assertThat(supervisor.listProjects().map { it.path.canonicalPath })
+      .containsExactly(projectDir.canonicalPath)
+
+    // project= scopes the lookup to that build, which reports it is not prepared yet.
+    val repo = samplesRepo()
+    val scoped =
+      client.callTool(
+        "render_matrix",
+        buildJsonObject {
+          put("preview", "StarterPreview")
+          put("project", File(repo, "ComposeStarter").absolutePath)
+        },
+      )
+    assertThat(scoped.firstTextContent())
+      .startsWith("render_matrix: project not prepared: no Gradle wrapper")
+  }
+
+  @Test
   fun `render_preview auto-registers the working directory only when it is a Gradle build`() {
     val notGradle = tmp.newFolder("plain")
     val cwdServer = DaemonMcpServer(supervisor, workingDirectory = notGradle)
