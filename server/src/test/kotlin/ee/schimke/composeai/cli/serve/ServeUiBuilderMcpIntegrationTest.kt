@@ -859,6 +859,28 @@ class ServeUiBuilderMcpIntegrationTest {
   }
 
   @Test
+  fun `component search returns only the matching summaries`() {
+    val server = start()
+
+    val hits =
+      Json.parseToJsonElement(
+          envelope(server, ServeUiBuilderMcp.SEARCH_COMPONENTS, """{"query":"TEXT"}""")
+        )
+        .jsonObject
+    val components = hits.getValue("catalogs").jsonArray.single().jsonObject.getValue("components")
+    val ids = components.jsonArray.map { it.jsonObject.getValue("id").jsonPrimitive.content }
+    assertTrue("m3/text" in ids, ids.toString())
+    assertTrue("layout/column" !in ids, ids.toString())
+
+    val none =
+      Json.parseToJsonElement(
+          envelope(server, ServeUiBuilderMcp.SEARCH_COMPONENTS, """{"query":"no-such-thing"}""")
+        )
+        .jsonObject
+    assertTrue(none.getValue("catalogs").jsonArray.isEmpty(), none.toString())
+  }
+
+  @Test
   fun `an optional property can be unset with null, and a required one cannot`() {
     val server = start()
     envelope(
