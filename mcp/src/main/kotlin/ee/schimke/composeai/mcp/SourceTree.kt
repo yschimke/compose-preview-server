@@ -90,7 +90,7 @@ class SourceTree(val root: File, private val budgetMs: Long = DEFAULT_BUDGET_MS)
           changed += it
         }
       children
-        .filter { it.isDirectory && walkable(it) && it !in dirs }
+        .filter { it.isDirectory && watched(dir, it) && it !in dirs }
         .forEach { sub -> listed += register(sub) { changed += it } }
     }
     val entries = files.entries.toList()
@@ -169,10 +169,7 @@ class SourceTree(val root: File, private val budgetMs: Long = DEFAULT_BUDGET_MS)
       listed++
       next.listFiles().orEmpty().forEach { child ->
         if (child.isDirectory) {
-          if (
-            walkable(child) && !(next.name == "src" && TEST_SOURCE_SET.containsMatchIn(child.name))
-          )
-            stack.addLast(child)
+          if (watched(next, child)) stack.addLast(child)
         } else if (isSource(child)) {
           files[child] = stamp(child)
           onFile(child)
@@ -221,6 +218,10 @@ class SourceTree(val root: File, private val budgetMs: Long = DEFAULT_BUDGET_MS)
   private fun stamp(file: File) = Stamp(file.lastModified(), file.length())
 
   private fun walkable(dir: File): Boolean = !dir.name.startsWith(".") && dir.name !in SKIPPED_DIRS
+
+  /** Whether [child], a directory in [parent], is watched: walkable and not a test source set. */
+  private fun watched(parent: File, child: File): Boolean =
+    walkable(child) && !(parent.name == "src" && TEST_SOURCE_SET.containsMatchIn(child.name))
 
   private fun isSource(file: File): Boolean {
     if (file.extension in SOURCE_EXTENSIONS) return true
