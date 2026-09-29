@@ -68,8 +68,12 @@ internal fun Route.installUiBuilderCommentRoutes(
 
   post(UI_BUILDER_COMMENTS_PATH) {
     val actor =
-      call.authorizedCommentActor(service, authorization, UiBuilderRouteCapability.WRITE, signedInReadersMayTakePart = true)
-        ?: return@post
+      call.authorizedCommentActor(
+        service,
+        authorization,
+        UiBuilderRouteCapability.WRITE,
+        signedInReadersMayTakePart = true,
+      ) ?: return@post
     val request = call.receiveCommentBody(CommentPostRequest.serializer()) ?: return@post
     when (
       val result =
@@ -117,15 +121,23 @@ internal fun Route.installUiBuilderCommentRoutes(
    */
   post(UI_BUILDER_COMMENTS_ACKNOWLEDGEMENT_PATH) {
     val actor =
-      call.authorizedCommentActor(service, authorization, UiBuilderRouteCapability.WRITE, signedInReadersMayTakePart = true)
-        ?: return@post
+      call.authorizedCommentActor(
+        service,
+        authorization,
+        UiBuilderRouteCapability.WRITE,
+        signedInReadersMayTakePart = true,
+      ) ?: return@post
     call.respondAcknowledgement(store, actor, threadId = null)
   }
 
   post(UI_BUILDER_COMMENT_ACKNOWLEDGEMENT_PATH) {
     val actor =
-      call.authorizedCommentActor(service, authorization, UiBuilderRouteCapability.WRITE, signedInReadersMayTakePart = true)
-        ?: return@post
+      call.authorizedCommentActor(
+        service,
+        authorization,
+        UiBuilderRouteCapability.WRITE,
+        signedInReadersMayTakePart = true,
+      ) ?: return@post
     val threadId = call.parameters["threadId"].orEmpty()
     if (threadId.isBlank()) {
       call.respondCommentError(HttpStatusCode.BadRequest, "a thread id is required")
@@ -142,8 +154,12 @@ internal fun Route.installUiBuilderCommentRoutes(
    */
   post(UI_BUILDER_COMMENT_REACTION_PATH) {
     val actor =
-      call.authorizedCommentActor(service, authorization, UiBuilderRouteCapability.WRITE, signedInReadersMayTakePart = true)
-        ?: return@post
+      call.authorizedCommentActor(
+        service,
+        authorization,
+        UiBuilderRouteCapability.WRITE,
+        signedInReadersMayTakePart = true,
+      ) ?: return@post
     val commentId = call.parameters["commentId"].orEmpty()
     if (commentId.isBlank()) {
       call.respondCommentError(HttpStatusCode.BadRequest, "a comment id is required")
@@ -322,10 +338,10 @@ private suspend fun ApplicationCall.authorizedCommentActor(
   capability: UiBuilderRouteCapability,
   /**
    * Whether a person signed in with GitHub who may only *read* the design may still take part in
-   * its conversation — post, react, mark as read. A guest on a box that restricts writing to an
-   * org is exactly that person: it can see the design, and saying something about it is not
-   * changing it. Never the anonymous reader of a public box, and never an agent grant that carries
-   * only read: a comment speaks for someone, and an agent's reach is what its grant says.
+   * its conversation — post, react, mark as read. A guest on a box that restricts writing to an org
+   * is exactly that person: it can see the design, and saying something about it is not changing
+   * it. Never the anonymous reader of a public box, and never an agent grant that carries only
+   * read: a comment speaks for someone, and an agent's reach is what its grant says.
    */
   signedInReadersMayTakePart: Boolean = false,
 ): CommentActor? {
