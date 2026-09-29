@@ -207,6 +207,8 @@ class DaemonMcpServer(
    */
   private val callBudgetMs: Long =
     environment[CALL_BUDGET_ENV]?.toLongOrNull() ?: DEFAULT_CALL_BUDGET_MS,
+  /** How long a budgeted call's finished result waits for its retry; tests shorten it. */
+  private val uncollectedCallResultTtlMs: Long = UNCOLLECTED_CALL_RESULT_TTL_MS,
 ) {
 
   private val fullToolDefsLoader: () -> List<ToolDef> =
@@ -562,6 +564,9 @@ class DaemonMcpServer(
     released.forEach { key -> dispatchDataUnsubscribe(key) }
     subscriptions.forget(session)
     previousFileRenderHashes.remove(session)
+    // Nobody can collect a closed session's budgeted calls: the key holds the session.
+    inFlightCalls.keys.removeIf { it.session == session }
+    sweepUncollectedCalls()
     synchronized(bootstrapNotifyLock) { bootstrapServedSessions.remove(session) }
     sessions.unregister(session)
   }
@@ -2633,7 +2638,8 @@ class DaemonMcpServer(
    * runs out the call returns a non-error `pending` result and the bootstrap or render carries on.
    * A later call with the same session, tool and arguments attaches to that work instead of
    * starting it again, and gets its result (or its error, such as the render timeout) once done. A
-   * finished result nobody collected is dropped after [UNCOLLECTED_CALL_RESULT_TTL_MS].
+   * finished result nobody collected is dropped after [uncollectedCallResultTtlMs]: swept on every
+   * budgeted call and when a session closes.
    */
   private suspend fun withCallBudget(
     session: Session,
@@ -2644,16 +2650,13 @@ class DaemonMcpServer(
   ): CallToolResult {
     if (callBudgetMs <= 0) return block(progress)
     val startedAt = System.nanoTime()
+    sweepUncollectedCalls()
     val key = InFlightCallKey(session, tool, args)
     var created: InFlightCall? = null
     val call =
       inFlightCalls.compute(key) { _, existing ->
-        val stale =
-          existing != null &&
-            existing.completedAtNanos != 0L &&
-            System.nanoTime() - existing.completedAtNanos >
-              TimeUnit.MILLISECONDS.toNanos(UNCOLLECTED_CALL_RESULT_TTL_MS)
-        if (existing != null && !stale) existing else InFlightCall().also { created = it }
+        if (existing != null && !existing.isUncollectedPastTtl()) existing
+        else InFlightCall().also { created = it }
       }!!
     call.reportTo = progress
     created?.let { work ->
@@ -2675,6 +2678,19 @@ class DaemonMcpServer(
     inFlightCalls.remove(key, call)
     return call.result.await()
   }
+
+  private fun InFlightCall.isUncollectedPastTtl(): Boolean =
+    completedAtNanos != 0L &&
+      System.nanoTime() - completedAtNanos >
+        TimeUnit.MILLISECONDS.toNanos(uncollectedCallResultTtlMs)
+
+  /** Drops finished results whose retry never came (#1210), so they do not pile up. */
+  private fun sweepUncollectedCalls() {
+    inFlightCalls.entries.removeIf { (_, call) -> call.isUncollectedPastTtl() }
+  }
+
+  /** Budgeted calls still held for a retry; for tests. */
+  internal fun inFlightCallCount(): Int = inFlightCalls.size
 
   /** The `pending` result [withCallBudget] returns when the budget runs out. */
   private fun pendingCallResult(tool: String): CallToolResult {

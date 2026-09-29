@@ -1828,6 +1828,73 @@ class DaemonMcpServerTest {
     budgetServer.shutdown()
   }
 
+  @Test
+  fun `a finished budgeted call nobody collected is swept and a closed session drops its calls`() {
+    val project = tmp.newFolder("uncollected")
+    File(project, "settings.gradle.kts").writeText("include(\":app\")")
+    File(project, "gradlew").writeText("#!/bin/sh\n")
+    val release = java.util.concurrent.CountDownLatch(1)
+    val runner = GradleTaskRunner { _, _, _, _ ->
+      release.await(30, TimeUnit.SECONDS)
+      GradleTaskRunner.Result(1, "* What went wrong:\nboom")
+    }
+    val budgetServer =
+      DaemonMcpServer(
+        supervisor,
+        workingDirectory = null,
+        projectBootstrap = ProjectBootstrap(runner = runner),
+        callBudgetMs = 300,
+        uncollectedCallResultTtlMs = 1,
+      )
+    restartSession(budgetServer)
+    client.initialize()
+    fun render(preview: String) =
+      client.callTool(
+        "render_preview",
+        buildJsonObject {
+          put("preview", preview)
+          put("project", project.absolutePath)
+        },
+      )
+
+    // #1210: the pending call finishes, but its retry never comes.
+    assertThat(render("Abandoned").firstTextContent()).contains("\"pending\":true")
+    assertThat(budgetServer.inFlightCallCount()).isEqualTo(1)
+    release.countDown()
+    val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10)
+    // Any later budgeted call sweeps it once it has finished and outlived its TTL.
+    while (budgetServer.inFlightCallCount() > 0 && System.nanoTime() < deadline) {
+      render("Other")
+    }
+    assertThat(budgetServer.inFlightCallCount()).isEqualTo(0)
+
+    // A call still pending when its session closes is dropped with the session.
+    val stuck = java.util.concurrent.CountDownLatch(1)
+    val stuckServer =
+      DaemonMcpServer(
+        supervisor,
+        workingDirectory = null,
+        projectBootstrap =
+          ProjectBootstrap(
+            runner =
+              GradleTaskRunner { _, _, _, _ ->
+                stuck.await(30, TimeUnit.SECONDS)
+                GradleTaskRunner.Result(1, "boom")
+              }
+          ),
+        callBudgetMs = 300,
+      )
+    restartSession(stuckServer)
+    client.initialize()
+    assertThat(render("Abandoned").firstTextContent()).contains("\"pending\":true")
+    assertThat(stuckServer.inFlightCallCount()).isEqualTo(1)
+    restartSession(stuckServer)
+    assertThat(stuckServer.inFlightCallCount()).isEqualTo(0)
+    stuck.countDown()
+    budgetServer.shutdown()
+    stuckServer.shutdown()
+  }
+
   /** Writes the `:app` daemon launch descriptor [ProjectBootstrap] looks for under [root]. */
   private fun writeAppDescriptor(root: File) {
     val dir = File(root, "app/build/compose-previews").apply { mkdirs() }
