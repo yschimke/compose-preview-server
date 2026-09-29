@@ -1206,6 +1206,7 @@ class ServeHttpServer(
             ::canonicalServerOrigin,
             uiBuilderNativePreview,
             uiBuilderInlineCapture,
+            identityDetails = ::uiBuilderIdentityDetails,
             // The native pane's live lane, on a host that has Stage-2 redemption. The token the
             // compile already minted is redeemed into a registered session, and the editor opens
             // the same `/{session}/ws/{preview}` socket the viewer's Live toggle opens — no new
@@ -2816,12 +2817,76 @@ class ServeHttpServer(
       // action from the one credential that always has it would be a strange kind of security.
       signedIn = login != null || permitted,
       permitted = permitted,
-      deniedReason = if (permitted) "" else uiBuilderDeniedReason(login),
+      deniedReason =
+        if (permitted) "" else uiBuilderDeniedReason(login, githubAuth?.isGuest(call) == true),
     )
   }
 
+  /**
+   * The identity endpoint's account of this caller beyond its actor id: whether anyone is signed
+   * in, why a write would be refused, and where to sign in.
+   *
+   * [canWrite] arrives already decided by the route — the same WRITE question [uiBuilderInvite]
+   * asks — so the reason is only ever attached to a refusal the write routes would really make.
+   * The sign-in link returns to the page the editor was loaded on, so signing in lands the person
+   * back on the design they were looking at rather than on the home page.
+   */
+  private fun uiBuilderIdentityDetails(
+    call: ApplicationCall,
+    canWrite: Boolean,
+  ): UiBuilderIdentityDetails {
+    val auth = githubAuth
+    val login = auth?.currentSignedInLogin(call)
+    return UiBuilderIdentityDetails(
+      // An operator token is a sign-in for this purpose, as it is for the invite card.
+      signedIn = login != null || canWrite,
+      writeDeniedReason =
+        if (canWrite) null else uiBuilderDeniedReason(login, auth?.isGuest(call) == true),
+      signInUrl =
+        if (auth == null || login != null) null
+        else
+          ServeGithubAuth.START_PATH +
+            "?return=" +
+            java.net.URLEncoder.encode(uiBuilderReturnPath(call), Charsets.UTF_8),
+    )
+  }
+
+  /**
+   * The same-host page the identity request came from, or the builder's home. Only a path is kept
+   * — never another host — and the sign-in route sanitizes it again on the way back.
+   */
+  private fun uiBuilderReturnPath(call: ApplicationCall): String {
+    val fallback = "/ui-builder"
+    val referer = call.request.headers[HttpHeaders.Referrer] ?: return fallback
+    val uri = runCatching { java.net.URI(referer) }.getOrNull() ?: return fallback
+    val sameHost =
+      uri.host == null || uri.host.equals(call.request.local.serverHost, ignoreCase = true) ||
+        uri.host.equals(call.request.headers[HttpHeaders.Host]?.substringBefore(':'), ignoreCase = true)
+    val path = uri.rawPath?.takeIf { it.startsWith("/") && sameHost } ?: return fallback
+    return ServeGithubAuth.safeReturnTo(path + (uri.rawQuery?.let { "?$it" } ?: ""))
+  }
+
   /** Why this visitor may not create a design, in the terms they can act on. */
-  private fun uiBuilderDeniedReason(login: String?): String {
+  private fun uiBuilderDeniedReason(login: String?, guest: Boolean = false): String {
+    val auth = githubAuth
+    // Nobody signed in on a host that offers GitHub sign-in: the next step is to sign in, not to
+    // ask an operator for a permission nobody has been asked for yet.
+    if (login == null && auth != null) return "Sign in with GitHub to create and edit designs."
+    // A guest on a box that names its members: repository access is not the bar there — being
+    // one of the named accounts or orgs is — so say that, and name the orgs.
+    if (guest && auth != null && auth.isRestrictedToAllowedUsers()) {
+      val orgs = auth.allowedOrgs().sorted()
+      val account = "the account you are signed in with ($login)"
+      return if (orgs.isNotEmpty()) {
+        val named = orgs.joinToString(" or ")
+        val noun = if (orgs.size == 1) "organization" else "organizations"
+        "Creating and editing designs here is limited to members of the $named GitHub $noun, " +
+          "and $account is not one. If you joined recently, sign out and sign in again."
+      } else {
+        "Creating and editing designs here is limited to accounts the operator has listed, and " +
+          "$account is not one of them. Ask an operator for access."
+      }
+    }
     val repository = githubAuth?.accessRepository()?.takeIf { it.isNotBlank() }
     val account = login?.let { "the account you are signed in with ($it)" } ?: "your session"
     return if (repository != null) {

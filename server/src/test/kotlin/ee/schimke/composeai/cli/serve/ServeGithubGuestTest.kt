@@ -87,6 +87,7 @@ class ServeGithubGuestTest {
   private fun server(
     allowGuests: Boolean,
     allowedUsers: Set<String> = setOf("octo"),
+    allowedOrgs: Set<String> = emptySet(),
   ): ServeHttpServer {
     val auth =
       ServeGithubAuth(
@@ -96,6 +97,7 @@ class ServeGithubGuestTest {
           cookieSecret = "x".repeat(32),
           repository = "yschimke/compose-ai-tools",
           allowedUsers = allowedUsers,
+          allowedOrgs = allowedOrgs,
           allowGuests = allowGuests,
         ),
         verifier = GitHubOAuthVerifier(fakeGitHub),
@@ -163,6 +165,82 @@ class ServeGithubGuestTest {
       )
       .execute()
       .use { it.code }
+  }
+
+  private fun identity(
+    server: ServeHttpServer,
+    cookie: String?,
+    referer: String? = null,
+  ): Pair<Int, String> {
+    val request =
+      Request.Builder().url("http://127.0.0.1:${server.port}$UI_BUILDER_IDENTITY_PATH")
+    if (cookie != null) request.header("Cookie", cookie)
+    if (referer != null) request.header("Referer", referer)
+    return noRedirect.newCall(request.build()).execute().use { it.code to it.body.string() }
+  }
+
+  @Test
+  fun `identity tells a guest outside the org that it may read but not write, and why`() {
+    // No org membership in the fake GitHub's answers, so `stranger` signs in as a guest.
+    val server = server(allowGuests = true, allowedUsers = emptySet(), allowedOrgs = setOf("google"))
+    val cookie = signIn(server).second!!
+
+    val (status, body) = identity(server, cookie)
+
+    assertEquals(200, status)
+    val identity = json.decodeFromString(UiBuilderIdentityV1.serializer(), body)
+    assertEquals("github:stranger", identity.actorId)
+    assertEquals(true, identity.signedIn)
+    assertEquals(false, identity.canWrite)
+    // Named in terms the person can act on: which org, and that a fresh sign-in picks up joining.
+    assertTrue(identity.writeDeniedReason!!.contains("google GitHub organization"), body)
+    assertTrue(identity.writeDeniedReason!!.contains("stranger"), body)
+    // Already signed in: offering sign-in again would be a loop, not a way forward.
+    assertEquals(null, identity.signInUrl)
+  }
+
+  @Test
+  fun `identity tells a named member that it may write`() {
+    login = "octo"
+    pushAccess = false
+    val server = server(allowGuests = true)
+    val cookie = signIn(server).second!!
+
+    val identity =
+      json.decodeFromString(UiBuilderIdentityV1.serializer(), identity(server, cookie).second)
+
+    assertEquals(true, identity.signedIn)
+    assertEquals(true, identity.canWrite)
+    assertEquals(null, identity.writeDeniedReason)
+    assertEquals(null, identity.signInUrl)
+  }
+
+  @Test
+  fun `a signed-out visitor is pointed at sign-in, back to the design it was on`() {
+    val server = server(allowGuests = true)
+
+    val (status, body) =
+      identity(server, cookie = null, referer = "http://127.0.0.1:${server.port}/ui-builder/shameless-potato?node=a")
+
+    // Still a refusal a bearer client understands, now carrying the way in.
+    assertEquals(401, status)
+    val refusal = json.decodeFromString(UiBuilderIdentityRefusalV1.serializer(), body)
+    assertEquals(
+      "/auth/github/start?return=%2Fui-builder%2Fshameless-potato%3Fnode%3Da",
+      refusal.signInUrl,
+    )
+  }
+
+  @Test
+  fun `a sign-in link never returns to another host`() {
+    val server = server(allowGuests = true)
+
+    val body = identity(server, cookie = null, referer = "https://evil.example/ui-builder/x").second
+
+    assertEquals(
+      "/auth/github/start?return=%2Fui-builder",
+      json.decodeFromString(UiBuilderIdentityRefusalV1.serializer(), body).signInUrl,
+    )
   }
 
   @Test

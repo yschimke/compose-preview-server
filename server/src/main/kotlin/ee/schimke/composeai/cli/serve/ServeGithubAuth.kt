@@ -539,6 +539,9 @@ class ServeGithubAuth(
 
   fun accessRepository(): String = config.repository
 
+  /** The GitHub orgs whose members sign in as members (`--github-auth-orgs`); empty when none. */
+  fun allowedOrgs(): Set<String> = config.allowedOrgs
+
   /**
    * The repository [hasImageRepositoryAccess] speaks for: `--image-upload-repo` when the operator
    * pointed the image lane somewhere else, else the sign-in repository it falls back to. A caller

@@ -27,6 +27,7 @@ import ee.schimke.composeai.uibuilder.service.UiBuilderServicePort
 import ee.schimke.composeai.uibuilder.service.UiBuilderServiceResponse
 import ee.schimke.composeai.uibuilder.service.UiBuilderSubscriptionCall
 import io.ktor.http.ContentType
+import io.ktor.server.application.ApplicationCall
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.request.receiveStream
@@ -65,6 +66,14 @@ internal fun Route.installUiBuilderRoutes(
   nativePreview: UiBuilderNativePreviewLane? = null,
   /** The inline Remote Compose capture lane, left out on a host that cannot compile — as above. */
   inlineCapture: UiBuilderInlineCaptureLane? = null,
+  /**
+   * Sign-in state and the reason a write would be refused, for the identity endpoint. Supplied by
+   * the host, which knows the GitHub session and the allowlist; null details leave those fields
+   * out, and the editor behaves as it did before they existed.
+   */
+  identityDetails: (call: ApplicationCall, canWrite: Boolean) -> UiBuilderIdentityDetails? = { _, _ ->
+    null
+  },
   /**
    * Turns the token a native render already minted into a live, streamed session, or null where
    * this host cannot.
@@ -527,8 +536,20 @@ internal fun Route.installUiBuilderRoutes(
       when (val decision = authorization.authorize(call, UiBuilderRouteCapability.READ)) {
         is UiBuilderAuthorizationDecision.Authorized -> decision.actorId
         UiBuilderAuthorizationDecision.Missing -> {
+          // Still a 401, and still one a bearer client understands — but with the way in, so a
+          // person who opened a private box's editor signed out is offered a sign-in rather than
+          // an editor that cannot start.
           call.response.headers.append(HttpHeaders.WWWAuthenticate, "Bearer")
-          call.respondText("authentication is required", status = HttpStatusCode.Unauthorized)
+          call.respondText(
+            UI_BUILDER_JSON.encodeToString(
+              UiBuilderIdentityRefusalV1(
+                message = "authentication is required",
+                signInUrl = identityDetails(call, false)?.signInUrl,
+              )
+            ),
+            ContentType.Application.Json,
+            HttpStatusCode.Unauthorized,
+          )
           return@get
         }
         UiBuilderAuthorizationDecision.Forbidden -> {
@@ -536,8 +557,20 @@ internal fun Route.installUiBuilderRoutes(
           return@get
         }
       }
+    val canWrite =
+      authorization.authorize(call, UiBuilderRouteCapability.WRITE) is
+        UiBuilderAuthorizationDecision.Authorized
+    val details = identityDetails(call, canWrite)
     call.respondText(
-      UI_BUILDER_JSON.encodeToString(UiBuilderIdentityV1(actorId = actorId)),
+      UI_BUILDER_JSON.encodeToString(
+        UiBuilderIdentityV1(
+          actorId = actorId,
+          signedIn = details?.signedIn,
+          canWrite = canWrite,
+          writeDeniedReason = details?.writeDeniedReason?.takeIf { !canWrite },
+          signInUrl = details?.signInUrl,
+        )
+      ),
       ContentType.Application.Json,
       HttpStatusCode.OK,
     )
@@ -718,7 +751,44 @@ private suspend fun io.ktor.server.application.ApplicationCall.respondProtocolEr
 }
 
 @kotlinx.serialization.Serializable
-internal data class UiBuilderIdentityV1(val schemaVersion: Int = 1, val actorId: String)
+internal data class UiBuilderIdentityV1(
+  val schemaVersion: Int = 1,
+  val actorId: String,
+  /**
+   * Whether a person (or an operator token) is behind this request, as opposed to the anonymous
+   * reader of a `--public` box. Absent from an older host.
+   */
+  val signedIn: Boolean? = null,
+  /**
+   * Whether this caller may create designs and apply edits here — asked of the same authorizer
+   * with the same capability the write routes demand, off the same call, so the editor and the
+   * server cannot disagree. A hint for what to offer, never a gate: every write is still
+   * authorized where it lands. Absent from an older host, which a client reads as "may write".
+   */
+  val canWrite: Boolean? = null,
+  /** Why [canWrite] is false, in words the person can act on. */
+  val writeDeniedReason: String? = null,
+  /** Where to sign in and come back to the editor, on a host with GitHub sign-in. */
+  val signInUrl: String? = null,
+)
+
+/**
+ * The 401 an unauthenticated identity request gets: still a refusal, but one that says where to
+ * sign in, so the editor can offer that instead of failing to start.
+ */
+@kotlinx.serialization.Serializable
+internal data class UiBuilderIdentityRefusalV1(
+  val schemaVersion: Int = 1,
+  val message: String,
+  val signInUrl: String? = null,
+)
+
+/** What the identity endpoint says beyond the actor, from the host that knows how people sign in. */
+internal data class UiBuilderIdentityDetails(
+  val signedIn: Boolean,
+  val writeDeniedReason: String?,
+  val signInUrl: String?,
+)
 
 internal val UI_BUILDER_JSON = Json {
   encodeDefaults = true
