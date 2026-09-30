@@ -183,8 +183,11 @@ composeai-preview-daemon = "3.9.2"
 # declare the safe, versioned Compose source adapter a host resolves for source export. 3.9.0 keeps
 # runtime manifest v1 strict and introduces v2 for implementation provenance. 3.11.0 adds
 # `ScreenNode.slotParameters` and `ScreenValue.SlotParameterRead` (compose-preview-contracts#115).
-# 3.12.0 adds the UI-builder design-home wire contract (compose-preview-contracts#116).
-composeai-contracts = "3.12.0"
+# 3.12.0 adds the UI-builder design-home wire contract (compose-preview-contracts#116). 3.13.0 ships
+# JSON Schemas for the design document, mutations and submissions in the `ui-builder-protocol` jar
+# (compose-preview-contracts#121) and optional asset size/provenance, an asset quota with its
+# rejection code, and a conflict explanation (compose-preview-contracts#122).
+composeai-contracts = "3.13.0"
 
 # The extracted UI builder (yschimke/compose-ui-builder), resolved from its RELEASES. Three jars
 # and a BOM on Maven Central, and the editor archive as a GitHub release asset reached through the
