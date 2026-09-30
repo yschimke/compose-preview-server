@@ -75,6 +75,25 @@ internal object UiBuilderJsonSchemas {
       ),
     )
 
+  /**
+   * `ui_builder_view`'s MCP `outputSchema`: [UiBuilderViewV1], the object its `structuredContent`
+   * carries, generated from the same descriptor the reply is encoded with.
+   */
+  val viewOutput: JsonObject by lazy {
+    SerialDescriptorJsonSchema.output(
+      UiBuilderViewV1.serializer().descriptor,
+      schemaId = UI_BUILDER_VIEW_SCHEMA,
+    )
+  }
+
+  /** `ui_builder_validate`'s MCP `outputSchema`: [UiBuilderValidationV1], as [viewOutput] is. */
+  val validationOutput: JsonObject by lazy {
+    SerialDescriptorJsonSchema.output(
+      UiBuilderValidationV1.serializer().descriptor,
+      schemaId = UI_BUILDER_VALIDATION_SCHEMA,
+    )
+  }
+
   fun byName(name: String): Served? = served.firstOrNull { it.name == name }
 
   fun byUri(uri: String): Served? = served.firstOrNull { it.uri == uri }
@@ -141,6 +160,49 @@ internal object SerialDescriptorJsonSchema {
         putAll(rootSchema)
         put("\$defs", JsonObject(builder.defs))
       }
+    )
+  }
+
+  /**
+   * A self-contained schema for a tool reply: [root] with every `$defs` reference expanded in
+   * place, no `$schema` or `$id`, and its `schema` field pinned to [schemaId] and required.
+   *
+   * An MCP `outputSchema` is checked by whatever validator the host happens to carry, and not every
+   * one of them knows the 2020-12 dialect URI or resolves `$defs`; a flat schema in the keywords
+   * every draft shares is one they all read. The replies it is used for are not recursive, and one
+   * that were would fail here rather than loop. The `schema` field has a default, so its descriptor
+   * calls it optional — but the reply encoders write defaults, so it is always there, and a client
+   * telling replies apart by it can rely on that.
+   */
+  fun output(root: SerialDescriptor, schemaId: String): JsonObject {
+    val builder = Builder()
+    fun expand(element: JsonElement, seen: Set<String>): JsonElement =
+      when (element) {
+        is JsonObject -> {
+          val ref = (element["\$ref"] as? JsonPrimitive)?.content
+          if (ref == null) {
+            JsonObject(element.mapValues { (_, value) -> expand(value, seen) })
+          } else {
+            val key = ref.removePrefix("#/\$defs/")
+            check(key !in seen) { "$key refers to itself and cannot be inlined" }
+            expand(builder.defs.getValue(key), seen + key)
+          }
+        }
+        is JsonArray -> JsonArray(element.map { expand(it, seen) })
+        else -> element
+      }
+    val schema = expand(builder.schemaOf(root), emptySet()) as JsonObject
+    val properties = schema["properties"] as? JsonObject ?: JsonObject(emptyMap())
+    val required = (schema["required"] as? JsonArray)?.map { it as JsonPrimitive }.orEmpty()
+    return JsonObject(
+      schema +
+        mapOf(
+          "properties" to
+            JsonObject(
+              properties + ("schema" to obj("type" to str("string"), "const" to str(schemaId)))
+            ),
+          "required" to JsonArray((listOf(str("schema")) + required).distinctBy { it.content }),
+        )
     )
   }
 

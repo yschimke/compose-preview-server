@@ -124,6 +124,48 @@ class ServeCatalogMcpToolsTest {
 
   private fun JsonObject.parsed(): JsonObject = Json.parseToJsonElement(firstText()).jsonObject
 
+  @Test
+  fun `data-product array text is wrapped for its object output schema`() {
+    val body = call(ToolHost(png = pixel), "catalog_list_data_products", """{"catalog":"m3"}""")
+
+    assertEquals(false, body.isError(), body.toString())
+    val legacyArray = Json.parseToJsonElement(body.firstText()).jsonArray
+    assertEquals(
+      legacyArray,
+      body["result"]!!.jsonObject["structuredContent"]!!.jsonObject["dataProducts"],
+    )
+  }
+
+  @Test
+  fun `preview stories preserves every structured observation`() {
+    val body =
+      call(
+        ToolHost(png = pixel),
+        "preview-stories",
+        """{"storyIds":["m3::card","m3::other"],"observe":"hash"}""",
+      )
+    // Each observation's text block, beside the resource link that follows it.
+    val legacy =
+      body
+        .content()
+        .map { it.jsonObject }
+        .filter { it["type"]!!.jsonPrimitive.content == "text" }
+        .map { Json.parseToJsonElement(it["text"]!!.jsonPrimitive.content).jsonObject }
+    val observations =
+      body["result"]!!
+        .jsonObject["structuredContent"]!!
+        .jsonObject["observations"]!!
+        .jsonArray
+        .map { it.jsonObject }
+
+    assertEquals(2, observations.size)
+    assertEquals(legacy, observations)
+    assertEquals(
+      setOf("compose-preview://catalog/m3/card", "compose-preview://catalog/m3/other"),
+      observations.map { it["uri"]!!.jsonPrimitive.content }.toSet(),
+    )
+  }
+
   // ---- catalog_render_preview image URL (#1160)
   // -------------------------------------------------------------------------
 
@@ -200,7 +242,8 @@ class ServeCatalogMcpToolsTest {
     val result = renderPng(mcpWith({ 1_000_000L }, origin = null))
 
     assertEquals(null, imageUrlOf(result))
-    assertEquals(null, result["structuredContent"])
+    // An image-only reply still carries the (empty) object its output schema promises.
+    assertEquals(JsonObject(emptyMap()), result["structuredContent"])
   }
 
   // ---- catalog_list_devices

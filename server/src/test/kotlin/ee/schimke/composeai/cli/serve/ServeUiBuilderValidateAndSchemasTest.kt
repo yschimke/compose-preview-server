@@ -240,6 +240,37 @@ class ServeUiBuilderValidateAndSchemasTest {
   // ---- the schemas -----------------------------------------------------------------------------
 
   @Test
+  fun `validate declares its reply as a closed output schema`() {
+    val server = start()
+    val schema = outputSchema(server, ServeUiBuilderMcp.VALIDATE)
+    val reply = validate(server, """{"document":${documentJson(document())}}""")
+
+    assertEquals(
+      UI_BUILDER_VALIDATION_SCHEMA,
+      schema["properties"]!!.jsonObject["schema"]!!.jsonObject["const"]!!.jsonPrimitive.content,
+    )
+    assertTrue(
+      schema["required"]!!
+        .jsonArray
+        .map { it.jsonPrimitive.content }
+        .containsAll(listOf("schema", "valid", "problems")),
+      schema.toString(),
+    )
+    // Self-contained: a host's validator need not know the 2020-12 dialect or resolve `$defs`.
+    assertFalse(schema.toString().contains("\$ref"), schema.toString())
+    assertFalse("\$schema" in schema, schema.toString())
+    // Not vacuous: a stray field, a wrong type and another reply's schema id are all refused.
+    val check = SchemaCheck(schema)
+    assertFalse(check.errors(JsonObject(reply + ("stray" to JsonPrimitive(1)))).isEmpty())
+    assertFalse(check.errors(JsonObject(reply + ("valid" to JsonPrimitive("yes")))).isEmpty())
+    assertFalse(
+      check
+        .errors(JsonObject(reply + ("schema" to JsonPrimitive(UI_BUILDER_VIEW_SCHEMA))))
+        .isEmpty()
+    )
+  }
+
+  @Test
   fun `the schemas are MCP resources beside the viewer and readable without a grant`() {
     val server = start()
 
@@ -381,8 +412,21 @@ class ServeUiBuilderValidateAndSchemasTest {
     val result = call(server, ServeUiBuilderMcp.VALIDATE, arguments)
     val text = result["content"]!!.jsonArray.first().jsonObject["text"]!!.jsonPrimitive.content
     assertEquals(null, result["isError"], text)
-    return Json.parseToJsonElement(text).jsonObject
+    val reply = Json.parseToJsonElement(text).jsonObject
+    // The typed reply is the same object, and it satisfies the schema the tool declares.
+    assertEquals(reply, result["structuredContent"], text)
+    val errors = SchemaCheck(outputSchema(server, ServeUiBuilderMcp.VALIDATE)).errors(reply)
+    assertTrue(errors.isEmpty(), "$errors in $reply")
+    return reply
   }
+
+  private fun outputSchema(server: Running, tool: String): JsonObject =
+    post(server, """{"jsonrpc":"2.0","id":1,"method":"tools/list"}""")["result"]!!
+      .jsonObject["tools"]!!
+      .jsonArray
+      .map { it.jsonObject }
+      .single { it["name"]!!.jsonPrimitive.content == tool }["outputSchema"]!!
+      .jsonObject
 
   private fun storedDocument(server: Running): JsonObject =
     Json.parseToJsonElement(
@@ -551,7 +595,7 @@ class ServeUiBuilderValidateAndSchemasTest {
  * `anyOf`. Deliberately small — the schema's own generator is the thing under test, and a keyword
  * this does not know fails the check rather than passing silently.
  */
-private class SchemaCheck(private val root: JsonObject) {
+internal class SchemaCheck(private val root: JsonObject) {
   private val known =
     setOf(
       "\$schema",

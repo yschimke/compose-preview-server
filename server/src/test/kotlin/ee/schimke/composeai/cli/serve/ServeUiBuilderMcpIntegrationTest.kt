@@ -90,6 +90,42 @@ class ServeUiBuilderMcpIntegrationTest {
   }
 
   @Test
+  fun `every catalog and UI builder tool declares an object output schema`() {
+    // Every optional lane on, so the list is the whole tool set rather than the default subset.
+    val server =
+      start(
+        withAssets = true,
+        withComments = true,
+        withPngExport = true,
+        withLinks = true,
+        withValidator = true,
+      )
+    val declarations = toolDefinitions(server)
+    val names = declarations.map { it["name"]!!.jsonPrimitive.content }
+    val lanes =
+      listOf(
+        "catalog_render_preview",
+        "catalog_library",
+        ServeUiBuilderMcp.SEARCH_COMPONENTS,
+        ServeUiBuilderMcp.VIEW,
+        ServeUiBuilderMcp.VALIDATE,
+        ServeUiBuilderMcp.PUT_ASSET,
+        ServeUiBuilderMcp.LIST_COMMENTS,
+        ServeUiBuilderMcp.GET_LINKS,
+        ServeUiBuilderMcp.SET_LINKS,
+      )
+    assertTrue(names.containsAll(lanes), "missing ${lanes - names.toSet()} from $names")
+    val invalid = declarations.filter {
+      it["outputSchema"]?.jsonObject?.get("type")?.jsonPrimitive?.content != "object"
+    }
+
+    assertTrue(
+      invalid.isEmpty(),
+      "tools without object output schemas: ${invalid.map { it["name"] }}",
+    )
+  }
+
+  @Test
   fun `initialize states the canonical home rules when the builder is present`() {
     val server = start()
 
@@ -1484,6 +1520,7 @@ class ServeUiBuilderMcpIntegrationTest {
     assertEquals(null, result["isError"], result.toString())
     val content = result["content"]!!.jsonArray.map { it.jsonObject }
     val view = Json.parseToJsonElement(content.first()["text"]!!.jsonPrimitive.content).jsonObject
+    assertTypedView(server, result, view)
     assertFalse("imageBase64" in view, "the picture must not travel as text")
     assertEquals("agent-screen", view["designId"]!!.jsonPrimitive.content)
     assertEquals(0L, view["revision"]!!.jsonPrimitive.content.toLong())
@@ -1572,6 +1609,7 @@ class ServeUiBuilderMcpIntegrationTest {
     assertEquals(null, result["isError"], result.toString())
     val content = result["content"]!!.jsonArray.map { it.jsonObject }
     val view = Json.parseToJsonElement(content.first()["text"]!!.jsonPrimitive.content).jsonObject
+    assertTypedView(server, result, view)
     assertEquals("export", view["renderer"]!!.jsonPrimitive.content)
     assertNotNull(view["boundsUnavailable"], view.toString())
     assertTrue(view["nodes"]!!.jsonArray.isEmpty(), view.toString())
@@ -1634,6 +1672,9 @@ class ServeUiBuilderMcpIntegrationTest {
     /** Answers a PNG export with [VIEW_FRAME], standing in for the packaged renderer. */
     withPngExport: Boolean = false,
     nativePreview: UiBuilderNativePreviewLane? = null,
+    withLinks: Boolean = false,
+    /** Advertises `ui_builder_validate`, with a validator that finds nothing. */
+    withValidator: Boolean = false,
   ): RunningServer {
     val registry = ServeSessionRegistry(open = { null })
     val service =
@@ -1710,6 +1751,10 @@ class ServeUiBuilderMcpIntegrationTest {
               ServeUiBuilderAuthorization.fromServeIdentity(OPERATOR_TOKEN, null, null)
             else null,
           uiBuilderNativePreview = nativePreview,
+          uiBuilderLinksStore =
+            if (withLinks) ServeUiBuilderLinksStore(stateDirectory.resolve("links")) else null,
+          uiBuilderValidator =
+            if (withValidator) UiBuilderDraftValidator { _, _, _ -> emptyList() } else null,
         )
         .also(ServeHttpServer::start)
     return RunningServer(server, registry).also { running = it }
@@ -1723,11 +1768,31 @@ class ServeUiBuilderMcpIntegrationTest {
       )["result"]!!
       .jsonObject
 
+  /**
+   * A view's `structuredContent` is the JSON its text carries, link included, and satisfies the
+   * `outputSchema` `ui_builder_view` declares.
+   */
+  private fun assertTypedView(server: RunningServer, result: JsonObject, view: JsonObject) {
+    assertEquals(view, result["structuredContent"], result.toString())
+    val schema =
+      toolDefinitions(server)
+        .single { it["name"]!!.jsonPrimitive.content == ServeUiBuilderMcp.VIEW }["outputSchema"]!!
+        .jsonObject
+    assertEquals(
+      UI_BUILDER_VIEW_SCHEMA,
+      schema["properties"]!!.jsonObject["schema"]!!.jsonObject["const"]!!.jsonPrimitive.content,
+    )
+    val errors = SchemaCheck(schema).errors(view)
+    assertTrue(errors.isEmpty(), "$errors in $view")
+    assertFalse(SchemaCheck(schema).errors(JsonObject(view - "frame")).isEmpty())
+  }
+
   /** The UI-builder envelope a tool replied with, as text. */
   private fun envelope(server: RunningServer, tool: String, arguments: String = "{}"): String {
     val result = call(server, tool, arguments)
     val text = result["content"]!!.jsonArray.first().jsonObject["text"]!!.jsonPrimitive.content
     assertEquals(null, result["isError"], text)
+    assertEquals(Json.parseToJsonElement(text), result["structuredContent"], text)
     return text
   }
 
