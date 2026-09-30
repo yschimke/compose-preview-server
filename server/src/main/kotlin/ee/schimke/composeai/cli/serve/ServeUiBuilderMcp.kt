@@ -11,9 +11,11 @@ import ee.schimke.composeai.uibuilder.protocol.DesignAccessActionV1
 import ee.schimke.composeai.uibuilder.protocol.DesignAccessRoleV1
 import ee.schimke.composeai.uibuilder.protocol.DesignCommandV1
 import ee.schimke.composeai.uibuilder.protocol.DesignDocumentV1
+import ee.schimke.composeai.uibuilder.protocol.DesignHomeV1
 import ee.schimke.composeai.uibuilder.protocol.DesignListItemV1
 import ee.schimke.composeai.uibuilder.protocol.DesignMutationV1
 import ee.schimke.composeai.uibuilder.protocol.DesignUpdateEnvelopeV1
+import ee.schimke.composeai.uibuilder.protocol.DiagnosticSeverityV1
 import ee.schimke.composeai.uibuilder.protocol.ExportCapabilitiesV1
 import ee.schimke.composeai.uibuilder.protocol.ExportDesignRequestV1
 import ee.schimke.composeai.uibuilder.protocol.ExportFormatV1
@@ -23,6 +25,7 @@ import ee.schimke.composeai.uibuilder.protocol.GrantActorAccessMutationV1
 import ee.schimke.composeai.uibuilder.protocol.ListCatalogsRequestV1
 import ee.schimke.composeai.uibuilder.protocol.ListDesignsRequestV1
 import ee.schimke.composeai.uibuilder.protocol.McpResponseEnvelopeV1
+import ee.schimke.composeai.uibuilder.protocol.OpenDesignRequestV1
 import ee.schimke.composeai.uibuilder.protocol.PropertyCapabilityV1
 import ee.schimke.composeai.uibuilder.protocol.RevokeActorAccessMutationV1
 import ee.schimke.composeai.uibuilder.protocol.ServiceErrorCodeV1
@@ -51,6 +54,7 @@ import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
@@ -86,11 +90,17 @@ import kotlinx.serialization.json.longOrNull
 class ServeUiBuilderMcp(
   private val service: UiBuilderServicePort,
   /**
+   * The configured public origin documents created here are homed at, or null when the operator
+   * stated none — then nothing is stamped, rather than a made-up address like `http://localhost`.
+   */
+  private val serverOrigin: () -> String? = { null },
+  /**
    * The native render lane, on a box that has one.
    *
    * Null on a host without a playground bundle — compiling a design needs a Kotlin compiler and the
-   * catalog's own classpath, which not every deployment carries. The tool is then absent rather
-   * than present and failing, exactly as the whole surface is on a box with no builder.
+   * catalog's own classpath, which not every deployment carries. The tool remains discoverable and
+   * returns [NATIVE_RENDER_UNAVAILABLE], so a client gets the same stable operation and can report
+   * the gap instead of guessing why a tool is absent.
    */
   private val nativePreview: UiBuilderNativePreviewLane? = null,
   /**
@@ -137,6 +147,14 @@ class ServeUiBuilderMcp(
    * on this surface could put bytes behind one.
    */
   private val assets: UiBuilderAssetPort? = null,
+  /**
+   * Answers "would this be accepted, and would it export?" without writing anything, on a host that
+   * can open a scratch service over its own catalogs and exporter.
+   *
+   * Null where the host did not wire one; [VALIDATE] is then absent rather than present and
+   * refusing, which is the rule the whole surface follows. See [UiBuilderDraftValidator].
+   */
+  private val validator: UiBuilderDraftValidator? = null,
 ) {
 
   /** Whether this host keeps design discussions, and so whether the comment tools exist. */
@@ -151,10 +169,15 @@ class ServeUiBuilderMcp(
   val supportsLinks: Boolean
     get() = links != null
 
+  /** Whether this host can check a design without saving it, and so whether [VALIDATE] exists. */
+  val supportsValidation: Boolean
+    get() = validator != null
+
   /** What a tool needs from the caller before it may run. Null when the name is not ours. */
   fun capabilityFor(tool: String): UiBuilderRouteCapability? =
     when (tool) {
       LIST_CATALOGS,
+      SEARCH_COMPONENTS,
       LIST_DESIGNS,
       GET_DESIGN,
       PREVIEW_CATALOG_RECOVERY,
@@ -173,6 +196,8 @@ class ServeUiBuilderMcp(
       REACT_TO_COMMENT -> if (comments == null) null else UiBuilderRouteCapability.WRITE
       CREATE_DESIGN,
       APPLY,
+      MOVE_DESIGN_HOME,
+      REPLACE_DESIGN_DOCUMENT,
       RENAME_DESIGN,
       // Sharing writes to the design's access control, and the service admits only its owner.
       SHARE_DESIGN,
@@ -192,10 +217,31 @@ class ServeUiBuilderMcp(
       SET_LINKS -> if (links == null) null else UiBuilderRouteCapability.WRITE
       // The same capability as an export, and for the same reason: a native render compiles and
       // runs the Kotlin an export hands back, so an actor who may not read that source may not
-      // run it. Absent entirely on a host that cannot compile.
-      RENDER_NATIVE -> if (nativePreview == null) null else UiBuilderRouteCapability.EXPORT
+      // run it. It stays discoverable on a host that cannot compile: the call then returns the
+      // stable NATIVE_RENDER_UNAVAILABLE refusal below instead of making clients infer capability
+      // from a tool disappearing between otherwise equivalent hosts.
+      RENDER_NATIVE -> UiBuilderRouteCapability.EXPORT
+      // A read: nothing is written, and the document checked is either the caller's own or one the
+      // service has just opened for them as a read.
+      VALIDATE -> if (validator == null) null else UiBuilderRouteCapability.READ
+      // Looking at a design is reading it: the default frame is the same PNG export a viewer of
+      // the design is shown. The native frame compiles Kotlin, so [additionalCapabilityFor] asks
+      // for the export capability on top when a call chooses it.
+      VIEW -> UiBuilderRouteCapability.READ
       else -> null
     }
+
+  /**
+   * A second capability this particular call needs beyond [capabilityFor], or null.
+   *
+   * Only [VIEW] has one: `renderer: "native"` compiles and runs the design's generated Kotlin,
+   * which [RENDER_NATIVE] gates as an export, and choosing the same lane through a read tool must
+   * not be a way around that.
+   */
+  fun additionalCapabilityFor(tool: String, args: JsonObject): UiBuilderRouteCapability? =
+    if (tool == VIEW && args.text(RENDERER_ARGUMENT) == ServeUiBuilderView.RENDERER_NATIVE)
+      UiBuilderRouteCapability.EXPORT
+    else null
 
   /**
    * Runs one tool as [actor], as the released MCP envelope.
@@ -230,6 +276,7 @@ class ServeUiBuilderMcp(
     val request =
       when (tool) {
         LIST_CATALOGS -> return listCatalogs(args, actor, callId)
+        SEARCH_COMPONENTS -> return searchComponents(args, actor, callId)
         LIST_DESIGNS ->
           ListDesignsRequestV1(
             cursor = args.text("cursor"),
@@ -251,6 +298,8 @@ class ServeUiBuilderMcp(
             ),
           )
         CREATE_DESIGN -> createDesign(args, actor)
+        MOVE_DESIGN_HOME,
+        REPLACE_DESIGN_DOCUMENT -> return authoritativeDocumentMutation(tool, args, actor, callId)
         RENAME_DESIGN,
         DELETE_DESIGN -> return manageDesign(tool, args, actor, callId)
         DESIGN_ACCESS -> GetDesignAccessRequestV1(designId = args.requiredText("designId"))
@@ -263,16 +312,7 @@ class ServeUiBuilderMcp(
               UiBuilderServiceCall(
                 actor,
                 UiBuilderServiceRequest.ExportDocument(
-                  try {
-                    UI_BUILDER_JSON.decodeFromJsonElement(
-                      DesignDocumentV1.serializer(),
-                      args["document"] ?: throw McpRequestException("document is required"),
-                    )
-                  } catch (failure: kotlinx.serialization.SerializationException) {
-                    throw McpRequestException(
-                      "document is not a DesignDocumentV1: ${failure.message}"
-                    )
-                  },
+                  args.requiredDocument(),
                   args.exportFormat(),
                 ),
               )
@@ -285,6 +325,7 @@ class ServeUiBuilderMcp(
             format = args.exportFormat(),
           )
         RENDER_NATIVE -> return renderNative(args, actor)
+        VIEW -> return view(args, actor)
         PUT_ASSET -> return envelope(callId, putAsset(args, actor))
         AWAIT_DESIGN -> return awaitDesign(args, actor)
         LIST_COMMENTS,
@@ -295,6 +336,7 @@ class ServeUiBuilderMcp(
         REACT_TO_COMMENT -> return commentTool(tool, args, actor)
         GET_LINKS,
         SET_LINKS -> return linksTool(tool, args, actor)
+        VALIDATE -> return validate(args, actor)
         else -> throw McpRequestException("unknown UI-builder tool '$tool'")
       }
     return envelope(callId, execute(request, actor), includeCatalog = args.includeCatalog())
@@ -359,6 +401,53 @@ class ServeUiBuilderMcp(
               components = catalog.components.map(::summarize),
             )
           },
+      ),
+    )
+  }
+
+  /**
+   * The components whose id, role or traits contain `query` (case-insensitive), in the summary
+   * shape of [listCatalogs]. A whole catalog summary is still thousands of tokens; an agent that
+   * wants `TextField` or `Button` should not pay for the rest.
+   */
+  private suspend fun searchComponents(
+    args: JsonObject,
+    actor: AuthenticatedUiBuilderActor,
+    callId: String,
+  ): String {
+    val query =
+      args[QUERY_ARGUMENT]?.jsonPrimitive?.contentOrNull?.trim()?.takeIf { it.isNotEmpty() }
+        ?: throw McpRequestException("`$QUERY_ARGUMENT` is required")
+    val catalogFilter = args[CATALOG_ARGUMENT]?.jsonPrimitive?.contentOrNull
+    val listed =
+      when (val response = execute(ListCatalogsRequestV1, actor)) {
+        is UiBuilderServiceResponse.Catalogs -> response
+        else -> return envelope(callId, response)
+      }
+    return SUMMARY_JSON.encodeToString(
+      CatalogSummaryReplyV1.serializer(),
+      CatalogSummaryReplyV1(
+        callId = callId,
+        catalogs =
+          listed.catalogs
+            .filter { catalogFilter == null || it.benchmark.catalogSystemId == catalogFilter }
+            .mapNotNull { catalog ->
+              val systemId = catalog.benchmark.catalogSystemId
+              val matches =
+                catalog.components.filter { component ->
+                  component.componentId.contains(query, ignoreCase = true) ||
+                    component.role.contains(query, ignoreCase = true) ||
+                    component.traits.any { it.contains(query, ignoreCase = true) }
+                }
+              if (matches.isEmpty()) null
+              else
+                CatalogSummaryV1(
+                  systemId = systemId,
+                  platform = catalog.statusSemantics[PLATFORM_KEY]?.jsonPrimitive?.contentOrNull,
+                  catalogPin = listed.pins[systemId],
+                  components = matches.map(::summarize),
+                )
+            },
       ),
     )
   }
@@ -480,6 +569,163 @@ class ServeUiBuilderMcp(
   }
 
   /**
+   * The two complete-document writes that deliberately do not pretend to be v1 design mutations.
+   *
+   * Their requests are typed at the service seam and their replies are the released operation
+   * outcome envelope. The host only translates JSON and authenticated identity; exact revisions,
+   * idempotency, authorization, validation, retention and broadcast stay authoritative in the
+   * runtime.
+   */
+  private suspend fun authoritativeDocumentMutation(
+    tool: String,
+    args: JsonObject,
+    actor: AuthenticatedUiBuilderActor,
+    callId: String,
+  ): String {
+    val designId = args.requiredText("designId")
+    val operationId = args.requiredText("operationId")
+    val baseRevision = args.requiredNumber("baseRevision")
+    if ((args[DRY_RUN_ARGUMENT] as? JsonPrimitive)?.booleanOrNull == true) {
+      return homeDecision(tool, designId, baseRevision, args).toString()
+    }
+    val request =
+      when (tool) {
+        MOVE_DESIGN_HOME ->
+          UiBuilderServiceRequest.MoveDesignHome(
+            designId = designId,
+            sourceHome = args.requiredNullableHome("sourceHome"),
+            targetHome = args.requiredHome("targetHome"),
+            baseRevision = baseRevision,
+            operationId = operationId,
+          )
+        else ->
+          UiBuilderServiceRequest.ReplaceDesignDocument(
+            designId = designId,
+            document = args.requiredDocument(),
+            baseRevision = baseRevision,
+            operationId = operationId,
+          )
+      }
+    return envelope(callId, service.execute(UiBuilderServiceCall(actor, request)))
+  }
+
+  /**
+   * The R3 decision behind a home move or a save-back / re-import, as a complete text result.
+   *
+   * This endpoint answers each POST on its own and keeps no channel open to the client, so it
+   * cannot send `elicitation/create` mid-call. The dry run is the fallback every client gets: the
+   * same validation as the real call, nothing written, and the options for the agent to put to the
+   * person in chat before it repeats the call without `dryRun`.
+   */
+  private fun homeDecision(
+    tool: String,
+    designId: String,
+    baseRevision: Long,
+    args: JsonObject,
+  ): JsonObject {
+    fun option(id: String, label: String) =
+      JsonObject(mapOf("id" to JsonPrimitive(id), "label" to JsonPrimitive(label)))
+    val fields = linkedMapOf<String, JsonElement>()
+    fields["schema"] = JsonPrimitive(DECISION_SCHEMA)
+    fields["designId"] = JsonPrimitive(designId)
+    fields["baseRevision"] = JsonPrimitive(baseRevision)
+    if (tool == MOVE_DESIGN_HOME) {
+      args.requiredNullableHome("sourceHome")
+      args.requiredHome("targetHome")
+      fields["decision"] = JsonPrimitive("move-design-home")
+      fields["sourceHome"] = args["sourceHome"] ?: JsonNull
+      fields["targetHome"] = args.getValue("targetHome")
+      fields["question"] =
+        JsonPrimitive("Move the canonical home of design `$designId` to the target home?")
+      fields["options"] =
+        JsonArray(
+          listOf(
+            option("move", "Move the home; the old record stays as a copy pointing to it"),
+            option("cancel", "Keep the current home"),
+          )
+        )
+    } else {
+      val document = args.requiredDocument()
+      fields["decision"] = JsonPrimitive("save-back-or-reimport")
+      fields["home"] = (args["document"] as? JsonObject)?.get("home") ?: JsonNull
+      fields["title"] = JsonPrimitive(document.title)
+      fields["question"] =
+        JsonPrimitive(
+          "This document's home is design `$designId` on this server. What should happen to it?"
+        )
+      fields["options"] =
+        JsonArray(
+          listOf(
+            option("save-back", "Save back onto the original (replaces revision $baseRevision)"),
+            option("create-new", "Create a new design instead, with a new id"),
+            option("discard", "Discard the copy; the original stays as it is"),
+            option("keep", "Keep the copy for now and change nothing"),
+          )
+        )
+    }
+    fields["elicitation"] =
+      JsonPrimitive(
+        "No form: this endpoint is stateless. Ask the person to pick one option in chat. " +
+          "Repeat the call without dryRun only for `move` or `save-back`."
+      )
+    return JsonObject(fields)
+  }
+
+  /**
+   * The R3 decision behind importing a document whose `home` is already this server (#1114), as the
+   * same `compose-preview-decision/v1` choices [homeDecision] offers.
+   *
+   * It is a refusal (the tool result stays `isError`, nothing is written) that carries the options
+   * rather than one hint, so an agent can put them to the person and continue with the chosen call.
+   * [reason] is the refusal sentence older clients matched on, kept verbatim.
+   */
+  private fun importOntoHomeDecision(
+    designId: String,
+    revision: Long,
+    incoming: DesignDocumentV1,
+    args: JsonObject,
+    reason: String,
+  ): JsonObject {
+    fun option(id: String, label: String) =
+      JsonObject(mapOf("id" to JsonPrimitive(id), "label" to JsonPrimitive(label)))
+    return JsonObject(
+      linkedMapOf(
+        "schema" to JsonPrimitive(DECISION_SCHEMA),
+        "decision" to JsonPrimitive("import-onto-existing-home"),
+        "designId" to JsonPrimitive(designId),
+        "baseRevision" to JsonPrimitive(revision),
+        "home" to ((args["document"] as? JsonObject)?.get("home") ?: JsonNull),
+        "title" to JsonPrimitive(incoming.title),
+        "reason" to JsonPrimitive(reason),
+        "question" to
+          JsonPrimitive(
+            "This document's home is design `$designId` on this server, which already exists. " +
+              "What should happen to it?"
+          ),
+        "options" to
+          JsonArray(
+            listOf(
+              option(
+                "apply-operations",
+                "Apply the changes as operations to the original (revision $revision)",
+              ),
+              option("create-new", "Create a new design instead, with a new id"),
+              option("cancel", "Cancel; the original stays as it is"),
+            )
+          ),
+        "elicitation" to
+          JsonPrimitive(
+            "No form: this endpoint is stateless. Ask the person to pick one option in chat. " +
+              "For `apply-operations`, read the original with $GET_DESIGN and send the " +
+              "differences through $APPLY at baseRevision $revision. For `create-new`, repeat " +
+              "$CREATE_DESIGN with a new designId and the document's `home` removed. For " +
+              "`cancel`, call nothing."
+          ),
+      )
+    )
+  }
+
+  /**
    * Grant or revoke one actor's access to a design.
    *
    * The access revision is read here rather than demanded from the caller. The service takes one to
@@ -528,12 +774,27 @@ class ServeUiBuilderMcp(
    * would be a way to render a design you cannot open.
    */
   private suspend fun renderNative(args: JsonObject, actor: AuthenticatedUiBuilderActor): String {
-    val lane = nativePreview ?: throw McpRequestException("this host has no native render lane")
     val designId = args.requiredText("designId")
+    // Read through the service before reporting host capability. Besides keeping missing and
+    // private designs indistinguishable, this establishes the access check that
+    // withCommentNotice relies on before it may inspect this design's discussion.
     val snapshot =
       execute(GetSnapshotRequestV1(designId = designId, revision = args.number("revision")), actor)
         as? UiBuilderServiceResponse.Snapshot
         ?: throw McpRequestException("no design `$designId` this actor can read")
+    val lane =
+      nativePreview
+        ?: return UI_BUILDER_JSON.encodeToString(
+          NativePreviewRefusalV1.serializer(),
+          NativePreviewRefusalV1(
+            code = NATIVE_RENDER_UNAVAILABLE,
+            reasons =
+              listOf(
+                "this host has no native render lane; configure a UI-builder native catalog " +
+                  "and compiler to render this design with Compose"
+              ),
+          ),
+        )
     val document = snapshot.snapshot.state.document
     return when (val outcome = lane.render(document)) {
       is UiBuilderNativePreviewOutcome.Refused ->
@@ -565,6 +826,185 @@ class ServeUiBuilderMcp(
           ),
         )
     }
+  }
+
+  /**
+   * The editor canvas as a person sees it: a frame of the design with the selection, the reference,
+   * the comment pins and — when asked — the layout bounds drawn over it, and the same facts as JSON
+   * (compose-preview-server#1114). See [ServeUiBuilderView].
+   *
+   * Not an [McpResponseEnvelopeV1], for the reason a native render is not. The design is read
+   * through the service as this actor first, so its own access control decides whether there is
+   * anything to look at, and the frame is one of the renders the design's other tools already make
+   * — nothing here draws a design a second way.
+   */
+  private suspend fun view(args: JsonObject, actor: AuthenticatedUiBuilderActor): String {
+    val designId = args.requiredText("designId")
+    val include = args.viewIncludes()
+    val selection = args.stringList(SELECTION_ARGUMENT)
+    val viewport = args.viewport()
+    val renderer = args.text(RENDERER_ARGUMENT) ?: ServeUiBuilderView.RENDERER_EXPORT
+    if (
+      renderer != ServeUiBuilderView.RENDERER_EXPORT &&
+        renderer != ServeUiBuilderView.RENDERER_NATIVE
+    ) {
+      throw McpRequestException(
+        "`$RENDERER_ARGUMENT` must be `${ServeUiBuilderView.RENDERER_EXPORT}` or " +
+          "`${ServeUiBuilderView.RENDERER_NATIVE}`"
+      )
+    }
+    val snapshot =
+      execute(GetSnapshotRequestV1(designId = designId, revision = args.number("revision")), actor)
+        as? UiBuilderServiceResponse.Snapshot
+        ?: throw McpRequestException("no design `$designId` this actor can read")
+    val document = snapshot.snapshot.state.document
+    val notes = mutableListOf<String>()
+    val frame =
+      if (renderer == ServeUiBuilderView.RENDERER_NATIVE) nativeViewFrame(designId, document)
+      else exportViewFrame(designId, document.revision, actor)
+    val board =
+      if (ServeUiBuilderView.INCLUDE_COMMENTS !in include) null
+      else if (comments == null) {
+        notes += "this host keeps no design discussions, so there are no comment pins"
+        null
+      } else {
+        val board = comments.readOrEmpty(designId)
+        service.publicReaderView(actor, designId)?.board(board) ?: board
+      }
+    val reference =
+      if (ServeUiBuilderView.INCLUDE_REFERENCE !in include) null
+      else runCatching { references?.read(designId) }.getOrNull()
+    val view =
+      try {
+        ServeUiBuilderView.compose(
+          designId = designId,
+          document = document,
+          frame = frame,
+          include = include,
+          selection = selection,
+          reference = reference,
+          board = board,
+          viewport = viewport,
+          notes = notes,
+        )
+      } catch (refused: ServeUiBuilderView.Refused) {
+        throw McpRequestException(refused.message ?: "the view could not be drawn")
+      }
+    return UI_BUILDER_JSON.encodeToString(UiBuilderViewV1.serializer(), view)
+  }
+
+  /** The editor renderer's PNG of [revision], exactly as `ui_builder_export` hands it over. */
+  private suspend fun exportViewFrame(
+    designId: String,
+    revision: Long,
+    actor: AuthenticatedUiBuilderActor,
+  ): ServeUiBuilderView.Frame {
+    val response =
+      execute(
+        ExportDesignRequestV1(
+          designId = designId,
+          revision = revision,
+          format = ExportFormatV1.PNG,
+        ),
+        actor,
+      )
+    val artifact =
+      when (response) {
+        is UiBuilderServiceResponse.Export -> response.artifact
+        is UiBuilderServiceResponse.Error -> throw McpRequestException(response.error.message)
+        else -> throw McpRequestException("the PNG export of `$designId` answered no artifact")
+      }
+    val errors = artifact.diagnostics.filter { it.severity == DiagnosticSeverityV1.ERROR }
+    val bytes =
+      runCatching { java.util.Base64.getDecoder().decode(artifact.content) }.getOrNull()
+        ?: ByteArray(0)
+    if (errors.isNotEmpty() || bytes.isEmpty()) {
+      throw McpRequestException(
+        "`$designId` has no PNG to view: " +
+          (errors
+            .joinToString("; ") { "${it.code}: ${it.message}" }
+            .ifEmpty { "the export produced no image" })
+      )
+    }
+    return ServeUiBuilderView.Frame(bytes, ServeUiBuilderView.RENDERER_EXPORT, bounds = null)
+  }
+
+  /** The native lane's frame and the boxes it reported, in that frame's pixels. */
+  private fun nativeViewFrame(
+    designId: String,
+    document: DesignDocumentV1,
+  ): ServeUiBuilderView.Frame {
+    val lane =
+      nativePreview
+        ?: throw McpRequestException(
+          "$NATIVE_RENDER_UNAVAILABLE: this host has no native render lane; view with " +
+            "`$RENDERER_ARGUMENT: \"${ServeUiBuilderView.RENDERER_EXPORT}\"` instead"
+        )
+    return when (val outcome = lane.render(document)) {
+      is UiBuilderNativePreviewOutcome.Refused ->
+        throw McpRequestException("${outcome.code}: ${outcome.reasons.joinToString("; ")}")
+      is UiBuilderNativePreviewOutcome.Rendered -> {
+        val encoded =
+          outcome.response.image?.removePrefix("data:image/png;base64,")?.takeIf { it.isNotBlank() }
+            ?: throw McpRequestException(
+              "the native render of `$designId` produced no frame: " +
+                (outcome.failure ?: "no reason given")
+            )
+        val bytes =
+          runCatching { java.util.Base64.getDecoder().decode(encoded) }.getOrNull()
+            ?: throw McpRequestException("the native render of `$designId` is not base64")
+        ServeUiBuilderView.Frame(
+          bytes,
+          ServeUiBuilderView.RENDERER_NATIVE,
+          bounds =
+            outcome.nodeBounds.mapValues { (_, box) ->
+              ServeUiBuilderView.Box(box.x, box.y, box.width, box.height)
+            },
+        )
+      }
+    }
+  }
+
+  private fun JsonObject.viewIncludes(): Set<String> {
+    if (this[INCLUDE_ARGUMENT] == null || this[INCLUDE_ARGUMENT] is JsonNull) {
+      return ServeUiBuilderView.DEFAULT_INCLUDES
+    }
+    val requested = stringList(INCLUDE_ARGUMENT).toSet()
+    val unknown = requested - ServeUiBuilderView.INCLUDES.toSet()
+    if (unknown.isNotEmpty()) {
+      throw McpRequestException(
+        "`$INCLUDE_ARGUMENT` names ${unknown.sorted().joinToString(", ")}; this server draws " +
+          ServeUiBuilderView.INCLUDES.joinToString(", ")
+      )
+    }
+    return requested
+  }
+
+  private fun JsonObject.stringList(name: String): List<String> {
+    val value = this[name] ?: return emptyList()
+    if (value is JsonNull) return emptyList()
+    return (value as? JsonArray)?.map {
+      (it as? JsonPrimitive)?.takeIf { primitive -> primitive.isString }?.content
+        ?: throw McpRequestException("`$name` must be an array of strings")
+    } ?: throw McpRequestException("`$name` must be an array of strings")
+  }
+
+  private fun JsonObject.viewport(): Pair<Int, Int>? {
+    val value = this[VIEWPORT_ARGUMENT] ?: return null
+    if (value is JsonNull) return null
+    val box =
+      value as? JsonObject ?: throw McpRequestException("`$VIEWPORT_ARGUMENT` must be an object")
+    fun edge(name: String): Int =
+      box[name]
+        ?.jsonPrimitive
+        ?.longOrNull
+        ?.takeIf { it in 1..ServeUiBuilderView.MAX_VIEWPORT_PX }
+        ?.toInt()
+        ?: throw McpRequestException(
+          "`$VIEWPORT_ARGUMENT.$name` must be an integer from 1 to " +
+            "${ServeUiBuilderView.MAX_VIEWPORT_PX}"
+        )
+    return Pair(edge("width"), edge("height"))
   }
 
   /**
@@ -889,7 +1329,7 @@ class ServeUiBuilderMcp(
       SNAPSHOT_RESPONSE_TYPE
 
   /**
-   * The reply, plus what this actor has not been told, when there is any.
+   * The reply, plus the pending-discussion count and what this actor has not been told.
    *
    * ## Why it is spliced onto the reply rather than left to the agent to ask for
    *
@@ -902,10 +1342,9 @@ class ServeUiBuilderMcp(
    * ## What it costs
    *
    * One board read per reply on the tools in [COMMENT_NOTICE_TOOLS], and nothing at all on a host
-   * that keeps no discussions. The reply is re-parsed only when there is something to add, so a
-   * design nobody has commented on — the common case, and the one where a native render's base64
-   * frame would be expensive to walk — pays a stat call and hands the original string back
-   * untouched.
+   * that keeps no discussions. A successful [GET_DESIGN] is always parsed once to attach the exact
+   * [UNACKNOWLEDGED_COMMENTS_KEY] count, including zero; the other replies are re-parsed only when
+   * there is a notice to add, so a native render's base64 frame is not walked without a reason.
    *
    * A reply that is not a JSON object is handed back as it is: a notice is worth having, and never
    * worth mangling the answer the agent asked for.
@@ -919,6 +1358,19 @@ class ServeUiBuilderMcp(
     val store = comments ?: return reply
     if (tool !in COMMENT_NOTICE_TOOLS) return reply
     val designId = args.text("designId") ?: return reply
+    // The count on GET_DESIGN must only accompany a successful snapshot. An error envelope means
+    // the service refused to open the design; reading or attaching its discussion metadata there
+    // would leak that a guessed private design has activity.
+    val parsedSnapshot =
+      if (tool != GET_DESIGN) null
+      else
+        try {
+          (UI_BUILDER_JSON.parseToJsonElement(reply) as? JsonObject)?.takeIf {
+            it.isSnapshotReply()
+          } ?: return reply
+        } catch (_: SerializationException) {
+          return reply
+        }
     // The design was read as this actor by the call that produced `reply`, so the access check has
     // already happened; a reply that never reached the design carries no notice because the board
     // of a design nobody may read is never consulted here — the tool refused before this point.
@@ -931,19 +1383,31 @@ class ServeUiBuilderMcp(
       } catch (cancelled: CancellationException) {
         throw cancelled
       } catch (_: Exception) {
-        // A discussion this host cannot read must never cost the agent the answer it asked for.
-        null
-      } ?: return reply
-    val parsed =
-      try {
-        UI_BUILDER_JSON.parseToJsonElement(reply) as? JsonObject ?: return reply
-      } catch (_: SerializationException) {
+        // A discussion this host cannot read must never cost the agent the answer it asked for or
+        // be misreported as an authoritative zero.
         return reply
       }
+    if (notice == null && tool != GET_DESIGN) return reply
+    val parsed =
+      parsedSnapshot
+        ?: try {
+          UI_BUILDER_JSON.parseToJsonElement(reply) as? JsonObject ?: return reply
+        } catch (_: SerializationException) {
+          return reply
+        }
     return JsonObject(
-        parsed +
-          (COMMENTS_NOTICE_KEY to
-            UI_BUILDER_JSON.encodeToJsonElement(CommentNoticeV1.serializer(), notice))
+        buildMap {
+          putAll(parsed)
+          if (tool == GET_DESIGN) {
+            put(UNACKNOWLEDGED_COMMENTS_KEY, JsonPrimitive(notice?.unacknowledged ?: 0))
+          }
+          if (notice != null) {
+            put(
+              COMMENTS_NOTICE_KEY,
+              UI_BUILDER_JSON.encodeToJsonElement(CommentNoticeV1.serializer(), notice),
+            )
+          }
+        }
       )
       .toString()
   }
@@ -988,9 +1452,38 @@ class ServeUiBuilderMcp(
             ?: throw McpRequestException("`fromDesignId` names no design this actor can read")
         snapshot.snapshot.state.document
       }
-    return CreateDesignRequestV1(
-      document.copy(id = designId, revision = 0, title = args.text("title") ?: document.title)
-    )
+    val incoming =
+      document.copy(
+        id = designId,
+        revision = 0,
+        title = args.text("title") ?: document.title,
+        // `fromDesignId` explicitly creates a new copy. It does not move the source's canonical
+        // home; an explicit supplied document, by contrast, must not be adopted silently.
+        home = if (source != null) null else document.home,
+      )
+    when (val existing = execute(OpenDesignRequestV1(designId), actor)) {
+      is UiBuilderServiceResponse.Snapshot -> {
+        val outcome = existingDesignOutcome(designId, incoming, serverOrigin())
+        if (outcome is ServeUiBuilderCreate.Outcome.Refused)
+          throw McpRequestException(
+            importOntoHomeDecision(
+                designId,
+                existing.snapshot.state.document.revision,
+                incoming,
+                args,
+                outcome.reason,
+              )
+              .toString()
+          )
+      }
+      is UiBuilderServiceResponse.Error ->
+        if (existing.error.code != ServiceErrorCodeV1.NOT_FOUND) {
+          throw McpRequestException(existing.error.message)
+        }
+      else -> Unit
+    }
+    incomingHomeRefusal(incoming, serverOrigin())?.let { throw McpRequestException(it) }
+    return CreateDesignRequestV1(incoming.withServerHome(serverOrigin()))
   }
 
   /**
@@ -1068,6 +1561,119 @@ class ServeUiBuilderMcp(
     )
   }
 
+  /**
+   * Check a whole `document`, a stored design, or a batch of `operations` against a stored design,
+   * and save nothing.
+   *
+   * A shape that does not decode is reported as a problem rather than thrown as a tool error: the
+   * caller asked "is this valid?", and "no, and here is why" is the answer, not a failure of the
+   * question. A design the actor cannot read is still refused outright, exactly as [GET_DESIGN]
+   * refuses it, so this is not a way to learn that a private design exists.
+   */
+  private suspend fun validate(args: JsonObject, actor: AuthenticatedUiBuilderActor): String {
+    val lane = validator ?: throw McpRequestException("this host cannot validate designs")
+    val explicit = args["document"]
+    val designId = args.text("designId")
+    val rawOperations = args["operations"]
+    if ((explicit == null) == (designId == null)) {
+      throw McpRequestException(
+        "pass exactly one of `document` (a whole design to check) or `designId` (a stored " +
+          "design, optionally with `operations` to check against it)"
+      )
+    }
+    if (explicit != null && rawOperations != null) {
+      throw McpRequestException(
+        "`operations` are checked against a stored design: pass `designId` with them, or check " +
+          "the whole edited `document` instead"
+      )
+    }
+    fun reply(
+      problems: List<UiBuilderValidationProblemV1>,
+      revision: Long? = null,
+    ): String =
+      UI_BUILDER_JSON.encodeToString(
+        UiBuilderValidationV1.serializer(),
+        UiBuilderValidationV1(
+          valid = problems.none { it.severity == SEVERITY_ERROR },
+          designId = designId,
+          revision = revision,
+          problems = problems,
+        ),
+      )
+    fun shape(code: String, message: String, operationIndex: Int? = null) =
+      UiBuilderValidationProblemV1(
+        source = SOURCE_SHAPE,
+        code = code,
+        message = message,
+        operationIndex = operationIndex,
+      )
+
+    if (explicit != null) {
+      val document =
+        try {
+          UI_BUILDER_JSON.decodeFromJsonElement(DesignDocumentV1.serializer(), explicit)
+        } catch (e: IllegalArgumentException) {
+          // SerializationException is an IllegalArgumentException, and so is a `require` in a
+          // protocol constructor; both mean the same thing to the caller.
+          return reply(
+            listOf(shape("invalidDocument", "`document` is not a DesignDocumentV1: ${e.message}"))
+          )
+        }
+      return reply(lane.validate(actor, document, operations = null))
+    }
+
+    val snapshot =
+      execute(GetSnapshotRequestV1(designId = designId!!, revision = null), actor)
+        as? UiBuilderServiceResponse.Snapshot
+        ?: throw McpRequestException("no design `$designId` this actor can read")
+    val document = snapshot.snapshot.state.document
+    val operations =
+      when (rawOperations) {
+        null -> null
+        is JsonArray ->
+          rawOperations.mapIndexed { index, element ->
+            try {
+              UI_BUILDER_JSON.decodeFromJsonElement(DesignMutationV1.serializer(), element)
+            } catch (e: IllegalArgumentException) {
+              return reply(
+                listOf(
+                  shape(
+                    "invalidMutation",
+                    "`operations[$index]` is not a DesignMutationV1: ${e.message}",
+                    operationIndex = index,
+                  )
+                ),
+                document.revision,
+              )
+            }
+          }
+        else ->
+          return reply(
+            listOf(shape("invalidMutation", "`operations` must be an array of design mutations")),
+            document.revision,
+          )
+      }
+    // Checked against the current document, because that is what an apply lands on. A batch
+    // written against an older revision is not refused for it — the reducer rebases what does not
+    // conflict — so a mismatch is a warning, not an error.
+    val baseRevision = args.number("baseRevision")
+    val notes =
+      if (operations != null && baseRevision != null && baseRevision != document.revision)
+        listOf(
+          UiBuilderValidationProblemV1(
+            severity = SEVERITY_WARNING,
+            source = SOURCE_MUTATIONS,
+            code = "revisionMismatch",
+            message =
+              "checked against the current revision ${document.revision}, not baseRevision " +
+                "$baseRevision; an apply quoting $baseRevision is also checked for conflicts " +
+                "with the edits in between",
+          )
+        )
+      else emptyList()
+    return reply(notes + lane.validate(actor, document, operations), document.revision)
+  }
+
   private suspend fun execute(
     request: UiBuilderRequestV1,
     actor: AuthenticatedUiBuilderActor,
@@ -1129,6 +1735,36 @@ class ServeUiBuilderMcp(
 
   private fun JsonObject.number(name: String): Long? = this[name]?.jsonPrimitive?.longOrNull
 
+  private fun JsonObject.requiredNumber(name: String): Long =
+    number(name) ?: throw McpRequestException("`$name` is required and must be an integer")
+
+  private fun JsonObject.requiredDocument(): DesignDocumentV1 =
+    decodeRequired("document", DesignDocumentV1.serializer(), "DesignDocumentV1")
+
+  private fun JsonObject.requiredHome(name: String): DesignHomeV1 =
+    decodeRequired(name, DesignHomeV1.serializer(), "DesignHomeV1")
+
+  private fun JsonObject.requiredNullableHome(name: String): DesignHomeV1? {
+    val value =
+      this[name] ?: throw McpRequestException("`$name` is required (use null for no home)")
+    if (value is JsonNull) return null
+    return decodeRequired(name, DesignHomeV1.serializer(), "DesignHomeV1")
+  }
+
+  private fun <T> JsonObject.decodeRequired(
+    name: String,
+    serializer: kotlinx.serialization.KSerializer<T>,
+    typeName: String,
+  ): T =
+    try {
+      UI_BUILDER_JSON.decodeFromJsonElement(
+        serializer,
+        this[name] ?: throw McpRequestException("`$name` is required"),
+      )
+    } catch (failure: SerializationException) {
+      throw McpRequestException("`$name` is not a $typeName: ${failure.message}")
+    }
+
   /** A frame fraction; `0.5` never survives [number], and an anchor is written in fractions. */
   private fun JsonObject.decimal(name: String): Float? = this[name]?.jsonPrimitive?.floatOrNull
 
@@ -1177,15 +1813,23 @@ class ServeUiBuilderMcp(
     private const val SUMMARY_ALLOWED_VALUES = 24
 
     const val LIST_CATALOGS = "ui_builder_list_catalogs"
+    const val SEARCH_COMPONENTS = "ui_builder_search_components"
     const val LIST_DESIGNS = "ui_builder_list_designs"
     const val GET_DESIGN = "ui_builder_get_design"
     const val PREVIEW_CATALOG_RECOVERY = "ui_builder_preview_catalog_recovery"
     const val CREATE_DESIGN = "ui_builder_create_design"
     const val APPLY = "ui_builder_apply"
+    const val MOVE_DESIGN_HOME = "ui_builder_move_design_home"
+    const val DRY_RUN_ARGUMENT = "dryRun"
+    const val DECISION_SCHEMA = "compose-preview-decision/v1"
+    private const val DRY_RUN_SCHEMA =
+      """{"type":"boolean","description":"Validate and return the person's choices without changing anything."}"""
+    const val REPLACE_DESIGN_DOCUMENT = "ui_builder_replace_design_document"
     const val EXPORT = "ui_builder_export"
     const val EXPORT_DOCUMENT = "ui_builder_export_document"
     const val RENDER_NATIVE = "ui_builder_render_native"
     const val PUT_ASSET = "ui_builder_put_asset"
+    const val VIEW = "ui_builder_view"
 
     /** The argument [PUT_ASSET] carries the picture in. */
     const val ASSET_BYTES_ARGUMENT = "imageBase64"
@@ -1202,11 +1846,25 @@ class ServeUiBuilderMcp(
     const val SHARE_DESIGN = "ui_builder_share_design"
     const val RENAME_DESIGN = "ui_builder_rename_design"
     const val DELETE_DESIGN = "ui_builder_delete_design"
+    const val VALIDATE = "ui_builder_validate"
 
     private const val REVOKE_ARGUMENT = "revoke"
     private const val INCLUDE_CATALOG_ARGUMENT = "includeCatalog"
     private const val FULL_ARGUMENT = "full"
+    private const val QUERY_ARGUMENT = "query"
+    private const val CATALOG_ARGUMENT = "catalog"
     private const val COMPONENT_IDS_ARGUMENT = "componentIds"
+    private const val INCLUDE_ARGUMENT = "include"
+    private const val SELECTION_ARGUMENT = "selection"
+    private const val VIEWPORT_ARGUMENT = "viewport"
+    private const val RENDERER_ARGUMENT = "renderer"
+
+    /** The argument that asks [VIEW] for the picture's bytes in the reply instead of a link. */
+    const val INLINE_ARGUMENT = "inline"
+
+    /** Closed, discriminated DesignHomeV1 schema shared by both mutation arguments. */
+    private const val DESIGN_HOME_SCHEMA =
+      """{"oneOf":[{"type":"object","properties":{"kind":{"const":"server"},"url":{"type":"string","minLength":1},"designId":{"type":"string","minLength":1}},"required":["kind","url","designId"],"additionalProperties":false},{"type":"object","properties":{"kind":{"const":"repo"},"path":{"type":"string","minLength":1}},"required":["kind","path"],"additionalProperties":false}]}"""
 
     /** The `statusSemantics` key a catalog declares its platform under; the runtime's own. */
     private const val PLATFORM_KEY = "platform"
@@ -1242,28 +1900,38 @@ class ServeUiBuilderMcp(
     val TOOL_NAMES =
       listOfNotNull(
         LIST_CATALOGS,
+        SEARCH_COMPONENTS,
         LIST_DESIGNS,
         GET_DESIGN,
         PREVIEW_CATALOG_RECOVERY,
         AWAIT_DESIGN,
         CREATE_DESIGN,
         APPLY,
+        MOVE_DESIGN_HOME,
+        REPLACE_DESIGN_DOCUMENT,
         EXPORT,
         EXPORT_DOCUMENT.takeIf { RemoteDocumentExportSupport.formats.isNotEmpty() },
+        VIEW,
         DESIGN_ACCESS,
         SHARE_DESIGN,
         RENAME_DESIGN,
         DELETE_DESIGN,
       )
 
-    /** Separate because it exists only where the host can compile. */
+    /** Kept separate for callers that group native-render capabilities. */
     val NATIVE_TOOL_NAMES = listOf(RENDER_NATIVE)
+
+    /** Stable refusal code returned when the host advertises the tool but cannot compile. */
+    const val NATIVE_RENDER_UNAVAILABLE = "NATIVE_RENDER_UNAVAILABLE"
 
     /** Separate because it exists only where the host keeps design assets. */
     val ASSET_TOOL_NAMES = listOf(PUT_ASSET)
 
     /** Separate because they exist only where the host records what a design is for. */
     val LINKS_TOOL_NAMES = listOf(GET_LINKS, SET_LINKS)
+
+    /** Separate because it exists only where the host can open a scratch service. */
+    val VALIDATE_TOOL_NAMES = listOf(VALIDATE)
 
     /** Separate because they exist only where the host keeps a discussion. */
     val COMMENT_TOOL_NAMES =
@@ -1285,7 +1953,16 @@ class ServeUiBuilderMcp(
      * news twice.
      */
     val COMMENT_NOTICE_TOOLS =
-      setOf(GET_DESIGN, APPLY, EXPORT, RENDER_NATIVE, PUT_ASSET, AWAIT_DESIGN)
+      setOf(
+        GET_DESIGN,
+        APPLY,
+        MOVE_DESIGN_HOME,
+        REPLACE_DESIGN_DOCUMENT,
+        EXPORT,
+        RENDER_NATIVE,
+        PUT_ASSET,
+        AWAIT_DESIGN,
+      )
 
     private const val DEFAULT_DESIGN_PAGE = 50
 
@@ -1308,6 +1985,9 @@ class ServeUiBuilderMcp(
     /** The key [CommentNoticeV1] is spliced onto a reply under. */
     internal const val COMMENTS_NOTICE_KEY = "comments"
 
+    /** The exact pending-discussion count attached to successful [GET_DESIGN] replies. */
+    internal const val UNACKNOWLEDGED_COMMENTS_KEY = "unacknowledgedComments"
+
     /** The key [StoredLinks] is spliced onto a $GET_DESIGN reply under. */
     internal const val LINKS_KEY = "links"
 
@@ -1321,6 +2001,7 @@ class ServeUiBuilderMcp(
       comments: Boolean = false,
       assets: Boolean = false,
       links: Boolean = false,
+      validate: Boolean = false,
     ): List<JsonObject> =
       listOfNotNull(
         tool(
@@ -1343,6 +2024,19 @@ class ServeUiBuilderMcp(
           """,
         ),
         tool(
+          SEARCH_COMPONENTS,
+          "Find catalog components by name, role or trait (case-insensitive substring), e.g. " +
+            "`TextField`, `Button`, `Card`. Returns the same summary as $LIST_CATALOGS " +
+            "(id, role, traits, slots, properties, and the catalog pin) for only the matches, " +
+            "so you don't pay for the whole catalog.",
+          """
+          {"type":"object","properties":{
+            "$QUERY_ARGUMENT":{"type":"string","description":"Text to look for in a component's id, role or traits."},
+            "$CATALOG_ARGUMENT":{"type":"string","description":"Only this catalog system id. Omit to search every catalog."}
+          },"required":["$QUERY_ARGUMENT"],"additionalProperties":false}
+          """,
+        ),
+        tool(
           LIST_DESIGNS,
           "List the UI-builder designs on this server, newest first, with the cursor to continue.",
           """
@@ -1358,7 +2052,9 @@ class ServeUiBuilderMcp(
             "variables and catalog pin — plus the revision to quote as `baseRevision` when " +
             "editing it. The catalog the design pins is left out unless `$INCLUDE_CATALOG_ARGUMENT` " +
             "is true: it is the same for every design on the pin, $LIST_CATALOGS serves it, and " +
-            "it is most of the bytes.",
+            "it is most of the bytes. On hosts with design discussions, " +
+            "`$UNACKNOWLEDGED_COMMENTS_KEY` is the number of comment threads this actor has not " +
+            "acknowledged; a nonzero count also carries the bounded `comments` notice.",
           """
           {"type":"object","properties":{
             "designId":{"type":"string"},
@@ -1405,7 +2101,9 @@ class ServeUiBuilderMcp(
           CREATE_DESIGN,
           "Create a design, either from a whole `document` you supply or by copying an existing " +
             "design named by `fromDesignId`. Copying is usually right: a document's `catalogPin` " +
-            "must match a catalog revision this server serves, and a copy carries one that does.",
+            "must match a catalog revision this server serves, and a copy carries one that does. " +
+            "A `document` whose `home` is an existing design on this server is refused with a " +
+            "`$DECISION_SCHEMA` choice to put to the person.",
           """
           {"type":"object","properties":{
             "designId":{"type":"string","description":"The id for the new design."},
@@ -1446,6 +2144,48 @@ class ServeUiBuilderMcp(
           """,
         ),
         tool(
+          MOVE_DESIGN_HOME,
+          "Move a design's canonical home between this server and a repository checkout. This " +
+            "changes real authoritative state: quote the exact `baseRevision` and current " +
+            "`sourceHome` from $GET_DESIGN, provide a stable `operationId`, and name the new " +
+            "`targetHome`. The old server record remains as a retained copy pointing at the new " +
+            "home. The reply is an idempotent operation outcome with the new revision; a stale " +
+            "revision or changed source home is refused rather than overwriting a concurrent move. " +
+            "Unless the person already chose this move, call first with `dryRun: true`: it " +
+            "changes nothing and returns the choices to put to them.",
+          """
+          {"type":"object","properties":{
+            "designId":{"type":"string"},
+            "operationId":{"type":"string","description":"Your stable id; makes a retry idempotent."},
+            "baseRevision":{"type":"integer","description":"The exact current revision read from the design."},
+            "sourceHome":{"description":"The exact current DesignHomeV1, or null when the design is unhomed.","anyOf":[{"type":"null"},$DESIGN_HOME_SCHEMA]},
+            "targetHome":$DESIGN_HOME_SCHEMA,
+            "dryRun":$DRY_RUN_SCHEMA
+          },"required":["designId","operationId","baseRevision","sourceHome","targetHome"],"additionalProperties":false}
+          """,
+        ),
+        tool(
+          REPLACE_DESIGN_DOCUMENT,
+          "Replace one stored design from a complete DesignDocumentV1 copy — the authoritative " +
+            "save-back and re-import operation. The document must name the same design and the " +
+            "same canonical home you read from $GET_DESIGN; `baseRevision` must still be current. " +
+            "The runtime validates the complete document and quotas, preserves server-owned " +
+            "identity, access and creation time, retains the old revision, and broadcasts a " +
+            "whole snapshot. Retry with the same `operationId`; never invent a new id after a " +
+            "lost response. Unless the person already chose to save back or re-import onto " +
+            "this home, call first with `dryRun: true`: it changes nothing and returns the " +
+            "choices to put to them.",
+          """
+          {"type":"object","properties":{
+            "designId":{"type":"string"},
+            "operationId":{"type":"string","description":"Your stable id; makes a retry idempotent."},
+            "baseRevision":{"type":"integer","description":"The exact current revision being replaced."},
+            "document":{"type":"object","description":"The complete replacement DesignDocumentV1, including the existing home."},
+            "dryRun":$DRY_RUN_SCHEMA
+          },"required":["designId","operationId","baseRevision","document"],"additionalProperties":false}
+          """,
+        ),
+        tool(
           EXPORT,
           "Export a design. `compose` returns the Kotlin the generator writes, or — when the " +
             "design holds something it cannot express — diagnostics naming each reason. This is " +
@@ -1472,6 +2212,29 @@ class ServeUiBuilderMcp(
             "format":{"type":"string","enum":["png","json","rc"]}
           },"required":["document","format"],"additionalProperties":false}
           """,
+          ),
+        if (!validate) null
+        else
+          tool(
+            VALIDATE,
+            "Check a design without saving it: a whole `document`, a stored design by " +
+              "`designId`, or `operations` against a stored design exactly as $APPLY would apply " +
+              "them. Runs the same checks the real call does — document shape, catalog pin, the " +
+              "catalog's own validation, the mutation reducer — and then the Compose export " +
+              "gate, which is the list the editor's problems panel shows. Returns " +
+              "`{valid, problems:[{severity, source, code, message, nodeId?, field?, " +
+              "operationIndex?}]}`; `valid` is false exactly when a problem is an error. Nothing " +
+              "is written, no revision moves and nobody watching the design is notified. The " +
+              "shapes are published as the resources ${UiBuilderJsonSchemas.DOCUMENT_URI} and " +
+              "${UiBuilderJsonSchemas.MUTATION_URI}.",
+            """
+            {"type":"object","properties":{
+              "document":{"type":"object","description":"A whole DesignDocumentV1 to check."},
+              "designId":{"type":"string","description":"A stored design to check, or to check `operations` against."},
+              "operations":{"type":"array","items":{"type":"object"},"description":"DesignMutationV1 objects to check against `designId`'s current document, as ui_builder_apply takes them."},
+              "baseRevision":{"type":"integer","description":"The revision the operations were written against; a stale one is reported as a warning."}
+            },"additionalProperties":false}
+            """,
           ),
         if (!assets) null
         else
@@ -1559,7 +2322,7 @@ class ServeUiBuilderMcp(
               "issue":{"type":"string","description":"The tracker issue this design is for."},
               "reference":{"type":"string","description":"The frame in the design tool it reproduces."},
               "pr":{"type":"string","description":"The pull request that implemented it."},
-              "thread":{"type":"string","description":"The chat thread it is discussed in, as a permalink."},
+              "thread":{"type":"string","description":"A permalink to a discussion held elsewhere, such as a chat thread. It does not replace this server's comments for a server-homed design: keep that discussion on the design."},
               "previous":{"type":"string","description":"The design id on this host that this one continues."}
             },"required":["designId"],"additionalProperties":false}
             """,
@@ -1701,24 +2464,51 @@ class ServeUiBuilderMcp(
             },"required":["designId","afterSequence"],"additionalProperties":false}
             """,
           ),
-        if (!native) null
-        else
-          tool(
-            RENDER_NATIVE,
-            "Compile a design and render it with real Compose on this host, rather than in the " +
-              "browser's Wasm canvas — the way to see what a design looks like on Android. " +
-              "Returns the first frame, the token the live frame stream is opened with, and the " +
-              "design node ids the render is tagged with, so `get_preview_data` can report each " +
-              "node's bounds and a client can put selectable regions over the image. The reply " +
-              "is not an McpResponseEnvelopeV1: the released contract defines no request type " +
-              "for a native render.",
-            """
+        tool(
+          RENDER_NATIVE,
+          "Compile a design and render it with real Compose on this host, rather than in the " +
+            "browser's Wasm canvas — the way to see what a design looks like on Android. " +
+            "Returns the first frame, the token the live frame stream is opened with, and the " +
+            "design node ids the render is tagged with, so `catalog_get_preview_data` can report each " +
+            "node's bounds and a client can put selectable regions over the image. " +
+            (if (native) "This host has a native render lane. "
+            else
+              "This host currently has no native render lane, so calls return a refusal with " +
+                "code `$NATIVE_RENDER_UNAVAILABLE` until one is configured. ") +
+            "The reply is not an McpResponseEnvelopeV1: the released contract defines no " +
+            "request type for a native render.",
+          """
             {"type":"object","properties":{
               "designId":{"type":"string"},
               "revision":{"type":"integer","description":"A past revision. Omit for the current one."}
             },"required":["designId"],"additionalProperties":false}
             """,
-          ),
+        ),
+        tool(
+          VIEW,
+          "See a design the way a person in the editor sees it: a PNG of the canvas with the " +
+            "overlays drawn on — the `selection` outline, the `reference` picture when one is " +
+            "attached, the discussion's `comments` pins, and the layout `bounds` — and beside it " +
+            "JSON with the revision, each visible node's id and box, each pin's thread and " +
+            "position, all in the returned image's pixels. The picture is a short-lived signed " +
+            "https link by default; `$INLINE_ARGUMENT: true` puts the bytes in the reply as well. " +
+            "The frame is the PNG export (`$RENDERER_ARGUMENT: \"export\"`, the editor's own " +
+            "renderer), which reports no node boxes; `$RENDERER_ARGUMENT: \"native\"` draws " +
+            "real Compose on a host with a native render lane, reports every node's box so the " +
+            "selection can be outlined, and needs the ui-builder-export capability. A node with " +
+            "no box is reported, never drawn at a guessed position. Not an McpResponseEnvelopeV1.",
+          """
+          {"type":"object","properties":{
+            "designId":{"type":"string"},
+            "revision":{"type":"integer","description":"A past revision. Omit for the current one."},
+            "$VIEWPORT_ARGUMENT":{"type":"object","properties":{"width":{"type":"integer","minimum":1,"maximum":${ServeUiBuilderView.MAX_VIEWPORT_PX}},"height":{"type":"integer","minimum":1,"maximum":${ServeUiBuilderView.MAX_VIEWPORT_PX}}},"required":["width","height"],"additionalProperties":false,"description":"Fit the picture inside this many pixels, keeping its aspect ratio. Omit for the render's own size."},
+            "$INCLUDE_ARGUMENT":{"type":"array","items":{"type":"string","enum":[${ServeUiBuilderView.INCLUDES.joinToString(",") { "\"$it\"" }}]},"description":"Overlays to draw. Defaults to ${ServeUiBuilderView.DEFAULT_INCLUDES.sorted().joinToString(", ")}; [] draws the bare frame."},
+            "$SELECTION_ARGUMENT":{"type":"array","items":{"type":"string"},"description":"Node ids to show as selected."},
+            "$RENDERER_ARGUMENT":{"type":"string","enum":["${ServeUiBuilderView.RENDERER_EXPORT}","${ServeUiBuilderView.RENDERER_NATIVE}"],"description":"Defaults to ${ServeUiBuilderView.RENDERER_EXPORT}."},
+            "$INLINE_ARGUMENT":{"type":"boolean","description":"Also return the PNG as an image block. Defaults to false; a host with no public origin always does."}
+          },"required":["designId"],"additionalProperties":false}
+          """,
+        ),
       )
   }
 }

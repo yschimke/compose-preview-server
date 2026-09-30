@@ -14,6 +14,8 @@ boundary that is compiled twice. An index is the cheap way to stop that recurrin
 - [UI_BUILDER_GETTING_STARTED.md](UI_BUILDER_GETTING_STARTED.md) — how to run the UI builder and
   what each surface does.
 - [VERSIONING.md](VERSIONING.md) — what a version number here promises.
+- [openai-extensions-probe.md](openai-extensions-probe.md) — running the opt-in OpenAI MCP
+  Extensions probe (#1236) in ChatGPT/Codex desktop, and the seven questions to record.
 
 ## Wire contracts
 

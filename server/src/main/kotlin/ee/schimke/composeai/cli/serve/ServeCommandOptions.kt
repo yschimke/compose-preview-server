@@ -554,6 +554,16 @@ public class ServeCommandOptions(
   override val uiBuilderDefaultVisibility: UiBuilderDefaultVisibility =
     UiBuilderDefaultVisibility.parse(args.flagValue("--ui-builder-default-visibility"))
 
+  override val uiBuilderPublicOrigin: String? =
+    args
+      .flagValue("--ui-builder-public-origin")
+      ?.takeIf { it.isNotBlank() }
+      ?.let { origin ->
+        requireNotNull(normalizeServerHomeUrl(origin)) {
+          "--ui-builder-public-origin must be an absolute http(s) URL, got '$origin'"
+        }
+      }
+
   /** Optional durable aggregate counters. Null keeps local serve sessions in-memory only. */
   override val engagementFile: File? =
     args.flagValue("--engagement-file")?.takeIf { it.isNotBlank() }?.let(::File)
@@ -606,6 +616,8 @@ public class ServeCommandOptions(
       ?.toSet() ?: emptySet()
 
   override val githubAuthGuests: Boolean = "--github-auth-guests" in args
+
+  override val githubAuthOpenUiBuilder: Boolean = "--github-auth-open-ui-builder" in args
 
   /**
    * Agent access grants (`--agent-grants`): enable the device-grant flow at `/agent-access/…` so an
@@ -1138,6 +1150,11 @@ public class ServeCommandOptions(
                           it, read-only, and can request edit access through an agent grant. A
                           guest counts as signed out
                           everywhere else — no live sessions, playground, uploads or approvals.
+        --github-auth-open-ui-builder
+                          Let every signed-in GitHub member create, edit and export UI-builder
+                          designs — and approve agent grants for those — without access to
+                          --github-auth-repo. Playground and image uploads still require it. With
+                          no --github-auth-users / --github-auth-orgs, that is any GitHub account.
         --agent-grants    Let an agent ask for temporary access it can't otherwise get. The agent
                           POSTs /agent-access/request and prints a link plus a verification code;
                           you open the link, check the code matches, and approve. It then collects a
@@ -1358,6 +1375,11 @@ public class ServeCommandOptions(
                           Whether a new UI-builder design starts public (anyone with the link may
                           view it, read-only) or private to its owner and whoever they share it
                           with. Owners change it per design from its share page. Default private.
+        --ui-builder-public-origin <url>
+                          The stable public origin designs on this server are canonical at, e.g.
+                          https://preview.example.com; recorded as each new design's home.
+                          Defaults to --github-auth-callback-base-url. With neither, new designs
+                          are left unhomed.
         --ui-builder-admin-actors <actor>[,…]
                           GitHub identities allowed to administer every shared UI-builder design,
                           for example github:octocat. A configured actor administers through its

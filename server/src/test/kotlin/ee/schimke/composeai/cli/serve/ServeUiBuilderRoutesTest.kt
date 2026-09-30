@@ -86,6 +86,13 @@ class ServeUiBuilderRoutesTest {
     when (val actor = call.request.headers[ACTOR_HEADER]) {
       null -> UiBuilderAuthorizationDecision.Missing
       "forbidden" -> UiBuilderAuthorizationDecision.Forbidden
+      // A caller that may look but not change anything: a guest, or a member without write access.
+      "reader" ->
+        if (capability == UiBuilderRouteCapability.READ) {
+          UiBuilderAuthorizationDecision.Authorized(actor)
+        } else {
+          UiBuilderAuthorizationDecision.Missing
+        }
       else -> UiBuilderAuthorizationDecision.Authorized(actor)
     }
   }
@@ -859,15 +866,47 @@ class ServeUiBuilderRoutesTest {
     val body =
       identity("github:someone").use {
         assertEquals(200, it.code)
-        assertEquals(UiBuilderRouteCapability.READ, capabilities.last())
+        // Admitted on READ; WRITE is then only asked, to report it.
+        assertEquals(
+          listOf(UiBuilderRouteCapability.READ, UiBuilderRouteCapability.WRITE),
+          capabilities.takeLast(2),
+        )
         assertEquals("no-store", it.header("Cache-Control"))
         it.body.string()
       }
     val payload = json.decodeFromString(UiBuilderIdentityV1.serializer(), body)
     assertEquals(1, payload.schemaVersion)
     assertEquals("github:someone", payload.actorId)
+    assertEquals(true, payload.canWrite)
+    assertEquals(null, payload.writeDeniedReason)
     // The point of the endpoint: an envelope declaring what it reports is accepted.
     assertEquals(200, status("github:someone", ListCatalogsRequestV1, payload.actorId))
+  }
+
+  @Test
+  fun `identity reports that a read-only caller cannot write, and why`() {
+    val payload =
+      identity("reader").use {
+        assertEquals(200, it.code)
+        json.decodeFromString(UiBuilderIdentityV1.serializer(), it.body.string())
+      }
+
+    assertEquals("reader", payload.actorId)
+    assertEquals(false, payload.canWrite)
+    assertTrue(payload.writeDeniedReason!!.isNotBlank())
+    // No GitHub sign-in on this host, so there is nowhere to send anyone.
+    assertEquals(null, payload.signInUrl)
+  }
+
+  @Test
+  fun `an unauthenticated identity request is still a 401, now with a JSON body`() {
+    identity(null).use {
+      assertEquals(401, it.code)
+      assertEquals("Bearer", it.header("WWW-Authenticate"))
+      val refusal = json.decodeFromString(UiBuilderIdentityRefusalV1.serializer(), it.body.string())
+      assertEquals("authentication is required", refusal.message)
+      assertEquals(null, refusal.signInUrl)
+    }
   }
 
   private fun identity(authenticatedActor: String?): Response {

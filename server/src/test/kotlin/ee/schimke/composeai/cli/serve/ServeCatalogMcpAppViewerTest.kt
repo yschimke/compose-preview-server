@@ -1,0 +1,362 @@
+package ee.schimke.composeai.cli.serve
+
+import ee.schimke.composeai.uibuilder.export.RemoteDocumentExportSupport
+import ee.schimke.composeai.uibuilder.service.UiBuilderServiceCall
+import ee.schimke.composeai.uibuilder.service.UiBuilderServicePort
+import ee.schimke.composeai.uibuilder.service.UiBuilderServiceResponse
+import ee.schimke.composeai.uibuilder.service.UiBuilderServiceUpdate
+import ee.schimke.composeai.uibuilder.service.UiBuilderSubscriptionCall
+import java.io.Closeable
+import java.util.Base64
+import java.util.concurrent.Semaphore
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertTrue
+import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+
+class ServeCatalogMcpAppViewerTest {
+  private fun request(
+    method: String,
+    params: String = "{}",
+    uiBuilder: ServeUiBuilderMcp? = null,
+    uiBuilderNative: Boolean = false,
+  ): JsonObject {
+    val mcp =
+      ServeCatalogMcp(
+        ServeSessionRegistry(open = { null }),
+        Semaphore(1),
+        uiBuilder = uiBuilder,
+        uiBuilderNative = uiBuilderNative,
+      )
+    val body =
+      Json.parseToJsonElement("""{"jsonrpc":"2.0","id":1,"method":"$method","params":$params}""")
+        .jsonObject
+    return requireNotNull(
+      runBlocking {
+        mcp.handle(body) { ServeMachineAuthorization.Decision.Authorized("agent:test") }
+      }
+        .body
+    )
+  }
+
+  @Test
+  fun `viewer resource is predeclared and returns MCP App HTML`() {
+    val listed = request("resources/list")["result"]!!.jsonObject["resources"]!!.jsonArray
+    val viewer =
+      listed
+        .single {
+          it.jsonObject["uri"]!!.jsonPrimitive.content == ServeCatalogMcp.MCP_APP_VIEWER_URI
+        }
+        .jsonObject
+    assertEquals("text/html;profile=mcp-app", viewer["mimeType"]!!.jsonPrimitive.content)
+    assertEquals(
+      "true",
+      viewer["_meta"]!!.jsonObject["ui"]!!.jsonObject["prefersBorder"]!!.jsonPrimitive.content,
+    )
+
+    val read =
+      request(
+          "resources/read",
+          """{"uri":"${ServeCatalogMcp.MCP_APP_VIEWER_URI}"}""",
+        )["result"]!!
+        .jsonObject["contents"]!!
+        .jsonArray
+        .single()
+        .jsonObject
+    assertEquals("text/html;profile=mcp-app", read["mimeType"]!!.jsonPrimitive.content)
+    val html = read["text"]!!.jsonPrimitive.content
+    assertTrue(
+      html.encodeToByteArray().size <= 500_000,
+      "the portable viewer bundle must stay at or below 500 KB",
+    )
+    assertTrue(html.contains("Compose Preview"))
+    assertTrue(html.contains("const pending = new Map();"))
+    assertTrue(html.contains("await request('ui/initialize'"))
+    assertTrue(html.contains("if (event.source !== window.parent) return;"))
+    assertTrue(!html.contains("innerHTML"))
+    assertTrue(html.contains("selected = undefined;"))
+    assertTrue(html.contains("use.hidden = true;"))
+    assertTrue(html.contains("message.method === 'ui/notifications/tool-input'"))
+    assertTrue(html.contains("toolArguments = safeSelectionArguments(incomingArguments);"))
+    assertTrue(html.contains("resourceToken = typeof incomingArguments.token === 'string'"))
+    assertTrue(
+      html.contains("if (resourceToken) params._meta = { 'compose-preview/token': resourceToken };")
+    )
+    assertTrue(html.contains("function safeSelectionArguments(value)"))
+    assertTrue(html.contains("/(token|authorization|password|secret|api[-_]?key|cookie|session)/i"))
+    assertTrue(html.contains("function credentialKeyInUri(key, value)"))
+    assertTrue(html.contains("if (url.username || url.password)"))
+    assertTrue(html.contains("for (const [parameter] of url.searchParams)"))
+    assertTrue(html.contains("new URLSearchParams(url.hash.slice(1))"))
+    assertTrue(html.contains("arguments: toolArguments"))
+    assertTrue(html.contains("structuredContent: { composePreviewSelection: selected }"))
+    assertTrue(html.contains("await request('ui/update-model-context'"))
+    assertTrue(!html.contains("notify('ui/update-model-context'"))
+    assertTrue(
+      html.contains(
+        "if (image && !cells.some(cell => typeof cell?.png === 'string' && cell.png.length > 0))"
+      )
+    )
+    assertTrue(html.contains("renderImage(image, value, resource);"))
+    assertTrue(html.contains("const RESOURCE_READ_TIMEOUT_MS = 65000;"))
+    assertTrue(html.contains("RESOURCE_READ_TIMEOUT_MS,"))
+    assertTrue(html.contains("const RESOURCE_POLL_INTERVAL_MS = 5000;"))
+    assertTrue(html.contains("connectResourceUpdates(resource.uri, !image && !cells)"))
+    assertTrue(html.contains("if (!initialReadPending) scheduleResourcePoll(uri);"))
+    assertTrue(html.contains("result?.hostCapabilities?.serverResources?.subscribe === true"))
+    assertTrue(
+      html.contains(
+        """await request(
+          'resources/subscribe',
+          { uri },
+          REQUEST_TIMEOUT_MS,
+          () => recoverLateSubscription(uri),
+        );"""
+      )
+    )
+    assertTrue(html.contains("await request('resources/unsubscribe', { uri });"))
+    assertTrue(html.contains("Unable to unsubscribe a stale Compose Preview resource"))
+    assertTrue(html.contains("message.method === 'notifications/resources/updated'"))
+    assertTrue(html.contains("if (resourceReadUri === message.params.uri) return;"))
+    assertTrue(html.contains("generation !== resourceReadGeneration"))
+    assertTrue(html.contains("scheduleResourcePoll(resource.uri);"))
+    assertTrue(html.contains("typeof content.blob === 'string'"))
+    assertTrue(html.contains("Refresh resource"))
+    assertTrue(html.contains("const REQUEST_TIMEOUT_MS = 5000;"))
+    assertTrue(html.contains("if (!pending.delete(id)) return;"))
+    assertTrue(html.contains("window.clearTimeout(request.timer);"))
+    assertTrue(html.contains("Viewer unavailable; use the complete text fallback."))
+    assertTrue(html.contains("const resultUri = value.uri || resource?.uri;"))
+    assertTrue(html.contains("if (!overlayEligible || !baseImageData"))
+    assertTrue(html.contains("!value?.crop"))
+    assertTrue(html.contains("!Array.isArray(value?.cells)"))
+    assertTrue(html.contains("readResource(true, true)"))
+    assertTrue(html.contains("!preserveOnlyIfUnchanged || image.blob === baseImageData"))
+    assertTrue(html.contains("ui_builder_list_comments"))
+    assertTrue(html.contains("ui_builder_post_comment"))
+    assertTrue(html.contains("Complete comment data"))
+    assertTrue(html.contains("renderCommentPins()"))
+    assertTrue(html.contains("Click the preview to pin this comment"))
+    assertTrue(html.contains("Refresh comments"))
+    assertTrue(html.contains("Reading comments requires <code>ui-builder-read</code>"))
+    assertTrue(html.contains("Posting requires ui-builder-write"))
+    assertTrue(html.contains("...(resourceToken ? { token: resourceToken } : {})"))
+    assertTrue(html.contains("const STATIC_RESULT_PARAM = 'compose-preview-result';"))
+    assertTrue(html.contains("const MAX_STATIC_RESULT_BYTES = 500000;"))
+    assertTrue(html.contains("#compose-preview-result=<unpadded base64url UTF-8 JSON>"))
+    assertTrue(html.contains("credential field"))
+    assertTrue(html.contains("return staticMode ? Promise.resolve() : initializeBridge();"))
+    assertTrue(html.contains("document.getElementById(STATIC_RESULT_PARAM)"))
+    assertTrue(html.contains("new TextEncoder().encode(text).length > MAX_STATIC_RESULT_BYTES"))
+    assertTrue(html.contains("if (staticMode || !inputResolved) return;"))
+    assertTrue(
+      !html.substringAfter("<script>").substringBeforeLast("</script>").contains("</script"),
+      "the viewer's own script must not contain a closing script tag",
+    )
+    assertTrue(html.contains("Render failed"))
+    assertTrue(html.contains("No image in this result"))
+    assertTrue(html.contains("Full message"))
+    assertTrue(html.contains("function beforeAfterModel(result, value)"))
+    assertTrue(html.contains("const inputBeforeUri = result?.isError ? undefined"))
+    assertTrue(html.contains("value?.left?.uri || value?.baseUri || inputBeforeUri"))
+    assertTrue(html.contains("await Promise.all(["))
+    assertTrue(html.contains("complete two-artifact fallback"))
+    assertTrue(html.contains("aria-label', 'Reveal after preview"))
+    assertTrue(
+      html.indexOf("await request('ui/initialize'") <
+        html.indexOf("notify('ui/notifications/initialized'"),
+      "the bridge must not announce readiness until the initialize response succeeds",
+    )
+  }
+
+  /**
+   * #1119: the viewer draws A2UI documents. The a2ui-catalog renderer is Compose on the server, so
+   * the bundle carries a small DOM renderer for the basic catalog and, with a live bridge, asks the
+   * server's a2ui-catalog for the Compose render the way `a2ui render` does. The behaviour itself
+   * is driven in a browser by `preview-harness/pages-snapshot.spec.mjs` ("renders an A2UI
+   * document"); this pins the contract the server side shares with it.
+   */
+  @Test
+  fun `viewer bundle renders A2UI documents and reuses the a2ui-catalog renderer`() {
+    val html =
+      request("resources/read", """{"uri":"${ServeCatalogMcp.MCP_APP_VIEWER_URI}"}""")["result"]!!
+        .jsonObject["contents"]!!
+        .jsonArray
+        .single()
+        .jsonObject["text"]!!
+        .jsonPrimitive
+        .content
+    assertTrue(html.encodeToByteArray().size <= 500_000, "the viewer bundle must stay ≤ 500 KB")
+    assertTrue(!html.contains("innerHTML"))
+
+    // Every message spelling the viewer accepts: v0.9, and v0.8 lowered to it.
+    assertTrue(
+      html.contains(
+        "'createSurface', 'updateComponents', 'updateDataModel', 'deleteSurface',\n" +
+          "    'surfaceUpdate', 'beginRendering', 'dataModelUpdate',"
+      )
+    )
+    // The basic catalog's component set.
+    listOf(
+        "Text",
+        "Image",
+        "Icon",
+        "Row",
+        "Column",
+        "List",
+        "Card",
+        "Divider",
+        "Button",
+        "TextField",
+        "CheckBox",
+        "Slider",
+        "ChoicePicker",
+        "DateTimeInput",
+        "Tabs",
+        "Modal",
+      )
+      .forEach { component -> assertTrue(html.contains("case '$component':"), component) }
+    // Bounded: a hostile document cannot recurse or fan out without limit.
+    assertTrue(html.contains("const A2UI_MAX_DEPTH = 64;"))
+    assertTrue(html.contains("const A2UI_MAX_COMPONENTS = 5000;"))
+    assertTrue(html.contains("trail.includes(id)"))
+
+    // Same channels as every other result, and an image in the result still wins.
+    val a2uiHook =
+      html.indexOf("const a2uiMessages = !result?.isError && a2uiMessagesIn(result, value);")
+    assertTrue(a2uiHook > 0)
+    assertTrue(html.indexOf("renderImage(image, value, resource);\n      renderDetails") < a2uiHook)
+    assertTrue(a2uiHook < html.indexOf("renderResourceFallback(\n        result,"))
+    // A ui_builder_export(_document) JSON artifact of an A2UI design is drawn too.
+    assertTrue(html.contains("artifact?.format === 'json' && typeof artifact.content === 'string'"))
+
+    // The catalog render is found and asked for exactly as `a2ui render` does it.
+    assertTrue(html.contains("const A2UI_CATALOG = '${A2uiCommand.DEFAULT_CATALOG}';"))
+    assertTrue(html.contains("const A2UI_DOCUMENT_KNOB = '${A2uiCommandRunner.DOCUMENT_KNOB}';"))
+    assertTrue(html.contains("[`knob.\${A2UI_DOCUMENT_KNOB}`]"))
+    assertTrue(html.contains("value?.overridesApplied === false"))
+    assertTrue(html.contains("/(^|__|\\/)catalog_list_previews$/"))
+    assertTrue(html.contains("<button id=\"a2ui-render\" type=\"button\" hidden>"))
+  }
+
+  @Test
+  fun `render tools declare the portable viewer without losing their text fallback`() {
+    val tools = request("tools/list")["result"]!!.jsonObject["tools"]!!.jsonArray
+    val viewerTools =
+      setOf("catalog_render_preview", "catalog_render_matrix", "catalog_diff_semantics")
+    viewerTools.forEach { name ->
+      val tool = tools.single { it.jsonObject["name"]!!.jsonPrimitive.content == name }.jsonObject
+      assertEquals(
+        ServeCatalogMcp.MCP_APP_VIEWER_URI,
+        tool["_meta"]!!.jsonObject["ui"]!!.jsonObject["resourceUri"]!!.jsonPrimitive.content,
+      )
+    }
+  }
+
+  @Test
+  fun `visual UI builder tools declare the portable viewer`() {
+    val service =
+      object : UiBuilderServicePort {
+        override suspend fun execute(call: UiBuilderServiceCall): UiBuilderServiceResponse =
+          UiBuilderServiceResponse.Catalogs(emptyList())
+
+        override fun subscribe(
+          call: UiBuilderSubscriptionCall,
+          listener: (UiBuilderServiceUpdate) -> Unit,
+        ): Closeable = Closeable {}
+      }
+    val native = UiBuilderNativePreviewLane { _, _ -> error("not called by tools/list") }
+    val tools =
+      request(
+          "tools/list",
+          uiBuilder = ServeUiBuilderMcp(service, nativePreview = native),
+          uiBuilderNative = true,
+        )["result"]!!
+        .jsonObject["tools"]!!
+        .jsonArray
+
+    buildSet {
+      add(ServeUiBuilderMcp.RENDER_NATIVE)
+      if (RemoteDocumentExportSupport.formats.isNotEmpty()) {
+        add(ServeUiBuilderMcp.EXPORT_DOCUMENT)
+      }
+    }
+      .forEach { name ->
+        val tool = tools.single { it.jsonObject["name"]!!.jsonPrimitive.content == name }.jsonObject
+        assertEquals(
+          ServeCatalogMcp.MCP_APP_VIEWER_URI,
+          tool["_meta"]!!.jsonObject["ui"]!!.jsonObject["resourceUri"]!!.jsonPrimitive.content,
+        )
+      }
+  }
+
+  @Test
+  fun `visual UI builder replies keep text fallback and expose PNG image blocks`() {
+    val mcp = ServeCatalogMcp(ServeSessionRegistry(open = { null }), Semaphore(1))
+    val native =
+      """{"designId":"demo","previewToken":"pg_secret","previewUrl":"/pg/pg_secret","imageBase64":"data:image/png;base64,AQID","compileError":null}"""
+    val nativeResult = mcp.uiBuilderToolResult(ServeUiBuilderMcp.RENDER_NATIVE, native)
+    assertVisualReply(
+      nativeResult,
+      """{"designId":"demo","previewToken":"pg_secret","previewUrl":"/pg/pg_secret","compileError":null}""",
+    )
+    assertTrue(nativeResult.toString().contains("pg_secret"))
+
+    val exported =
+      """{"callId":"ui_builder_export_document","response":{"artifact":{"format":"png","mediaType":"image/png","encoding":"base64","content":"AQID","contentDigest":"abc","diagnostics":[]}}}"""
+    val exportResult = mcp.uiBuilderToolResult(ServeUiBuilderMcp.EXPORT_DOCUMENT, exported)
+    assertVisualReply(
+      exportResult,
+      """{"callId":"ui_builder_export_document","response":{"artifact":{"format":"png","mediaType":"image/png","encoding":"base64","contentDigest":"abc","diagnostics":[]}}}""",
+    )
+
+    val jsonExported =
+      """{"callId":"ui_builder_export_document","response":{"artifact":{"format":"json","mediaType":"application/json","encoding":"utf8","content":"document bytes","contentDigest":"def","diagnostics":[]}}}"""
+    val jsonResult = mcp.uiBuilderToolResult(ServeUiBuilderMcp.EXPORT_DOCUMENT, jsonExported)
+    assertEquals(1, jsonResult["content"]!!.jsonArray.size)
+    assertEquals(
+      jsonExported,
+      jsonResult["content"]!!.jsonArray.single().jsonObject["text"]!!.jsonPrimitive.content,
+    )
+
+    val refused = """{"code":"COMPILE_FAILED","reasons":["bad source"]}"""
+    val fallback = mcp.uiBuilderToolResult(ServeUiBuilderMcp.RENDER_NATIVE, refused)
+    assertEquals(1, fallback["content"]!!.jsonArray.size)
+    assertEquals(
+      refused,
+      fallback["content"]!!.jsonArray.single().jsonObject["text"]!!.jsonPrimitive.content,
+    )
+  }
+
+  @Test
+  fun `visual UI builder reply keeps a representative PNG inside the static viewer bound`() {
+    val mcp = ServeCatalogMcp(ServeSessionRegistry(open = { null }), Semaphore(1))
+    val png = Base64.getEncoder().encodeToString(ByteArray(160_000) { it.toByte() })
+    val native =
+      """{"designId":"demo","previewToken":"pg_secret","previewUrl":"/pg/pg_secret","imageBase64":"$png","compileError":null}"""
+    val result = mcp.uiBuilderToolResult(ServeUiBuilderMcp.RENDER_NATIVE, native).toString()
+
+    assertTrue(result.indexOf(png) >= 0, "PNG image block is missing")
+    assertEquals(result.indexOf(png), result.lastIndexOf(png), "PNG must appear exactly once")
+    val fragment =
+      Base64.getUrlEncoder()
+        .withoutPadding()
+        .encodeToString("""{"version":1,"result":$result}""".encodeToByteArray())
+    assertTrue(fragment.length <= 500_000, "static viewer fragment was ${fragment.length} bytes")
+  }
+
+  private fun assertVisualReply(result: JsonObject, original: String) {
+    val content = result["content"]!!.jsonArray
+    assertEquals(2, content.size)
+    assertEquals("text", content[0].jsonObject["type"]!!.jsonPrimitive.content)
+    assertEquals(original, content[0].jsonObject["text"]!!.jsonPrimitive.content)
+    assertEquals("image", content[1].jsonObject["type"]!!.jsonPrimitive.content)
+    assertEquals("AQID", content[1].jsonObject["data"]!!.jsonPrimitive.content)
+    assertEquals("image/png", content[1].jsonObject["mimeType"]!!.jsonPrimitive.content)
+  }
+}

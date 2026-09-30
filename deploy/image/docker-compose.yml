@@ -120,6 +120,9 @@ services:
       SERVE_GITHUB_AUTH_ORGS: "${SERVE_GITHUB_AUTH_ORGS:-}"
       # `1` admits accounts outside SERVE_GITHUB_AUTH_USERS / _ORGS as read-only UI-builder guests.
       SERVE_GITHUB_AUTH_GUESTS: "${SERVE_GITHUB_AUTH_GUESTS:-}"
+      # `1` lets every signed-in GitHub member (any account, with no USERS/ORGS allowlist) create,
+      # edit and export UI-builder designs and approve agent grants for them, without repo access.
+      SERVE_GITHUB_AUTH_OPEN_UI_BUILDER: "${SERVE_GITHUB_AUTH_OPEN_UI_BUILDER:-}"
       # Empty asks for read:user only (plus read:org with SERVE_GITHUB_AUTH_ORGS). Only read-only
       # identity scopes (read:user, user:email, read:org) are accepted; repo is refused.
       SERVE_GITHUB_AUTH_SCOPE: "${SERVE_GITHUB_AUTH_SCOPE:-}"

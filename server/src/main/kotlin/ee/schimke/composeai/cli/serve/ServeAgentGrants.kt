@@ -32,6 +32,13 @@ object ServeAgentGrants {
   const val LEAVE_PATH = "$BASE_PATH/leave"
 
   /**
+   * Where the confirmation page shown when a grant link would replace the browser's current grant
+   * posts. POST only and same-origin only, so an agent-grant link can never switch a browser's
+   * identity without the person confirming it on a page this server served.
+   */
+  const val SWITCH_PATH = "$BASE_PATH/switch"
+
+  /**
    * The longest a poll may be held open. Chosen well inside the reverse proxies and load balancers
    * a box sits behind (Caddy's defaults included), and short enough that a client which loses
    * interest is not holding a connection for minutes.
@@ -290,6 +297,12 @@ object ServeAgentGrants {
         storeCeiling: AgentGrantScope,
         storeCapabilities: Set<AgentGrantCapability> = emptySet(),
         administers: Boolean = true,
+        /**
+         * `--github-auth-open-ui-builder`: this approver holds the UI builder's capabilities
+         * without repository access, so — by the same "never grant what you do not hold" rule — may
+         * pass them on. Nothing else rides in on it.
+         */
+        opensUiBuilder: Boolean = false,
       ) =
         Approver(
           name = "@$login",
@@ -300,6 +313,7 @@ object ServeAgentGrants {
           capabilityCeiling =
             buildSet {
               if (repositoryAccess) addAll(storeCapabilities)
+              if (opensUiBuilder) addAll(storeCapabilities intersect UI_BUILDER_CAPABILITIES)
               // Added and removed independently of the rest: `images` is the one capability whose
               // question is about a different repository, so it neither rides in on the sign-in
               // bit nor is withheld by it.
@@ -311,6 +325,16 @@ object ServeAgentGrants {
         )
     }
   }
+
+  /**
+   * The capabilities a UI-builder route asks for, and all `--github-auth-open-ui-builder` opens.
+   */
+  val UI_BUILDER_CAPABILITIES: Set<AgentGrantCapability> =
+    setOf(
+      AgentGrantCapability.UI_BUILDER_READ,
+      AgentGrantCapability.UI_BUILDER_WRITE,
+      AgentGrantCapability.UI_BUILDER_EXPORT,
+    )
 
   /** How [ServeMachineAuthorization] names the holder of `--token`. */
   const val OPERATOR_ACTOR_ID: String = "operator"

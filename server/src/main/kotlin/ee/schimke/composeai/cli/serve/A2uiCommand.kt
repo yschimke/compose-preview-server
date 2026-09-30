@@ -24,8 +24,8 @@ import kotlinx.serialization.json.put
  * The A2UI catalog publishes a preview that renders `previewOverrideString("document", …)`: an A2UI
  * document (JSON Lines of v0.9 messages, a JSON array, or a `{"components":[…]}` shorthand). This
  * command is the non-browser half of `/{system}/a2ui`: it finds that preview by the knob it
- * declares (or takes `--preview`), calls the catalog MCP `render_preview` with the document as
- * `knob.document` and `observe=png`, and writes the decoded PNG.
+ * declares (or takes `--preview`), calls the catalog MCP `catalog_render_preview` with the document
+ * as `knob.document` and `observe=png`, and writes the decoded PNG.
  *
  * A client like [DesignCommand], and built from the same parts: the same `--server` /
  * `$COMPOSE_PREVIEW_TOKEN` resolution, the same `POST <server>/mcp` transport, and the same
@@ -207,9 +207,9 @@ internal class A2uiCommandRunner(
     val previewId = options.previewId ?: documentPreview()
     val reply =
       catalogResult(
-        "render_preview",
+        "catalog_render_preview",
         transport.callRaw(
-          "render_preview",
+          "catalog_render_preview",
           buildJsonObject {
             put("catalog", options.catalog)
             put("previewId", previewId)
@@ -243,7 +243,8 @@ internal class A2uiCommandRunner(
         .firstOrNull { it["type"]?.jsonPrimitive?.contentOrNull == "image" }
         ?.get("data")
         ?.jsonPrimitive
-        ?.contentOrNull ?: throw DesignCommandFailure("a2ui: render_preview answered with no image")
+        ?.contentOrNull
+        ?: throw DesignCommandFailure("a2ui: catalog_render_preview answered with no image")
     val png = runCatching {
       Base64.getDecoder().decode(data)
     }
@@ -255,23 +256,28 @@ internal class A2uiCommandRunner(
     return DesignCommandRunner.EXIT_OK
   }
 
-  /** The catalog's preview declaring a string `document` knob, via `list_previews`. */
+  /** The catalog's preview declaring a string `document` knob, via `catalog_list_previews`. */
   private fun documentPreview(): String {
     val listing =
       catalogResult(
-        "list_previews",
-        transport.callRaw("list_previews", buildJsonObject { put("catalog", options.catalog) }),
+        "catalog_list_previews",
+        transport.callRaw(
+          "catalog_list_previews",
+          buildJsonObject { put("catalog", options.catalog) },
+        ),
       )
     val text =
       (listing["content"] as? JsonArray)?.firstNotNullOfOrNull { (it as? JsonObject)?.text() }
-        ?: throw DesignCommandFailure("a2ui: list_previews answered with no listing")
+        ?: throw DesignCommandFailure("a2ui: catalog_list_previews answered with no listing")
     val previews = runCatching {
       Json.parseToJsonElement(text)
         .jsonObject["catalogs"]!!
         .let { it as JsonArray }
         .flatMap { (it.jsonObject["previews"] as? JsonArray).orEmpty() }
     }
-      .getOrElse { throw DesignCommandFailure("a2ui: list_previews is not a listing — $text") }
+      .getOrElse {
+        throw DesignCommandFailure("a2ui: catalog_list_previews is not a listing — $text")
+      }
     return previews
       .mapNotNull { it as? JsonObject }
       .firstOrNull { preview ->

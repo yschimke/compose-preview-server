@@ -13,9 +13,12 @@ import kotlin.test.assertTrue
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.put
 
 /**
  * What the catalog MCP tells a caller about a render *besides* the pixels.
@@ -23,7 +26,7 @@ import kotlinx.serialization.json.jsonPrimitive
  * The gap these close was found by driving the endpoint: two different overrides returned
  * byte-identical PNGs and nothing in the reply said whether either had reached the renderer, and
  * probing eight axes cost twenty sequential calls. Provenance, strict override keys and
- * `render_matrix` are the three answers, pinned here.
+ * `catalog_render_matrix` are the three answers, pinned here.
  */
 class ServeCatalogMcpObservabilityTest {
 
@@ -64,7 +67,11 @@ class ServeCatalogMcpObservabilityTest {
     override fun close() {}
   }
 
-  private fun call(host: FakeHost, arguments: String, tool: String = "render_preview"): JsonObject {
+  private fun call(
+    host: FakeHost,
+    arguments: String,
+    tool: String = "catalog_render_preview",
+  ): JsonObject {
     val registry = ServeSessionRegistry(open = { null })
     registry.register("m3", host = host)
     val mcp = ServeCatalogMcp(registry, Semaphore(1))
@@ -106,6 +113,27 @@ class ServeCatalogMcpObservabilityTest {
     // No overrides were asked for, so there is nothing to say about them.
     assertNull(observation["requestedOverrides"])
     assertNull(observation["overridesApplied"])
+    val link =
+      body.content().single { it.jsonObject["type"]!!.jsonPrimitive.content == "resource_link" }
+    assertEquals(
+      "compose-preview://catalog/m3/card",
+      link.jsonObject["uri"]!!.jsonPrimitive.content,
+    )
+  }
+
+  @Test
+  fun `the default semantics observation carries a replayable override resource`() {
+    val body =
+      call(
+        FakeHost(png = pixel),
+        """{"catalog":"m3","previewId":"card","overrides":{"uiMode":"dark"}}""",
+      )
+
+    val observation = Json.parseToJsonElement(body.firstText()).jsonObject
+    assertEquals("semantics", observation["observe"]!!.jsonPrimitive.content)
+    val link =
+      body.content().single { it.jsonObject["type"]!!.jsonPrimitive.content == "resource_link" }
+    assertTrue(link.jsonObject["uri"]!!.jsonPrimitive.content.contains("overrides="))
   }
 
   @Test
@@ -147,8 +175,11 @@ class ServeCatalogMcpObservabilityTest {
     val body =
       call(FakeHost(png = pixel), """{"catalog":"m3","previewId":"card","observe":"png"}""")
 
-    assertEquals(1, body.content().size, "an override-free browse returns pixels and nothing else")
+    assertEquals(2, body.content().size)
     assertEquals("image", body.content()[0].jsonObject["type"]!!.jsonPrimitive.content)
+    val link = body.content()[1].jsonObject
+    assertEquals("resource_link", link["type"]!!.jsonPrimitive.content)
+    assertEquals("compose-preview://catalog/m3/card", link["uri"]!!.jsonPrimitive.content)
   }
 
   @Test
@@ -159,10 +190,97 @@ class ServeCatalogMcpObservabilityTest {
         """{"catalog":"m3","previewId":"card","observe":"png","overrides":{"uiMode":"dark"}}""",
       )
 
-    assertEquals(2, body.content().size)
+    assertEquals(3, body.content().size)
     assertEquals("image", body.content()[0].jsonObject["type"]!!.jsonPrimitive.content)
+    assertTrue(body.content()[1].jsonObject["uri"]!!.jsonPrimitive.content.contains("overrides="))
     val provenance = Json.parseToJsonElement(body.firstText()).jsonObject
     assertEquals("daemon", provenance["generation"]!!.jsonPrimitive.content)
+  }
+
+  @Test
+  fun `an override-bearing resource link replays the same render state`() {
+    val host = FakeHost(png = pixel)
+    val registry = ServeSessionRegistry(open = { null })
+    registry.register("m3", host = host)
+    val mcp = ServeCatalogMcp(registry, Semaphore(1))
+    val toolRequest =
+      Json.parseToJsonElement(
+          """{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"catalog_render_preview","arguments":{"catalog":"m3","previewId":"card","observe":"png","overrides":{"uiMode":"dark","device":"spec:width=400dp,height=800dp,dpi=320"}}}}"""
+        )
+        .jsonObject
+    val toolBody =
+      requireNotNull(
+          runBlocking {
+            mcp.handle(toolRequest) { ServeMachineAuthorization.Decision.Authorized("agent:test") }
+          }
+            .body
+        )
+        .content()
+    val resourceUri =
+      toolBody
+        .single { it.jsonObject["type"]!!.jsonPrimitive.content == "resource_link" }
+        .jsonObject["uri"]!!
+        .jsonPrimitive
+        .content
+
+    val readRequest = buildJsonObject {
+      put("jsonrpc", "2.0")
+      put("id", 2)
+      put("method", "resources/read")
+      put("params", buildJsonObject { put("uri", resourceUri) })
+    }
+    val denied =
+      requireNotNull(
+        runBlocking { mcp.handle(readRequest) { ServeMachineAuthorization.Decision.Missing } }.body
+      )
+    assertTrue(denied["error"] != null, "override-bearing resource reads require live access")
+    assertEquals(1, host.seen.size)
+    val presentedReadRequest =
+      JsonObject(
+        readRequest +
+          ("params" to
+            JsonObject(
+              readRequest["params"]!!.jsonObject +
+                ("_meta" to
+                  buildJsonObject { put("compose-preview/token", JsonPrimitive("cpat_live")) })
+            ))
+      )
+    var presentedToken: String? = null
+    requireNotNull(
+      runBlocking {
+        mcp.handle(presentedReadRequest) { token ->
+          presentedToken = token
+          ServeMachineAuthorization.Decision.Authorized("agent:test")
+        }
+      }
+        .body
+    )
+
+    assertEquals("cpat_live", presentedToken)
+    assertEquals(2, host.seen.size)
+    assertEquals(host.seen[0], host.seen[1])
+    assertEquals(ee.schimke.composeai.daemon.protocol.UiMode.DARK, host.seen[1].uiMode)
+    assertEquals("spec:width=400dp,height=800dp,dpi=320", host.seen[1].device)
+  }
+
+  @Test
+  fun `preview-stories links preserve the requested overrides`() {
+    val body =
+      call(
+        FakeHost(png = pixel),
+        """{"storyId":"m3::card","observe":"png","overrides":{"uiMode":"dark"}}""",
+        tool = "preview-stories",
+      )
+
+    val resourceUri =
+      body
+        .content()
+        .single { it.jsonObject["type"]!!.jsonPrimitive.content == "resource_link" }
+        .jsonObject["uri"]!!
+        .jsonPrimitive
+        .content
+    assertTrue(resourceUri.startsWith("compose-preview://catalog/m3/card?"), resourceUri)
+    assertTrue(resourceUri.contains("overrides="), resourceUri)
   }
 
   // ---- strict override keys -------------------------------------------------------------------
@@ -199,16 +317,17 @@ class ServeCatalogMcpObservabilityTest {
     assertEquals(1, host.renders.get())
   }
 
-  // ---- render_matrix --------------------------------------------------------------------------
+  // ---- catalog_render_matrix
+  // --------------------------------------------------------------------------
 
   @Test
-  fun `render_matrix renders the cross-product in one call`() {
+  fun `catalog_render_matrix renders the cross-product in one call`() {
     val host = FakeHost(png = pixel)
     val body =
       call(
         host,
         """{"catalog":"m3","previewId":"card","axes":{"uiMode":["light","dark"],"fontScale":[1.0,2.0]}}""",
-        tool = "render_matrix",
+        tool = "catalog_render_matrix",
       )
     val result = Json.parseToJsonElement(body.firstText()).jsonObject
 
@@ -227,13 +346,13 @@ class ServeCatalogMcpObservabilityTest {
   }
 
   @Test
-  fun `render_matrix layers each cell over the base overrides`() {
+  fun `catalog_render_matrix layers each cell over the base overrides`() {
     val host = FakeHost(png = pixel)
     val body =
       call(
         host,
         """{"catalog":"m3","previewId":"card","overrides":{"uiMode":"dark"},"axes":{"fontScale":[1.0,2.0]}}""",
-        tool = "render_matrix",
+        tool = "catalog_render_matrix",
       )
     val cells = Json.parseToJsonElement(body.firstText()).jsonObject["cells"]!!.jsonArray
 
@@ -247,13 +366,13 @@ class ServeCatalogMcpObservabilityTest {
   }
 
   @Test
-  fun `render_matrix refuses an oversized product before rendering anything`() {
+  fun `catalog_render_matrix refuses an oversized product before rendering anything`() {
     val host = FakeHost(png = pixel)
     val body =
       call(
         host,
         """{"catalog":"m3","previewId":"card","axes":{"fontScale":[1,2,3,4,5],"density":[1,2,3,4,5],"uiMode":["light","dark"]}}""",
-        tool = "render_matrix",
+        tool = "catalog_render_matrix",
       )
 
     assertTrue(body.isError())
@@ -262,12 +381,12 @@ class ServeCatalogMcpObservabilityTest {
   }
 
   @Test
-  fun `render_matrix rejects an empty axis`() {
+  fun `catalog_render_matrix rejects an empty axis`() {
     val body =
       call(
         FakeHost(png = pixel),
         """{"catalog":"m3","previewId":"card","axes":{"uiMode":[]}}""",
-        tool = "render_matrix",
+        tool = "catalog_render_matrix",
       )
 
     assertTrue(body.isError())
@@ -277,10 +396,11 @@ class ServeCatalogMcpObservabilityTest {
   // ---- svg availability -----------------------------------------------------------------------
 
   @Test
-  fun `list_previews advertises whether the vector lane exists`() {
-    val withSvg = call(FakeHost(png = pixel, hasSvgExport = true), """{}""", tool = "list_previews")
+  fun `catalog_list_previews advertises whether the vector lane exists`() {
+    val withSvg =
+      call(FakeHost(png = pixel, hasSvgExport = true), """{}""", tool = "catalog_list_previews")
     val without =
-      call(FakeHost(png = pixel, hasSvgExport = false), """{}""", tool = "list_previews")
+      call(FakeHost(png = pixel, hasSvgExport = false), """{}""", tool = "catalog_list_previews")
 
     fun flag(body: JsonObject): Boolean =
       Json.parseToJsonElement(body.firstText())

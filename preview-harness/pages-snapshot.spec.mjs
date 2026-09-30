@@ -19,6 +19,7 @@ import { test, expect } from "@playwright/test";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { PNG } from "pngjs";
 import { listThemes } from "./_themes.mjs";
 
 const harnessDir = dirname(fileURLToPath(import.meta.url));
@@ -4341,6 +4342,333 @@ for (const fixture of listPageFixtures()) {
         `/preview-harness/fixtures/pages/${fixture}.html${FIXTURE_QUERY[fixture] || ""}`,
       );
 
+      // The `.rc` viewer (#1237) plays asynchronously; shoot it once it reports ready or error.
+      if (fixture.startsWith("mcp-app-rc-viewer")) {
+        await page.waitForFunction(() => window.__rcHost?.settled === true, null, { timeout: 20_000 });
+      }
+      if (fixture.startsWith("mcp-app-viewer-")) {
+        const viewer = page.frameLocator('iframe[title="Compose Preview MCP App"]');
+        if (fixture.startsWith("mcp-app-viewer-static")) {
+          if (fixture === "mcp-app-viewer-static-fallback") {
+            await expect(viewer.locator("#canvas")).toContainText(
+              '"testTag":"static-card"',
+            );
+            await expect(viewer.locator("#canvas")).toContainText(
+              "compose-preview://fixture/_app/com.example.Card?overrides=fixture",
+            );
+            await expect(viewer.locator("#refresh")).toBeHidden();
+          } else if (fixture === "mcp-app-viewer-static-before-after-error") {
+            await expect(viewer.locator("#canvas")).toContainText(
+              "diff_semantics: base semantics are unavailable",
+            );
+            await expect(viewer.locator("#canvas")).not.toContainText("Before:");
+            await expect(viewer.locator("#canvas")).not.toContainText("After:");
+          } else if (fixture === "mcp-app-viewer-static-before-after") {
+            await expect(viewer.locator("#canvas")).toContainText(
+              "Static comparison result",
+            );
+            await expect(viewer.locator("#canvas")).toContainText("version=before");
+            await expect(viewer.locator("#canvas")).toContainText("version=after");
+            await expect(viewer.locator("#canvas")).toContainText(
+              "1 semantics node changed",
+            );
+            await expect(viewer.locator("#refresh")).toBeHidden();
+          } else {
+            await expect(
+              viewer.locator('#canvas img[alt="Rendered Compose preview"]'),
+            ).toBeVisible();
+            await expect(viewer.locator("#use")).toBeHidden();
+          }
+        } else if (
+          fixture !== "mcp-app-viewer-a11y-non-full" &&
+          !fixture.startsWith("mcp-app-viewer-comments")
+        ) {
+          await page.waitForFunction(
+            (count) => window.__mcpReadCount >= count,
+            fixture === "mcp-app-viewer-before-after" ? 2 : 1,
+          );
+        }
+        if (fixture === "mcp-app-viewer-fallback") {
+          await expect(viewer.locator("#canvas")).toContainText(
+            "The host returned no PNG for resource",
+          );
+        } else if (
+          !fixture.startsWith("mcp-app-viewer-static") &&
+          fixture !== "mcp-app-viewer-before-after"
+        ) {
+          await expect(viewer.locator('#canvas img[alt="Rendered Compose preview"]')).toBeVisible({
+            timeout: fixture === "mcp-app-viewer-resource" ? 8_000 : undefined,
+          });
+          if (fixture === "mcp-app-viewer-resource") {
+            expect(await page.evaluate(() => window.__mcpReadCount)).toBe(1);
+          }
+        }
+        if (fixture === "mcp-app-viewer-before-after") {
+          await expect(viewer.locator('img[alt="Before Compose preview"]')).toBeVisible();
+          await expect(viewer.locator('img[alt="After Compose preview"]')).toBeVisible();
+          await expect(viewer.locator(".comparison-labels")).toContainText("Before");
+          await expect(viewer.locator(".comparison-labels")).toContainText("After");
+          const slider = viewer.locator('input[aria-label="Reveal after preview"]');
+          await expect(slider).toHaveValue("50");
+          const beforeClip = await viewer.locator(".comparison-after").getAttribute("style");
+          await slider.fill("80");
+          await slider.dispatchEvent("input");
+          await expect(slider).toHaveAttribute("aria-valuetext", "80% after preview");
+          await expect(viewer.locator(".comparison-after")).not.toHaveAttribute(
+            "style",
+            beforeClip,
+          );
+          expect(await page.evaluate(() => window.__mcpReadUris)).toEqual([
+            "compose-preview://fixture/_app/com.example.Card?version=before",
+            "compose-preview://fixture/_app/com.example.Card?version=after",
+          ]);
+        }
+        if (fixture === "mcp-app-viewer-comments") {
+          await expect(viewer.locator("#comments")).toBeVisible();
+          await expect(viewer.locator("#comment-list")).toContainText("Align this heading.");
+          await expect(viewer.locator("#comment-list")).toContainText("Node button · Resolved");
+          await expect(viewer.locator("#comment-list")).toContainText("Mark stroke-7");
+          await expect(viewer.locator(".comment-pin")).toHaveCount(2);
+          await expect(viewer.locator('.comment-pin[aria-label^="Comment 1:"]')).toBeVisible();
+          await expect(viewer.locator('.comment-pin[aria-label^="Comment 2:"]')).toBeVisible();
+          await viewer.locator("#comment-raw summary").click();
+          await expect(viewer.locator("#comment-raw pre")).toBeVisible();
+          await expect(viewer.locator("#comment-raw pre")).toContainText("stroke-7");
+          await expect(viewer.locator("#comment-body")).toHaveAttribute("maxlength", "4000");
+          expect(await page.evaluate(() => window.__mcpCommentListCall)).toEqual({
+            name: "ui_builder_list_comments",
+            arguments: { designId: "design-comments", token: "viewer-grant-secret" },
+          });
+          await page.evaluate(() => window.__mcpAddExternalComment());
+          await expect(viewer.locator("#comment-list")).not.toContainText(
+            "This arrived after the inline render.",
+          );
+          await viewer.locator("#comment-refresh").click();
+          await page.waitForFunction(() => window.__mcpCommentListCalls >= 2);
+          await expect(viewer.locator("#comment-list")).toContainText(
+            "This arrived after the inline render.",
+          );
+
+          const image = viewer.locator(".preview-stage > img");
+          await image.click({ position: { x: 180, y: 180 } });
+          await expect(viewer.locator("#comment-anchor")).toContainText("Pinned at");
+          await viewer.locator("#comment-body").evaluate((field) => {
+            field.value = "x".repeat(4001);
+          });
+          await viewer.locator("#comment-post").click();
+          await expect(viewer.locator("#comment-status")).toContainText(
+            "limited to 4,000 characters",
+          );
+          expect(await page.evaluate(() => window.__mcpCommentPostCall)).toBeUndefined();
+          await viewer.locator("#comment-body").fill("Increase the touch target.");
+          await viewer.locator("#comment-post").click();
+          await page.waitForFunction(() => window.__mcpCommentPostCall != null);
+          await expect(viewer.locator("#comment-post")).toBeDisabled();
+          await expect(viewer.locator("#comment-refresh")).toBeDisabled();
+          const posted = await page.evaluate(() => window.__mcpCommentPostCall);
+          expect(posted.name).toBe("ui_builder_post_comment");
+          expect(posted.arguments.designId).toBe("design-comments");
+          expect(posted.arguments.body).toBe("Increase the touch target.");
+          expect(posted.arguments.token).toBe("viewer-grant-secret");
+          expect(posted.arguments.x).toBeGreaterThan(0.7);
+          expect(posted.arguments.x).toBeLessThan(0.8);
+          expect(posted.arguments.y).toBeGreaterThan(0.7);
+          expect(posted.arguments.y).toBeLessThan(0.8);
+          await expect(viewer.locator("#comment-list")).toContainText(
+            "Increase the touch target.",
+          );
+          await expect(viewer.locator(".comment-pin")).toHaveCount(3);
+          await expect(viewer.locator("#comment-status")).toHaveText("Comment posted.");
+          await expect(viewer.locator("#comment-post")).toBeEnabled();
+          await expect(viewer.locator("#comment-refresh")).toBeEnabled();
+        }
+        if (fixture === "mcp-app-viewer-comments-denied") {
+          await expect(viewer.locator("#comments")).toBeVisible();
+          await expect(viewer.locator("#comment-status")).toContainText(
+            "Reading requires ui-builder-read",
+          );
+          await expect(viewer.locator("#comment-raw pre")).toContainText(
+            "lacks the UI-builder read capability",
+          );
+          await expect(viewer.locator("#comment-compose")).toContainText(
+            "Post a comment",
+          );
+          await expect(viewer.locator("#comment-body")).toHaveAttribute("maxlength", "4000");
+          await expect(viewer.locator("#comments")).toContainText(
+            "posting requires ui-builder-write",
+          );
+          await viewer.locator("#comment-body").fill("This grant cannot post.");
+          await viewer.locator("#comment-post").click();
+          await page.waitForFunction(() => window.__mcpCommentPostCall != null);
+          await expect(viewer.locator("#comment-status")).toContainText(
+            "Posting requires ui-builder-write",
+          );
+          await expect(viewer.locator("#comment-raw pre")).toContainText(
+            "lacks the UI-builder write capability",
+          );
+        }
+        if (fixture === "mcp-app-viewer-refresh") {
+          const image = viewer.locator('#canvas img[alt="Rendered Compose preview"]');
+          const before = await image.getAttribute("src");
+          await page.waitForFunction(() => window.__mcpSubscribedUri?.includes("overrides=fixture"));
+          await page.waitForFunction(() =>
+            window.__mcpUnsubscribedUris?.some((uri) => uri.includes("overrides=stale")),
+          );
+          await page.waitForFunction(() => window.__mcpReadCount >= 2);
+          await expect(viewer.locator("#refresh")).toBeEnabled();
+          await expect(image).not.toHaveAttribute("src", before);
+        }
+        if (fixture === "mcp-app-viewer-read-notifies") {
+          await page.waitForTimeout(600);
+          expect(await page.evaluate(() => window.__mcpReadCount)).toBe(1);
+          await expect(viewer.locator("#refresh")).toBeEnabled();
+        }
+        if (fixture === "mcp-app-viewer-subscribe-fallback") {
+          await page.waitForFunction(() => window.__mcpReadCount >= 2, null, { timeout: 7_000 });
+          await expect(viewer.locator("#refresh")).toBeEnabled();
+        }
+        if (fixture === "mcp-app-viewer-stale-read-marker") {
+          await page.waitForFunction(() => window.__mcpReadCount >= 2, null, { timeout: 7_000 });
+          await expect(viewer.locator("#refresh")).toBeEnabled();
+        }
+        if (fixture === "mcp-app-viewer-same-uri-redraw") {
+          await page.waitForFunction(() => window.__mcpSubscribeCount >= 1);
+          await expect(viewer.locator('#canvas img[alt="Rendered Compose preview"]')).toBeVisible();
+          expect(await page.evaluate(() => window.__mcpSubscribeCount)).toBe(1);
+          expect(await page.evaluate(() => window.__mcpUnsubscribedUris || [])).toEqual([]);
+        }
+        if (fixture === "mcp-app-viewer-subscription-revisit") {
+          await page.waitForFunction(
+            () => window.__mcpActiveSubscriptions?.length === 1 &&
+              window.__mcpActiveSubscriptions[0].includes("overrides=fixture"),
+            null,
+            { timeout: 7_000 },
+          );
+          expect(await page.evaluate(() => window.__mcpActiveSubscriptions)).toEqual([
+            "compose-preview://fixture/_app/com.example.Card?overrides=fixture",
+          ]);
+        }
+        if (fixture === "mcp-app-viewer-subscribe-late") {
+          await page.waitForFunction(
+            () => Array.isArray(window.__mcpActiveSubscriptions) &&
+              window.__mcpActiveSubscriptions.length === 0,
+            null,
+            { timeout: 7_000 },
+          );
+          await page.waitForFunction(() => window.__mcpReadCount >= 2, null, { timeout: 12_000 });
+          await expect(viewer.locator("#refresh")).toBeEnabled();
+        }
+        if (fixture === "mcp-app-viewer-read-replaced-inline") {
+          await expect(
+            viewer.locator('#canvas img[alt="Rendered Compose preview"]'),
+          ).toBeVisible();
+          await page.waitForTimeout(600);
+          expect(await page.evaluate(() => window.__mcpReadCount)).toBe(1);
+          await expect(viewer.locator("#refresh")).toBeEnabled();
+        }
+        if (fixture === "mcp-app-viewer-manual-poll") {
+          await page.waitForTimeout(4500);
+          await viewer.locator("#refresh").click();
+          await page.waitForFunction(() => window.__mcpReadCount === 2);
+          await page.waitForTimeout(1100);
+          expect(await page.evaluate(() => window.__mcpReadCount)).toBe(2);
+          await expect(viewer.locator("#refresh")).toBeEnabled();
+        }
+        if (fixture === "mcp-app-viewer-a11y") {
+          const image = viewer.locator('#canvas img[alt="Rendered Compose preview"]');
+          const before = await image.getAttribute("src");
+          await expect(viewer.locator("#a11y")).toBeEnabled();
+          await viewer.locator("#a11y").click();
+          await page.waitForFunction(() => window.__mcpToolCallCount === 1);
+          await expect(
+            viewer.locator('#canvas img[alt="Compose preview with accessibility overlay"]'),
+          ).toBeVisible();
+          await expect(viewer.locator("#meta")).toHaveText("Accessibility overlay");
+          await page.waitForFunction(() => window.__mcpReadCount >= 2);
+          await expect(
+            viewer.locator('#canvas img[alt="Compose preview with accessibility overlay"]'),
+          ).toBeVisible();
+          await expect(viewer.locator("#meta")).toHaveText("Accessibility overlay");
+          await expect(viewer.locator("#a11y")).toHaveText("Show original preview");
+          const toolCall = await page.evaluate(() => window.__mcpToolCall);
+          expect(toolCall).toEqual({
+            name: "render_preview_overlay",
+            arguments: {
+              uri: "compose-preview://fixture/_app/com.example.Card?overrides=fixture",
+              kind: "a11y/overlay",
+              inline: true,
+              overrides: { uiMode: "dark" },
+              token: "viewer-grant-secret",
+            },
+          });
+          expect(JSON.stringify(toolCall)).not.toContain("must-not-travel");
+          expect(JSON.stringify(toolCall)).not.toContain("fragment-must-not-travel");
+          await viewer.locator("#a11y").click();
+          await expect(viewer.locator('#canvas img[alt="Rendered Compose preview"]')).toHaveAttribute(
+            "src",
+            before,
+          );
+          await viewer.locator("#a11y").click();
+          await expect(
+            viewer.locator('#canvas img[alt="Compose preview with accessibility overlay"]'),
+          ).toBeVisible();
+          expect(await page.evaluate(() => window.__mcpToolCallCount)).toBe(1);
+        }
+        if (fixture === "mcp-app-viewer-a11y-unavailable") {
+          const image = viewer.locator('#canvas img[alt="Rendered Compose preview"]');
+          const before = await image.getAttribute("src");
+          await viewer.locator("#a11y").click();
+          await page.waitForFunction(() => window.__mcpToolCallCount === 1);
+          await expect(viewer.locator("#a11y")).toBeDisabled();
+          await expect(viewer.locator("#a11y")).toHaveText(
+            "Accessibility overlay unavailable",
+          );
+          await expect(viewer.locator("#meta")).toContainText("original preview shown");
+          await expect(image).toHaveAttribute("src", before);
+        }
+        if (fixture === "mcp-app-viewer-a11y-no-overlay") {
+          await expect(viewer.locator("#a11y")).toBeHidden();
+          expect(await page.evaluate(() => window.__mcpToolCallCount || 0)).toBe(0);
+        }
+        if (fixture === "mcp-app-viewer-a11y-polling") {
+          await expect(viewer.locator("#a11y")).toBeEnabled();
+          await viewer.locator("#a11y").click();
+          await page.waitForFunction(() => window.__mcpOverlayCallPending === true);
+          await expect(viewer.locator("#refresh")).toBeDisabled();
+          await page.waitForTimeout(5100);
+          expect(await page.evaluate(() => window.__mcpReadCount)).toBe(1);
+          await expect(
+            viewer.locator('#canvas img[alt="Compose preview with accessibility overlay"]'),
+          ).toBeVisible({ timeout: 2000 });
+          await expect(viewer.locator("#refresh")).toBeEnabled();
+          await page.waitForFunction(() => window.__mcpReadCount >= 2, null, { timeout: 7_000 });
+          await expect(
+            viewer.locator('#canvas img[alt="Compose preview with accessibility overlay"]'),
+          ).toBeVisible();
+          await expect(viewer.locator("#meta")).toHaveText("Accessibility overlay");
+        }
+        if (fixture === "mcp-app-viewer-a11y-non-full") {
+          await page.waitForFunction(
+            () => window.__mcpCropOverlayHidden === true && window.__mcpMatrixOverlayHidden === true,
+          );
+          await expect(viewer.locator("#a11y")).toBeHidden();
+          expect(await page.evaluate(() => window.__mcpToolCallCount || 0)).toBe(0);
+        }
+        if (fixture === "mcp-app-viewer-a11y-list-changed") {
+          await page.waitForFunction(() => window.__mcpToolListCount >= 2);
+          await expect(viewer.locator("#a11y")).toBeEnabled();
+          await viewer.locator("#a11y").click();
+          await expect(
+            viewer.locator('#canvas img[alt="Compose preview with accessibility overlay"]'),
+          ).toBeVisible();
+        }
+        if (fixture === "mcp-app-viewer-a11y-handshake") {
+          await page.waitForFunction(() => window.__mcpAppInitialized === true);
+          expect(await page.evaluate(() => window.__mcpToolListCount)).toBe(1);
+          await expect(viewer.locator("#a11y")).toBeEnabled();
+        }
+      }
+
       // The design page's renders are `loading="lazy"` — a live catalog serves one daemon
       // render per node and the sheet is taller than the fold, so the production page must
       // not ask for all of them at once. A full-page screenshot does not itself scroll, so
@@ -5812,4 +6140,1133 @@ test("contract · a refused UI Builder explains itself inside the card", async (
   });
   expect(fits.insideRight).toBe(true);
   expect(fits.lines).toBeGreaterThan(1);
+});
+
+// Antigravity 1.2.12 renders `<agent-embed src="file:///…/viewer.html">` by reading the file into
+// `<iframe srcdoc>`: location is about:srcdoc, so the fragment never arrives and only an inline
+// `<script type="application/json" id="compose-preview-result">` block can carry the result.
+function inlineResultBlock(envelope, { raw } = {}) {
+  const json = raw ?? JSON.stringify(envelope).replace(/<\//g, "<\\/").replace(/<!--/g, "\\u003c!--");
+  return `<script type="application/json" id="compose-preview-result">${json}</script>`;
+}
+
+async function openSrcdocViewer(page, block) {
+  const viewerHtml = await (await page.request.get("/mcp-app/compose-preview-viewer.html")).text();
+  await page.goto("/preview-harness/index.html");
+  await page.evaluate((srcdoc) => {
+    document.body.replaceChildren();
+    const frame = document.createElement("iframe");
+    frame.title = "Compose Preview MCP App";
+    frame.style.width = "620px";
+    frame.style.height = "650px";
+    window.__viewerMessages = 0;
+    // Nothing may reach the host: a static viewer sends no JSON-RPC at all.
+    window.addEventListener("message", () => window.__viewerMessages++);
+    frame.srcdoc = srcdoc;
+    document.body.append(frame);
+  }, viewerHtml + block);
+  return page.frameLocator('iframe[title="Compose Preview MCP App"]');
+}
+
+test("contract · static viewer reads an inline result block in an srcdoc frame", async ({ page }) => {
+  const png = readFileSync(renderPlaceholder).toString("base64");
+  const imageEnvelope = {
+    version: 1,
+    arguments: { uri: "compose-preview://fixture/_app/com.example.Card", previewId: "CardPreview" },
+    result: {
+      content: [
+        { type: "image", mimeType: "image/png", data: png },
+        {
+          type: "text",
+          text: JSON.stringify({
+            uri: "compose-preview://fixture/_app/com.example.Card",
+            previewId: "InlineCardPreview",
+            semantics: { root: { testTag: "static-card" } },
+          }),
+        },
+      ],
+    },
+  };
+  let viewer = await openSrcdocViewer(page, inlineResultBlock(imageEnvelope));
+  const image = viewer.locator('#canvas img[alt="Rendered Compose preview"]');
+  await expect(image).toBeVisible();
+  expect(await image.getAttribute("src")).toBe(`data:image/png;base64,${png}`);
+  await expect(viewer.locator("#meta")).toHaveText("InlineCardPreview");
+  expect(await viewer.locator("html").evaluate(() => location.href)).toBe("about:srcdoc");
+  await expect(viewer.locator("#use")).toBeHidden();
+  await expect(viewer.locator("#refresh")).toBeHidden();
+  await expect(viewer.locator("#canvas")).not.toContainText("MCP Apps bridge is unavailable");
+  // No initialize request (or any other message) goes out to the host in static mode.
+  await page.waitForTimeout(500);
+  expect(await page.evaluate(() => window.__viewerMessages)).toBe(0);
+
+  // Text-only result, with markup a producer must escape so it cannot close the block early.
+  const hostile = 'before </script><script>window.parent.__escaped = true</script> <!-- <script> after';
+  viewer = await openSrcdocViewer(
+    page,
+    inlineResultBlock({
+      version: 1,
+      arguments: { uri: "compose-preview://fixture/_app/com.example.Card" },
+      result: { content: [{ type: "text", text: hostile }] },
+    }),
+  );
+  await expect(viewer.locator("#canvas")).toContainText(hostile);
+  await expect(viewer.locator("#meta")).toHaveText("Static preview result");
+  expect(await page.evaluate(() => window.__escaped)).toBeUndefined();
+
+  // Every "<" escaped as < is the other documented producer escape.
+  viewer = await openSrcdocViewer(
+    page,
+    inlineResultBlock(null, {
+      raw: JSON.stringify({
+        version: 1,
+        result: { content: [{ type: "text", text: hostile }] },
+      }).replace(/</g, "\\u003c"),
+    }),
+  );
+  await expect(viewer.locator("#canvas")).toContainText(hostile);
+
+  // Over 500 KB of UTF-8, though under 500 000 UTF-16 code units: bytes are what is bounded.
+  viewer = await openSrcdocViewer(
+    page,
+    inlineResultBlock({
+      version: 1,
+      result: { content: [{ type: "text", text: "é".repeat(250_000) }] },
+    }),
+  );
+  await expect(viewer.locator("#canvas")).toContainText("the inline result is larger than 500 KB");
+  await expect(viewer.locator("#meta")).toHaveText(
+    "Static result unavailable; use the complete text fallback.",
+  );
+
+  viewer = await openSrcdocViewer(
+    page,
+    inlineResultBlock({
+      version: 1,
+      arguments: { uri: "compose-preview://fixture/card", sessionId: "must-not-travel" },
+      result: { content: [{ type: "text", text: "safe fallback" }] },
+    }),
+  );
+  await expect(viewer.locator("#canvas")).toContainText('credential field "sessionId" is not allowed');
+  await expect(viewer.locator("#canvas")).not.toContainText("must-not-travel");
+
+  viewer = await openSrcdocViewer(
+    page,
+    inlineResultBlock({
+      version: 1,
+      arguments: { uri: "https://preview.invalid/render?token=query-secret" },
+      result: { content: [{ type: "text", text: "safe fallback" }] },
+    }),
+  );
+  await expect(viewer.locator("#canvas")).toContainText('credential field "token"');
+  await expect(viewer.locator("#canvas")).not.toContainText("query-secret");
+
+  for (const [raw, reason] of [
+    ["{not json", "the result is not valid JSON"],
+    ["", "the inline result is empty"],
+    [JSON.stringify({ version: 2, result: { content: [] } }), "expected a version 1 envelope"],
+    [JSON.stringify({ version: 1, result: { content: [null] } }), "must be an array of objects"],
+  ]) {
+    viewer = await openSrcdocViewer(page, inlineResultBlock(null, { raw }));
+    await expect(viewer.locator("#canvas")).toContainText(reason);
+    await expect(viewer.locator("#canvas")).toContainText("Unable to load the static preview result");
+    await expect(viewer.locator("#use")).toBeHidden();
+    await expect(viewer.locator("#refresh")).toBeHidden();
+  }
+  expect(await page.evaluate(() => window.__viewerMessages)).toBe(0);
+});
+
+test("contract · the static fragment takes precedence over an inline result block", async ({ page }) => {
+  const inline = inlineResultBlock({
+    version: 1,
+    result: { content: [{ type: "text", text: "from the inline block" }] },
+  });
+  const viewerHtml = await (await page.request.get("/mcp-app/compose-preview-viewer.html")).text();
+  // Served as a real URL, which is the only way a fragment can arrive alongside the block.
+  await page.route("**/inline-viewer.html", (route) =>
+    route.fulfill({ contentType: "text/html", body: viewerHtml + inline }),
+  );
+  const fragment = Buffer.from(
+    JSON.stringify({
+      version: 1,
+      result: { content: [{ type: "text", text: "from the fragment" }] },
+    }),
+  ).toString("base64url");
+
+  await page.goto(`/mcp-app/inline-viewer.html#compose-preview-result=${fragment}`);
+  await expect(page.locator("#canvas")).toContainText("from the fragment");
+  await expect(page.locator("#canvas")).not.toContainText("from the inline block");
+
+  await page.goto("about:blank");
+  await page.goto("/mcp-app/inline-viewer.html");
+  await expect(page.locator("#canvas")).toContainText("from the inline block");
+
+  // The fragment alone still works, and an invalid fragment is not rescued by the block.
+  await page.goto("about:blank");
+  await page.goto(`/mcp-app/compose-preview-viewer.html#compose-preview-result=${fragment}`);
+  await expect(page.locator("#canvas")).toContainText("from the fragment");
+  await page.goto("about:blank");
+  await page.goto(`/mcp-app/inline-viewer.html#compose-preview-result=${"A".repeat(500_001)}`);
+  await expect(page.locator("#canvas")).toContainText("larger than 500 KB");
+  await expect(page.locator("#canvas")).not.toContainText("from the inline block");
+});
+
+// render_preview `details` (#1170): the card carries the a11y overlay, the findings and the layout
+// boxes after the render, marked in `_meta`, and the static viewer toggles between them with no call.
+test("contract · static card toggles a11y overlay and layout bounds from embedded details", async ({ page }) => {
+  const png = readFileSync(renderPlaceholder).toString("base64");
+  const overlayPng =
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg==";
+  const uri = "compose-preview://fixture/_app/com.example.Card";
+  const details = {
+    a11y: {
+      summary: "a11y: 1 error, 1 warning (TouchTargetSize ×1, TextContrast ×1)",
+      overlay: true,
+      findings: [
+        { level: "ERROR", rule: "TouchTargetSize", message: "Target is 24dp", node: "Icon", bounds: [0, 0, 10, 10] },
+        { level: "WARNING", rule: "TextContrast", message: "Contrast 3.1:1", node: "Title" },
+      ],
+    },
+    layout: {
+      summary: "layout: 3 nodes (layout/inspector)",
+      kind: "layout/inspector",
+      nodes: 3,
+      boxes: [
+        { label: "Column", depth: 0, bounds: [0, 0, 100, 100] },
+        { label: "Text", depth: 1, bounds: [10, 10, 90, 30] },
+      ],
+    },
+  };
+  const envelope = {
+    version: 1,
+    arguments: { uri },
+    result: {
+      content: [
+        { type: "image", mimeType: "image/png", data: png },
+        { type: "text", text: JSON.stringify({ uri, widthPx: 100, heightPx: 100, sha256: "abc" }) },
+        { type: "image", mimeType: "image/png", data: overlayPng, _meta: { "composePreview/detail": "a11y/overlay" } },
+        { type: "text", text: JSON.stringify(details), _meta: { "composePreview/detail": "details" } },
+      ],
+    },
+  };
+  let viewer = await openSrcdocViewer(page, inlineResultBlock(envelope));
+  const image = viewer.locator("#canvas .preview-stage > img");
+  await expect(image).toBeVisible();
+  // The render, not the overlay, is what the card opens on.
+  expect(await image.getAttribute("src")).toBe(`data:image/png;base64,${png}`);
+  const modes = viewer.locator("#detail-modes button");
+  await expect(modes).toHaveText(["Plain", "A11y overlay", "Layout bounds"]);
+  await expect(modes.nth(0)).toHaveAttribute("aria-pressed", "true");
+  await expect(viewer.locator("#findings li")).toHaveCount(2);
+  await expect(viewer.locator("#findings li").first()).toContainText("ERROR");
+  await expect(viewer.locator("#findings li").first()).toContainText("TouchTargetSize Target is 24dp (Icon)");
+  await expect(viewer.locator("#detail-summary")).toContainText("layout: 3 nodes");
+
+  await modes.nth(1).click();
+  await expect(modes.nth(1)).toHaveAttribute("aria-pressed", "true");
+  expect(await image.getAttribute("src")).toBe(`data:image/png;base64,${overlayPng}`);
+  await expect(viewer.locator(".detail-boxes")).toHaveCount(0);
+
+  await modes.nth(2).click();
+  expect(await image.getAttribute("src")).toBe(`data:image/png;base64,${png}`);
+  const boxes = viewer.locator(".detail-boxes rect.layout");
+  await expect(boxes).toHaveCount(2);
+  await expect(viewer.locator(".detail-boxes")).toHaveAttribute("viewBox", "0 0 100 100");
+  expect(await boxes.nth(1).getAttribute("width")).toBe("80");
+
+  await modes.nth(0).click();
+  await expect(viewer.locator(".detail-boxes")).toHaveCount(0);
+  // Every toggle is local: nothing reaches the host.
+  await page.waitForTimeout(300);
+  expect(await page.evaluate(() => window.__viewerMessages)).toBe(0);
+
+  // Unavailable products get a line and no toggle.
+  viewer = await openSrcdocViewer(
+    page,
+    inlineResultBlock({
+      version: 1,
+      arguments: { uri },
+      result: {
+        content: [
+          envelope.result.content[0],
+          envelope.result.content[1],
+          {
+            type: "text",
+            text: JSON.stringify({ layout: details.layout, unavailable: { a11y: "this daemon does not produce a11y/atf" } }),
+            _meta: { "composePreview/detail": "details" },
+          },
+        ],
+      },
+    }),
+  );
+  await expect(viewer.locator("#detail-modes button")).toHaveText(["Plain", "Layout bounds"]);
+  await expect(viewer.locator("#detail-summary")).toContainText("a11y: unavailable (this daemon does not produce a11y/atf)");
+  await expect(viewer.locator("#findings li")).toHaveCount(0);
+
+  // A card without details shows none of it.
+  viewer = await openSrcdocViewer(
+    page,
+    inlineResultBlock({ version: 1, arguments: { uri }, result: { content: envelope.result.content.slice(0, 2) } }),
+  );
+  await expect(viewer.locator("#canvas .preview-stage > img")).toBeVisible();
+  await expect(viewer.locator("#details")).toBeHidden();
+});
+
+test("contract · static viewer bounds results and rejects credentials", async ({ page }) => {
+  await page.goto(
+    `/mcp-app/compose-preview-viewer.html#compose-preview-result=${"A".repeat(500_001)}`,
+  );
+  await expect(page.locator("#canvas")).toContainText("larger than 500 KB");
+  await expect(page.locator("#refresh")).toBeHidden();
+  await expect(page.locator("#use")).toBeHidden();
+
+  for (const content of [{}, [null], ["text"]]) {
+    const malformedEnvelope = Buffer.from(
+      JSON.stringify({ version: 1, result: { content } }),
+    ).toString("base64url");
+    await page.goto("about:blank");
+    await page.goto(
+      `/mcp-app/compose-preview-viewer.html#compose-preview-result=${malformedEnvelope}`,
+    );
+    await expect(page.locator("#canvas")).toContainText(
+      "the MCP tool result content must be an array of objects",
+    );
+    await expect(page.locator("#refresh")).toBeHidden();
+    await expect(page.locator("#use")).toBeHidden();
+  }
+
+  for (const result of [
+    { content: [], structuredContent: { cells: [null] } },
+    { content: [{ type: "text", text: '{"cells":[null]}' }] },
+  ]) {
+    const malformedMatrix = Buffer.from(
+      JSON.stringify({ version: 1, result }),
+    ).toString("base64url");
+    await page.goto("about:blank");
+    await page.goto(
+      `/mcp-app/compose-preview-viewer.html#compose-preview-result=${malformedMatrix}`,
+    );
+    await expect(page.locator("#canvas")).toContainText("matrix cells must be objects");
+    await expect(page.locator("#refresh")).toBeHidden();
+    await expect(page.locator("#use")).toBeHidden();
+  }
+
+  const credentialEnvelope = Buffer.from(
+    JSON.stringify({
+      version: 1,
+      arguments: { uri: "compose-preview://fixture/card", cookie: "must-not-travel" },
+      result: { content: [{ type: "text", text: "safe fallback" }] },
+    }),
+  ).toString("base64url");
+  await page.goto("about:blank");
+  await page.goto(
+    `/mcp-app/compose-preview-viewer.html#compose-preview-result=${credentialEnvelope}`,
+  );
+  await expect(page.locator("#canvas")).toContainText(
+    'credential field "cookie" is not allowed',
+  );
+  await expect(page.locator("#canvas")).not.toContainText("must-not-travel");
+
+  for (const [uri, rejected] of [
+    ["https://preview.invalid/render?token=query-secret", 'credential field "token"'],
+    ["https://user:password@preview.invalid/render", 'credential field "uri userinfo"'],
+    [
+      "https://preview.invalid/callback#access_token=fragment-secret",
+      'credential field "access_token"',
+    ],
+  ]) {
+    const encoded = Buffer.from(
+      JSON.stringify({
+        version: 1,
+        arguments: { uri },
+        result: { content: [{ type: "text", text: "safe fallback" }] },
+      }),
+    ).toString("base64url");
+    await page.goto("about:blank");
+    await page.goto(`/mcp-app/compose-preview-viewer.html#compose-preview-result=${encoded}`);
+    await expect(page.locator("#canvas")).toContainText(rejected);
+    await expect(page.locator("#canvas")).not.toContainText("query-secret");
+    await expect(page.locator("#canvas")).not.toContainText("fragment-secret");
+    await expect(page.locator("#canvas")).not.toContainText("password");
+  }
+
+  const nestedUriEnvelope = Buffer.from(
+    JSON.stringify({
+      version: 1,
+      arguments: {
+        redirects: ["https://preview.invalid/callback#access_token=nested-secret"],
+      },
+      result: { content: [{ type: "text", text: "safe fallback" }] },
+    }),
+  ).toString("base64url");
+  await page.goto("about:blank");
+  await page.goto(
+    `/mcp-app/compose-preview-viewer.html#compose-preview-result=${nestedUriEnvelope}`,
+  );
+  await expect(page.locator("#canvas")).toContainText('credential field "access_token"');
+  await expect(page.locator("#canvas")).not.toContainText("nested-secret");
+
+  await page.goto("/preview-harness/fixtures/pages/mcp-app-viewer-resource.html");
+  const viewer = page.frameLocator('iframe[title="Compose Preview MCP App"]');
+  // This fixture deliberately holds the read beyond the normal 5 s bridge timeout to prove the
+  // resource-specific 65 s budget. Leave enough room for that intentional delay plus decoding.
+  await expect(viewer.locator('#canvas img[alt="Rendered Compose preview"]')).toBeVisible({
+    timeout: 7_000,
+  });
+  await viewer.locator("#use").click();
+  await page.waitForFunction(() => window.__mcpModelContext != null);
+  const modelContext = await page.evaluate(() => window.__mcpModelContext);
+  expect(JSON.stringify(modelContext)).not.toContain("sessionId");
+  expect(JSON.stringify(modelContext)).not.toContain("must-not-travel");
+  expect(JSON.stringify(modelContext)).not.toContain("sourceUrl");
+  expect(JSON.stringify(modelContext)).not.toContain("also-must-not-travel");
+  expect(JSON.stringify(modelContext)).not.toContain("fragment-must-not-travel");
+  expect(JSON.stringify(modelContext)).not.toContain("array-must-not-travel");
+  expect(JSON.stringify(modelContext)).toContain("CardPreview");
+});
+
+// A fake MCP Apps host (2026-01-26 `ui/*` bridge) that proxies a compose-preview server's tools
+// and resources, so the live viewer actions can be driven end to end (#1119).
+async function openLiveViewer(
+  page,
+  pngs,
+  { frameHeight = 700, listTools = true, refuseCalls = false, firstResult, hostContext } = {},
+) {
+  await page.goto("/preview-harness/index.html");
+  await page.evaluate(({ pngs, frameHeight, listTools, refuseCalls, firstResult, hostContext }) => {
+    const base = "compose-preview://fixture/_app/com.example.Card";
+    const round = "compose-preview://fixture/_app/com.example.Card_Round?config=round";
+    const log = (window.__live = {
+      calls: [],
+      reads: [],
+      subscribes: [],
+      contexts: [],
+      links: [],
+      sizes: [],
+      lists: 0,
+    });
+    document.body.replaceChildren();
+    const frame = document.createElement("iframe");
+    frame.title = "Compose Preview MCP App";
+    frame.style.width = "620px";
+    frame.style.height = `${frameHeight}px`;
+    const send = (message) => frame.contentWindow.postMessage({ jsonrpc: "2.0", ...message }, "*");
+    const image = (data) => ({ type: "image", mimeType: "image/png", data });
+    const resourceLink = (uri) => ({ type: "resource_link", uri, name: "Compose Preview render", mimeType: "image/png" });
+    window.__liveSend = send;
+    window.__liveUris = { base, round };
+    window.addEventListener("message", (event) => {
+      if (event.source !== frame.contentWindow) return;
+      const { id, method, params } = event.data || {};
+      const reply = (result) => send({ id, result });
+      if (method === "ui/notifications/size-changed") {
+        log.sizes.push(params);
+        return;
+      }
+      if (method === "ui/initialize") {
+        reply({
+          hostCapabilities: { serverTools: {}, serverResources: { subscribe: true } },
+          ...(hostContext ? { hostContext } : {}),
+        });
+        send({ method: "ui/notifications/tool-input", params: { arguments: { preview: "Card" } } });
+        send({
+          method: "ui/notifications/tool-result",
+          params: firstResult || {
+            content: [
+              { type: "text", text: JSON.stringify({ observe: "semantics", uri: base, sha256: "a" }) },
+              { type: "text", text: JSON.stringify({ otherMatches: [round] }) },
+              resourceLink(base),
+            ],
+          },
+        });
+      } else if (method === "tools/list" && !listTools) {
+        log.lists += 1;
+        send({ id, error: { code: -32601, message: "Method not found" } });
+      } else if (method === "tools/call" && refuseCalls) {
+        log.calls.push(params);
+        send({ id, error: { code: -32603, message: "Tool calls from apps are not allowed" } });
+      } else if (method === "tools/list") {
+        reply({
+          tools: ["render_preview", "render_preview_overlay", "get_preview_data"].map((name) => ({
+            name,
+            inputSchema: { type: "object" },
+          })),
+        });
+      } else if (method === "resources/read") {
+        log.reads.push(params.uri);
+        const data = params.uri === round ? pngs.refreshed : pngs.base;
+        reply({ contents: [{ uri: params.uri, mimeType: "image/png", blob: data }] });
+      } else if (method === "resources/subscribe") {
+        log.subscribes.push(params.uri);
+        reply({});
+      } else if (method === "resources/unsubscribe") {
+        reply({});
+      } else if (method === "resources/list") {
+        log.lists += 1;
+        reply({
+          resources: [base, round].map((uri) => ({
+            uri,
+            name: uri,
+            mimeType: "image/png",
+            _meta: { sourceFile: "/work/app/src/Card.kt", sourceLine: uri === round ? 30 : 12 },
+          })),
+        });
+      } else if (method === "tools/call") {
+        log.calls.push(params);
+        if (params.name === "render_preview") {
+          reply({ content: [image(pngs.round), resourceLink(params.arguments.uri)] });
+        } else if (params.name === "render_preview_overlay") {
+          reply({ content: [image(pngs.base)] });
+        } else if (params.name === "get_preview_data") {
+          reply({
+            content: [
+              {
+                type: "text",
+                text: JSON.stringify({
+                  kind: params.arguments.kind,
+                  payload: {
+                    root: {
+                      displayName: "Column",
+                      bounds: { left: 0, top: 0, right: 240, bottom: 240 },
+                      children: [{ displayName: "Text", bounds: { left: 10, top: 10, right: 120, bottom: 40 } }],
+                    },
+                  },
+                }),
+              },
+            ],
+          });
+        }
+      } else if (method === "ui/update-model-context") {
+        log.contexts.push(params);
+        reply({});
+      } else if (method === "ui/open-link") {
+        log.links.push(params.url);
+        reply({});
+      }
+    });
+    frame.src = "/mcp-app/compose-preview-viewer.html";
+    document.body.append(frame);
+  }, { pngs, frameHeight, listTools, refuseCalls, firstResult: firstResult ?? null, hostContext: hostContext ?? null });
+  return page.frameLocator('iframe[title="Compose Preview MCP App"]');
+}
+
+test("contract · live viewer actions go over the MCP Apps bridge", async ({ page }) => {
+  const pngs = {
+    base: readFileSync(renderPlaceholder).toString("base64"),
+    round: readFileSync(resolve(pagesDir, "_render-placeholder-round.png")).toString("base64"),
+    refreshed: readFileSync(designRenderPlaceholder).toString("base64"),
+  };
+  const viewer = await openLiveViewer(page, pngs);
+  const live = () => page.evaluate(() => window.__live);
+  const { base, round } = await page.evaluate(() => window.__liveUris);
+  const image = viewer.locator("#canvas .preview-stage > img");
+  // Name the PNG on screen rather than printing base64 on a mismatch.
+  const shown = async () => {
+    const src = await image.getAttribute("src");
+    return Object.keys(pngs).find((key) => src === `data:image/png;base64,${pngs[key]}`) || "other";
+  };
+  const lastContext = async () => {
+    const { contexts } = await live();
+    const text = contexts.at(-1)?.content?.[0]?.text || "";
+    expect(contexts.at(-1).content).toHaveLength(1);
+    expect(text).not.toContain("\n");
+    expect(text).not.toContain(pngs.base.slice(0, 40));
+    expect(text).not.toContain("data:image");
+    return text;
+  };
+
+  // A resource_link with no inline image is read through the bridge, then subscribed.
+  await expect.poll(shown).toBe("base");
+  await expect.poll(async () => (await live()).subscribes).toEqual([base]);
+  expect((await live()).reads).toEqual([base]);
+
+  // Choose a variant: render_preview for the other match, the view and subscription follow it.
+  const variant = viewer.locator("#variant");
+  await expect(variant).toBeVisible();
+  await expect(variant.locator("option")).toHaveText(["Card", "Card_Round (round)"]);
+  await variant.selectOption(round);
+  await expect.poll(shown).toBe("round");
+  await expect(viewer.locator("#meta")).toHaveText("Card_Round (round)");
+  expect((await live()).calls).toEqual([
+    { name: "render_preview", arguments: { uri: round, observe: "png", inline: true } },
+  ]);
+  await expect.poll(async () => (await live()).subscribes).toEqual([base, round]);
+  expect(await lastContext()).toContain(`switched to variant Card_Round (round) (${round})`);
+  await expect(variant).toHaveValue(round);
+
+  // Layout bounds: get_preview_data, drawn over the render in its pixel space.
+  await viewer.locator("#layout").click();
+  await expect(viewer.locator(".layout-boxes rect")).toHaveCount(2);
+  await expect(viewer.locator("#layout")).toHaveAttribute("aria-pressed", "true");
+  expect((await live()).calls.at(-1)).toEqual({
+    name: "get_preview_data",
+    arguments: { uri: round, kind: "layout/inspector" },
+  });
+  expect(await lastContext()).toContain("layout bounds shown on Card_Round (round) (2 boxes)");
+
+  // The a11y overlay keeps the boxes, and tells the agent it is showing.
+  await viewer.locator("#a11y").click();
+  await expect(viewer.locator('#canvas img[alt="Compose preview with accessibility overlay"]')).toBeVisible();
+  await expect(viewer.locator(".layout-boxes rect")).toHaveCount(2);
+  expect((await live()).calls.at(-1).name).toBe("render_preview_overlay");
+  await expect.poll(lastContext).toContain("accessibility overlay shown on Card_Round (round)");
+  await viewer.locator("#a11y").click();
+  await viewer.locator("#layout").click();
+  await expect(viewer.locator(".layout-boxes")).toHaveCount(0);
+  await expect.poll(lastContext).toContain("layout bounds hidden on Card_Round (round)");
+
+  // Re-render the current variant.
+  const callsBefore = (await live()).calls.length;
+  await viewer.locator("#rerender").click();
+  await expect.poll(async () => (await live()).calls.length).toBe(callsBefore + 1);
+  expect((await live()).calls.at(-1)).toEqual({
+    name: "render_preview",
+    arguments: { uri: round, observe: "png", inline: true },
+  });
+
+  // Open in editor: the location from resources/list, as plain text and a file link.
+  await viewer.locator("#source").click();
+  await expect(viewer.locator("#source-location")).toHaveText("Source: /work/app/src/Card.kt:30");
+  expect(await lastContext()).toContain("open Card_Round (round) in the editor at /work/app/src/Card.kt:30");
+  await viewer.locator("#source-location a").click();
+  await expect.poll(async () => (await live()).links).toEqual(["file:///work/app/src/Card.kt"]);
+
+  // Live refresh: a resource update for the subscribed variant reads and redraws it.
+  const readsBefore = (await live()).reads.length;
+  await page.evaluate((uri) => window.__liveSend({ method: "notifications/resources/updated", params: { uri } }), round);
+  await expect.poll(shown).toBe("refreshed");
+  expect((await live()).reads.slice(readsBefore)).toEqual([round]);
+
+  // A matrix result: choosing a cell is model context, one line.
+  await page.evaluate((uri) =>
+    window.__liveSend({
+      method: "ui/notifications/tool-result",
+      params: {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({ uri, cells: [{ overrides: { uiMode: "dark" } }, { overrides: { fontScale: 2 } }] }),
+          },
+        ],
+      },
+    }), base);
+  await expect(viewer.locator(".cell")).toHaveCount(2);
+  await expect(viewer.locator("#rerender")).toBeHidden();
+  await expect(viewer.locator("#layout")).toBeHidden();
+  await viewer.locator(".cell").nth(1).click();
+  await expect(viewer.locator(".cell").nth(1)).toHaveAttribute("aria-pressed", "true");
+  await expect.poll(lastContext).toContain('matrix variant {"fontScale":2} of Card');
+});
+
+test("contract · a 160px host frame shows the whole preview and the toolbar", async ({ page }) => {
+  const pngs = {
+    base: readFileSync(resolve(pagesDir, "_render-placeholder-round.png")).toString("base64"),
+    round: readFileSync(resolve(pagesDir, "_render-placeholder-round.png")).toString("base64"),
+    refreshed: readFileSync(designRenderPlaceholder).toString("base64"),
+  };
+  const viewer = await openLiveViewer(page, pngs, { frameHeight: 160 });
+  const frame = page.locator('iframe[title="Compose Preview MCP App"]');
+  const image = viewer.locator("#canvas .preview-stage > img");
+  await expect(image).toBeVisible();
+  await expect(viewer.locator("#rerender")).toBeVisible();
+  const inside = (box, outer) =>
+    !!box &&
+    box.width > 0 &&
+    box.height > 0 &&
+    box.x >= outer.x - 0.5 &&
+    box.y >= outer.y - 0.5 &&
+    box.x + box.width <= outer.x + outer.width + 0.5 &&
+    box.y + box.height <= outer.y + outer.height + 0.5;
+  const outer = await frame.boundingBox();
+  // Fallback for hosts that ignore size-changed: the image shrinks to the frame, whole and unclipped.
+  await expect.poll(async () => inside(await image.boundingBox(), outer)).toBe(true);
+  const natural = await image.evaluate((img) => img.naturalWidth / img.naturalHeight);
+  const shown = await image.boundingBox();
+  expect(Math.abs(shown.width / shown.height - natural)).toBeLessThan(0.05);
+  expect(await viewer.locator("#canvas").evaluate((node) => node.scrollHeight <= node.clientHeight + 1)).toBe(true);
+  for (const id of ["#toolbar", "#rerender", "#layout", "#source", "#variant"]) {
+    expect(inside(await viewer.locator(id).boundingBox(), outer), `${id} is inside the frame`).toBe(true);
+  }
+  // Hosts that honour size-changed are asked for more than the image is given here.
+  await expect
+    .poll(async () => (await page.evaluate(() => window.__live.sizes)).map((size) => size.height))
+    .toContainEqual(expect.any(Number));
+  const sizes = await page.evaluate(() => window.__live.sizes);
+  expect(Math.max(...sizes.map((size) => size.height))).toBeGreaterThan(shown.height);
+  expect(Math.max(...sizes.map((size) => size.height))).toBeGreaterThan(160);
+});
+
+// A solid PNG of the given size, base64: tall enough to overflow any sensible host frame.
+function solidPng(width, height) {
+  const png = new PNG({ width, height });
+  for (let offset = 0; offset < png.data.length; offset += 4) {
+    png.data[offset] = 0x31;
+    png.data[offset + 1] = 0x5d;
+    png.data[offset + 2] = 0xa8;
+    png.data[offset + 3] = 0xff;
+  }
+  return PNG.sync.write(png).toString("base64");
+}
+
+const tallPngs = () => {
+  const tall = solidPng(400, 1600);
+  return { base: tall, round: tall, refreshed: tall };
+};
+
+// Claude Desktop gives the iframe the height it asks for but shows it inside a shorter
+// container, so window.innerHeight is large; the host's hostContext.containerDimensions is the
+// real limit (MCP Apps SEP-1865).
+const firstScreenBottom = (viewer) =>
+  viewer.locator("#source-location").evaluate((node) => node.getBoundingClientRect().bottom);
+const reportedHeights = async (page) =>
+  (await page.evaluate(() => window.__live.sizes)).map((size) => size.height);
+
+test("contract · the viewer fits a tall preview to the host's containerDimensions.maxHeight", async ({ page }) => {
+  const viewer = await openLiveViewer(page, tallPngs(), {
+    frameHeight: 1200,
+    hostContext: { containerDimensions: { maxHeight: 300, maxWidth: 620 } },
+  });
+  const image = viewer.locator("#canvas .preview-stage > img");
+  await expect(image).toBeVisible();
+  await expect(viewer.locator("#rerender")).toBeVisible();
+  await expect.poll(() => firstScreenBottom(viewer)).toBeLessThanOrEqual(300);
+  const shown = await image.boundingBox();
+  expect(shown.height).toBeGreaterThan(100);
+  expect(Math.abs(shown.width / shown.height - 400 / 1600)).toBeLessThan(0.05);
+  await expect.poll(() => reportedHeights(page)).toContainEqual(expect.any(Number));
+  expect(Math.max(...(await reportedHeights(page)))).toBeLessThanOrEqual(300);
+
+  // host-context-changed replaces the limit: a taller container lets the image grow.
+  await page.evaluate(() =>
+    window.__liveSend({
+      method: "ui/notifications/host-context-changed",
+      params: { containerDimensions: { maxHeight: 420 } },
+    }),
+  );
+  await expect.poll(async () => (await image.boundingBox()).height).toBeGreaterThan(shown.height + 60);
+  await expect.poll(() => firstScreenBottom(viewer)).toBeLessThanOrEqual(420);
+  await expect.poll(async () => Math.max(...(await reportedHeights(page)))).toBeGreaterThan(300);
+  expect(Math.max(...(await reportedHeights(page)))).toBeLessThanOrEqual(420);
+
+  // A fixed height is a limit too.
+  await page.evaluate(() =>
+    window.__liveSend({
+      method: "ui/notifications/host-context-changed",
+      params: { containerDimensions: { height: 250, width: 620 } },
+    }),
+  );
+  await expect.poll(() => firstScreenBottom(viewer)).toBeLessThanOrEqual(250);
+  expect((await reportedHeights(page)).at(-1)).toBeLessThanOrEqual(250);
+});
+
+test("contract · with no containerDimensions a tall preview fits about 480px", async ({ page }) => {
+  const viewer = await openLiveViewer(page, tallPngs(), { frameHeight: 1200 });
+  const image = viewer.locator("#canvas .preview-stage > img");
+  await expect(image).toBeVisible();
+  await expect.poll(() => firstScreenBottom(viewer)).toBeLessThanOrEqual(480);
+  expect((await image.boundingBox()).height).toBeGreaterThan(250);
+  await expect.poll(() => reportedHeights(page)).toContainEqual(expect.any(Number));
+  // Details and comments may sit below the fold, but this result has neither.
+  expect(Math.max(...(await reportedHeights(page)))).toBeLessThanOrEqual(480);
+});
+
+test("contract · a render_matrix grid fits the host's containerDimensions.maxHeight", async ({ page }) => {
+  const tall = solidPng(400, 1600);
+  const viewer = await openLiveViewer(page, tallPngs(), {
+    frameHeight: 1200,
+    hostContext: { containerDimensions: { maxHeight: 360 } },
+  });
+  await expect(viewer.locator("#canvas .preview-stage > img")).toBeVisible();
+  const { base } = await page.evaluate(() => window.__liveUris);
+  await page.evaluate(({ uri, tall }) =>
+    window.__liveSend({
+      method: "ui/notifications/tool-result",
+      params: {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({
+              uri,
+              cells: Array.from({ length: 6 }, (_, index) => ({ overrides: { fontScale: 1 + index / 4 }, png: tall })),
+            }),
+          },
+        ],
+      },
+    }), { uri: base, tall });
+  const cells = viewer.locator(".cell");
+  await expect(cells).toHaveCount(6);
+  await expect(cells.first().locator("img")).toBeVisible();
+  await expect.poll(async () => {
+    const boxes = await cells.evaluateAll((nodes) => nodes.map((node) => node.getBoundingClientRect().bottom));
+    return Math.max(...boxes);
+  }).toBeLessThanOrEqual(360);
+  await expect.poll(() => firstScreenBottom(viewer)).toBeLessThanOrEqual(360);
+  const image = await cells.first().locator("img").boundingBox();
+  expect(image.height).toBeGreaterThan(40);
+  expect(Math.max(...(await reportedHeights(page)))).toBeLessThanOrEqual(360);
+});
+
+const livePngs = () => ({
+  base: readFileSync(renderPlaceholder).toString("base64"),
+  round: readFileSync(resolve(pagesDir, "_render-placeholder-round.png")).toString("base64"),
+  refreshed: readFileSync(designRenderPlaceholder).toString("base64"),
+});
+
+test("contract · live actions work when the host refuses tools/list", async ({ page }) => {
+  const viewer = await openLiveViewer(page, livePngs(), { listTools: false });
+  const live = () => page.evaluate(() => window.__live);
+  const { round } = await page.evaluate(() => window.__liveUris);
+  await expect(viewer.locator("#canvas .preview-stage > img")).toBeVisible();
+  await expect(viewer.locator("#variant")).toBeVisible();
+  await expect(viewer.locator("#rerender")).toBeVisible();
+  await expect(viewer.locator("#layout")).toBeVisible();
+  await expect(viewer.locator("#a11y")).toBeVisible();
+  await viewer.locator("#variant").selectOption(round);
+  await expect.poll(async () => (await live()).calls.at(-1)).toEqual({
+    name: "render_preview",
+    arguments: { uri: round, observe: "png", inline: true },
+  });
+  await viewer.locator("#layout").click();
+  await expect(viewer.locator(".layout-boxes rect")).toHaveCount(2);
+});
+
+test("contract · a refused tool call disables only its control", async ({ page }) => {
+  const viewer = await openLiveViewer(page, livePngs(), { refuseCalls: true });
+  await expect(viewer.locator("#canvas .preview-stage > img")).toBeVisible();
+  await viewer.locator("#rerender").click();
+  await expect(viewer.locator("#rerender")).toBeDisabled();
+  await expect(viewer.locator("#rerender")).toHaveAttribute("title", "The host doesn't allow this from the viewer.");
+  await expect(viewer.locator("#meta")).toContainText("Re-render unavailable");
+  await expect(viewer.locator("#layout")).toBeEnabled();
+  await expect(viewer.locator("#canvas .preview-stage > img")).toBeVisible();
+});
+
+test("contract · an error result shows a clear error state, not Waiting", async ({ page }) => {
+  const message =
+    "render_preview: no preview matches 'ListScreenPrevew'. Closest: ListScreenPreview (3 previews in 1 module).";
+  const viewer = await openLiveViewer(page, livePngs(), {
+    firstResult: {
+      isError: true,
+      content: [{ type: "text", text: `${message}\nCall list_previews to see all.` }],
+    },
+  });
+  await expect(viewer.locator("#meta")).toHaveText("Render failed");
+  await expect(viewer.locator("#meta")).toHaveClass(/error/);
+  const notice = viewer.locator("#canvas .notice.error");
+  await expect(notice.locator("p")).toHaveText(message);
+  await expect(notice.locator("details pre")).toBeHidden();
+  await notice.locator("summary").click();
+  await expect(notice.locator("details pre")).toContainText("Call list_previews to see all.");
+  await expect(viewer.locator("#canvas")).not.toContainText("Waiting");
+});
+
+test("contract · a result without an image is re-rendered with one, and lists its variants", async ({ page }) => {
+  const pngs = livePngs();
+  const base = "compose-preview://fixture/_app/com.example.Card";
+  const round = "compose-preview://fixture/_app/com.example.Card_Round?config=round";
+  const viewer = await openLiveViewer(page, pngs, {
+    firstResult: {
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify({
+            observe: "semantics",
+            uri: base,
+            semanticsUnavailable: "kind not advertised: compose/semantics",
+            variantChoice: { mode: "text", choices: [base, round] },
+          }),
+        },
+      ],
+    },
+  });
+  await expect
+    .poll(() => page.evaluate(() => window.__live.calls[0]))
+    .toEqual({ name: "render_preview", arguments: { uri: base, observe: "png", inline: true } });
+  await expect(viewer.locator("#canvas .preview-stage > img")).toBeVisible();
+  await expect(viewer.locator("#canvas")).not.toContainText("semanticsUnavailable");
+
+  // Refused calls: the variants are still listed as labels, and the raw JSON is not the content.
+  const refused = await openLiveViewer(page, pngs, {
+    refuseCalls: true,
+    firstResult: {
+      content: [{ type: "text", text: JSON.stringify({ observe: "semantics", uri: base, variantChoice: { mode: "text", choices: [base, round] } }) }],
+    },
+  });
+  await expect(refused.locator(".notice strong")).toHaveText("No image in this result");
+  await expect(refused.locator(".variant-list button")).toHaveText(["Card", "Card_Round (round)"]);
+  await expect(refused.locator(".notice > p")).not.toContainText("{");
+});
+
+test("contract · a variant grid shows every variant and enlarges the one clicked", async ({ page }) => {
+  const pngs = livePngs();
+  const base = "compose-preview://fixture/_app/com.example.Card_Devices%20-%20Large";
+  const small = "compose-preview://fixture/_app/com.example.Card_Devices%20-%20Small";
+  const viewer = await openLiveViewer(page, pngs, {
+    firstResult: {
+      content: [
+        { type: "image", mimeType: "image/png", data: pngs.refreshed },
+        {
+          type: "text",
+          text: JSON.stringify({
+            schema: "compose-preview-matrix/v1",
+            mode: "variants",
+            uri: base,
+            cells: [
+              { uri: base, label: "Card_Devices - Large", sha256: "a" },
+              { uri: small, label: "Card_Devices - Small", sha256: "b" },
+            ],
+          }),
+        },
+      ],
+      _meta: { "composePreview/cellPngs": [pngs.base, pngs.round] },
+    },
+  });
+  await expect(viewer.locator(".cell")).toHaveCount(2);
+  await expect(viewer.locator(".cell code")).toHaveText(["Card_Devices - Large", "Card_Devices - Small"]);
+  await expect(viewer.locator(".cell img")).toHaveCount(2);
+  await viewer.locator(".cell").nth(1).click();
+  await expect(viewer.locator("#canvas .preview-stage > img")).toHaveAttribute(
+    "src",
+    `data:image/png;base64,${pngs.round}`,
+  );
+  await expect(viewer.locator("#meta")).toHaveText("Card_Devices - Small");
+  await viewer.locator("#grid-back").click();
+  await expect(viewer.locator(".cell")).toHaveCount(2);
+  await expect(viewer.locator("#grid-back")).toBeHidden();
+});
+
+test("contract · static viewer shows no live actions", async ({ page }) => {
+  const png = readFileSync(renderPlaceholder).toString("base64");
+  const viewer = await openSrcdocViewer(
+    page,
+    inlineResultBlock({
+      version: 1,
+      arguments: { uri: "compose-preview://fixture/_app/com.example.Card" },
+      result: {
+        content: [
+          { type: "image", mimeType: "image/png", data: png },
+          { type: "text", text: JSON.stringify({ otherMatches: ["compose-preview://fixture/_app/com.example.Card_Round"] }) },
+          { type: "resource_link", uri: "compose-preview://fixture/_app/com.example.Card", name: "render" },
+        ],
+      },
+    }),
+  );
+  await expect(viewer.locator('#canvas img[alt="Rendered Compose preview"]')).toBeVisible();
+  await expect(viewer.locator("#live")).toBeHidden();
+  await expect(viewer.locator("#source-location")).toBeEmpty();
+  await page.waitForTimeout(500);
+  expect(await page.evaluate(() => window.__viewerMessages)).toBe(0);
+});
+
+// A2UI documents (#1119): an agent that emits A2UI sees it drawn with the basic catalog's component
+// set, from any channel the viewer already reads — here the static fragment, JSON Lines in a text
+// block, and a ui_builder_export_document JSON artifact.
+const a2uiDocument = [
+  { version: "v0.9", createSurface: { surfaceId: "main", catalogId: "basic" } },
+  {
+    version: "v0.9",
+    updateComponents: {
+      surfaceId: "main",
+      components: [
+        { id: "root", component: "Card", child: "column" },
+        { id: "column", component: "Column", children: ["title", "name", "row", "items", "guests", "tabs"] },
+        { id: "title", component: "Text", text: "Book a table", variant: "h2" },
+        { id: "name", component: "Text", text: { path: "/restaurant/name" } },
+        { id: "row", component: "Row", justify: "spaceBetween", children: ["icon", "confirm"] },
+        { id: "icon", component: "Icon", name: "calendarToday" },
+        { id: "confirm", component: "Button", child: "confirmLabel", variant: "primary", action: { event: { name: "confirm" } } },
+        { id: "confirmLabel", component: "Text", text: "Confirm" },
+        { id: "items", component: "List", children: { componentId: "item", path: "/items" } },
+        { id: "item", component: "Text", text: { path: "name" } },
+        { id: "guests", component: "TextField", label: "Guests", value: { path: "/guests" }, variant: "number" },
+        { id: "tabs", component: "Tabs", tabs: [{ title: "Lunch", child: "lunch" }, { title: "Dinner", child: "dinner" }] },
+        { id: "lunch", component: "Text", text: "Noon to three" },
+        { id: "dinner", component: "Mystery" },
+      ],
+    },
+  },
+  {
+    version: "v0.9",
+    updateDataModel: {
+      surfaceId: "main",
+      path: "/",
+      value: { restaurant: { name: "Chez Test" }, items: [{ name: "Soup" }, { name: "Bread" }], guests: 4 },
+    },
+  },
+];
+
+function staticFragment(result) {
+  return Buffer.from(JSON.stringify({ version: 1, result })).toString("base64url");
+}
+
+test("contract · static viewer renders an A2UI document with the basic catalog components", async ({ page }) => {
+  await page.goto(
+    `/mcp-app/compose-preview-viewer.html#compose-preview-result=${staticFragment({
+      content: [{ type: "text", text: "A2UI document" }],
+      structuredContent: { a2ui: a2uiDocument },
+    })}`,
+  );
+  const canvas = page.locator("#canvas");
+  await expect(page.locator("#meta")).toHaveText("A2UI document · 1 surface · 14 components");
+  await expect(canvas.locator(".a2ui-card h2")).toHaveText("Book a table");
+  await expect(canvas.locator('[data-a2ui-id="name"]')).toHaveText("Chez Test");
+  await expect(canvas.locator('[data-a2ui-id="item"]')).toHaveText(["Soup", "Bread"]);
+  await expect(canvas.locator(".a2ui-row")).toHaveCSS("justify-content", "space-between");
+  await expect(canvas.locator(".a2ui-button.primary")).toHaveText("Confirm");
+  await expect(canvas.locator(".a2ui-field input")).toHaveValue("4");
+  await expect(canvas.locator(".a2ui-tab-panel")).toHaveText("Noon to three");
+  await canvas.locator(".a2ui-tab-strip button", { hasText: "Dinner" }).click();
+  await expect(canvas.locator(".a2ui-tab-panel .a2ui-missing")).toHaveText('Mystery "dinner"');
+  await canvas.locator(".a2ui-button").click();
+  await expect(page.locator("#meta")).toHaveText("Pressed confirm → confirm");
+  // Static mode: the catalog render needs the bridge, so it is not offered.
+  await expect(page.locator("#a2ui-render")).toBeHidden();
+
+  const jsonLines = a2uiDocument.map((message) => JSON.stringify(message)).join("\n");
+  for (const text of [
+    jsonLines,
+    JSON.stringify({
+      callId: "ui_builder_export_document",
+      response: { artifact: { format: "json", mediaType: "application/json", encoding: "utf8", content: `${jsonLines}\n` } },
+    }),
+  ]) {
+    await page.goto("about:blank");
+    await page.goto(
+      `/mcp-app/compose-preview-viewer.html#compose-preview-result=${staticFragment({ content: [{ type: "text", text }] })}`,
+    );
+    await expect(page.locator("#meta")).toHaveText("A2UI document · 1 surface · 14 components");
+    await expect(page.locator('#canvas [data-a2ui-id="name"]')).toHaveText("Chez Test");
+  }
+
+  // v0.8 messages and a reference cycle.
+  await page.goto("about:blank");
+  await page.goto(
+    `/mcp-app/compose-preview-viewer.html#compose-preview-result=${staticFragment({
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify([
+            {
+              surfaceUpdate: {
+                surfaceId: "legacy",
+                components: [
+                  { id: "r", component: { Column: { children: { explicitList: ["t", "loop"] } } } },
+                  { id: "t", component: { Text: { text: { literalString: "Legacy hello" }, usageHint: "h1" } } },
+                  { id: "loop", component: { Card: { child: "r" } } },
+                ],
+              },
+            },
+            { beginRendering: { surfaceId: "legacy", root: "r" } },
+          ]),
+        },
+      ],
+    })}`,
+  );
+  await expect(page.locator("#canvas .a2ui h1")).toHaveText("Legacy hello");
+  await expect(page.locator("#canvas .a2ui-missing")).toHaveText('Cycle at "r"');
+});
+
+test("contract · live viewer renders an A2UI document with the a2ui-catalog renderer", async ({ page }) => {
+  const shorthand = {
+    components: [
+      { id: "root", component: "Button", child: "label", action: { event: { name: "go" } } },
+      { id: "label", component: "Text", text: "Go" },
+    ],
+  };
+  await page.goto("/preview-harness/index.html");
+  await page.evaluate((a2ui) => {
+    const log = (window.__a2ui = { calls: [], contexts: [] });
+    document.body.replaceChildren();
+    const frame = document.createElement("iframe");
+    frame.title = "Compose Preview MCP App";
+    frame.style.width = "620px";
+    frame.style.height = "700px";
+    const send = (message) => frame.contentWindow.postMessage({ jsonrpc: "2.0", ...message }, "*");
+    window.addEventListener("message", (event) => {
+      if (event.source !== frame.contentWindow) return;
+      const { id, method, params } = event.data || {};
+      if (id == null) return;
+      const reply = (result) => send({ id, result });
+      if (method === "ui/initialize") {
+        reply({ hostCapabilities: { serverTools: {} } });
+        send({
+          method: "ui/notifications/tool-result",
+          params: { content: [{ type: "text", text: JSON.stringify(a2ui) }] },
+        });
+      } else if (method === "tools/list") {
+        reply({
+          tools: ["catalog_render_preview", "catalog_list_previews"].map((name) => ({
+            name,
+            inputSchema: { type: "object" },
+          })),
+        });
+      } else if (method === "tools/call") {
+        log.calls.push(params);
+        if (params.name === "catalog_list_previews") {
+          reply({
+            content: [
+              {
+                type: "text",
+                text: JSON.stringify({
+                  catalogs: [
+                    {
+                      id: "a2ui-catalog",
+                      previews: [
+                        { id: "Other" },
+                        { id: "A2uiDocumentPreview", knobs: [{ key: "document", type: "String" }] },
+                      ],
+                    },
+                  ],
+                }),
+              },
+            ],
+          });
+        } else {
+          reply({
+            content: [
+              {
+                type: "image",
+                mimeType: "image/png",
+                data: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg==",
+              },
+            ],
+          });
+        }
+      } else if (method === "ui/update-model-context") {
+        log.contexts.push(params.content[0].text);
+        reply({});
+      } else {
+        reply({});
+      }
+    });
+    frame.src = "/mcp-app/compose-preview-viewer.html";
+    document.body.append(frame);
+  }, shorthand);
+  const viewer = page.frameLocator('iframe[title="Compose Preview MCP App"]');
+  await expect(viewer.locator("#meta")).toHaveText("A2UI document · 1 surface · 2 components");
+
+  const renderButton = viewer.locator("#a2ui-render");
+  await expect(renderButton).toBeVisible();
+  await renderButton.click();
+  await expect(viewer.locator(".a2ui-catalog-render img")).toBeVisible();
+  await expect(viewer.locator(".a2ui-catalog-render figcaption")).toHaveText("a2ui-catalog (Compose) render");
+  expect((await page.evaluate(() => window.__a2ui)).calls).toEqual([
+    { name: "catalog_list_previews", arguments: { catalog: "a2ui-catalog" } },
+    {
+      name: "catalog_render_preview",
+      arguments: {
+        catalog: "a2ui-catalog",
+        previewId: "A2uiDocumentPreview",
+        observe: "png",
+        // The shorthand goes back as it came; the catalog renderer takes it directly.
+        overrides: { "knob.document": JSON.stringify(shorthand) },
+      },
+    },
+  ]);
+
+  // A pressed button tells the agent, over the bridge.
+  await viewer.locator(".a2ui-button").click();
+  await expect
+    .poll(async () => (await page.evaluate(() => window.__a2ui)).contexts.at(-1) || "")
+    .toContain("the user pressed A2UI button root (action go)");
 });

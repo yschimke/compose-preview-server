@@ -44,7 +44,10 @@ val publishedArtifactId = "compose-preview-mcp"
 
 kotlin {
   jvmToolchain(libs.versions.java.server.get().toInt())
-  sourceSets.named("main") { kotlin.srcDir(rootProject.tasks.named("generateMcpBuildFeatures")) }
+  sourceSets.named("main") {
+    kotlin.srcDir(rootProject.tasks.named("generateMcpBuildFeatures"))
+    resources.srcDir(rootProject.file("mcp-app"))
+  }
 }
 
 ktfmt { googleStyle() }
@@ -67,6 +70,41 @@ application {
   applicationName = "compose-preview-mcp"
   mainClass.set("ee.schimke.composeai.mcp.DaemonMcpMain")
 }
+
+// The version this module reports in the MCP `initialize` handshake's `serverInfo.version`. Same
+// shape as `:server`'s `generateServeVersionResource` for `SERVE_VERSION`: both derive from
+// `project.version`, generated into a resource this module's own classloader reads at runtime
+// (`McpVersion.kt`), rather than the `"v0"` / `"v1"` literals a client's `initialize` used to see
+// regardless of which release was actually running.
+val generateMcpVersionResource =
+  tasks.register("generateMcpVersionResource") {
+    val outputDir = layout.buildDirectory.dir("generated/mcp-version-resource")
+    val mcpVersion = project.version.toString()
+    inputs.property("version", mcpVersion)
+    outputs.dir(outputDir)
+    doLast {
+      val file = outputDir.get().file("ee/schimke/composeai/mcp/mcp-version.properties").asFile
+      file.parentFile.mkdirs()
+      file.writeText("version=$mcpVersion\n")
+    }
+  }
+
+sourceSets.main.get().resources.srcDir(generateMcpVersionResource)
+
+// The `.rc` viewer MCP App (`mcp-app/rc-viewer.html`, issue #1237) inlines the vendored TypeScript
+// Remote Compose player when it is served. That bundle is committed once, as `:server`'s
+// resource; this stages the same file into this module's resources instead of committing a second
+// ~0.7 MB copy. It is a file in this repository, not a project dependency on `:server`.
+val stageRcViewerPlayer =
+  tasks.register<Sync>("stageRcViewerPlayer") {
+    from(rootProject.file("server/src/main/resources/rc-player/bundle.js")) {
+      rename { "rc-player-bundle.js" }
+      into("rc-viewer")
+    }
+    into(layout.buildDirectory.dir("generated/rc-viewer-player"))
+  }
+
+sourceSets.main.get().resources.srcDir(stageRcViewerPlayer)
 
 // `archiveExtension = "tar.gz"` keeps the in-archive root as `compose-preview-mcp-<version>/`
 // rather than leaking `.tar.gz` into the directory name. Carried over from compose-ai-tools,
@@ -164,6 +202,28 @@ tasks.withType<Test>().configureEach {
   providers.gradleProperty("mcp.workdir").orNull?.let {
     systemProperty("composeai.mcp.workdir", it)
   }
+  // Opt-in edit→render loop on a real Android fixture (`EditLoopIntegrationTest`, issue #1174):
+  // `-Pmcp.editLoop=true`. It copies `src/editLoopFixture` and this build's Gradle wrapper, and
+  // always writes its timings and work records to the report file, which CI uploads.
+  val editLoop = providers.gradleProperty("mcp.editLoop").orNull == "true"
+  systemProperty("composeai.mcp.editLoop", editLoop.toString())
+  if (editLoop) {
+    // The CI log is where a failing edit loop is read: the full assertion (which tasks, which
+    // cycle) and the report the test prints, not just the exception class.
+    testLogging {
+      exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL
+      showStandardStreams = true
+    }
+  }
+  systemProperty("composeai.mcp.repoRoot", rootDir.absolutePath)
+  // `ANDROID_HOME` otherwise; for a launcher that does not pass the environment through.
+  providers.gradleProperty("mcp.androidSdk").orNull?.let {
+    systemProperty("composeai.mcp.androidSdk", it)
+  }
+  systemProperty(
+    "composeai.mcp.editLoopReport",
+    layout.buildDirectory.file("edit-loop/edit-loop-report.json").get().asFile.absolutePath,
+  )
 }
 
 // Boundary check, ported with the module: `:mcp` must NOT pull `gradle-tooling-api`, directly or

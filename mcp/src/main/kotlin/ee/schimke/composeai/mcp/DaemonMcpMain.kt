@@ -3,6 +3,8 @@ package ee.schimke.composeai.mcp
 import ee.schimke.composeai.daemon.client.SubprocessDaemonClientFactory
 import io.modelcontextprotocol.kotlin.sdk.types.Implementation
 import java.io.File
+import kotlin.time.Duration
+import kotlin.time.Duration.Companion.seconds
 
 /**
  * Entry point for the standalone MCP server. Stdio transport in v0; remote / HTTP transports are a
@@ -32,9 +34,9 @@ import java.io.File
  * `--replicas-per-daemon N` (or the `composeai.mcp.replicasPerDaemon` system property) configures
  * the in-JVM sandbox pool size: total sandboxes per (workspace, module) = `1 + N`. SANDBOX-POOL.md
  * Layer 3 collapsed what used to be N+1 separate JVM subprocesses into a single daemon JVM hosting
- * N+1 Robolectric sandboxes, so this knob no longer multiplies the JVM-baseline cost. Default
- * [DaemonSupervisor.DEFAULT_REPLICAS_PER_DAEMON] (= 4, i.e. 5 sandboxes per daemon). Set `0` to opt
- * out and run a single sandbox per daemon.
+ * N+1 Robolectric sandboxes, so this knob no longer multiplies the JVM-baseline cost. The default
+ * scales with the machine ([DaemonSupervisor.defaultReplicasFor]: half the cores less one, at most
+ * 4). Set `0` to opt out and run a single sandbox per daemon.
  *
  * On stdin EOF the server tears down every supervised daemon (sending `shutdown` + `exit` per
  * PROTOCOL.md § 3) and exits cleanly.
@@ -65,6 +67,8 @@ object DaemonMcpMain {
         descriptorProvider = DescriptorProvider.readingFromDisk(),
         clientFactory = SubprocessDaemonClientFactory(),
         replicasPerDaemon = replicasPerDaemon,
+        initializeTimeout = parseInitializeTimeout(),
+        workspaceStore = WorkspaceStore(WorkspaceStore.defaultFile()),
       )
     val server =
       if (storybookProfile) {
@@ -73,11 +77,16 @@ object DaemonMcpMain {
         // Storybook surface. Same daemon core + handlers underneath.
         DaemonMcpServer(
           supervisor,
-          serverInfo = Implementation(name = "compose-preview-storybook", version = "v0"),
+          serverInfo = Implementation(name = "compose-preview-storybook", version = MCP_VERSION),
           profile = McpToolProfile.STORYBOOK,
+          sourceCompiler = GradleSourceCompiler(),
         )
       } else {
-        DaemonMcpServer(supervisor, uiBuilderMcp = uiBuilderMcp)
+        DaemonMcpServer(
+          supervisor,
+          uiBuilderMcp = uiBuilderMcp,
+          sourceCompiler = GradleSourceCompiler(),
+        )
       }
 
     parseProjects(args).forEach { (path, name) ->
@@ -236,8 +245,35 @@ object DaemonMcpMain {
     else raw.substring(0, idx) to raw.substring(idx + 1).takeIf { it.isNotEmpty() }
   }
 
-  private fun parseReplicasPerDaemon(args: Array<String>): Int {
-    // CLI flag wins over the system property; system property wins over the default. Negative
+  /**
+   * `composeai.mcp.initializeTimeoutSeconds`, then `COMPOSE_PREVIEW_INITIALIZE_TIMEOUT_SECONDS`.
+   */
+  internal fun parseInitializeTimeout(
+    raw: String? =
+      System.getProperty("composeai.mcp.initializeTimeoutSeconds")
+        ?: System.getenv("COMPOSE_PREVIEW_INITIALIZE_TIMEOUT_SECONDS")
+  ): Duration {
+    val default = DaemonSupervisor.DEFAULT_INITIALIZE_TIMEOUT
+    if (raw.isNullOrBlank()) return default
+    val seconds = raw.trim().toLongOrNull()
+    if (seconds == null || seconds <= 0) {
+      System.err.println(
+        "compose-preview-mcp: ignoring invalid initialize timeout '$raw' (want positive seconds); " +
+          "falling back to default $default"
+      )
+      return default
+    }
+    return seconds.seconds
+  }
+
+  internal fun parseReplicasPerDaemon(
+    args: Array<String>,
+    settings: () -> PreviewSettings = {
+      PreviewSettingsStore(PreviewSettingsStore.defaultFile()).read()
+    },
+  ): Int {
+    // CLI flag wins over the system property; system property wins over the `replicasPerDaemon`
+    // setting (#1242; -1 there means unset), which wins over the default. Negative
     // or unparseable values fall back to the default with a stderr warning rather than crashing
     // the server — replication is non-load-bearing, so prefer "did something reasonable" to
     // refusing to start.
@@ -252,15 +288,19 @@ object DaemonMcpMain {
             else -> null
           }
         }
-    val raw = fromArgs ?: System.getProperty("composeai.mcp.replicasPerDaemon")
-    if (raw.isNullOrBlank()) return DaemonSupervisor.DEFAULT_REPLICAS_PER_DAEMON
+    val raw =
+      fromArgs
+        ?: System.getProperty("composeai.mcp.replicasPerDaemon")
+        ?: settings().replicasPerDaemon.takeIf { it >= 0 }?.toString()
+    val default = DaemonSupervisor.defaultReplicasFor(Runtime.getRuntime().availableProcessors())
+    if (raw.isNullOrBlank()) return default
     val parsed = raw.toIntOrNull()
     if (parsed == null || parsed < 0) {
       System.err.println(
         "compose-preview-mcp: ignoring invalid --replicas-per-daemon='$raw' (want non-negative int); " +
-          "falling back to default ${DaemonSupervisor.DEFAULT_REPLICAS_PER_DAEMON}"
+          "falling back to default $default"
       )
-      return DaemonSupervisor.DEFAULT_REPLICAS_PER_DAEMON
+      return default
     }
     return parsed
   }

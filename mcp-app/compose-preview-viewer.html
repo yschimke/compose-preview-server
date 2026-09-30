@@ -1,0 +1,2729 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Compose Preview</title>
+<style>
+  :root { color-scheme: light dark; font: 14px system-ui, sans-serif; color: var(--color-text-primary, #1b1b1f); background: var(--color-background-primary, #fff); }
+  body { margin: 0; background: var(--color-background-primary, #fff); }
+  .app { padding: 8px; }
+  /* One compact header line, so a short host frame (Claude Desktop starts near 160px) still fits
+     the image and the toolbar. --image-max and --cell-image-max are set from the measured chrome
+     and the host's containerDimensions, see fitToFrame(). */
+  .bar { display: flex; gap: 8px; align-items: center; min-width: 0; margin-bottom: 6px; }
+  .bar-text { display: flex; gap: 8px; align-items: baseline; min-width: 0; flex: 1 1 auto; }
+  .title { font-weight: 650; white-space: nowrap; }
+  #meta { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+  .bar label { font-size: 12px; white-space: nowrap; }
+  .bar label[hidden] { display: none; }
+  .bar select { font: inherit; padding: 2px 4px; border-radius: 6px; max-width: 14em; }
+  .muted { color: var(--color-text-secondary, #666); font-size: 12px; }
+  .canvas { min-height: 120px; border: 1px solid var(--color-border, #d8d8dd); border-radius: 10px; background: var(--color-background-secondary, #f8f8fa); display: grid; place-items: center; overflow: auto; }
+  .canvas.has-image { min-height: 0; overflow: hidden; }
+  #meta.error { color: var(--color-text-danger, #c5221f); font-weight: 650; }
+  .notice { width: 100%; padding: 10px 12px; box-sizing: border-box; border-radius: 0 8px 8px 0; border-left: 4px solid var(--color-border-secondary, #8a8f98); }
+  .notice.error { border-left-color: var(--color-border-danger, #c5221f); background: var(--color-background-danger, #fce8e6); }
+  .notice strong { display: block; }
+  .notice.error strong { color: var(--color-text-danger, #c5221f); }
+  .notice p { margin: 4px 0 0; overflow-wrap: anywhere; }
+  .notice details { margin-top: 6px; font-size: 12px; }
+  .notice pre { margin: 6px 0 0; padding: 8px; border-radius: 6px; background: var(--color-background-primary, #fff); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 240px; overflow: auto; }
+  .variant-list { display: flex; flex-wrap: wrap; gap: 4px; margin: 6px 0 0; padding: 0; list-style: none; font-size: 12px; }
+  .variant-list button { padding: 2px 7px; font-size: 12px; }
+  .refused { font-size: 11px; color: var(--color-text-secondary, #666); }
+  .canvas img { max-width: 100%; max-height: var(--image-max, 560px); object-fit: contain; }
+  .preview-stage { position: relative; display: inline-block; max-width: 100%; line-height: 0; }
+  .preview-stage > img { display: block; }
+  .comment-pin { position: absolute; transform: translate(-50%, -50%); z-index: 2; display: grid; place-items: center; width: 26px; height: 26px; padding: 0; border-radius: 999px; border: 2px solid #fff; background: #315da8; color: #fff; font-size: 12px; font-weight: 700; line-height: 1; box-shadow: 0 1px 4px #0008; }
+  .comment-pin.resolved { background: #62646a; }
+  .comment-pin.pending { background: #9b4d00; }
+  .comparison { width: 100%; padding: 10px; box-sizing: border-box; }
+  .comparison-stage { position: relative; display: grid; place-items: center; min-height: 120px; overflow: hidden; }
+  .comparison-stage img { grid-area: 1 / 1; display: block; }
+  .comparison-after { position: absolute; inset: 0; width: 100%; height: 100%; }
+  .comparison-labels { display: flex; justify-content: space-between; margin: 8px 2px 4px; font-size: 12px; font-weight: 650; }
+  .comparison-slider { width: 100%; margin: 0; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; width: 100%; padding: 8px; box-sizing: border-box; }
+  .cell { border: 1px solid var(--color-border, #d8d8dd); border-radius: 8px; padding: 6px; background: var(--color-background-primary, #fff); cursor: pointer; }
+  .cell img { width: 100%; height: auto; max-height: var(--cell-image-max, none); object-fit: contain; display: block; }
+  .cell code { font-size: 11px; overflow-wrap: anywhere; }
+  .fallback { width: 100%; padding: 12px; box-sizing: border-box; }
+  .fallback p { margin: 0 0 8px; }
+  .fallback pre { margin: 0; padding: 10px; border-radius: 7px; background: var(--color-background-primary, #fff); white-space: pre-wrap; overflow-wrap: anywhere; }
+  .toolbar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 6px; }
+  .toolbar button { padding: 3px 8px; font-size: 12px; }
+  .actions { display: contents; }
+  .live { display: contents; }
+  .live[hidden], .live [hidden] { display: none; }
+  .live select { font: inherit; padding: 5px; border-radius: 6px; max-width: 100%; }
+  .source { margin-top: 6px; overflow-wrap: anywhere; }
+  .cell[aria-pressed="true"] { outline: 2px solid #315da8; }
+  .layout-boxes { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+  .layout-boxes rect { fill: none; stroke: #1a73e8; stroke-width: 1.5; vector-effect: non-scaling-stroke; }
+  .comments { margin-top: 10px; padding: 10px; border: 1px solid var(--color-border, #d8d8dd); border-radius: 10px; }
+  .comments[hidden] { display: none; }
+  .comments-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-weight: 650; margin-bottom: 8px; }
+  .comment-list { display: grid; gap: 7px; }
+  .comment-thread { padding: 8px; border-radius: 7px; background: var(--color-background-secondary, #f8f8fa); }
+  .comment-thread:target { outline: 2px solid #315da8; }
+  .comment-thread p { margin: 4px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .comment-thread-meta { font-size: 12px; font-weight: 650; }
+  .comment-compose { display: grid; gap: 7px; margin-top: 10px; }
+  .comment-compose textarea { min-height: 64px; resize: vertical; box-sizing: border-box; width: 100%; padding: 7px; font: inherit; color: inherit; background: var(--color-background-primary, #fff); border: 1px solid var(--color-border, #aaa); border-radius: 6px; }
+  .comment-compose-row { display: flex; gap: 8px; align-items: center; }
+  .comment-raw { margin-top: 8px; }
+  .comment-raw pre { max-height: 180px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .details { margin-top: 10px; display: grid; gap: 8px; }
+  .details[hidden] { display: none; }
+  .detail-modes { display: flex; gap: 0; }
+  .detail-modes button { border-radius: 0; margin-left: -1px; }
+  .detail-modes button:first-child { border-radius: 6px 0 0 6px; margin-left: 0; }
+  .detail-modes button:last-child { border-radius: 0 6px 6px 0; }
+  .detail-modes button[aria-pressed="true"] { background: var(--color-background-secondary, #e8ecf6); font-weight: 650; }
+  .detail-boxes { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+  .detail-boxes rect { fill: none; stroke-width: 1.5; vector-effect: non-scaling-stroke; }
+  .detail-boxes rect.layout { stroke: #1a73e8; }
+  .detail-boxes rect.finding { stroke: #d93025; stroke-width: 2; }
+  .findings { margin: 0; padding: 0; list-style: none; display: grid; gap: 4px; font-size: 12px; }
+  .findings li { padding: 5px 7px; border-radius: 6px; background: var(--color-background-secondary, #f8f8fa); overflow-wrap: anywhere; }
+  .findings .level { font-weight: 700; margin-right: 6px; }
+  .findings .level.error { color: #c5221f; }
+  .findings .level.warning { color: #b06000; }
+  .a2ui { width: 100%; padding: 10px; box-sizing: border-box; display: grid; gap: 10px; align-self: start; }
+  .a2ui-surface { padding: 12px; border-radius: 8px; background: var(--color-background-primary, #fff); overflow-wrap: anywhere; }
+  .a2ui-vertical { display: flex; flex-direction: column; gap: 8px; }
+  .a2ui-horizontal { display: flex; flex-direction: row; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .a2ui-text { margin: 0; }
+  .a2ui-caption { font-size: 12px; color: var(--color-text-secondary, #666); }
+  .a2ui-image { max-width: 100%; max-height: 240px; }
+  .a2ui-icon, .a2ui-avatar { width: 48px; height: 48px; border-radius: 999px; }
+  span.a2ui-icon { width: auto; height: auto; padding: 1px 6px; font-size: 11px; border: 1px solid var(--color-border, #d8d8dd); }
+  .a2ui-card { padding: 12px; border: 1px solid var(--color-border, #d8d8dd); border-radius: 10px; background: var(--color-background-secondary, #f8f8fa); }
+  .a2ui-divider { width: 100%; margin: 4px 0; border: 0; border-top: 1px solid var(--color-border, #d8d8dd); }
+  .a2ui-divider-vertical { width: 0; align-self: stretch; margin: 0 4px; border-top: 0; border-left: 1px solid var(--color-border, #d8d8dd); }
+  .a2ui-button.primary { background: #315da8; border-color: #315da8; color: #fff; }
+  .a2ui-field { display: grid; gap: 3px; }
+  .a2ui-field input, .a2ui-field textarea { font: inherit; padding: 5px 7px; border-radius: 6px; border: 1px solid var(--color-border, #aaa); color: inherit; background: var(--color-background-primary, #fff); }
+  .a2ui-label { font-size: 12px; color: var(--color-text-secondary, #666); }
+  .a2ui-check { display: flex; gap: 6px; align-items: center; }
+  .a2ui-choices { margin: 0; border: 1px solid var(--color-border, #d8d8dd); border-radius: 6px; }
+  .a2ui-tab-strip { display: flex; gap: 4px; margin-bottom: 8px; }
+  .a2ui-tab-strip button[aria-selected="true"] { font-weight: 650; background: var(--color-background-secondary, #e8ecf6); }
+  .a2ui-missing { padding: 6px 8px; font-size: 12px; border: 1px dashed var(--color-border-secondary, #8a8f98); border-radius: 6px; color: var(--color-text-secondary, #666); }
+  .a2ui-catalog-render { margin: 0; display: grid; gap: 6px; font-size: 12px; }
+  .a2ui-catalog-render[hidden] { display: none; }
+  button { font: inherit; padding: 6px 9px; border-radius: 6px; border: 1px solid var(--color-border, #aaa); background: var(--color-background-primary, #fff); color: inherit; cursor: pointer; }
+</style>
+<body>
+<main class="app">
+  <div class="bar">
+    <div class="bar-text">
+      <span class="title">Compose Preview</span>
+      <span id="meta" class="muted" role="status">Waiting for a preview result…</span>
+    </div>
+    <label id="variant-label" hidden>Variant <select id="variant"></select></label>
+  </div>
+  <section id="canvas" class="canvas">
+    <div class="empty">This viewer displays render and matrix results when the host supplies them.</div>
+  </section>
+  <div id="toolbar" class="toolbar">
+    <div class="actions">
+      <button id="refresh" hidden>Refresh resource</button>
+      <button id="a11y" hidden>Show accessibility overlay</button>
+      <button id="use" hidden>Use selected result</button>
+      <button id="grid-back" type="button" hidden>All variants</button>
+      <button id="a2ui-render" type="button" hidden>Render with a2ui-catalog</button>
+    </div>
+    <div id="live" class="live" aria-label="Live viewer actions" hidden>
+      <button id="rerender" type="button" hidden>Re-render</button>
+      <button id="layout" type="button" aria-pressed="false" hidden>Show layout bounds</button>
+      <button id="source" type="button" hidden>Open in editor</button>
+    </div>
+  </div>
+  <div id="source-location" class="muted source" role="status"></div>
+  <section id="details" class="details" aria-label="Render details" hidden>
+    <div id="detail-modes" class="detail-modes" role="group" aria-label="Render view"></div>
+    <div id="detail-summary" class="muted"></div>
+    <ol id="findings" class="findings" aria-label="Accessibility findings"></ol>
+  </section>
+  <section id="comments" class="comments" aria-label="Design comments" hidden>
+    <div class="comments-heading"><span>Design comments</span><button id="comment-refresh" type="button" hidden>Refresh comments</button></div>
+    <p class="muted">Reading comments requires <code>ui-builder-read</code>; posting requires <code>ui-builder-write</code>. The current viewer grant is used only when it carries that capability.</p>
+    <div id="comment-list" class="comment-list"></div>
+    <div id="comment-compose" class="comment-compose" hidden>
+      <label for="comment-body">Post a comment</label>
+      <textarea id="comment-body" maxlength="4000" placeholder="Describe what should change"></textarea>
+      <div class="comment-compose-row">
+        <button id="comment-post" type="button">Post comment</button>
+        <span id="comment-anchor" class="muted">Click the preview to pin this comment, or post it unpinned.</span>
+      </div>
+    </div>
+    <div id="comment-status" class="muted" role="status"></div>
+    <details id="comment-raw" class="comment-raw">
+      <summary>Complete comment data</summary>
+      <pre></pre>
+    </details>
+  </section>
+</main>
+<script>
+(() => {
+  const q = selector => document.querySelector(selector);
+  const canvas = q('#canvas');
+  const meta = q('#meta');
+  const refresh = q('#refresh');
+  const a11y = q('#a11y');
+  const use = q('#use');
+  const gridBack = q('#grid-back');
+  let lastGrid;
+  const comments = q('#comments');
+  const commentList = q('#comment-list');
+  const commentRefresh = q('#comment-refresh');
+  const commentCompose = q('#comment-compose');
+  const commentBody = q('#comment-body');
+  const commentPost = q('#comment-post');
+  const commentAnchorLabel = q('#comment-anchor');
+  const commentStatus = q('#comment-status');
+  const commentRaw = q('#comment-raw');
+  const detailsSection = q('#details');
+  const detailModes = q('#detail-modes');
+  const detailSummary = q('#detail-summary');
+  const findingsList = q('#findings');
+  // render_preview `details` (#1170): blocks after the render, marked in `_meta`, carrying the a11y
+  // overlay PNG and the findings + layout boxes. Everything is embedded, so a static card toggles
+  // between them with no call.
+  const DETAIL_META = 'composePreview/detail';
+  const REQUEST_TIMEOUT_MS = 5000;
+  const RESOURCE_READ_TIMEOUT_MS = 65000;
+  const RESOURCE_POLL_INTERVAL_MS = 5000;
+  // Every poll is a resources/read, and every read is a render. Back off while the pixels do not
+  // change and stop after a bounded run of unchanged reads; Refresh or a new result re-arms it.
+  const RESOURCE_POLL_MAX_INTERVAL_MS = 60000;
+  const RESOURCE_POLL_MAX_UNCHANGED = 12;
+  const MAX_COMMENT_BODY_LENGTH = 4000;
+  // Static host contract, for hosts with no MCP Apps bridge (for example Antigravity's
+  // <agent-embed>). One envelope, two ways to deliver it:
+  //   1. URL fragment: #compose-preview-result=<unpadded base64url UTF-8 JSON>
+  //   2. Inline block, anywhere in the document (the <head>, or appended after this script):
+  //      <script type="application/json" id="compose-preview-result">JSON<\/script>
+  // JSON shape: {"version":1,"arguments":{...},"result":<MCP CallToolResult>}
+  // The inline block exists because Antigravity 1.2.12 does not load <agent-embed src="file://...">
+  // as a URL: it reads the file and injects its text into <iframe srcdoc>, so location.href is
+  // about:srcdoc and the fragment (or query) never reaches the viewer. Relative and file:/// URLs do
+  // not resolve there either; images must travel as base64 image content, drawn as data: URIs.
+  // A producer inlining the JSON must keep it inside the element: escape every "<" + "/" as "<\/" and
+  // every "<" + "!--" as "\u003c!--" (escaping every "<" as "\u003c" also works). Both are ordinary JSON
+  // string escapes, so JSON.parse reads the original text back unchanged.
+  // The fragment takes precedence: when it is present the inline block is ignored, so a host that
+  // does pass URLs can override a result baked into the file.
+  // Both inputs are held to the same rules and share one path after decoding: at most 500 KB of
+  // UTF-8 JSON, version 1, no credential-named field or credential-bearing URI anywhere, and static
+  // mode (no bridge, no polling, no postMessage handling; an input that fails any rule shows why and
+  // points at the complete text fallback in the surrounding response).
+  // Either way the result is intentionally credential-free and bounded so the file is safe to package.
+  const STATIC_RESULT_PARAM = 'compose-preview-result';
+  const MAX_STATIC_RESULT_BYTES = 500000;
+  const CREDENTIAL_KEY = /(token|authorization|password|secret|api[-_]?key|cookie|session)/i;
+  const pending = new Map();
+  const lateResponses = new Map();
+  let nextId = 1;
+  let initialized = false;
+  let hasToolResult = false;
+  let staticMode = false;
+  let inputResolved = false;
+  let selected;
+  let toolArguments = {};
+  let resourceToken;
+  let resourceResult;
+  let resourceReadGeneration = 0;
+  let resourceReadUri;
+  let resourcePollTimer;
+  let resourcePollUnchanged = 0;
+  let resourceSubscriptionGeneration = 0;
+  let subscribedResourceUri;
+  let resourceSubscriptionTargetUri;
+  let resourceSubscriptionQueue = Promise.resolve();
+  let hostResourceSubscriptions = false;
+  let hostServerTools = false;
+  let overlayToolName;
+  let toolDiscoveryGeneration = 0;
+  let baseImageData;
+  let overlayImageData;
+  let overlayVisible = false;
+  let overlayEligible = false;
+  let overlayGeneration = 0;
+  let overlayCall;
+  let baseMetaText = '';
+  let comparisonReadGeneration = 0;
+  let listCommentsToolName;
+  let postCommentToolName;
+  let commentDesignId;
+  let commentRenderValue;
+  let commentBoard;
+  let commentPoint;
+  let commentGeneration = 0;
+  let commentPostPending = false;
+
+  function request(method, params, timeoutMs = REQUEST_TIMEOUT_MS, onLateResult) {
+    const id = nextId++;
+    return new Promise((resolve, reject) => {
+      const timer = window.setTimeout(() => {
+        if (!pending.delete(id)) return;
+        if (onLateResult) {
+          const expiry = window.setTimeout(() => lateResponses.delete(id), RESOURCE_READ_TIMEOUT_MS);
+          lateResponses.set(id, { handle: onLateResult, expiry });
+        }
+        reject(new Error(`${method} request timed out after ${timeoutMs} ms`));
+      }, timeoutMs);
+      pending.set(id, { resolve, reject, timer });
+      window.parent.postMessage({ jsonrpc: '2.0', id, method, params }, '*');
+    });
+  }
+
+  function notify(method, params) {
+    window.parent.postMessage({ jsonrpc: '2.0', method, params }, '*');
+  }
+
+  const parse = source => {
+    try {
+      return JSON.parse(source);
+    } catch {
+      return null;
+    }
+  };
+
+  const detailOf = block => block?._meta?.[DETAIL_META];
+  const data = result =>
+    result?.structuredContent ||
+    result?.content?.filter(block => block.type === 'text' && !detailOf(block)).map(block => parse(block.text)).find(Boolean) ||
+    {};
+  const png = result =>
+    result?.content?.find(block => block.type === 'image' && block.mimeType === 'image/png' && !detailOf(block));
+  const link = result => result?.content?.find(block => block.type === 'resource_link');
+  const resourcePng = result =>
+    result?.contents?.find(content => content?.mimeType === 'image/png' && typeof content.blob === 'string');
+
+  function credentialKeyIn(value) {
+    const remaining = [value];
+    while (remaining.length) {
+      const current = remaining.pop();
+      if (!current || typeof current !== 'object') continue;
+      for (const [key, child] of Object.entries(current)) {
+        if (CREDENTIAL_KEY.test(key)) return key;
+        const uriCredential = credentialKeyInUri(key, child);
+        if (uriCredential) return uriCredential;
+        if (child && typeof child === 'object') remaining.push(child);
+      }
+    }
+    return undefined;
+  }
+
+  function credentialKeyInUri(key, value) {
+    if (typeof value !== 'string') return undefined;
+    try {
+      const url = new URL(value, 'https://compose-preview.invalid/');
+      if (url.username || url.password) return `${key} userinfo`;
+      for (const [parameter] of url.searchParams) {
+        if (CREDENTIAL_KEY.test(parameter)) return parameter;
+      }
+      for (const [parameter] of new URLSearchParams(url.hash.slice(1))) {
+        if (CREDENTIAL_KEY.test(parameter)) return parameter;
+      }
+    } catch {
+      // A malformed URI is handled by its consumer; it carries no parseable URL credential here.
+    }
+    return undefined;
+  }
+
+  function fragmentJson(encoded) {
+    if (!encoded || encoded.length > MAX_STATIC_RESULT_BYTES || !/^[A-Za-z0-9_-]+$/.test(encoded)) {
+      throw new Error('the encoded result is empty, malformed, or larger than 500 KB');
+    }
+    const base64 = encoded.replace(/-/g, '+').replace(/_/g, '/');
+    const binary = atob(base64 + '='.repeat((4 - base64.length % 4) % 4));
+    if (binary.length > MAX_STATIC_RESULT_BYTES) {
+      throw new Error('the decoded result is larger than 500 KB');
+    }
+    const bytes = Uint8Array.from(binary, character => character.charCodeAt(0));
+    return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+  }
+
+  function inlineJson(block) {
+    if (block.localName !== 'script' || block.type !== 'application/json') {
+      throw new Error('the inline result must be a <script type="application/json"> element');
+    }
+    const text = block.textContent || '';
+    // UTF-16 length never exceeds the UTF-8 byte count, so this cheap check can only reject early.
+    if (text.length > MAX_STATIC_RESULT_BYTES || new TextEncoder().encode(text).length > MAX_STATIC_RESULT_BYTES) {
+      throw new Error('the inline result is larger than 500 KB');
+    }
+    if (!text.trim()) throw new Error('the inline result is empty');
+    return text;
+  }
+
+  function staticInput() {
+    const encoded = new URLSearchParams(location.hash.slice(1)).get(STATIC_RESULT_PARAM);
+    const block = encoded == null ? document.getElementById(STATIC_RESULT_PARAM) : null;
+    if (encoded == null && !block) return { present: false };
+    try {
+      const json = encoded != null ? fragmentJson(encoded) : inlineJson(block);
+      let envelope;
+      try {
+        envelope = JSON.parse(json);
+      } catch {
+        throw new Error('the result is not valid JSON');
+      }
+      if (!envelope || envelope.version !== 1 || typeof envelope.result !== 'object' || !envelope.result || Array.isArray(envelope.result)) {
+        throw new Error('expected a version 1 envelope containing an MCP tool result');
+      }
+      if (
+        !Array.isArray(envelope.result.content) ||
+        !envelope.result.content.every(block => block && typeof block === 'object' && !Array.isArray(block))
+      ) {
+        throw new Error('the MCP tool result content must be an array of objects');
+      }
+      if (envelope.arguments != null && (typeof envelope.arguments !== 'object' || Array.isArray(envelope.arguments))) {
+        throw new Error('arguments must be an object when present');
+      }
+      const value = data(envelope.result);
+      if (
+        Array.isArray(value?.cells) &&
+        !value.cells.every(cell => cell && typeof cell === 'object' && !Array.isArray(cell))
+      ) {
+        throw new Error('matrix cells must be objects');
+      }
+      const credentialKey = credentialKeyIn(envelope);
+      if (credentialKey) throw new Error(`credential field "${credentialKey}" is not allowed`);
+      return { present: true, envelope };
+    } catch (error) {
+      return { present: true, error: error instanceof Error ? error.message : String(error) };
+    }
+  }
+
+  // Selection context must be complete enough to replay a render, but never leak a transport
+  // credential from the host's original tool input into the model context.
+  function safeSelectionArguments(value) {
+    if (Array.isArray(value)) {
+      return value.map(safeSelectionArguments).filter(child => child !== undefined);
+    }
+    if (typeof value === 'string' && credentialKeyInUri('value', value)) return undefined;
+    if (!value || typeof value !== 'object') return value;
+    return Object.fromEntries(
+      Object.entries(value)
+        .filter(([key, child]) => !CREDENTIAL_KEY.test(key) && !credentialKeyInUri(key, child))
+        .map(([key, child]) => [key, safeSelectionArguments(child)])
+    );
+  }
+
+  function choose(value, label) {
+    selected = value;
+    use.hidden = staticMode;
+    meta.textContent = label;
+  }
+
+  function clearComments() {
+    ++commentGeneration;
+    commentDesignId = undefined;
+    commentRenderValue = undefined;
+    commentBoard = undefined;
+    commentPoint = undefined;
+    commentPostPending = false;
+    comments.hidden = true;
+    commentList.replaceChildren();
+    commentRefresh.hidden = true;
+    commentRefresh.disabled = false;
+    commentCompose.hidden = true;
+    commentBody.value = '';
+    commentPost.disabled = false;
+    commentAnchorLabel.textContent = 'Click the preview to pin this comment, or post it unpinned.';
+    commentStatus.textContent = '';
+    commentRaw.hidden = true;
+    commentRaw.querySelector('pre').textContent = '';
+  }
+
+  function commentExcerpt(thread) {
+    const entries = Array.isArray(thread?.comments) ? thread.comments : [];
+    return entries.map(comment => comment?.body).find(body => typeof body === 'string' && body) || 'Comment';
+  }
+
+  function commentAnchorText(anchor) {
+    if (!anchor || typeof anchor !== 'object') return 'Unpinned';
+    if (typeof anchor.nodeId === 'string' && anchor.nodeId) return `Node ${anchor.nodeId}`;
+    if (typeof anchor.markId === 'string' && anchor.markId) return `Mark ${anchor.markId}`;
+    if (Number.isFinite(anchor.x) && Number.isFinite(anchor.y)) {
+      return `Frame ${Math.round(anchor.x * 100)}%, ${Math.round(anchor.y * 100)}%`;
+    }
+    return 'Unpinned';
+  }
+
+  function commentPosition(anchor, image) {
+    if (!anchor || typeof anchor !== 'object') return undefined;
+    if (Number.isFinite(anchor.x) && Number.isFinite(anchor.y)) {
+      return {
+        x: Math.min(1, Math.max(0, anchor.x)),
+        y: Math.min(1, Math.max(0, anchor.y)),
+      };
+    }
+    const bounds = typeof anchor.nodeId === 'string'
+      ? commentRenderValue?.nodeBounds?.[anchor.nodeId]
+      : undefined;
+    if (!bounds || !image?.naturalWidth || !image?.naturalHeight) return undefined;
+    const x = (Number(bounds.x) + Number(bounds.width) / 2) / image.naturalWidth;
+    const y = (Number(bounds.y) + Number(bounds.height) / 2) / image.naturalHeight;
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return undefined;
+    return { x: Math.min(1, Math.max(0, x)), y: Math.min(1, Math.max(0, y)) };
+  }
+
+  function renderCommentPins() {
+    const stage = canvas.querySelector('.preview-stage');
+    const image = stage?.querySelector('img');
+    if (!stage || !image) return;
+    stage.querySelectorAll('.comment-pin').forEach(pin => pin.remove());
+    const threads = Array.isArray(commentBoard?.threads) ? commentBoard.threads : [];
+    threads.forEach((thread, index) => {
+      const position = commentPosition(thread?.anchor, image);
+      if (!position) return;
+      const pin = document.createElement('button');
+      pin.type = 'button';
+      pin.className = `comment-pin${thread?.resolved ? ' resolved' : ''}`;
+      pin.style.left = `${position.x * 100}%`;
+      pin.style.top = `${position.y * 100}%`;
+      pin.textContent = String(index + 1);
+      const excerpt = commentExcerpt(thread);
+      pin.title = excerpt;
+      pin.setAttribute('aria-label', `Comment ${index + 1}: ${excerpt}`);
+      pin.addEventListener('click', event => {
+        event.stopPropagation();
+        document.getElementById(`comment-thread-${index + 1}`)?.scrollIntoView({ block: 'nearest' });
+      });
+      stage.append(pin);
+    });
+    if (commentPoint) {
+      const pending = document.createElement('span');
+      pending.className = 'comment-pin pending';
+      pending.style.left = `${commentPoint.x * 100}%`;
+      pending.style.top = `${commentPoint.y * 100}%`;
+      pending.textContent = '+';
+      pending.setAttribute('aria-label', 'New comment pin');
+      stage.append(pending);
+    }
+  }
+
+  function rawCommentFallback(value) {
+    commentRaw.hidden = false;
+    commentRaw.querySelector('pre').textContent =
+      typeof value === 'string' ? value : JSON.stringify(value, null, 2);
+  }
+
+  function renderCommentBoard(board) {
+    commentBoard = board;
+    commentList.replaceChildren();
+    const threads = Array.isArray(board?.threads) ? board.threads : [];
+    if (!threads.length) {
+      const empty = document.createElement('div');
+      empty.className = 'muted';
+      empty.textContent = 'No comments yet.';
+      commentList.append(empty);
+    }
+    threads.forEach((thread, index) => {
+      const card = document.createElement('article');
+      card.className = 'comment-thread';
+      card.id = `comment-thread-${index + 1}`;
+      const heading = document.createElement('div');
+      heading.className = 'comment-thread-meta';
+      heading.textContent = `${index + 1}. ${commentAnchorText(thread?.anchor)}${thread?.resolved ? ' · Resolved' : ''}`;
+      card.append(heading);
+      const entries = Array.isArray(thread?.comments) ? thread.comments : [];
+      entries.forEach(comment => {
+        const body = document.createElement('p');
+        const author = comment?.displayName || comment?.authorId || 'Unknown author';
+        body.textContent = `${author}: ${typeof comment?.body === 'string' ? comment.body : ''}`;
+        card.append(body);
+      });
+      commentList.append(card);
+    });
+    rawCommentFallback(board || {});
+    renderCommentPins();
+  }
+
+  function updateCommentAction() {
+    if (staticMode || !commentDesignId || !initialized || !listCommentsToolName) {
+      comments.hidden = true;
+      return;
+    }
+    comments.hidden = false;
+    commentRefresh.hidden = false;
+    commentCompose.hidden = !postCommentToolName;
+  }
+
+  async function loadComments() {
+    const designId = commentDesignId;
+    if (!designId || !initialized || !listCommentsToolName || staticMode) {
+      updateCommentAction();
+      return;
+    }
+    const generation = ++commentGeneration;
+    comments.hidden = false;
+    commentRefresh.disabled = true;
+    commentStatus.textContent = 'Loading comments…';
+    try {
+      const argumentsValue = { designId, ...(resourceToken ? { token: resourceToken } : {}) };
+      const result = await request(
+        'tools/call',
+        { name: listCommentsToolName, arguments: argumentsValue },
+        RESOURCE_READ_TIMEOUT_MS,
+      );
+      if (generation !== commentGeneration || commentDesignId !== designId) return;
+      const board = data(result);
+      if (result?.isError || !board || !Array.isArray(board.threads)) {
+        commentList.replaceChildren();
+        commentStatus.textContent = result?.isError
+          ? 'Comment access was not granted. Reading requires ui-builder-read; complete server response shown.'
+          : 'Comments are unavailable; complete text fallback shown.';
+        rawCommentFallback(fallbackText(result) || board || 'The host returned no comment board.');
+        return;
+      }
+      renderCommentBoard(board);
+      commentStatus.textContent = `${board.threads.length} comment thread${board.threads.length === 1 ? '' : 's'}.`;
+    } catch (error) {
+      if (generation !== commentGeneration || commentDesignId !== designId) return;
+      commentList.replaceChildren();
+      commentStatus.textContent = 'Comments are unavailable.';
+      rawCommentFallback(`Unable to load comments: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      if (generation === commentGeneration && commentDesignId === designId) {
+        commentRefresh.disabled = commentPostPending;
+      }
+    }
+    updateCommentAction();
+  }
+
+  function configureComments(value) {
+    const designId = typeof value?.designId === 'string' && value.designId ? value.designId : undefined;
+    if (!designId) return;
+    commentDesignId = designId;
+    commentRenderValue = value;
+    updateCommentAction();
+    if (listCommentsToolName) void loadComments();
+  }
+
+  function showImage(data, alt = 'Rendered Compose preview') {
+    const preview = document.createElement('img');
+    preview.alt = alt;
+    preview.src = `data:image/png;base64,${data}`;
+    const stage = document.createElement('div');
+    stage.className = 'preview-stage';
+    stage.append(preview);
+    stage.addEventListener('click', event => {
+      if (!commentDesignId || !postCommentToolName || commentCompose.hidden) return;
+      const bounds = preview.getBoundingClientRect();
+      if (!bounds.width || !bounds.height) return;
+      commentPoint = {
+        x: Math.min(1, Math.max(0, (event.clientX - bounds.left) / bounds.width)),
+        y: Math.min(1, Math.max(0, (event.clientY - bounds.top) / bounds.height)),
+      };
+      commentAnchorLabel.textContent =
+        `Pinned at ${Math.round(commentPoint.x * 100)}%, ${Math.round(commentPoint.y * 100)}%.`;
+      renderCommentPins();
+    });
+    preview.addEventListener('load', () => {
+      renderCommentPins();
+      scheduleFit();
+    }, { once: true });
+    canvas.replaceChildren(stage);
+    canvas.classList.add('has-image');
+    renderCommentPins();
+    if (layoutVisible) drawLayoutBounds();
+  }
+
+  function clearAccessibilityOverlay() {
+    ++overlayGeneration;
+    baseImageData = undefined;
+    overlayImageData = undefined;
+    overlayVisible = false;
+    overlayEligible = false;
+    baseMetaText = '';
+    a11y.hidden = true;
+    a11y.disabled = false;
+    a11y.textContent = 'Show accessibility overlay';
+    a11y.removeAttribute('title');
+  }
+
+  function updateAccessibilityAction() {
+    if (staticMode || !overlayEligible || !baseImageData || !initialized || !overlayToolName || embeddedDetails.a11y) {
+      a11y.hidden = true;
+      return;
+    }
+    a11y.hidden = false;
+    a11y.disabled = false;
+    a11y.textContent = overlayVisible ? 'Show original preview' : 'Show accessibility overlay';
+    a11y.removeAttribute('title');
+  }
+
+  function clearDetails() {
+    detailsSection.hidden = true;
+    detailModes.replaceChildren();
+    detailSummary.textContent = '';
+    findingsList.replaceChildren();
+  }
+
+  function detailBoxes(boxes, className, width, height) {
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('class', 'detail-boxes');
+    svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
+    svg.setAttribute('preserveAspectRatio', 'none');
+    svg.setAttribute('aria-hidden', 'true');
+    for (const box of boxes) {
+      const [left, top, right, bottom] = box.bounds.map(Number);
+      const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+      rect.setAttribute('class', className);
+      rect.setAttribute('x', left);
+      rect.setAttribute('y', top);
+      rect.setAttribute('width', Math.max(0, right - left));
+      rect.setAttribute('height', Math.max(0, bottom - top));
+      const title = document.createElementNS('http://www.w3.org/2000/svg', 'title');
+      title.textContent = box.label || '';
+      rect.append(title);
+      svg.append(rect);
+    }
+    return svg;
+  }
+
+  const hasBounds = item =>
+    Array.isArray(item?.bounds) && item.bounds.length === 4 && item.bounds.every(n => Number.isFinite(Number(n)));
+
+  function renderDetails(result, image) {
+    const block = result?.content?.find(candidate => candidate.type === 'text' && detailOf(candidate) === 'details');
+    const details = block && parse(block.text);
+    if (!details || typeof details !== 'object') return;
+    const overlay = result.content.find(
+      candidate => candidate.type === 'image' && candidate.mimeType === 'image/png' && detailOf(candidate) === 'a11y/overlay'
+    );
+    const a11yDetail = details.a11y && typeof details.a11y === 'object' ? details.a11y : undefined;
+    const layoutDetail = details.layout && typeof details.layout === 'object' ? details.layout : undefined;
+    const findings = Array.isArray(a11yDetail?.findings) ? a11yDetail.findings.filter(f => f && typeof f === 'object') : [];
+    const layoutBoxes = Array.isArray(layoutDetail?.boxes) ? layoutDetail.boxes.filter(hasBounds) : [];
+    const modes = [{ id: 'plain', label: 'Plain' }];
+    if (a11yDetail) modes.push({ id: 'a11y', label: 'A11y overlay' });
+    if (layoutDetail) modes.push({ id: 'layout', label: 'Layout bounds' });
+    const unavailable = details.unavailable && typeof details.unavailable === 'object' ? details.unavailable : {};
+    const notes = [a11yDetail?.summary, layoutDetail?.summary]
+      .concat(Object.entries(unavailable).map(([key, reason]) => `${key}: unavailable (${reason})`))
+      .filter(text => typeof text === 'string' && text);
+    if (modes.length === 1 && !notes.length) return;
+    detailsSection.hidden = false;
+    detailSummary.textContent = notes.join(' · ');
+    const stage = canvas.querySelector('.preview-stage');
+    const preview = stage?.querySelector(':scope > img');
+    // Boxes are in the render's pixel space, so size them against the render, not the overlay.
+    const value = data(result);
+    const size = { width: Number(value.widthPx) || 0, height: Number(value.heightPx) || 0 };
+    const measure = () => {
+      if (!size.width || !size.height) {
+        size.width = preview.naturalWidth || 1;
+        size.height = preview.naturalHeight || 1;
+      }
+    };
+    const setMode = mode => {
+      if (!stage || !preview) return;
+      measure();
+      stage.querySelectorAll('.detail-boxes').forEach(node => node.remove());
+      const { width, height } = size;
+      preview.src = `data:image/png;base64,${mode === 'a11y' && overlay ? overlay.data : image.data}`;
+      if (mode === 'layout') stage.append(detailBoxes(layoutBoxes, 'layout', width, height));
+      if (mode === 'a11y' && !overlay) {
+        stage.append(detailBoxes(findings.filter(hasBounds).map(f => ({ bounds: f.bounds, label: f.message })), 'finding', width, height));
+      }
+      stage.dataset.detailMode = mode;
+      detailModes.querySelectorAll('button').forEach(button =>
+        button.setAttribute('aria-pressed', String(button.dataset.mode === mode))
+      );
+      meta.textContent = mode === 'plain' ? baseMetaText : `${baseMetaText} · ${modes.find(m => m.id === mode).label}`;
+    };
+    if (modes.length > 1) {
+      for (const mode of modes) {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.dataset.mode = mode.id;
+        button.textContent = mode.label;
+        button.setAttribute('aria-pressed', String(mode.id === 'plain'));
+        button.addEventListener('click', () => {
+          // Bounds are in render pixels; wait for the natural size before drawing them.
+          if (preview && !preview.complete) preview.addEventListener('load', () => setMode(mode.id), { once: true });
+          else setMode(mode.id);
+        });
+        detailModes.append(button);
+      }
+    }
+    findings.forEach(finding => {
+      const item = document.createElement('li');
+      const level = document.createElement('span');
+      const levelText = String(finding.level || 'INFO').toUpperCase();
+      level.className = `level ${levelText.toLowerCase()}`;
+      level.textContent = levelText;
+      const rule = document.createElement('strong');
+      rule.textContent = String(finding.rule || '');
+      item.append(level, rule, document.createTextNode(` ${finding.message || ''}`));
+      if (finding.node) item.append(document.createTextNode(` (${finding.node})`));
+      findingsList.append(item);
+    });
+  }
+
+  function enlargeVariant(value, cells, cell) {
+    lastGrid = { value, cells };
+    showImage(cell.png, `Compose preview variant ${cell.label || ''}`.trim());
+    canvas.classList.add('has-image');
+    meta.textContent = cell.label || previewName(cell.uri);
+    gridBack.hidden = false;
+    void updateModelContext(`the user enlarged variant ${cell.label || previewName(cell.uri)} (${cell.uri})`);
+    scheduleFit();
+  }
+
+  function renderMatrix(value, cells) {
+    gridBack.hidden = true;
+    canvas.classList.remove('has-image');
+    const grid = document.createElement('div');
+    grid.className = 'grid';
+    cells.forEach((cell, index) => {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'cell';
+      if (typeof cell?.png === 'string') {
+        const image = document.createElement('img');
+        image.alt = `Matrix cell ${index + 1}`;
+        image.src = `data:image/png;base64,${cell.png}`;
+        button.append(image);
+      }
+      const overrides = document.createElement('code');
+      overrides.textContent = typeof cell?.label === 'string' && cell.uri
+        ? cell.label
+        : JSON.stringify(cell?.overrides || {});
+      button.append(overrides);
+      button.addEventListener('click', () => {
+        // A @Preview variant grid: a click enlarges that variant; "All variants" goes back.
+        if (typeof cell?.uri === 'string' && typeof cell.png === 'string') {
+          enlargeVariant(value, cells, cell);
+          return;
+        }
+        choose({
+          kind: 'matrix-cell',
+          uri: value.uri || toolArguments.uri,
+          arguments: toolArguments,
+          overrides: cell?.overrides || {},
+        }, 'Selected matrix cell');
+        chooseMatrixCell(button, value, cell);
+      });
+      grid.append(button);
+    });
+    canvas.replaceChildren(grid);
+  }
+
+  function renderImage(image, value, resource) {
+    if (image.data !== baseImageData) resetLayoutBounds();
+    ++overlayGeneration;
+    baseImageData = image.data;
+    overlayImageData = undefined;
+    overlayVisible = false;
+    const resultUri = value.uri || resource?.uri;
+    const uri = resultUri || toolArguments.uri;
+    overlayEligible =
+      typeof resultUri === 'string' &&
+      resultUri.startsWith('compose-preview://') &&
+      !value?.crop &&
+      !Array.isArray(value?.cells);
+    showImage(baseImageData);
+    const label = value.previewId || toolArguments.previewId || 'Preview render';
+    choose({
+      kind: 'preview',
+      uri,
+      arguments: toolArguments,
+      overrides: toolArguments.overrides,
+      semanticsRef: value.semanticsRef,
+    }, label);
+    baseMetaText = label;
+    updateAccessibilityAction();
+    configureComments(value);
+  }
+
+  function beforeAfterModel(result, value) {
+    const inputBeforeUri = result?.isError ? undefined : toolArguments.baseUri;
+    const inputAfterUri = result?.isError ? undefined : toolArguments.headUri;
+    const beforeUri = value?.left?.uri || value?.baseUri || inputBeforeUri;
+    const afterUri = value?.right?.uri || value?.headUri || inputAfterUri;
+    if (typeof beforeUri !== 'string' || !beforeUri || typeof afterUri !== 'string' || !afterUri) {
+      return undefined;
+    }
+    return {
+      kind: 'before-after',
+      before: { uri: beforeUri, label: 'Before' },
+      after: { uri: afterUri, label: 'After' },
+    };
+  }
+
+  function renderBeforeAfterFallback(result, comparison, reason) {
+    const message = document.createElement('div');
+    message.className = 'fallback';
+    const summary = document.createElement('p');
+    summary.textContent = reason;
+    message.append(summary);
+    for (const artifact of [comparison.before, comparison.after]) {
+      const label = document.createElement('p');
+      label.textContent = `${artifact.label}: `;
+      const uri = document.createElement('code');
+      uri.textContent = artifact.uri;
+      label.append(uri);
+      message.append(label);
+    }
+    const text = fallbackText(result);
+    if (text) {
+      const output = document.createElement('pre');
+      output.textContent = text;
+      message.append(output);
+    }
+    canvas.replaceChildren(message);
+  }
+
+  function showBeforeAfter(comparison, beforeData, afterData) {
+    const container = document.createElement('div');
+    container.className = 'comparison';
+    const stage = document.createElement('div');
+    stage.className = 'comparison-stage';
+    const before = document.createElement('img');
+    before.alt = 'Before Compose preview';
+    before.src = `data:image/png;base64,${beforeData}`;
+    const after = document.createElement('img');
+    after.className = 'comparison-after';
+    after.alt = 'After Compose preview';
+    after.src = `data:image/png;base64,${afterData}`;
+    const labels = document.createElement('div');
+    labels.className = 'comparison-labels';
+    const beforeLabel = document.createElement('span');
+    beforeLabel.textContent = comparison.before.label;
+    const afterLabel = document.createElement('span');
+    afterLabel.textContent = comparison.after.label;
+    labels.append(beforeLabel, afterLabel);
+    const slider = document.createElement('input');
+    slider.className = 'comparison-slider';
+    slider.type = 'range';
+    slider.min = '0';
+    slider.max = '100';
+    slider.value = '50';
+    slider.setAttribute('aria-label', 'Reveal after preview');
+    const reveal = () => {
+      after.style.clipPath = `inset(0 ${100 - Number(slider.value)}% 0 0)`;
+      slider.setAttribute('aria-valuetext', `${slider.value}% after preview`);
+    };
+    slider.addEventListener('input', reveal);
+    reveal();
+    stage.append(before, after);
+    container.append(stage, labels, slider);
+    canvas.replaceChildren(container);
+    choose(comparison, 'Before and after preview comparison');
+  }
+
+  async function renderBeforeAfter(result, comparison, generation) {
+    if (staticMode) {
+      renderBeforeAfterFallback(
+        result,
+        comparison,
+        'Static comparison result. Open both replayable resources in an MCP host to view the slider.',
+      );
+      meta.textContent = 'Static before and after result; complete text fallback shown.';
+      return;
+    }
+    meta.textContent = 'Reading before and after preview resources…';
+    try {
+      await bridgeReady;
+      if (!initialized) throw new Error('MCP Apps bridge is unavailable');
+      const read = uri => {
+        const params = { uri };
+        if (resourceToken) params._meta = { 'compose-preview/token': resourceToken };
+        return request('resources/read', params, RESOURCE_READ_TIMEOUT_MS);
+      };
+      const [beforeResult, afterResult] = await Promise.all([
+        read(comparison.before.uri),
+        read(comparison.after.uri),
+      ]);
+      if (generation !== comparisonReadGeneration) return;
+      const before = resourcePng(beforeResult);
+      const after = resourcePng(afterResult);
+      if (!before || !after) throw new Error('one or both comparison resources have no PNG');
+      showBeforeAfter(comparison, before.blob, after.blob);
+    } catch (error) {
+      if (generation !== comparisonReadGeneration) return;
+      renderBeforeAfterFallback(
+        result,
+        comparison,
+        'Unable to read both comparison resources; complete two-artifact fallback:',
+      );
+      choose(comparison, 'Comparison resources unavailable; complete text fallback shown.');
+      console.warn('Failed to read Compose Preview comparison resources:', error);
+    }
+  }
+
+  function applyAccessibilityResult(result, generation) {
+    if (generation !== overlayGeneration || !baseImageData) return;
+    const image = png(result);
+    if (result?.isError || typeof image?.data !== 'string' || !image.data) {
+      showImage(baseImageData);
+      overlayImageData = undefined;
+      overlayVisible = false;
+      a11y.hidden = false;
+      a11y.disabled = true;
+      a11y.textContent = 'Accessibility overlay unavailable';
+      a11y.title = 'The host or preview backend did not provide an accessibility overlay.';
+      meta.textContent = 'Accessibility overlay unavailable; original preview shown.';
+      return;
+    }
+    overlayImageData = image.data;
+    overlayVisible = true;
+    showImage(overlayImageData, 'Compose preview with accessibility overlay');
+    meta.textContent = 'Accessibility overlay';
+    updateAccessibilityAction();
+  }
+
+  async function toggleAccessibilityOverlay() {
+    if (!overlayEligible || !baseImageData || !initialized || !overlayToolName) return;
+    if (overlayVisible) {
+      overlayVisible = false;
+      showImage(baseImageData);
+      meta.textContent = baseMetaText;
+      updateAccessibilityAction();
+      return;
+    }
+    if (overlayImageData) {
+      overlayVisible = true;
+      showImage(overlayImageData, 'Compose preview with accessibility overlay');
+      meta.textContent = 'Accessibility overlay';
+      updateAccessibilityAction();
+      return;
+    }
+    const uri = selected?.uri || toolArguments.uri;
+    if (typeof uri !== 'string' || !uri) {
+      applyAccessibilityResult({ isError: true }, overlayGeneration);
+      return;
+    }
+    const generation = overlayGeneration;
+    const argumentsValue = {
+      uri,
+      kind: 'a11y/overlay',
+      inline: true,
+      ...(selected?.overrides || toolArguments.overrides
+        ? { overrides: selected?.overrides || toolArguments.overrides }
+        : {}),
+      ...(resourceToken ? { token: resourceToken } : {}),
+    };
+    const call = { generation };
+    overlayCall = call;
+    stopResourcePolling();
+    refresh.disabled = true;
+    a11y.disabled = true;
+    a11y.textContent = 'Loading accessibility overlay…';
+    meta.textContent = 'Rendering accessibility overlay…';
+    try {
+      const result = await request(
+        'tools/call',
+        { name: overlayToolName, arguments: argumentsValue },
+        RESOURCE_READ_TIMEOUT_MS,
+      );
+      applyAccessibilityResult(result, generation);
+    } catch (error) {
+      applyAccessibilityResult({ isError: true }, generation);
+      console.warn('Failed to render the Compose Preview accessibility overlay:', error);
+    } finally {
+      window.setTimeout(() => {
+        if (overlayCall !== call) return;
+        overlayCall = undefined;
+        if (call.resourceUpdatePending && resourceResult?.resource?.uri === uri) {
+          readResource(true);
+        } else if (resourceResult?.resource?.uri) {
+          refresh.disabled = false;
+          if (subscribedResourceUri !== resourceResult.resource.uri) {
+            scheduleResourcePoll(resourceResult.resource.uri);
+          }
+        }
+      }, 250);
+    }
+  }
+
+  async function postComment() {
+    const designId = commentDesignId;
+    const body = commentBody.value.trim();
+    if (!designId || !postCommentToolName || !initialized || !body) {
+      if (!body) commentStatus.textContent = 'Write a comment before posting.';
+      return;
+    }
+    if (body.length > MAX_COMMENT_BODY_LENGTH) {
+      commentStatus.textContent = `Comments are limited to ${MAX_COMMENT_BODY_LENGTH.toLocaleString()} characters.`;
+      return;
+    }
+    const generation = commentGeneration;
+    const argumentsValue = {
+      designId,
+      body,
+      ...(commentPoint ? { x: commentPoint.x, y: commentPoint.y } : {}),
+      ...(resourceToken ? { token: resourceToken } : {}),
+    };
+    commentPostPending = true;
+    commentPost.disabled = true;
+    commentRefresh.disabled = true;
+    commentStatus.textContent = 'Posting comment…';
+    try {
+      const result = await request(
+        'tools/call',
+        { name: postCommentToolName, arguments: argumentsValue },
+        RESOURCE_READ_TIMEOUT_MS,
+      );
+      if (generation !== commentGeneration || commentDesignId !== designId) return;
+      const board = data(result);
+      if (result?.isError || !board || !Array.isArray(board.threads)) {
+        commentStatus.textContent = result?.isError
+          ? 'Comment was not posted. Posting requires ui-builder-write; complete server response shown.'
+          : 'Unable to post comment; complete text fallback shown.';
+        rawCommentFallback(fallbackText(result) || board || 'The host returned no comment board.');
+        return;
+      }
+      commentBody.value = '';
+      commentPoint = undefined;
+      commentAnchorLabel.textContent = 'Click the preview to pin this comment, or post it unpinned.';
+      renderCommentBoard(board);
+      commentStatus.textContent = 'Comment posted.';
+    } catch (error) {
+      if (generation !== commentGeneration || commentDesignId !== designId) return;
+      commentStatus.textContent = 'Unable to post comment.';
+      rawCommentFallback(`Unable to post comment: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      if (commentDesignId === designId) {
+        commentPostPending = false;
+        commentPost.disabled = false;
+        commentRefresh.disabled = false;
+      }
+    }
+  }
+
+  // Live actions (#1119): each one is a tool call (or a bridge request) over the MCP Apps bridge,
+  // offered only when the host proxies the server's tools. Static mode never shows them. Choosing a
+  // variant or toggling an overlay also sends one line of model context, so the agent knows what
+  // the person is looking at (R1); it names the preview, never the pixels.
+  const live = q('#live');
+  const variantLabel = q('#variant-label');
+  const variantSelect = q('#variant');
+  const rerender = q('#rerender');
+  const layoutToggle = q('#layout');
+  const sourceButton = q('#source');
+  const sourceLocation = q('#source-location');
+  const MAX_LAYOUT_BOXES = 400;
+  const MAX_RESOURCE_LIST_PAGES = 10;
+  let renderToolName;
+  let dataToolName;
+  let liveTarget;
+  let variants = [];
+  let liveGeneration = 0;
+  let liveBusy = false;
+  let ownDraw = false;
+  let embeddedDetails = {};
+  let layoutEligible = false;
+  let layoutBoxes;
+  let layoutVisible = false;
+  let layoutUnavailable = false;
+  let layoutGeneration = 0;
+  const sourceLocations = new Map();
+
+  const liveReady = () => initialized && !staticMode;
+  // Tools the host refused to call for the app: only that control is disabled, with the reason.
+  const refusedTools = new Set();
+  const HOST_REFUSED = "The host doesn't allow this from the viewer.";
+  // A JSON-RPC error (not a timeout, not a tool-level isError) means the host refused the call.
+  const refusedByHost = error => error && typeof error === 'object' && typeof error.code === 'number';
+
+  function decodeBase64Url(encoded) {
+    const base64 = encoded.replace(/-/g, '+').replace(/_/g, '/');
+    const binary = atob(base64 + '='.repeat((4 - base64.length % 4) % 4));
+    return new TextDecoder().decode(Uint8Array.from(binary, character => character.charCodeAt(0)));
+  }
+
+  // compose-preview://<workspace>/<module>/<fqn>?config=<qualifier>&overrides=<base64url JSON>
+  function splitPreviewUri(uri) {
+    if (typeof uri !== 'string' || !uri.startsWith('compose-preview://')) return {};
+    const [base, query = ''] = uri.split('?', 2);
+    const kept = [];
+    let overrides;
+    for (const part of query.split('&').filter(Boolean)) {
+      if (!part.startsWith('overrides=')) {
+        kept.push(part);
+        continue;
+      }
+      try {
+        overrides = JSON.parse(decodeBase64Url(part.slice('overrides='.length)));
+      } catch {
+        overrides = undefined;
+      }
+    }
+    return { uri: kept.length ? `${base}?${kept.join('&')}` : base, overrides };
+  }
+
+  function previewName(uri) {
+    if (typeof uri !== 'string' || !uri) return 'the preview';
+    const [path, query = ''] = uri.split('?', 2);
+    const name = path.slice(path.lastIndexOf('/') + 1).split('.').pop() || path;
+    const config = query.split('&').find(part => part.startsWith('config='))?.slice('config='.length);
+    return config ? `${name} (${decodeURIComponent(config)})` : name;
+  }
+
+  function oneLine(text) {
+    return `Compose Preview viewer: ${text}`.replace(/\s+/g, ' ').slice(0, 300);
+  }
+
+  function updateModelContext(text) {
+    if (!liveReady()) return Promise.resolve();
+    return request('ui/update-model-context', { content: [{ type: 'text', text: oneLine(text) }] })
+      .catch(error => console.debug('The host did not accept a model-context update:', error));
+  }
+
+  function callTool(name, argumentsValue) {
+    return request(
+      'tools/call',
+      { name, arguments: { ...argumentsValue, ...(resourceToken ? { token: resourceToken } : {}) } },
+      RESOURCE_READ_TIMEOUT_MS,
+    );
+  }
+
+  function otherMatchesOf(result, value) {
+    if (Array.isArray(value?.otherMatches)) return value.otherMatches;
+    for (const block of result?.content || []) {
+      if (block?.type !== 'text' || typeof block.text !== 'string') continue;
+      const parsed = parse(block.text);
+      if (Array.isArray(parsed?.otherMatches)) return parsed.otherMatches;
+    }
+    return [];
+  }
+
+  // Every URI the result names as a match: otherMatches, plus a text-mode variantChoice.
+  function variantUrisOf(result, value) {
+    const choices = [];
+    for (const candidate of [value, ...(result?.content || []).map(block =>
+      block?.type === 'text' && typeof block.text === 'string' ? parse(block.text) : undefined)]) {
+      if (Array.isArray(candidate?.variantChoice?.choices)) choices.push(...candidate.variantChoice.choices);
+    }
+    return [...otherMatchesOf(result, value), ...choices];
+  }
+
+  // render_preview `details` (#1170) embed the a11y overlay and layout boxes in the result; those
+  // toggles then need no call, so the live buttons for the same data stay hidden.
+  function embeddedDetailsOf(result) {
+    const block = result?.content?.find(
+      candidate => candidate?.type === 'text' && detailOf(candidate) === 'details',
+    );
+    const details = block && parse(block.text);
+    return {
+      a11y: !!details?.a11y,
+      layout: !!details?.layout,
+    };
+  }
+
+  function configureLiveActions(result, value, resource, comparison) {
+    const own = ownDraw;
+    ownDraw = false;
+    ++liveGeneration;
+    liveBusy = false;
+    resetLayoutBounds();
+    sourceLocation.replaceChildren();
+    embeddedDetails = embeddedDetailsOf(result);
+    const fromResource = splitPreviewUri(resource?.uri);
+    const fromArguments = splitPreviewUri(toolArguments.uri);
+    const uri =
+      (typeof value?.uri === 'string' && splitPreviewUri(value.uri).uri) || fromArguments.uri || fromResource.uri;
+    const overrides = toolArguments.overrides || fromArguments.overrides || fromResource.overrides;
+    liveTarget = comparison || !uri ? undefined : { uri, ...(overrides ? { overrides } : {}) };
+    layoutEligible = !!liveTarget && !Array.isArray(value?.cells) && !value?.crop;
+    if (!own) {
+      const others = variantUrisOf(result, value).filter(other => typeof other === 'string' && other);
+      variants = liveTarget && others.length
+        ? [liveTarget.uri, ...others.filter(other => other !== liveTarget.uri)]
+        : [];
+    }
+    updateLiveActions();
+  }
+
+  function updateLiveActions() {
+    const ready = liveReady() && !!liveTarget;
+    const showVariants = ready && !!renderToolName && variants.length > 1;
+    variantLabel.hidden = !showVariants;
+    if (showVariants) {
+      variantSelect.replaceChildren(...variants.map(uri => {
+        const option = document.createElement('option');
+        option.value = uri;
+        option.textContent = previewName(uri);
+        option.selected = uri === liveTarget.uri;
+        return option;
+      }));
+    }
+    variantSelect.disabled = liveBusy;
+    rerender.hidden = !(ready && renderToolName && layoutEligible);
+    const renderRefused = refusedTools.has(renderToolName);
+    rerender.disabled = liveBusy || renderRefused;
+    variantSelect.disabled = liveBusy || renderRefused;
+    for (const [control, name] of [[rerender, renderToolName], [variantSelect, renderToolName], [layoutToggle, dataToolName]]) {
+      if (refusedTools.has(name)) control.title = HOST_REFUSED;
+      else control.removeAttribute('title');
+    }
+    layoutToggle.hidden = !(ready && dataToolName && layoutEligible && !embeddedDetails.layout);
+    layoutToggle.disabled = liveBusy || layoutUnavailable || refusedTools.has(dataToolName);
+    layoutToggle.textContent = layoutUnavailable
+      ? 'Layout bounds unavailable'
+      : layoutVisible ? 'Hide layout bounds' : 'Show layout bounds';
+    layoutToggle.setAttribute('aria-pressed', String(layoutVisible));
+    // The location comes from resources/list; offer it alongside this server's own tools.
+    sourceButton.hidden = !(ready && renderToolName);
+    live.hidden = [rerender, layoutToggle, sourceButton].every(node => node.hidden);
+    const canRender = liveReady() && !!renderToolName && !renderRefused && !liveBusy;
+    canvas.querySelectorAll('.variant-list button').forEach(button => {
+      button.disabled = !canRender;
+    });
+  }
+
+  async function renderLive(target, contextLine) {
+    if (!liveReady() || !renderToolName || !target || liveBusy) return;
+    const generation = ++liveGeneration;
+    liveBusy = true;
+    updateLiveActions();
+    meta.textContent = `Rendering ${previewName(target.uri)}…`;
+    try {
+      const result = await callTool(renderToolName, {
+        uri: target.uri,
+        ...(target.overrides ? { overrides: target.overrides } : {}),
+        observe: 'png',
+        inline: true,
+      });
+      if (generation !== liveGeneration) return;
+      if (result?.isError || (!png(result) && !link(result))) {
+        const reason = fallbackText(result).split('\n')[0];
+        meta.textContent = `Render failed${reason ? `: ${reason}` : ''}; the previous preview is still shown.`;
+        return;
+      }
+      toolArguments = safeSelectionArguments({
+        uri: target.uri,
+        previewId: previewName(target.uri),
+        ...(target.overrides ? { overrides: target.overrides } : {}),
+      });
+      ownDraw = true;
+      draw(result);
+      if (contextLine) void updateModelContext(contextLine);
+    } catch (error) {
+      if (generation !== liveGeneration) return;
+      if (refusedByHost(error)) {
+        refusedTools.add(renderToolName);
+        meta.textContent = `Re-render unavailable: ${HOST_REFUSED}`;
+      } else {
+        meta.textContent = 'Render failed; the previous preview is still shown.';
+      }
+      console.warn('Failed to re-render the Compose Preview:', error);
+    } finally {
+      if (generation === liveGeneration) {
+        liveBusy = false;
+        updateLiveActions();
+      }
+    }
+  }
+
+  function chooseVariant(uri) {
+    if (!liveTarget || uri === liveTarget.uri || !variants.includes(uri)) return;
+    void renderLive(
+      { uri, ...(liveTarget.overrides ? { overrides: liveTarget.overrides } : {}) },
+      `the user switched to variant ${previewName(uri)} (${uri})`,
+    );
+  }
+
+  function chooseMatrixCell(button, value, cell) {
+    if (!liveReady()) return;
+    canvas.querySelectorAll('.cell').forEach(node => node.setAttribute('aria-pressed', String(node === button)));
+    void updateModelContext(
+      `the user chose the matrix variant ${JSON.stringify(cell?.overrides || {})} of ${previewName(value?.uri || toolArguments.uri)}`,
+    );
+  }
+
+  function resetLayoutBounds() {
+    ++layoutGeneration;
+    layoutBoxes = undefined;
+    layoutVisible = false;
+    layoutUnavailable = false;
+    canvas.querySelectorAll('.layout-boxes').forEach(node => node.remove());
+  }
+
+  function boundsOf(node) {
+    const box = node?.bounds;
+    if (box && typeof box === 'object' && !Array.isArray(box)) {
+      return [box.left, box.top, box.right, box.bottom].map(Number);
+    }
+    const wire = typeof node?.boundsInRoot === 'string' ? node.boundsInRoot : undefined;
+    return wire ? wire.split(',').map(Number) : undefined;
+  }
+
+  // layout/inspector ({root:{bounds:{left,top,right,bottom},children}}) or compose/semantics
+  // ({root:{boundsInRoot:"l,t,r,b",children}}), both in render pixels.
+  function layoutBoxesFrom(payload) {
+    const boxes = [];
+    const remaining = payload?.root ? [payload.root] : [];
+    while (remaining.length && boxes.length < MAX_LAYOUT_BOXES) {
+      const node = remaining.shift();
+      if (!node || typeof node !== 'object') continue;
+      const bounds = boundsOf(node);
+      if (bounds?.length === 4 && bounds.every(Number.isFinite) && bounds[2] > bounds[0] && bounds[3] > bounds[1]) {
+        const label = [node.displayName, node.component, node.testTag, node.text, node.label, node.role]
+          .find(candidate => typeof candidate === 'string' && candidate);
+        boxes.push({ bounds, label: label || '' });
+      }
+      if (Array.isArray(node.children)) remaining.push(...node.children);
+    }
+    return boxes;
+  }
+
+  async function fetchLayoutBoxes(target) {
+    for (const kind of ['layout/inspector', 'compose/semantics']) {
+      const result = await callTool(dataToolName, { uri: target.uri, kind });
+      if (result?.isError) continue;
+      const boxes = layoutBoxesFrom(data(result)?.payload);
+      if (boxes.length) return boxes;
+    }
+    return undefined;
+  }
+
+  function drawLayoutBounds() {
+    const stage = canvas.querySelector('.preview-stage');
+    const image = stage?.querySelector(':scope > img');
+    if (!stage || !image || !layoutBoxes) return;
+    if (!image.complete || !image.naturalWidth) {
+      image.addEventListener('load', () => layoutVisible && drawLayoutBounds(), { once: true });
+      return;
+    }
+    stage.querySelectorAll('.layout-boxes').forEach(node => node.remove());
+    const namespace = 'http://www.w3.org/2000/svg';
+    const svg = document.createElementNS(namespace, 'svg');
+    svg.setAttribute('class', 'layout-boxes');
+    svg.setAttribute('viewBox', `0 0 ${image.naturalWidth} ${image.naturalHeight}`);
+    svg.setAttribute('preserveAspectRatio', 'none');
+    svg.setAttribute('aria-hidden', 'true');
+    for (const box of layoutBoxes) {
+      const [left, top, right, bottom] = box.bounds;
+      const rect = document.createElementNS(namespace, 'rect');
+      rect.setAttribute('x', left);
+      rect.setAttribute('y', top);
+      rect.setAttribute('width', right - left);
+      rect.setAttribute('height', bottom - top);
+      const title = document.createElementNS(namespace, 'title');
+      title.textContent = box.label;
+      rect.append(title);
+      svg.append(rect);
+    }
+    stage.append(svg);
+  }
+
+  async function toggleLayoutBounds() {
+    if (!liveReady() || !liveTarget || !dataToolName || liveBusy) return;
+    const name = previewName(liveTarget.uri);
+    if (layoutVisible) {
+      layoutVisible = false;
+      canvas.querySelectorAll('.layout-boxes').forEach(node => node.remove());
+      updateLiveActions();
+      void updateModelContext(`layout bounds hidden on ${name}`);
+      return;
+    }
+    if (!layoutBoxes) {
+      const generation = layoutGeneration;
+      layoutToggle.disabled = true;
+      layoutToggle.textContent = 'Loading layout bounds…';
+      let boxes;
+      try {
+        boxes = await fetchLayoutBoxes(liveTarget);
+      } catch (error) {
+        console.warn('Failed to read Compose Preview layout bounds:', error);
+      }
+      if (generation !== layoutGeneration) return;
+      layoutBoxes = boxes;
+      layoutUnavailable = !boxes;
+      if (!boxes) {
+        updateLiveActions();
+        return;
+      }
+    }
+    layoutVisible = true;
+    drawLayoutBounds();
+    updateLiveActions();
+    void updateModelContext(`layout bounds shown on ${name} (${layoutBoxes.length} boxes)`);
+  }
+
+  async function findSourceLocation(uri) {
+    if (sourceLocations.has(uri)) return sourceLocations.get(uri);
+    let cursor;
+    for (let page = 0; page < MAX_RESOURCE_LIST_PAGES; page++) {
+      const listed = await request('resources/list', cursor ? { cursor } : {});
+      const match = listed?.resources?.find(resource => resource?.uri === uri);
+      if (match) {
+        const file = match._meta?.sourceFile;
+        const line = Number(match._meta?.sourceLine);
+        const location = typeof file === 'string' && file
+          ? { file, ...(Number.isInteger(line) && line > 0 ? { line } : {}) }
+          : undefined;
+        sourceLocations.set(uri, location);
+        return location;
+      }
+      cursor = listed?.nextCursor;
+      if (!cursor) break;
+    }
+    return undefined;
+  }
+
+  function fileUrl(path) {
+    const normalized = path.replace(/\\/g, '/');
+    return `file://${encodeURI(normalized.startsWith('/') ? normalized : `/${normalized}`)}`;
+  }
+
+  async function openInEditor() {
+    if (!liveReady() || !liveTarget) return;
+    const target = liveTarget;
+    const name = previewName(target.uri);
+    sourceButton.disabled = true;
+    let location;
+    try {
+      location = await findSourceLocation(target.uri);
+    } catch (error) {
+      console.debug('The host did not list preview resources:', error);
+    } finally {
+      sourceButton.disabled = false;
+    }
+    if (liveTarget !== target) return;
+    sourceLocation.replaceChildren();
+    if (!location) {
+      sourceLocation.textContent = `Source location unavailable for ${name}; the agent has been told which preview to open.`;
+      void updateModelContext(`the user asked to open ${name} (${target.uri}) in the editor`);
+      return;
+    }
+    const text = location.line ? `${location.file}:${location.line}` : location.file;
+    const anchor = document.createElement('a');
+    anchor.href = fileUrl(location.file);
+    anchor.textContent = text;
+    anchor.addEventListener('click', event => {
+      event.preventDefault();
+      request('ui/open-link', { url: anchor.href })
+        .catch(error => console.debug('The host did not open the source link:', error));
+    });
+    sourceLocation.append('Source: ', anchor);
+    void updateModelContext(`the user asked to open ${name} in the editor at ${text}`);
+  }
+
+  function fallbackText(result) {
+    const text = result?.content
+      ?.filter(block => block?.type === 'text' && typeof block.text === 'string')
+      .map(block => block.text)
+      .join('\n\n');
+    if (text) return text;
+    if (result?.structuredContent) return JSON.stringify(result.structuredContent, null, 2);
+    return '';
+  }
+
+  function renderFallback(result, reason, resource) {
+    const message = document.createElement('div');
+    message.className = 'fallback';
+    const summary = document.createElement('p');
+    summary.textContent = reason;
+    message.append(summary);
+    if (resource) {
+      const uri = document.createElement('code');
+      uri.textContent = resource.uri;
+      message.append(uri);
+    }
+    const text = fallbackText(result);
+    if (text) {
+      const output = document.createElement('pre');
+      output.textContent = text;
+      message.append(output);
+    }
+    canvas.replaceChildren(message);
+  }
+
+  function renderResourceFallback(result, resource, reason) {
+    renderFallback(result, reason || 'A render resource is available:', resource);
+  }
+
+  // A result that arrived but has nothing to draw. The header says so plainly instead of staying
+  // on "Waiting…", which reads as still pending; the complete text stays one click away.
+  function renderNotice(result, { error, heading, summary }) {
+    const text = fallbackText(result).trim();
+    const firstLine = (text.split('\n').find(line => line.trim()) || '').trim();
+    const box = document.createElement('div');
+    box.className = error ? 'notice error' : 'notice';
+    if (error) box.setAttribute('role', 'alert');
+    const title = document.createElement('strong');
+    title.textContent = heading;
+    const line = document.createElement('p');
+    line.textContent = summary || firstLine || 'The result carried no image.';
+    box.append(title, line);
+    const list = variantList(result);
+    if (list) box.append(list);
+    if (text && text !== line.textContent) {
+      const more = document.createElement('details');
+      const label = document.createElement('summary');
+      label.textContent = 'Full message';
+      const output = document.createElement('pre');
+      output.textContent = text;
+      more.append(label, output);
+      box.append(more);
+    }
+    canvas.replaceChildren(box);
+    // A static card keeps its "Static preview result" header unless the result is an error.
+    if (error || !staticMode) meta.textContent = heading;
+    meta.classList.toggle('error', !!error);
+  }
+
+  // otherMatches / variantChoice are labels the agent already has; list them even without pixels
+  // so the person sees what exists. Choosing one needs a live bridge.
+  function variantList(result) {
+    const value = data(result);
+    const uris = [...new Set([
+      ...(typeof value?.uri === 'string' ? [value.uri] : []),
+      ...variantUrisOf(result, value),
+    ])].filter(uri => typeof uri === 'string' && uri);
+    if (uris.length < 2) return undefined;
+    const list = document.createElement('ul');
+    list.className = 'variant-list';
+    list.setAttribute('aria-label', 'Matching previews');
+    for (const uri of uris) {
+      const item = document.createElement('li');
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.textContent = previewName(uri);
+      button.title = uri;
+      button.dataset.uri = uri;
+      const live = liveReady() && !!renderToolName && !refusedTools.has(renderToolName);
+      button.disabled = !live;
+      if (!live) button.title = `${uri} (rendering from the viewer is unavailable here)`;
+      button.addEventListener('click', () => {
+        void renderLive({ uri }, `the user chose variant ${previewName(uri)} (${uri})`);
+      });
+      item.append(button);
+      list.append(item);
+    }
+    return list;
+  }
+
+  function renderStaticError(reason) {
+    hasToolResult = true;
+    renderFallback(undefined, `Unable to load the static preview result: ${reason}`);
+    meta.textContent = 'Static result unavailable; use the complete text fallback.';
+  }
+
+  // Sizing (MCP Apps `ui/notifications/size-changed` and `hostContext.containerDimensions`).
+  // A host may give the iframe the height it asks for but show it inside a shorter container, so
+  // window.innerHeight alone is not the visible height. The host's containerDimensions is: a fixed
+  // `height`, or a flexible `maxHeight` (the View sizes itself up to it). Whichever is known caps
+  // the image (or the grid of matrix cells) to that height less the header, toolbar and source
+  // line, and caps what size-changed asks for. With no dimensions the first screen is held to
+  // DEFAULT_FRAME_HEIGHT rather than growing to most of the screen.
+  const DEFAULT_FRAME_HEIGHT = 480;
+  let containerDimensions;
+  let fitScheduled = false;
+  let lastReportedHeight = 0;
+
+  function applyHostContext(context) {
+    if (!context || typeof context !== 'object' || !('containerDimensions' in context)) return;
+    const dimensions = context.containerDimensions;
+    containerDimensions = dimensions && typeof dimensions === 'object' ? dimensions : undefined;
+    lastReportedHeight = 0;
+    scheduleFit();
+  }
+
+  const positive = value => typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : undefined;
+
+  // The height the host will show: a fixed height wins over a maximum; undefined when unbounded.
+  function hostHeightLimit() {
+    return positive(containerDimensions?.height) ?? positive(containerDimensions?.maxHeight);
+  }
+
+  function scheduleFit() {
+    if (fitScheduled) return;
+    fitScheduled = true;
+    window.requestAnimationFrame(() => {
+      fitScheduled = false;
+      fitToFrame();
+    });
+  }
+
+  // Groups the matrix cells into rows by their top edge, and returns each row's tallest image as
+  // drawn (`shown`) and as it would be at the cell's width with no height cap (`natural`).
+  function gridRows(grid) {
+    const rows = new Map();
+    grid.querySelectorAll('.cell').forEach(cell => {
+      const top = Math.round(cell.offsetTop);
+      const image = cell.querySelector('img');
+      const shown = image ? image.getBoundingClientRect().height : 0;
+      const natural = image?.naturalWidth && image.naturalHeight
+        ? image.naturalHeight * (image.clientWidth / image.naturalWidth)
+        : shown;
+      const row = rows.get(top) || { shown: 0, natural: 0 };
+      rows.set(top, { shown: Math.max(row.shown, shown), natural: Math.max(row.natural, natural) });
+    });
+    return [...rows.values()];
+  }
+
+  function fitToFrame() {
+    const root = document.documentElement;
+    const limit = hostHeightLimit();
+    // `target` is the most the first screen may take: the host's limit, else the default. The
+    // image is drawn to fit the smaller of that and the current frame (for hosts that ignore
+    // size-changed), and size-changed asks for up to `target` so the frame can grow to it.
+    const target = limit ?? DEFAULT_FRAME_HEIGHT;
+    const frame = Math.min(window.innerHeight || Infinity, target);
+    // Only the header, the toolbar and the source line must share the first screen with the
+    // image; details and comments may sit below the fold.
+    const firstScreenBottom = q('#source-location').getBoundingClientRect().bottom + window.scrollY + 8;
+    const image = canvas.classList.contains('has-image') ? canvas.querySelector('.preview-stage > img') : null;
+    const grid = image ? null : canvas.querySelector('.grid');
+    // The content's own height. The root's scrollHeight is never less than the frame, so a frame
+    // the host already made tall would keep being asked for.
+    const content = q('.app').getBoundingClientRect().height;
+    let wanted = Math.ceil(content);
+    if (image) {
+      const shown = image.getBoundingClientRect().height;
+      const chrome = Math.max(0, firstScreenBottom - shown);
+      root.style.setProperty('--image-max', `${Math.max(32, Math.floor(frame - chrome))}px`);
+      const natural = image.naturalWidth && image.naturalHeight
+        ? image.naturalHeight * Math.min(1, canvas.clientWidth / image.naturalWidth)
+        : shown;
+      wanted = Math.ceil(content - shown + Math.min(natural, Math.max(32, target - chrome)));
+    } else if (grid) {
+      const rows = gridRows(grid);
+      const imagesHeight = rows.reduce((sum, row) => sum + row.shown, 0);
+      if (rows.length && imagesHeight > 0) {
+        const chrome = Math.max(0, firstScreenBottom - imagesHeight);
+        const perRow = available => Math.max(32, Math.floor((available - chrome) / rows.length));
+        root.style.setProperty('--cell-image-max', `${perRow(frame)}px`);
+        // Ask for the grid as it would be drawn at `target`, not as the current frame squeezed it.
+        const cappedImages = rows.reduce((sum, row) => sum + Math.min(row.natural, perRow(target)), 0);
+        wanted = Math.ceil(content - imagesHeight + cappedImages);
+      }
+    }
+    if (limit !== undefined) wanted = Math.min(wanted, Math.floor(limit));
+    if (!initialized || staticMode || wanted === lastReportedHeight) return;
+    lastReportedHeight = wanted;
+    notify('ui/notifications/size-changed', { height: wanted });
+  }
+
+  if (typeof ResizeObserver === 'function') new ResizeObserver(scheduleFit).observe(document.body);
+  window.addEventListener('resize', scheduleFit, { passive: true });
+
+  function stopResourcePolling() {
+    if (resourcePollTimer == null) return;
+    window.clearTimeout(resourcePollTimer);
+    resourcePollTimer = undefined;
+  }
+
+  function scheduleResourcePoll(uri) {
+    stopResourcePolling();
+    if (!initialized || staticMode || hostResourceSubscriptions || resourceResult?.resource?.uri !== uri) return;
+    if (resourcePollUnchanged >= RESOURCE_POLL_MAX_UNCHANGED) return;
+    const delay = Math.min(
+      RESOURCE_POLL_INTERVAL_MS * 2 ** resourcePollUnchanged,
+      RESOURCE_POLL_MAX_INTERVAL_MS,
+    );
+    resourcePollTimer = window.setTimeout(() => {
+      resourcePollTimer = undefined;
+      if (resourceResult?.resource?.uri !== uri) return;
+      // A hidden viewer does not need fresh pixels; check again later without rendering.
+      if (document.hidden) {
+        scheduleResourcePoll(uri);
+        return;
+      }
+      readResource(true, true);
+    }, delay);
+  }
+
+  function queueResourceSubscription(task) {
+    const queued = resourceSubscriptionQueue.then(task, task);
+    resourceSubscriptionQueue = queued.catch(() => {});
+    return queued;
+  }
+
+  function recoverLateSubscription(uri) {
+    void queueResourceSubscription(async () => {
+      try {
+        await request('resources/unsubscribe', { uri });
+      } catch (error) {
+        console.debug('Unable to clean up a late Compose Preview subscription:', error);
+      }
+      if (subscribedResourceUri === uri) subscribedResourceUri = undefined;
+      if (resourceSubscriptionTargetUri === uri && hostResourceSubscriptions) {
+        connectResourceUpdates(uri, false);
+      }
+    });
+  }
+
+  async function connectResourceUpdates(uri, initialReadPending) {
+    const generation = ++resourceSubscriptionGeneration;
+    stopResourcePolling();
+    if (subscribedResourceUri === uri) return;
+    try {
+      await bridgeReady;
+      if (!initialized || staticMode || generation !== resourceSubscriptionGeneration) return;
+      if (!hostResourceSubscriptions) {
+        if (!initialReadPending) scheduleResourcePoll(uri);
+        return;
+      }
+      await queueResourceSubscription(async () => {
+        if (
+          generation !== resourceSubscriptionGeneration ||
+          resourceSubscriptionTargetUri !== uri ||
+          resourceResult?.resource?.uri !== uri
+        ) return;
+        await request(
+          'resources/subscribe',
+          { uri },
+          REQUEST_TIMEOUT_MS,
+          () => recoverLateSubscription(uri),
+        );
+        if (
+          !initialized ||
+          staticMode ||
+          generation !== resourceSubscriptionGeneration ||
+          resourceSubscriptionTargetUri !== uri ||
+          resourceResult?.resource?.uri !== uri
+        ) {
+          try {
+            await request('resources/unsubscribe', { uri });
+          } catch (error) {
+            console.debug('Unable to unsubscribe a stale Compose Preview resource:', error);
+          }
+          return;
+        }
+        subscribedResourceUri = uri;
+      });
+    } catch (error) {
+      if (generation !== resourceSubscriptionGeneration || resourceResult?.resource?.uri !== uri) return;
+      // MCP Apps 2026-01-26 exposes resources/read but not subscription proxying. A future host
+      // may advertise serverResources.subscribe; if that path fails, retain today's bounded poll.
+      hostResourceSubscriptions = false;
+      // If the initial read is still running, its finally block observes the capability downgrade
+      // and arms the poll. If it already settled, this failure must do so itself.
+      if (resourceReadUri !== uri) scheduleResourcePoll(uri);
+      console.debug('Resource subscriptions are unavailable; polling instead:', error);
+    }
+  }
+
+  function disconnectResourceUpdates(nextUri) {
+    ++resourceSubscriptionGeneration;
+    ++resourceReadGeneration;
+    resourceReadUri = undefined;
+    refresh.disabled = false;
+    resourceSubscriptionTargetUri = nextUri;
+    stopResourcePolling();
+    if (subscribedResourceUri === nextUri) return;
+    const previous = subscribedResourceUri;
+    subscribedResourceUri = undefined;
+    if (!previous || !hostResourceSubscriptions || !initialized) return;
+    void queueResourceSubscription(async () => {
+      try {
+        await request('resources/unsubscribe', { uri: previous });
+      } catch (error) {
+        console.debug('Unable to unsubscribe the previous Compose Preview resource:', error);
+      }
+    });
+  }
+
+  async function readResource(
+    preserveAccessibilityOverlay = false,
+    preserveOnlyIfUnchanged = false,
+  ) {
+    if (!resourceResult) return;
+    stopResourcePolling();
+    const { result: toolResult, resource, value } = resourceResult;
+    const generation = ++resourceReadGeneration;
+    resourceReadUri = resource.uri;
+    refresh.disabled = true;
+    meta.textContent = 'Reading preview resource…';
+    try {
+      await bridgeReady;
+      if (!initialized) throw new Error('MCP Apps bridge is unavailable');
+      const params = { uri: resource.uri };
+      if (resourceToken) params._meta = { 'compose-preview/token': resourceToken };
+      const readResult = await request(
+        'resources/read',
+        params,
+        RESOURCE_READ_TIMEOUT_MS,
+      );
+      const image = resourcePng(readResult);
+      if (generation !== resourceReadGeneration || resourceResult?.resource?.uri !== resource.uri) return;
+      resourcePollUnchanged = image && image.blob === baseImageData ? resourcePollUnchanged + 1 : 0;
+      if (!image) {
+        if (overlayCall) return;
+        renderResourceFallback(toolResult, resource, 'The host returned no PNG for resource:');
+        meta.textContent = 'Resource has no PNG; use the text fallback.';
+        return;
+      }
+      if (
+        overlayCall ||
+        (preserveAccessibilityOverlay &&
+          overlayVisible &&
+          (!preserveOnlyIfUnchanged || image.blob === baseImageData))
+      ) {
+        baseImageData = image.blob;
+        baseMetaText = value.previewId || toolArguments.previewId || 'Preview render';
+        if (!overlayCall && overlayVisible) meta.textContent = 'Accessibility overlay';
+        return;
+      }
+      renderImage({ data: image.blob }, value, resource);
+    } catch (error) {
+      if (generation !== resourceReadGeneration || resourceResult?.resource?.uri !== resource.uri) return;
+      // A failing read is not retried every five seconds forever either.
+      resourcePollUnchanged += 1;
+      if (overlayCall) {
+        console.warn('Failed to refresh the Compose Preview resource during overlay rendering:', error);
+        return;
+      }
+      // Resource reads are optional in MCP Apps hosts. Keep the durable URI and text result useful.
+      renderResourceFallback(toolResult, resource, 'Unable to read preview resource:');
+      meta.textContent = 'Resource reads are unavailable; use the text fallback.';
+      console.warn('Failed to read Compose Preview resource:', error);
+      if (liveTarget && splitPreviewUri(resource.uri).uri === liveTarget.uri) requestImageFor(liveTarget);
+    } finally {
+      if (generation === resourceReadGeneration && resourceResult?.resource?.uri === resource.uri) {
+        resourceReadUri = undefined;
+        refresh.disabled = overlayCall != null;
+        if (!overlayCall && subscribedResourceUri !== resource.uri) scheduleResourcePoll(resource.uri);
+      }
+    }
+  }
+
+  // A2UI documents (#1119). An agent that emits A2UI (v0.9 createSurface / updateComponents /
+  // updateDataModel messages, the v0.8 surfaceUpdate / beginRendering / dataModelUpdate ones, or the
+  // {"components":[...]} shorthand `a2ui render` takes) sees it drawn here with the basic catalog's
+  // component set. The a2ui-catalog renderer itself is Compose running on the server, so it cannot
+  // ship inside this bundle: this small DOM renderer draws every document at once, with no call and
+  // in static mode too, and when the host lets the viewer call this server's catalog tools
+  // "Render with a2ui-catalog" asks that renderer for the pixel-exact Compose render beside it.
+  const A2UI_CATALOG = 'a2ui-catalog';
+  const A2UI_DOCUMENT_KNOB = 'document';
+  const A2UI_MESSAGE_KEYS = [
+    'createSurface', 'updateComponents', 'updateDataModel', 'deleteSurface',
+    'surfaceUpdate', 'beginRendering', 'dataModelUpdate',
+  ];
+  const A2UI_MAX_COMPONENTS = 5000;
+  const A2UI_MAX_DEPTH = 64;
+  const A2UI_MAX_TEMPLATE_ITEMS = 200;
+  const a2uiRender = q('#a2ui-render');
+  let listPreviewsToolName;
+  let a2uiView;
+  let a2uiGeneration = 0;
+
+  const isPlainObject = value => !!value && typeof value === 'object' && !Array.isArray(value);
+  const isA2uiMessage = value => isPlainObject(value) && A2UI_MESSAGE_KEYS.some(key => isPlainObject(value[key]));
+
+  // A document in any of the accepted spellings, as its message list; undefined when it is not A2UI.
+  function a2uiMessagesOf(candidate, depth = 0) {
+    if (candidate == null || depth > 3) return undefined;
+    if (typeof candidate === 'string') {
+      const text = candidate.trim();
+      if (!text || (text[0] !== '{' && text[0] !== '[')) return undefined;
+      const whole = parse(text);
+      if (whole != null) return a2uiMessagesOf(whole, depth + 1);
+      const lines = text.split('\n').map(line => line.trim()).filter(Boolean).map(parse);
+      return lines.length && lines.every(isA2uiMessage) ? lines : undefined;
+    }
+    if (Array.isArray(candidate)) {
+      return candidate.length && candidate.every(isPlainObject) && candidate.some(isA2uiMessage)
+        ? candidate.filter(isA2uiMessage)
+        : undefined;
+    }
+    if (!isPlainObject(candidate)) return undefined;
+    if (isA2uiMessage(candidate)) return [candidate];
+    for (const key of ['a2ui', 'messages']) {
+      const nested = a2uiMessagesOf(candidate[key], depth + 1);
+      if (nested) return nested;
+    }
+    if (
+      Array.isArray(candidate.components) &&
+      candidate.components.length &&
+      candidate.components.every(item => isPlainObject(item) && typeof item.id === 'string' && item.component != null)
+    ) {
+      const surfaceId = typeof candidate.surfaceId === 'string' ? candidate.surfaceId : 'main';
+      const messages = [{ updateComponents: { surfaceId, components: candidate.components } }];
+      if (candidate.dataModel !== undefined) messages.push({ updateDataModel: { surfaceId, path: '/', value: candidate.dataModel } });
+      // The catalog renderer takes the shorthand as it is; send it back unchanged.
+      Object.defineProperty(messages, 'source', { value: candidate });
+      return messages;
+    }
+    // ui_builder_export_document / ui_builder_export with format json: an A2UI design's JSON is
+    // its JSON Lines messages, as the artifact's UTF-8 content.
+    const artifact = candidate.response?.artifact || candidate.artifact;
+    if (artifact?.format === 'json' && typeof artifact.content === 'string') {
+      return a2uiMessagesOf(artifact.content, depth + 1);
+    }
+    return undefined;
+  }
+
+  function a2uiMessagesIn(result, value) {
+    const found = a2uiMessagesOf(value);
+    if (found) return found;
+    for (const block of result?.content || []) {
+      if (block?.type !== 'text' || typeof block.text !== 'string' || detailOf(block)) continue;
+      const messages = a2uiMessagesOf(block.text);
+      if (messages) return messages;
+    }
+    return undefined;
+  }
+
+  // v0.8 spells a component as {"Text":{...}} with {"literalString":…} values and
+  // {"explicitList":[…]} children; the renderer below reads v0.9, so v0.8 is lowered first.
+  function a2uiComponentOf(entry) {
+    if (typeof entry.component === 'string') return entry;
+    if (!isPlainObject(entry.component)) return undefined;
+    const [type] = Object.keys(entry.component);
+    const props = isPlainObject(entry.component[type]) ? { ...entry.component[type] } : {};
+    for (const key of ['children', 'child']) {
+      const value = props[key];
+      if (Array.isArray(value?.explicitList)) props[key] = value.explicitList;
+      else if (isPlainObject(value?.template)) {
+        props[key] = { componentId: value.template.componentId, path: value.template.dataBinding };
+      }
+    }
+    return { ...props, id: entry.id, component: type, ...(entry.weight != null ? { weight: entry.weight } : {}) };
+  }
+
+  function a2uiPointer(path) {
+    return String(path).split('/').filter(Boolean).map(part => part.replace(/~1/g, '/').replace(/~0/g, '~'));
+  }
+
+  function a2uiAbsolute(path, scope) {
+    const text = String(path);
+    if (text.startsWith('/')) return text;
+    return `${scope || ''}/${text}`;
+  }
+
+  function a2uiLookup(model, path) {
+    let current = model;
+    for (const part of a2uiPointer(path)) {
+      if (current == null || typeof current !== 'object') return undefined;
+      current = current[part];
+    }
+    return current;
+  }
+
+  function a2uiWrite(surface, path, value) {
+    const parts = a2uiPointer(path || '/');
+    if (!parts.length) {
+      surface.data = value === undefined ? {} : value;
+      return;
+    }
+    if (!isPlainObject(surface.data) && !Array.isArray(surface.data)) surface.data = {};
+    let current = surface.data;
+    parts.slice(0, -1).forEach(part => {
+      if (current[part] == null || typeof current[part] !== 'object') current[part] = {};
+      current = current[part];
+    });
+    const last = parts[parts.length - 1];
+    if (value === undefined) delete current[last];
+    else current[last] = value;
+  }
+
+  // v0.8's dataModelUpdate carries {key, valueString|valueNumber|valueBoolean|valueMap} entries.
+  function a2uiLegacyValue(contents) {
+    if (!Array.isArray(contents)) return contents;
+    const out = {};
+    for (const entry of contents) {
+      if (!isPlainObject(entry) || typeof entry.key !== 'string') continue;
+      out[entry.key] = 'valueMap' in entry ? a2uiLegacyValue(entry.valueMap)
+        : 'valueString' in entry ? entry.valueString
+        : 'valueNumber' in entry ? entry.valueNumber
+        : entry.valueBoolean;
+    }
+    return out;
+  }
+
+  function a2uiSurfaces(messages) {
+    const surfaces = new Map();
+    let count = 0;
+    const surface = id => {
+      const key = typeof id === 'string' && id ? id : 'main';
+      if (!surfaces.has(key)) surfaces.set(key, { id: key, components: new Map(), data: {}, root: undefined });
+      return surfaces.get(key);
+    };
+    for (const message of messages) {
+      if (message.createSurface) {
+        const target = surface(message.createSurface.surfaceId);
+        if (typeof message.createSurface.catalogId === 'string') target.catalogId = message.createSurface.catalogId;
+      }
+      if (message.beginRendering) {
+        const target = surface(message.beginRendering.surfaceId);
+        if (typeof message.beginRendering.root === 'string') target.root = message.beginRendering.root;
+      }
+      for (const update of [message.updateComponents, message.surfaceUpdate]) {
+        if (!update || !Array.isArray(update.components)) continue;
+        const target = surface(update.surfaceId);
+        for (const entry of update.components) {
+          if (!isPlainObject(entry) || typeof entry.id !== 'string') continue;
+          const component = a2uiComponentOf(entry);
+          if (!component || ++count > A2UI_MAX_COMPONENTS) continue;
+          target.components.set(entry.id, component);
+        }
+      }
+      if (message.updateDataModel) {
+        a2uiWrite(surface(message.updateDataModel.surfaceId), message.updateDataModel.path, message.updateDataModel.value);
+      }
+      if (message.dataModelUpdate) {
+        a2uiWrite(
+          surface(message.dataModelUpdate.surfaceId),
+          message.dataModelUpdate.path,
+          a2uiLegacyValue(message.dataModelUpdate.contents),
+        );
+      }
+      if (message.deleteSurface) surfaces.delete(message.deleteSurface.surfaceId || 'main');
+    }
+    return [...surfaces.values()].filter(target => target.components.size);
+  }
+
+  function a2uiRootOf(surface) {
+    if (surface.root && surface.components.has(surface.root)) return surface.root;
+    if (surface.components.has('root')) return 'root';
+    const referenced = new Set();
+    for (const component of surface.components.values()) {
+      for (const key of ['child', 'trigger', 'content']) {
+        if (typeof component[key] === 'string') referenced.add(component[key]);
+      }
+      if (Array.isArray(component.children)) component.children.forEach(child => referenced.add(child));
+      if (isPlainObject(component.children)) referenced.add(component.children.componentId);
+      if (Array.isArray(component.tabs)) component.tabs.forEach(tab => referenced.add(tab?.child));
+    }
+    return [...surface.components.keys()].find(id => !referenced.has(id));
+  }
+
+  function a2uiRenderer(surface, onAction) {
+    const value = (raw, scope) => {
+      if (raw == null) return undefined;
+      if (typeof raw !== 'object') return raw;
+      if (Array.isArray(raw)) return raw;
+      if (typeof raw.path === 'string') return a2uiLookup(surface.data, a2uiAbsolute(raw.path, scope));
+      for (const key of ['literalString', 'literalNumber', 'literalBoolean', 'literal']) {
+        if (key in raw) return raw[key];
+      }
+      return undefined;
+    };
+    const text = (raw, scope) => {
+      const resolved = value(raw, scope);
+      return resolved == null || typeof resolved === 'object' ? '' : String(resolved);
+    };
+    const element = (tag, className, content) => {
+      const node = document.createElement(tag);
+      if (className) node.className = className;
+      if (content != null) node.textContent = content;
+      return node;
+    };
+    const placeholder = label => element('div', 'a2ui-missing', label);
+    const flex = { start: 'flex-start', center: 'center', end: 'flex-end', stretch: 'stretch',
+      spaceBetween: 'space-between', spaceAround: 'space-around', spaceEvenly: 'space-evenly' };
+
+    function children(component, scope, depth, trail) {
+      const list = component.children;
+      if (Array.isArray(list)) return list.map(id => node(id, scope, depth + 1, trail));
+      if (isPlainObject(list) && typeof list.componentId === 'string' && typeof list.path === 'string') {
+        const base = a2uiAbsolute(list.path, scope);
+        const items = a2uiLookup(surface.data, base);
+        const keys = Array.isArray(items) ? items.map((_, index) => String(index))
+          : isPlainObject(items) ? Object.keys(items) : [];
+        return keys.slice(0, A2UI_MAX_TEMPLATE_ITEMS)
+          .map(key => node(list.componentId, `${base.replace(/\/$/, '')}/${key}`, depth + 1, trail));
+      }
+      return [];
+    }
+
+    function field(labelText, control) {
+      const label = element('label', 'a2ui-field');
+      if (labelText) label.append(element('span', 'a2ui-label', labelText));
+      label.append(control);
+      return label;
+    }
+
+    function node(id, scope, depth, trail) {
+      if (typeof id !== 'string') return placeholder('Invalid child reference');
+      if (depth > A2UI_MAX_DEPTH || trail.includes(id)) return placeholder(`Cycle at "${id}"`);
+      const component = surface.components.get(id);
+      if (!component) return placeholder(`Missing component "${id}"`);
+      const next = [...trail, id];
+      const type = component.component;
+      let out;
+      switch (type) {
+        case 'Text': {
+          const variant = String(component.variant || component.usageHint || 'body');
+          out = element(/^h[1-5]$/.test(variant) ? variant : 'p', `a2ui-text a2ui-${variant}`, text(component.text, scope));
+          break;
+        }
+        case 'Image': {
+          const url = text(component.url, scope);
+          if (/^(https?:|data:image\/)/i.test(url)) {
+            out = element('img', `a2ui-image a2ui-${component.variant || component.usageHint || 'image'}`);
+            out.src = url;
+            out.alt = text(component.description ?? component.altText, scope) || 'A2UI image';
+            out.style.objectFit = String(component.fit || 'contain');
+          } else {
+            out = placeholder(url ? `Image: ${url}` : 'Image');
+          }
+          break;
+        }
+        case 'Icon':
+          out = element('span', 'a2ui-icon', text(component.name, scope) || 'icon');
+          break;
+        case 'Video':
+        case 'AudioPlayer':
+          out = placeholder(`${type}: ${text(component.url, scope)}`);
+          break;
+        case 'Row':
+        case 'Column':
+        case 'List': {
+          const horizontal = type === 'Row' || (type === 'List' && component.direction === 'horizontal');
+          out = element('div', `a2ui-${type.toLowerCase()} ${horizontal ? 'a2ui-horizontal' : 'a2ui-vertical'}`);
+          const justify = flex[component.justify || component.distribution];
+          const align = flex[component.align || component.alignment];
+          if (justify) out.style.justifyContent = justify;
+          if (align) out.style.alignItems = align;
+          out.append(...children(component, scope, depth, next));
+          break;
+        }
+        case 'Card':
+          out = element('div', 'a2ui-card');
+          if (component.child != null) out.append(node(component.child, scope, depth + 1, next));
+          break;
+        case 'Divider':
+          out = element('hr', component.axis === 'vertical' ? 'a2ui-divider a2ui-divider-vertical' : 'a2ui-divider');
+          break;
+        case 'Button': {
+          const primary = component.variant === 'primary' || component.primary === true;
+          out = element('button', `a2ui-button${primary ? ' primary' : ''}`);
+          out.type = 'button';
+          if (component.child != null) out.append(node(component.child, scope, depth + 1, next));
+          else out.textContent = text(component.label, scope) || id;
+          const action = component.action?.event?.name || component.action?.name ||
+            component.action?.functionCall?.call || component.action?.call;
+          out.addEventListener('click', () => onAction(id, typeof action === 'string' ? action : undefined));
+          break;
+        }
+        case 'TextField': {
+          const variant = String(component.variant || component.textFieldType || 'shortText');
+          const control = element(variant === 'longText' ? 'textarea' : 'input');
+          if (control.localName === 'input') {
+            control.type = variant === 'number' ? 'number' : variant === 'obscured' ? 'password' : 'text';
+          }
+          control.value = text(component.value ?? component.text, scope);
+          out = field(text(component.label, scope), control);
+          break;
+        }
+        case 'CheckBox': {
+          const control = element('input');
+          control.type = 'checkbox';
+          control.checked = value(component.value, scope) === true;
+          out = element('label', 'a2ui-check');
+          out.append(control, element('span', null, text(component.label, scope)));
+          break;
+        }
+        case 'Slider': {
+          const control = element('input');
+          control.type = 'range';
+          control.min = String(Number(value(component.min ?? component.minValue, scope) ?? 0));
+          control.max = String(Number(value(component.max ?? component.maxValue, scope) ?? 100));
+          control.value = String(Number(value(component.value, scope) ?? 0));
+          out = field(text(component.label, scope), control);
+          break;
+        }
+        case 'ChoicePicker':
+        case 'MultipleChoice': {
+          const chosen = value(component.value ?? component.selections, scope);
+          const selected = new Set((Array.isArray(chosen) ? chosen : [chosen]).map(String));
+          const multiple = component.variant !== 'mutuallyExclusive' && Number(component.maxAllowedSelections) !== 1;
+          out = element('fieldset', 'a2ui-choices');
+          const legend = text(component.label, scope);
+          if (legend) out.append(element('legend', null, legend));
+          (Array.isArray(component.options) ? component.options : []).forEach(option => {
+            const control = element('input');
+            control.type = multiple ? 'checkbox' : 'radio';
+            control.name = `a2ui-${surface.id}-${id}`;
+            control.checked = selected.has(String(value(option?.value, scope)));
+            const row = element('label', 'a2ui-check');
+            row.append(control, element('span', null, text(option?.label, scope)));
+            out.append(row);
+          });
+          break;
+        }
+        case 'DateTimeInput': {
+          const control = element('input');
+          const date = component.enableDate !== false;
+          const time = component.enableTime === true;
+          control.type = date && time ? 'datetime-local' : time ? 'time' : 'date';
+          control.value = text(component.value, scope);
+          out = field(text(component.label, scope), control);
+          break;
+        }
+        case 'Tabs': {
+          const tabs = (Array.isArray(component.tabs) ? component.tabs : component.tabItems || []).filter(isPlainObject);
+          out = element('div', 'a2ui-tabs');
+          const strip = element('div', 'a2ui-tab-strip');
+          strip.setAttribute('role', 'tablist');
+          const panel = element('div', 'a2ui-tab-panel');
+          const show = index => {
+            strip.querySelectorAll('button').forEach((button, at) => button.setAttribute('aria-selected', String(at === index)));
+            panel.replaceChildren(tabs[index] ? node(tabs[index].child, scope, depth + 1, next) : placeholder('Empty tab'));
+          };
+          tabs.forEach((tab, index) => {
+            const button = element('button', null, text(tab.title, scope) || `Tab ${index + 1}`);
+            button.type = 'button';
+            button.setAttribute('role', 'tab');
+            button.addEventListener('click', () => show(index));
+            strip.append(button);
+          });
+          out.append(strip, panel);
+          show(0);
+          break;
+        }
+        case 'Modal': {
+          out = element('details', 'a2ui-modal');
+          const summary = element('summary');
+          const trigger = component.trigger ?? component.entryPointChild;
+          if (trigger != null) summary.append(node(trigger, scope, depth + 1, next));
+          else summary.textContent = 'Open';
+          out.append(summary);
+          const content = component.content ?? component.contentChild;
+          if (content != null) out.append(node(content, scope, depth + 1, next));
+          break;
+        }
+        default:
+          out = placeholder(`${type || 'Unknown'} "${id}"`);
+          if (component.child != null) out.append(node(component.child, scope, depth + 1, next));
+          if (component.children != null) out.append(...children(component, scope, depth, next));
+      }
+      out.dataset.a2uiId = id;
+      const weight = Number(component.weight);
+      if (weight > 0) out.style.flex = `${weight} 1 0`;
+      return out;
+    }
+    return node;
+  }
+
+  function a2uiAction(id, action) {
+    const line = `the user pressed A2UI button ${id}${action ? ` (action ${action})` : ''}`;
+    meta.textContent = `Pressed ${id}${action ? ` → ${action}` : ''}`;
+    void updateModelContext(line);
+  }
+
+  function renderA2ui(result, messages) {
+    const surfaces = a2uiSurfaces(messages);
+    const container = document.createElement('div');
+    container.className = 'a2ui';
+    let components = 0;
+    for (const surface of surfaces) {
+      components += surface.components.size;
+      const section = document.createElement('section');
+      section.className = 'a2ui-surface';
+      section.setAttribute('aria-label', `A2UI surface ${surface.id}`);
+      const root = a2uiRootOf(surface);
+      section.append(root ? a2uiRenderer(surface, a2uiAction)(root, '', 0, []) : Object.assign(
+        document.createElement('div'), { className: 'a2ui-missing', textContent: 'No root component' },
+      ));
+      container.append(section);
+    }
+    if (!surfaces.length) {
+      renderNotice(result, { heading: 'Empty A2UI document', summary: 'The document declares no components.' });
+      return;
+    }
+    const catalogRender = document.createElement('figure');
+    catalogRender.className = 'a2ui-catalog-render';
+    catalogRender.hidden = true;
+    container.append(catalogRender);
+    canvas.replaceChildren(container);
+    a2uiView = { messages, catalogRender };
+    const plural = (count, noun) => `${count} ${noun}${count === 1 ? '' : 's'}`;
+    meta.textContent = `A2UI document · ${plural(surfaces.length, 'surface')} · ${plural(components, 'component')}`;
+    updateA2uiAction();
+  }
+
+  function updateA2uiAction() {
+    const available = !!a2uiView && liveReady() && !!listPreviewsToolName &&
+      /(^|__|\/)catalog_render_preview$/.test(renderToolName || '');
+    a2uiRender.hidden = !available;
+    a2uiRender.disabled = refusedTools.has(renderToolName) || refusedTools.has(listPreviewsToolName);
+    if (a2uiRender.disabled) a2uiRender.title = HOST_REFUSED;
+    else a2uiRender.removeAttribute('title');
+  }
+
+  function a2uiCatalogStatus(view, text) {
+    view.catalogRender.hidden = false;
+    view.catalogRender.replaceChildren(Object.assign(document.createElement('figcaption'), { textContent: text }));
+  }
+
+  // The catalog's preview taking a string `document` knob, found the way `a2ui render` finds it.
+  async function a2uiDocumentPreview() {
+    const listing = await callTool(listPreviewsToolName, { catalog: A2UI_CATALOG });
+    const catalogs = data(listing)?.catalogs;
+    for (const catalog of Array.isArray(catalogs) ? catalogs : []) {
+      for (const preview of Array.isArray(catalog?.previews) ? catalog.previews : []) {
+        const knobs = Array.isArray(preview?.knobs) ? preview.knobs : [];
+        if (knobs.some(knob => knob?.key === A2UI_DOCUMENT_KNOB && String(knob.type).toLowerCase() === 'string')) {
+          return preview.id;
+        }
+      }
+    }
+    return undefined;
+  }
+
+  async function renderA2uiWithCatalog() {
+    const view = a2uiView;
+    if (!view || !liveReady() || !listPreviewsToolName || !renderToolName) return;
+    const generation = ++a2uiGeneration;
+    a2uiRender.disabled = true;
+    a2uiCatalogStatus(view, `Rendering with ${A2UI_CATALOG}…`);
+    let tool = listPreviewsToolName;
+    try {
+      const previewId = await a2uiDocumentPreview();
+      if (generation !== a2uiGeneration || view !== a2uiView) return;
+      if (!previewId) {
+        a2uiCatalogStatus(view, `${A2UI_CATALOG} declares no preview with a string "${A2UI_DOCUMENT_KNOB}" knob on this server.`);
+        return;
+      }
+      tool = renderToolName;
+      const result = await callTool(renderToolName, {
+        catalog: A2UI_CATALOG,
+        previewId,
+        observe: 'png',
+        overrides: {
+          [`knob.${A2UI_DOCUMENT_KNOB}`]: view.messages.source
+            ? JSON.stringify(view.messages.source)
+            : view.messages.map(message => JSON.stringify(message)).join('\n'),
+        },
+      });
+      if (generation !== a2uiGeneration || view !== a2uiView) return;
+      const image = png(result);
+      const ignored = (result?.content || [])
+        .map(block => block?.type === 'text' && typeof block.text === 'string' ? parse(block.text) : undefined)
+        .find(value => value?.overridesApplied === false);
+      if (result?.isError || !image || ignored) {
+        const reason = ignored ? ignored.overridesIgnoredReason || 'the catalog has no live renderer'
+          : fallbackText(result).split('\n')[0] || 'no image in the reply';
+        a2uiCatalogStatus(view, `${A2UI_CATALOG} could not render this document: ${reason}`);
+        return;
+      }
+      const picture = document.createElement('img');
+      picture.src = `data:image/png;base64,${image.data}`;
+      picture.alt = `${A2UI_CATALOG} render of the A2UI document`;
+      view.catalogRender.replaceChildren(
+        Object.assign(document.createElement('figcaption'), { textContent: `${A2UI_CATALOG} (Compose) render` }),
+        picture,
+      );
+      scheduleFit();
+    } catch (error) {
+      if (generation !== a2uiGeneration || view !== a2uiView) return;
+      if (refusedByHost(error)) refusedTools.add(tool);
+      a2uiCatalogStatus(view, refusedByHost(error) ? HOST_REFUSED : `${A2UI_CATALOG} render failed.`);
+      console.warn('Failed to render the A2UI document with the catalog:', error);
+    } finally {
+      if (generation === a2uiGeneration) updateA2uiAction();
+    }
+  }
+
+  a2uiRender.addEventListener('click', () => {
+    void renderA2uiWithCatalog();
+  });
+
+  function draw(result) {
+    hasToolResult = true;
+    canvas.classList.remove('has-image');
+    meta.classList.remove('error');
+    if (staticMode) meta.textContent = 'Static preview result';
+    const value = data(result);
+    const image = png(result);
+    const resource = link(result);
+    selected = undefined;
+    use.hidden = true;
+    refresh.hidden = true;
+    a2uiView = undefined;
+    ++a2uiGeneration;
+    a2uiRender.hidden = true;
+    clearAccessibilityOverlay();
+    clearComments();
+    clearDetails();
+    const comparisonGeneration = ++comparisonReadGeneration;
+    const comparison = beforeAfterModel(result, value);
+    disconnectResourceUpdates(comparison ? undefined : resource?.uri);
+    resourceResult = undefined;
+    resourcePollUnchanged = 0;
+    configureLiveActions(result, value, resource, comparison);
+    if (comparison) {
+      void renderBeforeAfter(result, comparison, comparisonGeneration);
+      return;
+    }
+    const cells = Array.isArray(value.cells) && value.cells;
+    // Variant grids carry each cell's PNG in `_meta`, which the model never reads.
+    const cellPngs = result?._meta?.['composePreview/cellPngs'];
+    if (cells && Array.isArray(cellPngs)) {
+      cells.forEach((cell, index) => {
+        if (cell && typeof cellPngs[index] === 'string' && !cell.png) cell.png = cellPngs[index];
+      });
+    }
+    gridBack.hidden = true;
+    if (resource) {
+      resourceResult = { result, resource, value };
+      refresh.hidden = staticMode;
+      if (!staticMode) connectResourceUpdates(resource.uri, !image && !cells);
+    }
+    if (cells) {
+      if (image && !cells.some(cell => typeof cell?.png === 'string' && cell.png.length > 0)) {
+        renderImage(image, value, resource);
+        return;
+      }
+      renderMatrix(value, cells);
+      return;
+    }
+    if (image) {
+      renderImage(image, value, resource);
+      renderDetails(result, image);
+      return;
+    }
+    const a2uiMessages = !result?.isError && a2uiMessagesIn(result, value);
+    if (a2uiMessages) {
+      renderA2ui(result, a2uiMessages);
+      return;
+    }
+    if (resource) {
+      renderResourceFallback(
+        result,
+        resource,
+        staticMode ? 'Static result links to this replayable render resource:' : undefined,
+      );
+      if (!staticMode) readResource();
+      return;
+    }
+    if (result?.isError) {
+      renderNotice(result, { error: true, heading: 'Render failed' });
+      return;
+    }
+    // A semantics or hash observation: fine for the agent, but nothing for the viewer to show.
+    // With a live bridge, ask for the pixels once.
+    renderNotice(result, {
+      heading: 'No image in this result',
+      summary: liveTarget && liveReady()
+        ? `Re-rendering ${previewName(liveTarget.uri)} with an image…`
+        : 'Re-render with observe="png" to see it here.',
+    });
+    requestImageFor(liveTarget);
+  }
+
+  const imageRequests = new Set();
+  let pendingImage;
+
+  // Ask for the PNG of a result that arrived without one (semantics observation, or a host that
+  // dropped the resource_link or refused resources/read). Once per URI, so a failure cannot loop.
+  function requestImageFor(target) {
+    if (!target || staticMode || imageRequests.has(target.uri)) return;
+    imageRequests.add(target.uri);
+    pendingImage = target;
+    void bridgeReady.then(sendPendingImageRequest);
+  }
+
+  function sendPendingImageRequest() {
+    if (!pendingImage || !liveReady() || !renderToolName || refusedTools.has(renderToolName)) return;
+    const target = pendingImage;
+    pendingImage = undefined;
+    void renderLive(target);
+  }
+
+  window.addEventListener('message', event => {
+    if (staticMode || !inputResolved) return;
+    if (event.source !== window.parent) return;
+    const message = event.data;
+    if (!message || message.jsonrpc !== '2.0') return;
+    if (pending.has(message.id)) {
+      const request = pending.get(message.id);
+      pending.delete(message.id);
+      window.clearTimeout(request.timer);
+      if (message.error) request.reject(message.error);
+      else request.resolve(message.result);
+      return;
+    }
+    if (lateResponses.has(message.id)) {
+      const late = lateResponses.get(message.id);
+      lateResponses.delete(message.id);
+      window.clearTimeout(late.expiry);
+      if (!message.error) late.handle(message.result);
+      return;
+    }
+    if (message.method === 'ui/notifications/host-context-changed') {
+      // A partial HostContext: containerDimensions is replaced when present, kept otherwise.
+      applyHostContext(message.params);
+      return;
+    }
+    if (message.method === 'ui/notifications/tool-input') {
+      const incomingArguments = message.params?.arguments || {};
+      if (overlayCall && incomingArguments.kind === 'a11y/overlay') return;
+      resourceToken = typeof incomingArguments.token === 'string' && incomingArguments.token
+        ? incomingArguments.token
+        : undefined;
+      toolArguments = safeSelectionArguments(incomingArguments);
+      return;
+    }
+    if (message.method === 'ui/notifications/tool-result') {
+      const incomingResult = message.params?.result || message.params;
+      if (overlayCall && (incomingResult?.isError || (png(incomingResult) && !link(incomingResult)))) {
+        applyAccessibilityResult(incomingResult, overlayCall.generation);
+        return;
+      }
+      draw(incomingResult);
+    }
+    if (
+      (message.method === 'notifications/resources/updated' ||
+        message.method === 'ui/notifications/resource-updated') &&
+      message.params?.uri === resourceResult?.resource?.uri
+    ) {
+      // A resources/read renders this URI, and this server announces that completed render before
+      // it returns the PNG. The response already carries those pixels; reading again here would
+      // create a render -> update -> read loop. Updates arriving after the read settles still
+      // trigger the next generation normally.
+      if (resourceReadUri === message.params.uri) return;
+      if (overlayCall) overlayCall.resourceUpdatePending = true;
+      else readResource();
+    }
+    if (
+      message.method === 'notifications/tools/list_changed' ||
+      message.method === 'ui/notifications/tools/list-changed'
+    ) {
+      discoverViewerActions();
+    }
+  }, { passive: true });
+
+  // The viewer ships with this server, so its own tools are known by name. A host that does not
+  // offer tools/list (or refuses it) still gets the live actions; a refused call disables only its
+  // control. A successful listing stays authoritative.
+  function assumeOwnTools() {
+    overlayToolName = 'render_preview_overlay';
+    renderToolName = 'render_preview';
+    dataToolName = 'get_preview_data';
+    listCommentsToolName = undefined;
+    postCommentToolName = undefined;
+    listPreviewsToolName = undefined;
+  }
+
+  async function discoverViewerActions() {
+    const generation = ++toolDiscoveryGeneration;
+    if (!hostServerTools) {
+      assumeOwnTools();
+      updateLiveActions();
+      updateAccessibilityAction();
+      updateCommentAction();
+      sendPendingImageRequest();
+      return;
+    }
+    try {
+      const tools = await request('tools/list', {});
+      if (generation !== toolDiscoveryGeneration) return;
+      const names = tools?.tools?.map(tool => tool?.name) || [];
+      overlayToolName = names
+        .find(name => typeof name === 'string' && /(^|__|\/)render_preview_overlay$/.test(name));
+      listCommentsToolName = names
+        .find(name => typeof name === 'string' && /(^|__|\/)ui_builder_list_comments$/.test(name));
+      postCommentToolName = names
+        .find(name => typeof name === 'string' && /(^|__|\/)ui_builder_post_comment$/.test(name));
+      renderToolName = names.find(name => typeof name === 'string' && /(^|__|\/|catalog_)render_preview$/.test(name));
+      dataToolName = names.find(name => typeof name === 'string' && /(^|__|\/|catalog_)get_preview_data$/.test(name));
+      listPreviewsToolName = names
+        .find(name => typeof name === 'string' && /(^|__|\/)catalog_list_previews$/.test(name));
+    } catch (error) {
+      if (generation !== toolDiscoveryGeneration) return;
+      assumeOwnTools();
+      console.debug('The host did not list tools; using the viewer\'s own tool names:', error);
+    }
+    updateLiveActions();
+    updateAccessibilityAction();
+    updateCommentAction();
+    updateA2uiAction();
+    if (commentDesignId && listCommentsToolName) void loadComments();
+    sendPendingImageRequest();
+  }
+
+  async function initializeBridge() {
+    try {
+      const result = await request('ui/initialize', {
+        appInfo: { name: 'compose-preview-viewer', version: '1' },
+        appCapabilities: {},
+        protocolVersion: '2026-01-26',
+      });
+      hostResourceSubscriptions = result?.hostCapabilities?.serverResources?.subscribe === true;
+      hostServerTools = result?.hostCapabilities?.serverTools != null;
+      applyHostContext(result?.hostContext);
+      initialized = true;
+      notify('ui/notifications/initialized', {});
+      scheduleFit();
+      updateAccessibilityAction();
+      void discoverViewerActions();
+    } catch (error) {
+      use.hidden = true;
+      refresh.hidden = true;
+      if (hasToolResult) {
+        meta.textContent = `${meta.textContent}; viewer actions unavailable.`;
+      } else {
+        const message = document.createElement('div');
+        message.className = 'empty';
+        message.textContent = 'The MCP Apps bridge is unavailable. Use the complete text fallback in the surrounding response.';
+        canvas.replaceChildren(message);
+        meta.textContent = 'Viewer unavailable; use the complete text fallback.';
+      }
+      console.error('Failed to initialize the MCP Apps bridge:', error);
+    }
+  }
+
+  // An inline result block may follow this script, so decide static mode once the whole document
+  // has been parsed. Until then no host message is handled (see inputResolved).
+  function startViewer() {
+    const staticResult = staticInput();
+    if (staticResult.present) {
+      staticMode = true;
+      if (staticResult.error) {
+        renderStaticError(staticResult.error);
+      } else {
+        toolArguments = safeSelectionArguments(staticResult.envelope.arguments || {});
+        draw(staticResult.envelope.result);
+      }
+    }
+    inputResolved = true;
+    return staticMode ? Promise.resolve() : initializeBridge();
+  }
+
+  const bridgeReady =
+    document.readyState === 'loading'
+      ? new Promise(resolve => document.addEventListener('DOMContentLoaded', resolve, { once: true })).then(startViewer)
+      : startViewer();
+  gridBack.addEventListener('click', () => {
+    if (!lastGrid) return;
+    renderMatrix(lastGrid.value, lastGrid.cells);
+    meta.textContent = `${lastGrid.cells.length} variants`;
+    scheduleFit();
+  });
+  refresh.addEventListener('click', () => {
+    resourcePollUnchanged = 0;
+    if (!overlayCall) readResource(true, true);
+  });
+  a11y.addEventListener('click', async () => {
+    const wasVisible = overlayVisible;
+    await toggleAccessibilityOverlay();
+    if (overlayVisible !== wasVisible) {
+      void updateModelContext(
+        `accessibility overlay ${overlayVisible ? 'shown' : 'hidden'} on ${previewName(selected?.uri || toolArguments.uri)}`,
+      );
+    }
+  });
+  variantSelect.addEventListener('change', () => chooseVariant(variantSelect.value));
+  rerender.addEventListener('click', () => renderLive(liveTarget));
+  layoutToggle.addEventListener('click', () => toggleLayoutBounds());
+  sourceButton.addEventListener('click', () => openInEditor());
+  commentRefresh.addEventListener('click', () => loadComments());
+  commentPost.addEventListener('click', () => postComment());
+  use.addEventListener('click', async () => {
+    await bridgeReady;
+    if (!initialized || !selected) return;
+    await request('ui/update-model-context', {
+      content: [{ type: 'text', text: `User selected Compose Preview context: ${JSON.stringify(selected)}` }],
+      structuredContent: { composePreviewSelection: selected },
+    });
+  });
+})();
+</script>

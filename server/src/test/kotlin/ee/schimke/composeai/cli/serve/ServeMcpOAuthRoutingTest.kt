@@ -154,7 +154,7 @@ class ServeMcpOAuthRoutingTest {
    */
   private val gatedCall =
     """{"jsonrpc":"2.0","id":1,"method":"tools/call",""" +
-      """"params":{"name":"list_projects","arguments":{}}}"""
+      """"params":{"name":"catalog_list_projects","arguments":{}}}"""
 
   @Test
   fun `an unauthenticated MCP call names the resource metadata discovery starts from`() {

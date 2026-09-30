@@ -1,0 +1,648 @@
+const frame = document.querySelector("iframe");
+const mode = document.body.dataset.mode;
+let reads = 0;
+let resourceUpdates = 0;
+const activeSubscriptions = new Set();
+let toolCalls = 0;
+let toolLists = 0;
+let appInitialized = false;
+let commentBoard = {
+  schema: "compose-ui-builder-comments/v1",
+  designId: "design-comments",
+  sequence: 3,
+  threads: [
+    {
+      id: "thread-point",
+      anchor: { x: 0.25, y: 0.2 },
+      resolved: false,
+      comments: [
+        { id: "comment-point", authorId: "github:yuri", displayName: "Yuri", body: "Align this heading." },
+      ],
+    },
+    {
+      id: "thread-node",
+      anchor: { nodeId: "button" },
+      resolved: true,
+      comments: [
+        { id: "comment-node", authorId: "agent:reviewer", displayName: "Review agent", body: "The button label is fixed." },
+      ],
+    },
+    {
+      id: "thread-mark",
+      anchor: { markId: "stroke-7" },
+      resolved: false,
+      comments: [
+        { id: "comment-mark", authorId: "github:yuri", displayName: "Yuri", body: "Follow the reference stroke." },
+      ],
+    },
+  ],
+};
+window.__mcpAddExternalComment = () => {
+  commentBoard = {
+    ...commentBoard,
+    sequence: commentBoard.sequence + 1,
+    threads: [
+      ...commentBoard.threads,
+      {
+        id: "thread-external",
+        resolved: false,
+        comments: [
+          {
+            id: "comment-external",
+            authorId: "github:reviewer",
+            displayName: "External reviewer",
+            body: "This arrived after the inline render.",
+          },
+        ],
+      },
+    ],
+  };
+};
+
+async function png(path) {
+  const bytes = new Uint8Array(await (await fetch(path)).arrayBuffer());
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary);
+}
+
+function send(message) {
+  frame.contentWindow.postMessage(message, "*");
+}
+
+window.addEventListener("message", async (event) => {
+  if (event.source !== frame.contentWindow) return;
+  const message = event.data;
+  if (!message || message.jsonrpc !== "2.0" || !message.method) return;
+  if (message.method === "ui/notifications/initialized") {
+    appInitialized = true;
+    window.__mcpAppInitialized = true;
+    return;
+  }
+  if (message.method === "ui/initialize") {
+    send({
+      jsonrpc: "2.0",
+      id: message.id,
+      result: {
+        hostCapabilities: {
+          serverResources: {
+            subscribe:
+              mode === "refresh" ||
+              mode === "read-notifies" ||
+              mode === "same-uri-redraw" ||
+              mode === "subscription-revisit" ||
+              mode === "subscribe-late" ||
+              mode === "read-replaced-inline" ||
+              mode === "subscribe-fails" ||
+              mode === "stale-read-marker" ||
+              mode === "a11y",
+          },
+          ...(mode.startsWith("a11y") || mode.startsWith("comments") ? { serverTools: {} } : {}),
+        },
+      },
+    });
+    send({
+      jsonrpc: "2.0",
+      method: "ui/notifications/tool-input",
+      params: {
+        arguments: {
+          uri: "compose-preview://fixture/_app/com.example.Card",
+          previewId: "CardPreview",
+          overrides: { uiMode: "dark" },
+          sessionId: "must-not-travel",
+          sourceUrl: "https://preview.invalid/render?cookie=also-must-not-travel",
+          callbackUrl: "https://preview.invalid/callback#access_token=fragment-must-not-travel",
+          redirects: [
+            "https://preview.invalid/callback#access_token=array-must-not-travel",
+          ],
+          ...(mode.startsWith("a11y") || mode.startsWith("comments")
+            ? { token: "viewer-grant-secret" }
+            : {}),
+        },
+      },
+    });
+    if (mode.startsWith("comments")) {
+      const imageData = await png("/preview-harness/fixtures/pages/_design-render-placeholder.png");
+      const result = {
+        schema: "compose-preview/ui-builder-native-preview/v1",
+        designId: "design-comments",
+        revision: 4,
+        nodeBounds: { button: { x: 80, y: 80, width: 80, height: 40 } },
+      };
+      send({
+        jsonrpc: "2.0",
+        method: "ui/notifications/tool-result",
+        params: {
+          result: {
+            content: [
+              { type: "image", mimeType: "image/png", data: imageData },
+              { type: "text", text: JSON.stringify(result) },
+            ],
+          },
+        },
+      });
+      return;
+    }
+    if (mode === "before-after") {
+      const comparison = {
+        schema: "compose-preview/catalog-mcp-semantics-diff/v1",
+        left: {
+          uri: "compose-preview://fixture/_app/com.example.Card?version=before",
+          taggedNodes: 3,
+        },
+        right: {
+          uri: "compose-preview://fixture/_app/com.example.Card?version=after",
+          taggedNodes: 4,
+        },
+        changed: [{ testTag: "title" }],
+        identical: false,
+      };
+      send({
+        jsonrpc: "2.0",
+        method: "ui/notifications/tool-result",
+        params: {
+          result: {
+            structuredContent: comparison,
+            content: [{ type: "text", text: JSON.stringify(comparison) }],
+          },
+        },
+      });
+      return;
+    }
+    if (mode === "a11y-non-full") {
+      const imageData = await png("/preview-harness/fixtures/pages/_render-placeholder.png");
+      send({
+        jsonrpc: "2.0",
+        method: "ui/notifications/tool-result",
+        params: {
+          result: {
+            content: [
+              { type: "image", mimeType: "image/png", data: imageData },
+              {
+                type: "text",
+                text: JSON.stringify({
+                  uri: "compose-preview://fixture/_app/com.example.Card",
+                  crop: { left: 12, top: 16, right: 120, bottom: 96 },
+                }),
+              },
+            ],
+          },
+        },
+      });
+      window.setTimeout(() => {
+        window.__mcpCropOverlayHidden = frame.contentDocument.querySelector("#a11y")?.hidden;
+      }, 300);
+      window.setTimeout(() => {
+        send({
+          jsonrpc: "2.0",
+          method: "ui/notifications/tool-result",
+          params: {
+            result: {
+              content: [
+                { type: "image", mimeType: "image/png", data: imageData },
+                {
+                  type: "text",
+                  text: JSON.stringify({
+                    uri: "compose-preview://fixture/_app/com.example.Card",
+                    cells: [{ overrides: { uiMode: "light" } }, { overrides: { uiMode: "dark" } }],
+                  }),
+                },
+              ],
+            },
+          },
+        });
+      }, 400);
+      window.setTimeout(() => {
+        window.__mcpMatrixOverlayHidden = frame.contentDocument.querySelector("#a11y")?.hidden;
+      }, 700);
+      return;
+    }
+    send({
+      jsonrpc: "2.0",
+      method: "ui/notifications/tool-result",
+      params: {
+        result: {
+          content: [
+            {
+              type: "resource_link",
+              uri:
+                mode === "refresh"
+                  ? "compose-preview://fixture/_app/com.example.Card?overrides=stale"
+                  : "compose-preview://fixture/_app/com.example.Card?overrides=fixture",
+              name: "Compose Preview render",
+              mimeType: "image/png",
+            },
+          ],
+        },
+      },
+    });
+    if (mode === "refresh") {
+      window.setTimeout(() => {
+        send({
+          jsonrpc: "2.0",
+          method: "ui/notifications/tool-result",
+          params: {
+            result: {
+              content: [
+                {
+                  type: "resource_link",
+                  uri: "compose-preview://fixture/_app/com.example.Card?overrides=fixture",
+                  name: "Compose Preview render",
+                  mimeType: "image/png",
+                },
+              ],
+            },
+          },
+        });
+      }, 100);
+    }
+    if (mode === "stale-read-marker") {
+      window.setTimeout(async () => {
+        send({
+          jsonrpc: "2.0",
+          method: "ui/notifications/tool-result",
+          params: {
+            result: {
+              content: [
+                {
+                  type: "image",
+                  mimeType: "image/png",
+                  data: await png("/preview-harness/fixtures/pages/_render-placeholder.png"),
+                },
+                {
+                  type: "resource_link",
+                  uri: "compose-preview://fixture/_app/com.example.Card?overrides=other",
+                  name: "Compose Preview render",
+                  mimeType: "image/png",
+                },
+              ],
+            },
+          },
+        });
+      }, 50);
+      window.setTimeout(async () => {
+        send({
+          jsonrpc: "2.0",
+          method: "ui/notifications/tool-result",
+          params: {
+            result: {
+              content: [
+                {
+                  type: "image",
+                  mimeType: "image/png",
+                  data: await png("/preview-harness/fixtures/pages/_render-placeholder.png"),
+                },
+                {
+                  type: "resource_link",
+                  uri: "compose-preview://fixture/_app/com.example.Card?overrides=fixture",
+                  name: "Compose Preview render",
+                  mimeType: "image/png",
+                },
+              ],
+            },
+          },
+        });
+      }, 100);
+    }
+    if (mode === "same-uri-redraw") {
+      window.setTimeout(async () => {
+        send({
+          jsonrpc: "2.0",
+          method: "ui/notifications/tool-result",
+          params: {
+            result: {
+              content: [
+                {
+                  type: "image",
+                  mimeType: "image/png",
+                  data: await png("/preview-harness/fixtures/pages/_design-render-placeholder.png"),
+                },
+                {
+                  type: "resource_link",
+                  uri: "compose-preview://fixture/_app/com.example.Card?overrides=fixture",
+                  name: "Compose Preview render",
+                  mimeType: "image/png",
+                },
+              ],
+            },
+          },
+        });
+      }, 250);
+    }
+    if (mode === "subscription-revisit") {
+      for (const [delay, overrides] of [[250, "other"], [350, "fixture"]]) {
+        window.setTimeout(async () => {
+          send({
+            jsonrpc: "2.0",
+            method: "ui/notifications/tool-result",
+            params: {
+              result: {
+                content: [
+                  {
+                    type: "image",
+                    mimeType: "image/png",
+                    data: await png("/preview-harness/fixtures/pages/_design-render-placeholder.png"),
+                  },
+                  {
+                    type: "resource_link",
+                    uri: `compose-preview://fixture/_app/com.example.Card?overrides=${overrides}`,
+                    name: "Compose Preview render",
+                    mimeType: "image/png",
+                  },
+                ],
+              },
+            },
+          });
+        }, delay);
+      }
+    }
+    if (mode === "read-replaced-inline") {
+      window.setTimeout(async () => {
+        send({
+          jsonrpc: "2.0",
+          method: "ui/notifications/tool-result",
+          params: {
+            result: {
+              content: [
+                {
+                  type: "image",
+                  mimeType: "image/png",
+                  data: await png("/preview-harness/fixtures/pages/_design-render-placeholder.png"),
+                },
+                {
+                  type: "resource_link",
+                  uri: "compose-preview://fixture/_app/com.example.Card?overrides=inline",
+                  name: "Compose Preview render",
+                  mimeType: "image/png",
+                },
+              ],
+            },
+          },
+        });
+      }, 100);
+    }
+    if (mode === "a11y-list-changed") {
+      window.setTimeout(() => {
+        send({
+          jsonrpc: "2.0",
+          method: "notifications/tools/list_changed",
+          params: {},
+        });
+      }, 250);
+    }
+    return;
+  }
+  if (message.method === "resources/subscribe") {
+    window.__mcpSubscribeCount = (window.__mcpSubscribeCount || 0) + 1;
+    if (mode === "subscribe-fails" || mode === "stale-read-marker") {
+      window.setTimeout(
+        () =>
+          send({
+            jsonrpc: "2.0",
+            id: message.id,
+            error: { code: -32601, message: "subscriptions unavailable" },
+          }),
+        250,
+      );
+      return;
+    }
+    activeSubscriptions.add(message.params.uri);
+    window.__mcpActiveSubscriptions = [...activeSubscriptions];
+    if (mode === "subscribe-late") {
+      window.setTimeout(
+        () => send({ jsonrpc: "2.0", id: message.id, result: {} }),
+        5250,
+      );
+      return;
+    }
+    const stale = message.params.uri.includes("overrides=stale");
+    if (stale) {
+      window.setTimeout(() => send({ jsonrpc: "2.0", id: message.id, result: {} }), 250);
+    } else {
+      send({ jsonrpc: "2.0", id: message.id, result: {} });
+    }
+    window.__mcpSubscribedUri = message.params.uri;
+    if (stale) return;
+    if (mode === "refresh") {
+      window.setTimeout(() => {
+        resourceUpdates += 1;
+        send({
+          jsonrpc: "2.0",
+          method: "notifications/resources/updated",
+          params: { uri: message.params.uri },
+        });
+      }, 300);
+    }
+    return;
+  }
+  if (message.method === "resources/unsubscribe") {
+    window.__mcpUnsubscribedUris = [
+      ...(window.__mcpUnsubscribedUris || []),
+      message.params.uri,
+    ];
+    const finish = () => {
+      activeSubscriptions.delete(message.params.uri);
+      window.__mcpActiveSubscriptions = [...activeSubscriptions];
+      send({ jsonrpc: "2.0", id: message.id, result: {} });
+    };
+    if (mode === "subscription-revisit") window.setTimeout(finish, 400);
+    else finish();
+    return;
+  }
+  if (message.method === "resources/read") {
+    reads += 1;
+    window.__mcpReadCount = reads;
+    if (mode === "read-notifies") {
+      send({
+        jsonrpc: "2.0",
+        method: "notifications/resources/updated",
+        params: { uri: message.params.uri },
+      });
+    }
+    window.__mcpReadUris = [...(window.__mcpReadUris || []), message.params.uri];
+    await new Promise((resolve) =>
+      setTimeout(
+        resolve,
+        mode === "slow-resource"
+          ? 5250
+          : mode === "stale-read-marker" || mode === "read-replaced-inline"
+            ? 500
+            : mode === "manual-poll" && reads === 2
+              ? 1000
+              : 150,
+      ),
+    );
+    if (mode === "fallback") {
+      send({
+        jsonrpc: "2.0",
+        id: message.id,
+        result: {
+          contents: [
+            {
+              uri: message.params.uri,
+              mimeType: "text/plain",
+              text: "No PNG is available",
+            },
+          ],
+        },
+      });
+      return;
+    }
+    const path =
+      mode === "before-after" && message.params.uri.includes("version=after")
+        ? "/preview-harness/fixtures/pages/_design-render-placeholder.png"
+        : mode === "refresh" && resourceUpdates > 0
+        ? "/preview-harness/fixtures/pages/_design-render-placeholder.png"
+        : "/preview-harness/fixtures/pages/_render-placeholder.png";
+    send({
+      jsonrpc: "2.0",
+      id: message.id,
+      result: {
+        contents: [
+          {
+            uri: message.params.uri,
+            mimeType: "image/png",
+            blob: await png(path),
+          },
+        ],
+      },
+    });
+    return;
+  }
+  if (message.method === "tools/list") {
+    toolLists += 1;
+    window.__mcpToolListCount = toolLists;
+    if (mode === "a11y-handshake" && !appInitialized) {
+      send({
+        jsonrpc: "2.0",
+        id: message.id,
+        error: { code: -32002, message: "App initialization is incomplete" },
+      });
+      return;
+    }
+    send({
+      jsonrpc: "2.0",
+      id: message.id,
+      result: {
+        tools: mode.startsWith("comments")
+          ? [
+              { name: "ui_builder_list_comments", inputSchema: { type: "object" } },
+              { name: "ui_builder_post_comment", inputSchema: { type: "object" } },
+            ]
+          : mode.startsWith("a11y") &&
+              mode !== "a11y-no-overlay" &&
+              (mode !== "a11y-list-changed" || toolLists > 1)
+            ? [{ name: "render_preview_overlay", inputSchema: { type: "object" } }]
+            : [],
+      },
+    });
+    return;
+  }
+  if (message.method === "tools/call") {
+    toolCalls += 1;
+    window.__mcpToolCallCount = toolCalls;
+    window.__mcpToolCall = message.params;
+    if (mode.startsWith("comments")) {
+      if (message.params.name === "ui_builder_list_comments") {
+        window.__mcpCommentListCall = message.params;
+        window.__mcpCommentListCalls = (window.__mcpCommentListCalls || 0) + 1;
+      } else if (message.params.name === "ui_builder_post_comment") {
+        window.__mcpCommentPostCall = message.params;
+        commentBoard = {
+          ...commentBoard,
+          sequence: commentBoard.sequence + 1,
+          threads: [
+            ...commentBoard.threads,
+            {
+              id: "thread-posted",
+              anchor: message.params.arguments.x == null
+                ? undefined
+                : { x: message.params.arguments.x, y: message.params.arguments.y },
+              resolved: false,
+              comments: [
+                {
+                  id: "comment-posted",
+                  authorId: "agent:viewer",
+                  displayName: "Viewer agent",
+                  body: message.params.arguments.body,
+                },
+              ],
+            },
+          ],
+        };
+        if (mode === "comments") {
+          await new Promise((resolve) => window.setTimeout(resolve, 250));
+        }
+      }
+      if (mode === "comments-denied") {
+        const capability = message.params.name === "ui_builder_post_comment" ? "write" : "read";
+        send({
+          jsonrpc: "2.0",
+          id: message.id,
+          result: {
+            isError: true,
+            content: [
+              {
+                type: "text",
+                text: `the presented identity lacks the UI-builder ${capability} capability`,
+              },
+            ],
+          },
+        });
+        return;
+      }
+      send({
+        jsonrpc: "2.0",
+        id: message.id,
+        result: { content: [{ type: "text", text: JSON.stringify(commentBoard) }] },
+      });
+      return;
+    }
+    if (mode === "a11y-unavailable") {
+      send({
+        jsonrpc: "2.0",
+        id: message.id,
+        result: {
+          isError: true,
+          content: [{ type: "text", text: "Accessibility overlays are unsupported" }],
+        },
+      });
+      return;
+    }
+    if (mode === "a11y") {
+      resourceUpdates += 1;
+      send({
+        jsonrpc: "2.0",
+        method: "notifications/resources/updated",
+        params: {
+          uri: "compose-preview://fixture/_app/com.example.Card?overrides=fixture",
+        },
+      });
+    }
+    if (mode === "a11y-polling") {
+      window.__mcpOverlayCallPending = true;
+      await new Promise((resolve) => setTimeout(resolve, 5250));
+      window.__mcpOverlayCallPending = false;
+    }
+    send({
+      jsonrpc: "2.0",
+      id: message.id,
+      result: {
+        content: [
+          {
+            type: "image",
+            mimeType: "image/png",
+            data: await png("/preview-harness/fixtures/pages/_design-render-placeholder.png"),
+          },
+        ],
+      },
+    });
+    return;
+  }
+  if (message.method === "ui/update-model-context") {
+    window.__mcpModelContext = message.params;
+    send({ jsonrpc: "2.0", id: message.id, result: {} });
+  }
+});
+
+frame.src = frame.dataset.src;

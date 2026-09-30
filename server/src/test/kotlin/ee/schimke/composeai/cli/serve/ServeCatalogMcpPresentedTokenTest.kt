@@ -35,7 +35,7 @@ class ServeCatalogMcpPresentedTokenTest {
   fun `a token argument is read off a tool call`() {
     assertEquals(
       "cpat_abc",
-      presented("""{"name":"list_projects","arguments":{"token":"cpat_abc"}}"""),
+      presented("""{"name":"catalog_list_projects","arguments":{"token":"cpat_abc"}}"""),
     )
   }
 
@@ -45,14 +45,26 @@ class ServeCatalogMcpPresentedTokenTest {
    */
   @Test
   fun `blank and absent are both nothing presented`() {
-    assertNull(presented("""{"name":"list_projects","arguments":{"token":"  "}}"""))
-    assertNull(presented("""{"name":"list_projects","arguments":{}}"""))
-    assertNull(presented("""{"name":"list_projects"}"""))
+    assertNull(presented("""{"name":"catalog_list_projects","arguments":{"token":"  "}}"""))
+    assertNull(presented("""{"name":"catalog_list_projects","arguments":{}}"""))
+    assertNull(presented("""{"name":"catalog_list_projects"}"""))
   }
 
   @Test
   fun `a message with no params presents nothing`() {
     assertNull(ServeCatalogMcp.presentedToken(json("""{"jsonrpc":"2.0","id":1,"method":"ping"}""")))
+  }
+
+  @Test
+  fun `a resource read presents its token directly in params`() {
+    assertEquals(
+      "cpat_resource",
+      ServeCatalogMcp.presentedToken(
+        json(
+          """{"jsonrpc":"2.0","id":1,"method":"resources/read","params":{"uri":"compose-preview://catalog/m3/card","_meta":{"compose-preview/token":"cpat_resource"}}}"""
+        )
+      ),
+    )
   }
 
   private fun presented(params: String): String? =
@@ -138,7 +150,7 @@ class ServeCatalogMcpPresentedTokenTest {
     val reply = runBlocking {
       mcp.handle(
         json(
-          """{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_previews",
+          """{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"catalog_list_previews",
              "arguments":{"catalog":"nope","token":"cpat_secret"}}}"""
         )
       ) {
@@ -155,7 +167,7 @@ class ServeCatalogMcpPresentedTokenTest {
     runBlocking {
       mcp.handle(
         json(
-          """{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"render_preview",
+          """{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"catalog_render_preview",
              "arguments":{"catalog":"m3","previewId":"card","token":"cpat_abc"}}}"""
         )
       ) { token ->

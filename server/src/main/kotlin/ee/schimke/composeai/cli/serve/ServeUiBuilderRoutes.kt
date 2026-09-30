@@ -29,6 +29,7 @@ import ee.schimke.composeai.uibuilder.service.UiBuilderSubscriptionCall
 import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
+import io.ktor.server.application.ApplicationCall
 import io.ktor.server.request.receiveStream
 import io.ktor.server.response.respondText
 import io.ktor.server.routing.Route
@@ -55,6 +56,8 @@ import kotlinx.serialization.json.Json
 internal fun Route.installUiBuilderRoutes(
   service: UiBuilderServicePort,
   authorization: ServeUiBuilderAuthorization,
+  /** Stable server address for documents created through the REST transport. */
+  serverOrigin: () -> String?,
   /**
    * The native render lane, on a host that can compile. Null simply leaves the route out: a box
    * with no playground bundle has no Kotlin compiler and no catalog classpath, and a route that
@@ -63,6 +66,15 @@ internal fun Route.installUiBuilderRoutes(
   nativePreview: UiBuilderNativePreviewLane? = null,
   /** The inline Remote Compose capture lane, left out on a host that cannot compile — as above. */
   inlineCapture: UiBuilderInlineCaptureLane? = null,
+  /**
+   * Sign-in state and the reason a write would be refused, for the identity endpoint. Supplied by
+   * the host, which knows the GitHub session and the allowlist; null details leave those fields
+   * out, and the editor behaves as it did before they existed.
+   */
+  identityDetails: (call: ApplicationCall, canWrite: Boolean) -> UiBuilderIdentityDetails? =
+    { _, _ ->
+      null
+    },
   /**
    * Turns the token a native render already minted into a live, streamed session, or null where
    * this host cannot.
@@ -232,7 +244,7 @@ internal fun Route.installUiBuilderRoutes(
       call.respondText("request body too large", status = HttpStatusCode.PayloadTooLarge)
       return@put
     }
-    val document =
+    val incoming =
       try {
         UI_BUILDER_JSON.decodeFromString(
           DesignDocumentV1.serializer(),
@@ -242,9 +254,9 @@ internal fun Route.installUiBuilderRoutes(
         call.respondText("body is not a DesignDocumentV1", status = HttpStatusCode.BadRequest)
         return@put
       }
-    if (document.id != designId) {
+    if (incoming.id != designId) {
       call.respondText(
-        "the document's id (${document.id}) is not the design this URL names",
+        "the document's id (${incoming.id}) is not the design this URL names",
         status = HttpStatusCode.BadRequest,
       )
       return@put
@@ -262,18 +274,35 @@ internal fun Route.installUiBuilderRoutes(
         call.respondText(existing.error.message, status = existing.httpStatus())
         return@put
       }
-      call.respondText(
-        "$designId already exists; If-None-Match: * requires that it does not",
-        status = HttpStatusCode.PreconditionFailed,
-      )
+      val outcome =
+        (existing as? UiBuilderServiceResponse.Snapshot)?.let {
+          existingDesignOutcome(designId, incoming, serverOrigin())
+        }
+      if (outcome is ServeUiBuilderCreate.Outcome.Refused) {
+        call.respondText(outcome.reason, status = HttpStatusCode.PreconditionFailed)
+      } else {
+        call.respondText(
+          "$designId already exists; If-None-Match: * requires that it does not",
+          status = HttpStatusCode.PreconditionFailed,
+        )
+      }
       return@put
     }
+    incomingHomeRefusal(incoming, serverOrigin())?.let { reason ->
+      call.respondText(reason, status = HttpStatusCode.Conflict)
+      return@put
+    }
+    val document = incoming.withServerHome(serverOrigin())
     when (val created = service.executeMapped(CreateDesignRequestV1(document), actor)) {
       is UiBuilderServiceResponse.Error -> {
-        val status =
-          if (created.error.code == ServiceErrorCodeV1.BAD_REQUEST)
-            HttpStatusCode.PreconditionFailed
-          else created.httpStatus()
+        // A bad request is the race with another create only when the design is there now. The
+        // service says "bad request" for every other refusal too — a design limit, a quota, a
+        // document its catalog does not validate — and those are not a failed precondition.
+        val raced =
+          created.error.code == ServiceErrorCodeV1.BAD_REQUEST &&
+            (service.executeMapped(OpenDesignRequestV1(designId), actor)
+              is UiBuilderServiceResponse.Snapshot)
+        val status = if (raced) HttpStatusCode.PreconditionFailed else created.httpStatus()
         call.respondText(created.error.message, status = status)
       }
       else -> {
@@ -508,8 +537,20 @@ internal fun Route.installUiBuilderRoutes(
       when (val decision = authorization.authorize(call, UiBuilderRouteCapability.READ)) {
         is UiBuilderAuthorizationDecision.Authorized -> decision.actorId
         UiBuilderAuthorizationDecision.Missing -> {
+          // Still a 401, and still one a bearer client understands — but with the way in, so a
+          // person who opened a private box's editor signed out is offered a sign-in rather than
+          // an editor that cannot start.
           call.response.headers.append(HttpHeaders.WWWAuthenticate, "Bearer")
-          call.respondText("authentication is required", status = HttpStatusCode.Unauthorized)
+          call.respondText(
+            UI_BUILDER_JSON.encodeToString(
+              UiBuilderIdentityRefusalV1(
+                message = "authentication is required",
+                signInUrl = identityDetails(call, false)?.signInUrl,
+              )
+            ),
+            ContentType.Application.Json,
+            HttpStatusCode.Unauthorized,
+          )
           return@get
         }
         UiBuilderAuthorizationDecision.Forbidden -> {
@@ -517,8 +558,20 @@ internal fun Route.installUiBuilderRoutes(
           return@get
         }
       }
+    val canWrite =
+      authorization.authorize(call, UiBuilderRouteCapability.WRITE) is
+        UiBuilderAuthorizationDecision.Authorized
+    val details = identityDetails(call, canWrite)
     call.respondText(
-      UI_BUILDER_JSON.encodeToString(UiBuilderIdentityV1(actorId = actorId)),
+      UI_BUILDER_JSON.encodeToString(
+        UiBuilderIdentityV1(
+          actorId = actorId,
+          signedIn = details?.signedIn,
+          canWrite = canWrite,
+          writeDeniedReason = details?.writeDeniedReason?.takeIf { !canWrite },
+          signInUrl = details?.signInUrl,
+        )
+      ),
       ContentType.Application.Json,
       HttpStatusCode.OK,
     )
@@ -699,7 +752,46 @@ private suspend fun io.ktor.server.application.ApplicationCall.respondProtocolEr
 }
 
 @kotlinx.serialization.Serializable
-internal data class UiBuilderIdentityV1(val schemaVersion: Int = 1, val actorId: String)
+internal data class UiBuilderIdentityV1(
+  val schemaVersion: Int = 1,
+  val actorId: String,
+  /**
+   * Whether a person (or an operator token) is behind this request, as opposed to the anonymous
+   * reader of a `--public` box. Absent from an older host.
+   */
+  val signedIn: Boolean? = null,
+  /**
+   * Whether this caller may create designs and apply edits here — asked of the same authorizer with
+   * the same capability the write routes demand, off the same call, so the editor and the server
+   * cannot disagree. A hint for what to offer, never a gate: every write is still authorized where
+   * it lands. Absent from an older host, which a client reads as "may write".
+   */
+  val canWrite: Boolean? = null,
+  /** Why [canWrite] is false, in words the person can act on. */
+  val writeDeniedReason: String? = null,
+  /** Where to sign in and come back to the editor, on a host with GitHub sign-in. */
+  val signInUrl: String? = null,
+)
+
+/**
+ * The 401 an unauthenticated identity request gets: still a refusal, but one that says where to
+ * sign in, so the editor can offer that instead of failing to start.
+ */
+@kotlinx.serialization.Serializable
+internal data class UiBuilderIdentityRefusalV1(
+  val schemaVersion: Int = 1,
+  val message: String,
+  val signInUrl: String? = null,
+)
+
+/**
+ * What the identity endpoint says beyond the actor, from the host that knows how people sign in.
+ */
+internal data class UiBuilderIdentityDetails(
+  val signedIn: Boolean,
+  val writeDeniedReason: String?,
+  val signInUrl: String?,
+)
 
 internal val UI_BUILDER_JSON = Json {
   encodeDefaults = true

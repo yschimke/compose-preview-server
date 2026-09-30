@@ -229,6 +229,37 @@ class ServeAgentGrantRoutingTest {
     }
   }
 
+  @Test
+  fun `the signed render png route is public but answers only a valid signature`() {
+    // An <img> sends no credential, so the route is not behind the grant; the signature is the
+    // authorization, and a missing or forged one is a 404, not a 401 that names the flow.
+    for (path in
+      listOf(
+        ServeCatalogMcp.IMAGE_URL_PATH,
+        "${ServeCatalogMcp.IMAGE_URL_PATH}?uri=compose-preview://catalog/m3/card&exp=9999999999&sig=x",
+      )) {
+      client.newCall(Request.Builder().url(url(path)).get().build()).execute().use { response ->
+        assertEquals(404, response.code, path)
+      }
+    }
+  }
+
+  @Test
+  fun `a private host permits only the static viewer resource before a grant`() {
+    val viewer =
+      mcpAnonymous(
+        """{"jsonrpc":"2.0","id":1,"method":"resources/read","params":{"uri":"${ServeCatalogMcp.MCP_APP_VIEWER_URI}"}}"""
+      )
+    assertEquals(200, viewer.first, viewer.second)
+    assertTrue(viewer.second.contains("Compose Preview"), viewer.second)
+
+    val catalogResource =
+      mcpAnonymous(
+        """{"jsonrpc":"2.0","id":2,"method":"resources/read","params":{"uri":"compose-preview://catalog/demo/previews/example"}}"""
+      )
+    assertEquals(401, catalogResource.first, catalogResource.second)
+  }
+
   /**
    * Discovery is open, and it is open for one reason: a client that cannot finish `initialize`
    * cannot reach the tool that asks a human for a credential either, so an agent holding nothing
@@ -257,6 +288,10 @@ class ServeAgentGrantRoutingTest {
     )
     // The instructions have to say how to get in, or an open handshake just moves the dead end.
     assertTrue(result["instructions"]!!.jsonPrimitive.content.contains("request_access"))
+    assertFalse(
+      result["instructions"]!!.jsonPrimitive.content.contains("`home` is canonical"),
+      "a catalog-only host must not advertise UI-builder rules",
+    )
 
     val listed = mcpAnonymous("""{"jsonrpc":"2.0","id":2,"method":"tools/list"}""")
     assertEquals(200, listed.first)
@@ -266,7 +301,7 @@ class ServeAgentGrantRoutingTest {
       }
     assertTrue(names.containsAll(listOf("request_access", "poll_access")), names.toString())
     // …and the catalog tools are still advertised, so the model knows what the grant is FOR.
-    assertTrue(names.contains("render_preview"))
+    assertTrue(names.contains("catalog_render_preview"))
 
     assertEquals(200, mcpAnonymous("""{"jsonrpc":"2.0","id":3,"method":"ping"}""").first)
     assertEquals(
@@ -383,7 +418,7 @@ class ServeAgentGrantRoutingTest {
     for (body in
       listOf(
         """{"jsonrpc":"2.0","id":1,"method":"resources/list"}""",
-        """{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"list_projects","arguments":{}}}""",
+        """{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"catalog_list_projects","arguments":{}}}""",
         """{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"status","arguments":{}}}""",
         // An unrecognised tool is gated too: unknown names are not a category to open by default.
         """{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"whatever","arguments":{}}}""",
@@ -494,6 +529,57 @@ class ServeAgentGrantRoutingTest {
   }
 
   @Test
+  fun `the handshake tells each client which access flow its declared elicitation supports`() {
+    fun instructions(capabilities: String, version: String = "2025-06-18"): Pair<String, String> {
+      val result =
+        json(
+            mcpAnonymous(
+                """{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"$version","capabilities":$capabilities,"clientInfo":{"name":"test","version":"1"}}}"""
+              )
+              .second
+          )["result"]!!
+          .jsonObject
+      return result["protocolVersion"]!!.jsonPrimitive.content to
+        result["instructions"]!!.jsonPrimitive.content
+    }
+    val (urlVersion, url) = instructions("""{"elicitation":{"form":{},"url":{}}}""", "2025-11-25")
+    assertEquals("2025-11-25", urlVersion)
+    assertTrue(url.contains("declared URL elicitation: call poll_access with urlMode=true"), url)
+    for (capabilities in
+      listOf("{}", """{"elicitation":{}}""", """{"elicitation":{"form":{}}}""")) {
+      val (version, text) = instructions(capabilities)
+      assertEquals("2025-06-18", version)
+      assertTrue(text.contains("did not declare URL elicitation: omit urlMode"), text)
+    }
+  }
+
+  @Test
+  fun `a per-request capability declaration decides poll_access URL mode`() {
+    val opened =
+      mcpAnonymous(
+        """{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"request_access","arguments":{}}}"""
+      )
+    val payload = json(toolText(opened.second))
+    val requestId = payload["requestId"]!!.jsonPrimitive.content
+    val secret = payload["deviceSecret"]!!.jsonPrimitive.content
+    fun poll(meta: String, urlMode: Boolean?) =
+      mcpAnonymous(
+          """{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"poll_access","_meta":{"${ServeCatalogMcp.CLIENT_CAPABILITIES_META}":$meta},"arguments":{"requestId":"$requestId","deviceSecret":"$secret","waitSeconds":0${urlMode?.let { ",\"urlMode\":$it" }.orEmpty()}}}}"""
+        )
+        .second
+
+    // Declared URL support: URL mode without the agent having to ask for it.
+    val declared = json(poll("""{"elicitation":{"url":{}}}""", urlMode = null))
+    assertEquals(-32042, declared["error"]!!.jsonObject["code"]!!.jsonPrimitive.content.toInt())
+
+    // Declared capabilities without URL mode: the text result, even if urlMode was passed.
+    val formOnly = poll("""{"elicitation":{"form":{}}}""", urlMode = true)
+    assertEquals("pending", json(toolText(formOnly))["status"]!!.jsonPrimitive.content)
+    val none = poll("{}", urlMode = true)
+    assertEquals("pending", json(toolText(none))["status"]!!.jsonPrimitive.content)
+  }
+
+  @Test
   fun `a denied URL-mode access request returns text and never a token`() {
     val opened =
       mcpAnonymous(
@@ -534,7 +620,7 @@ class ServeAgentGrantRoutingTest {
   fun `a token obtained in this session is usable in it without a header`() {
     val listProjects = { arguments: String ->
       mcpAnonymous(
-        """{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_projects","arguments":$arguments}}"""
+        """{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"catalog_list_projects","arguments":$arguments}}"""
       )
     }
     assertEquals(401, listProjects("{}").first)
@@ -550,7 +636,7 @@ class ServeAgentGrantRoutingTest {
     // door.
     val rendered =
       mcpAnonymous(
-        """{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"render_preview","arguments":{"catalog":"none","previewId":"none","token":"$token"}}}"""
+        """{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"catalog_render_preview","arguments":{"catalog":"none","previewId":"none","token":"$token"}}}"""
       )
     assertEquals(200, rendered.first, rendered.second)
     // The catalog does not exist here; what matters is that the refusal is about the catalog rather
@@ -558,12 +644,136 @@ class ServeAgentGrantRoutingTest {
     assertFalse(toolText(rendered.second).contains("live grant scope"), rendered.second)
   }
 
+  @Test
+  fun `an in-band token authorizes the resource linked by its render`() {
+    val opened =
+      mcpAnonymous(
+        """{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"request_access","arguments":{"scope":"live"}}}"""
+      )
+    val request = json(toolText(opened.second))
+    val requestId = request["requestId"]!!.jsonPrimitive.content
+    val deviceSecret = request["deviceSecret"]!!.jsonPrimitive.content
+    val (_, page) = get("/agent-access/$requestId?token=$operatorToken")
+    post(
+      "/agent-access/$requestId?token=$operatorToken",
+      "action=approve&csrf=${field(page, "csrf")}&scope=live&ttl=1800",
+      contentType = "application/x-www-form-urlencoded",
+    )
+    val polled =
+      mcpAnonymous(
+        """{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"poll_access","arguments":{"requestId":"$requestId","deviceSecret":"$deviceSecret"}}}"""
+      )
+    val token = json(toolText(polled.second))["token"]!!.jsonPrimitive.content
+
+    val rendered =
+      mcpAnonymous(
+        """{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"catalog_render_preview","arguments":{"catalog":"demo","previewId":"example","observe":"png","overrides":{"uiMode":"dark"},"token":"$token"}}}"""
+      )
+    assertEquals(200, rendered.first, rendered.second)
+    val resourceUri =
+      json(rendered.second)["result"]!!
+        .jsonObject["content"]!!
+        .jsonArray
+        .single { it.jsonObject["type"]!!.jsonPrimitive.content == "resource_link" }
+        .jsonObject["uri"]!!
+        .jsonPrimitive
+        .content
+    assertFalse(resourceUri.contains(token), "the replayable URI must not carry the grant secret")
+    assertFalse(rendered.second.contains(token), "the tool result must not echo the grant secret")
+
+    val read =
+      mcpAnonymous(
+        """{"jsonrpc":"2.0","id":4,"method":"resources/read","params":{"uri":"$resourceUri","_meta":{"compose-preview/token":"$token"}}}"""
+      )
+    assertEquals(200, read.first, read.second)
+    val contents = json(read.second)["result"]!!.jsonObject["contents"]!!.jsonArray
+    assertTrue(contents.single().jsonObject["blob"]!!.jsonPrimitive.content.isNotBlank())
+
+    // A host that reads the link itself cannot attach the in-band token. The link is signed for
+    // exactly this render, so that read succeeds with no credential at all...
+    assertTrue(resourceUri.contains("&exp=") && resourceUri.contains("&sig="), resourceUri)
+    val hostRead =
+      mcpAnonymous(
+        """{"jsonrpc":"2.0","id":5,"method":"resources/read","params":{"uri":"$resourceUri"}}"""
+      )
+    assertEquals(200, hostRead.first, hostRead.second)
+    assertTrue(
+      json(hostRead.second)["result"]!!
+        .jsonObject["contents"]!!
+        .jsonArray
+        .single()
+        .jsonObject["blob"]!!
+        .jsonPrimitive
+        .content
+        .isNotBlank(),
+      hostRead.second,
+    )
+
+    // ...but a tampered signature, or a different override state, still needs live scope.
+    val tampered =
+      mcpAnonymous(
+        """{"jsonrpc":"2.0","id":6,"method":"resources/read","params":{"uri":"${resourceUri.substringBeforeLast("&sig=")}&sig=AAAA"}}"""
+      )
+    assertTrue(tampered.second.contains("live grant scope is required"), tampered.second)
+    val otherState =
+      resourceUri.replace(
+        Regex("overrides=[^&]+"),
+        "overrides=" +
+          java.util.Base64.getUrlEncoder()
+            .withoutPadding()
+            .encodeToString("""{"uiMode":"light"}""".encodeToByteArray()),
+      )
+    val swapped =
+      mcpAnonymous(
+        """{"jsonrpc":"2.0","id":7,"method":"resources/read","params":{"uri":"$otherState"}}"""
+      )
+    assertTrue(swapped.second.contains("live grant scope is required"), swapped.second)
+    // An unsigned default-state read is still gated at the door.
+    val unsigned =
+      mcpAnonymous(
+        """{"jsonrpc":"2.0","id":8,"method":"resources/read","params":{"uri":"${resourceUri.substringBefore('?')}"}}"""
+      )
+    assertEquals(401, unsigned.first, unsigned.second)
+
+    // Replaying the link through catalog_render_preview renders the state it names, not the
+    // default.
+    val replayed =
+      mcpAnonymous(
+        """{"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"catalog_render_preview","arguments":{"uri":"$resourceUri","observe":"png","token":"$token"}}}"""
+      )
+    val replayedUri =
+      json(replayed.second)["result"]!!
+        .jsonObject["content"]!!
+        .jsonArray
+        .single { it.jsonObject["type"]!!.jsonPrimitive.content == "resource_link" }
+        .jsonObject["uri"]!!
+        .jsonPrimitive
+        .content
+    assertEquals(
+      Regex("overrides=[^&]+").find(resourceUri)!!.value,
+      Regex("overrides=[^&]+").find(replayedUri)!!.value,
+    )
+    val conflicting =
+      mcpAnonymous(
+        """{"jsonrpc":"2.0","id":10,"method":"tools/call","params":{"name":"catalog_render_preview","arguments":{"uri":"$resourceUri","overrides":{"uiMode":"light"},"token":"$token"}}}"""
+      )
+    assertTrue(
+      conflicting.second.contains("differ from the 'overrides' argument"),
+      conflicting.second,
+    )
+    val unsupported =
+      mcpAnonymous(
+        """{"jsonrpc":"2.0","id":11,"method":"tools/call","params":{"name":"catalog_history_list","arguments":{"uri":"$resourceUri","token":"$token"}}}"""
+      )
+    assertTrue(unsupported.second.contains("does not apply"), unsupported.second)
+  }
+
   /** A bad token in the argument is no token, not a way past the gate. */
   @Test
   fun `an unknown token argument is refused like none at all`() {
     val (code, body) =
       mcpAnonymous(
-        """{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_projects","arguments":{"token":"cpat_not-a-real-grant"}}}"""
+        """{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"catalog_list_projects","arguments":{"token":"cpat_not-a-real-grant"}}}"""
       )
     assertEquals(401, code, body)
   }
@@ -737,7 +947,8 @@ class ServeAgentGrantRoutingTest {
         """{"jsonrpc":"2.0","id":2,"method":"resources/list","params":{}}""",
       )
     val resources = json(listed.second)["result"]!!.jsonObject["resources"]!!.jsonArray
-    assertEquals(2, resources.size)
+    // The viewer, the library app (#1241) and the two catalogs' previews.
+    assertEquals(4, resources.size)
     val uri =
       resources
         .single { it.jsonObject["uri"]!!.jsonPrimitive.content.contains("/demo/") }
@@ -748,7 +959,7 @@ class ServeAgentGrantRoutingTest {
     val projects =
       mcp(
         token,
-        """{"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"list_projects","arguments":{}}}""",
+        """{"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"catalog_list_projects","arguments":{}}}""",
       )
     val projectText =
       json(projects.second)["result"]!!
@@ -813,7 +1024,7 @@ class ServeAgentGrantRoutingTest {
     val refused =
       mcp(
         previewToken,
-        """{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"render_preview","arguments":{"catalog":"demo","previewId":"example"}}}""",
+        """{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"catalog_render_preview","arguments":{"catalog":"demo","previewId":"example"}}}""",
       )
     assertTrue(refused.second.contains("'live' was not approved"))
 
@@ -821,18 +1032,29 @@ class ServeAgentGrantRoutingTest {
     val rendered =
       mcp(
         liveToken,
-        """{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"render_preview","arguments":{"catalog":"demo","previewId":"example","observe":"png"}}}""",
+        """{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"catalog_render_preview","arguments":{"catalog":"demo","previewId":"example","observe":"png"}}}""",
       )
     val content = json(rendered.second)["result"]!!.jsonObject["content"]!!.jsonArray
-    assertEquals("image", content.single().jsonObject["type"]!!.jsonPrimitive.content)
+    assertEquals(
+      "image",
+      content
+        .single { it.jsonObject["type"]!!.jsonPrimitive.content == "image" }
+        .jsonObject["type"]!!
+        .jsonPrimitive
+        .content,
+    )
 
     val observed =
       mcp(
         liveToken,
-        """{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"render_preview","arguments":{"catalog":"demo","previewId":"example"}}}""",
+        """{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"catalog_render_preview","arguments":{"catalog":"demo","previewId":"example"}}}""",
       )
     val observation =
-      json(observed.second)["result"]!!.jsonObject["content"]!!.jsonArray.single().jsonObject
+      json(observed.second)["result"]!!
+        .jsonObject["content"]!!
+        .jsonArray
+        .single { it.jsonObject["type"]!!.jsonPrimitive.content == "text" }
+        .jsonObject
     assertEquals("text", observation["type"]!!.jsonPrimitive.content)
     assertTrue(observation["text"]!!.jsonPrimitive.content.contains("\"sha256\""))
   }

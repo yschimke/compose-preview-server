@@ -10,6 +10,8 @@ import ee.schimke.composeai.daemon.protocol.DataProductCapability
 import ee.schimke.composeai.io.SystemFileSystem
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
+import kotlin.time.Duration
+import kotlin.time.Duration.Companion.seconds
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.contentOrNull
@@ -57,6 +59,13 @@ class DaemonSupervisor(
    */
   private val replicasPerDaemon: Int = DEFAULT_REPLICAS_PER_DAEMON,
   /**
+   * How long [spawn] waits for the `initialize` response. A Robolectric daemon reads nothing until
+   * its first sandbox is up, which took ~45s for a Wear OS module; the client's 30s default then
+   * failed the handshake and left the cached capabilities, devices and discovery empty for the
+   * daemon's lifetime even though renders worked. See [DEFAULT_INITIALIZE_TIMEOUT].
+   */
+  private val initializeTimeout: Duration = DEFAULT_INITIALIZE_TIMEOUT,
+  /**
    * D1 — kinds the supervisor passes through `initialize.options.attachDataProducts` to every
    * spawned daemon. Configures "always-on" data products (e.g. `a11y/atf` for ambient diagnostic
    * squigglies). Empty list (the default) keeps the wire absent — no global attach.
@@ -81,6 +90,13 @@ class DaemonSupervisor(
    */
   private val defaultExtensions: List<String> = emptyList(),
   private val fileSystem: FileSystem = SystemFileSystem,
+  /**
+   * Where registrations live beyond this object: the id → path map [project] and [daemonFor] fall
+   * back to when asked for an id they do not hold. In memory by default; [DaemonMcpMain] passes the
+   * persistent one so a registration survives a restart and is shared with sibling server
+   * processes.
+   */
+  val workspaceStore: WorkspaceStore = WorkspaceStore(file = null),
 ) {
 
   init {
@@ -126,6 +142,7 @@ class DaemonSupervisor(
           knownModules = knownModules.toMutableList(),
         )
       }
+    workspaceStore.remember(workspaceId.value, canonical, name)
     // Idempotent: merge module hints if the second call learned more.
     if (knownModules.isNotEmpty()) {
       synchronized(project.knownModules) {
@@ -140,6 +157,7 @@ class DaemonSupervisor(
    * an unknown id is a no-op.
    */
   fun unregisterProject(workspaceId: WorkspaceId) {
+    workspaceStore.forget(workspaceId.value)
     val project = projects.remove(workspaceId) ?: return
     project.daemons.values.forEach { runCatching { it.shutdown() } }
     project.daemons.clear()
@@ -147,7 +165,43 @@ class DaemonSupervisor(
 
   fun listProjects(): List<RegisteredProject> = projects.values.toList()
 
-  fun project(workspaceId: WorkspaceId): RegisteredProject? = projects[workspaceId]
+  /**
+   * The project for [workspaceId], registering it again from [workspaceStore] when this supervisor
+   * does not hold it (a restart, or a registration made by another server process): a known id
+   * never answers "workspace not registered".
+   */
+  fun project(workspaceId: WorkspaceId): RegisteredProject? =
+    projects[workspaceId] ?: restore(workspaceId)
+
+  /**
+   * Re-registers every stored workspace whose path is one of [dirs], lies inside one, or holds one:
+   * after a restart, the client's roots (or the working directory) bring their builds back without
+   * a `register_project`. Returns the projects restored or already live.
+   */
+  fun restoreMatching(dirs: List<File>): List<RegisteredProject> {
+    val wanted = dirs.map { runCatching { it.canonicalFile }.getOrDefault(it.absoluteFile) }
+    return workspaceStore
+      .all()
+      .filter { entry ->
+        val path = File(entry.path)
+        wanted.any { path.startsWith(it) || it.startsWith(path) }
+      }
+      .mapNotNull { project(WorkspaceId(it.id)) }
+  }
+
+  /** Re-registers a stored id from its path, under the same id; null when unknown or gone. */
+  private fun restore(workspaceId: WorkspaceId): RegisteredProject? {
+    val entry = workspaceStore.get(workspaceId.value) ?: return null
+    val dir = File(entry.path).takeIf(File::isDirectory) ?: return null
+    return projects.computeIfAbsent(workspaceId) {
+      RegisteredProject(
+        workspaceId = workspaceId,
+        rootProjectName = entry.name?.takeIf { it.isNotBlank() } ?: dir.name,
+        path = runCatching { dir.canonicalFile }.getOrDefault(dir.absoluteFile),
+        knownModules = mutableListOf(),
+      )
+    }
+  }
 
   /**
    * Forgets the [SupervisedDaemon] for [workspaceId] + [modulePath] and tears down any peer
@@ -176,7 +230,8 @@ class DaemonSupervisor(
    * cold-start time (3-10s for Robolectric, ~600ms for desktop).
    */
   fun daemonFor(workspaceId: WorkspaceId, modulePath: String): SupervisedDaemon {
-    val project = projects[workspaceId] ?: error("workspace not registered: $workspaceId")
+    val project = project(workspaceId) ?: error("workspace not registered: $workspaceId")
+    workspaceStore.touch(workspaceId.value)
     return project.daemons.computeIfAbsent(modulePath) { spawn(project, modulePath) }
   }
 
@@ -249,6 +304,7 @@ class DaemonSupervisor(
           moduleId = descriptor.modulePath,
           moduleProjectDir = descriptor.workingDirectory,
           attachDataProducts = globalAttachDataProducts.takeIf { it.isNotEmpty() },
+          timeout = initializeTimeout,
         )
       // Cache the full result so the public RenderSession view (`supervised.session`) can
       // expose it through `RenderSession.initializeResult`. Subsequent successful re-spawns
@@ -345,6 +401,23 @@ class DaemonSupervisor(
      * `--replicas-per-daemon N` flag or the `composeai.mcp.replicasPerDaemon` system property.
      */
     const val DEFAULT_REPLICAS_PER_DAEMON: Int = 4
+
+    /**
+     * Default [initializeTimeout]: long enough for a cold Robolectric sandbox boot on a busy
+     * machine. Override via the `composeai.mcp.initializeTimeoutSeconds` system property or the
+     * `COMPOSE_PREVIEW_INITIALIZE_TIMEOUT_SECONDS` environment variable.
+     */
+    val DEFAULT_INITIALIZE_TIMEOUT: Duration = 120.seconds
+
+    /**
+     * The out-of-the-box replica count for a machine with [cores] processors: half the cores less
+     * the primary, capped at [DEFAULT_REPLICAS_PER_DAEMON]. Each replica is a sandbox JVM that
+     * boots in the background (6–14 s each on a 4-core machine) and competes with the first renders
+     * (issue #1174), so a 4-core machine gets 1 and an 8-core one 3. `--replicas-per-daemon` and
+     * `composeai.mcp.replicasPerDaemon` still override it.
+     */
+    fun defaultReplicasFor(cores: Int): Int =
+      (cores / 2 - 1).coerceIn(0, DEFAULT_REPLICAS_PER_DAEMON)
   }
 }
 
@@ -676,9 +749,9 @@ fun interface DescriptorProvider {
      * Gradle/IDE metadata, `node_modules`, `src`, and non-`compose-previews` `build/` subtrees so
      * the walk stays cheap.
      */
-    private fun indexDescriptorsByModulePath(
+    internal fun indexDescriptorsByModulePath(
       projectRoot: File,
-      fileSystem: FileSystem,
+      fileSystem: FileSystem = SystemFileSystem,
     ): Map<String, File> {
       val index = HashMap<String, File>()
       projectRoot

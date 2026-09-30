@@ -791,10 +791,18 @@ The menu is the browser's door. The shell's is `design`, a command on the server
 
 ```shell
 compose-preview-server design list                       # what this credential can see
+compose-preview-server design status --workspace . --summary  # comments and temporary copies
 compose-preview-server design render my-widget -o cover.png   # or --format svg
+compose-preview-server design view   my-widget --select title # the editor canvas + JSON
 compose-preview-server design export my-widget -o Widget.kt   # the generated Kotlin
 compose-preview-server design get    my-widget > design.json  # the document
+compose-preview-server design validate my-widget --operations ops.json  # check, save nothing
 ```
+
+`design validate` checks the stored design, a batch of `--operations` against it, or a whole
+`--document`, through `ui_builder_validate`: every problem the editor's problems panel would show
+goes to stderr and the exit code is non-zero when one is an error. See
+[`CATALOG_MCP.md`](design/CATALOG_MCP.md#checking-before-writing-and-the-shapes).
 
 `--server <url>` picks the host (a local one by default, `$COMPOSE_PREVIEW_SERVER` otherwise) and
 `--revision N` pins, exactly as `?revision=` does on the URLs above. Every verb runs the same
@@ -815,6 +823,13 @@ Three things it does deliberately:
 - **A refusal is not an empty file.** When the generator cannot express a design — `asset/image`
   has no Remote Compose counterpart, an image background needs a `RemoteImageBitmap` — those
   diagnostics go to stderr, nothing is written, and the exit code is non-zero.
+
+`status` is deliberately different from the interactive verbs. It inventories only the bounded
+`ui-builder/designs/index.json` in `--workspace`, contacts only the independently selected
+`--server` when a document's server home has the same origin, and shares one timeout across all
+remote reads. It never requests a new grant. `--summary` is a fixed, credential-free one-line
+SessionStart result (silent when clean); `--json` returns the redacted
+`compose-preview-design-status/v1` envelope for other callers.
 
 ### When the server is the thing that is broken
 
@@ -1154,6 +1169,7 @@ with the same bearer. One tool per protocol request, plus the ones the contract 
 | Tool | Capability | What it answers |
 | --- | --- | --- |
 | `ui_builder_list_catalogs` | `ui-builder-read` | What a design's `catalogPin` may name, as a summary with the pin; `full: true` for the whole capability |
+| `ui_builder_search_components` | `ui-builder-read` | The summary of only the components whose id, role or trait contains `query` (optionally within one `catalog`) |
 | `ui_builder_list_designs` | `ui-builder-read` | The designs on this box |
 | `ui_builder_get_design` | `ui-builder-read` | One whole document, and the revision to quote next; the pinned catalog only with `includeCatalog: true` |
 | `ui_builder_await_design` | `ui-builder-read` | Waits for somebody else to change the design, and returns what they changed |
@@ -1173,9 +1189,10 @@ with the same bearer. One tool per protocol request, plus the ones the contract 
 | `ui_builder_react_to_comment` | `ui-builder-write` | An emoji on one comment, or `on: false` to take it back; the lightest acknowledgement |
 | `ui_builder_resolve_comment_thread` | `ui-builder-write` | Closes a thread once it is answered, or reopens one |
 
-They are absent from `tools/list` on a box that serves no builder, and `ui_builder_render_native` is
-absent on one that cannot compile — a client reads what this server can do off the tool list rather
-than off a failed call. Replies are the released `McpResponseEnvelopeV1`, except the native render,
+They are absent from `tools/list` on a box that serves no builder. A builder always lists
+`ui_builder_render_native`; on a host that cannot compile, it returns the stable
+`NATIVE_RENDER_UNAVAILABLE` refusal after checking that the caller may read the design. Replies are
+the released `McpResponseEnvelopeV1`, except the native render,
 the rename and the delete, which have no request type in the contract and say so in their own
 descriptions; and a snapshot's `catalog` is left out unless asked for, because an agent pays for it
 as context on every call and the design's `catalogPin` already names it.

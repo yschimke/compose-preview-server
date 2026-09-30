@@ -166,7 +166,7 @@ jobs:
           java-version: |
             21
             17
-      - uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
+      - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
         with:
           cache-provider: basic
           cache-read-only: true
@@ -181,6 +181,16 @@ jobs:
         run: >-
           gh release upload "${{ needs.release-please.outputs.publish_tag }}"
           "mcp/build/distributions/compose-preview-mcp-${PLUGIN_VERSION}.tar.gz"
+          --clobber
+      # The same self-contained MCP App both servers embed, as a static file for hosts with no MCP
+      # Apps bridge (for example an Antigravity <agent-embed>): they pass a result in the URL
+      # fragment, `#compose-preview-result=<base64url envelope>`, or inline it in the file as
+      # `<script type="application/json" id="compose-preview-result">` (Antigravity renders the file
+      # through <iframe srcdoc>, where no fragment arrives). Both are documented in the file itself.
+      - name: Upload portable MCP App viewer
+        run: >-
+          gh release upload "${{ needs.release-please.outputs.publish_tag }}"
+          "mcp-app/compose-preview-viewer.html"
           --clobber
 
   # One release goes out, or none does. The GitHub release stays a DRAFT until the distribution lane

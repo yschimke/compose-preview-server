@@ -16,8 +16,10 @@ import io.modelcontextprotocol.kotlin.sdk.types.ElicitResult
 import io.modelcontextprotocol.kotlin.sdk.types.EmbeddedResource
 import io.modelcontextprotocol.kotlin.sdk.types.EmptyResult
 import io.modelcontextprotocol.kotlin.sdk.types.GetPromptRequest
+import io.modelcontextprotocol.kotlin.sdk.types.Icon
 import io.modelcontextprotocol.kotlin.sdk.types.ImageContent
 import io.modelcontextprotocol.kotlin.sdk.types.Implementation
+import io.modelcontextprotocol.kotlin.sdk.types.InitializeResult
 import io.modelcontextprotocol.kotlin.sdk.types.ListPromptsRequest
 import io.modelcontextprotocol.kotlin.sdk.types.ListPromptsResult
 import io.modelcontextprotocol.kotlin.sdk.types.ListResourcesRequest
@@ -34,6 +36,7 @@ import io.modelcontextprotocol.kotlin.sdk.types.ReadResourceResult
 import io.modelcontextprotocol.kotlin.sdk.types.RequestId
 import io.modelcontextprotocol.kotlin.sdk.types.Resource
 import io.modelcontextprotocol.kotlin.sdk.types.ResourceContents
+import io.modelcontextprotocol.kotlin.sdk.types.ResourceLink
 import io.modelcontextprotocol.kotlin.sdk.types.ResourceUpdatedNotification
 import io.modelcontextprotocol.kotlin.sdk.types.ResourceUpdatedNotificationParams
 import io.modelcontextprotocol.kotlin.sdk.types.ServerCapabilities
@@ -41,12 +44,13 @@ import io.modelcontextprotocol.kotlin.sdk.types.SubscribeRequest
 import io.modelcontextprotocol.kotlin.sdk.types.TextContent
 import io.modelcontextprotocol.kotlin.sdk.types.TextResourceContents
 import io.modelcontextprotocol.kotlin.sdk.types.Tool
+import io.modelcontextprotocol.kotlin.sdk.types.ToolAnnotations
 import io.modelcontextprotocol.kotlin.sdk.types.ToolSchema
 import io.modelcontextprotocol.kotlin.sdk.types.UnsubscribeRequest
 import java.io.Closeable
+import java.io.File
 import java.io.InputStream
 import java.io.OutputStream
-import java.util.UUID
 import java.util.concurrent.CancellationException
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.ConcurrentHashMap
@@ -54,6 +58,7 @@ import kotlin.time.Duration.Companion.milliseconds
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.io.asSink
 import kotlinx.io.asSource
@@ -101,6 +106,11 @@ class McpSession(
   private val output: OutputStream,
   private val configure: (ServerSession) -> Unit,
   private val onClose: () -> Unit,
+  /**
+   * The `initialize` result's `instructions` for the connecting client's `clientInfo.name`; null
+   * sends none.
+   */
+  private val instructions: (clientName: String?) -> String? = { null },
 ) : Closeable, Session {
   private val closed = CompletableFuture<Unit>()
   @Volatile private var sdkSession: ServerSession? = null
@@ -119,8 +129,11 @@ class McpSession(
               // replies "Tool <name> not found". Constructing the ServerSession directly lets us
               // set every handler first, then connect, so no request is ever served by the SDK
               // defaults. ServerSession's constructor wires up initialize/ping/logging itself.
-              val session = ServerSession(serverInfo, options, UUID.randomUUID().toString())
+              // The third argument is the initialize `instructions`, not a session id (#1163);
+              // the per-client text replaces it in [wrapInitialize].
+              val session = ServerSession(serverInfo, options, instructions(null))
               sdkSession = session
+              wrapInitialize(session)
               session.onClose {
                 closed.complete(Unit)
                 onClose()
@@ -146,6 +159,36 @@ class McpSession(
 
   fun start() {
     thread.start()
+  }
+
+  /**
+   * Routes `initialize` through the SDK's own handler, which records the client's capabilities and
+   * version, then logs the client to stderr and swaps in the instructions for that client (#1109).
+   * The SDK takes the instructions once, at construction, before any client is known.
+   */
+  private fun wrapInitialize(session: ServerSession) {
+    val method = Method.Defined.Initialize.value
+    val builtIn = session.requestHandlers[method] ?: return
+    session.removeRequestHandler(Method.Defined.Initialize)
+    val fallback = session.fallbackRequestHandler
+    session.fallbackRequestHandler = { request, extra ->
+      if (request.method == method) {
+        val result = builtIn(request, extra)
+        val client = session.clientVersion
+        System.err.println(
+          "compose-preview-mcp: client ${client?.name ?: "<unknown>"} ${client?.version ?: ""}"
+            .trimEnd()
+        )
+        if (result is InitializeResult) result.copy(instructions = instructions(client?.name))
+        else result
+      } else {
+        fallback?.invoke(request, extra)
+          ?: throw McpException(
+            RPCError.ErrorCode.METHOD_NOT_FOUND,
+            "Method not found: ${request.method}",
+          )
+      }
+    }
   }
 
   fun awaitClose() {
@@ -225,7 +268,48 @@ class McpSession(
     }
   }
 
+  /**
+   * True when the client declared the MCP Apps extension (`io.modelcontextprotocol/ui`, under
+   * `capabilities.extensions`, or `experimental` for earlier hosts): it renders the viewer, so a
+   * result without an image leaves the viewer empty.
+   */
+  val supportsMcpApps: Boolean
+    get() {
+      val capabilities = sdkSession?.clientCapabilities ?: return false
+      return capabilities.extensions?.containsKey(MCP_APPS_EXTENSION) == true ||
+        capabilities.experimental?.containsKey(MCP_APPS_EXTENSION) == true
+    }
+
+  /** The client's `clientInfo.name` from `initialize`, or null before the handshake. */
+  val clientName: String?
+    get() = sdkSession?.clientVersion?.name
+
+  /**
+   * Local directories the client offers as MCP roots. Empty when the client declared no `roots`
+   * capability, did not answer in time, or offered only non-`file:` roots.
+   */
+  suspend fun rootDirectories(timeoutMs: Long = ROOTS_TIMEOUT_MS): List<File> {
+    val session = sdkSession ?: return emptyList()
+    if (session.clientCapabilities?.roots == null) return emptyList()
+    val roots =
+      try {
+        withTimeoutOrNull(timeoutMs) {
+          session.listRoots(options = RequestOptions(timeout = timeoutMs.milliseconds)).roots
+        }
+      } catch (cancelled: CancellationException) {
+        throw cancelled
+      } catch (_: Exception) {
+        null
+      } ?: return emptyList()
+    return roots.mapNotNull { root ->
+      runCatching { File(java.net.URI(root.uri)) }.getOrNull()?.takeIf { it.isDirectory }
+    }
+  }
+
   internal companion object {
+    /** Bound on a `roots/list` round trip; a client that never answers must not stall a render. */
+    const val ROOTS_TIMEOUT_MS = 5_000L
+
     /**
      * A person answering a form needs longer than the SDK's 60-second request default; a shorter
      * bound would silently fall back while their dialog is still open.
@@ -300,7 +384,8 @@ internal fun installComposePreviewHandlers(
       name: String,
       arguments: Map<String, String>,
     ) -> io.modelcontextprotocol.kotlin.sdk.types.GetPromptResult,
-  callTool: suspend (name: String, arguments: JsonElement?) -> CallToolResult,
+  callTool:
+    suspend (name: String, arguments: JsonElement?, progressToken: JsonElement?) -> CallToolResult,
   listResources: () -> List<ee.schimke.composeai.mcp.protocol.ResourceDescriptor>,
   readResource:
     (
@@ -324,7 +409,13 @@ internal fun installComposePreviewHandlers(
     }
   }
   sdkSession.setRequestHandler<CallToolRequest>(Method.Defined.ToolsCall) { request, _ ->
-    callTool(request.name, request.arguments).toSdkCallToolResult()
+    // The request's `_meta` rides in the coroutine context, so a tool that needs a host-injected
+    // key (OpenAI's `openai/resource.path`, see [OpenAiRequestMeta]) reads it without every tool
+    // signature growing a parameter.
+    withContext(OpenAiRequestMeta(request.meta?.json)) {
+        callTool(request.name, request.arguments, request.meta?.json?.get("progressToken"))
+      }
+      .toSdkCallToolResult()
   }
   sdkSession.setRequestHandler<ListResourcesRequest>(Method.Defined.ResourcesList) { _, _ ->
     ListResourcesResult(resources = listResources().map { it.toSdkResource() }, nextCursor = null)
@@ -344,13 +435,22 @@ internal fun installComposePreviewHandlers(
   }
 }
 
-internal fun composePreviewServerOptions(): ServerOptions =
+/**
+ * [extensions] are server capability extensions such as OpenAI's `openai/settings` (#1242). They go
+ * out twice, as the spec's `capabilities.extensions` and the legacy `capabilities.experimental`,
+ * because MCP `2025-11-25` and earlier hosts read the latter.
+ */
+internal fun composePreviewServerOptions(
+  extensions: Map<String, JsonObject> = emptyMap()
+): ServerOptions =
   ServerOptions(
     capabilities =
       ServerCapabilities(
         tools = ServerCapabilities.Tools(listChanged = true),
         resources = ServerCapabilities.Resources(subscribe = true, listChanged = true),
         prompts = ServerCapabilities.Prompts(listChanged = false),
+        experimental = extensions.takeIf { it.isNotEmpty() }?.let(::JsonObject),
+        extensions = extensions.takeIf { it.isNotEmpty() },
       )
   )
 
@@ -367,6 +467,20 @@ internal fun ToolDef.toSdkTool(): Tool {
           },
       ),
     description = description,
+    title = title,
+    icons = icons?.map { Icon(src = it.src, mimeType = it.mimeType, sizes = it.sizes) },
+    meta = meta,
+    outputSchema =
+      outputSchema?.let { schema ->
+        ToolSchema(
+          properties = schema["properties"] as? JsonObject ?: JsonObject(emptyMap()),
+          required =
+            (schema["required"] as? kotlinx.serialization.json.JsonArray)?.mapNotNull {
+              it.jsonPrimitive.contentOrNull
+            },
+        )
+      },
+    annotations = readOnlyHint?.let { ToolAnnotations(readOnlyHint = it) },
   )
 }
 
@@ -380,9 +494,9 @@ private fun ee.schimke.composeai.mcp.protocol.ResourceContents.toSdkResourceCont
   ResourceContents =
   when (this) {
     is ee.schimke.composeai.mcp.protocol.ResourceContents.Text ->
-      TextResourceContents(text = text, uri = uri, mimeType = mimeType)
+      TextResourceContents(text = text, uri = uri, mimeType = mimeType, meta = meta)
     is ee.schimke.composeai.mcp.protocol.ResourceContents.Blob ->
-      BlobResourceContents(blob = blob, uri = uri, mimeType = mimeType)
+      BlobResourceContents(blob = blob, uri = uri, mimeType = mimeType, meta = meta)
   }
 
 internal fun CallToolResult.toSdkCallToolResult():
@@ -390,12 +504,16 @@ internal fun CallToolResult.toSdkCallToolResult():
   io.modelcontextprotocol.kotlin.sdk.types.CallToolResult(
     content = content.map { it.toSdkContent() },
     isError = isError ?: false,
+    meta = meta,
+    structuredContent = structuredContent,
   )
 
 private fun ContentBlock.toSdkContent(): SdkContentBlock =
   when (this) {
     is ContentBlock.Text -> TextContent(text = text)
     is ContentBlock.Image -> ImageContent(data = data, mimeType = mimeType)
+    is ContentBlock.ResourceLink ->
+      ResourceLink(uri = uri, name = name, mimeType = mimeType, description = description)
     is ContentBlock.EmbeddedResource ->
       EmbeddedResource(resource = resource.toSdkResourceContents())
   }
@@ -421,5 +539,12 @@ fun pngCallToolResult(bytesBase64: String): CallToolResult =
   CallToolResult(content = listOf(ContentBlock.Image(data = bytesBase64, mimeType = "image/png")))
 
 /** Convenience: error response — `isError = true` per MCP spec for tool-level errors. */
-fun errorCallToolResult(message: String): CallToolResult =
-  CallToolResult(content = listOf(ContentBlock.Text(message)), isError = true)
+fun errorCallToolResult(message: String, structured: JsonObject? = null): CallToolResult =
+  CallToolResult(
+    content = listOf(ContentBlock.Text(message)),
+    isError = true,
+    structuredContent = structured,
+  )
+
+/** The MCP Apps client capability key (MCP Apps spec 2026-01-26). */
+internal const val MCP_APPS_EXTENSION: String = "io.modelcontextprotocol/ui"

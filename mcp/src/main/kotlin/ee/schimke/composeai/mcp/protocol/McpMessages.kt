@@ -58,10 +58,38 @@ import kotlinx.serialization.json.jsonObject
 // =====================================================================
 
 @Serializable
-data class ToolDef(val name: String, val description: String, val inputSchema: JsonElement)
+data class ToolDef(
+  val name: String,
+  val description: String,
+  val inputSchema: JsonElement,
+  val meta: JsonObject? = null,
+  /** MCP `title`: the human-readable name a host shows, e.g. on an OpenAI entrypoint. */
+  val title: String? = null,
+  /** MCP `icons` (2025-11-25): shown beside an entrypoint tool in host navigation. */
+  val icons: List<ToolIcon>? = null,
+  /** MCP `outputSchema`: the shape of `structuredContent`, e.g. OpenAI's `SettingsReadResult`. */
+  val outputSchema: JsonObject? = null,
+  /** MCP `annotations.readOnlyHint`: true for a tool that never changes anything. */
+  val readOnlyHint: Boolean? = null,
+)
+
+/** One MCP `Icon`: a `src` URI (a `data:` URI for inline SVG), its type and sizes. */
+@Serializable
+data class ToolIcon(
+  val src: String,
+  val mimeType: String? = null,
+  val sizes: List<String>? = null,
+)
 
 @Serializable
-data class CallToolResult(val content: List<ContentBlock>, val isError: Boolean? = null)
+data class CallToolResult(
+  val content: List<ContentBlock>,
+  val isError: Boolean? = null,
+  /** MCP `_meta`: debug data for clients and tests, kept out of what the agent reads. */
+  val meta: JsonObject? = null,
+  /** MCP `structuredContent`: the machine-readable form of the result, for apps and agents. */
+  val structuredContent: JsonObject? = null,
+)
 
 @Serializable
 sealed interface ContentBlock {
@@ -70,6 +98,15 @@ sealed interface ContentBlock {
   @Serializable
   @SerialName("image")
   data class Image(val data: String, val mimeType: String) : ContentBlock
+
+  @Serializable
+  @SerialName("resource_link")
+  data class ResourceLink(
+    val uri: String,
+    val name: String,
+    val mimeType: String? = null,
+    val description: String? = null,
+  ) : ContentBlock
 
   /**
    * MCP 2025-06-18 spec — `EmbeddedResource` content block. Wraps a [ResourceContents] (text or
@@ -98,7 +135,7 @@ data class ResourceDescriptor(
   val description: String? = null,
   val mimeType: String? = null,
   val size: Long? = null,
-  /** Optional MCP `_meta` payload for local client-only resource details. */
+  /** Optional MCP `_meta` payload (MCP App UI hints, local client-only resource details). */
   val meta: JsonObject? = null,
 )
 
@@ -108,13 +145,21 @@ data class ResourceDescriptor(
 sealed interface ResourceContents {
   @Serializable
   @SerialName("text")
-  data class Text(val uri: String, val mimeType: String? = null, val text: String) :
-    ResourceContents
+  data class Text(
+    val uri: String,
+    val mimeType: String? = null,
+    val text: String,
+    val meta: JsonObject? = null,
+  ) : ResourceContents
 
   @Serializable
   @SerialName("blob")
-  data class Blob(val uri: String, val mimeType: String? = null, val blob: String) :
-    ResourceContents
+  data class Blob(
+    val uri: String,
+    val mimeType: String? = null,
+    val blob: String,
+    val meta: JsonObject? = null,
+  ) : ResourceContents
 }
 
 object ResourceContentsSerializer : KSerializer<ResourceContents> {

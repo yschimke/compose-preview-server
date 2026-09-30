@@ -7,7 +7,10 @@ import ee.schimke.composeai.uibuilder.protocol.ExportFormatV1
 import java.util.Base64
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
@@ -59,6 +62,8 @@ internal class DesignCommandRunner(
   private val emit: (String) -> Unit,
   /** The artifact. [DesignCommand.STDOUT] as the destination means stdout. */
   private val write: (destination: String, bytes: ByteArray) -> Unit,
+  /** A local input file's text — `validate`'s `--document` and `--operations`. */
+  private val read: (path: String) -> String = { java.io.File(it).readText() },
 ) {
 
   /** Runs the verb and returns the process exit code. */
@@ -69,6 +74,8 @@ internal class DesignCommandRunner(
         DesignCommand.GET -> get()
         DesignCommand.RENDER,
         DesignCommand.EXPORT -> export()
+        DesignCommand.VALIDATE -> validate()
+        DesignCommand.VIEW -> view()
         else -> {
           emit("design: unknown verb '${options.verb}'")
           EXIT_USAGE
@@ -173,6 +180,120 @@ internal class DesignCommandRunner(
     note(
       "design ${options.verb}: ${bytes.size} bytes of ${artifact.mediaType} (${artifact.contentDigest.take(12)})"
     )
+    return EXIT_OK
+  }
+
+  /**
+   * `ui_builder_validate`, with the same posture as [export]: every problem to stderr, the reply to
+   * the destination, and a non-zero exit when any problem is an error — so a pipeline that checks a
+   * design before applying it stops at the check, and nothing was saved either way.
+   */
+  private fun validate(): Int {
+    val arguments = buildJsonObject {
+      options.document?.let { put("document", jsonFile(it, "--document")) }
+      if (options.designId.isNotBlank()) put("designId", options.designId)
+      options.operations?.let { path ->
+        val operations =
+          when (val parsed = jsonFile(path, "--operations")) {
+            is JsonArray -> parsed
+            is JsonObject -> parsed["operations"] as? JsonArray
+            else -> null
+          }
+            ?: throw DesignCommandFailure(
+              "design validate: --operations must hold a JSON array of mutations, or an object " +
+                "with one as `operations`"
+            )
+        put("operations", operations)
+      }
+    }
+    val response = transport.call(ServeUiBuilderMcp.VALIDATE, arguments)
+    val problems = response["problems"] as? JsonArray ?: JsonArray(emptyList())
+    problems.forEach { element ->
+      val problem = element as? JsonObject ?: return@forEach
+      val where =
+        listOfNotNull(
+            problem.text("nodeId")?.let { "node $it" },
+            problem.text("field")?.let { "field $it" },
+            problem["operationIndex"]?.jsonPrimitive?.longOrNull?.let { "operation $it" },
+          )
+          .joinToString(", ")
+      emit(
+        "  ${problem.text("severity") ?: "error"}: ${problem.text("source").orEmpty()}/" +
+          "${problem.text("code").orEmpty()}: ${problem.text("message").orEmpty()}" +
+          if (where.isEmpty()) "" else " ($where)"
+      )
+    }
+    write(
+      options.destination,
+      (PRETTY.encodeToString(JsonObject.serializer(), response) + "\n").toByteArray(),
+    )
+    val subject = options.designId.ifBlank { options.document ?: "the document" }
+    if (response["valid"]?.jsonPrimitive?.booleanOrNull != true) {
+      val errors = problems.count { (it as? JsonObject)?.text("severity") == "error" }
+      emit(
+        "design validate: $subject is not valid ($errors error${if (errors == 1) "" else "s"} " +
+          "above). Nothing was saved."
+      )
+      return EXIT_FAILURE
+    }
+    note("design validate: $subject is valid")
+    return EXIT_OK
+  }
+
+  private fun jsonFile(path: String, flag: String): JsonElement {
+    val text = runCatching {
+      read(path)
+    }
+      .getOrElse {
+        throw DesignCommandFailure("design validate: cannot read $flag $path — ${it.message}")
+      }
+    return runCatching { Json.parseToJsonElement(text) }
+      .getOrElse {
+        throw DesignCommandFailure("design validate: $flag $path is not JSON — ${it.message}")
+      }
+  }
+
+  /**
+   * The editor canvas as a person sees it: the picture to the destination, the JSON describing it —
+   * node boxes, pins, revision — to stdout, and the server's notes about what it could not draw to
+   * stderr. The picture is asked for inline, because a local server has no public origin to link it
+   * from and a CLI has no use for a link it would only fetch again.
+   */
+  private fun view(): Int {
+    val (response, png) =
+      transport.callWithImage(
+        ServeUiBuilderMcp.VIEW,
+        buildJsonObject {
+          put("designId", options.designId)
+          options.revision?.let { put("revision", it) }
+          if (options.selection.isNotEmpty()) {
+            put("selection", JsonArray(options.selection.map(::JsonPrimitive)))
+          }
+          options.include?.let { put("include", JsonArray(it.map(::JsonPrimitive))) }
+          options.viewport?.let { (width, height) ->
+            put(
+              "viewport",
+              buildJsonObject {
+                put("width", width)
+                put("height", height)
+              },
+            )
+          }
+          options.renderer?.let { put("renderer", it) }
+          put(ServeUiBuilderMcp.INLINE_ARGUMENT, true)
+        },
+      )
+    val bytes =
+      png ?: throw DesignCommandFailure("design view: the reply carried no picture of the view")
+    (response["notes"] as? JsonArray)?.forEach { note ->
+      note.jsonPrimitive.contentOrNull?.let { emit("  note: $it") }
+    }
+    write(options.destination, bytes)
+    val description = PRETTY.encodeToString(JsonObject.serializer(), response) + "\n"
+    // The picture has the terminal when it goes to stdout; the description then goes beside it.
+    if (options.destination == DesignCommand.STDOUT) emit(description.trimEnd())
+    else write(DesignCommand.STDOUT, description.toByteArray())
+    note("design view: ${options.designId} at revision ${response["revision"] ?: "?"}")
     return EXIT_OK
   }
 

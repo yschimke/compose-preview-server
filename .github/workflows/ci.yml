@@ -91,7 +91,7 @@ jobs:
           java-version: |
             21
             17
-      - uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
+      - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
         with:
           cache-provider: basic
       - run: ./gradlew check ktfmtCheckAll :server:distTar :mcp:distTar
@@ -136,7 +136,7 @@ jobs:
           java-version: |
             21
             17
-      - uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
+      - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
         with:
           cache-provider: basic
       # The normal Gradle job proves the shipping default. Keep the opt-in code compiled and
@@ -373,6 +373,8 @@ jobs:
       - run: npm run harness:pages
         working-directory: preview-harness
       - run: npm run harness:compare
+        working-directory: preview-harness
+      - run: npm run harness:rc-viewer
         working-directory: preview-harness
       # Playwright writes `<name>-actual.png` and `<name>-diff.png` next to every snapshot it
       # rejects, and until now the job threw them away. That is why a deliberate render change can
