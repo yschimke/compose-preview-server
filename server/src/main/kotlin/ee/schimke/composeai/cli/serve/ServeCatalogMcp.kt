@@ -195,7 +195,7 @@ class ServeCatalogMcp(
       )
       put(
         "instructions",
-        "This endpoint exposes every hosted Compose Preview catalog. Use list_projects to " +
+        "This endpoint exposes every hosted Compose Preview catalog. Use catalog_list_projects to " +
           "discover catalog ids. Reading published previews needs preview access; made-to-order " +
           "renders and data products need live access. With no credential, call request_access, " +
           "show the human its approveUrl and userCode, then poll_access (which waits for the " +
@@ -422,7 +422,7 @@ class ServeCatalogMcp(
       tool(
         "list_projects",
         "List every remote catalog with its stable id and preview count. Call this first: " +
-          "list_previews and list_data_products take one of these ids as 'catalog'.",
+          "catalog_list_previews and catalog_list_data_products take one of these ids as 'catalog'.",
         EMPTY_SCHEMA,
       )
     )
@@ -430,7 +430,7 @@ class ServeCatalogMcp(
       tool(
         "list_previews",
         "List the Compose previews and published metadata of one hosted catalog. 'catalog' is " +
-          "required (ids from list_projects). This server holds published library catalogs " +
+          "required (ids from catalog_list_projects). This server holds published library catalogs " +
           "only: previews of the project you are editing come from the local " +
           "compose-preview-mcp server, not from here.",
         CATALOG_REQUIRED_SCHEMA,
@@ -453,7 +453,7 @@ class ServeCatalogMcp(
         "render_matrix",
         "Render one preview across the cross-product of the given override axes in a single " +
           "call, returning a hash/size observation per cell (observe=png adds the pixels). " +
-          "Prefer this over a render_preview per combination: the cells share one catalog lease " +
+          "Prefer this over a catalog_render_preview per combination: the cells share one catalog lease " +
           "and are reported together, so comparing axes costs one round trip instead of N. " +
           "Capped at $MAX_MATRIX_CELLS cells. Requires live grant scope.",
         """{"type":"object","properties":{"uri":{"type":"string"},"catalog":{"type":"string"},"previewId":{"type":"string"},"observe":{"type":"string","enum":["png","hash"]},"overrides":{"type":"object","additionalProperties":{"type":["string","number","boolean"]}},"axes":{"type":"object","additionalProperties":{"type":"array","items":{"type":["string","number","boolean"]},"minItems":1}}},"required":["axes"],"anyOf":[{"required":["uri"]},{"required":["catalog","previewId"]}]}""",
@@ -525,7 +525,7 @@ class ServeCatalogMcp(
       tool(
         "list_data_products",
         "List the structured data-product kinds of one catalog, optionally one preview. Name " +
-          "the catalog with 'catalog' (ids from list_projects) or a preview 'uri'.",
+          "the catalog with 'catalog' (ids from catalog_list_projects) or a preview 'uri'.",
         """{"type":"object","properties":{"catalog":{"type":"string"},"previewId":{"type":"string"},"uri":{"type":"string"}},"anyOf":[{"required":["catalog"]},{"required":["uri"]}]}""",
       )
     )
@@ -566,7 +566,8 @@ class ServeCatalogMcp(
     access: AgentAccess?,
     uiBuilderAuthorization: (UiBuilderRouteCapability, String?) -> UiBuilderAuthorizationDecision,
   ): JsonObject {
-    val name = params.requiredString("name")
+    // Dispatch is by the canonical name; the wire name carries the `catalog_` prefix (#1105).
+    val name = canonicalName(params.requiredString("name"))
     val rawArgs = params["arguments"] as? JsonObject ?: JsonObject(emptyMap())
     // Stripped before dispatch: the credential is how this call was authorized, never an input to
     // what it does, and a tool that forwards its arguments must not forward a token with them.
@@ -840,12 +841,13 @@ class ServeCatalogMcp(
   ): JsonObject {
     val observe = args["observe"]?.jsonPrimitive?.contentOrNull?.lowercase() ?: "hash"
     if (observe !in MATRIX_OBSERVATION_MODES) {
-      throw McpRequestException("render_matrix 'observe' must be one of png or hash")
+      throw McpRequestException("catalog_render_matrix 'observe' must be one of png or hash")
     }
     val rawAxes =
       args["axes"] as? JsonObject
-        ?: throw McpRequestException("render_matrix requires an 'axes' object")
-    if (rawAxes.isEmpty()) throw McpRequestException("render_matrix requires at least one axis")
+        ?: throw McpRequestException("catalog_render_matrix requires an 'axes' object")
+    if (rawAxes.isEmpty())
+      throw McpRequestException("catalog_render_matrix requires at least one axis")
     val base =
       (args["overrides"] as? JsonObject)?.mapValues { (_, v) -> v.asOverrideString() }.orEmpty()
 
@@ -861,7 +863,7 @@ class ServeCatalogMcp(
     val cells = axes.fold(1) { acc, (_, values) -> acc * values.size }
     if (cells > MAX_MATRIX_CELLS) {
       throw McpRequestException(
-        "render_matrix would produce $cells cells; the cap is $MAX_MATRIX_CELLS. " +
+        "catalog_render_matrix would produce $cells cells; the cap is $MAX_MATRIX_CELLS. " +
           "Narrow an axis or split the call."
       )
     }
@@ -876,7 +878,9 @@ class ServeCatalogMcp(
       combinations.forEach { params ->
         val unknown = params.keys.filterNot(ServeOverrides::isOverrideParam).sorted()
         if (unknown.isNotEmpty()) {
-          throw McpRequestException("unknown override ${unknown.joinToString()} in render_matrix")
+          throw McpRequestException(
+            "unknown override ${unknown.joinToString()} in catalog_render_matrix"
+          )
         }
         val overrides =
           when (val parsed = ServeOverrides.parse(params, knobKinds)) {
@@ -1182,7 +1186,7 @@ class ServeCatalogMcp(
       val view =
         historyView(host, preview.id)
           ?: throw McpRequestException(
-            "no timeline for '${preview.id}'; call history_list to see why this catalog has none"
+            "no timeline for '${preview.id}'; call catalog_history_list to see why this catalog has none"
           )
       if (view.versions.size < 2) {
         throw McpRequestException(
@@ -1253,18 +1257,18 @@ class ServeCatalogMcp(
     val wanted =
       args.optionalString("commit")
         ?: args.optionalString("blob")
-        ?: throw McpRequestException("history_read requires 'commit' or 'blob'")
+        ?: throw McpRequestException("catalog_history_read requires 'commit' or 'blob'")
     return withCatalog(target.catalog) { host ->
       val preview = resolvePreview(host, target.previewId)
       val view =
         historyView(host, preview.id)
           ?: throw McpRequestException(
-            "no timeline for '${preview.id}'; call history_list to see why this catalog has none"
+            "no timeline for '${preview.id}'; call catalog_history_list to see why this catalog has none"
           )
       val version =
         view.versions.firstOrNull { it.commit.startsWith(wanted) || it.blob.startsWith(wanted) }
           ?: throw McpRequestException(
-            "'$wanted' names no recorded render of '${preview.id}'; history_list lists the ones " +
+            "'$wanted' names no recorded render of '${preview.id}'; catalog_history_list lists the ones " +
               "this catalog can serve"
           )
       val bytes =
@@ -1346,7 +1350,9 @@ class ServeCatalogMcp(
     val left = args.previewTarget()
     val other =
       args["other"] as? JsonObject
-        ?: throw McpRequestException("diff_semantics requires an 'other' preview to compare with")
+        ?: throw McpRequestException(
+          "catalog_diff_semantics requires an 'other' preview to compare with"
+        )
     val right = other.previewTarget()
     val leftOverrides = args["overrides"] as? JsonObject
     val rightOverrides = args["otherOverrides"] as? JsonObject
@@ -1632,7 +1638,7 @@ class ServeCatalogMcp(
       val baked =
         host.bakedRender(previewId, overrides)
           ?: throw McpRequestException(
-            "published preview '$previewId' is unavailable; use render_preview with live scope"
+            "published preview '$previewId' is unavailable; use catalog_render_preview with live scope"
           )
       return Rendered(baked.png, RenderOutcome.Generation.BAKED)
     }
@@ -1887,7 +1893,7 @@ class ServeCatalogMcp(
           "workspaceId" to JsonPrimitive(catalog),
           "note" to
             JsonPrimitive(
-              "Render with preview-stories. Native render_preview and get_preview_data also " +
+              "Render with preview-stories. Native catalog_render_preview and catalog_get_preview_data also " +
                 "accept this story's URI."
             ),
         )
@@ -2007,7 +2013,7 @@ class ServeCatalogMcp(
     val explicit = folded["otherOverrides"]
     if (explicit != null && explicit !is JsonNull && explicit != otherOverrides) {
       throw McpRequestException(
-        "diff_semantics: 'other.uri' carries render overrides that differ from " +
+        "catalog_diff_semantics: 'other.uri' carries render overrides that differ from " +
           "'otherOverrides'; pass one or the other"
       )
     }
@@ -2157,7 +2163,7 @@ class ServeCatalogMcp(
     throw McpRequestException(
       "$tool needs a 'catalog' argument; this hosted server does not list every catalog at " +
         "once. Available catalogs: ${if (shown.isEmpty()) "(none)" else shown.joinToString()}" +
-        "$more. Call list_projects for their labels and preview counts. Previews of the project " +
+        "$more. Call catalog_list_projects for their labels and preview counts. Previews of the project " +
         "you are working on are not hosted here: use the local compose-preview-mcp server."
     )
   }
@@ -2332,7 +2338,7 @@ class ServeCatalogMcp(
 
   private fun tool(name: String, description: String, schema: String): JsonObject =
     buildJsonObject {
-      put("name", name)
+      put("name", wireName(name))
       put("description", description)
       put("inputSchema", withTokenArgument(name, JSON.parseToJsonElement(schema).jsonObject))
       if (name in VIEWER_TOOL_NAMES) put("_meta", viewerToolMeta())
@@ -2572,7 +2578,7 @@ class ServeCatalogMcp(
     private val OBSERVATION_MODES =
       setOf("png", "svg", "scroll-png", "scroll-svg", "semantics", "hash")
     private const val CATALOG_REQUIRED_SCHEMA =
-      """{"type":"object","properties":{"catalog":{"type":"string","description":"A catalog id from list_projects."}},"required":["catalog"]}"""
+      """{"type":"object","properties":{"catalog":{"type":"string","description":"A catalog id from catalog_list_projects."}},"required":["catalog"]}"""
     /** Enough ids to pick from in a refusal without the refusal becoming the listing. */
     private const val MAX_CATALOGS_IN_ERROR = 50
     private val ANNOTATION_KINDS =
@@ -2616,6 +2622,36 @@ class ServeCatalogMcp(
      * answers about this host's catalogs and needs at least `preview` scope.
      */
     private val UNGATED_TOOLS = setOf("request_access", "poll_access")
+
+    /**
+     * Prefix on the hosted catalog's data tools, so a client that also runs the local
+     * `compose-preview` server (which has `render_preview`, `list_previews`, ...) never sees two
+     * tools with one name (#1105). The access tools, `status`, the Storybook aliases and the
+     * `ui_builder_*` tools already have distinct names and keep them.
+     */
+    private const val CATALOG_PREFIX = "catalog_"
+
+    private val CATALOG_TOOL_NAMES =
+      setOf(
+        "list_projects",
+        "list_previews",
+        "list_data_products",
+        "render_preview",
+        "render_matrix",
+        "list_devices",
+        "diff_semantics",
+        "get_preview_data",
+        "history_list",
+        "history_diff",
+        "history_read",
+      )
+
+    private fun wireName(name: String): String =
+      if (name in CATALOG_TOOL_NAMES) CATALOG_PREFIX + name else name
+
+    /** The internal name for a called tool; the pre-prefix name still dispatches. */
+    private fun canonicalName(name: String): String =
+      name.removePrefix(CATALOG_PREFIX).takeIf { it in CATALOG_TOOL_NAMES } ?: name
 
     private const val PROPERTIES = "properties"
 

@@ -2055,8 +2055,8 @@
         .find(name => typeof name === 'string' && /(^|__|\/)ui_builder_list_comments$/.test(name));
       postCommentToolName = names
         .find(name => typeof name === 'string' && /(^|__|\/)ui_builder_post_comment$/.test(name));
-      renderToolName = names.find(name => typeof name === 'string' && /(^|__|\/)render_preview$/.test(name));
-      dataToolName = names.find(name => typeof name === 'string' && /(^|__|\/)get_preview_data$/.test(name));
+      renderToolName = names.find(name => typeof name === 'string' && /(^|__|\/|catalog_)render_preview$/.test(name));
+      dataToolName = names.find(name => typeof name === 'string' && /(^|__|\/|catalog_)get_preview_data$/.test(name));
     } catch (error) {
       if (generation !== toolDiscoveryGeneration) return;
       assumeOwnTools();

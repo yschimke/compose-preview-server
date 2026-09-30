@@ -58,10 +58,14 @@ class ServeCatalogMcpGateTest {
       )
     )
     assertTrue(
-      gated("""{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_projects"}}""")
+      gated(
+        """{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"catalog_list_projects"}}"""
+      )
     )
     assertTrue(
-      gated("""{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"render_preview"}}""")
+      gated(
+        """{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"catalog_render_preview"}}"""
+      )
     )
   }
 

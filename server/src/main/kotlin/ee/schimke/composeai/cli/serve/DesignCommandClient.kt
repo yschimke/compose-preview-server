@@ -78,8 +78,8 @@ internal class DesignHttpTransport(
   /**
    * One `tools/call`, answered with the reply body as it came — JSON or an SSE frame — for a caller
    * whose tool does not answer with the UI-builder envelope [unwrap] peels. `a2ui render` is one:
-   * the catalog's `render_preview` answers with an image block. The 401/403 and transport handling
-   * is shared, so both commands refuse and retry the same way.
+   * the catalog's `catalog_render_preview` answers with an image block. The 401/403 and transport
+   * handling is shared, so both commands refuse and retry the same way.
    */
   fun callRaw(tool: String, arguments: JsonObject): String {
     val body = buildJsonObject {

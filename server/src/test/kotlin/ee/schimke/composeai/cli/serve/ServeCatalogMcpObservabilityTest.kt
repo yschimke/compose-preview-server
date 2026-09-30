@@ -26,7 +26,7 @@ import kotlinx.serialization.json.put
  * The gap these close was found by driving the endpoint: two different overrides returned
  * byte-identical PNGs and nothing in the reply said whether either had reached the renderer, and
  * probing eight axes cost twenty sequential calls. Provenance, strict override keys and
- * `render_matrix` are the three answers, pinned here.
+ * `catalog_render_matrix` are the three answers, pinned here.
  */
 class ServeCatalogMcpObservabilityTest {
 
@@ -67,7 +67,11 @@ class ServeCatalogMcpObservabilityTest {
     override fun close() {}
   }
 
-  private fun call(host: FakeHost, arguments: String, tool: String = "render_preview"): JsonObject {
+  private fun call(
+    host: FakeHost,
+    arguments: String,
+    tool: String = "catalog_render_preview",
+  ): JsonObject {
     val registry = ServeSessionRegistry(open = { null })
     registry.register("m3", host = host)
     val mcp = ServeCatalogMcp(registry, Semaphore(1))
@@ -201,7 +205,7 @@ class ServeCatalogMcpObservabilityTest {
     val mcp = ServeCatalogMcp(registry, Semaphore(1))
     val toolRequest =
       Json.parseToJsonElement(
-          """{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"render_preview","arguments":{"catalog":"m3","previewId":"card","observe":"png","overrides":{"uiMode":"dark","device":"spec:width=400dp,height=800dp,dpi=320"}}}}"""
+          """{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"catalog_render_preview","arguments":{"catalog":"m3","previewId":"card","observe":"png","overrides":{"uiMode":"dark","device":"spec:width=400dp,height=800dp,dpi=320"}}}}"""
         )
         .jsonObject
     val toolBody =
@@ -313,16 +317,17 @@ class ServeCatalogMcpObservabilityTest {
     assertEquals(1, host.renders.get())
   }
 
-  // ---- render_matrix --------------------------------------------------------------------------
+  // ---- catalog_render_matrix
+  // --------------------------------------------------------------------------
 
   @Test
-  fun `render_matrix renders the cross-product in one call`() {
+  fun `catalog_render_matrix renders the cross-product in one call`() {
     val host = FakeHost(png = pixel)
     val body =
       call(
         host,
         """{"catalog":"m3","previewId":"card","axes":{"uiMode":["light","dark"],"fontScale":[1.0,2.0]}}""",
-        tool = "render_matrix",
+        tool = "catalog_render_matrix",
       )
     val result = Json.parseToJsonElement(body.firstText()).jsonObject
 
@@ -341,13 +346,13 @@ class ServeCatalogMcpObservabilityTest {
   }
 
   @Test
-  fun `render_matrix layers each cell over the base overrides`() {
+  fun `catalog_render_matrix layers each cell over the base overrides`() {
     val host = FakeHost(png = pixel)
     val body =
       call(
         host,
         """{"catalog":"m3","previewId":"card","overrides":{"uiMode":"dark"},"axes":{"fontScale":[1.0,2.0]}}""",
-        tool = "render_matrix",
+        tool = "catalog_render_matrix",
       )
     val cells = Json.parseToJsonElement(body.firstText()).jsonObject["cells"]!!.jsonArray
 
@@ -361,13 +366,13 @@ class ServeCatalogMcpObservabilityTest {
   }
 
   @Test
-  fun `render_matrix refuses an oversized product before rendering anything`() {
+  fun `catalog_render_matrix refuses an oversized product before rendering anything`() {
     val host = FakeHost(png = pixel)
     val body =
       call(
         host,
         """{"catalog":"m3","previewId":"card","axes":{"fontScale":[1,2,3,4,5],"density":[1,2,3,4,5],"uiMode":["light","dark"]}}""",
-        tool = "render_matrix",
+        tool = "catalog_render_matrix",
       )
 
     assertTrue(body.isError())
@@ -376,12 +381,12 @@ class ServeCatalogMcpObservabilityTest {
   }
 
   @Test
-  fun `render_matrix rejects an empty axis`() {
+  fun `catalog_render_matrix rejects an empty axis`() {
     val body =
       call(
         FakeHost(png = pixel),
         """{"catalog":"m3","previewId":"card","axes":{"uiMode":[]}}""",
-        tool = "render_matrix",
+        tool = "catalog_render_matrix",
       )
 
     assertTrue(body.isError())
@@ -391,10 +396,11 @@ class ServeCatalogMcpObservabilityTest {
   // ---- svg availability -----------------------------------------------------------------------
 
   @Test
-  fun `list_previews advertises whether the vector lane exists`() {
-    val withSvg = call(FakeHost(png = pixel, hasSvgExport = true), """{}""", tool = "list_previews")
+  fun `catalog_list_previews advertises whether the vector lane exists`() {
+    val withSvg =
+      call(FakeHost(png = pixel, hasSvgExport = true), """{}""", tool = "catalog_list_previews")
     val without =
-      call(FakeHost(png = pixel, hasSvgExport = false), """{}""", tool = "list_previews")
+      call(FakeHost(png = pixel, hasSvgExport = false), """{}""", tool = "catalog_list_previews")
 
     fun flag(body: JsonObject): Boolean =
       Json.parseToJsonElement(body.firstText())

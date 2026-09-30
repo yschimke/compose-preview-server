@@ -177,7 +177,8 @@ class ServeCatalogMcpAppViewerTest {
   @Test
   fun `render tools declare the portable viewer without losing their text fallback`() {
     val tools = request("tools/list")["result"]!!.jsonObject["tools"]!!.jsonArray
-    val viewerTools = setOf("render_preview", "render_matrix", "diff_semantics")
+    val viewerTools =
+      setOf("catalog_render_preview", "catalog_render_matrix", "catalog_diff_semantics")
     viewerTools.forEach { name ->
       val tool = tools.single { it.jsonObject["name"]!!.jsonPrimitive.content == name }.jsonObject
       assertEquals(

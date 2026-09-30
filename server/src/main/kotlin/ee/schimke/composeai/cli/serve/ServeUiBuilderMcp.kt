@@ -1884,7 +1884,7 @@ class ServeUiBuilderMcp(
               "issue":{"type":"string","description":"The tracker issue this design is for."},
               "reference":{"type":"string","description":"The frame in the design tool it reproduces."},
               "pr":{"type":"string","description":"The pull request that implemented it."},
-              "thread":{"type":"string","description":"The chat thread it is discussed in, as a permalink."},
+              "thread":{"type":"string","description":"A permalink to a discussion held elsewhere, such as a chat thread. It does not replace this server's comments for a server-homed design: keep that discussion on the design."},
               "previous":{"type":"string","description":"The design id on this host that this one continues."}
             },"required":["designId"],"additionalProperties":false}
             """,
@@ -2031,7 +2031,7 @@ class ServeUiBuilderMcp(
           "Compile a design and render it with real Compose on this host, rather than in the " +
             "browser's Wasm canvas — the way to see what a design looks like on Android. " +
             "Returns the first frame, the token the live frame stream is opened with, and the " +
-            "design node ids the render is tagged with, so `get_preview_data` can report each " +
+            "design node ids the render is tagged with, so `catalog_get_preview_data` can report each " +
             "node's bounds and a client can put selectable regions over the image. " +
             (if (native) "This host has a native render lane. "
             else

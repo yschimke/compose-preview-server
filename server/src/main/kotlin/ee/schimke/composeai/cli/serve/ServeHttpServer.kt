@@ -11352,7 +11352,7 @@ class ServeHttpServer(
    * `application/x-www-form-urlencoded`. It is merged over the query and handed to [handleRender]
    * unchanged, so the LIVE gate, the product suffixes, the admission and the response are the GET's
    * own, not a copy of them. Capped at [MAX_RENDER_BODY_BYTES] (413 above), the same bound the
-   * catalog MCP endpoint's `render_preview` has for the same document.
+   * catalog MCP endpoint's `catalog_render_preview` has for the same document.
    */
   private suspend fun RoutingContext.handleRenderPost(sessionInPath: Boolean) {
     // The credential first, so an unauthenticated caller cannot make this server buffer a body.

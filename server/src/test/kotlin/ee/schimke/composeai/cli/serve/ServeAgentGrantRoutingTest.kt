@@ -273,7 +273,7 @@ class ServeAgentGrantRoutingTest {
       }
     assertTrue(names.containsAll(listOf("request_access", "poll_access")), names.toString())
     // …and the catalog tools are still advertised, so the model knows what the grant is FOR.
-    assertTrue(names.contains("render_preview"))
+    assertTrue(names.contains("catalog_render_preview"))
 
     assertEquals(200, mcpAnonymous("""{"jsonrpc":"2.0","id":3,"method":"ping"}""").first)
     assertEquals(
@@ -288,7 +288,7 @@ class ServeAgentGrantRoutingTest {
     for (body in
       listOf(
         """{"jsonrpc":"2.0","id":1,"method":"resources/list"}""",
-        """{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"list_projects","arguments":{}}}""",
+        """{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"catalog_list_projects","arguments":{}}}""",
         """{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"status","arguments":{}}}""",
         // An unrecognised tool is gated too: unknown names are not a category to open by default.
         """{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"whatever","arguments":{}}}""",
@@ -490,7 +490,7 @@ class ServeAgentGrantRoutingTest {
   fun `a token obtained in this session is usable in it without a header`() {
     val listProjects = { arguments: String ->
       mcpAnonymous(
-        """{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_projects","arguments":$arguments}}"""
+        """{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"catalog_list_projects","arguments":$arguments}}"""
       )
     }
     assertEquals(401, listProjects("{}").first)
@@ -506,7 +506,7 @@ class ServeAgentGrantRoutingTest {
     // door.
     val rendered =
       mcpAnonymous(
-        """{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"render_preview","arguments":{"catalog":"none","previewId":"none","token":"$token"}}}"""
+        """{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"catalog_render_preview","arguments":{"catalog":"none","previewId":"none","token":"$token"}}}"""
       )
     assertEquals(200, rendered.first, rendered.second)
     // The catalog does not exist here; what matters is that the refusal is about the catalog rather
@@ -537,7 +537,7 @@ class ServeAgentGrantRoutingTest {
 
     val rendered =
       mcpAnonymous(
-        """{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"render_preview","arguments":{"catalog":"demo","previewId":"example","observe":"png","overrides":{"uiMode":"dark"},"token":"$token"}}}"""
+        """{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"catalog_render_preview","arguments":{"catalog":"demo","previewId":"example","observe":"png","overrides":{"uiMode":"dark"},"token":"$token"}}}"""
       )
     assertEquals(200, rendered.first, rendered.second)
     val resourceUri =
@@ -605,10 +605,11 @@ class ServeAgentGrantRoutingTest {
       )
     assertEquals(401, unsigned.first, unsigned.second)
 
-    // Replaying the link through render_preview renders the state it names, not the default.
+    // Replaying the link through catalog_render_preview renders the state it names, not the
+    // default.
     val replayed =
       mcpAnonymous(
-        """{"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"render_preview","arguments":{"uri":"$resourceUri","observe":"png","token":"$token"}}}"""
+        """{"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"catalog_render_preview","arguments":{"uri":"$resourceUri","observe":"png","token":"$token"}}}"""
       )
     val replayedUri =
       json(replayed.second)["result"]!!
@@ -624,7 +625,7 @@ class ServeAgentGrantRoutingTest {
     )
     val conflicting =
       mcpAnonymous(
-        """{"jsonrpc":"2.0","id":10,"method":"tools/call","params":{"name":"render_preview","arguments":{"uri":"$resourceUri","overrides":{"uiMode":"light"},"token":"$token"}}}"""
+        """{"jsonrpc":"2.0","id":10,"method":"tools/call","params":{"name":"catalog_render_preview","arguments":{"uri":"$resourceUri","overrides":{"uiMode":"light"},"token":"$token"}}}"""
       )
     assertTrue(
       conflicting.second.contains("differ from the 'overrides' argument"),
@@ -632,7 +633,7 @@ class ServeAgentGrantRoutingTest {
     )
     val unsupported =
       mcpAnonymous(
-        """{"jsonrpc":"2.0","id":11,"method":"tools/call","params":{"name":"history_list","arguments":{"uri":"$resourceUri","token":"$token"}}}"""
+        """{"jsonrpc":"2.0","id":11,"method":"tools/call","params":{"name":"catalog_history_list","arguments":{"uri":"$resourceUri","token":"$token"}}}"""
       )
     assertTrue(unsupported.second.contains("does not apply"), unsupported.second)
   }
@@ -642,7 +643,7 @@ class ServeAgentGrantRoutingTest {
   fun `an unknown token argument is refused like none at all`() {
     val (code, body) =
       mcpAnonymous(
-        """{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_projects","arguments":{"token":"cpat_not-a-real-grant"}}}"""
+        """{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"catalog_list_projects","arguments":{"token":"cpat_not-a-real-grant"}}}"""
       )
     assertEquals(401, code, body)
   }
@@ -827,7 +828,7 @@ class ServeAgentGrantRoutingTest {
     val projects =
       mcp(
         token,
-        """{"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"list_projects","arguments":{}}}""",
+        """{"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"catalog_list_projects","arguments":{}}}""",
       )
     val projectText =
       json(projects.second)["result"]!!
@@ -892,7 +893,7 @@ class ServeAgentGrantRoutingTest {
     val refused =
       mcp(
         previewToken,
-        """{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"render_preview","arguments":{"catalog":"demo","previewId":"example"}}}""",
+        """{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"catalog_render_preview","arguments":{"catalog":"demo","previewId":"example"}}}""",
       )
     assertTrue(refused.second.contains("'live' was not approved"))
 
@@ -900,7 +901,7 @@ class ServeAgentGrantRoutingTest {
     val rendered =
       mcp(
         liveToken,
-        """{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"render_preview","arguments":{"catalog":"demo","previewId":"example","observe":"png"}}}""",
+        """{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"catalog_render_preview","arguments":{"catalog":"demo","previewId":"example","observe":"png"}}}""",
       )
     val content = json(rendered.second)["result"]!!.jsonObject["content"]!!.jsonArray
     assertEquals(
@@ -915,7 +916,7 @@ class ServeAgentGrantRoutingTest {
     val observed =
       mcp(
         liveToken,
-        """{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"render_preview","arguments":{"catalog":"demo","previewId":"example"}}}""",
+        """{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"catalog_render_preview","arguments":{"catalog":"demo","previewId":"example"}}}""",
       )
     val observation =
       json(observed.second)["result"]!!

@@ -83,7 +83,7 @@ class ServeMcpAnonymousPreviewTest {
 
   private val liveCall =
     """{"jsonrpc":"2.0","id":1,"method":"tools/call",""" +
-      """"params":{"name":"render_preview","arguments":{}}}"""
+      """"params":{"name":"catalog_render_preview","arguments":{}}}"""
 
   @AfterTest
   fun tearDown() {
