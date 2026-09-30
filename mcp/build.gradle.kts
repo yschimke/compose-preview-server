@@ -91,6 +91,21 @@ val generateMcpVersionResource =
 
 sourceSets.main.get().resources.srcDir(generateMcpVersionResource)
 
+// The `.rc` viewer MCP App (`mcp-app/rc-viewer.html`, issue #1237) inlines the vendored TypeScript
+// Remote Compose player when it is served. That bundle is committed once, as `:server`'s
+// resource; this stages the same file into this module's resources instead of committing a second
+// ~0.7 MB copy. It is a file in this repository, not a project dependency on `:server`.
+val stageRcViewerPlayer =
+  tasks.register<Sync>("stageRcViewerPlayer") {
+    from(rootProject.file("server/src/main/resources/rc-player/bundle.js")) {
+      rename { "rc-player-bundle.js" }
+      into("rc-viewer")
+    }
+    into(layout.buildDirectory.dir("generated/rc-viewer-player"))
+  }
+
+sourceSets.main.get().resources.srcDir(stageRcViewerPlayer)
+
 // `archiveExtension = "tar.gz"` keeps the in-archive root as `compose-preview-mcp-<version>/`
 // rather than leaking `.tar.gz` into the directory name. Carried over from compose-ai-tools,
 // where the GitHub Release artifact this produces is what `compose-preview mcp serve` runs.

@@ -1,6 +1,6 @@
 // Playwright config for the preview-server harness — `pages-snapshot.spec.mjs` (the served
-// viewer's pages) and `format-compare-scorer.spec.mjs` (the viewer's compare scorer, run in a real
-// browser).
+// viewer's pages), `format-compare-scorer.spec.mjs` (the viewer's compare scorer, run in a real
+// browser) and `mcp-app-rc-viewer.spec.mjs` (the `.rc` viewer MCP App behind a fake host).
 //
 // These specs used to run under [`preview-harness/playwright.config.mjs`](https://github.com/yschimke/compose-preview-vscode/blob/main/preview-harness/playwright.config.mjs), which is
 // how 167 of that config's 205 tests came to be serve's. The lane configs beside this one
@@ -24,7 +24,7 @@ export default defineConfig({
   testDir: ".",
   // Named, not a glob: the lane specs in this directory have their own configs and their own
   // servers, and a bare `*.spec.mjs` here would drag them into every page capture.
-  testMatch: /(pages-snapshot|format-compare-scorer)\.spec\.mjs/,
+  testMatch: /(pages-snapshot|format-compare-scorer|mcp-app-rc-viewer)\.spec\.mjs/,
   outputDir: resolve(here, "test-results"),
   timeout: 60_000,
   fullyParallel: true,

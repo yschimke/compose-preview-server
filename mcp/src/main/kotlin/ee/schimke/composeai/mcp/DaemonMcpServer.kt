@@ -221,6 +221,10 @@ class DaemonMcpServer(
 
   private val imageSizeOverride: ImageSizeOverride = ImageSizeOverride.detect()
 
+  /** The `.rc` Remote Compose viewer: `rc_open` and `ui://compose-preview/rc-viewer` (#1237). */
+  private val rcViewer =
+    RcViewerMcp(subscribers = { uri -> subscriptions.sessionsSubscribedTo(uri) })
+
   /**
    * Counters surfaced via the `status` MCP tool: probe outcomes, polling cycles, and random
    * sampling determinism. Lets an operator answer "why does my agent see stale renders?" without
@@ -509,6 +513,7 @@ class DaemonMcpServer(
     runCatching { freshnessExecutor.shutdownNow() }
     runCatching { renderDispatchExecutor.shutdownNow() }
     runCatching { budgetedCallScope.cancel() }
+    runCatching { rcViewer.shutdown() }
     synchronized(fileRenderCacheLock) { runCatching { fileRenderCacheDir.deleteRecursively() } }
   }
 
@@ -588,6 +593,7 @@ class DaemonMcpServer(
           meta = viewerResourceMeta(),
         )
       )
+    out += rcViewer.resourceDescriptors()
     for ((addr, byId) in catalog) {
       for (entry in byId.values) {
         val uri =
@@ -635,6 +641,9 @@ class DaemonMcpServer(
             )
           )
       )
+    }
+    rcViewer.readResource(uri)?.let {
+      return it
     }
     // History URIs short-circuit to `history/read` against the daemon — historical bytes are
     // immutable so there's no render path involved.
@@ -2543,7 +2552,7 @@ class DaemonMcpServer(
               .trimIndent()
           ),
       ),
-    ) + (uiBuilderMcp?.toolDefs() ?: emptyList())
+    ) + rcViewer.toolDefs() + (uiBuilderMcp?.toolDefs() ?: emptyList())
 
   private suspend fun handleCallTool(
     session: Session,
@@ -2611,6 +2620,7 @@ class DaemonMcpServer(
       "get-documentation-for-story" -> toolStorybookGetDoc(args)
       "preview-stories" -> toolStorybookPreviewStories(session, args)
       "run-story-tests" -> toolStorybookRunTests(args)
+      RcViewerMcp.TOOL_NAME -> rcViewer.handle(name, args)!!
       else ->
         if (profile == McpToolProfile.NATIVE) {
           uiBuilderMcp?.handle(name, args) ?: errorCallToolResult("unknown tool: $name")
