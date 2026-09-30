@@ -283,4 +283,64 @@ class ServeMcpRequestScopesTest {
     assertEquals("elicitation/create", streamed.single()["method"]!!.jsonPrimitive.content)
     assertEquals("done:${ServeCatalogMcp.FormElicitationAction.DECLINE}", finalReply)
   }
+
+  @Test
+  fun `an answer from a different credential is refused and leaves the request pending`() =
+    runBlocking {
+      val scopes = ServeMcpRequestScopes()
+      val scope = assertNotNull(scopes.open(protocolVersion, formElicitationSupported = true))
+      val emitted = CompletableDeferred<JsonObject>()
+      val waiting = async {
+        scopes
+          .interaction(scope, credential = "Bearer owner") { emitted.complete(it) }
+          .elicitForm("Choose", JsonObject(emptyMap()), timeoutMillis = 5_000)
+      }
+      val id = emitted.await()["id"]!!.jsonPrimitive.content
+      val response = buildJsonObject {
+        put("jsonrpc", "2.0")
+        put("id", id)
+        put("result", buildJsonObject { put("action", "decline") })
+      }
+      for (other in listOf(null, "Bearer someone-else")) {
+        assertEquals(
+          ServeMcpRequestScopes.ResponseDisposition.UNKNOWN_REQUEST,
+          scopes.acceptResponse(scope.id, response, other),
+        )
+      }
+      assertEquals(
+        ServeMcpRequestScopes.ResponseDisposition.ACCEPTED,
+        scopes.acceptResponse(scope.id, response, "Bearer owner"),
+      )
+      assertEquals(ServeCatalogMcp.FormElicitationAction.DECLINE, waiting.await()?.action)
+    }
+
+  @Test
+  fun `an accepted answer counts only while the original authorization still holds`() =
+    runBlocking {
+      fun answering(action: ServeCatalogMcp.FormElicitationAction) =
+        object : ServeCatalogMcp.ClientInteraction {
+          override val formElicitationSupported = true
+
+          override suspend fun elicitForm(
+            message: String,
+            requestedSchema: JsonObject,
+            timeoutMillis: Long,
+          ) =
+            ServeCatalogMcp.FormElicitationResult(
+              action,
+              if (action == ServeCatalogMcp.FormElicitationAction.ACCEPT) JsonObject(emptyMap())
+              else null,
+            )
+        }
+      val accept = ServeCatalogMcp.FormElicitationAction.ACCEPT
+      val decline = ServeCatalogMcp.FormElicitationAction.DECLINE
+      suspend fun ServeCatalogMcp.ClientInteraction.ask() =
+        elicitForm("Choose", JsonObject(emptyMap()), 1_000)?.action
+
+      assertEquals(accept, answering(accept).reauthorizedOnAccept { true }.ask())
+      assertNull(answering(accept).reauthorizedOnAccept { false }.ask())
+      assertEquals(decline, answering(decline).reauthorizedOnAccept { false }.ask())
+      val unsupported = ServeCatalogMcp.ClientInteraction.Unsupported
+      assertTrue(unsupported.reauthorizedOnAccept { true } === unsupported)
+    }
 }

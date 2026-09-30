@@ -105,6 +105,29 @@ class ServeCatalogMcp(
       timeoutMillis: Long,
     ): FormElicitationResult?
 
+    /**
+     * This interaction, except that an accepted answer is dropped — read as no answer at all —
+     * unless [stillAuthorized] holds when it arrives. Declines and cancels pass through: they write
+     * nothing either way.
+     */
+    fun reauthorizedOnAccept(stillAuthorized: () -> Boolean): ClientInteraction {
+      if (!formElicitationSupported) return this
+      val delegate = this
+      return object : ClientInteraction {
+        override val formElicitationSupported = true
+
+        override suspend fun elicitForm(
+          message: String,
+          requestedSchema: JsonObject,
+          timeoutMillis: Long,
+        ): FormElicitationResult? {
+          val answer = delegate.elicitForm(message, requestedSchema, timeoutMillis) ?: return null
+          if (answer.action == FormElicitationAction.ACCEPT && !stillAuthorized()) return null
+          return answer
+        }
+      }
+    }
+
     companion object {
       val Unsupported =
         object : ClientInteraction {
@@ -2514,8 +2537,15 @@ class ServeCatalogMcp(
         )
       }
     }
-    val text =
-      builder.call(name, args, actor, callId = name, clientInteraction = clientInteraction)
+    // A person may take a while to answer a form, and the answer is what licenses a write. So an
+    // accepted answer only counts if the SAME credential still authorizes the SAME actor for the
+    // SAME capability at the moment it arrives; a grant revoked or expired while the form was open
+    // turns the answer into a timeout — nothing written, the text decision returned.
+    val interaction = clientInteraction.reauthorizedOnAccept {
+      val again = authorize(capability, presentedToken)
+      again is UiBuilderAuthorizationDecision.Authorized && again.actor == actor
+    }
+    val text = builder.call(name, args, actor, callId = name, clientInteraction = interaction)
     if (name == ServeUiBuilderMcp.VIEW) {
       return uiBuilderViewResult(
         text,

@@ -1,5 +1,6 @@
 package ee.schimke.composeai.cli.serve
 
+import java.security.MessageDigest
 import java.security.SecureRandom
 import java.util.Base64
 import java.util.concurrent.ConcurrentHashMap
@@ -30,7 +31,7 @@ internal class ServeMcpRequestScopes(
   private val maxSessions: Int = 64,
   private val maxPendingPerSession: Int = 1,
   private val idleTimeoutMillis: Long = 5 * 60 * 1000L,
-  private val maxInteractionTimeoutMillis: Long = 2 * 60 * 1000L,
+  private val maxInteractionTimeoutMillis: Long = DEFAULT_INTERACTION_TIMEOUT_MILLIS,
   private val nowMillis: () -> Long = System::currentTimeMillis,
 ) {
   init {
@@ -53,8 +54,15 @@ internal class ServeMcpRequestScopes(
     val formElicitationSupported: Boolean,
     val lastUsedMillis: AtomicLong,
     val pendingPermits: Semaphore,
-    val pending: ConcurrentHashMap<String, CompletableDeferred<JsonObject>> = ConcurrentHashMap(),
+    val pending: ConcurrentHashMap<String, Pending> = ConcurrentHashMap(),
   )
+
+  /**
+   * One server request awaiting its answer. [credential] is the fingerprint of the credential the
+   * eliciting POST presented (see [credentialFingerprint]); the answer must arrive with the same
+   * one, so knowing a session id alone is never enough to answer on somebody else's behalf.
+   */
+  internal class Pending(val response: CompletableDeferred<JsonObject>, val credential: ByteArray)
 
   private val random = SecureRandom()
   private val scopes = ConcurrentHashMap<String, Scope>()
@@ -97,12 +105,22 @@ internal class ServeMcpRequestScopes(
 
   fun close(id: String): Boolean {
     val scope = scopes.remove(id) ?: return false
-    scope.pending.values.forEach { it.cancel() }
+    scope.pending.values.forEach { it.response.cancel() }
     scope.pending.clear()
     return true
   }
 
-  fun acceptResponse(sessionId: String?, response: JsonObject): ResponseDisposition {
+  /**
+   * Delivers a client's answer to the pending server request it names. [credential] is the raw
+   * credential material of the POST carrying the answer; it must fingerprint the same as the POST
+   * that asked, or the answer is refused as [ResponseDisposition.UNKNOWN_REQUEST] and the pending
+   * request is left untouched for its real owner (and, failing that, its timeout).
+   */
+  fun acceptResponse(
+    sessionId: String?,
+    response: JsonObject,
+    credential: String? = null,
+  ): ResponseDisposition {
     val scope = find(sessionId) ?: return ResponseDisposition.UNKNOWN_SESSION
     if ((response["jsonrpc"] as? JsonPrimitive)?.contentOrNull != "2.0") {
       return ResponseDisposition.INVALID_RESPONSE
@@ -115,8 +133,12 @@ internal class ServeMcpRequestScopes(
     val id =
       (response["id"] as? JsonPrimitive)?.contentOrNull
         ?: return ResponseDisposition.INVALID_RESPONSE
-    val pending = scope.pending.remove(id) ?: return ResponseDisposition.UNKNOWN_REQUEST
-    return if (pending.complete(response)) {
+    val pending = scope.pending[id] ?: return ResponseDisposition.UNKNOWN_REQUEST
+    if (!MessageDigest.isEqual(pending.credential, credentialFingerprint(credential))) {
+      return ResponseDisposition.UNKNOWN_REQUEST
+    }
+    if (!scope.pending.remove(id, pending)) return ResponseDisposition.UNKNOWN_REQUEST
+    return if (pending.response.complete(response)) {
       ResponseDisposition.ACCEPTED
     } else {
       ResponseDisposition.UNKNOWN_REQUEST
@@ -125,6 +147,8 @@ internal class ServeMcpRequestScopes(
 
   fun interaction(
     scope: Scope,
+    /** The eliciting POST's credential material; its answer must present the same. */
+    credential: String? = null,
     emit: suspend (JsonObject) -> Unit,
   ): ServeCatalogMcp.ClientInteraction =
     object : ServeCatalogMcp.ClientInteraction {
@@ -140,7 +164,8 @@ internal class ServeMcpRequestScopes(
 
         val id = "elicit-${newId()}"
         val response = CompletableDeferred<JsonObject>()
-        if (scope.pending.putIfAbsent(id, response) != null) {
+        val pending = Pending(response, credentialFingerprint(credential))
+        if (scope.pending.putIfAbsent(id, pending) != null) {
           scope.pendingPermits.release()
           return null
         }
@@ -164,7 +189,7 @@ internal class ServeMcpRequestScopes(
             parseElicitationResponse(response.await())
           }
         } finally {
-          scope.pending.remove(id, response)
+          scope.pending.remove(id, pending)
           scope.pendingPermits.release()
         }
       }
@@ -178,6 +203,7 @@ internal class ServeMcpRequestScopes(
    */
   suspend fun <R> dispatchLazily(
     scope: Scope,
+    credential: String? = null,
     dispatch: suspend (ServeCatalogMcp.ClientInteraction) -> R,
     onReply: suspend (R) -> Unit,
     onStream:
@@ -186,7 +212,7 @@ internal class ServeMcpRequestScopes(
     val outbound = Channel<JsonObject>(Channel.UNLIMITED)
     val reply = async {
       try {
-        dispatch(interaction(scope) { outbound.send(it) })
+        dispatch(interaction(scope, credential) { outbound.send(it) })
       } finally {
         outbound.close()
       }
@@ -222,6 +248,15 @@ internal class ServeMcpRequestScopes(
       .filter { it.pending.isEmpty() && it.lastUsedMillis.get() <= cutoff }
       .forEach { close(it.id) }
   }
+
+  companion object {
+    /** The whole send-and-wait of one interaction; a person needs time to read and choose. */
+    const val DEFAULT_INTERACTION_TIMEOUT_MILLIS: Long = 2 * 60 * 1000L
+  }
+
+  private fun credentialFingerprint(credential: String?): ByteArray =
+    MessageDigest.getInstance("SHA-256")
+      .digest((if (credential == null) "\u0000none" else "c:$credential").encodeToByteArray())
 
   private fun newId(): String {
     val bytes = ByteArray(24)

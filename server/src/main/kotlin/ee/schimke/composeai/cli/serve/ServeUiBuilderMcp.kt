@@ -272,7 +272,6 @@ class ServeUiBuilderMcp(
     callId: String,
     clientInteraction: ServeCatalogMcp.ClientInteraction,
   ): String {
-    @Suppress("UNUSED_VARIABLE") val interaction = clientInteraction
     val request =
       when (tool) {
         LIST_CATALOGS -> return listCatalogs(args, actor, callId)
@@ -297,9 +296,14 @@ class ServeUiBuilderMcp(
               )
             ),
           )
-        CREATE_DESIGN -> createDesign(args, actor)
+        CREATE_DESIGN ->
+          when (val plan = createDesign(args, actor, clientInteraction)) {
+            is CreatePlan.Create -> plan.request
+            is CreatePlan.Answered -> return plan.text
+          }
         MOVE_DESIGN_HOME,
-        REPLACE_DESIGN_DOCUMENT -> return authoritativeDocumentMutation(tool, args, actor, callId)
+        REPLACE_DESIGN_DOCUMENT ->
+          return authoritativeDocumentMutation(tool, args, actor, callId, clientInteraction)
         RENAME_DESIGN,
         DELETE_DESIGN -> return manageDesign(tool, args, actor, callId)
         DESIGN_ACCESS -> GetDesignAccessRequestV1(designId = args.requiredText("designId"))
@@ -581,13 +585,40 @@ class ServeUiBuilderMcp(
     args: JsonObject,
     actor: AuthenticatedUiBuilderActor,
     callId: String,
+    clientInteraction: ServeCatalogMcp.ClientInteraction,
   ): String {
     val designId = args.requiredText("designId")
-    val operationId = args.requiredText("operationId")
+    args.requiredText("operationId")
     val baseRevision = args.requiredNumber("baseRevision")
     if ((args[DRY_RUN_ARGUMENT] as? JsonPrimitive)?.booleanOrNull == true) {
-      return homeDecision(tool, designId, baseRevision, args).toString()
+      val decision = homeDecision(tool, designId, baseRevision, args)
+      val answer =
+        elicitDecision(clientInteraction, decision, offersNewDesign = tool != MOVE_DESIGN_HOME)
+          ?: return decision.toString()
+      return when (answer.choice) {
+        // The two writes the person can choose here are exactly the call this dry run stands in
+        // for, with the same arguments, operation id and actor — so the same idempotency, revision
+        // check and authorization — and never anything the non-dry-run call could not have done.
+        "move",
+        "save-back" -> documentMutation(tool, designId, baseRevision, args, actor, callId)
+        "create-new" ->
+          createNewInstead(args, answer.newDesignId, actor, callId) ?: decision.toString()
+        // `discard`, `keep` and `cancel`: the person said no, and there is nothing to write.
+        else -> answered(decision, answer.choice)
+      }
     }
+    return documentMutation(tool, designId, baseRevision, args, actor, callId)
+  }
+
+  private suspend fun documentMutation(
+    tool: String,
+    designId: String,
+    baseRevision: Long,
+    args: JsonObject,
+    actor: AuthenticatedUiBuilderActor,
+    callId: String,
+  ): String {
+    val operationId = args.requiredText("operationId")
     val request =
       when (tool) {
         MOVE_DESIGN_HOME ->
@@ -612,10 +643,11 @@ class ServeUiBuilderMcp(
   /**
    * The R3 decision behind a home move or a save-back / re-import, as a complete text result.
    *
-   * This endpoint answers each POST on its own and keeps no channel open to the client, so it
-   * cannot send `elicitation/create` mid-call. The dry run is the fallback every client gets: the
-   * same validation as the real call, nothing written, and the options for the agent to put to the
-   * person in chat before it repeats the call without `dryRun`.
+   * A client that negotiated a request scope and declared form elicitation is asked these options
+   * as an `elicitation/create` form instead ([elicitDecision]). Everyone else — and anyone who
+   * declines, cancels or lets the form time out — gets this text, unchanged: the same validation as
+   * the real call, nothing written, and the options for the agent to put to the person in chat
+   * before it repeats the call without `dryRun`.
    */
   private fun homeDecision(
     tool: String,
@@ -722,6 +754,145 @@ class ServeUiBuilderMcp(
               "`cancel`, call nothing."
           ),
       )
+    )
+  }
+
+  /** What [createDesign] resolved to: a create to execute, or a finished answer to return. */
+  private sealed interface CreatePlan {
+    data class Create(val request: UiBuilderRequestV1) : CreatePlan
+
+    data class Answered(val text: String) : CreatePlan
+  }
+
+  /** The person's pick from a decision form, already checked against the offered options. */
+  private data class DecisionAnswer(val choice: String, val newDesignId: String?)
+
+  /**
+   * Puts [decision]'s options to the person as an `elicitation/create` form, when the calling
+   * client negotiated a request scope and declared form support; null otherwise, and null for a
+   * decline, a cancel, a timeout, a malformed answer or a choice that was not offered. Null always
+   * means the same thing to the caller: write nothing and return the text decision.
+   *
+   * The form carries a closed `choice` enum (the decision's own option ids) and, where creating a
+   * new design is offered, an optional `newDesignId` — the only free text, and only ever used as a
+   * new design's id through the same create path, and the same checks, as [CREATE_DESIGN]. The
+   * answer selects an action; it never widens one. The write it selects runs as the actor the
+   * original call authenticated, and the transport drops an accepted answer whose credential no
+   * longer authorizes that actor.
+   */
+  private suspend fun elicitDecision(
+    interaction: ServeCatalogMcp.ClientInteraction,
+    decision: JsonObject,
+    offersNewDesign: Boolean,
+  ): DecisionAnswer? {
+    if (!interaction.formElicitationSupported) return null
+    val options = (decision["options"] as? JsonArray).orEmpty().mapNotNull { it as? JsonObject }
+    val ids = options.mapNotNull { it["id"]?.jsonPrimitive?.contentOrNull }
+    val labels = options.map { it["label"]?.jsonPrimitive?.contentOrNull.orEmpty() }
+    val question = decision["question"]?.jsonPrimitive?.contentOrNull ?: return null
+    if (ids.isEmpty() || ids.size != labels.size) return null
+    val properties = linkedMapOf<String, JsonElement>()
+    properties[DECISION_CHOICE_FIELD] =
+      JsonObject(
+        mapOf(
+          "type" to JsonPrimitive("string"),
+          "title" to JsonPrimitive("Choice"),
+          "description" to JsonPrimitive(question),
+          "enum" to JsonArray(ids.map(::JsonPrimitive)),
+          "enumNames" to JsonArray(labels.map(::JsonPrimitive)),
+        )
+      )
+    if (offersNewDesign && "create-new" in ids) {
+      properties[DECISION_NEW_DESIGN_ID_FIELD] =
+        JsonObject(
+          mapOf(
+            "type" to JsonPrimitive("string"),
+            "title" to JsonPrimitive("New design id"),
+            "description" to JsonPrimitive("Only for create-new: the id the new design gets."),
+            "minLength" to JsonPrimitive(1),
+            "maxLength" to JsonPrimitive(MAX_ELICITED_DESIGN_ID),
+          )
+        )
+    }
+    val schema =
+      JsonObject(
+        mapOf(
+          "type" to JsonPrimitive("object"),
+          "properties" to JsonObject(properties),
+          "required" to JsonArray(listOf(JsonPrimitive(DECISION_CHOICE_FIELD))),
+        )
+      )
+    val result =
+      interaction.elicitForm(question, schema, DECISION_ELICITATION_TIMEOUT_MILLIS) ?: return null
+    if (result.action != ServeCatalogMcp.FormElicitationAction.ACCEPT) return null
+    val content = result.content ?: return null
+    val choice =
+      (content[DECISION_CHOICE_FIELD] as? JsonPrimitive)
+        ?.takeIf { it.isString }
+        ?.content
+        ?.takeIf { it in ids } ?: return null
+    val newDesignId =
+      (content[DECISION_NEW_DESIGN_ID_FIELD] as? JsonPrimitive)
+        ?.takeIf { it.isString }
+        ?.content
+        ?.trim()
+        ?.takeIf { it.isNotEmpty() && it.length <= MAX_ELICITED_DESIGN_ID }
+    return DecisionAnswer(choice, newDesignId)
+  }
+
+  /**
+   * A decision the person answered with an option that writes nothing, as the decision itself plus
+   * what they chose. Not an error: the call did what it was asked, which was to ask.
+   */
+  private fun answered(decision: JsonObject, choice: String): String {
+    val next =
+      if (choice == "apply-operations")
+        "The person chose this in a form. Nothing was written: read the original with " +
+          "$GET_DESIGN and send the differences through $APPLY at baseRevision " +
+          "${decision["baseRevision"]}."
+      else "The person chose this in a form. Nothing was written; call nothing."
+    return JsonObject(
+        decision - "elicitation" +
+          mapOf(
+            "chosen" to JsonPrimitive(choice),
+            "written" to JsonPrimitive(false),
+            "elicitation" to JsonPrimitive(next),
+          )
+      )
+      .toString()
+  }
+
+  /**
+   * `create-new` from a save-back or re-import decision: the supplied document as a NEW design
+   * under the id the person typed, its `home` removed so it is homed here under that id instead. It
+   * goes through [createDesign] with no client interaction, so every check a direct [CREATE_DESIGN]
+   * makes still applies — an id already taken is refused as a tool error, never overwritten — and a
+   * second form is never stacked on the first. Null (the text decision) when no id was given.
+   */
+  private suspend fun createNewInstead(
+    args: JsonObject,
+    newDesignId: String?,
+    actor: AuthenticatedUiBuilderActor,
+    callId: String,
+  ): String? {
+    newDesignId ?: return null
+    val document = args["document"] as? JsonObject ?: return null
+    val createArgs =
+      JsonObject(
+        buildMap {
+          put("designId", JsonPrimitive(newDesignId))
+          put("document", JsonObject(document - "home"))
+          args["title"]?.let { put("title", it) }
+          args[INCLUDE_CATALOG_ARGUMENT]?.let { put(INCLUDE_CATALOG_ARGUMENT, it) }
+        }
+      )
+    val plan =
+      createDesign(createArgs, actor, ServeCatalogMcp.ClientInteraction.Unsupported)
+        as? CreatePlan.Create ?: return null
+    return envelope(
+      callId,
+      execute(plan.request, actor),
+      includeCatalog = createArgs.includeCatalog(),
     )
   }
 
@@ -1431,7 +1602,8 @@ class ServeUiBuilderMcp(
   private suspend fun createDesign(
     args: JsonObject,
     actor: AuthenticatedUiBuilderActor,
-  ): UiBuilderRequestV1 {
+    clientInteraction: ServeCatalogMcp.ClientInteraction,
+  ): CreatePlan {
     val designId = args.requiredText("designId")
     val explicit = args["document"] as? JsonObject
     val source = args.text("fromDesignId")
@@ -1464,17 +1636,41 @@ class ServeUiBuilderMcp(
     when (val existing = execute(OpenDesignRequestV1(designId), actor)) {
       is UiBuilderServiceResponse.Snapshot -> {
         val outcome = existingDesignOutcome(designId, incoming, serverOrigin())
-        if (outcome is ServeUiBuilderCreate.Outcome.Refused)
-          throw McpRequestException(
+        if (outcome is ServeUiBuilderCreate.Outcome.Refused) {
+          val decision =
             importOntoHomeDecision(
-                designId,
-                existing.snapshot.state.document.revision,
-                incoming,
-                args,
-                outcome.reason,
+              designId,
+              existing.snapshot.state.document.revision,
+              incoming,
+              args,
+              outcome.reason,
+            )
+          // Declined, cancelled, timed out or not negotiated: the refusal exactly as before.
+          val answer =
+            elicitDecision(clientInteraction, decision, offersNewDesign = true)
+              ?: throw McpRequestException(decision.toString())
+          return when (answer.choice) {
+            "create-new" -> {
+              val newDesignId =
+                answer.newDesignId?.takeIf { it != designId }
+                  ?: throw McpRequestException(decision.toString())
+              val document =
+                args["document"] as? JsonObject ?: throw McpRequestException(decision.toString())
+              createDesign(
+                JsonObject(
+                  args +
+                    mapOf("designId" to JsonPrimitive(newDesignId)) +
+                    mapOf("document" to JsonObject(document - "home"))
+                ),
+                actor,
+                ServeCatalogMcp.ClientInteraction.Unsupported,
               )
-              .toString()
-          )
+            }
+            // `apply-operations` needs operations this server cannot derive from two documents on
+            // the person's behalf, and `cancel` needs nothing: neither writes.
+            else -> CreatePlan.Answered(answered(decision, answer.choice))
+          }
+        }
       }
       is UiBuilderServiceResponse.Error ->
         if (existing.error.code != ServiceErrorCodeV1.NOT_FOUND) {
@@ -1483,7 +1679,7 @@ class ServeUiBuilderMcp(
       else -> Unit
     }
     incomingHomeRefusal(incoming, serverOrigin())?.let { throw McpRequestException(it) }
-    return CreateDesignRequestV1(incoming.withServerHome(serverOrigin()))
+    return CreatePlan.Create(CreateDesignRequestV1(incoming.withServerHome(serverOrigin())))
   }
 
   /**
@@ -1822,6 +2018,13 @@ class ServeUiBuilderMcp(
     const val MOVE_DESIGN_HOME = "ui_builder_move_design_home"
     const val DRY_RUN_ARGUMENT = "dryRun"
     const val DECISION_SCHEMA = "compose-preview-decision/v1"
+    /** The form field an elicited R3 decision's option id comes back in. */
+    const val DECISION_CHOICE_FIELD = "choice"
+    /** The optional form field naming a new design, where `create-new` is offered. */
+    const val DECISION_NEW_DESIGN_ID_FIELD = "newDesignId"
+    /** How long a decision form may wait; the request scope caps it further. */
+    private const val DECISION_ELICITATION_TIMEOUT_MILLIS = 2 * 60 * 1000L
+    private const val MAX_ELICITED_DESIGN_ID = 200
     private const val DRY_RUN_SCHEMA =
       """{"type":"boolean","description":"Validate and return the person's choices without changing anything."}"""
     const val REPLACE_DESIGN_DOCUMENT = "ui_builder_replace_design_document"
@@ -2103,7 +2306,9 @@ class ServeUiBuilderMcp(
             "design named by `fromDesignId`. Copying is usually right: a document's `catalogPin` " +
             "must match a catalog revision this server serves, and a copy carries one that does. " +
             "A `document` whose `home` is an existing design on this server is refused with a " +
-            "`$DECISION_SCHEMA` choice to put to the person.",
+            "`$DECISION_SCHEMA` choice to put to the person — or, when your client supports " +
+            "form elicitation on this connection, the person is asked in a form and the call " +
+            "acts on their answer.",
           """
           {"type":"object","properties":{
             "designId":{"type":"string","description":"The id for the new design."},
@@ -2152,7 +2357,9 @@ class ServeUiBuilderMcp(
             "home. The reply is an idempotent operation outcome with the new revision; a stale " +
             "revision or changed source home is refused rather than overwriting a concurrent move. " +
             "Unless the person already chose this move, call first with `dryRun: true`: it " +
-            "changes nothing and returns the choices to put to them.",
+            "changes nothing and returns the choices to put to them — or, when your client " +
+            "supports form elicitation on this connection, asks them in a form and, if they " +
+            "choose to move, returns this move's outcome.",
           """
           {"type":"object","properties":{
             "designId":{"type":"string"},
@@ -2174,7 +2381,8 @@ class ServeUiBuilderMcp(
             "whole snapshot. Retry with the same `operationId`; never invent a new id after a " +
             "lost response. Unless the person already chose to save back or re-import onto " +
             "this home, call first with `dryRun: true`: it changes nothing and returns the " +
-            "choices to put to them.",
+            "choices to put to them — or, when your client supports form elicitation on this " +
+            "connection, asks them in a form and returns the outcome of the write they chose.",
           """
           {"type":"object","properties":{
             "designId":{"type":"string"},
