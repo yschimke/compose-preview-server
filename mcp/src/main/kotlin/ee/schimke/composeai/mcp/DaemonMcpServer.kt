@@ -195,6 +195,9 @@ class DaemonMcpServer(
   private val compileInProcess: Boolean = environment[COMPILE_IN_PROCESS_ENV] == "1",
   /** OpenAI MCP Extensions probe tools (#1236), only with `COMPOSE_PREVIEW_MCP_OPENAI_PROBE=1`. */
   private val openAiProbe: OpenAiProbe? = OpenAiProbe.fromEnvironment(environment),
+  /** The `openai/settings` defaults file (#1242), shared with the CLI. */
+  private val previewSettingsStore: PreviewSettingsStore =
+    PreviewSettingsStore(PreviewSettingsStore.defaultFile(environment, homeDirectory)),
   /**
    * Prepares a registered build that has no daemon launch descriptor yet (`compose-preview mcp
    * install` never ran there) on first use. `null` turns that off; tests pass a fake runner.
@@ -215,6 +218,17 @@ class DaemonMcpServer(
 
   private val fullToolDefsLoader: () -> List<ToolDef> =
     fullToolDefsLoader ?: { effectiveFullToolDefs() }
+
+  /** `settings_read` / `settings_update` / `doctor` (#1242); native profile only. */
+  private val previewSettings =
+    PreviewSettingsMcp(previewSettingsStore) {
+      projectDoctorChecks(supervisor.listProjects(), environment) { project ->
+        catalog.entries.filter { it.key.workspaceId == project.workspaceId }.sumOf { it.value.size }
+      }
+    }
+
+  /** The `previews_library` sidebar app (#1241); native profile only. */
+  private val previewLibrary = PreviewLibrary { projectId -> libraryProjects(projectId) }
 
   private val json = Json {
     ignoreUnknownKeys = true
@@ -523,7 +537,10 @@ class DaemonMcpServer(
     session =
       McpSession(
         serverInfo = serverInfo,
-        options = composePreviewServerOptions(),
+        options =
+          composePreviewServerOptions(
+            if (profile == McpToolProfile.NATIVE) PreviewSettingsMcp.capability else emptyMap()
+          ),
         input = input,
         output = output,
         configure = { sdkSession ->
@@ -591,6 +608,7 @@ class DaemonMcpServer(
         )
       )
     openAiProbe?.resources()?.let(out::addAll)
+    if (profile == McpToolProfile.NATIVE) out.addAll(previewLibrary.resources())
     for ((addr, byId) in catalog) {
       for (entry in byId.values) {
         val uri =
@@ -640,6 +658,9 @@ class DaemonMcpServer(
       )
     }
     openAiProbe?.readResource(uri)?.let {
+      return it
+    }
+    previewLibrary.readResource(uri)?.let {
       return it
     }
     // History URIs short-circuit to `history/read` against the daemon — historical bytes are
@@ -2549,7 +2570,11 @@ class DaemonMcpServer(
               .trimIndent()
           ),
       ),
-    ) + (uiBuilderMcp?.toolDefs() ?: emptyList()) + (openAiProbe?.toolDefs() ?: emptyList())
+    ) +
+      (uiBuilderMcp?.toolDefs() ?: emptyList()) +
+      (openAiProbe?.toolDefs() ?: emptyList()) +
+      previewLibrary.toolDefs() +
+      previewSettings.toolDefs()
 
   private suspend fun handleCallTool(
     session: Session,
@@ -2586,7 +2611,7 @@ class DaemonMcpServer(
       "render_preview" ->
         withCallBudget(session, name, args, progress) { report ->
           if (scope == null) autoRegisterWorkspace(session)
-          renderPreviewChoosingVariant(session, args, scope, report)
+          renderPreviewChoosingVariant(session, withSettings(session, args), scope, report)
         }
       "render_matrix" ->
         withCallBudget(session, name, args, progress) { report ->
@@ -2620,6 +2645,8 @@ class DaemonMcpServer(
       else ->
         if (profile == McpToolProfile.NATIVE) {
           openAiProbe?.handle(name, args, (session as? McpSession)?.clientName)
+            ?: previewSettings.handle(name, args)
+            ?: previewLibrary.handle(name, args)
             ?: uiBuilderMcp?.handle(name, args)
             ?: errorCallToolResult("unknown tool: $name")
         } else {
@@ -3818,6 +3845,54 @@ class DaemonMcpServer(
   }
 
   private fun JsonElement?.isAbsent(): Boolean = this == null || this is JsonNull
+
+  /** [args] with the `openai/settings` defaults filled in where the call is silent (#1242). */
+  private fun withSettings(session: Session, args: JsonObject): JsonObject =
+    previewSettingsStore
+      .read()
+      .applyToRenderPreview(
+        args,
+        clientDefaultsToFile = (session as? McpSession)?.clientName in FILE_RESULT_CLIENT_NAMES,
+      )
+
+  /** Registered projects → modules → discovered previews, for [PreviewLibrary]. */
+  private fun libraryProjects(projectId: String?): List<PreviewLibrary.Project> {
+    val projects = supervisor.listProjects()
+    projects.firstOrNull { it.workspaceId.value == projectId }?.let(::warmUp)
+    return projects.map { project ->
+      val discovered = catalog.keys.filter { it.workspaceId == project.workspaceId }
+      val modules =
+        (synchronized(project.knownModules) { project.knownModules.toSet() } +
+            discovered.map { it.modulePath })
+          .sorted()
+      PreviewLibrary.Project(
+        id = project.workspaceId.value,
+        name = project.rootProjectName,
+        path = project.path.absolutePath,
+        modules =
+          modules.map { module ->
+            PreviewLibrary.Module(
+              path = module,
+              previews =
+                catalog[DaemonAddr(project.workspaceId, module)]
+                  ?.values
+                  ?.sortedBy { it.fqn }
+                  ?.map { entry ->
+                    PreviewLibrary.Preview(
+                      uri =
+                        PreviewUri(project.workspaceId, module, entry.fqn, entry.config).toUri(),
+                      name = entry.fqn.substringAfterLast('.'),
+                      displayName = entry.displayName,
+                      sourceFile = entry.resolvedSourcePath ?: entry.sourceFile,
+                      sourceLine = entry.bodyLine,
+                    )
+                  }
+                  .orEmpty(),
+            )
+          },
+      )
+    }
+  }
 
   /** Short, unique labels for a form: the preview id, or the whole URI when ids collide. */
   private fun variantLabels(uris: List<String>): List<String> {
