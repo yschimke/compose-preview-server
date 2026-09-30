@@ -201,6 +201,8 @@ class DaemonMcpServerTest {
         "render_preview_overlay",
         "get_preview_extras",
         "record_preview",
+        "previews_tray",
+        "preview_mentions",
         // OpenAI MCP Extensions: the sidebar library (#1241) and structured settings (#1242).
         PreviewLibrary.TOOL,
         PreviewSettingsMcp.READ_TOOL,

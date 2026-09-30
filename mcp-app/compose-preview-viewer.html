@@ -112,6 +112,26 @@
   .a2ui-missing { padding: 6px 8px; font-size: 12px; border: 1px dashed var(--color-border-secondary, #8a8f98); border-radius: 6px; color: var(--color-text-secondary, #666); }
   .a2ui-catalog-render { margin: 0; display: grid; gap: 6px; font-size: 12px; }
   .a2ui-catalog-render[hidden] { display: none; }
+  /* Previews tray (#1238): a thread tab listing the previews of the files this session changed.
+     Pointing at a node in the open preview attaches it to the next prompt. */
+  .tray { width: 100%; padding: 8px; box-sizing: border-box; display: grid; gap: 8px; align-self: start; }
+  .tray-list { display: flex; gap: 6px; margin: 0; padding: 0 0 4px; list-style: none; overflow-x: auto; }
+  .tray-item { display: grid; justify-items: center; gap: 3px; width: 108px; padding: 5px; font-size: 11px; text-align: center; }
+  .tray-item[aria-pressed="true"] { outline: 2px solid #315da8; }
+  .tray-item img, .tray-thumb-empty { width: 96px; height: 72px; object-fit: contain; border-radius: 4px; background: var(--color-background-secondary, #f0f1f4); }
+  .tray-item .tray-name { font-weight: 650; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tray-item .tray-where { color: var(--color-text-secondary, #666); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tray-badge { font-size: 10px; padding: 0 5px; border-radius: 999px; background: #315da8; color: #fff; }
+  .tray-empty { padding: 14px; text-align: center; }
+  .tray-stage { position: relative; display: inline-block; justify-self: center; max-width: 100%; line-height: 0; cursor: crosshair; }
+  .tray-stage > img { display: block; max-width: 100%; max-height: var(--tray-image-max, 560px); object-fit: contain; }
+  .hit-boxes { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+  .hit-boxes rect { fill: none; vector-effect: non-scaling-stroke; }
+  .hit-boxes rect.hover { stroke: #1a73e8; stroke-width: 1.5; stroke-dasharray: 4 3; }
+  .hit-boxes rect.selected { stroke: #d93025; stroke-width: 2.5; fill: #d9302518; }
+  .tray-selection { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 12px; }
+  .tray-selection .chip { padding: 3px 8px; border-radius: 999px; border: 1px solid var(--color-border, #d8d8dd); background: var(--color-background-secondary, #f8f8fa); overflow-wrap: anywhere; }
+  .tray-selection button { padding: 3px 8px; font-size: 12px; }
   button { font: inherit; padding: 6px 9px; border-radius: 6px; border: 1px solid var(--color-border, #aaa); background: var(--color-background-primary, #fff); color: inherit; cursor: pointer; }
 </style>
 <body>
@@ -2426,6 +2446,601 @@
     void renderA2uiWithCatalog();
   });
 
+  // Previews tray (#1238). `previews_tray` returns {mode: "tray", previews: [...]} for the source
+  // files this session changed (plus pins); the cached render of each rides in
+  // `_meta["composePreview/trayPngs"]`, which the model never reads. Opening one renders it and
+  // reads its compose/semantics; pointing at a node selects the deepest node under the pointer, and
+  // the selection is sent as `ui/update-model-context` (standard MCP Apps, so any host that
+  // implements it gets the chips): the cropped node, a titled text block, a resource_link to the
+  // source, and a model-only block (`annotations.audience: ["assistant"]`) with the subtree. Each
+  // update replaces the previous one. `_meta["openai/title"]` and `openai/thumbnail` label the
+  // chips in ChatGPT and are ignored elsewhere; "Open source" uses `openai/files/open` when the host
+  // advertises `experimental["openai/files"]`, and `ui/open-link` on a file URL otherwise.
+  const TRAY_PNGS_META = 'composePreview/trayPngs';
+  const TRAY_POLL_INTERVAL_MS = 15000;
+  const TRAY_MAX_SUBSCRIPTIONS = 20;
+  const CROP_PADDING_PX = 8;
+  const CROP_MAX_EDGE_PX = 512;
+  const MAX_SUBTREE_NODES = 60;
+  let trayToolName;
+  let hostFiles = false;
+  let trayState;
+  let trayGeneration = 0;
+  let trayPollTimer;
+  const traySubscriptions = new Set();
+
+  const isTrayResult = value => value?.mode === 'tray' && Array.isArray(value.previews);
+
+  function validBounds(bounds) {
+    return Array.isArray(bounds) && bounds.length === 4 && bounds.every(Number.isFinite) &&
+      bounds[2] > bounds[0] && bounds[3] > bounds[1];
+  }
+
+  // The deepest semantics node whose bounds contain (x, y), in render pixels; among nodes at the
+  // same depth the later one (drawn on top) wins. Children are visited even when they overflow
+  // their parent, and a parent without bounds is looked through.
+  function hitTest(root, x, y) {
+    let best;
+    const visit = (node, depth, budget) => {
+      if (!node || typeof node !== 'object' || budget.left-- <= 0) return;
+      const bounds = boundsOf(node);
+      if (validBounds(bounds) && x >= bounds[0] && x < bounds[2] && y >= bounds[1] && y < bounds[3]) {
+        if (!best || depth >= best.depth) best = { node, depth };
+      }
+      if (Array.isArray(node.children)) node.children.forEach(child => visit(child, depth + 1, budget));
+    };
+    visit(root, 0, { left: 5000 });
+    return best?.node;
+  }
+
+  // Render pixels per semantics pixel: an inline render may be downscaled from the root's size.
+  function semanticsScale(root, image) {
+    const bounds = boundsOf(root);
+    if (!validBounds(bounds) || !image?.naturalWidth) return 1;
+    const width = bounds[2] - bounds[0];
+    return width > 0 ? image.naturalWidth / width : 1;
+  }
+
+  function nodeLabel(node) {
+    const role = typeof node?.role === 'string' && node.role ? node.role : undefined;
+    const text = [node?.text, node?.label, node?.editableText]
+      .find(candidate => typeof candidate === 'string' && candidate);
+    const tag = typeof node?.testTag === 'string' && node.testTag ? `#${node.testTag}` : undefined;
+    return [role || (text ? 'Text' : 'Node'), text ? JSON.stringify(text.slice(0, 60)) : undefined, tag]
+      .filter(Boolean)
+      .join(' ');
+  }
+
+  // The node and its descendants, bounded, without anything the model does not need.
+  function subtreeOf(node, budget = { left: MAX_SUBTREE_NODES }) {
+    if (!node || typeof node !== 'object' || budget.left-- <= 0) return undefined;
+    const out = {};
+    for (const key of ['ref', 'nodeId', 'role', 'text', 'label', 'editableText', 'testTag', 'boundsInRoot', 'clickable']) {
+      if (node[key] !== undefined && node[key] !== null && node[key] !== '') out[key] = node[key];
+    }
+    const children = Array.isArray(node.children)
+      ? node.children.map(child => subtreeOf(child, budget)).filter(Boolean)
+      : [];
+    if (children.length) out.children = children;
+    return out;
+  }
+
+  // The `ui/update-model-context` params for a selected node. Pure, so a test can check the shape.
+  function selectionContext({ item, node, crop }) {
+    const name = item.displayName || item.name || previewName(item.uri);
+    const label = nodeLabel(node);
+    const bounds = boundsOf(node);
+    const where = item.sourceFile
+      ? `${item.sourceFile}${item.sourceLine ? `:${item.sourceLine}` : ''}`
+      : undefined;
+    const title = `${name}: ${label}`;
+    const facts = [
+      node.role ? `role=${node.role}` : undefined,
+      node.text ? `text=${JSON.stringify(node.text)}` : undefined,
+      !node.text && node.label ? `label=${JSON.stringify(node.label)}` : undefined,
+      node.testTag ? `testTag=${node.testTag}` : undefined,
+      validBounds(bounds) ? `bounds=[${bounds.join(',')}] (render px)` : undefined,
+      `preview=${item.uri}`,
+      where ? `source=${where}` : undefined,
+    ].filter(Boolean);
+    const content = [];
+    if (crop) {
+      content.push({ type: 'image', data: crop, mimeType: 'image/png', _meta: { 'openai/title': title } });
+    }
+    content.push({
+      type: 'text',
+      text: `The user pointed at ${label} in the Compose preview ${name}: ${facts.join(', ')}.`,
+      _meta: {
+        'openai/title': title,
+        ...(crop ? { 'openai/thumbnail': { src: `data:image/png;base64,${crop}`, mimeType: 'image/png' } } : {}),
+      },
+    });
+    if (item.sourceFile) {
+      const fileName = item.sourceFile.split(/[\\/]/).pop();
+      content.push({
+        type: 'resource_link',
+        uri: fileUrl(item.sourceFile),
+        name: item.sourceLine ? `${fileName}:${item.sourceLine}` : fileName,
+        description: `Declares ${name}${item.sourceLine ? ` (line ${item.sourceLine})` : ''}`,
+        mimeType: 'text/x-kotlin',
+      });
+    }
+    const detail = {
+      preview: item.uri,
+      ...(item.sourceFile ? { source: { file: item.sourceFile, ...(item.sourceLine ? { line: item.sourceLine } : {}) } } : {}),
+      node: subtreeOf(node),
+    };
+    content.push({
+      type: 'text',
+      text: `Selected Compose semantics subtree: ${JSON.stringify(detail)}`,
+      annotations: { audience: ['assistant'] },
+    });
+    return {
+      content,
+      structuredContent: {
+        composePreviewSelection: {
+          uri: item.uri,
+          node: { ref: node.ref, role: node.role, text: node.text, testTag: node.testTag, bounds: validBounds(bounds) ? bounds : undefined },
+          ...(item.sourceFile ? { source: detail.source } : {}),
+        },
+      },
+    };
+  }
+
+  // A PNG of the node's box (plus padding), from the full-resolution render on screen.
+  function cropNode(image, bounds, scale) {
+    if (!validBounds(bounds) || !image?.naturalWidth) return undefined;
+    const left = Math.max(0, Math.floor(bounds[0] * scale - CROP_PADDING_PX));
+    const top = Math.max(0, Math.floor(bounds[1] * scale - CROP_PADDING_PX));
+    const right = Math.min(image.naturalWidth, Math.ceil(bounds[2] * scale + CROP_PADDING_PX));
+    const bottom = Math.min(image.naturalHeight, Math.ceil(bounds[3] * scale + CROP_PADDING_PX));
+    const width = right - left;
+    const height = bottom - top;
+    if (width <= 0 || height <= 0) return undefined;
+    const ratio = Math.min(1, CROP_MAX_EDGE_PX / Math.max(width, height));
+    const canvasElement = document.createElement('canvas');
+    canvasElement.width = Math.max(1, Math.round(width * ratio));
+    canvasElement.height = Math.max(1, Math.round(height * ratio));
+    try {
+      canvasElement.getContext('2d').drawImage(image, left, top, width, height, 0, 0, canvasElement.width, canvasElement.height);
+      return canvasElement.toDataURL('image/png').slice('data:image/png;base64,'.length);
+    } catch (error) {
+      console.debug('Unable to crop the selected node:', error);
+      return undefined;
+    }
+  }
+
+  function leaveTray() {
+    if (!trayState) return;
+    ++trayGeneration;
+    trayState = undefined;
+    stopTrayPoll();
+    syncTraySubscriptions([]);
+  }
+
+  function stopTrayPoll() {
+    if (trayPollTimer == null) return;
+    window.clearTimeout(trayPollTimer);
+    trayPollTimer = undefined;
+  }
+
+  // Listing the tray renders nothing, so it can be polled; a render the agent triggers shows up as
+  // a new cached thumbnail, and a newly changed file as new rows.
+  function scheduleTrayPoll() {
+    stopTrayPoll();
+    if (!trayState || !liveReady() || !trayToolName) return;
+    trayPollTimer = window.setTimeout(() => {
+      trayPollTimer = undefined;
+      if (document.hidden) {
+        scheduleTrayPoll();
+        return;
+      }
+      void refreshTray();
+    }, TRAY_POLL_INTERVAL_MS);
+  }
+
+  // The existing resource subscriptions drive re-renders: each listed preview is subscribed while
+  // the host proxies subscriptions, and an update re-lists (and re-opens the selected preview).
+  function syncTraySubscriptions(uris) {
+    const wanted = new Set(hostResourceSubscriptions && initialized ? uris.slice(0, TRAY_MAX_SUBSCRIPTIONS) : []);
+    for (const uri of [...traySubscriptions]) {
+      if (wanted.has(uri)) continue;
+      traySubscriptions.delete(uri);
+      void queueResourceSubscription(() => request('resources/unsubscribe', { uri }).catch(() => {}));
+    }
+    for (const uri of wanted) {
+      if (traySubscriptions.has(uri)) continue;
+      traySubscriptions.add(uri);
+      void queueResourceSubscription(() => request('resources/subscribe', { uri }).catch(error => {
+        traySubscriptions.delete(uri);
+        console.debug('Unable to subscribe to a tray preview:', error);
+      }));
+    }
+  }
+
+  async function refreshTray(extraArguments = {}) {
+    if (!trayState || !liveReady() || !trayToolName) return;
+    const generation = trayGeneration;
+    try {
+      const result = await callTool(trayToolName, extraArguments);
+      if (generation !== trayGeneration || !trayState) return;
+      const value = data(result);
+      if (result?.isError || !isTrayResult(value)) {
+        trayState.status = fallbackText(result).split('\n')[0] || 'The tray could not be refreshed.';
+        renderTrayChrome();
+        return;
+      }
+      applyTrayResult(result, value);
+    } catch (error) {
+      if (refusedByHost(error)) refusedTools.add(trayToolName);
+      console.debug('Unable to refresh the Previews tray:', error);
+    } finally {
+      if (generation === trayGeneration) scheduleTrayPoll();
+    }
+  }
+
+  function applyTrayResult(result, value) {
+    const pngs = result?._meta?.[TRAY_PNGS_META];
+    const previous = trayState;
+    const items = value.previews.filter(item => typeof item?.uri === 'string' && item.uri);
+    trayState = {
+      nodes: previous?.nodes,
+      items,
+      pngs: pngs && typeof pngs === 'object' ? pngs : {},
+      changedFiles: Array.isArray(value.changedFiles) ? value.changedFiles : [],
+      selectedUri: previous?.selectedUri,
+      open: previous?.open,
+      selection: previous?.selection,
+      hover: undefined,
+      status: undefined,
+    };
+    if (!items.some(item => item.uri === trayState.selectedUri)) {
+      trayState.selectedUri = undefined;
+      trayState.open = undefined;
+      trayState.selection = undefined;
+    }
+    renderTrayList();
+    syncTraySubscriptions(items.map(item => item.uri));
+    const selected = items.find(item => item.uri === trayState.selectedUri);
+    const open = trayState.open;
+    if (open && selected) {
+      open.item = selected;
+      if (open.absorbing) {
+        // The listing right after this viewer's own render: that render is the one it reports.
+        open.absorbing = false;
+        open.seenRender = selected.rendered;
+      }
+    }
+    // Someone else (the agent, a file edit) rendered the open preview since this viewer did.
+    const renderedElsewhere = open && selected && !open.loading &&
+      Number.isFinite(selected.rendered) && selected.rendered > (open.seenRender ?? -1);
+    if (!selected && items.length) void openTrayPreview(items[0]);
+    else if (renderedElsewhere && liveReady()) void openTrayPreview(selected, true);
+    else renderTrayStage();
+  }
+
+  // Called once the viewer knows its tools: a tray drawn before that shows cached renders only.
+  function resumeTray() {
+    if (!trayState) return;
+    syncTraySubscriptions(trayState.items.map(item => item.uri));
+    scheduleTrayPoll();
+    const open = trayState.open;
+    if (open && !open.loading && !open.root) void openTrayPreview(open.item, true);
+  }
+
+  let trayUpdateTimer;
+  function onTrayResourceUpdated(uri) {
+    if (!trayState || !traySubscriptions.has(uri)) return false;
+    if (trayState.open?.loading && trayState.open.item.uri === uri) return true;
+    window.clearTimeout(trayUpdateTimer);
+    trayUpdateTimer = window.setTimeout(() => void refreshTray(), 250);
+    return true;
+  }
+
+  function renderTray(result, value) {
+    const firstTime = !trayState;
+    trayGeneration++;
+    stopTrayPoll();
+    if (firstTime) {
+      canvas.classList.remove('has-image');
+      canvas.replaceChildren();
+    }
+    trayState = trayState || {};
+    const root = document.createElement('div');
+    root.className = 'tray';
+    const list = document.createElement('ul');
+    list.className = 'tray-list';
+    list.setAttribute('aria-label', 'Previews for the files changed in this thread');
+    const stage = document.createElement('div');
+    stage.className = 'tray-stage-wrap';
+    const selectionBar = document.createElement('div');
+    selectionBar.className = 'tray-selection';
+    selectionBar.setAttribute('role', 'status');
+    root.append(list, stage, selectionBar);
+    canvas.replaceChildren(root);
+    trayState.nodes = { list, stage, selectionBar };
+    applyTrayResult(result, value);
+    scheduleTrayPoll();
+  }
+
+  function renderTrayChrome() {
+    if (!trayState) return;
+    const { items = [], changedFiles = [], status } = trayState;
+    const pinned = items.filter(item => item.pinned).length;
+    meta.textContent = status || (items.length
+      ? `Previews · ${items.length} for ${changedFiles.length} changed file${changedFiles.length === 1 ? '' : 's'}${pinned ? `, ${pinned} pinned` : ''}`
+      : 'Previews · none yet');
+  }
+
+  function renderTrayList() {
+    const { list } = trayState.nodes;
+    renderTrayChrome();
+    if (!trayState.items.length) {
+      const empty = document.createElement('li');
+      empty.className = 'tray-empty muted';
+      empty.textContent = 'Previews for the Kotlin files this thread changes appear here, and re-render as they change.';
+      list.replaceChildren(empty);
+      return;
+    }
+    list.replaceChildren(...trayState.items.map(item => {
+      const entry = document.createElement('li');
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'tray-item';
+      button.dataset.uri = item.uri;
+      button.setAttribute('aria-pressed', String(item.uri === trayState.selectedUri));
+      const cached = trayState.pngs[item.uri];
+      if (typeof cached === 'string' && cached) {
+        const thumb = document.createElement('img');
+        thumb.alt = '';
+        thumb.src = `data:image/png;base64,${cached}`;
+        button.append(thumb);
+      } else {
+        const placeholder = document.createElement('span');
+        placeholder.className = 'tray-thumb-empty';
+        button.append(placeholder);
+      }
+      const name = document.createElement('span');
+      name.className = 'tray-name';
+      name.textContent = item.displayName || item.name || previewName(item.uri);
+      const where = document.createElement('span');
+      where.className = 'tray-where';
+      const fileName = typeof item.sourceFile === 'string' ? item.sourceFile.split(/[\\/]/).pop() : '';
+      where.textContent = fileName ? `${fileName}${item.sourceLine ? `:${item.sourceLine}` : ''}` : item.module || '';
+      button.append(name, where);
+      if (item.pinned) {
+        const badge = document.createElement('span');
+        badge.className = 'tray-badge';
+        badge.textContent = 'pinned';
+        button.append(badge);
+      }
+      button.title = item.uri;
+      button.addEventListener('click', () => {
+        if (item.uri !== trayState?.selectedUri) void openTrayPreview(item);
+      });
+      entry.append(button);
+      return entry;
+    }));
+  }
+
+  async function openTrayPreview(item, keepSelection = false) {
+    if (!trayState) return;
+    const generation = ++trayGeneration;
+    const previousSelection = keepSelection ? trayState.selection : undefined;
+    trayState.selectedUri = item.uri;
+    trayState.selection = previousSelection;
+    trayState.open = { item, image: trayState.pngs[item.uri], root: undefined, loading: true };
+    trayState.nodes.list.querySelectorAll('.tray-item').forEach(button =>
+      button.setAttribute('aria-pressed', String(button.dataset.uri === item.uri)));
+    renderTrayStage();
+    if (!liveReady() || !renderToolName || refusedTools.has(renderToolName)) {
+      trayState.open.loading = false;
+      renderTrayStage();
+      return;
+    }
+    try {
+      const rendered = await callTool(renderToolName, { uri: item.uri, observe: 'png', inline: true });
+      if (generation !== trayGeneration || !trayState) return;
+      const image = png(rendered);
+      if (image) trayState.open.image = image.data;
+      else trayState.status = `Render failed: ${fallbackText(rendered).split('\n')[0] || 'no image'}`;
+      if (dataToolName && !refusedTools.has(dataToolName)) {
+        const semantics = await callTool(dataToolName, { uri: item.uri, kind: 'compose/semantics' });
+        if (generation !== trayGeneration || !trayState) return;
+        const root = !semantics?.isError && data(semantics)?.payload?.root;
+        trayState.open.root = root && typeof root === 'object' ? root : undefined;
+      }
+    } catch (error) {
+      if (generation !== trayGeneration || !trayState) return;
+      if (refusedByHost(error)) refusedTools.add(renderToolName);
+      trayState.status = 'Render failed; showing the last cached render.';
+      console.warn('Failed to open a tray preview:', error);
+    } finally {
+      if (generation === trayGeneration && trayState?.open) {
+        trayState.open.loading = false;
+        trayState.open.absorbing = true;
+        void refreshTray();
+        if (trayState.selection) {
+          // Keep the pointed-at node across a re-render when it still exists.
+          const again = trayState.open.root && findSameNode(trayState.open.root, trayState.selection.node);
+          if (again) trayState.selection = { ...trayState.selection, node: again };
+          else trayState.selection = undefined;
+        }
+        renderTrayChrome();
+        renderTrayStage();
+      }
+    }
+  }
+
+  function findSameNode(root, node) {
+    if (!node) return undefined;
+    const matches = candidate =>
+      (node.ref && candidate.ref === node.ref) ||
+      (node.testTag && candidate.testTag === node.testTag) ||
+      (!node.ref && !node.testTag && candidate.boundsInRoot === node.boundsInRoot && candidate.text === node.text);
+    const remaining = [root];
+    while (remaining.length) {
+      const candidate = remaining.shift();
+      if (!candidate || typeof candidate !== 'object') continue;
+      if (matches(candidate)) return candidate;
+      if (Array.isArray(candidate.children)) remaining.push(...candidate.children);
+    }
+    return undefined;
+  }
+
+  function renderTrayStage() {
+    if (!trayState?.nodes) return;
+    const { stage, selectionBar } = trayState.nodes;
+    const open = trayState.open;
+    selectionBar.replaceChildren();
+    if (!open) {
+      stage.replaceChildren();
+      return;
+    }
+    if (!open.image) {
+      const waiting = document.createElement('div');
+      waiting.className = 'muted tray-empty';
+      waiting.textContent = open.loading ? `Rendering ${open.item.name || previewName(open.item.uri)}…` : 'No render to show yet.';
+      stage.replaceChildren(waiting);
+    } else {
+      const wrapper = document.createElement('div');
+      wrapper.className = 'tray-stage';
+      const image = document.createElement('img');
+      image.alt = `Rendered Compose preview ${open.item.name || ''}`.trim();
+      image.src = `data:image/png;base64,${open.image}`;
+      wrapper.append(image);
+      const pointAt = (event, commit) => {
+        if (!open.root || !image.naturalWidth) return;
+        const rect = image.getBoundingClientRect();
+        if (!rect.width || !rect.height) return;
+        const scale = semanticsScale(open.root, image);
+        const x = (event.clientX - rect.left) * (image.naturalWidth / rect.width) / scale;
+        const y = (event.clientY - rect.top) * (image.naturalHeight / rect.height) / scale;
+        const node = hitTest(open.root, x, y);
+        if (commit) {
+          if (node) void selectNode(open, image, node);
+        } else if (node !== trayState.hover) {
+          trayState.hover = node;
+          drawHitBoxes(wrapper, image);
+        }
+      };
+      wrapper.addEventListener('pointermove', event => pointAt(event, false));
+      wrapper.addEventListener('pointerleave', () => {
+        trayState.hover = undefined;
+        drawHitBoxes(wrapper, image);
+      });
+      wrapper.addEventListener('click', event => pointAt(event, true));
+      image.addEventListener('load', () => {
+        drawHitBoxes(wrapper, image);
+        scheduleFit();
+      }, { once: true });
+      stage.replaceChildren(wrapper);
+      if (image.complete) drawHitBoxes(wrapper, image);
+    }
+    const hint = document.createElement('span');
+    hint.className = 'muted';
+    if (trayState.selection) {
+      const chip = document.createElement('span');
+      chip.className = 'chip';
+      chip.textContent = `Attached: ${nodeLabel(trayState.selection.node)}`;
+      selectionBar.append(chip);
+    } else {
+      hint.textContent = open.loading
+        ? 'Rendering…'
+        : open.root ? 'Point at a node to attach it to your next prompt.' : 'Semantics unavailable; nodes cannot be selected.';
+      selectionBar.append(hint);
+    }
+    const source = open.item.sourceFile;
+    if (source && liveReady()) {
+      const openSource = document.createElement('button');
+      openSource.type = 'button';
+      openSource.id = 'tray-open-source';
+      openSource.textContent = 'Open source';
+      openSource.title = `${source}${open.item.sourceLine ? `:${open.item.sourceLine}` : ''}`;
+      openSource.addEventListener('click', () => openTraySource(open.item));
+      selectionBar.append(openSource);
+    }
+    if (trayState.selection && liveReady()) {
+      const clear = document.createElement('button');
+      clear.type = 'button';
+      clear.id = 'tray-clear';
+      clear.textContent = 'Clear';
+      clear.addEventListener('click', () => clearTraySelection(true));
+      selectionBar.append(clear);
+    }
+    if (liveReady() && trayToolName && !refusedTools.has(trayToolName)) {
+      const pin = document.createElement('button');
+      pin.type = 'button';
+      pin.id = 'tray-pin';
+      pin.textContent = open.item.pinned ? 'Unpin' : 'Pin';
+      pin.addEventListener('click', () => refreshTray(open.item.pinned ? { unpin: open.item.uri } : { pin: open.item.uri }));
+      selectionBar.append(pin);
+    }
+  }
+
+  function drawHitBoxes(wrapper, image) {
+    wrapper.querySelectorAll('.hit-boxes').forEach(node => node.remove());
+    const open = trayState?.open;
+    if (!open?.root || !image.naturalWidth) return;
+    const scale = semanticsScale(open.root, image);
+    const namespace = 'http://www.w3.org/2000/svg';
+    const svg = document.createElementNS(namespace, 'svg');
+    svg.setAttribute('class', 'hit-boxes');
+    svg.setAttribute('viewBox', `0 0 ${image.naturalWidth} ${image.naturalHeight}`);
+    svg.setAttribute('preserveAspectRatio', 'none');
+    svg.setAttribute('aria-hidden', 'true');
+    for (const [node, className] of [[trayState.hover, 'hover'], [trayState.selection?.node, 'selected']]) {
+      const bounds = boundsOf(node);
+      if (!validBounds(bounds)) continue;
+      const rect = document.createElementNS(namespace, 'rect');
+      rect.setAttribute('class', className);
+      rect.setAttribute('x', bounds[0] * scale);
+      rect.setAttribute('y', bounds[1] * scale);
+      rect.setAttribute('width', (bounds[2] - bounds[0]) * scale);
+      rect.setAttribute('height', (bounds[3] - bounds[1]) * scale);
+      svg.append(rect);
+    }
+    wrapper.append(svg);
+  }
+
+  async function selectNode(open, image, node) {
+    if (!trayState || trayState.open !== open) return;
+    trayState.selection = { node };
+    const crop = cropNode(image, boundsOf(node), semanticsScale(open.root, image));
+    renderTrayStage();
+    if (!liveReady()) return;
+    try {
+      await request('ui/update-model-context', selectionContext({ item: open.item, node, crop }));
+    } catch (error) {
+      console.debug('The host did not accept the selected node as model context:', error);
+    }
+  }
+
+  function clearTraySelection(notifyHost) {
+    if (!trayState?.selection) return;
+    trayState.selection = undefined;
+    renderTrayStage();
+    if (notifyHost && liveReady()) {
+      request('ui/update-model-context', { content: [] })
+        .catch(error => console.debug('The host did not clear the model context:', error));
+    }
+  }
+
+  async function openTraySource(item) {
+    const path = item.sourceFile;
+    if (!path || !liveReady()) return;
+    try {
+      if (hostFiles) await request('openai/files/open', { path });
+      else await request('ui/open-link', { url: fileUrl(path) });
+    } catch (error) {
+      console.debug('The host did not open the source file:', error);
+      if (trayState) {
+        trayState.status = `Source: ${path}${item.sourceLine ? `:${item.sourceLine}` : ''}`;
+        renderTrayChrome();
+      }
+    }
+  }
+
   function draw(result) {
     hasToolResult = true;
     canvas.classList.remove('has-image');
@@ -2434,6 +3049,7 @@
     const value = data(result);
     const image = png(result);
     const resource = link(result);
+    if (!isTrayResult(value)) leaveTray();
     selected = undefined;
     use.hidden = true;
     refresh.hidden = true;
@@ -2449,6 +3065,10 @@
     resourceResult = undefined;
     resourcePollUnchanged = 0;
     configureLiveActions(result, value, resource, comparison);
+    if (isTrayResult(value)) {
+      renderTray(result, value);
+      return;
+    }
     if (comparison) {
       void renderBeforeAfter(result, comparison, comparisonGeneration);
       return;
@@ -2551,6 +3171,10 @@
     if (message.method === 'ui/notifications/host-context-changed') {
       // A partial HostContext: containerDimensions is replaced when present, kept otherwise.
       applyHostContext(message.params);
+      // The person removed the attached context in the composer (OpenAI model-context extension).
+      if (message.params && 'openai/modelContext' in message.params && message.params['openai/modelContext'] === null) {
+        clearTraySelection(false);
+      }
       return;
     }
     if (message.method === 'ui/notifications/tool-input') {
@@ -2570,6 +3194,11 @@
       }
       draw(incomingResult);
     }
+    if (
+      (message.method === 'notifications/resources/updated' ||
+        message.method === 'ui/notifications/resource-updated') &&
+      onTrayResourceUpdated(message.params?.uri)
+    ) return;
     if (
       (message.method === 'notifications/resources/updated' ||
         message.method === 'ui/notifications/resource-updated') &&
@@ -2598,6 +3227,7 @@
     overlayToolName = 'render_preview_overlay';
     renderToolName = 'render_preview';
     dataToolName = 'get_preview_data';
+    trayToolName = 'previews_tray';
     listCommentsToolName = undefined;
     postCommentToolName = undefined;
     listPreviewsToolName = undefined;
@@ -2611,6 +3241,7 @@
       updateAccessibilityAction();
       updateCommentAction();
       sendPendingImageRequest();
+      resumeTray();
       return;
     }
     try {
@@ -2627,6 +3258,7 @@
       dataToolName = names.find(name => typeof name === 'string' && /(^|__|\/|catalog_)get_preview_data$/.test(name));
       listPreviewsToolName = names
         .find(name => typeof name === 'string' && /(^|__|\/)catalog_list_previews$/.test(name));
+      trayToolName = names.find(name => typeof name === 'string' && /(^|__|\/)previews_tray$/.test(name));
     } catch (error) {
       if (generation !== toolDiscoveryGeneration) return;
       assumeOwnTools();
@@ -2638,6 +3270,7 @@
     updateA2uiAction();
     if (commentDesignId && listCommentsToolName) void loadComments();
     sendPendingImageRequest();
+    resumeTray();
   }
 
   async function initializeBridge() {
@@ -2649,6 +3282,8 @@
       });
       hostResourceSubscriptions = result?.hostCapabilities?.serverResources?.subscribe === true;
       hostServerTools = result?.hostCapabilities?.serverTools != null;
+      // OpenAI MCP Extensions: "Open source" can ask the host to open a local file.
+      hostFiles = result?.hostCapabilities?.experimental?.['openai/files'] != null;
       applyHostContext(result?.hostContext);
       initialized = true;
       notify('ui/notifications/initialized', {});
