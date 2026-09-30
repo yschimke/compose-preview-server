@@ -1884,7 +1884,7 @@ class ServeUiBuilderMcp(
               "issue":{"type":"string","description":"The tracker issue this design is for."},
               "reference":{"type":"string","description":"The frame in the design tool it reproduces."},
               "pr":{"type":"string","description":"The pull request that implemented it."},
-              "thread":{"type":"string","description":"The chat thread it is discussed in, as a permalink."},
+              "thread":{"type":"string","description":"A permalink to a discussion held elsewhere, such as a chat thread. It does not replace this server's comments for a server-homed design: keep that discussion on the design."},
               "previous":{"type":"string","description":"The design id on this host that this one continues."}
             },"required":["designId"],"additionalProperties":false}
             """,
