@@ -9,8 +9,8 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
@@ -253,6 +253,7 @@ internal class DesignCommandRunner(
       }
   }
 
+  /**
    * The editor canvas as a person sees it: the picture to the destination, the JSON describing it —
    * node boxes, pins, revision — to stdout, and the server's notes about what it could not draw to
    * stderr. The picture is asked for inline, because a local server has no public origin to link it
