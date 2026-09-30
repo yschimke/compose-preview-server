@@ -47,11 +47,12 @@ internal object DesignCommand {
   const val STATUS: String = "status"
   const val GET: String = "get"
   const val RENDER: String = "render"
+  const val VIEW: String = "view"
   const val EXPORT: String = "export"
   const val VALIDATE: String = "validate"
 
   /** Every verb, in the order [usage] lists them. */
-  val VERBS: List<String> = listOf(LIST, STATUS, GET, RENDER, EXPORT, VALIDATE)
+  val VERBS: List<String> = listOf(LIST, STATUS, GET, RENDER, VIEW, EXPORT, VALIDATE)
 
   /**
    * The verbs `--local` has an answer for.
@@ -144,6 +145,14 @@ internal object DesignCommand {
      * `ui_builder_apply` call's arguments already look like.
      */
     val operations: String? = null,
+    /** [VIEW]: node ids to show as selected. */
+    val selection: List<String> = emptyList(),
+    /** [VIEW]: the overlays to draw; null draws the server's default set. */
+    val include: List<String>? = null,
+    /** [VIEW]: fit the picture inside this many pixels, width then height. */
+    val viewport: Pair<Int, Int>? = null,
+    /** [VIEW]: `export` or `native`; null lets the server default. */
+    val renderer: String? = null,
   ) {
 
     /**
@@ -160,6 +169,11 @@ internal object DesignCommand {
           // read. Asking for `ui-builder-export` here would have an approver grant the capability
           // to make the server produce artifacts for a run that never asks it to.
           local -> listOf(AgentGrantCapability.UI_BUILDER_READ)
+          // Looking at a design is reading it; only the native frame, which compiles the design's
+          // Kotlin, is gated as an export -- the same split `ui_builder_view` makes.
+          verb == VIEW && renderer == ServeUiBuilderView.RENDERER_NATIVE ->
+            listOf(AgentGrantCapability.UI_BUILDER_READ, AgentGrantCapability.UI_BUILDER_EXPORT)
+          verb == VIEW -> listOf(AgentGrantCapability.UI_BUILDER_READ)
           verb == RENDER || verb == EXPORT -> listOf(AgentGrantCapability.UI_BUILDER_EXPORT)
           else -> listOf(AgentGrantCapability.UI_BUILDER_READ)
         }
@@ -169,7 +183,9 @@ internal object DesignCommand {
      * else reads what is already committed and asks for `preview`.
      */
     val scope: AgentGrantScope
-      get() = if (verb == RENDER && !local) AgentGrantScope.LIVE else AgentGrantScope.PREVIEW
+      get() =
+        if ((verb == RENDER || verb == VIEW) && !local) AgentGrantScope.LIVE
+        else AgentGrantScope.PREVIEW
 
     /** Where the artifact goes when the caller named no `--out`. */
     val destination: String
@@ -228,6 +244,11 @@ internal object DesignCommand {
     var json = false
     var summary = false
     var operations: String? = null
+    val selection = mutableListOf<String>()
+    var include: List<String>? = null
+    var viewport: Pair<Int, Int>? = null
+    var renderer: String? = null
+    var viewFlagWasSet = false
     var workspaceWasSet = false
     var outWasSet = false
     var revisionWasSet = false
@@ -314,6 +335,53 @@ internal object DesignCommand {
           operations = value() ?: return missingValue(argument)
           index++
         }
+        argument == "--select" -> {
+          val raw = value() ?: return missingValue(argument)
+          selection += raw.split(',').map(String::trim).filter(String::isNotEmpty)
+          viewFlagWasSet = true
+          index++
+        }
+        argument == "--include" -> {
+          val raw = value() ?: return missingValue(argument)
+          val requested = raw.split(',').map(String::trim).filter(String::isNotEmpty)
+          val unknown = requested - ServeUiBuilderView.INCLUDES.toSet()
+          if (unknown.isNotEmpty()) {
+            return Parsed.Invalid(
+              "design view: --include takes ${ServeUiBuilderView.INCLUDES.joinToString(",")}, " +
+                "not '${unknown.joinToString(",")}'"
+            )
+          }
+          include = requested
+          viewFlagWasSet = true
+          index++
+        }
+        argument == "--viewport" -> {
+          val raw = value() ?: return missingValue(argument)
+          val edges = raw.lowercase().split('x').mapNotNull { it.trim().toIntOrNull() }
+          if (edges.size != 2 || edges.any { it !in 1..ServeUiBuilderView.MAX_VIEWPORT_PX }) {
+            return Parsed.Invalid(
+              "design view: --viewport takes <width>x<height> in pixels, each 1 to " +
+                "${ServeUiBuilderView.MAX_VIEWPORT_PX}, not '$raw'"
+            )
+          }
+          viewport = edges[0] to edges[1]
+          viewFlagWasSet = true
+          index++
+        }
+        argument == "--renderer" -> {
+          val raw = value() ?: return missingValue(argument)
+          if (
+            raw != ServeUiBuilderView.RENDERER_EXPORT && raw != ServeUiBuilderView.RENDERER_NATIVE
+          ) {
+            return Parsed.Invalid(
+              "design view: --renderer is ${ServeUiBuilderView.RENDERER_EXPORT} or " +
+                "${ServeUiBuilderView.RENDERER_NATIVE}, not '$raw'"
+            )
+          }
+          renderer = raw
+          viewFlagWasSet = true
+          index++
+        }
         argument == "--json" -> json = true
         argument == "--summary" -> summary = true
         argument == "--no-authorize" -> authorize = false
@@ -392,6 +460,11 @@ internal object DesignCommand {
         "design $verb: --revision pins which revision a server hands over; a file is already one"
       )
     }
+    if (verb != VIEW && viewFlagWasSet) {
+      return Parsed.Invalid(
+        "design $verb: --select, --include, --viewport and --renderer apply to view only"
+      )
+    }
     if (verb != STATUS && (workspaceWasSet || json || summary)) {
       return Parsed.Invalid("design $verb: --workspace, --json and --summary apply to status only")
     }
@@ -444,6 +517,10 @@ internal object DesignCommand {
         json = json,
         summary = summary,
         operations = operations,
+        selection = selection,
+        include = include,
+        viewport = viewport,
+        renderer = renderer,
       )
     )
   }
@@ -463,6 +540,8 @@ internal object DesignCommand {
       GET,
       VALIDATE -> STDOUT
       EXPORT -> if (format == ExportFormatV1.COMPOSE) STDOUT else "$designId.${format.extension()}"
+      // Beside a `render` of the same design rather than over it: the two are different pictures.
+      VIEW -> "$designId.view.png"
       // Bytes are not something to spray at a terminal unless asked for by name.
       else -> "$designId.${format.extension()}"
     }
@@ -479,6 +558,9 @@ internal object DesignCommand {
       status                    Workspace-linked design comments and unsaved temporary copies.
       get <designId>            The design document, as JSON.
       render <designId>         The design as a picture: PNG, or SVG with --format svg.
+      view <designId>           The editor canvas as a person sees it: a PNG with the selection,
+                                reference and comment pins drawn on, and the node boxes and pin
+                                positions as JSON on stdout.
       export <designId>         The generated source (Kotlin), with its diagnostics.
       validate <designId>       Check a design without saving it: the stored design, a batch of
                                 --operations against it, or a whole --document. Prints the
@@ -513,6 +595,13 @@ internal object DesignCommand {
       --out, -o <path>          Where to write it; `-` is stdout. Text verbs default to stdout,
                                 a render defaults to <designId>.<png|svg>.
       --format <format>         render: png (default) or svg. export: compose (default).
+      --select <id,id>          view: node ids to show as selected. Repeatable.
+      --include <overlays>      view: comma-separated overlays to draw, from
+                                ${ServeUiBuilderView.INCLUDES.joinToString(",")} (default
+                                ${ServeUiBuilderView.DEFAULT_INCLUDES.sorted().joinToString(",")}).
+      --viewport <w>x<h>        view: fit the picture inside this many pixels.
+      --renderer <renderer>     view: export (default; reports no node boxes) or native (real
+                                Compose with node boxes; needs the ui-builder-export capability).
       --revision <n>            Pin a revision. Omitted means the current committed one, which is
                                 what the export URLs serve.
       --limit <n>               list: how many designs to ask for (default $DEFAULT_LIMIT).

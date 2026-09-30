@@ -15,6 +15,7 @@ import ee.schimke.composeai.uibuilder.protocol.DesignHomeV1
 import ee.schimke.composeai.uibuilder.protocol.DesignListItemV1
 import ee.schimke.composeai.uibuilder.protocol.DesignMutationV1
 import ee.schimke.composeai.uibuilder.protocol.DesignUpdateEnvelopeV1
+import ee.schimke.composeai.uibuilder.protocol.DiagnosticSeverityV1
 import ee.schimke.composeai.uibuilder.protocol.ExportCapabilitiesV1
 import ee.schimke.composeai.uibuilder.protocol.ExportDesignRequestV1
 import ee.schimke.composeai.uibuilder.protocol.ExportFormatV1
@@ -223,8 +224,24 @@ class ServeUiBuilderMcp(
       // A read: nothing is written, and the document checked is either the caller's own or one the
       // service has just opened for them as a read.
       VALIDATE -> if (validator == null) null else UiBuilderRouteCapability.READ
+      // Looking at a design is reading it: the default frame is the same PNG export a viewer of
+      // the design is shown. The native frame compiles Kotlin, so [additionalCapabilityFor] asks
+      // for the export capability on top when a call chooses it.
+      VIEW -> UiBuilderRouteCapability.READ
       else -> null
     }
+
+  /**
+   * A second capability this particular call needs beyond [capabilityFor], or null.
+   *
+   * Only [VIEW] has one: `renderer: "native"` compiles and runs the design's generated Kotlin,
+   * which [RENDER_NATIVE] gates as an export, and choosing the same lane through a read tool must
+   * not be a way around that.
+   */
+  fun additionalCapabilityFor(tool: String, args: JsonObject): UiBuilderRouteCapability? =
+    if (tool == VIEW && args.text(RENDERER_ARGUMENT) == ServeUiBuilderView.RENDERER_NATIVE)
+      UiBuilderRouteCapability.EXPORT
+    else null
 
   /**
    * Runs one tool as [actor], as the released MCP envelope.
@@ -298,6 +315,7 @@ class ServeUiBuilderMcp(
             format = args.exportFormat(),
           )
         RENDER_NATIVE -> return renderNative(args, actor)
+        VIEW -> return view(args, actor)
         PUT_ASSET -> return envelope(callId, putAsset(args, actor))
         AWAIT_DESIGN -> return awaitDesign(args, actor)
         LIST_COMMENTS,
@@ -798,6 +816,185 @@ class ServeUiBuilderMcp(
           ),
         )
     }
+  }
+
+  /**
+   * The editor canvas as a person sees it: a frame of the design with the selection, the reference,
+   * the comment pins and — when asked — the layout bounds drawn over it, and the same facts as JSON
+   * (compose-preview-server#1114). See [ServeUiBuilderView].
+   *
+   * Not an [McpResponseEnvelopeV1], for the reason a native render is not. The design is read
+   * through the service as this actor first, so its own access control decides whether there is
+   * anything to look at, and the frame is one of the renders the design's other tools already make
+   * — nothing here draws a design a second way.
+   */
+  private suspend fun view(args: JsonObject, actor: AuthenticatedUiBuilderActor): String {
+    val designId = args.requiredText("designId")
+    val include = args.viewIncludes()
+    val selection = args.stringList(SELECTION_ARGUMENT)
+    val viewport = args.viewport()
+    val renderer = args.text(RENDERER_ARGUMENT) ?: ServeUiBuilderView.RENDERER_EXPORT
+    if (
+      renderer != ServeUiBuilderView.RENDERER_EXPORT &&
+        renderer != ServeUiBuilderView.RENDERER_NATIVE
+    ) {
+      throw McpRequestException(
+        "`$RENDERER_ARGUMENT` must be `${ServeUiBuilderView.RENDERER_EXPORT}` or " +
+          "`${ServeUiBuilderView.RENDERER_NATIVE}`"
+      )
+    }
+    val snapshot =
+      execute(GetSnapshotRequestV1(designId = designId, revision = args.number("revision")), actor)
+        as? UiBuilderServiceResponse.Snapshot
+        ?: throw McpRequestException("no design `$designId` this actor can read")
+    val document = snapshot.snapshot.state.document
+    val notes = mutableListOf<String>()
+    val frame =
+      if (renderer == ServeUiBuilderView.RENDERER_NATIVE) nativeViewFrame(designId, document)
+      else exportViewFrame(designId, document.revision, actor)
+    val board =
+      if (ServeUiBuilderView.INCLUDE_COMMENTS !in include) null
+      else if (comments == null) {
+        notes += "this host keeps no design discussions, so there are no comment pins"
+        null
+      } else {
+        val board = comments.readOrEmpty(designId)
+        service.publicReaderView(actor, designId)?.board(board) ?: board
+      }
+    val reference =
+      if (ServeUiBuilderView.INCLUDE_REFERENCE !in include) null
+      else runCatching { references?.read(designId) }.getOrNull()
+    val view =
+      try {
+        ServeUiBuilderView.compose(
+          designId = designId,
+          document = document,
+          frame = frame,
+          include = include,
+          selection = selection,
+          reference = reference,
+          board = board,
+          viewport = viewport,
+          notes = notes,
+        )
+      } catch (refused: ServeUiBuilderView.Refused) {
+        throw McpRequestException(refused.message ?: "the view could not be drawn")
+      }
+    return UI_BUILDER_JSON.encodeToString(UiBuilderViewV1.serializer(), view)
+  }
+
+  /** The editor renderer's PNG of [revision], exactly as `ui_builder_export` hands it over. */
+  private suspend fun exportViewFrame(
+    designId: String,
+    revision: Long,
+    actor: AuthenticatedUiBuilderActor,
+  ): ServeUiBuilderView.Frame {
+    val response =
+      execute(
+        ExportDesignRequestV1(
+          designId = designId,
+          revision = revision,
+          format = ExportFormatV1.PNG,
+        ),
+        actor,
+      )
+    val artifact =
+      when (response) {
+        is UiBuilderServiceResponse.Export -> response.artifact
+        is UiBuilderServiceResponse.Error -> throw McpRequestException(response.error.message)
+        else -> throw McpRequestException("the PNG export of `$designId` answered no artifact")
+      }
+    val errors = artifact.diagnostics.filter { it.severity == DiagnosticSeverityV1.ERROR }
+    val bytes =
+      runCatching { java.util.Base64.getDecoder().decode(artifact.content) }.getOrNull()
+        ?: ByteArray(0)
+    if (errors.isNotEmpty() || bytes.isEmpty()) {
+      throw McpRequestException(
+        "`$designId` has no PNG to view: " +
+          (errors
+            .joinToString("; ") { "${it.code}: ${it.message}" }
+            .ifEmpty { "the export produced no image" })
+      )
+    }
+    return ServeUiBuilderView.Frame(bytes, ServeUiBuilderView.RENDERER_EXPORT, bounds = null)
+  }
+
+  /** The native lane's frame and the boxes it reported, in that frame's pixels. */
+  private fun nativeViewFrame(
+    designId: String,
+    document: DesignDocumentV1,
+  ): ServeUiBuilderView.Frame {
+    val lane =
+      nativePreview
+        ?: throw McpRequestException(
+          "$NATIVE_RENDER_UNAVAILABLE: this host has no native render lane; view with " +
+            "`$RENDERER_ARGUMENT: \"${ServeUiBuilderView.RENDERER_EXPORT}\"` instead"
+        )
+    return when (val outcome = lane.render(document)) {
+      is UiBuilderNativePreviewOutcome.Refused ->
+        throw McpRequestException("${outcome.code}: ${outcome.reasons.joinToString("; ")}")
+      is UiBuilderNativePreviewOutcome.Rendered -> {
+        val encoded =
+          outcome.response.image?.removePrefix("data:image/png;base64,")?.takeIf { it.isNotBlank() }
+            ?: throw McpRequestException(
+              "the native render of `$designId` produced no frame: " +
+                (outcome.failure ?: "no reason given")
+            )
+        val bytes =
+          runCatching { java.util.Base64.getDecoder().decode(encoded) }.getOrNull()
+            ?: throw McpRequestException("the native render of `$designId` is not base64")
+        ServeUiBuilderView.Frame(
+          bytes,
+          ServeUiBuilderView.RENDERER_NATIVE,
+          bounds =
+            outcome.nodeBounds.mapValues { (_, box) ->
+              ServeUiBuilderView.Box(box.x, box.y, box.width, box.height)
+            },
+        )
+      }
+    }
+  }
+
+  private fun JsonObject.viewIncludes(): Set<String> {
+    if (this[INCLUDE_ARGUMENT] == null || this[INCLUDE_ARGUMENT] is JsonNull) {
+      return ServeUiBuilderView.DEFAULT_INCLUDES
+    }
+    val requested = stringList(INCLUDE_ARGUMENT).toSet()
+    val unknown = requested - ServeUiBuilderView.INCLUDES.toSet()
+    if (unknown.isNotEmpty()) {
+      throw McpRequestException(
+        "`$INCLUDE_ARGUMENT` names ${unknown.sorted().joinToString(", ")}; this server draws " +
+          ServeUiBuilderView.INCLUDES.joinToString(", ")
+      )
+    }
+    return requested
+  }
+
+  private fun JsonObject.stringList(name: String): List<String> {
+    val value = this[name] ?: return emptyList()
+    if (value is JsonNull) return emptyList()
+    return (value as? JsonArray)?.map {
+      (it as? JsonPrimitive)?.takeIf { primitive -> primitive.isString }?.content
+        ?: throw McpRequestException("`$name` must be an array of strings")
+    } ?: throw McpRequestException("`$name` must be an array of strings")
+  }
+
+  private fun JsonObject.viewport(): Pair<Int, Int>? {
+    val value = this[VIEWPORT_ARGUMENT] ?: return null
+    if (value is JsonNull) return null
+    val box =
+      value as? JsonObject ?: throw McpRequestException("`$VIEWPORT_ARGUMENT` must be an object")
+    fun edge(name: String): Int =
+      box[name]
+        ?.jsonPrimitive
+        ?.longOrNull
+        ?.takeIf { it in 1..ServeUiBuilderView.MAX_VIEWPORT_PX }
+        ?.toInt()
+        ?: throw McpRequestException(
+          "`$VIEWPORT_ARGUMENT.$name` must be an integer from 1 to " +
+            "${ServeUiBuilderView.MAX_VIEWPORT_PX}"
+        )
+    return Pair(edge("width"), edge("height"))
   }
 
   /**
@@ -1622,6 +1819,7 @@ class ServeUiBuilderMcp(
     const val EXPORT_DOCUMENT = "ui_builder_export_document"
     const val RENDER_NATIVE = "ui_builder_render_native"
     const val PUT_ASSET = "ui_builder_put_asset"
+    const val VIEW = "ui_builder_view"
 
     /** The argument [PUT_ASSET] carries the picture in. */
     const val ASSET_BYTES_ARGUMENT = "imageBase64"
@@ -1646,6 +1844,13 @@ class ServeUiBuilderMcp(
     private const val QUERY_ARGUMENT = "query"
     private const val CATALOG_ARGUMENT = "catalog"
     private const val COMPONENT_IDS_ARGUMENT = "componentIds"
+    private const val INCLUDE_ARGUMENT = "include"
+    private const val SELECTION_ARGUMENT = "selection"
+    private const val VIEWPORT_ARGUMENT = "viewport"
+    private const val RENDERER_ARGUMENT = "renderer"
+
+    /** The argument that asks [VIEW] for the picture's bytes in the reply instead of a link. */
+    const val INLINE_ARGUMENT = "inline"
 
     /** Closed, discriminated DesignHomeV1 schema shared by both mutation arguments. */
     private const val DESIGN_HOME_SCHEMA =
@@ -1696,6 +1901,7 @@ class ServeUiBuilderMcp(
         REPLACE_DESIGN_DOCUMENT,
         EXPORT,
         EXPORT_DOCUMENT.takeIf { RemoteDocumentExportSupport.formats.isNotEmpty() },
+        VIEW,
         DESIGN_ACCESS,
         SHARE_DESIGN,
         RENAME_DESIGN,
@@ -2267,6 +2473,31 @@ class ServeUiBuilderMcp(
               "revision":{"type":"integer","description":"A past revision. Omit for the current one."}
             },"required":["designId"],"additionalProperties":false}
             """,
+        ),
+        tool(
+          VIEW,
+          "See a design the way a person in the editor sees it: a PNG of the canvas with the " +
+            "overlays drawn on — the `selection` outline, the `reference` picture when one is " +
+            "attached, the discussion's `comments` pins, and the layout `bounds` — and beside it " +
+            "JSON with the revision, each visible node's id and box, each pin's thread and " +
+            "position, all in the returned image's pixels. The picture is a short-lived signed " +
+            "https link by default; `$INLINE_ARGUMENT: true` puts the bytes in the reply as well. " +
+            "The frame is the PNG export (`$RENDERER_ARGUMENT: \"export\"`, the editor's own " +
+            "renderer), which reports no node boxes; `$RENDERER_ARGUMENT: \"native\"` draws " +
+            "real Compose on a host with a native render lane, reports every node's box so the " +
+            "selection can be outlined, and needs the ui-builder-export capability. A node with " +
+            "no box is reported, never drawn at a guessed position. Not an McpResponseEnvelopeV1.",
+          """
+          {"type":"object","properties":{
+            "designId":{"type":"string"},
+            "revision":{"type":"integer","description":"A past revision. Omit for the current one."},
+            "$VIEWPORT_ARGUMENT":{"type":"object","properties":{"width":{"type":"integer","minimum":1,"maximum":${ServeUiBuilderView.MAX_VIEWPORT_PX}},"height":{"type":"integer","minimum":1,"maximum":${ServeUiBuilderView.MAX_VIEWPORT_PX}}},"required":["width","height"],"additionalProperties":false,"description":"Fit the picture inside this many pixels, keeping its aspect ratio. Omit for the render's own size."},
+            "$INCLUDE_ARGUMENT":{"type":"array","items":{"type":"string","enum":[${ServeUiBuilderView.INCLUDES.joinToString(",") { "\"$it\"" }}]},"description":"Overlays to draw. Defaults to ${ServeUiBuilderView.DEFAULT_INCLUDES.sorted().joinToString(", ")}; [] draws the bare frame."},
+            "$SELECTION_ARGUMENT":{"type":"array","items":{"type":"string"},"description":"Node ids to show as selected."},
+            "$RENDERER_ARGUMENT":{"type":"string","enum":["${ServeUiBuilderView.RENDERER_EXPORT}","${ServeUiBuilderView.RENDERER_NATIVE}"],"description":"Defaults to ${ServeUiBuilderView.RENDERER_EXPORT}."},
+            "$INLINE_ARGUMENT":{"type":"boolean","description":"Also return the PNG as an image block. Defaults to false; a host with no public origin always does."}
+          },"required":["designId"],"additionalProperties":false}
+          """,
         ),
       )
   }

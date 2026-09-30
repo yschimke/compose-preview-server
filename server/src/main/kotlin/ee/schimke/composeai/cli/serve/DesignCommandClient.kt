@@ -5,6 +5,7 @@ import java.net.http.HttpClient
 import java.net.http.HttpRequest
 import java.net.http.HttpResponse
 import java.time.Duration
+import java.util.Base64
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
@@ -33,6 +34,14 @@ internal interface DesignMcpTransport {
    * service itself spelled.
    */
   fun call(tool: String, arguments: JsonObject): JsonObject
+
+  /**
+   * [call], plus the bytes of the first image block the result carries — for a tool that answers
+   * with a picture beside its JSON, as `ui_builder_view` does. Null bytes from a transport that
+   * cannot see content blocks.
+   */
+  fun callWithImage(tool: String, arguments: JsonObject): Pair<JsonObject, ByteArray?> =
+    call(tool, arguments) to null
 }
 
 /** A refusal worth printing verbatim: the server's own words, not an interpretation of them. */
@@ -74,6 +83,11 @@ internal class DesignHttpTransport(
 
   override fun call(tool: String, arguments: JsonObject): JsonObject =
     unwrap(tool, callRaw(tool, arguments))
+
+  override fun callWithImage(tool: String, arguments: JsonObject): Pair<JsonObject, ByteArray?> {
+    val raw = callRaw(tool, arguments)
+    return unwrap(tool, raw) to imageBlock(raw)
+  }
 
   /**
    * One `tools/call`, answered with the reply body as it came — JSON or an SSE frame — for a caller
@@ -229,6 +243,23 @@ internal fun unwrap(tool: String, raw: String): JsonObject {
   return envelope[ServeUiBuilderMcp.UNACKNOWLEDGED_COMMENTS_KEY]?.let { count ->
     JsonObject(response + (ServeUiBuilderMcp.UNACKNOWLEDGED_COMMENTS_KEY to count))
   } ?: response
+}
+
+/** The decoded bytes of the first `image` content block in a `tools/call` reply, or null. */
+internal fun imageBlock(raw: String): ByteArray? {
+  val payload =
+    if (raw.startsWith("event:") || raw.startsWith("data:")) {
+      raw.lineSequence().firstOrNull { it.startsWith("data:") }?.removePrefix("data:")?.trim()
+    } else raw
+  return runCatching {
+    val result = Json.parseToJsonElement(payload ?: return null).jsonObject["result"]?.jsonObject
+    val block =
+      (result?.get("content") as? JsonArray)
+        ?.mapNotNull { it as? JsonObject }
+        ?.firstOrNull { it["type"]?.jsonPrimitive?.contentOrNull == "image" }
+    block?.get("data")?.jsonPrimitive?.contentOrNull?.let { Base64.getDecoder().decode(it) }
+  }
+    .getOrNull()
 }
 
 private fun String.containsAuthorizationRefusal(): Boolean =
