@@ -201,6 +201,7 @@ class DaemonMcpServerTest {
         "render_preview_overlay",
         "get_preview_extras",
         "record_preview",
+        "rc_open",
       )
   }
 
