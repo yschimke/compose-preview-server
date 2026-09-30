@@ -1,5 +1,23 @@
 # Changelog
 
+## [3.88.0](https://github.com/yschimke/compose-preview-server/compare/v3.87.0...v3.88.0) (2026-09-30)
+
+
+### ⚠ BREAKING CHANGES
+
+* **mcp:** prefix the hosted catalog's data tools with catalog_ ([#1225](https://github.com/yschimke/compose-preview-server/issues/1225))
+
+### Features
+
+* **mcp:** add ui_builder_search_components for targeted catalog lookup ([#1222](https://github.com/yschimke/compose-preview-server/issues/1222)) ([0b4b16a](https://github.com/yschimke/compose-preview-server/commit/0b4b16a7e0f2768a2e3eadd8d02b18619afc5f9b))
+* **mcp:** prefix the hosted catalog's data tools with catalog_ ([#1225](https://github.com/yschimke/compose-preview-server/issues/1225)) ([bdf15d3](https://github.com/yschimke/compose-preview-server/commit/bdf15d3837fb8bc9ddb2d5c599eb168cdfbad4c4))
+* **serve:** --github-auth-open-ui-builder lets any signed-in member edit designs ([#1227](https://github.com/yschimke/compose-preview-server/issues/1227)) ([a96840b](https://github.com/yschimke/compose-preview-server/commit/a96840baef067f6647589861ec0f2b7b466f192c))
+
+
+### Bug Fixes
+
+* **mcp:** follow-ups to the auto-registration, grid and call-budget changes ([#1223](https://github.com/yschimke/compose-preview-server/issues/1223)) ([f8dc2bd](https://github.com/yschimke/compose-preview-server/commit/f8dc2bd97d7c5088dd4a3e6deccfe4deffe4e37f))
+
 ## [3.87.0](https://github.com/yschimke/compose-preview-server/compare/v3.86.0...v3.87.0) (2026-09-29)
 
 
