@@ -132,6 +132,8 @@ for a new grant the same way it asked for the first.
 
 The catalog's data tools carry a `catalog_` prefix (`catalog_render_preview`, `catalog_list_previews`, …) so a client that also runs the local `compose-preview` server never sees two tools with one name. The un-prefixed names still dispatch as a deprecated alias but are no longer listed. `status`, the access tools, the Storybook aliases and `ui_builder_*` are unchanged.
 
+A `catalog_render_preview` PNG result also carries a plain `https` `resource_link` (named `Compose Preview render (https)`, repeated as `structuredContent.imageUrl`) when this box has a public origin: `<origin>/mcp/render.png?uri=…&exp=…&sig=…`. Hosts that cannot show inline base64 or a `compose-preview://` URI (Antigravity's `<agent-embed>` cards, for one) can put it straight in an `<img>`. The URL needs no credential: the HMAC covers exactly one resource URI, overrides included, and expires after ten minutes, so it grants nothing beyond that image. It is minted only after a live-scope render, is absent on a box with no public origin, and a missing or forged signature is a 404.
+
 The endpoint implements Streamable HTTP MCP protocol versions `2025-06-18` and `2025-03-26`.
 Catalog calls are independent, so the server does not allocate sessions or advertise subscriptions:
 JSON-RPC messages use `POST`, notifications receive `202 Accepted`, and optional `GET`/SSE and

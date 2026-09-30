@@ -4,6 +4,7 @@ import ee.schimke.composeai.daemon.devices.DeviceDimensions
 import ee.schimke.composeai.daemon.protocol.PreviewOverrides
 import ee.schimke.composeai.web.WebEscaping
 import java.net.URLDecoder
+import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
 import java.security.SecureRandom
@@ -62,6 +63,11 @@ class ServeCatalogMcp(
   private val uiBuilderNative: Boolean = false,
   /** Wall clock for [signResourceLink] expiry; a seam so tests can age a signed link. */
   private val nowMillis: () -> Long = System::currentTimeMillis,
+  /**
+   * This box's public origin, when it has one. A render result carries a fetchable signed PNG URL
+   * only when this answers (#1160); the local server has no public origin and keeps `data:`.
+   */
+  private val publicOrigin: () -> String? = { null },
 ) {
   /**
    * Per-process key for short-lived signed resource links. A restart drops it, exactly as a restart
@@ -1487,12 +1493,14 @@ class ServeCatalogMcp(
     requestedKeys: List<String> = emptyList(),
     rawOverrides: JsonObject? = null,
   ): JsonObject = buildJsonObject {
-    put(
-      "content",
-      JsonArray(
-        renderContent(host, previewId, uri, overrides, observe, requestedKeys, rawOverrides)
-      ),
-    )
+    val content =
+      renderContent(host, previewId, uri, overrides, observe, requestedKeys, rawOverrides)
+    put("content", JsonArray(content))
+    // Also as `structuredContent.imageUrl`, for hosts that read the structure not the blocks.
+    content
+      .firstOrNull { it["name"]?.jsonPrimitive?.contentOrNull == IMAGE_URL_LINK_NAME }
+      ?.get("uri")
+      ?.let { url -> putJsonObject("structuredContent") { put("imageUrl", url) } }
   }
 
   private suspend fun renderContent(
@@ -1524,14 +1532,14 @@ class ServeCatalogMcp(
       // different overrides can produce byte-identical output either because both applied and
       // neither moved anything, or because a baked lane answered and ignored them both.
       val renderedUri = resourceUriWithOverrides(uri, rawOverrides)
+      val imageUrl = listOfNotNull(signedImageUrl(renderedUri)?.let(::imageUrlLinkContent))
       return if (requestedKeys.isEmpty())
-        listOf(imageContent(png), resourceLinkContent(renderedUri))
+        listOf(imageContent(png), resourceLinkContent(renderedUri)) + imageUrl
       else
         listOf(
           imageContent(png),
           resourceLinkContent(renderedUri),
-          textContent(JsonObject(provenance(rendered, requestedKeys)).toString()),
-        )
+        ) + imageUrl + textContent(JsonObject(provenance(rendered, requestedKeys)).toString())
     }
 
     val observation = buildJsonObject {
@@ -2083,6 +2091,46 @@ class ServeCatalogMcp(
     return "$unsigned${separator}exp=$expiry&sig=${resourceSignature(unsigned, expiry)}"
   }
 
+  /**
+   * `<origin>/mcp/render.png?uri=<resource uri>&exp=…&sig=…`, or null when this box has no public
+   * origin. The signature covers the resource URI (overrides included) and the expiry, so the link
+   * grants exactly one render for [SIGNED_RESOURCE_TTL_SECONDS] and no part of the grant token.
+   */
+  private fun signedImageUrl(resourceUri: String): String? {
+    val origin = publicOrigin()?.trimEnd('/') ?: return null
+    val unsigned = unsignedResourceUri(resourceUri)
+    val expiry = nowMillis() / 1000 + SIGNED_RESOURCE_TTL_SECONDS
+    val encoded = URLEncoder.encode(unsigned, StandardCharsets.UTF_8)
+    return "$origin$IMAGE_URL_PATH?uri=$encoded&exp=$expiry&sig=${resourceSignature(unsigned, expiry)}"
+  }
+
+  /**
+   * The PNG behind a [signedImageUrl], or null when the signature is bad or expired. Same lane as a
+   * signed `resources/read`: the catalog is leased and the render takes a permit as usual.
+   */
+  suspend fun signedImagePng(resourceUri: String, expiry: Long, signature: String): ByteArray? {
+    if (nowMillis() / 1000 > expiry) return null
+    val unsigned = unsignedResourceUri(resourceUri)
+    val expected = resourceSignature(unsigned, expiry)
+    if (!MessageDigest.isEqual(expected.encodeToByteArray(), signature.encodeToByteArray())) {
+      return null
+    }
+    val target = runCatching { targetFromUri(unsigned) }.getOrNull() ?: return null
+    val rawOverrides = resourceOverrides(unsigned)
+    return withCatalog(target.catalog) { host ->
+      val preview = resolvePreview(host, target.previewId)
+      renderPng(
+          host,
+          preview.id,
+          parseOverrides(preview, rawOverrides),
+          // The link is minted after a live render, so it serves that lane's pixels, not the
+          // published snapshot `resources/read` prefers for an override-free uri.
+          preferPublished = false,
+        )
+        .png
+    }
+  }
+
   private fun hasValidResourceSignature(uri: String): Boolean {
     val query = uri.substringAfter('?', missingDelimiterValue = "").split('&')
     fun param(name: String) =
@@ -2439,6 +2487,18 @@ class ServeCatalogMcp(
     )
   }
 
+  /** A plain `https` link a host can put in an `<img>`: no scheme it has to know, no bridge. */
+  private fun imageUrlLinkContent(url: String): JsonObject = buildJsonObject {
+    put("type", "resource_link")
+    put("uri", url)
+    put("name", IMAGE_URL_LINK_NAME)
+    put("mimeType", "image/png")
+    put(
+      "description",
+      "Short-lived signed https URL of this exact render; it grants nothing beyond that image.",
+    )
+  }
+
   private fun success(id: JsonElement, result: JsonObject): JsonObject = buildJsonObject {
     put("jsonrpc", "2.0")
     put("id", id)
@@ -2557,6 +2617,10 @@ class ServeCatalogMcp(
 
     /** Lifetime of a signed override-bearing resource link; see [signResourceUri]. */
     internal const val SIGNED_RESOURCE_TTL_SECONDS = 600L
+
+    /** The public route [signedImageUrl] points at; served by [ServeHttpServer], not MCP. */
+    const val IMAGE_URL_PATH = "/mcp/render.png"
+    private const val IMAGE_URL_LINK_NAME = "Compose Preview render (https)"
 
     /**
      * Catalog tools that accept an `overrides` argument, so a link's overrides can be folded in.
