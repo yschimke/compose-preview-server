@@ -237,6 +237,10 @@ class DaemonMcpServer(
 
   private val imageSizeOverride: ImageSizeOverride = ImageSizeOverride.detect()
 
+  /** The `.rc` Remote Compose viewer: `rc_open` and `ui://compose-preview/rc-viewer` (#1237). */
+  private val rcViewer =
+    RcViewerMcp(subscribers = { uri -> subscriptions.sessionsSubscribedTo(uri) })
+
   /**
    * Counters surfaced via the `status` MCP tool: probe outcomes, polling cycles, and random
    * sampling determinism. Lets an operator answer "why does my agent see stale renders?" without
@@ -525,6 +529,7 @@ class DaemonMcpServer(
     runCatching { freshnessExecutor.shutdownNow() }
     runCatching { renderDispatchExecutor.shutdownNow() }
     runCatching { budgetedCallScope.cancel() }
+    runCatching { rcViewer.shutdown() }
     synchronized(fileRenderCacheLock) { runCatching { fileRenderCacheDir.deleteRecursively() } }
   }
 
@@ -607,6 +612,7 @@ class DaemonMcpServer(
           meta = viewerResourceMeta(),
         )
       )
+    out += rcViewer.resourceDescriptors()
     openAiProbe?.resources()?.let(out::addAll)
     if (profile == McpToolProfile.NATIVE) out.addAll(previewLibrary.resources())
     for ((addr, byId) in catalog) {
@@ -656,6 +662,9 @@ class DaemonMcpServer(
             )
           )
       )
+    }
+    rcViewer.readResource(uri)?.let {
+      return it
     }
     openAiProbe?.readResource(uri)?.let {
       return it
@@ -2571,6 +2580,7 @@ class DaemonMcpServer(
           ),
       ),
     ) +
+      rcViewer.toolDefs() +
       (uiBuilderMcp?.toolDefs() ?: emptyList()) +
       (openAiProbe?.toolDefs() ?: emptyList()) +
       previewLibrary.toolDefs() +
@@ -2642,6 +2652,7 @@ class DaemonMcpServer(
       "get-documentation-for-story" -> toolStorybookGetDoc(args)
       "preview-stories" -> toolStorybookPreviewStories(session, args)
       "run-story-tests" -> toolStorybookRunTests(args)
+      RcViewerMcp.TOOL_NAME -> rcViewer.handle(name, args)!!
       else ->
         if (profile == McpToolProfile.NATIVE) {
           openAiProbe?.handle(name, args, (session as? McpSession)?.clientName)

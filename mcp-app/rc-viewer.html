@@ -1,0 +1,691 @@
+<!doctype html>
+<html lang="en" data-rc-player-state="loading">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Remote Compose</title>
+<!--
+  The `.rc` Remote Compose file viewer (ui://compose-preview/rc-viewer, issue #1237).
+
+  An MCP App. It plays one Remote Compose document with the vendored TypeScript player
+  (server/src/main/resources/rc-player/bundle.js), which the server inlines into the script
+  element marked below when it serves this resource: one self-contained document, no CDN, no
+  CSP resourceDomains for the player itself.
+
+  Where the bytes come from:
+  - a host file entrypoint (ChatGPT / Codex desktop): `ui/notifications/tool-input` carries
+    FileInput `{file: {name, resourceUri}}`; the app reads the opaque host URI with
+    `resources/read` (`_meta["openai/resource"].representation = "blob"`) and subscribes to it;
+  - a model call `rc_open {path}` in any other MCP Apps host: the tool result carries the bytes in
+    `_meta["compose-preview/rc"]` and a server-minted `compose-preview-rc://document/<token>/<name>`
+    URI to re-read and subscribe to. No filesystem path ever reaches this page, and the page never
+    shows the `path` argument a host may echo in tool-input.
+-->
+<style>
+  :root {
+    color-scheme: light dark;
+    font: 14px system-ui, sans-serif;
+    --fg: var(--color-text-primary, #1b1b1f);
+    --fg-2: var(--color-text-secondary, #5f6168);
+    --bg: var(--color-background-primary, #fff);
+    --bg-2: var(--color-background-secondary, #f4f4f7);
+    --border: var(--color-border, #d8d8dd);
+    --danger: var(--color-text-danger, #c5221f);
+    --danger-bg: var(--color-background-danger, #fce8e6);
+    --accent: #315da8;
+    color: var(--fg);
+    background: var(--bg);
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --fg: var(--color-text-primary, #e6e6ea);
+    --fg-2: var(--color-text-secondary, #a4a6ad);
+    --bg: var(--color-background-primary, #17181b);
+    --bg-2: var(--color-background-secondary, #222328);
+    --border: var(--color-border, #3a3c42);
+    --danger: var(--color-text-danger, #f28b82);
+    --danger-bg: var(--color-background-danger, #3c1f1d);
+    --accent: #8ab4f8;
+  }
+  :root[data-theme="light"] { color-scheme: light; }
+  body { margin: 0; background: var(--bg); color: var(--fg); }
+  .app { padding: 8px; display: grid; gap: 8px; }
+  .bar { display: flex; flex-wrap: wrap; gap: 6px 8px; align-items: center; min-width: 0; }
+  .title { font-weight: 650; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1 1 8em; }
+  .status { color: var(--fg-2); font-size: 12px; white-space: nowrap; }
+  button, select, input { font: inherit; color: inherit; }
+  button, select { font-size: 12px; padding: 3px 9px; border-radius: 6px; border: 1px solid var(--border); background: var(--bg-2); cursor: pointer; }
+  button:disabled { opacity: .5; cursor: default; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: var(--bg); }
+  .stage { border: 1px solid var(--border); border-radius: 10px; background: var(--bg-2); display: grid; place-items: center; min-height: 140px; padding: 10px; overflow: auto; }
+  .stage canvas { display: block; max-width: 100%; height: auto; image-rendering: auto; }
+  .stage canvas[hidden] { display: none; }
+  .notice { width: 100%; box-sizing: border-box; padding: 10px 12px; border-radius: 0 8px 8px 0; border-left: 4px solid var(--danger); background: var(--danger-bg); }
+  .notice strong { color: var(--danger); display: block; }
+  .notice p { margin: 4px 0 0; overflow-wrap: anywhere; }
+  .notice code { font-size: 12px; }
+  .empty { color: var(--fg-2); }
+  details.values { border: 1px solid var(--border); border-radius: 10px; padding: 6px 10px; }
+  details.values summary { cursor: pointer; font-weight: 600; }
+  .value-list { display: grid; grid-template-columns: minmax(6em, max-content) 1fr; gap: 6px 10px; align-items: center; margin: 8px 0 4px; }
+  .value-list label { font-size: 12px; overflow-wrap: anywhere; }
+  .value-list label small { color: var(--fg-2); margin-left: 4px; }
+  .value-row { display: flex; gap: 6px; align-items: center; min-width: 0; }
+  .value-row input[type="text"], .value-row input[type="number"] { flex: 1 1 auto; min-width: 0; padding: 3px 6px; border-radius: 6px; border: 1px solid var(--border); background: var(--bg); }
+  .value-row input[aria-invalid="true"] { border-color: var(--danger); }
+  .swatch { width: 18px; height: 18px; border-radius: 4px; border: 1px solid var(--border); flex: none; }
+  .hint { color: var(--fg-2); font-size: 12px; margin: 4px 0; }
+</style>
+<body>
+<div class="app">
+  <div class="bar">
+    <span class="title" id="title">Remote Compose</span>
+    <span class="status" id="status" role="status" aria-live="polite">Waiting for a document…</span>
+    <label class="status" for="theme">Theme
+      <select id="theme" aria-label="Theme">
+        <option value="auto">Host</option>
+        <option value="light">Light</option>
+        <option value="dark">Dark</option>
+      </select>
+    </label>
+    <button type="button" id="reload" disabled>Reload</button>
+    <button type="button" id="describe" class="primary" disabled>Describe this</button>
+  </div>
+  <div class="stage" id="stage">
+    <canvas id="canvas" width="256" height="256" hidden aria-label="Remote Compose document"></canvas>
+    <div class="empty" id="empty">Open a <code>.rc</code> file, or call <code>rc_open</code> with a path.</div>
+  </div>
+  <details class="values" id="values" hidden>
+    <summary id="values-summary">Named values</summary>
+    <p class="hint">Overrides apply live and survive a reload of the file.</p>
+    <div class="value-list" id="value-list"></div>
+    <button type="button" id="reset-values">Reset overrides</button>
+  </details>
+</div>
+<script id="rc-player-bundle">/*RC_PLAYER_BUNDLE*/</script>
+<script>
+(() => {
+  'use strict';
+  const REQUEST_TIMEOUT_MS = 15000;
+  const RESULT_META = 'compose-preview/rc';
+  const MAX_CANVAS_EDGE = 2048;
+  const FALLBACK_EDGE = 400;
+  // NamedVariable types (remote-core NamedVariable.*_TYPE).
+  const KINDS = { 0: 'string', 1: 'float', 2: 'color', 4: 'int' };
+
+  const $ = id => document.getElementById(id);
+  const root = document.documentElement;
+  const title = $('title');
+  const status = $('status');
+  const themeSelect = $('theme');
+  const reloadButton = $('reload');
+  const describeButton = $('describe');
+  const stage = $('stage');
+  const canvas = $('canvas');
+  const empty = $('empty');
+  const values = $('values');
+  const valuesSummary = $('values-summary');
+  const valueList = $('value-list');
+  const resetValues = $('reset-values');
+
+  const pending = new Map();
+  let nextId = 1;
+  let initialized = false;
+  let hostTheme;
+  let hostCanSubscribe = false;
+  let player;
+  let doc; // { name, uri, source: 'host' | 'server', bytes, width, height }
+  let subscribedUri;
+  let loadGeneration = 0;
+  let overrides = new Map(); // name -> { kind, value }
+  let themeMode = 'auto';
+  let lastHeight = 0;
+
+  // ---------------------------------------------------------------------------------------------
+  // MCP Apps bridge (postMessage JSON-RPC to the host)
+  // ---------------------------------------------------------------------------------------------
+
+  function request(method, params, timeoutMs = REQUEST_TIMEOUT_MS) {
+    const id = nextId++;
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        if (pending.delete(id)) reject(new Error(`${method} timed out after ${timeoutMs} ms`));
+      }, timeoutMs);
+      pending.set(id, { resolve, reject, timer });
+      window.parent.postMessage({ jsonrpc: '2.0', id, method, params }, '*');
+    });
+  }
+
+  function notify(method, params) {
+    window.parent.postMessage({ jsonrpc: '2.0', method, params }, '*');
+  }
+
+  window.addEventListener('message', event => {
+    if (event.source !== window.parent) return;
+    const message = event.data;
+    if (!message || message.jsonrpc !== '2.0') return;
+    if (message.id != null && !message.method) {
+      const waiter = pending.get(message.id);
+      if (!waiter) return;
+      pending.delete(message.id);
+      clearTimeout(waiter.timer);
+      if (message.error) waiter.reject(new Error(message.error.message || 'request failed'));
+      else waiter.resolve(message.result);
+      return;
+    }
+    switch (message.method) {
+      case 'ui/notifications/tool-input':
+        onToolInput(message.params?.arguments || {});
+        break;
+      case 'ui/notifications/tool-result':
+        onToolResult(message.params?.result || message.params || {});
+        break;
+      case 'notifications/resources/updated':
+      case 'ui/notifications/resource-updated':
+        if (doc && message.params?.uri === doc.uri) void reload('updated');
+        break;
+      case 'ui/notifications/host-context-changed':
+        applyHostContext(message.params || {});
+        break;
+      default:
+        break;
+    }
+  });
+
+  async function initializeBridge() {
+    try {
+      const result = await request('ui/initialize', {
+        appInfo: { name: 'compose-preview-rc-viewer', version: '1' },
+        appCapabilities: {},
+        protocolVersion: '2026-01-26',
+      });
+      const caps = result?.hostCapabilities || {};
+      hostCanSubscribe =
+        caps.serverResources?.subscribe === true || caps.experimental?.['openai/resource'] != null;
+      applyHostContext(result?.hostContext || {});
+      initialized = true;
+      notify('ui/notifications/initialized', {});
+      reportSize();
+    } catch (error) {
+      if (!doc) showError('The MCP Apps bridge is unavailable.', String(error?.message || error));
+    }
+  }
+
+  function applyHostContext(context) {
+    if (context && typeof context.theme === 'string') {
+      hostTheme = context.theme === 'dark' ? 'dark' : 'light';
+      applyTheme();
+    }
+  }
+
+  // ---------------------------------------------------------------------------------------------
+  // Inputs
+  // ---------------------------------------------------------------------------------------------
+
+  function onToolInput(args) {
+    const file = args && typeof args.file === 'object' ? args.file : null;
+    if (file && typeof file.resourceUri === 'string' && file.resourceUri.trim()) {
+      // A host file entrypoint: the bytes come from the host, through the opaque URI.
+      void open({ name: displayName(file.name), uri: file.resourceUri, source: 'host' });
+      return;
+    }
+    // A model call with `path`: the page never uses or shows it and waits for the tool result.
+    setStatus('Opening…');
+  }
+
+  function onToolResult(result) {
+    const structured = result?.structuredContent || {};
+    if (result?.isError) {
+      const error = structured.error || {};
+      const text = result.content?.find(block => block?.type === 'text')?.text;
+      showError(error.message || text || 'rc_open failed.', error.code);
+      return;
+    }
+    if (structured.source === 'server') {
+      const inline = result?._meta?.[RESULT_META]?.documentBase64;
+      const next = { name: displayName(structured.name), uri: structured.resourceUri, source: 'server' };
+      if (typeof inline === 'string' && inline) void open(next, base64ToBytes(inline));
+      else void open(next);
+      return;
+    }
+    if (structured.source === 'host' && structured.resourceUri) {
+      // The server may add its own URI for the same file (from the host-injected path), for a host
+      // that cannot answer resources/read on its opaque URI.
+      const fallbackUri = typeof structured.fallbackResourceUri === 'string' ? structured.fallbackResourceUri : undefined;
+      if (doc?.uri !== structured.resourceUri) {
+        void open({ name: displayName(structured.name), uri: structured.resourceUri, source: 'host', fallbackUri });
+      } else if (fallbackUri && !doc.fallbackUri) {
+        doc.fallbackUri = fallbackUri;
+        if (root.dataset.rcPlayerState === 'error') void reload('manual');
+      }
+    }
+  }
+
+  function displayName(name) {
+    // Only ever a base name: strip anything path-like a host might hand over.
+    const raw = typeof name === 'string' ? name : '';
+    return raw.split(/[\\/]/).pop() || 'document.rc';
+  }
+
+  // ---------------------------------------------------------------------------------------------
+  // Loading
+  // ---------------------------------------------------------------------------------------------
+
+  async function open(next, inlineBytes) {
+    const changedDoc = !doc || doc.uri !== next.uri;
+    doc = { ...next };
+    title.textContent = doc.name;
+    reloadButton.disabled = !doc.uri;
+    if (changedDoc) overrides = new Map();
+    await load(inlineBytes);
+    if (doc?.uri && changedDoc) void subscribe(doc.uri);
+  }
+
+  async function reload(reason) {
+    if (!doc) return;
+    setStatus(reason === 'updated' ? 'File changed, reloading…' : 'Reloading…');
+    await load();
+  }
+
+  async function load(inlineBytes) {
+    const generation = ++loadGeneration;
+    setState('loading');
+    setStatus('Loading…');
+    try {
+      let bytes = inlineBytes;
+      if (!bytes) {
+        try {
+          bytes = await readBytes(doc.uri);
+        } catch (error) {
+          if (!doc.fallbackUri) throw error;
+          bytes = await readBytes(doc.fallbackUri);
+        }
+      }
+      if (generation !== loadGeneration) return;
+      await play(bytes, generation);
+    } catch (error) {
+      if (generation !== loadGeneration) return;
+      showError('This Remote Compose document could not be played.', String(error?.message || error));
+    }
+  }
+
+  async function readBytes(uri) {
+    if (!uri) throw new Error('No document URI to read.');
+    const result = await request('resources/read', {
+      uri,
+      _meta: { 'openai/resource': { representation: 'blob' } },
+    });
+    const content = result?.contents?.find(item => item && (typeof item.blob === 'string' || typeof item.text === 'string'));
+    if (!content) throw new Error('resources/read returned no contents.');
+    if (typeof content.blob === 'string') return base64ToBytes(content.blob);
+    // A host that answered with text: best effort, one byte per UTF-16 unit.
+    const bytes = new Uint8Array(content.text.length);
+    for (let i = 0; i < content.text.length; i++) bytes[i] = content.text.charCodeAt(i) & 0xff;
+    return bytes;
+  }
+
+  async function subscribe(uri) {
+    if (subscribedUri === uri) return;
+    if (subscribedUri) {
+      const previous = subscribedUri;
+      subscribedUri = undefined;
+      request('resources/unsubscribe', { uri: previous }, 5000).catch(() => {});
+    }
+    if (!initialized || !hostCanSubscribe) return;
+    try {
+      await request('resources/subscribe', { uri }, 5000);
+      subscribedUri = uri;
+    } catch (error) {
+      console.debug('resources/subscribe was refused; live reload is off:', error);
+    }
+  }
+
+  function base64ToBytes(base64) {
+    const binary = atob(base64);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    return bytes;
+  }
+
+  // The header's DOC_WIDTH / DOC_HEIGHT (remote-core Header), read before the player loads: the
+  // player sizes the document from the canvas at load time and cannot recover it afterwards.
+  function headerSize(bytes) {
+    try {
+      const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+      let i = 1; // opcode 0 (HEADER)
+      const versionOrMagic = view.getInt32(i); i += 4;
+      if (((versionOrMagic & 0xffff0000) >>> 0) === 76283904) {
+        i += 8; // minor, patch
+        const count = view.getInt32(i); i += 4;
+        let width, height;
+        for (let p = 0; p < Math.min(count, 1000); p++) {
+          const tag = view.getUint16(i); i += 2;
+          const length = view.getUint16(i); i += 2;
+          const type = tag >> 10;
+          const key = tag & 1023;
+          if (type === 0 && (key === 5 || key === 6)) {
+            const value = view.getInt32(i);
+            if (key === 5) width = value; else height = value;
+          }
+          // Advance exactly as Header.readDirect reads: int/float 4, long 8, UTF-8 length-prefixed.
+          i += type === 0 || type === 1 ? 4 : type === 2 ? 8 : type === 3 ? 4 + view.getInt32(i) : length;
+        }
+        return width > 0 && height > 0 ? { width, height } : null;
+      }
+      i += 8; // minor, patch
+      const width = view.getInt32(i);
+      const height = view.getInt32(i + 4);
+      return width > 0 && height > 0 ? { width, height } : null;
+    } catch {
+      return null;
+    }
+  }
+
+  async function play(bytes, generation) {
+    if (!window.RC?.RcdPlayer) throw new Error('The Remote Compose player is missing from this page.');
+    const size = headerSize(bytes) || { width: FALLBACK_EDGE, height: FALLBACK_EDGE };
+    const scale = Math.min(1, MAX_CANVAS_EDGE / Math.max(size.width, size.height));
+    canvas.width = Math.max(1, Math.round(size.width * scale));
+    canvas.height = Math.max(1, Math.round(size.height * scale));
+    if (!player) player = new window.RC.RcdPlayer(canvas);
+    player.setTheme(effectiveTheme());
+    const copy = bytes.slice().buffer;
+    await player.loadFromArrayBuffer(copy);
+    if (generation !== loadGeneration) return;
+    applyOverrides();
+    try {
+      await Promise.race([player.fontsReady(), new Promise(resolve => setTimeout(resolve, 1500))]);
+    } catch {
+      // A face that never loads leaves the fallback font; the document still plays.
+    }
+    if (generation !== loadGeneration) return;
+    player.repaint?.();
+    doc.bytes = bytes;
+    doc.width = canvas.width;
+    doc.height = canvas.height;
+    empty.hidden = true;
+    stage.querySelector('.notice')?.remove();
+    canvas.hidden = false;
+    renderValueEditor();
+    describeButton.disabled = false;
+    setState('ready');
+    setStatus(`${canvas.width}×${canvas.height} · ${formatBytes(bytes.length)}`);
+    reportSize();
+  }
+
+  function formatBytes(n) {
+    return n < 1024 ? `${n} B` : n < 1048576 ? `${(n / 1024).toFixed(1)} KB` : `${(n / 1048576).toFixed(1)} MB`;
+  }
+
+  // ---------------------------------------------------------------------------------------------
+  // State, errors, sizing
+  // ---------------------------------------------------------------------------------------------
+
+  function setState(state, reason) {
+    root.dataset.rcPlayerState = state;
+    if (reason) root.dataset.rcPlayerError = reason;
+    else delete root.dataset.rcPlayerError;
+  }
+
+  function setStatus(text) {
+    status.textContent = text;
+  }
+
+  function showError(message, detail) {
+    setState('error', detail ? `${message} ${detail}` : message);
+    setStatus('Error');
+    canvas.hidden = true;
+    empty.hidden = true;
+    describeButton.disabled = true;
+    stage.querySelector('.notice')?.remove();
+    const notice = document.createElement('div');
+    notice.className = 'notice';
+    notice.setAttribute('role', 'alert');
+    const strong = document.createElement('strong');
+    strong.textContent = message;
+    notice.append(strong);
+    if (detail) {
+      const p = document.createElement('p');
+      const code = document.createElement('code');
+      code.textContent = detail;
+      p.append(code);
+      notice.append(p);
+    }
+    stage.append(notice);
+    reportSize();
+  }
+
+  function reportSize() {
+    requestAnimationFrame(() => {
+      const height = Math.ceil(document.documentElement.getBoundingClientRect().height);
+      if (!initialized || height === lastHeight) return;
+      lastHeight = height;
+      notify('ui/notifications/size-changed', { height });
+    });
+  }
+
+  // ---------------------------------------------------------------------------------------------
+  // Theme
+  // ---------------------------------------------------------------------------------------------
+
+  const darkMedia = window.matchMedia?.('(prefers-color-scheme: dark)');
+
+  function effectiveTheme() {
+    if (themeMode !== 'auto') return themeMode;
+    if (hostTheme) return hostTheme;
+    return darkMedia?.matches ? 'dark' : 'light';
+  }
+
+  function applyTheme() {
+    const theme = effectiveTheme();
+    root.dataset.theme = theme;
+    if (player) {
+      player.setTheme(theme);
+      player.repaint?.();
+    }
+  }
+
+  themeSelect.addEventListener('change', () => {
+    themeMode = themeSelect.value;
+    applyTheme();
+  });
+  darkMedia?.addEventListener?.('change', () => {
+    if (themeMode === 'auto' && !hostTheme) applyTheme();
+  });
+
+  // ---------------------------------------------------------------------------------------------
+  // Named values
+  // ---------------------------------------------------------------------------------------------
+
+  function remoteContext() {
+    return player?.getRemoteContext?.() || null;
+  }
+
+  // The document's user named values: [{ name, qualified, kind, value }].
+  function namedValues() {
+    const ctx = remoteContext();
+    const vars = ctx?.namedVariables;
+    if (!vars || typeof vars.forEach !== 'function') return [];
+    const state = ctx.mRemoteComposeState;
+    const out = [];
+    vars.forEach((entry, qualified) => {
+      const kind = KINDS[entry?.type];
+      if (!kind || typeof qualified !== 'string' || !qualified.startsWith('USER:')) return;
+      const name = qualified.slice(5);
+      const override = overrides.get(name);
+      out.push({ name, qualified, kind, value: override ? override.value : currentValue(state, kind, entry.id) });
+    });
+    return out.sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  function currentValue(state, kind, id) {
+    try {
+      if (kind === 'float') return state.getFloat(id);
+      if (kind === 'int') return state.getInteger(id);
+      if (kind === 'color') return argbToHex(state.getColor(id));
+      const text = state.getFromId(id);
+      return typeof text === 'string' ? text : '';
+    } catch {
+      return '';
+    }
+  }
+
+  function argbToHex(argb) {
+    if (typeof argb !== 'number') return '';
+    return '#' + (argb >>> 0).toString(16).toUpperCase().padStart(8, '0');
+  }
+
+  function parseColor(text) {
+    let hex = String(text).trim().replace(/^#/, '');
+    if (hex.length === 6) hex = 'FF' + hex;
+    if (!/^[0-9a-fA-F]{8}$/.test(hex)) return null;
+    return parseInt(hex, 16) >>> 0;
+  }
+
+  function applyOverride(name, kind, value) {
+    const ctx = remoteContext();
+    if (!ctx) return false;
+    const qualified = 'USER:' + name;
+    if (kind === 'color') {
+      const argb = parseColor(value);
+      if (argb === null) return false;
+      ctx.setNamedColorOverride?.(qualified, argb | 0);
+    } else if (kind === 'float') {
+      const number = Number(value);
+      if (!Number.isFinite(number)) return false;
+      ctx.setNamedFloatOverride?.(qualified, number);
+    } else if (kind === 'int') {
+      const number = Number(value);
+      if (!Number.isInteger(number)) return false;
+      ctx.setNamedIntegerOverride?.(qualified, number);
+    } else {
+      ctx.setNamedStringOverride?.(qualified, String(value));
+    }
+    return true;
+  }
+
+  function applyOverrides() {
+    overrides.forEach((override, name) => applyOverride(name, override.kind, override.value));
+  }
+
+  function renderValueEditor() {
+    const list = namedValues();
+    valueList.replaceChildren();
+    values.hidden = list.length === 0;
+    valuesSummary.textContent = `Named values (${list.length})`;
+    for (const item of list) {
+      const id = `value-${item.name.replace(/[^A-Za-z0-9_-]/g, '_')}`;
+      const label = document.createElement('label');
+      label.htmlFor = id;
+      label.textContent = item.name;
+      const kind = document.createElement('small');
+      kind.textContent = item.kind;
+      label.append(kind);
+      const row = document.createElement('div');
+      row.className = 'value-row';
+      const input = document.createElement('input');
+      input.id = id;
+      input.type = item.kind === 'float' || item.kind === 'int' ? 'number' : 'text';
+      if (item.kind === 'float') input.step = 'any';
+      input.value = item.kind === 'float' && typeof item.value === 'number' ? String(Math.round(item.value * 1000) / 1000) : String(item.value);
+      input.dataset.name = item.name;
+      input.dataset.kind = item.kind;
+      let swatch;
+      if (item.kind === 'color') {
+        swatch = document.createElement('span');
+        swatch.className = 'swatch';
+        swatch.style.background = cssColor(item.value);
+        row.append(swatch);
+      }
+      input.addEventListener('change', () => {
+        const ok = applyOverride(item.name, item.kind, input.value);
+        input.setAttribute('aria-invalid', ok ? 'false' : 'true');
+        if (!ok) return;
+        overrides.set(item.name, { kind: item.kind, value: input.value });
+        if (swatch) swatch.style.background = cssColor(input.value);
+        player?.repaint?.();
+      });
+      row.append(input);
+      valueList.append(label, row);
+    }
+  }
+
+  function cssColor(value) {
+    const argb = parseColor(value);
+    if (argb === null) return 'transparent';
+    const a = ((argb >>> 24) & 255) / 255;
+    return `rgba(${(argb >>> 16) & 255}, ${(argb >>> 8) & 255}, ${argb & 255}, ${a.toFixed(3)})`;
+  }
+
+  resetValues.addEventListener('click', () => {
+    overrides = new Map();
+    if (doc?.bytes) void play(doc.bytes, ++loadGeneration);
+  });
+
+  // ---------------------------------------------------------------------------------------------
+  // Actions
+  // ---------------------------------------------------------------------------------------------
+
+  reloadButton.addEventListener('click', () => void reload('manual'));
+
+  describeButton.addEventListener('click', async () => {
+    if (!doc || root.dataset.rcPlayerState !== 'ready') return;
+    player?.repaint?.();
+    const png = canvas.toDataURL('image/png').replace(/^data:image\/png;base64,/, '');
+    const list = namedValues().map(({ name, kind, value }) => ({ name, kind, value }));
+    const theme = effectiveTheme();
+    const lines = list.length
+      ? list.map(item => `- ${item.name} (${item.kind}) = ${JSON.stringify(item.value)}`).join('\n')
+      : '(none)';
+    const params = {
+      content: [
+        {
+          type: 'image',
+          data: png,
+          mimeType: 'image/png',
+          _meta: { 'openai/title': `${doc.name} (current frame)` },
+        },
+        {
+          type: 'text',
+          text:
+            `The user is looking at the Remote Compose document ${doc.name}, ` +
+            `${doc.width}×${doc.height}, ${theme} theme. The image is its current frame.\n` +
+            `Named values:\n${lines}`,
+          _meta: { 'openai/title': `${doc.name} named values` },
+        },
+      ],
+      structuredContent: {
+        rcDocument: { name: doc.name, width: doc.width, height: doc.height, theme, namedValues: list },
+      },
+    };
+    describeButton.disabled = true;
+    try {
+      await request('ui/update-model-context', params);
+      setStatus('Added to the conversation');
+    } catch (error) {
+      setStatus(`Could not add context: ${error?.message || error}`);
+    } finally {
+      describeButton.disabled = false;
+    }
+  });
+
+  // For tests and harness captures.
+  window.__rcViewer = {
+    get state() { return root.dataset.rcPlayerState; },
+    get document() { return doc ? { name: doc.name, uri: doc.uri, source: doc.source, width: doc.width, height: doc.height } : null; },
+    namedValues: () => namedValues().map(({ name, kind, value }) => ({ name, kind, value })),
+    setNamedValue(name, value) {
+      const item = namedValues().find(entry => entry.name === name);
+      if (!item || !applyOverride(name, item.kind, value)) return false;
+      overrides.set(name, { kind: item.kind, value });
+      player?.repaint?.();
+      renderValueEditor();
+      return true;
+    },
+  };
+
+  applyTheme();
+  initializeBridge();
+})();
+</script>
+</body>
+</html>

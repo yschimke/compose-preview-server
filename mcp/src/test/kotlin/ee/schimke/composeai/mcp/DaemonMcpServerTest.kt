@@ -207,6 +207,7 @@ class DaemonMcpServerTest {
         PreviewSettingsMcp.UPDATE_TOOL,
         PreviewSettingsMcp.DOCTOR_TOOL,
         PreviewSettingsMcp.REGISTER_PROJECT_TOOL,
+        "rc_open",
       )
   }
 
