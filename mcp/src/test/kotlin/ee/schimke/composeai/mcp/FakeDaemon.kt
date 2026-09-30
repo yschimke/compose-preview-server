@@ -257,6 +257,13 @@ class FakeDaemon : DaemonSpawn {
   @Volatile var autoRenderUnchanged: ((previewId: String) -> Boolean?)? = null
 
   /**
+   * Optional companion to [autoRenderPngPath] — when set, the auto-emitted `renderFinished` carries
+   * the returned element as `workTrace`, the per-render trace of what the daemon ran (#1181).
+   * Returning `null` omits the field, as every released daemon does today.
+   */
+  @Volatile var autoRenderWorkTrace: ((previewId: String) -> JsonElement?)? = null
+
+  /**
    * Path returned in `InitializeResult.manifest.path`. The MCP server's `DaemonSupervisor` caches
    * it on `SupervisedDaemon.manifestPath` so the background poller can stat the file and re-read on
    * change (issue #834). Tests that drive the manifest poller assign this before the spawn calls
@@ -344,13 +351,27 @@ class FakeDaemon : DaemonSpawn {
     sendNotification("classpathDirty", params)
   }
 
+  /** One auto-emitted `renderFinished`, captured when its `renderNow` arrived. */
+  private data class AutoRender(
+    val previewId: String,
+    val pngPath: String,
+    val unchanged: Boolean?,
+    val workTrace: JsonElement?,
+  )
+
   /** Pushes a `renderFinished` notification. Returns the synthetic pngPath emitted. */
-  fun emitRenderFinished(previewId: String, pngPath: String, unchanged: Boolean? = null): String {
+  fun emitRenderFinished(
+    previewId: String,
+    pngPath: String,
+    unchanged: Boolean? = null,
+    workTrace: JsonElement? = null,
+  ): String {
     val params = buildJsonObject {
       put("id", previewId)
       put("pngPath", pngPath)
       put("tookMs", 50L)
       if (unchanged != null) put("unchanged", unchanged)
+      if (workTrace != null) put("workTrace", workTrace)
     }
     sendNotification("renderFinished", params)
     return pngPath
@@ -455,7 +476,14 @@ class FakeDaemon : DaemonSpawn {
         val finished =
           autoRenderPngPath?.let { provider ->
             previews.mapNotNull { pid ->
-              provider(pid)?.let { path -> Triple(pid, path, autoRenderUnchanged?.invoke(pid)) }
+              provider(pid)?.let { path ->
+                AutoRender(
+                  pid,
+                  path,
+                  autoRenderUnchanged?.invoke(pid),
+                  autoRenderWorkTrace?.invoke(pid),
+                )
+              }
             }
           } ?: emptyList()
         renderRequests.offer(previews)
@@ -464,7 +492,9 @@ class FakeDaemon : DaemonSpawn {
         // Auto-emit renderFinished for any preview whose path the test pre-registered. The
         // emission happens AFTER the response so the daemon-protocol ordering matches what a
         // real backend produces (queued → started → finished).
-        finished.forEach { (pid, path, unchanged) -> emitRenderFinished(pid, path, unchanged) }
+        finished.forEach { (pid, path, unchanged, workTrace) ->
+          emitRenderFinished(pid, path, unchanged, workTrace)
+        }
       }
       "shutdown" -> {
         sendResponse(id, kotlinx.serialization.json.JsonNull)

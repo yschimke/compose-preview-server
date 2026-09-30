@@ -13,12 +13,14 @@ import java.net.ServerSocket
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.TimeUnit
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
+import kotlinx.serialization.json.putJsonArray
 import org.junit.After
 import org.junit.Assume.assumeFalse
 import org.junit.Rule
@@ -471,6 +473,25 @@ class SourceRecompileTest {
     edit(fixture, """@Preview fun Header() { Text("Hello Android") }""")
     val line = render(fixture).texts.single { it.startsWith("stale:") }
     assertThat(line).contains("timed out")
+  }
+
+  /** #1181: the daemon's per-render trace reaches `_meta.work.daemonTrace` unchanged. */
+  @Test
+  fun `the daemon's work trace passes through to the render's work record`() {
+    lateinit var fixture: Fixture
+    start(fakeCompiler { fixture.classes })
+    fixture = fixture()
+    assertThat(render(fixture).work!!.containsKey("daemonTrace")).isFalse()
+
+    val trace = buildJsonObject {
+      putJsonArray("dataKinds") { add(JsonPrimitive("compose/semantics")) }
+      putJsonArray("processors") { add(JsonPrimitive("capture")) }
+    }
+    daemon.autoRenderWorkTrace = { trace }
+    edit(fixture, """@Preview fun Header() { Text("Traced") }""")
+    val traced = render(fixture)
+    assertThat(traced.bytes).contains("Traced")
+    assertThat(traced.work!!["daemonTrace"]).isEqualTo(trace)
   }
 
   @Test
