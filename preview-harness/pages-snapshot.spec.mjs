@@ -4342,6 +4342,10 @@ for (const fixture of listPageFixtures()) {
         `/preview-harness/fixtures/pages/${fixture}.html${FIXTURE_QUERY[fixture] || ""}`,
       );
 
+      // The `.rc` viewer (#1237) plays asynchronously; shoot it once it reports ready or error.
+      if (fixture.startsWith("mcp-app-rc-viewer")) {
+        await page.waitForFunction(() => window.__rcHost?.settled === true, null, { timeout: 20_000 });
+      }
       if (fixture.startsWith("mcp-app-viewer-")) {
         const viewer = page.frameLocator('iframe[title="Compose Preview MCP App"]');
         if (fixture.startsWith("mcp-app-viewer-static")) {

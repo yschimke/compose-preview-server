@@ -203,6 +203,7 @@ class DaemonMcpServerTest {
         "record_preview",
         "previews_tray",
         "preview_mentions",
+        "rc_open",
       )
   }
 
