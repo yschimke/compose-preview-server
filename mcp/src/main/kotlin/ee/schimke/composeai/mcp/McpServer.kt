@@ -44,6 +44,7 @@ import io.modelcontextprotocol.kotlin.sdk.types.SubscribeRequest
 import io.modelcontextprotocol.kotlin.sdk.types.TextContent
 import io.modelcontextprotocol.kotlin.sdk.types.TextResourceContents
 import io.modelcontextprotocol.kotlin.sdk.types.Tool
+import io.modelcontextprotocol.kotlin.sdk.types.ToolAnnotations
 import io.modelcontextprotocol.kotlin.sdk.types.ToolSchema
 import io.modelcontextprotocol.kotlin.sdk.types.UnsubscribeRequest
 import java.io.Closeable
@@ -434,13 +435,22 @@ internal fun installComposePreviewHandlers(
   }
 }
 
-internal fun composePreviewServerOptions(): ServerOptions =
+/**
+ * [extensions] are server capability extensions such as OpenAI's `openai/settings` (#1242). They go
+ * out twice, as the spec's `capabilities.extensions` and the legacy `capabilities.experimental`,
+ * because MCP `2025-11-25` and earlier hosts read the latter.
+ */
+internal fun composePreviewServerOptions(
+  extensions: Map<String, JsonObject> = emptyMap()
+): ServerOptions =
   ServerOptions(
     capabilities =
       ServerCapabilities(
         tools = ServerCapabilities.Tools(listChanged = true),
         resources = ServerCapabilities.Resources(subscribe = true, listChanged = true),
         prompts = ServerCapabilities.Prompts(listChanged = false),
+        experimental = extensions.takeIf { it.isNotEmpty() }?.let(::JsonObject),
+        extensions = extensions.takeIf { it.isNotEmpty() },
       )
   )
 
@@ -460,6 +470,17 @@ internal fun ToolDef.toSdkTool(): Tool {
     title = title,
     icons = icons?.map { Icon(src = it.src, mimeType = it.mimeType, sizes = it.sizes) },
     meta = meta,
+    outputSchema =
+      outputSchema?.let { schema ->
+        ToolSchema(
+          properties = schema["properties"] as? JsonObject ?: JsonObject(emptyMap()),
+          required =
+            (schema["required"] as? kotlinx.serialization.json.JsonArray)?.mapNotNull {
+              it.jsonPrimitive.contentOrNull
+            },
+        )
+      },
+    annotations = readOnlyHint?.let { ToolAnnotations(readOnlyHint = it) },
   )
 }
 
