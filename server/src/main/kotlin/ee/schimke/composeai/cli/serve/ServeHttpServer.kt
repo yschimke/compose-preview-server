@@ -16716,6 +16716,7 @@ class ServeHttpServer(
           !isPublic ||
             (serverToken.isNotBlank() && ServeUrls.tokensMatch(serverToken, provided)) ||
             uiBuilderAdministrators.containsGithubLogin(login),
+        opensUiBuilder = auth.opensUiBuilder(),
       )
     }
     return ServeAgentGrants.Approver.operator(store.maxScope, store.maxCapabilities)

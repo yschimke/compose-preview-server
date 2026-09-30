@@ -324,6 +324,10 @@ asking to edit it — goes through the same approval, from `/ui-builder/request-
   the design service's per-design answer, so a new account sees what was shared with it and nothing
   else. A guest is an identity only: `currentLogin()` answers null for one, so live sessions, the
   playground, uploads, edit leases and approving grants all treat a guest as signed out.
+- **Or the operator opens the builder to everyone.** With `--github-auth-open-ui-builder`, any
+  signed-in member holds `ui-builder-read`, `-write` and `-export` without repository access, and so
+  — never granting what they do not hold — may approve an agent grant carrying them. Nothing else
+  rides in on it: the scope ceiling, `images` and the playground still ask about the repository.
 - **The request names its requester, verified.** The page opens it from the reader's session, with
   a form seal minted for that login, rather than through the ungated JSON request route — so nobody
   can open a request in someone else's name. The approval page's *Asked from* line, which the asker

@@ -689,7 +689,11 @@ anyone maintaining logins; it adds `read:org` to the requested scope, and a priv
 counts where the org allows this OAuth app (a public membership always does). With a list or orgs set,
 `SERVE_GITHUB_AUTH_GUESTS=1` lets every other GitHub account sign in as a **guest**: it sees the
 UI-builder designs shared with it, read-only, can ask for edit access through an agent grant, and
-counts as signed out everywhere else. The OAuth app
+counts as signed out everywhere else. `SERVE_GITHUB_AUTH_OPEN_UI_BUILDER=1` opens the UI builder
+to every signed-in **member** — with no list or orgs set, that is any GitHub account: they may
+create, edit and export designs, and approve agent grants carrying those three capabilities, without
+access to `SERVE_GITHUB_AUTH_REPO`. The playground and image uploads still require it, guests stay
+read-only, and each design's own sharing still decides who may touch it. The OAuth app
 requests GitHub's `repo` scope so private repository access can be checked during sign-in; the
 server stores only the signed login and the access verdict, not the OAuth token.
 

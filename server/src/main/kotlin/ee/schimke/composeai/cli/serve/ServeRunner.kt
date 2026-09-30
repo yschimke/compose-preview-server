@@ -5298,6 +5298,7 @@ public class ServeRunner(
         allowedUsers = githubAuthUsers,
         allowedOrgs = githubAuthOrgs,
         allowGuests = githubAuthGuests,
+        openUiBuilder = githubAuthOpenUiBuilder,
         callbackBaseUrl = githubAuthCallbackBaseUrl,
         cookieDomain = githubAuthCookieDomain,
         oauthScope = githubAuthScope,

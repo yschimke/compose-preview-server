@@ -297,6 +297,12 @@ object ServeAgentGrants {
         storeCeiling: AgentGrantScope,
         storeCapabilities: Set<AgentGrantCapability> = emptySet(),
         administers: Boolean = true,
+        /**
+         * `--github-auth-open-ui-builder`: this approver holds the UI builder's capabilities
+         * without repository access, so — by the same "never grant what you do not hold" rule — may
+         * pass them on. Nothing else rides in on it.
+         */
+        opensUiBuilder: Boolean = false,
       ) =
         Approver(
           name = "@$login",
@@ -307,6 +313,7 @@ object ServeAgentGrants {
           capabilityCeiling =
             buildSet {
               if (repositoryAccess) addAll(storeCapabilities)
+              if (opensUiBuilder) addAll(storeCapabilities intersect UI_BUILDER_CAPABILITIES)
               // Added and removed independently of the rest: `images` is the one capability whose
               // question is about a different repository, so it neither rides in on the sign-in
               // bit nor is withheld by it.
@@ -318,6 +325,16 @@ object ServeAgentGrants {
         )
     }
   }
+
+  /**
+   * The capabilities a UI-builder route asks for, and all `--github-auth-open-ui-builder` opens.
+   */
+  val UI_BUILDER_CAPABILITIES: Set<AgentGrantCapability> =
+    setOf(
+      AgentGrantCapability.UI_BUILDER_READ,
+      AgentGrantCapability.UI_BUILDER_WRITE,
+      AgentGrantCapability.UI_BUILDER_EXPORT,
+    )
 
   /** How [ServeMachineAuthorization] names the holder of `--token`. */
   const val OPERATOR_ACTOR_ID: String = "operator"

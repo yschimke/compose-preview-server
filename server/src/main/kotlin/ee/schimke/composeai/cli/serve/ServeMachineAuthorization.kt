@@ -110,6 +110,17 @@ class ServeMachineAuthorization(
     if (login != null && githubAuth.isRestrictedToAllowedUsers()) {
       return Decision.Authorized(ServeAgentGrants.githubActorId(login))
     }
+    // `--github-auth-open-ui-builder`: the operator opened the UI builder to every signed-in
+    // member,
+    // so being one is enough for its three capabilities — and only those. The playground and image
+    // uploads keep asking about the repository above.
+    if (
+      login != null &&
+        githubAuth.opensUiBuilder() &&
+        required in ServeAgentGrants.UI_BUILDER_CAPABILITIES
+    ) {
+      return Decision.Authorized(ServeAgentGrants.githubActorId(login))
+    }
 
     presentedGrant(call, presentedToken)?.let { grant ->
       return if (grant.allows(required)) {
