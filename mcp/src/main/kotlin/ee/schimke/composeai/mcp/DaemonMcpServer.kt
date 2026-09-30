@@ -207,6 +207,8 @@ class DaemonMcpServer(
    */
   private val callBudgetMs: Long =
     environment[CALL_BUDGET_ENV]?.toLongOrNull() ?: DEFAULT_CALL_BUDGET_MS,
+  /** How long a budgeted call's finished result waits for its retry; tests shorten it. */
+  private val uncollectedCallResultTtlMs: Long = UNCOLLECTED_CALL_RESULT_TTL_MS,
 ) {
 
   private val fullToolDefsLoader: () -> List<ToolDef> =
@@ -562,6 +564,9 @@ class DaemonMcpServer(
     released.forEach { key -> dispatchDataUnsubscribe(key) }
     subscriptions.forget(session)
     previousFileRenderHashes.remove(session)
+    // Nobody can collect a closed session's budgeted calls: the key holds the session.
+    inFlightCalls.keys.removeIf { it.session == session }
+    sweepUncollectedCalls()
     synchronized(bootstrapNotifyLock) { bootstrapServedSessions.remove(session) }
     sessions.unregister(session)
   }
@@ -2576,7 +2581,10 @@ class DaemonMcpServer(
           renderPreviewChoosingVariant(session, args, scope, report)
         }
       "render_matrix" ->
-        withCallBudget(session, name, args, progress) { toolRenderMatrix(session, args) }
+        withCallBudget(session, name, args, progress) { report ->
+          if (scope == null) autoRegisterWorkspace(session)
+          toolRenderMatrix(session, args, scope, report)
+        }
       "watch" -> toolWatch(session, args)
       "unwatch" -> toolUnwatch(session, args)
       "list_watches" -> toolListWatches(session)
@@ -2630,7 +2638,8 @@ class DaemonMcpServer(
    * runs out the call returns a non-error `pending` result and the bootstrap or render carries on.
    * A later call with the same session, tool and arguments attaches to that work instead of
    * starting it again, and gets its result (or its error, such as the render timeout) once done. A
-   * finished result nobody collected is dropped after [UNCOLLECTED_CALL_RESULT_TTL_MS].
+   * finished result nobody collected is dropped after [uncollectedCallResultTtlMs]: swept on every
+   * budgeted call and when a session closes.
    */
   private suspend fun withCallBudget(
     session: Session,
@@ -2641,16 +2650,13 @@ class DaemonMcpServer(
   ): CallToolResult {
     if (callBudgetMs <= 0) return block(progress)
     val startedAt = System.nanoTime()
+    sweepUncollectedCalls()
     val key = InFlightCallKey(session, tool, args)
     var created: InFlightCall? = null
     val call =
       inFlightCalls.compute(key) { _, existing ->
-        val stale =
-          existing != null &&
-            existing.completedAtNanos != 0L &&
-            System.nanoTime() - existing.completedAtNanos >
-              TimeUnit.MILLISECONDS.toNanos(UNCOLLECTED_CALL_RESULT_TTL_MS)
-        if (existing != null && !stale) existing else InFlightCall().also { created = it }
+        if (existing != null && !existing.isUncollectedPastTtl()) existing
+        else InFlightCall().also { created = it }
       }!!
     call.reportTo = progress
     created?.let { work ->
@@ -2672,6 +2678,19 @@ class DaemonMcpServer(
     inFlightCalls.remove(key, call)
     return call.result.await()
   }
+
+  private fun InFlightCall.isUncollectedPastTtl(): Boolean =
+    completedAtNanos != 0L &&
+      System.nanoTime() - completedAtNanos >
+        TimeUnit.MILLISECONDS.toNanos(uncollectedCallResultTtlMs)
+
+  /** Drops finished results whose retry never came (#1210), so they do not pile up. */
+  private fun sweepUncollectedCalls() {
+    inFlightCalls.entries.removeIf { (_, call) -> call.isUncollectedPastTtl() }
+  }
+
+  /** Budgeted calls still held for a retry; for tests. */
+  internal fun inFlightCallCount(): Int = inFlightCalls.size
 
   /** The `pending` result [withCallBudget] returns when the budget runs out. */
   private fun pendingCallResult(tool: String): CallToolResult {
@@ -3000,20 +3019,21 @@ class DaemonMcpServer(
     }
     lastTried = tried
     // After a restart, a build registered before (workspaces.json) comes back under its old id.
-    if (
-      supervisor.listProjects().isEmpty() && supervisor.restoreMatching(candidates).isNotEmpty()
-    ) {
+    if (supervisor.restoreMatching(candidates).isNotEmpty()) {
       sessions.forEach { it.notifyResourceListChanged() }
-      return
     }
     // A root that is not a build itself: the build around it, else the builds up to two levels
-    // below it (wear-os-samples keeps one build per sample under its git root).
+    // below it (wear-os-samples keeps one build per sample under its git root). A sibling of a
+    // restored build is still discovered (#1188): only the builds already live are skipped.
     val builds = candidates.flatMap { ProjectDiscovery.buildsFor(it) }.distinct()
-    if (builds.size == 1) {
-      registerQuietly(builds.single())
+    val live =
+      supervisor.listProjects().map { runCatching { it.path.canonicalFile }.getOrDefault(it.path) }
+    val fresh = builds.filter { it !in live }
+    if (builds.size == 1 && fresh.size == 1) {
+      registerQuietly(fresh.single())
     } else {
       // Several: registered on the first `preview=` lookup, which then searches all of them.
-      pendingBuilds = builds
+      pendingBuilds = fresh
     }
   }
 
@@ -3687,7 +3707,20 @@ class DaemonMcpServer(
         args["card"]?.jsonPrimitive?.contentOrNull?.toBooleanStrictOrNull() != true &&
         args["crop"] == null &&
         (session as? McpSession)?.clientName != ANTIGRAVITY_CLIENT_NAME
-    if (inlineResult && choices.size <= MAX_VARIANT_CELLS) {
+    // The grid renders each variant plainly (#1199): a call that shapes the render or its result
+    // (overrides, a non-png observation, details, full-scale pixels, force) renders one match
+    // through the single-preview path, which honours all of them.
+    val plainRender =
+      args["overrides"].isAbsent() &&
+        args["details"].let { it.isAbsent() || (it as? JsonArray)?.isEmpty() == true } &&
+        args["observe"].let {
+          it.isAbsent() || (it as? JsonPrimitive)?.contentOrNull?.lowercase() == "png"
+        } &&
+        args["imageScale"].let {
+          it.isAbsent() || (it as? JsonPrimitive)?.contentOrNull?.lowercase() == "default"
+        } &&
+        args["force"].isAbsent()
+    if (inlineResult && plainRender && choices.size <= MAX_VARIANT_CELLS) {
       val grid = renderVariantMatrix(session, choices, args, choose = false)
       if (grid.isError == true) return grid
       val choice = buildJsonObject {
@@ -3772,6 +3805,8 @@ class DaemonMcpServer(
           choiceBlock("elicitation", "The user chose this preview in a form: $picked")
     )
   }
+
+  private fun JsonElement?.isAbsent(): Boolean = this == null || this is JsonNull
 
   /** Short, unique labels for a form: the preview id, or the whole URI when ids collide. */
   private fun variantLabels(uris: List<String>): List<String> {
@@ -4341,11 +4376,16 @@ class DaemonMcpServer(
    * or passes `contactSheet:true` to also receive one stitched grid image of every cell. Bounded so
    * a careless cross-product can't fan out unboundedly.
    */
-  private suspend fun toolRenderMatrix(session: Session, args: JsonObject): CallToolResult {
+  private suspend fun toolRenderMatrix(
+    session: Session,
+    args: JsonObject,
+    scope: Set<WorkspaceId>? = null,
+    progress: (String) -> Unit = {},
+  ): CallToolResult {
     val uriArg = args["uri"]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() }
     val previewArg = args["preview"]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() }
     val variantUris =
-      when (val resolved = matrixVariants(uriArg, previewArg)) {
+      when (val resolved = matrixVariants(uriArg, previewArg, scope, progress)) {
         is PreviewNameResolution.Missing ->
           return errorCallToolResult("render_matrix: ${resolved.message}", resolved.structured)
         is PreviewNameResolution.Found -> listOf(resolved.uri) + resolved.others
@@ -4478,9 +4518,14 @@ class DaemonMcpServer(
    * manifest only holds `…Preview_Devices - Large Round` and friends) resolves to those variants
    * too, instead of reaching the daemon as an id it has never seen.
    */
-  private fun matrixVariants(uriArg: String?, previewArg: String?): PreviewNameResolution {
+  private fun matrixVariants(
+    uriArg: String?,
+    previewArg: String?,
+    scope: Set<WorkspaceId>? = null,
+    progress: (String) -> Unit = {},
+  ): PreviewNameResolution {
     if (uriArg == null) {
-      return previewArg?.let { resolvePreviewName(it) }
+      return previewArg?.let { resolvePreviewName(it, scope, progress) }
         ?: PreviewNameResolution.Missing("missing 'uri' or 'preview'")
     }
     val uri =

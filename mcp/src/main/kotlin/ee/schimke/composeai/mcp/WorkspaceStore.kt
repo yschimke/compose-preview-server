@@ -35,6 +35,13 @@ class WorkspaceStore(private val file: File?) {
   /** Ids this process unregistered, so merging the file back in does not resurrect them. */
   private val forgotten = ConcurrentHashMap.newKeySet<String>()
 
+  /**
+   * Ids this process added or refreshed since it last wrote the file. Any other entry missing from
+   * the file was removed there — `unregister_project` in a sibling process — and is dropped here
+   * too, so this process's next save does not write it back (#1188).
+   */
+  private val unsaved = ConcurrentHashMap.newKeySet<String>()
+
   init {
     load()
   }
@@ -58,6 +65,7 @@ class WorkspaceStore(private val file: File?) {
     val now = System.currentTimeMillis()
     val entry = Entry(id, path.absolutePath, name, now)
     forgotten.remove(id)
+    unsaved.add(id)
     val previous = entries.put(id, entry)
     if (
       previous == null ||
@@ -74,6 +82,7 @@ class WorkspaceStore(private val file: File?) {
     val entry = entries[id] ?: return
     val now = System.currentTimeMillis()
     if (now - entry.lastUsed < TOUCH_INTERVAL_MS) return
+    unsaved.add(id)
     entries[id] = entry.copy(lastUsed = now)
     save()
   }
@@ -81,6 +90,7 @@ class WorkspaceStore(private val file: File?) {
   /** Forgets [id]; only an explicit `unregister_project` does this. */
   fun forget(id: String) {
     forgotten.add(id)
+    unsaved.remove(id)
     if (entries.remove(id) != null) save()
   }
 
@@ -89,9 +99,11 @@ class WorkspaceStore(private val file: File?) {
     val root =
       runCatching { Json.parseToJsonElement(source.readText()) as? JsonObject }.getOrNull()
         ?: return
+    val onDisk = HashSet<String>()
     (root["workspaces"] as? JsonArray).orEmpty().forEach { element ->
       val obj = element as? JsonObject ?: return@forEach
       val id = obj["id"]?.jsonPrimitive?.contentOrNull ?: return@forEach
+      onDisk += id
       if (id in forgotten) return@forEach
       val path = obj["path"]?.jsonPrimitive?.contentOrNull ?: return@forEach
       val lastUsed = obj["lastUsed"]?.jsonPrimitive?.longOrNull ?: 0L
@@ -100,6 +112,7 @@ class WorkspaceStore(private val file: File?) {
         if (theirs.lastUsed > mine.lastUsed) theirs else mine
       }
     }
+    entries.keys.removeIf { it !in onDisk && it !in unsaved }
   }
 
   @Synchronized
@@ -108,7 +121,8 @@ class WorkspaceStore(private val file: File?) {
     runCatching {
       // Merge what other server processes wrote since this one last read the file.
       load()
-      val kept = entries.values.sortedByDescending { it.lastUsed }.take(MAX_ENTRIES)
+      val snapshot = entries.values.toList()
+      val kept = snapshot.sortedByDescending { it.lastUsed }.take(MAX_ENTRIES)
       val text = buildJsonObject {
         putJsonArray("workspaces") {
           kept.forEach { entry ->
@@ -133,6 +147,7 @@ class WorkspaceStore(private val file: File?) {
         StandardCopyOption.REPLACE_EXISTING,
         StandardCopyOption.ATOMIC_MOVE,
       )
+      unsaved.removeAll(snapshot.map { it.id }.toSet())
     }
       .onFailure {
         System.err.println("compose-preview-mcp: could not save $target: ${it.message}")

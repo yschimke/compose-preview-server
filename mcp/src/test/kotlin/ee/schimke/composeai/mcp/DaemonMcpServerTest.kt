@@ -1500,6 +1500,33 @@ class DaemonMcpServerTest {
   }
 
   @Test
+  fun `render_matrix auto-registers the client's Gradle root and honours project`() {
+    val projectDir = tmp.newFolder("matrix-rooted")
+    projectDir.resolve("settings.gradle.kts").writeText("rootProject.name = \"matrix-rooted\"")
+    restartSession(server, requestHandlers = rootsHandler(projectDir))
+    client.initialize(capabilities = buildJsonObject { putJsonObject("roots") {} })
+
+    // #1198: render_matrix preview= registered nothing on first use.
+    val result = client.callTool("render_matrix", buildJsonObject { put("preview", "Missing") })
+    assertThat(result.isError()).isTrue()
+    assertThat(supervisor.listProjects().map { it.path.canonicalPath })
+      .containsExactly(projectDir.canonicalPath)
+
+    // project= scopes the lookup to that build, which reports it is not prepared yet.
+    val repo = samplesRepo()
+    val scoped =
+      client.callTool(
+        "render_matrix",
+        buildJsonObject {
+          put("preview", "StarterPreview")
+          put("project", File(repo, "ComposeStarter").absolutePath)
+        },
+      )
+    assertThat(scoped.firstTextContent())
+      .startsWith("render_matrix: project not prepared: no Gradle wrapper")
+  }
+
+  @Test
   fun `render_preview auto-registers the working directory only when it is a Gradle build`() {
     val notGradle = tmp.newFolder("plain")
     val cwdServer = DaemonMcpServer(supervisor, workingDirectory = notGradle)
@@ -1584,6 +1611,31 @@ class DaemonMcpServerTest {
         File(repo, "ComposeStarter").canonicalPath,
         File(repo, "ComposeAdvanced").canonicalPath,
       )
+  }
+
+  @Test
+  fun `a sibling of a restored build is still discovered on a preview lookup`() {
+    val repo = samplesRepo()
+    // Only ComposeStarter was saved before the restart (#1188).
+    supervisor.workspaceStore.remember(
+      "ComposeStarter-0",
+      File(repo, "ComposeStarter"),
+      "ComposeStarter",
+    )
+    restartSession(server, requestHandlers = rootsHandler(repo))
+    client.initialize(capabilities = buildJsonObject { putJsonObject("roots") {} })
+
+    client.callTool("render_preview", buildJsonObject { put("preview", "Missing") })
+
+    assertThat(supervisor.listProjects().map { it.path.canonicalPath })
+      .containsExactly(
+        File(repo, "ComposeStarter").canonicalPath,
+        File(repo, "ComposeAdvanced").canonicalPath,
+      )
+    assertThat(
+        supervisor.listProjects().single { it.path.name == "ComposeStarter" }.workspaceId.value
+      )
+      .isEqualTo("ComposeStarter-0")
   }
 
   @Test
@@ -1774,6 +1826,73 @@ class DaemonMcpServerTest {
     assertThat(factory.daemons.keys)
       .contains(supervisor.listProjects().single().workspaceId to ":app")
     budgetServer.shutdown()
+  }
+
+  @Test
+  fun `a finished budgeted call nobody collected is swept and a closed session drops its calls`() {
+    val project = tmp.newFolder("uncollected")
+    File(project, "settings.gradle.kts").writeText("include(\":app\")")
+    File(project, "gradlew").writeText("#!/bin/sh\n")
+    val release = java.util.concurrent.CountDownLatch(1)
+    val runner = GradleTaskRunner { _, _, _, _ ->
+      release.await(30, TimeUnit.SECONDS)
+      GradleTaskRunner.Result(1, "* What went wrong:\nboom")
+    }
+    val budgetServer =
+      DaemonMcpServer(
+        supervisor,
+        workingDirectory = null,
+        projectBootstrap = ProjectBootstrap(runner = runner),
+        callBudgetMs = 300,
+        uncollectedCallResultTtlMs = 1,
+      )
+    restartSession(budgetServer)
+    client.initialize()
+    fun render(preview: String) =
+      client.callTool(
+        "render_preview",
+        buildJsonObject {
+          put("preview", preview)
+          put("project", project.absolutePath)
+        },
+      )
+
+    // #1210: the pending call finishes, but its retry never comes.
+    assertThat(render("Abandoned").firstTextContent()).contains("\"pending\":true")
+    assertThat(budgetServer.inFlightCallCount()).isEqualTo(1)
+    release.countDown()
+    val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10)
+    // Any later budgeted call sweeps it once it has finished and outlived its TTL.
+    while (budgetServer.inFlightCallCount() > 0 && System.nanoTime() < deadline) {
+      render("Other")
+    }
+    assertThat(budgetServer.inFlightCallCount()).isEqualTo(0)
+
+    // A call still pending when its session closes is dropped with the session.
+    val stuck = java.util.concurrent.CountDownLatch(1)
+    val stuckServer =
+      DaemonMcpServer(
+        supervisor,
+        workingDirectory = null,
+        projectBootstrap =
+          ProjectBootstrap(
+            runner =
+              GradleTaskRunner { _, _, _, _ ->
+                stuck.await(30, TimeUnit.SECONDS)
+                GradleTaskRunner.Result(1, "boom")
+              }
+          ),
+        callBudgetMs = 300,
+      )
+    restartSession(stuckServer)
+    client.initialize()
+    assertThat(render("Abandoned").firstTextContent()).contains("\"pending\":true")
+    assertThat(stuckServer.inFlightCallCount()).isEqualTo(1)
+    restartSession(stuckServer)
+    assertThat(stuckServer.inFlightCallCount()).isEqualTo(0)
+    stuck.countDown()
+    budgetServer.shutdown()
+    stuckServer.shutdown()
   }
 
   /** Writes the `:app` daemon launch descriptor [ProjectBootstrap] looks for under [root]. */
@@ -3630,6 +3749,38 @@ class DaemonMcpServerTest {
       )
       .isEqualTo("text")
     assertThat(resp.raw["_meta"]!!.jsonObject["composePreview/cellPngs"]!!.jsonArray).hasSize(2)
+  }
+
+  @Test
+  fun `render_preview with several matches and overrides renders one match with them`() {
+    client.initialize()
+    val (workspaceId, ids) = multipreviewModule("Devices - Large Round", "Devices - Small Round")
+    val daemon = factory.daemons.getValue(workspaceId to ":app")
+    val resp =
+      client.callTool(
+        "render_preview",
+        buildJsonObject {
+          put("preview", "ListScreenPreview")
+          put("observe", "png")
+          putJsonObject("overrides") { put("uiMode", "dark") }
+        },
+        timeoutMs = 10_000,
+      )
+    assertThat(resp.isError()).isFalse()
+    // #1199: the grid rendered each variant without the overrides; one match renders with them.
+    val texts = resp.textContents().map { json.parseToJsonElement(it).jsonObject }
+    assertThat(texts.none { it["cells"] != null }).isTrue()
+    assertThat(
+        texts
+          .first { it["variantChoice"] != null }["variantChoice"]!!
+          .jsonObject["choices"]!!
+          .jsonArray
+          .map { it.jsonPrimitive.content }
+      )
+      .containsExactlyElementsIn(ids.map { PreviewUri(workspaceId, ":app", it).toUri() })
+    assertThat(daemon.renderOverrides).hasSize(1)
+    assertThat(daemon.renderOverrides.single()!!.uiMode)
+      .isEqualTo(ee.schimke.composeai.daemon.protocol.UiMode.DARK)
   }
 
   @Test
