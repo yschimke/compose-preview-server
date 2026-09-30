@@ -187,7 +187,9 @@ composeai-preview-daemon = "3.9.2"
 # JSON Schemas for the design document, mutations and submissions in the `ui-builder-protocol` jar
 # (compose-preview-contracts#121) and optional asset size/provenance, an asset quota with its
 # rejection code, and a conflict explanation (compose-preview-contracts#122).
-composeai-contracts = "3.13.0"
+# 3.13.1 restores the binary compatibility 3.13.0 broke (the defaulted constructors and `copy` of
+# DesignStateV1, CommandConflictV1 and AssetBindingV1; compose-preview-contracts#124). Skip 3.13.0.
+composeai-contracts = "3.13.1"
 
 # The extracted UI builder (yschimke/compose-ui-builder), resolved from its RELEASES. Three jars
 # and a BOM on Maven Central, and the editor archive as a GitHub release asset reached through the
