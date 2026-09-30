@@ -1,0 +1,327 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>OpenAI Extensions Probe</title>
+<!--
+  Diagnostic MCP App for the OpenAI MCP Extensions probe (compose-preview-server #1236). Served as
+  ui://compose-preview/openai-probe only when COMPOSE_PREVIEW_MCP_OPENAI_PROBE=1. It records what
+  the host reports (ui/initialize, host context, tool input/result) and, inside a file entrypoint,
+  runs the four file checks: resources/read, resources/subscribe + a touch on disk, a tool call that
+  echoes the injected openai/resource.path, and (only when writable, only after a confirm) an
+  openai/resources/write with ifMatch. Everything lands in one JSON report the person copies into
+  the evidence file. How to run it: docs/openai-extensions-probe.md.
+-->
+<style>
+  :root { color-scheme: light dark; font: 13px system-ui, sans-serif; color: var(--color-text-primary, #1b1b1f); background: var(--color-background-primary, #fff); }
+  body { margin: 0; padding: 10px; background: var(--color-background-primary, #fff); }
+  h1 { font-size: 15px; margin: 0 0 6px; }
+  h2 { font-size: 13px; margin: 12px 0 4px; }
+  .muted { color: var(--color-text-secondary, #666); }
+  .row { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0; }
+  button { font: inherit; padding: 4px 10px; border-radius: 6px; border: 1px solid var(--color-border, #c8c8cf); background: var(--color-background-secondary, #f4f4f6); color: inherit; cursor: pointer; }
+  button:disabled { opacity: .5; cursor: default; }
+  button.danger { border-color: var(--color-border-danger, #c5221f); }
+  pre { margin: 0; padding: 8px; border-radius: 6px; background: var(--color-background-secondary, #f4f4f6); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 320px; overflow: auto; font-size: 12px; }
+  #file[hidden], #confirm[hidden] { display: none; }
+</style>
+<body>
+<h1>OpenAI Extensions Probe</h1>
+<div class="muted" id="status">Waiting for the host…</div>
+
+<h2>Host</h2>
+<pre id="host">(no ui/initialize result yet)</pre>
+
+<section id="file" hidden>
+  <h2>File entrypoint: <span id="fileName"></span></h2>
+  <div class="row">
+    <button id="read">1. resources/read</button>
+    <button id="subscribe">2a. resources/subscribe</button>
+    <button id="touch">2b. Touch the file on disk</button>
+    <button id="echo">3. Echo openai/resource.path</button>
+    <button id="write" class="danger" disabled>4. Write back (same bytes, ifMatch)…</button>
+    <button id="sizeProbe" class="danger" disabled>4b. Size-limit probe (stale ifMatch)…</button>
+  </div>
+  <div class="row" id="confirm" hidden>
+    <span id="confirmText"></span>
+    <button id="confirmYes" class="danger">Confirm</button>
+    <button id="confirmNo">Cancel</button>
+  </div>
+</section>
+
+<h2>Report <span class="muted">(select all and paste into the evidence file)</span></h2>
+<div class="row"><button id="copy">Copy report</button></div>
+<pre id="report"></pre>
+
+<script>
+(() => {
+  'use strict';
+  const REQUEST_TIMEOUT_MS = 30_000;
+  // Size-limit probe payload. Sent with a deliberately stale ifMatch, so a host that honours ifMatch
+  // answers "conflict" or "too-large" and never saves it.
+  const SIZE_PROBE_BYTES = 32 * 1024 * 1024;
+  const STALE_ETAG = 'compose-preview-probe-stale-etag';
+  const $ = id => document.getElementById(id);
+  const report = {
+    probe: 'compose-preview openai-extensions probe #1236',
+    startedAt: new Date().toISOString(),
+    userAgent: navigator.userAgent,
+    initialize: null,
+    hostContextChanges: [],
+    toolInput: null,
+    toolResult: null,
+    file: {},
+    notifications: [],
+    errors: [],
+  };
+  let nextId = 1;
+  const pending = new Map();
+  let fileUri = null;
+  let lastRead = null;
+  let toolNames = null;
+  let confirmAction = null;
+
+  function render() {
+    $('report').textContent = JSON.stringify(report, null, 2);
+  }
+  function status(text) {
+    $('status').textContent = text;
+  }
+  function error(where, err) {
+    report.errors.push({ where, at: new Date().toISOString(), message: String(err?.message || err) });
+    render();
+  }
+
+  function request(method, params) {
+    const id = nextId++;
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        if (pending.delete(id)) reject(new Error(`${method} timed out after ${REQUEST_TIMEOUT_MS} ms`));
+      }, REQUEST_TIMEOUT_MS);
+      pending.set(id, { resolve, reject, timer, method });
+      window.parent.postMessage({ jsonrpc: '2.0', id, method, params }, '*');
+    });
+  }
+  function notify(method, params) {
+    window.parent.postMessage({ jsonrpc: '2.0', method, params }, '*');
+  }
+
+  window.addEventListener('message', event => {
+    if (event.source !== window.parent) return;
+    const message = event.data;
+    if (!message || message.jsonrpc !== '2.0') return;
+    if (message.id != null && pending.has(message.id) && !message.method) {
+      const slot = pending.get(message.id);
+      pending.delete(message.id);
+      clearTimeout(slot.timer);
+      if (message.error) slot.reject(new Error(`${slot.method}: ${JSON.stringify(message.error)}`));
+      else slot.resolve(message.result);
+      return;
+    }
+    switch (message.method) {
+      case 'ui/notifications/tool-input':
+        report.toolInput = message.params ?? null;
+        onToolInput(message.params?.arguments);
+        break;
+      case 'ui/notifications/tool-result':
+        report.toolResult = message.params ?? null;
+        break;
+      case 'ui/notifications/host-context-changed':
+        report.hostContextChanges.push({ at: new Date().toISOString(), params: message.params });
+        break;
+      case 'notifications/resources/updated':
+      case 'ui/notifications/resource-updated':
+        report.notifications.push({ at: new Date().toISOString(), method: message.method, params: message.params });
+        if (fileUri && message.params?.uri === fileUri) report.file.subscriptionFired = true;
+        status(`Received ${message.method}`);
+        break;
+      default:
+        if (message.method) {
+          report.notifications.push({ at: new Date().toISOString(), method: message.method, params: message.params });
+        } else if (message.id != null) {
+          // A host request we do not implement: answer so it does not hang.
+          window.parent.postMessage({ jsonrpc: '2.0', id: message.id, result: {} }, '*');
+        }
+    }
+    render();
+  });
+
+  function onToolInput(args) {
+    const file = args?.file;
+    if (!file?.resourceUri) return;
+    fileUri = file.resourceUri;
+    report.file.name = file.name;
+    report.file.resourceUri = file.resourceUri;
+    $('fileName').textContent = file.name || file.resourceUri;
+    $('file').hidden = false;
+  }
+
+  async function resolveTool(suffix) {
+    if (!toolNames) {
+      try {
+        const listed = await request('tools/list', {});
+        toolNames = (listed?.tools || []).map(tool => tool?.name).filter(name => typeof name === 'string');
+      } catch (err) {
+        toolNames = [];
+        error('tools/list', err);
+      }
+    }
+    return toolNames.find(name => name === suffix || name.endsWith(`__${suffix}`) || name.endsWith(`/${suffix}`)) || suffix;
+  }
+
+  const utf8Bytes = text => new TextEncoder().encode(text).length;
+  const base64Bytes = blob => Math.floor((blob.length * 3) / 4) - (blob.endsWith('==') ? 2 : blob.endsWith('=') ? 1 : 0);
+
+  async function readFile() {
+    try {
+      const result = await request('resources/read', { uri: fileUri });
+      const content = result?.contents?.[0] || {};
+      const representation = typeof content.text === 'string' ? 'text' : typeof content.blob === 'string' ? 'blob' : 'unknown';
+      lastRead = content;
+      report.file.read = {
+        representation,
+        byteSize: representation === 'text' ? utf8Bytes(content.text) : representation === 'blob' ? base64Bytes(content.blob) : null,
+        mimeType: content.mimeType ?? null,
+        contentUri: content.uri ?? null,
+        openaiResource: content._meta?.['openai/resource'] ?? null,
+        contentMeta: content._meta ?? null,
+        contentCount: result?.contents?.length ?? 0,
+      };
+      const writable = content._meta?.['openai/resource']?.writable === true;
+      $('write').disabled = !writable;
+      $('sizeProbe').disabled = !writable;
+      status(`Read ${representation}; writable=${writable}`);
+    } catch (err) {
+      error('resources/read', err);
+    }
+    render();
+  }
+
+  async function subscribe() {
+    try {
+      await request('resources/subscribe', { uri: fileUri });
+      report.file.subscribedAt = new Date().toISOString();
+      report.file.subscriptionFired = report.file.subscriptionFired || false;
+      status('Subscribed. Now touch the file (button 2b, or edit it on disk) and watch for notifications.');
+    } catch (err) {
+      error('resources/subscribe', err);
+    }
+    render();
+  }
+
+  async function echo(touch) {
+    const name = await resolveTool('probe_file_echo');
+    try {
+      const result = await request('tools/call', { name, arguments: touch ? { touch: true } : {} });
+      const record = { at: new Date().toISOString(), tool: name, structuredContent: result?.structuredContent ?? null, text: result?.content?.find(block => block.type === 'text')?.text ?? null };
+      if (touch) report.file.touch = record;
+      else report.file.echo = record;
+      status(record.text || 'tool call returned');
+    } catch (err) {
+      error(touch ? 'touch' : 'echo', err);
+    }
+    render();
+  }
+
+  async function writeBack() {
+    if (!lastRead) return;
+    const params = { uri: fileUri };
+    const etag = lastRead._meta?.['openai/resource']?.etag;
+    if (etag) params.ifMatch = etag;
+    if (typeof lastRead.text === 'string') params.text = lastRead.text;
+    else params.blob = lastRead.blob;
+    try {
+      const result = await request('openai/resources/write', params);
+      report.file.write = { at: new Date().toISOString(), ifMatch: etag ?? null, result };
+      status(`write: ${JSON.stringify(result)}`);
+    } catch (err) {
+      error('openai/resources/write', err);
+    }
+    render();
+  }
+
+  async function sizeProbe() {
+    const text = 'x'.repeat(SIZE_PROBE_BYTES);
+    try {
+      const result = await request('openai/resources/write', { uri: fileUri, ifMatch: STALE_ETAG, text });
+      report.file.sizeProbe = { at: new Date().toISOString(), bytes: SIZE_PROBE_BYTES, ifMatch: STALE_ETAG, result };
+      status(`size probe: ${JSON.stringify(result)}`);
+    } catch (err) {
+      error('size probe', err);
+    }
+    render();
+  }
+
+  function ask(text, action) {
+    $('confirmText').textContent = text;
+    $('confirm').hidden = false;
+    confirmAction = action;
+  }
+
+  $('read').addEventListener('click', readFile);
+  $('subscribe').addEventListener('click', subscribe);
+  $('touch').addEventListener('click', () => echo(true));
+  $('echo').addEventListener('click', () => echo(false));
+  $('write').addEventListener('click', () =>
+    ask('Write the bytes just read back to the file, with ifMatch set to the etag read?', writeBack));
+  $('sizeProbe').addEventListener('click', () =>
+    ask(`Send a ${SIZE_PROBE_BYTES / 1024 / 1024} MiB write with a stale ifMatch? A host that honours ifMatch will not save it.`, sizeProbe));
+  $('confirmYes').addEventListener('click', () => {
+    $('confirm').hidden = true;
+    const action = confirmAction;
+    confirmAction = null;
+    if (action) void action();
+  });
+  $('confirmNo').addEventListener('click', () => {
+    $('confirm').hidden = true;
+    confirmAction = null;
+  });
+  $('copy').addEventListener('click', async () => {
+    const text = JSON.stringify(report, null, 2);
+    try {
+      await navigator.clipboard.writeText(text);
+      status('Report copied.');
+    } catch {
+      const range = document.createRange();
+      range.selectNodeContents($('report'));
+      const selection = window.getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+      status('Clipboard unavailable; the report is selected, copy it by hand.');
+    }
+  });
+
+  async function initialize() {
+    try {
+      const result = await request('ui/initialize', {
+        appInfo: { name: 'compose-preview-openai-probe', version: '1' },
+        appCapabilities: { availableDisplayModes: ['inline', 'fullscreen'] },
+        protocolVersion: '2026-01-26',
+      });
+      report.initialize = result ?? null;
+      const ctx = result?.hostContext || {};
+      $('host').textContent = JSON.stringify({
+        hostInfo: result?.hostInfo ?? null,
+        clientInfo: result?.clientInfo ?? null,
+        protocolVersion: result?.protocolVersion ?? null,
+        hostCapabilities: result?.hostCapabilities ?? null,
+        'openai/deepLink': ctx['openai/deepLink'] ?? null,
+        'openai/modelContext': ctx['openai/modelContext'] ?? null,
+        displayMode: ctx.displayMode ?? null,
+        hostContext: ctx,
+      }, null, 2);
+      notify('ui/notifications/initialized', {});
+      status('Initialized. Record the host block and the report below.');
+    } catch (err) {
+      status('The MCP Apps bridge did not answer ui/initialize.');
+      error('ui/initialize', err);
+    }
+    render();
+  }
+
+  render();
+  void initialize();
+})();
+</script>
+</body>
+</html>
