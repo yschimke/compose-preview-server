@@ -1,5 +1,26 @@
 # Changelog
 
+## [3.89.0](https://github.com/yschimke/compose-preview-server/compare/v3.88.0...v3.89.0) (2026-09-30)
+
+
+### Features
+
+* **mcp-app:** render A2UI in the viewer, take designUrl in review-design ([#1233](https://github.com/yschimke/compose-preview-server/issues/1233)) ([6e1dfa8](https://github.com/yschimke/compose-preview-server/commit/6e1dfa88c7433697fa123ea11a1c87b124eeb944))
+* **mcp:** .rc Remote Compose file viewer (OpenAI file entrypoint) ([#1244](https://github.com/yschimke/compose-preview-server/issues/1244)) ([1b5fccf](https://github.com/yschimke/compose-preview-server/commit/1b5fccf37d2957086596adf60c6a4b1154539663))
+* **mcp:** add ui_builder_view, the editor canvas as a person sees it ([#1232](https://github.com/yschimke/compose-preview-server/issues/1232)) ([fdae81e](https://github.com/yschimke/compose-preview-server/commit/fdae81e32a099e3ce173716b74c93f65267e2ee1))
+* **mcp:** OpenAI MCP Extensions entrypoint plumbing and opt-in probe ([#1243](https://github.com/yschimke/compose-preview-server/issues/1243)) ([b796bce](https://github.com/yschimke/compose-preview-server/commit/b796bcefb5b6dfad2f040f6c743cab27aef9fd5d))
+* **mcp:** per-client defaults and instructions, and opt in to semantics on demand ([#1231](https://github.com/yschimke/compose-preview-server/issues/1231)) ([6c9a811](https://github.com/yschimke/compose-preview-server/commit/6c9a8119c7fc8a5fe1b4994c5fc4cad78755455e))
+* **mcp:** request-scoped elicitation transport, and the R3 home decisions as forms ([#1152](https://github.com/yschimke/compose-preview-server/issues/1152)) ([3b7c917](https://github.com/yschimke/compose-preview-server/commit/3b7c91737b94159d295895cc5c29cb21794f2439))
+* **mcp:** return a fetchable signed https PNG URL from catalog_render_preview ([#1228](https://github.com/yschimke/compose-preview-server/issues/1228)) ([40b1863](https://github.com/yschimke/compose-preview-server/commit/40b1863e9cda542e8dcec3bb090701a3f773c372))
+* **mcp:** sidebar library apps with deep links, and structured settings ([#1246](https://github.com/yschimke/compose-preview-server/issues/1246)) ([05f56a0](https://github.com/yschimke/compose-preview-server/commit/05f56a094a4829ceb22129c1ba7a04dedcc2e641))
+* **mcp:** thread Previews tab with point-at context, and composer @-mentions ([#1245](https://github.com/yschimke/compose-preview-server/issues/1245)) ([e12143b](https://github.com/yschimke/compose-preview-server/commit/e12143bffa7dbe7e09dfdf2f33e35155edfb60bf))
+* **mcp:** ui_builder_validate, published UI-builder schemas, R3/R4 hints ([#1234](https://github.com/yschimke/compose-preview-server/issues/1234)) ([e105985](https://github.com/yschimke/compose-preview-server/commit/e10598525c037aa8724625a31fa3f4c165386b3f))
+
+
+### Bug Fixes
+
+* **deps:** update the UI builder to 3.69.0 ([#1230](https://github.com/yschimke/compose-preview-server/issues/1230)) ([52013e8](https://github.com/yschimke/compose-preview-server/commit/52013e8f90882bfbb98c57d060abb1e0911dbcbd))
+
 ## [3.88.0](https://github.com/yschimke/compose-preview-server/compare/v3.87.0...v3.88.0) (2026-09-30)
 
 
