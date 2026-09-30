@@ -628,6 +628,60 @@ class ServeUiBuilderMcp(
   }
 
   /**
+   * The R3 decision behind importing a document whose `home` is already this server (#1114), as the
+   * same `compose-preview-decision/v1` choices [homeDecision] offers.
+   *
+   * It is a refusal (the tool result stays `isError`, nothing is written) that carries the options
+   * rather than one hint, so an agent can put them to the person and continue with the chosen call.
+   * [reason] is the refusal sentence older clients matched on, kept verbatim.
+   */
+  private fun importOntoHomeDecision(
+    designId: String,
+    revision: Long,
+    incoming: DesignDocumentV1,
+    args: JsonObject,
+    reason: String,
+  ): JsonObject {
+    fun option(id: String, label: String) =
+      JsonObject(mapOf("id" to JsonPrimitive(id), "label" to JsonPrimitive(label)))
+    return JsonObject(
+      linkedMapOf(
+        "schema" to JsonPrimitive(DECISION_SCHEMA),
+        "decision" to JsonPrimitive("import-onto-existing-home"),
+        "designId" to JsonPrimitive(designId),
+        "baseRevision" to JsonPrimitive(revision),
+        "home" to ((args["document"] as? JsonObject)?.get("home") ?: JsonNull),
+        "title" to JsonPrimitive(incoming.title),
+        "reason" to JsonPrimitive(reason),
+        "question" to
+          JsonPrimitive(
+            "This document's home is design `$designId` on this server, which already exists. " +
+              "What should happen to it?"
+          ),
+        "options" to
+          JsonArray(
+            listOf(
+              option(
+                "apply-operations",
+                "Apply the changes as operations to the original (revision $revision)",
+              ),
+              option("create-new", "Create a new design instead, with a new id"),
+              option("cancel", "Cancel; the original stays as it is"),
+            )
+          ),
+        "elicitation" to
+          JsonPrimitive(
+            "No form: this endpoint is stateless. Ask the person to pick one option in chat. " +
+              "For `apply-operations`, read the original with $GET_DESIGN and send the " +
+              "differences through $APPLY at baseRevision $revision. For `create-new`, repeat " +
+              "$CREATE_DESIGN with a new designId and the document's `home` removed. For " +
+              "`cancel`, call nothing."
+          ),
+      )
+    )
+  }
+
+  /**
    * Grant or revoke one actor's access to a design.
    *
    * The access revision is read here rather than demanded from the caller. The service takes one to
@@ -1188,7 +1242,16 @@ class ServeUiBuilderMcp(
       is UiBuilderServiceResponse.Snapshot -> {
         val outcome = existingDesignOutcome(designId, incoming, serverOrigin())
         if (outcome is ServeUiBuilderCreate.Outcome.Refused)
-          throw McpRequestException(outcome.reason)
+          throw McpRequestException(
+            importOntoHomeDecision(
+                designId,
+                existing.snapshot.state.document.revision,
+                incoming,
+                args,
+                outcome.reason,
+              )
+              .toString()
+          )
       }
       is UiBuilderServiceResponse.Error ->
         if (existing.error.code != ServiceErrorCodeV1.NOT_FOUND) {
@@ -1688,7 +1751,9 @@ class ServeUiBuilderMcp(
           CREATE_DESIGN,
           "Create a design, either from a whole `document` you supply or by copying an existing " +
             "design named by `fromDesignId`. Copying is usually right: a document's `catalogPin` " +
-            "must match a catalog revision this server serves, and a copy carries one that does.",
+            "must match a catalog revision this server serves, and a copy carries one that does. " +
+            "A `document` whose `home` is an existing design on this server is refused with a " +
+            "`$DECISION_SCHEMA` choice to put to the person.",
           """
           {"type":"object","properties":{
             "designId":{"type":"string","description":"The id for the new design."},
