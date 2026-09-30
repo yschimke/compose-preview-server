@@ -7053,3 +7053,216 @@ test("contract · static viewer shows no live actions", async ({ page }) => {
   await page.waitForTimeout(500);
   expect(await page.evaluate(() => window.__viewerMessages)).toBe(0);
 });
+
+// A2UI documents (#1119): an agent that emits A2UI sees it drawn with the basic catalog's component
+// set, from any channel the viewer already reads — here the static fragment, JSON Lines in a text
+// block, and a ui_builder_export_document JSON artifact.
+const a2uiDocument = [
+  { version: "v0.9", createSurface: { surfaceId: "main", catalogId: "basic" } },
+  {
+    version: "v0.9",
+    updateComponents: {
+      surfaceId: "main",
+      components: [
+        { id: "root", component: "Card", child: "column" },
+        { id: "column", component: "Column", children: ["title", "name", "row", "items", "guests", "tabs"] },
+        { id: "title", component: "Text", text: "Book a table", variant: "h2" },
+        { id: "name", component: "Text", text: { path: "/restaurant/name" } },
+        { id: "row", component: "Row", justify: "spaceBetween", children: ["icon", "confirm"] },
+        { id: "icon", component: "Icon", name: "calendarToday" },
+        { id: "confirm", component: "Button", child: "confirmLabel", variant: "primary", action: { event: { name: "confirm" } } },
+        { id: "confirmLabel", component: "Text", text: "Confirm" },
+        { id: "items", component: "List", children: { componentId: "item", path: "/items" } },
+        { id: "item", component: "Text", text: { path: "name" } },
+        { id: "guests", component: "TextField", label: "Guests", value: { path: "/guests" }, variant: "number" },
+        { id: "tabs", component: "Tabs", tabs: [{ title: "Lunch", child: "lunch" }, { title: "Dinner", child: "dinner" }] },
+        { id: "lunch", component: "Text", text: "Noon to three" },
+        { id: "dinner", component: "Mystery" },
+      ],
+    },
+  },
+  {
+    version: "v0.9",
+    updateDataModel: {
+      surfaceId: "main",
+      path: "/",
+      value: { restaurant: { name: "Chez Test" }, items: [{ name: "Soup" }, { name: "Bread" }], guests: 4 },
+    },
+  },
+];
+
+function staticFragment(result) {
+  return Buffer.from(JSON.stringify({ version: 1, result })).toString("base64url");
+}
+
+test("contract · static viewer renders an A2UI document with the basic catalog components", async ({ page }) => {
+  await page.goto(
+    `/mcp-app/compose-preview-viewer.html#compose-preview-result=${staticFragment({
+      content: [{ type: "text", text: "A2UI document" }],
+      structuredContent: { a2ui: a2uiDocument },
+    })}`,
+  );
+  const canvas = page.locator("#canvas");
+  await expect(page.locator("#meta")).toHaveText("A2UI document · 1 surface · 14 components");
+  await expect(canvas.locator(".a2ui-card h2")).toHaveText("Book a table");
+  await expect(canvas.locator('[data-a2ui-id="name"]')).toHaveText("Chez Test");
+  await expect(canvas.locator('[data-a2ui-id="item"]')).toHaveText(["Soup", "Bread"]);
+  await expect(canvas.locator(".a2ui-row")).toHaveCSS("justify-content", "space-between");
+  await expect(canvas.locator(".a2ui-button.primary")).toHaveText("Confirm");
+  await expect(canvas.locator(".a2ui-field input")).toHaveValue("4");
+  await expect(canvas.locator(".a2ui-tab-panel")).toHaveText("Noon to three");
+  await canvas.locator(".a2ui-tab-strip button", { hasText: "Dinner" }).click();
+  await expect(canvas.locator(".a2ui-tab-panel .a2ui-missing")).toHaveText('Mystery "dinner"');
+  await canvas.locator(".a2ui-button").click();
+  await expect(page.locator("#meta")).toHaveText("Pressed confirm → confirm");
+  // Static mode: the catalog render needs the bridge, so it is not offered.
+  await expect(page.locator("#a2ui-render")).toBeHidden();
+
+  const jsonLines = a2uiDocument.map((message) => JSON.stringify(message)).join("\n");
+  for (const text of [
+    jsonLines,
+    JSON.stringify({
+      callId: "ui_builder_export_document",
+      response: { artifact: { format: "json", mediaType: "application/json", encoding: "utf8", content: `${jsonLines}\n` } },
+    }),
+  ]) {
+    await page.goto("about:blank");
+    await page.goto(
+      `/mcp-app/compose-preview-viewer.html#compose-preview-result=${staticFragment({ content: [{ type: "text", text }] })}`,
+    );
+    await expect(page.locator("#meta")).toHaveText("A2UI document · 1 surface · 14 components");
+    await expect(page.locator('#canvas [data-a2ui-id="name"]')).toHaveText("Chez Test");
+  }
+
+  // v0.8 messages and a reference cycle.
+  await page.goto("about:blank");
+  await page.goto(
+    `/mcp-app/compose-preview-viewer.html#compose-preview-result=${staticFragment({
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify([
+            {
+              surfaceUpdate: {
+                surfaceId: "legacy",
+                components: [
+                  { id: "r", component: { Column: { children: { explicitList: ["t", "loop"] } } } },
+                  { id: "t", component: { Text: { text: { literalString: "Legacy hello" }, usageHint: "h1" } } },
+                  { id: "loop", component: { Card: { child: "r" } } },
+                ],
+              },
+            },
+            { beginRendering: { surfaceId: "legacy", root: "r" } },
+          ]),
+        },
+      ],
+    })}`,
+  );
+  await expect(page.locator("#canvas .a2ui h1")).toHaveText("Legacy hello");
+  await expect(page.locator("#canvas .a2ui-missing")).toHaveText('Cycle at "r"');
+});
+
+test("contract · live viewer renders an A2UI document with the a2ui-catalog renderer", async ({ page }) => {
+  const shorthand = {
+    components: [
+      { id: "root", component: "Button", child: "label", action: { event: { name: "go" } } },
+      { id: "label", component: "Text", text: "Go" },
+    ],
+  };
+  await page.goto("/preview-harness/index.html");
+  await page.evaluate((a2ui) => {
+    const log = (window.__a2ui = { calls: [], contexts: [] });
+    document.body.replaceChildren();
+    const frame = document.createElement("iframe");
+    frame.title = "Compose Preview MCP App";
+    frame.style.width = "620px";
+    frame.style.height = "700px";
+    const send = (message) => frame.contentWindow.postMessage({ jsonrpc: "2.0", ...message }, "*");
+    window.addEventListener("message", (event) => {
+      if (event.source !== frame.contentWindow) return;
+      const { id, method, params } = event.data || {};
+      if (id == null) return;
+      const reply = (result) => send({ id, result });
+      if (method === "ui/initialize") {
+        reply({ hostCapabilities: { serverTools: {} } });
+        send({
+          method: "ui/notifications/tool-result",
+          params: { content: [{ type: "text", text: JSON.stringify(a2ui) }] },
+        });
+      } else if (method === "tools/list") {
+        reply({
+          tools: ["catalog_render_preview", "catalog_list_previews"].map((name) => ({
+            name,
+            inputSchema: { type: "object" },
+          })),
+        });
+      } else if (method === "tools/call") {
+        log.calls.push(params);
+        if (params.name === "catalog_list_previews") {
+          reply({
+            content: [
+              {
+                type: "text",
+                text: JSON.stringify({
+                  catalogs: [
+                    {
+                      id: "a2ui-catalog",
+                      previews: [
+                        { id: "Other" },
+                        { id: "A2uiDocumentPreview", knobs: [{ key: "document", type: "String" }] },
+                      ],
+                    },
+                  ],
+                }),
+              },
+            ],
+          });
+        } else {
+          reply({
+            content: [
+              {
+                type: "image",
+                mimeType: "image/png",
+                data: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg==",
+              },
+            ],
+          });
+        }
+      } else if (method === "ui/update-model-context") {
+        log.contexts.push(params.content[0].text);
+        reply({});
+      } else {
+        reply({});
+      }
+    });
+    frame.src = "/mcp-app/compose-preview-viewer.html";
+    document.body.append(frame);
+  }, shorthand);
+  const viewer = page.frameLocator('iframe[title="Compose Preview MCP App"]');
+  await expect(viewer.locator("#meta")).toHaveText("A2UI document · 1 surface · 2 components");
+
+  const renderButton = viewer.locator("#a2ui-render");
+  await expect(renderButton).toBeVisible();
+  await renderButton.click();
+  await expect(viewer.locator(".a2ui-catalog-render img")).toBeVisible();
+  await expect(viewer.locator(".a2ui-catalog-render figcaption")).toHaveText("a2ui-catalog (Compose) render");
+  expect((await page.evaluate(() => window.__a2ui)).calls).toEqual([
+    { name: "catalog_list_previews", arguments: { catalog: "a2ui-catalog" } },
+    {
+      name: "catalog_render_preview",
+      arguments: {
+        catalog: "a2ui-catalog",
+        previewId: "A2uiDocumentPreview",
+        observe: "png",
+        // The shorthand goes back as it came; the catalog renderer takes it directly.
+        overrides: { "knob.document": JSON.stringify(shorthand) },
+      },
+    },
+  ]);
+
+  // A pressed button tells the agent, over the bridge.
+  await viewer.locator(".a2ui-button").click();
+  await expect
+    .poll(async () => (await page.evaluate(() => window.__a2ui)).contexts.at(-1) || "")
+    .toContain("the user pressed A2UI button root (action go)");
+});

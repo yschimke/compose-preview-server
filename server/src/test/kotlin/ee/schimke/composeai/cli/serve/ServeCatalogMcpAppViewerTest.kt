@@ -174,6 +174,76 @@ class ServeCatalogMcpAppViewerTest {
     )
   }
 
+  /**
+   * #1119: the viewer draws A2UI documents. The a2ui-catalog renderer is Compose on the server, so
+   * the bundle carries a small DOM renderer for the basic catalog and, with a live bridge, asks the
+   * server's a2ui-catalog for the Compose render the way `a2ui render` does. The behaviour itself
+   * is driven in a browser by `preview-harness/pages-snapshot.spec.mjs` ("renders an A2UI
+   * document"); this pins the contract the server side shares with it.
+   */
+  @Test
+  fun `viewer bundle renders A2UI documents and reuses the a2ui-catalog renderer`() {
+    val html =
+      request("resources/read", """{"uri":"${ServeCatalogMcp.MCP_APP_VIEWER_URI}"}""")["result"]!!
+        .jsonObject["contents"]!!
+        .jsonArray
+        .single()
+        .jsonObject["text"]!!
+        .jsonPrimitive
+        .content
+    assertTrue(html.encodeToByteArray().size <= 500_000, "the viewer bundle must stay ≤ 500 KB")
+    assertTrue(!html.contains("innerHTML"))
+
+    // Every message spelling the viewer accepts: v0.9, and v0.8 lowered to it.
+    assertTrue(
+      html.contains(
+        "'createSurface', 'updateComponents', 'updateDataModel', 'deleteSurface',\n" +
+          "    'surfaceUpdate', 'beginRendering', 'dataModelUpdate',"
+      )
+    )
+    // The basic catalog's component set.
+    listOf(
+        "Text",
+        "Image",
+        "Icon",
+        "Row",
+        "Column",
+        "List",
+        "Card",
+        "Divider",
+        "Button",
+        "TextField",
+        "CheckBox",
+        "Slider",
+        "ChoicePicker",
+        "DateTimeInput",
+        "Tabs",
+        "Modal",
+      )
+      .forEach { component -> assertTrue(html.contains("case '$component':"), component) }
+    // Bounded: a hostile document cannot recurse or fan out without limit.
+    assertTrue(html.contains("const A2UI_MAX_DEPTH = 64;"))
+    assertTrue(html.contains("const A2UI_MAX_COMPONENTS = 5000;"))
+    assertTrue(html.contains("trail.includes(id)"))
+
+    // Same channels as every other result, and an image in the result still wins.
+    val a2uiHook =
+      html.indexOf("const a2uiMessages = !result?.isError && a2uiMessagesIn(result, value);")
+    assertTrue(a2uiHook > 0)
+    assertTrue(html.indexOf("renderImage(image, value, resource);\n      renderDetails") < a2uiHook)
+    assertTrue(a2uiHook < html.indexOf("renderResourceFallback(\n        result,"))
+    // A ui_builder_export(_document) JSON artifact of an A2UI design is drawn too.
+    assertTrue(html.contains("artifact?.format === 'json' && typeof artifact.content === 'string'"))
+
+    // The catalog render is found and asked for exactly as `a2ui render` does it.
+    assertTrue(html.contains("const A2UI_CATALOG = '${A2uiCommand.DEFAULT_CATALOG}';"))
+    assertTrue(html.contains("const A2UI_DOCUMENT_KNOB = '${A2uiCommandRunner.DOCUMENT_KNOB}';"))
+    assertTrue(html.contains("[`knob.\${A2UI_DOCUMENT_KNOB}`]"))
+    assertTrue(html.contains("value?.overridesApplied === false"))
+    assertTrue(html.contains("/(^|__|\\/)catalog_list_previews$/"))
+    assertTrue(html.contains("<button id=\"a2ui-render\" type=\"button\" hidden>"))
+  }
+
   @Test
   fun `render tools declare the portable viewer without losing their text fallback`() {
     val tools = request("tools/list")["result"]!!.jsonObject["tools"]!!.jsonArray

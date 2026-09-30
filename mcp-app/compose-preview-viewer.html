@@ -89,6 +89,29 @@
   .findings .level { font-weight: 700; margin-right: 6px; }
   .findings .level.error { color: #c5221f; }
   .findings .level.warning { color: #b06000; }
+  .a2ui { width: 100%; padding: 10px; box-sizing: border-box; display: grid; gap: 10px; align-self: start; }
+  .a2ui-surface { padding: 12px; border-radius: 8px; background: var(--color-background-primary, #fff); overflow-wrap: anywhere; }
+  .a2ui-vertical { display: flex; flex-direction: column; gap: 8px; }
+  .a2ui-horizontal { display: flex; flex-direction: row; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .a2ui-text { margin: 0; }
+  .a2ui-caption { font-size: 12px; color: var(--color-text-secondary, #666); }
+  .a2ui-image { max-width: 100%; max-height: 240px; }
+  .a2ui-icon, .a2ui-avatar { width: 48px; height: 48px; border-radius: 999px; }
+  span.a2ui-icon { width: auto; height: auto; padding: 1px 6px; font-size: 11px; border: 1px solid var(--color-border, #d8d8dd); }
+  .a2ui-card { padding: 12px; border: 1px solid var(--color-border, #d8d8dd); border-radius: 10px; background: var(--color-background-secondary, #f8f8fa); }
+  .a2ui-divider { width: 100%; margin: 4px 0; border: 0; border-top: 1px solid var(--color-border, #d8d8dd); }
+  .a2ui-divider-vertical { width: 0; align-self: stretch; margin: 0 4px; border-top: 0; border-left: 1px solid var(--color-border, #d8d8dd); }
+  .a2ui-button.primary { background: #315da8; border-color: #315da8; color: #fff; }
+  .a2ui-field { display: grid; gap: 3px; }
+  .a2ui-field input, .a2ui-field textarea { font: inherit; padding: 5px 7px; border-radius: 6px; border: 1px solid var(--color-border, #aaa); color: inherit; background: var(--color-background-primary, #fff); }
+  .a2ui-label { font-size: 12px; color: var(--color-text-secondary, #666); }
+  .a2ui-check { display: flex; gap: 6px; align-items: center; }
+  .a2ui-choices { margin: 0; border: 1px solid var(--color-border, #d8d8dd); border-radius: 6px; }
+  .a2ui-tab-strip { display: flex; gap: 4px; margin-bottom: 8px; }
+  .a2ui-tab-strip button[aria-selected="true"] { font-weight: 650; background: var(--color-background-secondary, #e8ecf6); }
+  .a2ui-missing { padding: 6px 8px; font-size: 12px; border: 1px dashed var(--color-border-secondary, #8a8f98); border-radius: 6px; color: var(--color-text-secondary, #666); }
+  .a2ui-catalog-render { margin: 0; display: grid; gap: 6px; font-size: 12px; }
+  .a2ui-catalog-render[hidden] { display: none; }
   button { font: inherit; padding: 6px 9px; border-radius: 6px; border: 1px solid var(--color-border, #aaa); background: var(--color-background-primary, #fff); color: inherit; cursor: pointer; }
 </style>
 <body>
@@ -109,6 +132,7 @@
       <button id="a11y" hidden>Show accessibility overlay</button>
       <button id="use" hidden>Use selected result</button>
       <button id="grid-back" type="button" hidden>All variants</button>
+      <button id="a2ui-render" type="button" hidden>Render with a2ui-catalog</button>
     </div>
     <div id="live" class="live" aria-label="Live viewer actions" hidden>
       <button id="rerender" type="button" hidden>Re-render</button>
@@ -1867,6 +1891,541 @@
     }
   }
 
+  // A2UI documents (#1119). An agent that emits A2UI (v0.9 createSurface / updateComponents /
+  // updateDataModel messages, the v0.8 surfaceUpdate / beginRendering / dataModelUpdate ones, or the
+  // {"components":[...]} shorthand `a2ui render` takes) sees it drawn here with the basic catalog's
+  // component set. The a2ui-catalog renderer itself is Compose running on the server, so it cannot
+  // ship inside this bundle: this small DOM renderer draws every document at once, with no call and
+  // in static mode too, and when the host lets the viewer call this server's catalog tools
+  // "Render with a2ui-catalog" asks that renderer for the pixel-exact Compose render beside it.
+  const A2UI_CATALOG = 'a2ui-catalog';
+  const A2UI_DOCUMENT_KNOB = 'document';
+  const A2UI_MESSAGE_KEYS = [
+    'createSurface', 'updateComponents', 'updateDataModel', 'deleteSurface',
+    'surfaceUpdate', 'beginRendering', 'dataModelUpdate',
+  ];
+  const A2UI_MAX_COMPONENTS = 5000;
+  const A2UI_MAX_DEPTH = 64;
+  const A2UI_MAX_TEMPLATE_ITEMS = 200;
+  const a2uiRender = q('#a2ui-render');
+  let listPreviewsToolName;
+  let a2uiView;
+  let a2uiGeneration = 0;
+
+  const isPlainObject = value => !!value && typeof value === 'object' && !Array.isArray(value);
+  const isA2uiMessage = value => isPlainObject(value) && A2UI_MESSAGE_KEYS.some(key => isPlainObject(value[key]));
+
+  // A document in any of the accepted spellings, as its message list; undefined when it is not A2UI.
+  function a2uiMessagesOf(candidate, depth = 0) {
+    if (candidate == null || depth > 3) return undefined;
+    if (typeof candidate === 'string') {
+      const text = candidate.trim();
+      if (!text || (text[0] !== '{' && text[0] !== '[')) return undefined;
+      const whole = parse(text);
+      if (whole != null) return a2uiMessagesOf(whole, depth + 1);
+      const lines = text.split('\n').map(line => line.trim()).filter(Boolean).map(parse);
+      return lines.length && lines.every(isA2uiMessage) ? lines : undefined;
+    }
+    if (Array.isArray(candidate)) {
+      return candidate.length && candidate.every(isPlainObject) && candidate.some(isA2uiMessage)
+        ? candidate.filter(isA2uiMessage)
+        : undefined;
+    }
+    if (!isPlainObject(candidate)) return undefined;
+    if (isA2uiMessage(candidate)) return [candidate];
+    for (const key of ['a2ui', 'messages']) {
+      const nested = a2uiMessagesOf(candidate[key], depth + 1);
+      if (nested) return nested;
+    }
+    if (
+      Array.isArray(candidate.components) &&
+      candidate.components.length &&
+      candidate.components.every(item => isPlainObject(item) && typeof item.id === 'string' && item.component != null)
+    ) {
+      const surfaceId = typeof candidate.surfaceId === 'string' ? candidate.surfaceId : 'main';
+      const messages = [{ updateComponents: { surfaceId, components: candidate.components } }];
+      if (candidate.dataModel !== undefined) messages.push({ updateDataModel: { surfaceId, path: '/', value: candidate.dataModel } });
+      // The catalog renderer takes the shorthand as it is; send it back unchanged.
+      Object.defineProperty(messages, 'source', { value: candidate });
+      return messages;
+    }
+    // ui_builder_export_document / ui_builder_export with format json: an A2UI design's JSON is
+    // its JSON Lines messages, as the artifact's UTF-8 content.
+    const artifact = candidate.response?.artifact || candidate.artifact;
+    if (artifact?.format === 'json' && typeof artifact.content === 'string') {
+      return a2uiMessagesOf(artifact.content, depth + 1);
+    }
+    return undefined;
+  }
+
+  function a2uiMessagesIn(result, value) {
+    const found = a2uiMessagesOf(value);
+    if (found) return found;
+    for (const block of result?.content || []) {
+      if (block?.type !== 'text' || typeof block.text !== 'string' || detailOf(block)) continue;
+      const messages = a2uiMessagesOf(block.text);
+      if (messages) return messages;
+    }
+    return undefined;
+  }
+
+  // v0.8 spells a component as {"Text":{...}} with {"literalString":…} values and
+  // {"explicitList":[…]} children; the renderer below reads v0.9, so v0.8 is lowered first.
+  function a2uiComponentOf(entry) {
+    if (typeof entry.component === 'string') return entry;
+    if (!isPlainObject(entry.component)) return undefined;
+    const [type] = Object.keys(entry.component);
+    const props = isPlainObject(entry.component[type]) ? { ...entry.component[type] } : {};
+    for (const key of ['children', 'child']) {
+      const value = props[key];
+      if (Array.isArray(value?.explicitList)) props[key] = value.explicitList;
+      else if (isPlainObject(value?.template)) {
+        props[key] = { componentId: value.template.componentId, path: value.template.dataBinding };
+      }
+    }
+    return { ...props, id: entry.id, component: type, ...(entry.weight != null ? { weight: entry.weight } : {}) };
+  }
+
+  function a2uiPointer(path) {
+    return String(path).split('/').filter(Boolean).map(part => part.replace(/~1/g, '/').replace(/~0/g, '~'));
+  }
+
+  function a2uiAbsolute(path, scope) {
+    const text = String(path);
+    if (text.startsWith('/')) return text;
+    return `${scope || ''}/${text}`;
+  }
+
+  function a2uiLookup(model, path) {
+    let current = model;
+    for (const part of a2uiPointer(path)) {
+      if (current == null || typeof current !== 'object') return undefined;
+      current = current[part];
+    }
+    return current;
+  }
+
+  function a2uiWrite(surface, path, value) {
+    const parts = a2uiPointer(path || '/');
+    if (!parts.length) {
+      surface.data = value === undefined ? {} : value;
+      return;
+    }
+    if (!isPlainObject(surface.data) && !Array.isArray(surface.data)) surface.data = {};
+    let current = surface.data;
+    parts.slice(0, -1).forEach(part => {
+      if (current[part] == null || typeof current[part] !== 'object') current[part] = {};
+      current = current[part];
+    });
+    const last = parts[parts.length - 1];
+    if (value === undefined) delete current[last];
+    else current[last] = value;
+  }
+
+  // v0.8's dataModelUpdate carries {key, valueString|valueNumber|valueBoolean|valueMap} entries.
+  function a2uiLegacyValue(contents) {
+    if (!Array.isArray(contents)) return contents;
+    const out = {};
+    for (const entry of contents) {
+      if (!isPlainObject(entry) || typeof entry.key !== 'string') continue;
+      out[entry.key] = 'valueMap' in entry ? a2uiLegacyValue(entry.valueMap)
+        : 'valueString' in entry ? entry.valueString
+        : 'valueNumber' in entry ? entry.valueNumber
+        : entry.valueBoolean;
+    }
+    return out;
+  }
+
+  function a2uiSurfaces(messages) {
+    const surfaces = new Map();
+    let count = 0;
+    const surface = id => {
+      const key = typeof id === 'string' && id ? id : 'main';
+      if (!surfaces.has(key)) surfaces.set(key, { id: key, components: new Map(), data: {}, root: undefined });
+      return surfaces.get(key);
+    };
+    for (const message of messages) {
+      if (message.createSurface) {
+        const target = surface(message.createSurface.surfaceId);
+        if (typeof message.createSurface.catalogId === 'string') target.catalogId = message.createSurface.catalogId;
+      }
+      if (message.beginRendering) {
+        const target = surface(message.beginRendering.surfaceId);
+        if (typeof message.beginRendering.root === 'string') target.root = message.beginRendering.root;
+      }
+      for (const update of [message.updateComponents, message.surfaceUpdate]) {
+        if (!update || !Array.isArray(update.components)) continue;
+        const target = surface(update.surfaceId);
+        for (const entry of update.components) {
+          if (!isPlainObject(entry) || typeof entry.id !== 'string') continue;
+          const component = a2uiComponentOf(entry);
+          if (!component || ++count > A2UI_MAX_COMPONENTS) continue;
+          target.components.set(entry.id, component);
+        }
+      }
+      if (message.updateDataModel) {
+        a2uiWrite(surface(message.updateDataModel.surfaceId), message.updateDataModel.path, message.updateDataModel.value);
+      }
+      if (message.dataModelUpdate) {
+        a2uiWrite(
+          surface(message.dataModelUpdate.surfaceId),
+          message.dataModelUpdate.path,
+          a2uiLegacyValue(message.dataModelUpdate.contents),
+        );
+      }
+      if (message.deleteSurface) surfaces.delete(message.deleteSurface.surfaceId || 'main');
+    }
+    return [...surfaces.values()].filter(target => target.components.size);
+  }
+
+  function a2uiRootOf(surface) {
+    if (surface.root && surface.components.has(surface.root)) return surface.root;
+    if (surface.components.has('root')) return 'root';
+    const referenced = new Set();
+    for (const component of surface.components.values()) {
+      for (const key of ['child', 'trigger', 'content']) {
+        if (typeof component[key] === 'string') referenced.add(component[key]);
+      }
+      if (Array.isArray(component.children)) component.children.forEach(child => referenced.add(child));
+      if (isPlainObject(component.children)) referenced.add(component.children.componentId);
+      if (Array.isArray(component.tabs)) component.tabs.forEach(tab => referenced.add(tab?.child));
+    }
+    return [...surface.components.keys()].find(id => !referenced.has(id));
+  }
+
+  function a2uiRenderer(surface, onAction) {
+    const value = (raw, scope) => {
+      if (raw == null) return undefined;
+      if (typeof raw !== 'object') return raw;
+      if (Array.isArray(raw)) return raw;
+      if (typeof raw.path === 'string') return a2uiLookup(surface.data, a2uiAbsolute(raw.path, scope));
+      for (const key of ['literalString', 'literalNumber', 'literalBoolean', 'literal']) {
+        if (key in raw) return raw[key];
+      }
+      return undefined;
+    };
+    const text = (raw, scope) => {
+      const resolved = value(raw, scope);
+      return resolved == null || typeof resolved === 'object' ? '' : String(resolved);
+    };
+    const element = (tag, className, content) => {
+      const node = document.createElement(tag);
+      if (className) node.className = className;
+      if (content != null) node.textContent = content;
+      return node;
+    };
+    const placeholder = label => element('div', 'a2ui-missing', label);
+    const flex = { start: 'flex-start', center: 'center', end: 'flex-end', stretch: 'stretch',
+      spaceBetween: 'space-between', spaceAround: 'space-around', spaceEvenly: 'space-evenly' };
+
+    function children(component, scope, depth, trail) {
+      const list = component.children;
+      if (Array.isArray(list)) return list.map(id => node(id, scope, depth + 1, trail));
+      if (isPlainObject(list) && typeof list.componentId === 'string' && typeof list.path === 'string') {
+        const base = a2uiAbsolute(list.path, scope);
+        const items = a2uiLookup(surface.data, base);
+        const keys = Array.isArray(items) ? items.map((_, index) => String(index))
+          : isPlainObject(items) ? Object.keys(items) : [];
+        return keys.slice(0, A2UI_MAX_TEMPLATE_ITEMS)
+          .map(key => node(list.componentId, `${base.replace(/\/$/, '')}/${key}`, depth + 1, trail));
+      }
+      return [];
+    }
+
+    function field(labelText, control) {
+      const label = element('label', 'a2ui-field');
+      if (labelText) label.append(element('span', 'a2ui-label', labelText));
+      label.append(control);
+      return label;
+    }
+
+    function node(id, scope, depth, trail) {
+      if (typeof id !== 'string') return placeholder('Invalid child reference');
+      if (depth > A2UI_MAX_DEPTH || trail.includes(id)) return placeholder(`Cycle at "${id}"`);
+      const component = surface.components.get(id);
+      if (!component) return placeholder(`Missing component "${id}"`);
+      const next = [...trail, id];
+      const type = component.component;
+      let out;
+      switch (type) {
+        case 'Text': {
+          const variant = String(component.variant || component.usageHint || 'body');
+          out = element(/^h[1-5]$/.test(variant) ? variant : 'p', `a2ui-text a2ui-${variant}`, text(component.text, scope));
+          break;
+        }
+        case 'Image': {
+          const url = text(component.url, scope);
+          if (/^(https?:|data:image\/)/i.test(url)) {
+            out = element('img', `a2ui-image a2ui-${component.variant || component.usageHint || 'image'}`);
+            out.src = url;
+            out.alt = text(component.description ?? component.altText, scope) || 'A2UI image';
+            out.style.objectFit = String(component.fit || 'contain');
+          } else {
+            out = placeholder(url ? `Image: ${url}` : 'Image');
+          }
+          break;
+        }
+        case 'Icon':
+          out = element('span', 'a2ui-icon', text(component.name, scope) || 'icon');
+          break;
+        case 'Video':
+        case 'AudioPlayer':
+          out = placeholder(`${type}: ${text(component.url, scope)}`);
+          break;
+        case 'Row':
+        case 'Column':
+        case 'List': {
+          const horizontal = type === 'Row' || (type === 'List' && component.direction === 'horizontal');
+          out = element('div', `a2ui-${type.toLowerCase()} ${horizontal ? 'a2ui-horizontal' : 'a2ui-vertical'}`);
+          const justify = flex[component.justify || component.distribution];
+          const align = flex[component.align || component.alignment];
+          if (justify) out.style.justifyContent = justify;
+          if (align) out.style.alignItems = align;
+          out.append(...children(component, scope, depth, next));
+          break;
+        }
+        case 'Card':
+          out = element('div', 'a2ui-card');
+          if (component.child != null) out.append(node(component.child, scope, depth + 1, next));
+          break;
+        case 'Divider':
+          out = element('hr', component.axis === 'vertical' ? 'a2ui-divider a2ui-divider-vertical' : 'a2ui-divider');
+          break;
+        case 'Button': {
+          const primary = component.variant === 'primary' || component.primary === true;
+          out = element('button', `a2ui-button${primary ? ' primary' : ''}`);
+          out.type = 'button';
+          if (component.child != null) out.append(node(component.child, scope, depth + 1, next));
+          else out.textContent = text(component.label, scope) || id;
+          const action = component.action?.event?.name || component.action?.name ||
+            component.action?.functionCall?.call || component.action?.call;
+          out.addEventListener('click', () => onAction(id, typeof action === 'string' ? action : undefined));
+          break;
+        }
+        case 'TextField': {
+          const variant = String(component.variant || component.textFieldType || 'shortText');
+          const control = element(variant === 'longText' ? 'textarea' : 'input');
+          if (control.localName === 'input') {
+            control.type = variant === 'number' ? 'number' : variant === 'obscured' ? 'password' : 'text';
+          }
+          control.value = text(component.value ?? component.text, scope);
+          out = field(text(component.label, scope), control);
+          break;
+        }
+        case 'CheckBox': {
+          const control = element('input');
+          control.type = 'checkbox';
+          control.checked = value(component.value, scope) === true;
+          out = element('label', 'a2ui-check');
+          out.append(control, element('span', null, text(component.label, scope)));
+          break;
+        }
+        case 'Slider': {
+          const control = element('input');
+          control.type = 'range';
+          control.min = String(Number(value(component.min ?? component.minValue, scope) ?? 0));
+          control.max = String(Number(value(component.max ?? component.maxValue, scope) ?? 100));
+          control.value = String(Number(value(component.value, scope) ?? 0));
+          out = field(text(component.label, scope), control);
+          break;
+        }
+        case 'ChoicePicker':
+        case 'MultipleChoice': {
+          const chosen = value(component.value ?? component.selections, scope);
+          const selected = new Set((Array.isArray(chosen) ? chosen : [chosen]).map(String));
+          const multiple = component.variant !== 'mutuallyExclusive' && Number(component.maxAllowedSelections) !== 1;
+          out = element('fieldset', 'a2ui-choices');
+          const legend = text(component.label, scope);
+          if (legend) out.append(element('legend', null, legend));
+          (Array.isArray(component.options) ? component.options : []).forEach(option => {
+            const control = element('input');
+            control.type = multiple ? 'checkbox' : 'radio';
+            control.name = `a2ui-${surface.id}-${id}`;
+            control.checked = selected.has(String(value(option?.value, scope)));
+            const row = element('label', 'a2ui-check');
+            row.append(control, element('span', null, text(option?.label, scope)));
+            out.append(row);
+          });
+          break;
+        }
+        case 'DateTimeInput': {
+          const control = element('input');
+          const date = component.enableDate !== false;
+          const time = component.enableTime === true;
+          control.type = date && time ? 'datetime-local' : time ? 'time' : 'date';
+          control.value = text(component.value, scope);
+          out = field(text(component.label, scope), control);
+          break;
+        }
+        case 'Tabs': {
+          const tabs = (Array.isArray(component.tabs) ? component.tabs : component.tabItems || []).filter(isPlainObject);
+          out = element('div', 'a2ui-tabs');
+          const strip = element('div', 'a2ui-tab-strip');
+          strip.setAttribute('role', 'tablist');
+          const panel = element('div', 'a2ui-tab-panel');
+          const show = index => {
+            strip.querySelectorAll('button').forEach((button, at) => button.setAttribute('aria-selected', String(at === index)));
+            panel.replaceChildren(tabs[index] ? node(tabs[index].child, scope, depth + 1, next) : placeholder('Empty tab'));
+          };
+          tabs.forEach((tab, index) => {
+            const button = element('button', null, text(tab.title, scope) || `Tab ${index + 1}`);
+            button.type = 'button';
+            button.setAttribute('role', 'tab');
+            button.addEventListener('click', () => show(index));
+            strip.append(button);
+          });
+          out.append(strip, panel);
+          show(0);
+          break;
+        }
+        case 'Modal': {
+          out = element('details', 'a2ui-modal');
+          const summary = element('summary');
+          const trigger = component.trigger ?? component.entryPointChild;
+          if (trigger != null) summary.append(node(trigger, scope, depth + 1, next));
+          else summary.textContent = 'Open';
+          out.append(summary);
+          const content = component.content ?? component.contentChild;
+          if (content != null) out.append(node(content, scope, depth + 1, next));
+          break;
+        }
+        default:
+          out = placeholder(`${type || 'Unknown'} "${id}"`);
+          if (component.child != null) out.append(node(component.child, scope, depth + 1, next));
+          if (component.children != null) out.append(...children(component, scope, depth, next));
+      }
+      out.dataset.a2uiId = id;
+      const weight = Number(component.weight);
+      if (weight > 0) out.style.flex = `${weight} 1 0`;
+      return out;
+    }
+    return node;
+  }
+
+  function a2uiAction(id, action) {
+    const line = `the user pressed A2UI button ${id}${action ? ` (action ${action})` : ''}`;
+    meta.textContent = `Pressed ${id}${action ? ` → ${action}` : ''}`;
+    void updateModelContext(line);
+  }
+
+  function renderA2ui(result, messages) {
+    const surfaces = a2uiSurfaces(messages);
+    const container = document.createElement('div');
+    container.className = 'a2ui';
+    let components = 0;
+    for (const surface of surfaces) {
+      components += surface.components.size;
+      const section = document.createElement('section');
+      section.className = 'a2ui-surface';
+      section.setAttribute('aria-label', `A2UI surface ${surface.id}`);
+      const root = a2uiRootOf(surface);
+      section.append(root ? a2uiRenderer(surface, a2uiAction)(root, '', 0, []) : Object.assign(
+        document.createElement('div'), { className: 'a2ui-missing', textContent: 'No root component' },
+      ));
+      container.append(section);
+    }
+    if (!surfaces.length) {
+      renderNotice(result, { heading: 'Empty A2UI document', summary: 'The document declares no components.' });
+      return;
+    }
+    const catalogRender = document.createElement('figure');
+    catalogRender.className = 'a2ui-catalog-render';
+    catalogRender.hidden = true;
+    container.append(catalogRender);
+    canvas.replaceChildren(container);
+    a2uiView = { messages, catalogRender };
+    const plural = (count, noun) => `${count} ${noun}${count === 1 ? '' : 's'}`;
+    meta.textContent = `A2UI document · ${plural(surfaces.length, 'surface')} · ${plural(components, 'component')}`;
+    updateA2uiAction();
+  }
+
+  function updateA2uiAction() {
+    const available = !!a2uiView && liveReady() && !!listPreviewsToolName &&
+      /(^|__|\/)catalog_render_preview$/.test(renderToolName || '');
+    a2uiRender.hidden = !available;
+    a2uiRender.disabled = refusedTools.has(renderToolName) || refusedTools.has(listPreviewsToolName);
+    if (a2uiRender.disabled) a2uiRender.title = HOST_REFUSED;
+    else a2uiRender.removeAttribute('title');
+  }
+
+  function a2uiCatalogStatus(view, text) {
+    view.catalogRender.hidden = false;
+    view.catalogRender.replaceChildren(Object.assign(document.createElement('figcaption'), { textContent: text }));
+  }
+
+  // The catalog's preview taking a string `document` knob, found the way `a2ui render` finds it.
+  async function a2uiDocumentPreview() {
+    const listing = await callTool(listPreviewsToolName, { catalog: A2UI_CATALOG });
+    const catalogs = data(listing)?.catalogs;
+    for (const catalog of Array.isArray(catalogs) ? catalogs : []) {
+      for (const preview of Array.isArray(catalog?.previews) ? catalog.previews : []) {
+        const knobs = Array.isArray(preview?.knobs) ? preview.knobs : [];
+        if (knobs.some(knob => knob?.key === A2UI_DOCUMENT_KNOB && String(knob.type).toLowerCase() === 'string')) {
+          return preview.id;
+        }
+      }
+    }
+    return undefined;
+  }
+
+  async function renderA2uiWithCatalog() {
+    const view = a2uiView;
+    if (!view || !liveReady() || !listPreviewsToolName || !renderToolName) return;
+    const generation = ++a2uiGeneration;
+    a2uiRender.disabled = true;
+    a2uiCatalogStatus(view, `Rendering with ${A2UI_CATALOG}…`);
+    let tool = listPreviewsToolName;
+    try {
+      const previewId = await a2uiDocumentPreview();
+      if (generation !== a2uiGeneration || view !== a2uiView) return;
+      if (!previewId) {
+        a2uiCatalogStatus(view, `${A2UI_CATALOG} declares no preview with a string "${A2UI_DOCUMENT_KNOB}" knob on this server.`);
+        return;
+      }
+      tool = renderToolName;
+      const result = await callTool(renderToolName, {
+        catalog: A2UI_CATALOG,
+        previewId,
+        observe: 'png',
+        overrides: {
+          [`knob.${A2UI_DOCUMENT_KNOB}`]: view.messages.source
+            ? JSON.stringify(view.messages.source)
+            : view.messages.map(message => JSON.stringify(message)).join('\n'),
+        },
+      });
+      if (generation !== a2uiGeneration || view !== a2uiView) return;
+      const image = png(result);
+      const ignored = (result?.content || [])
+        .map(block => block?.type === 'text' && typeof block.text === 'string' ? parse(block.text) : undefined)
+        .find(value => value?.overridesApplied === false);
+      if (result?.isError || !image || ignored) {
+        const reason = ignored ? ignored.overridesIgnoredReason || 'the catalog has no live renderer'
+          : fallbackText(result).split('\n')[0] || 'no image in the reply';
+        a2uiCatalogStatus(view, `${A2UI_CATALOG} could not render this document: ${reason}`);
+        return;
+      }
+      const picture = document.createElement('img');
+      picture.src = `data:image/png;base64,${image.data}`;
+      picture.alt = `${A2UI_CATALOG} render of the A2UI document`;
+      view.catalogRender.replaceChildren(
+        Object.assign(document.createElement('figcaption'), { textContent: `${A2UI_CATALOG} (Compose) render` }),
+        picture,
+      );
+      scheduleFit();
+    } catch (error) {
+      if (generation !== a2uiGeneration || view !== a2uiView) return;
+      if (refusedByHost(error)) refusedTools.add(tool);
+      a2uiCatalogStatus(view, refusedByHost(error) ? HOST_REFUSED : `${A2UI_CATALOG} render failed.`);
+      console.warn('Failed to render the A2UI document with the catalog:', error);
+    } finally {
+      if (generation === a2uiGeneration) updateA2uiAction();
+    }
+  }
+
+  a2uiRender.addEventListener('click', () => {
+    void renderA2uiWithCatalog();
+  });
+
   function draw(result) {
     hasToolResult = true;
     canvas.classList.remove('has-image');
@@ -1878,6 +2437,9 @@
     selected = undefined;
     use.hidden = true;
     refresh.hidden = true;
+    a2uiView = undefined;
+    ++a2uiGeneration;
+    a2uiRender.hidden = true;
     clearAccessibilityOverlay();
     clearComments();
     clearDetails();
@@ -1916,6 +2478,11 @@
     if (image) {
       renderImage(image, value, resource);
       renderDetails(result, image);
+      return;
+    }
+    const a2uiMessages = !result?.isError && a2uiMessagesIn(result, value);
+    if (a2uiMessages) {
+      renderA2ui(result, a2uiMessages);
       return;
     }
     if (resource) {
@@ -2033,6 +2600,7 @@
     dataToolName = 'get_preview_data';
     listCommentsToolName = undefined;
     postCommentToolName = undefined;
+    listPreviewsToolName = undefined;
   }
 
   async function discoverViewerActions() {
@@ -2057,6 +2625,8 @@
         .find(name => typeof name === 'string' && /(^|__|\/)ui_builder_post_comment$/.test(name));
       renderToolName = names.find(name => typeof name === 'string' && /(^|__|\/|catalog_)render_preview$/.test(name));
       dataToolName = names.find(name => typeof name === 'string' && /(^|__|\/|catalog_)get_preview_data$/.test(name));
+      listPreviewsToolName = names
+        .find(name => typeof name === 'string' && /(^|__|\/)catalog_list_previews$/.test(name));
     } catch (error) {
       if (generation !== toolDiscoveryGeneration) return;
       assumeOwnTools();
@@ -2065,6 +2635,7 @@
     updateLiveActions();
     updateAccessibilityAction();
     updateCommentAction();
+    updateA2uiAction();
     if (commentDesignId && listCommentsToolName) void loadComments();
     sendPendingImageRequest();
   }
