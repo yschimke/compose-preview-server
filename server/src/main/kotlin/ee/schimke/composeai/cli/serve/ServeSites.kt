@@ -314,6 +314,8 @@ data class ServeSites(private val byHost: Map<String, String>) {
         // the selector would silently offer no tag targets on exactly the deployments the parity
         // workflow runs on.
         "tags",
+        // `GET /schemas/<name>.json` — the UI-builder document and mutation JSON Schemas (#1114).
+        "schemas",
         "rc-compare",
         "parity",
         "parity.json",

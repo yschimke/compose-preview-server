@@ -2587,6 +2587,11 @@ public class ServeRunner(
      * is wired and after the first design can be opened.
      */
     val nativeBackends: Map<String, String>,
+    /**
+     * `ui_builder_validate`: a scratch service over [service]'s own catalogs and exporter, so a
+     * check answers with exactly the refusal the real call would, and writes nothing.
+     */
+    val validator: UiBuilderDraftValidator,
   ) : AutoCloseable {
     override fun close() {
       thumbnails?.close()
@@ -3069,11 +3074,12 @@ public class ServeRunner(
         }
       }
     }
+    val annotatedExporter = RootSurfaceGroundAnnotatedExporter(exporter)
     val service =
       PersistentUiBuilderService(
         designStore = UiBuilderDesignStateStore.open(directory.toPath()),
         catalogs = catalogs,
-        exporter = RootSurfaceGroundAnnotatedExporter(exporter),
+        exporter = annotatedExporter,
         assets = assetStore,
       )
     // A deploy can change a catalog's runtime too, so the same pass runs once at startup.
@@ -3180,6 +3186,7 @@ public class ServeRunner(
           .getOrNull(),
       compose = compose,
       nativeBackends = nativeBackends,
+      validator = ScratchUiBuilderDraftValidator(catalogs, annotatedExporter),
     )
   }
 
@@ -3706,6 +3713,7 @@ public class ServeRunner(
         uiBuilderLinksStore = uiBuilderLane?.links,
         uiBuilderFolderStore = uiBuilderLane?.folders,
         uiBuilderAssets = uiBuilderLane?.service,
+        uiBuilderValidator = uiBuilderLane?.validator,
         uiBuilderAuthorization =
           uiBuilderLane?.let {
             ServeUiBuilderAuthorization.fromMachineAuthorization(machineAuthorization)

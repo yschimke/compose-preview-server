@@ -786,6 +786,12 @@ internal class ScreenGeneratorComposeExportExecutor(
         request.document.home?.let {
           "Canonical home: ${it.toUiBuilderDocumentHome().description()}."
         },
+        // Beside the home rather than only in the line above it: an agent that reads this file and
+        // goes back to change the design needs both halves — where the original is, and which
+        // revision this was cut from, to quote as `baseRevision` — and reads the home line first.
+        request.document.home?.let {
+          "Edit the original there at revision ${request.revision} (quote it as baseRevision)."
+        },
         "Document SHA-256: ${request.documentHash}",
         "Catalog ${pin.systemId}@${pin.catalogRevision}; capability ${pin.capabilityDigest}",
       )

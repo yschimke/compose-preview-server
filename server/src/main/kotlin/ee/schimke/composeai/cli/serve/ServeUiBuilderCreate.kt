@@ -226,7 +226,8 @@ internal fun existingDesignOutcome(
     is DesignHomeV1.Server if sameCanonicalServerHome(home, designId, serverOrigin) ->
       ServeUiBuilderCreate.Outcome.Refused(
         409,
-        "$designId already lives on this server; apply changes to the original instead",
+        "$designId already lives on this server; apply changes to the original instead with " +
+          ServeUiBuilderMcp.APPLY,
       )
     else -> ServeUiBuilderCreate.Outcome.AlreadyExists
   }
