@@ -221,7 +221,7 @@ class ServeUiBuilderMcpIntegrationTest {
   }
 
   @Test
-  fun `MCP refuses a create onto this server's canonical design with an apply hint`() {
+  fun `MCP refuses a create onto this server's canonical design with the R3 decision`() {
     val server = start()
     val initial =
       """{"designId":"agent-screen","document":${json.encodeToString(DesignDocumentV1.serializer(), document())}}"""
@@ -243,10 +243,53 @@ class ServeUiBuilderMcpIntegrationTest {
     val duplicate = call(server, ServeUiBuilderMcp.CREATE_DESIGN, reimport)
     assertEquals(true, duplicate["isError"]?.jsonPrimitive?.content?.toBoolean())
     val text = duplicate["content"]!!.jsonArray.first().jsonObject["text"]!!.jsonPrimitive.content
+    // The same `compose-preview-decision/v1` choices the save-back and move-home dry runs offer,
+    // so the agent can put them to the person rather than guess which of the three was meant.
+    val decision = Json.parseToJsonElement(text).jsonObject
+    assertEquals(
+      ServeUiBuilderMcp.DECISION_SCHEMA,
+      decision["schema"]!!.jsonPrimitive.content,
+      text,
+    )
+    assertEquals("import-onto-existing-home", decision["decision"]!!.jsonPrimitive.content)
+    assertEquals("agent-screen", decision["designId"]!!.jsonPrimitive.content)
+    assertEquals(0, decision["baseRevision"]!!.jsonPrimitive.content.toInt())
     assertEquals(
       "agent-screen already lives on this server; apply changes to the original instead with " +
         ServeUiBuilderMcp.APPLY,
-      text,
+      decision["reason"]!!.jsonPrimitive.content,
+    )
+    assertEquals(
+      listOf("apply-operations", "create-new", "cancel"),
+      decision["options"]!!.jsonArray.map { it.jsonObject["id"]!!.jsonPrimitive.content },
+    )
+    val guidance = decision["elicitation"]!!.jsonPrimitive.content
+    assertTrue(guidance.contains(ServeUiBuilderMcp.APPLY), guidance)
+    assertTrue(guidance.contains("`home` removed"), guidance)
+
+    // Nothing was written: the original is still at revision 0.
+    val snapshot =
+      assertIs<SnapshotResponseV1>(
+        response(
+          envelope(
+            server,
+            ServeUiBuilderMcp.GET_DESIGN,
+            """{"designId":"agent-screen","includeCatalog":true}""",
+          )
+        )
+      )
+    assertEquals(0, snapshot.snapshot.state.document.revision)
+
+    // `create-new` as the decision describes it: a new id, the home removed.
+    val copy = document().copy(id = "agent-screen-2", home = null)
+    assertIs<SnapshotResponseV1>(
+      response(
+        envelope(
+          server,
+          ServeUiBuilderMcp.CREATE_DESIGN,
+          """{"designId":"agent-screen-2","includeCatalog":true,"document":${json.encodeToString(DesignDocumentV1.serializer(), copy)}}""",
+        )
+      )
     )
   }
 
@@ -314,12 +357,87 @@ class ServeUiBuilderMcpIntegrationTest {
     assertTrue(reviewText.contains("ui_builder_view"), reviewText)
     assertTrue(reviewText.contains("#1114"), reviewText)
 
+    // `designId` is still checked as an id: a URL there is not silently parsed.
     val invalid =
       post(
         server,
         """{"jsonrpc":"2.0","id":31,"method":"prompts/get","params":{"name":"review-design","arguments":{"designId":"https://foreign.test/ui-builder/login"}}}""",
       )
     assertEquals(-32602, invalid["error"]!!.jsonObject["code"]!!.jsonPrimitive.content.toInt())
+
+    val reviewArguments =
+      post(server, """{"jsonrpc":"2.0","id":32,"method":"prompts/list","params":{}}""")["result"]!!
+        .jsonObject["prompts"]!!
+        .jsonArray
+        .single { it.jsonObject["name"]!!.jsonPrimitive.content == "review-design" }
+        .jsonObject["arguments"]!!
+        .jsonArray
+        .associate {
+          it.jsonObject["name"]!!.jsonPrimitive.content to
+            it.jsonObject["required"]!!.jsonPrimitive.content.toBoolean()
+        }
+    assertEquals(mapOf("designUrl" to true, "designId" to false), reviewArguments)
+
+    fun reviewByUrl(designUrl: String): JsonObject =
+      post(
+        server,
+        """{"jsonrpc":"2.0","id":33,"method":"prompts/get","params":{"name":"review-design","arguments":{"designUrl":"$designUrl"}}}""",
+      )
+
+    fun promptText(reply: JsonObject): String =
+      reply["result"]!!
+        .jsonObject["messages"]!!
+        .jsonArray
+        .single()
+        .jsonObject["content"]!!
+        .jsonObject["text"]!!
+        .jsonPrimitive
+        .content
+
+    for (accepted in
+      listOf(
+        "$PUBLIC_ORIGIN/ui-builder/login",
+        "HTTPS://Designs.Example:443/ui-builder/login/",
+        "/ui-builder/login",
+        "$PUBLIC_ORIGIN/ui-builder/m3-catalog/login",
+        "login",
+      )) {
+      val text = promptText(reviewByUrl(accepted))
+      assertTrue(text.contains("design `login`"), "$accepted -> $text")
+      assertFalse(text.contains("pointed at node"), "$accepted -> $text")
+    }
+    val withNode = promptText(reviewByUrl("$PUBLIC_ORIGIN/ui-builder/login?node=title&token=pg_x"))
+    assertTrue(withNode.contains("design `login`"), withNode)
+    assertTrue(withNode.contains("node `title`"), withNode)
+    // Only the id and the node reach the prompt; a credential pasted with the URL does not.
+    assertFalse(withNode.contains("pg_x"), withNode)
+
+    for (refused in
+      listOf(
+        "https://foreign.test/ui-builder/login",
+        "$PUBLIC_ORIGIN/somewhere/login",
+        "$PUBLIC_ORIGIN/ui-builder/",
+        "$PUBLIC_ORIGIN/ui-builder/a/b/login",
+        "ftp://designs.example/ui-builder/login",
+        "$PUBLIC_ORIGIN/ui-builder/login?node=%3Cscript%3E",
+      )) {
+      val reply = reviewByUrl(refused)
+      assertEquals(
+        -32602,
+        reply["error"]?.jsonObject?.get("code")?.jsonPrimitive?.content?.toInt(),
+        "$refused -> $reply",
+      )
+    }
+
+    val missing =
+      post(
+        server,
+        """{"jsonrpc":"2.0","id":34,"method":"prompts/get","params":{"name":"review-design","arguments":{}}}""",
+      )
+    assertTrue(
+      missing["error"]!!.jsonObject["message"]!!.jsonPrimitive.content.contains("designUrl"),
+      missing.toString(),
+    )
 
     val status =
       post(

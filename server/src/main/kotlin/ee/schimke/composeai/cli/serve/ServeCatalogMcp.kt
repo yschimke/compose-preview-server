@@ -3,6 +3,7 @@ package ee.schimke.composeai.cli.serve
 import ee.schimke.composeai.daemon.devices.DeviceDimensions
 import ee.schimke.composeai.daemon.protocol.PreviewOverrides
 import ee.schimke.composeai.web.WebEscaping
+import java.net.URI
 import java.net.URLDecoder
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
@@ -278,9 +279,24 @@ class ServeCatalogMcp(
             putJsonArray("arguments") {
               add(
                 buildJsonObject {
-                  put("name", "designId")
-                  put("description", "The design id on this server.")
+                  put("name", "designUrl")
+                  put(
+                    "description",
+                    "The design's UI-builder URL on this server, such as " +
+                      "https://<host>/ui-builder/<designId> or …/ui-builder/<designId>?node=<nodeId>. " +
+                      "A bare design id is accepted too.",
+                  )
                   put("required", true)
+                }
+              )
+              add(
+                buildJsonObject {
+                  put("name", "designId")
+                  put(
+                    "description",
+                    "The design id on this server; kept for older clients, use designUrl.",
+                  )
+                  put("required", false)
                 }
               )
             }
@@ -315,7 +331,10 @@ class ServeCatalogMcp(
     val arguments = params["arguments"] as? JsonObject ?: JsonObject(emptyMap())
     val text =
       when (name) {
-        "review-design" -> reviewDesignPrompt(arguments.validatedDesignId())
+        "review-design" -> {
+          val target = arguments.reviewTarget()
+          reviewDesignPrompt(target.designId, target.nodeId)
+        }
         "design-status" -> designStatusPrompt(arguments.validatedDesignId())
         else -> throw McpRequestException("unknown prompt: $name")
       }
@@ -348,9 +367,75 @@ class ServeCatalogMcp(
     return designId
   }
 
-  private fun reviewDesignPrompt(designId: String): String =
+  private data class ReviewTarget(val designId: String, val nodeId: String?)
+
+  /**
+   * `review-design`'s design, from `designUrl` (#1120) or the older `designId`.
+   *
+   * The URL is the one a person copies from the builder's address bar: `/ui-builder/<designId>`,
+   * optionally catalog-prefixed (`/ui-builder/<catalog>/<designId>`, the old permalink this server
+   * redirects) and optionally carrying `?node=<nodeId>`. Only the id and the node leave this
+   * function; the URL itself never reaches the prompt text, so a query credential pasted along with
+   * it goes nowhere. A URL naming another origin than this box's public one is refused: the same id
+   * here would be a different design, and reviewing it would report on the wrong document.
+   */
+  private fun JsonObject.reviewTarget(): ReviewTarget {
+    val url = optionalString("designUrl")
+    if (url == null) {
+      if (optionalString("designId") == null) throw McpRequestException("'designUrl' is required")
+      return ReviewTarget(validatedDesignId(), null)
+    }
+    val trimmed = url.trim()
+    if (trimmed.matches(PROMPT_DESIGN_ID)) return ReviewTarget(trimmed, null)
+    val parsed =
+      runCatching { URI(trimmed) }.getOrNull()
+        ?: throw McpRequestException("designUrl is not a URL: expected …/ui-builder/<designId>")
+    if (parsed.isAbsolute) {
+      val scheme = parsed.scheme.lowercase()
+      if ((scheme != "http" && scheme != "https") || parsed.host == null) {
+        throw McpRequestException("designUrl must be an http(s) UI-builder URL")
+      }
+      val own = publicOrigin()?.let(::normalizeServerHomeUrl)
+      val theirs = normalizeServerHomeUrl("$scheme://${parsed.rawAuthority.substringAfter('@')}")
+      if (own != null && theirs != own) {
+        throw McpRequestException(
+          "designUrl names another server ($theirs); review it through that server's /mcp, " +
+            "since design ids are per server"
+        )
+      }
+    }
+    val segments = parsed.rawPath.orEmpty().split('/').filter(String::isNotEmpty)
+    val builder = segments.indexOf("ui-builder")
+    val rest = if (builder < 0) emptyList() else segments.drop(builder + 1)
+    val designId =
+      rest.takeIf { it.size in 1..2 }?.last()?.takeIf { it.matches(PROMPT_DESIGN_ID) }
+        ?: throw McpRequestException(
+          "designUrl must look like …/ui-builder/<designId> (optionally ?node=<nodeId>), where " +
+            "designId is 1-64 URL-safe letters, digits, dots, underscores, or hyphens"
+        )
+    val nodeId =
+      parsed.rawQuery
+        ?.split('&')
+        ?.firstOrNull { it.startsWith("node=") }
+        ?.let { URLDecoder.decode(it.removePrefix("node="), StandardCharsets.UTF_8) }
+        ?.takeIf(String::isNotBlank)
+        ?.also {
+          if (!it.matches(PROMPT_NODE_ID)) {
+            throw McpRequestException(
+              "designUrl's node must be 1-128 URL-safe letters, digits, dots, underscores, colons, " +
+                "or hyphens"
+            )
+          }
+        }
+    return ReviewTarget(designId, nodeId)
+  }
+
+  private fun reviewDesignPrompt(designId: String, nodeId: String? = null): String =
     """
-    Review the UI-builder design `$designId` at its server home.
+    Review the UI-builder design `$designId` at its server home.${
+      if (nodeId == null) ""
+      else " The person pointed at node `$nodeId`: start there, and keep the rest of the design in view."
+    }
 
     1. Call `ui_builder_get_design` with designId `$designId`.
     2. If `ui_builder_list_comments` is advertised, read it before proposing edits. Report each
@@ -2636,6 +2721,7 @@ class ServeCatalogMcp(
     private const val MAX_MATRIX_CELLS = 24
     private val MATRIX_OBSERVATION_MODES = setOf("png", "hash")
     private val PROMPT_DESIGN_ID = Regex("[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
+    private val PROMPT_NODE_ID = Regex("[A-Za-z0-9][A-Za-z0-9._:-]{0,127}")
 
     /** `a, b, or c` — the list keeps its grammar as observations are added to it. */
     private fun Collection<String>.orList(): String {

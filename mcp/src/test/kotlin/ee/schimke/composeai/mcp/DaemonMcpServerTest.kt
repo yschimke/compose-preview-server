@@ -1469,7 +1469,50 @@ class DaemonMcpServerTest {
   fun `initialize sends short local instructions naming render_preview preview`() {
     val instructions = client.initialize()["instructions"]?.jsonPrimitive?.contentOrNull
     assertThat(instructions).contains("render_preview preview=<FunctionName>")
-    assertThat(instructions!!.lines().size).isAtMost(3)
+    assertThat(instructions).contains("find_previews_for_file")
+    assertThat(instructions).contains("observe=hash")
+    assertThat(instructions).contains("hosted catalog")
+    assertThat(instructions!!.lines().size).isAtMost(10)
+    // An unknown client gets no client-specific tail.
+    assertThat(instructions).isEqualTo(DaemonMcpServer.LOCAL_INSTRUCTIONS)
+  }
+
+  @Test
+  fun `initialize instructions end with a tail for the connecting client`() {
+    val claude =
+      client.initialize(clientName = "claude-code")["instructions"]!!.jsonPrimitive.content
+    assertThat(claude).startsWith(DaemonMcpServer.LOCAL_INSTRUCTIONS)
+    assertThat(claude.lines().last()).contains("file-read tool")
+    assertThat(claude.lines().size).isAtMost(10)
+
+    restartSession(server)
+    val antigravity =
+      client.initialize(clientName = "antigravity-client")["instructions"]!!.jsonPrimitive.content
+    assertThat(antigravity.lines().last()).contains("<agent-embed>")
+  }
+
+  @Test
+  fun `render_preview defaults to the file result for a known agent client`() {
+    client.initialize(clientName = "codex-mcp-client")
+    val uri = solidPreview("AgentDefault")
+
+    val file =
+      client.callTool("render_preview", buildJsonObject { put("uri", uri) }, timeoutMs = 10_000)
+    val fileResult = json.parseToJsonElement(file.firstTextContent()).jsonObject
+    assertThat(File(fileResult["pngPath"]!!.jsonPrimitive.content).exists()).isTrue()
+
+    // An explicit inline=true, or an explicit observation, keeps the inline result.
+    val inline =
+      client.callTool(
+        "render_preview",
+        buildJsonObject {
+          put("uri", uri)
+          put("inline", true)
+          put("observe", "hash")
+        },
+        timeoutMs = 10_000,
+      )
+    assertThat(inline.firstTextContent()).doesNotContain("pngPath")
   }
 
   @Test
@@ -2995,7 +3038,51 @@ class DaemonMcpServerTest {
     val parsed = json.parseToJsonElement(result.firstTextContent()).jsonObject
     assertThat(parsed["semanticsUnavailable"]).isNotNull()
     assertThat(parsed["note"]!!.jsonPrimitive.content).startsWith("semantics unavailable (")
+    assertThat(parsed["fix"]!!.jsonPrimitive.content)
+      .isEqualTo(DaemonMcpServer.SEMANTICS_UNAVAILABLE_FIX)
     assertThat(result.contentTypes()).containsExactly("text", "image", "resource_link").inOrder()
+  }
+
+  @Test
+  fun `render_preview enables compose semantics when the daemon has not activated it`() {
+    // #1166: a daemon that starts with compose/semantics inactive answers data/fetch with
+    // DataProductUnknown; the default observation opts it in rather than falling back to pixels.
+    val semanticsCapability =
+      ee.schimke.composeai.daemon.protocol.DataProductCapability(
+        kind = "compose/semantics",
+        schemaVersion = 2,
+        transport = ee.schimke.composeai.daemon.protocol.DataProductTransport.INLINE,
+        attachable = true,
+        fetchable = true,
+        requiresRerender = false,
+      )
+    factory.daemonConfigurer = { d ->
+      d.enableableExtensions = mapOf("compose/semantics" to listOf(semanticsCapability))
+      d.dataFetchHandler = { _, kind, _, _ ->
+        if (d.advertisedDataProducts.none { it.kind == kind }) FakeDaemon.DataFetchOutcome.Unknown
+        else
+          FakeDaemon.DataFetchOutcome.Ok(
+            kind = kind,
+            schemaVersion = 2,
+            payload =
+              buildJsonObject {
+                putJsonObject("root") {
+                  put("nodeId", "1")
+                  put("boundsInRoot", "0,0,40,30")
+                  put("testTag", "hero")
+                }
+              },
+          )
+      }
+    }
+    client.initialize()
+    val uri = solidPreview("InactiveSemantics")
+    val result =
+      client.callTool("render_preview", buildJsonObject { put("uri", uri) }, timeoutMs = 10_000)
+    val parsed = json.parseToJsonElement(result.firstTextContent()).jsonObject
+    assertThat(parsed["semanticsUnavailable"]).isNull()
+    assertThat(parsed["semantics"]).isNotNull()
+    assertThat(result.contentTypes()).doesNotContain("image")
   }
 
   @Test

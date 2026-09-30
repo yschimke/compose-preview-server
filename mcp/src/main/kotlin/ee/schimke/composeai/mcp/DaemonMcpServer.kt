@@ -548,7 +548,9 @@ class DaemonMcpServer(
           )
         },
         onClose = { closeSession(session) },
-        instructions = if (profile == McpToolProfile.NATIVE) LOCAL_INSTRUCTIONS else null,
+        instructions =
+          if (profile == McpToolProfile.NATIVE) { clientName -> localInstructionsFor(clientName) }
+          else { _ -> null },
       )
     sessions.register(session)
     return session
@@ -1616,7 +1618,7 @@ class DaemonMcpServer(
                 "card":{"type":"boolean","description":"With inline=false, also write a self-contained viewer card (HTML) and return cardPath plus an <agent-embed> line for the reply. Implies inline=false. Default true for Antigravity."},
                 "observe":{"type":"string","enum":["png","semantics","hash"],"description":"Observation level (issue #1787). Default 'semantics' ('png' for a client that declares the MCP Apps extension, whose viewer shows the image; semantics falls back to the image when unavailable) — the compose/semantics tree + sha256 + dimensions with NO base64, the token-frugal snapshot-default for an agent loop (fetch pixels only when you need them). 'png' returns the base64 image (request it when you need to see pixels); 'hash' returns just sha256 + dimensions."},
                 "imageScale":{"type":"string","enum":["default","full"],"description":"Size of the inline image the model reads. 'default' caps the long edge at 768px (never upscales); the file on disk and the preview resource stay full size. 'full' only for pixel-level checks; costs more tokens."},
-                "inline":{"type":"boolean","description":"Default true. Set false on a local-FS client to return the rendered PNG's absolute pngPath plus sha256, dimensions, changed, and durationMs as text instead of an inline observation. inline=false takes precedence over observe, so it returns no semantics or image content. Cannot be combined with crop. Antigravity defaults to false when observe and crop are omitted."},
+                "inline":{"type":"boolean","description":"Default true. Set false on a local-FS client to return the rendered PNG's absolute pngPath plus sha256, dimensions, changed, and durationMs as text instead of an inline observation. inline=false takes precedence over observe, so it returns no semantics or image content. Cannot be combined with crop. Known agent clients (Claude Code, Codex, Gemini CLI, OpenCode, Antigravity) default to false when observe and crop are omitted."},
                 "crop":{"type":"object","description":"Return only ONE element's rectangle instead of the full frame (issue #1817) — far fewer tokens, and it focuses the view on the region you care about (the natural partner to diff_semantics: 'ref X changed' -> crop ref X). Set EITHER a semantic target (ref | testTag | role/text, resolved against compose/semantics) OR explicit render-pixel bounds {left,top,right,bottom}. Honours 'observe': png returns the cropped image (+ region metadata), hash/semantics return the crop's sha + dimensions only.","properties":{"ref":{"type":"string"},"testTag":{"type":"string"},"role":{"type":"string"},"text":{"type":"string"},"left":{"type":"integer"},"top":{"type":"integer"},"right":{"type":"integer"},"bottom":{"type":"integer"}}},
                 "overrides":{"type":"object","description":"Optional per-call display overrides."},
                 "details":{"type":"array","items":{"type":"string","enum":["a11y","layout"]},"description":"Opt-in, default none. Also fetch the accessibility findings and overlay (a11y) and the layout bounds (layout) in this call. Each adds ONE summary line to the result; the full detail goes only into the card, where the person toggles Plain / A11y overlay / Layout. Pass it only when the person asks about accessibility or layout."},
@@ -1793,7 +1795,7 @@ class DaemonMcpServer(
                 "card":{"type":"boolean","description":"With inline=false, also write a self-contained viewer card (HTML) and return cardPath plus an <agent-embed> line for the reply. Implies inline=false. Default true for Antigravity."},
                 "observe":{"type":"string","enum":["png","semantics","hash"],"description":"Observation level (issue #1787). Default 'semantics' ('png' for a client that declares the MCP Apps extension, whose viewer shows the image; semantics falls back to the image when unavailable) returns the compose/semantics tree + sha256 + width/height with NO base64 — the token-frugal snapshot-default for a multi-step agent loop (fetch pixels only when you need them). 'png' returns the base64 image (request it when you need to see pixels); 'hash' returns just sha256 + dimensions."},
                 "imageScale":{"type":"string","enum":["default","full"],"description":"Size of the inline image the model reads. 'default' caps the long edge at 768px (never upscales); the file on disk and the preview resource stay full size. 'full' only for pixel-level checks; costs more tokens."},
-                "inline":{"type":"boolean","description":"Default true. Set false on a local-FS client to return the rendered PNG's absolute pngPath plus sha256, dimensions, changed, and durationMs as text instead of an inline observation. inline=false takes precedence over observe, so it returns no semantics or image content. Cannot be combined with crop. Antigravity defaults to false when observe and crop are omitted."},
+                "inline":{"type":"boolean","description":"Default true. Set false on a local-FS client to return the rendered PNG's absolute pngPath plus sha256, dimensions, changed, and durationMs as text instead of an inline observation. inline=false takes precedence over observe, so it returns no semantics or image content. Cannot be combined with crop. Known agent clients (Claude Code, Codex, Gemini CLI, OpenCode, Antigravity) default to false when observe and crop are omitted."},
                 "overrides":{
                   "type":"object",
                   "description":"Per-call display overrides. Each field is optional; nulls fall back to the discovery-time RenderSpec. Backends that don't model a field (e.g. desktop has no Android resource qualifier system) ignore it.",
@@ -3703,7 +3705,8 @@ class DaemonMcpServer(
     // grid: every variant, one labelled contact sheet for the model. The chooser is kept for more
     // matches than a grid holds, and for file results.
     val inlineResult =
-      args["inline"]?.jsonPrimitive?.contentOrNull?.toBooleanStrictOrNull() != false &&
+      (args["inline"]?.jsonPrimitive?.contentOrNull?.toBooleanStrictOrNull()
+        ?: !defaultsToFileResult(session, args)) &&
         args["card"]?.jsonPrimitive?.contentOrNull?.toBooleanStrictOrNull() != true &&
         args["crop"] == null &&
         (session as? McpSession)?.clientName != ANTIGRAVITY_CLIENT_NAME
@@ -3814,6 +3817,16 @@ class DaemonMcpServer(
     return if (ids.toSet().size == ids.size) ids else uris
   }
 
+  /**
+   * True when `render_preview` returns the file result by default: the client is a known agent
+   * harness that reads files ([FILE_RESULT_CLIENT_NAMES]) and asked for neither an observation nor
+   * a crop. An explicit `inline` argument always wins over this.
+   */
+  private fun defaultsToFileResult(session: Session?, args: JsonObject): Boolean =
+    (session as? McpSession)?.clientName in FILE_RESULT_CLIENT_NAMES &&
+      args["observe"] == null &&
+      args["crop"] == null
+
   private fun toolRenderPreview(
     session: Session,
     args: JsonObject,
@@ -3859,15 +3872,16 @@ class DaemonMcpServer(
               "bounds {left,top,right,bottom})"
           )
       }
-    // Antigravity shows a render through a card built from the on-disk PNG, so it defaults to the
-    // file result (and the card) unless the caller asked for an inline observation or a crop.
+    // Agent harnesses that read files default to the file result (#1109); Antigravity also shows
+    // it through a card built from the on-disk PNG. An inline observation, a crop or an explicit
+    // `inline` keeps the inline result.
     val antigravity = (session as? McpSession)?.clientName == ANTIGRAVITY_CLIENT_NAME
     val cardArg = args["card"]?.jsonPrimitive?.contentOrNull?.toBooleanStrictOrNull()
     val inline =
       args["inline"]?.jsonPrimitive?.contentOrNull?.toBooleanStrictOrNull()
         ?: when {
           cardArg == true -> false
-          antigravity && args["observe"] == null && cropArg == null -> false
+          defaultsToFileResult(session, args) -> false
           else -> true
         }
     val card = cardArg ?: (antigravity && !inline)
@@ -4769,8 +4783,10 @@ class DaemonMcpServer(
         } else {
           val reason = error ?: "compose/semantics not available for this preview"
           put("semanticsUnavailable", reason)
-          // Never answer with neither semantics nor pixels: show the image instead.
+          // Never answer with neither semantics nor pixels: show the image instead, and say in one
+          // line how to get the default observation back (#1166).
           put("note", "semantics unavailable ($reason); showing the image instead")
+          put("fix", SEMANTICS_UNAVAILABLE_FIX)
           imageFallback = true
         }
       }
@@ -5964,7 +5980,12 @@ class DaemonMcpServer(
             inline = true,
           )
         } catch (e: DataProductWireException) {
-          if (e.code != DataProductWireException.NOT_AVAILABLE) throw e
+          // Unknown: the daemon hasn't activated the kind (#1166) — opt it in, then render.
+          // Not available: the kind is active but nothing has been rendered with it yet.
+          val retry =
+            e.code == DataProductWireException.NOT_AVAILABLE ||
+              (e.code == DataProductWireException.UNKNOWN && enableSemanticsExtension(daemon))
+          if (!retry) throw e
           awaitNextRender(renderUri)
           daemon.client.dataFetch(
             uri.previewFqn,
@@ -5985,6 +6006,26 @@ class DaemonMcpServer(
     return runCatching { decodeSemanticsPayload(result) }
       .map { it to null }
       .getOrElse { null to "$side: could not read compose/semantics (${it.message})" }
+  }
+
+  /**
+   * Activates `compose/semantics` on a daemon that doesn't advertise it (#1166), the way asking for
+   * a `details` layout does. True when the daemon now serves it; false when it already advertised
+   * the kind (so an unknown-kind error is real) or refused.
+   */
+  private fun enableSemanticsExtension(daemon: SupervisedDaemon): Boolean {
+    val kind = ComposeSemanticsProduct.KIND
+    if (daemon.dataProductCapabilities.any { it.kind == kind }) return false
+    return runCatching { daemon.client.extensionsEnable(listOf(kind)) }
+      .onSuccess {
+        daemon.dataProductCapabilities = it.dataProducts
+        daemon.dataExtensionDescriptors = it.dataExtensions
+      }
+      .onFailure {
+        System.err.println("render_preview: extensions/enable [$kind] failed: ${it.message}")
+      }
+      .map { result -> result.dataProducts.any { it.kind == kind } }
+      .getOrDefault(false)
   }
 
   /**
@@ -7399,16 +7440,59 @@ class DaemonMcpServer(
     private val PROJECT_ARGUMENT_TOOLS =
       setOf("render_preview", "render_matrix", "find_previews_for_file", "list_previews")
 
+    /**
+     * `clientInfo.name`s of agent harnesses that read local files: `render_preview` defaults to the
+     * file result (`inline=false`) for them, and inline for every other client (#1109).
+     */
+    internal val FILE_RESULT_CLIENT_NAMES: Set<String> =
+      setOf(
+        "opencode",
+        "codex-mcp-client",
+        "gemini-cli-mcp-client",
+        "claude-code",
+        ANTIGRAVITY_CLIENT_NAME,
+      )
+
+    /** The one-line remedy `render_preview` gives when it can't serve `compose/semantics`. */
+    internal const val SEMANTICS_UNAVAILABLE_FIX: String =
+      "list_data_products shows what this daemon serves; if compose/semantics is missing, " +
+        "update the compose-preview plugin/CLI, whose renderer lacks it. Pass observe=png to " +
+        "ask for the image directly; crop by ref/testTag and diff_semantics need semantics."
+
     /** Short `initialize` instructions for the local server (#1163, #1165). */
     internal const val LOCAL_INSTRUCTIONS: String =
       "Renders the person's own Compose @Preview functions from their Gradle workspace, " +
-        "which is registered automatically on first use.\n" +
-        "Render one with render_preview preview=<FunctionName> (a function name or FQN suffix); " +
-        "no URI lookup, register_project or source search is needed.\n" +
-        "With inline=false it returns pngPath, and in Antigravity also cardPath plus an " +
-        "<agent-embed> line to paste into the reply. " +
+        "registered automatically on first use (call register_project only if list_projects " +
+        "stays empty).\n" +
+        "Render one with render_preview preview=<FunctionName> (a function name or FQN suffix). " +
+        "To find a file's previews use find_previews_for_file or list_previews; never search " +
+        "source files for a preview ID.\n" +
+        "render_preview returns the semantics tree by default, observe=png the image and " +
+        "observe=hash only the sha256; describe an image rather than re-encoding or re-saving " +
+        "it. Use inline=false (the PNG's pngPath) for sweeps.\n" +
+        "Library components (Material, Wear and published catalogs) are on the hosted catalog " +
+        "server, not here.\n" +
         "Never fake a render: don't hand-build an HTML, CSS or SVG mock of a preview; " +
         "if rendering fails, report the error."
+
+    /**
+     * The client-specific last line of the `initialize` instructions (#1109), or null for a client
+     * that gets the plain instructions.
+     */
+    internal fun localInstructionsTail(clientName: String?): String? =
+      when (clientName) {
+        ANTIGRAVITY_CLIENT_NAME ->
+          "Show a render to the person by pasting the <agent-embed> line render_preview " +
+            "returns (it writes cardPath beside pngPath) into your reply."
+        in FILE_RESULT_CLIENT_NAMES ->
+          "render_preview returns pngPath rather than the image here; open it with your " +
+            "file-read tool to see the render."
+        else -> null
+      }
+
+    /** [LOCAL_INSTRUCTIONS] plus the tail for [clientName]. */
+    internal fun localInstructionsFor(clientName: String?): String =
+      localInstructionsTail(clientName)?.let { "$LOCAL_INSTRUCTIONS\n$it" } ?: LOCAL_INSTRUCTIONS
 
     /** Tools whose existing text output gains an optional, portable MCP Apps presentation. */
     private val VIEWER_TOOL_NAMES =
