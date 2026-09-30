@@ -124,6 +124,85 @@ class ServeCatalogMcpToolsTest {
 
   private fun JsonObject.parsed(): JsonObject = Json.parseToJsonElement(firstText()).jsonObject
 
+  // ---- catalog_render_preview image URL (#1160)
+  // -------------------------------------------------------------------------
+
+  private fun renderPng(mcp: ServeCatalogMcp): JsonObject {
+    val request =
+      Json.parseToJsonElement(
+          """{"jsonrpc":"2.0","id":1,"method":"tools/call",
+              "params":{"name":"catalog_render_preview",
+                        "arguments":{"catalog":"m3","previewId":"card","observe":"png"}}}"""
+        )
+        .jsonObject
+    return requireNotNull(
+        runBlocking {
+          mcp.handle(request) { ServeMachineAuthorization.Decision.Authorized("agent:test") }
+        }
+          .body
+      )
+      .get("result")!!
+      .jsonObject
+  }
+
+  private fun imageUrlOf(result: JsonObject): String? =
+    result["content"]!!
+      .jsonArray
+      .map { it.jsonObject }
+      .firstOrNull { it["uri"]?.jsonPrimitive?.content?.startsWith("https://") == true }
+      ?.get("uri")
+      ?.jsonPrimitive
+      ?.content
+
+  private fun mcpWith(now: () -> Long, origin: String?): ServeCatalogMcp {
+    val registry = ServeSessionRegistry(open = { null })
+    registry.register("m3", host = ToolHost(png = pixel))
+    return ServeCatalogMcp(registry, Semaphore(1), nowMillis = now, publicOrigin = { origin })
+  }
+
+  @Test
+  fun `a png render carries a signed https url that fetches exactly that image`() {
+    var now = 1_000_000L
+    val mcp = mcpWith({ now }, "https://preview.example/")
+    val result = renderPng(mcp)
+
+    val url = requireNotNull(imageUrlOf(result))
+    assertTrue(url.startsWith("https://preview.example${ServeCatalogMcp.IMAGE_URL_PATH}?"), url)
+    assertEquals(
+      url,
+      result["structuredContent"]!!.jsonObject["imageUrl"]!!.jsonPrimitive.content,
+    )
+    // The inline image stays for hosts that render it.
+    assertTrue(
+      result["content"]!!.jsonArray.any { it.jsonObject["type"]!!.jsonPrimitive.content == "image" }
+    )
+
+    val query =
+      java.net.URI(url).rawQuery.split('&').associate {
+        it.substringBefore('=') to java.net.URLDecoder.decode(it.substringAfter('='), "UTF-8")
+      }
+    val uri = query.getValue("uri")
+    val exp = query.getValue("exp").toLong()
+    val sig = query.getValue("sig")
+
+    assertTrue(pixel.contentEquals(runBlocking { mcp.signedImagePng(uri, exp, sig) }))
+    // A signature is bound to its resource: another preview's uri does not verify.
+    assertEquals(null, runBlocking { mcp.signedImagePng(uri.replace("card", "other"), exp, sig) })
+    assertEquals(null, runBlocking { mcp.signedImagePng(uri, exp, sig.reversed()) })
+    // ...and to its expiry.
+    assertEquals(null, runBlocking { mcp.signedImagePng(uri, exp + 1, sig) })
+    now += (ServeCatalogMcp.SIGNED_RESOURCE_TTL_SECONDS + 1) * 1000
+    assertEquals(null, runBlocking { mcp.signedImagePng(uri, exp, sig) })
+  }
+
+  @Test
+  fun `no public origin means no image url`() {
+    val result = renderPng(mcpWith({ 1_000_000L }, origin = null))
+
+    assertEquals(null, imageUrlOf(result))
+    assertEquals(null, result["structuredContent"])
+  }
+
   // ---- catalog_list_devices
   // ---------------------------------------------------------------------------
 

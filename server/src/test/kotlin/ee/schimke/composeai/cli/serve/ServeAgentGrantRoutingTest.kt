@@ -229,6 +229,21 @@ class ServeAgentGrantRoutingTest {
   }
 
   @Test
+  fun `the signed render png route is public but answers only a valid signature`() {
+    // An <img> sends no credential, so the route is not behind the grant; the signature is the
+    // authorization, and a missing or forged one is a 404, not a 401 that names the flow.
+    for (path in
+      listOf(
+        ServeCatalogMcp.IMAGE_URL_PATH,
+        "${ServeCatalogMcp.IMAGE_URL_PATH}?uri=compose-preview://catalog/m3/card&exp=9999999999&sig=x",
+      )) {
+      client.newCall(Request.Builder().url(url(path)).get().build()).execute().use { response ->
+        assertEquals(404, response.code, path)
+      }
+    }
+  }
+
+  @Test
   fun `a private host permits only the static viewer resource before a grant`() {
     val viewer =
       mcpAnonymous(

@@ -57,6 +57,7 @@ class ServeSitesReservedRoutesTest {
       "ServeAgentGrants.LEAVE_PATH" to ServeAgentGrants.LEAVE_PATH,
       "ServeAgentGrants.SWITCH_PATH" to ServeAgentGrants.SWITCH_PATH,
       "UI_BUILDER_REQUEST_ACCESS_PATH" to ServeHttpServer.UI_BUILDER_REQUEST_ACCESS_PATH,
+      "ServeCatalogMcp.IMAGE_URL_PATH" to ServeCatalogMcp.IMAGE_URL_PATH,
       "ServeMcpOAuth.AUTHORIZE_PATH" to ServeMcpOAuth.AUTHORIZE_PATH,
       "ServeMcpOAuth.TOKEN_PATH" to ServeMcpOAuth.TOKEN_PATH,
       "ServeMcpOAuth.REGISTER_PATH" to ServeMcpOAuth.REGISTER_PATH,

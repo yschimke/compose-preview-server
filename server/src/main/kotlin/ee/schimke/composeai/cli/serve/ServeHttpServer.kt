@@ -802,6 +802,7 @@ class ServeHttpServer(
             )
           },
         uiBuilderNative = uiBuilderNativePreview != null,
+        publicOrigin = ::canonicalServerOrigin,
       )
     else null
   private val unleasedThemeSemaphore = Semaphore(1)
@@ -1417,6 +1418,7 @@ class ServeHttpServer(
           post("/mcp") { handleCatalogMcp() }
           get("/mcp") { rejectCatalogMcpListen() }
           delete("/mcp") { rejectCatalogMcpListen() }
+          get(ServeCatalogMcp.IMAGE_URL_PATH) { handleSignedRenderPng() }
         }
 
         // `/status` — the operator/observer view of this running host: published catalogs + their
@@ -10026,6 +10028,30 @@ class ServeHttpServer(
         HttpStatusCode.OK,
       )
     }
+  }
+
+  /**
+   * The fetchable PNG a catalog `render_preview` result links to (#1160). Public on purpose — an
+   * `<img>` sends no credential — so the HMAC in the query is the whole authorization: it covers
+   * one resource URI and an expiry, and anything else is a 404 rather than a hint.
+   */
+  private suspend fun RoutingContext.handleSignedRenderPng() {
+    val mcp = catalogMcp ?: return call.respond(HttpStatusCode.NotFound)
+    val params = call.request.queryParameters
+    val uri = params["uri"]
+    val expiry = params["exp"]?.toLongOrNull()
+    val signature = params["sig"]
+    if (uri == null || expiry == null || signature == null) {
+      return call.respond(HttpStatusCode.NotFound)
+    }
+    val png =
+      try {
+        mcp.signedImagePng(uri, expiry, signature)
+      } catch (e: Exception) {
+        null
+      } ?: return call.respond(HttpStatusCode.NotFound)
+    call.response.headers.append(HttpHeaders.CacheControl, "private, max-age=300")
+    call.respondBytes(png, ContentType.Image.PNG)
   }
 
   /** Streamable HTTP permits a stateless server to decline the optional GET/SSE channel. */
