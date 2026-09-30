@@ -99,6 +99,15 @@ class FakeDaemon : DaemonSpawn {
    */
   @Volatile var advertisedRecordingFormats: List<String> = emptyList()
 
+  /**
+   * Extensions `extensions/enable` can turn on, by id, with the data products each adds to
+   * [advertisedDataProducts] (PROTOCOL.md § 3a). Ids absent here are reported as `unknown`.
+   */
+  @Volatile var enableableExtensions: Map<String, List<DataProductCapability>> = emptyMap()
+
+  /** Ids the fake observed across every `extensions/enable` call. */
+  val enabledExtensionRequests = java.util.concurrent.LinkedBlockingQueue<List<String>>()
+
   /** Data extensions advertised in `initialize.capabilities.dataExtensions`. */
   @Volatile
   var advertisedDataExtensions: List<ee.schimke.composeai.daemon.protocol.DataExtensionDescriptor> =
@@ -196,6 +205,15 @@ class FakeDaemon : DaemonSpawn {
   @Volatile var onInitializeReceived: (JsonObject) -> Unit = {}
 
   /**
+   * Answers `compileSources` (stage-2 in-process compile). Null — the default — answers "method not
+   * found", like a daemon that predates it.
+   */
+  @Volatile
+  var onCompileSources:
+    ((List<String>) -> ee.schimke.composeai.daemon.protocol.CompileSourcesResult)? =
+    null
+
+  /**
    * Outcome the fake's `data/fetch` handler returns. Mirrors the daemon's
    * [`DataProductRegistry.Outcome`] but deliberately decouples — the fake doesn't depend on the
    * registry interface.
@@ -237,6 +255,13 @@ class FakeDaemon : DaemonSpawn {
    * freshness-sampling tests to drive deterministic vs non-deterministic outcomes.
    */
   @Volatile var autoRenderUnchanged: ((previewId: String) -> Boolean?)? = null
+
+  /**
+   * Optional companion to [autoRenderPngPath] — when set, the auto-emitted `renderFinished` carries
+   * the returned element as `workTrace`, the per-render trace of what the daemon ran (#1181).
+   * Returning `null` omits the field, as every released daemon does today.
+   */
+  @Volatile var autoRenderWorkTrace: ((previewId: String) -> JsonElement?)? = null
 
   /**
    * Path returned in `InitializeResult.manifest.path`. The MCP server's `DaemonSupervisor` caches
@@ -289,6 +314,7 @@ class FakeDaemon : DaemonSpawn {
     displayName: String = previewId,
     sourceFile: String? = null,
     functionName: String = previewId.substringAfterLast('.'),
+    bodyLine: Int? = null,
   ) {
     val params = buildJsonObject {
       putJsonArray("added") {
@@ -299,6 +325,7 @@ class FakeDaemon : DaemonSpawn {
             put("functionName", functionName)
             put("displayName", displayName)
             if (sourceFile != null) put("sourceFile", sourceFile)
+            if (bodyLine != null) put("bodyLine", bodyLine)
           }
         )
       }
@@ -324,13 +351,27 @@ class FakeDaemon : DaemonSpawn {
     sendNotification("classpathDirty", params)
   }
 
+  /** One auto-emitted `renderFinished`, captured when its `renderNow` arrived. */
+  private data class AutoRender(
+    val previewId: String,
+    val pngPath: String,
+    val unchanged: Boolean?,
+    val workTrace: JsonElement?,
+  )
+
   /** Pushes a `renderFinished` notification. Returns the synthetic pngPath emitted. */
-  fun emitRenderFinished(previewId: String, pngPath: String, unchanged: Boolean? = null): String {
+  fun emitRenderFinished(
+    previewId: String,
+    pngPath: String,
+    unchanged: Boolean? = null,
+    workTrace: JsonElement? = null,
+  ): String {
     val params = buildJsonObject {
       put("id", previewId)
       put("pngPath", pngPath)
       put("tookMs", 50L)
       if (unchanged != null) put("unchanged", unchanged)
+      if (workTrace != null) put("workTrace", workTrace)
     }
     sendNotification("renderFinished", params)
     return pngPath
@@ -435,7 +476,14 @@ class FakeDaemon : DaemonSpawn {
         val finished =
           autoRenderPngPath?.let { provider ->
             previews.mapNotNull { pid ->
-              provider(pid)?.let { path -> Triple(pid, path, autoRenderUnchanged?.invoke(pid)) }
+              provider(pid)?.let { path ->
+                AutoRender(
+                  pid,
+                  path,
+                  autoRenderUnchanged?.invoke(pid),
+                  autoRenderWorkTrace?.invoke(pid),
+                )
+              }
             }
           } ?: emptyList()
         renderRequests.offer(previews)
@@ -444,7 +492,9 @@ class FakeDaemon : DaemonSpawn {
         // Auto-emit renderFinished for any preview whose path the test pre-registered. The
         // emission happens AFTER the response so the daemon-protocol ordering matches what a
         // real backend produces (queued → started → finished).
-        finished.forEach { (pid, path, unchanged) -> emitRenderFinished(pid, path, unchanged) }
+        finished.forEach { (pid, path, unchanged, workTrace) ->
+          emitRenderFinished(pid, path, unchanged, workTrace)
+        }
       }
       "shutdown" -> {
         sendResponse(id, kotlinx.serialization.json.JsonNull)
@@ -625,6 +675,51 @@ class FakeDaemon : DaemonSpawn {
             ),
           ),
         )
+      }
+      "extensions/enable" -> {
+        val ids =
+          (params?.get("ids") as? kotlinx.serialization.json.JsonArray)
+            ?.map { it.jsonPrimitive.content }
+            .orEmpty()
+        enabledExtensionRequests.add(ids)
+        val (known, unknown) = ids.partition { it in enableableExtensions }
+        val added = known.flatMap { enableableExtensions.getValue(it) }
+        advertisedDataProducts =
+          advertisedDataProducts +
+            added.filter { cap -> advertisedDataProducts.none { it.kind == cap.kind } }
+        sendResponse(
+          id,
+          json.encodeToJsonElement(
+            ee.schimke.composeai.daemon.protocol.ExtensionsEnableResult.serializer(),
+            ee.schimke.composeai.daemon.protocol.ExtensionsEnableResult.Builder()
+              .apply {
+                newlyEnabled = known
+                this.unknown = unknown
+                dataProducts = advertisedDataProducts
+                dataExtensions = advertisedDataExtensions
+              }
+              .build(),
+          ),
+        )
+      }
+      "compileSources" -> {
+        val handler = onCompileSources
+        if (handler == null) {
+          // A daemon without the in-process compiler, as before compileSources existed.
+          sendError(id, -32601, "method not found: $method")
+        } else {
+          val sources =
+            (params?.get("sources") as? kotlinx.serialization.json.JsonArray)
+              ?.map { it.jsonPrimitive.content }
+              .orEmpty()
+          sendResponse(
+            id,
+            json.encodeToJsonElement(
+              ee.schimke.composeai.daemon.protocol.CompileSourcesResult.serializer(),
+              handler(sources),
+            ),
+          )
+        }
       }
       else -> {
         // Unknown methods: error response so the client doesn't hang.

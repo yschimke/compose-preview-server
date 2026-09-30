@@ -213,6 +213,69 @@ class ServeAgentGrantPublicApproverTest {
   }
 
   @Test
+  fun `a signed-in GitHub identity outranks an ambient preview grant cookie`() {
+    val request =
+      requireNotNull(
+        grants.openRequest(
+          label = "ambient browser grant",
+          client = "test",
+          requestedScope = AgentGrantScope.PREVIEW,
+          requestedTtlSeconds = 600,
+        )
+      )
+    val grant =
+      requireNotNull(
+        grants.approve(
+          request.id,
+          approvedBy = "operator",
+          scope = AgentGrantScope.PREVIEW,
+          ttlSeconds = 600,
+        )
+      )
+    val credential = requireNotNull(grants.browserCredentialFor(grant))
+    val alice = signIn("alice")
+    val cookies = "$alice; ${ServeAgentGrantCookie.NAME}=${credential.value}"
+
+    client
+      .newCall(
+        Request.Builder()
+          .url("$base/status?token=${grant.token}")
+          .header("Cookie", alice)
+          .header("Accept", "text/html")
+          .build()
+      )
+      .execute()
+      .use {
+        assertEquals(302, it.code)
+        assertEquals("/status", it.header("Location"))
+        assertTrue(
+          it.headers("Set-Cookie").any { value ->
+            value.startsWith("${ServeAgentGrantCookie.NAME}=") && value.contains("Max-Age=0")
+          }
+        )
+      }
+
+    client
+      .newCall(
+        Request.Builder()
+          .url("$base/api/presence")
+          .header("Cookie", cookies)
+          .header("Origin", base)
+          .post("{}".toRequestBody())
+          .build()
+      )
+      .execute()
+      .use {
+        assertEquals(204, it.code, "the ambient preview grant must not block Alice's live access")
+        assertTrue(
+          it.headers("Set-Cookie").any { value ->
+            value.startsWith("${ServeAgentGrantCookie.NAME}=") && value.contains("Max-Age=0")
+          }
+        )
+      }
+  }
+
+  @Test
   fun `an approver revokes their own grant, and another approver's revoke is refused`() {
     val alice = signIn("alice")
     val bob = signIn("bob")

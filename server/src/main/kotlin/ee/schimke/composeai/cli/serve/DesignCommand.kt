@@ -44,12 +44,15 @@ internal object DesignCommand {
   const val NAME: String = "design"
 
   const val LIST: String = "list"
+  const val STATUS: String = "status"
   const val GET: String = "get"
   const val RENDER: String = "render"
+  const val VIEW: String = "view"
   const val EXPORT: String = "export"
+  const val VALIDATE: String = "validate"
 
   /** Every verb, in the order [usage] lists them. */
-  val VERBS: List<String> = listOf(LIST, GET, RENDER, EXPORT)
+  val VERBS: List<String> = listOf(LIST, STATUS, GET, RENDER, VIEW, EXPORT, VALIDATE)
 
   /**
    * The verbs `--local` has an answer for.
@@ -87,6 +90,7 @@ internal object DesignCommand {
 
   private const val DEFAULT_LIMIT = 50
   private const val DEFAULT_TIMEOUT_SECONDS = 120L
+  private const val DEFAULT_STATUS_TIMEOUT_SECONDS = 5L
 
   /** What one invocation asks for, once argv and the environment have both been read. */
   data class Options(
@@ -129,6 +133,26 @@ internal object DesignCommand {
     val assets: String? = null,
     /** `<catalog>=<components.json>`, as `serve --ui-builder-components` takes. */
     val components: Map<String, String> = emptyMap(),
+    /** Checkout whose published design index [STATUS] inventories. */
+    val workspace: String = ".",
+    /** Emit the complete, machine-readable status envelope. */
+    val json: Boolean = false,
+    /** Emit only a fixed, credential-free SessionStart sentence. */
+    val summary: Boolean = false,
+    /**
+     * [VALIDATE]: a file of design mutations to check against the stored design — a JSON array of
+     * `DesignMutationV1`, or an object carrying one as `operations`, which is what an
+     * `ui_builder_apply` call's arguments already look like.
+     */
+    val operations: String? = null,
+    /** [VIEW]: node ids to show as selected. */
+    val selection: List<String> = emptyList(),
+    /** [VIEW]: the overlays to draw; null draws the server's default set. */
+    val include: List<String>? = null,
+    /** [VIEW]: fit the picture inside this many pixels, width then height. */
+    val viewport: Pair<Int, Int>? = null,
+    /** [VIEW]: `export` or `native`; null lets the server default. */
+    val renderer: String? = null,
   ) {
 
     /**
@@ -145,6 +169,11 @@ internal object DesignCommand {
           // read. Asking for `ui-builder-export` here would have an approver grant the capability
           // to make the server produce artifacts for a run that never asks it to.
           local -> listOf(AgentGrantCapability.UI_BUILDER_READ)
+          // Looking at a design is reading it; only the native frame, which compiles the design's
+          // Kotlin, is gated as an export -- the same split `ui_builder_view` makes.
+          verb == VIEW && renderer == ServeUiBuilderView.RENDERER_NATIVE ->
+            listOf(AgentGrantCapability.UI_BUILDER_READ, AgentGrantCapability.UI_BUILDER_EXPORT)
+          verb == VIEW -> listOf(AgentGrantCapability.UI_BUILDER_READ)
           verb == RENDER || verb == EXPORT -> listOf(AgentGrantCapability.UI_BUILDER_EXPORT)
           else -> listOf(AgentGrantCapability.UI_BUILDER_READ)
         }
@@ -154,7 +183,9 @@ internal object DesignCommand {
      * else reads what is already committed and asks for `preview`.
      */
     val scope: AgentGrantScope
-      get() = if (verb == RENDER && !local) AgentGrantScope.LIVE else AgentGrantScope.PREVIEW
+      get() =
+        if ((verb == RENDER || verb == VIEW) && !local) AgentGrantScope.LIVE
+        else AgentGrantScope.PREVIEW
 
     /** Where the artifact goes when the caller named no `--out`. */
     val destination: String
@@ -202,13 +233,26 @@ internal object DesignCommand {
     var revision: Long? = null
     var limit = DEFAULT_LIMIT
     var server: String? = null
-    var authorize = true
-    var timeout = DEFAULT_TIMEOUT_SECONDS
+    var authorize = verb != STATUS
+    var timeout = if (verb == STATUS) DEFAULT_STATUS_TIMEOUT_SECONDS else DEFAULT_TIMEOUT_SECONDS
     var local = false
     var document: String? = null
     var catalog: String? = null
     var assets: String? = null
     val components = linkedMapOf<String, String>()
+    var workspace = "."
+    var json = false
+    var summary = false
+    var operations: String? = null
+    val selection = mutableListOf<String>()
+    var include: List<String>? = null
+    var viewport: Pair<Int, Int>? = null
+    var renderer: String? = null
+    var viewFlagWasSet = false
+    var workspaceWasSet = false
+    var outWasSet = false
+    var revisionWasSet = false
+    var limitWasSet = false
 
     var index = 0
     while (index < rest.size) {
@@ -223,6 +267,7 @@ internal object DesignCommand {
         }
         argument == "--out" || argument == "-o" -> {
           out = value() ?: return missingValue(argument)
+          outWasSet = true
           index++
         }
         argument == "--format" -> {
@@ -236,6 +281,7 @@ internal object DesignCommand {
               ?: return Parsed.Invalid(
                 "design: --revision must be a non-negative integer, not '$raw'"
               )
+          revisionWasSet = true
           index++
         }
         argument == "--limit" -> {
@@ -243,6 +289,7 @@ internal object DesignCommand {
           limit =
             raw.toIntOrNull()?.takeIf { it in 1..1000 }
               ?: return Parsed.Invalid("design: --limit must be between 1 and 1000, not '$raw'")
+          limitWasSet = true
           index++
         }
         argument == "--timeout" -> {
@@ -279,6 +326,64 @@ internal object DesignCommand {
           components[catalogId] = file
           index++
         }
+        argument == "--workspace" -> {
+          workspace = value() ?: return missingValue(argument)
+          workspaceWasSet = true
+          index++
+        }
+        argument == "--operations" -> {
+          operations = value() ?: return missingValue(argument)
+          index++
+        }
+        argument == "--select" -> {
+          val raw = value() ?: return missingValue(argument)
+          selection += raw.split(',').map(String::trim).filter(String::isNotEmpty)
+          viewFlagWasSet = true
+          index++
+        }
+        argument == "--include" -> {
+          val raw = value() ?: return missingValue(argument)
+          val requested = raw.split(',').map(String::trim).filter(String::isNotEmpty)
+          val unknown = requested - ServeUiBuilderView.INCLUDES.toSet()
+          if (unknown.isNotEmpty()) {
+            return Parsed.Invalid(
+              "design view: --include takes ${ServeUiBuilderView.INCLUDES.joinToString(",")}, " +
+                "not '${unknown.joinToString(",")}'"
+            )
+          }
+          include = requested
+          viewFlagWasSet = true
+          index++
+        }
+        argument == "--viewport" -> {
+          val raw = value() ?: return missingValue(argument)
+          val edges = raw.lowercase().split('x').mapNotNull { it.trim().toIntOrNull() }
+          if (edges.size != 2 || edges.any { it !in 1..ServeUiBuilderView.MAX_VIEWPORT_PX }) {
+            return Parsed.Invalid(
+              "design view: --viewport takes <width>x<height> in pixels, each 1 to " +
+                "${ServeUiBuilderView.MAX_VIEWPORT_PX}, not '$raw'"
+            )
+          }
+          viewport = edges[0] to edges[1]
+          viewFlagWasSet = true
+          index++
+        }
+        argument == "--renderer" -> {
+          val raw = value() ?: return missingValue(argument)
+          if (
+            raw != ServeUiBuilderView.RENDERER_EXPORT && raw != ServeUiBuilderView.RENDERER_NATIVE
+          ) {
+            return Parsed.Invalid(
+              "design view: --renderer is ${ServeUiBuilderView.RENDERER_EXPORT} or " +
+                "${ServeUiBuilderView.RENDERER_NATIVE}, not '$raw'"
+            )
+          }
+          renderer = raw
+          viewFlagWasSet = true
+          index++
+        }
+        argument == "--json" -> json = true
+        argument == "--summary" -> summary = true
         argument == "--no-authorize" -> authorize = false
         argument == "--token" ->
           // Named explicitly rather than falling through to "unknown flag", because the reason it
@@ -296,12 +401,12 @@ internal object DesignCommand {
       index++
     }
 
-    if (verb == LIST && designId != null) {
-      return Parsed.Invalid("design list: takes no design id")
+    if (verb in setOf(LIST, STATUS) && designId != null) {
+      return Parsed.Invalid("design $verb: takes no design id")
     }
     // A document read off disk IS the design, so it stands in for the id every other spelling
     // needs — including for `--out`, whose default is derived from one below.
-    if (verb != LIST && designId.isNullOrBlank() && document == null) {
+    if (verb !in setOf(LIST, STATUS) && designId.isNullOrBlank() && document == null) {
       return Parsed.Invalid("design $verb: a design id is required")
     }
     if (designId != null && document != null) {
@@ -315,7 +420,24 @@ internal object DesignCommand {
           "verbs read a server's state, which is not something this process holds a copy of"
       )
     }
-    if (document != null && !local) {
+    if (operations != null && verb != VALIDATE) {
+      return Parsed.Invalid("design $verb: --operations applies to validate only")
+    }
+    if (operations != null && document != null) {
+      return Parsed.Invalid(
+        "design validate: --operations are checked against a stored design; name it by id, or " +
+          "validate the whole edited --document instead"
+      )
+    }
+    if (verb == VALIDATE && revision != null) {
+      return Parsed.Invalid(
+        "design validate: checks the current revision, which is what an apply lands on; " +
+          "--revision does not apply"
+      )
+    }
+    // `validate` sends the file to the server to be checked — it never stores it — so a
+    // `--document` there is an input to the question rather than a local compile.
+    if (document != null && !local && verb != VALIDATE) {
       return Parsed.Invalid(
         "design $verb: --document is a local input — a server renders its own copy of a design, " +
           "not one from this disk. Add --local."
@@ -337,6 +459,20 @@ internal object DesignCommand {
       return Parsed.Invalid(
         "design $verb: --revision pins which revision a server hands over; a file is already one"
       )
+    }
+    if (verb != VIEW && viewFlagWasSet) {
+      return Parsed.Invalid(
+        "design $verb: --select, --include, --viewport and --renderer apply to view only"
+      )
+    }
+    if (verb != STATUS && (workspaceWasSet || json || summary)) {
+      return Parsed.Invalid("design $verb: --workspace, --json and --summary apply to status only")
+    }
+    if (verb == STATUS && json && summary) {
+      return Parsed.Invalid("design status: --json and --summary are mutually exclusive")
+    }
+    if (verb == STATUS && (outWasSet || revisionWasSet || limitWasSet)) {
+      return Parsed.Invalid("design status: --out, --revision and --limit do not apply")
     }
 
     val resolvedFormat =
@@ -377,6 +513,14 @@ internal object DesignCommand {
         catalog = catalog,
         assets = assets,
         components = components,
+        workspace = workspace,
+        json = json,
+        summary = summary,
+        operations = operations,
+        selection = selection,
+        include = include,
+        viewport = viewport,
+        renderer = renderer,
       )
     )
   }
@@ -392,8 +536,12 @@ internal object DesignCommand {
     when (verb) {
       // Both of these are text, and a pipe is the obvious thing to do with them.
       LIST,
-      GET -> STDOUT
+      STATUS,
+      GET,
+      VALIDATE -> STDOUT
       EXPORT -> if (format == ExportFormatV1.COMPOSE) STDOUT else "$designId.${format.extension()}"
+      // Beside a `render` of the same design rather than over it: the two are different pictures.
+      VIEW -> "$designId.view.png"
       // Bytes are not something to spray at a terminal unless asked for by name.
       else -> "$designId.${format.extension()}"
     }
@@ -407,9 +555,17 @@ internal object DesignCommand {
 
     Verbs:
       list                      Designs this credential can see, one per line.
+      status                    Workspace-linked design comments and unsaved temporary copies.
       get <designId>            The design document, as JSON.
       render <designId>         The design as a picture: PNG, or SVG with --format svg.
+      view <designId>           The editor canvas as a person sees it: a PNG with the selection,
+                                reference and comment pins drawn on, and the node boxes and pin
+                                positions as JSON on stdout.
       export <designId>         The generated source (Kotlin), with its diagnostics.
+      validate <designId>       Check a design without saving it: the stored design, a batch of
+                                --operations against it, or a whole --document. Prints the
+                                problems the editor's problems panel would show, and exits
+                                non-zero when any is an error.
 
     Options:
       --local                   Compile and render in this process instead of asking a server.
@@ -419,9 +575,11 @@ internal object DesignCommand {
                                 instead of coming back silently empty. Prints the classpath it
                                 resolved, the daemon it opened and the reason for a missing frame,
                                 which is the whole point of the mode.
-      --document <file>         Read the design from this file instead of from a server (--local
-                                only). `design get <id> -o doc.json` against the suspect host
-                                captures one; this replays it anywhere.
+      --document <file>         Read the design from this file instead of from a server (--local,
+                                or validate). `design get <id> -o doc.json` against the suspect
+                                host captures one; this replays it anywhere.
+      --operations <file>       validate: design mutations to check against the stored design,
+                                as a JSON array or ui_builder_apply-style {"operations": [...]}.
       --catalog <bundle>        --local: the catalog bundle to compile against. A path to a
                                 `.bundle`; its manifest picks the daemon (android or desktop).
       --assets <dir>            --local: uploaded asset bytes by storage key, as `serve` keeps
@@ -431,19 +589,32 @@ internal object DesignCommand {
                                 proves each call site against. Repeatable. A record-free catalog
                                 (wear-m3, remote-m3) needs none.
       --server <url>            The server to ask (default ${defaultServer()}, or ${'$'}$SERVER_ENV).
+      --workspace <dir>         status: checkout to inventory (default current directory).
+      --json                    status: emit the redacted machine-readable envelope.
+      --summary                 status: emit one fixed SessionStart sentence, or nothing when clean.
       --out, -o <path>          Where to write it; `-` is stdout. Text verbs default to stdout,
                                 a render defaults to <designId>.<png|svg>.
       --format <format>         render: png (default) or svg. export: compose (default).
+      --select <id,id>          view: node ids to show as selected. Repeatable.
+      --include <overlays>      view: comma-separated overlays to draw, from
+                                ${ServeUiBuilderView.INCLUDES.joinToString(",")} (default
+                                ${ServeUiBuilderView.DEFAULT_INCLUDES.sorted().joinToString(",")}).
+      --viewport <w>x<h>        view: fit the picture inside this many pixels.
+      --renderer <renderer>     view: export (default; reports no node boxes) or native (real
+                                Compose with node boxes; needs the ui-builder-export capability).
       --revision <n>            Pin a revision. Omitted means the current committed one, which is
                                 what the export URLs serve.
       --limit <n>               list: how many designs to ask for (default $DEFAULT_LIMIT).
       --no-authorize            Fail on a missing or expired grant instead of asking a human for
                                 one. For CI, where nobody is there to approve.
-      --timeout <seconds>       Give up on one call after this long (default $DEFAULT_TIMEOUT_SECONDS).
+      --timeout <seconds>       Give up within this total budget (status default
+                                $DEFAULT_STATUS_TIMEOUT_SECONDS; other verbs $DEFAULT_TIMEOUT_SECONDS).
 
     Credentials come from ${'$'}$TOKEN_ENV (or the older ${'$'}$LEGACY_TOKEN_ENV), never from a
     flag. With neither set — or when a server restart has dropped the grant — this command asks the
     server for one and prints a link and a code for a human to approve, unless --no-authorize.
+    `status` is always non-authorizing: it reports AUTHORIZATION_REQUIRED instead of starting a
+    device flow, so a SessionStart probe cannot ask for new access.
 
     Diagnostics from a refused export are printed to stderr and the exit code is non-zero, so a
     refusal fails a pipeline instead of writing an empty file into it.

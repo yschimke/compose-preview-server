@@ -15,8 +15,8 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 
 /**
- * `history_list` over the catalog MCP, in each of the three shapes a deployment can honestly
- * produce.
+ * `catalog_history_list` over the catalog MCP, in each of the three shapes a deployment can
+ * honestly produce.
  *
  * The modes are not interchangeable and the distinction is the point: a hosted catalog's timeline
  * lives on its delivery branch and this server does not hold it, while project mode derives one
@@ -99,7 +99,7 @@ class ServeCatalogMcpHistoryTest {
   private fun call(
     host: ServeHost,
     projectHistory: ServeProjectHistory? = null,
-    tool: String = "history_list",
+    tool: String = "catalog_history_list",
     extraArgs: String = "",
   ): JsonObject {
     val registry = ServeSessionRegistry(open = { null })
@@ -307,11 +307,12 @@ class ServeCatalogMcpHistoryTest {
     assertTrue(body["manifestUrl"] != null, "the degraded path is the old behaviour, not an error")
   }
 
-  // ---- history_diff -----------------------------------------------------------------------------
+  // ---- catalog_history_diff
+  // -----------------------------------------------------------------------------
 
   @Test
   fun `diff defaults to the two newest versions`() {
-    val body = call(publishedHost(), tool = "history_diff").payload()
+    val body = call(publishedHost(), tool = "catalog_history_diff").payload()
 
     assertEquals(newest.commit, body["to"]!!.jsonObject["commit"]!!.jsonPrimitive.content)
     assertEquals(older.commit, body["from"]!!.jsonObject["commit"]!!.jsonPrimitive.content)
@@ -324,7 +325,7 @@ class ServeCatalogMcpHistoryTest {
     val body =
       call(
           publishedHost(),
-          tool = "history_diff",
+          tool = "catalog_history_diff",
           extraArgs = ""","from":"${newest.commit}","to":"${newest.commit}"""",
         )
         .payload()
@@ -337,7 +338,8 @@ class ServeCatalogMcpHistoryTest {
     // The signal that makes this worth having: on a nondeterministic preview a byte difference is
     // not evidence of a real change, which is exactly what flake triage has to establish.
     val body =
-      call(publishedHost(indexed = manifest(unstable = true)), tool = "history_diff").payload()
+      call(publishedHost(indexed = manifest(unstable = true)), tool = "catalog_history_diff")
+        .payload()
 
     assertEquals(true, body["unstable"]!!.jsonPrimitive.content.toBoolean())
     assertTrue(body["note"]!!.jsonPrimitive.content.contains("not evidence of a real change"))
@@ -346,7 +348,10 @@ class ServeCatalogMcpHistoryTest {
   @Test
   fun `diff refuses a preview with a single recorded render`() {
     val body =
-      call(publishedHost(indexed = manifest(versions = listOf(newest))), tool = "history_diff")
+      call(
+        publishedHost(indexed = manifest(versions = listOf(newest))),
+        tool = "catalog_history_diff",
+      )
 
     assertTrue(body.isError())
     assertTrue(body.errorText().contains("a diff needs two"), body.errorText())
@@ -354,18 +359,24 @@ class ServeCatalogMcpHistoryTest {
 
   @Test
   fun `diff refuses a commit the timeline does not name`() {
-    val body = call(publishedHost(), tool = "history_diff", extraArgs = ""","to":"deadbeef"""")
+    val body =
+      call(publishedHost(), tool = "catalog_history_diff", extraArgs = ""","to":"deadbeef"""")
 
     assertTrue(body.isError())
     assertTrue(body.errorText().contains("no recorded render at commit"), body.errorText())
   }
 
-  // ---- history_read -----------------------------------------------------------------------------
+  // ---- catalog_history_read
+  // -----------------------------------------------------------------------------
 
   @Test
   fun `read returns the pixels published at a commit`() {
     val body =
-      call(publishedHost(), tool = "history_read", extraArgs = ""","commit":"${newest.commit}"""")
+      call(
+        publishedHost(),
+        tool = "catalog_history_read",
+        extraArgs = ""","commit":"${newest.commit}"""",
+      )
     val content = body["result"]!!.jsonObject["content"]!!.jsonArray
 
     assertEquals("image", content[0].jsonObject["type"]!!.jsonPrimitive.content)
@@ -381,7 +392,7 @@ class ServeCatalogMcpHistoryTest {
     val body =
       call(
         publishedHost(),
-        tool = "history_read",
+        tool = "catalog_history_read",
         extraArgs = ""","commit":"${newest.commit.take(8)}"""",
       )
 
@@ -399,7 +410,8 @@ class ServeCatalogMcpHistoryTest {
 
   @Test
   fun `read refuses a version the timeline does not name`() {
-    val body = call(publishedHost(), tool = "history_read", extraArgs = ""","commit":"beefbeef"""")
+    val body =
+      call(publishedHost(), tool = "catalog_history_read", extraArgs = ""","commit":"beefbeef"""")
 
     assertTrue(body.isError())
     assertTrue(body.errorText().contains("names no recorded render"), body.errorText())
@@ -411,7 +423,7 @@ class ServeCatalogMcpHistoryTest {
     val body =
       call(
         publishedHost(pinnedRenders = emptyMap()),
-        tool = "history_read",
+        tool = "catalog_history_read",
         extraArgs = ""","commit":"${newest.commit}"""",
       )
 
@@ -422,7 +434,8 @@ class ServeCatalogMcpHistoryTest {
   // ---- project mode: diff and read
   // ---------------------------------------------------------------
 
-  // These lanes were covered for `history_list` only. The published path and the local one reach
+  // These lanes were covered for `catalog_history_list` only. The published path and the local one
+  // reach
   // the timeline through completely different code — a parsed manifest held by the bundle host
   // versus JSON re-parsed out of ServeProjectHistory — and only the published half was exercised,
   // so the local half of `historyView` was reachable in production and untested.
@@ -430,7 +443,7 @@ class ServeCatalogMcpHistoryTest {
   @Test
   fun `diff works against a locally derived timeline`() {
     val history = projectHistory(blobs = mapOf(blobA to png(1), blobB to png(2)))
-    val body = call(bundleHost(), projectHistory = history, tool = "history_diff").payload()
+    val body = call(bundleHost(), projectHistory = history, tool = "catalog_history_diff").payload()
 
     assertEquals("local", body["mode"]!!.jsonPrimitive.content)
     assertEquals(blobA, body["to"]!!.jsonObject["blob"]!!.jsonPrimitive.content)
@@ -443,7 +456,7 @@ class ServeCatalogMcpHistoryTest {
     // The local lane has no repo to build a raw URL from; its renders are served by blob sha out of
     // the checkout. Getting this wrong would hand back a URL that resolves nowhere.
     val history = projectHistory(blobs = mapOf(blobA to png(1), blobB to png(2)))
-    val body = call(bundleHost(), projectHistory = history, tool = "history_diff").payload()
+    val body = call(bundleHost(), projectHistory = history, tool = "catalog_history_diff").payload()
 
     assertEquals(
       "/history/render/$blobA.png",
@@ -460,12 +473,12 @@ class ServeCatalogMcpHistoryTest {
       listOf(header(sha, "2026-05-22T11:08:37+00:00", "one"), raw(blobA, renderPath))
         .joinToString("\n")
     val history = projectHistory(logText = single, blobs = mapOf(blobA to png(1)))
-    val body = call(bundleHost(), projectHistory = history, tool = "history_diff")
+    val body = call(bundleHost(), projectHistory = history, tool = "catalog_history_diff")
 
     assertTrue(body.isError())
     // `timelineJsonFor` returns null below two versions, so this is the no-timeline refusal rather
     // than the "needs two" one — both are honest, and the message must not claim a timeline exists.
-    assertTrue(body.errorText().contains("history_list"), body.errorText())
+    assertTrue(body.errorText().contains("catalog_history_list"), body.errorText())
   }
 
   @Test
@@ -475,7 +488,7 @@ class ServeCatalogMcpHistoryTest {
       call(
         bundleHost(),
         projectHistory = history,
-        tool = "history_read",
+        tool = "catalog_history_read",
         extraArgs = ""","blob":"$blobA"""",
       )
     val content = body["result"]!!.jsonObject["content"]!!.jsonArray
@@ -494,7 +507,7 @@ class ServeCatalogMcpHistoryTest {
       call(
         bundleHost(),
         projectHistory = history,
-        tool = "history_read",
+        tool = "catalog_history_read",
         extraArgs = ""","commit":"${sha.take(8)}"""",
       )
     val content = body["result"]!!.jsonObject["content"]!!.jsonArray
@@ -516,7 +529,7 @@ class ServeCatalogMcpHistoryTest {
       call(
         bundleHost(),
         projectHistory = history,
-        tool = "history_read",
+        tool = "catalog_history_read",
         extraArgs = ""","blob":"$blobA"""",
       )
 

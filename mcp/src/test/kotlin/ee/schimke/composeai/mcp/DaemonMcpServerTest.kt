@@ -3,11 +3,19 @@ package ee.schimke.composeai.mcp
 import com.google.common.truth.Truth.assertThat
 import com.google.common.truth.Truth.assertWithMessage
 import ee.schimke.composeai.daemon.client.WorkspaceId
+import ee.schimke.composeai.daemon.protocol.DaemonLaunchDescriptor
+import ee.schimke.composeai.data.layoutinspector.ComposeSemanticsProduct
 import ee.schimke.composeai.mcp.protocol.ReadResourceResult
 import ee.schimke.composeai.mcp.protocol.ResourceContents
+import io.modelcontextprotocol.kotlin.sdk.types.ClientCapabilities
+import io.modelcontextprotocol.kotlin.sdk.types.ElicitResult
 import io.modelcontextprotocol.kotlin.sdk.types.Implementation
+import io.modelcontextprotocol.kotlin.sdk.types.ListPromptsResult
 import io.modelcontextprotocol.kotlin.sdk.types.ListToolsResult
+import io.modelcontextprotocol.kotlin.sdk.types.McpException
+import io.modelcontextprotocol.kotlin.sdk.types.RPCError
 import java.awt.image.BufferedImage
+import java.io.File
 import java.io.IOException
 import java.io.InputStream
 import java.io.OutputStream
@@ -15,14 +23,18 @@ import java.net.InetAddress
 import java.net.ServerSocket
 import java.nio.file.Files
 import java.util.Base64
+import java.util.concurrent.CancellationException
 import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicLong
 import javax.imageio.ImageIO
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.add
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonArray
@@ -32,6 +44,7 @@ import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
 import kotlinx.serialization.json.putJsonObject
 import org.junit.After
+import org.junit.Assert.assertThrows
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
@@ -66,7 +79,8 @@ class DaemonMcpServerTest {
     factory = FakeDaemonClientFactory()
     supervisor =
       DaemonSupervisor(descriptorProvider = FakeDescriptorProvider(), clientFactory = factory)
-    server = DaemonMcpServer(supervisor)
+    // No cwd fallback: auto-registration would register this repository in unrelated tests.
+    server = DaemonMcpServer(supervisor, workingDirectory = null)
 
     val (clientToServer, serverFromClient) = pipedPair()
     val (serverToClient, clientFromServer) = pipedPair()
@@ -83,11 +97,78 @@ class DaemonMcpServerTest {
   }
 
   @Test
+  fun `elicitation propagates cancellation and distinguishes timeout from unsupported`() {
+    assertThrows(CancellationException::class.java) {
+      runBlocking { awaitElicitation(60_000) { throw CancellationException("cancelled") } }
+    }
+    assertThat(runBlocking { awaitElicitation(60_000) { error("unsupported") } })
+      .isEqualTo(FormElicitation.Unsupported)
+    assertThat(
+        runBlocking {
+          awaitElicitation(60_000) {
+            throw McpException(RPCError.ErrorCode.REQUEST_TIMEOUT, "Request timed out")
+          }
+        }
+      )
+      .isEqualTo(FormElicitation.TimedOut)
+    assertThat(
+        runBlocking {
+          awaitElicitation(timeoutMs = 10) {
+            delay(5_000)
+            ElicitResult(action = ElicitResult.Action.Accept)
+          }
+        }
+      )
+      .isEqualTo(FormElicitation.TimedOut)
+    val declined = ElicitResult(action = ElicitResult.Action.Decline)
+    assertThat(runBlocking { awaitElicitation(60_000) { declined } })
+      .isEqualTo(FormElicitation.Answered(declined))
+    assertThat(McpSession.DEFAULT_ELICITATION_TIMEOUT_MS).isAtLeast(120_000L)
+  }
+
+  @Test
+  fun `form elicitation capability follows the spec's form-or-bare rule`() {
+    val empty = JsonObject(emptyMap())
+    assertThat(supportsFormElicitation(null)).isFalse()
+    assertThat(supportsFormElicitation(ClientCapabilities.Elicitation())).isTrue()
+    assertThat(supportsFormElicitation(ClientCapabilities.Elicitation(form = empty))).isTrue()
+    assertThat(supportsFormElicitation(ClientCapabilities.Elicitation(form = empty, url = empty)))
+      .isTrue()
+    assertThat(supportsFormElicitation(ClientCapabilities.Elicitation(url = empty))).isFalse()
+  }
+
+  @Test
+  fun `preview-file prompt rejects oversized and breakout paths as invalid params`() {
+    client.initialize()
+    for (path in listOf("x".repeat(2_000), "/a`b.kt", "/a\"b.kt", "/a\nb.kt")) {
+      val error =
+        client.requestError(
+          "prompts/get",
+          buildJsonObject {
+            put("name", "preview-file")
+            putJsonObject("arguments") { put("path", path) }
+          },
+        )
+      assertThat(error["code"]!!.jsonPrimitive.content.toInt())
+        .isEqualTo(RPCError.ErrorCode.INVALID_PARAMS)
+    }
+  }
+
+  @Test
   fun `initialize and tools list returns expected tool surface`() {
     val initResult = client.initialize()
     val caps = initResult["capabilities"]?.jsonObject
     assertThat(caps?.get("resources")?.jsonObject?.get("subscribe")?.jsonPrimitive?.contentOrNull)
       .isEqualTo("true")
+
+    // serverInfo.version must be the build's actual version (McpVersion.kt / MCP_VERSION), not the
+    // "v0" literal it used to carry regardless of which release was running.
+    val serverInfo = initResult["serverInfo"]?.jsonObject
+    assertThat(serverInfo?.get("name")?.jsonPrimitive?.contentOrNull)
+      .isEqualTo("compose-preview-mcp")
+    val reportedVersion = serverInfo?.get("version")?.jsonPrimitive?.contentOrNull
+    assertThat(reportedVersion).isEqualTo(MCP_VERSION)
+    assertThat(reportedVersion).isNotEqualTo("v0")
 
     val tools = client.awaitToolsContaining("record_preview")
     val names = tools.tools.map { it.name }.toSet()
@@ -99,6 +180,7 @@ class DaemonMcpServerTest {
         "list_projects",
         "list_devices",
         "render_preview",
+        "find_previews_for_file",
         "render_matrix",
         "watch",
         "unwatch",
@@ -119,7 +201,147 @@ class DaemonMcpServerTest {
         "render_preview_overlay",
         "get_preview_extras",
         "record_preview",
+        // OpenAI MCP Extensions: the sidebar library (#1241) and structured settings (#1242).
+        PreviewLibrary.TOOL,
+        PreviewSettingsMcp.READ_TOOL,
+        PreviewSettingsMcp.UPDATE_TOOL,
+        PreviewSettingsMcp.DOCTOR_TOOL,
+        PreviewSettingsMcp.REGISTER_PROJECT_TOOL,
+        "rc_open",
       )
+  }
+
+  @Test
+  fun `MCP App viewer is listed readable and linked to render tools`() {
+    client.initialize()
+    val tools = client.awaitToolsContaining("render_preview")
+    val render = tools.tools.single { it.name == "render_preview" }
+    assertThat(render.meta?.get("ui")?.jsonObject?.get("resourceUri")?.jsonPrimitive?.content)
+      .isEqualTo(DaemonMcpServer.MCP_APP_VIEWER_URI)
+    assertThat(tools.tools.single { it.name == "render_matrix" }.meta).isNotNull()
+    assertThat(tools.tools.single { it.name == "diff_semantics" }.meta).isNotNull()
+    // The viewer calls these itself, so hosts must see them as visible to the app.
+    for (name in listOf("render_preview", "render_preview_overlay", "get_preview_data")) {
+      val visibility =
+        tools.tools.single { it.name == name }.meta!!["ui"]!!.jsonObject["visibility"]!!.jsonArray
+      com.google.common.truth.Truth.assertWithMessage(name)
+        .that(visibility.map { it.jsonPrimitive.content })
+        .containsExactly("model", "app")
+    }
+
+    val listed = client.request("resources/list")
+    val viewer =
+      listed["resources"]!!
+        .jsonArray
+        .single { entry ->
+          entry.jsonObject["uri"]!!.jsonPrimitive.content == DaemonMcpServer.MCP_APP_VIEWER_URI
+        }
+        .jsonObject
+    assertThat(viewer["mimeType"]!!.jsonPrimitive.content).isEqualTo("text/html;profile=mcp-app")
+    assertThat(
+        viewer["_meta"]!!.jsonObject["ui"]!!.jsonObject["prefersBorder"]!!.jsonPrimitive.content
+      )
+      .isEqualTo("true")
+
+    val read =
+      client.request(
+        "resources/read",
+        buildJsonObject { put("uri", DaemonMcpServer.MCP_APP_VIEWER_URI) },
+      )
+    val content = read["contents"]!!.jsonArray.single().jsonObject
+    assertThat(content["mimeType"]!!.jsonPrimitive.content).isEqualTo("text/html;profile=mcp-app")
+    assertThat(content["text"]!!.jsonPrimitive.content).contains("Compose Preview")
+    assertThat(content["text"]!!.jsonPrimitive.content).contains("await request('ui/initialize'")
+    assertThat(content["text"]!!.jsonPrimitive.content)
+      .contains("if (event.source !== window.parent) return;")
+    assertThat(content["text"]!!.jsonPrimitive.content).doesNotContain("innerHTML")
+    assertThat(content["text"]!!.jsonPrimitive.content).contains("selected = undefined;")
+    assertThat(content["text"]!!.jsonPrimitive.content).contains("use.hidden = true;")
+    assertThat(content["text"]!!.jsonPrimitive.content)
+      .contains("message.method === 'ui/notifications/tool-input'")
+    assertThat(content["text"]!!.jsonPrimitive.content)
+      .contains("toolArguments = safeSelectionArguments(incomingArguments);")
+    assertThat(content["text"]!!.jsonPrimitive.content)
+      .contains("function safeSelectionArguments(value)")
+    assertThat(content["text"]!!.jsonPrimitive.content)
+      .contains("/(token|authorization|password|secret|api[-_]?key|cookie|session)/i")
+    assertThat(content["text"]!!.jsonPrimitive.content).contains("arguments: toolArguments")
+    assertThat(content["text"]!!.jsonPrimitive.content)
+      .contains("structuredContent: { composePreviewSelection: selected }")
+    assertThat(content["text"]!!.jsonPrimitive.content)
+      .contains("await request('ui/update-model-context'")
+    assertThat(content["text"]!!.jsonPrimitive.content).contains("const REQUEST_TIMEOUT_MS = 5000;")
+    assertThat(content["text"]!!.jsonPrimitive.content)
+      .contains("const RESOURCE_READ_TIMEOUT_MS = 65000;")
+    assertThat(content["text"]!!.jsonPrimitive.content)
+      .contains("window.clearTimeout(request.timer);")
+    assertThat(content["text"]!!.jsonPrimitive.content)
+      .contains("Viewer unavailable; use the complete text fallback.")
+    assertThat(content["text"]!!.jsonPrimitive.content)
+      .doesNotContain("notify('ui/update-model-context'")
+    assertThat(content["text"]!!.jsonPrimitive.content)
+      .contains(
+        "if (image && !cells.some(cell => typeof cell?.png === 'string' && cell.png.length > 0))"
+      )
+    assertThat(content["text"]!!.jsonPrimitive.content).contains("RESOURCE_READ_TIMEOUT_MS,")
+    assertThat(content["text"]!!.jsonPrimitive.content).contains("typeof content.blob === 'string'")
+    assertThat(content["text"]!!.jsonPrimitive.content).contains("Refresh resource")
+    assertThat(content["text"]!!.jsonPrimitive.content).contains("Show accessibility overlay")
+    assertThat(content["text"]!!.jsonPrimitive.content)
+      .contains("{ name: overlayToolName, arguments: argumentsValue }")
+    assertThat(content["text"]!!.jsonPrimitive.content).contains("await request('tools/list', {})")
+    assertThat(
+        content["text"]!!.jsonPrimitive.content.indexOf("notify('ui/notifications/initialized'")
+      )
+      .isLessThan(content["text"]!!.jsonPrimitive.content.indexOf("void discoverViewerActions();"))
+    assertThat(content["text"]!!.jsonPrimitive.content)
+      .contains("message.method === 'notifications/tools/list_changed'")
+    assertThat(content["text"]!!.jsonPrimitive.content)
+      .contains("/(^|__|\\/)render_preview_overlay$/")
+    assertThat(content["text"]!!.jsonPrimitive.content)
+      .contains("Accessibility overlay unavailable; original preview shown.")
+    assertThat(content["text"]!!.jsonPrimitive.content.encodeToByteArray().size).isAtMost(500_000)
+    assertThat(content["text"]!!.jsonPrimitive.content)
+      .contains("const STATIC_RESULT_PARAM = 'compose-preview-result';")
+    assertThat(content["text"]!!.jsonPrimitive.content)
+      .contains("const MAX_STATIC_RESULT_BYTES = 500000;")
+    assertThat(content["text"]!!.jsonPrimitive.content)
+      .contains("!Array.isArray(envelope.result.content)")
+    assertThat(content["text"]!!.jsonPrimitive.content)
+      .contains("envelope.result.content.every(block => block && typeof block === 'object'")
+    assertThat(content["text"]!!.jsonPrimitive.content)
+      .contains("value.cells.every(cell => cell && typeof cell === 'object'")
+    assertThat(content["text"]!!.jsonPrimitive.content)
+      .contains("filter(child => child !== undefined)")
+  }
+
+  @Test
+  fun `local MCP publishes preview and Wear migration prompts with complete text workflows`() {
+    client.initialize()
+
+    val prompts =
+      json.decodeFromJsonElement(ListPromptsResult.serializer(), client.request("prompts/list"))
+    assertThat(prompts.prompts.map { it.name }).containsExactly("preview-file", "migrate-wear-m3")
+
+    val previewFile =
+      client.request(
+        "prompts/get",
+        buildJsonObject {
+          put("name", "preview-file")
+          putJsonObject("arguments") { put("path", "/workspace/src/Main.kt") }
+        },
+      )
+    val previewText =
+      previewFile["messages"]!!.jsonArray.single().jsonObject["content"]!!.jsonObject
+    assertThat(previewText["text"]!!.jsonPrimitive.content).contains("find_previews_for_file")
+
+    val migration =
+      client.request("prompts/get", buildJsonObject { put("name", "migrate-wear-m3") })
+    val migrationText =
+      migration["messages"]!!.jsonArray.single().jsonObject["content"]!!.jsonObject
+    assertThat(migrationText["text"]!!.jsonPrimitive.content)
+      .contains("official Wear Compose M3 skill")
+    assertThat(migrationText["text"]!!.jsonPrimitive.content).contains("a11y/atf")
   }
 
   @Test
@@ -162,6 +384,9 @@ class DaemonMcpServerTest {
         )
       assertThat(tools.tools.map { it.name }).doesNotContain("render_preview")
       assertThat(tools.tools.map { it.name }).doesNotContain("create_design")
+      val prompts =
+        json.decodeFromJsonElement(ListPromptsResult.serializer(), sbClient.request("prompts/list"))
+      assertThat(prompts.prompts).isEmpty()
       val hidden = sbClient.callTool("list_components")
       assertThat(hidden.raw["isError"]?.jsonPrimitive?.contentOrNull).isEqualTo("true")
       assertThat(hidden.firstTextContent()).isEqualTo("unknown tool: list_components")
@@ -242,6 +467,25 @@ class DaemonMcpServerTest {
     assertThat(payload["ready"]?.jsonPrimitive?.contentOrNull).isEqualTo("true")
     assertThat(payload["toolCatalog"]?.jsonObject?.get("status")?.jsonPrimitive?.contentOrNull)
       .isAnyOf("loading", "ready")
+  }
+
+  @Test
+  fun `status reports the server version and each running daemon's version`() {
+    client.initialize()
+    val projectDir = tmp.newFolder("versioned")
+    tmp.newFolder("versioned", "module")
+    val workspaceId = registerWorkspace(projectDir, "demo")
+    warmDaemonFor(workspaceId, ":module")
+
+    val payload = json.parseToJsonElement(client.callTool("status").firstTextContent()).jsonObject
+    assertThat(payload["schema"]?.jsonPrimitive?.contentOrNull)
+      .isEqualTo("compose-preview-mcp-status/v1")
+    assertThat(payload["serverVersion"]?.jsonPrimitive?.contentOrNull).isEqualTo(MCP_VERSION)
+    val daemon =
+      payload["projects"]!!.jsonArray.single().jsonObject["daemons"]!!.jsonArray.single().jsonObject
+    assertThat(daemon["module"]?.jsonPrimitive?.contentOrNull).isEqualTo(":module")
+    assertThat(daemon["daemonVersion"]?.jsonPrimitive?.contentOrNull).isEqualTo("fake")
+    assertThat(daemon["protocolVersion"]?.jsonPrimitive?.contentOrNull).isEqualTo("2")
   }
 
   @Test
@@ -365,10 +609,89 @@ class DaemonMcpServerTest {
     val subResp = client.request("resources/subscribe", buildJsonObject { put("uri", expectedUri) })
     assertThat(subResp).isInstanceOf(JsonObject::class.java)
 
-    daemon.emitRenderFinished(previewId, "/tmp/fake.png")
+    val renderedPng = tmp.newFile("subscribed-render.png").apply { writeBytes(byteArrayOf(1)) }
+    daemon.emitRenderFinished(previewId, renderedPng.absolutePath)
     val update = client.expectNotification("notifications/resources/updated", 2_000)
     val updatedUri = update.params?.get("uri")?.jsonPrimitive?.contentOrNull
     assertThat(updatedUri).isEqualTo(expectedUri)
+  }
+
+  @Test
+  fun `override subscription rerenders and receives its exact uri after file change`() {
+    client.initialize()
+    val projectDir = tmp.newFolder("workspace")
+    tmp.newFolder("workspace", "module")
+    val workspaceId = registerWorkspace(projectDir, "demo")
+
+    val previewId = "com.example.Red"
+    val daemon = warmDaemonFor(workspaceId, ":module")
+    daemon.emitDiscovery(previewId)
+    client.expectNotification("notifications/resources/list_changed", 2_000)
+
+    val rawOverrides = buildJsonObject {
+      put("widthPx", 600)
+      put("uiMode", "dark")
+    }
+    val overrideUri =
+      PreviewUri(
+          workspaceId = workspaceId,
+          modulePath = ":module",
+          previewFqn = previewId,
+          overridesJson = rawOverrides.toString(),
+        )
+        .toUri()
+    client.request("resources/subscribe", buildJsonObject { put("uri", overrideUri) })
+
+    val response =
+      client.callTool(
+        "notify_file_changed",
+        buildJsonObject {
+          put("workspaceId", workspaceId.value)
+          put("path", "src/main/kotlin/com/example/Preview.kt")
+          put("kind", "source")
+          put("changeType", "modified")
+        },
+      )
+    assertThat(response.firstTextContent()).contains("re-rendered 1 watched preview(s)")
+
+    val rendered = daemon.renderRequests.poll(2_000, TimeUnit.MILLISECONDS)
+    assertThat(rendered).isEqualTo(listOf(previewId))
+    assertThat(daemon.renderOverrides).hasSize(1)
+    assertThat(daemon.renderOverrides.single()!!.widthPx).isEqualTo(600)
+    assertThat(daemon.renderOverrides.single()!!.uiMode)
+      .isEqualTo(ee.schimke.composeai.daemon.protocol.UiMode.DARK)
+
+    // A second edit with the same override set must queue another render rather than deduplicating
+    // onto the in-flight generation. The first render may already have captured the old source.
+    val secondResponse =
+      client.callTool(
+        "notify_file_changed",
+        buildJsonObject {
+          put("workspaceId", workspaceId.value)
+          put("path", "src/main/kotlin/com/example/Preview.kt")
+          put("kind", "source")
+          put("changeType", "modified")
+        },
+      )
+    assertThat(secondResponse.firstTextContent()).contains("re-rendered 1 watched preview(s)")
+    assertThat(daemon.renderRequests.poll(200, TimeUnit.MILLISECONDS)).isNull()
+    assertThat(daemon.renderOverrides).hasSize(1)
+
+    val refreshPng1 =
+      tmp.newFile("override-refresh-1.png").apply { writeBytes(byteArrayOf(1.toByte())) }
+    daemon.emitRenderFinished(previewId, refreshPng1.absolutePath)
+    val firstUpdate = client.expectNotification("notifications/resources/updated", 2_000)
+    assertThat(firstUpdate.params?.get("uri")?.jsonPrimitive?.contentOrNull).isEqualTo(overrideUri)
+    val secondRender = daemon.renderRequests.poll(2_000, TimeUnit.MILLISECONDS)
+    assertThat(secondRender).isEqualTo(listOf(previewId))
+    assertThat(daemon.renderOverrides).hasSize(2)
+    assertThat(daemon.renderOverrides[1]!!.widthPx).isEqualTo(600)
+
+    val refreshPng2 =
+      tmp.newFile("override-refresh-2.png").apply { writeBytes(byteArrayOf(2.toByte())) }
+    daemon.emitRenderFinished(previewId, refreshPng2.absolutePath)
+    val secondUpdate = client.expectNotification("notifications/resources/updated", 2_000)
+    assertThat(secondUpdate.params?.get("uri")?.jsonPrimitive?.contentOrNull).isEqualTo(overrideUri)
   }
 
   @Test
@@ -442,7 +765,10 @@ class DaemonMcpServerTest {
     val payload = json.parseToJsonElement(watchResp.firstTextContent()).jsonObject
     assertThat(payload["awaitDiscovery"]?.jsonPrimitive?.contentOrNull).isEqualTo("true")
     assertThat(payload["ready"]?.jsonPrimitive?.contentOrNull).isEqualTo("true")
-    assertThat(payload["spawning"]?.jsonPrimitive?.contentOrNull?.toInt()).isEqualTo(1)
+    // register_project's warm-up may have spawned the module first; either way it is one daemon.
+    val alreadyUp = payload["alreadyUp"]?.jsonPrimitive?.contentOrNull?.toInt() ?: 0
+    val spawning = payload["spawning"]?.jsonPrimitive?.contentOrNull?.toInt() ?: 0
+    assertThat(alreadyUp + spawning).isEqualTo(1)
     val moduleState = payload["modules"]!!.jsonArray.single().jsonObject
     assertThat(moduleState["module"]?.jsonPrimitive?.contentOrNull).isEqualTo(":module")
     assertThat(moduleState["spawned"]?.jsonPrimitive?.contentOrNull).isEqualTo("true")
@@ -850,38 +1176,40 @@ class DaemonMcpServerTest {
     daemon.autoRenderPngPath = { id -> if (id == previewId) pngFile.absolutePath else null }
 
     val uri = PreviewUri(workspaceId, ":module", previewId).toUri()
-    client.callTool(
-      "render_preview",
-      buildJsonObject {
-        put("uri", uri)
-        put(
-          "overrides",
-          buildJsonObject {
-            put("widthPx", 600)
-            put("heightPx", 800)
-            put("uiMode", "dark")
-            put("device", "id:pixel_5")
-            put("captureAdvanceMs", 250)
-            put("inspectionMode", false)
-            putJsonObject("material3Theme") {
-              putJsonObject("colorScheme") {
-                put("primary", "#FF336699")
-                put("onPrimary", "#FFFFFFFF")
-              }
-              putJsonObject("typography") {
-                putJsonObject("bodyLarge") {
-                  put("fontSizeSp", 18)
-                  put("lineHeightSp", 24)
-                  put("fontWeight", 700)
+    val rendered =
+      client.callTool(
+        "render_preview",
+        buildJsonObject {
+          put("uri", uri)
+          put("observe", "png")
+          put(
+            "overrides",
+            buildJsonObject {
+              put("widthPx", 600)
+              put("heightPx", 800)
+              put("uiMode", "dark")
+              put("device", "id:pixel_5")
+              put("captureAdvanceMs", 250)
+              put("inspectionMode", false)
+              putJsonObject("material3Theme") {
+                putJsonObject("colorScheme") {
+                  put("primary", "#FF336699")
+                  put("onPrimary", "#FFFFFFFF")
                 }
+                putJsonObject("typography") {
+                  putJsonObject("bodyLarge") {
+                    put("fontSizeSp", 18)
+                    put("lineHeightSp", 24)
+                    put("fontWeight", 700)
+                  }
+                }
+                putJsonObject("shapes") { put("medium", 16) }
               }
-              putJsonObject("shapes") { put("medium", 16) }
-            }
-          },
-        )
-      },
-      timeoutMs = 10_000,
-    )
+            },
+          )
+        },
+        timeoutMs = 10_000,
+      )
 
     // The daemon recorded one renderNow whose overrides match what we sent. Without the
     // compile fix, `renderOverrides[0]` would be `null` because the param was dropped on the
@@ -900,12 +1228,84 @@ class DaemonMcpServerTest {
     assertThat(material3Theme.typography["bodyLarge"]!!.fontWeight).isEqualTo(700)
     assertThat(material3Theme.shapes["medium"]).isEqualTo(16.0f)
 
+    val resourceUri =
+      rendered.raw["content"]!!
+        .jsonArray
+        .single { it.jsonObject["type"]!!.jsonPrimitive.content == "resource_link" }
+        .jsonObject["uri"]!!
+        .jsonPrimitive
+        .content
+    assertThat(resourceUri).contains("overrides=")
+    client.request(
+      "resources/read",
+      buildJsonObject { put("uri", resourceUri) },
+      timeoutMs = 10_000,
+    )
+    assertThat(daemon.renderOverrides).hasSize(2)
+    val resourceOverrides = daemon.renderOverrides[1]
+    assertThat(resourceOverrides).isNotNull()
+    assertThat(resourceOverrides!!.widthPx).isEqualTo(600)
+    assertThat(resourceOverrides.uiMode).isEqualTo(ee.schimke.composeai.daemon.protocol.UiMode.DARK)
+    assertThat(resourceOverrides.material3Theme!!.colorScheme["primary"]).isEqualTo("#FF336699")
+
     // A second render_preview call WITHOUT overrides now uses a different RenderKey and triggers
     // a fresh renderNow rather than dedup'ing onto the first. Pre-fix, the now-stale shared key
     // path would have skipped the renderNow and the request would have hung.
     client.callTool("render_preview", buildJsonObject { put("uri", uri) }, timeoutMs = 10_000)
-    assertThat(daemon.renderOverrides).hasSize(2)
-    assertThat(daemon.renderOverrides[1]).isNull()
+    assertThat(daemon.renderOverrides).hasSize(3)
+    assertThat(daemon.renderOverrides[2]).isNull()
+
+    // Passing the returned resource_link back to render_preview replays its overrides instead of
+    // silently rendering the default state.
+    val replayed =
+      client.callTool(
+        "render_preview",
+        buildJsonObject {
+          put("uri", resourceUri)
+          put("observe", "png")
+        },
+        timeoutMs = 10_000,
+      )
+    assertThat(replayed.isError()).isFalse()
+    assertThat(daemon.renderOverrides).hasSize(4)
+    assertThat(daemon.renderOverrides[3]!!.widthPx).isEqualTo(600)
+    assertThat(daemon.renderOverrides[3]!!.uiMode)
+      .isEqualTo(ee.schimke.composeai.daemon.protocol.UiMode.DARK)
+    val replayedLink =
+      replayed.raw["content"]!!
+        .jsonArray
+        .single { it.jsonObject["type"]!!.jsonPrimitive.content == "resource_link" }
+        .jsonObject["uri"]!!
+        .jsonPrimitive
+        .content
+    assertThat(PreviewUri.parseOrNull(replayedLink)!!.overridesJson)
+      .isEqualTo(PreviewUri.parseOrNull(resourceUri)!!.overridesJson)
+
+    // A conflicting explicit argument, or a tool that cannot apply overrides, is refused rather
+    // than answering with pixels from a different state.
+    val conflicting =
+      client.callTool(
+        "render_preview",
+        buildJsonObject {
+          put("uri", resourceUri)
+          putJsonObject("overrides") { put("widthPx", 320) }
+        },
+        timeoutMs = 10_000,
+      )
+    assertThat(conflicting.isError()).isTrue()
+    assertThat(conflicting.firstTextContent()).contains("differ from the 'overrides' argument")
+    val unsupported =
+      client.callTool(
+        "get_preview_data",
+        buildJsonObject {
+          put("uri", resourceUri)
+          put("kind", "compose/semantics")
+        },
+        timeoutMs = 10_000,
+      )
+    assertThat(unsupported.isError()).isTrue()
+    assertThat(unsupported.firstTextContent()).contains("does not apply")
+    assertThat(daemon.renderOverrides).hasSize(4)
   }
 
   @Test
@@ -967,9 +1367,1552 @@ class DaemonMcpServerTest {
     assertThat(parsed["heightPx"]?.jsonPrimitive?.contentOrNull).isEqualTo("30")
     assertThat(parsed["sizeBytes"]?.jsonPrimitive?.contentOrNull).isEqualTo("24")
     assertThat(parsed["sha256"]?.jsonPrimitive?.contentOrNull).isNotEmpty()
-    // The first (only) content block is text JSON — firstTextContent() above would have errored on
-    // an image block, so the token-frugal path returned no base64 PNG.
+    // The observation has text plus its replayable resource link, but no inline base64 image.
     assertThat(resp.textContents()).hasSize(1)
+  }
+
+  @Test
+  fun `render_preview inline false returns png path and tracks file changes per session`() {
+    client.initialize()
+    val projectDir = tmp.newFolder("workspace")
+    val moduleDir = tmp.newFolder("workspace", "module")
+    val sourceFile = moduleDir.resolve("src/main/kotlin/com/example/Preview.kt")
+    sourceFile.parentFile.mkdirs()
+    sourceFile.writeText("@Preview fun Red() {}")
+    val workspaceId = registerWorkspace(projectDir, "demo")
+    val daemon = warmDaemonFor(workspaceId, ":module")
+    val previewId = "com.example.Red"
+    daemon.emitDiscovery(previewId, sourceFile = "src/main/kotlin/com/example/Preview.kt")
+    client.expectNotification("notifications/resources/list_changed", 2_000)
+
+    val sharedPng = tmp.newFile("file-render-shared.png")
+    val header =
+      byteArrayOf(
+        0x89.toByte(),
+        0x50,
+        0x4e,
+        0x47,
+        0x0d,
+        0x0a,
+        0x1a,
+        0x0a,
+        0x00,
+        0x00,
+        0x00,
+        0x0d,
+        0x49,
+        0x48,
+        0x44,
+        0x52,
+        0x00,
+        0x00,
+        0x00,
+        0x28,
+        0x00,
+        0x00,
+        0x00,
+        0x1e,
+      )
+    val firstBytes = header + byteArrayOf(1)
+    val secondBytes = header + byteArrayOf(2)
+    Files.write(sharedPng.toPath(), firstBytes)
+    daemon.autoRenderPngPath = { id -> if (id == previewId) sharedPng.absolutePath else null }
+
+    val uri = PreviewUri(workspaceId, ":module", previewId).toUri()
+    fun renderFile() =
+      json
+        .parseToJsonElement(
+          client
+            .callTool(
+              "render_preview",
+              buildJsonObject {
+                put("uri", uri)
+                put("inline", false)
+              },
+              timeoutMs = 10_000,
+            )
+            .firstTextContent()
+        )
+        .jsonObject
+
+    val first = renderFile()
+    val firstStablePng = File(first["pngPath"]!!.jsonPrimitive.content)
+    assertThat(firstStablePng.canonicalPath).isNotEqualTo(sharedPng.canonicalPath)
+    assertThat(firstStablePng.name).isEqualTo("${first["sha256"]!!.jsonPrimitive.content}.png")
+    assertThat(firstStablePng.readBytes()).isEqualTo(firstBytes)
+    assertThat(first["widthPx"]?.jsonPrimitive?.contentOrNull).isEqualTo("40")
+    assertThat(first["heightPx"]?.jsonPrimitive?.contentOrNull).isEqualTo("30")
+    assertThat(first["sha256"]?.jsonPrimitive?.contentOrNull).isNotEmpty()
+    assertThat(first["changed"]?.jsonPrimitive?.contentOrNull).isEqualTo("true")
+    assertThat(first["durationMs"]?.jsonPrimitive?.contentOrNull?.toLong()).isAtLeast(0L)
+
+    val unchanged = renderFile()
+    assertThat(unchanged["changed"]?.jsonPrimitive?.contentOrNull).isEqualTo("false")
+
+    sourceFile.writeText("@Preview fun Red() { /* edited */ }")
+    Files.write(sharedPng.toPath(), secondBytes)
+    client.callTool(
+      "notify_file_changed",
+      buildJsonObject {
+        put("workspaceId", workspaceId.value)
+        put("path", sourceFile.absolutePath)
+      },
+    )
+    assertThat(daemon.fileChanges.poll(2_000, TimeUnit.MILLISECONDS)).isNotNull()
+
+    val changed = renderFile()
+    assertThat(changed["changed"]?.jsonPrimitive?.contentOrNull).isEqualTo("true")
+    assertThat(changed["sha256"]?.jsonPrimitive?.contentOrNull)
+      .isNotEqualTo(first["sha256"]?.jsonPrimitive?.contentOrNull)
+    assertThat(File(changed["pngPath"]!!.jsonPrimitive.content).readBytes()).isEqualTo(secondBytes)
+    // The daemon reused and overwrote its output, but the earlier result remains replayable.
+    assertThat(firstStablePng.readBytes()).isEqualTo(firstBytes)
+    val cacheDir = firstStablePng.parentFile
+    DaemonMcpMain.shutdown(server, supervisor)
+    assertThat(cacheDir.exists()).isFalse()
+  }
+
+  @Test
+  fun `initialize sends short local instructions naming render_preview preview`() {
+    val instructions = client.initialize()["instructions"]?.jsonPrimitive?.contentOrNull
+    assertThat(instructions).contains("render_preview preview=<FunctionName>")
+    assertThat(instructions).contains("find_previews_for_file")
+    assertThat(instructions).contains("observe=hash")
+    assertThat(instructions).contains("hosted catalog")
+    assertThat(instructions!!.lines().size).isAtMost(10)
+    // An unknown client gets no client-specific tail.
+    assertThat(instructions).isEqualTo(DaemonMcpServer.LOCAL_INSTRUCTIONS)
+  }
+
+  @Test
+  fun `initialize instructions end with a tail for the connecting client`() {
+    val claude =
+      client.initialize(clientName = "claude-code")["instructions"]!!.jsonPrimitive.content
+    assertThat(claude).startsWith(DaemonMcpServer.LOCAL_INSTRUCTIONS)
+    assertThat(claude.lines().last()).contains("file-read tool")
+    assertThat(claude.lines().size).isAtMost(10)
+
+    restartSession(server)
+    val antigravity =
+      client.initialize(clientName = "antigravity-client")["instructions"]!!.jsonPrimitive.content
+    assertThat(antigravity.lines().last()).contains("<agent-embed>")
+  }
+
+  @Test
+  fun `render_preview defaults to the file result for a known agent client`() {
+    client.initialize(clientName = "codex-mcp-client")
+    val uri = solidPreview("AgentDefault")
+
+    val file =
+      client.callTool("render_preview", buildJsonObject { put("uri", uri) }, timeoutMs = 10_000)
+    val fileResult = json.parseToJsonElement(file.firstTextContent()).jsonObject
+    assertThat(File(fileResult["pngPath"]!!.jsonPrimitive.content).exists()).isTrue()
+
+    // An explicit inline=true, or an explicit observation, keeps the inline result.
+    val inline =
+      client.callTool(
+        "render_preview",
+        buildJsonObject {
+          put("uri", uri)
+          put("inline", true)
+          put("observe", "hash")
+        },
+        timeoutMs = 10_000,
+      )
+    assertThat(inline.firstTextContent()).doesNotContain("pngPath")
+  }
+
+  @Test
+  fun `render_preview auto-registers the client's Gradle root on first use`() {
+    val projectDir = tmp.newFolder("rooted")
+    projectDir.resolve("settings.gradle.kts").writeText("rootProject.name = \"rooted\"")
+    restartSession(
+      server,
+      requestHandlers =
+        mapOf(
+          "roots/list" to
+            { _ ->
+              buildJsonObject {
+                putJsonArray("roots") {
+                  add(buildJsonObject { put("uri", projectDir.toPath().toUri().toString()) })
+                }
+              }
+            }
+        ),
+    )
+    client.initialize(capabilities = buildJsonObject { putJsonObject("roots") {} })
+
+    // Nothing matches (no daemons in the fake), but the workspace is now registered.
+    val result = client.callTool("render_preview", buildJsonObject { put("preview", "Missing") })
+    assertThat(result.isError()).isTrue()
+    assertThat(supervisor.listProjects().map { it.path.canonicalPath })
+      .containsExactly(projectDir.canonicalPath)
+  }
+
+  @Test
+  fun `render_matrix auto-registers the client's Gradle root and honours project`() {
+    val projectDir = tmp.newFolder("matrix-rooted")
+    projectDir.resolve("settings.gradle.kts").writeText("rootProject.name = \"matrix-rooted\"")
+    restartSession(server, requestHandlers = rootsHandler(projectDir))
+    client.initialize(capabilities = buildJsonObject { putJsonObject("roots") {} })
+
+    // #1198: render_matrix preview= registered nothing on first use.
+    val result = client.callTool("render_matrix", buildJsonObject { put("preview", "Missing") })
+    assertThat(result.isError()).isTrue()
+    assertThat(supervisor.listProjects().map { it.path.canonicalPath })
+      .containsExactly(projectDir.canonicalPath)
+
+    // project= scopes the lookup to that build, which reports it is not prepared yet.
+    val repo = samplesRepo()
+    val scoped =
+      client.callTool(
+        "render_matrix",
+        buildJsonObject {
+          put("preview", "StarterPreview")
+          put("project", File(repo, "ComposeStarter").absolutePath)
+        },
+      )
+    assertThat(scoped.firstTextContent())
+      .startsWith("render_matrix: project not prepared: no Gradle wrapper")
+  }
+
+  @Test
+  fun `render_preview auto-registers the working directory only when it is a Gradle build`() {
+    val notGradle = tmp.newFolder("plain")
+    val cwdServer = DaemonMcpServer(supervisor, workingDirectory = notGradle)
+    restartSession(cwdServer)
+    client.initialize()
+    client.callTool("render_preview", buildJsonObject { put("preview", "Anything") })
+    assertThat(supervisor.listProjects()).isEmpty()
+
+    notGradle.resolve("build.gradle").writeText("")
+    client.callTool("render_preview", buildJsonObject { put("preview", "Anything") })
+    assertThat(supervisor.listProjects().map { it.path.canonicalPath })
+      .containsExactly(notGradle.canonicalPath)
+    cwdServer.shutdown()
+  }
+
+  @Test
+  fun `render recovers when a failure made the supervisor forget the workspace`() {
+    client.initialize()
+    val projectDir = tmp.newFolder("ComposeStarter")
+    val workspaceId = registerWorkspace(projectDir, "ComposeStarter")
+    val png = tmp.newFile("desync.png")
+    writeSolidPng(png, 0xff00ff00.toInt())
+    factory.daemonConfigurer = { it.autoRenderPngPath = { png.absolutePath } }
+    val uri = PreviewUri(workspaceId, ":app", "com.example.StarterKt.StarterPreview").toUri()
+    fun render() =
+      client.callTool(
+        "render_preview",
+        buildJsonObject {
+          put("uri", uri)
+          put("inline", false)
+        },
+        timeoutMs = 10_000,
+      )
+    assertThat(render().isError()).isFalse()
+
+    // 3.79.0: a render failure tore the daemon down and every later call said "workspace not
+    // registered". Losing the live project must not lose the registration.
+    supervisor.shutdown()
+    assertThat(supervisor.listProjects()).isEmpty()
+    val recovered = render()
+    assertThat(recovered.firstTextContent()).doesNotContain("not registered")
+    assertThat(recovered.isError()).isFalse()
+
+    // register_project on the same path keeps the id, and the next render works.
+    supervisor.shutdown()
+    assertThat(registerWorkspace(projectDir, "ComposeStarter")).isEqualTo(workspaceId)
+    assertThat(render().isError()).isFalse()
+  }
+
+  /** Two sample builds under a git root that is not a build, as in wear-os-samples. */
+  private fun samplesRepo(): File {
+    val repo = tmp.newFolder("samples-repo")
+    for (sample in listOf("ComposeStarter", "ComposeAdvanced")) {
+      File(repo, "$sample/app/src").mkdirs()
+      File(repo, "$sample/settings.gradle.kts").writeText("")
+    }
+    return repo
+  }
+
+  private fun rootsHandler(vararg dirs: File) =
+    mapOf(
+      "roots/list" to
+        { _: JsonObject ->
+          buildJsonObject {
+            putJsonArray("roots") {
+              dirs.forEach { add(buildJsonObject { put("uri", it.toPath().toUri().toString()) }) }
+            }
+          }
+        }
+    )
+
+  @Test
+  fun `several builds under the root are registered and searched on a preview lookup`() {
+    val repo = samplesRepo()
+    restartSession(server, requestHandlers = rootsHandler(repo))
+    client.initialize(capabilities = buildJsonObject { putJsonObject("roots") {} })
+
+    client.callTool("render_preview", buildJsonObject { put("preview", "Missing") })
+
+    assertThat(supervisor.listProjects().map { it.path.canonicalPath })
+      .containsExactly(
+        File(repo, "ComposeStarter").canonicalPath,
+        File(repo, "ComposeAdvanced").canonicalPath,
+      )
+  }
+
+  @Test
+  fun `a sibling of a restored build is still discovered on a preview lookup`() {
+    val repo = samplesRepo()
+    // Only ComposeStarter was saved before the restart (#1188).
+    supervisor.workspaceStore.remember(
+      "ComposeStarter-0",
+      File(repo, "ComposeStarter"),
+      "ComposeStarter",
+    )
+    restartSession(server, requestHandlers = rootsHandler(repo))
+    client.initialize(capabilities = buildJsonObject { putJsonObject("roots") {} })
+
+    client.callTool("render_preview", buildJsonObject { put("preview", "Missing") })
+
+    assertThat(supervisor.listProjects().map { it.path.canonicalPath })
+      .containsExactly(
+        File(repo, "ComposeStarter").canonicalPath,
+        File(repo, "ComposeAdvanced").canonicalPath,
+      )
+    assertThat(
+        supervisor.listProjects().single { it.path.name == "ComposeStarter" }.workspaceId.value
+      )
+      .isEqualTo("ComposeStarter-0")
+  }
+
+  @Test
+  fun `the project argument registers the build around any folder in one call`() {
+    val repo = samplesRepo()
+    // Claude Desktop's chat: no roots, and the server was started from `/`.
+    val desktop = DaemonMcpServer(supervisor, workingDirectory = File("/"))
+    restartSession(desktop)
+    client.initialize()
+
+    val result =
+      client.callTool(
+        "render_preview",
+        buildJsonObject {
+          put("preview", "StarterPreview")
+          put("project", File(repo, "ComposeStarter/app/src").absolutePath)
+        },
+      )
+
+    assertThat(supervisor.listProjects().map { it.path.canonicalPath })
+      .containsExactly(File(repo, "ComposeStarter").canonicalPath)
+    // No gradlew in the fixture: reported as unprepared, never as a missing preview.
+    assertThat(result.firstTextContent())
+      .startsWith("render_preview: project not prepared: no Gradle wrapper")
+    assertThat(result.firstTextContent()).doesNotContain("no preview matches")
+
+    val relative =
+      client.callTool(
+        "render_preview",
+        buildJsonObject {
+          put("preview", "StarterPreview")
+          put("project", "ComposeStarter")
+        },
+      )
+    assertThat(relative.firstTextContent()).contains("must be an absolute path")
+    val schema =
+      client.awaitToolsContaining("render_matrix").tools.filter {
+        it.name in setOf("render_preview", "render_matrix", "find_previews_for_file")
+      }
+    assertThat(schema).hasSize(3)
+    schema.forEach { assertThat(it.inputSchema.toString()).contains("Only needed when the host") }
+    desktop.shutdown()
+  }
+
+  @Test
+  fun `nothing registered says what was tried and how to name a project`() {
+    val plain = tmp.newFolder("not-a-build")
+    val used = samplesRepo().resolve("ComposeAdvanced")
+    supervisor.workspaceStore.remember("ComposeAdvanced-0", used, "ComposeAdvanced")
+    val cwdServer = DaemonMcpServer(supervisor, workingDirectory = plain)
+    restartSession(cwdServer)
+    client.initialize()
+
+    val text =
+      client
+        .callTool("render_preview", buildJsonObject { put("preview", "Anything") })
+        .firstTextContent()
+
+    assertThat(text).contains("Tried ${plain.path} (the working directory): not Gradle builds")
+    assertThat(text).contains("Pass project=<absolute path>")
+    assertThat(text).contains("Candidate builds: ${used.absolutePath}")
+    assertThat(text.indexOf("Tried")).isLessThan(text.indexOf("Pass project="))
+    assertThat(text.indexOf("Pass project=")).isLessThan(text.indexOf("Candidate builds"))
+    cwdServer.shutdown()
+  }
+
+  @Test
+  fun `an unprepared build is bootstrapped through the init script on first use`() {
+    val project = tmp.newFolder("no-descriptor")
+    File(project, "settings.gradle.kts").writeText("include(\":app\")")
+    File(project, "gradlew").writeText("#!/bin/sh\n")
+    val initScript = tmp.newFile("apply-compose-ai-preview.init.gradle.kts")
+    val calls = mutableListOf<List<String>>()
+    var writeDescriptor = false
+    val runner = GradleTaskRunner { root, _, arguments, onLine ->
+      calls += arguments
+      onLine("> Task :app:composePreviewDiscover")
+      if (!writeDescriptor)
+        return@GradleTaskRunner GradleTaskRunner.Result(1, "* What went wrong:\nboom")
+      val dir = File(root, "app/build/compose-previews").apply { mkdirs() }
+      File(dir, "daemon-launch.json")
+        .writeText(
+          """{"schemaVersion":2,"modulePath":":app","variant":"desktop","enabled":true,""" +
+            """"mainClass":"x","classpath":[],"jvmArgs":[],"systemProperties":{},""" +
+            """"workingDirectory":"${dir.parentFile.parent}","manifestPath":"manifest.json"}"""
+        )
+      GradleTaskRunner.Result(0, "BUILD SUCCESSFUL")
+    }
+    val bootstrap =
+      ProjectBootstrap(
+        initScripts =
+          InitScripts(
+            environment = mapOf("COMPOSE_PREVIEW_INIT_SCRIPT" to initScript.absolutePath),
+            userHome = tmp.root,
+          ),
+        runner = runner,
+      )
+    val bootServer =
+      DaemonMcpServer(supervisor, workingDirectory = null, projectBootstrap = bootstrap)
+    restartSession(bootServer)
+    client.initialize()
+
+    fun render() =
+      client.callTool(
+        "render_preview",
+        buildJsonObject {
+          put("preview", "AppPreview")
+          put("project", project.absolutePath)
+        },
+      )
+
+    val failed = render().firstTextContent()
+    assertThat(failed)
+      .startsWith("render_preview: project not prepared: ./gradlew composePreviewDiscover")
+    assertThat(failed).contains("boom")
+    assertThat(failed).doesNotContain("no preview matches")
+
+    writeDescriptor = true
+    val prepared = render().firstTextContent()
+    assertThat(prepared).doesNotContain("project not prepared")
+    assertThat(calls).hasSize(2)
+    assertThat(calls.last())
+      .containsAtLeast(
+        "--init-script",
+        initScript.absolutePath,
+        "composePreviewDiscover",
+        "composePreviewDaemonStart",
+      )
+    val id = supervisor.listProjects().single().workspaceId
+    assertThat(factory.daemons.keys).contains(id to ":app")
+
+    // Prepared now: no further Gradle run.
+    render()
+    assertThat(calls).hasSize(2)
+    bootServer.shutdown()
+  }
+
+  @Test
+  fun `a cold render past the call budget returns pending and the retry attaches to the bootstrap`() {
+    val project = tmp.newFolder("slow-bootstrap")
+    File(project, "settings.gradle.kts").writeText("include(\":app\")")
+    File(project, "gradlew").writeText("#!/bin/sh\n")
+    val release = java.util.concurrent.CountDownLatch(1)
+    val runs = java.util.concurrent.atomic.AtomicInteger()
+    val runner = GradleTaskRunner { root, _, _, _ ->
+      runs.incrementAndGet()
+      release.await(30, TimeUnit.SECONDS)
+      val dir = File(root, "app/build/compose-previews").apply { mkdirs() }
+      File(dir, "daemon-launch.json")
+        .writeText(
+          """{"schemaVersion":2,"modulePath":":app","variant":"desktop","enabled":true,""" +
+            """"mainClass":"x","classpath":[],"jvmArgs":[],"systemProperties":{},""" +
+            """"workingDirectory":"${dir.parentFile.parent}","manifestPath":"manifest.json"}"""
+        )
+      GradleTaskRunner.Result(0, "BUILD SUCCESSFUL")
+    }
+    val budgetServer =
+      DaemonMcpServer(
+        supervisor,
+        workingDirectory = null,
+        projectBootstrap = ProjectBootstrap(runner = runner),
+        callBudgetMs = 500,
+      )
+    restartSession(budgetServer)
+    client.initialize()
+    val args = buildJsonObject {
+      put("preview", "AppPreview")
+      put("project", project.absolutePath)
+    }
+
+    val first = client.callTool("render_preview", args)
+    assertThat(first.isError()).isFalse()
+    val pending = json.parseToJsonElement(first.firstTextContent()).jsonObject
+    assertThat(pending["pending"]?.jsonPrimitive?.contentOrNull).isEqualTo("true")
+    assertThat(pending["phase"]?.jsonPrimitive?.contentOrNull).isEqualTo("starting")
+    assertThat(pending["retryAfterMs"]?.jsonPrimitive?.contentOrNull).isNotNull()
+    assertThat(pending["message"]?.jsonPrimitive?.contentOrNull).contains("render_preview again")
+
+    // Still bootstrapping: the retry waits on the same run rather than starting another.
+    val second = client.callTool("render_preview", args)
+    assertThat(second.firstTextContent()).contains("\"pending\":true")
+    assertThat(runs.get()).isEqualTo(1)
+
+    release.countDown()
+    val done = client.callTool("render_preview", args, timeoutMs = 10_000)
+    assertThat(done.firstTextContent()).doesNotContain("\"pending\"")
+    assertThat(runs.get()).isEqualTo(1)
+    assertThat(factory.daemons.keys)
+      .contains(supervisor.listProjects().single().workspaceId to ":app")
+    budgetServer.shutdown()
+  }
+
+  @Test
+  fun `a finished budgeted call nobody collected is swept and a closed session drops its calls`() {
+    val project = tmp.newFolder("uncollected")
+    File(project, "settings.gradle.kts").writeText("include(\":app\")")
+    File(project, "gradlew").writeText("#!/bin/sh\n")
+    val release = java.util.concurrent.CountDownLatch(1)
+    val runner = GradleTaskRunner { _, _, _, _ ->
+      release.await(30, TimeUnit.SECONDS)
+      GradleTaskRunner.Result(1, "* What went wrong:\nboom")
+    }
+    val budgetServer =
+      DaemonMcpServer(
+        supervisor,
+        workingDirectory = null,
+        projectBootstrap = ProjectBootstrap(runner = runner),
+        callBudgetMs = 300,
+        uncollectedCallResultTtlMs = 1,
+      )
+    restartSession(budgetServer)
+    client.initialize()
+    fun render(preview: String) =
+      client.callTool(
+        "render_preview",
+        buildJsonObject {
+          put("preview", preview)
+          put("project", project.absolutePath)
+        },
+      )
+
+    // #1210: the pending call finishes, but its retry never comes.
+    assertThat(render("Abandoned").firstTextContent()).contains("\"pending\":true")
+    assertThat(budgetServer.inFlightCallCount()).isEqualTo(1)
+    release.countDown()
+    val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10)
+    // Any later budgeted call sweeps it once it has finished and outlived its TTL.
+    while (budgetServer.inFlightCallCount() > 0 && System.nanoTime() < deadline) {
+      render("Other")
+    }
+    assertThat(budgetServer.inFlightCallCount()).isEqualTo(0)
+
+    // A call still pending when its session closes is dropped with the session.
+    val stuck = java.util.concurrent.CountDownLatch(1)
+    val stuckServer =
+      DaemonMcpServer(
+        supervisor,
+        workingDirectory = null,
+        projectBootstrap =
+          ProjectBootstrap(
+            runner =
+              GradleTaskRunner { _, _, _, _ ->
+                stuck.await(30, TimeUnit.SECONDS)
+                GradleTaskRunner.Result(1, "boom")
+              }
+          ),
+        callBudgetMs = 300,
+      )
+    restartSession(stuckServer)
+    client.initialize()
+    assertThat(render("Abandoned").firstTextContent()).contains("\"pending\":true")
+    assertThat(stuckServer.inFlightCallCount()).isEqualTo(1)
+    restartSession(stuckServer)
+    assertThat(stuckServer.inFlightCallCount()).isEqualTo(0)
+    stuck.countDown()
+    budgetServer.shutdown()
+    stuckServer.shutdown()
+  }
+
+  /** Writes the `:app` daemon launch descriptor [ProjectBootstrap] looks for under [root]. */
+  private fun writeAppDescriptor(root: File) {
+    val dir = File(root, "app/build/compose-previews").apply { mkdirs() }
+    File(dir, "daemon-launch.json")
+      .writeText(
+        """{"schemaVersion":2,"modulePath":":app","variant":"desktop","enabled":true,""" +
+          """"mainClass":"x","classpath":[],"jvmArgs":[],"systemProperties":{},""" +
+          """"workingDirectory":"${dir.parentFile.parent}","manifestPath":"manifest.json"}"""
+      )
+  }
+
+  private fun awaitCondition(what: String, timeoutMs: Long = 10_000, condition: () -> Boolean) {
+    val deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMs)
+    while (!condition()) {
+      if (System.nanoTime() > deadline) error("timed out waiting for $what")
+      Thread.sleep(20)
+    }
+  }
+
+  @Test
+  fun `register_project returns at once and warms the project in the background`() {
+    val project = tmp.newFolder("warm-on-register")
+    File(project, "settings.gradle.kts").writeText("include(\":app\")")
+    File(project, "gradlew").writeText("#!/bin/sh\n")
+    val release = java.util.concurrent.CountDownLatch(1)
+    val runs = java.util.concurrent.atomic.AtomicInteger()
+    val runner = GradleTaskRunner { root, _, _, _ ->
+      runs.incrementAndGet()
+      release.await(30, TimeUnit.SECONDS)
+      writeAppDescriptor(root)
+      GradleTaskRunner.Result(0, "BUILD SUCCESSFUL")
+    }
+    val warmServer =
+      DaemonMcpServer(
+        supervisor,
+        workingDirectory = null,
+        projectBootstrap = ProjectBootstrap(runner = runner),
+      )
+    restartSession(warmServer)
+    client.initialize()
+
+    val started = System.nanoTime()
+    val result =
+      client.callTool("register_project", buildJsonObject { put("path", project.absolutePath) })
+    val elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started)
+    // The Gradle bootstrap is still blocked on the latch: registration did not wait for it.
+    assertThat(release.count).isEqualTo(1)
+    assertThat(elapsedMs).isLessThan(5_000)
+    val payload = json.parseToJsonElement(result.firstTextContent()).jsonObject
+    assertThat(payload["warming"]?.jsonPrimitive?.contentOrNull).isEqualTo("true")
+    val id = WorkspaceId(payload["workspaceId"]!!.jsonPrimitive.content)
+    awaitCondition("the warm-up's Gradle bootstrap") { runs.get() == 1 }
+
+    release.countDown()
+    awaitCondition("the warm-up's daemon spawn") { factory.daemons.containsKey(id to ":app") }
+    assertThat(runs.get()).isEqualTo(1)
+    assertThat(factory.spawnHistory).hasSize(1)
+    warmServer.shutdown()
+  }
+
+  @Test
+  fun `only the project named in register_project is warmed, never auto-registered siblings`() {
+    val repo = samplesRepo()
+    listOf("ComposeStarter", "ComposeAdvanced").forEach {
+      File(repo, "$it/gradlew").writeText("#!/bin/sh\n")
+    }
+    val preparedRoots = java.util.concurrent.CopyOnWriteArrayList<String>()
+    val runner = GradleTaskRunner { root, _, _, _ ->
+      preparedRoots += root.canonicalPath
+      writeAppDescriptor(root)
+      GradleTaskRunner.Result(0, "BUILD SUCCESSFUL")
+    }
+    val warmServer =
+      DaemonMcpServer(
+        supervisor,
+        workingDirectory = null,
+        projectBootstrap = ProjectBootstrap(runner = runner),
+      )
+    restartSession(warmServer)
+    client.initialize()
+
+    // A project argument naming the folder above both builds registers them as siblings.
+    client.callTool(
+      "find_previews_for_file",
+      buildJsonObject {
+        put("path", File(repo, "ComposeStarter/app/src/Missing.kt").absolutePath)
+        put("project", repo.absolutePath)
+      },
+    )
+    assertThat(supervisor.listProjects()).hasSize(2)
+    Thread.sleep(300)
+    assertThat(preparedRoots).isEmpty()
+    assertThat(factory.spawnHistory).isEmpty()
+
+    val starter = File(repo, "ComposeStarter")
+    client.callTool("register_project", buildJsonObject { put("path", starter.absolutePath) })
+    awaitCondition("the warm-up's daemon spawn") { factory.spawnHistory.size == 1 }
+    Thread.sleep(300)
+    assertThat(preparedRoots).containsExactly(starter.canonicalPath)
+    assertThat(factory.daemons.keys.map { it.first })
+      .containsExactly(
+        supervisor.listProjects().single { it.path == starter.canonicalFile }.workspaceId
+      )
+    warmServer.shutdown()
+  }
+
+  @Test
+  fun `a render right after register_project attaches to the warm-up's daemon`() {
+    client.initialize()
+    val project = tmp.newFolder("WarmStarter")
+    writeAppDescriptor(project)
+    val png = tmp.newFile("warm.png")
+    writeSolidPng(png, 0xff00ff00.toInt())
+    // A slow spawn, so the render arrives while the warm-up is still inside it.
+    factory.daemonConfigurer = { daemon ->
+      Thread.sleep(500)
+      daemon.autoRenderPngPath = { png.absolutePath }
+    }
+    val workspaceId = registerWorkspace(project, "WarmStarter")
+    val uri = PreviewUri(workspaceId, ":app", "com.example.StarterKt.StarterPreview").toUri()
+
+    val result =
+      client.callTool(
+        "render_preview",
+        buildJsonObject {
+          put("uri", uri)
+          put("inline", false)
+        },
+        timeoutMs = 10_000,
+      )
+
+    assertThat(result.isError()).isFalse()
+    assertThat(factory.spawnHistory).hasSize(1)
+    assertThat(factory.daemons.keys).containsExactly(workspaceId to ":app")
+  }
+
+  @Test
+  fun `a slow render past the call budget returns pending and the retry collects the same render`() {
+    supervisor.shutdown()
+    factory = FakeDaemonClientFactory()
+    supervisor =
+      DaemonSupervisor(descriptorProvider = FakeDescriptorProvider(), clientFactory = factory)
+    val budgetServer = DaemonMcpServer(supervisor, workingDirectory = null, callBudgetMs = 500)
+    restartSession(budgetServer)
+    client.initialize()
+    val projectDir = tmp.newFolder("slow-render")
+    tmp.newFolder("slow-render", "module")
+    val workspaceId = registerWorkspace(projectDir, "demo")
+    val daemon = warmDaemonFor(workspaceId, ":module")
+    val previewId = "com.example.Slow"
+    daemon.emitDiscovery(previewId)
+    client.expectNotification("notifications/resources/list_changed", 2_000)
+    val args = buildJsonObject {
+      put("uri", PreviewUri(workspaceId, ":module", previewId).toUri())
+      put("observe", "hash")
+    }
+
+    // No autoRenderPngPath: the daemon accepts renderNow and never finishes on its own.
+    val first = client.callTool("render_preview", args)
+    assertThat(first.isError()).isFalse()
+    val pending = json.parseToJsonElement(first.firstTextContent()).jsonObject
+    assertThat(pending["pending"]?.jsonPrimitive?.contentOrNull).isEqualTo("true")
+    assertThat(pending["phase"]?.jsonPrimitive?.contentOrNull).isEqualTo("rendering")
+    assertThat(daemon.renderRequests.poll(2, TimeUnit.SECONDS)).containsExactly(previewId)
+
+    val second = client.callTool("render_preview", args)
+    assertThat(second.firstTextContent()).contains("\"pending\":true")
+    assertThat(daemon.renderRequests.poll(200, TimeUnit.MILLISECONDS)).isNull()
+
+    val png = tmp.newFile("slow-render.png")
+    writeSolidPng(png, 0xFFFF0000.toInt())
+    daemon.emitRenderFinished(previewId, png.absolutePath)
+    val done = client.callTool("render_preview", args, timeoutMs = 10_000)
+    assertThat(done.isError()).isFalse()
+    val parsed = json.parseToJsonElement(done.firstTextContent()).jsonObject
+    assertThat(parsed["observe"]?.jsonPrimitive?.contentOrNull).isEqualTo("hash")
+    assertThat(daemon.renderRequests.poll(200, TimeUnit.MILLISECONDS)).isNull()
+    budgetServer.shutdown()
+  }
+
+  @Test
+  fun `render_preview resolves a preview name and lists the other variant matches`() {
+    client.initialize()
+    val workspaceId = registerWorkspace(tmp.newFolder("named"), "named")
+    val daemon = warmDaemonFor(workspaceId, ":app")
+    val small = "com.example.MainActivityKt.ListScreenPreview_Devices - Small Round"
+    val large = "com.example.MainActivityKt.ListScreenPreview_Devices - Large Round"
+    listOf(small, large).forEach {
+      daemon.emitDiscovery(it, functionName = "ListScreenPreview")
+      client.expectNotification("notifications/resources/list_changed", 2_000)
+    }
+    daemon.emitDiscovery("com.example.MainActivityKt.DetailPreview")
+    client.expectNotification("notifications/resources/list_changed", 2_000)
+    val png = tmp.newFile("named.png")
+    writeSolidPng(png, 0xff00ff00.toInt())
+    daemon.autoRenderPngPath = { png.absolutePath }
+
+    fun render(name: String) =
+      client.callTool(
+        "render_preview",
+        buildJsonObject {
+          put("preview", name)
+          put("inline", false)
+        },
+        timeoutMs = 10_000,
+      )
+
+    val first = json.parseToJsonElement(render("ListScreenPreview").firstTextContent()).jsonObject
+    assertThat(first["uri"]!!.jsonPrimitive.content)
+      .isEqualTo(PreviewUri(workspaceId, ":app", large).toUri())
+    assertThat(first["otherMatches"]!!.jsonArray.map { it.jsonPrimitive.content })
+      .containsExactly(PreviewUri(workspaceId, ":app", small).toUri())
+    assertThat(first["cardPath"]).isNull()
+
+    val bySuffix =
+      json.parseToJsonElement(render("MainActivityKt.DetailPreview").firstTextContent()).jsonObject
+    assertThat(bySuffix["uri"]!!.jsonPrimitive.content)
+      .isEqualTo(
+        PreviewUri(workspaceId, ":app", "com.example.MainActivityKt.DetailPreview").toUri()
+      )
+    assertThat(bySuffix["otherMatches"]).isNull()
+
+    val missing = render("ListScreenPrevew")
+    assertThat(missing.isError()).isTrue()
+    assertThat(missing.firstTextContent())
+      .isEqualTo(
+        "render_preview: no preview matches 'ListScreenPrevew'. Closest: ListScreenPreview, " +
+          "DetailPreview (3 previews in 1 module). Call list_previews to see all."
+      )
+    assertThat(
+        missing.raw["structuredContent"]!!.jsonObject["suggestions"]!!.jsonArray.map {
+          it.jsonPrimitive.content
+        }
+      )
+      .containsExactly("ListScreenPreview", "DetailPreview")
+      .inOrder()
+  }
+
+  @Test
+  fun `render_preview writes an Antigravity card by default and into the conversation directory`() {
+    val home = tmp.newFolder("home")
+    val brain = File(home, ".gemini/antigravity/brain/conv-1").apply { mkdirs() }
+    val cardServer =
+      DaemonMcpServer(
+        supervisor,
+        workingDirectory = null,
+        environment = mapOf("ANTIGRAVITY_CONVERSATION_ID" to "conv-1"),
+        homeDirectory = home,
+      )
+    restartSession(cardServer)
+    client.initialize(clientName = "antigravity-client")
+    val workspaceId = registerWorkspace(tmp.newFolder("card"), "card")
+    val daemon = warmDaemonFor(workspaceId, ":app")
+    daemon.emitDiscovery("com.example.CardPreview")
+    client.expectNotification("notifications/resources/list_changed", 2_000)
+    val png = tmp.newFile("card.png")
+    writeSolidPng(png, 0xff0000ff.toInt())
+    daemon.autoRenderPngPath = { png.absolutePath }
+
+    // No inline argument: Antigravity gets the file result, and with it the card.
+    val result =
+      json
+        .parseToJsonElement(
+          client
+            .callTool(
+              "render_preview",
+              buildJsonObject { put("preview", "CardPreview") },
+              timeoutMs = 10_000,
+            )
+            .firstTextContent()
+        )
+        .jsonObject
+    val cardFile = File(result["cardPath"]!!.jsonPrimitive.content)
+    assertThat(cardFile.parentFile.canonicalPath).isEqualTo(brain.canonicalPath)
+    assertThat(result["embed"]!!.jsonPrimitive.content)
+      .isEqualTo("<agent-embed src=\"${cardFile.toPath().toUri()}\"></agent-embed>")
+    val html = cardFile.readText()
+    val marker = "<script type=\"application/json\" id=\"compose-preview-result\">"
+    assertThat(html)
+      .startsWith(javaClass.classLoader.getResource("compose-preview-viewer.html")!!.readText())
+    val block = html.substringAfterLast(marker).substringBefore("</script>")
+    assertThat(block).doesNotContain("<")
+    val envelope = json.parseToJsonElement(block).jsonObject
+    assertThat(envelope["version"]!!.jsonPrimitive.content).isEqualTo("1")
+    assertThat(envelope["arguments"]!!.jsonObject["uri"]!!.jsonPrimitive.content)
+      .isEqualTo(result["uri"]!!.jsonPrimitive.content)
+    val content = envelope["result"]!!.jsonObject["content"]!!.jsonArray
+    assertThat(Base64.getDecoder().decode(content[0].jsonObject["data"]!!.jsonPrimitive.content))
+      .isEqualTo(png.readBytes())
+    val summary = json.parseToJsonElement(content[1].jsonObject["text"]!!.jsonPrimitive.content)
+    assertThat(summary.jsonObject.keys).containsExactly("uri", "widthPx", "heightPx", "sha256")
+
+    // An explicit inline request keeps the inline observation and writes no card.
+    val inline =
+      client.callTool(
+        "render_preview",
+        buildJsonObject {
+          put("preview", "CardPreview")
+          put("inline", true)
+          put("observe", "hash")
+        },
+        timeoutMs = 10_000,
+      )
+    assertThat(inline.firstTextContent()).doesNotContain("cardPath")
+    cardServer.shutdown()
+  }
+
+  @Test
+  fun `render_preview card is refused over the size cap and falls back next to the png`() {
+    client.initialize()
+    val workspaceId = registerWorkspace(tmp.newFolder("big"), "big")
+    val daemon = warmDaemonFor(workspaceId, ":app")
+    daemon.emitDiscovery("com.example.BigPreview")
+    client.expectNotification("notifications/resources/list_changed", 2_000)
+    val small = tmp.newFile("small.png")
+    writeSolidPng(small, 0xffff0000.toInt())
+    val big = tmp.newFile("big.png")
+    val noise = BufferedImage(400, 400, BufferedImage.TYPE_INT_ARGB)
+    val random = java.util.Random(1)
+    for (y in 0 until 400) for (x in 0 until 400) noise.setRGB(x, y, random.nextInt())
+    ImageIO.write(noise, "png", big)
+    var path = small.absolutePath
+    daemon.autoRenderPngPath = { path }
+
+    fun render() =
+      json
+        .parseToJsonElement(
+          client
+            .callTool(
+              "render_preview",
+              buildJsonObject {
+                put("preview", "BigPreview")
+                put("card", true)
+              },
+              timeoutMs = 10_000,
+            )
+            .firstTextContent()
+        )
+        .jsonObject
+
+    val fits = render()
+    assertThat(File(fits["cardPath"]!!.jsonPrimitive.content).parentFile.canonicalPath)
+      .isEqualTo(File(fits["pngPath"]!!.jsonPrimitive.content).parentFile.canonicalPath)
+
+    path = big.absolutePath
+    val tooBig = render()
+    assertThat(tooBig["cardPath"]).isNull()
+    assertThat(tooBig["cardSkipped"]!!.jsonPrimitive.content).contains("500,000")
+  }
+
+  private fun capability(
+    kind: String,
+    transport: ee.schimke.composeai.daemon.protocol.DataProductTransport =
+      ee.schimke.composeai.daemon.protocol.DataProductTransport.INLINE,
+  ) =
+    ee.schimke.composeai.daemon.protocol.DataProductCapability(
+      kind = kind,
+      schemaVersion = 1,
+      transport = transport,
+      attachable = false,
+      fetchable = true,
+      requiresRerender = false,
+    )
+
+  private fun finding(level: String, type: String, node: String) = buildJsonObject {
+    put("level", level)
+    put("type", type)
+    put("message", "$type on $node")
+    put("viewDescription", node)
+    put("boundsInScreen", "0,0,20,10")
+  }
+
+  /**
+   * Serves `a11y/atf`, `a11y/overlay` (from [overlay]) and `layout/inspector` for every preview.
+   * With [inactive] the daemon advertises none of them until `extensions/enable` turns on `a11y`
+   * and `layout/inspector`, as a real daemon does (PROTOCOL.md § 3a).
+   */
+  private fun serveDetails(overlay: File, inactive: Boolean = false) {
+    factory.daemonConfigurer = { d ->
+      val a11y =
+        listOf(
+          capability("a11y/atf"),
+          capability(
+            "a11y/overlay",
+            ee.schimke.composeai.daemon.protocol.DataProductTransport.PATH,
+          ),
+        )
+      val layout = listOf(capability("layout/inspector"))
+      if (inactive) {
+        d.enableableExtensions = mapOf("a11y" to a11y, "layout/inspector" to layout)
+      } else {
+        d.advertisedDataProducts = a11y + layout
+      }
+      d.dataFetchHandler = { _, kind, _, _ ->
+        when (kind) {
+          "a11y/atf" ->
+            FakeDaemon.DataFetchOutcome.Ok(
+              kind = kind,
+              schemaVersion = 1,
+              payload =
+                buildJsonObject {
+                  putJsonArray("findings") {
+                    add(finding("ERROR", "TouchTargetSizeCheck", "Button"))
+                    add(finding("WARNING", "TextContrastCheck", "Title"))
+                    add(finding("ERROR", "TouchTargetSizeCheck", "Icon"))
+                  }
+                },
+            )
+          "a11y/overlay" -> FakeDaemon.DataFetchOutcome.Ok(kind, 1, path = overlay.absolutePath)
+          "layout/inspector" ->
+            FakeDaemon.DataFetchOutcome.Ok(
+              kind = kind,
+              schemaVersion = 1,
+              payload =
+                buildJsonObject {
+                  putJsonObject("root") {
+                    put("component", "Column")
+                    putJsonObject("bounds") {
+                      put("left", 0)
+                      put("top", 0)
+                      put("right", 2)
+                      put("bottom", 2)
+                    }
+                    putJsonArray("children") {
+                      add(
+                        buildJsonObject {
+                          put("displayName", "Text")
+                          putJsonObject("bounds") {
+                            put("left", 0)
+                            put("top", 0)
+                            put("right", 2)
+                            put("bottom", 1)
+                          }
+                        }
+                      )
+                      add(buildJsonObject { put("component", "Spacer") })
+                    }
+                  }
+                },
+            )
+          else -> FakeDaemon.DataFetchOutcome.Unknown
+        }
+      }
+    }
+  }
+
+  private fun cardEnvelope(result: JsonObject): JsonObject {
+    val html = File(result["cardPath"]!!.jsonPrimitive.content).readText()
+    val block =
+      html
+        .substringAfterLast("<script type=\"application/json\" id=\"compose-preview-result\">")
+        .substringBefore("</script>")
+    return json.parseToJsonElement(block).jsonObject
+  }
+
+  @Test
+  fun `render_preview details embed a11y and layout in the card and one summary line each`() {
+    client.initialize()
+    val workspaceId = registerWorkspace(tmp.newFolder("details"), "details")
+    val overlay = tmp.newFile("overlay.png")
+    writeSolidPng(overlay, 0xff00ff00.toInt())
+    serveDetails(overlay)
+    val daemon = warmDaemonFor(workspaceId, ":app")
+    daemon.emitDiscovery("com.example.DetailPreview")
+    client.expectNotification("notifications/resources/list_changed", 2_000)
+    val png = tmp.newFile("detail.png")
+    writeSolidPng(png, 0xff0000ff.toInt())
+    daemon.autoRenderPngPath = { png.absolutePath }
+
+    val call =
+      client.callTool(
+        "render_preview",
+        buildJsonObject {
+          put("preview", "DetailPreview")
+          put("card", true)
+          putJsonArray("details") {
+            add("a11y")
+            add("layout")
+          }
+        },
+        timeoutMs = 10_000,
+      )
+    val texts = call.textContents()
+    // The model sees one line per detail, not the findings or the boxes.
+    assertThat(texts[1].lines())
+      .containsExactly(
+        "a11y: 2 errors, 1 warning (TouchTargetSize ×2, TextContrast ×1)",
+        "layout: 3 nodes (layout/inspector)",
+      )
+      .inOrder()
+    assertThat(texts.joinToString()).doesNotContain("Icon")
+
+    val result = json.parseToJsonElement(texts[0]).jsonObject
+    assertThat(result["cardDetailsDropped"]).isNull()
+    val content = cardEnvelope(result)["result"]!!.jsonObject["content"]!!.jsonArray
+    assertThat(content).hasSize(4)
+    // The render stays the first image and the summary the first text.
+    assertThat(Base64.getDecoder().decode(content[0].jsonObject["data"]!!.jsonPrimitive.content))
+      .isEqualTo(png.readBytes())
+    val overlayBlock = content[2].jsonObject
+    assertThat(overlayBlock["_meta"]!!.jsonObject["composePreview/detail"]!!.jsonPrimitive.content)
+      .isEqualTo("a11y/overlay")
+    assertThat(Base64.getDecoder().decode(overlayBlock["data"]!!.jsonPrimitive.content))
+      .isEqualTo(overlay.readBytes())
+    val detailsBlock = content[3].jsonObject
+    assertThat(detailsBlock["_meta"]!!.jsonObject["composePreview/detail"]!!.jsonPrimitive.content)
+      .isEqualTo("details")
+    val details = json.parseToJsonElement(detailsBlock["text"]!!.jsonPrimitive.content).jsonObject
+    val findings = details["a11y"]!!.jsonObject["findings"]!!.jsonArray
+    assertThat(findings.map { it.jsonObject["level"]!!.jsonPrimitive.content })
+      .containsExactly("ERROR", "ERROR", "WARNING")
+      .inOrder()
+    assertThat(findings[0].jsonObject["rule"]!!.jsonPrimitive.content).isEqualTo("TouchTargetSize")
+    assertThat(findings[0].jsonObject["bounds"]!!.jsonArray.map { it.jsonPrimitive.content })
+      .containsExactly("0", "0", "20", "10")
+      .inOrder()
+    val layout = details["layout"]!!.jsonObject
+    assertThat(layout["nodes"]!!.jsonPrimitive.content).isEqualTo("3")
+    // The Spacer has no bounds, so only two boxes are drawn.
+    assertThat(layout["boxes"]!!.jsonArray.map { it.jsonObject["label"]!!.jsonPrimitive.content })
+      .containsExactly("Column", "Text")
+      .inOrder()
+
+    // Without details the call costs nothing extra: no fetch, no summary line, no detail blocks.
+    val plain =
+      client.callTool(
+        "render_preview",
+        buildJsonObject {
+          put("preview", "DetailPreview")
+          put("card", true)
+        },
+        timeoutMs = 10_000,
+      )
+    assertThat(plain.textContents()).hasSize(1)
+    val plainContent =
+      cardEnvelope(json.parseToJsonElement(plain.firstTextContent()).jsonObject)["result"]!!
+        .jsonObject["content"]!!
+        .jsonArray
+    assertThat(plainContent).hasSize(2)
+  }
+
+  @Test
+  fun `render_preview details enable the extensions a daemon started without`() {
+    client.initialize()
+    val workspaceId = registerWorkspace(tmp.newFolder("details-enable"), "enable")
+    val overlay = tmp.newFile("enable-overlay.png")
+    writeSolidPng(overlay, 0xff00ff00.toInt())
+    serveDetails(overlay, inactive = true)
+    val daemon = warmDaemonFor(workspaceId, ":app")
+    daemon.emitDiscovery("com.example.EnablePreview")
+    client.expectNotification("notifications/resources/list_changed", 2_000)
+    val png = tmp.newFile("enable.png")
+    writeSolidPng(png, 0xff0000ff.toInt())
+    daemon.autoRenderPngPath = { png.absolutePath }
+
+    val call =
+      client.callTool(
+        "render_preview",
+        buildJsonObject {
+          put("preview", "EnablePreview")
+          put("inline", true)
+          put("observe", "hash")
+          putJsonArray("details") {
+            add("a11y")
+            add("layout")
+          }
+        },
+        timeoutMs = 10_000,
+      )
+    assertThat(call.textContents().last().lines())
+      .containsExactly(
+        "a11y: 2 errors, 1 warning (TouchTargetSize ×2, TextContrast ×1)",
+        "layout: 3 nodes (layout/inspector)",
+      )
+      .inOrder()
+    assertThat(daemon.enabledExtensionRequests.poll())
+      .containsExactly("a11y", "layout/inspector", "compose/semantics")
+      .inOrder()
+
+    // Once enabled, the cached capabilities hold the kinds, so a second call enables nothing.
+    client.callTool(
+      "render_preview",
+      buildJsonObject {
+        put("preview", "EnablePreview")
+        put("inline", true)
+        put("observe", "hash")
+        putJsonArray("details") { add("a11y") }
+      },
+      timeoutMs = 10_000,
+    )
+    assertThat(daemon.enabledExtensionRequests).isEmpty()
+  }
+
+  @Test
+  fun `render_preview details name unavailable products and are dropped first over the card cap`() {
+    client.initialize()
+    val workspaceId = registerWorkspace(tmp.newFolder("details-cap"), "cap")
+    // A noisy overlay far over the cap on its own; the render itself is tiny.
+    val overlay = tmp.newFile("big-overlay.png")
+    val noise = BufferedImage(400, 400, BufferedImage.TYPE_INT_ARGB)
+    val random = java.util.Random(7)
+    for (y in 0 until 400) for (x in 0 until 400) noise.setRGB(x, y, random.nextInt())
+    ImageIO.write(noise, "png", overlay)
+    serveDetails(overlay)
+    val daemon = warmDaemonFor(workspaceId, ":app")
+    daemon.emitDiscovery("com.example.CapPreview")
+    client.expectNotification("notifications/resources/list_changed", 2_000)
+    val png = tmp.newFile("cap.png")
+    writeSolidPng(png, 0xff0000ff.toInt())
+    daemon.autoRenderPngPath = { png.absolutePath }
+
+    val call =
+      client.callTool(
+        "render_preview",
+        buildJsonObject {
+          put("preview", "CapPreview")
+          put("card", true)
+          putJsonArray("details") { add("a11y") }
+        },
+        timeoutMs = 10_000,
+      )
+    val result = json.parseToJsonElement(call.firstTextContent()).jsonObject
+    assertThat(result["cardDetailsDropped"]!!.jsonPrimitive.content).contains("500,000")
+    val content = cardEnvelope(result)["result"]!!.jsonObject["content"]!!.jsonArray
+    assertThat(content).hasSize(2)
+    assertThat(call.textContents()[1]).startsWith("a11y: 2 errors")
+
+    // A module whose daemon produces none of the kinds says so, one line per detail.
+    factory.daemonConfigurer = {}
+    val bare = warmDaemonFor(workspaceId, ":bare")
+    bare.emitDiscovery("com.example.BarePreview")
+    client.expectNotification("notifications/resources/list_changed", 2_000)
+    bare.autoRenderPngPath = { png.absolutePath }
+    val missing =
+      client.callTool(
+        "render_preview",
+        buildJsonObject {
+          put("preview", "BarePreview")
+          put("inline", true)
+          put("observe", "hash")
+          putJsonArray("details") {
+            add("layout")
+            add("a11y")
+          }
+        },
+        timeoutMs = 10_000,
+      )
+    assertThat(missing.textContents().last().lines())
+      .containsExactly(
+        "a11y: unavailable (this daemon does not produce a11y/atf)",
+        "layout: unavailable (this daemon produces neither layout/inspector nor compose/semantics)",
+      )
+      .inOrder()
+
+    val invalid =
+      client.callTool(
+        "render_preview",
+        buildJsonObject {
+          put("preview", "BarePreview")
+          putJsonArray("details") { add("pixels") }
+        },
+      )
+    assertThat(invalid.firstTextContent()).contains("'details' entries must be")
+  }
+
+  @Test
+  fun `render_preview inline false tracks changes independently per override set`() {
+    client.initialize()
+    val projectDir = tmp.newFolder("override-workspace")
+    tmp.newFolder("override-workspace", "module")
+    val workspaceId = registerWorkspace(projectDir, "override-demo")
+    val daemon = warmDaemonFor(workspaceId, ":module")
+    val previewId = "com.example.OverridePreview"
+    daemon.emitDiscovery(previewId)
+    client.expectNotification("notifications/resources/list_changed", 2_000)
+
+    val header =
+      byteArrayOf(
+        0x89.toByte(),
+        0x50,
+        0x4e,
+        0x47,
+        0x0d,
+        0x0a,
+        0x1a,
+        0x0a,
+        0x00,
+        0x00,
+        0x00,
+        0x0d,
+        0x49,
+        0x48,
+        0x44,
+        0x52,
+        0x00,
+        0x00,
+        0x00,
+        0x28,
+        0x00,
+        0x00,
+        0x00,
+        0x1e,
+      )
+    val frenchBytes = header + byteArrayOf(1)
+    val defaultBytes = header + byteArrayOf(2)
+    val sharedPng = tmp.newFile("override-shared.png")
+    daemon.autoRenderPngPath = { id ->
+      if (id != previewId) {
+        null
+      } else {
+        val locale = daemon.renderOverrides.lastOrNull()?.localeTag
+        Files.write(sharedPng.toPath(), if (locale == "fr") frenchBytes else defaultBytes)
+        sharedPng.absolutePath
+      }
+    }
+    val uri = PreviewUri(workspaceId, ":module", previewId).toUri()
+
+    fun render(locale: String?): JsonObject =
+      json
+        .parseToJsonElement(
+          client
+            .callTool(
+              "render_preview",
+              buildJsonObject {
+                put("uri", uri)
+                put("inline", false)
+                if (locale != null) putJsonObject("overrides") { put("localeTag", locale) }
+              },
+              timeoutMs = 10_000,
+            )
+            .firstTextContent()
+        )
+        .jsonObject
+
+    assertThat(render("fr")["changed"]?.jsonPrimitive?.contentOrNull).isEqualTo("true")
+    assertThat(render(null)["changed"]?.jsonPrimitive?.contentOrNull).isEqualTo("true")
+    assertThat(render("fr")["changed"]?.jsonPrimitive?.contentOrNull).isEqualTo("false")
+  }
+
+  @Test
+  fun `find_previews_for_file resolves workspace relative sources and returns no match as empty`() {
+    client.initialize()
+    val projectDir = tmp.newFolder("workspace")
+    val moduleDir = tmp.newFolder("workspace", "module")
+    // Deliberately collide with a real process-working-directory path. Relative discovery paths
+    // belong to the daemon's module, never to the MCP process working directory.
+    val sourcePath = "build.gradle.kts"
+    assertThat(File(sourcePath).isFile).isTrue()
+    val previewFile = moduleDir.resolve(sourcePath)
+    previewFile.writeText("@Preview fun Red() {}\n@Preview fun Blue() {}")
+    val unrelatedFile = moduleDir.resolve("src/main/kotlin/com/example/Other.kt")
+    unrelatedFile.parentFile.mkdirs()
+    unrelatedFile.writeText("fun Other() = Unit")
+    val workspaceId = registerWorkspace(projectDir, "demo")
+    val daemon = warmDaemonFor(workspaceId, ":module")
+    daemon.emitDiscovery(
+      "com.example.Red",
+      sourceFile = sourcePath,
+      bodyLine = 10,
+    )
+    daemon.emitDiscovery(
+      "com.example.Blue",
+      sourceFile = sourcePath,
+      bodyLine = 24,
+    )
+    client.expectNotification("notifications/resources/list_changed", 2_000)
+    client.expectNotification("notifications/resources/list_changed", 2_000)
+
+    val listed =
+      json.decodeFromJsonElement(
+        io.modelcontextprotocol.kotlin.sdk.types.ListResourcesResult.serializer(),
+        client.request("resources/list"),
+      )
+    assertThat(
+        listed.resources
+          .first { it.uri.contains("com.example.Red") }
+          .meta
+          ?.get("sourceFile")
+          ?.jsonPrimitive
+          ?.contentOrNull
+      )
+      .isEqualTo(previewFile.canonicalPath)
+    assertThat(
+        listed.resources
+          .first { it.uri.contains("com.example.Blue") }
+          .meta
+          ?.get("sourceLine")
+          ?.jsonPrimitive
+          ?.contentOrNull
+      )
+      .isEqualTo("24")
+
+    val found =
+      json
+        .parseToJsonElement(
+          client
+            .callTool(
+              "find_previews_for_file",
+              buildJsonObject {
+                put("workspaceId", workspaceId.value)
+                put("path", "module/$sourcePath")
+              },
+            )
+            .firstTextContent()
+        )
+        .jsonObject["previews"]!!
+        .jsonArray
+        .map { it.jsonObject }
+    assertThat(found.map { it["fqn"]?.jsonPrimitive?.contentOrNull })
+      .containsExactly("com.example.Blue", "com.example.Red")
+    assertThat(
+        found
+          .map { it["uri"]?.jsonPrimitive?.contentOrNull }
+          .all { it!!.startsWith("compose-preview://${workspaceId.value}/") }
+      )
+      .isTrue()
+    assertThat(found.map { it["bodyLine"]?.jsonPrimitive?.contentOrNull })
+      .containsExactly("24", "10")
+
+    val foundFromAbsolutePath =
+      json
+        .parseToJsonElement(
+          client
+            .callTool(
+              "find_previews_for_file",
+              buildJsonObject { put("path", previewFile.absolutePath) },
+            )
+            .firstTextContent()
+        )
+        .jsonObject["previews"]!!
+        .jsonArray
+    assertThat(foundFromAbsolutePath).hasSize(2)
+
+    // Discovery resolves and caches the canonical source once. Resource listing does no per-call
+    // filesystem work, so the descriptor remains stable if the source disappears between lists.
+    assertThat(previewFile.delete()).isTrue()
+    val listedAfterDelete =
+      json.decodeFromJsonElement(
+        io.modelcontextprotocol.kotlin.sdk.types.ListResourcesResult.serializer(),
+        client.request("resources/list"),
+      )
+    assertThat(
+        listedAfterDelete.resources
+          .first { it.uri.contains("com.example.Red") }
+          .meta
+          ?.get("sourceFile")
+          ?.jsonPrimitive
+          ?.contentOrNull
+      )
+      .isEqualTo(previewFile.canonicalPath)
+
+    val missing =
+      json
+        .parseToJsonElement(
+          client
+            .callTool(
+              "find_previews_for_file",
+              buildJsonObject {
+                put("workspaceId", workspaceId.value)
+                put("path", unrelatedFile.absolutePath)
+              },
+            )
+            .firstTextContent()
+        )
+        .jsonObject["previews"]!!
+        .jsonArray
+    assertThat(missing).isEmpty()
+  }
+
+  @Test
+  fun `find_previews_for_file resolves sources from a remapped module project directory`() {
+    val projectDir = tmp.newFolder("remapped-workspace")
+    val moduleDir = tmp.newFolder("remapped-workspace", "shared", "features", "tasks")
+    val sourcePath = "src/main/kotlin/com/example/TasksPreview.kt"
+    val previewFile = moduleDir.resolve(sourcePath)
+    previewFile.parentFile.mkdirs()
+    previewFile.writeText("@Preview fun Tasks() {}")
+
+    val remappedFactory = FakeDaemonClientFactory()
+    val remappedSupervisor =
+      DaemonSupervisor(
+        descriptorProvider =
+          DescriptorProvider { _, modulePath ->
+            DaemonLaunchDescriptor(
+              schemaVersion = 1,
+              modulePath = modulePath,
+              variant = "debug",
+              enabled = true,
+              mainClass = "fake.Main",
+              classpath = emptyList(),
+              jvmArgs = emptyList(),
+              systemProperties = emptyMap(),
+              workingDirectory = moduleDir.absolutePath,
+              manifestPath = "",
+            )
+          },
+        clientFactory = remappedFactory,
+      )
+    val remappedServer = DaemonMcpServer(remappedSupervisor)
+    val (clientToServer, serverFromClient) = pipedPair()
+    val (serverToClient, clientFromServer) = pipedPair()
+    val remappedSession =
+      remappedServer.newSession(input = serverFromClient, output = serverToClient).also {
+        it.start()
+      }
+    val remappedClient = McpTestClient(input = clientFromServer, output = clientToServer)
+
+    try {
+      remappedClient.initialize()
+      val registered =
+        json
+          .parseToJsonElement(
+            remappedClient
+              .callTool(
+                "register_project",
+                buildJsonObject {
+                  put("path", projectDir.absolutePath)
+                  put("rootProjectName", "remapped-demo")
+                },
+              )
+              .firstTextContent()
+          )
+          .jsonObject
+      val workspaceId = WorkspaceId(registered["workspaceId"]!!.jsonPrimitive.content)
+      remappedClient.expectNotification("notifications/resources/list_changed", 2_000)
+      remappedSupervisor.daemonFor(workspaceId, ":featureTasks")
+      val daemon = remappedFactory.daemons.getValue(workspaceId to ":featureTasks")
+      daemon.emitDiscovery(
+        "com.example.TasksPreview.Tasks",
+        sourceFile = sourcePath,
+        bodyLine = 7,
+      )
+      remappedClient.expectNotification("notifications/resources/list_changed", 2_000)
+
+      val listed =
+        json.decodeFromJsonElement(
+          io.modelcontextprotocol.kotlin.sdk.types.ListResourcesResult.serializer(),
+          remappedClient.request("resources/list"),
+        )
+      assertThat(
+          listed.resources
+            .single { it.uri.startsWith("compose-preview://") }
+            .meta
+            ?.get("sourceFile")
+            ?.jsonPrimitive
+            ?.contentOrNull
+        )
+        .isEqualTo(previewFile.canonicalPath)
+
+      val found =
+        json
+          .parseToJsonElement(
+            remappedClient
+              .callTool(
+                "find_previews_for_file",
+                buildJsonObject { put("path", previewFile.absolutePath) },
+              )
+              .firstTextContent()
+          )
+          .jsonObject["previews"]!!
+          .jsonArray
+      assertThat(found).hasSize(1)
+      assertThat(found.single().jsonObject["bodyLine"]?.jsonPrimitive?.contentOrNull).isEqualTo("7")
+    } finally {
+      runCatching { remappedClient.close() }
+      runCatching { remappedSession.close() }
+      runCatching { remappedSupervisor.shutdown() }
+    }
   }
 
   @Test
@@ -1058,6 +3001,97 @@ class DaemonMcpServerTest {
     assertThat(parsed["sha256"]?.jsonPrimitive?.contentOrNull).isNotEmpty()
   }
 
+  /** One registered preview whose render is a solid 2x2 PNG; returns its URI. */
+  private fun solidPreview(name: String): String {
+    val workspaceId = registerWorkspace(tmp.newFolder(name), name)
+    val daemon = warmDaemonFor(workspaceId, ":module")
+    val previewId = "com.example.$name"
+    daemon.emitDiscovery(previewId)
+    client.expectNotification("notifications/resources/list_changed", 2_000)
+    val png = tmp.newFile("$name.png")
+    writeSolidPng(png, 0xff00ff00.toInt())
+    daemon.autoRenderPngPath = { png.absolutePath }
+    return PreviewUri(workspaceId, ":module", previewId).toUri()
+  }
+
+  private fun McpToolResult.contentTypes(): List<String> =
+    raw["content"]!!.jsonArray.map { it.jsonObject["type"]!!.jsonPrimitive.content }
+
+  @Test
+  fun `render_preview defaults to an image for a client that declares MCP Apps`() {
+    client.initialize(
+      capabilities =
+        buildJsonObject {
+          putJsonObject("extensions") {
+            putJsonObject("io.modelcontextprotocol/ui") {
+              putJsonArray("mimeTypes") { add(JsonPrimitive("text/html;profile=mcp-app")) }
+            }
+          }
+        }
+    )
+    val uri = solidPreview("AppsClient")
+    val result =
+      client.callTool("render_preview", buildJsonObject { put("uri", uri) }, timeoutMs = 10_000)
+    assertThat(result.isError()).isFalse()
+    assertThat(result.contentTypes()).contains("image")
+  }
+
+  @Test
+  fun `render_preview semantics falls back to the image when semantics are unavailable`() {
+    client.initialize()
+    val uri = solidPreview("NoSemantics")
+    val result =
+      client.callTool("render_preview", buildJsonObject { put("uri", uri) }, timeoutMs = 10_000)
+    val parsed = json.parseToJsonElement(result.firstTextContent()).jsonObject
+    assertThat(parsed["semanticsUnavailable"]).isNotNull()
+    assertThat(parsed["note"]!!.jsonPrimitive.content).startsWith("semantics unavailable (")
+    assertThat(parsed["fix"]!!.jsonPrimitive.content)
+      .isEqualTo(DaemonMcpServer.SEMANTICS_UNAVAILABLE_FIX)
+    assertThat(result.contentTypes()).containsExactly("text", "image", "resource_link").inOrder()
+  }
+
+  @Test
+  fun `render_preview enables compose semantics when the daemon has not activated it`() {
+    // #1166: a daemon that starts with compose/semantics inactive answers data/fetch with
+    // DataProductUnknown; the default observation opts it in rather than falling back to pixels.
+    val semanticsCapability =
+      ee.schimke.composeai.daemon.protocol.DataProductCapability(
+        kind = "compose/semantics",
+        schemaVersion = 2,
+        transport = ee.schimke.composeai.daemon.protocol.DataProductTransport.INLINE,
+        attachable = true,
+        fetchable = true,
+        requiresRerender = false,
+      )
+    factory.daemonConfigurer = { d ->
+      d.enableableExtensions = mapOf("compose/semantics" to listOf(semanticsCapability))
+      d.dataFetchHandler = { _, kind, _, _ ->
+        if (d.advertisedDataProducts.none { it.kind == kind }) FakeDaemon.DataFetchOutcome.Unknown
+        else
+          FakeDaemon.DataFetchOutcome.Ok(
+            kind = kind,
+            schemaVersion = 2,
+            payload =
+              buildJsonObject {
+                putJsonObject("root") {
+                  put("nodeId", "1")
+                  put("boundsInRoot", "0,0,40,30")
+                  put("testTag", "hero")
+                }
+              },
+          )
+      }
+    }
+    client.initialize()
+    val uri = solidPreview("InactiveSemantics")
+    val result =
+      client.callTool("render_preview", buildJsonObject { put("uri", uri) }, timeoutMs = 10_000)
+    val parsed = json.parseToJsonElement(result.firstTextContent()).jsonObject
+    assertThat(parsed["semanticsUnavailable"]).isNull()
+    assertThat(parsed["semantics"]).isNotNull()
+    assertThat(result.contentTypes()).doesNotContain("image")
+  }
+
   @Test
   fun `render_preview defaults to the semantics observation with no base64 image`() {
     // Issue #1787 acceptance criterion: a bare render_preview (no `observe`) returns the
@@ -1139,8 +3173,13 @@ class DaemonMcpServerTest {
     assertThat(parsed["widthPx"]?.jsonPrimitive?.contentOrNull).isEqualTo("40")
     assertThat(parsed["heightPx"]?.jsonPrimitive?.contentOrNull).isEqualTo("30")
     assertThat(parsed["sha256"]?.jsonPrimitive?.contentOrNull).isNotEmpty()
-    // Single text block — no base64 PNG content rode along (firstTextContent would have errored on
-    // an image block).
+    val link =
+      resp.raw["content"]!!
+        .jsonArray
+        .single { it.jsonObject["type"]!!.jsonPrimitive.content == "resource_link" }
+        .jsonObject
+    assertThat(link["uri"]!!.jsonPrimitive.content).isEqualTo(uri)
+    // One text block plus the replayable link — no base64 PNG content rode along.
     assertThat(resp.textContents()).hasSize(1)
   }
 
@@ -1412,6 +3451,7 @@ class DaemonMcpServerTest {
         "render_matrix",
         buildJsonObject {
           put("uri", uri)
+          put("choose", JsonPrimitive(true))
           putJsonObject("axes") {
             putJsonArray("uiMode") {
               add(JsonPrimitive("light"))
@@ -1439,6 +3479,213 @@ class DaemonMcpServerTest {
     assertThat(cells[0].jsonObject["widthPx"]?.jsonPrimitive?.content?.toInt()).isEqualTo(40)
     // First cell is the baseline, so it is never "changed".
     assertThat(cells[0].jsonObject["changed"]?.jsonPrimitive?.content?.toBoolean()).isFalse()
+    val selection = parsed["selection"]!!.jsonObject
+    assertThat(selection["mode"]!!.jsonPrimitive.content).isEqualTo("text")
+    assertThat(selection["choices"]!!.jsonArray).hasSize(2)
+  }
+
+  @Test
+  fun `render_preview asks which matching variant to render and falls back to listed choices`() {
+    data class Case(
+      val action: String?,
+      val form: Boolean = true,
+      val url: Boolean = false,
+      val expectedMode: String,
+      val expectedRequests: Long = 1,
+      val rendersSmall: Boolean = false,
+      val renders: Boolean = true,
+    )
+    val cases =
+      listOf(
+        Case("accept", expectedMode = "elicitation", rendersSmall = true),
+        Case("decline", expectedMode = "declined", renders = false),
+        Case("cancel", expectedMode = "cancelled", renders = false),
+        // No elicitation capability at all, and a URL-only client: never asked, text fallback.
+        Case(null, form = false, expectedMode = "text", expectedRequests = 0),
+        Case(null, form = false, url = true, expectedMode = "text", expectedRequests = 0),
+      )
+    cases.forEachIndexed { index, case ->
+      val elicitations = AtomicLong()
+      client.close()
+      session.close()
+      val (clientToServer, serverFromClient) = pipedPair()
+      val (serverToClient, clientFromServer) = pipedPair()
+      session = server.newSession(input = serverFromClient, output = serverToClient)
+      session.start()
+      client =
+        McpTestClient(
+          input = clientFromServer,
+          output = clientToServer,
+          elicitationHandler = { request ->
+            elicitations.incrementAndGet()
+            buildJsonObject {
+              put("action", case.action ?: "accept")
+              if (case.action == "accept") {
+                val options =
+                  request["params"]!!
+                    .jsonObject["requestedSchema"]!!
+                    .jsonObject["properties"]!!
+                    .jsonObject["variant"]!!
+                    .jsonObject["enum"]!!
+                    .jsonArray
+                    .map { it.jsonPrimitive.content }
+                putJsonObject("content") { put("variant", options.single { it.endsWith("Small") }) }
+              }
+            }
+          },
+        )
+      client.initialize(
+        capabilities =
+          if (!case.form && !case.url) JsonObject(emptyMap())
+          else
+            buildJsonObject {
+              putJsonObject("elicitation") {
+                if (case.form) putJsonObject("form") {}
+                if (case.url) putJsonObject("url") {}
+              }
+            }
+      )
+      val workspaceId = registerWorkspace(tmp.newFolder("variants-$index"), "variants-$index")
+      val daemon = warmDaemonFor(workspaceId, ":app")
+      val small = "com.example.V${index}Kt.Screen${index}_Devices - Small"
+      val large = "com.example.V${index}Kt.Screen${index}_Devices - Large"
+      listOf(small, large).forEach {
+        daemon.emitDiscovery(it, functionName = "Screen$index")
+        client.expectNotification("notifications/resources/list_changed", 2_000)
+      }
+      val png = tmp.newFile("variants-$index.png")
+      writeSolidPng(png, 0xff00ff00.toInt())
+      daemon.autoRenderPngPath = { png.absolutePath }
+
+      val result =
+        client.callTool(
+          "render_preview",
+          buildJsonObject {
+            put("preview", "Screen$index")
+            put("inline", false)
+          },
+          timeoutMs = 10_000,
+        )
+      assertThat(elicitations.get()).isEqualTo(case.expectedRequests)
+      val texts = result.textContents()
+      val choice = json.parseToJsonElement(texts.last()).jsonObject["variantChoice"]!!.jsonObject
+      assertThat(choice["mode"]!!.jsonPrimitive.content).isEqualTo(case.expectedMode)
+      assertThat(choice["choices"]!!.jsonArray.map { it.jsonPrimitive.content })
+        .containsExactly(
+          PreviewUri(workspaceId, ":app", large).toUri(),
+          PreviewUri(workspaceId, ":app", small).toUri(),
+        )
+      if (case.renders) {
+        val rendered = if (case.rendersSmall) small else large
+        assertThat(json.parseToJsonElement(texts.first()).jsonObject["uri"]!!.jsonPrimitive.content)
+          .isEqualTo(PreviewUri(workspaceId, ":app", rendered).toUri())
+      } else {
+        assertThat(texts).hasSize(1)
+      }
+    }
+  }
+
+  @Test
+  fun `render_matrix distinguishes form acceptance decline cancellation and text fallback`() {
+    data class Case(
+      val action: String,
+      val variant: String? = null,
+      val formCapability: Boolean = true,
+      val urlCapability: Boolean = true,
+      val expectedMode: String,
+      val expectedRequests: Long = 1,
+    )
+    val cases =
+      listOf(
+        Case("accept", "__FIRST__", expectedMode = "elicitation"),
+        Case("decline", expectedMode = "declined"),
+        Case("cancel", expectedMode = "cancelled"),
+        Case("accept", "not one of the rendered choices", expectedMode = "text"),
+        Case(
+          "accept",
+          "__FIRST__",
+          formCapability = false,
+          expectedMode = "text",
+          expectedRequests = 0,
+        ),
+        // A bare `elicitation: {}` predates the form/url split and means form support.
+        Case(
+          "accept",
+          "__FIRST__",
+          formCapability = false,
+          urlCapability = false,
+          expectedMode = "elicitation",
+        ),
+      )
+
+    cases.forEachIndexed { index, case ->
+      client.close()
+      session.close()
+      val elicitations = AtomicLong()
+      val (clientToServer, serverFromClient) = pipedPair()
+      val (serverToClient, clientFromServer) = pipedPair()
+      session = server.newSession(input = serverFromClient, output = serverToClient)
+      session.start()
+      client =
+        McpTestClient(
+          input = clientFromServer,
+          output = clientToServer,
+          elicitationHandler = { request ->
+            elicitations.incrementAndGet()
+            buildJsonObject {
+              put("action", case.action)
+              case.variant?.let { variant ->
+                val selected =
+                  if (variant == "__FIRST__") {
+                    request["params"]!!
+                      .jsonObject["requestedSchema"]!!
+                      .jsonObject["properties"]!!
+                      .jsonObject["variant"]!!
+                      .jsonObject["enum"]!!
+                      .jsonArray
+                      .first()
+                      .jsonPrimitive
+                      .content
+                  } else variant
+                putJsonObject("content") { put("variant", selected) }
+              }
+            }
+          },
+        )
+      client.initialize(
+        capabilities =
+          buildJsonObject {
+            putJsonObject("elicitation") {
+              if (case.formCapability) putJsonObject("form") {}
+              if (case.urlCapability) putJsonObject("url") {}
+            }
+          }
+      )
+      val projectDir = tmp.newFolder("form-workspace-$index")
+      tmp.newFolder("form-workspace-$index", "module")
+      val workspaceId = registerWorkspace(projectDir, "form-demo-$index")
+      val daemon = warmDaemonFor(workspaceId, ":module")
+      val previewId = "com.example.Form$index"
+      daemon.emitDiscovery(previewId)
+      client.expectNotification("notifications/resources/list_changed", 2_000)
+      val pngFile = tmp.newFile("form-matrix-$index.png")
+      ImageIO.write(BufferedImage(2, 2, BufferedImage.TYPE_INT_ARGB), "png", pngFile)
+      daemon.autoRenderPngPath = { id -> if (id == previewId) pngFile.absolutePath else null }
+
+      val result =
+        client.callTool(
+          "render_matrix",
+          buildJsonObject {
+            put("uri", PreviewUri(workspaceId, ":module", previewId).toUri())
+            put("choose", true)
+            putJsonObject("axes") { putJsonArray("uiMode") { add(JsonPrimitive("light")) } }
+          },
+        )
+      val selection =
+        json.parseToJsonElement(result.firstTextContent()).jsonObject["selection"]!!.jsonObject
+      assertThat(elicitations.get()).isEqualTo(case.expectedRequests)
+      assertThat(selection["mode"]!!.jsonPrimitive.content).isEqualTo(case.expectedMode)
+    }
   }
 
   @Test
@@ -1521,24 +3768,211 @@ class DaemonMcpServerTest {
     assertThat(resp.firstTextContent()).contains("exceeds the cap")
   }
 
+  /** A registered module holding a multipreview function's variants, each a solid PNG. */
+  private fun multipreviewModule(vararg variants: String): Pair<WorkspaceId, List<String>> {
+    val workspaceId = registerWorkspace(tmp.newFolder("multi"), "multi")
+    val daemon = warmDaemonFor(workspaceId, ":app")
+    val ids = variants.map { "com.example.MainActivityKt.ListScreenPreview_$it" }
+    ids.forEach {
+      daemon.emitDiscovery(it, functionName = "ListScreenPreview")
+      client.expectNotification("notifications/resources/list_changed", 2_000)
+    }
+    val png = tmp.newFile("multi.png")
+    val img = BufferedImage(40, 40, BufferedImage.TYPE_INT_ARGB)
+    img.createGraphics().apply {
+      color = java.awt.Color.BLUE
+      fillRect(0, 0, 40, 40)
+      dispose()
+    }
+    ImageIO.write(img, "png", png)
+    daemon.autoRenderPngPath = { png.absolutePath }
+    return workspaceId to ids
+  }
+
   @Test
-  fun `render_matrix requires at least one axis`() {
+  fun `render_matrix with only preview renders every multipreview variant on one contact sheet`() {
     client.initialize()
-    val projectDir = tmp.newFolder("workspace")
-    tmp.newFolder("workspace", "module")
-    val workspaceId = registerWorkspace(projectDir, "demo")
-    warmDaemonFor(workspaceId, ":module")
-    val uri = PreviewUri(workspaceId, ":module", "com.example.Red").toUri()
+    multipreviewModule("Devices - Large Round", "Devices - Small Round", "Fonts - Small")
+    val resp =
+      client.callTool(
+        "render_matrix",
+        buildJsonObject { put("preview", "ListScreenPreview") },
+        timeoutMs = 10_000,
+      )
+    assertThat(resp.isError()).isFalse()
+    val parsed = json.parseToJsonElement(resp.textContents().first()).jsonObject
+    assertThat(parsed["mode"]!!.jsonPrimitive.content).isEqualTo("variants")
+    assertThat(parsed["cells"]!!.jsonArray.map { it.jsonObject["label"]!!.jsonPrimitive.content })
+      .containsExactly(
+        "ListScreenPreview_Devices - Large Round",
+        "ListScreenPreview_Devices - Small Round",
+        "ListScreenPreview_Fonts - Small",
+      )
+    val images =
+      resp.raw["content"]!!.jsonArray.filter {
+        it.jsonObject["type"]!!.jsonPrimitive.content == "image"
+      }
+    assertThat(images).hasSize(1)
+  }
+
+  @Test
+  fun `render_preview with several matches returns one contact sheet and cell pixels for the viewer`() {
+    client.initialize()
+    val (workspaceId, ids) = multipreviewModule("Devices - Large Round", "Devices - Small Round")
+    val resp =
+      client.callTool(
+        "render_preview",
+        buildJsonObject {
+          put("preview", "ListScreenPreview")
+          put("observe", "png")
+        },
+        timeoutMs = 10_000,
+      )
+    assertThat(resp.isError()).isFalse()
+    assertThat(resp.contentTypes().count { it == "image" }).isEqualTo(1)
+    val texts = resp.textContents().map { json.parseToJsonElement(it).jsonObject }
+    val grid = texts.first { it["cells"] != null }
+    assertThat(grid["cells"]!!.jsonArray.map { it.jsonObject["uri"]!!.jsonPrimitive.content })
+      .containsExactlyElementsIn(ids.map { PreviewUri(workspaceId, ":app", it).toUri() })
+    assertThat(
+        texts
+          .first { it["variantChoice"] != null }["variantChoice"]!!
+          .jsonObject["mode"]!!
+          .jsonPrimitive
+          .content
+      )
+      .isEqualTo("text")
+    assertThat(resp.raw["_meta"]!!.jsonObject["composePreview/cellPngs"]!!.jsonArray).hasSize(2)
+  }
+
+  @Test
+  fun `render_preview with several matches and overrides renders one match with them`() {
+    client.initialize()
+    val (workspaceId, ids) = multipreviewModule("Devices - Large Round", "Devices - Small Round")
+    val daemon = factory.daemons.getValue(workspaceId to ":app")
+    val resp =
+      client.callTool(
+        "render_preview",
+        buildJsonObject {
+          put("preview", "ListScreenPreview")
+          put("observe", "png")
+          putJsonObject("overrides") { put("uiMode", "dark") }
+        },
+        timeoutMs = 10_000,
+      )
+    assertThat(resp.isError()).isFalse()
+    // #1199: the grid rendered each variant without the overrides; one match renders with them.
+    val texts = resp.textContents().map { json.parseToJsonElement(it).jsonObject }
+    assertThat(texts.none { it["cells"] != null }).isTrue()
+    assertThat(
+        texts
+          .first { it["variantChoice"] != null }["variantChoice"]!!
+          .jsonObject["choices"]!!
+          .jsonArray
+          .map { it.jsonPrimitive.content }
+      )
+      .containsExactlyElementsIn(ids.map { PreviewUri(workspaceId, ":app", it).toUri() })
+    assertThat(daemon.renderOverrides).hasSize(1)
+    assertThat(daemon.renderOverrides.single()!!.uiMode)
+      .isEqualTo(ee.schimke.composeai.daemon.protocol.UiMode.DARK)
+  }
+
+  @Test
+  fun `render_preview downscales the inline image and keeps the file full size`() {
+    client.initialize()
+    val workspaceId = registerWorkspace(tmp.newFolder("phone"), "phone")
+    val daemon = warmDaemonFor(workspaceId, ":app")
+    val previewId = "com.example.PhonePreview"
+    daemon.emitDiscovery(previewId)
+    client.expectNotification("notifications/resources/list_changed", 2_000)
+    val png = tmp.newFile("phone.png")
+    ImageIO.write(BufferedImage(900, 1600, BufferedImage.TYPE_INT_ARGB), "png", png)
+    daemon.autoRenderPngPath = { png.absolutePath }
+    val uri = PreviewUri(workspaceId, ":app", previewId).toUri()
+    fun render(vararg extra: Pair<String, Any>) =
+      client.callTool(
+        "render_preview",
+        buildJsonObject {
+          put("uri", uri)
+          extra.forEach { (key, value) ->
+            if (value is Boolean) put(key, value) else put(key, value.toString())
+          }
+        },
+        timeoutMs = 10_000,
+      )
+    fun McpToolResult.imageSize(): Pair<Int, Int> {
+      val image = ImageIO.read(Base64.getDecoder().decode(firstImageContent().first).inputStream())
+      return image.width to image.height
+    }
+
+    val scaled = render("observe" to "png")
+    assertThat(scaled.imageSize()).isEqualTo(432 to 768)
+    val sizes = json.parseToJsonElement(scaled.textContents().single()).jsonObject
+    assertThat(sizes["widthPx"]!!.jsonPrimitive.content).isEqualTo("900")
+    assertThat(sizes["heightPx"]!!.jsonPrimitive.content).isEqualTo("1600")
+    assertThat(sizes["inlineWidthPx"]!!.jsonPrimitive.content).isEqualTo("432")
+    assertThat(sizes["inlineHeightPx"]!!.jsonPrimitive.content).isEqualTo("768")
+
+    assertThat(render("observe" to "png", "imageScale" to "full").imageSize())
+      .isEqualTo(900 to 1600)
+
+    val file = json.parseToJsonElement(render("inline" to false).firstTextContent()).jsonObject
+    val onDisk = ImageIO.read(File(file["pngPath"]!!.jsonPrimitive.content))
+    assertThat(onDisk.width to onDisk.height).isEqualTo(900 to 1600)
+  }
+
+  @Test
+  fun `render_matrix resolves a multipreview function's bare id and applies axes to one variant`() {
+    // Regression: the bare function id reached the daemon and surfaced
+    // "PreviewManifestRouter: no manifest entry for previewId".
+    client.initialize()
+    val (workspaceId, ids) = multipreviewModule("Devices - Large Round", "Fonts - Small")
+    val bare = PreviewUri(workspaceId, ":app", "com.example.MainActivityKt.ListScreenPreview")
     val resp =
       client.callTool(
         "render_matrix",
         buildJsonObject {
-          put("uri", uri)
-          putJsonObject("axes") {}
+          put("uri", bare.toUri())
+          putJsonObject("axes") {
+            putJsonArray("fontScale") {
+              add(JsonPrimitive(1.0))
+              add(JsonPrimitive(2.0))
+            }
+          }
         },
         timeoutMs = 10_000,
       )
-    assertThat(resp.firstTextContent()).contains("at least one of device")
+    assertThat(resp.isError()).isFalse()
+    val parsed = json.parseToJsonElement(resp.textContents().first()).jsonObject
+    assertThat(parsed["uri"]!!.jsonPrimitive.content)
+      .isEqualTo(PreviewUri(workspaceId, ":app", ids.first()).toUri())
+    assertThat(parsed["variant"]!!.jsonPrimitive.content)
+      .isEqualTo("ListScreenPreview_Devices - Large Round")
+    assertThat(parsed["cellCount"]!!.jsonPrimitive.content).isEqualTo("2")
+    assertThat(resp.firstTextContent()).doesNotContain("PreviewManifestRouter")
+  }
+
+  @Test
+  fun `render_matrix names the variants for an id the catalog does not hold`() {
+    client.initialize()
+    val (workspaceId, _) = multipreviewModule("Devices - Large Round")
+    val resp =
+      client.callTool(
+        "render_matrix",
+        buildJsonObject {
+          put(
+            "uri",
+            PreviewUri(workspaceId, ":app", "com.example.MainActivityKt.ListScreenPrevew").toUri(),
+          )
+        },
+        timeoutMs = 10_000,
+      )
+    assertThat(resp.isError()).isTrue()
+    assertThat(resp.firstTextContent())
+      .startsWith(
+        "render_matrix: no preview matches 'com.example.MainActivityKt.ListScreenPrevew'."
+      )
+    assertThat(resp.firstTextContent()).contains("Closest: ListScreenPreview")
   }
 
   @Test
@@ -1580,6 +4014,8 @@ class DaemonMcpServerTest {
         timeoutMs = 10_000,
       )
     assertThat(resp.firstTextContent()).contains("id:typo_phone")
+    // The error names the valid ids, so an agent never has to go looking for them.
+    assertThat(resp.firstTextContent()).contains("valid ids: id:pixel_5")
   }
 
   @Test
@@ -2818,8 +5254,7 @@ class DaemonMcpServerTest {
 
     val pngBytesA = byteArrayOf(0x89.toByte(), 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 1, 1)
     val pngBytesB = byteArrayOf(0x89.toByte(), 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 2, 2, 2)
-    val pngFileA = tmp.newFile("a.png").also { Files.write(it.toPath(), pngBytesA) }
-    val pngFileB = tmp.newFile("b.png").also { Files.write(it.toPath(), pngBytesB) }
+    val sharedPng = tmp.newFile("shared.png").also { Files.write(it.toPath(), pngBytesA) }
     // Deliberately NO autoRenderPngPath — we drive renderFinished manually so the test
     // controls timing.
     val uri = PreviewUri(workspaceId, ":module", previewId).toUri()
@@ -2836,6 +5271,7 @@ class DaemonMcpServerTest {
             "render_preview",
             buildJsonObject {
               put("uri", uri)
+              put("inline", false)
               putJsonObject("overrides") { put("widthPx", 100) }
             },
             timeoutMs = 10_000,
@@ -2856,6 +5292,7 @@ class DaemonMcpServerTest {
             "render_preview",
             buildJsonObject {
               put("uri", uri)
+              put("inline", false)
               putJsonObject("overrides") { put("widthPx", 200) }
             },
             timeoutMs = 10_000,
@@ -2869,7 +5306,7 @@ class DaemonMcpServerTest {
       assertThat(daemon.renderOverrides).hasSize(1)
 
       // Drain A — the head pop should promote B and dispatch B's renderNow.
-      daemon.emitRenderFinished(previewId, pngFileA.absolutePath)
+      daemon.emitRenderFinished(previewId, sharedPng.absolutePath)
 
       // B's renderNow now arrives, with B's overrides (not A's).
       val secondPreviews = daemon.renderRequests.poll(5, TimeUnit.SECONDS)
@@ -2877,15 +5314,23 @@ class DaemonMcpServerTest {
       assertThat(daemon.renderOverrides).hasSize(2)
       assertThat(daemon.renderOverrides[1]?.widthPx).isEqualTo(200)
 
-      // Drain B.
-      daemon.emitRenderFinished(previewId, pngFileB.absolutePath)
+      // Reuse and overwrite the SAME daemon path before B finishes. A must already have snapshotted
+      // its bytes on the notification thread, before promoting this render.
+      Files.write(sharedPng.toPath(), pngBytesB)
+      daemon.emitRenderFinished(previewId, sharedPng.absolutePath)
 
       // Both calls returned successfully — pre-fix B would have completed early with A's bytes
       // (wrong-bytes); post-fix B blocks until its own renderFinished and gets B's bytes. The
       // load-bearing wire-side assertion is the order and count of renderNows the daemon
       // observed above; we just confirm both callers unblocked here.
-      callA.get(5, TimeUnit.SECONDS)
-      callB.get(5, TimeUnit.SECONDS)
+      val resultA =
+        json.parseToJsonElement(callA.get(5, TimeUnit.SECONDS).firstTextContent()).jsonObject
+      val resultB =
+        json.parseToJsonElement(callB.get(5, TimeUnit.SECONDS).firstTextContent()).jsonObject
+      assertThat(File(resultA["pngPath"]!!.jsonPrimitive.content).readBytes()).isEqualTo(pngBytesA)
+      assertThat(File(resultB["pngPath"]!!.jsonPrimitive.content).readBytes()).isEqualTo(pngBytesB)
+      assertThat(resultA["sha256"]!!.jsonPrimitive.content)
+        .isNotEqualTo(resultB["sha256"]!!.jsonPrimitive.content)
     } finally {
       callerExecutor.shutdownNow()
     }
@@ -3682,6 +6127,8 @@ class DaemonMcpServerTest {
     val parsed = json.parseToJsonElement(resp.firstTextContent()).jsonObject
     assertThat(parsed["schema"]?.jsonPrimitive?.contentOrNull)
       .isEqualTo("compose-semantics-diff/v1")
+    assertThat(parsed["baseUri"]?.jsonPrimitive?.contentOrNull).isEqualTo(baseUri)
+    assertThat(parsed["headUri"]?.jsonPrimitive?.contentOrNull).isEqualTo(headUri)
     assertThat(parsed["summary"]?.jsonPrimitive?.contentOrNull).contains("changed")
     val changed = parsed["delta"]!!.jsonObject["changed"]!!.jsonArray
     val change = changed.single().jsonObject
@@ -3690,6 +6137,89 @@ class DaemonMcpServerTest {
     assertThat(fieldChange["field"]?.jsonPrimitive?.contentOrNull).isEqualTo("text")
     assertThat(fieldChange["from"]?.jsonPrimitive?.contentOrNull).isEqualTo("Hello")
     assertThat(fieldChange["to"]?.jsonPrimitive?.contentOrNull).isEqualTo("Goodbye")
+  }
+
+  @Test
+  fun `diff_semantics renders each replay URI override before fetching its semantics`() {
+    client.initialize()
+    val projectDir = tmp.newFolder("workspace")
+    tmp.newFolder("workspace", "module")
+    val workspaceId = registerWorkspace(projectDir, "demo")
+    val previewId = "com.example.Responsive"
+    val pngFile = tmp.newFile("semantic-overrides.png")
+    Files.write(pngFile.toPath(), byteArrayOf(0x89.toByte(), 0x50, 0x4e, 0x47))
+
+    factory.daemonConfigurer = { daemon ->
+      daemon.advertisedDataProducts =
+        listOf(
+          ee.schimke.composeai.daemon.protocol.DataProductCapability(
+            kind = ComposeSemanticsProduct.KIND,
+            schemaVersion = 2,
+            transport = ee.schimke.composeai.daemon.protocol.DataProductTransport.INLINE,
+            attachable = true,
+            fetchable = true,
+            requiresRerender = false,
+          )
+        )
+      daemon.advertisedSupportedOverrides = listOf("widthPx")
+      daemon.autoRenderPngPath = { id -> if (id == previewId) pngFile.absolutePath else null }
+      daemon.dataFetchHandler = { _, kind, _, _ ->
+        val renderedWidth = daemon.renderOverrides.lastOrNull()?.widthPx
+        FakeDaemon.DataFetchOutcome.Ok(
+          kind = kind,
+          schemaVersion = 2,
+          payload =
+            buildJsonObject {
+              putJsonObject("root") {
+                put("nodeId", "1")
+                put("boundsInRoot", "0,0,64,64")
+                putJsonArray("children") {
+                  add(
+                    buildJsonObject {
+                      put("nodeId", "2")
+                      put("boundsInRoot", "0,0,20,20")
+                      put("testTag", "width")
+                      put("text", renderedWidth.toString())
+                    }
+                  )
+                }
+              }
+            },
+        )
+      }
+    }
+    val daemon = warmDaemonFor(workspaceId, ":module")
+
+    fun replayUri(width: Int) =
+      PreviewUri(
+          workspaceId,
+          ":module",
+          previewId,
+          overridesJson = buildJsonObject { put("widthPx", width) }.toString(),
+        )
+        .toUri()
+
+    val response =
+      client.callTool(
+        "diff_semantics",
+        buildJsonObject {
+          put("baseUri", replayUri(320))
+          put("headUri", replayUri(640))
+        },
+        timeoutMs = 10_000,
+      )
+
+    assertThat(daemon.renderRequests.poll(2_000, TimeUnit.MILLISECONDS))
+      .isEqualTo(listOf(previewId))
+    assertThat(daemon.renderRequests.poll(2_000, TimeUnit.MILLISECONDS))
+      .isEqualTo(listOf(previewId))
+    assertThat(daemon.renderOverrides.map { it?.widthPx }).containsExactly(320, 640).inOrder()
+    val parsed = json.parseToJsonElement(response.firstTextContent()).jsonObject
+    val changed = parsed["delta"]!!.jsonObject["changed"]!!.jsonArray.single().jsonObject
+    val fieldChange = changed["changes"]!!.jsonArray.single().jsonObject
+    assertThat(fieldChange["field"]?.jsonPrimitive?.contentOrNull).isEqualTo("text")
+    assertThat(fieldChange["from"]?.jsonPrimitive?.contentOrNull).isEqualTo("320")
+    assertThat(fieldChange["to"]?.jsonPrimitive?.contentOrNull).isEqualTo("640")
   }
 
   @Test
@@ -4008,9 +6538,10 @@ class DaemonMcpServerTest {
 
     // Daemon ships an attached payload on a renderFinished — simulating the post-subscribe
     // attach-on-render path. The supervisor caches it.
+    val renderedPng = tmp.newFile("attached-data-render.png").apply { writeBytes(byteArrayOf(1)) }
     daemon.emitRenderFinishedWithDataProducts(
       previewId,
-      "/tmp/red.png",
+      renderedPng.absolutePath,
       listOf(
         buildJsonObject {
           put("kind", "a11y/atf")
@@ -4079,9 +6610,10 @@ class DaemonMcpServerTest {
     client.request("resources/subscribe", buildJsonObject { put("uri", uri) })
 
     // First render: a11y/atf is attached. Cache is warm.
+    val firstPng = tmp.newFile("cache-first-render.png").apply { writeBytes(byteArrayOf(1)) }
     daemon.emitRenderFinishedWithDataProducts(
       previewId,
-      "/tmp/red-1.png",
+      firstPng.absolutePath,
       listOf(
         buildJsonObject {
           put("kind", "a11y/atf")
@@ -4094,9 +6626,10 @@ class DaemonMcpServerTest {
 
     // Second render: NO data products attached (e.g. session unsubscribed in between). Cache for
     // a11y/atf must be evicted so a follow-up get_preview_data falls through to the wire.
+    val secondPng = tmp.newFile("cache-second-render.png").apply { writeBytes(byteArrayOf(2)) }
     daemon.emitRenderFinishedWithDataProducts(
       previewId,
-      "/tmp/red-2.png",
+      secondPng.absolutePath,
       attachments = emptyList(),
     )
     client.expectNotification("notifications/resources/updated", 2_000)
@@ -4155,9 +6688,10 @@ class DaemonMcpServerTest {
     client.request("resources/subscribe", buildJsonObject { put("uri", uri) })
 
     // Warm the cache with the no-params variant.
+    val renderedPng = tmp.newFile("per-kind-cache-render.png").apply { writeBytes(byteArrayOf(1)) }
     daemon.emitRenderFinishedWithDataProducts(
       previewId,
-      "/tmp/red.png",
+      renderedPng.absolutePath,
       listOf(
         buildJsonObject {
           put("kind", "layout/inspector")
@@ -4367,6 +6901,24 @@ class DaemonMcpServerTest {
   // Helpers
   // -------------------------------------------------------------------------
 
+  private fun restartSession(
+    target: DaemonMcpServer,
+    requestHandlers: Map<String, (JsonObject) -> JsonObject> = emptyMap(),
+  ) {
+    client.close()
+    session.close()
+    val (clientToServer, serverFromClient) = pipedPair()
+    val (serverToClient, clientFromServer) = pipedPair()
+    session = target.newSession(input = serverFromClient, output = serverToClient)
+    session.start()
+    client =
+      McpTestClient(
+        input = clientFromServer,
+        output = clientToServer,
+        requestHandlers = requestHandlers,
+      )
+  }
+
   private fun registerWorkspace(projectDir: java.io.File, rootName: String): WorkspaceId {
     val resp =
       client.callTool(
@@ -4414,7 +6966,13 @@ class DaemonMcpServerTest {
  * Minimal MCP client used by [DaemonMcpServerTest]. Speaks Content-Length-framed JSON-RPC over the
  * pipes the McpSession exposes.
  */
-class McpTestClient(private val input: InputStream, private val output: OutputStream) {
+class McpTestClient(
+  private val input: InputStream,
+  private val output: OutputStream,
+  private val elicitationHandler: ((JsonObject) -> JsonObject)? = null,
+  /** Answers other server-to-client requests (such as `roots/list`) by method name. */
+  private val requestHandlers: Map<String, (JsonObject) -> JsonObject> = emptyMap(),
+) {
 
   private val json = Json {
     ignoreUnknownKeys = true
@@ -4425,6 +6983,7 @@ class McpTestClient(private val input: InputStream, private val output: OutputSt
     java.util.concurrent.ConcurrentHashMap<Long, LinkedBlockingQueue<JsonObject>>()
   private val notifications = LinkedBlockingQueue<NotificationFrame>()
   @Volatile private var closed = false
+  @Volatile private var readerFailure: Throwable? = null
 
   private val readerThread =
     Thread({ runReader() }, "mcp-test-client-reader").apply { isDaemon = true }
@@ -4433,12 +6992,16 @@ class McpTestClient(private val input: InputStream, private val output: OutputSt
     readerThread.start()
   }
 
-  fun initialize(timeoutMs: Long = 5_000): JsonObject {
+  fun initialize(
+    timeoutMs: Long = 5_000,
+    capabilities: JsonObject = JsonObject(emptyMap()),
+    clientName: String = "mcp-test-client",
+  ): JsonObject {
     val params = buildJsonObject {
       put("protocolVersion", "2025-06-18")
-      putJsonObject("capabilities") {}
+      put("capabilities", capabilities)
       putJsonObject("clientInfo") {
-        put("name", "mcp-test-client")
+        put("name", clientName)
         put("version", "0.0")
       }
     }
@@ -4448,6 +7011,23 @@ class McpTestClient(private val input: InputStream, private val output: OutputSt
   }
 
   fun request(method: String, params: JsonElement? = null, timeoutMs: Long = 5_000): JsonObject {
+    val resp = rawRequest(method, params, timeoutMs)
+    if (resp["error"] != null) {
+      error("request($method) error: ${resp["error"]}")
+    }
+    return resp["result"]?.jsonObject ?: error("request($method): no result in $resp")
+  }
+
+  /** Sends a request that is expected to fail and returns its JSON-RPC `error` object. */
+  fun requestError(
+    method: String,
+    params: JsonElement? = null,
+    timeoutMs: Long = 5_000,
+  ): JsonObject =
+    rawRequest(method, params, timeoutMs)["error"]?.jsonObject
+      ?: error("requestError($method): expected an error response")
+
+  private fun rawRequest(method: String, params: JsonElement?, timeoutMs: Long): JsonObject {
     val id = nextId.getAndIncrement()
     val slot = responses.computeIfAbsent(id) { LinkedBlockingQueue() }
     val payload = buildJsonObject {
@@ -4459,12 +7039,9 @@ class McpTestClient(private val input: InputStream, private val output: OutputSt
     sendMessage(payload.toString())
     val resp =
       slot.poll(timeoutMs, TimeUnit.MILLISECONDS)
-        ?: error("request($method) timed out after ${timeoutMs}ms")
+        ?: error("request($method) timed out after ${timeoutMs}ms; reader failure: $readerFailure")
     responses.remove(id)
-    if (resp["error"] != null) {
-      error("request($method) error: ${resp["error"]}")
-    }
-    return resp["result"]?.jsonObject ?: error("request($method): no result in $resp")
+    return resp
   }
 
   fun callTool(
@@ -4527,18 +7104,41 @@ class McpTestClient(private val input: InputStream, private val output: OutputSt
       while (!closed) {
         val line = readMessage(input) ?: break
         val obj = json.parseToJsonElement(line).jsonObject
-        val id = obj["id"]?.jsonPrimitive?.intOrNull()
-        if (id != null) {
+        val method = obj["method"]?.jsonPrimitive?.contentOrNull
+        val requestId = obj["id"]
+        val requestHandler = method?.let { requestHandlers[it] }
+        if (requestHandler != null && requestId != null) {
+          sendMessage(
+            buildJsonObject {
+              put("jsonrpc", "2.0")
+              put("id", requestId)
+              put("result", requestHandler(obj))
+            }
+              .toString()
+          )
+        } else if (method == "elicitation/create" && requestId != null) {
+          val result = elicitationHandler?.invoke(obj) ?: continue
+          sendMessage(
+            buildJsonObject {
+              put("jsonrpc", "2.0")
+              put("id", requestId)
+              put("result", result)
+            }
+              .toString()
+          )
+        } else if (requestId?.jsonPrimitive?.intOrNull() != null) {
+          val id = requestId.jsonPrimitive.intOrNull()!!
           responses.computeIfAbsent(id.toLong()) { LinkedBlockingQueue() }.put(obj)
         } else {
-          val method = obj["method"]?.jsonPrimitive?.contentOrNull
           if (method != null) {
             notifications.put(NotificationFrame(method, obj["params"] as? JsonObject))
           }
         }
       }
-    } catch (_: IOException) {
-      // EOF
+    } catch (failure: IOException) {
+      if (!closed) readerFailure = failure
+    } catch (failure: Throwable) {
+      readerFailure = failure
     }
   }
 

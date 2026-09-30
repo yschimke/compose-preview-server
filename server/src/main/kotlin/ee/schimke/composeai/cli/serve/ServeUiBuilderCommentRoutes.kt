@@ -68,8 +68,12 @@ internal fun Route.installUiBuilderCommentRoutes(
 
   post(UI_BUILDER_COMMENTS_PATH) {
     val actor =
-      call.authorizedCommentActor(service, authorization, UiBuilderRouteCapability.WRITE)
-        ?: return@post
+      call.authorizedCommentActor(
+        service,
+        authorization,
+        UiBuilderRouteCapability.WRITE,
+        signedInReadersMayTakePart = true,
+      ) ?: return@post
     val request = call.receiveCommentBody(CommentPostRequest.serializer()) ?: return@post
     when (
       val result =
@@ -117,15 +121,23 @@ internal fun Route.installUiBuilderCommentRoutes(
    */
   post(UI_BUILDER_COMMENTS_ACKNOWLEDGEMENT_PATH) {
     val actor =
-      call.authorizedCommentActor(service, authorization, UiBuilderRouteCapability.WRITE)
-        ?: return@post
+      call.authorizedCommentActor(
+        service,
+        authorization,
+        UiBuilderRouteCapability.WRITE,
+        signedInReadersMayTakePart = true,
+      ) ?: return@post
     call.respondAcknowledgement(store, actor, threadId = null)
   }
 
   post(UI_BUILDER_COMMENT_ACKNOWLEDGEMENT_PATH) {
     val actor =
-      call.authorizedCommentActor(service, authorization, UiBuilderRouteCapability.WRITE)
-        ?: return@post
+      call.authorizedCommentActor(
+        service,
+        authorization,
+        UiBuilderRouteCapability.WRITE,
+        signedInReadersMayTakePart = true,
+      ) ?: return@post
     val threadId = call.parameters["threadId"].orEmpty()
     if (threadId.isBlank()) {
       call.respondCommentError(HttpStatusCode.BadRequest, "a thread id is required")
@@ -142,8 +154,12 @@ internal fun Route.installUiBuilderCommentRoutes(
    */
   post(UI_BUILDER_COMMENT_REACTION_PATH) {
     val actor =
-      call.authorizedCommentActor(service, authorization, UiBuilderRouteCapability.WRITE)
-        ?: return@post
+      call.authorizedCommentActor(
+        service,
+        authorization,
+        UiBuilderRouteCapability.WRITE,
+        signedInReadersMayTakePart = true,
+      ) ?: return@post
     val commentId = call.parameters["commentId"].orEmpty()
     if (commentId.isBlank()) {
       call.respondCommentError(HttpStatusCode.BadRequest, "a comment id is required")
@@ -320,14 +336,43 @@ private suspend fun ApplicationCall.authorizedCommentActor(
   service: UiBuilderServicePort,
   authorization: ServeUiBuilderAuthorization,
   capability: UiBuilderRouteCapability,
+  /**
+   * Whether a person signed in with GitHub who may only *read* the design may still take part in
+   * its conversation — post, react, mark as read. A guest on a box that restricts writing to an org
+   * is exactly that person: it can see the design, and saying something about it is not changing
+   * it. Never the anonymous reader of a public box, and never an agent grant that carries only
+   * read: a comment speaks for someone, and an agent's reach is what its grant says.
+   */
+  signedInReadersMayTakePart: Boolean = false,
 ): CommentActor? {
   response.headers.append(HttpHeaders.CacheControl, "no-store")
+  val decision =
+    authorization.authorize(this, capability).let { asked ->
+      if (asked is UiBuilderAuthorizationDecision.Authorized || !signedInReadersMayTakePart) {
+        asked
+      } else {
+        val read = authorization.authorize(this, UiBuilderRouteCapability.READ)
+        if (
+          read is UiBuilderAuthorizationDecision.Authorized &&
+            read.actorId.startsWith(GITHUB_ACTOR_PREFIX) &&
+            read.onBehalfOfActorId == null
+        ) {
+          read
+        } else {
+          asked
+        }
+      }
+    }
   val actor =
-    when (val decision = authorization.authorize(this, capability)) {
+    when (decision) {
       is UiBuilderAuthorizationDecision.Authorized -> decision.actor
       UiBuilderAuthorizationDecision.Missing -> {
         response.headers.append(HttpHeaders.WWWAuthenticate, "Bearer")
-        respondCommentError(HttpStatusCode.Unauthorized, "authentication is required")
+        respondCommentError(
+          HttpStatusCode.Unauthorized,
+          if (signedInReadersMayTakePart) "Sign in with GitHub to comment."
+          else "authentication is required",
+        )
         return null
       }
       UiBuilderAuthorizationDecision.Forbidden -> {
@@ -453,3 +498,6 @@ private val COMMENT_ROUTE_JSON = Json {
   // learned yet still gets its comment stored rather than a 400.
   ignoreUnknownKeys = true
 }
+
+/** The actor-id prefix a GitHub-signed-in person carries; see [ServeAgentGrants.githubActorId]. */
+private const val GITHUB_ACTOR_PREFIX = "github:"

@@ -35,7 +35,7 @@ URL: https://preview.example/mcp
 Authorization: Bearer <short-lived grant>
 ```
 
-`list_projects` discovers the current catalog set. Catalog-specific tools take `catalog` alongside
+`catalog_list_projects` discovers the current catalog set. Catalog-specific tools take `catalog` alongside
 `previewId`, while resource URIs carry both values, so adding or retiring a catalog needs no MCP
 client reconfiguration. The separate UI-builder MCP sidecar should use its configurable path (for
 example `/ui-builder/mcp`) when both products share a hostname.
@@ -83,6 +83,13 @@ transport does not need the other:
    client's read timeout — and may be raised to 30 by a client that tolerates longer calls; a wait
    that times out answers `pending` and you simply call again.
 
+A client that implements MCP URL elicitation passes `urlMode: true` to `poll_access`. While the
+request is pending, the server returns the standard `-32042` error with the existing `approveUrl`;
+after the browser decision, the client retries that same call to collect the ordinary approved or
+denied result. The URL error contains neither the device secret nor a bearer. Declining or
+cancelling the client interaction therefore grants nothing, and clients without URL elicitation
+keep the complete link-and-code text flow above.
+
 **`initialize`, `ping`, `tools/list` and these two tools need no credential**; everything that reads
 a catalog still does. The gate is per message, not per endpoint, because a client that cannot finish
 `initialize` cannot reach the tool that asks for a credential either — the endpoint was a dead end
@@ -123,6 +130,10 @@ for a new grant the same way it asked for the first.
 
 ## MCP surface
 
+The catalog's data tools carry a `catalog_` prefix (`catalog_render_preview`, `catalog_list_previews`, …) so a client that also runs the local `compose-preview` server never sees two tools with one name. The un-prefixed names still dispatch as a deprecated alias but are no longer listed. `status`, the access tools, the Storybook aliases and `ui_builder_*` are unchanged.
+
+A `catalog_render_preview` PNG result also carries a plain `https` `resource_link` (named `Compose Preview render (https)`, repeated as `structuredContent.imageUrl`) when this box has a public origin: `<origin>/mcp/render.png?uri=…&exp=…&sig=…`. Hosts that cannot show inline base64 or a `compose-preview://` URI (Antigravity's `<agent-embed>` cards, for one) can put it straight in an `<img>`. The URL needs no credential: the HMAC covers exactly one resource URI, overrides included, and expires after ten minutes, so it grants nothing beyond that image. It is minted only after a live-scope render, is absent on a box with no public origin, and a missing or forged signature is a 404.
+
 The endpoint implements Streamable HTTP MCP protocol versions `2025-06-18` and `2025-03-26`.
 Catalog calls are independent, so the server does not allocate sessions or advertise subscriptions:
 JSON-RPC messages use `POST`, notifications receive `202 Accepted`, and optional `GET`/SSE and
@@ -134,23 +145,26 @@ JSON-RPC messages use `POST`, notifications receive `202 Accepted`, and optional
 | `request_access`, `poll_access` | none | Obtain a grant without leaving MCP (above) |
 | `status` | `preview` | Report readiness and the aggregate catalog set |
 | `resources/list`, `resources/read` | `preview` | List and read published preview PNGs |
-| `list_projects`, `list_previews` | `preview` | Discover catalogs and preview metadata |
-| `render_preview` | `live` | Render with optional overrides; defaults to a token-frugal semantics/hash observation, with `observe=png` for pixels and `observe=svg` for the `compose/figma-svg` vector export |
-| `render_matrix` | `live` | Render one preview across a cross-product of override axes in a single call |
-| `list_devices` | `preview` | The `device` override's accepted vocabulary, with each frame's dp size and density |
-| `history_list` | `preview` | One preview's render timeline |
-| `history_diff` | `preview` | Compare two of its recorded renders |
-| `history_read` | `preview` | One historical render's pixels, by commit or blob |
-| `diff_semantics` | `live` | Compare two previews' semantics by authored `testTag` |
-| `list_data_products` | `preview` | Discover structured products exposed by previews |
-| `get_preview_data` | `live` | Retrieve accessibility or Compose annotation data |
+| `resources/read` of `compose-preview://schemas/…` | none | The UI-builder document and mutation JSON Schemas (below); listed only where a UI builder is served |
+| `catalog_list_projects`, `catalog_list_previews` | `preview` | Discover catalogs, then one catalog's preview metadata (`catalog_list_previews` requires `catalog` unless the server holds only one) |
+| `catalog_render_preview` | `live` | Render with optional overrides; defaults to a token-frugal semantics/hash observation, with `observe=png` for pixels and `observe=svg` for the `compose/figma-svg` vector export |
+| `catalog_render_matrix` | `live` | Render one preview across a cross-product of override axes in a single call |
+| `catalog_list_devices` | `preview` | The `device` override's accepted vocabulary, with each frame's dp size and density |
+| `catalog_history_list` | `preview` | One preview's render timeline |
+| `catalog_history_diff` | `preview` | Compare two of its recorded renders |
+| `catalog_history_read` | `preview` | One historical render's pixels, by commit or blob |
+| `catalog_diff_semantics` | `live` | Compare two previews' semantics by authored `testTag` |
+| `catalog_list_data_products` | `preview` | Discover structured products exposed by one catalog's previews (`catalog` or `uri` required) |
+| `catalog_get_preview_data` | `live` | Retrieve accessibility or Compose annotation data |
 | `list-all-documentation`, `get-documentation-for-story` | `preview` | Storybook-MCP-compatible discovery aliases |
 | `preview-stories` | `live` | Storybook-MCP-compatible preview rendering alias |
-| `ui_builder_list_catalogs`, `ui_builder_list_designs`, `ui_builder_get_design` | `ui-builder-read` | The component catalogs a design can pin to (a summary by default, the whole capability with `full: true`), the designs on this box, and one design's whole document (without the catalog it pins unless `includeCatalog: true`) |
+| `ui_builder_list_catalogs`, `ui_builder_search_components`, `ui_builder_list_designs`, `ui_builder_get_design` | `ui-builder-read` | The component catalogs a design can pin to (a summary by default, the whole capability with `full: true`), the designs on this box, and one design's whole document (without the catalog it pins unless `includeCatalog: true`) |
 | `ui_builder_create_design`, `ui_builder_apply` | `ui-builder-write` | Create a design, and apply `DesignMutationV1` operations to one — a `setProperty` whose value is `{"type":"null"}` unsets an optional property |
+| `ui_builder_validate` | `ui-builder-read` | Check a whole `document`, a stored design, or `operations` against a stored design **without saving** — `{valid, problems:[…]}`, the problems panel's list |
 | `ui_builder_rename_design`, `ui_builder_delete_design` | `ui-builder-write` | Retitle a design you may write; delete one you **own**. Neither has a request type in the contract, so both answer outside the released envelope |
 | `ui_builder_await_design` | `ui-builder-read` | **Wait** for somebody else to change a design, and return what they changed |
 | `ui_builder_export` | `ui-builder-export` | Export a design — `compose` returns the generator's Kotlin, or diagnostics naming each reason it refused |
+| `ui_builder_view` | `ui-builder-read` (plus `ui-builder-export` for `renderer: "native"`) | The editor canvas as a person sees it — a PNG with the selection, reference overlay, comment pins and layout bounds drawn on, and the node boxes and pin positions as JSON (#1114) |
 | `ui_builder_put_asset` | `ui-builder-write` | Put a picture behind an `assetKey`, so an `asset/image` node draws it; present only where the host keeps design assets |
 | `ui_builder_design_access` | `ui-builder-read` | Who can open a design — its owner, and everyone it has been shared with |
 | `ui_builder_share_design` | `ui-builder-write` | Share a design with another actor as `viewer` or `editor`, or take that back |
@@ -159,6 +173,11 @@ JSON-RPC messages use `POST`, notifications receive `202 Accepted`, and optional
 | `ui_builder_list_comments`, `ui_builder_await_comments` | `ui-builder-read` | Read a design's discussion, and **wait** for the next thing said in it |
 | `ui_builder_post_comment`, `ui_builder_resolve_comment_thread` | `ui-builder-write` | Say something on a design, and close a thread once it is answered |
 | `ui_builder_acknowledge_comment`, `ui_builder_react_to_comment` | `ui-builder-write` | Say you have **read** a thread — which is not resolving it — or react to one comment with an emoji |
+
+Enumerations across every catalog (`status`, `catalog_list_projects`, `resources/list`,
+`list-all-documentation`) read what the registry already holds and never resume a suspended catalog.
+`catalog_list_previews` and `catalog_list_data_products` without a catalog refuse at once with the available ids and a
+pointer to the local `compose-preview-mcp` server, rather than serialising every catalog (#1162).
 
 The `ui_builder_*` tools appear in `tools/list` only on a box that actually serves a UI builder
 (`--ui-builder-dir`). A box without one does not advertise them, because listed-and-failing tells an
@@ -203,12 +222,99 @@ the reply is the released `McpResponseEnvelopeV1` and the request shapes are the
 6. `ui_builder_export` — the Kotlin, or the refusals. An `asset/image` exports as the real
    `Image(...)` with a `ColorPainter` in place of the picture and an `ASSET_PLACEHOLDER` warning
    naming the key and digest to bundle.
+   Each export header names the design's canonical home and, on the line beside it, the revision
+   it was cut from — the `baseRevision` to quote when going back to edit the original.
 7. `ui_builder_rename_design` when the design has become something else, and
    `ui_builder_delete_design` when it was a probe. Rename is open to anybody who may write the
    design and moves no revision. Delete is **owner only** — an agent under a grant owns what it
    created as the person who approved the grant — so a session can clear its own litter and cannot
    reach anybody else's; a design whose owner no longer exists is still the operator's to remove
    through `/admin/ui-builder`.
+
+### Seeing the design, not only reading it
+
+`ui_builder_view` is "the agent sees what the user sees" (#1114). It takes `designId`, an optional
+`revision`, `include` (any of `selection`, `reference`, `comments`, `bounds`; defaults to the first
+three), `selection` (node ids), `viewport` (`{width, height}` in pixels, aspect kept) and
+`renderer`, and answers with a `compose-preview/ui-builder-view/v1` JSON beside the picture: the
+revision, each visible node's id and box, each comment thread's pin, what the reference overlay did,
+and `notes` for anything it could not draw. Every coordinate is in the returned image's pixels.
+
+Nothing new renders the design. The frame is the PNG export (`renderer: "export"`, the default — the
+editor's own renderer, as `ui_builder_export` with `format: "png"` returns it) or the native Compose
+render (`renderer: "native"`, the `ui_builder_render_native` lane, which compiles the design and so
+needs `ui-builder-export` as well). The overlays are drawn server-side with `java.awt`:
+
+- **selection** — a 2 px outline round each selected node's box;
+- **reference** — the design's reference picture, placed from its stored scale, offset and opacity,
+  honouring the `overlay`, `split` and `difference` modes (a hidden reference, `boxes` mode or a
+  format this JVM cannot decode is reported, not drawn);
+- **comments** — one numbered pin per thread: a point anchor at its frame fraction, a node anchor at
+  the node's top-left corner; a markup-stroke anchor is reported unplaced;
+- **bounds** — a thin rectangle round every node the renderer placed.
+
+A box is only ever one a renderer reported. The PNG export reports none, so a view from it carries
+`boundsUnavailable`, an empty `nodes`, and a note for each selected node it could not outline —
+never an outline at a guessed position. The native lane reports every tagged node's box in its own
+frame, which is why a view that needs boxes draws that frame rather than mixing two renders.
+
+The picture is a fetchable link by default rather than base64 in the reply: a `resource_link` named
+`UI-builder view (https)`, repeated as `image.url`, on the same signed `/mcp/render.png` route as a
+catalog render. A view is drawn for one actor from state that actor may read, so it cannot be
+re-rendered from a credential-free link; the server keeps the PNG for the link's ten-minute
+lifetime instead (at most 32 at once), and a forged or expired signature is a 404. `inline: true`
+adds the bytes as an `image` block; a box with no public origin always does. The tool carries
+`_meta.ui.resourceUri`, so MCP App hosts open it in the bundled viewer (#1119).
+
+The CLI spelling is `compose-preview-server design view <designId>` with `--select`, `--include`,
+`--viewport <w>x<h>` and `--renderer`: the PNG goes to `--out` (default `<designId>.view.png`) and
+the JSON to stdout.
+
+### Checking before writing, and the shapes
+
+`ui_builder_validate` answers "would this be accepted, and would it export?" and writes nothing. Pass
+exactly one of:
+
+- `document` — a whole `DesignDocumentV1`, e.g. one you are about to `ui_builder_create_design` or
+  `ui_builder_replace_design_document`;
+- `designId` — the stored design as it is now, which is the "is my design exportable?" question;
+- `designId` with `operations` (and optionally `baseRevision`) — the batch you are about to
+  `ui_builder_apply`, checked against the design's current document.
+
+The reply is `{"schema":"compose-preview/ui-builder-validation/v1","valid":…,"problems":[…]}`, each
+problem `{severity, source, code, message, nodeId?, field?, operationIndex?}`, and `valid` is false
+exactly when a problem is an `error`. `source` says which check spoke: `shape` (the JSON did not
+decode — reported as a problem, not a tool error), `document` (the runtime refused it: quota,
+environment, topology, catalog pin or the catalog's own validation), `mutations` (the reducer refused
+the batch; a stale `baseRevision` is only a `warning`, because an apply rebases what does not
+conflict), or `export` (the Compose export gate — `ScreenExportGate`, the same list the editor's
+problems panel shows).
+
+It asks the real runtime rather than a copy of its rules: each call opens a throwaway
+`PersistentUiBuilderService` over an empty temporary store with the host's own catalogs and exporter,
+creates the document there (and applies the batch there), asks for the Compose export, and deletes
+the directory. No revision moves, nobody watching the design is notified, and no asset store is
+attached. A design the caller cannot read is still refused outright, as `ui_builder_get_design`
+refuses it. The CLI's `compose-preview-server design validate <designId> [--operations <file>]` and
+`design validate --document <file>` make the same call, print each problem to stderr, and exit
+non-zero when the design is not valid.
+
+The shapes themselves are published, so an agent can write a document or a batch right the first
+time instead of learning it one refusal at a time:
+
+| Resource | HTTP | Describes |
+| --- | --- | --- |
+| `compose-preview://schemas/ui-builder-document-v1.json` | `GET /schemas/ui-builder-document-v1.json` | `DesignDocumentV1` — what `ui_builder_get_design` returns and `ui_builder_create_design`, `ui_builder_replace_design_document` and `ui_builder_validate` take |
+| `compose-preview://schemas/design-mutation-v1.json` | `GET /schemas/design-mutation-v1.json` | One `DesignMutationV1`, discriminated by `type` — an element of `ui_builder_apply`'s `operations` |
+
+Both are JSON Schema 2020-12 (`application/schema+json`), listed in `resources/list` beside the
+viewer and readable without a grant, like the viewer: they are static and describe no design. The
+released UI-builder jars ship no schema and no generator, so these are **generated at runtime from the
+released `kotlinx.serialization` descriptors** (`UiBuilderJsonSchemas`), which makes them the shape
+this server decodes with by construction, whichever protocol release the catalog pins. Objects are
+closed (`additionalProperties: false`) because the decoder refuses unknown fields; sealed types are a
+`oneOf` on their discriminator (`type`, or `kind` for `DesignHomeV1`). What a descriptor cannot say —
+which components and properties the pinned catalog declares — is `ui_builder_validate`'s job.
 
 ### Watching, rather than asking again
 
@@ -259,7 +365,7 @@ call the credential arrived on — the gate an agent reaches is the gate a perso
 `observe=svg` returns the vector as SVG **source** in a `text` content block, not as a base64
 `image` block with `mimeType: image/svg+xml`. The symmetry with `png` is tempting, but almost no MCP
 client renders SVG from an image block, and a vector consumer — a Figma round-trip, a diff, a
-DOM-capture tool — wants the markup. `list_previews` reports it per preview as `svgAvailable`, so the lane is discoverable without
+DOM-capture tool — wants the markup. `catalog_list_previews` reports it per preview as `svgAvailable`, so the lane is discoverable without
 asking for it and reading the refusal. It is available only where the host advertises it
 (`ServeHost.hasSvgExportFor`): a static bundle carrying `figma/<slug>.svg` vectors, or a
 daemon-backed session that can export `compose/figma-svg`. A catalog with neither is refused by
@@ -268,7 +374,7 @@ lane, so it is metered identically and cannot become a second unmetered renderer
 
 ### History
 
-`history_list` answers in one of three `mode`s, and the field is load-bearing: the three are not
+`catalog_history_list` answers in one of three `mode`s, and the field is load-bearing: the three are not
 interchangeable, and an agent that could not tell them apart would read "no versions" as "this
 preview has never changed".
 
@@ -309,7 +415,7 @@ branch, five such previews accounted for a 40% reduction in entries.
 
 ### Comparing and reading historical renders
 
-`history_diff` compares two of a preview's recorded renders, defaulting to the two newest — *did the
+`catalog_history_diff` compares two of a preview's recorded renders, defaulting to the two newest — *did the
 last publish move this preview?* It is a **metadata** comparison: the timeline's versions are
 already collapsed distinct renders, so whether the bytes changed is answered by their content ids
 without fetching either image on either side.
@@ -319,7 +425,7 @@ on a preview that re-renders differently on publishes that did not change it, a 
 not evidence of a real change — the same question `flake-triage` otherwise settles with a
 repeat-render oracle, answered here from precomputed data.
 
-`history_read` returns one historical render's pixels through this server, addressed by `commit` or
+`catalog_history_read` returns one historical render's pixels through this server, addressed by `commit` or
 `blob` (a prefix is enough). `preview` scope rather than `live`, matching the HTTP permalink lane:
 it replays already-published bytes and commissions no render. It is still bounded — the published
 lane goes through the bundle host's pinned-fetch permit and its miss cache, and the project-mode
@@ -332,12 +438,12 @@ will not hand over is reported as such, distinctly from a version that does not 
 `compose/figma-svg-long` — the whole scrollable screen (a virtualised `LazyColumn` re-rendered at an
 expanded viewport so every row composes) rather than the viewport crop. Both are gated on
 `ServeHost.hasScrollExportFor` and refused by name where absent, because the tall re-render needs a
-daemon and a static bundle has no scroll producer. `list_previews` reports `scrollAvailable` per
+daemon and a static bundle has no scroll producer. `catalog_list_previews` reports `scrollAvailable` per
 preview beside `svgAvailable`. A non-scrolling preview yields its ordinary viewport output.
 
 ### Devices
 
-`list_devices` publishes the `device` override's accepted vocabulary from `DeviceDimensions`, the
+`catalog_list_devices` publishes the `device` override's accepted vocabulary from `DeviceDimensions`, the
 same catalog the render path resolves against — no geometry is authored in the MCP layer. The tool
 exists because an unrecognised `device` value is **not** an error on the render path: it falls
 through to the default frame, which from the caller's side is indistinguishable from a device that
@@ -345,7 +451,7 @@ happens to render identically to the default.
 
 ### Comparing two previews
 
-`diff_semantics` compares two previews' semantics and reports tags present on only one side, tags
+`catalog_diff_semantics` compares two previews' semantics and reports tags present on only one side, tags
 whose bounds moved, and tags whose occupancy `count` changed.
 
 Identity is the authored `testTag`, deliberately, and not a `SemanticsRefs` ref. A ref indexes
@@ -378,7 +484,7 @@ lists the supported keys.
 
 ### Rendering a matrix
 
-`render_matrix` takes an `axes` object mapping an override key to the values to sweep, renders the
+`catalog_render_matrix` takes an `axes` object mapping an override key to the values to sweep, renders the
 cross-product, and reports one cell per combination with its overrides, `sha256`, dimensions and
 `generation` (`observe=png` adds base64 pixels per cell). The base `overrides`, if given, are the
 floor each cell starts from; an axis value with the same key wins for that cell.
@@ -418,8 +524,8 @@ all the same render:
   auto-render on a pause), the PNG shown in place, and a refusal explained where it happens. The
   viewer's Overrides panel also edits any multi-line or long (>120 chars) string knob in a textarea.
 - **`compose-preview-server a2ui render --document <file|-> [--out <png|->]`** does the same from a
-  shell through this endpoint: it finds the preview by its `document` knob (`list_previews` now
-  reports each preview's declared `knobs`), or takes `--preview`, calls `render_preview` with
+  shell through this endpoint: it finds the preview by its `document` knob (`catalog_list_previews` now
+  reports each preview's declared `knobs`), or takes `--preview`, calls `catalog_render_preview` with
   `observe=png` and the document as `knob.document`, and writes the PNG. `--catalog` defaults to
   `a2ui-catalog`, `--server` to `$COMPOSE_PREVIEW_SERVER` or the local default; the credential comes
   from `$COMPOSE_PREVIEW_TOKEN`, and without a `live` grant the command asks a human for one, as

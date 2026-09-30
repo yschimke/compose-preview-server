@@ -1,5 +1,6 @@
 package ee.schimke.composeai.cli.serve
 
+import ee.schimke.composeai.agentgrants.AgentGrantScope
 import java.io.File
 import java.nio.file.Files
 import kotlin.test.AfterTest
@@ -23,6 +24,7 @@ class ServeBrowseCookieTest {
 
   private lateinit var registry: ServeSessionRegistry
   private lateinit var server: ServeHttpServer
+  private val grants = ServeAgentGrantStore(maxScope = AgentGrantScope.PREVIEW)
   private val client = OkHttpClient.Builder().followRedirects(false).build()
 
   @BeforeTest
@@ -41,6 +43,7 @@ class ServeBrowseCookieTest {
           defaultSessionId = "local",
           wasmCatalogs = mapOf("local" to appDir),
           privateWasmCatalogs = setOf("local"),
+          agentGrants = grants,
         )
         .also { it.start() }
   }
@@ -84,6 +87,15 @@ class ServeBrowseCookieTest {
       assertEquals(302, response.code)
       assertEquals("/status", response.header("Location"))
     }
+  }
+
+  @Test
+  fun `cookie exchange redirects stay on this origin`() {
+    get("//attacker.example/?token=$TOKEN", *browserPage) { response ->
+      assertEquals(302, response.code)
+      assertEquals("/attacker.example/", response.header("Location"))
+    }
+    assertEquals("/attacker.example", ServeBrowseCookie.localRedirectPath("/\\/attacker.example"))
   }
 
   @Test
@@ -131,13 +143,48 @@ class ServeBrowseCookieTest {
   fun `the private wasm route accepts the derived access segment and old token URLs`() {
     val access = ServeBrowseCookie.wasmAccess(TOKEN)
     assertNotEquals(TOKEN, access)
-    assertEquals(200, get("/wasm-private/$access/local/") { it.code })
+    get("/wasm-private/$access/local/") {
+      assertEquals(200, it.code)
+      assertEquals("private, no-cache", it.header("Cache-Control"))
+    }
     assertEquals(
       "window.started = true",
       get("/wasm-private/$access/local/app.js") { it.body.string() },
     )
     assertEquals(200, get("/wasm-private/$TOKEN/local/") { it.code })
     assertEquals(404, get("/wasm-private/${ServeBrowseCookie.value(TOKEN)}/local/") { it.code })
+  }
+
+  @Test
+  fun `opaque iframe subresources use a grant-specific revocable path credential`() {
+    val request =
+      requireNotNull(
+        grants.openRequest(
+          label = "browser wasm",
+          client = "test",
+          requestedScope = AgentGrantScope.PREVIEW,
+          requestedTtlSeconds = 600,
+        )
+      )
+    val grant =
+      requireNotNull(
+        grants.approve(
+          request.id,
+          approvedBy = "operator",
+          scope = AgentGrantScope.PREVIEW,
+          ttlSeconds = 600,
+        )
+      )
+    val access = requireNotNull(grants.wasmCredentialFor(grant))
+    assertNotEquals(grant.token, access)
+
+    get("/wasm-private/$access/local/app.js") {
+      assertEquals(200, it.code)
+      assertEquals("window.started = true", it.body.string())
+      assertEquals("private, no-cache", it.header("Cache-Control"))
+    }
+    assertTrue(grants.revoke(grant.id, "test"))
+    assertEquals(404, get("/wasm-private/$access/local/app.js") { it.code })
   }
 
   @Test

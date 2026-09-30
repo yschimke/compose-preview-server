@@ -10,6 +10,7 @@ import ee.schimke.composeai.uibuilder.protocol.DesignAccessResponseV1
 import ee.schimke.composeai.uibuilder.protocol.DesignAccessRoleV1
 import ee.schimke.composeai.uibuilder.protocol.DesignDocumentV1
 import ee.schimke.composeai.uibuilder.protocol.DesignEnvironmentV1
+import ee.schimke.composeai.uibuilder.protocol.DesignHomeV1
 import ee.schimke.composeai.uibuilder.protocol.DesignMutationV1
 import ee.schimke.composeai.uibuilder.protocol.DesignNodeV1
 import ee.schimke.composeai.uibuilder.protocol.DesignsResponseV1
@@ -47,6 +48,7 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -106,6 +108,41 @@ class ServeUiBuilderMcpIntegrationTest {
   }
 
   @Test
+  fun `initialize states the canonical home rules when the builder is present`() {
+    val server = start()
+
+    val instructions =
+      post(
+          server,
+          """{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"${ServeCatalogMcp.MCP_PROTOCOL_VERSION}"}}""",
+        )["result"]!!
+        .jsonObject["instructions"]!!
+        .jsonPrimitive
+        .content
+
+    assertTrue(instructions.contains("`home` is canonical"), instructions)
+    assertTrue(instructions.contains("explicitly choosing"), instructions)
+    assertFalse(instructions.contains("pending comments"), instructions)
+  }
+
+  @Test
+  fun `initialize states the discussion rules when comments are supported`() {
+    val server = start(withComments = true)
+
+    val instructions =
+      post(
+          server,
+          """{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"${ServeCatalogMcp.MCP_PROTOCOL_VERSION}"}}""",
+        )["result"]!!
+        .jsonObject["instructions"]!!
+        .jsonPrimitive
+        .content
+
+    assertTrue(instructions.contains("pending comments"), instructions)
+    assertTrue(instructions.contains("never replaces that discussion"), instructions)
+  }
+
+  @Test
   fun `an agent creates, edits and exports a design without touching a browser`() {
     val server = start()
 
@@ -138,6 +175,10 @@ class ServeUiBuilderMcpIntegrationTest {
         )
       )
     assertEquals("agent-screen", snapshot.snapshot.designId)
+    assertEquals(
+      DesignHomeV1.Server(PUBLIC_ORIGIN, "agent-screen"),
+      snapshot.snapshot.state.document.home,
+    )
     val revision = snapshot.snapshot.state.document.revision
 
     // 4. The edit: a second text in the column, which is "add a component to a container" — the
@@ -177,11 +218,264 @@ class ServeUiBuilderMcpIntegrationTest {
         ServeUiBuilderMcp.EXPORT,
         """{"designId":"agent-screen","format":"compose"}""",
       )
-    val artifact = assertIs<ExportResponseV1>(response(exported)).artifact
+    val artifact = assertIs<ExportResponseV1>(response(exported), exported).artifact
     assertEquals(emptyList(), artifact.diagnostics, artifact.content)
     assertTrue(artifact.content.contains("""Text(text = "Opening keynote""""), artifact.content)
     assertTrue(artifact.content.contains("""Text(text = "Two sessions today""""), artifact.content)
     assertTrue(artifact.content.contains("Column {"), artifact.content)
+    assertTrue(
+      artifact.content.contains("// Canonical home: server $PUBLIC_ORIGIN design agent-screen."),
+      artifact.content,
+    )
+    // R3: the revision the export was cut from sits right beside the home, so an agent going back
+    // to edit the original knows what to quote as `baseRevision`.
+    assertTrue(
+      artifact.content.contains(
+        "// Canonical home: server $PUBLIC_ORIGIN design agent-screen.\n" +
+          "// Edit the original there at revision ${revision + 1} (quote it as baseRevision)."
+      ),
+      artifact.content,
+    )
+  }
+
+  @Test
+  fun `MCP refuses a create onto this server's canonical design with the R3 decision`() {
+    val server = start()
+    val initial =
+      """{"designId":"agent-screen","document":${json.encodeToString(DesignDocumentV1.serializer(), document())}}"""
+    envelope(server, ServeUiBuilderMcp.CREATE_DESIGN, initial)
+
+    val canonical =
+      document()
+        .copy(
+          home =
+            DesignHomeV1.Server(
+              // Equivalent to the configured origin once normalized.
+              "HTTPS://Designs.Example:443/",
+              "agent-screen",
+            )
+        )
+    val reimport =
+      """{"designId":"agent-screen","document":${json.encodeToString(DesignDocumentV1.serializer(), canonical)}}"""
+
+    val duplicate = call(server, ServeUiBuilderMcp.CREATE_DESIGN, reimport)
+    assertEquals(true, duplicate["isError"]?.jsonPrimitive?.content?.toBoolean())
+    val text = duplicate["content"]!!.jsonArray.first().jsonObject["text"]!!.jsonPrimitive.content
+    // The same `compose-preview-decision/v1` choices the save-back and move-home dry runs offer,
+    // so the agent can put them to the person rather than guess which of the three was meant.
+    val decision = Json.parseToJsonElement(text).jsonObject
+    assertEquals(
+      ServeUiBuilderMcp.DECISION_SCHEMA,
+      decision["schema"]!!.jsonPrimitive.content,
+      text,
+    )
+    assertEquals("import-onto-existing-home", decision["decision"]!!.jsonPrimitive.content)
+    assertEquals("agent-screen", decision["designId"]!!.jsonPrimitive.content)
+    assertEquals(0, decision["baseRevision"]!!.jsonPrimitive.content.toInt())
+    assertEquals(
+      "agent-screen already lives on this server; apply changes to the original instead with " +
+        ServeUiBuilderMcp.APPLY,
+      decision["reason"]!!.jsonPrimitive.content,
+    )
+    assertEquals(
+      listOf("apply-operations", "create-new", "cancel"),
+      decision["options"]!!.jsonArray.map { it.jsonObject["id"]!!.jsonPrimitive.content },
+    )
+    val guidance = decision["elicitation"]!!.jsonPrimitive.content
+    assertTrue(guidance.contains(ServeUiBuilderMcp.APPLY), guidance)
+    assertTrue(guidance.contains("`home` removed"), guidance)
+
+    // Nothing was written: the original is still at revision 0.
+    val snapshot =
+      assertIs<SnapshotResponseV1>(
+        response(
+          envelope(
+            server,
+            ServeUiBuilderMcp.GET_DESIGN,
+            """{"designId":"agent-screen","includeCatalog":true}""",
+          )
+        )
+      )
+    assertEquals(0, snapshot.snapshot.state.document.revision)
+
+    // `create-new` as the decision describes it: a new id, the home removed.
+    val copy = document().copy(id = "agent-screen-2", home = null)
+    assertIs<SnapshotResponseV1>(
+      response(
+        envelope(
+          server,
+          ServeUiBuilderMcp.CREATE_DESIGN,
+          """{"designId":"agent-screen-2","includeCatalog":true,"document":${json.encodeToString(DesignDocumentV1.serializer(), copy)}}""",
+        )
+      )
+    )
+  }
+
+  @Test
+  fun `MCP refuses to adopt a repository or foreign server home implicitly`() {
+    val server = start()
+    for ((designId, home) in
+      listOf(
+        "repo-owned" to DesignHomeV1.Repo("designs/repo-owned.uid"),
+        "foreign-owned" to DesignHomeV1.Server("https://other.example", "foreign-owned"),
+      )) {
+      val supplied = document().copy(id = designId, home = home)
+      val result =
+        call(
+          server,
+          ServeUiBuilderMcp.CREATE_DESIGN,
+          """{"designId":"$designId","document":${json.encodeToString(DesignDocumentV1.serializer(), supplied)}}""",
+        )
+      assertEquals(true, result["isError"]?.jsonPrimitive?.content?.toBoolean())
+      assertTrue(
+        result["content"]!!
+          .jsonArray
+          .first()
+          .jsonObject["text"]!!
+          .jsonPrimitive
+          .content
+          .contains("move it explicitly")
+      )
+    }
+  }
+
+  @Test
+  fun `remote MCP publishes design review and status prompts with honest unavailable-feature fallbacks`() {
+    val server = start()
+    val initialized =
+      post(
+          server,
+          """{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"test","version":"1"}}}""",
+        )["result"]!!
+        .jsonObject
+    assertTrue(initialized["capabilities"]!!.jsonObject.containsKey("prompts"))
+
+    val listed =
+      post(server, """{"jsonrpc":"2.0","id":2,"method":"prompts/list","params":{}}""")["result"]!!
+        .jsonObject["prompts"]!!
+        .jsonArray
+        .map { it.jsonObject["name"]!!.jsonPrimitive.content }
+    assertEquals(listOf("review-design", "design-status"), listed)
+
+    val review =
+      post(
+          server,
+          """{"jsonrpc":"2.0","id":3,"method":"prompts/get","params":{"name":"review-design","arguments":{"designId":"login"}}}""",
+        )["result"]!!
+        .jsonObject
+    val reviewText =
+      review["messages"]!!
+        .jsonArray
+        .single()
+        .jsonObject["content"]!!
+        .jsonObject["text"]!!
+        .jsonPrimitive
+        .content
+    assertTrue(reviewText.contains("ui_builder_list_comments"), reviewText)
+    assertTrue(reviewText.contains("ui_builder_view"), reviewText)
+    assertTrue(reviewText.contains("#1114"), reviewText)
+    // The tool exists now, so the prompt must not send an agent around it any more.
+    assertFalse(reviewText.contains("not available"), reviewText)
+
+    // `designId` is still checked as an id: a URL there is not silently parsed.
+    val invalid =
+      post(
+        server,
+        """{"jsonrpc":"2.0","id":31,"method":"prompts/get","params":{"name":"review-design","arguments":{"designId":"https://foreign.test/ui-builder/login"}}}""",
+      )
+    assertEquals(-32602, invalid["error"]!!.jsonObject["code"]!!.jsonPrimitive.content.toInt())
+
+    val reviewArguments =
+      post(server, """{"jsonrpc":"2.0","id":32,"method":"prompts/list","params":{}}""")["result"]!!
+        .jsonObject["prompts"]!!
+        .jsonArray
+        .single { it.jsonObject["name"]!!.jsonPrimitive.content == "review-design" }
+        .jsonObject["arguments"]!!
+        .jsonArray
+        .associate {
+          it.jsonObject["name"]!!.jsonPrimitive.content to
+            it.jsonObject["required"]!!.jsonPrimitive.content.toBoolean()
+        }
+    assertEquals(mapOf("designUrl" to true, "designId" to false), reviewArguments)
+
+    fun reviewByUrl(designUrl: String): JsonObject =
+      post(
+        server,
+        """{"jsonrpc":"2.0","id":33,"method":"prompts/get","params":{"name":"review-design","arguments":{"designUrl":"$designUrl"}}}""",
+      )
+
+    fun promptText(reply: JsonObject): String =
+      reply["result"]!!
+        .jsonObject["messages"]!!
+        .jsonArray
+        .single()
+        .jsonObject["content"]!!
+        .jsonObject["text"]!!
+        .jsonPrimitive
+        .content
+
+    for (accepted in
+      listOf(
+        "$PUBLIC_ORIGIN/ui-builder/login",
+        "HTTPS://Designs.Example:443/ui-builder/login/",
+        "/ui-builder/login",
+        "$PUBLIC_ORIGIN/ui-builder/m3-catalog/login",
+        "login",
+      )) {
+      val text = promptText(reviewByUrl(accepted))
+      assertTrue(text.contains("design `login`"), "$accepted -> $text")
+      assertFalse(text.contains("pointed at node"), "$accepted -> $text")
+    }
+    val withNode = promptText(reviewByUrl("$PUBLIC_ORIGIN/ui-builder/login?node=title&token=pg_x"))
+    assertTrue(withNode.contains("design `login`"), withNode)
+    assertTrue(withNode.contains("node `title`"), withNode)
+    // Only the id and the node reach the prompt; a credential pasted with the URL does not.
+    assertFalse(withNode.contains("pg_x"), withNode)
+
+    for (refused in
+      listOf(
+        "https://foreign.test/ui-builder/login",
+        "$PUBLIC_ORIGIN/somewhere/login",
+        "$PUBLIC_ORIGIN/ui-builder/",
+        "$PUBLIC_ORIGIN/ui-builder/a/b/login",
+        "ftp://designs.example/ui-builder/login",
+        "$PUBLIC_ORIGIN/ui-builder/login?node=%3Cscript%3E",
+      )) {
+      val reply = reviewByUrl(refused)
+      assertEquals(
+        -32602,
+        reply["error"]?.jsonObject?.get("code")?.jsonPrimitive?.content?.toInt(),
+        "$refused -> $reply",
+      )
+    }
+
+    val missing =
+      post(
+        server,
+        """{"jsonrpc":"2.0","id":34,"method":"prompts/get","params":{"name":"review-design","arguments":{}}}""",
+      )
+    assertTrue(
+      missing["error"]!!.jsonObject["message"]!!.jsonPrimitive.content.contains("designUrl"),
+      missing.toString(),
+    )
+
+    val status =
+      post(
+          server,
+          """{"jsonrpc":"2.0","id":4,"method":"prompts/get","params":{"name":"design-status","arguments":{"designId":"login"}}}""",
+        )["result"]!!
+        .jsonObject
+    val statusText =
+      status["messages"]!!
+        .jsonArray
+        .single()
+        .jsonObject["content"]!!
+        .jsonObject["text"]!!
+        .jsonPrimitive
+        .content
+    assertTrue(statusText.contains("`home`"), statusText)
+    assertTrue(statusText.contains("compose-preview design status"), statusText)
+    assertTrue(statusText.contains("never claim there are no copies"), statusText)
   }
 
   @Test
@@ -713,6 +1007,28 @@ class ServeUiBuilderMcpIntegrationTest {
   }
 
   @Test
+  fun `component search returns only the matching summaries`() {
+    val server = start()
+
+    val hits =
+      Json.parseToJsonElement(
+          envelope(server, ServeUiBuilderMcp.SEARCH_COMPONENTS, """{"query":"TEXT"}""")
+        )
+        .jsonObject
+    val components = hits.getValue("catalogs").jsonArray.single().jsonObject.getValue("components")
+    val ids = components.jsonArray.map { it.jsonObject.getValue("id").jsonPrimitive.content }
+    assertTrue("m3/text" in ids, ids.toString())
+    assertTrue("layout/column" !in ids, ids.toString())
+
+    val none =
+      Json.parseToJsonElement(
+          envelope(server, ServeUiBuilderMcp.SEARCH_COMPONENTS, """{"query":"no-such-thing"}""")
+        )
+        .jsonObject
+    assertTrue(none.getValue("catalogs").jsonArray.isEmpty(), none.toString())
+  }
+
+  @Test
   fun `an optional property can be unset with null, and a required one cannot`() {
     val server = start()
     envelope(
@@ -775,6 +1091,118 @@ class ServeUiBuilderMcpIntegrationTest {
     assertEquals("required property text is missing", refused.message)
     assertEquals("session", refused.nodeId)
     assertEquals("text", refused.field)
+  }
+
+  @Test
+  fun `an agent replaces a document and moves its canonical home with idempotent retries`() {
+    val server = start()
+    envelope(
+      server,
+      ServeUiBuilderMcp.CREATE_DESIGN,
+      """{"designId":"authoritative","document":${json.encodeToString(DesignDocumentV1.serializer(), document().copy(id = "authoritative"))}}""",
+    )
+    fun snapshot() =
+      assertIs<SnapshotResponseV1>(
+          response(
+            envelope(
+              server,
+              ServeUiBuilderMcp.GET_DESIGN,
+              """{"designId":"authoritative","includeCatalog":true}""",
+            )
+          )
+        )
+        .snapshot
+
+    val initial = snapshot().state.document
+    val replacement = initial.copy(title = "Saved from a temporary copy")
+    val replaceArguments =
+      """{"designId":"authoritative","operationId":"replace-1","baseRevision":0,"document":${json.encodeToString(DesignDocumentV1.serializer(), replacement)}}"""
+    // The R3 text fallback: a dry run validates, writes nothing, and lists the person's choices.
+    fun decision(tool: String, arguments: String): JsonObject =
+      json.parseToJsonElement(envelope(server, tool, arguments)).jsonObject
+    val replaceDecision =
+      decision(
+        ServeUiBuilderMcp.REPLACE_DESIGN_DOCUMENT,
+        replaceArguments.dropLast(1) + ""","dryRun":true}""",
+      )
+    assertEquals(
+      ServeUiBuilderMcp.DECISION_SCHEMA,
+      replaceDecision["schema"]!!.jsonPrimitive.content,
+    )
+    assertEquals(
+      listOf("save-back", "create-new", "discard", "keep"),
+      replaceDecision["options"]!!.jsonArray.map { it.jsonObject["id"]!!.jsonPrimitive.content },
+    )
+    assertEquals(0, snapshot().state.document.revision)
+    val dryMoveHome = assertNotNull(initial.home)
+    val moveDecision =
+      decision(
+        ServeUiBuilderMcp.MOVE_DESIGN_HOME,
+        """{"designId":"authoritative","operationId":"dry-move","baseRevision":0,"sourceHome":${json.encodeToString(DesignHomeV1.serializer(), dryMoveHome)},"targetHome":${json.encodeToString(DesignHomeV1.serializer(), DesignHomeV1.Repo("designs/authoritative.uid"))},"dryRun":true}""",
+      )
+    assertEquals("move-design-home", moveDecision["decision"]!!.jsonPrimitive.content)
+    assertEquals(
+      listOf("move", "cancel"),
+      moveDecision["options"]!!.jsonArray.map { it.jsonObject["id"]!!.jsonPrimitive.content },
+    )
+    assertEquals(dryMoveHome, snapshot().state.document.home)
+    val replaced =
+      assertIs<AcceptedOutcomeV1>(
+        assertIs<OperationOutcomeResponseV1>(
+            response(envelope(server, ServeUiBuilderMcp.REPLACE_DESIGN_DOCUMENT, replaceArguments))
+          )
+          .outcome
+      )
+    assertEquals(1, replaced.committedRevision)
+    assertEquals("Saved from a temporary copy", snapshot().state.document.title)
+    // A retry with the same operation id returns the original outcome without a second revision.
+    val replaceReplay =
+      assertIs<AcceptedOutcomeV1>(
+        assertIs<OperationOutcomeResponseV1>(
+            response(envelope(server, ServeUiBuilderMcp.REPLACE_DESIGN_DOCUMENT, replaceArguments))
+          )
+          .outcome
+      )
+    assertEquals(replaced.copy(idempotentReplay = true), replaceReplay)
+    assertEquals(1, snapshot().state.document.revision)
+
+    val sourceHome = assertNotNull(snapshot().state.document.home)
+    val targetHome = DesignHomeV1.Repo("designs/authoritative.uid")
+    val moveArguments =
+      """{"designId":"authoritative","operationId":"move-1","baseRevision":1,"sourceHome":${json.encodeToString(DesignHomeV1.serializer(), sourceHome)},"targetHome":${json.encodeToString(DesignHomeV1.serializer(), targetHome)}}"""
+    val moved =
+      assertIs<AcceptedOutcomeV1>(
+        assertIs<OperationOutcomeResponseV1>(
+            response(envelope(server, ServeUiBuilderMcp.MOVE_DESIGN_HOME, moveArguments))
+          )
+          .outcome
+      )
+    assertEquals(2, moved.committedRevision)
+    assertEquals(targetHome, snapshot().state.document.home)
+    val moveReplay =
+      assertIs<AcceptedOutcomeV1>(
+        assertIs<OperationOutcomeResponseV1>(
+            response(envelope(server, ServeUiBuilderMcp.MOVE_DESIGN_HOME, moveArguments))
+          )
+          .outcome
+      )
+    assertEquals(moved.copy(idempotentReplay = true), moveReplay)
+    assertEquals(2, snapshot().state.document.revision)
+
+    val stale =
+      assertIs<RejectedOutcomeV1>(
+        assertIs<OperationOutcomeResponseV1>(
+            response(
+              envelope(
+                server,
+                ServeUiBuilderMcp.MOVE_DESIGN_HOME,
+                """{"designId":"authoritative","operationId":"stale-move","baseRevision":1,"sourceHome":${json.encodeToString(DesignHomeV1.serializer(), sourceHome)},"targetHome":${json.encodeToString(DesignHomeV1.serializer(), targetHome)}}""",
+              )
+            )
+          )
+          .outcome
+      )
+    assertEquals(RejectionCodeV1.REVISION_MISMATCH, stale.code)
   }
 
   @Test
@@ -858,23 +1286,52 @@ class ServeUiBuilderMcpIntegrationTest {
     // agent this server can do something it cannot, which is worse than silence.
     val without = tools(start(withUiBuilder = false))
     assertTrue(ServeUiBuilderMcp.TOOL_NAMES.none { it in without }, without.toString())
-    assertTrue("render_preview" in without, without.toString())
+    assertTrue("catalog_render_preview" in without, without.toString())
   }
 
   @Test
-  fun `the native render tool appears only where the host can compile`() {
-    // Two absences, not one: a box with no builder has no UI-builder tools at all, and a box with
-    // a builder but no compiler has the six that need no compiler and not the seventh. A client
-    // reads which of the three it is talking to off `tools/list` rather than off a failed call.
-    val withoutCompiler = tools(start())
+  fun `home mutation schema advertises the closed server and repo variants`() {
+    val move =
+      toolDefinitions(start()).single {
+        it["name"]!!.jsonPrimitive.content == ServeUiBuilderMcp.MOVE_DESIGN_HOME
+      }
+    val properties = move["inputSchema"]!!.jsonObject["properties"]!!.jsonObject
+    val target = properties["targetHome"]!!.jsonObject
+    val sourceChoices = properties["sourceHome"]!!.jsonObject["anyOf"]!!.jsonArray
+    assertEquals("null", sourceChoices.first().jsonObject["type"]!!.jsonPrimitive.content)
+    assertHomeSchema(sourceChoices.last().jsonObject)
+    assertHomeSchema(target)
+  }
+
+  @Test
+  fun `the native render tool returns a stable refusal where the host cannot compile`() {
+    // A server with a builder advertises the same authoring surface regardless of whether this
+    // particular deployment carries a compiler. A client can therefore call one stable tool and
+    // branch on a stable code instead of treating an absent declaration as an ambiguous version or
+    // configuration mismatch.
+    val server = start()
+    val withoutCompiler = tools(server)
     assertTrue(
       ServeUiBuilderMcp.TOOL_NAMES.all { it in withoutCompiler },
       withoutCompiler.toString(),
     )
-    assertTrue(
-      ServeUiBuilderMcp.NATIVE_TOOL_NAMES.none { it in withoutCompiler },
-      withoutCompiler.toString(),
+    assertTrue(ServeUiBuilderMcp.NATIVE_TOOL_NAMES.all { it in withoutCompiler })
+
+    envelope(
+      server,
+      ServeUiBuilderMcp.CREATE_DESIGN,
+      """{"designId":"agent-screen","document":${json.encodeToString(DesignDocumentV1.serializer(), document())}}""",
     )
+    val refusal =
+      json.decodeFromString<NativePreviewRefusalV1>(
+        envelope(
+          server,
+          ServeUiBuilderMcp.RENDER_NATIVE,
+          """{"designId":"agent-screen"}""",
+        )
+      )
+    assertEquals(ServeUiBuilderMcp.NATIVE_RENDER_UNAVAILABLE, refusal.code)
+    assertTrue(refusal.reasons.single().contains("no native render lane"), refusal.toString())
   }
 
   @Test
@@ -970,6 +1427,209 @@ class ServeUiBuilderMcpIntegrationTest {
   }
 
   @Test
+  fun `ui_builder_view is declared read-gated and opens in the MCP App viewer`() {
+    val server = start(withPngExport = true)
+
+    val view =
+      toolDefinitions(server).single {
+        it["name"]!!.jsonPrimitive.content == ServeUiBuilderMcp.VIEW
+      }
+    assertEquals(
+      ServeCatalogMcp.MCP_APP_VIEWER_URI,
+      view["_meta"]!!.jsonObject["ui"]!!.jsonObject["resourceUri"]!!.jsonPrimitive.content,
+    )
+    val properties = view["inputSchema"]!!.jsonObject["properties"]!!.jsonObject
+    assertTrue(
+      listOf("designId", "revision", "viewport", "include", "selection", "renderer", "inline").all {
+        it in properties
+      },
+      properties.toString(),
+    )
+  }
+
+  @Test
+  fun `ui_builder_view outlines the selection, reports its box and the pins, and links a PNG that resolves`() {
+    val selected = ServeUiBuilderView.Box(16, 24, 200, 40)
+    val server =
+      start(
+        withComments = true,
+        nativePreview =
+          UiBuilderNativePreviewLane { _, _ ->
+            UiBuilderNativePreviewOutcome.Rendered(
+              response =
+                PlaygroundRunResponse(
+                  previewId = "generated",
+                  previewToken = "token",
+                  image = java.util.Base64.getEncoder().encodeToString(VIEW_FRAME),
+                ),
+              taggedNodeIds = listOf("column", "session"),
+              nodeBounds =
+                mapOf(
+                  "column" to AnnotationBounds(x = 0, y = 0, width = 400, height = 800),
+                  "session" to
+                    AnnotationBounds(
+                      x = selected.x,
+                      y = selected.y,
+                      width = selected.width,
+                      height = selected.height,
+                    ),
+                ),
+            )
+          },
+      )
+    envelope(
+      server,
+      ServeUiBuilderMcp.CREATE_DESIGN,
+      """{"designId":"agent-screen","document":${json.encodeToString(DesignDocumentV1.serializer(), document())}}""",
+    )
+    envelope(
+      server,
+      ServeUiBuilderMcp.POST_COMMENT,
+      """{"designId":"agent-screen","nodeId":"session","body":"The keynote title is cramped"}""",
+    )
+    envelope(
+      server,
+      ServeUiBuilderMcp.POST_COMMENT,
+      """{"designId":"agent-screen","x":0.5,"y":0.25,"body":"Too much empty space here"}""",
+    )
+
+    val result =
+      call(
+        server,
+        ServeUiBuilderMcp.VIEW,
+        """{"designId":"agent-screen","selection":["session"],"renderer":"native","include":["selection","comments","bounds"]}""",
+      )
+    assertEquals(null, result["isError"], result.toString())
+    val content = result["content"]!!.jsonArray.map { it.jsonObject }
+    val view = Json.parseToJsonElement(content.first()["text"]!!.jsonPrimitive.content).jsonObject
+    assertFalse("imageBase64" in view, "the picture must not travel as text")
+    assertEquals("agent-screen", view["designId"]!!.jsonPrimitive.content)
+    assertEquals(0L, view["revision"]!!.jsonPrimitive.content.toLong())
+    assertEquals("native", view["renderer"]!!.jsonPrimitive.content)
+
+    // The selected node's box, in the returned image's pixels.
+    val session =
+      view["nodes"]!!
+        .jsonArray
+        .map { it.jsonObject }
+        .single { it["nodeId"]!!.jsonPrimitive.content == "session" }
+    assertEquals("true", session["selected"]!!.jsonPrimitive.content)
+    assertEquals(
+      listOf(selected.x, selected.y, selected.width, selected.height),
+      listOf("x", "y", "width", "height").map { session[it]!!.jsonPrimitive.content.toInt() },
+    )
+
+    // Both threads are pinned: one at the node's corner, one at its frame fraction.
+    val pins = view["comments"]!!.jsonArray.map { it.jsonObject }
+    assertEquals(2, pins.size, pins.toString())
+    assertTrue(pins.all { it["placed"]!!.jsonPrimitive.content == "true" }, pins.toString())
+    val nodePin = pins.single { it["anchor"]!!.jsonPrimitive.content == "node" }
+    assertEquals(selected.x, nodePin["x"]!!.jsonPrimitive.content.toInt())
+    assertEquals(selected.y, nodePin["y"]!!.jsonPrimitive.content.toInt())
+    val pointPin = pins.single { it["anchor"]!!.jsonPrimitive.content == "point" }
+    assertEquals(200, pointPin["x"]!!.jsonPrimitive.content.toInt())
+    assertEquals(200, pointPin["y"]!!.jsonPrimitive.content.toInt())
+
+    // A link by default, not bytes; and the link is a picture anybody holding it can fetch.
+    assertTrue(content.none { it["type"]!!.jsonPrimitive.content == "image" }, content.toString())
+    val link = content.single { it["type"]!!.jsonPrimitive.content == "resource_link" }
+    val url = link["uri"]!!.jsonPrimitive.content
+    assertTrue(url.startsWith("$PUBLIC_ORIGIN${ServeCatalogMcp.IMAGE_URL_PATH}?"), url)
+    assertEquals(url, view["image"]!!.jsonObject["url"]!!.jsonPrimitive.content)
+    val png =
+      client
+        .newCall(
+          Request.Builder()
+            .url(url.replace(PUBLIC_ORIGIN, "http://127.0.0.1:${server.server.port}"))
+            .build()
+        )
+        .execute()
+        .use {
+          assertEquals(200, it.code)
+          assertEquals("image/png", it.header("Content-Type"))
+          it.body.bytes()
+        }
+    val picture = javax.imageio.ImageIO.read(png.inputStream())
+    assertEquals(400, picture.width)
+    assertEquals(800, picture.height)
+    // The outline is drawn on the selected node's edge, and the frame elsewhere is untouched.
+    val edge = java.awt.Color(picture.getRGB(selected.x, selected.y + selected.height / 2))
+    assertTrue(edge.blue > 200 && edge.red < 100, "selection outline at the node's edge: $edge")
+    assertEquals(java.awt.Color.WHITE.rgb, picture.getRGB(380, 780))
+
+    // A tampered signature is a 404, not a picture.
+    client
+      .newCall(
+        Request.Builder()
+          .url(
+            url
+              .replace(PUBLIC_ORIGIN, "http://127.0.0.1:${server.server.port}")
+              .replace("sig=", "sig=x")
+          )
+          .build()
+      )
+      .execute()
+      .use { assertEquals(404, it.code) }
+  }
+
+  @Test
+  fun `ui_builder_view from the PNG export says it has no bounds and inlines on request`() {
+    val server = start(withPngExport = true)
+    envelope(
+      server,
+      ServeUiBuilderMcp.CREATE_DESIGN,
+      """{"designId":"agent-screen","document":${json.encodeToString(DesignDocumentV1.serializer(), document())}}""",
+    )
+
+    val result =
+      call(
+        server,
+        ServeUiBuilderMcp.VIEW,
+        """{"designId":"agent-screen","selection":["session"],"inline":true,"viewport":{"width":200,"height":200}}""",
+      )
+    assertEquals(null, result["isError"], result.toString())
+    val content = result["content"]!!.jsonArray.map { it.jsonObject }
+    val view = Json.parseToJsonElement(content.first()["text"]!!.jsonPrimitive.content).jsonObject
+    assertEquals("export", view["renderer"]!!.jsonPrimitive.content)
+    assertNotNull(view["boundsUnavailable"], view.toString())
+    assertTrue(view["nodes"]!!.jsonArray.isEmpty(), view.toString())
+    // Never outlined at a guessed position: the note says why the selection is not drawn.
+    assertTrue(
+      view["notes"]!!.jsonArray.any { it.jsonPrimitive.content.contains("`session`") },
+      view.toString(),
+    )
+    // The viewport fits a 400x800 frame into 200x200 by height.
+    assertEquals(100, view["image"]!!.jsonObject["widthPx"]!!.jsonPrimitive.content.toInt())
+    assertEquals(200, view["image"]!!.jsonObject["heightPx"]!!.jsonPrimitive.content.toInt())
+    val image = content.single { it["type"]!!.jsonPrimitive.content == "image" }
+    val picture =
+      javax.imageio.ImageIO.read(
+        java.util.Base64.getDecoder().decode(image["data"]!!.jsonPrimitive.content).inputStream()
+      )
+    assertEquals(100, picture.width)
+    assertEquals(200, picture.height)
+    assertTrue(content.any { it["type"]!!.jsonPrimitive.content == "resource_link" })
+  }
+
+  @Test
+  fun `ui_builder_view refuses a design the actor cannot read and an unknown overlay`() {
+    val server = start(withPngExport = true)
+    val missing = call(server, ServeUiBuilderMcp.VIEW, """{"designId":"nobody-made-this"}""")
+    assertEquals("true", missing["isError"]?.jsonPrimitive?.content, missing.toString())
+
+    envelope(
+      server,
+      ServeUiBuilderMcp.CREATE_DESIGN,
+      """{"designId":"agent-screen","document":${json.encodeToString(DesignDocumentV1.serializer(), document())}}""",
+    )
+    val unknown =
+      call(server, ServeUiBuilderMcp.VIEW, """{"designId":"agent-screen","include":["grid"]}""")
+    assertEquals("true", unknown["isError"]?.jsonPrimitive?.content, unknown.toString())
+    val text = unknown["content"]!!.jsonArray.first().jsonObject["text"]!!.jsonPrimitive.content
+    assertTrue(text.contains("grid"), text)
+  }
+
+  @Test
   fun `a caller without the capability is refused by name rather than served`() {
     // The service is configured; the authorization is not. The refusal has to say which grant is
     // missing, because "unauthorized" on a surface with three capabilities is not actionable.
@@ -988,6 +1648,10 @@ class ServeUiBuilderMcpIntegrationTest {
     recordFile: File? = ScreenGeneratorScreenFixture.componentsFile(),
     catalogSystemId: String = CATALOG_SYSTEM_ID,
     withRemoteExports: Boolean = false,
+    withComments: Boolean = false,
+    /** Answers a PNG export with [VIEW_FRAME], standing in for the packaged renderer. */
+    withPngExport: Boolean = false,
+    nativePreview: UiBuilderNativePreviewLane? = null,
   ): RunningServer {
     val registry = ServeSessionRegistry(open = { null })
     val service =
@@ -1003,7 +1667,7 @@ class ServeUiBuilderMcpIntegrationTest {
                   .also {
                     it.composeCode = true
                     it.svg = false
-                    it.png = false
+                    it.png = withPngExport
                   }
                   .build()
                   .let {
@@ -1019,7 +1683,28 @@ class ServeUiBuilderMcpIntegrationTest {
                 ComponentRecordSource(recordFile?.let { mapOf(catalogSystemId to it) }.orEmpty())::
                   record
               )
-              .let { if (withRemoteExports) RemoteDocumentExportExecutor(it) else it },
+              .let { if (withRemoteExports) RemoteDocumentExportExecutor(it) else it }
+              .let { delegate ->
+                if (!withPngExport) delegate
+                else
+                  ee.schimke.composeai.uibuilder.service.UiBuilderExportExecutor { request ->
+                    if (
+                      request.format != ee.schimke.composeai.uibuilder.protocol.ExportFormatV1.PNG
+                    )
+                      delegate.export(request)
+                    else
+                      ee.schimke.composeai.uibuilder.protocol.ExportArtifactV1(
+                        ee.schimke.composeai.uibuilder.protocol.ExportFormatV1.PNG,
+                        "image/png",
+                        ee.schimke.composeai.uibuilder.protocol.ExportEncodingV1.BASE64,
+                        java.util.Base64.getEncoder().encodeToString(VIEW_FRAME),
+                        java.security.MessageDigest.getInstance("SHA-256")
+                          .digest(VIEW_FRAME)
+                          .joinToString("") { "%02x".format(it) },
+                        emptyList(),
+                      )
+                  }
+              },
           assets =
             if (withAssets) FileUiBuilderAssetStore(stateDirectory.resolve("assets")) else null,
         )
@@ -1027,6 +1712,7 @@ class ServeUiBuilderMcpIntegrationTest {
       ServeHttpServer(
           host = "127.0.0.1",
           requestedPort = 0,
+          canonicalOrigin = PUBLIC_ORIGIN,
           token = OPERATOR_TOKEN,
           sessions = registry,
           defaultSessionId = "unused",
@@ -1034,10 +1720,14 @@ class ServeUiBuilderMcpIntegrationTest {
           machineAuthorization = ServeMachineAuthorization(OPERATOR_TOKEN, null, null),
           uiBuilderService = service,
           uiBuilderAssets = if (withAssets) service else null,
+          uiBuilderCommentStore =
+            if (withComments) ServeUiBuilderCommentStore(stateDirectory.resolve("comments"))
+            else null,
           uiBuilderAuthorization =
             if (withAuthorization)
               ServeUiBuilderAuthorization.fromServeIdentity(OPERATOR_TOKEN, null, null)
             else null,
+          uiBuilderNativePreview = nativePreview,
         )
         .also(ServeHttpServer::start)
     return RunningServer(server, registry).also { running = it }
@@ -1064,10 +1754,32 @@ class ServeUiBuilderMcpIntegrationTest {
     json.decodeFromString(McpResponseEnvelopeV1.serializer(), envelope).response
 
   private fun tools(server: RunningServer): List<String> =
+    toolDefinitions(server).map { it["name"]!!.jsonPrimitive.content }
+
+  private fun toolDefinitions(server: RunningServer): List<JsonObject> =
     post(server, """{"jsonrpc":"2.0","id":1,"method":"tools/list"}""")["result"]!!
       .jsonObject["tools"]!!
       .jsonArray
-      .map { it.jsonObject["name"]!!.jsonPrimitive.content }
+      .map { it.jsonObject }
+
+  private fun assertHomeSchema(schema: JsonObject) {
+    val variants = schema["oneOf"]!!.jsonArray.map { it.jsonObject }
+    assertEquals(
+      listOf("server", "repo"),
+      variants.map { variant ->
+        variant["properties"]!!.jsonObject["kind"]!!.jsonObject["const"]!!.jsonPrimitive.content
+      },
+    )
+    assertEquals(
+      setOf("kind", "url", "designId"),
+      variants.first()["required"]!!.jsonArray.map { it.jsonPrimitive.content }.toSet(),
+    )
+    assertEquals(
+      setOf("kind", "path"),
+      variants.last()["required"]!!.jsonArray.map { it.jsonPrimitive.content }.toSet(),
+    )
+    variants.forEach { assertEquals("false", it["additionalProperties"]!!.jsonPrimitive.content) }
+  }
 
   private fun post(server: RunningServer, body: String) =
     client
@@ -1146,7 +1858,21 @@ class ServeUiBuilderMcpIntegrationTest {
         byteArrayOf(0, 0, 0, 40, 0, 0, 0, 40) +
         byteArrayOf(8, 6, 0, 0, 0) +
         ByteArray(4)
+    /** A plain white 400x800 frame: the document's environment at density 1. */
+    val VIEW_FRAME: ByteArray = run {
+      val image = java.awt.image.BufferedImage(400, 800, java.awt.image.BufferedImage.TYPE_INT_RGB)
+      image.createGraphics().apply {
+        color = java.awt.Color.WHITE
+        fillRect(0, 0, 400, 800)
+        dispose()
+      }
+      java.io
+        .ByteArrayOutputStream()
+        .also { javax.imageio.ImageIO.write(image, "png", it) }
+        .toByteArray()
+    }
     const val OPERATOR_TOKEN = "ui-builder-mcp-operator-token"
+    const val PUBLIC_ORIGIN = "https://designs.example"
     const val CATALOG_SYSTEM_ID = "m3-catalog"
     val JSON_MEDIA_TYPE = "application/json".toMediaType()
   }

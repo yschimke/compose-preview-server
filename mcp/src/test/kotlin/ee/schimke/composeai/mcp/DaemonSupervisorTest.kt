@@ -4,6 +4,8 @@ import com.google.common.truth.Truth.assertThat
 import ee.schimke.composeai.daemon.client.WorkspaceId
 import java.io.File
 import kotlin.io.path.createTempDirectory
+import kotlin.time.Duration.Companion.milliseconds
+import kotlin.time.Duration.Companion.seconds
 import org.junit.Test
 
 class DaemonSupervisorTest {
@@ -19,6 +21,104 @@ class DaemonSupervisorTest {
 
     assertThat(project.rootProjectName).isEqualTo("workspace")
     assertThat(project.workspaceId.value).startsWith("workspace-")
+  }
+
+  @Test
+  fun `a restarted supervisor re-registers a stored workspace id from workspaces json`() {
+    val root = createTempDirectory("cp-supervisor-store").toFile()
+    val project = File(root, "ComposeStarter").apply { mkdirs() }
+    val storeFile = File(root, "cache/composeai/mcp/workspaces.json")
+    val first =
+      DaemonSupervisor(
+        descriptorProvider = FakeDescriptorProvider(),
+        clientFactory = FakeDaemonClientFactory(),
+        workspaceStore = WorkspaceStore(storeFile),
+      )
+    val id = first.registerProject(project).workspaceId
+    first.shutdown()
+    assertThat(storeFile.readText()).contains(project.canonicalPath)
+
+    // A new process: nothing registered in memory, but the id still resolves, lazily.
+    val restarted =
+      DaemonSupervisor(
+        descriptorProvider = FakeDescriptorProvider(),
+        clientFactory = FakeDaemonClientFactory(),
+        workspaceStore = WorkspaceStore(storeFile),
+      )
+    assertThat(restarted.listProjects()).isEmpty()
+    assertThat(restarted.daemonFor(id, ":app").workspaceId).isEqualTo(id)
+    assertThat(restarted.project(id)?.path).isEqualTo(project.canonicalFile)
+    assertThat(restarted.registerProject(project).workspaceId).isEqualTo(id)
+    restarted.shutdown()
+
+    // Roots or the cwd inside a stored build bring it back too.
+    val third =
+      DaemonSupervisor(
+        descriptorProvider = FakeDescriptorProvider(),
+        clientFactory = FakeDaemonClientFactory(),
+        workspaceStore = WorkspaceStore(storeFile),
+      )
+    assertThat(third.restoreMatching(listOf(File(project, "app/src"))).map { it.workspaceId })
+      .containsExactly(id)
+
+    // Only unregister_project forgets an id.
+    third.unregisterProject(id)
+    assertThat(WorkspaceStore(storeFile).get(id.value)).isNull()
+    third.shutdown()
+  }
+
+  @Test
+  fun `a handshake slower than the client default still caches the capabilities`() {
+    val factory = FakeDaemonClientFactory()
+    factory.daemonConfigurer = { daemon ->
+      daemon.advertisedDataProducts =
+        listOf(
+          ee.schimke.composeai.daemon.protocol.DataProductCapability(
+            kind = "compose/semantics",
+            schemaVersion = 1,
+            transport = ee.schimke.composeai.daemon.protocol.DataProductTransport.INLINE,
+            attachable = false,
+            fetchable = true,
+            requiresRerender = false,
+          )
+        )
+      daemon.advertisedSupportedOverrides = listOf("device")
+      // A Robolectric daemon answers only once its sandbox is up.
+      daemon.onInitializeReceived = { Thread.sleep(1_500) }
+    }
+    fun spawnWith(timeout: kotlin.time.Duration): SupervisedDaemon {
+      val supervisor =
+        DaemonSupervisor(
+          descriptorProvider = FakeDescriptorProvider(),
+          clientFactory = factory,
+          initializeTimeout = timeout,
+        )
+      val root = createTempDirectory("cp-supervisor-slow").toFile()
+      return supervisor.daemonFor(supervisor.registerProject(root).workspaceId, ":app")
+    }
+
+    // The failure mode: a timed-out handshake leaves the caches empty for the daemon's lifetime.
+    val timedOut = spawnWith(500.milliseconds)
+    assertThat(timedOut.dataProductCapabilities).isEmpty()
+    timedOut.shutdown()
+
+    val slow = spawnWith(10.seconds)
+    assertThat(slow.dataProductCapabilities.map { it.kind }).containsExactly("compose/semantics")
+    assertThat(slow.supportedOverrides).containsExactly("device")
+    slow.shutdown()
+
+    assertThat(DaemonSupervisor.DEFAULT_INITIALIZE_TIMEOUT).isAtLeast(120.seconds)
+  }
+
+  @Test
+  fun `initialize timeout reads positive seconds and falls back otherwise`() {
+    assertThat(DaemonMcpMain.parseInitializeTimeout("300")).isEqualTo(300.seconds)
+    assertThat(DaemonMcpMain.parseInitializeTimeout(null))
+      .isEqualTo(DaemonSupervisor.DEFAULT_INITIALIZE_TIMEOUT)
+    assertThat(DaemonMcpMain.parseInitializeTimeout("0"))
+      .isEqualTo(DaemonSupervisor.DEFAULT_INITIALIZE_TIMEOUT)
+    assertThat(DaemonMcpMain.parseInitializeTimeout("soon"))
+      .isEqualTo(DaemonSupervisor.DEFAULT_INITIALIZE_TIMEOUT)
   }
 
   @Test

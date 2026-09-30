@@ -138,6 +138,46 @@ class DesignCommandTest {
   }
 
   @Test
+  fun `view writes the canvas beside a render and carries its own flags`() {
+    val options =
+      run(
+        "view",
+        "w",
+        "--select",
+        "a,b",
+        "--select",
+        "c",
+        "--include",
+        "selection,bounds",
+        "--viewport",
+        "800x600",
+        "--renderer",
+        "native",
+      )
+    assertEquals(DesignCommand.VIEW, options.verb)
+    assertEquals("w.view.png", options.destination)
+    assertNull(options.format)
+    assertEquals(listOf("a", "b", "c"), options.selection)
+    assertEquals(listOf("selection", "bounds"), options.include)
+    assertEquals(800 to 600, options.viewport)
+    // Looking is reading; the native frame compiles the design, which is an export.
+    assertEquals(
+      listOf(AgentGrantCapability.UI_BUILDER_READ, AgentGrantCapability.UI_BUILDER_EXPORT),
+      options.capabilities,
+    )
+    assertEquals(listOf(AgentGrantCapability.UI_BUILDER_READ), run("view", "w").capabilities)
+    assertNull(run("view", "w").include)
+
+    assertTrue(invalid("view").contains("design id is required"))
+    assertTrue(invalid("view", "w", "--include", "grid").contains("grid"))
+    assertTrue(invalid("view", "w", "--viewport", "wide").contains("<width>x<height>"))
+    assertTrue(invalid("view", "w", "--renderer", "wasm").contains("wasm"))
+    assertTrue(invalid("view", "w", "--format", "png").contains("render and export only"))
+    assertTrue(invalid("render", "w", "--select", "a").contains("apply to view only"))
+    assertTrue(invalid("view", "w", "--local").contains("--local applies to"))
+  }
+
+  @Test
   fun `a verb that needs a design id says so`() {
     assertTrue(invalid("render").contains("design id is required"))
     assertTrue(invalid("get").contains("design id is required"))
@@ -163,6 +203,20 @@ class DesignCommandTest {
   fun `authorising is the default and can be turned off for CI`() {
     assertTrue(run("render", "w").authorize)
     assertTrue(!run("render", "w", "--no-authorize").authorize)
+  }
+
+  @Test
+  fun `status is bounded non-authorising and takes workspace output modes`() {
+    val options = run("status", "--workspace", "/work", "--summary")
+    assertEquals(DesignCommand.STATUS, options.verb)
+    assertEquals("/work", options.workspace)
+    assertTrue(options.summary)
+    assertTrue(!options.authorize)
+    assertEquals(5L, options.timeoutSeconds)
+    assertEquals(3L, run("status", "--timeout", "3", "--json").timeoutSeconds)
+    assertTrue(invalid("status", "design-id").contains("takes no design id"))
+    assertTrue(invalid("status", "--json", "--summary").contains("mutually exclusive"))
+    assertTrue(invalid("list", "--json").contains("apply to status only"))
   }
 
   /** `design` is reachable from the binary's front door, and it is not a serving command. */

@@ -1,5 +1,170 @@
 # Changelog
 
+## [3.88.0](https://github.com/yschimke/compose-preview-server/compare/v3.87.0...v3.88.0) (2026-09-30)
+
+
+### ⚠ BREAKING CHANGES
+
+* **mcp:** prefix the hosted catalog's data tools with catalog_ ([#1225](https://github.com/yschimke/compose-preview-server/issues/1225))
+
+### Features
+
+* **mcp:** add ui_builder_search_components for targeted catalog lookup ([#1222](https://github.com/yschimke/compose-preview-server/issues/1222)) ([0b4b16a](https://github.com/yschimke/compose-preview-server/commit/0b4b16a7e0f2768a2e3eadd8d02b18619afc5f9b))
+* **mcp:** prefix the hosted catalog's data tools with catalog_ ([#1225](https://github.com/yschimke/compose-preview-server/issues/1225)) ([bdf15d3](https://github.com/yschimke/compose-preview-server/commit/bdf15d3837fb8bc9ddb2d5c599eb168cdfbad4c4))
+* **serve:** --github-auth-open-ui-builder lets any signed-in member edit designs ([#1227](https://github.com/yschimke/compose-preview-server/issues/1227)) ([a96840b](https://github.com/yschimke/compose-preview-server/commit/a96840baef067f6647589861ec0f2b7b466f192c))
+
+
+### Bug Fixes
+
+* **mcp:** follow-ups to the auto-registration, grid and call-budget changes ([#1223](https://github.com/yschimke/compose-preview-server/issues/1223)) ([f8dc2bd](https://github.com/yschimke/compose-preview-server/commit/f8dc2bd97d7c5088dd4a3e6deccfe4deffe4e37f))
+
+## [3.87.0](https://github.com/yschimke/compose-preview-server/compare/v3.86.0...v3.87.0) (2026-09-29)
+
+
+### Features
+
+* **ui-builder:** identity reports write access and where to sign in ([#1217](https://github.com/yschimke/compose-preview-server/issues/1217)) ([9da060d](https://github.com/yschimke/compose-preview-server/commit/9da060d7924bfaae5594066c69f444fdee2f10d8))
+
+
+### Bug Fixes
+
+* **deps:** update rc-players to v2 ([#1216](https://github.com/yschimke/compose-preview-server/issues/1216)) ([3003869](https://github.com/yschimke/compose-preview-server/commit/3003869f809bb6e998ba163464da8a6383699a48))
+* **deps:** update the UI builder to 3.68.0 ([#1219](https://github.com/yschimke/compose-preview-server/issues/1219)) ([9131ed3](https://github.com/yschimke/compose-preview-server/commit/9131ed3c57a5532776b549a2ea715d0a3434d7e4))
+
+## [3.86.0](https://github.com/yschimke/compose-preview-server/compare/v3.85.0...v3.86.0) (2026-09-28)
+
+
+### Features
+
+* **mcp:** warm the project's daemon on register_project ([#1214](https://github.com/yschimke/compose-preview-server/issues/1214)) ([c14063a](https://github.com/yschimke/compose-preview-server/commit/c14063a36e8c02b2e9839f9cd979d64ef228092c))
+
+## [3.85.0](https://github.com/yschimke/compose-preview-server/compare/v3.84.0...v3.85.0) (2026-09-28)
+
+
+### Bug Fixes
+
+* **mcp:** enable the a11y and layout extensions render_preview details need ([#1212](https://github.com/yschimke/compose-preview-server/issues/1212)) ([0e34a29](https://github.com/yschimke/compose-preview-server/commit/0e34a2948410ac1bb306c32dcd5d470bb96fd154))
+* **mcp:** never fake a preview render with a hand-built mock ([#1209](https://github.com/yschimke/compose-preview-server/issues/1209)) ([49c2f2a](https://github.com/yschimke/compose-preview-server/commit/49c2f2a1c705f451ba276c1e67d4f225b65c2e2b))
+* **mcp:** return a pending result before the client timeout on cold renders ([#1210](https://github.com/yschimke/compose-preview-server/issues/1210)) ([e8f7834](https://github.com/yschimke/compose-preview-server/commit/e8f783499ce329bedc715f1388166bc4cf7bc900))
+* **viewer:** fit previews to the host container height ([#1211](https://github.com/yschimke/compose-preview-server/issues/1211)) ([2ee8cec](https://github.com/yschimke/compose-preview-server/commit/2ee8cec7dcfa0fd06b3e1cf369e2489e7d793404))
+
+## [3.84.0](https://github.com/yschimke/compose-preview-server/compare/v3.83.0...v3.84.0) (2026-09-28)
+
+
+### Bug Fixes
+
+* **ci:** pin the edit-loop fixture's Compose BOM and keep Renovate out of it ([#1208](https://github.com/yschimke/compose-preview-server/issues/1208)) ([4687ad5](https://github.com/yschimke/compose-preview-server/commit/4687ad504cb3e025d21c3c6b01af55c5a623fbbc))
+* **deps:** update compose-ai-tools ([#1202](https://github.com/yschimke/compose-preview-server/issues/1202)) ([499bcc7](https://github.com/yschimke/compose-preview-server/commit/499bcc7ccc383f5847a92aa91789cb821eb3ce08))
+* **deps:** update dependency androidx.compose:compose-bom to v2026.09.00 ([#1204](https://github.com/yschimke/compose-preview-server/issues/1204)) ([8ccb5d0](https://github.com/yschimke/compose-preview-server/commit/8ccb5d0dcc4fa07e200eef856b398bbd096a59ce))
+* **deps:** update design-parity packages to v1.2.0 ([#1205](https://github.com/yschimke/compose-preview-server/issues/1205)) ([22f07bd](https://github.com/yschimke/compose-preview-server/commit/22f07bdc61ac64e2e691b5b72c170ed8641dd969))
+* **deps:** update rc-players to v1.75.0 ([#1206](https://github.com/yschimke/compose-preview-server/issues/1206)) ([f7c4d64](https://github.com/yschimke/compose-preview-server/commit/f7c4d64f9fdb1952dd386b32dcff8bbe203b8d3e))
+
+## [3.83.0](https://github.com/yschimke/compose-preview-server/compare/v3.82.0...v3.83.0) (2026-09-27)
+
+
+### Features
+
+* **mcp:** render several preview matches as a grid and size the model's image ([#1199](https://github.com/yschimke/compose-preview-server/issues/1199)) ([a02606a](https://github.com/yschimke/compose-preview-server/commit/a02606a8826bbc866f4d0a618d0816e02b0569b7))
+
+
+### Performance Improvements
+
+* **mcp:** make the in-process compile opt-in until it beats Gradle ([#1200](https://github.com/yschimke/compose-preview-server/issues/1200)) ([8f70404](https://github.com/yschimke/compose-preview-server/commit/8f70404938567960a07a5099b8f4feaf3c5bed4d))
+
+## [3.82.0](https://github.com/yschimke/compose-preview-server/compare/v3.81.0...v3.82.0) (2026-09-27)
+
+
+### Bug Fixes
+
+* **mcp:** clear error state in the viewer and suggestions on preview misses ([#1195](https://github.com/yschimke/compose-preview-server/issues/1195)) ([5cfcab0](https://github.com/yschimke/compose-preview-server/commit/5cfcab0c1b97c2dd8fb9445d1674d4381c827094))
+* **mcp:** recompile on render when sources changed ([#1186](https://github.com/yschimke/compose-preview-server/issues/1186)) ([0647918](https://github.com/yschimke/compose-preview-server/commit/064791853e4e3043108a1e52bca6e016c242106f))
+* **mcp:** render_matrix resolves multipreview names and renders their variants ([#1198](https://github.com/yschimke/compose-preview-server/issues/1198)) ([989467c](https://github.com/yschimke/compose-preview-server/commit/989467c3e0ba9846e1385581994427a0003f7605))
+
+
+### Performance Improvements
+
+* **mcp:** compile Kotlin edits in the daemon before falling back to Gradle ([#1197](https://github.com/yschimke/compose-preview-server/issues/1197)) ([5988c36](https://github.com/yschimke/compose-preview-server/commit/5988c36d788e2dd2ee7ab54ec340db535f7a66ae))
+
+## [3.81.0](https://github.com/yschimke/compose-preview-server/compare/v3.80.0...v3.81.0) (2026-09-27)
+
+
+### Features
+
+* **mcp:** find, register and prepare any project automatically ([#1191](https://github.com/yschimke/compose-preview-server/issues/1191)) ([53b901e](https://github.com/yschimke/compose-preview-server/commit/53b901e6a82f7e1d7e3cc58aa5c48a746d376783))
+
+
+### Bug Fixes
+
+* **deps:** update the preview daemon to 3.9.1 ([#1193](https://github.com/yschimke/compose-preview-server/issues/1193)) ([4a3ff28](https://github.com/yschimke/compose-preview-server/commit/4a3ff2802d03a10ec0883d2f4a029c9f3cc37d52))
+* **deps:** update the UI builder to 3.66.0 ([#1192](https://github.com/yschimke/compose-preview-server/issues/1192)) ([f852869](https://github.com/yschimke/compose-preview-server/commit/f852869ea7de75b0aafd5b546f0f336c7eb07594))
+* **mcp-app:** reserve only the header and toolbar when fitting the image ([#1190](https://github.com/yschimke/compose-preview-server/issues/1190)) ([8d2c7da](https://github.com/yschimke/compose-preview-server/commit/8d2c7dae2b31c11847c9cb162e8bf680dca6ffe7))
+
+## [3.80.0](https://github.com/yschimke/compose-preview-server/compare/v3.79.0...v3.80.0) (2026-09-27)
+
+
+### Bug Fixes
+
+* **mcp-app:** fit the whole preview in the host frame ([#1187](https://github.com/yschimke/compose-preview-server/issues/1187)) ([56bb6b2](https://github.com/yschimke/compose-preview-server/commit/56bb6b2bedb507c08d4956dc22282ff617dd5106))
+* **mcp:** keep workspace registrations consistent across failures and restarts ([#1188](https://github.com/yschimke/compose-preview-server/issues/1188)) ([122bdff](https://github.com/yschimke/compose-preview-server/commit/122bdff1807783b23aa718f7c2851c93cc5bd34a))
+* **mcp:** report the release version in serverInfo ([#1183](https://github.com/yschimke/compose-preview-server/issues/1183)) ([4403858](https://github.com/yschimke/compose-preview-server/commit/4403858bd409b8f5e02aab6a240c2ec0266c911c))
+* **serve:** answer a refused PUT create with its own status, not 412 ([#1182](https://github.com/yschimke/compose-preview-server/issues/1182)) ([845f033](https://github.com/yschimke/compose-preview-server/commit/845f033eb92acacc9c00c73b85449205d3fbb343))
+
+## [3.79.0](https://github.com/yschimke/compose-preview-server/compare/v3.78.0...v3.79.0) (2026-09-27)
+
+
+### Features
+
+* **mcp-app:** live viewer actions over the MCP Apps bridge ([#1177](https://github.com/yschimke/compose-preview-server/issues/1177)) ([eaac172](https://github.com/yschimke/compose-preview-server/commit/eaac172e6972b4cc47e3317f89ff336179118363))
+* **mcp:** elicitation and prompts with text fallbacks ([#1179](https://github.com/yschimke/compose-preview-server/issues/1179)) ([a6f72eb](https://github.com/yschimke/compose-preview-server/commit/a6f72eb7f54b75e8774babad9a022ed399ada95d))
+* **mcp:** opt-in a11y and layout details in the render card ([#1175](https://github.com/yschimke/compose-preview-server/issues/1175)) ([8a1ee2f](https://github.com/yschimke/compose-preview-server/commit/8a1ee2fc488cef1c1d4e474d5357b679f39ae210))
+
+
+### Bug Fixes
+
+* **mcp:** recompile CLI-injected projects through the CLI's init script ([#1178](https://github.com/yschimke/compose-preview-server/issues/1178)) ([5a98bea](https://github.com/yschimke/compose-preview-server/commit/5a98bea257a80e16c5b2ba40392258f831a78b98))
+* **mcp:** recompile edited sources before the daemon swaps classes ([#1171](https://github.com/yschimke/compose-preview-server/issues/1171)) ([c1f58bf](https://github.com/yschimke/compose-preview-server/commit/c1f58bfc19538dde80092fc35a14132ae57f396f))
+* **serve:** fail fast when list_previews has no catalog ([#1176](https://github.com/yschimke/compose-preview-server/issues/1176)) ([b0a72da](https://github.com/yschimke/compose-preview-server/commit/b0a72dae4d3eeb5599761df2a5bdb663b6dff665)), closes [#1162](https://github.com/yschimke/compose-preview-server/issues/1162)
+* **serve:** report a refused design create instead of redirecting to it ([#1180](https://github.com/yschimke/compose-preview-server/issues/1180)) ([73b6727](https://github.com/yschimke/compose-preview-server/commit/73b6727124a1bbfa6a2f91b3d782611f667cf43b))
+
+## [3.78.0](https://github.com/yschimke/compose-preview-server/compare/v3.77.0...v3.78.0) (2026-09-27)
+
+
+### Features
+
+* **mcp:** one-call preview render for agents ([#1167](https://github.com/yschimke/compose-preview-server/issues/1167)) ([a7db054](https://github.com/yschimke/compose-preview-server/commit/a7db05424559ab0956a7db713f0fb58ab2d2b26c))
+
+## [3.77.0](https://github.com/yschimke/compose-preview-server/compare/v3.76.0...v3.77.0) (2026-09-27)
+
+
+### Features
+
+* **mcp:** read the viewer's static result from an inline block ([#1161](https://github.com/yschimke/compose-preview-server/issues/1161)) ([1c065b5](https://github.com/yschimke/compose-preview-server/commit/1c065b55ac889d98df155dda0f6e9676327a57b6))
+
+## [3.76.0](https://github.com/yschimke/compose-preview-server/compare/v3.75.0...v3.76.0) (2026-09-27)
+
+
+### Features
+
+* **ui-builder:** record canonical design homes ([#1157](https://github.com/yschimke/compose-preview-server/issues/1157)) ([47a70b3](https://github.com/yschimke/compose-preview-server/commit/47a70b3265b50065a7308ffdc477f432191a5939))
+
+## [3.75.0](https://github.com/yschimke/compose-preview-server/compare/v3.74.0...v3.75.0) (2026-09-27)
+
+
+### Features
+
+* **mcp:** add interactive workflow elicitation ([#1128](https://github.com/yschimke/compose-preview-server/issues/1128)) ([127a0f9](https://github.com/yschimke/compose-preview-server/commit/127a0f978a1fe9c1b4a09d275bdcdba3dfd13589))
+* **mcp:** add local preview file fallbacks ([#1124](https://github.com/yschimke/compose-preview-server/issues/1124)) ([b5d409e](https://github.com/yschimke/compose-preview-server/commit/b5d409e60bdaf6a1cfd077844f0acd7783ceed80))
+* **mcp:** add portable MCP App preview viewer ([#1156](https://github.com/yschimke/compose-preview-server/issues/1156)) ([57f69e9](https://github.com/yschimke/compose-preview-server/commit/57f69e972c92d23e32a6b34cdc556829fe7dd4f1))
+* **mcp:** report design comment counts, native-render availability and workspace status ([#1144](https://github.com/yschimke/compose-preview-server/issues/1144)) ([1ea3fcd](https://github.com/yschimke/compose-preview-server/commit/1ea3fcd3725a1869a144ab19ebf137c173321280))
+* **mcp:** report unavailable native rendering ([#1143](https://github.com/yschimke/compose-preview-server/issues/1143)) ([75422f1](https://github.com/yschimke/compose-preview-server/commit/75422f1bb4da0ead7a666f8126b38a1647524a07))
+
+
+### Bug Fixes
+
+* **serve:** confirm before a grant link replaces a browser's grant ([#1155](https://github.com/yschimke/compose-preview-server/issues/1155)) ([fc7d79f](https://github.com/yschimke/compose-preview-server/commit/fc7d79fcb854221040a876de72272b05b0e3c040))
+* **serve:** keep grant browser sessions authenticated ([#1134](https://github.com/yschimke/compose-preview-server/issues/1134)) ([bc36b12](https://github.com/yschimke/compose-preview-server/commit/bc36b120eb116586b1c3b872d61e21a9123fe290))
+* **ui-builder:** keep create redirect reachable ([#1141](https://github.com/yschimke/compose-preview-server/issues/1141)) ([1d97cfe](https://github.com/yschimke/compose-preview-server/commit/1d97cfe2439dbef13f9bdddb134ffb84c09debe1))
+
 ## [3.74.0](https://github.com/yschimke/compose-preview-server/compare/v3.73.0...v3.74.0) (2026-09-26)
 
 

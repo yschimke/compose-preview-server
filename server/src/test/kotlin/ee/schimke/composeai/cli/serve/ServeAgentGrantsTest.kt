@@ -84,6 +84,39 @@ class ServeAgentGrantsTest {
   }
 
   @Test
+  fun `an open UI builder lets any approver pass on the UI builder's capabilities and nothing else`() {
+    val approver =
+      ServeAgentGrants.Approver.github(
+        login = "outsider",
+        repositoryAccess = false,
+        storeCeiling = AgentGrantScope.PLAYGROUND,
+        storeCapabilities =
+          setOf(
+            AgentGrantCapability.IMAGES,
+            AgentGrantCapability.UI_BUILDER_READ,
+            AgentGrantCapability.UI_BUILDER_WRITE,
+            AgentGrantCapability.UI_BUILDER_EXPORT,
+          ),
+        opensUiBuilder = true,
+      )
+    assertEquals(ServeAgentGrants.UI_BUILDER_CAPABILITIES, approver.capabilityCeiling)
+    // The scope rungs still ask about the repository: the playground stays out of reach.
+    assertEquals(AgentGrantScope.LIVE, approver.ceiling)
+  }
+
+  @Test
+  fun `without an open UI builder an approver without the repository passes on nothing`() {
+    val approver =
+      ServeAgentGrants.Approver.github(
+        login = "outsider",
+        repositoryAccess = false,
+        storeCeiling = AgentGrantScope.PLAYGROUND,
+        storeCapabilities = ServeAgentGrants.UI_BUILDER_CAPABILITIES,
+      )
+    assertEquals(emptySet(), approver.capabilityCeiling)
+  }
+
+  @Test
   fun `images follows the image repository, not the sign-in one`() {
     // The box gates uploads somewhere the approver has no rights, so `images` is withheld even
     // though every other capability rides in on their sign-in access.

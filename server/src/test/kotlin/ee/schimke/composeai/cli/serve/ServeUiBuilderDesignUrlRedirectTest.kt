@@ -69,15 +69,17 @@ class ServeUiBuilderDesignUrlRedirectTest {
   }
 
   @Test
-  fun `a caller who cannot open the design gets the same 404 as before`() {
+  fun `a catalog-free design URL always serves the shell without revealing whether it exists`() {
     withServer { port ->
       create(port, "my-remote-screen", "remote-m3")
 
-      // No credential: the redirect would otherwise report that this id exists and where it lives.
-      assertEquals(404, get(port, "/ui-builder/my-remote-screen", token = null).code)
-      // And an id that names nothing is a 404 for everyone, which is what keeps a merely missing
-      // asset from quietly rendering the app shell.
-      assertEquals(404, get(port, "/ui-builder/no-such-design", OPERATOR_TOKEN).code)
+      // A create response can only carry the identity its form was opened with. Serving the shell
+      // unconditionally keeps that POST/303/GET handoff from becoming a 404; the API it loads is
+      // still authenticated and returns no design data to this caller.
+      assertEquals(200, get(port, "/ui-builder/my-remote-screen", token = null).code)
+      // A missing design gets the same shell, so the route does not reveal which ids exist.
+      assertEquals(200, get(port, "/ui-builder/no-such-design", OPERATOR_TOKEN).code)
+      // A file-shaped path remains a static request rather than silently becoming a shell.
       assertEquals(404, get(port, "/ui-builder/missing.mjs", OPERATOR_TOKEN).code)
     }
   }

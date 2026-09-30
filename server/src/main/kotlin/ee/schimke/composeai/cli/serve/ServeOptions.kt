@@ -478,6 +478,15 @@ public interface ServeOptions {
   public val uiBuilderDefaultVisibility: UiBuilderDefaultVisibility
     get() = UiBuilderDefaultVisibility.PRIVATE
 
+  /**
+   * `--ui-builder-public-origin <url>`: the stable public origin this server's UI-builder designs
+   * are canonical at, recorded as their `home`. Unset falls back to
+   * `--github-auth-callback-base-url`; with neither, designs are left unhomed rather than stamped
+   * with a bind address that is not an identity.
+   */
+  public val uiBuilderPublicOrigin: String?
+    get() = null
+
   /** Optional durable aggregate counters. Null keeps local serve sessions in-memory only. */
   public val engagementFile: File?
 
@@ -521,6 +530,14 @@ public interface ServeOptions {
    * [ServeGithubAuthConfig.allowGuests].
    */
   public val githubAuthGuests: Boolean
+    get() = false
+
+  /**
+   * `--github-auth-open-ui-builder`: every signed-in GitHub member may create, edit and export
+   * UI-builder designs, and approve agent grants for them, without repository access. See
+   * [ServeGithubAuthConfig.openUiBuilder].
+   */
+  public val githubAuthOpenUiBuilder: Boolean
     get() = false
 
   /**

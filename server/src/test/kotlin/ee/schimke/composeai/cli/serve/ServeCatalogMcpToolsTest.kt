@@ -125,6 +125,18 @@ class ServeCatalogMcpToolsTest {
   private fun JsonObject.parsed(): JsonObject = Json.parseToJsonElement(firstText()).jsonObject
 
   @Test
+  fun `data-product array text is wrapped for its object output schema`() {
+    val body = call(ToolHost(png = pixel), "catalog_list_data_products", """{"catalog":"m3"}""")
+
+    assertEquals(false, body.isError(), body.toString())
+    val legacyArray = Json.parseToJsonElement(body.firstText()).jsonArray
+    assertEquals(
+      legacyArray,
+      body["result"]!!.jsonObject["structuredContent"]!!.jsonObject["dataProducts"],
+    )
+  }
+
+  @Test
   fun `preview stories preserves every structured observation`() {
     val body =
       call(
@@ -132,10 +144,13 @@ class ServeCatalogMcpToolsTest {
         "preview-stories",
         """{"storyIds":["m3::card","m3::other"],"observe":"hash"}""",
       )
+    // Each observation's text block, beside the resource link that follows it.
     val legacy =
-      body.content().map {
-        Json.parseToJsonElement(it.jsonObject["text"]!!.jsonPrimitive.content).jsonObject
-      }
+      body
+        .content()
+        .map { it.jsonObject }
+        .filter { it["type"]!!.jsonPrimitive.content == "text" }
+        .map { Json.parseToJsonElement(it["text"]!!.jsonPrimitive.content).jsonObject }
     val observations =
       body["result"]!!
         .jsonObject["structuredContent"]!!
@@ -151,14 +166,95 @@ class ServeCatalogMcpToolsTest {
     )
   }
 
-  // ---- list_devices ---------------------------------------------------------------------------
+  // ---- catalog_render_preview image URL (#1160)
+  // -------------------------------------------------------------------------
+
+  private fun renderPng(mcp: ServeCatalogMcp): JsonObject {
+    val request =
+      Json.parseToJsonElement(
+          """{"jsonrpc":"2.0","id":1,"method":"tools/call",
+              "params":{"name":"catalog_render_preview",
+                        "arguments":{"catalog":"m3","previewId":"card","observe":"png"}}}"""
+        )
+        .jsonObject
+    return requireNotNull(
+        runBlocking {
+          mcp.handle(request) { ServeMachineAuthorization.Decision.Authorized("agent:test") }
+        }
+          .body
+      )
+      .get("result")!!
+      .jsonObject
+  }
+
+  private fun imageUrlOf(result: JsonObject): String? =
+    result["content"]!!
+      .jsonArray
+      .map { it.jsonObject }
+      .firstOrNull { it["uri"]?.jsonPrimitive?.content?.startsWith("https://") == true }
+      ?.get("uri")
+      ?.jsonPrimitive
+      ?.content
+
+  private fun mcpWith(now: () -> Long, origin: String?): ServeCatalogMcp {
+    val registry = ServeSessionRegistry(open = { null })
+    registry.register("m3", host = ToolHost(png = pixel))
+    return ServeCatalogMcp(registry, Semaphore(1), nowMillis = now, publicOrigin = { origin })
+  }
 
   @Test
-  fun `list_devices publishes the render lane's own catalog`() {
+  fun `a png render carries a signed https url that fetches exactly that image`() {
+    var now = 1_000_000L
+    val mcp = mcpWith({ now }, "https://preview.example/")
+    val result = renderPng(mcp)
+
+    val url = requireNotNull(imageUrlOf(result))
+    assertTrue(url.startsWith("https://preview.example${ServeCatalogMcp.IMAGE_URL_PATH}?"), url)
+    assertEquals(
+      url,
+      result["structuredContent"]!!.jsonObject["imageUrl"]!!.jsonPrimitive.content,
+    )
+    // The inline image stays for hosts that render it.
+    assertTrue(
+      result["content"]!!.jsonArray.any { it.jsonObject["type"]!!.jsonPrimitive.content == "image" }
+    )
+
+    val query =
+      java.net.URI(url).rawQuery.split('&').associate {
+        it.substringBefore('=') to java.net.URLDecoder.decode(it.substringAfter('='), "UTF-8")
+      }
+    val uri = query.getValue("uri")
+    val exp = query.getValue("exp").toLong()
+    val sig = query.getValue("sig")
+
+    assertTrue(pixel.contentEquals(runBlocking { mcp.signedImagePng(uri, exp, sig) }))
+    // A signature is bound to its resource: another preview's uri does not verify.
+    assertEquals(null, runBlocking { mcp.signedImagePng(uri.replace("card", "other"), exp, sig) })
+    assertEquals(null, runBlocking { mcp.signedImagePng(uri, exp, sig.reversed()) })
+    // ...and to its expiry.
+    assertEquals(null, runBlocking { mcp.signedImagePng(uri, exp + 1, sig) })
+    now += (ServeCatalogMcp.SIGNED_RESOURCE_TTL_SECONDS + 1) * 1000
+    assertEquals(null, runBlocking { mcp.signedImagePng(uri, exp, sig) })
+  }
+
+  @Test
+  fun `no public origin means no image url`() {
+    val result = renderPng(mcpWith({ 1_000_000L }, origin = null))
+
+    assertEquals(null, imageUrlOf(result))
+    // An image-only reply still carries the (empty) object its output schema promises.
+    assertEquals(JsonObject(emptyMap()), result["structuredContent"])
+  }
+
+  // ---- catalog_list_devices
+  // ---------------------------------------------------------------------------
+
+  @Test
+  fun `catalog_list_devices publishes the render lane's own catalog`() {
     // The point of the tool: an unrecognised `device=` value is NOT an error on the render path, it
     // falls through to the default frame — indistinguishable, from outside, from a device that
     // renders the same as the default. So the vocabulary has to be askable.
-    val body = call(ToolHost(png = pixel), "list_devices")
+    val body = call(ToolHost(png = pixel), "catalog_list_devices")
     val devices = body.parsed()["devices"]!!.jsonArray
 
     assertTrue(devices.isNotEmpty())
@@ -173,7 +269,8 @@ class ServeCatalogMcpToolsTest {
     assertTrue(first["density"]!!.jsonPrimitive.content.toDouble() > 0)
   }
 
-  // ---- diff_semantics -------------------------------------------------------------------------
+  // ---- catalog_diff_semantics
+  // -------------------------------------------------------------------------
 
   private fun diffHost(left: ByteArray, right: ByteArray) =
     ToolHost(png = pixel, annotationsFor = mapOf("card" to left, "other" to right))
@@ -184,11 +281,39 @@ class ServeCatalogMcpToolsTest {
   @Test
   fun `identical tag indexes report identical`() {
     val same = annotations("submit" to entry())
-    val body = call(diffHost(same, same), "diff_semantics", bothSides)
+    val body = call(diffHost(same, same), "catalog_diff_semantics", bothSides)
     val diff = body.parsed()
 
     assertEquals(true, diff["identical"]!!.jsonPrimitive.content.toBoolean())
     assertEquals("testTag", diff["identity"]!!.jsonPrimitive.content)
+    assertEquals(
+      "compose-preview://catalog/m3/card",
+      diff["left"]!!.jsonObject["uri"]!!.jsonPrimitive.content,
+    )
+    assertEquals(
+      "compose-preview://catalog/m3/other",
+      diff["right"]!!.jsonObject["uri"]!!.jsonPrimitive.content,
+    )
+  }
+
+  @Test
+  fun `diff resource URIs preserve each side's overrides`() {
+    val same = annotations("submit" to entry())
+    val body =
+      call(
+        diffHost(same, same),
+        "catalog_diff_semantics",
+        """{"catalog":"m3","previewId":"card","overrides":{"uiMode":"dark"},"other":{"catalog":"m3","previewId":"other"},"otherOverrides":{"fontScale":1.3}}""",
+      )
+    val diff = body.parsed()
+
+    fun overrides(side: String): String {
+      val uri = diff[side]!!.jsonObject["uri"]!!.jsonPrimitive.content
+      return Base64.getUrlDecoder().decode(uri.substringAfter("?overrides=")).decodeToString()
+    }
+
+    assertEquals("""{"uiMode":"dark"}""", overrides("left"))
+    assertEquals("""{"fontScale":1.3}""", overrides("right"))
   }
 
   @Test
@@ -196,7 +321,7 @@ class ServeCatalogMcpToolsTest {
     val body =
       call(
         diffHost(annotations("submit" to entry()), annotations("cancel" to entry())),
-        "diff_semantics",
+        "catalog_diff_semantics",
         bothSides,
       )
     val diff = body.parsed()
@@ -211,7 +336,7 @@ class ServeCatalogMcpToolsTest {
     val body =
       call(
         diffHost(annotations("submit" to entry(x = 0)), annotations("submit" to entry(x = 40))),
-        "diff_semantics",
+        "catalog_diff_semantics",
         bothSides,
       )
     val changed = body.parsed()["changed"]!!.jsonArray
@@ -229,7 +354,7 @@ class ServeCatalogMcpToolsTest {
     val body =
       call(
         diffHost(annotations("row" to entry(count = 1)), annotations("row" to entry(count = 3))),
-        "diff_semantics",
+        "catalog_diff_semantics",
         bothSides,
       )
     val changed = body.parsed()["changed"]!!.jsonArray[0].jsonObject
@@ -242,7 +367,7 @@ class ServeCatalogMcpToolsTest {
   @Test
   fun `two untagged previews say so rather than claiming a match`() {
     val empty = annotations()
-    val body = call(diffHost(empty, empty), "diff_semantics", bothSides)
+    val body = call(diffHost(empty, empty), "catalog_diff_semantics", bothSides)
     val diff = body.parsed()
 
     assertTrue(diff["note"]!!.jsonPrimitive.content.contains("nothing to compare"))
@@ -253,7 +378,7 @@ class ServeCatalogMcpToolsTest {
     val body =
       call(
         ToolHost(png = pixel, annotationsFor = mapOf("card" to annotations("a" to entry()))),
-        "diff_semantics",
+        "catalog_diff_semantics",
         bothSides,
       )
 
@@ -267,7 +392,11 @@ class ServeCatalogMcpToolsTest {
   fun `a catalog with no scroll producer is refused by name`() {
     val host = ToolHost(png = pixel, hasScrollExport = false)
     val body =
-      call(host, "render_preview", """{"catalog":"m3","previewId":"card","observe":"scroll-svg"}""")
+      call(
+        host,
+        "catalog_render_preview",
+        """{"catalog":"m3","previewId":"card","observe":"scroll-svg"}""",
+      )
 
     assertTrue(body.isError())
     assertTrue(body.firstText().contains("no full-page scroll export"), body.firstText())
@@ -282,7 +411,11 @@ class ServeCatalogMcpToolsTest {
   fun `scroll-svg returns the full-page vector`() {
     val host = ToolHost(png = pixel, hasScrollExport = true, scrollSvg = "<svg id='long'/>")
     val body =
-      call(host, "render_preview", """{"catalog":"m3","previewId":"card","observe":"scroll-svg"}""")
+      call(
+        host,
+        "catalog_render_preview",
+        """{"catalog":"m3","previewId":"card","observe":"scroll-svg"}""",
+      )
 
     assertEquals("<svg id='long'/>", body.firstText())
     assertEquals(1, host.scrollRenders.get())
@@ -292,15 +425,19 @@ class ServeCatalogMcpToolsTest {
   fun `scroll-png returns the full-page raster`() {
     val host = ToolHost(png = pixel, hasScrollExport = true)
     val body =
-      call(host, "render_preview", """{"catalog":"m3","previewId":"card","observe":"scroll-png"}""")
+      call(
+        host,
+        "catalog_render_preview",
+        """{"catalog":"m3","previewId":"card","observe":"scroll-png"}""",
+      )
 
     assertEquals("image", body.content()[0].jsonObject["type"]!!.jsonPrimitive.content)
     assertEquals(1, host.scrollRenders.get())
   }
 
   @Test
-  fun `list_previews advertises scroll availability beside svg`() {
-    val body = call(ToolHost(png = pixel, hasScrollExport = true), "list_previews")
+  fun `catalog_list_previews advertises scroll availability beside svg`() {
+    val body = call(ToolHost(png = pixel, hasScrollExport = true), "catalog_list_previews")
     val preview =
       body.parsed()["catalogs"]!!.jsonArray[0].jsonObject["previews"]!!.jsonArray[0].jsonObject
 
@@ -309,7 +446,7 @@ class ServeCatalogMcpToolsTest {
 
   /** How `a2ui render` finds the preview that takes a document without a call per preview. */
   @Test
-  fun `list_previews reports declared knobs, and omits the field when there are none`() {
+  fun `catalog_list_previews reports declared knobs, and omits the field when there are none`() {
     val document =
       ee.schimke.composeai.data.overrides.PreviewOverrideDeclaration(
         key = "document",
@@ -327,7 +464,7 @@ class ServeCatalogMcpToolsTest {
           ),
       )
     val previews =
-      call(host, "list_previews")
+      call(host, "catalog_list_previews")
         .parsed()["catalogs"]!!
         .jsonArray[0]
         .jsonObject["previews"]!!
@@ -345,7 +482,7 @@ class ServeCatalogMcpToolsTest {
     val body =
       call(
         ToolHost(png = pixel),
-        "render_preview",
+        "catalog_render_preview",
         """{"catalog":"m3","previewId":"card","observe":"pdf"}""",
       )
 

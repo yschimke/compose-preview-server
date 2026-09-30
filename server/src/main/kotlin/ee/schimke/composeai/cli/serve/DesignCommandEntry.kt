@@ -3,6 +3,7 @@ package ee.schimke.composeai.cli.serve
 import java.io.File
 import java.time.Duration
 import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.put
 
 /**
  * `design`, wired to a real process: argv in, files and exit codes out.
@@ -45,6 +46,34 @@ internal object DesignCommandEntry {
         }
         is DesignCommand.Parsed.Run -> parsed.options
       }
+
+    if (options.verb == DesignCommand.STATUS) {
+      val token = DesignCommand.token(env)
+      return try {
+        val result =
+          DesignWorkspaceStatus(
+              options,
+              remote = { designId, timeout ->
+                DesignHttpTransport(
+                    server = options.server,
+                    token = { token },
+                    timeout = timeout,
+                  )
+                  .call(
+                    ServeUiBuilderMcp.GET_DESIGN,
+                    kotlinx.serialization.json.buildJsonObject { put("designId", designId) },
+                  )
+              },
+            )
+            .inspect()
+        val rendered = if (options.json) result.json().toString() else result.summary()
+        if (rendered.isNotBlank()) out.println(rendered)
+        DesignCommandRunner.EXIT_OK
+      } catch (failure: DesignCommandFailure) {
+        err.println(failure.message ?: "design status: failed")
+        DesignCommandRunner.EXIT_FAILURE
+      }
+    }
 
     var token = DesignCommand.token(env)
     val transport =

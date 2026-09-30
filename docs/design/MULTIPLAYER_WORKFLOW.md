@@ -79,7 +79,7 @@ An inventory of what exists, ordered by how much of the workflow each already ca
 | Deterministic export: Compose source, layered SVG, PNG, all pinned to a revision | `ui_builder_export`, `compose-preview-server design …` | The handoff to engineering is a file, not a screenshot; the handoff to the design tool is a vector it can import |
 | Preview permalinks that unfurl, with the render as the card | `/<system>/p/<id>`, Open Graph cards, `ServeSocialCard` ([public-preview-server.md](https://github.com/yschimke/compose-ai-tools/blob/main/docs/public-preview-server.md#pasting-a-link-into-slack-or-google-chat)) | A link pasted into the chat *is* the review artefact |
 | A prefilled issue carrying a `compose-parity-locator/v1` block, and an issue index the compare page reads back | `ServeIssueReport`, [`COMPONENT_PARITY_WORKFLOW.md`](COMPONENT_PARITY_WORKFLOW.md) | "We know about this one" survives the page reload, and the tracker is where the human already is |
-| History: a per-preview timeline across publishes, diffable without fetching pixels | `history_list` / `history_diff` / `history_read` | "Did the last publish move this?" answered from data |
+| History: a per-preview timeline across publishes, diffable without fetching pixels | `catalog_history_list` / `catalog_history_diff` / `catalog_history_read` | "Did the last publish move this?" answered from data |
 | One MCP endpoint over both catalogs and designs, with a device-flow grant an agent can obtain from inside the protocol | [`CATALOG_MCP.md`](CATALOG_MCP.md), `request_access` / `poll_access` | Any MCP host — a coding agent, a chat agent with a connector, a routine — reaches the same objects |
 | An agent on any issue or PR, with a visual-evidence contract; weekly triage; the preview-diff sticky comment | [`AGENT_INVOCATION.md`](https://github.com/yschimke/compose-ai-tools/blob/main/docs/AGENT_INVOCATION.md), `claude-triage.yml` | The tracker-side agent already exists and already has to show pixels |
 | Design-led catalogs that never write back to the design tool, and a parity direction with teeth | `.design-parity.json` in m3-catalog / wear-m3-catalog | Who is authoritative is decided by configuration, not per PR |
@@ -189,13 +189,13 @@ and the viewer has to be honest about which of them it is using. Three fields:
 | `point` | frame fractions, the space design comments and reference marks already use | position: where the author put it, surviving a phone becoming a tablet |
 | `sha` | the render's content id — the history timeline's version, not the commit | time: the version this was said about, and the key that shows it |
 
-`ref` is the `testTag` rather than the semantics tree's generated ref for the reason `diff_semantics`
+`ref` is the `testTag` rather than the semantics tree's generated ref for the reason `catalog_diff_semantics`
 gives: a generated ref is sibling-indexed and retargets when a sibling is inserted, which is exactly
 the edit a reader most needs to see; a `testTag` either survives or stops resolving, and both are
 reported. `sha` is the content id rather than the commit because the history timeline already
 collapses adjacent publishes with identical bytes into one version — the same baseline-inheritance
 a Storybook-hosted review service relies on — so a comment stays *current* across republishes that
-did not move the pixels, and `history_diff` says when one did.
+did not move the pixels, and `catalog_history_diff` says when one did.
 
 Resolved top-down, a republish leaves a thread in one of three states, each drawn differently:
 
@@ -224,7 +224,7 @@ back to the design tool: for the design-led catalogs by configuration, for an ap
 designer's own decision to import the layered SVG.
 
 **Reviewing.** Mostly not in the builder. The PM reads the chat thread, where the agent has posted
-the current render and, on request, a matrix (`render_matrix` over device × font scale × locale),
+the current render and, on request, a matrix (`catalog_render_matrix` over device × font scale × locale),
 because "does it survive the large-font setting on the small phone" is a PM's question. The link
 unfurls to the same pixels. Comments land in two places and both are fine: a designer's *"the gap
 above the card is wrong"* goes into Talk, pinned to the node; a PM's *"the primary action should say
@@ -245,8 +245,8 @@ puts it beside the kit reference or the previous render. A divergence is filed f
 page with the prefilled report; the locator block keys it; the parity issue index makes it a
 *known* difference the next reader sees rather than a fresh alarm. A difference the team accepts
 goes into `.design-parity.json` with its issue link — the one "saga-like" record this stack keeps,
-and the right shape for it. The agent's part is triage: `history_diff` for "did the publish move
-it", `diff_semantics` for "did the structure move", the flake oracle when a changed preview's
+and the right shape for it. The agent's part is triage: `catalog_history_diff` for "did the publish move
+it", `catalog_diff_semantics` for "did the structure move", the flake oracle when a changed preview's
 source was not touched.
 
 **Shipping, and what is left.** The catalog publishes; the delivery branch records the render; the
@@ -262,7 +262,7 @@ that a design nobody is editing has no reason to stay.
 | Design | Designer, agent | Builder; the design tool as reference | Revisions, overlay, Talk threads | `ui_builder_await_comments`, `_apply`; design-tool connector → reference |
 | Review | PM, designer, engineer | Chat thread, Talk panel | Render, matrix, resolved threads | Chat agent ↔ `_post_comment` / `_apply`; webhook out |
 | Build | Engineer, agent | PR | Exported Kotlin + design file in one PR | `ui_builder_export`; agent on the PR; preview-diff bot |
-| Verify | Agent, then a human verdict | Compare page, tracker | Parity issue with locator; accepted differences | `history_diff`, `diff_semantics`, prefilled issue |
+| Verify | Agent, then a human verdict | Compare page, tracker | Parity issue with locator; accepted differences | `catalog_history_diff`, `catalog_diff_semantics`, prefilled issue |
 | Ship | CI, weekly triage | Delivery branch, triage issue | Published catalog, history | The triage routine |
 
 ## 4. The four questions
@@ -288,7 +288,7 @@ Three things are missing, and they are the same thing seen from three sides.
    thread) and by the export routes (`revision` is already the parameter they take).
 2. **A link handed to an agent is opaque.** An agent in a chat receives a URL and has to know this
    server's grammar to turn it into `ui_builder_get_design` with the right arguments, or
-   `render_preview` with the right overrides. One tool — `resolve_reference(url)` — that answers
+   `catalog_render_preview` with the right overrides. One tool — `resolve_reference(url)` — that answers
    with the typed object (`kind`, the ids, the revision, and the call that fetches it) makes any
    link from any of the team's tools actionable without the agent learning the routes. It is the
    MCP-side twin of the locator block, and the locator's fields are its schema.
@@ -457,7 +457,7 @@ on is `compose-preview-contracts`.
 | 1 | **Design URL selectors and an unfurl card.** `?revision=` / `?node=` / `#thread=` on `/ui-builder/<design>`; an `og:image` for the design page from its PNG export or blank frame, content-addressed, privacy-aware | S | server, ui-builder | 4.1; a link in the chat means something |
 | 2 | **`links` beside the design.** A `links/<digest>.json` store, Screen-panel editor, `ui_builder_set_links` / carried in `ui_builder_get_design`, an additive `links` field on the project index, `GET /ui-builder/links?issue=` | S | server, ui-builder, contracts (index schema) | 4.2; "where were we" |
 | 3 | **Outbound comment webhook.** `--ui-builder-comment-webhook <url>`, posting new threads and replies with the thread permalink as plain JSON, and carrying the design's `links.thread` so a relay can put the message in the right conversation; the Slack, Teams and Google Chat incoming-webhook bodies are one adapter each | S | server | Reviewing without opening the builder |
-| 4 | **Comments on served previews.** The comment board keyed by `<catalog>/<previewId>` beside its design keying; the `ref` / `point` / `sha` anchor and the three display states above; the viewer's Talk panel; the same six MCP tools with a `preview` argument, and the same `comments` block on `render_preview` | M | server, serve-web | The "feedback on the shipped screen" entry |
+| 4 | **Comments on served previews.** The comment board keyed by `<catalog>/<previewId>` beside its design keying; the `ref` / `point` / `sha` anchor and the three display states above; the viewer's Talk panel; the same six MCP tools with a `preview` argument, and the same `comments` block on `catalog_render_preview` | M | server, serve-web | The "feedback on the shipped screen" entry |
 | 5 | **`resolve_reference(url)`** on `/mcp`, answering `kind`, ids, revision and the fetching call; the locator block's fields as its schema | S | server (mcp), contracts | 4.1; every agent seat |
 | 6 | **`ui_builder_put_reference`** — the reference-overlay routes as a tool (image bytes, or a piece placed at a rect), so an agent with a design-tool connector, or a render from this server, can put a frame under the design | S | server (mcp) | The frame, existing-screen and napkin entries |
 | 7 | **Persist grants across restart.** Encrypted at rest under a `/config` key; TTLs and `unknown` unchanged | M | server | 4.3 |

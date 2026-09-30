@@ -40,7 +40,7 @@ They are **different axes, kept apart on purpose**, sharing one vocabulary and o
 | Unit | a delivery-branch commit whose render bytes changed | a revision minted by `CollaborationReducer` |
 | Source | `PreviewHistoryManifest` off `compose-preview/main`, or `ServeProjectHistory` off the local clone | the accepted commands, undos and redos in `CollaborationState` |
 | Picture | the published PNG, content-addressed (`raw.githubusercontent.com`, or `/history/render/<blob>.png` in project mode) | the document rewound to that revision, drawn live by the renderer already drawing the canvas |
-| Diff | `history_diff` — a *metadata* comparison of content ids, no image fetched | `revisionDiff` — the two documents compared node by node, plus the two renders side by side |
+| Diff | `catalog_history_diff` — a *metadata* comparison of content ids, no image fetched | `revisionDiff` — the two documents compared node by node, plus the two renders side by side |
 | Collapse | adjacent commits with identical bytes fold into one version | adjacent revisions with identical documents fold into one row |
 | Lifetime | forever; immutable; survives the session, the clone and the design | this editor's accepted window (see [§4](#4-what-the-strip-can-and-cannot-reach)) |
 | Instability | `unstable` / `flapCount` — a preview that re-renders differently on publishes that did not change it | not applicable; a revision is a recorded edit, not a re-render |

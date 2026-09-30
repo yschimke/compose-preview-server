@@ -324,6 +324,10 @@ asking to edit it — goes through the same approval, from `/ui-builder/request-
   the design service's per-design answer, so a new account sees what was shared with it and nothing
   else. A guest is an identity only: `currentLogin()` answers null for one, so live sessions, the
   playground, uploads, edit leases and approving grants all treat a guest as signed out.
+- **Or the operator opens the builder to everyone.** With `--github-auth-open-ui-builder`, any
+  signed-in member holds `ui-builder-read`, `-write` and `-export` without repository access, and so
+  — never granting what they do not hold — may approve an agent grant carrying them. Nothing else
+  rides in on it: the scope ceiling, `images` and the playground still ask about the repository.
 - **The request names its requester, verified.** The page opens it from the reader's session, with
   a form seal minted for that login, rather than through the ungated JSON request route — so nobody
   can open a request in someone else's name. The approval page's *Asked from* line, which the asker
@@ -402,6 +406,12 @@ The catalog MCP endpoint (`/mcp`) carries the same two legs as tools, `request_a
 the same request and poll bodies documented above, produced by the same code, charged to the same
 per-address budget. Nothing about the design changes — the link is still a handle, the token still
 rides the poll leg to whoever holds the device secret, and a human still approves in a browser.
+
+For clients that support MCP URL elicitation, `poll_access` also accepts `urlMode: true`. A pending
+request then produces the protocol-standard `-32042` error containing the existing approval URL,
+and the client retries the same poll after the browser interaction completes. The error never
+contains the device secret or bearer; decline, cancellation and timeout mint nothing. Omitting the
+flag preserves the link-and-code text fallback and held-poll behavior for every other client.
 
 What did change is the gate. MCP used to authorize the whole endpoint before parsing, so a client
 holding nothing could not complete `initialize` and therefore could not reach a tool that asks for a

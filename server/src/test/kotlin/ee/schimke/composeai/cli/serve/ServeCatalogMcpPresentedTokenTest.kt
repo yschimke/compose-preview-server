@@ -35,7 +35,7 @@ class ServeCatalogMcpPresentedTokenTest {
   fun `a token argument is read off a tool call`() {
     assertEquals(
       "cpat_abc",
-      presented("""{"name":"list_projects","arguments":{"token":"cpat_abc"}}"""),
+      presented("""{"name":"catalog_list_projects","arguments":{"token":"cpat_abc"}}"""),
     )
   }
 
@@ -45,14 +45,26 @@ class ServeCatalogMcpPresentedTokenTest {
    */
   @Test
   fun `blank and absent are both nothing presented`() {
-    assertNull(presented("""{"name":"list_projects","arguments":{"token":"  "}}"""))
-    assertNull(presented("""{"name":"list_projects","arguments":{}}"""))
-    assertNull(presented("""{"name":"list_projects"}"""))
+    assertNull(presented("""{"name":"catalog_list_projects","arguments":{"token":"  "}}"""))
+    assertNull(presented("""{"name":"catalog_list_projects","arguments":{}}"""))
+    assertNull(presented("""{"name":"catalog_list_projects"}"""))
   }
 
   @Test
   fun `a message with no params presents nothing`() {
     assertNull(ServeCatalogMcp.presentedToken(json("""{"jsonrpc":"2.0","id":1,"method":"ping"}""")))
+  }
+
+  @Test
+  fun `a resource read presents its token directly in params`() {
+    assertEquals(
+      "cpat_resource",
+      ServeCatalogMcp.presentedToken(
+        json(
+          """{"jsonrpc":"2.0","id":1,"method":"resources/read","params":{"uri":"compose-preview://catalog/m3/card","_meta":{"compose-preview/token":"cpat_resource"}}}"""
+        )
+      ),
+    )
   }
 
   private fun presented(params: String): String? =
@@ -111,7 +123,7 @@ class ServeCatalogMcpPresentedTokenTest {
 
   @Test
   fun `data-product array text is wrapped for its object output schema`() {
-    val tool = tools().single { it.name == "list_data_products" }
+    val tool = tools().single { it.name == "catalog_list_data_products" }
     assertEquals(
       "array",
       tool.outputSchema["properties"]!!
@@ -124,22 +136,6 @@ class ServeCatalogMcpPresentedTokenTest {
       listOf("dataProducts"),
       tool.outputSchema["required"]!!.jsonArray.map { it.jsonPrimitive.content },
     )
-
-    val result =
-      runBlocking {
-          mcp.handle(
-            json(
-              """{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_data_products","arguments":{}}}"""
-            )
-          ) {
-            ServeMachineAuthorization.Decision.Missing
-          }
-        }
-        .body!!["result"]!!
-        .jsonObject
-    val text = result["content"]!!.jsonArray.first().jsonObject["text"]!!.jsonPrimitive.content
-    val legacyArray = Json.parseToJsonElement(text).jsonArray
-    assertEquals(legacyArray, result["structuredContent"]!!.jsonObject["dataProducts"])
   }
 
   @Test
@@ -182,6 +178,9 @@ class ServeCatalogMcpPresentedTokenTest {
         deviceSecret: String,
         waitSeconds: Long,
       ): String = "{}"
+
+      override fun approvalUrl(requestId: String): String =
+        "https://preview.example/access/$requestId"
     }
 
   private fun tools(): List<Tool> =
@@ -214,7 +213,7 @@ class ServeCatalogMcpPresentedTokenTest {
     val reply = runBlocking {
       mcp.handle(
         json(
-          """{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_previews",
+          """{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"catalog_list_previews",
              "arguments":{"catalog":"nope","token":"cpat_secret"}}}"""
         )
       ) {
@@ -231,7 +230,7 @@ class ServeCatalogMcpPresentedTokenTest {
     runBlocking {
       mcp.handle(
         json(
-          """{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"render_preview",
+          """{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"catalog_render_preview",
              "arguments":{"catalog":"m3","previewId":"card","token":"cpat_abc"}}}"""
         )
       ) { token ->

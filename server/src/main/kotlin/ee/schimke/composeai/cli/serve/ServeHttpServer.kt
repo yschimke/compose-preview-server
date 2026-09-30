@@ -34,7 +34,6 @@ import ee.schimke.composeai.uibuilder.protocol.GrantActorAccessMutationV1
 import ee.schimke.composeai.uibuilder.protocol.ListDesignsRequestV1
 import ee.schimke.composeai.uibuilder.protocol.OpenDesignRequestV1
 import ee.schimke.composeai.uibuilder.protocol.RevokeActorAccessMutationV1
-import ee.schimke.composeai.uibuilder.protocol.ServiceErrorCodeV1
 import ee.schimke.composeai.uibuilder.protocol.UpdateDesignAccessRequestV1
 import ee.schimke.composeai.uibuilder.service.AuthenticatedUiBuilderActor
 import ee.schimke.composeai.uibuilder.service.UiBuilderAssetPort
@@ -186,6 +185,8 @@ private val UI_BUILDER_ASSET_EXTENSIONS =
 class ServeHttpServer(
   private val host: String,
   requestedPort: Int,
+  /** Public origin an imported or newly created design should retain as its canonical home. */
+  private val canonicalOrigin: String? = null,
   /** The operator's own browse token (`--token`). Read through [serverToken]. */
   token: String,
   private val sessions: ServeSessionRegistry,
@@ -565,6 +566,12 @@ class ServeHttpServer(
    */
   uiBuilderAssets: UiBuilderAssetPort? = null,
   /**
+   * Checks a design or a mutation batch without saving it — `ui_builder_validate`. Null leaves the
+   * tool unadvertised, which is what a host that cannot open a scratch service over its own
+   * catalogs and exporter honestly has.
+   */
+  private val uiBuilderValidator: UiBuilderDraftValidator? = null,
+  /**
    * Observability for the playground lane on `/status.json` — which posture admitted it, whether
    * the configured jail actually contains anything on this host, and whether each mode's classpath
    * has resolved. Null when the lane isn't wired at all. See [PlaygroundHealth].
@@ -752,6 +759,22 @@ class ServeHttpServer(
   /** The actual bound port — may differ from the requested one if it was taken (auto-picked). */
   val port: Int = pickPort(host, requestedPort, portRange)
 
+  /**
+   * The server home a created or imported design is stamped with, or null to stamp none.
+   *
+   * Only an origin the operator stated counts (`--ui-builder-public-origin`, else
+   * `--github-auth-callback-base-url`). A bind address is not an identity: an auto-picked port
+   * changes on restart and two local servers on one port would each claim the other's designs, so a
+   * server without a configured origin leaves new designs unhomed, as they were before homes.
+   */
+  private val canonicalServerOriginValue: String? = canonicalOrigin?.let { configured ->
+    requireNotNull(normalizeServerHomeUrl(configured)) {
+      "the configured public origin '$configured' is not an absolute HTTP(S) URL"
+    }
+  }
+
+  private fun canonicalServerOrigin(): String? = canonicalServerOriginValue
+
   /** Concurrent-render slot count (the `/render` load-shed bound), surfaced on `/status`. */
   private val renderSlots: Int = maxConcurrentRenders.coerceAtLeast(1)
 
@@ -776,14 +799,17 @@ class ServeHttpServer(
           designService?.let {
             ServeUiBuilderMcp(
               it,
+              ::canonicalServerOrigin,
               uiBuilderNativePreview,
               uiBuilderCommentStore,
               references = uiBuilderReferenceStore,
               links = uiBuilderLinksStore,
               assets = designAssets,
+              validator = uiBuilderValidator,
             )
           },
         uiBuilderNative = uiBuilderNativePreview != null,
+        publicOrigin = ::canonicalServerOrigin,
       )
     else null
   private val unleasedThemeSemaphore = Semaphore(1)
@@ -943,6 +969,54 @@ class ServeHttpServer(
           )
           current.response.headers.append(HttpHeaders.CacheControl, "no-store")
           current.response.headers.append(HttpHeaders.Location, target)
+          current.respond(HttpStatusCode.Found)
+          finish()
+        }
+      }
+      // A browser may also arrive with a short-lived agent grant. Exchange that bearer for a
+      // derived HttpOnly credential backed by the same live grant, then remove it from the URL.
+      // Unlike the operator cookie this is installed on public boxes too: a public catalog still
+      // needs a grant for UI-builder write/export capabilities.
+      agentGrants?.let { store ->
+        intercept(ApplicationCallPipeline.Plugins) {
+          val current: ApplicationCall = context
+          val exchange = ServeAgentGrantCookie.exchange(current, store)
+          // A human identity wins over an ambient grant. Still strip a cpat URL they opened, but
+          // clear any previous grant cookie instead of silently switching their browser identity.
+          val humanPresent =
+            current.presentsOperatorCredential() ||
+              githubAuth?.currentSignedInLogin(current) != null
+          if (humanPresent) {
+            if (
+              exchange != null ||
+                current.request.cookies.rawCookies[ServeAgentGrantCookie.NAME] != null
+            ) {
+              current.response.cookies.append(
+                ServeAgentGrantCookie.clearedCookie(secure = isSecure(current))
+              )
+            }
+            if (exchange == null) return@intercept
+            current.response.headers.append(HttpHeaders.CacheControl, "no-store")
+            current.response.headers.append(HttpHeaders.Location, exchange.target)
+            current.respond(HttpStatusCode.Found)
+            finish()
+            return@intercept
+          }
+          if (exchange == null) return@intercept
+          // A browser already acting as a different live grant is not switched by a link alone:
+          // the link could be someone else's. Ask on a page of our own, whose form only a
+          // same-origin POST can submit.
+          val conflicting = ServeAgentGrantCookie.conflictingGrant(current, store, exchange)
+          if (conflicting != null) {
+            respondAgentGrantSwitchConfirmation(current, conflicting, exchange)
+            finish()
+            return@intercept
+          }
+          current.response.cookies.append(
+            ServeAgentGrantCookie.cookie(exchange.credential, secure = isSecure(current))
+          )
+          current.response.headers.append(HttpHeaders.CacheControl, "no-store")
+          current.response.headers.append(HttpHeaders.Location, exchange.target)
           current.respond(HttpStatusCode.Found)
           finish()
         }
@@ -1137,8 +1211,10 @@ class ServeHttpServer(
           installUiBuilderRoutes(
             designService,
             sameOriginUiBuilderAuthorization,
+            ::canonicalServerOrigin,
             uiBuilderNativePreview,
             uiBuilderInlineCapture,
+            identityDetails = ::uiBuilderIdentityDetails,
             // The native pane's live lane, on a host that has Stage-2 redemption. The token the
             // compile already minted is redeemed into a registered session, and the editor opens
             // the same `/{session}/ws/{preview}` socket the viewer's Live toggle opens — no new
@@ -1282,6 +1358,21 @@ class ServeHttpServer(
           post(ServeAgentGrants.POLL_PATH) { handleAgentGrantPoll(store) }
           post(ServeAgentGrants.REVOKE_PATH) { handleAgentGrantRevoke(store) }
           get(ServeAgentGrants.WHOAMI_PATH) { handleAgentGrantWhoami(store) }
+          post(ServeAgentGrants.SWITCH_PATH) { handleAgentGrantSwitch(store) }
+          post(ServeAgentGrants.LEAVE_PATH) {
+            // Same-origin only: a foreign page must not be able to sign this browser out of its
+            // grant any more than into one.
+            if (!ServeSameOriginRequests.isSameOrigin(call, sites.hosts)) {
+              call.response.headers.append(HttpHeaders.CacheControl, "no-store")
+              call.respond(HttpStatusCode.Forbidden)
+              return@post
+            }
+            call.response.cookies.append(
+              ServeAgentGrantCookie.clearedCookie(secure = isSecure(call))
+            )
+            call.response.headers.append(HttpHeaders.CacheControl, "no-store")
+            call.respond(HttpStatusCode.NoContent)
+          }
           get("${ServeAgentGrants.BASE_PATH}/{requestId}") { handleAgentGrantPage(store) }
           post("${ServeAgentGrants.BASE_PATH}/{requestId}") { handleAgentGrantDecision(store) }
           post("${ServeAgentGrants.BASE_PATH}/{grantId}/revoke") {
@@ -1334,6 +1425,24 @@ class ServeHttpServer(
           post("/mcp") { handleCatalogMcp() }
           get("/mcp") { rejectCatalogMcpListen() }
           delete("/mcp") { rejectCatalogMcpListen() }
+          get(ServeCatalogMcp.IMAGE_URL_PATH) { handleSignedRenderPng() }
+        }
+
+        // The UI-builder document and mutation JSON Schemas, the same bytes the MCP resources
+        // `compose-preview://schemas/…` serve, for a tool that is not an MCP client. Ungated like
+        // `/version`: they are generated from the released protocol and describe no design.
+        if (designService != null) {
+          get("${UiBuilderJsonSchemas.HTTP_PREFIX}{name}") {
+            val schema =
+              call.parameters["name"]?.let(UiBuilderJsonSchemas::byName)
+                ?: return@get call.respond(HttpStatusCode.NotFound)
+            call.response.headers.append(HttpHeaders.CacheControl, "public, max-age=3600")
+            call.respondText(
+              schema.text,
+              ContentType.parse(UiBuilderJsonSchemas.MEDIA_TYPE),
+              HttpStatusCode.OK,
+            )
+          }
         }
 
         // `/status` — the operator/observer view of this running host: published catalogs + their
@@ -2734,12 +2843,80 @@ class ServeHttpServer(
       // action from the one credential that always has it would be a strange kind of security.
       signedIn = login != null || permitted,
       permitted = permitted,
-      deniedReason = if (permitted) "" else uiBuilderDeniedReason(login),
+      deniedReason =
+        if (permitted) "" else uiBuilderDeniedReason(login, githubAuth?.isGuest(call) == true),
     )
   }
 
+  /**
+   * The identity endpoint's account of this caller beyond its actor id: whether anyone is signed
+   * in, why a write would be refused, and where to sign in.
+   *
+   * [canWrite] arrives already decided by the route — the same WRITE question [uiBuilderInvite]
+   * asks — so the reason is only ever attached to a refusal the write routes would really make. The
+   * sign-in link returns to the page the editor was loaded on, so signing in lands the person back
+   * on the design they were looking at rather than on the home page.
+   */
+  private fun uiBuilderIdentityDetails(
+    call: ApplicationCall,
+    canWrite: Boolean,
+  ): UiBuilderIdentityDetails {
+    val auth = githubAuth
+    val login = auth?.currentSignedInLogin(call)
+    return UiBuilderIdentityDetails(
+      // An operator token is a sign-in for this purpose, as it is for the invite card.
+      signedIn = login != null || canWrite,
+      writeDeniedReason =
+        if (canWrite) null else uiBuilderDeniedReason(login, auth?.isGuest(call) == true),
+      signInUrl =
+        if (auth == null || login != null) null
+        else
+          ServeGithubAuth.START_PATH +
+            "?return=" +
+            java.net.URLEncoder.encode(uiBuilderReturnPath(call), Charsets.UTF_8),
+    )
+  }
+
+  /**
+   * The same-host page the identity request came from, or the builder's home. Only a path is kept —
+   * never another host — and the sign-in route sanitizes it again on the way back.
+   */
+  private fun uiBuilderReturnPath(call: ApplicationCall): String {
+    val fallback = "/ui-builder"
+    val referer = call.request.headers[HttpHeaders.Referrer] ?: return fallback
+    val uri = runCatching { java.net.URI(referer) }.getOrNull() ?: return fallback
+    val sameHost =
+      uri.host == null ||
+        uri.host.equals(call.request.local.serverHost, ignoreCase = true) ||
+        uri.host.equals(
+          call.request.headers[HttpHeaders.Host]?.substringBefore(':'),
+          ignoreCase = true,
+        )
+    val path = uri.rawPath?.takeIf { it.startsWith("/") && sameHost } ?: return fallback
+    return ServeGithubAuth.safeReturnTo(path + (uri.rawQuery?.let { "?$it" } ?: ""))
+  }
+
   /** Why this visitor may not create a design, in the terms they can act on. */
-  private fun uiBuilderDeniedReason(login: String?): String {
+  private fun uiBuilderDeniedReason(login: String?, guest: Boolean = false): String {
+    val auth = githubAuth
+    // Nobody signed in on a host that offers GitHub sign-in: the next step is to sign in, not to
+    // ask an operator for a permission nobody has been asked for yet.
+    if (login == null && auth != null) return "Sign in with GitHub to create and edit designs."
+    // A guest on a box that names its members: repository access is not the bar there — being
+    // one of the named accounts or orgs is — so say that, and name the orgs.
+    if (guest && auth != null && auth.isRestrictedToAllowedUsers()) {
+      val orgs = auth.allowedOrgs().sorted()
+      val account = "the account you are signed in with ($login)"
+      return if (orgs.isNotEmpty()) {
+        val named = orgs.joinToString(" or ")
+        val noun = if (orgs.size == 1) "organization" else "organizations"
+        "Creating and editing designs here is limited to members of the $named GitHub $noun, " +
+          "and $account is not one. If you joined recently, sign out and sign in again."
+      } else {
+        "Creating and editing designs here is limited to accounts the operator has listed, and " +
+          "$account is not one of them. Ask an operator for access."
+      }
+    }
     val repository = githubAuth?.accessRepository()?.takeIf { it.isNotBlank() }
     val account = login?.let { "the account you are signed in with ($it)" } ?: "your session"
     return if (repository != null) {
@@ -5896,8 +6073,11 @@ class ServeHttpServer(
     }
     val outcome =
       withContext(Dispatchers.IO) {
-        ServeUiBuilderCreate(designService!!, uiBuilderDir!!)
-          .install(actor = AuthenticatedUiBuilderActor(ADMIN_LIBRARY_ACTOR), document = document)
+        ServeUiBuilderCreate(designService!!, uiBuilderDir!!, canonicalServerOrigin())
+          .installPublished(
+            actor = AuthenticatedUiBuilderActor(ADMIN_LIBRARY_ACTOR),
+            document = document,
+          )
       }
     call.response.headers.append(HttpHeaders.CacheControl, "no-store")
     if (outcome is ServeUiBuilderCreate.Outcome.Created) {
@@ -9821,7 +10001,13 @@ class ServeHttpServer(
 
     if (ServeCatalogMcp.requiresGrant(request)) {
       when (
-        val decision = authorization.authorizeScope(call, AgentGrantScope.PREVIEW, presentedToken)
+        val decision =
+          authorization.authorizeScope(
+            call,
+            AgentGrantScope.PREVIEW,
+            presentedToken,
+            allowBrowserGrantCookie = false,
+          )
       ) {
         is ServeMachineAuthorization.Decision.Authorized -> Unit
         ServeMachineAuthorization.Decision.Missing -> {
@@ -9849,7 +10035,12 @@ class ServeHttpServer(
             ?: UiBuilderAuthorizationDecision.Missing
         },
       ) { presented ->
-        authorization.authorizeScope(call, AgentGrantScope.LIVE, presented)
+        authorization.authorizeScope(
+          call,
+          AgentGrantScope.LIVE,
+          presented,
+          allowBrowserGrantCookie = false,
+        )
       }
     if (reply.accepted) {
       call.respond(HttpStatusCode.Accepted)
@@ -9861,6 +10052,30 @@ class ServeHttpServer(
         HttpStatusCode.OK,
       )
     }
+  }
+
+  /**
+   * The fetchable PNG a catalog `render_preview` result links to (#1160). Public on purpose — an
+   * `<img>` sends no credential — so the HMAC in the query is the whole authorization: it covers
+   * one resource URI and an expiry, and anything else is a 404 rather than a hint.
+   */
+  private suspend fun RoutingContext.handleSignedRenderPng() {
+    val mcp = catalogMcp ?: return call.respond(HttpStatusCode.NotFound)
+    val params = call.request.queryParameters
+    val uri = params["uri"]
+    val expiry = params["exp"]?.toLongOrNull()
+    val signature = params["sig"]
+    if (uri == null || expiry == null || signature == null) {
+      return call.respond(HttpStatusCode.NotFound)
+    }
+    val png =
+      try {
+        mcp.signedImagePng(uri, expiry, signature)
+      } catch (e: Exception) {
+        null
+      } ?: return call.respond(HttpStatusCode.NotFound)
+    call.response.headers.append(HttpHeaders.CacheControl, "private, max-age=300")
+    call.respondBytes(png, ContentType.Image.PNG)
   }
 
   /** Streamable HTTP permits a stateless server to decline the optional GET/SSE channel. */
@@ -11187,7 +11402,7 @@ class ServeHttpServer(
    * `application/x-www-form-urlencoded`. It is merged over the query and handed to [handleRender]
    * unchanged, so the LIVE gate, the product suffixes, the admission and the response are the GET's
    * own, not a copy of them. Capped at [MAX_RENDER_BODY_BYTES] (413 above), the same bound the
-   * catalog MCP endpoint's `render_preview` has for the same document.
+   * catalog MCP endpoint's `catalog_render_preview` has for the same document.
    */
   private suspend fun RoutingContext.handleRenderPost(sessionInPath: Boolean) {
     // The credential first, so an unauthenticated caller cannot make this server buffer a body.
@@ -13201,17 +13416,25 @@ class ServeHttpServer(
    *
    * The fix is to stop treating "the server's token" and "the token this page's links should carry"
    * as the same thing. A caller presenting a live grant gets pages wired with **their own** grant
-   * token — which passes every gate they are entitled to pass, so the UI is fully navigable — and
-   * everyone else gets [serverToken] exactly as before. A `--public` server puts no token in its
-   * links at all, so none of this applies there.
+   * token — which passes every gate they are entitled to pass, so the UI is fully navigable. Once a
+   * browser has exchanged that token for [ServeAgentGrantCookie], its links are clean instead.
+   * Everyone else gets [serverToken] exactly as before. A `--public` server puts no operator token
+   * in its links at all.
    *
    * See also [isAuthorizedAccessParam], the one place a credential arrives in a *path* segment
    * rather than a query string, which has to accept the same two answers.
    */
   private fun RoutingContext.linkToken(): String = call.linkToken()
 
-  private fun ApplicationCall.linkToken(): String =
-    agentGrantFor(this)?.token ?: if (browsesByCookie()) "" else serverToken
+  private fun ApplicationCall.linkToken(): String {
+    val grant = agentGrantFor(this)
+    return when {
+      grant != null && browsesByAgentGrantCookie(grant) -> ""
+      grant != null -> grant.token
+      browsesByCookie() -> ""
+      else -> serverToken
+    }
+  }
 
   /**
    * Whether this call presents the browse cookie ([ServeBrowseCookie]) — a browser that exchanged
@@ -13221,6 +13444,27 @@ class ServeHttpServer(
   private fun ApplicationCall.browsesByCookie(): Boolean =
     !isPublic && ServeBrowseCookie.presents(this, serverToken)
 
+  /** Whether this call already speaks with the operator's standing authority. */
+  private fun ApplicationCall.presentsOperatorCredential(): Boolean {
+    if (serverToken.isBlank()) return false
+    if (browsesByCookie()) return true
+    return sequenceOf(
+        request.headers[TOKEN_HEADER],
+        request.queryParameters["token"],
+      )
+      .filterNotNull()
+      .any { ServeUrls.tokensMatch(serverToken, it) }
+  }
+
+  /** Whether this call's resolved grant came from the short-lived browser cookie. */
+  private fun ApplicationCall.browsesByAgentGrantCookie(
+    grant: ServeAgentGrantStore.Grant
+  ): Boolean =
+    agentGrants?.browserCredentialMatches(
+      request.cookies.rawCookies[ServeAgentGrantCookie.NAME],
+      grant,
+    ) == true
+
   /** Whether the links of the page being built carry `token=` — see [linkToken]. */
   private fun RoutingContext.linksCarryToken(): Boolean = !isPublic && linkToken().isNotEmpty()
 
@@ -13229,8 +13473,15 @@ class ServeHttpServer(
    * own grant token, as [linkToken] would give it, or else a value derived from the operator token
    * — never the operator token itself.
    */
-  private fun RoutingContext.wasmPrivateAccess(): String =
-    agentGrantFor(call)?.token ?: ServeBrowseCookie.wasmAccess(serverToken)
+  private fun RoutingContext.wasmPrivateAccess(): String {
+    val grant = agentGrantFor(call)
+    return when {
+      grant != null && call.browsesByAgentGrantCookie(grant) ->
+        agentGrants?.wasmCredentialFor(grant) ?: grant.token
+      grant != null -> grant.token
+      else -> ServeBrowseCookie.wasmAccess(serverToken)
+    }
+  }
 
   /**
    * Whether a credential arriving as a **path** segment (`/wasm-private/{access}/…`) is one this
@@ -13238,10 +13489,11 @@ class ServeHttpServer(
    * the same two answers [linkToken] can produce, because the page that builds these URLs embeds
    * whichever one its reader presented.
    */
-  private fun isAuthorizedAccessParam(value: String?): Boolean =
+  private fun isAuthorizedAccessParam(call: ApplicationCall, value: String?): Boolean =
     ServeUrls.tokensMatch(ServeBrowseCookie.wasmAccess(serverToken), value) ||
       ServeUrls.tokensMatch(serverToken, value) ||
-      agentGrants?.grantForToken(value)?.allows(AgentGrantScope.PREVIEW) == true
+      agentGrants?.grantForToken(value)?.allows(AgentGrantScope.PREVIEW) == true ||
+      agentGrants?.grantForWasmCredential(value)?.allows(AgentGrantScope.PREVIEW) == true
 
   /**
    * The live grant this call presents, or null — resolved **once per request** and remembered.
@@ -13262,8 +13514,8 @@ class ServeHttpServer(
    * its grant once at connection setup ([socketGrant]) and never asks again.
    *
    * Reads the same two places the operator token is read from, plus `Authorization: Bearer` — an
-   * agent's HTTP client reaches for that header without being told to, and refusing it would be a
-   * papercut with no security value: the bearer is checked identically wherever it arrives.
+   * agent's HTTP client reaches for that header without being told to — and the derived HttpOnly
+   * browser cookie. The cookie is tried last so an explicit live grant still decides the request.
    */
   private fun agentGrantFor(call: ApplicationCall): ServeAgentGrantStore.Grant? =
     call.attributes
@@ -13317,8 +13569,74 @@ class ServeHttpServer(
       }
   }
 
+  /**
+   * The page a grant link gets instead of a silent identity switch, when this browser already acts
+   * as a different live grant. `Keep` is the clean URL (no token, no cookie change); `Switch` is a
+   * same-origin POST to [ServeAgentGrants.SWITCH_PATH]. The bearer is written into this one
+   * `no-store` page's form, never into a link, so it does not leak through history or `Referer`.
+   */
+  private suspend fun respondAgentGrantSwitchConfirmation(
+    call: ApplicationCall,
+    current: ServeAgentGrantStore.Grant,
+    exchange: ServeAgentGrantCookie.Exchange,
+  ) {
+    val skin = call.siteSkin()
+    call.response.headers.append(HttpHeaders.CacheControl, "no-store")
+    call.response.headers.append("Referrer-Policy", "no-referrer")
+    call.respondText(
+      ServeWeb.agentGrantSwitchPage(
+        currentLabel = current.label,
+        currentFingerprint = current.fingerprint,
+        nextLabel = exchange.grant.label,
+        nextFingerprint = exchange.grant.fingerprint,
+        formAction = ServeAgentGrants.SWITCH_PATH,
+        token = exchange.grant.token,
+        target = exchange.target,
+        version = SERVE_VERSION,
+        siteName = skin.first,
+        themeCss = skin.second,
+      ),
+      ContentType.Text.Html,
+      HttpStatusCode.OK,
+    )
+  }
+
+  /**
+   * `POST /agent-access/switch` — the person confirmed replacing this browser's grant. Accepted
+   * only from a page this server served, only for a live grant, and never over a human identity.
+   */
+  private suspend fun RoutingContext.handleAgentGrantSwitch(store: ServeAgentGrantStore) {
+    call.response.headers.append(HttpHeaders.CacheControl, "no-store")
+    val sameOrigin =
+      call.request.headers["Sec-Fetch-Site"] == "same-origin" ||
+        (call.request.headers[HttpHeaders.Origin] != null &&
+          ServeSameOriginRequests.isSameOrigin(call, sites.hosts))
+    if (!sameOrigin) {
+      call.respond(HttpStatusCode.Forbidden)
+      return
+    }
+    val form = call.receiveParameters()
+    val target = ServeAgentGrantCookie.safeLocalTarget(form["next"])
+    val humanPresent =
+      call.presentsOperatorCredential() || githubAuth?.currentSignedInLogin(call) != null
+    val grant = store.grantForToken(form["token"])
+    val credential = grant?.let(store::browserCredentialFor)
+    if (humanPresent || credential == null) {
+      call.respond(HttpStatusCode.Forbidden)
+      return
+    }
+    call.response.cookies.append(ServeAgentGrantCookie.cookie(credential, secure = isSecure(call)))
+    call.response.headers.append(HttpHeaders.Location, target)
+    call.respond(HttpStatusCode.SeeOther)
+  }
+
   private fun resolveAgentGrant(call: ApplicationCall): ServeAgentGrantStore.Grant? {
     val store = agentGrants ?: return null
+    // An ambient browser grant must not reduce a request that also carries the operator's standing
+    // credential. In particular, live/playground and ingest gates inspect the resolved grant to
+    // enforce its narrower scope, so resolving the cookie here would turn full operator authority
+    // into whichever short-lived grant happened to be exchanged earlier in this browser.
+    if (call.presentsOperatorCredential()) return null
     val bearer =
       call.request.headers[HttpHeaders.Authorization]
         ?.takeIf { it.startsWith(BEARER_PREFIX, ignoreCase = true) }
@@ -13329,12 +13647,19 @@ class ServeHttpServer(
     // is exactly the shape `share-preview --mechanism serve` sends: the host credential in the
     // query, a GitHub token in the bearer for the upload's own gate. First source that resolves to
     // a live grant wins; one carrying something else simply does not answer.
-    return sequenceOf(
-        call.request.headers[TOKEN_HEADER],
-        bearer,
-        call.request.queryParameters["token"],
-      )
-      .firstNotNullOfOrNull { store.grantForToken(it) }
+    val explicitlyPresented =
+      sequenceOf(
+          call.request.headers[TOKEN_HEADER],
+          bearer,
+          call.request.queryParameters["token"],
+        )
+        .firstNotNullOfOrNull { store.grantForToken(it) }
+    if (explicitlyPresented != null) return explicitlyPresented
+    // A person's signed-in browser identity also outranks an ambient grant cookie. An explicit
+    // cpat above remains explicit, while merely having exchanged one in this browser cannot make
+    // later work look like the grant holder's after the person signs in.
+    if (githubAuth?.currentSignedInLogin(call) != null) return null
+    return ServeAgentGrantCookie.grant(call, store, sites.hosts)
   }
 
   /**
@@ -13389,7 +13714,8 @@ class ServeHttpServer(
     }
     val privateSystem = system in privateWasmCatalogs
     if (
-      (privateRoute && (!privateSystem || !isAuthorizedAccessParam(call.parameters["access"]))) ||
+      (privateRoute &&
+        (!privateSystem || !isAuthorizedAccessParam(call, call.parameters["access"]))) ||
         (!privateRoute && privateSystem && !isPublic)
     ) {
       call.respondText("not found", status = HttpStatusCode.NotFound)
@@ -13420,7 +13746,12 @@ class ServeHttpServer(
     // The sandboxed iframe has an opaque origin, so its ES-module and Wasm requests require CORS.
     call.response.headers.append(HttpHeaders.AccessControlAllowOrigin, "*")
     val etag = "\"${file.length().toString(16)}-${file.lastModified().toString(16)}\""
-    call.response.headers.append(HttpHeaders.CacheControl, "public, max-age=3600")
+    call.response.headers.append(
+      HttpHeaders.CacheControl,
+      // The access segment can expire or be revoked while the bytes stay the same. A private cache
+      // may retain them, but it must revalidate through the authorization gate before reuse.
+      if (privateRoute) "private, no-cache" else "public, max-age=3600",
+    )
     call.response.headers.append(HttpHeaders.ETag, etag)
     if (call.request.headers[HttpHeaders.IfNoneMatch] == etag) {
       call.respond(HttpStatusCode.NotModified)
@@ -13428,65 +13759,6 @@ class ServeHttpServer(
     }
     val bytes = withContext(Dispatchers.IO) { file.readBytes() }
     call.respondBytes(bytes, wasmContentType(file.name))
-  }
-
-  /**
-   * Whether this caller may open the design named by a catalog-free UI-builder URL.
-   *
-   * Gated on a **READ authorization and the store's own answer**, which keeps the shell from being
-   * an existence oracle. Designs are private to their owner and collaborators, so serving the shell
-   * for any id that exists would tell an unauthenticated stranger that a `cheeky-raccoon` id is
-   * taken. Asking the service as the caller means the answer is exactly the one the design API
-   * would already give them: whoever cannot open the design gets the same `404` they got before.
-   *
-   * The question is `GetDesignActions`, not a snapshot. It is the service's own "what may this
-   * actor do here" answer, which says not-found for a design the actor cannot read exactly as for
-   * one that does not exist — the same guarantee — without building the snapshot the shell
-   * discarded. That snapshot was the whole design, its history and its resolved catalog, built
-   * under the lock every live edit also takes, on the critical path of every page load and a moment
-   * before the page asked for the very same snapshot itself.
-   *
-   * A design the service has set aside because its catalog pin no longer resolves answers neither
-   * question, and is the one exception: the recovery screen has to load before the design can open
-   * again. In that case the server asks for the read-only recovery preview. That request performs
-   * the same per-design READ check before saying anything about the catalog, so this fallback does
-   * not turn the shell into an existence oracle.
-   *
-   * @return true when the shell may be served, false to leave the request to the static lane —
-   *   which keeps a genuinely missing asset a 404 rather than a silent app shell.
-   */
-  private suspend fun RoutingContext.canOpenUiBuilderDesign(designId: String): Boolean {
-    val service = designService ?: return false
-    val authorization = uiBuilderAuthorization ?: return false
-    val actor =
-      (authorization.authorize(call, UiBuilderRouteCapability.READ)
-          as? UiBuilderAuthorizationDecision.Authorized)
-        ?.actor ?: return false
-    val response =
-      withContext(Dispatchers.IO) {
-        service.execute(
-          UiBuilderServiceCall(actor, UiBuilderServiceRequest.GetDesignActions(designId))
-        )
-      }
-    if (response is UiBuilderServiceResponse.DesignActions) return true
-    if (
-      response !is UiBuilderServiceResponse.Error ||
-        response.error.code != ServiceErrorCodeV1.CATALOG_UNAVAILABLE
-    ) {
-      return false
-    }
-    val recovery =
-      withContext(Dispatchers.IO) {
-        service.execute(
-          UiBuilderServiceCall(
-            actor,
-            UiBuilderServiceRequest.PreviewCurrentCatalogUpgrade(designId),
-          )
-        )
-      }
-    return recovery is UiBuilderServiceResponse.CatalogUpgradePreview ||
-      (recovery is UiBuilderServiceResponse.Error &&
-        recovery.error.code != ServiceErrorCodeV1.NOT_FOUND)
   }
 
   /**
@@ -13579,9 +13851,11 @@ class ServeHttpServer(
         return
       }
     } else if (assetSegments.size == 1 && isUiBuilderDesignSegment(assetSegments[0])) {
-      // The canonical design URL. Authorize before serving the public shell so a design id cannot
-      // be used as an existence oracle; the API then reads its catalog from the document.
-      if (!File(dir, assetSegments[0]).isFile && canOpenUiBuilderDesign(assetSegments[0])) {
+      // The canonical design URL. The shell is not design data, so serve it for every path-shaped
+      // id. That makes a creator's POST/303/GET handoff independent of how the browser presents
+      // its credential. It also cannot become an existence oracle: an unknown id gets the same
+      // shell, while the authenticated design API decides whether any document is readable.
+      if (!File(dir, assetSegments[0]).isFile) {
         if (call.request.path().endsWith("/")) {
           val suffix = call.request.queryString().let { if (it.isEmpty()) "" else "?$it" }
           call.respondRedirect("/ui-builder/${assetSegments[0]}$suffix")
@@ -14000,7 +14274,7 @@ class ServeHttpServer(
       }
     val outcome =
       withContext(Dispatchers.IO) {
-        ServeUiBuilderCreate(service, dir)
+        ServeUiBuilderCreate(service, dir, canonicalServerOrigin())
           .create(
             actor = actor,
             catalogSystemId = catalog,
@@ -14103,9 +14377,12 @@ class ServeHttpServer(
             ?: "${source.title.ifBlank { sourceDesignId }} copy",
         createdAtEpochMillis = null,
         updatedAtEpochMillis = null,
+        home = null,
       )
     val outcome =
-      withContext(Dispatchers.IO) { ServeUiBuilderCreate(service, dir).install(actor, copy) }
+      withContext(Dispatchers.IO) {
+        ServeUiBuilderCreate(service, dir, canonicalServerOrigin()).install(actor, copy)
+      }
     when (outcome) {
       is ServeUiBuilderCreate.Outcome.Created,
       is ServeUiBuilderCreate.Outcome.AlreadyExists -> {
@@ -14334,10 +14611,13 @@ class ServeHttpServer(
         title = "${source.title.ifBlank { designId }} (from revision $revision)",
         createdAtEpochMillis = null,
         updatedAtEpochMillis = null,
+        home = null,
       )
     when (
       val outcome =
-        withContext(Dispatchers.IO) { ServeUiBuilderCreate(service, dir).install(actor, fork) }
+        withContext(Dispatchers.IO) {
+          ServeUiBuilderCreate(service, dir, canonicalServerOrigin()).install(actor, fork)
+        }
     ) {
       is ServeUiBuilderCreate.Outcome.Created -> {
         call.response.headers.append(
@@ -15579,6 +15859,9 @@ class ServeHttpServer(
           permit.release()
         }
       }
+
+      override fun approvalUrl(requestId: String): String =
+        externalOrigin() + ServeAgentGrants.approvalPath(requestId)
     }
 
   /**
@@ -16483,6 +16766,7 @@ class ServeHttpServer(
           !isPublic ||
             (serverToken.isNotBlank() && ServeUrls.tokensMatch(serverToken, provided)) ||
             uiBuilderAdministrators.containsGithubLogin(login),
+        opensUiBuilder = auth.opensUiBuilder(),
       )
     }
     return ServeAgentGrants.Approver.operator(store.maxScope, store.maxCapabilities)

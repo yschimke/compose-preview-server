@@ -206,6 +206,11 @@ if [[ -n "${SERVE_GITHUB_AUTH_CLIENT_ID:-}" ||
   # ask for edit access through an agent grant. Guests count as signed out everywhere else.
   [[ "${SERVE_GITHUB_AUTH_GUESTS:-}" == "1" || "${SERVE_GITHUB_AUTH_GUESTS:-}" == "true" ]] &&
     args+=(--github-auth-guests)
+  # Let every signed-in GitHub member create, edit and export UI-builder designs, and approve agent
+  # grants for them, without push access to SERVE_GITHUB_AUTH_REPO. With no USERS/ORGS allowlist that
+  # is any GitHub account. Playground and image uploads still require the repository.
+  [[ "${SERVE_GITHUB_AUTH_OPEN_UI_BUILDER:-}" == "1" || "${SERVE_GITHUB_AUTH_OPEN_UI_BUILDER:-}" == "true" ]] &&
+    args+=(--github-auth-open-ui-builder)
   # Unset asks for read:user only (plus read:org with SERVE_GITHUB_AUTH_ORGS). Only read-only
   # identity scopes (read:user, user:email, read:org) are accepted; repo is refused at startup.
   [[ -n "${SERVE_GITHUB_AUTH_SCOPE:-}" ]] && args+=(--github-auth-scope "${SERVE_GITHUB_AUTH_SCOPE}")

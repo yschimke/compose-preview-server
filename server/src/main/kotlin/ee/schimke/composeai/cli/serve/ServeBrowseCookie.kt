@@ -95,10 +95,10 @@ internal object ServeBrowseCookie {
     if (path == "/admin" || path.startsWith("/admin/")) return null
     val presented = call.request.queryParameters.getAll("token") ?: return null
     if (presented.size != 1 || !ServeUrls.tokensMatch(serverToken, presented.single())) return null
-    return path + queryWithoutToken(call.request.queryString())
+    return localRedirectPath(path) + queryWithoutToken(call.request.queryString())
   }
 
-  private fun isDocumentNavigation(call: ApplicationCall): Boolean {
+  internal fun isDocumentNavigation(call: ApplicationCall): Boolean {
     val headers = call.request.headers
     val mode = headers["Sec-Fetch-Mode"]
     if (mode != null) {
@@ -120,6 +120,10 @@ internal object ServeBrowseCookie {
         }
     return if (kept.isEmpty()) "" else kept.joinToString("&", prefix = "?")
   }
+
+  /** A root-relative redirect path that cannot be interpreted as a protocol-relative authority. */
+  internal fun localRedirectPath(path: String): String =
+    "/" + path.trimStart { it == '/' || it == '\\' }
 
   private fun derive(serverToken: String, label: String): String {
     val mac = Mac.getInstance("HmacSHA256")
