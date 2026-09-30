@@ -372,6 +372,9 @@ internal object ServeUiBuilderView {
     MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
 }
 
+/** The `schema` of every [UiBuilderViewV1]. */
+internal const val UI_BUILDER_VIEW_SCHEMA = "compose-preview/ui-builder-view/v1"
+
 /**
  * What `ui_builder_view` answers with, beside the picture.
  *
@@ -383,7 +386,7 @@ internal object ServeUiBuilderView {
  */
 @Serializable
 internal data class UiBuilderViewV1(
-  val schema: String = "compose-preview/ui-builder-view/v1",
+  val schema: String = UI_BUILDER_VIEW_SCHEMA,
   val designId: String,
   val revision: Long,
   /** `export` (the editor's own renderer) or `native` (real Compose on this host). */

@@ -220,6 +220,12 @@ class DaemonMcpServerTest {
       .isEqualTo(DaemonMcpServer.MCP_APP_VIEWER_URI)
     assertThat(tools.tools.single { it.name == "render_matrix" }.meta).isNotNull()
     assertThat(tools.tools.single { it.name == "diff_semantics" }.meta).isNotNull()
+    // #1114: both render tools declare the object their structuredContent is.
+    for (name in listOf("render_preview", "render_matrix")) {
+      com.google.common.truth.Truth.assertWithMessage(name)
+        .that(tools.tools.single { it.name == name }.outputSchema?.type)
+        .isEqualTo("object")
+    }
     // The viewer calls these itself, so hosts must see them as visible to the app.
     for (name in listOf("render_preview", "render_preview_overlay", "get_preview_data")) {
       val visibility =
@@ -1369,6 +1375,8 @@ class DaemonMcpServerTest {
     assertThat(parsed["sha256"]?.jsonPrimitive?.contentOrNull).isNotEmpty()
     // The observation has text plus its replayable resource link, but no inline base64 image.
     assertThat(resp.textContents()).hasSize(1)
+    // The same observation, typed, for a client that reads the declared outputSchema.
+    assertThat(resp.raw["structuredContent"]).isEqualTo(parsed)
   }
 
   @Test
@@ -3465,6 +3473,7 @@ class DaemonMcpServerTest {
     assertThat(parsed["schema"]?.jsonPrimitive?.contentOrNull)
       .isEqualTo("compose-preview-matrix/v1")
     assertThat(parsed["cellCount"]?.jsonPrimitive?.content?.toInt()).isEqualTo(2)
+    assertThat(resp.raw["structuredContent"]).isEqualTo(parsed)
     val cells = parsed["cells"]!!.jsonArray
     assertThat(cells).hasSize(2)
     assertThat(

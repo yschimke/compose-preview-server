@@ -538,6 +538,24 @@ fun textCallToolResult(text: String): CallToolResult =
 fun pngCallToolResult(bytesBase64: String): CallToolResult =
   CallToolResult(content = listOf(ContentBlock.Image(data = bytesBase64, mimeType = "image/png")))
 
+/**
+ * This result with `structuredContent`, for a tool that declares an `outputSchema`: a client that
+ * reads a tool's schema may refuse a successful result that carries no structure. A result with its
+ * own structure, and an error, are returned unchanged; otherwise every JSON-object text block is
+ * merged in order (a later key wins), so the structure is exactly what the text says, and an image-
+ * or prose-only result carries an empty object.
+ */
+internal fun CallToolResult.withJsonTextStructure(): CallToolResult {
+  if (isError == true || structuredContent != null) return this
+  val objects =
+    content.filterIsInstance<ContentBlock.Text>().mapNotNull { block ->
+      runCatching { Json.parseToJsonElement(block.text) as? JsonObject }.getOrNull()
+    }
+  return copy(
+    structuredContent = JsonObject(objects.fold(emptyMap<String, JsonElement>()) { a, b -> a + b })
+  )
+}
+
 /** Convenience: error response — `isError = true` per MCP spec for tool-level errors. */
 fun errorCallToolResult(message: String, structured: JsonObject? = null): CallToolResult =
   CallToolResult(

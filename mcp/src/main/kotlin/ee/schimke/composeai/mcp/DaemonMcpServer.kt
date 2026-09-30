@@ -117,6 +117,37 @@ private val STORYBOOK_ALIAS_NAMES =
   )
 
 /**
+ * `render_preview`'s `outputSchema` (#1114). Its `structuredContent` is the JSON its text blocks
+ * carry ([withJsonTextStructure]) — the semantics or hash observation, the file result, the variant
+ * grid, a `pending` retry — so it is declared as an object and nothing narrower: the shape follows
+ * `observe`, `inline` and `crop`, and a field declared here would be a promise some of them break.
+ * An image-only render carries an empty object. Top-level for the reason [STORYBOOK_ALIAS_NAMES]
+ * is.
+ */
+private val RENDER_PREVIEW_OUTPUT_SCHEMA: JsonObject = buildJsonObject {
+  put("type", "object")
+  putJsonObject("properties") {}
+}
+
+/**
+ * `render_matrix`'s `outputSchema`: the `compose-preview-matrix/v1` summary. No field is required,
+ * because a call the budget cut short answers with the `pending` object instead.
+ */
+private val RENDER_MATRIX_OUTPUT_SCHEMA: JsonObject = buildJsonObject {
+  put("type", "object")
+  putJsonObject("properties") {
+    putJsonObject("schema") { put("type", "string") }
+    putJsonObject("uri") { put("type", "string") }
+    putJsonObject("cellCount") { put("type", "integer") }
+    putJsonObject("cells") {
+      put("type", "array")
+      putJsonObject("items") { put("type", "object") }
+    }
+    putJsonObject("pending") { put("type", "boolean") }
+  }
+}
+
+/**
  * The load-bearing wiring layer. Owns:
  *
  * - The per-(workspace, module) **preview catalog** populated from daemon `discoveryUpdated`.
@@ -1665,6 +1696,7 @@ class DaemonMcpServer(
             """
               .trimIndent()
           ),
+        outputSchema = RENDER_PREVIEW_OUTPUT_SCHEMA,
       ),
       ToolDef(
         name = "find_previews_for_file",
@@ -1960,6 +1992,7 @@ class DaemonMcpServer(
             """
               .trimIndent()
           ),
+        outputSchema = RENDER_PREVIEW_OUTPUT_SCHEMA,
       ),
       ToolDef(
         name = "find_previews_for_file",
@@ -2307,6 +2340,7 @@ class DaemonMcpServer(
             """
               .trimIndent()
           ),
+        outputSchema = RENDER_MATRIX_OUTPUT_SCHEMA,
       ),
       ToolDef(
         name = "subscribe_preview_data",
@@ -2618,16 +2652,19 @@ class DaemonMcpServer(
       "list_projects" -> toolListProjects()
       "list_devices" -> toolListDevices()
       "find_previews_for_file" -> toolFindPreviewsForFile(args)
+      // Both declare an outputSchema, so both carry structuredContent (#1114).
       "render_preview" ->
         withCallBudget(session, name, args, progress) { report ->
-          if (scope == null) autoRegisterWorkspace(session)
-          renderPreviewChoosingVariant(session, withSettings(session, args), scope, report)
-        }
+            if (scope == null) autoRegisterWorkspace(session)
+            renderPreviewChoosingVariant(session, withSettings(session, args), scope, report)
+          }
+          .withJsonTextStructure()
       "render_matrix" ->
         withCallBudget(session, name, args, progress) { report ->
-          if (scope == null) autoRegisterWorkspace(session)
-          toolRenderMatrix(session, args, scope, report)
-        }
+            if (scope == null) autoRegisterWorkspace(session)
+            toolRenderMatrix(session, args, scope, report)
+          }
+          .withJsonTextStructure()
       "watch" -> toolWatch(session, args)
       "unwatch" -> toolUnwatch(session, args)
       "list_watches" -> toolListWatches(session)

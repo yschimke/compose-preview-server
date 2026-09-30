@@ -271,11 +271,14 @@ data class UiBuilderValidationProblemV1(
   val operationIndex: Int? = null,
 )
 
+/** The `schema` of every [UiBuilderValidationV1]. */
+internal const val UI_BUILDER_VALIDATION_SCHEMA = "compose-preview/ui-builder-validation/v1"
+
 /** The reply of `ui_builder_validate`. [valid] is false exactly when a problem is an error. */
 @OptIn(ExperimentalSerializationApi::class)
 @Serializable
 internal data class UiBuilderValidationV1(
-  @EncodeDefault val schema: String = "compose-preview/ui-builder-validation/v1",
+  @EncodeDefault val schema: String = UI_BUILDER_VALIDATION_SCHEMA,
   val valid: Boolean,
   /** The stored design the batch was checked against, when the call named one. */
   val designId: String? = null,

@@ -2663,41 +2663,60 @@ class ServeCatalogMcp(
     put("ui", buildJsonObject { put("prefersBorder", true) })
   }
 
+  /**
+   * The `outputSchema` every advertised tool declares: always an object, because that is what
+   * `structuredContent` is. A reply this server encodes from a class of its own gets that class's
+   * generated schema ([ServeUiBuilderMcp.VIEW], [ServeUiBuilderMcp.VALIDATE]); a legacy array reply
+   * gets the wrapper [withStructuredContent] puts it in; a render declares the `imageUrl` it adds;
+   * and every other tool, whose JSON is a protocol envelope or a per-lane shape, is an open object
+   * — which an image-only reply's empty `structuredContent` also satisfies.
+   */
   private fun outputSchema(name: String): JsonObject =
-    if (name == "list_data_products" || name == "preview-stories") {
-      val field = if (name == "list_data_products") "dataProducts" else "observations"
-      buildJsonObject {
-        put("type", "object")
-        put(
-          "properties",
-          buildJsonObject {
-            put(
-              field,
-              buildJsonObject {
-                put("type", "array")
-                put("items", buildJsonObject { put("type", "object") })
-              },
-            )
-          },
-        )
-        put("required", buildJsonArray { add(JsonPrimitive(field)) })
-        put("additionalProperties", false)
-      }
-    } else {
-      buildJsonObject { put("type", "object") }
+    when (name) {
+      "list_data_products" -> arrayWrapperSchema("dataProducts")
+      "preview-stories" -> arrayWrapperSchema("observations")
+      ServeUiBuilderMcp.VIEW -> UiBuilderJsonSchemas.viewOutput
+      ServeUiBuilderMcp.VALIDATE -> UiBuilderJsonSchemas.validationOutput
+      "render_preview" ->
+        buildJsonObject {
+          put("type", "object")
+          putJsonObject(PROPERTIES) {
+            putJsonObject("imageUrl") {
+              put("type", "string")
+              put(
+                "description",
+                "Short-lived signed https URL of the rendered PNG, on a host with a public origin.",
+              )
+            }
+          }
+        }
+      else -> buildJsonObject { put("type", "object") }
     }
+
+  private fun arrayWrapperSchema(field: String): JsonObject = buildJsonObject {
+    put("type", "object")
+    putJsonObject(PROPERTIES) {
+      putJsonObject(field) {
+        put("type", "array")
+        putJsonObject("items") { put("type", "object") }
+      }
+    }
+    putJsonArray("required") { add(field) }
+    put("additionalProperties", false)
+  }
 
   /**
    * MCP output schemas validate `structuredContent`, not the backwards-compatible text block.
    * Preserve that text for existing clients while exposing the same JSON object to typed clients.
    * Legacy array results are wrapped under the field their output schema declares, and a batched
    * story call aggregates every JSON observation instead of dropping all but the first. Image-only
-   * and non-JSON text results keep their primary payload in `content`.
+   * and non-JSON text results keep their primary payload in `content` and carry an empty object. A
+   * result that already has structure of its own — a render's `imageUrl`, a library listing — keeps
+   * it, beside whatever its JSON text says.
    */
   private fun withStructuredContent(name: String, result: JsonObject): JsonObject {
-    if (result["isError"]?.jsonPrimitive?.booleanOrNull == true || "structuredContent" in result) {
-      return result
-    }
+    if (result["isError"]?.jsonPrimitive?.booleanOrNull == true) return result
+    val existing = result["structuredContent"] as? JsonObject ?: JsonObject(emptyMap())
     val parsedText =
       (result["content"] as? JsonArray)
         ?.asSequence()
@@ -2722,7 +2741,7 @@ class ServeCatalogMcp(
           }
         else -> parsedText.firstOrNull() as? JsonObject
       } ?: JsonObject(emptyMap())
-    return JsonObject(result + ("structuredContent" to structured))
+    return JsonObject(result + ("structuredContent" to JsonObject(structured + existing)))
   }
 
   /**
