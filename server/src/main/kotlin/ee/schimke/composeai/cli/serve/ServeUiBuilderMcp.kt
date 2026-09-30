@@ -2031,7 +2031,7 @@ class ServeUiBuilderMcp(
           "Compile a design and render it with real Compose on this host, rather than in the " +
             "browser's Wasm canvas — the way to see what a design looks like on Android. " +
             "Returns the first frame, the token the live frame stream is opened with, and the " +
-            "design node ids the render is tagged with, so `get_preview_data` can report each " +
+            "design node ids the render is tagged with, so `catalog_get_preview_data` can report each " +
             "node's bounds and a client can put selectable regions over the image. " +
             (if (native) "This host has a native render lane. "
             else

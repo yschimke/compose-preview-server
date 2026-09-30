@@ -151,9 +151,14 @@ class A2uiCommandTest {
     val seen = mutableListOf<Pair<String, JsonObject>>()
     val written = mutableMapOf<String, ByteArray>()
     val code =
-      runner(mapOf("list_previews" to listing, "render_preview" to rendered), seen, written).run()
+      runner(
+          mapOf("catalog_list_previews" to listing, "catalog_render_preview" to rendered),
+          seen,
+          written,
+        )
+        .run()
     assertEquals(DesignCommandRunner.EXIT_OK, code)
-    assertEquals(listOf("list_previews", "render_preview"), seen.map { it.first })
+    assertEquals(listOf("catalog_list_previews", "catalog_render_preview"), seen.map { it.first })
     val render = seen.last().second
     assertEquals("doc.Preview", render["previewId"]!!.jsonPrimitive.content)
     assertEquals("png", render["observe"]!!.jsonPrimitive.content)
@@ -167,8 +172,8 @@ class A2uiCommandTest {
   @Test
   fun `an explicit preview skips the listing`() {
     val seen = mutableListOf<Pair<String, JsonObject>>()
-    runner(mapOf("render_preview" to rendered), seen, mutableMapOf(), preview = "p.X").run()
-    assertEquals(listOf("render_preview"), seen.map { it.first })
+    runner(mapOf("catalog_render_preview" to rendered), seen, mutableMapOf(), preview = "p.X").run()
+    assertEquals(listOf("catalog_render_preview"), seen.map { it.first })
   }
 
   @Test
@@ -176,7 +181,7 @@ class A2uiCommandTest {
     val none = textResult("""{"catalogs":[{"catalog":"a2ui-catalog","previews":[{"id":"x"}]}]}""")
     val failure =
       assertFailsWith<DesignCommandFailure> {
-        runner(mapOf("list_previews" to none), mutableListOf(), mutableMapOf()).run()
+        runner(mapOf("catalog_list_previews" to none), mutableListOf(), mutableMapOf()).run()
       }
     assertTrue(failure.message!!.contains("--preview"), failure.message)
   }
@@ -189,7 +194,8 @@ class A2uiCommandTest {
         """{"type":"text","text":"{\"generation\":\"baked\",\"overridesApplied\":false}"}]}}"""
     val written = mutableMapOf<String, ByteArray>()
     assertFailsWith<DesignCommandFailure> {
-      runner(mapOf("render_preview" to baked), mutableListOf(), written, preview = "p").run()
+      runner(mapOf("catalog_render_preview" to baked), mutableListOf(), written, preview = "p")
+        .run()
     }
     assertTrue(written.isEmpty())
   }
@@ -200,14 +206,24 @@ class A2uiCommandTest {
       """{"jsonrpc":"2.0","id":1,"result":{"isError":true,"content":[""" +
         """{"type":"text","text":"live grant scope is required"}]}}"""
     assertFailsWith<DesignAuthorizationRequired> {
-      runner(mapOf("render_preview" to refused), mutableListOf(), mutableMapOf(), preview = "p")
+      runner(
+          mapOf("catalog_render_preview" to refused),
+          mutableListOf(),
+          mutableMapOf(),
+          preview = "p",
+        )
         .run()
     }
     val other =
       """{"jsonrpc":"2.0","id":1,"error":{"code":-32602,"message":"no such preview 'p'"}}"""
     val failure =
       assertFailsWith<DesignCommandFailure> {
-        runner(mapOf("render_preview" to other), mutableListOf(), mutableMapOf(), preview = "p")
+        runner(
+            mapOf("catalog_render_preview" to other),
+            mutableListOf(),
+            mutableMapOf(),
+            preview = "p",
+          )
           .run()
       }
     assertTrue(failure.message!!.contains("no such preview"))
@@ -217,7 +233,7 @@ class A2uiCommandTest {
   fun `an SSE frame carries the same reply`() {
     val written = mutableMapOf<String, ByteArray>()
     runner(
-        mapOf("render_preview" to "event: message\ndata: $rendered\n\n"),
+        mapOf("catalog_render_preview" to "event: message\ndata: $rendered\n\n"),
         mutableListOf(),
         written,
         preview = "p",

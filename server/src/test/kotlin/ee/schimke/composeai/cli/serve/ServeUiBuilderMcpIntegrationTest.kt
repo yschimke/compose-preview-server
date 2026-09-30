@@ -1138,7 +1138,7 @@ class ServeUiBuilderMcpIntegrationTest {
     // agent this server can do something it cannot, which is worse than silence.
     val without = tools(start(withUiBuilder = false))
     assertTrue(ServeUiBuilderMcp.TOOL_NAMES.none { it in without }, without.toString())
-    assertTrue("render_preview" in without, without.toString())
+    assertTrue("catalog_render_preview" in without, without.toString())
   }
 
   @Test

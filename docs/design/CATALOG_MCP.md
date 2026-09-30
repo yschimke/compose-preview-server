@@ -35,7 +35,7 @@ URL: https://preview.example/mcp
 Authorization: Bearer <short-lived grant>
 ```
 
-`list_projects` discovers the current catalog set. Catalog-specific tools take `catalog` alongside
+`catalog_list_projects` discovers the current catalog set. Catalog-specific tools take `catalog` alongside
 `previewId`, while resource URIs carry both values, so adding or retiring a catalog needs no MCP
 client reconfiguration. The separate UI-builder MCP sidecar should use its configurable path (for
 example `/ui-builder/mcp`) when both products share a hostname.
@@ -130,6 +130,8 @@ for a new grant the same way it asked for the first.
 
 ## MCP surface
 
+The catalog's data tools carry a `catalog_` prefix (`catalog_render_preview`, `catalog_list_previews`, …) so a client that also runs the local `compose-preview` server never sees two tools with one name. The un-prefixed names still dispatch as a deprecated alias but are no longer listed. `status`, the access tools, the Storybook aliases and `ui_builder_*` are unchanged.
+
 The endpoint implements Streamable HTTP MCP protocol versions `2025-06-18` and `2025-03-26`.
 Catalog calls are independent, so the server does not allocate sessions or advertise subscriptions:
 JSON-RPC messages use `POST`, notifications receive `202 Accepted`, and optional `GET`/SSE and
@@ -141,16 +143,16 @@ JSON-RPC messages use `POST`, notifications receive `202 Accepted`, and optional
 | `request_access`, `poll_access` | none | Obtain a grant without leaving MCP (above) |
 | `status` | `preview` | Report readiness and the aggregate catalog set |
 | `resources/list`, `resources/read` | `preview` | List and read published preview PNGs |
-| `list_projects`, `list_previews` | `preview` | Discover catalogs, then one catalog's preview metadata (`list_previews` requires `catalog` unless the server holds only one) |
-| `render_preview` | `live` | Render with optional overrides; defaults to a token-frugal semantics/hash observation, with `observe=png` for pixels and `observe=svg` for the `compose/figma-svg` vector export |
-| `render_matrix` | `live` | Render one preview across a cross-product of override axes in a single call |
-| `list_devices` | `preview` | The `device` override's accepted vocabulary, with each frame's dp size and density |
-| `history_list` | `preview` | One preview's render timeline |
-| `history_diff` | `preview` | Compare two of its recorded renders |
-| `history_read` | `preview` | One historical render's pixels, by commit or blob |
-| `diff_semantics` | `live` | Compare two previews' semantics by authored `testTag` |
-| `list_data_products` | `preview` | Discover structured products exposed by one catalog's previews (`catalog` or `uri` required) |
-| `get_preview_data` | `live` | Retrieve accessibility or Compose annotation data |
+| `catalog_list_projects`, `catalog_list_previews` | `preview` | Discover catalogs, then one catalog's preview metadata (`catalog_list_previews` requires `catalog` unless the server holds only one) |
+| `catalog_render_preview` | `live` | Render with optional overrides; defaults to a token-frugal semantics/hash observation, with `observe=png` for pixels and `observe=svg` for the `compose/figma-svg` vector export |
+| `catalog_render_matrix` | `live` | Render one preview across a cross-product of override axes in a single call |
+| `catalog_list_devices` | `preview` | The `device` override's accepted vocabulary, with each frame's dp size and density |
+| `catalog_history_list` | `preview` | One preview's render timeline |
+| `catalog_history_diff` | `preview` | Compare two of its recorded renders |
+| `catalog_history_read` | `preview` | One historical render's pixels, by commit or blob |
+| `catalog_diff_semantics` | `live` | Compare two previews' semantics by authored `testTag` |
+| `catalog_list_data_products` | `preview` | Discover structured products exposed by one catalog's previews (`catalog` or `uri` required) |
+| `catalog_get_preview_data` | `live` | Retrieve accessibility or Compose annotation data |
 | `list-all-documentation`, `get-documentation-for-story` | `preview` | Storybook-MCP-compatible discovery aliases |
 | `preview-stories` | `live` | Storybook-MCP-compatible preview rendering alias |
 | `ui_builder_list_catalogs`, `ui_builder_search_components`, `ui_builder_list_designs`, `ui_builder_get_design` | `ui-builder-read` | The component catalogs a design can pin to (a summary by default, the whole capability with `full: true`), the designs on this box, and one design's whole document (without the catalog it pins unless `includeCatalog: true`) |
@@ -167,9 +169,9 @@ JSON-RPC messages use `POST`, notifications receive `202 Accepted`, and optional
 | `ui_builder_post_comment`, `ui_builder_resolve_comment_thread` | `ui-builder-write` | Say something on a design, and close a thread once it is answered |
 | `ui_builder_acknowledge_comment`, `ui_builder_react_to_comment` | `ui-builder-write` | Say you have **read** a thread — which is not resolving it — or react to one comment with an emoji |
 
-Enumerations across every catalog (`status`, `list_projects`, `resources/list`,
+Enumerations across every catalog (`status`, `catalog_list_projects`, `resources/list`,
 `list-all-documentation`) read what the registry already holds and never resume a suspended catalog.
-`list_previews` and `list_data_products` without a catalog refuse at once with the available ids and a
+`catalog_list_previews` and `catalog_list_data_products` without a catalog refuse at once with the available ids and a
 pointer to the local `compose-preview-mcp` server, rather than serialising every catalog (#1162).
 
 The `ui_builder_*` tools appear in `tools/list` only on a box that actually serves a UI builder
@@ -271,7 +273,7 @@ call the credential arrived on — the gate an agent reaches is the gate a perso
 `observe=svg` returns the vector as SVG **source** in a `text` content block, not as a base64
 `image` block with `mimeType: image/svg+xml`. The symmetry with `png` is tempting, but almost no MCP
 client renders SVG from an image block, and a vector consumer — a Figma round-trip, a diff, a
-DOM-capture tool — wants the markup. `list_previews` reports it per preview as `svgAvailable`, so the lane is discoverable without
+DOM-capture tool — wants the markup. `catalog_list_previews` reports it per preview as `svgAvailable`, so the lane is discoverable without
 asking for it and reading the refusal. It is available only where the host advertises it
 (`ServeHost.hasSvgExportFor`): a static bundle carrying `figma/<slug>.svg` vectors, or a
 daemon-backed session that can export `compose/figma-svg`. A catalog with neither is refused by
@@ -280,7 +282,7 @@ lane, so it is metered identically and cannot become a second unmetered renderer
 
 ### History
 
-`history_list` answers in one of three `mode`s, and the field is load-bearing: the three are not
+`catalog_history_list` answers in one of three `mode`s, and the field is load-bearing: the three are not
 interchangeable, and an agent that could not tell them apart would read "no versions" as "this
 preview has never changed".
 
@@ -321,7 +323,7 @@ branch, five such previews accounted for a 40% reduction in entries.
 
 ### Comparing and reading historical renders
 
-`history_diff` compares two of a preview's recorded renders, defaulting to the two newest — *did the
+`catalog_history_diff` compares two of a preview's recorded renders, defaulting to the two newest — *did the
 last publish move this preview?* It is a **metadata** comparison: the timeline's versions are
 already collapsed distinct renders, so whether the bytes changed is answered by their content ids
 without fetching either image on either side.
@@ -331,7 +333,7 @@ on a preview that re-renders differently on publishes that did not change it, a 
 not evidence of a real change — the same question `flake-triage` otherwise settles with a
 repeat-render oracle, answered here from precomputed data.
 
-`history_read` returns one historical render's pixels through this server, addressed by `commit` or
+`catalog_history_read` returns one historical render's pixels through this server, addressed by `commit` or
 `blob` (a prefix is enough). `preview` scope rather than `live`, matching the HTTP permalink lane:
 it replays already-published bytes and commissions no render. It is still bounded — the published
 lane goes through the bundle host's pinned-fetch permit and its miss cache, and the project-mode
@@ -344,12 +346,12 @@ will not hand over is reported as such, distinctly from a version that does not 
 `compose/figma-svg-long` — the whole scrollable screen (a virtualised `LazyColumn` re-rendered at an
 expanded viewport so every row composes) rather than the viewport crop. Both are gated on
 `ServeHost.hasScrollExportFor` and refused by name where absent, because the tall re-render needs a
-daemon and a static bundle has no scroll producer. `list_previews` reports `scrollAvailable` per
+daemon and a static bundle has no scroll producer. `catalog_list_previews` reports `scrollAvailable` per
 preview beside `svgAvailable`. A non-scrolling preview yields its ordinary viewport output.
 
 ### Devices
 
-`list_devices` publishes the `device` override's accepted vocabulary from `DeviceDimensions`, the
+`catalog_list_devices` publishes the `device` override's accepted vocabulary from `DeviceDimensions`, the
 same catalog the render path resolves against — no geometry is authored in the MCP layer. The tool
 exists because an unrecognised `device` value is **not** an error on the render path: it falls
 through to the default frame, which from the caller's side is indistinguishable from a device that
@@ -357,7 +359,7 @@ happens to render identically to the default.
 
 ### Comparing two previews
 
-`diff_semantics` compares two previews' semantics and reports tags present on only one side, tags
+`catalog_diff_semantics` compares two previews' semantics and reports tags present on only one side, tags
 whose bounds moved, and tags whose occupancy `count` changed.
 
 Identity is the authored `testTag`, deliberately, and not a `SemanticsRefs` ref. A ref indexes
@@ -390,7 +392,7 @@ lists the supported keys.
 
 ### Rendering a matrix
 
-`render_matrix` takes an `axes` object mapping an override key to the values to sweep, renders the
+`catalog_render_matrix` takes an `axes` object mapping an override key to the values to sweep, renders the
 cross-product, and reports one cell per combination with its overrides, `sha256`, dimensions and
 `generation` (`observe=png` adds base64 pixels per cell). The base `overrides`, if given, are the
 floor each cell starts from; an axis value with the same key wins for that cell.
@@ -430,8 +432,8 @@ all the same render:
   auto-render on a pause), the PNG shown in place, and a refusal explained where it happens. The
   viewer's Overrides panel also edits any multi-line or long (>120 chars) string knob in a textarea.
 - **`compose-preview-server a2ui render --document <file|-> [--out <png|->]`** does the same from a
-  shell through this endpoint: it finds the preview by its `document` knob (`list_previews` now
-  reports each preview's declared `knobs`), or takes `--preview`, calls `render_preview` with
+  shell through this endpoint: it finds the preview by its `document` knob (`catalog_list_previews` now
+  reports each preview's declared `knobs`), or takes `--preview`, calls `catalog_render_preview` with
   `observe=png` and the document as `knob.document`, and writes the PNG. `--catalog` defaults to
   `a2ui-catalog`, `--server` to `$COMPOSE_PREVIEW_SERVER` or the local default; the credential comes
   from `$COMPOSE_PREVIEW_TOKEN`, and without a `live` grant the command asks a human for one, as

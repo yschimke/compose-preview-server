@@ -17,8 +17,8 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 
 /**
- * #1162: an agent called the hosted `list_previews` with `{}` and waited out its client's three
- * minute timeout, because the call resumed and serialised every catalog in turn.
+ * #1162: an agent called the hosted `catalog_list_previews` with `{}` and waited out its client's
+ * three minute timeout, because the call resumed and serialised every catalog in turn.
  *
  * Every catalog here is registered suspended, and resuming one takes longer than the whole bound
  * these tests allow, so any call that still wakes a catalog fails on time rather than passing
@@ -77,36 +77,36 @@ class ServeCatalogMcpListingBoundsTest {
     this["content"]!!.jsonArray.first().jsonObject["text"]!!.jsonPrimitive.content
 
   @Test
-  fun `list_previews without a catalog refuses at once, naming the catalogs and the local server`() {
-    val result = tool("list_previews")
+  fun `catalog_list_previews without a catalog refuses at once, naming the catalogs and the local server`() {
+    val result = tool("catalog_list_previews")
 
     assertTrue(result.isError(), result.toString())
     val text = result.text()
     assertTrue("'catalog'" in text, text)
     CATALOGS.forEach { assertTrue(it in text, "missing $it: $text") }
-    assertTrue("list_projects" in text, text)
+    assertTrue("catalog_list_projects" in text, text)
     assertTrue("compose-preview-mcp" in text, text)
   }
 
   @Test
-  fun `list_previews with an unknown catalog refuses at once`() {
-    val result = tool("list_previews", """{"catalog":"nope"}""")
+  fun `catalog_list_previews with an unknown catalog refuses at once`() {
+    val result = tool("catalog_list_previews", """{"catalog":"nope"}""")
 
     assertTrue(result.isError(), result.toString())
     assertTrue("no such catalog 'nope'" in result.text(), result.text())
   }
 
   @Test
-  fun `list_data_products without a catalog refuses at once`() {
-    val result = tool("list_data_products")
+  fun `catalog_list_data_products without a catalog refuses at once`() {
+    val result = tool("catalog_list_data_products")
 
     assertTrue(result.isError(), result.toString())
     assertTrue("compose-preview-mcp" in result.text(), result.text())
   }
 
   @Test
-  fun `list_projects reports every catalog without resuming any`() {
-    val result = tool("list_projects")
+  fun `catalog_list_projects reports every catalog without resuming any`() {
+    val result = tool("catalog_list_projects")
 
     assertFalse(result.isError(), result.toString())
     val projects = Json.parseToJsonElement(result.text()).jsonObject["projects"]!!.jsonArray

@@ -18,8 +18,8 @@ import kotlinx.serialization.json.jsonPrimitive
 /**
  * The catalog MCP's vector lane (issue #273).
  *
- * `render_preview` served raster only, while the HTTP `/render/<id>.svg` route on the same host
- * answered the same preview with a `compose/figma-svg` export. These pin the MCP lane to the
+ * `catalog_render_preview` served raster only, while the HTTP `/render/<id>.svg` route on the same
+ * host answered the same preview with a `compose/figma-svg` export. These pin the MCP lane to the
  * capability [ServeHost] already models, including the two things that are easy to regress: that
  * asking for SVG does not also pay for a PNG, and that a catalog with no vectors says so rather
  * than claiming the preview does not exist.
@@ -70,7 +70,7 @@ class ServeCatalogMcpSvgTest {
     val request =
       Json.parseToJsonElement(
           """
-          {"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"render_preview",
+          {"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"catalog_render_preview",
            "arguments":{"catalog":"m3","previewId":"card","observe":"$observe"}}}
           """
         )
@@ -148,7 +148,7 @@ class ServeCatalogMcpSvgTest {
   }
 
   @Test
-  fun `the advertised render_preview schema offers svg`() {
+  fun `the advertised catalog_render_preview schema offers svg`() {
     val registry = ServeSessionRegistry(open = { null })
     val mcp = ServeCatalogMcp(registry, Semaphore(1))
     val request =
@@ -162,7 +162,7 @@ class ServeCatalogMcpSvgTest {
         .jsonObject["tools"]!!
         .jsonArray
         .map { it.jsonObject }
-        .single { it["name"]!!.jsonPrimitive.content == "render_preview" }
+        .single { it["name"]!!.jsonPrimitive.content == "catalog_render_preview" }
     val enum =
       render["inputSchema"]!!
         .jsonObject["properties"]!!
