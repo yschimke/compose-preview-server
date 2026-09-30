@@ -6754,6 +6754,218 @@ test("contract · live viewer actions go over the MCP Apps bridge", async ({ pag
   await expect.poll(lastContext).toContain('matrix variant {"fontScale":2} of Card');
 });
 
+// The Previews tray (#1238): a thread entrypoint's `previews_tray` result drawn by the viewer, with
+// a fake MCP Apps host that proxies the server's tools. Pointing at a node sends it as model
+// context; the host here also advertises OpenAI's `openai/files` so "Open source" uses it.
+async function openTrayViewer(page, { experimental = { "openai/files": {} } } = {}) {
+  const base64 = solidPng(240, 240);
+  await page.goto("/preview-harness/index.html");
+  await page.evaluate(({ base64, experimental }) => {
+    const profile = "compose-preview://fixture/_app/com.example.ProfilePreview";
+    const settings = "compose-preview://fixture/_app/com.example.SettingsPreview";
+    const log = (window.__tray = { calls: [], contexts: [], opens: [], links: [], subscribes: [] });
+    document.body.replaceChildren();
+    const frame = document.createElement("iframe");
+    frame.title = "Compose Preview MCP App";
+    frame.style.width = "620px";
+    frame.style.height = "700px";
+    const send = (message) => frame.contentWindow.postMessage({ jsonrpc: "2.0", ...message }, "*");
+    window.__traySend = send;
+    window.__trayUris = { profile, settings };
+    const semantics = {
+      nodeId: "1",
+      boundsInRoot: "0,0,240,240",
+      children: [
+        {
+          nodeId: "2",
+          ref: "n2",
+          role: "Button",
+          testTag: "save",
+          boundsInRoot: "20,20,220,100",
+          children: [{ nodeId: "3", ref: "n3", text: "Save", boundsInRoot: "40,40,120,80" }],
+        },
+        { nodeId: "4", ref: "n4", text: "Footer", boundsInRoot: "0,200,240,240" },
+      ],
+    };
+    window.addEventListener("message", (event) => {
+      if (event.source !== frame.contentWindow) return;
+      const { id, method, params } = event.data || {};
+      const reply = (result) => send({ id, result });
+      if (method === "ui/initialize") {
+        reply({
+          hostCapabilities: { serverTools: {}, serverResources: { subscribe: true }, experimental },
+        });
+        send({ method: "ui/notifications/tool-input", params: { arguments: {} } });
+        send({
+          method: "ui/notifications/tool-result",
+          params: {
+            content: [{ type: "text", text: "Previews tray: 2 preview(s)" }],
+            structuredContent: {
+              mode: "tray",
+              previews: [
+                { uri: profile, name: "ProfilePreview", sourceFile: "/work/app/src/Profile.kt", sourceLine: 12, pinned: false, rendered: 1 },
+                { uri: settings, name: "SettingsPreview", sourceFile: "/work/app/src/Settings.kt", sourceLine: 4, pinned: true },
+              ],
+              changedFiles: [{ path: "/work/app/src/Profile.kt", previews: 1 }],
+            },
+            _meta: { "composePreview/trayPngs": { [profile]: base64 } },
+          },
+        });
+      } else if (method === "tools/list") {
+        reply({
+          tools: ["render_preview", "get_preview_data", "previews_tray"].map((name) => ({ name, inputSchema: { type: "object" } })),
+        });
+      } else if (method === "tools/call") {
+        log.calls.push(params);
+        if (params.name === "render_preview") {
+          reply({ content: [{ type: "image", mimeType: "image/png", data: base64 }] });
+        } else if (params.name === "get_preview_data") {
+          reply({ content: [{ type: "text", text: JSON.stringify({ kind: params.arguments.kind, payload: { root: semantics } }) }] });
+        } else if (params.name === "previews_tray") {
+          reply({
+            structuredContent: {
+              mode: "tray",
+              previews: [
+                { uri: profile, name: "ProfilePreview", sourceFile: "/work/app/src/Profile.kt", sourceLine: 12, pinned: false, rendered: window.__trayRendered ?? 2 },
+                { uri: settings, name: "SettingsPreview", sourceFile: "/work/app/src/Settings.kt", sourceLine: 4, pinned: true },
+              ],
+              changedFiles: [{ path: "/work/app/src/Profile.kt", previews: 1 }],
+            },
+            content: [],
+          });
+        }
+      } else if (method === "resources/subscribe") {
+        log.subscribes.push(params.uri);
+        reply({});
+      } else if (method === "resources/unsubscribe") {
+        reply({});
+      } else if (method === "ui/update-model-context") {
+        log.contexts.push(params);
+        reply({});
+      } else if (method === "openai/files/open") {
+        log.opens.push(params.path);
+        reply({});
+      } else if (method === "ui/open-link") {
+        log.links.push(params.url);
+        reply({});
+      }
+    });
+    frame.src = "/mcp-app/compose-preview-viewer.html";
+    document.body.append(frame);
+  }, { base64, experimental });
+  return page.frameLocator('iframe[title="Compose Preview MCP App"]');
+}
+
+test("contract · the Previews tray turns a pointed-at node into model context", async ({ page }) => {
+  const viewer = await openTrayViewer(page);
+  const tray = () => page.evaluate(() => window.__tray);
+  const { profile, settings } = await page.evaluate(() => window.__trayUris);
+
+  // The tray lists the changed file's preview first, opens it, and reads its semantics.
+  await expect(viewer.locator(".tray-item")).toHaveCount(2);
+  await expect(viewer.locator(".tray-item").first()).toHaveAttribute("aria-pressed", "true");
+  await expect(viewer.locator(".tray-item .tray-badge")).toHaveText(["pinned"]);
+  await expect(viewer.locator("#meta")).toHaveText("Previews · 2 for 1 changed file, 1 pinned");
+  const image = viewer.locator(".tray-stage > img");
+  await expect(image).toBeVisible();
+  await expect.poll(async () => (await tray()).calls.map((call) => call.name)).toEqual(
+    expect.arrayContaining(["render_preview", "get_preview_data"]),
+  );
+  const firstCalls = (await tray()).calls;
+  expect(firstCalls[0]).toEqual({ name: "render_preview", arguments: { uri: profile, observe: "png", inline: true } });
+  expect(firstCalls[1]).toEqual({ name: "get_preview_data", arguments: { uri: profile, kind: "compose/semantics" } });
+  // Live refresh rides the existing resource subscriptions.
+  await expect.poll(async () => [...(await tray()).subscribes].sort()).toEqual([profile, settings].sort());
+  await expect(viewer.locator(".tray-selection")).toContainText("Point at a node");
+
+  // Click inside the Button but outside its Text: the Button is the deepest node there.
+  const at = async (x, y) => {
+    const box = await image.boundingBox();
+    await image.click({ position: { x: (x / 240) * box.width, y: (y / 240) * box.height } });
+  };
+  await at(180, 60);
+  await expect.poll(async () => (await tray()).contexts.length).toBe(1);
+  const first = (await tray()).contexts[0];
+  expect(first.content.map((block) => block.type)).toEqual(["image", "text", "resource_link", "text"]);
+  const [crop, titled, sourceLink, hidden] = first.content;
+  expect(crop.mimeType).toBe("image/png");
+  expect(crop.data.length).toBeGreaterThan(20);
+  expect(crop._meta["openai/title"]).toBe('ProfilePreview: Button #save');
+  expect(titled._meta["openai/title"]).toBe("ProfilePreview: Button #save");
+  expect(titled.text).toContain("role=Button");
+  expect(titled.text).toContain("testTag=save");
+  expect(titled.text).toContain("bounds=[20,20,220,100]");
+  expect(titled.text).toContain(`preview=${profile}`);
+  expect(titled.annotations).toBeUndefined();
+  expect(sourceLink).toMatchObject({ uri: "file:///work/app/src/Profile.kt", name: "Profile.kt:12" });
+  expect(hidden.annotations).toEqual({ audience: ["assistant"] });
+  expect(hidden.text).toContain('"testTag":"save"');
+  expect(hidden.text).toContain('"text":"Save"');
+  expect(first.structuredContent.composePreviewSelection).toMatchObject({
+    uri: profile,
+    node: { ref: "n2", role: "Button", testTag: "save", bounds: [20, 20, 220, 100] },
+    source: { file: "/work/app/src/Profile.kt", line: 12 },
+  });
+  await expect(viewer.locator(".hit-boxes rect.selected")).toHaveCount(1);
+  await expect(viewer.locator(".tray-selection .chip")).toHaveText("Attached: Button #save");
+
+  // A point on the Text inside it selects the Text; the update is whole, replacing the first.
+  await at(60, 60);
+  await expect.poll(async () => (await tray()).contexts.length).toBe(2);
+  const second = (await tray()).contexts[1];
+  expect(second.content.map((block) => block.type)).toEqual(["image", "text", "resource_link", "text"]);
+  expect(second.content[1]._meta["openai/title"]).toBe('ProfilePreview: Text "Save"');
+  expect(second.content[1].text).not.toContain("testTag=save");
+  expect(second.structuredContent.composePreviewSelection.node.ref).toBe("n3");
+
+  // Open source: the host's openai/files/open, with the path the server supplied.
+  await viewer.locator("#tray-open-source").click();
+  await expect.poll(async () => (await tray()).opens).toEqual(["/work/app/src/Profile.kt"]);
+  expect((await tray()).links).toEqual([]);
+
+  // The person removed the chip in the composer: the selection goes too, without a new update.
+  await page.evaluate(() => window.__traySend({ method: "ui/notifications/host-context-changed", params: { "openai/modelContext": null } }));
+  await expect(viewer.locator(".tray-selection .chip")).toHaveCount(0);
+  expect((await tray()).contexts).toHaveLength(2);
+
+  // Clear sends an empty context.
+  await at(10, 220);
+  await expect.poll(async () => (await tray()).contexts.length).toBe(3);
+  expect((await tray()).contexts[2].structuredContent.composePreviewSelection.node.ref).toBe("n4");
+  await viewer.locator("#tray-clear").click();
+  await expect.poll(async () => (await tray()).contexts.at(-1)).toEqual({ content: [] });
+
+  // Someone else re-renders the open preview: the subscription's update re-lists the tray, the
+  // listing says it rendered since the viewer did, and the viewer re-opens it keeping the node.
+  await at(180, 60);
+  await expect(viewer.locator(".tray-selection .chip")).toHaveText("Attached: Button #save");
+  const rendersBefore = (await tray()).calls.filter((call) => call.name === "render_preview").length;
+  await page.evaluate((uri) => {
+    window.__trayRendered = 7;
+    window.__traySend({ method: "notifications/resources/updated", params: { uri } });
+  }, profile);
+  await expect
+    .poll(async () => (await tray()).calls.filter((call) => call.name === "render_preview").length)
+    .toBe(rendersBefore + 1);
+  await expect(viewer.locator(".tray-selection .chip")).toHaveText("Attached: Button #save");
+  // ...and its own render does not loop.
+  await page.waitForTimeout(600);
+  expect((await tray()).calls.filter((call) => call.name === "render_preview").length).toBe(rendersBefore + 1);
+
+  // Another preview in the tray.
+  await viewer.locator(".tray-item").nth(1).click();
+  await expect.poll(async () => (await tray()).calls.some((call) => call.arguments?.uri === settings)).toBe(true);
+  await expect(viewer.locator(".tray-item").nth(1)).toHaveAttribute("aria-pressed", "true");
+});
+
+test("contract · without openai/files the tray opens the source as a file link", async ({ page }) => {
+  const viewer = await openTrayViewer(page, { experimental: {} });
+  await expect(viewer.locator(".tray-stage > img")).toBeVisible();
+  await viewer.locator("#tray-open-source").click();
+  await expect.poll(() => page.evaluate(() => window.__tray.links)).toEqual(["file:///work/app/src/Profile.kt"]);
+  expect(await page.evaluate(() => window.__tray.opens)).toEqual([]);
+});
+
 test("contract · a 160px host frame shows the whole preview and the toolbar", async ({ page }) => {
   const pngs = {
     base: readFileSync(resolve(pagesDir, "_render-placeholder-round.png")).toString("base64"),
