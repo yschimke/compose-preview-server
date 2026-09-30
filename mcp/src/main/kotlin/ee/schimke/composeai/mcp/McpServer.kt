@@ -18,6 +18,7 @@ import io.modelcontextprotocol.kotlin.sdk.types.EmptyResult
 import io.modelcontextprotocol.kotlin.sdk.types.GetPromptRequest
 import io.modelcontextprotocol.kotlin.sdk.types.ImageContent
 import io.modelcontextprotocol.kotlin.sdk.types.Implementation
+import io.modelcontextprotocol.kotlin.sdk.types.InitializeResult
 import io.modelcontextprotocol.kotlin.sdk.types.ListPromptsRequest
 import io.modelcontextprotocol.kotlin.sdk.types.ListPromptsResult
 import io.modelcontextprotocol.kotlin.sdk.types.ListResourcesRequest
@@ -102,8 +103,11 @@ class McpSession(
   private val output: OutputStream,
   private val configure: (ServerSession) -> Unit,
   private val onClose: () -> Unit,
-  /** Sent as the `initialize` result's `instructions`; null sends none. */
-  private val instructions: String? = null,
+  /**
+   * The `initialize` result's `instructions` for the connecting client's `clientInfo.name`; null
+   * sends none.
+   */
+  private val instructions: (clientName: String?) -> String? = { null },
 ) : Closeable, Session {
   private val closed = CompletableFuture<Unit>()
   @Volatile private var sdkSession: ServerSession? = null
@@ -122,9 +126,11 @@ class McpSession(
               // replies "Tool <name> not found". Constructing the ServerSession directly lets us
               // set every handler first, then connect, so no request is ever served by the SDK
               // defaults. ServerSession's constructor wires up initialize/ping/logging itself.
-              // The third argument is the initialize `instructions`, not a session id (#1163).
-              val session = ServerSession(serverInfo, options, instructions)
+              // The third argument is the initialize `instructions`, not a session id (#1163);
+              // the per-client text replaces it in [wrapInitialize].
+              val session = ServerSession(serverInfo, options, instructions(null))
               sdkSession = session
+              wrapInitialize(session)
               session.onClose {
                 closed.complete(Unit)
                 onClose()
@@ -150,6 +156,36 @@ class McpSession(
 
   fun start() {
     thread.start()
+  }
+
+  /**
+   * Routes `initialize` through the SDK's own handler, which records the client's capabilities and
+   * version, then logs the client to stderr and swaps in the instructions for that client (#1109).
+   * The SDK takes the instructions once, at construction, before any client is known.
+   */
+  private fun wrapInitialize(session: ServerSession) {
+    val method = Method.Defined.Initialize.value
+    val builtIn = session.requestHandlers[method] ?: return
+    session.removeRequestHandler(Method.Defined.Initialize)
+    val fallback = session.fallbackRequestHandler
+    session.fallbackRequestHandler = { request, extra ->
+      if (request.method == method) {
+        val result = builtIn(request, extra)
+        val client = session.clientVersion
+        System.err.println(
+          "compose-preview-mcp: client ${client?.name ?: "<unknown>"} ${client?.version ?: ""}"
+            .trimEnd()
+        )
+        if (result is InitializeResult) result.copy(instructions = instructions(client?.name))
+        else result
+      } else {
+        fallback?.invoke(request, extra)
+          ?: throw McpException(
+            RPCError.ErrorCode.METHOD_NOT_FOUND,
+            "Method not found: ${request.method}",
+          )
+      }
+    }
   }
 
   fun awaitClose() {
