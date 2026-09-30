@@ -566,6 +566,12 @@ class ServeHttpServer(
    */
   uiBuilderAssets: UiBuilderAssetPort? = null,
   /**
+   * Checks a design or a mutation batch without saving it — `ui_builder_validate`. Null leaves the
+   * tool unadvertised, which is what a host that cannot open a scratch service over its own
+   * catalogs and exporter honestly has.
+   */
+  private val uiBuilderValidator: UiBuilderDraftValidator? = null,
+  /**
    * Observability for the playground lane on `/status.json` — which posture admitted it, whether
    * the configured jail actually contains anything on this host, and whether each mode's classpath
    * has resolved. Null when the lane isn't wired at all. See [PlaygroundHealth].
@@ -799,6 +805,7 @@ class ServeHttpServer(
               references = uiBuilderReferenceStore,
               links = uiBuilderLinksStore,
               assets = designAssets,
+              validator = uiBuilderValidator,
             )
           },
         uiBuilderNative = uiBuilderNativePreview != null,
@@ -1419,6 +1426,23 @@ class ServeHttpServer(
           get("/mcp") { rejectCatalogMcpListen() }
           delete("/mcp") { rejectCatalogMcpListen() }
           get(ServeCatalogMcp.IMAGE_URL_PATH) { handleSignedRenderPng() }
+        }
+
+        // The UI-builder document and mutation JSON Schemas, the same bytes the MCP resources
+        // `compose-preview://schemas/…` serve, for a tool that is not an MCP client. Ungated like
+        // `/version`: they are generated from the released protocol and describe no design.
+        if (designService != null) {
+          get("${UiBuilderJsonSchemas.HTTP_PREFIX}{name}") {
+            val schema =
+              call.parameters["name"]?.let(UiBuilderJsonSchemas::byName)
+                ?: return@get call.respond(HttpStatusCode.NotFound)
+            call.response.headers.append(HttpHeaders.CacheControl, "public, max-age=3600")
+            call.respondText(
+              schema.text,
+              ContentType.parse(UiBuilderJsonSchemas.MEDIA_TYPE),
+              HttpStatusCode.OK,
+            )
+          }
         }
 
         // `/status` — the operator/observer view of this running host: published catalogs + their

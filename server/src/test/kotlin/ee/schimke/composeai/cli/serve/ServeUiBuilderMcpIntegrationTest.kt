@@ -209,6 +209,15 @@ class ServeUiBuilderMcpIntegrationTest {
       artifact.content.contains("// Canonical home: server $PUBLIC_ORIGIN design agent-screen."),
       artifact.content,
     )
+    // R3: the revision the export was cut from sits right beside the home, so an agent going back
+    // to edit the original knows what to quote as `baseRevision`.
+    assertTrue(
+      artifact.content.contains(
+        "// Canonical home: server $PUBLIC_ORIGIN design agent-screen.\n" +
+          "// Edit the original there at revision ${revision + 1} (quote it as baseRevision)."
+      ),
+      artifact.content,
+    )
   }
 
   @Test
@@ -246,7 +255,8 @@ class ServeUiBuilderMcpIntegrationTest {
     assertEquals("agent-screen", decision["designId"]!!.jsonPrimitive.content)
     assertEquals(0, decision["baseRevision"]!!.jsonPrimitive.content.toInt())
     assertEquals(
-      "agent-screen already lives on this server; apply changes to the original instead",
+      "agent-screen already lives on this server; apply changes to the original instead with " +
+        ServeUiBuilderMcp.APPLY,
       decision["reason"]!!.jsonPrimitive.content,
     )
     assertEquals(

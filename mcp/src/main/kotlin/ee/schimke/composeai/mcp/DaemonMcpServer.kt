@@ -193,6 +193,8 @@ class DaemonMcpServer(
    * CPU with its sandbox). `COMPOSE_PREVIEW_COMPILE_IN_PROCESS=1` turns it on to measure it.
    */
   private val compileInProcess: Boolean = environment[COMPILE_IN_PROCESS_ENV] == "1",
+  /** OpenAI MCP Extensions probe tools (#1236), only with `COMPOSE_PREVIEW_MCP_OPENAI_PROBE=1`. */
+  private val openAiProbe: OpenAiProbe? = OpenAiProbe.fromEnvironment(environment),
   /**
    * Prepares a registered build that has no daemon launch descriptor yet (`compose-preview mcp
    * install` never ran there) on first use. `null` turns that off; tests pass a fake runner.
@@ -594,6 +596,7 @@ class DaemonMcpServer(
         )
       )
     out += rcViewer.resourceDescriptors()
+    openAiProbe?.resources()?.let(out::addAll)
     for ((addr, byId) in catalog) {
       for (entry in byId.values) {
         val uri =
@@ -643,6 +646,9 @@ class DaemonMcpServer(
       )
     }
     rcViewer.readResource(uri)?.let {
+      return it
+    }
+    openAiProbe?.readResource(uri)?.let {
       return it
     }
     // History URIs short-circuit to `history/read` against the daemon — historical bytes are
@@ -2552,7 +2558,10 @@ class DaemonMcpServer(
               .trimIndent()
           ),
       ),
-    ) + rcViewer.toolDefs() + (uiBuilderMcp?.toolDefs() ?: emptyList())
+    ) +
+      rcViewer.toolDefs() +
+      (uiBuilderMcp?.toolDefs() ?: emptyList()) +
+      (openAiProbe?.toolDefs() ?: emptyList())
 
   private suspend fun handleCallTool(
     session: Session,
@@ -2623,7 +2632,9 @@ class DaemonMcpServer(
       RcViewerMcp.TOOL_NAME -> rcViewer.handle(name, args)!!
       else ->
         if (profile == McpToolProfile.NATIVE) {
-          uiBuilderMcp?.handle(name, args) ?: errorCallToolResult("unknown tool: $name")
+          openAiProbe?.handle(name, args, (session as? McpSession)?.clientName)
+            ?: uiBuilderMcp?.handle(name, args)
+            ?: errorCallToolResult("unknown tool: $name")
         } else {
           errorCallToolResult("unknown tool: $name")
         }
