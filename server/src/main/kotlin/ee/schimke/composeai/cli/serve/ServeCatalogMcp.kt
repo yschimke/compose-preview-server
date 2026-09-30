@@ -38,7 +38,7 @@ import kotlinx.serialization.json.putJsonArray
 import kotlinx.serialization.json.putJsonObject
 
 /**
- * Stateless MCP 2025-06-18 surface aggregating every served catalog.
+ * MCP 2025-06-18 surface aggregating every served catalog.
  *
  * Transport is owned by [ServeHttpServer]; this class owns only MCP lifecycle messages and the
  * catalog-facing resources/tools. It shares the HTTP server's render semaphore, so a remote agent
@@ -93,6 +93,67 @@ class ServeCatalogMcp(
   data class Reply(val body: JsonObject?, val accepted: Boolean = false)
 
   /**
+   * Request-scoped client interaction available only on a negotiated Streamable HTTP session.
+   * Stateless JSON callers keep [Unsupported], so every tool must retain a complete text fallback.
+   */
+  interface ClientInteraction {
+    val formElicitationSupported: Boolean
+
+    suspend fun elicitForm(
+      message: String,
+      requestedSchema: JsonObject,
+      timeoutMillis: Long,
+    ): FormElicitationResult?
+
+    /**
+     * This interaction, except that an accepted answer is dropped — read as no answer at all —
+     * unless [stillAuthorized] holds when it arrives. Declines and cancels pass through: they write
+     * nothing either way.
+     */
+    fun reauthorizedOnAccept(stillAuthorized: () -> Boolean): ClientInteraction {
+      if (!formElicitationSupported) return this
+      val delegate = this
+      return object : ClientInteraction {
+        override val formElicitationSupported = true
+
+        override suspend fun elicitForm(
+          message: String,
+          requestedSchema: JsonObject,
+          timeoutMillis: Long,
+        ): FormElicitationResult? {
+          val answer = delegate.elicitForm(message, requestedSchema, timeoutMillis) ?: return null
+          if (answer.action == FormElicitationAction.ACCEPT && !stillAuthorized()) return null
+          return answer
+        }
+      }
+    }
+
+    companion object {
+      val Unsupported =
+        object : ClientInteraction {
+          override val formElicitationSupported = false
+
+          override suspend fun elicitForm(
+            message: String,
+            requestedSchema: JsonObject,
+            timeoutMillis: Long,
+          ): FormElicitationResult? = null
+        }
+    }
+  }
+
+  enum class FormElicitationAction {
+    ACCEPT,
+    DECLINE,
+    CANCEL,
+  }
+
+  data class FormElicitationResult(
+    val action: FormElicitationAction,
+    val content: JsonObject? = null,
+  )
+
+  /**
    * The grant flow, as much of it as an MCP client needs and no more.
    *
    * Kept as a seam rather than a store reference so this class stays free of HTTP, rate limits and
@@ -130,6 +191,11 @@ class ServeCatalogMcp(
   suspend fun handle(
     request: JsonObject,
     access: AgentAccess? = null,
+    /**
+     * A bounded request-scoped interaction channel. It is deliberately optional until a tool opts
+     * into elicitation; merely adding transport support must not alter stateless call behaviour.
+     */
+    clientInteraction: ClientInteraction = ClientInteraction.Unsupported,
     /**
      * The UI-builder capability check for this particular request, asked of the transport because
      * only it holds the call the credential arrived on. Defaults to refusing, so a caller that
@@ -169,6 +235,7 @@ class ServeCatalogMcp(
                 liveAuthorization,
                 access,
                 uiBuilderAuthorization,
+                clientInteraction,
               )
             } catch (e: McpRequestException) {
               toolError(e.message ?: "Tool call failed")
@@ -674,6 +741,7 @@ class ServeCatalogMcp(
     authorizeLive: (String?) -> ServeMachineAuthorization.Decision,
     access: AgentAccess?,
     uiBuilderAuthorization: (UiBuilderRouteCapability, String?) -> UiBuilderAuthorizationDecision,
+    clientInteraction: ClientInteraction,
   ): JsonObject {
     // Dispatch is by the canonical name; the wire name carries the `catalog_` prefix (#1105).
     val name = canonicalName(params.requiredString("name"))
@@ -683,7 +751,7 @@ class ServeCatalogMcp(
     val presented = tokenArgument(rawArgs)
     val args = if (TOKEN_ARGUMENT in rawArgs) JsonObject(rawArgs - TOKEN_ARGUMENT) else rawArgs
     val liveAuthorization = { authorizeLive(presented) }
-    uiBuilderTool(name, args, presented, uiBuilderAuthorization)?.let {
+    uiBuilderTool(name, args, presented, uiBuilderAuthorization, clientInteraction)?.let {
       return it
     }
     val result = catalogTool(name, foldUriOverrides(name, args), liveAuthorization, access)
@@ -2436,6 +2504,7 @@ class ServeCatalogMcp(
     args: JsonObject,
     presentedToken: String?,
     authorize: (UiBuilderRouteCapability, String?) -> UiBuilderAuthorizationDecision,
+    clientInteraction: ClientInteraction,
   ): JsonObject? {
     val builder = uiBuilder ?: return null
     val capability = builder.capabilityFor(name) ?: return null
@@ -2468,7 +2537,15 @@ class ServeCatalogMcp(
         )
       }
     }
-    val text = builder.call(name, args, actor, callId = name)
+    // A person may take a while to answer a form, and the answer is what licenses a write. So an
+    // accepted answer only counts if the SAME credential still authorizes the SAME actor for the
+    // SAME capability at the moment it arrives; a grant revoked or expired while the form was open
+    // turns the answer into a timeout — nothing written, the text decision returned.
+    val interaction = clientInteraction.reauthorizedOnAccept {
+      val again = authorize(capability, presentedToken)
+      again is UiBuilderAuthorizationDecision.Authorized && again.actor == actor
+    }
+    val text = builder.call(name, args, actor, callId = name, clientInteraction = interaction)
     if (name == ServeUiBuilderMcp.VIEW) {
       return uiBuilderViewResult(
         text,

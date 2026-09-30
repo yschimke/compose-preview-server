@@ -9,6 +9,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.contentOrNull
@@ -266,9 +267,21 @@ class ServeAgentGrantRoutingTest {
    */
   @Test
   fun `an agent with no credential can initialize and list tools`() {
-    val initialized = mcpAnonymous(initializeRequest(1))
-    assertEquals(200, initialized.first)
-    val result = json(initialized.second)["result"]!!.jsonObject
+    val initializeCall =
+      Request.Builder()
+        .url(url("/mcp"))
+        .header("Accept", "application/json, text/event-stream")
+        .header("MCP-Protocol-Version", ServeCatalogMcp.MCP_PROTOCOL_VERSION)
+        .post(initializeRequest(1).toRequestBody("application/json".toMediaType()))
+        .build()
+    val initialized = client.newCall(initializeCall).execute()
+    val initializedBody = initialized.use {
+      assertEquals(200, it.code)
+      assertNull(it.header("MCP-Session-Id"))
+      assertTrue(it.header("Content-Type")!!.startsWith("application/json"))
+      it.body.string()
+    }
+    val result = json(initializedBody)["result"]!!.jsonObject
     assertEquals(
       ServeCatalogMcp.MCP_PROTOCOL_VERSION,
       result["protocolVersion"]!!.jsonPrimitive.content,
@@ -295,6 +308,108 @@ class ServeAgentGrantRoutingTest {
       200,
       mcpAnonymous("""{"jsonrpc":"2.0","id":4,"method":"prompts/list","params":{}}""").first,
     )
+  }
+
+  @Test
+  fun `elicitation capability negotiates a bounded request scoped stream`() {
+    val initialize =
+      """{"jsonrpc":"2.0","id":20,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{"elicitation":{}},"clientInfo":{"name":"test","version":"1"}}}"""
+    val initializeCall =
+      Request.Builder()
+        .url(url("/mcp"))
+        .header("Accept", "application/json, text/event-stream")
+        .header("MCP-Protocol-Version", ServeCatalogMcp.MCP_PROTOCOL_VERSION)
+        .post(initialize.toRequestBody("application/json".toMediaType()))
+        .build()
+    val sessionId =
+      client.newCall(initializeCall).execute().use {
+        assertEquals(200, it.code)
+        assertTrue(it.header("Content-Type")!!.startsWith("application/json"))
+        assertNotNull(it.header("MCP-Session-Id"))
+      }
+
+    val pingCall =
+      Request.Builder()
+        .url(url("/mcp"))
+        .header("Accept", "application/json, text/event-stream")
+        .header("MCP-Protocol-Version", ServeCatalogMcp.MCP_PROTOCOL_VERSION)
+        .header("MCP-Session-Id", sessionId)
+        .post(
+          """{"jsonrpc":"2.0","id":21,"method":"ping"}"""
+            .toRequestBody("application/json".toMediaType())
+        )
+        .build()
+    // A call that does not elicit answers with plain JSON even on a negotiated session.
+    fun assertPlainJsonPing(call: Request) =
+      client.newCall(call).execute().use {
+        assertEquals(200, it.code)
+        assertTrue(it.header("Content-Type")!!.startsWith("application/json"))
+        assertEquals(21, json(it.body.string())["id"]!!.jsonPrimitive.content.toInt())
+      }
+    assertPlainJsonPing(pingCall)
+
+    val unknownResponse =
+      Request.Builder()
+        .url(url("/mcp"))
+        .header("MCP-Protocol-Version", ServeCatalogMcp.MCP_PROTOCOL_VERSION)
+        .header("MCP-Session-Id", sessionId)
+        .post(
+          """{"jsonrpc":"2.0","id":"not-pending","result":{"action":"cancel"}}"""
+            .toRequestBody("application/json".toMediaType())
+        )
+        .build()
+    client.newCall(unknownResponse).execute().use { assertEquals(400, it.code) }
+
+    // A version mismatch or an unknown session falls back to the stateless path, never an error.
+    val wrongVersion = pingCall.newBuilder().header("MCP-Protocol-Version", "2025-03-26").build()
+    assertPlainJsonPing(wrongVersion)
+    assertPlainJsonPing(pingCall.newBuilder().header("MCP-Session-Id", "never-issued").build())
+
+    val deleteCall =
+      Request.Builder()
+        .url(url("/mcp"))
+        .header("MCP-Protocol-Version", ServeCatalogMcp.MCP_PROTOCOL_VERSION)
+        .header("MCP-Session-Id", sessionId)
+        .delete()
+        .build()
+    client.newCall(deleteCall).execute().use { assertEquals(204, it.code) }
+    client.newCall(deleteCall).execute().use { assertEquals(404, it.code) }
+    assertPlainJsonPing(pingCall)
+  }
+
+  @Test
+  fun `a URL-only elicitation client gets no request scope`() {
+    val initialize =
+      """{"jsonrpc":"2.0","id":23,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{"elicitation":{"url":{}}},"clientInfo":{"name":"url-only","version":"1"}}}"""
+    val call =
+      Request.Builder()
+        .url(url("/mcp"))
+        .header("Accept", "application/json, text/event-stream")
+        .header("MCP-Protocol-Version", ServeCatalogMcp.MCP_PROTOCOL_VERSION)
+        .post(initialize.toRequestBody("application/json".toMediaType()))
+        .build()
+    client.newCall(call).execute().use {
+      assertEquals(200, it.code)
+      assertNull(it.header("MCP-Session-Id"))
+    }
+  }
+
+  @Test
+  fun `the older protocol remains stateless when it advertises an unknown capability`() {
+    val initialize =
+      """{"jsonrpc":"2.0","id":22,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{"elicitation":{}},"clientInfo":{"name":"old-test","version":"1"}}}"""
+    val call =
+      Request.Builder()
+        .url(url("/mcp"))
+        .header("Accept", "application/json, text/event-stream")
+        .header("MCP-Protocol-Version", "2025-03-26")
+        .post(initialize.toRequestBody("application/json".toMediaType()))
+        .build()
+    client.newCall(call).execute().use {
+      assertEquals(200, it.code)
+      assertNull(it.header("MCP-Session-Id"))
+      assertTrue(it.header("Content-Type")!!.startsWith("application/json"))
+    }
   }
 
   /** Opening the handshake must not open anything that reads a catalog. */

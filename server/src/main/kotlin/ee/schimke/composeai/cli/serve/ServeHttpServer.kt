@@ -75,6 +75,7 @@ import io.ktor.server.request.receiveText
 import io.ktor.server.response.ApplicationSendPipeline
 import io.ktor.server.response.respond
 import io.ktor.server.response.respondBytes
+import io.ktor.server.response.respondBytesWriter
 import io.ktor.server.response.respondRedirect
 import io.ktor.server.response.respondText
 import io.ktor.server.routing.RoutingContext
@@ -88,6 +89,7 @@ import io.ktor.server.websocket.WebSockets
 import io.ktor.server.websocket.webSocket
 import io.ktor.util.AttributeKey
 import io.ktor.util.pipeline.PipelinePhase
+import io.ktor.utils.io.writeStringUtf8
 import io.ktor.websocket.CloseReason
 import io.ktor.websocket.Frame
 import io.ktor.websocket.close
@@ -115,6 +117,7 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
 
 /** The query values a create link carries into the design's permalink: identity, never content. */
@@ -518,8 +521,15 @@ class ServeHttpServer(
    * ⇒ unlimited, which is right for a single-user local host.
    */
   private val agentGrantLimiter: ServeRateLimiter? = null,
-  /** Register stateless Streamable HTTP MCP endpoints for served catalogs. */
+  /** Register Streamable HTTP MCP endpoints for served catalogs. */
   private val catalogMcpEnabled: Boolean = false,
+  /**
+   * The longest a request-scoped MCP interaction — sending `elicitation/create` and waiting for a
+   * person's answer — may take before the call falls back to its text decision. A seam for tests;
+   * production keeps the two-minute default.
+   */
+  private val catalogMcpInteractionTimeoutMillis: Long =
+    ServeMcpRequestScopes.DEFAULT_INTERACTION_TIMEOUT_MILLIS,
   /** Shared bearer/session resolver used by catalog MCP and UI-builder authorization. */
   private val machineAuthorization: ServeMachineAuthorization? = null,
   /** Authoritative editable-design service. Null keeps the design API unregistered. */
@@ -812,6 +822,12 @@ class ServeHttpServer(
         publicOrigin = ::canonicalServerOrigin,
       )
     else null
+  /**
+   * Ephemeral request/response rendezvous only; authoritative application state stays elsewhere.
+   */
+  private val catalogMcpRequestScopes = catalogMcp?.let {
+    ServeMcpRequestScopes(maxInteractionTimeoutMillis = catalogMcpInteractionTimeoutMillis)
+  }
   private val unleasedThemeSemaphore = Semaphore(1)
   private val themeRenderLeases = ThemeRenderLeaseManager(renderSlots)
 
@@ -1417,14 +1433,14 @@ class ServeHttpServer(
           post(ServeMcpOAuth.TOKEN_PATH) { handleOAuthToken(store) }
         }
 
-        // Stateless aggregate Streamable HTTP MCP. One stable endpoint discovers every registered
-        // catalog; resource URIs and catalog-bearing tool arguments select the target. GET is
-        // intentionally 405: this version has no server-initiated notifications, so an SSE listen
-        // stream would make a promise the stateless implementation cannot use.
+        // Aggregate Streamable HTTP MCP. Existing callers remain independent JSON requests. A
+        // 2025 client that advertises form elicitation may additionally receive a bounded session
+        // id and use request-scoped SSE while that POST is waiting for its response. There is no
+        // long-lived GET notification stream or duplicated application state.
         if (catalogMcp != null) {
           post("/mcp") { handleCatalogMcp() }
           get("/mcp") { rejectCatalogMcpListen() }
-          delete("/mcp") { rejectCatalogMcpListen() }
+          delete("/mcp") { handleCatalogMcpDelete() }
           get(ServeCatalogMcp.IMAGE_URL_PATH) { handleSignedRenderPng() }
         }
 
@@ -9944,9 +9960,10 @@ class ServeHttpServer(
     }
   }
 
-  /** One stateless MCP request for the selected catalog (Streamable HTTP, JSON response mode). */
+  /** One MCP message, using JSON response mode unless a negotiated request scope needs SSE. */
   private suspend fun RoutingContext.handleCatalogMcp() {
     val mcp = catalogMcp ?: return call.respond(HttpStatusCode.NotFound)
+    val requestScopes = catalogMcpRequestScopes ?: return call.respond(HttpStatusCode.NotFound)
     val authorization = machineAuthorization ?: return call.respond(HttpStatusCode.NotFound)
     if (rejectCatalogMcpOrigin()) return
 
@@ -9987,6 +10004,36 @@ class ServeHttpServer(
         return
       }
 
+    // A session id is only a hint that elicitation may be possible. An unknown, expired or evicted
+    // id — or one sent with a different protocol version than it was negotiated under — does NOT
+    // answer 404/400: the request is served on the stateless JSON path, exactly as it was before
+    // request scopes existed. Idle expiry, eviction and server restarts therefore never break a
+    // client (preview.coo.ee's callers included); at worst they lose elicitation and see the text
+    // fallback every tool keeps.
+    val sessionId = call.request.headers[MCP_SESSION_ID_HEADER]
+    val requestScope =
+      sessionId?.let(requestScopes::find)?.takeIf { protocolVersion == it.protocolVersion }
+
+    // A JSON-RPC response is the second half of a server request previously emitted on another
+    // in-flight POST. It is not a catalog operation and is not put through the preview/live grant
+    // gate: it carries no authority of its own, only a choice among options the eliciting call
+    // offered, and that call acts on it under its own authorization. Its unguessable session id
+    // correlates it, and it must present the same transport credential as the POST that asked, so
+    // a leaked session id alone cannot answer for someone else.
+    if (request["method"] == null && request["id"] != null) {
+      call.response.headers.append(HttpHeaders.CacheControl, "no-store")
+      when (requestScopes.acceptResponse(sessionId, request, catalogMcpCredential())) {
+        ServeMcpRequestScopes.ResponseDisposition.ACCEPTED -> call.respond(HttpStatusCode.Accepted)
+        ServeMcpRequestScopes.ResponseDisposition.UNKNOWN_SESSION ->
+          call.respondText("unknown or expired MCP session", status = HttpStatusCode.NotFound)
+        ServeMcpRequestScopes.ResponseDisposition.UNKNOWN_REQUEST ->
+          call.respondText("unknown MCP server request", status = HttpStatusCode.BadRequest)
+        ServeMcpRequestScopes.ResponseDisposition.INVALID_RESPONSE ->
+          call.respondText("invalid JSON-RPC response", status = HttpStatusCode.BadRequest)
+      }
+      return
+    }
+
     // The gate moved BELOW the parse so it can be asked about this particular message. It used to
     // stand in front of the whole endpoint, which meant a client with no credential could not
     // complete `initialize` — and therefore could not reach the tool that asks a human for one
@@ -10024,34 +10071,88 @@ class ServeHttpServer(
       }
     }
 
-    val reply =
+    suspend fun dispatch(
+      interaction: ServeCatalogMcp.ClientInteraction = ServeCatalogMcp.ClientInteraction.Unsupported
+    ): ServeCatalogMcp.Reply =
       mcp.handle(
         request,
-        agentGrants?.let { catalogMcpAgentAccess(it) },
+        access = agentGrants?.let { catalogMcpAgentAccess(it) },
+        clientInteraction = interaction,
         // Asked per capability, off the same call the credential arrived on, so an MCP client
         // reaches the builder through exactly the door the browser does.
-        { capability, presented ->
+        uiBuilderAuthorization = { capability, presented ->
           uiBuilderAuthorization?.authorize(call, capability, presented)
             ?: UiBuilderAuthorizationDecision.Missing
         },
-      ) { presented ->
-        authorization.authorizeScope(
-          call,
-          AgentGrantScope.LIVE,
-          presented,
-          allowBrowserGrantCookie = false,
+        liveAuthorization = { presented ->
+          authorization.authorizeScope(
+            call,
+            AgentGrantScope.LIVE,
+            presented,
+            allowBrowserGrantCookie = false,
+          )
+        },
+      )
+
+    val isInitialize = (request["method"] as? JsonPrimitive)?.contentOrNull == "initialize"
+    val acceptsRequestScope = acceptsCatalogMcpRequestScope()
+    if (isInitialize) {
+      val reply = dispatch()
+      if (reply.accepted) {
+        call.respond(HttpStatusCode.Accepted)
+        return
+      }
+      val elicitingVersion = formElicitationProtocol(request)
+      if (acceptsRequestScope && elicitingVersion != null) {
+        val scope =
+          requestScopes.open(protocolVersion = elicitingVersion, formElicitationSupported = true)
+        // Capacity exhausted by pending interactions: stay stateless rather than refuse.
+        scope?.let { call.response.headers.append(MCP_SESSION_ID_HEADER, it.id) }
+      }
+      call.response.headers.append(HttpHeaders.CacheControl, "no-store")
+      call.respondText(reply.body.toString(), ContentType.Application.Json, HttpStatusCode.OK)
+      return
+    }
+
+    suspend fun respondReply(reply: ServeCatalogMcp.Reply) {
+      if (reply.accepted) {
+        call.respond(HttpStatusCode.Accepted)
+      } else {
+        call.response.headers.append(HttpHeaders.CacheControl, "no-store")
+        call.respondText(
+          reply.body.toString(),
+          ContentType.Application.Json,
+          HttpStatusCode.OK,
         )
       }
-    if (reply.accepted) {
-      call.respond(HttpStatusCode.Accepted)
-    } else {
-      call.response.headers.append(HttpHeaders.CacheControl, "no-store")
-      call.respondText(
-        reply.body.toString(),
-        ContentType.Application.Json,
-        HttpStatusCode.OK,
-      )
     }
+
+    // A request on a negotiated session may elicit, but the response only becomes an SSE stream
+    // once the call actually sends the client a message. Every call that does not elicit — all of
+    // them today — answers with the same JSON body and headers as the stateless path.
+    if (requestScope != null && request["id"] != null && acceptsRequestScope) {
+      requestScopes.dispatchLazily(
+        requestScope,
+        credential = catalogMcpCredential(),
+        dispatch = { interaction -> dispatch(interaction) },
+        onReply = { reply -> respondReply(reply) },
+        onStream = { first, rest, reply ->
+          call.response.headers.append(HttpHeaders.CacheControl, "no-store")
+          call.respondBytesWriter(contentType = ContentType.Text.EventStream) {
+            suspend fun emit(message: JsonObject) {
+              writeStringUtf8("event: message\ndata: $message\n\n")
+              flush()
+            }
+            emit(first)
+            for (message in rest) emit(message)
+            reply.await().body?.let { emit(it) }
+          }
+        },
+      )
+      return
+    }
+
+    respondReply(dispatch())
   }
 
   /**
@@ -10078,13 +10179,90 @@ class ServeHttpServer(
     call.respondBytes(png, ContentType.Image.PNG)
   }
 
-  /** Streamable HTTP permits a stateless server to decline the optional GET/SSE channel. */
+  /** This implementation needs only per-POST streams, not a long-lived notification channel. */
   private suspend fun RoutingContext.rejectCatalogMcpListen() {
     call.response.headers.append(HttpHeaders.Allow, HttpMethod.Post.value)
     call.respondText(
-      "This catalog MCP endpoint is stateless; send JSON-RPC messages with POST.",
+      "This catalog MCP endpoint uses request-scoped POST streams; GET is not available.",
       status = HttpStatusCode.MethodNotAllowed,
     )
+  }
+
+  /** Explicitly terminate a negotiated request scope; expiry remains the crash-safe fallback. */
+  private suspend fun RoutingContext.handleCatalogMcpDelete() {
+    if (rejectCatalogMcpOrigin()) return
+    call.response.headers.append(HttpHeaders.CacheControl, "no-store")
+    val sessionId = call.request.headers[MCP_SESSION_ID_HEADER]
+    if (sessionId.isNullOrBlank()) {
+      call.respondText("MCP-Session-Id is required", status = HttpStatusCode.BadRequest)
+      return
+    }
+    val scope = catalogMcpRequestScopes?.find(sessionId)
+    if (scope == null) {
+      call.respondText("unknown or expired MCP session", status = HttpStatusCode.NotFound)
+      return
+    }
+    if (call.request.headers[MCP_PROTOCOL_VERSION_HEADER] != scope.protocolVersion) {
+      call.respondText(
+        "MCP-Protocol-Version must match the negotiated session version",
+        status = HttpStatusCode.BadRequest,
+      )
+      return
+    }
+    if (catalogMcpRequestScopes.close(sessionId)) {
+      call.respond(HttpStatusCode.NoContent)
+    } else {
+      call.respondText("unknown or expired MCP session", status = HttpStatusCode.NotFound)
+    }
+  }
+
+  /**
+   * The credential material this POST carries on the transport — everything the machine and
+   * UI-builder authorizations can read off the call — as one opaque string, or null when there is
+   * none. An elicitation's answer must present the same material as the call that asked (see
+   * [ServeMcpRequestScopes.acceptResponse]); only a fingerprint of it is kept. A grant presented
+   * in-band ([ServeCatalogMcp.TOKEN_ARGUMENT]) cannot ride a JSON-RPC response, so such a call is
+   * bound by its session id alone.
+   */
+  private fun RoutingContext.catalogMcpCredential(): String? {
+    val parts =
+      listOf(
+        call.request.headers[TOKEN_HEADER],
+        call.request.headers[HttpHeaders.Authorization],
+        call.request.queryParameters["token"],
+        call.request.headers[HttpHeaders.Cookie],
+      )
+    if (parts.all { it == null }) return null
+    return parts.joinToString("\u0000") { it ?: "" }
+  }
+
+  private fun RoutingContext.acceptsCatalogMcpRequestScope(): Boolean {
+    val accepted =
+      call.request.headers[HttpHeaders.Accept]
+        .orEmpty()
+        .split(',')
+        .map { it.substringBefore(';').trim().lowercase() }
+        .toSet()
+    return ContentType.Application.Json.toString() in accepted &&
+      ContentType.Text.EventStream.toString() in accepted
+  }
+
+  /**
+   * The protocol version a request scope is negotiated under when this `initialize` asks for form
+   * elicitation on a protocol that has it (2025-06-18 and 2025-11-25, where the wire is the same),
+   * or null. 2025-03-26 has no elicitation, so it stays stateless whatever it advertises.
+   */
+  private fun formElicitationProtocol(request: JsonObject): String? {
+    val params = request["params"] as? JsonObject ?: return null
+    val version =
+      (params["protocolVersion"] as? JsonPrimitive)?.contentOrNull?.takeIf {
+        it in ELICITING_PROTOCOL_VERSIONS
+      } ?: return null
+    val capabilities = params["capabilities"] as? JsonObject ?: return null
+    val elicitation = capabilities["elicitation"] as? JsonObject ?: return null
+    // Form support is `form` declared, or a bare `{}` (the shape before form/url split). A
+    // URL-only client never gets a form, so it gets no request scope either.
+    return version.takeIf { elicitation["form"] != null || elicitation["url"] == null }
   }
 
   /** MCP's DNS-rebinding guard: browser-originated calls may only come from this request's host. */
@@ -17015,6 +17193,7 @@ class ServeHttpServer(
     private val RELATED_INVERSES = AttributeKey<RelatedInverses>("composeai.relatedInverses")
 
     private const val MCP_PROTOCOL_VERSION_HEADER = "MCP-Protocol-Version"
+    private const val MCP_SESSION_ID_HEADER = "MCP-Session-Id"
 
     /** Where a signed-in reader asks for UI-builder edit access for themselves. */
     const val UI_BUILDER_REQUEST_ACCESS_PATH = "/ui-builder/request-access"
@@ -17082,6 +17261,10 @@ class ServeHttpServer(
       linkedMapOf(".apng" to "image/apng", ".gif" to "image/gif")
 
     const val TOKEN_HEADER: String = "X-Compose-Preview-Token"
+
+    /** The negotiated MCP versions whose clients can answer `elicitation/create` forms. */
+    private val ELICITING_PROTOCOL_VERSIONS =
+      setOf(ServeCatalogMcp.MCP_PROTOCOL_VERSION, ServeCatalogMcp.MCP_PROTOCOL_VERSION_2025_11)
 
     /**
      * On `GET /images/capability`: `public` when anyone can open this host's pages, `private` when
