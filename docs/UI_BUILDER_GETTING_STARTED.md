@@ -795,7 +795,13 @@ compose-preview-server design status --workspace . --summary  # comments and tem
 compose-preview-server design render my-widget -o cover.png   # or --format svg
 compose-preview-server design export my-widget -o Widget.kt   # the generated Kotlin
 compose-preview-server design get    my-widget > design.json  # the document
+compose-preview-server design validate my-widget --operations ops.json  # check, save nothing
 ```
+
+`design validate` checks the stored design, a batch of `--operations` against it, or a whole
+`--document`, through `ui_builder_validate`: every problem the editor's problems panel would show
+goes to stderr and the exit code is non-zero when one is an error. See
+[`CATALOG_MCP.md`](design/CATALOG_MCP.md#checking-before-writing-and-the-shapes).
 
 `--server <url>` picks the host (a local one by default, `$COMPOSE_PREVIEW_SERVER` otherwise) and
 `--revision N` pins, exactly as `?revision=` does on the URLs above. Every verb runs the same

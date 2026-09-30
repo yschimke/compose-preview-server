@@ -48,9 +48,10 @@ internal object DesignCommand {
   const val GET: String = "get"
   const val RENDER: String = "render"
   const val EXPORT: String = "export"
+  const val VALIDATE: String = "validate"
 
   /** Every verb, in the order [usage] lists them. */
-  val VERBS: List<String> = listOf(LIST, STATUS, GET, RENDER, EXPORT)
+  val VERBS: List<String> = listOf(LIST, STATUS, GET, RENDER, EXPORT, VALIDATE)
 
   /**
    * The verbs `--local` has an answer for.
@@ -137,6 +138,12 @@ internal object DesignCommand {
     val json: Boolean = false,
     /** Emit only a fixed, credential-free SessionStart sentence. */
     val summary: Boolean = false,
+    /**
+     * [VALIDATE]: a file of design mutations to check against the stored design — a JSON array of
+     * `DesignMutationV1`, or an object carrying one as `operations`, which is what an
+     * `ui_builder_apply` call's arguments already look like.
+     */
+    val operations: String? = null,
   ) {
 
     /**
@@ -220,6 +227,7 @@ internal object DesignCommand {
     var workspace = "."
     var json = false
     var summary = false
+    var operations: String? = null
     var workspaceWasSet = false
     var outWasSet = false
     var revisionWasSet = false
@@ -302,6 +310,10 @@ internal object DesignCommand {
           workspaceWasSet = true
           index++
         }
+        argument == "--operations" -> {
+          operations = value() ?: return missingValue(argument)
+          index++
+        }
         argument == "--json" -> json = true
         argument == "--summary" -> summary = true
         argument == "--no-authorize" -> authorize = false
@@ -340,7 +352,24 @@ internal object DesignCommand {
           "verbs read a server's state, which is not something this process holds a copy of"
       )
     }
-    if (document != null && !local) {
+    if (operations != null && verb != VALIDATE) {
+      return Parsed.Invalid("design $verb: --operations applies to validate only")
+    }
+    if (operations != null && document != null) {
+      return Parsed.Invalid(
+        "design validate: --operations are checked against a stored design; name it by id, or " +
+          "validate the whole edited --document instead"
+      )
+    }
+    if (verb == VALIDATE && revision != null) {
+      return Parsed.Invalid(
+        "design validate: checks the current revision, which is what an apply lands on; " +
+          "--revision does not apply"
+      )
+    }
+    // `validate` sends the file to the server to be checked — it never stores it — so a
+    // `--document` there is an input to the question rather than a local compile.
+    if (document != null && !local && verb != VALIDATE) {
       return Parsed.Invalid(
         "design $verb: --document is a local input — a server renders its own copy of a design, " +
           "not one from this disk. Add --local."
@@ -414,6 +443,7 @@ internal object DesignCommand {
         workspace = workspace,
         json = json,
         summary = summary,
+        operations = operations,
       )
     )
   }
@@ -430,7 +460,8 @@ internal object DesignCommand {
       // Both of these are text, and a pipe is the obvious thing to do with them.
       LIST,
       STATUS,
-      GET -> STDOUT
+      GET,
+      VALIDATE -> STDOUT
       EXPORT -> if (format == ExportFormatV1.COMPOSE) STDOUT else "$designId.${format.extension()}"
       // Bytes are not something to spray at a terminal unless asked for by name.
       else -> "$designId.${format.extension()}"
@@ -449,6 +480,10 @@ internal object DesignCommand {
       get <designId>            The design document, as JSON.
       render <designId>         The design as a picture: PNG, or SVG with --format svg.
       export <designId>         The generated source (Kotlin), with its diagnostics.
+      validate <designId>       Check a design without saving it: the stored design, a batch of
+                                --operations against it, or a whole --document. Prints the
+                                problems the editor's problems panel would show, and exits
+                                non-zero when any is an error.
 
     Options:
       --local                   Compile and render in this process instead of asking a server.
@@ -458,9 +493,11 @@ internal object DesignCommand {
                                 instead of coming back silently empty. Prints the classpath it
                                 resolved, the daemon it opened and the reason for a missing frame,
                                 which is the whole point of the mode.
-      --document <file>         Read the design from this file instead of from a server (--local
-                                only). `design get <id> -o doc.json` against the suspect host
-                                captures one; this replays it anywhere.
+      --document <file>         Read the design from this file instead of from a server (--local,
+                                or validate). `design get <id> -o doc.json` against the suspect
+                                host captures one; this replays it anywhere.
+      --operations <file>       validate: design mutations to check against the stored design,
+                                as a JSON array or ui_builder_apply-style {"operations": [...]}.
       --catalog <bundle>        --local: the catalog bundle to compile against. A path to a
                                 `.bundle`; its manifest picks the daemon (android or desktop).
       --assets <dir>            --local: uploaded asset bytes by storage key, as `serve` keeps

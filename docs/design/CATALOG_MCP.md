@@ -145,6 +145,7 @@ JSON-RPC messages use `POST`, notifications receive `202 Accepted`, and optional
 | `request_access`, `poll_access` | none | Obtain a grant without leaving MCP (above) |
 | `status` | `preview` | Report readiness and the aggregate catalog set |
 | `resources/list`, `resources/read` | `preview` | List and read published preview PNGs |
+| `resources/read` of `compose-preview://schemas/…` | none | The UI-builder document and mutation JSON Schemas (below); listed only where a UI builder is served |
 | `catalog_list_projects`, `catalog_list_previews` | `preview` | Discover catalogs, then one catalog's preview metadata (`catalog_list_previews` requires `catalog` unless the server holds only one) |
 | `catalog_render_preview` | `live` | Render with optional overrides; defaults to a token-frugal semantics/hash observation, with `observe=png` for pixels and `observe=svg` for the `compose/figma-svg` vector export |
 | `catalog_render_matrix` | `live` | Render one preview across a cross-product of override axes in a single call |
@@ -159,6 +160,7 @@ JSON-RPC messages use `POST`, notifications receive `202 Accepted`, and optional
 | `preview-stories` | `live` | Storybook-MCP-compatible preview rendering alias |
 | `ui_builder_list_catalogs`, `ui_builder_search_components`, `ui_builder_list_designs`, `ui_builder_get_design` | `ui-builder-read` | The component catalogs a design can pin to (a summary by default, the whole capability with `full: true`), the designs on this box, and one design's whole document (without the catalog it pins unless `includeCatalog: true`) |
 | `ui_builder_create_design`, `ui_builder_apply` | `ui-builder-write` | Create a design, and apply `DesignMutationV1` operations to one — a `setProperty` whose value is `{"type":"null"}` unsets an optional property |
+| `ui_builder_validate` | `ui-builder-read` | Check a whole `document`, a stored design, or `operations` against a stored design **without saving** — `{valid, problems:[…]}`, the problems panel's list |
 | `ui_builder_rename_design`, `ui_builder_delete_design` | `ui-builder-write` | Retitle a design you may write; delete one you **own**. Neither has a request type in the contract, so both answer outside the released envelope |
 | `ui_builder_await_design` | `ui-builder-read` | **Wait** for somebody else to change a design, and return what they changed |
 | `ui_builder_export` | `ui-builder-export` | Export a design — `compose` returns the generator's Kotlin, or diagnostics naming each reason it refused |
@@ -219,12 +221,60 @@ the reply is the released `McpResponseEnvelopeV1` and the request shapes are the
 6. `ui_builder_export` — the Kotlin, or the refusals. An `asset/image` exports as the real
    `Image(...)` with a `ColorPainter` in place of the picture and an `ASSET_PLACEHOLDER` warning
    naming the key and digest to bundle.
+   Each export header names the design's canonical home and, on the line beside it, the revision
+   it was cut from — the `baseRevision` to quote when going back to edit the original.
 7. `ui_builder_rename_design` when the design has become something else, and
    `ui_builder_delete_design` when it was a probe. Rename is open to anybody who may write the
    design and moves no revision. Delete is **owner only** — an agent under a grant owns what it
    created as the person who approved the grant — so a session can clear its own litter and cannot
    reach anybody else's; a design whose owner no longer exists is still the operator's to remove
    through `/admin/ui-builder`.
+
+### Checking before writing, and the shapes
+
+`ui_builder_validate` answers "would this be accepted, and would it export?" and writes nothing. Pass
+exactly one of:
+
+- `document` — a whole `DesignDocumentV1`, e.g. one you are about to `ui_builder_create_design` or
+  `ui_builder_replace_design_document`;
+- `designId` — the stored design as it is now, which is the "is my design exportable?" question;
+- `designId` with `operations` (and optionally `baseRevision`) — the batch you are about to
+  `ui_builder_apply`, checked against the design's current document.
+
+The reply is `{"schema":"compose-preview/ui-builder-validation/v1","valid":…,"problems":[…]}`, each
+problem `{severity, source, code, message, nodeId?, field?, operationIndex?}`, and `valid` is false
+exactly when a problem is an `error`. `source` says which check spoke: `shape` (the JSON did not
+decode — reported as a problem, not a tool error), `document` (the runtime refused it: quota,
+environment, topology, catalog pin or the catalog's own validation), `mutations` (the reducer refused
+the batch; a stale `baseRevision` is only a `warning`, because an apply rebases what does not
+conflict), or `export` (the Compose export gate — `ScreenExportGate`, the same list the editor's
+problems panel shows).
+
+It asks the real runtime rather than a copy of its rules: each call opens a throwaway
+`PersistentUiBuilderService` over an empty temporary store with the host's own catalogs and exporter,
+creates the document there (and applies the batch there), asks for the Compose export, and deletes
+the directory. No revision moves, nobody watching the design is notified, and no asset store is
+attached. A design the caller cannot read is still refused outright, as `ui_builder_get_design`
+refuses it. The CLI's `compose-preview-server design validate <designId> [--operations <file>]` and
+`design validate --document <file>` make the same call, print each problem to stderr, and exit
+non-zero when the design is not valid.
+
+The shapes themselves are published, so an agent can write a document or a batch right the first
+time instead of learning it one refusal at a time:
+
+| Resource | HTTP | Describes |
+| --- | --- | --- |
+| `compose-preview://schemas/ui-builder-document-v1.json` | `GET /schemas/ui-builder-document-v1.json` | `DesignDocumentV1` — what `ui_builder_get_design` returns and `ui_builder_create_design`, `ui_builder_replace_design_document` and `ui_builder_validate` take |
+| `compose-preview://schemas/design-mutation-v1.json` | `GET /schemas/design-mutation-v1.json` | One `DesignMutationV1`, discriminated by `type` — an element of `ui_builder_apply`'s `operations` |
+
+Both are JSON Schema 2020-12 (`application/schema+json`), listed in `resources/list` beside the
+viewer and readable without a grant, like the viewer: they are static and describe no design. The
+released UI-builder jars ship no schema and no generator, so these are **generated at runtime from the
+released `kotlinx.serialization` descriptors** (`UiBuilderJsonSchemas`), which makes them the shape
+this server decodes with by construction, whichever protocol release the catalog pins. Objects are
+closed (`additionalProperties: false`) because the decoder refuses unknown fields; sealed types are a
+`oneOf` on their discriminator (`type`, or `kind` for `DesignHomeV1`). What a descriptor cannot say —
+which components and properties the pinned catalog declares — is `ui_builder_validate`'s job.
 
 ### Watching, rather than asking again
 

@@ -524,6 +524,7 @@ class ServeCatalogMcp(
           it.supportsComments,
           it.supportsAssets,
           it.supportsLinks,
+          it.supportsValidation,
         )
       )
     }
@@ -753,6 +754,21 @@ class ServeCatalogMcp(
           put("_meta", viewerResourceMeta())
         }
       )
+      // The UI-builder shapes, beside the viewer: static, public, and what an agent authoring a
+      // document or a mutation batch needs before its first call rather than after its first
+      // refusal.
+      if (uiBuilder != null) {
+        UiBuilderJsonSchemas.served.forEach { schema ->
+          add(
+            buildJsonObject {
+              put("uri", schema.uri)
+              put("name", schema.title)
+              put("description", schema.description)
+              put("mimeType", UiBuilderJsonSchemas.MEDIA_TYPE)
+            }
+          )
+        }
+      }
       catalogIds().forEach { catalog ->
         val view = peekCatalog(catalog)
         view.previews?.forEach { preview ->
@@ -776,6 +792,21 @@ class ServeCatalogMcp(
     liveAuthorization: (String?) -> ServeMachineAuthorization.Decision,
   ): JsonObject {
     val uri = params.requiredString("uri")
+    UiBuilderJsonSchemas.byUri(uri)
+      ?.takeIf { uiBuilder != null }
+      ?.let { schema ->
+        return buildJsonObject {
+          putJsonArray("contents") {
+            add(
+              buildJsonObject {
+                put("uri", uri)
+                put("mimeType", UiBuilderJsonSchemas.MEDIA_TYPE)
+                put("text", schema.text)
+              }
+            )
+          }
+        }
+      }
     if (uri == MCP_APP_VIEWER_URI) {
       return buildJsonObject {
         put(
@@ -2807,7 +2838,9 @@ class ServeCatalogMcp(
         val uri = (params["uri"] as? JsonPrimitive)?.contentOrNull
         // A signed override link is admitted without a grant; the handler verifies the signature
         // (or demands live scope) before it touches a catalog. See [signResourceUri].
-        return uri != MCP_APP_VIEWER_URI && (uri == null || !isSignedOverrideUri(uri))
+        return uri != MCP_APP_VIEWER_URI &&
+          UiBuilderJsonSchemas.byUri(uri.orEmpty()) == null &&
+          (uri == null || !isSignedOverrideUri(uri))
       }
       if (method != "tools/call") return true
       val params = request["params"] as? JsonObject ?: return true

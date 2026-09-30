@@ -146,6 +146,14 @@ class ServeUiBuilderMcp(
    * on this surface could put bytes behind one.
    */
   private val assets: UiBuilderAssetPort? = null,
+  /**
+   * Answers "would this be accepted, and would it export?" without writing anything, on a host that
+   * can open a scratch service over its own catalogs and exporter.
+   *
+   * Null where the host did not wire one; [VALIDATE] is then absent rather than present and
+   * refusing, which is the rule the whole surface follows. See [UiBuilderDraftValidator].
+   */
+  private val validator: UiBuilderDraftValidator? = null,
 ) {
 
   /** Whether this host keeps design discussions, and so whether the comment tools exist. */
@@ -159,6 +167,10 @@ class ServeUiBuilderMcp(
   /** Whether this host records what a design is for, and so whether the links tools exist. */
   val supportsLinks: Boolean
     get() = links != null
+
+  /** Whether this host can check a design without saving it, and so whether [VALIDATE] exists. */
+  val supportsValidation: Boolean
+    get() = validator != null
 
   /** What a tool needs from the caller before it may run. Null when the name is not ours. */
   fun capabilityFor(tool: String): UiBuilderRouteCapability? =
@@ -208,6 +220,9 @@ class ServeUiBuilderMcp(
       // stable NATIVE_RENDER_UNAVAILABLE refusal below instead of making clients infer capability
       // from a tool disappearing between otherwise equivalent hosts.
       RENDER_NATIVE -> UiBuilderRouteCapability.EXPORT
+      // A read: nothing is written, and the document checked is either the caller's own or one the
+      // service has just opened for them as a read.
+      VALIDATE -> if (validator == null) null else UiBuilderRouteCapability.READ
       else -> null
     }
 
@@ -293,6 +308,7 @@ class ServeUiBuilderMcp(
         REACT_TO_COMMENT -> return commentTool(tool, args, actor)
         GET_LINKS,
         SET_LINKS -> return linksTool(tool, args, actor)
+        VALIDATE -> return validate(args, actor)
         else -> throw McpRequestException("unknown UI-builder tool '$tool'")
       }
     return envelope(callId, execute(request, actor), includeCatalog = args.includeCatalog())
@@ -1275,6 +1291,119 @@ class ServeUiBuilderMcp(
     )
   }
 
+  /**
+   * Check a whole `document`, a stored design, or a batch of `operations` against a stored design,
+   * and save nothing.
+   *
+   * A shape that does not decode is reported as a problem rather than thrown as a tool error: the
+   * caller asked "is this valid?", and "no, and here is why" is the answer, not a failure of the
+   * question. A design the actor cannot read is still refused outright, exactly as [GET_DESIGN]
+   * refuses it, so this is not a way to learn that a private design exists.
+   */
+  private suspend fun validate(args: JsonObject, actor: AuthenticatedUiBuilderActor): String {
+    val lane = validator ?: throw McpRequestException("this host cannot validate designs")
+    val explicit = args["document"]
+    val designId = args.text("designId")
+    val rawOperations = args["operations"]
+    if ((explicit == null) == (designId == null)) {
+      throw McpRequestException(
+        "pass exactly one of `document` (a whole design to check) or `designId` (a stored " +
+          "design, optionally with `operations` to check against it)"
+      )
+    }
+    if (explicit != null && rawOperations != null) {
+      throw McpRequestException(
+        "`operations` are checked against a stored design: pass `designId` with them, or check " +
+          "the whole edited `document` instead"
+      )
+    }
+    fun reply(
+      problems: List<UiBuilderValidationProblemV1>,
+      revision: Long? = null,
+    ): String =
+      UI_BUILDER_JSON.encodeToString(
+        UiBuilderValidationV1.serializer(),
+        UiBuilderValidationV1(
+          valid = problems.none { it.severity == SEVERITY_ERROR },
+          designId = designId,
+          revision = revision,
+          problems = problems,
+        ),
+      )
+    fun shape(code: String, message: String, operationIndex: Int? = null) =
+      UiBuilderValidationProblemV1(
+        source = SOURCE_SHAPE,
+        code = code,
+        message = message,
+        operationIndex = operationIndex,
+      )
+
+    if (explicit != null) {
+      val document =
+        try {
+          UI_BUILDER_JSON.decodeFromJsonElement(DesignDocumentV1.serializer(), explicit)
+        } catch (e: IllegalArgumentException) {
+          // SerializationException is an IllegalArgumentException, and so is a `require` in a
+          // protocol constructor; both mean the same thing to the caller.
+          return reply(
+            listOf(shape("invalidDocument", "`document` is not a DesignDocumentV1: ${e.message}"))
+          )
+        }
+      return reply(lane.validate(actor, document, operations = null))
+    }
+
+    val snapshot =
+      execute(GetSnapshotRequestV1(designId = designId!!, revision = null), actor)
+        as? UiBuilderServiceResponse.Snapshot
+        ?: throw McpRequestException("no design `$designId` this actor can read")
+    val document = snapshot.snapshot.state.document
+    val operations =
+      when (rawOperations) {
+        null -> null
+        is JsonArray ->
+          rawOperations.mapIndexed { index, element ->
+            try {
+              UI_BUILDER_JSON.decodeFromJsonElement(DesignMutationV1.serializer(), element)
+            } catch (e: IllegalArgumentException) {
+              return reply(
+                listOf(
+                  shape(
+                    "invalidMutation",
+                    "`operations[$index]` is not a DesignMutationV1: ${e.message}",
+                    operationIndex = index,
+                  )
+                ),
+                document.revision,
+              )
+            }
+          }
+        else ->
+          return reply(
+            listOf(shape("invalidMutation", "`operations` must be an array of design mutations")),
+            document.revision,
+          )
+      }
+    // Checked against the current document, because that is what an apply lands on. A batch
+    // written against an older revision is not refused for it — the reducer rebases what does not
+    // conflict — so a mismatch is a warning, not an error.
+    val baseRevision = args.number("baseRevision")
+    val notes =
+      if (operations != null && baseRevision != null && baseRevision != document.revision)
+        listOf(
+          UiBuilderValidationProblemV1(
+            severity = SEVERITY_WARNING,
+            source = SOURCE_MUTATIONS,
+            code = "revisionMismatch",
+            message =
+              "checked against the current revision ${document.revision}, not baseRevision " +
+                "$baseRevision; an apply quoting $baseRevision is also checked for conflicts " +
+                "with the edits in between",
+          )
+        )
+      else emptyList()
+    return reply(notes + lane.validate(actor, document, operations), document.revision)
+  }
+
   private suspend fun execute(
     request: UiBuilderRequestV1,
     actor: AuthenticatedUiBuilderActor,
@@ -1446,6 +1575,7 @@ class ServeUiBuilderMcp(
     const val SHARE_DESIGN = "ui_builder_share_design"
     const val RENAME_DESIGN = "ui_builder_rename_design"
     const val DELETE_DESIGN = "ui_builder_delete_design"
+    const val VALIDATE = "ui_builder_validate"
 
     private const val REVOKE_ARGUMENT = "revoke"
     private const val INCLUDE_CATALOG_ARGUMENT = "includeCatalog"
@@ -1521,6 +1651,9 @@ class ServeUiBuilderMcp(
     /** Separate because they exist only where the host records what a design is for. */
     val LINKS_TOOL_NAMES = listOf(GET_LINKS, SET_LINKS)
 
+    /** Separate because it exists only where the host can open a scratch service. */
+    val VALIDATE_TOOL_NAMES = listOf(VALIDATE)
+
     /** Separate because they exist only where the host keeps a discussion. */
     val COMMENT_TOOL_NAMES =
       listOf(
@@ -1589,6 +1722,7 @@ class ServeUiBuilderMcp(
       comments: Boolean = false,
       assets: Boolean = false,
       links: Boolean = false,
+      validate: Boolean = false,
     ): List<JsonObject> =
       listOfNotNull(
         tool(
@@ -1797,6 +1931,29 @@ class ServeUiBuilderMcp(
             "format":{"type":"string","enum":["png","json","rc"]}
           },"required":["document","format"],"additionalProperties":false}
           """,
+          ),
+        if (!validate) null
+        else
+          tool(
+            VALIDATE,
+            "Check a design without saving it: a whole `document`, a stored design by " +
+              "`designId`, or `operations` against a stored design exactly as $APPLY would apply " +
+              "them. Runs the same checks the real call does — document shape, catalog pin, the " +
+              "catalog's own validation, the mutation reducer — and then the Compose export " +
+              "gate, which is the list the editor's problems panel shows. Returns " +
+              "`{valid, problems:[{severity, source, code, message, nodeId?, field?, " +
+              "operationIndex?}]}`; `valid` is false exactly when a problem is an error. Nothing " +
+              "is written, no revision moves and nobody watching the design is notified. The " +
+              "shapes are published as the resources ${UiBuilderJsonSchemas.DOCUMENT_URI} and " +
+              "${UiBuilderJsonSchemas.MUTATION_URI}.",
+            """
+            {"type":"object","properties":{
+              "document":{"type":"object","description":"A whole DesignDocumentV1 to check."},
+              "designId":{"type":"string","description":"A stored design to check, or to check `operations` against."},
+              "operations":{"type":"array","items":{"type":"object"},"description":"DesignMutationV1 objects to check against `designId`'s current document, as ui_builder_apply takes them."},
+              "baseRevision":{"type":"integer","description":"The revision the operations were written against; a stale one is reported as a warning."}
+            },"additionalProperties":false}
+            """,
           ),
         if (!assets) null
         else
