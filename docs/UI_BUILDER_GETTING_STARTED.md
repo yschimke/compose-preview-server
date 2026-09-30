@@ -1162,6 +1162,7 @@ with the same bearer. One tool per protocol request, plus the ones the contract 
 | Tool | Capability | What it answers |
 | --- | --- | --- |
 | `ui_builder_list_catalogs` | `ui-builder-read` | What a design's `catalogPin` may name, as a summary with the pin; `full: true` for the whole capability |
+| `ui_builder_search_components` | `ui-builder-read` | The summary of only the components whose id, role or trait contains `query` (optionally within one `catalog`) |
 | `ui_builder_list_designs` | `ui-builder-read` | The designs on this box |
 | `ui_builder_get_design` | `ui-builder-read` | One whole document, and the revision to quote next; the pinned catalog only with `includeCatalog: true` |
 | `ui_builder_await_design` | `ui-builder-read` | Waits for somebody else to change the design, and returns what they changed |

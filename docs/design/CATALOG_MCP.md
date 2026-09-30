@@ -153,7 +153,7 @@ JSON-RPC messages use `POST`, notifications receive `202 Accepted`, and optional
 | `get_preview_data` | `live` | Retrieve accessibility or Compose annotation data |
 | `list-all-documentation`, `get-documentation-for-story` | `preview` | Storybook-MCP-compatible discovery aliases |
 | `preview-stories` | `live` | Storybook-MCP-compatible preview rendering alias |
-| `ui_builder_list_catalogs`, `ui_builder_list_designs`, `ui_builder_get_design` | `ui-builder-read` | The component catalogs a design can pin to (a summary by default, the whole capability with `full: true`), the designs on this box, and one design's whole document (without the catalog it pins unless `includeCatalog: true`) |
+| `ui_builder_list_catalogs`, `ui_builder_search_components`, `ui_builder_list_designs`, `ui_builder_get_design` | `ui-builder-read` | The component catalogs a design can pin to (a summary by default, the whole capability with `full: true`), the designs on this box, and one design's whole document (without the catalog it pins unless `includeCatalog: true`) |
 | `ui_builder_create_design`, `ui_builder_apply` | `ui-builder-write` | Create a design, and apply `DesignMutationV1` operations to one — a `setProperty` whose value is `{"type":"null"}` unsets an optional property |
 | `ui_builder_rename_design`, `ui_builder_delete_design` | `ui-builder-write` | Retitle a design you may write; delete one you **own**. Neither has a request type in the contract, so both answer outside the released envelope |
 | `ui_builder_await_design` | `ui-builder-read` | **Wait** for somebody else to change a design, and return what they changed |

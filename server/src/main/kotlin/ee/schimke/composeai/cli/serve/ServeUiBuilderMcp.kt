@@ -164,6 +164,7 @@ class ServeUiBuilderMcp(
   fun capabilityFor(tool: String): UiBuilderRouteCapability? =
     when (tool) {
       LIST_CATALOGS,
+      SEARCH_COMPONENTS,
       LIST_DESIGNS,
       GET_DESIGN,
       PREVIEW_CATALOG_RECOVERY,
@@ -233,6 +234,7 @@ class ServeUiBuilderMcp(
     val request =
       when (tool) {
         LIST_CATALOGS -> return listCatalogs(args, actor, callId)
+        SEARCH_COMPONENTS -> return searchComponents(args, actor, callId)
         LIST_DESIGNS ->
           ListDesignsRequestV1(
             cursor = args.text("cursor"),
@@ -355,6 +357,53 @@ class ServeUiBuilderMcp(
               components = catalog.components.map(::summarize),
             )
           },
+      ),
+    )
+  }
+
+  /**
+   * The components whose id, role or traits contain `query` (case-insensitive), in the summary
+   * shape of [listCatalogs]. A whole catalog summary is still thousands of tokens; an agent that
+   * wants `TextField` or `Button` should not pay for the rest.
+   */
+  private suspend fun searchComponents(
+    args: JsonObject,
+    actor: AuthenticatedUiBuilderActor,
+    callId: String,
+  ): String {
+    val query =
+      args[QUERY_ARGUMENT]?.jsonPrimitive?.contentOrNull?.trim()?.takeIf { it.isNotEmpty() }
+        ?: throw McpRequestException("`$QUERY_ARGUMENT` is required")
+    val catalogFilter = args[CATALOG_ARGUMENT]?.jsonPrimitive?.contentOrNull
+    val listed =
+      when (val response = execute(ListCatalogsRequestV1, actor)) {
+        is UiBuilderServiceResponse.Catalogs -> response
+        else -> return envelope(callId, response)
+      }
+    return SUMMARY_JSON.encodeToString(
+      CatalogSummaryReplyV1.serializer(),
+      CatalogSummaryReplyV1(
+        callId = callId,
+        catalogs =
+          listed.catalogs
+            .filter { catalogFilter == null || it.benchmark.catalogSystemId == catalogFilter }
+            .mapNotNull { catalog ->
+              val systemId = catalog.benchmark.catalogSystemId
+              val matches =
+                catalog.components.filter { component ->
+                  component.componentId.contains(query, ignoreCase = true) ||
+                    component.role.contains(query, ignoreCase = true) ||
+                    component.traits.any { it.contains(query, ignoreCase = true) }
+                }
+              if (matches.isEmpty()) null
+              else
+                CatalogSummaryV1(
+                  systemId = systemId,
+                  platform = catalog.statusSemantics[PLATFORM_KEY]?.jsonPrimitive?.contentOrNull,
+                  catalogPin = listed.pins[systemId],
+                  components = matches.map(::summarize),
+                )
+            },
       ),
     )
   }
@@ -1365,6 +1414,7 @@ class ServeUiBuilderMcp(
     private const val SUMMARY_ALLOWED_VALUES = 24
 
     const val LIST_CATALOGS = "ui_builder_list_catalogs"
+    const val SEARCH_COMPONENTS = "ui_builder_search_components"
     const val LIST_DESIGNS = "ui_builder_list_designs"
     const val GET_DESIGN = "ui_builder_get_design"
     const val PREVIEW_CATALOG_RECOVERY = "ui_builder_preview_catalog_recovery"
@@ -1400,6 +1450,8 @@ class ServeUiBuilderMcp(
     private const val REVOKE_ARGUMENT = "revoke"
     private const val INCLUDE_CATALOG_ARGUMENT = "includeCatalog"
     private const val FULL_ARGUMENT = "full"
+    private const val QUERY_ARGUMENT = "query"
+    private const val CATALOG_ARGUMENT = "catalog"
     private const val COMPONENT_IDS_ARGUMENT = "componentIds"
 
     /** Closed, discriminated DesignHomeV1 schema shared by both mutation arguments. */
@@ -1440,6 +1492,7 @@ class ServeUiBuilderMcp(
     val TOOL_NAMES =
       listOfNotNull(
         LIST_CATALOGS,
+        SEARCH_COMPONENTS,
         LIST_DESIGNS,
         GET_DESIGN,
         PREVIEW_CATALOG_RECOVERY,
@@ -1555,6 +1608,19 @@ class ServeUiBuilderMcp(
             "$FULL_ARGUMENT":{"type":"boolean","description":"The whole CatalogCapabilityV1 per catalog, as the released envelope. Defaults to false."},
             "$COMPONENT_IDS_ARGUMENT":{"type":"array","items":{"type":"string"},"description":"Only these components. Omit for all of them."}
           },"additionalProperties":false}
+          """,
+        ),
+        tool(
+          SEARCH_COMPONENTS,
+          "Find catalog components by name, role or trait (case-insensitive substring), e.g. " +
+            "`TextField`, `Button`, `Card`. Returns the same summary as $LIST_CATALOGS " +
+            "(id, role, traits, slots, properties, and the catalog pin) for only the matches, " +
+            "so you don't pay for the whole catalog.",
+          """
+          {"type":"object","properties":{
+            "$QUERY_ARGUMENT":{"type":"string","description":"Text to look for in a component's id, role or traits."},
+            "$CATALOG_ARGUMENT":{"type":"string","description":"Only this catalog system id. Omit to search every catalog."}
+          },"required":["$QUERY_ARGUMENT"],"additionalProperties":false}
           """,
         ),
         tool(
