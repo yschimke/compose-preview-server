@@ -102,6 +102,60 @@ class DesignCommandRunnerTest {
     assertTrue(png.contentEquals(written.getValue("spotify-wear-widget.png")))
   }
 
+  @Test
+  fun `view writes the picture to the destination and the description to stdout`() {
+    val png = byteArrayOf(0x89.toByte(), 0x50, 0x4E, 0x47)
+    val seen = mutableListOf<Pair<String, JsonObject>>()
+    val runner =
+      DesignCommandRunner(
+        options =
+          options(DesignCommand.VIEW)
+            .copy(
+              selection = listOf("title"),
+              include = listOf("selection"),
+              viewport = 200 to 100,
+            ),
+        transport =
+          object : DesignMcpTransport {
+            override fun call(tool: String, arguments: JsonObject): JsonObject =
+              error("view asks for the picture too")
+
+            override fun callWithImage(
+              tool: String,
+              arguments: JsonObject,
+            ): Pair<JsonObject, ByteArray?> {
+              seen += tool to arguments
+              return Json.parseToJsonElement(
+                  """{"schema":"compose-preview/ui-builder-view/v1","designId":"spotify-wear-widget",
+                  "revision":3,"notes":["selected node `title` has no box in this render"]}"""
+                )
+                .jsonObject to png
+            }
+          },
+        emit = { logged += it },
+        write = { destination, bytes -> written[destination] = bytes },
+      )
+
+    assertEquals(DesignCommandRunner.EXIT_OK, runner.run())
+    assertTrue(png.contentEquals(written.getValue("spotify-wear-widget.view.png")))
+    val description =
+      Json.parseToJsonElement(written.getValue(DesignCommand.STDOUT).decodeToString())
+    assertEquals(3, description.jsonObject["revision"]!!.jsonPrimitive.int)
+    val (tool, arguments) = seen.single()
+    assertEquals(ServeUiBuilderMcp.VIEW, tool)
+    assertEquals("true", arguments[ServeUiBuilderMcp.INLINE_ARGUMENT].toString())
+    assertEquals("""["title"]""", arguments["selection"].toString())
+    assertEquals("""{"width":200,"height":100}""", arguments["viewport"].toString())
+    assertTrue(logged.any { it.contains("has no box") }, "$logged")
+  }
+
+  @Test
+  fun `a view without a picture fails rather than writing nothing and succeeding`() {
+    val code = runner(options(DesignCommand.VIEW), """{"designId":"spotify-wear-widget"}""").run()
+    assertEquals(DesignCommandRunner.EXIT_FAILURE, code)
+    assertTrue(written.isEmpty(), "$written")
+  }
+
   /**
    * The case the issue was written about: `ui_builder_export` answers a design it cannot express
    * with a parseable artifact whose content is the refusal in comments. Writing that out and
