@@ -305,6 +305,11 @@ class DaemonMcpServer(
   private val catalog: ConcurrentHashMap<DaemonAddr, ConcurrentHashMap<String, PreviewEntry>> =
     ConcurrentHashMap()
 
+  /** Changed sources, renders, subscriptions and pins: the Previews tray and `@`-mentions. */
+  private val previewActivity = PreviewActivity()
+
+  private val renderThumbnails = RenderThumbnails()
+
   /**
    * Last PNG digest each MCP client saw for a URI through `render_preview(inline=false)`. The
    * direct-file response is deliberately session-scoped: a newly connected client has not seen a
@@ -567,7 +572,10 @@ class DaemonMcpServer(
             readResource = { uri, progressToken ->
               handleReadResource(session, uri, progressToken)
             },
-            subscribe = { uri -> subscriptions.subscribe(uri, session) },
+            subscribe = { uri ->
+              subscriptions.subscribe(uri, session)
+              previewActivity.watched(uri)
+            },
             unsubscribe = { uri -> subscriptions.unsubscribe(uri, session) },
           )
         },
@@ -954,6 +962,7 @@ class DaemonMcpServer(
         }
       }
     if (!needsNotify) return false
+    previewActivity.sourceChanged(sourceFile.absolutePath)
 
     if (sourceCompiler != null) {
       // Recompile first, forward `fileChanged` after: see [recompilePendingSources].
@@ -1137,6 +1146,7 @@ class DaemonMcpServer(
     if (tree.generation <= compiled) return
     val changed = tree.changedSince(compiled).map { it.absolutePath }
     if (changed.isEmpty()) return
+    changed.forEach(previewActivity::sourceChanged)
     pendingSources.computeIfAbsent(addr) { ConcurrentHashMap.newKeySet() }.addAll(changed)
     pendingTrigger.putIfAbsent(addr, TRIGGER_DETECTED)
   }
@@ -2580,6 +2590,7 @@ class DaemonMcpServer(
           ),
       ),
     ) +
+      listOf(PreviewTray.toolDef(), PreviewMentions.toolDef()) +
       rcViewer.toolDefs() +
       (uiBuilderMcp?.toolDefs() ?: emptyList()) +
       (openAiProbe?.toolDefs() ?: emptyList()) +
@@ -2618,6 +2629,10 @@ class DaemonMcpServer(
       "list_projects" -> toolListProjects()
       "list_devices" -> toolListDevices()
       "find_previews_for_file" -> toolFindPreviewsForFile(args)
+      PreviewTray.TOOL ->
+        PreviewTray.call(args, previewCatalog(), previewActivity, renderThumbnails)
+      PreviewMentions.TOOL ->
+        PreviewMentions.call(args, previewCatalog(), previewActivity, renderThumbnails)
       "render_preview" ->
         withCallBudget(session, name, args, progress) { report ->
           if (scope == null) autoRegisterWorkspace(session)
@@ -4235,6 +4250,21 @@ class DaemonMcpServer(
         .forEach { stale -> runCatching { stale.delete() } }
       target
     }
+
+  /** The catalog as [PreviewTray] and [PreviewMentions] read it; empty until discovery lands. */
+  private fun previewCatalog(): List<CatalogPreview> = catalog.flatMap { (addr, byId) ->
+    byId.values.map { entry ->
+      CatalogPreview(
+        uri = PreviewUri(addr.workspaceId, addr.modulePath, entry.fqn, entry.config).toUri(),
+        fqn = entry.fqn,
+        functionName = entry.functionName,
+        displayName = entry.displayName,
+        modulePath = addr.modulePath,
+        sourceFile = entry.resolvedSourcePath,
+        sourceLine = entry.bodyLine,
+      )
+    }
+  }
 
   private fun toolFindPreviewsForFile(args: JsonObject): CallToolResult {
     val requestedPath =
@@ -6805,6 +6835,9 @@ class DaemonMcpServer(
         "deleted" -> ChangeType.DELETED
         else -> ChangeType.MODIFIED
       }
+    if (kind == FileKind.SOURCE && changeType != ChangeType.DELETED) {
+      previewActivity.sourceChanged(path)
+    }
     // Forward to every spawned daemon in the workspace. The daemon itself decides whether the
     // file is in its module's source set; the supervisor doesn't try to be clever about
     // dispatch. After the file change, also re-issue `renderNow` for every URI any session has
@@ -7039,6 +7072,7 @@ class DaemonMcpServer(
         config = entry?.config,
       )
     val uriStr = uri.toUri()
+    previewActivity.rendered(uriStr, pngPath)
     val notifications = mutableMapOf<String, MutableSet<Session>>()
     if (!completedGroup?.notificationUris.isNullOrEmpty()) {
       completedGroup!!.notificationUris.forEach { updatedUri ->
