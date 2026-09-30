@@ -303,6 +303,8 @@ class ServeUiBuilderMcpIntegrationTest {
     assertTrue(reviewText.contains("ui_builder_list_comments"), reviewText)
     assertTrue(reviewText.contains("ui_builder_view"), reviewText)
     assertTrue(reviewText.contains("#1114"), reviewText)
+    // The tool exists now, so the prompt must not send an agent around it any more.
+    assertFalse(reviewText.contains("not available"), reviewText)
 
     val invalid =
       post(
@@ -1279,6 +1281,209 @@ class ServeUiBuilderMcpIntegrationTest {
   }
 
   @Test
+  fun `ui_builder_view is declared read-gated and opens in the MCP App viewer`() {
+    val server = start(withPngExport = true)
+
+    val view =
+      toolDefinitions(server).single {
+        it["name"]!!.jsonPrimitive.content == ServeUiBuilderMcp.VIEW
+      }
+    assertEquals(
+      ServeCatalogMcp.MCP_APP_VIEWER_URI,
+      view["_meta"]!!.jsonObject["ui"]!!.jsonObject["resourceUri"]!!.jsonPrimitive.content,
+    )
+    val properties = view["inputSchema"]!!.jsonObject["properties"]!!.jsonObject
+    assertTrue(
+      listOf("designId", "revision", "viewport", "include", "selection", "renderer", "inline").all {
+        it in properties
+      },
+      properties.toString(),
+    )
+  }
+
+  @Test
+  fun `ui_builder_view outlines the selection, reports its box and the pins, and links a PNG that resolves`() {
+    val selected = ServeUiBuilderView.Box(16, 24, 200, 40)
+    val server =
+      start(
+        withComments = true,
+        nativePreview =
+          UiBuilderNativePreviewLane { _, _ ->
+            UiBuilderNativePreviewOutcome.Rendered(
+              response =
+                PlaygroundRunResponse(
+                  previewId = "generated",
+                  previewToken = "token",
+                  image = java.util.Base64.getEncoder().encodeToString(VIEW_FRAME),
+                ),
+              taggedNodeIds = listOf("column", "session"),
+              nodeBounds =
+                mapOf(
+                  "column" to AnnotationBounds(x = 0, y = 0, width = 400, height = 800),
+                  "session" to
+                    AnnotationBounds(
+                      x = selected.x,
+                      y = selected.y,
+                      width = selected.width,
+                      height = selected.height,
+                    ),
+                ),
+            )
+          },
+      )
+    envelope(
+      server,
+      ServeUiBuilderMcp.CREATE_DESIGN,
+      """{"designId":"agent-screen","document":${json.encodeToString(DesignDocumentV1.serializer(), document())}}""",
+    )
+    envelope(
+      server,
+      ServeUiBuilderMcp.POST_COMMENT,
+      """{"designId":"agent-screen","nodeId":"session","body":"The keynote title is cramped"}""",
+    )
+    envelope(
+      server,
+      ServeUiBuilderMcp.POST_COMMENT,
+      """{"designId":"agent-screen","x":0.5,"y":0.25,"body":"Too much empty space here"}""",
+    )
+
+    val result =
+      call(
+        server,
+        ServeUiBuilderMcp.VIEW,
+        """{"designId":"agent-screen","selection":["session"],"renderer":"native","include":["selection","comments","bounds"]}""",
+      )
+    assertEquals(null, result["isError"], result.toString())
+    val content = result["content"]!!.jsonArray.map { it.jsonObject }
+    val view = Json.parseToJsonElement(content.first()["text"]!!.jsonPrimitive.content).jsonObject
+    assertFalse("imageBase64" in view, "the picture must not travel as text")
+    assertEquals("agent-screen", view["designId"]!!.jsonPrimitive.content)
+    assertEquals(0L, view["revision"]!!.jsonPrimitive.content.toLong())
+    assertEquals("native", view["renderer"]!!.jsonPrimitive.content)
+
+    // The selected node's box, in the returned image's pixels.
+    val session =
+      view["nodes"]!!
+        .jsonArray
+        .map { it.jsonObject }
+        .single { it["nodeId"]!!.jsonPrimitive.content == "session" }
+    assertEquals("true", session["selected"]!!.jsonPrimitive.content)
+    assertEquals(
+      listOf(selected.x, selected.y, selected.width, selected.height),
+      listOf("x", "y", "width", "height").map { session[it]!!.jsonPrimitive.content.toInt() },
+    )
+
+    // Both threads are pinned: one at the node's corner, one at its frame fraction.
+    val pins = view["comments"]!!.jsonArray.map { it.jsonObject }
+    assertEquals(2, pins.size, pins.toString())
+    assertTrue(pins.all { it["placed"]!!.jsonPrimitive.content == "true" }, pins.toString())
+    val nodePin = pins.single { it["anchor"]!!.jsonPrimitive.content == "node" }
+    assertEquals(selected.x, nodePin["x"]!!.jsonPrimitive.content.toInt())
+    assertEquals(selected.y, nodePin["y"]!!.jsonPrimitive.content.toInt())
+    val pointPin = pins.single { it["anchor"]!!.jsonPrimitive.content == "point" }
+    assertEquals(200, pointPin["x"]!!.jsonPrimitive.content.toInt())
+    assertEquals(200, pointPin["y"]!!.jsonPrimitive.content.toInt())
+
+    // A link by default, not bytes; and the link is a picture anybody holding it can fetch.
+    assertTrue(content.none { it["type"]!!.jsonPrimitive.content == "image" }, content.toString())
+    val link = content.single { it["type"]!!.jsonPrimitive.content == "resource_link" }
+    val url = link["uri"]!!.jsonPrimitive.content
+    assertTrue(url.startsWith("$PUBLIC_ORIGIN${ServeCatalogMcp.IMAGE_URL_PATH}?"), url)
+    assertEquals(url, view["image"]!!.jsonObject["url"]!!.jsonPrimitive.content)
+    val png =
+      client
+        .newCall(
+          Request.Builder()
+            .url(url.replace(PUBLIC_ORIGIN, "http://127.0.0.1:${server.server.port}"))
+            .build()
+        )
+        .execute()
+        .use {
+          assertEquals(200, it.code)
+          assertEquals("image/png", it.header("Content-Type"))
+          it.body.bytes()
+        }
+    val picture = javax.imageio.ImageIO.read(png.inputStream())
+    assertEquals(400, picture.width)
+    assertEquals(800, picture.height)
+    // The outline is drawn on the selected node's edge, and the frame elsewhere is untouched.
+    val edge = java.awt.Color(picture.getRGB(selected.x, selected.y + selected.height / 2))
+    assertTrue(edge.blue > 200 && edge.red < 100, "selection outline at the node's edge: $edge")
+    assertEquals(java.awt.Color.WHITE.rgb, picture.getRGB(380, 780))
+
+    // A tampered signature is a 404, not a picture.
+    client
+      .newCall(
+        Request.Builder()
+          .url(
+            url
+              .replace(PUBLIC_ORIGIN, "http://127.0.0.1:${server.server.port}")
+              .replace("sig=", "sig=x")
+          )
+          .build()
+      )
+      .execute()
+      .use { assertEquals(404, it.code) }
+  }
+
+  @Test
+  fun `ui_builder_view from the PNG export says it has no bounds and inlines on request`() {
+    val server = start(withPngExport = true)
+    envelope(
+      server,
+      ServeUiBuilderMcp.CREATE_DESIGN,
+      """{"designId":"agent-screen","document":${json.encodeToString(DesignDocumentV1.serializer(), document())}}""",
+    )
+
+    val result =
+      call(
+        server,
+        ServeUiBuilderMcp.VIEW,
+        """{"designId":"agent-screen","selection":["session"],"inline":true,"viewport":{"width":200,"height":200}}""",
+      )
+    assertEquals(null, result["isError"], result.toString())
+    val content = result["content"]!!.jsonArray.map { it.jsonObject }
+    val view = Json.parseToJsonElement(content.first()["text"]!!.jsonPrimitive.content).jsonObject
+    assertEquals("export", view["renderer"]!!.jsonPrimitive.content)
+    assertNotNull(view["boundsUnavailable"], view.toString())
+    assertTrue(view["nodes"]!!.jsonArray.isEmpty(), view.toString())
+    // Never outlined at a guessed position: the note says why the selection is not drawn.
+    assertTrue(
+      view["notes"]!!.jsonArray.any { it.jsonPrimitive.content.contains("`session`") },
+      view.toString(),
+    )
+    // The viewport fits a 400x800 frame into 200x200 by height.
+    assertEquals(100, view["image"]!!.jsonObject["widthPx"]!!.jsonPrimitive.content.toInt())
+    assertEquals(200, view["image"]!!.jsonObject["heightPx"]!!.jsonPrimitive.content.toInt())
+    val image = content.single { it["type"]!!.jsonPrimitive.content == "image" }
+    val picture =
+      javax.imageio.ImageIO.read(
+        java.util.Base64.getDecoder().decode(image["data"]!!.jsonPrimitive.content).inputStream()
+      )
+    assertEquals(100, picture.width)
+    assertEquals(200, picture.height)
+    assertTrue(content.any { it["type"]!!.jsonPrimitive.content == "resource_link" })
+  }
+
+  @Test
+  fun `ui_builder_view refuses a design the actor cannot read and an unknown overlay`() {
+    val server = start(withPngExport = true)
+    val missing = call(server, ServeUiBuilderMcp.VIEW, """{"designId":"nobody-made-this"}""")
+    assertEquals("true", missing["isError"]?.jsonPrimitive?.content, missing.toString())
+
+    envelope(
+      server,
+      ServeUiBuilderMcp.CREATE_DESIGN,
+      """{"designId":"agent-screen","document":${json.encodeToString(DesignDocumentV1.serializer(), document())}}""",
+    )
+    val unknown =
+      call(server, ServeUiBuilderMcp.VIEW, """{"designId":"agent-screen","include":["grid"]}""")
+    assertEquals("true", unknown["isError"]?.jsonPrimitive?.content, unknown.toString())
+    val text = unknown["content"]!!.jsonArray.first().jsonObject["text"]!!.jsonPrimitive.content
+    assertTrue(text.contains("grid"), text)
+  }
+
+  @Test
   fun `a caller without the capability is refused by name rather than served`() {
     // The service is configured; the authorization is not. The refusal has to say which grant is
     // missing, because "unauthorized" on a surface with three capabilities is not actionable.
@@ -1298,6 +1503,9 @@ class ServeUiBuilderMcpIntegrationTest {
     catalogSystemId: String = CATALOG_SYSTEM_ID,
     withRemoteExports: Boolean = false,
     withComments: Boolean = false,
+    /** Answers a PNG export with [VIEW_FRAME], standing in for the packaged renderer. */
+    withPngExport: Boolean = false,
+    nativePreview: UiBuilderNativePreviewLane? = null,
   ): RunningServer {
     val registry = ServeSessionRegistry(open = { null })
     val service =
@@ -1313,7 +1521,7 @@ class ServeUiBuilderMcpIntegrationTest {
                   .also {
                     it.composeCode = true
                     it.svg = false
-                    it.png = false
+                    it.png = withPngExport
                   }
                   .build()
                   .let {
@@ -1329,7 +1537,28 @@ class ServeUiBuilderMcpIntegrationTest {
                 ComponentRecordSource(recordFile?.let { mapOf(catalogSystemId to it) }.orEmpty())::
                   record
               )
-              .let { if (withRemoteExports) RemoteDocumentExportExecutor(it) else it },
+              .let { if (withRemoteExports) RemoteDocumentExportExecutor(it) else it }
+              .let { delegate ->
+                if (!withPngExport) delegate
+                else
+                  ee.schimke.composeai.uibuilder.service.UiBuilderExportExecutor { request ->
+                    if (
+                      request.format != ee.schimke.composeai.uibuilder.protocol.ExportFormatV1.PNG
+                    )
+                      delegate.export(request)
+                    else
+                      ee.schimke.composeai.uibuilder.protocol.ExportArtifactV1(
+                        ee.schimke.composeai.uibuilder.protocol.ExportFormatV1.PNG,
+                        "image/png",
+                        ee.schimke.composeai.uibuilder.protocol.ExportEncodingV1.BASE64,
+                        java.util.Base64.getEncoder().encodeToString(VIEW_FRAME),
+                        java.security.MessageDigest.getInstance("SHA-256")
+                          .digest(VIEW_FRAME)
+                          .joinToString("") { "%02x".format(it) },
+                        emptyList(),
+                      )
+                  }
+              },
           assets =
             if (withAssets) FileUiBuilderAssetStore(stateDirectory.resolve("assets")) else null,
         )
@@ -1352,6 +1581,7 @@ class ServeUiBuilderMcpIntegrationTest {
             if (withAuthorization)
               ServeUiBuilderAuthorization.fromServeIdentity(OPERATOR_TOKEN, null, null)
             else null,
+          uiBuilderNativePreview = nativePreview,
         )
         .also(ServeHttpServer::start)
     return RunningServer(server, registry).also { running = it }
@@ -1481,6 +1711,19 @@ class ServeUiBuilderMcpIntegrationTest {
         byteArrayOf(0, 0, 0, 40, 0, 0, 0, 40) +
         byteArrayOf(8, 6, 0, 0, 0) +
         ByteArray(4)
+    /** A plain white 400x800 frame: the document's environment at density 1. */
+    val VIEW_FRAME: ByteArray = run {
+      val image = java.awt.image.BufferedImage(400, 800, java.awt.image.BufferedImage.TYPE_INT_RGB)
+      image.createGraphics().apply {
+        color = java.awt.Color.WHITE
+        fillRect(0, 0, 400, 800)
+        dispose()
+      }
+      java.io
+        .ByteArrayOutputStream()
+        .also { javax.imageio.ImageIO.write(image, "png", it) }
+        .toByteArray()
+    }
     const val OPERATOR_TOKEN = "ui-builder-mcp-operator-token"
     const val PUBLIC_ORIGIN = "https://designs.example"
     const val CATALOG_SYSTEM_ID = "m3-catalog"

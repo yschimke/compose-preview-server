@@ -162,6 +162,7 @@ JSON-RPC messages use `POST`, notifications receive `202 Accepted`, and optional
 | `ui_builder_rename_design`, `ui_builder_delete_design` | `ui-builder-write` | Retitle a design you may write; delete one you **own**. Neither has a request type in the contract, so both answer outside the released envelope |
 | `ui_builder_await_design` | `ui-builder-read` | **Wait** for somebody else to change a design, and return what they changed |
 | `ui_builder_export` | `ui-builder-export` | Export a design — `compose` returns the generator's Kotlin, or diagnostics naming each reason it refused |
+| `ui_builder_view` | `ui-builder-read` (plus `ui-builder-export` for `renderer: "native"`) | The editor canvas as a person sees it — a PNG with the selection, reference overlay, comment pins and layout bounds drawn on, and the node boxes and pin positions as JSON (#1114) |
 | `ui_builder_put_asset` | `ui-builder-write` | Put a picture behind an `assetKey`, so an `asset/image` node draws it; present only where the host keeps design assets |
 | `ui_builder_design_access` | `ui-builder-read` | Who can open a design — its owner, and everyone it has been shared with |
 | `ui_builder_share_design` | `ui-builder-write` | Share a design with another actor as `viewer` or `editor`, or take that back |
@@ -225,6 +226,45 @@ the reply is the released `McpResponseEnvelopeV1` and the request shapes are the
    created as the person who approved the grant — so a session can clear its own litter and cannot
    reach anybody else's; a design whose owner no longer exists is still the operator's to remove
    through `/admin/ui-builder`.
+
+### Seeing the design, not only reading it
+
+`ui_builder_view` is "the agent sees what the user sees" (#1114). It takes `designId`, an optional
+`revision`, `include` (any of `selection`, `reference`, `comments`, `bounds`; defaults to the first
+three), `selection` (node ids), `viewport` (`{width, height}` in pixels, aspect kept) and
+`renderer`, and answers with a `compose-preview/ui-builder-view/v1` JSON beside the picture: the
+revision, each visible node's id and box, each comment thread's pin, what the reference overlay did,
+and `notes` for anything it could not draw. Every coordinate is in the returned image's pixels.
+
+Nothing new renders the design. The frame is the PNG export (`renderer: "export"`, the default — the
+editor's own renderer, as `ui_builder_export` with `format: "png"` returns it) or the native Compose
+render (`renderer: "native"`, the `ui_builder_render_native` lane, which compiles the design and so
+needs `ui-builder-export` as well). The overlays are drawn server-side with `java.awt`:
+
+- **selection** — a 2 px outline round each selected node's box;
+- **reference** — the design's reference picture, placed from its stored scale, offset and opacity,
+  honouring the `overlay`, `split` and `difference` modes (a hidden reference, `boxes` mode or a
+  format this JVM cannot decode is reported, not drawn);
+- **comments** — one numbered pin per thread: a point anchor at its frame fraction, a node anchor at
+  the node's top-left corner; a markup-stroke anchor is reported unplaced;
+- **bounds** — a thin rectangle round every node the renderer placed.
+
+A box is only ever one a renderer reported. The PNG export reports none, so a view from it carries
+`boundsUnavailable`, an empty `nodes`, and a note for each selected node it could not outline —
+never an outline at a guessed position. The native lane reports every tagged node's box in its own
+frame, which is why a view that needs boxes draws that frame rather than mixing two renders.
+
+The picture is a fetchable link by default rather than base64 in the reply: a `resource_link` named
+`UI-builder view (https)`, repeated as `image.url`, on the same signed `/mcp/render.png` route as a
+catalog render. A view is drawn for one actor from state that actor may read, so it cannot be
+re-rendered from a credential-free link; the server keeps the PNG for the link's ten-minute
+lifetime instead (at most 32 at once), and a forged or expired signature is a 404. `inline: true`
+adds the bytes as an `image` block; a box with no public origin always does. The tool carries
+`_meta.ui.resourceUri`, so MCP App hosts open it in the bundled viewer (#1119).
+
+The CLI spelling is `compose-preview-server design view <designId>` with `--select`, `--include`,
+`--viewport <w>x<h>` and `--renderer`: the PNG goes to `--out` (default `<designId>.view.png`) and
+the JSON to stdout.
 
 ### Watching, rather than asking again
 

@@ -8,6 +8,7 @@ import java.util.Base64
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
@@ -69,6 +70,7 @@ internal class DesignCommandRunner(
         DesignCommand.GET -> get()
         DesignCommand.RENDER,
         DesignCommand.EXPORT -> export()
+        DesignCommand.VIEW -> view()
         else -> {
           emit("design: unknown verb '${options.verb}'")
           EXIT_USAGE
@@ -173,6 +175,50 @@ internal class DesignCommandRunner(
     note(
       "design ${options.verb}: ${bytes.size} bytes of ${artifact.mediaType} (${artifact.contentDigest.take(12)})"
     )
+    return EXIT_OK
+  }
+
+  /**
+   * The editor canvas as a person sees it: the picture to the destination, the JSON describing it —
+   * node boxes, pins, revision — to stdout, and the server's notes about what it could not draw to
+   * stderr. The picture is asked for inline, because a local server has no public origin to link it
+   * from and a CLI has no use for a link it would only fetch again.
+   */
+  private fun view(): Int {
+    val (response, png) =
+      transport.callWithImage(
+        ServeUiBuilderMcp.VIEW,
+        buildJsonObject {
+          put("designId", options.designId)
+          options.revision?.let { put("revision", it) }
+          if (options.selection.isNotEmpty()) {
+            put("selection", JsonArray(options.selection.map(::JsonPrimitive)))
+          }
+          options.include?.let { put("include", JsonArray(it.map(::JsonPrimitive))) }
+          options.viewport?.let { (width, height) ->
+            put(
+              "viewport",
+              buildJsonObject {
+                put("width", width)
+                put("height", height)
+              },
+            )
+          }
+          options.renderer?.let { put("renderer", it) }
+          put(ServeUiBuilderMcp.INLINE_ARGUMENT, true)
+        },
+      )
+    val bytes =
+      png ?: throw DesignCommandFailure("design view: the reply carried no picture of the view")
+    (response["notes"] as? JsonArray)?.forEach { note ->
+      note.jsonPrimitive.contentOrNull?.let { emit("  note: $it") }
+    }
+    write(options.destination, bytes)
+    val description = PRETTY.encodeToString(JsonObject.serializer(), response) + "\n"
+    // The picture has the terminal when it goes to stdout; the description then goes beside it.
+    if (options.destination == DesignCommand.STDOUT) emit(description.trimEnd())
+    else write(DesignCommand.STDOUT, description.toByteArray())
+    note("design view: ${options.designId} at revision ${response["revision"] ?: "?"}")
     return EXIT_OK
   }
 

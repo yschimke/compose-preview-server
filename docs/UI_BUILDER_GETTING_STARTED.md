@@ -793,6 +793,7 @@ The menu is the browser's door. The shell's is `design`, a command on the server
 compose-preview-server design list                       # what this credential can see
 compose-preview-server design status --workspace . --summary  # comments and temporary copies
 compose-preview-server design render my-widget -o cover.png   # or --format svg
+compose-preview-server design view   my-widget --select title # the editor canvas + JSON
 compose-preview-server design export my-widget -o Widget.kt   # the generated Kotlin
 compose-preview-server design get    my-widget > design.json  # the document
 ```

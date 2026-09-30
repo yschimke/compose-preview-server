@@ -75,6 +75,20 @@ class ServeCatalogMcp(
    */
   private val resourceLinkKey: ByteArray = ByteArray(32).also { SecureRandom().nextBytes(it) }
 
+  /**
+   * The pictures `ui_builder_view` has handed out as signed links, by the random id in their URI.
+   *
+   * A view is drawn for one actor from state that actor may read, so it cannot be re-rendered from
+   * the link the way a catalog preview is — the link carries no grant. It is kept instead, for the
+   * link's lifetime, and bounded by count so a burst of views cannot hold the heap.
+   */
+  private val viewImages =
+    object : LinkedHashMap<String, Pair<ByteArray, Long>>(16, 0.75f, true) {
+      override fun removeEldestEntry(
+        eldest: MutableMap.MutableEntry<String, Pair<ByteArray, Long>>
+      ) = size > MAX_VIEW_IMAGES
+    }
+
   data class Reply(val body: JsonObject?, val accepted: Boolean = false)
 
   /**
@@ -355,10 +369,10 @@ class ServeCatalogMcp(
     1. Call `ui_builder_get_design` with designId `$designId`.
     2. If `ui_builder_list_comments` is advertised, read it before proposing edits. Report each
        unresolved or unacknowledged thread; discussion belongs on the design, not in a new PR.
-    3. Inspect the visual result using `ui_builder_export` with `format: "png"` or
-       `ui_builder_render_native` when that tool is advertised. Be precise: neither is the editor
-       view. `ui_builder_view` (selection, reference overlay and comment pins) is not available
-       until compose-preview-server#1114 lands.
+    3. Look at the design with `ui_builder_view`: it returns the editor canvas as a person sees
+       it — selection outline, reference overlay and comment pins drawn over the render — plus the
+       node boxes and pin positions as JSON. Pass `renderer: "native"` when node boxes matter and
+       that lane is advertised; the default PNG export reports none (compose-preview-server#1114).
     4. Summarize concrete attention items, separating observed render evidence from document-only
        checks. Do not claim to have seen editor-only state you could not view.
     """
@@ -2115,6 +2129,10 @@ class ServeCatalogMcp(
     if (!MessageDigest.isEqual(expected.encodeToByteArray(), signature.encodeToByteArray())) {
       return null
     }
+    if (unsigned.startsWith(VIEW_URI_PREFIX)) {
+      val key = unsigned.removePrefix(VIEW_URI_PREFIX)
+      return synchronized(viewImages) { viewImages[key]?.takeIf { it.second >= expiry }?.first }
+    }
     val target = runCatching { targetFromUri(unsigned) }.getOrNull() ?: return null
     val rawOverrides = resourceOverrides(unsigned)
     return withCatalog(target.catalog) { host ->
@@ -2296,7 +2314,98 @@ class ServeCatalogMcp(
               "not offer it, the operator has to add the capability and restart."
           )
       }
-    return uiBuilderToolResult(name, builder.call(name, args, actor, callId = name))
+    builder.additionalCapabilityFor(name, args)?.let { additional ->
+      if (authorize(additional, presentedToken) !is UiBuilderAuthorizationDecision.Authorized) {
+        return toolError(
+          "this call also needs a UI-builder ${additional.name.lowercase()} grant. Call " +
+            "request_access with capability '${additional.agentGrantCapability().wire}', have a " +
+            "human approve it, then pass the token poll_access returns as this tool's " +
+            "'$TOKEN_ARGUMENT' argument."
+        )
+      }
+    }
+    val text = builder.call(name, args, actor, callId = name)
+    if (name == ServeUiBuilderMcp.VIEW) {
+      return uiBuilderViewResult(
+        text,
+        inline = args[ServeUiBuilderMcp.INLINE_ARGUMENT]?.jsonPrimitive?.booleanOrNull == true,
+      )
+    }
+    return uiBuilderToolResult(name, text)
+  }
+
+  /**
+   * `ui_builder_view`'s reply: the JSON as text, the picture as a signed https link a host can put
+   * in an `<img>`, and — when asked, or when this box has no public origin to link to — the bytes
+   * as an image block. The base64 never travels in the text, where it would be spent from an
+   * agent's context as characters rather than seen as a picture.
+   */
+  internal fun uiBuilderViewResult(text: String, inline: Boolean): JsonObject {
+    val reply =
+      runCatching { JSON.parseToJsonElement(text) as? JsonObject }.getOrNull()
+        ?: return textResult(text)
+    val encoded =
+      reply["imageBase64"]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() }
+        ?: return textResult(text)
+    val png =
+      runCatching { Base64.getDecoder().decode(encoded) }.getOrNull() ?: return textResult(text)
+    val link = signedViewUrl(png)
+    val image = reply["image"] as? JsonObject ?: JsonObject(emptyMap())
+    val described =
+      JsonObject(
+        reply - "imageBase64" +
+          ("image" to
+            JsonObject(
+              image +
+                (link?.let {
+                  mapOf(
+                    "url" to JsonPrimitive(it.first),
+                    "expiresAtEpochSeconds" to JsonPrimitive(it.second),
+                  )
+                } ?: emptyMap())
+            ))
+      )
+    return buildJsonObject {
+      put(
+        "content",
+        buildJsonArray {
+          add(textContent(described.toString()))
+          link?.let {
+            add(
+              buildJsonObject {
+                put("type", "resource_link")
+                put("uri", it.first)
+                put("name", VIEW_LINK_NAME)
+                put("mimeType", "image/png")
+                put(
+                  "description",
+                  "Short-lived signed https URL of this exact view; it grants nothing beyond " +
+                    "that image.",
+                )
+              }
+            )
+          }
+          if (inline || link == null) add(imageContent(png))
+        },
+      )
+    }
+  }
+
+  /** `<origin>/mcp/render.png` for a kept view, or null on a box with no public origin. */
+  private fun signedViewUrl(png: ByteArray): Pair<String, Long>? {
+    val origin = publicOrigin()?.trimEnd('/') ?: return null
+    val id = ByteArray(18).also { SecureRandom().nextBytes(it) }
+    val key = Base64.getUrlEncoder().withoutPadding().encodeToString(id)
+    val uri = "$VIEW_URI_PREFIX$key"
+    val expiry = nowMillis() / 1000 + SIGNED_RESOURCE_TTL_SECONDS
+    synchronized(viewImages) {
+      val now = nowMillis() / 1000
+      viewImages.entries.removeIf { it.value.second < now }
+      viewImages[key] = png to expiry
+    }
+    val encoded = URLEncoder.encode(uri, StandardCharsets.UTF_8)
+    return "$origin$IMAGE_URL_PATH?uri=$encoded&exp=$expiry&sig=${resourceSignature(uri, expiry)}" to
+      expiry
   }
 
   /**
@@ -2622,6 +2731,13 @@ class ServeCatalogMcp(
     const val IMAGE_URL_PATH = "/mcp/render.png"
     private const val IMAGE_URL_LINK_NAME = "Compose Preview render (https)"
 
+    /** The resource URI a kept `ui_builder_view` picture is signed under; see [viewImages]. */
+    private const val VIEW_URI_PREFIX = "compose-preview://ui-builder-view/"
+    private const val VIEW_LINK_NAME = "UI-builder view (https)"
+
+    /** How many view pictures are kept for their signed links at once. */
+    private const val MAX_VIEW_IMAGES = 32
+
     /**
      * Catalog tools that accept an `overrides` argument, so a link's overrides can be folded in.
      */
@@ -2637,6 +2753,7 @@ class ServeCatalogMcp(
         "diff_semantics",
         ServeUiBuilderMcp.EXPORT_DOCUMENT,
         ServeUiBuilderMcp.RENDER_NATIVE,
+        ServeUiBuilderMcp.VIEW,
       )
     private const val STORY_ID_SEPARATOR = "::"
     private val OBSERVATION_MODES =
