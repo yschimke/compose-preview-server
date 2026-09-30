@@ -83,6 +83,21 @@ data class ServeGithubAuthConfig(
    * every account is already a member, and this has nothing to do.
    */
   val allowGuests: Boolean = false,
+  /**
+   * `--github-auth-open-ui-builder`: every signed-in **member** may create, edit and export
+   * UI-builder designs, and pass those three capabilities on to an agent through an access grant,
+   * without write access to [repository].
+   *
+   * Without it, repository access is the bar for UI-builder writes on a box that names no members,
+   * so the builder is not an open book by default. This is the operator saying it should be: any
+   * GitHub account may make designs here. It opens the UI builder only — the playground and image
+   * uploads still ask about [repository] — and each design's own sharing still decides who may
+   * touch it. A guest ([allowGuests]) is not a member and stays read-only; for "any GitHub
+   * account", set this without [allowedUsers] or [allowedOrgs], where every account is a member.
+   *
+   * Decided per request, not baked into the session: turning it off takes effect at once.
+   */
+  val openUiBuilder: Boolean = false,
   val callbackBaseUrl: String? = null,
   /**
    * The domain the auth cookies are written for, so **one sign-in covers a parent host and every
@@ -552,6 +567,12 @@ class ServeGithubAuth(
     config.imageRepository?.takeIf { it.isNotBlank() } ?: config.repository
 
   fun isRestrictedToAllowedUsers(): Boolean = config.restrictsMembership
+
+  /**
+   * Whether any signed-in member may write UI-builder designs; see
+   * [ServeGithubAuthConfig.openUiBuilder].
+   */
+  fun opensUiBuilder(): Boolean = config.openUiBuilder
 
   private fun authorizeUrl(call: ApplicationCall, state: String): String {
     val params =

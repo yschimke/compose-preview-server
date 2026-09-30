@@ -617,6 +617,8 @@ public class ServeCommandOptions(
 
   override val githubAuthGuests: Boolean = "--github-auth-guests" in args
 
+  override val githubAuthOpenUiBuilder: Boolean = "--github-auth-open-ui-builder" in args
+
   /**
    * Agent access grants (`--agent-grants`): enable the device-grant flow at `/agent-access/…` so an
    * agent with no credential can ask for temporary, scoped, revocable access, and a human approves
@@ -1148,6 +1150,11 @@ public class ServeCommandOptions(
                           it, read-only, and can request edit access through an agent grant. A
                           guest counts as signed out
                           everywhere else — no live sessions, playground, uploads or approvals.
+        --github-auth-open-ui-builder
+                          Let every signed-in GitHub member create, edit and export UI-builder
+                          designs — and approve agent grants for those — without access to
+                          --github-auth-repo. Playground and image uploads still require it. With
+                          no --github-auth-users / --github-auth-orgs, that is any GitHub account.
         --agent-grants    Let an agent ask for temporary access it can't otherwise get. The agent
                           POSTs /agent-access/request and prints a link plus a verification code;
                           you open the link, check the code matches, and approve. It then collects a

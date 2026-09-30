@@ -533,6 +533,14 @@ public interface ServeOptions {
     get() = false
 
   /**
+   * `--github-auth-open-ui-builder`: every signed-in GitHub member may create, edit and export
+   * UI-builder designs, and approve agent grants for them, without repository access. See
+   * [ServeGithubAuthConfig.openUiBuilder].
+   */
+  public val githubAuthOpenUiBuilder: Boolean
+    get() = false
+
+  /**
    * Agent access grants (`--agent-grants`): enable the device-grant flow at `/agent-access/…` so an
    * agent with no credential can ask for temporary, scoped, revocable access, and a human approves
    * it from a link the agent prints. See

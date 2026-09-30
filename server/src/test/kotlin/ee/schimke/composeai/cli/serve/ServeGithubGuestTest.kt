@@ -88,6 +88,7 @@ class ServeGithubGuestTest {
     allowGuests: Boolean,
     allowedUsers: Set<String> = setOf("octo"),
     allowedOrgs: Set<String> = emptySet(),
+    openUiBuilder: Boolean = false,
   ): ServeHttpServer {
     val auth =
       ServeGithubAuth(
@@ -99,6 +100,7 @@ class ServeGithubGuestTest {
           allowedUsers = allowedUsers,
           allowedOrgs = allowedOrgs,
           allowGuests = allowGuests,
+          openUiBuilder = openUiBuilder,
         ),
         verifier = GitHubOAuthVerifier(fakeGitHub),
       )
@@ -316,6 +318,33 @@ class ServeGithubGuestTest {
     assertEquals(200, post(server, cookie, "github:octo", ListDesignsRequestV1()))
     val export = ExportDesignRequestV1("design", format = ExportFormatV1.SVG)
     assertEquals(401, post(server, cookie, "github:octo", export))
+  }
+
+  @Test
+  fun `an open UI builder lets any signed-in account write without the repository`() {
+    // `--github-auth-open-ui-builder` on a box that names nobody: every GitHub account is a
+    // member, and being one is now enough for the UI builder.
+    login = "stranger"
+    pushAccess = false
+    val server = server(allowGuests = false, allowedUsers = emptySet(), openUiBuilder = true)
+    val cookie = signIn(server).second!!
+
+    assertEquals(200, post(server, cookie, "github:stranger", ListDesignsRequestV1()))
+    val export = ExportDesignRequestV1("design", format = ExportFormatV1.SVG)
+    assertEquals(200, post(server, cookie, "github:stranger", export))
+    val identity =
+      json.decodeFromString(UiBuilderIdentityV1.serializer(), identity(server, cookie).second)
+    assertEquals(true, identity.canWrite)
+  }
+
+  @Test
+  fun `an open UI builder still leaves a guest read-only`() {
+    // A guest is not a member, so opening the builder to members opens nothing to it.
+    val server = server(allowGuests = true, openUiBuilder = true)
+    val cookie = signIn(server).second!!
+
+    val export = ExportDesignRequestV1("design", format = ExportFormatV1.SVG)
+    assertEquals(401, post(server, cookie, "github:stranger", export))
   }
 
   @Test
