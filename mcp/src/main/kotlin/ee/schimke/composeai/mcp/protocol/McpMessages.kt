@@ -67,6 +67,10 @@ data class ToolDef(
   val title: String? = null,
   /** MCP `icons` (2025-11-25): shown beside an entrypoint tool in host navigation. */
   val icons: List<ToolIcon>? = null,
+  /** MCP `outputSchema`: the shape of `structuredContent`, e.g. OpenAI's `SettingsReadResult`. */
+  val outputSchema: JsonObject? = null,
+  /** MCP `annotations.readOnlyHint`: true for a tool that never changes anything. */
+  val readOnlyHint: Boolean? = null,
 )
 
 /** One MCP `Icon`: a `src` URI (a `data:` URI for inline SVG), its type and sizes. */

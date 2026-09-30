@@ -531,6 +531,9 @@ class ServeCatalogMcp(
         EMPTY_SCHEMA,
       )
     )
+    // Sidebar apps (#1241): OpenAI global entrypoints opening the library MCP App.
+    add(ServeLibraryMcp.libraryTool(::tool))
+    if (uiBuilder != null) add(ServeLibraryMcp.uiBuilderOpenTool(::tool))
     add(
       tool(
         "list_previews",
@@ -742,6 +745,10 @@ class ServeCatalogMcp(
       }
       "status" -> textResult(statusJson().toString())
       "list_projects" -> textResult(projectsJson().toString())
+      ServeLibraryMcp.LIBRARY -> ServeLibraryMcp.libraryResult(libraryCatalogs(args))
+      ServeLibraryMcp.UI_BUILDER_OPEN ->
+        if (uiBuilder == null) toolError("unknown tool: $name")
+        else ServeLibraryMcp.uiBuilderOpenResult()
       "list_previews" -> textResult(previewsJson(requireCatalog("list_previews", args)).toString())
       "list_data_products" -> textResult(dataProductsJson(args).toString())
       "list-all-documentation" -> textResult(storiesJson().toString())
@@ -853,6 +860,7 @@ class ServeCatalogMcp(
           put("_meta", viewerResourceMeta())
         }
       )
+      add(ServeLibraryMcp.resourceDescriptor())
       // The UI-builder shapes, beside the viewer: static, public, and what an agent authoring a
       // document or a mutation batch needs before its first call rather than after its first
       // refusal.
@@ -906,6 +914,7 @@ class ServeCatalogMcp(
           }
         }
       }
+    if (uri == ServeLibraryMcp.RESOURCE_URI) return ServeLibraryMcp.readResource()
     if (uri == MCP_APP_VIEWER_URI) {
       return buildJsonObject {
         put(
@@ -1950,6 +1959,25 @@ class ServeCatalogMcp(
     }
   }
 
+  /**
+   * The catalogs for `catalog_library`: every one by its registry label, with previews where the
+   * registry already holds them without a lease, and `projectId`'s loaded (leased) on request.
+   */
+  private suspend fun libraryCatalogs(args: JsonObject): List<ServeLibraryMcp.Catalog> {
+    val selected = args.optionalString("projectId")
+    return catalogIds().map { catalog ->
+      val previews =
+        if (catalog == selected) withCatalog(catalog) { it.previews }
+        else peekCatalog(catalog).previews
+      ServeLibraryMcp.Catalog(
+        id = catalog,
+        label = peekCatalog(catalog).label,
+        previews =
+          previews?.map { ServeLibraryMcp.Preview(resourceUri(catalog, it.id), it.id, it.label) },
+      )
+    }
+  }
+
   private suspend fun statusJson(): JsonObject = buildJsonObject {
     put("schema", "compose-preview-mcp-status/v1")
     put("ready", true)
@@ -2931,6 +2959,7 @@ class ServeCatalogMcp(
 
     private val CATALOG_TOOL_NAMES =
       setOf(
+        ServeLibraryMcp.LIBRARY,
         "list_projects",
         "list_previews",
         "list_data_products",
@@ -3042,6 +3071,7 @@ class ServeCatalogMcp(
         // A signed override link is admitted without a grant; the handler verifies the signature
         // (or demands live scope) before it touches a catalog. See [signResourceUri].
         return uri != MCP_APP_VIEWER_URI &&
+          uri != ServeLibraryMcp.RESOURCE_URI &&
           UiBuilderJsonSchemas.byUri(uri.orEmpty()) == null &&
           (uri == null || !isSignedOverrideUri(uri))
       }

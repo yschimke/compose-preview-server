@@ -266,8 +266,14 @@ object DaemonMcpMain {
     return seconds.seconds
   }
 
-  private fun parseReplicasPerDaemon(args: Array<String>): Int {
-    // CLI flag wins over the system property; system property wins over the default. Negative
+  internal fun parseReplicasPerDaemon(
+    args: Array<String>,
+    settings: () -> PreviewSettings = {
+      PreviewSettingsStore(PreviewSettingsStore.defaultFile()).read()
+    },
+  ): Int {
+    // CLI flag wins over the system property; system property wins over the `replicasPerDaemon`
+    // setting (#1242; -1 there means unset), which wins over the default. Negative
     // or unparseable values fall back to the default with a stderr warning rather than crashing
     // the server — replication is non-load-bearing, so prefer "did something reasonable" to
     // refusing to start.
@@ -282,7 +288,10 @@ object DaemonMcpMain {
             else -> null
           }
         }
-    val raw = fromArgs ?: System.getProperty("composeai.mcp.replicasPerDaemon")
+    val raw =
+      fromArgs
+        ?: System.getProperty("composeai.mcp.replicasPerDaemon")
+        ?: settings().replicasPerDaemon.takeIf { it >= 0 }?.toString()
     val default = DaemonSupervisor.defaultReplicasFor(Runtime.getRuntime().availableProcessors())
     if (raw.isNullOrBlank()) return default
     val parsed = raw.toIntOrNull()

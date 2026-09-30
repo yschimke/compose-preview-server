@@ -832,7 +832,8 @@ class ServeAgentGrantRoutingTest {
         """{"jsonrpc":"2.0","id":2,"method":"resources/list","params":{}}""",
       )
     val resources = json(listed.second)["result"]!!.jsonObject["resources"]!!.jsonArray
-    assertEquals(3, resources.size)
+    // The viewer, the library app (#1241) and the two catalogs' previews.
+    assertEquals(4, resources.size)
     val uri =
       resources
         .single { it.jsonObject["uri"]!!.jsonPrimitive.content.contains("/demo/") }
