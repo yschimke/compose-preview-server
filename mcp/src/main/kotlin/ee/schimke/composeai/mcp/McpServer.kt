@@ -16,6 +16,7 @@ import io.modelcontextprotocol.kotlin.sdk.types.ElicitResult
 import io.modelcontextprotocol.kotlin.sdk.types.EmbeddedResource
 import io.modelcontextprotocol.kotlin.sdk.types.EmptyResult
 import io.modelcontextprotocol.kotlin.sdk.types.GetPromptRequest
+import io.modelcontextprotocol.kotlin.sdk.types.Icon
 import io.modelcontextprotocol.kotlin.sdk.types.ImageContent
 import io.modelcontextprotocol.kotlin.sdk.types.Implementation
 import io.modelcontextprotocol.kotlin.sdk.types.InitializeResult
@@ -56,6 +57,7 @@ import kotlin.time.Duration.Companion.milliseconds
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.io.asSink
 import kotlinx.io.asSource
@@ -406,7 +408,12 @@ internal fun installComposePreviewHandlers(
     }
   }
   sdkSession.setRequestHandler<CallToolRequest>(Method.Defined.ToolsCall) { request, _ ->
-    callTool(request.name, request.arguments, request.meta?.json?.get("progressToken"))
+    // The request's `_meta` rides in the coroutine context, so a tool that needs a host-injected
+    // key (OpenAI's `openai/resource.path`, see [OpenAiRequestMeta]) reads it without every tool
+    // signature growing a parameter.
+    withContext(OpenAiRequestMeta(request.meta?.json)) {
+        callTool(request.name, request.arguments, request.meta?.json?.get("progressToken"))
+      }
       .toSdkCallToolResult()
   }
   sdkSession.setRequestHandler<ListResourcesRequest>(Method.Defined.ResourcesList) { _, _ ->
@@ -450,6 +457,8 @@ internal fun ToolDef.toSdkTool(): Tool {
           },
       ),
     description = description,
+    title = title,
+    icons = icons?.map { Icon(src = it.src, mimeType = it.mimeType, sizes = it.sizes) },
     meta = meta,
   )
 }

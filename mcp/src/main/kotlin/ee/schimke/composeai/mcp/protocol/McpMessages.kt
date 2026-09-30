@@ -63,6 +63,18 @@ data class ToolDef(
   val description: String,
   val inputSchema: JsonElement,
   val meta: JsonObject? = null,
+  /** MCP `title`: the human-readable name a host shows, e.g. on an OpenAI entrypoint. */
+  val title: String? = null,
+  /** MCP `icons` (2025-11-25): shown beside an entrypoint tool in host navigation. */
+  val icons: List<ToolIcon>? = null,
+)
+
+/** One MCP `Icon`: a `src` URI (a `data:` URI for inline SVG), its type and sizes. */
+@Serializable
+data class ToolIcon(
+  val src: String,
+  val mimeType: String? = null,
+  val sizes: List<String>? = null,
 )
 
 @Serializable
