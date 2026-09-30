@@ -136,14 +136,15 @@ A `catalog_render_preview` PNG result also carries a plain `https` `resource_lin
 
 The endpoint implements Streamable HTTP MCP protocol versions `2025-06-18` and `2025-03-26`.
 Catalog calls remain independent by default: JSON-RPC messages use `POST`, notifications receive
-`202 Accepted`, and optional `GET`/SSE returns `405 Method Not Allowed`. A 2025 client that sends
-both Streamable HTTP media types and advertises form elicitation may receive an opaque
-`MCP-Session-Id` on `initialize`. A later request using that id may elicit: only at the moment a call sends
+`202 Accepted`, and optional `GET`/SSE returns `405 Method Not Allowed`. A client negotiating
+`2025-06-18` or `2025-11-25` that sends both Streamable HTTP media types and advertises form
+elicitation may receive an opaque `MCP-Session-Id` on `initialize`. A later request using that id may elicit: only at the moment a call sends
 `elicitation/create` does its POST switch to SSE, and the server then waits for the client's
 response on a second POST. A call that does not elicit answers with the same JSON body as the
 stateless path, so negotiating the scope changes nothing on the wire until a tool asks a question.
 The scope is bounded, expires after inactivity and can be closed with `DELETE`; it stores only the
-pending request correlation, never a design, grant, actor or authorization decision. Clients that
+pending request correlation and a fingerprint of the credential that asked, never a design, grant,
+actor or authorization decision. The three home decisions below are the calls that use it. Clients that
 do not negotiate this capability continue to receive the original JSON response mode with no
 session allocation.
 
@@ -251,6 +252,66 @@ the reply is the released `McpResponseEnvelopeV1` and the request shapes are the
    created as the person who approved the grant — so a session can clear its own litter and cannot
    reach anybody else's; a design whose owner no longer exists is still the operator's to remove
    through `/admin/ui-builder`.
+
+### Home decisions: a form when the client can answer one
+
+Three calls stop at a decision that belongs to the person rather than the agent (#1120, R3), and each
+one describes it as a `compose-preview-decision/v1` object listing `options` (`{id, label}`) and a
+`question`:
+
+| Call | `decision` | Options |
+| --- | --- | --- |
+| `ui_builder_replace_design_document` with `dryRun: true` | `save-back-or-reimport` | `save-back`, `create-new`, `discard`, `keep` |
+| `ui_builder_move_design_home` with `dryRun: true` | `move-design-home` | `move`, `cancel` |
+| `ui_builder_create_design` with a `document` whose `home` is an existing design here | `import-onto-existing-home` (a refusal, `isError`) | `apply-operations`, `create-new`, `cancel` |
+
+**Without a form** — a stateless client, a client that did not negotiate the request scope described
+under the transport, or one that declared only URL elicitation — the call returns that object as
+text, exactly as before, writes nothing, and the agent puts the choice to the person in chat.
+
+**With a form** — the client negotiated the request scope and declared form elicitation — the same
+call instead sends `elicitation/create` with the decision's `question` as the message and a
+`requestedSchema` of one required `choice` string whose `enum` is the option ids (`enumNames` are the
+labels), plus an optional `newDesignId` string wherever `create-new` is offered. Then:
+
+- **accept** with a write option performs exactly that write, as the call's own actor:
+  - `save-back` is the replace the dry run stood in for, with the same arguments and operation id,
+    so the same revision check and idempotency apply; `move` likewise for the home move;
+  - `create-new` creates the supplied document as a new design named `newDesignId`, its `home`
+    removed so it is homed here under the new id, through the ordinary create path — an id that
+    is already taken is refused as a tool error, never overwritten. A `create-new` without a
+    `newDesignId` (or naming the original) writes nothing and returns the decision text;
+  - the reply is that write's normal reply (an operation outcome or the new design's snapshot).
+- **accept** with `discard`, `keep` or `cancel` writes nothing and returns the decision plus
+  `"chosen": "<id>", "written": false` as a normal (non-error) result.
+- **accept** with `apply-operations` also writes nothing: turning two documents into operations is
+  the agent's job, so the reply records the choice and says to read the original with
+  `ui_builder_get_design` and send the differences through `ui_builder_apply` at the decision's
+  `baseRevision`.
+- **decline**, **cancel**, a malformed answer, an option that was not offered, or no answer within
+  the interaction timeout (two minutes) write nothing and return the decision text — for the import,
+  the refusal — byte for byte what a client without forms receives.
+
+The answer only ever selects among the options the call itself offered; it carries no authority.
+The write it selects runs inside the original call, with the actor that call authenticated and
+the capability it was already checked for (`ui-builder-write` for all three tools), so nothing
+the non-dry-run call could not do becomes reachable. Two further checks bind the answer to that
+call:
+
+- the POST carrying the answer must present the same transport credential (the
+  `X-Compose-Preview-Token`, `Authorization`, `?token=` and cookie material, compared as a SHA-256
+  fingerprint) as the POST that asked; a different or missing one is refused as an unknown
+  request and leaves the question pending for its real owner. A grant presented only in-band (the
+  `token` argument) cannot ride a JSON-RPC response, so such a call is bound by its session id —
+  192 random bits, handed only to the client that initialized — alone;
+- when an **accept** arrives, the same credential is authorized again for the same capability and
+  must still resolve to the same actor. A grant revoked or expired while the form was open turns
+  the answer into a timeout: nothing written, the decision text returned.
+
+Scopes, pending questions and fingerprints live in the memory of the one server process that
+issued them. An answer that reaches a different process (a restart, or another replica behind a
+load balancer) finds no such session and is refused `404`; the waiting call then times out and
+writes nothing.
 
 ### Seeing the design, not only reading it
 
@@ -577,7 +638,9 @@ that reaches the browser's Design API reaches these tools and nothing more.
 - Request bodies are capped at 1 MiB and responses disable caching.
 - Request scopes use cryptographically random ids, admit one pending interaction, are globally
   bounded, cap the complete send-and-wait interaction at two minutes, expire after five minutes of
-  inactivity and can be explicitly deleted.
+  inactivity and can be explicitly deleted. An answer must present the same transport credential
+  as the call that asked, and an accepted answer is re-authorized before it may write (see Home
+  decisions).
 - Catalog leases protect a catalog while a request is in flight.
 - Remote renders use the same server-wide semaphore and queue timeout as browser renders; enabling
   MCP does not create an unmetered rendering lane.
