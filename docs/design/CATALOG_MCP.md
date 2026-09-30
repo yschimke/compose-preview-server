@@ -135,9 +135,31 @@ The catalog's data tools carry a `catalog_` prefix (`catalog_render_preview`, `c
 A `catalog_render_preview` PNG result also carries a plain `https` `resource_link` (named `Compose Preview render (https)`, repeated as `structuredContent.imageUrl`) when this box has a public origin: `<origin>/mcp/render.png?uri=…&exp=…&sig=…`. Hosts that cannot show inline base64 or a `compose-preview://` URI (Antigravity's `<agent-embed>` cards, for one) can put it straight in an `<img>`. The URL needs no credential: the HMAC covers exactly one resource URI, overrides included, and expires after ten minutes, so it grants nothing beyond that image. It is minted only after a live-scope render, is absent on a box with no public origin, and a missing or forged signature is a 404.
 
 The endpoint implements Streamable HTTP MCP protocol versions `2025-06-18` and `2025-03-26`.
-Catalog calls are independent, so the server does not allocate sessions or advertise subscriptions:
-JSON-RPC messages use `POST`, notifications receive `202 Accepted`, and optional `GET`/SSE and
-`DELETE` operations return `405 Method Not Allowed`.
+Catalog calls remain independent by default: JSON-RPC messages use `POST`, notifications receive
+`202 Accepted`, and optional `GET`/SSE returns `405 Method Not Allowed`. A client negotiating
+`2025-06-18` or `2025-11-25` that sends both Streamable HTTP media types and advertises form
+elicitation may receive an opaque `MCP-Session-Id` on `initialize`. A later request using that id may elicit: only at the moment a call sends
+`elicitation/create` does its POST switch to SSE, and the server then waits for the client's
+response on a second POST. A call that does not elicit answers with the same JSON body as the
+stateless path, so negotiating the scope changes nothing on the wire until a tool asks a question.
+The scope is bounded, expires after inactivity and can be closed with `DELETE`; it stores only the
+pending request correlation and a fingerprint of the credential that asked, never a design, grant,
+actor or authorization decision. The three home decisions below are the calls that use it. Clients that
+do not negotiate this capability continue to receive the original JSON response mode with no
+session allocation.
+
+The session id is a hint, never a requirement. A request whose id is unknown, expired or evicted,
+or whose `MCP-Protocol-Version` differs from the negotiated one, is served on the stateless JSON
+path instead of answering `404`/`400`: idle expiry, eviction and a server restart must not break a
+client that has been working statelessly all along. It only loses elicitation, and every tool keeps
+its text fallback. A full registry evicts its least recently used idle scope (and, if every scope
+is waiting on a person, simply issues no id), because `initialize` is ungated and an anonymous
+caller must not be able to lock legitimate clients out.
+
+This is a compatibility path for the negotiated 2025 protocols and the current Kotlin MCP SDK.
+When the server and target clients move to the 2026 protocol generation, task-level
+`input_required` plus `inputResponses`/`requestState` should replace this request-scoped rendezvous;
+that protocol/SDK migration is deliberately not bundled into the compatibility transport.
 
 | Operation | Access | Purpose |
 | --- | --- | --- |
@@ -230,6 +252,66 @@ the reply is the released `McpResponseEnvelopeV1` and the request shapes are the
    created as the person who approved the grant — so a session can clear its own litter and cannot
    reach anybody else's; a design whose owner no longer exists is still the operator's to remove
    through `/admin/ui-builder`.
+
+### Home decisions: a form when the client can answer one
+
+Three calls stop at a decision that belongs to the person rather than the agent (#1120, R3), and each
+one describes it as a `compose-preview-decision/v1` object listing `options` (`{id, label}`) and a
+`question`:
+
+| Call | `decision` | Options |
+| --- | --- | --- |
+| `ui_builder_replace_design_document` with `dryRun: true` | `save-back-or-reimport` | `save-back`, `create-new`, `discard`, `keep` |
+| `ui_builder_move_design_home` with `dryRun: true` | `move-design-home` | `move`, `cancel` |
+| `ui_builder_create_design` with a `document` whose `home` is an existing design here | `import-onto-existing-home` (a refusal, `isError`) | `apply-operations`, `create-new`, `cancel` |
+
+**Without a form** — a stateless client, a client that did not negotiate the request scope described
+under the transport, or one that declared only URL elicitation — the call returns that object as
+text, exactly as before, writes nothing, and the agent puts the choice to the person in chat.
+
+**With a form** — the client negotiated the request scope and declared form elicitation — the same
+call instead sends `elicitation/create` with the decision's `question` as the message and a
+`requestedSchema` of one required `choice` string whose `enum` is the option ids (`enumNames` are the
+labels), plus an optional `newDesignId` string wherever `create-new` is offered. Then:
+
+- **accept** with a write option performs exactly that write, as the call's own actor:
+  - `save-back` is the replace the dry run stood in for, with the same arguments and operation id,
+    so the same revision check and idempotency apply; `move` likewise for the home move;
+  - `create-new` creates the supplied document as a new design named `newDesignId`, its `home`
+    removed so it is homed here under the new id, through the ordinary create path — an id that
+    is already taken is refused as a tool error, never overwritten. A `create-new` without a
+    `newDesignId` (or naming the original) writes nothing and returns the decision text;
+  - the reply is that write's normal reply (an operation outcome or the new design's snapshot).
+- **accept** with `discard`, `keep` or `cancel` writes nothing and returns the decision plus
+  `"chosen": "<id>", "written": false` as a normal (non-error) result.
+- **accept** with `apply-operations` also writes nothing: turning two documents into operations is
+  the agent's job, so the reply records the choice and says to read the original with
+  `ui_builder_get_design` and send the differences through `ui_builder_apply` at the decision's
+  `baseRevision`.
+- **decline**, **cancel**, a malformed answer, an option that was not offered, or no answer within
+  the interaction timeout (two minutes) write nothing and return the decision text — for the import,
+  the refusal — byte for byte what a client without forms receives.
+
+The answer only ever selects among the options the call itself offered; it carries no authority.
+The write it selects runs inside the original call, with the actor that call authenticated and
+the capability it was already checked for (`ui-builder-write` for all three tools), so nothing
+the non-dry-run call could not do becomes reachable. Two further checks bind the answer to that
+call:
+
+- the POST carrying the answer must present the same transport credential (the
+  `X-Compose-Preview-Token`, `Authorization`, `?token=` and cookie material, compared as a SHA-256
+  fingerprint) as the POST that asked; a different or missing one is refused as an unknown
+  request and leaves the question pending for its real owner. A grant presented only in-band (the
+  `token` argument) cannot ride a JSON-RPC response, so such a call is bound by its session id —
+  192 random bits, handed only to the client that initialized — alone;
+- when an **accept** arrives, the same credential is authorized again for the same capability and
+  must still resolve to the same actor. A grant revoked or expired while the form was open turns
+  the answer into a timeout: nothing written, the decision text returned.
+
+Scopes, pending questions and fingerprints live in the memory of the one server process that
+issued them. An answer that reaches a different process (a restart, or another replica behind a
+load balancer) finds no such session and is refused `404`; the waiting call then times out and
+writes nothing.
 
 ### Seeing the design, not only reading it
 
@@ -342,14 +424,12 @@ brief behind it without a second call. Read it on its own with `ui_builder_get_l
 with `ui_builder_set_links`, which replaces the whole record.
 [`UI_BUILDER_LINKS.md`](UI_BUILDER_LINKS.md) has the record and its routes.
 
-**Why a blocking call and not an MCP notification.** MCP has server-to-client notifications, and this
-endpoint deliberately cannot send one: `/mcp` is stateless JSON-RPC, `GET /mcp` — the
-Streamable-HTTP listening stream a notification travels on — answers `405`, and `initialize`
-advertises `resources: {"subscribe": false}` rather than claiming otherwise. Honouring
-`resources/subscribe` would mean session ids, a per-session SSE stream, resumability and
-server-held subscription state: a stateful transport, which is the property this endpoint is built
-not to have. A call that blocks needs none of it, and it is the shape `poll_access` already uses
-here.
+**Why a blocking call and not an MCP notification.** MCP has server-to-client notifications, but
+this endpoint does not advertise subscriptions: `GET /mcp` answers `405`, and `initialize`
+advertises `resources: {"subscribe": false}`. The optional elicitation scope does not change that:
+its SSE stream belongs to one in-flight POST, closes with that request's final response and has no
+resumable notification cursor. A blocking call still needs none of it, and it is the shape
+`poll_access` already uses here.
 
 Presence never wakes `ui_builder_await_design`. Who is looking at a design, and what they have
 selected, is excluded by design from the document, the revision and the durable sequence; waking an
@@ -537,16 +617,15 @@ One endpoint, two authorization vocabularies:
 
 | Surface | Endpoint/transport | Authorization | State model |
 | --- | --- | --- | --- |
-| Catalog tools | `/mcp`, Streamable HTTP | `preview` / `live` scopes | Stateless aggregate catalog queries and renders |
-| UI-builder tools | `/mcp`, same transport | `ui-builder-read`, `ui-builder-write`, `ui-builder-export` capabilities | Stateless per call; a design's revision is carried explicitly as `baseRevision` |
+| Catalog tools | `/mcp`, Streamable HTTP | `preview` / `live` scopes | Independent calls; optional bounded request scope for 2025 elicitation |
+| UI-builder tools | `/mcp`, same transport | `ui-builder-read`, `ui-builder-write`, `ui-builder-export` capabilities | Explicit `baseRevision`; optional request-scoped elicitation carries no design state |
 
-This was planned as a separate sidecar on a path of its own, with a stateful session. It is one
-endpoint instead, and the session is stateless, for two reasons. An agent already holds exactly one
-bearer for the box, and a second endpoint would have meant a second origin check, a second body cap
-and a second place for the two to drift about what a grant means. And the stateful session it would
-have kept turned out to buy nothing: the Design API already carries the revision in the request, so
-`baseRevision` does the work a session cursor would have done, and does it in a form a retry can
-repeat.
+This was planned as a separate sidecar on a path of its own, with authoritative state in a session.
+It is one endpoint instead. An agent already holds exactly one bearer for the box, and a second
+endpoint would have meant a second origin check, a second body cap and a second place for the two to
+drift about what a grant means. The Design API carries its revision explicitly, so `baseRevision`
+does the work an application session cursor would have done in a form a retry can repeat. The small
+transport scope used by elicitation is only a response rendezvous and never replaces that rule.
 
 What did not change is the capability model. `ui-builder-read`, `ui-builder-write` and
 `ui-builder-export` are checked per call through the same mapping the HTTP routes use, so a grant
@@ -557,6 +636,11 @@ that reaches the browser's Design API reaches these tools and nothing more.
 - Browser-originated MCP calls must have an `Origin` matching the request host, limiting DNS
   rebinding attacks. Non-browser clients normally omit `Origin`.
 - Request bodies are capped at 1 MiB and responses disable caching.
+- Request scopes use cryptographically random ids, admit one pending interaction, are globally
+  bounded, cap the complete send-and-wait interaction at two minutes, expire after five minutes of
+  inactivity and can be explicitly deleted. An answer must present the same transport credential
+  as the call that asked, and an accepted answer is re-authorized before it may write (see Home
+  decisions).
 - Catalog leases protect a catalog while a request is in flight.
 - Remote renders use the same server-wide semaphore and queue timeout as browser renders; enabling
   MCP does not create an unmetered rendering lane.

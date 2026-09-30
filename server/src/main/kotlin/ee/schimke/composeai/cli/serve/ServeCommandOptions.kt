@@ -1162,7 +1162,7 @@ public class ServeCommandOptions(
                           signed-in GitHub user (with --github-auth-*) or the --token holder; a
                           --public server with neither is refused. Revoke any time from /status.
                           Off by default.
-        --catalog-mcp     Expose all catalogs at /mcp using stateless Streamable HTTP.
+        --catalog-mcp     Expose all catalogs at /mcp using Streamable HTTP.
                           Requires --agent-grants. Published reads need preview scope; made-to-order
                           renders and data products need live scope. Separate from UI-builder MCP.
         --agent-grant-scopes <list>
