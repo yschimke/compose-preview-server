@@ -359,7 +359,7 @@ class ServeWebFixtureTest {
         RcCompareLane("js", "RC · JS player", "js"),
         RcCompareLane("embedded", "AndroidX Embedded · vendored Android", "vendored"),
         RcCompareLane("androidx-embedded", "AndroidX Embedded · androidx.dev", "androidx.dev"),
-        RcCompareLane("cmp-jvm", "RC · cmp-jvm player", "cmp-jvm"),
+        RcCompareLane("cmp-jvm", "rc-player JVM", "jvm"),
         RcCompareLane("cmp-wasm", "RC · cmp-wasm player", "cmp-wasm"),
       )
     val kept = allLanes.filter { lanes == null || it.id in lanes }
@@ -4774,7 +4774,7 @@ class ServeWebFixtureTest {
         "RC · JS player",
         "AndroidX Embedded · vendored Android",
         "AndroidX Embedded · androidx.dev",
-        "RC · cmp-jvm player",
+        "rc-player JVM",
         "RC · cmp-wasm player",
       ),
       Regex("<th>([^<]+)</th>")
@@ -4827,7 +4827,7 @@ class ServeWebFixtureTest {
       listOf(
         "AndroidX Embedded · vendored Android",
         "AndroidX Embedded · androidx.dev",
-        "RC · cmp-jvm player",
+        "rc-player JVM",
       ),
       Regex("<span class=\"cp-rc-absent-lane\">([^<]+)</span>")
         .findAll(rcLanesPartialComparison)
@@ -4850,7 +4850,7 @@ class ServeWebFixtureTest {
       listOf(
         "AndroidX Embedded · baked",
         "RC · JS player",
-        "RC · cmp-jvm player",
+        "rc-player JVM",
         "RC · cmp-wasm player",
         // Last, and deliberately: the offline pipeline has no `java` column, so this lane cannot
         // claim a position in an order it is not part of.

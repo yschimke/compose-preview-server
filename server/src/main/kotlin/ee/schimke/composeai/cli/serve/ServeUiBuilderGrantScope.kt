@@ -6,6 +6,10 @@ import ee.schimke.composeai.uibuilder.service.UiBuilderAssetPort
 import ee.schimke.composeai.uibuilder.service.UiBuilderAssetRead
 import ee.schimke.composeai.uibuilder.service.UiBuilderAssetReadResult
 import ee.schimke.composeai.uibuilder.service.UiBuilderAssetWrite
+import ee.schimke.composeai.uibuilder.service.UiBuilderBranchCall
+import ee.schimke.composeai.uibuilder.service.UiBuilderBranchPort
+import ee.schimke.composeai.uibuilder.service.UiBuilderBranchRequest
+import ee.schimke.composeai.uibuilder.service.UiBuilderBranchResponse
 import ee.schimke.composeai.uibuilder.service.UiBuilderServiceCall
 import ee.schimke.composeai.uibuilder.service.UiBuilderServicePort
 import ee.schimke.composeai.uibuilder.service.UiBuilderServiceRequest
@@ -13,6 +17,7 @@ import ee.schimke.composeai.uibuilder.service.UiBuilderServiceResponse
 import ee.schimke.composeai.uibuilder.service.UiBuilderServiceUpdate
 import ee.schimke.composeai.uibuilder.service.UiBuilderSubscriptionCall
 import java.io.Closeable
+import kotlinx.coroutines.runBlocking
 
 /**
  * Holds a grant that names its designs ([ServeAgentGrantStore.Grant.designIds]) to those designs.
@@ -33,6 +38,14 @@ import java.io.Closeable
  * Listing is the one request that is about many designs. A limited holder's listing is its own,
  * with the named designs it can reach through the grant added on the first page, so the design it
  * asked for is where it expects to find it.
+ *
+ * **A grant on a design reaches its branches** (yschimke/compose-ui-builder#377). A branch is a
+ * design with its own id, whose access list *is* its parent's, so a grant naming the parent lends
+ * the approver's access to every branch of it — to read, edit, merge or archive the alternatives
+ * being explored for the design it was given. The runtime is the only record of which design a
+ * branch came from, so a call about a design the grant does not name asks it ([Parents]) before the
+ * delegation is dropped. A branch whose parent the grant does not name is treated like any other
+ * unnamed design.
  */
 internal object ServeUiBuilderGrantScope {
 
@@ -46,6 +59,31 @@ internal object ServeUiBuilderGrantScope {
 
   fun lookupOf(store: ServeAgentGrantStore): Lookup = Lookup(store::designScopeFor)
 
+  /**
+   * The design [designId] was branched from, as [actor] may see it, or null when it is not a branch
+   * (or not one [actor] may read). Asked only for a design a limited grant does not name.
+   */
+  fun interface Parents {
+    suspend fun parentOf(actor: AuthenticatedUiBuilderActor, designId: String): String?
+  }
+
+  /**
+   * [Parents] read from the runtime's own branch records (`GetBranch`), never cached: a deleted
+   * branch's id can be reused by an unrelated design, and a remembered parent would then lend a
+   * grant to it.
+   */
+  fun parentsOf(branches: UiBuilderBranchPort): Parents = Parents { actor, designId ->
+    when (
+      val response =
+        branches.executeBranch(
+          UiBuilderBranchCall(actor, UiBuilderBranchRequest.GetBranch(designId))
+        )
+    ) {
+      is UiBuilderBranchResponse.Branch -> response.branch.parentDesignId
+      else -> null
+    }
+  }
+
   /** [actor], with its delegation kept only when [designId] is one its grant names. */
   fun actorFor(
     actor: AuthenticatedUiBuilderActor,
@@ -57,12 +95,35 @@ internal object ServeUiBuilderGrantScope {
     return if (designId != null && designId in designs) actor else actor.withoutDelegation()
   }
 
-  fun limit(delegate: UiBuilderServicePort, lookup: Lookup): UiBuilderServicePort =
+  /**
+   * [actorFor], except that a design the grant does not name keeps the delegation when it is a
+   * branch of one the grant does name — see the class comment.
+   */
+  suspend fun scopedActor(
+    actor: AuthenticatedUiBuilderActor,
+    designId: String?,
+    lookup: Lookup,
+    parents: Parents?,
+  ): AuthenticatedUiBuilderActor {
+    val scoped = actorFor(actor, designId, lookup)
+    if (scoped === actor || designId == null || parents == null) return scoped
+    val designs = lookup.designsFor(actor.actorId, actor.onBehalfOfActorId!!) ?: return actor
+    // Asked as the delegated actor: a branch's access list is its parent's, so the approver reads
+    // the branch exactly when they read the design the grant names.
+    val parent = parents.parentOf(actor, designId)
+    return if (parent != null && parent in designs) actor else scoped
+  }
+
+  fun limit(
+    delegate: UiBuilderServicePort,
+    lookup: Lookup,
+    parents: Parents? = null,
+  ): UiBuilderServicePort =
     object : UiBuilderServicePort {
       override suspend fun execute(call: UiBuilderServiceCall): UiBuilderServiceResponse {
         val request = call.request
         if (request is UiBuilderServiceRequest.ListDesigns) return list(call, request)
-        val actor = actorFor(call.actor, request.designId(), lookup)
+        val actor = scopedActor(call.actor, request.designId(), lookup, parents)
         return delegate.execute(if (actor === call.actor) call else call.copy(actor = actor))
       }
 
@@ -70,7 +131,12 @@ internal object ServeUiBuilderGrantScope {
         call: UiBuilderSubscriptionCall,
         listener: (UiBuilderServiceUpdate) -> Unit,
       ): Closeable {
-        val actor = actorFor(call.actor, call.designId, lookup)
+        val direct = actorFor(call.actor, call.designId, lookup)
+        // The port's subscribe is not suspending; the branch lookup is one short read under the
+        // service lock, taken only for a limited grant on a design it does not name.
+        val actor =
+          if (direct === call.actor || parents == null) direct
+          else runBlocking { scopedActor(call.actor, call.designId, lookup, parents) }
         return delegate.subscribe(
           if (actor === call.actor) call else call.copy(actor = actor),
           listener,
@@ -99,10 +165,14 @@ internal object ServeUiBuilderGrantScope {
       }
     }
 
-  fun limit(delegate: UiBuilderAssetPort, lookup: Lookup): UiBuilderAssetPort =
+  fun limit(
+    delegate: UiBuilderAssetPort,
+    lookup: Lookup,
+    parents: Parents? = null,
+  ): UiBuilderAssetPort =
     object : UiBuilderAssetPort {
       override suspend fun putAsset(write: UiBuilderAssetWrite): UiBuilderServiceResponse {
-        val actor = actorFor(write.actor, write.designId, lookup)
+        val actor = scopedActor(write.actor, write.designId, lookup, parents)
         return delegate.putAsset(
           if (actor === write.actor) write
           else UiBuilderAssetWrite(actor, write.designId, write.assetKey, write.bytes)
@@ -110,7 +180,27 @@ internal object ServeUiBuilderGrantScope {
       }
 
       override suspend fun readAsset(read: UiBuilderAssetRead): UiBuilderAssetReadResult =
-        delegate.readAsset(read.copy(actor = actorFor(read.actor, read.designId, lookup)))
+        delegate.readAsset(
+          read.copy(actor = scopedActor(read.actor, read.designId, lookup, parents))
+        )
+    }
+
+  /**
+   * The branch lane under the same limit. A request about a parent (create, list) is scoped to that
+   * parent; one about a branch (get, archive, merge) to the branch, which [scopedActor] resolves to
+   * its parent — so a grant on a design may branch it, list its branches, and merge or archive
+   * them, and nothing else.
+   */
+  fun limit(
+    delegate: UiBuilderBranchPort,
+    lookup: Lookup,
+    parents: Parents? = parentsOf(delegate),
+  ): UiBuilderBranchPort =
+    object : UiBuilderBranchPort {
+      override suspend fun executeBranch(call: UiBuilderBranchCall): UiBuilderBranchResponse {
+        val actor = scopedActor(call.actor, call.request.designId(), lookup, parents)
+        return delegate.executeBranch(if (actor === call.actor) call else call.copy(actor = actor))
+      }
     }
 
   /**
@@ -132,6 +222,16 @@ internal object ServeUiBuilderGrantScope {
     } while (cursor != null && found.size < designIds.size)
     return found
   }
+
+  /** The design a branch request names: the parent to branch or list, or the branch itself. */
+  internal fun UiBuilderBranchRequest.designId(): String =
+    when (this) {
+      is UiBuilderBranchRequest.CreateBranch -> designId
+      is UiBuilderBranchRequest.ListBranches -> designId
+      is UiBuilderBranchRequest.GetBranch -> branchId
+      is UiBuilderBranchRequest.ArchiveBranch -> branchId
+      is UiBuilderBranchRequest.MergeBranch -> branchId
+    }
 
   private fun AuthenticatedUiBuilderActor.withoutDelegation(): AuthenticatedUiBuilderActor =
     AuthenticatedUiBuilderActor(actorId)

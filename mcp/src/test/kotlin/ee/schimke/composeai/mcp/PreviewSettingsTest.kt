@@ -151,6 +151,10 @@ class PreviewSettingsTest {
     assertThat(update(PreviewSettings.DARK_THEME to JsonPrimitive("true")).isError).isTrue()
     assertThat(update(PreviewSettings.LOCALE to JsonPrimitive("not a locale")).isError).isTrue()
     assertThat(update(PreviewSettings.REPLICAS_PER_DAEMON to JsonPrimitive(1.5)).isError).isTrue()
+    assertThat(update(PreviewSettings.UI_BUILDER_MCP_APP_LAYOUT to JsonPrimitive("wide")).isError)
+      .isTrue()
+    assertThat(update(PreviewSettings.UI_BUILDER_MCP_APP_LAYOUT to JsonPrimitive(true)).isError)
+      .isTrue()
     assertThat(update("nope" to JsonPrimitive(1)).isError).isTrue()
     assertThat(update().isError).isTrue()
     // One bad key rejects the whole update.

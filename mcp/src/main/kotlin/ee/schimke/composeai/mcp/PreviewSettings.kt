@@ -53,6 +53,12 @@ data class PreviewSettings(
   val imageToModel: Boolean = true,
   /** Sandbox replicas per daemon; `-1` picks from the machine's cores. Read at server start. */
   val replicasPerDaemon: Int = -1,
+  /**
+   * How the `.uid` editor (`design_open`) opens: [LAYOUT_FOCUSED], just the canvas and a slim file
+   * bar, or [LAYOUT_FULL], the whole desktop editor (compose-ui-builder#378). Read each time the
+   * editor resource is read, so a change applies to the next design opened.
+   */
+  val uiBuilderMcpAppLayout: String = LAYOUT_FOCUSED,
 ) {
   /** The effective values, keyed as in [PreviewSettingsSchema.properties]. */
   fun toJson(): JsonObject = buildJsonObject {
@@ -63,6 +69,7 @@ data class PreviewSettings(
     put(RENDER_RESULT, renderResult)
     put(IMAGE_TO_MODEL, imageToModel)
     put(REPLICAS_PER_DAEMON, replicasPerDaemon)
+    put(UI_BUILDER_MCP_APP_LAYOUT, uiBuilderMcpAppLayout)
   }
 
   /**
@@ -156,6 +163,13 @@ data class PreviewSettings(
             ?.takeIf { it in -1..MAX_REPLICAS }
             ?.let { next = next.copy(replicasPerDaemon = it) }
             ?: bad("an integer from -1 to $MAX_REPLICAS")
+        UI_BUILDER_MCP_APP_LAYOUT ->
+          value
+            ?.takeIf { it.isString }
+            ?.content
+            ?.takeIf { it in LAYOUT_VALUES }
+            ?.let { next = next.copy(uiBuilderMcpAppLayout = it) }
+            ?: bad("one of ${LAYOUT_VALUES.joinToString()}")
         else -> problems.add("$key: unknown setting")
       }
     }
@@ -171,6 +185,7 @@ data class PreviewSettings(
     const val RENDER_RESULT: String = "renderResult"
     const val IMAGE_TO_MODEL: String = "imageToModel"
     const val REPLICAS_PER_DAEMON: String = "replicasPerDaemon"
+    const val UI_BUILDER_MCP_APP_LAYOUT: String = "uiBuilderMcpAppLayout"
 
     /** [device] value that keeps each preview's own device. */
     const val PREVIEW_DEVICE: String = "preview"
@@ -179,6 +194,12 @@ data class PreviewSettings(
     const val RESULT_INLINE: String = "inline"
     const val RESULT_FILE: String = "file"
     val RESULT_VALUES: List<String> = listOf(RESULT_AUTO, RESULT_INLINE, RESULT_FILE)
+
+    /** [uiBuilderMcpAppLayout]: the canvas and a file bar; the default. */
+    const val LAYOUT_FOCUSED: String = "focused"
+    /** [uiBuilderMcpAppLayout]: the whole desktop editor. */
+    const val LAYOUT_FULL: String = "full"
+    val LAYOUT_VALUES: List<String> = listOf(LAYOUT_FOCUSED, LAYOUT_FULL)
 
     const val MAX_FONT_SCALE: Double = 3.0
     const val MAX_REPLICAS: Int = 8

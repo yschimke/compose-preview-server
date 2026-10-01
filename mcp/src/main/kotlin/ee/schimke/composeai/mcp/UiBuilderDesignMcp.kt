@@ -23,8 +23,8 @@ import kotlinx.serialization.json.putJsonObject
  * with `openai/resources/write` and `ifMatch`, and subscribes for external edits — so this server
  * only has to:
  * 1. declare the tool, with `FileInput` and a `[".uid"]` file entrypoint, and acknowledge the call;
- * 2. serve the archive's MCP App shell with its one placeholder, the asset base, filled in, and the
- *    asset origin in its CSP; and
+ * 2. serve the archive's MCP App shell with its placeholders filled in — the asset base, and the
+ *    layout from the `uiBuilderMcpAppLayout` setting — and the asset origin in its CSP; and
  * 3. serve the editor's files from that origin ([UiBuilderAssetOrigin]).
  *
  * **Model calls with `{path}` are deliberately not offered.** The editor reads its file only from
@@ -58,18 +58,28 @@ internal constructor(
       )
     )
 
-  /** The shell for [EDITOR_URI], starting the asset origin; null for any other URI. */
-  fun readResource(uri: String): ReadResourceResult? {
+  /**
+   * The shell for [EDITOR_URI], starting the asset origin; null for any other URI.
+   *
+   * [layout] is the `uiBuilderMcpAppLayout` setting, substituted on every read so a changed setting
+   * applies to the next design opened. Anything but [PreviewSettings.LAYOUT_FULL] is passed as
+   * [PreviewSettings.LAYOUT_FOCUSED], which is also what the editor reads an unfilled placeholder
+   * as (compose-ui-builder#378).
+   */
+  fun readResource(uri: String, layout: String? = null): ReadResourceResult? {
     if (uri != EDITOR_URI) return null
     val base = assets.base().toString()
     val origin = assets.origin()
+    val mode =
+      if (layout == PreviewSettings.LAYOUT_FULL) PreviewSettings.LAYOUT_FULL
+      else PreviewSettings.LAYOUT_FOCUSED
     return ReadResourceResult(
       contents =
         listOf(
           ResourceContents.Text(
             uri = uri,
             mimeType = MCP_APP_MIME_TYPE,
-            text = shell.replace(ASSET_BASE_PLACEHOLDER, base),
+            text = shell.replace(ASSET_BASE_PLACEHOLDER, base).replace(LAYOUT_PLACEHOLDER, mode),
             meta = resourceMeta(origin),
           )
         )
@@ -168,6 +178,12 @@ internal constructor(
 
     /** The one placeholder `mcpApp` 1 says a server fills in: the absolute asset base URL. */
     const val ASSET_BASE_PLACEHOLDER: String = "__COMPOSE_UI_BUILDER_ASSET_BASE__"
+
+    /**
+     * `focused` or `full` (compose-ui-builder#378). Optional within `mcpApp` 1: an archive that
+     * predates it has no such placeholder, and a shell left unfilled opens focused.
+     */
+    const val LAYOUT_PLACEHOLDER: String = "__COMPOSE_UI_BUILDER_MCP_APP_LAYOUT__"
 
     /**
      * The `mcpApp` contracts this server fills in. compose-ui-builder bumps the number only for a
