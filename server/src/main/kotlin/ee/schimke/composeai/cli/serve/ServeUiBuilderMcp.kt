@@ -35,6 +35,7 @@ import ee.schimke.composeai.uibuilder.protocol.SlotCapabilityV1
 import ee.schimke.composeai.uibuilder.protocol.ThemeV1
 import ee.schimke.composeai.uibuilder.protocol.UiBuilderRequestV1
 import ee.schimke.composeai.uibuilder.protocol.UpdateDesignAccessRequestV1
+import ee.schimke.composeai.uibuilder.reference.ReferenceFit
 import ee.schimke.composeai.uibuilder.service.AuthenticatedUiBuilderActor
 import ee.schimke.composeai.uibuilder.service.ProtocolRequestMapping
 import ee.schimke.composeai.uibuilder.service.UiBuilderAssetPort
@@ -63,6 +64,7 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.doubleOrNull
 import kotlinx.serialization.json.encodeToJsonElement
 import kotlinx.serialization.json.floatOrNull
 import kotlinx.serialization.json.jsonObject
@@ -198,6 +200,10 @@ class ServeUiBuilderMcp(
   val supportsLinks: Boolean
     get() = links != null
 
+  /** Whether this host keeps reference overlays, and so whether the reference tools exist. */
+  val supportsReferences: Boolean
+    get() = references != null
+
   /** Whether this host can check a design without saving it, and so whether [VALIDATE] exists. */
   val supportsValidation: Boolean
     get() = validator != null
@@ -264,6 +270,10 @@ class ServeUiBuilderMcp(
       // is exactly as much as the design it is beside says about the work it belongs to.
       GET_LINKS -> if (links == null) null else UiBuilderRouteCapability.READ
       SET_LINKS -> if (links == null) null else UiBuilderRouteCapability.WRITE
+      // The reference overlay is gated as the browser's reference routes are: attaching one is
+      // the design's own write, measuring against it the design's read.
+      SET_REFERENCE -> if (references == null) null else UiBuilderRouteCapability.WRITE
+      COMPARE_REFERENCE -> if (references == null) null else UiBuilderRouteCapability.READ
       // The same capability as an export, and for the same reason: a native render compiles and
       // runs the Kotlin an export hands back, so an actor who may not read that source may not
       // run it. It stays discoverable on a host that cannot compile: the call then returns the
@@ -303,6 +313,9 @@ class ServeUiBuilderMcp(
   fun additionalCapabilityFor(tool: String, args: JsonObject): UiBuilderRouteCapability? =
     when {
       tool == VIEW && args.text(RENDERER_ARGUMENT) == ServeUiBuilderView.RENDERER_NATIVE ->
+        UiBuilderRouteCapability.EXPORT
+      // Matching layers measures the native render, which compiles Kotlin as [VIEW]'s does.
+      tool == COMPARE_REFERENCE && args.referenceRenderer() == ServeUiBuilderView.RENDERER_NATIVE ->
         UiBuilderRouteCapability.EXPORT
       // Measuring touch targets on a real render compiles the design's Kotlin, as [RENDER_NATIVE]
       // does, and the same grant gates it.
@@ -420,6 +433,8 @@ class ServeUiBuilderMcp(
         SET_IMPLEMENTATION,
         IMPLEMENTATION_STATUS -> return reviewTool(tool, args, actor)
         FIND_DESIGN_FOR_PR -> return findDesignForPr(args, actor)
+        SET_REFERENCE -> return setReference(args, actor)
+        COMPARE_REFERENCE -> return compareReference(args, actor)
         in ServeUiBuilderHistoryTools.TOOL_NAMES -> return history.call(tool, args, actor)
         in ServeUiBuilderBranchTools.TOOL_NAMES ->
           return (branchTools
@@ -1152,6 +1167,179 @@ class ServeUiBuilderMcp(
         throw McpRequestException(refused.message ?: "the view could not be drawn")
       }
     return UI_BUILDER_JSON.encodeToString(UiBuilderViewV1.serializer(), view)
+  }
+
+  /** The render [COMPARE_REFERENCE] measures: as asked, else native exactly when layers are. */
+  private fun JsonObject.referenceRenderer(): String =
+    text(RENDERER_ARGUMENT)
+      ?: if (this[NODE_IDS_ARGUMENT].let { it is JsonArray && it.isNotEmpty() }) {
+        ServeUiBuilderView.RENDERER_NATIVE
+      } else ServeUiBuilderView.RENDERER_EXPORT
+
+  /**
+   * The design [designId] as this actor may see it, and whether they may also change it.
+   *
+   * The tool capability got the call through the door; the design's own access decides the rest, as
+   * it does for the browser's reference routes — a viewer may measure, only an editor attaches.
+   */
+  private suspend fun referenceDesign(
+    designId: String,
+    revision: Long?,
+    actor: AuthenticatedUiBuilderActor,
+    write: Boolean,
+  ): DesignDocumentV1 {
+    val actions =
+      service.designActions(actor, designId)
+        ?: throw McpRequestException("no design `$designId` this actor can read")
+    if (write && !actions.contains(DesignAccessActionV1.WRITE)) {
+      throw McpRequestException("design `$designId` does not grant this actor write access")
+    }
+    val snapshot =
+      execute(GetSnapshotRequestV1(designId = designId, revision = revision), actor)
+        as? UiBuilderServiceResponse.Snapshot
+        ?: throw McpRequestException("no design `$designId` this actor can read")
+    return snapshot.snapshot.state.document
+  }
+
+  /** [SET_REFERENCE]: attach, replace or clear a design's reference picture. */
+  private suspend fun setReference(args: JsonObject, actor: AuthenticatedUiBuilderActor): String {
+    val store = references ?: throw McpRequestException("this host keeps no reference overlays")
+    val designId = args.requiredText("designId")
+    val document = referenceDesign(designId, revision = null, actor, write = true)
+    if (args["clear"]?.jsonPrimitive?.booleanOrNull == true) {
+      store.delete(designId)
+      return UI_BUILDER_JSON.encodeToString(
+        UiBuilderReferenceAttachedV1.serializer(),
+        UiBuilderReferenceAttachedV1(designId = designId, attached = false),
+      )
+    }
+    val encoded =
+      args.text(REFERENCE_BYTES_ARGUMENT)
+        ?: throw McpRequestException(
+          "pass the picture in `$REFERENCE_BYTES_ARGUMENT`, or `clear: true` to remove it"
+        )
+    val bytes =
+      runCatching { java.util.Base64.getDecoder().decode(encoded.trim()) }.getOrNull()
+        ?: throw McpRequestException("`$REFERENCE_BYTES_ARGUMENT` is not valid base64")
+    val density =
+      args["density"]?.jsonPrimitive?.doubleOrNull?.also {
+        if (!it.isFinite() || it <= 0.0 || it > 8.0) {
+          throw McpRequestException("`density` must be a number above 0 and at most 8")
+        }
+      }
+    val (image, refusal) =
+      ServeUiBuilderReferenceTools.attachedImage(
+        bytes = bytes,
+        name = args.text("name") ?: "Reference",
+        density = density,
+        sourceUrl = args.text("sourceUrl"),
+      )
+    if (image == null) throw McpRequestException(refusal ?: "the picture could not be read")
+    val current = store.read(designId)
+    // A new picture is a new picture: its nudge and scale start again, as an import in the editor
+    // does, while the way the operator is comparing and what they drew are kept.
+    val settings =
+      StoredReferenceSettings(
+        mode = current?.settings?.mode ?: "overlay",
+        visible = true,
+        alwaysShowBoxes = current?.settings?.alwaysShowBoxes ?: false,
+      )
+    val stored =
+      when (
+        val result =
+          store.replace(
+            designId,
+            ReferenceUploadRequest(
+              image = image,
+              settings = settings,
+              pieces = current?.pieces.orEmpty(),
+              marks = current?.marks.orEmpty(),
+            ),
+          )
+      ) {
+        is ReferenceWriteResult.Refused -> throw McpRequestException(result.reason)
+        is ReferenceWriteResult.Stored -> result.reference
+      }
+    val attached = stored.image ?: image
+    val facts = ServeUiBuilderReferenceTools.facts(document, attached)
+    val fit = facts.recommendedFit ?: ReferenceFit.Contain
+    return UI_BUILDER_JSON.encodeToString(
+      UiBuilderReferenceAttachedV1.serializer(),
+      UiBuilderReferenceAttachedV1(
+        designId = designId,
+        attached = true,
+        reference =
+          UiBuilderReferenceImageSummaryV1(
+            name = attached.name,
+            mediaType = attached.mediaType,
+            widthPx = attached.widthPx,
+            heightPx = attached.heightPx,
+            sourceUrl = attached.sourceUrl,
+          ),
+        facts = ServeUiBuilderReferenceTools.factsWire(facts, fit),
+        notes =
+          buildList {
+            if (fit != ReferenceFit.Contain) {
+              add(
+                "this picture is measured under the `${fit.wireValue}` fit; the stored overlay " +
+                  "does not record a fit yet, so the editor shows it contained until somebody " +
+                  "picks ${fit.label} in the panel"
+              )
+            }
+            if (attached.mediaType == "image/svg+xml") {
+              add("an SVG is shown in the editor but cannot be measured by $COMPARE_REFERENCE here")
+            }
+          },
+      ),
+    )
+  }
+
+  /** [COMPARE_REFERENCE]: measure a design against its reference. */
+  private suspend fun compareReference(
+    args: JsonObject,
+    actor: AuthenticatedUiBuilderActor,
+  ): String {
+    val store = references ?: throw McpRequestException("this host keeps no reference overlays")
+    val designId = args.requiredText("designId")
+    val document = referenceDesign(designId, args.number("revision"), actor, write = false)
+    val reference =
+      store.read(designId)?.takeIf { it.image != null }
+        ?: throw McpRequestException(
+          "design `$designId` has no reference picture; attach one with $SET_REFERENCE"
+        )
+    val fit =
+      args.text(FIT_ARGUMENT)?.let { wire ->
+        ReferenceFit.entries.firstOrNull { it.wireValue == wire }
+          ?: throw McpRequestException("`$FIT_ARGUMENT` must be contain, width or actual")
+      }
+    val renderer = args.referenceRenderer()
+    if (
+      renderer != ServeUiBuilderView.RENDERER_EXPORT &&
+        renderer != ServeUiBuilderView.RENDERER_NATIVE
+    ) {
+      throw McpRequestException(
+        "`$RENDERER_ARGUMENT` must be `${ServeUiBuilderView.RENDERER_EXPORT}` or " +
+          "`${ServeUiBuilderView.RENDERER_NATIVE}`"
+      )
+    }
+    val frame =
+      if (renderer == ServeUiBuilderView.RENDERER_NATIVE) nativeViewFrame(designId, document)
+      else exportViewFrame(designId, document.revision, actor)
+    val comparison =
+      try {
+        ServeUiBuilderReferenceTools.compare(
+          designId = designId,
+          document = document,
+          frame = frame,
+          reference = reference,
+          fit = fit,
+          differences = args["differences"]?.jsonPrimitive?.booleanOrNull ?: true,
+          nodeIds = args.stringList(NODE_IDS_ARGUMENT),
+        )
+      } catch (refused: ServeUiBuilderView.Refused) {
+        throw McpRequestException(refused.message ?: "the reference could not be measured")
+      }
+    return UI_BUILDER_JSON.encodeToString(UiBuilderReferenceComparisonV1.serializer(), comparison)
   }
 
   /** The editor renderer's PNG of [revision], exactly as `ui_builder_export` hands it over. */
@@ -2988,6 +3176,15 @@ class ServeUiBuilderMcp(
     const val SET_IMPLEMENTATION = "ui_builder_set_implementation"
     const val IMPLEMENTATION_STATUS = "ui_builder_implementation_status"
     const val FIND_DESIGN_FOR_PR = "ui_builder_find_design_for_pr"
+    const val SET_REFERENCE = "ui_builder_set_reference"
+    const val COMPARE_REFERENCE = "ui_builder_compare_reference"
+
+    /** Separate because they exist only where the host keeps reference overlays. */
+    val REFERENCE_TOOL_NAMES = listOf(SET_REFERENCE, COMPARE_REFERENCE)
+
+    private const val REFERENCE_BYTES_ARGUMENT = "imageBase64"
+    private const val NODE_IDS_ARGUMENT = "nodeIds"
+    private const val FIT_ARGUMENT = "fit"
 
     private const val RENDERED_ARGUMENT = "rendered"
     private const val INCLUDE_EXPORT_ARGUMENT = "includeExport"
@@ -3182,6 +3379,7 @@ class ServeUiBuilderMcp(
       validate: Boolean = false,
       reviews: Boolean = false,
       branches: Boolean = false,
+      references: Boolean = false,
     ): List<JsonObject> =
       listOfNotNull(
         tool(
@@ -3845,6 +4043,66 @@ class ServeUiBuilderMcp(
             {"type":"object","properties":{
               "pr":{"type":"string","description":"The pull request URL, exactly as recorded."}
             },"required":["pr"],"additionalProperties":false}
+            """,
+          ),
+        if (!references) null
+        else
+          tool(
+            SET_REFERENCE,
+            "Attach the picture a design is being built against — a Figma frame, a screenshot of " +
+              "a shipped screen, a mock — as its reference overlay, or `clear` it. The same " +
+              "overlay the browser editor's Frame, density and reference panel shows, so a " +
+              "person opening the design sees what you attached. Kept beside the design and " +
+              "never part of it: no node holds it, no export sees it, the revision does not " +
+              "move. Send PNG, JPEG, WebP or SVG bytes in `$REFERENCE_BYTES_ARGUMENT`. For a " +
+              "Figma frame, fetch the picture with your Figma tools (a screenshot of the node) " +
+              "and pass the frame's URL as `sourceUrl`; this host fetches nothing itself. State " +
+              "the export scale as `density` (2 for a Figma 2x export) or in the name " +
+              "(`card@2x.png`): without it a screen-shaped picture is read across the frame's " +
+              "width and anything else at the design's own density. The reply says what the " +
+              "picture is against the frame — size in dp, density, whether it is a screen or a " +
+              "region — and whether pixel comparison means anything. Marks drawn in the editor " +
+              "are kept; the alignment is reset, as a new picture in the editor does. A " +
+              "user-supplied image is stored on this host: say so, and attach it only with " +
+              "their permission.",
+            """
+            {"type":"object","properties":{
+              "designId":{"type":"string"},
+              "$REFERENCE_BYTES_ARGUMENT":{"type":"string","description":"The picture, base64. PNG, JPEG, WebP or SVG; at most the host's reference size limit."},
+              "name":{"type":"string","description":"What the editor calls it. An `@2x` suffix declares the density."},
+              "density":{"type":"number","description":"The picture's pixels per dp, e.g. 2 for a 2x export, 2.625 for a Pixel screenshot."},
+              "sourceUrl":{"type":"string","description":"Where it came from, such as the Figma frame URL. Provenance only; never fetched."},
+              "clear":{"type":"boolean","description":"Remove the reference, its marks and pieces instead."}
+            },"required":["designId"],"additionalProperties":false}
+            """,
+          ),
+        if (!references) null
+        else
+          tool(
+            COMPARE_REFERENCE,
+            "Measure a design against its reference overlay (attach one with $SET_REFERENCE). " +
+              "Returns what the picture is against the frame and whether a pixel comparison " +
+              "means anything (`facts.pixelComparable` — a 328×56 dp crop stretched over a " +
+              "screen is not comparable until measured at its `actual` size); with " +
+              "`differences`, the share of pixels that differ and up to eight regions in dp, " +
+              "each with the layer it falls in; and for each of `$NODE_IDS_ARGUMENT`, where that " +
+              "layer sits in the reference — from a box drawn over it in the editor, or a search " +
+              "of the reference's pixels, which for text also reads the font size — with the " +
+              "`alignment` that would make it agree (move, size, font size) and the exact " +
+              "`operations` to pass to $APPLY. Nothing is written: apply the operations you " +
+              "agree with, then compare again and look with $VIEW. Layer matching needs node " +
+              "boxes, so `$NODE_IDS_ARGUMENT` measures the native render (an export grant); " +
+              "differences alone use the PNG export. Treat `confident: false` as a hint to " +
+              "check, not an edit to make.",
+            """
+            {"type":"object","properties":{
+              "designId":{"type":"string"},
+              "revision":{"type":"integer","description":"Measure this revision. Defaults to the current one."},
+              "differences":{"type":"boolean","description":"Measure where the frame differs. Defaults to true."},
+              "$NODE_IDS_ARGUMENT":{"type":"array","items":{"type":"string"},"description":"Layers to match against the reference, each with a proposed alignment."},
+              "$FIT_ARGUMENT":{"type":"string","enum":["contain","width","actual"],"description":"How the picture is placed: contained and centred, across the width from the top, or at its own size from the top-left. Defaults to the fit the picture calls for (facts.recommendedFit)."},
+              "$RENDERER_ARGUMENT":{"type":"string","enum":["export","native"],"description":"Which render to measure. Defaults to native when $NODE_IDS_ARGUMENT is given, export otherwise."}
+            },"required":["designId"],"additionalProperties":false}
             """,
           ),
       ) +

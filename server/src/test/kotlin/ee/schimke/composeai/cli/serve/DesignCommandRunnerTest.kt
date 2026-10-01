@@ -272,6 +272,27 @@ class DesignCommandRunnerTest {
     assertTrue(written.isEmpty())
     assertTrue(logged.any { it.contains("asked for png and got svg") }, "$logged")
   }
+
+  @Test
+  fun `compare sends the layers and summarises each proposal on stderr`() {
+    val reply =
+      """
+      {"facts":{"advice":"The same screen at the design's own density: every comparison holds."},
+       "layers":[{"nodeId":"title","alignment":{"summary":"move right 12 dp, font size 28 sp"}},
+                 {"nodeId":"card","message":"Nothing to match"}]}
+      """
+    val seen = mutableListOf<Pair<String, JsonObject>>()
+    val options =
+      options(DesignCommand.COMPARE).copy(nodes = listOf("title", "card"), differences = false)
+    assertEquals(DesignCommandRunner.EXIT_OK, runner(options, reply, seen).run())
+    val (tool, arguments) = seen.single()
+    assertEquals(ServeUiBuilderMcp.COMPARE_REFERENCE, tool)
+    assertEquals("[\"title\",\"card\"]", arguments["nodeIds"].toString())
+    assertEquals("false", arguments["differences"].toString())
+    assertTrue(logged.any { it.contains("title: move right 12 dp") }, "$logged")
+    assertTrue(logged.any { it.contains("card: Nothing to match") }, "$logged")
+    assertTrue(written.getValue(DesignCommand.STDOUT).decodeToString().contains("\"layers\""))
+  }
 }
 
 /**

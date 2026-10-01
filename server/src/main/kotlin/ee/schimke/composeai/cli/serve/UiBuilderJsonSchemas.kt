@@ -134,6 +134,22 @@ internal object UiBuilderJsonSchemas {
     )
   }
 
+  /** `ui_builder_set_reference`'s MCP `outputSchema`: [UiBuilderReferenceAttachedV1]. */
+  val referenceAttachedOutput: JsonObject by lazy {
+    SerialDescriptorJsonSchema.output(
+      UiBuilderReferenceAttachedV1.serializer().descriptor,
+      schemaId = UI_BUILDER_REFERENCE_ATTACHED_SCHEMA,
+    )
+  }
+
+  /** `ui_builder_compare_reference`'s MCP `outputSchema`: [UiBuilderReferenceComparisonV1]. */
+  val referenceComparisonOutput: JsonObject by lazy {
+    SerialDescriptorJsonSchema.output(
+      UiBuilderReferenceComparisonV1.serializer().descriptor,
+      schemaId = UI_BUILDER_REFERENCE_COMPARISON_SCHEMA,
+    )
+  }
+
   fun byName(name: String): Served? = served.firstOrNull { it.name == name }
 
   fun byUri(uri: String): Served? = served.firstOrNull { it.uri == uri }

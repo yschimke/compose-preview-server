@@ -709,6 +709,7 @@ class ServeCatalogMcp(
           it.supportsValidation,
           it.supportsReviews,
           it.supportsBranches,
+          it.supportsReferences,
         )
       )
     }
@@ -2998,6 +2999,8 @@ class ServeCatalogMcp(
       ServeUiBuilderMcp.AWAIT_DECISION -> UiBuilderJsonSchemas.decisionOutput
       ServeUiBuilderMcp.IMPLEMENTATION_STATUS -> UiBuilderJsonSchemas.implementationOutput
       ServeUiBuilderMcp.FIND_DESIGN_FOR_PR -> UiBuilderJsonSchemas.prLookupOutput
+      ServeUiBuilderMcp.SET_REFERENCE -> UiBuilderJsonSchemas.referenceAttachedOutput
+      ServeUiBuilderMcp.COMPARE_REFERENCE -> UiBuilderJsonSchemas.referenceComparisonOutput
       in ServeUiBuilderHistoryTools.TOOL_NAMES -> ServeUiBuilderHistoryTools.outputSchema(name)!!
       in ServeUiBuilderBranchTools.TOOL_NAMES -> ServeUiBuilderBranchTools.outputSchema(name)!!
       "render_preview" ->
