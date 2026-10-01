@@ -3911,6 +3911,18 @@ class DaemonMcpServer(
       return toolRenderPreview(session, args, resolved)
     }
     val choices = listOf(resolved.uri) + resolved.others
+    // An OpenAI-forms client picks from thumbnails instead of getting the grid (#1240).
+    PreviewPickers.ambiguousMatch(
+        session,
+        previewName,
+        choices,
+        label = { variantLabel(PreviewUri.parseOrNull(it)!!) },
+        thumbnail = { PreviewPickers.cachedThumbnail(it, previewActivity, renderThumbnails) },
+        render = { toolRenderPreview(session, args, PreviewNameResolution.Found(it, emptyList())) },
+      )
+      ?.let {
+        return it
+      }
     // Several matches (such as @WearPreviewDevices + @WearPreviewFontScales variants) render as one
     // grid: every variant, one labelled contact sheet for the model. The chooser is kept for more
     // matches than a grid holds, and for file results.
@@ -4765,7 +4777,20 @@ class DaemonMcpServer(
         put("cellCount", cells.size)
         if (contactSheet) put("contactSheet", true)
         putJsonArray("cells") { cells.forEach { add(it) } }
-        if (choose) put("selection", matrixSelection(session, cells))
+        if (choose) {
+          put(
+            "selection",
+            matrixSelection(session, cells) {
+              rendered.map { rc ->
+                PreviewPickers.option(
+                  uri.copy(overridesJson = rc.cell.overridesJson().toString()).toUri(),
+                  rc.cell.label,
+                  thumbnailPngBase64 = pickerThumbnail(rc.bytes),
+                )
+              }
+            },
+          )
+        }
       }
       val blocks = buildList {
         if (contactSheet) {
@@ -4884,7 +4909,20 @@ class DaemonMcpServer(
             variantUris.drop(MAX_VARIANT_CELLS).forEach { add(JsonPrimitive(it)) }
           }
         }
-        if (choose) put("selection", matrixSelection(session, cellJson))
+        if (choose) {
+          put(
+            "selection",
+            matrixSelection(session, cellJson) {
+              cells.map { (variant, bytes, _) ->
+                PreviewPickers.option(
+                  variant.toUri(),
+                  variantLabel(variant),
+                  thumbnailPngBase64 = pickerThumbnail(bytes),
+                )
+              }
+            },
+          )
+        }
       }
       val blocks = buildList {
         if (contactSheet) {
@@ -4941,9 +4979,23 @@ class DaemonMcpServer(
     return errorCallToolResult("render_matrix failed: $message")
   }
 
-  /** Form chooser for a completed matrix, with an equivalent text answer for older harnesses. */
-  private suspend fun matrixSelection(session: Session, cells: List<JsonObject>): JsonObject {
+  /** A matrix cell's just-rendered pixels as a picker thumbnail (#1240). */
+  private fun pickerThumbnail(bytes: ByteArray): String =
+    Base64.getEncoder().encodeToString(scaleToMaxEdge(bytes, PreviewPickers.THUMBNAIL_EDGE_PX))
+
+  /**
+   * Form chooser for a completed matrix, with an equivalent text answer for older harnesses. An
+   * OpenAI-forms client picks from [pickerOptions], one per cell (#1240).
+   */
+  private suspend fun matrixSelection(
+    session: Session,
+    cells: List<JsonObject>,
+    pickerOptions: () -> List<OpenAiForms.ResourceOption>,
+  ): JsonObject {
     val choices = cells.map { it["label"]!!.jsonPrimitive.content }
+    PreviewPickers.matrixSelection(session, choices, pickerOptions)?.let {
+      return it
+    }
     val fallback = buildJsonObject {
       put("mode", "text")
       put("message", "Choose one rendered variant by label: ${choices.joinToString(" | ")}")
