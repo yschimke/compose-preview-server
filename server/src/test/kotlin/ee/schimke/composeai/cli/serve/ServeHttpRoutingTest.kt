@@ -196,7 +196,7 @@ class ServeHttpRoutingTest {
           lanes =
             listOf(
               RcCompareLane("embedded", "AndroidX Embedded", "emb"),
-              RcCompareLane("cmp-jvm", "RC · cmp-jvm player", "jvm"),
+              RcCompareLane("cmp-jvm", "rc-player JVM", "jvm"),
             ),
           rows =
             listOf(
