@@ -25,6 +25,7 @@ import ee.schimke.composeai.uibuilder.service.CurrentM3UiBuilderCatalogExecutor
 import ee.schimke.composeai.uibuilder.service.FileUiBuilderAssetStore
 import ee.schimke.composeai.uibuilder.service.PersistentUiBuilderService
 import ee.schimke.composeai.uibuilder.service.ProductionUiBuilderExportExecutor
+import ee.schimke.composeai.uibuilder.service.UiBuilderBranchPort
 import ee.schimke.composeai.uibuilder.service.UiBuilderCatalogExecutor
 import ee.schimke.composeai.uibuilder.service.UiBuilderDesignStateStore
 import java.awt.Desktop
@@ -3758,6 +3759,12 @@ public class ServeRunner(
         uiBuilderReviewStore = uiBuilderLane?.reviews,
         uiBuilderFolderStore = uiBuilderLane?.folders,
         uiBuilderAssets = uiBuilderLane?.service,
+        // Wrapped like the service, so a merge redraws the parent's listing card.
+        uiBuilderBranches =
+          uiBuilderLane?.let { lane ->
+            val branches: UiBuilderBranchPort = lane.service
+            lane.thumbnails?.warmingBranches(branches) ?: branches
+          },
         uiBuilderValidator = uiBuilderLane?.validator,
         uiBuilderAuthorization =
           uiBuilderLane?.let {

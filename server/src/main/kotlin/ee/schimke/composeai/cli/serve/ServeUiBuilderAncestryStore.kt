@@ -26,12 +26,13 @@ import kotlinx.serialization.json.encodeToJsonElement
  * *is* a fork that remembers its fork point — so it is recorded now, for both the MCP
  * `ui_builder_fork_design` and the history page's form.
  *
- * It belongs in the runtime's model eventually, beside the document it describes. Phase 1 needs it
- * before `ui-builder-runtime` grows a branch model, and the published `DesignLinksV1` has no field
- * for it, so it is kept the way the links are kept and for the same three reasons
- * ([ServeUiBuilderLinksStore] gives them): it is not design content, the wire cannot carry it, and
- * it must not move the revision. One small JSON file per design, beside the links records, read by
- * `ui_builder_get_links` and written only by a fork.
+ * Branches (compose-ui-builder#377) are recorded by the runtime itself, and `ui_builder_get_links`
+ * reads their parentage from there ([withBranches]); a fork is an independent design the runtime
+ * keeps no record of, and the published `DesignLinksV1` has no field for it, so it is kept the way
+ * the links are kept and for the same three reasons ([ServeUiBuilderLinksStore] gives them): it is
+ * not design content, the wire cannot carry it, and it must not move the revision. One small JSON
+ * file per design, beside the links records, read by `ui_builder_get_links` and written only by a
+ * fork.
  *
  * Both ends are written: the fork's [StoredAncestry.forkedFrom], and the parent's
  * [StoredAncestry.forks]. A design's delete removes its record and takes it off its parent's list,

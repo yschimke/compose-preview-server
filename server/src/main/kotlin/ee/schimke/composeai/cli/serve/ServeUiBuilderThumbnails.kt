@@ -6,6 +6,10 @@ import ee.schimke.composeai.uibuilder.protocol.ExportDesignRequestV1
 import ee.schimke.composeai.uibuilder.protocol.ExportEncodingV1
 import ee.schimke.composeai.uibuilder.protocol.ExportFormatV1
 import ee.schimke.composeai.uibuilder.service.AuthenticatedUiBuilderActor
+import ee.schimke.composeai.uibuilder.service.UiBuilderBranchCall
+import ee.schimke.composeai.uibuilder.service.UiBuilderBranchPort
+import ee.schimke.composeai.uibuilder.service.UiBuilderBranchRequest
+import ee.schimke.composeai.uibuilder.service.UiBuilderBranchResponse
 import ee.schimke.composeai.uibuilder.service.UiBuilderServiceCall
 import ee.schimke.composeai.uibuilder.service.UiBuilderServicePort
 import ee.schimke.composeai.uibuilder.service.UiBuilderServiceRequest
@@ -157,6 +161,30 @@ internal constructor(
     service = delegate
     return wrapped
   }
+
+  /**
+   * The branch lane, redrawing what it changes: a merge commits to the parent outside
+   * [UiBuilderServicePort], so without this the parent's card would show it as it was before the
+   * merge, and a new branch would have no card until its first edit.
+   */
+  internal fun warmingBranches(delegate: UiBuilderBranchPort): UiBuilderBranchPort =
+    object : UiBuilderBranchPort {
+      override suspend fun executeBranch(call: UiBuilderBranchCall): UiBuilderBranchResponse {
+        val response = delegate.executeBranch(call)
+        when (response) {
+          is UiBuilderBranchResponse.Merge ->
+            if (response.report.merged && !response.report.dryRun) {
+              warm(response.report.parentDesignId, call.actor)
+            }
+          is UiBuilderBranchResponse.Branch ->
+            if (call.request is UiBuilderBranchRequest.CreateBranch) {
+              warm(response.branch.branchId, call.actor)
+            }
+          else -> Unit
+        }
+        return response
+      }
+    }
 
   /**
    * Forget [designId]'s picture, in memory and on disk.

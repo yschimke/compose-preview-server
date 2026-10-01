@@ -193,6 +193,8 @@ that protocol/SDK migration is deliberately not bundled into the compatibility t
 | `ui_builder_list_revisions`, `ui_builder_diff_designs` | `ui-builder-read` | A design's retained revisions (actor, time, operation, document digest, and the retention floor); a node-level diff of any two retained revisions of any two designs (below) |
 | `ui_builder_restore_revision` | `ui-builder-write` | Restore a retained revision **forward**, as a new revision; `dryRun: true` returns the diff it would apply. Needs the design's own write action |
 | `ui_builder_fork_design` | `ui-builder-write` | A new design from one revision of another, with its `forkedFrom` recorded and listed on both ends through `ui_builder_get_links` |
+| `ui_builder_branch_design`, `ui_builder_list_branches` | `ui-builder-write`, `ui-builder-read` | Fork a design at a revision into a **branch** (a design of its own, edited with `ui_builder_apply`), and list a design's branches by status; present where the host's service keeps branches (below) |
+| `ui_builder_merge_branch`, `ui_builder_archive_branch` | `ui-builder-write` | Replay a branch onto its parent, all or nothing, with a per-command report (`dryRun`, `skipOperationIds`); or close it unmerged |
 | `ui_builder_export` | `ui-builder-export` | Export a design — `compose` returns the generator's Kotlin, or diagnostics naming each reason it refused |
 | `ui_builder_view` | `ui-builder-read` (plus `ui-builder-export` for `renderer: "native"`) | The editor canvas as a person sees it — a PNG with the selection, reference overlay, comment pins and layout bounds drawn on, and the node boxes and pin positions as JSON (#1114) |
 | `ui_builder_put_asset` | `ui-builder-write` | Put a picture behind an `assetKey`, so an `asset/image` node draws it; present only where the host keeps design assets |
@@ -518,8 +520,60 @@ its own small shape with a `summary` a person can read, declared as the tool's `
   copy in the R3 sense: announce it, and bring a chosen change back with `ui_builder_apply` on the
   parent. The history page's fork form records the same ancestry. Ancestry is kept beside the links
   records (`links/ancestry/`), because the published `DesignLinksV1` has no field for it and the
-  runtime has no branch model yet; a host without a links store forks without it and says so
-  (`ancestryRecorded: false`).
+  runtime's branch model records branches, not forks — a fork is an independent design with no
+  record there; a host without a links store forks without it and says so
+  (`ancestryRecorded: false`). When a change should come back, a branch (below) is the better tool.
+
+### Branches: explore alternatives, then merge one
+
+A **branch** is a design forked at a revision, edited on its own and **replay-merged** back onto its
+parent through the same reducer every edit goes through — the browser's Sync, run on the server
+(phase 2 of yschimke/compose-ui-builder#375; the runtime is compose-ui-builder#377 and
+[`UI_BUILDER_BRANCHES.md`](https://github.com/yschimke/compose-ui-builder/blob/main/docs/design/UI_BUILDER_BRANCHES.md)
+there). Use one to try alternatives, or to change a design somebody is editing live without editing
+under them. Unlike `ui_builder_fork_design`, a branch remembers its parent *and* has a way back.
+
+- `ui_builder_branch_design {designId, name, revision?, branchId?}` — the new branch, `open`, at
+  the fork revision (its revisions continue the parent's numbering). Needs write on the parent.
+  Branches of a branch are refused, and so, on a branch, are asset uploads, restores, catalog
+  upgrades, document replacements and home moves — a command log cannot carry them.
+- `ui_builder_list_branches {designId, status?}` — newest first; `status` is `open`, `merged`,
+  `archived` or `all` (the default). Each row has the fork and head revisions and `commandCount`,
+  what a merge would replay.
+- `ui_builder_merge_branch {branchId, dryRun?, skipOperationIds?}` — replays the branch's commands
+  onto the parent's **current** revision. All or nothing: either every command lands, one revision
+  each and attributed to the actor who authored it on the branch, or nothing is written. The reply
+  lists every command attempted — `applied` with `committedRevision` and any last-writer-wins
+  `conflicts` (`STALE_PROPERTY_WRITE`, `STALE_MOVE`, …), or `refused` with the reducer's `code` —
+  plus `remaining` (never tried), `skippedOperationIds` and `archivedSiblingIds`. A refusal is
+  resolved by skipping the command (and any undo of it) or branching again from the parent's head.
+- `ui_builder_archive_branch {branchId}` — closes a branch unmerged; it stays readable and listed.
+
+Every other tool works on a branch's id unchanged — `ui_builder_get_design`, `ui_builder_apply`,
+`ui_builder_view`, `ui_builder_export`, `ui_builder_diff_designs`. **Access is the parent's**: a
+branch's access list is copied from its parent and kept in step, so whoever reads the design reads
+its branches, and an agent grant naming a design reaches its branches too (the grant scope resolves
+a branch to its parent through the runtime). Writes — branching, merging, archiving — need write on
+the parent; the branch's creator may also archive it. `ui_builder_get_links` reports the relation
+from the runtime, never a second copy of it: `branchOf` on a branch (parent, fork revision, name,
+status) and `branches` on its parent. A fork's `forkedFrom` / `forks` is a separate relation, kept
+in the links store as before.
+
+**Recipe: N alternatives, pick one, merge.**
+
+1. `ui_builder_branch_design` ×N from the same revision, one `name` per idea (`compact header`,
+   `card list`, …). Branches forked at the same revision are **siblings**.
+2. Edit each with `ui_builder_apply` on its `branchId`.
+3. Show them: `ui_builder_view` (or `ui_builder_render_design_matrix`) per branch, and
+   `ui_builder_diff_designs {a: {designId: parent}, b: {designId: branchId}}` for what each changes.
+4. Let the person pick: in ChatGPT or Codex, as thumbnails in the picker shape of #1253; in a chat
+   surface (#1254), as a numbered list with each branch's picture link, answered by a reply.
+5. `ui_builder_merge_branch {branchId, dryRun: true}`, read the report, then merge for real. The
+   other siblings are archived, linked to the winner through `supersededByBranchId`, and kept.
+
+Known limit, from the runtime: only the first replayed command sees edits the parent made after the
+fork as concurrent, so a later command that overwrites one carries no `STALE_*` notice. The dry run
+and a diff of the parent against the branch are the review surface until that is fixed upstream.
 
 ### Watching, rather than asking again
 

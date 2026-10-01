@@ -26,6 +26,7 @@ import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
@@ -43,6 +44,12 @@ internal object UiBuilderArchiveFixture {
   const val SHELL =
     """<!doctype html><html><head><base href="__COMPOSE_UI_BUILDER_ASSET_BASE__" />""" +
       """<script>globalThis.composeUiBuilderMcpApp = { assetBase: "__COMPOSE_UI_BUILDER_ASSET_BASE__", version: "3.70.0" };</script>""" +
+      """</head><body><script type="module" src="uiBuilder.mjs"></script></body></html>"""
+  /** The 3.71.0 shell (compose-ui-builder#378): the layout placeholder beside the asset base. */
+  const val LAYOUT_SHELL =
+    """<!doctype html><html data-ui-builder-layout="__COMPOSE_UI_BUILDER_MCP_APP_LAYOUT__"><head>""" +
+      """<base href="__COMPOSE_UI_BUILDER_ASSET_BASE__" />""" +
+      """<script>globalThis.composeUiBuilderMcpApp = { assetBase: "__COMPOSE_UI_BUILDER_ASSET_BASE__", layout: "__COMPOSE_UI_BUILDER_MCP_APP_LAYOUT__", version: "3.71.0" };</script>""" +
       """</head><body><script type="module" src="uiBuilder.mjs"></script></body></html>"""
   val WASM: ByteArray = byteArrayOf(0, 0x61, 0x73, 0x6d, 1, 0, 0, 0) + ByteArray(4096) { 7 }
 
@@ -198,6 +205,44 @@ class UiBuilderDesignMcpTest {
     val design = UiBuilderDesignMcp.fromEnvironment(mapOf("APP_HOME" to home.path))
     assertThat(design).isNotNull()
     design!!.close()
+  }
+
+  @Test
+  fun `reading the editor fills in the layout setting, once per read, focused unless full`() {
+    val design =
+      design(UiBuilderArchiveFixture.files(shell = UiBuilderArchiveFixture.LAYOUT_SHELL))!!
+    fun read(layout: String?): String =
+      (design.readResource(UiBuilderDesignMcp.EDITOR_URI, layout)!!.contents.single()
+          as ResourceContents.Text)
+        .text
+    for ((setting, expected) in
+      listOf(
+        null to "focused",
+        "focused" to "focused",
+        "full" to "full",
+        // Anything else never reaches the shell: the editor would read it as focused anyway.
+        "fullscreen" to "focused",
+        "" to "focused",
+        "\" onload=\"x" to "focused",
+      )) {
+      val text = read(setting)
+      assertThat(text).doesNotContain(UiBuilderDesignMcp.LAYOUT_PLACEHOLDER)
+      assertThat(text).contains("data-ui-builder-layout=\"$expected\"")
+      assertThat(text).contains("layout: \"$expected\"")
+    }
+    // The same surface answers a changed setting on the next read; nothing is cached.
+    assertThat(read("full")).contains("layout: \"full\"")
+    assertThat(read(null)).contains("layout: \"focused\"")
+  }
+
+  @Test
+  fun `a shell without the layout placeholder is served the same whatever the setting`() {
+    val design = design()!!
+    fun read(layout: String): String =
+      (design.readResource(UiBuilderDesignMcp.EDITOR_URI, layout)!!.contents.single()
+          as ResourceContents.Text)
+        .text
+    assertThat(read("full")).isEqualTo(read("focused"))
   }
 
   @Test
@@ -472,13 +517,22 @@ class UiBuilderDesignMcpServerTest {
     closers.reversed().forEach { runCatching { it() } }
   }
 
-  private fun connect(design: UiBuilderDesignMcp?): McpTestClient {
+  private fun connect(
+    design: UiBuilderDesignMcp?,
+    settings: PreviewSettingsStore = PreviewSettingsStore(File(tmp.root, "settings.json")) {},
+  ): McpTestClient {
     val supervisor =
       DaemonSupervisor(
         descriptorProvider = FakeDescriptorProvider(),
         clientFactory = FakeDaemonClientFactory(),
       )
-    val server = DaemonMcpServer(supervisor, workingDirectory = null, uiBuilderDesign = design)
+    val server =
+      DaemonMcpServer(
+        supervisor,
+        workingDirectory = null,
+        previewSettingsStore = settings,
+        uiBuilderDesign = design,
+      )
     val (clientToServer, serverFromClient) = pipedPair()
     val (serverToClient, clientFromServer) = pipedPair()
     val session = server.newSession(input = serverFromClient, output = serverToClient)
@@ -531,6 +585,41 @@ class UiBuilderDesignMcpServerTest {
     assertThat(result["isError"]?.jsonPrimitive?.content ?: "false").isEqualTo("false")
     assertThat(result["structuredContent"]!!.jsonObject["name"]!!.jsonPrimitive.content)
       .isEqualTo("home.uid")
+  }
+
+  @Test
+  fun `the editor opens in the layout the settings file names`() {
+    val archive =
+      UiBuilderWebArchive.open(
+        UiBuilderArchiveFixture.zip(
+          tmp.newFolder(),
+          UiBuilderArchiveFixture.files(shell = UiBuilderArchiveFixture.LAYOUT_SHELL),
+        )
+      )!!
+    val file = File(tmp.root, "layout-settings.json")
+    val settings = PreviewSettingsStore(file) {}
+    val client = connect(UiBuilderDesignMcp.fromArchive(archive, onLog = {})!!, settings)
+    fun layout(): String {
+      val read =
+        client.request(
+          "resources/read",
+          buildJsonObject { put("uri", UiBuilderDesignMcp.EDITOR_URI) },
+        )
+      val text = read["contents"]!!.jsonArray.single().jsonObject["text"]!!.jsonPrimitive.content
+      assertThat(text).doesNotContain(UiBuilderDesignMcp.LAYOUT_PLACEHOLDER)
+      return Regex("layout: \"([^\"]*)\"").find(text)!!.groupValues[1]
+    }
+    // Unset: the default.
+    assertThat(layout()).isEqualTo("focused")
+    // Set through settings_update (or by the CLI writing the file): the next read follows it.
+    settings.update(mapOf(PreviewSettings.UI_BUILDER_MCP_APP_LAYOUT to JsonPrimitive("full")))
+    assertThat(layout()).isEqualTo("full")
+    // A hand-edited value the schema refuses falls back to the default.
+    file.writeText(
+      """{"schema":"compose-preview-settings/v1","values":{"uiBuilderMcpAppLayout":"wide"}}"""
+    )
+    file.setLastModified(System.currentTimeMillis() + 5_000)
+    assertThat(layout()).isEqualTo("focused")
   }
 
   @Test

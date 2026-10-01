@@ -241,6 +241,17 @@ class PreviewSettingsMcp(
           put("minimum", -1)
           put("maximum", PreviewSettings.MAX_REPLICAS)
         }
+        putJsonObject(PreviewSettings.UI_BUILDER_MCP_APP_LAYOUT) {
+          put("type", "string")
+          put("title", "UI Builder editor layout")
+          put(
+            "description",
+            "How a .uid design opens: 'focused' shows just the canvas and a file bar, 'full' the " +
+              "whole editor. Either way the editor's own button switches. Applies to the next " +
+              "design opened.",
+          )
+          putJsonArray("enum") { PreviewSettings.LAYOUT_VALUES.forEach { add(it) } }
+        }
       }
       putJsonArray("required") { PreviewSettings().toJson().keys.forEach { add(it) } }
     }
@@ -280,6 +291,7 @@ class PreviewSettingsMcp(
           tool(DOCTOR_TOOL, "Run doctor", "Check Java, the Android SDK and each project."),
           tool(REGISTER_PROJECT_TOOL, "Register project…", "Add a Gradle project by path."),
         )
+        group("UI Builder", property(PreviewSettings.UI_BUILDER_MCP_APP_LAYOUT))
       }
 
     /** The values schema: [SETTINGS_SCHEMA] with every property required. */

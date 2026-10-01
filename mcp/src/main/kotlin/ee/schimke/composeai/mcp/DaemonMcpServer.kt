@@ -713,9 +713,11 @@ class DaemonMcpServer(
     rcViewer.readResource(uri)?.let {
       return it
     }
-    uiBuilderDesign?.readResource(uri)?.let {
-      return it
-    }
+    uiBuilderDesign
+      ?.readResource(uri, layout = previewSettingsStore.read().uiBuilderMcpAppLayout)
+      ?.let {
+        return it
+      }
     openAiProbe?.readResource(uri)?.let {
       return it
     }
