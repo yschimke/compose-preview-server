@@ -107,7 +107,8 @@ internal object ServeContactSheet {
 
   private fun decode(bytes: ByteArray): BufferedImage? = runCatching {
     ImageIO.read(ByteArrayInputStream(bytes))
-  }.getOrNull()
+  }
+    .getOrNull()
 
   private fun draw(
     tiles: List<Tile>,
