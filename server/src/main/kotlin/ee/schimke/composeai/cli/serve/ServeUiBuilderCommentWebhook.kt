@@ -61,6 +61,10 @@ import kotlinx.serialization.json.putJsonObject
  * a thread is silent too: the news is that a question went away, and there is nothing left to link
  * to.
  *
+ * The same hook also posts **design activity** — a fork, a review verdict, the implementing pull
+ * request moving — when the operator names those kinds in `--ui-builder-webhook-events`. Those live
+ * in `ServeUiBuilderDesignActivity.kt` and ride this class's queue, buckets and privacy rule.
+ *
  * ## Private designs are announced as a link
  *
  * The destination is one channel for the whole host, and its readers are not the people each design
@@ -179,7 +183,7 @@ internal class ServeUiBuilderCommentWebhook(
   // [UiBuilderAdminPort.adminDesignSummary] exists: a keyed read under the service's lock rather
   // than the scan of every design that listing them would pay. That is small beside the disk write
   // the comment itself already does, and it is what makes the pairing correct rather than likely.
-  private val queue = Channel<QueuedCommentChange>(QUEUE_CAPACITY)
+  private val queue = Channel<QueuedWebhookEvent>(QUEUE_CAPACITY)
 
   private val perDesign =
     ServeRateLimiter(
@@ -203,7 +207,18 @@ internal class ServeUiBuilderCommentWebhook(
     for (queued in queue) {
       // One at a time and never rethrowing: a webhook host that answers with an exception must
       // not take the loop down and leave every later comment undelivered in silence.
-      runCatching { deliver(describe(queued)) }
+      runCatching {
+        when (queued) {
+          is QueuedCommentChange -> {
+            val event = describe(queued)
+            deliver(config.format.body(event), event.event)
+          }
+          is QueuedDesignActivity -> {
+            val event = describeDesignActivity(queued.activity, queued.design, baseUrl())
+            deliver(config.format.activityBody(event), event.event)
+          }
+        }
+      }
         .onFailure { onLog("serve: comment webhook $fingerprint failed (${it.message})") }
     }
   }
@@ -214,18 +229,54 @@ internal class ServeUiBuilderCommentWebhook(
       // A diff of two small in-memory boards, one design lookup each, and an offer to a queue
       // that never blocks. Nothing here waits on the network.
       for (change in diffCommentBoards(previous, next)) {
-        if (!admit(change)) continue
+        if (!admit(change.designId, change.kind.wire)) continue
         val design = runCatching { designs(change.designId) }.getOrNull()
         enqueue(QueuedCommentChange(change, design))
       }
     }
 
   /**
+   * Watch every design's review record on [store] — verdicts recorded, and the implementing pull
+   * request opened, merged or found to (mis)match — until the returned handle is closed. Only the
+   * [kinds] the operator opted into are posted; see [DesignActivityKind].
+   */
+  fun attachReviews(store: ServeUiBuilderReviewStore, kinds: Set<DesignActivityKind>): Closeable =
+    store.subscribeToHost { previous, next ->
+      for (activity in diffDesignReviews(previous, next)) {
+        if (activity.kind !in kinds) continue
+        announce(activity)
+      }
+    }
+
+  /**
+   * Watch every fork recorded on [ancestry] — a proposed alternative to an existing design — until
+   * the returned handle is closed. The event is about the design that was forked from: that is the
+   * design whose channel cares that somebody proposed something else.
+   */
+  fun attachForks(ancestry: ServeUiBuilderAncestryStore): Closeable =
+    ancestry.subscribeToForks { from, forkId ->
+      announce(
+        DesignActivity(
+          designId = from.designId,
+          kind = DesignActivityKind.FORK,
+          revision = from.revision,
+          forkId = forkId,
+        )
+      )
+    }
+
+  /** Design activity takes the same buckets and the same design lookup as a comment does. */
+  private fun announce(activity: DesignActivity) {
+    if (!admit(activity.designId, activity.kind.wire)) return
+    val design = runCatching { designs(activity.designId) }.getOrNull()
+    enqueue(QueuedDesignActivity(activity, design))
+  }
+
+  /**
    * Whether [change] fits under both buckets. The per-design bucket is asked first so a design that
    * is over its own limit does not also spend the host's shared allowance.
    */
-  private fun admit(change: CommentBoardChange): Boolean {
-    val designId = change.designId
+  private fun admit(designId: String, wire: String): Boolean {
     val admitted =
       perDesign.tryAcquire(designId).admittedAndReleased() &&
         total.tryAcquire(TOTAL_KEY).admittedAndReleased()
@@ -248,7 +299,7 @@ internal class ServeUiBuilderCommentWebhook(
         onLog(
           "serve: comment webhook $fingerprint is over its rate limit " +
             "(${rateLimit.perDesignPerMinute}/min per design, ${rateLimit.totalPerMinute}/min " +
-            "in total); holding back ${change.kind.wire} events on design $designId"
+            "in total); holding back $wire events on design $designId"
         )
       }
       return false
@@ -264,13 +315,13 @@ internal class ServeUiBuilderCommentWebhook(
       is ServeRateLimiter.Decision.Throttled -> false
     }
 
-  private fun enqueue(queued: QueuedCommentChange) {
+  private fun enqueue(queued: QueuedWebhookEvent) {
     if (queue.trySend(queued).isSuccess) return
     val dropped = queue.tryReceive().getOrNull()
     if (dropped != null) {
       onLog(
         "serve: comment webhook $fingerprint is behind; dropped the oldest queued event " +
-          "(${dropped.change.kind.wire} on design ${dropped.change.designId})"
+          "(${dropped.wire} on design ${dropped.designId})"
       )
     }
     // The slot freed above is not reserved, so another writer's event can take it first. Losing
@@ -278,21 +329,20 @@ internal class ServeUiBuilderCommentWebhook(
     // notification that is lossy without saying so is not.
     if (!queue.trySend(queued).isSuccess) {
       onLog(
-        "serve: comment webhook $fingerprint is behind; dropped a ${queued.change.kind.wire} " +
-          "event on design ${queued.change.designId}"
+        "serve: comment webhook $fingerprint is behind; dropped a ${queued.wire} " +
+          "event on design ${queued.designId}"
       )
     }
   }
 
-  private suspend fun deliver(event: DesignCommentWebhookEventV1) {
-    val body = config.format.body(event)
+  private suspend fun deliver(body: String, wire: String) {
     if (send(body)) return
     // Exactly one retry, and only one. A chat platform's incoming webhook is either up or it is
     // not; a longer ladder turns one wedged host into a queue that never drains and a comment
     // posted twice when the far end was slow rather than broken.
     delay(RETRY_DELAY_MILLIS)
     if (!send(body)) {
-      onLog("serve: comment webhook $fingerprint did not accept a ${event.event} event")
+      onLog("serve: comment webhook $fingerprint did not accept a $wire event")
     }
   }
 
@@ -434,7 +484,31 @@ internal class ServeUiBuilderCommentWebhook(
 internal data class QueuedCommentChange(
   val change: CommentBoardChange,
   val design: CommentWebhookDesign?,
-)
+) : QueuedWebhookEvent {
+  override val designId: String
+    get() = change.designId
+
+  override val wire: String
+    get() = change.kind.wire
+}
+
+/** What waits in the webhook's one queue: a comment change, or design activity. */
+internal sealed interface QueuedWebhookEvent {
+  val designId: String
+  val wire: String
+}
+
+/** A fork, a verdict or an implementation change, with the design as it was at that moment. */
+internal data class QueuedDesignActivity(
+  val activity: DesignActivity,
+  val design: CommentWebhookDesign?,
+) : QueuedWebhookEvent {
+  override val designId: String
+    get() = activity.designId
+
+  override val wire: String
+    get() = activity.kind.wire
+}
 
 /**
  * How many events go out per minute: per design, and from the whole host. The defaults sit under
@@ -522,6 +596,9 @@ internal enum class CommentWebhookFormat(val wire: String) {
 
   /** `{"text": …}` in Google Chat's markup, which is Slack's for the two things used here. */
   GOOGLE_CHAT("google-chat");
+
+  /** The same dialect for a design-activity event; see [designActivityBody]. */
+  fun activityBody(event: DesignActivityWebhookEventV1): String = designActivityBody(this, event)
 
   fun body(event: DesignCommentWebhookEventV1): String =
     when (this) {
@@ -810,7 +887,7 @@ private fun teamsBody(event: DesignCommentWebhookEventV1): JsonObject = buildJso
  * at all. Escaping would mean predicting one renderer's dialect and re-predicting it whenever that
  * renderer changes; this cannot be got wrong.
  */
-private fun textBlock(text: String, bold: Boolean, subtle: Boolean = false): JsonObject =
+internal fun textBlock(text: String, bold: Boolean, subtle: Boolean = false): JsonObject =
   buildJsonObject {
     put("type", "RichTextBlock")
     putJsonArray("inlines") {
@@ -882,7 +959,7 @@ private fun DesignCommentWebhookEventV1.contextLine(): String? {
  * replaced and nothing else — escaping quotes or ampersand-entities as well is what turns a comment
  * containing `&amp;` into `&amp;amp;` in the channel.
  */
-private fun slackEscape(text: String): String =
+internal fun slackEscape(text: String): String =
   text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 /**
@@ -926,7 +1003,7 @@ internal class HttpCommentWebhookSender(
 }
 
 /** `explicitNulls = false` so an absent author or anchor is an absent key, not `"author": null`. */
-private val WEBHOOK_JSON = Json {
+internal val WEBHOOK_JSON = Json {
   encodeDefaults = true
   explicitNulls = false
 }

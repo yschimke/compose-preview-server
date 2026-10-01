@@ -39,6 +39,18 @@ import kotlinx.serialization.json.encodeToJsonElement
  */
 internal class ServeUiBuilderAncestryStore(private val root: Path) {
   private val lock = Any()
+  private val forkListeners =
+    java.util.concurrent.CopyOnWriteArraySet<(DesignForkPointV1, String) -> Unit>()
+
+  /**
+   * Every fork recorded from now on — the point it was made from and the new design's id — until
+   * the handle is closed. Called on the thread that recorded it, after the record is on disk.
+   * Listeners must not block.
+   */
+  fun subscribeToForks(listener: (DesignForkPointV1, String) -> Unit): java.io.Closeable {
+    forkListeners.add(listener)
+    return java.io.Closeable { forkListeners.remove(listener) }
+  }
 
   init {
     ServeOwnerOnlyFiles.createDirectories(root)
@@ -67,7 +79,11 @@ internal class ServeUiBuilderAncestryStore(private val root: Path) {
                 DesignForkV1(forkId, forkedFrom.revision, atEpochMillis))
               .takeLast(MAX_FORKS)
         )
-      write(fileFor(forkId), child) && write(fileFor(parentId), updatedParent)
+      val recorded = write(fileFor(forkId), child) && write(fileFor(parentId), updatedParent)
+      // Announced only once both ends are on disk: a fork the record does not know about is not
+      // one a notification should point people at.
+      if (recorded) forkListeners.forEach { runCatching { it(forkedFrom, forkId) } }
+      recorded
     }
 
   /** Forget [designId]'s record, and take it off its parent's list of forks. */

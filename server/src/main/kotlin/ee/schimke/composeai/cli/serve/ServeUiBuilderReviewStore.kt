@@ -51,6 +51,8 @@ class ServeUiBuilderReviewStore(private val root: Path) {
 
   private val lock = Any()
   private val subscribers = ConcurrentHashMap<String, MutableSet<(StoredDesignReview) -> Unit>>()
+  private val hostSubscribers =
+    java.util.concurrent.CopyOnWriteArraySet<(StoredDesignReview?, StoredDesignReview) -> Unit>()
 
   /** Everything recorded about [designId]'s review, or null when nothing has been. */
   fun read(designId: String): StoredDesignReview? = readFile(fileFor(designId))
@@ -121,7 +123,7 @@ class ServeUiBuilderReviewStore(private val root: Path) {
           // and an unbounded log is how one design's file outgrows the read that serves it.
           decisions = (current.decisions + decision).takeLast(MAX_DECISIONS),
         )
-      when (val written = write(next)) {
+      when (val written = write(next, previous = current)) {
         null -> ReviewWriteResult.Stored(next, decision, replay = false)
         else -> written
       }
@@ -195,7 +197,7 @@ class ServeUiBuilderReviewStore(private val root: Path) {
           sequence = current.sequence + 1,
           implementation = candidate?.copy(updatedAtEpochMillis = System.currentTimeMillis()),
         )
-      write(next) ?: ReviewWriteResult.Stored(next, null, replay = false)
+      write(next, previous = current) ?: ReviewWriteResult.Stored(next, null, replay = false)
     }
   }
 
@@ -246,6 +248,18 @@ class ServeUiBuilderReviewStore(private val root: Path) {
   }
 
   /**
+   * Every accepted write on any design, as the record was and as it is, until the handle is closed.
+   *
+   * The comment store's host feed ([ServeUiBuilderCommentStore.subscribeToHost]) for reviews: what
+   * changed is a diff of the two records ([diffDesignReviews]) rather than a field this store
+   * carries. Called under the store's lock, on the writer's thread — listeners must not block.
+   */
+  fun subscribeToHost(listener: (StoredDesignReview?, StoredDesignReview) -> Unit): Closeable {
+    hostSubscribers.add(listener)
+    return Closeable { hostSubscribers.remove(listener) }
+  }
+
+  /**
    * Every design whose implementation record names [pr], in a stable order.
    *
    * A directory scan, for the reason [ServeUiBuilderLinksStore.citing] gives, and with the same
@@ -279,7 +293,10 @@ class ServeUiBuilderReviewStore(private val root: Path) {
       false
     }
 
-  private fun write(review: StoredDesignReview): ReviewWriteResult.Failed? {
+  private fun write(
+    review: StoredDesignReview,
+    previous: StoredDesignReview?,
+  ): ReviewWriteResult.Failed? {
     val encoded = REVIEW_JSON.encodeToString(StoredDesignReview.serializer(), review)
     try {
       val temporary = Files.createTempFile(root, "review", ".tmp")
@@ -294,6 +311,7 @@ class ServeUiBuilderReviewStore(private val root: Path) {
       return ReviewWriteResult.Failed("the review record could not be written to disk")
     }
     subscribers[review.designId]?.forEach { listener -> runCatching { listener(review) } }
+    hostSubscribers.forEach { listener -> runCatching { listener(previous, review) } }
     return null
   }
 

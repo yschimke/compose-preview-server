@@ -85,6 +85,11 @@ Both modes are `serve` with flags added, and every flag stays available:
   receives. `plain` is this server's own event JSON and is the default; the other three are the
   incoming-webhook shapes those platforms accept. Named rather than guessed from the hostname: a
   hook behind a relay has a host that says nothing about what parses the body.
+- **`--ui-builder-webhook-events comments|fork|decision|implementation|all[,…]`** — what that hook
+  posts. Defaults to `comments`. `fork` is a proposed alternative (announced on the design it was
+  forked from), `decision` an approval or rejection, and `implementation` the implementing pull
+  request opening, merging, closing or being found to (mis)match the design. Same rate limit and
+  private-design rule as comments.
 - **`--catalogs <system>[@<owner>/<repo>][,…]`** is **not** part of this. It fetches published
   catalogs from their `design-artifacts/<system>` branches and serves them as browsable preview
   sites at `/<system>/`. Publishing a catalog never enables authoring for it, and authoring against

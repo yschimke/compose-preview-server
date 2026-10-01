@@ -3585,9 +3585,15 @@ public class ServeRunner(
             configuredOrigin ?: ServeUrls.origin(linkHost, startedServer?.port ?: requestedPort)
           },
         )
+      val events =
+        uiBuilderWebhookEvents?.let { DesignActivityKind.parseEvents(it) }
+          ?: WebhookEventSelection.DEFAULT
+      val posted =
+        listOfNotNull(if (events.comments) "comment threads, replies and resolutions" else null) +
+          events.activity.map { it.wire }
       System.err.println(
-        "serve: UI-builder comment activity posts to a ${format.wire} webhook " +
-          "(${webhook.fingerprint}); threads, replies and resolutions only"
+        "serve: UI-builder activity posts to a ${format.wire} webhook " +
+          "(${webhook.fingerprint}): ${posted.joinToString(", ").ifEmpty { "nothing selected" }}"
       )
       // A permalink is only useful to somebody who can open it, and on a token-gated host without
       // sign-in nobody receiving one can: the browse token travels as a header or `?token=`, never
@@ -3605,7 +3611,33 @@ public class ServeRunner(
             "configure --github-auth-client-id, or authenticate in front of this server"
         )
       }
-      webhook to webhook.attach(comments)
+      // Each source is attached only when asked for and present; a selected kind with nothing to
+      // watch is said once, for the same reason a hook with no comment store is.
+      val handles = mutableListOf<java.io.Closeable>()
+      if (events.comments) handles += webhook.attach(comments)
+      val reviewKinds =
+        events.activity.intersect(
+          setOf(DesignActivityKind.DECISION, DesignActivityKind.IMPLEMENTATION)
+        )
+      if (reviewKinds.isNotEmpty()) {
+        val reviews = uiBuilderLane?.reviews
+        if (reviews != null) handles += webhook.attachReviews(reviews, reviewKinds)
+        else
+          System.err.println(
+            "serve: --ui-builder-webhook-events names review events and this host keeps no " +
+              "review records; none will be posted"
+          )
+      }
+      if (DesignActivityKind.FORK in events.activity) {
+        val links = uiBuilderLane?.links
+        if (links != null) handles += webhook.attachForks(links.ancestry)
+        else
+          System.err.println(
+            "serve: --ui-builder-webhook-events names fork and this host keeps no design " +
+              "ancestry; none will be posted"
+          )
+      }
+      webhook to java.io.Closeable { handles.forEach { runCatching { it.close() } } }
     }
     val server =
       ServeHttpServer(
