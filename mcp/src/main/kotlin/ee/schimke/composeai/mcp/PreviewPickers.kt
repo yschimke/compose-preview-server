@@ -175,20 +175,21 @@ object PreviewPickers {
           "Several previews match; the first was rendered. Ask the user which one they meant " +
             "and call render_preview with that uri.",
         )
-      Outcome.Declined,
-      Outcome.Cancelled -> {
-        val mode = if (outcome == Outcome.Declined) "declined" else "cancelled"
+      // A cancel is not an answer (a headless client cancels without showing the picker), so it
+      // renders the first match; only a decline renders nothing.
+      Outcome.Cancelled ->
+        rendered(choices.first(), "cancelled", DaemonMcpServer.CANCELLED_CHOICE_MESSAGE)
+      Outcome.Declined ->
         CallToolResult(
           content =
             listOf(
               choiceBlock(
-                mode,
-                "The user $mode the preview choice, so nothing was rendered. Do not ask again " +
+                "declined",
+                "The user declined the preview choice, so nothing was rendered. Do not ask again " +
                   "unless they bring it up; render one by uri if they do.",
               )
             )
         )
-      }
     }
   }
 
