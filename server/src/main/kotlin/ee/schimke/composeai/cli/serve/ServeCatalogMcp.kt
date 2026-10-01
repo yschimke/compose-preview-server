@@ -114,15 +114,30 @@ class ServeCatalogMcp(
     ): FormElicitationResult?
 
     /**
+     * Whether the client declared OpenAI form elicitation (`extensions["openai/elicitation"].form`)
+     * on this session; see [ServeOpenAiForms]. Independent of [formElicitationSupported].
+     */
+    val openAiFormsSupported: Boolean
+      get() = false
+
+    /** Sends `openai/elicitation/create`; [OpenAiFormElicitation.Unsupported] when not declared. */
+    suspend fun elicitOpenAiForm(
+      message: String,
+      requestedSchema: JsonObject,
+      timeoutMillis: Long,
+    ): OpenAiFormElicitation = OpenAiFormElicitation.Unsupported
+
+    /**
      * This interaction, except that an accepted answer is dropped — read as no answer at all —
      * unless [stillAuthorized] holds when it arrives. Declines and cancels pass through: they write
      * nothing either way.
      */
     fun reauthorizedOnAccept(stillAuthorized: () -> Boolean): ClientInteraction {
-      if (!formElicitationSupported) return this
+      if (!formElicitationSupported && !openAiFormsSupported) return this
       val delegate = this
       return object : ClientInteraction {
-        override val formElicitationSupported = true
+        override val formElicitationSupported = delegate.formElicitationSupported
+        override val openAiFormsSupported = delegate.openAiFormsSupported
 
         override suspend fun elicitForm(
           message: String,
@@ -131,6 +146,22 @@ class ServeCatalogMcp(
         ): FormElicitationResult? {
           val answer = delegate.elicitForm(message, requestedSchema, timeoutMillis) ?: return null
           if (answer.action == FormElicitationAction.ACCEPT && !stillAuthorized()) return null
+          return answer
+        }
+
+        override suspend fun elicitOpenAiForm(
+          message: String,
+          requestedSchema: JsonObject,
+          timeoutMillis: Long,
+        ): OpenAiFormElicitation {
+          val answer = delegate.elicitOpenAiForm(message, requestedSchema, timeoutMillis)
+          if (
+            answer is OpenAiFormElicitation.Answered &&
+              answer.result.action == FormElicitationAction.ACCEPT &&
+              !stillAuthorized()
+          ) {
+            return OpenAiFormElicitation.NoAnswer
+          }
           return answer
         }
       }
@@ -2779,7 +2810,11 @@ class ServeCatalogMcp(
       again is UiBuilderAuthorizationDecision.Authorized && again.actor == actor
     }
     val text = builder.call(name, args, actor, callId = name, clientInteraction = interaction)
-    if (name == ServeUiBuilderMcp.VIEW || name == ServeUiBuilderMcp.RENDER_DESIGN_MATRIX) {
+    if (
+      name == ServeUiBuilderMcp.VIEW ||
+        name == ServeUiBuilderMcp.RENDER_DESIGN_MATRIX ||
+        name in ServeUiBuilderAlternativeTools.TOOL_NAMES
+    ) {
       return uiBuilderViewResult(
         text,
         inline = args[ServeUiBuilderMcp.INLINE_ARGUMENT]?.jsonPrimitive?.booleanOrNull == true,
@@ -3003,6 +3038,8 @@ class ServeCatalogMcp(
       ServeUiBuilderMcp.COMPARE_REFERENCE -> UiBuilderJsonSchemas.referenceComparisonOutput
       in ServeUiBuilderHistoryTools.TOOL_NAMES -> ServeUiBuilderHistoryTools.outputSchema(name)!!
       in ServeUiBuilderBranchTools.TOOL_NAMES -> ServeUiBuilderBranchTools.outputSchema(name)!!
+      in ServeUiBuilderAlternativeTools.TOOL_NAMES ->
+        ServeUiBuilderAlternativeTools.outputSchema(name)!!
       "render_preview" ->
         buildJsonObject {
           put("type", "object")

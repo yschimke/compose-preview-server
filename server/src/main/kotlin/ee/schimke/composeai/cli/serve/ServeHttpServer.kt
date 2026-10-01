@@ -10144,10 +10144,22 @@ class ServeHttpServer(
         call.respond(HttpStatusCode.Accepted)
         return
       }
-      val elicitingVersion = formElicitationProtocol(request)
+      val formVersion = formElicitationProtocol(request)
+      // OpenAI form elicitation (`extensions["openai/elicitation"].form`) also needs the request
+      // scope, whether or not plain form elicitation was declared beside it.
+      val openAiVersion =
+        (request["params"] as? JsonObject)
+          ?.takeIf(ServeOpenAiForms::declaredIn)
+          ?.let { (it["protocolVersion"] as? JsonPrimitive)?.contentOrNull }
+          ?.takeIf { it in ELICITING_PROTOCOL_VERSIONS }
+      val elicitingVersion = formVersion ?: openAiVersion
       if (acceptsRequestScope && elicitingVersion != null) {
         val scope =
-          requestScopes.open(protocolVersion = elicitingVersion, formElicitationSupported = true)
+          requestScopes.open(
+            protocolVersion = elicitingVersion,
+            formElicitationSupported = formVersion != null,
+            openAiFormsSupported = openAiVersion != null,
+          )
         // Capacity exhausted by pending interactions: stay stateless rather than refuse.
         scope?.let { call.response.headers.append(MCP_SESSION_ID_HEADER, it.id) }
       }

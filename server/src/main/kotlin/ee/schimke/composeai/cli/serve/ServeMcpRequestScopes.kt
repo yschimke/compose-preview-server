@@ -55,6 +55,8 @@ internal class ServeMcpRequestScopes(
     val lastUsedMillis: AtomicLong,
     val pendingPermits: Semaphore,
     val pending: ConcurrentHashMap<String, Pending> = ConcurrentHashMap(),
+    /** The client declared `extensions["openai/elicitation"].form`; see [ServeOpenAiForms]. */
+    val openAiFormsSupported: Boolean = false,
   )
 
   /**
@@ -75,7 +77,11 @@ internal class ServeMcpRequestScopes(
    * path.
    */
   @Synchronized
-  fun open(protocolVersion: String, formElicitationSupported: Boolean): Scope? {
+  fun open(
+    protocolVersion: String,
+    formElicitationSupported: Boolean,
+    openAiFormsSupported: Boolean = false,
+  ): Scope? {
     require(protocolVersion.isNotBlank())
     expireIdle()
     if (scopes.size >= maxSessions) {
@@ -92,6 +98,7 @@ internal class ServeMcpRequestScopes(
           formElicitationSupported = formElicitationSupported,
           lastUsedMillis = AtomicLong(nowMillis()),
           pendingPermits = Semaphore(maxPendingPerSession),
+          openAiFormsSupported = openAiFormsSupported,
         )
       if (scopes.putIfAbsent(scope.id, scope) == null) return scope
     }
@@ -153,6 +160,7 @@ internal class ServeMcpRequestScopes(
   ): ServeCatalogMcp.ClientInteraction =
     object : ServeCatalogMcp.ClientInteraction {
       override val formElicitationSupported = scope.formElicitationSupported
+      override val openAiFormsSupported = scope.openAiFormsSupported
 
       override suspend fun elicitForm(
         message: String,
@@ -160,40 +168,85 @@ internal class ServeMcpRequestScopes(
         timeoutMillis: Long,
       ): ServeCatalogMcp.FormElicitationResult? {
         if (!formElicitationSupported || message.isBlank() || timeoutMillis <= 0) return null
-        if (!scope.pendingPermits.tryAcquire()) return null
-
-        val id = "elicit-${newId()}"
-        val response = CompletableDeferred<JsonObject>()
-        val pending = Pending(response, credentialFingerprint(credential))
-        if (scope.pending.putIfAbsent(id, pending) != null) {
-          scope.pendingPermits.release()
-          return null
+        val params = buildJsonObject {
+          put("message", message)
+          put("requestedSchema", requestedSchema)
         }
-        scope.lastUsedMillis.set(nowMillis())
-        return try {
-          withTimeoutOrNull(timeoutMillis.coerceAtMost(maxInteractionTimeoutMillis)) {
-            emit(
-              buildJsonObject {
-                put("jsonrpc", "2.0")
-                put("id", id)
-                put("method", "elicitation/create")
-                put(
-                  "params",
-                  buildJsonObject {
-                    put("message", message)
-                    put("requestedSchema", requestedSchema)
-                  },
-                )
-              }
-            )
-            parseElicitationResponse(response.await())
-          }
-        } finally {
-          scope.pending.remove(id, pending)
-          scope.pendingPermits.release()
+        val response =
+          exchange(scope, credential, emit, "elicitation/create", params, timeoutMillis)
+            as? Exchange.Response ?: return null
+        return parseElicitationResponse(response.body)
+      }
+
+      override suspend fun elicitOpenAiForm(
+        message: String,
+        requestedSchema: JsonObject,
+        timeoutMillis: Long,
+      ): OpenAiFormElicitation {
+        if (!openAiFormsSupported || message.isBlank() || timeoutMillis <= 0) {
+          return OpenAiFormElicitation.Unsupported
+        }
+        val params = ServeOpenAiForms.requestParams(message, requestedSchema)
+        return when (
+          val exchanged =
+            exchange(scope, credential, emit, ServeOpenAiForms.METHOD, params, timeoutMillis)
+        ) {
+          // Another interaction holds the session's only slot: ask some other way.
+          Exchange.Busy -> OpenAiFormElicitation.Unsupported
+          Exchange.TimedOut -> OpenAiFormElicitation.NoAnswer
+          is Exchange.Response ->
+            // A JSON-RPC error is the client refusing the method, as #1253 reads it: fall back.
+            if (exchanged.body["error"] != null) OpenAiFormElicitation.Unsupported
+            else
+              parseElicitationResponse(exchanged.body)?.let(OpenAiFormElicitation::Answered)
+                ?: OpenAiFormElicitation.NoAnswer
         }
       }
     }
+
+  private sealed interface Exchange {
+    data object Busy : Exchange
+
+    data object TimedOut : Exchange
+
+    data class Response(val body: JsonObject) : Exchange
+  }
+
+  /** Sends one server-to-client request on [scope] and waits, bounded, for its answer. */
+  private suspend fun exchange(
+    scope: Scope,
+    credential: String?,
+    emit: suspend (JsonObject) -> Unit,
+    method: String,
+    params: JsonObject,
+    timeoutMillis: Long,
+  ): Exchange {
+    if (!scope.pendingPermits.tryAcquire()) return Exchange.Busy
+    val id = "elicit-${newId()}"
+    val response = CompletableDeferred<JsonObject>()
+    val pending = Pending(response, credentialFingerprint(credential))
+    if (scope.pending.putIfAbsent(id, pending) != null) {
+      scope.pendingPermits.release()
+      return Exchange.Busy
+    }
+    scope.lastUsedMillis.set(nowMillis())
+    return try {
+      withTimeoutOrNull(timeoutMillis.coerceAtMost(maxInteractionTimeoutMillis)) {
+        emit(
+          buildJsonObject {
+            put("jsonrpc", "2.0")
+            put("id", id)
+            put("method", method)
+            put("params", params)
+          }
+        )
+        Exchange.Response(response.await())
+      } ?: Exchange.TimedOut
+    } finally {
+      scope.pending.remove(id, pending)
+      scope.pendingPermits.release()
+    }
+  }
 
   /**
    * Runs one request inside [scope] and picks the response shape lazily. A call that never sends
