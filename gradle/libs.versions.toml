@@ -289,6 +289,9 @@ composeai-contracts = "3.15.0"
 # compiles. Its editor archive opens the MCP App on a focused canvas and reads
 # `__COMPOSE_UI_BUILDER_MCP_APP_LAYOUT__`, which `:mcp` fills from `uiBuilderMcpAppLayout`
 # (compose-ui-builder#378). `androidx-window` and `composeai-contracts` are unchanged again.
+# Its editor also adds the Talk panel's review section (compose-ui-builder#381): Approve / Request
+# changes on the revision on screen, posted through this server's decisions route (#1255), so a
+# person's verdict wakes an agent waiting in `ui_builder_await_decision`.
 composeai-ui-builder = "3.71.0"
 # 1.65.0 is the first release publishing `rc-players-bom`. (1.64.0 is a tag and a GitHub Release
 # whose Maven coordinates never reached Central -- rc-players#211 -- so it cannot be pinned.)
