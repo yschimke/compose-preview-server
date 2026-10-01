@@ -280,7 +280,13 @@ composeai-contracts = "3.15.0"
 # 3.70.0 packages the `.uid` MCP App shell in the editor archive and declares `"mcpApp": 1`
 # (compose-ui-builder#366), which turns on `:mcp`'s `design_open` (compose-ui-builder#364).
 # `androidx-window` and `composeai-contracts` are unchanged on that release, so they stay put.
-composeai-ui-builder = "3.70.0"
+# 3.71.0 adds the Talk panel's review section (compose-ui-builder#381): Approve / Request changes on
+# the revision on screen, posted through this server's decisions route (#1255) so a person's verdict
+# wakes an agent waiting in `ui_builder_await_decision`. It also carries local components (#379),
+# design branches in the runtime (#377) and the MCP App editor's focused canvas mode (#378); the
+# server's tests run against it in compose-ui-builder's `server-against-checkout`. `androidx-window`
+# and `composeai-contracts` are unchanged on it.
+composeai-ui-builder = "3.71.0"
 # 1.65.0 is the first release publishing `rc-players-bom`. (1.64.0 is a tag and a GitHub Release
 # whose Maven coordinates never reached Central -- rc-players#211 -- so it cannot be pinned.)
 # 1.67.0 by hand, ahead of Renovate's soak: it pins the KMP player modules to a Java 17 toolchain
