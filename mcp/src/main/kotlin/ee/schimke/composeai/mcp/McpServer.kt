@@ -139,8 +139,11 @@ class McpSession(
                 onClose()
               }
               configure(session)
+              // RawParamsTransport lets `openai/elicitation/create` carry its untyped schema.
               session.connect(
-                StdioServerTransport(input.asSource().buffered(), output.asSink().buffered()) {}
+                RawParamsTransport(
+                  StdioServerTransport(input.asSource().buffered(), output.asSink().buffered()) {}
+                )
               )
               while (!closed.isDone) {
                 delay(100)
@@ -267,6 +270,20 @@ class McpSession(
       session.createElicitation(message, schema, RequestOptions(timeout = timeoutMs.milliseconds))
     }
   }
+
+  /** True when the client declared OpenAI form elicitation ([OpenAiForms.supportsForms]). */
+  val supportsOpenAiForms: Boolean
+    get() = OpenAiForms.supportsForms(sdkSession?.clientCapabilities)
+
+  /**
+   * Ask through an OpenAI extended form (`openai/elicitation/create`, #1240). Same outcomes as
+   * [elicitForm]; [FormElicitation.Unsupported] when the client did not declare the extension.
+   */
+  suspend fun elicitOpenAiForm(
+    message: String,
+    requestedSchema: JsonObject,
+    timeoutMs: Long = DEFAULT_ELICITATION_TIMEOUT_MS,
+  ): FormElicitation = OpenAiForms.elicit(sdkSession, message, requestedSchema, timeoutMs)
 
   /**
    * True when the client declared the MCP Apps extension (`io.modelcontextprotocol/ui`, under
