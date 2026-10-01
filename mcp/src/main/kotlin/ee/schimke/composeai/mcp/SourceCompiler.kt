@@ -245,7 +245,11 @@ class GradleSourceCompiler(
 class InitScripts(
   private val environment: Map<String, String> = System.getenv(),
   private val userHome: File = File(System.getProperty("user.home") ?: "."),
+  private val cli: CliInitScript? = CliInitScript.subprocess(environment, userHome),
 ) {
+
+  /** Builds the CLI was already asked to write a script for; asked at most once per build. */
+  private val cliAsked = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
 
   fun forProject(projectRoot: File): File? {
     if (environment["COMPOSE_PREVIEW_NO_AUTO_INJECT"] == "1") return null
@@ -255,6 +259,10 @@ class InitScripts(
       ?.let {
         return File(it).takeIf(File::isFile)
       }
+    return cached() ?: fromCli(projectRoot)
+  }
+
+  private fun cached(): File? {
     val cacheRoot =
       environment["XDG_CACHE_HOME"]?.takeIf { it.isNotBlank() }?.let { File(it, "composeai/init") }
         ?: File(userHome, ".cache/composeai/init")
@@ -264,6 +272,19 @@ class InitScripts(
       .sortedWith(compareByDescending<File, List<Int>>(VERSION_ORDER) { versionKey(it.name) })
       .map { File(it, FILE_NAME) }
       .firstOrNull(File::isFile)
+  }
+
+  /**
+   * Nothing cached yet, as on a machine where `compose-preview mcp install` never ran: ask the CLI
+   * to write the script (`compose-preview init-script --path`, side-effect free), instead of
+   * failing the first render with "run `compose-preview mcp install` once"
+   * (yschimke/compose-ag-plugin#87).
+   */
+  private fun fromCli(projectRoot: File): File? {
+    val cli = cli ?: return null
+    if (projectAppliesPlugin(projectRoot)) return null
+    if (!cliAsked.add(projectRoot.absolutePath)) return null
+    return runCatching { cli.materialize(projectRoot) }.getOrNull()?.takeIf(File::isFile)
   }
 
   /**
@@ -316,5 +337,84 @@ class InitScripts(
           .map { (a.getOrElse(it) { 0 }).compareTo(b.getOrElse(it) { 0 }) }
           .firstOrNull { it != 0 } ?: 0
       }
+  }
+}
+
+/**
+ * Asks the compose-preview CLI to write its init script for a build and returns the path; a seam so
+ * tests need no CLI. Driving Gradle stays the CLI's job: this only runs `compose-preview
+ * init-script --path` across a process boundary, which writes the script into the cache
+ * [InitScripts] reads.
+ */
+fun interface CliInitScript {
+
+  fun materialize(projectRoot: File): File?
+
+  companion object {
+    private const val CLI_NAME = "compose-preview"
+
+    /**
+     * The launcher the CLI names in `COMPOSE_PREVIEW_CLI`, else `compose-preview` on
+     * [environment]'s `PATH`, else the installer's `~/.local/bin/compose-preview`. Null when none
+     * exists.
+     */
+    fun locate(environment: Map<String, String>, userHome: File): File? {
+      environment["COMPOSE_PREVIEW_CLI"]
+        ?.takeIf { it.isNotBlank() }
+        ?.let { File(it) }
+        ?.takeIf { it.isFile && it.canExecute() }
+        ?.let {
+          return it
+        }
+      val names =
+        if (System.getProperty("os.name").orEmpty().startsWith("Windows"))
+          listOf("$CLI_NAME.bat", "$CLI_NAME.cmd", CLI_NAME)
+        else listOf(CLI_NAME)
+      val onPath =
+        environment["PATH"]
+          .orEmpty()
+          .split(File.pathSeparatorChar)
+          .filter { it.isNotBlank() }
+          .flatMap { dir -> names.map { File(dir, it) } }
+      return (onPath + File(userHome, ".local/bin/$CLI_NAME")).firstOrNull {
+        it.isFile && it.canExecute()
+      }
+    }
+
+    /** Runs the located CLI with captured output: this process's stdout is the MCP transport. */
+    fun subprocess(
+      environment: Map<String, String>,
+      userHome: File,
+      timeoutMs: Long = TimeUnit.MINUTES.toMillis(2),
+    ): CliInitScript = CliInitScript { projectRoot ->
+      val launcher = locate(environment, userHome) ?: return@CliInitScript null
+      val process =
+        ProcessBuilder(launcher.absolutePath, "init-script", "--path")
+          .directory(projectRoot)
+          .redirectError(ProcessBuilder.Redirect.DISCARD)
+          .start()
+      process.outputStream.close()
+      val output = StringBuilder()
+      val reader =
+        Thread(
+            { runCatching { output.append(process.inputStream.bufferedReader().readText()) } },
+            "compose-preview-mcp-init-script",
+          )
+          .apply {
+            isDaemon = true
+            start()
+          }
+      if (!process.waitFor(timeoutMs, TimeUnit.MILLISECONDS)) {
+        process.destroyForcibly()
+        return@CliInitScript null
+      }
+      reader.join(2_000)
+      if (process.exitValue() != 0) return@CliInitScript null
+      output
+        .lines()
+        .map { it.trim() }
+        .lastOrNull { it.endsWith(InitScripts.FILE_NAME) }
+        ?.let { File(it) }
+    }
   }
 }

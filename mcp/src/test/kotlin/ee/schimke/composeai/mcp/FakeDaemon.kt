@@ -264,6 +264,19 @@ class FakeDaemon : DaemonSpawn {
   @Volatile var autoRenderWorkTrace: ((previewId: String) -> JsonElement?)? = null
 
   /**
+   * Rejects a `renderNow` for a preview when it returns a reason, the way the real daemon answers
+   * `coalesced: override-bearing render already in flight for this previewId`: the preview goes in
+   * `rejected`, and no `renderFinished` or `renderFailed` ever follows for that request.
+   */
+  @Volatile
+  var rejectRenderNow:
+    ((
+      previewId: String,
+      overrides: ee.schimke.composeai.daemon.protocol.PreviewOverrides?,
+    ) -> String?)? =
+    null
+
+  /**
    * Path returned in `InitializeResult.manifest.path`. The MCP server's `DaemonSupervisor` caches
    * it on `SupervisedDaemon.manifestPath` so the background poller can stat the file and re-read on
    * change (issue #834). Tests that drive the manifest poller assign this before the spawn calls
@@ -473,21 +486,30 @@ class FakeDaemon : DaemonSpawn {
         // probes) must see this request answered with the lambda that was set when it was made.
         // Reading the lambda after the offer let the test's reassignment win the race on a loaded
         // box, so the first probe carried the second probe's answer.
+        val rejected = previews.mapNotNull { pid ->
+          rejectRenderNow?.invoke(pid, overrides)?.let {
+            ee.schimke.composeai.daemon.protocol.RejectedRender(pid, it)
+          }
+        }
+        val rejectedIds = rejected.map { it.id }.toSet()
         val finished =
           autoRenderPngPath?.let { provider ->
-            previews.mapNotNull { pid ->
-              provider(pid)?.let { path ->
-                AutoRender(
-                  pid,
-                  path,
-                  autoRenderUnchanged?.invoke(pid),
-                  autoRenderWorkTrace?.invoke(pid),
-                )
+            previews
+              .filterNot { it in rejectedIds }
+              .mapNotNull { pid ->
+                provider(pid)?.let { path ->
+                  AutoRender(
+                    pid,
+                    path,
+                    autoRenderUnchanged?.invoke(pid),
+                    autoRenderWorkTrace?.invoke(pid),
+                  )
+                }
               }
-            }
           } ?: emptyList()
         renderRequests.offer(previews)
-        val result = RenderNowResult(queued = previews, rejected = emptyList())
+        val result =
+          RenderNowResult(queued = previews.filterNot { it in rejectedIds }, rejected = rejected)
         sendResponse(id, json.encodeToJsonElement(RenderNowResult.serializer(), result))
         // Auto-emit renderFinished for any preview whose path the test pre-registered. The
         // emission happens AFTER the response so the daemon-protocol ordering matches what a
