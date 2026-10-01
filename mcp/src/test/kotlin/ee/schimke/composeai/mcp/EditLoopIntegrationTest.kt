@@ -148,13 +148,17 @@ class EditLoopIntegrationTest {
         assertThat(compile.taskPaths).contains(":app:${GradleSourceCompiler.TASK}")
         assertThat(compile.disallowedTasks(allowedModules = setOf(":app"))).isEmpty()
 
-        // TODO(#1181): once the daemon sends `renderFinished.workTrace` (a trace of the
-        //  post-capture processors and data kinds it ran), require it here and assert that no
-        //  unrequested kind such as `compose/figma-svg` ran. Until then this only checks a trace
-        //  that happens to be present.
-        current.work?.get("daemonTrace")?.let { trace ->
-          assertThat(trace.toString()).doesNotContain("compose/figma-svg")
-        }
+        // The daemon's own trace of the render (#1181): every warm render reports what it ran,
+        // and nothing the agent did not ask for ran — the `compose/figma-svg` export in
+        // particular, which used to cost 5-7 s of every warm render (#1174).
+        val trace = current.work?.get("daemonTrace")?.jsonObject
+        assertThat(trace).isNotNull()
+        val processors = trace!!.stringList("processors")
+        val dataKinds = trace.stringList("dataKinds")
+        assertThat(processors).isNotNull()
+        assertThat(dataKinds).isNotNull()
+        assertThat(processors).doesNotContain(FIGMA_SVG_KIND)
+        assertThat(dataKinds).doesNotContain(FIGMA_SVG_KIND)
 
         assertThat(cycleMs).isLessThan(WARM_CYCLE_BUDGET_MS)
         previous = current
@@ -312,6 +316,10 @@ class EditLoopIntegrationTest {
     )
   }
 
+  /** The strings under [key], or null when the trace does not record that kind of work. */
+  private fun JsonObject.stringList(key: String): List<String>? =
+    (this[key] as? kotlinx.serialization.json.JsonArray)?.map { it.jsonPrimitive.content }
+
   private fun pixelsDiffer(a: File, b: File): Boolean {
     val left = ImageIO.read(a)
     val right = ImageIO.read(b)
@@ -363,5 +371,7 @@ class EditLoopIntegrationTest {
      * unrequested `compose/figma-svg`).
      */
     const val WARM_CYCLE_BUDGET_MS = 30_000L
+    /** The Figma SVG export kind, which no edit-loop render asks for. */
+    const val FIGMA_SVG_KIND = "compose/figma-svg"
   }
 }
