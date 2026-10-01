@@ -3495,6 +3495,173 @@ class DaemonMcpServerTest {
     assertThat(selection["choices"]!!.jsonArray).hasSize(2)
   }
 
+  /** A spawned fake daemon for `com.example.Red` that renders [png] for every request. */
+  private fun redPreviewDaemon(png: File): Pair<FakeDaemon, String> {
+    client.initialize()
+    val projectDir = tmp.newFolder("queue-workspace")
+    tmp.newFolder("queue-workspace", "module")
+    val workspaceId = registerWorkspace(projectDir, "queue")
+    val daemon = warmDaemonFor(workspaceId, ":module")
+    val previewId = "com.example.Red"
+    daemon.emitDiscovery(previewId)
+    client.expectNotification("notifications/resources/list_changed", 2_000)
+    daemon.autoRenderPngPath = { id -> if (id == previewId) png.absolutePath else null }
+    return daemon to PreviewUri(workspaceId, ":module", previewId).toUri()
+  }
+
+  private fun fontScaleMatrix(uri: String, vararg scales: Double) =
+    client.callTool(
+      "render_matrix",
+      buildJsonObject {
+        put("uri", uri)
+        putJsonObject("axes") { putJsonArray("fontScale") { scales.forEach { add(it) } } }
+      },
+      timeoutMs = 20_000,
+    )
+
+  @Test
+  fun `render_matrix retries a coalesced renderNow rejection instead of timing out`() {
+    // yschimke/compose-ag-plugin#64: the daemon rejects an override render while it still records
+    // the previous one ("coalesced: …") and never sends renderFinished for it. The MCP server
+    // ignored the rejection, so every fontScale matrix waited 60 s and the queue stayed blocked.
+    val png = tmp.newFile("coalesced.png").also { writeSolidPng(it, 0xffff0000.toInt()) }
+    val (daemon, uri) = redPreviewDaemon(png)
+    val rejected = java.util.concurrent.atomic.AtomicInteger()
+    daemon.rejectRenderNow = { _, overrides ->
+      if (overrides?.fontScale == 2f && rejected.getAndIncrement() < 2)
+        "coalesced: override-bearing render already in flight for this previewId"
+      else null
+    }
+
+    val started = System.nanoTime()
+    val resp = fontScaleMatrix(uri, 1.0, 2.0)
+    assertWithMessage(resp.firstTextContent()).that(resp.isError()).isFalse()
+    assertThat(TimeUnit.NANOSECONDS.toSeconds(System.nanoTime() - started)).isLessThan(10)
+    assertThat(rejected.get()).isAtLeast(2)
+    val parsed = json.parseToJsonElement(resp.firstTextContent()).jsonObject
+    assertThat(parsed["cellCount"]?.jsonPrimitive?.content?.toInt()).isEqualTo(2)
+
+    // The queue is not left behind a head that can never pop.
+    val single =
+      client.callTool(
+        "render_preview",
+        buildJsonObject {
+          put("uri", uri)
+          putJsonObject("overrides") { put("fontScale", 2.0) }
+          put("observe", "hash")
+        },
+        timeoutMs = 10_000,
+      )
+    assertWithMessage(single.firstTextContent()).that(single.isError()).isFalse()
+  }
+
+  @Test
+  fun `a render the daemon rejects outright fails fast and frees the queue`() {
+    val png = tmp.newFile("rejected.png").also { writeSolidPng(it, 0xff00ff00.toInt()) }
+    val (daemon, uri) = redPreviewDaemon(png)
+    daemon.rejectRenderNow = { _, overrides ->
+      if (overrides?.fontScale == 3f) "unsupported: no such font scale" else null
+    }
+
+    val started = System.nanoTime()
+    val failed = fontScaleMatrix(uri, 3.0)
+    assertThat(failed.isError()).isTrue()
+    assertThat(failed.firstTextContent()).contains("unsupported: no such font scale")
+    assertThat(TimeUnit.NANOSECONDS.toSeconds(System.nanoTime() - started)).isLessThan(10)
+
+    val next = fontScaleMatrix(uri, 1.0)
+    assertWithMessage(next.firstTextContent()).that(next.isError()).isFalse()
+  }
+
+  @Test
+  fun `matrix cells say whether they changed since the session's last render`() {
+    // yschimke/compose-ag-plugin#64: `changed` compares with the first cell of the call, which an
+    // agent read as "unchanged since my edit"; `changedSinceLastRender` answers that question.
+    val png = tmp.newFile("since-last.png").also { writeSolidPng(it, 0xff0000ff.toInt()) }
+    val (_, uri) = redPreviewDaemon(png)
+    fun cells() =
+      json
+        .parseToJsonElement(fontScaleMatrix(uri, 1.0, 2.0).firstTextContent())
+        .jsonObject["cells"]!!
+        .jsonArray
+        .map { it.jsonObject["changedSinceLastRender"]!!.jsonPrimitive.content.toBoolean() }
+
+    assertThat(cells()).containsExactly(true, true)
+    assertThat(cells()).containsExactly(false, false)
+    writeSolidPng(png, 0xffffff00.toInt())
+    assertThat(cells()).containsExactly(true, true)
+  }
+
+  @Test
+  fun `a preview in a new source file is rediscovered by name, and a typo runs no Gradle`() {
+    // yschimke/compose-ag-plugin#64: previews in a newly added file never reached the catalog,
+    // even after notify_file_changed and force; `compose-preview show` found them.
+    val projectDir = tmp.newFolder("rediscover")
+    File(projectDir, "module").mkdirs()
+    File(projectDir, "gradlew").writeText("#!/bin/sh\n")
+    val manifest = tmp.newFile("rediscover.previews.json")
+    manifest.writeText(
+      """{"previews":[{"id":"com.example.Initial","className":"com.example",""" +
+        """"functionName":"Initial","displayName":"Initial"}]}"""
+    )
+    assertThat(manifest.setLastModified(System.currentTimeMillis() - 60_000)).isTrue()
+    factory.daemonConfigurer = { it.advertisedManifestPath = manifest.absolutePath }
+    val calls = java.util.concurrent.CopyOnWriteArrayList<List<String>>()
+    val runner = GradleTaskRunner { _, _, arguments, _ ->
+      // Registration's warm-up runs the full bootstrap; only the discover-only rerun counts here.
+      if ("composePreviewDaemonStart" in arguments) {
+        return@GradleTaskRunner GradleTaskRunner.Result(1, "not under test")
+      }
+      calls += arguments
+      manifest.writeText(
+        """{"previews":[{"id":"com.example.Initial","className":"com.example",""" +
+          """"functionName":"Initial","displayName":"Initial"},""" +
+          """{"id":"com.example.FreshPreview","className":"com.example",""" +
+          """"functionName":"FreshPreview","displayName":"FreshPreview"}]}"""
+      )
+      GradleTaskRunner.Result(0, "BUILD SUCCESSFUL")
+    }
+    val rediscoverServer =
+      DaemonMcpServer(
+        supervisor,
+        workingDirectory = null,
+        projectBootstrap =
+          ProjectBootstrap(
+            initScripts = InitScripts(environment = emptyMap(), userHome = tmp.newFolder("home")),
+            runner = runner,
+          ),
+      )
+    restartSession(rediscoverServer)
+    client.initialize()
+    val workspaceId = registerWorkspace(projectDir, "rediscover")
+    val daemon = warmDaemonFor(workspaceId, ":module")
+    val png = tmp.newFile("fresh.png").also { writeSolidPng(it, 0xff00ffff.toInt()) }
+    daemon.autoRenderPngPath = { png.absolutePath }
+    File(projectDir, "module/src/main/kotlin/Fresh.kt").apply {
+      parentFile.mkdirs()
+      writeText("@Preview\n@Composable\nfun FreshPreview() {}\n")
+    }
+
+    val resolved =
+      client.callTool(
+        "render_preview",
+        buildJsonObject {
+          put("preview", "FreshPreview")
+          put("observe", "hash")
+        },
+        timeoutMs = 10_000,
+      )
+    assertThat(resolved.firstTextContent()).doesNotContain("no preview matches")
+    assertThat(calls).hasSize(1)
+    assertThat(calls.single()).contains(ProjectBootstrap.DISCOVER_TASK)
+
+    val typo =
+      client.callTool("render_preview", buildJsonObject { put("preview", "NoSuchPreview") })
+    assertThat(typo.firstTextContent()).contains("no preview matches")
+    assertThat(calls).hasSize(1)
+    rediscoverServer.shutdown()
+  }
+
   @Test
   fun `render_preview asks which matching variant to render and falls back to listed choices`() {
     data class Case(
