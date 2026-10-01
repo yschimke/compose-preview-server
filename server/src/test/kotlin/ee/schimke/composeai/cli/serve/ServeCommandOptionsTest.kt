@@ -116,6 +116,18 @@ class ServeCommandOptionsTest {
   }
 
   @Test
+  fun `webhook events are a checked list, and a typo is refused rather than narrowed`() {
+    assertNull(options(emptyList()).uiBuilderWebhookEvents)
+    assertEquals(
+      "comments,decision",
+      options(listOf("--ui-builder-webhook-events", "comments,decision")).uiBuilderWebhookEvents,
+    )
+    assertFailsWith<IllegalArgumentException> {
+      options(listOf("--ui-builder-webhook-events", "comments,decisions"))
+    }
+  }
+
+  @Test
   fun `runtime bundle arguments reject duplicates and malformed entries`() {
     assertFailsWith<IllegalArgumentException> {
       options(listOf("--ui-builder-runtime-dir", "runtime="))

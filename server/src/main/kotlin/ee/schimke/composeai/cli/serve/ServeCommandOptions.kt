@@ -911,6 +911,23 @@ public class ServeCommandOptions(
       }
 
   /**
+   * Which events that hook posts. Refused rather than narrowed when it names a word nobody defined:
+   * a typo that silently dropped `decision` would be a channel that never hears about an approval.
+   */
+  override val uiBuilderWebhookEvents: String? =
+    args
+      .flagValue("--ui-builder-webhook-events")
+      ?.trim()
+      ?.takeIf { it.isNotEmpty() }
+      ?.also {
+        require(DesignActivityKind.parseEvents(it) != null) {
+          "--ui-builder-webhook-events takes a comma-separated list of " +
+            DesignActivityKind.WIRE_NAMES.joinToString(", ") +
+            "; got `$it`"
+        }
+      }
+
+  /**
    * Which served catalog compiles each UI-builder catalog's designs for the native preview lane.
    *
    * Same `<key>=<value>` shape as `--ui-builder-components` and for the same reason: a host serving
@@ -1522,6 +1539,11 @@ public class ServeCommandOptions(
                           The body shape --ui-builder-comment-webhook posts. Defaults to plain,
                           this server's own event JSON, for a bespoke receiver or a relay. The
                           other three are the incoming-webhook bodies those chat platforms accept.
+        --ui-builder-webhook-events comments|fork|decision|implementation|all[,...]
+                          What --ui-builder-comment-webhook posts. Defaults to comments. fork is a
+                          proposed alternative, decision an approve or reject, implementation the
+                          implementing pull request opening, merging or (mis)matching its design.
+                          Same rate limit and private-design rule as comments.
         --open-browser    Open a browser on the served URL at startup. Used by the `browse` and
                           `ui` launchers; plain `serve` prints the link instead.
         --open-path <path>
