@@ -195,6 +195,7 @@ that protocol/SDK migration is deliberately not bundled into the compatibility t
 | `ui_builder_fork_design` | `ui-builder-write` | A new design from one revision of another, with its `forkedFrom` recorded and listed on both ends through `ui_builder_get_links` |
 | `ui_builder_branch_design`, `ui_builder_list_branches` | `ui-builder-write`, `ui-builder-read` | Fork a design at a revision into a **branch** (a design of its own, edited with `ui_builder_apply`), and list a design's branches by status; present where the host's service keeps branches (below) |
 | `ui_builder_merge_branch`, `ui_builder_archive_branch` | `ui-builder-write` | Replay a branch onto its parent, all or nothing, with a per-command report (`dryRun`, `skipOperationIds`); or close it unmerged |
+| `ui_builder_compare_branches`, `ui_builder_pick_branch` | `ui-builder-read` | Put a design's open branches side by side in one signed picture with a diff summary each; ask the person which to keep (thumbnail picker, plain form, or a numbered list for chat). Present with the branch tools |
 | `ui_builder_export` | `ui-builder-export` | Export a design — `compose` returns the generator's Kotlin, or diagnostics naming each reason it refused |
 | `ui_builder_view` | `ui-builder-read` (plus `ui-builder-export` for `renderer: "native"`) | The editor canvas as a person sees it — a PNG with the selection, reference overlay, comment pins and layout bounds drawn on, and the node boxes and pin positions as JSON (#1114) |
 | `ui_builder_set_reference` | `ui-builder-write` | Attach the picture a design is built against — a Figma frame screenshot, a mock — as its reference overlay, or clear it; replies with what the picture is against the frame (size in dp, density, screen or region, whether pixels compare). Present only where the host keeps reference overlays |
@@ -597,17 +598,45 @@ from the runtime, never a second copy of it: `branchOf` on a branch (parent, for
 status) and `branches` on its parent. A fork's `forkedFrom` / `forks` is a separate relation, kept
 in the links store as before.
 
-**Recipe: N alternatives, pick one, merge.**
+**Recipe: N alternatives, pick one, merge** (phase 3 of yschimke/compose-ui-builder#375).
 
 1. `ui_builder_branch_design` ×N from the same revision, one `name` per idea (`compact header`,
    `card list`, …). Branches forked at the same revision are **siblings**.
 2. Edit each with `ui_builder_apply` on its `branchId`.
-3. Show them: `ui_builder_view` (or `ui_builder_render_design_matrix`) per branch, and
-   `ui_builder_diff_designs {a: {designId: parent}, b: {designId: branchId}}` for what each changes.
-4. Let the person pick: in ChatGPT or Codex, as thumbnails in the picker shape of #1253; in a chat
-   surface (#1254), as a numbered list with each branch's picture link, answered by a reply.
+3. Show them in one call: `ui_builder_compare_branches {designId, branchIds?, device?}`. It renders
+   the parent's head and each open branch (or the ones named, in that order) into **one** contact
+   sheet — a short-lived signed https link, like `ui_builder_view`'s, captioned `Parent · rN`,
+   `1 · <name>`, `2 · <name>`, … — and gives each branch a `ui_builder_diff_designs`-style summary
+   against the parent **at its fork** (counts, a headline such as `2 changed, 1 added`, the first
+   lines, and `parentMovedSinceFork`). `device` (a preset id or `{widthDp, heightDp}`) redraws
+   every picture at that size without saving anything. A branch whose picture fails is a blank
+   tile with its `problem`, never a failed call.
+4. Let the person pick: `ui_builder_pick_branch {designId, branchIds?, message?}`. It asks the
+   best way the client can answer, and never waits on one that cannot:
+   - a client that declared OpenAI form elicitation (`extensions["openai/elicitation"].form`, as
+     ChatGPT and Codex do) gets #1253's thumbnail picker — one option per branch, the branch's
+     render as its thumbnail and `ui_builder_view {designId: branchId}` as its preview;
+   - a client with plain MCP form elicitation gets a single-choice enum of the branch ids, titled
+     `1. <name>`, …;
+   - anybody else — the stateless JSON path, a Claude or ChatGPT agent in Slack (#1254) — gets
+     `outcome: "ask-in-chat"`: the numbered list and one sheet link for the agent to post, and the
+     person's reply with a number is the answer. Do not choose for them.
+
+   `outcome` is `chosen` (with `branchId`), `declined`, `ask-in-chat` or `no-branches`. A form is
+   bounded by two minutes; a picker the client rejects falls back to the plain form, and one that
+   goes unanswered falls back to the numbered list rather than asking twice. Picking writes nothing.
 5. `ui_builder_merge_branch {branchId, dryRun: true}`, read the report, then merge for real. The
-   other siblings are archived, linked to the winner through `supersededByBranchId`, and kept.
+   other siblings are archived, linked to the winner through `supersededByBranchId`, and kept. The
+   reply's `parentRevisionBefore` / `parentRevisionAfter` bound what landed;
+   `ui_builder_diff_designs {a: {designId: parent, revision: before}, b: {designId: parent}}` shows
+   it. There is deliberately no separate "adopt" tool: the merge already archives the siblings and
+   names the new revision, and a second door onto the same write would be one more thing to keep in
+   step.
+
+Compare and pick are reads of the parent: whoever may read the design may compare and pick among its
+branches, a design-scoped grant reaches the branches through the parent, and a `branchIds` entry
+that is not a branch of `designId` is refused rather than rendered. Only an open branch can be
+picked; compare also shows a merged or archived branch when it is named.
 
 Known limit, from the runtime: only the first replayed command sees edits the parent made after the
 fork as concurrent, so a later command that overwrites one carries no `STALE_*` notice. The dry run

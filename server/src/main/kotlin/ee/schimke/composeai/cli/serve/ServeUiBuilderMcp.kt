@@ -184,6 +184,11 @@ class ServeUiBuilderMcp(
   /** Branch, list, merge and archive; see [ServeUiBuilderBranchTools]. */
   private val branchTools = branches?.let(::ServeUiBuilderBranchTools)
 
+  /** Compare and pick among a design's branches; see [ServeUiBuilderAlternativeTools]. */
+  private val alternativeTools = branches?.let {
+    ServeUiBuilderAlternativeTools(service, it, validator)
+  }
+
   /** Whether this host keeps design branches, and so whether the branch tools exist. */
   val supportsBranches: Boolean
     get() = branches != null
@@ -240,6 +245,10 @@ class ServeUiBuilderMcp(
       ServeUiBuilderBranchTools.MERGE_BRANCH,
       ServeUiBuilderBranchTools.ARCHIVE_BRANCH ->
         if (branches == null) null else UiBuilderRouteCapability.WRITE
+      // Comparing and asking which to keep read the parent and its branches; neither writes.
+      ServeUiBuilderAlternativeTools.COMPARE_BRANCHES,
+      ServeUiBuilderAlternativeTools.PICK_BRANCH ->
+        if (branches == null) null else UiBuilderRouteCapability.READ
       LIST_COMMENTS,
       AWAIT_COMMENTS -> if (comments == null) null else UiBuilderRouteCapability.READ
       POST_COMMENT,
@@ -440,6 +449,10 @@ class ServeUiBuilderMcp(
           return (branchTools
               ?: throw McpRequestException("this host does not keep design branches"))
             .call(tool, args, actor)
+        in ServeUiBuilderAlternativeTools.TOOL_NAMES ->
+          return (alternativeTools
+              ?: throw McpRequestException("this host does not keep design branches"))
+            .call(tool, args, actor, clientInteraction)
         else -> throw McpRequestException("unknown UI-builder tool '$tool'")
       }
     return envelope(callId, execute(request, actor), includeCatalog = args.includeCatalog())
@@ -3287,7 +3300,8 @@ class ServeUiBuilderMcp(
     const val NATIVE_RENDER_UNAVAILABLE = "NATIVE_RENDER_UNAVAILABLE"
 
     /** Separate because they exist only where the host's service keeps design branches. */
-    val BRANCH_TOOL_NAMES = ServeUiBuilderBranchTools.TOOL_NAMES
+    val BRANCH_TOOL_NAMES =
+      ServeUiBuilderBranchTools.TOOL_NAMES + ServeUiBuilderAlternativeTools.TOOL_NAMES
 
     /** Separate because it exists only where the host keeps design assets. */
     val ASSET_TOOL_NAMES = listOf(PUT_ASSET)
@@ -4107,7 +4121,10 @@ class ServeUiBuilderMcp(
           ),
       ) +
         ServeUiBuilderHistoryTools.declarations(tool) +
-        (if (branches) ServeUiBuilderBranchTools.declarations(tool) else emptyList())
+        (if (branches) {
+          ServeUiBuilderBranchTools.declarations(tool) +
+            ServeUiBuilderAlternativeTools.declarations(tool)
+        } else emptyList())
   }
 }
 

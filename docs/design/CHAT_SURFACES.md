@@ -93,8 +93,10 @@ thread reply**. The flow:
    calling the same operation a picker would have.
 
 The local MCP server's thumbnail pickers (#1253, OpenAI form elicitation) are the same choice made
-in a UI. In chat, the reply is the answer. Design branches use the same shape: one picture per
-branch, numbered options, a reply, then `ui_builder_merge_branch` on the one picked
+in a UI. In chat, the reply is the answer. Design branches use the same shape, built in:
+`ui_builder_pick_branch` answers a client with no form with `outcome: "ask-in-chat"` — the numbered
+list and one signed sheet link to post — and the reply's number names the branch to pass to
+`ui_builder_merge_branch`
 ([`CATALOG_MCP.md`](CATALOG_MCP.md#branches-explore-alternatives-then-merge-one)).
 
 For a richer side-by-side, the agent can publish a claude.ai artifact page built from the signed
