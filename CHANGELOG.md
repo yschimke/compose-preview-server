@@ -1,5 +1,27 @@
 # Changelog
 
+## [3.90.0](https://github.com/yschimke/compose-preview-server/compare/v3.89.0...v3.90.0) (2026-10-01)
+
+
+### Features
+
+* **mcp:** chat-surface fallbacks — https image links, contact sheets, Slack thread links, webhook rate limit ([#1258](https://github.com/yschimke/compose-preview-server/issues/1258)) ([1cf7683](https://github.com/yschimke/compose-preview-server/commit/1cf7683b639a65d101fc59524ecc11bdead2e00c))
+* **mcp:** check designs, render device grids, await review decisions, link designs to PRs ([#1260](https://github.com/yschimke/compose-preview-server/issues/1260)) ([de1b054](https://github.com/yschimke/compose-preview-server/commit/de1b0544d14f20c6d19a974fc4b5dbaf4b043d9e))
+* **mcp:** design history tools — diff, revisions, restore, fork with ancestry ([#1259](https://github.com/yschimke/compose-preview-server/issues/1259)) ([d39052f](https://github.com/yschimke/compose-preview-server/commit/d39052fd83318606e4afecae582a27c81c361492))
+* **mcp:** design_open opens .uid designs in the UI Builder MCP App ([#1252](https://github.com/yschimke/compose-preview-server/issues/1252)) ([044ba1d](https://github.com/yschimke/compose-preview-server/commit/044ba1d9e7ce9fd095937847be165f368a9a409b))
+* **mcp:** require the daemon's per-render work trace in the edit loop ([#1257](https://github.com/yschimke/compose-preview-server/issues/1257)) ([7c5d18d](https://github.com/yschimke/compose-preview-server/commit/7c5d18dcec23d3bac2f63e5b9f22b703a631149e))
+* **mcp:** thumbnail pickers for visual choices (OpenAI form elicitation) ([#1253](https://github.com/yschimke/compose-preview-server/issues/1253)) ([2bfb3a2](https://github.com/yschimke/compose-preview-server/commit/2bfb3a28d27690a6d26820f93fa7f7f1dd3a07d3))
+* **webhook:** post design forks, review decisions and implementation changes ([#1264](https://github.com/yschimke/compose-preview-server/issues/1264)) ([fb58ea5](https://github.com/yschimke/compose-preview-server/commit/fb58ea55827c1001120d09bbdeebe86c16cef227))
+
+
+### Bug Fixes
+
+* **catalog-mcp:** bound catalog_library and validate arguments before the grant ([#1250](https://github.com/yschimke/compose-preview-server/issues/1250)) ([922ba1a](https://github.com/yschimke/compose-preview-server/commit/922ba1aa96b63bdef1d6139eb54704077d1d1eaa))
+* **deps:** update rc-players to v2.0.2 ([#1249](https://github.com/yschimke/compose-preview-server/issues/1249)) ([23b444a](https://github.com/yschimke/compose-preview-server/commit/23b444a2e09ba04104127825dda61dfef57f9256))
+* **mcp:** recover from rejected renders, rediscover new previews, and bootstrap via the CLI ([#1251](https://github.com/yschimke/compose-preview-server/issues/1251)) ([1418d86](https://github.com/yschimke/compose-preview-server/commit/1418d86337c7abeadd6e636fd72ecee43e210654))
+* **mcp:** render the first match when the variant chooser is cancelled, and infer notify_file_changed's workspace ([#1263](https://github.com/yschimke/compose-preview-server/issues/1263)) ([9bd1bfb](https://github.com/yschimke/compose-preview-server/commit/9bd1bfb999276e93b2947eee732918fc9422cf33))
+* **serve:** route a Remote Compose playerId to a real render ([#1261](https://github.com/yschimke/compose-preview-server/issues/1261)) ([a8d77b4](https://github.com/yschimke/compose-preview-server/commit/a8d77b4a2a13ebec0e9ac48fed126c7ebefc6013))
+
 ## [3.89.0](https://github.com/yschimke/compose-preview-server/compare/v3.88.0...v3.89.0) (2026-09-30)
 
 
