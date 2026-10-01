@@ -407,6 +407,22 @@ class PreviewPickersTest {
   }
 
   @Test
+  fun `a cancelled picker renders the first match, since a headless client cancels unseen`() {
+    val client = connect(openAiForms = true) { buildJsonObject { put("action", "cancel") } }
+    val ws = workspace(client)
+    val result =
+      client.callTool(
+        "render_preview",
+        buildJsonObject { put("preview", "Screen") },
+        timeoutMs = 10_000,
+      )
+    assertThat(openAiRequests).hasSize(1)
+    assertThat(variantChoice(result)["mode"]!!.jsonPrimitive.content).isEqualTo("cancelled")
+    assertThat(result.textContents().size).isGreaterThan(1)
+    assertThat(result.raw.toString()).contains(PreviewUri.parseOrNull(ws.large)!!.previewFqn)
+  }
+
+  @Test
   fun `without the openai capability an ambiguous match keeps the grid`() {
     val client = connect(openAiForms = false) { error("never asked") }
     val ws = workspace(client)

@@ -1807,12 +1807,12 @@ class DaemonMcpServer(
             {
               "type":"object",
               "properties":{
-                "workspaceId":{"type":"string"},
+                "workspaceId":{"type":"string","description":"Optional: defaults to the registered project that contains path."},
                 "path":{"type":"string","description":"Absolute path of the changed file."},
                 "kind":{"type":"string","enum":["source","resource","classpath"],"default":"source"},
                 "changeType":{"type":"string","enum":["modified","created","deleted"],"default":"modified"}
               },
-              "required":["workspaceId","path"]
+              "required":["path"]
             }
             """
               .trimIndent()
@@ -2127,12 +2127,12 @@ class DaemonMcpServer(
             {
               "type":"object",
               "properties":{
-                "workspaceId":{"type":"string"},
+                "workspaceId":{"type":"string","description":"Optional: defaults to the registered project that contains path."},
                 "path":{"type":"string","description":"Absolute path of the changed file."},
                 "kind":{"type":"string","enum":["source","resource","classpath"],"default":"source"},
                 "changeType":{"type":"string","enum":["modified","created","deleted"],"default":"modified"}
               },
-              "required":["workspaceId","path"]
+              "required":["path"]
             }
             """
               .trimIndent()
@@ -3894,9 +3894,10 @@ class DaemonMcpServer(
   /**
    * `render_preview preview=` with several matches (such as `@WearPreviewDevices` variants) asks
    * the person which one through a form when the client declared form elicitation. Every other
-   * outcome keeps a complete text result: an unsupported client or an unanswered form renders the
-   * first match as before and lists every match under `variantChoice`; a decline or cancel renders
-   * nothing and returns the choices, so the agent does not re-ask.
+   * outcome keeps a complete text result: an unsupported client, an unanswered form or a cancelled
+   * one renders the first match as before and lists every match under `variantChoice`; only a
+   * decline renders nothing and returns the choices, so the agent does not re-ask. Cancel renders
+   * because a headless client (Claude Code's print mode) cancels every form unseen.
    */
   private suspend fun renderPreviewChoosingVariant(
     session: Session,
@@ -4006,18 +4007,22 @@ class DaemonMcpServer(
           )
         is FormElicitation.Answered -> elicitation.result
       }
-    if (answer.action != ElicitResult.Action.Accept) {
-      val mode = if (answer.action == ElicitResult.Action.Decline) "declined" else "cancelled"
-      return CallToolResult(
-        content =
-          listOf(
-            choiceBlock(
-              mode,
-              "The user $mode the preview choice, so nothing was rendered. Do not ask again " +
-                "unless they bring it up; render one by uri if they do.",
+    when (answer.action) {
+      ElicitResult.Action.Decline ->
+        return CallToolResult(
+          content =
+            listOf(
+              choiceBlock(
+                "declined",
+                "The user declined the preview choice, so nothing was rendered. Do not ask again " +
+                  "unless they bring it up; render one by uri if they do.",
+              )
             )
-          )
-      )
+        )
+      // A cancel is not an answer: headless clients (Claude Code's print mode) cancel every form
+      // without showing it. Render the first match, as for a client without forms.
+      ElicitResult.Action.Cancel -> return renderFirst("cancelled", CANCELLED_CHOICE_MESSAGE)
+      ElicitResult.Action.Accept -> Unit
     }
     val picked =
       (answer.content?.get("variant") as? JsonPrimitive)?.contentOrNull?.let { label ->
@@ -7013,17 +7018,40 @@ class DaemonMcpServer(
     return build.takeIf { it !in registered }
   }
 
+  /**
+   * The workspace a `notify_file_changed` without `workspaceId` means: the one registered project
+   * whose root holds [path] (the deepest, when builds nest), else the only registered project when
+   * [path] is relative. Agents edit a file and notify with just its path; the id is bookkeeping.
+   */
+  private fun workspaceForPath(path: String): WorkspaceId? {
+    val projects = supervisor.listProjects()
+    val file = File(path)
+    if (!file.isAbsolute) return projects.singleOrNull()?.workspaceId
+    val canonical = runCatching { file.canonicalFile }.getOrDefault(file.absoluteFile)
+    return projects
+      .filter { project ->
+        val root = runCatching { project.path.canonicalFile }.getOrDefault(project.path)
+        canonical.toPath().startsWith(root.toPath())
+      }
+      .maxByOrNull { it.path.absolutePath.length }
+      ?.workspaceId
+  }
+
   private fun toolNotifyFileChanged(args: JsonObject): CallToolResult {
+    val path =
+      args["path"]?.jsonPrimitive?.contentOrNull
+        ?: return errorCallToolResult("notify_file_changed: missing 'path'")
     val ws =
       args["workspaceId"]?.jsonPrimitive?.contentOrNull
-        ?: return errorCallToolResult("notify_file_changed: missing 'workspaceId'")
+        ?: workspaceForPath(path)?.value
+        ?: return errorCallToolResult(
+          "notify_file_changed: missing 'workspaceId', and '$path' is not inside exactly one " +
+            "registered project (list_projects shows them)"
+        )
     val workspaceId = WorkspaceId(ws)
     val project =
       supervisor.project(workspaceId)
         ?: return errorCallToolResult("notify_file_changed: unknown workspace '$ws'")
-    val path =
-      args["path"]?.jsonPrimitive?.contentOrNull
-        ?: return errorCallToolResult("notify_file_changed: missing 'path'")
     File(path)
       .takeIf(File::isAbsolute)
       ?.let { otherBuildFor(it, project) }
@@ -7797,6 +7825,13 @@ class DaemonMcpServer(
         "claude-code",
         ANTIGRAVITY_CLIENT_NAME,
       )
+
+    /**
+     * `variantChoice.message` when a preview chooser was cancelled and the first match rendered.
+     */
+    internal const val CANCELLED_CHOICE_MESSAGE: String =
+      "The preview chooser was cancelled; the first match was rendered. Do not re-open it; list " +
+        "the choices and let the user pick."
 
     /** The one-line remedy `render_preview` gives when it can't serve `compose/semantics`. */
     internal const val SEMANTICS_UNAVAILABLE_FIX: String =
