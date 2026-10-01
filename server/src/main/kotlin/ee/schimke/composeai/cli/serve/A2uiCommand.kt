@@ -9,6 +9,7 @@ import java.time.Duration
 import java.util.Base64
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.buildJsonObject
@@ -258,26 +259,37 @@ internal class A2uiCommandRunner(
 
   /** The catalog's preview declaring a string `document` knob, via `catalog_list_previews`. */
   private fun documentPreview(): String {
-    val listing =
-      catalogResult(
-        "catalog_list_previews",
-        transport.callRaw(
+    // The listing is paged; follow `nextOffset` until the catalog is read (a server that predates
+    // paging ignores the arguments and answers with everything, and no `nextOffset`).
+    val previews = mutableListOf<JsonElement>()
+    var offset: Int? = 0
+    while (offset != null) {
+      val listing =
+        catalogResult(
           "catalog_list_previews",
-          buildJsonObject { put("catalog", options.catalog) },
-        ),
-      )
-    val text =
-      (listing["content"] as? JsonArray)?.firstNotNullOfOrNull { (it as? JsonObject)?.text() }
-        ?: throw DesignCommandFailure("a2ui: catalog_list_previews answered with no listing")
-    val previews = runCatching {
-      Json.parseToJsonElement(text)
-        .jsonObject["catalogs"]!!
-        .let { it as JsonArray }
-        .flatMap { (it.jsonObject["previews"] as? JsonArray).orEmpty() }
-    }
-      .getOrElse {
-        throw DesignCommandFailure("a2ui: catalog_list_previews is not a listing — $text")
+          transport.callRaw(
+            "catalog_list_previews",
+            buildJsonObject {
+              put("catalog", options.catalog)
+              put("offset", offset)
+              put("limit", LIST_PAGE)
+            },
+          ),
+        )
+      val text =
+        (listing["content"] as? JsonArray)?.firstNotNullOfOrNull { (it as? JsonObject)?.text() }
+          ?: throw DesignCommandFailure("a2ui: catalog_list_previews answered with no listing")
+      val catalogs = runCatching {
+        Json.parseToJsonElement(text).jsonObject["catalogs"]!!.let { it as JsonArray }
       }
+        .getOrElse {
+          throw DesignCommandFailure("a2ui: catalog_list_previews is not a listing — $text")
+        }
+      catalogs.forEach { previews += (it.jsonObject["previews"] as? JsonArray).orEmpty() }
+      offset = catalogs.firstNotNullOfOrNull {
+        it.jsonObject["nextOffset"]?.jsonPrimitive?.contentOrNull?.toIntOrNull()
+      }
+    }
     return previews
       .mapNotNull { it as? JsonObject }
       .firstOrNull { preview ->
@@ -305,6 +317,9 @@ internal class A2uiCommandRunner(
 
   companion object {
     const val DOCUMENT_KNOB: String = ServeWeb.A2UI_DOCUMENT_KNOB
+
+    /** Previews asked for per `catalog_list_previews` page: the server's largest. */
+    private const val LIST_PAGE = 500
 
     /**
      * A catalog tool reply → its `CallToolResult`, refusing the two error shapes: JSON-RPC's own

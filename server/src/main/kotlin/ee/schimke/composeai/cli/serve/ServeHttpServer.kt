@@ -826,6 +826,13 @@ class ServeHttpServer(
           },
         uiBuilderNative = uiBuilderNativePreview != null,
         publicOrigin = ::canonicalServerOrigin,
+        pendingCatalogs = {
+          catalogLoads
+            ?.snapshot()
+            ?.filter { it.loadState == "pending" }
+            ?.map { it.config.system }
+            .orEmpty()
+        },
       )
     else null
   /**

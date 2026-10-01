@@ -23,6 +23,7 @@ import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonObjectBuilder
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.add
 import kotlinx.serialization.json.booleanOrNull
@@ -70,6 +71,12 @@ class ServeCatalogMcp(
    * only when this answers (#1160); the local server has no public origin and keeps `data:`.
    */
   private val publicOrigin: () -> String? = { null },
+  /**
+   * Catalogs this box is configured to serve that have not loaded yet. After a restart the catalogs
+   * register one by one over several minutes; until they all have, a listing is partial and a
+   * request for a configured catalog would otherwise read "no such catalog" (compose-ag-plugin#64).
+   */
+  private val pendingCatalogs: () -> List<String> = { emptyList() },
 ) {
   /**
    * Per-process key for short-lived signed resource links. A restart drops it, exactly as a restart
@@ -609,10 +616,12 @@ class ServeCatalogMcp(
       tool(
         "list_previews",
         "List the Compose previews and published metadata of one hosted catalog. 'catalog' is " +
-          "required (ids from catalog_list_projects). This server holds published library catalogs " +
+          "required (ids from catalog_list_projects). Pass 'query' (a component name such as " +
+          "EdgeButton) to narrow by id or label; results are paged ($DEFAULT_PREVIEW_PAGE by " +
+          "default, 'offset'/'limit' for more). This server holds published library catalogs " +
           "only: previews of the project you are editing come from the local " +
           "compose-preview-mcp server, not from here.",
-        CATALOG_REQUIRED_SCHEMA,
+        LIST_PREVIEWS_SCHEMA,
       )
     )
     add(
@@ -621,9 +630,9 @@ class ServeCatalogMcp(
         "Render one preview. Like local compose-ai-tools, the default semantics observation is " +
           "token-frugal; request observe=png for pixels, observe=svg for the compose/figma-svg " +
           "vector export as SVG source, or observe=scroll-png / observe=scroll-svg for the " +
-          "full-page capture of a scrollable screen rather than the viewport crop. This " +
-          "made-to-order lane requires live grant scope. Use resources/read for the published " +
-          "snapshot lane.",
+          "full-page capture of a scrollable screen rather than the viewport crop. Overrides, " +
+          "other observations and fresh renders require live grant scope; without it, a call " +
+          "with no overrides returns the published snapshot (as resources/read does).",
         """{"type":"object","properties":{"uri":{"type":"string"},"catalog":{"type":"string"},"previewId":{"type":"string"},"observe":{"type":"string","enum":["png","svg","scroll-png","scroll-svg","semantics","hash"]},"overrides":{"type":"object","additionalProperties":{"type":["string","number","boolean"]}}},"anyOf":[{"required":["uri"]},{"required":["catalog","previewId"]}]}""",
       )
     )
@@ -822,7 +831,10 @@ class ServeCatalogMcp(
       ServeLibraryMcp.UI_BUILDER_OPEN ->
         if (uiBuilder == null) toolError("unknown tool: $name")
         else ServeLibraryMcp.uiBuilderOpenResult()
-      "list_previews" -> textResult(previewsJson(requireCatalog("list_previews", args)).toString())
+      "list_previews" ->
+        textResult(
+          previewsJson(requireCatalog("list_previews", args), PreviewPage.of(args)).toString()
+        )
       "list_data_products" -> textResult(dataProductsJson(args).toString())
       "list-all-documentation" -> textResult(storiesJson().toString())
       "get-documentation-for-story" -> {
@@ -835,6 +847,9 @@ class ServeCatalogMcp(
       }
       "render_preview" -> {
         val target = args.previewTarget()
+        if (servesPublishedSnapshot(args, liveAuthorization)) {
+          return publishedSnapshotResult(target.catalog, target.previewId)
+        }
         requireLive(liveAuthorization)
         withCatalog(target.catalog) { host ->
           val preview = resolvePreview(host, target.previewId)
@@ -2116,11 +2131,12 @@ class ServeCatalogMcp(
 
   private suspend fun statusJson(): JsonObject = buildJsonObject {
     put("schema", "compose-preview-mcp-status/v1")
-    put("ready", true)
+    put("ready", pendingCatalogs().isEmpty())
     put("remote", true)
     put("aggregate", true)
     put("toolCatalog", buildJsonObject { put("status", "ready") })
     put("projects", projectsJson()["projects"]!!)
+    putLoading()
   }
 
   private suspend fun projectsJson(): JsonObject = buildJsonObject {
@@ -2130,6 +2146,7 @@ class ServeCatalogMcp(
         catalogIds().forEach { catalog -> add(projectJson(catalog, peekCatalog(catalog))) }
       },
     )
+    putLoading()
   }
 
   private fun projectJson(catalog: String, view: CatalogView): JsonObject = buildJsonObject {
@@ -2141,24 +2158,71 @@ class ServeCatalogMcp(
     put("remote", true)
   }
 
-  private suspend fun previewsJson(selectedCatalog: String?): JsonObject = buildJsonObject {
-    put(
-      "catalogs",
-      buildJsonArray {
-        catalogIds(selectedCatalog).forEach { catalog ->
-          withCatalog(catalog) { host ->
-            add(
-              buildJsonObject {
-                put("catalog", catalog)
-                put("label", host.label)
-                put("previews", JsonArray(host.previews.map { previewJson(catalog, it, host) }))
-              }
-            )
-          }
+  /**
+   * One page of a `list_previews` answer. A whole catalog used to come back at once: m3-catalog's
+   * 4,108 previews are 2.7 M characters, which a client refuses outright (compose-ag-plugin#64).
+   * [query] narrows by id or label before paging, which is how an agent after one component finds
+   * it without reading the catalog.
+   */
+  private data class PreviewPage(val query: String?, val offset: Int, val limit: Int) {
+    fun matches(preview: ServePreview): Boolean =
+      query == null ||
+        preview.id.contains(query, ignoreCase = true) ||
+        preview.label.contains(query, ignoreCase = true)
+
+    companion object {
+      fun of(args: JsonObject): PreviewPage {
+        fun int(name: String): Int? {
+          val value = args[name] ?: return null
+          return (value as? JsonPrimitive)?.contentOrNull?.toIntOrNull()
+            ?: throw McpRequestException("'$name' must be an integer")
         }
-      },
-    )
+        val offset = int("offset") ?: 0
+        val limit = int("limit") ?: DEFAULT_PREVIEW_PAGE
+        if (offset < 0) throw McpRequestException("'offset' must not be negative")
+        if (limit !in 1..MAX_PREVIEW_PAGE) {
+          throw McpRequestException("'limit' must be between 1 and $MAX_PREVIEW_PAGE")
+        }
+        val query =
+          (args["query"] as? JsonPrimitive)?.contentOrNull?.trim()?.takeIf { it.isNotEmpty() }
+        return PreviewPage(query, offset, limit)
+      }
+    }
   }
+
+  private suspend fun previewsJson(selectedCatalog: String?, page: PreviewPage): JsonObject =
+    buildJsonObject {
+      put(
+        "catalogs",
+        buildJsonArray {
+          catalogIds(selectedCatalog).forEach { catalog ->
+            withCatalog(catalog) { host ->
+              val matching = host.previews.filter(page::matches)
+              val shown = matching.drop(page.offset).take(page.limit)
+              add(
+                buildJsonObject {
+                  put("catalog", catalog)
+                  put("label", host.label)
+                  page.query?.let { put("query", it) }
+                  put("total", matching.size)
+                  put("offset", page.offset)
+                  put("previews", JsonArray(shown.map { previewJson(catalog, it, host) }))
+                  val next = page.offset + shown.size
+                  if (next < matching.size) {
+                    put("nextOffset", next)
+                    put(
+                      "note",
+                      "Showing ${shown.size} of ${matching.size}. Pass offset=$next for more, or " +
+                        "a 'query' (such as a component name) to narrow the list.",
+                    )
+                  }
+                }
+              )
+            }
+          }
+        },
+      )
+    }
 
   private suspend fun storiesJson(): JsonObject = buildJsonObject {
     val stories = buildJsonArray {
@@ -2509,8 +2573,34 @@ class ServeCatalogMcp(
   private fun catalogIds(selected: String? = null): List<String> {
     val ids = sessions.knownSessionIds()
     if (selected == null) return ids
-    if (selected !in ids) throw McpRequestException("no such catalog '$selected'")
+    if (selected !in ids) throw unknownCatalog(selected)
     return listOf(selected)
+  }
+
+  /** "Still loading" for a configured catalog that has not registered yet, else "no such". */
+  private fun unknownCatalog(catalog: String): McpRequestException {
+    val pending = pendingCatalogs()
+    return if (catalog in pending) {
+      McpRequestException(
+        "catalog '$catalog' is still loading on this server (${pending.size} catalog(s) " +
+          "pending after a restart); retry in a minute"
+      )
+    } else {
+      McpRequestException("no such catalog '$catalog'")
+    }
+  }
+
+  /** Marks a listing taken while catalogs are still loading, so it is not read as complete. */
+  private fun JsonObjectBuilder.putLoading() {
+    val pending = pendingCatalogs()
+    if (pending.isEmpty()) return
+    put("complete", false)
+    putJsonArray("loading") { pending.forEach { add(it) } }
+    put(
+      "note",
+      "${pending.size} catalog(s) are still loading after a restart, so this list is " +
+        "incomplete. Retry in a minute before concluding a catalog is missing.",
+    )
   }
 
   /**
@@ -2562,9 +2652,7 @@ class ServeCatalogMcp(
   }
 
   private suspend fun <T> withCatalog(catalog: String, block: suspend (ServeHost) -> T): T {
-    if (catalog !in sessions.knownSessionIds()) {
-      throw McpRequestException("no such catalog '$catalog'")
-    }
+    if (catalog !in sessions.knownSessionIds()) throw unknownCatalog(catalog)
     val lease =
       withContext(Dispatchers.IO) { sessions.lease(catalog) }
         ?: throw McpRequestException("catalog '$catalog' is unavailable")
@@ -2574,6 +2662,49 @@ class ServeCatalogMcp(
       lease.close()
     }
   }
+
+  /**
+   * Whether `render_preview` should answer with the published snapshot instead of refusing: no live
+   * grant was presented, and the call asks for nothing a snapshot cannot give (no overrides, no
+   * observation other than the picture). Agents reach for `render_preview` to look at a library
+   * component before they think of `resources/read`; every eval run on compose-ag-plugin#64 spent
+   * three calls on the refusal before reading the same bytes.
+   */
+  private fun servesPublishedSnapshot(
+    args: JsonObject,
+    liveAuthorization: () -> ServeMachineAuthorization.Decision,
+  ): Boolean {
+    val overrides = args["overrides"] as? JsonObject
+    if (!overrides.isNullOrEmpty()) return false
+    val observe = args["observe"]?.jsonPrimitive?.contentOrNull?.lowercase()
+    if (observe != null && observe != "png") return false
+    return liveAuthorization() == ServeMachineAuthorization.Decision.Missing
+  }
+
+  /** The published render of one preview, as `resources/read` serves it, with a provenance note. */
+  private suspend fun publishedSnapshotResult(catalog: String, previewId: String): JsonObject =
+    withCatalog(catalog) { host ->
+      val preview = resolvePreview(host, previewId)
+      val uri = resourceUri(catalog, preview.id)
+      val png =
+        renderPng(host, preview.id, parseOverrides(preview, null), preferPublished = true).png
+      buildJsonObject {
+        putJsonArray("content") {
+          add(imageContent(png))
+          add(resourceLinkContent(uri))
+          add(
+            textContent(
+              buildJsonObject {
+                put("uri", uri)
+                put("published", true)
+                put("note", PUBLISHED_SNAPSHOT_NOTE)
+              }
+                .toString()
+            )
+          )
+        }
+      }
+    }
 
   private fun requireLive(check: () -> ServeMachineAuthorization.Decision) {
     when (val decision = check()) {
@@ -3192,8 +3323,14 @@ class ServeCatalogMcp(
     private const val STORY_ID_SEPARATOR = "::"
     private val OBSERVATION_MODES =
       setOf("png", "svg", "scroll-png", "scroll-svg", "semantics", "hash")
-    private const val CATALOG_REQUIRED_SCHEMA =
-      """{"type":"object","properties":{"catalog":{"type":"string","description":"A catalog id from catalog_list_projects."}},"required":["catalog"]}"""
+    private const val LIST_PREVIEWS_SCHEMA =
+      """{"type":"object","properties":{"catalog":{"type":"string","description":"A catalog id from catalog_list_projects."},"query":{"type":"string","description":"Case-insensitive substring of a preview id or label, such as a component name."},"offset":{"type":"integer","minimum":0},"limit":{"type":"integer","minimum":1,"maximum":500}},"required":["catalog"]}"""
+    private const val DEFAULT_PREVIEW_PAGE = 100
+    private const val MAX_PREVIEW_PAGE = 500
+    internal const val PUBLISHED_SNAPSHOT_NOTE =
+      "Published snapshot: no live grant was presented, so this is the catalog's published " +
+        "render. Overrides, other observations and fresh renders need live scope " +
+        "(request_access with scope \"live\")."
     /** Enough ids to pick from in a refusal without the refusal becoming the listing. */
     private const val MAX_CATALOGS_IN_ERROR = 50
     private val ANNOTATION_KINDS =
