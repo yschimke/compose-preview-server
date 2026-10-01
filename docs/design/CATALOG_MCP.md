@@ -197,6 +197,8 @@ that protocol/SDK migration is deliberately not bundled into the compatibility t
 | `ui_builder_merge_branch`, `ui_builder_archive_branch` | `ui-builder-write` | Replay a branch onto its parent, all or nothing, with a per-command report (`dryRun`, `skipOperationIds`); or close it unmerged |
 | `ui_builder_export` | `ui-builder-export` | Export a design — `compose` returns the generator's Kotlin, or diagnostics naming each reason it refused |
 | `ui_builder_view` | `ui-builder-read` (plus `ui-builder-export` for `renderer: "native"`) | The editor canvas as a person sees it — a PNG with the selection, reference overlay, comment pins and layout bounds drawn on, and the node boxes and pin positions as JSON (#1114) |
+| `ui_builder_set_reference` | `ui-builder-write` | Attach the picture a design is built against — a Figma frame screenshot, a mock — as its reference overlay, or clear it; replies with what the picture is against the frame (size in dp, density, screen or region, whether pixels compare). Present only where the host keeps reference overlays |
+| `ui_builder_compare_reference` | `ui-builder-read` (plus `ui-builder-export` when matching layers) | Measure a design against its reference: the differing regions in dp with their layers, and per named layer the move, size and font size that would line it up, as `ui_builder_apply` operations. Writes nothing |
 | `ui_builder_put_asset` | `ui-builder-write` | Put a picture behind an `assetKey`, so an `asset/image` node draws it; present only where the host keeps design assets |
 | `ui_builder_design_access` | `ui-builder-read` | Who can open a design — its owner, and everyone it has been shared with |
 | `ui_builder_share_design` | `ui-builder-write` | Share a design with another actor as `viewer` or `editor`, or take that back |
@@ -338,7 +340,8 @@ render (`renderer: "native"`, the `ui_builder_render_native` lane, which compile
 needs `ui-builder-export` as well). The overlays are drawn server-side with `java.awt`:
 
 - **selection** — a 2 px outline round each selected node's box;
-- **reference** — the design's reference picture, placed from its stored scale, offset and opacity,
+- **reference** — the design's reference picture, placed as the editor places it (contained and
+  centred, then its stored scale and offset) at its stored opacity,
   honouring the `overlay`, `split` and `difference` modes (a hidden reference, `boxes` mode or a
   format this JVM cannot decode is reported, not drawn);
 - **comments** — one numbered pin per thread: a point anchor at its frame fraction, a node anchor at
@@ -361,6 +364,41 @@ adds the bytes as an `image` block; a box with no public origin always does. The
 The CLI spelling is `compose-preview-server design view <designId>` with `--select`, `--include`,
 `--viewport <w>x<h>` and `--renderer`: the PNG goes to `--out` (default `<designId>.view.png`) and
 the JSON to stdout.
+
+### Building against a reference
+
+The editor's **Frame, density and reference** panel has two tools on this surface, so an agent can
+do what a person does there: put the mock beside the design, and measure the design against it.
+
+`ui_builder_set_reference` takes the picture's bytes (`imageBase64`), an optional `name`,
+`density` (pixels per dp — 2 for a Figma 2× export) and `sourceUrl` (where it came from; never
+fetched). This host makes no outbound call for a reference, Figma included: an agent with Figma
+tools takes the frame's screenshot itself and passes the bytes and the frame link. The reply says
+what the picture is against the design's frame — its size in dp, the density and where that came
+from (declared, inferred from the frame width, or assumed), whether it is a screen, a tall screen
+or a region, the fit that lines it up, and whether a pixel comparison means anything. The overlay
+is the one the browser shows, so a person opening the design sees what the agent attached.
+
+`ui_builder_compare_reference` measures. With `differences` (the default) it reports the share of
+compared pixels that differ and up to eight regions in dp; with `nodeIds` it matches each layer
+against the reference — from a box drawn over it in the editor, or a search of the reference's
+pixels, which for text also reads the type size — and returns the `alignment` (move, size, font
+size) and the `operations` (`setModifiers`, `setProperty`) that would make it agree. It writes
+nothing; the agent applies what it agrees with through `ui_builder_apply`, which validates it like
+any other edit, then compares again and looks with `ui_builder_view`. Layer matching needs node
+boxes, so `nodeIds` measures the native render and needs `ui-builder-export`; differences alone
+use the PNG export.
+
+Both are computed by `:ui-builder-export`'s reference engine, the code the browser editor runs over
+a photograph of its own canvas, so an agent and a person comparing the same design read the same
+numbers. Two gaps, said in the replies: the stored overlay does not yet record a *fit*, so a
+region attached here is shown contained in the editor until somebody picks *Actual size*; and an
+SVG reference is drawn in the editor but not measured here, because this JVM does not rasterise
+SVG.
+
+The CLI spellings are `compose-preview-server design reference <designId> --attach <picture>
+[--density <n>] [--source-url <url>]` (or `--clear`) and `design compare <designId> [--node <id>]
+[--fit <fit>] [--no-differences]`.
 
 ### Checking before writing, and the shapes
 

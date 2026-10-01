@@ -76,6 +76,8 @@ internal class DesignCommandRunner(
         DesignCommand.EXPORT -> export()
         DesignCommand.VALIDATE -> validate()
         DesignCommand.VIEW -> view()
+        DesignCommand.REFERENCE -> reference()
+        DesignCommand.COMPARE -> compare()
         else -> {
           emit("design: unknown verb '${options.verb}'")
           EXIT_USAGE
@@ -294,6 +296,75 @@ internal class DesignCommandRunner(
     if (options.destination == DesignCommand.STDOUT) emit(description.trimEnd())
     else write(DesignCommand.STDOUT, description.toByteArray())
     note("design view: ${options.designId} at revision ${response["revision"] ?: "?"}")
+    return EXIT_OK
+  }
+
+  /** Attach or clear a design's reference; the reply — what the picture is — to stdout. */
+  private fun reference(): Int {
+    val response =
+      transport.call(
+        ServeUiBuilderMcp.SET_REFERENCE,
+        buildJsonObject {
+          put("designId", options.designId)
+          if (options.clear) put("clear", true)
+          options.attach?.let { path ->
+            val file = java.io.File(path)
+            val bytes =
+              runCatching { file.readBytes() }.getOrNull()
+                ?: throw DesignCommandFailure("design reference: cannot read $path")
+            put("imageBase64", java.util.Base64.getEncoder().encodeToString(bytes))
+            put("name", file.name)
+          }
+          options.density?.let { put("density", it) }
+          options.sourceUrl?.let { put("sourceUrl", it) }
+        },
+      )
+    (response["notes"] as? JsonArray)?.forEach { note ->
+      note.jsonPrimitive.contentOrNull?.let { emit("  note: $it") }
+    }
+    write(
+      options.destination,
+      (PRETTY.encodeToString(JsonObject.serializer(), response) + "\n").toByteArray(),
+    )
+    return EXIT_OK
+  }
+
+  /**
+   * Measure a design against its reference. The comparison goes to stdout; each layer's proposed
+   * edit is summarised on stderr, so a person reading the terminal sees the answer and a pipe gets
+   * the JSON with the `operations` to apply.
+   */
+  private fun compare(): Int {
+    val response =
+      transport.call(
+        ServeUiBuilderMcp.COMPARE_REFERENCE,
+        buildJsonObject {
+          put("designId", options.designId)
+          options.revision?.let { put("revision", it) }
+          if (!options.differences) put("differences", false)
+          if (options.nodes.isNotEmpty()) {
+            put("nodeIds", JsonArray(options.nodes.map(::JsonPrimitive)))
+          }
+          options.fit?.let { put("fit", it) }
+          options.renderer?.let { put("renderer", it) }
+        },
+      )
+    (response["facts"] as? JsonObject)?.text("advice")?.let { emit("  $it") }
+    (response["layers"] as? JsonArray)?.forEach { entry ->
+      val layer = entry.jsonObject
+      val summary =
+        (layer["alignment"] as? JsonObject)?.text("summary")
+          ?: layer.text("message")
+          ?: "already lines up"
+      emit("  ${layer.text("nodeId")}: $summary")
+    }
+    (response["notes"] as? JsonArray)?.forEach { note ->
+      note.jsonPrimitive.contentOrNull?.let { emit("  note: $it") }
+    }
+    write(
+      options.destination,
+      (PRETTY.encodeToString(JsonObject.serializer(), response) + "\n").toByteArray(),
+    )
     return EXIT_OK
   }
 

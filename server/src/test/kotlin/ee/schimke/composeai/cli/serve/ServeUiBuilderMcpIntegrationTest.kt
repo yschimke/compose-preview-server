@@ -1445,6 +1445,188 @@ class ServeUiBuilderMcpIntegrationTest {
   }
 
   @Test
+  fun `the reference tools exist only where references are kept, with typed replies`() {
+    assertTrue(
+      ServeUiBuilderMcp.REFERENCE_TOOL_NAMES.none { it in tools(start(withPngExport = true)) }
+    )
+    running?.close()
+    val server = start(withPngExport = true, withReferences = true)
+    val definitions = toolDefinitions(server)
+    ServeUiBuilderMcp.REFERENCE_TOOL_NAMES.forEach { name ->
+      val definition = definitions.single { it["name"]!!.jsonPrimitive.content == name }
+      assertNotNull(definition["outputSchema"], definition.toString())
+    }
+  }
+
+  @Test
+  fun `an agent attaches a reference and is told what it is against the frame`() {
+    val server = start(withPngExport = true, withReferences = true)
+    envelope(
+      server,
+      ServeUiBuilderMcp.CREATE_DESIGN,
+      """{"designId":"agent-screen","document":${json.encodeToString(DesignDocumentV1.serializer(), document())}}""",
+    )
+    // A 2x crop of a 160 x 28 dp label: a region, comparable only at its actual size.
+    val attached =
+      envelope(
+        server,
+        ServeUiBuilderMcp.SET_REFERENCE,
+        referenceArguments(
+          "agent-screen",
+          png(320, 56) { fillRect(0, 0, 320, 56) },
+          extra =
+            ",\"name\":\"title\",\"density\":2," +
+              "\"sourceUrl\":\"https://www.figma.com/design/AbCdEf1234567890/App?node-id=1-2\"",
+        ),
+      )
+    val reply = Json.parseToJsonElement(attached).jsonObject
+    assertEquals("true", reply["attached"]!!.jsonPrimitive.content)
+    assertEquals("title@2x", reply["reference"]!!.jsonObject["name"]!!.jsonPrimitive.content)
+    val facts = reply["facts"]!!.jsonObject
+    assertEquals("region", facts["kind"]!!.jsonPrimitive.content)
+    assertEquals(160, facts["widthDp"]!!.jsonPrimitive.content.toInt())
+    assertEquals("actual", facts["recommendedFit"]!!.jsonPrimitive.content)
+    assertTrue(reply["notes"]!!.jsonArray.isNotEmpty(), attached)
+
+    // A picture that is not one is refused with the reason, and the attached one survives.
+    val refused =
+      call(
+        server,
+        ServeUiBuilderMcp.SET_REFERENCE,
+        """{"designId":"agent-screen","imageBase64":"${java.util.Base64.getEncoder().encodeToString("hello".toByteArray())}"}""",
+      )
+    assertEquals("true", refused["isError"]?.jsonPrimitive?.content, refused.toString())
+
+    val cleared =
+      envelope(
+        server,
+        ServeUiBuilderMcp.SET_REFERENCE,
+        """{"designId":"agent-screen","clear":true}""",
+      )
+    assertEquals(
+      "false",
+      Json.parseToJsonElement(cleared).jsonObject["attached"]!!.jsonPrimitive.content,
+    )
+    val nothing =
+      call(server, ServeUiBuilderMcp.COMPARE_REFERENCE, """{"designId":"agent-screen"}""")
+    assertEquals("true", nothing["isError"]?.jsonPrimitive?.content, nothing.toString())
+  }
+
+  @Test
+  fun `comparing finds the differences and proposes the edit that lines a layer up`() {
+    val box = ServeUiBuilderView.Box(16, 24, 200, 40)
+    val server =
+      start(
+        withPngExport = true,
+        withReferences = true,
+        nativePreview =
+          UiBuilderNativePreviewLane { _, _ ->
+            UiBuilderNativePreviewOutcome.Rendered(
+              response =
+                PlaygroundRunResponse(
+                  previewId = "generated",
+                  previewToken = "token",
+                  image =
+                    java.util.Base64.getEncoder()
+                      .encodeToString(png(400, 800) { label(this, 24, 34) }),
+                ),
+              taggedNodeIds = listOf("column", "session"),
+              nodeBounds =
+                mapOf(
+                  "column" to AnnotationBounds(x = 0, y = 0, width = 400, height = 800),
+                  "session" to
+                    AnnotationBounds(x = box.x, y = box.y, width = box.width, height = box.height),
+                ),
+            )
+          },
+      )
+    envelope(
+      server,
+      ServeUiBuilderMcp.CREATE_DESIGN,
+      """{"designId":"agent-screen","document":${json.encodeToString(DesignDocumentV1.serializer(), document())}}""",
+    )
+    // The mock: the same label, 10 dp right and 6 dp down.
+    envelope(
+      server,
+      ServeUiBuilderMcp.SET_REFERENCE,
+      referenceArguments("agent-screen", png(400, 800) { label(this, 34, 40) }),
+    )
+
+    // Differences alone measure the PNG export, which reports no boxes: regions, unattributed.
+    val differences =
+      Json.parseToJsonElement(
+          envelope(server, ServeUiBuilderMcp.COMPARE_REFERENCE, """{"designId":"agent-screen"}""")
+        )
+        .jsonObject
+    assertEquals("export", differences["renderer"]!!.jsonPrimitive.content)
+    assertEquals("screen", differences["facts"]!!.jsonObject["kind"]!!.jsonPrimitive.content)
+    val diff = differences["differences"]!!.jsonObject
+    assertTrue(diff["mismatch"]!!.jsonPrimitive.content.toDouble() > 0.0, diff.toString())
+    assertTrue(diff["regions"]!!.jsonArray.isNotEmpty(), diff.toString())
+    assertTrue(differences["notes"]!!.jsonArray.isNotEmpty(), differences.toString())
+
+    // Naming a layer measures the native render and proposes the edit.
+    val matched =
+      Json.parseToJsonElement(
+          envelope(
+            server,
+            ServeUiBuilderMcp.COMPARE_REFERENCE,
+            """{"designId":"agent-screen","nodeIds":["session"],"differences":false}""",
+          )
+        )
+        .jsonObject
+    assertEquals("native", matched["renderer"]!!.jsonPrimitive.content)
+    val layer = matched["layers"]!!.jsonArray.single().jsonObject
+    assertEquals("pixels", layer["source"]!!.jsonPrimitive.content, layer.toString())
+    val alignment = layer["alignment"]!!.jsonObject
+    assertEquals(10, alignment["moveXDp"]!!.jsonPrimitive.content.toInt(), layer.toString())
+    assertEquals(6, alignment["moveYDp"]!!.jsonPrimitive.content.toInt(), layer.toString())
+    val operations = layer["operations"]!!.jsonArray
+    assertEquals("setModifiers", operations.single().jsonObject["type"]!!.jsonPrimitive.content)
+
+    // And the operations are exactly what ui_builder_apply takes.
+    val applied =
+      envelope(
+        server,
+        ServeUiBuilderMcp.APPLY,
+        """{"designId":"agent-screen","operationId":"align-1","baseRevision":0,"operations":$operations}""",
+      )
+    assertIs<AcceptedOutcomeV1>(
+      assertIs<OperationOutcomeResponseV1>(response(applied)).outcome,
+      applied,
+    )
+  }
+
+  /** `set_reference`'s arguments for [bytes]. */
+  private fun referenceArguments(designId: String, bytes: ByteArray, extra: String = "") =
+    """{"designId":"$designId","imageBase64":"${java.util.Base64.getEncoder().encodeToString(bytes)}"$extra}"""
+
+  /** A white [width] x [height] PNG with [draw] applied in dark grey. */
+  private fun png(width: Int, height: Int, draw: java.awt.Graphics2D.() -> Unit): ByteArray {
+    val image =
+      java.awt.image.BufferedImage(width, height, java.awt.image.BufferedImage.TYPE_INT_RGB)
+    image.createGraphics().apply {
+      color = java.awt.Color.WHITE
+      fillRect(0, 0, width, height)
+      color = java.awt.Color(0x20, 0x20, 0x20)
+      draw()
+      dispose()
+    }
+    return java.io
+      .ByteArrayOutputStream()
+      .also { javax.imageio.ImageIO.write(image, "png", it) }
+      .toByteArray()
+  }
+
+  /** Bars of different lengths at [left], [top]: enough texture to be found, as a label is. */
+  private fun label(graphics: java.awt.Graphics2D, left: Int, top: Int) {
+    graphics.fillRect(left, top, 12, 16)
+    graphics.fillRect(left + 16, top + 5, 20, 11)
+    graphics.fillRect(left + 40, top, 4, 16)
+    graphics.fillRect(left + 52, top + 8, 20, 8)
+  }
+
+  @Test
   fun `ui_builder_view is declared read-gated and opens in the MCP App viewer`() {
     val server = start(withPngExport = true)
 
@@ -1675,6 +1857,8 @@ class ServeUiBuilderMcpIntegrationTest {
     withLinks: Boolean = false,
     /** Advertises `ui_builder_validate`, with a validator that finds nothing. */
     withValidator: Boolean = false,
+    /** Keeps reference overlays, and so advertises the reference tools. */
+    withReferences: Boolean = false,
   ): RunningServer {
     val registry = ServeSessionRegistry(open = { null })
     val service =
@@ -1755,6 +1939,9 @@ class ServeUiBuilderMcpIntegrationTest {
             if (withLinks) ServeUiBuilderLinksStore(stateDirectory.resolve("links")) else null,
           uiBuilderValidator =
             if (withValidator) UiBuilderDraftValidator { _, _, _ -> emptyList() } else null,
+          uiBuilderReferenceStore =
+            if (withReferences) ServeUiBuilderReferenceStore(stateDirectory.resolve("references"))
+            else null,
         )
         .also(ServeHttpServer::start)
     return RunningServer(server, registry).also { running = it }

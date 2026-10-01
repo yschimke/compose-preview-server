@@ -1,6 +1,7 @@
 package ee.schimke.composeai.cli.serve
 
 import ee.schimke.composeai.uibuilder.protocol.DesignDocumentV1
+import ee.schimke.composeai.uibuilder.reference.referencePlacement
 import java.awt.AlphaComposite
 import java.awt.BasicStroke
 import java.awt.Color
@@ -218,9 +219,10 @@ internal object ServeUiBuilderView {
   }
 
   /**
-   * The reference picture, placed the way the editor places it: scaled from the frame's width by
-   * `scalePercent`, offset by the stored dp offset, at the stored opacity. `split` shows it on the
-   * leading `splitPercent` of the frame and `difference` subtracts it; `boxes` draws no picture.
+   * The reference picture, placed the way the editor places it ([referencePlacement]: contained,
+   * centred, scaled by `scalePercent` and offset by the stored dp offset), at the stored opacity.
+   * `split` shows it on the leading `splitPercent` of the frame and `difference` subtracts it;
+   * `boxes` draws no picture.
    */
   private fun drawReference(
     graphics: java.awt.Graphics2D,
@@ -246,10 +248,24 @@ internal object ServeUiBuilderView {
       runCatching { ImageIO.read(ByteArrayInputStream(Base64.getDecoder().decode(image.base64))) }
         .getOrNull() ?: return report(false, "${image.mediaType} cannot be decoded on this host")
     val pxPerDp = width.toDouble() / max(1, widthDp)
-    val drawWidth = max(1, (width * settings.scalePercent / 100.0).roundToInt())
-    val drawHeight = max(1, (picture.height * drawWidth.toDouble() / picture.width).roundToInt())
-    val left = (settings.offsetXDp * pxPerDp).roundToInt()
-    val top = (settings.offsetYDp * pxPerDp).roundToInt()
+    // The editor's own placement rule, shared through `:ui-builder-export`: contained and centred,
+    // then scaled and nudged. This view used to fit the picture to the frame's width from the
+    // top-left, which put a screenshot a person had lined up in the editor somewhere else in the
+    // picture an agent was shown.
+    val placed =
+      referencePlacement(
+        frameWidth = width.toFloat(),
+        frameHeight = canvas.height.toFloat(),
+        imageWidthPx = picture.width.toFloat(),
+        imageHeightPx = picture.height.toFloat(),
+        scale = settings.scalePercent / 100f,
+        offsetX = (settings.offsetXDp * pxPerDp).toFloat(),
+        offsetY = (settings.offsetYDp * pxPerDp).toFloat(),
+      )
+    val drawWidth = max(1, placed.width.roundToInt())
+    val drawHeight = max(1, placed.height.roundToInt())
+    val left = placed.left.roundToInt()
+    val top = placed.top.roundToInt()
     val alpha = settings.opacityPercent / 100f
     if (settings.mode == "difference") {
       val scaled = BufferedImage(drawWidth, drawHeight, BufferedImage.TYPE_INT_ARGB)

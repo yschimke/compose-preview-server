@@ -50,9 +50,12 @@ internal object DesignCommand {
   const val VIEW: String = "view"
   const val EXPORT: String = "export"
   const val VALIDATE: String = "validate"
+  const val REFERENCE: String = "reference"
+  const val COMPARE: String = "compare"
 
   /** Every verb, in the order [usage] lists them. */
-  val VERBS: List<String> = listOf(LIST, STATUS, GET, RENDER, VIEW, EXPORT, VALIDATE)
+  val VERBS: List<String> =
+    listOf(LIST, STATUS, GET, RENDER, VIEW, REFERENCE, COMPARE, EXPORT, VALIDATE)
 
   /**
    * The verbs `--local` has an answer for.
@@ -151,8 +154,22 @@ internal object DesignCommand {
     val include: List<String>? = null,
     /** [VIEW]: fit the picture inside this many pixels, width then height. */
     val viewport: Pair<Int, Int>? = null,
-    /** [VIEW]: `export` or `native`; null lets the server default. */
+    /** [VIEW], [COMPARE]: `export` or `native`; null lets the server default. */
     val renderer: String? = null,
+    /** [REFERENCE]: the picture to attach. */
+    val attach: String? = null,
+    /** [REFERENCE]: the picture's pixels per dp, e.g. 2 for a Figma 2x export. */
+    val density: Double? = null,
+    /** [REFERENCE]: where the picture came from, such as the Figma frame URL. */
+    val sourceUrl: String? = null,
+    /** [REFERENCE]: remove the reference instead. */
+    val clear: Boolean = false,
+    /** [COMPARE]: layers to match against the reference. */
+    val nodes: List<String> = emptyList(),
+    /** [COMPARE]: `contain`, `width` or `actual`; null lets the picture choose. */
+    val fit: String? = null,
+    /** [COMPARE]: skip the whole-frame difference. */
+    val differences: Boolean = true,
   ) {
 
     /**
@@ -174,6 +191,13 @@ internal object DesignCommand {
           verb == VIEW && renderer == ServeUiBuilderView.RENDERER_NATIVE ->
             listOf(AgentGrantCapability.UI_BUILDER_READ, AgentGrantCapability.UI_BUILDER_EXPORT)
           verb == VIEW -> listOf(AgentGrantCapability.UI_BUILDER_READ)
+          // Attaching a reference writes beside the design; matching layers measures the native
+          // render, which compiles the design's Kotlin, as `ui_builder_compare_reference` gates it.
+          verb == REFERENCE -> listOf(AgentGrantCapability.UI_BUILDER_WRITE)
+          verb == COMPARE &&
+            (renderer == ServeUiBuilderView.RENDERER_NATIVE ||
+              (renderer == null && nodes.isNotEmpty())) ->
+            listOf(AgentGrantCapability.UI_BUILDER_READ, AgentGrantCapability.UI_BUILDER_EXPORT)
           verb == RENDER || verb == EXPORT -> listOf(AgentGrantCapability.UI_BUILDER_EXPORT)
           else -> listOf(AgentGrantCapability.UI_BUILDER_READ)
         }
@@ -184,7 +208,7 @@ internal object DesignCommand {
      */
     val scope: AgentGrantScope
       get() =
-        if ((verb == RENDER || verb == VIEW) && !local) AgentGrantScope.LIVE
+        if ((verb == RENDER || verb == VIEW || verb == COMPARE) && !local) AgentGrantScope.LIVE
         else AgentGrantScope.PREVIEW
 
     /** Where the artifact goes when the caller named no `--out`. */
@@ -249,6 +273,15 @@ internal object DesignCommand {
     var viewport: Pair<Int, Int>? = null
     var renderer: String? = null
     var viewFlagWasSet = false
+    var attach: String? = null
+    var density: Double? = null
+    var sourceUrl: String? = null
+    var clear = false
+    val nodes = mutableListOf<String>()
+    var fit: String? = null
+    var differences = true
+    var referenceFlagWasSet = false
+    var compareFlagWasSet = false
     var workspaceWasSet = false
     var outWasSet = false
     var revisionWasSet = false
@@ -382,6 +415,49 @@ internal object DesignCommand {
           viewFlagWasSet = true
           index++
         }
+        argument == "--attach" -> {
+          attach = value() ?: return missingValue(argument)
+          referenceFlagWasSet = true
+          index++
+        }
+        argument == "--density" -> {
+          val raw = value() ?: return missingValue(argument)
+          density =
+            raw.toDoubleOrNull()?.takeIf { it > 0.0 && it <= 8.0 }
+              ?: return Parsed.Invalid(
+                "design reference: --density is pixels per dp, above 0 and at most 8, not '$raw'"
+              )
+          referenceFlagWasSet = true
+          index++
+        }
+        argument == "--source-url" -> {
+          sourceUrl = value() ?: return missingValue(argument)
+          referenceFlagWasSet = true
+          index++
+        }
+        argument == "--clear" -> {
+          clear = true
+          referenceFlagWasSet = true
+        }
+        argument == "--node" -> {
+          val raw = value() ?: return missingValue(argument)
+          nodes += raw.split(',').map(String::trim).filter(String::isNotEmpty)
+          compareFlagWasSet = true
+          index++
+        }
+        argument == "--fit" -> {
+          val raw = value() ?: return missingValue(argument)
+          if (raw !in setOf("contain", "width", "actual")) {
+            return Parsed.Invalid("design compare: --fit is contain, width or actual, not '$raw'")
+          }
+          fit = raw
+          compareFlagWasSet = true
+          index++
+        }
+        argument == "--no-differences" -> {
+          differences = false
+          compareFlagWasSet = true
+        }
         argument == "--json" -> json = true
         argument == "--summary" -> summary = true
         argument == "--no-authorize" -> authorize = false
@@ -460,10 +536,28 @@ internal object DesignCommand {
         "design $verb: --revision pins which revision a server hands over; a file is already one"
       )
     }
-    if (verb != VIEW && viewFlagWasSet) {
+    // `--renderer` is shared by view and compare; the other view flags are view's alone.
+    if (
+      verb != VIEW &&
+        viewFlagWasSet &&
+        !(verb == COMPARE && include == null && selection.isEmpty() && viewport == null)
+    ) {
       return Parsed.Invalid(
         "design $verb: --select, --include, --viewport and --renderer apply to view only"
       )
+    }
+    if (verb != REFERENCE && referenceFlagWasSet) {
+      return Parsed.Invalid(
+        "design $verb: --attach, --density, --source-url and --clear apply to reference only"
+      )
+    }
+    if (verb != COMPARE && compareFlagWasSet) {
+      return Parsed.Invalid(
+        "design $verb: --node, --fit and --no-differences apply to compare only"
+      )
+    }
+    if (verb == REFERENCE && (attach == null) == !clear) {
+      return Parsed.Invalid("design reference: give either --attach <picture> or --clear")
     }
     if (verb != STATUS && (workspaceWasSet || json || summary)) {
       return Parsed.Invalid("design $verb: --workspace, --json and --summary apply to status only")
@@ -521,6 +615,13 @@ internal object DesignCommand {
         include = include,
         viewport = viewport,
         renderer = renderer,
+        attach = attach,
+        density = density,
+        sourceUrl = sourceUrl,
+        clear = clear,
+        nodes = nodes,
+        fit = fit,
+        differences = differences,
       )
     )
   }
@@ -538,6 +639,8 @@ internal object DesignCommand {
       LIST,
       STATUS,
       GET,
+      REFERENCE,
+      COMPARE,
       VALIDATE -> STDOUT
       EXPORT -> if (format == ExportFormatV1.COMPOSE) STDOUT else "$designId.${format.extension()}"
       // Beside a `render` of the same design rather than over it: the two are different pictures.
@@ -561,6 +664,12 @@ internal object DesignCommand {
       view <designId>           The editor canvas as a person sees it: a PNG with the selection,
                                 reference and comment pins drawn on, and the node boxes and pin
                                 positions as JSON on stdout.
+      reference <designId>      Attach the picture the design is built against (--attach), or
+                                --clear it. Prints what it is against the frame: size in dp,
+                                density, and whether pixels can be compared.
+      compare <designId>        Measure the design against its reference: where it differs, and
+                                for each --node the move, size and font size that would line it
+                                up, as ui_builder_apply operations. Writes nothing.
       export <designId>         The generated source (Kotlin), with its diagnostics.
       validate <designId>       Check a design without saving it: the stored design, a batch of
                                 --operations against it, or a whole --document. Prints the
@@ -600,8 +709,17 @@ internal object DesignCommand {
                                 ${ServeUiBuilderView.INCLUDES.joinToString(",")} (default
                                 ${ServeUiBuilderView.DEFAULT_INCLUDES.sorted().joinToString(",")}).
       --viewport <w>x<h>        view: fit the picture inside this many pixels.
-      --renderer <renderer>     view: export (default; reports no node boxes) or native (real
+      --renderer <renderer>     view, compare: export (reports no node boxes) or native (real
                                 Compose with node boxes; needs the ui-builder-export capability).
+                                compare defaults to native when --node is given.
+      --attach <picture>        reference: a PNG, JPEG, WebP or SVG file.
+      --density <n>             reference: its pixels per dp (2 for a Figma 2x export).
+      --source-url <url>        reference: where it came from, e.g. the Figma frame link.
+      --clear                   reference: remove the reference, its marks and pieces.
+      --node <id,id>            compare: layers to match. Repeatable.
+      --fit <fit>               compare: contain, width or actual (default: what the picture
+                                calls for).
+      --no-differences          compare: skip the whole-frame difference.
       --revision <n>            Pin a revision. Omitted means the current committed one, which is
                                 what the export URLs serve.
       --limit <n>               list: how many designs to ask for (default $DEFAULT_LIMIT).

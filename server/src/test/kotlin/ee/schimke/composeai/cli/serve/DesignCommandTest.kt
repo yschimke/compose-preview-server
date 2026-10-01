@@ -232,4 +232,42 @@ class DesignCommandTest {
     )
     assertTrue(ServerCommands.commandListing().contains("design"))
   }
+
+  @Test
+  fun `reference attaches a file or clears, and asks for write`() {
+    val attach =
+      run("reference", "home", "--attach", "mock@2x.png", "--source-url", "https://x.test/f")
+    assertEquals("mock@2x.png", attach.attach)
+    assertEquals(DesignCommand.STDOUT, attach.destination)
+    assertEquals(
+      listOf(ee.schimke.composeai.agentgrants.AgentGrantCapability.UI_BUILDER_WRITE),
+      attach.capabilities,
+    )
+    assertEquals(2.0, run("reference", "home", "--attach", "a.png", "--density", "2").density)
+    assertEquals(true, run("reference", "home", "--clear").clear)
+    invalid("reference", "home")
+    invalid("reference", "home", "--attach", "a.png", "--clear")
+    invalid("reference", "home", "--attach", "a.png", "--density", "0")
+    invalid("view", "home", "--attach", "a.png")
+  }
+
+  @Test
+  fun `compare matching layers measures the native render, so it asks for export too`() {
+    val compare = run("compare", "home", "--node", "title,card", "--fit", "actual")
+    assertEquals(listOf("title", "card"), compare.nodes)
+    assertEquals("actual", compare.fit)
+    assertTrue(
+      ee.schimke.composeai.agentgrants.AgentGrantCapability.UI_BUILDER_EXPORT in
+        compare.capabilities
+    )
+    val differencesOnly = run("compare", "home", "--renderer", "export")
+    assertEquals(
+      listOf(ee.schimke.composeai.agentgrants.AgentGrantCapability.UI_BUILDER_READ),
+      differencesOnly.capabilities,
+    )
+    assertEquals(false, run("compare", "home", "--node", "t", "--no-differences").differences)
+    invalid("compare", "home", "--fit", "stretch")
+    invalid("compare", "home", "--select", "title")
+    invalid("view", "home", "--node", "title")
+  }
 }
