@@ -1483,6 +1483,35 @@ class DaemonMcpServerTest {
   }
 
   @Test
+  fun `notify_file_changed without a workspaceId uses the project that holds the path`() {
+    client.initialize()
+    val outer = tmp.newFolder("notify-outer")
+    val inner = File(outer, "nested").apply { mkdirs() }
+    registerWorkspace(outer, "outer")
+    val workspaceId = registerWorkspace(inner, "inner")
+    val daemon = warmDaemonFor(workspaceId, ":app")
+    // The deepest project holding the path wins when builds nest.
+    val source = File(inner, "app/src/main/kotlin/Screen.kt").apply { parentFile.mkdirs() }
+    source.writeText("fun Screen() {}")
+    val result =
+      client.callTool(
+        "notify_file_changed",
+        buildJsonObject {
+          put("path", source.absolutePath)
+          put("kind", "resource")
+        },
+      )
+    assertThat(result.isError()).isFalse()
+    assertThat(daemon.fileChanges.poll(2_000, TimeUnit.MILLISECONDS)).isNotNull()
+
+    val outside = tmp.newFile("Elsewhere.kt")
+    val refused =
+      client.callTool("notify_file_changed", buildJsonObject { put("path", outside.absolutePath) })
+    assertThat(refused.isError()).isTrue()
+    assertThat(refused.firstTextContent()).contains("not inside exactly one registered project")
+  }
+
+  @Test
   fun `initialize sends short local instructions naming render_preview preview`() {
     val instructions = client.initialize()["instructions"]?.jsonPrimitive?.contentOrNull
     assertThat(instructions).contains("render_preview preview=<FunctionName>")
@@ -3677,7 +3706,8 @@ class DaemonMcpServerTest {
       listOf(
         Case("accept", expectedMode = "elicitation", rendersSmall = true),
         Case("decline", expectedMode = "declined", renders = false),
-        Case("cancel", expectedMode = "cancelled", renders = false),
+        // A headless client (Claude Code's print mode) cancels every form unseen: render the first.
+        Case("cancel", expectedMode = "cancelled"),
         // No elicitation capability at all, and a URL-only client: never asked, text fallback.
         Case(null, form = false, expectedMode = "text", expectedRequests = 0),
         Case(null, form = false, url = true, expectedMode = "text", expectedRequests = 0),

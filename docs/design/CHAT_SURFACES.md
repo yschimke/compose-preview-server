@@ -68,6 +68,8 @@ the image blocks it always returned and changes nothing.
 | `ui_builder_render_native` | image block | ✅ **added here** (kept) | ✅ | |
 | `ui_builder_export_document` (`png`) | image block | ✅ **added here** (kept) | ✅ | Text and JSON exports are text. |
 | `ui_builder_export` | Kotlin, SVG or JSON text | n/a | n/a | Source, not a picture. |
+| `ui_builder_render_design_matrix` (#1260) | image block only with `inline=true` | ✅ (kept) | ✅ | Shares `ui_builder_view`'s result path, so it got the link and the text line without its own change. |
+| `ui_builder_check_design`, `ui_builder_diff_designs`, `ui_builder_list_revisions` | none | n/a | n/a | Text and JSON reports. |
 | `resources/read` | `blob` | n/a | n/a | MCP resource content is base64 by protocol, and a chat host does not call it. |
 
 `ServeCatalogMcpChatFallbackTest` and `ChatFallbackAssertions` pin the table. On a public origin
@@ -170,10 +172,32 @@ and `--ui-builder-comment-webhook-format plain|slack|teams|google-chat`.
   thread. A relay reading the `plain` body can use `design.thread` (and the `slackThread` parse
   above) to post into the thread with `chat.postMessage`.
 
-Events posted today: a new thread, a reply, a resolve, a reopen. Reactions, acknowledgements and
-deletes are deliberately silent (see the class KDoc). Not yet posted: a proposed alternative or
-branch, a merge, and a failed render. Branches are being designed separately, and their events
-should be added to this webhook as new `event` kinds when they land, under the same rate limit.
+**Comment events** (the default): a new thread, a reply, a resolve, a reopen. Reactions,
+acknowledgements and deletes are deliberately silent (see the class KDoc).
+
+**Design activity** (opt-in by name with `--ui-builder-webhook-events`, `ServeUiBuilderDesignActivity`):
+
+| Event | Source | Fires when |
+| --- | --- | --- |
+| `fork` | `ui_builder_fork_design` (#1259), via the ancestry store | An alternative is proposed. It is announced on the design it was forked from, with the fork's own permalink. |
+| `decision` | `ui_builder_record_decision` (#1260), via the review store | A revision is approved or rejected. The note is quoted on public designs. |
+| `implementation` | `ui_builder_set_implementation` (#1260), via the review store | The implementing pull request is linked, or its status (`draft`, `open`, `merged`, `closed`) or its preview match (`match`, `mismatch`) changes. "Merged" is the merge. |
+
+- `--ui-builder-webhook-events` takes `comments`, `fork`, `decision`, `implementation` or `all`,
+  comma-separated, and defaults to `comments`. A channel that opted into comment activity gets
+  nothing new on upgrade, and a typo is refused at startup rather than silently posting less.
+- Design activity shares the comment webhook's queue, its two rate-limit buckets, its single retry
+  and its private-design rule. A private design gets a link-only event: the kind, the design id, the
+  revision and the permalink, with no title, actor, note or pull request.
+- The `plain` body is `compose-preview/design-activity-webhook/v1`. That shape belongs to this
+  server, like the review and ancestry records it is built from. It reuses the published
+  `DesignCommentWebhookDesignV1` for the design. Move it to `compose-preview-contracts` if a relay
+  outside this repository comes to depend on it.
+- **No "failed render" event, deliberately.** A render here is commissioned by a caller and
+  answered to that caller, who already has the failure. Nothing records a design as "currently
+  failing", so the event would broadcast one caller's transient error, again on every retry. The
+  persistent signal, an implementation whose previews do not match the design, is announced as an
+  `implementation` change.
 
 **Agents are not woken by any of this.** For follow-ups, Claude Tag uses what it supports: a PR
 subscription, or a routine that polls `ui_builder_list_comments` (or `ui_builder_await_comments`
@@ -209,7 +233,9 @@ and a credential. Not needed today.
      Everyone in the scope shares that token's capabilities.
 3. Optionally attach the compose-ag-plugin skills to the access bundle. They apply to new threads.
 4. For notifications, create a Slack incoming webhook for the channel and start the server with
-   `--ui-builder-comment-webhook <url> --ui-builder-comment-webhook-format slack`.
+   `--ui-builder-comment-webhook <url> --ui-builder-comment-webhook-format slack`. Add
+   `--ui-builder-webhook-events all` (or a list) to post forks, decisions and implementation changes
+   as well as comments.
 
 ## Verification status
 
@@ -219,6 +245,7 @@ and a credential. Not needed today.
 | Contact sheet fits a Slack attachment | ✅ server test (`ServeContactSheetTest`, 24 phone screens < 3.75 MB) |
 | Slack permalink parsing, `threadKind` | ✅ server tests (`ServeChatThreadLinksTest`) |
 | Webhook payload shapes, opt-in, rate limit | ✅ server tests (`ServeUiBuilderCommentWebhookTest`) |
+| Design-activity events: diff, privacy, bodies, opt-in, shared rate limit | ✅ server tests (`ServeUiBuilderDesignActivityTest`) |
 | OpenGraph on viewer, browse and design pages | ✅ existing server tests |
 | Claude Tag: connection setup against `preview.coo.ee/mcp` | ⬜ not yet verified in a live workspace |
 | Claude Tag: attaching an image from a signed URL | ⬜ not yet verified |

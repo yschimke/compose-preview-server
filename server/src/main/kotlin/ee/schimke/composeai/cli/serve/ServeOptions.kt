@@ -764,6 +764,14 @@ public interface ServeOptions {
     get() = null
 
   /**
+   * What that webhook posts (`--ui-builder-webhook-events`): a comma-separated list of `comments`,
+   * `fork`, `decision`, `implementation`, or `all`. Defaults to `comments`, which is all a hook
+   * posted before design activity existed, so an existing channel gets nothing new on upgrade.
+   */
+  public val uiBuilderWebhookEvents: String?
+    get() = null
+
+  /**
    * Which served catalog each UI-builder catalog's designs are **compiled** against for the native
    * preview lane (`--ui-builder-native-catalog <builder catalog>=<served catalog>`).
    *
