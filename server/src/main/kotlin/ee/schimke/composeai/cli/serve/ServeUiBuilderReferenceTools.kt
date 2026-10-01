@@ -1,6 +1,7 @@
 package ee.schimke.composeai.cli.serve
 
 import ee.schimke.composeai.uibuilder.export.UiBuilderDocument
+import ee.schimke.composeai.uibuilder.export.UiBuilderNode
 import ee.schimke.composeai.uibuilder.export.toUiBuilderDocument
 import ee.schimke.composeai.uibuilder.protocol.DesignDocumentV1
 import ee.schimke.composeai.uibuilder.reference.REFERENCE_FONT_SIZE_PROPERTY
@@ -168,7 +169,7 @@ internal object ServeUiBuilderReferenceTools {
         ReferenceLayer(
           nodeId = nodeId,
           bounds = bounds,
-          text = node.componentId.isTextComponent(),
+          text = node.isTextLayer(),
           content = node.contentBounds(bounds),
         )
       }
@@ -402,8 +403,12 @@ internal object ServeUiBuilderReferenceTools {
       heightDp = (height * 10).roundToInt() / 10.0,
     )
 
-  private fun String.isTextComponent(): Boolean =
-    this == "m3/text" || this == "material3/Text" || this == "wear-m3/text" || endsWith("/text")
+  /**
+   * Whether a node draws its own text, read from the node rather than from a list of catalog ids
+   * (which this module may not hold — see `ui-builder-catalog-literals.sh`): a leaf that carries a
+   * `text` property is a label, and is compared by its ink and resized by its type.
+   */
+  private fun UiBuilderNode.isTextLayer(): Boolean = "text" in properties && slots.isEmpty()
 
   private fun Double.densityText(): String =
     if (this == toLong().toDouble()) toLong().toString() else toString()
