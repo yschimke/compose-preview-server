@@ -85,7 +85,12 @@ class ServeMcpAnonymousPreviewTest {
   private val liveCall =
     """{"jsonrpc":"2.0","id":1,"method":"tools/call",""" +
       """"params":{"name":"catalog_render_preview",""" +
-      """"arguments":{"catalog":"demo","previewId":"example"}}}"""
+      """"arguments":{"catalog":"demo","previewId":"example","overrides":{"uiMode":"dark"}}}}"""
+
+  private val publishedCall =
+    """{"jsonrpc":"2.0","id":1,"method":"tools/call",""" +
+      """"params":{"name":"catalog_render_preview",""" +
+      """"arguments":{"catalog":"demo","previewId":"example","observe":"png"}}}"""
 
   private val argumentlessLiveCall =
     """{"jsonrpc":"2.0","id":1,"method":"tools/call",""" +
@@ -128,6 +133,18 @@ class ServeMcpAnonymousPreviewTest {
     assertTrue(body.contains("live grant scope is required"), body)
     // …and says how to look without one: the published render needs only preview scope.
     assertTrue(body.contains("resources/read"), body)
+  }
+
+  @Test
+  fun `an override-free render without a live grant returns the published snapshot`() {
+    // Agents call catalog_render_preview to look at a library component before they think of
+    // resources/read; every eval run on yschimke/compose-ag-plugin#64 spent three calls on the
+    // refusal and then read these same bytes.
+    val (code, body) = mcp(start(isPublic = true), publishedCall)
+    assertEquals(200, code, body)
+    assertTrue(!body.contains("\"isError\":true"), body)
+    assertTrue(body.contains("\"type\":\"image\""), body)
+    assertTrue(body.contains("\\\"published\\\":true"), body)
   }
 
   @Test
