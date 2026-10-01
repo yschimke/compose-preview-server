@@ -196,7 +196,9 @@ composeai-preview-daemon = "3.11.0"
 # 3.14.0 adds `RenderFinishedParams.workTrace` (compose-preview-contracts#128) and builders for the
 # evolving UI-builder types; daemon 3.11.0 needs it (it builds `renderFinished` through the new
 # `RenderFinishedParams.Builder`). Its BOM keeps `common-io` at 3.13.0, the last release of it.
-composeai-contracts = "3.14.0"
+# 3.15.0 adds `RemoteComposeOverride.playerId` (compose-preview-contracts#129): an `rcPlayer=` naming
+# a player registered with the daemon, which `CatalogLiveRouting` must route to a real render.
+composeai-contracts = "3.15.0"
 
 # The extracted UI builder (yschimke/compose-ui-builder), resolved from its RELEASES. Three jars
 # and a BOM on Maven Central, and the editor archive as a GitHub release asset reached through the

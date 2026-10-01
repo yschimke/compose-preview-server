@@ -29,6 +29,37 @@ class CatalogLiveRoutingTest {
     )
 
   /**
+   * A player named by id — one registered with the daemon beyond the built-ins — is never what the
+   * baked capture drew, so it always routes to a real render, and it is reported under the
+   * `rcPlayer` name the caller spelled it with when a lane cannot honour it.
+   */
+  @Test
+  fun `a player named by id always needs the renderer`() {
+    val byId =
+      PreviewOverrides(
+        remoteCompose = RemoteComposeOverride.Builder().also { it.playerId = "rcplayer-x" }.build()
+      )
+    assertTrue(
+      CatalogLiveRouting.overridesAffectRender(
+        lightId,
+        byId,
+        UiMode.LIGHT,
+        RemoteComposePlayerKind.EMBEDDED,
+      ),
+      "a facet holding only a playerId is not empty",
+    )
+    assertEquals(
+      listOf("rcPlayer"),
+      CatalogLiveRouting.droppedOverrideNames(
+        lightId,
+        byId,
+        UiMode.LIGHT,
+        RemoteComposePlayerKind.EMBEDDED,
+      ),
+    )
+  }
+
+  /**
    * The player the request names is a no-op exactly when the capture went through it.
    *
    * `RemoteOverridablePreview` defaults to the embedded player, so for an ordinary preview the
