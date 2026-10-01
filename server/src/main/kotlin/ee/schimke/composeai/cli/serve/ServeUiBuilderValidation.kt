@@ -2,6 +2,7 @@ package ee.schimke.composeai.cli.serve
 
 import ee.schimke.composeai.uibuilder.protocol.AcceptedOutcomeV1
 import ee.schimke.composeai.uibuilder.protocol.ApplyOperationRequestV1
+import ee.schimke.composeai.uibuilder.protocol.CatalogCapabilityV1
 import ee.schimke.composeai.uibuilder.protocol.CreateDesignRequestV1
 import ee.schimke.composeai.uibuilder.protocol.DesignCommandV1
 import ee.schimke.composeai.uibuilder.protocol.DesignDocumentV1
@@ -9,6 +10,7 @@ import ee.schimke.composeai.uibuilder.protocol.DesignMutationV1
 import ee.schimke.composeai.uibuilder.protocol.DiagnosticSeverityV1
 import ee.schimke.composeai.uibuilder.protocol.ExportDesignRequestV1
 import ee.schimke.composeai.uibuilder.protocol.ExportFormatV1
+import ee.schimke.composeai.uibuilder.protocol.GetSnapshotRequestV1
 import ee.schimke.composeai.uibuilder.protocol.RejectedOutcomeV1
 import ee.schimke.composeai.uibuilder.protocol.RejectionCodeV1
 import ee.schimke.composeai.uibuilder.protocol.ServiceErrorCodeV1
@@ -68,7 +70,51 @@ fun interface UiBuilderDraftValidator {
     document: DesignDocumentV1,
     operations: List<DesignMutationV1>?,
   ): List<UiBuilderValidationProblemV1>
+
+  /**
+   * [validate], and the document it checked: [document] itself, or — when [operations] are given —
+   * what the batch made of it, so a caller can ask further questions of an edit nobody has saved.
+   *
+   * The default can only hand back a document it was given, so a batch's result is null there; the
+   * scratch validator, which actually applies the batch, overrides it.
+   */
+  suspend fun draft(
+    actor: AuthenticatedUiBuilderActor,
+    document: DesignDocumentV1,
+    operations: List<DesignMutationV1>?,
+  ): UiBuilderDraft =
+    UiBuilderDraft(
+      validate(actor, document, operations),
+      if (operations == null) document else null,
+    )
+
+  /**
+   * The editor's PNG export of each of [documents] exactly as given — environment included — with
+   * nothing stored anywhere, or null where this lane cannot draw one.
+   *
+   * What `ui_builder_render_design_matrix` draws its cells with: the same design under a different
+   * device, theme or font scale is a different environment, and changing a stored design's
+   * environment to take its picture would move its revision and tell everybody watching it about a
+   * change nobody made.
+   */
+  suspend fun exportPngs(
+    actor: AuthenticatedUiBuilderActor,
+    documents: List<DesignDocumentV1>,
+  ): List<UiBuilderScratchPng>? = null
 }
+
+/** One picture from [UiBuilderDraftValidator.exportPngs], or why there is none. */
+class UiBuilderScratchPng(val png: ByteArray?, val problem: String?)
+
+/**
+ * What [UiBuilderDraftValidator.draft] found: the problems, and the checked document with the
+ * catalog it pins, when there was one to check.
+ */
+class UiBuilderDraft(
+  val problems: List<UiBuilderValidationProblemV1>,
+  val document: DesignDocumentV1?,
+  val catalog: CatalogCapabilityV1? = null,
+)
 
 /** [UiBuilderDraftValidator] over a throwaway service; see the interface for why. */
 class ScratchUiBuilderDraftValidator(
@@ -81,11 +127,77 @@ class ScratchUiBuilderDraftValidator(
     actor: AuthenticatedUiBuilderActor,
     document: DesignDocumentV1,
     operations: List<DesignMutationV1>?,
-  ): List<UiBuilderValidationProblemV1> =
+  ): List<UiBuilderValidationProblemV1> = draft(actor, document, operations).problems
+
+  override suspend fun draft(
+    actor: AuthenticatedUiBuilderActor,
+    document: DesignDocumentV1,
+    operations: List<DesignMutationV1>?,
+  ): UiBuilderDraft =
     withContext(Dispatchers.IO) {
       val directory = scratchRoot()
       try {
         validateIn(directory, actor, document, operations)
+      } finally {
+        runCatching { directory.toFile().deleteRecursively() }
+      }
+    }
+
+  override suspend fun exportPngs(
+    actor: AuthenticatedUiBuilderActor,
+    documents: List<DesignDocumentV1>,
+  ): List<UiBuilderScratchPng> =
+    withContext(Dispatchers.IO) {
+      val directory = scratchRoot()
+      try {
+        val scratch =
+          PersistentUiBuilderService(
+            designStore = UiBuilderDesignStateStore.open(directory),
+            catalogs = catalogs,
+            exporter = exporter,
+          )
+        documents.mapIndexed { index, document ->
+          val designId = "$SCRATCH_DESIGN_ID-$index"
+          val created =
+            scratch.run(
+              actor,
+              CreateDesignRequestV1(document.copy(id = designId, revision = 0, home = null)),
+            )
+          val snapshot =
+            created as? UiBuilderServiceResponse.Snapshot
+              ?: return@mapIndexed UiBuilderScratchPng(
+                null,
+                problemOf(created, SOURCE_DOCUMENT).message,
+              )
+          val exported =
+            scratch.run(
+              actor,
+              ExportDesignRequestV1(
+                designId,
+                snapshot.snapshot.state.document.revision,
+                ExportFormatV1.PNG,
+              ),
+            )
+          val artifact =
+            (exported as? UiBuilderServiceResponse.Export)?.artifact
+              ?: return@mapIndexed UiBuilderScratchPng(
+                null,
+                problemOf(exported, SOURCE_EXPORT).message,
+              )
+          val errors = artifact.diagnostics.filter { it.severity == DiagnosticSeverityV1.ERROR }
+          val bytes = runCatching {
+            java.util.Base64.getDecoder().decode(artifact.content)
+          }
+            .getOrNull()
+          if (errors.isNotEmpty() || bytes == null || bytes.isEmpty()) {
+            UiBuilderScratchPng(
+              null,
+              errors
+                .joinToString("; ") { "${it.code}: ${it.message}" }
+                .ifEmpty { "the export produced no image" },
+            )
+          } else UiBuilderScratchPng(bytes, null)
+        }
       } finally {
         runCatching { directory.toFile().deleteRecursively() }
       }
@@ -96,7 +208,7 @@ class ScratchUiBuilderDraftValidator(
     actor: AuthenticatedUiBuilderActor,
     document: DesignDocumentV1,
     operations: List<DesignMutationV1>?,
-  ): List<UiBuilderValidationProblemV1> {
+  ): UiBuilderDraft {
     val scratch =
       PersistentUiBuilderService(
         designStore = UiBuilderDesignStateStore.open(directory),
@@ -111,8 +223,10 @@ class ScratchUiBuilderDraftValidator(
     val created = scratch.run(actor, CreateDesignRequestV1(seeded))
     val snapshot =
       created as? UiBuilderServiceResponse.Snapshot
-        ?: return listOf(problemOf(created, SOURCE_DOCUMENT))
+        ?: return UiBuilderDraft(listOf(problemOf(created, SOURCE_DOCUMENT)), null)
+    val catalog = snapshot.snapshot.catalog
     var revision = snapshot.snapshot.state.document.revision
+    var checked = snapshot.snapshot.state.document
 
     if (operations != null) {
       val outcome =
@@ -130,61 +244,81 @@ class ScratchUiBuilderDraftValidator(
           ),
         )
       when (val result = (outcome as? UiBuilderServiceResponse.OperationOutcome)?.outcome) {
-        is AcceptedOutcomeV1 -> revision = result.committedRevision
+        is AcceptedOutcomeV1 -> {
+          revision = result.committedRevision
+          checked =
+            (scratch.run(actor, GetSnapshotRequestV1(designId = designId, revision = revision))
+                as? UiBuilderServiceResponse.Snapshot)
+              ?.snapshot
+              ?.state
+              ?.document ?: checked
+        }
         is RejectedOutcomeV1 ->
-          return listOf(
-            UiBuilderValidationProblemV1(
-              source = SOURCE_MUTATIONS,
-              code =
-                UI_BUILDER_JSON.encodeToJsonElement(
-                    RejectionCodeV1.serializer(),
-                    result.code,
-                  )
-                  .let { (it as JsonPrimitive).content },
-              message = result.message,
-              nodeId = result.nodeId,
-              field = result.field,
-              operationIndex = result.operationIndex,
-            )
+          return UiBuilderDraft(
+            listOf(
+              UiBuilderValidationProblemV1(
+                source = SOURCE_MUTATIONS,
+                code =
+                  UI_BUILDER_JSON.encodeToJsonElement(
+                      RejectionCodeV1.serializer(),
+                      result.code,
+                    )
+                    .let { (it as JsonPrimitive).content },
+                message = result.message,
+                nodeId = result.nodeId,
+                field = result.field,
+                operationIndex = result.operationIndex,
+              )
+            ),
+            null,
+            catalog,
           )
-        else -> return listOf(problemOf(outcome, SOURCE_MUTATIONS))
+        else -> return UiBuilderDraft(listOf(problemOf(outcome, SOURCE_MUTATIONS)), null, catalog)
       }
     }
 
+    // The scratch copy's id and revision are its own; the caller asked about theirs.
+    checked = checked.copy(id = document.id, revision = document.revision)
     // The export gate: only where the pinned catalog exports Compose at all. A catalog that does
     // not has no gate to fail, and saying "valid" there is the truth rather than an omission.
     if (!snapshot.snapshot.catalog.exportCapabilities.composeCode) {
-      return listOf(
-        UiBuilderValidationProblemV1(
-          severity = SEVERITY_INFO,
-          source = SOURCE_EXPORT,
-          code = "composeExportUnavailable",
-          message =
-            "the pinned catalog does not export Compose, so there is no export gate to check",
-        )
+      return UiBuilderDraft(
+        listOf(
+          UiBuilderValidationProblemV1(
+            severity = SEVERITY_INFO,
+            source = SOURCE_EXPORT,
+            code = "composeExportUnavailable",
+            message =
+              "the pinned catalog does not export Compose, so there is no export gate to check",
+          )
+        ),
+        checked,
+        catalog,
       )
     }
-    return when (
-      val exported =
-        scratch.run(actor, ExportDesignRequestV1(designId, revision, ExportFormatV1.COMPOSE))
-    ) {
-      is UiBuilderServiceResponse.Export ->
-        exported.artifact.diagnostics.map {
-          UiBuilderValidationProblemV1(
-            severity =
-              when (it.severity) {
-                DiagnosticSeverityV1.ERROR -> SEVERITY_ERROR
-                DiagnosticSeverityV1.WARNING -> SEVERITY_WARNING
-                DiagnosticSeverityV1.INFO -> SEVERITY_INFO
-              },
-            source = SOURCE_EXPORT,
-            code = it.code,
-            message = it.message,
-            nodeId = it.nodeId,
-          )
-        }
-      else -> listOf(problemOf(exported, SOURCE_EXPORT))
-    }
+    val problems =
+      when (
+        val exported =
+          scratch.run(actor, ExportDesignRequestV1(designId, revision, ExportFormatV1.COMPOSE))
+      ) {
+        is UiBuilderServiceResponse.Export ->
+          exported.artifact.diagnostics.map {
+            UiBuilderValidationProblemV1(
+              severity =
+                when (it.severity) {
+                  DiagnosticSeverityV1.ERROR -> SEVERITY_ERROR
+                  DiagnosticSeverityV1.WARNING -> SEVERITY_WARNING
+                  DiagnosticSeverityV1.INFO -> SEVERITY_INFO
+                },
+              source = SOURCE_EXPORT,
+              code = it.code,
+              message = it.message,
+              nodeId = it.nodeId,
+            )
+          }
+        else -> listOf(problemOf(exported, SOURCE_EXPORT))
+      }
+    return UiBuilderDraft(problems, checked, catalog)
   }
 
   private suspend fun PersistentUiBuilderService.run(

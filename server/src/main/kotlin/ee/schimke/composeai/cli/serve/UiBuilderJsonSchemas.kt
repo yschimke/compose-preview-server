@@ -94,6 +94,46 @@ internal object UiBuilderJsonSchemas {
     )
   }
 
+  /** `ui_builder_check_design`'s MCP `outputSchema`: [UiBuilderDesignCheckV1]. */
+  val designCheckOutput: JsonObject by lazy {
+    SerialDescriptorJsonSchema.output(
+      UiBuilderDesignCheckV1.serializer().descriptor,
+      schemaId = UI_BUILDER_DESIGN_CHECK_SCHEMA,
+    )
+  }
+
+  /** `ui_builder_render_design_matrix`'s MCP `outputSchema`: [UiBuilderDesignMatrixV1]. */
+  val designMatrixOutput: JsonObject by lazy {
+    SerialDescriptorJsonSchema.output(
+      UiBuilderDesignMatrixV1.serializer().descriptor,
+      schemaId = UI_BUILDER_DESIGN_MATRIX_SCHEMA,
+    )
+  }
+
+  /** The decision tools' MCP `outputSchema`: [UiBuilderDecisionReplyV1]. */
+  val decisionOutput: JsonObject by lazy {
+    SerialDescriptorJsonSchema.output(
+      UiBuilderDecisionReplyV1.serializer().descriptor,
+      schemaId = UI_BUILDER_DECISION_SCHEMA,
+    )
+  }
+
+  /** `ui_builder_implementation_status`'s MCP `outputSchema`: [UiBuilderImplementationStatusV1]. */
+  val implementationOutput: JsonObject by lazy {
+    SerialDescriptorJsonSchema.output(
+      UiBuilderImplementationStatusV1.serializer().descriptor,
+      schemaId = UI_BUILDER_IMPLEMENTATION_SCHEMA,
+    )
+  }
+
+  /** `ui_builder_find_design_for_pr`'s MCP `outputSchema`: [UiBuilderPrLookupV1]. */
+  val prLookupOutput: JsonObject by lazy {
+    SerialDescriptorJsonSchema.output(
+      UiBuilderPrLookupV1.serializer().descriptor,
+      schemaId = UI_BUILDER_PR_LOOKUP_SCHEMA,
+    )
+  }
+
   fun byName(name: String): Served? = served.firstOrNull { it.name == name }
 
   fun byUri(uri: String): Served? = served.firstOrNull { it.uri == uri }

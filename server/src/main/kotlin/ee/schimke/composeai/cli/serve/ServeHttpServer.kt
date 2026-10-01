@@ -567,6 +567,11 @@ class ServeHttpServer(
    * feature.
    */
   private val uiBuilderLinksStore: ServeUiBuilderLinksStore? = null,
+  /**
+   * Per-design review verdicts and the implementing pull request. Null leaves the review routes and
+   * the decision and implementation tools unregistered, for the links store's reason.
+   */
+  private val uiBuilderReviewStore: ServeUiBuilderReviewStore? = null,
   /** Shared server-side folders for designs; null leaves folder organization unavailable. */
   private val uiBuilderFolderStore: ServeUiBuilderFolderStore? = null,
   /**
@@ -816,6 +821,7 @@ class ServeHttpServer(
               links = uiBuilderLinksStore,
               assets = designAssets,
               validator = uiBuilderValidator,
+              reviews = uiBuilderReviewStore,
             )
           },
         uiBuilderNative = uiBuilderNativePreview != null,
@@ -1271,6 +1277,13 @@ class ServeHttpServer(
               designService,
               sameOriginUiBuilderAuthorization,
               uiBuilderLinksStore,
+            )
+          }
+          if (uiBuilderReviewStore != null) {
+            installUiBuilderReviewRoutes(
+              designService,
+              sameOriginUiBuilderAuthorization,
+              uiBuilderReviewStore,
             )
           }
           if (uiBuilderFolderStore != null) {
@@ -14859,6 +14872,14 @@ class ServeHttpServer(
           }
             .onFailure {
               System.err.println("serve: links record for $designId not removed (${it.message})")
+            }
+          runCatching {
+            if (uiBuilderReviewStore?.delete(designId) == false) {
+              System.err.println("serve: review record for $designId not removed")
+            }
+          }
+            .onFailure {
+              System.err.println("serve: review record for $designId not removed (${it.message})")
             }
           runCatching {
             if (uiBuilderFolderStore?.move(designId, null) is FolderWriteResult.Failed) {

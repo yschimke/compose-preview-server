@@ -147,8 +147,17 @@ class ServeUiBuilderLinksStore(private val root: Path) {
    * through a read of the design as the calling actor before it leaves the process; a store cannot
    * do that, and one that pretended to would be the wrong place for the access check to live.
    */
-  fun citing(issue: String): List<String> {
-    val wanted = issue.normalized() ?: return emptyList()
+  fun citing(issue: String): List<String> = matching(issue) { it.issue }
+
+  /**
+   * Every design on this host whose record names [pr] as its pull request — the reverse of "the
+   * implementation PR for this design", with [citing]'s caveat: the caller filters each id through
+   * a read of the design as the asking actor.
+   */
+  fun citingPr(pr: String): List<String> = matching(pr) { it.pr }
+
+  private fun matching(value: String, field: (StoredLinks) -> String?): List<String> {
+    val wanted = value.normalized() ?: return emptyList()
     val files =
       try {
         Files.list(root).use { entries ->
@@ -159,7 +168,7 @@ class ServeUiBuilderLinksStore(private val root: Path) {
       }
     return files
       .mapNotNull { readFile(it) }
-      .filter { it.issue == wanted && it.designId.isNotBlank() }
+      .filter { field(it) == wanted && it.designId.isNotBlank() }
       .map { it.designId }
       .distinct()
       .sorted()
