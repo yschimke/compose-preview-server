@@ -163,8 +163,9 @@ It reads, saves and follows the file itself, through the host's `resources/read`
   calls. The editor can load and save only through a host that offers the `openai/resource`
   capability, so in Claude Code or Antigravity it would open an editor with no file.
 - **`ui://compose-ui-builder/editor`**, the archive's `mcp-app/ui-builder-mcp-app.html` shell,
-  served as `text/html;profile=mcp-app`. Its one placeholder is filled in with the asset base URL,
-  and `_meta.ui.csp.resourceDomains` and `connectDomains` name that origin. Its display mode is
+  served as `text/html;profile=mcp-app`. Its placeholders are filled in on every read: the asset
+  base URL, and the layout from the `uiBuilderMcpAppLayout` setting (below).
+  `_meta.ui.csp.resourceDomains` and `connectDomains` name the asset origin. Its display mode is
   fullscreen only.
 - **The asset origin**, `http://127.0.0.1:<ephemeral>/ui-builder/v/<version>/`. The editor is
   about 45 MB unpacked, too large to inline, so the shell loads it from this origin. The listener
@@ -182,6 +183,15 @@ catalog pins, and it is read in place, without unpacking. To use another archive
 `COMPOSE_PREVIEW_UI_BUILDER_WEB` at a ZIP or an unpacked directory. The tool and the resource are
 registered only when the archive's `ui-builder-web.json` declares `"mcpApp": 1`. An older archive,
 or no archive, leaves both out, and no error is reported.
+
+The editor opens on a **focused canvas** by default: the design fills the panel, with a slim file
+bar (name, saved state, Save, and **Full editor**), and a node's menu offers Quick edit and Comment,
+which sends the node to the chat ([compose-ui-builder#378](https://github.com/yschimke/compose-ui-builder/pull/378)).
+To open designs in the whole desktop editor instead, set `uiBuilderMcpAppLayout` to `full` — on the
+plugin's settings page, with `settings_update {"set": {"uiBuilderMcpAppLayout": "full"}}`, or in
+`~/.compose-preview/settings.json`. The value is `focused` (the default) or `full`; anything else
+opens focused. It is read each time the editor resource is read, so a change applies to the next
+design opened, and the editor's own button switches either way.
 
 Still to check in a real host, as part of the
 [#1236](https://github.com/yschimke/compose-preview-server/issues/1236) probe:

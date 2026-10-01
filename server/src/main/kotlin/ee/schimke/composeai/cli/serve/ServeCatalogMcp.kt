@@ -708,6 +708,7 @@ class ServeCatalogMcp(
           it.supportsLinks,
           it.supportsValidation,
           it.supportsReviews,
+          it.supportsBranches,
         )
       )
     }
@@ -2998,6 +2999,7 @@ class ServeCatalogMcp(
       ServeUiBuilderMcp.IMPLEMENTATION_STATUS -> UiBuilderJsonSchemas.implementationOutput
       ServeUiBuilderMcp.FIND_DESIGN_FOR_PR -> UiBuilderJsonSchemas.prLookupOutput
       in ServeUiBuilderHistoryTools.TOOL_NAMES -> ServeUiBuilderHistoryTools.outputSchema(name)!!
+      in ServeUiBuilderBranchTools.TOOL_NAMES -> ServeUiBuilderBranchTools.outputSchema(name)!!
       "render_preview" ->
         buildJsonObject {
           put("type", "object")

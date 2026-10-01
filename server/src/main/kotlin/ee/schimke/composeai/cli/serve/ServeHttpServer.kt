@@ -37,6 +37,7 @@ import ee.schimke.composeai.uibuilder.protocol.RevokeActorAccessMutationV1
 import ee.schimke.composeai.uibuilder.protocol.UpdateDesignAccessRequestV1
 import ee.schimke.composeai.uibuilder.service.AuthenticatedUiBuilderActor
 import ee.schimke.composeai.uibuilder.service.UiBuilderAssetPort
+import ee.schimke.composeai.uibuilder.service.UiBuilderBranchPort
 import ee.schimke.composeai.uibuilder.service.UiBuilderServiceCall
 import ee.schimke.composeai.uibuilder.service.UiBuilderServiceDiagnosticsSource
 import ee.schimke.composeai.uibuilder.service.UiBuilderServicePort
@@ -581,6 +582,12 @@ class ServeHttpServer(
    */
   uiBuilderAssets: UiBuilderAssetPort? = null,
   /**
+   * The branch lane of [uiBuilderService] — fork a design into a branch, list, merge and archive
+   * branches (yschimke/compose-ui-builder#377). Null leaves the branch tools unregistered. The
+   * service itself, not a decorator of it: the runtime is where a branch's parent is recorded.
+   */
+  uiBuilderBranches: UiBuilderBranchPort? = null,
+  /**
    * Checks a design or a mutation batch without saving it — `ui_builder_validate`. Null leaves the
    * tool unadvertised, which is what a host that cannot open a scratch service over its own
    * catalogs and exporter honestly has.
@@ -658,21 +665,35 @@ class ServeHttpServer(
 ) {
 
   /**
+   * Which design a branch was forked from, read from the runtime, so a grant naming a design also
+   * reaches its branches ([ServeUiBuilderGrantScope]). Null where the host wires no branches.
+   */
+  private val branchParents: ServeUiBuilderGrantScope.Parents? =
+    uiBuilderBranches?.let(ServeUiBuilderGrantScope::parentsOf)
+
+  /**
    * The design service every route, sidecar, stream and MCP tool here reaches designs through, with
    * a grant that names its designs held to them — see [ServeUiBuilderGrantScope]. Nothing in this
    * class reaches the unwrapped port, which is why the constructor parameter is not a property.
    */
   private val designService: UiBuilderServicePort? = uiBuilderService?.let { service ->
     agentGrants?.let {
-      ServeUiBuilderGrantScope.limit(service, ServeUiBuilderGrantScope.lookupOf(it))
+      ServeUiBuilderGrantScope.limit(service, ServeUiBuilderGrantScope.lookupOf(it), branchParents)
     } ?: service
   }
 
   /** The asset lane of [designService], under the same limit. */
   private val designAssets: UiBuilderAssetPort? = uiBuilderAssets?.let { assets ->
     agentGrants?.let {
-      ServeUiBuilderGrantScope.limit(assets, ServeUiBuilderGrantScope.lookupOf(it))
+      ServeUiBuilderGrantScope.limit(assets, ServeUiBuilderGrantScope.lookupOf(it), branchParents)
     } ?: assets
+  }
+
+  /** The branch lane of [designService], under the same limit. */
+  private val designBranches: UiBuilderBranchPort? = uiBuilderBranches?.let { branches ->
+    agentGrants?.let {
+      ServeUiBuilderGrantScope.limit(branches, ServeUiBuilderGrantScope.lookupOf(it), branchParents)
+    } ?: branches
   }
 
   /** Read off the service itself: the limit above is a decorator and reports nothing. */
@@ -822,6 +843,7 @@ class ServeHttpServer(
               assets = designAssets,
               validator = uiBuilderValidator,
               reviews = uiBuilderReviewStore,
+              branches = designBranches,
             )
           },
         uiBuilderNative = uiBuilderNativePreview != null,

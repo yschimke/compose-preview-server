@@ -283,7 +283,13 @@ composeai-contracts = "3.15.0"
 # 3.70.0 packages the `.uid` MCP App shell in the editor archive and declares `"mcpApp": 1`
 # (compose-ui-builder#366), which turns on `:mcp`'s `design_open` (compose-ui-builder#364).
 # `androidx-window` and `composeai-contracts` are unchanged on that release, so they stay put.
-composeai-ui-builder = "3.70.0"
+# 3.71.0 adds design branches with replay-merge through a separate `UiBuilderBranchPort`
+# (compose-ui-builder#377), which the `ui_builder_*_branch*` tools call and the grant scope reads a
+# branch's parent from; `UiBuilderServiceRequest` is unchanged, so its exhaustive `when` here still
+# compiles. Its editor archive opens the MCP App on a focused canvas and reads
+# `__COMPOSE_UI_BUILDER_MCP_APP_LAYOUT__`, which `:mcp` fills from `uiBuilderMcpAppLayout`
+# (compose-ui-builder#378). `androidx-window` and `composeai-contracts` are unchanged again.
+composeai-ui-builder = "3.71.0"
 # 1.65.0 is the first release publishing `rc-players-bom`. (1.64.0 is a tag and a GitHub Release
 # whose Maven coordinates never reached Central -- rc-players#211 -- so it cannot be pinned.)
 # 1.67.0 by hand, ahead of Renovate's soak: it pins the KMP player modules to a Java 17 toolchain

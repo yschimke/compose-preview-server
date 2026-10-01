@@ -39,6 +39,7 @@ import ee.schimke.composeai.uibuilder.service.AuthenticatedUiBuilderActor
 import ee.schimke.composeai.uibuilder.service.ProtocolRequestMapping
 import ee.schimke.composeai.uibuilder.service.UiBuilderAssetPort
 import ee.schimke.composeai.uibuilder.service.UiBuilderAssetWrite
+import ee.schimke.composeai.uibuilder.service.UiBuilderBranchPort
 import ee.schimke.composeai.uibuilder.service.UiBuilderProtocolMapper
 import ee.schimke.composeai.uibuilder.service.UiBuilderServiceCall
 import ee.schimke.composeai.uibuilder.service.UiBuilderServicePort
@@ -167,10 +168,23 @@ class ServeUiBuilderMcp(
    * [ServeUiBuilderReviewStore] for why this is beside the design rather than in it.
    */
   private val reviews: ServeUiBuilderReviewStore? = null,
+  /**
+   * Design branches — fork, list, merge, archive — on a host whose service keeps them
+   * (yschimke/compose-ui-builder#377). Null leaves the branch tools absent rather than present and
+   * refusing, which is the rule the whole surface follows. See [ServeUiBuilderBranchTools].
+   */
+  private val branches: UiBuilderBranchPort? = null,
 ) {
 
   /** Revisions, restore, fork and diff; see [ServeUiBuilderHistoryTools]. */
   private val history = ServeUiBuilderHistoryTools(service, serverOrigin, links)
+
+  /** Branch, list, merge and archive; see [ServeUiBuilderBranchTools]. */
+  private val branchTools = branches?.let(::ServeUiBuilderBranchTools)
+
+  /** Whether this host keeps design branches, and so whether the branch tools exist. */
+  val supportsBranches: Boolean
+    get() = branches != null
 
   /** Whether this host keeps design discussions, and so whether the comment tools exist. */
   val supportsComments: Boolean
@@ -211,6 +225,15 @@ class ServeUiBuilderMcp(
       ServeUiBuilderHistoryTools.DIFF_DESIGNS -> UiBuilderRouteCapability.READ
       ServeUiBuilderHistoryTools.RESTORE_REVISION,
       ServeUiBuilderHistoryTools.FORK_DESIGN -> UiBuilderRouteCapability.WRITE
+      // Branches: listing is a read of the parent; branching, merging and archiving write it (and
+      // the service takes the parent's own WRITE action on top, or the branch's ownership for an
+      // archive).
+      ServeUiBuilderBranchTools.LIST_BRANCHES ->
+        if (branches == null) null else UiBuilderRouteCapability.READ
+      ServeUiBuilderBranchTools.BRANCH_DESIGN,
+      ServeUiBuilderBranchTools.MERGE_BRANCH,
+      ServeUiBuilderBranchTools.ARCHIVE_BRANCH ->
+        if (branches == null) null else UiBuilderRouteCapability.WRITE
       LIST_COMMENTS,
       AWAIT_COMMENTS -> if (comments == null) null else UiBuilderRouteCapability.READ
       POST_COMMENT,
@@ -398,6 +421,10 @@ class ServeUiBuilderMcp(
         IMPLEMENTATION_STATUS -> return reviewTool(tool, args, actor)
         FIND_DESIGN_FOR_PR -> return findDesignForPr(args, actor)
         in ServeUiBuilderHistoryTools.TOOL_NAMES -> return history.call(tool, args, actor)
+        in ServeUiBuilderBranchTools.TOOL_NAMES ->
+          return (branchTools
+              ?: throw McpRequestException("this host does not keep design branches"))
+            .call(tool, args, actor)
         else -> throw McpRequestException("unknown UI-builder tool '$tool'")
       }
     return envelope(callId, execute(request, actor), includeCatalog = args.includeCatalog())
@@ -1460,14 +1487,19 @@ class ServeUiBuilderMcp(
     val stored =
       when (tool) {
         GET_LINKS ->
-          return withAncestry(
-            service,
+          return withBranches(
+            branches,
             actor,
-            store.ancestry,
             designId,
-            UI_BUILDER_JSON.encodeToString(
-              StoredLinks.serializer(),
-              store.read(designId) ?: StoredLinks(designId = designId),
+            withAncestry(
+              service,
+              actor,
+              store.ancestry,
+              designId,
+              UI_BUILDER_JSON.encodeToString(
+                StoredLinks.serializer(),
+                store.read(designId) ?: StoredLinks(designId = designId),
+              ),
             ),
           )
         SET_LINKS ->
@@ -3057,6 +3089,9 @@ class ServeUiBuilderMcp(
     /** Stable refusal code returned when the host advertises the tool but cannot compile. */
     const val NATIVE_RENDER_UNAVAILABLE = "NATIVE_RENDER_UNAVAILABLE"
 
+    /** Separate because they exist only where the host's service keeps design branches. */
+    val BRANCH_TOOL_NAMES = ServeUiBuilderBranchTools.TOOL_NAMES
+
     /** Separate because it exists only where the host keeps design assets. */
     val ASSET_TOOL_NAMES = listOf(PUT_ASSET)
 
@@ -3146,6 +3181,7 @@ class ServeUiBuilderMcp(
       links: Boolean = false,
       validate: Boolean = false,
       reviews: Boolean = false,
+      branches: Boolean = false,
     ): List<JsonObject> =
       listOfNotNull(
         tool(
@@ -3447,7 +3483,10 @@ class ServeUiBuilderMcp(
               "somebody else's design here — it is the brief, and it is what $GET_DESIGN cannot " +
               "tell you. Every field is optional; a reply with none of them means nobody has said " +
               "yet. The record is kept beside the design and is never part of it: no node holds " +
-              "it, no export sees it, and writing one does not move the revision.",
+              "it, no export sees it, and writing one does not move the revision. Ancestry rides " +
+              "along where there is some: `forkedFrom` / `forks` for a fork made with " +
+              "${ServeUiBuilderHistoryTools.FORK_DESIGN}, and `branchOf` / `branches` for a " +
+              "design branch and its parent.",
             """
             {"type":"object","properties":{
               "designId":{"type":"string"}
@@ -3808,7 +3847,9 @@ class ServeUiBuilderMcp(
             },"required":["pr"],"additionalProperties":false}
             """,
           ),
-      ) + ServeUiBuilderHistoryTools.declarations(tool)
+      ) +
+        ServeUiBuilderHistoryTools.declarations(tool) +
+        (if (branches) ServeUiBuilderBranchTools.declarations(tool) else emptyList())
   }
 }
 
