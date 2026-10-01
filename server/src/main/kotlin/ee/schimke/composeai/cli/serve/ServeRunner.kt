@@ -2561,6 +2561,8 @@ public class ServeRunner(
      * every open client is holding.
      */
     val links: ServeUiBuilderLinksStore?,
+    /** Review verdicts and implementing pull requests, beside the state for the links' reasons. */
+    val reviews: ServeUiBuilderReviewStore?,
     /** Shared file-manager folders, stored beside design state without changing revisions. */
     val folders: ServeUiBuilderFolderStore?,
     /** The design listing's card pictures, drawn ahead of the reader and kept across restarts. */
@@ -3165,6 +3167,15 @@ public class ServeRunner(
             )
           }
           .getOrNull(),
+      reviews =
+        runCatching { ServeUiBuilderReviewStore(directory.resolve("reviews").toPath()) }
+          .onFailure {
+            System.err.println(
+              "serve: UI-builder reviews unavailable (${it.message}); " +
+                "the builder works, and a design cannot be approved on it"
+            )
+          }
+          .getOrNull(),
       thumbnails = runCatching {
           ServeUiBuilderThumbnails(directory.resolve("thumbnails").toPath(), SERVE_VERSION)
         }
@@ -3490,6 +3501,7 @@ public class ServeRunner(
           references = uiBuilderLane.references,
           comments = uiBuilderLane.comments,
           links = uiBuilderLane.links,
+          reviews = uiBuilderLane.reviews,
           thumbnails = uiBuilderLane.thumbnails,
           designs = uiBuilderLane.service,
         )
@@ -3711,6 +3723,7 @@ public class ServeRunner(
         uiBuilderReferenceStore = uiBuilderLane?.references,
         uiBuilderCommentStore = uiBuilderLane?.comments,
         uiBuilderLinksStore = uiBuilderLane?.links,
+        uiBuilderReviewStore = uiBuilderLane?.reviews,
         uiBuilderFolderStore = uiBuilderLane?.folders,
         uiBuilderAssets = uiBuilderLane?.service,
         uiBuilderValidator = uiBuilderLane?.validator,

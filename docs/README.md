@@ -98,6 +98,9 @@ The product spec and its RFC come first; everything after them is one surface or
   with no credential gets temporary, scoped, revocable access to a `serve` host.
 - [design/CATALOG_MCP.md](design/CATALOG_MCP.md) — **implemented**: the remote catalog MCP surface,
   and why the UI-builder tools share its endpoint rather than taking one of their own.
+- [design/CHAT_SURFACES.md](design/CHAT_SURFACES.md) — **implemented, live checks pending**: Slack
+  and other chat tools as text and image fallbacks, pick-by-reply contact sheets, Slack thread
+  links, rate-limited notifications and unfurls.
 - [design/COMPARE_NAVIGATION.md](design/COMPARE_NAVIGATION.md) — **proposal + phase 1**: one
   vocabulary, one shape and one filter for the seven places a difference can be looked at.
 - [design/COMPONENT_PARITY_WORKFLOW.md](design/COMPONENT_PARITY_WORKFLOW.md) — parity issues and

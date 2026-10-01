@@ -9,6 +9,7 @@ import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
 import java.security.SecureRandom
+import java.time.Instant
 import java.util.Base64
 import java.util.concurrent.Semaphore
 import java.util.concurrent.TimeUnit
@@ -525,7 +526,10 @@ class ServeCatalogMcp(
        it — selection outline, reference overlay and comment pins drawn over the render — plus the
        node boxes and pin positions as JSON. Pass `renderer: "native"` when node boxes matter and
        that lane is advertised; the default PNG export reports none (compose-preview-server#1114).
-    4. Summarize concrete attention items, separating observed render evidence from document-only
+       Where `ui_builder_render_design_matrix` is advertised, use it for other device sizes.
+    4. Run `ui_builder_check_design` and report its findings by node; they are document checks,
+       not render evidence, unless the reply says they were measured on a render.
+    5. Summarize concrete attention items, separating observed render evidence from document-only
        checks. Do not claim to have seen editor-only state you could not view.
     """
       .trimIndent()
@@ -694,6 +698,7 @@ class ServeCatalogMcp(
           it.supportsAssets,
           it.supportsLinks,
           it.supportsValidation,
+          it.supportsReviews,
         )
       )
     }
@@ -1089,8 +1094,15 @@ class ServeCatalogMcp(
       }
 
     val knobKinds = ServeOverrides.declaredKnobKinds(preview)
+    val uri = resourceUri(catalog, preview.id)
+    // On a host with a public origin the pixels leave the text: each cell gets a signed https link
+    // (re-rendered on fetch from its own override-bearing URI, so nothing is held), the viewer gets
+    // the bytes in `_meta`, which the model never reads, and a chat surface gets one numbered
+    // contact sheet — a Slack message carries at most five attachments, and a matrix is up to 24.
+    val linked = observe == "png" && publicOrigin() != null
+    val cellPngs = mutableListOf<ByteArray>()
     val rendered = buildJsonArray {
-      combinations.forEach { params ->
+      combinations.forEachIndexed { index, params ->
         val unknown = params.keys.filterNot(ServeOverrides::isOverrideParam).sorted()
         if (unknown.isNotEmpty()) {
           throw McpRequestException(
@@ -1116,7 +1128,16 @@ class ServeCatalogMcp(
               put("heightPx", height)
             }
             put("generation", cell.generation.wire)
-            if (observe == "png") put("png", Base64.getEncoder().encodeToString(cell.png))
+            if (linked) {
+              put("index", index + 1)
+              val cellOverrides = JsonObject(params.mapValues { (_, v) -> JsonPrimitive(v) })
+              signedImageUrl(resourceUriWithOverrides(uri, cellOverrides))?.let {
+                put("imageUrl", it)
+              }
+              cellPngs += cell.png
+            } else if (observe == "png") {
+              put("png", Base64.getEncoder().encodeToString(cell.png))
+            }
           }
         )
       }
@@ -1127,19 +1148,46 @@ class ServeCatalogMcp(
     // question the twenty-call version was being used to answer.
     val distinct =
       rendered.mapNotNull { it.jsonObject["sha256"]?.jsonPrimitive?.contentOrNull }.toSet().size
-    return textResult(
-      buildJsonObject {
-        put("schema", "compose-preview/catalog-mcp-matrix/v1")
-        put("catalog", catalog)
-        put("previewId", preview.id)
-        put("uri", resourceUri(catalog, preview.id))
-        put("observe", observe)
-        put("cellCount", rendered.size)
-        put("distinctRenders", distinct)
-        put("cells", rendered)
+    val sheet = if (linked) ServeContactSheet.render(cellPngs)?.let { signedViewUrl(it) } else null
+    val body = buildJsonObject {
+      put("schema", "compose-preview/catalog-mcp-matrix/v1")
+      put("catalog", catalog)
+      put("previewId", preview.id)
+      put("uri", uri)
+      put("observe", observe)
+      put("cellCount", rendered.size)
+      put("distinctRenders", distinct)
+      sheet?.let { (url, expiry) ->
+        putJsonObject("contactSheet") {
+          put("url", url)
+          put("expiresAtEpochSeconds", expiry)
+          put(
+            "description",
+            "One PNG of every cell, each badged with its 'index'. To let a person pick in chat, " +
+              "post this with the numbered options and take their reply as the choice.",
+          )
+        }
       }
-        .toString()
-    )
+      put("cells", rendered)
+    }
+    if (!linked) return textResult(body.toString())
+    return buildJsonObject {
+      put(
+        "content",
+        buildJsonArray {
+          add(textContent(body.toString()))
+          sheet?.let { (url, expiry) ->
+            add(imageUrlLinkContent(url))
+            add(chatImageText(url, expiry))
+          }
+        },
+      )
+      putJsonObject("_meta") {
+        putJsonArray(CELL_PNGS_META_KEY) {
+          cellPngs.forEach { add(Base64.getEncoder().encodeToString(it)) }
+        }
+      }
+    }
   }
 
   /**
@@ -1511,6 +1559,7 @@ class ServeCatalogMcp(
           buildJsonArray {
             add(imageContent(bytes))
             add(textContent(versionRef(version, view).toString()))
+            keptImageFallback(bytes).forEach(::add)
           },
         )
       }
@@ -1735,8 +1784,12 @@ class ServeCatalogMcp(
     if (observe == "scroll-svg") {
       return listOf(textContent(renderScrollSvg(host, previewId, overrides)))
     }
-    if (observe == "scroll-png")
-      return listOf(imageContent(renderScrollPng(host, previewId, overrides)))
+    if (observe == "scroll-png") {
+      // A full-page capture cannot be replayed from a signed resource URI (that lane renders the
+      // viewport), so the picture is kept for the link's lifetime, as a `ui_builder_view` is.
+      val png = renderScrollPng(host, previewId, overrides)
+      return listOf(imageContent(png)) + keptImageFallback(png)
+    }
     val rendered = renderPng(host, previewId, overrides)
     val png = rendered.png
     if (observe == "png") {
@@ -1746,14 +1799,20 @@ class ServeCatalogMcp(
       // different overrides can produce byte-identical output either because both applied and
       // neither moved anything, or because a baked lane answered and ignored them both.
       val renderedUri = resourceUriWithOverrides(uri, rawOverrides)
-      val imageUrl = listOfNotNull(signedImageUrl(renderedUri)?.let(::imageUrlLinkContent))
+      val signed = signedImage(renderedUri)
+      val imageUrl = listOfNotNull(signed?.let { imageUrlLinkContent(it.first) })
+      // Last, so a caller reading the first text block still finds the provenance JSON there.
+      val chatLine = listOfNotNull(signed?.let { chatImageText(it.first, it.second) })
       return if (requestedKeys.isEmpty())
-        listOf(imageContent(png), resourceLinkContent(renderedUri)) + imageUrl
+        listOf(imageContent(png), resourceLinkContent(renderedUri)) + imageUrl + chatLine
       else
         listOf(
           imageContent(png),
           resourceLinkContent(renderedUri),
-        ) + imageUrl + textContent(JsonObject(provenance(rendered, requestedKeys)).toString())
+        ) +
+          imageUrl +
+          textContent(JsonObject(provenance(rendered, requestedKeys)).toString()) +
+          chatLine
     }
 
     val observation = buildJsonObject {
@@ -2344,12 +2403,26 @@ class ServeCatalogMcp(
    * origin. The signature covers the resource URI (overrides included) and the expiry, so the link
    * grants exactly one render for [SIGNED_RESOURCE_TTL_SECONDS] and no part of the grant token.
    */
-  private fun signedImageUrl(resourceUri: String): String? {
+  private fun signedImageUrl(resourceUri: String): String? = signedImage(resourceUri)?.first
+
+  /** [signedImageUrl] with the epoch second it stops verifying. */
+  private fun signedImage(resourceUri: String): Pair<String, Long>? {
     val origin = publicOrigin()?.trimEnd('/') ?: return null
     val unsigned = unsignedResourceUri(resourceUri)
     val expiry = nowMillis() / 1000 + SIGNED_RESOURCE_TTL_SECONDS
     val encoded = URLEncoder.encode(unsigned, StandardCharsets.UTF_8)
-    return "$origin$IMAGE_URL_PATH?uri=$encoded&exp=$expiry&sig=${resourceSignature(unsigned, expiry)}"
+    return "$origin$IMAGE_URL_PATH?uri=$encoded&exp=$expiry&sig=${resourceSignature(unsigned, expiry)}" to
+      expiry
+  }
+
+  /**
+   * The chat-surface fallback for pixels that cannot be replayed from a resource URI: the bytes are
+   * kept for the link's lifetime ([signedViewUrl]) and offered as an https `resource_link` plus one
+   * line of text. Empty on a box with no public origin, where the image block is all there is.
+   */
+  private fun keptImageFallback(png: ByteArray): List<JsonObject> {
+    val (url, expiry) = signedViewUrl(png) ?: return emptyList()
+    return listOf(imageUrlLinkContent(url), chatImageText(url, expiry))
   }
 
   /**
@@ -2573,7 +2646,7 @@ class ServeCatalogMcp(
       again is UiBuilderAuthorizationDecision.Authorized && again.actor == actor
     }
     val text = builder.call(name, args, actor, callId = name, clientInteraction = interaction)
-    if (name == ServeUiBuilderMcp.VIEW) {
+    if (name == ServeUiBuilderMcp.VIEW || name == ServeUiBuilderMcp.RENDER_DESIGN_MATRIX) {
       return uiBuilderViewResult(
         text,
         inline = args[ServeUiBuilderMcp.INLINE_ARGUMENT]?.jsonPrimitive?.booleanOrNull == true,
@@ -2632,6 +2705,7 @@ class ServeCatalogMcp(
                 )
               }
             )
+            add(chatImageText(it.first, it.second))
           }
           if (inline || link == null) add(imageContent(png))
         },
@@ -2682,6 +2756,11 @@ class ServeCatalogMcp(
               put("mimeType", "image/png")
             }
           )
+          // A chat surface shows the person text and links, never the block above.
+          runCatching { Base64.getDecoder().decode(png) }
+            .getOrNull()
+            ?.let(::keptImageFallback)
+            ?.forEach(::add)
         },
       )
     }
@@ -2781,6 +2860,13 @@ class ServeCatalogMcp(
       "preview-stories" -> arrayWrapperSchema("observations")
       ServeUiBuilderMcp.VIEW -> UiBuilderJsonSchemas.viewOutput
       ServeUiBuilderMcp.VALIDATE -> UiBuilderJsonSchemas.validationOutput
+      ServeUiBuilderMcp.CHECK_DESIGN -> UiBuilderJsonSchemas.designCheckOutput
+      ServeUiBuilderMcp.RENDER_DESIGN_MATRIX -> UiBuilderJsonSchemas.designMatrixOutput
+      ServeUiBuilderMcp.RECORD_DECISION,
+      ServeUiBuilderMcp.AWAIT_DECISION -> UiBuilderJsonSchemas.decisionOutput
+      ServeUiBuilderMcp.IMPLEMENTATION_STATUS -> UiBuilderJsonSchemas.implementationOutput
+      ServeUiBuilderMcp.FIND_DESIGN_FOR_PR -> UiBuilderJsonSchemas.prLookupOutput
+      in ServeUiBuilderHistoryTools.TOOL_NAMES -> ServeUiBuilderHistoryTools.outputSchema(name)!!
       "render_preview" ->
         buildJsonObject {
           put("type", "object")
@@ -2926,6 +3012,19 @@ class ServeCatalogMcp(
     )
   }
 
+  /**
+   * The image as one line of text, for hosts that show a person only text — a Slack thread, where
+   * the agent replies in mrkdwn and has no MCP App, viewer or image block to hand on (rule R1: the
+   * agent sees what the person sees). A bare https URL, which Slack links and unfurls as written,
+   * and nothing else: no base64, no `file://`, no grant.
+   */
+  private fun chatImageText(url: String, expiresAtEpochSeconds: Long): JsonObject =
+    textContent(
+      "Image: $url\n" +
+        "(signed https PNG, valid until ${Instant.ofEpochSecond(expiresAtEpochSeconds)}; " +
+        "attach or link it in chat rather than describing it)"
+    )
+
   /** A plain `https` link a host can put in an `<img>`: no scheme it has to know, no bridge. */
   private fun imageUrlLinkContent(url: String): JsonObject = buildJsonObject {
     put("type", "resource_link")
@@ -3042,6 +3141,9 @@ class ServeCatalogMcp(
      * [MAX_STORIES_PER_CALL] exists, applied to a product rather than a list.
      */
     private const val MAX_MATRIX_CELLS = 24
+
+    /** Where a variant grid's PNGs ride for the viewer, out of the model's text; see the viewer. */
+    private const val CELL_PNGS_META_KEY = "composePreview/cellPngs"
     private val MATRIX_OBSERVATION_MODES = setOf("png", "hash")
     private val PROMPT_DESIGN_ID = Regex("[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
     private val PROMPT_NODE_ID = Regex("[A-Za-z0-9][A-Za-z0-9._:-]{0,127}")
@@ -3085,6 +3187,7 @@ class ServeCatalogMcp(
         ServeUiBuilderMcp.EXPORT_DOCUMENT,
         ServeUiBuilderMcp.RENDER_NATIVE,
         ServeUiBuilderMcp.VIEW,
+        ServeUiBuilderMcp.RENDER_DESIGN_MATRIX,
       )
     private const val STORY_ID_SEPARATOR = "::"
     private val OBSERVATION_MODES =

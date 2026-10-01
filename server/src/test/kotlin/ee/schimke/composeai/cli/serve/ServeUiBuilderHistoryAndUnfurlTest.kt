@@ -43,6 +43,7 @@ class ServeUiBuilderHistoryAndUnfurlTest {
   }
   private val client = OkHttpClient.Builder().followRedirects(false).build()
   private val catalogs = CurrentM3UiBuilderCatalogExecutor(catalogSystemIds = linkedSetOf(CATALOG))
+  private val links by lazy { ServeUiBuilderLinksStore(stateDirectory.resolve("links")) }
 
   private fun withServer(
     visibility: UiBuilderDefaultVisibility,
@@ -77,6 +78,7 @@ class ServeUiBuilderHistoryAndUnfurlTest {
             ServeUiBuilderAuthorization.fromMachineAuthorization(
               ServeMachineAuthorization(OPERATOR_TOKEN, null, null, isPublic = true)
             ),
+          uiBuilderLinksStore = links,
         )
         .also(ServeHttpServer::start)
     try {
@@ -164,6 +166,15 @@ class ServeUiBuilderHistoryAndUnfurlTest {
       assertEquals(303, fork.first)
       assertTrue(fork.second.startsWith("/ui-builder/$DESIGN_ID-r0-"), fork.second)
       assertEquals(200, get(port, fork.second, OPERATOR_TOKEN).first)
+      // The form records the same ancestry `ui_builder_fork_design` does, on both ends.
+      val forkId = fork.second.removePrefix("/ui-builder/").substringBefore("?")
+      val forkedFrom = links.ancestry.read(forkId)?.forkedFrom
+      assertEquals(DESIGN_ID, forkedFrom?.designId)
+      assertEquals(0L, forkedFrom?.revision)
+      assertEquals(
+        listOf(forkId),
+        links.ancestry.read(DESIGN_ID)?.forks?.map { it.designId },
+      )
     }
   }
 

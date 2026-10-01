@@ -183,8 +183,16 @@ that protocol/SDK migration is deliberately not bundled into the compatibility t
 | `ui_builder_list_catalogs`, `ui_builder_search_components`, `ui_builder_list_designs`, `ui_builder_get_design` | `ui-builder-read` | The component catalogs a design can pin to (a summary by default, the whole capability with `full: true`), the designs on this box, and one design's whole document (without the catalog it pins unless `includeCatalog: true`) |
 | `ui_builder_create_design`, `ui_builder_apply` | `ui-builder-write` | Create a design, and apply `DesignMutationV1` operations to one — a `setProperty` whose value is `{"type":"null"}` unsets an optional property |
 | `ui_builder_validate` | `ui-builder-read` | Check a whole `document`, a stored design, or `operations` against a stored design **without saving** — `{valid, problems:[…]}`, the problems panel's list |
+| `ui_builder_check_design` | `ui-builder-read` (plus `ui-builder-export` for `rendered: true`) | Everything worth checking **before showing** a design: schema, catalog and accessibility (labels, content descriptions, touch targets, contrast, text clipping at 200%) on a design, a past revision, a `document`, or unsaved `operations` — a summary, then findings by node (#1255) |
+| `ui_builder_render_design_matrix` | `ui-builder-read` | One design on several devices × themes × font scales as **one** contact-sheet PNG behind a signed link, with each cell's device and box; present where the host can render on a scratch copy (#1255) |
+| `ui_builder_record_decision`, `ui_builder_await_decision` | `ui-builder-write`, `ui-builder-read` | Record an agent's `approve`/`reject` of one revision, and **wait** for a person's; present only where the host keeps reviews (#1255) |
+| `ui_builder_set_implementation`, `ui_builder_implementation_status` | `ui-builder-write`, `ui-builder-read` + `ui-builder-export` | Record the pull request implementing a design (status, revision, whether its previews match), and read everything the code side needs in one call (#1255) |
+| `ui_builder_find_design_for_pr` | `ui-builder-read` | From a pull request back to the design(s) it implements |
 | `ui_builder_rename_design`, `ui_builder_delete_design` | `ui-builder-write` | Retitle a design you may write; delete one you **own**. Neither has a request type in the contract, so both answer outside the released envelope |
 | `ui_builder_await_design` | `ui-builder-read` | **Wait** for somebody else to change a design, and return what they changed |
+| `ui_builder_list_revisions`, `ui_builder_diff_designs` | `ui-builder-read` | A design's retained revisions (actor, time, operation, document digest, and the retention floor); a node-level diff of any two retained revisions of any two designs (below) |
+| `ui_builder_restore_revision` | `ui-builder-write` | Restore a retained revision **forward**, as a new revision; `dryRun: true` returns the diff it would apply. Needs the design's own write action |
+| `ui_builder_fork_design` | `ui-builder-write` | A new design from one revision of another, with its `forkedFrom` recorded and listed on both ends through `ui_builder_get_links` |
 | `ui_builder_export` | `ui-builder-export` | Export a design — `compose` returns the generator's Kotlin, or diagnostics naming each reason it refused |
 | `ui_builder_view` | `ui-builder-read` (plus `ui-builder-export` for `renderer: "native"`) | The editor canvas as a person sees it — a PNG with the selection, reference overlay, comment pins and layout bounds drawn on, and the node boxes and pin positions as JSON (#1114) |
 | `ui_builder_put_asset` | `ui-builder-write` | Put a picture behind an `assetKey`, so an `asset/image` node draws it; present only where the host keeps design assets |
@@ -397,6 +405,121 @@ this server decodes with by construction, whichever protocol release the catalog
 closed (`additionalProperties: false`) because the decoder refuses unknown fields; sealed types are a
 `oneOf` on their discriminator (`type`, or `kind` for `DesignHomeV1`). What a descriptor cannot say —
 which components and properties the pinned catalog declares — is `ui_builder_validate`'s job.
+
+### Before you show it: check, then look at every size
+
+Agents working on a design for a person should not spend that person's attention on something they
+could have caught (compose-ag-plugin `docs/agent-rules.md`, R1–R4). Two tools make that one call
+each (#1255).
+
+`ui_builder_check_design` runs `schema`, `catalog` and `a11y` — pick with `checks` — on a stored
+design (`designId`, optionally a past `revision`), a whole `document`, or `operations` applied to a
+scratch copy of `designId` exactly as `ui_builder_apply` would, with nothing saved. The schema and
+catalog halves are `ui_builder_validate`'s; the accessibility half reads the document through the
+pinned catalog's own vocabulary — traits like `Action`, `SelectionControl`, `IconContent`,
+`TextContent`, and whether a component declares `contentDescription` — so it names no Material
+component and works for a Wear or pack catalog too:
+
+| Code | Severity | What it means |
+| --- | --- | --- |
+| `missingLabel` | error | A control that can be activated has no text, no `contentDescription` and no labelled child |
+| `missingContentDescription` | warning | An icon or picture says nothing; set one, or `null` when it is decorative. An icon inside a control that is labelled by text is decorative by construction and is not reported |
+| `touchTargetTooSmall` | warning (declared) / error (rendered) | A control under 48×48dp — from its declared `size`/`width`/`height`/`sizeDp`, or measured on a native render with `rendered: true` |
+| `lowContrast` | error (literal colours) / warning (theme roles) | Text under 4.5:1 (large text and icons 3:1) against the nearest background. Theme roles are resolved against the Material 3 baseline scheme, which a custom or dynamic theme can change, so they only ever warn |
+| `textMayClip` | warning | Text inside a fixed dp height that one line at 200% font scale does not fit |
+
+The reply leads with `summary` ("Fix before showing it: 1 error, 2 warnings — missingLabel on
+`play`; …"), then `ok`, the counts, and `findings` with the `nodeId` each is about — capped at 40,
+with `truncated` saying how many more. A check that could not run says so in `skipped` instead of
+passing silently. These are document checks: they do not claim to have seen a render unless
+`rendered: true` measured one.
+
+`ui_builder_render_design_matrix` draws the design under several environments and returns **one**
+contact sheet — the design's own PNG export per cell, with the environment swapped on a scratch
+copy, so nothing is written and nobody watching the design is woken. Name `devices` by preset
+(`phone_small`, `phone`, `phone_landscape`, `foldable_folded`, `foldable_unfolded`,
+`tablet_portrait`, `tablet_landscape`, `wear_small_round`, `wear_large_round`, `wear_square`,
+`tv_1080p`) or as `{widthDp, heightDp, label?, round?}`, or a `formFactor` (`phone`, `foldable`,
+`tablet`, `wear`, `tv`, `adaptive`) for its default set; with neither, a mobile catalog gets
+`adaptive` (phone, unfolded foldable, landscape tablet) and a Wear catalog the two round watches.
+`themes` and `fontScales` cross with the devices, up to 16 cells. The sheet is a short-lived signed
+https link, as `ui_builder_view`'s picture is, and is kept under 3.5 MB so a chat surface (#1254)
+can show it inline; `inline: true` adds the bytes as an image block. Each cell reports its device,
+size, theme, font scale and its box on the sheet, and a cell that could not be drawn says why.
+
+### Waiting for a verdict, and joining a design to its pull request
+
+`ui_builder_await_comments` waits for words; `ui_builder_await_decision` waits for a **decision** —
+an `approve` or `reject` recorded on one revision, with who decided, when, and an optional note. It is
+the same shape as the other waits — `afterSequence`, `waitSeconds`, a `timedOut` reply — with two
+additions for agents that can only follow up later (Claude Tag routines, #1254): every reply carries
+`latest`, the newest matching verdict whether or not it is new, and `approved`, so `waitSeconds: 0`
+is a cheap and idempotent poll. By default it waits for a **person** (`from: "human"`);
+`from: "anyone"` counts agents too, and `revision` narrows it to one revision.
+
+People record theirs over `POST /api/ui-builder/v1/designs/{designId}/decisions`
+(`{revision, verdict, note?, decisionId?}`) — the route a browser review control calls; the decider
+kind comes from the credential, as a comment's author kind does. `ui_builder_record_decision` records an **agent's** verdict and is
+labelled as one, so it never answers a person's wait. Both are idempotent by `decisionId`.
+`GET …/review` returns the whole record.
+
+The implementation side is a record of its own beside the design rather than another field of the
+published links record: `ui_builder_set_implementation` stores the pull request URL, its `status`
+(`draft`, `open`, `merged`, `closed`), the design `revision` it implements, and `previewMatch` —
+`{status: match | mismatch | unknown, evidence, note}` — once somebody has compared the PR's rendered
+previews (the preview diff bot's comment, or `ui_builder_render_design_matrix` against the PR's
+renders) with the design. This server cannot see a pull request's renders, so it records that answer
+and where the evidence is rather than claiming to have checked. Writing the same record again moves
+nothing and wakes nobody, so CI may report on every push. `PUT …/implementation` is the same write
+over HTTP.
+
+`ui_builder_implementation_status` is what the code side reads: the revision, its links, the
+implementation record and whether it names this revision, the latest verdict on this revision, and
+the Compose export with the generator's diagnostics (`includeExport: false` leaves the Kotlin out and
+needs only a read grant). `ui_builder_find_design_for_pr` goes the other way — from a pull request to
+the designs whose implementation record or links name it, each read as the caller before it is named
+— and `GET /api/ui-builder/v1/implementations?pr=` answers the same over HTTP. Decisions and the
+implementation live under `reviews/` beside the UI-builder state and are deleted with the design.
+
+### A design's history: revisions, diff, restore, fork
+
+Four tools give an agent the history page's operations (#1256, phase 1 of
+yschimke/compose-ui-builder#375), over the same service requests and with the same access rules. None
+of them answers with the released envelope — the contract has no history request — so each reply is
+its own small shape with a `summary` a person can read, declared as the tool's `outputSchema`.
+
+- `ui_builder_list_revisions {designId, limit?, before?}` — newest first: revision, sequence, actor,
+  time, document digest, node count and the operation that produced it (`setProperty ×2,
+  insertNode`, `undo of …`, `restored r3`) while the operation log still holds it. `retention`
+  names the **floor** — `oldestRetainedRevision` — and the policy behind it (128 whole-document
+  revisions within a 2 MiB budget per design, never fewer than 32, and the last 1,024 operations).
+  Anything older is gone: get, diff, restore and fork refuse it with an error that names the floor,
+  and a revision that never existed is refused as such.
+- `ui_builder_diff_designs {a: {designId, revision?}, b?: {designId, revision?}}` — nodes added,
+  removed and moved (a different parent or slot, or a different place among the siblings both sides
+  share — a sibling inserted before a node is not a move), and per node the properties, the
+  modifier list and any other field that changed, each with its id and a `root/slot[index]/node`
+  path; plus changed document fields (title, environment, state variables). Values are the
+  protocol's own JSON. Works across a design and its fork. `b` defaults to `a`'s current revision.
+  The diff is computed server-side over `DesignDocumentV1`: the editor's `revisionDiff` lives in the
+  unpublished frontend module and diffs the editor's own model, so the two should be consolidated
+  once a document diff moves into a published module. No before/after render URLs yet: the only
+  signed image link on this surface is `ui_builder_view`'s, and it is not reachable per revision.
+- `ui_builder_restore_revision {designId, revision, baseRevision, dryRun?, operationId?}` — the
+  runtime's `RestoreRevision`: forward, hash-bound to the document it replaces, refused as **stale**
+  when `baseRevision` is not current. `dryRun: true` writes nothing and returns the diff from the
+  current document to the restored one, and `stale` when the real call would be refused. Both take
+  the design's own write action.
+- `ui_builder_fork_design {designId, revision?, title?, newDesignId?}` — the history page's fork,
+  plus **ancestry**: the fork records `forkedFrom: {designId, revision, documentDigest}`, and the
+  parent lists it under `forks`; `ui_builder_get_links` returns both, a parent's `forks` filtered to
+  the ones the reader may open. A fork never takes its parent's canonical home — it is homed here
+  under its own id where the host has a public origin, unhomed otherwise — so it is a temporary
+  copy in the R3 sense: announce it, and bring a chosen change back with `ui_builder_apply` on the
+  parent. The history page's fork form records the same ancestry. Ancestry is kept beside the links
+  records (`links/ancestry/`), because the published `DesignLinksV1` has no field for it and the
+  runtime has no branch model yet; a host without a links store forks without it and says so
+  (`ancestryRecorded: false`).
 
 ### Watching, rather than asking again
 

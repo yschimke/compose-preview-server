@@ -168,7 +168,11 @@ composeai-tools = "2.28.3"
 # post-capture work each render did (`postCapture.<kind>` / `postCaptureSkipped.<kind>` in the
 # `render/trace` metrics), enables `compose/semantics` by default (#1166) and adds
 # `DaemonSession.compileSources` (#1174, compose-preview-daemon#163).
-composeai-preview-daemon = "3.9.2"
+# 3.11.0 reports each render's work on `renderFinished.workTrace` — the post-capture processors
+# and data kinds it ran, with per-step ms (compose-preview-daemon#189, #1181). It is compiled
+# against contracts 3.14.0, which is where that field lives, so `composeai-contracts` below must
+# be at least 3.14.0.
+composeai-preview-daemon = "3.11.0"
 # 2.9.0 is the first release carrying `DesignEnvironmentV1.exportDevices` and its Set/Reset
 # changes, which is the field a design names its export devices in. 2.14.0 adds the components a
 # design defines — `DesignDocumentV1.components`, `DesignNodeV1.component` and the `binding` value
@@ -189,6 +193,9 @@ composeai-preview-daemon = "3.9.2"
 # rejection code, and a conflict explanation (compose-preview-contracts#122).
 # 3.13.1 restores the binary compatibility 3.13.0 broke (the defaulted constructors and `copy` of
 # DesignStateV1, CommandConflictV1 and AssetBindingV1; compose-preview-contracts#124). Skip 3.13.0.
+# 3.14.0 adds `RenderFinishedParams.workTrace` (compose-preview-contracts#128) and builders for the
+# evolving UI-builder types; daemon 3.11.0 needs it (it builds `renderFinished` through the new
+# `RenderFinishedParams.Builder`). Its BOM keeps `common-io` at 3.13.0, the last release of it.
 # 3.15.0 adds `RemoteComposeOverride.playerId` (compose-preview-contracts#129): an `rcPlayer=` naming
 # a player registered with the daemon, which `CatalogLiveRouting` must route to a real render.
 composeai-contracts = "3.15.0"

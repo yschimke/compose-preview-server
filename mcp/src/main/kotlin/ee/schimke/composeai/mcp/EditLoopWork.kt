@@ -119,9 +119,9 @@ data class EditCycleWork(
         },
       )
     }
-    // TODO(#1181): the daemon does not send a per-render trace of the post-capture processors and
-    //  data kinds it ran (e.g. `compose/figma-svg`) yet. `renderFinished.params.workTrace` is the
-    //  provisional name; until a daemon release sends it this stays absent.
+    // The daemon's own trace of this render, passed through from `renderFinished.workTrace`
+    // (daemon 3.11.0+): the post-capture processors and data kinds it ran, with per-step ms
+    // (#1181). Absent from older daemons and from render modes that record nothing.
     daemonTrace?.let { put("daemonTrace", it) }
   }
 }

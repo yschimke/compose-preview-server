@@ -60,6 +60,15 @@ class ServeUiBuilderLinksStore(private val root: Path) {
     require(Files.isDirectory(root)) { "UI-builder links root is not a directory: $root" }
   }
 
+  /**
+   * Where each design was forked from and what was forked from it, kept beside the links because
+   * the same host that records what a design is for records where it came from. See
+   * [ServeUiBuilderAncestryStore].
+   */
+  internal val ancestry: ServeUiBuilderAncestryStore by lazy {
+    ServeUiBuilderAncestryStore(root.resolve(ServeUiBuilderAncestryStore.DIRECTORY))
+  }
+
   /** What one design is linked to, or null when nothing has been recorded for it. */
   fun read(designId: String): StoredLinks? = readFile(fileFor(designId))
 
@@ -91,7 +100,7 @@ class ServeUiBuilderLinksStore(private val root: Path) {
       // storage for that is no file at all. A clear that did not happen is a refusal, though: the
       // caller asked for these links to be gone, and reporting success over a record still on disk
       // is how an issue or a pull request outlives the request to forget it.
-      return when (delete(designId)) {
+      return when (deleteRecord(designId)) {
         LinksDeleteResult.REMOVED,
         LinksDeleteResult.ABSENT -> LinksWriteResult.Stored(candidate)
         LinksDeleteResult.FAILED ->
@@ -112,7 +121,13 @@ class ServeUiBuilderLinksStore(private val root: Path) {
    * second one, reported as success, leaves an issue or a pull request readable after an explicit
    * clear. The caller decides what a failure is worth; the store only declines to hide it.
    */
-  fun delete(designId: String): LinksDeleteResult =
+  fun delete(designId: String): LinksDeleteResult {
+    // The design is going, so where it came from goes with it; its links record decides the answer.
+    runCatching { ancestry.delete(designId) }
+    return deleteRecord(designId)
+  }
+
+  private fun deleteRecord(designId: String): LinksDeleteResult =
     try {
       if (Files.deleteIfExists(fileFor(designId))) LinksDeleteResult.REMOVED
       else LinksDeleteResult.ABSENT
@@ -132,8 +147,17 @@ class ServeUiBuilderLinksStore(private val root: Path) {
    * through a read of the design as the calling actor before it leaves the process; a store cannot
    * do that, and one that pretended to would be the wrong place for the access check to live.
    */
-  fun citing(issue: String): List<String> {
-    val wanted = issue.normalized() ?: return emptyList()
+  fun citing(issue: String): List<String> = matching(issue) { it.issue }
+
+  /**
+   * Every design on this host whose record names [pr] as its pull request — the reverse of "the
+   * implementation PR for this design", with [citing]'s caveat: the caller filters each id through
+   * a read of the design as the asking actor.
+   */
+  fun citingPr(pr: String): List<String> = matching(pr) { it.pr }
+
+  private fun matching(value: String, field: (StoredLinks) -> String?): List<String> {
+    val wanted = value.normalized() ?: return emptyList()
     val files =
       try {
         Files.list(root).use { entries ->
@@ -144,7 +168,7 @@ class ServeUiBuilderLinksStore(private val root: Path) {
       }
     return files
       .mapNotNull { readFile(it) }
-      .filter { it.issue == wanted && it.designId.isNotBlank() }
+      .filter { field(it) == wanted && it.designId.isNotBlank() }
       .map { it.designId }
       .distinct()
       .sorted()

@@ -412,6 +412,79 @@ class ServeUiBuilderCommentWebhookTest {
   }
 
   @Test
+  fun `events over the per-design rate limit are held back, and other designs still get through`() {
+    val root = Files.createTempDirectory("comment-webhook-rate-limit")
+    try {
+      val store = ServeUiBuilderCommentStore(root)
+      val delivered = CopyOnWriteArrayList<String>()
+      val logs = CopyOnWriteArrayList<String>()
+      val webhook =
+        ServeUiBuilderCommentWebhook(
+          config = CommentWebhookConfig("https://hooks.example/hook"),
+          designs = { CommentWebhookDesign("Checkout", "m3-catalog", readableByAnyone = true) },
+          baseUrl = { "https://preview.example" },
+          send = {
+            delivered += it
+            true
+          },
+          onLog = { logs += it },
+          rateLimit = CommentWebhookRateLimit(perDesignPerMinute = 2, totalPerMinute = 10),
+          clock = { 1_000_000L },
+        )
+      webhook.use {
+        it.attach(store).use {
+          repeat(5) { n -> store.post("design-1", "Yuri", CommentPostRequest(body = "Note $n.")) }
+          store.post("design-2", "Yuri", CommentPostRequest(body = "Elsewhere."))
+          awaitDeliveries(delivered, 3)
+          Thread.sleep(100)
+
+          assertEquals(3, delivered.size, "two for design-1, one for design-2")
+          assertEquals(
+            1,
+            logs.count { line -> "over its rate limit" in line && "design-1" in line },
+            "one line per throttled design per window, not one per dropped event: $logs",
+          )
+          assertTrue(logs.none { "hooks.example" in it }, "the hook URL is a credential")
+        }
+      }
+    } finally {
+      root.toFile().deleteRecursively()
+    }
+  }
+
+  @Test
+  fun `the host-wide limit caps every design together`() {
+    val root = Files.createTempDirectory("comment-webhook-total-limit")
+    try {
+      val store = ServeUiBuilderCommentStore(root)
+      val delivered = CopyOnWriteArrayList<String>()
+      val webhook =
+        ServeUiBuilderCommentWebhook(
+          config = CommentWebhookConfig("https://hooks.example/hook"),
+          designs = { CommentWebhookDesign("Checkout", "m3-catalog", readableByAnyone = true) },
+          baseUrl = { "https://preview.example" },
+          send = {
+            delivered += it
+            true
+          },
+          onLog = {},
+          rateLimit = CommentWebhookRateLimit(perDesignPerMinute = 5, totalPerMinute = 3),
+          clock = { 1_000_000L },
+        )
+      webhook.use {
+        it.attach(store).use {
+          repeat(6) { n -> store.post("design-$n", "Yuri", CommentPostRequest(body = "Hi $n.")) }
+          awaitDeliveries(delivered, 3)
+          Thread.sleep(100)
+          assertEquals(3, delivered.size)
+        }
+      }
+    } finally {
+      root.toFile().deleteRecursively()
+    }
+  }
+
+  @Test
   fun `each event names the design as it was when that comment was written`() {
     // A design id is not a stable name for a design: ids come from the client and are free again
     // once one is deleted, so the id a comment was written under can mean something else by the

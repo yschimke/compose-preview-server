@@ -37,7 +37,7 @@ concurrency:
 env:
   # The compose-preview CLI whose init script the recompile injects. The fixture does not apply the
   # plugin, like most projects the CLI drives, so this version also picks the plugin under test.
-  COMPOSE_PREVIEW_CLI_VERSION: 2.28.0
+  COMPOSE_PREVIEW_CLI_VERSION: 2.30.0
 
 jobs:
   edit-loop:
