@@ -147,6 +147,51 @@ After discovery, `find_previews_for_file` maps an absolute source path — or on
 registered workspace — to the preview URIs declared there. Both returned URIs can be passed
 directly to `render_preview`.
 
+### `.uid` designs: `design_open`
+
+In ChatGPT or Codex desktop, opening a `.uid` UI Builder design opens it in the UI Builder editor
+instead of the default viewer, and edits save back to the file
+([compose-ui-builder#364](https://github.com/yschimke/compose-ui-builder/issues/364)). The editor
+is compose-ui-builder's MCP App
+([#366](https://github.com/yschimke/compose-ui-builder/pull/366),
+[its design note](https://github.com/yschimke/compose-ui-builder/blob/main/docs/design/UI_BUILDER_MCP_APP_HOST.md)).
+It reads, saves and follows the file itself, through the host's `resources/read`,
+`openai/resources/write` and `resources/subscribe`. This server adds three things:
+
+- **`design_open`**, a file-entrypoint tool (`extensions: [".uid"]`) that takes `FileInput`
+  `{file: {name, resourceUri}}` and only acknowledges the call. It has no `{path}` form for model
+  calls. The editor can load and save only through a host that offers the `openai/resource`
+  capability, so in Claude Code or Antigravity it would open an editor with no file.
+- **`ui://compose-ui-builder/editor`**, the archive's `mcp-app/ui-builder-mcp-app.html` shell,
+  served as `text/html;profile=mcp-app`. Its one placeholder is filled in with the asset base URL,
+  and `_meta.ui.csp.resourceDomains` and `connectDomains` name that origin. Its display mode is
+  fullscreen only.
+- **The asset origin**, `http://127.0.0.1:<ephemeral>/ui-builder/v/<version>/`. The editor is
+  about 45 MB unpacked, too large to inline, so the shell loads it from this origin. The listener
+  starts on the first read of the editor resource. It serves only the files in the archive,
+  answers GET, HEAD and OPTIONS only, and refuses path traversal. It sends:
+  - `Access-Control-Allow-Origin: *`, with no credentials. The app's sandboxed frame may have an
+    opaque `null` origin, and echoing that would grant the same access as `*`;
+  - `Access-Control-Allow-Private-Network: true` in answer to a Private Network Access preflight;
+  - `application/wasm` for `.wasm`, and the right type for each script, stylesheet, JSON file and
+    font.
+
+The `compose-preview-mcp` distribution carries the editor archive as
+`ui-builder/compose-preview-ui-builder-web.zip`. It is the `composeai-ui-builder` release the
+catalog pins, and it is read in place, without unpacking. To use another archive, point
+`COMPOSE_PREVIEW_UI_BUILDER_WEB` at a ZIP or an unpacked directory. The tool and the resource are
+registered only when the archive's `ui-builder-web.json` declares `"mcpApp": 1`. An older archive,
+or no archive, leaves both out, and no error is reported.
+
+Still to check in a real host, as part of the
+[#1236](https://github.com/yschimke/compose-preview-server/issues/1236) probe:
+
+- whether ChatGPT/Codex desktop accepts a loopback `http://127.0.0.1:<port>` origin in
+  `resourceDomains` / `connectDomains` for a local stdio server, and whether its sandbox sends the
+  PNA preflight;
+- whether the sandbox allows WebAssembly compilation (`'wasm-unsafe-eval'`) and WebGL;
+- whether `resources/read` on the `.uid` file reports `writable: true`, so that saves happen.
+
 ## Spatial and WebXR previews
 
 A portable bundle can publish an XR preview as a version-one `SpatialScene` document and its panel

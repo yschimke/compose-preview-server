@@ -245,6 +245,12 @@ class DaemonMcpServer(
     environment[CALL_BUDGET_ENV]?.toLongOrNull() ?: DEFAULT_CALL_BUDGET_MS,
   /** How long a budgeted call's finished result waits for its retry; tests shorten it. */
   private val uncollectedCallResultTtlMs: Long = UNCOLLECTED_CALL_RESULT_TTL_MS,
+  /**
+   * `design_open` and `ui://compose-ui-builder/editor` (compose-ui-builder#364); null, and absent
+   * from every list, unless the editor archive carries the MCP App shell.
+   */
+  private val uiBuilderDesign: UiBuilderDesignMcp? =
+    UiBuilderDesignMcp.fromEnvironment(environment),
 ) {
 
   private val fullToolDefsLoader: () -> List<ToolDef> =
@@ -566,6 +572,7 @@ class DaemonMcpServer(
     runCatching { renderDispatchExecutor.shutdownNow() }
     runCatching { budgetedCallScope.cancel() }
     runCatching { rcViewer.shutdown() }
+    runCatching { uiBuilderDesign?.close() }
     synchronized(fileRenderCacheLock) { runCatching { fileRenderCacheDir.deleteRecursively() } }
   }
 
@@ -652,6 +659,7 @@ class DaemonMcpServer(
         )
       )
     out += rcViewer.resourceDescriptors()
+    uiBuilderDesign?.resourceDescriptors()?.let(out::addAll)
     openAiProbe?.resources()?.let(out::addAll)
     if (profile == McpToolProfile.NATIVE) out.addAll(previewLibrary.resources())
     for ((addr, byId) in catalog) {
@@ -703,6 +711,9 @@ class DaemonMcpServer(
       )
     }
     rcViewer.readResource(uri)?.let {
+      return it
+    }
+    uiBuilderDesign?.readResource(uri)?.let {
       return it
     }
     openAiProbe?.readResource(uri)?.let {
@@ -2626,6 +2637,7 @@ class DaemonMcpServer(
     ) +
       listOf(PreviewTray.toolDef(), PreviewMentions.toolDef()) +
       rcViewer.toolDefs() +
+      (uiBuilderDesign?.toolDefs() ?: emptyList()) +
       (uiBuilderMcp?.toolDefs() ?: emptyList()) +
       (openAiProbe?.toolDefs() ?: emptyList()) +
       previewLibrary.toolDefs() +
@@ -2705,6 +2717,8 @@ class DaemonMcpServer(
       "preview-stories" -> toolStorybookPreviewStories(session, args)
       "run-story-tests" -> toolStorybookRunTests(args)
       RcViewerMcp.TOOL_NAME -> rcViewer.handle(name, args)!!
+      UiBuilderDesignMcp.TOOL_NAME ->
+        uiBuilderDesign?.handle(name, args) ?: errorCallToolResult("unknown tool: $name")
       else ->
         if (profile == McpToolProfile.NATIVE) {
           openAiProbe?.handle(name, args, (session as? McpSession)?.clientName)
