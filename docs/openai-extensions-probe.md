@@ -149,6 +149,23 @@ plugin):
 7. **Deep link:** what form does `openai/deepLink` take (for example `{ "url": "/probe?x=1" }`)?
    Does it arrive at `ui/initialize`, or later as `host-context-changed`?
 
+## The `.uid` editor (`design_open`)
+
+`design_open` is not a probe tool. It is registered whenever the bundled editor archive declares
+`"mcpApp": 1`, so with the probe on it competes with `probe_file` for `.uid`. Run it without
+`COMPOSE_PREVIEW_MCP_OPENAI_PROBE`. To try an archive other than the bundled one, set
+`COMPOSE_PREVIEW_UI_BUILDER_WEB` to a ZIP or an unpacked directory in the plugin's `env`. Open
+`~/probe/hello.uid` (copy a real design over it first, for example compose-ui-builder's
+`docs/design/fixtures/ui-builder/state-actions.uid`) and record:
+
+1. whether the editor loads at all. Its shell loads Wasm from
+   `http://127.0.0.1:<port>/ui-builder/v/<version>/` (the server logs the URL on stderr). If the
+   host's CSP rejects a loopback `resourceDomains` origin, or blocks `'wasm-unsafe-eval'`, the boot
+   screen stays up or fails. Copy the frame's console errors;
+2. whether the canvas draws, which needs WebGL in the sandbox;
+3. whether the file bar says the file is writable, and whether an edit autosaves to disk
+   (`writable: true`, then `openai/resources/write`).
+
 ## Recording the evidence
 
 Add a row for the OpenAI extensions to compose-ag-plugin's `docs/harness-matrix.md`. Add an

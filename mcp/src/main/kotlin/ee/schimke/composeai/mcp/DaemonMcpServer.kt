@@ -245,6 +245,12 @@ class DaemonMcpServer(
     environment[CALL_BUDGET_ENV]?.toLongOrNull() ?: DEFAULT_CALL_BUDGET_MS,
   /** How long a budgeted call's finished result waits for its retry; tests shorten it. */
   private val uncollectedCallResultTtlMs: Long = UNCOLLECTED_CALL_RESULT_TTL_MS,
+  /**
+   * `design_open` and `ui://compose-ui-builder/editor` (compose-ui-builder#364); null, and absent
+   * from every list, unless the editor archive carries the MCP App shell.
+   */
+  private val uiBuilderDesign: UiBuilderDesignMcp? =
+    UiBuilderDesignMcp.fromEnvironment(environment),
 ) {
 
   private val fullToolDefsLoader: () -> List<ToolDef> =
@@ -566,6 +572,7 @@ class DaemonMcpServer(
     runCatching { renderDispatchExecutor.shutdownNow() }
     runCatching { budgetedCallScope.cancel() }
     runCatching { rcViewer.shutdown() }
+    runCatching { uiBuilderDesign?.close() }
     synchronized(fileRenderCacheLock) { runCatching { fileRenderCacheDir.deleteRecursively() } }
   }
 
@@ -652,6 +659,7 @@ class DaemonMcpServer(
         )
       )
     out += rcViewer.resourceDescriptors()
+    uiBuilderDesign?.resourceDescriptors()?.let(out::addAll)
     openAiProbe?.resources()?.let(out::addAll)
     if (profile == McpToolProfile.NATIVE) out.addAll(previewLibrary.resources())
     for ((addr, byId) in catalog) {
@@ -703,6 +711,9 @@ class DaemonMcpServer(
       )
     }
     rcViewer.readResource(uri)?.let {
+      return it
+    }
+    uiBuilderDesign?.readResource(uri)?.let {
       return it
     }
     openAiProbe?.readResource(uri)?.let {
@@ -849,9 +860,7 @@ class DaemonMcpServer(
       // Shard render fan-out across replicas: same previewFqn → same replica (cache locality +
       // dedup), different previewFqns → spread across replicas so concurrent renders run in
       // parallel. With replicasPerDaemon = 0 this collapses to the primary.
-      daemon
-        .clientForRender(uri.previewFqn)
-        .renderNow(previews = listOf(uri.previewFqn), tier = RenderTier.FULL, overrides = overrides)
+      dispatchHeadRender(daemon, key, overrides)
     }
     val outcome =
       try {
@@ -1434,14 +1443,57 @@ class DaemonMcpServer(
       renderDispatchExecutor.execute {
         // clientForRender's hash routes by previewFqn, same as the original dispatch in
         // awaitNextRender; preserves cache-locality / replica-affinity across promoted groups.
+        dispatchHeadRender(daemon, key, next.overrides)
+      }
+    }
+  }
+
+  /**
+   * Sends `renderNow` for the head group of [key]'s queue and handles a rejection, which the daemon
+   * never follows with `renderFinished` or `renderFailed`. Ignoring one left the head's waiters to
+   * time out after [renderTimeoutMs] and every later render of the preview queued behind a head
+   * that could never pop (yschimke/compose-ag-plugin#64: every `render_matrix` with a `fontScale`
+   * axis).
+   *
+   * A `coalesced:` rejection means the daemon still holds the previous override render of this
+   * previewId (it records history after sending `renderFinished`), so it is retried after a short
+   * backoff. Any other rejection, or one that outlasts the retries, fails the head group so its
+   * waiters return at once and the next group is dispatched.
+   */
+  private fun dispatchHeadRender(
+    daemon: SupervisedDaemon,
+    key: PreviewIdKey,
+    overrides: PreviewOverrides?,
+    reason: String? = null,
+  ) {
+    var attempt = 0
+    while (true) {
+      val result =
         daemon
           .clientForRender(key.previewId)
           .renderNow(
             previews = listOf(key.previewId),
             tier = RenderTier.FULL,
-            overrides = next.overrides,
+            reason = reason,
+            overrides = overrides,
           )
+      val rejection = result.rejected.firstOrNull { it.id == key.previewId } ?: return
+      if (rejection.reason.startsWith("coalesced") && attempt < RENDER_NOW_COALESCED_RETRIES) {
+        attempt++
+        Thread.sleep(RENDER_NOW_RETRY_BACKOFF_MS * attempt)
+        continue
       }
+      val transition =
+        popHeadAndPrepareNext(
+          daemon,
+          key,
+          RenderOutcome.Failed(
+            kind = "RenderRejected",
+            message = "the daemon rejected the render of ${key.previewId}: ${rejection.reason}",
+          ),
+        )
+      dispatchPreparedNext(daemon, key, transition.next)
+      return
     }
   }
 
@@ -1474,14 +1526,7 @@ class DaemonMcpServer(
       q
     }
     if (becameFront) {
-      daemon
-        .clientForRender(uri.previewFqn)
-        .renderNow(
-          previews = listOf(uri.previewFqn),
-          tier = RenderTier.FULL,
-          overrides = overrides,
-          reason = reason,
-        )
+      dispatchHeadRender(daemon, key, overrides, reason)
     }
   }
 
@@ -2322,7 +2367,7 @@ class DaemonMcpServer(
           "With just `preview` (a @Preview function name), renders all of its @Preview variants " +
             "(the annotation's own devices, font scales, …; up to 12) with one labelled contact " +
             "sheet. " +
-            "Render one preview across a cross-product of display axes in a single call and return a token-frugal per-cell summary — for 'does this survive small screen + RTL + large font?' without looping render_preview and reading N PNGs (issue #1788). `axes` sets any of device / locale / uiMode / fontScale (each a non-empty array); the result has one cell per combination with its `overrides`, `label`, `sha256`, `widthPx`/`heightPx`, and `changed` (sha differs from the first cell — the quick 'which configs render differently?' signal). No base64 by default; fetch a specific cell's pixels with render_preview + those overrides when you need to look, or set `contactSheet:true` to also get one stitched grid image of every cell. Bounded at 24 cells; narrow the axes if you exceed it. Pairs with diff_semantics for per-cell structural diffs.",
+            "Render one preview across a cross-product of display axes in a single call and return a token-frugal per-cell summary — for 'does this survive small screen + RTL + large font?' without looping render_preview and reading N PNGs (issue #1788). `axes` sets any of device / locale / uiMode / fontScale (each a non-empty array); the result has one cell per combination with its `overrides`, `label`, `sha256`, `widthPx`/`heightPx`, `changed` (sha differs from the first cell — the quick 'which configs render differently?' signal), and `changedSinceLastRender` (sha differs from this session's last render of that cell — use it to check an edit landed). No base64 by default; fetch a specific cell's pixels with render_preview + those overrides when you need to look, or set `contactSheet:true` to also get one stitched grid image of every cell. Bounded at 24 cells; narrow the axes if you exceed it. Pairs with diff_semantics for per-cell structural diffs.",
         inputSchema =
           parseSchema(
             """
@@ -2626,6 +2671,7 @@ class DaemonMcpServer(
     ) +
       listOf(PreviewTray.toolDef(), PreviewMentions.toolDef()) +
       rcViewer.toolDefs() +
+      (uiBuilderDesign?.toolDefs() ?: emptyList()) +
       (uiBuilderMcp?.toolDefs() ?: emptyList()) +
       (openAiProbe?.toolDefs() ?: emptyList()) +
       previewLibrary.toolDefs() +
@@ -2705,6 +2751,8 @@ class DaemonMcpServer(
       "preview-stories" -> toolStorybookPreviewStories(session, args)
       "run-story-tests" -> toolStorybookRunTests(args)
       RcViewerMcp.TOOL_NAME -> rcViewer.handle(name, args)!!
+      UiBuilderDesignMcp.TOOL_NAME ->
+        uiBuilderDesign?.handle(name, args) ?: errorCallToolResult("unknown tool: $name")
       else ->
         if (profile == McpToolProfile.NATIVE) {
           openAiProbe?.handle(name, args, (session as? McpSession)?.clientName)
@@ -3326,6 +3374,9 @@ class DaemonMcpServer(
       spawnUndiscoveredModules(scope)
       matches = previewNameMatches(trimmed, scope)
     }
+    if (matches.isEmpty() && unprepared.isEmpty()) {
+      matches = rediscoverForName(trimmed, scope, progress)
+    }
     if (matches.isEmpty() && unprepared.isNotEmpty()) {
       // Never "no preview matches" for a build that could not even be discovered.
       return PreviewNameResolution.Missing(
@@ -3337,6 +3388,67 @@ class DaemonMcpServer(
     }
     if (matches.isEmpty()) return noPreviewMatches(trimmed)
     return PreviewNameResolution.Found(matches.first(), matches.drop(1))
+  }
+
+  /**
+   * A name the catalog has never seen, in a build whose daemons are running: when a `.kt` source
+   * declares `fun <name>(`, rerun `composePreviewDiscover` and reload each daemon's manifest, then
+   * look again. A preview added in a new file otherwise never reached the catalog, because the
+   * daemon's incremental discovery missed it and nothing else rediscovers
+   * (yschimke/compose-ag-plugin#64). The source scan keeps a typo from paying for a Gradle run, and
+   * one declaring file version is rediscovered at most once.
+   */
+  private fun rediscoverForName(
+    name: String,
+    scope: Set<WorkspaceId>?,
+    progress: (String) -> Unit,
+  ): List<String> {
+    val bootstrap = projectBootstrap ?: return emptyList()
+    val function = name.substringAfterLast('.').trim()
+    if (function.isEmpty()) return emptyList()
+    val candidates = buildList {
+      add(function)
+      if ('_' in function) add(function.substringBefore('_'))
+    }
+    var ran = false
+    supervisor
+      .listProjects()
+      .filter { scope == null || it.workspaceId in scope }
+      .filter { it.daemons.isNotEmpty() }
+      .forEach { project ->
+        val declaring =
+          candidates.firstNotNullOfOrNull { findFunctionSource(project.path, it) } ?: return@forEach
+        val attempt = RediscoveryKey(project.path.absolutePath, declaring.absolutePath)
+        val version = declaring.lastModified()
+        if (rediscoveredSources.put(attempt, version) == version) return@forEach
+        val result = bootstrap.rediscover(project.path, progress) ?: return@forEach
+        if (result.exitCode != 0) {
+          System.err.println(
+            "compose-preview-mcp: rediscovery in ${project.path} failed: " +
+              GradleSourceCompiler.summarizeGradleFailure(result.output)
+          )
+        }
+        project.daemons.values.forEach { reloadManifestIfChanged(it) }
+        ran = true
+      }
+    return if (ran) previewNameMatches(name, scope) else emptyList()
+  }
+
+  private data class RediscoveryKey(val projectRoot: String, val source: String)
+
+  private val rediscoveredSources = ConcurrentHashMap<RediscoveryKey, Long>()
+
+  /** The first `.kt` under [root], outside build output, that declares `fun <function>(`. */
+  private fun findFunctionSource(root: File, function: String): File? {
+    val declaration = Regex("""\bfun\s+${Regex.escape(function)}\s*\(""")
+    return root
+      .walkTopDown()
+      .onEnter { it.name !in SOURCE_SCAN_SKIPPED_DIRS }
+      .filter { it.isFile && it.extension == "kt" }
+      .take(MAX_SOURCE_SCAN_FILES)
+      .firstOrNull { file ->
+        runCatching { declaration.containsMatchIn(file.readText()) }.getOrDefault(false)
+      }
   }
 
   /**
@@ -3799,6 +3911,18 @@ class DaemonMcpServer(
       return toolRenderPreview(session, args, resolved)
     }
     val choices = listOf(resolved.uri) + resolved.others
+    // An OpenAI-forms client picks from thumbnails instead of getting the grid (#1240).
+    PreviewPickers.ambiguousMatch(
+        session,
+        previewName,
+        choices,
+        label = { variantLabel(PreviewUri.parseOrNull(it)!!) },
+        thumbnail = { PreviewPickers.cachedThumbnail(it, previewActivity, renderThumbnails) },
+        render = { toolRenderPreview(session, args, PreviewNameResolution.Found(it, emptyList())) },
+      )
+      ?.let {
+        return it
+      }
     // Several matches (such as @WearPreviewDevices + @WearPreviewFontScales variants) render as one
     // grid: every variant, one labelled contact sheet for the model. The chooser is kept for more
     // matches than a grid holds, and for file results.
@@ -4205,10 +4329,7 @@ class DaemonMcpServer(
     val pngBytes = outcome.pngBytes
     val sha = sha256Hex(pngBytes)
     val stablePng = cacheRenderedPng(pngBytes, sha)
-    val changed =
-      previousFileRenderHashes
-        .computeIfAbsent(session) { ConcurrentHashMap() }
-        .put(FileRenderKey(uri.toUri(), overrides), sha) != sha
+    val changed = changedSinceLastRender(session, uri, overrides, sha)
     val payload = buildJsonObject {
       put("uri", uri.toUri())
       put("pngPath", stablePng.canonicalPath)
@@ -4630,7 +4751,7 @@ class DaemonMcpServer(
         val bytes = renderAndReadBytes(uri, overrides = overrides)
         val sha = sha256Hex(bytes)
         if (baselineSha == null) baselineSha = sha
-        RenderedCell(cell, bytes, sha, pngDimensions(bytes))
+        RenderedCell(cell, overrides, bytes, sha, pngDimensions(bytes))
       }
       val cells = rendered.map { rc ->
         buildJsonObject {
@@ -4642,6 +4763,7 @@ class DaemonMcpServer(
             put("heightPx", it.second)
           }
           put("changed", rc.sha != baselineSha)
+          put("changedSinceLastRender", changedSinceLastRender(session, uri, rc.overrides, rc.sha))
         }
       }
       val payload = buildJsonObject {
@@ -4655,7 +4777,20 @@ class DaemonMcpServer(
         put("cellCount", cells.size)
         if (contactSheet) put("contactSheet", true)
         putJsonArray("cells") { cells.forEach { add(it) } }
-        if (choose) put("selection", matrixSelection(session, cells))
+        if (choose) {
+          put(
+            "selection",
+            matrixSelection(session, cells) {
+              rendered.map { rc ->
+                PreviewPickers.option(
+                  uri.copy(overridesJson = rc.cell.overridesJson().toString()).toUri(),
+                  rc.cell.label,
+                  thumbnailPngBase64 = pickerThumbnail(rc.bytes),
+                )
+              }
+            },
+          )
+        }
       }
       val blocks = buildList {
         if (contactSheet) {
@@ -4759,6 +4894,7 @@ class DaemonMcpServer(
             put("heightPx", it.second)
           }
           put("changed", sha != baselineSha)
+          put("changedSinceLastRender", changedSinceLastRender(session, variant, null, sha))
         }
       }
       val payload = buildJsonObject {
@@ -4773,7 +4909,20 @@ class DaemonMcpServer(
             variantUris.drop(MAX_VARIANT_CELLS).forEach { add(JsonPrimitive(it)) }
           }
         }
-        if (choose) put("selection", matrixSelection(session, cellJson))
+        if (choose) {
+          put(
+            "selection",
+            matrixSelection(session, cellJson) {
+              cells.map { (variant, bytes, _) ->
+                PreviewPickers.option(
+                  variant.toUri(),
+                  variantLabel(variant),
+                  thumbnailPngBase64 = pickerThumbnail(bytes),
+                )
+              }
+            },
+          )
+        }
       }
       val blocks = buildList {
         if (contactSheet) {
@@ -4830,9 +4979,23 @@ class DaemonMcpServer(
     return errorCallToolResult("render_matrix failed: $message")
   }
 
-  /** Form chooser for a completed matrix, with an equivalent text answer for older harnesses. */
-  private suspend fun matrixSelection(session: Session, cells: List<JsonObject>): JsonObject {
+  /** A matrix cell's just-rendered pixels as a picker thumbnail (#1240). */
+  private fun pickerThumbnail(bytes: ByteArray): String =
+    Base64.getEncoder().encodeToString(scaleToMaxEdge(bytes, PreviewPickers.THUMBNAIL_EDGE_PX))
+
+  /**
+   * Form chooser for a completed matrix, with an equivalent text answer for older harnesses. An
+   * OpenAI-forms client picks from [pickerOptions], one per cell (#1240).
+   */
+  private suspend fun matrixSelection(
+    session: Session,
+    cells: List<JsonObject>,
+    pickerOptions: () -> List<OpenAiForms.ResourceOption>,
+  ): JsonObject {
     val choices = cells.map { it["label"]!!.jsonPrimitive.content }
+    PreviewPickers.matrixSelection(session, choices, pickerOptions)?.let {
+      return it
+    }
     val fallback = buildJsonObject {
       put("mode", "text")
       put("message", "Choose one rendered variant by label: ${choices.joinToString(" | ")}")
@@ -4904,8 +5067,25 @@ class DaemonMcpServer(
   }
 
   /** A rendered matrix cell held in memory so the optional contact sheet can stitch the bytes. */
+  /**
+   * Whether [sha] differs from the last render of [uri] with [overrides] this [session] saw, and
+   * records it. A matrix cell's `changed` compares with the first cell of the same call, which an
+   * agent checking an edit read as "unchanged since my edit" (yschimke/compose-ag-plugin#64), so
+   * every cell also carries this.
+   */
+  private fun changedSinceLastRender(
+    session: Session,
+    uri: PreviewUri,
+    overrides: PreviewOverrides?,
+    sha: String,
+  ): Boolean =
+    previousFileRenderHashes
+      .computeIfAbsent(session) { ConcurrentHashMap() }
+      .put(FileRenderKey(uri.toUri(), overrides), sha) != sha
+
   private class RenderedCell(
     val cell: MatrixCell,
+    val overrides: PreviewOverrides?,
     val bytes: ByteArray,
     val sha: String,
     val dimensions: Pair<Int, Int>?,
@@ -7742,6 +7922,19 @@ class DaemonMcpServer(
      * `sourcePollIntervalMs`; pass `0` to disable.
      */
     const val DEFAULT_SOURCE_POLL_INTERVAL_MS: Long = 30_000
+
+    /**
+     * How often a `coalesced:` `renderNow` rejection is retried, and the backoff step between tries
+     * (linear: 50, 100, … ms, about 2 s in all). The daemon clears the previous override render
+     * once it has recorded history, which is well inside that.
+     */
+    /** Directories the name-miss source scan never enters; and how many `.kt` files it reads. */
+    private val SOURCE_SCAN_SKIPPED_DIRS =
+      setOf("build", ".gradle", ".git", ".idea", "node_modules", ".kotlin", "out")
+    private const val MAX_SOURCE_SCAN_FILES = 20_000
+
+    internal const val RENDER_NOW_COALESCED_RETRIES: Int = 8
+    internal const val RENDER_NOW_RETRY_BACKOFF_MS: Long = 50
 
     /** Source extensions whose edit needs a recompile before the daemon can render it. */
     private val COMPILED_SOURCE_EXTENSIONS = setOf("kt", "java")

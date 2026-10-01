@@ -145,7 +145,7 @@ class ServeLibraryMcpTest {
   }
 
   @Test
-  fun `catalog_library lists catalogs without resuming any, and loads the one asked for`() {
+  fun `catalog_library lists catalogs with counts only and resumes none`() {
     val all =
       request("tools/call", """{"name":"catalog_library","arguments":{}}""")["structuredContent"]!!
         .jsonObject
@@ -157,15 +157,14 @@ class ServeLibraryMcpTest {
       projects.map { it["id"]!!.jsonPrimitive.content }.sorted(),
     )
     assertEquals(0, opened.get(), "an unscoped library call must not resume a catalog")
-    // Registered suspended: the retained state already names the previews.
+    // Registered suspended: the retained state gives the count, but an unscoped call lists counts
+    // only. Listing every catalog's previews made `{}` return megabytes on the hosted box
+    // (yschimke/compose-ag-plugin#64).
     val alpha = projects.single { it["id"]!!.jsonPrimitive.content == "alpha" }
     assertEquals("alpha label", alpha["name"]!!.jsonPrimitive.content)
-    val previews =
-      alpha["modules"]!!.jsonArray.single().jsonObject["previews"]!!.jsonArray.map {
-        it.jsonObject["uri"]!!.jsonPrimitive.content
-      }
-    assertEquals(2, previews.size)
-    assertTrue(previews.all { it.startsWith("compose-preview://catalog/alpha/") })
+    assertEquals(2, alpha["previewCount"]!!.jsonPrimitive.content.toInt())
+    assertTrue(alpha["modules"]!!.jsonArray.isEmpty(), alpha.toString())
+    assertTrue(projects.all { it["modules"]!!.jsonArray.isEmpty() }, projects.toString())
   }
 
   @Test

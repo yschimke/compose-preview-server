@@ -95,8 +95,42 @@ class ProjectBootstrap(
     }
   }
 
+  /**
+   * Reruns `composePreviewDiscover` in a build that is already prepared, so previews declared since
+   * its daemons started reach `previews.json`. The daemon's own incremental discovery missed a
+   * newly added file (yschimke/compose-ag-plugin#64), while this Gradle task, the one
+   * `compose-preview show` runs, finds it. Returns null when the build has no Gradle wrapper.
+   */
+  fun rediscover(projectRoot: File, progress: (String) -> Unit = {}): GradleTaskRunner.Result? {
+    val windows = System.getProperty("os.name").orEmpty().startsWith("Windows")
+    val wrapper = File(projectRoot, if (windows) "gradlew.bat" else "gradlew")
+    if (!wrapper.isFile) return null
+    synchronized(locks.computeIfAbsent(projectRoot.absolutePath) { Any() }) {
+      val initScript =
+        initScripts.forProject(projectRoot)?.takeIf {
+          !initScripts.projectAppliesPlugin(projectRoot)
+        }
+      val arguments = buildList {
+        if (initScript != null) {
+          add("--init-script")
+          add(initScript.absolutePath)
+          addAll(ISOLATED_PROJECTS_OFF)
+        }
+        add("--console=plain")
+        add("--continue")
+        add(DISCOVER_TASK)
+      }
+      progress("rediscovering previews in ${projectRoot.name}: ./gradlew $DISCOVER_TASK")
+      return runner.run(projectRoot, wrapper, arguments) { line ->
+        if (line.startsWith("> Task ")) progress(line)
+      }
+    }
+  }
+
   companion object {
     val TASKS = listOf("composePreviewDiscover", "composePreviewDaemonStart")
+
+    const val DISCOVER_TASK = "composePreviewDiscover"
 
     /** Mirrors [GradleSourceCompiler]: the injected script cannot run under Isolated Projects. */
     private val ISOLATED_PROJECTS_OFF =

@@ -829,8 +829,8 @@ class ServeCatalogMcp(
         }
       }
       "render_preview" -> {
-        requireLive(liveAuthorization)
         val target = args.previewTarget()
+        requireLive(liveAuthorization)
         withCatalog(target.catalog) { host ->
           val preview = resolvePreview(host, target.previewId)
           val rawOverrides = args["overrides"] as? JsonObject
@@ -857,19 +857,19 @@ class ServeCatalogMcp(
         }
       }
       "diff_semantics" -> {
+        diffSemanticsTargets(args)
         requireLive(liveAuthorization)
         diffSemanticsResult(args)
       }
       "render_matrix" -> {
-        requireLive(liveAuthorization)
         val target = args.previewTarget()
+        requireLive(liveAuthorization)
         withCatalog(target.catalog) { host ->
           val preview = resolvePreview(host, target.previewId)
           matrixResult(host, preview, target.catalog, args)
         }
       }
       "preview-stories" -> {
-        requireLive(liveAuthorization)
         val ids =
           ((args["storyIds"] ?: args["ids"]) as? JsonArray)?.map { it.jsonPrimitive.content }
             ?: listOf(args.firstString("storyId", "id"))
@@ -878,6 +878,7 @@ class ServeCatalogMcp(
             "preview-stories accepts at most $MAX_STORIES_PER_CALL ids per call"
           )
         }
+        requireLive(liveAuthorization)
         val observe = args["observe"]?.jsonPrimitive?.contentOrNull?.lowercase() ?: "png"
         val content = buildJsonArray {
           ids.forEach { storyId ->
@@ -902,12 +903,13 @@ class ServeCatalogMcp(
         buildJsonObject { put("content", content) }
       }
       "get_preview_data" -> {
-        requireLive(liveAuthorization)
         val target = args.previewTarget()
+        val kind = args.requiredString("kind")
+        requireLive(liveAuthorization)
         withCatalog(target.catalog) { host ->
           val preview = resolvePreview(host, target.previewId)
           val overrides = parseOverrides(preview, args["overrides"] as? JsonObject)
-          dataProductResult(host, preview.id, args.requiredString("kind"), overrides)
+          dataProductResult(host, preview.id, kind, overrides)
         }
       }
       else -> toolError("unknown tool: $name")
@@ -1559,14 +1561,19 @@ class ServeCatalogMcp(
    * `count` (how many nodes carry the tag — a tag is only a usable identity while exactly one does)
    * and its explicitly-named coordinate space.
    */
-  private suspend fun diffSemanticsResult(args: JsonObject): JsonObject {
+  /** The two previews `diff_semantics` compares, validated before any grant check. */
+  private fun diffSemanticsTargets(args: JsonObject): Pair<PreviewTarget, PreviewTarget> {
     val left = args.previewTarget()
     val other =
       args["other"] as? JsonObject
         ?: throw McpRequestException(
           "catalog_diff_semantics requires an 'other' preview to compare with"
         )
-    val right = other.previewTarget()
+    return left to other.previewTarget()
+  }
+
+  private suspend fun diffSemanticsResult(args: JsonObject): JsonObject {
+    val (left, right) = diffSemanticsTargets(args)
     val leftOverrides = args["overrides"] as? JsonObject
     val rightOverrides = args["otherOverrides"] as? JsonObject
 
@@ -2028,20 +2035,22 @@ class ServeCatalogMcp(
   }
 
   /**
-   * The catalogs for `catalog_library`: every one by its registry label, with previews where the
-   * registry already holds them without a lease, and `projectId`'s loaded (leased) on request.
+   * The catalogs for `catalog_library`: every one by its registry label and preview count, and only
+   * `projectId`'s previews (leased on request). Listing every resident catalog's previews made an
+   * argument-less call return megabytes (yschimke/compose-ag-plugin#64); the library app loads one
+   * catalog's previews when it is opened.
    */
   private suspend fun libraryCatalogs(args: JsonObject): List<ServeLibraryMcp.Catalog> {
     val selected = args.optionalString("projectId")
     return catalogIds().map { catalog ->
-      val previews =
-        if (catalog == selected) withCatalog(catalog) { it.previews }
-        else peekCatalog(catalog).previews
+      val peeked = peekCatalog(catalog)
+      val previews = if (catalog == selected) withCatalog(catalog) { it.previews } else null
       ServeLibraryMcp.Catalog(
         id = catalog,
-        label = peekCatalog(catalog).label,
+        label = peeked.label,
         previews =
           previews?.map { ServeLibraryMcp.Preview(resourceUri(catalog, it.id), it.id, it.label) },
+        previewCount = previews?.size ?: peeked.previews?.size,
       )
     }
   }
@@ -2182,7 +2191,20 @@ class ServeCatalogMcp(
     optionalString("uri")?.let {
       return targetFromUri(it)
     }
-    return PreviewTarget(requiredString("catalog"), requiredString("previewId"))
+    val catalog = optionalString("catalog")
+    val previewId = optionalString("previewId")
+    if (catalog == null || previewId == null) {
+      val missing =
+        listOfNotNull(
+          "catalog".takeIf { catalog == null },
+          "previewId".takeIf { previewId == null },
+        )
+      throw McpRequestException(
+        "needs 'uri', or 'catalog' and 'previewId' (missing: ${missing.joinToString()}). " +
+          "Ids come from catalog_list_projects and catalog_list_previews."
+      )
+    }
+    return PreviewTarget(catalog, previewId)
   }
 
   private fun storyTarget(value: String): PreviewTarget {
@@ -2484,7 +2506,12 @@ class ServeCatalogMcp(
     when (val decision = check()) {
       is ServeMachineAuthorization.Decision.Authorized -> Unit
       ServeMachineAuthorization.Decision.Missing ->
-        throw McpRequestException("live grant scope is required")
+        throw McpRequestException(
+          "live grant scope is required for a made-to-order render. To look at a published " +
+            "render, read its resource instead (resources/read on the uri from " +
+            "catalog_list_previews), which needs only preview scope. For a live render, call " +
+            "request_access with scope \"live\"."
+        )
       is ServeMachineAuthorization.Decision.Forbidden -> throw McpRequestException(decision.message)
     }
   }

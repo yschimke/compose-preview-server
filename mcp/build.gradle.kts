@@ -142,7 +142,41 @@ val writeDistributionJavaMin =
     }
   }
 
-distributions { main { contents { from(writeDistributionJavaMin) } } }
+// The UI-builder editor archive, for `design_open` (compose-ui-builder#364). Its MCP App shell is
+// the `ui://compose-ui-builder/editor` resource, and its Wasm, scripts, fonts and catalogs are
+// served from a loopback origin (`UiBuilderAssetOrigin`). The same coordinate `:server` unpacks,
+// resolved the same way: artifact-only from the release's ivy repository, or the included build's
+// `:ui-builder-web` under `-PcomposeUiBuilderDir`.
+//
+// Shipped as the ZIP, not unpacked. The server reads entries straight out of it, so the install
+// grows by the archive (~12 MB) rather than by what it unpacks to (~45 MB). The name is fixed, so
+// the runtime finds it without knowing the version; the version it serves under is the one the
+// archive's own manifest declares. An archive whose manifest has no `mcpApp` (3.69.0 and older)
+// ships inert: the tool is not registered.
+val uiBuilderWeb =
+  configurations.create("uiBuilderWeb") {
+    description = "Immutable Compose/Wasm UI-builder frontend archive, for design_open."
+    isCanBeConsumed = false
+    isCanBeResolved = true
+    isTransitive = false
+    attributes {
+      attribute(Category.CATEGORY_ATTRIBUTE, objects.named("distribution"))
+      attribute(LibraryElements.LIBRARY_ELEMENTS_ATTRIBUTE, objects.named("ui-builder-web"))
+      attribute(Usage.USAGE_ATTRIBUTE, objects.named("ui-builder-web"))
+    }
+  }
+
+distributions {
+  main {
+    contents { from(writeDistributionJavaMin) }
+    contents {
+      from(uiBuilderWeb) {
+        into("ui-builder")
+        rename { "compose-preview-ui-builder-web.zip" }
+      }
+    }
+  }
+}
 
 dependencies {
   implementation(libs.kotlinx.coroutines.core)
@@ -182,6 +216,9 @@ dependencies {
   // Axis expansion + contact-sheet stitching behind the `render_matrix` tool, shared with the CLI's
   // offline `render-matrix` command so the two agree by construction.
   implementation(libs.composeai.render.matrix)
+
+  // See the `uiBuilderWeb` configuration above; a bare ZIP, so requested artifact-only.
+  add("uiBuilderWeb", "${libs.composeai.ui.builder.web.get()}@zip")
 
   testImplementation(libs.junit)
   testImplementation(libs.truth)
