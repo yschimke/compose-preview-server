@@ -2339,7 +2339,6 @@ class ServeUiBuilderMcp(
       )
     }
     val sheet = UiBuilderDesignMatrix.compose(cells)
-    val columns = kotlin.math.ceil(kotlin.math.sqrt(cells.size.toDouble())).toInt()
     val failed = cells.count { it.png == null }
     val summary =
       "${cells.size} cells of `$designId` r${document.revision}: " +
@@ -2355,8 +2354,8 @@ class ServeUiBuilderMcp(
         summary = summary,
         designId = designId,
         revision = document.revision,
-        columns = columns,
-        rows = kotlin.math.ceil(cells.size / columns.toDouble()).toInt(),
+        columns = sheet.columns,
+        rows = sheet.rows,
         image =
           UiBuilderViewImageV1(
             widthPx = sheet.width,

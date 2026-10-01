@@ -57,4 +57,31 @@ class ServeContactSheetTest {
     // Two slots wide even though only one cell decoded.
     assertTrue(image.width > 2 * 10, "width ${image.width}")
   }
+
+  @Test
+  fun `captioned tiles report where each landed, and a byte budget shrinks them`() {
+    val tiles = List(4) { ServeContactSheet.Tile(png(400, 800), caption = "Phone $it") }
+
+    val roomy = ServeContactSheet.compose(tiles)
+    assertEquals(2, roomy.columns)
+    assertEquals(2, roomy.rows)
+    assertEquals(4, roomy.placed.size)
+    // 400×800 fits a 320 edge as 160×320, and the second column starts a slot and a gap later.
+    assertEquals(160, roomy.placed[0].width)
+    assertEquals(320, roomy.placed[0].height)
+    assertEquals(roomy.placed[0].x + 160 + 12, roomy.placed[1].x)
+
+    val tight = ServeContactSheet.compose(tiles, maxBytes = 1)
+    assertTrue(tight.placed[0].height < roomy.placed[0].height, "shrank to fit the budget")
+  }
+
+  @Test
+  fun `a missing tile still gets a placement`() {
+    val sheet =
+      ServeContactSheet.compose(
+        listOf(ServeContactSheet.Tile(null, caption = "gone"), ServeContactSheet.Tile(png(10, 20)))
+      )
+    assertEquals(2, sheet.placed.size)
+    assertEquals(sheet.placed[1].height, sheet.placed[0].height)
+  }
 }
