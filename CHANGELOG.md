@@ -1,5 +1,20 @@
 # Changelog
 
+## [3.91.0](https://github.com/yschimke/compose-preview-server/compare/v3.90.0...v3.91.0) (2026-10-01)
+
+
+### Features
+
+* adopt UI Builder 3.71.0 — design branch MCP tools and the focused editor layout setting ([#1268](https://github.com/yschimke/compose-preview-server/issues/1268)) ([4aa2f05](https://github.com/yschimke/compose-preview-server/commit/4aa2f050ccf210852e5b371595b3da08b8ddb251))
+* **mcp:** attach and measure a UI-builder reference over MCP and the CLI ([#1271](https://github.com/yschimke/compose-preview-server/issues/1271)) ([d350893](https://github.com/yschimke/compose-preview-server/commit/d350893b8df922883e2fa7dd3b2fbc865825f4c4))
+
+
+### Bug Fixes
+
+* **catalog-mcp:** say when catalogs are still loading, page catalog_list_previews, and serve published snapshots without a live grant ([#1267](https://github.com/yschimke/compose-preview-server/issues/1267)) ([dfa556d](https://github.com/yschimke/compose-preview-server/commit/dfa556dd9f53453c033aa5edacc5407a4c4bb6ea))
+* **deps:** update rc-players to 2.0.4 ([#1272](https://github.com/yschimke/compose-preview-server/issues/1272)) ([c571bb7](https://github.com/yschimke/compose-preview-server/commit/c571bb7e526b1ab14ad11b8e98e5802d10b994de))
+* **deps:** update the UI builder to 3.71.0 ([#1269](https://github.com/yschimke/compose-preview-server/issues/1269)) ([96c2c83](https://github.com/yschimke/compose-preview-server/commit/96c2c8349e50da73e39748a4e18d87b61fabf48a))
+
 ## [3.90.0](https://github.com/yschimke/compose-preview-server/compare/v3.89.0...v3.90.0) (2026-10-01)
 
 
