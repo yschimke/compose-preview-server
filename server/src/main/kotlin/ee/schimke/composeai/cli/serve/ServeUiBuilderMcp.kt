@@ -64,6 +64,7 @@ import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.encodeToJsonElement
 import kotlinx.serialization.json.floatOrNull
+import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.longOrNull
 
@@ -168,6 +169,9 @@ class ServeUiBuilderMcp(
   private val reviews: ServeUiBuilderReviewStore? = null,
 ) {
 
+  /** Revisions, restore, fork and diff; see [ServeUiBuilderHistoryTools]. */
+  private val history = ServeUiBuilderHistoryTools(service, serverOrigin, links)
+
   /** Whether this host keeps design discussions, and so whether the comment tools exist. */
   val supportsComments: Boolean
     get() = comments != null
@@ -200,6 +204,13 @@ class ServeUiBuilderMcp(
       // service on top of that: only the owner is told who else holds a grant.
       DESIGN_ACCESS -> UiBuilderRouteCapability.READ
       AWAIT_DESIGN -> UiBuilderRouteCapability.READ
+      // History: looking and comparing are reads; a restore writes the design (and the service
+      // also takes the design's own WRITE action), and a fork creates a design, as the history
+      // page's fork form does.
+      ServeUiBuilderHistoryTools.LIST_REVISIONS,
+      ServeUiBuilderHistoryTools.DIFF_DESIGNS -> UiBuilderRouteCapability.READ
+      ServeUiBuilderHistoryTools.RESTORE_REVISION,
+      ServeUiBuilderHistoryTools.FORK_DESIGN -> UiBuilderRouteCapability.WRITE
       LIST_COMMENTS,
       AWAIT_COMMENTS -> if (comments == null) null else UiBuilderRouteCapability.READ
       POST_COMMENT,
@@ -386,6 +397,7 @@ class ServeUiBuilderMcp(
         SET_IMPLEMENTATION,
         IMPLEMENTATION_STATUS -> return reviewTool(tool, args, actor)
         FIND_DESIGN_FOR_PR -> return findDesignForPr(args, actor)
+        in ServeUiBuilderHistoryTools.TOOL_NAMES -> return history.call(tool, args, actor)
         else -> throw McpRequestException("unknown UI-builder tool '$tool'")
       }
     return envelope(callId, execute(request, actor), includeCatalog = args.includeCatalog())
@@ -1447,7 +1459,17 @@ class ServeUiBuilderMcp(
     }
     val stored =
       when (tool) {
-        GET_LINKS -> store.read(designId) ?: StoredLinks(designId = designId)
+        GET_LINKS ->
+          return withAncestry(
+            service,
+            actor,
+            store.ancestry,
+            designId,
+            UI_BUILDER_JSON.encodeToString(
+              StoredLinks.serializer(),
+              store.read(designId) ?: StoredLinks(designId = designId),
+            ),
+          )
         SET_LINKS ->
           when (val result = store.replace(designId, args.linksArgument())) {
             is LinksWriteResult.Refused -> throw McpRequestException(result.reason)
@@ -1456,7 +1478,9 @@ class ServeUiBuilderMcp(
           }
         else -> throw McpRequestException("unknown UI-builder links tool '$tool'")
       }
-    return UI_BUILDER_JSON.encodeToString(StoredLinks.serializer(), stored)
+    val record = UI_BUILDER_JSON.encodeToJsonElement(StoredLinks.serializer(), stored).jsonObject
+    // The chat platform the thread lives on, read off its permalink; see [ServeChatThreadLinks].
+    return JsonObject(record + ServeChatThreadLinks.describe(stored.thread)).toString()
   }
 
   /**
@@ -3026,7 +3050,7 @@ class ServeUiBuilderMcp(
         SHARE_DESIGN,
         RENAME_DESIGN,
         DELETE_DESIGN,
-      )
+      ) + ServeUiBuilderHistoryTools.TOOL_NAMES
 
     /** Kept separate for callers that group native-render capabilities. */
     val NATIVE_TOOL_NAMES = listOf(RENDER_NATIVE)
@@ -3785,7 +3809,7 @@ class ServeUiBuilderMcp(
             },"required":["pr"],"additionalProperties":false}
             """,
           ),
-      )
+      ) + ServeUiBuilderHistoryTools.declarations(tool)
   }
 }
 

@@ -190,6 +190,9 @@ that protocol/SDK migration is deliberately not bundled into the compatibility t
 | `ui_builder_find_design_for_pr` | `ui-builder-read` | From a pull request back to the design(s) it implements |
 | `ui_builder_rename_design`, `ui_builder_delete_design` | `ui-builder-write` | Retitle a design you may write; delete one you **own**. Neither has a request type in the contract, so both answer outside the released envelope |
 | `ui_builder_await_design` | `ui-builder-read` | **Wait** for somebody else to change a design, and return what they changed |
+| `ui_builder_list_revisions`, `ui_builder_diff_designs` | `ui-builder-read` | A design's retained revisions (actor, time, operation, document digest, and the retention floor); a node-level diff of any two retained revisions of any two designs (below) |
+| `ui_builder_restore_revision` | `ui-builder-write` | Restore a retained revision **forward**, as a new revision; `dryRun: true` returns the diff it would apply. Needs the design's own write action |
+| `ui_builder_fork_design` | `ui-builder-write` | A new design from one revision of another, with its `forkedFrom` recorded and listed on both ends through `ui_builder_get_links` |
 | `ui_builder_export` | `ui-builder-export` | Export a design — `compose` returns the generator's Kotlin, or diagnostics naming each reason it refused |
 | `ui_builder_view` | `ui-builder-read` (plus `ui-builder-export` for `renderer: "native"`) | The editor canvas as a person sees it — a PNG with the selection, reference overlay, comment pins and layout bounds drawn on, and the node boxes and pin positions as JSON (#1114) |
 | `ui_builder_put_asset` | `ui-builder-write` | Put a picture behind an `assetKey`, so an `asset/image` node draws it; present only where the host keeps design assets |
@@ -477,6 +480,46 @@ needs only a read grant). `ui_builder_find_design_for_pr` goes the other way —
 the designs whose implementation record or links name it, each read as the caller before it is named
 — and `GET /api/ui-builder/v1/implementations?pr=` answers the same over HTTP. Decisions and the
 implementation live under `reviews/` beside the UI-builder state and are deleted with the design.
+
+### A design's history: revisions, diff, restore, fork
+
+Four tools give an agent the history page's operations (#1256, phase 1 of
+yschimke/compose-ui-builder#375), over the same service requests and with the same access rules. None
+of them answers with the released envelope — the contract has no history request — so each reply is
+its own small shape with a `summary` a person can read, declared as the tool's `outputSchema`.
+
+- `ui_builder_list_revisions {designId, limit?, before?}` — newest first: revision, sequence, actor,
+  time, document digest, node count and the operation that produced it (`setProperty ×2,
+  insertNode`, `undo of …`, `restored r3`) while the operation log still holds it. `retention`
+  names the **floor** — `oldestRetainedRevision` — and the policy behind it (128 whole-document
+  revisions within a 2 MiB budget per design, never fewer than 32, and the last 1,024 operations).
+  Anything older is gone: get, diff, restore and fork refuse it with an error that names the floor,
+  and a revision that never existed is refused as such.
+- `ui_builder_diff_designs {a: {designId, revision?}, b?: {designId, revision?}}` — nodes added,
+  removed and moved (a different parent or slot, or a different place among the siblings both sides
+  share — a sibling inserted before a node is not a move), and per node the properties, the
+  modifier list and any other field that changed, each with its id and a `root/slot[index]/node`
+  path; plus changed document fields (title, environment, state variables). Values are the
+  protocol's own JSON. Works across a design and its fork. `b` defaults to `a`'s current revision.
+  The diff is computed server-side over `DesignDocumentV1`: the editor's `revisionDiff` lives in the
+  unpublished frontend module and diffs the editor's own model, so the two should be consolidated
+  once a document diff moves into a published module. No before/after render URLs yet: the only
+  signed image link on this surface is `ui_builder_view`'s, and it is not reachable per revision.
+- `ui_builder_restore_revision {designId, revision, baseRevision, dryRun?, operationId?}` — the
+  runtime's `RestoreRevision`: forward, hash-bound to the document it replaces, refused as **stale**
+  when `baseRevision` is not current. `dryRun: true` writes nothing and returns the diff from the
+  current document to the restored one, and `stale` when the real call would be refused. Both take
+  the design's own write action.
+- `ui_builder_fork_design {designId, revision?, title?, newDesignId?}` — the history page's fork,
+  plus **ancestry**: the fork records `forkedFrom: {designId, revision, documentDigest}`, and the
+  parent lists it under `forks`; `ui_builder_get_links` returns both, a parent's `forks` filtered to
+  the ones the reader may open. A fork never takes its parent's canonical home — it is homed here
+  under its own id where the host has a public origin, unhomed otherwise — so it is a temporary
+  copy in the R3 sense: announce it, and bring a chosen change back with `ui_builder_apply` on the
+  parent. The history page's fork form records the same ancestry. Ancestry is kept beside the links
+  records (`links/ancestry/`), because the published `DesignLinksV1` has no field for it and the
+  runtime has no branch model yet; a host without a links store forks without it and says so
+  (`ancestryRecorded: false`).
 
 ### Watching, rather than asking again
 
