@@ -7,6 +7,7 @@ import java.util.Base64
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -83,6 +84,11 @@ class ServeMcpAnonymousPreviewTest {
 
   private val liveCall =
     """{"jsonrpc":"2.0","id":1,"method":"tools/call",""" +
+      """"params":{"name":"catalog_render_preview",""" +
+      """"arguments":{"catalog":"demo","previewId":"example"}}}"""
+
+  private val argumentlessLiveCall =
+    """{"jsonrpc":"2.0","id":1,"method":"tools/call",""" +
       """"params":{"name":"catalog_render_preview","arguments":{}}}"""
 
   @AfterTest
@@ -120,5 +126,27 @@ class ServeMcpAnonymousPreviewTest {
     assertEquals(200, code, body)
     assertTrue(body.contains("\"isError\":true"), body)
     assertTrue(body.contains("live grant scope is required"), body)
+    // …and says how to look without one: the published render needs only preview scope.
+    assertTrue(body.contains("resources/read"), body)
+  }
+
+  @Test
+  fun `a call missing its arguments is told what is missing before any grant`() {
+    // An agent that sent `{}` was told to get a live grant, asked the person to approve one, and
+    // only then learned it had named no preview (yschimke/compose-ag-plugin#64).
+    val server = start(isPublic = true)
+    for (tool in
+      listOf(
+        "catalog_render_preview",
+        "catalog_render_matrix",
+        "catalog_get_preview_data",
+        "catalog_diff_semantics",
+      )) {
+      val (code, body) = mcp(server, argumentlessLiveCall.replace("catalog_render_preview", tool))
+      assertEquals(200, code, "$tool: $body")
+      assertTrue(body.contains("\"isError\":true"), "$tool: $body")
+      assertTrue(body.contains("missing: catalog, previewId"), "$tool: $body")
+      assertFalse(body.contains("live grant"), "$tool: $body")
+    }
   }
 }

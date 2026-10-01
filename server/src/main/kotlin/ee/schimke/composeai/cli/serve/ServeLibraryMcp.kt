@@ -42,8 +42,16 @@ internal object ServeLibraryMcp {
   /** A catalog lists at most this many previews in one result; search narrows the rest. */
   const val MAX_PREVIEWS: Int = 2_000
 
-  /** One catalog as the library shows it; null [previews] means not loaded yet. */
-  data class Catalog(val id: String, val label: String, val previews: List<Preview>?)
+  /**
+   * One catalog as the library shows it; null [previews] means not loaded yet, and [previewCount]
+   * is its size when the registry knows it without loading.
+   */
+  data class Catalog(
+    val id: String,
+    val label: String,
+    val previews: List<Preview>?,
+    val previewCount: Int? = previews?.size,
+  )
 
   data class Preview(val uri: String, val id: String, val label: String)
 
@@ -52,9 +60,10 @@ internal object ServeLibraryMcp {
     entrypoint(
       tool(
         LIBRARY,
-        "Open the hosted preview catalog browser: every catalog, its previews with search, and " +
-          "the published render of the one selected. Takes no arguments (optional projectId " +
-          "loads one catalog's previews). Also opens from the ChatGPT/Codex sidebar.",
+        "Open the hosted preview catalog browser app. With no arguments it lists every catalog " +
+          "with its preview count only; pass projectId to list one catalog's previews. To find " +
+          "previews without the app, call catalog_list_projects, then catalog_list_previews " +
+          "with a catalog id. Also opens from the ChatGPT/Codex sidebar.",
         """{"type":"object","properties":{"projectId":{"type":"string","description":"A catalog id from catalog_list_projects whose previews to list."}}}""",
       ),
       title = "Preview Catalogs",
@@ -78,8 +87,15 @@ internal object ServeLibraryMcp {
   /** The opening result of `catalog_library`: the catalogs, with previews where loaded. */
   fun libraryResult(catalogs: List<Catalog>): JsonObject {
     val loaded = catalogs.sumOf { it.previews?.size ?: 0 }
+    val text =
+      if (catalogs.none { it.previews != null }) {
+        "${catalogs.size} catalog(s), listed with preview counts only. Pass projectId, or call " +
+          "catalog_list_previews with a catalog id, to list one catalog's previews."
+      } else {
+        "${catalogs.size} catalog(s), $loaded preview(s) listed; the library app shows them."
+      }
     return result(
-      "${catalogs.size} catalog(s), $loaded preview(s) listed; the library app shows them.",
+      text,
       buildJsonObject {
         put("schema", SCHEMA)
         put("mode", "library")
@@ -97,6 +113,7 @@ internal object ServeLibraryMcp {
               put("name", catalog.label)
               val previews = catalog.previews
               if (previews == null) {
+                catalog.previewCount?.let { put("previewCount", it) }
                 putJsonArray("modules") {}
               } else {
                 put("previewCount", previews.size)
