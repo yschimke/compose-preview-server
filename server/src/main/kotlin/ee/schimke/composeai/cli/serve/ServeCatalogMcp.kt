@@ -525,7 +525,10 @@ class ServeCatalogMcp(
        it — selection outline, reference overlay and comment pins drawn over the render — plus the
        node boxes and pin positions as JSON. Pass `renderer: "native"` when node boxes matter and
        that lane is advertised; the default PNG export reports none (compose-preview-server#1114).
-    4. Summarize concrete attention items, separating observed render evidence from document-only
+       Where `ui_builder_render_design_matrix` is advertised, use it for other device sizes.
+    4. Run `ui_builder_check_design` and report its findings by node; they are document checks,
+       not render evidence, unless the reply says they were measured on a render.
+    5. Summarize concrete attention items, separating observed render evidence from document-only
        checks. Do not claim to have seen editor-only state you could not view.
     """
       .trimIndent()
@@ -694,6 +697,7 @@ class ServeCatalogMcp(
           it.supportsAssets,
           it.supportsLinks,
           it.supportsValidation,
+          it.supportsReviews,
         )
       )
     }
@@ -2573,7 +2577,7 @@ class ServeCatalogMcp(
       again is UiBuilderAuthorizationDecision.Authorized && again.actor == actor
     }
     val text = builder.call(name, args, actor, callId = name, clientInteraction = interaction)
-    if (name == ServeUiBuilderMcp.VIEW) {
+    if (name == ServeUiBuilderMcp.VIEW || name == ServeUiBuilderMcp.RENDER_DESIGN_MATRIX) {
       return uiBuilderViewResult(
         text,
         inline = args[ServeUiBuilderMcp.INLINE_ARGUMENT]?.jsonPrimitive?.booleanOrNull == true,
@@ -2781,6 +2785,12 @@ class ServeCatalogMcp(
       "preview-stories" -> arrayWrapperSchema("observations")
       ServeUiBuilderMcp.VIEW -> UiBuilderJsonSchemas.viewOutput
       ServeUiBuilderMcp.VALIDATE -> UiBuilderJsonSchemas.validationOutput
+      ServeUiBuilderMcp.CHECK_DESIGN -> UiBuilderJsonSchemas.designCheckOutput
+      ServeUiBuilderMcp.RENDER_DESIGN_MATRIX -> UiBuilderJsonSchemas.designMatrixOutput
+      ServeUiBuilderMcp.RECORD_DECISION,
+      ServeUiBuilderMcp.AWAIT_DECISION -> UiBuilderJsonSchemas.decisionOutput
+      ServeUiBuilderMcp.IMPLEMENTATION_STATUS -> UiBuilderJsonSchemas.implementationOutput
+      ServeUiBuilderMcp.FIND_DESIGN_FOR_PR -> UiBuilderJsonSchemas.prLookupOutput
       "render_preview" ->
         buildJsonObject {
           put("type", "object")
@@ -3085,6 +3095,7 @@ class ServeCatalogMcp(
         ServeUiBuilderMcp.EXPORT_DOCUMENT,
         ServeUiBuilderMcp.RENDER_NATIVE,
         ServeUiBuilderMcp.VIEW,
+        ServeUiBuilderMcp.RENDER_DESIGN_MATRIX,
       )
     private const val STORY_ID_SEPARATOR = "::"
     private val OBSERVATION_MODES =

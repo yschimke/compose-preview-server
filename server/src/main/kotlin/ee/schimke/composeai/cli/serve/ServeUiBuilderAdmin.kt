@@ -30,6 +30,8 @@ class ServeUiBuilderAdmin(
   private val references: ServeUiBuilderReferenceStore? = null,
   private val comments: ServeUiBuilderCommentStore? = null,
   private val links: ServeUiBuilderLinksStore? = null,
+  /** Review verdicts and the implementing pull request, forgotten with the design. */
+  private val reviews: ServeUiBuilderReviewStore? = null,
   /** The design list's card pictures, forgotten with the design they were drawn from. */
   private val thumbnails: ServeUiBuilderThumbnails? = null,
   /**
@@ -212,6 +214,12 @@ class ServeUiBuilderAdmin(
       }
     }
       .onFailure { onLog("serve: links record for $designId not removed (${it.message})") }
+    runCatching {
+      if (reviews?.delete(designId) == false) {
+        onLog("serve: review record for $designId not removed")
+      }
+    }
+      .onFailure { onLog("serve: review record for $designId not removed (${it.message})") }
     return Result.Deleted(designId)
   }
 }

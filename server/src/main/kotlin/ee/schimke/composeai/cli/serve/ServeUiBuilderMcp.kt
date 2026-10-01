@@ -16,8 +16,10 @@ import ee.schimke.composeai.uibuilder.protocol.DesignListItemV1
 import ee.schimke.composeai.uibuilder.protocol.DesignMutationV1
 import ee.schimke.composeai.uibuilder.protocol.DesignUpdateEnvelopeV1
 import ee.schimke.composeai.uibuilder.protocol.DiagnosticSeverityV1
+import ee.schimke.composeai.uibuilder.protocol.ExportArtifactV1
 import ee.schimke.composeai.uibuilder.protocol.ExportCapabilitiesV1
 import ee.schimke.composeai.uibuilder.protocol.ExportDesignRequestV1
+import ee.schimke.composeai.uibuilder.protocol.ExportEncodingV1
 import ee.schimke.composeai.uibuilder.protocol.ExportFormatV1
 import ee.schimke.composeai.uibuilder.protocol.GetDesignAccessRequestV1
 import ee.schimke.composeai.uibuilder.protocol.GetSnapshotRequestV1
@@ -30,6 +32,7 @@ import ee.schimke.composeai.uibuilder.protocol.PropertyCapabilityV1
 import ee.schimke.composeai.uibuilder.protocol.RevokeActorAccessMutationV1
 import ee.schimke.composeai.uibuilder.protocol.ServiceErrorCodeV1
 import ee.schimke.composeai.uibuilder.protocol.SlotCapabilityV1
+import ee.schimke.composeai.uibuilder.protocol.ThemeV1
 import ee.schimke.composeai.uibuilder.protocol.UiBuilderRequestV1
 import ee.schimke.composeai.uibuilder.protocol.UpdateDesignAccessRequestV1
 import ee.schimke.composeai.uibuilder.service.AuthenticatedUiBuilderActor
@@ -155,6 +158,14 @@ class ServeUiBuilderMcp(
    * refusing, which is the rule the whole surface follows. See [UiBuilderDraftValidator].
    */
   private val validator: UiBuilderDraftValidator? = null,
+  /**
+   * Review verdicts and the implementing pull request, on a host that keeps them.
+   *
+   * Null on a host with no durable UI-builder state; the decision and implementation tools are then
+   * absent rather than present and refusing, which is the rule the whole surface follows. See
+   * [ServeUiBuilderReviewStore] for why this is beside the design rather than in it.
+   */
+  private val reviews: ServeUiBuilderReviewStore? = null,
 ) {
 
   /** Whether this host keeps design discussions, and so whether the comment tools exist. */
@@ -172,6 +183,10 @@ class ServeUiBuilderMcp(
   /** Whether this host can check a design without saving it, and so whether [VALIDATE] exists. */
   val supportsValidation: Boolean
     get() = validator != null
+
+  /** Whether this host records review decisions and implementations, and so whether they exist. */
+  val supportsReviews: Boolean
+    get() = reviews != null
 
   /** What a tool needs from the caller before it may run. Null when the name is not ours. */
   fun capabilityFor(tool: String): UiBuilderRouteCapability? =
@@ -228,6 +243,19 @@ class ServeUiBuilderMcp(
       // the design is shown. The native frame compiles Kotlin, so [additionalCapabilityFor] asks
       // for the export capability on top when a call chooses it.
       VIEW -> UiBuilderRouteCapability.READ
+      // Both read the design and write nothing: a check runs on a scratch copy, and a matrix draws
+      // the PNG export a viewer of the design is already shown, at other sizes. `rendered: true`
+      // compiles Kotlin, so [additionalCapabilityFor] asks for the export capability then.
+      CHECK_DESIGN -> UiBuilderRouteCapability.READ
+      RENDER_DESIGN_MATRIX -> if (validator == null) null else UiBuilderRouteCapability.READ
+      // Recording a verdict or the implementing pull request is saying something about the design,
+      // gated as the comment tools are: a write at the door, the design's own read inside.
+      RECORD_DECISION,
+      SET_IMPLEMENTATION -> if (reviews == null) null else UiBuilderRouteCapability.WRITE
+      AWAIT_DECISION,
+      IMPLEMENTATION_STATUS -> if (reviews == null) null else UiBuilderRouteCapability.READ
+      FIND_DESIGN_FOR_PR ->
+        if (reviews == null && links == null) null else UiBuilderRouteCapability.READ
       else -> null
     }
 
@@ -239,9 +267,19 @@ class ServeUiBuilderMcp(
    * not be a way around that.
    */
   fun additionalCapabilityFor(tool: String, args: JsonObject): UiBuilderRouteCapability? =
-    if (tool == VIEW && args.text(RENDERER_ARGUMENT) == ServeUiBuilderView.RENDERER_NATIVE)
-      UiBuilderRouteCapability.EXPORT
-    else null
+    when {
+      tool == VIEW && args.text(RENDERER_ARGUMENT) == ServeUiBuilderView.RENDERER_NATIVE ->
+        UiBuilderRouteCapability.EXPORT
+      // Measuring touch targets on a real render compiles the design's Kotlin, as [RENDER_NATIVE]
+      // does, and the same grant gates it.
+      tool == CHECK_DESIGN && args[RENDERED_ARGUMENT]?.jsonPrimitive?.booleanOrNull == true ->
+        UiBuilderRouteCapability.EXPORT
+      // The status hands over the Compose export unless asked not to, which is an export.
+      tool == IMPLEMENTATION_STATUS &&
+        args[INCLUDE_EXPORT_ARGUMENT]?.jsonPrimitive?.booleanOrNull != false ->
+        UiBuilderRouteCapability.EXPORT
+      else -> null
+    }
 
   /**
    * Runs one tool as [actor], as the released MCP envelope.
@@ -341,6 +379,13 @@ class ServeUiBuilderMcp(
         GET_LINKS,
         SET_LINKS -> return linksTool(tool, args, actor)
         VALIDATE -> return validate(args, actor)
+        CHECK_DESIGN -> return checkDesign(args, actor)
+        RENDER_DESIGN_MATRIX -> return renderDesignMatrix(args, actor)
+        RECORD_DECISION,
+        AWAIT_DECISION,
+        SET_IMPLEMENTATION,
+        IMPLEMENTATION_STATUS -> return reviewTool(tool, args, actor)
+        FIND_DESIGN_FOR_PR -> return findDesignForPr(args, actor)
         else -> throw McpRequestException("unknown UI-builder tool '$tool'")
       }
     return envelope(callId, execute(request, actor), includeCatalog = args.includeCatalog())
@@ -563,6 +608,12 @@ class ServeUiBuilderMcp(
           }
         }
           .onFailure { onLog("serve: links record for $designId not removed (${it.message})") }
+        runCatching {
+          if (reviews?.delete(designId) == false) {
+            onLog("serve: review record for $designId not removed")
+          }
+        }
+          .onFailure { onLog("serve: review record for $designId not removed (${it.message})") }
         UI_BUILDER_JSON.encodeToString(
           DesignDeletedV1.serializer(),
           DesignDeletedV1(callId = callId, designId = designId),
@@ -1870,6 +1921,830 @@ class ServeUiBuilderMcp(
     return reply(notes + lane.validate(actor, document, operations), document.revision)
   }
 
+  /**
+   * Everything worth knowing before a design is shown to a person, in one call
+   * (compose-preview-server#1255): the shape and catalog checks [VALIDATE] runs, and the
+   * accessibility checks of [UiBuilderAccessibilityCheck] — on a stored design, a past revision, a
+   * whole document, or a batch of operations applied to a scratch copy and never saved.
+   *
+   * The reply leads with a sentence and the counts, then the findings with the node each is about,
+   * so an agent can act on it without reading the rest.
+   */
+  private suspend fun checkDesign(args: JsonObject, actor: AuthenticatedUiBuilderActor): String {
+    val checks = args.checksArgument()
+    val explicit = args["document"]
+    val designId = args.text("designId")
+    val rawOperations = args["operations"]
+    val revision = args.number("revision")
+    val rendered = args[RENDERED_ARGUMENT]?.jsonPrimitive?.booleanOrNull == true
+    if ((explicit == null) == (designId == null)) {
+      throw McpRequestException(
+        "pass exactly one of `document` (a whole design to check) or `designId` (a stored " +
+          "design, optionally with `revision`, or with `operations` to check unsaved)"
+      )
+    }
+    if (explicit != null && (rawOperations != null || revision != null)) {
+      throw McpRequestException(
+        "`operations` and `revision` are about a stored design: pass `designId` with them"
+      )
+    }
+    if (rawOperations != null && revision != null) {
+      throw McpRequestException(
+        "`operations` are checked against the current revision, as $APPLY lands them; omit " +
+          "`revision`, or quote the revision you read as `baseRevision`"
+      )
+    }
+    val findings = mutableListOf<UiBuilderCheckFindingV1>()
+    val skipped = mutableListOf<UiBuilderCheckSkippedV1>()
+    fun shapeFinding(code: String, message: String, operationIndex: Int? = null) =
+      UiBuilderCheckFindingV1(
+        severity = SEVERITY_ERROR,
+        check = CHECK_SCHEMA,
+        code = code,
+        message = message,
+        operationIndex = operationIndex,
+      )
+
+    var document: DesignDocumentV1? = null
+    var catalog: ee.schimke.composeai.uibuilder.protocol.CatalogCapabilityV1? = null
+    var checkedRevision: Long? = null
+    if (explicit != null) {
+      document =
+        try {
+          UI_BUILDER_JSON.decodeFromJsonElement(DesignDocumentV1.serializer(), explicit)
+        } catch (e: IllegalArgumentException) {
+          findings +=
+            shapeFinding("invalidDocument", "`document` is not a DesignDocumentV1: ${e.message}")
+          null
+        }
+    } else {
+      val snapshot =
+        when (val response = execute(GetSnapshotRequestV1(designId!!, revision), actor)) {
+          is UiBuilderServiceResponse.Snapshot -> response.snapshot
+          is UiBuilderServiceResponse.Error -> throw McpRequestException(response.error.message)
+          else -> throw McpRequestException("no design `$designId` this actor can read")
+        }
+      document = snapshot.state.document
+      catalog = snapshot.catalog
+      checkedRevision = document.revision
+    }
+
+    val operations =
+      when (rawOperations) {
+        null -> null
+        is JsonArray ->
+          rawOperations.mapIndexedNotNull { index, element ->
+            try {
+              UI_BUILDER_JSON.decodeFromJsonElement(DesignMutationV1.serializer(), element)
+            } catch (e: IllegalArgumentException) {
+              findings +=
+                shapeFinding(
+                  "invalidMutation",
+                  "`operations[$index]` is not a DesignMutationV1: ${e.message}",
+                  index,
+                )
+              null
+            }
+          }
+        else -> {
+          findings += shapeFinding("invalidMutation", "`operations` must be an array of mutations")
+          emptyList()
+        }
+      }
+    // A batch that did not decode cannot be applied, so there is no edited document to look at.
+    if (operations != null && findings.isNotEmpty()) document = null
+    val baseRevision = args.number("baseRevision")
+    if (
+      operations != null &&
+        baseRevision != null &&
+        checkedRevision != null &&
+        baseRevision != checkedRevision
+    ) {
+      findings +=
+        UiBuilderCheckFindingV1(
+          severity = SEVERITY_WARNING,
+          check = CHECK_CATALOG,
+          code = "revisionMismatch",
+          message =
+            "checked against the current revision $checkedRevision, not baseRevision " +
+              "$baseRevision; an apply quoting $baseRevision is also checked for conflicts with " +
+              "the edits in between",
+        )
+    }
+
+    val validating = CHECK_SCHEMA in checks || CHECK_CATALOG in checks
+    if (document != null && (validating || operations != null)) {
+      val lane = validator
+      if (lane == null) {
+        if (validating) {
+          checks
+            .filter { it != CHECK_A11Y }
+            .forEach { skipped += UiBuilderCheckSkippedV1(it, "this host cannot validate designs") }
+        }
+        if (operations != null) {
+          // The operations cannot be applied without a scratch service, so what they would make is
+          // unknown; checking the document as it stands would answer a question nobody asked.
+          document = null
+          if (CHECK_A11Y in checks) {
+            skipped +=
+              UiBuilderCheckSkippedV1(
+                CHECK_A11Y,
+                "this host cannot apply operations to a scratch copy; apply them, then check",
+              )
+          }
+        }
+      } else {
+        val draft = lane.draft(actor, document, operations)
+        if (validating) {
+          findings +=
+            draft.problems
+              .map { problem ->
+                UiBuilderCheckFindingV1(
+                  severity = problem.severity,
+                  check = if (problem.source == SOURCE_SHAPE) CHECK_SCHEMA else CHECK_CATALOG,
+                  code = problem.code,
+                  message = problem.message,
+                  nodeId = problem.nodeId,
+                  field = problem.field,
+                  operationIndex = problem.operationIndex,
+                )
+              }
+              .filter { it.check in checks }
+        }
+        if (operations != null) document = draft.document
+        catalog = draft.catalog ?: catalog
+      }
+    }
+
+    if (CHECK_A11Y in checks && skipped.none { it.check == CHECK_A11Y }) {
+      val checked = document
+      if (checked == null) {
+        skipped +=
+          UiBuilderCheckSkippedV1(
+            CHECK_A11Y,
+            "there is no document to check until the errors above are fixed",
+          )
+      } else {
+        val components =
+          (catalog ?: pinnedCatalog(checked, actor))
+            ?.components
+            ?.associateBy { it.componentId }
+            .orEmpty()
+        val bounds =
+          if (!rendered) null
+          else
+            renderedBounds(checked).also {
+              if (it == null) {
+                skipped +=
+                  UiBuilderCheckSkippedV1(
+                    "$CHECK_A11Y.$RENDERED_ARGUMENT",
+                    "no native render was available, so touch targets were checked from the " +
+                      "sizes the document declares",
+                  )
+              }
+            }
+        findings += UiBuilderAccessibilityCheck.check(checked, components, bounds)
+      }
+    }
+
+    val ordered = findings.sortedBy { SEVERITY_ORDER.indexOf(it.severity) }
+    val errors = ordered.count { it.severity == SEVERITY_ERROR }
+    val warnings = ordered.count { it.severity == SEVERITY_WARNING }
+    val shown = ordered.take(MAX_CHECK_FINDINGS)
+    return UI_BUILDER_JSON.encodeToString(
+      UiBuilderDesignCheckV1.serializer(),
+      UiBuilderDesignCheckV1(
+        ok = errors == 0,
+        summary = checkSummary(checks, errors, warnings, ordered, skipped),
+        designId = designId ?: document?.id,
+        revision = checkedRevision,
+        dryRun = operations != null,
+        checks = checks,
+        errors = errors,
+        warnings = warnings,
+        findings = shown,
+        truncated = ordered.size - shown.size,
+        skipped = skipped,
+      ),
+    )
+  }
+
+  private fun checkSummary(
+    checks: List<String>,
+    errors: Int,
+    warnings: Int,
+    findings: List<UiBuilderCheckFindingV1>,
+    skipped: List<UiBuilderCheckSkippedV1>,
+  ): String {
+    val ran = checks.filter { check -> skipped.none { it.check == check } }
+    val skippedNote =
+      if (skipped.isEmpty()) ""
+      else " Not checked: ${skipped.joinToString("; ") { "${it.check} (${it.reason})" }}."
+    if (findings.isEmpty()) {
+      return "No problems found (${ran.joinToString(", ").ifEmpty { "nothing ran" }}).$skippedNote"
+    }
+    val headline = buildList {
+      if (errors > 0) add("$errors error${if (errors == 1) "" else "s"}")
+      if (warnings > 0) add("$warnings warning${if (warnings == 1) "" else "s"}")
+      val infos = findings.size - errors - warnings
+      if (infos > 0) add("$infos note${if (infos == 1) "" else "s"}")
+    }
+      .joinToString(", ")
+    val examples =
+      findings
+        .groupBy { it.code }
+        .entries
+        .take(3)
+        .joinToString("; ") { (code, group) ->
+          val nodes = group.mapNotNull { it.nodeId }.distinct()
+          code +
+            (if (nodes.isEmpty()) "" else " on ${nodes.take(3).joinToString(", ") { "`$it`" }}") +
+            (if (nodes.size > 3) " and ${nodes.size - 3} more" else "")
+        }
+    val verdict = if (errors > 0) "Fix before showing it" else "Shippable, with warnings"
+    return "$verdict: $headline — $examples.$skippedNote"
+  }
+
+  private fun JsonObject.checksArgument(): List<String> {
+    if (this[CHECKS_ARGUMENT] == null || this[CHECKS_ARGUMENT] is JsonNull) return DESIGN_CHECKS
+    val asked = stringList(CHECKS_ARGUMENT)
+    val unknown = asked.filter { it !in DESIGN_CHECKS }
+    if (unknown.isNotEmpty() || asked.isEmpty()) {
+      throw McpRequestException(
+        "`$CHECKS_ARGUMENT` takes one or more of ${DESIGN_CHECKS.joinToString(", ")}" +
+          (if (unknown.isEmpty()) "" else "; not ${unknown.joinToString(", ")}")
+      )
+    }
+    return DESIGN_CHECKS.filter { it in asked }
+  }
+
+  /**
+   * The catalog [document] pins, as this host serves it, or null when it serves no such catalog.
+   */
+  private suspend fun pinnedCatalog(
+    document: DesignDocumentV1,
+    actor: AuthenticatedUiBuilderActor,
+  ): ee.schimke.composeai.uibuilder.protocol.CatalogCapabilityV1? =
+    (execute(ListCatalogsRequestV1, actor) as? UiBuilderServiceResponse.Catalogs)
+      ?.catalogs
+      ?.firstOrNull { it.benchmark.catalogSystemId == document.catalogPin.systemId }
+
+  /** Node boxes from a native render of [document], in dp-convertible form, or null without one. */
+  private fun renderedBounds(document: DesignDocumentV1): UiBuilderAccessibilityCheck.Rendered? {
+    val lane = nativePreview ?: return null
+    val outcome =
+      try {
+        lane.render(document)
+      } catch (cancelled: CancellationException) {
+        throw cancelled
+      } catch (_: Exception) {
+        return null
+      }
+    val rendered = outcome as? UiBuilderNativePreviewOutcome.Rendered ?: return null
+    if (rendered.nodeBounds.isEmpty()) return null
+    val bytes =
+      rendered.response.image?.removePrefix("data:image/png;base64,")?.let {
+        runCatching { java.util.Base64.getDecoder().decode(it) }.getOrNull()
+      } ?: return null
+    val width = pngWidth(bytes) ?: return null
+    val widthDp = document.environment.widthDp.takeIf { it > 0 } ?: return null
+    return UiBuilderAccessibilityCheck.Rendered(
+      pxPerDp = width / widthDp.toDouble(),
+      boxes =
+        rendered.nodeBounds.mapValues { (_, box) ->
+          ServeUiBuilderView.Box(box.x, box.y, box.width, box.height)
+        },
+    )
+  }
+
+  /** A PNG's width from its IHDR, without decoding the picture. */
+  private fun pngWidth(bytes: ByteArray): Int? {
+    if (bytes.size < 24) return null
+    return ((bytes[16].toInt() and 0xff) shl 24) or
+      ((bytes[17].toInt() and 0xff) shl 16) or
+      ((bytes[18].toInt() and 0xff) shl 8) or
+      (bytes[19].toInt() and 0xff)
+  }
+
+  /**
+   * One design on several devices, themes and font scales, as one contact sheet
+   * (compose-preview-server#1255). See [UiBuilderDesignMatrix].
+   *
+   * Each cell is the design's own document with its environment swapped, exported to PNG through
+   * the scratch lane — the stored design is read as this actor first and never written to.
+   */
+  private suspend fun renderDesignMatrix(
+    args: JsonObject,
+    actor: AuthenticatedUiBuilderActor,
+  ): String {
+    val designId = args.requiredText("designId")
+    val snapshot =
+      when (
+        val response = execute(GetSnapshotRequestV1(designId, args.number("revision")), actor)
+      ) {
+        is UiBuilderServiceResponse.Snapshot -> response.snapshot
+        is UiBuilderServiceResponse.Error -> throw McpRequestException(response.error.message)
+        else -> throw McpRequestException("no design `$designId` this actor can read")
+      }
+    val document = snapshot.state.document
+    val platform = snapshot.catalog.statusSemantics[PLATFORM_KEY]?.jsonPrimitive?.contentOrNull
+    val devices = matrixDevices(args, platform)
+    val themes =
+      args.stringList(THEMES_ARGUMENT).ifEmpty {
+        listOf(
+          if (document.environment.theme == ThemeV1.DARK) UiBuilderDesignMatrix.THEME_DARK
+          else UiBuilderDesignMatrix.THEME_LIGHT
+        )
+      }
+    themes
+      .firstOrNull {
+        it != UiBuilderDesignMatrix.THEME_LIGHT && it != UiBuilderDesignMatrix.THEME_DARK
+      }
+      ?.let { throw McpRequestException("`$THEMES_ARGUMENT` takes `light` and `dark`, not `$it`") }
+    val fontScales =
+      when (val value = args[FONT_SCALES_ARGUMENT]) {
+        null,
+        is JsonNull -> listOf(document.environment.fontScale)
+        is JsonArray ->
+          value.map {
+            (it as? JsonPrimitive)
+              ?.takeIf { p -> !p.isString }
+              ?.content
+              ?.toDoubleOrNull()
+              ?.takeIf { scale -> scale in MIN_FONT_SCALE..MAX_FONT_SCALE }
+              ?: throw McpRequestException(
+                "`$FONT_SCALES_ARGUMENT` takes numbers from $MIN_FONT_SCALE to $MAX_FONT_SCALE"
+              )
+          }
+        else -> throw McpRequestException("`$FONT_SCALES_ARGUMENT` must be an array of numbers")
+      }.ifEmpty { listOf(document.environment.fontScale) }
+    val combinations = devices.flatMap { device ->
+      themes.distinct().flatMap { theme -> fontScales.distinct().map { Triple(device, theme, it) } }
+    }
+    if (combinations.size > UiBuilderDesignMatrix.MAX_CELLS) {
+      throw McpRequestException(
+        "${combinations.size} cells (${devices.size} devices × ${themes.distinct().size} themes × " +
+          "${fontScales.distinct().size} font scales) is more than " +
+          "${UiBuilderDesignMatrix.MAX_CELLS}; ask for fewer"
+      )
+    }
+    val variants = combinations.map { (device, theme, scale) ->
+      document.copy(
+        environment =
+          document.environment.copy(
+            widthDp = device.widthDp,
+            heightDp = device.heightDp,
+            theme = if (theme == UiBuilderDesignMatrix.THEME_DARK) ThemeV1.DARK else ThemeV1.LIGHT,
+            fontScale = scale,
+          )
+      )
+    }
+    val pictures =
+      validator?.exportPngs(actor, variants)
+        ?: throw McpRequestException(
+          "this host cannot render a design under another environment without saving it; use " +
+            "$VIEW for the design as it is"
+        )
+    val cells = combinations.mapIndexed { index, (device, theme, scale) ->
+      UiBuilderDesignMatrix.Cell(
+        device,
+        theme,
+        scale,
+        pictures.getOrNull(index)?.png,
+        pictures.getOrNull(index)?.problem ?: "not rendered",
+      )
+    }
+    val sheet = UiBuilderDesignMatrix.compose(cells)
+    val columns = kotlin.math.ceil(kotlin.math.sqrt(cells.size.toDouble())).toInt()
+    val failed = cells.count { it.png == null }
+    val summary =
+      "${cells.size} cells of `$designId` r${document.revision}: " +
+        devices.joinToString(", ") { it.label } +
+        (if (themes.distinct().size > 1) "; light and dark" else "") +
+        (if (fontScales.distinct().size > 1)
+          "; font ${fontScales.distinct().joinToString("/") { "${(it * 100).toInt()}%" }}"
+        else "") +
+        (if (failed > 0) ". $failed could not be rendered; see each cell's `problem`." else ".")
+    return UI_BUILDER_JSON.encodeToString(
+      UiBuilderDesignMatrixV1.serializer(),
+      UiBuilderDesignMatrixV1(
+        summary = summary,
+        designId = designId,
+        revision = document.revision,
+        columns = columns,
+        rows = kotlin.math.ceil(cells.size / columns.toDouble()).toInt(),
+        image =
+          UiBuilderViewImageV1(
+            widthPx = sheet.width,
+            heightPx = sheet.height,
+            scale = 1.0,
+            sha256 = UiBuilderDesignMatrix.sha256(sheet.png),
+          ),
+        cells =
+          cells.mapIndexed { index, cell ->
+            val placed = sheet.placed[index]
+            UiBuilderDesignMatrixCellV1(
+              index = index,
+              device = cell.device.id,
+              label = cell.device.label,
+              formFactor = cell.device.formFactor,
+              widthDp = cell.device.widthDp,
+              heightDp = cell.device.heightDp,
+              round = cell.device.round,
+              theme = cell.theme,
+              fontScale = cell.fontScale,
+              x = placed.x,
+              y = placed.y,
+              width = placed.width,
+              height = placed.height,
+              rendered = cell.png != null,
+              problem = if (cell.png == null) cell.problem else null,
+            )
+          },
+        imageBase64 = UiBuilderDesignMatrix.base64(sheet.png),
+      ),
+    )
+  }
+
+  /** The devices a matrix call asked for: by preset id, by size, by form factor, or by default. */
+  private fun matrixDevices(
+    args: JsonObject,
+    platform: String?,
+  ): List<UiBuilderDesignMatrix.Device> {
+    val formFactor = args.text(FORM_FACTOR_ARGUMENT)
+    val listed = args[DEVICES_ARGUMENT]?.takeIf { it !is JsonNull }
+    if (listed != null && formFactor != null) {
+      throw McpRequestException("pass `$DEVICES_ARGUMENT` or `$FORM_FACTOR_ARGUMENT`, not both")
+    }
+    if (listed == null) {
+      val chosen = formFactor ?: UiBuilderDesignMatrix.defaultFormFactor(platform)
+      val ids =
+        UiBuilderDesignMatrix.FORM_FACTOR_DEFAULTS[chosen]
+          ?: throw McpRequestException(
+            "`$FORM_FACTOR_ARGUMENT` is one of ${UiBuilderDesignMatrix.FORM_FACTORS.joinToString(", ")}"
+          )
+      return ids.mapNotNull(UiBuilderDesignMatrix::preset)
+    }
+    val array =
+      listed as? JsonArray
+        ?: throw McpRequestException("`$DEVICES_ARGUMENT` must be an array of preset ids or sizes")
+    if (array.isEmpty()) throw McpRequestException("`$DEVICES_ARGUMENT` names no device")
+    return array.mapIndexed { index, element ->
+      when {
+        element is JsonPrimitive && element.isString ->
+          UiBuilderDesignMatrix.preset(element.content)
+            ?: throw McpRequestException(
+              "`${element.content}` is not a device preset; presets are " +
+                UiBuilderDesignMatrix.PRESETS.joinToString(", ") { it.id } +
+                ", or pass {\"widthDp\":…,\"heightDp\":…}"
+            )
+        element is JsonObject -> {
+          fun edge(name: String): Int =
+            element[name]
+              ?.jsonPrimitive
+              ?.longOrNull
+              ?.takeIf { it in 1..UiBuilderDesignMatrix.MAX_DEVICE_DP }
+              ?.toInt()
+              ?: throw McpRequestException(
+                "`$DEVICES_ARGUMENT[$index].$name` must be an integer from 1 to " +
+                  "${UiBuilderDesignMatrix.MAX_DEVICE_DP}"
+              )
+          val width = edge("widthDp")
+          val height = edge("heightDp")
+          val label = element.text("label") ?: "${width}×$height"
+          UiBuilderDesignMatrix.Device(
+            id = element.text("id") ?: "custom-$index",
+            label = label,
+            formFactor = element.text("formFactor") ?: "custom",
+            widthDp = width,
+            heightDp = height,
+            round = element["round"]?.jsonPrimitive?.booleanOrNull == true,
+          )
+        }
+        else ->
+          throw McpRequestException("`$DEVICES_ARGUMENT[$index]` must be a preset id or a size")
+      }
+    }
+  }
+
+  /**
+   * Review verdicts and the implementing pull request (compose-preview-server#1255). See
+   * [ServeUiBuilderReviewStore].
+   *
+   * The design is read through the service as this actor first, so its own access control decides
+   * whether there is a review here to see — the identical rule the comment tools follow — and
+   * [SET_IMPLEMENTATION] additionally takes the design's own WRITE action, as [SET_LINKS] does.
+   */
+  private suspend fun reviewTool(
+    tool: String,
+    args: JsonObject,
+    actor: AuthenticatedUiBuilderActor,
+  ): String {
+    val store = reviews ?: throw McpRequestException("this host keeps no design reviews")
+    val designId = args.requiredText("designId")
+    val actions =
+      service.designActions(actor, designId)
+        ?: throw McpRequestException("no design `$designId` this actor can read")
+    return when (tool) {
+      RECORD_DECISION -> {
+        val revision =
+          args.number("revision")
+            ?: throw McpRequestException(
+              "`revision` is required: a verdict is about the revision that was looked at"
+            )
+        val result =
+          store.decide(
+            designId,
+            actor.actorId,
+            // Set by the server, never by an argument, for the reason a comment's author kind is:
+            // everything reaching this class arrived over MCP, so the caller is an agent, and an
+            // agent must not be able to record a person's approval.
+            deciderKind = StoredComment.AUTHOR_KIND_AGENT,
+            DecisionRequest(
+              revision = revision,
+              verdict = args.requiredText("verdict"),
+              note = args.text("note"),
+              decisionId = args.text("decisionId"),
+              displayName = args.text("displayName"),
+            ),
+          )
+        val stored = result.storedOrThrow()
+        decisionReply(
+          designId,
+          stored.review,
+          after = null,
+          revision = null,
+          kind = null,
+          timedOut = false,
+          recorded = stored.decision,
+          replay = stored.replay,
+        )
+      }
+      AWAIT_DECISION -> {
+        val after = args.number("afterSequence") ?: 0
+        if (after < 0) throw McpRequestException("`afterSequence` must not be negative")
+        val revision = args.number("revision")
+        val kind =
+          when (val from = args.text(FROM_ARGUMENT) ?: FROM_HUMAN) {
+            FROM_HUMAN -> StoredComment.AUTHOR_KIND_HUMAN
+            FROM_ANYONE -> null
+            else ->
+              throw McpRequestException(
+                "`$FROM_ARGUMENT` is `$FROM_HUMAN` or `$FROM_ANYONE`, not `$from`"
+              )
+          }
+        val wait =
+          (args.number("waitSeconds") ?: DEFAULT_DECISION_WAIT_SECONDS).coerceIn(
+            0,
+            MAX_DECISION_WAIT_SECONDS,
+          )
+        val review = store.awaitDecisionsAfter(designId, after, revision, kind, wait * 1000)
+        decisionReply(
+          designId,
+          review ?: store.readOrEmpty(designId),
+          after = after,
+          revision = revision,
+          kind = kind,
+          timedOut = review == null,
+          recorded = null,
+          replay = false,
+        )
+      }
+      SET_IMPLEMENTATION -> {
+        if (!actions.contains(DesignAccessActionV1.WRITE)) {
+          throw McpRequestException("design `$designId` does not grant this actor write access")
+        }
+        val previewMatch =
+          (args[PREVIEW_MATCH_ARGUMENT] as? JsonObject)?.let {
+            try {
+              UI_BUILDER_JSON.decodeFromJsonElement(StoredPreviewMatch.serializer(), it)
+            } catch (e: IllegalArgumentException) {
+              throw McpRequestException(
+                "`$PREVIEW_MATCH_ARGUMENT` is not {status, evidence?, note?}: ${e.message}"
+              )
+            }
+          }
+        val pr = args.text("pr")
+        if (pr == null && args.keys.any { it != "designId" }) {
+          throw McpRequestException("`pr` is required; pass only `designId` to clear the record")
+        }
+        val result =
+          store.setImplementation(
+            designId,
+            actor.actorId,
+            pr?.let {
+              ImplementationRequest(
+                pr = it,
+                status = args.text("status"),
+                revision = args.number("revision"),
+                previewMatch = previewMatch,
+              )
+            },
+          )
+        val stored = result.storedOrThrow()
+        UI_BUILDER_JSON.encodeToString(
+          StoredDesignReview.serializer(),
+          stored.review.copy(decisions = stored.review.decisions.takeLast(1)),
+        )
+      }
+      IMPLEMENTATION_STATUS -> implementationStatus(store, designId, args, actor)
+      else -> throw McpRequestException("unknown UI-builder review tool '$tool'")
+    }
+  }
+
+  private fun ReviewWriteResult.storedOrThrow(): ReviewWriteResult.Stored =
+    when (this) {
+      is ReviewWriteResult.Stored -> this
+      is ReviewWriteResult.Refused -> throw McpRequestException(reason)
+      is ReviewWriteResult.Failed -> throw McpRequestException(reason)
+    }
+
+  /**
+   * The decision reply: the cursor to quote next, the latest verdict that matches — whether or not
+   * it is new, so a poll is answered without walking the log — and what arrived after the cursor.
+   */
+  private fun decisionReply(
+    designId: String,
+    review: StoredDesignReview,
+    after: Long?,
+    revision: Long?,
+    kind: String?,
+    timedOut: Boolean,
+    recorded: StoredDesignDecision?,
+    replay: Boolean,
+  ): String {
+    val matching =
+      review.decisions.filter {
+        (revision == null || it.revision == revision) && (kind == null || it.deciderKind == kind)
+      }
+    val fresh = if (after == null) emptyList() else matching.filter { it.sequence > after }
+    val latest = recorded ?: matching.lastOrNull()
+    val summary =
+      when {
+        recorded != null ->
+          "${if (replay) "Already recorded" else "Recorded"}: ${recorded.verdict} of revision " +
+            "${recorded.revision} by ${recorded.decidedBy}."
+        timedOut ->
+          "No new decision" +
+            (if (revision != null) " on revision $revision" else "") +
+            (if (kind != null) " from a person" else "") +
+            " yet; call again with afterSequence ${after ?: review.sequence}." +
+            (latest?.let { " The latest is ${it.verdict} of revision ${it.revision}." } ?: "")
+        else ->
+          "${fresh.size} new decision${if (fresh.size == 1) "" else "s"}; latest: " +
+            "${latest?.verdict} of revision ${latest?.revision} by ${latest?.decidedBy}" +
+            (latest?.note?.let { " — \"${it.take(120)}\"" } ?: "") +
+            "."
+      }
+    return UI_BUILDER_JSON.encodeToString(
+      UiBuilderDecisionReplyV1.serializer(),
+      UiBuilderDecisionReplyV1(
+        summary = summary,
+        designId = designId,
+        timedOut = timedOut,
+        // Past every decision this reply reports, so quoting it never returns the same one twice.
+        sequence =
+          maxOf(after ?: 0, fresh.maxOfOrNull { it.sequence } ?: 0, recorded?.sequence ?: 0),
+        latest = latest,
+        decisions = fresh.takeLast(MAX_DECISIONS_IN_REPLY),
+        approved = latest?.verdict == ServeUiBuilderReviewStore.VERDICT_APPROVE,
+      ),
+    )
+  }
+
+  /**
+   * What the code side needs to implement a design, in one call: the revision, the links, the
+   * implementation record and its preview match, the latest verdict, and — unless asked not to —
+   * the Compose export (compose-preview-server#1255).
+   */
+  private suspend fun implementationStatus(
+    store: ServeUiBuilderReviewStore,
+    designId: String,
+    args: JsonObject,
+    actor: AuthenticatedUiBuilderActor,
+  ): String {
+    val snapshot =
+      when (
+        val response = execute(GetSnapshotRequestV1(designId, args.number("revision")), actor)
+      ) {
+        is UiBuilderServiceResponse.Snapshot -> response.snapshot
+        is UiBuilderServiceResponse.Error -> throw McpRequestException(response.error.message)
+        else -> throw McpRequestException("no design `$designId` this actor can read")
+      }
+    val revision = snapshot.state.document.revision
+    val review = store.readOrEmpty(designId)
+    val stored = runCatching { links?.read(designId) }.getOrNull()
+    val includeExport = args[INCLUDE_EXPORT_ARGUMENT]?.jsonPrimitive?.booleanOrNull != false
+    val export =
+      if (!includeExport) null
+      else
+        when (
+          val response =
+            execute(ExportDesignRequestV1(designId, revision, ExportFormatV1.COMPOSE), actor)
+        ) {
+          is UiBuilderServiceResponse.Export ->
+            UiBuilderImplementationExportV1(
+              format = "compose",
+              ok = response.artifact.diagnostics.none { it.severity == DiagnosticSeverityV1.ERROR },
+              diagnostics =
+                response.artifact.diagnostics
+                  .map { "${it.severity.name.lowercase()} ${it.code}: ${it.message}" }
+                  .take(MAX_CHECK_FINDINGS),
+              source = response.artifact.text(),
+            )
+          is UiBuilderServiceResponse.Error ->
+            UiBuilderImplementationExportV1(
+              format = "compose",
+              ok = false,
+              diagnostics = listOf(response.error.message),
+            )
+          else -> null
+        }
+    val implementation = review.implementation
+    val latest = review.decisions.lastOrNull { it.revision == revision }
+    val pr = implementation?.pr ?: stored?.pr
+    val stale = implementation?.revision?.let { it != revision } == true
+    val summary = buildString {
+      append("`$designId` r$revision")
+      append(
+        when (latest?.verdict) {
+          ServeUiBuilderReviewStore.VERDICT_APPROVE -> ", approved by ${latest.decidedBy}"
+          ServeUiBuilderReviewStore.VERDICT_REJECT -> ", rejected by ${latest.decidedBy}"
+          else -> ", no decision on this revision"
+        }
+      )
+      if (pr == null) append("; no implementation PR recorded")
+      else {
+        append("; PR $pr")
+        implementation?.let { append(" (${it.status})") }
+        if (stale) append(" implements r${implementation.revision}, not this revision")
+        append(
+          when (implementation?.previewMatch?.status) {
+            "match" -> "; previews match the design"
+            "mismatch" -> "; previews do NOT match the design"
+            else -> "; preview match unknown"
+          }
+        )
+      }
+      export?.let {
+        append(if (it.ok) "; the Compose export is clean" else "; the Compose export has errors")
+      }
+      append(".")
+    }
+    return UI_BUILDER_JSON.encodeToString(
+      UiBuilderImplementationStatusV1.serializer(),
+      UiBuilderImplementationStatusV1(
+        summary = summary,
+        designId = designId,
+        revision = revision,
+        links = stored,
+        implementation = implementation,
+        implementsRevision = !stale && implementation != null,
+        latestDecision = latest,
+        export = export,
+      ),
+    )
+  }
+
+  /**
+   * From a pull request back to the designs it implements — through the implementation record and
+   * the links record both — with every id read as this actor before it is named, so the answer
+   * never says a design exists to somebody who cannot open it.
+   */
+  private suspend fun findDesignForPr(
+    args: JsonObject,
+    actor: AuthenticatedUiBuilderActor,
+  ): String {
+    val pr = args.requiredText("pr").trim()
+    val candidates =
+      (runCatching { reviews?.implementedBy(pr) }.getOrNull().orEmpty() +
+          runCatching { links?.citingPr(pr) }.getOrNull().orEmpty())
+        .distinct()
+        .sorted()
+    val readable = candidates.filter { service.canRead(actor, it) }
+    val designs = readable.map { designId ->
+      val implementation = runCatching { reviews?.read(designId)?.implementation }.getOrNull()
+      UiBuilderPrDesignV1(
+        designId = designId,
+        status = implementation?.takeIf { it.pr == pr }?.status,
+        revision = implementation?.takeIf { it.pr == pr }?.revision,
+      )
+    }
+    return UI_BUILDER_JSON.encodeToString(
+      UiBuilderPrLookupV1.serializer(),
+      UiBuilderPrLookupV1(
+        summary =
+          if (designs.isEmpty()) "No design you can read names $pr."
+          else
+            "${designs.size} design${if (designs.size == 1) "" else "s"} for $pr: " +
+              designs.joinToString(", ") { "`${it.designId}`" } +
+              ".",
+        pr = pr,
+        designs = designs,
+      ),
+    )
+  }
+
   private suspend fun execute(
     request: UiBuilderRequestV1,
     actor: AuthenticatedUiBuilderActor,
@@ -2051,6 +2926,37 @@ class ServeUiBuilderMcp(
     const val DELETE_DESIGN = "ui_builder_delete_design"
     const val VALIDATE = "ui_builder_validate"
 
+    const val CHECK_DESIGN = "ui_builder_check_design"
+    const val RENDER_DESIGN_MATRIX = "ui_builder_render_design_matrix"
+    const val RECORD_DECISION = "ui_builder_record_decision"
+    const val AWAIT_DECISION = "ui_builder_await_decision"
+    const val SET_IMPLEMENTATION = "ui_builder_set_implementation"
+    const val IMPLEMENTATION_STATUS = "ui_builder_implementation_status"
+    const val FIND_DESIGN_FOR_PR = "ui_builder_find_design_for_pr"
+
+    private const val RENDERED_ARGUMENT = "rendered"
+    private const val INCLUDE_EXPORT_ARGUMENT = "includeExport"
+    private const val CHECKS_ARGUMENT = "checks"
+    private const val DEVICES_ARGUMENT = "devices"
+    private const val FORM_FACTOR_ARGUMENT = "formFactor"
+    private const val THEMES_ARGUMENT = "themes"
+    private const val FONT_SCALES_ARGUMENT = "fontScales"
+    private const val PREVIEW_MATCH_ARGUMENT = "previewMatch"
+    private const val FROM_ARGUMENT = "from"
+    private const val FROM_HUMAN = "human"
+    private const val FROM_ANYONE = "anyone"
+    private const val MIN_FONT_SCALE = 0.5
+    private const val MAX_FONT_SCALE = 3.0
+
+    /** How long a decision watcher waits by default, and the most it may ask for. */
+    private const val DEFAULT_DECISION_WAIT_SECONDS = 25L
+    private const val MAX_DECISION_WAIT_SECONDS = 120L
+    private const val MAX_DECISIONS_IN_REPLY = 10
+
+    /** Enough findings to fix in one pass; the counts still include the rest. */
+    private const val MAX_CHECK_FINDINGS = 40
+    private val SEVERITY_ORDER = listOf(SEVERITY_ERROR, SEVERITY_WARNING, SEVERITY_INFO)
+
     private const val REVOKE_ARGUMENT = "revoke"
     private const val INCLUDE_CATALOG_ARGUMENT = "includeCatalog"
     private const val FULL_ARGUMENT = "full"
@@ -2115,6 +3021,7 @@ class ServeUiBuilderMcp(
         EXPORT,
         EXPORT_DOCUMENT.takeIf { RemoteDocumentExportSupport.formats.isNotEmpty() },
         VIEW,
+        CHECK_DESIGN,
         DESIGN_ACCESS,
         SHARE_DESIGN,
         RENAME_DESIGN,
@@ -2134,7 +3041,17 @@ class ServeUiBuilderMcp(
     val LINKS_TOOL_NAMES = listOf(GET_LINKS, SET_LINKS)
 
     /** Separate because it exists only where the host can open a scratch service. */
-    val VALIDATE_TOOL_NAMES = listOf(VALIDATE)
+    val VALIDATE_TOOL_NAMES = listOf(VALIDATE, RENDER_DESIGN_MATRIX)
+
+    /** Separate because they exist only where the host records review decisions. */
+    val REVIEW_TOOL_NAMES =
+      listOf(
+        RECORD_DECISION,
+        AWAIT_DECISION,
+        SET_IMPLEMENTATION,
+        IMPLEMENTATION_STATUS,
+        FIND_DESIGN_FOR_PR,
+      )
 
     /** Separate because they exist only where the host keeps a discussion. */
     val COMMENT_TOOL_NAMES =
@@ -2205,6 +3122,7 @@ class ServeUiBuilderMcp(
       assets: Boolean = false,
       links: Boolean = false,
       validate: Boolean = false,
+      reviews: Boolean = false,
     ): List<JsonObject> =
       listOfNotNull(
         tool(
@@ -2717,6 +3635,156 @@ class ServeUiBuilderMcp(
           },"required":["designId"],"additionalProperties":false}
           """,
         ),
+        tool(
+          CHECK_DESIGN,
+          "Check a design before you show it to anybody — one call instead of validate, view and " +
+            "an accessibility pass. Runs `$CHECK_SCHEMA` (document shape), `$CHECK_CATALOG` (the " +
+            "pinned catalog's validation, the mutation reducer and the Compose export gate — what " +
+            "$VALIDATE runs) and `$CHECK_A11Y`: controls with no label, icons and pictures with no " +
+            "`contentDescription`, touch targets under 48dp, text and icon contrast under WCAG " +
+            "4.5:1 / 3:1, and text in a fixed height that clips at 200% font scale. Check a stored " +
+            "design (`designId`, optionally a past `revision`), a whole `document`, or `operations` " +
+            "applied to a scratch copy of `designId` exactly as $APPLY would — nothing is saved. " +
+            "Returns `summary` first, then `ok`, the counts, and `findings` with the `nodeId` each " +
+            "is about, so you can fix them with $APPLY and check again. `$RENDERED_ARGUMENT: true` " +
+            "measures touch targets on a native render where the host has one (needs the " +
+            "ui-builder-export capability). Contrast against theme roles is resolved with the " +
+            "Material 3 baseline scheme and reported as a warning, never an error.",
+          """
+          {"type":"object","properties":{
+            "designId":{"type":"string","description":"A stored design to check, or to check `operations` against."},
+            "revision":{"type":"integer","description":"A past revision of `designId`. Omit for the current one."},
+            "document":{"type":"object","description":"A whole DesignDocumentV1 to check instead of a stored design."},
+            "operations":{"type":"array","items":{"type":"object"},"description":"DesignMutationV1 objects to apply to a scratch copy of `designId` and check — a dry run."},
+            "baseRevision":{"type":"integer","description":"The revision `operations` were written against; a stale one is a warning."},
+            "$CHECKS_ARGUMENT":{"type":"array","items":{"type":"string","enum":[${DESIGN_CHECKS.joinToString(",") { "\"$it\"" }}]},"description":"Which checks to run. Defaults to all three."},
+            "$RENDERED_ARGUMENT":{"type":"boolean","description":"Measure touch targets on a native render. Defaults to false."}
+          },"additionalProperties":false}
+          """,
+        ),
+        if (!validate) null
+        else
+          tool(
+            RENDER_DESIGN_MATRIX,
+            "See one design on several devices in ONE picture: a contact sheet with a captioned " +
+              "cell per device × theme × font scale, plus each cell's device, size and box on the " +
+              "sheet. Nothing is saved — the design's environment is swapped on a scratch copy for " +
+              "each cell. Name `$DEVICES_ARGUMENT` by preset " +
+              "(${UiBuilderDesignMatrix.PRESETS.joinToString(", ") { it.id }}) or as " +
+              "{widthDp, heightDp, label?, round?}; or a `$FORM_FACTOR_ARGUMENT` " +
+              "(${UiBuilderDesignMatrix.FORM_FACTORS.joinToString(", ")}) for its default set; " +
+              "with neither you get the design's own form factor — phone, foldable and tablet for a " +
+              "mobile catalog, the round watches for Wear. Add `$THEMES_ARGUMENT: [\"light\",\"dark\"]` " +
+              "and `$FONT_SCALES_ARGUMENT: [1, 2]` to cross them; at most " +
+              "${UiBuilderDesignMatrix.MAX_CELLS} cells. The sheet is a short-lived signed https " +
+              "link kept under 3.5 MB, so a chat surface can show it inline; `$INLINE_ARGUMENT: " +
+              "true` puts the bytes in the reply as well.",
+            """
+          {"type":"object","properties":{
+            "designId":{"type":"string"},
+            "revision":{"type":"integer","description":"A past revision. Omit for the current one."},
+            "$DEVICES_ARGUMENT":{"type":"array","items":{"anyOf":[{"type":"string","enum":[${UiBuilderDesignMatrix.PRESETS.joinToString(",") { "\"${it.id}\"" }}]},{"type":"object","properties":{"widthDp":{"type":"integer","minimum":1,"maximum":${UiBuilderDesignMatrix.MAX_DEVICE_DP}},"heightDp":{"type":"integer","minimum":1,"maximum":${UiBuilderDesignMatrix.MAX_DEVICE_DP}},"label":{"type":"string"},"id":{"type":"string"},"formFactor":{"type":"string"},"round":{"type":"boolean"}},"required":["widthDp","heightDp"],"additionalProperties":false}]},"description":"Devices to draw. Omit for the form factor's defaults."},
+            "$FORM_FACTOR_ARGUMENT":{"type":"string","enum":[${UiBuilderDesignMatrix.FORM_FACTORS.joinToString(",") { "\"$it\"" }}],"description":"A default device set, instead of `$DEVICES_ARGUMENT`."},
+            "$THEMES_ARGUMENT":{"type":"array","items":{"type":"string","enum":["light","dark"]},"description":"Defaults to the design's own theme."},
+            "$FONT_SCALES_ARGUMENT":{"type":"array","items":{"type":"number","minimum":$MIN_FONT_SCALE,"maximum":$MAX_FONT_SCALE},"description":"Defaults to the design's own font scale."},
+            "$INLINE_ARGUMENT":{"type":"boolean","description":"Also return the PNG as an image block. Defaults to false; a host with no public origin always does."}
+          },"required":["designId"],"additionalProperties":false}
+          """,
+          ),
+        if (!reviews) null
+        else
+          tool(
+            RECORD_DECISION,
+            "Record a review verdict — `approve` or `reject` — on one revision of a design, with " +
+              "an optional note. Kept beside the design, like comments: it never moves the " +
+              "revision. Recorded as an agent's decision, so a person waiting with " +
+              "$AWAIT_DECISION's default `$FROM_ARGUMENT: \"$FROM_HUMAN\"` is not answered by it. " +
+              "Pass your own `decisionId` to make a retry idempotent.",
+            """
+            {"type":"object","properties":{
+              "designId":{"type":"string"},
+              "revision":{"type":"integer","description":"The revision the verdict is about."},
+              "verdict":{"type":"string","enum":["approve","reject"]},
+              "note":{"type":"string","description":"Why, in a sentence or two."},
+              "decisionId":{"type":"string","description":"Your id for this decision; makes a retry idempotent."},
+              "displayName":{"type":"string"}
+            },"required":["designId","revision","verdict"],"additionalProperties":false}
+            """,
+          ),
+        if (!reviews) null
+        else
+          tool(
+            AWAIT_DECISION,
+            "Wait for somebody to approve or reject a design, rather than asking again whether " +
+              "they have. Returns as soon as a decision lands after `afterSequence` — by default " +
+              "only a person's (`$FROM_ARGUMENT: \"$FROM_HUMAN\"`), on any revision unless you " +
+              "name one — or a `timedOut` reply after `waitSeconds`. Every reply carries " +
+              "`latest` (the newest matching verdict, new or not) and `approved`, so " +
+              "`waitSeconds: 0` is a cheap, idempotent poll for a routine that can only check " +
+              "back later; quote the reply's `sequence` as the next `afterSequence`. People " +
+              "record theirs over the design's `decisions` HTTP route.",
+            """
+            {"type":"object","properties":{
+              "designId":{"type":"string"},
+              "afterSequence":{"type":"integer","description":"The `sequence` you last saw. 0 for anything at all."},
+              "revision":{"type":"integer","description":"Only decisions on this revision."},
+              "$FROM_ARGUMENT":{"type":"string","enum":["$FROM_HUMAN","$FROM_ANYONE"],"description":"Whose decisions count. Defaults to $FROM_HUMAN."},
+              "waitSeconds":{"type":"integer","description":"Up to $MAX_DECISION_WAIT_SECONDS. Defaults to $DEFAULT_DECISION_WAIT_SECONDS; 0 checks without blocking."}
+            },"required":["designId"],"additionalProperties":false}
+            """,
+          ),
+        if (!reviews) null
+        else
+          tool(
+            SET_IMPLEMENTATION,
+            "Record the pull request that implements a design: its URL, its `status` " +
+              "(draft, open, merged, closed), the design `revision` it implements, and — once you " +
+              "have compared the PR's rendered previews with the design — `$PREVIEW_MATCH_ARGUMENT` " +
+              "{status: match|mismatch|unknown, evidence: a URL to the comparison, note}. Replaces " +
+              "the whole record; pass only `designId` to clear it. Writing the same record again " +
+              "changes nothing and wakes nobody. Needs write access to the design.",
+            """
+            {"type":"object","properties":{
+              "designId":{"type":"string"},
+              "pr":{"type":"string","description":"The pull request URL."},
+              "status":{"type":"string","enum":[${ServeUiBuilderReviewStore.IMPLEMENTATION_STATUSES.joinToString(",") { "\"$it\"" }}],"description":"Defaults to open."},
+              "revision":{"type":"integer","description":"The design revision the PR implements."},
+              "$PREVIEW_MATCH_ARGUMENT":{"type":"object","properties":{"status":{"type":"string","enum":[${ServeUiBuilderReviewStore.PREVIEW_MATCH_STATUSES.joinToString(",") { "\"$it\"" }}]},"evidence":{"type":"string"},"note":{"type":"string"}},"required":["status"],"additionalProperties":false}
+            },"required":["designId"],"additionalProperties":false}
+            """,
+          ),
+        if (!reviews) null
+        else
+          tool(
+            IMPLEMENTATION_STATUS,
+            "Everything the code side needs to implement a design, in one call: the revision, its " +
+              "links (issue, reference, PR, thread), the implementation PR with its status and " +
+              "whether its previews were found to match, the latest verdict on this revision, and " +
+              "the Compose export with the generator's diagnostics. `summary` says in one line " +
+              "whether the PR implements this revision and whether it was approved. " +
+              "`$INCLUDE_EXPORT_ARGUMENT: false` leaves the Kotlin out and needs only read access; " +
+              "with it the call needs the ui-builder-export capability.",
+            """
+            {"type":"object","properties":{
+              "designId":{"type":"string"},
+              "revision":{"type":"integer","description":"A past revision. Omit for the current one."},
+              "$INCLUDE_EXPORT_ARGUMENT":{"type":"boolean","description":"Include the Compose export. Defaults to true."}
+            },"required":["designId"],"additionalProperties":false}
+            """,
+          ),
+        if (!reviews && !links) null
+        else
+          tool(
+            FIND_DESIGN_FOR_PR,
+            "From a pull request back to the design(s) it implements: every design you can read " +
+              "whose implementation record or links name `pr`, with the implementation status " +
+              "and revision. Then call $IMPLEMENTATION_STATUS for what the design expects.",
+            """
+            {"type":"object","properties":{
+              "pr":{"type":"string","description":"The pull request URL, exactly as recorded."}
+            },"required":["pr"],"additionalProperties":false}
+            """,
+          ),
       )
   }
 }
@@ -2799,6 +3867,15 @@ internal data class ComponentSummaryV1(
  * envelope puts one (a response, a pushed update) and from nothing else: a node property that
  * happens to be called `catalog` is not a snapshot's.
  */
+/** An export artifact's content as text: UTF-8 as it is, base64 decoded. Null when empty. */
+private fun ExportArtifactV1.text(): String? =
+  when (encoding) {
+    ExportEncodingV1.UTF8 -> content
+    ExportEncodingV1.BASE64 ->
+      runCatching { String(java.util.Base64.getDecoder().decode(content), Charsets.UTF_8) }
+        .getOrNull()
+  }?.takeIf { it.isNotBlank() }
+
 private fun JsonElement.withoutCatalog(): JsonElement =
   when (this) {
     is JsonObject -> {
