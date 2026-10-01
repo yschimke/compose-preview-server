@@ -109,11 +109,13 @@ internal object ServeChatThreadLinks {
       Kind.OTHER -> "Discussion for this design"
     }
 
-  private fun hostOf(url: String): String? = runCatching {
-    URI(url.trim()).host?.lowercase()
-  }.getOrNull()
+  private fun hostOf(url: String): String? {
+    val uri = runCatching { URI(url.trim()) }.getOrNull() ?: return null
+    return uri.host?.lowercase()
+  }
 
-  private fun pathOf(url: String): String = runCatching {
-    URI(url.trim()).rawPath
-  }.getOrNull().orEmpty()
+  private fun pathOf(url: String): String {
+    val uri = runCatching { URI(url.trim()) }.getOrNull() ?: return ""
+    return uri.rawPath.orEmpty()
+  }
 }
