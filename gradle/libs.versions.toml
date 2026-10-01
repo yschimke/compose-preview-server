@@ -292,7 +292,11 @@ composeai-contracts = "3.15.0"
 # Its editor also adds the Talk panel's review section (compose-ui-builder#381): Approve / Request
 # changes on the revision on screen, posted through this server's decisions route (#1255), so a
 # person's verdict wakes an agent waiting in `ui_builder_await_decision`.
-composeai-ui-builder = "3.71.0"
+# 3.72.0 moves the reference-matching engine into `ui-builder-export` (compose-ui-builder#386):
+# placement, facts, the pixel diff, layer matching and the padding/offset chain, with no Compose
+# types, which `ui_builder_set_reference` / `ui_builder_compare_reference` call so an agent and the
+# editor measure the same way. `androidx-window` and `composeai-contracts` are unchanged again.
+composeai-ui-builder = "3.72.0"
 # 1.65.0 is the first release publishing `rc-players-bom`. (1.64.0 is a tag and a GitHub Release
 # whose Maven coordinates never reached Central -- rc-players#211 -- so it cannot be pinned.)
 # 1.67.0 by hand, ahead of Renovate's soak: it pins the KMP player modules to a Java 17 toolchain
