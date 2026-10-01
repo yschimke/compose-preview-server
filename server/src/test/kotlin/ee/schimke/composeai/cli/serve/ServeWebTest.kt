@@ -1352,9 +1352,7 @@ class ServeWebTest {
     )
     // cmp-jvm is the disabled option (and says why in its own label); the enabled ones are not.
     assertTrue(
-      html.contains(
-        "<option value=\"rc:cmp-jvm\" disabled>AndroidX Embedded (JVM) (unavailable)</option>"
-      ),
+      html.contains("<option value=\"rc:cmp-jvm\" disabled>rc-player JVM (unavailable)</option>"),
       html,
     )
     val android = Regex("<option value=\"rc:cmp-android\"[^>]*>").find(html)?.value ?: ""

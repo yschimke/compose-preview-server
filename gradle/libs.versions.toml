@@ -100,7 +100,10 @@ graphics-shapes = "1.1.0"
 # and the compose-ui-builder release that projects the binding.
 # 2.26.1 starts playground snippet JVMs with a minimal environment unless the sandbox already
 # clears it (compose-ai-tools#5585).
-composeai-tools = "2.28.3"
+# 2.31.0 forwards an `rcPlayer=` naming a player registered with the daemon as
+# `RemoteComposeOverride.playerId` (compose-ai-tools#5661), which `CatalogLiveRouting` already routes
+# to a real render (#1261).
+composeai-tools = "2.31.0"
 # The render daemons, the renderers, the preview annotations and data API, and the data extractors,
 # published from yschimke/compose-preview-daemon since its 3.0.0 (compose-ai-tools#5336). Layer 1a
 # in that repository's `docs/design/REPOSITORY_LAYERS.md`: between the contracts and
