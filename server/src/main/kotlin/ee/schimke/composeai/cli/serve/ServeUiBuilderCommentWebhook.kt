@@ -130,6 +130,19 @@ import kotlinx.serialization.json.putJsonObject
  * For the same reason only `https` is accepted, refused at startup by [ServeCommandOptions] rather
  * than at the first delivery. The exception is loopback (`http://127.0.0.1`, `http://localhost`),
  * which is a test receiver and a local relay, and where there is no network to eavesdrop on.
+ *
+ * ## Rate-limited, per design and in total
+ *
+ * Opt-in is the operator's flag; volume is this class's job. A channel is shared by every design on
+ * the host, and Slack's incoming webhooks accept about one message a second before answering
+ * 429. So two token buckets sit in front of the queue, both checked on the writer's thread before
+ *      anything is enqueued: [CommentWebhookRateLimit.perDesignPerMinute] keeps one busy review (or
+ *      an agent replying in a loop) from drowning every other design's news, and
+ *      [CommentWebhookRateLimit.totalPerMinute] keeps the host under what the far end will take. An
+ *      event over either limit is dropped, not delayed — a delayed burst arrives as the same burst
+ *      a minute later — and the first drop per design per window says so on stderr, with the count
+ *      of what was held back reported when that design next gets through. The design's own board
+ *      stays canonical: nothing dropped here is lost, only not announced.
  */
 internal class ServeUiBuilderCommentWebhook(
   private val config: CommentWebhookConfig,
@@ -146,6 +159,8 @@ internal class ServeUiBuilderCommentWebhook(
   private val send: suspend (String) -> Boolean = HttpCommentWebhookSender(config)::post,
   private val onLog: (String) -> Unit = { System.err.println(it) },
   private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO),
+  private val rateLimit: CommentWebhookRateLimit = CommentWebhookRateLimit(),
+  private val clock: () -> Long = System::currentTimeMillis,
 ) : Closeable {
 
   /** What the log calls this hook. A digest of the URL, never the URL. */
@@ -166,6 +181,24 @@ internal class ServeUiBuilderCommentWebhook(
   // the comment itself already does, and it is what makes the pairing correct rather than likely.
   private val queue = Channel<QueuedCommentChange>(QUEUE_CAPACITY)
 
+  private val perDesign =
+    ServeRateLimiter(
+      permitsPerWindow = rateLimit.perDesignPerMinute,
+      windowSeconds = 60,
+      maxConcurrent = Int.MAX_VALUE,
+      clock = clock,
+    )
+  private val total =
+    ServeRateLimiter(
+      permitsPerWindow = rateLimit.totalPerMinute,
+      windowSeconds = 60,
+      maxConcurrent = Int.MAX_VALUE,
+      clock = clock,
+    )
+
+  /** Events held back per design since that design last got through; guarded by itself. */
+  private val throttled = HashMap<String, Int>()
+
   private val worker = scope.launch {
     for (queued in queue) {
       // One at a time and never rethrowing: a webhook host that answers with an exception must
@@ -181,9 +214,54 @@ internal class ServeUiBuilderCommentWebhook(
       // A diff of two small in-memory boards, one design lookup each, and an offer to a queue
       // that never blocks. Nothing here waits on the network.
       for (change in diffCommentBoards(previous, next)) {
+        if (!admit(change)) continue
         val design = runCatching { designs(change.designId) }.getOrNull()
         enqueue(QueuedCommentChange(change, design))
       }
+    }
+
+  /**
+   * Whether [change] fits under both buckets. The per-design bucket is asked first so a design that
+   * is over its own limit does not also spend the host's shared allowance.
+   */
+  private fun admit(change: CommentBoardChange): Boolean {
+    val designId = change.designId
+    val admitted =
+      perDesign.tryAcquire(designId).admittedAndReleased() &&
+        total.tryAcquire(TOTAL_KEY).admittedAndReleased()
+    synchronized(throttled) {
+      if (admitted) {
+        throttled.remove(designId)?.let { held ->
+          onLog(
+            "serve: comment webhook $fingerprint resumed design $designId after holding back " +
+              "$held event(s) over the rate limit"
+          )
+        }
+        return true
+      }
+      val held = (throttled[designId] ?: 0) + 1
+      // Bounded like the queue: a host with this many throttled designs is not being reviewed,
+      // it is being flooded, and the count is a courtesy rather than a ledger.
+      if (held == 1 && throttled.size >= MAX_THROTTLED_DESIGNS) return false
+      throttled[designId] = held
+      if (held == 1) {
+        onLog(
+          "serve: comment webhook $fingerprint is over its rate limit " +
+            "(${rateLimit.perDesignPerMinute}/min per design, ${rateLimit.totalPerMinute}/min " +
+            "in total); holding back ${change.kind.wire} events on design $designId"
+        )
+      }
+      return false
+    }
+  }
+
+  private fun ServeRateLimiter.Decision.admittedAndReleased(): Boolean =
+    when (this) {
+      is ServeRateLimiter.Decision.Admitted -> {
+        release()
+        true
+      }
+      is ServeRateLimiter.Decision.Throttled -> false
     }
 
   private fun enqueue(queued: QueuedCommentChange) {
@@ -309,6 +387,12 @@ internal class ServeUiBuilderCommentWebhook(
      */
     const val QUEUE_CAPACITY: Int = 64
 
+    /** The bucket key every event shares for [CommentWebhookRateLimit.totalPerMinute]. */
+    private const val TOTAL_KEY = "*"
+
+    /** Designs whose held-back count is remembered at once; see [admit]. */
+    private const val MAX_THROTTLED_DESIGNS = 256
+
     const val RETRY_DELAY_MILLIS: Long = 500
 
     /** How long [close] waits for the queue to drain before saying what it is abandoning. */
@@ -351,6 +435,20 @@ internal data class QueuedCommentChange(
   val change: CommentBoardChange,
   val design: CommentWebhookDesign?,
 )
+
+/**
+ * How many events go out per minute: per design, and from the whole host. The defaults sit under
+ * Slack's incoming-webhook limit of roughly one message a second with room for a burst, and well
+ * above what a review conversation produces.
+ */
+internal data class CommentWebhookRateLimit(
+  val perDesignPerMinute: Int = 12,
+  val totalPerMinute: Int = 40,
+) {
+  init {
+    require(perDesignPerMinute > 0 && totalPerMinute > 0) { "rate limits must be positive" }
+  }
+}
 
 /** Where the notification goes, and in whose dialect. */
 internal data class CommentWebhookConfig(
@@ -687,7 +785,7 @@ private fun teamsBody(event: DesignCommentWebhookEventV1): JsonObject = buildJso
               add(
                 buildJsonObject {
                   put("type", "Action.OpenUrl")
-                  put("title", "Discussion for this design")
+                  put("title", ServeChatThreadLinks.label(thread))
                   put("url", thread)
                 }
               )
@@ -745,7 +843,7 @@ private fun DesignCommentWebhookEventV1.chatText(
   // Where the design is already being talked about, when that is somewhere other than here. A
   // notification often lands in a team channel while the design's own conversation is elsewhere,
   // and this is the line that joins the two.
-  design.thread?.let { append("\n").append(link(it, "Discussion for this design")) }
+  design.thread?.let { append("\n").append(link(it, ServeChatThreadLinks.label(it))) }
 }
 
 private fun DesignCommentWebhookEventV1.headline(

@@ -61,6 +61,7 @@ import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.encodeToJsonElement
 import kotlinx.serialization.json.floatOrNull
+import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.longOrNull
 
@@ -1405,7 +1406,9 @@ class ServeUiBuilderMcp(
           }
         else -> throw McpRequestException("unknown UI-builder links tool '$tool'")
       }
-    return UI_BUILDER_JSON.encodeToString(StoredLinks.serializer(), stored)
+    val record = UI_BUILDER_JSON.encodeToJsonElement(StoredLinks.serializer(), stored).jsonObject
+    // The chat platform the thread lives on, read off its permalink; see [ServeChatThreadLinks].
+    return JsonObject(record + ServeChatThreadLinks.describe(stored.thread)).toString()
   }
 
   /**

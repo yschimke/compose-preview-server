@@ -101,10 +101,17 @@ class ServeCatalogMcpHistoryTest {
     projectHistory: ServeProjectHistory? = null,
     tool: String = "catalog_history_list",
     extraArgs: String = "",
+    origin: String? = null,
   ): JsonObject {
     val registry = ServeSessionRegistry(open = { null })
     registry.register("m3", host = host)
-    val mcp = ServeCatalogMcp(registry, Semaphore(1), projectHistory = projectHistory)
+    val mcp =
+      ServeCatalogMcp(
+        registry,
+        Semaphore(1),
+        projectHistory = projectHistory,
+        publicOrigin = { origin },
+      )
     val request =
       Json.parseToJsonElement(
           """{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"$tool",
@@ -497,6 +504,25 @@ class ServeCatalogMcpHistoryTest {
     assertEquals(
       Base64.getEncoder().encodeToString(png(1)),
       content[0].jsonObject["data"]!!.jsonPrimitive.content,
+    )
+  }
+
+  @Test
+  fun `on a host with a public origin, read also links the pixels for a chat surface`() {
+    val history = projectHistory(blobs = mapOf(blobA to png(1), blobB to png(2)))
+    val body =
+      call(
+        bundleHost(),
+        projectHistory = history,
+        tool = "catalog_history_read",
+        extraArgs = ""","blob":"$blobA"""",
+        origin = "https://preview.example",
+      )
+
+    ChatFallbackAssertions.assertChatReadable(
+      body["result"]!!.jsonObject,
+      "https://preview.example",
+      png(1),
     )
   }
 
