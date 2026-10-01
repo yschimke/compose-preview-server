@@ -2781,6 +2781,7 @@ class ServeCatalogMcp(
       "preview-stories" -> arrayWrapperSchema("observations")
       ServeUiBuilderMcp.VIEW -> UiBuilderJsonSchemas.viewOutput
       ServeUiBuilderMcp.VALIDATE -> UiBuilderJsonSchemas.validationOutput
+      in ServeUiBuilderHistoryTools.TOOL_NAMES -> ServeUiBuilderHistoryTools.outputSchema(name)!!
       "render_preview" ->
         buildJsonObject {
           put("type", "object")

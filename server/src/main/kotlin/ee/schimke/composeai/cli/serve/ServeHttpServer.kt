@@ -14781,16 +14781,8 @@ class ServeHttpServer(
         }
       }
     // Its own id — a fork is never an existing design — made from where it came from.
-    val forkId = "${designId.take(40)}-r$revision-" + java.util.UUID.randomUUID().toString().take(6)
-    val fork =
-      source.copy(
-        id = forkId,
-        revision = 0,
-        title = "${source.title.ifBlank { designId }} (from revision $revision)",
-        createdAtEpochMillis = null,
-        updatedAtEpochMillis = null,
-        home = null,
-      )
+    val forkId = defaultForkId(designId, revision)
+    val fork = forkedDesignDocument(source, designId, forkId)
     when (
       val outcome =
         withContext(Dispatchers.IO) {
@@ -14798,6 +14790,10 @@ class ServeHttpServer(
         }
     ) {
       is ServeUiBuilderCreate.Outcome.Created -> {
+        // The same ancestry `ui_builder_fork_design` records, so either fork shows its parent.
+        withContext(Dispatchers.IO) {
+          recordDesignFork(uiBuilderLinksStore, source, designId, forkId)
+        }
         call.response.headers.append(
           HttpHeaders.Location,
           uiBuilderPermalink(forkId, call.request.queryParameters),

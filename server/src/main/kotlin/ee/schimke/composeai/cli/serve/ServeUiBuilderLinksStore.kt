@@ -60,6 +60,15 @@ class ServeUiBuilderLinksStore(private val root: Path) {
     require(Files.isDirectory(root)) { "UI-builder links root is not a directory: $root" }
   }
 
+  /**
+   * Where each design was forked from and what was forked from it, kept beside the links because
+   * the same host that records what a design is for records where it came from. See
+   * [ServeUiBuilderAncestryStore].
+   */
+  internal val ancestry: ServeUiBuilderAncestryStore by lazy {
+    ServeUiBuilderAncestryStore(root.resolve(ServeUiBuilderAncestryStore.DIRECTORY))
+  }
+
   /** What one design is linked to, or null when nothing has been recorded for it. */
   fun read(designId: String): StoredLinks? = readFile(fileFor(designId))
 
@@ -91,7 +100,7 @@ class ServeUiBuilderLinksStore(private val root: Path) {
       // storage for that is no file at all. A clear that did not happen is a refusal, though: the
       // caller asked for these links to be gone, and reporting success over a record still on disk
       // is how an issue or a pull request outlives the request to forget it.
-      return when (delete(designId)) {
+      return when (deleteRecord(designId)) {
         LinksDeleteResult.REMOVED,
         LinksDeleteResult.ABSENT -> LinksWriteResult.Stored(candidate)
         LinksDeleteResult.FAILED ->
@@ -112,7 +121,13 @@ class ServeUiBuilderLinksStore(private val root: Path) {
    * second one, reported as success, leaves an issue or a pull request readable after an explicit
    * clear. The caller decides what a failure is worth; the store only declines to hide it.
    */
-  fun delete(designId: String): LinksDeleteResult =
+  fun delete(designId: String): LinksDeleteResult {
+    // The design is going, so where it came from goes with it; its links record decides the answer.
+    runCatching { ancestry.delete(designId) }
+    return deleteRecord(designId)
+  }
+
+  private fun deleteRecord(designId: String): LinksDeleteResult =
     try {
       if (Files.deleteIfExists(fileFor(designId))) LinksDeleteResult.REMOVED
       else LinksDeleteResult.ABSENT
