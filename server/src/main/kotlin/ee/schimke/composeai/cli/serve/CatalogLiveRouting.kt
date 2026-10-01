@@ -129,7 +129,9 @@ internal object CatalogLiveRouting {
     dropped.namedOverrides?.keys?.sorted()?.forEach { names += "${ServeOverrides.KNOB_PREFIX}$it" }
     dropped.remoteCompose?.let { rc ->
       add("rcProfile", rc.profile)
-      add("rcPlayer", rc.player)
+      // `?rcPlayer=` reaches the override as the built-in `player` or, for any other player, as
+      // `playerId`; the caller spelled both the same way, so they share one name here.
+      add("rcPlayer", rc.player ?: rc.playerId)
       rc.namedValues.keys.sorted().forEach { names += "${ServeOverrides.RC_NAMED_PREFIX}$it" }
     }
     return names.ifEmpty { listOf("overrides") }
@@ -258,6 +260,15 @@ internal object CatalogLiveRouting {
           }
           // An `rc` facet that held nothing but that player is now empty, and an empty facet is not
           // the same as no facet to the `!= PreviewOverrides()` comparison above.
-          ?.takeIf { it.profile != null || it.player != null || it.namedValues.isNotEmpty() },
+          //
+          // A `playerId` is never a no-op here: it names a player by an id the baked capture did
+          // not record (the capture records only the built-in it went through), so it always needs
+          // the renderer — and a facet holding only one is not empty.
+          ?.takeIf {
+            it.profile != null ||
+              it.player != null ||
+              it.playerId != null ||
+              it.namedValues.isNotEmpty()
+          },
     )
 }
