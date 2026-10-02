@@ -123,9 +123,17 @@ class ServeUiBuilderComponentLibrary(
 
   private val indexes = ConcurrentHashMap<String, CachedIndex>()
 
-  /** Every published component across [catalogs], catalog order preserved. */
+  /**
+   * Every published component across [catalogs], catalog order preserved, one entry per system and
+   * id.
+   *
+   * The first coordinate to publish an id wins, which is the order the symbol route resolves in, so
+   * a listing never offers a row whose body comes from somewhere else. It is how a component that
+   * has moved into the project's repository shadows the copy this host still holds
+   * ([ServeUiBuilderComponentStore]): the project's coordinates come first.
+   */
   fun list(catalogs: List<ServeUiBuilderDesignLibrary.Coordinate>): List<Entry> =
-    catalogs.flatMap(::index)
+    catalogs.flatMap(::index).distinctBy { it.system to it.componentId }
 
   /**
    * A parsed index: what it offers, and which ids it named but this host will not offer.

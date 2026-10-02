@@ -267,7 +267,7 @@ two halves as [`UI_BUILDER_PROJECT_DESIGNS.md`](UI_BUILDER_PROJECT_DESIGNS.md).
 
 ```text
 ui-builder/designs/index.json        the designs a project has (built)
-ui-builder/components/index.json     the components a project has (proposed)
+ui-builder/components/index.json     the components a project has (built)
 ui-builder/components/<file>.json    one component symbol per file
 ```
 
@@ -276,11 +276,12 @@ A local directory (uncached, because it is the half that changes under you) and 
 palette as `project/<id>`.
 
 **Built so far**, in `ServeUiBuilderComponentLibrary`: both sources, the index and symbol reads,
-both honesty rules below, and two admin routes — a listing and one symbol with its digest and body.
-A published symbol file is an ordinary `DesignDocumentV1` declaring exactly one component plus the
-nodes its body is made of, so there is no second wire type, no second validator, and no contracts
-release in the path. **Not built**: the editor side — a `project/<id>` on the palette, the import
-that records id and digest into a design, and the drift report when a later read disagrees. What separates this from a component pack is the thing that makes it
+both honesty rules below, admin routes and the builder's own routes — a listing, one symbol with its
+digest and body, and a publish (below). A published symbol file is an ordinary `DesignDocumentV1`
+declaring exactly one component plus the nodes its body is made of, so there is no second wire type,
+no second validator, and no contracts release in the path. The editor side is built in
+compose-ui-builder: the palette's "Project library" shelf, the import that records id and digest
+into a design, and the drift report when a later read disagrees. What separates this from a component pack is the thing that makes it
 worth having at all: these are catalog nodes all the way down, so the Wasm canvas draws them
 properly rather than as a named placeholder — a pack cannot, and says so.
 
@@ -292,6 +293,19 @@ Two rules keep it honest:
   explicit catalog-revision migration is. Never silently redrawn.
 - **A symbol may only use components from the pinned catalog** (plus the packs the host admits), or
   a design that imports it cannot be drawn.
+
+**Two homes, the way designs have two.** A design is worked on on the host and settles in the
+app's repository; a shared component does the same. `ServeUiBuilderComponentStore` is the host's
+half: `PUT /api/ui-builder/v1/component-library/{system}/{componentId}` (write access) takes the
+one-component document and keeps it under the UI-builder state directory **in the same
+`ui-builder/components/` layout a project commits**, so it is read back by the same reader, as one
+more directory coordinate after the project's own. Creating names no digest and is refused over an
+id already published; replacing names the digest it replaces and is refused, with the current
+digest, when someone published in between. The project's repository stays its own: a project
+coordinate is read first, so a committed component shadows the host copy, and publishing over an id
+the project has committed is refused — change it there. Moving a host component into the
+repository is a copy of its two files. The pinned-catalog rule is checked at publish by the host's
+own draft validator, ignoring export-only findings.
 
 **The far half — graduation.** Once a component stops changing daily, generate it into the app's own
 Kotlin and commit it. Discovery's `components.json` then picks it up, `ComponentRecordPacks`
@@ -307,10 +321,10 @@ only has to carry a symbol during the phase where it is still moving — the fai
    The canvas is done; the wire surfaces in the table above move with the first construct that
    draws a second copy.
 3. **Component symbols and instances**, in-document — built, canvas and export.
-4. **`ui-builder/components/`** — the library and its two rules are built on the server
-   (`ServeUiBuilderComponentLibrary`, listed and fetched under
-   `/admin/ui-builder/component-library`); the editor does not yet import from it. Graduation still
-   needs nothing new.
+4. **`ui-builder/components/`** — built: the library and its two rules on the server
+   (`ServeUiBuilderComponentLibrary`), the host-held half editors publish into
+   (`ServeUiBuilderComponentStore`), and the editor's import, drift report and publish. Graduation
+   still needs nothing new.
 5. **Data-driven loops** — built on the canvas and in the editor's export lane. Two emitters are
    still refused by name: `items(rows, key = { … })` for a loop inside a lazy container, and the
    record-driven lane the code pane and the server use.
