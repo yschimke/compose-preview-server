@@ -6545,10 +6545,22 @@ test("contract · static viewer bounds results and rejects credentials", async (
 async function openLiveViewer(
   page,
   pngs,
-  { frameHeight = 700, listTools = true, refuseCalls = false, firstResult, hostContext } = {},
+  {
+    frameHeight = 700,
+    frameWidth = 620,
+    listTools = true,
+    refuseCalls = false,
+    firstResult,
+    hostContext,
+    // A host that sizes the iframe to every ui/notifications/size-changed it is sent.
+    followSize = false,
+    // A host (Codex Desktop) that also delivers the viewer's own tools/call as tool-input and
+    // tool-result notifications, this many ms after the reply.
+    echoAppCalls,
+  } = {},
 ) {
   await page.goto("/preview-harness/index.html");
-  await page.evaluate(({ pngs, frameHeight, listTools, refuseCalls, firstResult, hostContext }) => {
+  await page.evaluate(({ pngs, frameHeight, frameWidth, listTools, refuseCalls, firstResult, hostContext, followSize, echoAppCalls }) => {
     const base = "compose-preview://fixture/_app/com.example.Card";
     const round = "compose-preview://fixture/_app/com.example.Card_Round?config=round";
     const log = (window.__live = {
@@ -6563,7 +6575,7 @@ async function openLiveViewer(
     document.body.replaceChildren();
     const frame = document.createElement("iframe");
     frame.title = "Compose Preview MCP App";
-    frame.style.width = "620px";
+    frame.style.width = `${frameWidth}px`;
     frame.style.height = `${frameHeight}px`;
     const send = (message) => frame.contentWindow.postMessage({ jsonrpc: "2.0", ...message }, "*");
     const image = (data) => ({ type: "image", mimeType: "image/png", data });
@@ -6576,6 +6588,7 @@ async function openLiveViewer(
       const reply = (result) => send({ id, result });
       if (method === "ui/notifications/size-changed") {
         log.sizes.push(params);
+        if (followSize) frame.style.height = `${params.height}px`;
         return;
       }
       if (method === "ui/initialize") {
@@ -6628,12 +6641,24 @@ async function openLiveViewer(
         });
       } else if (method === "tools/call") {
         log.calls.push(params);
+        const answer = (result) => {
+          reply(result);
+          if (echoAppCalls == null) return;
+          setTimeout(() => {
+            send({ method: "ui/notifications/tool-input", params: { arguments: params.arguments } });
+            send({ method: "ui/notifications/tool-result", params: result });
+          }, echoAppCalls);
+        };
         if (params.name === "render_preview") {
-          reply({ content: [image(pngs.round), resourceLink(params.arguments.uri)] });
+          // render_preview's inline image is the model's copy; a downscaled one names the render's size.
+          const sizes = pngs.roundSize
+            ? [{ type: "text", text: JSON.stringify({ uri: params.arguments.uri, ...pngs.roundSize }) }]
+            : [];
+          answer({ content: [image(pngs.round), ...sizes, resourceLink(params.arguments.uri)] });
         } else if (params.name === "render_preview_overlay") {
-          reply({ content: [image(pngs.base)] });
+          answer({ content: [image(pngs.overlay || pngs.base)] });
         } else if (params.name === "get_preview_data") {
-          reply({
+          answer({
             content: [
               {
                 type: "text",
@@ -6661,7 +6686,17 @@ async function openLiveViewer(
     });
     frame.src = "/mcp-app/compose-preview-viewer.html";
     document.body.append(frame);
-  }, { pngs, frameHeight, listTools, refuseCalls, firstResult: firstResult ?? null, hostContext: hostContext ?? null });
+  }, {
+    pngs,
+    frameHeight,
+    frameWidth,
+    listTools,
+    refuseCalls,
+    firstResult: firstResult ?? null,
+    hostContext: hostContext ?? null,
+    followSize,
+    echoAppCalls: echoAppCalls ?? null,
+  });
   return page.frameLocator('iframe[title="Compose Preview MCP App"]');
 }
 
@@ -7249,7 +7284,10 @@ test("contract · a variant grid shows every variant and enlarges the one clicke
     },
   });
   await expect(viewer.locator(".cell")).toHaveCount(2);
-  await expect(viewer.locator(".cell code")).toHaveText(["Card_Devices - Large", "Card_Devices - Small"]);
+  // Each label is what tells the variants apart; the whole label is the cell's tooltip.
+  await expect(viewer.locator(".cell code")).toHaveText(["Large", "Small"]);
+  await expect(viewer.locator(".cell").nth(1)).toHaveAttribute("title", "Card_Devices - Small");
+  await expect(viewer.locator("#meta")).toHaveText("Card_Devices · 2 variants");
   await expect(viewer.locator(".cell img")).toHaveCount(2);
   await viewer.locator(".cell").nth(1).click();
   await expect(viewer.locator("#canvas .preview-stage > img")).toHaveAttribute(
@@ -7260,6 +7298,213 @@ test("contract · a variant grid shows every variant and enlarges the one clicke
   await viewer.locator("#grid-back").click();
   await expect(viewer.locator(".cell")).toHaveCount(2);
   await expect(viewer.locator("#grid-back")).toBeHidden();
+  await expect(viewer.locator("#meta")).toHaveText("Card_Devices · 2 variants");
+});
+
+// Codex Desktop delivers the viewer's own tools/call back to it as tool-input and tool-result
+// notifications. Those echoes are not a new result: drawing one replaced the preview with the
+// overlay (or with get_preview_data's JSON) and lost the controls that undo it.
+test("contract · echoed app tool calls leave the overlay and layout toggles reversible", async ({ page }) => {
+  const pngs = { ...livePngs(), overlay: solidPng(240, 240) };
+  const viewer = await openLiveViewer(page, pngs, { echoAppCalls: 300 });
+  const image = viewer.locator("#canvas .preview-stage > img");
+  const shown = async () => {
+    const src = await image.getAttribute("src");
+    return Object.keys(pngs).find((key) => src === `data:image/png;base64,${pngs[key]}`) || "other";
+  };
+  const a11y = viewer.locator("#a11y");
+  const layout = viewer.locator("#layout");
+  const variant = viewer.locator("#variant");
+  await expect.poll(shown).toBe("base");
+
+  await a11y.click();
+  await expect.poll(shown).toBe("overlay");
+  await expect(a11y).toHaveText("Show original preview");
+  await page.waitForTimeout(700);
+  await expect(a11y).toBeVisible();
+  await expect(a11y).toHaveText("Show original preview");
+  await expect(variant).toBeVisible();
+  await a11y.click();
+  await expect.poll(shown).toBe("base");
+  await expect(a11y).toHaveText("Show accessibility overlay");
+
+  await layout.click();
+  await expect(viewer.locator(".layout-boxes rect")).toHaveCount(2);
+  await page.waitForTimeout(700);
+  await expect.poll(shown).toBe("base");
+  await expect(viewer.locator(".layout-boxes rect")).toHaveCount(2);
+  await expect(layout).toHaveText("Hide layout bounds");
+  await layout.click();
+  await expect(viewer.locator(".layout-boxes")).toHaveCount(0);
+  await expect(layout).toHaveText("Show layout bounds");
+
+  // An echoed render_preview keeps the variant list the viewer chose from.
+  const { round } = await page.evaluate(() => window.__liveUris);
+  await variant.selectOption(round);
+  await expect.poll(shown).toBe("round");
+  await page.waitForTimeout(700);
+  await expect(variant).toBeVisible();
+  await expect(variant).toHaveValue(round);
+  await expect(a11y).toBeVisible();
+
+  // A new result from the agent is not an echo, and still draws.
+  await page.evaluate(({ uri, data }) => {
+    window.__liveSend({ method: "ui/notifications/tool-input", params: { arguments: { preview: "Card" } } });
+    window.__liveSend({
+      method: "ui/notifications/tool-result",
+      params: { content: [{ type: "image", mimeType: "image/png", data }, { type: "resource_link", uri, name: "r", mimeType: "image/png" }] },
+    });
+  }, { uri: round, data: pngs.refreshed });
+  await expect.poll(shown).toBe("refreshed");
+});
+
+// Switching variant draws render_preview's inline image, the model's copy downscaled to 768px on
+// its long edge, where the first render was the full-size resource. The viewer draws it at the
+// render's size, so it fills the card the way the first render did instead of shrinking to a small
+// centered picture. The host here also sizes the frame to what the viewer asks for and echoes the
+// viewer's own calls, as Codex Desktop does.
+test("contract · switching variant keeps the image the size the first render had", async ({ page }) => {
+  const pngs = {
+    base: solidPng(1600, 1000),
+    round: solidPng(768, 480),
+    roundSize: { widthPx: 1600, heightPx: 1000, inlineWidthPx: 768, inlineHeightPx: 480 },
+    refreshed: solidPng(1600, 1000),
+  };
+  const viewer = await openLiveViewer(page, pngs, {
+    frameWidth: 1000,
+    frameHeight: 150,
+    followSize: true,
+    echoAppCalls: 200,
+    hostContext: { containerDimensions: { maxHeight: 900 } },
+  });
+  const image = viewer.locator("#canvas .preview-stage > img");
+  await expect(image).toBeVisible();
+  await expect.poll(async () => Math.round((await image.boundingBox()).width)).toBeGreaterThan(800);
+  await page.waitForTimeout(300);
+  const first = await image.boundingBox();
+  const { round } = await page.evaluate(() => window.__liveUris);
+  await viewer.locator("#variant").selectOption(round);
+  await expect(image).toHaveAttribute("src", `data:image/png;base64,${pngs.round}`);
+  await expect(viewer.locator("#meta")).toHaveText("Card_Round (round)");
+  await page.waitForTimeout(500);
+  const second = await image.boundingBox();
+  expect(Math.abs(second.height - first.height)).toBeLessThan(2);
+  expect(Math.abs(second.width - first.width)).toBeLessThan(2);
+  // The echoed call did not reset the variant list.
+  await expect(viewer.locator("#variant")).toBeVisible();
+  // Actual size draws the render's size, not the copy's.
+  await viewer.locator("#zoom").click();
+  await expect.poll(async () => Math.round((await image.boundingBox()).width)).toBe(1600);
+  await viewer.locator("#zoom").click();
+  await expect.poll(async () => Math.round((await image.boundingBox()).width)).toBe(Math.round(second.width));
+  // The whole card fits the frame it asked for: nothing to scroll.
+  expect(await viewer.locator("html").evaluate((root) => root.scrollHeight <= window.innerHeight + 1)).toBe(true);
+});
+
+// Codex Desktop's inline card is narrow: the header (title, variant picker, Actual size) must not
+// push the page sideways, and the whole image must fit the frame with nothing to scroll.
+test("contract · a narrow inline card shows the whole preview without scrolling", async ({ page }) => {
+  const tall = solidPng(1080, 2400);
+  const viewer = await openLiveViewer(page, { base: tall, round: tall, refreshed: tall }, {
+    frameWidth: 360,
+    frameHeight: 150,
+    followSize: true,
+  });
+  const image = viewer.locator("#canvas .preview-stage > img");
+  await expect(image).toBeVisible();
+  await expect(viewer.locator("#variant")).toBeVisible();
+  await expect(viewer.locator("#zoom")).toBeVisible();
+  await page.waitForTimeout(500);
+  const fits = () => viewer.locator("html").evaluate((root) => ({
+    x: root.scrollWidth <= window.innerWidth + 1,
+    y: root.scrollHeight <= window.innerHeight + 1,
+  }));
+  expect(await fits()).toEqual({ x: true, y: true });
+  const frame = await page.locator('iframe[title="Compose Preview MCP App"]').boundingBox();
+  const box = await image.boundingBox();
+  expect(box.y + box.height).toBeLessThanOrEqual(frame.y + frame.height + 0.5);
+  expect(box.x + box.width).toBeLessThanOrEqual(frame.x + frame.width + 0.5);
+  expect(box.height).toBeGreaterThan(250);
+  // The header wraps rather than drawing the variant picker over the title.
+  const title = await viewer.locator(".title").boundingBox();
+  const picker = await viewer.locator("#variant-label").boundingBox();
+  expect(title.x + title.width <= picker.x + 0.5 || picker.y >= title.y + title.height - 0.5).toBe(true);
+});
+
+// render_matrix of a multipreview: the images get the tile, each label is the part that differs,
+// on one line, and the header says what is shown.
+test("contract · a render_matrix variant grid gives the images the tiles and updates the header", async ({ page }) => {
+  const square = solidPng(454, 454);
+  const pngs = { base: square, round: square, refreshed: square };
+  const prefix = "compose-preview://fixture/_app/com.example.ListScreenPreview_Devices%20-%20";
+  const names = ["Large Round", "Small Round", "Square", "Rectangular", "Large Round Dark", "Small Round Dark", "Square Dark", "Rectangular Dark"];
+  const viewer = await openLiveViewer(page, pngs, {
+    frameHeight: 150,
+    followSize: true,
+    firstResult: {
+      content: [
+        { type: "image", mimeType: "image/png", data: square },
+        {
+          type: "text",
+          text: JSON.stringify({
+            schema: "compose-preview-matrix/v1",
+            mode: "variants",
+            uri: `${prefix}Large%20Round`,
+            cellCount: names.length,
+            cells: names.map((name) => ({
+              uri: `${prefix}${encodeURIComponent(name)}`,
+              label: `ListScreenPreview_Devices - ${name}`,
+              sha256: name,
+            })),
+          }),
+        },
+      ],
+      _meta: { "composePreview/cellPngs": names.map(() => square) },
+    },
+  });
+  const cells = viewer.locator(".cell");
+  await expect(cells).toHaveCount(8);
+  await expect(viewer.locator("#meta")).not.toContainText("Waiting");
+  await expect(viewer.locator("#meta")).toContainText("8 variants");
+  await expect(viewer.locator(".cell code")).toHaveText(names);
+  await expect(cells.first()).toHaveAttribute("title", "ListScreenPreview_Devices - Large Round");
+  await page.waitForTimeout(500);
+  const heights = await cells.evaluateAll((nodes) => nodes.map((node) => {
+    const image = node.querySelector("img").getBoundingClientRect();
+    const label = node.querySelector("code").getBoundingClientRect();
+    return { image: image.height, label: label.height };
+  }));
+  for (const { image, label } of heights) {
+    expect(image).toBeGreaterThan(100);
+    expect(label).toBeLessThan(20);
+  }
+  expect(await viewer.locator("html").evaluate((root) => root.scrollHeight <= window.innerHeight + 1)).toBe(true);
+});
+
+// render_matrix with axes: each label is the axis values that differ between cells.
+test("contract · an axes matrix labels each cell by the dimensions that vary", async ({ page }) => {
+  const square = solidPng(240, 240);
+  const viewer = await openLiveViewer(page, { base: square, round: square, refreshed: square }, {
+    firstResult: {
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify({
+            schema: "compose-preview-matrix/v1",
+            uri: "compose-preview://fixture/_app/com.example.Card",
+            cellCount: 2,
+            cells: [
+              { overrides: { device: "id:pixel_5", fontScale: 1, uiMode: "dark" }, label: "device=id:pixel_5, fontScale=1.0, uiMode=dark", png: square },
+              { overrides: { device: "id:pixel_5", fontScale: 2, uiMode: "dark" }, label: "device=id:pixel_5, fontScale=2.0, uiMode=dark", png: square },
+            ],
+          }),
+        },
+      ],
+    },
+  });
+  await expect(viewer.locator(".cell")).toHaveCount(2);
+  await expect(viewer.locator(".cell code")).toHaveText(["fontScale 1", "fontScale 2"]);
+  await expect(viewer.locator("#meta")).toContainText("2 matrix cells");
 });
 
 test("contract · static viewer shows no live actions", async ({ page }) => {
