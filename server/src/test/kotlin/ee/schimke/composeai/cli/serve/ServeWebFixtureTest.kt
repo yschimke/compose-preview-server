@@ -2068,8 +2068,8 @@ class ServeWebFixtureTest {
           if (previewId.startsWith("badge")) emptyList()
           else
             listOf(
-              RcPlayerBackend.JAVA,
-              RcPlayerBackend.CMP_ANDROID,
+              RcPlayerBackend.ANDROIDX_VIEW,
+              RcPlayerBackend.ANDROIDX_EMBEDDED,
               RcPlayerBackend.CMP_JVM,
             )
         },

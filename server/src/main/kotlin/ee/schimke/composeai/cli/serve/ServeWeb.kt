@@ -13175,19 +13175,19 @@ ${captureControlsHtml().prependIndent("          ")}
    * capture can be. `androidx-view` is genuinely distinct too, but maps to no published column, so
    * filling one would invent a lane the offline vocabulary does not have.
    */
-  private val LIVE_FILLABLE = setOf(RcPlayerBackend.CMP_JVM, RcPlayerBackend.JAVA)
+  private val LIVE_FILLABLE = setOf(RcPlayerBackend.CMP_JVM, RcPlayerBackend.ANDROIDX_VIEW)
 
   /**
    * A column for a player the offline pipeline has no lane id for, so the wall has to name it
-   * itself. Only [RcPlayerBackend.JAVA] is in this position: the AOSP view-backed
+   * itself. Only [RcPlayerBackend.ANDROIDX_VIEW] is in this position: the AOSP view-backed
    * `RemoteComposePlayer`, which draws into a framework `Canvas` rather than into Compose nodes.
    *
    * It is a genuinely different renderer from everything else on the wall, and measurably so — on
    * the deployed `remote-m3` host `?rcPlayer=androidx-view` answers `822c80a4…` where the baked
    * capture is `e69d5136…`, so unlike `androidx-embedded` it is never the baked bytes wearing
-   * another name. That is exactly why [RcPlayerBackend.JAVA.rcCompareLane] is null: the lane
-   * mapping exists to answer a bare `?rcPlayer=` from staged bytes, and there are no staged bytes
-   * that are this player's.
+   * another name. That is exactly why [RcPlayerBackend.ANDROIDX_VIEW.rcCompareLane] is null: the
+   * lane mapping exists to answer a bare `?rcPlayer=` from staged bytes, and there are no staged
+   * bytes that are this player's.
    *
    * Kept out of [ServeRcCompare.LANES] deliberately. That list mirrors the offline pipeline's
    * columns, and a catalog's published `rc-compare.html` will never carry an `androidx-view` one —
@@ -13196,7 +13196,7 @@ ${captureControlsHtml().prependIndent("          ")}
    */
   private val LIVE_ONLY_LANES =
     mapOf(
-      RcPlayerBackend.JAVA to
+      RcPlayerBackend.ANDROIDX_VIEW to
         RcCompareLane(
           ServeRcPlayerIds.ANDROIDX_VIEW,
           "AndroidX View",
