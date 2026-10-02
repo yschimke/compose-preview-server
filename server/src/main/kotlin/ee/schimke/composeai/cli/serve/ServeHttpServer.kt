@@ -1702,6 +1702,10 @@ class ServeHttpServer(
         // (issue #3480). Ungated and CORS-open for the same reason as the player bundle: font bytes
         // baked into the jar, no session data.
         get("${ServeRcFonts.URL_BASE}/{name}") { handleRcFont() }
+        // A Google Fonts family at one weight, for a UI-builder design whose typeface the editor
+        // bundle does not vendor ([ServeGoogleFonts]). Ungated and CORS-open like the route above:
+        // public font bytes, and the runtime frames that ask are sandboxed and credential-less.
+        get("${ServeGoogleFonts.ROUTE}/{family}/{weight}") { handleGoogleFont() }
 
         // The document lane (`--accept-docs`): ingest one **known document format** (Remote Compose
         // or Lottie — see [ServeDocFormats]) and hand back an expiring permalink that plays it in
@@ -3993,6 +3997,64 @@ class ServeHttpServer(
       return
     }
     call.respondBytes(asset.bytes, ContentType.parse("font/ttf"))
+  }
+
+  /** The Google Fonts cache, present exactly when this host serves the UI builder. */
+  private val googleFonts: ServeGoogleFonts? by lazy {
+    val dir = uiBuilderDir ?: return@lazy null
+    ServeGoogleFonts(
+      cacheDirectory = File(dir, "google-fonts"),
+      families = ServeWeb.googleFontFamilies,
+      fetch = { url, userAgent ->
+        materialSymbolsHttpClient
+          .newCall(okhttp3.Request.Builder().url(url).header("User-Agent", userAgent).build())
+          .execute()
+          .use { response ->
+            if (response.code in 400..499) return@use null
+            check(response.isSuccessful) { "$url answered ${response.code}" }
+            val body = checkNotNull(response.body) { "$url answered no body" }
+            check(body.contentLength() <= ServeGoogleFonts.MAX_FONT_BYTES) {
+              "$url declared ${body.contentLength()} bytes; refusing to read it"
+            }
+            val bytes =
+              MaterialSymbolsSource.readAtMost(body.byteStream(), ServeGoogleFonts.MAX_FONT_BYTES)
+            check(bytes.size <= ServeGoogleFonts.MAX_FONT_BYTES) { "$url is too large" }
+            bytes
+          }
+      },
+    )
+  }
+
+  /**
+   * `GET /api/fonts/google/{family}/{weight}`: that family's TrueType file. 404 for a family not on
+   * fonts.google.com or a weight that is not a hundred, 502 when Google could not be reached —
+   * either way the editor draws the default face, as it did before the route existed.
+   */
+  private suspend fun RoutingContext.handleGoogleFont() {
+    val fonts = googleFonts
+    val family = call.parameters["family"].orEmpty()
+    val weight = call.parameters["weight"]?.removeSuffix(".ttf")?.toIntOrNull()
+    if (fonts == null || weight == null || fonts.canonical(family) == null) {
+      call.respondText("not found", status = HttpStatusCode.NotFound)
+      return
+    }
+    val bytes =
+      try {
+        withContext(Dispatchers.IO) { fonts.font(family, weight) }
+      } catch (e: Exception) {
+        call.respondText(
+          "could not fetch $family: ${e.message}",
+          status = HttpStatusCode.BadGateway,
+        )
+        return
+      }
+    if (bytes == null) {
+      call.respondText("not found", status = HttpStatusCode.NotFound)
+      return
+    }
+    call.response.headers.append(HttpHeaders.AccessControlAllowOrigin, "*")
+    call.response.headers.append(HttpHeaders.CacheControl, "public, max-age=604800")
+    call.respondBytes(bytes, ContentType.parse("font/ttf"))
   }
 
   /** `GET /assets/serve/{version}/{name}`: static ServeWeb CSS/JS extracted from raw strings. */

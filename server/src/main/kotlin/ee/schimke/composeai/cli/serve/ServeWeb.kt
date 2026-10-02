@@ -19441,7 +19441,7 @@ ${ServeSiteIcon.linkTags().prependIndent("        ")}
       PreviewOverrideOption("th-TH"),
     )
 
-  private val googleFontFamilies: List<String> by lazy {
+  internal val googleFontFamilies: List<String> by lazy {
     ServeWeb::class
       .java
       .classLoader
