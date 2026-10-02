@@ -1151,6 +1151,9 @@ class ServeCatalogMcp(
     val cellPngs = mutableListOf<ByteArray>()
     val cellLabels = mutableListOf<String>()
     val axisKeys = axes.map { it.first }
+    // Every cell's knobs are checked before any cell renders, like the cell cap above: a refusal
+    // discovered on cell 7 would already have spent six renders answering nothing.
+    combinations.forEach { refuseUndeclaredKnobs(preview, it, knobKinds) }
     val rendered = buildJsonArray {
       combinations.forEachIndexed { index, params ->
         val unknown = params.keys.filterNot(ServeOverrides::isOverrideParam).sorted()
@@ -2094,11 +2097,61 @@ class ServeCatalogMcp(
       )
     }
     val knobKinds = ServeOverrides.declaredKnobKinds(preview)
+    refuseUndeclaredKnobs(preview, params, knobKinds)
     return when (val parsed = ServeOverrides.parse(params, knobKinds)) {
       is OverrideParse.Ok -> parsed.overrides
       is OverrideParse.Invalid -> throw McpRequestException(parsed.message)
     }
   }
+
+  /**
+   * The refusal [parseOverrides] states for unknown keys, applied to knobs (#1277).
+   *
+   * `knob.` passes [ServeOverrides.isOverrideParam] whatever follows it, and the renderer drops a
+   * knob the preview never declared, or a value it cannot read as the declared type — so
+   * `knob.nope` or `knob.checked: "maybe"` rendered the default and reported `overridesApplied:
+   * true`. That is the render "that answers a different question than the one asked" the refusal
+   * exists for, so each knob is checked here against the preview's own declarations
+   * ([ServeOverrides.declaredKnobKinds], the map the renderer parses with), and a mismatch names
+   * what the preview does declare. A kind this layer does not know how to read is passed through
+   * for the renderer to judge.
+   */
+  private fun refuseUndeclaredKnobs(
+    preview: ServePreview,
+    params: Map<String, String?>,
+    knobKinds: Map<String, String>,
+  ) {
+    for ((key, value) in params) {
+      if (!key.startsWith(ServeOverrides.KNOB_PREFIX)) continue
+      val name = key.removePrefix(ServeOverrides.KNOB_PREFIX)
+      val kind =
+        knobKinds[name]
+          ?: knobKinds[key]
+          ?: throw McpRequestException(
+            if (knobKinds.isEmpty()) {
+              "'${preview.id}' declares no knobs, so '$key' would change nothing; " +
+                "catalog_list_previews lists each preview's knobs"
+            } else {
+              "'${preview.id}' declares no knob '$name'; its knobs are " +
+                knobKinds.keys.sorted().joinToString { ServeOverrides.KNOB_PREFIX + it }
+            }
+          )
+      if (value != null && !knobValueFits(kind, value)) {
+        throw McpRequestException("'$key' is a $kind knob, and '$value' is not a $kind")
+      }
+    }
+  }
+
+  private fun knobValueFits(kind: String, value: String): Boolean =
+    when (kind.lowercase()) {
+      "bool",
+      "boolean" -> value.lowercase() == "true" || value.lowercase() == "false"
+      "int",
+      "long" -> value.trim().toLongOrNull() != null
+      "float",
+      "double" -> value.trim().toDoubleOrNull() != null
+      else -> true
+    }
 
   private fun JsonElement.asOverrideString(): String =
     when (this) {

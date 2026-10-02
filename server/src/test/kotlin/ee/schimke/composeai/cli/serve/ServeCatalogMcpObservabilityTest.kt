@@ -1,8 +1,10 @@
 package ee.schimke.composeai.cli.serve
 
+import ee.schimke.composeai.daemon.protocol.PreviewOverrideValue
 import ee.schimke.composeai.daemon.protocol.PreviewOverrides
 import ee.schimke.composeai.daemon.protocol.StreamCodec
 import ee.schimke.composeai.daemon.protocol.StreamFrameParams
+import ee.schimke.composeai.data.overrides.PreviewOverrideDeclaration
 import java.util.Base64
 import java.util.concurrent.Semaphore
 import java.util.concurrent.atomic.AtomicInteger
@@ -41,9 +43,11 @@ class ServeCatalogMcpObservabilityTest {
     private val generation: RenderOutcome.Generation = RenderOutcome.Generation.DAEMON,
     private val png: ByteArray,
     override val hasSvgExport: Boolean = false,
+    knobs: List<PreviewOverrideDeclaration> = emptyList(),
   ) : ServeHost {
     override val label: String = "fake"
-    override val previews: List<ServePreview> = listOf(ServePreview(id = "card", label = "Card"))
+    override val previews: List<ServePreview> =
+      listOf(ServePreview(id = "card", label = "Card", overrides = knobs))
     val renders = AtomicInteger()
     val seen = mutableListOf<PreviewOverrides>()
 
@@ -304,9 +308,28 @@ class ServeCatalogMcpObservabilityTest {
     assertEquals(0, host.renders.get(), "a bad request must not reach the renderer")
   }
 
+  /** The card's declared knobs, as `catalog_list_previews` would list them. */
+  private val cardKnobs =
+    listOf(
+      PreviewOverrideDeclaration(
+        key = "label",
+        type = "string",
+        label = "label",
+        default = PreviewOverrideValue.StringValue("Card"),
+        current = PreviewOverrideValue.StringValue("Card"),
+      ),
+      PreviewOverrideDeclaration(
+        key = "checked",
+        type = "bool",
+        label = "checked",
+        default = PreviewOverrideValue.BooleanValue(true),
+        current = PreviewOverrideValue.BooleanValue(true),
+      ),
+    )
+
   @Test
   fun `a declared knob and an rc seed are not mistaken for unknown keys`() {
-    val host = FakeHost(png = pixel)
+    val host = FakeHost(png = pixel, knobs = cardKnobs)
     val body =
       call(
         host,
@@ -315,6 +338,96 @@ class ServeCatalogMcpObservabilityTest {
 
     assertTrue(!body.isError(), body.firstText())
     assertEquals(1, host.renders.get())
+  }
+
+  @Test
+  fun `a knob the preview does not declare is refused, naming the ones it does`() {
+    // #1277: `knob.` passed the key check whatever followed it, so a misspelled knob rendered the
+    // default and reported overridesApplied: true.
+    val host = FakeHost(png = pixel, knobs = cardKnobs)
+    val body =
+      call(
+        host,
+        """{"catalog":"m3","previewId":"card","observe":"hash","overrides":{"knob.nope":"x"}}""",
+      )
+
+    assertTrue(body.isError())
+    val message = body.firstText()
+    assertTrue(message.contains("declares no knob 'nope'"), message)
+    assertTrue(message.contains("knob.checked") && message.contains("knob.label"), message)
+    assertEquals(0, host.renders.get(), "a bad request must not reach the renderer")
+  }
+
+  @Test
+  fun `a knob on a preview with no knobs is refused`() {
+    val host = FakeHost(png = pixel)
+    val body =
+      call(
+        host,
+        """{"catalog":"m3","previewId":"card","observe":"hash","overrides":{"knob.label":"Tap"}}""",
+      )
+
+    assertTrue(body.isError())
+    assertTrue(body.firstText().contains("declares no knobs"), body.firstText())
+    assertEquals(0, host.renders.get())
+  }
+
+  @Test
+  fun `a knob value of the wrong type is refused`() {
+    // #1277: `knob.checked: "maybe"` rendered as unchecked and reported overridesApplied: true.
+    val host = FakeHost(png = pixel, knobs = cardKnobs)
+    val body =
+      call(
+        host,
+        """{"catalog":"m3","previewId":"card","observe":"hash","overrides":{"knob.checked":"maybe"}}""",
+      )
+
+    assertTrue(body.isError())
+    assertTrue(body.firstText().contains("'maybe' is not a bool"), body.firstText())
+    assertEquals(0, host.renders.get())
+
+    // A JSON boolean, and its string spelling, both read as a bool.
+    val ok =
+      call(
+        host,
+        """{"catalog":"m3","previewId":"card","observe":"hash","overrides":{"knob.checked":false}}""",
+      )
+    assertTrue(!ok.isError(), ok.firstText())
+    val okString =
+      call(
+        host,
+        """{"catalog":"m3","previewId":"card","observe":"hash","overrides":{"knob.checked":"TRUE"}}""",
+      )
+    assertTrue(!okString.isError(), okString.firstText())
+  }
+
+  @Test
+  fun `a matrix with an undeclared knob axis renders no cell`() {
+    val host = FakeHost(png = pixel, knobs = cardKnobs)
+    val body =
+      call(
+        host,
+        """{"catalog":"m3","previewId":"card","axes":{"uiMode":["light","dark"],"knob.chekced":[true,false]}}""",
+        tool = "catalog_render_matrix",
+      )
+
+    assertTrue(body.isError())
+    assertTrue(body.firstText().contains("declares no knob 'chekced'"), body.firstText())
+    assertEquals(0, host.renders.get(), "refused before the first cell, not on it")
+  }
+
+  @Test
+  fun `a matrix over a declared knob renders every cell`() {
+    val host = FakeHost(png = pixel, knobs = cardKnobs)
+    val body =
+      call(
+        host,
+        """{"catalog":"m3","previewId":"card","axes":{"knob.checked":[true,false]}}""",
+        tool = "catalog_render_matrix",
+      )
+
+    assertTrue(!body.isError(), body.firstText())
+    assertEquals(2, host.renders.get())
   }
 
   // ---- catalog_render_matrix
