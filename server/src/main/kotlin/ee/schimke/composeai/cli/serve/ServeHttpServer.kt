@@ -14424,7 +14424,14 @@ class ServeHttpServer(
     // asset contract below: a worker script is revalidated on every navigation, never immutable,
     // and it may only claim the whole `/ui-builder/` scope if the server says so.
     if (assetSegments == listOf(UI_BUILDER_SERVICE_WORKER)) {
-      respondUiBuilderServiceWorker(file)
+      // Only at `/ui-builder/ui-builder-sw.js`. The worker's URL is its identity across releases
+      // (its bytes change every release, its address never does), so a copy under the versioned
+      // prefix or a catalog prefix would register a second worker beside the real one.
+      if (version != null || scopedCatalog != null) {
+        call.respondText("not found", status = HttpStatusCode.NotFound)
+      } else {
+        respondUiBuilderServiceWorker(file)
+      }
       return
     }
     // One door to the shell, so the reference rewrite cannot be reached around.
@@ -14471,12 +14478,13 @@ class ServeHttpServer(
    * compose-ui-builder bundle ships from the release that introduces it (an older pinned bundle has
    * none, and the route simply 404s through the ordinary missing-file path above).
    *
-   * Served the same, uncached, from the unversioned path and under `/ui-builder/v/<version>/`: a
-   * worker script is the one file whose freshness decides whether a rollout reaches anyone, so the
-   * versioned prefix's `immutable` contract must not apply to it. `Service-Worker-Allowed` lets a
-   * registration from either path take the editor's whole `/ui-builder/` scope and no more — the
-   * catalog pages, `/api/` and the WebSockets are outside it. Like every bundle asset it is
-   * ungated, because the browser fetches a worker's updates without the page's credential.
+   * Served only at the unversioned `/ui-builder/ui-builder-sw.js`, uncached: a worker is identified
+   * by its script URL, which must stay put while its bytes change every release, and it is the one
+   * file whose freshness decides whether a rollout reaches anyone — the versioned prefix's
+   * `immutable` contract must never apply to it. Its default scope is its own directory,
+   * `/ui-builder/`; `Service-Worker-Allowed` says the same explicitly, so the catalog pages,
+   * `/api/` and the WebSockets are outside it either way. Like every bundle asset it is ungated,
+   * because the browser fetches a worker's updates without the page's credential.
    */
   private suspend fun RoutingContext.respondUiBuilderServiceWorker(file: File) {
     val etag = "\"${file.length().toString(16)}-${file.lastModified().toString(16)}\""

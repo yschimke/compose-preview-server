@@ -55,16 +55,16 @@ class ServeUiBuilderServiceWorkerTest {
         get(port, "/ui-builder/").use { response ->
           Regex("""src="/ui-builder/v/([^/"]+)/""").find(response.body.string())!!.groupValues[1]
         }
-      for (path in
-        listOf("/ui-builder/ui-builder-sw.js", "/ui-builder/v/$version/ui-builder-sw.js")) {
-        get(port, path).use { response ->
-          assertEquals(200, response.code, path)
-          assertTrue(response.header("Content-Type")!!.startsWith("text/javascript"), path)
-          assertEquals("no-cache", response.header("Cache-Control"), path)
-          assertEquals("/ui-builder/", response.header("Service-Worker-Allowed"), path)
-          assertTrue(response.body.string().contains("addEventListener"), path)
-        }
+      get(port, "/ui-builder/ui-builder-sw.js").use { response ->
+        assertEquals(200, response.code)
+        assertTrue(response.header("Content-Type")!!.startsWith("text/javascript"))
+        assertEquals("no-cache", response.header("Cache-Control"))
+        assertEquals("/ui-builder/", response.header("Service-Worker-Allowed"))
+        assertTrue(response.body.string().contains("addEventListener"))
       }
+      // Never under the immutable versioned prefix: the worker's URL is its identity across
+      // releases, and a second copy there would register a second worker.
+      get(port, "/ui-builder/v/$version/ui-builder-sw.js").use { assertEquals(404, it.code) }
       // Every other bundle asset keeps its own contract: the versioned prefix stays immutable.
       get(port, "/ui-builder/v/$version/app.mjs").use { response ->
         assertTrue(response.header("Cache-Control")!!.contains("immutable"))
