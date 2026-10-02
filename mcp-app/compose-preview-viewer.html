@@ -20,6 +20,11 @@
   .muted { color: var(--color-text-secondary, #666); font-size: 12px; }
   .canvas { min-height: 120px; border: 1px solid var(--color-border, #d8d8dd); border-radius: 10px; background: var(--color-background-secondary, #f8f8fa); display: grid; place-items: center; overflow: auto; }
   .canvas.has-image { min-height: 0; overflow: hidden; }
+  /* Actual size: the image at its own pixels, scrolled inside the canvas at the height the fitted
+     image had (--zoom-height), so the frame does not jump. See the #zoom handler. */
+  .canvas.has-image.zoomed { display: block; height: var(--zoom-height, auto); overflow: auto; text-align: center; }
+  .canvas.zoomed .preview-stage, .canvas.zoomed img { max-width: none; max-height: none; }
+  .bar #zoom { flex: none; padding: 2px 8px; font-size: 12px; }
   #meta.error { color: var(--color-text-danger, #c5221f); font-weight: 650; }
   .notice { width: 100%; padding: 10px 12px; box-sizing: border-box; border-radius: 0 8px 8px 0; border-left: 4px solid var(--color-border-secondary, #8a8f98); }
   .notice.error { border-left-color: var(--color-border-danger, #c5221f); background: var(--color-background-danger, #fce8e6); }
@@ -142,6 +147,7 @@
       <span id="meta" class="muted" role="status">Waiting for a preview result…</span>
     </div>
     <label id="variant-label" hidden>Variant <select id="variant"></select></label>
+    <button id="zoom" type="button" aria-pressed="false" hidden>Actual size</button>
   </div>
   <section id="canvas" class="canvas">
     <div class="empty">This viewer displays render and matrix results when the host supplies them.</div>
@@ -194,6 +200,7 @@
   const a11y = q('#a11y');
   const use = q('#use');
   const gridBack = q('#grid-back');
+  const zoom = q('#zoom');
   let lastGrid;
   const comments = q('#comments');
   const commentList = q('#comment-list');
@@ -1701,6 +1708,11 @@
     // the host already made tall would keep being asked for.
     const content = q('.app').getBoundingClientRect().height;
     let wanted = Math.ceil(content);
+    const zoomed = canvas.classList.contains('zoomed');
+    // Offer Actual size only while the fit drew the image smaller than its own pixels.
+    zoom.hidden = !image || (!zoomed && !(image.naturalWidth > image.clientWidth + 1));
+    // Zoomed, the canvas keeps the height it had, so the fit and the size asked for stand.
+    if (image && zoomed) return;
     if (image) {
       const shown = image.getBoundingClientRect().height;
       const chrome = Math.max(0, firstScreenBottom - shown);
@@ -3327,6 +3339,17 @@
     document.readyState === 'loading'
       ? new Promise(resolve => document.addEventListener('DOMContentLoaded', resolve, { once: true })).then(startViewer)
       : startViewer();
+  // A host may hold the card to a short frame (Antigravity shows a static card at a fixed height),
+  // so the fitted image can be well under its own size. Actual size draws it at its own pixels and
+  // scrolls it inside the canvas; Fit goes back.
+  zoom.addEventListener('click', () => {
+    const on = !canvas.classList.contains('zoomed');
+    if (on) canvas.style.setProperty('--zoom-height', `${canvas.clientHeight}px`);
+    canvas.classList.toggle('zoomed', on);
+    zoom.setAttribute('aria-pressed', String(on));
+    zoom.textContent = on ? 'Fit' : 'Actual size';
+    scheduleFit();
+  });
   gridBack.addEventListener('click', () => {
     if (!lastGrid) return;
     renderMatrix(lastGrid.value, lastGrid.cells);
