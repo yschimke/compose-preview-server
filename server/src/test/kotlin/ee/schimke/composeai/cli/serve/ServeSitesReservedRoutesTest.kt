@@ -49,6 +49,7 @@ class ServeSitesReservedRoutesTest {
       "ServeSiteIcon.MASKABLE_ICON_PATH" to ServeSiteIcon.MASKABLE_ICON_PATH,
       "ServeSiteIcon.MANIFEST_PATH" to ServeSiteIcon.MANIFEST_PATH,
       "ServeRcFonts.URL_BASE" to ServeRcFonts.URL_BASE,
+      "ServeGoogleFonts.ROUTE" to ServeGoogleFonts.ROUTE,
       "ServeAgentGrants.BASE_PATH" to ServeAgentGrants.BASE_PATH,
       "ServeAgentGrants.REQUEST_PATH" to ServeAgentGrants.REQUEST_PATH,
       "ServeAgentGrants.POLL_PATH" to ServeAgentGrants.POLL_PATH,
