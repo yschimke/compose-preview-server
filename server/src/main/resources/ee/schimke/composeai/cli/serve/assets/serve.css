@@ -5589,3 +5589,12 @@ body { padding-left: max(28px, env(safe-area-inset-left, 0px));
 @media (hover: none) {
   .cp-card:hover .cp-imgwrap img { transform: none; }
 }
+
+/* CROSS-DOCUMENT VIEW TRANSITIONS. Catalog → component → variant is a chain of ordinary page loads
+   on one origin, and every page shares this sheet, so opting in here cross-fades each same-origin
+   navigation instead of flashing white between them — most visible in an installed app window,
+   which has no browser chrome to paper over it. Only for a reader who has not asked for less
+   motion; a browser without the feature ignores the rule. */
+@media (prefers-reduced-motion: no-preference) {
+  @view-transition { navigation: auto; }
+}

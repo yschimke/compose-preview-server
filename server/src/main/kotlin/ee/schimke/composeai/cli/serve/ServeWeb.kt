@@ -19145,6 +19145,7 @@ ${scriptTag("known-differences.js")}
         <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">$unfurlBlock
         <title>${WebEscaping.htmlEscape(title)}</title>
 ${ServeSiteIcon.linkTags(themeCss, siteName.ifBlank { "Compose Preview" }).prependIndent("        ")}
+        $SPECULATION_RULES
         <link rel="stylesheet" href="${assetHref("serve.css")}">$feedLink$rcFontsBlock$themeBlock$interfaceModeBoot
         <!-- Apply the Transparent choice before first paint (no checkerboard flash).
              A `?bg=` on the URL is an explicit, shareable choice and outranks the sticky one. -->
@@ -19163,6 +19164,48 @@ ${ServeSiteIcon.linkTags(themeCss, siteName.ifBlank { "Compose Preview" }).prepe
     """
       .trimIndent() + "\n"
   }
+
+  /**
+   * Same-origin links this page may **prefetch** — the document only, never prerendered — when the
+   * visitor shows intent (`moderate`: a hover of about 200ms, or a press). Catalog → component →
+   * variant is a chain of plain page loads, and fetching the next document during the hover takes
+   * most of the wait out of the click.
+   *
+   * Prefetch and not prerender: a viewer page that ran would open a render socket, wake a daemon
+   * and count a view for a page nobody opened. A prefetch is one GET of the HTML. Everything that
+   * acts, signs in or out, streams, or is heavy is excluded by path, and a link the page marks as a
+   * download, a new tab or `nofollow` is left alone.
+   */
+  internal val SPECULATION_RULES: String =
+    """<script type="speculationrules">{"prefetch":[{"source":"document","where":{"and":[""" +
+      """{"href_matches":"/*"},{"not":{"href_matches":[""" +
+      listOf(
+          "/api/*",
+          "/auth/*",
+          "/admin/*",
+          "/oauth/*",
+          "/agent-access/*",
+          "/report-bug*",
+          "/refresh*",
+          "/ui-builder*",
+          "/playground*",
+          "/pg/*",
+          "/bundle*",
+          "/render/*",
+          "/motion/*",
+          "/ws/*",
+          "/mcp*",
+          "/i/*",
+          "/d/*",
+          "/docs*",
+          "/images*",
+          "/*/render/*",
+          "/*/refresh*",
+          "/*/bundle*",
+        )
+        .joinToString(",") { "\"$it\"" } +
+      """]}},{"not":{"selector_matches":"[download], [target=_blank], [rel~=nofollow], """ +
+      """[data-cp-no-prefetch]"}}]},"eagerness":"moderate"}]}</script>"""
 
   /**
    * Pin the page's colour scheme to the selected preview theme **before first paint**, when the
