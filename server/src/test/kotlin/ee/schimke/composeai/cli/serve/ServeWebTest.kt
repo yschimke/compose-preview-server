@@ -749,11 +749,12 @@ class ServeWebTest {
 
   /**
    * The builder was reachable only by knowing its URL, so the whole authoring surface was invisible
-   * from the front door. The card offers it — on the catalogs the builder actually runs for, and to
-   * the visitors whose credential the create route will accept.
+   * from the front door. The header offers it once — to the visitors whose credential the create
+   * route will accept, on a host that runs it for a listed catalog — rather than repeating the same
+   * link on every card.
    */
   @Test
-  fun `a front-door card offers the UI builder to a permitted visitor`() {
+  fun `the front-door header offers the UI builder to a permitted visitor`() {
     val html =
       builderHome(
         ServeWeb.UiBuilderInvite(
@@ -763,17 +764,27 @@ class ServeWebTest {
         )
       )
 
+    val header =
+      html.substringAfter("<header class=\"cp-site-header\">").substringBefore("</header>")
     assertTrue(
-      html.contains(
-        "<a class=\"cp-action-chip cp-action-chip--primary\" " +
-          "href=\"/ui-builder/?catalog=m3-catalog\" " +
-          "aria-label=\"m3-catalog: open the UI Builder\">"
-      ),
-      html,
+      header.contains("<a class=\"cp-site-builder-link\" href=\"/ui-builder/\">"),
+      header,
     )
-    // …but only for a catalog the builder is configured for. Every other card is unchanged.
-    assertFalse(html.contains("catalog=plain"), html)
-    assertEquals(1, Regex("cp-action-chip--primary").findAll(html).count(), html)
+    // Once, in the bar: no card carries its own copy any more.
+    assertEquals(1, Regex(">UI Builder</a>").findAll(html).count(), html)
+    assertFalse(html.contains("cp-action-chip--primary"), html)
+    assertFalse(html.contains("?catalog="), html)
+  }
+
+  /** A host whose builder serves none of the listed catalogs has nothing to offer from here. */
+  @Test
+  fun `no header builder link when the builder serves no listed catalog`() {
+    val html =
+      builderHome(
+        ServeWeb.UiBuilderInvite(systems = setOf("elsewhere"), signedIn = true, permitted = true)
+      )
+
+    assertFalse(html.contains("UI Builder"), html)
   }
 
   /**
@@ -793,7 +804,9 @@ class ServeWebTest {
         )
       )
 
-    assertTrue(html.contains("cp-action-chip cp-action-chip--locked"), html)
+    val header =
+      html.substringAfter("<header class=\"cp-site-header\">").substringBefore("</header>")
+    assertTrue(header.contains("cp-action-chip cp-action-chip--locked"), header)
     assertTrue(
       html.contains(
         "<span class=\"cp-action-note-body\">" +
@@ -801,8 +814,8 @@ class ServeWebTest {
       ),
       html,
     )
-    // Explained, not offered: nothing on the page links the create route.
-    assertFalse(html.contains("catalog=m3-catalog"), html)
+    // Explained, not offered: nothing on the page links the builder.
+    assertFalse(html.contains("cp-site-builder-link"), html)
   }
 
   /** Creating a design is a write, so an anonymous visitor is offered the header's sign-in only. */

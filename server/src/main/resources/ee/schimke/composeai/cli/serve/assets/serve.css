@@ -293,6 +293,12 @@ input, select, textarea, progress { accent-color: var(--md-sys-color-primary); }
 .cp-site-nav a:hover { text-decoration: none; color: var(--md-sys-color-primary);
   background: color-mix(in srgb, var(--md-sys-color-primary) 8%, transparent); }
 .cp-site-nav .cp-gh-auth { color: var(--cp-fg-soft); }
+/* The front door's UI Builder entry (ServeWeb.builderHeaderAction). Permitted, it is one more nav
+   link; refused, it is the locked chip disclosure, whose explanation floats under the bar as a menu
+   surface rather than growing the row the way it does inside a card. */
+.cp-site-nav details.cp-site-builder-note { position: relative; flex: none; }
+.cp-site-nav .cp-site-builder-note .cp-action-note-body { position: absolute; right: 0;
+  top: calc(100% + 4px); z-index: 60; width: max-content; max-width: min(280px, calc(100vw - 28px)); }
 /* The Settings menu (ServeWeb.settingsMenuHtml): standing per-visitor preferences, as opposed to
    the controls that describe what is on screen. A `<details>` so it works with no JavaScript; its
    summary is styled as one more nav action, and the panel is an M3 menu surface anchored under it.
