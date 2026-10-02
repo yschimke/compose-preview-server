@@ -19144,7 +19144,7 @@ ${scriptTag("known-differences.js")}
         <meta charset="utf-8">
         <meta name="viewport" content="width=device-width, initial-scale=1">$unfurlBlock
         <title>${WebEscaping.htmlEscape(title)}</title>
-${ServeSiteIcon.linkTags().prependIndent("        ")}
+${ServeSiteIcon.linkTags(themeCss, siteName.ifBlank { "Compose Preview" }).prependIndent("        ")}
         <link rel="stylesheet" href="${assetHref("serve.css")}">$feedLink$rcFontsBlock$themeBlock$interfaceModeBoot
         <!-- Apply the Transparent choice before first paint (no checkerboard flash).
              A `?bg=` on the URL is an explicit, shareable choice and outranks the sticky one. -->

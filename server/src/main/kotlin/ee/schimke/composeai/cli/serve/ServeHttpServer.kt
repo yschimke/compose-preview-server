@@ -1684,7 +1684,13 @@ class ServeHttpServer(
         get(ServeSiteIcon.MASKABLE_ICON_PATH) { respondSiteIcon(ServeSiteIcon.maskableIcon) }
         // Installable as an app ([ServeSiteIcon.manifest]). Ungated like the icons it names: the
         // browser fetches it without the page's query string, and it describes nothing private.
-        get(ServeSiteIcon.MANIFEST_PATH) { respondSiteIcon(siteManifest) }
+        //
+        // Per host: a top-level site installs as its own app, under its catalog's name and colour,
+        // rather than as one more "Compose Preview" window that opens the box's front door.
+        get(ServeSiteIcon.MANIFEST_PATH) { respondSiteIcon(manifestFor(call)) }
+        // The manifest's install-dialog screenshots: committed captures, ungated like the icons.
+        get(ServeSiteIcon.SCREENSHOT_NARROW_PATH) { respondScreenshot() }
+        get(ServeSiteIcon.SCREENSHOT_WIDE_PATH) { respondScreenshot() }
 
         // The in-browser Remote Compose player: a single shared IIFE bundle (global `RC`), baked
         // into the CLI jar as a classpath resource and served here so the viewer's client-side
@@ -7545,22 +7551,63 @@ class ServeHttpServer(
       name = "Compose Preview",
       shortName = "Compose Preview",
       startUrl = "/",
-      shortcuts =
-        if (designService == null) emptyList()
-        else
-          listOf(
-            ServeSiteIcon.Shortcut(
-              "UI builder",
-              "/ui-builder/",
-              "Start a design or carry on with one",
-            ),
-            ServeSiteIcon.Shortcut(
-              "My designs",
-              "/ui-builder/designs",
-              "Every design you own or that was shared with you",
-            ),
-          ),
+      shortcuts = manifestShortcuts,
     )
+  }
+
+  /** Launcher shortcuts: the UI builder and its designs, where this box has one. */
+  private val manifestShortcuts: List<ServeSiteIcon.Shortcut>
+    get() =
+      if (designService == null) emptyList()
+      else
+        listOf(
+          ServeSiteIcon.Shortcut(
+            "UI builder",
+            "/ui-builder/",
+            "Start a design or carry on with one",
+          ),
+          ServeSiteIcon.Shortcut(
+            "My designs",
+            "/ui-builder/designs",
+            "Every design you own or that was shared with you",
+          ),
+        )
+
+  /** Site-host manifests, keyed by what they are built from so a re-themed catalog rebuilds. */
+  private val siteManifests =
+    java.util.concurrent.ConcurrentHashMap<List<String>, ServeSiteIcon.Icon>()
+
+  /**
+   * The manifest for the host [call] arrived on: [siteManifest] on the main host, and on a
+   * top-level site ([ServeSites]) one named for that site's catalog and coloured by its palette.
+   * Its `id`, `start_url` and `scope` are `/` like the main host's, but a manifest's members
+   * resolve against its own origin — so each site host is a separate installable app.
+   */
+  private fun manifestFor(call: ApplicationCall): ServeSiteIcon.Icon {
+    val system = call.siteSystem() ?: return siteManifest
+    val (name, themeCss, _) = call.siteSkin()
+    val title = name.ifBlank { system }
+    val themeColor = ServeSiteIcon.themeColors(themeCss).first
+    return siteManifests.computeIfAbsent(listOf(system, title, themeColor)) {
+      ServeSiteIcon.manifest(
+        name = title,
+        // A launcher truncates past about a dozen characters; the catalog id is the short form
+        // its own URLs already use, so prefer it to a name cut mid-word.
+        shortName =
+          listOf(title, system).firstOrNull { it.length <= SHORT_NAME_MAX }
+            ?: title.take(SHORT_NAME_MAX),
+        startUrl = "/",
+        shortcuts = manifestShortcuts,
+        description = "$title — Compose previews from this catalog.",
+        themeColor = themeColor,
+      )
+    }
+  }
+
+  private suspend fun RoutingContext.respondScreenshot() {
+    val icon = ServeSiteIcon.screenshot(call.request.path())
+    if (icon == null) call.respondText("not found", status = HttpStatusCode.NotFound)
+    else respondSiteIcon(icon)
   }
 
   private suspend fun RoutingContext.respondSiteIcon(icon: ServeSiteIcon.Icon) {
@@ -17507,6 +17554,9 @@ class ServeHttpServer(
 
     /** The path segment that introduces a UI-builder bundle version. */
     private const val UI_BUILDER_VERSION_SEGMENT = "v"
+
+    /** Launchers truncate a `short_name` past about a dozen characters. */
+    private const val SHORT_NAME_MAX = 12
 
     /**
      * A year, and `immutable` so a reload does not revalidate either.

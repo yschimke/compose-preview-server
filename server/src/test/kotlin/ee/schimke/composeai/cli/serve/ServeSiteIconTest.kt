@@ -151,4 +151,78 @@ class ServeSiteIconTest {
     val maskable = ImageIO.read(ByteArrayInputStream(ServeSiteIcon.maskableIcon.bytes))
     assertEquals(0xff, maskable.getRGB(0, 0) ushr 24)
   }
+
+  /**
+   * The installed app's richer install UI and launch behaviour: a second launch focuses the window
+   * already open, the install dialog has a phone and a desktop screenshot that are actually served,
+   * and the display override never asks for a window-controls overlay the header cannot host.
+   */
+  @Test
+  fun `the manifest carries launch handling, categories and screenshots`() {
+    val manifest =
+      ServeSiteIcon.manifest(
+        name = "Compose Preview",
+        shortName = "Compose Preview",
+        startUrl = "/",
+        shortcuts = emptyList(),
+      )
+    val root =
+      kotlinx.serialization.json.Json.parseToJsonElement(manifest.bytes.decodeToString()).jsonObject
+    assertEquals(
+      listOf("standalone", "minimal-ui"),
+      root.getValue("display_override").jsonArray.map { it.jsonPrimitive.content },
+    )
+    assertEquals(
+      listOf("focus-existing", "auto"),
+      root.getValue("launch_handler").jsonObject.getValue("client_mode").jsonArray.map {
+        it.jsonPrimitive.content
+      },
+    )
+    assertTrue(root.getValue("categories").jsonArray.isNotEmpty())
+    val shots = root.getValue("screenshots").jsonArray.map { it.jsonObject }
+    assertEquals(
+      setOf("narrow", "wide"),
+      shots.map { it.getValue("form_factor").jsonPrimitive.content }.toSet(),
+    )
+    for (shot in shots) {
+      val src = shot.getValue("src").jsonPrimitive.content
+      val bytes = assertNotNull(ServeSiteIcon.screenshot(src), "$src is packaged").bytes
+      val image = assertNotNull(ImageIO.read(ByteArrayInputStream(bytes)))
+      assertEquals(shot.getValue("sizes").jsonPrimitive.content, "${image.width}x${image.height}")
+    }
+  }
+
+  /** The browser chrome follows the page's surface in each scheme, including a catalog palette. */
+  @Test
+  fun `theme-color is declared once per colour scheme`() {
+    val tags = ServeSiteIcon.linkTags()
+    assertTrue(
+      tags.contains(
+        """<meta name="theme-color" media="(prefers-color-scheme: light)" content="#fef7ff">"""
+      ),
+      tags,
+    )
+    assertTrue(
+      tags.contains(
+        """<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#141218">"""
+      ),
+      tags,
+    )
+    assertTrue(tags.contains("""<meta name="apple-mobile-web-app-capable" content="yes">"""), tags)
+
+    val themed =
+      ServeSiteIcon.linkTags(
+        ":root {\n  --md-sys-color-surface: light-dark(#F8F4F8, #202124);\n}\n",
+        appTitle = "Wear <M3>",
+      )
+    assertTrue(
+      themed.contains("""media="(prefers-color-scheme: light)" content="#f8f4f8""""),
+      themed,
+    )
+    assertTrue(
+      themed.contains("""media="(prefers-color-scheme: dark)" content="#202124""""),
+      themed,
+    )
+    assertTrue(themed.contains("""content="Wear &lt;M3&gt;""""), themed)
+  }
 }
