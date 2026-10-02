@@ -19142,7 +19142,7 @@ ${scriptTag("known-differences.js")}
     <html lang="en"$themeKeyAttr>
       <head>
         <meta charset="utf-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1">$unfurlBlock
+        <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">$unfurlBlock
         <title>${WebEscaping.htmlEscape(title)}</title>
 ${ServeSiteIcon.linkTags(themeCss, siteName.ifBlank { "Compose Preview" }).prependIndent("        ")}
         <link rel="stylesheet" href="${assetHref("serve.css")}">$feedLink$rcFontsBlock$themeBlock$interfaceModeBoot
