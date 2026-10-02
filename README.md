@@ -202,6 +202,14 @@ Still to check in a real host, as part of the
 - whether the sandbox allows WebAssembly compilation (`'wasm-unsafe-eval'`) and WebGL;
 - whether `resources/read` on the `.uid` file reports `writable: true`, so that saves happen.
 
+## On a phone
+
+The pages work on phones, and the site installs as an app with a share target: a screenshot shared
+to it opens the bug report with the image attached. `serve --lan` prints a QR code for opening a
+laptop's server on a phone. A plain-http LAN address is not a secure context, so installing the app,
+Web Share and the clipboard need HTTPS or `adb reverse`. See
+[Compose Preview on a phone](docs/serve/MOBILE.md).
+
 ## Spatial and WebXR previews
 
 A portable bundle can publish an XR preview as a version-one `SpatialScene` document and its panel
