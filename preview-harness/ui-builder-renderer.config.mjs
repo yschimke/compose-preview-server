@@ -9,9 +9,12 @@ export default defineConfig({
     timeout: 60_000,
     reporter: process.env.CI ? "github" : "list",
     use: {
-        // Harness lanes stay isolated: a service worker registered by one page (the UI builder
-        // ships one) must never answer another lane's requests from its cache.
-        serviceWorkers: "block",
+        // Unlike the other harness lanes, this one does not set `serviceWorkers: "block"`. Playwright
+        // implements the block with a script injected into every frame that reads
+        // `navigator.serviceWorker`, and in the renderer's sandboxed iframe (no `allow-same-origin`)
+        // that read throws — a page error this spec rightly fails on. Nothing here can register a
+        // worker anyway: the lane serves the renderer's static dist, not the editor shell, and a
+        // sandboxed frame has no service-worker access at all.
         browserName: "chromium",
         baseURL: `http://127.0.0.1:${PORT}/ui-builder/build/wasmDist/`,
         viewport: { width: 1280, height: 800 },
