@@ -2566,6 +2566,11 @@ public class ServeRunner(
     val reviews: ServeUiBuilderReviewStore?,
     /** Shared file-manager folders, stored beside design state without changing revisions. */
     val folders: ServeUiBuilderFolderStore?,
+    /**
+     * The components this host's editors publish, beside the state for the reason designs live here
+     * while they move: a project's own `ui-builder/components/` is its repository's to change.
+     */
+    val components: ServeUiBuilderComponentStore? = null,
     /** The design listing's card pictures, drawn ahead of the reader and kept across restarts. */
     val thumbnails: ServeUiBuilderThumbnails?,
     /**
@@ -3196,6 +3201,18 @@ public class ServeRunner(
             )
           }
           .getOrNull(),
+      components = runCatching {
+          ServeUiBuilderComponentStore(
+            directory.resolve(ServeUiBuilderComponentStore.DIRECTORY).toPath()
+          )
+        }
+          .onFailure {
+            System.err.println(
+              "serve: UI-builder component publishing unavailable (${it.message}); " +
+                "the project library is still read, and nothing can be published to it"
+            )
+          }
+          .getOrNull(),
       compose = compose,
       nativeBackends = nativeBackends,
       validator = ScratchUiBuilderDraftValidator(catalogs, annotatedExporter),
@@ -3695,6 +3712,7 @@ public class ServeRunner(
           uiBuilderDesignDirectories() + uiBuilderDesignCatalogCoordinates(catalogLoads)
         },
         uiBuilderComponentLibrary = uiBuilderComponentLibrary,
+        uiBuilderComponentStore = uiBuilderLane?.components,
         // The same executor the export runs, asked for the record rather than for Kotlin: the
         // editor's code pane generates from it in the browser, so the two lanes cannot be reading
         // different records. Null lane ⇒ no record, which is also no builder to serve it to.

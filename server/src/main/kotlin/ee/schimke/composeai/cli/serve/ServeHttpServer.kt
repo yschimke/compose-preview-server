@@ -422,6 +422,12 @@ class ServeHttpServer(
    */
   private val uiBuilderComponentLibrary: ServeUiBuilderComponentLibrary? = null,
   /**
+   * The components this host's editors publish ([ServeUiBuilderComponentStore]), read after the
+   * projects' own so a committed component shadows the host copy. Null serves the library
+   * read-only.
+   */
+  private val uiBuilderComponentStore: ServeUiBuilderComponentStore? = null,
+  /**
    * The record the Compose export generates a given catalog's designs from, so the browser's code
    * pane can read the same one. See [installUiBuilderCatalogRecordRoutes].
    *
@@ -1335,7 +1341,7 @@ class ServeHttpServer(
               designService,
               sameOriginUiBuilderAuthorization,
               ServeUiBuilderComponentDrift(uiBuilderComponentLibrary),
-              uiBuilderDesignCatalogs,
+              ::uiBuilderComponentCatalogs,
             )
           }
         }
@@ -1349,6 +1355,11 @@ class ServeHttpServer(
             uiBuilderAuthorization,
             uiBuilderComponentLibrary,
             uiBuilderDesignCatalogs,
+            store = uiBuilderComponentStore,
+            validate =
+              uiBuilderValidator?.let { validator ->
+                { actorId, document -> componentPublishProblems(validator, actorId, document) }
+              },
           )
         }
         // What the export generates from, for the editor that has to agree with it. Outside the
@@ -6012,10 +6023,17 @@ class ServeHttpServer(
    * index is one HTTP round trip per project, and one unreachable branch must not empty the list
    * for the rest.
    */
+  /**
+   * Every place a shared component is read from: the projects first, then what this host's editors
+   * published, so a component committed to a project shadows the host copy of it.
+   */
+  private fun uiBuilderComponentCatalogs(): List<ServeUiBuilderDesignLibrary.Coordinate> =
+    uiBuilderDesignCatalogs() + uiBuilderComponentStore?.coordinates().orEmpty()
+
   private suspend fun RoutingContext.respondAdminUiBuilderComponentLibrary(
     library: ServeUiBuilderComponentLibrary
   ) {
-    val catalogs = uiBuilderDesignCatalogs()
+    val catalogs = uiBuilderComponentCatalogs()
     val entries = withContext(Dispatchers.IO) { library.list(catalogs) }
     call.response.headers.append(HttpHeaders.CacheControl, "no-store")
     call.respondText(
@@ -6055,7 +6073,7 @@ class ServeHttpServer(
     // Every coordinate for this system, not the first: `--ui-builder-designs` can name a local
     // checkout for the same system a served catalog covers, and the listing flattens both. Taking
     // only the head made a component published solely on the branch 404 here while appearing there.
-    val catalogs = uiBuilderDesignCatalogs().filter { it.system == system }
+    val catalogs = uiBuilderComponentCatalogs().filter { it.system == system }
     if (catalogs.isEmpty()) {
       call.respondText(
         "$system is not a catalog this host serves",
