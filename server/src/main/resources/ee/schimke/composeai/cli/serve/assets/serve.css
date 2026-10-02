@@ -2621,13 +2621,13 @@ cp-history-menu { display: contents; }
 .cp-url { position: absolute; left: 0; top: 0; width: 1px; height: 1px; padding: 0; margin: -1px;
   overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
 /* M3 text buttons on the export line. */
-.cp-copyurl, .cp-copyimg, .cp-dl { font-size: var(--md-sys-typescale-label-large-size);
+.cp-copyurl, .cp-copyimg, .cp-share, .cp-dl { font-size: var(--md-sys-typescale-label-large-size);
   letter-spacing: var(--md-sys-typescale-label-large-tracking); font-weight: 500;
   padding: 8px 10px; border-radius: var(--md-sys-shape-corner-full); border: 0;
   background: transparent; color: var(--md-sys-color-primary); cursor: pointer;
   text-decoration: none; flex: none; white-space: nowrap; font-family: inherit;
   transition: background var(--md-sys-motion-duration-short2) var(--md-sys-motion-easing-standard); }
-.cp-copyurl:hover, .cp-copyimg:hover, .cp-dl:hover {
+.cp-copyurl:hover, .cp-copyimg:hover, .cp-share:hover, .cp-dl:hover {
   background: color-mix(in srgb, var(--md-sys-color-primary) 8%, transparent); }
 /* Drawer toggles + the two collapsible drawers (left component nav, right overrides). The open
    state is a class on .cp-viewer — cp-controls-open (default on) and cp-nav-open (default off) —
@@ -5573,7 +5573,7 @@ body { padding-left: max(28px, env(safe-area-inset-left, 0px));
   .cp-settings-btn, .cp-site-search-btn, .cp-keyboard-close, .cp-back,
   .cp-action-chip, .cp-tab, .cp-pane-tab, .cp-theme-btn, .cp-bg-btn, .cp-state-btn,
   .cp-revisions-btn, .cp-shot-mode, .cp-shot-action, .cp-fab-choice,
-  .cp-copyurl, .cp-copyimg, .cp-dl {
+  .cp-copyurl, .cp-copyimg, .cp-share, .cp-dl {
     min-height: 44px; }
   .cp-site-nav a, .cp-settings-option, .cp-revision, .cp-tree-component, .cp-tree-page,
   .cp-tree-variant, .cp-tree-group, .cp-tree-pages-row, .cp-strip-row {

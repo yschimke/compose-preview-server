@@ -51,7 +51,13 @@ const limits = {
     // was already on this page for the typography overlay. Raised by the usual 2 kB step over the
     // former ceiling. `viewer-components.js` is also two thirds of the spatial viewer's bundle, so
     // that page absorbed the same increase; see its own note below.
-    viewer: 72_000,
+    //
+    // 72_000 until the export bar learned Share link / Share PNG on a touchscreen
+    // (`viewer/webShare.ts`), which is the phone's way to hand a preview on. Measured at 72_324
+    // gzip bytes: +621 over the previous build, all of it that module, and it rides in the
+    // viewer bundle rather than a lazy chunk because every entry here is a classic script. Raised
+    // by the usual 2 kB step over the former ceiling.
+    viewer: 74_000,
     // 180_000 until the report form's body writer learned to fill a locator's `overrides:` from
     // live viewer state (#5000). That put `fillOverrides` and the classification read-back into
     // `viewer-components.js`, which this page carries for its report affordance: measured at

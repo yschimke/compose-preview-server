@@ -42,6 +42,7 @@ import { type ApiDocLink, usableApiDocs } from "./viewer/apiDocs.js";
 import { reportBody } from "./report/body.js";
 import { withStage } from "./annotate/report.js";
 import { isTransparent } from "./backgroundChoice.js";
+import { installWebShare } from "./viewer/webShare.js";
 import { writeThemeMemory } from "./chrome/themeMemory.js";
 import { fitInk, imageInk, type InkBounds } from "./design/ink.js";
 import { compareApi } from "./compare/api.js";
@@ -1473,6 +1474,13 @@ document.querySelectorAll<HTMLElement>(".cp-copyimg").forEach(function (btn) {
         }
         copyAsText();
     });
+});
+// Share link / Share PNG beside the Copy actions, on a touchscreen with a share sheet. The PNG is
+// the one Copy PNG would take: composited onto the stage unless Transparent is on.
+installWebShare(function () {
+    var field = may<HTMLInputElement>("cp-url-png");
+    if (!field || !field.value) return null;
+    return isTransparent() ? field.value : withStage(field.value);
 });
 // --- Live frame painting.
 //
