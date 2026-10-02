@@ -102,6 +102,58 @@ class ServeCatalogStoreTest {
     """
       .trimIndent()
 
+  /** Loads [catalog] and returns the host's resolved hero. */
+  private fun heroOf(catalog: String): String? {
+    assertTrue(
+      store(
+          TrustStore.EMPTY,
+          fetch = { url ->
+            when {
+              url.endsWith("/${ServeCatalogStore.CATALOG_FILE}") -> catalog.toByteArray()
+              url.endsWith(".png") -> png()
+              else -> null
+            }
+          },
+        )
+        .load("glimmer-catalog") is ServeCatalogStore.Result.Ok
+    )
+    return registered.getValue("glimmer-catalog").declaredHeroPreviewId
+  }
+
+  private fun glimmerCatalog(hero: String): String =
+    """
+    {"schema":"design-parity-catalog/v1","system":"glimmer-catalog","display":{"hero":"$hero"},
+     "components":[
+      {"componentId":"Button","images":[
+        {"path":"images/button/ideal__default.png","previewId":"ee.g.ButtonsKt.ButtonSticker"},
+        {"path":"images/button/ideal__pressed.png","state":"pressed",
+         "previewId":"ee.g.ButtonsKt.ButtonSticker_VARIANT_pressed"}]},
+      {"componentId":"Card","images":[
+        {"path":"images/card/ideal__default.png","previewId":"ee.g.CardsKt.CardSticker"},
+        {"path":"images/card/ideal__default__content-action.png","props":{"content":"action"},
+         "previewId":"ee.g.CardsKt.CardActionSticker"}]}]}
+    """
+      .trimIndent()
+
+  @Test
+  fun `a function-name hero resolves through the images' daemon preview ids`() {
+    // A @CatalogVariant function publishes under its parent's slug, so neither the exact-id nor the
+    // componentId-slug path can find it — glimmer-catalog's `CardActionSticker` fell through to the
+    // server's own pick (a lone Button) this way.
+    assertEquals(
+      "card__ideal__default__content-action",
+      heroOf(glimmerCatalog("CardActionSticker")),
+    )
+    // A component's own function leads with its default render, not a `_VARIANT_` sibling.
+    assertEquals("button__ideal__default", heroOf(glimmerCatalog("ButtonSticker")))
+  }
+
+  @Test
+  fun `a componentId hero still wins over the function-name lookup`() {
+    assertEquals("card__ideal__default", heroOf(glimmerCatalog("Card")))
+    assertEquals(null, heroOf(glimmerCatalog("NoSuchSticker")))
+  }
+
   @Test
   fun `component parameters survive catalog loading`() {
     val catalog =
