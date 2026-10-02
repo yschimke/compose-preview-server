@@ -120,6 +120,50 @@ internal fun Route.installUiBuilderComponentLibraryRoutes(
     call.respondSymbol(symbol, HttpStatusCode.OK)
   }
 
+  // The file itself, for moving a component into a project's repository: what a checkout commits
+  // under `ui-builder/components/`, and the index entry that names it.
+  get(UI_BUILDER_COMPONENT_FILE_PATH) {
+    if (call.authorizedForComponentLibrary(authorization) == null) return@get
+    val system = call.parameters["system"].orEmpty()
+    val componentId = call.parameters["componentId"].orEmpty()
+    val found =
+      withContext(Dispatchers.IO) {
+        everywhere()
+          .filter { it.system == system }
+          .firstNotNullOfOrNull { catalog ->
+            library
+              .index(catalog)
+              .firstOrNull { it.componentId == componentId }
+              ?.let { entry -> library.document(catalog, entry)?.let { entry to it } }
+          }
+      }
+    if (found == null) {
+      call.respondComponentLibraryError(
+        HttpStatusCode.NotFound,
+        "no usable component called $componentId is published for $system",
+      )
+      return@get
+    }
+    val (entry, document) = found
+    call.respondText(
+      COMPONENT_LIBRARY_JSON.encodeToString(
+        UiBuilderComponentFileResponse.serializer(),
+        UiBuilderComponentFileResponse(
+          system = entry.system,
+          entry =
+            UiBuilderComponentIndexEntryDto(
+              id = entry.componentId,
+              title = entry.title,
+              description = entry.description,
+              file = entry.file,
+            ),
+          document = document,
+        ),
+      ),
+      ContentType.Application.Json,
+    )
+  }
+
   if (store == null) return
   put(UI_BUILDER_COMPONENT_SYMBOL_PATH) {
     val actorId =
@@ -322,6 +366,33 @@ internal data class UiBuilderComponentSymbolResponse(
 )
 
 internal const val UI_BUILDER_COMPONENT_LIBRARY_PATH = "/api/ui-builder/v1/component-library"
+
+/**
+ * One published component as the file a project commits, and the line its `index.json` needs.
+ *
+ * Moving a component this host holds into the repository is these two, written under
+ * `ui-builder/components/`: from then on the project's copy is read first and shadows this one, and
+ * since the content is the same, so is the digest every importing design recorded.
+ */
+@Serializable
+internal data class UiBuilderComponentFileResponse(
+  val schema: String = "compose-preview-serve/ui-builder-component-file/v1",
+  val system: String,
+  val entry: UiBuilderComponentIndexEntryDto,
+  val document: DesignDocumentV1,
+)
+
+/** One `components` row of `ui-builder/components/index.json`, as the index reader parses it. */
+@Serializable
+internal data class UiBuilderComponentIndexEntryDto(
+  val id: String,
+  val title: String,
+  val description: String? = null,
+  val file: String,
+)
+
+internal const val UI_BUILDER_COMPONENT_FILE_PATH =
+  "/api/ui-builder/v1/component-library/{system}/{componentId}/file"
 
 internal const val UI_BUILDER_COMPONENT_SYMBOL_PATH =
   "/api/ui-builder/v1/component-library/{system}/{componentId}"

@@ -235,6 +235,24 @@ class ServeUiBuilderComponentLibrary(
   }
 
   /**
+   * The file behind an entry, as the project or host holds it, once it checks out as a symbol.
+   *
+   * What moving a host-held component into a repository copies: the whole one-component document,
+   * environment and all, rather than the [Symbol] a design imports — which is only the part a
+   * design needs. Null for anything [symbol] would refuse, so nothing is copied into a project that
+   * its own library would then drop.
+   */
+  fun document(catalog: ServeUiBuilderDesignLibrary.Coordinate, entry: Entry): DesignDocumentV1? {
+    val bytes =
+      runCatching { read(catalog, "$COMPONENTS_DIR/${entry.file}", MAX_DOCUMENT_BYTES) }.getOrNull()
+        ?: return null
+    val document =
+      runCatching { json.decodeFromString<DesignDocumentV1>(bytes.toString(Charsets.UTF_8)) }
+        .getOrNull() ?: return null
+    return document.takeIf { symbolOf(entry, it) != null }
+  }
+
+  /**
    * The checked symbol a document publishes, or null with a logged reason.
    *
    * Internal rather than private so the checks can be exercised directly against a document the

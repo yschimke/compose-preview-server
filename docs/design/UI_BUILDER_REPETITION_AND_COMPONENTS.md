@@ -304,7 +304,10 @@ id already published; replacing names the digest it replaces and is refused, wit
 digest, when someone published in between. The project's repository stays its own: a project
 coordinate is read first, so a committed component shadows the host copy, and publishing over an id
 the project has committed is refused — change it there. Moving a host component into the
-repository is a copy of its two files. The pinned-catalog rule is checked at publish by the host's
+repository is `scripts/ui-builder/component-sync.mjs pull <system>/<componentId> --server <url>`,
+which reads `GET …/component-library/{system}/{componentId}/file` — the document as published and
+its index line — and writes both under the checkout's `ui-builder/components/`. Committed, the
+project copy shadows the host one with the same digest, so no importing design reports drift. The pinned-catalog rule is checked at publish by the host's
 own draft validator, ignoring export-only findings.
 
 **The far half — graduation.** Once a component stops changing daily, generate it into the app's own
