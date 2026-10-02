@@ -18,6 +18,46 @@ class ServeContactSheetTest {
       it.toByteArray()
     }
 
+  private fun solid(width: Int, height: Int, rgb: Int): ByteArray {
+    val image = BufferedImage(width, height, BufferedImage.TYPE_INT_RGB)
+    for (x in 0 until width) for (y in 0 until height) image.setRGB(x, y, rgb)
+    return ByteArrayOutputStream().use {
+      ImageIO.write(image, "png", it)
+      it.toByteArray()
+    }
+  }
+
+  @Test
+  fun `a matrix sheet numbers each tile in a strip under it, never over the picture`() {
+    // The finding from the live run (compose-preview-server#1262): a badge drawn on a 40 px
+    // component hid most of it. Every pixel of the tile must be the tile's own.
+    val red = 0xCC2222
+    val sheet = assertNotNull(ServeContactSheet.render(List(4) { solid(40, 40, red) }))
+    val image = ImageIO.read(ByteArrayInputStream(sheet))
+
+    // A 2x2 grid of captioned slots: wide enough for the caption, tall enough for its strip.
+    assertTrue(image.width >= 12 + 2 * (140 + 12), "width ${image.width}")
+    assertEquals(12 + 2 * (40 + 20 + 12), image.height)
+    // The first tile is centred in its slot. Inside the 1 px frame every captioned sheet draws
+    // round a tile, every pixel is still red — where the old badge covered the top-left 30 px.
+    val left = 12 + (140 - 40) / 2
+    for (x in left + 1 until left + 39) for (y in 13 until 12 + 39) {
+      assertEquals(red, image.getRGB(x, y) and 0xFFFFFF, "pixel ($x, $y) was drawn over")
+    }
+  }
+
+  @Test
+  fun `the number leads the caption, so cutting it to the slot never loses it`() {
+    // Rendered through compose with the same captions render() builds, checking placement only:
+    // a label too long for the slot is cut from the end, and the number comes first.
+    val long = "uiMode=dark, fontScale=1.5, locale=de-DE, layoutDirection=rtl, density=3.0"
+    val sheet = ServeContactSheet.render(listOf(png(40, 40), png(40, 40)), listOf(long, long))
+    assertNotNull(sheet)
+    val composed =
+      ServeContactSheet.compose(listOf(ServeContactSheet.Tile(png(40, 40), "1 · $long")))
+    assertEquals(140, composed.width - 24, "a captioned slot is widened to its minimum")
+  }
+
   @Test
   fun `the grid is near-square and never wider than its column cap`() {
     assertEquals(1, ServeContactSheet.columnsFor(1))
