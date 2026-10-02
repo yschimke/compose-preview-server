@@ -398,7 +398,16 @@ internal class ScreenGeneratorComposeExportExecutor(
           Generated.Refused(RECORD_FREE_DESIGN, listOf("no Remote emitter claimed this design"))
       }
     }
-    if (RecordFreeExport.applies(document)) {
+    // A Wear-catalog design rooted in neither the Wear screen scaffold nor a widget container is
+    // written by no Wear emitter; the record-driven generator below would only refuse it once per
+    // component ("no component `wear-m3/button` in this catalog"). Given the platform, the tagged
+    // overload refuses it with the one sentence the export, the Code pane and the Issues panel
+    // give: wrap the content in a screen. Widened for WEAR alone, because the two-argument
+    // `applies` also claims every A2UI design, which the tagged overload does not write.
+    if (
+      RecordFreeExport.applies(document) ||
+        (platform == UiBuilderCatalogPlatform.WEAR && RecordFreeExport.applies(document, platform))
+    ) {
       val packRecords =
         when (val packs = packRecordsFor(document)) {
           is PackRecords.Refused -> return Generated.Refused(packs.code, packs.reasons)
@@ -416,6 +425,7 @@ internal class ScreenGeneratorComposeExportExecutor(
                   return Generated.Refused(resolved.code, resolved.reasons)
                 is RecordFreeComponents.Found -> resolved.components
               },
+            platform = platform,
           )
       ) {
         // Unreachable: `applies` was true, so the emitter owns this document. Reported as a

@@ -1,5 +1,6 @@
 package ee.schimke.composeai.cli.serve
 
+import ee.schimke.composeai.uibuilder.export.UiBuilderCatalogPlatform
 import ee.schimke.composeai.uibuilder.export.WearWidgetHostShape
 import ee.schimke.composeai.uibuilder.protocol.AnimationStateV1
 import ee.schimke.composeai.uibuilder.protocol.AssetBindingV1
@@ -119,6 +120,36 @@ class ServeUiBuilderWearNativePreviewTest {
       )
 
     assertTrue("testTag" !in generated.source, generated.source)
+  }
+
+  /**
+   * A Wear component left as the design's root is written by neither Wear emitter, and the lane
+   * says what to do about it — the same sentence the export, the Code pane and the Issues panel
+   * give — rather than falling through to the record-driven generator and refusing once per
+   * component.
+   */
+  @Test
+  fun `a bare wear component root is refused with the wrap-it-in-a-screen sentence`() {
+    val wearExecutor =
+      ScreenGeneratorComposeExportExecutor(
+        { ComponentRecordSource.Lookup.Unconfigured },
+        catalogPlatform = { UiBuilderCatalogPlatform.WEAR },
+      )
+    val bareRoot =
+      wearScreen()
+        .copy(
+          roots = listOf("heading"),
+          nodes = wearScreen().nodes.filterKeys { it == "heading" },
+        )
+
+    val refused =
+      assertIs<ScreenGeneratorComposeExportExecutor.Generated.Refused>(
+        wearExecutor.generate(bareRoot, tagNodes = true)
+      )
+
+    assertEquals("UNEXPRESSIBLE_DOCUMENT", refused.code)
+    assertEquals(1, refused.reasons.size, refused.reasons.toString())
+    assertTrue("wear-m3/screen-scaffold" in refused.reasons.single(), refused.reasons.single())
   }
 
   /**
