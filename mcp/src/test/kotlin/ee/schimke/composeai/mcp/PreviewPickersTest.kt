@@ -138,6 +138,93 @@ class PreviewPickersTest {
   }
 
   @Test
+  fun `option uris are valid rfc 3986 on the wire and answers in either form map back`() {
+    val raw = "compose-preview://ws/_app/com.example.VKt.Screen_Devices - Small Round?config=a%b"
+    val encoded = OpenAiForms.encodeUri(raw)
+    assertThat(encoded)
+      .isEqualTo(
+        "compose-preview://ws/_app/com.example.VKt.Screen_Devices%20-%20Small%20Round?config=a%25b"
+      )
+    assertThat(java.net.URI(encoded).scheme).isEqualTo("compose-preview")
+    assertThat(OpenAiForms.decodeUri(encoded)).isEqualTo(raw)
+    // Non-ASCII round-trips through UTF-8 escapes; an already-safe URI is unchanged.
+    val unicode = "compose-preview://ws/_app/com.example.Ünïcode 😀"
+    assertThat(OpenAiForms.decodeUri(OpenAiForms.encodeUri(unicode))).isEqualTo(unicode)
+    assertThat(OpenAiForms.encodeUri("a://1?x=y&z")).isEqualTo("a://1?x=y&z")
+    assertThat(OpenAiForms.decodeUri("a%2")).isNull()
+    assertThat(OpenAiForms.decodeUri("a%+1")).isNull()
+
+    val option = OpenAiForms.ResourceOption(raw, "small")
+    assertThat(option.toJson()["uri"]!!.jsonPrimitive.content).isEqualTo(encoded)
+    val field = OpenAiForms.singleResourceField(listOf(option), default = raw)
+    assertThat(field["default"]!!.jsonPrimitive.content).isEqualTo(encoded)
+
+    val offered = listOf(raw, "compose-preview://ws/_app/com.example.Other")
+    fun content(value: String) = buildJsonObject { put("f", value) }
+    assertThat(OpenAiForms.selectedUri(content(encoded), "f", offered)).isEqualTo(raw)
+    assertThat(OpenAiForms.selectedUri(content(raw), "f", offered)).isEqualTo(raw)
+    assertThat(
+        OpenAiForms.selectedUris(
+          buildJsonObject {
+            putJsonArray("f") {
+              add(encoded)
+              add(offered[1])
+            }
+          },
+          "f",
+          offered,
+        )
+      )
+      .containsExactly(raw, offered[1])
+      .inOrder()
+    // The same option twice, once in each form, is still a duplicate.
+    assertThat(
+        OpenAiForms.selectedUris(
+          buildJsonObject {
+            putJsonArray("f") {
+              add(encoded)
+              add(raw)
+            }
+          },
+          "f",
+          offered,
+        )
+      )
+      .isNull()
+  }
+
+  @Test
+  fun `variant labels drop the shared function name and stay unique`() {
+    fun uri(fqn: String, config: String? = null) =
+      PreviewUri(WorkspaceId("ws"), ":app", fqn, config).toUri()
+    assertThat(
+        PreviewPickers.variantLabels(
+          listOf(
+            uri("com.example.MainActivityKt.ListScreenPreview_Devices - Small Round"),
+            uri("com.example.MainActivityKt.ListScreenPreview_Devices - Large Round"),
+          )
+        )
+      )
+      .containsExactly("Devices - Small Round", "Devices - Large Round")
+      .inOrder()
+    // Nothing shared to drop: the simple names.
+    assertThat(PreviewPickers.variantLabels(listOf(uri("a.HomeKt.Home"), uri("a.CardKt.Card"))))
+      .containsExactly("Home", "Card")
+      .inOrder()
+    // Configs distinguish otherwise identical names.
+    assertThat(PreviewPickers.variantLabels(listOf(uri("a.K.P", "dark"), uri("a.K.P", "light"))))
+      .containsExactly("P (dark)", "P (light)")
+      .inOrder()
+    // The same simple name in two packages: only the whole URIs tell them apart.
+    val clash = listOf(uri("a.K.Same"), uri("b.K.Same"))
+    assertThat(PreviewPickers.variantLabels(clash)).isEqualTo(clash)
+    // A remainder that would be blank keeps the simple names.
+    assertThat(PreviewPickers.variantLabels(listOf(uri("a.K.P_"), uri("a.K.P_x"))))
+      .containsExactly("P_", "P_x")
+      .inOrder()
+  }
+
+  @Test
   fun `capability is the openai-elicitation extension's form object`() {
     val empty = JsonObject(emptyMap())
     fun caps(vararg extensions: Pair<String, JsonObject>) =
@@ -369,14 +456,20 @@ class PreviewPickersTest {
 
     assertThat(plainRequests.get()).isEqualTo(0)
     val options = pickerOptions(openAiRequests.single())
-    assertThat(options.map { it["uri"]!!.jsonPrimitive.content })
-      .containsExactly(ws.large, ws.small)
-    val byUri = options.associateBy { it["uri"]!!.jsonPrimitive.content }
+    // The variants' names have spaces, which a `format: "uri"` field refuses: the options go out
+    // percent-encoded, as valid RFC 3986 URIs, and decode back to the previews.
+    val wireUris = options.map { it["uri"]!!.jsonPrimitive.content }
+    wireUris.forEach { assertThat(java.net.URI(it).scheme).isEqualTo(PreviewUri.SCHEME) }
+    assertThat(wireUris.map { OpenAiForms.decodeUri(it) }).containsExactly(ws.large, ws.small)
+    val byUri = options.associateBy { OpenAiForms.decodeUri(it["uri"]!!.jsonPrimitive.content)!! }
+    // Short labels: the shared function name is dropped, not truncated per row.
+    assertThat(options.map { it["title"]!!.jsonPrimitive.content })
+      .containsExactly("Devices - Large", "Devices - Small")
+    // Every option has a thumbnail: the cached render for Large, a fresh one for Small.
     assertThat(byUri.getValue(ws.large)["_meta"]!!.jsonObject.keys)
       .containsExactly("openai/thumbnail", "openai/preview")
-    // Never rendered here: no thumbnail, and nothing rendered to make one.
     assertThat(byUri.getValue(ws.small)["_meta"]!!.jsonObject.keys)
-      .containsExactly("openai/preview")
+      .containsExactly("openai/thumbnail", "openai/preview")
     assertThat(
         byUri.getValue(ws.small)["_meta"]!!.jsonObject["openai/preview"]!!.jsonObject["target"]
       )
@@ -447,10 +540,11 @@ class PreviewPickersTest {
     val client =
       connect(openAiForms = true) { request ->
         val options = pickerOptions(request)
-        picked = options.last()["uri"]!!.jsonPrimitive.content
+        picked = OpenAiForms.decodeUri(options.last()["uri"]!!.jsonPrimitive.content)
         buildJsonObject {
           put("action", "accept")
-          putJsonObject("content") { put(PreviewPickers.FIELD, picked) }
+          // Answered with the URI exactly as offered on the wire.
+          putJsonObject("content") { put(PreviewPickers.FIELD, options.last()["uri"]!!) }
         }
       }
     val ws = workspace(client)
@@ -476,7 +570,8 @@ class PreviewPickersTest {
       val meta = option["_meta"]!!.jsonObject
       assertThat(meta["openai/thumbnail"]!!.jsonObject["src"]!!.jsonPrimitive.content)
         .startsWith("data:image/png;base64,")
-      val uri = PreviewUri.parseOrNull(option["uri"]!!.jsonPrimitive.content)!!
+      val uri =
+        PreviewUri.parseOrNull(OpenAiForms.decodeUri(option["uri"]!!.jsonPrimitive.content)!!)!!
       assertThat(uri.overridesJson).contains("uiMode")
     }
     assertThat(plainRequests.get()).isEqualTo(0)

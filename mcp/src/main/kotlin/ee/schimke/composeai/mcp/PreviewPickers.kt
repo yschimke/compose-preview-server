@@ -18,9 +18,14 @@ import kotlinx.serialization.json.putJsonObject
  * `render_preview` as its full-size preview. Every other client keeps today's behaviour, which
  * [DaemonMcpServer] still owns: these functions return null to mean "not asked here".
  *
- * Thumbnails are never rendered for the picker. An ambiguous match uses each preview's last cached
- * render ([PreviewActivity.lastRenderPng]) and goes without where there is none; a matrix uses the
- * cells the same call just rendered.
+ * Every option should carry a thumbnail: a host draws a file placeholder for one without (the spec:
+ * "Servers that provide images for SOME items … SHOULD provide images for ALL items"). An ambiguous
+ * match uses each preview's last cached render ([PreviewActivity.lastRenderPng]) and
+ * [DaemonMcpServer] renders the rest when there are no more than a variant grid holds, the renders
+ * the grid would have made anyway; a matrix uses the cells the same call just rendered.
+ *
+ * Option URIs go out [OpenAiForms.encodeUri]'d, since the field is `format: "uri"` and a
+ * multipreview's name has spaces; [OpenAiForms.selectedUri] maps the answer back.
  */
 object PreviewPickers {
   /** Long edge of a picker thumbnail, in pixels. */
@@ -39,16 +44,39 @@ object PreviewPickers {
   fun renderPreviewTarget(uri: String): JsonObject =
     OpenAiForms.appToolTarget(RENDER_TOOL, buildJsonObject { put("uri", uri) })
 
+  /**
+   * Short labels that tell [uris] apart, in order: each preview's simple name (plus its config)
+   * without the function name the variants share, so `ListScreenPreview_Devices - Small Round` and
+   * `…_Devices - Large Round` read `Devices - Small Round` and `Devices - Large Round`. A chooser
+   * row is narrow, and full names truncated to the identical prefix (Codex Desktop). Falls back to
+   * the simple names, then to the URIs, whenever the shorter labels would not be unique.
+   */
+  fun variantLabels(uris: List<String>): List<String> {
+    val names = uris.map { uri ->
+      val parsed = PreviewUri.parseOrNull(uri) ?: return@map uri
+      val name = parsed.previewFqn.substringAfterLast('.')
+      if (parsed.config == null) name else "$name (${parsed.config})"
+    }
+    if (names.toSet().size != names.size) return uris
+    if (names.size < 2) return names
+    val shared = names.reduce { a, b -> a.commonPrefixWith(b) }
+    val cut = shared.lastIndexOf('_') + 1
+    if (cut == 0) return names
+    val short = names.map { it.substring(cut) }
+    return if (short.all { it.isNotBlank() } && short.toSet().size == short.size) short else names
+  }
+
   /** One picker option for the preview at [uri]. */
   fun option(
     uri: String,
     title: String,
     description: String? = null,
     thumbnailPngBase64: String? = null,
+    name: String = PreviewUri.parseOrNull(uri)?.previewFqn?.substringAfterLast('.') ?: uri,
   ): ResourceOption =
     ResourceOption(
       uri = uri,
-      name = PreviewUri.parseOrNull(uri)?.previewFqn?.substringAfterLast('.') ?: uri,
+      name = name,
       title = title,
       description = description,
       mimeType = "image/png",
@@ -127,7 +155,8 @@ object PreviewPickers {
     if ((session as? McpSession)?.supportsOpenAiForms != true) return null
     if (choices.size < 2 || choices.size > MAX_OPTIONS) return null
     val options = choices.map { uri ->
-      option(uri, label(uri), PreviewUri.parseOrNull(uri)?.modulePath, thumbnail(uri))
+      val title = label(uri)
+      option(uri, title, PreviewUri.parseOrNull(uri)?.modulePath, thumbnail(uri), name = title)
     }
     fun choiceBlock(mode: String, message: String) =
       ContentBlock.Text(

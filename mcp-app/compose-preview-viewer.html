@@ -8,15 +8,17 @@
   body { margin: 0; background: var(--color-background-primary, #fff); }
   .app { padding: 8px; }
   /* One compact header line, so a short host frame (Claude Desktop starts near 160px) still fits
-     the image and the toolbar. --image-max and --cell-image-max are set from the measured chrome
-     and the host's containerDimensions, see fitToFrame(). */
-  .bar { display: flex; gap: 8px; align-items: center; min-width: 0; margin-bottom: 6px; }
-  .bar-text { display: flex; gap: 8px; align-items: baseline; min-width: 0; flex: 1 1 auto; }
+     the image and the toolbar; a narrow card (Codex's inline card) wraps the variant picker and
+     Actual size onto a second line rather than drawing them over the title. --image-max and
+     --cell-image-max are set from the measured chrome and the host's containerDimensions, see
+     fitToFrame(). */
+  .bar { display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: center; min-width: 0; margin-bottom: 6px; }
+  .bar-text { display: flex; gap: 8px; align-items: baseline; min-width: 0; flex: 1 1 12em; }
   .title { font-weight: 650; white-space: nowrap; }
   #meta { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
-  .bar label { font-size: 12px; white-space: nowrap; }
+  .bar label { font-size: 12px; white-space: nowrap; max-width: 100%; }
   .bar label[hidden] { display: none; }
-  .bar select { font: inherit; padding: 2px 4px; border-radius: 6px; max-width: 14em; }
+  .bar select { font: inherit; padding: 2px 4px; border-radius: 6px; max-width: min(14em, calc(100vw - 90px)); }
   .muted { color: var(--color-text-secondary, #666); font-size: 12px; }
   .canvas { min-height: 120px; border: 1px solid var(--color-border, #d8d8dd); border-radius: 10px; background: var(--color-background-secondary, #f8f8fa); display: grid; place-items: center; overflow: auto; }
   .canvas.has-image { min-height: 0; overflow: hidden; }
@@ -48,10 +50,12 @@
   .comparison-after { position: absolute; inset: 0; width: 100%; height: 100%; }
   .comparison-labels { display: flex; justify-content: space-between; margin: 8px 2px 4px; font-size: 12px; font-weight: 650; }
   .comparison-slider { width: 100%; margin: 0; }
-  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; width: 100%; padding: 8px; box-sizing: border-box; }
-  .cell { border: 1px solid var(--color-border, #d8d8dd); border-radius: 8px; padding: 6px; background: var(--color-background-primary, #fff); cursor: pointer; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); align-items: start; gap: 8px; width: 100%; padding: 8px; box-sizing: border-box; }
+  /* fitToFrame() picks the column count that draws the cells largest in the frame. */
+  .cell { display: grid; gap: 4px; min-width: 0; border: 1px solid var(--color-border, #d8d8dd); border-radius: 8px; padding: 6px; background: var(--color-background-primary, #fff); cursor: pointer; }
   .cell img { width: 100%; height: auto; max-height: var(--cell-image-max, none); object-fit: contain; display: block; }
-  .cell code { font-size: 11px; overflow-wrap: anywhere; }
+  /* One line: the part of the label that differs; the whole label is the cell's title. */
+  .cell code { display: block; font-size: 11px; line-height: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .fallback { width: 100%; padding: 12px; box-sizing: border-box; }
   .fallback p { margin: 0 0 8px; }
   .fallback pre { margin: 0; padding: 10px; border-radius: 7px; background: var(--color-background-primary, #fff); white-space: pre-wrap; overflow-wrap: anywhere; }
@@ -274,6 +278,7 @@
   let overlayToolName;
   let toolDiscoveryGeneration = 0;
   let baseImageData;
+  let baseRenderSize;
   let overlayImageData;
   let overlayVisible = false;
   let overlayEligible = false;
@@ -290,8 +295,50 @@
   let commentGeneration = 0;
   let commentPostPending = false;
 
+  // JSON with sorted keys, so two spellings of one value compare equal.
+  function stableJson(value) {
+    if (Array.isArray(value)) return `[${value.map(stableJson).join(',')}]`;
+    if (value && typeof value === 'object') {
+      return `{${Object.keys(value).sort().filter(key => value[key] !== undefined)
+        .map(key => `${JSON.stringify(key)}:${stableJson(value[key])}`).join(',')}}`;
+    }
+    return JSON.stringify(value) ?? 'null';
+  }
+
+  // A host can also deliver the viewer's own tools/call back to it, as a tool-input and a
+  // tool-result notification (the likeliest reading of the stuck overlay Codex Desktop showed in
+  // compose-ag-plugin#76). Those are an echo of a call the viewer already handled, not a new
+  // result: drawing one replaced the preview with the a11y overlay (whose result names no URI, so
+  // the toggle disappeared) or with get_preview_data's JSON, and dropped the variant list. Each own
+  // call is remembered by its arguments and its result so its echo can be recognised once.
+  const OWN_CALL_ECHO_MS = 120000;
+  const ownCalls = [];
+  let echoedCall;
+  const resultKey = result => stableJson({
+    content: result?.content,
+    structuredContent: result?.structuredContent,
+    isError: !!result?.isError,
+  });
+
+  function rememberOwnCall(params) {
+    const now = Date.now();
+    while (ownCalls.length && (ownCalls.length >= 16 || now - ownCalls[0].at > OWN_CALL_ECHO_MS)) ownCalls.shift();
+    const call = { at: now, input: stableJson(params?.arguments || {}) };
+    ownCalls.push(call);
+    return call;
+  }
+
+  function claimEcho(field, key, seen) {
+    const now = Date.now();
+    const call = ownCalls.find(candidate =>
+      !candidate[seen] && now - candidate.at <= OWN_CALL_ECHO_MS && candidate[field] === key);
+    if (call) call[seen] = true;
+    return call;
+  }
+
   function request(method, params, timeoutMs = REQUEST_TIMEOUT_MS, onLateResult) {
     const id = nextId++;
+    const own = method === 'tools/call' ? rememberOwnCall(params) : undefined;
     return new Promise((resolve, reject) => {
       const timer = window.setTimeout(() => {
         if (!pending.delete(id)) return;
@@ -301,7 +348,11 @@
         }
         reject(new Error(`${method} request timed out after ${timeoutMs} ms`));
       }, timeoutMs);
-      pending.set(id, { resolve, reject, timer });
+      const settle = result => {
+        if (own) own.output = resultKey(result);
+        resolve(result);
+      };
+      pending.set(id, { resolve: settle, reject, timer });
       window.parent.postMessage({ jsonrpc: '2.0', id, method, params }, '*');
     });
   }
@@ -493,9 +544,10 @@
     const bounds = typeof anchor.nodeId === 'string'
       ? commentRenderValue?.nodeBounds?.[anchor.nodeId]
       : undefined;
-    if (!bounds || !image?.naturalWidth || !image?.naturalHeight) return undefined;
-    const x = (Number(bounds.x) + Number(bounds.width) / 2) / image.naturalWidth;
-    const y = (Number(bounds.y) + Number(bounds.height) / 2) / image.naturalHeight;
+    const size = renderSize(image);
+    if (!bounds || !size.width || !size.height) return undefined;
+    const x = (Number(bounds.x) + Number(bounds.width) / 2) / size.width;
+    const y = (Number(bounds.y) + Number(bounds.height) / 2) / size.height;
     if (!Number.isFinite(x) || !Number.isFinite(y)) return undefined;
     return { x: Math.min(1, Math.max(0, x)), y: Math.min(1, Math.max(0, y)) };
   }
@@ -633,10 +685,30 @@
     if (listCommentsToolName) void loadComments();
   }
 
-  function showImage(data, alt = 'Rendered Compose preview') {
+  // A render's own size in pixels. render_preview's inline image (and a variant grid's cell PNG) is
+  // the model's copy, downscaled to 768px on its long edge; the result names the render's size, and
+  // the viewer draws and measures the image at that size, as it does the full-size resource. Drawn
+  // at its own pixels, the copy came out smaller than the first render did, and layout bounds (in
+  // render pixels) landed off it.
+  function sizeOf(width, height) {
+    const w = Number(width);
+    const h = Number(height);
+    return w > 0 && h > 0 ? { width: w, height: h } : undefined;
+  }
+
+  function renderSize(image) {
+    return sizeOf(image?.dataset.renderWidth, image?.dataset.renderHeight) ||
+      { width: image?.naturalWidth || 0, height: image?.naturalHeight || 0 };
+  }
+
+  function showImage(data, alt = 'Rendered Compose preview', size) {
     const preview = document.createElement('img');
     preview.alt = alt;
     preview.src = `data:image/png;base64,${data}`;
+    if (size) {
+      preview.dataset.renderWidth = String(size.width);
+      preview.dataset.renderHeight = String(size.height);
+    }
     const stage = document.createElement('div');
     stage.className = 'preview-stage';
     stage.append(preview);
@@ -665,6 +737,7 @@
   function clearAccessibilityOverlay() {
     ++overlayGeneration;
     baseImageData = undefined;
+    baseRenderSize = undefined;
     overlayImageData = undefined;
     overlayVisible = false;
     overlayEligible = false;
@@ -797,7 +870,7 @@
 
   function enlargeVariant(value, cells, cell) {
     lastGrid = { value, cells };
-    showImage(cell.png, `Compose preview variant ${cell.label || ''}`.trim());
+    showImage(cell.png, `Compose preview variant ${cell.label || ''}`.trim(), sizeOf(cell.widthPx, cell.heightPx));
     canvas.classList.add('has-image');
     meta.textContent = cell.label || previewName(cell.uri);
     gridBack.hidden = false;
@@ -805,25 +878,76 @@
     scheduleFit();
   }
 
+  const SEPARATOR = /[\s_\-–·,:;(]/;
+
+  function axisValueText(key, value) {
+    if (typeof value === 'string') return value.replace(/^id:/, '');
+    return `${key} ${typeof value === 'object' ? JSON.stringify(value) : String(value)}`;
+  }
+
+  // What tells the cells apart, short enough for one line under the image: an axes matrix's
+  // override values that vary between cells (`fontScale 2`, `pixel_5`), or what is left of a
+  // @Preview variant's label (`ListScreenPreview_Devices - Large Round`) once the prefix every
+  // label shares is gone (`Large Round`). `full` is the whole label, kept for the tooltip.
+  function matrixCellLabels(cells) {
+    const full = cells.map(cell => typeof cell?.label === 'string' && cell.label
+      ? cell.label
+      : JSON.stringify(cell?.overrides || {}));
+    const overrides = cells.map(cell => isPlainObject(cell?.overrides) ? cell.overrides : undefined);
+    if (!cells.some(cell => typeof cell?.uri === 'string') && cells.length && overrides.every(Boolean)) {
+      const keys = [...new Set(overrides.flatMap(Object.keys))];
+      const varying = keys.filter(key => new Set(overrides.map(entry => stableJson(entry[key]))).size > 1);
+      const shown = varying.length ? varying : keys;
+      return {
+        common: '',
+        labels: overrides.map((entry, index) => ({
+          full: full[index],
+          short: shown.filter(key => entry[key] !== undefined).map(key => axisValueText(key, entry[key])).join(' · ') || full[index],
+        })),
+      };
+    }
+    let prefix = full.length > 1 ? full[0] : '';
+    for (const label of full) {
+      while (prefix && !label.startsWith(prefix)) prefix = prefix.slice(0, -1);
+    }
+    // Cut back to a word boundary, so `Small` and `Square` do not both lose their `S`.
+    while (prefix && !SEPARATOR.test(prefix[prefix.length - 1])) prefix = prefix.slice(0, -1);
+    const labels = full.map(label => {
+      let short = label.slice(prefix.length).replace(/^[\s_\-–·,:;]+/, '');
+      if (prefix.endsWith('(') && short.endsWith(')') && !short.includes('(')) short = short.slice(0, -1);
+      return { full: label, short: short || label };
+    });
+    return { common: prefix.replace(/[\s_\-–·,:;(]+$/, ''), labels };
+  }
+
+  function matrixSummary(value, cells) {
+    const { common } = matrixCellLabels(cells);
+    const variants = value?.mode === 'variants' || cells.some(cell => typeof cell?.uri === 'string');
+    const name = common || previewName(value?.uri || toolArguments.uri);
+    const count = `${cells.length} ${variants ? 'variant' : 'matrix cell'}${cells.length === 1 ? '' : 's'}`;
+    return name && name !== 'the preview' ? `${name} · ${count}` : count;
+  }
+
   function renderMatrix(value, cells) {
     gridBack.hidden = true;
     canvas.classList.remove('has-image');
     const grid = document.createElement('div');
     grid.className = 'grid';
+    const { labels } = matrixCellLabels(cells);
     cells.forEach((cell, index) => {
       const button = document.createElement('button');
       button.type = 'button';
       button.className = 'cell';
+      button.title = labels[index].full;
       if (typeof cell?.png === 'string') {
         const image = document.createElement('img');
-        image.alt = `Matrix cell ${index + 1}`;
+        image.alt = `Matrix cell ${index + 1}: ${labels[index].full}`;
         image.src = `data:image/png;base64,${cell.png}`;
+        image.addEventListener('load', scheduleFit, { once: true });
         button.append(image);
       }
       const overrides = document.createElement('code');
-      overrides.textContent = typeof cell?.label === 'string' && cell.uri
-        ? cell.label
-        : JSON.stringify(cell?.overrides || {});
+      overrides.textContent = labels[index].short;
       button.append(overrides);
       button.addEventListener('click', () => {
         // A @Preview variant grid: a click enlarges that variant; "All variants" goes back.
@@ -842,6 +966,9 @@
       grid.append(button);
     });
     canvas.replaceChildren(grid);
+    // The header names what is shown, as it does for a single render.
+    meta.textContent = matrixSummary(value, cells);
+    scheduleFit();
   }
 
   function renderImage(image, value, resource) {
@@ -857,7 +984,9 @@
       resultUri.startsWith('compose-preview://') &&
       !value?.crop &&
       !Array.isArray(value?.cells);
-    showImage(baseImageData);
+    // Only a downscaled inline copy says so (inlineWidthPx); any other image is drawn as it is.
+    baseRenderSize = value?.inlineWidthPx ? sizeOf(value.widthPx, value.heightPx) : undefined;
+    showImage(baseImageData, undefined, baseRenderSize);
     const label = value.previewId || toolArguments.previewId || 'Preview render';
     choose({
       kind: 'preview',
@@ -991,7 +1120,7 @@
     if (generation !== overlayGeneration || !baseImageData) return;
     const image = png(result);
     if (result?.isError || typeof image?.data !== 'string' || !image.data) {
-      showImage(baseImageData);
+      showImage(baseImageData, undefined, baseRenderSize);
       overlayImageData = undefined;
       overlayVisible = false;
       a11y.hidden = false;
@@ -1012,7 +1141,7 @@
     if (!overlayEligible || !baseImageData || !initialized || !overlayToolName) return;
     if (overlayVisible) {
       overlayVisible = false;
-      showImage(baseImageData);
+      showImage(baseImageData, undefined, baseRenderSize);
       meta.textContent = baseMetaText;
       updateAccessibilityAction();
       return;
@@ -1426,7 +1555,8 @@
     const namespace = 'http://www.w3.org/2000/svg';
     const svg = document.createElementNS(namespace, 'svg');
     svg.setAttribute('class', 'layout-boxes');
-    svg.setAttribute('viewBox', `0 0 ${image.naturalWidth} ${image.naturalHeight}`);
+    const size = renderSize(image);
+    svg.setAttribute('viewBox', `0 0 ${size.width} ${size.height}`);
     svg.setAttribute('preserveAspectRatio', 'none');
     svg.setAttribute('aria-hidden', 'true');
     for (const box of layoutBoxes) {
@@ -1674,21 +1804,38 @@
     });
   }
 
-  // Groups the matrix cells into rows by their top edge, and returns each row's tallest image as
-  // drawn (`shown`) and as it would be at the cell's width with no height cap (`natural`).
-  function gridRows(grid) {
-    const rows = new Map();
-    grid.querySelectorAll('.cell').forEach(cell => {
-      const top = Math.round(cell.offsetTop);
-      const image = cell.querySelector('img');
-      const shown = image ? image.getBoundingClientRect().height : 0;
-      const natural = image?.naturalWidth && image.naturalHeight
-        ? image.naturalHeight * (image.clientWidth / image.naturalWidth)
-        : shown;
-      const row = rows.get(top) || { shown: 0, natural: 0 };
-      rows.set(top, { shown: Math.max(row.shown, shown), natural: Math.max(row.natural, natural) });
-    });
-    return [...rows.values()];
+  // The matrix grid's layout for a given height: the column count whose cells draw the images
+  // largest, and the image height cap that fits every row in. Labels are one line, so a cell's
+  // overhead (padding, border, label) is the same in every cell.
+  function gridLayout(grid, height, fixedColumns) {
+    const cells = [...grid.querySelectorAll('.cell')];
+    const images = cells.map(cell => cell.querySelector('img')).filter(image => image?.naturalWidth && image.naturalHeight);
+    if (!cells.length || !images.length) return undefined;
+    // The tallest aspect decides a row's height.
+    const aspect = Math.max(...images.map(image => image.naturalHeight / image.naturalWidth));
+    const gridStyle = getComputedStyle(grid);
+    const px = value => parseFloat(value) || 0;
+    const gap = px(gridStyle.columnGap);
+    const rowGap = px(gridStyle.rowGap);
+    const innerWidth = grid.clientWidth - px(gridStyle.paddingLeft) - px(gridStyle.paddingRight);
+    const paddingY = px(gridStyle.paddingTop) + px(gridStyle.paddingBottom);
+    const sample = cells.find(cell => cell.querySelector('img')) || cells[0];
+    const sampleImage = sample.querySelector('img');
+    const cellStyle = getComputedStyle(sample);
+    const cellPaddingX = px(cellStyle.paddingLeft) + px(cellStyle.paddingRight) +
+      px(cellStyle.borderLeftWidth) + px(cellStyle.borderRightWidth);
+    const overhead = sample.getBoundingClientRect().height - (sampleImage?.getBoundingClientRect().height || 0);
+    let best;
+    for (let columns = fixedColumns || 1; columns <= (fixedColumns || cells.length); columns++) {
+      const rows = Math.ceil(cells.length / columns);
+      const width = (innerWidth - gap * (columns - 1)) / columns - cellPaddingX;
+      const cap = Math.max(32, Math.floor((height - paddingY - rowGap * (rows - 1)) / rows - overhead));
+      const drawn = Math.min(width * aspect, cap);
+      if (width > 0 && (!best || drawn > best.drawn + 0.5)) {
+        best = { columns, rows, cap, drawn, gridHeight: paddingY + rowGap * (rows - 1) + rows * (drawn + overhead) };
+      }
+    }
+    return best;
   }
 
   function fitToFrame() {
@@ -1708,29 +1855,45 @@
     // the host already made tall would keep being asked for.
     const content = q('.app').getBoundingClientRect().height;
     let wanted = Math.ceil(content);
+    // An image still decoding has no size: measured now, the frame would be asked to shrink to
+    // the chrome alone, and the next image fitted to that. Its load event fits again.
+    if (image && !image.complete) return;
     const zoomed = canvas.classList.contains('zoomed');
+    const size = image ? renderSize(image) : undefined;
+    // A downscaled copy is drawn at the render's size: the fit's width, or its own size zoomed.
+    const scaled = !!image?.dataset.renderWidth;
     // Offer Actual size only while the fit drew the image smaller than its own pixels.
-    zoom.hidden = !image || (!zoomed && !(image.naturalWidth > image.clientWidth + 1));
+    zoom.hidden = !image || (!zoomed && !(size.width > image.getBoundingClientRect().width + 1));
     // Zoomed, the canvas keeps the height it had, so the fit and the size asked for stand.
-    if (image && zoomed) return;
+    if (image && zoomed) {
+      if (scaled) image.style.width = `${size.width}px`;
+      return;
+    }
     if (image) {
       const shown = image.getBoundingClientRect().height;
       const chrome = Math.max(0, firstScreenBottom - shown);
-      root.style.setProperty('--image-max', `${Math.max(32, Math.floor(frame - chrome))}px`);
-      const natural = image.naturalWidth && image.naturalHeight
-        ? image.naturalHeight * Math.min(1, canvas.clientWidth / image.naturalWidth)
+      const imageMax = Math.max(32, Math.floor(frame - chrome));
+      root.style.setProperty('--image-max', `${imageMax}px`);
+      if (scaled) {
+        image.style.width = `${Math.min(size.width, canvas.clientWidth, imageMax * size.width / size.height)}px`;
+      }
+      const natural = size.width && size.height
+        ? size.height * Math.min(1, canvas.clientWidth / size.width)
         : shown;
       wanted = Math.ceil(content - shown + Math.min(natural, Math.max(32, target - chrome)));
     } else if (grid) {
-      const rows = gridRows(grid);
-      const imagesHeight = rows.reduce((sum, row) => sum + row.shown, 0);
-      if (rows.length && imagesHeight > 0) {
-        const chrome = Math.max(0, firstScreenBottom - imagesHeight);
-        const perRow = available => Math.max(32, Math.floor((available - chrome) / rows.length));
-        root.style.setProperty('--cell-image-max', `${perRow(frame)}px`);
-        // Ask for the grid as it would be drawn at `target`, not as the current frame squeezed it.
-        const cappedImages = rows.reduce((sum, row) => sum + Math.min(row.natural, perRow(target)), 0);
-        wanted = Math.ceil(content - imagesHeight + cappedImages);
+      // A cell image still decoding has no size yet; its load event fits again.
+      if ([...grid.querySelectorAll('.cell img')].some(cell => !cell.complete)) return;
+      const gridHeight = grid.getBoundingClientRect().height;
+      const chrome = Math.max(0, firstScreenBottom - gridHeight);
+      // Columns are chosen for the height asked for, so a frame that has not grown yet does not
+      // fix the grid at a short, wide shape; the image cap then fits the frame there is.
+      const layout = gridLayout(grid, Math.max(32, target - chrome));
+      if (layout) {
+        grid.style.gridTemplateColumns = `repeat(${layout.columns}, minmax(0, 1fr))`;
+        const shown = gridLayout(grid, Math.max(32, frame - chrome), layout.columns);
+        root.style.setProperty('--cell-image-max', `${Math.min(layout.cap, shown?.cap ?? layout.cap)}px`);
+        wanted = Math.ceil(content - gridHeight + layout.gridHeight);
       }
     }
     if (limit !== undefined) wanted = Math.min(wanted, Math.floor(limit));
@@ -3191,6 +3354,9 @@
     }
     if (message.method === 'ui/notifications/tool-input') {
       const incomingArguments = message.params?.arguments || {};
+      // The echo of the viewer's own call: its arguments are not the card's input.
+      echoedCall = claimEcho('input', stableJson(incomingArguments), 'inputSeen');
+      if (echoedCall) return;
       if (overlayCall && incomingArguments.kind === 'a11y/overlay') return;
       resourceToken = typeof incomingArguments.token === 'string' && incomingArguments.token
         ? incomingArguments.token
@@ -3200,10 +3366,19 @@
     }
     if (message.method === 'ui/notifications/tool-result') {
       const incomingResult = message.params?.result || message.params;
+      // The echo of the viewer's own call, announced by its tool-input or recognised by its result:
+      // the reply is (or will be) applied by the call itself, so drawing it as a new result would
+      // undo what the person chose.
+      const echo = echoedCall && !echoedCall.outputSeen
+        ? echoedCall
+        : claimEcho('output', resultKey(incomingResult), 'outputSeen');
+      echoedCall = undefined;
+      if (echo) echo.outputSeen = true;
       if (overlayCall && (incomingResult?.isError || (png(incomingResult) && !link(incomingResult)))) {
         applyAccessibilityResult(incomingResult, overlayCall.generation);
         return;
       }
+      if (echo) return;
       draw(incomingResult);
     }
     if (
@@ -3353,8 +3528,7 @@
   gridBack.addEventListener('click', () => {
     if (!lastGrid) return;
     renderMatrix(lastGrid.value, lastGrid.cells);
-    meta.textContent = `${lastGrid.cells.length} variants`;
-    scheduleFit();
+    meta.textContent = matrixSummary(lastGrid.value, lastGrid.cells);
   });
   refresh.addEventListener('click', () => {
     resourcePollUnchanged = 0;
