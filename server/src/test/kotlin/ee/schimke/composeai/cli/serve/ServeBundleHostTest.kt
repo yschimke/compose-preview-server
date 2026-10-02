@@ -185,10 +185,11 @@ class ServeBundleHostTest {
    * Which Remote Compose player drew the baked pixels is a fact about the manifest, not the id.
    *
    * Everything bakes through the embedded player — `RemoteOverridablePreview` defaults to it — so
-   * `?rcPlayer=cmp-android` on an ordinary preview is a request the snapshot answers exactly, and
-   * the routing predicates are allowed to treat it as a no-op. A preview that pins
+   * `?rcPlayer=androidx-embedded` on an ordinary preview is a request the snapshot answers exactly,
+   * and the routing predicates are allowed to treat it as a no-op. A preview that pins
    * `RemoteViewPreviewWrapper` is the one exception, and the whole point of asking the host is that
-   * it does not get swept into the default: for that preview cmp-android is a genuine re-render.
+   * it does not get swept into the default: for that preview androidx-embedded is a genuine
+   * re-render.
    */
   @Test
   fun `the baked player is read from a preview's pinned wrapper`() {
@@ -230,9 +231,9 @@ class ServeBundleHostTest {
    * A published catalog stages no `previews.json`, so nothing there records a `@PreviewWrapper`
    * pin. Inferring the `RemoteOverridablePreview` default would be right for every catalog we
    * publish today and silently wrong for a view-pinned preview — it would answer
-   * `?rcPlayer=cmp-android` with the view player's capture under a confident 200, and have the
-   * viewer drop the parameter and label those pixels CMP Android. Unknown costs a redundant query
-   * parameter instead, which is the behaviour that predates this seam.
+   * `?rcPlayer=androidx-embedded` with the view player's capture under a confident 200, and have
+   * the viewer drop the parameter and label those pixels AndroidX Embedded. Unknown costs a
+   * redundant query parameter instead, which is the behaviour that predates this seam.
    */
   @Test
   fun `a catalog that records no capture player is unknown, not assumed embedded`() {
@@ -281,6 +282,32 @@ class ServeBundleHostTest {
       RcPlayerBackend.JAVA in host.enabledRcPlayersFor("com.example.Card"),
       "…and not offered where it is someone else's pixels",
     )
+  }
+
+  /**
+   * Newer daemons record the players by their implementation names; older ones recorded the
+   * embedded player as `cmp-android` (the test above). Both read back as the same built-in.
+   */
+  @Test
+  fun `a capture player recorded by its implementation name is read back`() {
+    val dir = bundle("com.example.Card" to byteArrayOf(1), "com.example.Pinned" to byteArrayOf(2))
+    File(dir, "ir").mkdirs()
+    File(dir, "ir/com.example.Card.rc").writeBytes(byteArrayOf(9))
+    File(dir, "ir/com.example.Pinned.rc").writeBytes(byteArrayOf(9))
+    File(dir, "previews").mkdirs()
+    File(dir, "previews/variants.json")
+      .writeText(
+        """
+        {
+          "com.example.Card": {"previewParams":{"capturePlayer":"androidx-embedded"}},
+          "com.example.Pinned": {"previewParams":{"capturePlayer":"androidx-view"}}
+        }
+        """
+          .trimIndent()
+      )
+    val host = ServeBundleHost(dir, label = "remote-m3")
+    assertEquals(RemoteComposePlayerKind.EMBEDDED, host.bakedRcPlayer("com.example.Card"))
+    assertEquals(RemoteComposePlayerKind.VIEW, host.bakedRcPlayer("com.example.Pinned"))
   }
 
   @Test

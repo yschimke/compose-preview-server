@@ -1163,7 +1163,7 @@ class ServeCatalogMcp(
           )
         }
         val overrides =
-          when (val parsed = ServeOverrides.parse(params, knobKinds)) {
+          when (val parsed = ServeRcPlayerIds.parseOverrides(params, knobKinds)) {
             is OverrideParse.Ok -> parsed.overrides
             is OverrideParse.Invalid -> throw McpRequestException(parsed.message)
           }
@@ -2098,7 +2098,7 @@ class ServeCatalogMcp(
     }
     val knobKinds = ServeOverrides.declaredKnobKinds(preview)
     refuseUndeclaredKnobs(preview, params, knobKinds)
-    return when (val parsed = ServeOverrides.parse(params, knobKinds)) {
+    return when (val parsed = ServeRcPlayerIds.parseOverrides(params, knobKinds)) {
       is OverrideParse.Ok -> parsed.overrides
       is OverrideParse.Invalid -> throw McpRequestException(parsed.message)
     }

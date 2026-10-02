@@ -166,7 +166,7 @@ class ServeComponentBrowserTest {
         hasLiveStream = true,
         wasmSrc = "/wasm/compose-m3/",
         hasRemoteComposeDoc = true,
-        enabledRcPlayers = listOf("js", "java"),
+        enabledRcPlayers = listOf("camaelon-js", "androidx-view"),
         hasA11yOverlay = true,
         hasDesignAnnotations = true,
         hasSvgExport = true,
@@ -216,8 +216,8 @@ class ServeComponentBrowserTest {
     // would leave a `▾` with nothing beside it to name.
     assertFalse(html.contains("class=\"cp-renderer\""))
     assertFalse(html.contains("cp-renderer-more"))
-    assertTrue(html.contains("value=\"rc:js\""))
-    assertTrue(html.contains("value=\"rc:java\""))
+    assertTrue(html.contains("value=\"rc:camaelon-js\""))
+    assertTrue(html.contains("value=\"rc:androidx-view\""))
     assertFalse(html.contains("id=\"cp-svg-toggle\""))
     assertFalse(html.contains("id=\"cp-explode-toggle\""))
     assertFalse(html.contains("Accessibility</label>"))
@@ -305,7 +305,8 @@ class ServeComponentBrowserTest {
         catalogTitle = "Remote Compose Material 3",
         componentBrowser = true,
         hasRemoteComposeDoc = true,
-        enabledRcPlayers = listOf("js", "java", "cmp-android", "cmp-jvm", "cmp-wasm"),
+        enabledRcPlayers =
+          listOf("camaelon-js", "androidx-view", "androidx-embedded", "cmp-jvm", "cmp-wasm"),
       )
 
     // The canvas lane is present, so the `.rc` document has something to paint into.
@@ -313,14 +314,15 @@ class ServeComponentBrowserTest {
     assertTrue(html.contains("id=\"cp-rc-canvas\""))
     // …and the switcher offers every player the host reported, browser and server-side alike.
     assertTrue(html.contains("id=\"cp-lane-select\""))
-    for (wire in listOf("js", "cmp-wasm", "java", "cmp-android", "cmp-jvm")) {
+    for (wire in
+      listOf("camaelon-js", "cmp-wasm", "androidx-view", "androidx-embedded", "cmp-jvm")) {
       assertTrue(html.contains("value=\"rc:$wire\""), "$wire is offered in Catalog mode")
     }
     // The lane it opens on is the embedded player, exactly as in Dev. Asserted on both attributes
     // because it is the visible consequence of the change and the thing a reviewer should weigh: an
     // RC preview in Catalog mode now lands on a rendered player rather than the baked PNG.
-    assertTrue(html.contains("data-rc-default=\"cmp-android\""))
-    assertTrue(html.contains("data-default=\"rc:cmp-android\""))
+    assertTrue(html.contains("data-rc-default=\"androidx-embedded\""))
+    assertTrue(html.contains("data-default=\"rc:androidx-embedded\""))
   }
 
   /**
@@ -339,7 +341,7 @@ class ServeComponentBrowserTest {
         catalogTitle = "Remote Compose Material 3",
         componentBrowser = true,
         hasRemoteComposeDoc = true,
-        enabledRcPlayers = listOf("js", "java", "cmp-android"),
+        enabledRcPlayers = listOf("camaelon-js", "androidx-view", "androidx-embedded"),
       )
     assertFalse(catalog.contains("id=\"cp-live-toggle\""), "no chip in Catalog mode")
     assertTrue(catalog.contains("data-lane-state=\"1\""), "so the combo holds the state instead")
@@ -351,7 +353,7 @@ class ServeComponentBrowserTest {
         token = token,
         catalogTitle = "Remote Compose Material 3",
         hasRemoteComposeDoc = true,
-        enabledRcPlayers = listOf("js", "java", "cmp-android"),
+        enabledRcPlayers = listOf("camaelon-js", "androidx-view", "androidx-embedded"),
       )
     assertTrue(dev.contains("id=\"cp-live-toggle\""))
     assertFalse(dev.contains("data-lane-state"))
@@ -368,13 +370,13 @@ class ServeComponentBrowserTest {
         token = token,
         catalogTitle = "Remote Compose Material 3",
         hasRemoteComposeDoc = true,
-        enabledRcPlayers = listOf("js", "java", "cmp-android"),
+        enabledRcPlayers = listOf("camaelon-js", "androidx-view", "androidx-embedded"),
       )
 
-    assertTrue(html.contains("value=\"rc:java\""))
-    assertTrue(html.contains("value=\"rc:cmp-android\""))
+    assertTrue(html.contains("value=\"rc:androidx-view\""))
+    assertTrue(html.contains("value=\"rc:androidx-embedded\""))
     assertTrue(html.contains("value=\"rc:cmp-jvm\""), "an unavailable player is still listed")
-    assertTrue(html.contains("data-rc-default=\"cmp-android\""))
+    assertTrue(html.contains("data-rc-default=\"androidx-embedded\""))
   }
 
   @Test

@@ -7945,8 +7945,8 @@ class ServeHttpServer(
     if (!overrideCanReachThePixels) return seeds(emptyMap())
     if (!isReplayedPreview(renderHost, preview.id)) return seeds(params)
     val parsed =
-      ServeOverrides.parse(params, ServeOverrides.declaredKnobKinds(preview)) as? OverrideParse.Ok
-        ?: return seeds(params)
+      ServeRcPlayerIds.parseOverrides(params, ServeOverrides.declaredKnobKinds(preview))
+        as? OverrideParse.Ok ?: return seeds(params)
     val dropped =
       CatalogLiveRouting.irReplayDroppedOverrideNames(
           preview.id,
@@ -10740,7 +10740,8 @@ class ServeHttpServer(
       // 404s.
       val wantSvg = call.request.queryParameters["format"]?.lowercase() == "svg"
       when (
-        val parsed = ServeOverrides.parse(normalizedOverrideParams, knobKinds, declaredThemeFqns)
+        val parsed =
+          ServeRcPlayerIds.parseOverrides(normalizedOverrideParams, knobKinds, declaredThemeFqns)
       ) {
         is OverrideParse.Invalid ->
           call.respondText(parsed.message, status = HttpStatusCode.BadRequest)
@@ -11408,20 +11409,18 @@ class ServeHttpServer(
           // lane when this preview has an RC document. Empty for a non-RC preview ⇒ no selector.
           enabledRcPlayers =
             buildList {
-              addAll(renderHost.enabledRcPlayersFor(preview.id).map { it.wire })
+              // In this server's player vocabulary ([ServeRcPlayerIds]), not compose-ai-tools'
+              // wire spelling: the pinned release still spells the embedded player `cmp-android`.
+              addAll(renderHost.enabledRcPlayersFor(preview.id).map(ServeRcPlayerIds::of))
               if (rcPlayerWasmDir != null && renderHost.hasRemoteComposeDoc(preview.id)) {
-                add(RcPlayerBackend.CMP_WASM.wire)
+                add(ServeRcPlayerIds.CMP_WASM)
               }
             },
           // Which of those lanes a *bare* `/render` URL already is, so the viewer can stop naming
           // it. Empty when the session cannot say — the viewer then keeps naming every lane, which
           // is what it did before any of this.
           bakedRcPlayer =
-            renderHost
-              .bakedRcPlayer(preview.id)
-              ?.let { kind -> RcPlayerBackend.entries.firstOrNull { it.playerKind == kind } }
-              ?.wire
-              .orEmpty(),
+            renderHost.bakedRcPlayer(preview.id)?.let(ServeRcPlayerIds::ofKind).orEmpty(),
           wasmSrc = wasmSrc,
           wasmSameOrigin = wasmSameOrigin,
           basePath = basePath,
@@ -12099,7 +12098,7 @@ class ServeHttpServer(
       if (!wantSvg && !wantSlots && !wantA11y && !wantAnnotations && bareRcPlayerRequest()) {
         val stagedRaster =
           renderHost.publishedRcPlayerRender(previewId, RcPlayerBackend.CMP_JVM).takeIf {
-            renderParams()["rcPlayer"]?.lowercase() == RcPlayerBackend.CMP_JVM.wire
+            ServeRcPlayerIds.isCmpJvm(renderParams()["rcPlayer"])
           }
         if (stagedRaster != null) {
           // Cached exactly like the daemon-backed player lanes below, and for the same reason:
@@ -12121,7 +12120,7 @@ class ServeHttpServer(
         !wantSlots &&
           !wantA11y &&
           !wantAnnotations &&
-          renderParams()["rcPlayer"]?.lowercase() == RcPlayerBackend.CMP_JVM.wire
+          ServeRcPlayerIds.isCmpJvm(renderParams()["rcPlayer"])
       ) {
         // Past the staged-raster shortcut above, so this really does spawn the desktop player
         // (~4.3s of one-shot JVM). That is a commission, not a replay, whatever the query looked
@@ -12179,7 +12178,8 @@ class ServeHttpServer(
       // default theme under its name (see ServeOverrides.parse).
       val declaredThemeFqns = renderHost.declaredThemes.map { it.providerFqn }.toSet()
       when (
-        val parsed = ServeOverrides.parse(normalizedOverrideParams, knobKinds, declaredThemeFqns)
+        val parsed =
+          ServeRcPlayerIds.parseOverrides(normalizedOverrideParams, knobKinds, declaredThemeFqns)
       ) {
         is OverrideParse.Invalid ->
           call.respondText(parsed.message, status = HttpStatusCode.BadRequest)
@@ -12251,11 +12251,11 @@ class ServeHttpServer(
                 // for dropping `rcPlayer` while the very raster it asked for sat unread.
                 //
                 // That argument used to be stated as "those bytes are the *Java* player's capture".
-                // They are not — baked is the cmp-android capture — and the correction matters,
-                // because it is exactly the backend for which reaching this lane FIRST was the bug:
-                // see [publishedRcPlayerRender], which now declines cmp-android so it falls through
-                // to the baked bytes that are already that player's. The ordering still holds for
-                // every other backend, where baked really is someone else's pixels.
+                // They are not — baked is the androidx-embedded capture — and the correction
+                // matters, because it is exactly the backend for which reaching this lane FIRST was
+                // the bug: see [publishedRcPlayerRender], which now declines androidx-embedded so
+                // it falls through to the baked bytes that are already that player's. The ordering
+                // still holds for every other backend, where baked really is someone else's pixels.
                 ?: publishedRcPlayerRender(renderHost, previewId, overrides)
                 ?: renderHost.bakedRender(previewId, overrides)
           // The second place the up-front gate defers to. A null `cached` means no lane answered
@@ -12500,7 +12500,7 @@ class ServeHttpServer(
    * The catalog's ordinary baked PNG **can** stand in, because `RemoteOverridablePreview` defaults
    * to `RemoteComposePlayerKind.EMBEDDED` — so the backend matching the session's own
    * [ServeHost.bakedRcPlayer] is excluded below and answered from baked instead, which for an
-   * ordinary preview means cmp-android.
+   * ordinary preview means androidx-embedded.
    *
    * "Bare" is the whole safety condition. Any other override — a font scale, a device, a knob, a
    * theme — asks for pixels the parity run never drew, so the player selection is stripped and what
@@ -12527,16 +12527,16 @@ class ServeHttpServer(
     // render of the same player: the vendored player under this repo's Robolectric harness, drawn
     // to be compared against baked rather than to stand in for it, and the committed harness model
     // measures the two apart (0.03% on `serve-rc-lanes.html`'s first row). Answering the viewer
-    // from it made a bare browse and `?rcPlayer=cmp-android` disagree — so an explicit pick, or a
-    // viewer that stopped stamping one, silently changed which artifact you got.
+    // from it made a bare browse and `?rcPlayer=androidx-embedded` disagree — so an explicit pick,
+    // or a viewer that stopped stamping one, silently changed which artifact you got.
     //
     // Falling through to baked is also simply faster than the staged lookup this lane exists to
     // provide: a local file rather than an index into the published comparison.
     //
     // Same reasoning that already sets [RcPlayerBackend.JAVA]'s `rcCompareLane` to null. Every
     // other backend keeps the shortcut, because for them baked genuinely is another player's
-    // pixels — and on a view-pinned preview that includes cmp-android, which then keeps its staged
-    // column instead of being handed the view player's capture under a confident 200.
+    // pixels — and on a view-pinned preview that includes androidx-embedded, which then keeps its
+    // staged column instead of being handed the view player's capture under a confident 200.
     if (player == renderHost.bakedRcPlayer(previewId)) return null
     // Everything the request asks for beyond "draw it with this player".
     val withoutPlayer =

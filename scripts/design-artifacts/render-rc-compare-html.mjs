@@ -116,6 +116,11 @@ export function hasCmpWasmLane(rows = []) {
  * Each lane knows how to pull its own fields out of a row, which is what keeps `rowHtml` and the
  * client model from repeating the four near-identical field families the model carries.
  */
+//
+// The column ids are the published `rc-compare` vocabulary (`rc-compare.json` lanes, and the
+// `rcCompareLane` compose-preview serve maps a player onto), so they stay as published. The labels
+// name the implementation that draws: Camaelon JS, the AndroidX players, and the CMP player
+// (`rc-player-compose`) on the JVM and in Wasm.
 const LANES = [
   {
     id: "baked",
@@ -135,8 +140,8 @@ const LANES = [
   },
   {
     id: "js",
-    label: "RC · JS player",
-    short: "js",
+    label: "Camaelon JS",
+    short: "camaelon-js",
     present: () => true,
     src: (r) => r.rc,
     diff: (r) => r.diff,
@@ -174,7 +179,7 @@ const LANES = [
   },
   {
     id: "cmp-jvm",
-    label: "RC · cmp-jvm player",
+    label: "CMP JVM",
     short: "cmp-jvm",
     present: hasEmbeddedJvmLane,
     src: (r) => r.embeddedJvm,
@@ -186,7 +191,7 @@ const LANES = [
   },
   {
     id: "cmp-wasm",
-    label: "RC · cmp-wasm player",
+    label: "CMP Wasm",
     short: "cmp-wasm",
     present: hasCmpWasmLane,
     src: (r) => r.cmpWasm,
@@ -690,7 +695,7 @@ export function renderRcCompareHtml(model, opts = {}) {
   const lanes = activeLanes(allRows);
   // "JS", "JS + embedded", "JS + embedded + cmp-jvm", … — the players this page actually shows.
   const laneNames = [
-    "JS",
+    "camaelon-js",
     withEmbedded && "embedded",
     withAndroidxEmbedded && "androidx.dev embedded",
     withEmbeddedJvm && "cmp-jvm",
@@ -715,7 +720,7 @@ export function renderRcCompareHtml(model, opts = {}) {
     : "";
 
   const summary =
-    `<strong>JS player:</strong> ${stats.scored} scored · mean mismatch <strong>${meanTxt}</strong>` +
+    `<strong>Camaelon JS:</strong> ${stats.scored} scored · mean mismatch <strong>${meanTxt}</strong>` +
     (stats.unsupported ? ` · ${stats.unsupported} not decodable` : "") +
     blankTxt +
     (withEmbedded
@@ -731,12 +736,12 @@ export function renderRcCompareHtml(model, opts = {}) {
         blankTxt
       : "") +
     (withEmbeddedJvm
-      ? `<br><strong>cmp-jvm player:</strong> ${stats.embeddedJvmScored} scored · mean mismatch <strong>${jvmMeanTxt}</strong>` +
+      ? `<br><strong>CMP JVM:</strong> ${stats.embeddedJvmScored} scored · mean mismatch <strong>${jvmMeanTxt}</strong>` +
         (stats.embeddedJvmUnsupported ? ` · ${stats.embeddedJvmUnsupported} not rendered` : "") +
         blankTxt
       : "") +
     (withCmpWasm
-      ? `<br><strong>cmp-wasm player:</strong> ${stats.cmpWasmScored} scored · mean mismatch <strong>${wasmMeanTxt}</strong>` +
+      ? `<br><strong>CMP Wasm:</strong> ${stats.cmpWasmScored} scored · mean mismatch <strong>${wasmMeanTxt}</strong>` +
         (stats.cmpWasmUnsupported ? ` · ${stats.cmpWasmUnsupported} not rendered` : "") +
         blankTxt
       : "");
@@ -844,15 +849,15 @@ own offline Robolectric/Skiko render, through AndroidX's embedded <code>RcPlayer
 preview pins the view-backed lane) next to the same
 <code>ir/*.rc</code> document as each player renders it.
 ${[
-  `The <strong>JS player</strong> is the vendored TypeScript <code>RC.RcdPlayer</code> on a <code>&lt;canvas&gt;</code>`,
+  `<strong>Camaelon JS</strong> is the vendored TypeScript <code>RC.RcdPlayer</code> on a <code>&lt;canvas&gt;</code>`,
   withEmbedded &&
     `<strong>AndroidX Embedded · vendored Android</strong> is this repo's pinned and locally patched <code>RcPlayer</code>, rasterized by Robolectric`,
   withAndroidxEmbedded &&
     `<strong>AndroidX Embedded · androidx.dev</strong> is the independently compiled player published by the pinned AndroidX snapshot`,
   withEmbeddedJvm &&
-    `the <strong>cmp-jvm player</strong> runs that same <code>RcPlayer</code> draw path on Compose Desktop / Skiko, rasterizing offscreen`,
+    `<strong>CMP JVM</strong> is the CMP player (<code>rc-player-compose</code>) on Compose Desktop / Skiko, rasterizing offscreen`,
   withCmpWasm &&
-    `the <strong>cmp-wasm player</strong> runs the new Compose Multiplatform / Skiko player in browser Wasm`,
+    `<strong>CMP Wasm</strong> is the same CMP player compiled to Wasm, in the browser`,
 ]
   .filter(Boolean)
   .join("; ")}${laneNames.length > 1 ? " — so they diverge wherever those differences show." : "."}

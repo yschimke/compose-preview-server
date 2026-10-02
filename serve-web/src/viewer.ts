@@ -707,27 +707,33 @@ function liveOverrides() {
     var gi = takeGestureInvoke();
     if (gi) o["gestureInvoke"] = gi;
     // setOverrides REPLACES the stream's entire override map. Keep an explicit server-side player
-    // in that replacement, especially when CMP Android/JVM is the page default; otherwise the
-    // connect URL selects it and the first onopen replay immediately clears it back to Java.
+    // in that replacement, especially when it is the page default; otherwise the connect URL
+    // selects it and the first onopen replay immediately clears it back to the baked player.
     var livePlayer = rules.serverPlayerParam(rcPlayerBackend, !!rcPlayerPicked);
     if (livePlayer) o.rcPlayer = livePlayer;
     return o;
 }
 // Renderer-picker state (the #cp-lane-select combo). `rcPlayerBackend` is the current Remote
-// Compose player and `rcPlayerPicked` gates whether it rides the render URL. It is also true for an
-// embedded default that differs from the server's absent-param Java fallback.
+// Compose player and `rcPlayerPicked` gates whether it rides the render URL. It is also true for a
+// default that differs from the player the server's bare URL already produces.
 const laneSelect = may<HTMLSelectElement>("cp-lane-select");
 // The design-spec lane's own chip, beside the combo rather than inside it (see ServeWeb's
 // specChipHtml). Present only when this preview carries an imported reference.
 const specChip = may<HTMLButtonElement>("cp-spec-chip");
+// Canonical player ids throughout (see `RC_PLAYER`); a legacy spelling is read as the player it
+// always named.
 var rcDefaultBackend = laneSelect
-    ? laneSelect.getAttribute("data-rc-default") || ""
+    ? rules.normalizeRcPlayer(laneSelect.getAttribute("data-rc-default"))
     : "";
 // The player a BARE `/render` URL already produces, as the server reports it
 // (`ServeHost.bakedRcPlayer`). Empty when the session cannot name one — a non-Remote-Compose
 // preview, or a server that predates the attribute — and everything then names itself, as before.
+// A capture record, so an older server's `cmp-android` / `java` reads as the AndroidX embedded /
+// view player it meant then.
 var rcBakedPlayer = laneSelect
-    ? laneSelect.getAttribute("data-rc-baked-player") || ""
+    ? rules.normalizeBakedPlayer(
+          laneSelect.getAttribute("data-rc-baked-player"),
+      )
     : "";
 var rcPlayerBackend = rcDefaultBackend;
 // Every server-side backend must ride the very first snapshot request like a user pick — except
@@ -804,11 +810,11 @@ function renderOverrides(): Overrides {
     var gi = takeGestureInvoke();
     if (gi) o.gestureInvoke = gi;
     // Remote Compose render backend: a server-side player selection rides the render as
-    // rcPlayer=<wire>. Emitted for a visitor pick or a non-Java server-side default, and only
-    // for a server-side lane — java / cmp-android render through the daemon, cmp-jvm through its
-    // isolated desktop subprocess (all three PNG lanes). The js canvas replays the doc in-browser
-    // (no server render), so it never sends the param, and an unpicked default stays on the
-    // instant baked snapshot.
+    // rcPlayer=<id>. Emitted for a visitor pick or a server-side default the bare URL does not
+    // already produce, and only for a server-side lane — androidx-view / androidx-embedded /
+    // cmp-android render through the daemon, cmp-jvm through its isolated desktop subprocess (all
+    // PNG lanes). The camaelon-js canvas replays the doc in-browser (no server render), so it never
+    // sends the param, and an unpicked default stays on the instant baked snapshot.
     var serverPlayer = rules.serverPlayerParam(
         rcPlayerBackend,
         !!rcPlayerPicked,
@@ -3795,8 +3801,8 @@ function enterMode(m: string) {
         openSpec();
     } else {
         // Browser RC lanes deliberately clear the server-side pick while they paint. Returning to
-        // the static lane must restore a non-Java default before query() renders it; otherwise the
-        // chip says CMP Android/JVM while the absent rcPlayer parameter silently selects Java.
+        // the static lane must restore a non-baked default before query() renders it; otherwise
+        // the chip names one player while the absent rcPlayer parameter silently selects another.
         var restoredPlayer = rules.restoreStaticPlayer(
             {
                 defaultBackend: rcDefaultBackend,
@@ -4205,10 +4211,11 @@ Array.prototype.forEach.call(
     },
 );
 // The primary chip. It does two jobs at once, which is what lets one control replace the row of
-// per-lane chips this page used to carry: it NAMES the renderer currently on the stage ("Java",
-// "JS", "Figma spec", "Live") and its status dot says whether that render is interactive, and
-// clicking it TOGGLES interactivity — into the best live lane this session offers (the daemon
-// stream when present, else the in-browser Wasm app), and back out to the static snapshot.
+// per-lane chips this page used to carry: it NAMES the renderer currently on the stage
+// ("AndroidX View", "Camaelon JS", "Figma spec", "Live") and its status dot says whether that
+// render is interactive, and clicking it TOGGLES interactivity — into the best live lane this
+// session offers (the daemon stream when present, else the in-browser Wasm app), and back out to
+// the static snapshot.
 // Overrides still take effect while static (a catalog re-renders /render on demand), so the
 // toggle is specifically about *interacting* with the running composition — clicking, scrolling,
 // typing. The corner backend badge flips its icon/accent to match (see backendBadgeScript).
@@ -4688,10 +4695,11 @@ if (motionRateSelect) {
 }
 // ---- The renderer combo box ------------------------------------------------------------------
 // One `<select>` holding every lane this preview can be drawn by: the Remote Compose players
-// (`rc:js` paints client-side via setMode("rc"), `rc:cmp-wasm` in its own frame, and
-// `java` / `cmp-android` / `cmp-jvm` re-render the PNG server-side with rcPlayer=<wire>, see
-// query()), the in-browser Wasm app, and the imported design spec. Its value tracks the active
-// lane however the lane was entered — a pick, the Live toggle, an SVG swap, or Back/Forward.
+// (`rc:camaelon-js` paints client-side via setMode("rc"), `rc:cmp-wasm` in its own frame, and
+// `androidx-view` / `androidx-embedded` / `cmp-android` / `cmp-jvm` re-render the PNG server-side
+// with rcPlayer=<id>, see query()), the in-browser Wasm app, and the imported design spec. Its
+// value tracks the active lane however the lane was entered — a pick, the Live toggle, an SVG
+// swap, or Back/Forward.
 if (laneSelect) {
     // Assign the hoisted stub with the real reconciler (see the declaration before query()).
     // The combo is a command menu ("switch renderer"), not a state field — the chip beside it holds
@@ -4723,8 +4731,8 @@ if (laneSelect) {
     function pickLane(value: string) {
         if (!value) return; // the placeholder; nothing was chosen
         if (value.indexOf("rc:") === 0) {
-            var wire = value.substring(3);
-            if (wire === "js") {
+            var wire = rules.normalizeRcPlayer(value.substring(3));
+            if (wire === rules.RC_PLAYER.camaelonJs) {
                 // The client canvas lane. Leave the server pick untouched so returning to a server-side
                 // player restores it. setMode("rc") (via enterMode) closes any Live/Wasm lane, opens the
                 // canvas, and re-syncs the picker; if the canvas is already up there is nothing to do
@@ -4732,7 +4740,7 @@ if (laneSelect) {
                 rcPlayerPicked = false;
                 if (!rcActive()) setMode("rc");
                 else syncLaneSelect();
-            } else if (wire === "cmp-wasm") {
+            } else if (wire === rules.RC_PLAYER.cmpWasm) {
                 rcPlayerPicked = false;
                 if (!rcWasmActive()) setMode("rc-wasm");
                 else syncLaneSelect();
@@ -5444,13 +5452,16 @@ function hydrateFromUrl(popped: boolean) {
         // back to `prefers-color-scheme`.
         if (window.cpPageTheme) window.cpPageTheme.follow(activeThemeChoice());
     }
-    // The Remote Compose player pick already rode the URL as `rcPlayer=<wire>` (query() emits it,
-    // URL_STATE_PARAMS owns it) but nothing ever read it back, so a shared `?rcPlayer=cmp-android`
+    // The Remote Compose player pick already rode the URL as `rcPlayer=<id>` (query() emits it,
+    // URL_STATE_PARAMS owns it) but nothing ever read it back, so a shared `?rcPlayer=cmp-jvm`
     // link opened on the default player under a combo naming it — the link described a render the
     // page wasn't showing. Restore it here, from the offered options only, so an unknown or
-    // unavailable wire falls back to this preview's default rather than pinning a dead param.
+    // unavailable id falls back to this preview's default rather than pinning a dead param. A
+    // legacy spelling (`java`, `embedded`, `js`, `rcplayer-*`) restores the player it named.
     if (rcDefaultBackend) {
-        var wantedPlayer = q.get("rcPlayer");
+        var wantedPlayer = q.get("rcPlayer")
+            ? rules.normalizeRcPlayer(q.get("rcPlayer"))
+            : null;
         var playerOffered = false;
         if (wantedPlayer && laneSelect) {
             Array.prototype.forEach.call(laneSelect.options, function (o) {

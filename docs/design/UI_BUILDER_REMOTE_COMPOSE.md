@@ -137,18 +137,25 @@ a nested document keeps its own runtime state across recomposition.
 
 That answers "could the editor use the CMP Wasm player?" with "it is what it uses". The remaining
 question is which *other* players the same document can be checked against, and this repository
-already runs four of them over the identical `ir/<id>.rc` bytes:
+already runs several of them over the identical `ir/<id>.rc` bytes. Each id names the
+implementation that draws (the full table is `ServeRcPlayerIds`):
 
 | Player | Where it runs | What it is for here |
 | --- | --- | --- |
-| `cmp-wasm` | the browser, in-process | the editor canvas, and the `/wasm/<system>/` catalog frontend |
-| `cmp-jvm` | the server, isolated desktop-player subprocess | headless render evidence and the parity wall's published rasters |
-| `cmp-android` | the Android daemon | the on-device Compose rendition |
-| `java` | AOSP's view-backed `RemoteComposePlayer`, drawing into a framework `Canvas` | the non-Compose reference the others are checked against |
+| `cmp-wasm` | the CMP player (`rc-player-compose`) in the browser, in-process | the editor canvas, and the `/wasm/<system>/` catalog frontend |
+| `cmp-jvm` | the CMP player on the server, in an isolated desktop-player subprocess | headless render evidence and the parity wall's published rasters |
+| `cmp-android` | the CMP player on the Android daemon, by `playerId` | the same player's on-device rendition |
+| `androidx-embedded` | the vendored AndroidX embedded player on the Android daemon | the on-device Compose rendition a capture bakes through |
+| `androidx-view` | AndroidX's view-backed `RemoteComposePlayer`, drawing into a framework `Canvas` | the non-Compose reference the others are checked against |
+| `camaelon-js` | the vendored TypeScript player in the browser | the in-browser canvas lane |
+
+`cmp-android` used to name the AndroidX embedded player; links and capture sidecars written then
+say `cmp-android` / `java` for `androidx-embedded` / `androidx-view`, and a capture record is still
+read that way.
 
 So the useful framing is not "is there a more native editor than the Wasm one" — the same
 `rc-players` API compiles for JVM, Android, iOS and Wasm, and a desktop or Android host of this
-editor would render the identical node tree. It is that a Remote Compose document has four
+editor would render the identical node tree. It is that a Remote Compose document has several
 independent rasterisers, the compare wall exists to show where they disagree, and an authoring
 surface that draws with one of them should be read beside it rather than trusted alone.
 

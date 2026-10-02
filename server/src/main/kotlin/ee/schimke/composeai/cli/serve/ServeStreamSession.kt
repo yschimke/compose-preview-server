@@ -125,7 +125,7 @@ class ServeStreamSession(
    * rather than carrying the previous one's.
    */
   private fun parseFor(id: String, params: Map<String, String>): OverrideParse =
-    ServeOverrides.parse(
+    ServeRcPlayerIds.parseOverrides(
       ServeThemeReplay.expand(renderHost, id, params).params,
       knobKindsFor(id),
       declaredThemeFqns(),

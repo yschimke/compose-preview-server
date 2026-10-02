@@ -63,9 +63,9 @@ class CatalogLiveRoutingTest {
    * The player the request names is a no-op exactly when the capture went through it.
    *
    * `RemoteOverridablePreview` defaults to the embedded player, so for an ordinary preview the
-   * baked PNG *is* the answer to `?rcPlayer=cmp-android` — reporting it dropped refused a request
-   * the snapshot satisfies, which is why the viewer had to keep stamping the parameter onto every
-   * default link. Any other player is a genuine re-render.
+   * baked PNG *is* the answer to `?rcPlayer=androidx-embedded` — reporting it dropped refused a
+   * request the snapshot satisfies, which is why the viewer had to keep stamping the parameter onto
+   * every default link. Any other player is a genuine re-render.
    */
   @Test
   fun `the baked player is a no-op and every other player is dropped`() {
@@ -102,9 +102,9 @@ class CatalogLiveRoutingTest {
    * …and the no-op follows the *session's* answer, not a constant.
    *
    * A preview pinning `RemoteViewPreviewWrapper` baked through the view player, so on it the
-   * cmp-android request is the genuine re-render and `rcPlayer=java` is the one the snapshot
-   * answers. Reading [ServeHost.bakedRcPlayer] rather than assuming EMBEDDED is what keeps that
-   * preview from being handed the wrong player's capture under a confident 200.
+   * androidx-embedded request is the genuine re-render and `rcPlayer=androidx-view` is the one the
+   * snapshot answers. Reading [ServeHost.bakedRcPlayer] rather than assuming EMBEDDED is what keeps
+   * that preview from being handed the wrong player's capture under a confident 200.
    */
   @Test
   fun `a view-pinned preview inverts which player is the no-op`() {
