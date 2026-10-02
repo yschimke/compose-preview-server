@@ -786,6 +786,9 @@ tasks.register<CheckServeModuleBoundary>("checkServeModuleBoundary") {
       "ee.schimke.composeai:common-web-escaping",
       "ee.schimke.composeai:daemon-bta",
       "ee.schimke.composeai:daemon-client",
+      // The connector SPI `daemon-core` exposes as `api` since compose-preview-daemon#197: four
+      // types moved verbatim out of `daemon-core`, same package, no renderer behind them.
+      "ee.schimke.composeai:daemon-connector-api",
       "ee.schimke.composeai:daemon-core",
       "ee.schimke.composeai:daemon-devices",
       "ee.schimke.composeai:daemon-protocol",
