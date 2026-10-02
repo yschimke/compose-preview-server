@@ -175,7 +175,7 @@ class RcJvmServeIntegrationTest {
   fun `cmp-jvm chip is enabled only when the desktop-player sidecar is installed`() {
     val host = ServeBundleHost(bundle(120, 80, 3.0f), label = "b")
     // The JS lane always rides on a carried doc; cmp-jvm needs the sidecar, absent here.
-    assertTrue(RcPlayerBackend.JS in host.enabledRcPlayersFor("Foo"))
+    assertTrue(RcPlayerBackend.CAMAELON_JS in host.enabledRcPlayersFor("Foo"))
     assertFalse(RcPlayerBackend.CMP_JVM in host.enabledRcPlayersFor("Foo"))
 
     // Point both sidecar dirs at (empty-jar) temp dirs so RcJvmServerRenderer.isAvailable() is
@@ -218,6 +218,6 @@ class RcJvmServeIntegrationTest {
         override fun close() {}
       }
 
-    assertEquals(listOf(RcPlayerBackend.JS), host.enabledRcPlayersFor("Foo"))
+    assertEquals(listOf(RcPlayerBackend.CAMAELON_JS), host.enabledRcPlayersFor("Foo"))
   }
 }

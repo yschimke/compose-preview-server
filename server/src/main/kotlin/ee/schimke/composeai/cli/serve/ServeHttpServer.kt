@@ -12520,7 +12520,7 @@ class ServeHttpServer(
     // rc-compare column, and that is the difference between this lane being an optimisation and
     // being a source of two answers to one question.
     //
-    // For all but a view-pinned preview that player is [RcPlayerBackend.CMP_ANDROID], because
+    // For all but a view-pinned preview that player is [RcPlayerBackend.ANDROIDX_EMBEDDED], because
     // `RemoteOverridablePreview` defaults to `RemoteComposePlayerKind.EMBEDDED` — but which one it
     // was is a fact about the session's manifest, so it is asked ([ServeHost.bakedRcPlayer]) rather
     // than assumed here. The staged `embedded` column is a DIFFERENT
@@ -12533,7 +12533,8 @@ class ServeHttpServer(
     // Falling through to baked is also simply faster than the staged lookup this lane exists to
     // provide: a local file rather than an index into the published comparison.
     //
-    // Same reasoning that already sets [RcPlayerBackend.JAVA]'s `rcCompareLane` to null. Every
+    // Same reasoning that already sets [RcPlayerBackend.ANDROIDX_VIEW]'s `rcCompareLane` to null.
+    // Every
     // other backend keeps the shortcut, because for them baked genuinely is another player's
     // pixels — and on a view-pinned preview that includes androidx-embedded, which then keeps its
     // staged column instead of being handed the view player's capture under a confident 200.

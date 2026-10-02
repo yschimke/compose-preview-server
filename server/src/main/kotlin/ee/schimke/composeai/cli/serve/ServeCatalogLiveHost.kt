@@ -1750,21 +1750,21 @@ class ServeCatalogLiveHost(
   override val remoteComposePlayerSelectable: Boolean by lazy { live.remoteComposePlayerSelectable }
 
   /**
-   * The RC backend selector unions the two lanes: the client-side [RcPlayerBackend.JS] canvas
-   * whenever the baked bundle carries the `.rc` document, plus the server-side
-   * [RcPlayerBackend.JAVA] / [RcPlayerBackend.CMP_ANDROID] lanes when this Remote Compose preview
-   * has a daemon twin ([canRenderOverridesFor]) on a backend that honours the player override
-   * ([remoteComposePlayerSelectable]). A preview with no `.rc` doc is not Remote Compose, so it
-   * gets no selector at all. [RcPlayerBackend.CMP_JVM] joins when the isolated desktop player is
-   * installed and the baked bundle can size a render for it ([supportsCmpJvm]).
+   * The RC backend selector unions the two lanes: the client-side [RcPlayerBackend.CAMAELON_JS]
+   * canvas whenever the baked bundle carries the `.rc` document, plus the server-side
+   * [RcPlayerBackend.ANDROIDX_VIEW] / [RcPlayerBackend.ANDROIDX_EMBEDDED] lanes when this Remote
+   * Compose preview has a daemon twin ([canRenderOverridesFor]) on a backend that honours the
+   * player override ([remoteComposePlayerSelectable]). A preview with no `.rc` doc is not Remote
+   * Compose, so it gets no selector at all. [RcPlayerBackend.CMP_JVM] joins when the isolated
+   * desktop player is installed and the baked bundle can size a render for it ([supportsCmpJvm]).
    */
   override fun enabledRcPlayersFor(previewId: String): List<RcPlayerBackend> {
     if (!hasRemoteComposeDoc(previewId)) return emptyList()
     return buildList {
-      add(RcPlayerBackend.JS)
+      add(RcPlayerBackend.CAMAELON_JS)
       if (canRenderOverridesFor(previewId) && remoteComposePlayerSelectable) {
-        add(RcPlayerBackend.JAVA)
-        add(RcPlayerBackend.CMP_ANDROID)
+        add(RcPlayerBackend.ANDROIDX_VIEW)
+        add(RcPlayerBackend.ANDROIDX_EMBEDDED)
       }
       if (supportsCmpJvm(previewId)) add(RcPlayerBackend.CMP_JVM)
       // A player the parity run staged is offerable whatever the daemon is doing — the bytes are

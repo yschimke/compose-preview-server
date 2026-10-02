@@ -32,11 +32,11 @@ import ee.schimke.composeai.daemon.protocol.RemoteComposePlayerKind
  *   and the view player `java`, so there and only there those map to `androidx-embedded` and
  *   `androidx-view`.
  *
- * compose-ai-tools' [RcPlayerBackend] is the backend universe this server renders through, and on
- * the release this build pins its [RcPlayerBackend.wire] ids are still the old ones (`js`, `java`,
- * `cmp-android` for the EMBEDDED backend). [of] maps a backend onto its canonical id by what it
- * draws (its daemon player kind) rather than by that spelling, so the mapping holds on either side
- * of the compose-ai-tools bump that renames them.
+ * compose-ai-tools' [RcPlayerBackend] is the backend universe this server renders through. Since
+ * compose-ai-tools 2.32 its [RcPlayerBackend.wire] ids are these canonical ones; up to 2.31 they
+ * were the old spellings (`js`, `java`, `cmp-android` for the EMBEDDED backend). [of] maps a
+ * backend onto its canonical id by what it draws (its daemon player kind) rather than by that
+ * spelling, so the mapping does not depend on which side of that rename a build is on.
  */
 internal object ServeRcPlayerIds {
   const val ANDROIDX_VIEW: String = "androidx-view"
@@ -111,7 +111,7 @@ internal object ServeRcPlayerIds {
 
   /**
    * The canonical id of a compose-ai-tools [RcPlayerBackend]. Keyed on the daemon player kind
-   * first, because the pinned release still spells the EMBEDDED backend `cmp-android`.
+   * first, because compose-ai-tools up to 2.31 spelled the EMBEDDED backend `cmp-android`.
    */
   fun of(backend: RcPlayerBackend): String =
     backend.playerKind?.let(::ofKind) ?: normalizeRequest(backend.wire)
@@ -125,7 +125,8 @@ internal object ServeRcPlayerIds {
    * The value is normalised first ([normalizeRequest]), so a legacy `java` or `embedded` link still
    * selects the player it always did. `cmp-android` is then forwarded to the daemon as a `playerId`
    * — the CMP player on Android, registered by the daemon — rather than as the EMBEDDED built-in
-   * the pinned compose-ai-tools release still maps that spelling to.
+   * compose-ai-tools up to 2.31 mapped that spelling to. Since 2.32 its own parser forwards it the
+   * same way, so this rewrite is a no-op there and stays as the guarantee.
    */
   fun parseOverrides(
     params: Map<String, String>,
