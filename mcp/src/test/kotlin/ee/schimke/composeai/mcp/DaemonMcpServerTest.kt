@@ -1792,6 +1792,52 @@ class DaemonMcpServerTest {
   }
 
   @Test
+  fun `status with nothing registered says what was tried and names candidate builds`() {
+    val plain = tmp.newFolder("status-not-a-build")
+    val used = samplesRepo().resolve("ComposeStarter")
+    supervisor.workspaceStore.remember("ComposeStarter-0", used, "ComposeStarter")
+    val cwdServer = DaemonMcpServer(supervisor, workingDirectory = plain)
+    restartSession(cwdServer)
+    client.initialize()
+
+    val payload = json.parseToJsonElement(client.callTool("status").firstTextContent()).jsonObject
+    assertThat(payload["projects"]?.jsonArray).isEmpty()
+    val hint = payload["projectHint"]!!.jsonObject
+    assertThat(hint["message"]?.jsonPrimitive?.contentOrNull)
+      .contains("Tried ${plain.path} (the working directory): not Gradle builds")
+    assertThat(hint["message"]?.jsonPrimitive?.contentOrNull)
+      .contains("Candidate builds: ${used.absolutePath}")
+    assertThat(hint["triedSource"]?.jsonPrimitive?.contentOrNull).isEqualTo("workingDirectory")
+    assertThat(hint["candidateBuilds"]!!.jsonArray.map { it.jsonPrimitive.content })
+      .containsExactly(used.absolutePath)
+    // status only reports: nothing was registered or restored.
+    assertThat(supervisor.listProjects()).isEmpty()
+    cwdServer.shutdown()
+  }
+
+  @Test
+  fun `status names a build at the working directory as what the first render registers`() {
+    val build = tmp.newFolder("status-build")
+    build.resolve("settings.gradle.kts").writeText("")
+    val cwdServer = DaemonMcpServer(supervisor, workingDirectory = build)
+    restartSession(cwdServer)
+    client.initialize()
+
+    val payload = json.parseToJsonElement(client.callTool("status").firstTextContent()).jsonObject
+    val hint = payload["projectHint"]!!.jsonObject
+    assertThat(hint["message"]?.jsonPrimitive?.contentOrNull)
+      .contains("render_preview registers it on first use")
+    assertThat(hint["candidateBuilds"]!!.jsonArray.map { it.jsonPrimitive.content })
+      .containsExactly(build.canonicalPath)
+
+    // Once a project is registered the hint is gone.
+    client.callTool("render_preview", buildJsonObject { put("preview", "Anything") })
+    val after = json.parseToJsonElement(client.callTool("status").firstTextContent()).jsonObject
+    assertThat(after["projectHint"]).isNull()
+    cwdServer.shutdown()
+  }
+
+  @Test
   fun `an unprepared build is bootstrapped through the init script on first use`() {
     val project = tmp.newFolder("no-descriptor")
     File(project, "settings.gradle.kts").writeText("include(\":app\")")

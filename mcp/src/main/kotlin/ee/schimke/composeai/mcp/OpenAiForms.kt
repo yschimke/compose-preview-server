@@ -94,8 +94,9 @@ object OpenAiForms {
     /** `_meta["openai/preview"].target`; null sends no preview. */
     val previewTarget: JsonObject? = null,
   ) {
+    /** The option on the wire; [uri] travels [encodeUri]'d, as the field's `uri` format needs. */
     fun toJson(): JsonObject = buildJsonObject {
-      put("uri", uri)
+      put("uri", encodeUri(uri))
       put("name", name)
       title?.let { put("title", it) }
       description?.let { put("description", it) }
@@ -147,7 +148,7 @@ object OpenAiForms {
       description?.let { put("description", it) }
       put("format", "uri")
       put(INPUT_KEY, resourceInput(options, selection = null))
-      default?.let { put("default", it) }
+      default?.let { put("default", encodeUri(it)) }
     }
   }
 
@@ -181,7 +182,7 @@ object OpenAiForms {
         put("format", "uri")
       }
       put(INPUT_KEY, resourceInput(options, selection))
-      defaults?.let { uris -> putJsonArray("default") { uris.forEach { add(it) } } }
+      defaults?.let { uris -> putJsonArray("default") { uris.forEach { add(encodeUri(it)) } } }
     }
   }
 
@@ -202,6 +203,61 @@ object OpenAiForms {
     }
 
   /**
+   * [uri] as a valid RFC 3986 URI, for a `format: "uri"` field and its options. Every character
+   * outside the unreserved set and `:/?@!$&'()*+,;=` is percent-encoded as UTF-8, `%` included, so
+   * [decodeUri] reverses it exactly. A `compose-preview://` URI keeps a multipreview's name
+   * verbatim (`…Screen_Devices - Small`), and a host that checks the `uri` format refuses the
+   * spaces: Codex Desktop answered every pick with "Check this answer and try again".
+   */
+  fun encodeUri(uri: String): String {
+    if (uri.all { it.isUriSafe() }) return uri
+    return buildString {
+      // Byte by byte: a non-ASCII byte is never safe, so every multi-byte character is escaped.
+      uri.encodeToByteArray().forEach { byte ->
+        val char = (byte.toInt() and 0xFF).toChar()
+        if (char.isUriSafe()) append(char)
+        else {
+          append('%')
+          append(HEX[(byte.toInt() shr 4) and 0xF])
+          append(HEX[byte.toInt() and 0xF])
+        }
+      }
+    }
+  }
+
+  /** Reverses [encodeUri]; null when [encoded] holds a malformed escape. */
+  fun decodeUri(encoded: String): String? {
+    if ('%' !in encoded) return encoded
+    val bytes = java.io.ByteArrayOutputStream()
+    var i = 0
+    while (i < encoded.length) {
+      val char = encoded[i]
+      if (char == '%') {
+        if (i + 3 > encoded.length) return null
+        val high = encoded[i + 1].digitToIntOrNull(16) ?: return null
+        val low = encoded[i + 2].digitToIntOrNull(16) ?: return null
+        bytes.write(high * 16 + low)
+        i += 3
+      } else {
+        // encodeUri leaves only ASCII unescaped; anything else came from the host verbatim.
+        val end = if (char.isHighSurrogate() && i + 1 < encoded.length) i + 2 else i + 1
+        bytes.write(encoded.substring(i, end).encodeToByteArray())
+        i = end
+      }
+    }
+    return bytes.toByteArray().decodeToString()
+  }
+
+  private const val HEX = "0123456789ABCDEF"
+
+  private fun Char.isUriSafe(): Boolean =
+    this in 'a'..'z' ||
+      this in 'A'..'Z' ||
+      this in '0'..'9' ||
+      this in "-._~" ||
+      this in ":/?@!$&'()*+,;="
+
+  /**
    * The URI a single-select field submitted, or null when it is missing, not a string, or not one
    * of [offered]. Without `userOptions` a picker may only answer with a supplied option (the SDKs'
    * `isValidFileSelection`), so anything else is treated as a malformed answer.
@@ -210,7 +266,16 @@ object OpenAiForms {
     (content?.get(field) as? JsonPrimitive)
       ?.takeIf { it.isString }
       ?.contentOrNull
-      ?.takeIf { it in offered }
+      ?.let { offeredUri(it, offered) }
+
+  /**
+   * The member of [offered] that [answer] names: the option's URI as sent ([encodeUri]'d) or as
+   * given, so a host that hands back either form is understood.
+   */
+  private fun offeredUri(answer: String, offered: Collection<String>): String? =
+    answer.takeIf { it in offered }
+      ?: decodeUri(answer)?.takeIf { it in offered }
+      ?: offered.firstOrNull { encodeUri(it) == answer }
 
   /**
    * The URIs a multi-select field submitted, in answer order, or null when the value is not an
@@ -223,9 +288,12 @@ object OpenAiForms {
   ): List<String>? {
     val values = content?.get(field) as? JsonArray ?: return null
     val uris = values.map {
-      (it as? JsonPrimitive)?.takeIf { p -> p.isString }?.content ?: return null
+      (it as? JsonPrimitive)
+        ?.takeIf { p -> p.isString }
+        ?.content
+        ?.let { answer -> offeredUri(answer, offered) } ?: return null
     }
-    if (uris.toSet().size != uris.size || uris.any { it !in offered }) return null
+    if (uris.toSet().size != uris.size) return null
     return uris
   }
 

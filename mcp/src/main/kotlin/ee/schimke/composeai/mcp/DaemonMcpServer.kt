@@ -1680,7 +1680,7 @@ class DaemonMcpServer(
       ToolDef(
         name = "status",
         description =
-          "Not needed before render_preview — the workspace registers itself on first render. Report MCP server readiness, tool-catalog loading state, registered projects, and spawned daemon discovery state. Available immediately after initialize.",
+          "Not needed before render_preview — the workspace registers itself on first render. Report MCP server readiness, tool-catalog loading state, registered projects, and spawned daemon discovery state. With no project registered, projectHint says what was tried and lists candidateBuilds to pass as render_preview project=<absolute path>. Available immediately after initialize.",
         inputSchema = parseSchema("""{"type":"object","properties":{}}"""),
       ),
       ToolDef(
@@ -1828,7 +1828,7 @@ class DaemonMcpServer(
       ToolDef(
         name = "status",
         description =
-          "Not needed before render_preview — the workspace registers itself on first render. Report MCP server readiness, tool-catalog loading state, registered projects, and spawned daemon discovery state.",
+          "Not needed before render_preview — the workspace registers itself on first render. Report MCP server readiness, tool-catalog loading state, registered projects, and spawned daemon discovery state. With no project registered, projectHint says what was tried and lists candidateBuilds to pass as render_preview project=<absolute path>.",
         inputSchema = parseSchema("""{"type":"object","properties":{}}"""),
       ),
       ToolDef(
@@ -2705,7 +2705,7 @@ class DaemonMcpServer(
     }
     val progress = progressReporter(session, progressToken)
     return when (name) {
-      "status" -> toolStatus()
+      "status" -> toolStatus(session)
       "register_project" -> toolRegisterProject(args)
       "unregister_project" -> toolUnregisterProject(args)
       "list_projects" -> toolListProjects()
@@ -3017,7 +3017,9 @@ class DaemonMcpServer(
     return single?.let { listOf(it) }
   }
 
-  private fun toolStatus(): CallToolResult {
+  private suspend fun toolStatus(session: Session): CallToolResult {
+    val projects = supervisor.listProjects()
+    val hint = if (projects.isEmpty()) projectHint(session) else null
     val catalogState =
       when {
         fullToolCatalogError != null -> "failed"
@@ -3042,7 +3044,7 @@ class DaemonMcpServer(
         fullToolCatalogError?.let { put("error", it) }
       }
       putJsonArray("projects") {
-        supervisor.listProjects().forEach { project ->
+        projects.forEach { project ->
           add(
             buildJsonObject {
               put("workspaceId", project.workspaceId.value)
@@ -3076,6 +3078,7 @@ class DaemonMcpServer(
           )
         }
       }
+      hint?.let { put("projectHint", it) }
       put("freshness", freshnessMetrics.toJson())
     }
     return textCallToolResult(payload.toString())
@@ -3234,8 +3237,7 @@ class DaemonMcpServer(
    * The error when no project is registered: what was tried and why it did not qualify, how to name
    * a project, and the builds found or used before (up to ten).
    */
-  private fun notRegisteredMessage(): String {
-    val tried = lastTried
+  private fun notRegisteredMessage(tried: Tried? = lastTried): String {
     val triedText =
       if (tried == null || tried.dirs.isEmpty()) {
         "The client sent no workspace roots and the server has no working directory."
@@ -3246,16 +3248,51 @@ class DaemonMcpServer(
           "no settings.gradle(.kts) above them or up to ${ProjectDiscovery.SEARCH_DEPTH} levels " +
           "below."
       }
-    val candidates =
-      (pendingBuilds.map { it.path } + supervisor.workspaceStore.all().map { it.path })
-        .distinct()
-        .filter { File(it).isDirectory }
-        .take(10)
+    val candidates = candidateBuilds()
     return buildString {
       append("no project registered. ")
       append(triedText)
       append(" Pass project=<absolute path> (the Gradle build, or any folder in it).")
       if (candidates.isNotEmpty()) append(" Candidate builds: ${candidates.joinToString(", ")}.")
+    }
+  }
+
+  /** The builds found under the roots or used before (up to ten), for naming as `project=`. */
+  private fun candidateBuilds(): List<String> =
+    (pendingBuilds.map { it.path } + supervisor.workspaceStore.all().map { it.path })
+      .distinct()
+      .filter { File(it).isDirectory }
+      .take(10)
+
+  /**
+   * `status`'s `projectHint` while nothing is registered: an agent that calls `status` first learns
+   * the same thing a `render_preview` would tell it — what was tried and which builds to pass as
+   * `project=`. Registers nothing; a Gradle build at the roots is named as what the first render
+   * will register.
+   */
+  private suspend fun projectHint(session: Session): JsonObject {
+    val tried = lastTried ?: sessionRoots(session)
+    val builds = tried.dirs.flatMap { ProjectDiscovery.buildsFor(it) }.distinct()
+    val candidates = (builds.map { it.path } + candidateBuilds()).distinct().take(10)
+    return buildJsonObject {
+      put(
+        "message",
+        if (builds.isEmpty()) notRegisteredMessage(tried)
+        else
+          "no project registered yet. Found ${builds.joinToString(", ") { it.path }} under " +
+            "${tried.dirs.joinToString(", ") { it.path }}; render_preview registers it on first " +
+            "use, or pass project=<absolute path> (the Gradle build, or any folder in it).",
+      )
+      putJsonArray("tried") { tried.dirs.forEach { add(JsonPrimitive(it.path)) } }
+      put(
+        "triedSource",
+        when {
+          tried.dirs.isEmpty() -> "none"
+          tried.fromRoots -> "roots"
+          else -> "workingDirectory"
+        },
+      )
+      putJsonArray("candidateBuilds") { candidates.forEach { add(JsonPrimitive(it)) } }
     }
   }
 
@@ -3914,13 +3951,24 @@ class DaemonMcpServer(
       return toolRenderPreview(session, args, resolved)
     }
     val choices = listOf(resolved.uri) + resolved.others
-    // An OpenAI-forms client picks from thumbnails instead of getting the grid (#1240).
+    // An OpenAI-forms client picks from thumbnails instead of getting the grid (#1240). Short
+    // labels:
+    // the shared function name is in the form's message, not repeated (and truncated) per row.
+    val pickerLabels = PreviewPickers.variantLabels(choices)
+    // A host draws a placeholder for an option without a thumbnail, so every match that would have
+    // been a grid cell is rendered for its thumbnail when there is no cached render.
+    val renderMissingThumbnails = choices.size <= MAX_VARIANT_CELLS
     PreviewPickers.ambiguousMatch(
         session,
         previewName,
         choices,
-        label = { variantLabel(PreviewUri.parseOrNull(it)!!) },
-        thumbnail = { PreviewPickers.cachedThumbnail(it, previewActivity, renderThumbnails) },
+        label = { pickerLabels[choices.indexOf(it)] },
+        thumbnail = { uri ->
+          PreviewPickers.cachedThumbnail(uri, previewActivity, renderThumbnails)
+            ?: if (!renderMissingThumbnails) null
+            else
+              runCatching { pickerThumbnail(renderAndReadBytes(PreviewUri.parse(uri))) }.getOrNull()
+        },
         render = { toolRenderPreview(session, args, PreviewNameResolution.Found(it, emptyList())) },
       )
       ?.let {
@@ -3963,7 +4011,7 @@ class DaemonMcpServer(
       }
       return grid.copy(content = grid.content + ContentBlock.Text(choice.toString()))
     }
-    val labels = variantLabels(choices)
+    val labels = PreviewPickers.variantLabels(choices)
     val elicitation =
       (session as? McpSession)?.elicitForm(
         message = "Several previews match '$previewName'. Choose the one to render.",
@@ -4086,12 +4134,6 @@ class DaemonMcpServer(
           },
       )
     }
-  }
-
-  /** Short, unique labels for a form: the preview id, or the whole URI when ids collide. */
-  private fun variantLabels(uris: List<String>): List<String> {
-    val ids = uris.map { PreviewUri.parseOrNull(it)?.previewFqn ?: it }
-    return if (ids.toSet().size == ids.size) ids else uris
   }
 
   /**
