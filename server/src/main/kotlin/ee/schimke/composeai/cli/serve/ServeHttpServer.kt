@@ -14323,6 +14323,13 @@ class ServeHttpServer(
       call.respondText("not found", status = HttpStatusCode.NotFound)
       return
     }
+    // The builder's service worker, when the bundle ships one. Its own headers rather than the
+    // asset contract below: a worker script is revalidated on every navigation, never immutable,
+    // and it may only claim the whole `/ui-builder/` scope if the server says so.
+    if (assetSegments == listOf(UI_BUILDER_SERVICE_WORKER)) {
+      respondUiBuilderServiceWorker(file)
+      return
+    }
     // One door to the shell, so the reference rewrite cannot be reached around.
     if (version == null && rel == "index.html") {
       respondUiBuilderShell(dir, file)
@@ -14360,6 +14367,30 @@ class ServeHttpServer(
     } else {
       call.respond(LocalFileContent(file, wasmContentType(file.name)))
     }
+  }
+
+  /**
+   * `ui-builder-sw.js` at the bundle root — the builder's offline shell cache, which the
+   * compose-ui-builder bundle ships from the release that introduces it (an older pinned bundle has
+   * none, and the route simply 404s through the ordinary missing-file path above).
+   *
+   * Served the same, uncached, from the unversioned path and under `/ui-builder/v/<version>/`: a
+   * worker script is the one file whose freshness decides whether a rollout reaches anyone, so the
+   * versioned prefix's `immutable` contract must not apply to it. `Service-Worker-Allowed` lets a
+   * registration from either path take the editor's whole `/ui-builder/` scope and no more — the
+   * catalog pages, `/api/` and the WebSockets are outside it. Like every bundle asset it is
+   * ungated, because the browser fetches a worker's updates without the page's credential.
+   */
+  private suspend fun RoutingContext.respondUiBuilderServiceWorker(file: File) {
+    val etag = "\"${file.length().toString(16)}-${file.lastModified().toString(16)}\""
+    call.response.headers.append(HttpHeaders.CacheControl, "no-cache")
+    call.response.headers.append(HttpHeaders.ETag, etag)
+    call.response.headers.append(SERVICE_WORKER_ALLOWED, UI_BUILDER_SERVICE_WORKER_SCOPE)
+    if (call.request.headers[HttpHeaders.IfNoneMatch] == etag) {
+      call.respond(HttpStatusCode.NotModified)
+      return
+    }
+    call.respond(LocalFileContent(file, ContentType.parse("text/javascript")))
   }
 
   /** The bundle's gzip copies. Per server, because the bundle directory is. */
@@ -17645,6 +17676,16 @@ class ServeHttpServer(
 
     /** The path segment that introduces a UI-builder bundle version. */
     private const val UI_BUILDER_VERSION_SEGMENT = "v"
+
+    /**
+     * The service worker the UI-builder bundle ships at its root, from the release that adds it.
+     */
+    internal const val UI_BUILDER_SERVICE_WORKER = "ui-builder-sw.js"
+
+    /** The widest scope that worker may claim: the editor, and nothing else on the server. */
+    internal const val UI_BUILDER_SERVICE_WORKER_SCOPE = "/ui-builder/"
+
+    private const val SERVICE_WORKER_ALLOWED = "Service-Worker-Allowed"
 
     /** Launchers truncate a `short_name` past about a dozen characters. */
     private const val SHORT_NAME_MAX = 12

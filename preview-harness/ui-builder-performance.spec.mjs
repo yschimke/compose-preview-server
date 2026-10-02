@@ -405,7 +405,10 @@ test("UI-builder performance acceptance markers remain bounded", async ({ browse
     const logPath = testInfo.outputPath("server.log");
     const port = await freePort();
     const server = await startProductServer(port, stateDirectory, logPath);
-    const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+    const context = await browser.newContext({
+        viewport: { width: 1440, height: 900 },
+        serviceWorkers: "block",
+    });
     const observer = await context.newPage();
     const writer = await context.newPage();
     // The editor must never be refused by its own server. Its API calls were split across three
