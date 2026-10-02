@@ -79,6 +79,45 @@ class ServeUiBuilderComponentPublishRoutesTest {
     assertEquals(409, put("inbox-email", publishRequest(replacesDigest = firstDigest)).first)
   }
 
+  /**
+   * Moving a host-held component into the repository: the file the route answers, written where a
+   * project keeps its library, is then served from the project — with the digest every design that
+   * imported the host copy recorded, so nothing reports drift for having moved.
+   */
+  @Test
+  fun `a published component pulled into the project is served from there with the same digest`() {
+    start()
+    val published = Json.parseToJsonElement(put("inbox-email", publishRequest()).second).jsonObject
+    val digest = published["digest"]!!.jsonPrimitive.content
+
+    val (code, body) = get("$LIBRARY/$SYSTEM/inbox-email/file")
+
+    assertEquals(200, code, body)
+    val reply = Json.parseToJsonElement(body).jsonObject
+    val entry = reply["entry"]!!.jsonObject
+    assertEquals("inbox-email", entry["id"]!!.jsonPrimitive.content)
+    assertEquals("inbox-email.json", entry["file"]!!.jsonPrimitive.content)
+    // What component-sync.mjs writes into a checkout: the document, and an index naming it.
+    val committed = File(project, ServeUiBuilderComponentLibrary.COMPONENTS_DIR).apply { mkdirs() }
+    File(committed, "inbox-email.json").writeText(reply["document"].toString())
+    File(committed, "index.json")
+      .writeText(
+        """{"schema":"${ServeUiBuilderComponentLibrary.INDEX_SCHEMA}",
+           "components":[$entry]}"""
+      )
+    val fromProject = ServeUiBuilderComponentLibrary(fetch = { _, _ -> null })
+    val coordinate =
+      ServeUiBuilderDesignLibrary.Coordinate(
+        system = SYSTEM,
+        source = ServeUiBuilderDesignLibrary.Source.Directory(project),
+      )
+    val symbol = fromProject.symbol(coordinate, "inbox-email")
+    assertEquals(digest, symbol?.digest)
+    // And the project's copy is the one the route now serves.
+    assertEquals(409, put("inbox-email", publishRequest(replacesDigest = digest)).first)
+    assertEquals(404, get("$LIBRARY/$SYSTEM/absent/file").first)
+  }
+
   @Test
   fun `publishing needs write access`() {
     start()
