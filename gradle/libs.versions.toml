@@ -175,7 +175,11 @@ composeai-tools = "2.31.0"
 # and data kinds it ran, with per-step ms (compose-preview-daemon#189, #1181). It is compiled
 # against contracts 3.14.0, which is where that field lives, so `composeai-contracts` below must
 # be at least 3.14.0.
-composeai-preview-daemon = "3.11.0"
+# 3.12.0 stops staging Remote Compose and the embedded player in the Android sidecar
+# (compose-preview-daemon#191), so a bundle's own player draws its live renders. 3.11.0's copy
+# shadowed it with a player predating rc-players#558, which draws no text in a
+# `RemoteDensity.Host` capture: every live `remote-m3` render came back without its text.
+composeai-preview-daemon = "3.12.0"
 # 2.9.0 is the first release carrying `DesignEnvironmentV1.exportDevices` and its Set/Reset
 # changes, which is the field a design names its export devices in. 2.14.0 adds the components a
 # design defines — `DesignDocumentV1.components`, `DesignNodeV1.component` and the `binding` value
