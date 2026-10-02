@@ -6497,6 +6497,47 @@ ${captureControlsHtml().prependIndent("          ")}
   }
 
   /**
+   * The front door's **UI Builder** action, in the header bar rather than on every card.
+   *
+   * It used to be a chip on each catalog card the builder runs for, which repeated one destination
+   * down the grid: the link goes to `/ui-builder/`, the builder's **New design** chooser, where the
+   * catalog is picked anyway. One entry point in the bar says the same thing once and stays put
+   * while the grid scrolls.
+   *
+   * Offered only where the host runs the builder for at least one listed catalog and somebody is
+   * signed in — creating a design is a write, and an anonymous visitor's only honest next step is
+   * the sign-in control beside it. Component-browser mode never calls this.
+   *
+   * **A refusal is explained rather than hidden.** A visitor whose sign-in does not carry the
+   * builder's write capability gets the same label, visibly locked, as a `<details>` whose body
+   * names what is missing ([UiBuilderInvite.deniedReason]) — reachable without script and by
+   * keyboard. Showing nothing is indistinguishable from the builder not existing.
+   */
+  private fun builderHeaderAction(
+    invite: UiBuilderInvite?,
+    systems: List<HomeSystem>,
+    suffix: String,
+  ): String {
+    invite ?: return ""
+    if (!invite.signedIn || systems.none { it.system in invite.systems }) return ""
+    if (!invite.permitted) {
+      val why =
+        WebEscaping.htmlEscape(
+          invite.deniedReason.takeIf { it.isNotBlank() }
+            ?: "Your account does not carry the access creating a design needs."
+        )
+      return "<details class=\"cp-action-note cp-site-builder-note\">" +
+        "<summary class=\"cp-action-chip cp-action-chip--locked\" " +
+        "aria-label=\"UI Builder is unavailable — why\">" +
+        "UI Builder<span class=\"cp-action-chip-hint\" aria-hidden=\"true\">why?</span></summary>" +
+        "<span class=\"cp-action-note-body\">$why</span></details>"
+    }
+    val href = WebEscaping.htmlEscape("/ui-builder/$suffix")
+    return "<a class=\"cp-site-builder-link\" href=\"$href\">" +
+      "<span aria-hidden=\"true\">\u270e</span>UI Builder</a>"
+  }
+
+  /**
    * The public preview server's **front door**: an index of the systems it publishes, each a card
    * carrying a meaningful preview, the system's title + library, its trust badge, and a link to its
    * `/<system>/` catalog. This replaces showing an arbitrary default module's previews at `/` (the
@@ -6538,12 +6579,17 @@ ${captureControlsHtml().prependIndent("          ")}
     uiBuilder: UiBuilderInvite? = null,
     componentBrowser: Boolean = false,
   ): String {
-    val headerAction = if (componentBrowser) "" else githubAuthControl(githubAuth)
     val headerSessionSettings = if (componentBrowser) "" else githubSessionSettings(githubAuth)
     // Public routes are open — no token param on the cards; a token-gated box keeps it.
     val tokenParam =
       if (isPublic || token.isEmpty()) "" else "token=" + WebEscaping.urlEncodeSegment(token)
     val suffix = querySuffix(tokenParam)
+    val headerAction =
+      if (componentBrowser) ""
+      else
+        listOf(builderHeaderAction(uiBuilder, systems, suffix), githubAuthControl(githubAuth))
+          .filter { it.isNotEmpty() }
+          .joinToString("\n          ")
     /**
      * The card's comparison destinations, shortest label that still identifies them.
      *
@@ -6577,62 +6623,6 @@ ${captureControlsHtml().prependIndent("          ")}
       return out
     }
 
-    /**
-     * The card's **UI Builder** action: start a document in this catalog's builder.
-     *
-     * Offered only where all three are true — the host runs the builder for this catalog, somebody
-     * is signed in, and this is not the component-browser mode (which is for browsing components,
-     * not authoring against them, and drops the compare action beside it for the same reason).
-     *
-     * The link goes to `/ui-builder/?catalog=<catalog>`, which is the builder's **New design**
-     * chooser: the catalog is a creation choice, not part of a future document's identity.
-     * Deliberately a plain `GET` link rather than a form that posts a creation: the design does not
-     * exist until its id and template are chosen, and a chip that silently minted `untitled-3` on
-     * every stray click is not a front door.
-     *
-     * **A refusal is explained rather than hidden.** A visitor whose sign-in does not carry the
-     * builder's write capability gets the chip as a disclosure: the same label, visibly locked, and
-     * one sentence naming what is missing ([UiBuilderInvite.deniedReason]) when they open it. The
-     * alternative — showing nothing — is what the surface did before, and it is indistinguishable
-     * from the builder not existing. A `<details>` because the explanation must be reachable
-     * without script and by keyboard, and must not steal the card's own click.
-     */
-    fun builderAction(s: HomeSystem, sysSeg: String): String {
-      val invite = uiBuilder ?: return ""
-      if (componentBrowser || !invite.signedIn || s.system !in invite.systems) return ""
-      if (!invite.permitted) {
-        val described = WebEscaping.htmlEscape("${s.title}: UI Builder is unavailable — why")
-        val why =
-          WebEscaping.htmlEscape(
-            invite.deniedReason.takeIf { it.isNotBlank() }
-              ?: "Your account does not carry the access creating a design needs."
-          )
-        return "<details class=\"cp-action-note\">" +
-          "<summary class=\"cp-action-chip cp-action-chip--locked\" aria-label=\"$described\">" +
-          "UI Builder<span class=\"cp-action-chip-hint\" aria-hidden=\"true\">why?</span></summary>" +
-          "<span class=\"cp-action-note-body\">$why</span></details>"
-      }
-      val catalogQuery = "catalog=${WebEscaping.urlEncodeSegment(sysSeg)}"
-      val href =
-        WebEscaping.htmlEscape(
-          "/ui-builder/" +
-            querySuffix(
-              listOf(catalogQuery, tokenParam).filter { it.isNotEmpty() }.joinToString("&")
-            )
-        )
-      val described = WebEscaping.htmlEscape("${s.title}: open the UI Builder")
-      return "<a class=\"cp-action-chip cp-action-chip--primary\" href=\"$href\" " +
-        "aria-label=\"$described\">" +
-        "<span class=\"cp-action-chip-icon\" aria-hidden=\"true\">\u270e</span>UI Builder</a>"
-    }
-
-    /**
-     * The card's action row, or nothing at all when this card has no actions.
-     *
-     * A `<div>` rather than a `<p>`: the locked builder chip is a `<details>`, flow content that a
-     * browser would push out of a paragraph, leaving the explanation dangling outside the row.
-     * `.cp-sys-actions` passes pointer events through to the tile link underneath.
-     */
     /**
      * The card's **compare to Figma** action: a chip in the card's own meta block, under the
      * preview count, deep-linking that catalog's comparison page straight to its `reference`
@@ -6687,11 +6677,15 @@ ${captureControlsHtml().prependIndent("          ")}
         "</span>"
     }
 
+    /**
+     * The card's action row, or nothing at all when this card has no actions. The UI Builder entry
+     * lives in the header bar ([builderHeaderAction]), not here. `.cp-sys-actions` passes pointer
+     * events through to the tile link underneath.
+     */
     fun cardActions(s: HomeSystem, sysSeg: String): String {
-      val chips =
-        listOf(builderAction(s, sysSeg), compareAction(s, sysSeg)).filter { it.isNotEmpty() }
-      if (chips.isEmpty()) return ""
-      return "\n            <div class=\"cp-sys-actions\">" + chips.joinToString("") + "</div>"
+      val compare = compareAction(s, sysSeg)
+      if (compare.isEmpty()) return ""
+      return "\n            <div class=\"cp-sys-actions\">$compare</div>"
     }
     fun card(s: HomeSystem): String {
       val sysSeg = WebEscaping.urlEncodeSegment(s.system)
