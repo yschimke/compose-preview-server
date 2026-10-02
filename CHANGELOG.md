@@ -1,5 +1,33 @@
 # Changelog
 
+## [3.92.0](https://github.com/yschimke/compose-preview-server/compare/v3.91.0...v3.92.0) (2026-10-02)
+
+
+### Features
+
+* **deploy:** serve remote-m3 from yschimke/remote-m3-catalog-out ([#1282](https://github.com/yschimke/compose-preview-server/issues/1282)) ([7dbf200](https://github.com/yschimke/compose-preview-server/commit/7dbf2007b1dfadb0d3318c4166ecb1612776bd90))
+* **mcp-app:** Actual size toggle when the frame shrinks the preview ([#1285](https://github.com/yschimke/compose-preview-server/issues/1285)) ([1830529](https://github.com/yschimke/compose-preview-server/commit/1830529ac1185bdb39f694ccfb4b3e51b8ecee0d))
+* **mcp:** compare and pick design branches (explore alternatives) ([#1273](https://github.com/yschimke/compose-preview-server/issues/1273)) ([178d3c8](https://github.com/yschimke/compose-preview-server/commit/178d3c82fa4ed942823094152e857483c9c6269c))
+* **serve:** move the front door's UI Builder action from every card into the header ([#1280](https://github.com/yschimke/compose-preview-server/issues/1280)) ([591d94b](https://github.com/yschimke/compose-preview-server/commit/591d94bfd5b0015833d2631a47781d60e5ef65b9))
+* **ui-builder:** publish components to a host-held project library ([#1276](https://github.com/yschimke/compose-preview-server/issues/1276)) ([bbda1df](https://github.com/yschimke/compose-preview-server/commit/bbda1dfb877c095b4d9eded1d390d47d438c910a))
+* **ui-builder:** pull a host-held component into the project repository ([#1288](https://github.com/yschimke/compose-preview-server/issues/1288)) ([242eada](https://github.com/yschimke/compose-preview-server/commit/242eada2836ab0b9328a0fe2118237cb6cebaba4))
+
+
+### Bug Fixes
+
+* **catalog:** resolve a function-name display.hero through image daemon ids ([#1284](https://github.com/yschimke/compose-preview-server/issues/1284)) ([561c372](https://github.com/yschimke/compose-preview-server/commit/561c3727bea5c4a0f5a5c77cbf01928a8819e36c))
+* **ci:** skip the release PR pass while a release is in flight ([#1281](https://github.com/yschimke/compose-preview-server/issues/1281)) ([cef06b9](https://github.com/yschimke/compose-preview-server/commit/cef06b965199f68ec530765bfb47834122bef6e3))
+* **deps:** bump compose-preview-daemon to 3.12.0 ([#1287](https://github.com/yschimke/compose-preview-server/issues/1287)) ([b8edb85](https://github.com/yschimke/compose-preview-server/commit/b8edb851d4f76051a66b261c474b3e84b5a14bf0))
+* **deps:** compose-ai-tools 2.32.1 with the renamed Remote Compose player constants ([#1293](https://github.com/yschimke/compose-preview-server/issues/1293)) ([96f4bdc](https://github.com/yschimke/compose-preview-server/commit/96f4bdc380f02c90f2f01e893654b97f897876b9))
+* **deps:** update dependency ee.schimke.composeai:compose-preview-contracts-bom to v3.16.0 ([#1291](https://github.com/yschimke/compose-preview-server/issues/1291)) ([aeec97c](https://github.com/yschimke/compose-preview-server/commit/aeec97c4418291194b7967f31f0e576f59614f36))
+* **deps:** update dependency ee.schimke.composeai:rc-player-compose to v2.0.4 ([#1289](https://github.com/yschimke/compose-preview-server/issues/1289)) ([f5e1530](https://github.com/yschimke/compose-preview-server/commit/f5e1530f08ccaeb6fbc073a5cf8b6a50599cd7bc))
+* **deps:** update design-parity packages to v1.3.0 ([#1292](https://github.com/yschimke/compose-preview-server/issues/1292)) ([ffc3737](https://github.com/yschimke/compose-preview-server/commit/ffc37370a6fd7a2373c14deb16b4c139732aced2))
+* **mcp:** Codex chooser, viewer and status fixes from the compose-ag-plugin[#76](https://github.com/yschimke/compose-preview-server/issues/76) smoke run ([#1286](https://github.com/yschimke/compose-preview-server/issues/1286)) ([cdaf9d6](https://github.com/yschimke/compose-preview-server/commit/cdaf9d64b3c73c952d34ef09fb55351c42ab718e))
+* **mcp:** number contact-sheet tiles in a caption strip, not over the picture ([#1275](https://github.com/yschimke/compose-preview-server/issues/1275)) ([bef654e](https://github.com/yschimke/compose-preview-server/commit/bef654e3d81501976d41b9c6bf0e1e4af3c6c870))
+* **mcp:** refuse knob overrides a preview does not declare, or of the wrong type ([#1278](https://github.com/yschimke/compose-preview-server/issues/1278)) ([c4f2f6a](https://github.com/yschimke/compose-preview-server/commit/c4f2f6a1b9cba0f914e8a53a3c5d536bc14fa3ef))
+* **viewer:** name Remote Compose players by implementation; cmp-android is the CMP player ([#1283](https://github.com/yschimke/compose-preview-server/issues/1283)) ([be7d47e](https://github.com/yschimke/compose-preview-server/commit/be7d47e86f4f1dafbc7f59259ff92034bb08b84b))
+* **web:** never upscale a front-door hero past its own pixels ([#1279](https://github.com/yschimke/compose-preview-server/issues/1279)) ([4cb72b4](https://github.com/yschimke/compose-preview-server/commit/4cb72b4fbbf202ff4d3de4828d8ff50fc9496c5a))
+
 ## [3.91.0](https://github.com/yschimke/compose-preview-server/compare/v3.90.0...v3.91.0) (2026-10-01)
 
 
