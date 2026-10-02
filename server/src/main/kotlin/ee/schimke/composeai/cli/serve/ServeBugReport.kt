@@ -142,6 +142,19 @@ internal object ServeBugReport {
     val publicRender: Boolean = false,
   )
 
+  /** The comment [body] leaves under "What went wrong" for the reporter to replace. */
+  const val WHAT_WENT_WRONG_PROMPT: String =
+    "<!-- What were you doing, what did you expect, and what happened instead? -->"
+
+  /**
+   * [body] with [shared] — text shared into the installed app ([ServeShareTarget]) — in place of
+   * the "What went wrong" prompt. Unchanged when nothing was shared.
+   */
+  fun withSharedText(body: String, shared: String?): String {
+    val text = shared?.trim()?.takeIf { it.isNotEmpty() } ?: return body
+    return body.replaceFirst(WHAT_WENT_WRONG_PROMPT, text)
+  }
+
   /** The GitHub new-issue form for [REPO]. A literal — see [ServeIssueReport.action]. */
   fun action(): String = "https://github.com/$REPO/issues/new"
 
@@ -169,7 +182,7 @@ internal object ServeBugReport {
         listOfNotNull(page.renderUrl, page.referenceUrl).none { it.contains('|') }
     return buildString {
       append("### What went wrong\n\n")
-      append("<!-- What were you doing, what did you expect, and what happened instead? -->\n\n\n")
+      append(WHAT_WENT_WRONG_PROMPT).append("\n\n\n")
       append("### Screenshot\n\n")
       append("<!-- Paste your capture of the page here. -->\n\n\n")
       // The base render goes BELOW the paste slot and says what it is, rather than standing in as

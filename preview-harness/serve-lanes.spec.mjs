@@ -385,7 +385,7 @@ test("a Remote Compose document plays in the vendored typefaces, not the visitor
   // Two loads of the same page: as served, and with `/rc-fonts/**` blocked — which is exactly this
   // page before the faces were served at all.
   async function play(blockFonts) {
-    const ctx = await browser.newContext({ deviceScaleFactor: 2 });
+    const ctx = await browser.newContext({ deviceScaleFactor: 2, serviceWorkers: "block" });
     const page = await ctx.newPage();
     if (blockFonts) await page.route("**/rc-fonts/**", (route) => route.abort());
     await page.goto(docUrl, { waitUntil: "domcontentloaded" });

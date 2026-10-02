@@ -36,6 +36,8 @@ import {
     withUploadedCaptures,
 } from "./upload.js";
 import { PRIVATE_SCOPE, SCOPE_ATTR, needsUploadConsent } from "./visibility.js";
+import { sharedId, sharedImageUrl, withoutShared } from "./shared.js";
+import { fitWithin } from "./geometry.js";
 
 type Mode = "view" | "region" | "element";
 
@@ -66,6 +68,60 @@ export function installCapture(): void {
     render();
     if (imageUploadEnabled()) void uploadReportCaptures();
     else void discoverImageUpload();
+    void importSharedCapture();
+}
+
+/** The longest side a shared image is stored at — the same budget as a capture's. */
+const SHARED_MAX_SIDE = 1600;
+
+/**
+ * Pull a screenshot shared into the installed app (see `shared.ts`) into the capture pile, stamped
+ * as a capture of the report being written here so the hand-off carries it into the issue.
+ */
+async function importSharedCapture(): Promise<void> {
+    const id = sharedId(location.search);
+    if (!id) return;
+    const source = sharedImageUrl(id, location.search);
+    // Before the fetch, so a reload mid-import cannot import it twice.
+    try {
+        history.replaceState(history.state, "", withoutShared(location.href));
+    } catch {
+        // A sandboxed document may refuse; importing once more on reload is the only cost.
+    }
+    let bitmap: ImageBitmap;
+    try {
+        const response = await fetch(source, { credentials: "same-origin" });
+        // A text-only share parks no image, and an expired one is gone: nothing to import.
+        if (!response.ok) return;
+        bitmap = await createImageBitmap(await response.blob());
+    } catch {
+        note(
+            "The shared image could not be read. Paste it into the issue instead.",
+        );
+        return;
+    }
+    const size = fitWithin(
+        { width: bitmap.width, height: bitmap.height },
+        SHARED_MAX_SIDE,
+    );
+    const canvas = document.createElement("canvas");
+    canvas.width = size.width;
+    canvas.height = size.height;
+    canvas.getContext("2d")?.drawImage(bitmap, 0, 0, size.width, size.height);
+    bitmap.close();
+    const capture: Capture = {
+        id: nextId(readCaptures(sessionStore())),
+        label: "Shared image",
+        dataUrl: toDataUrl(canvas),
+        width: canvas.width,
+        height: canvas.height,
+        page: reportedPage() ?? location.pathname,
+    };
+    note(
+        storeCapture(capture)
+            ? "Your shared image is attached to this report."
+            : "The shared image is too large to keep here. Paste it into the issue instead.",
+    );
 }
 
 /**

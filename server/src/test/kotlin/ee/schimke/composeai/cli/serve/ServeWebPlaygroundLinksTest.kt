@@ -55,7 +55,10 @@ class ServeWebPlaygroundLinksTest {
     // No playground lane, or a preview whose catalog never recorded a source path. A dead entry in
     // a provenance row is worse than no entry: it reads as an offer the server then refuses.
     val html = viewer(null)
-    assertFalse(html.contains("playground"), "no lane, no link")
+    // Asked of the link itself: every page's speculation rules name `/playground*` as a path never
+    // to prefetch, so the bare word is on every page whether or not the lane exists.
+    assertFalse(html.contains("/playground?from"), "no lane, no link")
+    assertFalse(html.contains("playground</a>"), "no lane, no link")
     assertTrue(html.contains("source</a>"), "…and the rest of the row is untouched")
   }
 

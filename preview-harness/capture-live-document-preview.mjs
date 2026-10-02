@@ -20,7 +20,7 @@ const browser = await chromium.launch({ headless: true, executablePath: process.
 const errors = [];
 const sha = bytes => createHash("sha256").update(bytes).digest("hex");
 try {
-    const page = await browser.newPage({ viewport: { width: 1600, height: 1050 }, deviceScaleFactor: 1 });
+    const page = await browser.newPage({ viewport: { width: 1600, height: 1050 }, deviceScaleFactor: 1, serviceWorkers: "block" });
     // Compose's accessibility nodes sit behind its canvas; send input to their measured positions.
     async function click(locator) {
         const bounds = await locator.boundingBox();

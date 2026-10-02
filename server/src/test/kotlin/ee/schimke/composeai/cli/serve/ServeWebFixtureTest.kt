@@ -7671,9 +7671,17 @@ class ServeWebFixtureTest {
     // A representative viewer with siblings (so the component nav drawer is present too).
     val viewer = ServeWeb.viewerPage(previews.first(), token, siblings = previews)
     assertTrue(
-      viewer.contains("<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">"),
-      "the page declares a mobile viewport",
+      viewer.contains(
+        "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1, " +
+          "viewport-fit=cover, interactive-widget=resizes-content\">"
+      ),
+      "the page declares a mobile viewport that reaches under a notch and resizes for the keyboard",
     )
+    // Safe-area insets and touch-sized targets ride on that declaration.
+    val css = assetText("serve.css")
+    assertTrue(css.contains("env(safe-area-inset-left"), "the page pads a landscape notch")
+    assertTrue(css.contains("@media (pointer: coarse)"), "touch gets larger tap targets")
+    assertTrue(css.contains("max-height: 78dvh"), "bottom sheets size to the visible viewport")
     assertTrue(
       assetText("serve.css").contains("@media (max-width: 640px) {"),
       "the stylesheet has a narrow-viewport breakpoint",

@@ -1,5 +1,6 @@
 package ee.schimke.composeai.cli.serve
 
+import ee.schimke.composeai.web.WebEscaping
 import java.awt.image.BufferedImage
 import java.io.ByteArrayOutputStream
 import java.security.MessageDigest
@@ -48,6 +49,11 @@ internal object ServeSiteIcon {
 
   /** The same mark inside a launcher's safe zone ([maskableIcon]). */
   const val MASKABLE_ICON_PATH = "/icons/app-maskable-512.png"
+
+  /** The manifest's install-dialog [screenshots], one per form factor. */
+  const val SCREENSHOT_NARROW_PATH = "/icons/screenshot-narrow.png"
+
+  const val SCREENSHOT_WIDE_PATH = "/icons/screenshot-wide.png"
 
   /** The web app manifest ([manifest]): what makes the site installable as an app. */
   const val MANIFEST_PATH = "/manifest.webmanifest"
@@ -160,19 +166,67 @@ internal object ServeSiteIcon {
    *
    * The `id` is fixed at `/` so the installed app keeps its identity if [startUrl] ever moves.
    */
-  fun manifest(name: String, shortName: String, startUrl: String, shortcuts: List<Shortcut>): Icon {
+  fun manifest(
+    name: String,
+    shortName: String,
+    startUrl: String,
+    shortcuts: List<Shortcut>,
+    /**
+     * The installed app's identity. Resolved against the manifest's own origin, so `/` on a site
+     * host (`m3.preview.coo.ee`) is already a different app from `/` on the main host — which is
+     * what lets each top-level site install as its own app rather than as the box.
+     */
+    id: String = "/",
+    scope: String = "/",
+    description: String = "Compose previews, catalogs and the UI builder.",
+    /** The title bar colour of the installed window; defaults to the brand's tonal container. */
+    themeColor: String = hex(ServeBrand.MARK_BG),
+  ): Icon {
     fun str(value: String) = kotlinx.serialization.json.JsonPrimitive(value)
     val json =
       kotlinx.serialization.json.buildJsonObject {
-        put("id", str("/"))
+        put("id", str(id))
         put("name", str(name))
         put("short_name", str(shortName))
-        put("description", str("Compose previews, catalogs and the UI builder."))
+        put("description", str(description))
         put("start_url", str(startUrl))
-        put("scope", str("/"))
+        put("scope", str(scope))
         put("display", str("standalone"))
+        // Tried in order before `display`. Not `window-controls-overlay`: the site header is a
+        // sticky bar that knows nothing of `env(titlebar-area-*)`, so the desktop window controls
+        // would sit over its trailing actions. `minimal-ui` is the fallback a browser that cannot
+        // do standalone (or a user who declined it) still gets a back button from.
+        put(
+          "display_override",
+          kotlinx.serialization.json.buildJsonArray {
+            add(str("standalone"))
+            add(str("minimal-ui"))
+          },
+        )
+        // A second launch focuses the window already open rather than stacking another — the
+        // share target below relies on it to land a shared screenshot in the running app.
+        put(
+          "launch_handler",
+          kotlinx.serialization.json.buildJsonObject {
+            put(
+              "client_mode",
+              kotlinx.serialization.json.buildJsonArray {
+                add(str("focus-existing"))
+                add(str("auto"))
+              },
+            )
+          },
+        )
+        put(
+          "categories",
+          kotlinx.serialization.json.buildJsonArray {
+            add(str("developer"))
+            add(str("productivity"))
+            add(str("design"))
+          },
+        )
         put("background_color", str(hex(ServeBrand.MARK_BG)))
-        put("theme_color", str(hex(ServeBrand.MARK_BG)))
+        put("theme_color", str(themeColor))
         put(
           "icons",
           kotlinx.serialization.json.buildJsonArray {
@@ -189,6 +243,59 @@ internal object ServeSiteIcon {
             icon(APP_ICON_512_PATH, "512x512", "image/png", "any")
             icon(MASKABLE_ICON_PATH, "512x512", "image/png", "maskable")
             icon(SVG_PATH, "any", "image/svg+xml", "any")
+          },
+        )
+        // What the install dialog shows beside the name. Committed captures of the catalog page,
+        // one per form factor, so the richer install UI has something true to show at either size.
+        put(
+          "screenshots",
+          kotlinx.serialization.json.buildJsonArray {
+            screenshots.forEach { shot ->
+              add(
+                kotlinx.serialization.json.buildJsonObject {
+                  put("src", str(shot.path))
+                  put("sizes", str("${shot.width}x${shot.height}"))
+                  put("type", str("image/png"))
+                  put("form_factor", str(shot.formFactor))
+                  put("label", str(shot.label))
+                }
+              )
+            }
+          },
+        )
+        // Installed, the app appears in the OS share sheet. A shared screenshot lands in the
+        // bug-report flow as a capture, and a shared link opens if it is one of this server's own
+        // pages. See [ServeShareTarget].
+        put(
+          "share_target",
+          kotlinx.serialization.json.buildJsonObject {
+            put("action", str(ServeShareTarget.ACTION_PATH))
+            put("method", str("POST"))
+            put("enctype", str("multipart/form-data"))
+            put(
+              "params",
+              kotlinx.serialization.json.buildJsonObject {
+                put("title", str(ServeShareTarget.TITLE_FIELD))
+                put("text", str(ServeShareTarget.TEXT_FIELD))
+                put("url", str(ServeShareTarget.URL_FIELD))
+                put(
+                  "files",
+                  kotlinx.serialization.json.buildJsonArray {
+                    add(
+                      kotlinx.serialization.json.buildJsonObject {
+                        put("name", str(ServeShareTarget.FILE_FIELD))
+                        put(
+                          "accept",
+                          kotlinx.serialization.json.buildJsonArray {
+                            ServeShareTarget.ACCEPTED_IMAGE_TYPES.forEach { add(str(it)) }
+                          },
+                        )
+                      }
+                    )
+                  },
+                )
+              },
+            )
           },
         )
         if (shortcuts.isNotEmpty()) {
@@ -228,15 +335,93 @@ internal object ServeSiteIcon {
    * ones: an icon fetcher that guesses a URL guesses these, and unlike a page asset an icon is
    * small enough that a day's cache costs nothing to get wrong.
    */
-  fun linkTags(): String =
-    """
+  fun linkTags(themeCss: String = "", appTitle: String = "Compose Preview"): String {
+    val (light, dark) = themeColors(themeCss)
+    val title = WebEscaping.htmlEscape(appTitle.ifBlank { "Compose Preview" })
+    return """
     <link rel="icon" href="$SVG_PATH" type="image/svg+xml">
     <link rel="icon" href="$ICO_PATH" sizes="32x32">
     <link rel="apple-touch-icon" href="$APPLE_TOUCH_PATH">
     <link rel="manifest" href="$MANIFEST_PATH">
-    <meta name="theme-color" content="${hex(ServeBrand.MARK_BG)}">
+    <meta name="theme-color" media="(prefers-color-scheme: light)" content="$light">
+    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="$dark">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-title" content="$title">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
     """
       .trimIndent()
+  }
+
+  /**
+   * The browser chrome's colour in each scheme: the page's own surface, which is what the sticky
+   * site header paints (`--cp-bg`), so the status bar and the header read as one strip. A catalog
+   * that publishes a palette ([ServeThemeCss]) re-themes `--md-sys-color-surface`, and the strip
+   * follows it; anything else gets the M3 baseline surface the stylesheet declares.
+   */
+  fun themeColors(themeCss: String = ""): Pair<String, String> {
+    val match = SURFACE_PAIR.find(themeCss)
+    return if (match != null) match.groupValues[1].lowercase() to match.groupValues[2].lowercase()
+    else BASELINE_SURFACE_LIGHT to BASELINE_SURFACE_DARK
+  }
+
+  /** `serve.css`'s baseline `--md-sys-color-surface`, light then dark. */
+  const val BASELINE_SURFACE_LIGHT = "#fef7ff"
+  const val BASELINE_SURFACE_DARK = "#141218"
+
+  private val SURFACE_PAIR =
+    Regex(
+      "--md-sys-color-surface:\\s*light-dark\\(\\s*(#[0-9a-fA-F]{6})\\s*,\\s*(#[0-9a-fA-F]{6})\\s*\\)"
+    )
+
+  /** One manifest screenshot, served from the classpath at [path]. */
+  data class Screenshot(
+    val path: String,
+    val resource: String,
+    val width: Int,
+    val height: Int,
+    val formFactor: String,
+    val label: String,
+  )
+
+  /**
+   * The manifest's screenshots: committed captures of the catalog page, a phone and a desktop.
+   * Small on purpose — a few tens of kilobytes each — because an install dialog is the only reader.
+   */
+  val screenshots: List<Screenshot> =
+    listOf(
+      Screenshot(
+        SCREENSHOT_NARROW_PATH,
+        "screenshot-narrow.png",
+        412,
+        800,
+        "narrow",
+        "A catalog of Compose previews on a phone",
+      ),
+      Screenshot(
+        SCREENSHOT_WIDE_PATH,
+        "screenshot-wide.png",
+        1280,
+        800,
+        "wide",
+        "A catalog of Compose previews on a desktop",
+      ),
+    )
+
+  /** A [screenshots] entry's bytes, read once from the classpath; null when not packaged. */
+  fun screenshot(path: String): Icon? = screenshotIcons[path]
+
+  private val screenshotIcons: Map<String, Icon> by lazy {
+    screenshots
+      .mapNotNull { shot ->
+        val bytes =
+          ServeSiteIcon::class.java.getResourceAsStream("pwa/${shot.resource}")?.use {
+            it.readBytes()
+          } ?: return@mapNotNull null
+        shot.path to Icon(bytes, "image/png", etagOf(bytes))
+      }
+      .toMap()
+  }
 
   private fun pngIcon(size: Int): Icon {
     val image = BufferedImage(size, size, BufferedImage.TYPE_INT_ARGB)
@@ -253,7 +438,7 @@ internal object ServeSiteIcon {
     return Icon(bytes, "image/png", etagOf(bytes))
   }
 
-  private fun hex(color: java.awt.Color): String =
+  internal fun hex(color: java.awt.Color): String =
     "#%02x%02x%02x".format(color.red, color.green, color.blue)
 
   private fun etagOf(bytes: ByteArray): String =

@@ -5407,6 +5407,7 @@ public class ServeRunner(
         builderPath =
           effectiveOpenPath.takeIf { uiBuilderLaneOpen && isUiBuilderPath(openBrowserPath) },
         acceptDocs = acceptDocs,
+        qr = System.console() != null,
       )
       .forEach(System.err::println)
   }

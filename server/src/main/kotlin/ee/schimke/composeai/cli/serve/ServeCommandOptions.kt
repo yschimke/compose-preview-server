@@ -1112,7 +1112,11 @@ public class ServeCommandOptions(
                           (--module / --discover) — a bundle-backed server has no manifest.
         --host <addr>     Bind address (default 127.0.0.1 — loopback only).
         --lan             Bind all interfaces (0.0.0.0) so other devices on your network can
-                          connect. Prints the token-gated network URL and a security warning.
+                          connect. Prints the token-gated network URL, a QR code for a phone
+                          (interactive terminals) and a security warning. A plain-http LAN
+                          origin is not a secure context: installing the app, Web Share,
+                          clipboard and offline need HTTPS, or `adb reverse tcp:<port>
+                          tcp:<port>` to open it as http://localhost on an Android phone.
         --port <n>        Preferred port (default ${ServeDefaults.DEFAULT_PORT}; auto-picks the next free one).
         --token <value>   Use a fixed token instead of a freshly generated one (stable links).
         --public          Serve every route WITHOUT a token (open). For a deployed public preview

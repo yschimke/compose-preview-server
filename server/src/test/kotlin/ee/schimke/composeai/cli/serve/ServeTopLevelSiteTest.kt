@@ -12,6 +12,8 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import okhttp3.OkHttpClient
 import okhttp3.Request
 
@@ -169,6 +171,33 @@ class ServeTopLevelSiteTest {
     val (mainCode, mainBody, _) = get("/")
     assertEquals(200, mainCode)
     assertTrue(mainBody.contains("Wear M3"), "the main front door still lists every system")
+  }
+
+  /**
+   * A site host installs as its own app: its manifest is named for the site's catalog, while the
+   * main host keeps the box's own name. Both stay ungated like the icons they name.
+   */
+  @Test
+  fun `each site host serves a manifest named for its own catalog`() {
+    server = newServer()
+    val (siteCode, site, _) = get("/manifest.webmanifest", host = siteHost)
+    assertEquals(200, siteCode)
+    val siteJson = kotlinx.serialization.json.Json.parseToJsonElement(site).jsonObject
+    assertEquals("Compose Material 3", siteJson.getValue("name").jsonPrimitive.content)
+    assertEquals("compose-m3", siteJson.getValue("short_name").jsonPrimitive.content)
+    assertEquals("/", siteJson.getValue("start_url").jsonPrimitive.content)
+    assertEquals("/", siteJson.getValue("scope").jsonPrimitive.content)
+    assertEquals("/", siteJson.getValue("id").jsonPrimitive.content)
+
+    val (mainCode, main, _) = get("/manifest.webmanifest")
+    assertEquals(200, mainCode)
+    val mainJson = kotlinx.serialization.json.Json.parseToJsonElement(main).jsonObject
+    assertEquals("Compose Preview", mainJson.getValue("name").jsonPrimitive.content)
+
+    // The screenshots the manifest names are served on the site host too.
+    for (path in listOf("/icons/screenshot-narrow.png", "/icons/screenshot-wide.png")) {
+      assertEquals(200, get(path, host = siteHost).first, path)
+    }
   }
 
   @Test

@@ -10,6 +10,9 @@ export default defineConfig({
     timeout: 60_000,
     reporter: process.env.CI ? "github" : "list",
     use: {
+        // Harness lanes stay isolated: a service worker registered by one page (the UI builder
+        // ships one) must never answer another lane's requests from its cache.
+        serviceWorkers: "block",
         browserName: "chromium",
         baseURL: `http://127.0.0.1:${PORT}/`,
         viewport: { width: 1280, height: 800 },

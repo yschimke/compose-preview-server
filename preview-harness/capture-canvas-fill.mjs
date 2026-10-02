@@ -11,7 +11,7 @@ await mkdir(dir, {recursive: true});
 const browser = await chromium.launch({headless: true, executablePath: process.env.CHROME_PATH || undefined, args: ['--enable-unsafe-swiftshader', '--use-gl=angle', '--force-renderer-accessibility']});
 const errors = [];
 try {
-  const page = await browser.newPage({viewport: {width: 1600, height: 1050}, deviceScaleFactor: 1});
+  const page = await browser.newPage({viewport: {width: 1600, height: 1050}, deviceScaleFactor: 1, serviceWorkers: "block"});
   page.on('pageerror', error => errors.push(error.message));
   await page.goto(url);
   await page.waitForFunction(() => document.documentElement.dataset.uiBuilderReady === 'true', null, {timeout: 60000});

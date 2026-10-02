@@ -42,6 +42,8 @@ import { type ApiDocLink, usableApiDocs } from "./viewer/apiDocs.js";
 import { reportBody } from "./report/body.js";
 import { withStage } from "./annotate/report.js";
 import { isTransparent } from "./backgroundChoice.js";
+import { installWebShare } from "./viewer/webShare.js";
+import { pageWakeHold } from "./viewer/wakeLock.js";
 import { writeThemeMemory } from "./chrome/themeMemory.js";
 import { fitInk, imageInk, type InkBounds } from "./design/ink.js";
 import { compareApi } from "./compare/api.js";
@@ -73,6 +75,8 @@ import {
 function must<T extends HTMLElement>(id: string): T {
     return document.getElementById(id) as T;
 }
+// The screen stays on while a live stream or a motion capture is running (see `wakeLock.ts`).
+var wakeHold = pageWakeHold();
 function may<T extends HTMLElement>(id: string): T | null {
     return document.getElementById(id) as T | null;
 }
@@ -1474,6 +1478,13 @@ document.querySelectorAll<HTMLElement>(".cp-copyimg").forEach(function (btn) {
         copyAsText();
     });
 });
+// Share link / Share PNG beside the Copy actions, on a touchscreen with a share sheet. The PNG is
+// the one Copy PNG would take: composited onto the stage unless Transparent is on.
+installWebShare(function () {
+    var field = may<HTMLInputElement>("cp-url-png");
+    if (!field || !field.value) return null;
+    return isTransparent() ? field.value : withStage(field.value);
+});
 // --- Live frame painting.
 //
 // Frames land on `frameQueue` and are drained one per animation frame, never straight from the
@@ -1749,6 +1760,7 @@ function openStream() {
             (qs ? qs + "&codec=webp" : "codec=webp"),
     );
     ws = sock;
+    wakeHold.hold("live", true);
     startFrameLoop();
     sock.onopen = function () {
         // A tab hidden during the connecting window has never told the server so — every stream
@@ -1796,6 +1808,7 @@ function openStream() {
         // (which cleared pending and restored the snapshot). Leave the live lane's state alone.
         if (ws !== sock) return;
         ws = null;
+        wakeHold.hold("live", false);
         // The lane is done waiting either way — it painted, or it failed (showModeError below).
         setPending(null);
         // Closed before any frame ⇒ the mode failed to activate. Drop the stale seeded snapshot
@@ -1827,6 +1840,7 @@ function closeStream() {
         ws.close();
         ws = null;
     }
+    wakeHold.hold("live", false);
     canvas.hidden = true;
     // Tear down the overlay: drop the absolute positioning and restore the snapshot img's slot.
     canvas.classList.remove("cp-canvas-live");
@@ -2687,12 +2701,14 @@ function motionPrefersStill() {
     );
 }
 function stopMotionClock() {
+    wakeHold.hold("motion", false);
     if (motionRaf) window.cancelAnimationFrame(motionRaf);
     motionRaf = 0;
     motionLastTs = 0;
 }
 function startMotionClock() {
     if (motionRaf) return;
+    wakeHold.hold("motion", true);
     motionLastTs = 0;
     motionRaf = window.requestAnimationFrame(motionClockTick);
 }
@@ -2704,7 +2720,10 @@ function motionClockTick(ts: number) {
     paintMotion();
     if (motionPlayback.playing)
         motionRaf = window.requestAnimationFrame(motionClockTick);
-    else motionLastTs = 0;
+    else {
+        motionLastTs = 0;
+        wakeHold.hold("motion", false);
+    }
 }
 /** Draw whichever frame the playhead is on, and put the transport in step with it. */
 function paintMotion() {

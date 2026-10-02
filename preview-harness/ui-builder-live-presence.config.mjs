@@ -8,6 +8,9 @@ export default defineConfig({
     fullyParallel: false,
     reporter: process.env.CI ? "github" : "list",
     use: {
+        // Harness lanes stay isolated: a service worker registered by one page (the UI builder
+        // ships one) must never answer another lane's requests from its cache.
+        serviceWorkers: "block",
         browserName: "chromium",
         baseURL: process.env.SERVE_URL || "http://127.0.0.1:8727",
         viewport: { width: 1440, height: 900 },

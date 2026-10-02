@@ -13,7 +13,7 @@ const browser = await chromium.launch({
 });
 let page;
 try {
-  page = await browser.newPage({ viewport: { width: 1600, height: 1050 }, deviceScaleFactor: 1 });
+  page = await browser.newPage({ viewport: { width: 1600, height: 1050 }, deviceScaleFactor: 1, serviceWorkers: "block" });
   const errors = [];
   page.on("pageerror", error => errors.push(error.message));
   await page.goto(`${origin}/ui-builder/${designId}?token=${encodeURIComponent(token)}&node=choice`);

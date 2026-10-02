@@ -98,7 +98,7 @@ test("two authenticated browser actors exchange real ephemeral selection presenc
     const firstGrant = await mintEditorGrant(request, "Presence browser Ada");
     const secondGrant = await mintEditorGrant(request, "Presence browser Lin");
 
-    const owner = await browser.newContext();
+    const owner = await browser.newContext({ serviceWorkers: "block" });
     const ownerPage = await owner.newPage();
     await ownerPage.goto(
         liveUrl(designId, "operator", operatorToken, "owner-seed", "Owner", "#FF777777", true),
@@ -110,8 +110,8 @@ test("two authenticated browser actors exchange real ephemeral selection presenc
         .toBe("true");
     await grantDesignAccess(request, designId, [firstGrant.actorId, secondGrant.actorId]);
 
-    const first = await browser.newContext();
-    const second = await browser.newContext();
+    const first = await browser.newContext({ serviceWorkers: "block" });
+    const second = await browser.newContext({ serviceWorkers: "block" });
     const firstPage = await first.newPage();
     const secondPage = await second.newPage();
     const pageErrors = [];
