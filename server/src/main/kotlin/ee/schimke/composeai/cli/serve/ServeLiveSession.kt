@@ -173,7 +173,7 @@ private constructor(
    * rather than carrying the previous one's.
    */
   private fun parseFor(id: String, params: Map<String, String>): OverrideParse =
-    ServeOverrides.parse(
+    ServeRcPlayerIds.parseOverrides(
       ServeThemeReplay.expand(renderHost, id, params).params,
       knobKindsFor(id),
       declaredThemeFqns(),
@@ -276,7 +276,7 @@ private constructor(
       val initial =
         when (
           val parsed =
-            ServeOverrides.parse(
+            ServeRcPlayerIds.parseOverrides(
               ServeThemeReplay.expand(renderHost, previewId, normalizedOverrides).params,
               knobKinds,
               renderHost.declaredThemes.map { it.providerFqn }.toSet(),

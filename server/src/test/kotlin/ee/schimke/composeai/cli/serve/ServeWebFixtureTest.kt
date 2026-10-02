@@ -356,11 +356,11 @@ class ServeWebFixtureTest {
     val allLanes =
       listOf(
         RcCompareLane("baked", "AndroidX Embedded · baked", "baked"),
-        RcCompareLane("js", "RC · JS player", "js"),
+        RcCompareLane("js", "Camaelon JS", "camaelon-js"),
         RcCompareLane("embedded", "AndroidX Embedded · vendored Android", "vendored"),
         RcCompareLane("androidx-embedded", "AndroidX Embedded · androidx.dev", "androidx.dev"),
-        RcCompareLane("cmp-jvm", "rc-player JVM", "jvm"),
-        RcCompareLane("cmp-wasm", "RC · cmp-wasm player", "cmp-wasm"),
+        RcCompareLane("cmp-jvm", "CMP JVM", "jvm"),
+        RcCompareLane("cmp-wasm", "CMP Wasm", "cmp-wasm"),
       )
     val kept = allLanes.filter { lanes == null || it.id in lanes }
     fun cell(lane: String, slot: Int, pct: Double?, px: Long?, note: String = "") =
@@ -1520,9 +1520,10 @@ class ServeWebFixtureTest {
         hasLiveStream = true,
         hasSvgExport = true,
         hasRemoteComposeDoc = true,
-        // js + cmp-wasm play in the browser, java + cmp-android render through the daemon; cmp-jvm
-        // needs sidecars this host doesn't carry, so it is the "(unavailable)" option.
-        enabledRcPlayers = listOf("js", "cmp-wasm", "java", "cmp-android"),
+        // camaelon-js + cmp-wasm play in the browser, androidx-view + androidx-embedded render
+        // through the daemon; cmp-android (the CMP player on Android) and cmp-jvm are not
+        // reported by this host, so they are the "(unavailable)" options.
+        enabledRcPlayers = listOf("camaelon-js", "cmp-wasm", "androidx-view", "androidx-embedded"),
         trust = "branch:yschimke/compose-ai-tools@design-artifacts/remote-m3",
       )
     // The SAME Remote Compose preview, behind GitHub auth — the one pair the renderer control has
@@ -1549,7 +1550,7 @@ class ServeWebFixtureTest {
         hasLiveStream = true,
         hasSvgExport = true,
         hasRemoteComposeDoc = true,
-        enabledRcPlayers = listOf("js", "cmp-wasm", "java", "cmp-android"),
+        enabledRcPlayers = listOf("camaelon-js", "cmp-wasm", "androidx-view", "androidx-embedded"),
         trust = "branch:yschimke/compose-ai-tools@design-artifacts/remote-m3",
         liveAuthPrompt =
           ServeWeb.LiveAuthPrompt(
@@ -1573,7 +1574,7 @@ class ServeWebFixtureTest {
         sessionId = "remote-m3",
         basePath = "/remote-m3",
         hasRemoteComposeDoc = true,
-        enabledRcPlayers = listOf("js", "cmp-wasm", "java", "cmp-android"),
+        enabledRcPlayers = listOf("camaelon-js", "cmp-wasm", "androidx-view", "androidx-embedded"),
         pairedDesignSource =
           ServeWeb.SpecSource(
             id = "kit",
@@ -1642,7 +1643,7 @@ class ServeWebFixtureTest {
         hasRemoteComposeDoc = true,
         hasA11yOverlay = true,
         hasDesignAnnotations = true,
-        enabledRcPlayers = listOf("js", "cmp-wasm", "java", "cmp-android"),
+        enabledRcPlayers = listOf("camaelon-js", "cmp-wasm", "androidx-view", "androidx-embedded"),
         trust = "branch:yschimke/compose-ai-tools@design-artifacts/remote-m3",
         revisions =
           ServeWeb.CatalogRevisions(
@@ -2060,9 +2061,9 @@ class ServeWebFixtureTest {
         isPublic = true,
         rcCompare = rcCompareFixture(themedPreviews, lanes = setOf("baked", "js", "cmp-wasm")),
         // The host offers BOTH server-side players, and the wall must take only cmp-jvm: on an
-        // Android daemon `?rcPlayer=cmp-android` returns the baked capture itself, so that column
-        // would duplicate the one beside it. `badge` stands in for a preview the host carries no
-        // document for, so the wall also has to show a column its rows do not all fill.
+        // Android daemon `?rcPlayer=androidx-embedded` returns the baked capture itself, so that
+        // column would duplicate the one beside it. `badge` stands in for a preview the host
+        // carries no document for, so the wall also has to show a column its rows do not all fill.
         liveRcPlayersFor = { previewId ->
           if (previewId.startsWith("badge")) emptyList()
           else
@@ -3528,7 +3529,8 @@ class ServeWebFixtureTest {
         siblings = browserPreviews,
         canRenderOverrides = true,
         hasRemoteComposeDoc = true,
-        enabledRcPlayers = listOf("js", "java", "cmp-android", "cmp-jvm", "cmp-wasm"),
+        enabledRcPlayers =
+          listOf("camaelon-js", "androidx-view", "androidx-embedded", "cmp-jvm", "cmp-wasm"),
         componentBrowser = true,
       )
     // A viewer whose sibling list spans several components each with many baked variants (a
@@ -4771,11 +4773,11 @@ class ServeWebFixtureTest {
     assertEquals(
       listOf(
         "AndroidX Embedded · baked",
-        "RC · JS player",
+        "Camaelon JS",
         "AndroidX Embedded · vendored Android",
         "AndroidX Embedded · androidx.dev",
-        "rc-player JVM",
-        "RC · cmp-wasm player",
+        "CMP JVM",
+        "CMP Wasm",
       ),
       Regex("<th>([^<]+)</th>")
         .findAll(rcLanesComparison.substringAfter("cp-rc-table").substringBefore("</thead>"))
@@ -4836,7 +4838,7 @@ class ServeWebFixtureTest {
       "a wall with no live players names every one the run did not publish",
     )
     assertEquals(
-      listOf("AndroidX Embedded · baked", "RC · JS player", "RC · cmp-wasm player"),
+      listOf("AndroidX Embedded · baked", "Camaelon JS", "CMP Wasm"),
       Regex("<th>([^<]+)</th>")
         .findAll(rcLanesPartialComparison.substringAfter("cp-rc-table").substringBefore("</thead>"))
         .map { it.groupValues[1] }
@@ -4849,12 +4851,12 @@ class ServeWebFixtureTest {
     assertEquals(
       listOf(
         "AndroidX Embedded · baked",
-        "RC · JS player",
+        "Camaelon JS",
         "rc-player JVM",
-        "RC · cmp-wasm player",
-        // Last, and deliberately: the offline pipeline has no `java` column, so this lane cannot
-        // claim a position in an order it is not part of.
-        "AOSP · view-backed player",
+        "CMP Wasm",
+        // Last, and deliberately: the offline pipeline has no `androidx-view` column, so this lane
+        // cannot claim a position in an order it is not part of.
+        "AndroidX View",
       ),
       Regex("<th>([^<]+)</th>")
         .findAll(rcLanesLiveComparison.substringAfter("cp-rc-table").substringBefore("</thead>"))
@@ -4865,8 +4867,9 @@ class ServeWebFixtureTest {
     )
     // The one that must NOT appear, and the reason this filter exists at all.
     assertFalse(
-      rcLanesLiveComparison.contains("rcPlayer=cmp-android"),
-      "cmp-android is never filled live: an Android daemon answers it with the baked bytes",
+      rcLanesLiveComparison.contains("rcPlayer=androidx-embedded") ||
+        rcLanesLiveComparison.contains("rcPlayer=cmp-android"),
+      "androidx-embedded is never filled live: an Android daemon answers it with the baked bytes",
     )
     assertEquals(
       listOf("AndroidX Embedded · vendored Android", "AndroidX Embedded · androidx.dev"),
@@ -4891,7 +4894,7 @@ class ServeWebFixtureTest {
       "a host with no live players has nothing withheld, and says nothing about drawing",
     )
     assertEquals(
-      listOf("none", "baked", "js", "cmp-jvm", "cmp-wasm", "java"),
+      listOf("none", "baked", "js", "cmp-jvm", "cmp-wasm", "androidx-view"),
       Regex("data-rc-ref=\"([^\"]+)\"")
         .findAll(rcLanesLiveComparison)
         .map { it.groupValues[1] }
@@ -4912,20 +4915,20 @@ class ServeWebFixtureTest {
       Regex("data-live=\"1\"").findAll(rcLanesLiveComparison).count(),
       "every live cell is marked as drawn on request — two players over the four rows that carry a document",
     )
-    // The java lane is named by this wall rather than by the offline vocabulary, so its cells still
-    // have to point at the host's render endpoint like any other live column.
+    // The androidx-view lane is named by this wall rather than by the offline vocabulary, so its
+    // cells still have to point at the host's render endpoint like any other live column.
     assertTrue(
       rcLanesLiveComparison.contains(
-        "/render/button-filled__ideal__default__light.png?session=remote-m3&amp;rcPlayer=java"
+        "/render/button-filled__ideal__default__light.png?session=remote-m3&amp;rcPlayer=androidx-view"
       ),
-      "the wall-named java column renders through this host, not from staged bytes",
+      "the wall-named androidx-view column renders through this host, not from staged bytes",
     )
     // The inlined client model must carry the COLUMNS, not the published lanes: `RcLanes` reads its
     // lane ids from here, so a live column absent from this list is one the client never diffs and
     // a `?ref=` that cannot be shared. It was `manifest.lanes` from #199, which left cmp-jvm in
     // exactly that state — a column you could see and not compare.
     assertEquals(
-      listOf("baked", "js", "cmp-jvm", "cmp-wasm", "java"),
+      listOf("baked", "js", "cmp-jvm", "cmp-wasm", "androidx-view"),
       Regex("\"id\":\"([^\"]+)\"")
         .findAll(
           rcLanesLiveComparison

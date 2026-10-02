@@ -283,8 +283,8 @@ if (EMBEDDED_JVM) {
  * `baked` is already flattened onto the neutral background by the caller, so the embedded render is
  * flattened the same way before diffing — otherwise a transparent-background render would score as
  * a false match the same way the baked stickers would. The neutral stays *out* of the published
- * PNG: these bytes are also what a served catalog hands back for `?rcPlayer=cmp-android`, so the
- * file written here is the harness's own capture, alpha intact.
+ * PNG: these bytes are the staged `embedded` column a served catalog can hand back for a player
+ * request, so the file written here is the harness's own capture, alpha intact.
  *
  * `referenceBlank` suppresses the percentage (the images are still written, so the blank reference
  * is visible on the page) — see `isFullyTransparent`.

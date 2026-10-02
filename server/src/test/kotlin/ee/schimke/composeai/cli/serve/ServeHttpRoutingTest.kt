@@ -141,7 +141,7 @@ class ServeHttpRoutingTest {
       override fun remoteComposeDoc(previewId: String): ByteArray? = rcDocBytes
 
       // This session CAN name the player its baked pixels came from — the ordinary case, and the
-      // premise every cmp-android assertion below rests on. Stated rather than inherited: the
+      // premise every androidx-embedded assertion below rests on. Stated rather than inherited: the
       // interface default is "cannot say", so a host that has the fact has to say so.
       override fun bakedRcPlayer(previewId: String): RemoteComposePlayerKind? =
         RemoteComposePlayerKind.EMBEDDED
@@ -186,7 +186,7 @@ class ServeHttpRoutingTest {
       override fun remoteComposeDoc(previewId: String): ByteArray? = rcDocBytes
 
       // This session CAN name the player its baked pixels came from — the ordinary case, and the
-      // premise every cmp-android assertion below rests on. Stated rather than inherited: the
+      // premise every androidx-embedded assertion below rests on. Stated rather than inherited: the
       // interface default is "cannot say", so a host that has the fact has to say so.
       override fun bakedRcPlayer(previewId: String): RemoteComposePlayerKind? =
         RemoteComposePlayerKind.EMBEDDED
@@ -1130,10 +1130,19 @@ class ServeHttpRoutingTest {
    */
   @Test
   fun `a cold replayed preview is 503, not a terminal refusal — the axis decides`() {
-    // `rcPlayer=cmp-android` is deliberately NOT in this list: the baked snapshot IS the embedded
-    // player's capture, so it answers that request outright rather than waiting on a daemon. The
-    // case below pins that, and it is a strictly better outcome than the retry this asserts.
-    for (query in listOf("rcPlayer=java", "fontScale=2.0", "uiMode=dark")) {
+    // `rcPlayer=androidx-embedded` is deliberately NOT in this list: the baked snapshot IS the
+    // embedded player's capture, so it answers that request outright rather than waiting on a
+    // daemon. The case below pins that, and it is a strictly better outcome than the retry this
+    // asserts. `rcPlayer=cmp-android` IS in it: that is the CMP player on Android now, a genuine
+    // re-render the snapshot cannot stand in for.
+    for (query in
+      listOf(
+        "rcPlayer=androidx-view",
+        "rcPlayer=java",
+        "rcPlayer=cmp-android",
+        "fontScale=2.0",
+        "uiMode=dark",
+      )) {
       val (code, body, headers) = getFull("/live-down-rc/render/$previewId.png?$query")
       assertEquals(503, code, "$query is retryable on a replayed preview")
       assertEquals("2", headers["Retry-After"], "$query offers a retry")
@@ -1151,13 +1160,14 @@ class ServeHttpRoutingTest {
    * snapshot is that player's own capture.
    *
    * This is what makes the parameter droppable from a default link: a bare browse and
-   * `?rcPlayer=cmp-android` now agree on every host, including one that can render nothing at all.
+   * `?rcPlayer=androidx-embedded` now agree on every host, including one that can render nothing at
+   * all.
    */
   @Test
   fun `a cold daemon still answers the embedded player, from the baked capture`() {
     val bare = getFullBytes("/live-down-rc/render/$previewId.png")
     val (code, body, headers) =
-      getFullBytes("/live-down-rc/render/$previewId.png?rcPlayer=cmp-android")
+      getFullBytes("/live-down-rc/render/$previewId.png?rcPlayer=androidx-embedded")
     assertEquals(200, code, "the snapshot answers it; no daemon needed")
     assertEquals("baked", headers[ServeHttpServer.GENERATION_HEADER])
     assertEquals(
@@ -1222,8 +1232,8 @@ class ServeHttpRoutingTest {
   @Test
   fun `a bare player selection is served from the published parity staging`() {
     val published = publishedPng()
-    // cmp-android is NOT in this list: baked is already that player's capture, so it is answered
-    // from baked rather than from the staged `embedded` column. See the test below.
+    // androidx-embedded is NOT in this list: baked is already that player's capture, so it is
+    // answered from baked rather than from the staged `embedded` column. See the test below.
     for (query in listOf("rcPlayer=cmp-jvm")) {
       val (code, body, headers) = getFullBytes("/rc-published/render/$previewId.png?$query")
       assertEquals(200, code, "$query is answered")
@@ -1295,23 +1305,23 @@ class ServeHttpRoutingTest {
   }
 
   /**
-   * A bare browse and `?rcPlayer=cmp-android` are the SAME request, and must answer with the same
-   * bytes.
+   * A bare browse and `?rcPlayer=androidx-embedded` are the SAME request, and must answer with the
+   * same bytes.
    *
    * They did not. The staged `embedded` column is the vendored player under this repo's Robolectric
    * harness — a different render of the same player, drawn to be compared against baked rather than
    * to stand in for it — so routing the parameter there while a bare browse went to baked gave two
-   * answers to one question. That is what made dropping the viewer's `?rcPlayer=cmp-android` stamp
-   * unsafe, and it traced back to a stale claim in `publishedRcPlayerRender` that baked was the
-   * Java player's capture. It is the cmp-android capture.
+   * answers to one question. That is what made dropping the viewer's embedded-player stamp unsafe,
+   * and it traced back to a stale claim in `publishedRcPlayerRender` that baked was the view
+   * player's capture. It is the androidx-embedded capture.
    */
   @Test
-  fun `cmp-android is answered from baked, not from the staged embedded column`() {
+  fun `androidx-embedded is answered from baked, not from the staged embedded column`() {
     val bare = getFullBytes("/rc-published/render/$previewId.png")
     assertEquals(200, bare.first)
     assertEquals("baked", bare.third[ServeHttpServer.GENERATION_HEADER])
 
-    for (query in listOf("rcPlayer=cmp-android", "rcPlayer=embedded")) {
+    for (query in listOf("rcPlayer=androidx-embedded", "rcPlayer=embedded")) {
       val (code, body, headers) = getFullBytes("/rc-published/render/$previewId.png?$query")
       assertEquals(200, code, "$query is answered")
       assertEquals(
@@ -1337,9 +1347,9 @@ class ServeHttpRoutingTest {
   fun `a player selection with any other override does not take the published lane`() {
     for (query in
       listOf(
-        "rcPlayer=cmp-android&fontScale=2.0",
-        "rcPlayer=cmp-android&knob.label=Hi",
-        "rcPlayer=cmp-android&localeTag=ar",
+        "rcPlayer=androidx-embedded&fontScale=2.0",
+        "rcPlayer=androidx-embedded&knob.label=Hi",
+        "rcPlayer=androidx-embedded&localeTag=ar",
       )) {
       val (code, _, headers) = getFull("/rc-published/render/$previewId.png?$query")
       assertNotEquals(200, code, "$query must not be answered from published bytes")
@@ -1370,9 +1380,9 @@ class ServeHttpRoutingTest {
     assertEquals(200, baked.first)
     assertEquals("baked", baked.third[ServeHttpServer.GENERATION_HEADER])
 
-    // Asked on cmp-jvm, not cmp-android. The ordering this pins matters exactly where baked is
-    // ANOTHER player's pixels, which for cmp-android it is not — see the test above, where the
-    // same question has the opposite answer for that one backend.
+    // Asked on cmp-jvm, not androidx-embedded. The ordering this pins matters exactly where baked
+    // is ANOTHER player's pixels, which for androidx-embedded it is not — see the test above, where
+    // the same question has the opposite answer for that one backend.
     val (code, body, headers) = getFullBytes("/rc-published/render/$previewId.png?rcPlayer=cmp-jvm")
     assertEquals(200, code)
     assertEquals("rc-published", headers[ServeHttpServer.GENERATION_HEADER])
@@ -1420,7 +1430,7 @@ class ServeHttpRoutingTest {
    */
   @Test
   fun `a scrolling capture is not a bare player selection, in either lane`() {
-    for (wire in listOf("cmp-jvm", "cmp-android")) {
+    for (wire in listOf("cmp-jvm", "androidx-embedded")) {
       val (code, _, headers) =
         getFull("/rc-published/render/$previewId.png?rcPlayer=$wire&scroll=long")
       assertNotEquals(
@@ -1439,16 +1449,16 @@ class ServeHttpRoutingTest {
 
   /**
    * A host that can answer a player from published bytes must also **offer** it. The capability
-   * list and the render lane disagreed: this host answers a bare `cmp-android` request perfectly
-   * well, but advertised only `js`, so the viewer greyed the option out and Catalog mode fell back
-   * to the JS canvas instead of its preferred embedded default — leaving a working lane reachable
-   * only by hand-typing a URL.
+   * list and the render lane disagreed: this host answers a bare `androidx-embedded` request
+   * perfectly well, but advertised only `js`, so the viewer greyed the option out and Catalog mode
+   * fell back to the JS canvas instead of its preferred embedded default — leaving a working lane
+   * reachable only by hand-typing a URL.
    */
   @Test
   fun `a staged player is advertised as enabled, not just answerable`() {
     val (code, body) = get("/rc-published/p/$previewId")
     assertEquals(200, code)
-    for (wire in listOf("cmp-android", "cmp-jvm")) {
+    for (wire in listOf("androidx-embedded", "cmp-jvm")) {
       assertTrue(
         body.contains("<option value=\"rc:$wire\">"),
         "$wire is offered without a disabled attribute",
@@ -1459,23 +1469,29 @@ class ServeHttpRoutingTest {
       )
     }
     // …and the page opens on the embedded player rather than demoting to the JS canvas.
-    assertTrue(body.contains("data-rc-default=\"cmp-android\""), "embedded is the default lane")
+    assertTrue(
+      body.contains("data-rc-default=\"androidx-embedded\""),
+      "embedded is the default lane",
+    )
     // The wire between the two halves of this change: the page reports which player the BAKED
     // artifact carries, and the viewer drops `?rcPlayer=` for exactly that lane rather than
     // assuming which one it is. Without this attribute the viewer names every lane, which is the
     // stamped-parameter behaviour this PR exists to remove.
     assertTrue(
-      body.contains("data-rc-baked-player=\"cmp-android\""),
-      "the bare render names itself as cmp-android",
+      body.contains("data-rc-baked-player=\"androidx-embedded\""),
+      "the bare render names itself as androidx-embedded",
     )
     // A player nothing staged, and which no renderer here can produce, stays honestly unavailable.
-    assertTrue(body.contains("<option value=\"rc:java\" disabled>"), "unstaged java stays greyed")
+    assertTrue(
+      body.contains("<option value=\"rc:androidx-view\" disabled>"),
+      "unstaged androidx-view stays greyed",
+    )
   }
 
   /** A lane the parity run staged nothing for falls through to the renderer, not to a 404. */
   @Test
   fun `an unstaged player falls through to the ordinary render path`() {
-    val (code, _, headers) = getFull("/rc-published/render/$previewId.png?rcPlayer=java")
+    val (code, _, headers) = getFull("/rc-published/render/$previewId.png?rcPlayer=androidx-view")
     assertNotEquals("rc-published", headers[ServeHttpServer.GENERATION_HEADER])
     assertTrue(code == 503 || code == 409, "routed to the renderer, which cannot serve: $code")
   }
@@ -2790,9 +2806,9 @@ class ServeHttpRoutingTest {
     assertEquals(200, code)
     assertTrue(html.contains("data-has-rc-doc=\"1\""), "viewer flags the rc document: $html")
     assertTrue(html.contains("id=\"cp-rc-canvas\""), "rc canvas element present")
-    // The renderer combo replaces the old row of chips: `rc:js` drives the same canvas lane.
+    // The renderer combo replaces the old row of chips: `rc:camaelon-js` is the canvas lane.
     assertTrue(html.contains("id=\"cp-lane-select\""), "renderer combo present")
-    assertTrue(html.contains("value=\"rc:js\""), "js player option present")
+    assertTrue(html.contains("value=\"rc:camaelon-js\""), "camaelon-js player option present")
     assertTrue(html.contains("value=\"rc:cmp-wasm\""), "cmp-wasm player option present")
     assertTrue(html.contains("id=\"cp-rc-wasm\""), "cmp-wasm iframe present")
     assertTrue(html.contains("value=\"rc\""), "rc mode radio present")

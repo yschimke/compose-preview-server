@@ -237,11 +237,11 @@ internal object CatalogLiveRouting {
    *   preview with no captured document — or for a caller with no session in hand — every
    *   `rcPlayer` survives and routes to a real render. The baked PNG *is* the answer to "draw this
    *   with that player", and reporting it dropped refused a request the snapshot satisfies exactly.
-   *   That refusal is why a bare browse and `?rcPlayer=cmp-android` could not be made to agree, and
-   *   so why the viewer had to keep stamping the parameter onto every default link. Any OTHER
-   *   player is a genuine re-render and still counts as dropped — including `cmp-android` on a
-   *   preview that baked through the view player, which is the case this reads the host for rather
-   *   than assuming away.
+   *   That refusal is why a bare browse and `?rcPlayer=androidx-embedded` could not be made to
+   *   agree, and so why the viewer had to keep stamping the parameter onto every default link. Any
+   *   OTHER player is a genuine re-render and still counts as dropped — including
+   *   `androidx-embedded` on a preview that baked through the view player, which is the case this
+   *   reads the host for rather than assuming away.
    */
   private fun withoutBakedNoOps(
     previewId: String,

@@ -176,7 +176,7 @@ test("the page is a self-contained document with one column per player", () => {
   const html = renderRcCompareHtml(model);
   assert.match(html, /^<!doctype html>/);
   assert.match(html, /AndroidX Embedded · baked/);
-  assert.match(html, /RC · JS player/);
+  assert.match(html, /Camaelon JS/);
   // summary line reflects the counts
   assert.match(html, /mean mismatch <strong>38\.15%<\/strong>/);
   assert.match(html, /1 not decodable/);
@@ -286,7 +286,7 @@ test("a model with no embedded results renders the JS-only page — no empty emb
   // exactly the baked + JS columns
   assert.match(
     html,
-    /<thead><tr><th>preview<\/th><th>AndroidX Embedded · baked<\/th><th>RC · JS player<\/th><\/tr><\/thead>/,
+    /<thead><tr><th>preview<\/th><th>AndroidX Embedded · baked<\/th><th>Camaelon JS<\/th><\/tr><\/thead>/,
   );
 });
 
@@ -345,26 +345,26 @@ test("the vendored and androidx.dev Android embedded players are independent lan
 test("the cmp-jvm lane adds one column, a picker entry and its own summary line", () => {
   const html = renderRcCompareHtml(withEmbeddedJvm(model));
   assert.equal(hasEmbeddedJvmLane(withEmbeddedJvm(model).rows), true);
-  assert.match(html, /RC · cmp-jvm player/);
-  assert.match(html, /<strong>cmp-jvm player:<\/strong>/);
+  assert.match(html, /CMP JVM/);
+  assert.match(html, /<strong>CMP JVM:<\/strong>/);
   assert.ok(referenceOptions(html).includes("cmp-jvm"));
   // Header carries exactly one cmp-jvm column.
-  assert.equal((html.match(/<th>RC · cmp-jvm player<\/th>/g) || []).length, 1);
+  assert.equal((html.match(/<th>CMP JVM<\/th>/g) || []).length, 1);
   // The lede must describe the cmp-jvm player even when the Android embedded lane is off —
   // otherwise it falls into the JS-only branch and claims the TypeScript player is the only one.
-  assert.match(html, /<strong>cmp-jvm player<\/strong> runs that same/);
+  assert.match(html, /<strong>CMP JVM<\/strong> is the CMP player/);
   assert.doesNotMatch(html, /The player is the vendored TypeScript/);
 });
 
 test("the cmp-jvm and embedded lanes coexist, each its own column and summary", () => {
   const html = renderRcCompareHtml(withEmbeddedJvm(withEmbedded(model)));
   assert.match(html, /AndroidX Embedded · vendored Android/);
-  assert.match(html, /RC · cmp-jvm player/);
-  assert.match(html, /\(JS \+ embedded \+ cmp-jvm players\)/);
+  assert.match(html, /CMP JVM/);
+  assert.match(html, /\(camaelon-js \+ embedded \+ cmp-jvm players\)/);
   // The lede names all three players and the worst-scoring sort, not just JS + embedded.
-  assert.match(html, /<strong>JS player<\/strong>/);
+  assert.match(html, /<strong>Camaelon JS<\/strong>/);
   assert.match(html, /<strong>AndroidX Embedded · vendored Android<\/strong>/);
-  assert.match(html, /<strong>cmp-jvm player<\/strong>/);
+  assert.match(html, /<strong>CMP JVM<\/strong>/);
   assert.match(html, /Rows sort worst-match-first on the worst-scoring player/);
 });
 
@@ -376,11 +376,11 @@ test("the cmp-wasm lane adds one folded-diff column and independent parity stats
   assert.equal(stats.cmpWasmRendered, 2);
   assert.equal(stats.cmpWasmUnsupported, 1);
   assert.ok(Math.abs(stats.cmpWasmMeanPct - 3.5) < 1e-9);
-  assert.match(html, /RC · cmp-wasm player/);
-  assert.match(html, /<strong>cmp-wasm player:<\/strong>/);
+  assert.match(html, /CMP Wasm/);
+  assert.match(html, /<strong>CMP Wasm:<\/strong>/);
   assert.ok(referenceOptions(html).includes("cmp-wasm"));
-  assert.match(html, /\(JS \+ cmp-wasm players\)/);
-  assert.match(html, /runs the new Compose Multiplatform \/ Skiko player in browser Wasm/);
+  assert.match(html, /\(camaelon-js \+ cmp-wasm players\)/);
+  assert.match(html, /is the same CMP player compiled to Wasm, in the browser/);
   assert.match(
     html,
     /href="rc-cmp-wasm-errors\/pkg\.CatalogPreviewsKt\.Undecodable\.txt">details<\/a>/,
@@ -391,8 +391,8 @@ test("all rc-compare lanes can coexist without hiding the cmp-wasm result", () =
   const html = renderRcCompareHtml(
     withCmpWasm(withEmbeddedJvm(withAndroidxEmbedded(withEmbedded(model)))),
   );
-  assert.match(html, /\(JS \+ embedded \+ androidx.dev embedded \+ cmp-jvm \+ cmp-wasm players\)/);
-  assert.equal((html.match(/<th>RC · cmp-wasm player<\/th>/g) || []).length, 1);
+  assert.match(html, /\(camaelon-js \+ embedded \+ androidx.dev embedded \+ cmp-jvm \+ cmp-wasm players\)/);
+  assert.equal((html.match(/<th>CMP Wasm<\/th>/g) || []).length, 1);
   assert.match(html, /data-cmp-wasm-pct=/);
 });
 

@@ -10323,9 +10323,8 @@ ${captureControlsHtml().prependIndent("          ")}
         $rcFontsScript<script>${docPlayerScript(doc, rawUrl)}</script>
         """
           .trimIndent(),
-      // Same lane as the viewer's `js` chip, same reason: a shared `.rc` link must not render in
-      // the
-      // recipient's own generics.
+      // Same lane as the viewer's `camaelon-js` lane, same reason: a shared `.rc` link must not
+      // render in the recipient's own generics.
       rcFonts = isRemoteComposeDoc,
     )
   }
@@ -13157,14 +13156,15 @@ ${captureControlsHtml().prependIndent("          ")}
    * The backends a missing column may be filled from by rendering it live — NOT simply every
    * backend the host can draw, which is the whole point of the distinction.
    *
-   * `cmp-android` is the embedded AndroidX player, and a catalog's baked capture goes through that
-   * same player (it is what `RemoteOverridablePreview` defaults to), so on an Android daemon
-   * `?rcPlayer=cmp-android` hands back the baked bytes themselves. Measured against the deployed
-   * `remote-m3` host: `appcard__ideal__default__compact` answers md5 `e69d5136…` to both the bare
-   * render and `?rcPlayer=cmp-android`, and `button-imagebackground__ideal__default__compact`
-   * answers `48794c07…` to both. A column filled from that would be a pixel-for-pixel copy of the
-   * baked column under another player's name — worse than an absent column, because it asserts that
-   * two players agree where nothing was compared.
+   * `androidx-embedded` is the embedded AndroidX player, and a catalog's baked capture goes through
+   * that same player (it is what `RemoteOverridablePreview` defaults to), so on an Android daemon
+   * `?rcPlayer=androidx-embedded` hands back the baked bytes themselves. Measured against the
+   * deployed `remote-m3` host: `appcard__ideal__default__compact` answers md5 `e69d5136…` to both
+   * the bare render and `?rcPlayer=androidx-embedded` (then spelled `cmp-android`), and
+   * `button-imagebackground__ideal__default__compact` answers `48794c07…` to both. A column filled
+   * from that would be a pixel-for-pixel copy of the baked column under another player's name —
+   * worse than an absent column, because it asserts that two players agree where nothing was
+   * compared.
    *
    * The offline `embedded` lane is a third thing again: the vendored/local-patch player under this
    * repo's own Robolectric harness, a harness-vs-harness check on that same player. Nothing records
@@ -13172,8 +13172,8 @@ ${captureControlsHtml().prependIndent("          ")}
    * duplication cannot be detected per row either — carry that provenance before widening this set.
    *
    * `cmp-jvm` is safe: Compose Desktop / Skiko is a different rasteriser from anything an Android
-   * capture can be. `java` is genuinely distinct too, but maps to no published column, so filling
-   * one would invent a lane the offline vocabulary does not have.
+   * capture can be. `androidx-view` is genuinely distinct too, but maps to no published column, so
+   * filling one would invent a lane the offline vocabulary does not have.
    */
   private val LIVE_FILLABLE = setOf(RcPlayerBackend.CMP_JVM, RcPlayerBackend.JAVA)
 
@@ -13183,18 +13183,26 @@ ${captureControlsHtml().prependIndent("          ")}
    * `RemoteComposePlayer`, which draws into a framework `Canvas` rather than into Compose nodes.
    *
    * It is a genuinely different renderer from everything else on the wall, and measurably so — on
-   * the deployed `remote-m3` host `?rcPlayer=java` answers `822c80a4…` where the baked capture is
-   * `e69d5136…`, so unlike `cmp-android` it is never the baked bytes wearing another name. That is
-   * exactly why [RcPlayerBackend.JAVA.rcCompareLane] is null: the lane mapping exists to answer a
-   * bare `?rcPlayer=` from staged bytes, and there are no staged bytes that are this player's.
+   * the deployed `remote-m3` host `?rcPlayer=androidx-view` answers `822c80a4…` where the baked
+   * capture is `e69d5136…`, so unlike `androidx-embedded` it is never the baked bytes wearing
+   * another name. That is exactly why [RcPlayerBackend.JAVA.rcCompareLane] is null: the lane
+   * mapping exists to answer a bare `?rcPlayer=` from staged bytes, and there are no staged bytes
+   * that are this player's.
    *
    * Kept out of [ServeRcCompare.LANES] deliberately. That list mirrors the offline pipeline's
-   * columns, and a catalog's published `rc-compare.html` will never carry a `java` one — so putting
-   * it there would make the absent-players note start reporting a player no run could ever publish,
-   * on every wall, forever.
+   * columns, and a catalog's published `rc-compare.html` will never carry an `androidx-view` one —
+   * so putting it there would make the absent-players note start reporting a player no run could
+   * ever publish, on every wall, forever.
    */
   private val LIVE_ONLY_LANES =
-    mapOf(RcPlayerBackend.JAVA to RcCompareLane("java", "AOSP · view-backed player", "java"))
+    mapOf(
+      RcPlayerBackend.JAVA to
+        RcCompareLane(
+          ServeRcPlayerIds.ANDROIDX_VIEW,
+          "AndroidX View",
+          ServeRcPlayerIds.ANDROIDX_VIEW,
+        )
+    )
 
   /**
    * The **Remote Compose players** view: every player's published render of every `ir/<id>.rc`
@@ -13330,10 +13338,15 @@ ${captureControlsHtml().prependIndent("          ")}
     // bytes where the run drew them and from the renderer otherwise, so this one URL is right
     // whether or not the lane was ever staged.
     val liveQuery = linkQuery(token, linkSessionId, basePath, isPublic)
+    // The URL names the player in this server's vocabulary ([ServeRcPlayerIds]), not by the
+    // compose-ai-tools wire spelling the membership sets above are keyed on.
+    val playerIdByWire = RcPlayerBackend.UNIVERSE.associate { it.wire to ServeRcPlayerIds.of(it) }
     fun liveRenderUrl(previewId: String, wire: String): String =
       "$basePath/render/${WebEscaping.urlEncodeSegment(previewId)}.png" +
         querySuffix(
-          listOf(liveQuery, "rcPlayer=$wire").filter { it.isNotEmpty() }.joinToString("&")
+          listOf(liveQuery, "rcPlayer=${playerIdByWire[wire] ?: wire}")
+            .filter { it.isNotEmpty() }
+            .joinToString("&")
         )
 
     // One cell, built once: the table below and the client model inlined under it must agree about
@@ -15835,17 +15848,19 @@ ${scriptTag("known-differences.js")}
     replayThemes: Boolean = false,
     /**
      * The Remote Compose render backends the viewer may offer for this preview as a per-preview
-     * **backend selector** — the [RcPlayerBackend.wire] ids the host reports via
+     * **backend selector** — the [ServeRcPlayerIds] ids of the players the host reports via
      * [ServeHost.enabledRcPlayersFor]. Non-empty for a Remote Compose preview: the viewer renders
-     * one chip per [RcPlayerBackend.UNIVERSE] entry, enables those in this list, and disables the
-     * rest. The `js` chip drives the client-side `<canvas>` lane (so [hasRemoteComposeDoc] is what
-     * carries the doc for it), while `java` / `cmp-android` re-render through the Android daemon
-     * and `cmp-jvm` through its isolated desktop-player subprocess. Empty ⇒ no selector at all (not
-     * a Remote Compose preview).
+     * one option per [ServeRcPlayerIds.UNIVERSE] entry, enables those in this list, and disables
+     * the rest. The `camaelon-js` option drives the client-side `<canvas>` lane (so
+     * [hasRemoteComposeDoc] is what carries the doc for it), while `androidx-view` /
+     * `androidx-embedded` / `cmp-android` re-render through the Android daemon and `cmp-jvm`
+     * through its isolated desktop-player subprocess. A legacy spelling (`js`, `java`, `embedded`)
+     * is read as the player it always named. Empty ⇒ no selector at all (not a Remote Compose
+     * preview).
      */
     enabledRcPlayers: List<String> = emptyList(),
     /**
-     * The [RcPlayerBackend.wire] id of the player this preview's **baked** artifact was drawn with
+     * The [ServeRcPlayerIds] id of the player this preview's **baked** artifact was drawn with
      * ([ServeHost.bakedRcPlayer]), or empty when the session cannot name one — a preview with no
      * captured Remote Compose document, or a host that does not track it.
      *
@@ -15853,8 +15868,8 @@ ${scriptTag("known-differences.js")}
      * *bare* `/render` URL already produces. That is exactly the lane that must NOT name itself in
      * the query string: naming it splits one rendering across two cache entries and reads as a
      * deliberate choice the visitor never made. Every other lane keeps naming itself, including
-     * `cmp-android` on a preview that pinned the view player — which is why this is reported rather
-     * than assumed viewer-side (`backendRequiresRenderParam`).
+     * `androidx-embedded` on a preview that pinned the view player — which is why this is reported
+     * rather than assumed viewer-side (`backendRequiresRenderParam`).
      */
     bakedRcPlayer: String = "",
     wasmSrc: String? = null,
@@ -16265,7 +16280,11 @@ ${scriptTag("known-differences.js")}
     // Dev, rather than the two modes disagreeing about what the default rendering of a document is.
     @Suppress("NAME_SHADOWING") val hasRemoteComposeDoc = hasRemoteComposeDoc && pinned == null
     @Suppress("NAME_SHADOWING")
-    val enabledRcPlayers = if (pinned == null) enabledRcPlayers else emptyList()
+    val enabledRcPlayers =
+      if (pinned == null) enabledRcPlayers.map(ServeRcPlayerIds::normalizeRequest).distinct()
+      else emptyList()
+    @Suppress("NAME_SHADOWING")
+    val bakedRcPlayer = ServeRcPlayerIds.fromCaptureRecord(bakedRcPlayer).orEmpty()
     @Suppress("NAME_SHADOWING")
     val hasA11yOverlay = hasA11yOverlay && pinned == null && !componentBrowser
     @Suppress("NAME_SHADOWING")
@@ -16423,7 +16442,7 @@ ${scriptTag("known-differences.js")}
     // Live / Wasm toggles.
     val rcAttr = if (hasRemoteComposeDoc) " data-has-rc-doc=\"1\"" else ""
     val rcCanvas = if (hasRemoteComposeDoc) "<canvas id=\"cp-rc-canvas\" hidden></canvas>" else ""
-    val hasRcWasm = RcPlayerBackend.CMP_WASM.wire in enabledRcPlayers
+    val hasRcWasm = ServeRcPlayerIds.CMP_WASM in enabledRcPlayers
     val rcWasmFrame =
       if (hasRcWasm)
         "<iframe id=\"cp-rc-wasm\" hidden sandbox=\"allow-scripts allow-same-origin\" " +
@@ -16610,10 +16629,11 @@ ${scriptTag("known-differences.js")}
     // live/interactive, with its status dot as the live indicator. viewer.js drives both from one
     // lane value (`syncLaneSelect`), so the two can never disagree about what's on the stage.
     val rcEnabled = enabledRcPlayers.toSet()
-    // The lane the viewer opens on for a Remote Compose preview: the server-side `cmp-android`
-    // (embedded) player when it's available, else `java`, else the client `js` canvas.
+    // The lane the viewer opens on for a Remote Compose preview: the server-side
+    // `androidx-embedded` player when it's available, else `androidx-view`, else the client
+    // `camaelon-js` canvas.
     //
-    // The payoff is the data tier rather than the pixels (#3936). `java` is
+    // The payoff is the data tier rather than the pixels (#3936). `androidx-view` is
     // `AndroidView { RemoteComposePlayer }`, so a whole document reaches Compose as one interop
     // leaf: `compose/figma-svg` exports it as a single raster wearing an `.svg` extension, and the
     // semantics tree describes a black box. The embedded player emits real Compose nodes, so the
@@ -16622,12 +16642,13 @@ ${scriptTag("known-differences.js")}
     // The two lanes were measured over all 164 documents of the homeassistant catalog before this
     // moved (`renders/rc-embedded-lane-ab/`): 34 byte-identical, and the residual is overwhelmingly
     // text rasterization — Skia and the Android canvas hint glyphs differently, which no amount of
-    // player work removes. `?rcPlayer=java` still selects the old lane for anything that needs it.
+    // player work removes. `?rcPlayer=androidx-view` still selects the old lane for anything that
+    // needs it.
     val defaultRcBackend =
       when {
-        RcPlayerBackend.CMP_ANDROID.wire in rcEnabled -> RcPlayerBackend.CMP_ANDROID.wire
-        RcPlayerBackend.JAVA.wire in rcEnabled -> RcPlayerBackend.JAVA.wire
-        RcPlayerBackend.JS.wire in rcEnabled -> RcPlayerBackend.JS.wire
+        ServeRcPlayerIds.ANDROIDX_EMBEDDED in rcEnabled -> ServeRcPlayerIds.ANDROIDX_EMBEDDED
+        ServeRcPlayerIds.ANDROIDX_VIEW in rcEnabled -> ServeRcPlayerIds.ANDROIDX_VIEW
+        ServeRcPlayerIds.CAMAELON_JS in rcEnabled -> ServeRcPlayerIds.CAMAELON_JS
         else -> enabledRcPlayers.firstOrNull().orEmpty()
       }
     // Every lane this preview can be drawn by, in display order: the Remote Compose players (or the
@@ -16639,8 +16660,8 @@ ${scriptTag("known-differences.js")}
     val lanes = buildList {
       if (enabledRcPlayers.isEmpty()) add(ViewerLane("png", "Snapshot", true))
       else
-        RcPlayerBackend.UNIVERSE.forEach { backend ->
-          add(ViewerLane("rc:${backend.wire}", backend.label, backend.wire in rcEnabled))
+        ServeRcPlayerIds.UNIVERSE.forEach { player ->
+          add(ViewerLane("rc:${player.id}", player.label, player.id in rcEnabled))
         }
       if (wasmSrc != null) add(ViewerLane("wasm", "In browser (Wasm)", true))
     }
@@ -18484,8 +18505,8 @@ ${scriptTag("known-differences.js")}
       themeChoiceApplies = themeChoiceApplies,
       offeredThemes = offeredThemes,
       declaredThemes = if (overridesLive) viewerDeclaredThemes else emptyList(),
-      // Only the `js` chip paints in this document's canvas, and it only exists when the preview
-      // carries a captured document.
+      // Only the `camaelon-js` lane paints in this document's canvas, and it only exists when the
+      // preview carries a captured document.
       rcFonts = hasRemoteComposeDoc,
       componentBrowser = componentBrowser,
       interfaceModeControl = true,

@@ -7,6 +7,8 @@
 import assert from "node:assert/strict";
 import {
     anyInteractive,
+    normalizeBakedPlayer,
+    normalizeRcPlayer,
     backendRequiresRenderParam,
     bestLiveMode,
     currentLaneValue,
@@ -19,35 +21,85 @@ import {
     type LaneFlags,
 } from "../src/viewer/laneState.js";
 
+describe("normalizeRcPlayer", () => {
+    it("keeps every canonical id", () => {
+        for (const id of [
+            "androidx-view",
+            "androidx-embedded",
+            "cmp-android",
+            "cmp-jvm",
+            "cmp-wasm",
+            "camaelon-js",
+        ])
+            assert.equal(normalizeRcPlayer(id), id);
+    });
+
+    it("reads a legacy ?rcPlayer= spelling as the player it always named", () => {
+        assert.equal(normalizeRcPlayer("java"), "androidx-view");
+        assert.equal(normalizeRcPlayer("view"), "androidx-view");
+        assert.equal(normalizeRcPlayer("embedded"), "androidx-embedded");
+        assert.equal(normalizeRcPlayer("js"), "camaelon-js");
+        assert.equal(normalizeRcPlayer("rcplayer-jvm"), "cmp-jvm");
+        assert.equal(normalizeRcPlayer("RCPLAYER-WASM"), "cmp-wasm");
+        assert.equal(normalizeRcPlayer(null), "");
+    });
+
+    it("never reinterprets cmp-android in a request: it is the CMP player on Android", () => {
+        assert.equal(normalizeRcPlayer("cmp-android"), "cmp-android");
+    });
+});
+
+describe("normalizeBakedPlayer", () => {
+    it("maps an older capture record's cmp-android / java to the AndroidX players", () => {
+        assert.equal(normalizeBakedPlayer("cmp-android"), "androidx-embedded");
+        assert.equal(normalizeBakedPlayer("java"), "androidx-view");
+        assert.equal(
+            normalizeBakedPlayer("androidx-embedded"),
+            "androidx-embedded",
+        );
+        assert.equal(normalizeBakedPlayer(""), "");
+    });
+});
+
 describe("backendRequiresRenderParam", () => {
     // What the server reports for an ordinary Remote Compose preview: the baked artifact is the
-    // embedded player's capture, so a bare `/render` URL already is cmp-android.
-    const BAKED_EMBEDDED = "cmp-android";
+    // embedded player's capture, so a bare `/render` URL already is androidx-embedded.
+    const BAKED_EMBEDDED = "androidx-embedded";
 
     it("names every lane a bare render is not", () => {
         assert.equal(
             backendRequiresRenderParam("cmp-jvm", BAKED_EMBEDDED),
             true,
         );
-        assert.equal(backendRequiresRenderParam("java", BAKED_EMBEDDED), true);
+        assert.equal(
+            backendRequiresRenderParam("androidx-view", BAKED_EMBEDDED),
+            true,
+        );
     });
 
     it("does NOT name the lane the bare render already is", () => {
-        // The regression this exists for. While this answered `true` for cmp-android, the viewer
-        // seeded its pick state from it and stamped `?rcPlayer=cmp-android` onto every first click
+        // The regression this exists for. While this answered `true` for the embedded player, the
+        // viewer seeded its pick state from it and stamped `?rcPlayer=…` onto every first click
         // from a catalog — a URL that reads as a deliberate player choice and is a no-op.
         assert.equal(
-            backendRequiresRenderParam("cmp-android", BAKED_EMBEDDED),
+            backendRequiresRenderParam("androidx-embedded", BAKED_EMBEDDED),
             false,
         );
     });
 
-    it("follows the server's answer rather than assuming cmp-android", () => {
+    it("follows the server's answer rather than assuming the embedded player", () => {
         // A preview pinning `RemoteViewPreviewWrapper` bakes through the view player. There
-        // cmp-android is a genuine re-render and must name itself, while `java` is the silent one —
+        // androidx-embedded is a genuine re-render and must name itself, while androidx-view is the
+        // silent one —
         // the exact inversion that hardcoding the default would have got backwards.
-        assert.equal(backendRequiresRenderParam("cmp-android", "java"), true);
-        assert.equal(backendRequiresRenderParam("java", "java"), false);
+        assert.equal(
+            backendRequiresRenderParam("androidx-embedded", "androidx-view"),
+            true,
+        );
+        assert.equal(
+            backendRequiresRenderParam("androidx-view", "androidx-view"),
+            false,
+        );
     });
 
     it("names everything when the server cannot say which player baked", () => {
@@ -56,42 +108,81 @@ describe("backendRequiresRenderParam", () => {
         // real re-render serves the wrong pixels, so the unknown case names.
         for (const absent of ["", null, undefined]) {
             assert.equal(
-                backendRequiresRenderParam("cmp-android", absent),
+                backendRequiresRenderParam("androidx-embedded", absent),
                 true,
             );
-            assert.equal(backendRequiresRenderParam("java", absent), true);
+            assert.equal(
+                backendRequiresRenderParam("androidx-view", absent),
+                true,
+            );
             assert.equal(backendRequiresRenderParam("cmp-jvm", absent), true);
         }
     });
 
+    it("matches an older server's legacy baked-player report", () => {
+        // An older server reported the embedded capture as `cmp-android` and the view one as
+        // `java`. Read as a capture record, those are still the silent lanes.
+        assert.equal(
+            backendRequiresRenderParam("androidx-embedded", "cmp-android"),
+            false,
+        );
+        assert.equal(
+            backendRequiresRenderParam("androidx-view", "java"),
+            false,
+        );
+        // …and the CMP player on Android is never the baked one.
+        assert.equal(
+            backendRequiresRenderParam("cmp-android", "cmp-android"),
+            true,
+        );
+    });
+
+    it("names the CMP player on Android, a daemon lane", () => {
+        assert.equal(
+            backendRequiresRenderParam("cmp-android", BAKED_EMBEDDED),
+            true,
+        );
+    });
+
     it("never names a browser lane, which does not use /render at all", () => {
-        assert.equal(backendRequiresRenderParam("js", BAKED_EMBEDDED), false);
-        assert.equal(backendRequiresRenderParam("js", ""), false);
+        assert.equal(
+            backendRequiresRenderParam("camaelon-js", BAKED_EMBEDDED),
+            false,
+        );
+        assert.equal(backendRequiresRenderParam("camaelon-js", ""), false);
     });
 });
 
 describe("server-side player persistence", () => {
     it("keeps the explicit player in full live override replacements", () => {
-        assert.equal(serverPlayerParam("cmp-android", true), "cmp-android");
+        assert.equal(
+            serverPlayerParam("androidx-embedded", true),
+            "androidx-embedded",
+        );
         assert.equal(serverPlayerParam("cmp-jvm", true), "cmp-jvm");
-        assert.equal(serverPlayerParam("java", true), "java");
-        assert.equal(serverPlayerParam("cmp-android", false), null);
-        assert.equal(serverPlayerParam("js", true), null);
+        assert.equal(serverPlayerParam("androidx-view", true), "androidx-view");
+        assert.equal(serverPlayerParam("androidx-embedded", false), null);
+        assert.equal(serverPlayerParam("camaelon-js", true), null);
+        assert.equal(serverPlayerParam("cmp-wasm", true), null);
+        // The CMP player on Android rides `/render` like the AndroidX daemon players.
+        assert.equal(serverPlayerParam("cmp-android", true), "cmp-android");
+        // A legacy spelling is emitted canonically.
+        assert.equal(serverPlayerParam("java", true), "androidx-view");
     });
 
     it("restores a default that needs no parameter after a browser player", () => {
         assert.deepEqual(
             restoreStaticPlayer(
                 {
-                    defaultBackend: "cmp-android",
-                    pickedBackend: "cmp-android",
+                    defaultBackend: "androidx-embedded",
+                    pickedBackend: "androidx-embedded",
                     picked: false,
                 },
-                "cmp-android",
+                "androidx-embedded",
             ),
             {
-                defaultBackend: "cmp-android",
-                pickedBackend: "cmp-android",
+                defaultBackend: "androidx-embedded",
+                pickedBackend: "androidx-embedded",
                 // Returning to the static lane on the default needs no parameter to describe it:
                 // the bare render is already this player, and the server said so.
                 picked: false,
@@ -100,15 +191,15 @@ describe("server-side player persistence", () => {
         assert.deepEqual(
             restoreStaticPlayer(
                 {
-                    defaultBackend: "java",
-                    pickedBackend: "java",
+                    defaultBackend: "androidx-view",
+                    pickedBackend: "androidx-view",
                     picked: false,
                 },
-                "java",
+                "androidx-view",
             ),
             {
-                defaultBackend: "java",
-                pickedBackend: "java",
+                defaultBackend: "androidx-view",
+                pickedBackend: "androidx-view",
                 picked: false,
             },
         );
@@ -116,17 +207,17 @@ describe("server-side player persistence", () => {
 
     it("keeps naming the restored default when the baked player is unreported", () => {
         // Without `data-rc-baked-player` nothing establishes that a bare URL is this lane, so the
-        // restore names it rather than betting on it. The old code bet, and on `cmp-android` it
+        // restore names it rather than betting on it. The old code bet, and on the embedded player it
         // happened to be right — which is why the bet went unnoticed until a pinned preview.
         assert.deepEqual(
             restoreStaticPlayer({
-                defaultBackend: "cmp-android",
-                pickedBackend: "cmp-android",
+                defaultBackend: "androidx-embedded",
+                pickedBackend: "androidx-embedded",
                 picked: false,
             }),
             {
-                defaultBackend: "cmp-android",
-                pickedBackend: "cmp-android",
+                defaultBackend: "androidx-embedded",
+                pickedBackend: "androidx-embedded",
                 picked: true,
             },
         );
@@ -134,7 +225,7 @@ describe("server-side player persistence", () => {
 
     it("does not replace an explicit server-side visitor pick", () => {
         const pick = {
-            defaultBackend: "cmp-android",
+            defaultBackend: "androidx-embedded",
             pickedBackend: "cmp-jvm",
             picked: true,
         };
@@ -144,24 +235,24 @@ describe("server-side player persistence", () => {
     it("restores the retained visitor pick after a browser-only lane", () => {
         assert.deepEqual(
             restoreStaticPlayer({
-                defaultBackend: "cmp-android",
-                pickedBackend: "java",
+                defaultBackend: "androidx-embedded",
+                pickedBackend: "androidx-view",
                 picked: false,
             }),
             {
-                defaultBackend: "cmp-android",
-                pickedBackend: "java",
+                defaultBackend: "androidx-embedded",
+                pickedBackend: "androidx-view",
                 picked: true,
             },
         );
         assert.deepEqual(
             restoreStaticPlayer({
-                defaultBackend: "cmp-android",
+                defaultBackend: "androidx-embedded",
                 pickedBackend: "cmp-jvm",
                 picked: false,
             }),
             {
-                defaultBackend: "cmp-android",
+                defaultBackend: "androidx-embedded",
                 pickedBackend: "cmp-jvm",
                 picked: true,
             },
@@ -180,7 +271,7 @@ const lanes = (over: Partial<LaneFlags> = {}): LaneFlags => ({
 
 describe("anyInteractive", () => {
     it("counts every lane that paints a RUNNING composition", () => {
-        // Picking "JS" from the combo must light the same status dot as clicking into Live: both
+        // Picking "Camaelon JS" from the combo must light the same status dot as clicking into Live: both
         // are the claim "this is running", and reporting them differently would make the dot mean
         // two things.
         for (const key of ["live", "wasm", "rc", "rcWasm"] as const) {
@@ -226,7 +317,10 @@ describe("currentLaneValue", () => {
             currentLaneValue(lanes({ rcWasm: true }), pick),
             "rc:cmp-wasm",
         );
-        assert.equal(currentLaneValue(lanes({ rc: true }), pick), "rc:js");
+        assert.equal(
+            currentLaneValue(lanes({ rc: true }), pick),
+            "rc:camaelon-js",
+        );
         assert.equal(currentLaneValue(lanes({ wasm: true }), pick), "wasm");
         assert.equal(currentLaneValue(lanes({ spec: true }), pick), "spec");
     });
@@ -235,14 +329,21 @@ describe("currentLaneValue", () => {
         // A stream is not one of the offered renderers — it is the live form of whichever one is
         // picked. Reporting "live" here would make the chip rename itself on entering Live and
         // forget which renderer it came from.
-        const rc = { defaultBackend: "java", pickedBackend: "", picked: false };
-        assert.equal(currentLaneValue(lanes({ live: true }), rc), "rc:java");
+        const rc = {
+            defaultBackend: "androidx-view",
+            pickedBackend: "",
+            picked: false,
+        };
+        assert.equal(
+            currentLaneValue(lanes({ live: true }), rc),
+            "rc:androidx-view",
+        );
     });
 
     it("prefers the visitor's pick over the server's default", () => {
         assert.equal(
             currentLaneValue(lanes(), {
-                defaultBackend: "java",
+                defaultBackend: "androidx-view",
                 pickedBackend: "cmp-jvm",
                 picked: true,
             }),
@@ -250,11 +351,11 @@ describe("currentLaneValue", () => {
         );
         assert.equal(
             currentLaneValue(lanes(), {
-                defaultBackend: "java",
+                defaultBackend: "androidx-view",
                 pickedBackend: "cmp-jvm",
                 picked: false,
             }),
-            "rc:java",
+            "rc:androidx-view",
             "an unpicked backend stays on the server's default",
         );
     });
@@ -266,8 +367,8 @@ describe("currentLaneValue", () => {
 
 describe("laneLabelText", () => {
     const laneOptions = new Map([
-        ["rc:java", "Java"],
-        ["rc:js", "JS"],
+        ["rc:androidx-view", "AndroidX View"],
+        ["rc:camaelon-js", "Camaelon JS"],
         ["png", "Snapshot"],
     ]);
 
@@ -276,7 +377,7 @@ describe("laneLabelText", () => {
             laneLabelText({
                 live: true,
                 laneOptions,
-                wanted: "rc:java",
+                wanted: "rc:androidx-view",
                 defaultLabel: "Live preview",
             }),
             "Live",
@@ -288,10 +389,10 @@ describe("laneLabelText", () => {
             laneLabelText({
                 live: false,
                 laneOptions,
-                wanted: "rc:js",
+                wanted: "rc:camaelon-js",
                 defaultLabel: "Live preview",
             }),
-            "JS",
+            "Camaelon JS",
         );
     });
 

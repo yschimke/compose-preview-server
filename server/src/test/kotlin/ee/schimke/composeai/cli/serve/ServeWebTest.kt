@@ -1238,7 +1238,7 @@ class ServeWebTest {
         sessionId = "remote-m3",
         basePath = "/remote-m3",
         hasRemoteComposeDoc = true,
-        enabledRcPlayers = listOf("js", "cmp-wasm", "java", "cmp-android"),
+        enabledRcPlayers = listOf("camaelon-js", "cmp-wasm", "androidx-view", "androidx-embedded"),
         designReference =
           DesignReference(
             id = "chip-figma",
@@ -1294,7 +1294,7 @@ class ServeWebTest {
         basePath = "/remote-m3",
         siblings = listOf(preview),
         hasRemoteComposeDoc = true,
-        enabledRcPlayers = listOf("js", "java", "cmp-android"),
+        enabledRcPlayers = listOf("camaelon-js", "androidx-view", "androidx-embedded"),
         hasLiveStream = true,
         liveAuthPrompt = ServeWeb.LiveAuthPrompt(loginHref = "/auth/github/start"),
       )
@@ -1309,8 +1309,9 @@ class ServeWebTest {
 
   @Test
   fun `the renderer combo lists every player with the unavailable ones disabled`() {
-    // A Remote Compose preview on an Android daemon: js (client canvas) + java + cmp-android are
-    // enabled; the opt-in CMP/Wasm and unadvertised cmp-jvm lanes remain disabled.
+    // A Remote Compose preview on an Android daemon: camaelon-js (client canvas) + androidx-view +
+    // androidx-embedded are enabled; the opt-in CMP Wasm, CMP Android and unadvertised cmp-jvm
+    // lanes remain disabled.
     val preview = ServePreview(id = "widget.Chip", label = "chip")
     val html =
       ServeWeb.viewerPage(
@@ -1319,32 +1320,40 @@ class ServeWebTest {
         basePath = "/remote-m3",
         siblings = listOf(preview),
         hasRemoteComposeDoc = true,
-        enabledRcPlayers = listOf("js", "java", "cmp-android"),
+        enabledRcPlayers = listOf("camaelon-js", "androidx-view", "androidx-embedded"),
       )
 
     assertTrue(html.contains("id=\"cp-lane-select\""), "the renderer combo is rendered")
     // Every universe entry is an option — the unavailable ones included, so the set of players
     // stays legible from any session.
-    for (wire in listOf("js", "cmp-wasm", "java", "cmp-android", "cmp-jvm")) {
+    for (wire in
+      listOf(
+        "camaelon-js",
+        "cmp-wasm",
+        "androidx-view",
+        "androidx-embedded",
+        "cmp-android",
+        "cmp-jvm",
+      )) {
       assertTrue(html.contains("value=\"rc:$wire\""), "option for $wire present")
     }
-    // The LANE VALUES (`rc:java`, `rc:cmp-android`) are this repository's and do not move. The
-    // LABELS below are the published `render-host` artifact's, and compose-ai-tools 2.3.0 renamed
-    // all five (`Java` -> `AndroidX View`, `CMP Android` -> `AndroidX Embedded`, …). Asserted
-    // literally rather than read back off the combo: the point of this test is that the chip and
-    // the combo agree on ONE label, and comparing them to each other would hold even if both said
-    // the wrong thing.
+    // The LANE VALUES (`rc:androidx-view`, `rc:androidx-embedded`) are this repository's
+    // ([ServeRcPlayerIds]) and name the implementation that draws; so do the LABELS. They were
+    // `rc:java` / `rc:cmp-android` until `cmp-android` came to mean the CMP player on Android.
+    // Asserted literally rather than read back off the combo: the point of this test is that the
+    // chip and the combo agree on ONE label, and comparing them to each other would hold even if
+    // both said the wrong thing.
     //
     // AndroidX Embedded is the seeded default: both the combo's selection and the chip's opening
     // label.
     // It opens on the embedded player because that is the lane whose output is a real Compose tree
     // — editable figma-svg geometry and a described semantics tree, rather than one interop leaf
-    // (#3936). `?rcPlayer=java` still selects the view player.
+    // (#3936). `?rcPlayer=androidx-view` still selects the view player.
     assertTrue(
-      html.contains("data-rc-default=\"cmp-android\""),
-      "cmp-android is the default player",
+      html.contains("data-rc-default=\"androidx-embedded\""),
+      "androidx-embedded is the default player",
     )
-    assertTrue(html.contains("<option value=\"rc:java\">AndroidX View</option>"), html)
+    assertTrue(html.contains("<option value=\"rc:androidx-view\">AndroidX View</option>"), html)
     // The combo itself rests on its placeholder — the chip is what names the current lane, and a
     // combo repeating that name beside it read as two controls arguing about the same fact. The
     // placeholder is never SEEN once the two are joined (the combo is a caret), but it is what the
@@ -1365,11 +1374,16 @@ class ServeWebTest {
     )
     // cmp-jvm is the disabled option (and says why in its own label); the enabled ones are not.
     assertTrue(
-      html.contains("<option value=\"rc:cmp-jvm\" disabled>rc-player JVM (unavailable)</option>"),
+      html.contains("<option value=\"rc:cmp-jvm\" disabled>CMP JVM (unavailable)</option>"),
       html,
     )
-    val android = Regex("<option value=\"rc:cmp-android\"[^>]*>").find(html)?.value ?: ""
-    assertFalse(android.contains(" disabled"), "cmp-android is offered: '$android'")
+    val android = Regex("<option value=\"rc:androidx-embedded\"[^>]*>").find(html)?.value ?: ""
+    assertFalse(android.contains(" disabled"), "androidx-embedded is offered: '$android'")
+    // The CMP player on Android is listed but not offered until the host reports it.
+    assertTrue(
+      html.contains("<option value=\"rc:cmp-android\" disabled>CMP Android (unavailable)</option>"),
+      html,
+    )
     // …and the step out to every player side by side. This preview has exactly ONE full-page
     // comparison surface, and one destination is not a menu — so it stays the inline link it has
     // always been rather than costing a click to reach what a link already said. The ampersands are
@@ -1385,8 +1399,9 @@ class ServeWebTest {
 
   @Test
   fun `a js-only host disables the server-side player options and offers no comparison`() {
-    // A static bundle carries the `.rc` doc (js works client-side) but has no daemon, so the
-    // server-side java / cmp-android lanes are disabled alongside the never-available cmp-jvm.
+    // A static bundle carries the `.rc` doc (camaelon-js works client-side) but has no daemon, so
+    // the server-side androidx-* / cmp-android lanes are disabled alongside the never-available
+    // cmp-jvm lane.
     val preview = ServePreview(id = "widget.Chip", label = "chip")
     val html =
       ServeWeb.viewerPage(
@@ -1395,18 +1410,19 @@ class ServeWebTest {
         basePath = "/remote-m3",
         siblings = listOf(preview),
         hasRemoteComposeDoc = true,
-        enabledRcPlayers = listOf("js"),
+        enabledRcPlayers = listOf("camaelon-js"),
       )
 
     assertTrue(
-      html.contains("data-rc-default=\"js\""),
+      html.contains("data-rc-default=\"camaelon-js\""),
       "js is the default when it is the only lane",
     )
-    for (wire in listOf("cmp-wasm", "java", "cmp-android", "cmp-jvm")) {
+    for (wire in
+      listOf("cmp-wasm", "androidx-view", "androidx-embedded", "cmp-android", "cmp-jvm")) {
       val option = Regex("<option value=\"rc:$wire\"[^>]*>").find(html)?.value ?: ""
       assertTrue(option.contains(" disabled"), "$wire disabled on a js-only host: '$option'")
     }
-    val js = Regex("<option value=\"rc:js\"[^>]*>").find(html)?.value ?: ""
+    val js = Regex("<option value=\"rc:camaelon-js\"[^>]*>").find(html)?.value ?: ""
     assertFalse(js.contains(" disabled"), "js is offered: '$js'")
     // One player is nothing to compare against, so the link stays off.
     assertFalse(html.contains("compare players"), "no comparison link with a single player")
@@ -1426,7 +1442,7 @@ class ServeWebTest {
         preview,
         token = "t",
         hasRemoteComposeDoc = true,
-        enabledRcPlayers = listOf("js", "cmp-wasm"),
+        enabledRcPlayers = listOf("camaelon-js", "cmp-wasm"),
       )
 
     val option = Regex("<option value=\"rc:cmp-wasm\"[^>]*>").find(html)?.value ?: ""

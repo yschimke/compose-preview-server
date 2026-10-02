@@ -724,12 +724,14 @@ class ServeBundleHost(
     // A published catalog stages no such manifest, so it must say so explicitly
     // ([ServeCatalogStore.PreviewParamsMeta.capturePlayer]) or be taken as unknown. Inferring the
     // embedded default here is what would serve a view-pinned preview's capture in answer to
-    // `?rcPlayer=cmp-android`; an unknown costs a redundant query parameter instead.
-    return variantMeta[previewId]
-      ?.previewParams
-      ?.capturePlayer
-      ?.let { wire -> RcPlayerBackend.entries.firstOrNull { it.wire == wire } }
-      ?.playerKind
+    // `?rcPlayer=androidx-embedded`; an unknown costs a redundant query parameter instead.
+    //
+    // Newer daemons record `androidx-embedded` / `androidx-view`; older ones recorded the same two
+    // players as `cmp-android` / `java`, which [ServeRcPlayerIds.fromCaptureRecord] maps back. Only
+    // a capture record is read that way — a `?rcPlayer=cmp-android` request means the CMP player.
+    return ServeRcPlayerIds.playerKindOf(
+      ServeRcPlayerIds.fromCaptureRecord(variantMeta[previewId]?.previewParams?.capturePlayer)
+    )
   }
 
   /**
