@@ -1149,6 +1149,8 @@ class ServeCatalogMcp(
     // contact sheet — a Slack message carries at most five attachments, and a matrix is up to 24.
     val linked = observe == "png" && publicOrigin() != null
     val cellPngs = mutableListOf<ByteArray>()
+    val cellLabels = mutableListOf<String>()
+    val axisKeys = axes.map { it.first }
     val rendered = buildJsonArray {
       combinations.forEachIndexed { index, params ->
         val unknown = params.keys.filterNot(ServeOverrides::isOverrideParam).sorted()
@@ -1183,6 +1185,7 @@ class ServeCatalogMcp(
                 put("imageUrl", it)
               }
               cellPngs += cell.png
+              cellLabels += axisKeys.joinToString(", ") { key -> "$key=${params[key]}" }
             } else if (observe == "png") {
               put("png", Base64.getEncoder().encodeToString(cell.png))
             }
@@ -1196,7 +1199,9 @@ class ServeCatalogMcp(
     // question the twenty-call version was being used to answer.
     val distinct =
       rendered.mapNotNull { it.jsonObject["sha256"]?.jsonPrimitive?.contentOrNull }.toSet().size
-    val sheet = if (linked) ServeContactSheet.render(cellPngs)?.let { signedViewUrl(it) } else null
+    val sheet =
+      if (linked) ServeContactSheet.render(cellPngs, cellLabels)?.let { signedViewUrl(it) }
+      else null
     val body = buildJsonObject {
       put("schema", "compose-preview/catalog-mcp-matrix/v1")
       put("catalog", catalog)
@@ -1211,7 +1216,8 @@ class ServeCatalogMcp(
           put("expiresAtEpochSeconds", expiry)
           put(
             "description",
-            "One PNG of every cell, each badged with its 'index'. To let a person pick in chat, " +
+            "One PNG of every cell, each captioned with its 'index' and overrides. To let a " +
+              "person pick in chat, " +
               "post this with the numbered options and take their reply as the choice.",
           )
         }

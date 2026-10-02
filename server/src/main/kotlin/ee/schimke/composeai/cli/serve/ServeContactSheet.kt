@@ -2,7 +2,6 @@ package ee.schimke.composeai.cli.serve
 
 import java.awt.Color
 import java.awt.Font
-import java.awt.Graphics2D
 import java.awt.RenderingHints
 import java.awt.geom.Ellipse2D
 import java.awt.image.BufferedImage
@@ -19,11 +18,14 @@ import kotlin.math.sqrt
  * **One picture of N renders** — the one contact sheet this server draws.
  *
  * Two callers, one renderer:
- * - `catalog_render_matrix`'s chat fallback badges each tile with its number. A chat surface is
- *   where "try three, pick one" ends up when there is no MCP App to draw a picker in: Claude in
- *   Slack posts text and attachments and steers only on a reply, so the choice is made the way a
- *   person makes it in a thread anyway — look at one image, answer "2". Each badge matches the
- *   cell's `index`, so the number in the reply names exactly one set of overrides.
+ * - `catalog_render_matrix`'s chat fallback captions each tile with its number and overrides (`3 ·
+ *   uiMode=dark, fontScale=1.0`). A chat surface is where "try three, pick one" ends up when there
+ *   is no MCP App to draw a picker in: Claude in Slack posts text and attachments and steers only
+ *   on a reply, so the choice is made the way a person makes it in a thread anyway — look at one
+ *   image, answer "2". Each number matches the cell's `index`, so the number in the reply names
+ *   exactly one set of overrides. The number sits in the caption strip under the tile, never over
+ *   it: a 30 px badge drawn on the picture hid most of a 40 px component (measured on
+ *   preview.coo.ee in compose-preview-server#1262).
  * - `ui_builder_render_design_matrix` captions each tile with its device, theme and font scale,
  *   masks a round watch to its circle, and needs to know where each tile landed, which [compose]
  *   reports as [Placement]s.
@@ -43,10 +45,17 @@ internal object ServeContactSheet {
   /** The smallest tile edge [compose] shrinks to while fitting a byte budget. */
   private const val MIN_TILE_EDGE = 96
   private const val GAP = 12
-  private const val BADGE = 30
   private const val CAPTION = 20
+
+  /**
+   * The narrowest slot a captioned tile gets. A caption is cut to its slot's width, so without this
+   * a small component's caption is cut to "1…" — and the number is the part a person replies with.
+   * Kept at or under the design matrix's 160 px phone tile so those sheets keep their layout; a
+   * longer label is still cut from the end, after the number, and the full overrides travel in the
+   * numbered text list posted with the sheet.
+   */
+  private const val MIN_CAPTIONED_SLOT_WIDTH = 140
   private val BACKGROUND = Color(0xF2, 0xF2, 0xF2)
-  private val BADGE_FILL = Color(0x1F, 0x1F, 0x1F)
   private val MISSING = Color(0xE0, 0xE0, 0xE0)
   private val CAPTION_COLOR = Color(0x30, 0x30, 0x30)
   private val FRAME = Color(0xBD, 0xBD, 0xBD)
@@ -68,26 +77,34 @@ internal object ServeContactSheet {
   )
 
   /**
-   * The badged sheet `catalog_render_matrix` hands a chat surface, or null when there is nothing to
-   * draw or none of [pngs] decodes. A cell that does not decode keeps its slot, drawn empty, so
-   * badge numbers still line up with indices.
+   * The numbered sheet `catalog_render_matrix` hands a chat surface, or null when there is nothing
+   * to draw or none of [pngs] decodes. Each tile is captioned `<n>` or `<n> · <label>`, with
+   * [labels] read by position. A cell that does not decode keeps its slot, drawn empty, so the
+   * numbers still line up with indices.
    */
-  fun render(pngs: List<ByteArray>): ByteArray? {
+  fun render(pngs: List<ByteArray>, labels: List<String> = emptyList()): ByteArray? {
     if (pngs.isEmpty()) return null
     if (pngs.none { decode(it) != null }) return null
-    return compose(pngs.map { Tile(it) }, badges = true).png
+    val tiles = pngs.mapIndexed { index, png ->
+      val number = "${index + 1}"
+      Tile(
+        png,
+        labels.getOrNull(index)?.takeIf { it.isNotBlank() }?.let { "$number · $it" } ?: number,
+      )
+    }
+    return compose(tiles).png
   }
 
   /**
    * Lays [tiles] out and encodes the sheet, shrinking the tile edge until the PNG is under
    * [maxBytes] or the edge reaches its floor.
    */
-  fun compose(tiles: List<Tile>, badges: Boolean = false, maxBytes: Int = Int.MAX_VALUE): Sheet {
+  fun compose(tiles: List<Tile>, maxBytes: Int = Int.MAX_VALUE): Sheet {
     require(tiles.isNotEmpty()) { "a sheet needs at least one tile" }
     val images = tiles.map { tile -> tile.png?.let(::decode) }
     var edge = MAX_TILE_EDGE
     while (true) {
-      val sheet = draw(tiles, images, edge, badges)
+      val sheet = draw(tiles, images, edge)
       if (sheet.png.size <= maxBytes || edge <= MIN_TILE_EDGE) return sheet
       edge = max(MIN_TILE_EDGE, (edge * 0.7).roundToInt())
     }
@@ -114,14 +131,14 @@ internal object ServeContactSheet {
     tiles: List<Tile>,
     images: List<BufferedImage?>,
     edge: Int,
-    badges: Boolean,
   ): Sheet {
     val sizes = images.map { image -> image?.let { scaledSize(it.width, it.height, edge) } }
     // A slot is as big as the biggest tile; an empty one is a square of the edge it was given,
     // unless some other tile says how big a slot is.
-    val slotWidth = sizes.maxOfOrNull { it?.first ?: 0 }?.takeIf { it > 0 } ?: edge
-    val slotHeight = sizes.maxOfOrNull { it?.second ?: 0 }?.takeIf { it > 0 } ?: edge
     val captioned = tiles.any { it.caption != null }
+    val widest = sizes.maxOfOrNull { it?.first ?: 0 }?.takeIf { it > 0 } ?: edge
+    val slotWidth = if (captioned) max(widest, MIN_CAPTIONED_SLOT_WIDTH) else widest
+    val slotHeight = sizes.maxOfOrNull { it?.second ?: 0 }?.takeIf { it > 0 } ?: edge
     val captionHeight = if (captioned) CAPTION else 0
     val columns = columnsFor(tiles.size)
     val rows = ceil(tiles.size / columns.toDouble()).toInt()
@@ -178,7 +195,6 @@ internal object ServeContactSheet {
           }
           placed += Placement(left, top, slotWidth, slotHeight)
         }
-        if (badges) drawBadge(g, left, top, index + 1)
         tile.caption?.let { caption ->
           g.font = Font(Font.SANS_SERIF, Font.PLAIN, 12)
           g.color = CAPTION_COLOR
@@ -198,18 +214,6 @@ internal object ServeContactSheet {
         out.toByteArray()
       }
     return Sheet(png, width, height, columns, rows, placed)
-  }
-
-  private fun drawBadge(g: Graphics2D, x: Int, y: Int, number: Int) {
-    g.font = Font(Font.SANS_SERIF, Font.BOLD, 16)
-    g.color = BADGE_FILL
-    g.fillOval(x + 4, y + 4, BADGE, BADGE)
-    g.color = Color.WHITE
-    val label = number.toString()
-    val metrics = g.fontMetrics
-    val textX = x + 4 + (BADGE - metrics.stringWidth(label)) / 2
-    val textY = y + 4 + (BADGE - metrics.height) / 2 + metrics.ascent
-    g.drawString(label, textX, textY)
   }
 
   private fun ellipsize(text: String, measure: (String) -> Int, width: Int): String {
