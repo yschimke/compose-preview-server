@@ -51,8 +51,7 @@ class ServeGoogleFontsTest {
       when {
         "wght@400&" in url -> null // Google's 400 for a single weight of a variable family
         "wght@100..1000" in url ->
-          (face("300", "light") + face("500", "medium") + face("900", "black"))
-            .encodeToByteArray()
+          (face("300", "light") + face("500", "medium") + face("900", "black")).encodeToByteArray()
         else -> url.encodeToByteArray()
       }
     }

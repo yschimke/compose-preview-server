@@ -4026,8 +4026,8 @@ class ServeHttpServer(
   }
 
   /**
-   * `GET /api/fonts/google/{family}/{weight}`: that family's TrueType file. 404 for a family not
-   * on fonts.google.com or a weight that is not a hundred, 502 when Google could not be reached —
+   * `GET /api/fonts/google/{family}/{weight}`: that family's TrueType file. 404 for a family not on
+   * fonts.google.com or a weight that is not a hundred, 502 when Google could not be reached —
    * either way the editor draws the default face, as it did before the route existed.
    */
   private suspend fun RoutingContext.handleGoogleFont() {

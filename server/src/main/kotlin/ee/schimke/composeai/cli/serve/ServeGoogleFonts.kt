@@ -27,8 +27,8 @@ internal class ServeGoogleFonts(
   private val cacheDirectory: File,
   private val families: List<String>,
   /**
-   * The body of a GET; null when the server answered 4xx (Google's "no such face"), and a throw
-   * for anything that is not an answer — so an outage is a 502 now, never a cached "missing".
+   * The body of a GET; null when the server answered 4xx (Google's "no such face"), and a throw for
+   * anything that is not an answer — so an outage is a 502 now, never a cached "missing".
    */
   private val fetch: (url: String, userAgent: String) -> ByteArray?,
 ) {
@@ -95,8 +95,7 @@ internal class ServeGoogleFonts(
     private val VALID_WEIGHTS = (100..900 step 100).toSet()
 
     /** `GoogleFontKey.slugify`: lowercase, every non-alphanumeric run one `-`, none at the ends. */
-    fun slugify(name: String): String =
-      name.lowercase().replace(Regex("[^a-z0-9]+"), "-").trim('-')
+    fun slugify(name: String): String = name.lowercase().replace(Regex("[^a-z0-9]+"), "-").trim('-')
 
     fun cssUrl(family: String, axis: String): String =
       "https://fonts.googleapis.com/css2?family=${family.replace(" ", "%20")}:$axis&display=swap"
