@@ -668,6 +668,11 @@ class ServeHttpServer(
   private val projectHistory: ServeProjectHistory? = null,
   /** Trusted module roots for local browse sessions, keyed by their session ids. */
   private val localSourceRoots: Map<String, File> = emptyMap(),
+  /**
+   * This machine's site-local addresses, for the operator's "Open on your phone" card on a `--lan`
+   * server. A parameter so a test can name one on a host that has none.
+   */
+  private val lanAddresses: () -> List<String> = ServeUrls::siteLocalIpv4Addresses,
 ) {
 
   /**
@@ -4222,8 +4227,10 @@ class ServeHttpServer(
             imageWidth = heroSize?.first,
             imageHeight = heroSize?.second,
           )
-      markGeneration("static-page", pageCacheControl())
-      call.respondText(
+      val lanCard = operatorLanCard()
+      markGeneration("static-page", if (lanCard != null) "no-store" else pageCacheControl())
+      respondWithLanCard(
+        lanCard,
         ServeWeb.landingPage(
           renderHost.label,
           gridPreviews,
@@ -4233,9 +4240,11 @@ class ServeHttpServer(
           isPublic = isPublic,
           componentBrowser = componentBrowserMode(),
           // A back-to-home button whenever this server publishes a front-door index — listed
-          // catalogs OR unlisted app catalogs (mirrors handleLanding's home-index condition), so an
+          // catalogs OR unlisted app catalogs (mirrors handleLanding's home-index condition), so
+          // an
           // app-only server's landings still link home.
-          // …and never on a top-level site: there is no front door on this hostname to go back to,
+          // …and never on a top-level site: there is no front door on this hostname to go back
+          // to,
           // and a "← All design systems" button would either lie or leave the domain.
           hasHomeIndex =
             siteSystem() == null &&
@@ -4243,17 +4252,20 @@ class ServeHttpServer(
           basePath = basePath,
           changelogHref = changelogHref(selectedSessionId, basePath, webSessionId),
           // One action per comparable format, each gated on the same condition `comparisonPage`
-          // turns that format on with — so "compare SVG" and "compare RC players" only appear when
+          // turns that format on with — so "compare SVG" and "compare RC players" only appear
+          // when
           // there is something behind them.
           hasSvgComparison = renderHost.previews.any { renderHost.hasSvgExportFor(it.id) },
           hasRcComparison =
             renderHost.rcCompare() != null ||
               renderHost.previews.any { renderHost.hasRemoteComposeDoc(it.id) },
-          // Same condition `comparisonPage` turns the `reference` format on with, so the deep link
+          // Same condition `comparisonPage` turns the `reference` format on with, so the deep
+          // link
           // never lands on a format the page does not offer.
           hasReferenceComparison =
             renderHost.previews.any { renderHost.designReferencesFor(it.id).isNotEmpty() },
-          // Same condition `handleParity` serves on, so the link never leads to that route's 404 —
+          // Same condition `handleParity` serves on, so the link never leads to that route's 404
+          // —
           // and, since the acceptance lane was added there, so the page it made reachable is not
           // reachable only by typing the URL.
           hasParityView =
@@ -4261,7 +4273,8 @@ class ServeHttpServer(
               renderHost.parityIssues() != null ||
               renderHost.knownDifferences() != null ||
               renderHost.previews.any { renderHost.designReferencesFor(it.id).isNotEmpty() },
-          // The PAIRED implementation, named the way the wall names it. Same source the wall reads
+          // The PAIRED implementation, named the way the wall names it. Same source the wall
+          // reads
           // (`parallelSpecSource`), so the chip and the format it deep-links can never disagree
           // about whether there is a sibling catalog to compare against.
           parallelComparisonLabel =
@@ -4283,7 +4296,8 @@ class ServeHttpServer(
             renderHost.designPages().pages.map { page ->
               ServeWeb.PageLink(page.id, page.name, designPageSections(page))
             },
-          // …and name that action after the design tool the catalog is specified by, read from the
+          // …and name that action after the design tool the catalog is specified by, read from
+          // the
           // references it published (or from the parity feed's Figma lane when the references are
           // rasters with no provider). Null ⇒ the generic "design parity" label.
           designToolLabel =
@@ -4299,7 +4313,8 @@ class ServeHttpServer(
           refreshUrl =
             if (catalogRefresh != null) "$basePath/refresh${requestQuerySuffix()}" else null,
           // "try in playground" — opens the editor with this design system preselected, so a
-          // snippet compiles against the catalog you were just browsing. Omitted on a host with no
+          // snippet compiles against the catalog you were just browsing. Omitted on a host with
+          // no
           // lane; the per-preview handoff is the viewer's `playgroundHref`.
           playgroundHref = catalogPlaygroundHref,
           // Crop each card's thumbnail to the component's figma-svg content box (cheap baked
@@ -4307,9 +4322,11 @@ class ServeHttpServer(
           // so a Wear sticker shows the component, not the empty watch canvas around it.
           thumbCrop = { id -> catalogBundleHost(renderHost)?.contentCrop(id) },
           // …and point each card at a prebaked, downscaled copy of its render where one can be
-          // baked from local pixels, so the page ships a few hundred kB of thumbnails instead of a
+          // baked from local pixels, so the page ships a few hundred kB of thumbnails instead of
+          // a
           // couple of MB of full-resolution PNGs. Baking reads only what is already on disk (see
-          // [ServeHeroImages.gridThumbFor]) — this runs per card on the request thread, so it must
+          // [ServeHeroImages.gridThumbFor]) — this runs per card on the request thread, so it
+          // must
           // never fetch.
           thumbHash = { id ->
             heroImages
@@ -4321,8 +4338,10 @@ class ServeHttpServer(
               // thumbnails the card rather than waiting for a reader to download 50 kB of it.
               .also { if (it == null) thumbWarmer.enqueue(renderHost, id) }
           },
-          // A heartbeat while the tab is open, so a visitor reading the grid keeps their session —
-          // and its daemon — alive. Especially now: the cards above are cacheable, so browsing this
+          // A heartbeat while the tab is open, so a visitor reading the grid keeps their session
+          // —
+          // and its daemon — alive. Especially now: the cards above are cacheable, so browsing
+          // this
           // page can make no requests at all for as long as someone cares to read it.
           presenceUrl = "$basePath/api/presence${requestQuerySuffix()}",
           // The catalog's declared stage surface (`display.surface`), so a dark-first system's
@@ -4330,29 +4349,36 @@ class ServeHttpServer(
           declaredSurface = catalogBundleHost(renderHost)?.stageSurface,
           // …and its own colour palette, so this system's pages are framed in its colours.
           themeCss = catalogBundleHost(renderHost)?.webThemeCss.orEmpty(),
-          // Why the catalog is snapshot-only, when it is (no live bundle, unverified, …) — shown as
+          // Why the catalog is snapshot-only, when it is (no live bundle, unverified, …) — shown
+          // as
           // a banner under the header so a browser sees it before opening a preview.
           degradations = renderHost.degradations,
-          // The module's declared @ThemeCatalog themes join the header's Theme control, so the grid
-          // can be redrawn under any theme the catalog configures — not just baked Light/Dark. Only
+          // The module's declared @ThemeCatalog themes join the header's Theme control, so the
+          // grid
+          // can be redrawn under any theme the catalog configures — not just baked Light/Dark.
+          // Only
           // a daemon-twinned card can actually re-render one, hence the per-preview predicate.
           declaredThemes = applicableThemes(renderHost),
           canRenderThemeFor = { id -> renderHost.canRenderOverridesFor(id) },
           // …and a twin that REPLAYS a captured document rather than recomposing can't honour a
-          // theme provider either, however live it is: the render below refuses it with a terminal
+          // theme provider either, however live it is: the render below refuses it with a
+          // terminal
           // 409. Same predicate that refusal is derived from, deliberately read here rather than
           // re-derived — the viewer greys the identical choice off `irReplay`, and a grid that
           // disagreed with either would offer chips that turn every card into an error.
           // A replayed card is theme-overridable exactly when it can apply every theme this page
           // offers. On a pure-replay catalog the chips below are already narrowed to the mapped
-          // ones, so that is the whole declared set and nothing changes. In a **mixed** catalog the
-          // chips are the union — one recomposing preview is enough to publish all of them — and a
+          // ones, so that is the whole declared set and nothing changes. In a **mixed** catalog
+          // the
+          // chips are the union — one recomposing preview is enough to publish all of them — and
+          // a
           // replayed card mapped for only some would light up chips that 409 it.
           irReplayFor = { id ->
             isReplayedPreview(renderHost, id) && !everyThemeApplies(renderHost, id)
           },
           // Long-press a card to open a live daemon session inside it. Same two conditions the
-          // viewer's Live toggle answers to — the session offers the stream lane, and this preview
+          // viewer's Live toggle answers to — the session offers the stream lane, and this
+          // preview
           // has a daemon twin to stream — so a card only takes the gesture when the socket behind
           // it would deliver real frames rather than replaying baked pixels.
           canStreamLiveFor = { id ->
@@ -4381,12 +4407,14 @@ class ServeHttpServer(
           //
           // Only where a login unlocks something on THIS catalog: a live lane to stream, or a
           // playground that compiles against it. A static bundle (or one whose live breaker has
-          // opened) with no playground has nothing behind the control, and inviting a sign-in that
+          // opened) with no playground has nothing behind the control, and inviting a sign-in
+          // that
           // changes nothing is the dead affordance the viewer's chip already refuses to be. The
           // front door keeps its unconditional control — it stands above every catalog, so it
           // cannot answer for one, and any of them may offer a lane.
           //
-          // The lane it speaks for is whichever this catalog actually has. With no live stream the
+          // The lane it speaks for is whichever this catalog actually has. With no live stream
+          // the
           // playground is the only thing behind the login, and its gate is repository access — so
           // the control says so instead of promising a Live lane this catalog cannot offer.
           githubAuth =
@@ -4397,8 +4425,10 @@ class ServeHttpServer(
             },
           // The catalog report on the page most visitors arrive on — what the floating launcher's
           // catalog half points at in Dev, and the only reporting affordance Catalog mode has at
-          // all. Scoped to the page rather than to a card: the grid singles out no component, and a
-          // report naming one the reporter never picked would be worse than one naming the catalog.
+          // all. Scoped to the page rather than to a card: the grid singles out no component, and
+          // a
+          // report naming one the reporter never picked would be worse than one naming the
+          // catalog.
           reportIssue = pageScopedReportIssue(renderHost, selectedSessionId, "this catalog"),
         ),
         ContentType.Text.Html,
@@ -7384,8 +7414,10 @@ class ServeHttpServer(
           imageWidth = featuredRender?.second?.first,
           imageHeight = featuredRender?.second?.second,
         )
-    markGeneration("static-page", pageCacheControl())
-    call.respondText(
+    val lanCard = operatorLanCard()
+    markGeneration("static-page", if (lanCard != null) "no-store" else pageCacheControl())
+    respondWithLanCard(
+      lanCard,
       ServeWeb.homeIndexPage(
         systems,
         linkToken(),
@@ -8053,6 +8085,71 @@ class ServeHttpServer(
       ?.let(sharedItems::get)
       ?.text
       ?.takeIf { it.isNotBlank() }
+
+  /**
+   * "Open on your phone" for the operator of a `--lan` server: each network URL, a QR code for the
+   * first, and the secure-context caveat — on the landing page they already have open.
+   *
+   * Shown only to the operator, which here means all of: the server is bound to every interface;
+   * the request reached the listener directly from this machine (a loopback peer, a loopback
+   * `Host`, and no proxy forwarding headers — a reverse proxy on the same box makes every visitor
+   * look local otherwise); and it carries the operator's own token or browse cookie, not an agent
+   * grant. The card puts the operator's token into a link, so anything looser would hand it to
+   * whoever else can load the page. The response is then `no-store`.
+   */
+  private fun RoutingContext.operatorLanCard(): String? {
+    if (!ServeUrls.isExposed(host)) return null
+    val headers = call.request.headers
+    if (
+      listOf("X-Forwarded-For", "X-Forwarded-Host", "Forwarded", "X-Real-IP").any {
+        headers[it] != null
+      }
+    )
+      return null
+    val peer = call.request.local.remoteAddress
+    if (peer !in LOOPBACK_PEERS) return null
+    val requestHost = headers[HttpHeaders.Host]?.substringBeforeLast(':')?.trim('[', ']')
+    if (requestHost !in LOOPBACK_HOSTS) return null
+    val provided = call.request.queryParameters["token"] ?: headers[TOKEN_HEADER]
+    val operator =
+      isPublic || ServeUrls.tokensMatch(serverToken, provided) || call.browsesByCookie()
+    if (!operator) return null
+    val origins = lanAddresses().map { ServeUrls.origin(it, port) }
+    if (origins.isEmpty()) return null
+    val tokenQuery = if (isPublic) "" else "?token=${WebEscaping.urlEncodeSegment(serverToken)}"
+    val urls = origins.map { "$it/$tokenQuery" }
+    val qr =
+      ServeQrCode.encode(urls.first())?.svg(moduleSize = 4, label = "QR code for ${urls.first()}")
+    return buildString {
+      append("<section class=\"cp-lan-card\" aria-labelledby=\"cp-lan-card-title\">")
+      append("<h2 id=\"cp-lan-card-title\">Open on your phone</h2>")
+      if (qr != null) append("<div class=\"cp-lan-qr\">").append(qr).append("</div>")
+      append("<div class=\"cp-lan-text\"><p>Scan the code, or open")
+      urls.forEach { url ->
+        val escaped = WebEscaping.htmlEscape(url)
+        append(" <a href=\"$escaped\"><code>$escaped</code></a>")
+      }
+      append(" on a device on the same network. Only you see this card: it carries your token.</p>")
+      append(
+        "<p class=\"cp-lan-caveat\">A plain-http LAN address is not a secure context, so " +
+          "installing the app, sharing, the clipboard and offline use need HTTPS — or, on an " +
+          "Android phone over USB, <code>adb reverse tcp:$port tcp:$port</code> and open " +
+          "<code>http://localhost:$port/</code>.</p></div></section>"
+      )
+    }
+  }
+
+  /** Respond [html] with [card] as the first thing in its `<main>`, when there is one. */
+  private suspend fun RoutingContext.respondWithLanCard(
+    card: String?,
+    html: String,
+    contentType: ContentType,
+  ) = call.respondText(withOperatorLanCard(card, html), contentType)
+
+  /** [html] with [card] as the first thing in its `<main>`, or unchanged when there is none. */
+  private fun withOperatorLanCard(card: String?, html: String): String =
+    if (card == null) html
+    else html.replaceFirst("<main class=\"cp-main\">", "<main class=\"cp-main\">\n$card")
 
   /**
    * The session a root-form viewer path was showing, from the `?session=` its links carry, else the
@@ -17686,6 +17783,12 @@ class ServeHttpServer(
     internal const val UI_BUILDER_SERVICE_WORKER_SCOPE = "/ui-builder/"
 
     private const val SERVICE_WORKER_ALLOWED = "Service-Worker-Allowed"
+
+    /** A request's peer address when it comes from this machine. */
+    private val LOOPBACK_PEERS = setOf("127.0.0.1", "::1", "0:0:0:0:0:0:0:1", "localhost")
+
+    /** A `Host` naming this machine (port and IPv6 brackets already removed). */
+    private val LOOPBACK_HOSTS = setOf("127.0.0.1", "localhost", "::1")
 
     /** Launchers truncate a `short_name` past about a dozen characters. */
     private const val SHORT_NAME_MAX = 12

@@ -31,6 +31,12 @@ internal object ServeBanner {
     /** The builder page to point at, when the UI builder is a lane this run opens; else null. */
     builderPath: String?,
     acceptDocs: Boolean,
+    /**
+     * Whether to draw the first network URL as a QR code, for a phone on the same network to scan.
+     * Only for an interactive terminal: in a log the ANSI colours are noise, and a QR there is a
+     * second, harder-to-notice copy of the token.
+     */
+    qr: Boolean = false,
   ): List<String> = buildList {
     // Public mode is open, so the links carry no token; otherwise the token gates every route.
     fun url(origin: String, path: String): String =
@@ -50,6 +56,21 @@ internal object ServeBanner {
         "  ⚠ Bound to all interfaces — reachable by anyone on your LAN. The token in the link is " +
           "the only gate; share it only with people you'd let see these previews."
       )
+      add(
+        "  ⓘ A plain-http LAN address is not a secure context: installing the app, Web Share, " +
+          "clipboard and offline need HTTPS, or `adb reverse tcp:${portOf(localOrigin)} " +
+          "tcp:${portOf(localOrigin)}` so an Android phone can open http://localhost instead."
+      )
+      val first = networkOrigins.firstOrNull()
+      if (qr && first != null) {
+        // A supplied token is shown redacted above, so the code carries none either: the phone
+        // asks for it rather than a scan lifting it off the screen.
+        val target = if (tokenSupplied && !public) "$first/" else url(first, "/")
+        ServeQrCode.encode(target)?.let { code ->
+          add("  Scan to open on a phone on this network:")
+          code.terminalLines().forEach { add("  $it") }
+        }
+      }
     }
     if (!public && tokenSupplied) {
       add("  Token:   the value passed with --token (SERVE_TOKEN), shown above as a prefix only")
@@ -66,6 +87,8 @@ internal object ServeBanner {
    * [token] shortened for display: its first [TOKEN_PREFIX_CHARS] characters and an ellipsis, or
    * just the ellipsis when the token is too short for a prefix to leave most of it unsaid.
    */
+  private fun portOf(origin: String): String = origin.substringAfterLast(':').trimEnd('/')
+
   fun redact(token: String): String =
     if (token.length < TOKEN_PREFIX_CHARS * 3) "…" else token.take(TOKEN_PREFIX_CHARS) + "…"
 }

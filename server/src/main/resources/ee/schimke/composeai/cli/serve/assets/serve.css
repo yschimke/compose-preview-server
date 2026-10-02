@@ -5598,3 +5598,17 @@ body { padding-left: max(28px, env(safe-area-inset-left, 0px));
 @media (prefers-reduced-motion: no-preference) {
   @view-transition { navigation: auto; }
 }
+
+/* "Open on your phone": the operator's own card on a `--lan` server's landing page. */
+.cp-lan-card { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 16px;
+  align-items: center; margin: 0 0 20px; padding: 16px;
+  border: 1px solid var(--md-sys-color-outline-variant);
+  border-radius: var(--md-sys-shape-corner-large, 16px);
+  background: var(--md-sys-color-surface-container-low); }
+.cp-lan-card h2 { grid-column: 1 / -1; margin: 0; font-size: var(--md-sys-typescale-title-medium-size, 1rem); }
+.cp-lan-qr svg { display: block; width: 148px; height: 148px; border-radius: 8px; }
+.cp-lan-text p { margin: 0 0 8px; overflow-wrap: anywhere; }
+.cp-lan-caveat { color: var(--cp-fg-muted); font-size: var(--md-sys-typescale-body-small-size, 0.8rem); }
+@media (max-width: 640px) {
+  .cp-lan-card { grid-template-columns: minmax(0, 1fr); justify-items: start; }
+}
