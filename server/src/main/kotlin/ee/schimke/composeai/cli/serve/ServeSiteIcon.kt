@@ -263,6 +263,41 @@ internal object ServeSiteIcon {
             }
           },
         )
+        // Installed, the app appears in the OS share sheet. A shared screenshot lands in the
+        // bug-report flow as a capture, and a shared link opens if it is one of this server's own
+        // pages. See [ServeShareTarget].
+        put(
+          "share_target",
+          kotlinx.serialization.json.buildJsonObject {
+            put("action", str(ServeShareTarget.ACTION_PATH))
+            put("method", str("POST"))
+            put("enctype", str("multipart/form-data"))
+            put(
+              "params",
+              kotlinx.serialization.json.buildJsonObject {
+                put("title", str(ServeShareTarget.TITLE_FIELD))
+                put("text", str(ServeShareTarget.TEXT_FIELD))
+                put("url", str(ServeShareTarget.URL_FIELD))
+                put(
+                  "files",
+                  kotlinx.serialization.json.buildJsonArray {
+                    add(
+                      kotlinx.serialization.json.buildJsonObject {
+                        put("name", str(ServeShareTarget.FILE_FIELD))
+                        put(
+                          "accept",
+                          kotlinx.serialization.json.buildJsonArray {
+                            ServeShareTarget.ACCEPTED_IMAGE_TYPES.forEach { add(str(it)) }
+                          },
+                        )
+                      }
+                    )
+                  },
+                )
+              },
+            )
+          },
+        )
         if (shortcuts.isNotEmpty()) {
           put(
             "shortcuts",

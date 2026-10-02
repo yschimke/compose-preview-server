@@ -1532,6 +1532,11 @@ class ServeHttpServer(
         // the same catalog-load and daemon-failure detail, so a private box keeps it behind the
         // token.
         get(ServeBugReport.PATH) { handleBugReport() }
+        // The installed app's share target ([ServeShareTarget]), named by the web app manifest.
+        // Gated like the report page it leads to: on a token-gated box the installed app's browse
+        // cookie is the credential, exactly as for any other navigation.
+        post(ServeShareTarget.ACTION_PATH) { handleShareTarget() }
+        get("${ServeShareTarget.SHARED_PATH}/{id}") { handleSharedImage() }
 
         // The crawler-facing pair (see [ServeSiteIndex]). Both are deliberately UNGATED even on a
         // token-gated host: a crawler has no token, and answering the styled HTML 404 — which is
@@ -7895,11 +7900,14 @@ class ServeHttpServer(
           site = siteSystem() != null,
         )
     }
+    // Text shared into the installed app ([ServeShareTarget]) answers "what went wrong".
+    val shared = sharedReportText()
+    fun withShared(body: String) = ServeBugReport.withSharedText(body, shared)
     val report =
       ServeWeb.BugReport(
         action = ServeBugReport.action(),
-        body = ServeBugReport.body(server, page),
-        bodyTemplate = ServeBugReport.body(server, page, clientPlaceholder = true),
+        body = withShared(ServeBugReport.body(server, page)),
+        bodyTemplate = withShared(ServeBugReport.body(server, page, clientPlaceholder = true)),
         repo = ServeBugReport.REPO,
         // The thumbnail is fetched by the visitor's own browser against this server, so it keeps
         // the token the report body strips — otherwise a gated box shows a broken image on the
@@ -7962,6 +7970,89 @@ class ServeHttpServer(
       ContentType.Text.Html,
     )
   }
+
+  /** Shares waiting for the report page to pick them up. See [ServeShareTarget]. */
+  private val sharedItems = ServeShareTarget.Store()
+
+  /**
+   * `POST /report-bug/share`: what the OS share sheet sends the installed app.
+   *
+   * A browser-initiated navigation, so it is answered with a `303` to a page rather than with data:
+   * an image or free text lands in the bug report (parked in [sharedItems] for the page to import),
+   * and a link to one of this server's own pages opens that page. A cross-site form that tries to
+   * plant a picture in somebody's report is refused — the share sheet's own POST is
+   * browser-initiated (`Sec-Fetch-Site: none`), so it is never cross-site.
+   */
+  private suspend fun RoutingContext.handleShareTarget() {
+    if (rejectBadToken()) return
+    if (call.request.headers["Sec-Fetch-Site"] == "cross-site") {
+      call.respondText("cross-site share refused", status = HttpStatusCode.Forbidden)
+      return
+    }
+    val contentType = call.request.headers[HttpHeaders.ContentType].orEmpty()
+    if (!contentType.startsWith("multipart/form-data", ignoreCase = true)) {
+      call.respondText("expected multipart/form-data", status = HttpStatusCode.UnsupportedMediaType)
+      return
+    }
+    val body =
+      withContext(Dispatchers.IO) {
+        call.receiveStream().use { readCapped(it, ServeShareTarget.MAX_BODY_BYTES) }
+      }
+    if (body == null) {
+      call.respondText("share too large", status = HttpStatusCode.PayloadTooLarge)
+      return
+    }
+    val fields = ServeShareTarget.parseMultipart(body, contentType)
+    if (fields == null) {
+      call.respondText("malformed share", status = HttpStatusCode.BadRequest)
+      return
+    }
+    val self = runCatching { java.net.URI(externalOrigin()) }.getOrNull()
+    fun port(uri: java.net.URI) =
+      if (uri.port >= 0) uri.port else if (uri.scheme.equals("https", true)) 443 else 80
+    val outcome =
+      ServeShareTarget.outcome(fields, System.currentTimeMillis()) { uri ->
+        self != null && uri.host.equals(self.host, ignoreCase = true) && port(uri) == port(self)
+      }
+    val gate =
+      if (!linksCarryToken()) null else "token=${WebEscaping.urlEncodeSegment(linkToken())}"
+    fun withGate(path: String) =
+      if (gate == null || Regex("[?&]token=").containsMatchIn(path)) path
+      else path + (if ('?' in path) "&" else "?") + gate
+    val target =
+      when (outcome) {
+        is ServeShareTarget.Outcome.Open -> outcome.path
+        is ServeShareTarget.Outcome.Report -> {
+          val id = sharedItems.put(outcome.shared)
+          "${ServeBugReport.PATH}?${ServeShareTarget.SHARED_PARAM}=$id"
+        }
+        ServeShareTarget.Outcome.Empty -> ServeBugReport.PATH
+      }
+    call.response.headers.append(HttpHeaders.Location, withGate(target))
+    call.respond(HttpStatusCode.SeeOther)
+  }
+
+  /** `GET /report-bug/shared/<id>`: a parked shared image, for the report page to import. */
+  private suspend fun RoutingContext.handleSharedImage() {
+    if (rejectBadToken()) return
+    val shared = call.parameters["id"]?.let(sharedItems::get)
+    val image = shared?.image
+    val type = shared?.imageType
+    if (image == null || type == null) {
+      call.respondText("not found", status = HttpStatusCode.NotFound)
+      return
+    }
+    call.response.headers.append(HttpHeaders.CacheControl, "private, no-store")
+    call.response.headers.append("X-Content-Type-Options", "nosniff")
+    call.respondBytes(image, ContentType.parse(type))
+  }
+
+  /** The text a share parked for the report page named by `?shared=`, if it is still parked. */
+  private fun RoutingContext.sharedReportText(): String? =
+    call.request.queryParameters[ServeShareTarget.SHARED_PARAM]
+      ?.let(sharedItems::get)
+      ?.text
+      ?.takeIf { it.isNotBlank() }
 
   /**
    * The session a root-form viewer path was showing, from the `?session=` its links carry, else the

@@ -50,6 +50,8 @@ class ServeSitesReservedRoutesTest {
       "ServeSiteIcon.MANIFEST_PATH" to ServeSiteIcon.MANIFEST_PATH,
       "ServeSiteIcon.SCREENSHOT_NARROW_PATH" to ServeSiteIcon.SCREENSHOT_NARROW_PATH,
       "ServeSiteIcon.SCREENSHOT_WIDE_PATH" to ServeSiteIcon.SCREENSHOT_WIDE_PATH,
+      "ServeShareTarget.ACTION_PATH" to ServeShareTarget.ACTION_PATH,
+      "ServeShareTarget.SHARED_PATH" to ServeShareTarget.SHARED_PATH,
       "ServeRcFonts.URL_BASE" to ServeRcFonts.URL_BASE,
       "ServeGoogleFonts.ROUTE" to ServeGoogleFonts.ROUTE,
       "ServeAgentGrants.BASE_PATH" to ServeAgentGrants.BASE_PATH,
