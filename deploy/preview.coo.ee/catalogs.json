@@ -33,7 +33,7 @@
     },
     {
       "system": "remote-m3",
-      "repo": "yschimke/wear-m3-catalog-out",
+      "repo": "yschimke/remote-m3-catalog-out",
       "listed": true,
       "group": "design-systems"
     },

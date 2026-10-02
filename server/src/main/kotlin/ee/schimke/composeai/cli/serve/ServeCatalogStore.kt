@@ -348,17 +348,61 @@ class ServeCatalogStore(
 
   /**
    * The declared hero resolved against [bakedIds], or null when the catalog declares none / it
-   * matches nothing. Mirrors [ServeBundleHost.declaredHeroPreviewId]: an exact preview id wins,
-   * else a `componentId` / preview-function name is matched against the slug head using the same
-   * normalisation the exporter used, so a spec can name `"Template/TimeText"` and hit
-   * `template-timetext__ideal__…`. Kept in step with that resolver — they must agree, or the image
-   * fetched ahead of publishing is not the one the front door paints.
+   * matches nothing. Tried in order:
+   * 1. an exact preview id;
+   * 2. a `componentId`, matched against the slug head with the same normalisation the exporter
+   *    used, so a spec can name `"Template/TimeText"` and hit `template-timetext__ideal__…`;
+   * 3. a `@Preview` function name, matched against the daemon [Image.previewId] each image records
+   *    ([heroForFunction]).
+   *
+   * The first two mirror [ServeBundleHost.declaredHeroPreviewId]. The third needs `catalog.json`,
+   * which the host never sees, so the load hands the host this resolved id as its declared hero
+   * (its exact-id path then wins) — the image fetched ahead of publishing and the one the front
+   * door paints stay the same.
    */
   private fun heroPreviewIdFor(catalog: Catalog, bakedIds: Set<String>): String? {
     val hero = catalog.display?.hero?.takeIf { it.isNotBlank() } ?: return null
     if (hero in bakedIds) return hero
     val wanted = heroSlugOf(hero)
     return bakedIds.firstOrNull { heroSlugOf(it.substringBefore(SLUG_SEPARATOR)) == wanted }
+      ?: heroForFunction(catalog, hero, bakedIds)
+  }
+
+  /**
+   * The baked preview a function-name [hero] names. A `@Preview` function publishes under its
+   * component's slug, not its own name — a `@CatalogVariant` function `CardActionSticker` lands as
+   * `card__ideal__default__content-action` — so the only link back to the function is the daemon
+   * preview id the exporter stamps on each image (`ee.schimke.m3catalog.glimmer.CardsKt.
+   * CardActionSticker`, `…ButtonSticker_VARIANT_pressed`, `SwitchOn_Dark`).
+   *
+   * An image matches when the id's simple name is the function itself, or the function plus a `_…`
+   * suffix (a per-annotation or variant id of it); an exact name beats a suffixed one so `Button`
+   * never resolves through `Button_Large`. Among matches the default render wins (no state, no
+   * variant props), so a hero naming a function with several cells leads with its plain one.
+   *
+   * Null when nothing matches — including a catalog published with no live path, whose images carry
+   * no `previewId` at all; the front door then falls back to its own pick as before.
+   */
+  private fun heroForFunction(catalog: Catalog, hero: String, bakedIds: Set<String>): String? {
+    val matches =
+      catalog.components.flatMap { component ->
+        component.images.mapNotNull { image ->
+          val name =
+            image.previewId?.substringAfterLast(':')?.substringAfterLast('.')
+              ?: return@mapNotNull null
+          val exact =
+            when {
+              name == hero -> true
+              name.startsWith("${hero}_") -> false
+              else -> return@mapNotNull null
+            }
+          val id = previewIdFor(image.path).takeIf { it in bakedIds } ?: return@mapNotNull null
+          val isDefault =
+            (image.state == null || image.state == "default") && image.props.isNullOrEmpty()
+          Triple(id, exact, isDefault)
+        }
+      }
+    return matches.sortedWith(compareBy({ !it.second }, { !it.third })).firstOrNull()?.first
   }
 
   sealed interface Result {
@@ -843,8 +887,12 @@ class ServeCatalogStore(
     // single file would fail a whole catalog because one image happens to be missing, which is
     // strictly worse than the bulk fetch it replaces (that one dropped the bad image and served the
     // rest). The hero leads the sample so the front-door card is the one certainly present.
+    //
+    // The hero is resolved once, here, and handed to the host below as its declared hero: a
+    // function-name hero resolves only through the images' daemon ids, which the host never sees.
+    val heroId = heroPreviewIdFor(catalog, bakedPathById.keys)
     if (bakedPathById.isNotEmpty()) {
-      val heroPath = heroPreviewIdFor(catalog, bakedPathById.keys)?.let(bakedPathById::get)
+      val heroPath = heroId?.let(bakedPathById::get)
       val sample =
         (listOfNotNull(heroPath) + bakedPathById.values).distinct().take(PUBLISH_SAMPLE_IMAGES)
       val landed =
@@ -930,7 +978,7 @@ class ServeCatalogStore(
     // the branch; the bulk path this replaces enabled the lane if *any* candidate landed. Spread
     // across distinct slugs so the sample is about the branch rather than one component.
     val figmaProbeIds =
-      (listOfNotNull(heroPreviewIdFor(catalog, bakedPathById.keys)) + bakedPathById.keys)
+      (listOfNotNull(heroId) + bakedPathById.keys)
         .distinctBy { it.substringBefore(SLUG_SEPARATOR) }
         .take(FIGMA_PROBE_SLUGS)
     val figmaDir = probeFigmaSvg(figmaProbeIds.flatMap(::heroSvgCandidates), base, dir)
@@ -998,7 +1046,7 @@ class ServeCatalogStore(
           // the system's own choice instead of inferring it.
           stageSurface = catalog.display?.surface?.takeIf { it.isNotBlank() },
           catalogRole = catalog.display?.role?.takeIf { it.isNotBlank() },
-          declaredHero = catalog.display?.hero?.takeIf { it.isNotBlank() },
+          declaredHero = heroId ?: catalog.display?.hero?.takeIf { it.isNotBlank() },
           webThemeCss = webThemeCss,
           figmaDir = figmaDir,
           provenance =

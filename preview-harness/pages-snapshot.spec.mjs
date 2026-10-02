@@ -4374,10 +4374,25 @@ for (const fixture of listPageFixtures()) {
             );
             await expect(viewer.locator("#refresh")).toBeHidden();
           } else {
-            await expect(
-              viewer.locator('#canvas img[alt="Rendered Compose preview"]'),
-            ).toBeVisible();
+            const image = viewer.locator('#canvas img[alt="Rendered Compose preview"]');
+            await expect(image).toBeVisible();
             await expect(viewer.locator("#use")).toBeHidden();
+            const zoom = viewer.locator("#zoom");
+            if (fixture === "mcp-app-viewer-static-short") {
+              // A short frame (Antigravity's card) fits the 200x420 render well under its own
+              // size; Actual size draws it at its own pixels, and Fit goes back.
+              const width = () => image.evaluate((img) => img.clientWidth);
+              await expect.poll(width).toBeLessThan(200);
+              await zoom.click();
+              await expect(zoom).toHaveAttribute("aria-pressed", "true");
+              await expect.poll(width).toBe(200);
+              await zoom.click();
+              await expect(zoom).toHaveText("Actual size");
+              await expect.poll(width).toBeLessThan(200);
+            } else {
+              // Already drawn at its own size, so there is nothing to enlarge.
+              await expect(zoom).toBeHidden();
+            }
           }
         } else if (
           fixture !== "mcp-app-viewer-a11y-non-full" &&
