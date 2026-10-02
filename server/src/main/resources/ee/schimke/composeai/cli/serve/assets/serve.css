@@ -1844,7 +1844,13 @@ cp-parity-scores { display: contents; }
 .cp-card.cp-sys:hover, .cp-card.cp-sys:focus-within { z-index: 4; }
 .cp-syslist .cp-imgwrap { min-height: 0; height: 220px; overflow: visible;
   border-radius: var(--md-sys-shape-corner-medium) var(--md-sys-shape-corner-medium) 0 0; }
-.cp-syslist .cp-imgwrap > img { width: 100%; height: 100%; max-height: none; object-fit: contain; }
+/* `scale-down`, not `contain`: a hero is fitted into the well but never drawn larger than its own
+   pixels. `contain` upscales too, and the well is 196px of content height, so a component-sized
+   hero was stretched to fill it — Glimmer's 141x48 button hero went out at ~4x, a smeared blob,
+   before the hover zoom added another 1.15. A phone or watch hero is baked well past the well's
+   size ([ServeHeroImages] bakes at 2x the 240px cap) and still fits exactly as before; only a
+   hero with fewer pixels than the well is left at 1 image pixel per CSS pixel. */
+.cp-syslist .cp-imgwrap > img { width: 100%; height: 100%; max-height: none; object-fit: scale-down; }
 /* …and a CROPPED hero gets the same exemption, in the only form a clip window can take it. The
    line above frees a plain hero from the grid's image cap because this row is a fixed 220px; a
    clip window is capped through `--cp-thumb-cap` instead (see `.cp-crop`), so it has to be told
