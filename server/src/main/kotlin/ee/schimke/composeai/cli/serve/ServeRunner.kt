@@ -2690,6 +2690,14 @@ public class ServeRunner(
    * checksum mismatch, a migration that could not complete — disables the lane and prints
    * [uiBuilderDisabledWarning]. See yschimke/compose-preview-server#568 for the deploy this cost.
    */
+  /** For [ServeGoogleFonts]' fetches on the renderer's behalf: the font route's own timeouts. */
+  private val googleFontsHttpClient: okhttp3.OkHttpClient by lazy {
+    okhttp3.OkHttpClient.Builder()
+      .connectTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
+      .readTimeout(60, java.util.concurrent.TimeUnit.SECONDS)
+      .build()
+  }
+
   private fun openUiBuilderService(
     appDirectory: File?,
     /** The served catalogs' store, for a pack's record and a served catalog's export record. */
@@ -2711,7 +2719,14 @@ public class ServeRunner(
     // daemon and a directory for the life of a process that is no longer using either.
     val opened = AtomicReference<AutoCloseable?>(null)
     return try {
-      openUiBuilderLane(directory, catalogStore, catalogLoads, opened::set)
+      openUiBuilderLane(
+        directory,
+        catalogStore,
+        catalogLoads,
+        opened::set,
+        // The editor's Google Fonts cache, which the renderer draws a design's typefaces from.
+        fonts = ServeGoogleFonts.overHttp(appDirectory, googleFontsHttpClient),
+      )
     } catch (failure: Exception) {
       runCatching { opened.get()?.close() }
       System.err.println(uiBuilderDisabledWarning(directory, failure))
@@ -2727,6 +2742,7 @@ public class ServeRunner(
     catalogStore: ServeCatalogStore?,
     catalogLoads: CatalogLoadTracker?,
     registerCloseable: (AutoCloseable?) -> Unit,
+    fonts: ServeGoogleFonts? = null,
   ): UiBuilderLane {
     if (!(directory.isDirectory || directory.mkdirs()) || !directory.canWrite()) {
       throw IllegalStateException("UI-builder state directory is not writable: $directory")
@@ -2758,7 +2774,7 @@ public class ServeRunner(
     }
     val composeExportConfigured = catalogsWithoutRecords.isEmpty()
     val renderer = runCatching {
-      ServeUiBuilderRenderPort.open(directory.resolve("renderer").toPath())
+      ServeUiBuilderRenderPort.open(directory.resolve("renderer").toPath(), fonts)
     }
       .onFailure { failure ->
         System.err.println(
@@ -2911,7 +2927,7 @@ public class ServeRunner(
     // every other design passes through to the Remote Compose / picture chain below it.
     val exporter =
       A2uiJsonExportExecutor(
-        documentExporter?.let { RemotePngExportExecutor(it, renderer) } ?: pictureExporter
+        documentExporter?.let { RemotePngExportExecutor(it, renderer, fonts) } ?: pictureExporter
       )
     val pictureExports =
       ((pictureExporter as? ProductionUiBuilderExportExecutor)?.capabilities

@@ -4059,27 +4059,7 @@ class ServeHttpServer(
   /** The Google Fonts cache, present exactly when this host serves the UI builder. */
   private val googleFonts: ServeGoogleFonts? by lazy {
     val dir = uiBuilderDir ?: return@lazy null
-    ServeGoogleFonts(
-      cacheDirectory = File(dir, "google-fonts"),
-      families = ServeWeb.googleFontFamilies,
-      fetch = { url, userAgent ->
-        materialSymbolsHttpClient
-          .newCall(okhttp3.Request.Builder().url(url).header("User-Agent", userAgent).build())
-          .execute()
-          .use { response ->
-            if (response.code in 400..499) return@use null
-            check(response.isSuccessful) { "$url answered ${response.code}" }
-            val body = checkNotNull(response.body) { "$url answered no body" }
-            check(body.contentLength() <= ServeGoogleFonts.MAX_FONT_BYTES) {
-              "$url declared ${body.contentLength()} bytes; refusing to read it"
-            }
-            val bytes =
-              MaterialSymbolsSource.readAtMost(body.byteStream(), ServeGoogleFonts.MAX_FONT_BYTES)
-            check(bytes.size <= ServeGoogleFonts.MAX_FONT_BYTES) { "$url is too large" }
-            bytes
-          }
-      },
-    )
+    ServeGoogleFonts.overHttp(dir, materialSymbolsHttpClient)
   }
 
   /**

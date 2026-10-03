@@ -8,12 +8,20 @@ import ee.schimke.composeai.uibuilder.service.UiBuilderRenderRequest
 import java.nio.file.Path
 
 /** Server-side adapter from the UI-builder runtime's narrow port to the existing render host. */
-internal class ServeUiBuilderRenderPort private constructor(private val host: ServeRenderHost) :
-  UiBuilderRenderPort {
+internal class ServeUiBuilderRenderPort
+private constructor(
+  private val host: ServeRenderHost,
+  /**
+   * The Google Fonts cache the renderer reads a design's typefaces from, filled for each render's
+   * families first; null draws every family the bundle does not vendor in the default face.
+   */
+  private val fonts: ServeGoogleFonts? = null,
+) : UiBuilderRenderPort {
   override val supportsSvg: Boolean = host.hasSvgExport
 
-  override fun renderPng(request: UiBuilderRenderRequest): ByteArray =
-    when (
+  override fun renderPng(request: UiBuilderRenderRequest): ByteArray {
+    request.warmFonts()
+    return when (
       val outcome = host.render(PackagedUiBuilderRenderBundle.PREVIEW_ID, request.overrides())
     ) {
       is RenderOutcome.Ok -> outcome.png
@@ -21,15 +29,23 @@ internal class ServeUiBuilderRenderPort private constructor(private val host: Se
       RenderOutcome.Busy -> error("UI-builder renderer is busy")
       is RenderOutcome.Failed -> error(outcome.reason)
     }
+  }
 
-  override fun renderSvg(request: UiBuilderRenderRequest): ByteArray =
-    when (
+  override fun renderSvg(request: UiBuilderRenderRequest): ByteArray {
+    request.warmFonts()
+    return when (
       val outcome = host.renderSvg(PackagedUiBuilderRenderBundle.PREVIEW_ID, request.overrides())
     ) {
       is SvgOutcome.Ok -> outcome.svg
       SvgOutcome.NotFound -> error("packaged UI-builder SVG producer is unavailable")
       is SvgOutcome.Failed -> error(outcome.reason)
     }
+  }
+
+  /** The design's families into the cache the renderer reads, before it draws. */
+  private fun UiBuilderRenderRequest.warmFonts() {
+    fonts?.warm(DesignTypefaces.ofRendererDocument(encodedDocument))
+  }
 
   override fun close() = host.close()
 
@@ -50,6 +66,7 @@ internal class ServeUiBuilderRenderPort private constructor(private val host: Se
   companion object {
     fun open(
       root: Path,
+      fonts: ServeGoogleFonts? = null,
       onLog: (String) -> Unit = { System.err.println("[ui-builder renderer] $it") },
     ): ServeUiBuilderRenderPort {
       preflightJvm()
@@ -72,8 +89,17 @@ internal class ServeUiBuilderRenderPort private constructor(private val host: Se
           workspaceName = state.workspaceName,
           previews = state.previews,
           label = "UI builder renderer",
+          // Where the preview reads the families the bundle does not vendor from.
+          systemPropertyOverrides =
+            fonts?.let {
+              mapOf(
+                PackagedUiBuilderRenderBundle.GOOGLE_FONTS_DIRECTORY_PROPERTY to
+                  it.cacheDirectory.absolutePath
+              )
+            } ?: emptyMap(),
           onLog = onLog,
-        )
+        ),
+        fonts,
       )
     }
 
