@@ -534,4 +534,55 @@ class CatalogBlobPoolTest {
   private companion object {
     const val COMMIT = "0123456789abcdef0123456789abcdef01234567"
   }
+
+  @Test
+  fun `a remembered miss is trusted until its ttl, then forgotten`() {
+    var now = 1_000_000L
+    val ttl = 60_000L
+    val root = root()
+    val pool = CatalogBlobPool(root, missingTtlMillis = ttl, clock = { now })
+    val url = "https://raw.githubusercontent.com/o/r/0123456789abcdef/figma/a/b.svg"
+
+    assertFalse(pool.knownMissing(url), "nothing is known before a miss is recorded")
+    pool.recordMissing(url)
+    assertTrue(pool.knownMissing(url))
+    // Durable: a restarted process over the same volume trusts it too.
+    assertTrue(CatalogBlobPool(root, missingTtlMillis = ttl, clock = { now }).knownMissing(url))
+    // Scoped to its own key.
+    assertFalse(pool.knownMissing("$url.other"))
+    assertEquals(2, pool.snapshot().knownMissingHits)
+
+    now += ttl
+    assertFalse(pool.knownMissing(url), "an expired miss must be asked again")
+    assertFalse(pool.knownMissing(url), "and stays forgotten")
+  }
+
+  @Test
+  fun `a miss costs no bytes, and sweep and clear drop the markers`() {
+    var now = 1_000_000L
+    val ttl = 60_000L
+    val root = root()
+    val pool = CatalogBlobPool(root, missingTtlMillis = ttl, clock = { now })
+    pool.recordMissing("https://example.test/a")
+    assertEquals(0L, pool.sweep().bytes, "a remembered miss is not a blob")
+    assertTrue(pool.knownMissing("https://example.test/a"), "sweep keeps a live marker")
+
+    now += ttl
+    pool.sweep()
+    assertTrue(
+      File(root, CatalogBlobPool.MISSING_DIR).listFiles().orEmpty().isEmpty(),
+      "sweep reclaims an expired marker",
+    )
+
+    pool.recordMissing("https://example.test/b")
+    pool.clear()
+    assertFalse(pool.knownMissing("https://example.test/b"), "clear forgets every miss")
+  }
+
+  @Test
+  fun `a zero ttl turns the miss lane off`() {
+    val pool = CatalogBlobPool(root(), missingTtlMillis = 0)
+    pool.recordMissing("https://example.test/a")
+    assertFalse(pool.knownMissing("https://example.test/a"))
+  }
 }

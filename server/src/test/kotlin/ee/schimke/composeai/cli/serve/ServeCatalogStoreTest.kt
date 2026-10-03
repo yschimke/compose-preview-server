@@ -3364,6 +3364,59 @@ class ServeCatalogStoreTest {
   }
 
   @Test
+  fun `a pinned miss is not asked again on the next load, an un-pinned one is`() {
+    // A catalog declares far more than it publishes; the figma fill alone asks for a vector per
+    // preview. Only hits used to be cached, so every reload re-asked each question whose answer had
+    // been "no" — thousands per catalog. `history.json` stands in for those here: optional, read on
+    // every load, absent from this branch.
+    fun run(serveFeed: Boolean): Long {
+      val misses = java.util.concurrent.atomic.AtomicLong()
+      val json =
+        """
+        {"schema":"design-parity-catalog/v1","system":"compose-m3","components":[
+          {"componentId":"Button/Filled","images":[
+            {"path":"images/button-filled/ideal__default__dark.png","theme":"dark"}]}]}
+        """
+          .trimIndent()
+      val pool = CatalogBlobPool(tempRoot())
+      val fetch: (String) -> ByteArray? = { url ->
+        when {
+          serveFeed &&
+            url ==
+              ServeCatalogRevision.commitsFeedUrl(
+                "yschimke/compose-ai-tools",
+                "design-artifacts/compose-m3",
+              ) -> feed(COMMIT).encodeToByteArray()
+          url.endsWith("/${ServeCatalogStore.CATALOG_FILE}") -> json.toByteArray()
+          url.endsWith(".png") -> png()
+          url.endsWith("/${PreviewHistoryManifest.FILE_NAME}") -> {
+            misses.incrementAndGet()
+            null
+          }
+          else -> null
+        }
+      }
+      // Two stores over one pool: the second is a restarted process on the same volume.
+      repeat(2) {
+        val store =
+          ServeCatalogStore(
+            root = tempRoot(),
+            register = { n, h -> registered[n] = h },
+            trust = { trustedBranch },
+            fetch = fetch,
+            blobs = pool,
+          )
+        assertTrue(store.load("compose-m3") is ServeCatalogStore.Result.Ok)
+      }
+      return misses.get()
+    }
+
+    assertEquals(1, run(serveFeed = true), "a pinned miss must be remembered across a restart")
+    // Un-pinned addresses a moving branch ref: a file missing there now may be published next.
+    assertEquals(2, run(serveFeed = false), "an un-pinned miss must be asked every time")
+  }
+
+  @Test
   fun `an un-pinned load reads its manifests from the branch every time`() {
     // No feed ⇒ no delivery commit ⇒ the base is the branch ref, which is a moving target. Caching
     // under it would answer a regenerated branch with last week's bytes.
