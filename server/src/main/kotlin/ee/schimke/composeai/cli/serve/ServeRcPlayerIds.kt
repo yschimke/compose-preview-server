@@ -1,5 +1,6 @@
 package ee.schimke.composeai.cli.serve
 
+import ee.schimke.composeai.bundle.BundleReader
 import ee.schimke.composeai.daemon.protocol.PreviewOverrides
 import ee.schimke.composeai.daemon.protocol.RemoteComposePlayerKind
 
@@ -115,6 +116,94 @@ internal object ServeRcPlayerIds {
    */
   fun of(backend: RcPlayerBackend): String =
     backend.playerKind?.let(::ofKind) ?: normalizeRequest(backend.wire)
+
+  /**
+   * The order the viewer opens a Remote Compose preview on when no preference is configured:
+   * `androidx-embedded`, else `androidx-view`, else the client `camaelon-js` canvas. Why embedded
+   * leads is written at [defaultPlayer].
+   */
+  val DEFAULT_ORDER: List<String> = listOf(ANDROIDX_EMBEDDED, ANDROIDX_VIEW, CAMAELON_JS)
+
+  /**
+   * The player the viewer opens a Remote Compose preview on (`data-rc-default`), out of the
+   * [enabled] players this preview offers.
+   *
+   * [preferred] is the operator's choice (`serve --rc-default-player`), already normalised by
+   * [parsePreferredPlayer]. It wins **only when this preview enables it**: a preferred player the
+   * preview cannot run — `cmp-android` on a catalog whose bundle does not carry the CMP player, or
+   * any daemon lane while the daemon is absent — falls back through [DEFAULT_ORDER] exactly as an
+   * unset preference does, so naming a player can never open a page on a disabled option.
+   *
+   * Why the unconfigured default is the server-side `androidx-embedded` player: the payoff is the
+   * data tier rather than the pixels (#3936). `androidx-view` is `AndroidView { RemoteComposePlayer
+   * }`, so a whole document reaches Compose as one interop leaf: `compose/figma-svg` exports it as
+   * a single raster wearing an `.svg` extension, and the semantics tree describes a black box. The
+   * embedded player emits real Compose nodes, so the same document exports editable geometry and
+   * describes the card. The two lanes were measured over all 164 documents of the homeassistant
+   * catalog before this moved (`renders/rc-embedded-lane-ab/`): 34 byte-identical, and the residual
+   * is overwhelmingly text rasterization — Skia and the Android canvas hint glyphs differently,
+   * which no amount of player work removes. `?rcPlayer=androidx-view` still selects the old lane
+   * for anything that needs it.
+   *
+   * `cmp-android` (the CMP player, `rc-player-compose`, run by the daemon) is the intended next
+   * default, and making it one is a configuration change rather than a code change: set the
+   * preference, and every preview whose catalog can run it ([carriesCmpAndroidPlayer]) opens on it
+   * while the rest keep this order.
+   */
+  fun defaultPlayer(enabled: Collection<String>, preferred: String? = null): String {
+    if (preferred != null && preferred in enabled) return preferred
+    return DEFAULT_ORDER.firstOrNull { it in enabled } ?: enabled.firstOrNull().orEmpty()
+  }
+
+  /**
+   * The canonical id of a configured default player, or null for "no preference" — blank, or a
+   * value naming no player in [UNIVERSE] (reported through [onInvalid] rather than failing the
+   * server: an unknown preference costs only the configured default, never a page).
+   */
+  fun parsePreferredPlayer(raw: String?, onInvalid: (String) -> Unit = {}): String? {
+    val value = raw?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+    val id = normalizeRequest(value)
+    if (id in CANONICAL) return id
+    onInvalid(value)
+    return null
+  }
+
+  /** The Maven group of the CMP Remote Compose player (yschimke/rc-players). */
+  const val CMP_PLAYER_GROUP: String = "ee.schimke.composeai"
+
+  /**
+   * The CMP player's artifact. A Kotlin Multiplatform library, so an Android bundle's resolved
+   * classpath names its Android variant (`rc-player-compose-android`, as `material3-android` and
+   * every other KMP dependency appear there); the root coordinate is accepted too.
+   */
+  const val CMP_PLAYER_ARTIFACT: String = "rc-player-compose"
+
+  private val CMP_PLAYER_ARTIFACTS: Set<String> =
+    setOf(CMP_PLAYER_ARTIFACT, "$CMP_PLAYER_ARTIFACT-android")
+
+  /**
+   * Whether a bundle manifest's resolved [classpath] carries the CMP player, any version — the half
+   * of `cmp-android`'s capability the daemon cannot answer. The daemon registers the player id
+   * whatever it was launched with; whether the player's classes are actually loadable is a fact
+   * about the catalog's bundle, and without them a `cmp-android` render fails inside the daemon
+   * with a `RemoteComposeLinkageException` (`RcComposePlayerKt` class not found) rather than
+   * declining up front.
+   */
+  fun carriesCmpAndroidPlayer(classpath: List<BundleReader.ClasspathEntry>): Boolean =
+    classpath.any {
+      it is BundleReader.ClasspathEntry.Maven &&
+        it.group == CMP_PLAYER_GROUP &&
+        it.artifact in CMP_PLAYER_ARTIFACTS
+    }
+
+  /**
+   * [carriesCmpAndroidPlayer] for a bundle on disk. An unreadable bundle — or no manifest at all —
+   * answers false: the lane is offered only on positive evidence, never guessed.
+   */
+  fun bundleCarriesCmpAndroidPlayer(bundleFile: java.io.File): Boolean = runCatching {
+    carriesCmpAndroidPlayer(BundleReader.readMetadata(bundleFile).manifest.classpath)
+  }
+    .getOrDefault(false)
 
   /** Whether a `?rcPlayer=` value selects the desktop-JVM subprocess lane. */
   fun isCmpJvm(raw: String?): Boolean = raw != null && normalizeRequest(raw) == CMP_JVM

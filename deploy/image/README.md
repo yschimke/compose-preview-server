@@ -120,6 +120,14 @@ app or `SERVE_WASM_DIR` mapping (`system=/path`) takes precedence at the same UR
 path must exist inside the container. Old `/wasm/preview-ui/?session=<system>` links redirect to the
 catalog-scoped form.
 
+A Remote Compose preview opens on `androidx-embedded` where the daemon can render it, else
+`androidx-view`, else the in-browser `camaelon-js` canvas. `SERVE_RC_DEFAULT_PLAYER` (`serve
+--rc-default-player`) names a player to prefer instead — for example `cmp-android`, the CMP player
+the Android daemon runs — and a preview that does not enable that player keeps the built-in order.
+`cmp-android` is enabled only for a catalog whose live bundle lists
+`ee.schimke.composeai:rc-player-compose` on its classpath; elsewhere the viewer shows it disabled.
+Unset by default.
+
 The Compose UI builder's Jetcaster benchmark preview is packaged alongside that browser and served
 at `/ui-builder/`, with explicitly enabled catalog instances at `/ui-builder/<catalog>/`. The
 packaged preview deployment enables `m3-catalog` only; name more in the selective allowlist

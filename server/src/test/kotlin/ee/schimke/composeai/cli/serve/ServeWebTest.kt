@@ -1398,6 +1398,41 @@ class ServeWebTest {
   }
 
   @Test
+  fun `a configured default player opens the viewer on it only where the preview enables it`() {
+    val preview = ServePreview(id = "widget.Chip", label = "chip")
+    fun page(enabled: List<String>, preferred: String?) =
+      ServeWeb.viewerPage(
+        preview,
+        token = "t",
+        basePath = "/remote-m3",
+        siblings = listOf(preview),
+        hasRemoteComposeDoc = true,
+        enabledRcPlayers = enabled,
+        preferredRcPlayer = preferred,
+      )
+    val withCmpAndroid = listOf("camaelon-js", "androidx-view", "androidx-embedded", "cmp-android")
+
+    // Unset: unchanged, even where cmp-android is offered.
+    assertTrue(page(withCmpAndroid, null).contains("data-rc-default=\"androidx-embedded\""))
+    // Set and enabled: the page opens on it — the lane value, the attribute and the chip agree.
+    val preferred = page(withCmpAndroid, "cmp-android")
+    assertTrue(preferred.contains("data-rc-default=\"cmp-android\""), preferred)
+    assertTrue(preferred.contains("data-default=\"rc:cmp-android\""), preferred)
+    assertTrue(
+      preferred.contains("<span id=\"cp-live-toggle-label\">CMP Android</span>"),
+      "the chip names the lane it opens on",
+    )
+    val option = Regex("<option value=\"rc:cmp-android\"[^>]*>").find(preferred)?.value ?: ""
+    assertFalse(option.contains(" disabled"), "cmp-android is offered: '$option'")
+    // Set but not enabled for this preview: the built-in order, never a disabled option.
+    val fallback = page(withCmpAndroid - "cmp-android", "cmp-android")
+    assertTrue(fallback.contains("data-rc-default=\"androidx-embedded\""), fallback)
+    assertTrue(
+      page(listOf("camaelon-js"), "cmp-android").contains("data-rc-default=\"camaelon-js\"")
+    )
+  }
+
+  @Test
   fun `a js-only host disables the server-side player options and offers no comparison`() {
     // A static bundle carries the `.rc` doc (camaelon-js works client-side) but has no daemon, so
     // the server-side androidx-* / cmp-android lanes are disabled alongside the never-available

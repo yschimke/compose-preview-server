@@ -173,6 +173,11 @@ services:
       # `source` but no bundle): setting it makes the entrypoint clone that repo and pay a one-time
       # cold Gradle build at startup. Not needed for the published catalogs — leave it unset.
       SERVE_ALLOW_RENDER_TRUSTED: "${SERVE_ALLOW_RENDER_TRUSTED:-}"
+      # The Remote Compose player the viewer opens on (`serve --rc-default-player`), honoured only on
+      # a preview that enables it — `cmp-android` needs a live daemon AND a catalog bundle carrying
+      # rc-player-compose — and otherwise falling back to the built-in order. Empty ⇒ that order:
+      # androidx-embedded, then androidx-view, then camaelon-js.
+      SERVE_RC_DEFAULT_PLAYER: "${SERVE_RC_DEFAULT_PLAYER:-}"
       SERVE_REVISIONS_ALLOW: "${SERVE_REVISIONS_ALLOW:-}"
       SERVE_CATALOG_SOURCE_REPO: "${SERVE_CATALOG_SOURCE_REPO:-}"
       SERVE_CATALOG_SOURCE_REF: "${SERVE_CATALOG_SOURCE_REF:-}"

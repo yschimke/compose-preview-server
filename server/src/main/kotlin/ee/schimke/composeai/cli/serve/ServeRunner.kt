@@ -242,6 +242,44 @@ public class ServeRunner(
     java.util.concurrent.ConcurrentHashMap<String, List<CatalogLiveBundle>>()
 
   /**
+   * Which daemon-preview ids of a live catalog can run the `cmp-android` player, keyed by the
+   * session state's descriptor — the one key [openHost] has, since [ServeSessionState] is
+   * compose-ai-tools' and carries no field for it. Filled when a catalog's live bundle is
+   * materialised, from that bundle's manifest ([ServeRcPlayerIds.bundleCarriesCmpAndroidPlayer]); a
+   * state with no entry (a source build, a plain project) never offers the lane. Keyed by
+   * descriptor rather than by system so a suspended session resumes with the answer it had.
+   */
+  private val cmpAndroidPlayerByDescriptor =
+    java.util.concurrent.ConcurrentHashMap<String, (String) -> Boolean>()
+
+  /** The descriptor key each system last PUBLISHED with, so a refresh retires its predecessor. */
+  private val cmpAndroidPlayerKeyBySystem = java.util.concurrent.ConcurrentHashMap<String, String>()
+
+  /** Record before [openHost] reads it; [commitCmpAndroidPlayer] once the generation is live. */
+  private fun recordCmpAndroidPlayer(
+    descriptor: File,
+    carriesPlayer: (daemonId: String) -> Boolean,
+  ) {
+    cmpAndroidPlayerByDescriptor[descriptor.absolutePath] = carriesPlayer
+  }
+
+  /**
+   * Retire the previous generation's entry only after this one published: until then the old
+   * session is the one serving, and it may still suspend and reopen from its own descriptor.
+   */
+  private fun commitCmpAndroidPlayer(system: String, descriptor: File) {
+    val key = descriptor.absolutePath
+    cmpAndroidPlayerKeyBySystem
+      .put(system, key)
+      ?.takeIf { it != key }
+      ?.let { cmpAndroidPlayerByDescriptor.remove(it) }
+  }
+
+  private fun forgetCmpAndroidPlayer(system: String) {
+    cmpAndroidPlayerKeyBySystem.remove(system)?.let { cmpAndroidPlayerByDescriptor.remove(it) }
+  }
+
+  /**
    * A served catalog's verified liveBundle, as the playground sees it: where the bytes landed and
    * which renderer they declare. [backend] is read once at load time (it costs one bundle-metadata
    * read, off the request path) because the runtime catalog selector needs it to decide which modes
@@ -1499,6 +1537,8 @@ public class ServeRunner(
           // (~1.2 GB apiece) and was the one holder that never asked for a permit.
           liveSeats = liveSeatLimiter,
           residencySeatWeight = { state.liveSeatWeight },
+          cmpAndroidPlayerFor =
+            cmpAndroidPlayerByDescriptor[state.descriptor.absolutePath] ?: { false },
         )
         // Warm the daemon off the request path so the first browse already gets the per-variant
         // SVG lane instead of the baked fallback — critical for a slow-cold-starting Android
@@ -3688,6 +3728,7 @@ public class ServeRunner(
         },
         privateWasmCatalogs = privateWasmCatalogs,
         rcPlayerWasmDir = rcPlayerWasmDir,
+        preferredRcPlayer = rcDefaultPlayer,
         // Preserve the CONFIGURED set, not only startup successes. Failed rows then stay visible on
         // /status, and a catalog recovered by the refresher appears on the home index immediately.
         catalogSessions = configuredCatalogs,
@@ -4612,6 +4653,7 @@ public class ServeRunner(
       registry.unregister(system)
       catalogPerPreviewPools.remove(system)?.let { runCatching { it.close() } }
       catalogLiveBundles.remove(system)
+      forgetCmpAndroidPlayer(system)
       registeredCatalogs.remove(system)
       registeredUnlistedCatalogs.remove(system)
       // Never drop a local `--wasm-dir` the operator configured; it isn't the catalog's to remove.
@@ -4789,6 +4831,9 @@ public class ServeRunner(
     // Now that the backend is known, the pool's daemons charge this catalog's real weight — an
     // Android/Robolectric per-preview daemon is not the same cost to the box as a desktop one.
     perPreviewSeatWeight = state.liveSeatWeight
+    // Whether this bundle can run the CMP player is a fact about its classpath, read once here.
+    val carriesCmpPlayer = ServeRcPlayerIds.bundleCarriesCmpAndroidPlayer(bundleFile)
+    recordCmpAndroidPlayer(state.descriptor) { carriesCmpPlayer }
     val host =
       openHost(state)
         ?: run {
@@ -4805,6 +4850,7 @@ public class ServeRunner(
       liveLaneLaunchLog.record(system, "the live host could not be published for this catalog")
       return false
     }
+    commitCmpAndroidPlayer(system, state.descriptor)
     // Up: drop anything the attempt recorded so a later failure can never report a stale line, and
     // an informational one (the Skiko pairing repair) is never mistaken for a failure at all.
     liveLaneLaunchLog.clear(system)
@@ -4964,6 +5010,11 @@ public class ServeRunner(
           }
           .toMap()
       val alias = opened.flatMap { it.published.alias.entries }.associate { it.toPair() }
+      // Per module: each daemon id runs on its own module's bundle, so each answers for itself.
+      val cmpPlayerDaemonIds =
+        opened
+          .filter { ServeRcPlayerIds.bundleCarriesCmpAndroidPlayer(it.published.file) }
+          .flatMapTo(HashSet()) { it.published.alias.values }
       val resolver: (String) -> ServeHost? = { daemonId ->
         val runtime = ownerByDaemonId[daemonId]
         when {
@@ -5005,6 +5056,7 @@ public class ServeRunner(
           serverIdleMillis = backgroundWork.idleClock(registry::idleMillis),
           backgroundWork = backgroundWork,
         )
+      recordCmpAndroidPlayer(state.descriptor) { it in cmpPlayerDaemonIds }
       val host =
         openHost(state)
           ?: run {
@@ -5024,6 +5076,7 @@ public class ServeRunner(
         liveLaneLaunchLog.record(system, "the live host could not be published for this catalog")
         return false
       }
+      commitCmpAndroidPlayer(system, state.descriptor)
       liveLaneLaunchLog.clear(system)
       System.err.println(
         "serve: catalog $system → LIVE from ${opened.size} module bundles (no build) (?session=$system)"

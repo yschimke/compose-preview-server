@@ -309,6 +309,68 @@ class ServeCatalogLiveHostTest {
 
   private val brandTheme = ServeTheme("Brand Dark", "com.example.BrandDark")
 
+  /**
+   * A Remote Compose catalog: the baked host carries the `.rc` doc for both ids, the live daemon
+   * honours the player override when [selectable].
+   */
+  private fun rcComposite(
+    selectable: Boolean = true,
+    cmpAndroidPlayerFor: (String) -> Boolean = { false },
+  ): ServeCatalogLiveHost {
+    val bakedDelegate =
+      RecordingHost(
+        previews =
+          listOf(ServePreview(catalogId, catalogId), ServePreview(androidOnlyId, androidOnlyId)),
+        tag = "baked",
+      )
+    val baked =
+      object : ServeHost by bakedDelegate {
+        override fun remoteComposeDoc(previewId: String): ByteArray = byteArrayOf(1)
+      }
+    val liveDelegate =
+      RecordingHost(previews = listOf(ServePreview(daemonId, daemonId)), tag = "live")
+    val live =
+      object : ServeHost by liveDelegate {
+        override val remoteComposePlayerSelectable: Boolean = selectable
+      }
+    return ServeCatalogLiveHost(
+      alias = mapOf(catalogId to daemonId),
+      live = live,
+      baked = baked,
+      cmpAndroidPlayerFor = cmpAndroidPlayerFor,
+    )
+  }
+
+  @Test
+  fun `cmp-android is offered only when the catalog bundle carries the CMP player`() {
+    // Without the player on the bundle's classpath the AndroidX pair is offered and cmp-android is
+    // not — the existing behaviour, and what every host with no manifest gets by default.
+    val without = rcComposite().enabledRcPlayersFor(catalogId)
+    assertTrue(RcPlayerBackend.ANDROIDX_EMBEDDED in without, "$without")
+    assertFalse(RcPlayerBackend.CMP_ANDROID in without, "$without")
+
+    // With it, cmp-android joins — asked about the DAEMON id the alias maps to.
+    val asked = mutableListOf<String>()
+    val with =
+      rcComposite(
+        cmpAndroidPlayerFor = {
+          asked += it
+          true
+        }
+      )
+    assertTrue(RcPlayerBackend.CMP_ANDROID in with.enabledRcPlayersFor(catalogId))
+    assertEquals(listOf(daemonId), asked)
+
+    // …but only through the AndroidX pair's own gate: an unaliased preview has no daemon twin, and
+    // a daemon that does not honour the player override cannot be pointed at the CMP player either.
+    assertFalse(RcPlayerBackend.CMP_ANDROID in with.enabledRcPlayersFor(androidOnlyId))
+    assertFalse(
+      RcPlayerBackend.CMP_ANDROID in
+        rcComposite(selectable = false, cmpAndroidPlayerFor = { true })
+          .enabledRcPlayersFor(catalogId)
+    )
+  }
+
   @Test
   fun `canRenderOverridesFor is true only for aliased previews`() {
     val (composite, _, _) = host()
