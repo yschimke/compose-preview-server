@@ -1657,8 +1657,8 @@ class ServeBundleHost(
     // that waits is a card drawn at the wrong size) but do NOT memoise it, or the vector would
     // never be reconsidered until the host is rebuilt. Only a decision made against files that are
     // actually present is cached — the same rule the guard above states.
-    if (svgOutstanding) return if (gutter == null) null else computeContentCrop(previewId, gutter)
-    val computed = java.util.Optional.ofNullable(computeContentCrop(previewId, gutter))
+    if (svgOutstanding) return if (gutter == null) null else sharedContentCrop(previewId, gutter)
+    val computed = java.util.Optional.ofNullable(sharedContentCrop(previewId, gutter))
     cropCache[previewId] = computed
     return computed.orElse(null)
   }
@@ -1703,6 +1703,48 @@ class ServeBundleHost(
 
   private val cropCache =
     java.util.concurrent.ConcurrentHashMap<String, java.util.Optional<ContentCrop>>()
+
+  /**
+   * [computeContentCrop], memoised across every host over the same files.
+   *
+   * [cropCache] lives and dies with this host, and a catalog's host is rebuilt every time the
+   * registry resumes it — which, on a box under memory pressure, is most visits. Each rebuild then
+   * decoded every card's PNG again on the landing's request thread to find its alpha bounds: four
+   * seconds of a cold `/jetsnack/` on preview.coo.ee. The answer depends only on the files, and a
+   * rebuilt host reads the same generation directory, so it is keyed by those files' identity
+   * (path, size, modification time) and the gutter — a file that changes is a different key.
+   */
+  private fun sharedContentCrop(
+    previewId: String,
+    gutter: ServeCatalogStore.CaptureGutterPx?,
+  ): ContentCrop? {
+    val png = localBakedPng(previewId) ?: return null
+    val svg = figmaSvgFileFor(previewId)
+    val key =
+      runCatching {
+        val pngMeta = fileSystem.metadata(png)
+        val svgMeta = svg?.let(fileSystem::metadata)
+        SharedCropKey(
+          png.toString(),
+          pngMeta.size,
+          pngMeta.lastModifiedAtMillis,
+          svg?.toString(),
+          svgMeta?.size,
+          svgMeta?.lastModifiedAtMillis,
+          gutter,
+        )
+      }
+        .getOrNull() ?: return computeContentCrop(previewId, gutter)
+    sharedCrops[key]?.let {
+      return it.orElse(null)
+    }
+    val computed = java.util.Optional.ofNullable(computeContentCrop(previewId, gutter))
+    // Bounded crudely: a crop is a few longs, so the cap is about memory only in the pathological
+    // case, and a wholesale clear costs one recompute per card — what every rebuild paid before.
+    if (sharedCrops.size >= MAX_SHARED_CROPS) sharedCrops.clear()
+    sharedCrops[key] = computed
+    return computed.orElse(null)
+  }
 
   private fun computeContentCrop(
     previewId: String,
@@ -1768,6 +1810,22 @@ class ServeBundleHost(
   }
 
   companion object {
+    /** Identity of the files a [ContentCrop] was computed from. See [sharedContentCrop]. */
+    private data class SharedCropKey(
+      val png: String,
+      val pngSize: Long?,
+      val pngModified: Long?,
+      val svg: String?,
+      val svgSize: Long?,
+      val svgModified: Long?,
+      val gutter: ServeCatalogStore.CaptureGutterPx?,
+    )
+
+    private const val MAX_SHARED_CROPS = 100_000
+
+    private val sharedCrops =
+      java.util.concurrent.ConcurrentHashMap<SharedCropKey, java.util.Optional<ContentCrop>>()
+
     private const val PREVIEWS_SUBDIR = "previews"
     private const val PNG_SUFFIX = ".png"
     private const val SPATIAL_SUFFIX = ".spatial"
