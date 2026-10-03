@@ -38,7 +38,8 @@ import kotlinx.serialization.json.put
  *   project's own `RemoteSticker` wrapper, two records for the whole module). When this was written
  *   not one of them could be EXPORTED, so calling them a gain would have been wrong; twenty-two of
  *   twenty-six now can, and the four that cannot are named below with the reason;
- * - it **loses** three, and it lost five until the two that mattered most came back.
+ * - it **loses** two — three until the frozen side dropped `m3/surface` — and it lost more until
+ *   the two that mattered most came back.
  *
  * The loss is a blocker, and nothing else states it. `ProductionUiBuilderRuntime`'s donor unions in
  * `layout/`, `shape/`, `asset/` and `remote-compose/` and nothing else — deliberately, because
@@ -57,10 +58,11 @@ import kotlinx.serialization.json.put
  * policy schema forbids, dropped its slot policy, and hardcoded its traits to empty. Three defects
  * on a seam no catalog had ever crossed.
  *
- * **The other three are not losses**, which took asking the person who owns the catalog:
- * - `m3/surface` — there is no Surface in Remote Compose or Wear Material 3. The synthesised shelf
- *   borrowing one from the m3 catalog was the mistake, and the emitter already tells an author to
- *   reach for a `layout/box` with `background` and `clip` instead.
+ * **The other two are not losses**, which took asking the person who owns the catalog. A third,
+ * `m3/surface`, was on this list until the synthesised shelf stopped borrowing it
+ * (yschimke/compose-ui-builder#81): there is no Surface in Remote Compose or Wear Material 3, and the
+ * emitter tells an author to reach for a `layout/box` with `background` and `clip` instead. The
+ * frozen catalog no longer offers it, so there is nothing left for the published one to lose.
  * - `m3/text` — **is** `RemoteText`, published here as `remote-m3/remote-text`. The component is
  *   not missing; the id a design stores changes.
  * - `remote-m3/lottie` — the catalog draws no Lottie sticker at all, so there is nothing here to
@@ -113,7 +115,7 @@ class PublishedRemoteM3CatalogEquivalenceTest {
     get() = result.records
 
   /**
-   * The three the published catalog cannot offer, and why each one.
+   * The ones the published catalog cannot offer, and why each one.
    *
    * Asserted ABSENT rather than skipped, and with the reason spelled out, because a gap nothing
    * states is a gap that stops being noticed. If one starts composing this test fails and says to
@@ -127,14 +129,8 @@ class PublishedRemoteM3CatalogEquivalenceTest {
           "synthesised shelf because the server builds one from `asset/image` and the emitter " +
           "can write Horologist's `LottieAnimation`. Publishing it means the catalog drawing " +
           "one, on a shelf it would have to declare",
-      "m3/surface" to
-        "NOT a loss: there is no Surface in Remote Compose or Wear Material 3, so a Remote " +
-          "design never had one to place. The synthesised shelf borrowed it from the m3 catalog, " +
-          "which was the mistake — a coloured, rounded container in a widget body is a " +
-          "`layout/box` with `background` and `clip`, which is exactly what the emitter already " +
-          "tells an author who tries",
       "m3/text" to
-        "NOT a loss either, and not the same thing as `m3/surface`: `m3/text` IS `RemoteText` in " +
+        "NOT a loss: `m3/text` IS `RemoteText` in " +
           "remote-material3, and this catalog publishes it under its own id, " +
           "`remote-m3/remote-text`. What the swap changes is the id a design stores, not whether " +
           "the component is there — and the emitter has written `m3/text` as `RemoteText` all " +
