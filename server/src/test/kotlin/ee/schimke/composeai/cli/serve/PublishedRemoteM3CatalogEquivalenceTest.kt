@@ -60,8 +60,8 @@ import kotlinx.serialization.json.put
  *
  * **The other two are not losses**, which took asking the person who owns the catalog. A third,
  * `m3/surface`, was on this list until the synthesised shelf stopped borrowing it
- * (yschimke/compose-ui-builder#81): there is no Surface in Remote Compose or Wear Material 3, and the
- * emitter tells an author to reach for a `layout/box` with `background` and `clip` instead. The
+ * (yschimke/compose-ui-builder#81): there is no Surface in Remote Compose or Wear Material 3, and
+ * the emitter tells an author to reach for a `layout/box` with `background` and `clip` instead. The
  * frozen catalog no longer offers it, so there is nothing left for the published one to lose.
  * - `m3/text` — **is** `RemoteText`, published here as `remote-m3/remote-text`. The component is
  *   not missing; the id a design stores changes.
@@ -186,9 +186,12 @@ class PublishedRemoteM3CatalogEquivalenceTest {
         "remote-m3/remote-title-card",
         "remote-m3/remote-vertical-page-indicator",
         "remote-m3/theme-specimen",
-        // Not records: the two host frames the policy declares as builtins, because the Glance
-        // Wear container is a host frame rather than a `remote-material3` component and nothing
-        // calls it. Everything above is a record component.
+        // Not records: the host frames the policy declares as builtins, because the Glance Wear
+        // container is a host frame rather than a `remote-material3` component and nothing calls
+        // it. Everything above is a record component. `widget-container-adaptive` is the
+        // experimental third, declared in remote-m3-catalog's policy: authored as headline /
+        // supporting / action slots and resolved to Small or Large before anything renders.
+        "remote-m3/widget-container-adaptive",
         "remote-m3/widget-container-large",
         "remote-m3/widget-container-small",
       ),
@@ -231,8 +234,12 @@ class PublishedRemoteM3CatalogEquivalenceTest {
         }
         .keys
         .sorted()
+    // `capturing-wear-widget-preview` used to be the second entry. The catalog now uses the
+    // RELEASED `CapturingWearWidgetPreview` (wear-m3-catalog#613) rather than its own copy, so the
+    // wrapper is no longer a symbol of this module and drops out of the record entirely — which is
+    // a stronger exclusion than a stated reason, not a weaker one.
     assertEquals(
-      listOf("remote-m3/capturing-wear-widget-preview", "remote-m3/remote-sticker"),
+      listOf("remote-m3/remote-sticker"),
       excluded,
       "the set of components the catalog excludes has changed",
     )
@@ -303,7 +310,7 @@ class PublishedRemoteM3CatalogEquivalenceTest {
       }
     }
     assertEquals(
-      emptyList(),
+      REVIEWED_CONTAINER_DIFFERENCES.sorted(),
       differences.sorted(),
       "a restored container differs from the frozen one in a way nobody has reviewed",
     )
@@ -543,7 +550,8 @@ class PublishedRemoteM3CatalogEquivalenceTest {
         "RemoteBoolean" to 6,
         "RemoteFloat" to 5,
         "RemotePageIndicatorState" to 2,
-        "ImageVector" to 1,
+        // `RemoteImageVector`: what the current record names RemoteIcon's parameter type.
+        "RemoteImageVector" to 1,
         "RemoteString" to 1,
         // Not a type at all — one callable this catalog cannot call from a generated file.
         "not public or internal, so a generated file cannot call it" to 1,
@@ -763,6 +771,25 @@ class PublishedRemoteM3CatalogEquivalenceTest {
 
   private companion object {
     /**
+     * The container differences that are reviewed rather than open, one line per container.
+     *
+     * The frozen shelf narrows the content slot to `RemoteAuthorable`
+     * (yschimke/compose-ui-builder #81), a trait the synthesised catalog stamps on every component
+     * a Remote widget can hold. The published catalog cannot say that: traits reach it from the
+     * discovery RECORD, not from the policy, and no record component carries `RemoteAuthorable` —
+     * so a published content slot narrowed to it would accept none of the catalog's own components.
+     * `AnyContent` is the correct published value until the record can carry the trait. What it
+     * gives up: the slot no longer refuses a donated `layout/`, `shape/`, `asset/` or
+     * `remote-compose/` component the frozen shelf does not mark Remote-authorable. Delete a line
+     * here when the published side carries the trait.
+     */
+    val REVIEWED_CONTAINER_DIFFERENCES =
+      listOf("small", "large").map {
+        "remote-m3/widget-container-$it.slots[content].acceptedTraits: " +
+          "frozen=[RemoteAuthorable] composed=[AnyContent]"
+      }
+
+    /**
      * The four published components the widget exporter cannot write, and why each one.
      *
      * Twenty-three of the twenty-seven do, which is the number this test exists to keep honest —
@@ -776,7 +803,7 @@ class PublishedRemoteM3CatalogEquivalenceTest {
      * The other three are a required parameter whose TYPE no design value becomes, and none is a
      * mapping the emitter could add without the design model growing a way to say it: the page
      * indicators want a `RemotePageIndicatorState`, a runtime object rather than a value, and the
-     * icon an `ImageVector`, which a design carries as an asset key.
+     * icon a `RemoteImageVector`, which a design carries as an asset key.
      */
     val EXPORT_REFUSALS =
       mapOf(
@@ -784,8 +811,8 @@ class PublishedRemoteM3CatalogEquivalenceTest {
           "`state: RemotePageIndicatorState` and the design carries no value this generator can " +
             "write as one",
         "remote-m3/remote-icon" to
-          "`imageVector: ImageVector` and the design carries no value this generator can write " +
-            "as one",
+          "`imageVector: RemoteImageVector` and the design carries no value this generator can " +
+            "write as one",
         "remote-m3/remote-vertical-page-indicator" to
           "`state: RemotePageIndicatorState` and the design carries no value this generator can " +
             "write as one",

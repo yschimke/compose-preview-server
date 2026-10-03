@@ -1,5 +1,5 @@
 {
-  "$comment": "GENERATED, unlike its m3 sibling — captured verbatim from the `design-artifacts/remote-m3` delivery branch of yschimke/wear-m3-catalog at 9047edfce, which `composePreviewDiscover` wrote from wear-m3-catalog 540893ab (the merge of wear-m3-catalog#485). That is the pair the cutover actually uses, so this fixture answers the question the hand-built m3 one cannot: can the catalog produce a usable published file. Regenerate the same way — take the delivery branch's `ui-builder.json` and re-add this key — whenever remote-catalog gains or loses a component, or its policy changes what a component declares.\n\n28 record components and a 26-entry menu. The two differ by the two components the catalog EXCLUDES: `remote-m3/remote-sticker`, its own preview frame, and `remote-m3/capturing-wear-widget-preview`, a `private` capture wrapper that hands the widget's encoded document to `IrSidecarChannel` so a render lands a `.rc` sidecar. Both stay in the record carrying their `excluded` reason — that is what the schema means by \"kept off the shelf, with the stated reason\" — and neither is offered for insertion.\n\nThe capture wrapper is why this capture exists rather than the previous one. It was published on the `Widget Container` shelf until wear-m3-catalog#485 excluded it, and against the earlier 27-component fixture the equivalence gate scored 0/0/0/0 while the LIVE document had one unreviewed field — a gate green against a document that no longer existed. Re-capture after a republish rather than trusting a green run against a stale fixture.",
+  "$comment": "GENERATED, unlike its m3 sibling — captured verbatim from the `design-artifacts/remote-m3` delivery branch of yschimke/remote-m3-catalog-out at 52ed103, which `composePreviewDiscover` wrote from yschimke/remote-m3-catalog 4f6f808d (remote-m3 moved out of wear-m3-catalog into its own repository). remote-m3-record-v1.json is the same branch's `components.json`. That is the pair the cutover actually uses, so this fixture answers the question the hand-built m3 one cannot: can the catalog produce a usable published file. Regenerate the same way — take the delivery branch's `ui-builder.json` and re-add this key — whenever remote-catalog gains or loses a component, or its policy changes what a component declares.\n\n27 record components and a 26-entry menu, plus three builtins (the Small, Large and experimental Adaptive widget containers). The record and the menu differ by the one component the catalog EXCLUDES: `remote-m3/remote-sticker`, its own preview frame, which stays in the record carrying its `excluded` reason — that is what the schema means by \"kept off the shelf, with the stated reason\". The capture wrapper that used to be the second exclusion is gone from the record altogether: the catalog now uses the released `CapturingWearWidgetPreview` rather than its own copy.\n\nRe-capture after a republish rather than trusting a green run against a stale fixture: against an earlier capture the equivalence gate once scored 0/0/0/0 while the LIVE document had an unreviewed field.",
   "schema": "compose-ui-builder-catalog/v1",
   "catalog": {
     "id": "remote-m3",
@@ -12,7 +12,7 @@
   "record": {
     "file": "components.json",
     "schemaVersion": 2,
-    "components": 28
+    "components": 27
   },
   "statusSemantics": {
     "platform": "remote-compose",
@@ -21,7 +21,7 @@
     "previewSurfaces": {
       "wasm": {
         "fidelity": "approximate",
-        "reason": "A Remote Compose document is played, not composed. The builder's Wasm canvas has no player, so it draws the widget host frame and placeholders inside it; what the player would draw is a different picture, produced by a different program from the same document."
+        "reason": "The selectable Visual Editor draws Wear Compose CMP stand-ins. The read-only Browser Preview is a separate DEVICE surface: CMP Remote M3 records a real .rc document in Wasm and the pinned CMP RcComposePlayer plays it in each selected host frame. Approximate describes authoring only, never the Browser Preview."
       },
       "native": {
         "fidelity": "authoritative",
@@ -29,6 +29,7 @@
         "reason": "The generated creation-DSL Kotlin compiled against this module's own alpha Remote Compose trio and rasterised by the real player — the same lane that produces every sticker in this catalog."
       }
     },
+    "browserPreview": null,
     "componentMenu": {
       "groupOrder": [
         "Widget Container",
@@ -151,7 +152,13 @@
       }
     },
     "code": null,
-    "templates": [],
+    "composeSourceExport": null,
+    "templates": [
+      "ui-builder/designs/wear-widget-small.json",
+      "ui-builder/designs/wear-widget-large.json",
+      "ui-builder/designs/hello-widget.json",
+      "ui-builder/designs/weather-widget.json"
+    ],
     "colorTokens": {
       "$comment": "The theme roles a colour property may name. Same Material 3 vocabulary as the sibling :catalog, and stated here for the same reason: a Remote design names roles, and a role the canvas cannot resolve is a literal. Every sticker in this catalog is a RemoteDocument carrying explicit dark-first Material colours, so the values behind these names are the document's rather than a theme's — but the names are what a design writes.",
       "roles": [
@@ -172,12 +179,14 @@
       ]
     },
     "assetRegistry": null,
+    "supersedes": null,
     "builtins": {
       "remote-m3/widget-container-small": {
         "role": "screen-root",
         "displayName": "Wear widget · Small (216×76dp)",
         "group": "Widget Container",
         "canvas": "widget-container",
+        "unrolled": null,
         "traits": [
           "ScreenContent",
           "WearWidgetHost",
@@ -210,34 +219,72 @@
             "name": "background",
             "jsonType": "string",
             "required": false,
-            "notes": "The widget's own background, painted by the host as the rounded rect. Defaults to #FF272430, the colour WearWidgetContainer applies to a widget that declares none."
+            "notes": "The widget's own background, painted by the host inside the frame it draws. Defaults to #FF272430, the colour WearWidgetContainer applies to a widget that declares none. Padding and corner radius are not properties: WearWidgetParams hands them to the widget per host shape (0 rectangular, 26 squircle, 999 round), so the outermost box never authors a radius."
           },
           {
-            "name": "horizontalPaddingDp",
-            "jsonType": "number",
+            "name": "themeDisplayTypeface",
+            "jsonType": "string",
             "required": false,
-            "notes": "WearWidgetParams.horizontalPaddingDp; 8 in every shipped preview spec."
+            "notes": "The font family for the display roles (displayLarge, displayMedium, displaySmall, numeralExtraLarge, numeralLarge, numeralMedium, numeralSmall, numeralExtraSmall) of everything this theme host contains. A family name: one of the editor's vendored faces or any Google Fonts family (\"Space Grotesk\", \"Michroma\"); a `google:` prefix is accepted. Generated code sets it as a `GoogleFont` family on the theme's typography. Unset keeps the platform's own face for these roles."
           },
           {
-            "name": "verticalPaddingDp",
-            "jsonType": "number",
+            "name": "themeTitleTypeface",
+            "jsonType": "string",
             "required": false,
-            "notes": "WearWidgetParams.verticalPaddingDp; 8 in every shipped preview spec."
+            "notes": "The font family for the title roles (titleLarge, titleMedium, titleSmall) of everything this theme host contains. A family name: one of the editor's vendored faces or any Google Fonts family (\"Space Grotesk\", \"Michroma\"); a `google:` prefix is accepted. Generated code sets it as a `GoogleFont` family on the theme's typography. Unset keeps the platform's own face for these roles."
           },
           {
-            "name": "cornerRadiusDp",
-            "jsonType": "number",
+            "name": "themeBodyTypeface",
+            "jsonType": "string",
             "required": false,
-            "notes": "WearWidgetParams.cornerRadiusDp: 26 squircle, 999 round, 0 rectangular. The host draws this radius behind the content rather than clipping to it."
+            "notes": "The font family for the body roles (bodyLarge, bodyMedium, bodySmall, bodyExtraSmall) of everything this theme host contains. A family name: one of the editor's vendored faces or any Google Fonts family (\"Space Grotesk\", \"Michroma\"); a `google:` prefix is accepted. Generated code sets it as a `GoogleFont` family on the theme's typography. Unset keeps the platform's own face for these roles."
+          },
+          {
+            "name": "themeLabelTypeface",
+            "jsonType": "string",
+            "required": false,
+            "notes": "The font family for the label roles (labelLarge, labelMedium, labelSmall) of everything this theme host contains. A family name: one of the editor's vendored faces or any Google Fonts family (\"Space Grotesk\", \"Michroma\"); a `google:` prefix is accepted. Generated code sets it as a `GoogleFont` family on the theme's typography. Unset keeps the platform's own face for these roles."
+          },
+          {
+            "name": "themeTextStyle",
+            "jsonType": "string",
+            "required": false,
+            "allowedValues": [
+              "displayLarge",
+              "displayMedium",
+              "displaySmall",
+              "titleLarge",
+              "titleMedium",
+              "titleSmall",
+              "labelLarge",
+              "labelMedium",
+              "labelSmall",
+              "bodyLarge",
+              "bodyMedium",
+              "bodySmall",
+              "bodyExtraSmall",
+              "numeralExtraLarge",
+              "numeralLarge",
+              "numeralMedium",
+              "numeralSmall",
+              "numeralExtraSmall"
+            ],
+            "notes": "The type role a text with no `style` of its own is set in, for everything this theme host contains — and with it that role's size and typeface. Both themes default to `bodyLarge`; choose `labelMedium` for a design whose plain text is mostly labels, or a display role for one that is mostly figures. Generated code provides it as `ProvideTextStyle(MaterialTheme.typography.<role>)` inside the theme."
           }
         ],
-        "modifierCapabilities": []
+        "modifierCapabilities": [],
+        "implementation": null,
+        "shelfRole": null,
+        "wasm": null,
+        "code": null,
+        "svg": null
       },
       "remote-m3/widget-container-large": {
         "role": "screen-root",
         "displayName": "Wear widget · Large (216×124dp)",
         "group": "Widget Container",
         "canvas": "widget-container",
+        "unrolled": null,
         "traits": [
           "ScreenContent",
           "WearWidgetHost",
@@ -270,28 +317,182 @@
             "name": "background",
             "jsonType": "string",
             "required": false,
-            "notes": "The widget's own background, painted by the host as the rounded rect. Defaults to #FF272430, the colour WearWidgetContainer applies to a widget that declares none."
+            "notes": "The widget's own background, painted by the host inside the frame it draws. Defaults to #FF272430, the colour WearWidgetContainer applies to a widget that declares none. Padding and corner radius are not properties: WearWidgetParams hands them to the widget per host shape (0 rectangular, 26 squircle, 999 round), so the outermost box never authors a radius."
           },
           {
-            "name": "horizontalPaddingDp",
-            "jsonType": "number",
+            "name": "themeDisplayTypeface",
+            "jsonType": "string",
             "required": false,
-            "notes": "WearWidgetParams.horizontalPaddingDp; 8 in every shipped preview spec."
+            "notes": "The font family for the display roles (displayLarge, displayMedium, displaySmall, numeralExtraLarge, numeralLarge, numeralMedium, numeralSmall, numeralExtraSmall) of everything this theme host contains. A family name: one of the editor's vendored faces or any Google Fonts family (\"Space Grotesk\", \"Michroma\"); a `google:` prefix is accepted. Generated code sets it as a `GoogleFont` family on the theme's typography. Unset keeps the platform's own face for these roles."
           },
           {
-            "name": "verticalPaddingDp",
-            "jsonType": "number",
+            "name": "themeTitleTypeface",
+            "jsonType": "string",
             "required": false,
-            "notes": "WearWidgetParams.verticalPaddingDp; 8 in every shipped preview spec."
+            "notes": "The font family for the title roles (titleLarge, titleMedium, titleSmall) of everything this theme host contains. A family name: one of the editor's vendored faces or any Google Fonts family (\"Space Grotesk\", \"Michroma\"); a `google:` prefix is accepted. Generated code sets it as a `GoogleFont` family on the theme's typography. Unset keeps the platform's own face for these roles."
           },
           {
-            "name": "cornerRadiusDp",
-            "jsonType": "number",
+            "name": "themeBodyTypeface",
+            "jsonType": "string",
             "required": false,
-            "notes": "WearWidgetParams.cornerRadiusDp: 26 squircle, 999 round, 0 rectangular. The host draws this radius behind the content rather than clipping to it."
+            "notes": "The font family for the body roles (bodyLarge, bodyMedium, bodySmall, bodyExtraSmall) of everything this theme host contains. A family name: one of the editor's vendored faces or any Google Fonts family (\"Space Grotesk\", \"Michroma\"); a `google:` prefix is accepted. Generated code sets it as a `GoogleFont` family on the theme's typography. Unset keeps the platform's own face for these roles."
+          },
+          {
+            "name": "themeLabelTypeface",
+            "jsonType": "string",
+            "required": false,
+            "notes": "The font family for the label roles (labelLarge, labelMedium, labelSmall) of everything this theme host contains. A family name: one of the editor's vendored faces or any Google Fonts family (\"Space Grotesk\", \"Michroma\"); a `google:` prefix is accepted. Generated code sets it as a `GoogleFont` family on the theme's typography. Unset keeps the platform's own face for these roles."
+          },
+          {
+            "name": "themeTextStyle",
+            "jsonType": "string",
+            "required": false,
+            "allowedValues": [
+              "displayLarge",
+              "displayMedium",
+              "displaySmall",
+              "titleLarge",
+              "titleMedium",
+              "titleSmall",
+              "labelLarge",
+              "labelMedium",
+              "labelSmall",
+              "bodyLarge",
+              "bodyMedium",
+              "bodySmall",
+              "bodyExtraSmall",
+              "numeralExtraLarge",
+              "numeralLarge",
+              "numeralMedium",
+              "numeralSmall",
+              "numeralExtraSmall"
+            ],
+            "notes": "The type role a text with no `style` of its own is set in, for everything this theme host contains — and with it that role's size and typeface. Both themes default to `bodyLarge`; choose `labelMedium` for a design whose plain text is mostly labels, or a display role for one that is mostly figures. Generated code provides it as `ProvideTextStyle(MaterialTheme.typography.<role>)` inside the theme."
           }
         ],
-        "modifierCapabilities": []
+        "modifierCapabilities": [],
+        "implementation": null,
+        "shelfRole": null,
+        "wasm": null,
+        "code": null,
+        "svg": null
+      },
+      "remote-m3/widget-container-adaptive": {
+        "role": "screen-root",
+        "displayName": "Wear widget · Adaptive (experimental)",
+        "group": "Widget Container",
+        "canvas": "widget-container",
+        "unrolled": null,
+        "traits": [
+          "ScreenContent",
+          "WearWidgetHost",
+          "RemoteContentHost"
+        ],
+        "slots": {
+          "background": {
+            "acceptedRoles": [
+              "Leaf"
+            ],
+            "acceptedTraits": [
+              "DrawLayer",
+              "ImageContent"
+            ]
+          },
+          "headline": {
+            "acceptedRoles": [
+              "Scaffold",
+              "Container",
+              "Leaf"
+            ],
+            "acceptedTraits": [
+              "AnyContent"
+            ]
+          },
+          "supporting": {
+            "acceptedRoles": [
+              "Scaffold",
+              "Container",
+              "Leaf"
+            ],
+            "acceptedTraits": [
+              "AnyContent"
+            ]
+          },
+          "action": {
+            "acceptedRoles": [
+              "Scaffold",
+              "Container",
+              "Leaf"
+            ],
+            "acceptedTraits": [
+              "AnyContent"
+            ]
+          }
+        },
+        "properties": [
+          {
+            "name": "background",
+            "jsonType": "string",
+            "required": false,
+            "notes": "The widget's own background, painted by the host inside the frame it draws. Defaults to #FF272430, the colour WearWidgetContainer applies to a widget that declares none. Padding and corner radius are not properties: WearWidgetParams hands them to the widget per host shape (0 rectangular, 26 squircle, 999 round), so the outermost box never authors a radius."
+          },
+          {
+            "name": "themeDisplayTypeface",
+            "jsonType": "string",
+            "required": false,
+            "notes": "The font family for the display roles (displayLarge, displayMedium, displaySmall, numeralExtraLarge, numeralLarge, numeralMedium, numeralSmall, numeralExtraSmall) of everything this theme host contains. A family name: one of the editor's vendored faces or any Google Fonts family (\"Space Grotesk\", \"Michroma\"); a `google:` prefix is accepted. Generated code sets it as a `GoogleFont` family on the theme's typography. Unset keeps the platform's own face for these roles."
+          },
+          {
+            "name": "themeTitleTypeface",
+            "jsonType": "string",
+            "required": false,
+            "notes": "The font family for the title roles (titleLarge, titleMedium, titleSmall) of everything this theme host contains. A family name: one of the editor's vendored faces or any Google Fonts family (\"Space Grotesk\", \"Michroma\"); a `google:` prefix is accepted. Generated code sets it as a `GoogleFont` family on the theme's typography. Unset keeps the platform's own face for these roles."
+          },
+          {
+            "name": "themeBodyTypeface",
+            "jsonType": "string",
+            "required": false,
+            "notes": "The font family for the body roles (bodyLarge, bodyMedium, bodySmall, bodyExtraSmall) of everything this theme host contains. A family name: one of the editor's vendored faces or any Google Fonts family (\"Space Grotesk\", \"Michroma\"); a `google:` prefix is accepted. Generated code sets it as a `GoogleFont` family on the theme's typography. Unset keeps the platform's own face for these roles."
+          },
+          {
+            "name": "themeLabelTypeface",
+            "jsonType": "string",
+            "required": false,
+            "notes": "The font family for the label roles (labelLarge, labelMedium, labelSmall) of everything this theme host contains. A family name: one of the editor's vendored faces or any Google Fonts family (\"Space Grotesk\", \"Michroma\"); a `google:` prefix is accepted. Generated code sets it as a `GoogleFont` family on the theme's typography. Unset keeps the platform's own face for these roles."
+          },
+          {
+            "name": "themeTextStyle",
+            "jsonType": "string",
+            "required": false,
+            "allowedValues": [
+              "displayLarge",
+              "displayMedium",
+              "displaySmall",
+              "titleLarge",
+              "titleMedium",
+              "titleSmall",
+              "labelLarge",
+              "labelMedium",
+              "labelSmall",
+              "bodyLarge",
+              "bodyMedium",
+              "bodySmall",
+              "bodyExtraSmall",
+              "numeralExtraLarge",
+              "numeralLarge",
+              "numeralMedium",
+              "numeralSmall",
+              "numeralExtraSmall"
+            ],
+            "notes": "The type role a text with no `style` of its own is set in, for everything this theme host contains — and with it that role's size and typeface. Both themes default to `bodyLarge`; choose `labelMedium` for a design whose plain text is mostly labels, or a display role for one that is mostly figures. Generated code provides it as `ProvideTextStyle(MaterialTheme.typography.<role>)` inside the theme."
+          }
+        ],
+        "modifierCapabilities": [],
+        "implementation": null,
+        "shelfRole": null,
+        "wasm": null,
+        "code": null,
+        "svg": null
       }
     },
     "components": {
@@ -299,7 +500,19 @@
         "record": "remote-catalog/androidx.wear.compose.remote.material3.RemoteAppCardKt.RemoteAppCard",
         "catalogId": null,
         "displayName": null,
-        "canvas": null,
+        "canvas": "wear-m3/card",
+        "canvasMapping": {
+          "slots": {
+            "content": "title"
+          },
+          "defaults": {
+            "variant": {
+              "type": "enum",
+              "value": "app"
+            }
+          }
+        },
+        "unrolled": null,
         "nativeOnly": false,
         "traits": [],
         "slots": {},
@@ -316,7 +529,13 @@
         "record": "remote-catalog/androidx.wear.compose.remote.material3.RemoteButtonGroupKt.RemoteButtonGroup",
         "catalogId": null,
         "displayName": null,
-        "canvas": null,
+        "canvas": "wear-m3/button-group",
+        "canvasMapping": {
+          "slots": {
+            "children": "content"
+          }
+        },
+        "unrolled": null,
         "nativeOnly": false,
         "traits": [],
         "slots": {},
@@ -333,7 +552,16 @@
         "record": "remote-catalog/androidx.wear.compose.remote.material3.RemoteButtonKt.RemoteButton",
         "catalogId": null,
         "displayName": null,
-        "canvas": null,
+        "canvas": "wear-m3/button",
+        "canvasMapping": {
+          "defaults": {
+            "variant": {
+              "type": "enum",
+              "value": "filled"
+            }
+          }
+        },
+        "unrolled": null,
         "nativeOnly": false,
         "traits": [],
         "slots": {},
@@ -350,7 +578,19 @@
         "record": "remote-catalog/androidx.wear.compose.remote.material3.RemoteButtonKt.RemoteCompactButton",
         "catalogId": null,
         "displayName": null,
-        "canvas": null,
+        "canvas": "wear-m3/button",
+        "canvasMapping": {
+          "slots": {
+            "content": "label"
+          },
+          "defaults": {
+            "variant": {
+              "type": "enum",
+              "value": "filled"
+            }
+          }
+        },
+        "unrolled": null,
         "nativeOnly": false,
         "traits": [],
         "slots": {},
@@ -367,7 +607,16 @@
         "record": "remote-catalog/androidx.wear.compose.remote.material3.RemoteCardKt.RemoteCard",
         "catalogId": null,
         "displayName": null,
-        "canvas": null,
+        "canvas": "wear-m3/card",
+        "canvasMapping": {
+          "defaults": {
+            "variant": {
+              "type": "enum",
+              "value": "filled"
+            }
+          }
+        },
+        "unrolled": null,
         "nativeOnly": false,
         "traits": [],
         "slots": {},
@@ -384,7 +633,16 @@
         "record": "remote-catalog/androidx.wear.compose.remote.material3.RemoteCardKt.RemoteOutlinedCard",
         "catalogId": null,
         "displayName": null,
-        "canvas": null,
+        "canvas": "wear-m3/card",
+        "canvasMapping": {
+          "defaults": {
+            "variant": {
+              "type": "enum",
+              "value": "outlined"
+            }
+          }
+        },
+        "unrolled": null,
         "nativeOnly": false,
         "traits": [],
         "slots": {},
@@ -401,7 +659,9 @@
         "record": "remote-catalog/androidx.wear.compose.remote.material3.RemoteCheckboxButtonKt.RemoteCheckboxButton",
         "catalogId": null,
         "displayName": null,
-        "canvas": null,
+        "canvas": "wear-m3/checkbox-button",
+        "canvasMapping": null,
+        "unrolled": null,
         "nativeOnly": false,
         "traits": [],
         "slots": {},
@@ -418,7 +678,16 @@
         "record": "remote-catalog/androidx.wear.compose.remote.material3.RemoteCircularProgressIndicatorKt.RemoteCircularProgressIndicator",
         "catalogId": null,
         "displayName": null,
-        "canvas": null,
+        "canvas": "wear-m3/progress-indicator",
+        "canvasMapping": {
+          "defaults": {
+            "variant": {
+              "type": "enum",
+              "value": "circular"
+            }
+          }
+        },
+        "unrolled": null,
         "nativeOnly": false,
         "traits": [],
         "slots": {},
@@ -435,7 +704,16 @@
         "record": "remote-catalog/androidx.wear.compose.remote.material3.RemoteCurvedProgressIndicatorKt.RemoteCurvedProgressIndicator",
         "catalogId": null,
         "displayName": null,
-        "canvas": null,
+        "canvas": "wear-m3/progress-indicator",
+        "canvasMapping": {
+          "defaults": {
+            "variant": {
+              "type": "enum",
+              "value": "arc"
+            }
+          }
+        },
+        "unrolled": null,
         "nativeOnly": false,
         "traits": [],
         "slots": {},
@@ -452,7 +730,13 @@
         "record": "remote-catalog/androidx.wear.compose.remote.material3.RemoteEdgeButtonKt.RemoteEdgeButton",
         "catalogId": null,
         "displayName": null,
-        "canvas": null,
+        "canvas": "wear-m3/edge-button",
+        "canvasMapping": {
+          "properties": {
+            "size": "buttonSize"
+          }
+        },
+        "unrolled": null,
         "nativeOnly": false,
         "traits": [],
         "slots": {},
@@ -469,7 +753,16 @@
         "record": "remote-catalog/androidx.wear.compose.remote.material3.RemoteIconButtonKt.RemoteIconButton",
         "catalogId": null,
         "displayName": null,
-        "canvas": null,
+        "canvas": "wear-m3/icon-button",
+        "canvasMapping": {
+          "defaults": {
+            "variant": {
+              "type": "enum",
+              "value": "filled"
+            }
+          }
+        },
+        "unrolled": null,
         "nativeOnly": false,
         "traits": [],
         "slots": {},
@@ -486,7 +779,19 @@
         "record": "remote-catalog/androidx.wear.compose.remote.material3.RemoteIconKt.RemoteIcon",
         "catalogId": null,
         "displayName": null,
-        "canvas": null,
+        "canvas": "wear-m3/icon",
+        "canvasMapping": {
+          "defaults": {
+            "iconKey": {
+              "type": "enum",
+              "value": "addCircle"
+            }
+          },
+          "properties": {
+            "iconKey": "imageVector"
+          }
+        },
+        "unrolled": null,
         "nativeOnly": false,
         "traits": [],
         "slots": {},
@@ -503,7 +808,16 @@
         "record": "remote-catalog/androidx.wear.compose.remote.material3.RemoteLinearProgressIndicatorKt.RemoteLinearProgressIndicator",
         "catalogId": null,
         "displayName": null,
-        "canvas": null,
+        "canvas": "wear-m3/progress-indicator",
+        "canvasMapping": {
+          "defaults": {
+            "variant": {
+              "type": "enum",
+              "value": "linear"
+            }
+          }
+        },
+        "unrolled": null,
         "nativeOnly": false,
         "traits": [],
         "slots": {},
@@ -520,7 +834,16 @@
         "record": "remote-catalog/androidx.wear.compose.remote.material3.RemotePageIndicatorKt.RemoteHorizontalPageIndicator",
         "catalogId": null,
         "displayName": null,
-        "canvas": null,
+        "canvas": "wear-m3/page-indicator",
+        "canvasMapping": {
+          "defaults": {
+            "variant": {
+              "type": "enum",
+              "value": "horizontal"
+            }
+          }
+        },
+        "unrolled": null,
         "nativeOnly": false,
         "traits": [],
         "slots": {},
@@ -537,7 +860,16 @@
         "record": "remote-catalog/androidx.wear.compose.remote.material3.RemotePageIndicatorKt.RemoteVerticalPageIndicator",
         "catalogId": null,
         "displayName": null,
-        "canvas": null,
+        "canvas": "wear-m3/page-indicator",
+        "canvasMapping": {
+          "defaults": {
+            "variant": {
+              "type": "enum",
+              "value": "vertical"
+            }
+          }
+        },
+        "unrolled": null,
         "nativeOnly": false,
         "traits": [],
         "slots": {},
@@ -554,7 +886,9 @@
         "record": "remote-catalog/androidx.wear.compose.remote.material3.RemoteRadioButtonKt.RemoteRadioButton",
         "catalogId": null,
         "displayName": null,
-        "canvas": null,
+        "canvas": "wear-m3/radio-button",
+        "canvasMapping": null,
+        "unrolled": null,
         "nativeOnly": false,
         "traits": [],
         "slots": {},
@@ -571,7 +905,20 @@
         "record": "remote-catalog/androidx.wear.compose.remote.material3.RemoteSliderKt.RemoteSlider",
         "catalogId": null,
         "displayName": null,
-        "canvas": null,
+        "canvas": "wear-m3/slider",
+        "canvasMapping": {
+          "defaults": {
+            "valueFrom": {
+              "type": "float",
+              "value": 0.0
+            },
+            "valueTo": {
+              "type": "float",
+              "value": 1.0
+            }
+          }
+        },
+        "unrolled": null,
         "nativeOnly": false,
         "traits": [],
         "slots": {},
@@ -588,7 +935,9 @@
         "record": "remote-catalog/androidx.wear.compose.remote.material3.RemoteSplitCheckboxButtonKt.RemoteSplitCheckboxButton",
         "catalogId": null,
         "displayName": null,
-        "canvas": null,
+        "canvas": "wear-m3/checkbox-button",
+        "canvasMapping": null,
+        "unrolled": null,
         "nativeOnly": false,
         "traits": [],
         "slots": {},
@@ -605,7 +954,9 @@
         "record": "remote-catalog/androidx.wear.compose.remote.material3.RemoteSplitRadioButtonKt.RemoteSplitRadioButton",
         "catalogId": null,
         "displayName": null,
-        "canvas": null,
+        "canvas": "wear-m3/radio-button",
+        "canvasMapping": null,
+        "unrolled": null,
         "nativeOnly": false,
         "traits": [],
         "slots": {},
@@ -622,7 +973,9 @@
         "record": "remote-catalog/androidx.wear.compose.remote.material3.RemoteSplitSwitchButtonKt.RemoteSplitSwitchButton",
         "catalogId": null,
         "displayName": null,
-        "canvas": null,
+        "canvas": "wear-m3/switch-button",
+        "canvasMapping": null,
+        "unrolled": null,
         "nativeOnly": false,
         "traits": [],
         "slots": {},
@@ -639,7 +992,20 @@
         "record": "remote-catalog/androidx.wear.compose.remote.material3.RemoteStepperKt.RemoteStepper",
         "catalogId": null,
         "displayName": null,
-        "canvas": null,
+        "canvas": "wear-m3/stepper",
+        "canvasMapping": {
+          "defaults": {
+            "valueFrom": {
+              "type": "float",
+              "value": 0.0
+            },
+            "valueTo": {
+              "type": "float",
+              "value": 1.0
+            }
+          }
+        },
+        "unrolled": null,
         "nativeOnly": false,
         "traits": [],
         "slots": {},
@@ -656,7 +1022,9 @@
         "record": "remote-catalog/androidx.wear.compose.remote.material3.RemoteSwitchButtonKt.RemoteSwitchButton",
         "catalogId": null,
         "displayName": null,
-        "canvas": null,
+        "canvas": "wear-m3/switch-button",
+        "canvasMapping": null,
+        "unrolled": null,
         "nativeOnly": false,
         "traits": [],
         "slots": {},
@@ -673,7 +1041,16 @@
         "record": "remote-catalog/androidx.wear.compose.remote.material3.RemoteTextButtonKt.RemoteTextButton",
         "catalogId": null,
         "displayName": null,
-        "canvas": null,
+        "canvas": "wear-m3/text-button",
+        "canvasMapping": {
+          "defaults": {
+            "variant": {
+              "type": "enum",
+              "value": "standard"
+            }
+          }
+        },
+        "unrolled": null,
         "nativeOnly": false,
         "traits": [],
         "slots": {},
@@ -690,7 +1067,13 @@
         "record": "remote-catalog/androidx.wear.compose.remote.material3.RemoteTextKt.RemoteText",
         "catalogId": null,
         "displayName": null,
-        "canvas": null,
+        "canvas": "wear-m3/text",
+        "canvasMapping": {
+          "properties": {
+            "fontSizeSp": "fontSize"
+          }
+        },
+        "unrolled": null,
         "nativeOnly": false,
         "traits": [],
         "slots": {},
@@ -699,7 +1082,68 @@
         "variantProperty": null,
         "variants": {},
         "excluded": null,
-        "propertyCapabilities": null,
+        "propertyCapabilities": [
+          {
+            "name": "text",
+            "jsonType": "string",
+            "required": true,
+            "notes": "The string the component draws. `RemoteText` takes a `RemoteString`, so a design's plain string is written as `\"…\".rs` and a binding or a state value as the remote expression it names — what the design carries is the same JSON either way."
+          },
+          {
+            "name": "style",
+            "jsonType": "string",
+            "required": false,
+            "allowedValues": [
+              "displayLarge",
+              "displayMedium",
+              "displaySmall",
+              "titleLarge",
+              "titleMedium",
+              "titleSmall",
+              "labelLarge",
+              "labelMedium",
+              "labelSmall",
+              "bodyLarge",
+              "bodyMedium",
+              "bodySmall",
+              "bodyExtraSmall",
+              "numeralExtraLarge",
+              "numeralLarge",
+              "numeralMedium",
+              "numeralSmall",
+              "numeralExtraSmall"
+            ],
+            "notes": "A role on this catalog's type scale, written as `style = RemoteMaterialTheme.typography.<role>`. This is the way to set type here: a role carries size, weight, line height and letter spacing together through `RemoteTextStyle`, which is why the catalog's own stickers pass a role OR an explicit size and never both. The eighteen are `RemoteTypography`'s own and are NOT the Material 3 fifteen — there is no `headline` on a watch, and there are five `numeral` roles a time or a metric is set in. A role this class does not have would export as a call that does not compile, so the list is exactly what it publishes."
+          },
+          {
+            "name": "fontSize",
+            "jsonType": "number",
+            "required": false,
+            "notes": "Size in sp, as an override on top of `style` rather than a substitute for it — set it alone and everything else about the type comes from the ambient style. Spelled the parameter's own way; a design authored against the borrowed `m3/text` says `fontSizeSp` and the writer reads both. A whole number writes `22.rsp`; a fractional one writes `14.5f.sp.asRemoteTextUnit()`, because `RemoteTextUnitKt` publishes no `Float.rsp`."
+          },
+          {
+            "name": "color",
+            "jsonType": "string",
+            "required": false,
+            "notes": "A colour: a `#RRGGBB` literal, which exports as `Color(0x…).rc`, or one of `colorTokens.roles`, which exports as `RemoteMaterialTheme.colorScheme.<role>`."
+          },
+          {
+            "name": "textAlign",
+            "jsonType": "string",
+            "required": false,
+            "allowedValues": [
+              "start",
+              "center",
+              "end",
+              "justify"
+            ]
+          },
+          {
+            "name": "maxLines",
+            "jsonType": "integer",
+            "required": false
+          }
+        ],
         "slotCapabilities": null,
         "modifierCapabilities": null
       },
@@ -707,7 +1151,19 @@
         "record": "remote-catalog/androidx.wear.compose.remote.material3.RemoteTitleCardKt.RemoteTitleCard",
         "catalogId": null,
         "displayName": null,
-        "canvas": null,
+        "canvas": "wear-m3/card",
+        "canvasMapping": {
+          "slots": {
+            "content": "title"
+          },
+          "defaults": {
+            "variant": {
+              "type": "enum",
+              "value": "title"
+            }
+          }
+        },
+        "unrolled": null,
         "nativeOnly": false,
         "traits": [],
         "slots": {},
@@ -725,6 +1181,8 @@
         "catalogId": null,
         "displayName": null,
         "canvas": null,
+        "canvasMapping": null,
+        "unrolled": null,
         "nativeOnly": false,
         "traits": [],
         "slots": {},
@@ -742,6 +1200,8 @@
         "catalogId": null,
         "displayName": null,
         "canvas": null,
+        "canvasMapping": null,
+        "unrolled": null,
         "nativeOnly": false,
         "traits": [],
         "slots": {},
@@ -753,156 +1213,14 @@
         "propertyCapabilities": null,
         "slotCapabilities": null,
         "modifierCapabilities": null
-      },
-      "remote-m3/capturing-wear-widget-preview": {
-        "record": "remote-catalog/ee.schimke.wearm3catalog.remote.WidgetContainerPreviewsKt.CapturingWearWidgetPreview",
-        "catalogId": null,
-        "displayName": null,
-        "canvas": null,
-        "nativeOnly": false,
-        "traits": [],
-        "slots": {},
-        "stateCallbacks": {},
-        "starter": {},
-        "variantProperty": null,
-        "variants": {},
-        "excluded": "a `private` capture wrapper, not a Remote Compose component: it exists only to hand the widget's encoded document to `IrSidecarChannel` so the render lands a `.rc` sidecar beside the PNG, and it is local at all only until AndroidX's `useSafeFallbackRendererVersion` reaches compose-ai-tools' published wrapper. Same exclusion, and the same reason, as `remote-m3/remote-sticker` above: nobody places a capture frame in a design. It published on the `Widget Container` shelf, beside the two widget-container builtins it wraps.",
-        "propertyCapabilities": null,
-        "slotCapabilities": null,
-        "modifierCapabilities": null
       }
     }
   },
   "diagnostics": [
     {
-      "code": "component.canvas.unclaimed",
-      "subject": "remote-m3/remote-app-card",
-      "message": "no canvas adapter claimed, so it draws as a placeholder. That is the honest default and needs no fixing; it is reported so a shelf drawn entirely in placeholders is visible rather than mysterious."
-    },
-    {
-      "code": "component.canvas.unclaimed",
-      "subject": "remote-m3/remote-button-group",
-      "message": "no canvas adapter claimed, so it draws as a placeholder. That is the honest default and needs no fixing; it is reported so a shelf drawn entirely in placeholders is visible rather than mysterious."
-    },
-    {
-      "code": "component.canvas.unclaimed",
-      "subject": "remote-m3/remote-button",
-      "message": "no canvas adapter claimed, so it draws as a placeholder. That is the honest default and needs no fixing; it is reported so a shelf drawn entirely in placeholders is visible rather than mysterious."
-    },
-    {
-      "code": "component.canvas.unclaimed",
-      "subject": "remote-m3/remote-compact-button",
-      "message": "no canvas adapter claimed, so it draws as a placeholder. That is the honest default and needs no fixing; it is reported so a shelf drawn entirely in placeholders is visible rather than mysterious."
-    },
-    {
-      "code": "component.canvas.unclaimed",
-      "subject": "remote-m3/remote-card",
-      "message": "no canvas adapter claimed, so it draws as a placeholder. That is the honest default and needs no fixing; it is reported so a shelf drawn entirely in placeholders is visible rather than mysterious."
-    },
-    {
-      "code": "component.canvas.unclaimed",
-      "subject": "remote-m3/remote-outlined-card",
-      "message": "no canvas adapter claimed, so it draws as a placeholder. That is the honest default and needs no fixing; it is reported so a shelf drawn entirely in placeholders is visible rather than mysterious."
-    },
-    {
-      "code": "component.canvas.unclaimed",
-      "subject": "remote-m3/remote-checkbox-button",
-      "message": "no canvas adapter claimed, so it draws as a placeholder. That is the honest default and needs no fixing; it is reported so a shelf drawn entirely in placeholders is visible rather than mysterious."
-    },
-    {
-      "code": "component.canvas.unclaimed",
-      "subject": "remote-m3/remote-circular-progress-indicator",
-      "message": "no canvas adapter claimed, so it draws as a placeholder. That is the honest default and needs no fixing; it is reported so a shelf drawn entirely in placeholders is visible rather than mysterious."
-    },
-    {
-      "code": "component.canvas.unclaimed",
-      "subject": "remote-m3/remote-curved-progress-indicator",
-      "message": "no canvas adapter claimed, so it draws as a placeholder. That is the honest default and needs no fixing; it is reported so a shelf drawn entirely in placeholders is visible rather than mysterious."
-    },
-    {
-      "code": "component.canvas.unclaimed",
-      "subject": "remote-m3/remote-edge-button",
-      "message": "no canvas adapter claimed, so it draws as a placeholder. That is the honest default and needs no fixing; it is reported so a shelf drawn entirely in placeholders is visible rather than mysterious."
-    },
-    {
-      "code": "component.canvas.unclaimed",
-      "subject": "remote-m3/remote-icon-button",
-      "message": "no canvas adapter claimed, so it draws as a placeholder. That is the honest default and needs no fixing; it is reported so a shelf drawn entirely in placeholders is visible rather than mysterious."
-    },
-    {
-      "code": "component.canvas.unclaimed",
-      "subject": "remote-m3/remote-icon",
-      "message": "no canvas adapter claimed, so it draws as a placeholder. That is the honest default and needs no fixing; it is reported so a shelf drawn entirely in placeholders is visible rather than mysterious."
-    },
-    {
-      "code": "component.canvas.unclaimed",
-      "subject": "remote-m3/remote-linear-progress-indicator",
-      "message": "no canvas adapter claimed, so it draws as a placeholder. That is the honest default and needs no fixing; it is reported so a shelf drawn entirely in placeholders is visible rather than mysterious."
-    },
-    {
-      "code": "component.canvas.unclaimed",
-      "subject": "remote-m3/remote-horizontal-page-indicator",
-      "message": "no canvas adapter claimed, so it draws as a placeholder. That is the honest default and needs no fixing; it is reported so a shelf drawn entirely in placeholders is visible rather than mysterious."
-    },
-    {
-      "code": "component.canvas.unclaimed",
-      "subject": "remote-m3/remote-vertical-page-indicator",
-      "message": "no canvas adapter claimed, so it draws as a placeholder. That is the honest default and needs no fixing; it is reported so a shelf drawn entirely in placeholders is visible rather than mysterious."
-    },
-    {
-      "code": "component.canvas.unclaimed",
-      "subject": "remote-m3/remote-radio-button",
-      "message": "no canvas adapter claimed, so it draws as a placeholder. That is the honest default and needs no fixing; it is reported so a shelf drawn entirely in placeholders is visible rather than mysterious."
-    },
-    {
-      "code": "component.canvas.unclaimed",
-      "subject": "remote-m3/remote-slider",
-      "message": "no canvas adapter claimed, so it draws as a placeholder. That is the honest default and needs no fixing; it is reported so a shelf drawn entirely in placeholders is visible rather than mysterious."
-    },
-    {
-      "code": "component.canvas.unclaimed",
-      "subject": "remote-m3/remote-split-checkbox-button",
-      "message": "no canvas adapter claimed, so it draws as a placeholder. That is the honest default and needs no fixing; it is reported so a shelf drawn entirely in placeholders is visible rather than mysterious."
-    },
-    {
-      "code": "component.canvas.unclaimed",
-      "subject": "remote-m3/remote-split-radio-button",
-      "message": "no canvas adapter claimed, so it draws as a placeholder. That is the honest default and needs no fixing; it is reported so a shelf drawn entirely in placeholders is visible rather than mysterious."
-    },
-    {
-      "code": "component.canvas.unclaimed",
-      "subject": "remote-m3/remote-split-switch-button",
-      "message": "no canvas adapter claimed, so it draws as a placeholder. That is the honest default and needs no fixing; it is reported so a shelf drawn entirely in placeholders is visible rather than mysterious."
-    },
-    {
-      "code": "component.canvas.unclaimed",
-      "subject": "remote-m3/remote-stepper",
-      "message": "no canvas adapter claimed, so it draws as a placeholder. That is the honest default and needs no fixing; it is reported so a shelf drawn entirely in placeholders is visible rather than mysterious."
-    },
-    {
-      "code": "component.canvas.unclaimed",
-      "subject": "remote-m3/remote-switch-button",
-      "message": "no canvas adapter claimed, so it draws as a placeholder. That is the honest default and needs no fixing; it is reported so a shelf drawn entirely in placeholders is visible rather than mysterious."
-    },
-    {
-      "code": "component.canvas.unclaimed",
-      "subject": "remote-m3/remote-text-button",
-      "message": "no canvas adapter claimed, so it draws as a placeholder. That is the honest default and needs no fixing; it is reported so a shelf drawn entirely in placeholders is visible rather than mysterious."
-    },
-    {
-      "code": "component.canvas.unclaimed",
-      "subject": "remote-m3/remote-text",
-      "message": "no canvas adapter claimed, so it draws as a placeholder. That is the honest default and needs no fixing; it is reported so a shelf drawn entirely in placeholders is visible rather than mysterious."
-    },
-    {
-      "code": "component.canvas.unclaimed",
-      "subject": "remote-m3/remote-title-card",
-      "message": "no canvas adapter claimed, so it draws as a placeholder. That is the honest default and needs no fixing; it is reported so a shelf drawn entirely in placeholders is visible rather than mysterious."
-    },
-    {
-      "code": "component.canvas.unclaimed",
+      "code": "component.excluded",
       "subject": "remote-m3/remote-sticker",
-      "message": "no canvas adapter claimed, so it draws as a placeholder. That is the honest default and needs no fixing; it is reported so a shelf drawn entirely in placeholders is visible rather than mysterious."
+      "message": "kept off the builder's shelf: the catalog's own preview frame, not a Remote Compose component: every sticker is drawn inside one and nobody places one in a design."
     },
     {
       "code": "component.canvas.unclaimed",
@@ -910,9 +1228,9 @@
       "message": "no canvas adapter claimed, so it draws as a placeholder. That is the honest default and needs no fixing; it is reported so a shelf drawn entirely in placeholders is visible rather than mysterious."
     },
     {
-      "code": "component.canvas.unclaimed",
+      "code": "component.policy.orphaned",
       "subject": "remote-m3/capturing-wear-widget-preview",
-      "message": "no canvas adapter claimed, so it draws as a placeholder. That is the honest default and needs no fixing; it is reported so a shelf drawn entirely in placeholders is visible rather than mysterious."
+      "message": "ui-builder.policy.json states a policy for \"remote-m3/capturing-wear-widget-preview\", which joins no component in this record, so every field in it does nothing. Check its `record` canonicalId or its builder id against components.json."
     }
   ]
 }

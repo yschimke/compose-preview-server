@@ -44,11 +44,11 @@
   },
   {
     "field": "previewSurfaces",
-    "why": "The catalog states a `wasm` surface the frozen catalog omits entirely, and native agrees on fidelity/backend with only the `reason` rewritten. The addition is the point rather than a discrepancy to tolerate: the builder's Wasm canvas has no Remote Compose player, so a design drawn there is a widget-host frame with placeholders inside it and NOT a picture of what the player will produce. The frozen catalog says nothing about that, which leaves a person reading an approximate canvas with no statement that it is approximate — precisely the silence this contract moves into the repository that can answer it. Both values are pinned, so a later change to either side re-surfaces this for review.",
+    "why": "The catalog states a `wasm` surface the frozen catalog omits entirely, and native agrees on fidelity/backend with only the `reason` rewritten. The addition is the point rather than a discrepancy to tolerate: the builder's Wasm Visual Editor draws Wear Compose stand-ins, not the Remote Compose player, so it is approximate, while the read-only Browser Preview plays a real `.rc` document. The frozen catalog says nothing about either, which leaves a person reading an approximate canvas with no statement that it is approximate — precisely the silence this contract moves into the repository that can answer it. RE-REVIEWED when remote-m3-catalog rewrote the wasm reason to separate the Visual Editor (approximate) from the Browser Preview (a real player in each host frame); fidelity is unchanged. Both values are pinned, so a later change to either side re-surfaces this for review.",
     "policy": {
       "wasm": {
         "fidelity": "approximate",
-        "reason": "A Remote Compose document is played, not composed. The builder's Wasm canvas has no player, so it draws the widget host frame and placeholders inside it; what the player would draw is a different picture, produced by a different program from the same document."
+        "reason": "The selectable Visual Editor draws Wear Compose CMP stand-ins. The read-only Browser Preview is a separate DEVICE surface: CMP Remote M3 records a real .rc document in Wasm and the pinned CMP RcComposePlayer plays it in each selected host frame. Approximate describes authoring only, never the Browser Preview."
       },
       "native": {
         "fidelity": "authoritative",
@@ -102,8 +102,13 @@
   },
   {
     "field": "templates",
-    "why": "Empty for the same reason `code` is null — there is no template engine yet, so there are no structural templates to name. Recorded so a future non-empty value re-surfaces here for review.",
-    "policy": [],
+    "why": "The frozen catalog states no templates; the catalog now ships four Wear widget designs as starting points (wear-widget-small, wear-widget-large, hello-widget, weather-widget) from remote-catalog/ui-builder/designs. RE-REVIEWED from the earlier empty list: these are seed documents a person opens and edits, not structural code templates, so `code` staying null is still consistent. Pinned so adding or removing one re-surfaces here.",
+    "policy": [
+      "ui-builder/designs/wear-widget-small.json",
+      "ui-builder/designs/wear-widget-large.json",
+      "ui-builder/designs/hello-widget.json",
+      "ui-builder/designs/weather-widget.json"
+    ],
     "frozen": null
   },
   {
