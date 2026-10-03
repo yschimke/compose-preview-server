@@ -833,8 +833,10 @@ there. Then `docker compose up -d`.
 Caddy sends exactly those paths to `playground`; everything else, including the shared `/assets/`,
 stays on `preview`. Both services run the same `IMAGE_TAG`.
 
-- **Sign-in.** Visitors still sign in on `preview`. Both services share the GitHub OAuth secrets
-  and cookie secret, so the playground accepts the same session.
+- **Sign-in.** Visitors still sign in on `preview`. A session cookie carries a fingerprint of the
+  sign-in repository, the image repository, the allowed users and orgs, and the guest setting, so
+  the `playground` service is given all of them (and the cookie secret) to accept the same session.
+  Change any of them in `.env` and both services pick it up together.
 - **Catalogs.** The playground reads the same `catalogs.json`, trust store and blob cache, and loads
   catalogs only for their compile bundles. It never renders a catalog page, so it never warms one.
 - **Remote Compose documents.** The playground's captures are minted as `/d/pg_<id>`, a prefix

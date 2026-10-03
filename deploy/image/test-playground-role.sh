@@ -45,6 +45,9 @@ for writer in --engagement-file --agent-grants --accept-images --ui-builder-dir 
   has "${writer}" && note "the playground role passes ${writer}, which writes or serves state it must not"
 done
 has --accept-docs || note "the playground role drops --accept-docs, so Remote Compose mode has nowhere to publish"
+# The image repository is part of the session-cookie fingerprint, so the role must still name it.
+has --image-upload-repo ||
+  note "the playground role drops --image-upload-repo, so every cookie preview signs is rejected"
 grep -q -- '-Dcomposeai.serve.themeOptimization=false' "${work}/out" ||
   note "the playground role leaves the theme optimizer on"
 grep -q -- '-Dcomposeai.serve.warmInBackground=false' "${work}/out" ||
@@ -56,6 +59,23 @@ run SERVE_ROLE=playground SERVE_JAVA_OPTS=-Dcomposeai.serve.themeOptimization=tr
 opts="$(grep '^JAVA_TOOL_OPTIONS=' "${work}/out")"
 [[ "${opts}" == *"themeOptimization=false"*"themeOptimization=true"* ]] ||
   note "SERVE_JAVA_OPTS no longer comes after the role's defaults: ${opts}"
+
+# --- the compose service forwards every input of the session-cookie fingerprint -----------------
+# ServeGithubAuth.configFingerprint: sign-in repo, image repo, allowed users, allowed orgs, guests.
+compose="${COMPOSE_FILE_UNDER_TEST:-${here}/docker-compose.yml}"
+playground_env="$(awk '
+  /^  playground:/                 { in_svc = 1; next }
+  in_svc && /^  [a-z]/            { in_svc = 0 }
+  in_svc && /^    environment:/   { in_env = 1; next }
+  in_env && /^    [a-z]/          { in_env = 0 }
+  in_env && /^      [A-Z0-9_]+:/  { k = $1; sub(/:$/, "", k); print k }
+' "${compose}")"
+[[ -n "${playground_env}" ]] || note "found no playground service environment — the detector is broken"
+for v in SERVE_GITHUB_AUTH_COOKIE_SECRET SERVE_GITHUB_AUTH_REPO SERVE_IMAGE_UPLOAD_REPO \
+  SERVE_GITHUB_AUTH_USERS SERVE_GITHUB_AUTH_ORGS SERVE_GITHUB_AUTH_GUESTS; do
+  grep -qx -- "${v}" <<<"${playground_env}" ||
+    note "the playground service does not forward ${v}, so preview's session cookies fail its fingerprint"
+done
 
 # --- the main server beside it ------------------------------------------------------------------
 run SERVE_COMPILE_ENGINE=1 SERVE_PLAYGROUND_EXTERNAL=1 || note "the main server did not start: $(tail -1 "${work}/log")"

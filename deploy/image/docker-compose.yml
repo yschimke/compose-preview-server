@@ -525,11 +525,18 @@ services:
       SERVE_CATALOG_CACHE_DIR: "${SERVE_CATALOG_CACHE_DIR:-/catalog-cache}"
       SERVE_CATALOG_CACHE_MAX_BYTES: "${SERVE_CATALOG_CACHE_MAX_BYTES:-}"
       SERVE_EXTRA_MAVEN_REPOS: "${SERVE_EXTRA_MAVEN_REPOS:-}"
-      # The repo-access gate, with the same secrets as `preview` so its sign-in is honoured here.
+      # The repo-access gate, configured exactly as on `preview` so its sign-in is honoured here. A
+      # session cookie carries a fingerprint of the sign-in repository, the image repository, the
+      # allowed users and orgs, and the guest setting, and is rejected wherever any of them differs
+      # — so every one of those is forwarded, even the image repository of a lane that is off here.
       SERVE_GITHUB_AUTH_CLIENT_ID: "${SERVE_GITHUB_AUTH_CLIENT_ID:-}"
       SERVE_GITHUB_AUTH_CLIENT_SECRET: "${SERVE_GITHUB_AUTH_CLIENT_SECRET:-}"
       SERVE_GITHUB_AUTH_COOKIE_SECRET: "${SERVE_GITHUB_AUTH_COOKIE_SECRET:-}"
       SERVE_GITHUB_AUTH_REPO: "${SERVE_GITHUB_AUTH_REPO:-yschimke/compose-ai-tools}"
+      SERVE_GITHUB_AUTH_USERS: "${SERVE_GITHUB_AUTH_USERS:-}"
+      SERVE_GITHUB_AUTH_ORGS: "${SERVE_GITHUB_AUTH_ORGS:-}"
+      SERVE_GITHUB_AUTH_GUESTS: "${SERVE_GITHUB_AUTH_GUESTS:-}"
+      SERVE_IMAGE_UPLOAD_REPO: "${SERVE_IMAGE_UPLOAD_REPO:-}"
       SERVE_GITHUB_AUTH_CALLBACK_BASE_URL: "${SERVE_GITHUB_AUTH_CALLBACK_BASE_URL:-}"
       SERVE_GITHUB_AUTH_COOKIE_DOMAIN: "${SERVE_GITHUB_AUTH_COOKIE_DOMAIN:-}"
       # Remote Compose mode publishes its capture as a `/d/pg_*` document held here.

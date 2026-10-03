@@ -776,6 +776,12 @@ if [[ -z "${SERVE_ACCEPT_IMAGES:-}" ]]; then
   fi
 fi
 
+# The playground role keeps the lane off but still names its repository: the session cookie
+# `preview` signs carries a fingerprint that includes it, and the playground rejects any cookie
+# whose fingerprint differs from its own. Naming it without --accept-images opens nothing.
+[[ "${SERVE_ROLE:-}" == "playground" && -n "${SERVE_IMAGE_UPLOAD_REPO:-}" ]] &&
+  args+=(--image-upload-repo "${SERVE_IMAGE_UPLOAD_REPO}")
+
 image_lane_on=0
 if [[ "${SERVE_ACCEPT_IMAGES:-}" == "1" || "${SERVE_ACCEPT_IMAGES:-}" == "true" ]]; then
   args+=(--accept-images)
