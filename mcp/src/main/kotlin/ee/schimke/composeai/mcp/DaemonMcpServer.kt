@@ -1098,19 +1098,25 @@ class DaemonMcpServer(
                 "notify_file_changed",
             )
       }
-      // Forward even after a failed compile: the swap is cheap, and classes that something else
-      // (an IDE, a continuous build) wrote in the meantime are then picked up.
-      daemon.allClients().forEach { client ->
-        sources.forEach { path ->
-          runCatching {
-            client.fileChanged(
-              path = path,
-              kind = FileKind.SOURCE,
-              changeType = ChangeType.MODIFIED,
-            )
+      // Never after a failed compile: the daemon would swap onto a class directory the failed
+      // incremental compile left half-written, render code older than the last good build, and
+      // drop every preview in the broken file from discovery, which the fixed file's recompile
+      // never restored (yschimke/compose-ag-plugin#64, #76). Keeping the last good classloader
+      // renders the last good image, with the stale note saying why. A compile that could not run
+      // at all still forwards, so classes something else (an IDE, a continuous build) wrote are
+      // picked up.
+      if (outcome !is SourceCompileOutcome.Failed)
+        daemon.allClients().forEach { client ->
+          sources.forEach { path ->
+            runCatching {
+              client.fileChanged(
+                path = path,
+                kind = FileKind.SOURCE,
+                changeType = ChangeType.MODIFIED,
+              )
+            }
           }
         }
-      }
       return outcome
     }
   }
@@ -1287,9 +1293,15 @@ class DaemonMcpServer(
    * exactly as if the daemon had pushed the notification itself. Idempotent: a no-op when the
    * manifest hasn't changed since the last cycle.
    *
+   * With [force], the file is diffed against the catalog even when it has not changed since the
+   * last read. The daemon's own `discoveryUpdated` can empty the catalog while the manifest stays
+   * put: after a compile failure its incremental discovery dropped every preview in the broken
+   * file, the fixed file's recompile never added them back, and an unchanged `previews.json` kept
+   * this reload from restoring them (yschimke/compose-ag-plugin#64).
+   *
    * Internal so tests can drive it directly without racing the scheduled poll.
    */
-  internal fun reloadManifestIfChanged(daemon: SupervisedDaemon) {
+  internal fun reloadManifestIfChanged(daemon: SupervisedDaemon, force: Boolean = false) {
     val manifestPath = daemon.manifestPath?.takeIf { it.isNotBlank() } ?: return
     val file = File(manifestPath)
     if (!file.isFile) return
@@ -1297,10 +1309,10 @@ class DaemonMcpServer(
     val mtime = file.lastModified().takeIf { it > 0L } ?: return
     val addr = DaemonAddr(daemon.workspaceId, daemon.modulePath)
     val previous = manifestState[addr]
-    if (previous != null && mtime <= previous.mtimeMs) return
+    if (!force && previous != null && mtime <= previous.mtimeMs) return
 
     val hash = runCatching { sha256Hex(file) }.getOrNull() ?: return
-    if (previous != null && hash == previous.hash) {
+    if (!force && previous != null && hash == previous.hash) {
       // mtime moved (e.g. `touch` on previews.json) but bytes didn't — refresh mtime so the
       // next cycle skips the hash, and bail out without redispatching.
       manifestState[addr] = ManifestState(mtime, hash)
@@ -1719,7 +1731,7 @@ class DaemonMcpServer(
         name = "render_preview",
         description =
           "Call this FIRST with preview=<FunctionName> (e.g. ListScreenPreview); it registers the " +
-            "workspace and resolves the name itself. Only explore (list_previews, source files) if " +
+            "workspace and resolves the name itself. Only explore (find_previews_for_file) if " +
             "this call fails. " +
             "Render a preview by URI (or by `preview` function name), bypassing the in-memory render cache. Returns a token-frugal " +
             "structured observation by default — the compose/semantics snapshot + sha256 + " +
@@ -1888,7 +1900,7 @@ class DaemonMcpServer(
         name = "render_preview",
         description =
           "Call this FIRST with preview=<FunctionName> (e.g. ListScreenPreview); it registers the " +
-            "workspace and resolves the name itself. Only explore (list_previews, source files) if " +
+            "workspace and resolves the name itself. Only explore (find_previews_for_file) if " +
             "this call fails. " +
             "Render a preview by URI (or by `preview` function name), bypassing the in-memory render cache. Returns a token-frugal " +
             "structured observation by default (`observe=\"semantics\"`: the compose/semantics tree " +
@@ -3406,12 +3418,17 @@ class DaemonMcpServer(
       if (scope == null) {
         pendingBuilds.also { pendingBuilds = emptyList() }.forEach { registerQuietly(it) }
       }
-      if (supervisor.listProjects().isEmpty()) {
+      if (supervisor.listProjects().isEmpty() && registerDeclaringCandidate(trimmed) == null) {
         return PreviewNameResolution.Missing(notRegisteredMessage())
       }
-      unprepared = prepareProjects(scope, progress)
-      spawnUndiscoveredModules(scope)
-      matches = previewNameMatches(trimmed, scope)
+      val prepareScope =
+        when (val narrowed = unpreparedScopeFor(trimmed, scope)) {
+          is UnpreparedScope.Use -> narrowed.scope
+          is UnpreparedScope.Ambiguous -> return PreviewNameResolution.Missing(narrowed.message)
+        }
+      unprepared = prepareProjects(prepareScope, progress)
+      spawnUndiscoveredModules(prepareScope)
+      matches = previewNameMatches(trimmed, prepareScope)
     }
     if (matches.isEmpty() && unprepared.isEmpty()) {
       matches = rediscoverForName(trimmed, scope, progress)
@@ -3467,10 +3484,74 @@ class DaemonMcpServer(
               GradleSourceCompiler.summarizeGradleFailure(result.output)
           )
         }
-        project.daemons.values.forEach { reloadManifestIfChanged(it) }
+        project.daemons.values.forEach { reloadManifestIfChanged(it, force = true) }
         ran = true
       }
     return if (ran) previewNameMatches(name, scope) else emptyList()
+  }
+
+  /**
+   * With nothing registered and no roots that are builds (Antigravity starts the server in its
+   * plugin directory and sends none), the candidate builds remembered from earlier sessions: when
+   * exactly one declares `fun <name>(`, it is registered so the render can go on instead of failing
+   * with "no project registered" while naming that very build (yschimke/compose-ag-plugin#63).
+   */
+  private fun registerDeclaringCandidate(name: String): RegisteredProject? {
+    val function = name.substringAfterLast('.').trim()
+    if (function.isEmpty()) return null
+    val functions =
+      listOfNotNull(function, function.substringBefore('_').takeIf { '_' in function })
+    val declaring =
+      candidateBuilds().map(::File).filter { build ->
+        functions.any { findFunctionSource(build, it) != null }
+      }
+    return declaring.singleOrNull()?.let(::registerQuietly)
+  }
+
+  private sealed interface UnpreparedScope {
+    data class Use(val scope: Set<WorkspaceId>?) : UnpreparedScope
+
+    data class Ambiguous(val message: String) : UnpreparedScope
+  }
+
+  /**
+   * Which builds a by-name lookup may bootstrap. Each bootstrap is a full Gradle run, so with no
+   * `project` and several unprepared builds (wear-os-samples registers one per sample) only a build
+   * whose sources declare `fun <name>(` is prepared, and only when exactly one does. Before this,
+   * every build was bootstrapped in turn, starting with whichever came first, and the render sat in
+   * `starting` for minutes on the wrong sample (yschimke/compose-ag-plugin#64). With none or
+   * several declaring it, no Gradle runs: the agent is asked to name the build (its settings.gradle
+   * folder).
+   */
+  private fun unpreparedScopeFor(name: String, scope: Set<WorkspaceId>?): UnpreparedScope {
+    if (scope != null) return UnpreparedScope.Use(scope)
+    val unprepared =
+      supervisor.listProjects().filter { project ->
+        project.daemons.isEmpty() &&
+          synchronized(project.knownModules) { project.knownModules.isEmpty() } &&
+          projectBootstrap?.isPrepared(project.path) != true
+      }
+    if (unprepared.size <= 1) return UnpreparedScope.Use(null)
+    val function = name.substringAfterLast('.').trim()
+    val functions =
+      listOfNotNull(function, function.substringBefore('_').takeIf { '_' in function })
+    val declaring = unprepared.filter { project ->
+      functions.any { findFunctionSource(project.path, it) != null }
+    }
+    if (declaring.size != 1) {
+      val named = declaring.ifEmpty { unprepared }
+      val why =
+        if (declaring.isEmpty()) "none of the ${unprepared.size} unprepared builds declares"
+        else "${declaring.size} unprepared builds declare"
+      return UnpreparedScope.Ambiguous(
+        "no preview matches '$name' yet, and $why fun $function(. Preparing a build is a full " +
+          "Gradle run, so none was started. Pass project=<absolute path> (the folder with the " +
+          "build's settings.gradle(.kts)). Candidate builds: " +
+          "${named.take(10).joinToString(", ") { it.path.path }}."
+      )
+    }
+    val prepared = supervisor.listProjects().filter { it !in unprepared }
+    return UnpreparedScope.Use((declaring + prepared).map { it.workspaceId }.toSet())
   }
 
   private data class RediscoveryKey(val projectRoot: String, val source: String)
@@ -3503,7 +3584,7 @@ class DaemonMcpServer(
       if (suggestions.isNotEmpty()) append(" Closest: ").append(suggestions.joinToString(", "))
       append(" (").append(plural(previewCount, "preview")).append(" in ")
       append(plural(moduleCount, "module")).append(").")
-      append(" Call list_previews to see all.")
+      append(" Call find_previews_for_file with the source file to list its previews.")
     }
     return PreviewNameResolution.Missing(
       message,
@@ -4012,6 +4093,7 @@ class DaemonMcpServer(
       return grid.copy(content = grid.content + ContentBlock.Text(choice.toString()))
     }
     val labels = PreviewPickers.variantLabels(choices)
+    val askedAt = System.nanoTime()
     val elicitation =
       (session as? McpSession)?.elicitForm(
         message = "Several previews match '$previewName'. Choose the one to render.",
@@ -4057,7 +4139,13 @@ class DaemonMcpServer(
           )
         is FormElicitation.Answered -> elicitation.result
       }
+    val answeredMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - askedAt)
     when (answer.action) {
+      // A decline faster than anyone could read the form is the host's, not the person's: Claude
+      // Code's desktop (SDK) session declines unseen, which read as "the user declined" and
+      // rendered nothing (yschimke/compose-ag-plugin#64). Treat it like a client without forms.
+      ElicitResult.Action.Decline if answeredMs < UNSEEN_ANSWER_MS ->
+        return renderFirst("text", textFallback)
       ElicitResult.Action.Decline ->
         return CallToolResult(
           content =
@@ -4389,6 +4477,11 @@ class DaemonMcpServer(
       put("sha256", sha)
       put("changed", changed)
       put("durationMs", TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedAt))
+      // In the payload, not only as text blocks after it: a client that reads just this object
+      // otherwise never learns the image is stale or what the details found (#64, #76).
+      staleRenderLine(uri)?.let { put("stale", it) }
+      if (fetchedDetails.summaries.isNotEmpty())
+        putJsonArray("details") { fetchedDetails.summaries.forEach { add(JsonPrimitive(it)) } }
       if (otherMatches.isNotEmpty())
         putJsonArray("otherMatches") { otherMatches.forEach { add(JsonPrimitive(it)) } }
       if (card) {
@@ -7855,7 +7948,7 @@ class DaemonMcpServer(
     /** A directory holding one of these is a Gradle build the server may auto-register. */
     /** Tools that take a `project` path and register its build on the fly. */
     private val PROJECT_ARGUMENT_TOOLS =
-      setOf("render_preview", "render_matrix", "find_previews_for_file", "list_previews")
+      setOf("render_preview", "render_matrix", "find_previews_for_file")
 
     /**
      * `clientInfo.name`s of agent harnesses that read local files: `render_preview` defaults to the
@@ -7869,6 +7962,9 @@ class DaemonMcpServer(
         "claude-code",
         ANTIGRAVITY_CLIENT_NAME,
       )
+
+    /** An elicitation answered faster than this was never shown to a person. */
+    internal const val UNSEEN_ANSWER_MS: Long = 1_000
 
     /**
      * `variantChoice.message` when a preview chooser was cancelled and the first match rendered.
@@ -7889,7 +7985,7 @@ class DaemonMcpServer(
         "registered automatically on first use (call register_project only if list_projects " +
         "stays empty).\n" +
         "Render one with render_preview preview=<FunctionName> (a function name or FQN suffix). " +
-        "To find a file's previews use find_previews_for_file or list_previews; never search " +
+        "To find a file's previews use find_previews_for_file; never search " +
         "source files for a preview ID.\n" +
         "render_preview returns the semantics tree by default, observe=png the image and " +
         "observe=hash only the sha256; describe an image rather than re-encoding or re-saving " +

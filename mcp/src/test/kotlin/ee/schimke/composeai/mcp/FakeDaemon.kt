@@ -19,6 +19,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
@@ -345,6 +346,20 @@ class FakeDaemon : DaemonSpawn {
       putJsonArray("removed") {}
       putJsonArray("changed") {}
       put("totalPreviews", 1)
+    }
+    sendNotification("discoveryUpdated", params)
+  }
+
+  /**
+   * Pushes a `discoveryUpdated` that removes [previewIds], as the real daemon's incremental
+   * discovery does after swapping onto a failed compile's output. Test helper.
+   */
+  fun emitRemoved(vararg previewIds: String) {
+    val params = buildJsonObject {
+      putJsonArray("added") {}
+      putJsonArray("removed") { previewIds.forEach { add(JsonPrimitive(it)) } }
+      putJsonArray("changed") {}
+      put("totalPreviews", 0)
     }
     sendNotification("discoveryUpdated", params)
   }

@@ -155,48 +155,60 @@ fun interface GradleTaskRunner {
 
     /**
      * A child process whose output is captured, never inherited: this process's stdout is the MCP
-     * transport.
+     * transport. Like [GradleSourceCompiler], it passes [androidSdks]' SDK as `ANDROID_HOME` to a
+     * build that cannot see one, such as a worktree with no copy of the untracked
+     * `local.properties` (yschimke/compose-ag-plugin#64).
      */
-    fun subprocess(timeoutMs: Long = TimeUnit.MINUTES.toMillis(15)) =
-      GradleTaskRunner { projectRoot, wrapper, arguments, onLine ->
-        val windows = System.getProperty("os.name").orEmpty().startsWith("Windows")
-        val command =
-          (if (windows) listOf("cmd", "/c", wrapper.absolutePath)
-          else listOf(wrapper.absolutePath)) + arguments
-        val process = runCatching {
-          ProcessBuilder(command).directory(projectRoot).redirectErrorStream(true).start()
-        }
-          .getOrElse {
-            return@GradleTaskRunner Result(-1, "could not start ${wrapper.path}: ${it.message}")
+    fun subprocess(
+      timeoutMs: Long = TimeUnit.MINUTES.toMillis(15),
+      androidSdks: AndroidSdks = AndroidSdks(),
+    ) = GradleTaskRunner { projectRoot, wrapper, arguments, onLine ->
+      val windows = System.getProperty("os.name").orEmpty().startsWith("Windows")
+      val command =
+        (if (windows) listOf("cmd", "/c", wrapper.absolutePath) else listOf(wrapper.absolutePath)) +
+          arguments
+      val process = runCatching {
+        ProcessBuilder(command)
+          .directory(projectRoot)
+          .redirectErrorStream(true)
+          .apply {
+            androidSdks.forBuild(projectRoot)?.let {
+              environment()["ANDROID_HOME"] = it.absolutePath
+            }
           }
-        process.outputStream.close()
-        val output = StringBuilder()
-        val reader =
-          Thread(
-              {
-                runCatching {
-                  process.inputStream.bufferedReader().useLines { lines ->
-                    lines.forEach { line ->
-                      runCatching { onLine(line) }
-                      synchronized(output) {
-                        if (output.length < MAX_CAPTURED_CHARS) output.appendLine(line)
-                      }
+          .start()
+      }
+        .getOrElse {
+          return@GradleTaskRunner Result(-1, "could not start ${wrapper.path}: ${it.message}")
+        }
+      process.outputStream.close()
+      val output = StringBuilder()
+      val reader =
+        Thread(
+            {
+              runCatching {
+                process.inputStream.bufferedReader().useLines { lines ->
+                  lines.forEach { line ->
+                    runCatching { onLine(line) }
+                    synchronized(output) {
+                      if (output.length < MAX_CAPTURED_CHARS) output.appendLine(line)
                     }
                   }
                 }
-              },
-              "compose-preview-mcp-bootstrap",
-            )
-            .apply {
-              isDaemon = true
-              start()
-            }
-        if (!process.waitFor(timeoutMs, TimeUnit.MILLISECONDS)) {
-          process.destroyForcibly()
-          return@GradleTaskRunner Result(-1, synchronized(output) { output.toString() }, true)
-        }
-        reader.join(2_000)
-        Result(process.exitValue(), synchronized(output) { output.toString() })
+              }
+            },
+            "compose-preview-mcp-bootstrap",
+          )
+          .apply {
+            isDaemon = true
+            start()
+          }
+      if (!process.waitFor(timeoutMs, TimeUnit.MILLISECONDS)) {
+        process.destroyForcibly()
+        return@GradleTaskRunner Result(-1, synchronized(output) { output.toString() }, true)
       }
+      reader.join(2_000)
+      Result(process.exitValue(), synchronized(output) { output.toString() })
+    }
   }
 }
