@@ -322,7 +322,9 @@ composeai-contracts = "3.17.0"
 # (compose-ui-builder#411), and mobile/offline web: insets, Web Share, IndexedDB and the
 # `ui-builder-sw.js` service worker at the archive root (compose-ui-builder#410) that #1300 already
 # serves at `/ui-builder/ui-builder-sw.js`. `androidx-window` and `composeai-contracts` are unchanged.
-composeai-ui-builder = "3.76.0"
+# 3.77.0 exports a themed m3/surface's theme — colours, type scale, corner radius and typefaces —
+# which the server's screen export resolves through `Outcome.Projected.resolvable` (compose-ui-builder#413).
+composeai-ui-builder = "3.77.0"
 kotlinx-coroutines = "1.11.0"
 kotlinx-serialization = "1.11.0"
 ktor = "3.6.0"
