@@ -122,6 +122,8 @@ describe("the push worker", () => {
             },
             navigate: async (url) => {
                 visited.push(url);
+                // A real WindowClient.navigate resolves to the navigated client.
+                return mine;
             },
         };
         const { s, opened } = scope([other, mine]);
@@ -135,6 +137,66 @@ describe("the push worker", () => {
         assert.equal(closed, true);
         assert.equal(focused, 1);
         assert.deepEqual(visited, [`${ORIGIN}/ui-builder/d1#thread=t1`]);
+        assert.deepEqual(opened, []);
+    });
+
+    it("opens the thread in a new window when the open one is not this worker's to navigate", async () => {
+        // An editor tab belongs to the UI builder's worker, or to none: navigate() rejects there.
+        const editor: WindowClientLike = {
+            url: `${ORIGIN}/ui-builder/other`,
+            focus: async () => undefined,
+            navigate: async () => {
+                throw new TypeError(
+                    "This service worker is not the client's active service worker.",
+                );
+            },
+        };
+        const { s, opened } = scope([editor]);
+        await handleNotificationClick(s, {
+            data: { url: `${ORIGIN}/ui-builder/d1#thread=t1` },
+            close: () => undefined,
+        });
+        assert.deepEqual(opened, [`${ORIGIN}/ui-builder/d1#thread=t1`]);
+    });
+
+    it("opens a new window when navigate resolves null or is missing", async () => {
+        const nulled: WindowClientLike = {
+            url: `${ORIGIN}/status`,
+            focus: async () => undefined,
+            navigate: async () => null,
+        };
+        const { s, opened } = scope([nulled]);
+        await handleNotificationClick(s, {
+            data: { url: `${ORIGIN}/ui-builder/d1#thread=t1` },
+            close: () => undefined,
+        });
+        const noNavigate: WindowClientLike = {
+            url: `${ORIGIN}/status`,
+            focus: async () => undefined,
+        };
+        const second = scope([noNavigate]);
+        await handleNotificationClick(second.s, {
+            data: { url: `${ORIGIN}/ui-builder/d1#thread=t1` },
+            close: () => undefined,
+        });
+        assert.deepEqual(opened, [`${ORIGIN}/ui-builder/d1#thread=t1`]);
+        assert.deepEqual(second.opened, [`${ORIGIN}/ui-builder/d1#thread=t1`]);
+    });
+
+    it("focuses a window already on the thread without opening another", async () => {
+        let focused = 0;
+        const there: WindowClientLike = {
+            url: `${ORIGIN}/ui-builder/d1#thread=t1`,
+            focus: async () => {
+                focused++;
+            },
+        };
+        const { s, opened } = scope([there]);
+        await handleNotificationClick(s, {
+            data: { url: `${ORIGIN}/ui-builder/d1#thread=t1` },
+            close: () => undefined,
+        });
+        assert.equal(focused, 1);
         assert.deepEqual(opened, []);
     });
 
