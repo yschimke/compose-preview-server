@@ -7,8 +7,8 @@ import java.io.File
  *
  * compose-ai-tools' `RcJvmServerRenderer` hands its render worker a `fonts.json` manifest
  * directory, and the worker resolves every family a document names through it: the literal
- * `default` a `CoreText` with no family asks for, and `google:Roboto Flex`, which is what every
- * `remote-m3` card names. With no manifest the worker draws in Compose's built-in face, which on a
+ * `default` a `CoreText` with no family asks for, and `google:Roboto Flex`, which is what the Wear
+ * Material 3 Remote cards name. With no manifest the worker draws in Compose's built-in face, which on a
  * Linux host is a wider fallback sans — so titles wrap an extra line, card bodies overflow and the
  * subtitle is pushed out of the card. Nothing fails, which is why it went unnoticed: preview.coo.ee
  * scored 26–31% against the published captures on every Title/App card while the other players drew
