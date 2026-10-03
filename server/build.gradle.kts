@@ -250,6 +250,29 @@ val writeDistributionJavaMin =
     }
   }
 
+// The `fonts.json` manifest and faces the server-side **cmp-jvm** Remote Compose lane shapes text
+// with, shipped as `<APP_HOME>/rc-fonts/` and handed to the render worker by `ServeRcJvmFonts`.
+//
+// compose-ai-tools' `RcJvmServerRenderer` looks for them at `-Dcomposeai.rcjvm.fontsDir`, else at
+// `<APP_HOME>/rc-player-wasm/fonts` — a sidecar of the CLI install that this distribution never
+// carried. With no manifest the worker draws every `google:Roboto Flex` card in Compose's built-in
+// face (a wider fallback sans on Linux), so preview.coo.ee's cmp-jvm lane wrapped and overflowed
+// every remote-m3 Title/App card while reporting success.
+//
+// STAGED from the one vendored directory, not committed a second time: the same files the offline
+// parity harness and the served viewer read (`stageRcFontResources` below), and byte-identical to
+// the CLI's `rc-player-wasm/fonts`. Everything the manifest names plus the licences beside them.
+val RC_JVM_FONTS_DIR = "rc-fonts"
+val stagedRcJvmFonts = layout.buildDirectory.dir("generated/rc-jvm-fonts")
+val stageRcJvmFonts =
+  tasks.register<Sync>("stageRcJvmFonts") {
+    description = "Stage the fonts.json manifest and faces the cmp-jvm render worker resolves."
+    from(rootDir.resolve("assets/rc-fonts")) {
+      include("fonts.json", "*.ttf", "*OFL.txt", "LICENSE.txt", "README.md")
+    }
+    into(stagedRcJvmFonts)
+  }
+
 distributions {
   main {
     contents { from(project(":wasm-ui").tasks.named("wasmFrontendDist")) { into("wasm-ui") } }
@@ -268,6 +291,8 @@ distributions {
       into("lib-renderer") { from(stageRendererLibs) }
       into("lib-daemon-desktop") { from(stageDaemonDesktopLibs) }
     }
+    // The cmp-jvm render worker's typefaces — see `stageRcJvmFonts`.
+    contents { into(RC_JVM_FONTS_DIR) { from(stageRcJvmFonts) } }
     contents { from(writeDistributionJavaMin) }
   }
 }
@@ -632,6 +657,19 @@ tasks.withType<Test>().configureEach {
     .files(rootProject.layout.projectDirectory.file("deploy/image/Dockerfile"))
     .withPropertyName("imageDockerfile")
     .withPathSensitivity(PathSensitivity.RELATIVE)
+
+  // The exact directory the distribution packages as `rc-fonts/`, so `ServeRcJvmFontsTest` checks
+  // what ships rather than the source tree it was staged from.
+  inputs
+    .files(stageRcJvmFonts)
+    .withPropertyName("rcJvmFonts")
+    .withPathSensitivity(PathSensitivity.RELATIVE)
+  val rcJvmFontsDir = stagedRcJvmFonts
+  jvmArgumentProviders.add(
+    CommandLineArgumentProvider {
+      listOf("-Dcomposeai.test.rcJvmFontsDir=${rcJvmFontsDir.get().asFile.absolutePath}")
+    }
+  )
 
   jvmArgumentProviders.add(
     CommandLineArgumentProvider {
