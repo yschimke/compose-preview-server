@@ -1,5 +1,18 @@
 # Changelog
 
+## [3.94.0](https://github.com/yschimke/compose-preview-server/compare/v3.93.0...v3.94.0) (2026-10-03)
+
+
+### Features
+
+* **serve:** offer the cmp-android player where the bundle carries it, and make the default player configurable ([#1304](https://github.com/yschimke/compose-preview-server/issues/1304)) ([d52a80a](https://github.com/yschimke/compose-preview-server/commit/d52a80aaf2405c9b0908b5130e58d8baf433c8a1))
+
+
+### Bug Fixes
+
+* **deps:** compose-ui-builder 3.76.0 ([#1307](https://github.com/yschimke/compose-preview-server/issues/1307)) ([1fe926a](https://github.com/yschimke/compose-preview-server/commit/1fe926a7048ff779bc14620bc00fc9810e3bfb09))
+* **serve:** ship the cmp-jvm lane's fonts so google:Roboto Flex resolves on a server install ([#1302](https://github.com/yschimke/compose-preview-server/issues/1302)) ([8c862b2](https://github.com/yschimke/compose-preview-server/commit/8c862b2e3b1530f7cff35ff9601ec03293026390))
+
 ## [3.93.0](https://github.com/yschimke/compose-preview-server/compare/v3.92.0...v3.93.0) (2026-10-03)
 
 
