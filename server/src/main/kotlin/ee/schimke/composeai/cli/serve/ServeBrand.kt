@@ -118,21 +118,46 @@ internal object ServeBrand {
     g.color = MARK_BG
     g.fill(Ellipse2D.Double(x, y, size, size))
     // The glyph occupies a little over half the container, matching the CSS mark's 0.9rem-in-32px.
-    val r = size * 0.28
-    val cx = x + size / 2
-    val cy = y + size / 2
-    val diamond =
-      Path2D.Double().apply {
-        moveTo(cx, cy - r)
-        lineTo(cx + r, cy)
-        lineTo(cx, cy + r)
-        lineTo(cx - r, cy)
-        closePath()
-      }
     g.color = MARK_FG
     g.stroke = BasicStroke((size * 0.075).toFloat(), BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND)
-    g.draw(diamond)
+    g.draw(diamond(x + size / 2, y + size / 2, size * 0.28))
   }
+
+  /**
+   * The mark's glyph alone — the `◇` without its container — in white on transparency, filling a
+   * [size]-square box at ([x], [y]). This is the monochrome form an alpha-mask surface wants (the
+   * Android status bar's notification badge, a themed launcher icon): such a surface throws the
+   * colour away and keeps only the alpha, so the round container would read as a solid blob and the
+   * diamond inside it would vanish. Dropping the container and keeping the glyph is the same
+   * translation Android's own themed icons make.
+   *
+   * Drawn for legibility at 24dp rather than copied at [drawMark]'s proportions: the diamond fills
+   * the live area inside a 1/12 margin (Android's 2dp of 24), and the stroke is 11% of the box —
+   * about 2.6px at 24px, where [drawMark]'s 7.5% would thin out to under 2px and shimmer.
+   */
+  fun drawMonochromeGlyph(g: Graphics2D, x: Double, y: Double, size: Double) {
+    val stroke = size * MONO_STROKE
+    // A round join puts the vertex's outer edge half a stroke beyond the path's own corner.
+    val r = size / 2 - size * MONO_MARGIN - stroke / 2
+    g.color = Color.WHITE
+    g.stroke = BasicStroke(stroke.toFloat(), BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND)
+    g.draw(diamond(x + size / 2, y + size / 2, r))
+  }
+
+  /** [drawMonochromeGlyph]'s margin and stroke, as fractions of the box. */
+  const val MONO_MARGIN = 1.0 / 12
+
+  const val MONO_STROKE = 0.11
+
+  /** The mark's diamond: a square on its point, centred on ([cx], [cy]) with half-diagonal [r]. */
+  private fun diamond(cx: Double, cy: Double, r: Double): Path2D.Double =
+    Path2D.Double().apply {
+      moveTo(cx, cy - r)
+      lineTo(cx + r, cy)
+      lineTo(cx, cy + r)
+      lineTo(cx - r, cy)
+      closePath()
+    }
 
   // --- Encoding --------------------------------------------------------------------------------
 

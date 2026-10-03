@@ -194,8 +194,16 @@ class ServeTopLevelSiteTest {
     val mainJson = kotlinx.serialization.json.Json.parseToJsonElement(main).jsonObject
     assertEquals("Compose Preview", mainJson.getValue("name").jsonPrimitive.content)
 
-    // The screenshots the manifest names are served on the site host too.
-    for (path in listOf("/icons/screenshot-narrow.png", "/icons/screenshot-wide.png")) {
+    // The screenshots the manifest names are served on the site host too…
+    // …and so are its icons, the monochrome badge included: the push worker on a site host asks
+    // its own origin for it.
+    for (path in
+      listOf(
+        "/icons/screenshot-narrow.png",
+        "/icons/screenshot-wide.png",
+        ServeSiteIcon.APP_ICON_192_PATH,
+        ServeSiteIcon.BADGE_PATH,
+      )) {
       assertEquals(200, get(path, host = siteHost).first, path)
     }
   }

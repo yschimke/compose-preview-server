@@ -153,6 +153,78 @@ class ServeSiteIconTest {
   }
 
   /**
+   * The notification badge is an alpha mask on Android's status bar: whatever is opaque is tinted
+   * and the colour is thrown away. So it has to be a glyph on transparency — a full-colour round
+   * icon (what the push worker used before) shows as a solid white disc — and it has to be neither
+   * blank nor solid, which is what the coverage bounds pin.
+   */
+  @Test
+  fun `the badge is a white glyph on transparency at 96 pixels`() {
+    val icon = ServeSiteIcon.badgeIcon
+    assertEquals("image/png", icon.contentType)
+    val image = assertNotNull(ImageIO.read(ByteArrayInputStream(icon.bytes)))
+    assertEquals(96, image.width)
+    assertEquals(96, image.height)
+    assertTrue(image.colorModel.hasAlpha(), "the badge carries an alpha channel")
+
+    var opaque = 0.0
+    for (y in 0 until image.height) {
+      for (x in 0 until image.width) {
+        val argb = image.getRGB(x, y)
+        val alpha = argb ushr 24
+        if (alpha == 0) continue
+        val r = (argb shr 16) and 0xff
+        val g = (argb shr 8) and 0xff
+        val b = argb and 0xff
+        assertTrue(
+          r >= 0xf0 && g >= 0xf0 && b >= 0xf0,
+          "pixel ($x,$y) is #%06x at alpha $alpha — a badge pixel is white or nothing"
+            .format(argb and 0xffffff),
+        )
+        opaque += alpha / 255.0
+      }
+    }
+    val coverage = opaque / (image.width * image.height)
+    assertTrue(coverage in 0.15..0.6, "coverage $coverage: neither blank nor a solid block")
+
+    // A transparent margin all round (Android's 2dp of 24) and a transparent centre: the glyph is
+    // the diamond's outline, so the badge reads as the mark rather than as a filled blob.
+    for (i in 0 until image.width) {
+      for (edge in listOf(0, 1, image.width - 2, image.width - 1)) {
+        assertEquals(0, image.getRGB(i, edge) ushr 24, "edge pixel ($i,$edge)")
+        assertEquals(0, image.getRGB(edge, i) ushr 24, "edge pixel ($edge,$i)")
+      }
+    }
+    assertEquals(0, image.getRGB(48, 48) ushr 24, "the diamond is hollow")
+    // …and the stroke itself is solid at the vertices' midline, not a hairline.
+    assertEquals(0xff, image.getRGB(48, 14) ushr 24, "the top of the diamond is opaque")
+  }
+
+  /**
+   * The manifest's `monochrome` icon is the badge: the same alpha-only contract, the same bytes.
+   */
+  @Test
+  fun `the manifest declares the badge as its monochrome icon`() {
+    val manifest =
+      ServeSiteIcon.manifest(
+        name = "Compose Preview",
+        shortName = "Compose Preview",
+        startUrl = "/",
+        shortcuts = emptyList(),
+      )
+    val icons =
+      kotlinx.serialization.json.Json.parseToJsonElement(manifest.bytes.decodeToString())
+        .jsonObject
+        .getValue("icons")
+        .jsonArray
+        .map { it.jsonObject }
+    val mono = icons.single { it.getValue("purpose").jsonPrimitive.content == "monochrome" }
+    assertEquals(ServeSiteIcon.BADGE_PATH, mono.getValue("src").jsonPrimitive.content)
+    assertEquals("96x96", mono.getValue("sizes").jsonPrimitive.content)
+    assertEquals("image/png", mono.getValue("type").jsonPrimitive.content)
+  }
+
+  /**
    * The installed app's richer install UI and launch behaviour: a second launch focuses the window
    * already open, the install dialog has a phone and a desktop screenshot that are actually served,
    * and the display override never asks for a window-controls overlay the header cannot host.

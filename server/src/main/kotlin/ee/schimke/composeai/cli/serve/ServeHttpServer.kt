@@ -1711,6 +1711,8 @@ class ServeHttpServer(
         get(ServeSiteIcon.APP_ICON_192_PATH) { respondSiteIcon(ServeSiteIcon.appIcon192) }
         get(ServeSiteIcon.APP_ICON_512_PATH) { respondSiteIcon(ServeSiteIcon.appIcon512) }
         get(ServeSiteIcon.MASKABLE_ICON_PATH) { respondSiteIcon(ServeSiteIcon.maskableIcon) }
+        // The push notification's status-bar badge, also the manifest's `monochrome` icon.
+        get(ServeSiteIcon.BADGE_PATH) { respondSiteIcon(ServeSiteIcon.badgeIcon) }
         // Installable as an app ([ServeSiteIcon.manifest]). Ungated like the icons it names: the
         // browser fetches it without the page's query string, and it describes nothing private.
         //

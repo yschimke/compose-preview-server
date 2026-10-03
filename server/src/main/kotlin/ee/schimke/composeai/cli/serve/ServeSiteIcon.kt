@@ -50,6 +50,12 @@ internal object ServeSiteIcon {
   /** The same mark inside a launcher's safe zone ([maskableIcon]). */
   const val MASKABLE_ICON_PATH = "/icons/app-maskable-512.png"
 
+  /** The notification badge ([badgeIcon]): the glyph alone, white on transparency. */
+  const val BADGE_PATH = "/icons/badge-96.png"
+
+  /** Android's recommended badge size: 24dp at xxxhdpi, and still crisp scaled to 72 at xxhdpi. */
+  const val BADGE_SIZE = 96
+
   /** The manifest's install-dialog [screenshots], one per form factor. */
   const val SCREENSHOT_NARROW_PATH = "/icons/screenshot-narrow.png"
 
@@ -155,6 +161,31 @@ internal object ServeSiteIcon {
     Icon(bytes, "image/png", etagOf(bytes))
   }
 
+  /**
+   * The notification badge: [ServeBrand.drawMonochromeGlyph], [BADGE_SIZE] square, white on a
+   * transparent ground.
+   *
+   * Android draws a notification's `badge` in the status bar as an **alpha mask** — it discards the
+   * colour and tints whatever is opaque. The push worker used [appIcon192] for it before this, and
+   * a full-colour round icon is opaque edge to edge, so the status bar showed a solid white disc.
+   * This is the mark's diamond with its container dropped, at a stroke that holds up at 24dp.
+   *
+   * It is also the manifest's `monochrome` icon, which is the same contract: only the alpha is
+   * read. Chrome packages that one into an installed WebAPK as its notification icon.
+   */
+  val badgeIcon: Icon by lazy {
+    val image = BufferedImage(BADGE_SIZE, BADGE_SIZE, BufferedImage.TYPE_INT_ARGB)
+    val g = image.createGraphics()
+    try {
+      ServeBrand.quality(g)
+      ServeBrand.drawMonochromeGlyph(g, 0.0, 0.0, BADGE_SIZE.toDouble())
+    } finally {
+      g.dispose()
+    }
+    val bytes = ServeBrand.encodePng(image) ?: ByteArray(0)
+    Icon(bytes, "image/png", etagOf(bytes))
+  }
+
   /** One launcher shortcut — the long-press / right-click menu of the installed app. */
   data class Shortcut(val name: String, val url: String, val description: String)
 
@@ -243,6 +274,8 @@ internal object ServeSiteIcon {
             icon(APP_ICON_512_PATH, "512x512", "image/png", "any")
             icon(MASKABLE_ICON_PATH, "512x512", "image/png", "maskable")
             icon(SVG_PATH, "any", "image/svg+xml", "any")
+            // Alpha only, per the spec's `monochrome` purpose — which is exactly what the badge is.
+            icon(BADGE_PATH, "${BADGE_SIZE}x$BADGE_SIZE", "image/png", "monochrome")
           },
         )
         // What the install dialog shows beside the name. Committed captures of the catalog page,
