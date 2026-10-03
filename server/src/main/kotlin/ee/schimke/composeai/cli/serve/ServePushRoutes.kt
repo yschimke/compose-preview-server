@@ -1,6 +1,8 @@
 package ee.schimke.composeai.cli.serve
 
 import io.ktor.http.ContentType
+import io.ktor.http.Cookie
+import io.ktor.http.CookieEncoding
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.ApplicationCall
@@ -41,7 +43,10 @@ internal constructor(
  *
  * * `GET /api/push/key` — the VAPID public key a browser subscribes with, and the kinds on offer.
  *   Ungated: the key is public by design, and the page reads it before anybody is asked anything.
- * * `POST` / `DELETE /api/push/subscribe` — store or forget this browser's subscription.
+ * * `POST` / `DELETE /api/push/subscribe` — store or forget this browser's subscription. `POST` is
+ *   idempotent and binds the endpoint to whoever is signed in now, answering that person's kinds;
+ *   the settings page re-posts on every load, so a browser that changed hands is rebound before it
+ *   is shown as on. Omitting `kinds` keeps the person's choice; sending them sets it everywhere.
  * * `GET` / `PUT /api/push/preferences` — the kinds the signed-in person wants, on every device.
  *
  * Every route but the key wants a GitHub sign-in, and every write is refused from a page this
@@ -80,11 +85,17 @@ internal fun Route.installPushRoutes(lane: ServePushLane, siteHosts: () -> Set<S
     when (result) {
       is PushSubscribeResult.Refused ->
         call.respondPushError(HttpStatusCode.UnprocessableEntity, result.reason)
-      is PushSubscribeResult.Stored ->
+      is PushSubscribeResult.Stored -> {
+        // Names this browser's subscription to the sign-out route, which drops it: see
+        // [forgetSignedOutBrowser].
+        call.response.cookies.append(
+          pushDeviceCookie(ServePushSubscriptionStore.deviceOf(result.subscription.endpoint), call)
+        )
         call.respondPush(
           preferencesOf(lane, actor),
           HttpStatusCode.Created,
         )
+      }
     }
   }
 
@@ -99,6 +110,7 @@ internal fun Route.installPushRoutes(lane: ServePushLane, siteHosts: () -> Set<S
       call.respondPushError(HttpStatusCode.NotFound, "this browser is not subscribed")
       return@delete
     }
+    call.response.cookies.append(pushDeviceCookie("", call))
     call.respondPush(preferencesOf(lane, actor))
   }
 
@@ -115,6 +127,42 @@ internal fun Route.installPushRoutes(lane: ServePushLane, siteHosts: () -> Set<S
     call.respondPush(preferencesOf(lane, actor).copy(kinds = kinds.map { it.wire }.sorted()))
   }
 }
+
+/**
+ * Sign-out's half of push: drop the subscription this browser bound to the person signing out.
+ *
+ * A push subscription belongs to the browser's origin, not to the session, so it outlives a
+ * sign-out — and without this, whoever used the browser next would keep receiving the previous
+ * person's replies, mentions and reviews, design titles included. The server learns which
+ * subscription is this browser's from [PUSH_DEVICE_COOKIE], which the subscribe response set to a
+ * hash of the endpoint; only a subscription of the actor whose session is ending is touched. The
+ * settings page also unsubscribes before it submits the sign-out
+ * (`serve-web/src/push/settings.ts`), so this is the half that holds when that script did not get
+ * to run.
+ */
+internal suspend fun ServePushLane.forgetSignedOutBrowser(call: ApplicationCall) {
+  val device = call.request.cookies[PUSH_DEVICE_COOKIE]?.takeIf { it.isNotBlank() } ?: return
+  actorOf(call)?.let { actor ->
+    withContext(Dispatchers.IO) { store.unsubscribeDevice(actor, device) }
+  }
+  call.response.cookies.append(pushDeviceCookie("", call))
+}
+
+/**
+ * [PUSH_DEVICE_COOKIE], set to [device] or, empty, cleared. Host-only like the subscription it
+ * names, which belongs to this origin; `HttpOnly`, because nothing in a page needs to read it.
+ */
+private fun pushDeviceCookie(device: String, call: ApplicationCall): Cookie =
+  Cookie(
+    name = PUSH_DEVICE_COOKIE,
+    value = device,
+    path = "/",
+    maxAge = if (device.isEmpty()) 0 else PUSH_DEVICE_COOKIE_MAX_AGE_SECONDS,
+    secure = isSecure(call),
+    httpOnly = true,
+    encoding = CookieEncoding.RAW,
+    extensions = mapOf("SameSite" to "Lax"),
+  )
 
 private fun preferencesOf(lane: ServePushLane, actor: String): PushPreferencesResponse =
   PushPreferencesResponse(
@@ -225,6 +273,12 @@ internal data class PushPreferencesResponse(
 internal const val PUSH_KEY_PATH = "/api/push/key"
 internal const val PUSH_SUBSCRIBE_PATH = "/api/push/subscribe"
 internal const val PUSH_PREFERENCES_PATH = "/api/push/preferences"
+
+/** Which of the signed-in person's subscriptions is this browser's: [forgetSignedOutBrowser]. */
+internal const val PUSH_DEVICE_COOKIE = "cp_push_device"
+
+/** About a year: the cookie only has to live as long as the subscription it names. */
+private const val PUSH_DEVICE_COOKIE_MAX_AGE_SECONDS = 400 * 24 * 60 * 60
 
 /** Where the push service worker lives: the root, so its scope can be `/`. */
 internal const val PUSH_SERVICE_WORKER_PATH = "/push-sw.js"

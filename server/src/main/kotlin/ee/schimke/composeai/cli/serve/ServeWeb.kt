@@ -1002,7 +1002,7 @@ object ServeWeb {
         <legend class="cp-settings-legend">Session</legend>
         <p class="cp-settings-hint">Signed in to GitHub as ${WebEscaping.htmlEscape(login)}.</p>
         <div class="cp-settings-session-actions">
-          <form method="post" action="${WebEscaping.htmlEscape(logoutHref)}">
+          <form method="post" action="${WebEscaping.htmlEscape(logoutHref)}" data-cp-push-signout>
             <button type="submit" class="cp-settings-tour">Sign out</button>
           </form>
           <a class="cp-settings-session-switch"

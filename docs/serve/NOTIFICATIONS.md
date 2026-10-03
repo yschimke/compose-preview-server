@@ -111,8 +111,15 @@ thread.
   wrote it, because it is shown on a lock screen. Open the link to see the rest — it opens only
   for somebody who may read the design.
 - **Turning it off** deletes the subscription on the server, unsubscribes the browser and removes
-  the push service worker. Signing in as somebody else in the same browser and turning
-  notifications on moves that browser's subscription to the new account.
+  the push service worker.
+- **A shared browser.** A subscription belongs to the browser, not to the session, so it survives
+  a change of account. **Signing out** (Settings → Session) turns it off first — the page
+  unsubscribes before the sign-out is sent, and the server also drops the subscription this
+  browser bound to you, named by a `cp_push_device` cookie (an `HttpOnly` SHA-256 of the
+  endpoint, never the endpoint itself) that subscribing set. When somebody else signs in on a
+  browser that still holds a subscription, every page load re-posts it, which moves it to them
+  before Settings shows notifications as on, so the previous person's notifications stop arriving
+  there.
 
 ## How it fits together
 

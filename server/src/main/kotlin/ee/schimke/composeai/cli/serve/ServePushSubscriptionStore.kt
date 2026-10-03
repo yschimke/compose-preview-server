@@ -18,6 +18,7 @@ import java.nio.file.attribute.FileTime
 import java.nio.file.attribute.PosixFileAttributeView
 import java.nio.file.attribute.PosixFilePermissions
 import java.security.KeyPair
+import java.security.MessageDigest
 import java.security.Signature
 import java.util.concurrent.ConcurrentHashMap
 import kotlinx.serialization.Serializable
@@ -212,6 +213,15 @@ internal class ServePushSubscriptionStore(
     it.endpoint == endpoint && it.actor == actor
   }
 
+  /**
+   * Remove [actor]'s subscription whose endpoint [deviceOf] answers [device]: what a sign-out
+   * drops, from the device cookie the subscribe response set in that browser. False when nothing of
+   * theirs matched.
+   */
+  fun unsubscribeDevice(actor: String, device: String): Boolean = removeWhere {
+    it.actor == actor && deviceOf(it.endpoint) == device
+  }
+
   /** Every one of [actor]'s devices takes [kinds]; answers how many devices that was. */
   fun setKinds(actor: String, kinds: Set<PushKind>): Int = exclusive {
     val current = load()
@@ -355,6 +365,15 @@ internal class ServePushSubscriptionStore(
     }
 
     private val PROCESS_LOCKS = ConcurrentHashMap<Path, Any>()
+
+    /**
+     * The value of the device cookie for [endpoint]: a SHA-256 of it, so the cookie names this
+     * browser's subscription without carrying the endpoint, which is a secret.
+     */
+    fun deviceOf(endpoint: String): String =
+      MessageDigest.getInstance("SHA-256")
+        .digest(endpoint.toByteArray(StandardCharsets.UTF_8))
+        .joinToString("") { (it.toInt() and 0xff).toString(16).padStart(2, '0') }
 
     /**
      * [text] into [target] via a temporary file that is created `0600`, then moved into place, so

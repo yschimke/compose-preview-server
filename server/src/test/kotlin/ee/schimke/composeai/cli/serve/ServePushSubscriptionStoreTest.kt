@@ -185,6 +185,19 @@ class ServePushSubscriptionStoreTest {
   }
 
   @Test
+  fun `a sign-out drops only the signing-out person's subscription named by the device cookie`() {
+    val store = store()
+    store.subscribe("github:alice", ENDPOINT, browserKey, auth, null)
+    store.subscribe("github:alice", "$ENDPOINT-2", browserKey, auth, null)
+    val device = ServePushSubscriptionStore.deviceOf(ENDPOINT)
+    assertFalse(ENDPOINT in device, "the device id must not carry the endpoint")
+    assertFalse(store.unsubscribeDevice("github:bob", device))
+    assertTrue(store.unsubscribeDevice("github:alice", device))
+    assertEquals(listOf("$ENDPOINT-2"), store.all().map { it.endpoint })
+    assertFalse(store.unsubscribeDevice("github:alice", device))
+  }
+
+  @Test
   fun `two stores over one directory — a rolling deployment — lose neither one's writes`() {
     // Both replicas start, and each reads the file once, before either writes.
     val old = store()

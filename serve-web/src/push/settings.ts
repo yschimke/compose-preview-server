@@ -11,8 +11,14 @@
 //   scope `/`. It handles `push` and `notificationclick` and nothing else — no `fetch` — so it
 //   cannot change how any page loads, and the UI builder's own `/ui-builder/` worker, being the
 //   more specific scope, keeps controlling the editor. Turning notifications off unregisters it.
-// * **Nothing about a subscription is shown.** The endpoint and keys go to the server once, in the
+// * **Nothing about a subscription is shown.** The endpoint and keys go to the server in the
 //   subscribe request, and the page only ever reads back the kinds and a device count.
+//
+// A subscription belongs to the browser's origin, not to whoever is signed in, so it outlives a
+// change of account. Two things keep it from delivering one person's notifications to the next:
+// on every load an existing subscription is posted again — idempotent on the server, and it binds
+// the endpoint to the person signed in now — and is shown as on only once the server has said so;
+// and Settings → Session → Sign out turns it off before the session ends.
 
 import {
     applicationServerKey,
@@ -31,6 +37,8 @@ export interface PushBrowser {
     getRegistration(
         scope: string,
     ): Promise<ServiceWorkerRegistration | undefined>;
+    /** Submit [form] for real — the sign-out, once this browser's subscription is gone. */
+    submit(form: HTMLFormElement): void;
 }
 
 export function liveBrowser(): PushBrowser {
@@ -42,6 +50,9 @@ export function liveBrowser(): PushBrowser {
             navigator.serviceWorker.register(url, { scope }),
         getRegistration: (scope) =>
             navigator.serviceWorker.getRegistration(scope),
+        // `submit()`, not `requestSubmit()`: it does not fire `submit` again, so the handler
+        // that called it is not re-entered.
+        submit: (form) => form.submit(),
     };
 }
 
@@ -269,12 +280,68 @@ async function savePreferences(
     );
 }
 
-/** Reflect what this browser already has, without asking it anything new. */
+/**
+ * Post this browser's existing subscription again, binding it to whoever is signed in now.
+ *
+ * The browser keeps a subscription across a change of account, so finding one proves only that
+ * *somebody* turned notifications on here. The server's answer is what says it is now this
+ * person's: the post is idempotent for the same person, and for a different one it moves the
+ * endpoint to them, so the previous person's notifications stop arriving. No `kinds` are sent, so
+ * the person's own choice stands. Answers the kinds on success, or the reason it was not bound.
+ */
+async function rebind(
+    group: Group,
+    browser: PushBrowser,
+    subscription: PushSubscription,
+): Promise<{ kinds: string[] | null } | { refused: string; status: number }> {
+    const response = await browser.fetch(group.subscribeUrl, {
+        method: "POST",
+        credentials: "same-origin",
+        headers: JSON_HEADERS,
+        body: JSON.stringify(subscription.toJSON()),
+    });
+    if (!response.ok) {
+        return { refused: await errorOf(response), status: response.status };
+    }
+    const body = (await response.json()) as { kinds?: string[] };
+    return { kinds: Array.isArray(body.kinds) ? body.kinds : null };
+}
+
+/** Reflect what this browser already has, confirming any subscription with the server first. */
 async function refresh(group: Group, browser: PushBrowser): Promise<void> {
     const subscription =
         browser.permission() === "granted"
             ? await currentSubscription(browser)
             : null;
+    if (subscription) {
+        const bound = await rebind(group, browser, subscription);
+        if ("kinds" in bound) {
+            showKinds(group, bound.kinds, true);
+            setToggle(group, true);
+            setStatus(group, "Notifications are on for this browser.");
+            return;
+        }
+        // The server would not bind it to this person (too many devices, a key it no longer
+        // accepts). It must not keep delivering to whoever it belonged to before, so a refusal
+        // ends it here too; a server error or an outage is only reported, and the next load
+        // tries again.
+        if (bound.status >= 400 && bound.status < 500) {
+            await subscription.unsubscribe().catch(() => undefined);
+        }
+        showKinds(
+            group,
+            await readPreferences(group, browser).catch(() => null),
+            true,
+        );
+        setToggle(group, false);
+        setStatus(
+            group,
+            bound.status >= 400 && bound.status < 500
+                ? `Notifications were turned off for this browser: ${bound.refused}`
+                : "Could not confirm notifications for this browser with the server. Reload to try again.",
+        );
+        return;
+    }
     // The kinds are the person's, shared by all their browsers, so they are shown either way: a
     // second device starts from what the first one chose.
     showKinds(
@@ -282,11 +349,6 @@ async function refresh(group: Group, browser: PushBrowser): Promise<void> {
         await readPreferences(group, browser).catch(() => null),
         true,
     );
-    if (subscription) {
-        setToggle(group, true);
-        setStatus(group, "Notifications are on for this browser.");
-        return;
-    }
     setToggle(group, false);
     if (browser.permission() === "denied") {
         setStatus(
@@ -328,6 +390,55 @@ function wire(group: Group, browser: PushBrowser): void {
     }
 }
 
+/** How long a sign-out waits on the push service before signing out anyway. */
+const SIGN_OUT_GRACE_MS = 3000;
+
+/**
+ * Turn this browser's notifications off before the Session group's Sign out submits.
+ *
+ * Signing out ends the session, not the subscription, and the next person to sign in here — or
+ * nobody — would otherwise go on receiving the person's notifications. The server drops the
+ * subscription on sign-out too, from the device cookie it set at subscribe; this is the half that
+ * also removes it from the browser. Never the thing that stops a sign-out: whatever happens, or
+ * after [SIGN_OUT_GRACE_MS], the form is submitted.
+ */
+function wireSignOut(
+    form: HTMLFormElement,
+    subscribeUrl: string,
+    browser: PushBrowser,
+): void {
+    let leaving = false;
+    form.addEventListener("submit", (event) => {
+        if (leaving) return;
+        event.preventDefault();
+        leaving = true;
+        const forget = (async () => {
+            const registration = await browser.getRegistration(SCOPE);
+            const subscription =
+                await registration?.pushManager?.getSubscription();
+            if (!subscription) return;
+            await browser
+                .fetch(subscribeUrl, {
+                    method: "DELETE",
+                    credentials: "same-origin",
+                    headers: JSON_HEADERS,
+                    body: JSON.stringify({ endpoint: subscription.endpoint }),
+                })
+                .catch(() => undefined);
+            await subscription.unsubscribe();
+            await registration?.unregister();
+        })().catch(() => undefined);
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        const grace = new Promise<void>((resolve) => {
+            timer = setTimeout(resolve, SIGN_OUT_GRACE_MS);
+        });
+        void Promise.race([forget, grace]).then(() => {
+            clearTimeout(timer);
+            browser.submit(form);
+        });
+    });
+}
+
 /**
  * Enhance every Notifications group on the page. Answers a promise that settles once each group
  * shows this browser's current state, which is what a test waits on.
@@ -345,6 +456,18 @@ export function installPushSettings(
         .filter((g): g is Group => g !== null);
     const availability = pushAvailability(env);
     const work: Promise<void>[] = [];
+    if (availability === "ready" && groups.length > 0) {
+        const live = browser ?? liveBrowser();
+        for (const form of Array.from(
+            root.querySelectorAll<HTMLFormElement>(
+                "form[data-cp-push-signout]",
+            ),
+        )) {
+            if (form.hasAttribute("data-cp-push-wired")) continue;
+            form.setAttribute("data-cp-push-wired", "");
+            wireSignOut(form, groups[0].subscribeUrl, live);
+        }
+    }
     for (const group of groups) {
         group.root.setAttribute("data-cp-push-wired", "");
         group.root.setAttribute("data-cp-push-availability", availability);

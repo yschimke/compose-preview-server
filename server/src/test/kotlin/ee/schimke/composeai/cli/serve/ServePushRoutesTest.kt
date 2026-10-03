@@ -29,6 +29,9 @@ import org.junit.jupiter.api.io.TempDir
 class ServePushRoutesTest {
   @TempDir lateinit var root: Path
 
+  /** Who the fake GitHub says signed in; changed between sign-ins to hand the browser over. */
+  @Volatile private var login = "octo"
+
   private val fakeGitHub =
     OkHttpClient.Builder()
       .addInterceptor { chain ->
@@ -36,7 +39,7 @@ class ServePushRoutesTest {
         val body =
           when (request.url.encodedPath) {
             "/login/oauth/access_token" -> """{"access_token":"token"}"""
-            "/user" -> """{"login":"octo"}"""
+            "/user" -> """{"login":"$login"}"""
             else -> """{"private":false,"permissions":{"push":true}}"""
           }
         Response.Builder()
@@ -262,6 +265,92 @@ class ServePushRoutesTest {
       call("DELETE", PUSH_SUBSCRIBE_PATH, """{"endpoint":"$ENDPOINT"}""", cookie).first,
     )
     assertTrue(store.all().isEmpty())
+  }
+
+  /** [method] [path], answering the status, the body and the `Set-Cookie` lines. */
+  private fun exchange(
+    method: String,
+    path: String,
+    body: String,
+    cookie: String,
+  ): Triple<Int, String, List<String>> {
+    val request =
+      Request.Builder()
+        .url(url(path))
+        .header("Cookie", cookie)
+        .header("Origin", "http://127.0.0.1:${server.port}")
+        .method(method, body.toRequestBody("application/json".toMediaType()))
+        .build()
+    return noRedirect.newCall(request).execute().use {
+      Triple(it.code, it.body.string(), it.headers("Set-Cookie"))
+    }
+  }
+
+  private fun kindsOf(body: String): List<String> =
+    Json.parseToJsonElement(body).jsonObject["kinds"]!!.jsonArray.map { it.jsonPrimitive.content }
+
+  private fun deviceCookie(setCookies: List<String>): String =
+    setCookies.first { it.startsWith("$PUSH_DEVICE_COOKIE=") }.substringBefore(";")
+
+  @Test
+  fun `a browser that changes hands is rebound to whoever signs in, and re-posting is idempotent`() {
+    login = "alice"
+    val alice = signIn()
+    val (created, body, cookies) =
+      exchange("POST", PUSH_SUBSCRIBE_PATH, subscription(kinds = ""","kinds":["replies"]"""), alice)
+    assertEquals(201, created, body)
+    assertEquals(
+      "$PUSH_DEVICE_COOKIE=${ServePushSubscriptionStore.deviceOf(ENDPOINT)}",
+      deviceCookie(cookies),
+    )
+    assertFalse(cookies.any { ENDPOINT in it }, "the device cookie carried the endpoint")
+    val stored = store.all().single()
+
+    // What the settings page does on every load: re-post, without kinds. Nothing changes, and the
+    // answer is alice's choice.
+    val (again, againBody, _) = exchange("POST", PUSH_SUBSCRIBE_PATH, subscription(), alice)
+    assertEquals(201, again)
+    assertEquals(listOf("replies"), kindsOf(againBody))
+    assertEquals(listOf(stored), store.all())
+
+    // Bob signs in on the same browser. The page's re-post binds the endpoint to him, so alice's
+    // replies stop arriving here, and what he is shown is his own choice, not hers.
+    login = "bob"
+    val bob = signIn()
+    val (rebound, reboundBody, _) = exchange("POST", PUSH_SUBSCRIBE_PATH, subscription(), bob)
+    assertEquals(201, rebound)
+    assertEquals(listOf("mentions", "replies", "reviews"), kindsOf(reboundBody))
+    assertTrue(store.forActor("github:alice").isEmpty())
+    assertEquals(ENDPOINT, store.forActor("github:bob").single().endpoint)
+  }
+
+  @Test
+  fun `signing out drops the subscription this browser bound to the person signing out`() {
+    login = "alice"
+    val alice = signIn()
+    val (_, _, cookies) = exchange("POST", PUSH_SUBSCRIBE_PATH, subscription(), alice)
+    val device = deviceCookie(cookies)
+    exchange("POST", PUSH_SUBSCRIBE_PATH, subscription(endpoint = "$ENDPOINT-phone"), alice)
+    assertEquals(2, store.forActor("github:alice").size)
+
+    // A sign-out without the device cookie (a browser that never subscribed) touches nothing.
+    assertEquals(302, exchange("POST", ServeGithubAuth.LOGOUT_PATH, "", alice).first)
+    assertEquals(2, store.forActor("github:alice").size)
+
+    // Somebody else's session cannot use the cookie to drop alice's subscription.
+    login = "bob"
+    val bob = signIn()
+    exchange("POST", ServeGithubAuth.LOGOUT_PATH, "", "$bob; $device")
+    assertEquals(2, store.forActor("github:alice").size)
+
+    // Alice signing out of this browser drops this browser's subscription and keeps her phone's.
+    val (status, _, cleared) = exchange("POST", ServeGithubAuth.LOGOUT_PATH, "", "$alice; $device")
+    assertEquals(302, status)
+    assertEquals(listOf("$ENDPOINT-phone"), store.forActor("github:alice").map { it.endpoint })
+    assertTrue(
+      cleared.any { it.startsWith("$PUSH_DEVICE_COOKIE=;") && "Max-Age=0" in it },
+      cleared.toString(),
+    )
   }
 
   @Test

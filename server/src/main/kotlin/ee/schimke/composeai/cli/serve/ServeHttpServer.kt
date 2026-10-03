@@ -1425,7 +1425,11 @@ class ServeHttpServer(
           // POST only, on purpose: see [ServeGithubAuth.handleLogout]. No GET is registered, so a
           // prefetcher or an unfurler that follows the URL gets a 405 rather than signing the
           // visitor out.
-          post(ServeGithubAuth.LOGOUT_PATH) { with(auth) { handleLogout() } }
+          post(ServeGithubAuth.LOGOUT_PATH) {
+            // Before the session cookie is cleared, while it still names who is signing out.
+            push?.forgetSignedOutBrowser(call)
+            with(auth) { handleLogout() }
+          }
         }
 
         // The agent-grant lane (`--agent-grants`): an agent with no credential asks for one, a

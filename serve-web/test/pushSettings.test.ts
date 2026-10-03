@@ -68,6 +68,7 @@ interface Fake {
     permission: NotificationPermission;
     subscribed: boolean;
     unregistered: boolean;
+    submitted: number;
 }
 
 function fake(options: {
@@ -75,6 +76,8 @@ function fake(options: {
     grant?: NotificationPermission;
     subscribed?: boolean;
     kinds?: string[];
+    /** What `POST /api/push/subscribe` answers; 201 by default. */
+    subscribeStatus?: number;
 }): Fake {
     const state: Fake = {
         log: [],
@@ -82,6 +85,7 @@ function fake(options: {
         permission: options.permission ?? "default",
         subscribed: options.subscribed ?? false,
         unregistered: false,
+        submitted: 0,
         browser: undefined as unknown as PushBrowser,
     };
     const subscription = {
@@ -141,10 +145,22 @@ function fake(options: {
                 });
             }
             if (url === "/api/push/subscribe" && method === "POST") {
+                const status = options.subscribeStatus ?? 201;
+                if (status >= 300) {
+                    return json({ error: "refused by the server" }, status);
+                }
                 const sent = JSON.parse(init!.body as string) as {
-                    kinds: string[];
+                    kinds?: string[];
                 };
-                return json({ kinds: sent.kinds, devices: 1 }, 201);
+                // Like the server: no kinds keeps the person's own choice.
+                return json(
+                    {
+                        kinds: sent.kinds ??
+                            options.kinds ?? ["replies", "mentions", "reviews"],
+                        devices: 1,
+                    },
+                    status,
+                );
             }
             return json({ kinds: [], devices: 0 });
         },
@@ -162,6 +178,10 @@ function fake(options: {
             state.subscribed || state.log.some((l) => l.startsWith("register"))
                 ? registration
                 : undefined,
+        submit: () => {
+            state.log.push("submit");
+            state.submitted++;
+        },
     };
     return state;
 }
@@ -325,5 +345,104 @@ describe("Settings → Notifications", () => {
         assert.ok(f.log.includes("unsubscribe"));
         assert.equal(f.unregistered, true);
         assert.equal(toggle().textContent, "Turn on notifications");
+    });
+
+    it("re-posts an existing subscription on load, and shows it on only once the server binds it", async () => {
+        page();
+        // Alice turned notifications on in this browser; Bob has since signed in. His choice is
+        // "mentions" only, and that is what the server answers for him.
+        const f = fake({
+            permission: "granted",
+            subscribed: true,
+            kinds: ["mentions"],
+        });
+        await installPushSettings(document, READY, f.browser);
+        const post = f.requests.find((r) => r.method === "POST")!;
+        assert.equal(post.url, "/api/push/subscribe");
+        const body = JSON.parse(post.body!) as {
+            endpoint: string;
+            kinds?: string[];
+        };
+        assert.equal(
+            body.endpoint,
+            "https://fcm.googleapis.com/fcm/send/secret",
+        );
+        // No kinds: re-binding must not overwrite the signed-in person's choice with the boxes.
+        assert.equal("kinds" in body, false);
+        assert.equal(toggle().textContent, "Turn off notifications");
+        assert.equal(box("mentions").checked, true);
+        assert.equal(box("replies").checked, false);
+        assert.equal(f.log.includes("requestPermission"), false);
+    });
+
+    it("turns a subscription the server will not bind to this person off, here too", async () => {
+        page();
+        const f = fake({
+            permission: "granted",
+            subscribed: true,
+            subscribeStatus: 422,
+        });
+        await installPushSettings(document, READY, f.browser);
+        assert.equal(toggle().textContent, "Turn on notifications");
+        assert.ok(f.log.includes("unsubscribe"));
+        assert.equal(f.subscribed, false);
+        assert.match(status(), /refused by the server/);
+    });
+
+    it("shows a subscription it could not confirm as off, without throwing it away", async () => {
+        page();
+        const f = fake({
+            permission: "granted",
+            subscribed: true,
+            subscribeStatus: 503,
+        });
+        await installPushSettings(document, READY, f.browser);
+        assert.equal(toggle().textContent, "Turn on notifications");
+        assert.equal(f.subscribed, true);
+        assert.match(status(), /Could not confirm/);
+    });
+
+    it("turns notifications off before Sign out submits", async () => {
+        page();
+        document.body.insertAdjacentHTML(
+            "beforeend",
+            `<form method="post" action="/auth/github/logout?return=%2F" data-cp-push-signout>
+               <button type="submit">Sign out</button>
+             </form>`,
+        );
+        const f = fake({ permission: "granted", subscribed: true });
+        await installPushSettings(document, READY, f.browser);
+        f.log.length = 0;
+        const form = document.querySelector("form") as HTMLFormElement;
+        const submit = new Event("submit", { cancelable: true });
+        form.dispatchEvent(submit);
+        assert.equal(submit.defaultPrevented, true);
+        await settle();
+        assert.deepEqual(f.log, [
+            "DELETE /api/push/subscribe",
+            "unsubscribe",
+            "unregister",
+            "submit",
+        ]);
+        const del = f.requests.find((r) => r.method === "DELETE")!;
+        assert.deepEqual(JSON.parse(del.body!), {
+            endpoint: "https://fcm.googleapis.com/fcm/send/secret",
+        });
+    });
+
+    it("signs out straight away when this browser has no subscription", async () => {
+        page();
+        document.body.insertAdjacentHTML(
+            "beforeend",
+            `<form method="post" action="/auth/github/logout" data-cp-push-signout></form>`,
+        );
+        const f = fake({});
+        await installPushSettings(document, READY, f.browser);
+        f.log.length = 0;
+        (document.querySelector("form") as HTMLFormElement).dispatchEvent(
+            new Event("submit", { cancelable: true }),
+        );
+        await settle();
+        assert.deepEqual(f.log, ["submit"]);
     });
 });
