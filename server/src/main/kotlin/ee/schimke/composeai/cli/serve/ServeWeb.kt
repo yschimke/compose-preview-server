@@ -82,6 +82,12 @@ object ServeWeb {
      * (wear-m3-catalog#68).
      */
     val accessRepository: String? = null,
+    /**
+     * Whether this host sends Web Push notifications ([ServePushNotifier]), and so whether the
+     * Settings menu offers a signed-in visitor the **Notifications** group
+     * ([pushNotificationSettings]). False on a host without a UI builder to notify about.
+     */
+    val notifications: Boolean = false,
   )
 
   /** The capability a header sign-in control speaks for. See [GitHubAuthStatus.lane]. */
@@ -989,7 +995,9 @@ object ServeWeb {
   private fun githubSessionSettings(status: GitHubAuthStatus?): String {
     val login = status?.login?.takeIf { it.isNotBlank() } ?: return ""
     val logoutHref = status.logoutHref?.takeIf { it.isNotBlank() } ?: return ""
-    return """
+    val notifications = if (status.notifications) pushNotificationSettings() + "\n" else ""
+    return notifications +
+      """
       <fieldset class="cp-settings-group cp-settings-session">
         <legend class="cp-settings-legend">Session</legend>
         <p class="cp-settings-hint">Signed in to GitHub as ${WebEscaping.htmlEscape(login)}.</p>
@@ -1002,6 +1010,45 @@ object ServeWeb {
         </div>
         <p class="cp-settings-hint">Switching account signs in again through GitHub, which is what
           refreshes what this session is allowed to do. Signing out forgets it in this browser.</p>
+      </fieldset>
+      """
+        .trimIndent()
+  }
+
+  /**
+   * The **Notifications** group: Web Push for the signed-in visitor, one toggle per kind
+   * ([PushKind]) and one button that asks the browser.
+   *
+   * Server-rendered like every other settings group, and inert without `push-settings.js`, which is
+   * emitted right here so only a signed-in visit on a host with push pays for it. The script — not
+   * this markup — decides what the button may offer, because only the browser knows: whether it has
+   * a `PushManager` at all, whether this is an iPhone that must be added to the Home Screen first,
+   * whether the page is on HTTPS, and whether permission was already given or refused. The browser
+   * is asked for permission from that button's click and from nowhere else.
+   */
+  internal fun pushNotificationSettings(): String {
+    val kinds =
+      PushKind.entries.joinToString("\n") { kind ->
+        """
+        <label class="cp-settings-option">
+          <input type="checkbox" data-cp-push-kind="${kind.wire}" checked disabled>
+          <span>${WebEscaping.htmlEscape(kind.label)}</span>
+        </label>
+        """
+          .trimIndent()
+      }
+    return """
+      <fieldset class="cp-settings-group cp-settings-notifications" data-cp-push-settings
+        data-cp-push-key="$PUSH_KEY_PATH" data-cp-push-subscribe="$PUSH_SUBSCRIBE_PATH"
+        data-cp-push-preferences="$PUSH_PREFERENCES_PATH" data-cp-push-worker="$PUSH_SERVICE_WORKER_PATH">
+        <legend class="cp-settings-legend">Notifications</legend>
+        <p class="cp-settings-hint" data-cp-push-status role="status">Get a notification when
+          somebody replies to you, mentions you, or reviews your design — even with this tab
+          closed.</p>
+${kinds.prependIndent("        ")}
+        <button type="button" class="cp-settings-tour" data-cp-push-toggle hidden>Turn on
+          notifications</button>
+        <script src="${assetHref("push-settings.js")}" defer></script>
       </fieldset>
       """
       .trimIndent()

@@ -47,6 +47,12 @@ internal object ServeWebAssets {
       // fraction of visits that file something, and `serve-chrome.js` is on every page including
       // the front door.
       "report-capture.js" to "text/javascript; charset=utf-8",
+      // Settings → Notifications: emitted only beside a signed-in session on a host with Web Push,
+      // so the front door and every signed-out visit pay nothing for it.
+      "push-settings.js" to "text/javascript; charset=utf-8",
+      // The root-scoped push service worker, served at `/push-sw.js` rather than under this
+      // prefix: a worker's scope is bounded by its own path.
+      "push-sw.js" to "text/javascript; charset=utf-8",
       "viewer.js" to "text/javascript; charset=utf-8",
       "spatial-view.js" to "text/javascript; charset=utf-8",
       "format-compare.js" to "text/javascript; charset=utf-8",

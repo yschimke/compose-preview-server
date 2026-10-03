@@ -772,6 +772,33 @@ public interface ServeOptions {
     get() = null
 
   /**
+   * Web Push notifications (`--no-web-push` turns them off). On by default wherever they can work —
+   * a host with GitHub sign-in and a UI builder — because a person still has to sign in and turn
+   * them on per browser before anything is sent. See [ServePushNotifier].
+   */
+  public val webPush: Boolean
+    get() = true
+
+  /**
+   * The VAPID `sub` claim (`--vapid-subject mailto:…|https://…`): who a push service contacts about
+   * this deployment. Defaults to the deployment's own https origin, else the project's page.
+   */
+  public val vapidSubject: String?
+    get() = null
+
+  /**
+   * A pinned VAPID key pair (`--vapid-public-key` / `--vapid-private-key`, base64url, as `web-push
+   * generate-vapid-keys` prints them). Unset generates one on first start and keeps it beside the
+   * UI-builder state. **The private key is a credential**: whoever holds it can push to every
+   * subscriber of this deployment.
+   */
+  public val vapidPublicKey: String?
+    get() = null
+
+  public val vapidPrivateKey: String?
+    get() = null
+
+  /**
    * Which served catalog each UI-builder catalog's designs are **compiled** against for the native
    * preview lane (`--ui-builder-native-catalog <builder catalog>=<served catalog>`).
    *

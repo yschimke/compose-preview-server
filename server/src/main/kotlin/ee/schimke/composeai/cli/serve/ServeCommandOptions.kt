@@ -927,6 +927,43 @@ public class ServeCommandOptions(
         }
       }
 
+  override val webPush: Boolean = "--no-web-push" !in args
+
+  /** Refused unless it is a `mailto:` or an `https:` URL, which is what Apple will accept. */
+  override val vapidSubject: String? =
+    args
+      .flagValue("--vapid-subject")
+      ?.trim()
+      ?.takeIf { it.isNotEmpty() }
+      ?.also { subject ->
+        ServeVapidKeys.subjectRejection(subject)?.let {
+          throw IllegalArgumentException("--vapid-subject $it")
+        }
+      }
+
+  override val vapidPublicKey: String? =
+    args.flagValue("--vapid-public-key")?.trim()?.takeIf { it.isNotEmpty() }
+
+  /** A credential, so a malformed one is refused without echoing it. */
+  override val vapidPrivateKey: String? =
+    args.flagValue("--vapid-private-key")?.trim()?.takeIf { it.isNotEmpty() }
+
+  init {
+    require((vapidPublicKey == null) == (vapidPrivateKey == null)) {
+      "--vapid-public-key and --vapid-private-key are given together or not at all"
+    }
+    vapidPublicKey?.let { key ->
+      require(ServeWebPush.fromBase64Url(key)?.let(ServeWebPush::publicKeyFromRaw) != null) {
+        "--vapid-public-key must be a base64url uncompressed P-256 point"
+      }
+    }
+    vapidPrivateKey?.let { key ->
+      require(ServeWebPush.fromBase64Url(key)?.let(ServeWebPush::privateKeyFromRaw) != null) {
+        "--vapid-private-key must be a base64url 32-byte P-256 key"
+      }
+    }
+  }
+
   /**
    * Which served catalog compiles each UI-builder catalog's designs for the native preview lane.
    *
@@ -1551,6 +1588,17 @@ public class ServeCommandOptions(
                           The body shape --ui-builder-comment-webhook posts. Defaults to plain,
                           this server's own event JSON, for a bespoke receiver or a relay. The
                           other three are the incoming-webhook bodies those chat platforms accept.
+        --no-web-push
+                          Do not offer Web Push notifications. They are otherwise offered on a host
+                          with GitHub sign-in and a UI builder; nothing is sent until a signed-in
+                          person turns them on in Settings. See docs/serve/NOTIFICATIONS.md.
+        --vapid-subject mailto:<address>|https://<url>
+                          Who push services may contact about this deployment. Defaults to the
+                          https origin of --github-auth-callback-base-url, else the project page.
+        --vapid-public-key <base64url> --vapid-private-key <base64url>
+                          Pin the VAPID key pair (both or neither). Unset, one is generated on first
+                          start and kept in the UI-builder state directory. The private key is a
+                          credential.
         --ui-builder-webhook-events comments|fork|decision|implementation|all[,...]
                           What --ui-builder-comment-webhook posts. Defaults to comments. fork is a
                           proposed alternative, decision an approve or reject, implementation the
