@@ -313,10 +313,11 @@ on, and a design keeps exactly one owner. An agent that needs to know which id t
 own from `GET /agent-access/whoami`, which now answers with `actorId` and — when it is acting for
 somebody — `onBehalfOfActorId`.
 
-New designs default to **Private** in the browser and MCP. Creation forms accept `visibility=private`
+The browser's creation forms preselect **Private**. Creation forms accept `visibility=private`
 or `visibility=public`; `ui_builder_create_design` accepts the same optional `visibility` argument.
-The selection overrides `--ui-builder-default-visibility` for that creation, before a public grant
-can be applied. Copies start with their own access list and the selected visibility.
+An explicit selection overrides `--ui-builder-default-visibility` for that creation, before a public
+grant can be applied; a request without one (an older editor, an MCP client that omits it) keeps
+the operator's default. Copies start with their own access list and the selected visibility.
 
 An owner (or their authorized agent) can call `ui_builder_share_design` with `designId` and
 `visibility` instead of `actorId` to change the mode. Public grants only read and export;

@@ -103,7 +103,7 @@ class ServeUiBuilderPublicDesignIntegrationTest {
   fun `an explicit private create never receives the public server default`() = runBlocking {
     val service = service(UiBuilderDefaultVisibility.PUBLIC)
     val created =
-      withDesignCreationVisibility("private") {
+      withDesignCreationVisibility(UiBuilderDefaultVisibility.PRIVATE) {
         service.execute(
           UiBuilderServiceCall(owner, UiBuilderServiceRequest.CreateDesign(document()))
         )
@@ -125,7 +125,7 @@ class ServeUiBuilderPublicDesignIntegrationTest {
   fun `public create and private revocation preserve delegated owner editing`() = runBlocking {
     val service = service(UiBuilderDefaultVisibility.PRIVATE)
     val agent = AuthenticatedUiBuilderActor("agent:owner", onBehalfOfActorId = owner.actorId)
-    withDesignCreationVisibility("public") {
+    withDesignCreationVisibility(UiBuilderDefaultVisibility.PUBLIC) {
       service.execute(UiBuilderServiceCall(owner, UiBuilderServiceRequest.CreateDesign(document())))
     }
     assertIs<UiBuilderServiceResponse.Snapshot>(

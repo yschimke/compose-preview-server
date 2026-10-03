@@ -30,16 +30,23 @@ enum class UiBuilderDefaultVisibility(val wire: String) {
 
   companion object {
     fun parse(value: String?): UiBuilderDefaultVisibility =
+      parseRequested(value, "--ui-builder-default-visibility") ?: PRIVATE
+
+    /**
+     * One request's explicit choice, or null when it made none — in which case the operator's
+     * default applies, not [PRIVATE]: a caller that predates the field (an older editor, an MCP
+     * client that never passes it) must keep getting what the server was configured to give.
+     */
+    fun parseRequested(value: String?, label: String = "visibility"): UiBuilderDefaultVisibility? =
       value
         ?.trim()
         ?.takeIf { it.isNotEmpty() }
         ?.let { raw ->
           entries.firstOrNull { it.wire.equals(raw, ignoreCase = true) }
             ?: throw IllegalArgumentException(
-              "--ui-builder-default-visibility '$raw' is not one of " +
-                entries.joinToString(", ") { it.wire }
+              "$label '$raw' is not one of " + entries.joinToString(", ") { it.wire }
             )
-        } ?: PRIVATE
+        }
   }
 }
 
@@ -137,8 +144,11 @@ internal class CreationVisibility(val value: UiBuilderDefaultVisibility) :
   companion object Key : CoroutineContext.Key<CreationVisibility>
 }
 
-internal suspend fun <T> withDesignCreationVisibility(value: String?, block: suspend () -> T): T =
-  withContext(CreationVisibility(UiBuilderDefaultVisibility.parse(value))) { block() }
+/** Runs [block] with [value] overriding the operator default; null leaves that default in force. */
+internal suspend fun <T> withDesignCreationVisibility(
+  value: UiBuilderDefaultVisibility?,
+  block: suspend () -> T,
+): T = if (value == null) block() else withContext(CreationVisibility(value)) { block() }
 
 internal suspend fun UiBuilderServicePort.setDesignVisibility(
   actor: AuthenticatedUiBuilderActor,
