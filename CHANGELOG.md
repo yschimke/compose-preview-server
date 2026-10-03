@@ -1,5 +1,20 @@
 # Changelog
 
+## [3.95.0](https://github.com/yschimke/compose-preview-server/compare/v3.94.0...v3.95.0) (2026-10-03)
+
+
+### Features
+
+* **serve:** split the compile engine from the public playground ([#1312](https://github.com/yschimke/compose-preview-server/issues/1312)) ([7fce9c1](https://github.com/yschimke/compose-preview-server/commit/7fce9c12a4fa072df8c27938aff61ccf982f2d4c))
+* **serve:** Web Push notifications for replies, mentions and review decisions ([#1306](https://github.com/yschimke/compose-preview-server/issues/1306)) ([fb34af5](https://github.com/yschimke/compose-preview-server/commit/fb34af577c7f82aad348a57ff8c6b7da60923f4d))
+* **ui-builder:** export a themed m3/surface's theme through the server ([#1303](https://github.com/yschimke/compose-preview-server/issues/1303)) ([dda1d3f](https://github.com/yschimke/compose-preview-server/commit/dda1d3fadae2fde17a8aefc100932274707c8e9f))
+
+
+### Bug Fixes
+
+* **deps:** compose-preview-daemon 3.13.1 ([#1311](https://github.com/yschimke/compose-preview-server/issues/1311)) ([e63f172](https://github.com/yschimke/compose-preview-server/commit/e63f1720adc51f36e81c655ebe21dca86b2c3665))
+* **serve:** resume a suspended session without holding the registry lock ([#1313](https://github.com/yschimke/compose-preview-server/issues/1313)) ([21c48c7](https://github.com/yschimke/compose-preview-server/commit/21c48c752583b91dd6085341c395562168e4afc6))
+
 ## [3.94.0](https://github.com/yschimke/compose-preview-server/compare/v3.93.0...v3.94.0) (2026-10-03)
 
 
