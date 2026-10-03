@@ -141,6 +141,13 @@ class ServeSessionRegistry(
      */
     @Volatile var suspendedAt: Long? = null,
     @Volatile var closing: Boolean = false,
+    /**
+     * True while [liveHost] is re-opening this session's host with the registry lock RELEASED.
+     *
+     * The mirror of [closing]: a second caller for the same session waits on [closeFinished] rather
+     * than opening a duplicate host, while callers for every other session go straight through.
+     */
+    @Volatile var opening: Boolean = false,
   ) {
     /** Every open holder, of either kind — the residency question. */
     val leases: Int
@@ -739,7 +746,7 @@ class ServeSessionRegistry(
       if (idleMillis() == null) return 0
       val candidates =
         sessions.values
-          .filter { it.host == null && !it.closing && optimizerUnfinished(it.state) }
+          .filter { it.host == null && !it.closing && !it.opening && optimizerUnfinished(it.state) }
           // Longest-parked first — see [Entry.suspendedAt] for why this is not `lastAccess`.
           .sortedBy { it.suspendedAt ?: Long.MIN_VALUE }
       val resumed = mutableListOf<ServeHost>()
@@ -942,16 +949,53 @@ class ServeSessionRegistry(
    * shutting down, briefly doubling that session's memory and live-seat cost. `await` releases the
    * lock while parked, so the closer (which re-takes it only to clear the flag) still makes
    * progress, and other sessions are unaffected.
+   *
+   * **[open] runs with the lock released.** Re-opening a catalog host resolves its bundle classpath
+   * and launches (and prewarms) an Android daemon — seconds at best, a minute on a loaded box. Held
+   * under the one registry lock, that stalled every request to every *other* session for the whole
+   * open: on preview.coo.ee a warm catalog's landing page went from 0.4 s to 25 s while one
+   * suspended catalog resumed, and the shedder suspends one per sweep under memory pressure, so
+   * this was the steady state rather than an edge. [Entry.opening] keeps the per-session guarantee
+   * the lock used to give for free — one opener per session, a second caller waits for its host —
+   * without serialising unrelated sessions behind it.
+   *
+   * If the entry was retired or replaced, or the registry closed, while the lock was released, the
+   * host just opened belongs to nobody: it is closed (outside the lock again) and null returned.
    */
   private fun liveHost(entry: Entry): ServeHost? {
-    while (entry.closing) closeFinished.awaitUninterruptibly()
+    while (entry.closing || entry.opening) closeFinished.awaitUninterruptibly()
     // The registry may have been closed while we were parked; don't resurrect a daemon into it.
     if (closed) return null
     entry.host?.let {
       return it
     }
     val state = entry.state ?: return null
-    val resumed = open(state) ?: return null
+    entry.opening = true
+    // Every hold this thread has, not one: a caller may have re-entered the lock (e.g.
+    // `resumeIdleOptimizers` → `idleMillis`), and a single unlock would keep it held.
+    val holds = lock.holdCount
+    val resumed =
+      try {
+        repeat(holds) { lock.unlock() }
+        try {
+          open(state)
+        } finally {
+          repeat(holds) { lock.lock() }
+        }
+      } finally {
+        entry.opening = false
+        closeFinished.signalAll()
+      }
+    if (resumed == null) return null
+    if (closed || sessions.values.none { it === entry }) {
+      repeat(holds) { lock.unlock() }
+      try {
+        runCatching { resumed.close() }
+      } finally {
+        repeat(holds) { lock.lock() }
+      }
+      return null
+    }
     entry.host = resumed
     entry.startedAt = clock()
     return resumed

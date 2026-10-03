@@ -140,6 +140,91 @@ class ServeSessionRegistryTest {
       }
   }
 
+  /**
+   * Re-opening a suspended catalog launches its daemon — seconds to a minute. That used to run
+   * under the one registry lock, so on preview.coo.ee a warm catalog's landing page took 25 s
+   * instead of 0.4 s whenever any other catalog was resuming. A slow open must hold up only its own
+   * session.
+   */
+  @Test
+  fun `a slow resume of one session does not stall another`() {
+    val opener = Opener()
+    val openStarted = CountDownLatch(1)
+    val releaseOpen = CountDownLatch(1)
+    val slowOpener: (ServeSessionState) -> ServeHost? = { state ->
+      if (state.label == "slow") {
+        openStarted.countDown()
+        // Bounded, so a regression fails rather than hanging CI.
+        releaseOpen.await(10, TimeUnit.SECONDS)
+      }
+      opener(state)
+    }
+    ServeSessionRegistry(open = slowOpener, reaperIntervalMillis = 0).use { reg ->
+      try {
+        reg.register("slow", stateFor("slow"))
+        reg.register("fast", stateFor("fast"))
+
+        val first = AtomicReference<ServeHost?>(null)
+        val second = AtomicReference<ServeHost?>(null)
+        val firstThread = Thread { first.set(reg.lease("slow")?.host) }.apply { start() }
+        assertTrue(openStarted.await(5, TimeUnit.SECONDS), "the slow open started")
+        val secondThread = Thread { second.set(reg.acquire("slow")) }.apply { start() }
+
+        // While "slow" is still opening, an unrelated session leases straight through.
+        val fastLeased = CountDownLatch(1)
+        Thread { reg.lease("fast")?.let { fastLeased.countDown() } }.start()
+        assertTrue(
+          fastLeased.await(2, TimeUnit.SECONDS),
+          "another session must not wait behind a slow open",
+        )
+        assertNull(reg.peekHost("slow"), "the slow session is not resident until its open returns")
+
+        releaseOpen.countDown()
+        firstThread.join(5_000)
+        secondThread.join(5_000)
+        assertNotNull(first.get())
+        assertSame(first.get(), second.get(), "a concurrent caller shares the one opened host")
+        assertEquals(2, opener.opened.get(), "one open per session, never a duplicate")
+      } finally {
+        releaseOpen.countDown()
+      }
+    }
+  }
+
+  @Test
+  fun `a host opened for a session retired mid-open is closed, not leaked`() {
+    val openStarted = CountDownLatch(1)
+    val releaseOpen = CountDownLatch(1)
+    val closed = AtomicBoolean(false)
+    val opener = Opener()
+    val slowOpener: (ServeSessionState) -> ServeHost? = { state ->
+      openStarted.countDown()
+      releaseOpen.await(10, TimeUnit.SECONDS)
+      val delegate = opener(state)
+      object : ServeHost by delegate {
+        override fun close() {
+          closed.set(true)
+          delegate.close()
+        }
+      }
+    }
+    ServeSessionRegistry(open = slowOpener, reaperIntervalMillis = 0).use { reg ->
+      try {
+        reg.register("a", stateFor("a"))
+        val result = AtomicReference<ServeHost?>(null)
+        val leaser = Thread { result.set(reg.acquire("a")) }.apply { start() }
+        assertTrue(openStarted.await(5, TimeUnit.SECONDS))
+        assertTrue(reg.unregister("a"), "retiring does not wait for the open")
+        releaseOpen.countDown()
+        leaser.join(5_000)
+        assertNull(result.get(), "a retired session hands out no host")
+        assertTrue(closed.get(), "the orphaned host was closed")
+      } finally {
+        releaseOpen.countDown()
+      }
+    }
+  }
+
   @Test
   fun `a reserved route name is never bound to a session`() {
     // No entry in `sessions` may be named after one of the server's own top-level routes — a
