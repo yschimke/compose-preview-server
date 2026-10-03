@@ -187,7 +187,10 @@ composeai-tools = "2.32.2"
 # changed-region APNG frames with per-frame delays (#207), advances animated and interaction captures
 # by the exact frame interval (#203, #206) and distributes GIF frame-delay rounding so playback keeps
 # the captured timeline (#204). No API this server calls changed.
-composeai-preview-daemon = "3.13.0"
+# 3.13.1 gives the `cmp-android` player the pinned Robolectric clock the AndroidX backends already
+# get (compose-preview-daemon#209), so its live renders settle instead of waiting on a frame clock
+# that never goes idle. That is a precondition for `--rc-default-player cmp-android`.
+composeai-preview-daemon = "3.13.1"
 # 2.9.0 is the first release carrying `DesignEnvironmentV1.exportDevices` and its Set/Reset
 # changes, which is the field a design names its export devices in. 2.14.0 adds the components a
 # design defines — `DesignDocumentV1.components`, `DesignNodeV1.component` and the `binding` value
