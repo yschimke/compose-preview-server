@@ -64,6 +64,16 @@ private constructor(
     )
 
   companion object {
+    /**
+     * The system property naming the directory of Google Fonts files the bundle's preview draws a
+     * design's typefaces from — `PackagedUiBuilderRenderBundle.GOOGLE_FONTS_DIRECTORY_PROPERTY`
+     * upstream, spelled out here because that constant first ships in compose-ui-builder 3.79.0 and
+     * the catalog still pins 3.78.0: referencing it left `:server` uncompilable on `main`. A
+     * renderer bundle that does not read the property ignores it. Switch to the upstream constant
+     * once `composeai-ui-builder` is 3.79.0 or later.
+     */
+    private const val GOOGLE_FONTS_DIRECTORY_PROPERTY = "uiBuilder.googleFontsDir"
+
     fun open(
       root: Path,
       fonts: ServeGoogleFonts? = null,
@@ -91,12 +101,8 @@ private constructor(
           label = "UI builder renderer",
           // Where the preview reads the families the bundle does not vendor from.
           systemPropertyOverrides =
-            fonts?.let {
-              mapOf(
-                PackagedUiBuilderRenderBundle.GOOGLE_FONTS_DIRECTORY_PROPERTY to
-                  it.cacheDirectory.absolutePath
-              )
-            } ?: emptyMap(),
+            fonts?.let { mapOf(GOOGLE_FONTS_DIRECTORY_PROPERTY to it.cacheDirectory.absolutePath) }
+              ?: emptyMap(),
           onLog = onLog,
         ),
         fonts,
