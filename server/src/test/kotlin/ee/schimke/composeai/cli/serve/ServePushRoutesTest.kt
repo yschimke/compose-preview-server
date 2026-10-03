@@ -369,6 +369,7 @@ class ServePushRoutesTest {
         "the push worker must not handle fetch",
       )
       assertTrue(ServeSiteIcon.APP_ICON_192_PATH in script)
+      assertTrue(ServeSiteIcon.BADGE_PATH in script, "the badge is the monochrome glyph")
     }
   }
 
