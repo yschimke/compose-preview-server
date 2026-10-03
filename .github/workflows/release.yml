@@ -281,6 +281,8 @@ jobs:
     permissions:
       contents: write
       pull-requests: write
+    outputs:
+      pr: ${{ steps.rp.outputs.pr }}
     env:
       GH_TOKEN: ${{ github.token }}
     steps:
@@ -326,3 +328,31 @@ jobs:
         run: |
           echo "::error::release-please failed and no release was in flight — see the step above."
           exit 1
+
+  # CI for the release PR. release-please writes that PR with `github.token`, and GitHub starts no
+  # workflow from an event that token causes, so the PR's `pull_request` CI never ran and its
+  # required checks were missing. A `workflow_dispatch` is the one event that token may still start
+  # (`Regenerate goldens` relies on the same exception), and the runs it starts report on the release
+  # branch's head commit, which is what the PR's required checks read. Dispatched after every pass
+  # that wrote the PR, so a rewritten release PR is built again.
+  release-pr-ci:
+    needs: update-release-pr
+    if: ${{ !cancelled() && needs.update-release-pr.result == 'success' && needs.update-release-pr.outputs.pr != '' }}
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write # dispatch ci.yml
+    steps:
+      - name: Run CI on the release PR's branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RP_PR: ${{ needs.update-release-pr.outputs.pr }}
+        run: |
+          set -euo pipefail
+          branch="$(jq -r '.headBranchName // empty' <<<"$RP_PR")"
+          if [ -z "$branch" ]; then
+            echo "release-please reported no PR branch; nothing to build"
+            exit 0
+          fi
+          gh workflow run ci.yml --ref "$branch"
+          echo "dispatched ci.yml on $branch"
