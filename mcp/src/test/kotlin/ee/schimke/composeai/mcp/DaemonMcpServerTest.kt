@@ -1702,6 +1702,113 @@ class DaemonMcpServerTest {
       )
   }
 
+  /** A runner that records which build each bootstrap ran in, and never prepares one. */
+  private fun recordingRunner(roots: MutableList<File>) = GradleTaskRunner { root, _, _, _ ->
+    roots += root.canonicalFile
+    GradleTaskRunner.Result(1, "* What went wrong:\nnot in this test")
+  }
+
+  private fun declarePreview(build: File, function: String) {
+    File(build, "app/src/main/kotlin/Previews.kt")
+      .apply { parentFile.mkdirs() }
+      .writeText("@Preview @Composable\nfun $function() {}\n")
+    File(build, "gradlew").writeText("#!/bin/sh\n")
+  }
+
+  @Test
+  fun `a preview lookup over several builds bootstraps only the one declaring it`() {
+    val repo = samplesRepo()
+    declarePreview(File(repo, "ComposeStarter"), "GreetingScreenPreview")
+    File(repo, "ComposeAdvanced/gradlew").writeText("#!/bin/sh\n")
+    val ran = java.util.concurrent.CopyOnWriteArrayList<File>()
+    val bootServer =
+      DaemonMcpServer(
+        supervisor,
+        workingDirectory = null,
+        projectBootstrap = ProjectBootstrap(runner = recordingRunner(ran)),
+      )
+    restartSession(bootServer, requestHandlers = rootsHandler(repo))
+    client.initialize(capabilities = buildJsonObject { putJsonObject("roots") {} })
+
+    // compose-ag-plugin#64: every build was bootstrapped in turn, the first one (not the one
+    // holding the preview) first.
+    val result =
+      client.callTool("render_preview", buildJsonObject { put("preview", "GreetingScreenPreview") })
+    assertThat(ran).containsExactly(File(repo, "ComposeStarter").canonicalFile)
+    assertThat(result.firstTextContent()).contains("project not prepared")
+    bootServer.shutdown()
+  }
+
+  @Test
+  fun `a preview lookup declared in several or no unprepared builds runs no Gradle`() {
+    val repo = samplesRepo()
+    declarePreview(File(repo, "ComposeStarter"), "DefaultPreview")
+    declarePreview(File(repo, "ComposeAdvanced"), "DefaultPreview")
+    val ran = java.util.concurrent.CopyOnWriteArrayList<File>()
+    val bootServer =
+      DaemonMcpServer(
+        supervisor,
+        workingDirectory = null,
+        projectBootstrap = ProjectBootstrap(runner = recordingRunner(ran)),
+      )
+    restartSession(bootServer, requestHandlers = rootsHandler(repo))
+    client.initialize(capabilities = buildJsonObject { putJsonObject("roots") {} })
+
+    val both =
+      client
+        .callTool("render_preview", buildJsonObject { put("preview", "DefaultPreview") })
+        .firstTextContent()
+    assertThat(both).contains("2 unprepared builds declare fun DefaultPreview(")
+    assertThat(both).contains("Pass project=<absolute path>")
+    assertThat(both).contains(File(repo, "ComposeStarter").canonicalPath)
+
+    val neither =
+      client
+        .callTool("render_preview", buildJsonObject { put("preview", "NoSuchPreview") })
+        .firstTextContent()
+    assertThat(neither).contains("none of the 2 unprepared builds declares fun NoSuchPreview(")
+    assertThat(ran).isEmpty()
+    bootServer.shutdown()
+  }
+
+  @Test
+  fun `with no roots a remembered build declaring the preview is registered`() {
+    // compose-ag-plugin#63: Antigravity starts the server in its plugin directory and sends no
+    // roots; the error named the one build that held the preview instead of using it.
+    val plain = tmp.newFolder("plugin-dir")
+    val repo = samplesRepo()
+    declarePreview(File(repo, "ComposeStarter"), "GreetingScreenPreview")
+    supervisor.workspaceStore.remember(
+      "ComposeStarter-0",
+      File(repo, "ComposeStarter"),
+      "ComposeStarter",
+    )
+    supervisor.workspaceStore.remember(
+      "ComposeAdvanced-0",
+      File(repo, "ComposeAdvanced"),
+      "ComposeAdvanced",
+    )
+    val ran = java.util.concurrent.CopyOnWriteArrayList<File>()
+    val cwdServer =
+      DaemonMcpServer(
+        supervisor,
+        workingDirectory = plain,
+        projectBootstrap = ProjectBootstrap(runner = recordingRunner(ran)),
+      )
+    restartSession(cwdServer)
+    client.initialize()
+
+    val text =
+      client
+        .callTool("render_preview", buildJsonObject { put("preview", "GreetingScreenPreview") })
+        .firstTextContent()
+    assertThat(text).doesNotContain("no project registered")
+    assertThat(supervisor.listProjects().map { it.path.canonicalPath })
+      .containsExactly(File(repo, "ComposeStarter").canonicalPath)
+    assertThat(ran).containsExactly(File(repo, "ComposeStarter").canonicalFile)
+    cwdServer.shutdown()
+  }
+
   @Test
   fun `a sibling of a restored build is still discovered on a preview lookup`() {
     val repo = samplesRepo()
@@ -2257,7 +2364,8 @@ class DaemonMcpServerTest {
     assertThat(missing.firstTextContent())
       .isEqualTo(
         "render_preview: no preview matches 'ListScreenPrevew'. Closest: ListScreenPreview, " +
-          "DetailPreview (3 previews in 1 module). Call list_previews to see all."
+          "DetailPreview (3 previews in 1 module). Call find_previews_for_file with the source file " +
+          "to list its previews."
       )
     assertThat(
         missing.raw["structuredContent"]!!.jsonObject["suggestions"]!!.jsonArray.map {
@@ -3738,6 +3846,69 @@ class DaemonMcpServerTest {
   }
 
   @Test
+  fun `previews the daemon dropped come back from an unchanged manifest on a lookup by name`() {
+    // yschimke/compose-ag-plugin#64 and #76: after a failed compile the daemon's discovery dropped
+    // every preview in the file; the fixed file's recompile never re-added them, and previews.json,
+    // which still listed them, was unchanged, so the manifest reload skipped it. The catalog stayed
+    // at one entry for the rest of the session.
+    val projectDir = tmp.newFolder("dropped")
+    File(projectDir, "module/src/main/kotlin").mkdirs()
+    File(projectDir, "gradlew").writeText("#!/bin/sh\n")
+    File(projectDir, "module/src/main/kotlin/Greeting.kt")
+      .writeText("@Preview\n@Composable\nfun GreetingPreview() {}\n")
+    val manifest = tmp.newFile("dropped.previews.json")
+    manifest.writeText(
+      """{"previews":[{"id":"com.example.GreetingPreview","className":"com.example",""" +
+        """"functionName":"GreetingPreview","displayName":"GreetingPreview"},""" +
+        """{"id":"activity__MainActivity","className":"com.example",""" +
+        """"functionName":"MainActivity","displayName":"MainActivity"}]}"""
+    )
+    factory.daemonConfigurer = { it.advertisedManifestPath = manifest.absolutePath }
+    val rediscoveries = java.util.concurrent.atomic.AtomicInteger()
+    val runner = GradleTaskRunner { _, _, arguments, _ ->
+      if ("composePreviewDaemonStart" in arguments) {
+        return@GradleTaskRunner GradleTaskRunner.Result(1, "not under test")
+      }
+      // Up to date: the task leaves previews.json exactly as it was.
+      rediscoveries.incrementAndGet()
+      GradleTaskRunner.Result(0, "BUILD SUCCESSFUL")
+    }
+    val droppedServer =
+      DaemonMcpServer(
+        supervisor,
+        workingDirectory = null,
+        projectBootstrap =
+          ProjectBootstrap(
+            initScripts = InitScripts(environment = emptyMap(), userHome = tmp.newFolder("home")),
+            runner = runner,
+          ),
+      )
+    restartSession(droppedServer)
+    client.initialize()
+    val workspaceId = registerWorkspace(projectDir, "dropped")
+    val daemon = warmDaemonFor(workspaceId, ":module")
+    val png = tmp.newFile("dropped.png").also { writeSolidPng(it, 0xff00ffff.toInt()) }
+    daemon.autoRenderPngPath = { png.absolutePath }
+    fun render() =
+      client.callTool(
+        "render_preview",
+        buildJsonObject {
+          put("preview", "GreetingPreview")
+          put("observe", "hash")
+        },
+        timeoutMs = 10_000,
+      )
+    assertThat(render().firstTextContent()).doesNotContain("no preview matches")
+
+    daemon.emitRemoved("com.example.GreetingPreview")
+    client.expectNotification("notifications/resources/list_changed", 2_000)
+
+    assertThat(render().firstTextContent()).doesNotContain("no preview matches")
+    assertThat(rediscoveries.get()).isEqualTo(1)
+    droppedServer.shutdown()
+  }
+
+  @Test
   fun `render_preview asks which matching variant to render and falls back to listed choices`() {
     data class Case(
       val action: String?,
@@ -3747,11 +3918,20 @@ class DaemonMcpServerTest {
       val expectedRequests: Long = 1,
       val rendersSmall: Boolean = false,
       val renders: Boolean = true,
+      val answerAfterMs: Long = 0,
     )
     val cases =
       listOf(
         Case("accept", expectedMode = "elicitation", rendersSmall = true),
-        Case("decline", expectedMode = "declined", renders = false),
+        Case(
+          "decline",
+          expectedMode = "declined",
+          renders = false,
+          answerAfterMs = DaemonMcpServer.UNSEEN_ANSWER_MS + 200,
+        ),
+        // A decline before anyone could read the form was the host's (Claude Code's desktop
+        // session): render the first match and list the choices, as for a client without forms.
+        Case("decline", expectedMode = "text"),
         // A headless client (Claude Code's print mode) cancels every form unseen: render the first.
         Case("cancel", expectedMode = "cancelled"),
         // No elicitation capability at all, and a URL-only client: never asked, text fallback.
@@ -3772,6 +3952,7 @@ class DaemonMcpServerTest {
           output = clientToServer,
           elicitationHandler = { request ->
             elicitations.incrementAndGet()
+            if (case.answerAfterMs > 0) Thread.sleep(case.answerAfterMs)
             buildJsonObject {
               put("action", case.action ?: "accept")
               if (case.action == "accept") {

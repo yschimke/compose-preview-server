@@ -154,6 +154,8 @@ class SourceRecompileTest {
     val changed: Boolean,
     /** `_meta.work` of the result: this edit→render cycle's [EditCycleWork]. */
     val work: kotlinx.serialization.json.JsonObject?,
+    /** The payload's own `stale` field. */
+    val stale: String? = null,
   )
 
   private fun render(fixture: Fixture): Render {
@@ -174,6 +176,7 @@ class SourceRecompileTest {
       sha256 = payload["sha256"]!!.jsonPrimitive.content,
       changed = payload["changed"]!!.jsonPrimitive.content.toBoolean(),
       work = result.raw["_meta"]?.jsonObject?.get("work")?.jsonObject,
+      stale = payload["stale"]?.jsonPrimitive?.content,
     )
   }
 
@@ -367,7 +370,11 @@ class SourceRecompileTest {
         ":app:composePreviewCompile failed: MainActivity.kt:1:30 Unresolved reference 'Txt'"
       )
     edit(fixture, """@Preview fun Header() { Txt("Hello Android") }""")
+    val swapsBefore = daemon.fileChanges.size
     assertThat(notifyChanged(fixture)).contains("Unresolved reference 'Txt'")
+    // The daemon keeps its last good classloader: swapping onto a failed compile's output rendered
+    // older code and dropped the file's previews from discovery (compose-ag-plugin#64).
+    assertThat(daemon.fileChanges.size).isEqualTo(swapsBefore)
 
     val stale = render(fixture)
     assertThat(stale.bytes).contains("\"Header\"")
@@ -375,6 +382,8 @@ class SourceRecompileTest {
     assertThat(lines).hasSize(1)
     assertThat(lines.single()).contains("MainActivity.kt")
     assertThat(lines.single()).contains("Unresolved reference 'Txt'")
+    // And in the payload, for a client that reads only that object.
+    assertThat(stale.stale).isEqualTo(lines.single())
 
     // Fixing the edit clears the note.
     nextFailure = null
@@ -822,6 +831,16 @@ class SourceRecompileTest {
         androidSdks = AndroidSdks(emptyMap(), home),
       )
       .compile(build, ":app", emptyList())
+    assertThat(seen.readText().trim()).isEqualTo(sdk.absolutePath)
+
+    // The first-use bootstrap too: it failed with "SDK location not found" in the same worktree
+    // while `doctor` reported the SDK (compose-ag-plugin#64, #63).
+    seen.delete()
+    ProjectBootstrap(
+        initScripts = InitScripts(emptyMap(), home),
+        runner = GradleTaskRunner.subprocess(androidSdks = AndroidSdks(emptyMap(), home)),
+      )
+      .ensurePrepared(build)
     assertThat(seen.readText().trim()).isEqualTo(sdk.absolutePath)
   }
 
