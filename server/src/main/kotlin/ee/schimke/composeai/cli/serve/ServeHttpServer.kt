@@ -694,6 +694,11 @@ class ServeHttpServer(
    * nothing to notify them about; the routes then 404.
    */
   private val push: ServePushLane? = null,
+  /**
+   * Bug-report triage from GitHub ([installGithubWebhookRoute]), present only when the operator
+   * configured a webhook secret and push is on. Null leaves `POST /api/github/webhook` absent.
+   */
+  private val githubWebhook: ServeGithubIssueWebhook? = null,
 ) {
 
   /**
@@ -1562,6 +1567,23 @@ class ServeHttpServer(
         // the same catalog-load and daemon-failure detail, so a private box keeps it behind the
         // token.
         get(ServeBugReport.PATH) { handleBugReport() }
+        // Where a bug-report notification's click lands: the push worker opens only this origin,
+        // so it opens this, which redirects to the issue on GitHub — and to nothing else, since
+        // the target is rebuilt from a validated `github.com/<owner>/<repo>/issues/<n>`. Ungated:
+        // it reveals nothing, and a token-gated box's notification must still open.
+        get(ServeIssueReport.ISSUE_REDIRECT_PATH) {
+          call.response.headers.append(HttpHeaders.CacheControl, "no-store")
+          val issue =
+            ServeIssueReport.githubIssue(
+              call.request.queryParameters[ServeIssueReport.ISSUE_REDIRECT_PARAM]
+            )
+          if (issue == null) {
+            call.respondText("not a GitHub issue link", status = HttpStatusCode.BadRequest)
+          } else {
+            call.response.headers.append(HttpHeaders.Location, issue.htmlUrl)
+            call.respond(HttpStatusCode.Found)
+          }
+        }
         // The installed app's share target ([ServeShareTarget]), named by the web app manifest.
         // Gated like the report page it leads to: on a token-gated box the installed app's browse
         // cookie is the credential, exactly as for any other navigation.
@@ -1730,6 +1752,9 @@ class ServeHttpServer(
         // current script rather than keeping a stale one.
         get(PUSH_SERVICE_WORKER_PATH) { respondPushServiceWorker() }
         push?.let { lane -> installPushRoutes(lane) { sites.hosts } }
+        // GitHub's half of bug-report triage: signed `issues` deliveries for the reports this
+        // server prefilled. Ungated — GitHub has no token — because the HMAC is the credential.
+        githubWebhook?.let { hook -> installGithubWebhookRoute(hook) { reportHosts() } }
         // The manifest's install-dialog screenshots: committed captures, ungated like the icons.
         get(ServeSiteIcon.SCREENSHOT_NARROW_PATH) { respondScreenshot() }
         get(ServeSiteIcon.SCREENSHOT_WIDE_PATH) { respondScreenshot() }
@@ -2839,6 +2864,17 @@ class ServeHttpServer(
    * reverse proxy sets them. Without it they are whatever the caller chose to send, so the origin
    * comes from the connection and `Host` alone.
    */
+  /**
+   * The hosts a [ServeIssueReport.reportMarker] may name for a report to count as this server's:
+   * the configured public origin, every top-level site, and the host GitHub delivered to — which is
+   * this server's own public name by construction, since the operator typed it into the webhook.
+   */
+  private fun RoutingContext.reportHosts(): Set<String> =
+    setOfNotNull(
+      ServeIssueReport.reportHostOf(canonicalServerOrigin()),
+      ServeIssueReport.reportHostOf(externalOrigin()),
+    ) + sites.hosts
+
   private fun RoutingContext.externalOrigin(): String {
     val forwardedScheme = forwardedHeader(call, "X-Forwarded-Proto", trustForwardedFor)
     val scheme =
@@ -5443,6 +5479,7 @@ class ServeHttpServer(
                 "${WebEscaping.urlEncodeSegment(reference.id)}.png$assetQuerySuffix"
             ),
           publicRender = isPublic,
+          reportOrigin = externalOrigin(),
         )
       val reportIssue =
         ServeWeb.ReportIssue(
@@ -7073,6 +7110,7 @@ class ServeHttpServer(
         toolVersion = bundleHost.provenance?.toolVersion,
         pageUrl = ServeIssueReport.withoutToken(pageUrlPinningChrome()),
         publicRender = isPublic,
+        reportOrigin = externalOrigin(),
       )
     return ServeWeb.ReportIssue(
       action = ServeIssueReport.action(context.repo),
@@ -7917,6 +7955,7 @@ class ServeHttpServer(
       ServeBugReport.Server(
         version = SERVE_VERSION,
         public = isPublic,
+        reportOrigin = externalOrigin(),
         uptimeSeconds = status.uptimeSeconds,
         java = "${System.getProperty("java.version")} (${System.getProperty("java.vendor")})",
         os =
@@ -11659,6 +11698,7 @@ class ServeHttpServer(
           // every URL that reaches an issue body.
           renderUrl = ServeIssueReport.withoutToken(imageUrl),
           publicRender = isPublic,
+          reportOrigin = externalOrigin(),
         )
       val reportIssue =
         ServeWeb.ReportIssue(

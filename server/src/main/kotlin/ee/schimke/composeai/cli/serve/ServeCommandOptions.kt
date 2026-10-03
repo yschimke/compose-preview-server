@@ -963,6 +963,10 @@ public class ServeCommandOptions(
   override val vapidPrivateKey: String? =
     args.flagValue("--vapid-private-key")?.trim()?.takeIf { it.isNotEmpty() }
 
+  /** A credential: never echoed, and blank is the same as unset. */
+  override val githubWebhookSecret: String? =
+    args.flagValue("--github-webhook-secret")?.trim()?.takeIf { it.isNotEmpty() }
+
   init {
     require((vapidPublicKey == null) == (vapidPrivateKey == null)) {
       "--vapid-public-key and --vapid-private-key are given together or not at all"
@@ -1614,6 +1618,12 @@ public class ServeCommandOptions(
                           Pin the VAPID key pair (both or neither). Unset, one is generated on first
                           start and kept in the UI-builder state directory. The private key is a
                           credential.
+        --github-webhook-secret <secret>
+                          Accept GitHub issue webhooks at POST /api/github/webhook, signed with
+                          this secret, and push "your bug report was closed / reopened / labelled /
+                          assigned" to the person who filed it from this server. Needs Web Push.
+                          Only repositories whose owners add the webhook are heard. The secret is a
+                          credential. See docs/serve/NOTIFICATIONS.md.
         --ui-builder-webhook-events comments|fork|decision|implementation|all[,...]
                           What --ui-builder-comment-webhook posts. Defaults to comments. fork is a
                           proposed alternative, decision an approve or reject, implementation the

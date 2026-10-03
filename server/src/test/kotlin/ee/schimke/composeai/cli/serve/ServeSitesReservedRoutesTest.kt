@@ -38,6 +38,7 @@ class ServeSitesReservedRoutesTest {
   private val constantPaths =
     mapOf(
       "ServeBugReport.PATH" to ServeBugReport.PATH,
+      "ServeIssueReport.ISSUE_REDIRECT_PATH" to ServeIssueReport.ISSUE_REDIRECT_PATH,
       "ServeGithubAuth.START_PATH" to ServeGithubAuth.START_PATH,
       "ServeGithubAuth.LOGOUT_PATH" to ServeGithubAuth.LOGOUT_PATH,
       "ServeGithubAuth.CALLBACK_PATH" to ServeGithubAuth.CALLBACK_PATH,

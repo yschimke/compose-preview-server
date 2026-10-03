@@ -3984,6 +3984,7 @@ public class ServeRunner(
         projectHistory = projectHistory,
         localSourceRoots = localSourceRoots,
         push = push?.lane,
+        githubWebhook = push?.githubWebhook,
       )
     if (trustAdmin != null) {
       System.err.println(
@@ -4089,6 +4090,8 @@ public class ServeRunner(
     val lane: ServePushLane,
     private val notifier: ServePushNotifier,
     private val handles: List<java.io.Closeable>,
+    /** Bug-report triage from GitHub, when `--github-webhook-secret` names one. */
+    val githubWebhook: ServeGithubIssueWebhook? = null,
   ) : java.io.Closeable {
     override fun close() {
       handles.forEach { runCatching { it.close() } }
@@ -4107,7 +4110,16 @@ public class ServeRunner(
     githubAuth: ServeGithubAuth?,
     origin: () -> String,
   ): WebPush? {
-    if (!webPush || lane == null || githubAuth == null) return null
+    if (!webPush || lane == null || githubAuth == null) {
+      // The webhook only ever feeds push, so without push there is nobody it could tell.
+      if (githubWebhookSecret != null) {
+        System.err.println(
+          "serve: --github-webhook-secret is set but Web Push is off on this host " +
+            "(it needs GitHub sign-in and a UI builder); POST $GITHUB_WEBHOOK_PATH is not served"
+        )
+      }
+      return null
+    }
     val directory = lane.stateDirectory?.toPath()?.resolve("push") ?: return null
     return runCatching {
       val keys =
@@ -4141,6 +4153,13 @@ public class ServeRunner(
         "serve: Web Push enabled (VAPID subject ${keys.subject}; " +
           "${store.all().size} subscription(s))"
       )
+      val githubWebhook =
+        githubWebhookSecret?.let { secret ->
+          System.err.println(
+            "serve: GitHub issue webhook enabled at $GITHUB_WEBHOOK_PATH (bug-report triage)"
+          )
+          ServeGithubIssueWebhook(secret, onTriage = notifier::offerBugReport)
+        }
       WebPush(
         ServePushLane(
           store = store,
@@ -4151,6 +4170,7 @@ public class ServeRunner(
         ),
         notifier,
         handles,
+        githubWebhook,
       )
     }
       .onFailure {

@@ -77,6 +77,11 @@ internal object ServeBugReport {
     val unhealthyCatalogs: List<String> = emptyList(),
     /** Most recent daemon-startup / render failures, newest first, already one-line each. */
     val recentFailures: List<String> = emptyList(),
+    /**
+     * This server's external origin as the reporter reached it, for the
+     * [ServeIssueReport.reportMarker] a triage webhook recognises the issue by. Null writes none.
+     */
+    val reportOrigin: String? = null,
   )
 
   /**
@@ -243,6 +248,9 @@ internal object ServeBugReport {
       server.recentFailures
         .takeIf { it.isNotEmpty() }
         ?.let { append("\n### Recent failures\n\n").append(fence(it)) }
+      ServeIssueReport.reportMarker(server.reportOrigin)?.let {
+        append("\n").append(it).append("\n")
+      }
     }
   }
 

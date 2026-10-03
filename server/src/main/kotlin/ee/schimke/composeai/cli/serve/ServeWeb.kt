@@ -1043,8 +1043,8 @@ object ServeWeb {
         data-cp-push-preferences="$PUSH_PREFERENCES_PATH" data-cp-push-worker="$PUSH_SERVICE_WORKER_PATH">
         <legend class="cp-settings-legend">Notifications</legend>
         <p class="cp-settings-hint" data-cp-push-status role="status">Get a notification when
-          somebody replies to you, mentions you, or reviews your design — even with this tab
-          closed.</p>
+          somebody replies to you, mentions you, reviews your design, or triages a bug you
+          reported — even with this tab closed.</p>
 ${kinds.prependIndent("        ")}
         <button type="button" class="cp-settings-tour" data-cp-push-toggle hidden>Turn on
           notifications</button>
@@ -1813,6 +1813,13 @@ ${captureControlsHtml().prependIndent("          ")}
     )
 
   private const val REPORT_CLASSIFICATION_DEFAULT = "parity:verification-needed"
+
+  /**
+   * The labels a reporter can apply from the classification control themselves — so a triage
+   * webhook ([ServeGithubIssueWebhook]) does not mistake one for a maintainer's triage.
+   */
+  internal val REPORT_CLASSIFICATION_LABELS: List<String>
+    get() = REPORT_CLASSIFICATIONS.map { it.first }
 
   /**
    * The same affordance as a **row of its own**, for a page-scoped report on a surface that carries

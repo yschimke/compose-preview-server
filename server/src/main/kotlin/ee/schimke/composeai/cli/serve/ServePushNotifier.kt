@@ -102,8 +102,11 @@ internal class ServePushNotifier(
 
   private val queue = Channel<PushDelivery>(QUEUE_CAPACITY)
 
-  /** Collapsing bursts: one entry per (recipient, design, thread) waiting out its debounce. */
-  private val pending = HashMap<PushTopicKey, PendingPush>()
+  /**
+   * Collapsing bursts: one entry per (recipient, design, thread) — or per (recipient, issue) for a
+   * bug report — waiting out its debounce. One map, so [MAX_PENDING] bounds both.
+   */
+  private val pending = HashMap<Any, Held>()
 
   /** Push-service origins that answered 429, and when they may be asked again. */
   private val pausedUntil = ConcurrentHashMap<String, Long>()
@@ -147,26 +150,82 @@ internal class ServePushNotifier(
       return
     }
     val key = PushTopicKey(intent.recipient.lowercase(), intent.designId, intent.threadId)
+    hold(key, PendingPush(intent, count = 1), intent.kinds.first())
+  }
+
+  /**
+   * Hold a bug report's triage event for [debounceMillis], folding any others on the same issue for
+   * the same person into it — a triager who labels, assigns and closes in one sitting is one
+   * notification, worded for the last thing they did, with the count.
+   */
+  internal fun offerBugReport(intent: BugReportPushIntent) {
+    if (
+      store.forActorIgnoringCase(intent.recipient).none { PushKind.BUG_REPORTS.wire in it.kinds }
+    ) {
+      return
+    }
+    val key = IssueTopicKey(intent.recipient.lowercase(), intent.issue.key)
+    hold(key, PendingIssuePush(intent, count = 1), PushKind.BUG_REPORTS)
+  }
+
+  /** The debounce both kinds of intent share: the first event starts the timer, others merge. */
+  private fun hold(key: Any, held: Held, kind: PushKind) {
     val first =
       synchronized(pending) {
         val existing = pending[key]
         if (existing != null) {
-          pending[key] = existing.merge(intent)
+          pending[key] = existing.merge(held)
           false
         } else {
           if (pending.size >= MAX_PENDING) {
-            onLog("serve: push is behind; dropped a ${intent.kinds.first().wire} notification")
+            onLog("serve: push is behind; dropped a ${kind.wire} notification")
             return
           }
-          pending[key] = PendingPush(intent, count = 1)
+          pending[key] = held
           true
         }
       }
     if (!first) return
     scope.launch {
       delay(debounceMillis)
-      val ready = synchronized(pending) { pending.remove(key) } ?: return@launch
-      fanOut(ready)
+      when (val ready = synchronized(pending) { pending.remove(key) } ?: return@launch) {
+        is PendingPush -> fanOut(ready)
+        is PendingIssuePush -> fanOutIssue(ready)
+      }
+    }
+  }
+
+  /**
+   * One bug report's notification to each of the reporter's browsers that wants the kind. No
+   * access check like a design's: the recipient is the person who filed the issue, under their own
+   * GitHub identity, and the link opens GitHub, which applies its own.
+   */
+  private fun fanOutIssue(ready: PendingIssuePush) {
+    val intent = ready.intent
+    val url = ServeIssueReport.issueRedirectUrl(baseUrl(), intent.issue)
+    val topic = topicFor("issue:${intent.issue.key}", null)
+    for (subscription in store.forActorIgnoringCase(intent.recipient)) {
+      if (PushKind.BUG_REPORTS.wire !in subscription.kinds) continue
+      val payload =
+        PushPayloadV1(
+          kind = PushKind.BUG_REPORTS.wire,
+          issue = intent.issue.key,
+          title = intent.title,
+          url = url,
+          count = ready.count,
+        )
+      enqueue(
+        PushDelivery(
+          endpoint = subscription.endpoint,
+          p256dh = subscription.p256dh,
+          auth = subscription.auth,
+          body =
+            PUSH_JSON.encodeToString(PushPayloadV1.serializer(), payload)
+              .toByteArray(StandardCharsets.UTF_8),
+          topic = topic,
+          attempt = 1,
+        )
+      )
     }
   }
 
@@ -374,6 +433,8 @@ internal fun pushTitle(kind: PushKind, intent: PushIntent, designTitle: String):
         "reject" -> "$name was sent back"
         else -> "A pull request implements $name"
       }
+    // Worded by the webhook that heard it ([bugReportPushTitle]); never asked of a design.
+    PushKind.BUG_REPORTS -> name
   }
 }
 
@@ -398,26 +459,61 @@ internal data class PushIntent(
   val verdict: String? = null,
 )
 
+/**
+ * A bug report's triage, for the person who filed it: which issue, and the notification's line.
+ *
+ * [recipient] is `github:<login>` — the issue's author, the same actor id a push subscription is
+ * bound to. [title] is already worded ([bugReportPushTitle]), because only the webhook payload
+ * knows what happened.
+ */
+internal data class BugReportPushIntent(
+  val recipient: String,
+  val issue: GithubIssueRef,
+  val title: String,
+)
+
 private data class PushTopicKey(val recipient: String, val designId: String, val threadId: String?)
 
-private data class PendingPush(val intent: PushIntent, val count: Int) {
+private data class IssueTopicKey(val recipient: String, val issue: String)
+
+/** Something waiting out its debounce. */
+private sealed interface Held {
+  fun merge(next: Held): Held
+}
+
+private data class PendingPush(val intent: PushIntent, val count: Int) : Held {
   /** The newest event's wording, the union of what admits it, and one more in the count. */
-  fun merge(next: PushIntent): PendingPush =
-    PendingPush(
-      next.copy(
-        kinds = (next.kinds + intent.kinds).distinct().sortedBy { KIND_PRIORITY.indexOf(it) }
+  override fun merge(next: Held): Held {
+    val newer = (next as PendingPush).intent
+    return PendingPush(
+      newer.copy(
+        kinds = (newer.kinds + intent.kinds).distinct().sortedBy { KIND_PRIORITY.indexOf(it) }
       ),
       count + 1,
     )
+  }
 }
 
-private val KIND_PRIORITY = listOf(PushKind.MENTIONS, PushKind.REPLIES, PushKind.REVIEWS)
+private data class PendingIssuePush(val intent: BugReportPushIntent, val count: Int) : Held {
+  /** The newest event's wording, and one more in the count. */
+  override fun merge(next: Held): Held =
+    PendingIssuePush((next as PendingIssuePush).intent, count + 1)
+}
 
-/** The whole of what reaches a browser. Kept small, and kept free of anything anybody wrote. */
+private val KIND_PRIORITY =
+  listOf(PushKind.MENTIONS, PushKind.REPLIES, PushKind.REVIEWS, PushKind.BUG_REPORTS)
+
+/**
+ * The whole of what reaches a browser. Kept small, and kept free of anything anybody else wrote —
+ * a bug report's title is the recipient's own.
+ *
+ * [designId] for the design kinds; [issue] (`owner/repo#n`) for [PushKind.BUG_REPORTS].
+ */
 @Serializable
 internal data class PushPayloadV1(
   val kind: String,
-  val designId: String,
+  val designId: String? = null,
+  val issue: String? = null,
   val threadId: String? = null,
   val title: String,
   val url: String,

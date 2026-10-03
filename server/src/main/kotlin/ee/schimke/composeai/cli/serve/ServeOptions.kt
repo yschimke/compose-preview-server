@@ -830,6 +830,15 @@ public interface ServeOptions {
     get() = null
 
   /**
+   * The shared secret of a GitHub webhook (`--github-webhook-secret`) that tells this server about
+   * triage on the bug reports filed from it, so their reporters can be notified by push
+   * ([ServeGithubIssueWebhook]). Unset leaves `POST /api/github/webhook` absent. **A credential**:
+   * whoever holds it can make this server notify a reporter about their own issue.
+   */
+  public val githubWebhookSecret: String?
+    get() = null
+
+  /**
    * Which served catalog each UI-builder catalog's designs are **compiled** against for the native
    * preview lane (`--ui-builder-native-catalog <builder catalog>=<served catalog>`).
    *

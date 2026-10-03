@@ -218,6 +218,12 @@ internal object ServeIssueReport {
     val publicRender: Boolean = false,
     /** Browser-computed parity measurements; absent until the focused comparison finishes. */
     val rawScores: RawScores? = null,
+    /**
+     * This server's external origin as the reporter reached it (`https://preview.coo.ee`), for the
+     * [reportMarker] that lets a triage webhook recognise the issue as one of ours. Null writes no
+     * marker.
+     */
+    val reportOrigin: String? = null,
   )
 
   data class RawScores(
@@ -455,8 +461,95 @@ internal object ServeIssueReport {
       // server had already committed to would survive the deletion and leave a body that is not the
       // one it writes without this parameter.
       if (locatorsPlaceholder) append(LOCATORS_PLACEHOLDER).append("\n")
+      // Last, after every placeholder, so no client-side substitution has to step around it.
+      reportMarker(ctx.reportOrigin)?.let { append("\n").append(it).append("\n") }
     }
   }
+
+  /**
+   * The stable machine marker every report body this server writes ends with:
+   * `<!-- compose-preview-report v1 host=preview.coo.ee -->`.
+   *
+   * **Why a marker at all.** The server never files an issue: the reporter does, under their own
+   * GitHub identity, against a repository this server may not control ([repoFor]). So the only way
+   * to know later that an issue came from here — to tell its reporter it was triaged
+   * ([ServeGithubIssueWebhook]) — is for the body to say so. Nothing existing does: the locator
+   * fence names a *comparison* and is absent from page-scoped and server reports, and the links in
+   * a body are reporter-editable prose.
+   *
+   * **Why the host.** One repository receives reports from several servers (a hosted catalog and a
+   * developer's local `serve`), and its webhook may be installed on only one of them. The host is
+   * what keeps a server from notifying for reports that were filed through another. An HTML
+   * comment, so GitHub shows nothing; versioned, so a later format can be told apart.
+   *
+   * Null when [origin] names no ordinary host (an IPv6 literal, garbage), which writes no marker
+   * rather than one no server could match.
+   */
+  fun reportMarker(origin: String?): String? {
+    val host = reportHostOf(origin) ?: return null
+    return "<!-- $REPORT_MARKER v1 host=$host -->"
+  }
+
+  /** The normalised host of an origin (`https://Preview.coo.ee:443` → `preview.coo.ee`). */
+  fun reportHostOf(origin: String?): String? {
+    val authority =
+      origin?.trim()?.substringAfter("://")?.substringBefore('/')?.takeIf { it.isNotEmpty() }
+        ?: return null
+    if (authority.startsWith("[")) return null
+    return ServeSites.normalizeHost(authority)
+  }
+
+  /** Every host a [reportMarker] in [body] names, normalised; empty when it carries none. */
+  fun reportMarkerHosts(body: String?): Set<String> {
+    if (body.isNullOrEmpty()) return emptySet()
+    return REPORT_MARKER_RE.findAll(body)
+      .mapNotNull { ServeSites.normalizeHost(it.groupValues[1]) }
+      .toSet()
+  }
+
+  const val REPORT_MARKER: String = "compose-preview-report"
+
+  private val REPORT_MARKER_RE = Regex("<!-- $REPORT_MARKER v1 host=([A-Za-z0-9.-]{1,253}) -->")
+
+  /**
+   * Where a bug-report notification sends its click: a same-origin hop that redirects to the issue,
+   * because the push worker opens nothing but its own origin. See [githubIssue], which is the only
+   * thing that route will redirect to.
+   */
+  const val ISSUE_REDIRECT_PATH: String = "/report-bug/issue"
+
+  /** [ISSUE_REDIRECT_PATH]'s one parameter: the issue's `https://github.com/…` URL. */
+  const val ISSUE_REDIRECT_PARAM: String = "u"
+
+  fun issueRedirectUrl(origin: String, issue: GithubIssueRef): String =
+    origin.trimEnd('/') +
+      ISSUE_REDIRECT_PATH +
+      "?" +
+      ISSUE_REDIRECT_PARAM +
+      "=" +
+      java.net.URLEncoder.encode(issue.htmlUrl, Charsets.UTF_8)
+
+  /**
+   * [url] when it is exactly a GitHub issue — `https://github.com/<owner>/<repo>/issues/<n>` and
+   * nothing more — else null. No query, fragment, credentials, port or trailing path; the owner
+   * spelled as GitHub spells a login and the repository as GitHub allows a name. What the redirect
+   * route sends a browser to is then rebuilt from the parts ([GithubIssueRef.htmlUrl]), never the
+   * input, so it cannot be bent into an open redirect.
+   */
+  fun githubIssue(url: String?): GithubIssueRef? {
+    val match = GITHUB_ISSUE_RE.matchEntire(url?.trim() ?: return null) ?: return null
+    val (owner, repo, number) = match.destructured
+    if (repo == "." || repo == "..") return null
+    val n = number.toIntOrNull() ?: return null
+    return GithubIssueRef("$owner/$repo", n)
+  }
+
+  private val GITHUB_ISSUE_RE =
+    Regex(
+      "https://github\\.com/" +
+        "([A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38})/" +
+        "([A-Za-z0-9._-]{1,100})/issues/([1-9][0-9]{0,8})"
+    )
 
   private fun formatRawScores(scores: RawScores): String = buildString {
     append(
@@ -786,4 +879,14 @@ internal object ServeIssueReport {
     return if (kept.isEmpty()) u.substring(0, cut)
     else u.substring(0, cut) + "?" + kept.joinToString("&")
   }
+}
+
+/** One GitHub issue: `owner/repo` and its number. Built only by [ServeIssueReport.githubIssue]. */
+internal data class GithubIssueRef(val repo: String, val number: Int) {
+  /** `owner/repo#n`: the debounce key, the push topic's seed and the payload's `issue`. */
+  val key: String
+    get() = "$repo#$number"
+
+  val htmlUrl: String
+    get() = "https://github.com/$repo/issues/$number"
 }

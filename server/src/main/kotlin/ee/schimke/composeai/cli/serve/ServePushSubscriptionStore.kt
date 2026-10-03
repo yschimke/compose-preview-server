@@ -38,11 +38,24 @@ internal enum class PushKind(val wire: String, val label: String) {
   MENTIONS("mentions", "@mentions of me"),
 
   /** A verdict recorded on a design I own, or a pull request linked as implementing it. */
-  REVIEWS("reviews", "Reviews and implementations of my designs");
+  REVIEWS("reviews", "Reviews and implementations of my designs"),
+
+  /**
+   * A bug report I filed from this server was closed, reopened, labelled or assigned by somebody
+   * else. Heard only through the operator's GitHub webhook ([ServeGithubIssueWebhook]), so only
+   * for repositories whose owners installed it.
+   *
+   * Not in a subscription made before it existed: [ServePushSubscriptionStore.kinds] answers a
+   * person's stored choice, so somebody who already chose keeps exactly what they chose and ticks
+   * this one in Settings; somebody turning notifications on for the first time starts with every
+   * kind, this one included.
+   */
+  BUG_REPORTS("bugReports", "Triage of bug reports I filed");
 
   companion object {
+    /** Case-insensitive, so `bugReports` is read whichever way a client spelled it. */
     fun parse(value: String): PushKind? = entries.firstOrNull {
-      it.wire == value.trim().lowercase()
+      it.wire.equals(value.trim(), ignoreCase = true)
     }
 
     val ALL: Set<PushKind> = entries.toSet()
