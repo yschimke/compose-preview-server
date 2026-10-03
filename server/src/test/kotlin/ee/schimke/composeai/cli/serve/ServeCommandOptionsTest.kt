@@ -293,6 +293,38 @@ class ServeCommandOptionsTest {
     assertFailsWith<IllegalArgumentException> { options(listOf("--open-path", "ui-builder/")) }
   }
 
+  @Test
+  fun `web push is on by default, and its VAPID flags are validated without echoing a key`() {
+    assertTrue(options(emptyList()).webPush)
+    assertFalse(options(listOf("--no-web-push")).webPush)
+    assertNull(options(emptyList()).vapidSubject)
+    assertEquals(
+      "mailto:ops@example.com",
+      options(listOf("--vapid-subject", "mailto:ops@example.com")).vapidSubject,
+    )
+    assertFailsWith<IllegalArgumentException> { options(listOf("--vapid-subject", "http://x.y")) }
+
+    val pair = ServeWebPush.generateKeyPair()
+    val public =
+      ServeWebPush.base64Url(
+        ServeWebPush.rawPublicKey(pair.public as java.security.interfaces.ECPublicKey)
+      )
+    val private =
+      ServeWebPush.base64Url(
+        ServeWebPush.rawPrivateKey(pair.private as java.security.interfaces.ECPrivateKey)
+      )
+    val pinned = options(listOf("--vapid-public-key", public, "--vapid-private-key", private))
+    assertEquals(public, pinned.vapidPublicKey)
+    assertEquals(private, pinned.vapidPrivateKey)
+    // Halves alone, or a key that is not a key, are refused at startup — and never repeated back.
+    assertFailsWith<IllegalArgumentException> { options(listOf("--vapid-public-key", public)) }
+    val refused =
+      assertFailsWith<IllegalArgumentException> {
+        options(listOf("--vapid-public-key", public, "--vapid-private-key", "not-a-key"))
+      }
+    assertFalse("not-a-key" in refused.message.orEmpty())
+  }
+
   private fun options(args: List<String>): ServeCommandOptions =
     ServeCommandOptions(
       args = args,

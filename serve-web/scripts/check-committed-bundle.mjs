@@ -37,6 +37,10 @@ const tracked = [
     "serve-chrome.js",
     "keyboard-navigation.js",
     "report-capture.js",
+    // Settings → Notifications and the root push worker. The worker matters most: a stale copy is
+    // what every subscribed browser keeps running, and it is fetched by URL, never by a page tag.
+    "push-settings.js",
+    "push-sw.js",
     "format-compare.js",
     // The scorer's worker half. Tracked like every other bundle: it is the one asset whose
     // staleness nothing else would catch, because no page emits a script tag for it — it is

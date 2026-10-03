@@ -441,6 +441,18 @@ if [[ -f /opt/compose-preview-server/ui-builder/index.html ]]; then
     [[ -n "${SERVE_UI_BUILDER_COMMENT_WEBHOOK_FORMAT:-}" ]] &&
       args+=(--ui-builder-comment-webhook-format "${SERVE_UI_BUILDER_COMMENT_WEBHOOK_FORMAT}")
   fi
+  # Web Push: a reply, an @mention or a review verdict, pushed to a signed-in person's installed
+  # browser. Offered whenever GitHub sign-in is configured; nobody receives anything until they turn
+  # it on in Settings. The VAPID key pair is generated on first start and kept in the UI-builder
+  # state directory; pin it here when that directory is not durable, because a new pair silently
+  # strands every existing subscriber. The private key is a SECRET. The box needs outbound HTTPS to
+  # the push services (fcm.googleapis.com, *.push.services.mozilla.com, web.push.apple.com, …).
+  # See docs/serve/NOTIFICATIONS.md.
+  [[ "${SERVE_WEB_PUSH:-1}" == "0" ]] && args+=(--no-web-push)
+  [[ -n "${SERVE_VAPID_SUBJECT:-}" ]] && args+=(--vapid-subject "${SERVE_VAPID_SUBJECT}")
+  if [[ -n "${SERVE_VAPID_PUBLIC_KEY:-}" || -n "${SERVE_VAPID_PRIVATE_KEY:-}" ]]; then
+    args+=(--vapid-public-key "${SERVE_VAPID_PUBLIC_KEY:-}" --vapid-private-key "${SERVE_VAPID_PRIVATE_KEY:-}")
+  fi
 fi
 # Explicit per-catalog apps remain additive and take precedence over the packaged fallback.
 [[ -n "${SERVE_WASM_DIR:-}" ]] && args+=(--wasm-dir "${SERVE_WASM_DIR}")
