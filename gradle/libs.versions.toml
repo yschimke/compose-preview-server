@@ -103,7 +103,11 @@ graphics-shapes = "1.1.0"
 # 2.31.0 forwards an `rcPlayer=` naming a player registered with the daemon as
 # `RemoteComposeOverride.playerId` (compose-ai-tools#5661), which `CatalogLiveRouting` already routes
 # to a real render (#1261).
-composeai-tools = "2.32.1"
+# 2.32.2 names an `@AnimatedPreview` capture rendered as APNG `.apng` rather than `.gif`
+# (compose-ai-tools#5679) and moves with compose-preview-daemon 3.13.0 below. This server already
+# serves both motion extensions (`MOTION_EXTENSIONS`), and its catalog motion index reads the
+# extension from the manifest, so nothing here keys on the old name.
+composeai-tools = "2.32.2"
 # The render daemons, the renderers, the preview annotations and data API, and the data extractors,
 # published from yschimke/compose-preview-daemon since its 3.0.0 (compose-ai-tools#5336). Layer 1a
 # in that repository's `docs/design/REPOSITORY_LAYERS.md`: between the contracts and
@@ -179,7 +183,11 @@ composeai-tools = "2.32.1"
 # (compose-preview-daemon#191), so a bundle's own player draws its live renders. 3.11.0's copy
 # shadowed it with a player predating rc-players#558, which draws no text in a
 # `RemoteDensity.Host` capture: every live `remote-m3` render came back without its text.
-composeai-preview-daemon = "3.12.0"
+# 3.13.0 honours `@AnimatedPreview(format = Apng)` on Android (compose-preview-daemon#208), writes
+# changed-region APNG frames with per-frame delays (#207), advances animated and interaction captures
+# by the exact frame interval (#203, #206) and distributes GIF frame-delay rounding so playback keeps
+# the captured timeline (#204). No API this server calls changed.
+composeai-preview-daemon = "3.13.0"
 # 2.9.0 is the first release carrying `DesignEnvironmentV1.exportDevices` and its Set/Reset
 # changes, which is the field a design names its export devices in. 2.14.0 adds the components a
 # design defines — `DesignDocumentV1.components`, `DesignNodeV1.component` and the `binding` value

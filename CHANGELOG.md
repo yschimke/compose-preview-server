@@ -1,5 +1,21 @@
 # Changelog
 
+## [3.93.0](https://github.com/yschimke/compose-preview-server/compare/v3.92.0...v3.93.0) (2026-10-03)
+
+
+### Features
+
+* **serve:** mobile web — richer manifest, share target, UI-builder worker hosting, phone CSS, Web Share, LAN QR ([#1300](https://github.com/yschimke/compose-preview-server/issues/1300)) ([d0241f6](https://github.com/yschimke/compose-preview-server/commit/d0241f63aefd585fa9f9e149b635ba604bc9e4c4))
+* **serve:** serve Google Fonts families to the UI builder by name ([#1296](https://github.com/yschimke/compose-preview-server/issues/1296)) ([ff54ab1](https://github.com/yschimke/compose-preview-server/commit/ff54ab17ff8e917ab55bdb2df1c273d074eda4f1))
+
+
+### Bug Fixes
+
+* **deps:** compose-ai-tools 2.32.2 and compose-preview-daemon 3.13.0 ([#1301](https://github.com/yschimke/compose-preview-server/issues/1301)) ([9a4d4d3](https://github.com/yschimke/compose-preview-server/commit/9a4d4d3b5e70828311ad37922c88ef0ad2f53e21))
+* **deps:** update ui-builder to 3.73.0 and remotecompose-json to 2.31.0 ([#1294](https://github.com/yschimke/compose-preview-server/issues/1294)) ([54b11e6](https://github.com/yschimke/compose-preview-server/commit/54b11e60fed293cab37e8f6bea2b61bee7599bd4))
+* **serve:** resolve ServeGoogleFonts.ROUTE in the reserved-routes scan ([#1298](https://github.com/yschimke/compose-preview-server/issues/1298)) ([3a37e84](https://github.com/yschimke/compose-preview-server/commit/3a37e84402eb61280b25ff9cb2ce38a6c0cdc06e))
+* **ui-builder:** refuse a bare Wear root on the native lane with the wrap-it-in-a-screen sentence ([#1297](https://github.com/yschimke/compose-preview-server/issues/1297)) ([b62007d](https://github.com/yschimke/compose-preview-server/commit/b62007de273c0f3fddf67cd210edb172c31791ce))
+
 ## [3.92.0](https://github.com/yschimke/compose-preview-server/compare/v3.91.0...v3.92.0) (2026-10-02)
 
 
