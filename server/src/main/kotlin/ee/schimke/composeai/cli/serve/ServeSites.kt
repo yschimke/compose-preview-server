@@ -228,6 +228,9 @@ data class ServeSites(private val byHost: Map<String, String>) {
         // would make every site host uninstallable.
         "icons",
         "manifest.webmanifest",
+        // The push service worker (`PUSH_SERVICE_WORKER_PATH`). Its scope is bounded by its path,
+        // so it has to live at the root of whichever host a person turns notifications on from.
+        "push-sw.js",
         "assets",
         "ui-builder",
         // The root-mounted A2UI playground (`GET /a2ui`), which a viewer served at `/p/{name}` on

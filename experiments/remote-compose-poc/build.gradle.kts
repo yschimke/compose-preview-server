@@ -17,11 +17,15 @@ kotlin {
       implementation(compose.foundation)
       implementation(compose.material3)
       implementation(compose.ui)
-      implementation("ee.schimke.composeai:rc-player-compose:2.0.4")
+      // Versionless through the publishers' BOMs: rc-players and compose-ai-tools publish only the
+      // modules a release changes, so a module pinned at a BOM's release version can 404.
+      implementation(project.dependencies.platform("ee.schimke.composeai:rc-players-bom:2.0.4"))
+      implementation("ee.schimke.composeai:rc-player-compose")
     }
     jvmMain.dependencies {
       implementation(compose.desktop.currentOs)
-      implementation("ee.schimke.composeai:remotecompose-json:2.31.0")
+      implementation(project.dependencies.platform("ee.schimke.composeai:compose-ai-tools-bom:2.31.0"))
+      implementation("ee.schimke.composeai:remotecompose-json")
       implementation("androidx.compose.remote:remote-creation-core:1.0.0-alpha20")
       implementation("org.json:json:20250517")
     }

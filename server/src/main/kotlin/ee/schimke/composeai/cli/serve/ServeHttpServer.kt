@@ -679,6 +679,12 @@ class ServeHttpServer(
    * server. A parameter so a test can name one on a host that has none.
    */
   private val lanAddresses: () -> List<String> = ServeUrls::siteLocalIpv4Addresses,
+  /**
+   * Web Push ([installPushRoutes]): the subscriptions and this deployment's VAPID key. Null on a
+   * host without GitHub sign-in or without a UI builder, which is a host with nobody to notify and
+   * nothing to notify them about; the routes then 404.
+   */
+  private val push: ServePushLane? = null,
 ) {
 
   /**
@@ -1419,7 +1425,11 @@ class ServeHttpServer(
           // POST only, on purpose: see [ServeGithubAuth.handleLogout]. No GET is registered, so a
           // prefetcher or an unfurler that follows the URL gets a 405 rather than signing the
           // visitor out.
-          post(ServeGithubAuth.LOGOUT_PATH) { with(auth) { handleLogout() } }
+          post(ServeGithubAuth.LOGOUT_PATH) {
+            // Before the session cookie is cleared, while it still names who is signing out.
+            push?.forgetSignedOutBrowser(call)
+            with(auth) { handleLogout() }
+          }
         }
 
         // The agent-grant lane (`--agent-grants`): an agent with no credential asks for one, a
@@ -1704,6 +1714,13 @@ class ServeHttpServer(
         // Per host: a top-level site installs as its own app, under its catalog's name and colour,
         // rather than as one more "Compose Preview" window that opens the box's front door.
         get(ServeSiteIcon.MANIFEST_PATH) { respondSiteIcon(manifestFor(call)) }
+        // The push service worker: root-scoped, push and notificationclick only, no fetch handler
+        // (see `serve-web/src/push/pushWorker.ts`). Ungated like the manifest — the browser fetches
+        // a worker's updates without the page's credential — and served even on a host with push
+        // off, so a browser that subscribed before an operator turned it off still updates to the
+        // current script rather than keeping a stale one.
+        get(PUSH_SERVICE_WORKER_PATH) { respondPushServiceWorker() }
+        push?.let { lane -> installPushRoutes(lane) { sites.hosts } }
         // The manifest's install-dialog screenshots: committed captures, ungated like the icons.
         get(ServeSiteIcon.SCREENSHOT_NARROW_PATH) { respondScreenshot() }
         get(ServeSiteIcon.SCREENSHOT_WIDE_PATH) { respondScreenshot() }
@@ -2903,6 +2920,7 @@ class ServeHttpServer(
           lane = lane,
           accessRepository =
             auth.accessRepository().takeIf { lane == ServeWeb.GatedLane.PLAYGROUND },
+          notifications = push != null,
         )
       }
 
@@ -7645,6 +7663,27 @@ class ServeHttpServer(
         themeColor = themeColor,
       )
     }
+  }
+
+  /**
+   * `push-sw.js`, from the committed serve-web bundle. Uncached like the UI builder's worker, for
+   * the same reason: a worker is identified by its URL and must pick up each release's bytes.
+   * `Service-Worker-Allowed: /` is what lets a page register it for the whole origin.
+   */
+  private suspend fun RoutingContext.respondPushServiceWorker() {
+    val asset = ServeWebAssets.load(PUSH_SERVICE_WORKER_ASSET)
+    if (asset == null) {
+      call.respondText("not found", status = HttpStatusCode.NotFound)
+      return
+    }
+    call.response.headers.append(HttpHeaders.CacheControl, "no-cache")
+    call.response.headers.append(HttpHeaders.ETag, asset.etag)
+    call.response.headers.append(SERVICE_WORKER_ALLOWED, "/")
+    if (call.request.headers[HttpHeaders.IfNoneMatch] == asset.etag) {
+      call.respond(HttpStatusCode.NotModified)
+      return
+    }
+    call.respondBytes(asset.bytes, ContentType.parse("text/javascript"))
   }
 
   private suspend fun RoutingContext.respondScreenshot() {
@@ -17798,6 +17837,9 @@ class ServeHttpServer(
     internal const val UI_BUILDER_SERVICE_WORKER_SCOPE = "/ui-builder/"
 
     private const val SERVICE_WORKER_ALLOWED = "Service-Worker-Allowed"
+
+    /** The serve-web bundle served at [PUSH_SERVICE_WORKER_PATH]. */
+    internal const val PUSH_SERVICE_WORKER_ASSET = "push-sw.js"
 
     /** A request's peer address when it comes from this machine. */
     private val LOOPBACK_PEERS = setOf("127.0.0.1", "::1", "0:0:0:0:0:0:0:1", "localhost")

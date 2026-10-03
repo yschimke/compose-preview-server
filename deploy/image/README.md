@@ -161,6 +161,16 @@ the deployment's env file, never in a compose file or a log; the server accepts 
 fire-and-forget from a bounded queue, so a wedged chat platform never slows an accepted comment.
 See [`docs/design/UI_BUILDER_COMMENTS.md`](../../docs/design/UI_BUILDER_COMMENTS.md).
 
+**Web Push** reaches a person rather than a room: a reply on a thread they are in, an `@mention`,
+or a verdict on a design they own, pushed to each browser they turned notifications on in
+(Settings → Notifications). It is offered whenever GitHub sign-in is configured;
+`SERVE_WEB_PUSH=0` turns it off. The VAPID key pair is generated on first start into the UI-builder
+state directory; pin it with `SERVE_VAPID_PUBLIC_KEY` / `SERVE_VAPID_PRIVATE_KEY` (both or neither —
+the private key is a secret) if that directory is not durable, because a new pair strands every
+subscriber. `SERVE_VAPID_SUBJECT` (a `mailto:` or `https:` URL) defaults to the callback base URL.
+The box needs outbound HTTPS to the browsers' push services. See
+[`docs/serve/NOTIFICATIONS.md`](../../docs/serve/NOTIFICATIONS.md).
+
 The compose deployment offers those three agent capabilities by default because the image always
 packages the builder lane. `images` joins them when `SERVE_IMAGE_UPLOAD_REPO` names a repository —
 that is, when this box runs the upload lane — so an approved agent can host a rendered preview

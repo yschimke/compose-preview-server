@@ -21,6 +21,7 @@ import ee.schimke.composeai.uibuilder.export.UiBuilderBuildFeatures
 import ee.schimke.composeai.uibuilder.export.UiBuilderCatalogPlatform
 import ee.schimke.composeai.uibuilder.export.UiBuilderPreviewSurfaces
 import ee.schimke.composeai.uibuilder.protocol.CatalogCapabilityV1
+import ee.schimke.composeai.uibuilder.service.AuthenticatedUiBuilderActor
 import ee.schimke.composeai.uibuilder.service.CurrentM3UiBuilderCatalogExecutor
 import ee.schimke.composeai.uibuilder.service.FileUiBuilderAssetStore
 import ee.schimke.composeai.uibuilder.service.PersistentUiBuilderService
@@ -2644,6 +2645,8 @@ public class ServeRunner(
      * check answers with exactly the refusal the real call would, and writes nothing.
      */
     val validator: UiBuilderDraftValidator,
+    /** The state directory itself, for the stores that live beside the builder's (Web Push). */
+    val stateDirectory: File? = null,
   ) : AutoCloseable {
     override fun close() {
       thumbnails?.close()
@@ -3260,6 +3263,7 @@ public class ServeRunner(
       compose = compose,
       nativeBackends = nativeBackends,
       validator = ScratchUiBuilderDraftValidator(catalogs, annotatedExporter),
+      stateDirectory = directory,
     )
   }
 
@@ -3701,6 +3705,16 @@ public class ServeRunner(
       }
       webhook to java.io.Closeable { handles.forEach { runCatching { it.close() } } }
     }
+    // Telling the person: Web Push, the fourth subscriber to the same two feeds. Attached here for
+    // the webhook's reason — before the routes that accept comments are serving.
+    val push =
+      openWebPush(uiBuilderLane, githubAuth) {
+        githubAuthCallbackBaseUrl?.trim()?.trimEnd('/')?.takeIf { it.isNotEmpty() }
+          ?: ServeUrls.origin(
+            if (ServeUrls.isExposed(host)) ServeUrls.LOOPBACK else host,
+            startedServer?.port ?: requestedPort,
+          )
+      }
     val server =
       ServeHttpServer(
         host = host,
@@ -3924,6 +3938,7 @@ public class ServeRunner(
         engagementStore = ServeEngagementStore(engagementFile),
         projectHistory = projectHistory,
         localSourceRoots = localSourceRoots,
+        push = push?.lane,
       )
     if (trustAdmin != null) {
       System.err.println(
@@ -4004,6 +4019,7 @@ public class ServeRunner(
           runCatching { registry.close() }
           runCatching { commentWebhook?.second?.close() }
           runCatching { commentWebhook?.first?.close() }
+          runCatching { push?.close() }
           runCatching { uiBuilderLane?.close() }
           closeables.forEach { c -> runCatching { c?.close() } }
           done.countDown()
@@ -4021,6 +4037,81 @@ public class ServeRunner(
     val watchdog = if (exitWhenIdle) startIdleWatchdog(registry, done) else null
     done.await()
     watchdog?.shutdownNow()
+  }
+
+  /** The push lane, the notifier feeding it, and what to close when the server stops. */
+  private class WebPush(
+    val lane: ServePushLane,
+    private val notifier: ServePushNotifier,
+    private val handles: List<java.io.Closeable>,
+  ) : java.io.Closeable {
+    override fun close() {
+      handles.forEach { runCatching { it.close() } }
+      notifier.close()
+    }
+  }
+
+  /**
+   * Web Push, where it can work: a UI builder to say something about, and GitHub sign-in to say who
+   * is listening. Anywhere else there is nobody a push could be addressed to, so the lane is simply
+   * absent and its routes 404. A failure to open it (an unreadable key file, a pinned key pair that
+   * is not a pair) costs the notifications and never the server.
+   */
+  private fun openWebPush(
+    lane: UiBuilderLane?,
+    githubAuth: ServeGithubAuth?,
+    origin: () -> String,
+  ): WebPush? {
+    if (!webPush || lane == null || githubAuth == null) return null
+    val directory = lane.stateDirectory?.toPath()?.resolve("push") ?: return null
+    return runCatching {
+      val keys =
+        ServeVapidKeys.loadOrCreate(
+          directory,
+          subject = ServeVapidKeys.subjectFor(vapidSubject, githubAuthCallbackBaseUrl),
+          configuredPublic = vapidPublicKey,
+          configuredPrivate = vapidPrivateKey,
+        )
+      val store = ServePushSubscriptionStore(directory)
+      val readable = ServeUiBuilderVisibility.withDefault(lane.service, uiBuilderDefaultVisibility)
+      val notifier =
+        ServePushNotifier(
+          store = store,
+          keys = keys,
+          designs = { designId ->
+            lane.service.adminDesignSummary(designId)?.let {
+              PushDesign(title = it.title, ownerActorId = it.ownerActorId)
+            }
+          },
+          canRead = { actorId, designId ->
+            readable.canRead(AuthenticatedUiBuilderActor(actorId), designId)
+          },
+          baseUrl = origin,
+        )
+      val handles = buildList {
+        lane.comments?.let { add(notifier.attachComments(it)) }
+        lane.reviews?.let { add(notifier.attachReviews(it)) }
+      }
+      System.err.println(
+        "serve: Web Push enabled (VAPID subject ${keys.subject}; " +
+          "${store.all().size} subscription(s))"
+      )
+      WebPush(
+        ServePushLane(
+          store = store,
+          keys = keys,
+          actorOf = { call ->
+            githubAuth.currentSignedInLogin(call)?.let(ServeAgentGrants::githubActorId)
+          },
+        ),
+        notifier,
+        handles,
+      )
+    }
+      .onFailure {
+        System.err.println("serve: Web Push unavailable (${it.message}); notifications are off")
+      }
+      .getOrNull()
   }
 
   private fun openBrowser(port: Int, token: String) {
