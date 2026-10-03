@@ -4523,10 +4523,10 @@ class ServeCatalogStore(
    * addresses a commit the load never resolved, and it is exactly as immutable. What the rule
    * refuses is the un-pinned fallback, where `base` is the branch ref.
    *
-   * Only [BranchFetch.Ok] is stored. A `NotFound` is a statement about one revision that a caller
-   * may already cache permanently in its own terms ([ServeBundleHost.fetchPinnedAssetOutcome]), and
-   * a throttle or a transport failure is a statement about *now* — caching either would turn a bad
-   * minute into a permanent answer.
+   * [BranchFetch.Ok] is stored as the bytes. A `NotFound` is remembered too, but only for a day
+   * ([CatalogBlobPool.knownMissing]): without that, every load re-asked thousands of questions
+   * whose answer had been "no". A throttle or a transport failure is a statement about *now* and is
+   * never remembered — that would turn a bad minute into a lasting answer.
    *
    * The pool sits **outside** the injected [fetch] seam, exactly as the executable-bundle lane's
    * does, so a stubbed transport exercises the same caching a real one gets. Putting it on the
@@ -4542,8 +4542,17 @@ class ServeCatalogStore(
         branchFetchStats.recordCached()
         return BranchFetch.Ok(it)
       }
+    if (blobs.knownMissing(url)) {
+      branchFetchStats.recordCached()
+      return BranchFetch.NotFound
+    }
     return directBranchRead(url, maxBytes).also {
-      if (it is BranchFetch.Ok) blobs.write(url, it.bytes)
+      when (it) {
+        is BranchFetch.Ok -> blobs.write(url, it.bytes)
+        // Remembered for a day, not forever: see [CatalogBlobPool.knownMissing].
+        BranchFetch.NotFound -> blobs.recordMissing(url)
+        else -> Unit
+      }
     }
   }
 

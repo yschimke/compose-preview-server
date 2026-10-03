@@ -51,6 +51,12 @@ data class CatalogBlobPoolSnapshot(
    */
   val adopted: Int = 0,
   val lastFailure: String? = null,
+  /**
+   * Pinned reads answered "not found" from a remembered miss instead of the branch — see
+   * [CatalogBlobPool.knownMissing]. A restart that re-reads the same revision should see this climb
+   * while the branch's own `notFound` stays flat.
+   */
+  val knownMissingHits: Long = 0,
 )
 
 /**
@@ -129,6 +135,11 @@ class CatalogBlobPool(
    * false reassurance it exists to remove.
    */
   private val persistenceConfigured: Boolean = false,
+  /**
+   * How long a remembered "not found" for a pinned address is trusted; see [knownMissing]. Zero
+   * turns the lane off.
+   */
+  private val missingTtlMillis: Long = DEFAULT_MISSING_TTL_MILLIS,
   private val clock: () -> Long = System::currentTimeMillis,
 ) {
   private val hits = AtomicLong()
@@ -139,6 +150,7 @@ class CatalogBlobPool(
   private val corrupt = AtomicLong()
   private val audited = AtomicLong()
   private val mismatched = AtomicLong()
+  private val knownMissingHits = AtomicLong()
   /**
    * Occupancy as of the last census, advanced by each write and reclaim in between.
    *
@@ -167,6 +179,7 @@ class CatalogBlobPool(
 
   private val contentDir = File(root, CONTENT_DIR)
   private val keysDir = File(root, KEYS_DIR)
+  private val missingDir = File(root, MISSING_DIR)
 
   /**
    * Blobs already present when this process opened the pool — the only direct evidence that
@@ -305,6 +318,50 @@ class CatalogBlobPool(
   }
 
   /**
+   * Whether the branch recently answered "not found" for [key], so a caller can skip the request.
+   *
+   * ### Why misses are remembered at all
+   *
+   * A catalog declares far more assets than it publishes. The figma-vector fill alone asks for one
+   * vector per preview, and a catalog that ships none answers each with a 404 — about 3,900 of them
+   * for `m3-catalog`, on every load, because only [write] was cached and a restart re-asked every
+   * question whose answer had been "no". On a box loading forty catalogs that is most of its
+   * requests to the branch host, competing with the loads that matter for the same rate limit.
+   *
+   * ### Why with a TTL, when hits need none
+   *
+   * The same immutability argument holds — a file absent at a commit is absent forever — but the
+   * evidence is weaker. A hit is the bytes themselves; a miss is one response from a CDN, and a
+   * just-pushed commit can briefly 404 before it is everywhere. So a miss is trusted for
+   * [missingTtlMillis] rather than permanently: long enough that restarts and refreshes in the same
+   * day stop re-asking, short enough that a wrong answer heals on its own.
+   *
+   * [key] must be an immutable address, exactly as for [write].
+   */
+  fun knownMissing(key: String): Boolean {
+    if (missingTtlMillis <= 0) return false
+    val marker = File(missingDir, sha256Hex(key.toByteArray()))
+    val recordedAt = marker.lastModified()
+    if (recordedAt == 0L) return false
+    if (clock() - recordedAt >= missingTtlMillis) {
+      runCatching { marker.delete() }
+      return false
+    }
+    knownMissingHits.increment()
+    return true
+  }
+
+  /** Remember that the branch answered "not found" for [key]; see [knownMissing]. Best-effort. */
+  fun recordMissing(key: String) {
+    if (missingTtlMillis <= 0) return
+    val marker = File(missingDir, sha256Hex(key.toByteArray()))
+    writeAtomically(marker, ByteArray(0))
+    // Stamped from [clock], not left at the scratch file's wall-clock time, so expiry is measured
+    // on the same clock [knownMissing] reads.
+    runCatching { marker.setLastModified(clock()) }
+  }
+
+  /**
    * Check what this pool would serve for [key] against [fresh] — bytes just read from the branch —
    * and drop the entry when they differ.
    *
@@ -365,6 +422,9 @@ class CatalogBlobPool(
     for (pointer in keysDir.listFiles()?.filter { it.isFile }.orEmpty()) {
       runCatching { pointer.delete() }
     }
+    for (marker in missingDir.listFiles()?.filter { it.isFile }.orEmpty()) {
+      runCatching { marker.delete() }
+    }
     // Scratch too. A process killed mid-produce leaves a bundle-sized file under `tmp/`, which no
     // census counts and no read will ever want — so without this an operator could clear the cache,
     // be told it holds nothing, and still find the volume full. A live writer losing its scratch
@@ -399,6 +459,11 @@ class CatalogBlobPool(
     }
     for (pointer in keysDir.listFiles()?.filter { it.isFile }.orEmpty()) {
       if (resolve(pointer, verify = false) == null) runCatching { pointer.delete() }
+    }
+    // Expired misses. Empty files, so they cost no bytes against [maxBytes], only directory
+    // entries — and an expired one is never trusted again anyway.
+    for (marker in missingDir.listFiles()?.filter { it.isFile }.orEmpty()) {
+      if (now - marker.lastModified() >= missingTtlMillis) runCatching { marker.delete() }
     }
     // Abandoned scratch, on the same reasoning as [clear] — but bounded by the grace window rather
     // than unconditional, because this runs on a timer while writers are live and a scratch file
@@ -436,6 +501,7 @@ class CatalogBlobPool(
       corrupt = corrupt.get(),
       audited = audited.get(),
       mismatched = mismatched.get(),
+      knownMissingHits = knownMissingHits.get(),
       lastFailure = lastFailure,
     )
   }
@@ -606,6 +672,12 @@ class CatalogBlobPool(
     const val CONTENT_DIR: String = "content"
     const val KEYS_DIR: String = "keys"
     const val TEMP_DIR: String = "tmp"
+    const val MISSING_DIR: String = "missing"
+
+    /**
+     * A day: restarts and refreshes on the same revision stop re-asking; a wrong 404 self-heals.
+     */
+    const val DEFAULT_MISSING_TTL_MILLIS: Long = 24L * 60 * 60 * 1000
 
     /**
      * Ceiling for the whole pool. Sized for a box publishing a couple of dozen catalogs: the
