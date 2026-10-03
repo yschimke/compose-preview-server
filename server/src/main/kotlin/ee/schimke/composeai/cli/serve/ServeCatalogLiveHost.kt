@@ -196,6 +196,15 @@ class ServeCatalogLiveHost(
    * session state's `liveSeatWeight`. A function because that state is built alongside this host.
    */
   private val residencySeatWeight: () -> Int = { 1 },
+  /**
+   * Whether the bundle a **daemon-preview id** renders from carries the CMP Remote Compose player
+   * (`ee.schimke.composeai:rc-player-compose`) on its classpath — read from that bundle's manifest
+   * ([ServeRcPlayerIds.carriesCmpAndroidPlayer]). The daemon registers `cmp-android` whatever it
+   * was launched with, so this is the half of the lane's capability only the catalog can answer;
+   * without it a `cmp-android` render fails inside the player with a class-not-found linkage error.
+   * The default answers false for every id: a host with no manifest to read never offers the lane.
+   */
+  private val cmpAndroidPlayerFor: (daemonId: String) -> Boolean = { false },
   private val clock: () -> Long = System::currentTimeMillis,
 ) : ServeHost {
   /**
@@ -1755,7 +1764,9 @@ class ServeCatalogLiveHost(
    * [RcPlayerBackend.ANDROIDX_VIEW] / [RcPlayerBackend.ANDROIDX_EMBEDDED] lanes when this Remote
    * Compose preview has a daemon twin ([canRenderOverridesFor]) on a backend that honours the
    * player override ([remoteComposePlayerSelectable]). A preview with no `.rc` doc is not Remote
-   * Compose, so it gets no selector at all. [RcPlayerBackend.CMP_JVM] joins when the isolated
+   * Compose, so it gets no selector at all. [RcPlayerBackend.CMP_ANDROID] — the CMP player run by
+   * the same daemon — takes the AndroidX pair's gate AND needs the catalog's bundle to carry the
+   * player's classes ([cmpAndroidPlayerFor]). [RcPlayerBackend.CMP_JVM] joins when the isolated
    * desktop player is installed and the baked bundle can size a render for it ([supportsCmpJvm]).
    */
   override fun enabledRcPlayersFor(previewId: String): List<RcPlayerBackend> {
@@ -1765,6 +1776,7 @@ class ServeCatalogLiveHost(
       if (canRenderOverridesFor(previewId) && remoteComposePlayerSelectable) {
         add(RcPlayerBackend.ANDROIDX_VIEW)
         add(RcPlayerBackend.ANDROIDX_EMBEDDED)
+        if (alias[previewId]?.let(cmpAndroidPlayerFor) == true) add(RcPlayerBackend.CMP_ANDROID)
       }
       if (supportsCmpJvm(previewId)) add(RcPlayerBackend.CMP_JVM)
       // A player the parity run staged is offerable whatever the daemon is doing — the bytes are

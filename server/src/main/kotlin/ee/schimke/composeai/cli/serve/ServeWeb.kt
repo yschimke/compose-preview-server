@@ -15872,6 +15872,12 @@ ${scriptTag("known-differences.js")}
      * rather than assumed viewer-side (`backendRequiresRenderParam`).
      */
     bakedRcPlayer: String = "",
+    /**
+     * The operator's preferred default Remote Compose player (`serve --rc-default-player`), a
+     * canonical [ServeRcPlayerIds] id, or null for the built-in order. Honoured only when it is in
+     * [enabledRcPlayers] — see [ServeRcPlayerIds.defaultPlayer].
+     */
+    preferredRcPlayer: String? = null,
     wasmSrc: String? = null,
     /**
      * Whether the Wasm iframe may run with `allow-same-origin` (real origin) rather than the
@@ -16629,28 +16635,13 @@ ${scriptTag("known-differences.js")}
     // live/interactive, with its status dot as the live indicator. viewer.js drives both from one
     // lane value (`syncLaneSelect`), so the two can never disagree about what's on the stage.
     val rcEnabled = enabledRcPlayers.toSet()
-    // The lane the viewer opens on for a Remote Compose preview: the server-side
+    // The lane the viewer opens on for a Remote Compose preview: the operator's configured
+    // preference (`serve --rc-default-player`) when this preview enables it, else the server-side
     // `androidx-embedded` player when it's available, else `androidx-view`, else the client
-    // `camaelon-js` canvas.
-    //
-    // The payoff is the data tier rather than the pixels (#3936). `androidx-view` is
-    // `AndroidView { RemoteComposePlayer }`, so a whole document reaches Compose as one interop
-    // leaf: `compose/figma-svg` exports it as a single raster wearing an `.svg` extension, and the
-    // semantics tree describes a black box. The embedded player emits real Compose nodes, so the
-    // same document exports editable geometry and describes the card.
-    //
-    // The two lanes were measured over all 164 documents of the homeassistant catalog before this
-    // moved (`renders/rc-embedded-lane-ab/`): 34 byte-identical, and the residual is overwhelmingly
-    // text rasterization — Skia and the Android canvas hint glyphs differently, which no amount of
-    // player work removes. `?rcPlayer=androidx-view` still selects the old lane for anything that
-    // needs it.
-    val defaultRcBackend =
-      when {
-        ServeRcPlayerIds.ANDROIDX_EMBEDDED in rcEnabled -> ServeRcPlayerIds.ANDROIDX_EMBEDDED
-        ServeRcPlayerIds.ANDROIDX_VIEW in rcEnabled -> ServeRcPlayerIds.ANDROIDX_VIEW
-        ServeRcPlayerIds.CAMAELON_JS in rcEnabled -> ServeRcPlayerIds.CAMAELON_JS
-        else -> enabledRcPlayers.firstOrNull().orEmpty()
-      }
+    // `camaelon-js` canvas. Why embedded leads that order — and why switching the default to
+    // `cmp-android` is a configuration change — is written once, at
+    // [ServeRcPlayerIds.defaultPlayer].
+    val defaultRcBackend = ServeRcPlayerIds.defaultPlayer(enabledRcPlayers, preferredRcPlayer)
     // Every lane this preview can be drawn by, in display order: the Remote Compose players (or the
     // plain snapshot, when this isn't a Remote Compose preview), the in-browser Wasm app, and the
     // imported design spec. A player the host doesn't offer is still listed — as a disabled option,

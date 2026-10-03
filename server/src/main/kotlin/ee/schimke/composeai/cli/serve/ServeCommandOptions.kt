@@ -1046,6 +1046,14 @@ public class ServeCommandOptions(
         }
       }
 
+  override val rcDefaultPlayer: String? =
+    ServeRcPlayerIds.parsePreferredPlayer(args.flagValue("--rc-default-player")) { value ->
+      System.err.println(
+        "serve: --rc-default-player '$value' names no Remote Compose player (expected one of " +
+          "${ServeRcPlayerIds.UNIVERSE.joinToString(", ") { it.id }}) — keeping the built-in default."
+      )
+    }
+
   override val catalogRepo: String =
     args.flagValue("--catalog-repo")?.takeIf { it.isNotBlank() } ?: ServeDefaults.CATALOG_REPO
 
@@ -1558,6 +1566,10 @@ public class ServeCommandOptions(
                           Experimental non-JVM Remote Compose player produced by
                           :rc-player-wasm:wasmPlayerDist. Serves it at /rc-player-wasm/ and enables
                           the "CMP Wasm" RC backend for previews carrying a captured .rc document.
+        --rc-default-player <id>
+                          The Remote Compose player the viewer opens on (e.g. cmp-android), used
+                          only where a preview enables it; elsewhere the built-in order applies:
+                          androidx-embedded, then androidx-view, then camaelon-js.
 
       The shareable link carries an unguessable token; requests without it get 404.
       """

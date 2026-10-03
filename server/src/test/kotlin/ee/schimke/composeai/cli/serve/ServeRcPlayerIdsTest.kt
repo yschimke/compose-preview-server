@@ -90,4 +90,128 @@ class ServeRcPlayerIdsTest {
     assertFalse(ServeRcPlayerIds.isCmpJvm("cmp-android"))
     assertFalse(ServeRcPlayerIds.isCmpJvm(null))
   }
+
+  // ---- cmp-android capability: read from the bundle manifest's classpath ----------------------
+
+  private fun bundleWith(vararg maven: Pair<String, String>): java.io.File {
+    val classpath =
+      (listOf("""{"kind":"module","path":"classes/app.jar"}""") +
+          maven.map { (group, artifact) ->
+            """{"kind":"maven","group":"$group","artifact":"$artifact","version":"0.1.0","type":"aar","sha256":"00"}"""
+          })
+        .joinToString(",")
+    val manifest =
+      """{"schemaVersion":8,"backend":"android","previewIds":["a"],"coverPreviewId":"a",""" +
+        """"classpath":[$classpath],"modulePath":":remote-catalog","producedBy":"test"}"""
+    val zip =
+      java.io
+        .ByteArrayOutputStream()
+        .also { baos ->
+          java.util.zip.ZipOutputStream(baos).use { z ->
+            z.putNextEntry(java.util.zip.ZipEntry("bundle.json"))
+            z.write(manifest.toByteArray())
+            z.closeEntry()
+          }
+        }
+        .toByteArray()
+    val cover =
+      java.io
+        .ByteArrayOutputStream()
+        .also {
+          javax.imageio.ImageIO.write(
+            java.awt.image.BufferedImage(2, 2, java.awt.image.BufferedImage.TYPE_INT_RGB),
+            "png",
+            it,
+          )
+        }
+        .toByteArray()
+    return kotlin.io.path.createTempFile("bundle", ".png").toFile().apply {
+      deleteOnExit()
+      writeBytes(cover + zip)
+    }
+  }
+
+  @Test
+  fun `a bundle whose classpath carries rc-player-compose can run cmp-android`() {
+    assertTrue(
+      ServeRcPlayerIds.bundleCarriesCmpAndroidPlayer(
+        bundleWith(
+          "androidx.compose.remote" to "remote-player-view",
+          "ee.schimke.composeai" to "rc-player-compose",
+        )
+      )
+    )
+    // A KMP library resolves to its Android variant on an Android bundle's classpath.
+    assertTrue(
+      ServeRcPlayerIds.bundleCarriesCmpAndroidPlayer(
+        bundleWith("ee.schimke.composeai" to "rc-player-compose-android")
+      )
+    )
+  }
+
+  @Test
+  fun `a bundle without rc-player-compose, or with no readable manifest, cannot`() {
+    assertFalse(
+      ServeRcPlayerIds.bundleCarriesCmpAndroidPlayer(
+        bundleWith(
+          "androidx.compose.remote" to "remote-player-view",
+          "ee.schimke.composeai" to "data-remotecompose-connector",
+          // Same artifact name under another group is not the player.
+          "com.example" to "rc-player-compose",
+        )
+      )
+    )
+    val notABundle =
+      kotlin.io.path.createTempFile("bundle", ".png").toFile().apply {
+        deleteOnExit()
+        writeBytes(byteArrayOf(1, 2, 3))
+      }
+    assertFalse(ServeRcPlayerIds.bundleCarriesCmpAndroidPlayer(notABundle))
+    assertFalse(ServeRcPlayerIds.bundleCarriesCmpAndroidPlayer(java.io.File("/no/such/bundle.png")))
+  }
+
+  // ---- the configured default player ---------------------------------------------------------
+
+  private val allDaemonLanes =
+    listOf("camaelon-js", "androidx-view", "androidx-embedded", "cmp-android", "cmp-jvm")
+
+  @Test
+  fun `with no preference the default is unchanged - embedded, then view, then the JS canvas`() {
+    assertEquals("androidx-embedded", ServeRcPlayerIds.defaultPlayer(allDaemonLanes))
+    assertEquals(
+      "androidx-view",
+      ServeRcPlayerIds.defaultPlayer(listOf("camaelon-js", "androidx-view", "cmp-jvm")),
+    )
+    assertEquals("camaelon-js", ServeRcPlayerIds.defaultPlayer(listOf("camaelon-js", "cmp-jvm")))
+    assertEquals("cmp-jvm", ServeRcPlayerIds.defaultPlayer(listOf("cmp-jvm")))
+    assertEquals("", ServeRcPlayerIds.defaultPlayer(emptyList()))
+  }
+
+  @Test
+  fun `a preferred cmp-android opens the viewer on it where the preview enables it`() {
+    assertEquals("cmp-android", ServeRcPlayerIds.defaultPlayer(allDaemonLanes, "cmp-android"))
+  }
+
+  @Test
+  fun `a preferred player the preview does not enable falls back through the built-in order`() {
+    val noCmpAndroid = allDaemonLanes - "cmp-android"
+    assertEquals("androidx-embedded", ServeRcPlayerIds.defaultPlayer(noCmpAndroid, "cmp-android"))
+    // No daemon at all: still the JS canvas, never a disabled option.
+    assertEquals(
+      "camaelon-js",
+      ServeRcPlayerIds.defaultPlayer(listOf("camaelon-js"), "cmp-android"),
+    )
+  }
+
+  @Test
+  fun `the configured preference is read in canonical ids`() {
+    assertEquals("cmp-android", ServeRcPlayerIds.parsePreferredPlayer(" CMP-Android "))
+    assertEquals("androidx-view", ServeRcPlayerIds.parsePreferredPlayer("java"))
+    assertEquals("camaelon-js", ServeRcPlayerIds.parsePreferredPlayer("js"))
+    assertNull(ServeRcPlayerIds.parsePreferredPlayer(null))
+    assertNull(ServeRcPlayerIds.parsePreferredPlayer("  "))
+    val rejected = mutableListOf<String>()
+    assertNull(ServeRcPlayerIds.parsePreferredPlayer("my-player", rejected::add))
+    assertEquals(listOf("my-player"), rejected)
+  }
 }

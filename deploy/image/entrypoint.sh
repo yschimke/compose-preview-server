@@ -61,6 +61,12 @@ if [[ -f /opt/compose-preview-server/rc-player-wasm/index.html ]]; then
   args+=(--rc-player-wasm-dir /opt/compose-preview-server/rc-player-wasm)
 fi
 
+# The Remote Compose player the viewer opens on, where a preview enables it (e.g. `cmp-android`,
+# offered only on catalogs whose live bundle carries rc-player-compose). Empty ⇒ the server's
+# built-in order: androidx-embedded, then androidx-view, then camaelon-js.
+[[ -n "${SERVE_RC_DEFAULT_PLAYER:-}" ]] &&
+  args+=(--rc-default-player "${SERVE_RC_DEFAULT_PLAYER}")
+
 # Auth posture (see deploy/cloudrun/entrypoint.sh): SERVE_PUBLIC=1 → the open
 # public preview server (preview.coo.ee); otherwise token-gated (SERVE_TOKEN
 # required, fail closed).

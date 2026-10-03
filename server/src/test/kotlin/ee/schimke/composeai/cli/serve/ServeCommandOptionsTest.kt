@@ -91,6 +91,18 @@ class ServeCommandOptionsTest {
   }
 
   @Test
+  fun `the default Remote Compose player is unset unless named, and read in canonical ids`() {
+    assertNull(options(emptyList()).rcDefaultPlayer)
+    assertEquals(
+      "cmp-android",
+      options(listOf("--rc-default-player", "cmp-android")).rcDefaultPlayer,
+    )
+    assertEquals("androidx-view", options(listOf("--rc-default-player=java")).rcDefaultPlayer)
+    // A value naming no player keeps the built-in default rather than failing the server.
+    assertNull(options(listOf("--rc-default-player", "nope")).rcDefaultPlayer)
+  }
+
+  @Test
   fun `the diagnostic admin token is parsed separately and blanks stay disabled`() {
     assertEquals(
       "read-secret",
