@@ -6363,6 +6363,13 @@ ${captureControlsHtml().prependIndent("          ")}
      * default, and every catalog that declares no `compareWith` — renders no chip.
      */
     val parallelComparison: ParallelComparison? = null,
+    /**
+     * Configured but not loaded yet: the first pass after a restart reads catalogs one at a time,
+     * and a box with dozens of them spends minutes there. The card holds the catalog's place on the
+     * front page instead of the catalog vanishing until its turn comes. It carries no link, because
+     * `/<system>/` does not exist until the load lands.
+     */
+    val loading: Boolean = false,
   )
 
   /**
@@ -6734,7 +6741,26 @@ ${captureControlsHtml().prependIndent("          ")}
       if (compare.isEmpty()) return ""
       return "\n            <div class=\"cp-sys-actions\">$compare</div>"
     }
+    fun loadingCard(s: HomeSystem): String {
+      val title = WebEscaping.htmlEscape(s.title)
+      val sysId = WebEscaping.htmlEscape(s.system)
+      val technicalId =
+        if (componentBrowser) "" else "\n            <div class=\"cp-id\">$sysId</div>"
+      val searchAttr =
+        " data-browser-search=\"${WebEscaping.htmlEscape("${s.title} ${s.system} ${s.sourceRepo.orEmpty()}").lowercase()}\""
+      return """
+      <div class="cp-card cp-sys cp-sys-loading" aria-busy="true"$searchAttr data-cp-system="$sysId">
+        <div class="cp-imgwrap"><span class="cp-sys-noimg">loading…</span></div>
+        <div class="cp-meta">
+          <div class="cp-sys-title">$title</div>$technicalId
+          <div class="cp-sys-foot">loading…</div>
+        </div>
+      </div>
+      """
+        .trimIndent()
+    }
     fun card(s: HomeSystem): String {
+      if (s.loading) return loadingCard(s)
       val sysSeg = WebEscaping.urlEncodeSegment(s.system)
       val title = WebEscaping.htmlEscape(s.title)
       val sysId = WebEscaping.htmlEscape(s.system)

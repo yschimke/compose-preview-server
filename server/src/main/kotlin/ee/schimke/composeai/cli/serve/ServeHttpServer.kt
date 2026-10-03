@@ -9965,6 +9965,30 @@ class ServeHttpServer(
    * count. A catalog with neither a resident host nor a last-known snapshot is skipped rather than
    * sinking the whole page.
    */
+  /**
+   * The front-page card for a catalog that is configured but has not loaded yet, or null when it is
+   * not pending. A restart reads catalogs one at a time, so most of a large box's front page used
+   * to vanish for minutes and come back a card at a time; this keeps each one in its place, filed
+   * under the same publisher section, until its load lands. A catalog whose load FAILED is still
+   * skipped: it is not on its way.
+   */
+  private fun loadingHomeSystem(system: String): ServeWeb.HomeSystem? {
+    val state = catalogLoads?.snapshot()?.firstOrNull { it.config.system == system } ?: return null
+    if (state.loadState != "pending") return null
+    return ServeWeb.HomeSystem(
+      group = state.config.group,
+      system = system,
+      title = system,
+      subtitle = null,
+      previewCount = 0,
+      trust = null,
+      sourceRepo = state.config.repo,
+      importedFrom = state.config.importedFrom,
+      heroPreviewId = null,
+      loading = true,
+    )
+  }
+
   private fun homeSystemsFor(ids: List<String>): List<ServeWeb.HomeSystem> {
     val views = engagementStore.systemViews(ids)
     // The front door's own set, for the sibling gate below. A list here and a membership test per
@@ -9972,7 +9996,7 @@ class ServeHttpServer(
     val listed = ids.toSet()
     return ids.mapNotNull { system ->
       sessions.peekHost(system)?.let { rememberCatalogMeta(system, it, progress = false) }
-      val meta = catalogMetaSeen[system] ?: return@mapNotNull null
+      val meta = catalogMetaSeen[system] ?: return@mapNotNull loadingHomeSystem(system)
       ServeWeb.HomeSystem(
         // The front-page section this catalog was published under, straight from the operator's
         // config — the page then checks the claim against the catalog's actual provenance.
