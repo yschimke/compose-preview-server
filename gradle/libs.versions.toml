@@ -334,7 +334,9 @@ composeai-contracts = "3.17.0"
 # which the server's screen export resolves through `Outcome.Projected.resolvable` (compose-ui-builder#413).
 # 3.78.0 adds a theme host's `themeTextStyle`, the role unstyled text is set in, which the screen
 # export provides as `ProvideTextStyle` inside the theme (compose-ui-builder#416).
-composeai-ui-builder = "3.78.0"
+# 3.79.0 draws a design's typefaces in the renderer's thumbnails and PNG/SVG exports, from the
+# Google Fonts cache this server names on its daemon (compose-ui-builder#425).
+composeai-ui-builder = "3.79.0"
 kotlinx-coroutines = "1.11.0"
 kotlinx-serialization = "1.11.0"
 ktor = "3.6.0"
