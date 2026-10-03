@@ -1002,6 +1002,18 @@ const ADMIN_UI_BUILDER_DESIGNS = {
 
 const FIXTURE_STATES = [
   {
+    fixture: "serve-ui-builder-designs",
+    suffix: "visibility",
+    apply: async (page) => {
+      await page.getByText("More ways to start", { exact: true }).click();
+      const visibility = page.getByRole("combobox", { name: "Design visibility" });
+      await expect(visibility.first()).toHaveValue("private");
+      await visibility.first().selectOption("public");
+      await expect(visibility.first()).toHaveValue("public");
+      await expect(visibility.nth(1)).toHaveValue("private");
+    },
+  },
+  {
     // The admin screen with its designs loaded. The default capture of this fixture shows the
     // page after the fetch FAILED (no server behind the harness), which is a real state — the
     // token-less hint — but not the one the screen exists for.

@@ -95,6 +95,41 @@ internal fun Route.installUiBuilderRoutes(
 ) {
   installUiBuilderLiveExportRoutes(service, authorization)
   installUiBuilderCatalogRecoveryRoutes(service, authorization)
+  get("/api/ui-builder/v1/designs/{designId}/visibility") {
+    call.response.headers.append(HttpHeaders.CacheControl, "no-store")
+    val actor =
+      (authorization.authorize(call, UiBuilderRouteCapability.READ)
+          as? UiBuilderAuthorizationDecision.Authorized)
+        ?.actor
+    val designId = call.parameters["designId"].orEmpty()
+    val actions = actor?.let { service.designActions(it, designId) }
+    if (actions == null) {
+      call.respondText("not found", status = HttpStatusCode.NotFound)
+      return@get
+    }
+    val publicRead =
+      service.canRead(
+        AuthenticatedUiBuilderActor(ServeUiBuilderVisibility.ANONYMOUS_ACTOR_ID),
+        designId,
+      )
+    val canWrite =
+      ee.schimke.composeai.uibuilder.protocol.DesignAccessActionV1.WRITE in actions &&
+        authorization.authorize(call, UiBuilderRouteCapability.WRITE) is
+          UiBuilderAuthorizationDecision.Authorized
+    val canManage =
+      canWrite &&
+        ee.schimke.composeai.uibuilder.protocol.DesignAccessActionV1.MANAGE_ACCESS in actions
+    call.respondText(
+      UI_BUILDER_JSON.encodeToString(
+        UiBuilderVisibilityPayload(
+          if (publicRead) "public" else "private",
+          canWrite,
+          canManage,
+        )
+      ),
+      ContentType.Application.Json,
+    )
+  }
   post(UI_BUILDER_REQUEST_PATH) {
     call.response.headers.append(HttpHeaders.CacheControl, "no-store")
     val bytes =
@@ -754,6 +789,7 @@ private suspend fun io.ktor.server.application.ApplicationCall.respondProtocolEr
 @kotlinx.serialization.Serializable
 internal data class UiBuilderIdentityV1(
   val schemaVersion: Int = 1,
+  val designVisibilitySupported: Boolean = true,
   val actorId: String,
   /**
    * Whether a person (or an operator token) is behind this request, as opposed to the anonymous
@@ -957,4 +993,11 @@ internal data class NativePreviewRefusalV1(
   val schema: String = "compose-preview/ui-builder-native-preview-refusal/v1",
   val code: String,
   val reasons: List<String>,
+)
+
+@kotlinx.serialization.Serializable
+internal data class UiBuilderVisibilityPayload(
+  val visibility: String,
+  val canWrite: Boolean,
+  val canManage: Boolean,
 )

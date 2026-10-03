@@ -99,6 +99,80 @@ class ServeUiBuilderPublicDesignIntegrationTest {
     )
   }
 
+  @Test
+  fun `an explicit private create never receives the public server default`() = runBlocking {
+    val service = service(UiBuilderDefaultVisibility.PUBLIC)
+    val created =
+      withDesignCreationVisibility("private") {
+        service.execute(
+          UiBuilderServiceCall(owner, UiBuilderServiceRequest.CreateDesign(document()))
+        )
+      }
+    val snapshot = assertIs<UiBuilderServiceResponse.Snapshot>(created)
+    assertEquals(0, snapshot.snapshot.access?.accessRevision)
+    assertTrue(snapshot.snapshot.access!!.actorGrants.isEmpty())
+    assertIs<UiBuilderServiceResponse.Error>(
+      service.execute(
+        UiBuilderServiceCall(
+          anonymous,
+          UiBuilderServiceRequest.OpenDesign(DESIGN_ID),
+        )
+      )
+    )
+  }
+
+  @Test
+  fun `public create and private revocation preserve delegated owner editing`() = runBlocking {
+    val service = service(UiBuilderDefaultVisibility.PRIVATE)
+    val agent = AuthenticatedUiBuilderActor("agent:owner", onBehalfOfActorId = owner.actorId)
+    withDesignCreationVisibility("public") {
+      service.execute(UiBuilderServiceCall(owner, UiBuilderServiceRequest.CreateDesign(document())))
+    }
+    assertIs<UiBuilderServiceResponse.Snapshot>(
+      service.execute(
+        UiBuilderServiceCall(
+          anonymous,
+          UiBuilderServiceRequest.OpenDesign(DESIGN_ID),
+        )
+      )
+    )
+    assertIs<UiBuilderServiceResponse.Error>(
+      service.execute(
+        UiBuilderServiceCall(
+          anonymous,
+          UiBuilderServiceRequest.RenameDesign(DESIGN_ID, "Not allowed"),
+        )
+      )
+    )
+    assertIs<UiBuilderServiceResponse.Error>(
+      service.setDesignVisibility(stranger, DESIGN_ID, UiBuilderDefaultVisibility.PRIVATE)
+    )
+    assertIs<UiBuilderServiceResponse.DesignAccess>(
+      service.setDesignVisibility(agent, DESIGN_ID, UiBuilderDefaultVisibility.PRIVATE)
+    )
+    assertIs<UiBuilderServiceResponse.Error>(
+      service.execute(
+        UiBuilderServiceCall(
+          anonymous,
+          UiBuilderServiceRequest.OpenDesign(DESIGN_ID),
+        )
+      )
+    )
+    assertIs<UiBuilderServiceResponse.DesignRenamed>(
+      service.execute(
+        UiBuilderServiceCall(
+          agent,
+          UiBuilderServiceRequest.RenameDesign(DESIGN_ID, "Still mine"),
+        )
+      )
+    )
+    // Revocation is durable, and reopening with a public default does not republish old designs.
+    assertIs<UiBuilderServiceResponse.Error>(
+      service(UiBuilderDefaultVisibility.PUBLIC)
+        .execute(UiBuilderServiceCall(anonymous, UiBuilderServiceRequest.OpenDesign(DESIGN_ID)))
+    )
+  }
+
   private fun document(): DesignDocumentV1 =
     DesignDocumentV1(
       schema = "compose-ui-builder-document/v1-candidate",

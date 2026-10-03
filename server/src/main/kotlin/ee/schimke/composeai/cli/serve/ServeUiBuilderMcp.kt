@@ -401,7 +401,23 @@ class ServeUiBuilderMcp(
         RENAME_DESIGN,
         DELETE_DESIGN -> return manageDesign(tool, args, actor, callId)
         DESIGN_ACCESS -> GetDesignAccessRequestV1(designId = args.requiredText("designId"))
-        SHARE_DESIGN -> share(args, actor)
+        SHARE_DESIGN -> {
+          args.text("visibility")?.let { value ->
+            if (args.text("actorId") != null)
+              throw McpRequestException("pass visibility or actorId, not both")
+            val visibility =
+              try {
+                UiBuilderDefaultVisibility.parse(value)
+              } catch (e: IllegalArgumentException) {
+                throw McpRequestException(e.message.orEmpty())
+              }
+            return envelope(
+              callId,
+              service.setDesignVisibility(actor, args.requiredText("designId"), visibility),
+            )
+          }
+          share(args, actor)
+        }
         APPLY -> apply(args, actor)
         EXPORT_DOCUMENT ->
           return envelope(
@@ -455,7 +471,17 @@ class ServeUiBuilderMcp(
             .call(tool, args, actor, clientInteraction)
         else -> throw McpRequestException("unknown UI-builder tool '$tool'")
       }
-    return envelope(callId, execute(request, actor), includeCatalog = args.includeCatalog())
+    val response =
+      if (request is CreateDesignRequestV1) {
+        val visibility =
+          try {
+            UiBuilderDefaultVisibility.parse(args.text("visibility"))
+          } catch (e: IllegalArgumentException) {
+            throw McpRequestException(e.message.orEmpty())
+          }
+        withDesignCreationVisibility(visibility.wire) { execute(request, actor) }
+      } else execute(request, actor)
+    return envelope(callId, response, includeCatalog = args.includeCatalog())
   }
 
   /**
@@ -1001,6 +1027,7 @@ class ServeUiBuilderMcp(
           put("designId", JsonPrimitive(newDesignId))
           put("document", JsonObject(document - "home"))
           args["title"]?.let { put("title", it) }
+          args["visibility"]?.let { put("visibility", it) }
           args[INCLUDE_CATALOG_ARGUMENT]?.let { put(INCLUDE_CATALOG_ARGUMENT, it) }
         }
       )
@@ -1009,7 +1036,7 @@ class ServeUiBuilderMcp(
         as? CreatePlan.Create ?: return null
     return envelope(
       callId,
-      execute(plan.request, actor),
+      withDesignCreationVisibility(createArgs.text("visibility")) { execute(plan.request, actor) },
       includeCatalog = createArgs.includeCatalog(),
     )
   }
@@ -3504,6 +3531,7 @@ class ServeUiBuilderMcp(
             "title":{"type":"string"},
             "document":{"type":"object","description":"A whole DesignDocumentV1."},
             "fromDesignId":{"type":"string","description":"Copy this design's document instead."},
+            "visibility":{"type":"string","enum":["private","public"],"default":"private","description":"Private by default. Public allows anyone with the link to view; editing still requires explicit access."},
             "$INCLUDE_CATALOG_ARGUMENT":{"type":"boolean","description":"Embed the pinned catalog in the returned snapshot. Defaults to false."}
           },"required":["designId"],"additionalProperties":false}
           """,
@@ -3675,14 +3703,16 @@ class ServeUiBuilderMcp(
             "grant; $DESIGN_ACCESS lists the ones a design already carries. A `viewer` may read " +
             "and export, an `editor` may also change the design, and neither may share it on. " +
             "Only the design's owner may share it, and an agent acting under an approved grant " +
-            "shares as the person who approved that grant.",
+            "shares as the person who approved that grant. Pass visibility instead of actorId to " +
+            "choose private or public (read only). Private keeps existing invited collaborators.",
           """
           {"type":"object","properties":{
             "designId":{"type":"string"},
             "actorId":{"type":"string","description":"Who to share with, e.g. github:octocat."},
+            "visibility":{"type":"string","enum":["private","public"],"description":"Change visibility instead of an actor grant. Public is read only. Private keeps invited collaborators."},
             "role":{"type":"string","description":"editor or viewer. Defaults to viewer."},
             "$REVOKE_ARGUMENT":{"type":"boolean","description":"Take this actor's access away instead."}
-          },"required":["designId","actorId"],"additionalProperties":false}
+          },"required":["designId"],"additionalProperties":false}
           """,
         ),
         if (!links) null

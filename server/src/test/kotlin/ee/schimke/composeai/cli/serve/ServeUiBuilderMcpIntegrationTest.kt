@@ -1843,6 +1843,80 @@ class ServeUiBuilderMcpIntegrationTest {
     assertTrue(text.contains("read grant"), text)
   }
 
+  @Test
+  fun `agents create in either visibility and can switch without changing collaborators`() {
+    val server = start()
+    val doc =
+      json.encodeToString(DesignDocumentV1.serializer(), document().copy(id = "visible-screen"))
+    val created =
+      assertIs<SnapshotResponseV1>(
+        response(
+          envelope(
+            server,
+            ServeUiBuilderMcp.CREATE_DESIGN,
+            """{"designId":"visible-screen","document":$doc,"visibility":"public","includeCatalog":true}""",
+          )
+        )
+      )
+    assertTrue(ServeUiBuilderVisibility.isPublic(created.snapshot.access!!))
+    fun visibility(authenticated: Boolean): Pair<Int, String> =
+      client
+        .newCall(
+          Request.Builder()
+            .url(
+              "http://127.0.0.1:${server.server.port}/api/ui-builder/v1/designs/visible-screen/visibility"
+            )
+            .apply { if (authenticated) header(ServeHttpServer.TOKEN_HEADER, OPERATOR_TOKEN) }
+            .build()
+        )
+        .execute()
+        .use { it.code to it.body.string() }
+    val (status, body) = visibility(true)
+    assertEquals(200, status)
+    assertTrue(body.contains("\"visibility\":\"public\""), body)
+    assertTrue(body.contains("\"canManage\":true"), body)
+    assertEquals(404, visibility(false).first, "private host still requires authentication")
+
+    val shared =
+      assertIs<DesignAccessResponseV1>(
+        response(
+          envelope(
+            server,
+            ServeUiBuilderMcp.SHARE_DESIGN,
+            """{"designId":"visible-screen","actorId":"github:collaborator","role":"editor"}""",
+          )
+        )
+      )
+    val private =
+      assertIs<DesignAccessResponseV1>(
+        response(
+          envelope(
+            server,
+            ServeUiBuilderMcp.SHARE_DESIGN,
+            """{"designId":"visible-screen","visibility":"private"}""",
+          )
+        )
+      )
+    assertEquals(
+      shared.access.actorGrants.filterNot { ServeUiBuilderVisibility.isReservedActor(it.actorId) },
+      private.access.actorGrants,
+    )
+    assertTrue(!ServeUiBuilderVisibility.isPublic(private.access))
+    assertTrue(visibility(true).second.contains("\"visibility\":\"private\""))
+
+    val publicAgain =
+      assertIs<DesignAccessResponseV1>(
+        response(
+          envelope(
+            server,
+            ServeUiBuilderMcp.SHARE_DESIGN,
+            """{"designId":"visible-screen","visibility":"public"}""",
+          )
+        )
+      )
+    assertTrue(ServeUiBuilderVisibility.isPublic(publicAgain.access))
+  }
+
   private fun start(
     withUiBuilder: Boolean = true,
     withAuthorization: Boolean = true,
@@ -1925,7 +1999,10 @@ class ServeUiBuilderMcpIntegrationTest {
           defaultSessionId = "unused",
           catalogMcpEnabled = true,
           machineAuthorization = ServeMachineAuthorization(OPERATOR_TOKEN, null, null),
-          uiBuilderService = service,
+          uiBuilderService =
+            service?.let {
+              ServeUiBuilderVisibility.withDefault(it, UiBuilderDefaultVisibility.PRIVATE)
+            },
           uiBuilderAssets = if (withAssets) service else null,
           uiBuilderCommentStore =
             if (withComments) ServeUiBuilderCommentStore(stateDirectory.resolve("comments"))

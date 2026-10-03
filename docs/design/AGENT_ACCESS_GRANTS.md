@@ -313,6 +313,22 @@ on, and a design keeps exactly one owner. An agent that needs to know which id t
 own from `GET /agent-access/whoami`, which now answers with `actorId` and — when it is acting for
 somebody — `onBehalfOfActorId`.
 
+New designs default to **Private** in the browser and MCP. Creation forms accept `visibility=private`
+or `visibility=public`; `ui_builder_create_design` accepts the same optional `visibility` argument.
+The selection overrides `--ui-builder-default-visibility` for that creation, before a public grant
+can be applied. Copies start with their own access list and the selected visibility.
+
+An owner (or their authorized agent) can call `ui_builder_share_design` with `designId` and
+`visibility` instead of `actorId` to change the mode. Public grants only read and export;
+editing still requires a named collaborator grant. Returning to private removes public access
+and retains invited collaborators. Public designs remain link-only, outside strangers' design lists.
+The host's own authentication gate still applies on a private server.
+
+The editor reads `GET /api/ui-builder/v1/designs/{designId}/visibility` for the current visibility
+and the caller's edit/manage permissions. This endpoint exposes no collaborator identities, returns
+404 when the caller cannot read the design, and is never cached. `/identity` advertises
+`designVisibilitySupported` so a newer editor does not offer public creation on an older host.
+
 ## Asking for access yourself
 
 Sharing needs the owner to act first. The other direction — a person who can see the UI builder

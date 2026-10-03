@@ -20,6 +20,7 @@ import java.io.File
 import java.nio.file.Files
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CopyOnWriteArrayList
+import kotlin.coroutines.coroutineContext
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -41,6 +42,7 @@ import okhttp3.RequestBody.Companion.toRequestBody
  */
 class ServeUiBuilderCreateRoutesTest {
   private val created = CopyOnWriteArrayList<String>()
+  private val visibility = ConcurrentHashMap<String, UiBuilderDefaultVisibility>()
   private val createdDocuments = java.util.concurrent.ConcurrentHashMap<String, DesignDocumentV1>()
   private val documents = ConcurrentHashMap<String, DesignDocumentV1>()
 
@@ -97,6 +99,8 @@ class ServeUiBuilderCreateRoutesTest {
                 UiBuilderServiceError(ServiceErrorCodeV1.BAD_REQUEST, "design limit reached")
               )
             } else {
+              visibility[request.document.id] =
+                coroutineContext[CreationVisibility]?.value ?: UiBuilderDefaultVisibility.PUBLIC
               created += request.document.id
               createdDocuments[request.document.id] = request.document
               documents[request.document.id] = request.document
@@ -157,6 +161,42 @@ class ServeUiBuilderCreateRoutesTest {
   }
 
   private fun url(path: String) = "http://127.0.0.1:${server.port}$path"
+
+  @Test
+  fun `creation form carries explicit visibility and defaults to private`() {
+    for ((name, choice) in
+      listOf(
+        "default" to null,
+        "private" to "private",
+        "public" to "public",
+        "invalid" to "invalid",
+      )) {
+      val form =
+        FormBody.Builder()
+          .add("designId", name)
+          .add("catalog", "m3-catalog")
+          .add("template", "blank")
+      choice?.let { form.add("visibility", it) }
+      client
+        .newCall(
+          Request.Builder()
+            .url(url("/ui-builder/designs"))
+            .header("X-Test-Actor", "operator")
+            .post(form.build())
+            .build()
+        )
+        .execute()
+        .use { assertEquals(if (choice == "invalid") 400 else 303, it.code) }
+    }
+    assertEquals(
+      mapOf(
+        "default" to UiBuilderDefaultVisibility.PRIVATE,
+        "private" to UiBuilderDefaultVisibility.PRIVATE,
+        "public" to UiBuilderDefaultVisibility.PUBLIC,
+      ),
+      visibility,
+    )
+  }
 
   @Test
   fun `the New design form creates once and redirects to the design's permalink`() {
