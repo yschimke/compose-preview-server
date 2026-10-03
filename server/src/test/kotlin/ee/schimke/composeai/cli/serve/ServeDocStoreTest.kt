@@ -176,4 +176,22 @@ class ServeDocStoreTest {
     assertTrue(!ServeDocStore.isWellFormedId("../../secret"))
     assertTrue(!ServeDocStore.isWellFormedId("short"))
   }
+
+  @Test
+  fun `a playground process mints routable ids the main server never mints`() {
+    repeat(2_000) {
+      val main = ServeDocStore.randomId()
+      assertTrue(!main.startsWith(ServeDocStore.PLAYGROUND_PREFIX), main)
+      assertTrue(ServeDocStore.isWellFormedId(main), main)
+    }
+    val playground = ServeDocStore.playgroundId()
+    assertTrue(playground.startsWith(ServeDocStore.PLAYGROUND_PREFIX), playground)
+    // Still a capability the store and its route accept, not merely a routable name.
+    assertTrue(ServeDocStore.isWellFormedId(playground), playground)
+
+    val store = ServeDocStore(mintId = { ServeDocStore.playgroundId() }, clock = { now })
+    val doc = ok(store.add("loading.json", ServeDocFixtures.lottieDoc(), isSecurityChecked = true))
+    assertTrue(doc.id.startsWith(ServeDocStore.PLAYGROUND_PREFIX))
+    assertEquals(doc, store.get(doc.id))
+  }
 }

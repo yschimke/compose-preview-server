@@ -32,8 +32,12 @@ for f in "${entrypoint}" "${compose}"; do
 done
 
 # Variables the entrypoint reads that are deliberately NOT operator-facing compose knobs. Keep this
-# short and justified — it is an exemption from the guard, not a parking space. (Empty today.)
-EXEMPT=()
+# short and justified — it is an exemption from the guard, not a parking space.
+EXEMPT=(
+  # Pinned to `playground` by the `playground` service and deliberately absent from `preview`: a
+  # SERVE_ROLE left in .env must never turn the main server into the playground's container.
+  SERVE_ROLE
+)
 
 # Every ${SERVE_...} / ${SERVE_...:-default} / ${SERVE_...:=default} expansion in the entrypoint.
 mapfile -t read_vars < <(

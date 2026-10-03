@@ -299,6 +299,24 @@ public interface ServeOptions {
   public val compileEngine: Boolean
 
   /**
+   * `--role playground` (env `SERVE_ROLE=playground`): this process is the public playground's own
+   * container, behind the same proxy as the main server. It mounts the playground surface over a
+   * runtime-selecting engine, and mints its `/d/` documents with [ServeDocStore.PLAYGROUND_PREFIX]
+   * so the proxy can send them back here. The proxy routes only the playground's paths to it; the
+   * entrypoint also switches off the catalog theme optimizer and background warming, which a
+   * process that never serves catalog pages has no use for.
+   */
+  public val playgroundRole: Boolean
+
+  /**
+   * `--playground-external` (env `SERVE_PLAYGROUND_EXTERNAL=1`): the public playground is served by
+   * a sibling process at this same origin (`--role playground`), so this host renders the editor
+   * handoff links without mounting the routes. Which catalogs get a link is decided by this host's
+   * own engine, so it needs `--compile-engine` too; without one, no link is offered.
+   */
+  public val playgroundExternal: Boolean
+
+  /**
    * `--playground-catalog-limit <n>`: how many runtime-selected catalogs may hold a resolved
    * compile classpath at once. Each one is an unpacked bundle plus a resolved Maven classpath held
    * for the life of the process (they cannot be evicted while snippet JVMs hold their jars open),

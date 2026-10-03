@@ -331,4 +331,14 @@ class ServeCommandOptionsTest {
       defaultTimeoutSeconds = 600L,
       previewMatcher = { _, _, _, _, _, _ -> true },
     )
+
+  @Test
+  fun `the playground role and external playground are read, and an unknown role is refused`() {
+    assertFalse(options(emptyList()).playgroundRole)
+    assertFalse(options(emptyList()).playgroundExternal)
+    assertTrue(options(listOf("--role", "playground")).playgroundRole)
+    assertTrue(options(listOf("--playground-external")).playgroundExternal)
+    assertTrue(options(listOf("--compile-engine")).compileEngine)
+    assertFailsWith<IllegalArgumentException> { options(listOf("--role", "catalog")) }
+  }
 }

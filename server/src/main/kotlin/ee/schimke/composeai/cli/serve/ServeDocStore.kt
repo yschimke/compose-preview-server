@@ -225,8 +225,24 @@ class ServeDocStore(
     const val DEFAULT_MAX_DOC_BYTES = 8 * 1024 * 1024
     const val DEFAULT_MAX_TOTAL_BYTES = 64L * 1024 * 1024
 
-    /** 128 bits of [SecureRandom], base64url — the permalink id IS the capability. */
-    fun randomId(): String = ServeCapabilityId.mint()
+    /**
+     * Prefix of every document a `--role playground` process mints. The proxy in front of a split
+     * deployment routes `/d/pg_*` to that process, because each process holds its own documents in
+     * memory and a permalink must reach the one that minted it.
+     */
+    const val PLAYGROUND_PREFIX = "pg_"
+
+    /**
+     * 128 bits of [SecureRandom], base64url — the permalink id IS the capability. Never starts with
+     * [PLAYGROUND_PREFIX], so the main server's documents are never routed to the playground.
+     */
+    fun randomId(): String = generateSequence {
+      ServeCapabilityId.mint()
+    }
+      .first { !it.startsWith(PLAYGROUND_PREFIX) }
+
+    /** A playground process's id: the same capability, behind [PLAYGROUND_PREFIX]. */
+    fun playgroundId(): String = PLAYGROUND_PREFIX + ServeCapabilityId.mint()
 
     /** True when [id] could be one of ours — cheap shape check before a map lookup. */
     fun isWellFormedId(id: String): Boolean = ServeCapabilityId.isWellFormed(id)

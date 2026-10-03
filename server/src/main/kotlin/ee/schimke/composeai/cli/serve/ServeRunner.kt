@@ -1571,7 +1571,12 @@ public class ServeRunner(
       "serve: document uploads enabled (/docs) — ${ServeDocFormats.knownSummary()}; " +
         "links expire after ${docTtlSeconds}s"
     )
-    return ServeDocStore(ttlSeconds = docTtlSeconds, allowedHosts = acceptDocsFrom)
+    return ServeDocStore(
+      ttlSeconds = docTtlSeconds,
+      allowedHosts = acceptDocsFrom,
+      mintId =
+        if (playgroundRole) ({ ServeDocStore.playgroundId() }) else ({ ServeDocStore.randomId() }),
+    )
   }
 
   /**
@@ -1643,7 +1648,7 @@ public class ServeRunner(
    * (engine + public surface) or `--compile-engine` (engine for the UI builder only).
    */
   private val engineRuntimeSelection: Boolean
-    get() = playgroundRuntimeSelection || compileEngine
+    get() = playgroundRuntimeSelection || compileEngine || playgroundRole
 
   /**
    * Whether the public playground surface is mounted over the engine. `--playground` always asks
@@ -1653,6 +1658,7 @@ public class ServeRunner(
   private val publicPlayground: Boolean
     get() =
       playgroundRuntimeSelection ||
+        playgroundRole ||
         ((playgroundBundlePath != null || playgroundAndroidBundlePath != null) && !compileEngine)
 
   /**
@@ -3512,6 +3518,15 @@ public class ServeRunner(
       )
     val playgroundLane =
       openPlaygroundService(docStore, registry, repoAccessGated = githubAuth != null)
+    if (playgroundExternal && (playgroundLane == null || publicPlayground)) {
+      System.err.println(
+        if (publicPlayground)
+          "serve: --playground-external ignored — this host mounts the playground itself."
+        else
+          "serve: --playground-external has no compile engine to decide which catalogs compile " +
+            "(add --compile-engine); no playground links are offered."
+      )
+    }
     val catalogFeed =
       if (catalogLoads != null && catalogFeedIdleSeconds > 0) {
         ServeCatalogChangeFeed(
@@ -3808,6 +3823,10 @@ public class ServeRunner(
         // what keeps `/playground`, the run route, `/pg/` and every editor link unmounted there,
         // while the UI-builder lanes below still compile through `playgroundLane` directly.
         playgroundService = playgroundLane?.compile?.takeIf { publicPlayground },
+        // A sibling `--role playground` process serves the editor; this host's engine only decides
+        // which catalogs get a link to it.
+        externalPlaygroundLinks =
+          playgroundLane?.compile?.takeIf { playgroundExternal && !publicPlayground },
         playgroundHealth = playgroundLane?.health,
         branchFetchStats = catalogStore?.let { store -> { store.branchFetchStats.snapshot() } },
         themeOptimizerStats = { backgroundWork.optimizerAdmissionSnapshot() },

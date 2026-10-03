@@ -213,6 +213,10 @@ services:
       # capture, with the public playground surface left off. The SERVE_PLAYGROUND_* knobs below
       # configure it either way.
       SERVE_COMPILE_ENGINE: "${SERVE_COMPILE_ENGINE:-}"
+      # The public playground runs in the `playground` service below (COMPOSE_PROFILES=playground)
+      # rather than here: this server keeps the engine for the UI builder and links to the editor
+      # the sibling serves. Set together with PLAYGROUND_UPSTREAM=playground for caddy.
+      SERVE_PLAYGROUND_EXTERNAL: "${SERVE_PLAYGROUND_EXTERNAL:-}"
       # How many DISTINCT catalogs the selector may hold resolved classpaths for at once. Empty ⇒
       # the CLI default (6); past the bound a run naming a new catalog is refused rather than
       # evicting a warm one.
@@ -487,6 +491,98 @@ services:
     # which needs the service to stay scalable — so no `container_name`, no
     # published host ports (only `expose` above), which is already the case.
 
+  # The public playground in a container of its own (README → "Playground in its own container").
+  # Opt-in: started only with COMPOSE_PROFILES=playground, and reached only once caddy is told to
+  # route to it (PLAYGROUND_UPSTREAM=playground). It runs visitor-supplied Kotlin, so it gets its own
+  # memory cap and can be stopped without touching catalog browsing or the UI builder.
+  #
+  # Same image as `preview`, as SERVE_ROLE=playground: it loads the catalog set only for compile
+  # bundles (from the same config and blob cache, read-only config), never serves a catalog page,
+  # and runs no theme optimizer or background warming. Caddy sends it /playground, the compiler
+  # API, /pg/ redemption, redeemed `/pg_*` sessions and its own `/d/pg_*` documents — nothing else.
+  # Sign-in stays on `preview`: both share the GitHub cookie secret, so one session covers both.
+  playground:
+    logging: *default-logging
+    profiles: ["playground"]
+    image: "ghcr.io/yschimke/compose-preview-host:${IMAGE_TAG:-latest}"
+    restart: always
+    init: true
+    pull_policy: always
+    environment:
+      DOMAIN: "${DOMAIN:-}"
+      SERVE_ROLE: playground
+      SERVE_PUBLIC: "${SERVE_PUBLIC:-1}"
+      SERVE_TOKEN: "${SERVE_TOKEN:-}"
+      SERVE_CATALOGS: "${SERVE_CATALOGS:-}"
+      SERVE_CATALOGS_UNLISTED: "${SERVE_CATALOGS_UNLISTED:-}"
+      SERVE_CATALOG_REGISTRY: "${SERVE_CATALOG_REGISTRY:-}"
+      SERVE_CATALOGS_FILE: "${SERVE_CATALOGS_FILE:-}"
+      SERVE_TRUST_STORE: "${SERVE_TRUST_STORE:-}"
+      SERVE_CATALOG_MAX_IMAGES: "${SERVE_CATALOG_MAX_IMAGES:-}"
+      SERVE_CATALOG_REFRESH: "${SERVE_CATALOG_REFRESH:-}"
+      # The same content-addressed pool `preview` fills, so loading here re-reads rather than
+      # re-downloads; the pool is built for more than one process mounting it.
+      SERVE_CATALOG_CACHE_DIR: "${SERVE_CATALOG_CACHE_DIR:-/catalog-cache}"
+      SERVE_CATALOG_CACHE_MAX_BYTES: "${SERVE_CATALOG_CACHE_MAX_BYTES:-}"
+      SERVE_EXTRA_MAVEN_REPOS: "${SERVE_EXTRA_MAVEN_REPOS:-}"
+      # The repo-access gate, configured exactly as on `preview` so its sign-in is honoured here. A
+      # session cookie carries a fingerprint of the sign-in repository, the image repository, the
+      # allowed users and orgs, and the guest setting, and is rejected wherever any of them differs
+      # — so every one of those is forwarded, even the image repository of a lane that is off here.
+      SERVE_GITHUB_AUTH_CLIENT_ID: "${SERVE_GITHUB_AUTH_CLIENT_ID:-}"
+      SERVE_GITHUB_AUTH_CLIENT_SECRET: "${SERVE_GITHUB_AUTH_CLIENT_SECRET:-}"
+      SERVE_GITHUB_AUTH_COOKIE_SECRET: "${SERVE_GITHUB_AUTH_COOKIE_SECRET:-}"
+      SERVE_GITHUB_AUTH_REPO: "${SERVE_GITHUB_AUTH_REPO:-yschimke/compose-ai-tools}"
+      SERVE_GITHUB_AUTH_USERS: "${SERVE_GITHUB_AUTH_USERS:-}"
+      SERVE_GITHUB_AUTH_ORGS: "${SERVE_GITHUB_AUTH_ORGS:-}"
+      SERVE_GITHUB_AUTH_GUESTS: "${SERVE_GITHUB_AUTH_GUESTS:-}"
+      SERVE_IMAGE_UPLOAD_REPO: "${SERVE_IMAGE_UPLOAD_REPO:-}"
+      SERVE_GITHUB_AUTH_CALLBACK_BASE_URL: "${SERVE_GITHUB_AUTH_CALLBACK_BASE_URL:-}"
+      SERVE_GITHUB_AUTH_COOKIE_DOMAIN: "${SERVE_GITHUB_AUTH_COOKIE_DOMAIN:-}"
+      # Remote Compose mode publishes its capture as a `/d/pg_*` document held here.
+      SERVE_ACCEPT_DOCS: "1"
+      SERVE_DOC_TTL: "${SERVE_DOC_TTL:-}"
+      SERVE_TRUST_FORWARDED_FOR: "${SERVE_TRUST_FORWARDED_FOR:-1}"
+      SERVE_LIVE_SEATS: "${PLAYGROUND_LIVE_SEATS:-}"
+      SERVE_JAVA_OPTS: "${PLAYGROUND_JAVA_OPTS:-}"
+      SERVE_PLAYGROUND_CATALOG_LIMIT: "${SERVE_PLAYGROUND_CATALOG_LIMIT:-}"
+      SERVE_PLAYGROUND_BUNDLE: "${SERVE_PLAYGROUND_BUNDLE:-}"
+      SERVE_PLAYGROUND_ANDROID_BUNDLE: "${SERVE_PLAYGROUND_ANDROID_BUNDLE:-}"
+      SERVE_PLAYGROUND_SANDBOX: "${SERVE_PLAYGROUND_SANDBOX:-}"
+      SERVE_PLAYGROUND_SANDBOX_MEMORY_MB: "${SERVE_PLAYGROUND_SANDBOX_MEMORY_MB:-}"
+      SERVE_PLAYGROUND_SANDBOX_CPUS: "${SERVE_PLAYGROUND_SANDBOX_CPUS:-}"
+      SERVE_PLAYGROUND_SANDBOX_PIDS: "${SERVE_PLAYGROUND_SANDBOX_PIDS:-}"
+      SERVE_PLAYGROUND_SANDBOX_TTL: "${SERVE_PLAYGROUND_SANDBOX_TTL:-}"
+      SERVE_PLAYGROUND_SANDBOX_RO: "${SERVE_PLAYGROUND_SANDBOX_RO:-}"
+      SERVE_PLAYGROUND_COMPILE_SLOTS: "${SERVE_PLAYGROUND_COMPILE_SLOTS:-}"
+      SERVE_PLAYGROUND_RATE_LIMIT: "${SERVE_PLAYGROUND_RATE_LIMIT:-}"
+      SERVE_PLAYGROUND_CALLER_CONCURRENCY: "${SERVE_PLAYGROUND_CALLER_CONCURRENCY:-}"
+      SERVE_PLAYGROUND_EDITING: "${SERVE_PLAYGROUND_EDITING:-0}"
+      SERVE_PLAYGROUND_EDIT_LEASE_TTL: "${SERVE_PLAYGROUND_EDIT_LEASE_TTL:-}"
+      PORT: "8080"
+    volumes:
+      - preview_cache:/root/.cache/composeai
+      # Shared with `preview` for the catalog set and trust store. Writable only because files the
+      # server derives beside catalogs.json (the cross-replica optimizer locks) live here; the
+      # entrypoint's playground role turns off every lane that would write state of its own.
+      - preview_config:/config
+      - preview_catalog_cache:/catalog-cache
+    expose:
+      - "8080"
+    # Its own ceiling, which is the point of the split: a run of heavy compiles can exhaust THIS
+    # container and nothing else. Peak is roughly compile slots x sandbox memory plus live snippet
+    # JVMs; 6g suits the one-slot default.
+    mem_limit: "${PLAYGROUND_MEM_LIMIT:-6g}"
+    # `/healthz`, not `/readyz`: readiness waits on a catalog render, which this role never does.
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+    labels:
+      com.centurylinklabs.watchtower.enable: "true"
+
   # Zero-downtime updater for `preview`: poll GHCR for a new :latest digest and,
   # when one lands, roll the service with docker-rollout (boot a new replica →
   # wait for its /readyz healthcheck → drain onto it → retire the old one) so
@@ -595,6 +691,9 @@ services:
       # so the committed file is what routes a site AND what gets it a certificate. Set this only
       # for a name the app doesn't serve as a site (a vanity alias, a migration).
       SITE_DOMAINS: "${SITE_DOMAINS:-}"
+      # Which service serves the public playground's paths: `preview` (the default, which answers
+      # with its disabled page) or `playground` once that profile is running.
+      PLAYGROUND_UPSTREAM: "${PLAYGROUND_UPSTREAM:-preview}"
     volumes:
       - caddy_data:/data
       - caddy_config:/config
