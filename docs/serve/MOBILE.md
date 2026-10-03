@@ -44,6 +44,15 @@ the server token. Desktop browsers keep the Copy buttons only.
 While a live preview is streaming, or a motion capture is playing, the screen stays on. It turns off
 normally once the stream or the playback stops, or when you switch away.
 
+## Notifications
+
+Signed in with GitHub on a server that offers them, **Settings → Notifications** turns on Web Push
+for this browser: a reply on a comment thread you are in, an `@mention`, or a review of a design you
+own reaches the phone with the tab closed, and tapping it opens the thread. On an iPhone or iPad,
+add the site to the Home Screen first and turn notifications on from the installed app; Safari
+offers push only there. Push needs HTTPS. Setup, the deployment's key and egress requirements, and
+what is stored are in [NOTIFICATIONS.md](NOTIFICATIONS.md).
+
 ## Open a laptop's server on a phone (`--lan`)
 
 ```shell
@@ -67,6 +76,7 @@ context, so they are unavailable on a plain-http LAN address:
 - Web Share (*Share link* / *Share PNG*)
 - clipboard writes (*Copy PNG*; *Copy link* falls back to selecting the text)
 - screen wake lock
+- push notifications
 - any offline support
 
 Plain browsing, the catalog, the viewer and live previews all work over http.
