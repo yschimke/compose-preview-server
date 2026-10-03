@@ -8,6 +8,19 @@ class ServeAnalyticsTest {
   private val website = "e676c9b4-11e4-4ef1-a4d7-87001773e9f2"
 
   @Test
+  fun `configured analytics stays disabled unless explicitly enabled`() {
+    val config =
+      mapOf(
+        "SERVE_UMAMI_URL" to "https://preview.test/__analytics",
+        "SERVE_UMAMI_WEBSITE_ID" to website,
+      )
+    assertEquals("", ServeAnalytics.scriptTag(config))
+    for (disabled in listOf("0", "false", "", "yes")) {
+      assertEquals("", ServeAnalytics.scriptTag(config + ("SERVE_UMAMI_ENABLED" to disabled)))
+    }
+  }
+
+  @Test
   fun `analytics is explicitly configured and rejects invalid endpoints`() {
     assertEquals("", ServeAnalytics.scriptTag(emptyMap()))
     for (url in
@@ -20,13 +33,18 @@ class ServeAnalyticsTest {
       assertEquals(
         "",
         ServeAnalytics.scriptTag(
-          mapOf("SERVE_UMAMI_URL" to url, "SERVE_UMAMI_WEBSITE_ID" to website)
+          mapOf(
+            "SERVE_UMAMI_ENABLED" to "1",
+            "SERVE_UMAMI_URL" to url,
+            "SERVE_UMAMI_WEBSITE_ID" to website,
+          )
         ),
       )
     }
     val tag =
       ServeAnalytics.scriptTag(
         mapOf(
+          "SERVE_UMAMI_ENABLED" to "1",
           "SERVE_UMAMI_URL" to "https://preview.test/__analytics/",
           "SERVE_UMAMI_WEBSITE_ID" to website,
         )

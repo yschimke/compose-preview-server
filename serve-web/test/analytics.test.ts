@@ -1,3 +1,4 @@
+import { trackInteraction } from "../src/analyticsClient.js";
 import { strict as assert } from "node:assert";
 import { safeEvent, safePath, installAnalytics } from "../src/analytics.js";
 
@@ -43,6 +44,9 @@ describe("analytics", () => {
         installAnalytics(document.createElement("script"));
         assert.equal(document.scripts.length, count);
         assert.equal(window.previewTelemetry, undefined);
+        assert.doesNotThrow(() =>
+            trackInteraction("renderer_changed", { mode: "live" }),
+        );
     });
     it("installs the bridge, sanitizes every payload and ignores broken events", () => {
         const script = document.createElement("script");

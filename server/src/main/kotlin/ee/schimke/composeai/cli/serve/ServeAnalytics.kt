@@ -6,6 +6,7 @@ import java.net.URI
 /** Deployment opt-in. Installed/local servers never contact an analytics service by default. */
 internal object ServeAnalytics {
   fun scriptTag(env: Map<String, String> = System.getenv()): String {
+    if (env["SERVE_UMAMI_ENABLED"] !in setOf("1", "true")) return ""
     val endpoint = env["SERVE_UMAMI_URL"]?.trimEnd('/') ?: return ""
     val website = env["SERVE_UMAMI_WEBSITE_ID"] ?: return ""
     val uri = runCatching { URI(endpoint) }.getOrNull() ?: return ""

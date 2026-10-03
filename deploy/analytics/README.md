@@ -28,11 +28,12 @@ For the preview stack, set these in its existing `.env`, then roll the preview s
 normal deployment mechanism after the server release containing the integration:
 
 ```dotenv
+SERVE_UMAMI_ENABLED=1
 SERVE_UMAMI_URL=https://preview.coo.ee/__analytics
 SERVE_UMAMI_WEBSITE_ID=<preview.coo.ee entry from websites.json>
 ```
 
-For GitHub Pages, set `UMAMI_URL` to that same URL and `UMAMI_WEBSITE_ID` to the
+For GitHub Pages, set `UMAMI_ENABLED=1`, `UMAMI_URL` to that same URL and `UMAMI_WEBSITE_ID` to the
 `yschimke.github.io` entry as **Actions variables** on compose-ai-tools; run its Pages workflow
 after the matching site PR lands. IDs are public configuration, not API credentials.
 
@@ -42,7 +43,8 @@ The shared browser wrapper records page views, `navigation` (destination categor
 `renderer_changed` (renderer enum). It removes URL queries/fragments, replaces builder design
 paths with `/ui-builder/`, and never sends titles, referrers or arbitrary event properties.
 It honors DNT/GPC and Umami's `umami.disabled` local-storage opt-out. Other server installations
-send nothing unless both configuration values are supplied. Frames do not double-count views.
+send nothing unless `SERVE_UMAMI_ENABLED=1` (or `true`) and both configuration values are supplied.
+The backend is not installed by the default preview stack; only this separate deployment starts it. Frames do not double-count views.
 
 The hosted Wasm editor shell gets page views and `window.previewTelemetry.track(name, json)`;
 fine-grained Compose actions are **not yet instrumented**. The bridge accepts `component_added`,
@@ -68,6 +70,6 @@ docker compose exec -T umami-db pg_restore -U umami -d umami < backups/umami-TIM
 
 Upgrade by changing the image pin, taking a backup, then `docker compose up -d --wait`.
 Do not downgrade an image after schema migrations without restoring the matching database backup.
-Disable collection by clearing the server's two environment variables and the Pages variables,
-then redeploying those frontends. `docker compose stop` stops analytics without touching previews
+Disable collection with `SERVE_UMAMI_ENABLED=0` and the Pages variable `UMAMI_ENABLED=0`,
+then redeploy those frontends. URL/ID settings can remain for future re-enablement. `docker compose stop` stops analytics without touching previews
 or deleting data; never use `down -v` as a rollback.
