@@ -334,6 +334,18 @@ public class ServeCommandOptions(
   /** `--compile-engine`: the compile engine without the public playground; see [ServeOptions]. */
   override val compileEngine: Boolean = "--compile-engine" in args
 
+  /** `--role playground`; see [ServeOptions]. Any other role is a startup error. */
+  override val playgroundRole: Boolean =
+    when (val role = args.flagValue("--role")) {
+      null -> false
+      "playground" -> true
+      else ->
+        throw IllegalArgumentException("--role '$role' is not a role — the only one is playground")
+    }
+
+  /** `--playground-external`; see [ServeOptions]. */
+  override val playgroundExternal: Boolean = "--playground-external" in args
+
   /**
    * `--playground-catalog-limit <n>`: how many runtime-selected catalogs may hold a resolved
    * compile classpath at once. Each one is an unpacked bundle plus a resolved Maven classpath held

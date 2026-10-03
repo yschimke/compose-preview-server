@@ -81,6 +81,33 @@ else
   args+=(--token "${SERVE_TOKEN}")
 fi
 
+# The playground's own container (`playground` compose service, SERVE_ROLE=playground). Decided
+# first, because its defaults below must be in place before the blocks that read them. It shares
+# `preview`'s config volume to read the catalog set and trust store, so everything that would WRITE
+# beside them — engagement counts, UI-builder designs, agent grants, push subscriptions — is off
+# here: one writer per file, and that writer is `preview`. An explicit value in the compose file
+# still wins.
+case "${SERVE_ROLE:-}" in
+  "") ;;
+  playground)
+    args+=(--role playground)
+    : "${SERVE_ENGAGEMENT_FILE:=none}"
+    : "${SERVE_AGENT_GRANTS:=0}"
+    : "${SERVE_WEB_PUSH:=0}"
+    : "${SERVE_ACCEPT_IMAGES:=0}"
+    # It loads catalogs only for their compile bundles and never serves a catalog page, so the
+    # theme optimizer and background warming would only duplicate the main server's work.
+    # Appended before SERVE_JAVA_OPTS (applied further down, last wins), which can still turn
+    # either back on.
+    export JAVA_TOOL_OPTIONS="${JAVA_TOOL_OPTIONS:-} -Dcomposeai.serve.themeOptimization=false -Dcomposeai.serve.warmInBackground=false"
+    echo "entrypoint: playground role — no UI builder, engagement, grants, push, optimizer or warming" >&2
+    ;;
+  *)
+    echo "entrypoint: SERVE_ROLE='${SERVE_ROLE}' is not a role — the only one is playground" >&2
+    exit 64
+    ;;
+esac
+
 # The public-server pillars. The prebuilt image has no catalog modules to build a
 # Wasm app from, so its in-browser tier rides --catalogs: `serve` fetches each
 # system's web/wasm/ from the trusted design-artifacts branch. (--wasm-dir is for
@@ -266,7 +293,7 @@ if [[ -f /opt/compose-preview-server/wasm-ui/index.html ]]; then
 fi
 # The Compose UI builder is an independent application and route. Do not register it as a
 # `preview-ui` catalog or as the `/wasm/<system>/` fallback above.
-if [[ -f /opt/compose-preview-server/ui-builder/index.html ]]; then
+if [[ -f /opt/compose-preview-server/ui-builder/index.html && "${SERVE_ROLE:-}" != "playground" ]]; then
   args+=(--ui-builder-dir /opt/compose-preview-server/ui-builder)
   # Catalog publication does not imply authoring support. Enable only the explicitly reviewed
   # catalog adapters; this deployment carries M3, the Remote Compose M3 catalog, and Wear M3.
@@ -505,6 +532,12 @@ fi
 # longer implies the public page once this is set.
 [[ -n "${SERVE_COMPILE_ENGINE:-}" && "${SERVE_COMPILE_ENGINE}" != "0" ]] &&
   args+=(--compile-engine)
+# Split deployment: the `playground` compose service runs this image with SERVE_ROLE=playground and
+# serves only the playground's paths; the main `preview` service sets SERVE_PLAYGROUND_EXTERNAL=1
+# so its pages still link to the editor that sibling serves. See README "Playground in its own
+# container".
+[[ -n "${SERVE_PLAYGROUND_EXTERNAL:-}" && "${SERVE_PLAYGROUND_EXTERNAL}" != "0" ]] &&
+  args+=(--playground-external)
 [[ -n "${SERVE_PLAYGROUND_CATALOG_LIMIT:-}" ]] &&
   args+=(--playground-catalog-limit "${SERVE_PLAYGROUND_CATALOG_LIMIT}")
 [[ -n "${SERVE_PLAYGROUND_BUNDLE:-}" ]] &&

@@ -495,6 +495,12 @@ class ServeHttpServer(
    */
   private val playgroundService: PlaygroundCompileService? = null,
   /**
+   * Set when the public playground is served by a sibling process at this origin
+   * (`--playground-external`): its handoff links are rendered against this engine's catalogs while
+   * none of [playgroundService]'s routes are mounted here.
+   */
+  private val externalPlaygroundLinks: PlaygroundCompileService? = null,
+  /**
    * When non-null, enables Stage-2 redemption: `GET /pg/<token>` redeems a preview token into a
    * live streamed session (registered under the token id) and redirects to its viewer. Supplied by
    * `ServeCommand` alongside [playgroundService]; the two share one [PlaygroundTokenStore].
@@ -6602,6 +6608,7 @@ class ServeHttpServer(
     previewId: String,
     sourceFile: String?,
   ): String? {
+    val playgroundService = playgroundService ?: externalPlaygroundLinks
     if (playgroundService == null || playgroundSeeds == null) return null
     // Same dead end the catalog-level handoff is withheld for: a site host whose OAuth cannot round
     // trip would offer an editor that ends in a 401.
@@ -6647,7 +6654,7 @@ class ServeHttpServer(
 
   private fun RoutingContext.playgroundLinkForCatalog(system: String): String? {
     if (!playgroundReachable()) return null
-    if (playgroundService == null) return null
+    val playgroundService = playgroundService ?: externalPlaygroundLinks ?: return null
     if (!playgroundService.compilesCatalog(system)) return null
     val token =
       if (!linksCarryToken()) "" else "&token=" + WebEscaping.urlEncodeSegment(linkToken())

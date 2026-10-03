@@ -155,6 +155,23 @@ class PlaygroundRoutingTest {
       .also { it.start() }
   }
 
+  /**
+   * A `--playground-external` host: a sibling process serves the editor, so this one renders links
+   * against its engine and mounts none of the routes.
+   */
+  private val externalLinksServer: ServeHttpServer by lazy {
+    ServeHttpServer(
+        host = "127.0.0.1",
+        requestedPort = 0,
+        token = "unused-in-public",
+        sessions = ServeSessionRegistry(open = { null }),
+        defaultSessionId = "none",
+        isPublic = true,
+        externalPlaygroundLinks = playground,
+      )
+      .also { it.start() }
+  }
+
   private val githubNoRepoServer: ServeHttpServer by lazy {
     ServeHttpServer(
         host = "127.0.0.1",
@@ -191,6 +208,7 @@ class PlaygroundRoutingTest {
     runCatching { plainServer.stop() }
     runCatching { gatedServer.stop() }
     runCatching { engineOnlyServer.stop() }
+    runCatching { externalLinksServer.stop() }
     runCatching { githubNoRepoServer.stop() }
     runCatching { githubRepoServer.stop() }
     runCatching { limitedServer.stop() }
@@ -660,6 +678,15 @@ class PlaygroundRoutingTest {
     // The engine itself still redeems, which is what the UI builder's native live pane calls.
     val token = previewUrl.removePrefix("/pg/")
     assertTrue(redeem.redeem(token, null) is PlaygroundRedeemService.Outcome.Live)
+  }
+
+  @Test
+  fun `an external-playground host mounts no playground route of its own`() {
+    val body = """{"files":[{"name":"S.kt","text":"x"}],"confType":"compose-cmp"}"""
+    postRun(body, externalLinksServer.port).use { resp -> assertEquals(404, resp.code) }
+    // The reserved path still answers with the disabled page rather than the `/{system}` catch-all;
+    // in a split deployment the proxy never sends it here.
+    get("/playground", externalLinksServer.port).use { resp -> assertEquals(503, resp.code) }
   }
 
   private fun githubAuth(repositoryAccess: Boolean): ServeGithubAuth {

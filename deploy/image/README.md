@@ -805,6 +805,50 @@ unavailable. Once resolved it is **pinned for the life of the process**: a later
 does not move it, because live snippet JVMs hold those jars open. Restart the container to compile
 against a newer catalog ABI.
 
+### Playground in its own container
+
+The public playground can run in a container of its own beside `preview`, so it has its own memory
+cap and can be stopped, restarted or rolled back without touching catalog browsing or the UI
+builder. It is opt-in, and three settings in `.env` turn it on:
+
+```bash
+COMPOSE_PROFILES=playground      # start the `playground` service
+PLAYGROUND_UPSTREAM=playground   # caddy routes the playground's paths to it
+SERVE_PLAYGROUND_EXTERNAL=1      # `preview` keeps linking to the editor it no longer serves
+```
+
+Keep `SERVE_COMPILE_ENGINE=1` on `preview` for the UI builder, and leave `SERVE_PLAYGROUND` unset
+there. Then `docker compose up -d`.
+
+**What runs where.** The `playground` service is the same image with `SERVE_ROLE=playground`:
+
+| | `preview` | `playground` |
+|---|---|---|
+| Catalog pages, UI builder, sign-in, MCP, uploads | yes | no |
+| Compile engine | for the UI builder | for visitors |
+| `/playground`, `/api/<v>/compiler/…`, `/pg/…`, `/pg_<token>/…`, `/d/pg_<id>` | no | yes |
+| Theme optimizer, background warming | yes | off |
+| Memory cap | `PREVIEW_MEM_LIMIT` | `PLAYGROUND_MEM_LIMIT` (default `6g`) |
+
+Caddy sends exactly those paths to `playground`; everything else, including the shared `/assets/`,
+stays on `preview`. Both services run the same `IMAGE_TAG`.
+
+- **Sign-in.** Visitors still sign in on `preview`. Both services share the GitHub OAuth secrets
+  and cookie secret, so the playground accepts the same session.
+- **Catalogs.** The playground reads the same `catalogs.json`, trust store and blob cache, and loads
+  catalogs only for their compile bundles. It never renders a catalog page, so it never warms one.
+- **Remote Compose documents.** The playground's captures are minted as `/d/pg_<id>`, a prefix
+  `preview` never mints, so a permalink always reaches the process holding it.
+- **Not carried over:** agent grants with the `playground` scope. They are issued by `preview`, so
+  an agent cannot compile against the split playground.
+
+**Check it:** `docker compose ps` shows `playground` healthy; `/playground` serves the editor;
+`/status.json` on `preview` still shows `playground.publicSurface: false` (that is its engine). A
+catalog page offers "open in playground", and the editor's Run returns a frame.
+
+**Turn it off** by unsetting the three settings and running `docker compose up -d`. Caddy then
+sends the playground's paths back to `preview`, which shows its disabled page.
+
 ### Image lane on `preview.coo.ee`
 
 `POST /images` lets an agent that just rendered a preview hand the PNG to this box and get back an

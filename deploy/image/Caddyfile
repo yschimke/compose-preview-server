@@ -136,6 +136,33 @@
 		reverse_proxy hook:9000
 	}
 
+	# The public playground's own paths → whichever service serves it (PLAYGROUND_UPSTREAM, set
+	# from .env by the compose file; default `preview`, whose answer is its disabled page). With the
+	# split deployment that is the `playground` service, a separate container with its own memory
+	# cap (README → "Playground in its own container"). Exactly its paths and nothing more:
+	#   /playground[/…]               the editor
+	#   /api/<v>/compiler[/…]         run, catalog list, edit lease
+	#   /pg/<token>                   Stage-2 redemption
+	#   /pg_<token>[/…]               the redeemed session's own viewer + WebSocket
+	#   /d/pg_<id>                    Remote Compose documents that process minted
+	# Shared static assets (/assets/…) stay on `preview`; both run the same image tag.
+	@playground path_regexp ^/(playground(/.*)?|api/[^/]+/compiler(/.*)?|pg/.*|pg_[^/]+(/.*)?|d/pg_.*)$
+	handle @playground {
+		reverse_proxy {
+			dynamic a {
+				name {$PLAYGROUND_UPSTREAM:preview}
+				port 8080
+				refresh 3s
+				resolvers 127.0.0.11
+			}
+			lb_try_duration 10s
+			lb_try_interval 250ms
+			transport http {
+				dial_timeout 30s
+			}
+		}
+	}
+
 	# Everything else → the preview server.
 	handle {
 		# The /ws/ WebSocket frame lane (Live Compose) was 502ing: a `read_timeout` on
