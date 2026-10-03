@@ -726,6 +726,13 @@ private to its owner and whoever it is shared with. preview.coo.ee runs `public`
 
 ### Playground on `preview.coo.ee`
 
+> **Currently off on preview.coo.ee.** No `SERVE_PLAYGROUND*` lane variable is set, so serve opens
+> no compile lane: `/playground` answers with the disabled page, `/pg/` and
+> `POST /api/{v}/compiler/run` are not mounted, and no viewer or catalog page offers the handoff.
+> The UI builder's native-preview and inline-capture routes compile through this lane and are
+> absent with it. `.env.example` keeps the previous settings commented out; uncomment them and
+> recreate the `preview` service to turn it back on.
+
 `/playground` is disabled unless the preview service is started with a catalog live bundle that can
 seed the snippet classpath **and** the `--public` admission gate lets the lane through. On a public
 host the gate admits on either of two independent bases (issue #3210):
