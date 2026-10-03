@@ -97,6 +97,16 @@ class DaemonSupervisor(
    * processes.
    */
   val workspaceStore: WorkspaceStore = WorkspaceStore(file = null),
+  /**
+   * How many registered builds may have live daemons at once; `0` means no limit. A render that
+   * starts the first daemon of another build stops the daemons of the least recently used builds
+   * beyond it, so an agent that moves from one sample of a multi-build repository to the next does
+   * not leave every sample it touched rendering in the background (yschimke/compose-ag-plugin#64:
+   * ComposeStarter's daemon and its workers were still up hours after the agent moved to
+   * WearOAuth). A stopped build comes back on its next render. [DaemonMcpMain] passes
+   * [DEFAULT_MAX_ACTIVE_PROJECTS]; the default here stays unlimited for embedders.
+   */
+  private val maxActiveProjects: Int = 0,
 ) {
 
   init {
@@ -104,6 +114,9 @@ class DaemonSupervisor(
   }
 
   private val projects = ConcurrentHashMap<WorkspaceId, RegisteredProject>()
+
+  /** When each project last had a daemon asked for, for [retireIdleProjects]. */
+  private val lastUsedNanos = ConcurrentHashMap<WorkspaceId, Long>()
 
   /**
    * Registers a project at [absolutePath] (must already exist on disk). Returns the assigned
@@ -232,7 +245,33 @@ class DaemonSupervisor(
   fun daemonFor(workspaceId: WorkspaceId, modulePath: String): SupervisedDaemon {
     val project = project(workspaceId) ?: error("workspace not registered: $workspaceId")
     workspaceStore.touch(workspaceId.value)
+    lastUsedNanos[workspaceId] = System.nanoTime()
+    project.daemons[modulePath]?.let {
+      return it
+    }
+    if (project.daemons.isEmpty()) retireIdleProjects(except = project)
     return project.daemons.computeIfAbsent(modulePath) { spawn(project, modulePath) }
+  }
+
+  /**
+   * Before [active] starts its first daemon, stops every daemon of the least recently used other
+   * builds beyond [maxActiveProjects]. Registrations stay, so the next render of a stopped build
+   * spawns it again.
+   */
+  private fun retireIdleProjects(except: RegisteredProject) {
+    if (maxActiveProjects <= 0) return
+    projects.values
+      .filter { it.workspaceId != except.workspaceId && it.daemons.isNotEmpty() }
+      .sortedByDescending { lastUsedNanos[it.workspaceId] ?: 0L }
+      .drop(maxActiveProjects - 1)
+      .forEach { idle ->
+        System.err.println(
+          "compose-preview-mcp: stopping ${idle.rootProjectName}'s daemons (" +
+            "${idle.daemons.keys.sorted().joinToString(", ")}) to start ${except.rootProjectName}; " +
+            "at most $maxActiveProjects build(s) render at once"
+        )
+        idle.daemons.keys.toList().forEach { forgetDaemon(idle.workspaceId, it) }
+      }
   }
 
   /** Closes every daemon. After this call the supervisor is unusable. */
@@ -258,7 +297,10 @@ class DaemonSupervisor(
     // JVM, the rest in worker JVMs it spawns). DaemonMain reads the sysprop and passes it on. We
     // merge into a copy rather than mutating the original — the descriptor object is cached by
     // `DescriptorProvider.readingFromDisk` and shared across `daemonFor` calls.
-    val descriptor = baseDescriptor.withSandboxCount(1 + replicasPerDaemon)
+    val descriptor =
+      baseDescriptor.withSandboxCount(1 + replicasPerDaemon).let {
+        if (replicasPerDaemon > 0) it.withSystemProperty(ON_DEMAND_WORKER_BOOT_PROP, "true") else it
+      }
     val supervised = SupervisedDaemon(workspaceId = project.workspaceId, modulePath = modulePath)
     val descriptorWorkingDirectory = File(descriptor.workingDirectory)
     supervised.moduleProjectDirPath =
@@ -418,6 +460,17 @@ class DaemonSupervisor(
      */
     fun defaultReplicasFor(cores: Int): Int =
       (cores / 2 - 1).coerceIn(0, DEFAULT_REPLICAS_PER_DAEMON)
+
+    /** [maxActiveProjects] for the standalone server: one build renders at a time. */
+    const val DEFAULT_MAX_ACTIVE_PROJECTS: Int = 1
+
+    /**
+     * Daemon property (compose-preview-daemon's `DaemonProperties.onDemandWorkerBoot`): the
+     * replicas' worker JVMs boot when two different previews render at once, not behind the first
+     * sandbox at start, where their Robolectric boots competed with an agent's first compile and
+     * render. A daemon older than the property ignores it and boots them in the background.
+     */
+    const val ON_DEMAND_WORKER_BOOT_PROP: String = "composeai.daemon.onDemandWorkerBoot"
   }
 }
 
@@ -831,3 +884,24 @@ class NotificationRouter {
       runCatching { it.jsonObject }.getOrNull()
     } ?: emptyList()
 }
+
+/** This descriptor with one more JVM system property, everything else unchanged. */
+internal fun DaemonLaunchDescriptor.withSystemProperty(
+  name: String,
+  value: String,
+): DaemonLaunchDescriptor =
+  DaemonLaunchDescriptor(
+    schemaVersion = schemaVersion,
+    modulePath = modulePath,
+    variant = variant,
+    enabled = enabled,
+    mainClass = mainClass,
+    javaLauncher = javaLauncher,
+    classpath = classpath,
+    jvmArgs = jvmArgs,
+    systemProperties = systemProperties + (name to value),
+    workingDirectory = workingDirectory,
+    manifestPath = manifestPath,
+    jailCommand = jailCommand,
+    hardTtlSeconds = hardTtlSeconds,
+  )

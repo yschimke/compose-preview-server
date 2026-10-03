@@ -24,6 +24,53 @@ class DaemonSupervisorTest {
   }
 
   @Test
+  fun `starting another build stops the idle one beyond the active-build limit`() {
+    // compose-ag-plugin#64: ComposeStarter's daemon was still up hours after the agent moved on to
+    // WearOAuth, a separate build in the same repository.
+    val root = createTempDirectory("cp-supervisor-active").toFile()
+    val factory = FakeDaemonClientFactory()
+    val supervisor =
+      DaemonSupervisor(
+        descriptorProvider = FakeDescriptorProvider(),
+        clientFactory = factory,
+        maxActiveProjects = 1,
+      )
+    val starter = supervisor.registerProject(File(root, "ComposeStarter").apply { mkdirs() })
+    val oauth = supervisor.registerProject(File(root, "WearOAuth").apply { mkdirs() })
+
+    supervisor.daemonFor(starter.workspaceId, ":app")
+    // A second module of the same build is the same build: nothing is stopped.
+    supervisor.daemonFor(starter.workspaceId, ":wear")
+    assertThat(starter.daemons.keys).containsExactly(":app", ":wear")
+
+    supervisor.daemonFor(oauth.workspaceId, ":oauth-pkce")
+    assertThat(starter.daemons).isEmpty()
+    assertThat(oauth.daemons.keys).containsExactly(":oauth-pkce")
+    // Still registered: its next render starts it again, and stops WearOAuth.
+    assertThat(supervisor.listProjects()).hasSize(2)
+    supervisor.daemonFor(starter.workspaceId, ":app")
+    assertThat(oauth.daemons).isEmpty()
+    supervisor.shutdown()
+  }
+
+  @Test
+  fun `replicas are asked to boot on demand`() {
+    val factory = FakeDaemonClientFactory()
+    val supervisor =
+      DaemonSupervisor(
+        descriptorProvider = FakeDescriptorProvider(),
+        clientFactory = factory,
+        replicasPerDaemon = 3,
+      )
+    val project = supervisor.registerProject(createTempDirectory("cp-on-demand").toFile())
+    supervisor.daemonFor(project.workspaceId, ":app")
+    val properties = factory.spawnDescriptors.single().systemProperties
+    assertThat(properties).containsEntry("composeai.daemon.sandboxCount", "4")
+    assertThat(properties).containsEntry(DaemonSupervisor.ON_DEMAND_WORKER_BOOT_PROP, "true")
+    supervisor.shutdown()
+  }
+
+  @Test
   fun `a restarted supervisor re-registers a stored workspace id from workspaces json`() {
     val root = createTempDirectory("cp-supervisor-store").toFile()
     val project = File(root, "ComposeStarter").apply { mkdirs() }

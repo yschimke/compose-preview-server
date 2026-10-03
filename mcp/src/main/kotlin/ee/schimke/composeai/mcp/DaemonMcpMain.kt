@@ -69,6 +69,11 @@ object DaemonMcpMain {
         replicasPerDaemon = replicasPerDaemon,
         initializeTimeout = parseInitializeTimeout(),
         workspaceStore = WorkspaceStore(WorkspaceStore.defaultFile()),
+        // One build renders at a time; moving to another stops the last one's daemons. `0` lifts
+        // the limit.
+        maxActiveProjects =
+          System.getProperty("composeai.mcp.maxActiveProjects")?.toIntOrNull()?.coerceAtLeast(0)
+            ?: DaemonSupervisor.DEFAULT_MAX_ACTIVE_PROJECTS,
       )
     val server =
       if (storybookProfile) {
