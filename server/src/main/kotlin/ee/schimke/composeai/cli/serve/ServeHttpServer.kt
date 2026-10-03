@@ -14635,7 +14635,8 @@ class ServeHttpServer(
     val version = uiBuilderBundleVersion
     // The shell is one file for every design, so what makes a pasted link unfurl as *this* design
     // is written into its head here. The ETag folds it in, because the body now depends on it.
-    val head = uiBuilderShellHead(designId)
+    val shellHead = uiBuilderShellHead(designId)
+    val head = shellHead.first to (shellHead.second + ServeAnalytics.scriptTag())
     val headTag = Integer.toHexString(head.second.hashCode())
     val etag =
       "\"${index.length().toString(16)}-${index.lastModified().toString(16)}-$version-$headTag\""

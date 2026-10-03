@@ -1458,3 +1458,9 @@ should never show two different typefaces.
   (default 1800s) guards slow first renders.
 - `SERVE_CATALOG_MAX_IMAGES` forwards to `serve --catalog-max-images`; leave it empty for the CLI
   default, or raise it when the configured catalogs legitimately contain more images.
+
+## Optional interaction analytics
+
+[Umami deployment](../analytics/README.md) runs alongside this stack, with a private dashboard
+and collection routes through Caddy. Set `SERVE_UMAMI_URL` and `SERVE_UMAMI_WEBSITE_ID` explicitly
+to enable the browser integration. Both default to empty; other installations send no analytics.

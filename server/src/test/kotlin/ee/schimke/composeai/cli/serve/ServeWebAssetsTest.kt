@@ -13,6 +13,7 @@ class ServeWebAssetsTest {
     for (name in
       listOf(
         "serve.css",
+        "analytics.js",
         "serve-chrome.js",
         "vue-runtime.js",
         "catalog-components.js",
