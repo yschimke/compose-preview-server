@@ -209,6 +209,10 @@ services:
       # entry. Enabling the selector never widens who may compile — the public-host admission gate
       # (GitHub repo access, or a sandbox that passes the preflight) is unchanged.
       SERVE_PLAYGROUND: "${SERVE_PLAYGROUND:-}"
+      # The compile engine alone, for the UI builder's native preview and inline Remote Compose
+      # capture, with the public playground surface left off. The SERVE_PLAYGROUND_* knobs below
+      # configure it either way.
+      SERVE_COMPILE_ENGINE: "${SERVE_COMPILE_ENGINE:-}"
       # How many DISTINCT catalogs the selector may hold resolved classpaths for at once. Empty ⇒
       # the CLI default (6); past the bound a run naming a new catalog is refused rather than
       # evicting a warm one.

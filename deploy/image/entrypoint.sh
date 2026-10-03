@@ -499,6 +499,12 @@ fi
 # refuses the lane and `/playground` shows an explanatory disabled page.
 [[ -n "${SERVE_PLAYGROUND:-}" && "${SERVE_PLAYGROUND}" != "0" ]] &&
   args+=(--playground)
+# The same compile engine WITHOUT the public playground: the UI builder's native preview and inline
+# Remote Compose capture compile through it, while `/playground`, the run route and `/pg/` stay
+# unmounted. Every SERVE_PLAYGROUND_* knob below still configures the engine; a pinned bundle no
+# longer implies the public page once this is set.
+[[ -n "${SERVE_COMPILE_ENGINE:-}" && "${SERVE_COMPILE_ENGINE}" != "0" ]] &&
+  args+=(--compile-engine)
 [[ -n "${SERVE_PLAYGROUND_CATALOG_LIMIT:-}" ]] &&
   args+=(--playground-catalog-limit "${SERVE_PLAYGROUND_CATALOG_LIMIT}")
 [[ -n "${SERVE_PLAYGROUND_BUNDLE:-}" ]] &&

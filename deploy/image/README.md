@@ -726,6 +726,17 @@ private to its owner and whoever it is shared with. preview.coo.ee runs `public`
 
 ### Playground on `preview.coo.ee`
 
+> **preview.coo.ee runs the engine without the playground.** `SERVE_COMPILE_ENGINE=1` starts the
+> compile engine described below for the UI builder's native preview and inline Remote Compose
+> capture, and leaves the public surface unmounted: `/playground` answers with the disabled page,
+> `/pg/` and `POST /api/{v}/compiler/run` are absent, and no viewer or catalog page offers the
+> handoff. `/status.json` → `playground.publicSurface` is `false`. Set `SERVE_PLAYGROUND=1` as well
+> to mount the public surface over the same engine.
+>
+> Every `SERVE_PLAYGROUND_*` knob in this section configures the engine either way. A pinned
+> `SERVE_PLAYGROUND_BUNDLE` without `SERVE_COMPILE_ENGINE` still enables the public playground, as
+> it always has.
+
 `/playground` is disabled unless the preview service is started with a catalog live bundle that can
 seed the snippet classpath **and** the `--public` admission gate lets the lane through. On a public
 host the gate admits on either of two independent bases (issue #3210):

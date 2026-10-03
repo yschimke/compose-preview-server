@@ -67,6 +67,11 @@ data class PlaygroundHealth(
   val catalogSelector: (() -> CatalogSelector)? = null,
   /** Stateful editing trial state and cumulative process-lifetime counters. */
   val editing: (() -> Editing)? = null,
+  /**
+   * Whether the public playground surface (`/playground`, `POST /api/{v}/compiler/run`, `/pg/`) is
+   * mounted. False on a `--compile-engine` host, where the engine serves only the UI builder.
+   */
+  val publicSurface: Boolean = true,
 ) {
   /**
    * A wired playground mode. "Wired" means configured with a bundle source *and* backed by an

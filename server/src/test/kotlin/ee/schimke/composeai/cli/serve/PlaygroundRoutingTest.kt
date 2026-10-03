@@ -138,6 +138,23 @@ class PlaygroundRoutingTest {
       .also { it.start() }
   }
 
+  /**
+   * A `--compile-engine` host: the engine's redeem service is wired for the UI builder's native
+   * pane, but the public surface ([ServeHttpServer]'s `playgroundService`) is not.
+   */
+  private val engineOnlyServer: ServeHttpServer by lazy {
+    ServeHttpServer(
+        host = "127.0.0.1",
+        requestedPort = 0,
+        token = "sekret",
+        sessions = registry,
+        defaultSessionId = "none",
+        isPublic = false,
+        playgroundRedeem = redeem,
+      )
+      .also { it.start() }
+  }
+
   private val githubNoRepoServer: ServeHttpServer by lazy {
     ServeHttpServer(
         host = "127.0.0.1",
@@ -173,6 +190,7 @@ class PlaygroundRoutingTest {
     runCatching { server.stop() }
     runCatching { plainServer.stop() }
     runCatching { gatedServer.stop() }
+    runCatching { engineOnlyServer.stop() }
     runCatching { githubNoRepoServer.stop() }
     runCatching { githubRepoServer.stop() }
     runCatching { limitedServer.stop() }
@@ -595,6 +613,53 @@ class PlaygroundRoutingTest {
           "redirect targets the viewer /p/ route: ${resp.header("Location")}",
         )
       }
+  }
+
+  @Test
+  fun `an engine-only host mounts no public playground route but still redeems in process`() {
+    // Mint on the gated host, which shares the token store and redeem service with the engine-only
+    // one — the same shape as the UI builder compiling through the engine.
+    val body =
+      """{"files":[{"name":"Snippet.kt","text":"@Preview @Composable fun P(){}"}],"confType":"compose-cmp"}"""
+    val previewUrl =
+      client
+        .newCall(
+          Request.Builder()
+            .url("http://127.0.0.1:${gatedServer.port}/api/1/compiler/run?token=sekret")
+            .post(body.toRequestBody("application/json".toMediaType()))
+            .build()
+        )
+        .execute()
+        .use { resp ->
+          assertEquals(200, resp.code)
+          Json.parseToJsonElement(resp.body.string())
+            .jsonObject["previewUrl"]!!
+            .jsonPrimitive
+            .content
+        }
+
+    val noRedirect = client.newBuilder().followRedirects(false).build()
+    noRedirect
+      .newCall(
+        Request.Builder()
+          .url("http://127.0.0.1:${engineOnlyServer.port}$previewUrl?token=sekret")
+          .build()
+      )
+      .execute()
+      .use { resp -> assertEquals(404, resp.code, "`/pg/` is not mounted without the surface") }
+    client
+      .newCall(
+        Request.Builder()
+          .url("http://127.0.0.1:${engineOnlyServer.port}/api/1/compiler/run?token=sekret")
+          .post(body.toRequestBody("application/json".toMediaType()))
+          .build()
+      )
+      .execute()
+      .use { resp -> assertEquals(404, resp.code, "the run route is not mounted either") }
+
+    // The engine itself still redeems, which is what the UI builder's native live pane calls.
+    val token = previewUrl.removePrefix("/pg/")
+    assertTrue(redeem.redeem(token, null) is PlaygroundRedeemService.Outcome.Live)
   }
 
   private fun githubAuth(repositoryAccess: Boolean): ServeGithubAuth {

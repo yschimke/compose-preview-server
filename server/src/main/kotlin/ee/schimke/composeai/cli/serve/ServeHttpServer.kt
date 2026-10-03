@@ -498,6 +498,9 @@ class ServeHttpServer(
    * When non-null, enables Stage-2 redemption: `GET /pg/<token>` redeems a preview token into a
    * live streamed session (registered under the token id) and redirects to its viewer. Supplied by
    * `ServeCommand` alongside [playgroundService]; the two share one [PlaygroundTokenStore].
+   *
+   * Present without [playgroundService] on a `--compile-engine` host: the UI builder's native pane
+   * still redeems its own tokens in process, but `/pg/` is only mounted with the public surface.
    */
   private val playgroundRedeem: PlaygroundRedeemService? = null,
   /**
@@ -1811,7 +1814,13 @@ class ServeHttpServer(
         // The path segment is named `{pgToken}`, NOT `{token}`: on a token-gated host the access
         // token rides as `?token=…`, and `call.parameters` merges path + query, so a `{token}` path
         // segment would collide with the access token and redeem the wrong id (a NotFound 404).
-        playgroundRedeem?.let { redeem -> get("/pg/{pgToken}") { handlePlaygroundRedeem(redeem) } }
+        // Only beside the public surface: a `--compile-engine` host still holds a redeem service,
+        // but only for the UI builder's native pane, which redeems in process.
+        if (playgroundService != null) {
+          playgroundRedeem?.let { redeem ->
+            get("/pg/{pgToken}") { handlePlaygroundRedeem(redeem) }
+          }
+        }
 
         // Shared/public mode ingestion: a client contributes a pre-rendered bundle (upload the zip
         // as the body, or pass `?url=` to a build-results artifact) and gets back a ?session= link.
@@ -9466,6 +9475,7 @@ class ServeHttpServer(
           playgroundHealth?.invoke()?.let { h ->
             PlaygroundDto(
               admittedBy = h.admittedBy,
+              publicSurface = h.publicSurface,
               sandbox =
                 SandboxDto(
                   profile = h.sandboxProfile,
@@ -18477,6 +18487,11 @@ private data class AgentGrantDto(
 private data class PlaygroundDto(
   /** Which admission posture let the lane serve (the gate's own words). */
   val admittedBy: String,
+  /**
+   * False when only the compile engine is up (`--compile-engine`): the UI builder compiles through
+   * it, and `/playground`, the run route and `/pg/` are not mounted.
+   */
+  val publicSurface: Boolean = true,
   val sandbox: SandboxDto,
   /** True when compiles run in a jailed child rather than in the serve JVM. */
   val compilerJailed: Boolean,
