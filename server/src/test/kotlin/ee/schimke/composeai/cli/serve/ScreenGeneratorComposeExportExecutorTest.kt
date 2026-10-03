@@ -203,6 +203,65 @@ class ScreenGeneratorComposeExportExecutorTest {
     )
   }
 
+  /**
+   * A themed `m3/surface` exports as a `MaterialTheme` around it, and the service writes what the
+   * browser's gate does: the `MaterialTheme` record the projection adds has to reach this
+   * executor's generator call as well, or every themed design refuses here alone.
+   */
+  @Test
+  fun `a themed surface exports its theme, as the browser does`() {
+    val document =
+      Json.decodeFromString<DesignDocumentV1>(
+        """
+        {
+          "schema": "compose-ui-builder-document/v1-candidate",
+          "id": "themed", "title": "Themed", "revision": 0,
+          "catalogPin": {"systemId": "m3-catalog", "catalogRevision": "candidate",
+            "capabilityDigest": "candidate", "nativeRuntimeId": "candidate"},
+          "environment": {"widthDp": 360, "heightDp": 640, "density": 1.0, "theme": "dark",
+            "locale": "en-US", "fontScale": 1.0, "layoutDirection": "ltr"},
+          "roots": ["screen"],
+          "nodes": {
+            "screen": {"id": "screen", "componentId": "m3/surface",
+              "properties": {
+                "themePrimaryColor": {"type": "string", "value": "#FFD0BCFF"},
+                "themeDisplayTypeface": {"type": "string", "value": "Michroma"}
+              },
+              "slots": {"content": ["label"]}, "modifiers": []},
+            "label": {"id": "label", "componentId": "m3/text",
+              "properties": {"text": {"type": "string", "value": "Hello"},
+                "color": {"type": "colorToken", "value": "primary"}},
+              "slots": {}, "modifiers": []}
+          }
+        }
+        """
+      )
+    val record = ExportRecords.m3Catalog()
+    val browser = ScreenExportGate.export(document, record)
+    val artifact =
+      ScreenGeneratorComposeExportExecutor(
+          { ComponentRecordSource.Lookup.Found(record) },
+          ScreenExportGate.PACKAGE_NAME,
+        )
+        .export(
+          RevisionPinnedUiBuilderExport(
+            actor = AuthenticatedUiBuilderActor("tester"),
+            designId = document.id,
+            revision = document.revision,
+            documentHash = "hash",
+            document = document,
+            catalog = catalog,
+            format = ExportFormatV1.COMPOSE,
+          )
+        )
+    assertEquals(emptyList(), artifact.diagnostics)
+    val source = (browser as ScreenExportGate.Outcome.Emitted).source
+    assertTrue(artifact.content.orEmpty().endsWith(source), artifact.content)
+    assertTrue("MaterialTheme(colorScheme = colorScheme" in source, source)
+    assertTrue("darkColorScheme(primary = Color(0xFFD0BCFF))" in source, source)
+    assertTrue("GoogleFont(\"Michroma\")" in source, source)
+  }
+
   @Test
   fun `the same document exports byte-identically twice`() {
     assertEquals(export().contentDigest, export().contentDigest)

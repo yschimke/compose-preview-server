@@ -523,7 +523,9 @@ internal class ScreenGeneratorComposeExportExecutor(
       val generated =
         ScreenGenerator.generate(
           projection.document,
-          merged,
+          // A themed design's root is wrapped in `MaterialTheme`, which no catalog records; the
+          // projection adds that one call's record, and only when it wrote it.
+          projection.resolvable(merged),
           packageName,
           EXPRESSION_PACKAGES,
           previewFor(document.environment),
