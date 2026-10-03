@@ -24,7 +24,8 @@ import java.nio.file.StandardCopyOption
  * weight wins. The cache files share that script's `<slug>-<weight>.ttf` naming.
  */
 internal class ServeGoogleFonts(
-  private val cacheDirectory: File,
+  /** Where the files are kept, which the UI-builder renderer reads ([warm]). */
+  val cacheDirectory: File,
   private val families: List<String>,
   /**
    * The body of a GET; null when the server answered 4xx (Google's "no such face"), and a throw for
@@ -76,6 +77,25 @@ internal class ServeGoogleFonts(
   }
 
   /**
+   * Fetch the regular and bold of every family in [typefaces] the catalog lists, so the UI-builder
+   * renderer — which reads [cacheDirectory] and fetches nothing — draws a design in its faces.
+   *
+   * The editor fills the cache as it draws, but a design an agent edited through the API, or a
+   * cache that started empty on a new host, has never been drawn there; its thumbnail would be in
+   * the platform face. A name outside the catalog, a vendored family, or a fetch that fails is left
+   * alone: the render draws that one family in the default face, as the editor would.
+   */
+  fun warm(typefaces: Collection<String>) {
+    typefaces
+      .map { it.trim().removePrefix("google:").trim() }
+      .filter { canonical(it) != null }
+      .toSet()
+      .forEach { family ->
+        WARMED_WEIGHTS.forEach { weight -> runCatching { font(family, weight) } }
+      }
+  }
+
+  /**
    * The stylesheet for one query. A 4xx is "no file", the same as an empty sheet: purely variable
    * families answer a single-weight query that way.
    */
@@ -93,6 +113,41 @@ internal class ServeGoogleFonts(
     const val MAX_FONT_BYTES: Int = 16 * 1024 * 1024
 
     private val VALID_WEIGHTS = (100..900 step 100).toSet()
+
+    /**
+     * The weights the renderer reads for a family: compose-ui-builder's `ProductionFontFamilies`.
+     */
+    private val WARMED_WEIGHTS = listOf(400, 700)
+
+    /**
+     * The cache under the UI builder's app directory [dir], fetching through [client] — the one
+     * place both the font route and the renderer get it from, so they share files.
+     */
+    fun overHttp(dir: File, client: okhttp3.OkHttpClient): ServeGoogleFonts =
+      ServeGoogleFonts(
+        cacheDirectory = File(dir, "google-fonts"),
+        families = ServeWeb.googleFontFamilies,
+        fetch = { url, userAgent ->
+          client
+            .newCall(okhttp3.Request.Builder().url(url).header("User-Agent", userAgent).build())
+            .execute()
+            .use { response ->
+              if (response.code in 400..499) return@use null
+              check(response.isSuccessful) { "$url answered ${response.code}" }
+              val body = checkNotNull(response.body) { "$url answered no body" }
+              check(body.contentLength() <= MAX_FONT_BYTES) {
+                "$url declared ${body.contentLength()} bytes; refusing to read it"
+              }
+              val bytes =
+                ee.schimke.composeai.cli.serve.icons.MaterialSymbolsSource.readAtMost(
+                  body.byteStream(),
+                  MAX_FONT_BYTES,
+                )
+              check(bytes.size <= MAX_FONT_BYTES) { "$url is too large" }
+              bytes
+            }
+        },
+      )
 
     /** `GoogleFontKey.slugify`: lowercase, every non-alphanumeric run one `-`, none at the ends. */
     fun slugify(name: String): String = name.lowercase().replace(Regex("[^a-z0-9]+"), "-").trim('-')

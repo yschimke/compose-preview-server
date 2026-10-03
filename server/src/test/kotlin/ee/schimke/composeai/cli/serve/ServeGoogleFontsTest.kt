@@ -94,4 +94,31 @@ class ServeGoogleFontsTest {
     assertNull(ServeGoogleFonts.truetypeUrl(css, 400))
     assertEquals("playfair-display", ServeGoogleFonts.slugify("Playfair  Display"))
   }
+
+  @Test
+  fun `warming fetches the regular and bold of each catalog family a design names, once`() {
+    val fonts = fonts { url ->
+      if (url.startsWith("https://fonts.googleapis.com/")) {
+        val weight = Regex("wght@(\\d+)&").find(url)?.groupValues?.get(1) ?: "400"
+        face(weight, "w$weight").encodeToByteArray()
+      } else byteArrayOf(0, 1, 0, 0)
+    }
+
+    fonts.warm(listOf("google:Playfair Display", "playfair display", "Orbitron", "Not A Family"))
+
+    assertTrue(File(dir, "playfair-display-400.ttf").isFile)
+    assertTrue(File(dir, "playfair-display-700.ttf").isFile)
+    assertEquals(4, requests.size, "one stylesheet and one file per weight, for one family")
+    fonts.warm(listOf("Playfair Display"))
+    assertEquals(4, requests.size, "a warm cache asks for nothing")
+  }
+
+  @Test
+  fun `a failed fetch while warming leaves the render to the default face`() {
+    val fonts = fonts { error("offline") }
+
+    fonts.warm(listOf("Playfair Display"))
+
+    assertTrue(dir.listFiles().orEmpty().none { it.name.endsWith(".ttf") })
+  }
 }

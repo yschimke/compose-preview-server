@@ -13,6 +13,11 @@ import kotlin.math.roundToInt
 internal class RemotePngExportExecutor(
   private val delegate: UiBuilderExportExecutor,
   private val renderer: UiBuilderRenderPort?,
+  /**
+   * The cache the renderer reads typefaces from. Filled here from the design itself, because what
+   * the renderer is handed is the compiled document alone, whose theme hosts are gone.
+   */
+  private val fonts: ServeGoogleFonts? = null,
 ) : UiBuilderExportExecutor {
   override fun export(request: RevisionPinnedUiBuilderExport): ExportArtifactV1 {
     if (
@@ -43,6 +48,7 @@ internal class RemotePngExportExecutor(
     require(digest(bytes) == compiled.contentDigest) {
       "Remote document export digest does not match its bytes"
     }
+    fonts?.warm(DesignTypefaces.of(request.document))
     val image = player.renderPng(renderRequest(request, bytes))
     return artifact(
       image,
