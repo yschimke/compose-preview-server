@@ -331,6 +331,9 @@ public class ServeCommandOptions(
    */
   override val playgroundRuntimeSelection: Boolean = "--playground" in args
 
+  /** `--compile-engine`: the compile engine without the public playground; see [ServeOptions]. */
+  override val compileEngine: Boolean = "--compile-engine" in args
+
   /**
    * `--playground-catalog-limit <n>`: how many runtime-selected catalogs may hold a resolved
    * compile classpath at once. Each one is an unpacked bundle plus a resolved Maven classpath held

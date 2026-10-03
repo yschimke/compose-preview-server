@@ -1639,6 +1639,23 @@ public class ServeRunner(
   )
 
   /**
+   * The compile engine selects among served catalogs at runtime under either flag: `--playground`
+   * (engine + public surface) or `--compile-engine` (engine for the UI builder only).
+   */
+  private val engineRuntimeSelection: Boolean
+    get() = playgroundRuntimeSelection || compileEngine
+
+  /**
+   * Whether the public playground surface is mounted over the engine. `--playground` always asks
+   * for it; a bare `--playground-bundle` / `--playground-android-bundle` pin still does, as it
+   * always has, unless `--compile-engine` says the engine is for the UI builder alone.
+   */
+  private val publicPlayground: Boolean
+    get() =
+      playgroundRuntimeSelection ||
+        ((playgroundBundlePath != null || playgroundAndroidBundlePath != null) && !compileEngine)
+
+  /**
    * Build the `--playground-bundle` compile service, or null when not opted in. Resolves the CMP
    * compile classpath from the catalog liveBundle once at startup and wires the in-process BTA
    * compiler from the CLI install's `lib-bta/`.
@@ -1662,14 +1679,15 @@ public class ServeRunner(
   ): PlaygroundLane? {
     val cmpBundle = playgroundBundlePath
     val androidBundle = playgroundAndroidBundlePath
-    if (cmpBundle == null && androidBundle == null && !playgroundRuntimeSelection) return null
-    // `--playground` on its own means "select from what this host serves" — with nothing served
-    // there is nothing to select, and a lane whose selector is permanently empty is worse than a
-    // clear refusal at startup.
+    if (cmpBundle == null && androidBundle == null && !engineRuntimeSelection) return null
+    // `--playground` / `--compile-engine` on their own mean "select from what this host serves" —
+    // with nothing served there is nothing to select, and a lane whose selector is permanently
+    // empty is worse than a clear refusal at startup.
     if (cmpBundle == null && androidBundle == null && catalogRefs.isEmpty()) {
       System.err.println(
-        "serve: --playground selects a catalog at runtime but no --catalogs are configured, and no " +
-          "--playground-bundle is pinned; there is nothing to compile against. Playground disabled."
+        "serve: --playground / --compile-engine select a catalog at runtime but no --catalogs " +
+          "are configured, and no --playground-bundle is pinned; there is nothing to compile " +
+          "against. Playground disabled."
       )
       return null
     }
@@ -1779,7 +1797,7 @@ public class ServeRunner(
     val androidSupplier = androidBundle?.let {
       playgroundClasspathSupplier(it, workRoot, "android")
     }
-    if (cmpSupplier == null && androidSupplier == null && !playgroundRuntimeSelection) {
+    if (cmpSupplier == null && androidSupplier == null && !engineRuntimeSelection) {
       // Both configured sources were rejected outright (an unknown system id) — the specific reason
       // is already on stderr from the supplier factory.
       System.err.println("serve: playground has no usable bundle source; playground disabled.")
@@ -1823,7 +1841,7 @@ public class ServeRunner(
     // locates jars and returns a lambda), and asking at startup is what lets the selector omit the
     // Android catalogs instead of offering them and refusing every run.
     val androidDaemonOpener =
-      if (androidSupplier != null || playgroundRuntimeSelection)
+      if (androidSupplier != null || engineRuntimeSelection)
         buildPlaygroundAndroidDaemonOpener(sandbox)
       else null
     val androidRender = androidDaemonOpener?.let { opener ->
@@ -1838,8 +1856,7 @@ public class ServeRunner(
     // simply
     // carries no still image; its live `/pg/` redemption still renders on demand.
     val cmpDaemonOpener =
-      if (cmpSupplier != null || playgroundRuntimeSelection)
-        buildPlaygroundDesktopDaemonOpener(sandbox)
+      if (cmpSupplier != null || engineRuntimeSelection) buildPlaygroundDesktopDaemonOpener(sandbox)
       else null
     val cmpRender = cmpDaemonOpener?.let { opener ->
       buildPlaygroundAndroidRenderService(workRoot, opener)
@@ -1861,7 +1878,7 @@ public class ServeRunner(
     // above. Everything downstream of the choice — the classpath, the dependencies, the renderer —
     // is the catalog's own, so picking a catalog picks the whole compile target.
     val catalogTargets =
-      if (!playgroundRuntimeSelection) null
+      if (!engineRuntimeSelection) null
       else
         PlaygroundCatalogTargets(
           available = {
@@ -1901,7 +1918,8 @@ public class ServeRunner(
     // source resolves on first use, well after this line. A mode whose bundle never materializes
     // answers "mode … is not available" per request and logs why there.
     System.err.println(
-      "serve: playground enabled (POST /api/1/compiler/run) — " +
+      (if (publicPlayground) "serve: playground enabled (POST /api/1/compiler/run) — "
+      else "serve: compile engine enabled for the UI builder (public playground off) — ") +
         listOfNotNull(
             cmpSupplier?.let { "cmp✓" },
             cmpRender?.let { "cmp-render✓" },
@@ -2001,7 +2019,8 @@ public class ServeRunner(
             ?.doc
             ?.path
         },
-        editLeasesEnabled = playgroundEditing && repoAccessGated,
+        // The lease is a playground editor feature; an engine-only host has no editor to hold one.
+        editLeasesEnabled = playgroundEditing && repoAccessGated && publicPlayground,
         editLeaseTtlMillis = playgroundEditLeaseTtlSeconds * 1000,
       )
     if (playgroundEditing && !repoAccessGated) {
@@ -2087,6 +2106,7 @@ public class ServeRunner(
         probe = probe,
         compilerJailed = compiler !== inProcessCompiler && !sandbox.jailDropped,
         compileSlots = playgroundCompileSlots,
+        publicSurface = publicPlayground,
         modes = {
           listOfNotNull(
             cmpSupplier?.let {
@@ -3784,7 +3804,10 @@ public class ServeRunner(
         imageStore = imageLane?.store,
         imageUploadAuth = imageLane?.auth,
         imageUploadLimiter = imageLane?.limiter,
-        playgroundService = playgroundLane?.compile,
+        // The public surface's handle on the engine. Null on a `--compile-engine` host, which is
+        // what keeps `/playground`, the run route, `/pg/` and every editor link unmounted there,
+        // while the UI-builder lanes below still compile through `playgroundLane` directly.
+        playgroundService = playgroundLane?.compile?.takeIf { publicPlayground },
         playgroundHealth = playgroundLane?.health,
         branchFetchStats = catalogStore?.let { store -> { store.branchFetchStats.snapshot() } },
         themeOptimizerStats = { backgroundWork.optimizerAdmissionSnapshot() },
@@ -3923,7 +3946,10 @@ public class ServeRunner(
               )
             }
           },
-        playgroundRateLimiter = playgroundLane?.let { buildPlaygroundRateLimiter() },
+        // Meters visitors of the public run route; the UI-builder lanes are gated by their own
+        // export capability instead.
+        playgroundRateLimiter =
+          playgroundLane?.takeIf { publicPlayground }?.let { buildPlaygroundRateLimiter() },
         // Reads a served preview's Kotlin, for two consumers with different requirements:
         // `/playground?from=<system>/<previewId>` (needs a playground to open it in) and the
         // viewer's Source panel (does not — it only shows the code).

@@ -286,6 +286,19 @@ public interface ServeOptions {
   public val playgroundRuntimeSelection: Boolean
 
   /**
+   * `--compile-engine` (env `SERVE_COMPILE_ENGINE=1`): start the playground's compile engine for
+   * this host's own consumers — the UI builder's native preview and inline Remote Compose capture —
+   * **without** the public playground surface. `/playground` keeps its disabled page, `POST
+   * /api/{v}/compiler/run` and `/pg/` are not mounted, and no page links to an editor.
+   *
+   * The engine selects among served catalogs at runtime, as `--playground` does, and every other
+   * `--playground-*` knob (sandbox, compile slots, catalog limit, pins) configures it. A pinned
+   * `--playground-bundle` stops implying the public surface once this flag is set; add
+   * `--playground` to expose it as well.
+   */
+  public val compileEngine: Boolean
+
+  /**
    * `--playground-catalog-limit <n>`: how many runtime-selected catalogs may hold a resolved
    * compile classpath at once. Each one is an unpacked bundle plus a resolved Maven classpath held
    * for the life of the process (they cannot be evicted while snippet JVMs hold their jars open),
