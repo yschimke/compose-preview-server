@@ -7808,7 +7808,7 @@ ${captureControlsHtml().prependIndent("          ")}
                 <label class="cp-grant-ttl"><span>New design id</span><input type="text" name="designId"
                   value="${esc(row.copySuggestedId)}" pattern="[A-Za-z0-9][A-Za-z0-9._-]*" required></label>
                 ${uiBuilderCreationVisibility()}
-          <button class="cp-grant-approve" type="submit">Create the copy</button>
+                <button class="cp-grant-approve" type="submit">Create the copy</button>
               </form>
             </details>
             """

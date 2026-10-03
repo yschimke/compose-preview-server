@@ -14867,7 +14867,7 @@ class ServeHttpServer(
     val form = call.receiveParameters()
     val creationVisibility =
       try {
-        UiBuilderDefaultVisibility.parse(form["visibility"])
+        UiBuilderDefaultVisibility.parseRequested(form["visibility"])
       } catch (e: IllegalArgumentException) {
         call.respondText(e.message.orEmpty(), status = HttpStatusCode.BadRequest)
         return
@@ -14942,15 +14942,17 @@ class ServeHttpServer(
         return
       }
     val outcome =
-      withContext(Dispatchers.IO + CreationVisibility(creationVisibility)) {
-        ServeUiBuilderCreate(service, dir, canonicalServerOrigin())
-          .create(
-            actor = actor,
-            catalogSystemId = catalog,
-            designId = designId,
-            templateId = template,
-            state = state,
-          )
+      withContext(Dispatchers.IO) {
+        withDesignCreationVisibility(creationVisibility) {
+          ServeUiBuilderCreate(service, dir, canonicalServerOrigin())
+            .create(
+              actor = actor,
+              catalogSystemId = catalog,
+              designId = designId,
+              templateId = template,
+              state = state,
+            )
+        }
       }
     when (outcome) {
       is ServeUiBuilderCreate.Outcome.Created,
@@ -15002,7 +15004,7 @@ class ServeHttpServer(
     val form = call.receiveParameters()
     val creationVisibility =
       try {
-        UiBuilderDefaultVisibility.parse(form["visibility"])
+        UiBuilderDefaultVisibility.parseRequested(form["visibility"])
       } catch (e: IllegalArgumentException) {
         call.respondText(e.message.orEmpty(), status = HttpStatusCode.BadRequest)
         return
@@ -15056,8 +15058,10 @@ class ServeHttpServer(
         home = null,
       )
     val outcome =
-      withContext(Dispatchers.IO + CreationVisibility(creationVisibility)) {
-        ServeUiBuilderCreate(service, dir, canonicalServerOrigin()).install(actor, copy)
+      withContext(Dispatchers.IO) {
+        withDesignCreationVisibility(creationVisibility) {
+          ServeUiBuilderCreate(service, dir, canonicalServerOrigin()).install(actor, copy)
+        }
       }
     when (outcome) {
       is ServeUiBuilderCreate.Outcome.Created,

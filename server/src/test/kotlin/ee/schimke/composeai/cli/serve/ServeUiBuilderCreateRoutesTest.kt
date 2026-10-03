@@ -163,7 +163,7 @@ class ServeUiBuilderCreateRoutesTest {
   private fun url(path: String) = "http://127.0.0.1:${server.port}$path"
 
   @Test
-  fun `creation form carries explicit visibility and defaults to private`() {
+  fun `creation form carries explicit visibility and otherwise keeps the operator default`() {
     for ((name, choice) in
       listOf(
         "default" to null,
@@ -190,7 +190,8 @@ class ServeUiBuilderCreateRoutesTest {
     }
     assertEquals(
       mapOf(
-        "default" to UiBuilderDefaultVisibility.PRIVATE,
+        // No field (an older editor or form): the operator's default — PUBLIC in this fake.
+        "default" to UiBuilderDefaultVisibility.PUBLIC,
         "private" to UiBuilderDefaultVisibility.PRIVATE,
         "public" to UiBuilderDefaultVisibility.PUBLIC,
       ),

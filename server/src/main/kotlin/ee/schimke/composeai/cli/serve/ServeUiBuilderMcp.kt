@@ -407,10 +407,10 @@ class ServeUiBuilderMcp(
               throw McpRequestException("pass visibility or actorId, not both")
             val visibility =
               try {
-                UiBuilderDefaultVisibility.parse(value)
+                UiBuilderDefaultVisibility.parseRequested(value)
               } catch (e: IllegalArgumentException) {
                 throw McpRequestException(e.message.orEmpty())
-              }
+              } ?: throw McpRequestException("visibility must be private or public")
             return envelope(
               callId,
               service.setDesignVisibility(actor, args.requiredText("designId"), visibility),
@@ -475,11 +475,11 @@ class ServeUiBuilderMcp(
       if (request is CreateDesignRequestV1) {
         val visibility =
           try {
-            UiBuilderDefaultVisibility.parse(args.text("visibility"))
+            UiBuilderDefaultVisibility.parseRequested(args.text("visibility"))
           } catch (e: IllegalArgumentException) {
             throw McpRequestException(e.message.orEmpty())
           }
-        withDesignCreationVisibility(visibility.wire) { execute(request, actor) }
+        withDesignCreationVisibility(visibility) { execute(request, actor) }
       } else execute(request, actor)
     return envelope(callId, response, includeCatalog = args.includeCatalog())
   }
@@ -1036,7 +1036,15 @@ class ServeUiBuilderMcp(
         as? CreatePlan.Create ?: return null
     return envelope(
       callId,
-      withDesignCreationVisibility(createArgs.text("visibility")) { execute(plan.request, actor) },
+      withDesignCreationVisibility(
+        try {
+          UiBuilderDefaultVisibility.parseRequested(createArgs.text("visibility"))
+        } catch (e: IllegalArgumentException) {
+          throw McpRequestException(e.message.orEmpty())
+        }
+      ) {
+        execute(plan.request, actor)
+      },
       includeCatalog = createArgs.includeCatalog(),
     )
   }
@@ -3531,7 +3539,7 @@ class ServeUiBuilderMcp(
             "title":{"type":"string"},
             "document":{"type":"object","description":"A whole DesignDocumentV1."},
             "fromDesignId":{"type":"string","description":"Copy this design's document instead."},
-            "visibility":{"type":"string","enum":["private","public"],"default":"private","description":"Private by default. Public allows anyone with the link to view; editing still requires explicit access."},
+            "visibility":{"type":"string","enum":["private","public"],"description":"Defaults to the server's configured visibility, which is private unless the operator chose public. Public allows anyone with the link to view; editing still requires explicit access."},
             "$INCLUDE_CATALOG_ARGUMENT":{"type":"boolean","description":"Embed the pinned catalog in the returned snapshot. Defaults to false."}
           },"required":["designId"],"additionalProperties":false}
           """,
