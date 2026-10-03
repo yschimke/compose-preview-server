@@ -1805,6 +1805,56 @@ class ServeHttpRoutingTest {
   }
 
   @Test
+  fun `a catalog still loading keeps a loading card on the front page, a failed one does not`() {
+    val catalogRegistry = ServeSessionRegistry(open = { null })
+    catalogRegistry.register(
+      "compose-m3",
+      host = bundle("compose-m3", "Compose Material 3"),
+      pinned = true,
+    )
+    fun config(system: String) =
+      CatalogLoadTracker.Config(
+        system = system,
+        listed = true,
+        repo = "yschimke/compose-samples",
+        branch = "design-artifacts/$system",
+      )
+    val loads = CatalogLoadTracker(listOf(config("compose-m3"), config("jetnews"), config("reply")))
+    loads.recordFailure("reply", "could not parse catalog.json")
+    val homeServer =
+      ServeHttpServer(
+          host = "127.0.0.1",
+          requestedPort = 0,
+          token = "unused-in-public",
+          sessions = catalogRegistry,
+          defaultSessionId = "compose-m3",
+          isPublic = true,
+          catalogSessions = listOf("compose-m3", "jetnews", "reply"),
+          catalogLoads = loads,
+        )
+        .also { it.start() }
+    try {
+      val body =
+        client
+          .newCall(Request.Builder().url("http://127.0.0.1:${homeServer.port}/").build())
+          .execute()
+          .use { it.body.string() }
+      val card =
+        Regex("""<div class="cp-card cp-sys cp-sys-loading"[^>]*data-cp-system="jetnews">""")
+      assertTrue(card.containsMatchIn(body), "the pending catalog keeps a loading card: $body")
+      // No link: `/jetnews/` does not exist until the load lands.
+      assertFalse(body.contains("href=\"/jetnews/"), "a loading card must not link anywhere: $body")
+      // The loaded catalog still renders as before.
+      assertTrue(body.contains("href=\"/compose-m3/"), "the loaded catalog keeps its card: $body")
+      // A failed load is not on its way, so it gets no card.
+      assertFalse(body.contains("data-cp-system=\"reply\""), "a failed catalog gets no card: $body")
+    } finally {
+      homeServer.stop()
+      catalogRegistry.close()
+    }
+  }
+
+  @Test
   fun `readyz falls through to a later loaded catalog when the configured default failed`() {
     val catalogRegistry = ServeSessionRegistry(open = { null })
     catalogRegistry.register("reply", host = bundle("reply"), pinned = true)
