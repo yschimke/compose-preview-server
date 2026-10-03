@@ -809,4 +809,44 @@ class ServeBundleHostTest {
     assertEquals(20, second?.window?.h)
     assertEquals(false, second?.clip)
   }
+
+  @Test
+  fun `a rebuilt host reuses the crops computed over the same files`() {
+    // The registry rebuilds a catalog's host on every resume, and each rebuild used to decode every
+    // card's PNG again on the landing's request thread. The answer depends only on the files.
+    val dir = bundle("sticker__ideal__default" to pngOf(200, 100))
+    File(dir, "previews.json")
+      .writeText(
+        """
+        {"module":"catalog","variant":"main","previews":[
+          {"id":"sticker__ideal__default","functionName":"Sticker","className":"Kt",
+           "params":{"density":1.0,"captureGutter":{"start":4,"top":4,"end":4,"bottom":4}}}
+        ]}
+        """
+          .trimIndent()
+      )
+    assertEquals(
+      192,
+      ServeBundleHost(dir, label = "b").contentCrop("sticker__ideal__default")?.window?.w,
+    )
+
+    // Same path, size and timestamp but unreadable bytes: only a reused answer can still crop it.
+    val png = dir.walkTopDown().single { it.name == "sticker__ideal__default.png" }
+    val stamp = png.lastModified()
+    png.writeBytes(ByteArray(png.length().toInt()))
+    png.setLastModified(stamp)
+    assertEquals(
+      192,
+      ServeBundleHost(dir, label = "b").contentCrop("sticker__ideal__default")?.window?.w,
+      "a rebuilt host must not decode the PNG again",
+    )
+
+    // A file that changed is a different key, and is computed afresh.
+    png.writeBytes(pngOf(300, 100))
+    png.setLastModified(stamp + 10_000)
+    assertEquals(
+      292,
+      ServeBundleHost(dir, label = "b").contentCrop("sticker__ideal__default")?.window?.w,
+    )
+  }
 }

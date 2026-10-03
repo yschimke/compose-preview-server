@@ -1430,6 +1430,23 @@ class ServeCatalogLiveHost(
     (previewId in alias && live.hasSvgExport) || baked.hasSvgExportFor(previewId)
 
   /**
+   * [hasSvgExportFor] for the catalog landing page, which must never stand a daemon up.
+   *
+   * [live.hasSvgExport] is answered by the daemon's extension handshake, so asking it of a catalog
+   * whose daemon is not running boots one — on the request thread. The landing asks it of every
+   * preview to decide whether to offer "compare SVG", and a catalog with no baked vectors falls
+   * through to the live lane on every one: on preview.coo.ee a plain GET of
+   * `/home-assistant-android/` waited 10-60 s for a ~1 GB Android daemon to initialise, just to
+   * draw a grid of baked thumbnails, and every catalog browsed that way stayed resident and added
+   * to the memory pressure that suspends catalogs in the first place.
+   *
+   * So the live lane is consulted only once its daemon is already up. A cold catalog with no baked
+   * vectors omits the chip until something that genuinely needs the daemon has started it.
+   */
+  fun hasSvgExportWithoutWaking(previewId: String): Boolean =
+    baked.hasSvgExportFor(previewId) || (live.daemonStarted && hasSvgExportFor(previewId))
+
+  /**
    * The "Live (stream)" toggle is offered (unlike a plain static catalog) — until this catalog's
    * live lane breaks. An open render breaker means no live render can succeed, so the catalog must
    * stop advertising `live` on `/status` and stop offering the toggle: reporting a healthy live
