@@ -14,7 +14,9 @@
 
 /** The site icons the notification wears; `ServeSiteIcon`'s paths, pinned by a server test. */
 export const ICON_PATH = "/icons/app-192.png";
-export const BADGE_PATH = "/icons/app-192.png";
+// The status bar draws the badge as an alpha mask, so it is the monochrome glyph rather than the
+// full-colour app icon, which would show up as a solid white disc.
+export const BADGE_PATH = "/icons/badge-96.png";
 
 export interface PushPayload {
     kind: string;

@@ -82,6 +82,8 @@ describe("the push worker", () => {
         assert.equal(spec.title, "New reply on “Checkout”");
         assert.equal(spec.options.tag, "cp-push:d1:t1");
         assert.equal(spec.options.icon, "/icons/app-192.png");
+        // The status bar masks the badge by alpha, so it is the monochrome glyph, not the app icon.
+        assert.equal(spec.options.badge, "/icons/badge-96.png");
         assert.match(spec.options.body!, /3 updates/);
     });
 

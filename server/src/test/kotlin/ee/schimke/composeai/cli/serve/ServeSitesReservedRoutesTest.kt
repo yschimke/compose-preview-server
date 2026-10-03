@@ -47,6 +47,7 @@ class ServeSitesReservedRoutesTest {
       "ServeSiteIcon.APP_ICON_192_PATH" to ServeSiteIcon.APP_ICON_192_PATH,
       "ServeSiteIcon.APP_ICON_512_PATH" to ServeSiteIcon.APP_ICON_512_PATH,
       "ServeSiteIcon.MASKABLE_ICON_PATH" to ServeSiteIcon.MASKABLE_ICON_PATH,
+      "ServeSiteIcon.BADGE_PATH" to ServeSiteIcon.BADGE_PATH,
       "ServeSiteIcon.MANIFEST_PATH" to ServeSiteIcon.MANIFEST_PATH,
       "ServeSiteIcon.SCREENSHOT_NARROW_PATH" to ServeSiteIcon.SCREENSHOT_NARROW_PATH,
       "ServeSiteIcon.SCREENSHOT_WIDE_PATH" to ServeSiteIcon.SCREENSHOT_WIDE_PATH,

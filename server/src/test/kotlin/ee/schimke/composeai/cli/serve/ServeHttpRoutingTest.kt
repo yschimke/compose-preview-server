@@ -804,6 +804,33 @@ class ServeHttpRoutingTest {
   }
 
   /**
+   * The notification badge is served like the other icons — a day's public cache and a content ETag
+   * that answers a revalidation with 304 — because the push worker names it on every notification,
+   * and a phone that refetched it each time would pay for that on every push.
+   */
+  @Test
+  fun `the badge icon is served with the site icons' caching`() {
+    val (code, bytes, headers) = getFullBytes(ServeSiteIcon.BADGE_PATH)
+    assertEquals(200, code)
+    assertTrue(bytes.contentEquals(ServeSiteIcon.badgeIcon.bytes), "serves the baked badge")
+    assertTrue(headers["Content-Type"].orEmpty().startsWith("image/png"), "$headers")
+    assertEquals("public, max-age=86400", headers["Cache-Control"])
+    val etag = headers["ETag"].orEmpty()
+    assertEquals(ServeSiteIcon.badgeIcon.etag, etag)
+
+    val revalidated =
+      client
+        .newCall(
+          Request.Builder()
+            .url("http://127.0.0.1:${server.port}${ServeSiteIcon.BADGE_PATH}")
+            .header("If-None-Match", etag)
+            .build()
+        )
+        .execute()
+    revalidated.use { assertEquals(304, it.code) }
+  }
+
+  /**
    * The unfurl card lane. A card is resolved purely by the content hash in its name, so a name this
    * server never drew is a 404 rather than a lookup against anything a caller controls.
    */
