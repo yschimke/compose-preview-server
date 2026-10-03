@@ -4279,7 +4279,13 @@ class ServeHttpServer(
           // turns that format on with — so "compare SVG" and "compare RC players" only appear
           // when
           // there is something behind them.
-          hasSvgComparison = renderHost.previews.any { renderHost.hasSvgExportFor(it.id) },
+          // …without waking a daemon to find out: see
+          // [ServeCatalogLiveHost.hasSvgExportWithoutWaking].
+          hasSvgComparison =
+            renderHost.previews.any {
+              (renderHost as? ServeCatalogLiveHost)?.hasSvgExportWithoutWaking(it.id)
+                ?: renderHost.hasSvgExportFor(it.id)
+            },
           hasRcComparison =
             renderHost.rcCompare() != null ||
               renderHost.previews.any { renderHost.hasRemoteComposeDoc(it.id) },

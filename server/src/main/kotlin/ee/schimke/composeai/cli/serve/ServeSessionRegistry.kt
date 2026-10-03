@@ -963,9 +963,14 @@ class ServeSessionRegistry(
    * host just opened belongs to nobody: it is closed (outside the lock again) and null returned.
    */
   private fun liveHost(entry: Entry): ServeHost? {
-    while (entry.closing || entry.opening) closeFinished.awaitUninterruptibly()
+    // `!closed` first: [close] signals on its way out, and a waiter that re-parked because an
+    // opener still held the flag would otherwise stay parked until that (possibly stuck) open ends.
+    while (!closed && (entry.closing || entry.opening)) closeFinished.awaitUninterruptibly()
     // The registry may have been closed while we were parked; don't resurrect a daemon into it.
     if (closed) return null
+    // …nor into an entry retired or replaced while we were parked. Every caller queued behind a
+    // slow open wakes here, and each would otherwise launch (and then discard) a daemon of its own.
+    if (sessions.values.none { it === entry }) return null
     entry.host?.let {
       return it
     }

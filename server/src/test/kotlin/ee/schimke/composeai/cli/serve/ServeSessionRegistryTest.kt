@@ -226,6 +226,68 @@ class ServeSessionRegistryTest {
   }
 
   @Test
+  fun `callers queued behind an open of a retired session open nothing of their own`() {
+    val openStarted = CountDownLatch(1)
+    val releaseOpen = CountDownLatch(1)
+    val opener = Opener()
+    val slowOpener: (ServeSessionState) -> ServeHost? = { state ->
+      openStarted.countDown()
+      releaseOpen.await(10, TimeUnit.SECONDS)
+      opener(state)
+    }
+    ServeSessionRegistry(open = slowOpener, reaperIntervalMillis = 0).use { reg ->
+      try {
+        reg.register("a", stateFor("a"))
+        val first = Thread { reg.acquire("a") }.apply { start() }
+        assertTrue(openStarted.await(5, TimeUnit.SECONDS))
+        val queued = List(3) { Thread { reg.acquire("a") }.apply { start() } }
+        Thread.sleep(100) // let the queued callers park on the open
+        assertTrue(reg.unregister("a"))
+        releaseOpen.countDown()
+        first.join(5_000)
+        queued.forEach { it.join(5_000) }
+        assertEquals(1, opener.opened.get(), "only the original open ran")
+      } finally {
+        releaseOpen.countDown()
+      }
+    }
+  }
+
+  @Test
+  fun `closing the registry releases a caller waiting on another's open`() {
+    val openStarted = CountDownLatch(1)
+    val releaseOpen = CountDownLatch(1)
+    val opener = Opener()
+    val slowOpener: (ServeSessionState) -> ServeHost? = { state ->
+      openStarted.countDown()
+      releaseOpen.await(10, TimeUnit.SECONDS)
+      opener(state)
+    }
+    val reg = ServeSessionRegistry(open = slowOpener, reaperIntervalMillis = 0)
+    try {
+      reg.register("a", stateFor("a"))
+      Thread { reg.acquire("a") }.start()
+      assertTrue(openStarted.await(5, TimeUnit.SECONDS))
+      val waiterReturned = CountDownLatch(1)
+      val waited = AtomicReference<ServeHost?>(null)
+      Thread {
+        waited.set(reg.acquire("a"))
+        waiterReturned.countDown()
+      }
+        .start()
+      Thread.sleep(100) // let the waiter park on the open
+      reg.close()
+      assertTrue(
+        waiterReturned.await(2, TimeUnit.SECONDS),
+        "a closed registry must not keep a waiter parked behind a stuck open",
+      )
+      assertNull(waited.get())
+    } finally {
+      releaseOpen.countDown()
+    }
+  }
+
+  @Test
   fun `a reserved route name is never bound to a session`() {
     // No entry in `sessions` may be named after one of the server's own top-level routes — a
     // session called `api` is unreachable at `/api/` on the main host (Ktor scores the constant
