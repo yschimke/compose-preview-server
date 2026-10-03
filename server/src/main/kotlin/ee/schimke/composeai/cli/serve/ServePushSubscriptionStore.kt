@@ -139,6 +139,17 @@ internal class ServePushSubscriptionStore(
    */
   fun kinds(actor: String): Set<PushKind> = kindsOf(all(), actor)
 
+  /**
+   * Bind [endpoint] to [actor], idempotently.
+   *
+   * The same browser posting the same subscription again — which the settings page does on every
+   * load, to confirm the endpoint is the signed-in person's — writes nothing. A different person
+   * posting it takes it over: the endpoint is the browser, and it follows whoever signed in last.
+   *
+   * Explicit [kinds] are the person's choice for every device, as [setKinds] is, so they are
+   * applied to each of [actor]'s subscriptions, not only this one. Null [kinds] keeps what the
+   * person already chose.
+   */
   fun subscribe(
     actor: String,
     endpoint: String,
@@ -152,8 +163,11 @@ internal class ServePushSubscriptionStore(
     ServePushEndpoints.keyRejection(p256dh, auth)?.let {
       return PushSubscribeResult.Refused(it)
     }
+    val key = p256dh.trim().trimEnd('=')
+    val secret = auth.trim().trimEnd('=')
     return exclusive {
       val current = load()
+      val existing = current.firstOrNull { it.endpoint == endpoint }
       val others = current.filter { it.endpoint != endpoint }
       val mine = others.count { it.actor == actor }
       if (mine >= maximumPerActor) {
@@ -166,17 +180,29 @@ internal class ServePushSubscriptionStore(
           "this server holds the most push subscriptions it allows"
         )
       }
-      val chosen = kinds ?: kindsOf(current, actor)
+      val wire = (kinds ?: kindsOf(current, actor)).map { it.wire }.toSortedSet()
       val stored =
-        StoredPushSubscription(
-          endpoint = endpoint,
-          p256dh = p256dh.trim().trimEnd('='),
-          auth = auth.trim().trimEnd('='),
-          actor = actor,
-          kinds = chosen.map { it.wire }.toSortedSet(),
-          createdAt = now(),
-        )
-      save(others + stored)
+        if (existing != null && existing.actor == actor) {
+          existing.copy(p256dh = key, auth = secret, kinds = wire)
+        } else {
+          StoredPushSubscription(
+            endpoint = endpoint,
+            p256dh = key,
+            auth = secret,
+            actor = actor,
+            kinds = wire,
+            createdAt = now(),
+          )
+        }
+      val next =
+        current.map {
+          when {
+            it.endpoint == endpoint -> stored
+            kinds != null && it.actor == actor -> it.copy(kinds = wire)
+            else -> it
+          }
+        } + listOfNotNull(stored.takeIf { existing == null })
+      if (next != current) save(next)
       PushSubscribeResult.Stored(stored)
     }
   }

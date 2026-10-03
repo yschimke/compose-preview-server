@@ -3,6 +3,7 @@ package ee.schimke.composeai.cli.serve
 import java.net.InetAddress
 import java.nio.file.Files
 import java.nio.file.Path
+import java.nio.file.attribute.BasicFileAttributes
 import java.nio.file.attribute.PosixFilePermissions
 import java.security.interfaces.ECPublicKey
 import kotlin.test.Test
@@ -147,6 +148,40 @@ class ServePushSubscriptionStoreTest {
     // A third device starts with what the person last chose.
     store.subscribe("github:alice", "$ENDPOINT-3", browserKey, auth, null)
     assertEquals(setOf("mentions"), store.forActor("github:alice").last().kinds)
+  }
+
+  @Test
+  fun `kinds sent with a subscribe are the person's choice on every device`() {
+    val store = store()
+    store.subscribe("github:alice", "$ENDPOINT-1", browserKey, auth, null)
+    store.subscribe("github:alice", "$ENDPOINT-2", browserKey, auth, null)
+    store.subscribe("github:bob", "$ENDPOINT-3", browserKey, auth, null)
+    // A third browser signs up with a narrower choice: preferences are account-wide, so the two
+    // devices alice already had follow it, and bob's are untouched.
+    store.subscribe("github:alice", "$ENDPOINT-4", browserKey, auth, setOf(PushKind.MENTIONS))
+    assertEquals(3, store.forActor("github:alice").size)
+    assertTrue(store.forActor("github:alice").all { it.kinds == setOf("mentions") })
+    assertEquals(setOf(PushKind.MENTIONS), store.kinds("github:alice"))
+    assertEquals(PushKind.ALL.map { it.wire }.toSet(), store.forActor("github:bob").single().kinds)
+    // And from disk, not just this process's copy.
+    assertTrue(store().forActor("github:alice").all { it.kinds == setOf("mentions") })
+  }
+
+  @Test
+  fun `re-posting the same subscription writes nothing, and keeps what the person chose`() {
+    val store = store()
+    val first = store.subscribe("github:alice", ENDPOINT, browserKey, auth, setOf(PushKind.REVIEWS))
+    assertIs<PushSubscribeResult.Stored>(first)
+    val file = root.resolve("push").resolve(ServePushSubscriptionStore.FILE_NAME)
+    val before = Files.readAttributes(file, BasicFileAttributes::class.java).fileKey()
+    val modified = Files.getLastModifiedTime(file)
+    // What the settings page sends on every load: the subscription, without kinds.
+    val again = store.subscribe("github:alice", ENDPOINT, browserKey, auth, null)
+    assertIs<PushSubscribeResult.Stored>(again)
+    assertEquals(first.subscription, again.subscription)
+    assertEquals(before, Files.readAttributes(file, BasicFileAttributes::class.java).fileKey())
+    assertEquals(modified, Files.getLastModifiedTime(file))
+    assertEquals(setOf("reviews"), store.all().single().kinds)
   }
 
   @Test
