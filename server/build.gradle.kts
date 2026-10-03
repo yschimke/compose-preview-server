@@ -793,6 +793,10 @@ tasks.register<CheckServeModuleBoundary>("checkServeModuleBoundary") {
       "ee.schimke.composeai:daemon-devices",
       "ee.schimke.composeai:daemon-protocol",
       "ee.schimke.composeai:data-layoutinspector-core",
+      // A `runtime` edge of `daemon-core` since compose-preview-daemon 3.13.0: the pure-JVM APNG
+      // encoder/decoder and the interaction-script types (`ee.schimke.composeai.motion`), with no
+      // dependencies of its own and no renderer behind them.
+      "ee.schimke.composeai:data-motion-core",
       "ee.schimke.composeai:data-preview-overrides-core",
       "ee.schimke.composeai:data-pseudolocale-core",
       "ee.schimke.composeai:data-remotecompose-core",

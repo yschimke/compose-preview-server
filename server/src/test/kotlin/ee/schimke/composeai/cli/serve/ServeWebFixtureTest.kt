@@ -4829,7 +4829,7 @@ class ServeWebFixtureTest {
       listOf(
         "AndroidX Embedded · vendored Android",
         "AndroidX Embedded · androidx.dev",
-        "rc-player JVM",
+        "CMP JVM",
       ),
       Regex("<span class=\"cp-rc-absent-lane\">([^<]+)</span>")
         .findAll(rcLanesPartialComparison)
@@ -4852,7 +4852,7 @@ class ServeWebFixtureTest {
       listOf(
         "AndroidX Embedded · baked",
         "Camaelon JS",
-        "rc-player JVM",
+        "CMP JVM",
         "CMP Wasm",
         // Last, and deliberately: the offline pipeline has no `androidx-view` column, so this lane
         // cannot claim a position in an order it is not part of.
