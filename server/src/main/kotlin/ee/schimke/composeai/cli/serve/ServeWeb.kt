@@ -19217,7 +19217,7 @@ ${ServeSiteIcon.linkTags(themeCss, siteName.ifBlank { "Compose Preview" }).prepe
         ${pageThemeScript(themeStorageKey, declaredThemes, themeChoiceApplies, offeredThemes)}
       </head>
       <body${bodyClassAttr}>
-        ${scriptTag("serve-chrome.js")}
+        ${scriptTag("serve-chrome.js")}${ServeAnalytics.scriptTag()}
         ${siteHeader(navSuffix, headerAction, headerBreadcrumb, siteName, componentBrowser, interfaceModeControl, themeStorageKey.isNotBlank() && interfaceModeControl, headerSessionSettings, headerSearch, headerDesignsHref)}
         <main class="cp-main">
         $body

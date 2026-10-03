@@ -94,6 +94,7 @@ const assets = (name) =>
 // machinery into a component bundle would put it on the catalog grid, the
 // compare wall and the design pages, none of which have a stage to drive.
 const BUNDLES = [
+    { entry: "src/analytics.ts", out: "analytics.js" },
     { entry: "src/vueRuntime.ts", out: "vue-runtime.js" },
     { entry: "src/catalog.ts", out: "catalog-components.js" },
     { entry: "src/compare.ts", out: "compare-components.js" },

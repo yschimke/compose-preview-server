@@ -163,6 +163,13 @@
 		}
 	}
 
+	# Analytics: expose collection only; the dashboard stays on the host loopback port.
+	@analytics path /__analytics/script.js /__analytics/api/send
+	handle @analytics {
+		uri strip_prefix /__analytics
+		reverse_proxy umami:3000
+	}
+
 	# Everything else → the preview server.
 	handle {
 		# The /ws/ WebSocket frame lane (Live Compose) was 502ing: a `read_timeout` on

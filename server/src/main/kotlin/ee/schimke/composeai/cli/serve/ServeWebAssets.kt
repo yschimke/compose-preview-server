@@ -37,6 +37,7 @@ internal object ServeWebAssets {
       // folding the shell into a surface bundle
       // would put Vue on the front door, whose imagery is prebaked precisely so a visit
       // costs the HTML and nothing else.
+      "analytics.js" to "text/javascript; charset=utf-8",
       "serve-chrome.js" to "text/javascript; charset=utf-8",
       // Opt-in site-wide power-user navigation. Separate from the Vue bundle because Settings is
       // on every page while only pages with Vue controls load `vue-runtime.js`.

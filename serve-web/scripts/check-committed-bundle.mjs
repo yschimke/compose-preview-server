@@ -27,6 +27,7 @@ const assets = resolve(
     "server/src/main/resources/ee/schimke/composeai/cli/serve/assets",
 );
 const tracked = [
+    "analytics.js",
     "vue-runtime.js",
     "catalog-components.js",
     "compare-components.js",

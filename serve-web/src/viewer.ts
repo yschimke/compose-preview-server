@@ -1,3 +1,4 @@
+import { trackInteraction } from "./analyticsClient.js";
 // The preview viewer: the stage, its lanes, and every control that changes what is on it.
 //
 // Ported from the last hand-written `assets/*.js`. It is still one long imperative module rather
@@ -3728,6 +3729,9 @@ function clearExploded() {
 // the frame the visitor was looking at. Starts on the snapshot, which is what the page opens on.
 var outgoingStage = "snapshot";
 function enterMode(m: string) {
+    if (m !== root.getAttribute("data-mode")) {
+        trackInteraction("renderer_changed", { mode: m });
+    }
     // A lane switch is a discrete choice, so the URL sync it ends up triggering pushes a history
     // entry rather than replacing one — Back returns to the lane the visitor came from. Set here
     // rather than on each control because every transition (radio, Live/Wasm/RC toggle, or an
