@@ -338,7 +338,11 @@ composeai-contracts = "3.17.0"
 # export provides as `ProvideTextStyle` inside the theme (compose-ui-builder#416).
 # 3.79.0 draws a design's typefaces in the renderer's thumbnails and PNG/SVG exports, from the
 # Google Fonts cache this server names on its daemon (compose-ui-builder#425).
-composeai-ui-builder = "3.79.0"
+# 3.80.0 lets the editor resize a live catalog runtime frame instead of rebooting it on every
+# height change (compose-ui-builder#438), grows a runtime-drawn frame when its layout changes after
+# the first frame (compose-ui-builder#430), and draws theme typefaces in device previews
+# (compose-ui-builder#434).
+composeai-ui-builder = "3.80.0"
 kotlinx-coroutines = "1.11.0"
 kotlinx-serialization = "1.11.0"
 ktor = "3.6.0"
