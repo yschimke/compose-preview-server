@@ -179,6 +179,28 @@ export async function handlePush(
     await updateBadge(scope).catch(() => undefined);
 }
 
+/**
+ * Take an open window of this site to [url], and say whether that happened. `WindowClient.navigate`
+ * only works on a window this worker controls, and this worker has no `fetch` handler, so it
+ * controls none: an editor tab belongs to the UI builder's `/ui-builder/` worker or to no worker at
+ * all, and there `navigate` rejects (or resolves `null`). Focusing such a window and stopping would
+ * leave the person on the wrong page, so the caller opens the thread in a new window instead.
+ */
+async function navigateExisting(
+    target: WindowClientLike | undefined,
+    url: string,
+): Promise<boolean> {
+    if (!target?.navigate) return false;
+    try {
+        const navigated = await target.navigate(url);
+        if (!navigated) return false;
+        await (navigated as WindowClientLike).focus?.();
+        return true;
+    } catch {
+        return false;
+    }
+}
+
 export async function handleNotificationClick(
     scope: WorkerScope,
     notification: { data: unknown; close(): void },
@@ -203,11 +225,9 @@ export async function handleNotificationClick(
     // The manifest says `launch_handler: focus-existing`; a click honours the same intent. Prefer a
     // window already on this exact page, then any window of the site, taken to the thread.
     const exact = own.find((client) => client.url === url);
-    const target = exact ?? own[0];
-    if (target) {
-        await target.focus();
-        if (!exact && target.navigate) await target.navigate(url);
-    } else {
+    if (exact) {
+        await exact.focus();
+    } else if (!(await navigateExisting(own[0], url))) {
         await scope.clients.openWindow(url);
     }
     await updateBadge(scope).catch(() => undefined);
