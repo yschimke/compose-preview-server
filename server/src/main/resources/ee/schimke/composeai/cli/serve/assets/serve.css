@@ -4224,7 +4224,10 @@ html:not(.cp-bg-transparent) #cp-reference-compare[data-cp-stage-clip] .cp-refer
     max-width: min(280px, calc(100vw - 28px)); padding: 8px;
     border-radius: var(--md-sys-shape-corner-medium);
     background: var(--md-sys-color-surface-container-high);
-    box-shadow: var(--md-sys-elevation-level2); }
+    box-shadow: var(--md-sys-elevation-level2);
+    /* The header is sticky, so a panel taller than the screen (Settings open, with the
+       Notifications and Session groups) would leave its last rows unreachable. It scrolls itself. */
+    max-height: calc(100dvh - 64px); overflow-y: auto; overscroll-behavior: contain; }
   .cp-site-menu[open] + .cp-site-menu-panel { display: flex; flex-direction: column;
     align-items: stretch; gap: 2px; }
   /* GitHub is in the menu now, where a row of its own costs nothing, so it stops being the link a
