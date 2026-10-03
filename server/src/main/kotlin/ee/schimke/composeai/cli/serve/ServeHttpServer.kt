@@ -4068,6 +4068,10 @@ class ServeHttpServer(
    * either way the editor draws the default face, as it did before the route existed.
    */
   private suspend fun RoutingContext.handleGoogleFont() {
+    // Every answer is CORS-open, not only the font: the asker is a sandboxed runtime frame with an
+    // opaque origin, and a 404 without the header reached its console as a CORS failure instead
+    // of the "no such face" it is.
+    call.response.headers.append(HttpHeaders.AccessControlAllowOrigin, "*")
     val fonts = googleFonts
     val family = call.parameters["family"].orEmpty()
     val weight = call.parameters["weight"]?.removeSuffix(".ttf")?.toIntOrNull()
@@ -4089,7 +4093,6 @@ class ServeHttpServer(
       call.respondText("not found", status = HttpStatusCode.NotFound)
       return
     }
-    call.response.headers.append(HttpHeaders.AccessControlAllowOrigin, "*")
     call.response.headers.append(HttpHeaders.CacheControl, "public, max-age=604800")
     call.respondBytes(bytes, ContentType.parse("font/ttf"))
   }

@@ -63,6 +63,28 @@ class ServeGoogleFontsTest {
   }
 
   @Test
+  fun `a single-face static family asked at another weight falls back to its one face`() {
+    val fonts = fonts { url ->
+      when {
+        // Google's 400 for a weight a static family does not have, and for the axis range.
+        ":wght@" in url -> null
+        url.startsWith("https://fonts.googleapis.com/") ->
+          face("400", "regular").encodeToByteArray()
+        else -> url.encodeToByteArray()
+      }
+    }
+
+    assertContentEquals(
+      "https://fonts.gstatic.com/s/x/regular.ttf".encodeToByteArray(),
+      fonts.font("Playfair Display", 700),
+    )
+    assertEquals(
+      "https://fonts.googleapis.com/css2?family=Playfair%20Display&display=swap",
+      requests[2],
+    )
+  }
+
+  @Test
   fun `nothing outside the catalog or off the hundreds is ever fetched`() {
     val fonts = fonts { error("must not fetch") }
 

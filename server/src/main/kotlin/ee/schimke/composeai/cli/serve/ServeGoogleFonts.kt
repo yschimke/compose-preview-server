@@ -20,8 +20,8 @@ import java.nio.file.StandardCopyOption
  *
  * The fetch mirrors `deploy/image/prewarm-fonts.sh` (and through it the Android renderer's
  * `GoogleFontInterceptor`): the CSS2 endpoint with a pre-KitKat UA so it answers `truetype`, the
- * exact weight first and the whole axis only when that carried no file, and the closest declared
- * weight wins. The cache files share that script's `<slug>-<weight>.ttf` naming.
+ * exact weight first, the whole axis only when that carried no file, then the bare family (a
+ * static family with a single face), and the closest declared weight wins. The cache files share that script's `<slug>-<weight>.ttf` naming.
  */
 internal class ServeGoogleFonts(
   /** Where the files are kept, which the UI-builder renderer reads ([warm]). */
@@ -59,6 +59,10 @@ internal class ServeGoogleFonts(
       val url =
         truetypeUrl(cssText(name, "wght@$weight"), weight)
           ?: truetypeUrl(cssText(name, "wght@100..1000"), weight)
+          // A static family with one face (Major Mono Display, many display faces) answers both
+          // weight queries above with a 400 when the weight asked is not that face's; the bare
+          // family query names its face, which is the closest it has.
+          ?: truetypeUrl(cssText(name, null), weight)
       if (url == null) {
         missing += cached.name
         return null
@@ -99,7 +103,7 @@ internal class ServeGoogleFonts(
    * The stylesheet for one query. A 4xx is "no file", the same as an empty sheet: purely variable
    * families answer a single-weight query that way.
    */
-  private fun cssText(family: String, axis: String): String =
+  private fun cssText(family: String, axis: String?): String =
     fetch(cssUrl(family, axis), TTF_USER_AGENT)?.decodeToString().orEmpty()
 
   companion object {
@@ -152,8 +156,11 @@ internal class ServeGoogleFonts(
     /** `GoogleFontKey.slugify`: lowercase, every non-alphanumeric run one `-`, none at the ends. */
     fun slugify(name: String): String = name.lowercase().replace(Regex("[^a-z0-9]+"), "-").trim('-')
 
-    fun cssUrl(family: String, axis: String): String =
-      "https://fonts.googleapis.com/css2?family=${family.replace(" ", "%20")}:$axis&display=swap"
+    /** The CSS2 stylesheet url for [family], on [axis] (`wght@700`), or its default face for null. */
+    fun cssUrl(family: String, axis: String?): String =
+      "https://fonts.googleapis.com/css2?family=${family.replace(" ", "%20")}" +
+        (axis?.let { ":$it" } ?: "") +
+        "&display=swap"
 
     private val FACE = Regex("@font-face\\s*\\{([^}]*)}")
     private val WEIGHT = Regex("font-weight:\\s*(\\d+)")
