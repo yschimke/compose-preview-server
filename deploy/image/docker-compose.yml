@@ -385,6 +385,14 @@ services:
       # Which body that hook receives: plain, slack, teams or google-chat. Unset is plain, this
       # server's own event JSON.
       SERVE_UI_BUILDER_COMMENT_WEBHOOK_FORMAT: "${SERVE_UI_BUILDER_COMMENT_WEBHOOK_FORMAT:-}"
+      # Web Push notifications (docs/serve/NOTIFICATIONS.md). 0 turns them off; unset offers them
+      # wherever GitHub sign-in is configured. The VAPID subject defaults to the callback base URL.
+      SERVE_WEB_PUSH: "${SERVE_WEB_PUSH:-}"
+      SERVE_VAPID_SUBJECT: "${SERVE_VAPID_SUBJECT:-}"
+      # A pinned VAPID pair, both or neither; unset generates one in the UI-builder state directory.
+      # The private key is a SECRET — keep it in the env file, not here.
+      SERVE_VAPID_PUBLIC_KEY: "${SERVE_VAPID_PUBLIC_KEY:-}"
+      SERVE_VAPID_PRIVATE_KEY: "${SERVE_VAPID_PRIVATE_KEY:-}"
       # Naming this turns the image lane on (see SERVE_ACCEPT_IMAGES above): the repository an
       # uploader's GitHub token must have access to. Write access on a public repo, any grant on a
       # private one.
