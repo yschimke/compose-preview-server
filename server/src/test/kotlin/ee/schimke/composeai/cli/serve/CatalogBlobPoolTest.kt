@@ -550,7 +550,8 @@ class CatalogBlobPoolTest {
     assertTrue(CatalogBlobPool(root, missingTtlMillis = ttl, clock = { now }).knownMissing(url))
     // Scoped to its own key.
     assertFalse(pool.knownMissing("$url.other"))
-    assertEquals(2, pool.snapshot().knownMissingHits)
+    // Counted per process: the reopened pool's hit is its own.
+    assertEquals(1, pool.snapshot().knownMissingHits)
 
     now += ttl
     assertFalse(pool.knownMissing(url), "an expired miss must be asked again")
