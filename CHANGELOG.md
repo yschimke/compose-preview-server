@@ -1,5 +1,18 @@
 # Changelog
 
+## [3.96.0](https://github.com/yschimke/compose-preview-server/compare/v3.95.0...v3.96.0) (2026-10-03)
+
+
+### Features
+
+* **deploy:** run the public playground in its own container ([#1316](https://github.com/yschimke/compose-preview-server/issues/1316)) ([b9114c5](https://github.com/yschimke/compose-preview-server/commit/b9114c5298c731c7294e800ba54a8813ec3e33b5))
+
+
+### Bug Fixes
+
+* **deps:** compose-ui-builder 3.78.0 ([#1317](https://github.com/yschimke/compose-preview-server/issues/1317)) ([ff3cc64](https://github.com/yschimke/compose-preview-server/commit/ff3cc643649b65c3a65a610b158cccbeb778c87f))
+* **serve:** keep catalog landings off the daemon and off repeated PNG decodes ([#1314](https://github.com/yschimke/compose-preview-server/issues/1314)) ([ea73aa5](https://github.com/yschimke/compose-preview-server/commit/ea73aa5ab47e5587f181b37297d2b5a660877a5e))
+
 ## [3.95.0](https://github.com/yschimke/compose-preview-server/compare/v3.94.0...v3.95.0) (2026-10-03)
 
 
