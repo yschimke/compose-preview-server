@@ -59,6 +59,9 @@ internal class ServeGoogleFonts(
       val url =
         truetypeUrl(cssText(name, "wght@$weight"), weight)
           ?: truetypeUrl(cssText(name, "wght@100..1000"), weight)
+      // Deliberately no bare-family query after these: a static family's one face (Major Mono
+      // Display's 400) answered for 700 is registered by the editor as a real bold, and Compose
+      // then draws it regular. A 404 lets it synthesize the bold, as Android does.
       if (url == null) {
         missing += cached.name
         return null
