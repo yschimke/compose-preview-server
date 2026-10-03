@@ -7431,7 +7431,7 @@ ${captureControlsHtml().prependIndent("          ")}
           <legend>Visibility</legend>
           <p class="cp-sub">${
             if (isPublic)
-              "<strong>Public.</strong> Anyone with the link can open this design, signed in or " +
+              "<strong>Public (read only).</strong> Anyone with the link can open this design, signed in or " +
                 "not; only the people below can change it."
             else
               "<strong>Private.</strong> Only you and the people below can open this design."
@@ -7447,8 +7447,7 @@ ${captureControlsHtml().prependIndent("          ")}
       """
         .trimIndent()
     val rows =
-      if (people.isEmpty())
-        "<tr><td colspan=\"4\"><em>Nobody else. This design is yours alone.</em></td></tr>"
+      if (people.isEmpty()) "<tr><td colspan=\"4\"><em>No invited collaborators.</em></td></tr>"
       else
         people.joinToString("\n") { row ->
           """
@@ -7679,6 +7678,7 @@ ${captureControlsHtml().prependIndent("          ")}
     val shareAction: String,
     val grants: List<UiBuilderAccessRow>?,
     val unopenableReason: String?,
+    val publicRead: Boolean? = null,
     /**
      * The design's live SVG export, drawn as the card's thumbnail.
      *
@@ -7706,6 +7706,17 @@ ${captureControlsHtml().prependIndent("          ")}
      */
     val requestAccessHref: String = "",
   )
+
+  private fun uiBuilderCreationVisibility(): String =
+    """
+    <label class="cp-grant-ttl"><span>Visibility</span>
+      <select name="visibility" aria-label="Design visibility">
+        <option value="private" selected>Private — invited collaborators only</option>
+        <option value="public">Public (read only) — anyone with the link</option>
+      </select>
+    </label>
+    """
+      .trimIndent()
 
   /**
    * `GET /ui-builder/designs` — the caller's own designs and the ones shared with them.
@@ -7796,7 +7807,8 @@ ${captureControlsHtml().prependIndent("          ")}
                 <input type="hidden" name="sourceDesignId" value="${esc(row.designId)}">
                 <label class="cp-grant-ttl"><span>New design id</span><input type="text" name="designId"
                   value="${esc(row.copySuggestedId)}" pattern="[A-Za-z0-9][A-Za-z0-9._-]*" required></label>
-                <button class="cp-grant-approve" type="submit">Create the copy</button>
+                ${uiBuilderCreationVisibility()}
+          <button class="cp-grant-approve" type="submit">Create the copy</button>
               </form>
             </details>
             """
@@ -7846,7 +7858,7 @@ ${captureControlsHtml().prependIndent("          ")}
             """
               <form method="post" action="${esc(row.shareAction)}">
                 <input type="hidden" name="returnTo" value="designs">
-                ${if (isPublic) "<strong>Public</strong> — anyone with the link can view."
+                ${if (isPublic) "<strong>Public (read only)</strong> — anyone with the link can view."
                   else "<strong>Private</strong>."}
                 <button class="${if (isPublic) "cp-grant-deny" else "cp-grant-approve"}" type="submit"
                   name="visibility" value="${if (isPublic) "private" else "public"}">${
@@ -7905,6 +7917,13 @@ ${captureControlsHtml().prependIndent("          ")}
           $thumbnail
           <div class="cp-design-body">
             <h2 class="cp-design-title"><a href="${esc(row.designHref)}">${esc(title)}</a></h2>
+            <p class="cp-design-meta"><strong>${
+              when (row.publicRead ?: row.grants?.any { ServeUiBuilderVisibility.isReservedActor(it.actorId) }) {
+                true -> "Public (read only)"
+                false -> "Private"
+                null -> "Visibility unavailable"
+              }
+            }</strong></p>
             <p class="cp-design-meta"><code>${esc(row.designId)}</code> · ${esc(row.catalogSystemId)} · revision ${row.revision}</p>
             <p class="cp-design-meta">${esc(row.requesterRole)} · may ${esc(row.requesterAllowed)} · updated ${esc(updated)}</p>$unavailable
             <div class="cp-design-actions">
@@ -7989,6 +8008,7 @@ ${captureControlsHtml().prependIndent("          ")}
           </label>
           <label class="cp-grant-ttl"><span>Design id</span><input type="text" name="designId"
             value="${esc(suggestedDesignId)}" pattern="[A-Za-z0-9][A-Za-z0-9._-]*" required></label>
+          ${uiBuilderCreationVisibility()}
           <button class="cp-grant-approve" type="submit">Create</button>
         </form>
         """
@@ -8015,6 +8035,7 @@ ${captureControlsHtml().prependIndent("          ")}
           </label>
           <label class="cp-grant-ttl"><span>New design id</span><input type="text" name="designId"
             value="${esc(suggestedDesignId)}" pattern="[A-Za-z0-9][A-Za-z0-9._-]*" required></label>
+          ${uiBuilderCreationVisibility()}
           <button class="cp-grant-approve" type="submit">Create the copy</button>
         </form>
         """

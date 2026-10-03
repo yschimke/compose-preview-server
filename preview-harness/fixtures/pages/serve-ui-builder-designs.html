@@ -75,35 +75,47 @@
 <summary>More ways to start</summary>
 <section class="cp-designs-create">
 <form class="cp-designs-new" method="post" action="/ui-builder/designs?token=fixture-token">
-  <h2 class="cp-designs-h2">Start a new design</h2>
-  <label class="cp-grant-ttl"><span>Starting point</span>
-    <select name="start">
-    <optgroup label="m3-catalog">
-    <option value="m3-catalog|blank">Blank</option>
-    <option value="m3-catalog|jetcaster">Jetcaster</option>
-    </optgroup>
-    <optgroup label="wear-m3">
-    <option value="wear-m3|wear-screen">Wear screen</option>
-    </optgroup>
-    </select>
-  </label>
-  <label class="cp-grant-ttl"><span>Design id</span><input type="text" name="designId"
-    value="cheeky-raccoon" pattern="[A-Za-z0-9][A-Za-z0-9._-]*" required></label>
-  <button class="cp-grant-approve" type="submit">Create</button>
-</form>
-<form class="cp-designs-new" method="post" action="/ui-builder/designs/copy?token=fixture-token">
-  <h2 class="cp-designs-h2">Start from an existing design</h2>
-  <p class="cp-designs-hint">A copy at revision zero, with its own history. The design it was
-  copied from is left exactly as it is.</p>
-  <label class="cp-grant-ttl"><span>Copy</span>
-    <select name="sourceDesignId">
-    <option value="morning-player">Morning player (morning-player)</option>
-    </select>
-  </label>
-  <label class="cp-grant-ttl"><span>New design id</span><input type="text" name="designId"
-    value="cheeky-raccoon" pattern="[A-Za-z0-9][A-Za-z0-9._-]*" required></label>
-  <button class="cp-grant-approve" type="submit">Create the copy</button>
-</form>
+          <h2 class="cp-designs-h2">Start a new design</h2>
+          <label class="cp-grant-ttl"><span>Starting point</span>
+            <select name="start">
+            <optgroup label="m3-catalog">
+            <option value="m3-catalog|blank">Blank</option>
+            <option value="m3-catalog|jetcaster">Jetcaster</option>
+            </optgroup>
+            <optgroup label="wear-m3">
+            <option value="wear-m3|wear-screen">Wear screen</option>
+            </optgroup>
+            </select>
+          </label>
+          <label class="cp-grant-ttl"><span>Design id</span><input type="text" name="designId"
+            value="cheeky-raccoon" pattern="[A-Za-z0-9][A-Za-z0-9._-]*" required></label>
+          <label class="cp-grant-ttl"><span>Visibility</span>
+  <select name="visibility" aria-label="Design visibility">
+    <option value="private" selected>Private — invited collaborators only</option>
+    <option value="public">Public (read only) — anyone with the link</option>
+  </select>
+</label>
+          <button class="cp-grant-approve" type="submit">Create</button>
+        </form>
+        <form class="cp-designs-new" method="post" action="/ui-builder/designs/copy?token=fixture-token">
+          <h2 class="cp-designs-h2">Start from an existing design</h2>
+          <p class="cp-designs-hint">A copy at revision zero, with its own history. The design it was
+          copied from is left exactly as it is.</p>
+          <label class="cp-grant-ttl"><span>Copy</span>
+            <select name="sourceDesignId">
+            <option value="morning-player">Morning player (morning-player)</option>
+            </select>
+          </label>
+          <label class="cp-grant-ttl"><span>New design id</span><input type="text" name="designId"
+            value="cheeky-raccoon" pattern="[A-Za-z0-9][A-Za-z0-9._-]*" required></label>
+          <label class="cp-grant-ttl"><span>Visibility</span>
+  <select name="visibility" aria-label="Design visibility">
+    <option value="private" selected>Private — invited collaborators only</option>
+    <option value="public">Public (read only) — anyone with the link</option>
+  </select>
+</label>
+          <button class="cp-grant-approve" type="submit">Create the copy</button>
+        </form>
 </section>
 </details>
         <div class="cp-designs-toolbar">
@@ -153,6 +165,7 @@
   </a>
             <div class="cp-design-body">
               <h2 class="cp-design-title"><a href="/ui-builder/morning-player?token=fixture-token">Morning player</a></h2>
+              <p class="cp-design-meta"><strong>Private</strong></p>
               <p class="cp-design-meta"><code>morning-player</code> · wear-m3-catalog · revision 12</p>
               <p class="cp-design-meta">owner · may read, write, export, manage_access, delete · updated 2026-01-12T10:40:00Z</p>
               <div class="cp-design-actions">
@@ -160,15 +173,21 @@
                 <a class="cp-action-chip" href="/ui-builder/morning-player/history?token=fixture-token">History</a>
                 <a class="cp-action-chip" href="/ui-builder/morning-player/access?token=fixture-token">Share</a>
               </div>
-              <details class="cp-design-more">
-    <summary>Duplicate</summary>
-    <form class="cp-design-form" method="post" action="/ui-builder/designs/copy?token=fixture-token">
-      <input type="hidden" name="sourceDesignId" value="morning-player">
-      <label class="cp-grant-ttl"><span>New design id</span><input type="text" name="designId"
-        value="shady-raccoon" pattern="[A-Za-z0-9][A-Za-z0-9._-]*" required></label>
-      <button class="cp-grant-approve" type="submit">Create the copy</button>
-    </form>
-  </details>
+                          <details class="cp-design-more">
+                <summary>Duplicate</summary>
+                <form class="cp-design-form" method="post" action="/ui-builder/designs/copy?token=fixture-token">
+                  <input type="hidden" name="sourceDesignId" value="morning-player">
+                  <label class="cp-grant-ttl"><span>New design id</span><input type="text" name="designId"
+                    value="shady-raccoon" pattern="[A-Za-z0-9][A-Za-z0-9._-]*" required></label>
+                  <label class="cp-grant-ttl"><span>Visibility</span>
+    <select name="visibility" aria-label="Design visibility">
+      <option value="private" selected>Private — invited collaborators only</option>
+      <option value="public">Public (read only) — anyone with the link</option>
+    </select>
+  </label>
+            <button class="cp-grant-approve" type="submit">Create the copy</button>
+                </form>
+              </details>
               <details class="cp-design-more">
     <summary>Folder · Media</summary>
     <form class="cp-design-form" method="post" action="/ui-builder/morning-player/folder?token=fixture-token">
@@ -218,6 +237,7 @@
     <span class="cp-design-thumb cp-design-thumb-empty" aria-hidden="true">◇</span>
     <div class="cp-design-body">
       <h2 class="cp-design-title"><a href="/ui-builder/archived-dashboard?token=fixture-token">Archived dashboard</a></h2>
+      <p class="cp-design-meta"><strong>Visibility unavailable</strong></p>
       <p class="cp-design-meta"><code>archived-dashboard</code> · m3-catalog · revision 7</p>
       <p class="cp-design-meta">viewer · may read, export · updated 2026-01-09T10:40:00Z</p>
       <p class="cp-grant-withheld"><strong>This design cannot be opened:</strong> catalog unavailable for stored design archived-dashboard</p>

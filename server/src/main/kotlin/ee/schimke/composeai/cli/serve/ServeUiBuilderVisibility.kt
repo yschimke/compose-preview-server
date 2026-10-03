@@ -4,11 +4,16 @@ import ee.schimke.composeai.uibuilder.protocol.DesignAccessControlV1
 import ee.schimke.composeai.uibuilder.protocol.DesignAccessRoleV1
 import ee.schimke.composeai.uibuilder.protocol.GrantActorAccessMutationV1
 import ee.schimke.composeai.uibuilder.protocol.RevokeActorAccessMutationV1
+import ee.schimke.composeai.uibuilder.service.AuthenticatedUiBuilderActor
 import ee.schimke.composeai.uibuilder.service.UiBuilderPublicAccess
 import ee.schimke.composeai.uibuilder.service.UiBuilderServiceCall
 import ee.schimke.composeai.uibuilder.service.UiBuilderServicePort
 import ee.schimke.composeai.uibuilder.service.UiBuilderServiceRequest
 import ee.schimke.composeai.uibuilder.service.UiBuilderServiceResponse
+import kotlin.coroutines.AbstractCoroutineContextElement
+import kotlin.coroutines.CoroutineContext
+import kotlin.coroutines.coroutineContext
+import kotlinx.coroutines.withContext
 
 /**
  * Whether a new UI-builder design starts out public — readable by anyone who has its link — or
@@ -78,14 +83,15 @@ internal object ServeUiBuilderVisibility {
     delegate: UiBuilderServicePort,
     visibility: UiBuilderDefaultVisibility,
   ): UiBuilderServicePort {
-    if (visibility == UiBuilderDefaultVisibility.PRIVATE) return delegate
     return object : UiBuilderServicePort by delegate {
       override suspend fun execute(call: UiBuilderServiceCall): UiBuilderServiceResponse {
         val response = delegate.execute(call)
         val request = call.request
         if (
           request is UiBuilderServiceRequest.CreateDesign &&
-            response is UiBuilderServiceResponse.Snapshot
+            response is UiBuilderServiceResponse.Snapshot &&
+            (coroutineContext[CreationVisibility]?.value ?: visibility) ==
+              UiBuilderDefaultVisibility.PUBLIC
         ) {
           val designId = request.document.id
           val accessRevision = response.snapshot.access?.accessRevision ?: 0
@@ -123,4 +129,36 @@ internal object ServeUiBuilderVisibility {
       }
     }
   }
+}
+
+/** Request-scoped intent overrides the operator default before any public grant is applied. */
+internal class CreationVisibility(val value: UiBuilderDefaultVisibility) :
+  AbstractCoroutineContextElement(Key) {
+  companion object Key : CoroutineContext.Key<CreationVisibility>
+}
+
+internal suspend fun <T> withDesignCreationVisibility(value: String?, block: suspend () -> T): T =
+  withContext(CreationVisibility(UiBuilderDefaultVisibility.parse(value))) { block() }
+
+internal suspend fun UiBuilderServicePort.setDesignVisibility(
+  actor: AuthenticatedUiBuilderActor,
+  designId: String,
+  visibility: UiBuilderDefaultVisibility,
+): UiBuilderServiceResponse {
+  val current =
+    execute(UiBuilderServiceCall(actor, UiBuilderServiceRequest.GetDesignAccess(designId)))
+  if (current !is UiBuilderServiceResponse.DesignAccess) return current
+  return execute(
+    UiBuilderServiceCall(
+      actor,
+      UiBuilderServiceRequest.UpdateDesignAccess(
+        designId,
+        current.access.accessRevision,
+        listOf(
+          if (visibility == UiBuilderDefaultVisibility.PUBLIC) ServeUiBuilderVisibility.makePublic()
+          else ServeUiBuilderVisibility.makePrivate()
+        ),
+      ),
+    )
+  )
 }

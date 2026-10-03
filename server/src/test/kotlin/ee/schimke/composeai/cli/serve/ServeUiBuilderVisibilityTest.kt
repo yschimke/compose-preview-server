@@ -13,7 +13,6 @@ import java.io.Closeable
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
-import kotlin.test.assertSame
 import kotlin.test.assertTrue
 import kotlinx.coroutines.runBlocking
 
@@ -35,14 +34,10 @@ class ServeUiBuilderVisibilityTest {
     }
 
   @Test
-  fun `private is the default and leaves the service untouched`() {
+  fun `private is the default`() {
     assertEquals(UiBuilderDefaultVisibility.PRIVATE, UiBuilderDefaultVisibility.parse(null))
     assertEquals(UiBuilderDefaultVisibility.PUBLIC, UiBuilderDefaultVisibility.parse("Public"))
     assertFailsWith<IllegalArgumentException> { UiBuilderDefaultVisibility.parse("open") }
-    assertSame(
-      refusingCreate,
-      ServeUiBuilderVisibility.withDefault(refusingCreate, UiBuilderDefaultVisibility.PRIVATE),
-    )
   }
 
   @Test

@@ -14865,6 +14865,13 @@ class ServeHttpServer(
       return
     }
     val form = call.receiveParameters()
+    val creationVisibility =
+      try {
+        UiBuilderDefaultVisibility.parse(form["visibility"])
+      } catch (e: IllegalArgumentException) {
+        call.respondText(e.message.orEmpty(), status = HttpStatusCode.BadRequest)
+        return
+      }
     // `start` is one control carrying both halves of one choice — *a blank Wear screen* — because
     // the Designs page has no script with which to repopulate a second `<select>` when the first
     // one changes. `catalog` and `template` remain exactly as they were for every other caller.
@@ -14935,7 +14942,7 @@ class ServeHttpServer(
         return
       }
     val outcome =
-      withContext(Dispatchers.IO) {
+      withContext(Dispatchers.IO + CreationVisibility(creationVisibility)) {
         ServeUiBuilderCreate(service, dir, canonicalServerOrigin())
           .create(
             actor = actor,
@@ -14993,6 +15000,13 @@ class ServeHttpServer(
     }
     val actor = authorizeUiBuilderPage(authorization, UiBuilderRouteCapability.WRITE) ?: return
     val form = call.receiveParameters()
+    val creationVisibility =
+      try {
+        UiBuilderDefaultVisibility.parse(form["visibility"])
+      } catch (e: IllegalArgumentException) {
+        call.respondText(e.message.orEmpty(), status = HttpStatusCode.BadRequest)
+        return
+      }
     val sourceDesignId = form["sourceDesignId"].orEmpty().trim()
     val designId = form["designId"].orEmpty().trim()
     if (!isUiBuilderDesignSegment(sourceDesignId) || !isUiBuilderDesignSegment(designId)) {
@@ -15042,7 +15056,7 @@ class ServeHttpServer(
         home = null,
       )
     val outcome =
-      withContext(Dispatchers.IO) {
+      withContext(Dispatchers.IO + CreationVisibility(creationVisibility)) {
         ServeUiBuilderCreate(service, dir, canonicalServerOrigin()).install(actor, copy)
       }
     when (outcome) {
@@ -15571,6 +15585,12 @@ class ServeHttpServer(
             )
           },
         unopenableReason = openFailure,
+        publicRead =
+          access?.let(ServeUiBuilderVisibility::isPublic)
+            ?: service.canRead(
+              AuthenticatedUiBuilderActor(ServeUiBuilderVisibility.ANONYMOUS_ACTOR_ID),
+              item.designId,
+            ),
         // No thumbnail for a design that could not be opened: the export would answer with the
         // same refusal the card already prints in words, and an `<img>` cannot say it.
         previewHref =
