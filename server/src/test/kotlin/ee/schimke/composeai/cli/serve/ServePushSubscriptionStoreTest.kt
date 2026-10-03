@@ -150,6 +150,48 @@ class ServePushSubscriptionStoreTest {
   }
 
   @Test
+  fun `two stores over one directory — a rolling deployment — lose neither one's writes`() {
+    // Both replicas start, and each reads the file once, before either writes.
+    val old = store()
+    val new = store()
+    assertTrue(old.all().isEmpty())
+    assertTrue(new.all().isEmpty())
+
+    old.subscribe("github:alice", "$ENDPOINT-1", browserKey, auth, null)
+    // The new replica's write is a read-modify-write of the file, not of its stale snapshot.
+    new.subscribe("github:bob", "$ENDPOINT-2", browserKey, auth, null)
+    assertEquals(setOf("$ENDPOINT-1", "$ENDPOINT-2"), old.all().map { it.endpoint }.toSet())
+    assertEquals(setOf("$ENDPOINT-1", "$ENDPOINT-2"), new.all().map { it.endpoint }.toSet())
+
+    // A delivery on one replica sees a preference change and an unsubscribe made on the other.
+    new.setKinds("github:alice", setOf(PushKind.REPLIES))
+    assertEquals(setOf(PushKind.REPLIES), old.kinds("github:alice"))
+    assertTrue(old.unsubscribe("github:bob", "$ENDPOINT-2"))
+    assertTrue(new.forActor("github:bob").isEmpty())
+    new.recordSuccess("$ENDPOINT-1")
+    assertNotNull(old.all().single().lastSuccess)
+    assertTrue(old.remove("$ENDPOINT-1"))
+    assertTrue(new.all().isEmpty())
+    assertTrue(store().all().isEmpty())
+  }
+
+  @Test
+  fun `concurrent writers through separate stores lose no subscription`() {
+    val stores = List(4) { store(perActor = 1000, total = 1000) }
+    val threads = stores.mapIndexed { index, store ->
+      Thread {
+        repeat(25) { n ->
+          store.subscribe("github:u$index", "$ENDPOINT-$index-$n", browserKey, auth, null)
+        }
+      }
+    }
+    threads.forEach(Thread::start)
+    threads.forEach(Thread::join)
+    assertEquals(100, store().all().size)
+    stores.forEach { assertEquals(100, it.all().size) }
+  }
+
+  @Test
   fun `only the owner can unsubscribe, and the endpoint follows whoever signed in last`() {
     val store = store()
     store.subscribe("github:alice", ENDPOINT, browserKey, auth, null)

@@ -6,14 +6,20 @@ import java.net.Inet4Address
 import java.net.Inet6Address
 import java.net.InetAddress
 import java.net.URI
+import java.nio.channels.FileChannel
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
+import java.nio.file.NoSuchFileException
 import java.nio.file.Path
 import java.nio.file.StandardCopyOption
+import java.nio.file.StandardOpenOption
+import java.nio.file.attribute.BasicFileAttributes
+import java.nio.file.attribute.FileTime
 import java.nio.file.attribute.PosixFileAttributeView
 import java.nio.file.attribute.PosixFilePermissions
 import java.security.KeyPair
 import java.security.Signature
+import java.util.concurrent.ConcurrentHashMap
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
@@ -89,6 +95,10 @@ internal sealed interface PushSubscribeResult {
  *
  * The directory is `0700` and the file `0600` ([ServeOwnerOnlyFiles]); the file holds every
  * subscriber's endpoint and keys.
+ *
+ * More than one process may hold this store over the same directory — two replicas during a rolling
+ * deployment — so every write is a read-modify-write under a file lock, and every read re-reads the
+ * file when it has changed since this process last saw it ([exclusive], [load]).
  */
 internal class ServePushSubscriptionStore(
   private val root: Path,
@@ -104,8 +114,20 @@ internal class ServePushSubscriptionStore(
   }
 
   private val file: Path = root.resolve(FILE_NAME)
-  private val lock = Any()
+  private val lockFile: Path = root.resolve(".$FILE_NAME.lock")
+
+  /**
+   * Shared by every store over this directory in this process. A `FileChannel` lock belongs to the
+   * whole JVM, and asking for one the JVM already holds throws rather than waits, so two instances
+   * here (a test, or a host that opens the store twice) queue on this monitor before the file lock.
+   */
+  private val lock: Any =
+    PROCESS_LOCKS.computeIfAbsent(lockFile.toAbsolutePath().normalize()) { Any() }
+
   private var cached: List<StoredPushSubscription>? = null
+
+  /** What the file was when [cached] was read or written; a different one means re-read it. */
+  private var cachedStamp: FileStamp? = null
 
   fun all(): List<StoredPushSubscription> = synchronized(lock) { load() }
 
@@ -115,9 +137,7 @@ internal class ServePushSubscriptionStore(
    * The kinds [actor] has chosen: those of their newest subscription, or every kind when they have
    * none yet — which is what a first subscribe offers, before anybody has narrowed it.
    */
-  fun kinds(actor: String): Set<PushKind> =
-    forActor(actor).maxByOrNull { it.createdAt }?.kinds?.mapNotNull(PushKind::parse)?.toSet()
-      ?: PushKind.ALL
+  fun kinds(actor: String): Set<PushKind> = kindsOf(all(), actor)
 
   fun subscribe(
     actor: String,
@@ -132,17 +152,17 @@ internal class ServePushSubscriptionStore(
     ServePushEndpoints.keyRejection(p256dh, auth)?.let {
       return PushSubscribeResult.Refused(it)
     }
-    return synchronized(lock) {
+    return exclusive {
       val current = load()
       val others = current.filter { it.endpoint != endpoint }
       val mine = others.count { it.actor == actor }
       if (mine >= maximumPerActor) {
-        return@synchronized PushSubscribeResult.Refused(
+        return@exclusive PushSubscribeResult.Refused(
           "you already have $maximumPerActor devices subscribed; turn notifications off on one first"
         )
       }
       if (others.size >= maximumTotal) {
-        return@synchronized PushSubscribeResult.Refused(
+        return@exclusive PushSubscribeResult.Refused(
           "this server holds the most push subscriptions it allows"
         )
       }
@@ -162,47 +182,42 @@ internal class ServePushSubscriptionStore(
   }
 
   /** Remove [endpoint] when it belongs to [actor]; false when there was nothing of theirs there. */
-  fun unsubscribe(actor: String, endpoint: String): Boolean =
-    synchronized(lock) {
-      val current = load()
-      val next = current.filterNot { it.endpoint == endpoint && it.actor == actor }
-      if (next.size == current.size) return@synchronized false
-      save(next)
-      true
-    }
+  fun unsubscribe(actor: String, endpoint: String): Boolean = removeWhere {
+    it.endpoint == endpoint && it.actor == actor
+  }
 
   /** Every one of [actor]'s devices takes [kinds]; answers how many devices that was. */
-  fun setKinds(actor: String, kinds: Set<PushKind>): Int =
-    synchronized(lock) {
-      val current = load()
-      val wire = kinds.map { it.wire }.toSortedSet()
-      var changed = 0
-      val next = current.map {
-        if (it.actor == actor) {
-          changed++
-          it.copy(kinds = wire)
-        } else it
-      }
-      if (changed > 0) save(next)
-      changed
+  fun setKinds(actor: String, kinds: Set<PushKind>): Int = exclusive {
+    val current = load()
+    val wire = kinds.map { it.wire }.toSortedSet()
+    var changed = 0
+    val next = current.map {
+      if (it.actor == actor) {
+        changed++
+        it.copy(kinds = wire)
+      } else it
     }
+    if (changed > 0) save(next)
+    changed
+  }
 
   /** The push service said this subscription is gone (404/410); forget it. */
-  fun remove(endpoint: String): Boolean =
-    synchronized(lock) {
-      val current = load()
-      val next = current.filterNot { it.endpoint == endpoint }
-      if (next.size == current.size) return@synchronized false
-      save(next)
-      true
-    }
+  fun remove(endpoint: String): Boolean = removeWhere { it.endpoint == endpoint }
 
   fun recordSuccess(endpoint: String) {
-    synchronized(lock) {
+    exclusive {
       val current = load()
-      if (current.none { it.endpoint == endpoint }) return
+      if (current.none { it.endpoint == endpoint }) return@exclusive
       save(current.map { if (it.endpoint == endpoint) it.copy(lastSuccess = now()) else it })
     }
+  }
+
+  private fun removeWhere(predicate: (StoredPushSubscription) -> Boolean): Boolean = exclusive {
+    val current = load()
+    val next = current.filterNot(predicate)
+    if (next.size == current.size) return@exclusive false
+    save(next)
+    true
   }
 
   private fun kindsOf(current: List<StoredPushSubscription>, actor: String): Set<PushKind> =
@@ -213,12 +228,49 @@ internal class ServePushSubscriptionStore(
       ?.mapNotNull(PushKind::parse)
       ?.toSet() ?: PushKind.ALL
 
-  private fun load(): List<StoredPushSubscription> {
-    cached?.let {
-      return it
+  /**
+   * Read-modify-write under an exclusive lock on a sibling `.lock` file, so a second process over
+   * the same directory cannot interleave.
+   *
+   * That second process is real: `deploy/image` keeps this directory on the shared config volume,
+   * and a rolling deployment runs the retiring and the replacement replica side by side for a
+   * moment. Each holds its own [cached] list; without this, whichever wrote last would rewrite the
+   * file from its snapshot and silently drop the other's subscribe, unsubscribe or removal. [load]
+   * re-reads the file whenever it changed under us, which inside this lock is exactly "the other
+   * replica wrote". The same pattern as [ServeEngagementStore]. A filesystem that cannot lock still
+   * gets the in-process lock and a warning, never a failed request.
+   */
+  private fun <T> exclusive(block: () -> T): T =
+    synchronized(lock) {
+      val channel =
+        try {
+          FileChannel.open(lockFile, StandardOpenOption.CREATE, StandardOpenOption.WRITE)
+        } catch (e: IOException) {
+          System.err.println("serve: push subscription lock unavailable: ${e.message}")
+          return@synchronized block()
+        }
+      channel.use {
+        val held =
+          try {
+            it.lock()
+          } catch (e: IOException) {
+            System.err.println("serve: push subscription lock unavailable: ${e.message}")
+            null
+          }
+        try {
+          block()
+        } finally {
+          runCatching { held?.release() }
+        }
+      }
     }
+
+  /** The subscriptions as the file holds them now; re-read only when the file has changed. */
+  private fun load(): List<StoredPushSubscription> {
+    val stamp = stampOf(file)
+    cached?.let { if (stamp == cachedStamp) return it }
     val loaded =
-      if (!Files.exists(file)) emptyList()
+      if (stamp == null) emptyList()
       else
         try {
           JSON.decodeFromString(
@@ -233,6 +285,7 @@ internal class ServePushSubscriptionStore(
           emptyList()
         }
     cached = loaded
+    cachedStamp = stamp
     return loaded
   }
 
@@ -245,7 +298,25 @@ internal class ServePushSubscriptionStore(
       ),
     )
     cached = subscriptions
+    cachedStamp = stampOf(file)
   }
+
+  /**
+   * Which file this is, and which version of it. Every save is a new file moved into place, so the
+   * file key (the inode, where the platform has one) changes on each write; the modified time and
+   * size cover a platform without one.
+   */
+  private data class FileStamp(val key: Any?, val modified: FileTime, val size: Long)
+
+  private fun stampOf(path: Path): FileStamp? =
+    try {
+      val attributes = Files.readAttributes(path, BasicFileAttributes::class.java)
+      FileStamp(attributes.fileKey(), attributes.lastModifiedTime(), attributes.size())
+    } catch (_: NoSuchFileException) {
+      null
+    } catch (_: IOException) {
+      null
+    }
 
   internal companion object {
     const val FILE_NAME = "subscriptions.json"
@@ -256,6 +327,8 @@ internal class ServePushSubscriptionStore(
       encodeDefaults = true
       ignoreUnknownKeys = true
     }
+
+    private val PROCESS_LOCKS = ConcurrentHashMap<Path, Any>()
 
     /**
      * [text] into [target] via a temporary file that is created `0600`, then moved into place, so
