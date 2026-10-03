@@ -954,6 +954,10 @@ public class ServeRunner(
   }
 
   public fun run() {
+    // Before anything can spawn a cmp-jvm render worker: the worker reads its fonts directory at
+    // spawn time, and a pooled worker started without one keeps drawing in the fallback face for
+    // its whole life. See [ServeRcJvmFonts].
+    ServeRcJvmFonts.installPackaged()
 
     // Default (opt-in Gradle): unless something explicitly asks for local Gradle work, run as
     // a pure preview server — no discover/build, ever — hosting only the fetched sources
