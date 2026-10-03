@@ -194,7 +194,11 @@ composeai-tools = "2.32.4"
 # 3.13.1 gives the `cmp-android` player the pinned Robolectric clock the AndroidX backends already
 # get (compose-preview-daemon#209), so its live renders settle instead of waiting on a frame clock
 # that never goes idle. That is a precondition for `--rc-default-player cmp-android`.
-composeai-preview-daemon = "3.13.1"
+# 3.13.2 stops two kinds of wasted Android boots on a box hosting many catalogs: a sandbox worker
+# with a non-empty directory on its classpath no longer gets a CDS archive it cannot be launched with
+# (compose-preview-daemon#213), and the spare pool no longer evicts a just-warmed signature's spares
+# for every new one (compose-preview-daemon#215).
+composeai-preview-daemon = "3.13.2"
 # 2.9.0 is the first release carrying `DesignEnvironmentV1.exportDevices` and its Set/Reset
 # changes, which is the field a design names its export devices in. 2.14.0 adds the components a
 # design defines — `DesignDocumentV1.components`, `DesignNodeV1.component` and the `binding` value
