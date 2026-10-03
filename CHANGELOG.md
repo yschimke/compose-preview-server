@@ -1,5 +1,20 @@
 # Changelog
 
+## [3.97.0](https://github.com/yschimke/compose-preview-server/compare/v3.96.0...v3.97.0) (2026-10-03)
+
+
+### Features
+
+* **serve:** monochrome notification badge for Web Push ([#1319](https://github.com/yschimke/compose-preview-server/issues/1319)) ([c814c42](https://github.com/yschimke/compose-preview-server/commit/c814c42c1662439e5442a6312489c4a44df51c17))
+
+
+### Bug Fixes
+
+* **deps:** compose-ai-tools 2.32.4 ([#1322](https://github.com/yschimke/compose-preview-server/issues/1322)) ([be3b2a5](https://github.com/yschimke/compose-preview-server/commit/be3b2a51756b2244ade901ad7af9afc23e454953))
+* **deps:** update dependency ee.schimke.composeai:compose-ai-tools-bom to v2.32.2 ([#1320](https://github.com/yschimke/compose-preview-server/issues/1320)) ([40ab94f](https://github.com/yschimke/compose-preview-server/commit/40ab94f7fa0e8482b09416f47a80a669918720c3))
+* **deps:** update dependency ee.schimke.composeai:rc-players-bom to v2.1.0 ([#1321](https://github.com/yschimke/compose-preview-server/issues/1321)) ([84086c4](https://github.com/yschimke/compose-preview-server/commit/84086c40797d713f46837630ff05df8a1bfc351d))
+* **serve:** keep loading catalogs on the front page after a restart ([#1323](https://github.com/yschimke/compose-preview-server/issues/1323)) ([2fa27d2](https://github.com/yschimke/compose-preview-server/commit/2fa27d2172b43e88c6e660d03a78c6dd72a08afa))
+
 ## [3.96.0](https://github.com/yschimke/compose-preview-server/compare/v3.95.0...v3.96.0) (2026-10-03)
 
 
