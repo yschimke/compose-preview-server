@@ -104,6 +104,12 @@ const BUNDLES = [
     { entry: "src/chrome.ts", out: "serve-chrome.js" },
     { entry: "src/keyboardNavigation.ts", out: "keyboard-navigation.js" },
     { entry: "src/reportCapture.ts", out: "report-capture.js" },
+    // Settings → Notifications. Its own bundle because it is emitted only beside a signed-in
+    // session on a host with Web Push; `serve-chrome.js` is on every page, the front door included.
+    { entry: "src/pushSettings.ts", out: "push-settings.js" },
+    // The root-scoped push service worker. The server serves it at `/push-sw.js` (a worker's scope
+    // is bounded by its path), not under `/assets/serve/`. Push and notificationclick only.
+    { entry: "src/pushWorker.ts", out: "push-sw.js" },
     { entry: "src/formatCompare.ts", out: "format-compare.js" },
     // The comparison metric, for a worker thread. Its own entry because that is what a worker is:
     // a second script, loaded by URL, with no DOM and none of the API surface beside it. Tiny —
