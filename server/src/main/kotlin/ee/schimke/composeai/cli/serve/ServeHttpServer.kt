@@ -244,6 +244,12 @@ class ServeHttpServer(
    */
   private val rcPlayerWasmDir: File? = null,
   /**
+   * The operator's preferred default Remote Compose player (`--rc-default-player`), canonical, or
+   * null for the built-in order. Reaches the viewer as `data-rc-default` only on a preview that
+   * enables it ([ServeRcPlayerIds.defaultPlayer]).
+   */
+  private val preferredRcPlayer: String? = null,
+  /**
    * Design-system catalog sessions that registered (`--catalogs`), e.g. `["compose-m3","wear-m3"]`.
    * Surfaced as `?session=<system>` nav links on the landing page so the public front door lists
    * the served systems instead of hiding them behind the query param. Empty ⇒ no nav row (the
@@ -11718,6 +11724,7 @@ class ServeHttpServer(
           // is what it did before any of this.
           bakedRcPlayer =
             renderHost.bakedRcPlayer(preview.id)?.let(ServeRcPlayerIds::ofKind).orEmpty(),
+          preferredRcPlayer = preferredRcPlayer,
           wasmSrc = wasmSrc,
           wasmSameOrigin = wasmSameOrigin,
           basePath = basePath,

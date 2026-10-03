@@ -830,6 +830,16 @@ public interface ServeOptions {
   /** Experimental AndroidX-conformant Remote Compose CMP/Wasm player distribution. */
   public val rcPlayerWasmDir: File?
 
+  /**
+   * The Remote Compose player the viewer opens on when a preview enables it (`--rc-default-player
+   * <id>`; env `SERVE_RC_DEFAULT_PLAYER` in the image), as a canonical [ServeRcPlayerIds] id, or
+   * null for the built-in order (`androidx-embedded`, `androidx-view`, `camaelon-js`). A preview
+   * that does not enable the named player falls back through that order — see
+   * [ServeRcPlayerIds.defaultPlayer].
+   */
+  public val rcDefaultPlayer: String?
+    get() = null
+
   public val catalogRepo: String
 
   public val catalogBranchPrefix: String
