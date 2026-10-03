@@ -213,7 +213,11 @@ composeai-preview-daemon = "3.13.0"
 # `RenderFinishedParams.Builder`). Its BOM keeps `common-io` at 3.13.0, the last release of it.
 # 3.15.0 adds `RemoteComposeOverride.playerId` (compose-preview-contracts#129): an `rcPlayer=` naming
 # a player registered with the daemon, which `CatalogLiveRouting` must route to a real render.
-composeai-contracts = "3.16.0"
+# 3.17.0 (the `setComponentArguments` mutation, compose-preview-contracts#133) because that is what
+# `:server` already resolved: the UI-builder modules' POMs import the contracts BOM at 3.17.0, and
+# Gradle takes the highest of competing platform constraints. Every BOM ref in this file is a floor
+# under that highest-wins rule, not a ceiling.
+composeai-contracts = "3.17.0"
 
 # The extracted UI builder (yschimke/compose-ui-builder), resolved from its RELEASES. Three jars
 # and a BOM on Maven Central, and the editor archive as a GitHub release asset reached through the
@@ -316,13 +320,6 @@ composeai-contracts = "3.16.0"
 # `ui-builder-sw.js` service worker at the archive root (compose-ui-builder#410) that #1300 already
 # serves at `/ui-builder/ui-builder-sw.js`. `androidx-window` and `composeai-contracts` are unchanged.
 composeai-ui-builder = "3.76.0"
-# 1.65.0 is the first release publishing `rc-players-bom`. (1.64.0 is a tag and a GitHub Release
-# whose Maven coordinates never reached Central -- rc-players#211 -- so it cannot be pinned.)
-# 1.67.0 by hand, ahead of Renovate's soak: it pins the KMP player modules to a Java 17 toolchain
-# (rc-players#272), the floor every consumer of this repository resolves at.
-# 2.0.4 is the first release whose players draw text from a `RemoteDensity.Host` capture
-# (rc-players#558), which the `remote-m3` sheet publishes since wear-m3-catalog#665.
-rc-players = "2.0.4"
 kotlinx-coroutines = "1.11.0"
 kotlinx-serialization = "1.11.0"
 ktor = "3.6.0"
@@ -360,11 +357,11 @@ composeai-remotecompose-json = { module = "ee.schimke.composeai:remotecompose-js
 # what lets `checkServeModuleBoundary` keep holding while the server gains the capability
 # yschimke/compose-preview-server#9 asked for.
 composeai-build-host-protocol = { module = "ee.schimke.composeai:build-host-protocol" }
-# The five upstream BOMs. THE only `ee.schimke.composeai` entries in this file that carry a
+# The upstream BOMs. THE only `ee.schimke.composeai` entries in this file that carry a
 # version: every coordinate below deliberately carries none of its own. (`compose-preview-ui-builder-web`
 # is the one non-BOM entry with a version, and the UI-builder ref above says why.)
 #
-# The rule the daemon line arrived at now holds for all five. Each of those repositories publishes
+# The rule the daemon line arrived at now holds for every line. Each of those repositories publishes
 # only the modules a release changes -- compose-preview-daemon#123, and since then
 # compose-ai-tools#5485, compose-preview-contracts#80, rc-players#196 and the UI builder's own
 # reduced releases -- so their coordinates no longer all sit at the same version. Pinning a line's
@@ -385,7 +382,6 @@ composeai-build-host-protocol = { module = "ee.schimke.composeai:build-host-prot
 composeai-tools-bom = { module = "ee.schimke.composeai:compose-ai-tools-bom", version.ref = "composeai-tools" }
 composeai-contracts-bom = { module = "ee.schimke.composeai:compose-preview-contracts-bom", version.ref = "composeai-contracts" }
 composeai-daemon-bom = { module = "ee.schimke.composeai:compose-preview-daemon-bom", version.ref = "composeai-preview-daemon" }
-composeai-rc-players-bom = { module = "ee.schimke.composeai:rc-players-bom", version.ref = "rc-players" }
 composeai-ui-builder-bom = { module = "ee.schimke.composeai:compose-preview-ui-builder-bom", version.ref = "composeai-ui-builder" }
 composeai-preview-data-api = { module = "ee.schimke.composeai:preview-data-api" }
 composeai-preview-discovery = { module = "ee.schimke.composeai:preview-discovery" }
@@ -425,7 +421,6 @@ composeai-ui-builder-export = { module = "ee.schimke.composeai:compose-preview-u
 # repository with no metadata can serve.
 composeai-ui-builder-web = { module = "ee.schimke.composeai:compose-preview-ui-builder-web", version.ref = "composeai-ui-builder" }
 composeai-ui-builder-render-bundle = { module = "ee.schimke.composeai:compose-preview-ui-builder-render-bundle" }
-composeai-rc-player-compose = { module = "ee.schimke.composeai:rc-player-compose" }
 
 kotlinx-coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "kotlinx-coroutines" }
 kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "kotlinx-serialization" }
@@ -463,4 +458,3 @@ kotlin-serialization = { id = "org.jetbrains.kotlin.plugin.serialization", versi
 compose-compiler = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
 compose-multiplatform = { id = "org.jetbrains.compose", version.ref = "compose-multiplatform" }
 ktfmt = { id = "com.ncorti.ktfmt.gradle", version.ref = "ktfmt" }
-compose-preview = { id = "ee.schimke.composeai.preview", version.ref = "composeai-tools" }
