@@ -1,5 +1,27 @@
 # Changelog
 
+## [3.98.0](https://github.com/yschimke/compose-preview-server/compare/v3.97.0...v3.98.0) (2026-10-03)
+
+
+### Features
+
+* expose private and public read-only design modes ([#1335](https://github.com/yschimke/compose-preview-server/issues/1335)) ([7293338](https://github.com/yschimke/compose-preview-server/commit/7293338efb802b73e659042c97eb99f96b99a587))
+
+
+### Bug Fixes
+
+* **deps:** compose-ai-tools 2.33.0, and back on compose-ui-builder's fonts constant ([#1336](https://github.com/yschimke/compose-preview-server/issues/1336)) ([b232981](https://github.com/yschimke/compose-preview-server/commit/b2329811cadf2944c566f4b7871ab139a73f71d5))
+* **deps:** compose-ui-builder 3.79.0 ([#1333](https://github.com/yschimke/compose-preview-server/issues/1333)) ([6a3ce66](https://github.com/yschimke/compose-preview-server/commit/6a3ce666ddc81f951af61414c11dab2bf12efa4d))
+* **deps:** compose-ui-builder 3.80.0 ([#1338](https://github.com/yschimke/compose-preview-server/issues/1338)) ([002e1cc](https://github.com/yschimke/compose-preview-server/commit/002e1cc5e7948b3d568f740a70296cbe8ef3357b))
+* **push:** open the thread in a new window when an open tab can't be navigated ([#1329](https://github.com/yschimke/compose-preview-server/issues/1329)) ([7a4db39](https://github.com/yschimke/compose-preview-server/commit/7a4db39f64a75115383a8de05c7015f761fc7b8b))
+* **ui-builder:** spell out the fonts-directory property so main compiles on ui-builder 3.78.0 ([#1332](https://github.com/yschimke/compose-preview-server/issues/1332)) ([999521c](https://github.com/yschimke/compose-preview-server/commit/999521c29579e3c66d1c545f4a7f29fb6a9f5596))
+* **ui-builder:** thumbnails and PNG exports draw a design's typefaces ([#1326](https://github.com/yschimke/compose-preview-server/issues/1326)) ([67bbbcf](https://github.com/yschimke/compose-preview-server/commit/67bbbcf06c08f30fd8b9121e21070f2ff3ea5cfb))
+
+
+### Performance Improvements
+
+* **serve:** remember pinned "not found" answers for a day ([#1328](https://github.com/yschimke/compose-preview-server/issues/1328)) ([006ad98](https://github.com/yschimke/compose-preview-server/commit/006ad983ce560ae16591822dbc541a1932478131))
+
 ## [3.97.0](https://github.com/yschimke/compose-preview-server/compare/v3.96.0...v3.97.0) (2026-10-03)
 
 
