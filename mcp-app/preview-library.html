@@ -98,6 +98,10 @@
     query: '',
     route: null,
     designs: null,
+    refreshInFlight: null,
+    startedProjects: new Set(),
+    renders: new Map(), // Last successful pixels in this app session; never a fabricated preview.
+    selectionGeneration: 0,
   };
 
   // ---- MCP Apps bridge ------------------------------------------------------------------------
@@ -215,6 +219,21 @@
       if ((data.projects || []).length === 1) state.expanded.add(data.projects[0].id);
     }
     render();
+    const projects = data.projects || [];
+    if (data.mode === 'library' && data.host === 'local' && projects.length === 1 && (!state.route || state.route.kind === 'home')) {
+      const project = projects[0];
+      state.expanded.add(project.id);
+      const previews = (project.modules || []).flatMap(m => m.previews || []);
+      if (!state.selected && previews.length) {
+        const preview = previews.find(p => p.sourceFile) || previews[0];
+        void select(preview.uri, preview);
+      }
+      else if (!previews.length && !state.startedProjects.has(project.id)) {
+        state.startedProjects.add(project.id);
+        // Defer until the current refresh has released its in-flight guard.
+        setTimeout(() => void refresh(project.id), 0);
+      }
+    }
     if (!previous) {
       $('search').placeholder = data.mode === 'designs' ? 'Search designs' : 'Search previews';
       if (data.mode === 'designs') void loadDesigns().then(applyRoute);
@@ -231,19 +250,39 @@
     return null;
   }
 
-  async function refresh(projectId) {
+  async function refresh(projectId, quiet = false) {
     const tool = state.data?.tools?.refresh;
     if (!tool) return;
-    $('refresh').disabled = true;
-    try {
-      const result = await callTool(tool, projectId ? { projectId } : {});
-      accept(result);
-    } catch (err) {
-      showError('Refresh failed', err);
-    } finally {
-      $('refresh').disabled = false;
+    if (state.refreshInFlight) {
+      await state.refreshInFlight;
+      if (projectId) return refresh(projectId, quiet);
+      return;
     }
+    $('refresh').disabled = true;
+    state.refreshInFlight = (async () => {
+      try {
+        const result = await callTool(tool, projectId ? { projectId } : {});
+        if (result?.isError) throw new Error(textOf(result) || 'Refresh failed');
+        accept(result);
+      } catch (err) {
+        $('count').textContent = 'Refresh failed; showing last loaded previews. Use Refresh to retry.';
+        if (!quiet && !state.selected) showError('Refresh failed', err);
+      } finally {
+        $('refresh').disabled = false;
+        state.refreshInFlight = null;
+      }
+    })();
+    return state.refreshInFlight;
   }
+
+  // Sidebar and chat can have separate server processes. Re-read the shared registrations while
+  // visible, including the empty state, and let background discovery populate the tree.
+  setInterval(() => {
+    if (!document.hidden && state.data?.mode === 'library' && state.data?.host === 'local') void refresh(undefined, true);
+  }, 5000);
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden && state.data?.mode === 'library' && state.data?.host === 'local') void refresh(undefined, true);
+  });
 
   // ---- Rendering ------------------------------------------------------------------------------
   function render() {
@@ -294,7 +333,7 @@
         el('span', { class: 'meta' }, project.previewCount != null && !modules.length ? String(project.previewCount) : modules.length ? String(count) : '…')));
       const children = el('div', { class: 'children' });
       if (!modules.length) children.append(el('div', { class: 'empty' }, state.data.host === 'hosted'
-        ? 'Loading its previews…' : 'Not discovered yet. Opening it starts its daemons; refresh in a moment.'));
+        ? 'Loading its previews…' : project.warming ? 'Preparing previews… This updates automatically.' : 'Open this project to discover its previews.'));
       for (const module of modules) {
         const key = project.id + '::' + module.path;
         const previews = (module.previews || []).filter(matches);
@@ -306,7 +345,7 @@
           el('span', { class: 'twisty' }, mOpen ? '▾' : '▸'), el('span', {}, module.path || project.name),
           el('span', { class: 'meta' }, String((module.previews || []).length))));
         const list = el('div', { class: 'children' });
-        if (!(module.previews || []).length) list.append(el('div', { class: 'empty' }, 'No previews discovered in this module yet.'));
+        if (!(module.previews || []).length) list.append(el('div', { class: 'empty' }, project.warming ? 'Preparing previews… This updates automatically.' : 'No previews discovered in this module yet.'));
         for (const preview of previews) {
           list.append(el('div', {
             class: 'preview row' + (state.selected === preview.uri ? ' selected' : ''), role: 'button', tabindex: '0',
@@ -329,7 +368,7 @@
     else {
       state.expanded.add(key);
       const project = isProject && projectById(key);
-      if (project && !(project.modules || []).length) void refresh(key);
+      if (project && !(project.modules || []).some(m => (m.previews || []).length)) void refresh(key);
     }
     renderTree();
   }
@@ -341,22 +380,30 @@
 
   async function select(uri, preview) {
     state.selected = uri;
+    const generation = ++state.selectionGeneration;
     renderTree();
     const pane = $('pane');
-    const status = el('div', { class: 'status' }, 'Rendering…');
+    const cached = state.renders.get(uri);
+    const status = el('div', { class: 'status' }, cached
+      ? `Showing last successful render (${new Date(cached.at).toLocaleTimeString()}); refreshing…` : 'Rendering…');
     const stage = el('div', { class: 'stage' });
+    if (cached) stage.append(el('img', { src: cached.png, alt: preview?.name || uri }));
     pane.replaceChildren(el('h2', {}, preview?.displayName || preview?.name || uri.split('/').pop()),
       el('div', { class: 'uri' }, uri), status, stage);
     try {
       const png = await renderPreview(uri);
-      if (state.selected !== uri) return;
+      if (state.selected !== uri || generation !== state.selectionGeneration) return;
       if (png) {
-        stage.append(el('img', { src: png, alt: preview?.name || uri }));
-        status.textContent = '';
-      } else status.textContent = 'The render returned no image.';
+        state.renders.delete(uri);
+        state.renders.set(uri, { png, at: Date.now() });
+        // Bound retained pixels; the sidebar can stay open for hours.
+        if (state.renders.size > 12) state.renders.delete(state.renders.keys().next().value);
+        stage.replaceChildren(el('img', { src: png, alt: preview?.name || uri }));
+        status.textContent = 'Updated ' + new Date().toLocaleTimeString();
+      } else status.textContent = cached ? 'No new image returned; showing last successful render.' : 'The render returned no image.';
     } catch (err) {
-      if (state.selected !== uri) return;
-      status.replaceChildren(el('div', { class: 'error' }, String(err.message || err)));
+      if (state.selected !== uri || generation !== state.selectionGeneration) return;
+      status.replaceChildren(el('div', { class: 'error' }, (cached ? 'Refresh failed; showing last successful render. ' : '') + String(err.message || err)));
     }
   }
 

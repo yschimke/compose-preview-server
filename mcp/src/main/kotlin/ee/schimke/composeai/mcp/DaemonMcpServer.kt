@@ -4263,7 +4263,10 @@ class DaemonMcpServer(
 
   /** Registered projects → modules → discovered previews, for [PreviewLibrary]. */
   private fun libraryProjects(projectId: String?): List<PreviewLibrary.Project> {
-    val projects = supervisor.listProjects()
+    // The global sidebar may use a different process (and roots) from the chat that registered
+    // the build. Restore remembered ids lazily: browsing must not start every build's daemons.
+    supervisor.workspaceStore.all().forEach { supervisor.project(WorkspaceId(it.id)) }
+    val projects = supervisor.listProjects().sortedBy { it.rootProjectName }
     projects.firstOrNull { it.workspaceId.value == projectId }?.let(::warmUp)
     return projects.map { project ->
       val discovered = catalog.keys.filter { it.workspaceId == project.workspaceId }
@@ -4275,6 +4278,7 @@ class DaemonMcpServer(
         id = project.workspaceId.value,
         name = project.rootProjectName,
         path = project.path.absolutePath,
+        warming = warmUps.containsKey(project.workspaceId),
         modules =
           modules.map { module ->
             PreviewLibrary.Module(

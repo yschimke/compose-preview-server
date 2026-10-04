@@ -45,10 +45,11 @@ class PreviewLibraryMcpTest {
   private fun connect(
     profile: McpToolProfile = McpToolProfile.NATIVE,
     settingsFile: File = File(tmp.root, "settings.json"),
+    projectSupervisor: DaemonSupervisor = supervisor,
   ): McpTestClient {
     val server =
       DaemonMcpServer(
-        supervisor,
+        projectSupervisor,
         workingDirectory = null,
         profile = profile,
         previewSettingsStore = PreviewSettingsStore(settingsFile) {},
@@ -161,6 +162,32 @@ class PreviewLibraryMcpTest {
     assertThat(projects.map { it.jsonObject["name"]!!.jsonPrimitive.content })
       .containsExactly("sample")
     assertThat(result.firstTextContent()).contains("1 project(s)")
+  }
+
+  @Test
+  fun `global library restores a registration made by another process without starting daemons`() {
+    val file = File(tmp.root, "workspaces.json")
+    val factory = FakeDaemonClientFactory()
+    val sidebarSupervisor =
+      DaemonSupervisor(
+        descriptorProvider = FakeDescriptorProvider(),
+        clientFactory = factory,
+        workspaceStore = WorkspaceStore(file),
+      )
+    closers += { sidebarSupervisor.shutdown() }
+    val client = connect(projectSupervisor = sidebarSupervisor)
+    tools(client)
+    // The sidebar was already open when a chat in unrelated roots registered the build.
+    assertThat(client.callTool(PreviewLibrary.TOOL, JsonObject(emptyMap())).firstTextContent())
+      .contains("No projects")
+    val project = File(tmp.root, "other-chat-project").apply { mkdirs() }
+    WorkspaceStore(file).remember("chat-project", project, "From another chat")
+    val result = client.callTool(PreviewLibrary.TOOL, JsonObject(emptyMap()))
+    val restored =
+      result.raw["structuredContent"]!!.jsonObject["projects"]!!.jsonArray.single().jsonObject
+    assertThat(restored["id"]!!.jsonPrimitive.content).isEqualTo("chat-project")
+    assertThat(restored["warming"]).isEqualTo(JsonPrimitive(false))
+    assertThat(sidebarSupervisor.listProjects().single().daemons).isEmpty()
   }
 
   @Test
