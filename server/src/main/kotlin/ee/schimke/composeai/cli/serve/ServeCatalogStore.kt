@@ -231,6 +231,8 @@ class ServeCatalogStore(
     val externalResourcesDir: File?,
     val alias: Map<String, String>,
     val perPreviewBundle: PerPreviewBundleAccess,
+    /** Catalog-wide daemon identity to the id actually carried by this module bundle. */
+    val localPreviewIds: Map<String, String> = emptyMap(),
   )
 
   /** Minimal verified carried-bundle identity for compile consumers that do not run its daemon. */
@@ -1233,7 +1235,20 @@ class ServeCatalogStore(
               )
             break
           }
-          extractCatalogRcDocs(bundleFile, moduleAlias, dir)
+          // The catalog namespace distinguishes modules; it need not be present inside the
+          // module's executable bundle. Prefer an exact manifest match for older publishers
+          // that already namespace their bundles, and strip only the declared outer prefix.
+          val bundleIds = runCatching {
+            BundleReader.readMetadata(bundleFile).manifest.previewIds.toSet()
+          }
+            .getOrDefault(emptySet())
+          val localPreviewIds =
+            moduleAlias.values.associateWith { id ->
+              val local = id.removePrefix(descriptor.previewIdPrefix)
+              if (id !in bundleIds && local in bundleIds) local else id
+            }
+          val localAlias = moduleAlias.mapValues { (_, id) -> localPreviewIds.getValue(id) }
+          extractCatalogRcDocs(bundleFile, localAlias, dir)
           extractComponentRecord(bundleFile, dir)
           val resources =
             when (
@@ -1249,22 +1264,23 @@ class ServeCatalogStore(
                 break
               }
             }
-          val safeStems = uniquePerPreviewStems(moduleAlias.values)
+          val safeStems = uniquePerPreviewStems(localPreviewIds.values)
           prepared +=
             TrustedModuleBundle(
               module = descriptor.module,
               file = bundleFile,
               externalResourcesDir = resources,
               alias = moduleAlias,
+              localPreviewIds = localPreviewIds,
               perPreviewBundle =
                 PerPreviewBundleAccess(
                   available = { daemonId ->
-                    safeStems[daemonId]?.let { stem ->
+                    safeStems[localPreviewIds[daemonId]]?.let { stem ->
                       perPreviewBundleAvailable(stem, descriptor, base, dir, pinned)
                     } ?: false
                   },
                   fetch = { daemonId ->
-                    safeStems[daemonId]?.let { stem ->
+                    safeStems[localPreviewIds[daemonId]]?.let { stem ->
                       fetchPerPreviewBundle(stem, descriptor, base, dir, safe, resources, pinned)
                     }
                   },

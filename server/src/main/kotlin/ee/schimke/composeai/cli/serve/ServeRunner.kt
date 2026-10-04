@@ -5138,7 +5138,7 @@ public class ServeRunner(
                 extraMavenRepos = extraMavenRepos,
                 extraClasspathDirs = listOfNotNull(published.externalResourcesDir),
               ) ?: return@ServePerPreviewDaemonPool null
-            openHost(state)
+            openHost(state)?.let { ServeModuleLiveHost(it, published.localPreviewIds) }
           }
         val dest =
           java.nio.file.Files.createTempDirectory("serve-catalog-module-$system-$index")
@@ -5165,7 +5165,10 @@ public class ServeRunner(
 
       val primary = opened.first()
       for (runtime in opened.drop(1)) {
-        runtime.monolithic = openHost(runtime.state) ?: return false
+        runtime.monolithic =
+          openHost(runtime.state)?.let {
+            ServeModuleLiveHost(it, runtime.published.localPreviewIds)
+          } ?: return false
       }
       val ownerByDaemonId =
         opened

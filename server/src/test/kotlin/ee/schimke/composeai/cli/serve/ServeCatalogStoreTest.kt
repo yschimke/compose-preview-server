@@ -2561,13 +2561,19 @@ class ServeCatalogStoreTest {
          {"componentId":"TV","images":[{"path":"images/tv.png","previewId":"${prefix}activity__MainActivity"}]}]}
       """
         .trimIndent()
+    // Both spellings exist: an exact manifest match must win over prefix removal.
+    val bundle =
+      polyglotBundle(
+        manifest =
+          """{"schemaVersion":8,"backend":"desktop","previewIds":["activity__MainActivity","${prefix}activity__MainActivity"],"coverPreviewId":"activity__MainActivity","classpath":[{"kind":"module","path":"classes/app.jar"}],"modulePath":":app","producedBy":"test"}"""
+      )
     val requested = java.util.concurrent.CopyOnWriteArrayList<String>()
     val fetch: (String) -> ByteArray? = { url ->
       requested += url
       when {
         url.endsWith("/${ServeCatalogStore.CATALOG_FILE}") -> json.toByteArray()
         url.endsWith("bundle/0000.png") ||
-          url.endsWith("bundle/modules/module_3a7476/module_3a7476.png") -> byteArrayOf(1, 2, 3)
+          url.endsWith("bundle/modules/module_3a7476/module_3a7476.png") -> bundle
         url.endsWith(".png") -> png()
         else -> null
       }
@@ -2597,10 +2603,92 @@ class ServeCatalogStoreTest {
     assertEquals(listOf(":mobile", ":tv"), assertNotNull(recorded).map { it.module })
     assertEquals(mapOf("mobile" to "activity__MainActivity"), modules[0].alias)
     assertEquals(mapOf("tv" to "${prefix}activity__MainActivity"), modules[1].alias)
+    assertEquals(
+      mapOf("${prefix}activity__MainActivity" to "${prefix}activity__MainActivity"),
+      modules[1].localPreviewIds,
+    )
     modules[1].perPreviewBundle.fetch("${prefix}activity__MainActivity")
     assertTrue(
       requested.any {
         it.endsWith("bundle/modules/module_3a7476/previews/${prefix}activity__MainActivity.png")
+      }
+    )
+    assertTrue(registered["all-modules"] == null)
+  }
+
+  @Test
+  fun `liveBundles translate catalog namespaces to manifest ids without changing module ownership`() {
+    val prefix = "module_3a7476__"
+    val json =
+      """
+      {"schema":"design-parity-catalog/v1","system":"all-modules",
+       "liveBundle":{"path":"bundle/","file":"0000.png"},
+       "liveBundles":[
+         {"module":":mobile","path":"bundle/","file":"0000.png","previewIdPrefix":""},
+         {"module":":tv","path":"bundle/modules/module_3a7476/","file":"module_3a7476.png","previewIdPrefix":"$prefix"}],
+       "components":[
+         {"componentId":"Mobile","images":[{"path":"images/mobile.png","previewId":"activity__MainActivity"}]},
+         {"componentId":"TV","images":[{"path":"images/tv.png","previewId":"${prefix}activity__MainActivity"}]}]}
+      """
+        .trimIndent()
+    val mobileBundle =
+      polyglotBundle(
+        manifest =
+          """{"schemaVersion":8,"backend":"desktop","previewIds":["activity__MainActivity"],"coverPreviewId":"activity__MainActivity","classpath":[{"kind":"module","path":"classes/app.jar"}],"modulePath":":app","producedBy":"test","externalResources":[]}"""
+      )
+    val tvBundle =
+      polyglotBundle(
+        manifest =
+          """{"schemaVersion":8,"backend":"desktop","previewIds":["activity__MainActivity"],"coverPreviewId":"activity__MainActivity","classpath":[{"kind":"module","path":"classes/app.jar"}],"modulePath":":app","producedBy":"test","externalResources":[]}"""
+      )
+    val requested = java.util.concurrent.CopyOnWriteArrayList<String>()
+    val fetch: (String) -> ByteArray? = { url ->
+      requested += url
+      when {
+        url.endsWith("/${ServeCatalogStore.CATALOG_FILE}") -> json.toByteArray()
+        url.endsWith("bundle/0000.png") -> mobileBundle
+        url.endsWith("bundle/modules/module_3a7476/module_3a7476.png") -> tvBundle
+        url.endsWith(".png") -> png()
+        else -> null
+      }
+    }
+    val trust =
+      TrustStore(
+        branches = listOf(TrustedBranch("yschimke/compose-ai-tools", "design-artifacts/*"))
+      )
+    var captured: List<ServeCatalogStore.TrustedModuleBundle>? = null
+    var recorded: List<ServeCatalogStore.VerifiedModuleBundle>? = null
+    val store =
+      ServeCatalogStore(
+        root = tempRoot(),
+        register = { n, h -> registered[n] = h },
+        trust = { trust },
+        fetch = fetch,
+        buildTrustedBundles = { _, bundles, _ ->
+          captured = bundles
+          true
+        },
+        recordTrustedBundles = { _, bundles -> recorded = bundles },
+      )
+
+    assertTrue(store.load("all-modules") is ServeCatalogStore.Result.Ok)
+    val modules = assertNotNull(captured)
+    assertEquals(listOf(":mobile", ":tv"), modules.map { it.module })
+    assertEquals(listOf(":mobile", ":tv"), assertNotNull(recorded).map { it.module })
+    assertEquals(mapOf("mobile" to "activity__MainActivity"), modules[0].alias)
+    assertEquals(mapOf("tv" to "${prefix}activity__MainActivity"), modules[1].alias)
+    assertEquals(
+      mapOf("activity__MainActivity" to "activity__MainActivity"),
+      modules[0].localPreviewIds,
+    )
+    assertEquals(
+      mapOf("${prefix}activity__MainActivity" to "activity__MainActivity"),
+      modules[1].localPreviewIds,
+    )
+    modules[1].perPreviewBundle.fetch("${prefix}activity__MainActivity")
+    assertTrue(
+      requested.any {
+        it.endsWith("bundle/modules/module_3a7476/previews/activity__MainActivity.png")
       }
     )
     assertTrue(registered["all-modules"] == null)
