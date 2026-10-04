@@ -96,9 +96,28 @@ class ServeCatalogRegistrySync(
     Thread(r, "serve-catalog-registry").apply { isDaemon = true }
   }
 
-  /** Record the systems the startup fold-in already registered from a registry. */
-  fun adopt(systems: Collection<String>) {
-    owned.addAll(systems)
+  /**
+   * Record the entries the startup fold-in already registered from [contribution], **with** what
+   * they were registered as.
+   *
+   * The fingerprint is the half that used to be missing. Adopting only the system names left
+   * [publishedAs] empty, so the first pass found every boot-loaded catalog "changed" — nothing ever
+   * equals an absent fingerprint — and retired and re-published the lot. On preview.coo.ee that
+   * re-publish failed for two imports after a restart, and they served a 404 for a refresh interval
+   * until the next pass put them back, from a registry document that had not changed at all.
+   *
+   * [entries] is the subset the boot actually took from this registry: an entry the operator's own
+   * configuration (or an earlier registry) already claimed was never registered from here, so
+   * adopting it would hand the sync a catalog it must not re-point or withdraw.
+   */
+  fun adopt(
+    contribution: ServeCatalogRegistry.Contribution,
+    entries: Collection<ServeCatalogsConfig.Entry> = contribution.entries,
+  ) {
+    for (entry in entries) {
+      owned += entry.system
+      publishedAs[entry.system] = fingerprintOf(contribution, entry)
+    }
   }
 
   /** The systems this sync published, for status / tests. */
