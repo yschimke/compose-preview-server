@@ -113,7 +113,7 @@ graphics-shapes = "1.1.0"
 # platform, so the `composeai-preview-daemon` and `composeai-contracts` pins below still decide.
 # 2.33.0 moves with compose-preview-daemon 3.13.2 (compose-ai-tools#5694) and keeps the rc-players
 # players in Remote Compose bundles (#5691).
-composeai-tools = "2.33.0"
+composeai-tools = "2.34.0"
 # The render daemons, the renderers, the preview annotations and data API, and the data extractors,
 # published from yschimke/compose-preview-daemon since its 3.0.0 (compose-ai-tools#5336). Layer 1a
 # in that repository's `docs/design/REPOSITORY_LAYERS.md`: between the contracts and
