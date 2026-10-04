@@ -2719,6 +2719,41 @@ class ServeWebTest {
   }
 
   @Test
+  fun `a compare strip with no design reference anywhere leaves the baseline column out`() {
+    // An imported catalog has no design file. Every row used to carry an empty reference frame and
+    // a `not scored`, under a heading claiming the variants were compared "against Design
+    // reference" — and a link to a reference wall with no rows to draw.
+    val html =
+      ServeWeb.viewerPage(
+        ServePreview("list__narrow", "Message List", componentId = "MessageList"),
+        token = "t",
+        basePath = "/heron",
+        catalogName = "Heron",
+        componentVariants =
+          listOf(
+            ServeWeb.ComponentVariant(previewId = "list__narrow", variant = "narrow"),
+            ServeWeb.ComponentVariant(previewId = "list__compact", variant = "compact"),
+            ServeWeb.ComponentVariant(previewId = "list__medium", variant = "medium"),
+          ),
+      )
+    // Still a strip: it is the way between the component's variants.
+    assertTrue(html.contains("class=\"cp-strip cp-strip--no-baseline\""), html)
+    assertTrue(html.contains("href=\"/heron/p/list__compact?"), html)
+    assertTrue(html.contains("/heron/render/list__medium.png"), html)
+    assertTrue(
+      html.contains("<span class=\"cp-strip-sub\">3 variants of Message List</span>"),
+      html,
+    )
+    // …without the baseline half.
+    assertFalse(html.contains("cp-strip-shot--empty"), html)
+    assertFalse(html.contains("not scored"), html)
+    assertFalse(html.contains("Design reference"), html)
+    assertFalse(html.contains("<span>Match</span>"), html)
+    assertFalse(html.contains("format=reference"), html)
+    assertFalse(html.contains("cp-strip-more"), html)
+  }
+
+  @Test
   fun `the viewer draws no compare strip for a component with one unmapped variant`() {
     // Nothing to compare and nothing to navigate between. An empty panel under every one-off
     // preview is worse than no panel.

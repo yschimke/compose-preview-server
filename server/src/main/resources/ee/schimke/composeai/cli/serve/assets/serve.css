@@ -1047,6 +1047,10 @@ input, select, textarea, progress { accent-color: var(--md-sys-color-primary); }
    grid stays five tracks because exactly one of each tagged pair is ever in flow. */
 .cp-strip[data-cp-strip-source="kit"] [data-cp-strip-source="parallel"],
 .cp-strip[data-cp-strip-source="parallel"] [data-cp-strip-source="kit"] { display: none; }
+/* No baseline anywhere — no variant maps to a design reference and nothing is paired — so the strip
+   is the variants alone: the render and its name. Two tracks, not five with three left empty. */
+.cp-strip--no-baseline .cp-strip-headrow, .cp-strip--no-baseline .cp-strip-row {
+  grid-template-columns: 132px minmax(0, 1fr); }
 /* Narrow: the two pictures keep their row and everything else stacks under them, because the
    pictures are what the strip is for and a 132px frame is already the smallest useful one. */
 @media (max-width: 640px) {
@@ -1054,6 +1058,9 @@ input, select, textarea, progress { accent-color: var(--md-sys-color-primary); }
   .cp-strip-row { grid-template-columns: 1fr 1fr; gap: 8px; padding: 10px; }
   .cp-strip-row > .cp-strip-name, .cp-strip-row > .cp-strip-score,
   .cp-strip-row > .cp-strip-detail { grid-column: 1 / -1; text-align: left; }
+  /* One picture, so the name keeps its place beside it. */
+  .cp-strip--no-baseline .cp-strip-row { grid-template-columns: 132px minmax(0, 1fr); }
+  .cp-strip--no-baseline .cp-strip-row > .cp-strip-name { grid-column: auto; }
 }
 .cp-catalog-download { margin: 30px 0 0; }
 /* One chip, three weights. M3 calls this an assist chip and draws it as a PILL — which is what the
