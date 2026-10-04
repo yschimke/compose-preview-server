@@ -46,11 +46,14 @@ class PreviewLibraryMcpTest {
     profile: McpToolProfile = McpToolProfile.NATIVE,
     settingsFile: File = File(tmp.root, "settings.json"),
     projectSupervisor: DaemonSupervisor = supervisor,
+    workingDirectory: File? = null,
+    activeRoots: ActiveDesignRoots = ActiveDesignRoots(),
   ): McpTestClient {
     val server =
       DaemonMcpServer(
         projectSupervisor,
-        workingDirectory = null,
+        workingDirectory = workingDirectory,
+        activeDesignRoots = activeRoots,
         profile = profile,
         previewSettingsStore = PreviewSettingsStore(settingsFile) {},
       )
@@ -188,6 +191,30 @@ class PreviewLibraryMcpTest {
     assertThat(restored["id"]!!.jsonPrimitive.content).isEqualTo("chat-project")
     assertThat(restored["warming"]).isEqualTo(JsonPrimitive(false))
     assertThat(sidebarSupervisor.listProjects().single().daemons).isEmpty()
+  }
+
+  @Test
+  fun `library finds uid designs from another active non Gradle session`() {
+    val directory = tmp.newFolder("active-roots")
+    val chat = ActiveDesignRoots(directory)
+    val sidebar = ActiveDesignRoots(directory)
+    closers += { chat.close() }
+    closers += { sidebar.close() }
+    val root = tmp.newFolder("non-gradle")
+    val design =
+      File(root, "screen.uid").apply { writeText("discovery does not read the document") }
+    // Even before a render/tool call, the process working directory is an active root.
+    connect(workingDirectory = root, activeRoots = chat)
+    val client = connect(activeRoots = sidebar)
+    tools(client)
+    val result = client.callTool(PreviewLibrary.TOOL, JsonObject(emptyMap()))
+    val data = result.raw["structuredContent"]!!.jsonObject
+    assertThat(data["projects"]!!.jsonArray).isEmpty()
+    assertThat(data["designs"]!!.jsonArray.single().jsonObject["path"]!!.jsonPrimitive.content)
+      .isEqualTo(design.canonicalPath)
+    chat.close()
+    val refreshed = client.callTool(PreviewLibrary.TOOL, JsonObject(emptyMap()))
+    assertThat(refreshed.raw["structuredContent"]!!.jsonObject["designs"]!!.jsonArray).isEmpty()
   }
 
   @Test

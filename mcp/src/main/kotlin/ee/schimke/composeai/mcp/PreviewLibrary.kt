@@ -13,6 +13,7 @@ import kotlinx.serialization.json.add
 import kotlinx.serialization.json.addJsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
 import kotlinx.serialization.json.putJsonObject
@@ -36,11 +37,13 @@ import kotlinx.serialization.json.putJsonObject
  * tool names in the result, so there is one library UI rather than three.
  */
 class PreviewLibrary(
+  /** Local design files discovered without reading their documents. */
+  private val designs: () -> List<Design> = { emptyList() },
   /**
    * Registered projects with their modules and discovered previews. With a `projectId`, that
    * project's daemons are started first (in the background) so its previews get discovered.
    */
-  private val snapshot: suspend (projectId: String?) -> List<Project>
+  private val snapshot: suspend (projectId: String?) -> List<Project>,
 ) {
   data class Project(
     val id: String,
@@ -49,6 +52,8 @@ class PreviewLibrary(
     val modules: List<Module>,
     val warming: Boolean = false,
   )
+
+  data class Design(val id: String, val name: String, val path: String)
 
   data class Module(val path: String, val previews: List<Preview>)
 
@@ -67,10 +72,11 @@ class PreviewLibrary(
           name = TOOL,
           description =
             "Open the Compose preview library: registered projects, their modules and every " +
-              "discovered @Preview, with search; selecting one renders it. Takes no arguments " +
+              "discovered @Preview and local .uid designs, with search; selecting a preview renders it. Takes no arguments " +
               "(optional projectId refreshes one project and starts its daemons). Also opens " +
               "from the ChatGPT/Codex sidebar.",
           inputSchema = INPUT_SCHEMA,
+          outputSchema = OUTPUT_SCHEMA,
           meta = appToolMeta(),
         ),
         listOf(OpenAiEntrypoint.Global),
@@ -110,19 +116,22 @@ class PreviewLibrary(
         val projectId =
           (args["projectId"] as? JsonPrimitive)?.contentOrNull?.takeIf { it.isNotBlank() }
         val projects = snapshot(projectId)
+        val designFiles = designs()
         val previews = projects.sumOf { p -> p.modules.sumOf { it.previews.size } }
         CallToolResult(
           content =
             listOf(
               ContentBlock.Text(
-                if (projects.isEmpty())
+                if (projects.isEmpty() && designFiles.isNotEmpty())
+                  "${designFiles.size} UI Builder design(s); open their .uid files from the Designs tab."
+                else if (projects.isEmpty())
                   "No projects are registered. Call register_project with a Gradle project path."
                 else
                   "${projects.size} project(s), $previews discovered preview(s); the library " +
                     "app lists them. Render one with render_preview(uri)."
               )
             ),
-          structuredContent = structured(MODE_LIBRARY, projects),
+          structuredContent = structured(MODE_LIBRARY, projects, designFiles),
         )
       }
       PreviewSettingsMcp.REGISTER_PROJECT_TOOL ->
@@ -133,7 +142,11 @@ class PreviewLibrary(
       else -> null
     }
 
-  private fun structured(mode: String, projects: List<Project>): JsonObject = buildJsonObject {
+  private fun structured(
+    mode: String,
+    projects: List<Project>,
+    designFiles: List<Design> = emptyList(),
+  ): JsonObject = buildJsonObject {
     put("schema", SCHEMA)
     put("mode", mode)
     put("host", "local")
@@ -149,6 +162,16 @@ class PreviewLibrary(
       put("inline", true)
       put("observe", "png")
     }
+    if (mode == MODE_LIBRARY)
+      putJsonArray("designs") {
+        designFiles.forEach { design ->
+          addJsonObject {
+            put("id", design.id)
+            put("name", design.name)
+            put("path", design.path)
+          }
+        }
+      }
     putJsonArray("projects") {
       projects.forEach { project ->
         addJsonObject {
@@ -195,6 +218,17 @@ class PreviewLibrary(
     const val SCHEMA: String = "compose-preview-library/v1"
     const val MODE_LIBRARY: String = "library"
     const val MODE_REGISTER: String = "register"
+
+    val OUTPUT_SCHEMA: JsonObject =
+      kotlinx.serialization.json.Json.parseToJsonElement(
+          """{"type":"object","required":["schema","mode","host","projects","designs"],"properties":{
+        "schema":{"type":"string","const":"compose-preview-library/v1"},
+        "mode":{"type":"string","const":"library"},"host":{"type":"string","const":"local"},
+        "projects":{"type":"array","items":{"type":"object"}},
+        "designs":{"type":"array","items":{"type":"object","required":["id","name","path"],"properties":{
+          "id":{"type":"string"},"name":{"type":"string"},"path":{"type":"string"}}}}}}"""
+        )
+        .jsonObject
 
     /** `{}` plus the optional `projectId` the app sends to refresh one project. */
     val INPUT_SCHEMA: JsonObject = buildJsonObject {

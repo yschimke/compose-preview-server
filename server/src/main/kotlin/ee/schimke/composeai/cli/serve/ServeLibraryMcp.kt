@@ -85,7 +85,7 @@ internal object ServeLibraryMcp {
     )
 
   /** The opening result of `catalog_library`: the catalogs, with previews where loaded. */
-  fun libraryResult(catalogs: List<Catalog>): JsonObject {
+  fun libraryResult(catalogs: List<Catalog>, designsAvailable: Boolean = false): JsonObject {
     val loaded = catalogs.sumOf { it.previews?.size ?: 0 }
     val text =
       if (catalogs.none { it.previews != null }) {
@@ -103,6 +103,10 @@ internal object ServeLibraryMcp {
         putJsonObject("tools") {
           put("refresh", "catalog_$LIBRARY")
           put("render", "catalog_render_preview")
+          if (designsAvailable) {
+            put("listDesigns", ServeUiBuilderMcp.LIST_DESIGNS)
+            put("view", ServeUiBuilderMcp.VIEW)
+          }
         }
         // The published PNG is readable with preview scope; a made-to-order render needs live.
         put("renderVia", "resource")
