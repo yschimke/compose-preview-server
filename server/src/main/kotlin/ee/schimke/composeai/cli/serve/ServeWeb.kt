@@ -15132,6 +15132,9 @@ $cards
           <p class="cp-sub">${WebEscaping.htmlEscape(coverageText)}$figmaLink</p>${
           pageReportRowHtml(reportIssue, "cp-page-links")
         }
+          <div class="cp-page-toolbar">
+          <details class="cp-page-options">
+            <summary>View options</summary>
           <div class="cp-page-controls">
             <div class="cp-page-group">
               <span class="cp-page-group-label" id="cp-page-show-label">Show</span>
@@ -15162,8 +15165,11 @@ $cards
               <label class="cp-page-opt"><input type="checkbox" data-cp-page-outlines> Outlines</label>
               <label class="cp-page-opt"><input type="checkbox" data-cp-page-unlinked> Gaps only</label>
             </div>
-            <cp-page-zoom hidden></cp-page-zoom>
           </div>
+          </details>
+          <cp-page-zoom hidden></cp-page-zoom>
+          </div>
+          <p class="cp-page-touch-hint">Swipe across to explore the sheet · + to zoom</p>
           <p class="cp-page-hint">Double-click a section to zoom · ⌘/Ctrl-scroll · drag to pan
             · + / &#8722; / 0 by keyboard · Esc resets</p>
           <div class="cp-page-legend" hidden>
@@ -15174,6 +15180,7 @@ $cards
             <span data-link="unlinked"><i class="cp-page-swatch" style="color:#cf222e;border-style:dashed"></i> not implemented</span>$unpairedLegend
           </div>
           <div class="cp-page-layout">
+            <div class="cp-page-scroll" tabindex="0" role="region" aria-label="Design sheet — scroll to explore">
             <div class="cp-page-stage" style="--cp-page-aspect:$aspect">
               <div class="cp-page-canvas" data-cp-page-canvas$sceneAttrs>
                 $plates$svg
@@ -15182,6 +15189,7 @@ $cards
                 $outlines
               </div>
               <div class="cp-page-tip" data-cp-page-tip hidden aria-live="polite"></div>
+            </div>
             </div>
             <details class="cp-page-nodes">
               <summary>$linked of $total components implemented</summary>
