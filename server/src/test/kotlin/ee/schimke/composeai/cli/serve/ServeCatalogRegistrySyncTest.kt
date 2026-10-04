@@ -130,11 +130,70 @@ class ServeCatalogRegistrySyncTest {
     val box = Box()
     box.tracked += "a"
     val sync = syncOf(box) { contributionOf() }
-    sync.adopt(listOf("a"))
+    sync.adopt(contributionOf("a"))
 
     sync.syncOnce()
 
     assertEquals(listOf("a"), box.retired)
+  }
+
+  @Test
+  fun `an unchanged entry adopted from the startup fold-in is not re-published`() {
+    // The restart churn on preview.coo.ee: adopting system names without what they were registered
+    // as made every boot-loaded catalog look changed on the first pass, so the sync retired and
+    // re-published all of them — and two whose re-publish failed served a 404 until the next pass.
+    val box = Box()
+    val doc =
+      contributionOfEntry(
+        ServeCatalogsConfig.Entry(
+          system = "joreilly-peopleinspace",
+          importedFrom = "joreilly/PeopleInSpace",
+        )
+      )
+    box.tracked += "joreilly-peopleinspace"
+    val sync = syncOf(box) { doc }
+    sync.adopt(doc)
+
+    sync.syncOnce()
+    sync.syncOnce()
+
+    assertEquals(emptyList<String>(), box.retired)
+    assertEquals(setOf("joreilly-peopleinspace"), box.tracked)
+    assertEquals(setOf("joreilly-peopleinspace"), sync.ownedSystems())
+  }
+
+  @Test
+  fun `an adopted entry that changed after boot is still re-published`() {
+    val box = Box()
+    val boot = contributionOfEntry(ServeCatalogsConfig.Entry(system = "a"))
+    box.tracked += "a"
+    var doc = boot
+    val sync = syncOf(box) { doc }
+    sync.adopt(boot)
+
+    doc = contributionOfEntry(ServeCatalogsConfig.Entry(system = "a", importedFrom = "o/R"))
+    sync.syncOnce()
+
+    assertEquals(listOf("a"), box.retired)
+    assertEquals(setOf("a"), box.tracked)
+  }
+
+  @Test
+  fun `an entry the operator claimed at boot is not adopted`() {
+    // The boot de-duplicates first-wins with the operator's config ahead of every registry, so a
+    // registry entry for a system the operator names was never registered from the registry.
+    // Adopting it would let the first pass retire the operator's catalog and re-point it.
+    val box = Box()
+    box.tracked += "operator-named"
+    val doc = contributionOf("operator-named", "a")
+    box.tracked += "a"
+    val sync = syncOf(box) { doc }
+    sync.adopt(doc, doc.entries.filter { it.system != "operator-named" })
+
+    sync.syncOnce()
+
+    assertEquals(emptyList<String>(), box.retired)
+    assertEquals(setOf("a"), sync.ownedSystems())
   }
 
   @Test

@@ -983,14 +983,18 @@ public class ServeRunner(
    * a flag can add a catalog the file doesn't name but never silently re-attributes one it does.
    */
   private val catalogRefs: List<CatalogRef> by lazy {
-    (configCatalogRefs() +
-        parseCatalogRefs(catalogsRaw, listed = true) +
-        parseCatalogRefs(catalogsUnlistedRaw, listed = false) +
+    (operatorCatalogRefs() +
         // Last, so first-wins de-duplication means a registry can add catalogs the operator hasn't
         // named but can never re-attribute one they have. See [ServeCatalogRegistry].
         registryCatalogRefs())
       .distinctBy { it.system }
   }
+
+  /** The operator's own catalog refs — the config file, then the flags — before any registry. */
+  private fun operatorCatalogRefs(): List<CatalogRef> =
+    configCatalogRefs() +
+      parseCatalogRefs(catalogsRaw, listed = true) +
+      parseCatalogRefs(catalogsUnlistedRaw, listed = false)
 
   public fun run() {
     // Before anything can spawn a cmp-jvm render worker: the worker reads its fonts directory at
@@ -4788,8 +4792,14 @@ public class ServeRunner(
         intervalMillis = catalogRefreshSeconds * 1000,
       )
     // The boot fold-in already registered these, so the sync owns them from the start — otherwise
-    // the first pass would see them as somebody else's catalogs and never withdraw them.
-    sync.adopt(registryCatalogRefs().map { it.system })
+    // the first pass would see them as somebody else's catalogs and never withdraw them. Only the
+    // entries [catalogRefs] actually took from a registry: one the operator (or an earlier
+    // registry) already claimed won that de-duplication, was never registered from here, and is
+    // not the sync's to re-point or retire.
+    val claimed = operatorCatalogRefs().mapTo(hashSetOf()) { it.system }
+    for (contribution in catalogRegistryContributions) {
+      sync.adopt(contribution, contribution.entries.filter { claimed.add(it.system) })
+    }
     return sync
   }
 
