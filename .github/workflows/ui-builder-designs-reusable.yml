@@ -44,7 +44,8 @@ name: UI Builder Design Renders (reusable)
 # nothing). `ghcr.io/<owner>/compose-preview-host` is the image that already assembles all of them,
 # with `compose-preview-server` on PATH. Rendering in it is what makes this lane a workflow rather
 # than a week of sidecar archaeology. Override `host-image` to pin a version; `latest` tracks the
-# deployment.
+# deployment. Set `builder-repository` and `builder-ref` to render unreleased builder code;
+# its server distribution is built separately and uses the image's existing render sidecars.
 #
 # ## Three jobs, and the split is about write access
 #
@@ -109,6 +110,28 @@ on:
         required: false
         type: string
         default: 'ghcr.io/yschimke/compose-preview-host:latest'
+      builder-repository:
+        description: >-
+          Optional builder source repository. Builds a server distribution against this checkout
+          for rendering, so designs can exercise unreleased export adapters. Empty uses the host image.
+        required: false
+        type: string
+        default: ''
+      builder-ref:
+        description: 'Exact builder revision to render against when builder-repository is set.'
+        required: false
+        type: string
+        default: ''
+      server-ref:
+        description: 'Server revision used to build the optional checkout-based renderer.'
+        required: false
+        type: string
+        default: 'main'
+      fail-on-refusal:
+        description: 'Fail the render check when any selected design is refused, while publishing diagnostics.'
+        required: false
+        type: boolean
+        default: false
       format:
         description: 'png (default) or svg. Both embed in a comment; svg diffs as text.'
         required: false
@@ -274,11 +297,59 @@ jobs:
           path: documents/
           retention-days: 1
 
+  # A read-only build: caller code never runs with publish credentials. The host image still
+  # supplies compiler/native/daemon sidecars; only the server distribution is replaced.
+  build-renderer:
+    name: Build checkout renderer
+    needs: stage
+    if: ${{ needs.stage.outputs.count != '0' && inputs.builder-repository != '' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    steps:
+      - name: Require a builder revision
+        env:
+          BUILDER_REF: ${{ inputs.builder-ref }}
+        run: test -n "$BUILDER_REF"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: yschimke/compose-preview-server
+          ref: ${{ inputs.server-ref }}
+          path: server-source
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ inputs.builder-repository }}
+          ref: ${{ inputs.builder-ref }}
+          path: builder-source
+          persist-credentials: false
+      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          java-version: |
+            21
+            17
+      - name: Build the renderer against the requested builder
+        working-directory: server-source
+        run: >-
+          ./gradlew -PcomposeUiBuilderDir=../builder-source :server:installDist
+          --no-daemon --no-parallel --max-workers=2 -Pkotlin.daemon.jvmargs=-Xmx6g
+      - name: Package the renderer
+        run: tar -czf checkout-renderer.tar.gz -C server-source/server/build/install/compose-preview-server .
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ui-builder-checkout-renderer${{ inputs.lane && format('-{0}', inputs.lane) || '' }}
+          path: checkout-renderer.tar.gz
+          retention-days: 1
+
   # ── The render ────────────────────────────────────────────────────────────────────────────────
   render:
     name: Render designs
-    needs: stage
-    if: ${{ needs.stage.outputs.count != '0' }}
+    needs: [stage, build-renderer]
+    if: >-
+      ${{ always() && needs.stage.result == 'success' && needs.stage.outputs.count != '0' &&
+          (needs.build-renderer.result == 'success' || needs.build-renderer.result == 'skipped') }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -296,6 +367,19 @@ jobs:
         with:
           name: ui-builder-design-documents${{ inputs.lane && format('-{0}', inputs.lane) || '' }}
           path: documents
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        if: ${{ inputs.builder-repository != '' }}
+        with:
+          name: ui-builder-checkout-renderer${{ inputs.lane && format('-{0}', inputs.lane) || '' }}
+          path: checkout-renderer-artifact
+
+      - name: Install the checkout renderer
+        if: ${{ inputs.builder-repository != '' }}
+        run: |
+          mkdir -p checkout-renderer
+          tar -xzf checkout-renderer-artifact/checkout-renderer.tar.gz -C checkout-renderer
+          test -x checkout-renderer/bin/compose-preview-server
 
       - name: Resolve the catalog bundle
         env:
@@ -322,6 +406,7 @@ jobs:
           ASSETS_DIR: ${{ inputs.assets-dir }}
           FORMAT: ${{ inputs.format }}
           DESIGN_RENDER_SECONDS: ${{ inputs.design-render-seconds }}
+          BUILDER_REPOSITORY: ${{ inputs.builder-repository }}
         # POSIX sh, not bash, and deliberately: the host image carries no `bash` where the runner
         # looks for one, so Actions falls back to `sh -e {0}` (dash) inside the container. An
         # `args=()` array is a syntax error there, which is how the lane's first real run died —
@@ -331,6 +416,10 @@ jobs:
         # the worse one: it asserts something about an image this workflow does not build.
         run: |
           mkdir -p renders
+          renderer=compose-preview-server
+          if [ -n "$BUILDER_REPOSITORY" ]; then
+            renderer="$PWD/checkout-renderer/bin/compose-preview-server"
+          fi
           # The per-design budget. Appended, so it wins over the image's own
           # `-Dcomposeai.serve.renderTimeoutSeconds` while every sidecar flag the image sets stays.
           JAVA_TOOL_OPTIONS="${JAVA_TOOL_OPTIONS:-} -Dcomposeai.serve.renderTimeoutSeconds=$DESIGN_RENDER_SECONDS"
@@ -361,7 +450,7 @@ jobs:
             # server for one anyway; passing it keeps a misconfiguration a failure rather than a
             # hang. A refusal is CAPTURED, not fatal: the comment reports it, which is the whole
             # reason a refusal is interesting.
-            if timeout "$design_limit" compose-preview-server design render \
+            if timeout "$design_limit" "$renderer" design render \
                  --local \
                  --document "$document" \
                  --catalog catalog.bundle \
@@ -408,6 +497,15 @@ jobs:
           path: renders/
           retention-days: 7
 
+      - name: Require all selected designs to render
+        if: ${{ inputs.fail-on-refusal }}
+        run: |
+          if [ -s renders/_refusals.txt ]; then
+            cat renders/_refusals.txt
+            echo "::error::One or more selected designs could not render"
+            exit 1
+          fi
+
   # ── Publish and comment ───────────────────────────────────────────────────────────────────────
   #
   # The only job that can write, and it runs none of the caller's code: it moves an artifact onto a
@@ -415,7 +513,9 @@ jobs:
   publish:
     name: Publish renders
     needs: [stage, render]
-    if: ${{ needs.stage.outputs.count != '0' }}
+    if: >-
+      ${{ always() && needs.stage.result == 'success' && needs.stage.outputs.count != '0' &&
+          (needs.render.result == 'success' || needs.render.result == 'failure') }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
