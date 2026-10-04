@@ -51,6 +51,12 @@
   button:disabled { opacity: .5; cursor: default; }
   main { flex: 1; display: grid; grid-template-columns: minmax(220px, 34%) 1fr; min-height: 0; }
   nav { border-right: 1px solid var(--line); overflow: auto; padding: 6px 0; }
+  .recents { border-bottom: 1px solid var(--line); padding-bottom: 8px; margin-bottom: 6px; }
+  .recents header { border: 0; padding: 6px 12px; justify-content: space-between; }
+  .recents h2 { font-size: 12px; margin: 0; }
+  .recent.row { align-items: center; }
+  .recent img { width: 48px; height: 48px; object-fit: contain; background: var(--bg2); border-radius: 4px; }
+  .recent .sub { color: var(--fg2); font-size: 11px; }
   .project > .row { font-weight: 600; }
   .row { display: flex; gap: 6px; align-items: baseline; padding: 4px 12px; cursor: pointer; user-select: none; }
   .row:hover { background: var(--bg2); }
@@ -110,6 +116,8 @@
     selectionGeneration: 0,
     contextQueue: Promise.resolve(),
     contextVersion: 0,
+    recents: [],
+    recentScope: null,
   };
 
   // ---- MCP Apps bridge ------------------------------------------------------------------------
@@ -224,6 +232,7 @@
       }
     }
     state.data = data;
+    restoreRecents();
     if (state.selected && state.tab === 'designs' && data.host === 'local'
       && !(data.designs || []).some(d => d.id === state.selected)) clearSelection();
     if (!previous) {
@@ -238,7 +247,8 @@
       state.expanded.add(project.id);
       const previews = (project.modules || []).flatMap(m => m.previews || []);
       if (!state.selected && previews.length) {
-        const preview = previews.find(p => p.sourceFile) || previews[0];
+        const last = state.recents.find(r => r.kind === 'preview' && previews.some(p => p.uri === r.id));
+        const preview = previews.find(p => p.uri === last?.id) || previews.find(p => p.sourceFile) || previews[0];
         void select(preview.uri, preview);
       }
       else if (!previews.length && !state.startedProjects.has(project.id)) {
@@ -380,6 +390,7 @@
       node.append(children);
       tree.append(node);
     }
+    renderRecents('preview');
     $('count').textContent = state.query ? `${shown} of ${total}` : total ? `${total} previews` : '';
   }
 
@@ -396,6 +407,94 @@
   function scrollTo(id) {
     const node = document.querySelector(`[data-id="${CSS.escape(id)}"]`);
     if (node) node.scrollIntoView({ block: 'start' });
+  }
+
+  // Widget-scoped presentation cache, never an authoritative listing or a cross-user browser store.
+  const RECENT_LIMIT = 8;
+  const THUMB_LIMIT = 80_000;
+  function restoreRecents() {
+    const scope = JSON.stringify([state.data.host, (state.data.projects || []).map(p => [p.id, p.path || '']).sort()]);
+    if (scope === state.recentScope) return;
+    if (state.recentScope !== null && state.selected) clearSelection();
+    state.recentScope = scope;
+    state.renders.clear();
+    let saved;
+    try { saved = window.openai?.widgetState?.privateContent?.composePreviewRecents; }
+    catch (err) { console.debug('Recent items unavailable', err); }
+    state.recents = saved?.schema === 1 && saved.scope === scope && Array.isArray(saved.items)
+      ? saved.items.slice(0, RECENT_LIMIT).filter(r => r && ['preview', 'local-design', 'hosted-design'].includes(r.kind)
+        && typeof r.id === 'string' && r.id.length <= 4096 && typeof r.name === 'string' && r.name.length <= 4096 && Number.isFinite(r.at)).map(r => ({
+          kind: r.kind, id: r.id, name: r.name, at: r.at,
+          ...(typeof r.thumb === 'string' && r.thumb.length <= THUMB_LIMIT && /^data:image\/png;base64,[A-Za-z0-9+/=]+$/.test(r.thumb)
+            && Number.isFinite(r.imageAt) ? { thumb: r.thumb, imageAt: r.imageAt } : {}),
+        })) : [];
+  }
+
+  function persistRecents() {
+    try {
+      if (typeof window.openai?.setWidgetState !== 'function') return;
+      const previous = window.openai.widgetState || {};
+      window.openai.setWidgetState({ ...previous, privateContent: { ...previous.privateContent,
+        composePreviewRecents: { schema: 1, scope: state.recentScope, items: state.recents },
+      } });
+    } catch (err) { console.debug('Recent items could not be persisted', err); }
+  }
+
+  function remember(kind, id, name) {
+    const before = state.recents.find(r => r.kind === kind && r.id === id);
+    state.recents = [{ ...before, kind, id, name: name || id, at: Date.now() },
+      ...state.recents.filter(r => !(r.kind === kind && r.id === id))].slice(0, RECENT_LIMIT);
+    persistRecents();
+  }
+
+  async function rememberPixels(kind, id, png) {
+    // Persist small, real thumbnails, not multi-megabyte render payloads.
+    const scope = state.recentScope;
+    const generation = state.selectionGeneration;
+    try {
+      const image = new Image();
+      image.src = png;
+      await image.decode();
+      const canvas = document.createElement('canvas');
+      const scale = Math.min(1, 192 / Math.max(image.naturalWidth, image.naturalHeight));
+      canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
+      canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
+      canvas.getContext('2d').drawImage(image, 0, 0, canvas.width, canvas.height);
+      const thumb = canvas.toDataURL('image/png');
+      const item = state.recents.find(r => r.kind === kind && r.id === id);
+      if (!item || scope !== state.recentScope || generation !== state.selectionGeneration || thumb.length > THUMB_LIMIT) return;
+      item.thumb = thumb;
+      item.imageAt = Date.now();
+      persistRecents();
+      render();
+    } catch (err) { console.debug('Thumbnail unavailable', err); }
+  }
+
+  function renderRecents(kind) {
+    const recent = state.recents.filter(r => kind === 'preview' ? r.kind === kind && findPreview(r.id)
+      : r.kind === (state.data.host === 'local' ? 'local-design' : 'hosted-design')
+        && (state.data.host === 'local' ? state.data.designs || [] : state.designs || []).some(d => d.id === r.id))
+      .filter(r => !state.query || (r.name + r.id).toLowerCase().includes(state.query));
+    const itemKind = kind === 'preview' ? 'preview' : state.data.host === 'local' ? 'local-design' : 'hosted-design';
+    if (!state.recents.some(r => r.kind === itemKind)) return;
+    const section = el('div', { class: 'recents', 'aria-label': 'Recent items' });
+    section.append(el('header', {}, el('h2', {}, 'Recent'), el('button', { type: 'button', onclick: () => {
+      state.recents = [];
+      persistRecents();
+      render();
+    } }, 'Clear recent items')));
+    if (!recent.length) section.append(el('div', { class: 'empty' }, state.query
+      ? 'No matching recent items.' : 'Recent items are not in the current listing.'));
+    for (const item of recent) {
+      const choose = () => item.kind === 'preview' ? select(item.id, findPreview(item.id)?.preview)
+        : item.kind === 'local-design' ? selectLocalDesign(state.data.designs.find(d => d.id === item.id)) : openDesign(item.id);
+      section.append(el('div', { class: 'recent row' + (state.selected === item.id ? ' selected' : ''),
+        role: 'button', tabindex: '0', onclick: choose, onkeydown: e => { if (e.key === 'Enter') choose(); } },
+        item.thumb ? el('img', { src: item.thumb, alt: 'Last successful render of ' + item.name }) : null,
+        el('div', {}, el('div', {}, item.name), el('div', { class: 'sub' }, item.imageAt
+          ? 'Rendered ' + new Date(item.imageAt).toLocaleString() : 'Opened ' + new Date(item.at).toLocaleString()))));
+    }
+    $('tree').prepend(section);
   }
 
   // Serialize updates: an older acknowledgement must never leave chat on the wrong item.
@@ -427,6 +526,7 @@
   async function select(uri, preview) {
     state.selected = uri;
     const generation = ++state.selectionGeneration;
+    remember('preview', uri, preview?.displayName || preview?.name);
     renderTree();
     const pane = $('pane');
     const found = findPreview(uri);
@@ -434,9 +534,10 @@
       name: preview?.displayName || preview?.name, projectId: found?.project.id,
       projectName: found?.project.name, module: found?.module.path,
       sourceFile: preview?.sourceFile, sourceLine: preview?.sourceLine });
-    const cached = state.renders.get(uri);
+    const recent = state.recents.find(r => r.kind === 'preview' && r.id === uri);
+    const cached = state.renders.get(uri) || (recent?.thumb ? { png: recent.thumb, at: recent.imageAt, thumbnail: true } : null);
     const status = el('div', { class: 'status' }, cached
-      ? `Showing last successful render (${new Date(cached.at).toLocaleTimeString()}); refreshing…` : 'Rendering…');
+      ? `Showing last successful render${cached.thumbnail ? ' thumbnail' : ''} (${new Date(cached.at).toLocaleString()}); refreshing…` : 'Rendering…');
     const stage = el('div', { class: 'stage' });
     if (cached) stage.append(el('img', { src: cached.png, alt: preview?.name || uri }));
     pane.replaceChildren(el('h2', {}, preview?.displayName || preview?.name || uri.split('/').pop()),
@@ -449,6 +550,7 @@
         state.renders.set(uri, { png, at: Date.now() });
         // Bound retained pixels; the sidebar can stay open for hours.
         if (state.renders.size > 12) state.renders.delete(state.renders.keys().next().value);
+        void rememberPixels('preview', uri, png);
         stage.replaceChildren(el('img', { src: png, alt: preview?.name || uri }));
         status.textContent = 'Updated ' + new Date().toLocaleTimeString();
       } else status.textContent = cached ? 'No new image returned; showing last successful render.' : 'The render returned no image.';
@@ -547,6 +649,7 @@
     if (all && !designs.length) $('tree').append(el('div', { class: 'empty' }, state.query
       ? 'No matching designs.' : local ? 'No .uid designs found in registered projects or active session folders.' : 'No designs.'));
     if (!all) $('tree').append(el('div', { class: 'empty' }, 'Loading designs…'));
+    renderRecents('design');
     $('count').textContent = all ? `${all.length} designs` : '';
   }
 
@@ -564,6 +667,7 @@
 
   function selectLocalDesign(design) {
     if (!design) return;
+    remember('local-design', design.id, design.name);
     state.selected = design.id;
     ++state.selectionGeneration;
     renderDesigns();
@@ -583,11 +687,15 @@
   }
 
   async function openDesign(id) {
+    remember('hosted-design', id, (state.designs || []).find(d => d.id === id)?.name);
     state.selected = id;
     const generation = ++state.selectionGeneration;
     renderDesigns();
-    const status = el('div', { class: 'status' }, 'Drawing…');
+    const recent = state.recents.find(r => r.kind === 'hosted-design' && r.id === id);
+    const status = el('div', { class: 'status' }, recent?.thumb
+      ? 'Showing last successful render thumbnail (' + new Date(recent.imageAt).toLocaleString() + '); refreshing…' : 'Drawing…');
     const stage = el('div', { class: 'stage' });
+    if (recent?.thumb) stage.append(el('img', { src: recent.thumb, alt: id }));
     const name = (state.designs || []).find(d => d.id === id)?.name;
     const context = shareSelection({ kind: 'hosted-design', host: state.data.host, id, name });
     $('pane').replaceChildren(el('h2', {}, name || id), name ? el('div', { class: 'uri' }, id) : null, context, status, stage);
@@ -596,11 +704,15 @@
       if (result?.isError) throw new Error(textOf(result));
       if (state.selected !== id || generation !== state.selectionGeneration) return;
       const png = imageOf(result);
-      if (png) { stage.append(el('img', { src: png, alt: id })); status.textContent = ''; }
-      else status.textContent = 'No picture returned.';
+      if (png) {
+        stage.replaceChildren(el('img', { src: png, alt: id }));
+        status.textContent = 'Updated ' + new Date().toLocaleTimeString();
+        void rememberPixels('hosted-design', id, png);
+      }
+      else status.textContent = recent?.thumb ? 'No new picture returned; showing last successful render.' : 'No picture returned.';
     } catch (err) {
       if (state.selected === id && generation === state.selectionGeneration)
-        status.replaceChildren(el('div', { class: 'error' }, String(err.message || err)));
+        status.replaceChildren(el('div', { class: 'error' }, (recent?.thumb ? 'Refresh failed; showing last successful render. ' : '') + String(err.message || err)));
     }
   }
 
