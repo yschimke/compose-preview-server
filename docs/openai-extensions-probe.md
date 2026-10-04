@@ -38,7 +38,7 @@ and one `compose-preview-mcp: client <name> <version>` line at `initialize`.
 
 You need macOS with Codex desktop (or ChatGPT desktop with plugins), a JDK 21, and
 checkouts of this repository and
-[compose-ag-plugin](https://github.com/yschimke/compose-ag-plugin).
+[compose-agent-plugins](https://github.com/yschimke/compose-agent-plugins).
 
 1. **Build the MCP server from this branch.**
 
@@ -48,7 +48,7 @@ checkouts of this repository and
    ```
 
 2. **Point a local copy of the plugin at that build, with the probe on.** In your
-   compose-ag-plugin checkout, edit the `mcpServers` entry in
+   compose-agent-plugins checkout, edit the `mcpServers` entry in
    `plugins/compose-preview/.codex-plugin/plugin.json`. Don't commit this change.
 
    ```json
@@ -70,8 +70,8 @@ checkouts of this repository and
 3. **Install the plugin from the local marketplace.**
 
    ```sh
-   codex plugin marketplace add /ABSOLUTE/PATH/compose-ag-plugin
-   codex plugin add compose-preview@compose-ag-plugin
+   codex plugin marketplace add /ABSOLUTE/PATH/compose-agent-plugins
+   codex plugin add compose-preview@compose-agent-plugins
    codex plugin list
    ```
 
@@ -121,7 +121,7 @@ is what happens, and quote any error you see.
    Record whether `probe-mention-1`…`3` appear. Then check the server's stderr for the
    `mentions/search … query=` lines, and record each query string.
 5. **Deep link.** Open
-   `codex://plugins/compose-preview@compose-ag-plugin/app/probe_global?path=%2Fprobe%3Fx%3D1`.
+   `codex://plugins/compose-preview@compose-agent-plugins/app/probe_global?path=%2Fprobe%3Fx%3D1`.
    Record whether it opens the global probe, and the `openai/deepLink` value in the **Host** block
    or under `hostContextChanges`.
 
@@ -168,7 +168,7 @@ plugin):
 
 ## Recording the evidence
 
-Add a row for the OpenAI extensions to compose-ag-plugin's `docs/harness-matrix.md`. Add an
+Add a row for the OpenAI extensions to compose-agent-plugins' `docs/harness-matrix.md`. Add an
 evidence file next to the others, named for example
 `docs/evidence/<date>-codex-desktop-openai-extensions.md`. The evidence file holds the host
 version, the plugin commit, this repository's commit, the copied **Host** blocks and **Report**

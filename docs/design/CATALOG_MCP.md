@@ -450,7 +450,7 @@ which components and properties the pinned catalog declares — is `ui_builder_v
 ### Before you show it: check, then look at every size
 
 Agents working on a design for a person should not spend that person's attention on something they
-could have caught (compose-ag-plugin `docs/agent-rules.md`, R1–R4). Two tools make that one call
+could have caught (compose-agent-plugins `docs/agent-rules.md`, R1–R4). Two tools make that one call
 each (#1255).
 
 `ui_builder_check_design` runs `schema`, `catalog` and `a11y` — pick with `checks` — on a stored

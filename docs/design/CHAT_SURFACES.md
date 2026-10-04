@@ -30,7 +30,7 @@ an https URL the agent can fetch and attach, or link. A choice is made by replyi
 
 ## 1. Text and image fallbacks on the hosted `/mcp`
 
-Rule R1 (compose-ag-plugin `docs/agent-rules.md`) says the agent sees what the person sees. In a
+Rule R1 (compose-agent-plugins `docs/agent-rules.md`) says the agent sees what the person sees. In a
 chat thread the person sees text and attachments, so every result that would show them a picture
 carries a **short-lived signed https PNG URL** on a host with a public origin, for example
 `https://preview.coo.ee`. The origin comes from `--ui-builder-public-origin`, or failing that from
@@ -231,10 +231,10 @@ and a credential. Not needed today.
 2. Add a connection for the hosted MCP server: URL `https://preview.coo.ee/mcp` (or your host's
    `/mcp`), allowed hostname `preview.coo.ee`.
    - **OAuth** (preferred): per-user grants through `ServeMcpOAuth`, the same flow the Claude
-     Connectors Directory uses (compose-ag-plugin#54).
+     Connectors Directory uses (compose-agent-plugins#54).
    - **Bearer**: one agent-grant token per connection (`request_access`, approved by a human).
      Everyone in the scope shares that token's capabilities.
-3. Optionally attach the compose-ag-plugin skills to the access bundle. They apply to new threads.
+3. Optionally attach the compose-agent-plugins skills to the access bundle. They apply to new threads.
 4. For notifications, create a Slack incoming webhook for the channel and start the server with
    `--ui-builder-comment-webhook <url> --ui-builder-comment-webhook-format slack`. Add
    `--ui-builder-webhook-events all` (or a list) to post forks, decisions and implementation changes
@@ -253,11 +253,11 @@ and a credential. Not needed today.
 | Claude Tag: connection setup against `preview.coo.ee/mcp` | ⬜ not yet verified in a live workspace |
 | Claude Tag: attaching an image from a signed URL | ⬜ not yet verified |
 | Claude Tag: whether a tool's MCP `ImageContent` reaches the thread | ⬜ not yet verified |
-| Claude Tag: compose-ag-plugin skills load | ⬜ not yet verified |
+| Claude Tag: compose-agent-plugins skills load | ⬜ not yet verified |
 | Claude Tag: pick by reply, round trip | ⬜ not yet verified |
 | Claude Tag: PR-subscription follow-up | ⬜ not yet verified |
 | ChatGPT Slack app | ⬜ not yet verified |
 
-The live checks belong in compose-ag-plugin's harness matrix, in a new Claude Tag column next to
+The live checks belong in compose-agent-plugins' harness matrix, in a new Claude Tag column next to
 Q8/Q9/Q16. That follow-up, along with the skill wording ("in Slack, attach or link the image; don't
-describe it from memory"), is tracked in compose-ag-plugin.
+describe it from memory"), is tracked in compose-agent-plugins.
