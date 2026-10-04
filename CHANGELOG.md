@@ -1,5 +1,13 @@
 # Changelog
 
+## [3.100.0](https://github.com/yschimke/compose-preview-server/compare/v3.99.0...v3.100.0) (2026-10-04)
+
+
+### Features
+
+* **deploy:** serve imported catalogs from compose-preview-imports-out ([#1345](https://github.com/yschimke/compose-preview-server/issues/1345)) ([80d3abe](https://github.com/yschimke/compose-preview-server/commit/80d3abe032c1f3d02f3ffa55197beef638497257))
+* retain catalog heroes and prioritize startup requests ([#1347](https://github.com/yschimke/compose-preview-server/issues/1347)) ([0780923](https://github.com/yschimke/compose-preview-server/commit/0780923d502caa5745e19a5586341c77c98e2424))
+
 ## [3.99.0](https://github.com/yschimke/compose-preview-server/compare/v3.98.0...v3.99.0) (2026-10-04)
 
 
