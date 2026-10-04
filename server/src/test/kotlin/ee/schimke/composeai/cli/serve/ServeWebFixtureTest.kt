@@ -1562,6 +1562,38 @@ class ServeWebFixtureTest {
     // its paired Wear M3 catalog. This is the public remote-m3/Card shape: no duplicated local
     // Figma reference, but a Figma source inherited from the paired Wear preview and the Wear
     // render itself as the second comparison source.
+    // The compare strip on a catalog with NO baseline anywhere: no variant maps to a design
+    // reference and nothing is paired, which is every imported catalog (tunjid-heron's message list
+    // is the shape). The strip is the variants alone — render and name — rather than a column of
+    // empty reference frames and `not scored` under a heading claiming a comparison nobody made.
+    val viewerStripNoBaseline =
+      ServeWeb.viewerPage(
+        ServePreview(
+          "message-list__ideal__default__narrow",
+          "Message List",
+          section = "Writing and messages",
+          componentId = "message-list",
+        ),
+        token,
+        sessionId = "tunjid-heron",
+        basePath = "/tunjid-heron",
+        catalogName = "Heron",
+        componentVariants =
+          listOf(
+            ServeWeb.ComponentVariant(
+              previewId = "message-list__ideal__default__compact",
+              variant = "ideal/default/compact",
+            ),
+            ServeWeb.ComponentVariant(
+              previewId = "message-list__ideal__default__medium",
+              variant = "ideal/default/medium",
+            ),
+            ServeWeb.ComponentVariant(
+              previewId = "message-list__ideal__default__narrow",
+              variant = "ideal/default/narrow",
+            ),
+          ),
+      )
     val viewerRcParallel =
       ServeWeb.viewerPage(
         ServePreview(
@@ -4432,6 +4464,7 @@ class ServeWebFixtureTest {
         "serve-viewer-rc-players.html" to viewerRcPlayers,
         "serve-viewer-rc-signin.html" to viewerRcSignIn,
         "serve-viewer-rc-parallel.html" to viewerRcParallel,
+        "serve-viewer-strip-no-baseline.html" to viewerStripNoBaseline,
         "serve-viewer-wear-screen.html" to viewerWearScreen,
         "serve-landing-themed.html" to landingThemed,
         "serve-landing-catalog-palette.html" to landingCatalogPalette,
