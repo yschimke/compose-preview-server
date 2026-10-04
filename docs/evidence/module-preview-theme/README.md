@@ -32,8 +32,27 @@ preview id with the original dark override. A fixture with both local and namesp
 manifest ids verifies that an exact match takes precedence. Split-preview bundle
 requests use the manifest's local id rather than the catalog namespace.
 
-The public deployment is unchanged by this PR. These tests establish routing; they do
-not establish the colors drawn by Heron's own theme implementation.
+The public deployment is unchanged by this PR.
+
+### Real Heron render
+
+After approval to execute the published bundle locally, a temporary integration check
+materialized the Home bundle and launched the released desktop daemon on Java 21
+(the bundle's application classes require Java 21). Before translation the real renderer
+returned `NotFound` for the catalog-wide id. The same renderer behind `ServeModuleLiveHost`
+returned PNGs for both `uiMode=light` and `uiMode=dark`.
+
+Both outputs are 1050 × 2100. The dark image visibly changes the screen surface, text,
+skeleton placeholders, sign-in button and bottom navigation palette. This captures the
+preview's initial loading state; it does not exercise a signed-in timeline.
+
+- [Light render after the routing fix](heron-after-light.png)
+- [Dark render after the routing fix](heron-after-dark.png)
+
+Bundle SHA-256: `d120ac6e226192773ea74524f7f44f793066e3dbc5d0622dd595a3cd6f0403eb`.
+
+The one-off integration check passed and its temporary test harness was removed;
+the committed regression suite remains independent of downloaded application bundles.
 
 ### Hosted failure
 
