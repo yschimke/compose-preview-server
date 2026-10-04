@@ -128,6 +128,12 @@ server half means building against a UI-builder checkout with the option
 (`-PcomposeUiBuilderDir=…`). See
 [feature scope and verification](docs/development/UI_BUILDER_FEATURE_FLAGS.md).
 
+After a restart, configured catalogs keep their home-page cards while they load. With
+`--catalog-cache-dir` on a persistent volume, each card can show its last successful hero thumbnail
+with a small “Loading catalog…” label. The thumbnail is scoped to the catalog's configured repository
+and branch. Opening a pending catalog promotes it ahead of the remaining startup fetches; the fetch
+already running finishes first. The loading page retries automatically until the catalog is available.
+
 ## Remote catalog MCP
 
 The server can expose every hosted catalog through one aggregate Streamable HTTP MCP endpoint at

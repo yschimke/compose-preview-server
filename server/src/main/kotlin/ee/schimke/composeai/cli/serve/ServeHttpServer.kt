@@ -283,6 +283,8 @@ class ServeHttpServer(
    * explicit and recoverable. Null preserves the plain/test server behaviour.
    */
   private val catalogLoads: CatalogLoadTracker? = null,
+  /** Persistent last-successful thumbnails, independent of catalog initialization. */
+  private val heroCacheDir: File? = null,
   /** Immediate catalog branch check exposed by `POST /{system}/refresh`. */
   private val catalogRefresh: ((system: String, force: Boolean) -> CatalogRefreshResult)? = null,
   /** Demand-activated, expiring background RSS generator for published catalog history. */
@@ -948,7 +950,10 @@ class ServeHttpServer(
    * (see [rememberCatalogMeta]) so the public landing costs the server a handful of map lookups
    * rather than a dozen full-resolution renders. See [ServeHeroImages].
    */
-  private val heroImages = ServeHeroImages()
+  private val heroImages =
+    ServeHeroImages(heroCacheDir).also { images ->
+      catalogLoads?.snapshot()?.forEach { images.cached(it.config) }
+    }
 
   /**
    * Fills the baked PNGs a page build asked for and could not find, off the request thread, so the
@@ -4175,6 +4180,24 @@ class ServeHttpServer(
     }
     val (webSessionId, basePath) = webSessionAndBase(sessionInPath)
     val selectedSessionId = selectedSessionId(sessionInPath)
+    loadingHomeSystem(selectedSessionId)?.let { pending ->
+      catalogLoads?.prioritize(selectedSessionId)
+      call.response.headers.append(HttpHeaders.CacheControl, "no-store")
+      call.response.headers.append(HttpHeaders.RetryAfter, "3")
+      call.response.headers.append("Refresh", "3")
+      call.respondText(
+        ServeWeb.homeIndexPage(
+          listOf(pending),
+          linkToken(),
+          isPublic,
+          version = SERVE_VERSION,
+          componentBrowser = componentBrowserMode(),
+        ),
+        ContentType.Text.Html,
+        HttpStatusCode.ServiceUnavailable,
+      )
+      return
+    }
     withLeasedSession(
       selectedSessionId,
       onMissing = { respondNotFoundHtml("That design system was not found on this server.") },
@@ -8908,7 +8931,11 @@ class ServeHttpServer(
         // refresh — which installs a fresh host — re-bakes under a new hash.
         heroImage =
           bundle?.let { owner ->
-            facts.heroPreviewId?.let { heroImages.heroFor(owner, it, heroCrop) }
+            facts.heroPreviewId?.let {
+              heroImages.heroFor(owner, it, heroCrop)?.also { hero ->
+                catalogLoads?.configFor(id)?.let { config -> heroImages.remember(config, hero) }
+              }
+            }
           },
         heroRenderSize = facts.heroPreviewId?.let { host.bakedRenderSize(it) },
         darkStage = facts.darkStage,
@@ -9970,6 +9997,14 @@ class ServeHttpServer(
       sourceRepo = state.config.repo,
       importedFrom = state.config.importedFrom,
       heroPreviewId = null,
+      heroImage =
+        heroImages.cached(state.config)?.let {
+          ServeWeb.HeroImage(
+            "${ServeHeroImages.PATH_PREFIX}/$system/${it.fileName}",
+            it.cssWidth,
+            it.cssHeight,
+          )
+        },
       loading = true,
     )
   }
