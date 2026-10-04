@@ -3941,8 +3941,17 @@ class DaemonMcpServerTest {
       )
     assertThat(render().firstTextContent()).doesNotContain("no preview matches")
 
+    fun previewListed() =
+      client.request("resources/list")["resources"]!!.jsonArray.any {
+        it.jsonObject["name"]?.jsonPrimitive?.content == "GreetingPreview"
+      }
+    assertThat(previewListed()).isTrue()
     daemon.emitRemoved("com.example.GreetingPreview")
-    client.expectNotification("notifications/resources/list_changed", 2_000)
+    // A list_changed notification may still be queued from initial discovery. Wait for the
+    // actual removal so the next lookup must rediscover instead of finding the old entry.
+    val removalDeadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
+    while (previewListed() && System.nanoTime() < removalDeadline) Thread.sleep(10)
+    assertThat(previewListed()).isFalse()
 
     assertThat(render().firstTextContent()).doesNotContain("no preview matches")
     assertThat(rediscoveries.get()).isEqualTo(1)
