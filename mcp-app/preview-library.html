@@ -108,6 +108,8 @@
     startedProjects: new Set(),
     renders: new Map(), // Last successful pixels in this app session; never a fabricated preview.
     selectionGeneration: 0,
+    contextQueue: Promise.resolve(),
+    contextVersion: 0,
   };
 
   // ---- MCP Apps bridge ------------------------------------------------------------------------
@@ -222,6 +224,8 @@
       }
     }
     state.data = data;
+    if (state.selected && state.tab === 'designs' && data.host === 'local'
+      && !(data.designs || []).some(d => d.id === state.selected)) clearSelection();
     if (!previous) {
       $('title').textContent = data.mode === 'designs' ? 'UI Builder designs'
         : data.mode === 'register' ? 'Register a project' : 'Compose Previews';
@@ -394,18 +398,49 @@
     if (node) node.scrollIntoView({ block: 'start' });
   }
 
+  // Serialize updates: an older acknowledgement must never leave chat on the wrong item.
+  function shareSelection(selection) {
+    const version = ++state.contextVersion;
+    const indicator = selection ? el('div', { class: 'chat-context status', role: 'status' }, 'Sharing selection with chat…') : null;
+    state.contextQueue = state.contextQueue.then(async () => {
+      if (version !== state.contextVersion) return;
+      try {
+        await request('ui/update-model-context', { content: selection ? [{ type: 'text', text: JSON.stringify({
+          schema: 'compose-preview-selection/v1', selection,
+        }) }] : [] });
+        if (version === state.contextVersion && indicator) indicator.textContent = 'Selection shared with chat';
+      } catch (err) {
+        if (version === state.contextVersion && indicator) indicator.textContent = 'Could not share selection with chat. ' + (err.message || err);
+      }
+    });
+    return indicator;
+  }
+
+  function clearSelection() {
+    state.selected = null;
+    ++state.selectionGeneration;
+    shareSelection(null);
+    $('pane').replaceChildren(el('div', { class: 'empty' }, state.tab === 'designs'
+      ? 'Select a design to view it.' : 'Select a preview to render it.'));
+  }
+
   async function select(uri, preview) {
     state.selected = uri;
     const generation = ++state.selectionGeneration;
     renderTree();
     const pane = $('pane');
+    const found = findPreview(uri);
+    const context = shareSelection({ kind: 'preview', host: state.data.host, uri,
+      name: preview?.displayName || preview?.name, projectId: found?.project.id,
+      projectName: found?.project.name, module: found?.module.path,
+      sourceFile: preview?.sourceFile, sourceLine: preview?.sourceLine });
     const cached = state.renders.get(uri);
     const status = el('div', { class: 'status' }, cached
       ? `Showing last successful render (${new Date(cached.at).toLocaleTimeString()}); refreshing…` : 'Rendering…');
     const stage = el('div', { class: 'stage' });
     if (cached) stage.append(el('img', { src: cached.png, alt: preview?.name || uri }));
     pane.replaceChildren(el('h2', {}, preview?.displayName || preview?.name || uri.split('/').pop()),
-      el('div', { class: 'uri' }, uri), status, stage);
+      el('div', { class: 'uri' }, uri), context, status, stage);
     try {
       const png = await renderPreview(uri);
       if (state.selected !== uri || generation !== state.selectionGeneration) return;
@@ -520,6 +555,7 @@
     state.selected = design.id;
     ++state.selectionGeneration;
     renderDesigns();
+    const context = shareSelection({ kind: 'local-design', host: 'local', id: design.id, name: design.name, path: design.path });
     const status = el('div', { class: 'status' }, 'Open this .uid file in UI Builder to view and edit it. Changes save back to this file.');
     const button = el('button', { type: 'button', onclick: async () => {
       button.disabled = true;
@@ -531,30 +567,39 @@
         status.textContent = 'Could not open the design: ' + (err.message || err) + '. Open the file at the path above.';
       } finally { button.disabled = false; }
     } }, 'Open in UI Builder');
-    $('pane').replaceChildren(el('h2', {}, design.name), el('div', { class: 'uri' }, design.path), status, button);
+    $('pane').replaceChildren(el('h2', {}, design.name), el('div', { class: 'uri' }, design.path), context, status, button);
   }
 
   async function openDesign(id) {
     state.selected = id;
+    const generation = ++state.selectionGeneration;
     renderDesigns();
     const status = el('div', { class: 'status' }, 'Drawing…');
     const stage = el('div', { class: 'stage' });
     const name = (state.designs || []).find(d => d.id === id)?.name;
-    $('pane').replaceChildren(el('h2', {}, name || id), name ? el('div', { class: 'uri' }, id) : null, status, stage);
+    const context = shareSelection({ kind: 'hosted-design', host: state.data.host, id, name });
+    $('pane').replaceChildren(el('h2', {}, name || id), name ? el('div', { class: 'uri' }, id) : null, context, status, stage);
     try {
       const result = await callTool(state.data.tools.view, { designId: id, inline: true });
       if (result?.isError) throw new Error(textOf(result));
+      if (state.selected !== id || generation !== state.selectionGeneration) return;
       const png = imageOf(result);
       if (png) { stage.append(el('img', { src: png, alt: id })); status.textContent = ''; }
       else status.textContent = 'No picture returned.';
-    } catch (err) { status.replaceChildren(el('div', { class: 'error' }, String(err.message || err))); }
+    } catch (err) {
+      if (state.selected === id && generation === state.selectionGeneration)
+        status.replaceChildren(el('div', { class: 'error' }, String(err.message || err)));
+    }
   }
 
   // ---- Wiring ---------------------------------------------------------------------------------
   $('search').addEventListener('input', e => { state.query = e.target.value.trim().toLowerCase(); render(); });
   $('refresh').addEventListener('click', () => state.data?.host === 'hosted' && (state.data?.mode === 'designs' || state.tab === 'designs') ? loadDesigns() : refresh());
   function chooseTab(tab) {
-    state.tab = tab;
+    if (state.tab !== tab) {
+      state.tab = tab;
+      clearSelection();
+    }
     state.query = '';
     $('search').value = '';
     render();
