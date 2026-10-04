@@ -23,7 +23,7 @@ export function safePath(value: unknown, origin: string): string {
         const path = new URL(String(value), origin).pathname;
         // Neither private design identifiers nor authorization paths belong in analytics.
         if (path.startsWith("/ui-builder/")) return "/ui-builder/";
-        if (/^\/(auth|admin|api|__)/.test(path)) return "/";
+        if (/^\/(auth|admin|api|agent-access|__)/.test(path)) return "/";
         return path;
     } catch {
         return "/";

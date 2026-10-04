@@ -22,6 +22,10 @@ describe("analytics", () => {
             safePath("/auth/device/secret", "https://preview.test"),
             "/",
         );
+        assert.equal(
+            safePath("/agent-access/request-id", "https://preview.test"),
+            "/",
+        );
         assert.deepEqual(
             safeEvent("property_changed", {
                 value: "private text",
