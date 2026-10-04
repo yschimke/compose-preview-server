@@ -133,9 +133,10 @@ test('hosted library lists designs through its existing authorized tools', async
   try {
     const page = await browser.newPage();
     await page.setContent('<iframe id="app" style="width:100%;height:620px"></iframe>');
-    await page.evaluate(({ html }) => {
+    await page.evaluate(({ html, png }) => {
       const frame = document.getElementById('app');
       window.calls = [];
+      window.designSuccess = false;
       const send = m => frame.contentWindow.postMessage({ jsonrpc: '2.0', ...m }, '*');
       window.addEventListener('message', e => {
         if (e.source !== frame.contentWindow) return;
@@ -154,11 +155,12 @@ test('hosted library lists designs through its existing authorized tools', async
           window.calls.push(params);
           send({ id, result: params.name === 'ui_builder_list_designs'
             ? { structuredContent: { designs: [{ designId: 'owned-design', title: 'Owned design' }] } }
+            : window.designSuccess ? { content: [{ type: 'image', mimeType: 'image/png', data: png }] }
             : { isError: true, content: [{ type: 'text', text: 'Export capability required' }] } });
         }
       });
       frame.srcdoc = html;
-    }, { html });
+    }, { html, png });
     const frame = page.frameLocator('#app');
     await frame.locator('#designs-tab').click();
     await frame.locator('#tree [role="button"]').click();
@@ -170,6 +172,14 @@ test('hosted library lists designs through its existing authorized tools', async
       { name: 'ui_builder_list_designs', arguments: {} },
       { name: 'ui_builder_view', arguments: { designId: 'owned-design', inline: true } },
     ]);
+    await page.evaluate(() => { window.designSuccess = true; });
+    await frame.locator('#tree > .row').click();
+    await frame.locator('.recent img').waitFor();
+    const thumb = await frame.locator('.recent img').getAttribute('src');
+    await page.evaluate(() => { window.designSuccess = false; });
+    await frame.locator('.recent.row').click();
+    await frame.locator('#pane .error').getByText('Refresh failed; showing last successful render.', { exact: false }).waitFor();
+    assert.equal(await frame.locator('#pane img').getAttribute('src'), thumb);
   } finally { await browser.close(); }
 });
 
@@ -204,18 +214,91 @@ test('pending selection updates preserve order, deletion clears context, and rej
     const frame = page.frameLocator('#app');
     await frame.locator('#designs-tab').click();
     await page.waitForFunction(() => !!window.releaseContext);
-    await frame.locator('#tree .row').getByText('A', { exact: true }).click();
-    await frame.locator('#tree .row').getByText('B', { exact: true }).click();
+    await frame.locator('#tree > .row').getByText('A', { exact: true }).click();
+    await frame.locator('#tree > .row').getByText('B', { exact: true }).click();
     assert.equal(await page.evaluate(() => window.contexts.length), 1);
     await page.evaluate(() => window.releaseContext());
     await frame.locator('.chat-context').getByText('Selection shared with chat', { exact: true }).waitFor();
     assert.equal(await page.evaluate(() => JSON.parse(window.contexts.at(-1).content[0].text).selection.id), 'B');
     await page.evaluate(() => { window.rejectContext = true; });
-    await frame.locator('#tree .row').getByText('A', { exact: true }).click();
+    await frame.locator('#tree > .row').getByText('A', { exact: true }).click();
     await frame.locator('.chat-context').getByText('Context updates unsupported', { exact: false }).waitFor();
     assert.equal(await frame.getByRole('button', { name: 'Open in UI Builder' }).isEnabled(), true);
     await page.evaluate(() => { window.rejectContext = false; window.removeDesigns(); });
     await page.waitForFunction(() => window.contexts.at(-1).content.length === 0);
     assert.equal(await frame.locator('#pane .uri').count(), 0);
+  } finally { await browser.close(); }
+});
+
+test('host-scoped recents restore actual thumbnails, skip removed items, and survive unavailable persistence', async () => {
+  const browser = await chromium.launch();
+  try {
+    const page = await browser.newPage({ viewport: { width: 1100, height: 720 } });
+    await page.setContent('<iframe id="app" style="width:100%;height:700px;border:0"></iframe>');
+    await page.evaluate(({ html, png }) => {
+      const frame = document.getElementById('app');
+      window.savedWidget = { modelContent: 'Existing context', privateContent: { unrelated: true } };
+      window.contexts = [];
+      window.paused = false;
+      window.otherProject = false;
+      window.throwPersistence = false;
+      const send = m => frame.contentWindow.postMessage({ jsonrpc: '2.0', ...m }, '*');
+      const listing = () => ({ schema: 'compose-preview-library/v1', mode: 'library', host: 'local',
+        tools: { render: 'render_preview' }, projects: [{ id: window.otherProject ? 'other' : 'starter', name: 'ComposeStarter', path: '/work/starter',
+          modules: [{ path: ':app', previews: [{ uri: 'compose-preview://starter/_app/ListScreenPreview', name: 'ListScreenPreview' }] }] }],
+        designs: Array.from({ length: 10 }, (_, n) => ({ id: `design-${n}`, name: `Design ${n}`, path: `/work/design-${n}.uid` })) });
+      window.reopen = () => {
+        frame.srcdoc = html.replace('<script>', `<script>window.openai = { get widgetState() { return parent.savedWidget; }, setWidgetState(value) {
+          if (parent.throwPersistence) throw new Error('Host persistence unavailable'); parent.savedWidget = value; } };`);
+      };
+      window.removeDesigns = () => send({ method: 'ui/notifications/tool-result', params: { structuredContent: { ...listing(), designs: [] } } });
+      window.addEventListener('message', e => {
+        if (e.source !== frame.contentWindow) return;
+        const { id, method, params } = e.data;
+        if (method === 'ui/initialize') {
+          send({ id, result: {} });
+          send({ method: 'ui/notifications/tool-result', params: { structuredContent: listing() } });
+        } else if (method === 'ui/update-model-context') {
+          window.contexts.push(params); send({ id, result: {} });
+        } else if (method === 'tools/call') {
+          if (window.paused) window.finishRender = () => send({ id, result: { isError: true, content: [{ type: 'text', text: 'Offline' }] } });
+          else send({ id, result: { content: [{ type: 'image', mimeType: 'image/png', data: png }] } });
+        }
+      });
+      window.reopen();
+    }, { html, png });
+    const frame = page.frameLocator('#app');
+    await frame.locator('.recent img').waitFor();
+    const thumb = await frame.locator('.recent img').getAttribute('src');
+    assert.notEqual(thumb, `data:image/png;base64,${png}`);
+    assert.equal(await frame.locator('.recent img').evaluate(img => img.naturalWidth <= 192 && img.naturalHeight <= 192), true);
+    assert.equal(await page.evaluate(() => window.savedWidget.privateContent.unrelated), true);
+    assert.equal(await page.evaluate(() => window.savedWidget.modelContent), 'Existing context');
+    if (process.env.PREVIEW_LIBRARY_RECENT_EVIDENCE) await page.screenshot({ path: `${process.env.PREVIEW_LIBRARY_RECENT_EVIDENCE}/fresh-preview.png` });
+    await page.evaluate(() => { window.paused = true; window.reopen(); });
+    await frame.locator('#pane .status').getByText('Showing last successful render', { exact: false }).waitFor();
+    assert.equal(await frame.locator('#pane img').getAttribute('src'), thumb);
+    await page.waitForFunction(() => !!window.finishRender);
+    await page.evaluate(() => window.finishRender());
+    await frame.locator('#pane .error').getByText('Offline', { exact: false }).waitFor();
+    assert.equal(await frame.locator('#pane img').getAttribute('src'), thumb);
+    const evidence = process.env.PREVIEW_LIBRARY_RECENT_EVIDENCE;
+    if (evidence) await page.screenshot({ path: `${evidence}/cached-preview.png` });
+    await frame.locator('#designs-tab').click();
+    for (let n = 0; n < 10; n++) await frame.locator('#tree > .row').getByText(`Design ${n}`, { exact: true }).click();
+    assert.equal(await page.evaluate(() => window.savedWidget.privateContent.composePreviewRecents.items.length), 8);
+    await frame.getByRole('button', { name: 'Clear recent items' }).click();
+    assert.equal(await frame.locator('.recents').count(), 0);
+    assert.equal(await page.evaluate(() => window.savedWidget.privateContent.composePreviewRecents.items.length), 0);
+    await page.evaluate(() => { window.throwPersistence = true; });
+    await frame.locator('#tree > .row').getByText('Design 1', { exact: true }).click();
+    await frame.getByRole('button', { name: 'Open in UI Builder' }).waitFor();
+    assert.equal(await frame.locator('.recent.row').count(), 1);
+    await page.evaluate(() => window.removeDesigns());
+    await frame.locator('#tree .empty').getByText('No .uid designs', { exact: false }).waitFor();
+    assert.equal(await frame.locator('.recent.row').count(), 0);
+    await page.evaluate(() => { window.otherProject = true; window.reopen(); });
+    await frame.locator('#pane h2').getByText('ListScreenPreview', { exact: true }).waitFor();
+    assert.equal(await frame.locator('#pane img').count(), 0);
   } finally { await browser.close(); }
 });
