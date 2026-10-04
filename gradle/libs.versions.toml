@@ -346,7 +346,7 @@ composeai-contracts = "3.17.0"
 # height change (compose-ui-builder#438), grows a runtime-drawn frame when its layout changes after
 # the first frame (compose-ui-builder#430), and draws theme typefaces in device previews
 # (compose-ui-builder#434).
-composeai-ui-builder = "3.80.0"
+composeai-ui-builder = "3.82.0"
 kotlinx-coroutines = "1.11.0"
 kotlinx-serialization = "1.11.0"
 ktor = "3.6.0"
