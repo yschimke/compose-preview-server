@@ -270,12 +270,24 @@ class DaemonMcpServer(
       }
     }
 
+  /**
+   * Projects only [libraryProjects]' sweep of the machine-wide [WorkspaceStore] brought into this
+   * process: other chats' builds. The library lists them, but design discovery never scans them, so
+   * a `.uid` in another chat's workspace stays out of this session (#1358). Registering one, or
+   * restoring it from this session's own roots, claims it back.
+   */
+  private val storeOnlyProjects: MutableSet<WorkspaceId> = ConcurrentHashMap.newKeySet()
+
   /** The `previews_library` sidebar app (#1241); native profile only. */
   private val previewLibrary =
     PreviewLibrary(
       designs = {
         LocalDesignDiscovery.discover(
-          activeDesignRoots.all() + supervisor.listProjects().map { it.path }
+          activeDesignRoots.all() +
+            supervisor
+              .listProjects()
+              .filter { it.workspaceId !in storeOnlyProjects }
+              .map { it.path }
         )
       },
       snapshot = { projectId -> libraryProjects(projectId) },
@@ -3197,6 +3209,7 @@ class DaemonMcpServer(
     modules: List<String>,
   ): RegisteredProject {
     val project = supervisor.registerProject(dir, rootName, modules)
+    storeOnlyProjects -= project.workspaceId
     sessions.forEach { it.notifyResourceListChanged() }
     return project
   }
@@ -3211,12 +3224,20 @@ class DaemonMcpServer(
     val candidates = tried.dirs
     preferredRoots = candidates
     if (supervisor.listProjects().isNotEmpty()) {
+      // A build of these roots that the library's sweep restored first is this session's own.
+      val wanted = candidates.map { runCatching { it.canonicalFile }.getOrDefault(it) }
+      supervisor
+        .listProjects()
+        .filter { p -> wanted.any { p.path.startsWith(it) || it.startsWith(p.path) } }
+        .forEach { storeOnlyProjects -= it.workspaceId }
       registerNestedBuilds(candidates)
       return
     }
     lastTried = tried
     // After a restart, a build registered before (workspaces.json) comes back under its old id.
-    if (supervisor.restoreMatching(candidates).isNotEmpty()) {
+    val restored = supervisor.restoreMatching(candidates)
+    restored.forEach { storeOnlyProjects -= it.workspaceId }
+    if (restored.isNotEmpty()) {
       sessions.forEach { it.notifyResourceListChanged() }
     }
     // A root that is not a build itself: the build around it, else the builds up to two levels
@@ -4282,7 +4303,11 @@ class DaemonMcpServer(
   private fun libraryProjects(projectId: String?): List<PreviewLibrary.Project> {
     // The global sidebar may use a different process (and roots) from the chat that registered
     // the build. Restore remembered ids lazily: browsing must not start every build's daemons.
-    supervisor.workspaceStore.all().forEach { supervisor.project(WorkspaceId(it.id)) }
+    val live = supervisor.listProjects().mapTo(HashSet()) { it.workspaceId }
+    supervisor.workspaceStore.all().forEach { entry ->
+      val id = WorkspaceId(entry.id)
+      if (id !in live && supervisor.project(id) != null) storeOnlyProjects += id
+    }
     val projects = supervisor.listProjects().sortedBy { it.rootProjectName }
     projects.firstOrNull { it.workspaceId.value == projectId }?.let(::warmUp)
     return projects.map { project ->

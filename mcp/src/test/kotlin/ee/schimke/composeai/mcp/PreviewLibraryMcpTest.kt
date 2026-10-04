@@ -194,6 +194,37 @@ class PreviewLibraryMcpTest {
   }
 
   @Test
+  fun `library lists a restored project but not the designs inside it`() {
+    val file = File(tmp.root, "workspaces.json")
+    val sidebarSupervisor =
+      DaemonSupervisor(
+        descriptorProvider = FakeDescriptorProvider(),
+        clientFactory = FakeDaemonClientFactory(),
+        workspaceStore = WorkspaceStore(file),
+      )
+    closers += { sidebarSupervisor.shutdown() }
+    // Another chat's build, known only through the machine-wide store.
+    val other = File(tmp.root, "other-chat-project").apply { mkdirs() }
+    File(other, "secret.uid").writeText("another chat's design")
+    WorkspaceStore(file).remember("chat-project", other, "From another chat")
+    val ownRoot = tmp.newFolder("own-root")
+    val own = File(ownRoot, "mine.uid").apply { writeText("this session's design") }
+    val client = connect(projectSupervisor = sidebarSupervisor, workingDirectory = ownRoot)
+    tools(client)
+    repeat(2) {
+      val data =
+        client
+          .callTool(PreviewLibrary.TOOL, JsonObject(emptyMap()))
+          .raw["structuredContent"]!!
+          .jsonObject
+      assertThat(data["projects"]!!.jsonArray.single().jsonObject["id"]!!.jsonPrimitive.content)
+        .isEqualTo("chat-project")
+      assertThat(data["designs"]!!.jsonArray.map { it.jsonObject["path"]!!.jsonPrimitive.content })
+        .containsExactly(own.canonicalPath)
+    }
+  }
+
+  @Test
   fun `library finds uid designs from another active non Gradle session`() {
     val directory = tmp.newFolder("active-roots")
     val chat = ActiveDesignRoots(directory, scope = "test-host")
