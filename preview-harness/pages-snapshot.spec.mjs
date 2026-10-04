@@ -782,7 +782,7 @@ async function sheetPoint(page, ux, uy) {
 async function revealStage(page) {
   await page.evaluate(() => {
     const stage = document.querySelector(".cp-page-stage");
-    const bar = document.querySelector(".cp-page-controls");
+    const bar = document.querySelector(".cp-page-toolbar");
     // Where the stage's top edge would have to be for the bar to clear it, plus a margin so a
     // point aimed AT that edge is still the sheet's.
     const clearance = bar.getBoundingClientRect().height + 24;
@@ -1438,6 +1438,31 @@ const FIXTURE_STATES = [
       await expect(
         page.locator(".cp-compare-bug-disclosure[open] .cp-compare-bug-asof"),
       ).toBeVisible();
+    },
+  },
+  {
+    fixture: "serve-design-page",
+    suffix: "mobile-content",
+    viewport: { width: 390, height: 844 },
+    parkPointer: true,
+    apply: async (page) => {
+      await expect(page.locator(".cp-page-options")).not.toHaveAttribute("open", "");
+      await expect(page.getByRole("button", { name: "Zoom in", exact: true })).toBeVisible();
+      const stage = await page.locator(".cp-page-stage").boundingBox();
+      expect(stage.height).toBeGreaterThan(450);
+      expect(stage.y).toBeLessThan(260);
+      expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(390);
+      const sheet = page.locator(".cp-page-scroll");
+      await sheet.evaluate((element) => { element.scrollLeft = 120; });
+      expect(await sheet.evaluate((element) => element.scrollLeft)).toBeGreaterThan(0);
+      await page.getByRole("button", { name: "Zoom in", exact: true }).click();
+      expect(await zoomPercent(page)).toBeGreaterThan(100);
+      await page.locator(".cp-page-zoom-reset").click();
+      expect(await zoomPercent(page)).toBe(100);
+      await sheet.evaluate((element) => { element.scrollLeft = 0; });
+      await page.locator(".cp-page-options > summary").click();
+      await expect(page.locator(".cp-page-controls")).toBeVisible();
+      await page.locator(".cp-page-options > summary").click();
     },
   },
   {

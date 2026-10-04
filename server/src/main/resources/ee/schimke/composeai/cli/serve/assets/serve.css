@@ -4981,7 +4981,7 @@ cp-page-zoom button:focus-visible {
 
    Above the stage's own layers (the overlays and the tip) but below the header's 80: the sheet
    scrolls under this bar, and this bar scrolls under the site's. */
-.cp-page-controls {
+.cp-page-toolbar {
   position: sticky;
   top: var(--site-header-height);
   z-index: 19;
@@ -5683,4 +5683,36 @@ body { padding-left: max(28px, env(safe-area-inset-left, 0px));
 .cp-design-duplicate > summary:focus-visible {
   outline: 2px solid var(--cp-accent);
   outline-offset: 2px;
+}
+
+/* Keep the sheet ahead of its audit metadata on phones. Wide Figma pages retain
+   a useful reading scale and scroll within their own region, never the document. */
+.cp-page-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 0.9rem; }
+.cp-page-options > summary { cursor: pointer; }
+.cp-page-scroll { min-width: 0; }
+.cp-page-touch-hint { display: none; }
+@media (min-width: 721px) {
+  .cp-page-options > summary { display: none; }
+  .cp-page-options::details-content { content-visibility: visible; }
+  .cp-page-options:not([open]) > .cp-page-controls { display: flex; }
+}
+@media (max-width: 720px) {
+  #cp-design-page { display: flex; flex-direction: column; }
+  .cp-page-touch-hint { display: block; margin: 0 0 0.5rem; color: var(--cp-fg-muted); font-size: 0.72rem; }
+  #cp-design-page > .cp-head { margin: 0 0 0.35rem; font-size: 1.35rem; }
+  #cp-design-page > .cp-sub { order: 3; margin: 1rem 0 0; font-size: 0.8rem; }
+  #cp-design-page > .cp-page-links { order: 4; margin: 0.5rem 0; }
+  .cp-page-toolbar { gap: 0.4rem; justify-content: space-between; padding: 0.25rem 0; margin-bottom: 0.5rem; }
+  .cp-page-options > summary { min-height: 44px; align-content: center; font-size: 0.8rem; }
+  .cp-page-options[open] { flex-basis: 100%; }
+  .cp-page-controls { padding: 0.5rem 0; gap: 0.7rem; }
+  .cp-page-controls input[type="checkbox"] { min-width: 24px; min-height: 24px; }
+  .cp-page-scroll { overflow-x: auto; overscroll-behavior-x: contain; border-radius: 12px; }
+  .cp-page-scroll:focus-visible { outline: 2px solid var(--cp-accent); outline-offset: 2px; }
+  .cp-page-scroll .cp-page-stage { width: max(100%, calc(60svh * var(--cp-page-aspect, 1.2))); }
+  #cp-design-page cp-page-zoom[hidden] { display: inline-flex; }
+  #cp-design-page cp-page-zoom button { min-width: 44px; min-height: 44px; }
+  #cp-design-page .cp-page-zoom-level { display: none; }
+  .cp-page-layout { gap: 0.75rem; }
+  .cp-page-nodes { font-size: 0.8rem; }
 }

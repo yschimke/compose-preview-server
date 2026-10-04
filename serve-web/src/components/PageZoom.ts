@@ -398,11 +398,21 @@ export class PageZoom extends VueElement {
 
     private step(factor: number, eased = true): void {
         const box = this.stageBox();
+        // A phone shows a horizontally scrollable slice of the sheet. Zoom about
+        // that visible slice, not the middle of the offscreen full-width stage.
+        const viewport = this.stage
+            ?.closest(".cp-page-scroll")
+            ?.getBoundingClientRect();
+        const left = Math.max(box.left, viewport?.left ?? box.left);
+        const right = Math.min(
+            box.left + box.width,
+            viewport?.right ?? box.left + box.width,
+        );
         this.apply(
             zoomAbout(
                 this.view,
                 box,
-                box.left + box.width / 2,
+                (left + right) / 2,
                 box.top + box.height / 2,
                 factor,
             ),
