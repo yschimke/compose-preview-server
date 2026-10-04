@@ -162,6 +162,13 @@ class ServeHeroImages(private val cacheDir: java.io.File? = null) {
 
   private val cachedHeroes = ConcurrentHashMap<String, Hero>()
 
+  /**
+   * Per cache key, the [Hero.fileName] last written to (or read from) [cacheDir]. Kept apart from
+   * [cachedHeroes], which is updated before the write, so a write that fails is retried by the next
+   * [remember] instead of being mistaken for one that landed.
+   */
+  private val persistedFileNames = ConcurrentHashMap<String, String>()
+
   private fun cacheKey(config: CatalogLoadTracker.Config): String =
     sha256Hex("${config.system}\n${config.repo}\n${config.branch}".toByteArray())
 
@@ -189,6 +196,7 @@ class ServeHeroImages(private val cacheDir: java.io.File? = null) {
       }
         .getOrNull() ?: return null
     cachedHeroes[key] = hero
+    persistedFileNames[key] = hero.fileName
     byFileName[hero.fileName] = hero
     return hero
   }
@@ -196,8 +204,9 @@ class ServeHeroImages(private val cacheDir: java.io.File? = null) {
   /** Atomic replacement keeps a restart from reading a partially written thumbnail. */
   fun remember(config: CatalogLoadTracker.Config, hero: Hero) {
     val key = cacheKey(config)
-    if (cachedHeroes.put(key, hero)?.fileName == hero.fileName) return
+    cachedHeroes[key] = hero
     val dir = cacheDir ?: return
+    if (persistedFileNames[key] == hero.fileName) return
     runCatching {
       dir.mkdirs()
       val temp = java.io.File.createTempFile(key, ".tmp", dir)
@@ -216,6 +225,7 @@ class ServeHeroImages(private val cacheDir: java.io.File? = null) {
       } finally {
         temp.delete()
       }
+      persistedFileNames[key] = hero.fileName
     }
       .onFailure {
         System.err.println("serve: could not cache hero for ${config.system}: ${it.message}")

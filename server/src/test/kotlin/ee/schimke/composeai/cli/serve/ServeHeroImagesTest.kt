@@ -51,6 +51,31 @@ class ServeHeroImagesTest {
     }
   }
 
+  @Test
+  fun `a hero whose cache write failed is written by the next remember`() {
+    val parent = java.nio.file.Files.createTempDirectory("hero-retry").toFile()
+    try {
+      val dir = java.io.File(parent, "cache")
+      // A plain file where the cache directory should be makes the first write fail, even as root.
+      dir.writeText("not a directory")
+      val config =
+        CatalogLoadTracker.Config("sample", true, "owner/repo", "design-artifacts/sample")
+      val images = ServeHeroImages(dir)
+      val hero = assertNotNull(images.bake(png(320, 200), null))
+      images.remember(config, hero)
+      assertSame(hero, images.cached(config))
+      assertTrue(dir.isFile)
+
+      dir.delete()
+      images.remember(config, hero)
+      val written = assertNotNull(dir.listFiles()).single()
+      assertTrue(written.name.endsWith(".hero"))
+      assertEquals(hero.fileName, assertNotNull(ServeHeroImages(dir).cached(config)).fileName)
+    } finally {
+      parent.deleteRecursively()
+    }
+  }
+
   private fun png(width: Int, height: Int, paint: (BufferedImage) -> Unit = {}): ByteArray {
     val img = BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB)
     val g = img.createGraphics()
