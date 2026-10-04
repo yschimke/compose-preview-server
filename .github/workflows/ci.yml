@@ -178,6 +178,11 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: Verify analytics bootstrap
+        run: |
+          python3 deploy/analytics/test-bootstrap.py
+          bash -n deploy/analytics/setup.sh deploy/analytics/backup.sh
+          UMAMI_DB_PASSWORD=test UMAMI_APP_SECRET=test UMAMI_TWO_FACTOR_KEY=test docker compose -f deploy/analytics/docker-compose.yml config --quiet
       - name: Verify deployment scripts
         run: |
           # Both directories: the box's own scripts live in deploy/image/, and the reconcile that

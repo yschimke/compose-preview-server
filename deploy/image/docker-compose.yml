@@ -62,6 +62,9 @@ services:
     init: true
     pull_policy: always
     environment:
+      SERVE_UMAMI_ENABLED: "${SERVE_UMAMI_ENABLED:-0}"
+      SERVE_UMAMI_URL: "${SERVE_UMAMI_URL:-}"
+      SERVE_UMAMI_WEBSITE_ID: "${SERVE_UMAMI_WEBSITE_ID:-}"
       DOMAIN: "${DOMAIN:-}"
       # Public preview server by default (preview.coo.ee): open, serving our
       # published design systems. The in-browser CMP Wasm tier rides --catalogs —
