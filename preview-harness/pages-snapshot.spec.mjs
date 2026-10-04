@@ -457,6 +457,7 @@ const STYLED_FIXTURES = new Set([
   // shot an unstyled column of links, so a change to any of that moved no baseline at all —
   // which is exactly how the section spacing and the card hover reached production unreviewed.
   "serve-home-index",
+  "serve-home-loading",
   // The catalog landing is the same claim one level down: the navigation, the group headings and
   // the preview-card grid ARE the page, and its cards share the front door's hover treatment.
   "serve-landing-public",

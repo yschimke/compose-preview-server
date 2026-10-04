@@ -6,6 +6,24 @@ import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class CatalogLoadTrackerTest {
+  @Test
+  fun `visitor promotes pending catalog after the current fetch without moving front page order`() {
+    val tracker =
+      CatalogLoadTracker(
+        listOf("first", "second", "third").map {
+          CatalogLoadTracker.Config(it, true, "owner/repo", "design-artifacts/$it")
+        }
+      )
+    assertEquals("first", tracker.nextInitialLoad()?.system)
+    assertFalse(tracker.prioritize("first"))
+    assertFalse(tracker.prioritize("unknown"))
+    assertTrue(tracker.prioritize("third"))
+    assertFalse(tracker.prioritize("third"))
+    assertEquals("third", tracker.nextInitialLoad()?.system)
+    assertEquals("second", tracker.nextInitialLoad()?.system)
+    assertEquals(null, tracker.nextInitialLoad())
+    assertEquals(listOf("first", "second", "third"), tracker.snapshot().map { it.config.system })
+  }
 
   private fun tracker() =
     CatalogLoadTracker(

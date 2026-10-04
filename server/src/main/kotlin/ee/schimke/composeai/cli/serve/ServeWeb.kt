@@ -6767,14 +6767,19 @@ ${captureControlsHtml().prependIndent("          ")}
         if (componentBrowser) "" else "\n            <div class=\"cp-id\">$sysId</div>"
       val searchAttr =
         " data-browser-search=\"${WebEscaping.htmlEscape("${s.title} ${s.system} ${s.sourceRepo.orEmpty()}").lowercase()}\""
+      val href = "/${WebEscaping.urlEncodeSegment(s.system)}/$suffix"
+      val image =
+        s.heroImage?.let { hero ->
+          "<img loading=\"eager\" decoding=\"async\" width=\"${hero.width}\" height=\"${hero.height}\" alt=\"$title preview\" src=\"${WebEscaping.htmlEscape(hero.path)}$suffix\">"
+        } ?: "<span class=\"cp-sys-noimg\">loading…</span>"
       return """
-      <div class="cp-card cp-sys cp-sys-loading" aria-busy="true"$searchAttr data-cp-system="$sysId">
-        <div class="cp-imgwrap"><span class="cp-sys-noimg">loading…</span></div>
+      <a href="$href" class="cp-card cp-sys cp-sys-loading" aria-busy="true"$searchAttr data-cp-system="$sysId">
+        <div class="cp-imgwrap">$image</div>
         <div class="cp-meta">
           <div class="cp-sys-title">$title</div>$technicalId
-          <div class="cp-sys-foot">loading…</div>
+          <div class="cp-sys-foot" role="status">Loading catalog…</div>
         </div>
-      </div>
+      </a>
       """
         .trimIndent()
     }

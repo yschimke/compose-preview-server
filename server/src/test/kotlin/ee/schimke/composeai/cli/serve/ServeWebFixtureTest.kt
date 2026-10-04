@@ -4438,6 +4438,19 @@ class ServeWebFixtureTest {
         "serve-landing.html" to landing,
         "serve-landing-public.html" to landingPublic,
         "serve-home-index.html" to homeIndex,
+        "serve-home-loading.html" to
+          ServeWeb.homeIndexPage(
+            homeSystems.take(3).mapIndexed { index, system ->
+              system.copy(
+                loading = true,
+                heroPreviewId = null,
+                heroImage = if (index == 0) system.heroImage else null,
+              )
+            },
+            "",
+            isPublic = true,
+            version = version,
+          ),
         "serve-viewer.html" to viewer,
         "serve-viewer-spatial.html" to spatialViewer,
         "serve-viewer-samples.html" to samplesViewer,

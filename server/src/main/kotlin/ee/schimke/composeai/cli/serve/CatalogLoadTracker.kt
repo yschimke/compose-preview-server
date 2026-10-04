@@ -190,6 +190,8 @@ class CatalogLoadTracker(
     synchronized(lock) {
       if (states.remove(system) == null) return false
       ordered.removeAll { it.system == system }
+      requestedLoads.remove(system)
+      claimedLoads.remove(system)
       true
     }
 
@@ -294,6 +296,31 @@ class CatalogLoadTracker(
         compareByDescending<State> { it.config.designSystem }
           .thenByDescending { it.config.loadPriority }
       )
+
+  private val requestedLoads = linkedSetOf<String>()
+  private val claimedLoads = mutableSetOf<String>()
+
+  /** Promote a pending catalog without interrupting the fetch already in progress. */
+  fun prioritize(system: String): Boolean =
+    synchronized(lock) {
+      if (states[system]?.loadState != "pending" || system in claimedLoads) return false
+      requestedLoads.add(system)
+    }
+
+  /** Claim one startup fetch at a time, so requests can change the remaining order. */
+  fun nextInitialLoad(): Config? =
+    synchronized(lock) {
+      val pending =
+        loadOrder().filter { it.loadState == "pending" && it.config.system !in claimedLoads }
+      val next =
+        requestedLoads.toList().asReversed().firstNotNullOfOrNull { id ->
+          pending.firstOrNull { it.config.system == id }
+        } ?: pending.firstOrNull()
+      next?.config?.also {
+        claimedLoads.add(it.system)
+        requestedLoads.remove(it.system)
+      }
+    }
 
   /** Catalogs with a usable registered copy; used to seed only successful branch heads. */
   /**

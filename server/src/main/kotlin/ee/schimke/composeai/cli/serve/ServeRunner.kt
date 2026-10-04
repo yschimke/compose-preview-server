@@ -3800,6 +3800,7 @@ public class ServeRunner(
         appCatalogSessions = configuredApps,
         sites = sites,
         catalogLoads = catalogLoads,
+        heroCacheDir = catalogCacheDirFlag?.takeIf { it != "none" }?.let { File(it, "heroes") },
         catalogRefresh = catalogRefresh,
         catalogFeed = catalogFeed,
         maxLiveSeats = liveSeats,
@@ -4493,7 +4494,8 @@ public class ServeRunner(
         try {
           // Fetch order, not front-page order: a box's load-bearing catalogs come back first
           // after a restart even though their cards stay where the operator put them (#4231).
-          for (seed in loads.loadOrder().map { it.config }) {
+          while (true) {
+            val seed = loads.nextInitialLoad() ?: break
             if (closed.get()) return@execute
             val (config, result) =
               synchronized(catalogRegistrationLock) {

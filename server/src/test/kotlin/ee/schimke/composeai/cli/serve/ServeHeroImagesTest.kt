@@ -27,6 +27,29 @@ import kotlin.test.assertTrue
  * addressed, and the bake happens once per catalog rather than once per visitor.
  */
 class ServeHeroImagesTest {
+  @Test
+  fun `last hero survives restart and does not follow a changed source`() {
+    val dir = java.nio.file.Files.createTempDirectory("hero-restart").toFile()
+    try {
+      val config =
+        CatalogLoadTracker.Config("sample", true, "owner/repo", "design-artifacts/sample")
+      val images = ServeHeroImages(dir)
+      val hero = assertNotNull(images.bake(png(320, 200), null))
+      images.remember(config, hero)
+      val restarted = ServeHeroImages(dir)
+      val restored = assertNotNull(restarted.cached(config))
+      assertEquals(hero.fileName, restored.fileName)
+      assertTrue(hero.bytes.contentEquals(restored.bytes))
+      assertEquals(hero.cssWidth, restored.cssWidth)
+      assertEquals(hero.cssHeight, restored.cssHeight)
+      assertSame(restored, restarted.byFileName(hero.fileName))
+      assertNull(restarted.cached(config.copy(repo = "other/repo")))
+      dir.listFiles()!!.single().writeText("broken")
+      assertNull(ServeHeroImages(dir).cached(config))
+    } finally {
+      dir.deleteRecursively()
+    }
+  }
 
   private fun png(width: Int, height: Int, paint: (BufferedImage) -> Unit = {}): ByteArray {
     val img = BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB)

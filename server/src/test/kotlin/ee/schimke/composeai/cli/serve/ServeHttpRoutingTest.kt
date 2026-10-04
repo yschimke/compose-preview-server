@@ -1821,6 +1821,10 @@ class ServeHttpRoutingTest {
       )
     val loads = CatalogLoadTracker(listOf(config("compose-m3"), config("jetnews"), config("reply")))
     loads.recordFailure("reply", "could not parse catalog.json")
+    val heroDir = java.nio.file.Files.createTempDirectory("pending-hero").toFile()
+    val hero = assertNotNull(ServeHeroImages(heroDir).bake(png(), null))
+    ServeHeroImages(heroDir).remember(config("jetnews"), hero)
+    val heroPath = "/hero/jetnews/${hero.fileName}"
     val homeServer =
       ServeHttpServer(
           host = "127.0.0.1",
@@ -1831,19 +1835,45 @@ class ServeHttpRoutingTest {
           isPublic = true,
           catalogSessions = listOf("compose-m3", "jetnews", "reply"),
           catalogLoads = loads,
+          heroCacheDir = heroDir,
         )
         .also { it.start() }
     try {
+      // A previously minted immutable URL works before even opening the home page.
+      client
+        .newCall(Request.Builder().url("http://127.0.0.1:${homeServer.port}$heroPath").build())
+        .execute()
+        .use {
+          assertEquals(200, it.code)
+          assertTrue(hero.bytes.contentEquals(it.body.bytes()))
+        }
       val body =
         client
           .newCall(Request.Builder().url("http://127.0.0.1:${homeServer.port}/").build())
           .execute()
           .use { it.body.string() }
+      assertTrue(body.contains("src=\"$heroPath\""))
       val card =
-        Regex("""<div class="cp-card cp-sys cp-sys-loading"[^>]*data-cp-system="jetnews">""")
+        Regex(
+          """<a href="/jetnews/" class="cp-card cp-sys cp-sys-loading"[^>]*data-cp-system="jetnews">"""
+        )
       assertTrue(card.containsMatchIn(body), "the pending catalog keeps a loading card: $body")
-      // No link: `/jetnews/` does not exist until the load lands.
-      assertFalse(body.contains("href=\"/jetnews/"), "a loading card must not link anywhere: $body")
+      assertTrue(body.contains("href=\"/jetnews/"), "a pending catalog can be opened: $body")
+      client
+        .newCall(Request.Builder().url("http://127.0.0.1:${homeServer.port}/jetnews/").build())
+        .execute()
+        .use {
+          assertEquals(503, it.code)
+          assertEquals("3", it.header("Refresh"))
+          assertTrue(it.body.string().contains("Loading catalog…"))
+        }
+      assertEquals("jetnews", loads.nextInitialLoad()?.system)
+      catalogRegistry.register("jetnews", host = bundle("jetnews"), pinned = true)
+      loads.recordSuccess("jetnews")
+      client
+        .newCall(Request.Builder().url("http://127.0.0.1:${homeServer.port}/jetnews/").build())
+        .execute()
+        .use { assertEquals(200, it.code) }
       // The loaded catalog still renders as before.
       assertTrue(body.contains("href=\"/compose-m3/"), "the loaded catalog keeps its card: $body")
       // A failed load is not on its way, so it gets no card.
@@ -1851,6 +1881,7 @@ class ServeHttpRoutingTest {
     } finally {
       homeServer.stop()
       catalogRegistry.close()
+      heroDir.deleteRecursively()
     }
   }
 

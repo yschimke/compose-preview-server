@@ -36,6 +36,8 @@ import kotlin.math.roundToInt
  * - **Content-addressed.** The file name is a hash of the baked bytes, so a republished catalog
  *   gets a new URL and the old one can be cached forever ([ServeHttpServer] serves the `/hero/`
  *   lane `immutable`). No revalidation, no request on a repeat visit.
+ * - **Persisted when a cache directory is configured.** The last successful hero can be restored
+ *   before its catalog loads after a restart.
  * - **Held in memory.** Serving is a map lookup and a byte-array write: no session lease, no render
  *   permit, no disk read, nothing that can queue behind a catalog render.
  *
@@ -60,7 +62,7 @@ import kotlin.math.roundToInt
  *   render lane already exists in both; the hash rides as a query param so the URL still changes
  *   when the pixels do, which is what makes the response `immutable`.
  */
-class ServeHeroImages {
+class ServeHeroImages(private val cacheDir: java.io.File? = null) {
 
   /** One baked hero: the bytes to serve, how to name/validate them, and the size to lay out. */
   data class Hero(
@@ -156,6 +158,68 @@ class ServeHeroImages {
     val hero = png?.let { bake(it, crop) }
     perHost[previewId] = Optional.ofNullable(hero)
     return hero
+  }
+
+  private val cachedHeroes = ConcurrentHashMap<String, Hero>()
+
+  private fun cacheKey(config: CatalogLoadTracker.Config): String =
+    sha256Hex("${config.system}\n${config.repo}\n${config.branch}".toByteArray())
+
+  /**
+   * Last successful thumbnail, scoped to the configured source, restored without a catalog host.
+   */
+  fun cached(config: CatalogLoadTracker.Config): Hero? {
+    val key = cacheKey(config)
+    cachedHeroes[key]?.let {
+      return it
+    }
+    val dir = cacheDir ?: return null
+    val hero =
+      runCatching {
+        val file = java.io.File(dir, "$key.hero")
+        if (file.length() !in 1..(4L * 1024 * 1024)) return null
+        java.io.DataInputStream(file.inputStream()).use { input ->
+          val width = input.readInt()
+          val height = input.readInt()
+          if (width !in 1..DISPLAY_CAP || height !in 1..DISPLAY_CAP) return null
+          val bytes = input.readBytes()
+          val hash = sha256Hex(bytes).take(HASH_CHARS)
+          Hero(bytes, "$hash.png", "\"$hash\"", width, height)
+        }
+      }
+        .getOrNull() ?: return null
+    cachedHeroes[key] = hero
+    byFileName[hero.fileName] = hero
+    return hero
+  }
+
+  /** Atomic replacement keeps a restart from reading a partially written thumbnail. */
+  fun remember(config: CatalogLoadTracker.Config, hero: Hero) {
+    val key = cacheKey(config)
+    if (cachedHeroes.put(key, hero)?.fileName == hero.fileName) return
+    val dir = cacheDir ?: return
+    runCatching {
+      dir.mkdirs()
+      val temp = java.io.File.createTempFile(key, ".tmp", dir)
+      try {
+        java.io.DataOutputStream(temp.outputStream()).use {
+          it.writeInt(hero.cssWidth)
+          it.writeInt(hero.cssHeight)
+          it.write(hero.bytes)
+        }
+        java.nio.file.Files.move(
+          temp.toPath(),
+          java.io.File(dir, "$key.hero").toPath(),
+          java.nio.file.StandardCopyOption.ATOMIC_MOVE,
+          java.nio.file.StandardCopyOption.REPLACE_EXISTING,
+        )
+      } finally {
+        temp.delete()
+      }
+    }
+      .onFailure {
+        System.err.println("serve: could not cache hero for ${config.system}: ${it.message}")
+      }
   }
 
   /** The baked hero a `/hero/<system>/<fileName>` request names, or null when unknown. */
