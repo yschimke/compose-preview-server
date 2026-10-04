@@ -264,13 +264,20 @@ Everything above onboards catalogs **one at a time, against this box** — a `cu
 when the choosing already happened somewhere else: `yschimke/compose-preview-imports` exists so
 that importing a third-party project is a reviewed pull request, and a merged import that still
 needs a second, manual, out-of-band request here is an import that silently 404s until somebody
-remembers.
+remembers. Its builds publish to its output repository, `yschimke/compose-preview-imports-out`,
+which carries both the delivery branches and the registry document — and that output repository is
+what a box nominates.
 
 So a box can nominate one or more **registry projects** instead:
 
 ```bash
-SERVE_CATALOG_REGISTRY=yschimke/compose-preview-imports
+SERVE_CATALOG_REGISTRY=yschimke/compose-preview-imports-out
 ```
+
+A box set up while that document still lived in the source repository nominates
+`yschimke/compose-preview-imports`; re-running `setup.sh` re-points it (`env-migrations.sh`), or
+edit the line by hand and `docker compose up -d`. The nomination has to follow the document because a
+registry may serve only its own branches.
 
 Each nominated project publishes `.compose-preview/catalogs.json` on its default branch — the same
 document this box's own `catalogs.json` is, `groups` and `catalogs` included — and every catalog it

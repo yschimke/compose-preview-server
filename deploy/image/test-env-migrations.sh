@@ -125,5 +125,114 @@ else
   fail=$((fail + 1))
 fi
 
+# ---------------------------------------------------------------------------------------
+# migrate_imports_catalog_registry
+# ---------------------------------------------------------------------------------------
+
+# run_registry_case <name> <expected-return: changed|kept> <expected .env contents> <.env contents>
+run_registry_case() {
+  local name="$1" expect_rc="$2" expected="$3" input="$4"
+  local env_file="${TMP}/env" rc=0 actual
+  printf '%s' "${input}" > "${env_file}"
+  chmod 600 "${env_file}"
+  migrate_imports_catalog_registry "${env_file}" || rc=$?
+
+  local want_rc=0
+  [[ "${expect_rc}" == "changed" ]] || want_rc=1
+  actual="$(cat "${env_file}")"
+
+  if [[ "${rc}" -ne "${want_rc}" ]]; then
+    echo "FAIL ${name}: expected ${expect_rc} (rc ${want_rc}), got rc ${rc}"
+    fail=$((fail + 1))
+  elif [[ "${actual}" != "${expected%$'\n'}" ]]; then
+    echo "FAIL ${name}: .env contents differ"
+    diff <(printf '%s\n' "${expected%$'\n'}") <(printf '%s\n' "${actual}") || true
+    fail=$((fail + 1))
+  else
+    pass=$((pass + 1))
+  fi
+}
+
+run_registry_case "re-points the staging repository" changed \
+  "DOMAIN=preview.coo.ee
+SERVE_CATALOG_REGISTRY=yschimke/compose-preview-imports-out
+SERVE_TOKEN=abc123" \
+  "DOMAIN=preview.coo.ee
+SERVE_CATALOG_REGISTRY=yschimke/compose-preview-imports
+SERVE_TOKEN=abc123
+"
+
+run_registry_case "keeps quotes and export" changed \
+  "export SERVE_CATALOG_REGISTRY=\"yschimke/compose-preview-imports-out\"" \
+  "export SERVE_CATALOG_REGISTRY=\"yschimke/compose-preview-imports\"
+"
+
+run_registry_case "re-points only that item of a list" changed \
+  "SERVE_CATALOG_REGISTRY=acme/registry, yschimke/compose-preview-imports-out" \
+  "SERVE_CATALOG_REGISTRY=acme/registry, yschimke/compose-preview-imports
+"
+
+run_registry_case "keeps CRLF line endings" changed \
+  "$(printf 'SERVE_CATALOG_REGISTRY=yschimke/compose-preview-imports-out\r')" \
+  "$(printf 'SERVE_CATALOG_REGISTRY=yschimke/compose-preview-imports\r\n')"
+
+run_registry_case "keeps an inline comment" changed \
+  "SERVE_CATALOG_REGISTRY=yschimke/compose-preview-imports-out # staging registry" \
+  "SERVE_CATALOG_REGISTRY=yschimke/compose-preview-imports # staging registry
+"
+
+run_registry_case "keeps an inline comment after a quoted value" changed \
+  "SERVE_CATALOG_REGISTRY=\"yschimke/compose-preview-imports-out\" # staging" \
+  "SERVE_CATALOG_REGISTRY=\"yschimke/compose-preview-imports\" # staging
+"
+
+run_registry_case "keeps trailing whitespace" changed \
+  "SERVE_CATALOG_REGISTRY=yschimke/compose-preview-imports-out  " \
+  "SERVE_CATALOG_REGISTRY=yschimke/compose-preview-imports  
+"
+
+run_registry_case "does not read a comment as the value" kept \
+  "SERVE_CATALOG_REGISTRY=acme/registry # was yschimke/compose-preview-imports" \
+  "SERVE_CATALOG_REGISTRY=acme/registry # was yschimke/compose-preview-imports
+"
+
+run_registry_case "is idempotent" kept \
+  "SERVE_CATALOG_REGISTRY=yschimke/compose-preview-imports-out" \
+  "SERVE_CATALOG_REGISTRY=yschimke/compose-preview-imports-out
+"
+
+# A pinned ref names a branch of the SOURCE repository: deliberate, and not ours to guess at.
+run_registry_case "keeps a nomination pinned to a ref" kept \
+  "SERVE_CATALOG_REGISTRY=yschimke/compose-preview-imports@release" \
+  "SERVE_CATALOG_REGISTRY=yschimke/compose-preview-imports@release
+"
+
+run_registry_case "keeps an operator's own registry" kept \
+  "SERVE_CATALOG_REGISTRY=acme/compose-preview-imports" \
+  "SERVE_CATALOG_REGISTRY=acme/compose-preview-imports
+"
+
+run_registry_case "keeps a commented-out example" kept \
+  "# SERVE_CATALOG_REGISTRY=yschimke/compose-preview-imports" \
+  "# SERVE_CATALOG_REGISTRY=yschimke/compose-preview-imports
+"
+
+run_registry_case "leaves a file without SERVE_CATALOG_REGISTRY alone" kept \
+  "DOMAIN=preview.coo.ee" \
+  "DOMAIN=preview.coo.ee
+"
+
+mode_file="${TMP}/registry-mode-env"
+printf 'SERVE_TOKEN=abc123\nSERVE_CATALOG_REGISTRY=yschimke/compose-preview-imports\n' > "${mode_file}"
+chmod 600 "${mode_file}"
+migrate_imports_catalog_registry "${mode_file}" || true
+mode="$(stat -c '%a' "${mode_file}" 2>/dev/null || stat -f '%Lp' "${mode_file}")"
+if [[ "${mode}" == "600" ]]; then
+  pass=$((pass + 1))
+else
+  echo "FAIL registry rewrite preserves 0600 mode: got ${mode}"
+  fail=$((fail + 1))
+fi
+
 echo "${pass} passed, ${fail} failed"
 [[ "${fail}" -eq 0 ]]

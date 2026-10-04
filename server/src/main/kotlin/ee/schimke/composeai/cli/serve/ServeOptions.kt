@@ -442,7 +442,7 @@ public interface ServeOptions {
   public val catalogsUnlistedRaw: String?
 
   /**
-   * **Catalog registry projects** (`--catalog-registry yschimke/compose-preview-imports,…`; env
+   * **Catalog registry projects** (`--catalog-registry yschimke/compose-preview-imports-out,…`; env
    * `SERVE_CATALOG_REGISTRY`): GitHub projects that publish their own served set, rather than the
    * operator naming each catalog here.
    *
