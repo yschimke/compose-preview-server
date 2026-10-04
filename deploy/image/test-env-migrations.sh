@@ -176,6 +176,26 @@ run_registry_case "keeps CRLF line endings" changed \
   "$(printf 'SERVE_CATALOG_REGISTRY=yschimke/compose-preview-imports-out\r')" \
   "$(printf 'SERVE_CATALOG_REGISTRY=yschimke/compose-preview-imports\r\n')"
 
+run_registry_case "keeps an inline comment" changed \
+  "SERVE_CATALOG_REGISTRY=yschimke/compose-preview-imports-out # staging registry" \
+  "SERVE_CATALOG_REGISTRY=yschimke/compose-preview-imports # staging registry
+"
+
+run_registry_case "keeps an inline comment after a quoted value" changed \
+  "SERVE_CATALOG_REGISTRY=\"yschimke/compose-preview-imports-out\" # staging" \
+  "SERVE_CATALOG_REGISTRY=\"yschimke/compose-preview-imports\" # staging
+"
+
+run_registry_case "keeps trailing whitespace" changed \
+  "SERVE_CATALOG_REGISTRY=yschimke/compose-preview-imports-out  " \
+  "SERVE_CATALOG_REGISTRY=yschimke/compose-preview-imports  
+"
+
+run_registry_case "does not read a comment as the value" kept \
+  "SERVE_CATALOG_REGISTRY=acme/registry # was yschimke/compose-preview-imports" \
+  "SERVE_CATALOG_REGISTRY=acme/registry # was yschimke/compose-preview-imports
+"
+
 run_registry_case "is idempotent" kept \
   "SERVE_CATALOG_REGISTRY=yschimke/compose-preview-imports-out" \
   "SERVE_CATALOG_REGISTRY=yschimke/compose-preview-imports-out

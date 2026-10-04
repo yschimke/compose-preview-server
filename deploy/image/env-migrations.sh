@@ -83,10 +83,28 @@ _env_rewrite_imports_registry_line() {
     return 1
   fi
   value="${body#SERVE_CATALOG_REGISTRY=}"
-  value="${value%"${value##*[![:space:]]}"}"
-  if [[ ${#value} -ge 2 && ( "${value}" == \"*\" || "${value}" == \'*\' ) ]]; then
+  # Split off whatever follows the value — trailing whitespace and an inline
+  # comment — and carry it through unchanged. Compose's own rule: a quoted value
+  # ends at its closing quote; an unquoted one at the first whitespace-preceded
+  # `#`. Comparing with the comment still attached would never match, and a box
+  # whose line reads `…=yschimke/compose-preview-imports # registry` would be
+  # left on the legacy nomination without a word.
+  local suffix=""
+  if [[ "${value}" == \"* || "${value}" == \'* ]]; then
     quote="${value:0:1}"
-    value="${value:1:${#value}-2}"
+    local rest="${value:1}"
+    if [[ "${rest}" != *"${quote}"* ]]; then
+      printf '%s' "$1"
+      return 1
+    fi
+    value="${rest%%"${quote}"*}"
+    suffix="${rest#*"${quote}"}"
+  else
+    local re='^([^[:space:]]*([[:space:]]+[^#[:space:]][^[:space:]]*)*)([[:space:]].*)?$'
+    if [[ "${value}" =~ ${re} ]]; then
+      suffix="${BASH_REMATCH[3]}"
+      value="${BASH_REMATCH[1]}"
+    fi
   fi
   local -a items
   IFS=',' read -r -a items <<< "${value}"
@@ -103,7 +121,7 @@ _env_rewrite_imports_registry_line() {
     printf '%s' "$1"
     return 1
   fi
-  printf '%s' "${lead}${prefix}SERVE_CATALOG_REGISTRY=${quote}${out}${quote}${cr}"
+  printf '%s' "${lead}${prefix}SERVE_CATALOG_REGISTRY=${quote}${out}${quote}${suffix}${cr}"
 }
 
 # Re-point a SERVE_CATALOG_REGISTRY that nominates the import staging repository
