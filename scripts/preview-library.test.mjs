@@ -16,7 +16,7 @@ test('empty sidebar discovers registration, auto-selects, and keeps real cached 
     await page.evaluate(({ html, png }) => {
       const frame = document.getElementById('app');
       const uri = 'compose-preview://starter/_app/ListScreenPreview';
-      const preview = { uri, name: 'ListScreenPreview' };
+      const preview = { uri, name: 'ListScreenPreview', sourceFile: 'ListScreen.kt', sourceLine: 42 };
       window.calls = [];
       window.registered = false;
       window.discovered = false;
@@ -31,7 +31,11 @@ test('empty sidebar discovers registration, auto-selects, and keeps real cached 
         const { id, method, params } = e.data;
         if (!method) return;
         const reply = result => send({ id, result });
-        if (method === 'ui/initialize') {
+        if (method === 'ui/update-model-context') {
+          window.contexts ||= [];
+          window.contexts.push(params);
+          send({ id, result: {} });
+        } else if (method === 'ui/initialize') {
           reply({ hostContext: {}, hostCapabilities: { serverTools: {} } });
           send({ method: 'ui/notifications/tool-result', params: { structuredContent: structured() } });
         } else if (method === 'tools/call') {
@@ -54,6 +58,9 @@ test('empty sidebar discovers registration, auto-selects, and keeps real cached 
     await page.evaluate(() => { window.registered = true; });
     await frame.locator('#pane img').waitFor({ timeout: 15000 });
     assert.equal(await frame.locator('#pane img').getAttribute('src'), `data:image/png;base64,${png}`);
+    await frame.locator('.chat-context').getByText('Selection shared with chat', { exact: true }).waitFor();
+    assert.deepEqual(await page.evaluate(() => JSON.parse(window.contexts.at(-1).content[0].text).selection),
+      { kind: 'preview', host: 'local', uri: 'compose-preview://starter/_app/ListScreenPreview', name: 'ListScreenPreview', projectId: 'starter', projectName: 'ComposeStarter', module: ':app', sourceFile: 'ListScreen.kt', sourceLine: 42 });
     assert.equal(await page.evaluate(() => window.calls.filter(c => c.name === 'render_preview').length), 1);
     if (evidence) await page.screenshot({ path: `${evidence}/after.png` });
     await page.evaluate(() => { window.failRender = true; });
@@ -85,7 +92,11 @@ for (const { hostFiles, path, expectedUrl } of [
         const { id, method, params } = e.data;
         if (!method) return;
         window.calls.push({ method, params });
-        if (method === 'ui/initialize') {
+        if (method === 'ui/update-model-context') {
+          window.contexts ||= [];
+          window.contexts.push(params);
+          send({ id, result: {} });
+        } else if (method === 'ui/initialize') {
           send({ id, result: { hostCapabilities: { experimental: hostFiles ? { 'openai/files': {} } : {} }, hostContext: {} } });
           send({ method: 'ui/notifications/tool-result', params: { structuredContent: {
             schema: 'compose-preview-library/v1', mode: 'library', host: 'local', projects: [],
@@ -100,6 +111,9 @@ for (const { hostFiles, path, expectedUrl } of [
     await frame.locator('#search').fill('active chat');
     await frame.locator('#tree [role="button"]').click();
     assert.equal(await frame.locator('#pane .uri').textContent(), path);
+    await frame.locator('.chat-context').getByText('Selection shared with chat', { exact: true }).waitFor();
+    assert.deepEqual(await page.evaluate(() => JSON.parse(window.contexts.at(-1).content[0].text).selection),
+      { kind: 'local-design', host: 'local', id: path, name: 'Watch #1', path });
     if (process.env.PREVIEW_LIBRARY_DESIGN_EVIDENCE && hostFiles)
       await page.screenshot({ path: `${process.env.PREVIEW_LIBRARY_DESIGN_EVIDENCE}/local-designs.png` });
     await frame.getByRole('button', { name: 'Open in UI Builder' }).click();
@@ -108,6 +122,9 @@ for (const { hostFiles, path, expectedUrl } of [
     assert.deepEqual(call, hostFiles ? { method: 'openai/files/open', params: { path } }
       : { method: 'ui/open-link', params: { url: expectedUrl } });
     assert.equal(await page.evaluate(() => window.calls.filter(c => c.method === 'tools/call').length), 0);
+    await frame.locator('#previews-tab').click();
+    await page.waitForFunction(() => window.contexts.at(-1).content.length === 0);
+    assert.equal(await frame.locator('#pane .uri').count(), 0);
   } finally { await browser.close(); }
 });
 
@@ -123,7 +140,11 @@ test('hosted library lists designs through its existing authorized tools', async
       window.addEventListener('message', e => {
         if (e.source !== frame.contentWindow) return;
         const { id, method, params } = e.data;
-        if (method === 'ui/initialize') {
+        if (method === 'ui/update-model-context') {
+          window.contexts ||= [];
+          window.contexts.push(params);
+          send({ id, result: {} });
+        } else if (method === 'ui/initialize') {
           send({ id, result: { hostContext: {} } });
           send({ method: 'ui/notifications/tool-result', params: { structuredContent: {
             schema: 'compose-preview-library/v1', mode: 'library', host: 'hosted', projects: [],
@@ -142,9 +163,59 @@ test('hosted library lists designs through its existing authorized tools', async
     await frame.locator('#designs-tab').click();
     await frame.locator('#tree [role="button"]').click();
     await frame.locator('#pane .error').getByText('Export capability required').waitFor();
+    await frame.locator('.chat-context').getByText('Selection shared with chat', { exact: true }).waitFor();
+    assert.deepEqual(await page.evaluate(() => JSON.parse(window.contexts.at(-1).content[0].text).selection),
+      { kind: 'hosted-design', host: 'hosted', id: 'owned-design', name: 'Owned design' });
     assert.deepEqual(await page.evaluate(() => window.calls), [
       { name: 'ui_builder_list_designs', arguments: {} },
       { name: 'ui_builder_view', arguments: { designId: 'owned-design', inline: true } },
     ]);
+  } finally { await browser.close(); }
+});
+
+test('pending selection updates preserve order, deletion clears context, and rejection leaves actions usable', async () => {
+  const browser = await chromium.launch();
+  try {
+    const page = await browser.newPage();
+    await page.setContent('<iframe id="app" style="width:100%;height:620px"></iframe>');
+    await page.evaluate(({ html }) => {
+      const frame = document.getElementById('app');
+      window.contexts = [];
+      window.rejectContext = false;
+      const send = m => frame.contentWindow.postMessage({ jsonrpc: '2.0', ...m }, '*');
+      const data = { schema: 'compose-preview-library/v1', mode: 'library', host: 'local', projects: [],
+        designs: ['A', 'B'].map(name => ({ id: name, name, path: `/work/${name}.uid` })) };
+      window.removeDesigns = () => send({ method: 'ui/notifications/tool-result', params: { structuredContent: { ...data, designs: [] } } });
+      window.addEventListener('message', e => {
+        if (e.source !== frame.contentWindow) return;
+        const { id, method, params } = e.data;
+        if (method === 'ui/initialize') {
+          send({ id, result: {} });
+          send({ method: 'ui/notifications/tool-result', params: { structuredContent: data } });
+        } else if (method === 'ui/update-model-context') {
+          window.contexts.push(params);
+          if (window.contexts.length === 1) window.releaseContext = () => send({ id, result: {} });
+          else if (window.rejectContext) send({ id, error: { code: -32601, message: 'Context updates unsupported' } });
+          else send({ id, result: {} });
+        }
+      });
+      frame.srcdoc = html;
+    }, { html });
+    const frame = page.frameLocator('#app');
+    await frame.locator('#designs-tab').click();
+    await page.waitForFunction(() => !!window.releaseContext);
+    await frame.locator('#tree .row').getByText('A', { exact: true }).click();
+    await frame.locator('#tree .row').getByText('B', { exact: true }).click();
+    assert.equal(await page.evaluate(() => window.contexts.length), 1);
+    await page.evaluate(() => window.releaseContext());
+    await frame.locator('.chat-context').getByText('Selection shared with chat', { exact: true }).waitFor();
+    assert.equal(await page.evaluate(() => JSON.parse(window.contexts.at(-1).content[0].text).selection.id), 'B');
+    await page.evaluate(() => { window.rejectContext = true; });
+    await frame.locator('#tree .row').getByText('A', { exact: true }).click();
+    await frame.locator('.chat-context').getByText('Context updates unsupported', { exact: false }).waitFor();
+    assert.equal(await frame.getByRole('button', { name: 'Open in UI Builder' }).isEnabled(), true);
+    await page.evaluate(() => { window.rejectContext = false; window.removeDesigns(); });
+    await page.waitForFunction(() => window.contexts.at(-1).content.length === 0);
+    assert.equal(await frame.locator('#pane .uri').count(), 0);
   } finally { await browser.close(); }
 });
