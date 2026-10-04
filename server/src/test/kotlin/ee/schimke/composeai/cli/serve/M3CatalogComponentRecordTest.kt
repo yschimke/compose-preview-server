@@ -14,6 +14,7 @@ import ee.schimke.composeai.uibuilder.protocol.ExportFormatV1
 import ee.schimke.composeai.uibuilder.protocol.StringValueV1
 import ee.schimke.composeai.uibuilder.protocol.TypographyTokenValueV1
 import ee.schimke.composeai.uibuilder.service.AuthenticatedUiBuilderActor
+import ee.schimke.composeai.uibuilder.service.CurrentM3UiBuilderCatalogExecutor
 import ee.schimke.composeai.uibuilder.service.RevisionPinnedUiBuilderExport
 import java.io.File
 import kotlin.test.Test
@@ -172,9 +173,18 @@ class M3CatalogComponentRecordTest {
       "shape/radial-gradient" to "a Modifier, not a component",
     )
 
+  // Use the vocabulary packaged with the builder code, including composite checkout changes.
   private fun capabilityIds(): Set<String> =
     json
-      .parseToJsonElement(File(CAPABILITIES).readText())
+      .parseToJsonElement(
+        checkNotNull(
+            CurrentM3UiBuilderCatalogExecutor::class
+              .java
+              .getResourceAsStream("/ee/schimke/composeai/uibuilder/catalogs/m3-catalog-v1.json")
+          )
+          .bufferedReader()
+          .use { it.readText() }
+      )
       .jsonObject
       .getValue("components")
       .jsonArray
@@ -372,9 +382,5 @@ class M3CatalogComponentRecordTest {
     assertTrue(source.contains("Checkbox("), source)
     assertTrue(source.contains("checked = true"), source)
     assertTrue(!source.contains("children ="), source)
-  }
-
-  private companion object {
-    const val CAPABILITIES = "../docs/design/fixtures/ui-builder/m3-catalog-capabilities-v1.json"
   }
 }
