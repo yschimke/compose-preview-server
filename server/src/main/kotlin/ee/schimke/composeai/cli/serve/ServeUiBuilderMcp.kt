@@ -176,6 +176,7 @@ class ServeUiBuilderMcp(
    * refusing, which is the rule the whole surface follows. See [ServeUiBuilderBranchTools].
    */
   private val branches: UiBuilderBranchPort? = null,
+  private val agentPresence: ServeUiBuilderAgentPresence? = null,
 ) {
 
   /** Revisions, restore, fork and diff; see [ServeUiBuilderHistoryTools]. */
@@ -351,13 +352,30 @@ class ServeUiBuilderMcp(
     /** Optional 2025 request-scoped interaction; every operation must retain a text fallback. */
     clientInteraction: ServeCatalogMcp.ClientInteraction =
       ServeCatalogMcp.ClientInteraction.Unsupported,
-  ): String =
-    withCommentNotice(
-      tool,
-      args,
-      actor,
-      withLinks(tool, args, run(tool, args, actor, callId, clientInteraction)),
-    )
+  ): String {
+    // Only a design this actor may read can acquire presence. A failed or spoofed design id
+    // must never reveal another actor's access or add a participant to someone else's room.
+    val designId = args.text("designId")
+    val leave =
+      if (designId != null && service.canRead(actor, designId)) {
+        agentPresence?.enter(
+          designId,
+          actor.actorId,
+          args.text("agentName"),
+          args.text("agentModel"),
+        )
+      } else null
+    try {
+      return withCommentNotice(
+        tool,
+        args,
+        actor,
+        withLinks(tool, args, run(tool, args, actor, callId, clientInteraction)),
+      )
+    } finally {
+      leave?.invoke()
+    }
+  }
 
   private suspend fun run(
     tool: String,

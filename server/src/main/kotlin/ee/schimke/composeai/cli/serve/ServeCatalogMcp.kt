@@ -334,7 +334,7 @@ class ServeCatalogMcp(
           accessElicitationInstruction(params) +
           if (uiBuilder == null) ""
           else
-            " A UI-builder document's `home` is canonical: edit that original, and never " +
+            " UI-builder tools accept optional agentName and agentModel for the participant toolbar; report your client name and current model only when known. Active tool calls and the last 30 seconds of activity appear on that design. A UI-builder document's `home` is canonical: edit that original, and never " +
               "re-import it as a second design or move, save back, or discard it without the " +
               "human explicitly choosing." +
               if (uiBuilder?.supportsComments != true) ""
@@ -3051,7 +3051,13 @@ class ServeCatalogMcp(
     buildJsonObject {
       put("name", wireName(name))
       put("description", description)
-      put("inputSchema", withTokenArgument(name, JSON.parseToJsonElement(schema).jsonObject))
+      put(
+        "inputSchema",
+        withAgentIdentity(
+          name,
+          withTokenArgument(name, JSON.parseToJsonElement(schema).jsonObject),
+        ),
+      )
       put("outputSchema", outputSchema(name))
       if (name in VIEWER_TOOL_NAMES) put("_meta", viewerToolMeta())
     }
@@ -3174,6 +3180,27 @@ class ServeCatalogMcp(
    * access tools are skipped: they are the ones a caller reaches *without* a credential, and
    * offering to carry one there would only invite a token that does not exist yet.
    */
+  /** Cosmetic, explicitly reported identity. Never grants access or changes authorization. */
+  private fun withAgentIdentity(name: String, schema: JsonObject): JsonObject {
+    if (!name.startsWith("ui_builder_")) return schema
+    val properties = schema[PROPERTIES] as? JsonObject ?: JsonObject(emptyMap())
+    val identity =
+      listOf("agentName", "agentModel").associateWith { field ->
+        buildJsonObject {
+          put("type", "string")
+          put("maxLength", 80)
+          put(
+            "description",
+            if (field == "agentName")
+              "Optional agent/client name shown to design viewers; self-reported."
+            else
+              "Optional current model name shown to design viewers; self-reported. Omit when unknown.",
+          )
+        }
+      }
+    return JsonObject(schema + (PROPERTIES to JsonObject(properties + identity)))
+  }
+
   private fun withTokenArgument(name: String, schema: JsonObject): JsonObject {
     if (name in UNGATED_TOOLS) return schema
     val properties = schema[PROPERTIES] as? JsonObject ?: JsonObject(emptyMap())

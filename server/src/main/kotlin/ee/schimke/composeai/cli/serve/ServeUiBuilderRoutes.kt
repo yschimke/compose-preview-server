@@ -92,7 +92,28 @@ internal fun Route.installUiBuilderRoutes(
    * the editor reads as "still only" and says so.
    */
   liveNativeSession: ((token: String, previewId: String) -> UiBuilderNativeLiveSession?)? = null,
+  agentPresence: ServeUiBuilderAgentPresence? = null,
 ) {
+  if (agentPresence != null) {
+    get("/api/ui-builder/v1/designs/{designId}/agents") {
+      call.response.headers.append(HttpHeaders.CacheControl, "no-store")
+      val actor =
+        (authorization.authorize(call, UiBuilderRouteCapability.READ)
+            as? UiBuilderAuthorizationDecision.Authorized)
+          ?.actor
+      val designId = call.parameters["designId"].orEmpty()
+      if (actor == null || !service.canRead(actor, designId)) {
+        call.respondText("not found", status = HttpStatusCode.NotFound)
+        return@get
+      }
+      // Public viewers get anonymous labels, just as they do for browser presence and comments.
+      val redact = service.publicReaderView(actor, designId) != null
+      call.respondText(
+        UI_BUILDER_JSON.encodeToString(agentPresence.roster(designId, redact)),
+        ContentType.Application.Json,
+      )
+    }
+  }
   installUiBuilderLiveExportRoutes(service, authorization)
   installUiBuilderCatalogRecoveryRoutes(service, authorization)
   get("/api/ui-builder/v1/designs/{designId}/visibility") {
