@@ -7813,7 +7813,7 @@ ${captureControlsHtml().prependIndent("          ")}
           """<span class="cp-design-thumb cp-design-thumb-empty" aria-hidden="true">◇</span>"""
         else
           """
-            <a class="cp-design-thumb" href="${esc(row.designHref)}" tabindex="-1" aria-hidden="true">
+            <a class="cp-design-thumb${if (row.catalogSystemId == "remote-m3") " cp-design-thumb-widget" else ""}" href="${esc(row.designHref)}" tabindex="-1" aria-hidden="true">
               <img src="${esc(row.previewHref)}" alt="" loading="lazy" decoding="async"
                 onerror="this.closest('.cp-design-thumb').classList.add('cp-design-thumb-empty');this.remove();">
             </a>
