@@ -200,7 +200,11 @@ composeai-tools = "2.33.0"
 # with a non-empty directory on its classpath no longer gets a CDS archive it cannot be launched with
 # (compose-preview-daemon#213), and the spare pool no longer evicts a just-warmed signature's spares
 # for every new one (compose-preview-daemon#215).
-composeai-preview-daemon = "3.13.2"
+# 3.14.0 adds `composeai.daemon.onDemandWorkerBoot` (compose-preview-daemon#219), which the MCP
+# server's `DaemonSupervisor` already sets on every daemon it spawns with replicas (#1342): the
+# worker sandboxes boot when two different previews render at once instead of behind slot 0 at
+# start. It also moves rc-players to 2.1.2 (compose-preview-daemon#217).
+composeai-preview-daemon = "3.14.0"
 # 2.9.0 is the first release carrying `DesignEnvironmentV1.exportDevices` and its Set/Reset
 # changes, which is the field a design names its export devices in. 2.14.0 adds the components a
 # design defines — `DesignDocumentV1.components`, `DesignNodeV1.component` and the `binding` value
