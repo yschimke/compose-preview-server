@@ -14,7 +14,7 @@
 # The value is RESOLVED BY THE ENTRYPOINT (caddy-entrypoint.sh), not by the
 # operator: it reads the `sites` list out of the preview server's own catalogs.json
 # — mounted read-only at /srv/preview-config — and unions it with any explicit
-# SITE_DOMAINS. So the committed file both routes a site and gets it a certificate,
+# SITE_DOMAINS and SERVE_UI_BUILDER_HOST. So the committed file both routes a site and gets it a certificate,
 # instead of the two being kept in step by hand in an untracked .env. Each name
 # still needs its own DNS record. Empty (the default) leaves this block exactly as
 # it was.

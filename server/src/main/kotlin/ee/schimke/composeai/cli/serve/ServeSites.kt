@@ -233,6 +233,8 @@ data class ServeSites(private val byHost: Map<String, String>) {
         "push-sw.js",
         "assets",
         "ui-builder",
+        // Optional builder guide redirect. Reserve it even when the guide URL is unset.
+        "start",
         // The root-mounted A2UI playground (`GET /a2ui`), which a viewer served at `/p/{name}` on
         // a site host links to. A catalog named `a2ui` would otherwise shadow it.
         "a2ui",

@@ -9,6 +9,30 @@ import kotlin.test.assertTrue
 
 class ServeCommandOptionsTest {
   @Test
+  fun `builder hostname and guide redirect are opt in and validated`() {
+    assertNull(options(emptyList()).uiBuilderHost)
+    assertNull(options(emptyList()).uiBuilderStartUrl)
+    val configured =
+      options(
+        listOf(
+          "--ui-builder-host",
+          "UI.Coo.EE",
+          "--ui-builder-start-url",
+          "https://yschimke.github.io/compose-ui-builder/",
+        )
+      )
+    assertEquals("ui.coo.ee", configured.uiBuilderHost)
+    assertEquals("https://yschimke.github.io/compose-ui-builder/", configured.uiBuilderStartUrl)
+    assertFailsWith<IllegalArgumentException> { options(listOf("--ui-builder-host", "bad/host")) }
+    assertFailsWith<IllegalArgumentException> {
+      options(listOf("--ui-builder-start-url", "http://guide.example/"))
+    }
+    assertFailsWith<IllegalArgumentException> {
+      options(listOf("--ui-builder-start-url", "https://user@guide.example/"))
+    }
+  }
+
+  @Test
   fun `constructor normalises network and capacity arguments`() {
     val options =
       options(

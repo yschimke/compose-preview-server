@@ -132,6 +132,12 @@ check "comma-separated SITE_DOMAINS is accepted, as documented" \
   "SITE_DOMAINS=[a.example.com b.example.com]" \
   "$(entry_of '{"catalogs":[]}' 'a.example.com,b.example.com' | head -1)"
 
+check "builder hostname is included in TLS addresses" "SITE_DOMAINS=[ui.coo.ee]" \
+  "$(SERVE_UI_BUILDER_HOST=ui.coo.ee entry_of '{"catalogs":[]}' | head -1)"
+
+check "builder hostname is deduplicated with explicit domains" "SITE_DOMAINS=[ui.coo.ee]" \
+  "$(SERVE_UI_BUILDER_HOST=ui.coo.ee entry_of '{"catalogs":[]}' 'ui.coo.ee' | head -1)"
+
 # The image's CMD has to survive: the entrypoint replaces `caddy` as PID 1's program, so dropping
 # the arguments would start Caddy with no config at all.
 check "the caddy command line is passed through" \

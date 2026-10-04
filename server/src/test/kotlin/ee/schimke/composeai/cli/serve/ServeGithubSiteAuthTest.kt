@@ -100,6 +100,8 @@ class ServeGithubSiteAuthTest {
           githubAuth = auth(cookieDomain),
           trustForwardedFor = true,
           sites = sites,
+          uiBuilderHost = "ui.coo.ee",
+          uiBuilderStartUrl = "https://yschimke.github.io/compose-ui-builder/",
         )
         .also {
           it.start()
@@ -181,6 +183,53 @@ class ServeGithubSiteAuthTest {
       runCatching { direct.stop() }
       runCatching { sessions.close() }
     }
+  }
+
+  @Test
+  fun `builder host shares the pinned OAuth callback and returns to its own editor`() {
+    serverWith(cookieDomain = "coo.ee")
+    get("/auth/github/start?return=%2Fui-builder%2Fmy-design", "ui.coo.ee").use { started ->
+      val location = started.header("Location").orEmpty()
+      assertTrue(
+        location.contains("redirect_uri=https%3A%2F%2Fpreview.coo.ee%2Fauth%2Fgithub%2Fcallback")
+      )
+      val state =
+        java.net.URLDecoder.decode(location.substringAfter("state=").substringBefore("&"), "UTF-8")
+      val cookie =
+        started.headers("Set-Cookie").first {
+          it.startsWith("cp_gh_state=") && it.contains("domain=coo.ee", ignoreCase = true)
+        }
+      assertTrue(cookie.contains("domain=coo.ee", ignoreCase = true))
+      get(
+          "/auth/github/callback?code=ok&state=${enc(state)}",
+          "preview.coo.ee",
+          cookie.substringBefore(";"),
+        )
+        .use { callback ->
+          assertEquals(302, callback.code)
+          assertEquals("https://ui.coo.ee/ui-builder/my-design", callback.header("Location"))
+          val session = callback.headers("Set-Cookie").first { it.startsWith("cp_gh_auth=") }
+          assertTrue(session.contains("domain=coo.ee", ignoreCase = true))
+          assertTrue(session.contains("HttpOnly", ignoreCase = true))
+          assertTrue(session.contains("Secure", ignoreCase = true))
+          assertTrue(session.contains("SameSite=Lax", ignoreCase = true))
+        }
+    }
+  }
+
+  @Test
+  fun `only the builder hostname redirects the root and guide entry points`() {
+    get("/?catalog=wear-m3", "ui.coo.ee").use {
+      assertEquals(302, it.code)
+      assertEquals("/ui-builder/?catalog=wear-m3", it.header("Location"))
+    }
+    get("/start", "ui.coo.ee").use {
+      assertEquals(302, it.code)
+      assertEquals("https://yschimke.github.io/compose-ui-builder/", it.header("Location"))
+    }
+    get("/", "preview.coo.ee").use { assertFalse(it.header("Location") == "/ui-builder/") }
+    get("/start", "preview.coo.ee").use { assertEquals(404, it.code) }
+    get("/", "unknown.coo.ee").use { assertFalse(it.header("Location") == "/ui-builder/") }
   }
 
   @Test

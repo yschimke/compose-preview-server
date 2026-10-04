@@ -470,6 +470,12 @@ public interface ServeOptions {
    */
   public val sitesRaw: String?
 
+  /** Optional builder entry hostname; keeps editor, API and assets on that origin. */
+  public val uiBuilderHost: String?
+
+  /** Optional HTTPS guide URL linked by the builder host at /start. */
+  public val uiBuilderStartUrl: String?
+
   /**
    * Raw `--catalogs-file` path, unopened.
    *

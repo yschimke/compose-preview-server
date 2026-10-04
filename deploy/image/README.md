@@ -688,6 +688,46 @@ SERVE_GITHUB_AUTH_COOKIE_SECRET=... # openssl rand -hex 32
 The compose profile derives the callback base URL from `DOMAIN`; set
 `SERVE_GITHUB_AUTH_CALLBACK_BASE_URL` to override.
 
+### Optional UI Builder hostname
+
+Set `SERVE_UI_BUILDER_HOST=ui.coo.ee` to serve the existing editor on an additional
+hostname. Point its DNS A/AAAA records at this deployment (a CNAME to `preview.coo.ee`
+also works). Compose passes the name to both the server and Caddy, which provisions
+TLS using the existing proxy block. Recreate the preview and Caddy containers after
+changing `.env`.
+
+`https://ui.coo.ee/` redirects to `https://ui.coo.ee/ui-builder/`, preserving the query.
+Editor assets, REST APIs, preview frames and WebSockets use that same origin and the
+same backend/design store. Existing `preview.coo.ee/ui-builder/` links continue to work.
+This does not mount design URLs at the hostname root.
+
+For shared GitHub sign-in between these sibling hosts, explicitly set:
+
+```dotenv
+SERVE_UI_BUILDER_HOST=ui.coo.ee
+SERVE_GITHUB_AUTH_COOKIE_DOMAIN=coo.ee
+SERVE_GITHUB_AUTH_CALLBACK_BASE_URL=https://preview.coo.ee
+SERVE_UI_BUILDER_START_URL=https://yschimke.github.io/compose-ui-builder/
+```
+
+Keep the OAuth app's callback at `https://preview.coo.ee/auth/github/callback`.
+The configured builder hostname joins the existing callback return allowlist and
+browser-origin checks. The auth cookies retain `Secure`, `HttpOnly`, `SameSite=Lax`
+and `Path=/`. A cookie domain of `preview.coo.ee` cannot cover `ui.coo.ee`; the image
+never automatically widens it to `coo.ee`. Every subdomain of `coo.ee` receives the
+shared session, so this configuration assumes control of that whole domain.
+
+When widening an existing `Domain=preview.coo.ee` deployment to `coo.ee`, clear the
+old `cp_gh_auth`, `cp_gh_state` and `cp_gh_regrant` cookies in the browser and sign in
+again. Browsers can retain both parent-domain variants; the server refuses ambiguous
+session/state cookies, and its host-only cleanup cannot remove an old domain variant.
+
+The optional start URL makes `/start` on the builder hostname redirect to the guide.
+It does not relocate GitHub Pages. Serving the guide directly at `/start/` requires a
+separate static-site build with its asset base set to `/start/`, deployed alongside
+this proxy; leave the redirect unset when using that arrangement. No settings here
+change DNS or publish/move the guide automatically.
+
 **With top-level sites configured, the cookies need a domain.** `SERVE_GITHUB_AUTH_COOKIE_DOMAIN`
 scopes both auth cookies to a parent domain, so one sign-in covers this host and every site
 hostname under it — sign in on `preview.coo.ee` and `m3.preview.coo.ee` is signed in too. Without it

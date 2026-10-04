@@ -276,6 +276,8 @@ class ServeHttpServer(
    * publish a hostname on a running box ([ServeSiteAdmin]).
    */
   private val sites: ServeSiteRegistry = ServeSiteRegistry.empty(),
+  private val uiBuilderHost: String? = null,
+  private val uiBuilderStartUrl: String? = null,
   /**
    * Configured catalog availability shared with startup + refresh. When present, `/status` includes
    * failed/pending catalogs instead of silently omitting them. Catalog loading remains best-effort:
@@ -1025,6 +1027,13 @@ class ServeHttpServer(
   private val catalogCacheAdminEnabled: Boolean =
     catalogCacheClear != null && !adminToken.isNullOrBlank()
 
+  /** Explicit hosts admitted to the existing OAuth return and browser-origin checks. */
+  private val browserHosts: Set<String>
+    get() = sites.hosts + listOfNotNull(uiBuilderHost)
+
+  private fun isUiBuilderHost(call: ApplicationCall): Boolean =
+    uiBuilderHost != null && requestHost(call, trustForwardedFor) == uiBuilderHost
+
   private val server: EmbeddedServer<*, *> =
     embeddedServer(CIO, host = host, port = port) {
       install(WebSockets)
@@ -1037,7 +1046,7 @@ class ServeHttpServer(
         val current: ApplicationCall = context
         if (
           ServeSameOriginRequests.isWebSocketUpgrade(current) &&
-            ServeSameOriginRequests.isForeignSessionRequest(current, sites.hosts)
+            ServeSameOriginRequests.isForeignSessionRequest(current, browserHosts)
         ) {
           current.respondText("socket origin not accepted", status = HttpStatusCode.Forbidden)
           finish()
@@ -1294,7 +1303,7 @@ class ServeHttpServer(
           // write carried by the session cookie is accepted only from a page this server served.
           val sameOriginUiBuilderAuthorization =
             uiBuilderAuthorization.acceptingSessionWritesFromSameOrigin {
-              sites.hosts
+              browserHosts
             }
           installUiBuilderRoutes(
             designService,
@@ -1431,11 +1440,11 @@ class ServeHttpServer(
         }
 
         githubAuth?.let { auth ->
-          // The site hosts are the allowlist for the post-callback return redirect: the only
+          // Configured browser hosts allow the post-callback return redirect: the only
           // hostnames a sign-in started elsewhere may be sent back to. Passed in rather than known
-          // to the auth object, so the site config keeps one home.
-          get(ServeGithubAuth.START_PATH) { with(auth) { handleStart(sites.hosts) } }
-          get(ServeGithubAuth.CALLBACK_PATH) { with(auth) { handleCallback(sites.hosts) } }
+          // to the auth object, so host configuration stays with the server.
+          get(ServeGithubAuth.START_PATH) { with(auth) { handleStart(browserHosts) } }
+          get(ServeGithubAuth.CALLBACK_PATH) { with(auth) { handleCallback(browserHosts) } }
           // POST only, on purpose: see [ServeGithubAuth.handleLogout]. No GET is registered, so a
           // prefetcher or an unfurler that follows the URL gets a 405 rather than signing the
           // visitor out.
@@ -1466,7 +1475,7 @@ class ServeHttpServer(
           post(ServeAgentGrants.LEAVE_PATH) {
             // Same-origin only: a foreign page must not be able to sign this browser out of its
             // grant any more than into one.
-            if (!ServeSameOriginRequests.isSameOrigin(call, sites.hosts)) {
+            if (!ServeSameOriginRequests.isSameOrigin(call, browserHosts)) {
               call.response.headers.append(HttpHeaders.CacheControl, "no-store")
               call.respond(HttpStatusCode.Forbidden)
               return@post
@@ -1736,7 +1745,7 @@ class ServeHttpServer(
         // off, so a browser that subscribed before an operator turned it off still updates to the
         // current script rather than keeping a stale one.
         get(PUSH_SERVICE_WORKER_PATH) { respondPushServiceWorker() }
-        push?.let { lane -> installPushRoutes(lane) { sites.hosts } }
+        push?.let { lane -> installPushRoutes(lane) { browserHosts } }
         // The manifest's install-dialog screenshots: committed captures, ungated like the icons.
         get(ServeSiteIcon.SCREENSHOT_NARROW_PATH) { respondScreenshot() }
         get(ServeSiteIcon.SCREENSHOT_WIDE_PATH) { respondScreenshot() }
@@ -2348,7 +2357,19 @@ class ServeHttpServer(
         // higher than `/{system}` in Ktor routing, so they still win — only genuinely unknown
         // single
         // segments fall through to a session lookup (and 404 like a bad session).
-        get("/") { handleLanding(sessionInPath = false) }
+        get("/") {
+          if (isUiBuilderHost(call)) {
+            call.respondRedirect("/ui-builder/" + call.request.queryString().prefixedQuery())
+          } else {
+            handleLanding(sessionInPath = false)
+          }
+        }
+        if (uiBuilderHost != null && uiBuilderStartUrl != null) {
+          get("/start") {
+            if (isUiBuilderHost(call)) call.respondRedirect(uiBuilderStartUrl)
+            else handleLanding(sessionInPath = true)
+          }
+        }
         get("/{system}") { handleLanding(sessionInPath = true) }
         get("/{system}/") { handleLanding(sessionInPath = true) }
         get("/compare") { handleFormatComparison(sessionInPath = false) }
@@ -2710,7 +2731,7 @@ class ServeHttpServer(
    * visitor back signed-out, and offering the link would still be advertising a dead end.
    */
   private fun RoutingContext.oauthCanRoundTrip(): Boolean =
-    githubAuth?.canRoundTrip(requestHost(call, trustForwardedFor), sites.hosts) ?: true
+    githubAuth?.canRoundTrip(requestHost(call, trustForwardedFor), browserHosts) ?: true
 
   /**
    * The session id to hand [ServeWeb] for nav-marking + link building, and the URL [basePath] its
@@ -2833,7 +2854,7 @@ class ServeHttpServer(
    */
   private fun pagePolicyFormActions(): List<String> {
     val auth = githubAuth ?: return emptyList()
-    return listOfNotNull(auth.callbackOrigin()) + sites.hosts.sorted().map { "https://$it" }
+    return listOfNotNull(auth.callbackOrigin()) + browserHosts.sorted().map { "https://$it" }
   }
 
   /**
@@ -3614,7 +3635,7 @@ class ServeHttpServer(
    * and bearer credentials pass untouched; see [ServeSameOriginRequests].
    */
   private suspend fun RoutingContext.rejectForeignSessionRequest(json: Boolean = false): Boolean {
-    if (ServeSameOriginRequests.isForeignSessionRequest(call, sites.hosts)) {
+    if (ServeSameOriginRequests.isForeignSessionRequest(call, browserHosts)) {
       call.respondText("request origin not accepted", status = HttpStatusCode.Forbidden)
       return true
     }
@@ -14271,7 +14292,7 @@ class ServeHttpServer(
     val sameOrigin =
       call.request.headers["Sec-Fetch-Site"] == "same-origin" ||
         (call.request.headers[HttpHeaders.Origin] != null &&
-          ServeSameOriginRequests.isSameOrigin(call, sites.hosts))
+          ServeSameOriginRequests.isSameOrigin(call, browserHosts))
     if (!sameOrigin) {
       call.respond(HttpStatusCode.Forbidden)
       return
@@ -14320,7 +14341,7 @@ class ServeHttpServer(
     // cpat above remains explicit, while merely having exchanged one in this browser cannot make
     // later work look like the grant holder's after the person signs in.
     if (githubAuth?.currentSignedInLogin(call) != null) return null
-    return ServeAgentGrantCookie.grant(call, store, sites.hosts)
+    return ServeAgentGrantCookie.grant(call, store, browserHosts)
   }
 
   /**
