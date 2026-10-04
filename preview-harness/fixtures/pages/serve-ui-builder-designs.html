@@ -126,6 +126,18 @@
 </div>
 <script>
 (function () {
+  document.addEventListener("click", function (event) {
+    document.querySelectorAll(".cp-design-menu[open], .cp-design-duplicate[open]").forEach(function (menu) {
+      if (!menu.contains(event.target)) menu.open = false;
+    });
+  });
+  document.addEventListener("keydown", function (event) {
+    if (event.key !== "Escape") return;
+    document.querySelectorAll(".cp-design-menu[open], .cp-design-duplicate[open]").forEach(function (menu) {
+      menu.open = false;
+      menu.querySelector("summary").focus();
+    });
+  });
   var box = document.getElementById("cp-design-filter");
   var count = document.getElementById("cp-design-count");
   var none = document.getElementById("cp-designs-none");
@@ -166,15 +178,12 @@
             <div class="cp-design-body">
               <h2 class="cp-design-title"><a href="/ui-builder/morning-player?token=fixture-token">Morning player</a></h2>
               <p class="cp-design-meta"><strong>Private</strong></p>
-              <p class="cp-design-meta"><code>morning-player</code> · wear-m3-catalog · revision 12</p>
-              <p class="cp-design-meta">owner · may read, write, export, manage_access, delete · updated 2026-01-12T10:40:00Z</p>
+              <p class="cp-design-meta">Wear app · updated 12 Jan 2026</p>
+              <p class="cp-design-meta"><code>morning-player</code></p>
               <div class="cp-design-actions">
                 <a class="cp-action-chip" href="/ui-builder/morning-player?token=fixture-token">Open</a>
-                <a class="cp-action-chip" href="/ui-builder/morning-player/history?token=fixture-token">History</a>
-                <a class="cp-action-chip" href="/ui-builder/morning-player/access?token=fixture-token">Share</a>
-              </div>
-                          <details class="cp-design-more">
-                <summary>Duplicate</summary>
+                            <details class="cp-design-duplicate">
+                <summary class="cp-action-chip">Duplicate</summary>
                 <form class="cp-design-form" method="post" action="/ui-builder/designs/copy?token=fixture-token">
                   <input type="hidden" name="sourceDesignId" value="morning-player">
                   <label class="cp-grant-ttl"><span>New design id</span><input type="text" name="designId"
@@ -188,6 +197,11 @@
                   <button class="cp-grant-approve" type="submit">Create the copy</button>
                 </form>
               </details>
+                <details class="cp-design-menu">
+                  <summary class="cp-action-chip" aria-label="More actions for Morning player" title="More actions">⋮</summary>
+                  <div class="cp-design-menu-panel">
+                    <a class="cp-action-chip" href="/ui-builder/morning-player/history?token=fixture-token">History</a>
+                    <a class="cp-action-chip" href="/ui-builder/morning-player/access?token=fixture-token">Share</a>
               <details class="cp-design-more">
     <summary>Folder · Media</summary>
     <form class="cp-design-form" method="post" action="/ui-builder/morning-player/folder?token=fixture-token">
@@ -226,6 +240,14 @@
       <button class="cp-grant-deny" type="submit" name="confirm" value="delete">Delete permanently</button>
     </form>
   </details>
+                    <details class="cp-design-more">
+                      <summary>Design details</summary>
+                      <p class="cp-design-meta">wear-m3-catalog · revision 12</p>
+                      <p class="cp-design-meta">owner · may read, write, export, manage_access, delete</p>
+                    </details>
+                  </div>
+                </details>
+              </div>
             </div>
           </article>
   </div>
@@ -238,15 +260,25 @@
     <div class="cp-design-body">
       <h2 class="cp-design-title"><a href="/ui-builder/archived-dashboard?token=fixture-token">Archived dashboard</a></h2>
       <p class="cp-design-meta"><strong>Visibility unavailable</strong></p>
-      <p class="cp-design-meta"><code>archived-dashboard</code> · m3-catalog · revision 7</p>
-      <p class="cp-design-meta">viewer · may read, export · updated 2026-01-09T10:40:00Z</p>
+      <p class="cp-design-meta">Mobile app · updated 9 Jan 2026</p>
+      <p class="cp-design-meta"><code>archived-dashboard</code></p>
       <p class="cp-grant-withheld"><strong>This design cannot be opened:</strong> catalog unavailable for stored design archived-dashboard</p>
       <div class="cp-design-actions">
         <a class="cp-action-chip" href="/ui-builder/archived-dashboard?token=fixture-token">Open</a>
-        <a class="cp-action-chip" href="/ui-builder/archived-dashboard/history?token=fixture-token">History</a>
 
+        <details class="cp-design-menu">
+          <summary class="cp-action-chip" aria-label="More actions for Archived dashboard" title="More actions">⋮</summary>
+          <div class="cp-design-menu-panel">
+            <a class="cp-action-chip" href="/ui-builder/archived-dashboard/history?token=fixture-token">History</a>
+            <p class="cp-design-meta">Shared by <code>github:designer</code>; the owner manages its grants.</p>
+            <details class="cp-design-more">
+              <summary>Design details</summary>
+              <p class="cp-design-meta">m3-catalog · revision 7</p>
+              <p class="cp-design-meta">viewer · may read, export</p>
+            </details>
+          </div>
+        </details>
       </div>
-      <p class="cp-design-meta">Shared by <code>github:designer</code>; the owner manages its grants.</p>
     </div>
   </article>
   </div>

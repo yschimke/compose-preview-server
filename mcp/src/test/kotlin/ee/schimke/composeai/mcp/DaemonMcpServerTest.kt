@@ -3941,8 +3941,13 @@ class DaemonMcpServerTest {
       )
     assertThat(render().firstTextContent()).doesNotContain("no preview matches")
 
+    assertThat(client.request("resources/list").toString()).contains("GreetingPreview")
     daemon.emitRemoved("com.example.GreetingPreview")
-    client.expectNotification("notifications/resources/list_changed", 2_000)
+    // Registration and the first render also enqueue list_changed notifications. Consuming one
+    // does not prove the asynchronous discovery removal has reached the catalog yet.
+    awaitCondition("the removed preview to leave the catalog") {
+      !client.request("resources/list").toString().contains("GreetingPreview")
+    }
 
     assertThat(render().firstTextContent()).doesNotContain("no preview matches")
     assertThat(rediscoveries.get()).isEqualTo(1)

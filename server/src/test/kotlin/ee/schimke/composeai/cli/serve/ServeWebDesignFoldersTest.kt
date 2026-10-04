@@ -66,6 +66,40 @@ class ServeWebDesignFoldersTest {
     assertTrue("""<span class="cp-designs-count cp-design-folder-count">1 design</span>""" in page)
   }
 
+  @Test
+  fun `cards offer open and duplicate with secondary controls in an accessible more menu`() {
+    val page =
+      ServeWeb.uiBuilderDesignsPage(
+        rows =
+          listOf(
+            row("watch")
+              .copy(
+                copyAction = "/copy",
+                copySuggestedId = "watch-copy",
+                deleteAction = "/delete",
+                folderAction = "/folder",
+              )
+          ),
+        viewerActorId = "github:octocat",
+      )
+    val actions = page.substringAfter("""<div class="cp-design-actions">""")
+    assertTrue(
+      actions.substringBefore("""<details class="cp-design-menu">""").contains(">Open</a>")
+    )
+    assertTrue(
+      actions
+        .substringBefore("""<details class="cp-design-menu">""")
+        .contains(">Duplicate</summary>")
+    )
+    val more = actions.substringAfter("""<div class="cp-design-menu-panel">""")
+    assertTrue("More actions for watch" in actions)
+    assertTrue(">History</a>" in more)
+    assertTrue(">Share</a>" in more)
+    assertTrue(">Move to folder</summary>" in more)
+    assertTrue(">Delete</summary>" in more)
+    assertTrue("name=\"confirm\" value=\"delete\"" in more)
+  }
+
   private fun String.sectionFor(name: String): String =
     substringAfter("""aria-label="$name">""").substringBefore("</section>")
 
