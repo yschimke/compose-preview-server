@@ -1218,7 +1218,11 @@ class ServeCatalogStore(
           ServeDegradation.liveBundleUnavailable("the module bundle identity map is invalid")
       } else {
         val prepared = mutableListOf<TrustedModuleBundle>()
-        for (descriptor in declaredLiveBundles) {
+        // The empty-prefix bundle is the primary whatever its position: the runner opens the first
+        // bundle's daemon unwrapped, and only that bundle's local ids equal the catalog's ids.
+        // Declared first, a prefixed module would hand its prefixed ids to a daemon that only
+        // knows the local ones (#1351).
+        for (descriptor in declaredLiveBundles.sortedBy { it.previewIdPrefix.isNotEmpty() }) {
           val moduleAlias = alias.filterValues { daemonId ->
             if (descriptor.previewIdPrefix.isNotEmpty()) {
               daemonId.startsWith(descriptor.previewIdPrefix)
