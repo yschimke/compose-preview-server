@@ -19,7 +19,7 @@ kotlin {
       implementation(compose.ui)
       // Versionless through the publishers' BOMs: rc-players and compose-ai-tools publish only the
       // modules a release changes, so a module pinned at a BOM's release version can 404.
-      implementation(project.dependencies.platform("ee.schimke.composeai:rc-players-bom:2.1.0"))
+      implementation(project.dependencies.platform("ee.schimke.composeai:rc-players-bom:2.1.3"))
       implementation("ee.schimke.composeai:rc-player-compose")
     }
     jvmMain.dependencies {
