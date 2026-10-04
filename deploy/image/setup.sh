@@ -52,6 +52,11 @@ else
   if migrate_legacy_serve_catalogs .env; then
     echo "==> Removed the legacy three-app SERVE_CATALOGS override (using the image default)"
   fi
+  # The import staging repository's output moved to its -out repository; a registry
+  # can only serve its own branches, so the nomination follows (see env-migrations.sh).
+  if migrate_imports_catalog_registry .env; then
+    echo "==> Re-pointed SERVE_CATALOG_REGISTRY at yschimke/compose-preview-imports-out"
+  fi
   echo "==> Reusing existing .env (tokens preserved)"
 fi
 

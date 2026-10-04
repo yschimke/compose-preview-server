@@ -20,9 +20,10 @@ package ee.schimke.composeai.cli.serve
  * and 404'd for as long as nobody edited the box.
  *
  * So a server may nominate one or more **registry projects** (`--catalog-registry
- * yschimke/compose-preview-imports`). Each publishes [FILE_PATH] on its default branch, and every
- * catalog listed there is served exactly as a `catalogs.json` entry would be. Landing the PR is
- * then genuinely the whole import, and [ServeCatalogRegistrySync] picks it up without a restart.
+ * yschimke/compose-preview-imports-out`, the staging repository's output repository). Each
+ * publishes [FILE_PATH] on its default branch, and every catalog listed there is served exactly as
+ * a `catalogs.json` entry would be. Landing the PR is then genuinely the whole import, and
+ * [ServeCatalogRegistrySync] picks it up without a restart.
  *
  * ### What nominating a registry delegates, and what it does not
  *

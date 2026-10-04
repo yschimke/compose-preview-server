@@ -53,3 +53,76 @@ migrate_legacy_serve_catalogs() {
   # inode, which a temp-file rename would quietly reset on a live box.
   printf '%s' "${out}" > "${env_file}"
 }
+
+# The import staging repository's generated output moved: its delivery branches
+# and its catalog registry document now live in yschimke/compose-preview-imports-out,
+# and the source repository's own copy of the document is frozen and then removed.
+# A registry may only serve its own branches, so the nomination has to follow the
+# document — a box still nominating the source repository goes on serving frozen
+# branches, and then nothing once that copy is deleted.
+LEGACY_IMPORTS_REGISTRY='yschimke/compose-preview-imports'
+IMPORTS_OUT_REGISTRY='yschimke/compose-preview-imports-out'
+
+# Rewrite one SERVE_CATALOG_REGISTRY line, replacing the legacy nomination when it
+# is one of the comma-separated items EXACTLY (no `@ref`: a pinned ref names a
+# branch of the source repository, which is an operator's deliberate choice and
+# not ours to guess at). Keeps an `export ` prefix and the line's quote style, and
+# leaves every other item — and any other key — untouched. Prints the line, and
+# returns 0 only when it changed.
+_env_rewrite_imports_registry_line() {
+  local line="${1%$'\r'}" cr="" lead body prefix="" value quote="" item out="" changed=1
+  [[ "$1" == *$'\r' ]] && cr=$'\r'
+  lead="${line%%[![:space:]]*}"
+  body="${line#"${lead}"}"
+  if [[ "${body}" == export\ * ]]; then
+    prefix="export "
+    body="${body#export }"
+  fi
+  if [[ "${body}" != SERVE_CATALOG_REGISTRY=* ]]; then
+    printf '%s' "$1"
+    return 1
+  fi
+  value="${body#SERVE_CATALOG_REGISTRY=}"
+  value="${value%"${value##*[![:space:]]}"}"
+  if [[ ${#value} -ge 2 && ( "${value}" == \"*\" || "${value}" == \'*\' ) ]]; then
+    quote="${value:0:1}"
+    value="${value:1:${#value}-2}"
+  fi
+  local -a items
+  IFS=',' read -r -a items <<< "${value}"
+  for item in "${items[@]}"; do
+    local trimmed="${item#"${item%%[![:space:]]*}"}"
+    trimmed="${trimmed%"${trimmed##*[![:space:]]}"}"
+    if [[ "${trimmed}" == "${LEGACY_IMPORTS_REGISTRY}" ]]; then
+      item="${item/${LEGACY_IMPORTS_REGISTRY}/${IMPORTS_OUT_REGISTRY}}"
+      changed=0
+    fi
+    out+="${out:+,}${item}"
+  done
+  if (( changed )); then
+    printf '%s' "$1"
+    return 1
+  fi
+  printf '%s' "${lead}${prefix}SERVE_CATALOG_REGISTRY=${quote}${out}${quote}${cr}"
+}
+
+# Re-point a SERVE_CATALOG_REGISTRY that nominates the import staging repository
+# at its output repository. Every assignment is rewritten, not only the last, so
+# no line Compose might read is left behind. Returns 0 when something changed (so
+# callers can log), 1 otherwise.
+migrate_imports_catalog_registry() {
+  local env_file="${1:?env file required}"
+  [[ -f "${env_file}" ]] || return 1
+
+  local line rewritten changed=0 out=""
+  while IFS= read -r line || [[ -n "${line}" ]]; do
+    if rewritten="$(_env_rewrite_imports_registry_line "${line}")"; then
+      changed=1
+    fi
+    out+="${rewritten}"$'\n'
+  done < "${env_file}"
+
+  (( changed )) || return 1
+  # Truncate-in-place, for the same 0600/owner/inode reason as above.
+  printf '%s' "${out}" > "${env_file}"
+}
