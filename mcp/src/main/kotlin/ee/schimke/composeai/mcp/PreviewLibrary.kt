@@ -42,7 +42,13 @@ class PreviewLibrary(
    */
   private val snapshot: suspend (projectId: String?) -> List<Project>
 ) {
-  data class Project(val id: String, val name: String, val path: String, val modules: List<Module>)
+  data class Project(
+    val id: String,
+    val name: String,
+    val path: String,
+    val modules: List<Module>,
+    val warming: Boolean = false,
+  )
 
   data class Module(val path: String, val previews: List<Preview>)
 
@@ -149,6 +155,7 @@ class PreviewLibrary(
           put("id", project.id)
           put("name", project.name)
           put("path", project.path)
+          put("warming", project.warming)
           putJsonArray("modules") {
             project.modules.forEach { module ->
               addJsonObject {
