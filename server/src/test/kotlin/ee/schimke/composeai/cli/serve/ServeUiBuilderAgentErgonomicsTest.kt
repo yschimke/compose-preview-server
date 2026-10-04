@@ -76,6 +76,37 @@ class ServeUiBuilderAgentErgonomicsTest {
     running?.close()
   }
 
+  @Test
+  fun `authorized MCP activity appears on its design and presence requires read access`() {
+    val server = start()
+    create(server, cleanDocument())
+    envelope(
+      server,
+      ServeUiBuilderMcp.GET_DESIGN,
+      """{"designId":"agent-screen","agentName":"Codex","agentModel":"reported-model"}""",
+    )
+    val (status, body) = http(server, "GET", "/api/ui-builder/v1/designs/agent-screen/agents", null)
+    assertEquals(200, status, body)
+    val agent = Json.parseToJsonElement(body).jsonObject["agents"]!!.jsonArray.single().jsonObject
+    assertEquals("Codex", agent.text("name"))
+    assertEquals("reported-model", agent.text("model"))
+    assertTrue(!body.contains(OPERATOR_TOKEN))
+    val refused =
+      client
+        .newCall(
+          Request.Builder()
+            .url(
+              "http://127.0.0.1:${server.server.port}/api/ui-builder/v1/designs/agent-screen/agents"
+            )
+            .build()
+        )
+        .execute()
+        .use { it.code }
+    assertEquals(404, refused)
+    val missing = http(server, "GET", "/api/ui-builder/v1/designs/unknown/agents", null)
+    assertEquals(404, missing.first)
+  }
+
   // ---- ui_builder_check_design ------------------------------------------------------------------
 
   @Test

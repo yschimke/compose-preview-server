@@ -857,6 +857,7 @@ class ServeHttpServer(
   private val liveFrameStats = LiveFramePerfStats()
 
   private val renderSemaphore = Semaphore(renderSlots)
+  private val uiBuilderAgentPresence = ServeUiBuilderAgentPresence()
   private val catalogMcp =
     if (catalogMcpEnabled && machineAuthorization != null)
       ServeCatalogMcp(
@@ -876,6 +877,7 @@ class ServeHttpServer(
               validator = uiBuilderValidator,
               reviews = uiBuilderReviewStore,
               branches = designBranches,
+              agentPresence = uiBuilderAgentPresence,
             )
           },
         uiBuilderNative = uiBuilderNativePreview != null,
@@ -1298,6 +1300,7 @@ class ServeHttpServer(
             uiBuilderNativePreview,
             uiBuilderInlineCapture,
             identityDetails = ::uiBuilderIdentityDetails,
+            agentPresence = uiBuilderAgentPresence,
             // The native pane's live lane, on a host that has Stage-2 redemption. The token the
             // compile already minted is redeemed into a registered session, and the editor opens
             // the same `/{session}/ws/{preview}` socket the viewer's Live toggle opens — no new
