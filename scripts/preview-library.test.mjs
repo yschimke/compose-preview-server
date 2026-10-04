@@ -244,8 +244,11 @@ test('host-scoped recents restore actual thumbnails, skip removed items, and sur
       window.throwPersistence = false;
       const send = m => frame.contentWindow.postMessage({ jsonrpc: '2.0', ...m }, '*');
       const listing = () => ({ schema: 'compose-preview-library/v1', mode: 'library', host: 'local',
-        tools: { render: 'render_preview' }, projects: [{ id: window.otherProject ? 'other' : 'starter', name: 'ComposeStarter', path: '/work/starter',
-          modules: [{ path: ':app', previews: [{ uri: 'compose-preview://starter/_app/ListScreenPreview', name: 'ListScreenPreview' }] }] }],
+        tools: { render: 'render_preview' }, projects: [window.otherProject
+          ? { id: 'other', name: 'Other', path: '/work/other',
+            modules: [{ path: ':app', previews: [{ uri: 'compose-preview://other/_app/ListScreenPreview', name: 'ListScreenPreview' }] }] }
+          : { id: 'starter', name: 'ComposeStarter', path: '/work/starter',
+            modules: [{ path: ':app', previews: [{ uri: 'compose-preview://starter/_app/ListScreenPreview', name: 'ListScreenPreview' }] }] }],
         designs: Array.from({ length: 10 }, (_, n) => ({ id: `design-${n}`, name: `Design ${n}`, path: `/work/design-${n}.uid` })) });
       window.reopen = () => {
         frame.srcdoc = html.replace('<script>', `<script>window.openai = { get widgetState() { return parent.savedWidget; }, setWidgetState(value) {
@@ -300,5 +303,52 @@ test('host-scoped recents restore actual thumbnails, skip removed items, and sur
     await page.evaluate(() => { window.otherProject = true; window.reopen(); });
     await frame.locator('#pane h2').getByText('ListScreenPreview', { exact: true }).waitFor();
     assert.equal(await frame.locator('#pane img').count(), 0);
+  } finally { await browser.close(); }
+});
+
+test('a project appearing keeps the selection, its pixels and the recents; only removing it clears', async () => {
+  const browser = await chromium.launch();
+  try {
+    const page = await browser.newPage({ viewport: { width: 1100, height: 720 } });
+    await page.setContent('<iframe id="app" style="width:100%;height:700px;border:0"></iframe>');
+    await page.evaluate(({ html, png }) => {
+      const frame = document.getElementById('app');
+      window.savedWidget = {};
+      window.contexts = [];
+      const send = m => frame.contentWindow.postMessage({ jsonrpc: '2.0', ...m }, '*');
+      const project = (id, name) => ({ id, name, path: `/work/${id}`,
+        modules: [{ path: ':app', previews: [{ uri: `compose-preview://${id}/_app/ListScreenPreview`, name: `${name}Preview` }] }] });
+      const listing = projects => ({ schema: 'compose-preview-library/v1', mode: 'library', host: 'local',
+        tools: { render: 'render_preview' }, projects, designs: [] });
+      window.push = ids => send({ method: 'ui/notifications/tool-result', params: { structuredContent:
+        listing(ids.map(id => project(id, id === 'starter' ? 'Starter' : 'Added'))) } });
+      window.addEventListener('message', e => {
+        if (e.source !== frame.contentWindow) return;
+        const { id, method, params } = e.data;
+        if (method === 'ui/initialize') {
+          send({ id, result: {} });
+          window.push(['starter']);
+        } else if (method === 'ui/update-model-context') {
+          window.contexts.push(params); send({ id, result: {} });
+        } else if (method === 'tools/call') send({ id, result: { content: [{ type: 'image', mimeType: 'image/png', data: png }] } });
+      });
+      frame.srcdoc = html.replace('<script>', `<script>window.openai = { get widgetState() { return parent.savedWidget; },
+        setWidgetState(value) { parent.savedWidget = value; } };`);
+    }, { html, png });
+    const frame = page.frameLocator('#app');
+    await frame.locator('.recent img').waitFor();
+    await frame.locator('.chat-context').getByText('Selection shared with chat', { exact: true }).waitFor();
+    const contexts = await page.evaluate(() => window.contexts.length);
+    await page.evaluate(() => window.push(['starter', 'added']));
+    await frame.locator('#tree').getByText('Added', { exact: true }).waitFor();
+    assert.equal(await frame.locator('#pane h2').textContent(), 'StarterPreview');
+    assert.equal(await frame.locator('#pane img').getAttribute('src'), `data:image/png;base64,${png}`);
+    assert.equal(await frame.locator('.recent.row').count(), 1);
+    assert.equal(await page.evaluate(() => window.contexts.length), contexts);
+    assert.equal(await page.evaluate(() => window.savedWidget.privateContent.composePreviewRecents.items.length), 1);
+    await page.evaluate(() => window.push(['added', 'third']));
+    await page.waitForFunction(() => window.contexts.at(-1).content.length === 0);
+    assert.equal(await frame.locator('#pane img').count(), 0);
+    assert.equal(await page.evaluate(() => window.savedWidget.privateContent.composePreviewRecents.items.length), 1);
   } finally { await browser.close(); }
 });

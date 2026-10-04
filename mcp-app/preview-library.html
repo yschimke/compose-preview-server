@@ -233,6 +233,10 @@
     }
     state.data = data;
     restoreRecents();
+    // Only a selection that has left the listing is cleared; a project appearing or disappearing
+    // elsewhere leaves the pane, the chat context and the render cache alone.
+    if (state.selected && state.tab === 'previews' && previous
+      && findPreview(state.selected, previous) && !findPreview(state.selected)) clearSelection();
     if (state.selected && state.tab === 'designs' && data.host === 'local'
       && !(data.designs || []).some(d => d.id === state.selected)) clearSelection();
     if (!previous) {
@@ -265,8 +269,8 @@
   }
 
   const projectById = id => (state.data?.projects || []).find(p => p.id === id);
-  function findPreview(uri) {
-    for (const project of state.data?.projects || [])
+  function findPreview(uri, data = state.data) {
+    for (const project of data?.projects || [])
       for (const module of project.modules || [])
         for (const preview of module.previews || [])
           if (preview.uri === uri) return { project, module, preview };
@@ -412,12 +416,12 @@
   // Widget-scoped presentation cache, never an authoritative listing or a cross-user browser store.
   const RECENT_LIMIT = 8;
   const THUMB_LIMIT = 80_000;
+  // Keyed on the host alone: the project set grows as projects are registered and discovered, and
+  // an item whose project has gone simply stops resolving (renderRecents filters it out).
   function restoreRecents() {
-    const scope = JSON.stringify([state.data.host, (state.data.projects || []).map(p => [p.id, p.path || '']).sort()]);
+    const scope = state.data.host;
     if (scope === state.recentScope) return;
-    if (state.recentScope !== null && state.selected) clearSelection();
     state.recentScope = scope;
-    state.renders.clear();
     let saved;
     try { saved = window.openai?.widgetState?.privateContent?.composePreviewRecents; }
     catch (err) { console.debug('Recent items unavailable', err); }
