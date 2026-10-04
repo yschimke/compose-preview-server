@@ -58,6 +58,7 @@ import java.util.concurrent.CompletableFuture
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
 import javax.imageio.ImageIO
 import kotlin.time.Duration.Companion.seconds
 import kotlinx.coroutines.CompletableDeferred
@@ -66,7 +67,10 @@ import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.Json
@@ -2856,10 +2860,14 @@ class DaemonMcpServer(
 
   /** The `pending` result [withCallBudget] returns when the budget runs out. */
   private fun pendingCallResult(tool: String): CallToolResult {
+    // "starting" while any build is in its Gradle bootstrap or starting a daemon: a daemon another
+    // build already has up does not make this call's work a render (it read "rendering" through a
+    // three-minute bootstrap of a second build).
     val rendering =
-      supervisor.listProjects().any { project ->
-        project.daemons.values.any { it.initialDiscoveryComplete }
-      }
+      startingProjects.isEmpty() &&
+        supervisor.listProjects().any { project ->
+          project.daemons.values.any { it.initialDiscoveryComplete }
+        }
     val payload = buildJsonObject {
       put("pending", true)
       put("phase", if (rendering) "rendering" else "starting")
@@ -3123,11 +3131,12 @@ class DaemonMcpServer(
 
   /**
    * Starts preparing [project] in the background so the first render finds it warm: the Gradle
-   * bootstrap when the build has no launch descriptor, then each module's daemon spawn and
-   * `initialize` handshake — the same [prepareProjects] and [spawnUndiscoveredModules] a first
-   * `render_preview` by name runs. Only an explicit `register_project` warms: the siblings that
-   * auto-discovery registers and the workspaces restored from [WorkspaceStore] stay lazy, so a
-   * monorepo does not start a daemon for every build in it.
+   * bootstrap when the build has no launch descriptor, then, for a single-module build, its
+   * daemon's spawn and `initialize` handshake — the same [prepareProjects] and
+   * [spawnUndiscoveredModules] a first `render_preview` by name runs. A multi-module build's
+   * daemons wait for a render to say which module it needs. Only an explicit `register_project`
+   * warms: the siblings that auto-discovery registers and the workspaces restored from
+   * [WorkspaceStore] stay lazy, so a monorepo does not start a daemon for every build in it.
    *
    * Nothing here is started twice. [ProjectBootstrap.ensurePrepared] shares one Gradle run per
    * build and [DaemonSupervisor.daemonFor] one spawn per module (`computeIfAbsent`), so a render
@@ -3145,7 +3154,14 @@ class DaemonMcpServer(
             prepareProjects(setOf(id), log).forEach { (unprepared, reason) ->
               log("${unprepared.path} not prepared: $reason")
             }
-            spawnUndiscoveredModules(setOf(id), caller = "warm-up")
+            // One module: start its daemon now. Several: the first render starts the one that
+            // holds its preview, rather than a daemon per module up front.
+            val modules = runCatching {
+              DescriptorProvider.indexDescriptorsByModulePath(project.path).keys
+            }
+              .getOrDefault(emptySet())
+            if (modules.size <= 1) spawnUndiscoveredModules(setOf(id), caller = "warm-up")
+            else log("${project.path}: ${modules.size} modules; daemons start on first render")
           } catch (e: CancellationException) {
             throw e
           } catch (e: Throwable) {
@@ -3338,12 +3354,28 @@ class DaemonMcpServer(
           synchronized(project.knownModules) { project.knownModules.isEmpty() }
       }
       .mapNotNull { project ->
-        when (val outcome = bootstrap.ensurePrepared(project.path, progress)) {
+        val outcome =
+          starting(project.workspaceId) { bootstrap.ensurePrepared(project.path, progress) }
+        when (outcome) {
           is ProjectBootstrap.Outcome.Ready -> null
           is ProjectBootstrap.Outcome.NotPrepared -> project to outcome.reason
         }
       }
       .toMap()
+  }
+
+  /** Builds in a Gradle bootstrap or a daemon start right now, for [pendingCallResult]. */
+  private val startingProjects = ConcurrentHashMap<WorkspaceId, AtomicInteger>()
+
+  private inline fun <T> starting(id: WorkspaceId, block: () -> T): T {
+    startingProjects.computeIfAbsent(id) { AtomicInteger() }.incrementAndGet()
+    try {
+      return block()
+    } finally {
+      startingProjects.computeIfPresent(id) { _, count ->
+        if (count.decrementAndGet() <= 0) null else count
+      }
+    }
   }
 
   /** The client's MCP roots, else [workingDirectory]; asked once per session. */
@@ -3415,19 +3447,16 @@ class DaemonMcpServer(
     var matches = previewNameMatches(trimmed, scope)
     var unprepared = emptyMap<RegisteredProject, String>()
     if (matches.isEmpty()) {
-      if (scope == null) {
-        pendingBuilds.also { pendingBuilds = emptyList() }.forEach { registerQuietly(it) }
-      }
-      if (supervisor.listProjects().isEmpty() && registerDeclaringCandidate(trimmed) == null) {
+      val prepareScope =
+        when (val narrowed = buildScopeFor(trimmed, scope)) {
+          is BuildScope.Use -> narrowed.scope
+          is BuildScope.Ambiguous -> return PreviewNameResolution.Missing(narrowed.message)
+        }
+      if (supervisor.listProjects().isEmpty()) {
         return PreviewNameResolution.Missing(notRegisteredMessage())
       }
-      val prepareScope =
-        when (val narrowed = unpreparedScopeFor(trimmed, scope)) {
-          is UnpreparedScope.Use -> narrowed.scope
-          is UnpreparedScope.Ambiguous -> return PreviewNameResolution.Missing(narrowed.message)
-        }
       unprepared = prepareProjects(prepareScope, progress)
-      spawnUndiscoveredModules(prepareScope)
+      spawnUndiscoveredModules(prepareScope, name = trimmed)
       matches = previewNameMatches(trimmed, prepareScope)
     }
     if (matches.isEmpty() && unprepared.isEmpty()) {
@@ -3490,69 +3519,77 @@ class DaemonMcpServer(
     return if (ran) previewNameMatches(name, scope) else emptyList()
   }
 
-  /**
-   * With nothing registered and no roots that are builds (Antigravity starts the server in its
-   * plugin directory and sends none), the candidate builds remembered from earlier sessions: when
-   * exactly one declares `fun <name>(`, it is registered so the render can go on instead of failing
-   * with "no project registered" while naming that very build (yschimke/compose-ag-plugin#63).
-   */
-  private fun registerDeclaringCandidate(name: String): RegisteredProject? {
-    val function = name.substringAfterLast('.').trim()
-    if (function.isEmpty()) return null
-    val functions =
-      listOfNotNull(function, function.substringBefore('_').takeIf { '_' in function })
-    val declaring =
-      candidateBuilds().map(::File).filter { build ->
-        functions.any { findFunctionSource(build, it) != null }
-      }
-    return declaring.singleOrNull()?.let(::registerQuietly)
-  }
+  private sealed interface BuildScope {
+    data class Use(val scope: Set<WorkspaceId>?) : BuildScope
 
-  private sealed interface UnpreparedScope {
-    data class Use(val scope: Set<WorkspaceId>?) : UnpreparedScope
-
-    data class Ambiguous(val message: String) : UnpreparedScope
+    data class Ambiguous(val message: String) : BuildScope
   }
 
   /**
-   * Which builds a by-name lookup may bootstrap. Each bootstrap is a full Gradle run, so with no
-   * `project` and several unprepared builds (wear-os-samples registers one per sample) only a build
-   * whose sources declare `fun <name>(` is prepared, and only when exactly one does. Before this,
-   * every build was bootstrapped in turn, starting with whichever came first, and the render sat in
-   * `starting` for minutes on the wrong sample (yschimke/compose-ag-plugin#64). With none or
-   * several declaring it, no Gradle runs: the agent is asked to name the build (its settings.gradle
-   * folder).
+   * Which builds a by-name lookup may register and prepare. Preparing a build is a full Gradle run
+   * and starts its daemons, so the default is the one build that holds the preview, never every
+   * build in reach: a repository like wear-os-samples has no root `settings.gradle`, only one build
+   * per sample (yschimke/compose-ag-plugin#64). The candidates are the builds found under the roots
+   * or remembered from earlier sessions but not registered (Antigravity sends no roots, #63), plus
+   * the registered ones not prepared yet. Exactly one declaring `fun <name>(` is registered and
+   * prepared, with the builds already prepared; none is left alone; several ask the agent to name
+   * one (its `settings.gradle` folder) without running Gradle.
    */
-  private fun unpreparedScopeFor(name: String, scope: Set<WorkspaceId>?): UnpreparedScope {
-    if (scope != null) return UnpreparedScope.Use(scope)
-    val unprepared =
-      supervisor.listProjects().filter { project ->
-        project.daemons.isEmpty() &&
-          synchronized(project.knownModules) { project.knownModules.isEmpty() } &&
-          projectBootstrap?.isPrepared(project.path) != true
-      }
-    if (unprepared.size <= 1) return UnpreparedScope.Use(null)
-    val function = name.substringAfterLast('.').trim()
-    val functions =
-      listOfNotNull(function, function.substringBefore('_').takeIf { '_' in function })
-    val declaring = unprepared.filter { project ->
-      functions.any { findFunctionSource(project.path, it) != null }
+  private fun buildScopeFor(name: String, scope: Set<WorkspaceId>?): BuildScope {
+    if (scope != null) return BuildScope.Use(scope)
+    val registered = supervisor.listProjects()
+    val unprepared = registered.filter { project ->
+      project.daemons.isEmpty() &&
+        synchronized(project.knownModules) { project.knownModules.isEmpty() } &&
+        projectBootstrap?.isPrepared(project.path) != true
     }
-    if (declaring.size != 1) {
-      val named = declaring.ifEmpty { unprepared }
-      val why =
-        if (declaring.isEmpty()) "none of the ${unprepared.size} unprepared builds declares"
-        else "${declaring.size} unprepared builds declare"
-      return UnpreparedScope.Ambiguous(
-        "no preview matches '$name' yet, and $why fun $function(. Preparing a build is a full " +
-          "Gradle run, so none was started. Pass project=<absolute path> (the folder with the " +
-          "build's settings.gradle(.kts)). Candidate builds: " +
-          "${named.take(10).joinToString(", ") { it.path.path }}."
+    val registeredPaths = registered.map { canonical(it.path) }.toSet()
+    // The session's own builds first; builds remembered from earlier sessions only when the
+    // session offers none, or an old checkout would compete with the one being worked on.
+    val fromRoots = pendingBuilds.map(::canonical).filter { it !in registeredPaths }
+    val unregistered = fromRoots.ifEmpty {
+      if (registered.isNotEmpty()) emptyList()
+      else candidateBuilds().map { canonical(File(it)) }.filter { it !in registeredPaths }
+    }
+    val candidates = unprepared.map { canonical(it.path) } + unregistered
+    // One build, or nothing to choose between: prepare whatever is registered, as before.
+    if (candidates.size <= 1 && unregistered.isEmpty()) return BuildScope.Use(null)
+    val function = name.substringAfterLast('.').trim()
+    val functions =
+      listOfNotNull(function, function.substringBefore('_').takeIf { '_' in function })
+    val declaring = candidates.filter { build ->
+      functions.any { findFunctionSource(build, it) != null }
+    }
+    if (declaring.size > 1) {
+      return BuildScope.Ambiguous(
+        "no preview matches '$name' yet, and ${declaring.size} builds declare fun $function(. " +
+          "Preparing a build is a full Gradle run, so none was started. Pass project=<absolute " +
+          "path> (the folder with the build's settings.gradle(.kts)). Candidate builds: " +
+          "${declaring.take(10).joinToString(", ") { it.path }}."
       )
     }
-    val prepared = supervisor.listProjects().filter { it !in unprepared }
-    return UnpreparedScope.Use((declaring + prepared).map { it.workspaceId }.toSet())
+    val chosen =
+      declaring.singleOrNull()?.let { build ->
+        registered.firstOrNull { canonical(it.path) == build }
+          ?: registerQuietly(build)?.also { pendingBuilds = pendingBuilds.filter { it != build } }
+      }
+    val prepared = supervisor.listProjects().filter { it !in unprepared && it != chosen }
+    return when {
+      chosen != null -> BuildScope.Use((prepared + chosen).map { it.workspaceId }.toSet())
+      prepared.isNotEmpty() -> BuildScope.Use(prepared.map { it.workspaceId }.toSet())
+      unprepared.size == 1 && unregistered.isEmpty() -> BuildScope.Use(null)
+      registered.isEmpty() -> BuildScope.Use(null)
+      else ->
+        BuildScope.Ambiguous(
+          "no preview matches '$name' yet, and none of the ${candidates.size} candidate builds " +
+            "declares fun $function(. Pass project=<absolute path> (the folder with the build's " +
+            "settings.gradle(.kts)). Candidate builds: " +
+            "${candidates.take(10).joinToString(", ") { it.path }}."
+        )
+    }
   }
+
+  private fun canonical(file: File): File = runCatching { file.canonicalFile }.getOrDefault(file)
 
   private data class RediscoveryKey(val projectRoot: String, val source: String)
 
@@ -3660,26 +3697,65 @@ class DaemonMcpServer(
 
   /**
    * Starts each registered module's daemon that is not running; its discovery seeds the catalog.
+   *
+   * With a preview [name], only the modules whose `previews.json` (written by the bootstrap's
+   * discovery, beside the launch descriptor) names it, when any does: a multi-module build such as
+   * WearOAuth (`oauth-pkce`, `oauth-device-grant`, `util`) otherwise started a daemon, and its
+   * sandbox pool, for every module to render a preview that lives in one
+   * (yschimke/compose-ag-plugin#64).
    */
   private fun spawnUndiscoveredModules(
     scope: Set<WorkspaceId>? = null,
     caller: String = "render_preview",
+    name: String? = null,
   ) {
     supervisor
       .listProjects()
       .filter { scope == null || it.workspaceId in scope }
       .forEach { project ->
+        val descriptors = runCatching {
+          DescriptorProvider.indexDescriptorsByModulePath(project.path)
+        }
+          .getOrDefault(emptyMap())
         val modules =
-          synchronized(project.knownModules) { project.knownModules.toSet() } +
-            runCatching { DescriptorProvider.indexDescriptorsByModulePath(project.path).keys }
-              .getOrDefault(emptySet())
-        modules
+          synchronized(project.knownModules) { project.knownModules.toSet() } + descriptors.keys
+        val declaring =
+          name
+            ?.let { previewName ->
+              descriptors.filter { (_, descriptor) ->
+                manifestNamesPreview(File(descriptor.parentFile, "previews.json"), previewName)
+              }
+            }
+            ?.keys
+            .orEmpty()
+        declaring
+          .ifEmpty { modules }
           .filterNot { project.daemons.containsKey(it) }
           .forEach { module ->
-            runCatching { supervisor.daemonFor(project.workspaceId, module) }
+            runCatching {
+              starting(project.workspaceId) { supervisor.daemonFor(project.workspaceId, module) }
+            }
               .onFailure { System.err.println("$caller: could not start $module: ${it.message}") }
           }
       }
+  }
+
+  /** Whether [manifest] (a module's `previews.json`) lists a preview that [name] matches. */
+  private fun manifestNamesPreview(manifest: File, name: String): Boolean {
+    if (!manifest.isFile) return false
+    val previews =
+      runCatching {
+        (json.parseToJsonElement(manifest.readText()) as? JsonObject)?.get("previews") as? JsonArray
+      }
+        .getOrNull() ?: return false
+    val function = name.substringAfterLast('.')
+    return previews.any { element ->
+      val preview = element as? JsonObject ?: return@any false
+      val id = preview["id"]?.jsonPrimitive?.contentOrNull.orEmpty()
+      preview["functionName"]?.jsonPrimitive?.contentOrNull == function ||
+        id == name ||
+        id.endsWith(".$name")
+    }
   }
 
   private sealed interface PreviewCard {
@@ -5019,13 +5095,21 @@ class DaemonMcpServer(
     val rendered = variantUris.take(MAX_VARIANT_CELLS).map { PreviewUri.parseOrNull(it)!! }
     val first = rendered.first()
     return try {
-      var baselineSha: String? = null
-      val cells = rendered.map { variant ->
-        val bytes = renderAndReadBytes(variant)
-        val sha = sha256Hex(bytes)
-        if (baselineSha == null) baselineSha = sha
-        Triple(variant, bytes, sha)
+      // Concurrently: each variant is a different preview, so the daemon spreads them over its
+      // sandbox pool, and asking for several at once is what boots the pool's workers when the
+      // daemon defers them (DaemonSupervisor.ON_DEMAND_WORKER_BOOT_PROP). One at a time, a grid
+      // never used more than one sandbox.
+      val cells = coroutineScope {
+        rendered
+          .map { variant ->
+            async(Dispatchers.IO) {
+              val bytes = renderAndReadBytes(variant)
+              Triple(variant, bytes, sha256Hex(bytes))
+            }
+          }
+          .awaitAll()
       }
+      val baselineSha = cells.first().third
       val cellJson = cells.map { (variant, bytes, sha) ->
         buildJsonObject {
           put("uri", variant.toUri())
