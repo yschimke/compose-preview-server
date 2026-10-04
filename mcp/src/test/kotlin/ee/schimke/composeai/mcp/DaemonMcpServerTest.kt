@@ -1688,18 +1688,20 @@ class DaemonMcpServerTest {
     )
 
   @Test
-  fun `several builds under the root are registered and searched on a preview lookup`() {
+  fun `of several builds under the root a preview lookup registers only the one declaring it`() {
+    // wear-os-samples has no root settings.gradle, one build per sample: registering (and then
+    // preparing) every build in reach is the costliest default (compose-ag-plugin#64).
     val repo = samplesRepo()
+    declarePreview(File(repo, "ComposeAdvanced"), "AdvancedPreview")
     restartSession(server, requestHandlers = rootsHandler(repo))
     client.initialize(capabilities = buildJsonObject { putJsonObject("roots") {} })
 
     client.callTool("render_preview", buildJsonObject { put("preview", "Missing") })
+    assertThat(supervisor.listProjects()).isEmpty()
 
+    client.callTool("render_preview", buildJsonObject { put("preview", "AdvancedPreview") })
     assertThat(supervisor.listProjects().map { it.path.canonicalPath })
-      .containsExactly(
-        File(repo, "ComposeStarter").canonicalPath,
-        File(repo, "ComposeAdvanced").canonicalPath,
-      )
+      .containsExactly(File(repo, "ComposeAdvanced").canonicalPath)
   }
 
   /** A runner that records which build each bootstrap ran in, and never prepares one. */
@@ -1713,6 +1715,43 @@ class DaemonMcpServerTest {
       .apply { parentFile.mkdirs() }
       .writeText("@Preview @Composable\nfun $function() {}\n")
     File(build, "gradlew").writeText("#!/bin/sh\n")
+  }
+
+  @Test
+  fun `a preview lookup in a multi-module build starts only the module that lists it`() {
+    // WearOAuth: one build, three modules. Rendering a preview in one started a daemon (and its
+    // sandbox pool) for every module (compose-ag-plugin#64).
+    val project = tmp.newFolder("WearOAuth")
+    File(project, "settings.gradle").writeText("include(\":oauth-pkce\", \":oauth-device-grant\")")
+    for ((module, preview) in
+      listOf(":oauth-pkce" to "PkcePreview", ":oauth-device-grant" to "DeviceGrantPreview")) {
+      val dir = File(project, "${module.drop(1)}/build/compose-previews").apply { mkdirs() }
+      File(dir, "daemon-launch.json")
+        .writeText(
+          """{"schemaVersion":2,"modulePath":"$module","variant":"debug","enabled":true,""" +
+            """"mainClass":"x","classpath":[],"jvmArgs":[],"systemProperties":{},""" +
+            """"workingDirectory":"${dir.parentFile.parent}","manifestPath":"previews.json"}"""
+        )
+      File(dir, "previews.json")
+        .writeText(
+          """{"previews":[{"id":"com.example.${preview}_Devices - Small Round",""" +
+            """"className":"com.example","functionName":"$preview"}]}"""
+        )
+    }
+    val desktop = DaemonMcpServer(supervisor, workingDirectory = null)
+    restartSession(desktop)
+    client.initialize()
+
+    client.callTool(
+      "render_preview",
+      buildJsonObject {
+        put("preview", "PkcePreview")
+        put("project", project.absolutePath)
+      },
+    )
+
+    assertThat(factory.daemons.keys.map { it.second }).containsExactly(":oauth-pkce")
+    desktop.shutdown()
   }
 
   @Test
@@ -1758,7 +1797,7 @@ class DaemonMcpServerTest {
       client
         .callTool("render_preview", buildJsonObject { put("preview", "DefaultPreview") })
         .firstTextContent()
-    assertThat(both).contains("2 unprepared builds declare fun DefaultPreview(")
+    assertThat(both).contains("2 builds declare fun DefaultPreview(")
     assertThat(both).contains("Pass project=<absolute path>")
     assertThat(both).contains(File(repo, "ComposeStarter").canonicalPath)
 
@@ -1766,7 +1805,8 @@ class DaemonMcpServerTest {
       client
         .callTool("render_preview", buildJsonObject { put("preview", "NoSuchPreview") })
         .firstTextContent()
-    assertThat(neither).contains("none of the 2 unprepared builds declares fun NoSuchPreview(")
+    assertThat(neither).contains("Candidate builds")
+    assertThat(supervisor.listProjects()).isEmpty()
     assertThat(ran).isEmpty()
     bootServer.shutdown()
   }
@@ -1818,10 +1858,11 @@ class DaemonMcpServerTest {
       File(repo, "ComposeStarter"),
       "ComposeStarter",
     )
+    declarePreview(File(repo, "ComposeAdvanced"), "AdvancedPreview")
     restartSession(server, requestHandlers = rootsHandler(repo))
     client.initialize(capabilities = buildJsonObject { putJsonObject("roots") {} })
 
-    client.callTool("render_preview", buildJsonObject { put("preview", "Missing") })
+    client.callTool("render_preview", buildJsonObject { put("preview", "AdvancedPreview") })
 
     assertThat(supervisor.listProjects().map { it.path.canonicalPath })
       .containsExactly(
