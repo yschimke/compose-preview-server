@@ -430,6 +430,10 @@ const STYLED_FIXTURES = new Set([
   "serve-reference-compare-round-device",
   "serve-viewer",
   "serve-viewer-rc-parallel",
+  // The compare strip with no baseline anywhere — an imported catalog with no design file. Its
+  // claim is the two-track grid that replaces five tracks with three left empty, which only exists
+  // with the stylesheet routed in.
+  "serve-viewer-strip-no-baseline",
   // The WebGL/WebXR stage is a separate, selectively-loaded renderer. This fixture keeps its
   // desktop orbit presentation and headset affordance in the normal visual-diff workflow.
   "serve-viewer-spatial",

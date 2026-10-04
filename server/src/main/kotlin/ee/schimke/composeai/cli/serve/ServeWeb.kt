@@ -326,6 +326,12 @@ object ServeWeb {
     // One variant and nothing to compare it against is not a strip, it is a heading over a single
     // row that restates the picture directly above it.
     if (variants.size < 2 && scored.isEmpty() && !hasParallel) return ""
+    // No variant has a design reference and there is no paired catalog: there is no baseline at
+    // all, only the variants themselves. A column of empty reference frames and a column of
+    // `not scored` under every row then says nothing but "this catalog has no design file", once
+    // per variant, and the link to the reference wall opens on rows it cannot draw. The strip
+    // stays — it is still the way between this component's variants — without the baseline half.
+    val hasBaseline = scored.isNotEmpty() || hasParallel
     fun seg(value: String) = WebEscaping.urlEncodeSegment(value)
     // `data-cp-strip-source` on a cell says which baseline it belongs to. Absent when there is
     // only one, so a catalog without a pairing keeps the strip it had.
@@ -337,14 +343,16 @@ object ServeWeb {
         // reloads the page you are on reads as a control that does nothing.
         val href = if (current) null else "$basePath/p/${seg(variant.previewId)}$q"
         val baselineCell =
-          variant.referenceId?.let {
-            "<span class=\"cp-strip-shot\"${sourced("kit")}><img loading=\"lazy\" alt=\"\" " +
-              "src=\"$basePath/reference/${seg(it)}.png$assetQ\"></span>"
-          }
-            // A cell rather than nothing, so the columns line up down the strip: a row that jumps
-            // left because this variant is unmapped reads as a layout fault, where an empty frame
-            // reads as the missing mapping it is.
-            ?: "<span class=\"cp-strip-shot cp-strip-shot--empty\"${sourced("kit")} aria-label=\"No design reference\"></span>"
+          if (!hasBaseline) ""
+          else
+            variant.referenceId?.let {
+              "<span class=\"cp-strip-shot\"${sourced("kit")}><img loading=\"lazy\" alt=\"\" " +
+                "src=\"$basePath/reference/${seg(it)}.png$assetQ\"></span>"
+            }
+              // A cell rather than nothing, so the columns line up down the strip: a row that jumps
+              // left because this variant is unmapped reads as a layout fault, where an empty frame
+              // reads as the missing mapping it is.
+              ?: "<span class=\"cp-strip-shot cp-strip-shot--empty\"${sourced("kit")} aria-label=\"No design reference\"></span>"
         // The paired catalog's render of the same variant, on the same terms: an empty frame where
         // the sibling draws no such cell, because the pairing refuses to substitute its default.
         val parallelCell =
@@ -356,11 +364,13 @@ object ServeWeb {
             }
               ?: "<span class=\"cp-strip-shot cp-strip-shot--empty\"${sourced("parallel")} aria-label=\"No paired render\"></span>"
         val score =
-          variant.matchPercent?.let {
-            "<span class=\"cp-strip-score\"${sourced("kit")} data-spec-match=\"${specMatchBand(it)}\">" +
-              "${WebEscaping.formatPercent(it)}</span>"
-          }
-            ?: "<span class=\"cp-strip-score cp-strip-score--none\"${sourced("kit")}>not scored</span>"
+          if (!hasBaseline) ""
+          else
+            variant.matchPercent?.let {
+              "<span class=\"cp-strip-score\"${sourced("kit")} data-spec-match=\"${specMatchBand(it)}\">" +
+                "${WebEscaping.formatPercent(it)}</span>"
+            }
+              ?: "<span class=\"cp-strip-score cp-strip-score--none\"${sourced("kit")}>not scored</span>"
         // Nothing measures the parallel pair per variant, and the design number must not stand in
         // for it: opposite the sibling's render the column says so.
         val parallelScore =
@@ -405,10 +415,12 @@ object ServeWeb {
           .filter { it.isNotEmpty() }
           .joinToString("&")
     val more =
-      "<a${sourced("kit")} href=\"${WebEscaping.htmlEscape(wallHref("reference"))}\">every component &rarr;</a>" +
-        (if (!hasParallel) ""
-        else
-          "<a${sourced("parallel")} href=\"${WebEscaping.htmlEscape(wallHref("parallel"))}\">every component &rarr;</a>")
+      if (!hasBaseline) ""
+      else
+        "<a${sourced("kit")} href=\"${WebEscaping.htmlEscape(wallHref("reference"))}\">every component &rarr;</a>" +
+          (if (!hasParallel) ""
+          else
+            "<a${sourced("parallel")} href=\"${WebEscaping.htmlEscape(wallHref("parallel"))}\">every component &rarr;</a>")
     val counted =
       "${variants.size} ${if (variants.size == 1) "variant" else "variants"} of " +
         WebEscaping.htmlEscape(componentName)
@@ -423,14 +435,21 @@ object ServeWeb {
     val sectionSource =
       if (!hasParallel) ""
       else " data-cp-strip-source=\"${if (defaultSource == "parallel") "parallel" else "kit"}\""
+    val catalogHead = "<span>${WebEscaping.htmlEscape(catalogName)}</span>"
+    // `serve.css` narrows the grid to the render and its name for a strip with no baseline.
+    val sectionClass = if (hasBaseline) "cp-strip" else "cp-strip cp-strip--no-baseline"
+    val sub = if (hasBaseline) "$counted, against $against" else counted
+    val headCells =
+      if (hasBaseline) "$against$catalogHead<span></span><span>Match</span><span></span>"
+      else "$catalogHead<span></span>"
+    val moreHtml = if (more.isEmpty()) "" else "\n        <p class=\"cp-strip-more\">$more</p>"
     return """
-      <section class="cp-strip" id="cp-compare-strip" aria-labelledby="cp-strip-head"$sectionSource>
-        <h2 class="cp-strip-head" id="cp-strip-head">Compare<span class="cp-strip-sub">$counted, against $against</span></h2>
+      <section class="$sectionClass" id="cp-compare-strip" aria-labelledby="cp-strip-head"$sectionSource>
+        <h2 class="cp-strip-head" id="cp-strip-head">Compare<span class="cp-strip-sub">$sub</span></h2>
         <ol class="cp-strip-rows">
-          <li class="cp-strip-headrow" aria-hidden="true">$against<span>${WebEscaping.htmlEscape(catalogName)}</span><span></span><span>Match</span><span></span></li>
+          <li class="cp-strip-headrow" aria-hidden="true">$headCells</li>
           $rows
-        </ol>
-        <p class="cp-strip-more">$more</p>
+        </ol>$moreHtml
       </section>
       """
       .trimIndent()
