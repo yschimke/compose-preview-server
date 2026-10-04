@@ -7759,3 +7759,51 @@ test("contract · live viewer renders an A2UI document with the a2ui-catalog ren
     .poll(async () => (await page.evaluate(() => window.__a2ui)).contexts.at(-1) || "")
     .toContain("the user pressed A2UI button root (action go)");
 });
+
+test("design cards expose two primary actions and tuck secondary controls into more", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 412, height: 915 });
+  await page.route("**/api/ui-builder/v1/designs/**/export.svg**", (route) =>
+    route.fulfill({ path: renderSvgPlaceholder, contentType: "image/svg+xml" }),
+  );
+  await page.goto("/preview-harness/fixtures/pages/serve-ui-builder-designs.html");
+  const card = page
+    .locator(".cp-design-card")
+    .filter({ hasText: "Morning player" })
+    .first();
+  await expect(
+    card.getByRole("link", { name: "Open", exact: true }),
+  ).toBeVisible();
+  await expect(card.locator(".cp-design-duplicate > summary")).toBeVisible();
+  await expect(
+    card.getByRole("link", { name: "History", exact: true }),
+  ).toBeHidden();
+  const more = card.getByLabel("More actions for Morning player");
+  await more.click();
+  await expect(
+    card.getByRole("link", { name: "History", exact: true }),
+  ).toBeVisible();
+  await expect(
+    card.getByRole("link", { name: "Share", exact: true }),
+  ).toBeVisible();
+  await card
+    .locator(".cp-design-more > summary")
+    .filter({ hasText: "Folder" })
+    .click();
+  await expect(
+    card.getByRole("textbox", { name: "Folder", exact: true }),
+  ).toHaveValue("Media");
+  await page.keyboard.press("Escape");
+  await expect(
+    card.getByRole("link", { name: "History", exact: true }),
+  ).toBeHidden();
+  await card.locator(".cp-design-duplicate > summary").click();
+  await expect(
+    card.getByRole("button", { name: "Create the copy" }),
+  ).toBeVisible();
+  await page.getByRole("heading", { name: "Designs", exact: true }).click();
+  await expect(
+    card.getByRole("button", { name: "Create the copy" }),
+  ).toBeHidden();
+});

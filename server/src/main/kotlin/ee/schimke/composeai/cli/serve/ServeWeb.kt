@@ -7798,7 +7798,11 @@ ${captureControlsHtml().prependIndent("          ")}
     val card: (UiBuilderDesignRow) -> String = { row ->
       val title = if (row.title.isBlank()) row.designId else row.title
       val updated =
-        row.updatedAtEpochMillis?.let { java.time.Instant.ofEpochMilli(it).toString() } ?: "unknown"
+        row.updatedAtEpochMillis?.let {
+          java.time.format.DateTimeFormatter.ofPattern("d MMM uuuu", java.util.Locale.ENGLISH)
+            .withZone(java.time.ZoneOffset.UTC)
+            .format(java.time.Instant.ofEpochMilli(it))
+        } ?: "date unavailable"
       // The thumbnail is `loading="lazy"` and `decoding="async"` on purpose: a page of twenty
       // designs is twenty live exports, and none of them is worth blocking the list on. The
       // `onerror` hides a picture that could not be produced rather than leaving a broken-image
@@ -7825,8 +7829,8 @@ ${captureControlsHtml().prependIndent("          ")}
         if (row.copyAction.isBlank()) ""
         else
           """
-            <details class="cp-design-more">
-              <summary>Duplicate</summary>
+            <details class="cp-design-duplicate">
+              <summary class="cp-action-chip">Duplicate</summary>
               <form class="cp-design-form" method="post" action="${esc(row.copyAction)}">
                 <input type="hidden" name="sourceDesignId" value="${esc(row.designId)}">
                 <label class="cp-grant-ttl"><span>New design id</span><input type="text" name="designId"
@@ -7933,7 +7937,7 @@ ${captureControlsHtml().prependIndent("          ")}
           .joinToString(" ")
           .lowercase()
       val cardActions =
-        listOf(duplicate, folder, grants, delete)
+        listOf(share, folder, grants, delete)
           .filter(String::isNotBlank)
           .joinToString("\n            ")
       """
@@ -7948,14 +7952,29 @@ ${captureControlsHtml().prependIndent("          ")}
                 null -> "Visibility unavailable"
               }
             }</strong></p>
-            <p class="cp-design-meta"><code>${esc(row.designId)}</code> · ${esc(row.catalogSystemId)} · revision ${row.revision}</p>
-            <p class="cp-design-meta">${esc(row.requesterRole)} · may ${esc(row.requesterAllowed)} · updated ${esc(updated)}</p>$unavailable
+            <p class="cp-design-meta">${esc(when (row.catalogSystemId) {
+              "m3-catalog" -> "Mobile app"
+              "wear-m3", "wear-m3-catalog" -> "Wear app"
+              "remote-m3" -> "Wear widget"
+              else -> row.catalogSystemId
+            })} · updated ${esc(updated)}</p>
+            <p class="cp-design-meta"><code>${esc(row.designId)}</code></p>$unavailable
             <div class="cp-design-actions">
               <a class="cp-action-chip" href="${esc(row.designHref)}">Open</a>
-              <a class="cp-action-chip" href="${esc(historyHref(row.designHref))}">History</a>
-              $share
+              $duplicate
+              <details class="cp-design-menu">
+                <summary class="cp-action-chip" aria-label="More actions for ${esc(title)}" title="More actions">⋮</summary>
+                <div class="cp-design-menu-panel">
+                  <a class="cp-action-chip" href="${esc(historyHref(row.designHref))}">History</a>
+                  $cardActions
+                  <details class="cp-design-more">
+                    <summary>Design details</summary>
+                    <p class="cp-design-meta">${esc(row.catalogSystemId)} · revision ${row.revision}</p>
+                    <p class="cp-design-meta">${esc(row.requesterRole)} · may ${esc(row.requesterAllowed)}</p>
+                  </details>
+                </div>
+              </details>
             </div>
-            $cardActions
           </div>
         </article>
         """
@@ -8141,6 +8160,18 @@ ${captureControlsHtml().prependIndent("          ")}
         </div>
         <script>
         (function () {
+          document.addEventListener("click", function (event) {
+            document.querySelectorAll(".cp-design-menu[open], .cp-design-duplicate[open]").forEach(function (menu) {
+              if (!menu.contains(event.target)) menu.open = false;
+            });
+          });
+          document.addEventListener("keydown", function (event) {
+            if (event.key !== "Escape") return;
+            document.querySelectorAll(".cp-design-menu[open], .cp-design-duplicate[open]").forEach(function (menu) {
+              menu.open = false;
+              menu.querySelector("summary").focus();
+            });
+          });
           var box = document.getElementById("cp-design-filter");
           var count = document.getElementById("cp-design-count");
           var none = document.getElementById("cp-designs-none");

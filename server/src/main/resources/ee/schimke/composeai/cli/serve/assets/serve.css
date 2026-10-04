@@ -5508,12 +5508,12 @@ cp-page-zoom button:focus-visible {
 .cp-design-folder { margin: 0 0 8px; }
 .cp-design-folder[hidden] { display: none; }
 .cp-design-folder-name { display: flex; align-items: baseline; gap: 10px; margin: 0 0 12px; }
-.cp-card.cp-design-card { display: flex; flex-direction: column; overflow: hidden;
+.cp-card.cp-design-card { display: flex; flex-direction: column; overflow: visible;
   padding: 0; text-align: left; }
 .cp-card.cp-design-card[hidden] { display: none; }
 .cp-design-thumb { display: flex; align-items: center; justify-content: center; height: 200px;
   margin: 0; background: var(--md-sys-color-surface-container, var(--cp-surface));
-  border-bottom: 1px solid var(--cp-border); overflow: hidden; }
+  border-bottom: 1px solid var(--cp-border); border-radius: var(--md-sys-shape-corner-medium) var(--md-sys-shape-corner-medium) 0 0; overflow: hidden; }
 .cp-design-thumb img { max-width: 100%; max-height: 100%; object-fit: contain; display: block; }
 .cp-design-thumb-empty { color: var(--cp-fg-muted); font-size: 2rem; }
 .cp-design-body { display: flex; flex-direction: column; gap: 8px; padding: 14px 16px 16px; }
@@ -5621,4 +5621,65 @@ body { padding-left: max(28px, env(safe-area-inset-left, 0px));
 .cp-lan-caveat { color: var(--cp-fg-muted); font-size: var(--md-sys-typescale-body-small-size, 0.8rem); }
 @media (max-width: 640px) {
   .cp-lan-card { grid-template-columns: minmax(0, 1fr); justify-items: start; }
+}
+
+/* Secondary design controls stay behind one keyboard-accessible overflow menu. */
+.cp-design-menu,
+.cp-design-duplicate {
+  position: relative;
+}
+.cp-design-menu {
+  margin-left: auto;
+}
+.cp-design-menu > summary,
+.cp-design-duplicate > summary {
+  list-style: none;
+  cursor: pointer;
+}
+.cp-design-menu > summary::-webkit-details-marker,
+.cp-design-duplicate > summary::-webkit-details-marker {
+  display: none;
+}
+.cp-design-menu > summary {
+  min-width: 40px;
+  justify-content: center;
+  font-size: 1.3rem;
+}
+.cp-design-menu-panel,
+.cp-design-duplicate > form {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 20;
+  width: min(280px, calc(100vw - 60px));
+  box-sizing: border-box;
+  max-height: 65vh;
+  overflow-y: auto;
+  padding: 14px;
+  margin: 0;
+  border: 1px solid var(--cp-border);
+  border-radius: 12px;
+  background: var(--cp-surface);
+  color: var(--cp-fg);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.18);
+}
+.cp-design-duplicate > form {
+  left: -80px;
+  right: auto;
+}
+.cp-design-card:has(.cp-design-menu[open], .cp-design-duplicate[open]) {
+  z-index: 30;
+}
+.cp-design-menu-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.cp-design-menu-panel .cp-action-chip {
+  align-self: flex-start;
+}
+.cp-design-menu > summary:focus-visible,
+.cp-design-duplicate > summary:focus-visible {
+  outline: 2px solid var(--cp-accent);
+  outline-offset: 2px;
 }

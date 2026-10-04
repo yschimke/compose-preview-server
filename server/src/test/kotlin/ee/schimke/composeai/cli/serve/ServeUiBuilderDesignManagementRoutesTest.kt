@@ -36,8 +36,10 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 import okhttp3.FormBody
+import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
 
 /**
  * Managing designs from the page they are listed on: copy one, delete one, and see both offered.
@@ -185,6 +187,8 @@ class ServeUiBuilderDesignManagementRoutesTest {
         uiBuilderDir = builderDir,
         uiBuilderCatalogs = setOf("m3-catalog"),
         uiBuilderService = service,
+        uiBuilderFolderStore =
+          ServeUiBuilderFolderStore(Files.createTempDirectory("manage-folders")),
         uiBuilderAuthorization = authorization,
       )
       .also(ServeHttpServer::start)
@@ -314,6 +318,33 @@ class ServeUiBuilderDesignManagementRoutesTest {
 
     // The service's own refusal is the answer the second attempt gets.
     assertEquals(404, post("/ui-builder/morning-player/delete", confirmed).first)
+  }
+
+  @Test
+  fun `a folder move from the home API is visible in the designs page and survives a form move`() {
+    val moved =
+      Request.Builder()
+        .url(url("/api/ui-builder/v1/home-folders/morning-player"))
+        .header("X-Test-Actor", OWNER)
+        .put("""{"folder":"Music"}""".toRequestBody("application/json".toMediaType()))
+        .build()
+    client.newCall(moved).execute().use { assertEquals(200, it.code) }
+    var page = designsPage()
+    assertTrue("""<section class="cp-design-folder" aria-label="Music">""" in page, page)
+    assertTrue("""value="Music""" in page, page)
+    assertEquals(
+      303,
+      post("/ui-builder/morning-player/folder", FormBody.Builder().add("folder", "Watch").build())
+        .first,
+    )
+    page = designsPage()
+    assertTrue("""<section class="cp-design-folder" aria-label="Watch">""" in page, page)
+    assertFalse("""aria-label="Music""" in page, page)
+    assertEquals(
+      303,
+      post("/ui-builder/morning-player/folder", FormBody.Builder().add("folder", "").build()).first,
+    )
+    assertFalse("""<section class="cp-design-folder"""" in designsPage())
   }
 
   @Test
