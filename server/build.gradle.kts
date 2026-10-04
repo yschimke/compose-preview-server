@@ -1075,7 +1075,10 @@ val stageFoundationRecord =
   tasks.register<Sync>("stageFoundationRecord") {
     description =
       "Stage the builder's own layout/, shape/ and asset/ component record into the jar."
-    from(rootProject.layout.projectDirectory.dir("docs/design/fixtures/ui-builder")) {
+    // Composite builds must use the record owned by the same builder checkout as the code.
+    // Otherwise its new slot scopes are checked against this repository's older release fixture.
+    val builderRoot = providers.gradleProperty("composeUiBuilderDir").orNull?.let(rootProject::file)
+    from((builderRoot ?: rootProject.projectDir).resolve("docs/design/fixtures/ui-builder")) {
       include("compose-foundation-components-v1.json")
       into("ui-builder")
     }
