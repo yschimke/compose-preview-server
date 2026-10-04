@@ -22,6 +22,59 @@ import kotlin.test.assertTrue
  */
 class ServePerPreviewLiveHostTest {
 
+  @Test
+  fun `module routing applies dark mode using the bundle local id`() {
+    val localId = "module_home__HomePreview"
+    val outerId = "module_3a686f6d65__$localId"
+    val daemon =
+      RecordingHost(listOf(ServePreview(id = localId, label = "Home")), "home", streaming = true)
+    val module = ServeModuleLiveHost(daemon, mapOf(outerId to localId))
+    val baked = RecordingHost(listOf(ServePreview(id = "home", label = "Home")), "baked")
+    val catalog =
+      ServePerPreviewLiveHost(
+        alias = mapOf("home" to outerId),
+        baked = baked,
+        resolveLive = { if (it == outerId) module else null },
+        previews = baked.previews,
+      )
+    val dark = PreviewOverrides(uiMode = UiMode.DARK)
+    assertEquals(
+      "home:$localId",
+      (catalog.render("home", dark) as RenderOutcome.Ok).png.decodeToString(),
+    )
+    assertEquals(localId, daemon.lastRenderId)
+    assertEquals(dark, daemon.lastRenderOverrides)
+    catalog.renderSvg("home", dark)
+    assertEquals(localId, daemon.lastSvgId)
+    catalog.renderA11y("home", dark)
+    assertEquals(localId, daemon.lastA11yId)
+    catalog.renderAnnotations("home", dark, null)
+    assertEquals(localId, daemon.lastAnnotationsId)
+    assertEquals(outerId, module.previews.single().id)
+    catalog.subscribeStream("home", dark, null, null, null) {}
+    assertEquals(localId, daemon.lastStreamId)
+  }
+
+  @Test
+  fun `equal local ids retain distinct catalog module identities`() {
+    val localId = "activity__MainActivity"
+    val mobile = RecordingHost(listOf(ServePreview(id = localId, label = "Mobile")), "mobile")
+    val tv = RecordingHost(listOf(ServePreview(id = localId, label = "TV")), "tv")
+    val mobileHost = ServeModuleLiveHost(mobile, mapOf("mobile__$localId" to localId))
+    val tvHost = ServeModuleLiveHost(tv, mapOf("tv__$localId" to localId))
+    val overrides = PreviewOverrides(uiMode = UiMode.DARK)
+    assertEquals(
+      "mobile:$localId",
+      (mobileHost.render("mobile__$localId", overrides) as RenderOutcome.Ok).png.decodeToString(),
+    )
+    assertEquals(
+      "tv:$localId",
+      (tvHost.render("tv__$localId", overrides) as RenderOutcome.Ok).png.decodeToString(),
+    )
+    assertEquals("mobile__$localId", mobileHost.previews.single().id)
+    assertEquals("tv__$localId", tvHost.previews.single().id)
+  }
+
   private class RecordingHost(
     override val previews: List<ServePreview>,
     private val tag: String,
