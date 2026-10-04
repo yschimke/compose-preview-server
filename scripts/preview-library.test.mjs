@@ -66,12 +66,16 @@ test('empty sidebar discovers registration, auto-selects, and keeps real cached 
   } finally { await browser.close(); }
 });
 
-for (const hostFiles of [true, false]) test(`local design tab opens the original .uid file (host file capability: ${hostFiles})`, async () => {
+for (const { hostFiles, path, expectedUrl } of [
+  { hostFiles: true, path: '/work/active chat/designs/Watch #1.uid' },
+  { hostFiles: false, path: '/work/active chat/designs/Watch #1.uid', expectedUrl: 'file:///work/active%20chat/designs/Watch%20%231.uid' },
+  { hostFiles: false, path: String.raw`C:\work\active chat\Watch #1.uid`, expectedUrl: 'file:///C:/work/active%20chat/Watch%20%231.uid' },
+  { hostFiles: false, path: String.raw`\\server\share\active chat\Watch #1.uid`, expectedUrl: 'file://server/share/active%20chat/Watch%20%231.uid' },
+]) test(`local design tab opens the original .uid file (${path}, host file capability: ${hostFiles})`, async () => {
   const browser = await chromium.launch();
   try {
     const page = await browser.newPage({ viewport: { width: 1100, height: 640 } });
     await page.setContent('<iframe id="app" style="width:100%;height:620px;border:0"></iframe>');
-    const path = '/work/active chat/designs/Watch #1.uid';
     await page.evaluate(({ html, hostFiles, path }) => {
       const frame = document.getElementById('app');
       window.calls = [];
@@ -102,7 +106,7 @@ for (const hostFiles of [true, false]) test(`local design tab opens the original
     await frame.locator('#pane .status').getByText('Asked the host', { exact: false }).waitFor();
     const call = await page.evaluate(() => window.calls.find(c => c.method === 'openai/files/open' || c.method === 'ui/open-link'));
     assert.deepEqual(call, hostFiles ? { method: 'openai/files/open', params: { path } }
-      : { method: 'ui/open-link', params: { url: 'file:///work/active%20chat/designs/Watch%20%231.uid' } });
+      : { method: 'ui/open-link', params: { url: expectedUrl } });
     assert.equal(await page.evaluate(() => window.calls.filter(c => c.method === 'tools/call').length), 0);
   } finally { await browser.close(); }
 });

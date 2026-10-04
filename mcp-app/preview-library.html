@@ -515,6 +515,18 @@
     $('count').textContent = all ? `${all.length} designs` : '';
   }
 
+  function fileUrl(path) {
+    const normalized = path.startsWith('/') ? path : path.replace(/\\/g, '/');
+    const encodePath = value => value.split('/').map(encodeURIComponent).join('/');
+    // Preserve the drive colon and UNC authority; encode only path segments.
+    if (/^[A-Za-z]:\//.test(normalized)) return 'file:///' + normalized.slice(0, 2) + encodePath(normalized.slice(2));
+    if (normalized.startsWith('//')) {
+      const slash = normalized.indexOf('/', 2);
+      return 'file://' + normalized.slice(2, slash) + encodePath(normalized.slice(slash));
+    }
+    return 'file://' + encodePath(normalized);
+  }
+
   function selectLocalDesign(design) {
     if (!design) return;
     state.selected = design.id;
@@ -525,7 +537,7 @@
       button.disabled = true;
       try {
         if (state.hostFiles) await request('openai/files/open', { path: design.path });
-        else await request('ui/open-link', { url: 'file://' + design.path.split('/').map(encodeURIComponent).join('/') });
+        else await request('ui/open-link', { url: fileUrl(design.path) });
         status.textContent = 'Asked the host to open the design. If it did not open, open the file at the path above.';
       } catch (err) {
         status.textContent = 'Could not open the design: ' + (err.message || err) + '. Open the file at the path above.';
