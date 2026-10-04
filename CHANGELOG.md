@@ -1,5 +1,27 @@
 # Changelog
 
+## [3.101.0](https://github.com/yschimke/compose-preview-server/compare/v3.100.0...v3.101.0) (2026-10-04)
+
+
+### Features
+
+* **mcp:** share library selection with chat ([#1360](https://github.com/yschimke/compose-preview-server/issues/1360)) ([c5e54fe](https://github.com/yschimke/compose-preview-server/commit/c5e54fe31f98d72c1090c56ab5d5a3bb9ef04ba1))
+* **mcp:** surface UI Builder designs from active sessions ([#1356](https://github.com/yschimke/compose-preview-server/issues/1356)) ([7770643](https://github.com/yschimke/compose-preview-server/commit/7770643162f2d436d2df1ceccbd635de713dc492))
+* **server:** report MCP agent activity per design ([#1355](https://github.com/yschimke/compose-preview-server/issues/1355)) ([f216bdd](https://github.com/yschimke/compose-preview-server/commit/f216bdd5a86798d64e9fc2bb3218ca611db21e8a))
+* **serve:** simplify design card actions ([#1357](https://github.com/yschimke/compose-preview-server/issues/1357)) ([c726c54](https://github.com/yschimke/compose-preview-server/commit/c726c54252ace75005bc4b2ac517b0a063bb5920))
+* **ui-builder:** support an optional custom hostname ([#1353](https://github.com/yschimke/compose-preview-server/issues/1353)) ([5269eac](https://github.com/yschimke/compose-preview-server/commit/5269eac793906bb54833cd5c7fc596b2e51dc474))
+
+
+### Bug Fixes
+
+* compare records with packaged builder capabilities ([#1361](https://github.com/yschimke/compose-preview-server/issues/1361)) ([a50998b](https://github.com/yschimke/compose-preview-server/commit/a50998bf8326ada2500540d1c4831b25f11f6951))
+* make design pages content first on mobile ([#1362](https://github.com/yschimke/compose-preview-server/issues/1362)) ([c851e53](https://github.com/yschimke/compose-preview-server/commit/c851e5331d53a2fb70b974f1d2c45287ff18c324))
+* **mcp:** recover preview library registrations and retain renders ([#1348](https://github.com/yschimke/compose-preview-server/issues/1348)) ([ba4e7fa](https://github.com/yschimke/compose-preview-server/commit/ba4e7fa94f00b965eabfcfb589d7b7a517a2466e))
+* **mcp:** scope design roots and bound discovery ([#1358](https://github.com/yschimke/compose-preview-server/issues/1358)) ([703c351](https://github.com/yschimke/compose-preview-server/commit/703c3512ed960b64f870d864bf2f3cd4b7d61e77))
+* **serve:** route module theme renders to bundle-local preview ids ([#1351](https://github.com/yschimke/compose-preview-server/issues/1351)) ([462891a](https://github.com/yschimke/compose-preview-server/commit/462891a6bf2dd29667812022dfe3251635d13c56))
+* **serve:** stop the registry sync churning boot-loaded catalogs ([#1352](https://github.com/yschimke/compose-preview-server/issues/1352)) ([cc9d681](https://github.com/yschimke/compose-preview-server/commit/cc9d681aee383c60cec942f01dc27541850cc30a))
+* stage foundation record from builder checkout ([#1359](https://github.com/yschimke/compose-preview-server/issues/1359)) ([658dae6](https://github.com/yschimke/compose-preview-server/commit/658dae664cc52baa35bb80c85ce6a3362e9ee558))
+
 ## [3.100.0](https://github.com/yschimke/compose-preview-server/compare/v3.99.0...v3.100.0) (2026-10-04)
 
 
