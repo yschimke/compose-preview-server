@@ -511,6 +511,19 @@ public class ServeCommandOptions(
    */
   override val sitesRaw: String? = args.flagValue("--sites")
 
+  override val uiBuilderHost: String? =
+    args.flagValue("--ui-builder-host")?.let { raw ->
+      requireNotNull(ServeSites.normalizeHost(raw)) { "--ui-builder-host must be a hostname" }
+    }
+
+  override val uiBuilderStartUrl: String? =
+    args.flagValue("--ui-builder-start-url")?.also { raw ->
+      val uri = java.net.URI(raw)
+      require(uri.scheme == "https" && uri.host != null && uri.userInfo == null) {
+        "--ui-builder-start-url must be an HTTPS URL without credentials"
+      }
+    }
+
   /** Raw `--catalogs-file` path; the server opens it. */
   override val catalogsFilePath: String? =
     args.flagValue("--catalogs-file")?.takeIf { it.isNotBlank() }
@@ -1395,6 +1408,11 @@ public class ServeCommandOptions(
                           "attributionRepos"), so an id like compose-m3 can't buy a section. Entries
                           here come first; --catalogs / --catalogs-unlisted add to them. May also
                           carry "sites" (see --sites).
+        --ui-builder-host <hostname>
+                          Optional builder hostname; / redirects to /ui-builder/ on that host.
+                          Include it in the TLS proxy and configure a shared auth cookie domain.
+        --ui-builder-start-url <https-url>
+                          Optional /start guide redirect on the builder hostname.
         --sites <host>=<system>[,…]
                           Top-level sites: serve an already-published catalog on a hostname of its
                           own, where it looks like the whole server (e.g.

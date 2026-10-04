@@ -66,6 +66,8 @@ services:
       SERVE_UMAMI_URL: "${SERVE_UMAMI_URL:-}"
       SERVE_UMAMI_WEBSITE_ID: "${SERVE_UMAMI_WEBSITE_ID:-}"
       DOMAIN: "${DOMAIN:-}"
+      SERVE_UI_BUILDER_HOST: "${SERVE_UI_BUILDER_HOST:-}"
+      SERVE_UI_BUILDER_START_URL: "${SERVE_UI_BUILDER_START_URL:-}"
       # Public preview server by default (preview.coo.ee): open, serving our
       # published design systems. The in-browser CMP Wasm tier rides --catalogs —
       # `serve` fetches each system's web/wasm/ from the trusted branch (the
@@ -513,6 +515,8 @@ services:
     pull_policy: always
     environment:
       DOMAIN: "${DOMAIN:-}"
+      SERVE_UI_BUILDER_HOST: "${SERVE_UI_BUILDER_HOST:-}"
+      SERVE_UI_BUILDER_START_URL: "${SERVE_UI_BUILDER_START_URL:-}"
       SERVE_ROLE: playground
       SERVE_PUBLIC: "${SERVE_PUBLIC:-1}"
       SERVE_TOKEN: "${SERVE_TOKEN:-}"
@@ -694,6 +698,7 @@ services:
       # so the committed file is what routes a site AND what gets it a certificate. Set this only
       # for a name the app doesn't serve as a site (a vanity alias, a migration).
       SITE_DOMAINS: "${SITE_DOMAINS:-}"
+      SERVE_UI_BUILDER_HOST: "${SERVE_UI_BUILDER_HOST:-}"
       # Which service serves the public playground's paths: `preview` (the default, which answers
       # with its disabled page) or `playground` once that profile is running.
       PLAYGROUND_UPSTREAM: "${PLAYGROUND_UPSTREAM:-preview}"

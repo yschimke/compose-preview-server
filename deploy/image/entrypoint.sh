@@ -160,6 +160,8 @@ fi
 # pixels — a site is a view of this server, not a second one, so it costs no extra memory or
 # render. The reverse proxy in front must route the hostname here and hold a certificate for it;
 # catalogs.json's "sites" says the same thing as durable config.
+[[ -n "${SERVE_UI_BUILDER_HOST:-}" ]] && args+=(--ui-builder-host "${SERVE_UI_BUILDER_HOST}")
+[[ -n "${SERVE_UI_BUILDER_START_URL:-}" ]] && args+=(--ui-builder-start-url "${SERVE_UI_BUILDER_START_URL}")
 [[ -n "${SERVE_SITES:-}" && "${SERVE_SITES}" != "none" ]] && args+=(--sites "${SERVE_SITES}")
 # Runtime catalog administration (GET/POST /admin/catalogs, DELETE /admin/catalogs/<system>),
 # gated by its own secret — never the browse token, which a public box hands to every visitor.

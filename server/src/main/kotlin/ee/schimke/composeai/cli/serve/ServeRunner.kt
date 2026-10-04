@@ -3799,6 +3799,8 @@ public class ServeRunner(
         catalogSessions = configuredCatalogs,
         appCatalogSessions = configuredApps,
         sites = sites,
+        uiBuilderHost = uiBuilderHost,
+        uiBuilderStartUrl = uiBuilderStartUrl,
         catalogLoads = catalogLoads,
         heroCacheDir = catalogCacheDirFlag?.takeIf { it != "none" }?.let { File(it, "heroes") },
         catalogRefresh = catalogRefresh,

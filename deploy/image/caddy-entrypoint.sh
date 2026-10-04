@@ -24,9 +24,10 @@ SCAN="$(dirname "$0")/site-domains.sh"
 derived="$(sh "${SCAN}" "${CATALOGS_FILE}" || true)"
 
 # Union, first spelling wins. SITE_DOMAINS is space- or comma-separated by documented convention;
-# the derived list is newline-separated. Normalise both to whitespace and dedupe.
+# the derived list is newline-separated. Include the optional builder hostname too.
+# Normalise the lists to whitespace and dedupe.
 resolved="$(
-  printf '%s %s' "$(printf '%s' "${SITE_DOMAINS:-}" | tr ',' ' ')" "$(printf '%s' "${derived}" | tr '\n' ' ')" |
+  printf '%s %s %s' "$(printf '%s' "${SITE_DOMAINS:-}" | tr ',' ' ')" "$(printf '%s' "${derived}" | tr '\n' ' ')" "${SERVE_UI_BUILDER_HOST:-}" |
     tr -s ' \t' '\n' |
     awk 'NF && !seen[$0]++' |
     tr '\n' ' '
