@@ -1,5 +1,26 @@
 # Changelog
 
+## [3.99.0](https://github.com/yschimke/compose-preview-server/compare/v3.98.0...v3.99.0) (2026-10-04)
+
+
+### Features
+
+* add opt-in Umami analytics and deployment ([#1334](https://github.com/yschimke/compose-preview-server/issues/1334)) ([65c378e](https://github.com/yschimke/compose-preview-server/commit/65c378e5e5b46e4eadfaf9ff3f3910f473d0776a))
+
+
+### Bug Fixes
+
+* **deps:** compose-preview-daemon 3.14.0 ([#1343](https://github.com/yschimke/compose-preview-server/issues/1343)) ([ab74cb2](https://github.com/yschimke/compose-preview-server/commit/ab74cb290a27340bb3884a6642b86973d8c53427))
+* **mcp:** smoke-run failures from Claude Code, Antigravity and Codex ([#1340](https://github.com/yschimke/compose-preview-server/issues/1340)) ([ab7c896](https://github.com/yschimke/compose-preview-server/commit/ab7c896a39f832d7cad889391808d31308b3f4b0))
+* **serve:** answer the Google font route's 404s CORS-open ([#1341](https://github.com/yschimke/compose-preview-server/issues/1341)) ([7c95863](https://github.com/yschimke/compose-preview-server/commit/7c958637b9b94f290d244cd44b6ba383d36103d5))
+* **serve:** keep the operator's default visibility when a create omits one ([#1337](https://github.com/yschimke/compose-preview-server/issues/1337)) ([e54dac1](https://github.com/yschimke/compose-preview-server/commit/e54dac1321b134c2a70a9ae2788a77a10fdd99ab))
+* **serve:** leave the baseline column out of a compare strip with nothing to compare against ([#1344](https://github.com/yschimke/compose-preview-server/issues/1344)) ([b0d6a96](https://github.com/yschimke/compose-preview-server/commit/b0d6a965cc6cc5d57af797a0455c42845c0dec7e))
+
+
+### Performance Improvements
+
+* **mcp:** start one module of one build, not everything in reach ([#1342](https://github.com/yschimke/compose-preview-server/issues/1342)) ([47ffdc9](https://github.com/yschimke/compose-preview-server/commit/47ffdc9dc0db0b1e4a1e63a4858e3050c329d078))
+
 ## [3.98.0](https://github.com/yschimke/compose-preview-server/compare/v3.97.0...v3.98.0) (2026-10-03)
 
 
