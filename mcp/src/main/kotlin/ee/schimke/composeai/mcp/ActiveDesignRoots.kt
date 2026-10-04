@@ -16,10 +16,11 @@ import kotlinx.serialization.json.putJsonArray
 
 /** Roots of connected MCP sessions, shared with the sidebar's sibling process. No design bytes. */
 class ActiveDesignRoots(
-  private val directory: File? = null,
+  directory: File? = null,
   private val processId: Long = ProcessHandle.current().pid(),
   private val processStart: Long =
     ProcessHandle.current().info().startInstant().map { it.toEpochMilli() }.orElse(0L),
+  scope: String? = null,
   private val isAlive: (Long, Long) -> Boolean = { pid, start ->
     ProcessHandle.of(pid)
       .map {
@@ -29,9 +30,21 @@ class ActiveDesignRoots(
       .orElse(false)
   },
 ) : AutoCloseable {
+  // Sharing is opt-in. A host must supply the same opaque scope to its chat/sidebar processes;
+  // absent that identity, discovery remains local to this process. Ignore legacy unscoped records.
+  private val directory =
+    scope
+      ?.takeIf { it.isNotBlank() }
+      ?.let {
+        directory?.resolve(
+          java.security.MessageDigest.getInstance("SHA-256")
+            .digest(it.toByteArray(Charsets.UTF_8))
+            .joinToString("") { byte -> "%02x".format(byte.toInt() and 0xff) }
+        )
+      }
   private val sessions = mutableMapOf<Any, List<File>>()
   private var closed = false
-  private val record = directory?.let { File(it, "${UUID.randomUUID()}.json") }
+  private val record = this.directory?.let { File(it, "${UUID.randomUUID()}.json") }
 
   @Synchronized
   fun register(session: Any, roots: List<File>) {
@@ -120,6 +133,8 @@ class ActiveDesignRoots(
   }
 
   companion object {
+    const val SCOPE_ENV: String = "COMPOSE_PREVIEW_DESIGN_SESSION_SCOPE"
+
     fun defaultDirectory(): File =
       File(WorkspaceStore.defaultFile().parentFile, "active-design-roots")
   }

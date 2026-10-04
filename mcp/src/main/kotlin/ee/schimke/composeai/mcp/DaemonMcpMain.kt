@@ -90,7 +90,11 @@ object DaemonMcpMain {
         DaemonMcpServer(
           supervisor,
           uiBuilderMcp = uiBuilderMcp,
-          activeDesignRoots = ActiveDesignRoots(ActiveDesignRoots.defaultDirectory()),
+          activeDesignRoots =
+            ActiveDesignRoots(
+              ActiveDesignRoots.defaultDirectory(),
+              scope = System.getenv(ActiveDesignRoots.SCOPE_ENV),
+            ),
           sourceCompiler = GradleSourceCompiler(),
         )
       }

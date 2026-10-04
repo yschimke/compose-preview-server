@@ -196,8 +196,8 @@ class PreviewLibraryMcpTest {
   @Test
   fun `library finds uid designs from another active non Gradle session`() {
     val directory = tmp.newFolder("active-roots")
-    val chat = ActiveDesignRoots(directory)
-    val sidebar = ActiveDesignRoots(directory)
+    val chat = ActiveDesignRoots(directory, scope = "test-host")
+    val sidebar = ActiveDesignRoots(directory, scope = "test-host")
     closers += { chat.close() }
     closers += { sidebar.close() }
     val root = tmp.newFolder("non-gradle")
