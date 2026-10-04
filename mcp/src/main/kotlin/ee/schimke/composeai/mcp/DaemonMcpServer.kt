@@ -249,6 +249,8 @@ class DaemonMcpServer(
     environment[CALL_BUDGET_ENV]?.toLongOrNull() ?: DEFAULT_CALL_BUDGET_MS,
   /** How long a budgeted call's finished result waits for its retry; tests shorten it. */
   private val uncollectedCallResultTtlMs: Long = UNCOLLECTED_CALL_RESULT_TTL_MS,
+  /** Active local session folders shared with sibling sidebar processes. */
+  private val activeDesignRoots: ActiveDesignRoots = ActiveDesignRoots(),
   /**
    * `design_open` and `ui://compose-ui-builder/editor` (compose-ui-builder#364); null, and absent
    * from every list, unless the editor archive carries the MCP App shell.
@@ -269,7 +271,15 @@ class DaemonMcpServer(
     }
 
   /** The `previews_library` sidebar app (#1241); native profile only. */
-  private val previewLibrary = PreviewLibrary { projectId -> libraryProjects(projectId) }
+  private val previewLibrary =
+    PreviewLibrary(
+      designs = {
+        LocalDesignDiscovery.discover(
+          activeDesignRoots.all() + supervisor.listProjects().map { it.path }
+        )
+      },
+      snapshot = { projectId -> libraryProjects(projectId) },
+    )
 
   private val json = Json {
     ignoreUnknownKeys = true
@@ -575,6 +585,7 @@ class DaemonMcpServer(
     runCatching { freshnessExecutor.shutdownNow() }
     runCatching { renderDispatchExecutor.shutdownNow() }
     runCatching { budgetedCallScope.cancel() }
+    runCatching { activeDesignRoots.close() }
     runCatching { rcViewer.shutdown() }
     runCatching { uiBuilderDesign?.close() }
     synchronized(fileRenderCacheLock) { runCatching { fileRenderCacheDir.deleteRecursively() } }
@@ -627,6 +638,8 @@ class DaemonMcpServer(
           else { _ -> null },
       )
     sessions.register(session)
+    if (profile == McpToolProfile.NATIVE)
+      activeDesignRoots.register(session, listOfNotNull(workingDirectory))
     return session
   }
 
@@ -639,6 +652,8 @@ class DaemonMcpServer(
     val released = subscriptions.forgetDataSubscriptions(session)
     released.forEach { key -> dispatchDataUnsubscribe(key) }
     subscriptions.forget(session)
+    sessionRootsCache.remove(session)
+    activeDesignRoots.remove(session)
     previousFileRenderHashes.remove(session)
     // Nobody can collect a closed session's budgeted calls: the key holds the session.
     inFlightCalls.keys.removeIf { it.session == session }
@@ -2719,6 +2734,7 @@ class DaemonMcpServer(
         is ProjectArgument.Rejected -> return errorCallToolResult("$name: ${registered.message}")
       }
     }
+    if (profile == McpToolProfile.NATIVE) sessionRoots(session)
     val progress = progressReporter(session, progressToken)
     return when (name) {
       "status" -> toolStatus(session)
@@ -3387,6 +3403,7 @@ class DaemonMcpServer(
     val tried =
       Tried(roots.ifEmpty { listOfNotNull(workingDirectory) }, fromRoots = roots.isNotEmpty())
     sessionRootsCache[session] = tried
+    activeDesignRoots.update(session, tried.dirs)
     return tried
   }
 

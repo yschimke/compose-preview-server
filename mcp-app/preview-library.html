@@ -76,6 +76,10 @@
 <body>
 <header>
   <h1 id="title">Compose Previews</h1>
+  <div id="tabs" hidden role="group" aria-label="Library contents">
+    <button id="previews-tab" aria-pressed="true">Previews</button>
+    <button id="designs-tab" aria-pressed="false">Designs</button>
+  </div>
   <input id="search" type="search" placeholder="Search previews" aria-label="Search previews">
   <span class="count" id="count"></span>
   <button id="refresh" title="Refresh">Refresh</button>
@@ -98,6 +102,8 @@
     query: '',
     route: null,
     designs: null,
+    tab: 'previews',
+    hostFiles: false,
     refreshInFlight: null,
     startedProjects: new Set(),
     renders: new Map(), // Last successful pixels in this app session; never a fabricated preview.
@@ -195,7 +201,10 @@
       }
       select(route.value, found?.preview);
     } else if (route.kind === 'design') {
-      if (state.data.mode === 'designs') void openDesign(route.value);
+      state.tab = 'designs';
+      render();
+      if (state.data.host === 'local') selectLocalDesign((state.data.designs || []).find(d => d.id === route.value));
+      else if (state.data.tools?.listDesigns) void loadDesigns().then(() => openDesign(route.value));
     }
   }
 
@@ -220,7 +229,7 @@
     }
     render();
     const projects = data.projects || [];
-    if (data.mode === 'library' && data.host === 'local' && projects.length === 1 && (!state.route || state.route.kind === 'home')) {
+    if (state.tab === 'previews' && data.mode === 'library' && data.host === 'local' && projects.length === 1 && (!state.route || state.route.kind === 'home')) {
       const project = projects[0];
       state.expanded.add(project.id);
       const previews = (project.modules || []).flatMap(m => m.previews || []);
@@ -288,8 +297,15 @@
   function render() {
     const mode = state.data?.mode;
     $('search').hidden = mode === 'register';
+    const hasDesigns = mode === 'library' && (state.data?.host === 'local' || state.data?.tools?.listDesigns);
+    $('tabs').hidden = !hasDesigns;
+    const designsTab = mode === 'designs' || (hasDesigns && state.tab === 'designs');
+    $('previews-tab').setAttribute('aria-pressed', String(!designsTab));
+    $('designs-tab').setAttribute('aria-pressed', String(designsTab));
+    $('search').placeholder = designsTab ? 'Search designs' : 'Search previews';
+    $('search').setAttribute('aria-label', $('search').placeholder);
     if (mode === 'register') renderRegister();
-    else if (mode === 'designs') renderDesigns();
+    else if (designsTab) renderDesigns();
     else renderTree();
   }
 
@@ -460,9 +476,9 @@
       const result = await callTool(state.data.tools.listDesigns, {});
       if (result?.isError) throw new Error(textOf(result));
       state.designs = designsFrom(result);
-      renderDesigns();
+      if (state.tab === 'designs' || state.data?.mode === 'designs') renderDesigns();
     } catch (err) {
-      $('tree').replaceChildren(el('div', { class: 'error' }, String(err.message || err)));
+      if (state.tab === 'designs' || state.data?.mode === 'designs') $('tree').replaceChildren(el('div', { class: 'error' }, String(err.message || err)));
     }
   }
 
@@ -484,13 +500,38 @@
   }
 
   function renderDesigns() {
-    const designs = (state.designs || []).filter(d => !state.query || (d.name + d.id).toLowerCase().includes(state.query));
+    const local = state.data?.host === 'local';
+    const all = local ? state.data.designs || [] : state.designs;
+    const designs = (all || []).filter(d => !state.query || (d.name + d.id + (d.path || '')).toLowerCase().includes(state.query));
     $('tree').replaceChildren(...designs.map(d => el('div', {
-      class: 'row' + (state.selected === d.id ? ' selected' : ''), onclick: () => openDesign(d.id),
-    }, el('span', {}, d.name), el('span', { class: 'meta' }, d.id))));
-    if (state.designs && !designs.length) $('tree').append(el('div', { class: 'empty' }, 'No designs.'));
-    if (!state.designs) $('tree').append(el('div', { class: 'empty' }, 'Loading designs…'));
-    $('count').textContent = state.designs ? `${state.designs.length} designs` : '';
+      class: 'row' + (state.selected === d.id ? ' selected' : ''), role: 'button', tabindex: '0',
+      onclick: () => local ? selectLocalDesign(d) : openDesign(d.id),
+      onkeydown: e => { if (e.key === 'Enter') local ? selectLocalDesign(d) : openDesign(d.id); },
+    }, el('div', {}, el('div', { class: 'name' }, d.name),
+      d.path ? el('div', { class: 'sub' }, d.path) : null))));
+    if (all && !designs.length) $('tree').append(el('div', { class: 'empty' }, state.query
+      ? 'No matching designs.' : local ? 'No .uid designs found in registered projects or active session folders.' : 'No designs.'));
+    if (!all) $('tree').append(el('div', { class: 'empty' }, 'Loading designs…'));
+    $('count').textContent = all ? `${all.length} designs` : '';
+  }
+
+  function selectLocalDesign(design) {
+    if (!design) return;
+    state.selected = design.id;
+    ++state.selectionGeneration;
+    renderDesigns();
+    const status = el('div', { class: 'status' }, 'Open this .uid file in UI Builder to view and edit it. Changes save back to this file.');
+    const button = el('button', { type: 'button', onclick: async () => {
+      button.disabled = true;
+      try {
+        if (state.hostFiles) await request('openai/files/open', { path: design.path });
+        else await request('ui/open-link', { url: 'file://' + design.path.split('/').map(encodeURIComponent).join('/') });
+        status.textContent = 'Asked the host to open the design. If it did not open, open the file at the path above.';
+      } catch (err) {
+        status.textContent = 'Could not open the design: ' + (err.message || err) + '. Open the file at the path above.';
+      } finally { button.disabled = false; }
+    } }, 'Open in UI Builder');
+    $('pane').replaceChildren(el('h2', {}, design.name), el('div', { class: 'uri' }, design.path), status, button);
   }
 
   async function openDesign(id) {
@@ -511,7 +552,16 @@
 
   // ---- Wiring ---------------------------------------------------------------------------------
   $('search').addEventListener('input', e => { state.query = e.target.value.trim().toLowerCase(); render(); });
-  $('refresh').addEventListener('click', () => state.data?.mode === 'designs' ? loadDesigns() : refresh());
+  $('refresh').addEventListener('click', () => state.data?.host === 'hosted' && (state.data?.mode === 'designs' || state.tab === 'designs') ? loadDesigns() : refresh());
+  function chooseTab(tab) {
+    state.tab = tab;
+    state.query = '';
+    $('search').value = '';
+    render();
+    if (tab === 'designs' && state.data?.host === 'hosted') void loadDesigns();
+  }
+  $('previews-tab').addEventListener('click', () => chooseTab('previews'));
+  $('designs-tab').addEventListener('click', () => chooseTab('designs'));
 
   async function initialize() {
     try {
@@ -520,6 +570,7 @@
         appCapabilities: { availableDisplayModes: ['fullscreen', 'inline'] },
         protocolVersion: '2026-01-26',
       });
+      state.hostFiles = result?.hostCapabilities?.experimental?.['openai/files'] != null;
       applyHostContext(result?.hostContext || {});
       notify('ui/notifications/initialized', {});
     } catch (err) {

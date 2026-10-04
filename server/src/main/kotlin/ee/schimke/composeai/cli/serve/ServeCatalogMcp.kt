@@ -860,7 +860,8 @@ class ServeCatalogMcp(
       }
       "status" -> textResult(statusJson().toString())
       "list_projects" -> textResult(projectsJson().toString())
-      ServeLibraryMcp.LIBRARY -> ServeLibraryMcp.libraryResult(libraryCatalogs(args))
+      ServeLibraryMcp.LIBRARY ->
+        ServeLibraryMcp.libraryResult(libraryCatalogs(args), designsAvailable = uiBuilder != null)
       ServeLibraryMcp.UI_BUILDER_OPEN ->
         if (uiBuilder == null) toolError("unknown tool: $name")
         else ServeLibraryMcp.uiBuilderOpenResult()

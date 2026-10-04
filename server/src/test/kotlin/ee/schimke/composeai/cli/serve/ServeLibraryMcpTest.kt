@@ -25,6 +25,21 @@ import kotlinx.serialization.json.jsonPrimitive
 
 /** The hosted sidebar apps (#1241): `catalog_library` and `ui_builder_open`. */
 class ServeLibraryMcpTest {
+  @Test
+  fun `catalog library offers designs only when builder is available`() {
+    val disabled =
+      ServeLibraryMcp.libraryResult(emptyList())["structuredContent"]!!
+        .jsonObject["tools"]!!
+        .jsonObject
+    assertNull(disabled["listDesigns"])
+    val enabled =
+      ServeLibraryMcp.libraryResult(emptyList(), designsAvailable = true)["structuredContent"]!!
+        .jsonObject["tools"]!!
+        .jsonObject
+    assertEquals(ServeUiBuilderMcp.LIST_DESIGNS, enabled["listDesigns"]!!.jsonPrimitive.content)
+    assertEquals(ServeUiBuilderMcp.VIEW, enabled["view"]!!.jsonPrimitive.content)
+  }
+
   private val opened = AtomicInteger()
   private val registry =
     ServeSessionRegistry(
