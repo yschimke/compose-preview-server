@@ -7785,6 +7785,38 @@ test("contract · live viewer renders an A2UI document with the a2ui-catalog ren
     .toContain("the user pressed A2UI button root (action go)");
 });
 
+test("design folders sit on one row and a pressed folder toggles back to every folder", async ({
+  page,
+}) => {
+  // Narrow enough that the two folder picks cannot both fit, so the row has to scroll rather than wrap.
+  await page.setViewportSize({ width: 220, height: 915 });
+  await page.route("**/api/ui-builder/v1/designs/**/export.svg**", (route) =>
+    route.fulfill({ path: renderSvgPlaceholder, contentType: "image/svg+xml" }),
+  );
+  await page.goto("/preview-harness/fixtures/pages/serve-ui-builder-designs.html");
+  const row = page.locator(".cp-design-folder-picks");
+  await expect(row).toBeVisible();
+  const layout = await row.evaluate((el) => ({
+    tops: new Set([...el.children].map((c) => Math.round(c.getBoundingClientRect().top))).size,
+    overflows: el.scrollWidth > el.clientWidth,
+    // The row scrolls inside itself; it never widens the page past the viewport.
+    fits: el.getBoundingClientRect().right <= window.innerWidth,
+  }));
+  expect(layout).toEqual({ tops: 1, overflows: true, fits: true });
+  // No "All designs" pick; nothing is pressed until a folder is.
+  await expect(row.getByText("All designs")).toHaveCount(0);
+  await expect(row.locator('[aria-pressed="true"]')).toHaveCount(0);
+  const media = row.getByRole("button", { name: "Media, 1 design" });
+  await media.click();
+  await expect(media).toHaveAttribute("aria-pressed", "true");
+  await expect(page).toHaveURL(/[?&]folder=Media/);
+  await expect(page.getByRole("region", { name: "No folder" })).toBeHidden();
+  await media.click();
+  await expect(media).toHaveAttribute("aria-pressed", "false");
+  await expect(page).not.toHaveURL(/folder=/);
+  await expect(page.getByRole("region", { name: "No folder" })).toBeVisible();
+});
+
 test("design cards expose two primary actions and tuck secondary controls into more", async ({
   page,
 }) => {
