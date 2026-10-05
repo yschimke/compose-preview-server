@@ -171,6 +171,11 @@ class DaemonSupervisor(
    */
   fun unregisterProject(workspaceId: WorkspaceId) {
     workspaceStore.forget(workspaceId.value)
+    removeLiveProject(workspaceId)
+  }
+
+  /** Stops and drops this process's live project without changing the shared store. */
+  private fun removeLiveProject(workspaceId: WorkspaceId) {
     val project = projects.remove(workspaceId) ?: return
     project.daemons.values.forEach { runCatching { it.shutdown() } }
     project.daemons.clear()
@@ -196,7 +201,7 @@ class DaemonSupervisor(
       ) {
         projects.containsKey(it)
       }
-    removed.forEach(::unregisterProject)
+    removed.forEach(::removeLiveProject)
     return removed
   }
 

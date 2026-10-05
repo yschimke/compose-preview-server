@@ -143,6 +143,11 @@ class DaemonSupervisorTest {
     assertThat(sidebar.forgetProjectsMissingFromStore()).containsExactly(id)
     assertThat(sidebar.listProjects().map { it.workspaceId }).containsExactly(localOnlyId)
     assertThat(sidebar.project(id)).isNull()
+
+    // A later registration in the chat is visible again without restarting the sidebar process.
+    assertThat(chat.registerProject(project).workspaceId).isEqualTo(id)
+    assertThat(sidebar.project(id)?.path).isEqualTo(project.canonicalFile)
+    assertThat(sidebar.listProjects().map { it.workspaceId }).containsExactly(localOnlyId, id)
     chat.shutdown()
     sidebar.shutdown()
   }
