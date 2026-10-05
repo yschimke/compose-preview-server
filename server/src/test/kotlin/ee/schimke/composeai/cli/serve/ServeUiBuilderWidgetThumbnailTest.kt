@@ -144,6 +144,21 @@ class ServeUiBuilderWidgetThumbnailTest {
   }
 
   @Test
+  fun `a history thumbnail is drawn natively for a caller who may compile, and kept`() {
+    thumbnails.nativePreview = lane(PlaygroundCompileService.toDataUri(HOSTED))
+
+    val unframed = assertNotNull(runBlocking { thumbnails.render("widget", actor, revision = 7) })
+    assertTrue(thumbnails.awaitsNativeRedraw(unframed, "widget", 7, native = true))
+    assertFalse(thumbnails.awaitsNativeRedraw(unframed, "widget", 7, native = false))
+
+    runBlocking { thumbnails.render("widget", actor, revision = 7, native = true) }
+
+    val kept = assertNotNull(thumbnails.cachedRevision("widget", 7))
+    assertContentEquals(HOSTED, kept.png)
+    assertFalse(thumbnails.awaitsNativeRedraw(kept, "widget", 7, native = true))
+  }
+
+  @Test
   fun `a design that is not a widget keeps the export`() {
     thumbnails.nativePreview = lane(PlaygroundCompileService.toDataUri(HOSTED))
 

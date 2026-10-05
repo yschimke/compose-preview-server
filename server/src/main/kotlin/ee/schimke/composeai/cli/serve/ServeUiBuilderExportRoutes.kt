@@ -108,11 +108,14 @@ internal fun Route.installUiBuilderThumbnailRoute(
     val actor = call.authorizeThumbnail(authorization) ?: return@get
     val designId = call.parameters["designId"].orEmpty()
     val revision = call.request.queryParameters["revision"]?.toLongOrNull()
-    // A native widget draw compiles and runs Kotlin, which is the export capability's to grant.
-    val native =
-      authorization.authorize(call, UiBuilderRouteCapability.EXPORT) is
-        UiBuilderAuthorizationDecision.Authorized
-    call.serveUiBuilderThumbnail(thumbnails, service, actor, designId, revision, native)
+    call.serveUiBuilderThumbnail(
+      thumbnails,
+      service,
+      actor,
+      designId,
+      revision,
+      native = call.mayCompileThumbnails(authorization),
+    )
   }
   get("/api/ui-builder/v1/designs/{designId}/revisions/{revision}/thumbnail.png") {
     val actor = call.authorizeThumbnail(authorization) ?: return@get
@@ -125,7 +128,14 @@ internal fun Route.installUiBuilderThumbnailRoute(
       )
       return@get
     }
-    call.serveUiBuilderRevisionThumbnail(thumbnails, service, actor, designId, revision)
+    call.serveUiBuilderRevisionThumbnail(
+      thumbnails,
+      service,
+      actor,
+      designId,
+      revision,
+      native = call.mayCompileThumbnails(authorization),
+    )
   }
 }
 
@@ -261,6 +271,16 @@ private suspend fun ApplicationCall.authorizeExport(
 ): AuthenticatedUiBuilderActor? = authorizeRoute(authorization, UiBuilderRouteCapability.EXPORT)
 
 /** A thumbnail asks the route for read; the design's own EXPORT action is checked per design. */
+/**
+ * Whether this caller may have a Wear widget thumbnail drawn by the native lane, which compiles and
+ * runs Kotlin: the export capability's to grant, not the read access a thumbnail needs.
+ */
+private suspend fun ApplicationCall.mayCompileThumbnails(
+  authorization: ServeUiBuilderAuthorization
+): Boolean =
+  authorization.authorize(this, UiBuilderRouteCapability.EXPORT) is
+    UiBuilderAuthorizationDecision.Authorized
+
 private suspend fun ApplicationCall.authorizeThumbnail(
   authorization: ServeUiBuilderAuthorization
 ): AuthenticatedUiBuilderActor? = authorizeRoute(authorization, UiBuilderRouteCapability.READ)

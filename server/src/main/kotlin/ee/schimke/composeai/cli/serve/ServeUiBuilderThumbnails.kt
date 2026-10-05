@@ -278,11 +278,24 @@ internal constructor(
     cached(designId)?.let {
       it.revision == revision &&
         it.generation == generation &&
-        !(native && it.unframed && nativePreview != null && mayRetryNative(designId, revision))
+        !awaitsNativeRedraw(it, designId, revision, native)
     } == true
 
-  private fun mayRetryNative(designId: String, revision: Long): Boolean =
-    (nativeFailures["$designId@$revision"] ?: 0) < NATIVE_ATTEMPTS
+  /**
+   * Whether [entry] of [designId] at [revision] is an unframed widget that a caller who may compile
+   * ([native]) should have redrawn natively: there is a lane, and its draws of this revision have
+   * not yet failed [NATIVE_ATTEMPTS] times.
+   */
+  internal fun awaitsNativeRedraw(
+    entry: Entry,
+    designId: String,
+    revision: Long,
+    native: Boolean,
+  ): Boolean =
+    native &&
+      entry.unframed &&
+      nativePreview != null &&
+      (nativeFailures["$designId@$revision"] ?: 0) < NATIVE_ATTEMPTS
 
   /**
    * Queue a redraw of [designId] at its latest revision, as [actor]; a no-op when one is queued.
@@ -586,6 +599,10 @@ internal suspend fun ApplicationCall.serveUiBuilderRevisionThumbnail(
   actor: AuthenticatedUiBuilderActor,
   designId: String,
   revision: Long,
+  /**
+   * Whether this caller passed the `ui-builder-export` route check; see [ServeUiBuilderThumbnails].
+   */
+  native: Boolean = false,
 ) {
   val allowed = service.designActions(actor, designId)
   if (allowed == null || DesignAccessActionV1.EXPORT !in allowed) {
@@ -593,17 +610,26 @@ internal suspend fun ApplicationCall.serveUiBuilderRevisionThumbnail(
     respondText("not found", status = HttpStatusCode.NotFound)
     return
   }
+  val cached = thumbnails.cachedRevision(designId, revision)
   val entry =
-    thumbnails.cachedRevision(designId, revision)
-      ?: withTimeoutOrNull(COLD_RENDER_TIMEOUT_MS) {
-        thumbnails.submit(designId, actor, urgent = false, revision = revision).await()
-      }
+    if (cached != null && !thumbnails.awaitsNativeRedraw(cached, designId, revision, native)) cached
+    else
+      withTimeoutOrNull(COLD_RENDER_TIMEOUT_MS) {
+        thumbnails
+          .submit(designId, actor, urgent = false, revision = revision, native = native)
+          .await()
+      } ?: cached
   if (entry == null || entry.revision != revision) {
     response.headers.append(HttpHeaders.CacheControl, "no-store")
     respondText("no thumbnail", status = HttpStatusCode.NotFound)
     return
   }
-  response.headers.append(HttpHeaders.CacheControl, "private, max-age=604800, immutable")
+  response.headers.append(
+    HttpHeaders.CacheControl,
+    // A retained revision never changes, unless it is an unframed widget still due its native draw.
+    if (thumbnails.awaitsNativeRedraw(entry, designId, revision, native)) "no-store"
+    else "private, max-age=604800, immutable",
+  )
   response.headers.append(UI_BUILDER_REVISION_HEADER, entry.revision.toString())
   respondBytes(entry.png, ContentType.Image.PNG, HttpStatusCode.OK)
 }
