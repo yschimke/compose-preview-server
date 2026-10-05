@@ -423,8 +423,14 @@ jobs:
           if-no-files-found: ignore
           retention-days: 14
 
+  # Also the verdict for the whole lane, because `visual-harness` is the name a ruleset requires. A
+  # job whose `needs` failed is SKIPPED, and GitHub counts a skipped required check as passing, so
+  # a failed build or page capture would otherwise merge. It therefore waits on every split job
+  # (`-pages` included, which costs little: it should finish before the builds do), runs whatever they
+  # did, and fails first thing unless all of them succeeded.
   visual-harness:
-    needs: [ui-builder-ref, visual-harness-dist, visual-harness-server]
+    needs: [ui-builder-ref, visual-harness-dist, visual-harness-server, visual-harness-pages]
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     env:
       # The harness server resolves `/ui-builder/...` and the renderer routes against this
@@ -433,6 +439,13 @@ jobs:
       # the UI-builder release, so this job exercises both paths.
       COMPOSE_UI_BUILDER_DIR: ${{ github.workspace }}/.compose-ui-builder
     steps:
+      - name: Every split visual-harness job succeeded
+        if: ${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'skipped') || contains(needs.*.result, 'cancelled') }}
+        run: |
+          echo "::error::A visual-harness job did not succeed: ${NEEDS}"
+          exit 1
+        env:
+          NEEDS: ${{ toJSON(needs.*.result) }}
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
