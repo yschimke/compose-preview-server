@@ -108,7 +108,11 @@ internal fun Route.installUiBuilderThumbnailRoute(
     val actor = call.authorizeThumbnail(authorization) ?: return@get
     val designId = call.parameters["designId"].orEmpty()
     val revision = call.request.queryParameters["revision"]?.toLongOrNull()
-    call.serveUiBuilderThumbnail(thumbnails, service, actor, designId, revision)
+    // A native widget draw compiles and runs Kotlin, which is the export capability's to grant.
+    val native =
+      authorization.authorize(call, UiBuilderRouteCapability.EXPORT) is
+        UiBuilderAuthorizationDecision.Authorized
+    call.serveUiBuilderThumbnail(thumbnails, service, actor, designId, revision, native)
   }
   get("/api/ui-builder/v1/designs/{designId}/revisions/{revision}/thumbnail.png") {
     val actor = call.authorizeThumbnail(authorization) ?: return@get
