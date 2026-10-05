@@ -10,6 +10,11 @@ import ee.schimke.composeai.uibuilder.protocol.DesignDocumentV1
 import ee.schimke.composeai.uibuilder.protocol.DesignEnvironmentV1
 import ee.schimke.composeai.uibuilder.protocol.DesignNodeV1
 import ee.schimke.composeai.uibuilder.protocol.DesignStateV1
+import ee.schimke.composeai.uibuilder.protocol.DiagnosticSeverityV1
+import ee.schimke.composeai.uibuilder.protocol.ExportArtifactV1
+import ee.schimke.composeai.uibuilder.protocol.ExportDiagnosticV1
+import ee.schimke.composeai.uibuilder.protocol.ExportEncodingV1
+import ee.schimke.composeai.uibuilder.protocol.ExportFormatV1
 import ee.schimke.composeai.uibuilder.protocol.LayoutDirectionV1
 import ee.schimke.composeai.uibuilder.protocol.ServiceSnapshotV1
 import ee.schimke.composeai.uibuilder.protocol.ThemeV1
@@ -30,7 +35,9 @@ import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
+import kotlin.test.assertTrue
 import kotlinx.coroutines.runBlocking
 
 /**
@@ -64,7 +71,23 @@ class ServeUiBuilderWidgetThumbnailTest {
             )
           is UiBuilderServiceRequest.ExportDesign -> {
             exports.incrementAndGet()
-            UiBuilderServiceResponse.Catalogs(emptyList())
+            UiBuilderServiceResponse.Export(
+              ExportArtifactV1(
+                format = ExportFormatV1.PNG,
+                mediaType = "image/png",
+                encoding = ExportEncodingV1.BASE64,
+                content = Base64.getEncoder().encodeToString(BARE),
+                contentDigest = "digest",
+                diagnostics =
+                  listOf(
+                    ExportDiagnosticV1(
+                      severity = DiagnosticSeverityV1.INFO,
+                      code = "REVISION_PINNED_DAEMON_RENDER",
+                      message = "Rendered design ${request.designId} revision 7 (hash).",
+                    )
+                  ),
+              )
+            )
           }
           else -> UiBuilderServiceResponse.Catalogs(emptyList())
         }
@@ -94,35 +117,73 @@ class ServeUiBuilderWidgetThumbnailTest {
   }
 
   @Test
-  fun `a widget is drawn by the native lane in the squircle host`() {
+  fun `a caller who may compile gets the widget drawn by the native lane in the squircle host`() {
+    thumbnails.nativePreview = lane(PlaygroundCompileService.toDataUri(HOSTED))
+
+    val entry = assertNotNull(runBlocking { thumbnails.render("widget", actor, native = true) })
+
+    assertContentEquals(HOSTED, entry.png)
+    assertEquals(7, entry.revision)
+    assertFalse(entry.unframed)
+    assertEquals(listOf("widget" to WearWidgetHostShape.Squircle), rendered)
+    assertEquals(0, exports.get(), "the bare export is not asked for")
+    assertTrue(thumbnails.isCurrent("widget", 7, native = true))
+  }
+
+  @Test
+  fun `a caller without the export capability never compiles, and its picture is unframed`() {
     thumbnails.nativePreview = lane(PlaygroundCompileService.toDataUri(HOSTED))
 
     val entry = assertNotNull(runBlocking { thumbnails.render("widget", actor) })
 
-    assertContentEquals(HOSTED, entry.png)
-    assertEquals(7, entry.revision)
-    assertEquals(listOf("widget" to WearWidgetHostShape.Squircle), rendered)
-    assertEquals(0, exports.get(), "the bare export is not asked for")
+    assertEquals(emptyList(), rendered, "a reader's draw must not run the compile lane")
+    assertContentEquals(BARE, entry.png)
+    assertTrue(entry.unframed)
+    assertTrue(thumbnails.isCurrent("widget", 7), "current for a reader")
+    assertFalse(thumbnails.isCurrent("widget", 7, native = true), "stale for one who may compile")
+  }
+
+  @Test
+  fun `a history thumbnail is drawn natively for a caller who may compile, and kept`() {
+    thumbnails.nativePreview = lane(PlaygroundCompileService.toDataUri(HOSTED))
+
+    val unframed = assertNotNull(runBlocking { thumbnails.render("widget", actor, revision = 7) })
+    assertTrue(thumbnails.awaitsNativeRedraw(unframed, "widget", 7, native = true))
+    assertFalse(thumbnails.awaitsNativeRedraw(unframed, "widget", 7, native = false))
+
+    runBlocking { thumbnails.render("widget", actor, revision = 7, native = true) }
+
+    val kept = assertNotNull(thumbnails.cachedRevision("widget", 7))
+    assertContentEquals(HOSTED, kept.png)
+    assertFalse(thumbnails.awaitsNativeRedraw(kept, "widget", 7, native = true))
   }
 
   @Test
   fun `a design that is not a widget keeps the export`() {
     thumbnails.nativePreview = lane(PlaygroundCompileService.toDataUri(HOSTED))
 
-    runBlocking { thumbnails.render("screen", actor) }
+    val entry = assertNotNull(runBlocking { thumbnails.render("screen", actor, native = true) })
 
     assertEquals(emptyList(), rendered)
     assertEquals(1, exports.get())
+    assertFalse(entry.unframed)
   }
 
   @Test
-  fun `a widget the lane cannot draw falls back to the export`() {
+  fun `a failed native draw falls back, and is retried a bounded number of times`() {
     thumbnails.nativePreview = lane(image = null)
 
-    runBlocking { thumbnails.render("widget", actor) }
+    repeat(ServeUiBuilderThumbnails.NATIVE_ATTEMPTS) {
+      assertFalse(thumbnails.isCurrent("widget", 7, native = true), "attempt ${it + 1} is due")
+      val entry = assertNotNull(runBlocking { thumbnails.render("widget", actor, native = true) })
+      assertTrue(entry.unframed)
+    }
 
-    assertEquals(1, rendered.size)
-    assertEquals(1, exports.get())
+    assertEquals(ServeUiBuilderThumbnails.NATIVE_ATTEMPTS, rendered.size)
+    assertTrue(
+      thumbnails.isCurrent("widget", 7, native = true),
+      "a widget the lane cannot draw stops being recompiled on every view",
+    )
   }
 
   private val catalog =
@@ -171,5 +232,6 @@ class ServeUiBuilderWidgetThumbnailTest {
   private companion object {
     const val WIDGET_CONTAINER = "remote-m3/widget-container-large"
     val HOSTED: ByteArray = Base64.getDecoder().decode("iVBORw0KGgo=")
+    val BARE: ByteArray = byteArrayOf(0x89.toByte(), 'P'.code.toByte(), 7)
   }
 }

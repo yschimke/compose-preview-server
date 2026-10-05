@@ -15615,6 +15615,10 @@ class ServeHttpServer(
         UI_BUILDER_REQUEST_ACCESS_PATH + tokenQuery
       else ""
     val copyAction = if (mayCreate) "/ui-builder/designs/copy$tokenQuery" else ""
+    // Whether this viewer may have widget cards compiled natively; see ServeUiBuilderThumbnails.
+    val mayCompileThumbnails =
+      authorization.authorize(call, UiBuilderRouteCapability.EXPORT) is
+        UiBuilderAuthorizationDecision.Authorized
     val folders = withContext(Dispatchers.IO) { uiBuilderFolderStore?.readAll().orEmpty() }
     val rows = listed.map { item ->
       val openFailure =
@@ -15666,7 +15670,12 @@ class ServeHttpServer(
           if (openFailure != null) ""
           else if (uiBuilderThumbnails != null) {
             // Queued now so a card this page shows out of date is current on the next view.
-            uiBuilderThumbnails.warm(item.designId, actor, knownRevision = item.revision)
+            uiBuilderThumbnails.warm(
+              item.designId,
+              actor,
+              knownRevision = item.revision,
+              native = mayCompileThumbnails,
+            )
             "/api/ui-builder/v1/designs/" +
               WebEscaping.urlEncodeSegment(item.designId) +
               "/thumbnail.png" +

@@ -3,6 +3,7 @@ package ee.schimke.composeai.cli.serve
 import ee.schimke.composeai.uibuilder.export.RecordFreeExport
 import ee.schimke.composeai.uibuilder.export.WearWidgetHostShape
 import ee.schimke.composeai.uibuilder.protocol.DesignAccessActionV1
+import ee.schimke.composeai.uibuilder.protocol.DesignDocumentV1
 import ee.schimke.composeai.uibuilder.protocol.DiagnosticSeverityV1
 import ee.schimke.composeai.uibuilder.protocol.ExportDesignRequestV1
 import ee.schimke.composeai.uibuilder.protocol.ExportEncodingV1
@@ -72,8 +73,17 @@ import kotlinx.coroutines.withTimeoutOrNull
  * is drawn through it instead: the generated `WearWidgetPreview`, compiled and rendered on the
  * device renderer, inside the [WearWidgetHostShape.Squircle] container — the round-rect frame the
  * host really draws, and the render recommended for the widget picker — rather than corners faked
- * in CSS. Anything that lane cannot draw falls back to the export, because an approximate picture
- * is still better than a blank card.
+ * in CSS.
+ *
+ * That lane compiles and runs Kotlin, which is the separately granted `ui-builder-export` route
+ * capability rather than anything a reader holds, so a native draw only runs for a request whose
+ * caller passed that check (`native = true`). A reader's view, an anonymous unfurl, and a redraw
+ * queued by an edit (which has no request to ask) draw the export instead, kept as
+ * [Entry.unframed]; the next view by a caller who may compile treats that picture as out of date
+ * and redraws it natively. A native draw that fails falls back the same way, and is retried on
+ * later views up to [NATIVE_ATTEMPTS] times per revision, so a busy renderer does not leave a
+ * widget unframed for good and a widget the lane can never draw is not recompiled on every page
+ * view.
  *
  * ## Access
  *
@@ -89,7 +99,18 @@ internal constructor(
   private val onLog: (String) -> Unit = { System.err.println(it) },
 ) : Closeable {
   /** One cached picture: the bytes, and what they were drawn from. */
-  internal data class Entry(val revision: Long, val generation: String, val png: ByteArray)
+  internal data class Entry(
+    val revision: Long,
+    val generation: String,
+    val png: ByteArray,
+    /** A Wear widget drawn by the export, without its host frame; see the class comment. */
+    val unframed: Boolean = false,
+  )
+
+  /**
+   * Native draws that failed, per `designId@revision`, so a later view retries a bounded number.
+   */
+  private val nativeFailures = ConcurrentHashMap<String, Int>()
 
   private val memory = ConcurrentHashMap<String, Entry>()
 
@@ -99,10 +120,12 @@ internal constructor(
     val actor: AuthenticatedUiBuilderActor,
     /** A retained revision to draw, for the history view; null draws the latest. */
     val revision: Long? = null,
+    /** Whether the caller that queued this may have a widget compiled natively. */
+    val native: Boolean = false,
     val result: CompletableFuture<Entry?> = CompletableFuture(),
   ) {
     val key: String
-      get() = revisionKey(designId, revision)
+      get() = revisionKey(designId, revision) + if (native) NATIVE_SUFFIX else ""
   }
 
   private val jobs = LinkedBlockingDeque<Job>(QUEUE)
@@ -133,7 +156,9 @@ internal constructor(
               }
             val entry =
               try {
-                runBlocking { retrying { render(job.designId, job.actor, job.revision) } }
+                runBlocking {
+                  retrying { render(job.designId, job.actor, job.revision, job.native) }
+                }
               } catch (failure: Exception) {
                 onLog("serve: UI-builder thumbnail for ${job.designId} failed: ${failure.message}")
                 null
@@ -216,6 +241,7 @@ internal constructor(
    */
   internal fun evict(designId: String) {
     memory.remove(designId)
+    nativeFailures.keys.removeIf { it.startsWith("$designId@") }
     memory.keys.removeIf { it.startsWith("$designId$REVISION_SEPARATOR") }
     runCatching {
       val base = fileBase(designId)
@@ -244,9 +270,32 @@ internal constructor(
     memory[designId]
       ?: runCatching { readEntry(designId) }.getOrNull()?.also { memory[designId] = it }
 
-  /** Whether the cache holds [designId] drawn at [revision] by this generation. */
-  internal fun isCurrent(designId: String, revision: Long): Boolean =
-    cached(designId)?.let { it.revision == revision && it.generation == generation } == true
+  /**
+   * Whether the cache holds [designId] drawn at [revision] by this generation — and, for a caller
+   * that may compile ([native]), drawn in its host frame unless native draws of it keep failing.
+   */
+  internal fun isCurrent(designId: String, revision: Long, native: Boolean = false): Boolean =
+    cached(designId)?.let {
+      it.revision == revision &&
+        it.generation == generation &&
+        !awaitsNativeRedraw(it, designId, revision, native)
+    } == true
+
+  /**
+   * Whether [entry] of [designId] at [revision] is an unframed widget that a caller who may compile
+   * ([native]) should have redrawn natively: there is a lane, and its draws of this revision have
+   * not yet failed [NATIVE_ATTEMPTS] times.
+   */
+  internal fun awaitsNativeRedraw(
+    entry: Entry,
+    designId: String,
+    revision: Long,
+    native: Boolean,
+  ): Boolean =
+    native &&
+      entry.unframed &&
+      nativePreview != null &&
+      (nativeFailures["$designId@$revision"] ?: 0) < NATIVE_ATTEMPTS
 
   /**
    * Queue a redraw of [designId] at its latest revision, as [actor]; a no-op when one is queued.
@@ -258,9 +307,10 @@ internal constructor(
     designId: String,
     actor: AuthenticatedUiBuilderActor,
     knownRevision: Long? = null,
+    native: Boolean = false,
   ) {
-    if (knownRevision != null && isCurrent(designId, knownRevision)) return
-    submit(designId, actor, urgent = false)
+    if (knownRevision != null && isCurrent(designId, knownRevision, native)) return
+    submit(designId, actor, urgent = false, native = native)
   }
 
   /**
@@ -272,8 +322,9 @@ internal constructor(
     actor: AuthenticatedUiBuilderActor,
     urgent: Boolean,
     revision: Long? = null,
+    native: Boolean = false,
   ): CompletableFuture<Entry?> {
-    val job = Job(designId, actor, revision)
+    val job = Job(designId, actor, revision, native)
     val existing = pending.putIfAbsent(job.key, job)
     if (existing != null) {
       // A card waiting on a redraw the listing queued moves that redraw to the front.
@@ -296,11 +347,17 @@ internal constructor(
     designId: String,
     actor: AuthenticatedUiBuilderActor,
     revision: Long? = null,
+    native: Boolean = false,
   ): Entry? {
     val port = service ?: return null
-    nativeWidget(port, designId, actor, revision)?.let {
-      store(designId, it, pinned = revision != null)
-      return it
+    val widget = widgetDocument(port, designId, actor, revision)
+    if (widget != null && native) {
+      nativeWidget(designId, widget)?.let {
+        nativeFailures.remove("$designId@${it.revision}")
+        store(designId, it, pinned = revision != null)
+        return it
+      }
+      nativeFailures.merge("$designId@${widget.revision}", 1, Int::plus)
     }
     val response =
       try {
@@ -321,25 +378,30 @@ internal constructor(
     if (artifact.diagnostics.any { it.severity == DiagnosticSeverityV1.ERROR }) return null
     if (artifact.encoding != ExportEncodingV1.BASE64) return null
     val servedRevision = artifact.servedRevision()?.toLongOrNull() ?: return null
-    val entry = Entry(servedRevision, generation, Base64.getDecoder().decode(artifact.content))
+    val entry =
+      Entry(
+        servedRevision,
+        generation,
+        Base64.getDecoder().decode(artifact.content),
+        unframed = widget != null,
+      )
     store(designId, entry, pinned = revision != null)
     return entry
   }
 
   /**
-   * [designId] drawn by the [nativePreview] lane inside its widget host, or null when it is not a
-   * Wear widget, this host has no such lane, or the lane could not draw it.
+   * [designId]'s document when it is a Wear widget this host could draw natively, else null.
    *
    * Asks the same EXPORT question the export would, and reads the document through the service as
    * [actor], so this is never a way to picture a design the actor could not export.
    */
-  private suspend fun nativeWidget(
+  private suspend fun widgetDocument(
     port: UiBuilderServicePort,
     designId: String,
     actor: AuthenticatedUiBuilderActor,
     revision: Long?,
-  ): Entry? {
-    val lane = nativePreview ?: return null
+  ): DesignDocumentV1? {
+    if (nativePreview == null) return null
     if (DesignAccessActionV1.EXPORT !in port.designActions(actor, designId).orEmpty()) return null
     val snapshot =
       try {
@@ -349,8 +411,16 @@ internal constructor(
         if (failure is kotlinx.coroutines.CancellationException) throw failure
         null
       } ?: return null
-    val document = snapshot.snapshot.state.document
-    if (!RecordFreeExport.isWearWidget(document)) return null
+    return snapshot.snapshot.state.document.takeIf(RecordFreeExport::isWearWidget)
+  }
+
+  /**
+   * [document] drawn by the [nativePreview] lane inside its widget host, or null when the lane
+   * could not draw it. Only called for a caller that holds the export capability; see the class
+   * comment.
+   */
+  private fun nativeWidget(designId: String, document: DesignDocumentV1): Entry? {
+    val lane = nativePreview ?: return null
     val outcome =
       try {
         lane.render(document, WearWidgetHostShape.Squircle)
@@ -385,7 +455,9 @@ internal constructor(
       writeAtomically(png, entry.png)
       writeAtomically(
         meta,
-        "${entry.revision}\n${entry.generation}\n$designId\n".toByteArray(Charsets.UTF_8),
+        ("${entry.revision}\n${entry.generation}\n$designId\n" +
+            if (entry.unframed) "$UNFRAMED\n" else "")
+          .toByteArray(Charsets.UTF_8),
       )
     }
       .onFailure { onLog("serve: UI-builder thumbnail for $designId not saved: ${it.message}") }
@@ -398,7 +470,12 @@ internal constructor(
     if (!Files.isRegularFile(meta) || !Files.isRegularFile(png)) return null
     val lines = Files.readAllLines(meta, Charsets.UTF_8)
     if (lines.size < 3 || lines[2] != designId) return null
-    return Entry(lines[0].toLong(), lines[1], Files.readAllBytes(png))
+    return Entry(
+      lines[0].toLong(),
+      lines[1],
+      Files.readAllBytes(png),
+      unframed = lines.getOrNull(3) == UNFRAMED,
+    )
   }
 
   private fun writeAtomically(target: Path, bytes: ByteArray) {
@@ -428,6 +505,14 @@ internal constructor(
 
     private const val PNG_DATA_URI = "data:image/png;base64,"
 
+    /** Native draws of one revision before an unframed picture of it stops counting as stale. */
+    const val NATIVE_ATTEMPTS = 3
+
+    private const val NATIVE_SUFFIX = "\u0000n"
+
+    /** The `.meta` line marking an [Entry.unframed] picture; absent in files written before it. */
+    private const val UNFRAMED = "unframed"
+
     /** Cannot appear in a design id segment, so a revision key never collides with a design. */
     private const val REVISION_SEPARATOR = "\u0000r"
 
@@ -456,6 +541,10 @@ internal suspend fun ApplicationCall.serveUiBuilderThumbnail(
   actor: AuthenticatedUiBuilderActor,
   designId: String,
   revision: Long?,
+  /**
+   * Whether this caller passed the `ui-builder-export` route check; see [ServeUiBuilderThumbnails].
+   */
+  native: Boolean = false,
 ) {
   val allowed = service.designActions(actor, designId)
   if (allowed == null || DesignAccessActionV1.EXPORT !in allowed) {
@@ -464,18 +553,18 @@ internal suspend fun ApplicationCall.serveUiBuilderThumbnail(
     return
   }
   val cached = thumbnails.cached(designId)
-  val current = revision != null && thumbnails.isCurrent(designId, revision)
+  val current = revision != null && thumbnails.isCurrent(designId, revision, native)
   val entry =
     when {
       current -> cached
       cached != null -> {
-        thumbnails.warm(designId, actor)
+        thumbnails.warm(designId, actor, native = native)
         cached
       }
       // Drawn by the one worker, ahead of any redraw, and shared with the listing's own request.
       else ->
         withTimeoutOrNull(COLD_RENDER_TIMEOUT_MS) {
-          thumbnails.submit(designId, actor, urgent = true).await()
+          thumbnails.submit(designId, actor, urgent = true, native = native).await()
         }
     }
   if (entry == null) {
@@ -484,7 +573,11 @@ internal suspend fun ApplicationCall.serveUiBuilderThumbnail(
     return
   }
   val fresh =
-    revision != null && entry.revision == revision && entry.generation == thumbnails.generation
+    revision != null &&
+      entry.revision == revision &&
+      entry.generation == thumbnails.generation &&
+      // An unframed widget a caller who may compile is about to have redrawn is not kept.
+      (!native || !entry.unframed || thumbnails.isCurrent(designId, revision, native = true))
   response.headers.append(
     HttpHeaders.CacheControl,
     // Keyed by revision in the URL, so a current picture never changes under it; private because
@@ -506,6 +599,10 @@ internal suspend fun ApplicationCall.serveUiBuilderRevisionThumbnail(
   actor: AuthenticatedUiBuilderActor,
   designId: String,
   revision: Long,
+  /**
+   * Whether this caller passed the `ui-builder-export` route check; see [ServeUiBuilderThumbnails].
+   */
+  native: Boolean = false,
 ) {
   val allowed = service.designActions(actor, designId)
   if (allowed == null || DesignAccessActionV1.EXPORT !in allowed) {
@@ -513,17 +610,26 @@ internal suspend fun ApplicationCall.serveUiBuilderRevisionThumbnail(
     respondText("not found", status = HttpStatusCode.NotFound)
     return
   }
+  val cached = thumbnails.cachedRevision(designId, revision)
   val entry =
-    thumbnails.cachedRevision(designId, revision)
-      ?: withTimeoutOrNull(COLD_RENDER_TIMEOUT_MS) {
-        thumbnails.submit(designId, actor, urgent = false, revision = revision).await()
-      }
+    if (cached != null && !thumbnails.awaitsNativeRedraw(cached, designId, revision, native)) cached
+    else
+      withTimeoutOrNull(COLD_RENDER_TIMEOUT_MS) {
+        thumbnails
+          .submit(designId, actor, urgent = false, revision = revision, native = native)
+          .await()
+      } ?: cached
   if (entry == null || entry.revision != revision) {
     response.headers.append(HttpHeaders.CacheControl, "no-store")
     respondText("no thumbnail", status = HttpStatusCode.NotFound)
     return
   }
-  response.headers.append(HttpHeaders.CacheControl, "private, max-age=604800, immutable")
+  response.headers.append(
+    HttpHeaders.CacheControl,
+    // A retained revision never changes, unless it is an unframed widget still due its native draw.
+    if (thumbnails.awaitsNativeRedraw(entry, designId, revision, native)) "no-store"
+    else "private, max-age=604800, immutable",
+  )
   response.headers.append(UI_BUILDER_REVISION_HEADER, entry.revision.toString())
   respondBytes(entry.png, ContentType.Image.PNG, HttpStatusCode.OK)
 }
