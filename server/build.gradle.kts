@@ -581,6 +581,11 @@ tasks.withType<Test>().configureEach {
   // compiling.
   useJUnitPlatform()
 
+  // ~350 test classes in one JVM were most of `gradle` and `ui-builder-remote-compose`'s wall time
+  // on a 4-core runner. Forks are separate JVMs, so system properties and statics stay per fork;
+  // half the cores, as Gradle's own guidance suggests, leaves the rest to the build running beside.
+  maxParallelForks = (Runtime.getRuntime().availableProcessors() / 2).coerceAtLeast(1)
+
   // Catalog checkouts for the usage-snippet corpus (`UsageSnippetCorpusTest`, which moved here with
   // the serve sources). Absent by default, so the corpus is a no-op in a normal build;
   // `scripts/usage-corpus.sh` supplies them. Forwarded rather than read from the environment so the
