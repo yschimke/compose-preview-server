@@ -2695,6 +2695,70 @@ class ServeCatalogStoreTest {
   }
 
   @Test
+  fun `the empty-prefix liveBundle is the primary even when declared after a prefixed one`() {
+    val prefix = "module_3a7476__"
+    // The prefixed module comes first: the primary (the runner's unwrapped daemon) must still be
+    // the bundle whose local ids are the catalog's ids, or prefixed ids reach a daemon that does
+    // not know them.
+    val json =
+      """
+      {"schema":"design-parity-catalog/v1","system":"all-modules",
+       "liveBundles":[
+         {"module":":tv","path":"bundle/modules/module_3a7476/","file":"module_3a7476.png","previewIdPrefix":"$prefix"},
+         {"module":":mobile","path":"bundle/","file":"0000.png","previewIdPrefix":""}],
+       "components":[
+         {"componentId":"Mobile","images":[{"path":"images/mobile.png","previewId":"activity__MainActivity"}]},
+         {"componentId":"TV","images":[{"path":"images/tv.png","previewId":"${prefix}activity__MainActivity"}]}]}
+      """
+        .trimIndent()
+    val bundle =
+      polyglotBundle(
+        manifest =
+          """{"schemaVersion":8,"backend":"desktop","previewIds":["activity__MainActivity"],"coverPreviewId":"activity__MainActivity","classpath":[{"kind":"module","path":"classes/app.jar"}],"modulePath":":app","producedBy":"test","externalResources":[]}"""
+      )
+    val fetch: (String) -> ByteArray? = { url ->
+      when {
+        url.endsWith("/${ServeCatalogStore.CATALOG_FILE}") -> json.toByteArray()
+        url.endsWith("bundle/0000.png") ||
+          url.endsWith("bundle/modules/module_3a7476/module_3a7476.png") -> bundle
+        url.endsWith(".png") -> png()
+        else -> null
+      }
+    }
+    val trust =
+      TrustStore(
+        branches = listOf(TrustedBranch("yschimke/compose-ai-tools", "design-artifacts/*"))
+      )
+    var captured: List<ServeCatalogStore.TrustedModuleBundle>? = null
+    var recorded: List<ServeCatalogStore.VerifiedModuleBundle>? = null
+    val store =
+      ServeCatalogStore(
+        root = tempRoot(),
+        register = { n, h -> registered[n] = h },
+        trust = { trust },
+        fetch = fetch,
+        buildTrustedBundles = { _, bundles, _ ->
+          captured = bundles
+          true
+        },
+        recordTrustedBundles = { _, bundles -> recorded = bundles },
+      )
+
+    assertTrue(store.load("all-modules") is ServeCatalogStore.Result.Ok)
+    val modules = assertNotNull(captured)
+    assertEquals(listOf(":mobile", ":tv"), modules.map { it.module })
+    assertEquals(listOf(":mobile", ":tv"), assertNotNull(recorded).map { it.module })
+    assertEquals(
+      mapOf("activity__MainActivity" to "activity__MainActivity"),
+      modules[0].localPreviewIds,
+    )
+    assertEquals(
+      mapOf("${prefix}activity__MainActivity" to "activity__MainActivity"),
+      modules[1].localPreviewIds,
+    )
+  }
+
+  @Test
   fun `a mixed liveBundle routes class-backed and IR previews to the daemon`() {
     val remoteId = "com.example.CatalogKt.RemotePreview"
     val widgetId = "com.example.WidgetKt.WidgetPreview"
