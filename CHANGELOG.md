@@ -1,5 +1,21 @@
 # Changelog
 
+## [3.104.0](https://github.com/yschimke/compose-preview-server/compare/v3.103.0...v3.104.0) (2026-10-05)
+
+
+### Features
+
+* **ui-builder:** lead the designs page with its folders ([#1386](https://github.com/yschimke/compose-preview-server/issues/1386)) ([bbc9666](https://github.com/yschimke/compose-preview-server/commit/bbc966669cb0b95636cd5ee206a235cf733902c5))
+
+
+### Bug Fixes
+
+* compile widget thumbnails only for callers with the export capability ([#1382](https://github.com/yschimke/compose-preview-server/issues/1382)) ([2f68dcd](https://github.com/yschimke/compose-preview-server/commit/2f68dcd53907ddec24362ce4dc0acc5c8eff75e2))
+* **deps:** update dependency ee.schimke.composeai:compose-ai-tools-bom to v2.34.1 ([#1383](https://github.com/yschimke/compose-preview-server/issues/1383)) ([026da5c](https://github.com/yschimke/compose-preview-server/commit/026da5c7ad25d69dad76fdc0915618d590931473))
+* **deps:** update dependency ee.schimke.composeai:compose-preview-ui-builder-bom to v3.83.0 ([#1385](https://github.com/yschimke/compose-preview-server/issues/1385)) ([3f9434e](https://github.com/yschimke/compose-preview-server/commit/3f9434e5c14cdaba4bdcc60da895588fe4adbe82))
+* **deps:** update dependency ee.schimke.composeai:rc-players-bom to v2.1.4 ([#1384](https://github.com/yschimke/compose-preview-server/issues/1384)) ([3c945e2](https://github.com/yschimke/compose-preview-server/commit/3c945e247570dfbb71930605f68abfbed3011db5))
+* draw Wear widget design cards in the squircle device host ([#1380](https://github.com/yschimke/compose-preview-server/issues/1380)) ([2830a0c](https://github.com/yschimke/compose-preview-server/commit/2830a0c4be4d29410b50ce85ca6155bece0a568a))
+
 ## [3.103.0](https://github.com/yschimke/compose-preview-server/compare/v3.102.0...v3.103.0) (2026-10-05)
 
 
