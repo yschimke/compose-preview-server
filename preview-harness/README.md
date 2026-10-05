@@ -37,7 +37,7 @@ UI-builder Wasm, and the real compose-ai-tools MCP executable:
 ```
 ./gradlew :server:installDist
 preview-harness/fetch-ui-builder-dists.sh build/ui-builder-dists
-COMPOSE_UI_BUILDER_DIR=build/ui-builder-dists \
+COMPOSE_UI_BUILDER_DIR="$PWD/build/ui-builder-dists" \
   GATE2_MCP_LAUNCHER=/absolute/path/to/compose-preview-mcp \
   npm --prefix preview-harness run harness:ui-builder-gate2
 ```
