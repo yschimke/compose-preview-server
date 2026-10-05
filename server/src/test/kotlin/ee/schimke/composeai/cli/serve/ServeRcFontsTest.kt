@@ -15,7 +15,7 @@ import kotlin.test.assertTrue
  * would otherwise degrade silently — the stylesheet would simply omit it and the lane would paint
  * that generic in the visitor's own fallback, which is exactly the bug (#3480) this closes and is
  * invisible in the output. Whether the table itself still matches the offline parity harness's is
- * checked from the other side, in `scripts/design-artifacts/rc-fonts.test.mjs`.
+ * checked from the other side, in `compose-ai-tools/scripts/design-artifacts/rc-fonts.test.mjs`.
  */
 class ServeRcFontsTest {
 

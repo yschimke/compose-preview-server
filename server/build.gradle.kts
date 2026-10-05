@@ -1038,7 +1038,8 @@ sourceSets.main.get().resources.srcDir(generateServeVersionResource)
 // while the baked PNG beside it used these files (issue #3480).
 //
 // STAGED, not committed a second time. The source is the one vendored directory the offline parity
-// harness reads (`scripts/design-artifacts/rc-fonts.mjs`'s `DEFAULT_FONTS_DIR`) and the snapshot
+// harness reads (`compose-ai-tools/scripts/design-artifacts/rc-fonts.mjs`'s `DEFAULT_FONTS_DIR`)
+// and the snapshot
 // renderer rasterizes with, so "the viewer's faces" and "the faces parity is measured against"
 // cannot become different files. The named-family faces in that directory (Orbitron, Lobster Two)
 // are deliberately left out — the player fetches those itself through `WebFonts.ts`; only the four

@@ -3460,8 +3460,8 @@ class ServeCatalogStore(
     val source: Source? = null,
     /**
      * Optional executable preview bundle carried alongside the baked PNGs (desktop-CMP systems only
-     * — see `scripts/design-artifacts/generate-design-catalog.mjs`), preferred over [source] for
-     * trusted server-side re-render: no Gradle build, no worktree.
+     * — see `compose-ai-tools/scripts/design-artifacts/generate-design-catalog.mjs`), preferred
+     * over [source] for trusted server-side re-render: no Gradle build, no worktree.
      */
     val liveBundle: LiveBundle? = null,
     /**

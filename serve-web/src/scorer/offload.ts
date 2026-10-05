@@ -10,7 +10,7 @@
 // **Opt-in by URL, and that is deliberate.** The offload only happens when the page carries a
 // `<script data-cp-scorer-worker="…">` naming the built worker; with no such attribute this module
 // calls `scorePlanes` directly, exactly as before. Two consumers depend on that being the default:
-// `scripts/design-artifacts/design-reference-score.mjs` and `scripts/compare-audit.mjs` inject
+// `compose-ai-tools/scripts/design-artifacts/design-reference-score.mjs` and `scripts/compare-audit.mjs` inject
 // `format-compare.js` into a bare page and drive `window.ComposePreviewCompare` there, so they have
 // no asset URL to name and must keep getting the same numbers on the calling thread. A page that
 // scores nothing pays for nothing either — the worker is constructed on the first comparison, not

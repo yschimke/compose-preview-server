@@ -2,7 +2,7 @@
 //
 // Every player's published render of the same `ir/*.rc` document side by side, and — once a column
 // is picked as the reference — a pixel diff of every other column against it. The renders and the
-// baked-PNG diffs were computed offline by `scripts/design-artifacts/rc-compare.mjs` and published
+// baked-PNG diffs were computed offline by `compose-ai-tools/scripts/design-artifacts/rc-compare.mjs` and published
 // on the delivery branch, so nothing here renders a document: it places `<img>`s and, for the one
 // question the build cannot answer (two players against each other), diffs two of them on a canvas.
 //

@@ -3,7 +3,7 @@
 // This is the whole of `window.ComposePreviewCompare`. Four surfaces reach it as a global — the
 // parity page, the compare wall, the spec lane and the reference page — and two consumers outside
 // the browser drive it by loading the built asset: the publish-time score driver
-// (`scripts/design-artifacts/design-reference-score.mjs`) and the compare audit. That is why the
+// (`compose-ai-tools/scripts/design-artifacts/design-reference-score.mjs`) and the compare audit. That is why the
 // shape below is a contract rather than an implementation detail; `src/formatCompare.ts` is what
 // publishes it.
 

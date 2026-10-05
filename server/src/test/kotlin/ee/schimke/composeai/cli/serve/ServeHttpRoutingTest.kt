@@ -365,7 +365,8 @@ class ServeHttpRoutingTest {
         )
     }
     if (tagIndex) {
-      // The published element index, exactly as `scripts/design-artifacts/tag-index.mjs` writes it:
+      // The published element index, exactly as
+      // `compose-ai-tools/scripts/design-artifacts/tag-index.mjs` writes it:
       // one unique tag with a box, one unique tag whose every carrying node had a zero-area box,
       // and one carried by two nodes. The last two are the interesting ones — a tag with no
       // geometry is still an identity, and a tag with `count: 2` is not one at all.

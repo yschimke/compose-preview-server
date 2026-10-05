@@ -7,7 +7,7 @@
 // having drifted.
 //
 // STILL MIRRORED, deliberately, in one place this cannot reach:
-// `scripts/design-artifacts/design-reference-score.mjs`, which runs at publish time under node with
+// `compose-ai-tools/scripts/design-artifacts/design-reference-score.mjs`, which runs at publish time under node with
 // no build step, so it cannot import from `src/`. It carries a comment pointing here.
 //
 // `assets/format-compare.js` used to hold a third copy. It no longer reports anything itself — the
