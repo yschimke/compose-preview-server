@@ -1010,7 +1010,7 @@ const FIXTURE_STATES = [
     fixture: "serve-ui-builder-designs",
     suffix: "visibility",
     apply: async (page) => {
-      await page.getByText("More ways to start", { exact: true }).click();
+      await page.getByText("New design", { exact: true }).click();
       const visibility = page.getByRole("combobox", { name: "Design visibility" });
       await expect(visibility.first()).toHaveValue("private");
       await visibility.first().selectOption("public");

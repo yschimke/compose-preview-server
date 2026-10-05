@@ -330,7 +330,7 @@ class ServeUiBuilderDesignManagementRoutesTest {
         .build()
     client.newCall(moved).execute().use { assertEquals(200, it.code) }
     var page = designsPage()
-    assertTrue("""<section class="cp-design-folder" aria-label="Music">""" in page, page)
+    assertTrue("""<section class="cp-design-folder" aria-label="Music" """ in page, page)
     assertTrue("""value="Music""" in page, page)
     assertEquals(
       303,
@@ -338,7 +338,7 @@ class ServeUiBuilderDesignManagementRoutesTest {
         .first,
     )
     page = designsPage()
-    assertTrue("""<section class="cp-design-folder" aria-label="Watch">""" in page, page)
+    assertTrue("""<section class="cp-design-folder" aria-label="Watch" """ in page, page)
     assertFalse("""aria-label="Music""" in page, page)
     assertEquals(
       303,

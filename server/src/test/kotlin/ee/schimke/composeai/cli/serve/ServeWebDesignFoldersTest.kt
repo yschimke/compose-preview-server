@@ -24,7 +24,7 @@ class ServeWebDesignFoldersTest {
         viewerActorId = "github:octocat",
       )
 
-    val folders = Regex("""<section class="cp-design-folder" aria-label="([^"]+)">""")
+    val folders = Regex("""<section class="cp-design-folder" aria-label="([^"]+)" """)
     assertEquals(
       listOf("Tiles", "wear", "No folder"),
       folders.findAll(page).map { it.groupValues[1] }.toList(),
@@ -59,11 +59,87 @@ class ServeWebDesignFoldersTest {
 
     assertTrue("folder.hidden = left === 0;" in page, page)
     // The script sits above the grid, so the cards are found when the filter runs, not at parse.
-    val listener = page.substringAfter("""box.addEventListener("input"""")
-    assertTrue("""document.querySelectorAll(".cp-design-card")""" in listener, listener)
+    val apply =
+      page
+        .substringAfter("function apply() {")
+        .substringBefore("""box.addEventListener("input", apply)""")
+    assertTrue("""document.querySelectorAll(".cp-design-card")""" in apply, apply)
     // The folder's own count follows the filter, not only the page total.
     assertTrue("""folder.querySelector(".cp-design-folder-count")""" in page, page)
     assertTrue("""<span class="cp-designs-count cp-design-folder-count">1 design</span>""" in page)
+  }
+
+  @Test
+  fun `folders are listed first, and picking one narrows the list to it`() {
+    val page =
+      ServeWeb.uiBuilderDesignsPage(
+        rows =
+          listOf(
+            row("loose-sketch", folder = null),
+            row("watch-face", folder = "wear"),
+            row("tile-draft", folder = "Tiles"),
+            row("widget-draft", folder = "wear"),
+          ),
+        viewerActorId = "github:octocat",
+      )
+
+    val picker =
+      page
+        .substringAfter("""<nav class="cp-design-folders" aria-label="Folders" hidden>""")
+        .substringBefore("</nav>")
+    val picks =
+      Regex(
+          """<span class="cp-design-folder-pick-name">([^<]+)</span> <span class="cp-designs-count">([^<]+)</span>"""
+        )
+        .findAll(picker)
+        .map { "${it.groupValues[1]} · ${it.groupValues[2]}" }
+        .toList()
+    assertEquals(
+      listOf(
+        "All designs · 4 designs",
+        "Tiles · 1 design",
+        "wear · 2 designs",
+        "No folder · 1 design",
+      ),
+      picks,
+    )
+    // The list of folders leads the page, above the filter and every folder's cards.
+    assertTrue(page.indexOf("cp-design-folders") < page.indexOf("cp-design-filter"))
+    // Each pick names the section it selects, and the unfiled designs travel as an empty name.
+    assertTrue("""data-cp-folder-index="1" data-cp-folder-name="wear"""" in picker, picker)
+    assertTrue("""data-cp-folder-index="2" data-cp-folder-name=""""" in picker, picker)
+    assertTrue("""aria-label="wear" data-cp-folder-index="1">""" in page, page)
+    assertTrue("var inFolder = picked === null" in page, page)
+  }
+
+  @Test
+  fun `nothing filed offers no folder list`() {
+    val page =
+      ServeWeb.uiBuilderDesignsPage(rows = listOf(row("a")), viewerActorId = "github:octocat")
+
+    assertFalse("cp-design-folders" in page.substringBefore("<script>"), page)
+  }
+
+  @Test
+  fun `creating a design is folded below the list rather than leading the page`() {
+    val page =
+      ServeWeb.uiBuilderDesignsPage(
+        rows = listOf(row("a", folder = "x")),
+        viewerActorId = "github:octocat",
+        createAction = "/ui-builder/designs",
+        catalogs =
+          listOf(
+            ServeWeb.UiBuilderNewDesignOption(
+              systemId = "m3-catalog",
+              label = "m3-catalog",
+              templates = listOf(ServeWeb.UiBuilderNewDesignTemplate("blank", "Blank screen")),
+            )
+          ),
+      )
+
+    assertFalse("cp-designs-quick" in page, page)
+    assertTrue("""<details class="cp-designs-create-more">""" in page, page)
+    assertTrue(page.indexOf("cp-designs-create-more") > page.indexOf("cp-design-card"))
   }
 
   @Test
@@ -101,7 +177,8 @@ class ServeWebDesignFoldersTest {
   }
 
   private fun String.sectionFor(name: String): String =
-    substringAfter("""aria-label="$name">""").substringBefore("</section>")
+    substringAfter("""<section class="cp-design-folder" aria-label="$name" """)
+      .substringBefore("</section>")
 
   private fun row(designId: String, folder: String? = null) =
     ServeWeb.UiBuilderDesignRow(
