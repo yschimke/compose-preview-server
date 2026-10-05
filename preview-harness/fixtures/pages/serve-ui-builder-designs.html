@@ -65,59 +65,14 @@
         <p class="cp-sub">Every design this server permits <code>github:octocat</code> to open,
         newest first. Open one to carry on with it, duplicate one to start from it.</p>
         
-        <form class="cp-designs-quick" method="post" action="/ui-builder/designs?token=fixture-token">
-  <input type="hidden" name="designId" value="cheeky-raccoon">
-  <span class="cp-designs-h2">New design</span>
-  <button class="cp-grant-approve" type="submit" name="start" value="m3-catalog|blank">Blank screen · m3-catalog</button>
-</form>
+        <nav class="cp-design-folders" aria-label="Folders" hidden>
+  <h2 class="cp-designs-h2">Folders</h2>
+  <div class="cp-design-folder-picks">
+  <button type="button" class="cp-design-folder-pick" data-cp-folder-index="0" data-cp-folder-name="Media" aria-label="Media, 1 design" aria-pressed="false"><span class="cp-design-folder-pick-name">Media</span> <span class="cp-designs-count">1</span></button>
+  <button type="button" class="cp-design-folder-pick" data-cp-folder-index="1" data-cp-folder-name="" aria-label="No folder, 1 design" aria-pressed="false"><span class="cp-design-folder-pick-name">No folder</span> <span class="cp-designs-count">1</span></button>
+  </div>
+</nav>
         
-        <details class="cp-designs-create-more">
-<summary>More ways to start</summary>
-<section class="cp-designs-create">
-<form class="cp-designs-new" method="post" action="/ui-builder/designs?token=fixture-token">
-          <h2 class="cp-designs-h2">Start a new design</h2>
-          <label class="cp-grant-ttl"><span>Starting point</span>
-            <select name="start">
-            <optgroup label="m3-catalog">
-            <option value="m3-catalog|blank">Blank</option>
-            <option value="m3-catalog|jetcaster">Jetcaster</option>
-            </optgroup>
-            <optgroup label="wear-m3">
-            <option value="wear-m3|wear-screen">Wear screen</option>
-            </optgroup>
-            </select>
-          </label>
-          <label class="cp-grant-ttl"><span>Design id</span><input type="text" name="designId"
-            value="cheeky-raccoon" pattern="[A-Za-z0-9][A-Za-z0-9._-]*" required></label>
-          <label class="cp-grant-ttl"><span>Visibility</span>
-  <select name="visibility" aria-label="Design visibility">
-    <option value="private" selected>Private — invited collaborators only</option>
-    <option value="public">Public (read only) — anyone with the link</option>
-  </select>
-</label>
-          <button class="cp-grant-approve" type="submit">Create</button>
-        </form>
-        <form class="cp-designs-new" method="post" action="/ui-builder/designs/copy?token=fixture-token">
-          <h2 class="cp-designs-h2">Start from an existing design</h2>
-          <p class="cp-designs-hint">A copy at revision zero, with its own history. The design it was
-          copied from is left exactly as it is.</p>
-          <label class="cp-grant-ttl"><span>Copy</span>
-            <select name="sourceDesignId">
-            <option value="morning-player">Morning player (morning-player)</option>
-            </select>
-          </label>
-          <label class="cp-grant-ttl"><span>New design id</span><input type="text" name="designId"
-            value="cheeky-raccoon" pattern="[A-Za-z0-9][A-Za-z0-9._-]*" required></label>
-          <label class="cp-grant-ttl"><span>Visibility</span>
-  <select name="visibility" aria-label="Design visibility">
-    <option value="private" selected>Private — invited collaborators only</option>
-    <option value="public">Public (read only) — anyone with the link</option>
-  </select>
-</label>
-          <button class="cp-grant-approve" type="submit">Create the copy</button>
-        </form>
-</section>
-</details>
         <div class="cp-designs-toolbar">
   <label class="cp-designs-filter"><span class="cp-visually-hidden">Filter designs</span>
     <input type="search" id="cp-design-filter" placeholder="Filter by name, id, catalog or folder"
@@ -142,14 +97,17 @@
   var count = document.getElementById("cp-design-count");
   var none = document.getElementById("cp-designs-none");
   if (!box) return;
-  box.addEventListener("input", function () {
+  // null shows every folder; otherwise the index of the one folder picked above.
+  var picked = null;
+  function apply() {
     // Looked up here, not when the script runs: the script sits above the grid, so at
     // parse time there were no cards yet and the filter hid nothing and counted zero.
-    var cards = Array.prototype.slice.call(document.querySelectorAll(".cp-design-card"));
     var q = box.value.trim().toLowerCase();
     var shown = 0;
-    cards.forEach(function (card) {
-      var hit = q === "" || (card.getAttribute("data-cp-design") || "").indexOf(q) >= 0;
+    Array.prototype.slice.call(document.querySelectorAll(".cp-design-card")).forEach(function (card) {
+      var folder = card.closest(".cp-design-folder");
+      var inFolder = picked === null || (folder && folder.getAttribute("data-cp-folder-index") === picked);
+      var hit = inFolder && (q === "" || (card.getAttribute("data-cp-design") || "").indexOf(q) >= 0);
       card.hidden = !hit;
       if (hit) shown += 1;
     });
@@ -162,12 +120,59 @@
         var label = folder.querySelector(".cp-design-folder-count");
         if (label) label.textContent = left + (left === 1 ? " design" : " designs");
       });
+    // Recent is across every folder, so it steps aside while one folder is picked.
+    var recent = document.querySelector(".cp-designs-recent");
+    if (recent) recent.hidden = picked !== null;
     if (count) count.textContent = shown + (shown === 1 ? " design" : " designs");
     if (none) none.hidden = shown !== 0;
+  }
+  box.addEventListener("input", apply);
+  var folders = document.querySelector(".cp-design-folders");
+  if (!folders) return;
+  var picks = Array.prototype.slice.call(folders.querySelectorAll(".cp-design-folder-pick"));
+  // index null shows every folder; there is no "All designs" pick to press for that.
+  function pick(index, remember) {
+    picked = index;
+    var name = null;
+    picks.forEach(function (button) {
+      var on = button.getAttribute("data-cp-folder-index") === index;
+      button.setAttribute("aria-pressed", on ? "true" : "false");
+      if (on && picked !== null) name = button.getAttribute("data-cp-folder-name");
+    });
+    if (remember && window.history && window.URLSearchParams) {
+      var params = new URLSearchParams(window.location.search);
+      if (name === null) params.delete("folder"); else params.set("folder", name);
+      var search = params.toString();
+      window.history.replaceState(null, "", window.location.pathname + (search ? "?" + search : "") + window.location.hash);
+    }
+    apply();
+  }
+  picks.forEach(function (button) {
+    button.addEventListener("click", function () {
+      // Pressing the picked folder again lets go of it, back to every folder.
+      var index = button.getAttribute("data-cp-folder-index");
+      pick(index === picked ? null : index, true);
+    });
   });
+  var initial = null;
+  if (window.URLSearchParams) {
+    var wanted = new URLSearchParams(window.location.search).get("folder");
+    picks.forEach(function (button) {
+      if (wanted !== null && button.getAttribute("data-cp-folder-name") === wanted) {
+        initial = button.getAttribute("data-cp-folder-index");
+      }
+    });
+  }
+  folders.hidden = false;
+  // The cards are below this script, so a folder named in the URL is applied once they exist.
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", function () { pick(initial, false); });
+  } else {
+    pick(initial, false);
+  }
 })();
 </script>
-        <section class="cp-design-folder" aria-label="Media">
+        <section class="cp-design-folder" aria-label="Media" data-cp-folder-index="0">
   <h2 class="cp-designs-h2 cp-design-folder-name">Media <span class="cp-designs-count cp-design-folder-count">1 design</span></h2>
   <div class="cp-designs-grid">
   <article class="cp-card cp-design-card" data-cp-design="morning player morning-player wear-m3-catalog media">
@@ -252,7 +257,7 @@
           </article>
   </div>
 </section>
-<section class="cp-design-folder" aria-label="No folder">
+<section class="cp-design-folder" aria-label="No folder" data-cp-folder-index="1">
   <h2 class="cp-designs-h2 cp-design-folder-name">No folder <span class="cp-designs-count cp-design-folder-count">1 design</span></h2>
   <div class="cp-designs-grid">
   <article class="cp-card cp-design-card" data-cp-design="archived dashboard archived-dashboard m3-catalog">
@@ -284,6 +289,53 @@
   </div>
 </section>
 <p class="cp-sub" id="cp-designs-none" hidden>No design here matches that.</p>
+        <details class="cp-designs-create-more">
+<summary>New design</summary>
+<section class="cp-designs-create">
+<form class="cp-designs-new" method="post" action="/ui-builder/designs?token=fixture-token">
+          <h2 class="cp-designs-h2">Start a new design</h2>
+          <label class="cp-grant-ttl"><span>Starting point</span>
+            <select name="start">
+            <optgroup label="m3-catalog">
+            <option value="m3-catalog|blank">Blank</option>
+            <option value="m3-catalog|jetcaster">Jetcaster</option>
+            </optgroup>
+            <optgroup label="wear-m3">
+            <option value="wear-m3|wear-screen">Wear screen</option>
+            </optgroup>
+            </select>
+          </label>
+          <label class="cp-grant-ttl"><span>Design id</span><input type="text" name="designId"
+            value="cheeky-raccoon" pattern="[A-Za-z0-9][A-Za-z0-9._-]*" required></label>
+          <label class="cp-grant-ttl"><span>Visibility</span>
+  <select name="visibility" aria-label="Design visibility">
+    <option value="private" selected>Private — invited collaborators only</option>
+    <option value="public">Public (read only) — anyone with the link</option>
+  </select>
+</label>
+          <button class="cp-grant-approve" type="submit">Create</button>
+        </form>
+        <form class="cp-designs-new" method="post" action="/ui-builder/designs/copy?token=fixture-token">
+          <h2 class="cp-designs-h2">Start from an existing design</h2>
+          <p class="cp-designs-hint">A copy at revision zero, with its own history. The design it was
+          copied from is left exactly as it is.</p>
+          <label class="cp-grant-ttl"><span>Copy</span>
+            <select name="sourceDesignId">
+            <option value="morning-player">Morning player (morning-player)</option>
+            </select>
+          </label>
+          <label class="cp-grant-ttl"><span>New design id</span><input type="text" name="designId"
+            value="cheeky-raccoon" pattern="[A-Za-z0-9][A-Za-z0-9._-]*" required></label>
+          <label class="cp-grant-ttl"><span>Visibility</span>
+  <select name="visibility" aria-label="Design visibility">
+    <option value="private" selected>Private — invited collaborators only</option>
+    <option value="public">Public (read only) — anyone with the link</option>
+  </select>
+</label>
+          <button class="cp-grant-approve" type="submit">Create the copy</button>
+        </form>
+</section>
+</details>
         <a class="cp-back" href="/ui-builder/?token=fixture-token">← UI builder</a>
         </main>
         <footer class="cp-site-footer">

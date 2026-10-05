@@ -5489,10 +5489,21 @@ cp-page-zoom button:focus-visible {
   padding: 8px 10px; border-radius: 9px; border: 1px solid var(--cp-border);
   background: var(--cp-bg); color: var(--cp-fg); font: inherit; font-size: 0.88rem; }
 .cp-designs-new button { align-self: flex-start; }
-/* The one-press starts and the Recent strip sit above the list; the full forms fold away. */
-.cp-designs-quick { display: flex; flex-wrap: wrap; align-items: center; gap: 10px;
-  margin: 0 0 20px; padding: 14px 16px; border: 1px solid var(--cp-border); border-radius: 14px;
-  background: var(--cp-surface); }
+/* The folders lead the page and narrow the list; the Recent strip follows, the forms fold away. */
+.cp-design-folders { margin: 0 0 20px; }
+.cp-design-folders[hidden], .cp-designs-recent[hidden] { display: none; }
+.cp-design-folders .cp-designs-h2 { margin: 0 0 12px; }
+/* One row, scrolled sideways when the folders outrun the width, so they never push Recent down. */
+.cp-design-folder-picks { display: flex; flex-wrap: nowrap; gap: 8px; overflow-x: auto;
+  scrollbar-width: none; }
+.cp-design-folder-picks::-webkit-scrollbar { display: none; }
+.cp-design-folder-pick { flex: 0 0 auto; white-space: nowrap;
+  display: inline-flex; align-items: baseline; gap: 8px; padding: 10px 14px;
+  border: 1px solid var(--cp-border); border-radius: 12px; background: var(--cp-surface);
+  color: var(--cp-fg); font: inherit; font-size: 0.9rem; cursor: pointer; }
+.cp-design-folder-pick[aria-pressed="true"] { border-color: var(--md-sys-color-primary, var(--cp-fg));
+  background: color-mix(in srgb, var(--md-sys-color-primary, var(--cp-fg)) 14%, var(--cp-surface)); }
+.cp-design-folder-pick-name { font-weight: 600; }
 .cp-designs-create-more { margin: 0 0 20px; }
 .cp-designs-create-more > summary { cursor: pointer; color: var(--cp-fg-muted); font-size: 0.88rem;
   margin: 0 0 12px; }

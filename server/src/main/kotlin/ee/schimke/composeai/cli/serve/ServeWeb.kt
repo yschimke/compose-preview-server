@@ -7993,8 +7993,8 @@ ${captureControlsHtml().prependIndent("          ")}
     // last: a person who files designs opens this page looking for a folder, and a folder that is
     // only a line on each card makes them read every card to find it. Until anything is filed the
     // page stays the one grid it always was — a "No folder" heading over everything says nothing.
-    val sections =
-      if (rows.none { it.folder != null }) gridOf(rows)
+    val folderGroups =
+      if (rows.none { it.folder != null }) emptyList()
       else
         rows
           .groupBy { it.folder }
@@ -8003,17 +8003,23 @@ ${captureControlsHtml().prependIndent("          ")}
             compareBy<Map.Entry<String?, List<UiBuilderDesignRow>>> { it.key == null }
               .thenBy(String.CASE_INSENSITIVE_ORDER) { it.key.orEmpty() }
           )
-          .joinToString("\n") { (folder, group) ->
-            val name = folder ?: "No folder"
-            val count = "${group.size} design${if (group.size == 1) "" else "s"}"
-            """
-            <section class="cp-design-folder" aria-label="${esc(name)}">
+          .map { it.key to it.value }
+    fun designCount(n: Int) = "$n design${if (n == 1) "" else "s"}"
+    val sections =
+      if (folderGroups.isEmpty()) gridOf(rows)
+      else
+        folderGroups.withIndex().joinToString("\n") { (index, entry) ->
+          val (folder, group) = entry
+          val name = folder ?: "No folder"
+          val count = designCount(group.size)
+          """
+            <section class="cp-design-folder" aria-label="${esc(name)}" data-cp-folder-index="$index">
               <h2 class="cp-designs-h2 cp-design-folder-name">${esc(name)} <span class="cp-designs-count cp-design-folder-count">$count</span></h2>
               ${gridOf(group).prependIndent("              ").trimStart()}
             </section>
             """
-              .trimIndent()
-          }
+            .trimIndent()
+        }
     val grid =
       if (rows.isEmpty())
         """<p class="cp-sub" id="cp-designs-empty">No designs are owned by or shared with this account yet.</p>"""
@@ -8023,6 +8029,35 @@ ${captureControlsHtml().prependIndent("          ")}
         <p class="cp-sub" id="cp-designs-none" hidden>No design here matches that.</p>
         """
           .trimIndent()
+    // The folders come first, as one row to pick from: a person who files designs opens this page
+    // looking for one, and picking it narrows everything below to that folder. There is no "All
+    // designs" pick — every folder is shown until one is pressed, and pressing it again lets go.
+    // The count is the bare number to keep the row short; the button's label still says "designs".
+    // Script-only, so it starts hidden; without script every folder is simply listed in full
+    // underneath. The choice rides in `?folder=` (empty for the unfiled designs) so a reload or a
+    // shared link keeps it.
+    val folderPicker =
+      if (folderGroups.isEmpty()) ""
+      else {
+        val picks =
+          folderGroups.mapIndexed { index, (folder, group) ->
+            val name = esc(folder ?: "No folder")
+            "<button type=\"button\" class=\"cp-design-folder-pick\" " +
+              "data-cp-folder-index=\"$index\" data-cp-folder-name=\"${esc(folder.orEmpty())}\" " +
+              "aria-label=\"$name, ${designCount(group.size)}\" aria-pressed=\"false\">" +
+              "<span class=\"cp-design-folder-pick-name\">$name</span> " +
+              "<span class=\"cp-designs-count\">${group.size}</span></button>"
+          }
+        """
+        <nav class="cp-design-folders" aria-label="Folders" hidden>
+          <h2 class="cp-designs-h2">Folders</h2>
+          <div class="cp-design-folder-picks">
+          ${picks.joinToString("\n          ")}
+          </div>
+        </nav>
+        """
+          .trimIndent()
+      }
     val startOptions =
       catalogs.joinToString("\n") { catalog ->
         val options =
@@ -8085,37 +8120,13 @@ ${captureControlsHtml().prependIndent("          ")}
         </form>
         """
           .trimIndent()
-    // One press to a new design, first: a blank screen or the smallest sample is what most people
-    // arriving here want, and the full forms are one disclosure further in.
-    val quickStarts = catalogs.flatMap { catalog ->
-      catalog.templates
-        .filter { it.id in QUICK_START_TEMPLATES }
-        .sortedBy { QUICK_START_TEMPLATES.keys.indexOf(it.id) }
-        .map { template ->
-          val label = QUICK_START_TEMPLATES.getValue(template.id)
-          (if (catalogs.size > 1) "$label · ${catalog.label}" else label) to
-            "${catalog.systemId}|${template.id}"
-        }
-    }
-    val quickStart =
-      if (createAction.isBlank() || quickStarts.isEmpty()) ""
-      else
-        """
-        <form class="cp-designs-quick" method="post" action="${esc(createAction)}">
-          <input type="hidden" name="designId" value="${esc(suggestedDesignId)}">
-          <span class="cp-designs-h2">New design</span>
-          ${quickStarts.joinToString("\n          ") { (label, start) ->
-            "<button class=\"cp-grant-approve\" type=\"submit\" name=\"start\" value=\"${esc(start)}\">${esc(label)}</button>"
-          }}
-        </form>
-        """
-          .trimIndent()
+    // Creating is the rarer errand here, so it folds away under the list rather than leading it.
     val create =
       if (newDesign.isEmpty() && fromExample.isEmpty()) ""
       else
         """
-        <details class="cp-designs-create-more"${if (quickStart.isEmpty()) " open" else ""}>
-        <summary>More ways to start</summary>
+        <details class="cp-designs-create-more">
+        <summary>New design</summary>
         <section class="cp-designs-create">
         ${(newDesign + "\n" + fromExample).trim().prependIndent("        ").trimStart()}
         </section>
@@ -8178,14 +8189,17 @@ ${captureControlsHtml().prependIndent("          ")}
           var count = document.getElementById("cp-design-count");
           var none = document.getElementById("cp-designs-none");
           if (!box) return;
-          box.addEventListener("input", function () {
+          // null shows every folder; otherwise the index of the one folder picked above.
+          var picked = null;
+          function apply() {
             // Looked up here, not when the script runs: the script sits above the grid, so at
             // parse time there were no cards yet and the filter hid nothing and counted zero.
-            var cards = Array.prototype.slice.call(document.querySelectorAll(".cp-design-card"));
             var q = box.value.trim().toLowerCase();
             var shown = 0;
-            cards.forEach(function (card) {
-              var hit = q === "" || (card.getAttribute("data-cp-design") || "").indexOf(q) >= 0;
+            Array.prototype.slice.call(document.querySelectorAll(".cp-design-card")).forEach(function (card) {
+              var folder = card.closest(".cp-design-folder");
+              var inFolder = picked === null || (folder && folder.getAttribute("data-cp-folder-index") === picked);
+              var hit = inFolder && (q === "" || (card.getAttribute("data-cp-design") || "").indexOf(q) >= 0);
               card.hidden = !hit;
               if (hit) shown += 1;
             });
@@ -8198,9 +8212,56 @@ ${captureControlsHtml().prependIndent("          ")}
                 var label = folder.querySelector(".cp-design-folder-count");
                 if (label) label.textContent = left + (left === 1 ? " design" : " designs");
               });
+            // Recent is across every folder, so it steps aside while one folder is picked.
+            var recent = document.querySelector(".cp-designs-recent");
+            if (recent) recent.hidden = picked !== null;
             if (count) count.textContent = shown + (shown === 1 ? " design" : " designs");
             if (none) none.hidden = shown !== 0;
+          }
+          box.addEventListener("input", apply);
+          var folders = document.querySelector(".cp-design-folders");
+          if (!folders) return;
+          var picks = Array.prototype.slice.call(folders.querySelectorAll(".cp-design-folder-pick"));
+          // index null shows every folder; there is no "All designs" pick to press for that.
+          function pick(index, remember) {
+            picked = index;
+            var name = null;
+            picks.forEach(function (button) {
+              var on = button.getAttribute("data-cp-folder-index") === index;
+              button.setAttribute("aria-pressed", on ? "true" : "false");
+              if (on && picked !== null) name = button.getAttribute("data-cp-folder-name");
+            });
+            if (remember && window.history && window.URLSearchParams) {
+              var params = new URLSearchParams(window.location.search);
+              if (name === null) params.delete("folder"); else params.set("folder", name);
+              var search = params.toString();
+              window.history.replaceState(null, "", window.location.pathname + (search ? "?" + search : "") + window.location.hash);
+            }
+            apply();
+          }
+          picks.forEach(function (button) {
+            button.addEventListener("click", function () {
+              // Pressing the picked folder again lets go of it, back to every folder.
+              var index = button.getAttribute("data-cp-folder-index");
+              pick(index === picked ? null : index, true);
+            });
           });
+          var initial = null;
+          if (window.URLSearchParams) {
+            var wanted = new URLSearchParams(window.location.search).get("folder");
+            picks.forEach(function (button) {
+              if (wanted !== null && button.getAttribute("data-cp-folder-name") === wanted) {
+                initial = button.getAttribute("data-cp-folder-index");
+              }
+            });
+          }
+          folders.hidden = false;
+          // The cards are below this script, so a folder named in the URL is applied once they exist.
+          if (document.readyState === "loading") {
+            document.addEventListener("DOMContentLoaded", function () { pick(initial, false); });
+          } else {
+            pick(initial, false);
+          }
         })();
         </script>
         """
@@ -8219,20 +8280,16 @@ ${captureControlsHtml().prependIndent("          ")}
         <p class="cp-sub">Every design this server permits <code>${esc(viewerActorId)}</code> to open,
         newest first. Open one to carry on with it, duplicate one to start from it.</p>
         $noticeHtml$requestAccess
-        $quickStart
+        $folderPicker
         $recent
-        $create
         $filter
         $grid
+        $create
         <a class="cp-back" href="/ui-builder/$navSuffix">← UI builder</a>
         """
           .trimIndent(),
     )
   }
-
-  /** The starting points the designs page offers as one-press buttons, in order, with labels. */
-  private val QUICK_START_TEMPLATES =
-    linkedMapOf("blank" to "Blank screen", "hello" to "Hello sample")
 
   /** How many recently changed designs the designs page shows as pictures above the list. */
   private const val RECENT_DESIGNS = 4
