@@ -1,47 +1,16 @@
 package ee.schimke.composeai.cli.serve
 
-import java.util.concurrent.TimeUnit
-
 /**
  * **Onboarding a GitHub project in one step**: hand the server a repository URL and it publishes
  * every catalog that repository already delivers.
  *
- * ### Why this exists
+ * One `git ls-remote --heads` ([listDeliveryBranches]) finds the branches under [branchPrefix];
+ * each suffix is a catalog id, published through [ServeCatalogAdmin.register] exactly as a
+ * hand-written `POST /admin/catalogs` would be.
  *
- * Publishing a catalog on a running box is possible today ([ServeCatalogAdmin]) but only for
- * someone who already knows the shape of the delivery contract: that a catalog is a
- * `design-artifacts/<system>` branch, that `<system>` is simultaneously the branch suffix, the
- * `/<system>/` route and the id in `catalogs.json`, and therefore that publishing `compose-m3` from
- * `yschimke/compose-ai-tools` means posting
- * `{"system":"compose-m3","repo":"yschimke/compose-ai-tools"}`. A project that has run
- * `compose-preview publish` has all of that written down already — in its refs. Asking a newcomer
- * to restate it, exactly, as JSON is the whole of the onboarding friction (issue #4789).
- *
- * So this reads it instead. One `git ls-remote --heads` over the repository
- * ([listDeliveryBranches]) enumerates the branches whose names start with the server's
- * [branchPrefix]; each suffix is a catalog id, and each one is published through
- * [ServeCatalogAdmin.register] — the *same* path a hand-written `POST /admin/catalogs` takes, so an
- * onboarded catalog is in every way an ordinary one, persisted to `catalogs.json` and back after a
- * restart.
- *
- * ### What it deliberately does not do
- *
- * It discovers nothing that isn't already published as a delivery branch. A repository that has
- * never run `compose-preview publish` has no `design-artifacts/` delivery refs, and the honest
- * answer is that there is nothing here to serve yet ([Result.Empty]) — not a build, not a clone of
- * the project's sources. Onboarding stays a *registration* step; producing the artifacts remains
- * the producer's job.
- *
- * It also grants no trust. A newly onboarded catalog serves and badges `unverified` exactly as one
- * published by hand does, until its producer is trusted ([ServeTrustAdmin]). Discovery reading a
- * repository's public refs is not an assertion about that repository.
- *
- * ### Partial success is the normal case
- *
- * A repository can deliver several catalogs, and they fail independently: one branch may be a
- * newly-pushed catalog, another may already be published here, a third may not fetch. So the result
- * is per-catalog ([Result.Ok.catalogs]) rather than one verdict — the caller sees which ids landed
- * and why the rest didn't, instead of a single 502 that hides the two that worked.
+ * It builds nothing (a repository with no delivery branches is [Result.Empty]) and grants no trust
+ * (onboarded catalogs badge `unverified` until [ServeTrustAdmin] says otherwise). Catalogs succeed
+ * or fail independently, so the result is per catalog ([Result.Ok.catalogs]).
  */
 class ServeOnboarding(
   /** Publishes each discovered catalog. The same administrator `POST /admin/catalogs` uses. */
@@ -227,43 +196,19 @@ data class GithubProject(val owner: String, val repo: String) {
 
 /**
  * Branch names in a public GitHub repository via `git ls-remote --heads`, or null when the
- * repository couldn't be read.
- *
- * `ls-remote` rather than the GitHub branches API for the reason [gitLsRemoteHead] uses it: it is
- * unauthenticated and unrated, where the API would spend one of 60 calls an hour on what is meant
- * to be a paste-a-URL interaction. Hardened the same way, too — stdout is drained on a daemon
- * thread so a remote that stalls without closing the pipe can't wedge the calling request thread
- * past the bounded [WAIT_SECONDS] wait.
+ * repository couldn't be read. `ls-remote` for the reason [gitLsRemoteHead] uses it:
+ * unauthenticated and unrated.
  */
-fun gitLsRemoteBranches(repo: String): List<String>? = runCatching {
-  val proc =
-    ProcessBuilder("git", "ls-remote", "--heads", "https://github.com/$repo.git")
-      .redirectErrorStream(true)
-      .start()
-  proc.outputStream.close()
-  val captured = StringBuilder()
-  val reader = Thread {
-    runCatching { proc.inputStream.bufferedReader().use { r -> captured.append(r.readText()) } }
-  }
-    .apply {
-      isDaemon = true
-      start()
-    }
-  if (!proc.waitFor(WAIT_SECONDS, TimeUnit.SECONDS)) {
-    proc.destroyForcibly()
-    return null
-  }
-  reader.join(2_000)
-  // A missing or private repository exits non-zero (git prompts for no credentials in this
-  // environment); an empty repository exits zero with no refs. Only the first is unreadable.
-  if (proc.exitValue() != 0) return null
-  captured
-    .toString()
+fun gitLsRemoteBranches(repo: String): List<String>? {
+  val (exitCode, output) =
+    gitLsRemote(repo, options = listOf("--heads"), waitSeconds = WAIT_SECONDS) ?: return null
+  // A missing or private repository exits non-zero; an empty one exits zero with no refs.
+  if (exitCode != 0) return null
+  return output
     .lineSequence()
     .mapNotNull { line -> line.substringAfter("refs/heads/", "").trim().takeIf { it.isNotEmpty() } }
     .toList()
 }
-  .getOrNull()
 
 /** Longest a `ls-remote` may take before the onboarding request gives up on the repository. */
 private const val WAIT_SECONDS = 20L

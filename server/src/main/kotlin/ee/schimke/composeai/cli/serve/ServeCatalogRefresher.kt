@@ -242,22 +242,33 @@ public class ServeCatalogRefresher(
 
 /**
  * Resolve a branch's head commit via `git ls-remote` — unauthenticated and unrated (unlike the
- * GitHub commits API's 60/hr), so it scales to any number of watched catalogs. Returns null on any
- * failure (git absent, network error, unknown branch), which the refresher treats as "can't check,
- * skip". Best-effort with a bounded wait so a hung remote can't wedge the poll thread.
+ * GitHub commits API's 60/hr). Null on any failure, which the refresher treats as "skip".
  */
-public fun gitLsRemoteHead(repo: String, branch: String): String? = runCatching {
+public fun gitLsRemoteHead(repo: String, branch: String): String? {
+  val (_, output) =
+    gitLsRemote(repo, patterns = listOf("refs/heads/$branch"), waitSeconds = 20) ?: return null
+  return Regex("\\b([0-9a-f]{40})\\b").find(output)?.groupValues?.get(1)
+}
+
+/**
+ * `git ls-remote <options> https://github.com/<repo>.git <patterns>` as `(exitCode, combined
+ * output)`, or null when it could not run or outlived [waitSeconds].
+ *
+ * Output is drained on a daemon thread: a remote that stalls without closing the pipe would
+ * otherwise block a direct read forever and never reach the bounded wait.
+ */
+internal fun gitLsRemote(
+  repo: String,
+  options: List<String> = emptyList(),
+  patterns: List<String> = emptyList(),
+  waitSeconds: Long,
+): Pair<Int, String>? = runCatching {
   val proc =
-    ProcessBuilder("git", "ls-remote", "https://github.com/$repo.git", "refs/heads/$branch")
+    ProcessBuilder(listOf("git", "ls-remote") + options + "https://github.com/$repo.git" + patterns)
       .redirectErrorStream(true)
       .start()
   proc.outputStream.close()
-  // Drain stdout on a daemon thread: if git hangs *without* closing stdout (a DNS/TLS/network
-  // stall), a direct `readText()` would block on EOF forever and never reach the `waitFor`
-  // timeout below — wedging the single catalog-refresh thread so no branch ever updates again.
-  // The reader thread lets `waitFor(20s)` bound the wait; `join` after the process exits reads
-  // the (now-complete) output safely.
-  val captured = StringBuilder()
+  val captured = StringBuffer()
   val reader = Thread {
     runCatching { proc.inputStream.bufferedReader().use { r -> captured.append(r.readText()) } }
   }
@@ -265,11 +276,11 @@ public fun gitLsRemoteHead(repo: String, branch: String): String? = runCatching 
       isDaemon = true
       start()
     }
-  if (!proc.waitFor(20, TimeUnit.SECONDS)) {
+  if (!proc.waitFor(waitSeconds, TimeUnit.SECONDS)) {
     proc.destroyForcibly()
     return null
   }
   reader.join(2_000)
-  Regex("\\b([0-9a-f]{40})\\b").find(captured.toString())?.groupValues?.get(1)
+  proc.exitValue() to captured.toString()
 }
   .getOrNull()
