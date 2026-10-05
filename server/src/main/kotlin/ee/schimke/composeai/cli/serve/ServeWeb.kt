@@ -8039,15 +8039,14 @@ ${captureControlsHtml().prependIndent("          ")}
     val folderPicker =
       if (folderGroups.isEmpty()) ""
       else {
-        val picks =
-          folderGroups.mapIndexed { index, (folder, group) ->
-            val name = esc(folder ?: "No folder")
-            "<button type=\"button\" class=\"cp-design-folder-pick\" " +
-              "data-cp-folder-index=\"$index\" data-cp-folder-name=\"${esc(folder.orEmpty())}\" " +
-              "aria-label=\"$name, ${designCount(group.size)}\" aria-pressed=\"false\">" +
-              "<span class=\"cp-design-folder-pick-name\">$name</span> " +
-              "<span class=\"cp-designs-count\">${group.size}</span></button>"
-          }
+        val picks = folderGroups.mapIndexed { index, (folder, group) ->
+          val name = esc(folder ?: "No folder")
+          "<button type=\"button\" class=\"cp-design-folder-pick\" " +
+            "data-cp-folder-index=\"$index\" data-cp-folder-name=\"${esc(folder.orEmpty())}\" " +
+            "aria-label=\"$name, ${designCount(group.size)}\" aria-pressed=\"false\">" +
+            "<span class=\"cp-design-folder-pick-name\">$name</span> " +
+            "<span class=\"cp-designs-count\">${group.size}</span></button>"
+        }
         """
         <nav class="cp-design-folders" aria-label="Folders" hidden>
           <h2 class="cp-designs-h2">Folders</h2>

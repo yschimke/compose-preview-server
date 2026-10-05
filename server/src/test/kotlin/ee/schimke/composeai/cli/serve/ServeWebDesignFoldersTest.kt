@@ -98,7 +98,7 @@ class ServeWebDesignFoldersTest {
       listOf("Tiles · 1", "wear · 2", "No folder · 1"),
       picks,
     )
-    // No "All designs" pick: every folder shows until one is pressed, and pressing it again lets go.
+    // No "All designs" pick: every folder shows until one is pressed; pressing it again lets go.
     assertFalse("All designs" in picker, picker)
     assertTrue("""aria-label="wear, 2 designs"""" in picker, picker)
     assertTrue("pick(index === picked ? null : index, true)" in page, page)
