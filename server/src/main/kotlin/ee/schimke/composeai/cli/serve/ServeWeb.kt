@@ -127,6 +127,8 @@ object ServeWeb {
     val permitted: Boolean,
     /** Plain-language explanation, shown in place of the action when [permitted] is false. */
     val deniedReason: String = "",
+    /** Editor entry point; absolute when the server configures a dedicated builder hostname. */
+    val editorHref: String = "/ui-builder/",
   )
 
   /**
@@ -6607,7 +6609,7 @@ ${captureControlsHtml().prependIndent("          ")}
         "UI Builder<span class=\"cp-action-chip-hint\" aria-hidden=\"true\">why?</span></summary>" +
         "<span class=\"cp-action-note-body\">$why</span></details>"
     }
-    val href = WebEscaping.htmlEscape("/ui-builder/$suffix")
+    val href = WebEscaping.htmlEscape("${invite.editorHref}$suffix")
     return "<a class=\"cp-site-builder-link\" href=\"$href\">" +
       "<span aria-hidden=\"true\">\u270e</span>UI Builder</a>"
   }
