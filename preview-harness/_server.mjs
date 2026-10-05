@@ -28,13 +28,11 @@ const harnessDir = dirname(fileURLToPath(import.meta.url));
 export const harnessRoot = resolve(harnessDir, "..");
 
 // The UI builder is a separate repository (yschimke/compose-ui-builder) whose build output this
-// harness serves. The server's own distribution resolves the editor from that repository's
-// RELEASES, but the renderer and the two Jetcaster fixtures have no release asset, so this harness
-// still reads them out of a checkout.
+// harness serves, laid out as a checkout holds it: either a built checkout, or the pinned release's
+// archives unpacked into that shape by `fetch-ui-builder-dists.sh`, which is what CI does.
 //
 // TWO spellings, and the difference matters. `COMPOSE_UI_BUILDER_DIR` is the harness's own, and it
-// is what CI sets in the one job that checks the builder out inside the workspace (a runner cannot
-// hold a directory above itself). `ORG_GRADLE_PROJECT_composeUiBuilderDir` is Gradle's environment
+// is what CI sets to that unpacked directory inside the workspace. `ORG_GRADLE_PROJECT_composeUiBuilderDir` is Gradle's environment
 // spelling for `-PcomposeUiBuilderDir`, which turns the build itself into a composite against that
 // checkout -- so a developer who exports that one gets the local editor AND a harness that serves
 // it, with no second variable.
