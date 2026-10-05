@@ -17,12 +17,11 @@ permissions:
 # its four seams as RELEASES -- three from Maven Central, the editor archive from that repository's
 # GitHub release -- so `gradle` needs no checkout and CI proves the published set resolves.
 #
-# The lane that still needs the checkout is the visual harness, which needs the renderer and the
-# two Jetcaster fixtures that have no release asset. `visual-harness-dist` builds them from it, and
-# `visual-harness` checks the repository out INSIDE the workspace (actions/checkout refuses a path
-# outside `$GITHUB_WORKSPACE`), unpacks those builds into it, and points the harness server at it
-# with `COMPOSE_UI_BUILDER_DIR`; Gradle is not told about it, because the server distribution the
-# harness runs comes from the release.
+# The visual harness serves the builder's four Wasm distributions -- the editor, the renderer and
+# the two Jetcaster fixtures -- from the SAME release, downloaded by
+# `preview-harness/fetch-ui-builder-dists.sh` rather than built, so it too tests the pinned set.
+# The one job that still builds from a checkout is `ui-builder-remote-compose`, for the flag no
+# release enables.
 
 # A pull request cancels its own superseded runs; a push to `main` does not cancel anything.
 #
@@ -291,76 +290,12 @@ jobs:
             --component-id-prefix "m3/" \
             --strict
 
-  # The visual harness, as five jobs rather than one. It used to be a single job that built four
-  # UI-builder Wasm distributions one after another (`--max-workers=1`, because `gradle.properties`
-  # sizes the Kotlin daemon for ONE ir2wasm link), then `:server:installDist`, then every harness,
-  # with no Gradle cache at all: ~20 min of builds before the first test, and the slowest job in
-  # the workflow by a quarter of an hour. Now each link has a runner of its own, so the heap
-  # reasoning holds per job and the four run side by side; the server distribution builds beside
-  # them from the restored cache; and the page captures, which need no build output at all, start
-  # at once.
-  #
-  # The four builds and the harness must agree on ONE UI-builder commit, so it is resolved once
-  # here rather than each job checking out whatever `main` is when its runner starts.
-  ui-builder-ref:
-    runs-on: ubuntu-latest
-    outputs:
-      sha: ${{ steps.ref.outputs.sha }}
-    steps:
-      - id: ref
-        run: |
-          sha=$(git ls-remote https://github.com/yschimke/compose-ui-builder.git refs/heads/main | cut -f1)
-          test -n "${sha}"
-          echo "sha=${sha}" >> "$GITHUB_OUTPUT"
+  # The visual harness, as three jobs. It used to be a single job that linked four UI-builder Wasm
+  # distributions one after another from a checkout (~20 min before the first test); those now
+  # come from the pinned release (`fetch-ui-builder-dists.sh`), the server distribution builds from
+  # the restored cache, and the page captures, which need no build output at all, start at once.
 
-  # Only the editor is a UI-builder release asset; the harness also needs the renderer and the two
-  # Jetcaster fixtures, so all four are built from the checkout, by that repository's own wrapper.
-  # The checkout sits at the workspace root, so the cache key hashes the UI builder's build files,
-  # not this repository's: one entry for these four, separate from the `gradle` job's.
-  visual-harness-dist:
-    needs: ui-builder-ref
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        include:
-          - task: ":ui-builder:wasmFrontendDist"
-            dist: ui-builder/build/wasmDist
-            name: ui-builder
-          - task: ":ui-builder-renderer:wasmRendererDist"
-            dist: ui-builder-renderer/build/wasmRendererDist
-            name: ui-builder-renderer
-          - task: ":ui-builder-reference-jetcaster:wasmFrontendDist"
-            dist: ui-builder-reference-jetcaster/build/wasmDist
-            name: ui-builder-reference-jetcaster
-          - task: ":ui-builder-generated-jetcaster:wasmFrontendDist"
-            dist: ui-builder-generated-jetcaster/build/wasmDist
-            name: ui-builder-generated-jetcaster
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: yschimke/compose-ui-builder
-          ref: ${{ needs.ui-builder-ref.outputs.sha }}
-          persist-credentials: false
-      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
-        with:
-          distribution: temurin
-          java-version: |
-            21
-            17
-      - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
-        with:
-          cache-provider: basic
-      - run: ./gradlew ${{ matrix.task }}
-      # A tarball, not the directory: one file uploads and downloads far faster than a few hundred.
-      - run: tar -czf "${RUNNER_TEMP}/dist.tgz" "${{ matrix.dist }}"
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: visual-harness-dist-${{ matrix.name }}
-          path: ${{ runner.temp }}/dist.tgz
-          retention-days: 1
-          compression-level: 0
-
-  # `:server:installDist`, beside the four links rather than after them. Read-only cache: the key is
+  # `:server:installDist`, beside the page captures. Read-only cache: the key is
   # the `gradle` job's (same build files), and this job must never be the one that writes it -- an
   # entry holding only what `installDist` resolves would leave `check` a cold start on every PR.
   visual-harness-server:
@@ -425,18 +360,16 @@ jobs:
 
   # Also the verdict for the whole lane, because `visual-harness` is the name a ruleset requires. A
   # job whose `needs` failed is SKIPPED, and GitHub counts a skipped required check as passing, so
-  # a failed build or page capture would otherwise merge. It therefore waits on every split job
-  # (`-pages` included, which costs little: it should finish before the builds do), runs whatever they
-  # did, and fails first thing unless all of them succeeded.
+  # a failed build or page capture would otherwise merge. It therefore waits on both split jobs
+  # (`-pages` included, about a minute longer than `-server`; the lane still finishes inside
+  # `gradle`'s time), runs whatever they did, and fails first thing unless both succeeded.
   visual-harness:
-    needs: [ui-builder-ref, visual-harness-dist, visual-harness-server, visual-harness-pages]
+    needs: [visual-harness-server, visual-harness-pages]
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     env:
       # The harness server resolves `/ui-builder/...` and the renderer routes against this
-      # checkout, into which the four distributions built above are unpacked. Gradle is
-      # deliberately not pointed at it: the server distribution resolves the editor archive from
-      # the UI-builder release, so this job exercises both paths.
+      # directory, laid out like a builder checkout by `fetch-ui-builder-dists.sh`.
       COMPOSE_UI_BUILDER_DIR: ${{ github.workspace }}/.compose-ui-builder
     steps:
       - name: Every split visual-harness job succeeded
@@ -454,13 +387,6 @@ jobs:
           node-version: 24.21.0
           cache: npm
           cache-dependency-path: preview-harness/package-lock.json
-      - name: Check out the UI builder
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: yschimke/compose-ui-builder
-          ref: ${{ needs.ui-builder-ref.outputs.sha }}
-          path: .compose-ui-builder
-          persist-credentials: false
       # The harness servers run on 21; nothing here builds any more. The UI builder's renderer is
       # `java-ui-builder` (21) -- its previews are compiled for 21 and unpacked into a daemon that
       # runs on the server's own JVM -- so on 17 `ServeUiBuilderRenderPort`'s preflight withdraws
@@ -481,24 +407,15 @@ jobs:
       - run: sudo rm -f /etc/apt/sources.list.d/google-chrome.list /etc/apt/sources.list.d/microsoft-prod.list
       - run: npx playwright install --with-deps chromium
         working-directory: preview-harness
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          pattern: visual-harness-dist-*
-          path: ${{ runner.temp }}/dist
+      - name: Download the UI-builder distributions
+        run: preview-harness/fetch-ui-builder-dists.sh "${COMPOSE_UI_BUILDER_DIR}"
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: visual-harness-server
           path: ${{ runner.temp }}/server
-      - name: Unpack the distributions
+      - name: Unpack the server distribution
         run: |
-          for archive in "${RUNNER_TEMP}"/dist/*/dist.tgz; do
-            tar -xzf "${archive}" -C .compose-ui-builder
-          done
           tar -xzf "${RUNNER_TEMP}/server/server.tgz"
-          test -f .compose-ui-builder/ui-builder/build/wasmDist/index.html
-          test -d .compose-ui-builder/ui-builder-renderer/build/wasmRendererDist
-          test -d .compose-ui-builder/ui-builder-reference-jetcaster/build/wasmDist
-          test -d .compose-ui-builder/ui-builder-generated-jetcaster/build/wasmDist
           test -x server/build/install/compose-preview-server/bin/compose-preview-server
       - run: npm run harness:ui-builder
         working-directory: preview-harness

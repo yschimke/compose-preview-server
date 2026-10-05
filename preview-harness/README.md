@@ -24,7 +24,10 @@ npm run harness:bundle-upload
 ```
 
 CI also runs `npm run harness:ui-builder-visual-replay` after assembling the standalone server and
-the independent Jetcaster reference. That command deliberately excludes the cross-repository MCP
+downloading the independent Jetcaster reference. The UI builder's four Wasm distributions (editor,
+renderer, both Jetcaster fixtures) come from the release `gradle/libs.versions.toml` pins, laid out
+by `fetch-ui-builder-dists.sh <dir>` the way a builder checkout holds them; point
+`COMPOSE_UI_BUILDER_DIR` at that directory, or at a built checkout to test unreleased builder code. That command deliberately excludes the cross-repository MCP
 case below, so operations-to-production-pixels remains a required check without needing an external
 compose-ai-tools checkout.
 
@@ -33,8 +36,8 @@ UI-builder Wasm, and the real compose-ai-tools MCP executable:
 
 ```
 ./gradlew :server:installDist
-(cd ../compose-ui-builder && ./gradlew :ui-builder-reference-jetcaster:wasmFrontendDist)
-COMPOSE_UI_BUILDER_DIR=../compose-ui-builder \
+preview-harness/fetch-ui-builder-dists.sh build/ui-builder-dists
+COMPOSE_UI_BUILDER_DIR="$PWD/build/ui-builder-dists" \
   GATE2_MCP_LAUNCHER=/absolute/path/to/compose-preview-mcp \
   npm --prefix preview-harness run harness:ui-builder-gate2
 ```
