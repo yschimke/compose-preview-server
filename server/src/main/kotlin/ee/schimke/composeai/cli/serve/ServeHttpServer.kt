@@ -2998,6 +2998,7 @@ class ServeHttpServer(
     val permitted = decision is UiBuilderAuthorizationDecision.Authorized
     return ServeWeb.UiBuilderInvite(
       systems = uiBuilderCatalogs,
+      editorHref = uiBuilderHost?.let { "https://$it/" } ?: "/ui-builder/",
       // An operator token is a sign-in for this purpose: it carries the capability, and hiding the
       // action from the one credential that always has it would be a strange kind of security.
       signedIn = login != null || permitted,

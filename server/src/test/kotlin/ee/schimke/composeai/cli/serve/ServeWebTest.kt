@@ -776,6 +776,31 @@ class ServeWebTest {
     assertFalse(html.contains("?catalog="), html)
   }
 
+  @Test
+  fun `the front-door builder link uses its configured editor origin and preserves the token`() {
+    val html =
+      ServeWeb.homeIndexPage(
+        listOf(builderSystem("m3-catalog")),
+        token = "test-token",
+        isPublic = false,
+        uiBuilder =
+          ServeWeb.UiBuilderInvite(
+            systems = setOf("m3-catalog"),
+            signedIn = true,
+            permitted = true,
+            editorHref = "https://ui.coo.ee/",
+          ),
+      )
+    val header =
+      html.substringAfter("<header class=\"cp-site-header\">").substringBefore("</header>")
+    assertTrue(
+      header.contains(
+        "<a class=\"cp-site-builder-link\" href=\"https://ui.coo.ee/?token=test-token\">"
+      ),
+      header,
+    )
+  }
+
   /** A host whose builder serves none of the listed catalogs has nothing to offer from here. */
   @Test
   fun `no header builder link when the builder serves no listed catalog`() {
