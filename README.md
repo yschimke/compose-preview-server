@@ -134,6 +134,13 @@ with a small “Loading catalog…” label. The thumbnail is scoped to the cata
 and branch. Opening a pending catalog promotes it ahead of the remaining startup fetches; the fetch
 already running finishes first. The loading page retries automatically until the catalog is available.
 
+## Agent plugins
+
+Install the `compose-preview` local MCP plugin or the `compose-catalogs` hosted catalog and
+UI Builder plugin from [yschimke/compose-agent-plugins](https://github.com/yschimke/compose-agent-plugins#quick-start).
+That guide covers each supported agent host, the canonical skill bundles from `yschimke/skills`,
+and [migration from the old marketplace](https://github.com/yschimke/compose-agent-plugins#moving-from-compose-ag-plugin).
+
 ## Remote catalog MCP
 
 The server can expose every hosted catalog through one aggregate Streamable HTTP MCP endpoint at
