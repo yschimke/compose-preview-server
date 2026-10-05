@@ -11,59 +11,23 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 
 /**
- * The designs a project is working on, offered on this host so one can be opened and carried on
- * with rather than rebuilt.
+ * The designs a project publishes, offered on this host so one can be opened and continued.
  *
- * This is for a team leaning on the builder while a screen is still being designed: somebody
- * prototypes, exports the design into the app's own repository beside the code, and the next person
- * — or the next session, or an agent — opens it here and keeps going. The design in the repository
- * is the thing under review and the thing that survives; the design on this host is where it is
- * being worked on.
- *
- * ## The convention
- *
- * Either way a project's designs reach the server, they sit at the same two paths, so a team moves
- * between the two without rewriting anything:
  * ```text
  * ui-builder/designs/index.json      the manifest: which designs this project publishes
  * ui-builder/designs/<file>.json     one DesignDocumentV1 per design
  * ```
  *
- * They are read from one of two places, and the difference is which half of the loop a host is in:
+ * Read from a **directory** ([Source.Directory], `--ui-builder-designs`, the app's checkout) or a
+ * **branch** ([Source.Branch], a served catalog's `design-artifacts/<system>`, needing no
+ * per-catalog wiring). A missing `index.json` simply means no designs.
  *
- * - **A directory** ([Source.Directory], `--ui-builder-designs`) — the app's own checkout, which is
- *   the prototyping case. The team edits designs here, exports them into the repository, and the
- *   server sees the new file on the next read: no publish step, no branch, no commit required to
- *   try something.
- * - **A branch** ([Source.Branch]) — a served catalog's `design-artifacts/<system>`, read the same
- *   way every other thing a catalog contributes is read. This is the case where the designs have
- *   settled enough to ship with the catalog, and it needs no per-catalog wiring at all: a catalog
- *   registered at runtime brings its designs with it.
- *
- * A project with no designs has no `index.json` — a missing file or a 404, whichever source it is —
- * which is an ordinary answer rather than an error anybody configures away.
- *
- * ## Documents, not operation logs
- *
- * The published file is a whole [DesignDocumentV1] — the shape `CreateDesignRequestV1` takes —
- * rather than the `compose-ui-builder-operations/v1-candidate` log this repository keeps its own
- * fixtures in. The two describe the same design and a project generates one from the other at
- * publish time (`scripts/ui-builder/design-sync.mjs` already holds both directions), but only one
- * of them can be *consumed* here: the reducer that replays an operation log lives in
+ * The file is a whole [DesignDocumentV1], not an operation log: replaying a log needs
  * `:ui-builder-export`, which `:server` deliberately does not depend on
  * ([`UI_BUILDER_PROJECT_BOUNDARY.md`](../../../../../../../../docs/design/UI_BUILDER_PROJECT_BOUNDARY.md)).
- * Publishing the document keeps that boundary and keeps the published artifact the same shape as
- * the API that receives it.
  *
- * ## Best-effort, and cached against the branch head
- *
- * Every read here is best-effort in the same sense the catalog machinery already means it: a
- * project whose index is missing, unreachable or malformed contributes no designs and takes nothing
- * away from the ones that do. A branch's index is cached against the marker the caller passes, so a
- * refreshed catalog invalidates its own entry — the load marker moves when the branch head does —
- * and a host that never refreshes still re-reads on [ttlMillis]. Neither the index nor a document
- * is ever fetched while rendering a page: the browse route asks, and one answer serves every viewer
- * until the branch moves.
+ * Every read is best-effort: a bad index contributes nothing. A branch's index is cached against
+ * the caller's load marker (it moves with the branch head) and otherwise expires after [ttlMillis].
  */
 class ServeUiBuilderDesignLibrary(
   private val fetch: (url: String, maxBytes: Long) -> ByteArray?,

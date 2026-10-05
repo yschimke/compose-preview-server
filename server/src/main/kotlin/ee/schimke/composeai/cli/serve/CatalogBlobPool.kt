@@ -61,58 +61,24 @@ data class CatalogBlobPoolSnapshot(
 
 /**
  * Content-addressed home for the heavy bytes a catalog load fetches — the executable `liveBundle`,
- * its per-preview splits, and the externalised resource pool.
+ * its per-preview splits, and the externalised resource pool — so they survive container recreation
+ * and the per-system directory swap every [ServeCatalogStore.load] performs.
  *
- * ### What this exists to stop
- *
- * `ServeCommand.registerCatalogs` roots the catalog store at a `createTempDirectory`, so everything
- * a catalog fetched is discarded when the container is recreated — which on the prebuilt image is
- * what every rolled release performs. Worse, it is not only restarts: [ServeCatalogStore.load]
- * finishes by deleting the live per-system directory before renaming staging over it, so **every
- * reload throws the previous generation away too**, including a 100 MB-class bundle the new
- * revision may not have changed at all. Only the old `.res-cache` survived a reload, and only
- * because it sat above that directory.
- *
- * Pointing [ServeCommand] at a durable root makes the pool outlive both events. It is deliberately
- * the whole of the change: nothing here decides *what* to cache or *when* a catalog is stale — that
- * is the caller's business, and the rule the caller must keep is stated below.
- *
- * ### The rule callers must keep
- *
- * **Only bytes with an immutable address may be [keyed] here.** A catalog load resolves its
- * delivery commit first and pins every subsequent URL to it
- * (`raw.githubusercontent.com/<repo>/<commit>/…`), so those reads are immutable by construction and
- * a cached answer can only ever be *the* answer. The un-pinned fallback — a load whose revision
- * feed could not be read, which addresses the branch ref instead — is mutable, and must not reach
- * this pool at all. One rule, no TTLs, nothing to revalidate.
- *
- * [contentAddressed] carries no such caveat: its key *is* the digest a trusted manifest declared,
- * so it is safe wherever that manifest is.
- *
- * ### Layout, and why there is only one blob space
+ * **Only bytes with an immutable address may be [keyed] here**: commit-pinned
+ * `raw.githubusercontent.com/<repo>/<commit>/…` URLs. The un-pinned branch-ref fallback must never
+ * reach this pool. [contentAddressed] keys by a digest a trusted manifest declared.
  *
  * ```
  * <root>/content/<sha256-of-bytes>     the blobs themselves
  * <root>/keys/<sha256-of-key>          a pointer: the content sha its key resolves to
  * ```
  *
- * Both addressing modes land in the same `content/` space, so a bundle fetched by URL and the same
- * bundle declared by sha are one file. More importantly it makes **every blob self-verifying**: the
- * file name is the digest, so a read hashes the bytes and compares, and a truncated or corrupted
- * entry can never be handed to a classloader. A sidecar recording the digest beside the blob would
- * have needed the pair to stay consistent across two writers and a kill; a name cannot go out of
- * step with itself.
+ * One blob space makes every blob self-verifying (its name is its digest), so a truncated entry is
+ * never handed to a classloader. The pointer is a single atomic write whose every value names a
+ * verifiable blob, so racing replicas can at worst re-fetch.
  *
- * The pointer file is the only mutable thing here, and it is a single small atomic write whose
- * every possible value names a self-verifying blob — so two replicas racing on it cannot produce a
- * wrong read, at worst a re-produced one.
- *
- * ### Concurrency
- *
- * The prebuilt image's rolling update boots a new replica alongside the running one and both mount
- * this volume. Writes are therefore staged per-writer and moved into place atomically, reads verify
- * before trusting, and [sweep] spares anything younger than [graceMillis] so a booting replica
- * cannot reclaim the bytes the outgoing one is still serving from.
+ * A rolling update runs two replicas on this volume: writes are staged per writer and moved
+ * atomically, reads verify, and [sweep] spares anything younger than [graceMillis].
  */
 class CatalogBlobPool(
   private val root: File,

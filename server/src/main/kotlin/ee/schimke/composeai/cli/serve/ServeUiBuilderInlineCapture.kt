@@ -6,50 +6,19 @@ import ee.schimke.composeai.uibuilder.export.toUiBuilderDocument
 import ee.schimke.composeai.uibuilder.protocol.DesignDocumentV1
 
 /**
- * One `remote-compose/inline` subtree, captured into the Remote Compose document it describes.
+ * One `remote-compose/inline` subtree, captured into the Remote Compose document it describes, so
+ * it is played by `RcComposePlayer` on real bytes rather than drawn with Compose stand-ins. The
+ * browser has no Remote Compose writer; a Robolectric daemon running `captureSingleRemoteDocument`
+ * does.
  *
- * ## Why a capture and not a renderer
+ * Joins existing pieces: [InlineRemoteContentExporter] writes the `@RemoteComposable` body,
+ * `RemoteOverridablePreview` is the reviewed call site (density decisions live there),
+ * [PlaygroundCompileService] in `remote-compose` mode compiles, renders and publishes the `.rc` as
+ * a `/d/<id>` permalink, and the editor plays the resulting `documentUrl`.
  *
- * The canvas draws an inline subtree with the ordinary Compose stand-ins `remote-m3` publishes for
- * those ids — a `RemoteColumn` drawn by a `Column` — inside a marked frame. That frame is honest
- * and it is also a strictly weaker guarantee than the neighbouring `remote-compose/document`, which
- * is played for real by `RcComposePlayer` on real bytes. Closing the gap needs **bytes**, and the
- * browser has no Remote Compose writer to make them with: `rc-player-protocol` has `RcWireWriter`
- * and `RcDocumentCodec.encode`, but nothing that turns a layout/text/modifier tree into the
- * operation list they serialize.
- *
- * The Android creation library does have one, and this host can already run it. So the bytes come
- * from where they already come from — a real `captureSingleRemoteDocument` on a real Robolectric
- * daemon — and every surface that already plays a document plays these too.
- *
- * ## The lane is four things that all existed
- *
- * 1. [InlineRemoteContentExporter] writes the subtree's `@RemoteComposable` body. It has since the
- *    inline node existed; what it deliberately does not write is a **call site**, because
- *    `captureSingleRemoteDocument` takes a `RemoteCreationDisplayInfo`, a `RemoteDensity` and a
- *    density behaviour that disagree with one another, and choosing for an application is not a
- *    generator's decision to make.
- * 2. `RemoteOverridablePreview` is that call site, made once, in one place a human reviewed, with
- *    the reasoning written down beside it — `RemoteDensityBehavior.Legacy`, and a generation
- *    density stamped into the header afterwards so the player can scale the dp-typed dimensions
- *    back. This lane names it rather than restating the decision.
- * 3. [PlaygroundCompileService] in `remote-compose` mode compiles a snippet, renders it on the
- *    Android daemon, drains the captured `.rc` off the daemon's `data/remotecompose` product and
- *    publishes it as a `/d/<id>` permalink. That is exactly this capture, minus the design.
- * 4. `remote-compose/document`'s `documentUrl` is already resolved by the editor and played by
- *    `RcComposePlayer`.
- *
- * This class is the join: design → body → snippet → document URL. It adds no compiler, no renderer
- * and no second density opinion.
- *
- * ## Which catalog it compiles against
- *
- * Not the design's. An inline body is written entirely in the Remote Compose vocabulary —
- * `RemoteColumn`, `RemoteText`, `RemoteCustomComponent` — which comes from
- * `remote-creation-compose` and `remote-material3` rather than from whichever Material catalog the
- * screen around it is pinned to. So the capture target is a property of the **host**: whichever
- * served catalog this box can compile Remote Compose against ([captureCatalog]). A host with none
- * refuses by naming that, because it is an operator's fact rather than the designer's.
+ * The body is pure Remote Compose vocabulary, so the capture compiles against whichever served
+ * catalog this host can compile Remote Compose against ([captureCatalog]), not the design's; a host
+ * with none refuses and says so.
  */
 internal class ServeUiBuilderInlineCapture(
   /**

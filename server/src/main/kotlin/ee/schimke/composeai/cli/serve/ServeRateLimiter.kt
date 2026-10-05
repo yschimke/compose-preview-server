@@ -2,41 +2,16 @@ package ee.schimke.composeai.cli.serve
 
 /**
  * A **per-caller** budget for an expensive serve lane: a token bucket for the request *rate* plus a
- * counter for *concurrent* work, keyed by whoever is asking (issue #3214).
+ * counter for *concurrent* work, keyed by whoever is asking. Host-wide caps (compile slots, seats)
+ * do not stop one caller from holding every slot; this provides fair sharing.
  *
- * Everything the playground already bounds — compile slots, the compile timeout, the request-body
- * cap, live seats, the token store's size and TTL — bounds *simultaneous resource use across the
- * whole host*. None of it is a per-caller budget, so two clients issuing back-to-back 180-second
- * compiles hold every slot indefinitely and everyone else gets "the playground is busy compiling".
- * That is the gap this closes: not lifetime (the sandbox TTL already reclaims a wedged JVM) and not
- * total capacity, but **fair sharing**.
+ * The bucket holds [permitsPerWindow] tokens refilling continuously over [windowSeconds], so a full
+ * burst is allowed; refill is computed lazily on read. [maxConcurrent] bounds what one caller holds
+ * at once, released through the idempotent [Decision.Admitted.release].
  *
- * Deliberately its own type rather than a `PlaygroundRateLimiter`: `/docs` uploads have capacity
- * caps and likewise no rate limit, and the shape needed there is the same one.
- *
- * ## The bucket
- *
- * [permitsPerWindow] tokens refilling continuously over [windowSeconds], capacity equal to the same
- * number — so a caller may burst their whole minute's budget at once and then waits, which is what
- * an editor's Run button actually looks like. The refill is computed from elapsed time on read
- * rather than by a timer, so an idle host does no work and a caller who steps away is fully
- * refilled when they return.
- *
- * ## The concurrency counter
- *
- * [maxConcurrent] bounds what one caller may hold *at once*, and it is the half that answers the
- * issue's complaint directly: with the host's compile slots at 2 and this at 1, one caller cannot
- * hold both. It is acquired and released around the work, so it is only ever released by the caller
- * that took it — see [Decision.Admitted.release], which is idempotent.
- *
- * ## Key-space growth
- *
- * A public host is keyed partly by client address, which an attacker chooses. The map is therefore
- * bounded at [maxKeys]: admitting a new key first sweeps every entry that is **indistinguishable
- * from a fresh one** (nothing in flight and a fully refilled bucket), which costs a caller nothing
- * to lose. If that frees nothing, the host has [maxKeys] callers actively spending budget right now
- * and a new key is refused rather than growing the map — under a key-space spray that is the honest
- * answer, and the alternative is unbounded memory chosen by the attacker.
+ * Keys may be attacker-chosen (client addresses), so the map is bounded at [maxKeys]: a new key
+ * first sweeps entries indistinguishable from fresh ones (idle, full bucket), and is refused if
+ * that frees nothing.
  */
 class ServeRateLimiter(
   /**
@@ -70,11 +45,7 @@ class ServeRateLimiter(
       }
     }
 
-    /**
-     * Refused. [retryAfterSeconds] is what the caller should be told to wait — a real number for
-     * the rate bound (when the next token lands) and a short nudge for the concurrency bound (which
-     * clears when their own in-flight work does, at a time nobody here can predict).
-     */
+    /** Refused: [retryAfterSeconds] is exact for the rate bound, a nudge for concurrency. */
     data class Throttled(val retryAfterSeconds: Long, val reason: String) : Decision
   }
 
@@ -85,9 +56,8 @@ class ServeRateLimiter(
   private val refillPerMilli: Double = permitsPerWindow.toDouble() / (windowSeconds * 1000.0)
 
   /**
-   * Take one permit for [key], or say why not. Cheap and non-blocking — a refused caller is told to
-   * come back rather than parked, because parking is what turns a rate problem into a thread
-   * problem.
+   * Take one permit for [key], or say why not. Never blocks: parking turns a rate problem into a
+   * thread problem.
    */
   fun tryAcquire(key: String): Decision {
     synchronized(this) {
@@ -169,18 +139,10 @@ class ServeRateLimiter(
   }
 
   companion object {
-    /**
-     * Distinct callers tracked. Comfortably above any real audience for a repo-access-gated
-     * playground, and small enough that a spray of forged keys costs the host kilobytes rather than
-     * memory pressure.
-     */
+    /** Well above a real audience; a spray of forged keys costs kilobytes. */
     const val DEFAULT_MAX_KEYS = 4096
 
-    /**
-     * What a concurrency refusal advises. Unlike the rate bound there is no computable answer — the
-     * caller's own in-flight work clears when it clears — so this is a nudge sized to "a compile is
-     * running", not a promise.
-     */
+    /** What a concurrency refusal advises; a nudge, since no exact answer exists. */
     const val CONCURRENCY_RETRY_AFTER_SECONDS = 5L
   }
 }

@@ -5,39 +5,16 @@ import java.io.File
 /**
  * **What Compose previews are in this checkout?** — answered by *reading* it, never by running it.
  *
- * The onboarding flow ([ServeOnboarding]) can only publish what a repository already delivers on a
- * `design-artifacts/` branch, which is nothing at all for a project that has never heard of this
- * tool — and those are exactly the projects someone pastes a URL for (issue #12). Before anything
- * can be built from source, the box has to be able to say *what there is to build*: which Gradle
- * modules hold `@Preview` composables, and which of those the preview plugin can actually be
- * injected into.
+ * Configuring a Gradle build runs its scripts as the server user, which a repository nobody has
+ * vouched for must not do; so this reads `settings.gradle[.kts]`, module build files, the version
+ * catalog and Kotlin sources as text. The answer is a well-founded guess
+ * ([ServeSourceModule.buildable] means "worth trying").
  *
- * ### Why a reader and not a Gradle model query
- *
- * Asking Gradle would be more accurate and is the wrong first step: configuring a build **is**
- * running its build scripts as the server user, the exact thing [GradleRevisionBuilder] warns about
- * at its exec point. A scan has to be safe on a repository nobody has vouched for yet, because its
- * whole purpose is to tell an operator whether vouching for it is worth it. So this reads
- * `settings.gradle[.kts]`, the per-module build files, the version catalog and the Kotlin sources
- * as **text**. Nothing here executes, and nothing it reports is authoritative — it is a
- * well-founded guess, deliberately labelled as one ([ServeSourceModule.buildable] is "worth
- * trying", not "will work").
- *
- * ### What it looks for
- *
- * A module is worth building when it has previews *and* something to hang the plugin off:
- * - **Previews**: `@Preview`-annotated functions under `src/`, which is how both flavours spell it
- *   (`androidx.compose.ui.tooling.preview.Preview`, `org.jetbrains.compose.ui.tooling.preview`).
- * - **A host plugin**: `com.android.application`, `com.android.library`,
- *   `com.android.kotlin.multiplatform.library` or `org.jetbrains.compose` — the ids the auto-inject
- *   init script hooks with `pluginManager.withPlugin(...)`. A module that already applies
- *   `ee.schimke.composeai.preview` itself needs no injection and counts too.
- *
- * Version-catalog aliases are resolved because that is how the projects this was written for spell
- * their plugins: `alias(libs.plugins.androidApplication)` says nothing on its own, and
- * `gradle/libs.versions.toml` is where it says `com.android.application`. Missing that mapping
- * would report "no Compose modules" for a repository full of them — the one failure mode that makes
- * the whole feature look broken.
+ * A module qualifies when it has `@Preview` functions under `src/` and a host plugin the
+ * auto-inject init script hooks (`com.android.application`, `com.android.library`,
+ * `com.android.kotlin.multiplatform.library`, `org.jetbrains.compose`) or applies
+ * `ee.schimke.composeai.preview` itself. Version-catalog plugin aliases are resolved, since that is
+ * how most projects spell them.
  */
 object ServeSourceScan {
 

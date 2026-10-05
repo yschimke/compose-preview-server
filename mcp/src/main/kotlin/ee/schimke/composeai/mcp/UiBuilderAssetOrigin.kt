@@ -26,33 +26,20 @@ import java.net.URI
 import kotlinx.coroutines.runBlocking
 
 /**
- * The loopback HTTP origin the UI Builder MCP App loads its editor from
- * (compose-ui-builder#364, #366): `http://127.0.0.1:<ephemeral>/ui-builder/v/<version>/`.
+ * The loopback HTTP origin the UI Builder MCP App loads its editor from:
+ * `http://127.0.0.1:<ephemeral>/ui-builder/v/<version>/`. The ~45 MB editor is too large for an
+ * inline `resources/read`, so the resource is a small shell whose `<base href>` and CSP point here.
+ * The listener starts on the first [base] call, so a session that never opens a design opens no
+ * port.
  *
- * The editor is ~45 MB unpacked (`uiBuilder.wasm` alone is ~29 MB), which no host takes inline in a
- * `resources/read`, so the MCP App resource is a ~5 KB shell whose `<base href>` points here and
- * whose CSP `resourceDomains`/`connectDomains` name this origin. The listener starts on the first
- * [base] call — the first read of the editor resource — and never before, so a session that never
- * opens a design never opens a port.
- *
- * What it serves, and nothing else:
- * - **Only files from the archive**, by exact name under the versioned prefix. A path that decodes
- *   to an empty, `.` or `..` segment, a backslash or a colon is refused before any lookup
+ * - Only archive files, by exact name; unsafe segments are refused before lookup
  *   ([UiBuilderWebArchive.isSafeArchivePath]).
- * - **GET, HEAD and OPTIONS only.** Anything else is 405 with `Allow`.
- * - **`Access-Control-Allow-Origin: *`.** The app runs in the host's sandboxed frame, whose origin
- *   is the host's sandbox domain or opaque (`null`); module scripts and the Wasm fetch from it are
- *   cross-origin. Echoing the request's `Origin` instead would mean echoing `null`, which grants
- *   every sandboxed document on the machine exactly what `*` does while reading as if it were
- *   narrower. `*` is the honest form for what this is: public, read-only, credential-free bytes
- *   (the same archive is a public GitHub release asset). No `Allow-Credentials` is ever sent.
- * - **Private Network Access.** A loopback origin fetched from an `https` sandbox page is a PNA
- *   request: Chromium preflights it with `Access-Control-Request-Private-Network: true`, which is
- *   answered with `Access-Control-Allow-Private-Network: true`.
- * - **Types**: `application/wasm` for `.wasm` (streaming compilation refuses anything else),
- *   `text/javascript` for `.js`/`.mjs`, and the right types for CSS, JSON, HTML, SVG, images and
- *   fonts, with `X-Content-Type-Options: nosniff`.
- * - **Caching**: immutable for a year, because the path carries the editor version.
+ * - GET, HEAD and OPTIONS only; anything else is 405 with `Allow`.
+ * - `Access-Control-Allow-Origin: *`, never credentials: the sandboxed frame's origin is often
+ *   `null`, and echoing that grants exactly what `*` does. The bytes are public and read-only.
+ * - Private Network Access preflights get `Access-Control-Allow-Private-Network: true`.
+ * - `application/wasm` for `.wasm` (streaming compilation requires it), `nosniff` throughout.
+ * - Immutable for a year: the path carries the editor version.
  */
 internal class UiBuilderAssetOrigin(
   private val archive: UiBuilderWebArchive,

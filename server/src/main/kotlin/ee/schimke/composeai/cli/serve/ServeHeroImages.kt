@@ -17,50 +17,21 @@ import kotlin.math.min
 import kotlin.math.roundToInt
 
 /**
- * Prebaked thumbnails: the public front door's hero cards ([heroFor]) and the catalog grid's
- * component cards ([gridThumbFor]).
+ * Prebaked thumbnails: the front door's hero cards ([heroFor]) and the catalog grid's component
+ * cards ([gridThumbFor]), so a landing page does not lease a session and read a full-resolution
+ * render per card.
  *
- * The home page used to point each system card's `<img>` straight at `/<system>/render/<id>.png` —
- * the same lane the catalogs use. That made the landing the most expensive page on the server: a
- * dozen cards meant a dozen requests that each leased a session, took a render-slot permit, and
- * read a **full-resolution** render off disk (a phone screenshot hero is ~260 kB for a card that
- * displays it at ~256 CSS px), with no cache headers at all — so every visit and every reload paid
- * the whole cost again.
+ * Heroes are cropped ([ContentCrop]) and downscaled to [DISPLAY_CAP] × [PIXEL_SCALE] at bake time
+ * (never upscaled), named by a hash of their bytes so `/hero/` is served `immutable`, held in
+ * memory, and persisted when a cache directory is configured. Baking happens off the request path
+ * when a catalog host is first seen ([ServeHttpServer.rememberCatalogMeta]); a refresh installs a
+ * new host and re-bakes.
  *
- * A hero is a fixed picture of a published catalog: it only changes when the catalog is
- * republished. So bake it once and serve it like the static asset it is:
- * - **Cropped and downscaled at bake time.** The card's content-crop ([ContentCrop], which the page
- *   used to emulate with a CSS clip window around the full render) is baked into the pixels, and
- *   the result is scaled to [DISPLAY_CAP] × [PIXEL_SCALE] — enough for a 2× display, a fraction of
- *   the bytes. Never upscaled past the source region's own pixels.
- * - **Content-addressed.** The file name is a hash of the baked bytes, so a republished catalog
- *   gets a new URL and the old one can be cached forever ([ServeHttpServer] serves the `/hero/`
- *   lane `immutable`). No revalidation, no request on a repeat visit.
- * - **Persisted when a cache directory is configured.** The last successful hero can be restored
- *   before its catalog loads after a restart.
- * - **Held in memory.** Serving is a map lookup and a byte-array write: no session lease, no render
- *   permit, no disk read, nothing that can queue behind a catalog render.
- *
- * Baking happens off the home-page path, when a catalog host is first seen (see
- * [ServeHttpServer.rememberCatalogMeta]), and is memoised per host instance — a catalog refresh
- * installs a fresh host, which re-bakes under a new hash.
- *
- * The **catalog grid** ([gridThumbFor]) has the same problem an order of magnitude larger — a
- * catalog page is ~42 cards, not a dozen, and its full-resolution renders add up to a couple of MB
- * — so it gets the same treatment with two deliberate differences:
- * - **The crop is NOT baked in.** A grid card's content-crop stays the CSS clip window
- *   ([ServeWeb.thumbImg]), because that card is re-pointed at a *full* render when the visitor
- *   picks a declared theme; baking the crop into the thumbnail would leave the themed render
- *   uncropped and the card would change shape under the visitor. The crop still sets the *scale* —
- *   the render is downscaled so the visible region, not the whole canvas, lands at the card's cap —
- *   so a sticker's cropped component is as crisp as an uncropped screenshot. This works because
- *   [ServeWeb.thumbImg]'s clip geometry is expressed in percentages, so it is resolution
- *   independent: the same window frames the thumbnail and the full render identically.
- * - **Served through the render lane**, as `/render/<id>.png?thumb=<hash>` rather than a route of
- *   its own ([ServeHttpServer.handleRender] answers it before admission). A catalog grid is served
- *   under both the public `/<system>/` prefix and a plain single-module session, and only the
- *   render lane already exists in both; the hash rides as a query param so the URL still changes
- *   when the pixels do, which is what makes the response `immutable`.
+ * Grid thumbnails differ in two ways:
+ * - **The crop is not baked in.** The card is re-pointed at a full render when a theme is picked,
+ *   so the crop stays the percentage-based CSS clip ([ServeWeb.thumbImg]); it only sets the scale.
+ * - **Served through the render lane** as `/render/<id>.png?thumb=<hash>`
+ *   ([ServeHttpServer.handleRender]), which exists under both `/<system>/` and a plain session.
  */
 class ServeHeroImages(private val cacheDir: java.io.File? = null) {
 

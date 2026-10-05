@@ -13,46 +13,19 @@ import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
 
 /**
- * What one design is **for**: the issue behind it, the frame it reproduces, the pull request that
- * implemented it, the thread it is being discussed in, and the design it continues.
- *
- * A design on this host knows its catalog pin and nothing else. The work it belongs to — the brief,
- * the review, the ship — lives in the tracker, the design tool, the forge and the chat channel, and
- * every one of those already has a durable identifier. This is the join: five typed back-links
- * beside a design, so the thread of work can be assembled from the outside without this server
- * growing a saga object of its own (see
+ * What one design is **for**: typed back-links to the issue behind it, the frame it reproduces, the
+ * pull request that implemented it, the thread it is discussed in, and the design it continues (see
  * [`MULTIPLAYER_WORKFLOW.md`](../../../../../../../../docs/design/MULTIPLAYER_WORKFLOW.md) §4.2).
  *
- * ### Why this is not in the design document
- *
- * The same three reasons [ServeUiBuilderReferenceStore] gives for the reference overlay, and they
- * hold here without weakening:
- *
- * 1. **It is not part of the design.** Which issue a screen was drawn for is scaffolding around the
- *    work, not content of it. It must never reach the Compose export, the SVG export or the
- *    rendered document — a `pr` URL is not a thing that ships in generated Kotlin.
- * 2. **The wire cannot carry it.** `DesignMutationV1` is a closed set with no mutation for any of
- *    this, so there is no way to write it after `createDesign` without releasing
- *    `ui-builder-protocol` — to carry something point 1 says should not be in the document.
- * 3. **It must not move the revision.** The document is replayed, hashed, diffed for catalog
- *    upgrades and pushed to every subscriber on every edit. Pasting an issue URL would advance the
- *    design's revision and invalidate every open client's optimistic state, which is a large price
- *    for a fact about the design rather than a change to it.
- *
- * So it lives here: one small JSON file per design under a `links/` directory beside the UI-builder
- * state, read when a design is opened and replaced whole when it changes. Losing this directory
- * loses the back-links and no design content, which is the correct blast radius.
- *
- * ### What it will accept
+ * Kept out of the design document for the reasons [ServeUiBuilderReferenceStore] gives: it is not
+ * design content and must never reach an export, `DesignMutationV1` has no mutation for it, and it
+ * must not advance the revision. One small JSON file per design under `links/`; losing it loses no
+ * design content.
  *
  * [StoredLinks.issue], [StoredLinks.reference], [StoredLinks.pr] and [StoredLinks.thread] are
- * absolute `http(s)` URLs; [StoredLinks.previous] is a design id on this host. Every value is
- * bounded at [MAX_VALUE_BYTES]. All of them are optional, and an absent field means unset rather
- * than empty — a record with nothing in it is no file at all.
- *
- * Nothing here is ever fetched. A link is provenance the reader follows, and this host holds no
- * credential for any of the systems these URLs name; the schemes are checked so that what is stored
- * is something a browser can be handed, not so that this process can go and get it.
+ * absolute `http(s)` URLs, [StoredLinks.previous] is a design id on this host, each bounded at
+ * [MAX_VALUE_BYTES]; an empty record is no file. **Nothing here is ever fetched**: the URLs are
+ * written by any design writer, and this host holds no credential for the systems they name.
  */
 class ServeUiBuilderLinksStore(private val root: Path) {
   init {

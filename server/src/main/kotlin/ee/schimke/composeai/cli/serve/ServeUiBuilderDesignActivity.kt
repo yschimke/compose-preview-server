@@ -12,46 +12,20 @@ import kotlinx.serialization.json.putJsonArray
 import kotlinx.serialization.json.putJsonObject
 
 /**
- * **Design activity in the room**: the notifications #1254 asked for beyond comments — a proposed
- * alternative, a review verdict, and the implementing pull request moving (opened, merged, found to
- * match or not).
+ * **Design activity** posted beyond comments: a proposed alternative (fork), a review verdict, and
+ * the implementing pull request moving (opened, merged, found to match or not).
  *
- * Posted by [ServeUiBuilderCommentWebhook], through the same queue, the same two rate-limit
- * buckets, the same single retry and the same private-design rule, because they go to the same
- * channel: a second notifier would be a second set of limits a channel could be flooded past. What
- * differs is the source and the body:
+ * Posted by [ServeUiBuilderCommentWebhook] through its queue, rate limits, retry and private-design
+ * rule, so a channel has one set of limits. Forks come from
+ * [ServeUiBuilderAncestryStore.subscribeToForks]; decisions and implementations are a before/after
+ * diff of [ServeUiBuilderReviewStore.subscribeToHost] ([diffDesignReviews]), so a repeated CI
+ * status announces nothing. Each kind is opt-in via `--ui-builder-webhook-events`
+ * ([DesignActivityKind.parseEvents]).
  *
- * * a **fork** comes from [ServeUiBuilderAncestryStore.subscribeToForks], once both ends of the
- *   ancestry are on disk, and is announced on the design that was forked from;
- * * a **decision** and an **implementation** change come from
- *   [ServeUiBuilderReviewStore.subscribeToHost], as a diff of the record before and after
- *   ([diffDesignReviews]) — the comment board's model, so a write shape added later cannot forget
- *   to announce itself, and a CI job re-reporting the same status (which the store already refuses
- *   to count as a write) announces nothing.
- *
- * ## Opt-in, per kind
- *
- * An operator who set `--ui-builder-comment-webhook` opted into comment activity; that is what the
- * startup line has always said it posts. These kinds are added only by naming them in
- * `--ui-builder-webhook-events` ([DesignActivityKind.parseEvents]), so an existing channel gets
- * nothing new on upgrade.
- *
- * ## Why there is no "failed render" event
- *
- * A render on this host is commissioned by a caller and answered to that caller — the editor, an
- * agent's `ui_builder_render_native` or `ui_builder_check_design` — who already has the failure in
- * hand. Nothing records a design as "currently failing", so a notification would be one caller's
- * transient error broadcast to a channel, posted again on every retry. The persistent signal that
- * does exist — the implementation's previews found **not** to match the design — is announced, as
- * an implementation change.
- *
- * ## The wire shape is this server's
- *
- * [DesignActivityWebhookEventV1] is defined here, with its own `schema`, rather than in
- * `compose-preview-contracts` beside the comment event: it rides records ([StoredDesignReview],
- * [StoredAncestry]) that are themselves this host's, not published. It reuses the published
- * [DesignCommentWebhookDesignV1] for the design, so a relay reads the design the same way in both.
- * If a relay outside this repository comes to depend on it, it moves to contracts then.
+ * There is no "failed render" event: a render's caller already has the failure, and nothing records
+ * a design as currently failing. [DesignActivityWebhookEventV1] is this server's own shape (its
+ * records are not published), reusing the published [DesignCommentWebhookDesignV1]; it moves to
+ * contracts if an outside relay comes to depend on it.
  */
 internal enum class DesignActivityKind(val wire: String) {
   FORK("fork"),

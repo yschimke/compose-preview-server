@@ -4,49 +4,20 @@ import java.security.MessageDigest
 import java.util.concurrent.ConcurrentHashMap
 
 /**
- * The identity gate on the image lane ([ServeImageStore]): **who is allowed to upload**.
+ * The identity gate on the image lane ([ServeImageStore]): **who is allowed to upload**. Never
+ * anonymous, not even on a `--public` box, because it hands out hosting on the operator's origin.
  *
- * The lane hands out hosting on the operator's origin, so unlike the document drop-box it is never
- * anonymous — not even on a `--public` box, where every *browsing* surface is open. A caller must
- * present a GitHub credential that GitHub itself says has real access to the operator's repository.
+ * The credential is `Authorization: Bearer <github-token>`, because the audience is headless (CI
+ * jobs, agents running `curl`) and cannot do [ServeGithubAuth]'s browser cookie flow; no OAuth app
+ * is needed. Accepted:
+ * - a **user token** (`gh auth token`, a PAT), verified as that user against
+ *   [GitHubOAuthVerifier]'s repo-access rule;
+ * - a **GitHub App installation token** (`${'$'}{{ github.token }}`), verified on the
+ *   installation's write permission and attributed to [GitHubOAuthVerifier.INSTALLATION_LOGIN].
  *
- * ## What counts as a credential
- *
- * Both kinds a headless caller actually holds:
- * - A **user token** — `gh auth token`, a PAT — verified as that user, against the same repo-access
- *   rule the playground applies.
- * - A **GitHub App installation token**, which is what `${'$'}{{ github.token }}` is inside a
- *   GitHub Actions job. There is no user behind one, so it is verified on the installation's own
- *   write permission on the gating repo and attributed to [GitHubOAuthVerifier.INSTALLATION_LOGIN].
- *
- * ## Why a bearer token and not the OAuth session
- *
- * [ServeGithubAuth] already gates the playground on a signed-in GitHub account, and reusing it here
- * would have been less code — but its credential is a **cookie minted by a browser redirect flow**,
- * and the entire audience for this lane is headless: an agent in a CI job or a cloud coding
- * session, holding a `GITHUB_TOKEN` or a `gh auth token`, running `curl`. There is no browser to
- * round-trip. So the credential is `Authorization: Bearer <github-token>`, verified live against
- * GitHub on the host's own outbound connection.
- *
- * That also means the lane needs **no OAuth app**: it never mints a token, it only checks one the
- * caller already has. `--accept-images` therefore works on a box with no `--github-auth-*` config
- * at all, given a repository to check access against.
- *
- * ## Which tokens, from whom
- *
- * A user token says who the user is, not who is presenting it: any OAuth app the user ever
- * authorized holds one that reads `GET /user` just as well. So when this server *does* have its own
- * OAuth app, a user token must have been issued to it (`POST /applications/{client_id}/token`), and
- * other kinds are accepted only as [ImageUploadTokenPolicy] (`--image-upload-tokens`) allows.
- *
- * ## What the token is used for, and what happens to it
- *
- * Two GitHub reads as the caller — who they are, and whether they have access to [repository] —
- * plus, for a user token on a host with its own OAuth app, one call as that app asking whether the
- * token is its own. The token is never stored, never logged, and never echoed back — the cache
- * below is keyed by its SHA-256, so a heap dump of a running server yields a hash, not a
- * credential. The access rule itself is [GitHubOAuthVerifier]'s, unchanged: write access on a
- * public repository (on which every GitHub user has read), any real grant on a private one.
+ * When this server has its own OAuth app, a user token must have been issued to it; other kinds are
+ * accepted only as [ImageUploadTokenPolicy] (`--image-upload-tokens`) allows. The token is never
+ * stored, logged or echoed; the cache below is keyed by its SHA-256.
  */
 interface ServeImageUploadAuth {
 

@@ -6,37 +6,15 @@ import java.util.concurrent.TimeUnit
 
 /**
  * Keeps a running server's catalog set in step with its nominated **registry projects**
- * ([ServeCatalogRegistry]).
+ * ([ServeCatalogRegistry]), so a merged registry change takes effect without a restart. Each pass:
+ * - registers a newly listed system (not via [ServeCatalogAdmin.register]: registry entries are
+ *   derived state and must not be written into the operator's `catalogs.json`);
+ * - retires a system no longer listed, but only if this sync put it there;
+ * - re-publishes a system whose entry changed (`importedFrom`, `listed`, `group`, `loadPriority`),
+ *   again only if this sync owns it.
  *
- * The startup fold-in reads each registry once, which is enough to serve what was listed at boot
- * and nothing that lands after it — and what lands after it is the entire point. A registry
- * project's whole workflow is "merge the PR and the catalog is imported"; if a merge only takes
- * effect at the next container restart, the reviewer is back to filing a second request against the
- * box, which is the gap [ServeCatalogRegistry] exists to close. So the document is re-read on the
- * same cadence the branch refresher polls at, and the difference is applied:
- * - a system the registry has started listing is fetched and registered, exactly as an admin `POST`
- *   would ([ServeCatalogAdmin.register] is not reused only because a registry entry is *derived*
- *   state and must not be written into the operator's `catalogs.json`, where it would outlive the
- *   registry that asked for it);
- * - a system the registry has stopped listing is retired — but only if **this sync** is what put it
- *   there. A catalog the operator named, or one published through the admin API, is never withdrawn
- *   because a registry stopped mentioning it;
- * - a system whose ENTRY changed — `importedFrom`, `listed`, `group`, `loadPriority` — is
- *   re-published, again only if this sync owns it.
- *
- * That last one was missing, and its absence was silent in the way that costs an afternoon. The
- * pass skipped any system it already knew, so editing a registry document changed nothing about a
- * catalog already registered from it: the entry was re-read every tick and thrown away. On
- * preview.coo.ee three imports kept the `group: imported-projects` they were first registered with
- * — a group that box does not declare, so they fell back to the owner heading and sat under
- * `yschimke repositories` — while the two first listed *after* the document gained `importedFrom`
- * were filed correctly under `joreilly repositories`. Same repository, same branch, same trust; the
- * only difference was which revision of the document each was registered from. Nothing on the box
- * reported a problem, and only a restart would have fixed it.
- *
- * A registry that fails to fetch contributes nothing *that pass* and retires nothing: an
- * unreachable document is not a statement that its catalogs are gone. Only a document that read
- * cleanly and no longer names a system is.
+ * A registry that fails to fetch contributes and retires nothing that pass: only a document that
+ * read cleanly and no longer names a system retires it.
  *
  * @param repos the nominated registry projects, in `--catalog-registry` order.
  * @param read fetch + normalise one registry's document; null ⇒ unreadable this pass.

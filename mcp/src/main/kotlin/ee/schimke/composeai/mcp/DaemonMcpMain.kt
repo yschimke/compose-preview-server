@@ -7,10 +7,8 @@ import kotlin.time.Duration
 import kotlin.time.Duration.Companion.seconds
 
 /**
- * Entry point for the standalone MCP server. Stdio transport in v0; remote / HTTP transports are a
- * follow-up (see docs/daemon/MCP-KOTLIN.md § "Transports").
- *
- * **CLI:**
+ * Entry point for the standalone MCP server: stdio by default, or `--streamable-http` for the
+ * shared UI Builder only.
  *
  * ```
  * compose-preview-mcp [--project <path>[:<rootProjectName>]]...
@@ -21,25 +19,13 @@ import kotlin.time.Duration.Companion.seconds
  *                     [--storybook]
  * ```
  *
- * `--storybook` (or `-Dcomposeai.mcp.profile=storybook`) runs the **Storybook-compatibility
- * profile**: the server exposes only the Storybook-MCP tools (`list-all-documentation`,
- * `get-documentation-for-story`, `preview-stories`, `run-story-tests`) with the native tools
- * hidden, and identifies as `compose-preview-storybook`. Point a Storybook-MCP-trained agent at
- * this to drive compose-preview unmodified. Omit it for the full native tool set (the default).
+ * `--storybook` (or `-Dcomposeai.mcp.profile=storybook`) exposes only the Storybook-MCP tools and
+ * identifies as `compose-preview-storybook`. Each `--project` pre-registers a workspace; more can
+ * be added at runtime with `register_project`. `--replicas-per-daemon N` (or
+ * `composeai.mcp.replicasPerDaemon`) sizes the in-JVM sandbox pool at `1 + N` per (workspace,
+ * module); the default is [DaemonSupervisor.defaultReplicasFor], and `0` runs a single sandbox.
  *
- * Each `--project` flag pre-registers a workspace with the supervisor at startup so connecting
- * clients see the project in `list_projects` immediately. Projects can also be added at runtime via
- * the `register_project` MCP tool.
- *
- * `--replicas-per-daemon N` (or the `composeai.mcp.replicasPerDaemon` system property) configures
- * the in-JVM sandbox pool size: total sandboxes per (workspace, module) = `1 + N`. SANDBOX-POOL.md
- * Layer 3 collapsed what used to be N+1 separate JVM subprocesses into a single daemon JVM hosting
- * N+1 Robolectric sandboxes, so this knob no longer multiplies the JVM-baseline cost. The default
- * scales with the machine ([DaemonSupervisor.defaultReplicasFor]: half the cores less one, at most
- * 4). Set `0` to opt out and run a single sandbox per daemon.
- *
- * On stdin EOF the server tears down every supervised daemon (sending `shutdown` + `exit` per
- * PROTOCOL.md § 3) and exits cleanly.
+ * On stdin EOF every supervised daemon is shut down and the process exits.
  */
 object DaemonMcpMain {
 

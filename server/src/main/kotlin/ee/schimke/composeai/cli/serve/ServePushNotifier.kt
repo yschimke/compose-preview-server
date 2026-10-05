@@ -26,57 +26,24 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 
 /**
- * **Telling the person**: the comment board and the review record, reaching somebody whose tab is
- * closed (compose-preview-server#1299).
+ * Web Push for comments and review activity, reaching somebody whose tab is closed. Subscribes to
+ * the same [ServeUiBuilderCommentStore] and [ServeUiBuilderReviewStore] feeds as the socket and the
+ * webhook, so it cannot drift from what the board shows.
  *
- * ## One feed, a fourth subscriber
- *
- * The browser socket, `ui_builder_await_comments` and the outbound webhook all hear about a comment
- * from [ServeUiBuilderCommentStore.subscribeToHost]; review verdicts and implementing pull requests
- * come from [ServeUiBuilderReviewStore.subscribeToHost]. This attaches to the same two, so a push
- * can never announce something the board does not show or stay quiet about something it does. There
- * is no second event source to drift.
- *
- * ## Who is told
- *
- * The webhook tells a room; this tells a person, so it has to decide who. Three rules, and they are
- * the whole of it ([commentPushIntents], [reviewPushIntents]):
- * * a **reply** reaches everybody who has already said something in that thread;
- * * an **@mention** (`@login` in the body) reaches that GitHub login, thread or no thread;
+ * Recipients ([commentPushIntents], [reviewPushIntents]):
+ * * a **reply** reaches everybody who has already spoken in that thread;
+ * * an **@mention** reaches that GitHub login;
  * * a **verdict** or an **implementation** reaches the design's owner.
  *
- * Never the person who did it — a reply is never pushed back to its author, a verdict never to the
- * reviewer who recorded it. And never somebody who cannot read the design: every recipient is asked
- * through the design's own access control at delivery time, so a mention cannot announce a private
- * design to somebody it was never shared with, and a collaborator removed since they last commented
- * stops hearing about it.
+ * Never the actor, and never anyone the design's ACL denies at delivery time. The payload (`{kind,
+ * designId, threadId?, title, url, count}`) carries no comment text or names, since it lands on a
+ * lock screen.
  *
- * ## What a push says
- *
- * As little as is useful: `{kind, designId, threadId?, title, url, count}`. The payload is end-to-
- * end encrypted to the browser (RFC 8291), but it still lands on a lock screen, so there is no
- * comment text and no name in it — the title says *what kind of thing* happened on *which design*,
- * and the link takes somebody who may read it to the thread. `count` is how many events a burst
- * collapsed into this one notification.
- *
- * ## Bursts
- *
- * A review conversation produces replies in runs. Each (person, design, thread) waits
- * [debounceMillis] after its first event and then sends once, with the count; the push service is
- * also given a `Topic` per design and thread, so a notification still waiting at the push service
- * for an offline phone is replaced by the newer one rather than queued behind it.
- *
- * ## Delivery
- *
- * The webhook's shape: the listener runs on the writer's thread and does only in-memory work, a
- * bounded queue drops its oldest on overflow (and says so), and one worker does the network. Unlike
- * the webhook's single retry, a push service is a well-behaved HTTP API with documented status
- * codes, so this honours them: `201`/`2xx` is done, `404`/`410` means the browser unsubscribed and
- * the subscription is deleted, `429` pauses that push service for its `Retry-After`, and `5xx` or a
- * network failure retries with backoff, [MAX_ATTEMPTS] times in all.
- *
- * Endpoints and keys are credentials, so a log line names a subscription by a digest of its
- * endpoint and never by the endpoint.
+ * Each (person, design, thread) is debounced by [debounceMillis] and sent once with a count, under
+ * a per-thread `Topic` so a queued notification is replaced. The listener does only in-memory work;
+ * a bounded drop-oldest queue feeds one worker that honours push-service status codes: `2xx` done,
+ * `404`/`410` deletes the subscription, `429` pauses for `Retry-After`, `5xx` or network failure
+ * retries up to [MAX_ATTEMPTS] times. Logs name a subscription by an endpoint digest only.
  */
 internal class ServePushNotifier(
   private val store: ServePushSubscriptionStore,
@@ -272,8 +239,7 @@ internal class ServePushNotifier(
       in 200..299 -> store.recordSuccess(delivery.endpoint)
       404,
       410 -> {
-        // The browser unsubscribed, or the push service expired the subscription. It will never
-        // accept anything again, so keeping it would only repeat this request forever.
+        // Unsubscribed or expired: it will never accept anything again.
         if (store.remove(delivery.endpoint)) {
           onLog(
             "serve: push subscription ${delivery.fingerprint} is gone (${response.status}); removed it"
@@ -291,8 +257,7 @@ internal class ServePushNotifier(
       }
       in 500..599 -> retryLater(delivery, backoff(delivery.attempt), response.status.toString())
       else ->
-        // 400, 401, 403, 413: the request is wrong in a way repeating it will not fix — a key the
-        // push service does not accept, a payload too large. Said once, not retried.
+        // 400, 401, 403, 413: repeating will not fix it.
         onLog("serve: push to ${delivery.fingerprint} was refused (${response.status})")
     }
   }
@@ -314,10 +279,8 @@ internal class ServePushNotifier(
   private fun backoff(attempt: Int): Long = retryBaseMillis shl (2 * (attempt - 1)).coerceAtMost(10)
 
   /**
-   * Stop listening, and give what is already queued a short, bounded chance to go out — the
-   * webhook's reasoning: a restart must not discard everything in flight, and must not wait on a
-   * push service either. Debounced notifications still waiting are abandoned; they are a few
-   * seconds old and the board still holds what they were about.
+   * Stop listening, giving queued deliveries a bounded chance to go out. Notifications still in
+   * their debounce window are abandoned.
    */
   override fun close() {
     queue.close()

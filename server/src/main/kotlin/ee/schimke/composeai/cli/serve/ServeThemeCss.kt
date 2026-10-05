@@ -9,54 +9,22 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 
 /**
- * Projects a published catalog's **own design tokens onto the serve web chrome** — so browsing
- * `/wear-m3/` paints the page in Wear M3's colours, `/jetnews/` in JetNews's crimson, and so on,
- * instead of every design system being framed by the same fixed indigo-on-white shell.
+ * Projects a published catalog's **own design tokens onto the serve web chrome**, so `/wear-m3/`
+ * paints in Wear M3's colours rather than the fixed shell palette.
  *
- * The input is the `tokens.dtcg.json` each `design-artifacts/<system>` branch already publishes
- * beside `catalog.json` (declared there as `tokensFile`): the W3C DTCG projection of the resolved
- * `MaterialTheme.colorScheme` the catalog was rendered with, lifted from the render's
- * `compose/theme` data product by the export driver. That makes this a genuine *sync* rather than a
- * second, hand-maintained palette — re-publishing a catalog with a new brand colour re-themes its
- * pages on the next catalog refresh, with nothing to edit here.
+ * Input is the branch's `tokens.dtcg.json` (`tokensFile`), the DTCG projection of the colour scheme
+ * the catalog rendered with, so re-publishing a catalog re-themes its pages. Output is an inline
+ * `:root` override emitted after `serve.css`, covering both the `--md-sys-color-*` roles and the
+ * `--cp-*` aliases ([m3Roles]) so role-styled components re-theme too. Semantic colours (trust
+ * badges, scores, parity lanes) stay literal.
  *
- * The output is an inline `:root` override for the custom properties `serve.css` paints the chrome
- * from ([ServeWebAssets] `serve.css`), emitted into the page `<head>` *after* the stylesheet so it
- * wins at equal specificity. It covers **both** families that sheet declares: the
- * `--md-sys-color-*` Material 3 roles and the `--cp-*` chrome aliases written in terms of them.
- * Emitting only the aliases would leave every component styled against a role (an M3 tonal chip, a
- * state layer, an error container) stuck on the baseline scheme while the rest of the page
- * re-themed — so the two are produced together, from the same resolved values, in [m3Roles].
- * Semantic colours (the trust badges, good/warn/bad scores, the parity lanes) stay literal in the
- * sheet, because they mean the same thing in every system.
+ * A catalog bakes one mode; the CSS declares both. The matching mode gets the full sync, the
+ * opposite mode keeps built-in neutrals and takes only the accent family, and every text colour is
+ * pushed to a minimum contrast ([ensureContrast]). Both are emitted as `light-dark(<light>,
+ * <dark>)` pairs so `.cp-scheme-light` / `.cp-scheme-dark` can pin the mode via `color-scheme`.
  *
- * ## Two modes from one palette
- *
- * A catalog bakes **one** mode — `wear-m3` is dark, `jetnews` is light — but the page may be read
- * in either. Rather than forcing the catalog's mode onto the browser, the emitted CSS declares
- * both:
- * - the **matching** mode gets the full sync: surfaces, text and borders derived from the catalog's
- *   `surface` / `onSurface` (plus `surfaceContainer*` when it publishes them), and its accent
- *   family;
- * - the **opposite** mode keeps the built-in neutrals for that mode and takes only the accent
- *   family, re-contrasted against that mode's background.
- *
- * So a dark-mode reader of a light-first catalog gets a dark page in the catalog's brand colour,
- * not a light page — and never an unreadable one: every colour that ends up as text is pushed to a
- * minimum contrast ratio against what it sits on ([ensureContrast]).
- *
- * The two are emitted as **one `:root` block of `light-dark(<light>, <dark>)` pairs**, not as a
- * `:root` block plus a `prefers-color-scheme` media block. That is what lets the chrome be pinned
- * to a mode: `serve.css` resolves every mode-dependent value the same way, and the page-theme
- * setting only has to set `color-scheme` (via `.cp-scheme-light` / `.cp-scheme-dark` on `<html>`)
- * for the catalog's palette to follow the selected preview theme instead of the OS. With neither
- * class set, `color-scheme: light dark` defers to `prefers-color-scheme` exactly as the media query
- * did.
- *
- * The neutral ramp (muted/faint text, borders) is *derived* from the `(background, text)` pair by
- * mixing, rather than read from `outline` / `onSurfaceVariant`: those roles are published
- * inconsistently across catalogs (some carry alpha, some are absent), while the mix reproduces the
- * built-in ramp almost exactly and behaves the same for every system.
+ * The neutral ramp is mixed from `(background, text)` rather than read from `outline` /
+ * `onSurfaceVariant`, which catalogs publish inconsistently.
  */
 internal object ServeThemeCss {
 

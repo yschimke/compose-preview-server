@@ -1,62 +1,24 @@
 package ee.schimke.composeai.cli.serve
 
 /**
- * Turns a catalog sticker's source into the **usage code** a developer would write — the thing the
- * playground handoff (and, next, the viewer's Source tab) should open on.
+ * Turns a catalog sticker's source into the **usage code** a developer would write, for the
+ * playground handoff. Verbatim slices carry catalog scaffolding (annotations, `Sticker { }`, knobs,
+ * wrappers), much of which does not resolve against the published bundle; cleaning is what makes
+ * the seed runnable.
  *
- * ### The problem
+ * Driven by the catalog's [UsageRules], in order:
+ * 1. slice to the declaration containing the anchor line;
+ * 2. strip catalog annotations, resolved through the file's imports;
+ * 3. inline string resources;
+ * 4. apply the scaffold rules ([UsageRules.Kind]);
+ * 5. pull in and clean same-file references, recursively;
+ * 6. prune imports, add what rewrites need, stamp a real `@Preview`.
  *
- * `PlaygroundSeedResolver` already narrows a preview file to the one declaration behind the card
- * that was clicked, verbatim. Verbatim is honest but it is not usable: a sticker carries the
- * machinery that lets a single declaration serve a baked PNG, a live clickable session, six themes
- * and a variant matrix at once. Opening `Button/Filled` in the playground today hands over three
- * catalog annotations, a `Sticker { }` frame, a click tally, a size knob, a shape knob, an enabled
- * knob, a private layout wrapper and a string-resource lookup — around thirty lines, of which two
- * are about `Button`. Worse, half of those names live in the catalog's *own* module, and the
- * playground compiles against the published bundle, so a fair number of them do not even resolve:
- * the seed note has to warn that unresolved references are expected and should be deleted.
- *
- * So the noise is not only cosmetic. Cleaning is what makes the seed **runnable**.
- *
- * ### The approach: subtract declared scaffolding, then close over what is left
- *
- * Everything here is either catalog-agnostic or driven by [UsageRules], which the catalog declares
- * once for its handful of helpers rather than per component. In order:
- *
- * 1. **Slice** to the declaration containing the anchor line (as the seed already did).
- * 2. **Strip catalog annotations**, resolved through the file's own imports so a rule can only ever
- *    strike an annotation it actually names.
- * 3. **Inline string resources**, so the snippet renders the label the sticker renders.
- * 4. **Apply the scaffold rules** — unwrap, substitute, inline, drop, rename (see
- *    [UsageRules.Kind]).
- * 5. **Close over same-file references.** Whatever the cleaned body still calls that is declared in
- *    the same file (`FigmaButtonContent`, `SizedLabel`) is pulled in and cleaned too, recursively.
- *    This is the step that turns "expect unresolved references" into a buffer that compiles.
- * 6. **Prune imports** to what survived, add what the rewrites need, stamp a real `@Preview`.
- *
- * ### Part parse, part text scan
- *
- * This began as pure text, because the Kotlin frontend is deliberately kept off the CLI's classpath
- * (`cli/build.gradle.kts`). The snippet corpus then showed what that cost: named-argument binding,
- * a receiver chain mistaken for a package qualifier, a trailing-lambda call with no parentheses, a
- * qualified call no pass could see — five defects, all of them structure being guessed at.
- *
- * So the structural questions now go to a real parse. [UsageSourceParser] loads `:usage-source-psi`
- * into the *same kind* of isolated classloader the playground compiler already uses, so the
- * frontend still never reaches the CLI's own classpath; [applySubstituteParsed] and the residue
- * scan read [UsageSourceFacts] rather than regex. The remaining passes are still text, and the
- * whole parse is optional: a host with no staged sidecar keeps the text path, which is what shipped
- * before.
- *
- * Either way it is built to **fail in the safe direction**: every text pass is masked against
- * string and comment content so it cannot rewrite inside a literal, anything it does not understand
- * it leaves alone, and [Result.residue] reports declared scaffolding that survived — so a seed that
- * came out half-cleaned says so rather than pretending. The caller falls back to the verbatim slice
- * when [clean] returns null.
- *
- * The formatting assumptions are ktfmt's (Google style), which every catalog in these repos is
- * formatted with: one argument per line in a wrapped call, a blank line between top-level
- * declarations, no blank line inside an annotation stack.
+ * Structural questions go to [UsageSourceParser] (`:usage-source-psi` in an isolated classloader,
+ * keeping the Kotlin frontend off this classpath) when its sidecar is staged; the remaining passes
+ * are text, masked against strings and comments. Anything not understood is left alone,
+ * [Result.residue] reports surviving scaffolding, and the caller falls back to the verbatim slice
+ * when [clean] returns null. Formatting assumptions are ktfmt's Google style.
  */
 object PlaygroundSourceCleaner {
 
