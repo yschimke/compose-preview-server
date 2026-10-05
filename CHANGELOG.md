@@ -1,5 +1,19 @@
 # Changelog
 
+## [3.103.0](https://github.com/yschimke/compose-preview-server/compare/v3.102.0...v3.103.0) (2026-10-05)
+
+
+### Features
+
+* **mcp:** restore recent items and render thumbnails ([#1369](https://github.com/yschimke/compose-preview-server/issues/1369)) ([562c381](https://github.com/yschimke/compose-preview-server/commit/562c3818fb8db466e940b8379ac693e35bb1c37f))
+
+
+### Bug Fixes
+
+* render designs against requested builder checkout ([#1368](https://github.com/yschimke/compose-preview-server/issues/1368)) ([2076ca1](https://github.com/yschimke/compose-preview-server/commit/2076ca1d7544d7f2cdca55fe0037f8cb79b5ad29))
+* retry failed hero cache writes and keep recents across project changes ([#1371](https://github.com/yschimke/compose-preview-server/issues/1371)) ([b1e2ba2](https://github.com/yschimke/compose-preview-server/commit/b1e2ba20b85d5737bb3545644cdd04e0009a64e1))
+* scope design discovery to the session and route prefixed primary modules ([#1374](https://github.com/yschimke/compose-preview-server/issues/1374)) ([1eda79d](https://github.com/yschimke/compose-preview-server/commit/1eda79db54e1fb0e9331e695170fa6b233a0325f))
+
 ## [3.102.0](https://github.com/yschimke/compose-preview-server/compare/v3.101.0...v3.102.0) (2026-10-04)
 
 
