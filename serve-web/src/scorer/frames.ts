@@ -16,7 +16,7 @@ import { BOX_SAMPLE_SIDE } from "./tuning.js";
 import {
     cropTo,
     resampleArea,
-} from "../../../scripts/design-artifacts/known-difference-resample.mjs";
+} from "@design-parity/known-differences/known-difference-resample";
 
 /** Anything decoded that a canvas can draw and that reports its own size. */
 export type Frame = CanvasImageSource & {

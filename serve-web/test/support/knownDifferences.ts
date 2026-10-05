@@ -5,10 +5,10 @@
 // and a second copy of the world would let them drift into testing two different catalogs while
 // reading as though they agreed.
 
-import { encodePng } from "../../../scripts/design-artifacts/png-write.mjs";
-import { sha256Hex } from "../../../scripts/design-artifacts/png-lite.mjs";
-import { resolvePlane } from "../../../scripts/design-artifacts/known-difference-plane.mjs";
-import { decodePng } from "../../../scripts/design-artifacts/png-lite.mjs";
+import { encodePng } from "@design-parity/known-differences/png-write";
+import { sha256Hex } from "@design-parity/known-differences/png-lite";
+import { resolvePlane } from "@design-parity/known-differences/known-difference-plane";
+import { decodePng } from "@design-parity/known-differences/png-lite";
 
 export const WHITE = [255, 255, 255, 255];
 export const BLACK = [0, 0, 0, 255];

@@ -30,7 +30,7 @@ import {
     COMPARISON_GROUND_RGB,
     MAX_SIDE,
 } from "./tuning.js";
-import { cropToPremultiplied } from "../../../scripts/design-artifacts/known-difference-resample.mjs";
+import { cropToPremultiplied } from "@design-parity/known-differences/known-difference-resample";
 
 export interface Measurement {
     /** Structural match, 0–100. */
