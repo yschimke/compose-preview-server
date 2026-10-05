@@ -23,7 +23,8 @@ class ServeFigmaSpecTest {
 
   @Test
   fun `the published figma handle resolves to a node deep link`() {
-    // What scripts/design-artifacts/design-references.mjs republishes from a design-map entry.
+    // What compose-ai-tools/scripts/design-artifacts/design-references.mjs republishes from a
+    // design-map entry.
     val spec = ServeFigmaSpec.of(reference(uri = "figma:gYzowY4cQ7rNr2gYoco1M6/73:6"))
     // Figma's URL form spells the node id with `-` where the design map and the API use `:`.
     assertEquals("https://www.figma.com/design/gYzowY4cQ7rNr2gYoco1M6?node-id=73-6", spec?.url)

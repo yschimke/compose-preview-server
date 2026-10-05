@@ -6,7 +6,8 @@ package ee.schimke.composeai.cli.serve
  *
  * The mapping is already published: a catalog whose producer keeps a `design-map.json` emits its
  * Figma-backed entries into `references/index.json` as `source.provider = "figma"` plus a
- * `figma:<fileKey>/<nodeId>` handle (see `scripts/design-artifacts/design-references.mjs`), and
+ * `figma:<fileKey>/<nodeId>` handle (see
+ * `compose-ai-tools/scripts/design-artifacts/design-references.mjs`), and
  * [ServeDesignReferenceStore] keeps those fields. So this is only the last step: turn the handle
  * into a URL, and only when the catalog really names one — a preview whose reference is an HTML
  * export or a plain PNG gets no link rather than a guess.

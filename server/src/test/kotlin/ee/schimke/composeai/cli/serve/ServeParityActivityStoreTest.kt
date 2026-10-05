@@ -230,12 +230,12 @@ class ServeParityActivityStoreTest {
   /**
    * The producer↔consumer contract, pinned by a file both sides use.
    *
-   * `scripts/design-artifacts/parity-activity.mjs` writes this schema and this Kotlin reads it —
-   * two languages, one wire format, and nothing in either build that would notice them drifting
-   * apart. The committed fixture is the emitter's own output (regenerate it by re-running the
-   * builders in `parity-activity.test.mjs`); loading it here means a field the emitter renames, or
-   * a shape the reader tightens, fails a test instead of silently publishing a feed the server
-   * discards.
+   * `compose-ai-tools/scripts/design-artifacts/parity-activity.mjs` writes this schema and this
+   * Kotlin reads it — two languages, one wire format, and nothing in either build that would notice
+   * them drifting apart. The committed fixture is the emitter's own output (regenerate it by
+   * re-running the builders in `parity-activity.test.mjs`); loading it here means a field the
+   * emitter renames, or a shape the reader tightens, fails a test instead of silently publishing a
+   * feed the server discards.
    */
   @Test
   fun `the emitter's own output loads as a complete feed`() {

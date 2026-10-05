@@ -217,12 +217,13 @@ object ServeWeb {
   /**
    * The verdict band a published match percentage falls in — the chip's colour, and nothing else.
    *
-   * Restates `matchBand` in `scripts/design-artifacts/design-reference-score.mjs`, where the number
-   * is minted. The thresholds come from the distribution a real catalog produces rather than from
-   * round numbers (issue #4290): the score is measured over the pixels the two frames actually drew
-   * on rather than over the whole canvas, and across wear-m3-catalog's 186 published pairs that
-   * runs 4%..100% with a median of 91. 63 sit at or above 95, and the 59 below 85 are the genuine
-   * divergences — a 4% scroll indicator, a 52% picker, a 70% stepper that lost its button fills.
+   * Restates `matchBand` in `compose-ai-tools/scripts/design-artifacts/design-reference-score.mjs`,
+   * where the number is minted. The thresholds come from the distribution a real catalog produces
+   * rather than from round numbers (issue #4290): the score is measured over the pixels the two
+   * frames actually drew on rather than over the whole canvas, and across wear-m3-catalog's 186
+   * published pairs that runs 4%..100% with a median of 91. 63 sit at or above 95, and the 59 below
+   * 85 are the genuine divergences — a 4% scroll indicator, a 52% picker, a 70% stepper that lost
+   * its button fills.
    *
    * A band never decides whether the number is SHOWN, only how it is coloured, so a drift between
    * the two copies costs a hue and can never hide a finding.
@@ -1809,8 +1810,9 @@ ${captureControlsHtml().prependIndent("          ")}
    * `verification-needed` is the existing `parity:` value for "somebody has to look at this", so
    * the third answer reuses it rather than minting a synonym beside it. The other two are new and
    * are added to the vocabulary at both ends of the round trip — the producer
-   * (`scripts/design-artifacts/parity-issues.mjs`) and the reader ([ServeParityIssuesStore]) —
-   * since a value only one end knows is a label the index silently drops.
+   * (`compose-ai-tools/scripts/design-artifacts/parity-issues.mjs`) and the reader
+   * ([ServeParityIssuesStore]) — since a value only one end knows is a label the index silently
+   * drops.
    */
   private val REPORT_CLASSIFICATIONS =
     listOf(

@@ -14,7 +14,7 @@
 // committed `format-compare.js` computes for each row, and writes those back as the
 // `data-match-<variant>` attributes `ServeWeb` now emits from `references/index.json` — which is
 // exactly what the publisher bakes, computed by driving this same asset
-// (`scripts/design-artifacts/design-reference-score.mjs`). The scorer is then held open so both
+// (`compose-ai-tools/scripts/design-artifacts/design-reference-score.mjs`). The scorer is then held open so both
 // shots catch the wall mid-pass rather than racing it.
 //
 // The fixture is borrowed wholesale from `../compare-wall-diff-column/fixture`: a real

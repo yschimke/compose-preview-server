@@ -4,7 +4,7 @@
 // elements in the surface component bundles, and TWO consumers live outside the browser and drive
 // the built asset by path:
 //
-//   - `scripts/design-artifacts/design-reference-score.mjs` bakes the reference score at publish
+//   - `compose-ai-tools/scripts/design-artifacts/design-reference-score.mjs` bakes the reference score at publish
 //     time by loading THIS FILE into a headless page. One scorer, so the number on the chip and the
 //     number the lane computes live cannot disagree.
 //   - `scripts/compare-audit.mjs` intercepts the request for it and swaps in a local build, so a

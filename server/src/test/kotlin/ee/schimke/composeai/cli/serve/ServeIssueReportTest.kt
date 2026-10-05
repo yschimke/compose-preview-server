@@ -461,7 +461,8 @@ class ServeIssueReportTest {
   @Test
   fun `the writer emits the shared locator fixture byte for byte`() {
     // The other half of `compose-parity-locator/v1`. This side asserts the bytes the writer puts in
-    // an issue body; scripts/design-artifacts/parity-issues.test.mjs asserts the producer parses
+    // an issue body; compose-ai-tools/scripts/design-artifacts/parity-issues.test.mjs asserts the
+    // producer parses
     // those same bytes back. Without one file both read, each engine only ever tests itself — which
     // is how the producer came to reject an omitted `revision`, an empty `variant`, and an override
     // map ordered by code point, none of which the writer can be talked out of emitting.

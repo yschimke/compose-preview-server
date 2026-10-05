@@ -19,9 +19,9 @@ package ee.schimke.composeai.cli.serve
  * nativeruntime) and the same ones the offline parity harness registers, so the browser lane and
  * the baked PNG beside it are comparable rather than merely similar:
  * * [FACES] mirrors `FONT_FACES` in
- *   [`rc-fonts.mjs`](../../../../../../../../scripts/design-artifacts/rc-fonts.mjs) —
- *   `rc-fonts.test.mjs` reads *this file* and fails when the two tables disagree, so a rename or a
- *   weight-range edit cannot silently reintroduce font substitution on one side only;
+ *   [`rc-fonts.mjs`](https://github.com/yschimke/compose-ai-tools/blob/main/scripts/design-artifacts/rc-fonts.mjs)
+ *   — `rc-fonts.test.mjs` reads *this file* and fails when the two tables disagree, so a rename or
+ *   a weight-range edit cannot silently reintroduce font substitution on one side only;
  * * the font bytes reach the CLI jar by a `processResources` copy from the vendored directory
  *   `rc-fonts.mjs` reads (`cli/build.gradle.kts`), not a second committed copy, and
  *   `ServeRcFontsTest` asserts every declared face is actually on the classpath.
