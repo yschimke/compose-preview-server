@@ -95,14 +95,13 @@ class ServeWebDesignFoldersTest {
         .map { "${it.groupValues[1]} · ${it.groupValues[2]}" }
         .toList()
     assertEquals(
-      listOf(
-        "All designs · 4 designs",
-        "Tiles · 1 design",
-        "wear · 2 designs",
-        "No folder · 1 design",
-      ),
+      listOf("Tiles · 1", "wear · 2", "No folder · 1"),
       picks,
     )
+    // No "All designs" pick: every folder shows until one is pressed; pressing it again lets go.
+    assertFalse("All designs" in picker, picker)
+    assertTrue("""aria-label="wear, 2 designs"""" in picker, picker)
+    assertTrue("pick(index === picked ? null : index, true)" in page, page)
     // The list of folders leads the page, above the filter and every folder's cards.
     assertTrue(page.indexOf("cp-design-folders") < page.indexOf("cp-design-filter"))
     // Each pick names the section it selects, and the unfiled designs travel as an empty name.
@@ -179,6 +178,18 @@ class ServeWebDesignFoldersTest {
   private fun String.sectionFor(name: String): String =
     substringAfter("""<section class="cp-design-folder" aria-label="$name" """)
       .substringBefore("</section>")
+
+  @Test
+  fun `picking a folder hides Recent`() {
+    val page =
+      ServeWeb.uiBuilderDesignsPage(
+        rows = (1..5).map { row("wear-$it", folder = "wear") } + row("tile", folder = "Tiles"),
+        viewerActorId = "github:octocat",
+      )
+
+    assertTrue("""<section class="cp-designs-recent"""" in page, page)
+    assertTrue("recent.hidden = picked !== null;" in page, page)
+  }
 
   private fun row(designId: String, folder: String? = null) =
     ServeWeb.UiBuilderDesignRow(

@@ -8029,27 +8029,24 @@ ${captureControlsHtml().prependIndent("          ")}
         <p class="cp-sub" id="cp-designs-none" hidden>No design here matches that.</p>
         """
           .trimIndent()
-    // The folders come first, as a list to pick from: a person who files designs opens this page
-    // looking for one, and picking it narrows everything below to that folder. Script-only, so it
-    // starts hidden; without script every folder is simply listed in full underneath. The choice
-    // rides in `?folder=` (empty for the unfiled designs) so a reload or a shared link keeps it.
+    // The folders come first, as one row to pick from: a person who files designs opens this page
+    // looking for one, and picking it narrows everything below to that folder. There is no "All
+    // designs" pick — every folder is shown until one is pressed, and pressing it again lets go.
+    // The count is the bare number to keep the row short; the button's label still says "designs".
+    // Script-only, so it starts hidden; without script every folder is simply listed in full
+    // underneath. The choice rides in `?folder=` (empty for the unfiled designs) so a reload or a
+    // shared link keeps it.
     val folderPicker =
       if (folderGroups.isEmpty()) ""
       else {
-        val pick: (String, String, String) -> String = { attributes, label, count ->
-          "<button type=\"button\" class=\"cp-design-folder-pick\" $attributes aria-pressed=\"false\">" +
-            "<span class=\"cp-design-folder-pick-name\">$label</span> " +
-            "<span class=\"cp-designs-count\">$count</span></button>"
+        val picks = folderGroups.mapIndexed { index, (folder, group) ->
+          val name = esc(folder ?: "No folder")
+          "<button type=\"button\" class=\"cp-design-folder-pick\" " +
+            "data-cp-folder-index=\"$index\" data-cp-folder-name=\"${esc(folder.orEmpty())}\" " +
+            "aria-label=\"$name, ${designCount(group.size)}\" aria-pressed=\"false\">" +
+            "<span class=\"cp-design-folder-pick-name\">$name</span> " +
+            "<span class=\"cp-designs-count\">${group.size}</span></button>"
         }
-        val picks =
-          listOf(pick("data-cp-folder-index=\"all\"", "All designs", designCount(rows.size))) +
-            folderGroups.mapIndexed { index, (folder, group) ->
-              pick(
-                "data-cp-folder-index=\"$index\" data-cp-folder-name=\"${esc(folder.orEmpty())}\"",
-                esc(folder ?: "No folder"),
-                designCount(group.size),
-              )
-            }
         """
         <nav class="cp-design-folders" aria-label="Folders" hidden>
           <h2 class="cp-designs-h2">Folders</h2>
@@ -8224,8 +8221,9 @@ ${captureControlsHtml().prependIndent("          ")}
           var folders = document.querySelector(".cp-design-folders");
           if (!folders) return;
           var picks = Array.prototype.slice.call(folders.querySelectorAll(".cp-design-folder-pick"));
+          // index null shows every folder; there is no "All designs" pick to press for that.
           function pick(index, remember) {
-            picked = index === "all" ? null : index;
+            picked = index;
             var name = null;
             picks.forEach(function (button) {
               var on = button.getAttribute("data-cp-folder-index") === index;
@@ -8242,10 +8240,12 @@ ${captureControlsHtml().prependIndent("          ")}
           }
           picks.forEach(function (button) {
             button.addEventListener("click", function () {
-              pick(button.getAttribute("data-cp-folder-index"), true);
+              // Pressing the picked folder again lets go of it, back to every folder.
+              var index = button.getAttribute("data-cp-folder-index");
+              pick(index === picked ? null : index, true);
             });
           });
-          var initial = "all";
+          var initial = null;
           if (window.URLSearchParams) {
             var wanted = new URLSearchParams(window.location.search).get("folder");
             picks.forEach(function (button) {

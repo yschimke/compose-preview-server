@@ -68,9 +68,8 @@
         <nav class="cp-design-folders" aria-label="Folders" hidden>
   <h2 class="cp-designs-h2">Folders</h2>
   <div class="cp-design-folder-picks">
-  <button type="button" class="cp-design-folder-pick" data-cp-folder-index="all" aria-pressed="false"><span class="cp-design-folder-pick-name">All designs</span> <span class="cp-designs-count">2 designs</span></button>
-  <button type="button" class="cp-design-folder-pick" data-cp-folder-index="0" data-cp-folder-name="Media" aria-pressed="false"><span class="cp-design-folder-pick-name">Media</span> <span class="cp-designs-count">1 design</span></button>
-  <button type="button" class="cp-design-folder-pick" data-cp-folder-index="1" data-cp-folder-name="" aria-pressed="false"><span class="cp-design-folder-pick-name">No folder</span> <span class="cp-designs-count">1 design</span></button>
+  <button type="button" class="cp-design-folder-pick" data-cp-folder-index="0" data-cp-folder-name="Media" aria-label="Media, 1 design" aria-pressed="false"><span class="cp-design-folder-pick-name">Media</span> <span class="cp-designs-count">1</span></button>
+  <button type="button" class="cp-design-folder-pick" data-cp-folder-index="1" data-cp-folder-name="" aria-label="No folder, 1 design" aria-pressed="false"><span class="cp-design-folder-pick-name">No folder</span> <span class="cp-designs-count">1</span></button>
   </div>
 </nav>
         
@@ -131,8 +130,9 @@
   var folders = document.querySelector(".cp-design-folders");
   if (!folders) return;
   var picks = Array.prototype.slice.call(folders.querySelectorAll(".cp-design-folder-pick"));
+  // index null shows every folder; there is no "All designs" pick to press for that.
   function pick(index, remember) {
-    picked = index === "all" ? null : index;
+    picked = index;
     var name = null;
     picks.forEach(function (button) {
       var on = button.getAttribute("data-cp-folder-index") === index;
@@ -149,10 +149,12 @@
   }
   picks.forEach(function (button) {
     button.addEventListener("click", function () {
-      pick(button.getAttribute("data-cp-folder-index"), true);
+      // Pressing the picked folder again lets go of it, back to every folder.
+      var index = button.getAttribute("data-cp-folder-index");
+      pick(index === picked ? null : index, true);
     });
   });
-  var initial = "all";
+  var initial = null;
   if (window.URLSearchParams) {
     var wanted = new URLSearchParams(window.location.search).get("folder");
     picks.forEach(function (button) {
