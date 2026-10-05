@@ -73,7 +73,14 @@ jobs:
       # the builder modules' half of the rule went with them.
       - run: .github/scripts/ui-builder-catalog-literals.sh
 
-  gradle:
+  # `gradle` was one serial chain: configuration, `:server:compileKotlin`, `compileTestKotlin`,
+  # then ~4.5 minutes of `:server:test` with nothing else left to run beside it -- 11-12 minutes
+  # in all, the longest job in the workflow. `:server:test` now has a runner of its own, where it
+  # takes every core (`-Pcomposeai.testForks`), and `gradle-build` runs the rest of `check`
+  # without it. `gradle` stays as the check the ruleset requires, and Renovate's automerge waits
+  # on, and passes only if both did; see the note on `visual-harness` for why a gate must run
+  # whatever its `needs` did rather than be skipped.
+  gradle-build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -94,7 +101,7 @@ jobs:
       - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
         with:
           cache-provider: basic
-      - run: ./gradlew check ktfmtCheckAll :server:distTar :mcp:distTar
+      - run: ./gradlew check ktfmtCheckAll :server:distTar :mcp:distTar -x :server:test
       - name: Smoke-test standalone distribution
         run: |
           mkdir -p "${RUNNER_TEMP}/compose-preview-server"
@@ -109,6 +116,44 @@ jobs:
           # what every deployed box did while this file sat in the repository unshipped.
           test -f "${dist_root}/ui-builder-components/m3-catalog-components-v1.json"
           "${dist_root}/bin/compose-preview-server" --help
+
+  gradle-server-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          # Two JDKs, because this build has two JVM floors: `java-server` (17) for everything a
+          # consumer compiles against, and `java-ui-builder` (21) for the UI-builder frontend lane.
+          # See the top of `gradle/libs.versions.toml`. 17 is last, so it is `JAVA_HOME` and Gradle
+          # itself runs on the floor the distribution ships for; the 21 install is reached as a
+          # toolchain through `org.gradle.java.installations.fromEnv` in `gradle.properties`, which
+          # names the `JAVA_HOME_<version>_<arch>` variables this action exports.
+          java-version: |
+            21
+            17
+      - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+        with:
+          cache-provider: basic
+          # Same key as `gradle-build`, which is the job that writes it.
+          cache-read-only: true
+      - run: ./gradlew :server:test -Pcomposeai.testForks=4
+
+  gradle:
+    needs: [gradle-build, gradle-server-test]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Every split Gradle job succeeded
+        if: ${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'skipped') || contains(needs.*.result, 'cancelled') }}
+        run: |
+          echo "::error::A Gradle job did not succeed: ${NEEDS}"
+          exit 1
+        env:
+          NEEDS: ${{ toJSON(needs.*.result) }}
 
   ui-builder-remote-compose:
     runs-on: ubuntu-latest
@@ -134,7 +179,7 @@ jobs:
       # every Gradle build file in the workspace, and with the checkout already in place that hash
       # took in the UI builder's files too -- a key no `main` run had ever saved, since the builder
       # moves independently (its release bumps alone change it), so this job restored nothing and
-      # resolved every dependency cold. Restored first, the key is the `gradle` job's, which `main`
+      # resolved every dependency cold. Restored first, the key is `gradle-build`'s, which `main`
       # does save. Read-only so this job, holding a different build's state, never writes that key.
       - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
         with:
@@ -154,7 +199,7 @@ jobs:
       # one compile-time choice made in two builds now, and they have to agree.
       - run: >-
           ./gradlew -PcomposeUiBuilderDir=.compose-ui-builder -PuiBuilderRemoteCompose=true
-          :mcp:test :server:test
+          -Pcomposeai.testForks=4 :mcp:test :server:test
 
   selector-fixtures:
     runs-on: ubuntu-latest
@@ -296,7 +341,7 @@ jobs:
   # the restored cache, and the page captures, which need no build output at all, start at once.
 
   # `:server:installDist`, beside the page captures. Read-only cache: the key is
-  # the `gradle` job's (same build files), and this job must never be the one that writes it -- an
+  # `gradle-build`'s (same build files), and this job must never be the one that writes it -- an
   # entry holding only what `installDist` resolves would leave `check` a cold start on every PR.
   visual-harness-server:
     runs-on: ubuntu-latest
@@ -362,7 +407,7 @@ jobs:
   # job whose `needs` failed is SKIPPED, and GitHub counts a skipped required check as passing, so
   # a failed build or page capture would otherwise merge. It therefore waits on both split jobs
   # (`-pages` included, about a minute longer than `-server`; the lane still finishes inside
-  # `gradle`'s time), runs whatever they did, and fails first thing unless both succeeded.
+  # `gradle-build`'s time), runs whatever they did, and fails first thing unless both succeeded.
   visual-harness:
     needs: [visual-harness-server, visual-harness-pages]
     if: ${{ !cancelled() }}

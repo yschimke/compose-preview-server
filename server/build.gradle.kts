@@ -584,7 +584,11 @@ tasks.withType<Test>().configureEach {
   // ~350 test classes in one JVM were most of `gradle` and `ui-builder-remote-compose`'s wall time
   // on a 4-core runner. Forks are separate JVMs, so system properties and statics stay per fork;
   // half the cores, as Gradle's own guidance suggests, leaves the rest to the build running beside.
-  maxParallelForks = (Runtime.getRuntime().availableProcessors() / 2).coerceAtLeast(1)
+  // `-Pcomposeai.testForks=<n>` overrides it where tests have the machine to themselves, as CI's
+  // `gradle-server-test` and `ui-builder-remote-compose` jobs do.
+  maxParallelForks =
+    providers.gradleProperty("composeai.testForks").orNull?.toInt()
+      ?: (Runtime.getRuntime().availableProcessors() / 2).coerceAtLeast(1)
 
   // Catalog checkouts for the usage-snippet corpus (`UsageSnippetCorpusTest`, which moved here with
   // the serve sources). Absent by default, so the corpus is a no-op in a normal build;
