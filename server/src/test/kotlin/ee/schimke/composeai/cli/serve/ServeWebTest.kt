@@ -788,14 +788,14 @@ class ServeWebTest {
             systems = setOf("m3-catalog"),
             signedIn = true,
             permitted = true,
-            editorHref = "https://ui.coo.ee/ui-builder/",
+            editorHref = "https://ui.coo.ee/",
           ),
       )
     val header =
       html.substringAfter("<header class=\"cp-site-header\">").substringBefore("</header>")
     assertTrue(
       header.contains(
-        "<a class=\"cp-site-builder-link\" href=\"https://ui.coo.ee/ui-builder/?token=test-token\">"
+        "<a class=\"cp-site-builder-link\" href=\"https://ui.coo.ee/?token=test-token\">"
       ),
       header,
     )
