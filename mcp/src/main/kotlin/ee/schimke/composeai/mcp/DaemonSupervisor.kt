@@ -179,6 +179,28 @@ class DaemonSupervisor(
   fun listProjects(): List<RegisteredProject> = projects.values.toList()
 
   /**
+   * Drops live projects that another server process removed from the shared [workspaceStore].
+   *
+   * The sidebar app and a chat normally use separate MCP processes. An `unregister_project` call in
+   * the chat updates their shared store, but cannot directly mutate the sidebar process's live
+   * [projects] map. Reconcile before a library snapshot so that process does not keep advertising
+   * the removed project until it restarts.
+   *
+   * Only ids observed disappearing from the shared file are removed, so in-memory registrations and
+   * failed store writes do not make projects disappear from this process.
+   */
+  fun forgetProjectsMissingFromStore(): Set<WorkspaceId> {
+    val removed =
+      workspaceStore.takeExternallyRemovedIds().mapTo(LinkedHashSet(), ::WorkspaceId).filterTo(
+        LinkedHashSet()
+      ) {
+        projects.containsKey(it)
+      }
+    removed.forEach(::unregisterProject)
+    return removed
+  }
+
+  /**
    * The project for [workspaceId], registering it again from [workspaceStore] when this supervisor
    * does not hold it (a restart, or a registration made by another server process): a known id
    * never answers "workspace not registered".

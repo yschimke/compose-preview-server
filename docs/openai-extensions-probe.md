@@ -17,7 +17,7 @@ server's environment. Any other value, or no value, leaves every tool list uncha
 | --- | --- | --- | --- |
 | `probe_global` ("Compose Preview Probe") | `global` (sidebar) | `{}` | Opens the probe panel. |
 | `probe_thread` ("Probe Tab") | `thread` (thread tab) | `{}` | Opens the probe panel. |
-| `probe_file` ("Compose Probe Viewer") | `file`, `[".rc", ".uid"]` | `FileInput` | Opens the probe panel with the four file checks. |
+| `probe_file` ("Compose Probe Viewer") | `file`, `["rc", "uid"]` | `FileInput` | Opens the probe panel with the four file checks. |
 | `probe_file_echo` | none; visible to the app only | `{touch?}` | Called by the panel. Echoes `_meta["openai/resource"].path`. With `touch`, it rewrites that file with its own bytes. |
 | `probe_mentions` | `mentions/search`; visible to the app only | `{query}` | Returns three fixed `resource_link` items. Logs the query to stderr. |
 

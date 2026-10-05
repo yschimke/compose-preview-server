@@ -42,6 +42,9 @@ class WorkspaceStore(private val file: File?) {
    */
   private val unsaved = ConcurrentHashMap.newKeySet<String>()
 
+  /** Ids removed by another process since this process last observed the shared file. */
+  private val externallyRemoved = ConcurrentHashMap.newKeySet<String>()
+
   init {
     load()
   }
@@ -60,11 +63,20 @@ class WorkspaceStore(private val file: File?) {
     return entries.values.sortedByDescending { it.lastUsed }
   }
 
+  /** Returns and clears ids that disappeared from the shared file in another process. */
+  fun takeExternallyRemovedIds(): Set<String> {
+    load()
+    val removed = externallyRemoved.toSet()
+    externallyRemoved.removeAll(removed)
+    return removed
+  }
+
   /** Records (or refreshes) [id] at [path]. */
   fun remember(id: String, path: File, name: String?) {
     val now = System.currentTimeMillis()
     val entry = Entry(id, path.absolutePath, name, now)
     forgotten.remove(id)
+    externallyRemoved.remove(id)
     unsaved.add(id)
     val previous = entries.put(id, entry)
     if (
@@ -112,7 +124,9 @@ class WorkspaceStore(private val file: File?) {
         if (theirs.lastUsed > mine.lastUsed) theirs else mine
       }
     }
-    entries.keys.removeIf { it !in onDisk && it !in unsaved }
+    val removed = entries.keys.filterTo(HashSet()) { it !in onDisk && it !in unsaved }
+    entries.keys.removeAll(removed)
+    externallyRemoved.addAll(removed)
   }
 
   @Synchronized

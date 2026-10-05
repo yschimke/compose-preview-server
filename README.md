@@ -171,7 +171,7 @@ is compose-ui-builder's MCP App
 It reads, saves and follows the file itself, through the host's `resources/read`,
 `openai/resources/write` and `resources/subscribe`. This server adds three things:
 
-- **`design_open`**, a file-entrypoint tool (`extensions: [".uid"]`) that takes `FileInput`
+- **`design_open`**, a file-entrypoint tool (`extensions: ["uid"]`) that takes `FileInput`
   `{file: {name, resourceUri}}` and only acknowledges the call. It has no `{path}` form for model
   calls. The editor can load and save only through a host that offers the `openai/resource`
   capability, so in Claude Code or Antigravity it would open an editor with no file.

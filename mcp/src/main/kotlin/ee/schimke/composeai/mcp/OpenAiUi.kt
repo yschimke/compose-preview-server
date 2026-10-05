@@ -261,16 +261,16 @@ sealed interface OpenAiEntrypoint {
   }
 
   /**
-   * A viewer for files with these [extensions] (each `.xxx`), replacing the host's default viewer.
-   * The tool takes [OpenAiUi.FILE_INPUT_SCHEMA]. Desktop only. Claim only formats this server owns
-   * — never `.kt` (#1235).
+   * A viewer for files with these [extensions] (each `xxx`, without a leading dot), replacing the
+   * host's default viewer. The tool takes [OpenAiUi.FILE_INPUT_SCHEMA]. Desktop only. Claim only
+   * formats this server owns — never `.kt` (#1235).
    */
   data class File(val extensions: List<String>) : OpenAiEntrypoint {
     init {
       require(extensions.isNotEmpty()) { "a file entrypoint needs at least one extension" }
       extensions.forEach { ext ->
-        require(ext.length > 1 && ext.startsWith(".") && ext.none { it.isWhitespace() }) {
-          "file entrypoint extensions use HTML accept's '.ext' form: '$ext'"
+        require(ext.isNotEmpty() && !ext.startsWith(".") && ext.none { it.isWhitespace() }) {
+          "file entrypoint extensions omit the leading dot: '$ext'"
         }
       }
     }

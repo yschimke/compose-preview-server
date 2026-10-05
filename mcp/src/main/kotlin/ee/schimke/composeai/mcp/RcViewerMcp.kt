@@ -323,7 +323,7 @@ class RcViewerMcp(
         inputSchema = inputSchema,
         meta = OpenAiUi.appToolMeta(VIEWER_URI, entrypoints = emptyList()),
       ),
-      entrypoints = listOf(OpenAiEntrypoint.File(listOf(EXTENSION))),
+      entrypoints = listOf(OpenAiEntrypoint.File(listOf(ENTRYPOINT_EXTENSION))),
       title = "Remote Compose viewer",
       icon = OpenAiUi.svgIcon(RC_ICON_SVG),
     )
@@ -391,6 +391,7 @@ class RcViewerMcp(
     /** `_meta` key on a `path` result carrying `documentBase64` for the app. */
     const val RESULT_META_KEY: String = "compose-preview/rc"
     const val EXTENSION: String = ".rc"
+    const val ENTRYPOINT_EXTENSION: String = "rc"
 
     /** Largest document the viewer opens; far above any real `.rc`, well under a host's limit. */
     const val MAX_DOCUMENT_BYTES: Long = 16L * 1024 * 1024
