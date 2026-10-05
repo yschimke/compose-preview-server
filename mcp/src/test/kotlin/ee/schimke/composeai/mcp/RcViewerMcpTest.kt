@@ -69,7 +69,7 @@ class RcViewerMcpTest {
           {
             "ui": {"resourceUri": "ui://compose-preview/rc-viewer"},
             "ui/resourceUri": "ui://compose-preview/rc-viewer",
-            "openai/ui": {"entrypoints": [{"type": "file", "extensions": [".rc"]}]}
+            "openai/ui": {"entrypoints": [{"type": "file", "extensions": ["rc"]}]}
           }
           """
         )
@@ -344,7 +344,7 @@ class RcViewerMcpServerTest {
   fun `rc_open and the viewer are listed with their _meta`() {
     val tool = client.awaitToolsContaining("rc_open").tools.single { it.name == "rc_open" }
     assertThat(tool.meta!!["openai/ui"]!!.jsonObject["entrypoints"])
-      .isEqualTo(Json.parseToJsonElement("""[{"type":"file","extensions":[".rc"]}]"""))
+      .isEqualTo(Json.parseToJsonElement("""[{"type":"file","extensions":["rc"]}]"""))
     assertThat(tool.meta!!["ui"]!!.jsonObject["resourceUri"]!!.jsonPrimitive.content)
       .isEqualTo(RcViewerMcp.VIEWER_URI)
 

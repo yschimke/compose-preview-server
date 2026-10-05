@@ -79,7 +79,7 @@ const tool = tools.find((it) => it.name === 'design_open');
 expect(tool, 'design_open is not listed');
 expect(
   JSON.stringify(tool?._meta?.['openai/ui']?.entrypoints) ===
-    JSON.stringify([{ type: 'file', extensions: ['.uid'] }]),
+    JSON.stringify([{ type: 'file', extensions: ['uid'] }]),
   `design_open entrypoints: ${JSON.stringify(tool?._meta?.['openai/ui'])}`,
 );
 const resourceUri = tool?._meta?.ui?.resourceUri;

@@ -120,7 +120,7 @@ class OpenAiProbeTest {
       mapOf(
         OpenAiProbe.PROBE_GLOBAL to """[{"type":"global"}]""",
         OpenAiProbe.PROBE_THREAD to """[{"type":"thread"}]""",
-        OpenAiProbe.PROBE_FILE to """[{"type":"file","extensions":[".rc",".uid"]}]""",
+        OpenAiProbe.PROBE_FILE to """[{"type":"file","extensions":["rc","uid"]}]""",
       )
     for ((name, entrypoints) in expected) {
       val tool = tools.getValue(name)

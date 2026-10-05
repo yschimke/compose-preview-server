@@ -25,7 +25,7 @@ class OpenAiUiTest {
           listOf(
             OpenAiEntrypoint.Global,
             OpenAiEntrypoint.Thread,
-            OpenAiEntrypoint.File(listOf(".rc", ".uid")),
+            OpenAiEntrypoint.File(listOf("rc", "uid")),
           ),
         visibility = listOf("model", "app"),
       )
@@ -39,7 +39,7 @@ class OpenAiUiTest {
             "openai/ui": {"entrypoints": [
               {"type": "global"},
               {"type": "thread"},
-              {"type": "file", "extensions": [".rc", ".uid"]}
+              {"type": "file", "extensions": ["rc", "uid"]}
             ]}
           }
           """
@@ -66,7 +66,7 @@ class OpenAiUiTest {
     assertThrows(IllegalArgumentException::class.java) {
       OpenAiUi.withEntrypoints(null, listOf(OpenAiEntrypoint.Global, OpenAiEntrypoint.Global))
     }
-    assertThrows(IllegalArgumentException::class.java) { OpenAiEntrypoint.File(listOf("rc")) }
+    assertThrows(IllegalArgumentException::class.java) { OpenAiEntrypoint.File(listOf(".rc")) }
     assertThrows(IllegalArgumentException::class.java) { OpenAiEntrypoint.File(listOf(".")) }
     assertThrows(IllegalArgumentException::class.java) { OpenAiEntrypoint.File(emptyList()) }
   }

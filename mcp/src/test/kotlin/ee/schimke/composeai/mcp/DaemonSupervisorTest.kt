@@ -115,6 +115,44 @@ class DaemonSupervisorTest {
   }
 
   @Test
+  fun `a sidebar process forgets a project unregistered by a chat process`() {
+    val root = createTempDirectory("cp-supervisor-shared-store").toFile()
+    val project = File(root, "ComposeStarter").apply { mkdirs() }
+    val storeFile = File(root, "cache/composeai/mcp/workspaces.json")
+    val chat =
+      DaemonSupervisor(
+        descriptorProvider = FakeDescriptorProvider(),
+        clientFactory = FakeDaemonClientFactory(),
+        workspaceStore = WorkspaceStore(storeFile),
+      )
+    val id = chat.registerProject(project).workspaceId
+    val sidebar =
+      DaemonSupervisor(
+        descriptorProvider = FakeDescriptorProvider(),
+        clientFactory = FakeDaemonClientFactory(),
+        workspaceStore = WorkspaceStore(storeFile),
+      )
+    assertThat(sidebar.project(id)).isNotNull()
+
+    // Another current registration is not swept while reconciling the externally removed id.
+    val localOnly = File(root, "LocalOnly").apply { mkdirs() }
+    val localOnlyId = sidebar.registerProject(localOnly).workspaceId
+
+    chat.unregisterProject(id)
+
+    assertThat(sidebar.forgetProjectsMissingFromStore()).containsExactly(id)
+    assertThat(sidebar.listProjects().map { it.workspaceId }).containsExactly(localOnlyId)
+    assertThat(sidebar.project(id)).isNull()
+
+    // A later registration in the chat is visible again without restarting the sidebar process.
+    assertThat(chat.registerProject(project).workspaceId).isEqualTo(id)
+    assertThat(sidebar.project(id)?.path).isEqualTo(project.canonicalFile)
+    assertThat(sidebar.listProjects().map { it.workspaceId }).containsExactly(localOnlyId, id)
+    chat.shutdown()
+    sidebar.shutdown()
+  }
+
+  @Test
   fun `a handshake slower than the client default still caches the capabilities`() {
     val factory = FakeDaemonClientFactory()
     factory.daemonConfigurer = { daemon ->

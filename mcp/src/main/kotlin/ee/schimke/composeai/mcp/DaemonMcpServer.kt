@@ -4066,10 +4066,15 @@ class DaemonMcpServer(
       args["workspaceId"]?.jsonPrimitive?.contentOrNull
         ?: return errorCallToolResult("unregister_project: missing 'workspaceId'")
     val id = WorkspaceId(ws)
-    supervisor.unregisterProject(id)
-    catalog.keys.removeIf { it.workspaceId == id }
+    forgetProject(id)
     sessions.forEach { it.notifyResourceListChanged() }
     return textCallToolResult("unregistered $id")
+  }
+
+  private fun forgetProject(id: WorkspaceId) {
+    supervisor.unregisterProject(id)
+    storeOnlyProjects.remove(id)
+    catalog.keys.removeIf { it.workspaceId == id }
   }
 
   private fun toolListProjects(): CallToolResult {
@@ -4301,6 +4306,10 @@ class DaemonMcpServer(
 
   /** Registered projects → modules → discovered previews, for [PreviewLibrary]. */
   private fun libraryProjects(projectId: String?): List<PreviewLibrary.Project> {
+    supervisor.forgetProjectsMissingFromStore().forEach { id ->
+      storeOnlyProjects.remove(id)
+      catalog.keys.removeIf { it.workspaceId == id }
+    }
     // The global sidebar may use a different process (and roots) from the chat that registered
     // the build. Restore remembered ids lazily: browsing must not start every build's daemons.
     val live = supervisor.listProjects().mapTo(HashSet()) { it.workspaceId }

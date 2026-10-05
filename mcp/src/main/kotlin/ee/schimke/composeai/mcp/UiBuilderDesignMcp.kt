@@ -22,7 +22,7 @@ import kotlinx.serialization.json.putJsonObject
  * the opened file with `resources/read` on the entrypoint's opaque `host-resource://` URI, saves
  * with `openai/resources/write` and `ifMatch`, and subscribes for external edits — so this server
  * only has to:
- * 1. declare the tool, with `FileInput` and a `[".uid"]` file entrypoint, and acknowledge the call;
+ * 1. declare the tool, with `FileInput` and a `["uid"]` file entrypoint, and acknowledge the call;
  * 2. serve the archive's MCP App shell with its placeholders filled in — the asset base, and the
  *    layout from the `uiBuilderMcpAppLayout` setting — and the asset origin in its CSP; and
  * 3. serve the editor's files from that origin ([UiBuilderAssetOrigin]).
@@ -134,7 +134,7 @@ internal constructor(
         inputSchema = OpenAiUi.FILE_INPUT_SCHEMA,
         meta = OpenAiUi.appToolMeta(EDITOR_URI, entrypoints = emptyList()),
       ),
-      entrypoints = listOf(OpenAiEntrypoint.File(listOf(EXTENSION))),
+      entrypoints = listOf(OpenAiEntrypoint.File(listOf(ENTRYPOINT_EXTENSION))),
       title = "Compose UI Builder",
       icon = OpenAiUi.svgIcon(DESIGN_ICON_SVG),
     )
@@ -171,6 +171,7 @@ internal constructor(
     const val EDITOR_URI: String = "ui://compose-ui-builder/editor"
     const val MCP_APP_MIME_TYPE: String = "text/html;profile=mcp-app"
     const val EXTENSION: String = ".uid"
+    const val ENTRYPOINT_EXTENSION: String = "uid"
     const val RESULT_SCHEMA: String = "compose-preview/design-open/v1"
 
     /** The shell's path in the archive, fixed by `mcpApp` 1. */

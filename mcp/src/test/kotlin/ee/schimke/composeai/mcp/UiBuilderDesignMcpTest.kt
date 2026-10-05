@@ -120,7 +120,7 @@ class UiBuilderDesignMcpTest {
     assertThat(tool.meta!!["ui"]!!.jsonObject["resourceUri"]!!.jsonPrimitive.content)
       .isEqualTo("ui://compose-ui-builder/editor")
     assertThat(tool.meta!!["openai/ui"]!!.jsonObject["entrypoints"])
-      .isEqualTo(Json.parseToJsonElement("""[{"type":"file","extensions":[".uid"]}]"""))
+      .isEqualTo(Json.parseToJsonElement("""[{"type":"file","extensions":["uid"]}]"""))
     assertThat(tool.title).isEqualTo("Compose UI Builder")
     assertThat(tool.icons!!.single().mimeType).isEqualTo("image/svg+xml")
     // No `path` for model calls: the editor can only load and save through the host.
@@ -552,7 +552,7 @@ class UiBuilderDesignMcpServerTest {
     val client = connect(UiBuilderDesignMcp.fromArchive(archive, onLog = {})!!)
     val tool = client.awaitToolsContaining("design_open").tools.single { it.name == "design_open" }
     assertThat(tool.meta!!["openai/ui"]!!.jsonObject["entrypoints"])
-      .isEqualTo(Json.parseToJsonElement("""[{"type":"file","extensions":[".uid"]}]"""))
+      .isEqualTo(Json.parseToJsonElement("""[{"type":"file","extensions":["uid"]}]"""))
 
     val listed =
       client.request("resources/list")["resources"]!!.jsonArray.map {

@@ -283,7 +283,7 @@ class OpenAiProbe(private val log: (String) -> Unit = { System.err.println(it) }
     const val PROBE_MENTIONS: String = "probe_mentions"
 
     /** Only our own formats (#1235): never `.kt`, which would replace the host's Kotlin viewer. */
-    val FILE_EXTENSIONS: List<String> = listOf(".rc", ".uid")
+    val FILE_EXTENSIONS: List<String> = listOf("rc", "uid")
 
     val TOOL_NAMES: Set<String> =
       setOf(PROBE_GLOBAL, PROBE_THREAD, PROBE_FILE, PROBE_FILE_ECHO, PROBE_MENTIONS)
