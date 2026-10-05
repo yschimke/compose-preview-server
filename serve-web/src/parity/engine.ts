@@ -23,19 +23,19 @@ import {
     evaluateKnownDifferences as evaluateJs,
     readsNoArtifacts as readsNoArtifactsJs,
     recordsThatRead as recordsThatReadJs,
-} from "../../../scripts/design-artifacts/known-differences.mjs";
+} from "@design-parity/known-differences/known-differences";
 import {
     canonicalRaster as canonicalRasterJs,
     projectTagIndex as projectTagIndexJs,
     resolvePlane as resolvePlaneJs,
-} from "../../../scripts/design-artifacts/known-difference-plane.mjs";
-import { scoreComparison as scoreComparisonJs } from "../../../scripts/design-artifacts/known-difference-score.mjs";
+} from "@design-parity/known-differences/known-difference-plane";
+import { scoreComparison as scoreComparisonJs } from "@design-parity/known-differences/known-difference-score";
 import {
     MAX_CONFORMING_HEADER_BYTES as MaxConformingHeaderBytesJs,
     decodePng as decodePngJs,
     preflightPng as preflightPngJs,
     sha256Hex as sha256HexJs,
-} from "../../../scripts/design-artifacts/png-lite.mjs";
+} from "@design-parity/known-differences/png-lite";
 
 /** A decoded raster, in the shape `png-lite.mjs` hands one over. */
 export interface Raster {

@@ -10,11 +10,11 @@
         "noUnusedLocals": true,
         "noUnusedParameters": true,
         "esModuleInterop": true,
-        // The acceptance engine is shared JavaScript, not a TypeScript port: `src/parity/` imports
-        // `scripts/design-artifacts/known-differences.mjs` so the browser and the offline driver run
-        // one implementation rather than two that a fixture suite has to keep honest. `checkJs` stays
-        // off — those files have their own `node --test` suite and are not this project's to
-        // type-check — but `allowJs` is what lets `tsc` follow the import and infer their shapes.
+        // The acceptance engine is shared, not a TypeScript port: `src/parity/` imports
+        // `@design-parity/known-differences` so the browser and the offline driver run one
+        // implementation rather than two that a fixture suite has to keep honest. The package ships
+        // its own declarations. `allowJs` stays for the plain JavaScript this project still imports;
+        // `checkJs` stays off because none of it is this project's to type-check.
         "allowJs": true,
         "checkJs": false,
         "skipLibCheck": true,

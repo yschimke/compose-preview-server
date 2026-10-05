@@ -26,7 +26,7 @@ import {
     withFetch,
     world,
 } from "./support/knownDifferences.js";
-import { sha256Hex } from "../../scripts/design-artifacts/png-lite.mjs";
+import { sha256Hex } from "@design-parity/known-differences/png-lite";
 import { evaluateComparison, walkCatalog } from "../src/parity/acceptance.js";
 
 /** One recorded request: the path asked for, and the `Range` header if the caller sent one. */

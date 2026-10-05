@@ -212,11 +212,18 @@ class ServeKnownDifferencesTest {
     // versioned with the schema and are deliberately not per-catalog settings, so a host that
     // guessed one would refuse what the engine calls legal — and the disagreement would surface as
     // a record that evaluates on one consumer and 413s on the other.
-    val source =
-      File(repoRoot(), "scripts/design-artifacts/known-differences.mjs").let {
-        if (it.exists()) it else File("scripts/design-artifacts/known-differences.mjs")
-      }
-    assertTrue(source.exists(), "the reference implementation moved: ${source.absolutePath}")
+    //
+    // The reference implementation is `@design-parity/known-differences`, which `serve-web` bundles
+    // into the asset below. Read the bundle rather than the package so this stays a Node-free test,
+    // and because the bundle is what the server actually serves. Minifying keeps the numeric
+    // literals and the schema string, which is all this compares.
+    val bundle =
+      "server/src/main/resources/ee/schimke/composeai/cli/serve/assets/known-differences.js"
+    val source = File(repoRoot(), bundle).let { if (it.exists()) it else File(bundle) }
+    assertTrue(
+      source.exists(),
+      "the bundled reference implementation moved: ${source.absolutePath}",
+    )
     val text = source.readText()
     val documentBytes =
       Regex("maxDocumentBytes:\\s*([0-9 *_]+),").find(text)?.groupValues?.get(1)?.let(::evaluate)
@@ -229,9 +236,10 @@ class ServeKnownDifferencesTest {
     // The schema token travels with them, for the same reason: the staging path refuses to fetch
     // for a document declaring anything else, so a host spelling it differently would fetch nothing
     // for every catalog rather than everything for one.
-    val schema =
-      Regex("KNOWN_DIFFERENCES_SCHEMA\\s*=\\s*\"([^\"]+)\"").find(text)?.groupValues?.get(1)
-    assertEquals(ServeKnownDifferences.SCHEMA, schema)
+    assertTrue(
+      text.contains("\"${ServeKnownDifferences.SCHEMA}\""),
+      "the bundled engine does not declare ${ServeKnownDifferences.SCHEMA}",
+    )
     // Mirrored for the staging path's fetch list — a cap the host reads further than would fetch
     // artifacts belonging to records the engine rejects the whole document for.
     assertEquals(ServeKnownDifferences.MAX_ACCEPTANCES.toLong(), acceptances)
