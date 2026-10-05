@@ -5493,8 +5493,12 @@ cp-page-zoom button:focus-visible {
 .cp-design-folders { margin: 0 0 20px; }
 .cp-design-folders[hidden], .cp-designs-recent[hidden] { display: none; }
 .cp-design-folders .cp-designs-h2 { margin: 0 0 12px; }
-.cp-design-folder-picks { display: flex; flex-wrap: wrap; gap: 8px; }
-.cp-design-folder-pick { display: inline-flex; align-items: baseline; gap: 8px; padding: 10px 14px;
+/* One row, scrolled sideways when the folders outrun the width, so they never push Recent down. */
+.cp-design-folder-picks { display: flex; flex-wrap: nowrap; gap: 8px; overflow-x: auto;
+  scrollbar-width: none; }
+.cp-design-folder-picks::-webkit-scrollbar { display: none; }
+.cp-design-folder-pick { flex: 0 0 auto; white-space: nowrap;
+  display: inline-flex; align-items: baseline; gap: 8px; padding: 10px 14px;
   border: 1px solid var(--cp-border); border-radius: 12px; background: var(--cp-surface);
   color: var(--cp-fg); font: inherit; font-size: 0.9rem; cursor: pointer; }
 .cp-design-folder-pick[aria-pressed="true"] { border-color: var(--md-sys-color-primary, var(--cp-fg));
