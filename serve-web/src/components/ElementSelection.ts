@@ -1,28 +1,15 @@
-// `<cp-element-selection>` — choosing which element the focused comparison's report is about.
+// `<cp-element-selection>` — choosing which element the focused comparison's report is about, so
+// the `compose-parity-locator/v1` block can name it and the region it covers.
 //
-// Without it a report says "something in this picture is wrong" and a triager re-derives the rest by
-// eye. With it the report names the element, and the locator block carries that name plus the
-// region it covers — the two fields `compose-parity-locator/v1` reserved for exactly this.
+//   A TAG survives a re-render, so an acceptance can resolve it later. Offered only where the
+//   server emits `data-cp-tags`; a tag on more than one node is listed but never selectable.
 //
-// Two ways to choose, and the difference is not cosmetic:
+//   A REGION is a rectangle over the displayed pixels, converted into the render's own pixel plane
+//   before it is recorded (`v1` accepts no other space).
 //
-//   A TAG is an identity that survives a re-render, so an acceptance can resolve it later. It is
-//   offered only where the published index describes the frame on screen (the server decides that
-//   and simply omits `data-cp-tags` otherwise), and a tag carried by more than one node is listed
-//   but never selectable — `count > 1` is not an identity, and picking one of several silently is
-//   the failure the field exists to catch.
+// Selection is a report affordance only: nothing here accepts or scores a difference.
 //
-//   A REGION is a rectangle read off the displayed pixels, so it describes what the reporter saw by
-//   construction and needs nothing from the server. It is converted into the render's own pixel
-//   plane before it is recorded, because `v1` accepts no other space — a rectangle in the display
-//   plane makes an element that never moved report as moved.
-//
-// Selection is a REPORT affordance. Nothing here accepts a difference or scores anything; the
-// epic's boundary, and the easiest one in it to erode by accident.
-//
-// The decisions live next door: `report/elementTargets.ts` (what is offerable and how a drag is
-// converted), `report/locator.ts` (how the two fields are written) and `report/body.ts` (which
-// composes them with everything else the report carries).
+// Decisions live in `report/elementTargets.ts`, `report/locator.ts` and `report/body.ts`.
 
 import { ControllerElement, customElement } from "../controllerElement.js";
 import { whenParsed } from "../dom/whenParsed.js";

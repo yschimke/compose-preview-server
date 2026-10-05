@@ -1,34 +1,16 @@
-// `<cp-backend-badge>` — the provenance badge on the viewer stage. Replaces
-// `assets/backend-badge.js`.
+// `<cp-backend-badge>` — the provenance badge on the viewer stage: which tier
+// painted what you are looking at (snapshot, daemon stream, Wasm app, or an
+// imported design spec).
 //
-// It names the tier that actually painted what you are looking at, because the
-// viewer's lanes are not interchangeable: a published snapshot, a daemon stream,
-// an in-browser Wasm app, and an imported design spec can all occupy the same
-// stage, and "is this pixel ours or theirs" is the first question anyone asks of
-// a preview server.
+// The icon carries the state for people who cannot see the accent colours: ▶
+// interactive live lane, ▪ static, ◇ design spec (not something this server
+// rendered), ◌ activating.
 //
-// The icon carries the state change. ▶ for an interactive live lane, ▪ for a
-// static one, ◇ for the design spec (what is on the stage is the imported
-// reference, not something this server rendered, so it must not wear a
-// renderer's icon), and ◌ while a lane is still activating. Those are the
-// visible signal that the Static⇄Live toggle did something — the accent colours
-// in `serve.css` say the same thing, but only to people who can see them.
-//
-// The badge does not own its state. `.cp-viewer`'s `data-mode` / `data-pending`
-// attributes are the single source of truth — `viewer.js` drives the lanes and
-// writes them — so this observes those attributes rather than being called. One
-// writer, many readers; a lane that forgets to notify the badge cannot exist.
-//
-// The HOST is the badge, not a wrapper around one: the server emits
-// `<cp-backend-badge class="cp-backend" id="cp-backend" role="status"
-// aria-live="polite">`, and this renders only the text inside it. That keeps the
-// live region in the server's HTML — a `role="status"` element created by script
-// with its text already in place is not announced by screen readers, so
-// rendering the span from here would have quietly cost the announcement that is
-// the whole point of the attribute. It also means `serve.css`'s `.cp-backend`
-// rules (absolute in `.cp-stage`, the `[data-live]` / `[data-pending]` accents)
-// apply to the host unchanged, with no `display: contents` wrapper to reason
-// about.
+// It observes `.cp-viewer`'s `data-mode` / `data-pending` (written by
+// `viewer.js`) rather than being called, so no lane can forget to notify it.
+// The server-emitted host is the `role="status"` live region and this renders
+// only its text: a status element created by script with its text in place is
+// not announced.
 
 import { createTextVNode, type VNode } from "../vue.js";
 import { customElement } from "../controllerElement.js";

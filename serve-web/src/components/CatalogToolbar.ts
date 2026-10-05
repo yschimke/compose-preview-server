@@ -1,35 +1,15 @@
 // `<cp-catalog-toolbar>` — the catalog landing's one toolbar row on a phone.
 //
-// The landing spends two blocks between its toolbar and its first card on a
-// phone: the summary tally, and — on a sectioned catalog — the navigation tree.
-// The Theme group and the catalog's actions are menus at every width now (the
-// same `.cp-theme-menu` dropdown the component page's Theme control is), so
-// `serve.css` has nothing left to fold there; what CSS still cannot do is put
-// the filter field on the same row as those menus, because the filter belongs to
-// the tree's sidebar — that is where it lives above 960px, beside the grid.
+// CSS cannot put the filter field (which lives in the tree's sidebar above
+// 960px) on the same row as the Theme and action menus, so this moves it there
+// and back. In the DOM rather than with `order`, so reading, paint and tab order
+// agree at every width (the rule `<cp-viewer-drawers>` follows too).
 //
-// So this moves them, and moves them back. In the DOM rather than with `order`,
-// which is the same rule the viewer follows for its own two rows in
-// `viewer-drawers.js`: reading order, paint order and tab order stay the same
-// order at every width, where a CSS re-order would leave a keyboard walking to
-// controls a screenful away from where they appear.
-//
-// A CONTROLLER element in the `<cp-group-memory>` shape — it renders nothing and
-// holds no state of its own, and every element it moves is one the server
-// already rendered. It is on the landing page only, which is the only page with
-// a toolbar to reflow.
-//
-// The one thing it does build is the row itself, and only on a phone: a
-// sectioned catalog's filter lives in the tree's sidebar, so its toggles ride on
-// the identity row and the server emits no toolbar at all (issue #4224 — a
-// full-width sticky band holding one `⋯` and nothing else). The phone row is
-// still worth having, so where there is no bar to move into, this makes one and
-// takes it away again on the way back up.
-//
-// Nothing here is required for the page to work: with the bundle blocked, the
-// filter, the chips and the menus are all still on the page in their served
-// positions, and the menus still open — they are bare `<details>`, styled by a
-// sibling selector, with no script behind them at all.
+// A controller element in the `<cp-group-memory>` shape: it renders nothing and
+// holds no state. On a sectioned catalog the server emits no toolbar, so on a
+// phone this builds the row and removes it again on the way back up. Nothing
+// here is required: without the bundle every control stays in its served
+// position and the `<details>` menus still open.
 
 import { ControllerElement, customElement } from "../controllerElement.js";
 
@@ -67,7 +47,7 @@ export class CatalogToolbar extends ControllerElement {
      * so the menu stayed open over the previews the visitor had just asked to see, for as long as
      * the declared-theme renders took to arrive. The same for Transparent, which is a toggle on the
      * cards behind it. The Theme chips are INSIDE their `<details>` (`.cp-theme-menu-panel`, the
-     * viewer's own control), so that one closes the way `viewer-drawers.js` closes it; the actions
+     * viewer's own control), so that one closes the way `<cp-viewer-drawers>` closes it; the actions
      * panel is still its disclosure's sibling, which `closest()` cannot walk, so that one is named
      * here. A link in the actions panel navigates and takes the whole page with it, closed or not.
      *

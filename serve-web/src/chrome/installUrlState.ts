@@ -1,5 +1,4 @@
 // `window.cpUrlState` — the one place that writes a page's selection into the address bar.
-// Replaces `assets/url-state.js`.
 //
 // Every serve surface keeps some selection client-side: the catalog grid's section tab, theme chip,
 // filter text and stage backing; the viewer's overrides and knobs; the compare page's format and

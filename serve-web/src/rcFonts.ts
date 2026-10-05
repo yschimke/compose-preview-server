@@ -1,5 +1,5 @@
 // `window.cpRcFonts` — make the page's registered faces paintable BEFORE a Remote Compose lane
-// paints. Replaces `assets/rc-fonts.js`.
+// paints.
 //
 // `@font-face` is lazy and canvas does not drive it: `ctx.font` neither triggers a load nor waits
 // for one, and a canvas asked for an unloaded face silently paints the fallback — no

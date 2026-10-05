@@ -1,5 +1,4 @@
 // `<cp-catalog-live>` — long-press a catalog card to start a live daemon session in place.
-// Replaces `assets/catalog-live.js`.
 //
 // The grid's counterpart of the viewer's Static⇄Live toggle, without leaving the page. The card
 // keeps its baked thumbnail as the stage: a `<canvas>` is mounted as an absolute overlay on the

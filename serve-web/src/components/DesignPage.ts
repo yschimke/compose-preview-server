@@ -1,6 +1,5 @@
 // `<cp-design-page>` — a whole page of the design file, inlined as SVG, with this catalog's renders
 // standing in for the design's own drawing of the components it implements.
-// Replaces `assets/design-page.js`.
 //
 // THE SVG IS THE GEOMETRY, AND THAT IS THE WHOLE DESIGN
 //

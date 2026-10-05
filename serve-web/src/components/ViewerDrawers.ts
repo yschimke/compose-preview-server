@@ -1,5 +1,5 @@
 // `<cp-viewer-drawers>` — the viewer's two drawers, the phone reflow, the theme toggle's value,
-// and the component filter. Replaces `assets/viewer-drawers.js`.
+// and the component filter.
 //
 // A page-level controller, not a control: everything it owns is server-rendered markup it wires
 // behaviour onto (the same shape as `<cp-group-memory>`), so it renders nothing and `serve.css`
