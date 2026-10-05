@@ -1,10 +1,13 @@
 package ee.schimke.composeai.cli.serve
 
+import ee.schimke.composeai.uibuilder.export.RecordFreeExport
+import ee.schimke.composeai.uibuilder.export.WearWidgetHostShape
 import ee.schimke.composeai.uibuilder.protocol.DesignAccessActionV1
 import ee.schimke.composeai.uibuilder.protocol.DiagnosticSeverityV1
 import ee.schimke.composeai.uibuilder.protocol.ExportDesignRequestV1
 import ee.schimke.composeai.uibuilder.protocol.ExportEncodingV1
 import ee.schimke.composeai.uibuilder.protocol.ExportFormatV1
+import ee.schimke.composeai.uibuilder.protocol.GetSnapshotRequestV1
 import ee.schimke.composeai.uibuilder.service.AuthenticatedUiBuilderActor
 import ee.schimke.composeai.uibuilder.service.UiBuilderBranchCall
 import ee.schimke.composeai.uibuilder.service.UiBuilderBranchPort
@@ -61,6 +64,17 @@ import kotlinx.coroutines.withTimeoutOrNull
  * worker, because the renderer answers a second concurrent render with "busy" and the editor's
  * interactive exports matter more than a thumbnail.
  *
+ * ## Wear widgets are drawn in their host
+ *
+ * A Wear widget's PNG export is the widget's content at its environment size, with square corners
+ * and no host container around it, so on the card it read as a squashed rectangle rather than the
+ * widget a person put on their watch. Where the host has the [nativePreview] lane, a widget design
+ * is drawn through it instead: the generated `WearWidgetPreview`, compiled and rendered on the
+ * device renderer, inside the [WearWidgetHostShape.Squircle] container — the round-rect frame the
+ * host really draws, and the render recommended for the widget picker — rather than corners faked
+ * in CSS. Anything that lane cannot draw falls back to the export, because an approximate picture
+ * is still better than a blank card.
+ *
  * ## Access
  *
  * The bytes on disk carry no access record, so every serve asks the design's own access control
@@ -95,6 +109,12 @@ internal constructor(
   private val pending = ConcurrentHashMap<String, Job>()
 
   @Volatile private var service: UiBuilderServicePort? = null
+
+  /**
+   * The native render lane, set once the server has one; null draws every design through the
+   * export. See "Wear widgets are drawn in their host" above.
+   */
+  @Volatile internal var nativePreview: UiBuilderNativePreviewLane? = null
 
   /**
    * The one worker. Every render goes through it, a card's own request included, because the
@@ -278,6 +298,10 @@ internal constructor(
     revision: Long? = null,
   ): Entry? {
     val port = service ?: return null
+    nativeWidget(port, designId, actor, revision)?.let {
+      store(designId, it, pinned = revision != null)
+      return it
+    }
     val response =
       try {
         port.executeMapped(
@@ -300,6 +324,56 @@ internal constructor(
     val entry = Entry(servedRevision, generation, Base64.getDecoder().decode(artifact.content))
     store(designId, entry, pinned = revision != null)
     return entry
+  }
+
+  /**
+   * [designId] drawn by the [nativePreview] lane inside its widget host, or null when it is not a
+   * Wear widget, this host has no such lane, or the lane could not draw it.
+   *
+   * Asks the same EXPORT question the export would, and reads the document through the service as
+   * [actor], so this is never a way to picture a design the actor could not export.
+   */
+  private suspend fun nativeWidget(
+    port: UiBuilderServicePort,
+    designId: String,
+    actor: AuthenticatedUiBuilderActor,
+    revision: Long?,
+  ): Entry? {
+    val lane = nativePreview ?: return null
+    if (DesignAccessActionV1.EXPORT !in port.designActions(actor, designId).orEmpty()) return null
+    val snapshot =
+      try {
+        port.executeMapped(GetSnapshotRequestV1(designId = designId, revision = revision), actor)
+          as? UiBuilderServiceResponse.Snapshot
+      } catch (failure: Exception) {
+        if (failure is kotlinx.coroutines.CancellationException) throw failure
+        null
+      } ?: return null
+    val document = snapshot.snapshot.state.document
+    if (!RecordFreeExport.isWearWidget(document)) return null
+    val outcome =
+      try {
+        lane.render(document, WearWidgetHostShape.Squircle)
+      } catch (failure: Exception) {
+        onLog("serve: UI-builder widget thumbnail for $designId not drawn: ${failure.message}")
+        return null
+      }
+    val rendered = outcome as? UiBuilderNativePreviewOutcome.Rendered
+    if (rendered == null || rendered.failure != null) {
+      onLog(
+        "serve: UI-builder widget thumbnail for $designId fell back to the export: " +
+          ((outcome as? UiBuilderNativePreviewOutcome.Refused)?.reasons?.joinToString("; ")
+            ?: rendered?.failure)
+      )
+      return null
+    }
+    val png =
+      rendered.response.image
+        ?.takeIf { it.startsWith(PNG_DATA_URI) }
+        ?.let {
+          runCatching { Base64.getDecoder().decode(it.removePrefix(PNG_DATA_URI)) }.getOrNull()
+        } ?: return null
+    return Entry(document.revision, generation, png)
   }
 
   private fun store(designId: String, entry: Entry, pinned: Boolean = false) {
@@ -351,6 +425,8 @@ internal constructor(
   internal companion object {
     /** Deep enough for every card on a large listing; beyond it a card waits for the next view. */
     const val QUEUE = 512
+
+    private const val PNG_DATA_URI = "data:image/png;base64,"
 
     /** Cannot appear in a design id segment, so a revision key never collides with a design. */
     private const val REVISION_SEPARATOR = "\u0000r"

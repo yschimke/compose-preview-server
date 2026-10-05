@@ -8824,6 +8824,8 @@ class ServeHttpServer(
   )
 
   init {
+    // Widget thumbnails are drawn in their host container wherever this server can render one.
+    uiBuilderThumbnails?.nativePreview = uiBuilderNativePreview
     // Snapshot a catalog's facts as its daemon goes idle — the last moment they're readable.
     sessions.addSuspendListener { id, host -> rememberCatalogMeta(id, host) }
     // A retired catalog's status snapshot goes with it. Without this every published-then-retired
