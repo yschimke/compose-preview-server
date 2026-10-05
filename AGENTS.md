@@ -23,7 +23,9 @@ boundaries.
       git log --format='%h %an <%ae> | %cn <%ce>' <base>..<head>
       .github/scripts/agent-attribution-scan.sh --range '<base>..<head>'
 
-  Report only what the scanner exits 1 on, and quote its output. `Yuri Schimke <yuri@schimke.ee>` is
+  `<head>` must be the pull request's head commit as GitHub reports it: a commit made in a review
+  checkout, for example by reapplying the diff, carries the reviewer's identity, and that is how
+  every false report so far arose. Report only what the scanner exits 1 on, and quote its output. `Yuri Schimke <yuri@schimke.ee>` is
   this repository's human identity, and `github-actions[bot]` / `renovate[bot]` are exempt bot
   accounts — none of the three is ever a finding. If the `Reject agent attribution` check is already
   green on the head commit, there is nothing to report.
@@ -64,6 +66,14 @@ boundaries.
   [`PR Body Syntax`](.github/workflows/pr-body-syntax.yml) workflow strips them in place within a
   minute of the edit. Hand-fixing or re-posting to "correct" them does not work — the next write is
   mangled the same way.
+
+## Review guidelines
+
+- **Do not report commit author, committer or `Co-authored-by:` findings.** Your review sandbox
+  applies the pull request as a new commit under your own identity (`Codex <codex@openai.com>`),
+  so any identity you read from a local `git log` is yours, not the author's. Every such finding
+  on these repositories has named a commit that exists only in the sandbox. Attribution is a
+  human and CI concern; leave it out of reviews entirely.
 
 ## Running Gradle
 
