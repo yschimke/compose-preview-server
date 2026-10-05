@@ -1,50 +1,20 @@
 package ee.schimke.composeai.cli.serve
 
 /**
- * **Catalogs discovered from a nominated GitHub project**, instead of named one at a time.
+ * **Catalogs discovered from a nominated GitHub project**, so publishing a delivery branch (for
+ * example by merging an import PR) is enough to get it served, with no manual `--catalogs` edit.
  *
- * ### Why this exists
+ * A server may nominate **registry projects** (`--catalog-registry <owner>/<repo>`); each publishes
+ * [FILE_PATH] on its default branch, and [ServeCatalogRegistrySync] serves every entry as a
+ * `catalogs.json` entry would be, without a restart.
  *
- * Publishing a catalog and *serving* it were two unrelated acts with nothing joining them. A
- * project's CI force-pushes its `design-artifacts/<system>` branch and stops there; the branch is
- * complete, verifiable and reachable, and the box serves a 404 for it — permanently, not until the
- * next refresh — because the served set is enumerated by hand in `--catalogs` / `catalogs.json`.
- * Every publisher therefore needed a second, manual, out-of-band step against the box before any of
- * its work was visible.
+ * A registry delegates which of its catalogs are served and how they are grouped, never where bytes
+ * come from:
+ * - an entry is served only from the registry project itself; others are dropped, loudly;
+ * - group claims resolve against the registry document's own group table, never the box's;
+ * - the operator's configuration wins every id collision ([ServeRunner.catalogRefs]).
  *
- * That is tolerable while the publishers are a handful of first-party repos. It stops being
- * tolerable for `yschimke/compose-preview-imports`, whose entire purpose is to onboard third-party
- * projects *by pull request*: merging the PR builds the upstream project and force-pushes a
- * delivery branch, and the reviewer's mental model — reasonably — is that merging is the import.
- * With the served set enumerated elsewhere, it wasn't: `joreilly-peopleinspace` published cleanly
- * and 404'd for as long as nobody edited the box.
- *
- * So a server may nominate one or more **registry projects** (`--catalog-registry
- * yschimke/compose-preview-imports-out`, the staging repository's output repository). Each
- * publishes [FILE_PATH] on its default branch, and every catalog listed there is served exactly as
- * a `catalogs.json` entry would be. Landing the PR is then genuinely the whole import, and
- * [ServeCatalogRegistrySync] picks it up without a restart.
- *
- * ### What nominating a registry delegates, and what it does not
- *
- * It delegates **which catalogs from that project are served, and how they are grouped on the front
- * page**. It deliberately does not delegate *where bytes may come from*:
- * - an entry may only be served from the registry project itself, so a compromised or careless
- *   registry can publish its own branches and nothing else. An entry naming another repo is
- *   dropped, loudly. (Serving a catalog out of somebody else's repository stays an operator
- *   decision — `--catalogs <system>@<owner>/<repo>`, or an admin `POST`.)
- * - group claims resolve against the registry document's **own** group table, never the box's, so a
- *   registry cannot file its catalogs under a heading the operator reserved for first-party design
- *   systems.
- * - the operator's own configuration wins on any id collision ([ServeRunner.catalogRefs]
- *   de-duplicates first-wins with the registry last), so nominating a registry can never
- *   re-attribute a catalog the box already names.
- *
- * The document is the ordinary [ServeCatalogsConfig] shape, so a registry project's file is
- * readable, diffable and validated by exactly the code the box's own config goes through — and a
- * project can move from "the operator lists my catalogs" to "I list them myself" by copying its
- * entries across unchanged. `sites` in a registry document are ignored: a hostname is the box's to
- * hand out.
+ * The document is the ordinary [ServeCatalogsConfig] shape; its `sites` are ignored.
  */
 object ServeCatalogRegistry {
 

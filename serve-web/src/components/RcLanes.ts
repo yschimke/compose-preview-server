@@ -1,4 +1,4 @@
-// `<cp-rc-lanes>` — the compare page's "Remote Compose players" view. Replaces `assets/rc-lanes.js`.
+// `<cp-rc-lanes>` — the compare page's "Remote Compose players" view.
 //
 // Every player's published render of the same `ir/*.rc` document side by side, and — once a column
 // is picked as the reference — a pixel diff of every other column against it. The renders and the

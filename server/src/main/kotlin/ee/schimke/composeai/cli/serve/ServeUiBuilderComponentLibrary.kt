@@ -16,60 +16,23 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 
 /**
- * The components a project shares between its own designs — the third question the design record
- * asks, after "can the format repeat" and "can a subtree become a composable".
- *
- * A component defined inside one design is reusable in that design and nowhere else, which is the
- * point at which a team starts copying subtrees between files. A copy is not reuse: the second one
- * stops tracking the first the moment either is edited. So a project publishes its components the
- * way it already publishes its designs, and a design *references* one.
- *
- * ## The convention
- *
- * Deliberately the same shape as [ServeUiBuilderDesignLibrary], read through the same two sources
- * and the same file reader, because it is the same loop seen from one level down:
+ * The components a project shares between its own designs, so a design can *reference* a subtree
+ * rather than copy it. Same convention and reader as [ServeUiBuilderDesignLibrary]:
  * ```text
  * ui-builder/components/index.json     the manifest: which components this project publishes
  * ui-builder/components/<file>.json    one component symbol per file
  * ```
  *
- * ## A symbol file is a design document
+ * A symbol file is an ordinary [DesignDocumentV1] with exactly one `components` entry, so it needs
+ * no new wire type, validator or contracts release.
  *
- * There is no new wire type here, and that is a decision rather than an economy. A published symbol
- * is an ordinary [DesignDocumentV1] carrying exactly one entry in its `components` map plus the
- * nodes that entry's body is made of — the same document a design is, written by the same exporter,
- * validated by the same rules, drawn by the same canvas. The alternative, a bespoke
- * `ComponentDocumentV1`, would need its own schema, its own validator and its own release through
- * the contracts repository, and would drift from the document shape the editor actually holds.
+ * - **Referenced, not copied.** Each symbol carries a content [Symbol.digest]; an importer records
+ *   it and reports a moved library as drift.
+ * - **Pinned-catalog components only.** A body placing another project symbol is refused here
+ *   (cross-symbol composition would need an import graph and cycle checks); catalog membership is
+ *   checked at import against [Symbol.catalogPin].
  *
- * What makes this worth having over a component *pack* is that these are catalog nodes all the way
- * down: the Wasm canvas draws a project symbol properly, where a pack can only name a placeholder
- * and say so.
- *
- * ## Two rules keep it honest
- *
- * - **Referenced, not copied.** A shared symbol changing under a design is the catalog-pin problem
- *   again, so every symbol carries a [Symbol.digest] over its content. An importing design records
- *   the id *and* the digest, and a design whose library has moved is reported as drifted rather
- *   than silently redrawn. Computing it is this class's job; acting on it is the importer's.
- * - **A symbol may only use components from the pinned catalog.** Split across two places, because
- *   only one of them holds a catalog. What is enforced *here* is the part that needs no catalog: a
- *   body placing another project symbol is refused by name, since cross-symbol composition needs an
- *   import graph, a cycle check and a digest per edge, and half-supporting it would mean a design
- *   that imports one symbol silently depends on another it never named. Whether each node's
- *   `componentId` exists in the catalog is checked where the catalog is — at import, exactly as a
- *   published *design* has its nodes validated when it is installed rather than when it is listed.
- *   [Symbol.catalogPin] is carried out of here so an importer can do that against the right one.
- *
- * Both refusals are per symbol and never per project: one unusable file is dropped with a line in
- * the log, and the components either side of it are still offered.
- *
- * ## The far half, for context
- *
- * This convention only has to carry a symbol while it is still moving. Once a component settles, it
- * is generated into the app's own Kotlin and committed; discovery picks it up, and it returns as an
- * ordinary `<catalog>/<component>` on the palette, exported as a call to real code. That is why
- * this is a convention over the existing reader rather than a system of its own.
+ * Refusals are per symbol: an unusable file is logged and dropped, the rest are still offered.
  */
 class ServeUiBuilderComponentLibrary(
   private val fetch: (url: String, maxBytes: Long) -> ByteArray?,

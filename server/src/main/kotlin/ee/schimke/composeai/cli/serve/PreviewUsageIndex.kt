@@ -4,48 +4,16 @@ import java.util.concurrent.ConcurrentHashMap
 
 /**
  * Which functions each preview's own declaration **calls**, so the landing grid's filter can answer
- * "show me the previews that call `SwipeToReveal`".
+ * "show me the previews that call `SwipeToReveal`" — the cards a name search cannot find.
  *
- * ### Why a call index and not a text search
+ * Reuses the playground's Source-panel inputs: [PlaygroundSeedResolver.Location] for where each
+ * preview's source lives and [UsageSourceParser] for the parse, with one fetch per distinct file
+ * split among its previews by [PlaygroundSeedResolver.declarationLines].
  *
- * The grid's filter box already matches a card's label and id, which are names a catalog *chose*.
- * The question this answers is the other one — what a preview is actually made of — and that lives
- * only in the source. `Button/Filled` is findable by name; the six other cards that happen to put a
- * `Button` inside a larger composition are not, and they are exactly what someone changing
- * `Button`'s API needs to look at.
- *
- * ### Where the facts come from
- *
- * The same two things the playground's Source panel already runs on, reused rather than rebuilt:
- * [PlaygroundSeedResolver.Location] (a preview's `repo` / `ref` / `module` / `sourceFile` /
- * `bodyLine`, all from catalog metadata) and [UsageSourceParser] (a real Kotlin parse, in its
- * isolated classloader). One fetch per distinct **file** — a catalog's previews come a section at a
- * time, so a 200-preview catalog is a few dozen files — and
- * [PlaygroundSeedResolver.declarationLines] splits each file's calls among the previews declared in
- * it.
- *
- * ### What it deliberately does not do
- *
- * **No resolution.** A parse reports the callee as written, so this index is "names called in this
- * declaration", not "Compose symbols this preview binds to". `Text` and a local `counted` are the
- * same kind of fact here; two different `Button`s from two packages are one entry. Resolution needs
- * a classpath and a frontend per catalog, which is the expensive half of a compiler for a filter
- * box.
- *
- * **No expansion through delegation.** The index covers a preview's own top-level declaration and
- * stops there. A catalog whose previews are one-line delegations to a shared component set — the
- * `Sticker("<slug>")` shape `compose-usage.json` describes for the m3 sticker sheet — therefore
- * indexes as calling `Sticker`, which is true and not useful. Those catalogs already declare their
- * scaffolding for the Source panel; teaching this index to follow it is a further change, not a
- * silent behaviour of this one.
- *
- * ### Availability
- *
- * Every stage is allowed to be absent, and the index says so rather than pretending to be empty:
- * the parser sidecar may not be staged ([UsageSourceParser.of] returns null), a catalog may carry
- * no source metadata at all (an uploaded bundle), and a fetch may fail. A caller that cannot tell
- * "no preview calls that" from "nothing was indexed" would show an empty grid for both, which is
- * why [Match.available] exists.
+ * Callees are recorded as written, with no symbol resolution and no expansion through delegation (a
+ * `Sticker("<slug>")` catalog indexes as calling `Sticker`). Every stage may be absent (no parser
+ * sidecar, no source metadata, a failed fetch), and [Match.available] distinguishes "nothing
+ * indexed" from "no preview calls that".
  */
 class PreviewUsageIndex(
   /** Where a preview's source lives, or null when this server can't say. */

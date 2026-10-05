@@ -1,4 +1,4 @@
-// `<cp-spec-compare>` — the viewer's design-spec diff options. Replaces `assets/spec-compare.js`.
+// `<cp-spec-compare>` — the viewer's design-spec diff options.
 //
 // The spec lane already put the imported design reference on the same stage as the render, so the
 // two could be flipped between. Flipping is a weak instrument: it answers "are these different?" by

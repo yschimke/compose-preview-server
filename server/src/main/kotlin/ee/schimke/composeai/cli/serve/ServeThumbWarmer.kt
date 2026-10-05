@@ -8,43 +8,20 @@ import java.util.concurrent.TimeUnit
 /**
  * Fetches a catalog's baked PNGs in the background so its **next** page build can thumbnail them.
  *
- * ## Why this exists
+ * [ServeHeroImages.gridThumbFor] reads [ServeHost.bakedRender] local-only (fetching on the
+ * page-build thread would serialise dozens of round trips), so a miss emits the full-resolution
+ * `/render/<id>.png`. Without this, the thumbnail lane only ever warmed through the full-resolution
+ * traffic it exists to eliminate; with it, one page view converges the catalog.
  *
- * [ServeHeroImages.gridThumbFor] reads [ServeHost.bakedRender], which is deliberately a local-only
- * read: a declared preview whose PNG has not arrived yet returns null rather than fetching, because
- * fetching on the page-build thread would turn one catalog page into dozens of serial round trips.
- * A card with no local pixels therefore emits the plain full-resolution `/render/<id>.png`.
+ * - **Never renders**: [ServeHost.warmBakedRender] only fetches published bytes, so a suspended
+ *   daemon stays suspended.
+ * - **Never blocks a request**: [enqueue] offers to a bounded queue and returns.
+ * - **Never retries in a loop**: a full queue drops the request and a failed fetch is forgotten, so
+ *   the next page build re-offers it. Both paths must release the [inFlight] claim, or a drop
+ *   becomes a permanent dedupe.
  *
- * That URL is what *does* fetch. So the thumbnail lane used to warm only through the
- * full-resolution traffic it exists to eliminate: a cold catalog charged its first visitors the
- * whole bill, and a quiet catalog never converged at all. Measured on the deployed server,
- * `/jetchat/` served 67 cards as **3,332 KB** of full-resolution PNGs while the same cards on the
- * thumbnail lane are **778 KB** — a 4.3× difference that only visitor *N+1* could ever see, and on
- * `/jetsnack/` and `/jetchat/` never arrived, while the busy `/m3-catalog/` sat fully converged at
- * 58 of 58.
- *
- * This closes the loop the other way round: a page build that *misses* says so, and the miss is
- * filled off-thread. One page view then converges the catalog instead of one full-resolution image
- * load per card.
- *
- * ## What it deliberately does not do
- *
- * - **Never renders.** [ServeHost.warmBakedRender] fetches published bytes and nothing else, so a
- *   suspended daemon stays suspended. Warming a catalog must never be the thing that wakes it.
- * - **Never blocks a request.** [enqueue] only offers to a bounded queue and returns; the page
- *   build that missed still emits the plain URL for this render, exactly as before.
- * - **Never retries in a loop.** A full queue drops the request and a failed fetch is not
- *   remembered as failed — the next page build re-offers it. Both paths release the claim, the drop
- *   via the rejection handler; forgetting that is how a "drop" silently becomes a permanent
- *   deduplication. That is the same self-healing rule `ServeBundleHost.bakedPngFile` already
- *   applies to a transient branch blip, and it is why this needs no backoff of its own.
- *
- * ## Bounds
- *
- * [THREADS] workers against a [QUEUE] deep queue, both small on purpose: this is opportunistic work
- * on a box that may serve dozens of catalogs, and it competes for the same delivery branch as the
- * requests a reader is actually waiting on. Work already in flight or already done is skipped by
- * [inFlight], so a page reloaded ten times enqueues each preview once.
+ * [THREADS] workers and a [QUEUE]-deep queue are small on purpose: this is opportunistic work
+ * competing with requests a reader is waiting on.
  */
 internal class ServeThumbWarmer(
   private val onLog: (String) -> Unit = {},

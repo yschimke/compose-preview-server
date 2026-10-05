@@ -3,48 +3,14 @@ package ee.schimke.composeai.cli.serve
 /**
  * A component's links to the SAME component as another catalog publishes it.
  *
- * ## Why this is not `compareWith` + `parallel`
+ * Not `compareWith` + `parallel`: that pairing ([ServeParallelPairing]) is one symmetric sibling
+ * for a parity comparison, while `related` is any number of directed siblings that are *about* the
+ * component (call-site samples, a tile rendition, a motion study). Produced upstream by
+ * `@CatalogComponent(related = …)` into `components[].related`; this is the reading half.
  *
- * The server already reaches into a sibling catalog: `compareWith` names one system, `parallel`
- * names the counterpart component in it, and [ServeParallelPairing] picks which of its renders is
- * the counterpart of this one. That pairing answers a **parity** question — two catalogs drawing
- * one design system, is this cell the same on both — and it is deliberately a single scalar,
- * because a parity comparison has two sides.
- *
- * `related` answers a different question, and the difference is why it cannot ride on the same
- * field. A catalog has exactly one rendition to be compared against, but any number of catalogs
- * that are ABOUT it. The case that forced this: the AndroidX samples are imported into a samples
- * catalog published beside each kit catalog, and the kit catalog that most wants to point at it had
- * already spent its single `compareWith` on a second rendition of its own components. Overloading
- * `compareWith` would mean choosing between the parity lane and the samples lane; a list means
- * neither has to lose (yschimke/compose-ai-tools#5398).
- *
- * No catalog is named anywhere in this file, deliberately: which catalogs exist is the deployment's
- * `catalogs.json` and each catalog's own published `catalog.json` to say, never this module's
- * Kotlin (`.github/scripts/ui-builder-catalog-literals.sh` enforces it).
- *
- * So: `compareWith` is one sibling, symmetric, about sameness. `related` is many siblings,
- * directed, about aboutness — the call sites for a component, a tile rendition of it, a motion
- * study. The producer side has been merged in compose-ai-tools since #5398
- * (`@CatalogComponent(related = …)` through discovery, `apply-related.mjs` stamping
- * `components[].related` onto `catalog.json`); this is the reading half.
- *
- * ## What this file is, and is not
- *
- * It is the **model and the policy**: what a link is, how the declared entries become resolvable
- * links, and what happens to the ones that cannot resolve. Deliberately pure and free of the
- * session registry, so the rules are testable without standing a catalog up — the same division
- * [ServeParallelPairing] draws, where the object decides and the server does the lookup.
- *
- * PUBLIC where [ServeParallelPairing] is internal, and only for that reason: [Declared] is part of
- * [ServeBundleHost]'s own public surface (`relatedByComponentId`), so an internal object here would
- * be a public function exposing an internal type. Nothing outside this package should reach for it.
- *
- * It is NOT a surface. Nothing here decides where a related link appears in the viewer, or what it
- * looks like; that is still open, and this layer exists so the answer can change without moving any
- * of this. In particular a related link is not a motion capture: the motion lane is same-system by
- * construction (a capture is fetched from the leased host's own branch), and a related link points
- * at a catalog that is a separate session with its own routes.
+ * The model and policy only — pure, with the lookup left to the server — and not a surface. No
+ * catalog is named here (`.github/scripts/ui-builder-catalog-literals.sh` enforces it). Public only
+ * because [Declared] appears in [ServeBundleHost.relatedByComponentId].
  */
 object ServeRelatedCatalogs {
 

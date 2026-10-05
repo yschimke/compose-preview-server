@@ -1,5 +1,5 @@
 // `<cp-group-memory>` — remembers which viewer control groups a visitor left
-// open. Replaces `assets/viewer-groups.js`.
+// open.
 //
 // The viewer's controls are a column of `<details class="cp-group">` drawers:
 // Overlays, Features, Size, Locale, Overrides, Remote Compose. Someone tuning a

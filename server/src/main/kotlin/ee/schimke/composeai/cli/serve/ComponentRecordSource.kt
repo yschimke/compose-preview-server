@@ -6,73 +6,21 @@ import java.util.concurrent.ConcurrentHashMap
 import kotlinx.serialization.json.Json
 
 /**
- * Reads a bundle's `components.json` for the Compose export path, per catalog, re-reading each one
- * when it changes.
+ * Reads each catalog's `components.json` for the Compose export path, re-reading it when it
+ * changes.
  *
- * ## Per catalog, because a host serves several
+ * Keyed by catalog system id because a host serves several catalogs, and an id shared between them
+ * must not export as another catalog's call site. An operator-named file (`--ui-builder-components
+ * <catalog>=<components.json>`) wins; otherwise [served] resolves the served catalog's staged
+ * record per call, since a refresh moves it to a new generation directory.
  *
- * A deployment such as preview.coo.ee runs `--ui-builder-catalogs m3-catalog,remote-m3,wear-m3`.
- * One global record would resolve every export against whichever record the host happened to be
- * given: a component id present in more than one of them would generate another catalog's call
- * site, and an id present in none of them would refuse a document that is perfectly valid against
- * its own. Keyed by catalog system id, an export either finds its own catalog's record or is told
- * that catalog has none.
+ * [foundation] (the builder's own `layout/`, `shape/`, `asset/` vocabulary) is unioned onto every
+ * record that exists; the catalog's own entries win collisions, and a catalog with no record
+ * (Remote Compose, on purpose) stays [Lookup.Unconfigured].
  *
- * ## Two places a record comes from
- *
- * A file the operator named (`--ui-builder-components <catalog>=<components.json>`) wins, because
- * it is the one they are looking at. Otherwise the **served catalog** of the same id supplies it:
- * `ServeCatalogStore` stages the record its delivery branch declares, or lifts it out of the live
- * bundle, and [served] resolves that file. Resolved per call rather than captured, because a served
- * catalog loads after this source is built and is re-fetched on every refresh into a new generation
- * directory — a `File` captured once would be stale or absent. A catalog with neither is
- * [Lookup.Unconfigured], and the export names both ways of fixing that.
- *
- * ## The foundation vocabulary travels with every record
- *
- * A design is mostly `layout/column`, `layout/box` and `asset/image`, and no catalog's record
- * carries them: `androidx.compose.foundation` publishes one of each rather than one per design
- * system, and m3-catalog declares no builtins at all on the stated grounds that doing so "would be
- * this catalog claiming to own the builder's own vocabulary". `composeFoundationCatalog` already
- * owns that vocabulary on the CAPABILITY side, per platform. This is the record side of the same
- * ownership: [foundation] is unioned onto whatever record a catalog supplies, so the shelf offering
- * `layout/column` and the export writing `Column(…)` come from the same place.
- *
- * The catalog's own entry wins any collision, and the union runs only over a record that EXISTS — a
- * catalog with none stays [Lookup.Unconfigured] rather than acquiring an export it was deliberately
- * kept out of, which is the Remote Compose catalog's case: it has no record on purpose, because
- * Remote Compose is not written by the Compose exporter.
- *
- * Local for now, external eventually, for the same reason and on the same issue as the catalog:
- * when the foundation is published like any other catalog (#819) this loads its record instead of a
- * packaged one.
- *
- * ## What this still does not pin
- *
- * A record is **not revision-pinned**. A design pinned to an older catalog revision exports against
- * whatever `components.json` is on disk now, so regenerating the file changes what a pinned export
- * produces. Fixing that means storing a record per catalog *revision*, which needs a retention
- * story this option does not have — recorded here rather than left to be discovered.
- *
- * ## Why a source rather than a value
- *
- * The record is a build output. In a dev loop it is regenerated while the server keeps running, and
- * a host that parsed it once at startup would export against a catalog the developer has already
- * replaced — the export would look stale for no visible reason. So the file's identity is checked
- * on every call and the parse is reused only while it holds.
- *
- * The identity is `(path, length, lastModified)`. Not a digest: hashing the file on every export
- * costs more than it buys, and the failure mode a digest would catch — a rewrite that keeps both
- * size and timestamp — needs a deliberate `touch -r`. A path that no longer exists is null again
- * rather than the last good parse, because a caller asking "is there a record?" should get today's
- * answer.
- *
- * ## Failures are null, once
- *
- * A missing file or unreadable JSON yields null, and the executor turns that into a refusal naming
- * the reason. It is reported to stderr **once per identity** rather than on every export: a broken
- * record is a startup-shaped problem, and a builder exporting in a loop would otherwise fill the
- * log with the same line.
+ * A record is not revision-pinned: a design pinned to an older catalog revision exports against the
+ * file on disk now. The parse is reused while `(path, length, lastModified)` holds, a vanished file
+ * reads as null again, and a bad file is reported to stderr once per identity.
  */
 internal class ComponentRecordSource(
   private val files: Map<String, File>,

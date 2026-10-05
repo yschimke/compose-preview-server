@@ -11,10 +11,7 @@ import ee.schimke.composeai.daemon.protocol.UiMode
  * - [ServePerPreviewLiveHost] — a daemon per per-preview bundle
  *   (`bundle/previews/<daemon-id>.png`).
  *
- * Both front a baked catalog and re-render only the requests the baked PNG can't satisfy, mapping
- * the catalog id to its daemon-preview id via the same alias. Extracted so the "does this override
- * need a fresh render vs. the baked sticker?" predicate is defined once and can't drift between the
- * two hosts.
+ * Both front a baked catalog and re-render only what the baked PNG cannot satisfy.
  */
 internal object CatalogLiveRouting {
 
@@ -55,15 +52,9 @@ internal object CatalogLiveRouting {
     else daemonIdForOverrideRender(previewId, overrides, alias, bakedTheme, bakedRcPlayer)
 
   /**
-   * Whether [o] would change pixels vs the preview's baked sticker, so the render must go to the
-   * daemon rather than replay the baked PNG. The baked variant already encodes its **theme**
-   * ([bakedTheme], which the session resolves — an explicit `…__light` / `…__dark` id segment, the
-   * record's own declaration, or the folded pair it belongs to) and every other axis at its
-   * discovery-time default, so the overrides that merely restate what it already shows
-   * ([withoutBakedNoOps]) stay baked (keeping browsing instant); anything else — a font scale,
-   * device, locale, orientation, a named knob, a feature override (gestures / focus / keyboard / …)
-   * — needs a re-render. Uses data-class equality against a defaults instance so a newly added
-   * override field is covered without touching this predicate.
+   * Whether [o] would change pixels vs the baked PNG, so the render must go to the daemon.
+   * Overrides that restate what the baked variant shows ([withoutBakedNoOps]) stay baked. Compares
+   * against a defaults instance so a newly added override field is covered automatically.
    */
   fun overridesAffectRender(
     previewId: String,
@@ -78,18 +69,9 @@ internal object CatalogLiveRouting {
    * exactly when [overridesAffectRender] is false — i.e. when the baked pixels are a truthful
    * answer to the request.
    *
-   * This is what makes a baked fallback *legible* (#3449). Serving the snapshot for a request that
-   * asked for `?fontScale=2.0` produces pixels that are byte-identical to the un-overridden render,
-   * so nothing in the response body distinguishes "the override had no visual effect" from "the
-   * override was never applied" — a caller comparing renders across override values reads the first
-   * and concludes wrongly. The HTTP layer turns a non-empty list into a refusal (or, when the
-   * caller opted into the snapshot, into response headers naming exactly these params).
-   *
-   * [overridesAffectRender] stays the authority on *whether* anything was dropped — it compares
-   * against a defaults instance, so a newly added override field is covered without touching this
-   * function. The per-field names below are the human detail on top; a field that affects the
-   * render but isn't named here (one only the WebSocket lanes can set, or one added later) still
-   * reports, as the catch-all `overrides`.
+   * Makes a baked fallback legible: the HTTP layer refuses a non-empty list (or names it in
+   * response headers when the caller opted into the snapshot), since the snapshot's pixels cannot
+   * show that an override was ignored. A dropped field not named below reports as `overrides`.
    */
   fun droppedOverrideNames(
     previewId: String,
@@ -141,63 +123,23 @@ internal object CatalogLiveRouting {
    * The overrides an **IR replay** of [previewId] cannot honour, named as the caller spelled them —
    * the daemon-lane counterpart of [droppedOverrideNames].
    *
-   * A schema-v5 IR-backed preview is redrawn by replaying a captured document, never by re-running
-   * the composable that authored it (`BundleIrReplayStore` / `RemoteComposeIrReplay`). So every
-   * axis whose *only* route to the pixels is a fresh composition is inert: the daemon renders,
-   * answers `200`, and hands back bytes byte-identical to the baked snapshot. That is the #3449
-   * failure mode wearing a successful render's clothes — worse than the baked case it was written
-   * for, because `generation=daemon` reads as proof the override was applied.
+   * An IR-backed preview is redrawn by replaying a captured document, so an axis whose only route
+   * to the pixels is a fresh composition renders byte-identical to the baked snapshot while
+   * answering `200`.
    *
-   * Deliberately a **narrow allow-list of the inert axes** rather than the inverse of what replay
-   * honours. Getting this set too wide turns working renders into refusals, so an axis earns its
-   * place here only by having **no representation in the document at all** — not merely by looking
-   * inert against one catalog:
-   * - `themeProvider` and the `knob.` named overrides — both are seeded *into* a composition
-   *   (`PreviewWrapperProvider` substitution, the named-override planner). There is no composition,
-   *   and neither has a document-side counterpart to fall back on.
-   * - `localeTag` — `stringResource()` resolved to a literal during capture and the text op holds
-   *   that literal. Unlike the font/theme pair below, `RemoteContext` exposes no locale among its
-   *   system variables (`ID_*` covers time, window, touch, sensors, density, API level, font size,
-   *   dates), so a document has no way to defer the choice to the host.
-   * - **string** `rc.` named values. The rest of the Remote Compose facet does reach the replayed
-   *   document through the player's `StateUpdater` — `rc.shaderColor` and `rc.progress` both move
-   *   pixels on `remote-m3` — but a string seed does not land in the alpha player
-   *   (`RemoteContext.setNamedStringOverride` → `overrideText` → `RemoteComposeState.overrideData`
-   *   is structurally identical to the float path that works, so the divergence is downstream of
-   *   anything this repo controls). Reported as un-applied until the player honours it; the day it
-   *   does, this entry comes out and `IrReplayDroppedOverridesTest` is what notices.
+   * Deliberately a narrow allow-list: an axis is listed only when the document has no
+   * representation of it at all, because too wide a list turns working renders into refusals.
+   * - `themeProvider` and `knob.` overrides are seeded into a composition that does not exist.
+   * - `localeTag`: strings were resolved at capture, and `RemoteContext` has no locale variable.
+   * - **string** `rc.` named values do not land in the alpha player (float ones do); remove this
+   *   entry when it does, and `IrReplayDroppedOverridesTest` will notice.
    *
-   * **`fontScale` and `uiMode` are deliberately absent, and that is the subtle one.** They look
-   * inert against `remote-m3` — every render there came back byte-identical to the baked snapshot —
-   * but that is a property of *those documents*, not of replay. A document can defer both to the
-   * host and resolve them at paint time, with no recomposition:
-   * `RemoteComposeView.getDefaultTextSize()` is `14f * density * Configuration.fontScale`, and
-   * `onDraw` derives the paint theme from `Configuration.isNightModeActive()` whenever the player's
-   * own theme is `THEME_UNSPECIFIED`. Both read the live Android `Configuration`, which
-   * `RenderEngine` already sets per render spec — so the wiring is end-to-end today and a document
-   * that reads the host values genuinely responds. Naming them here would 409 an override the
-   * replay can honour, which is exactly the false-refusal failure this list's narrowness exists to
-   * prevent.
+   * `fontScale` and `uiMode` are deliberately absent: a document can defer both to the host
+   * `Configuration` at paint time (a `-PcomposePreview.rcDensity=host` capture does), so refusing
+   * them would be a false refusal. Size, density and device reach the player through the capture's
+   * `displayMetrics`.
    *
-   * What was wrong, until the `rcDensity` capture setting landed upstream, was the *reason* given
-   * for `fontScale`'s silence on `remote-m3`: "the catalog simply baked absolute text sizes at
-   * capture", i.e. authored behaviour. It was not authored. The capture called
-   * `RemoteDensity.from(displayInfo)`, which folds density **and** font scale into literal
-   * constants, and it passed no font scale into `RemoteCreationDisplayInfo` — whose own parameter
-   * defaults to `1f` — so every document baked `fontScale = 1` no matter what the render spec asked
-   * for. A catalog opts out of that with `-PcomposePreview.rcDensity=host`, which captures against
-   * `RemoteDensity.Host` and leaves the sp→px conversions as expressions over the player's
-   * `FONT_SIZE` variable. The conclusion here is unchanged and the entry stays absent — a
-   * host-captured document genuinely responds, so refusing the axis wholesale would be the false
-   * refusal — but the silence of a constant-folded one is a capture setting, not something its
-   * author chose.
-   *
-   * The size / density / device family is **not** listed either: those reach the player through the
-   * capture's `displayMetrics`, so a replay can answer them.
-   *
-   * Still runs [withoutBakedNoOps] first, for the same reason [droppedOverrideNames] does. It is a
-   * no-op for the axes that remain — none of them is ever satisfied by baked pixels — but it keeps
-   * the two predicates honest about the same baseline if this list ever grows.
+   * Runs [withoutBakedNoOps] first so both predicates share a baseline.
    */
   fun irReplayDroppedOverrideNames(
     previewId: String,
@@ -220,28 +162,12 @@ internal object CatalogLiveRouting {
   }
 
   /**
-   * [o] with the fields the baked PNG **already satisfies** cleared, so what remains is exactly
-   * what a baked answer would fail to honour. Three of them:
-   * - a `uiMode` matching [bakedTheme] — the mode the sticker was drawn in, resolved by the session
-   *   that owns the manifest ([ServeHost.bakedTheme] / [ServeBakedTheme]) and defaulting to the
-   *   id's own `__light` / `__dark` token for a caller with no session in hand. A null theme names
-   *   nothing, so every `uiMode` survives and routes to a real render.
-   * - `clearBackground = false` (the `background=default` / `show` / `on` spellings). That asks to
-   *   *preserve* the preview's authored background, which is what the baked render drew — so it is
-   *   satisfied, not dropped. Only `true` ("crisp outline", strip the background) needs a
-   *   re-render.
-   * - an `rcPlayer` naming [bakedRcPlayer] — the player the capture actually went through, which
-   *   the session resolves ([ServeHost.bakedRcPlayer]) and which is
-   *   [RemoteComposePlayerKind.EMBEDDED] for every Remote Compose preview that does not pin the
-   *   view-backed lane. A **null** names nothing, exactly as a null [bakedTheme] does, so on a
-   *   preview with no captured document — or for a caller with no session in hand — every
-   *   `rcPlayer` survives and routes to a real render. The baked PNG *is* the answer to "draw this
-   *   with that player", and reporting it dropped refused a request the snapshot satisfies exactly.
-   *   That refusal is why a bare browse and `?rcPlayer=androidx-embedded` could not be made to
-   *   agree, and so why the viewer had to keep stamping the parameter onto every default link. Any
-   *   OTHER player is a genuine re-render and still counts as dropped — including
-   *   `androidx-embedded` on a preview that baked through the view player, which is the case this
-   *   reads the host for rather than assuming away.
+   * [o] with the fields the baked PNG already satisfies cleared:
+   * - a `uiMode` equal to [bakedTheme] ([ServeHost.bakedTheme] / [ServeBakedTheme]);
+   * - `clearBackground = false`, which preserves the authored background the baked render drew;
+   * - an `rcPlayer` equal to [bakedRcPlayer] ([ServeHost.bakedRcPlayer]), the capture's player.
+   *
+   * A null [bakedTheme] or [bakedRcPlayer] satisfies nothing, so those overrides route to a render.
    */
   private fun withoutBakedNoOps(
     previewId: String,
@@ -258,12 +184,8 @@ internal object CatalogLiveRouting {
             if (rc.player == bakedRcPlayer) rc.newBuilder().also { it.player = null }.build()
             else rc
           }
-          // An `rc` facet that held nothing but that player is now empty, and an empty facet is not
-          // the same as no facet to the `!= PreviewOverrides()` comparison above.
-          //
-          // A `playerId` is never a no-op here: it names a player by an id the baked capture did
-          // not record (the capture records only the built-in it went through), so it always needs
-          // the renderer — and a facet holding only one is not empty.
+          // An emptied facet must become null for the `!= PreviewOverrides()` comparison. A
+          // `playerId` is never a no-op: the capture records only the built-in player.
           ?.takeIf {
             it.profile != null ||
               it.player != null ||

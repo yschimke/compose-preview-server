@@ -6,41 +6,17 @@ import java.util.concurrent.locks.ReentrantLock
 import kotlin.concurrent.withLock
 
 /**
- * The render-history timeline in **project mode** — computed from the local repository instead of
- * read from a published `history.json`.
+ * The render-history timeline in **project mode**, computed from the local clone's delivery branch
+ * ([PreviewHistory.read] joined through its `baselines.json`) instead of fetched as a published
+ * `history.json`, and inlined into the viewer page for `<cp-history-menu>`.
  *
- * The hosted viewer has no repo, so CI precomputes [PreviewHistoryManifest] and the viewer fetches
- * it from `raw.githubusercontent.com`. `serve` against a local checkout is the mirror image: there
- * is no delivery branch to fetch from, but the delivery branch's *commits* are usually right there
- * in the clone (`compose-preview/main`, or its remote-tracking twin). So the same timeline is
- * derived on demand — [PreviewHistory.read] over the local objects, joined to preview ids through
- * the `baselines.json` that ships on that same ref — and inlined into the viewer page, which
- * `<cp-history-menu>` already prefers over the fetch.
+ * Old renders are served by **blob sha** ([renderBytes], `/history/render/<sha>.png`): the sha is
+ * already in the manifest, it is content-addressed, and a sha not in [blobs] is refused, so the
+ * endpoint can never hand out an arbitrary object from the repository.
  *
- * ### What a chip links to
- *
- * Hosted mode addresses an old render as `raw.githubusercontent.com/<repo>/<commit>/<path>`, which
- * a local checkout has no equivalent of. Rather than leave the entries non-navigable, this serves
- * the bytes itself, addressed by **blob sha** ([renderBytes], behind `/history/render/<sha>.png`):
- *
- * - the sha is already in the manifest — [PreviewHistoryManifest.ManifestVersion.blob] — so no
- *   commit+path resolution is needed at request time, and nothing about the URL can be steered by a
- *   path;
- * - it is content-addressed, so two commits carrying the same render share one URL and one cache
- *   entry;
- * - and it is trivially constrained: a sha not in [blobs] is refused, so the endpoint can only ever
- *   hand out renders this timeline already names — never an arbitrary object from the repository's
- *   store (a source file, a secret in an old commit).
- *
- * ### Cost
- *
- * One `git log --raw` over the delivery branch is ~1.6s at 770 commits, which is far too slow to
- * repeat per page view, so the whole manifest is computed once and memoised for [refreshMillis].
- * Re-reading rather than caching forever matters for the case this feature exists to serve: someone
- * fetches the delivery branch mid-session and expects the strip to pick the new publishes up.
- *
- * Everything that touches git is injected ([git], [readBlobBytes], [now]) so the resolution,
- * memoisation and gating rules are unit-testable without a repository.
+ * The `git log --raw` costs seconds, so the manifest is memoised for [refreshMillis] (not forever:
+ * a mid-session fetch should show up). Git access is injected ([git], [readBlobBytes], [now]) for
+ * tests.
  */
 class ServeProjectHistory(
   private val repoRoot: File,

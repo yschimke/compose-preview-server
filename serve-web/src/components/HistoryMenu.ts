@@ -1,4 +1,4 @@
-// `<cp-history-menu>` — the viewer's render-history menu. Replaces `assets/viewer-history.js`.
+// `<cp-history-menu>` — the viewer's render-history menu.
 //
 // A MENU, on the same `<details>` shape as Revision and Theme beside it, not a strip of chips. It
 // was a horizontal row of dated chips, which is the exact pattern #3858 removed one row up: a wall

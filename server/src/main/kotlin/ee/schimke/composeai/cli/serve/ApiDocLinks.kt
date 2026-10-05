@@ -2,60 +2,22 @@ package ee.schimke.composeai.cli.serve
 
 /**
  * The **API reference links** behind a usage snippet: every `androidx.` / `android.` symbol the
- * cleaned Compose code actually uses, resolved to its KDoc page on `developer.android.com`
- * (issue #4331).
+ * cleaned Compose code uses, resolved to its KDoc page on `developer.android.com`.
  *
- * ### Why the snippet, and not the preview
+ * The snippet rather than the preview, because [PlaygroundSourceCleaner] has already pruned its
+ * imports to exactly what the code touches; those imports plus [QUALIFIED] are the render's API.
  *
- * A catalog preview is a `@Preview` function in the catalog's own package — `ImageBackgroundButton`
- * in `ee.schimke.wearm3catalog` — and nothing about that name says the component on screen is
- * `androidx.wear.compose.material3.Button`. The *usage snippet* does: [PlaygroundSourceCleaner] has
- * already reduced the sticker to the plain Compose a reader would write, and pruned its imports to
- * exactly what that code touches. So the snippet's imports — plus the APIs the cleaner chose to
- * write out in full ([QUALIFIED]) — **are** the API surface of the render, with no join table to
- * maintain and nothing for a catalog to declare.
+ * A composable's page is `<pkg>/<Name>.composable` and anything else's is `<pkg>/<Name>` (the other
+ * 404s), so [linkFor] infers the kind from use:
+ * - a qualifier, annotation or type ⇒ the declaration page;
+ * - outside a Compose namespace ([composableNamespace]) ⇒ the declaration page;
+ * - called in statement position (preceded by `{`, `}`, `)`, `;`, `->` or the start, not by `=`,
+ *   `,` or `(`) ⇒ the composable page;
+ * - anything else (a bare property such as `CircleShape`) ⇒ no link.
  *
- * ### The two page shapes, and why the kind has to be inferred
- *
- * `developer.android.com` publishes a top-level `@Composable` function at `<pkg>/<Name>.composable`
- * and a class / interface / object / annotation at `<pkg>/<Name>` — and the *other* one 404s. An
- * import carries no signature to tell them apart, so [linkFor] reads how the snippet uses the name:
- *
- * - used as a **qualifier** (`ButtonDefaults.buttonColors()`), an **annotation** (`@Composable`),
- *   or a **type** (`: Modifier`, `<Dp>`) ⇒ the declaration page. A composable is never any of
- *   those.
- * - outside a Compose namespace ([composableNamespace]) ⇒ the declaration page, without consulting
- *   the call site at all. `Button(onClick = { Intent(ctx, T::class.java) })` puts a constructor
- *   exactly where a composable call sits, and nothing in the braces alone tells a callback lambda
- *   from a slot one — but `android.content.Intent` has no `.composable` page to be wrong about.
- * - otherwise, **called in statement position** ⇒ the composable page. "Statement position" is the
- *   discriminator that matters, and it is decided by the character before the call rather than by
- *   the start of a line: a value called for its constructor is always part of a larger expression
- *   (`color = Color(0xFF…)`, or that same argument wrapped onto a line of its own), so the
- *   character before it is `=` or `,` or `(`, while a composable call follows a statement — `{`,
- *   `}`, `)`, `;`, `->`, or the start of the code. Line starts alone got this wrong on every
- *   wrapped argument.
- * - a name that is neither ⇒ no link. A bare `shape = CircleShape` names a **property**, and dokka
- *   files properties under their package summary rather than giving each a page.
- *
- * Comments and string literals are blanked before any of that runs ([blankCommentsAndStrings]).
- * Both produced wrong answers on real catalog source: a `Slider.kt` mention in a KDoc line read as
- * a qualifier, and `contentDescription = "Add"` made an `Icons.Filled.Add` import look like a
- * symbol the code used by name.
- *
- * ### What is deliberately dropped
- *
- * - Non-`androidx`/`android` packages — a catalog's own helpers have no published reference.
- * - Lower-case leaves (`fillMaxSize`, `dp`, `remember`) and `Local…` composition locals: extension
- *   functions, properties and vals, all filed under a package summary with no page of their own.
- * - The icon packs (`androidx.compose.material.icons.**`), whose members are extension properties
- *   on `Icons.Filled` and friends, and are written `Icons.Filled.Add` rather than by their imported
- *   name anyway.
- *
- * Measured against 244 live snippets spanning every catalog on the public preview host, every URL
- * this produces resolves (227 distinct pages, zero 404s). `ApiDocLinksTest` pins the shapes that
- * got it there, so a "simplification" that drops one of them fails rather than silently starts
- * publishing dead links.
+ * Comments and strings are blanked first ([blankCommentsAndStrings]). Non-Android packages,
+ * lower-case leaves, `Local…` locals and the icon packs have no page and are dropped.
+ * `ApiDocLinksTest` pins these shapes; measured against every live catalog with zero 404s.
  */
 internal object ApiDocLinks {
 

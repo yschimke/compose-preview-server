@@ -1,29 +1,14 @@
-// `<cp-inspect-layers>` — the viewer's inspection overlays. Replaces `assets/inspect.js`.
+// `<cp-inspect-layers>` — the viewer's inspection overlays: numbered boxes over the render plus a
+// legend beside it, one checkbox per layer in the Overrides panel's "Inspect" group. Box + badge +
+// legend (hover either to light the other) is the compare page's idiom, since labels are wider
+// than their boxes.
 //
-// Draws what the render is MADE OF over the frame it produced: numbered boxes on the image plus a
-// legend beside it. Each layer is a checkbox in the Overrides panel's "Inspect" group — slots,
-// accessibility (what a screen reader sees), typography, theme attributes, and layout.
+// Every source reports bounds in the render's pixel space, the snapshot `<img>`'s natural size, so
+// one uniform scale places every layer. Renders nothing itself; it fills server-rendered
+// containers. A second instance on the focused comparison names its own DOM via `inspect/host.ts`.
 //
-// The box + numbered-badge + legend idiom is deliberately the compare page's, because a spec label
-// is far wider than the box it describes: the box carries an index, the readable text lives in the
-// legend, and hovering either one lights up the other.
-//
-// Geometry: every source reports bounds in the RENDER's own pixel space, which is exactly the
-// snapshot `<img>`'s natural size — so one uniform scale places every layer, re-applied on resize
-// and whenever new pixels land.
-//
-// Renders nothing of its own; the layer and legend containers are server-rendered and this fills
-// them. `serve.css` hides the tag.
-//
-// Mounted on two surfaces. The viewer's tag carries no attributes and gets the wiring this element
-// was written for. The focused comparison mounts a second instance over its Actual panel, naming its
-// own frame, layer, legend and toggles — which is how the DERIVED semantics layers reach the page
-// where a parity report is filed. `inspect/host.ts` is the whole of that difference; nothing below
-// this line knows which page it is on.
-//
-// The decisions live next door: `inspect/entries.ts` (which nodes and findings become boxes at all,
-// and what each says), `inspect/layers.ts` (which endpoint a layer reads, and how a deep link names
-// it) and `inspect/host.ts` (which DOM it draws into).
+// Decisions live in `inspect/entries.ts` (what becomes a box), `inspect/layers.ts` (endpoints and
+// deep links) and `inspect/host.ts` (which DOM it draws into).
 
 import { ControllerElement, customElement } from "../controllerElement.js";
 import { whenParsed } from "../dom/whenParsed.js";

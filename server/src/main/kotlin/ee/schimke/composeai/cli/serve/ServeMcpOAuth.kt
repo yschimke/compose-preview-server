@@ -14,57 +14,20 @@ import kotlinx.serialization.json.JsonIgnoreUnknownKeys
 
 /**
  * The OAuth 2.1 façade an MCP client speaks, layered over the agent-grant flow in
- * [ServeAgentGrants].
+ * [ServeAgentGrants]. MCP clients discover auth only through RFC 9728 / RFC 8414 metadata, RFC 7591
+ * registration and an authorization-code + PKCE exchange, so the device grant alone was
+ * undiscoverable to them.
  *
- * ## Why this exists beside a device grant that already works
+ * An **adapter**, not a second authorization system:
+ * * `/oauth/authorize` opens an ordinary [ServeAgentGrantStore] request and redirects to the
+ *   existing approval page (same scopes, ceilings and audit);
+ * * [ServeHttpServer.handleAgentGrantDecision] still mints the grant; a pending authorization only
+ *   adds the redirect back to the client;
+ * * `/oauth/token` returns the grant's own `cpat_…` token.
  *
- * [docs/design/AGENT_ACCESS_GRANTS.md](../../../../../../../../docs/design/AGENT_ACCESS_GRANTS.md)
- * picked RFC 8628 for the right reason — the party needing the credential cannot render an approval
- * page — and the flow is sound. What it is not is *discoverable*. An MCP client that meets a `401`
- * has one script: read `WWW-Authenticate` for `resource_metadata`, fetch
- * [RFC 9728](https://datatracker.ietf.org/doc/html/rfc9728) protected-resource metadata, fetch
- * [RFC 8414](https://datatracker.ietf.org/doc/html/rfc8414) authorization-server metadata, register
- * itself with [RFC 7591](https://datatracker.ietf.org/doc/html/rfc7591), then run an authorization
- * code + PKCE exchange. It cannot be told in prose to POST `/agent-access/request` instead, because
- * nothing in the protocol gives an agent a place to read prose.
- *
- * So a client hitting this server got as far as the guess it makes when discovery 404s — an
- * unprompted registration attempt — and reported `Dynamic Client Registration rejected (HTTP 404)`.
- * The bespoke flow was reachable only by a human relaying `approveUrl` and a token by hand.
- *
- * ## What is actually new
- *
- * Very little, deliberately. This is an **adapter**, not a second authorization system:
- *
- * * `/oauth/authorize` opens an ordinary [ServeAgentGrantStore] request and redirects the browser
- *   to the approval page that already exists, so the human sees the same page, the same scope
- *   ladder, the same approver ceilings and the same audit line as before.
- * * The approval itself is unchanged — [ServeHttpServer.handleAgentGrantDecision] mints the grant.
- *   All this adds is a return leg: a pending authorization bound to that request id turns the
- *   decision page into a redirect back to the client.
- * * `/oauth/token` hands back **the grant's own token**, the same `cpat_…` string the device poll
- *   returns, which every gate on this server already accepts as `Authorization: Bearer`.
- *
- * There is no new credential type, no new lifetime, no new revocation path, and nothing here can
- * grant what an approver could not grant on the page.
- *
- * ## Refresh, and the line it does not cross
- *
- * Refresh tokens exist and are **session-scoped**: one renews an access token within the lifetime
- * an approver already chose, and dies with the grant — on its deadline, or the instant it is
- * revoked. Nothing here lengthens a decision, which is what lets it sit inside a design whose
- * promise is that no credential outlives one.
- *
- * The case it answers is real and previously had no answer: a client that lost its access token
- * mid-session had to interrupt a person for permission it had already been given, and a headless or
- * cloud client — with no browser to be interrupted in — simply stopped there. Rotation on every use
- * follows RFC 9700 §4.14.2, because a public client has nothing standing behind a leaked token.
- *
- * ## What is still not implemented
- *
- * No client secrets: every MCP client here is a public client, so RFC 7591 registration returns an
- * id only and the token endpoint is `none`-authenticated with PKCE carrying the proof — `S256`
- * only, never `plain`.
+ * Refresh tokens are session-scoped: they renew within the lifetime the approver chose and die with
+ * the grant; they rotate on every use (RFC 9700 §4.14.2). Every client is public: registration
+ * returns an id only, and PKCE is `S256` only.
  */
 object ServeMcpOAuth {
 

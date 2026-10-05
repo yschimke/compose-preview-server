@@ -32,48 +32,18 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.decodeFromJsonElement
 
 /**
- * A catalog's published `ui-builder.json`, composed with its component record into the capability
- * catalog the builder serves.
+ * A catalog's published `ui-builder.json` (the POLICY: platform, shelves, frame, templates, editor
+ * knowledge) composed with its `components.json` (the INVENTORY) into the capability catalog the
+ * builder serves; the read half of `docs/design/UI_BUILDER_CATALOG_CONTRACT.md`, joined on
+ * [UiBuilderComponentPolicy.record]'s `canonicalId`.
  *
- * This is the read half of `docs/design/UI_BUILDER_CATALOG_CONTRACT.md`. The catalog repositories
- * publish two files and this composes them:
+ * Policy is read from the published file even though the record carries a copy: a catalog need not
+ * have a record here at all, and `statusSemantics.components` is published for exactly this reader.
+ * The two agree by construction.
  *
- * - **`components.json`** is the INVENTORY: every composable the catalog's previews render, with
- *   the signature discovery recovered. It says what exists.
- * - **`ui-builder.json`** is the POLICY: platform, shelves, frame, templates, screen strategy, and
- *   per-component editor knowledge no signature holds. It says what a builder should do with it.
- *
- * Neither restates the other, and [UiBuilderComponentPolicy.record] is the join — the record's
- * `canonicalId`. Composing them here is what lets a catalog this binary has never heard of appear
- * in the chooser, which is the whole point of the contract.
- *
- * ## Why the policy is read from the published file rather than the record
- *
- * The record also carries each component's resolved `builder` policy, which would make this a
- * one-file read. The published file is used anyway, and not as a workaround:
- *
- * - **A catalog need not have a record here at all.** The whole point is that a catalog this binary
- *   has never heard of can be served, and its record is a separate file that may be absent, stale,
- *   or on a schema this build will not read. Policy that only arrives with an inventory is policy
- *   that cannot describe a catalog of builtins.
- * - **`statusSemantics.components` exists for exactly this reader.** It is published so a consumer
- *   holding the file can pair a builder id with a record entry, and dropping it in favour of the
- *   record's copy would make a published field nothing reads — which is how a field stops being
- *   maintained.
- *
- * The two agree by construction, because the generator writes this file FROM that field, so this is
- * a choice about which of two equal sources is the contract — not about which is available.
- *
- * ## What this does not do
- *
- * It does not decide anything the published file does not say. A component the file has no policy
- * for is still admitted — an unannotated record component belongs on the shelf, which is why
- * [UiBuilderStatusSemantics.componentIdPrefix] is published at all — and it is admitted with the
- * defaults the record supports, not with values invented on the catalog's behalf. Where the file
- * and this reader could disagree about a derived id, the frozen goldens and
- * `.github/scripts/ui-builder-equivalence.sh` are what catch it: that gate exists so this
- * composition can be proved equal to what the server synthesises today, per catalog, before any
- * catalog stops being synthesised.
+ * It invents nothing: a component with no policy is admitted with the record's defaults (see
+ * [UiBuilderStatusSemantics.componentIdPrefix]). `.github/scripts/ui-builder-equivalence.sh` and
+ * the frozen goldens prove the composition equals what the server synthesises.
  */
 internal object PublishedUiBuilderCatalog {
 

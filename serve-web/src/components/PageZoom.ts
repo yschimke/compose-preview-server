@@ -1,36 +1,14 @@
 // `<cp-page-zoom>` — makes a design page's sheet readable: drill in by
 // double-click, zoom about the pointer with ⌘/Ctrl + wheel, drag to pan, and one
-// subtle corner control to get back out.
+// corner control to get back out. Specimen sheets are inlined at design size
+// (thousands of px wide) into a narrow column; being SVG, a transform keeps them
+// sharp.
 //
-// WHY THIS SURFACE NEEDS IT AT ALL
-//
-// A specimen sheet is inlined at the size the design file drew it — m3-catalog's
-// Styles page is 6263 px across — and it lands in a content column a sixth of
-// that. Every type specimen, swatch number and elevation label on it is therefore
-// sub-pixel: the page can be looked at but not read. Because the sheet is SVG
-// rather than a raster, a transform is all it takes; the drawing stays vector
-// sharp at any factor.
-//
-// WHAT IT DRIVES, AND WHY THAT IS ONE ELEMENT
-//
-// `.cp-page-canvas` — the layer holding the export, the component overlays over
-// it and the renders inside those. One transform moves the sheet and its whole
-// instrumentation together, so a slot cannot come unstuck from the shape it
-// stands in. This element sits OUTSIDE that layer, and outside the stage
-// altogether: a control that panned away with the sheet could not be reached to
-// undo the pan, and one parked in the stage's corner could not be reached from a
-// sheet two screenfuls tall either. It renders into the page's sticky control
-// row, and reaches the stage by lookup rather than by ancestry.
-//
-// COMPONENT BOUNDARY
-//
-// The page's overlay measurement, lane flip and per-node scoring live in the
-// neighbouring `<cp-design-page>` controller. Gesture state remains separate so
-// its viewport arithmetic stays testable without that page-sized controller. The
-// coupling is deliberately one-way and through the DOM: this element reads
-// `.cp-page-selected` to know a node is
-// selected (so Escape unwinds the selection before the zoom) and writes
-// `--cp-page-zoom` on the stage for the stylesheet to counter-scale the marks by.
+// It transforms `.cp-page-canvas`, so the sheet and its overlays move together,
+// but renders outside that layer (into the sticky control row) so the control
+// never pans out of reach. Coupling with `<cp-design-page>` is one-way through
+// the DOM: it reads `.cp-page-selected` (Escape unwinds a selection first) and
+// writes `--cp-page-zoom` on the stage for the stylesheet to counter-scale marks.
 
 import { Fragment, h, type VNode } from "../vue.js";
 import { customElement } from "../controllerElement.js";

@@ -17,35 +17,11 @@ import kotlinx.serialization.json.jsonObject
 // ---------------------------------------------------------------------------
 // Internal DTOs for the daemon-facing tool/resource catalog.
 //
-// The MCP Kotlin SDK owns the wire and session layer — transport, JSON-RPC
-// framing, request dispatch, and the `initialize` handshake. These types are
-// deliberately NOT a second implementation of that: they are the boundary
-// between the SDK and the ~5k lines of tool/resource code in `DaemonMcpServer`,
-// so an SDK bump touches one adapter (`McpServer.kt`'s `toSdk*` functions)
-// rather than every tool. That indirection is the reason the file still exists.
-//
-// What it must NOT hold is a parallel copy of a shape the SDK already owns on
-// the wire. It used to: an entire JSON-RPC envelope layer (`McpRequest` /
-// `McpResponse` / `McpNotification` / `McpError` / `McpErrorCodes`), the
-// `initialize` handshake (`InitializeParams` / `InitializeResult` /
-// `Implementation` / `ClientCapabilities` / `ServerCapabilities` /
-// `ToolsCapability` / `ResourcesCapability`), and the request-param types
-// (`CallToolParams` / `ReadResourceParams` / `SubscribeParams` /
-// `UnsubscribeParams` / `ResourceUpdatedParams`). Every one was superseded by
-// the SDK and left behind, referenced by nothing.
-//
-// Several were actively hazardous rather than merely dead, because they shared
-// a simple name with a live type from another package: `InitializeResult`,
-// `ServerCapabilities`, `ClientCapabilities` and `InitializeParams` all also
-// exist in `ee.schimke.composeai.daemon.protocol` (the daemon's own wire
-// contract, which is a different protocol), and `Implementation` /
-// `ServerCapabilities` also exist in the SDK. An IDE auto-import had three
-// candidates for one name, only one of them correct, and picking the dead one
-// compiled clean.
-//
-// Keep that shape: types here exist to decouple the tool catalog, not to
-// restate the SDK. If a new type would just mirror an SDK wire shape, use the
-// SDK's.
+// The MCP Kotlin SDK owns the wire and session layer. These types only decouple
+// `DaemonMcpServer`'s tool code from it, so an SDK bump touches one adapter
+// (`McpServer.kt`'s `toSdk*` functions). Never mirror an SDK wire shape here:
+// several daemon-protocol and SDK types share simple names, and a duplicate
+// invites the wrong auto-import.
 //
 // References:
 // - https://modelcontextprotocol.io/specification/2025-06-18/basic

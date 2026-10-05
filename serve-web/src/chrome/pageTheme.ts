@@ -1,5 +1,5 @@
 // The **Page theme** setting: whether the site chrome follows the SELECTED PREVIEW THEME or the
-// visitor's operating system. Replaces `assets/page-theme.js`.
+// visitor's operating system.
 //
 // The catalog's Theme control re-renders the previews; until this existed it said nothing about the
 // page around them, which followed `prefers-color-scheme` alone. So opening `…/m3-catalog/?theme=dark`
