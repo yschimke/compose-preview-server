@@ -22,6 +22,7 @@ import ee.schimke.composeai.uibuilder.protocol.LayoutDirectionV1
 import ee.schimke.composeai.uibuilder.protocol.ThemeV1
 import ee.schimke.composeai.uibuilder.protocol.WindowPostureV1
 import ee.schimke.composeai.uibuilder.service.AuthenticatedUiBuilderActor
+import ee.schimke.composeai.uibuilder.service.PublishedUiBuilderCatalog
 import ee.schimke.composeai.uibuilder.service.RevisionPinnedUiBuilderExport
 import kotlin.test.Test
 import kotlin.test.assertEquals

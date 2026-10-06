@@ -27,6 +27,7 @@ import ee.schimke.composeai.uibuilder.service.FileUiBuilderAssetStore
 import ee.schimke.composeai.uibuilder.service.PackagedUiBuilderRenderBundle
 import ee.schimke.composeai.uibuilder.service.PersistentUiBuilderService
 import ee.schimke.composeai.uibuilder.service.ProductionUiBuilderExportExecutor
+import ee.schimke.composeai.uibuilder.service.PublishedUiBuilderCatalog
 import ee.schimke.composeai.uibuilder.service.UiBuilderBranchPort
 import ee.schimke.composeai.uibuilder.service.UiBuilderCatalogExecutor
 import ee.schimke.composeai.uibuilder.service.UiBuilderDesignStateStore
