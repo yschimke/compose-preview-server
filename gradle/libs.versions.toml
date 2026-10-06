@@ -346,7 +346,9 @@ composeai-contracts = "3.19.0"
 # height change (compose-ui-builder#438), grows a runtime-drawn frame when its layout changes after
 # the first frame (compose-ui-builder#430), and draws theme typefaces in device previews
 # (compose-ui-builder#434).
-composeai-ui-builder = "3.86.0"
+# 3.87.0 offers `remote-m3/remote-icon` on the widget palette and exports it as `RemoteIcon` from a
+# Material icon key (compose-ui-builder#497), so it leaves the published shelf's export refusals.
+composeai-ui-builder = "3.87.0"
 kotlinx-coroutines = "1.11.0"
 kotlinx-serialization = "1.11.0"
 ktor = "3.6.0"
