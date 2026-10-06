@@ -348,7 +348,10 @@ composeai-contracts = "3.19.0"
 # (compose-ui-builder#434).
 # 3.87.0 offers `remote-m3/remote-icon` on the widget palette and exports it as `RemoteIcon` from a
 # Material icon key (compose-ui-builder#497), so it leaves the published shelf's export refusals.
-# 3.88.0 adds `PackagedUiBuilderRenderBundle.digest()`, the identity of the PNG render pipeline,
+# 3.88.0 frames Wear widgets only in the predefined host shapes, ignoring a legacy padding or radius
+# override rather than drawing or refusing it (compose-ui-builder#501), which
+# RecordFreeComposeExportTest now expects.
+# It also adds `PackagedUiBuilderRenderBundle.digest()`, the identity of the PNG render pipeline,
 # which keys the designs page's thumbnail cache beside the server version (compose-ui-builder#502).
 composeai-ui-builder = "3.88.0"
 kotlinx-coroutines = "1.11.0"
