@@ -581,7 +581,7 @@ class PublishedRemoteM3CatalogEquivalenceTest {
    * one more type shortens this list and says so.
    *
    * The three the caller has to know about, and none of them is a mapping gap:
-   * - `RemotePageIndicatorState` and `ImageVector` are types no design value becomes;
+   * - `RemotePageIndicatorState` is a type no design value becomes;
    * - one callable is not public or internal, so no generated file can call it at all.
    */
   @Test
@@ -608,7 +608,8 @@ class PublishedRemoteM3CatalogEquivalenceTest {
     //
     // Twenty-six, not the twenty-seven this was written with: wear-m3-catalog#425 excludes
     // `remote-sticker`, the frame every preview is drawn inside, so the shelf no longer offers
-    // it and the exporter is no longer asked about it. Twenty-two of the twenty-six export.
+    // it and the exporter is no longer asked about it. Twenty-three of the twenty-six export: the
+    // icon joined them when compose-ui-builder learned to write its glyph from an icon key.
     assertEquals(
       26,
       byId.size,
@@ -790,9 +791,9 @@ class PublishedRemoteM3CatalogEquivalenceTest {
       }
 
     /**
-     * The four published components the widget exporter cannot write, and why each one.
+     * The three published components the widget exporter cannot write, and why each one.
      *
-     * Twenty-three of the twenty-seven do, which is the number this test exists to keep honest —
+     * Twenty-three of the twenty-six do, which is the number this test exists to keep honest —
      * and it was reported as twenty-four until the emitter started checking whether a recovered
      * signature is a callable a generated file can reach. `remote-m3/theme-specimen` has a
      * signature and is not public, so writing the call from its parameters produced source that
@@ -800,18 +801,17 @@ class PublishedRemoteM3CatalogEquivalenceTest {
      * moving the wrong way: a number that counts an uncompilable export as a success is what this
      * gate exists to stop.
      *
-     * The other three are a required parameter whose TYPE no design value becomes, and none is a
+     * The other two are a required parameter whose TYPE no design value becomes, and neither is a
      * mapping the emitter could add without the design model growing a way to say it: the page
-     * indicators want a `RemotePageIndicatorState`, a runtime object rather than a value, and the
-     * icon a `RemoteImageVector`, which a design carries as an asset key.
+     * indicators want a `RemotePageIndicatorState`, a runtime object rather than a value. The icon
+     * used to be the third, wanting a `RemoteImageVector`; compose-ui-builder now writes it by hand
+     * from a Material icon key (`Icons.<Style>.<Name>.toRemoteImageVector()`), with the catalog's
+     * `addCircle` when the design names none, so it exports (yschimke/remote-m3-catalog#12).
      */
     val EXPORT_REFUSALS =
       mapOf(
         "remote-m3/remote-horizontal-page-indicator" to
           "`state: RemotePageIndicatorState` and the design carries no value this generator can " +
-            "write as one",
-        "remote-m3/remote-icon" to
-          "`imageVector: RemoteImageVector` and the design carries no value this generator can " +
             "write as one",
         "remote-m3/remote-vertical-page-indicator" to
           "`state: RemotePageIndicatorState` and the design carries no value this generator can " +
