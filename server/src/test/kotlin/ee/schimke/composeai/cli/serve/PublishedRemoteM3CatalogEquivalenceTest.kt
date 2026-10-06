@@ -793,8 +793,8 @@ class PublishedRemoteM3CatalogEquivalenceTest {
     /**
      * The three published components the widget exporter cannot write, and why each one.
      *
-     * Twenty-three of the twenty-six do, which is the number this test exists to keep honest —
-     * and it was reported as twenty-four until the emitter started checking whether a recovered
+     * Twenty-three of the twenty-six do, which is the number this test exists to keep honest — and
+     * it was reported as twenty-four until the emitter started checking whether a recovered
      * signature is a callable a generated file can reach. `remote-m3/theme-specimen` has a
      * signature and is not public, so writing the call from its parameters produced source that
      * imports and invokes something no other file may name. Found in review, and worth the count
