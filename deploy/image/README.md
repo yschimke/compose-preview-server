@@ -717,10 +717,11 @@ and `Path=/`. A cookie domain of `preview.coo.ee` cannot cover `ui.coo.ee`; the 
 never automatically widens it to `coo.ee`. Every subdomain of `coo.ee` receives the
 shared session, so this configuration assumes control of that whole domain.
 
-When widening an existing `Domain=preview.coo.ee` deployment to `coo.ee`, clear the
-old `cp_gh_auth`, `cp_gh_state` and `cp_gh_regrant` cookies in the browser and sign in
-again. Browsers can retain both parent-domain variants; the server refuses ambiguous
-session/state cookies, and its host-only cleanup cannot remove an old domain variant.
+When widening an existing `Domain=preview.coo.ee` deployment to `coo.ee`, browsers keep
+the old `Domain=preview.coo.ee` cookies beside the new ones. The server expires the
+host-only variant and every variant scoped between the request's host and the configured
+domain whenever it sees them, and the callback accepts a state matching any `cp_gh_state`
+the browser sends, so existing visitors sign in again without clearing cookies by hand.
 
 The optional start URL makes `/start` on the builder hostname redirect to the guide.
 It does not relocate GitHub Pages. Serving the guide directly at `/start/` requires a

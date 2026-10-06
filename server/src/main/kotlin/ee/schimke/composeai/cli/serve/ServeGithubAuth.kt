@@ -234,10 +234,10 @@ class ServeGithubAuth(
     val originHost = originHostFor(call, siteHosts)
     val state = signedState(nonce(), returnTo, originHost)
     val secure = isSecure(call, config.callbackBaseUrl, config.trustForwardedHeaders)
-    // A host-only `cp_gh_state` left from before a cookie domain was configured would sit beside
-    // the new one, and a callback that sees two values refuses both. The browser stores the two
+    // A host-only `cp_gh_state`, or one scoped to a narrower domain, left from before the current
+    // cookie domain was configured would sit beside the new one. The browser stores them
     // separately, so the order of these lines does not matter to it.
-    clearHostOnlyVariant(call, STATE_COOKIE, secure)
+    clearStaleVariants(call, STATE_COOKIE, secure)
     call.response.cookies.append(stateCookie(state, maxAge = STATE_TTL_SECONDS, secure = secure))
     call.respondRedirect(authorizeUrl(call, state))
   }
@@ -263,12 +263,23 @@ class ServeGithubAuth(
    */
   suspend fun RoutingContext.handleCallback(siteHosts: Set<String> = emptySet()) {
     val state = call.request.queryParameters["state"].orEmpty()
-    val expected = call.request.soleCookieValue(STATE_COOKIE).orEmpty()
+    // Every value, not just a sole one: a stale `cp_gh_state` from an earlier, narrower cookie
+    // domain (`Domain=preview.coo.ee` before it was widened to `coo.ee`) is sent beside the fresh
+    // one, and a sign-in started on a sibling host cannot clear it, since a browser only accepts a
+    // `Domain` its own host is under. The check is unchanged in substance: the query's state must
+    // be one this browser holds in a cookie, which a cross-site request cannot arrange.
+    val held = call.request.cookieValues(STATE_COOKIE)
     val code = call.request.queryParameters["code"].orEmpty()
     val statePayload = verifyState(state)
     if (
-      state.isBlank() || code.isBlank() || statePayload == null || !tokensMatch(state, expected)
+      state.isBlank() ||
+        code.isBlank() ||
+        statePayload == null ||
+        held.none { expected -> tokensMatch(state, expected) }
     ) {
+      // Clear the leftovers anyway, so a retry from this host starts from a single value.
+      val secure = isSecure(call, config.callbackBaseUrl, config.trustForwardedHeaders)
+      clearStaleVariants(call, STATE_COOKIE, secure)
       call.respondText("GitHub sign-in failed.", status = HttpStatusCode.Unauthorized)
       return
     }
@@ -303,10 +314,10 @@ class ServeGithubAuth(
     call.response.cookies.append(authCookie(session, maxAge = SESSION_TTL_SECONDS, secure = secure))
     call.response.cookies.append(stateCookie("", maxAge = 0, secure = secure))
     call.response.cookies.append(regrantCookie("", maxAge = 0, secure = secure))
-    // Written after the session above, and distinct from it in the browser's store (no `Domain`),
-    // so this removes only a host-only leftover and never the cookie just minted.
-    clearHostOnlyVariant(call, AUTH_COOKIE, secure)
-    clearHostOnlyVariant(call, STATE_COOKIE, secure)
+    // Written after the session above, and distinct from it in the browser's store (no `Domain`,
+    // or a narrower one), so this removes only leftovers and never the cookie just minted.
+    clearStaleVariants(call, AUTH_COOKIE, secure)
+    clearStaleVariants(call, STATE_COOKIE, secure)
     call.respondRedirect(
       if (returnHost == null) statePayload.returnTo
       else "https://$returnHost${statePayload.returnTo}"
@@ -380,7 +391,7 @@ class ServeGithubAuth(
     val returnTo = safeReturnTo(call.request.queryParameters["return"] ?: "/")
     val secure = isSecure(call, config.callbackBaseUrl, config.trustForwardedHeaders)
     call.response.cookies.append(authCookie("", maxAge = 0, secure = secure))
-    clearHostOnlyVariant(call, AUTH_COOKIE, secure)
+    clearStaleVariants(call, AUTH_COOKIE, secure)
     call.respondRedirect(returnTo)
   }
 
@@ -435,8 +446,8 @@ class ServeGithubAuth(
    * on top of the headers the route appended to the call.
    *
    * When a cookie domain is configured and the request carries two session values, the host-only
-   * one is cleared here: such a request reads as signed out ([soleCookieValue]), and this is what
-   * lets the next request read as signed in again.
+   * and narrower-domain ones are cleared here: such a request reads as signed out
+   * ([soleCookieValue]), and this is what lets the next request read as signed in again.
    */
   fun refreshSession(call: ApplicationCall, contentCacheControl: List<String> = emptyList()) {
     if (call.request.uri.substringBefore('?').startsWith(AUTH_PATH_PREFIX)) return
@@ -447,7 +458,7 @@ class ServeGithubAuth(
     // clearing cookie is empty and already expired, so it carries nobody's session even when a
     // shared cache keeps it.
     if (call.request.cookieValues(AUTH_COOKIE).size > 1) {
-      clearHostOnlyVariant(call, AUTH_COOKIE, secure)
+      clearStaleVariants(call, AUTH_COOKIE, secure)
       return
     }
     val cacheControl = call.response.headers.values(HttpHeaders.CacheControl) + contentCacheControl
@@ -801,14 +812,29 @@ class ServeGithubAuth(
   }
 
   /**
-   * With a cookie domain configured, expire the **host-only** cookie called [name] on this host.
-   * The browser keeps a host-only cookie and a domain cookie of the same name side by side, and one
-   * written before the domain was set would otherwise linger beside the current one. A no-op when
-   * cookies are host-only already: the ordinary clear covers that cookie.
+   * With a cookie domain configured, expire every **other** variant of the cookie called [name]
+   * this host can reach: the host-only one, and one scoped to each domain between this host and the
+   * configured cookie domain. The browser keeps each of those side by side with the current domain
+   * cookie, so one written before the domain was set — or before it was widened, as when
+   * `preview.coo.ee` became `coo.ee` to admit a sibling builder host — would otherwise linger and
+   * make every request carry two values. A no-op when cookies are host-only already: the ordinary
+   * clear covers that cookie.
+   *
+   * The narrower domains come from the request's host, which is safe here because these cookies
+   * only ever expire something: a forged `Host` names a domain the browser refuses to set, never a
+   * session wider than [cookieDomain].
    */
-  private fun clearHostOnlyVariant(call: ApplicationCall, name: String, secure: Boolean) {
-    if (cookieDomain == null) return
+  private fun clearStaleVariants(call: ApplicationCall, name: String, secure: Boolean) {
+    val domain = cookieDomain ?: return
     call.response.cookies.append(sessionCookie(name, "", 0, secure, domain = null))
+    val host = requestHost(call, config.trustForwardedHeaders) ?: return
+    if (!host.endsWith(".$domain")) return
+    // `m3.preview.coo.ee` under `coo.ee` yields `m3.preview.coo.ee` and `preview.coo.ee`.
+    generateSequence(host) { it.substringAfter('.', "") }
+      .takeWhile { it.length > domain.length }
+      .forEach { narrower ->
+        call.response.cookies.append(sessionCookie(name, "", 0, secure, domain = narrower))
+      }
   }
 
   private fun nonce(): String {

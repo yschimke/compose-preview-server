@@ -188,11 +188,79 @@ class ServeGithubSessionCookieTest {
   }
 
   @Test
-  fun `two state cookies fail the callback`() {
+  fun `the callback needs a state cookie matching the returned state`() {
     val server = server(auth())
     val (state, stateCookie) = start(server)
-    assertEquals(401, callback(server, state, "$stateCookie; $stateCookie").first)
+    assertEquals(401, callback(server, state, "cp_gh_state=other").first)
+    assertEquals(401, callback(server, state, "").first)
     assertEquals(302, callback(server, state, stateCookie).first, "one value still completes")
+  }
+
+  @Test
+  fun `a stale state cookie beside the fresh one does not fail the callback`() {
+    // preview.coo.ee widened its cookie domain to coo.ee for a sibling builder host. A browser that
+    // signed in before holds a `Domain=preview.coo.ee` state beside the new `Domain=coo.ee` one,
+    // and sends both to the callback; a sign-in started on the sibling host cannot clear it.
+    val server = server(auth(config(cookieDomain = "coo.ee")))
+    val (state, stateCookie) = start(server)
+    assertEquals(302, callback(server, state, "cp_gh_state=stale; $stateCookie").first)
+    assertEquals(302, callback(server, state, "$stateCookie; cp_gh_state=stale").first)
+  }
+
+  @Test
+  fun `a widened cookie domain clears the narrower leftovers on this host`() {
+    val server = server(auth(config(cookieDomain = "coo.ee")))
+    val (state, stateCookie) = start(server)
+    val cookies =
+      noRedirect
+        .newCall(
+          Request.Builder()
+            .url(url(server, "/auth/github/callback?code=ok&state=$state"))
+            .header("Host", "m3.preview.coo.ee")
+            .header("Cookie", "cp_gh_state=stale; $stateCookie")
+            .build()
+        )
+        .execute()
+        .use { resp ->
+          assertEquals(302, resp.code)
+          resp.headers("Set-Cookie")
+        }
+    val minted = cookies.filter { it.startsWith("cp_gh_auth=") && !it.startsWith("cp_gh_auth=;") }
+    assertEquals(1, minted.size, cookies.toString())
+    assertTrue(minted.single().contains("Domain=coo.ee", ignoreCase = true), minted.toString())
+    for (name in listOf("cp_gh_auth", "cp_gh_state")) {
+      val cleared = cookies.filter { it.startsWith("$name=;") }
+      val domains = cleared.map { line ->
+        line.split(";").map { it.trim() }.firstOrNull { it.startsWith("Domain=", true) }
+      }
+      assertTrue(null in domains, "host-only $name cleared: $cleared")
+      assertTrue("Domain=preview.coo.ee" in domains, "narrower $name cleared: $cleared")
+      assertTrue("Domain=m3.preview.coo.ee" in domains, "this host's $name cleared: $cleared")
+      if (name == "cp_gh_auth") {
+        assertFalse("Domain=coo.ee" in domains, "the session just minted is kept: $cleared")
+      }
+    }
+  }
+
+  @Test
+  fun `a stale narrower-domain session is cleared so the next request reads as signed in`() {
+    val server = server(auth(config(cookieDomain = "coo.ee")))
+    val cookie = signIn(server)
+    val cleared =
+      noRedirect
+        .newCall(
+          Request.Builder()
+            .url(url(server, "/version"))
+            .header("Host", "preview.coo.ee")
+            .header("Cookie", "cp_gh_auth=stale; cp_gh_auth=$cookie")
+            .build()
+        )
+        .execute()
+        .use { resp -> resp.headers("Set-Cookie").filter { it.startsWith("cp_gh_auth=") } }
+    assertEquals(2, cleared.size, cleared.toString())
+    assertTrue(cleared.all { it.startsWith("cp_gh_auth=;") }, cleared.toString())
+    assertEquals(1, cleared.count { it.contains("Domain=preview.coo.ee", ignoreCase = true) })
+    assertEquals(1, cleared.count { !it.contains("Domain=", ignoreCase = true) })
   }
 
   @Test
