@@ -55,8 +55,9 @@ import kotlinx.coroutines.withTimeoutOrNull
  * request for a newer revision still gets the picture this cache holds — a card showing the design
  * as it was a minute ago is better than a blank card — and the redraw is queued behind it, so the
  * next page view has the current one. Only a design never drawn at all is rendered while the reader
- * waits. The generation is the server version, so a deploy (a new renderer) redraws every design in
- * the background while the old pictures keep serving.
+ * waits. The generation is the server version and the renderer's identity ([generationOf]), so a
+ * deploy that changes either redraws every design in the background while the old pictures keep
+ * serving.
  *
  * ## Ahead of the reader
  *
@@ -518,6 +519,20 @@ internal constructor(
 
     private fun revisionKey(designId: String, revision: Long?): String =
       if (revision == null) designId else "$designId$REVISION_SEPARATOR$revision"
+
+    /**
+     * The generation a picture is drawn at: [serveVersion] and [renderer], the identity of the
+     * pipeline that draws a PNG export (`PackagedUiBuilderRenderBundle.digest()`).
+     *
+     * The server version alone was the generation, and it does not move when only the UI-builder
+     * pin does. Pictures drawn before compose-ui-builder 3.85.0 — whose render projection dropped
+     * every placement's `component`, drawing each as "Unsupported component:
+     * design/component-instance → (none)" — therefore stayed current on every card of a design not
+     * edited since, through the deploys that fixed the renderer. A renderer whose identity cannot
+     * be read draws nothing either, so the server version alone is kept for it.
+     */
+    internal fun generationOf(serveVersion: String, renderer: () -> String): String =
+      runCatching(renderer).map { "$serveVersion+$it" }.getOrDefault(serveVersion)
 
     /** A file name for [designId] that no id can escape the directory with. */
     fun fileBase(designId: String): String =
