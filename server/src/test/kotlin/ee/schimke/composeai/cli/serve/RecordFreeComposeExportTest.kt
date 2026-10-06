@@ -146,41 +146,28 @@ class RecordFreeComposeExportTest {
   }
 
   @Test
-  fun `a widget the export refuses for its padding still renders natively`() {
-    // The export's refusal is true of a *pasteable file*: only the shipped providers can be named
-    // in one, and they carry 8dp. This host constructs the params itself, so the design gets the
-    // padding it authored and a picture of it.
-    val artifact = export(widget(horizontalPaddingDp = 20.0))
-    assertEquals(
-      listOf(ScreenGeneratorComposeExportExecutor.UNEXPRESSIBLE_DOCUMENT),
-      artifact.diagnostics.map { it.code },
-    )
-
+  fun `a legacy padding override renders in the predefined host frame`() {
+    // Only the predefined host shapes are supported: a design saved while padding was authorable
+    // still carries it, but the native lane builds the selected shape's own params and ignores it.
     val generated =
       executor.generate(widget(horizontalPaddingDp = 20.0))
         as ScreenGeneratorComposeExportExecutor.Generated.Emitted
 
-    assertTrue("horizontalPaddingDp = 20f" in generated.source, generated.source)
-    // The native frame follows the authored 20dp horizontal padding and the current host geometry.
+    assertFalse("horizontalPaddingDp = 20f" in generated.source, generated.source)
     assertEquals(
-      ScreenGeneratorComposeExportExecutor.Generated.WidgetFrame(232, 84),
+      ScreenGeneratorComposeExportExecutor.Generated.WidgetFrame(224, 84),
       generated.widgetFrame,
     )
   }
 
   @Test
-  fun `a design the emitter cannot write refuses as the document's own fault`() {
-    // Padding the *container* owns, and a widget cannot choose: the shipped preview params carry
-    // 8dp, so no generated preview could show 20dp. The emitter refuses by name rather than
-    // emitting a widget whose preview draws a frame the design does not have — the same judgement
-    // the Code pane makes, now reaching the export.
+  fun `a legacy padding override no longer refuses the export`() {
+    // Nothing draws the override any more, so there is no frame for a generated preview to
+    // disagree with, and the export writes the widget like any other.
     val artifact = export(widget(horizontalPaddingDp = 20.0))
 
-    assertEquals(
-      listOf(ScreenGeneratorComposeExportExecutor.UNEXPRESSIBLE_DOCUMENT),
-      artifact.diagnostics.map { it.code },
-    )
-    assertTrue("horizontal padding is 20dp" in artifact.diagnostics.single().message)
+    assertEquals(emptyList(), artifact.diagnostics)
+    assertTrue("class HelloWidget : GlanceWearWidget()" in artifact.content, artifact.content)
   }
 
   @Test
