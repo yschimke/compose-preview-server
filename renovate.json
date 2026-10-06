@@ -45,6 +45,58 @@
         "mcp/src/editLoopFixture/**"
       ],
       "enabled": false
+    },
+    {
+      "description": "Update this release BOM independently; module versions come from its constraints.",
+      "matchPackageNames": [
+        "ee.schimke.composeai:compose-ai-tools-bom"
+      ],
+      "groupName": "compose-ai-tools",
+      "rangeStrategy": "pin",
+      "enabled": true,
+      "schedule": [
+        "at any time"
+      ],
+      "minimumReleaseAge": null
+    },
+    {
+      "description": "Update this release BOM independently; module versions come from its constraints.",
+      "matchPackageNames": [
+        "ee.schimke.composeai:compose-preview-contracts-bom"
+      ],
+      "groupName": "compose-preview-contracts",
+      "rangeStrategy": "pin",
+      "enabled": true,
+      "schedule": [
+        "at any time"
+      ],
+      "minimumReleaseAge": null
+    },
+    {
+      "description": "Update this release BOM independently; module versions come from its constraints.",
+      "matchPackageNames": [
+        "ee.schimke.composeai:compose-preview-daemon-bom"
+      ],
+      "groupName": "compose-preview-daemon",
+      "rangeStrategy": "pin",
+      "enabled": true,
+      "schedule": [
+        "at any time"
+      ],
+      "minimumReleaseAge": null
+    },
+    {
+      "description": "Update this release BOM independently; module versions come from its constraints.",
+      "matchPackageNames": [
+        "ee.schimke.composeai:compose-preview-ui-builder-bom"
+      ],
+      "groupName": "compose-ui-builder",
+      "rangeStrategy": "pin",
+      "enabled": true,
+      "schedule": [
+        "at any time"
+      ],
+      "minimumReleaseAge": null
     }
   ],
   "ignorePaths": [
