@@ -2444,6 +2444,8 @@ class ServeUiBuilderMcp(
         skipped += UiBuilderCheckSkippedV1(CHECK_GUIDELINES, reason)
       } else {
         val png = render?.png
+        val pictures =
+          guidelinePictures(checked!!, png, (catalog ?: pinnedCatalog(checked, actor))?.components)
         if (rendered && png == null) {
           skipped +=
             UiBuilderCheckSkippedV1(
@@ -2456,7 +2458,7 @@ class ServeUiBuilderMcp(
           UI_BUILDER_JSON.encodeToJsonElement(DesignDocumentV1.serializer(), checked!!).jsonObject
         // The code the design exports to, so code-shaped rules are judged on real calls. A
         // design the export gate refuses is still checked, from its tree alone, and says so.
-        when (val outcome = lane!!.check(encoded, png) { composeSource(checked!!, actor) }) {
+        when (val outcome = lane!!.check(encoded, pictures) { composeSource(checked, actor) }) {
           is UiBuilderGuidelineOutcome.Checked -> {
             findings += outcome.findings
             if (!outcome.sourceAttached) {
@@ -2600,6 +2602,46 @@ class ServeUiBuilderMcp(
     val artifact = (response as? UiBuilderServiceResponse.Export)?.artifact ?: return null
     if (artifact.diagnostics.any { it.severity == DiagnosticSeverityV1.ERROR }) return null
     return artifact.text()
+  }
+
+  /**
+   * The renders the guidelines model judges visual rules on: the device frame already made for the
+   * a11y check and, for a screen holding a component its catalog marks [SCROLLABLE_TRAIT], an
+   * unrolled render on a canvas [UNROLLED_HEIGHT_FACTOR] times as tall. There the whole list fits,
+   * so it sits at its end and `ScreenScaffold` reveals the edge button it hides on the first frame.
+   * A native render the host cannot make is left out.
+   */
+  private fun guidelinePictures(
+    document: DesignDocumentV1,
+    devicePng: ByteArray?,
+    components: List<ComponentCapabilityV1>?,
+  ): List<UiBuilderGuidelinePicture> {
+    devicePng ?: return emptyList()
+    val environment = document.environment
+    val device =
+      UiBuilderGuidelinePicture(
+        UiBuilderGuidelinePicture.DEVICE,
+        devicePng,
+        environment.widthDp,
+        environment.heightDp,
+      )
+    val scrollable =
+      components.orEmpty().filter { SCROLLABLE_TRAIT in it.traits }.map { it.componentId }.toSet()
+    val scrolls = document.nodes.values.any { it.componentId in scrollable }
+    if (!scrolls) return listOf(device)
+    val tallHeight = environment.heightDp * UNROLLED_HEIGHT_FACTOR
+    val unrolled =
+      nativeRender(document.copy(environment = environment.copy(heightDp = tallHeight)))?.png
+        ?: return listOf(device)
+    return listOf(
+      device,
+      UiBuilderGuidelinePicture(
+        UiBuilderGuidelinePicture.UNROLLED,
+        unrolled,
+        environment.widthDp,
+        tallHeight,
+      ),
+    )
   }
 
   /** A native render of [document]: its PNG and node boxes, or null where none could be made. */
@@ -3370,6 +3412,15 @@ class ServeUiBuilderMcp(
 
     private const val RENDERED_ARGUMENT = "rendered"
     private const val INCLUDE_EXPORT_ARGUMENT = "includeExport"
+    /** How much taller than the device the unrolled guidelines picture is drawn. */
+    private const val UNROLLED_HEIGHT_FACTOR = 4
+
+    /**
+     * The trait a catalog gives a component whose content scrolls, so a device frame shows only the
+     * top of the screen.
+     */
+    private const val SCROLLABLE_TRAIT = "ScrollableContent"
+
     private const val CHECKS_ARGUMENT = "checks"
     private const val DEVICES_ARGUMENT = "devices"
     private const val FORM_FACTOR_ARGUMENT = "formFactor"
