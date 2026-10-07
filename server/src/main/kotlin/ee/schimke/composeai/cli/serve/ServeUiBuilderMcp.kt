@@ -2457,6 +2457,14 @@ class ServeUiBuilderMcp(
         when (val outcome = lane!!.check(encoded, png)) {
           is UiBuilderGuidelineOutcome.Checked -> {
             findings += outcome.findings
+            if (outcome.unanswered.isNotEmpty()) {
+              skipped +=
+                UiBuilderCheckSkippedV1(
+                  "$CHECK_GUIDELINES.unanswered",
+                  "the model returned no verdict for ${outcome.unanswered.size} rule(s), so " +
+                    "they are unchecked, not passed: ${outcome.unanswered.joinToString(", ")}",
+                )
+            }
             if (outcome.visualSkipped > 0 && !rendered) {
               skipped +=
                 UiBuilderCheckSkippedV1(

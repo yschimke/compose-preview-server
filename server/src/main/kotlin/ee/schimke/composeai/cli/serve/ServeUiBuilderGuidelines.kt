@@ -56,7 +56,9 @@ internal constructor(
   val model: String
     get() = config.model
 
-  fun allows(actor: AuthenticatedUiBuilderActor): Boolean = access.allows(actor)
+  /** May [actor] spend the key? An org check can ask GitHub, so it runs on the I/O pool. */
+  suspend fun allows(actor: AuthenticatedUiBuilderActor): Boolean =
+    withContext(Dispatchers.IO) { access.allows(actor) }
 
   /** Who may run the check, for the startup banner. */
   fun describeAccess(): String = access.describe()
@@ -108,9 +110,18 @@ internal constructor(
         )
       }
     val byId = asked.associateBy { it.id }
+    // One verdict per rule asked: the first for each id, nothing for rules nobody asked about. A
+    // rule the model skipped is reported as unanswered, never counted as a pass.
+    val answered = verdicts.filter { it.ruleId in byId }.distinctBy { it.ruleId }
+    if (answered.isEmpty()) {
+      return UiBuilderGuidelineOutcome.Failed(
+        "${config.model} returned no verdict for any of the ${asked.size} rules asked"
+      )
+    }
+    val unanswered = asked.map { it.id } - answered.map { it.ruleId }.toSet()
     val nodeIds = (document["nodes"] as? JsonObject)?.keys.orEmpty()
     val findings =
-      verdicts
+      answered
         .filter { it.verdict == VERDICT_FAIL && it.confidence >= config.minConfidence }
         .flatMap { verdict ->
           val rule = byId[verdict.ruleId] ?: return@flatMap emptyList()
@@ -135,8 +146,9 @@ internal constructor(
         }
     return UiBuilderGuidelineOutcome.Checked(
       findings = findings,
-      judged = asked.size,
+      judged = answered.size,
       visualSkipped = if (png == null) visual.size else 0,
+      unanswered = unanswered,
     )
   }
 
@@ -154,6 +166,8 @@ internal sealed interface UiBuilderGuidelineOutcome {
     val judged: Int,
     /** Visual rules left out because there was no render to show the model. */
     val visualSkipped: Int,
+    /** Rules asked about that the model returned no verdict for. */
+    val unanswered: List<String> = emptyList(),
   ) : UiBuilderGuidelineOutcome
 
   data class Skipped(val reason: String) : UiBuilderGuidelineOutcome
@@ -483,6 +497,15 @@ internal object UiBuilderGuidelinePrompt {
         out.append(" modifiers[").append(modifiers.joinToString(", ")).append(']')
       val events = (node["eventBindings"] as? JsonObject)?.keys.orEmpty()
       if (events.isNotEmpty()) out.append(" events[").append(events.joinToString(", ")).append(']')
+      (node["component"] as? JsonObject)?.let { instance ->
+        out.append(" instance of ").append(instance["componentKey"]?.stringOrNull() ?: "?")
+        val arguments =
+          (instance["arguments"] as? JsonObject).orEmpty().entries.mapNotNull { (name, value) ->
+            describeValue(value)?.let { "$name=$it" }
+          }
+        if (arguments.isNotEmpty())
+          out.append(" (").append(arguments.joinToString(", ")).append(')')
+      }
       out.append('\n')
       (node["slots"] as? JsonObject).orEmpty().forEach { (slot, children) ->
         val ids = (children as? JsonArray).orEmpty().mapNotNull { it.stringOrNull() }
@@ -492,6 +515,15 @@ internal object UiBuilderGuidelinePrompt {
       }
     }
     roots.forEach { visit(it, 0) }
+    // A component's body hangs off `components[key].root`, not off the slots of the nodes that
+    // place it, so it is outlined once here and each placement names it with "instance of".
+    (document["components"] as? JsonObject).orEmpty().forEach { (key, component) ->
+      val root = (component as? JsonObject)?.get("root")?.stringOrNull() ?: return@forEach
+      if (root in seen) return@forEach
+      val name = (component as JsonObject)["name"]?.stringOrNull()
+      out.append("component ").append(key).append(name?.let { " ($it)" }.orEmpty()).append(":\n")
+      visit(root, 1)
+    }
     if (seen.size < nodes.size) out.append("(${nodes.size - seen.size} more nodes not shown)\n")
     return out.toString()
   }

@@ -153,6 +153,65 @@ class ServeUiBuilderGuidelinesTest {
   }
 
   @Test
+  fun `a component's body is outlined once, and each placement names it`() {
+    val document =
+      Json.parseToJsonElement(
+          """
+          {
+            "roots": ["screen"],
+            "components": {"card": {"name": "Card", "root": "card-root"}},
+            "nodes": {
+              "screen": {"componentId": "layout/column", "slots": {"children": ["a"]}},
+              "a": {"componentId": "design/component-instance",
+                "component": {"componentKey": "card",
+                  "arguments": {"title": {"type": "string", "value": "Hi"}}}},
+              "card-root": {"componentId": "wear-m3/card", "slots": {"content": ["t"]}},
+              "t": {"componentId": "wear-m3/text",
+                "properties": {"text": {"type": "binding", "value": "title"}}}
+            }
+          }
+          """
+        )
+        .jsonObject
+    val outline = UiBuilderGuidelinePrompt.outline(document)
+    assertTrue("- a: design/component-instance instance of card (title=\"Hi\")" in outline, outline)
+    assertTrue("component card (Card):\n  - card-root: wear-m3/card" in outline, outline)
+    assertTrue("- t: wear-m3/text {text={title}}" in outline, outline)
+    assertFalse("more nodes not shown" in outline, outline)
+  }
+
+  @Test
+  fun `rules the model skipped are unanswered, not passed, and no verdicts at all is a failure`():
+    Unit = runBlocking {
+    val partial = guidelines { _, _ ->
+      OpenRouterTransport.Response(
+        200,
+        completion(
+          verdict("wear.layout.responsive-width", "pass", 0.9),
+          verdict("wear.layout.responsive-width", "fail", 0.9, "two"),
+          verdict("not.a.rule", "fail", 0.9),
+        ),
+      )
+    }
+      .check(wearDocument(), null)
+    assertIs<UiBuilderGuidelineOutcome.Checked>(partial)
+    // The first verdict for a rule stands; a duplicate and an unknown rule are ignored.
+    assertTrue(partial.findings.isEmpty())
+    assertEquals(1, partial.judged)
+    val structural =
+      UiBuilderGuidelineRuleSet.bundled().rules.filter {
+        "wear" in it.platforms && it.kind != "visual"
+      }
+    assertEquals(structural.size - 1, partial.unanswered.size)
+    assertFalse("wear.layout.responsive-width" in partial.unanswered)
+
+    val empty = guidelines { _, _ ->
+      OpenRouterTransport.Response(200, completion())
+    }.check(wearDocument(), null)
+    assertIs<UiBuilderGuidelineOutcome.Failed>(empty)
+  }
+
+  @Test
   fun `a refusal from OpenRouter or an unreadable answer is a failure, not a finding`(): Unit =
     runBlocking {
       val refused = guidelines { _, _ ->
