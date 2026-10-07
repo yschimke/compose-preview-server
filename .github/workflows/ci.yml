@@ -101,6 +101,10 @@ jobs:
       - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
         with:
           cache-provider: basic
+      - uses: ./.github/actions/buildfetch-cache
+        with:
+          rw-token: ${{ github.event_name == 'push' && (secrets.BUILDFETCH_COMPOSEAI_GRADLE_REMOTE_CACHE_TOKEN || secrets.BUILDFETCH_GRADLE_REMOTE_CACHE_TOKEN) || '' }}
+          ro-token: ${{ secrets.BUILDFETCH_COMPOSEAI_GRADLE_REMOTE_CACHE_TOKEN_RO || secrets.BUILDFETCH_GRADLE_REMOTE_CACHE_TOKEN_RO }}
       - run: ./gradlew check ktfmtCheckAll :server:distTar :mcp:distTar -x :server:test
       - name: Smoke-test standalone distribution
         run: |
@@ -140,6 +144,10 @@ jobs:
           cache-provider: basic
           # Same key as `gradle-build`, which is the job that writes it.
           cache-read-only: true
+      - uses: ./.github/actions/buildfetch-cache
+        with:
+          rw-token: ${{ github.event_name == 'push' && (secrets.BUILDFETCH_COMPOSEAI_GRADLE_REMOTE_CACHE_TOKEN || secrets.BUILDFETCH_GRADLE_REMOTE_CACHE_TOKEN) || '' }}
+          ro-token: ${{ secrets.BUILDFETCH_COMPOSEAI_GRADLE_REMOTE_CACHE_TOKEN_RO || secrets.BUILDFETCH_GRADLE_REMOTE_CACHE_TOKEN_RO }}
       - run: ./gradlew :server:test -Pcomposeai.testForks=4
 
   gradle:
@@ -185,6 +193,10 @@ jobs:
         with:
           cache-provider: basic
           cache-read-only: true
+      - uses: ./.github/actions/buildfetch-cache
+        with:
+          rw-token: ${{ github.event_name == 'push' && (secrets.BUILDFETCH_COMPOSEAI_GRADLE_REMOTE_CACHE_TOKEN || secrets.BUILDFETCH_GRADLE_REMOTE_CACHE_TOKEN) || '' }}
+          ro-token: ${{ secrets.BUILDFETCH_COMPOSEAI_GRADLE_REMOTE_CACHE_TOKEN_RO || secrets.BUILDFETCH_GRADLE_REMOTE_CACHE_TOKEN_RO }}
       - name: Check out the UI builder
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -359,6 +371,10 @@ jobs:
         with:
           cache-provider: basic
           cache-read-only: true
+      - uses: ./.github/actions/buildfetch-cache
+        with:
+          rw-token: ${{ github.event_name == 'push' && (secrets.BUILDFETCH_COMPOSEAI_GRADLE_REMOTE_CACHE_TOKEN || secrets.BUILDFETCH_GRADLE_REMOTE_CACHE_TOKEN) || '' }}
+          ro-token: ${{ secrets.BUILDFETCH_COMPOSEAI_GRADLE_REMOTE_CACHE_TOKEN_RO || secrets.BUILDFETCH_GRADLE_REMOTE_CACHE_TOKEN_RO }}
       - run: ./gradlew :server:installDist
       # Tarred so the launcher keeps its executable bit; an artifact does not carry modes.
       - run: tar -czf "${RUNNER_TEMP}/server.tgz" server/build/install
