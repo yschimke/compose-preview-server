@@ -165,6 +165,14 @@ jobs:
           fi
           echo "probing renders for: $(echo "${design_systems}" | tr '\n' ' ')"
 
+          # Every catalog this repository declares, which is what the catalog counts below judge.
+          declared_json="$(jq -c '[.catalogs[].system]' \
+            "${DEPLOY_CONFIG_DIR:-deploy/preview.coo.ee}/catalogs.json" 2>/dev/null || true)"
+          if [ -z "${declared_json}" ] || [ "${declared_json}" = "[]" ]; then
+            echo "::error::no catalogs declared in catalogs.json; the catalog counts would assert nothing"
+            exit 1
+          fi
+
           # One real render per design system. Not the catalog PAGE -- that was already 200 with a
           # full component tree while every image under it was missing. The page is where the render
           # URL comes from; the render is the assertion.
@@ -216,9 +224,25 @@ jobs:
             status_json=$(curl -fsS -m 10 "${base}/status.json" 2>/dev/null || true)
             live=$(printf '%s' "${version_json}" | tr -d ' \n' | sed -n 's/.*"version":"\([^"]*\)".*/\1/p')
             status_version=$(printf '%s' "${status_json}" | jq -r '.version // ""' 2>/dev/null || echo "")
-            loaded=$(printf '%s' "${status_json}" | jq -r '.catalogs.loaded // -1' 2>/dev/null || echo -1)
-            total=$(printf '%s' "${status_json}" | jq -r '.catalogs.total // -1' 2>/dev/null || echo -1)
-            failed=$(printf '%s' "${status_json}" | jq -r '.catalogs.failed // -1' 2>/dev/null || echo -1)
+            # Counted over the catalogs THIS repository declares, not the box's totals. The box also
+            # serves every catalog the import registry (`SERVE_CATALOG_REGISTRY`) lists, and those
+            # are third-party builds published from another repository on their own schedule: the
+            # 3.105.0 rollout ran out its ten minutes on `element-hq-element-x-android`, which the
+            # registry listed before its build had ever published a `design-artifacts/` branch. A
+            # catalog this release did not ship cannot say whether this release deployed, so it is
+            # reported below instead. `loaded` and `failed` mean what `/status.json` means by them:
+            # a stale catalog still serves, and only one with nothing to serve has failed.
+            loaded=$(printf '%s' "${status_json}" | jq -r --argjson d "${declared_json}" \
+              '[.catalogList[] | select(.id as $i | $d | index($i)) | select(.loadState == "loaded" or .loadState == "stale")] | length' \
+              2>/dev/null || echo -1)
+            total=$(printf '%s' "${status_json}" | jq -r --argjson d "${declared_json}" \
+              'if .catalogList then ($d | length) else -1 end' 2>/dev/null || echo -1)
+            failed=$(printf '%s' "${status_json}" | jq -r --argjson d "${declared_json}" \
+              '[.catalogList[] | select(.id as $i | $d | index($i)) | select(.loadState == "failed")] | length' \
+              2>/dev/null || echo -1)
+            undeclared_failed=$(printf '%s' "${status_json}" | jq -r --argjson d "${declared_json}" \
+              '[.catalogList[] | select(.id as $i | $d | index($i) | not) | select(.loadState == "failed") | .id] | join(" ")' \
+              2>/dev/null || true)
             builder_html=$(curl -fsS -m 10 "${base}/ui-builder/" 2>/dev/null || true)
             builder_mjs=$(curl -sS -o /dev/null -w '%{http_code}:%{content_type}' -m 10 "${base}/ui-builder/uiBuilder.mjs" 2>/dev/null || true)
             builder_wasm=$(curl -sS -o /dev/null -w '%{http_code}:%{content_type}' -m 10 "${base}/ui-builder/uiBuilder.wasm" 2>/dev/null || true)
@@ -246,6 +270,9 @@ jobs:
             if converged "${live}" "${status_version}" "${{ steps.versions.outputs.server }}" \
               "${loaded}" "${total}" "${failed}" "${builder_ok}" "${renders_ok}" \
               "${wear_authorable}"; then
+              for system in ${undeclared_failed}; do
+                echo "::warning::${system} is served from the import registry and failed to load; it does not gate this release"
+              done
               {
                 echo "deployed=true"
                 echo "base_url=${base}"
