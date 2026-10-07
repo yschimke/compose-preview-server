@@ -3091,6 +3091,8 @@ public class ServeRunner(
           publishedCatalogs.remove(systemId)
           publishedRuntimeIds.remove(systemId)
           publishedRecords.remove(systemId)
+          // The seeds belonged to the publication that just stopped composing.
+          publishedTemplates.remove(systemId)
           return false
         }
       }

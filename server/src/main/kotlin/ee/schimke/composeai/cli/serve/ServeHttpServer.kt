@@ -15781,12 +15781,17 @@ class ServeHttpServer(
         systemId = catalog,
         label = catalog,
         templates =
-          uiBuilderSeeds.templateIds(catalog).sorted().map { template ->
-            ServeWeb.UiBuilderNewDesignTemplate(
-              id = template,
-              label = template.replace('-', ' ').replaceFirstChar { it.uppercase() },
-            )
-          },
+          uiBuilderSeeds
+            .templateIds(catalog)
+            // A catalog-owned catalog's order is its own, and its first is the default the
+            // create route falls back to; the built-in set has no order, so it stays sorted.
+            .let { if (uiBuilderSeeds.ownership.owns(catalog)) it.toList() else it.sorted() }
+            .map { template ->
+              ServeWeb.UiBuilderNewDesignTemplate(
+                id = template,
+                label = template.replace('-', ' ').replaceFirstChar { it.uppercase() },
+              )
+            },
       )
     }
 
