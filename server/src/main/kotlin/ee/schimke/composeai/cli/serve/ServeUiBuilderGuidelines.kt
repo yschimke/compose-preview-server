@@ -3,12 +3,10 @@ package ee.schimke.composeai.cli.serve
 import ee.schimke.composeai.uibuilder.guidelines.DesignGuidelinePicture
 import ee.schimke.composeai.uibuilder.guidelines.DesignGuidelinePrompt
 import ee.schimke.composeai.uibuilder.guidelines.DesignGuidelineRequest
-import ee.schimke.composeai.uibuilder.guidelines.DesignGuidelineRequestRules
 import ee.schimke.composeai.uibuilder.guidelines.DesignGuidelineRuleSet
 import ee.schimke.composeai.uibuilder.guidelines.DesignGuidelineVerdict
-import ee.schimke.composeai.uibuilder.guidelines.GUIDELINE_RULES_URL
 import ee.schimke.composeai.uibuilder.guidelines.body
-import ee.schimke.composeai.uibuilder.guidelines.provenance
+import ee.schimke.composeai.uibuilder.guidelines.prepare
 import ee.schimke.composeai.uibuilder.service.AuthenticatedUiBuilderActor
 import java.time.Clock
 import java.util.concurrent.ConcurrentHashMap
@@ -16,8 +14,6 @@ import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.contentOrNull
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -114,14 +110,9 @@ internal constructor(
     private const val MAX_NODES_PER_RULE = 5
 
     /**
-     * The request for [document] with [pictures] and [source], built from the bundled rules. Pure
-     * and keyless: `ui_builder_guidelines_prompt`, the prompt route and [check] all start here.
-     *
-     * Composed from the library's own parts — the rule filter, [DesignGuidelinePrompt.userText],
-     * [DesignGuidelinePrompt.provenance], the fixed system prompt and response schema — exactly as
-     * its single-picture `prepare` does, with the whole picture list instead of one device frame.
-     * With no picture the visual rules are left out, since the model would have nothing to judge
-     * them on.
+     * The request for [document] with [pictures] and [source], built from the bundled rules by the
+     * library's own `prepare`, so this host and the editor build byte-identical requests. Pure and
+     * keyless: `ui_builder_guidelines_prompt`, the prompt route and [check] all start here.
      */
     fun prepare(
       designId: String?,
@@ -130,48 +121,8 @@ internal constructor(
       pictures: List<DesignGuidelinePicture>,
       source: String?,
       rules: DesignGuidelineRuleSet = DesignGuidelineRuleSet.Bundled,
-    ): DesignGuidelineRequest {
-      val systemId =
-        ((document["catalogPin"] as? JsonObject)?.get("systemId") as? JsonPrimitive)?.contentOrNull
-      val platform = systemId?.let(DesignGuidelinePrompt::platformOf)
-      val applicable = platform?.let(rules::forPlatform).orEmpty()
-      val asked = if (pictures.isNotEmpty()) applicable else applicable.filterNot { it.visual }
-      return DesignGuidelineRequest(
-        designId = designId,
-        revision = revision,
-        platform = platform,
-        rules =
-          DesignGuidelineRequestRules(
-            version = rules.version,
-            source = GUIDELINE_RULES_URL,
-            forPlatform = applicable.size,
-            asked = asked,
-            visualSkipped = applicable.size - asked.size,
-          ),
-        pictures = pictures,
-        sourceAttached = source != null,
-        systemPrompt = DesignGuidelinePrompt.SYSTEM_PROMPT,
-        userText =
-          if (platform == null) ""
-          else
-            DesignGuidelinePrompt.userText(
-              platform,
-              document,
-              asked,
-              pictures.map { it.description },
-              source,
-            ),
-        responseSchema = DesignGuidelinePrompt.responseSchema,
-        provenance =
-          DesignGuidelinePrompt.provenance(
-            rules.version,
-            applicable.size,
-            asked.size,
-            pictures,
-            source != null,
-          ),
-      )
-    }
+    ): DesignGuidelineRequest =
+      DesignGuidelinePrompt.prepare(rules, designId, revision, document, pictures, source)
 
     /**
      * [verdicts] as `ui_builder_check_design` findings: one per node a confident `fail` names (at

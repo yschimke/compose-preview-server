@@ -7,6 +7,7 @@ import ee.schimke.composeai.uibuilder.guidelines.DesignGuidelineRecord
 import ee.schimke.composeai.uibuilder.guidelines.DesignGuidelineRuleSet
 import ee.schimke.composeai.uibuilder.guidelines.DesignGuidelineVerdict
 import ee.schimke.composeai.uibuilder.guidelines.body
+import ee.schimke.composeai.uibuilder.guidelines.prepare
 import ee.schimke.composeai.uibuilder.service.AuthenticatedUiBuilderActor
 import java.time.Clock
 import java.time.Instant
@@ -58,6 +59,18 @@ class ServeUiBuilderGuidelinesTest {
     }
     val request =
       ServeUiBuilderGuidelines.prepare("d", 3, wearDocument(), pictures, "@Composable fun X() {}")
+    // The server builds exactly the editor's request: same library call, same bytes.
+    assertEquals(
+      DesignGuidelinePrompt.prepare(
+        DesignGuidelineRuleSet.Bundled,
+        "d",
+        3,
+        wearDocument(),
+        pictures,
+        "@Composable fun X() {}",
+      ),
+      request,
+    )
     assertEquals(wear.map { it.id }, request.rules.asked.map { it.id })
     assertTrue("Picture 2 (unrolled picture)" in request.userText, request.userText)
     assertTrue("@Composable fun X() {}" in request.userText)
