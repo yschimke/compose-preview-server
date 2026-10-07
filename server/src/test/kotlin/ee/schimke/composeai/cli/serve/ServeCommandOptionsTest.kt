@@ -127,6 +127,23 @@ class ServeCommandOptionsTest {
   }
 
   @Test
+  fun `the widget player defaults to cmp-android and refuses a player it does not know`() {
+    assertEquals(UiBuilderWidgetPlayer.CMP, options(emptyList()).uiBuilderWidgetPlayer)
+    assertEquals(
+      UiBuilderWidgetPlayer.ANDROIDX,
+      options(listOf("--ui-builder-widget-player", "androidx")).uiBuilderWidgetPlayer,
+    )
+    assertEquals(
+      UiBuilderWidgetPlayer.CMP,
+      options(listOf("--ui-builder-widget-player=cmp")).uiBuilderWidgetPlayer,
+    )
+    // Unlike --rc-default-player, a typo here is refused: it would silently pick a lane's player.
+    assertFailsWith<IllegalArgumentException> {
+      options(listOf("--ui-builder-widget-player", "nope"))
+    }
+  }
+
+  @Test
   fun `the diagnostic admin token is parsed separately and blanks stay disabled`() {
     assertEquals(
       "read-secret",

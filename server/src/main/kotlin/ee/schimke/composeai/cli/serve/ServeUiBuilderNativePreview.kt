@@ -93,6 +93,13 @@ internal class ServeUiBuilderNativePreview(
    * Two packs in one design have no such bundle and are refused with [MIXED_PACKS].
    */
   private val packs: Set<String> = emptySet(),
+  /**
+   * Which player draws a Wear widget's recorded document (`--ui-builder-widget-player`).
+   *
+   * The recording is the AndroidX writer's either way, so the lane stays authoritative under both;
+   * see [UiBuilderWidgetPlayer] for why the CMP one is the default.
+   */
+  private val widgetPlayer: UiBuilderWidgetPlayer = UiBuilderWidgetPlayer.DEFAULT,
 ) : UiBuilderNativePreviewLane {
 
   override fun render(
@@ -166,6 +173,7 @@ internal class ServeUiBuilderNativePreview(
           confType = target.confType,
           wearWidget = widget != null,
           remoteCapture = generated.remoteContent,
+          widgetPlayer = widgetPlayer,
         )
       )
     // Only asked for a frame: a compile that failed has no render to read bounds off, and asking

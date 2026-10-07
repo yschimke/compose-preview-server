@@ -64,7 +64,8 @@ class ServeUiBuilderWearNativePreviewTest {
   private fun lane(
     nativeTarget: (String) -> UiBuilderNativeTarget? = {
       UiBuilderNativeTarget("wear-m3-catalog", UiBuilderGeneratedCompose.COMPOSE_ANDROID)
-    }
+    },
+    widgetPlayer: UiBuilderWidgetPlayer = UiBuilderWidgetPlayer.DEFAULT,
   ) =
     ServeUiBuilderNativePreview(
       executor = executor,
@@ -73,6 +74,7 @@ class ServeUiBuilderWearNativePreviewTest {
         PlaygroundRunResponse(previewId = "generated", previewToken = "token", image = "png")
       },
       nativeTarget = nativeTarget,
+      widgetPlayer = widgetPlayer,
     )
 
   @Test
@@ -233,6 +235,23 @@ class ServeUiBuilderWearNativePreviewTest {
     // 168 + 2×32 by 112 + 2×16, which is what `WearWidgetPreview` sizes itself to.
     assertEquals(232, request.widthDp)
     assertEquals(144, request.heightDp)
+  }
+
+  /**
+   * The lane hands a widget to the player the host was started with, on the Android daemon either
+   * way: only playback differs, the recording stays the AndroidX writer's.
+   */
+  @Test
+  fun `a widget is played by the CMP player by default and by androidx when the host asks`() {
+    lane().render(wearWidget())
+    lane(widgetPlayer = UiBuilderWidgetPlayer.ANDROIDX).render(wearWidget())
+
+    val (byDefault, byAndroidx) = submitted
+    assertEquals(UiBuilderWidgetPlayer.CMP, byDefault.widgetPlayer)
+    assertEquals(UiBuilderWidgetPlayer.ANDROIDX, byAndroidx.widgetPlayer)
+    assertEquals(UiBuilderGeneratedCompose.COMPOSE_ANDROID, byDefault.confType)
+    assertEquals(UiBuilderGeneratedCompose.COMPOSE_ANDROID, byAndroidx.confType)
+    assertEquals(byDefault.source, byAndroidx.source)
   }
 
   /** Asking for nothing draws the broad rectangular editing host. */

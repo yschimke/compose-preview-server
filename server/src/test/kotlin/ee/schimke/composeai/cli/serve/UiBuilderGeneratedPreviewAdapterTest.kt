@@ -53,6 +53,64 @@ class UiBuilderGeneratedPreviewAdapterTest {
     )
   }
 
+  /**
+   * A widget is recorded the same way under both players and played by the one the flag names.
+   *
+   * `cmp-android` is the default because AndroidX's player drops a `RemoteButton`'s container
+   * (yschimke/compose-ui-builder#511); `androidx` keeps upstream's preview so the lane can go back.
+   */
+  @Test
+  fun `a widget entry plays its recording with the CMP player unless androidx is asked for`() {
+    val cmp = UiBuilderGeneratedPreviewAdapter.previewEntry("News", 232, 144, wearWidget = true)
+    assertEquals(
+      cmp,
+      UiBuilderGeneratedPreviewAdapter.previewEntry(
+        "News",
+        232,
+        144,
+        wearWidget = true,
+        widgetPlayer = UiBuilderWidgetPlayer.CMP,
+      ),
+    )
+    assertTrue(cmp.startsWith("@file:Suppress(\"RestrictedApi\", \"RestrictedApiAndroidX\")"), cmp)
+    assertTrue("@Preview(widthDp = 232, heightDp = 144)" in cmp, cmp)
+    assertTrue(
+      "WearWidgetDocument(generatedWidgetBackground()) { GeneratedWidgetContent() }" in cmp,
+      cmp,
+    )
+    assertTrue(
+      ".captureRawContent(context, generatedWidgetParams(), isInspectionMode = true)" in cmp,
+      cmp,
+    )
+    assertTrue("RcComposePlayer(" in cmp, cmp)
+    assertTrue("import generated.uibuilder.NewsContent as GeneratedWidgetContent" in cmp, cmp)
+    assertTrue("WearWidgetPreview" !in cmp, cmp)
+
+    val androidx =
+      UiBuilderGeneratedPreviewAdapter.previewEntry(
+        "News",
+        232,
+        144,
+        wearWidget = true,
+        widgetPlayer = UiBuilderWidgetPlayer.ANDROIDX,
+      )
+    assertTrue(
+      "import androidx.glance.wear.tooling.preview.WearWidgetPreview" in androidx,
+      androidx,
+    )
+    assertTrue("WearWidgetPreview(" in androidx, androidx)
+    assertTrue("RcComposePlayer" !in androidx, androidx)
+  }
+
+  @Test
+  fun `the widget player reads the rc-default-player ids`() {
+    assertEquals(UiBuilderWidgetPlayer.CMP, UiBuilderWidgetPlayer.DEFAULT)
+    assertEquals(UiBuilderWidgetPlayer.CMP, UiBuilderWidgetPlayer.fromFlag("cmp-android"))
+    assertEquals(UiBuilderWidgetPlayer.CMP, UiBuilderWidgetPlayer.fromFlag(" CMP "))
+    assertEquals(UiBuilderWidgetPlayer.ANDROIDX, UiBuilderWidgetPlayer.fromFlag("androidx"))
+    assertEquals(null, UiBuilderWidgetPlayer.fromFlag("wasm"))
+  }
+
   @Test
   fun `representative generated source compiles discovers and enters first-frame render`() {
     val btaJars = System.getProperty("composeai.libBtaJars").split(File.pathSeparator).map(::File)

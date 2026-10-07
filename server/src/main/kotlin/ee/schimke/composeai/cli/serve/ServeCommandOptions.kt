@@ -1027,6 +1027,14 @@ public class ServeCommandOptions(
       }
       ?.toMap() ?: emptyMap()
 
+  override val uiBuilderWidgetPlayer: UiBuilderWidgetPlayer =
+    args.flagValue("--ui-builder-widget-player")?.let { value ->
+      requireNotNull(UiBuilderWidgetPlayer.fromFlag(value)) {
+        "--ui-builder-widget-player must be one of " +
+          "${UiBuilderWidgetPlayer.entries.joinToString(", ") { it.flagValue }}, got `$value`"
+      }
+    } ?: UiBuilderWidgetPlayer.DEFAULT
+
   /**
    * Which served catalogs are offered as component packs, and to which platform's catalogs.
    *
@@ -1602,6 +1610,12 @@ public class ServeCommandOptions(
                           branch; a --ui-builder-components entry overrides it. Authors switch a
                           pack on from the editor's settings; admitting one here only makes it
                           available.
+        --ui-builder-widget-player cmp-android|androidx
+                          Which player draws a Wear widget design in the native preview lane and
+                          its thumbnails. Both record with the AndroidX writer on the Android
+                          daemon. Defaults to cmp-android, the Compose Multiplatform player;
+                          androidx keeps upstream's WearWidgetPreview, whose player drops a
+                          RemoteButton's container (yschimke/compose-ui-builder#511).
         --ui-builder-runtime-dir <runtimeId>=<dir>[,<runtimeId>=<dir>…]
                           Retained immutable native renderer bundles. Each directory must contain
                           runtime-manifest.json. Runtime ids are exact pins; there is no latest
