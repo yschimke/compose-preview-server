@@ -66,6 +66,7 @@ class ServeUiBuilderWearNativePreviewTest {
       UiBuilderNativeTarget("wear-m3-catalog", UiBuilderGeneratedCompose.COMPOSE_ANDROID)
     },
     widgetPlayer: UiBuilderWidgetPlayer = UiBuilderWidgetPlayer.DEFAULT,
+    carriesCmpWidgetPlayer: (String) -> Boolean = { true },
   ) =
     ServeUiBuilderNativePreview(
       executor = executor,
@@ -75,6 +76,7 @@ class ServeUiBuilderWearNativePreviewTest {
       },
       nativeTarget = nativeTarget,
       widgetPlayer = widgetPlayer,
+      carriesCmpWidgetPlayer = carriesCmpWidgetPlayer,
     )
 
   @Test
@@ -252,6 +254,30 @@ class ServeUiBuilderWearNativePreviewTest {
     assertEquals(UiBuilderGeneratedCompose.COMPOSE_ANDROID, byDefault.confType)
     assertEquals(UiBuilderGeneratedCompose.COMPOSE_ANDROID, byAndroidx.confType)
     assertEquals(byDefault.source, byAndroidx.source)
+  }
+
+  /**
+   * The CMP entry imports `rc-player-compose`, so a bundle that does not carry it is drawn by the
+   * upstream preview instead of failing every widget compile on an unresolved reference.
+   */
+  @Test
+  fun `a widget bundle without the CMP player is drawn by androidx`() {
+    val asked = mutableListOf<String>()
+    lane(
+        carriesCmpWidgetPlayer = {
+          asked += it
+          false
+        }
+      )
+      .render(wearWidget())
+    lane(carriesCmpWidgetPlayer = { false }, widgetPlayer = UiBuilderWidgetPlayer.ANDROIDX)
+      .render(wearWidget())
+
+    assertEquals(listOf("wear-m3-catalog"), asked)
+    assertEquals(
+      listOf(UiBuilderWidgetPlayer.ANDROIDX, UiBuilderWidgetPlayer.ANDROIDX),
+      submitted.map { it.widgetPlayer },
+    )
   }
 
   /** Asking for nothing draws the broad rectangular editing host. */

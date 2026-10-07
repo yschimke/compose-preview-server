@@ -445,6 +445,11 @@ if [[ -f /opt/compose-preview-server/ui-builder/index.html && "${SERVE_ROLE:-}" 
   # `wear-m3` back in SERVE_UI_BUILDER_CATALOGS restores the whole lane in one variable rather than
   # producing a catalog whose native render silently compiles against the wrong bundle.
   args+=(--ui-builder-native-catalog "${SERVE_UI_BUILDER_NATIVE_CATALOGS:-wear-m3=wear-m3-catalog}")
+  # Which player draws a Wear widget design in that lane and on its design cards: `cmp-android`
+  # (the server's default, used only where the bundle carries rc-player-compose) or `androidx`,
+  # upstream's WearWidgetPreview. Empty ⇒ the server's default.
+  [[ -n "${SERVE_UI_BUILDER_WIDGET_PLAYER:-}" ]] &&
+    args+=(--ui-builder-widget-player "${SERVE_UI_BUILDER_WIDGET_PLAYER}")
   # Served catalogs offered as COMPONENT PACKS inside the builder's catalogs: `confetti-mobile=mobile`
   # puts Confetti's own composables on a shelf of their own in every Material 3 design, drawn as
   # placeholders on the canvas and rendered natively against the confetti-mobile bundle, and

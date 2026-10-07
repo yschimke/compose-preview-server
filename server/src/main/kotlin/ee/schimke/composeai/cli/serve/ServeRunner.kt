@@ -3969,6 +3969,14 @@ public class ServeRunner(
                 },
                 packs = uiBuilderPacks.keys,
                 widgetPlayer = options.uiBuilderWidgetPlayer,
+                // The CMP player is compiled into the widget entry, so it is chosen only for a
+                // bundle whose manifest carries it — positive evidence, as the live lane asks.
+                carriesCmpWidgetPlayer = { served ->
+                  catalogLiveBundles[served.substringBefore('@')]
+                    ?.firstOrNull { it.id == served }
+                    ?.file
+                    ?.let(ServeRcPlayerIds::bundleCarriesCmpAndroidPlayer) ?: false
+                },
                 compile = { generated ->
                   // `true` here, and only here: this call site is downstream of the route's
                   // `ui-builder-export` capability check, and the source it submits came from

@@ -388,6 +388,9 @@ services:
       # Robolectric. The interactive canvas uses the Wear Compose Multiplatform port instead.
       # An empty value keeps the entrypoint's default.
       SERVE_UI_BUILDER_NATIVE_CATALOGS: "${SERVE_UI_BUILDER_NATIVE_CATALOGS:-}"
+      # Which player draws a Wear widget design natively (`serve --ui-builder-widget-player`):
+      # `cmp-android` or `androidx`. Empty keeps the server's default, `cmp-android`.
+      SERVE_UI_BUILDER_WIDGET_PLAYER: "${SERVE_UI_BUILDER_WIDGET_PLAYER:-}"
       # Served catalogs offered as component packs (`<catalog>=<platform>[,…]`); the record
       # comes from each catalog's own delivery branch. Unset means no packs.
       SERVE_UI_BUILDER_PACKS: "${SERVE_UI_BUILDER_PACKS:-}"

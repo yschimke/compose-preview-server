@@ -285,7 +285,7 @@ document is `--ui-builder-widget-player`:
 
 | Value | Player | Why |
 | --- | --- | --- |
-| `cmp-android` (default) | the Compose Multiplatform `RcComposePlayer` on the Android daemon | AndroidX's player drops a `DrawPath` sized from the component it draws behind, so a `RemoteButton` came back as its bare label while the editor drew the filled pill ([yschimke/compose-ui-builder#511](https://github.com/yschimke/compose-ui-builder/issues/511)); the CMP player draws it from the same bytes |
+| `cmp-android` (default) | the Compose Multiplatform `RcComposePlayer` on the Android daemon, where the widget's bundle manifest carries `rc-player-compose`; a bundle without it is drawn with `androidx` rather than failing to compile | AndroidX's player drops a `DrawPath` sized from the component it draws behind, so a `RemoteButton` came back as its bare label while the editor drew the filled pill ([yschimke/compose-ui-builder#511](https://github.com/yschimke/compose-ui-builder/issues/511)); the CMP player draws it from the same bytes |
 | `androidx` | upstream `androidx.glance.wear.tooling.preview.WearWidgetPreview` | what Android Studio shows for the exported file; kept so the lane can go back once upstream draws the container |
 
 Either way the recording is the AndroidX writer's, which is why the lane stays authoritative. The

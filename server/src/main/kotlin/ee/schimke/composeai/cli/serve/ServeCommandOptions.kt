@@ -1613,7 +1613,8 @@ public class ServeCommandOptions(
         --ui-builder-widget-player cmp-android|androidx
                           Which player draws a Wear widget design in the native preview lane and
                           its thumbnails. Both record with the AndroidX writer on the Android
-                          daemon. Defaults to cmp-android, the Compose Multiplatform player;
+                          daemon. Defaults to cmp-android, the Compose Multiplatform player,
+                          wherever the widget's bundle carries rc-player-compose (else androidx);
                           androidx keeps upstream's WearWidgetPreview, whose player drops a
                           RemoteButton's container (yschimke/compose-ui-builder#511).
         --ui-builder-runtime-dir <runtimeId>=<dir>[,<runtimeId>=<dir>…]

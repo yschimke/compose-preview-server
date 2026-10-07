@@ -100,6 +100,15 @@ internal class ServeUiBuilderNativePreview(
    * see [UiBuilderWidgetPlayer] for why the CMP one is the default.
    */
   private val widgetPlayer: UiBuilderWidgetPlayer = UiBuilderWidgetPlayer.DEFAULT,
+  /**
+   * Whether a served catalog's bundle carries the CMP player (`rc-player-compose`), by served id.
+   *
+   * The [UiBuilderWidgetPlayer.CMP] entry imports it, so a bundle without it would fail every
+   * widget compile on an unresolved reference; such a bundle is drawn with
+   * [UiBuilderWidgetPlayer.ANDROIDX] instead. Defaults to yes, which is what every test that does
+   * not ask about it wants.
+   */
+  private val carriesCmpWidgetPlayer: (catalog: String) -> Boolean = { true },
 ) : UiBuilderNativePreviewLane {
 
   override fun render(
@@ -160,6 +169,14 @@ internal class ServeUiBuilderNativePreview(
     // authored — and rendering at the environment's size instead would put a 216×124 container in
     // the middle of a watch face.
     val widget = generated.widgetFrame
+    val player =
+      if (
+        widget != null &&
+          widgetPlayer == UiBuilderWidgetPlayer.CMP &&
+          !carriesCmpWidgetPlayer(target.catalog)
+      )
+        UiBuilderWidgetPlayer.ANDROIDX
+      else widgetPlayer
     val response =
       compile(
         UiBuilderGeneratedCompose(
@@ -173,7 +190,7 @@ internal class ServeUiBuilderNativePreview(
           confType = target.confType,
           wearWidget = widget != null,
           remoteCapture = generated.remoteContent,
-          widgetPlayer = widgetPlayer,
+          widgetPlayer = player,
         )
       )
     // Only asked for a frame: a compile that failed has no render to read bounds off, and asking
