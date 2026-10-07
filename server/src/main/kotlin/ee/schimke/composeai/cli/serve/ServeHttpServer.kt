@@ -519,6 +519,12 @@ class ServeHttpServer(
    */
   private val githubAuth: ServeGithubAuth? = null,
   /**
+   * `ui_builder_check_design`'s `guidelines` check on the operator's OpenRouter key, open only to
+   * the accounts `--ui-builder-guidelines-users` / `--ui-builder-guidelines-orgs` name. Null leaves
+   * the check reported as skipped.
+   */
+  private val uiBuilderGuidelines: ServeUiBuilderGuidelines? = null,
+  /**
    * Resolve a browser session into an image-uploader login for [ServeImageUploadAuth.repository].
    *
    * The headless image lane still accepts a GitHub bearer token. This second admission path is for
@@ -882,6 +888,7 @@ class ServeHttpServer(
               reviews = uiBuilderReviewStore,
               branches = designBranches,
               agentPresence = uiBuilderAgentPresence,
+              guidelines = uiBuilderGuidelines,
             )
           },
         uiBuilderNative = uiBuilderNativePreview != null,

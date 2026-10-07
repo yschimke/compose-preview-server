@@ -250,6 +250,17 @@ if [[ -n "${SERVE_GITHUB_AUTH_CLIENT_ID:-}" ||
   # identity scopes (read:user, user:email, read:org) are accepted; repo is refused at startup.
   [[ -n "${SERVE_GITHUB_AUTH_SCOPE:-}" ]] && args+=(--github-auth-scope "${SERVE_GITHUB_AUTH_SCOPE}")
 fi
+# ui_builder_check_design's `guidelines` check: a model judges a design against the Android design
+# guides, on this box's OpenRouter key. The server reads the key itself from
+# SERVE_UI_BUILDER_GUIDELINES_OPENROUTER_KEY (never a flag, so it stays out of `ps`), and only the
+# GitHub logins and orgs named here may spend it. Everyone else can run the same check in the
+# editor with their own key.
+[[ -n "${SERVE_UI_BUILDER_GUIDELINES_USERS:-}" ]] &&
+  args+=(--ui-builder-guidelines-users "${SERVE_UI_BUILDER_GUIDELINES_USERS}")
+[[ -n "${SERVE_UI_BUILDER_GUIDELINES_ORGS:-}" ]] &&
+  args+=(--ui-builder-guidelines-orgs "${SERVE_UI_BUILDER_GUIDELINES_ORGS}")
+[[ -n "${SERVE_UI_BUILDER_GUIDELINES_MODEL:-}" ]] &&
+  args+=(--ui-builder-guidelines-model "${SERVE_UI_BUILDER_GUIDELINES_MODEL}")
 # The producer-trust store is CONFIG, on the same /config volume as catalogs.json — for the
 # same reason. It used to live only in the image, which meant trusting a new producer needed a
 # code change, a release and an image publish, while a *catalog* could be published at runtime in

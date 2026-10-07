@@ -177,6 +177,11 @@ class ServeUiBuilderMcp(
    */
   private val branches: UiBuilderBranchPort? = null,
   private val agentPresence: ServeUiBuilderAgentPresence? = null,
+  /**
+   * The `guidelines` check of [CHECK_DESIGN], on the operator's OpenRouter key. Null on a host that
+   * did not configure one, where asking for it reports the check as skipped.
+   */
+  private val guidelines: ServeUiBuilderGuidelines? = null,
 ) {
 
   /** Revisions, restore, fork and diff; see [ServeUiBuilderHistoryTools]. */
@@ -2348,20 +2353,22 @@ class ServeUiBuilderMcp(
       if (lane == null) {
         if (validating) {
           checks
-            .filter { it != CHECK_A11Y }
+            .filter { it == CHECK_SCHEMA || it == CHECK_CATALOG }
             .forEach { skipped += UiBuilderCheckSkippedV1(it, "this host cannot validate designs") }
         }
         if (operations != null) {
           // The operations cannot be applied without a scratch service, so what they would make is
           // unknown; checking the document as it stands would answer a question nobody asked.
           document = null
-          if (CHECK_A11Y in checks) {
-            skipped +=
-              UiBuilderCheckSkippedV1(
-                CHECK_A11Y,
-                "this host cannot apply operations to a scratch copy; apply them, then check",
-              )
-          }
+          checks
+            .filter { it == CHECK_A11Y || it == CHECK_GUIDELINES }
+            .forEach {
+              skipped +=
+                UiBuilderCheckSkippedV1(
+                  it,
+                  "this host cannot apply operations to a scratch copy; apply them, then check",
+                )
+            }
         }
       } else {
         val draft = lane.draft(actor, document, operations)
@@ -2386,6 +2393,9 @@ class ServeUiBuilderMcp(
       }
     }
 
+    // One native render serves both checks that can use it: touch targets measured on it, and the
+    // picture the guidelines model judges the visual rules from.
+    val render by lazy { if (rendered && document != null) nativeRender(document!!) else null }
     if (CHECK_A11Y in checks && skipped.none { it.check == CHECK_A11Y }) {
       val checked = document
       if (checked == null) {
@@ -2403,7 +2413,7 @@ class ServeUiBuilderMcp(
         val bounds =
           if (!rendered) null
           else
-            renderedBounds(checked).also {
+            render?.let(::renderedBounds).also {
               if (it == null) {
                 skipped +=
                   UiBuilderCheckSkippedV1(
@@ -2414,6 +2424,55 @@ class ServeUiBuilderMcp(
               }
             }
         findings += UiBuilderAccessibilityCheck.check(checked, components, bounds)
+      }
+    }
+
+    if (CHECK_GUIDELINES in checks && skipped.none { it.check == CHECK_GUIDELINES }) {
+      val checked = document
+      val lane = guidelines
+      val reason =
+        when {
+          lane == null -> "this host has no guidelines model configured"
+          !lane.allows(actor) ->
+            "the guidelines check runs on this host's shared model key and is not enabled for " +
+              "this account; ask the operator to add you, or run it in the editor with your own " +
+              "OpenRouter key"
+          checked == null -> "there is no document to check until the errors above are fixed"
+          else -> null
+        }
+      if (reason != null) {
+        skipped += UiBuilderCheckSkippedV1(CHECK_GUIDELINES, reason)
+      } else {
+        val png = render?.png
+        if (rendered && png == null) {
+          skipped +=
+            UiBuilderCheckSkippedV1(
+              "$CHECK_GUIDELINES.$RENDERED_ARGUMENT",
+              "no native render was available, so only the guidelines judged from the design " +
+                "tree ran",
+            )
+        }
+        val encoded =
+          UI_BUILDER_JSON.encodeToJsonElement(DesignDocumentV1.serializer(), checked!!).jsonObject
+        when (val outcome = lane!!.check(encoded, png)) {
+          is UiBuilderGuidelineOutcome.Checked -> {
+            findings += outcome.findings
+            if (outcome.visualSkipped > 0 && !rendered) {
+              skipped +=
+                UiBuilderCheckSkippedV1(
+                  "$CHECK_GUIDELINES.visual",
+                  "${outcome.visualSkipped} visual guideline(s) need a picture; pass " +
+                    "`$RENDERED_ARGUMENT: true` to judge them on a native render",
+                )
+            }
+          }
+          is UiBuilderGuidelineOutcome.Skipped ->
+            skipped += UiBuilderCheckSkippedV1(CHECK_GUIDELINES, outcome.reason)
+          is UiBuilderGuidelineOutcome.Failed -> {
+            onLog("[ui-builder] guidelines check failed: ${outcome.reason}")
+            skipped += UiBuilderCheckSkippedV1(CHECK_GUIDELINES, outcome.reason)
+          }
+        }
       }
     }
 
@@ -2478,14 +2537,14 @@ class ServeUiBuilderMcp(
   private fun JsonObject.checksArgument(): List<String> {
     if (this[CHECKS_ARGUMENT] == null || this[CHECKS_ARGUMENT] is JsonNull) return DESIGN_CHECKS
     val asked = stringList(CHECKS_ARGUMENT)
-    val unknown = asked.filter { it !in DESIGN_CHECKS }
+    val unknown = asked.filter { it !in ALL_DESIGN_CHECKS }
     if (unknown.isNotEmpty() || asked.isEmpty()) {
       throw McpRequestException(
-        "`$CHECKS_ARGUMENT` takes one or more of ${DESIGN_CHECKS.joinToString(", ")}" +
+        "`$CHECKS_ARGUMENT` takes one or more of ${ALL_DESIGN_CHECKS.joinToString(", ")}" +
           (if (unknown.isEmpty()) "" else "; not ${unknown.joinToString(", ")}")
       )
     }
-    return DESIGN_CHECKS.filter { it in asked }
+    return ALL_DESIGN_CHECKS.filter { it in asked }
   }
 
   /**
@@ -2499,8 +2558,14 @@ class ServeUiBuilderMcp(
       ?.catalogs
       ?.firstOrNull { it.benchmark.catalogSystemId == document.catalogPin.systemId }
 
-  /** Node boxes from a native render of [document], in dp-convertible form, or null without one. */
-  private fun renderedBounds(document: DesignDocumentV1): UiBuilderAccessibilityCheck.Rendered? {
+  /** A native render of [document]: its PNG and node boxes, or null where none could be made. */
+  private class NativeRender(
+    val document: DesignDocumentV1,
+    val png: ByteArray?,
+    val rendered: UiBuilderNativePreviewOutcome.Rendered,
+  )
+
+  private fun nativeRender(document: DesignDocumentV1): NativeRender? {
     val lane = nativePreview ?: return null
     val outcome =
       try {
@@ -2511,13 +2576,20 @@ class ServeUiBuilderMcp(
         return null
       }
     val rendered = outcome as? UiBuilderNativePreviewOutcome.Rendered ?: return null
-    if (rendered.nodeBounds.isEmpty()) return null
     val bytes =
       rendered.response.image?.removePrefix("data:image/png;base64,")?.let {
         runCatching { java.util.Base64.getDecoder().decode(it) }.getOrNull()
-      } ?: return null
+      }
+    return NativeRender(document, bytes, rendered)
+  }
+
+  /** Node boxes from a native render, in dp-convertible form, or null without them. */
+  private fun renderedBounds(render: NativeRender): UiBuilderAccessibilityCheck.Rendered? {
+    val rendered = render.rendered
+    if (rendered.nodeBounds.isEmpty()) return null
+    val bytes = render.png ?: return null
     val width = pngWidth(bytes) ?: return null
-    val widthDp = document.environment.widthDp.takeIf { it > 0 } ?: return null
+    val widthDp = render.document.environment.widthDp.takeIf { it > 0 } ?: return null
     return UiBuilderAccessibilityCheck.Rendered(
       pxPerDp = width / widthDp.toDouble(),
       boxes =
@@ -3979,7 +4051,13 @@ class ServeUiBuilderMcp(
             "is about, so you can fix them with $APPLY and check again. `$RENDERED_ARGUMENT: true` " +
             "measures touch targets on a native render where the host has one (needs the " +
             "ui-builder-export capability). Contrast against theme roles is resolved with the " +
-            "Material 3 baseline scheme and reported as a warning, never an error.",
+            "Material 3 baseline scheme and reported as a warning, never an error. " +
+            "`$CHECK_GUIDELINES` runs only when named: a model judges the design against the " +
+            "Android design guides (developer.android.com) for its platform and reports each " +
+            "broken rule as a warning or note with its source. It uses this host's shared model " +
+            "key, so it runs only for the accounts the operator enabled and is reported as " +
+            "skipped for everyone else; with `$RENDERED_ARGUMENT: true` the visual rules are " +
+            "judged on the native render too.",
           """
           {"type":"object","properties":{
             "designId":{"type":"string","description":"A stored design to check, or to check `operations` against."},
@@ -3987,8 +4065,8 @@ class ServeUiBuilderMcp(
             "document":{"type":"object","description":"A whole DesignDocumentV1 to check instead of a stored design."},
             "operations":{"type":"array","items":{"type":"object"},"description":"DesignMutationV1 objects to apply to a scratch copy of `designId` and check — a dry run."},
             "baseRevision":{"type":"integer","description":"The revision `operations` were written against; a stale one is a warning."},
-            "$CHECKS_ARGUMENT":{"type":"array","items":{"type":"string","enum":[${DESIGN_CHECKS.joinToString(",") { "\"$it\"" }}]},"description":"Which checks to run. Defaults to all three."},
-            "$RENDERED_ARGUMENT":{"type":"boolean","description":"Measure touch targets on a native render. Defaults to false."}
+            "$CHECKS_ARGUMENT":{"type":"array","items":{"type":"string","enum":[${ALL_DESIGN_CHECKS.joinToString(",") { "\"$it\"" }}]},"description":"Which checks to run. Defaults to ${DESIGN_CHECKS.joinToString(", ")}; `$CHECK_GUIDELINES` runs only when named."},
+            "$RENDERED_ARGUMENT":{"type":"boolean","description":"Measure touch targets on a native render, and show it to the guidelines model. Defaults to false."}
           },"additionalProperties":false}
           """,
         ),

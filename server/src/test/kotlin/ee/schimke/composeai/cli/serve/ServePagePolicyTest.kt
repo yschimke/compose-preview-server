@@ -80,6 +80,18 @@ class ServePagePolicyTest {
   }
 
   @Test
+  fun `only the UI-builder editor may reach OpenRouter, not the runtimes it frames`() {
+    assertTrue(directives("/ui-builder").getValue("connect-src").contains("https://openrouter.ai"))
+    assertTrue(
+      directives("/ui-builder/designs/x").getValue("connect-src").contains("https://openrouter.ai")
+    )
+    assertFalse(
+      directives("/ui-builder/runtime/r1/index.html").getValue("connect-src").contains("openrouter")
+    )
+    assertFalse(directives("/m3-catalog/").getValue("connect-src").contains("openrouter"))
+  }
+
+  @Test
   fun `the history strip, fonts and images the pages load are admitted`() {
     val d = directives("/m3-catalog/p/com.example.Red")
     assertTrue(d.getValue("img-src").contains("https://raw.githubusercontent.com"))

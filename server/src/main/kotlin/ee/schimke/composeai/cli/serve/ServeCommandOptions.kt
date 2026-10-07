@@ -645,6 +645,15 @@ public class ServeCommandOptions(
 
   override val githubAuthGuests: Boolean = "--github-auth-guests" in args
 
+  override val uiBuilderGuidelinesUsers: Set<String> =
+    args.flagValue("--ui-builder-guidelines-users").loginSet()
+
+  override val uiBuilderGuidelinesOrgs: Set<String> =
+    args.flagValue("--ui-builder-guidelines-orgs").loginSet()
+
+  override val uiBuilderGuidelinesModel: String? =
+    args.flagValue("--ui-builder-guidelines-model")?.trim()?.takeIf { it.isNotEmpty() }
+
   override val githubAuthOpenUiBuilder: Boolean = "--github-auth-open-ui-builder" in args
 
   /**
@@ -1249,6 +1258,19 @@ public class ServeCommandOptions(
                           designs — and approve agent grants for those — without access to
                           --github-auth-repo. Playground and image uploads still require it. With
                           no --github-auth-users / --github-auth-orgs, that is any GitHub account.
+        --ui-builder-guidelines-users <login>[,<login>…]
+        --ui-builder-guidelines-orgs <org>[,<org>…]
+                          Who may run ui_builder_check_design's `guidelines` check, which asks a
+                          model (via OpenRouter) to judge a design against the Android design
+                          guides. It spends this server's key, read from the
+                          SERVE_UI_BUILDER_GUIDELINES_OPENROUTER_KEY environment variable, so it
+                          is off unless that is set and one of these names somebody. Org
+                          membership is read from GitHub; set
+                          SERVE_UI_BUILDER_GUIDELINES_GITHUB_TOKEN to a token of an org member so
+                          private memberships count. Everyone else can still run the check in the
+                          editor with their own OpenRouter key.
+        --ui-builder-guidelines-model <id>
+                          The OpenRouter model for that check (default typesafe/jev-router).
         --agent-grants    Let an agent ask for temporary access it can't otherwise get. The agent
                           POSTs /agent-access/request and prints a link plus a verification code;
                           you open the link, check the code matches, and approve. It then collects a
@@ -1726,3 +1748,7 @@ private fun List<String>.flagValuesAll(flag: String): List<String> = buildList {
     }
   }
 }
+
+/** A comma-separated list of GitHub logins or orgs, lowercased, blanks dropped. */
+private fun String?.loginSet(): Set<String> =
+  this?.split(",")?.map { it.trim().lowercase() }?.filter { it.isNotEmpty() }?.toSet() ?: emptySet()
