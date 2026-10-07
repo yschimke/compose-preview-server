@@ -359,7 +359,10 @@ composeai-contracts = "3.20.0"
 # And it owns `PublishedUiBuilderCatalog`, the composer of a catalog's published `ui-builder.json`
 # with its component record (compose-ui-builder#503), which this server called its own copy of;
 # its tests went with it, so they no longer pin that repository's behaviour from here.
-composeai-ui-builder = "3.90.0"
+# 3.91.0 is built on contracts 3.20.0: its screen projection refuses a `remoteCall` by name (the
+# root refusal DesignModifierExportTest expects), and it adds variable-font axes and OpenType
+# features to every design system's text (compose-ui-builder#521).
+composeai-ui-builder = "3.91.0"
 kotlinx-coroutines = "1.11.0"
 kotlinx-serialization = "1.11.0"
 ktor = "3.6.0"
