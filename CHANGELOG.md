@@ -1,5 +1,24 @@
 # Changelog
 
+## [3.105.0](https://github.com/yschimke/compose-preview-server/compare/v3.104.0...v3.105.0) (2026-10-07)
+
+
+### Features
+
+* **ui-builder:** one-row folder picker, toggled, no "All designs" ([#1389](https://github.com/yschimke/compose-preview-server/issues/1389)) ([d5baa7d](https://github.com/yschimke/compose-preview-server/commit/d5baa7da92473d071b67128668d1bfb5a5d67a98))
+
+
+### Bug Fixes
+
+* **auth:** clear stale narrower-domain cookies so sign-in works again ([#1399](https://github.com/yschimke/compose-preview-server/issues/1399)) ([8d3dba2](https://github.com/yschimke/compose-preview-server/commit/8d3dba22dc5415163342ba328023b6e855c514e9))
+* **deps:** compose-ui-builder 3.87.0, which exports remote-m3/remote-icon ([#1400](https://github.com/yschimke/compose-preview-server/issues/1400)) ([e0b971d](https://github.com/yschimke/compose-preview-server/commit/e0b971d3886ff8bdbfa0cf13a559626001495545))
+* **deps:** compose-ui-builder 3.88.0, which frames widgets only in the predefined host shapes ([#1402](https://github.com/yschimke/compose-preview-server/issues/1402)) ([b470c30](https://github.com/yschimke/compose-preview-server/commit/b470c30f6f7a41bb3a4673b1a190035eb97a5605))
+* **deps:** update dependency ee.schimke.composeai:compose-ai-tools-bom to v2.35.0 ([#1398](https://github.com/yschimke/compose-preview-server/issues/1398)) ([6e26885](https://github.com/yschimke/compose-preview-server/commit/6e26885658a77da4afe6dd8ab70f0b2c5778dd3d))
+* **deps:** update dependency ee.schimke.composeai:compose-preview-contracts-bom to v3.19.0 ([#1393](https://github.com/yschimke/compose-preview-server/issues/1393)) ([977c1ad](https://github.com/yschimke/compose-preview-server/commit/977c1ad040a3d0885804acb896124e48a7f10ca2))
+* **mcp:** route design files and refresh projects ([#1395](https://github.com/yschimke/compose-preview-server/issues/1395)) ([1a58061](https://github.com/yschimke/compose-preview-server/commit/1a58061c59ff61217cbb3fc3660742755508bb38))
+* **serve:** redraw design thumbnails when the renderer changes ([#1403](https://github.com/yschimke/compose-preview-server/issues/1403)) ([e42a95b](https://github.com/yschimke/compose-preview-server/commit/e42a95b73ad171a36bc3c738eb62d93525a84aa8))
+* **serve:** use the builder domain in the homepage link ([#1396](https://github.com/yschimke/compose-preview-server/issues/1396)) ([db5ab32](https://github.com/yschimke/compose-preview-server/commit/db5ab3236fe3d94d7fbda73bf07e0030ae86da87))
+
 ## [3.104.0](https://github.com/yschimke/compose-preview-server/compare/v3.103.0...v3.104.0) (2026-10-05)
 
 
