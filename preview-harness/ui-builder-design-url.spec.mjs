@@ -204,12 +204,6 @@ test("a fragment-only navigation moves the panel to the thread it names", async 
 });
 
 test("opening another thread by hand keeps it open", async ({ page }) => {
-  page.on("console", (m) =>
-    console.log("DIAG page", m.type(), m.text().slice(0, 400)),
-  );
-  page.on("pageerror", (e) =>
-    console.log("DIAG pageerror", String(e).slice(0, 400)),
-  );
   // The regression this guards: the host clears the fragment when the reader opens a different
   // conversation, and an editor that read that housekeeping as a navigation would immediately
   // close the thread the reader had just opened.
@@ -218,38 +212,27 @@ test("opening another thread by hand keeps it open", async ({ page }) => {
     name: "Comment thread on This design",
   });
   await expect(other).toBeVisible();
-  // DIAGNOSTIC (temporary): what the page holds around the click, for the CI-only failure.
-  const trace = async (label) =>
-    console.log(
-      `DIAG ${label}`,
-      JSON.stringify({
-        url: page.url(),
-        selectors: await page.evaluate(
-          () => globalThis.__uiBuilderDesignSelectors,
-        ),
-        bounds: await other.boundingBox(),
-        buttons: await page
-          .getByRole("button")
-          .evaluateAll((els) =>
-            els.map((e) => e.getAttribute("aria-label") || e.textContent),
-          ),
-      }),
-    );
-  await trace("before");
-  await clickCompose(page, other);
-  for (let i = 0; i < 6; i++) {
-    await page.waitForTimeout(500);
-    await trace(`after ${i}`);
-  }
+  const selectedThread = async () =>
+    (await page.evaluate(() => globalThis.__uiBuilderDesignSelectors)).threadId;
+  // Pressed until the thread opens, as `openDock` presses the rail: a press that lands while the
+  // editor is still settling does nothing, and on a slower runner the first one routinely does.
+  // That is not the regression this guards — what is, is the thread opening and then closing again.
   await settle(page);
+  for (
+    let attempt = 0;
+    attempt < 5 && (await selectedThread()) !== secondOfTwoThreadId;
+    attempt++
+  ) {
+    await clickCompose(page, other);
+    await settle(page);
+  }
   await expect
-    .poll(
-      async () =>
-        (await page.evaluate(() => globalThis.__uiBuilderDesignSelectors))
-          .threadId,
-      { timeout: 30_000 },
-    )
+    .poll(selectedThread, { timeout: 30_000 })
     .toBe(secondOfTwoThreadId);
+  // And it stays open once the host has cleared the fragment behind it.
+  await page.waitForTimeout(1_000);
+  await settle(page);
+  expect(await selectedThread()).toBe(secondOfTwoThreadId);
 });
 
 test("#thread= combines with ?node= where the thread is pinned to a layer", async ({
