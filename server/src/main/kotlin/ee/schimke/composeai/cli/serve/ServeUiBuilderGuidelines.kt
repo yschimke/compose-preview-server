@@ -64,12 +64,12 @@ internal constructor(
   fun describeAccess(): String = access.describe()
 
   /**
-   * Judges [document], with [png] (a render, for the visual rules) and the Compose code the design
-   * exports to, which [source] produces only once there are rules to ask about.
+   * Judges [document], with [pictures] (renders, for the visual rules) and the Compose code the
+   * design exports to, which [source] produces only once there are rules to ask about.
    */
   internal suspend fun check(
     document: JsonObject,
-    png: ByteArray?,
+    pictures: List<UiBuilderGuidelinePicture>,
     source: suspend () -> String? = { null },
   ): UiBuilderGuidelineOutcome {
     val systemId =
@@ -81,7 +81,7 @@ internal constructor(
         )
     val applicable = rules.rules.filter { platform in it.platforms }
     val (visual, structural) = applicable.partition { it.kind == KIND_VISUAL }
-    val asked = if (png != null) applicable else structural
+    val asked = if (pictures.isNotEmpty()) applicable else structural
     if (asked.isEmpty()) {
       return UiBuilderGuidelineOutcome.Skipped(
         "no $platform guideline can be judged without a render"
@@ -94,7 +94,7 @@ internal constructor(
         platform = platform,
         document = document,
         rules = asked,
-        pngDataUrl = png?.let { "data:image/png;base64," + Base64.getEncoder().encodeToString(it) },
+        pictures = pictures,
         source = code,
       )
     val response =
@@ -157,7 +157,7 @@ internal constructor(
     return UiBuilderGuidelineOutcome.Checked(
       findings = findings,
       judged = answered.size,
-      visualSkipped = if (png == null) visual.size else 0,
+      visualSkipped = if (pictures.isEmpty()) visual.size else 0,
       unanswered = unanswered,
       sourceAttached = code != null,
     )
@@ -167,6 +167,42 @@ internal constructor(
     const val KIND_VISUAL = "visual"
     const val VERDICT_FAIL = "fail"
     private const val MAX_NODES_PER_RULE = 5
+  }
+}
+
+/**
+ * A render the model judges the visual rules on, and what it shows. A scrolling Wear screen gets
+ * two: the [DEVICE] frame (scrolled to the top, where Wear keeps the edge button hidden) and the
+ * [UNROLLED] canvas (tall enough for the whole list, so its end is reached and the edge button is
+ * revealed). The rules' `check` text names the picture each is judged on.
+ */
+internal class UiBuilderGuidelinePicture(
+  val kind: String,
+  val png: ByteArray,
+  val widthDp: Int,
+  val heightDp: Int,
+) {
+  val dataUrl: String
+    get() = "data:image/png;base64," + Base64.getEncoder().encodeToString(png)
+
+  /** One line telling the model what this picture is. */
+  fun describe(index: Int): String =
+    when (kind) {
+      DEVICE ->
+        "Picture $index (device picture): the design on the watch at ${widthDp}×${heightDp}dp, " +
+          "its first frame, scrolled to the top. On a scrolling screen, content running off the " +
+          "bottom continues when the wearer scrolls and is not clipped, and Wear keeps the edge " +
+          "button hidden until the list reaches its end."
+      UNROLLED ->
+        "Picture $index (unrolled picture): the same design on a ${widthDp}×${heightDp}dp " +
+          "canvas, tall enough to show the whole scrolling list at once, scrolled to its end so a " +
+          "revealed edge button is visible. It is not what the wearer sees at one time."
+      else -> "Picture $index: the design rendered at ${widthDp}×${heightDp}dp."
+    }
+
+  companion object {
+    const val DEVICE = "device"
+    const val UNROLLED = "unrolled"
   }
 }
 
@@ -416,7 +452,7 @@ internal object UiBuilderGuidelinePrompt {
     platform: String,
     document: JsonObject,
     rules: List<UiBuilderGuidelineRule>,
-    pngDataUrl: String?,
+    pictures: List<UiBuilderGuidelinePicture>,
     source: String? = null,
   ): JsonObject = buildJsonObject {
     put("model", model)
@@ -435,14 +471,23 @@ internal object UiBuilderGuidelinePrompt {
             add(
               buildJsonObject {
                 put("type", "text")
-                put("text", userText(platform, document, rules, pngDataUrl != null, source))
+                put(
+                  "text",
+                  userText(
+                    platform,
+                    document,
+                    rules,
+                    pictures.mapIndexed { i, picture -> picture.describe(i + 1) },
+                    source,
+                  ),
+                )
               }
             )
-            if (pngDataUrl != null) {
+            pictures.forEach { picture ->
               add(
                 buildJsonObject {
                   put("type", "image_url")
-                  putJsonObject("image_url") { put("url", pngDataUrl) }
+                  putJsonObject("image_url") { put("url", picture.dataUrl) }
                 }
               )
             }
@@ -464,7 +509,7 @@ internal object UiBuilderGuidelinePrompt {
     platform: String,
     document: JsonObject,
     rules: List<UiBuilderGuidelineRule>,
-    hasPicture: Boolean,
+    pictures: List<String> = emptyList(),
     source: String? = null,
   ): String = buildString {
     val environment = document["environment"] as? JsonObject
@@ -478,7 +523,10 @@ internal object UiBuilderGuidelinePrompt {
     }
     if (theme != null) append(", ").append(theme).append(" theme")
     append('\n')
-    append(if (hasPicture) "A rendered picture of the design is attached.\n" else "")
+    if (pictures.isNotEmpty()) {
+      append("Attached pictures, in order:\n")
+      pictures.forEach { append("- ").append(it).append('\n') }
+    }
     append("\nDesign tree (node id, component, properties, modifiers; children by slot):\n")
     append(outline(document))
     if (source != null) {

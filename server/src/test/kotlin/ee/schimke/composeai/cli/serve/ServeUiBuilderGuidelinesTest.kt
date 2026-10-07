@@ -74,8 +74,7 @@ class ServeUiBuilderGuidelinesTest {
   @Test
   fun `the request carries the rules for the platform, and a picture only when there is one`() {
     val rules = UiBuilderGuidelineRuleSet.bundled().rules.filter { "wear" in it.platforms }
-    val bare =
-      UiBuilderGuidelinePrompt.requestBody("m", "wear", wearDocument(), rules, pngDataUrl = null)
+    val bare = UiBuilderGuidelinePrompt.requestBody("m", "wear", wearDocument(), rules, emptyList())
     val content = bare.userContent()
     assertEquals(1, content.size)
     val text = content.single().jsonObject["text"]!!.jsonPrimitive.content
@@ -93,12 +92,22 @@ class ServeUiBuilderGuidelinesTest {
         "wear",
         wearDocument(),
         rules,
-        "data:image/png;base64,AAAA",
+        listOf(
+          UiBuilderGuidelinePicture(UiBuilderGuidelinePicture.DEVICE, byteArrayOf(1), 192, 192),
+          UiBuilderGuidelinePicture(UiBuilderGuidelinePicture.UNROLLED, byteArrayOf(2), 192, 768),
+        ),
       )
+    val parts = pictured.userContent()
     assertEquals(
-      "image_url",
-      pictured.userContent().last().jsonObject["type"]!!.jsonPrimitive.content,
+      listOf("text", "image_url", "image_url"),
+      parts.map { it.jsonObject["type"]!!.jsonPrimitive.content },
     )
+    // The text says which picture is which, and that content below the device frame is not cut.
+    val described = parts.first().jsonObject["text"]!!.jsonPrimitive.content
+    assertTrue("Picture 1 (device picture)" in described, described)
+    assertTrue("is not clipped" in described, described)
+    assertTrue("Picture 2 (unrolled picture)" in described, described)
+    assertTrue("192×768dp" in described, described)
   }
 
   @Test
@@ -134,7 +143,7 @@ class ServeUiBuilderGuidelinesTest {
         }
       )
 
-    val outcome = guidelines.check(wearDocument(), png = null)
+    val outcome = guidelines.check(wearDocument(), emptyList())
 
     assertIs<UiBuilderGuidelineOutcome.Checked>(outcome)
     val finding = outcome.findings.single()
@@ -193,7 +202,7 @@ class ServeUiBuilderGuidelinesTest {
         ),
       )
     }
-      .check(wearDocument(), null)
+      .check(wearDocument(), emptyList())
     assertIs<UiBuilderGuidelineOutcome.Checked>(partial)
     // The first verdict for a rule stands; a duplicate and an unknown rule are ignored.
     assertTrue(partial.findings.isEmpty())
@@ -208,7 +217,7 @@ class ServeUiBuilderGuidelinesTest {
     val empty = guidelines { _, _ ->
       OpenRouterTransport.Response(200, completion())
     }
-      .check(wearDocument(), null)
+      .check(wearDocument(), emptyList())
     assertIs<UiBuilderGuidelineOutcome.Failed>(empty)
   }
 
@@ -220,13 +229,13 @@ class ServeUiBuilderGuidelinesTest {
         "wear",
         wearDocument(),
         rules,
-        hasPicture = false,
+        pictures = emptyList(),
         source = "@Composable fun Workout() { Button(onClick = {}) { Text(\"Start\") } }",
       )
     assertTrue("```kotlin\n@Composable fun Workout()" in text, text)
     assertTrue(text.indexOf("Design tree") < text.indexOf("```kotlin"), text)
     val long = "x".repeat(UiBuilderGuidelinePrompt.MAX_SOURCE_CHARS + 10)
-    val cut = UiBuilderGuidelinePrompt.userText("wear", wearDocument(), rules, false, long)
+    val cut = UiBuilderGuidelinePrompt.userText("wear", wearDocument(), rules, emptyList(), long)
     assertTrue("// … 10 more characters not shown" in cut, cut.takeLast(200))
   }
 
@@ -242,7 +251,7 @@ class ServeUiBuilderGuidelinesTest {
           completion(verdict("wear.layout.responsive-width", "pass", 0.9)),
         )
       }
-        .check(wearDocument(), null) {
+        .check(wearDocument(), emptyList()) {
           asked++
           "@Composable fun Workout() {}"
         }
@@ -254,7 +263,7 @@ class ServeUiBuilderGuidelinesTest {
       val skipped = guidelines { _, _ ->
         error("must not be called")
       }
-        .check(wearDocument(systemId = "m3-catalog"), null) {
+        .check(wearDocument(systemId = "m3-catalog"), emptyList()) {
           asked++
           "unused"
         }
@@ -268,14 +277,14 @@ class ServeUiBuilderGuidelinesTest {
       val refused = guidelines { _, _ ->
         OpenRouterTransport.Response(402, """{"error":{"message":"Insufficient credits"}}""")
       }
-        .check(wearDocument(), null)
+        .check(wearDocument(), emptyList())
       assertIs<UiBuilderGuidelineOutcome.Failed>(refused)
       assertTrue("Insufficient credits" in refused.reason, refused.reason)
 
       val garbled = guidelines { _, _ ->
         OpenRouterTransport.Response(200, completionText("sorry"))
       }
-        .check(wearDocument(), null)
+        .check(wearDocument(), emptyList())
       assertIs<UiBuilderGuidelineOutcome.Failed>(garbled)
     }
 
@@ -284,7 +293,7 @@ class ServeUiBuilderGuidelinesTest {
     val outcome = guidelines { _, _ ->
       error("must not be called")
     }
-      .check(wearDocument(systemId = "m3-catalog"), null)
+      .check(wearDocument(systemId = "m3-catalog"), emptyList())
     assertIs<UiBuilderGuidelineOutcome.Skipped>(outcome)
   }
 
