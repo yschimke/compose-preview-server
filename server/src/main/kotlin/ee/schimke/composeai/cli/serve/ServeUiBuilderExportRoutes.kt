@@ -93,6 +93,11 @@ internal fun Route.installUiBuilderLiveExportRoutes(
   get(UI_BUILDER_EXPORT_PNG_PATH) {
     call.serveLiveExport(service, authorization, ExportFormatV1.PNG)
   }
+  // The Compose source a design exports to, as text: what the editor's guidelines check shows the
+  // model beside the design tree. The same export grant as every other format.
+  get(UI_BUILDER_EXPORT_COMPOSE_PATH) {
+    call.serveLiveExport(service, authorization, ExportFormatV1.COMPOSE)
+  }
 }
 
 /** The design listing's card picture; see [ServeUiBuilderThumbnails]. */
@@ -344,6 +349,10 @@ private fun ExportFormatV1.fileExtension(): String =
 
 /** The live SVG of one design: the current committed revision, rendered on every request. */
 internal const val UI_BUILDER_EXPORT_SVG_PATH = "/api/ui-builder/v1/designs/{designId}/export.svg"
+
+/** The Compose source one design exports to; see [UI_BUILDER_EXPORT_SVG_PATH]. */
+internal const val UI_BUILDER_EXPORT_COMPOSE_PATH =
+  "/api/ui-builder/v1/designs/{designId}/export.compose"
 
 /** The live PNG of one design; see [UI_BUILDER_EXPORT_SVG_PATH]. */
 internal const val UI_BUILDER_EXPORT_PNG_PATH = "/api/ui-builder/v1/designs/{designId}/export.png"

@@ -156,6 +156,16 @@ class ServeUiBuilderAgentErgonomicsTest {
   }
 
   @Test
+  fun `a design's Compose source is served as text for the editor's guidelines check`() {
+    val server = start()
+    create(server, cleanDocument())
+    val (status, body) =
+      http(server, "GET", "/api/ui-builder/v1/designs/agent-screen/export.compose", null)
+    assertEquals(200, status, body)
+    assertTrue("@Composable" in body, body)
+  }
+
+  @Test
   fun `accessibility problems are reported by node, with the number behind each`() {
     val server = start()
 

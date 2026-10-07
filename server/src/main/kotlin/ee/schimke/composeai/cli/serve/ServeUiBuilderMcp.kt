@@ -2454,9 +2454,19 @@ class ServeUiBuilderMcp(
         }
         val encoded =
           UI_BUILDER_JSON.encodeToJsonElement(DesignDocumentV1.serializer(), checked!!).jsonObject
-        when (val outcome = lane!!.check(encoded, png)) {
+        // The code the design exports to, so code-shaped rules are judged on real calls. A
+        // design the export gate refuses is still checked, from its tree alone, and says so.
+        when (val outcome = lane!!.check(encoded, png) { composeSource(checked!!, actor) }) {
           is UiBuilderGuidelineOutcome.Checked -> {
             findings += outcome.findings
+            if (!outcome.sourceAttached) {
+              skipped +=
+                UiBuilderCheckSkippedV1(
+                  "$CHECK_GUIDELINES.source",
+                  "the design did not export to Compose, so the model judged it from the design " +
+                    "tree without the generated source",
+                )
+            }
             if (outcome.unanswered.isNotEmpty()) {
               skipped +=
                 UiBuilderCheckSkippedV1(
@@ -2565,6 +2575,32 @@ class ServeUiBuilderMcp(
     (execute(ListCatalogsRequestV1, actor) as? UiBuilderServiceResponse.Catalogs)
       ?.catalogs
       ?.firstOrNull { it.benchmark.catalogSystemId == document.catalogPin.systemId }
+
+  /**
+   * The Compose source [document] exports to, through the same generator `export` uses; null when
+   * the export gate refuses it or the host cannot export Compose.
+   */
+  private suspend fun composeSource(
+    document: DesignDocumentV1,
+    actor: AuthenticatedUiBuilderActor,
+  ): String? {
+    val response =
+      try {
+        service.execute(
+          UiBuilderServiceCall(
+            actor,
+            UiBuilderServiceRequest.ExportDocument(document, ExportFormatV1.COMPOSE),
+          )
+        )
+      } catch (cancelled: CancellationException) {
+        throw cancelled
+      } catch (_: Exception) {
+        return null
+      }
+    val artifact = (response as? UiBuilderServiceResponse.Export)?.artifact ?: return null
+    if (artifact.diagnostics.any { it.severity == DiagnosticSeverityV1.ERROR }) return null
+    return artifact.text()
+  }
 
   /** A native render of [document]: its PNG and node boxes, or null where none could be made. */
   private class NativeRender(

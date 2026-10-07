@@ -63,7 +63,15 @@ internal constructor(
   /** Who may run the check, for the startup banner. */
   fun describeAccess(): String = access.describe()
 
-  internal suspend fun check(document: JsonObject, png: ByteArray?): UiBuilderGuidelineOutcome {
+  /**
+   * Judges [document], with [png] (a render, for the visual rules) and the Compose code the design
+   * exports to, which [source] produces only once there are rules to ask about.
+   */
+  internal suspend fun check(
+    document: JsonObject,
+    png: ByteArray?,
+    source: suspend () -> String? = { null },
+  ): UiBuilderGuidelineOutcome {
     val systemId =
       document["catalogPin"]?.let { it as? JsonObject }?.get("systemId")?.stringOrNull().orEmpty()
     val platform =
@@ -79,6 +87,7 @@ internal constructor(
         "no $platform guideline can be judged without a render"
       )
     }
+    val code = source()
     val body =
       UiBuilderGuidelinePrompt.requestBody(
         model = config.model,
@@ -86,6 +95,7 @@ internal constructor(
         document = document,
         rules = asked,
         pngDataUrl = png?.let { "data:image/png;base64," + Base64.getEncoder().encodeToString(it) },
+        source = code,
       )
     val response =
       try {
@@ -149,6 +159,7 @@ internal constructor(
       judged = answered.size,
       visualSkipped = if (png == null) visual.size else 0,
       unanswered = unanswered,
+      sourceAttached = code != null,
     )
   }
 
@@ -168,6 +179,8 @@ internal sealed interface UiBuilderGuidelineOutcome {
     val visualSkipped: Int,
     /** Rules asked about that the model returned no verdict for. */
     val unanswered: List<String> = emptyList(),
+    /** Whether the generated Compose source went to the model with the design tree. */
+    val sourceAttached: Boolean = false,
   ) : UiBuilderGuidelineOutcome
 
   data class Skipped(val reason: String) : UiBuilderGuidelineOutcome
@@ -381,11 +394,16 @@ internal object UiBuilderGuidelinePrompt {
     }
   }
 
+  /** How much generated source a request carries; a screen's export is well under this. */
+  const val MAX_SOURCE_CHARS: Int = 16_000
+
   const val SYSTEM_PROMPT: String =
     "You review UI designs against Android design guidelines. For every rule you are given, " +
       "answer the rule's yes/no `check` for this design: verdict `pass` when the answer is yes, " +
       "`fail` when it is no, `not_applicable` when the rule does not apply to this design or the " +
-      "evidence cannot decide it. Judge only from the design tree and picture provided; do not " +
+      "evidence cannot decide it. Judge only from what is provided: the design tree, and when " +
+      "given the generated Jetpack Compose source (the code this design exports to; use it for " +
+      "questions about code) and a rendered picture. Do not " +
       "assume content that is not there. Answer `fail` only when the design clearly breaks the " +
       "rule. `confidence` is your probability (0 to 1) that the verdict is right. `nodeIds` names " +
       "the design-tree node ids a `fail` is about (empty otherwise). `reason` is one short " +
@@ -399,6 +417,7 @@ internal object UiBuilderGuidelinePrompt {
     document: JsonObject,
     rules: List<UiBuilderGuidelineRule>,
     pngDataUrl: String?,
+    source: String? = null,
   ): JsonObject = buildJsonObject {
     put("model", model)
     put("temperature", 0)
@@ -416,7 +435,7 @@ internal object UiBuilderGuidelinePrompt {
             add(
               buildJsonObject {
                 put("type", "text")
-                put("text", userText(platform, document, rules, pngDataUrl != null))
+                put("text", userText(platform, document, rules, pngDataUrl != null, source))
               }
             )
             if (pngDataUrl != null) {
@@ -446,6 +465,7 @@ internal object UiBuilderGuidelinePrompt {
     document: JsonObject,
     rules: List<UiBuilderGuidelineRule>,
     hasPicture: Boolean,
+    source: String? = null,
   ): String = buildString {
     val environment = document["environment"] as? JsonObject
     val width = environment?.get("widthDp")?.numberOrNull()
@@ -461,6 +481,16 @@ internal object UiBuilderGuidelinePrompt {
     append(if (hasPicture) "A rendered picture of the design is attached.\n" else "")
     append("\nDesign tree (node id, component, properties, modifiers; children by slot):\n")
     append(outline(document))
+    if (source != null) {
+      append("\nGenerated Jetpack Compose source (what this design exports to):\n```kotlin\n")
+      if (source.length > MAX_SOURCE_CHARS) {
+        append(source.take(MAX_SOURCE_CHARS)).append("\n// … ")
+        append(source.length - MAX_SOURCE_CHARS).append(" more characters not shown\n")
+      } else {
+        append(source.trimEnd()).append('\n')
+      }
+      append("```\n")
+    }
     append("\nRules:\n")
     rules.forEach { rule ->
       append("- ruleId: ").append(rule.id).append('\n')

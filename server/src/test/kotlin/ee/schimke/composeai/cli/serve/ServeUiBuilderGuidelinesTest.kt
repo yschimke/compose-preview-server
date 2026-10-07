@@ -213,6 +213,56 @@ class ServeUiBuilderGuidelinesTest {
   }
 
   @Test
+  fun `the generated source goes with the tree, fenced, and is cut short when it is huge`() {
+    val rules = UiBuilderGuidelineRuleSet.bundled().rules.take(1)
+    val text =
+      UiBuilderGuidelinePrompt.userText(
+        "wear",
+        wearDocument(),
+        rules,
+        hasPicture = false,
+        source = "@Composable fun Workout() { Button(onClick = {}) { Text(\"Start\") } }",
+      )
+    assertTrue("```kotlin\n@Composable fun Workout()" in text, text)
+    assertTrue(text.indexOf("Design tree") < text.indexOf("```kotlin"), text)
+    val long = "x".repeat(UiBuilderGuidelinePrompt.MAX_SOURCE_CHARS + 10)
+    val cut = UiBuilderGuidelinePrompt.userText("wear", wearDocument(), rules, false, long)
+    assertTrue("// … 10 more characters not shown" in cut, cut.takeLast(200))
+  }
+
+  @Test
+  fun `source is asked for only once there are rules, and reported when it went along`(): Unit =
+    runBlocking {
+      var sent = ""
+      var asked = 0
+      val checked = guidelines { body, _ ->
+        sent = body
+        OpenRouterTransport.Response(
+          200,
+          completion(verdict("wear.layout.responsive-width", "pass", 0.9)),
+        )
+      }
+        .check(wearDocument(), null) {
+          asked++
+          "@Composable fun Workout() {}"
+        }
+      assertIs<UiBuilderGuidelineOutcome.Checked>(checked)
+      assertTrue(checked.sourceAttached)
+      assertEquals(1, asked)
+      assertTrue("@Composable fun Workout() {}" in sent, sent)
+
+      val skipped = guidelines { _, _ ->
+        error("must not be called")
+      }
+        .check(wearDocument(systemId = "m3-catalog"), null) {
+          asked++
+          "unused"
+        }
+      assertIs<UiBuilderGuidelineOutcome.Skipped>(skipped)
+      assertEquals(1, asked)
+    }
+
+  @Test
   fun `a refusal from OpenRouter or an unreadable answer is a failure, not a finding`(): Unit =
     runBlocking {
       val refused = guidelines { _, _ ->
