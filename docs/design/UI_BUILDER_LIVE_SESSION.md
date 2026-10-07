@@ -46,7 +46,9 @@ aim at this server with the reader's credentials attached.
 is required, not assumed: this route creates and never replaces, so a `PUT` without it is answered
 `428 Precondition Required` rather than being quietly treated as a create. `201` carries `Location`
 — the editor permalink, because the useful answer to "I made a design" is where a person can open
-it — and a design that already exists fails its precondition with `412`.
+it — and a design that already exists fails its precondition with `412`. `GET` on the same URL is
+its read half: the document as `ui_builder_get_design` returns it (`?revision=N` for a retained
+one), with read access only, so a caller without `/mcp` can read back what it created.
 
 Neither route overwrites. The form answers an id that already exists with the same `303` it would
 have given a fresh one, which is what "open or create" meant when this was a navigation, minus the

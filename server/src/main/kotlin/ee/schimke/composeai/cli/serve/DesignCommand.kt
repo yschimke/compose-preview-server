@@ -734,6 +734,13 @@ internal object DesignCommand {
     `status` is always non-authorizing: it reports AUTHORIZATION_REQUIRED instead of starting a
     device flow, so a SessionStart probe cannot ask for new access.
 
+    Every verb that asks a server goes through its /mcp, which a server mounts only when started
+    with --agent-grants --catalog-mcp (and --agent-grant-capabilities
+    ui-builder-read,ui-builder-write,ui-builder-export for an agent to be granted the ui_builder
+    tools). A stock `ui` or `serve` mounts none, and this command says so rather than reporting a
+    bare 404. Against such a server the operator token still reads a design with
+    GET /api/ui-builder/v1/designs/<designId>, and renders one with …/<designId>/export.png.
+
     Diagnostics from a refused export are printed to stderr and the exit code is non-zero, so a
     refusal fails a pipeline instead of writing an empty file into it.
 

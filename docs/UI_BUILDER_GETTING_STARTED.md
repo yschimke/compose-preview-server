@@ -218,11 +218,15 @@ Automation that already holds a document uses the design's own API resource inst
 ```shell
 curl -X PUT --header 'If-None-Match: *' --data @design.json \
   https://<server>/api/ui-builder/v1/designs/my-remote-screen
+curl https://<server>/api/ui-builder/v1/designs/my-remote-screen > design.json
 ```
 
 `If-None-Match: *` is required, because that route creates and never replaces: without it the
 answer is `428`, and against a design that already exists it is `412`. A successful `201` carries
-the editor permalink in `Location`. Credentials are intentionally absent from these examples:
+the editor permalink in `Location`. A `GET` on the same URL reads the document back: the same JSON
+`ui_builder_get_design` returns, `?revision=N` for a retained revision, and `404` for a design the
+caller cannot open or that does not exist. It needs read access only, so it works with the
+operator token on a plain `ui` server, where `/mcp` is not mounted. Credentials are intentionally absent from these examples:
 supply them through the server and client credential facilities, never in a shared URL, shell
 history, or process arguments.
 
@@ -818,6 +822,19 @@ compose-preview-server design validate my-widget --operations ops.json  # check,
 goes to stderr and the exit code is non-zero when one is an error. See
 [`CATALOG_MCP.md`](design/CATALOG_MCP.md#checking-before-writing-and-the-shapes).
 
+**It needs the server's `/mcp`.** Every verb that asks a server goes through MCP, and a server mounts
+`/mcp` only when it is started with `--agent-grants --catalog-mcp`; `ui` and `serve` leave both off.
+On a local builder add
+
+```shell
+compose-preview-server ui --no-project --agent-grants --catalog-mcp \
+  --agent-grant-capabilities ui-builder-read,ui-builder-write,ui-builder-export
+```
+
+Against a server without it, `design` says so and names those flags instead of reporting a bare
+`404`. The operator token still reads and renders a design over REST there: `GET
+/api/ui-builder/v1/designs/<id>` and `…/<id>/export.png` (or `.svg`).
+
 `--server <url>` picks the host (a local one by default, `$COMPOSE_PREVIEW_SERVER` otherwise) and
 `--revision N` pins, exactly as `?revision=` does on the URLs above. Every verb runs the same
 export lane as the menu and the MCP tool: same gate, same renderer, same artifact.
@@ -1178,7 +1195,9 @@ with the builder.
 ## Connect an MCP agent
 
 The builder is reachable over the server's own `/mcp` endpoint — the same one the catalog tools use,
-with the same bearer. One tool per protocol request, plus the ones the contract does not define:
+with the same bearer. It is off by default: a server mounts `/mcp` only with `--agent-grants
+--catalog-mcp`, and an agent is granted these tools only for the capabilities listed in
+`--agent-grant-capabilities` (`ui-builder-read,ui-builder-write,ui-builder-export`). One tool per protocol request, plus the ones the contract does not define:
 
 | Tool | Capability | What it answers |
 | --- | --- | --- |

@@ -142,12 +142,47 @@ internal class DesignHttpTransport(
         message = response.authorizationMessage(),
       )
     }
+    if (response.statusCode() == 404) throw DesignCommandFailure(noMcpEndpoint(tool))
     if (response.statusCode() !in 200..299) {
       throw DesignCommandFailure(
         "$tool: $base answered HTTP ${response.statusCode()} — ${response.body().firstLine()}"
       )
     }
     return response.body()
+  }
+
+  /**
+   * What a 404 from `/mcp` means, said as the fix rather than as the status.
+   *
+   * `/mcp` is mounted only on a server started with `--agent-grants --catalog-mcp`, and neither
+   * `ui` nor `serve` adds them, so the commonest way to meet this is a stock local builder — where
+   * a bare "answered HTTP 404 — Not Found" reads as "that design does not exist"
+   * (compose-ui-builder #492). An unknown design is not a 404 here: the tool answers it inside
+   * a 200.
+   */
+  private fun noMcpEndpoint(tool: String): String = buildString {
+    append("$tool: $base has no MCP endpoint (POST /mcp answered 404). ")
+    append("This command talks to /mcp, which a server mounts only when it is ")
+    append("started with agent grants and catalog MCP on, and `ui` / `serve` leave both off. ")
+    append("Restart the server with:\n")
+    if (!tool.startsWith(UI_BUILDER_TOOL_PREFIX)) {
+      // A catalog tool (`a2ui render`'s `catalog_render_preview`): its grant is a scope, not a
+      // UI-builder capability, and no design route stands in for it.
+      append("    --agent-grants --catalog-mcp\n")
+      append("and present a grant with the scope this tool needs (a render needs `live`).")
+      return@buildString
+    }
+    append("    --agent-grants --catalog-mcp ")
+    append("--agent-grant-capabilities ui-builder-read,ui-builder-write,ui-builder-export\n")
+    val designs = base.resolve("/api/ui-builder/v1/designs/")
+    if (tool == ServeUiBuilderMcp.GET_DESIGN) {
+      append("Or read the document without MCP: GET $designs<designId> with the operator token ")
+      append("in the ${ServeHttpServer.TOKEN_HEADER} header.")
+    } else {
+      append("Without MCP, the operator token still works on the REST routes: ")
+      append("GET $designs<designId> reads a design and GET $designs<designId>/export.png ")
+      append("(or .svg) renders one.")
+    }
   }
 
   /** The `agentAccessRequestUrl` the 401 body carries, or the header that says the same thing. */
@@ -174,6 +209,9 @@ internal class DesignHttpTransport(
     /** What `.mcp.json` and `design-sync.mjs` already send; this server is version-tolerant. */
     const val MCP_PROTOCOL_VERSION = "2025-06-18"
     val CONNECT_TIMEOUT: Duration = Duration.ofSeconds(15)
+
+    /** The UI-builder tools on `/mcp`; everything else there is a catalog tool. */
+    const val UI_BUILDER_TOOL_PREFIX = "ui_builder_"
 
     fun normalize(server: String): URI {
       val trimmed = server.trim().trimEnd('/')

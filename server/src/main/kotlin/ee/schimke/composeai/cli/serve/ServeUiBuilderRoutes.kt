@@ -23,7 +23,9 @@ import ee.schimke.composeai.uibuilder.protocol.UpdatePresenceRequestV1
 import ee.schimke.composeai.uibuilder.service.AuthenticatedUiBuilderActor
 import ee.schimke.composeai.uibuilder.service.ProtocolRequestMapping
 import ee.schimke.composeai.uibuilder.service.UiBuilderProtocolMapper
+import ee.schimke.composeai.uibuilder.service.UiBuilderServiceCall
 import ee.schimke.composeai.uibuilder.service.UiBuilderServicePort
+import ee.schimke.composeai.uibuilder.service.UiBuilderServiceRequest
 import ee.schimke.composeai.uibuilder.service.UiBuilderServiceResponse
 import ee.schimke.composeai.uibuilder.service.UiBuilderSubscriptionCall
 import io.ktor.http.ContentType
@@ -249,6 +251,75 @@ internal fun Route.installUiBuilderRoutes(
       ContentType.Application.Json,
       response.httpStatus(),
     )
+  }
+
+  /**
+   * `GET` one design's document from its own URL: the read half of the `PUT` below.
+   *
+   * Before this route the document was readable only through MCP (`ui_builder_get_design`, which is
+   * what `compose-preview-server design get` calls), and `/mcp` is mounted only with
+   * `--agent-grants --catalog-mcp`. A caller holding the operator token on a plain `ui` server
+   * could create a design and export its pixels, but could not read back the JSON it had just
+   * written (compose-ui-builder#492). The body is the same document `ui_builder_get_design` returns
+   * under `snapshot.state.document`, so a file saved from either is the same file.
+   *
+   * `?revision=N` reads a retained revision, as on the export routes. A caller that may not read
+   * the design is answered 404, never 403: whether a design exists is not something its URL leaks.
+   * A public reader gets the document shaped as every other read shapes it for them.
+   */
+  get(UI_BUILDER_DESIGN_PATH) {
+    call.response.headers.append(HttpHeaders.CacheControl, "no-store")
+    val actor =
+      when (val decision = authorization.authorize(call, UiBuilderRouteCapability.READ)) {
+        is UiBuilderAuthorizationDecision.Authorized -> decision.actor
+        UiBuilderAuthorizationDecision.Missing -> {
+          call.response.headers.append(HttpHeaders.WWWAuthenticate, "Bearer")
+          call.respondText("authentication is required", status = HttpStatusCode.Unauthorized)
+          return@get
+        }
+        UiBuilderAuthorizationDecision.Forbidden -> {
+          call.respondText("UI-builder read access required", status = HttpStatusCode.Forbidden)
+          return@get
+        }
+      }
+    val designId = call.parameters["designId"].orEmpty()
+    if (designId.isBlank()) {
+      call.respondText("a design id is required", status = HttpStatusCode.BadRequest)
+      return@get
+    }
+    val revisionParameter = call.request.queryParameters["revision"]
+    val revision = revisionParameter?.toLongOrNull()
+    if (revisionParameter != null && (revision == null || revision < 0)) {
+      call.respondText(
+        "revision must be a non-negative integer",
+        status = HttpStatusCode.BadRequest,
+      )
+      return@get
+    }
+    val response =
+      service.shapeForReader(
+        actor,
+        service.execute(
+          UiBuilderServiceCall(actor, UiBuilderServiceRequest.GetSnapshot(designId, revision))
+        ),
+      )
+    when (response) {
+      is UiBuilderServiceResponse.Snapshot ->
+        call.respondText(
+          UI_BUILDER_JSON.encodeToString(
+            DesignDocumentV1.serializer(),
+            response.snapshot.state.document,
+          ),
+          ContentType.Application.Json,
+        )
+      is UiBuilderServiceResponse.Error ->
+        call.respondText(response.error.message, status = response.httpStatus())
+      else ->
+        call.respondText(
+          "the design service did not answer with a document",
+          status = HttpStatusCode.InternalServerError,
+        )
+    }
   }
 
   /**
