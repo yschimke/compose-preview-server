@@ -24,9 +24,11 @@ import ee.schimke.composeai.uibuilder.protocol.HeightInModifierV1
 import ee.schimke.composeai.uibuilder.protocol.HeightModifierV1
 import ee.schimke.composeai.uibuilder.protocol.HorizontalAlignmentV1
 import ee.schimke.composeai.uibuilder.protocol.HorizontalScrollModifierV1
+import ee.schimke.composeai.uibuilder.protocol.IntegerValueV1
 import ee.schimke.composeai.uibuilder.protocol.MatchParentSizeModifierV1
 import ee.schimke.composeai.uibuilder.protocol.OffsetModifierV1
 import ee.schimke.composeai.uibuilder.protocol.PaddingModifierV1
+import ee.schimke.composeai.uibuilder.protocol.RemoteCallModifierV1
 import ee.schimke.composeai.uibuilder.protocol.RotateModifierV1
 import ee.schimke.composeai.uibuilder.protocol.ScaleModifierV1
 import ee.schimke.composeai.uibuilder.protocol.ShadowModifierV1
@@ -122,7 +124,8 @@ class DesignModifierExportTest {
     // the root refuses for a *reason about placement*: `weight`, the three `align`s and
     // `matchParentSize` are members of a slot's receiver. The two scrolls used to be on this list
     // as well, for a `rememberScrollState()` the vocabulary supposedly could not hold; it can,
-    // inline, and they export now (#481).
+    // inline, and they export now (#481). `remoteCall` refuses for a reason about the target: it
+    // is a `RemoteModifier` call, which only a Remote Compose widget can carry.
     val refused = mutableListOf<String>()
     for (modifier in EVERY_MODIFIER) {
       val reasons = reasonsFor(document(text(modifier)))
@@ -139,6 +142,7 @@ class DesignModifierExportTest {
         "AlignModifierV1",
         "AlignVerticalModifierV1",
         "MatchParentSizeModifierV1",
+        "RemoteCallModifierV1",
         "WeightModifierV1",
       ),
       refused.sorted(),
@@ -566,6 +570,9 @@ class DesignModifierExportTest {
         MatchParentSizeModifierV1,
         OffsetModifierV1(JsonPrimitive(4), JsonPrimitive(2)),
         PaddingModifierV1(JsonPrimitive(8), JsonPrimitive(8), JsonPrimitive(8), JsonPrimitive(8)),
+        RemoteCallModifierV1.Builder("visibility")
+          .apply { args = mapOf("visible" to IntegerValueV1(1)) }
+          .build(),
         RotateModifierV1(JsonPrimitive(90)),
         ScaleModifierV1(JsonPrimitive(2), JsonPrimitive(2)),
         ShadowModifierV1(JsonPrimitive(6)),
