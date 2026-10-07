@@ -1258,7 +1258,9 @@ public class ServeCommandOptions(
                           Off by default.
         --catalog-mcp     Expose all catalogs at /mcp using Streamable HTTP.
                           Requires --agent-grants. Published reads need preview scope; made-to-order
-                          renders and data products need live scope. Separate from UI-builder MCP.
+                          renders and data products need live scope. The same /mcp also carries
+                          the ui_builder_* tools when the UI builder is on, and is what
+                          `compose-preview-server design` talks to; off by default.
         --agent-grant-scopes <list>
                           Ceiling on what a grant may carry: preview, live, playground (cumulative;
                           default preview,live). 'playground' lets an approved agent compile and run
@@ -1266,9 +1268,11 @@ public class ServeCommandOptions(
                           --github-auth-repo themselves.
         --agent-grant-capabilities <list>
                           Extra permissions a grant may carry beside its scope, chosen separately by
-                          the approver: currently 'images' (upload rendered previews through the
-                          image lane, needs --accept-images). Off by default — a scope ceiling says
-                          nothing about these.
+                          the approver: 'images' (upload rendered previews through the image lane,
+                          needs --accept-images), and 'ui-builder-read', 'ui-builder-write' and
+                          'ui-builder-export' (the ui_builder_* MCP tools: read, edit, and
+                          export or natively render a design). Off by default — a scope ceiling
+                          says nothing about these.
         --agent-grant-max-ttl <duration>
                           Longest grant this server will mint, e.g. 90m / 2h / 3600 (default 8h,
                           hard ceiling 24h). The approver picks the actual lifetime on the page.

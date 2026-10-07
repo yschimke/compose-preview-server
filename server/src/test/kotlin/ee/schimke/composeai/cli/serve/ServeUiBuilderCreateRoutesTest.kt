@@ -89,6 +89,22 @@ class ServeUiBuilderCreateRoutesTest {
               ?: UiBuilderServiceResponse.Error(
                 UiBuilderServiceError(ServiceErrorCodeV1.NOT_FOUND, "missing")
               )
+          is UiBuilderServiceRequest.GetSnapshot ->
+            documents[request.designId]
+              ?.takeIf { request.revision == null || request.revision == it.revision }
+              ?.let { document ->
+                UiBuilderServiceResponse.Snapshot(
+                  ServiceSnapshotV1(
+                    designId = document.id,
+                    state = DesignStateV1(lastSequence = 0, document = document),
+                    catalog = catalog,
+                    retainedFromSequence = 0,
+                  )
+                )
+              }
+              ?: UiBuilderServiceResponse.Error(
+                UiBuilderServiceError(ServiceErrorCodeV1.NOT_FOUND, "missing")
+              )
           is UiBuilderServiceRequest.ListCatalogs ->
             UiBuilderServiceResponse.Catalogs(listOf(catalog))
           is UiBuilderServiceRequest.CreateDesign ->
@@ -403,6 +419,52 @@ class ServeUiBuilderCreateRoutesTest {
 
     // The URL names the design, so a document that claims to be another one is a bad request.
     assertEquals(400, put("elsewhere", document).first)
+  }
+
+  @Test
+  fun `GET reads back the document a PUT created, at the same URL`() {
+    val document =
+      """
+      {"schema":"compose-ui-builder/v1","id":"read-back","title":"Read back","revision":0,
+       "catalogPin":{"systemId":"m3-catalog","catalogRevision":"candidate",
+       "capabilityDigest":"candidate","nativeRuntimeId":"candidate"},
+       "environment":{"widthDp":1280,"heightDp":800,"density":1.0,"theme":"dark","locale":"en-US",
+       "fontScale":1.0,"layoutDirection":"ltr"},
+       "stateVariables":{},"roots":[],"nodes":{}}
+      """
+        .trimIndent()
+    fun get(path: String, actor: String? = "operator"): Pair<Int, String> {
+      val builder = Request.Builder().url(url(path))
+      actor?.let { builder.header("X-Test-Actor", it) }
+      return client.newCall(builder.get().build()).execute().use { it.code to it.body.string() }
+    }
+
+    client
+      .newCall(
+        Request.Builder()
+          .url(url("/api/ui-builder/v1/designs/read-back"))
+          .header("X-Test-Actor", "operator")
+          .header("If-None-Match", "*")
+          .put(document.toRequestBody())
+          .build()
+      )
+      .execute()
+      .use { assertEquals(201, it.code) }
+
+    val (code, body) = get("/api/ui-builder/v1/designs/read-back")
+    assertEquals(200, code, body)
+    val read = UI_BUILDER_JSON.decodeFromString(DesignDocumentV1.serializer(), body)
+    assertEquals("read-back", read.id)
+    assertEquals("Read back", read.title)
+    assertEquals(createdDocuments.getValue("read-back"), read)
+
+    assertEquals(200, get("/api/ui-builder/v1/designs/read-back?revision=0").first)
+    assertEquals(404, get("/api/ui-builder/v1/designs/read-back?revision=7").first)
+    assertEquals(400, get("/api/ui-builder/v1/designs/read-back?revision=-1").first)
+    assertEquals(400, get("/api/ui-builder/v1/designs/read-back?revision=latest").first)
+    assertEquals(404, get("/api/ui-builder/v1/designs/never-made").first)
+    assertEquals(401, get("/api/ui-builder/v1/designs/read-back", actor = null).first)
+    assertEquals(403, get("/api/ui-builder/v1/designs/read-back", actor = "forbidden").first)
   }
 
   @Test

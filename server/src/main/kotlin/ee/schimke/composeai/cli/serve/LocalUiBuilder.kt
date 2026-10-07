@@ -300,7 +300,8 @@ internal object LocalUiBuilder {
       --variant <name>  Android build variant used for previews.
       --port <n>        Preferred port (default ${ServeDefaults.DEFAULT_PORT}; the next free port is used).
       --host <addr>     Bind address (default 127.0.0.1).
-      --no-open         Print the URL instead of opening a browser (CI / headless shells).
+      --no-open         Print the URL instead of opening a browser (CI / headless shells). The
+                        printed URL carries this run's ?token=; it changes on every restart.
       --build-host <path|none>
                         The `compose-preview` binary to run Gradle through. Defaults to
                         ${BuildHostDiscovery.ENV} in the environment, then `compose-preview` on PATH.
@@ -314,6 +315,18 @@ internal object LocalUiBuilder {
       --help, -h        Show this help.
 
     Every `serve` flag is accepted as well; see `compose-preview-server help serve`.
+
+    Scripting the builder. The ?token= in the printed URL is the operator credential, and it
+    works on the REST routes (as ?token=, or in the X-Compose-Preview-Token header):
+      PUT  /api/ui-builder/v1/designs/<id>              create a design (send If-None-Match: *)
+      GET  /api/ui-builder/v1/designs/<id>              read its document back
+      GET  /api/ui-builder/v1/designs/<id>/export.png   render it (or .svg)
+
+    MCP is off by default: /mcp, the ui_builder_* tools and `compose-preview-server design` need
+    it, and it is mounted only when this command is also given
+
+        --agent-grants --catalog-mcp \
+          --agent-grant-capabilities ui-builder-read,ui-builder-write,ui-builder-export
     """
       .trimIndent()
 }
