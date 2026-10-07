@@ -1,5 +1,19 @@
 # Changelog
 
+## [3.106.0](https://github.com/yschimke/compose-preview-server/compare/v3.105.0...v3.106.0) (2026-10-07)
+
+
+### Features
+
+* **ui-builder:** GET a design's document over REST, and say why design needs /mcp ([#1407](https://github.com/yschimke/compose-preview-server/issues/1407)) ([f62a2ec](https://github.com/yschimke/compose-preview-server/commit/f62a2ec0ac8203d35079c12db9ea5a39d3bfc612))
+
+
+### Bug Fixes
+
+* **deploy:** gate the rollout on the catalogs this repository declares ([#1405](https://github.com/yschimke/compose-preview-server/issues/1405)) ([11bd79c](https://github.com/yschimke/compose-preview-server/commit/11bd79c11354f633bc80b12caf57a748835b55cb))
+* **deps:** compose-ui-builder 3.89.0, which checks a typed map's values in the readiness gate ([#1408](https://github.com/yschimke/compose-preview-server/issues/1408)) ([c810dff](https://github.com/yschimke/compose-preview-server/commit/c810dffd88cd31925b2ad63735110e3d089d460b))
+* **serve:** play Wear widget previews with the CMP player, behind a flag ([#1410](https://github.com/yschimke/compose-preview-server/issues/1410)) ([fb8265d](https://github.com/yschimke/compose-preview-server/commit/fb8265d11dd058584c62a1807909079cd726669d))
+
 ## [3.105.0](https://github.com/yschimke/compose-preview-server/compare/v3.104.0...v3.105.0) (2026-10-07)
 
 
