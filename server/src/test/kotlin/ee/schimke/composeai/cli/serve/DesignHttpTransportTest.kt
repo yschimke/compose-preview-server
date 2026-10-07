@@ -64,4 +64,20 @@ class DesignHttpTransportTest {
     assertTrue("has no MCP endpoint" in message, message)
     assertTrue("/export.png" in message, message)
   }
+
+  @Test
+  fun `a catalog tool is told about catalog MCP, not UI-builder capabilities`() {
+    // `a2ui render` shares this transport and calls `catalog_render_preview`, which needs a
+    // grant's live scope; the design routes and ui-builder-* capabilities are no help to it.
+    val failure =
+      assertFailsWith<DesignCommandFailure> {
+        transport.call("catalog_render_preview", buildJsonObject {})
+      }
+    val message = failure.message.orEmpty()
+    assertTrue("has no MCP endpoint" in message, message)
+    assertTrue("--agent-grants --catalog-mcp" in message, message)
+    assertTrue("live" in message, message)
+    assertFalse("ui-builder-read" in message, message)
+    assertFalse("/api/ui-builder" in message, message)
+  }
 }
