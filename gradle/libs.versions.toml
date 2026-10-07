@@ -204,7 +204,7 @@ composeai-tools = "2.35.0"
 # server's `DaemonSupervisor` already sets on every daemon it spawns with replicas (#1342): the
 # worker sandboxes boot when two different previews render at once instead of behind slot 0 at
 # start. It also moves rc-players to 2.1.2 (compose-preview-daemon#217).
-composeai-preview-daemon = "3.14.0"
+composeai-preview-daemon = "3.14.1"
 # 2.9.0 is the first release carrying `DesignEnvironmentV1.exportDevices` and its Set/Reset
 # changes, which is the field a design names its export devices in. 2.14.0 adds the components a
 # design defines — `DesignDocumentV1.components`, `DesignNodeV1.component` and the `binding` value
