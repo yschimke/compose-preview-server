@@ -2,6 +2,15 @@ package ee.schimke.composeai.cli.serve
 
 import ee.schimke.composeai.uibuilder.export.RemoteDocumentExportSupport
 import ee.schimke.composeai.uibuilder.export.UiBuilderBuildFeatures
+import ee.schimke.composeai.uibuilder.export.WearWidgetHostShape
+import ee.schimke.composeai.uibuilder.export.toUiBuilderDocument
+import ee.schimke.composeai.uibuilder.guidelines.DesignGuidelineFrame
+import ee.schimke.composeai.uibuilder.guidelines.DesignGuidelineFrames
+import ee.schimke.composeai.uibuilder.guidelines.DesignGuidelinePicture
+import ee.schimke.composeai.uibuilder.guidelines.DesignGuidelinePrompt
+import ee.schimke.composeai.uibuilder.guidelines.DesignGuidelineRecord
+import ee.schimke.composeai.uibuilder.guidelines.DesignGuidelineRequest
+import ee.schimke.composeai.uibuilder.guidelines.DesignGuidelineRuleSet
 import ee.schimke.composeai.uibuilder.protocol.ApplyOperationRequestV1
 import ee.schimke.composeai.uibuilder.protocol.CatalogReferenceV1
 import ee.schimke.composeai.uibuilder.protocol.CatalogsResponseV1
@@ -51,7 +60,9 @@ import ee.schimke.composeai.uibuilder.service.UiBuilderSubscriptionCall
 import ee.schimke.composeai.uibuilder.service.UiBuilderSubscriptionRejectedException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.EncodeDefault
 import kotlinx.serialization.ExperimentalSerializationApi
@@ -182,6 +193,11 @@ class ServeUiBuilderMcp(
    * did not configure one, where asking for it reports the check as skipped.
    */
   private val guidelines: ServeUiBuilderGuidelines? = null,
+  /**
+   * Each design's latest guidelines result, whoever ran it. Null on a host with no durable state:
+   * [GET_GUIDELINES] and [RECORD_GUIDELINES] are then absent, and [CHECK_DESIGN] records nothing.
+   */
+  private val guidelineRecords: ServeUiBuilderGuidelineStore? = null,
 ) {
 
   /** Revisions, restore, fork and diff; see [ServeUiBuilderHistoryTools]. */
@@ -222,6 +238,10 @@ class ServeUiBuilderMcp(
   /** Whether this host records review decisions and implementations, and so whether they exist. */
   val supportsReviews: Boolean
     get() = reviews != null
+
+  /** Whether this host keeps guidelines results, and so whether their tools exist. */
+  val supportsGuidelineRecords: Boolean
+    get() = guidelineRecords != null
 
   /** What a tool needs from the caller before it may run. Null when the name is not ours. */
   fun capabilityFor(tool: String): UiBuilderRouteCapability? =
@@ -315,6 +335,13 @@ class ServeUiBuilderMcp(
       IMPLEMENTATION_STATUS -> if (reviews == null) null else UiBuilderRouteCapability.READ
       FIND_DESIGN_FOR_PR ->
         if (reviews == null && links == null) null else UiBuilderRouteCapability.READ
+      // Reading the prompt spends no key and writes nothing: a read. Its pictures are native
+      // renders and its source the export, so [additionalCapabilityFor] asks for the export
+      // capability when they are included.
+      GUIDELINES_PROMPT -> UiBuilderRouteCapability.READ
+      // A recorded result is said about the design, gated as a decision is.
+      GET_GUIDELINES -> if (guidelineRecords == null) null else UiBuilderRouteCapability.READ
+      RECORD_GUIDELINES -> if (guidelineRecords == null) null else UiBuilderRouteCapability.WRITE
       else -> null
     }
 
@@ -335,6 +362,9 @@ class ServeUiBuilderMcp(
       // Measuring touch targets on a real render compiles the design's Kotlin, as [RENDER_NATIVE]
       // does, and the same grant gates it.
       tool == CHECK_DESIGN && args[RENDERED_ARGUMENT]?.jsonPrimitive?.booleanOrNull == true ->
+        UiBuilderRouteCapability.EXPORT
+      // The prompt's pictures are native renders and its source the Compose export.
+      tool == GUIDELINES_PROMPT && args[RENDERED_ARGUMENT]?.jsonPrimitive?.booleanOrNull != false ->
         UiBuilderRouteCapability.EXPORT
       // The status hands over the Compose export unless asked not to, which is an export.
       tool == IMPLEMENTATION_STATUS &&
@@ -481,6 +511,9 @@ class ServeUiBuilderMcp(
         SET_IMPLEMENTATION,
         IMPLEMENTATION_STATUS -> return reviewTool(tool, args, actor)
         FIND_DESIGN_FOR_PR -> return findDesignForPr(args, actor)
+        GUIDELINES_PROMPT -> return guidelinesPrompt(args, actor)
+        GET_GUIDELINES -> return getGuidelines(args, actor)
+        RECORD_GUIDELINES -> return recordGuidelines(args, actor)
         SET_REFERENCE -> return setReference(args, actor)
         COMPARE_REFERENCE -> return compareReference(args, actor)
         in ServeUiBuilderHistoryTools.TOOL_NAMES -> return history.call(tool, args, actor)
@@ -730,6 +763,12 @@ class ServeUiBuilderMcp(
           }
         }
           .onFailure { onLog("serve: review record for $designId not removed (${it.message})") }
+        runCatching {
+          if (guidelineRecords?.delete(designId) == false) {
+            onLog("serve: guidelines record for $designId not removed")
+          }
+        }
+          .onFailure { onLog("serve: guidelines record for $designId not removed (${it.message})") }
         UI_BUILDER_JSON.encodeToString(
           DesignDeletedV1.serializer(),
           DesignDeletedV1(callId = callId, designId = designId),
@@ -2428,6 +2467,7 @@ class ServeUiBuilderMcp(
       }
     }
 
+    var guidelinesRecord: DesignGuidelineRecord? = null
     if (CHECK_GUIDELINES in checks && skipped.none { it.check == CHECK_GUIDELINES }) {
       val checked = document
       val lane = guidelines
@@ -2444,10 +2484,16 @@ class ServeUiBuilderMcp(
       if (reason != null) {
         skipped += UiBuilderCheckSkippedV1(CHECK_GUIDELINES, reason)
       } else {
-        val png = render?.png
-        val pictures =
-          guidelinePictures(checked!!, png, (catalog ?: pinnedCatalog(checked, actor))?.components)
-        if (rendered && png == null) {
+        val request =
+          guidelineRequest(
+            checked!!,
+            actor,
+            withRenders = rendered,
+            withSource = true,
+            devicePng = render?.png,
+            components = (catalog ?: pinnedCatalog(checked, actor))?.components,
+          )
+        if (rendered && request.platform != null && request.pictures.isEmpty()) {
           skipped +=
             UiBuilderCheckSkippedV1(
               "$CHECK_GUIDELINES.$RENDERED_ARGUMENT",
@@ -2455,13 +2501,23 @@ class ServeUiBuilderMcp(
                 "tree ran",
             )
         }
-        val encoded =
-          UI_BUILDER_JSON.encodeToJsonElement(DesignDocumentV1.serializer(), checked!!).jsonObject
         // The code the design exports to, so code-shaped rules are judged on real calls. A
         // design the export gate refuses is still checked, from its tree alone, and says so.
-        when (val outcome = lane!!.check(encoded, pictures) { composeSource(checked, actor) }) {
+        when (val outcome = lane!!.check(request)) {
           is UiBuilderGuidelineOutcome.Checked -> {
-            findings += outcome.findings
+            findings +=
+              ServeUiBuilderGuidelines.findings(
+                outcome.verdicts,
+                outcome.asked,
+                checked.nodes.keys,
+                outcome.model,
+                lane.minConfidence,
+              )
+            // Only a stored design's current revision is recorded: a dry run or a loose document
+            // is not the design anybody else will open.
+            if (explicit == null && rawOperations == null && designId != null) {
+              guidelinesRecord = recordGuidelineOutcome(designId, checked, outcome, actor)
+            }
             if (!outcome.sourceAttached) {
               skipped +=
                 UiBuilderCheckSkippedV1(
@@ -2483,7 +2539,7 @@ class ServeUiBuilderMcp(
                 UiBuilderCheckSkippedV1(
                   "$CHECK_GUIDELINES.visual",
                   "${outcome.visualSkipped} visual guideline(s) need a picture; pass " +
-                    "`$RENDERED_ARGUMENT: true` to judge them on a native render",
+                    "`$RENDERED_ARGUMENT: true` to judge them on native renders",
                 )
             }
           }
@@ -2515,6 +2571,7 @@ class ServeUiBuilderMcp(
         findings = shown,
         truncated = ordered.size - shown.size,
         skipped = skipped,
+        guidelines = guidelinesRecord,
       ),
     )
   }
@@ -2606,43 +2663,196 @@ class ServeUiBuilderMcp(
   }
 
   /**
-   * The renders the guidelines model judges visual rules on: the device frame already made for the
-   * a11y check and, for a screen holding a component its catalog marks [SCROLLABLE_TRAIT], an
-   * unrolled render on a canvas [UNROLLED_HEIGHT_FACTOR] times as tall. There the whole list fits,
-   * so it sits at its end and `ScreenScaffold` reveals the edge button it hides on the first frame.
-   * A native render the host cannot make is left out.
+   * The request a guidelines model is asked about [document]: the bundled rules for its platform,
+   * the design tree, and — when asked — the frames [DesignGuidelineFrames.plan] names drawn
+   * natively and the Compose source it exports to. The same request `ui_builder_guidelines_prompt`
+   * returns, the prompt route serves and [CHECK_DESIGN] sends, so what an agent or a person reads
+   * is what the model was asked.
+   */
+  private suspend fun guidelineRequest(
+    document: DesignDocumentV1,
+    actor: AuthenticatedUiBuilderActor,
+    withRenders: Boolean,
+    withSource: Boolean,
+    devicePng: ByteArray? = null,
+    components: List<ComponentCapabilityV1>? = null,
+  ): DesignGuidelineRequest {
+    val platform = DesignGuidelinePrompt.platformOf(document.catalogPin.systemId)
+    val pictures =
+      if (withRenders && platform != null) {
+        guidelinePictures(
+          document,
+          platform,
+          devicePng,
+          components ?: pinnedCatalog(document, actor)?.components,
+        )
+      } else emptyList()
+    val source = if (withSource && platform != null) composeSource(document, actor) else null
+    return ServeUiBuilderGuidelines.prepare(
+      designId = document.id,
+      revision = document.revision.toInt(),
+      document =
+        UI_BUILDER_JSON.encodeToJsonElement(DesignDocumentV1.serializer(), document).jsonObject,
+      pictures = pictures,
+      source = source,
+    )
+  }
+
+  /**
+   * The frames [DesignGuidelineFrames.plan] names for [document], each drawn natively: a Wear
+   * widget in the Samsung and Pixel Watch containers, a phone or tablet design at both sizes, a
+   * Wear screen on its device and, when it holds a component its catalog marks [SCROLLABLE_TRAIT],
+   * unrolled. The device frame reuses [devicePng] when the caller already has it. A frame the host
+   * cannot render is left out. One at a time: native renders queue behind each other anyway, and a
+   * burst of them is what compose-preview-server#1421 is about.
    */
   private fun guidelinePictures(
     document: DesignDocumentV1,
+    platform: String,
     devicePng: ByteArray?,
     components: List<ComponentCapabilityV1>?,
-  ): List<UiBuilderGuidelinePicture> {
-    devicePng ?: return emptyList()
-    val environment = document.environment
-    val device =
-      UiBuilderGuidelinePicture(
-        UiBuilderGuidelinePicture.DEVICE,
-        devicePng,
-        environment.widthDp,
-        environment.heightDp,
-      )
+  ): List<DesignGuidelinePicture> {
     val scrollable =
       components.orEmpty().filter { SCROLLABLE_TRAIT in it.traits }.map { it.componentId }.toSet()
     val scrolls = document.nodes.values.any { it.componentId in scrollable }
-    if (!scrolls) return listOf(device)
-    val tallHeight = environment.heightDp * UNROLLED_HEIGHT_FACTOR
-    val unrolled =
-      nativeRender(document.copy(environment = environment.copy(heightDp = tallHeight)))?.png
-        ?: return listOf(device)
-    return listOf(
-      device,
-      UiBuilderGuidelinePicture(
-        UiBuilderGuidelinePicture.UNROLLED,
-        unrolled,
-        environment.widthDp,
-        tallHeight,
-      ),
-    )
+    val frames = DesignGuidelineFrames.plan(document.toUiBuilderDocument(), platform, scrolls)
+    return drawGuidelineFrames(document, frames, devicePng) { framed, shape ->
+      nativeRender(framed, shape)?.png
+    }
+  }
+
+  /** [outcome] as [designId]'s latest record, run by [actor] on this host's model. */
+  private fun recordGuidelineOutcome(
+    designId: String,
+    document: DesignDocumentV1,
+    outcome: UiBuilderGuidelineOutcome.Checked,
+    actor: AuthenticatedUiBuilderActor,
+  ): DesignGuidelineRecord? {
+    val store = guidelineRecords ?: return null
+    val result = runCatching {
+      store.record(
+        designId,
+        ranBy = actor.actorId,
+        DesignGuidelineRecord(
+          designId = designId,
+          revision = document.revision.toInt(),
+          model = outcome.model,
+          rulesVersion = outcome.rulesVersion,
+          asked = outcome.asked,
+          verdicts = outcome.verdicts,
+        ),
+      )
+    }
+      .getOrElse {
+        onLog("[ui-builder] guidelines record for $designId not written (${it.message})")
+        return null
+      }
+    return when (result) {
+      is ServeUiBuilderGuidelineStore.GuidelineWriteResult.Stored -> result.record
+      is ServeUiBuilderGuidelineStore.GuidelineWriteResult.Refused -> {
+        onLog("[ui-builder] guidelines record for $designId refused: ${result.reason}")
+        null
+      }
+      is ServeUiBuilderGuidelineStore.GuidelineWriteResult.Failed -> {
+        onLog("[ui-builder] guidelines record for $designId not written: ${result.reason}")
+        null
+      }
+    }
+  }
+
+  /**
+   * [GUIDELINES_PROMPT] and the prompt route: [designId] at [revision] (the current one when null)
+   * as the request a guidelines model would get, or null when [actor] cannot read it. Pictures and
+   * source only [withRenders]: they are native renders and the Compose export, which the caller has
+   * already been allowed to see.
+   */
+  internal suspend fun guidelinesPromptFor(
+    designId: String,
+    revision: Long?,
+    withRenders: Boolean,
+    actor: AuthenticatedUiBuilderActor,
+  ): DesignGuidelineRequest? {
+    val snapshot =
+      execute(GetSnapshotRequestV1(designId = designId, revision = revision), actor)
+        as? UiBuilderServiceResponse.Snapshot ?: return null
+    val document = snapshot.snapshot.state.document
+    return guidelineRequest(document, actor, withRenders = withRenders, withSource = withRenders)
+  }
+
+  private suspend fun guidelinesPrompt(
+    args: JsonObject,
+    actor: AuthenticatedUiBuilderActor,
+  ): String {
+    val designId = args.requiredText("designId")
+    val rendered = args[RENDERED_ARGUMENT]?.jsonPrimitive?.booleanOrNull != false
+    val request =
+      guidelinesPromptFor(designId, args.number("revision"), rendered, actor)
+        ?: throw McpRequestException("no design `$designId` this actor can read")
+    return UI_BUILDER_JSON.encodeToString(DesignGuidelineRequest.serializer(), request)
+  }
+
+  /**
+   * [designId]'s recorded result as [GET_GUIDELINES] and the result route answer it: the record,
+   * its findings read against the bundled rules, and whether the design has moved on since.
+   */
+  internal suspend fun guidelinesFor(
+    designId: String,
+    actor: AuthenticatedUiBuilderActor,
+  ): UiBuilderGuidelinesV1? {
+    val store = guidelineRecords ?: return null
+    val snapshot =
+      execute(GetSnapshotRequestV1(designId = designId, revision = null), actor)
+        as? UiBuilderServiceResponse.Snapshot ?: return null
+    val document = snapshot.snapshot.state.document
+    val record = withContext(Dispatchers.IO) { store.read(designId) }
+    return UiBuilderGuidelinesV1.of(designId, document.revision, document.nodes.keys, record)
+  }
+
+  private suspend fun getGuidelines(args: JsonObject, actor: AuthenticatedUiBuilderActor): String {
+    val designId = args.requiredText("designId")
+    val reply =
+      guidelinesFor(designId, actor)
+        ?: throw McpRequestException("no design `$designId` this actor can read")
+    return UI_BUILDER_JSON.encodeToString(UiBuilderGuidelinesV1.serializer(), reply)
+  }
+
+  private suspend fun recordGuidelines(
+    args: JsonObject,
+    actor: AuthenticatedUiBuilderActor,
+  ): String {
+    val store =
+      guidelineRecords ?: throw McpRequestException("this host keeps no guidelines results")
+    val designId = args.requiredText("designId")
+    if (!service.canRead(actor, designId)) {
+      throw McpRequestException("no design `$designId` this actor can read")
+    }
+    val record =
+      try {
+        UI_BUILDER_JSON.decodeFromJsonElement(
+          DesignGuidelineRecord.serializer(),
+          JsonObject(
+            args.filterKeys { it in RECORD_GUIDELINES_FIELDS } +
+              mapOf(
+                "revision" to (args["revision"] ?: JsonPrimitive(-1)),
+                "rulesVersion" to
+                  (args["rulesVersion"] ?: JsonPrimitive(DesignGuidelineRuleSet.Bundled.version)),
+              )
+          ),
+        )
+      } catch (e: IllegalArgumentException) {
+        throw McpRequestException("the verdicts could not be read: ${e.message}")
+      }
+    when (
+      val result =
+        withContext(Dispatchers.IO) { store.record(designId, ranBy = actor.actorId, record) }
+    ) {
+      is ServeUiBuilderGuidelineStore.GuidelineWriteResult.Refused ->
+        throw McpRequestException(result.reason)
+      is ServeUiBuilderGuidelineStore.GuidelineWriteResult.Failed ->
+        throw McpRequestException(result.reason)
+      is ServeUiBuilderGuidelineStore.GuidelineWriteResult.Stored -> Unit
+    }
+    return getGuidelines(args, actor)
   }
 
   /** A native render of [document]: its PNG and node boxes, or null where none could be made. */
@@ -2652,11 +2862,14 @@ class ServeUiBuilderMcp(
     val rendered: UiBuilderNativePreviewOutcome.Rendered,
   )
 
-  private fun nativeRender(document: DesignDocumentV1): NativeRender? {
+  private fun nativeRender(
+    document: DesignDocumentV1,
+    widgetHostShape: WearWidgetHostShape = WearWidgetHostShape.Default,
+  ): NativeRender? {
     val lane = nativePreview ?: return null
     val outcome =
       try {
-        lane.render(document)
+        lane.render(document, widgetHostShape)
       } catch (cancelled: CancellationException) {
         throw cancelled
       } catch (_: Exception) {
@@ -3403,6 +3616,59 @@ class ServeUiBuilderMcp(
     const val FIND_DESIGN_FOR_PR = "ui_builder_find_design_for_pr"
     const val SET_REFERENCE = "ui_builder_set_reference"
     const val COMPARE_REFERENCE = "ui_builder_compare_reference"
+    const val GUIDELINES_PROMPT = "ui_builder_guidelines_prompt"
+    const val GET_GUIDELINES = "ui_builder_get_guidelines"
+    const val RECORD_GUIDELINES = "ui_builder_record_guidelines"
+
+    /**
+     * [frames] drawn by [render], in order, as the pictures of a guidelines request: each frame's
+     * size written over [document]'s environment, its widget host shape (when it names one) passed
+     * to the renderer, and the device frame answered by [devicePng] when the caller already has it.
+     * A frame [render] cannot draw is left out, and the rest are numbered as they are attached.
+     */
+    internal fun drawGuidelineFrames(
+      document: DesignDocumentV1,
+      frames: List<DesignGuidelineFrame>,
+      devicePng: ByteArray?,
+      render: (DesignDocumentV1, WearWidgetHostShape) -> ByteArray?,
+    ): List<DesignGuidelinePicture> {
+      val drawn = frames.mapNotNull { frame ->
+        val png =
+          if (
+            frame.kind == DesignGuidelinePicture.DEVICE &&
+              frame.environment.isEmpty() &&
+              devicePng != null
+          ) {
+            devicePng
+          } else {
+            val shape =
+              frame.environment[WearWidgetHostShape.ENVIRONMENT_KEY]?.content?.let {
+                WearWidgetHostShape.fromId(it)
+              } ?: WearWidgetHostShape.Default
+            render(
+              document.copy(
+                environment =
+                  document.environment.copy(widthDp = frame.widthDp, heightDp = frame.heightDp)
+              ),
+              shape,
+            )
+          }
+        png?.let { frame to it }
+      }
+      return drawn.mapIndexed { index, (frame, png) ->
+        DesignGuidelinePicture.of(
+          frame,
+          index + 1,
+          "data:image/png;base64," + java.util.Base64.getEncoder().encodeToString(png),
+        )
+      }
+    }
+
+    /** Separate because they exist only where the host keeps guidelines results. */
+    val GUIDELINE_RECORD_TOOL_NAMES = listOf(GET_GUIDELINES, RECORD_GUIDELINES)
+
+    /** The arguments of [RECORD_GUIDELINES] that are the record itself. */
+    private val RECORD_GUIDELINES_FIELDS = setOf("model", "rulesVersion", "asked", "verdicts")
 
     /** Separate because they exist only where the host keeps reference overlays. */
     val REFERENCE_TOOL_NAMES = listOf(SET_REFERENCE, COMPARE_REFERENCE)
@@ -3413,9 +3679,6 @@ class ServeUiBuilderMcp(
 
     private const val RENDERED_ARGUMENT = "rendered"
     private const val INCLUDE_EXPORT_ARGUMENT = "includeExport"
-    /** How much taller than the device the unrolled guidelines picture is drawn. */
-    private const val UNROLLED_HEIGHT_FACTOR = 4
-
     /**
      * The trait a catalog gives a component whose content scrolls, so a device frame shows only the
      * top of the screen.
@@ -3508,6 +3771,7 @@ class ServeUiBuilderMcp(
         EXPORT_DOCUMENT.takeIf { RemoteDocumentExportSupport.formats.isNotEmpty() },
         VIEW,
         CHECK_DESIGN,
+        GUIDELINES_PROMPT,
         DESIGN_ACCESS,
         SHARE_DESIGN,
         RENAME_DESIGN,
@@ -3615,6 +3879,7 @@ class ServeUiBuilderMcp(
       reviews: Boolean = false,
       branches: Boolean = false,
       references: Boolean = false,
+      guidelineRecords: Boolean = false,
     ): List<JsonObject> =
       listOfNotNull(
         tool(
@@ -4166,6 +4431,70 @@ class ServeUiBuilderMcp(
           },"additionalProperties":false}
           """,
         ),
+        tool(
+          GUIDELINES_PROMPT,
+          "Read the exact prompt a design-guidelines model is given for a design, before anybody " +
+            "spends a key on it: the rules for the design's platform (Android design guidance " +
+            "from developer.android.com, each with its source), the fixed system prompt, the user " +
+            "message with the design tree and Compose source, the JSON schema the verdicts must " +
+            "follow, a sentence on where each part comes from, and the pictures as image blocks — " +
+            "a Wear screen on its device (and unrolled when it scrolls), a Wear widget in the " +
+            "Samsung and Pixel Watch containers, a phone or tablet design at phone and tablet " +
+            "size. It spends no key. Judge it with your own model, then record the verdicts with " +
+            "$RECORD_GUIDELINES so the editor and other agents see them. " +
+            "`$RENDERED_ARGUMENT: false` leaves out the pictures and source (and the visual " +
+            "rules), and needs only read access; otherwise it needs the ui-builder-export " +
+            "capability.",
+          """
+          {"type":"object","properties":{
+            "designId":{"type":"string"},
+            "revision":{"type":"integer","description":"A past revision. Omit for the current one."},
+            "$RENDERED_ARGUMENT":{"type":"boolean","description":"Attach native renders and the Compose source. Defaults to true."}
+          },"required":["designId"],"additionalProperties":false}
+          """,
+        ),
+        if (!guidelineRecords) null
+        else
+          tool(
+            GET_GUIDELINES,
+            "Read a design's latest design-guidelines result, whoever ran it — a person in the " +
+              "editor on their own key, $CHECK_DESIGN on this host's key, or an agent that " +
+              "recorded verdicts with $RECORD_GUIDELINES. Returns the record (model, revision, " +
+              "rules asked, verdicts, `ranBy`), the findings it implies, and `stale: true` when " +
+              "the design has changed since it was checked.",
+            """
+            {"type":"object","properties":{
+              "designId":{"type":"string"}
+            },"required":["designId"],"additionalProperties":false}
+            """,
+          ),
+        if (!guidelineRecords) null
+        else
+          tool(
+            RECORD_GUIDELINES,
+            "Record your own model's verdicts on $GUIDELINES_PROMPT as the design's latest " +
+              "design-guidelines result, so the editor's Issues panel and other agents show " +
+              "them. Pass the `revision` and rule ids the prompt asked (`rules.asked[].id`), " +
+              "and one verdict per rule you answered: `pass`, `fail` or `not_applicable`, with " +
+              "`confidence` 0..1, the `nodeIds` it is about and a one-sentence `reason`. " +
+              "`ranBy` is taken from your credential. Returns what $GET_GUIDELINES returns.",
+            """
+            {"type":"object","properties":{
+              "designId":{"type":"string"},
+              "revision":{"type":"integer","description":"The revision the prompt was built from."},
+              "model":{"type":"string","description":"The model that judged it, e.g. anthropic/claude-haiku-5.5."},
+              "rulesVersion":{"type":"integer","description":"The prompt's `rules.version`. Defaults to this host's."},
+              "asked":{"type":"array","items":{"type":"string"},"description":"The rule ids the prompt asked."},
+              "verdicts":{"type":"array","items":{"type":"object","properties":{
+                "ruleId":{"type":"string"},
+                "verdict":{"type":"string","enum":["pass","fail","not_applicable"]},
+                "confidence":{"type":"number","minimum":0,"maximum":1},
+                "nodeIds":{"type":"array","items":{"type":"string"}},
+                "reason":{"type":"string"}
+              },"required":["ruleId","verdict"],"additionalProperties":false}}
+            },"required":["designId","revision","model","asked","verdicts"],"additionalProperties":false}
+            """,
+          ),
         if (!validate) null
         else
           tool(

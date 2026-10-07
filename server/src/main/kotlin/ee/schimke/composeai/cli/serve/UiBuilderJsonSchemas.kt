@@ -142,6 +142,22 @@ internal object UiBuilderJsonSchemas {
     )
   }
 
+  /** `ui_builder_guidelines_prompt`'s MCP `outputSchema`: compose-ui-builder's request. */
+  val guidelinesPromptOutput: JsonObject by lazy {
+    SerialDescriptorJsonSchema.output(
+      ee.schimke.composeai.uibuilder.guidelines.DesignGuidelineRequest.serializer().descriptor,
+      schemaId = ee.schimke.composeai.uibuilder.guidelines.DesignGuidelineRequest.SCHEMA,
+    )
+  }
+
+  /** `ui_builder_get_guidelines` and `ui_builder_record_guidelines`: [UiBuilderGuidelinesV1]. */
+  val guidelinesOutput: JsonObject by lazy {
+    SerialDescriptorJsonSchema.output(
+      UiBuilderGuidelinesV1.serializer().descriptor,
+      schemaId = UI_BUILDER_GUIDELINES_SCHEMA,
+    )
+  }
+
   /** `ui_builder_compare_reference`'s MCP `outputSchema`: [UiBuilderReferenceComparisonV1]. */
   val referenceComparisonOutput: JsonObject by lazy {
     SerialDescriptorJsonSchema.output(

@@ -741,6 +741,7 @@ class ServeCatalogMcp(
           it.supportsReviews,
           it.supportsBranches,
           it.supportsReferences,
+          it.supportsGuidelineRecords,
         )
       )
     }
@@ -2870,6 +2871,7 @@ class ServeCatalogMcp(
       again is UiBuilderAuthorizationDecision.Authorized && again.actor == actor
     }
     val text = builder.call(name, args, actor, callId = name, clientInteraction = interaction)
+    if (name == ServeUiBuilderMcp.GUIDELINES_PROMPT) return uiBuilderGuidelinesPromptResult(text)
     if (
       name == ServeUiBuilderMcp.VIEW ||
         name == ServeUiBuilderMcp.RENDER_DESIGN_MATRIX ||
@@ -2936,6 +2938,40 @@ class ServeCatalogMcp(
             add(chatImageText(it.first, it.second))
           }
           if (inline || link == null) add(imageContent(png))
+        },
+      )
+    }
+  }
+
+  /**
+   * `ui_builder_guidelines_prompt`'s reply: the request as JSON text with each picture's `dataUrl`
+   * taken out, then the pictures as image blocks in the order the user message numbers them, so an
+   * agent hands its model the same text and the same pictures and spends no context on base64.
+   */
+  internal fun uiBuilderGuidelinesPromptResult(text: String): JsonObject {
+    val reply =
+      runCatching { JSON.parseToJsonElement(text) as? JsonObject }.getOrNull()
+        ?: return textResult(text)
+    val pictures = (reply["pictures"] as? JsonArray).orEmpty().filterIsInstance<JsonObject>()
+    val pngs = pictures.map { picture ->
+      picture["dataUrl"]?.jsonPrimitive?.contentOrNull?.let(::pngPayload)
+    }
+    val described =
+      JsonObject(reply + ("pictures" to JsonArray(pictures.map { JsonObject(it - "dataUrl") })))
+    return buildJsonObject {
+      put(
+        "content",
+        buildJsonArray {
+          add(textContent(described.toString()))
+          pngs.filterNotNull().forEach { png ->
+            add(
+              buildJsonObject {
+                put("type", "image")
+                put("data", png)
+                put("mimeType", "image/png")
+              }
+            )
+          }
         },
       )
     }
@@ -3102,6 +3138,9 @@ class ServeCatalogMcp(
       ServeUiBuilderMcp.FIND_DESIGN_FOR_PR -> UiBuilderJsonSchemas.prLookupOutput
       ServeUiBuilderMcp.SET_REFERENCE -> UiBuilderJsonSchemas.referenceAttachedOutput
       ServeUiBuilderMcp.COMPARE_REFERENCE -> UiBuilderJsonSchemas.referenceComparisonOutput
+      ServeUiBuilderMcp.GUIDELINES_PROMPT -> UiBuilderJsonSchemas.guidelinesPromptOutput
+      ServeUiBuilderMcp.GET_GUIDELINES,
+      ServeUiBuilderMcp.RECORD_GUIDELINES -> UiBuilderJsonSchemas.guidelinesOutput
       in ServeUiBuilderHistoryTools.TOOL_NAMES -> ServeUiBuilderHistoryTools.outputSchema(name)!!
       in ServeUiBuilderBranchTools.TOOL_NAMES -> ServeUiBuilderBranchTools.outputSchema(name)!!
       in ServeUiBuilderAlternativeTools.TOOL_NAMES ->

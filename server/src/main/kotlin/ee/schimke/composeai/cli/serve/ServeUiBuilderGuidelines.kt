@@ -1,28 +1,23 @@
 package ee.schimke.composeai.cli.serve
 
+import ee.schimke.composeai.uibuilder.guidelines.DesignGuidelinePicture
+import ee.schimke.composeai.uibuilder.guidelines.DesignGuidelinePrompt
+import ee.schimke.composeai.uibuilder.guidelines.DesignGuidelineRequest
+import ee.schimke.composeai.uibuilder.guidelines.DesignGuidelineRequestRules
+import ee.schimke.composeai.uibuilder.guidelines.DesignGuidelineRuleSet
+import ee.schimke.composeai.uibuilder.guidelines.DesignGuidelineVerdict
+import ee.schimke.composeai.uibuilder.guidelines.GUIDELINE_RULES_URL
+import ee.schimke.composeai.uibuilder.guidelines.body
+import ee.schimke.composeai.uibuilder.guidelines.provenance
 import ee.schimke.composeai.uibuilder.service.AuthenticatedUiBuilderActor
 import java.time.Clock
-import java.util.Base64
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import kotlinx.serialization.Serializable
-import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonArray
-import kotlinx.serialization.json.JsonElement
-import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.buildJsonArray
-import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
-import kotlinx.serialization.json.doubleOrNull
-import kotlinx.serialization.json.jsonArray
-import kotlinx.serialization.json.jsonObject
-import kotlinx.serialization.json.put
-import kotlinx.serialization.json.putJsonArray
-import kotlinx.serialization.json.putJsonObject
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -30,27 +25,23 @@ import okhttp3.RequestBody.Companion.toRequestBody
 
 /**
  * The `guidelines` half of `ui_builder_check_design`: a model judges a design against the Android
- * design guidance in [UiBuilderGuidelineRuleSet], through OpenRouter, on the **operator's** key.
+ * design guidance through OpenRouter, on the **operator's** key.
  *
  * Because the key is shared and every call costs money, the check is never on by default and never
  * open to everyone: [ServeUiBuilderGuidelineAccess] admits only the GitHub logins and organizations
  * the operator named. Every other caller gets the check reported as skipped, with why, and the rest
  * of `ui_builder_check_design` runs as before.
  *
- * The rules are the same file compose-ui-builder ships its in-browser check with
- * (`docs/guidelines/android-design-guidelines.json`); this copy is a resource of the server.
- *
- * What the model sees: an indented outline of the design tree (component, properties, modifiers,
- * slots — never asset bytes), the screen size and theme, the rules for the design's platform, and,
- * when the caller asked for `rendered: true` and the host could render, the native PNG. `visual`
- * rules need that picture and are skipped without it. Model findings are advisory: a failed rule is
- * a warning or a note, never an error, so `ok` is unchanged by them.
+ * The rules, the prompt and the reading of the reply are compose-ui-builder's
+ * (`ee.schimke.composeai.uibuilder.guidelines`, in `ui-builder-export`): the editor's own-key
+ * check, this lane and `ui_builder_guidelines_prompt` send the same [DesignGuidelineRequest].
+ * [prepare] builds one and needs no key; [check] spends the key on it. Model findings are advisory:
+ * a failed rule is a warning or a note, never an error, so `ok` is unchanged by them.
  */
 class ServeUiBuilderGuidelines
 internal constructor(
   private val config: ServeUiBuilderGuidelinesConfig,
   private val access: ServeUiBuilderGuidelineAccess,
-  private val rules: UiBuilderGuidelineRuleSet = UiBuilderGuidelineRuleSet.bundled(),
   private val transport: OpenRouterTransport = OkHttpOpenRouterTransport(config.endpoint),
 ) {
   val model: String
@@ -64,44 +55,27 @@ internal constructor(
   fun describeAccess(): String = access.describe()
 
   /**
-   * Judges [document], with [pictures] (renders, for the visual rules) and the Compose code the
-   * design exports to, which [source] produces only once there are rules to ask about.
+   * Sends [request] to the model on the operator's key and reads the verdicts. The caller has
+   * already decided [allows]; the request is the one [prepare] built, unchanged, so what was shown
+   * is what was asked.
    */
-  internal suspend fun check(
-    document: JsonObject,
-    pictures: List<UiBuilderGuidelinePicture>,
-    source: suspend () -> String? = { null },
-  ): UiBuilderGuidelineOutcome {
-    val systemId =
-      document["catalogPin"]?.let { it as? JsonObject }?.get("systemId")?.stringOrNull().orEmpty()
+  internal suspend fun check(request: DesignGuidelineRequest): UiBuilderGuidelineOutcome {
     val platform =
-      UiBuilderGuidelinePrompt.platformOf(systemId)
+      request.platform
         ?: return UiBuilderGuidelineOutcome.Skipped(
-          "no guidelines are written for catalog `$systemId` yet"
+          "no guidelines are written for this catalog yet"
         )
-    val applicable = rules.rules.filter { platform in it.platforms }
-    val (visual, structural) = applicable.partition { it.kind == KIND_VISUAL }
-    val asked = if (pictures.isNotEmpty()) applicable else structural
+    val asked = request.rules.asked
     if (asked.isEmpty()) {
       return UiBuilderGuidelineOutcome.Skipped(
         "no $platform guideline can be judged without a render"
       )
     }
-    val code = source()
-    val body =
-      UiBuilderGuidelinePrompt.requestBody(
-        model = config.model,
-        platform = platform,
-        document = document,
-        rules = asked,
-        pictures = pictures,
-        source = code,
-      )
     val response =
       try {
         withContext(Dispatchers.IO) {
           transport.post(
-            GUIDELINES_JSON.encodeToString(JsonObject.serializer(), body),
+            DesignGuidelinePrompt.body(request, config.model).toString(),
             config.apiKey,
           )
         }
@@ -110,114 +84,153 @@ internal constructor(
       }
     if (response.status !in 200..299) {
       return UiBuilderGuidelineOutcome.Failed(
-        "OpenRouter answered ${response.status}: ${UiBuilderGuidelinePrompt.errorMessage(response.body)}"
+        "OpenRouter answered ${response.status}: ${DesignGuidelinePrompt.errorMessage(response.body)}"
       )
     }
     val verdicts =
-      UiBuilderGuidelinePrompt.parseCompletion(response.body).getOrElse {
+      DesignGuidelinePrompt.parseCompletion(response.body).getOrElse {
         return UiBuilderGuidelineOutcome.Failed(
           "the model's answer was not the verdict list asked for: ${it.message}"
         )
       }
-    val byId = asked.associateBy { it.id }
-    // One verdict per rule asked: the first for each id, nothing for rules nobody asked about. A
-    // rule the model skipped is reported as unanswered, never counted as a pass.
-    val answered = verdicts.filter { it.ruleId in byId }.distinctBy { it.ruleId }
+    // One verdict per rule asked. A rule the model skipped is unanswered, never counted as a pass.
+    val answered = DesignGuidelinePrompt.answered(verdicts, asked)
     if (answered.isEmpty()) {
       return UiBuilderGuidelineOutcome.Failed(
         "${config.model} returned no verdict for any of the ${asked.size} rules asked"
       )
     }
-    val unanswered = asked.map { it.id } - answered.map { it.ruleId }.toSet()
-    val nodeIds = (document["nodes"] as? JsonObject)?.keys.orEmpty()
-    val findings =
-      answered
-        .filter { it.verdict == VERDICT_FAIL && it.confidence >= config.minConfidence }
-        .flatMap { verdict ->
-          val rule = byId[verdict.ruleId] ?: return@flatMap emptyList()
-          val nodes = verdict.nodeIds.filter { it in nodeIds }.distinct().take(MAX_NODES_PER_RULE)
-          (nodes.ifEmpty { listOf(null) }).map { nodeId ->
-            UiBuilderCheckFindingV1(
-              severity = if (rule.severity == SEVERITY_WARNING) SEVERITY_WARNING else SEVERITY_INFO,
-              check = CHECK_GUIDELINES,
-              code = rule.id,
-              message =
-                buildString {
-                  append(verdict.reason.trim().ifEmpty { rule.check })
-                  append(" Guideline: \"").append(rule.guidance).append("\" (")
-                  append(rule.source).append("). Model ").append(config.model)
-                  append(", confidence ")
-                    .append(String.format(java.util.Locale.ROOT, "%.2f", verdict.confidence))
-                    .append('.')
-                },
-              nodeId = nodeId,
-            )
-          }
-        }
     return UiBuilderGuidelineOutcome.Checked(
-      findings = findings,
-      judged = answered.size,
-      visualSkipped = if (pictures.isEmpty()) visual.size else 0,
-      unanswered = unanswered,
-      sourceAttached = code != null,
+      model = config.model,
+      rulesVersion = request.rules.version,
+      asked = asked.map { it.id },
+      verdicts = answered,
+      visualSkipped = request.rules.visualSkipped,
+      sourceAttached = request.sourceAttached,
     )
   }
 
   companion object {
-    const val KIND_VISUAL = "visual"
-    const val VERDICT_FAIL = "fail"
     private const val MAX_NODES_PER_RULE = 5
-  }
-}
 
-/**
- * A render the model judges the visual rules on, and what it shows. A scrolling Wear screen gets
- * two: the [DEVICE] frame (scrolled to the top, where Wear keeps the edge button hidden) and the
- * [UNROLLED] canvas (tall enough for the whole list, so its end is reached and the edge button is
- * revealed). The rules' `check` text names the picture each is judged on.
- */
-internal class UiBuilderGuidelinePicture(
-  val kind: String,
-  val png: ByteArray,
-  val widthDp: Int,
-  val heightDp: Int,
-) {
-  val dataUrl: String
-    get() = "data:image/png;base64," + Base64.getEncoder().encodeToString(png)
-
-  /** One line telling the model what this picture is. */
-  fun describe(index: Int): String =
-    when (kind) {
-      DEVICE ->
-        "Picture $index (device picture): the design on the watch at ${widthDp}×${heightDp}dp, " +
-          "its first frame, scrolled to the top. On a scrolling screen, content running off the " +
-          "bottom continues when the wearer scrolls and is not clipped, and Wear keeps the edge " +
-          "button hidden until the list reaches its end."
-      UNROLLED ->
-        "Picture $index (unrolled picture): the same design on a ${widthDp}×${heightDp}dp " +
-          "canvas, tall enough to show the whole scrolling list at once, scrolled to its end so a " +
-          "revealed edge button is visible. It is not what the wearer sees at one time."
-      else -> "Picture $index: the design rendered at ${widthDp}×${heightDp}dp."
+    /**
+     * The request for [document] with [pictures] and [source], built from the bundled rules. Pure
+     * and keyless: `ui_builder_guidelines_prompt`, the prompt route and [check] all start here.
+     *
+     * Composed from the library's own parts — the rule filter, [DesignGuidelinePrompt.userText],
+     * [DesignGuidelinePrompt.provenance], the fixed system prompt and response schema — exactly as
+     * its single-picture `prepare` does, with the whole picture list instead of one device frame.
+     * With no picture the visual rules are left out, since the model would have nothing to judge
+     * them on.
+     */
+    fun prepare(
+      designId: String?,
+      revision: Int,
+      document: JsonObject,
+      pictures: List<DesignGuidelinePicture>,
+      source: String?,
+      rules: DesignGuidelineRuleSet = DesignGuidelineRuleSet.Bundled,
+    ): DesignGuidelineRequest {
+      val systemId =
+        ((document["catalogPin"] as? JsonObject)?.get("systemId") as? JsonPrimitive)?.contentOrNull
+      val platform = systemId?.let(DesignGuidelinePrompt::platformOf)
+      val applicable = platform?.let(rules::forPlatform).orEmpty()
+      val asked = if (pictures.isNotEmpty()) applicable else applicable.filterNot { it.visual }
+      return DesignGuidelineRequest(
+        designId = designId,
+        revision = revision,
+        platform = platform,
+        rules =
+          DesignGuidelineRequestRules(
+            version = rules.version,
+            source = GUIDELINE_RULES_URL,
+            forPlatform = applicable.size,
+            asked = asked,
+            visualSkipped = applicable.size - asked.size,
+          ),
+        pictures = pictures,
+        sourceAttached = source != null,
+        systemPrompt = DesignGuidelinePrompt.SYSTEM_PROMPT,
+        userText =
+          if (platform == null) ""
+          else
+            DesignGuidelinePrompt.userText(
+              platform,
+              document,
+              asked,
+              pictures.map { it.description },
+              source,
+            ),
+        responseSchema = DesignGuidelinePrompt.responseSchema,
+        provenance =
+          DesignGuidelinePrompt.provenance(
+            rules.version,
+            applicable.size,
+            asked.size,
+            pictures,
+            source != null,
+          ),
+      )
     }
 
-  companion object {
-    const val DEVICE = "device"
-    const val UNROLLED = "unrolled"
+    /**
+     * [verdicts] as `ui_builder_check_design` findings: one per node a confident `fail` names (at
+     * most a few), or one for the whole design, each quoting the guideline and its source.
+     */
+    internal fun findings(
+      verdicts: List<DesignGuidelineVerdict>,
+      asked: List<String>,
+      nodeIds: Set<String>,
+      model: String,
+      minConfidence: Double,
+    ): List<UiBuilderCheckFindingV1> {
+      val rules = DesignGuidelineRuleSet.Bundled.rules.filter { it.id in asked }
+      return DesignGuidelinePrompt.findings(verdicts, rules, nodeIds, minConfidence).flatMap {
+        finding ->
+        val rule = finding.rule
+        (finding.nodeIds.take(MAX_NODES_PER_RULE).ifEmpty { listOf(null) }).map { nodeId ->
+          UiBuilderCheckFindingV1(
+            severity = if (rule.severity == SEVERITY_WARNING) SEVERITY_WARNING else SEVERITY_INFO,
+            check = CHECK_GUIDELINES,
+            code = rule.id,
+            message =
+              buildString {
+                append(finding.reason)
+                append(" Guideline: \"").append(rule.guidance).append("\" (")
+                append(rule.source).append("). Model ").append(model)
+                append(", confidence ")
+                  .append(String.format(java.util.Locale.ROOT, "%.2f", finding.confidence))
+                  .append('.')
+              },
+            nodeId = nodeId,
+          )
+        }
+      }
+    }
   }
+
+  /** Below this, a `fail` verdict is not reported: the model was guessing. */
+  val minConfidence: Double
+    get() = config.minConfidence
 }
 
 internal sealed interface UiBuilderGuidelineOutcome {
+  /** The model's answers to the rules asked, ready to record and to turn into findings. */
   data class Checked(
-    val findings: List<UiBuilderCheckFindingV1>,
-    /** How many rules the model judged. */
-    val judged: Int,
-    /** Visual rules left out because there was no render to show the model. */
+    val model: String,
+    val rulesVersion: Int,
+    /** The rule ids asked about. */
+    val asked: List<String>,
+    /** One verdict per answered rule; a rule asked and missing here is unanswered. */
+    val verdicts: List<DesignGuidelineVerdict>,
+    /** Visual rules left out because there was no picture to show the model. */
     val visualSkipped: Int,
-    /** Rules asked about that the model returned no verdict for. */
-    val unanswered: List<String> = emptyList(),
     /** Whether the generated Compose source went to the model with the design tree. */
     val sourceAttached: Boolean = false,
-  ) : UiBuilderGuidelineOutcome
+  ) : UiBuilderGuidelineOutcome {
+    val unanswered: List<String>
+      get() = asked - verdicts.map { it.ruleId }.toSet()
+  }
 
   data class Skipped(val reason: String) : UiBuilderGuidelineOutcome
 
@@ -365,373 +378,3 @@ internal class OkHttpOpenRouterTransport(
     }
   }
 }
-
-@Serializable
-internal data class UiBuilderGuidelineRule(
-  val id: String,
-  val platforms: List<String>,
-  /** `structure` (the tree is enough) or `visual` (needs a picture). */
-  val kind: String,
-  /** `warning` or `info`. */
-  val severity: String,
-  /** The guidance as written at [source]. */
-  val guidance: String,
-  /** A yes/no question; YES means the design follows the rule. */
-  val check: String,
-  val source: String,
-)
-
-@Serializable
-internal data class UiBuilderGuidelineRuleSet(
-  val schema: String,
-  val version: Int,
-  val about: String = "",
-  val rules: List<UiBuilderGuidelineRule>,
-) {
-  companion object {
-    private const val RESOURCE = "guidelines/android-design-guidelines.json"
-
-    fun bundled(): UiBuilderGuidelineRuleSet {
-      val text =
-        UiBuilderGuidelineRuleSet::class.java.getResourceAsStream(RESOURCE)?.use {
-          it.readBytes().decodeToString()
-        } ?: error("missing resource $RESOURCE")
-      return GUIDELINES_JSON.decodeFromString(serializer(), text)
-    }
-  }
-}
-
-/** One rule's answer, as the model returns it. */
-@Serializable
-internal data class UiBuilderGuidelineVerdict(
-  val ruleId: String,
-  /** `pass`, `fail` or `not_applicable`. */
-  val verdict: String,
-  val confidence: Double = 0.0,
-  val nodeIds: List<String> = emptyList(),
-  val reason: String = "",
-)
-
-@Serializable
-private data class UiBuilderGuidelineVerdicts(val verdicts: List<UiBuilderGuidelineVerdict>)
-
-/**
- * The request the model is sent and the reading of what comes back — no I/O, so it is tested on its
- * own. The browser check in compose-ui-builder builds the same request from the same rules.
- */
-internal object UiBuilderGuidelinePrompt {
-  /** Which guides apply to a catalog, read from its system id; null for one with none yet. */
-  fun platformOf(systemId: String): String? {
-    val id = systemId.lowercase()
-    return when {
-      "glimmer" in id || "glasses" in id -> "glasses"
-      "wear" in id || id.startsWith("remote") -> "wear"
-      else -> null
-    }
-  }
-
-  /** How much generated source a request carries; a screen's export is well under this. */
-  const val MAX_SOURCE_CHARS: Int = 16_000
-
-  const val SYSTEM_PROMPT: String =
-    "You review UI designs against Android design guidelines. For every rule you are given, " +
-      "answer the rule's yes/no `check` for this design: verdict `pass` when the answer is yes, " +
-      "`fail` when it is no, `not_applicable` when the rule does not apply to this design or the " +
-      "evidence cannot decide it. Judge only from what is provided: the design tree, and when " +
-      "given the generated Jetpack Compose source (the code this design exports to; use it for " +
-      "questions about code) and a rendered picture. Do not " +
-      "assume content that is not there. Answer `fail` only when the design clearly breaks the " +
-      "rule. `confidence` is your probability (0 to 1) that the verdict is right. `nodeIds` names " +
-      "the design-tree node ids a `fail` is about (empty otherwise). `reason` is one short " +
-      "sentence a designer can act on. Reply with JSON only: " +
-      "{\"verdicts\":[{\"ruleId\":…,\"verdict\":…,\"confidence\":…,\"nodeIds\":[…],\"reason\":…}]}, " +
-      "one entry per rule."
-
-  fun requestBody(
-    model: String,
-    platform: String,
-    document: JsonObject,
-    rules: List<UiBuilderGuidelineRule>,
-    pictures: List<UiBuilderGuidelinePicture>,
-    source: String? = null,
-  ): JsonObject = buildJsonObject {
-    put("model", model)
-    put("temperature", 0)
-    putJsonArray("messages") {
-      add(
-        buildJsonObject {
-          put("role", "system")
-          put("content", SYSTEM_PROMPT)
-        }
-      )
-      add(
-        buildJsonObject {
-          put("role", "user")
-          putJsonArray("content") {
-            add(
-              buildJsonObject {
-                put("type", "text")
-                put(
-                  "text",
-                  userText(
-                    platform,
-                    document,
-                    rules,
-                    pictures.mapIndexed { i, picture -> picture.describe(i + 1) },
-                    source,
-                  ),
-                )
-              }
-            )
-            pictures.forEach { picture ->
-              add(
-                buildJsonObject {
-                  put("type", "image_url")
-                  putJsonObject("image_url") { put("url", picture.dataUrl) }
-                }
-              )
-            }
-          }
-        }
-      )
-    }
-    putJsonObject("response_format") {
-      put("type", "json_schema")
-      putJsonObject("json_schema") {
-        put("name", "guideline_verdicts")
-        put("strict", true)
-        put("schema", VERDICTS_SCHEMA)
-      }
-    }
-  }
-
-  fun userText(
-    platform: String,
-    document: JsonObject,
-    rules: List<UiBuilderGuidelineRule>,
-    pictures: List<String> = emptyList(),
-    source: String? = null,
-  ): String = buildString {
-    val environment = document["environment"] as? JsonObject
-    val width = environment?.get("widthDp")?.numberOrNull()
-    val height = environment?.get("heightDp")?.numberOrNull()
-    val theme = environment?.get("theme")?.stringOrNull()
-    append("Platform: ").append(platform).append('\n')
-    append("Design: ").append(document["title"]?.stringOrNull() ?: "untitled")
-    if (width != null && height != null) {
-      append(", ").append(width.toInt()).append('×').append(height.toInt()).append("dp")
-    }
-    if (theme != null) append(", ").append(theme).append(" theme")
-    append('\n')
-    if (pictures.isNotEmpty()) {
-      append("Attached pictures, in order:\n")
-      pictures.forEach { append("- ").append(it).append('\n') }
-    }
-    append("\nDesign tree (node id, component, properties, modifiers; children by slot):\n")
-    append(outline(document))
-    if (source != null) {
-      append("\nGenerated Jetpack Compose source (what this design exports to):\n```kotlin\n")
-      if (source.length > MAX_SOURCE_CHARS) {
-        append(source.take(MAX_SOURCE_CHARS)).append("\n// … ")
-        append(source.length - MAX_SOURCE_CHARS).append(" more characters not shown\n")
-      } else {
-        append(source.trimEnd()).append('\n')
-      }
-      append("```\n")
-    }
-    append("\nRules:\n")
-    rules.forEach { rule ->
-      append("- ruleId: ").append(rule.id).append('\n')
-      append("  guidance: ").append(rule.guidance).append('\n')
-      append("  check: ").append(rule.check).append('\n')
-    }
-  }
-
-  /**
-   * The design as an indented tree a model can read: one line per node with its scalar properties
-   * and modifiers, children under the slot that holds them. Asset bytes and bindings never appear.
-   */
-  fun outline(document: JsonObject, maxNodes: Int = 250): String {
-    val nodes = document["nodes"] as? JsonObject ?: return "(no nodes)\n"
-    val roots =
-      (document["roots"] as? JsonArray)
-        ?.mapNotNull { it.stringOrNull() }
-        .orEmpty()
-        .ifEmpty { nodes.keys.toList() }
-    val seen = mutableSetOf<String>()
-    val out = StringBuilder()
-    fun visit(id: String, depth: Int) {
-      if (seen.size >= maxNodes || !seen.add(id)) return
-      val node = nodes[id] as? JsonObject ?: return
-      out.append("  ".repeat(depth)).append("- ").append(id).append(": ")
-      out.append(node["componentId"]?.stringOrNull() ?: "?")
-      val properties = (node["properties"] as? JsonObject).orEmpty()
-      val described =
-        properties.entries.mapNotNull { (name, value) -> describeValue(value)?.let { "$name=$it" } }
-      if (described.isNotEmpty()) out.append(" {").append(described.joinToString(", ")).append('}')
-      val modifiers =
-        (node["modifiers"] as? JsonArray).orEmpty().mapNotNull { describeModifier(it) }
-      if (modifiers.isNotEmpty())
-        out.append(" modifiers[").append(modifiers.joinToString(", ")).append(']')
-      val events = (node["eventBindings"] as? JsonObject)?.keys.orEmpty()
-      if (events.isNotEmpty()) out.append(" events[").append(events.joinToString(", ")).append(']')
-      (node["component"] as? JsonObject)?.let { instance ->
-        out.append(" instance of ").append(instance["componentKey"]?.stringOrNull() ?: "?")
-        val arguments =
-          (instance["arguments"] as? JsonObject).orEmpty().entries.mapNotNull { (name, value) ->
-            describeValue(value)?.let { "$name=$it" }
-          }
-        if (arguments.isNotEmpty())
-          out.append(" (").append(arguments.joinToString(", ")).append(')')
-      }
-      out.append('\n')
-      (node["slots"] as? JsonObject).orEmpty().forEach { (slot, children) ->
-        val ids = (children as? JsonArray).orEmpty().mapNotNull { it.stringOrNull() }
-        if (ids.isEmpty()) return@forEach
-        out.append("  ".repeat(depth + 1)).append(slot).append(":\n")
-        ids.forEach { visit(it, depth + 2) }
-      }
-    }
-    roots.forEach { visit(it, 0) }
-    // A component's body hangs off `components[key].root`, not off the slots of the nodes that
-    // place it, so it is outlined once here and each placement names it with "instance of".
-    (document["components"] as? JsonObject).orEmpty().forEach { (key, component) ->
-      val root = (component as? JsonObject)?.get("root")?.stringOrNull() ?: return@forEach
-      if (root in seen) return@forEach
-      val name = (component as JsonObject)["name"]?.stringOrNull()
-      out.append("component ").append(key).append(name?.let { " ($it)" }.orEmpty()).append(":\n")
-      visit(root, 1)
-    }
-    if (seen.size < nodes.size) out.append("(${nodes.size - seen.size} more nodes not shown)\n")
-    return out.toString()
-  }
-
-  /** A typed protocol value (`{"type":"string","value":"OK"}`) as a short literal, or null. */
-  private fun describeValue(value: JsonElement): String? {
-    val obj = value as? JsonObject ?: return (value as? JsonPrimitive)?.contentOrNull?.take(60)
-    val type = obj["type"]?.stringOrNull()
-    return when (type) {
-      "string" -> obj["value"]?.stringOrNull()?.let { "\"${it.take(60)}\"" }
-      "bool",
-      "int",
-      "float",
-      "double",
-      "enum",
-      "dp",
-      "sp" -> obj["value"]?.let { primitiveText(it) }
-      "color" -> obj["value"]?.let { primitiveText(it) } ?: obj["role"]?.stringOrNull()
-      "null" -> null
-      "binding" -> obj["value"]?.stringOrNull()?.let { "{$it}" }
-      "list" -> (obj["values"] as? JsonArray)?.let { "[${it.size} items]" }
-      else ->
-        obj["value"]?.let { primitiveText(it) }
-          ?: obj["role"]?.stringOrNull()
-          ?: obj["iconName"]?.stringOrNull()
-          ?: type
-    }
-  }
-
-  private fun describeModifier(value: JsonElement): String? {
-    val obj = value as? JsonObject ?: return null
-    val type = obj["type"]?.stringOrNull() ?: return null
-    val args =
-      obj.entries
-        .filter { it.key != "type" }
-        .mapNotNull { (name, arg) -> primitiveText(arg)?.let { "$name=$it" } }
-    return if (args.isEmpty()) type else "$type(${args.joinToString(", ")})"
-  }
-
-  private fun primitiveText(value: JsonElement): String? =
-    (value as? JsonPrimitive)?.takeIf { it !is JsonNull }?.contentOrNull?.take(40)
-
-  /**
-   * The verdicts out of an OpenAI-style chat completion: `choices[0].message.content`, which may be
-   * fenced or carry text around the JSON when a model ignores `response_format`.
-   */
-  fun parseCompletion(body: String): Result<List<UiBuilderGuidelineVerdict>> = runCatching {
-    val completion = GUIDELINES_JSON.parseToJsonElement(body).jsonObject
-    val content =
-      completion["choices"]
-        ?.jsonArray
-        ?.firstOrNull()
-        ?.jsonObject
-        ?.get("message")
-        ?.jsonObject
-        ?.get("content")
-        ?.stringOrNull() ?: error("no message content in the completion")
-    parseVerdicts(content)
-  }
-
-  fun parseVerdicts(content: String): List<UiBuilderGuidelineVerdict> {
-    val start = content.indexOf('{')
-    val end = content.lastIndexOf('}')
-    require(start >= 0 && end > start) { "no JSON object in: ${content.take(200)}" }
-    return GUIDELINES_JSON.decodeFromString(
-        UiBuilderGuidelineVerdicts.serializer(),
-        content.substring(start, end + 1),
-      )
-      .verdicts
-      .map { it.copy(confidence = it.confidence.coerceIn(0.0, 1.0)) }
-  }
-
-  /** OpenRouter's `{"error":{"message":…}}`, or the start of whatever came back. */
-  fun errorMessage(body: String): String =
-    runCatching {
-      GUIDELINES_JSON.parseToJsonElement(body)
-        .jsonObject["error"]
-        ?.jsonObject
-        ?.get("message")
-        ?.stringOrNull()
-    }
-      .getOrNull() ?: body.take(200)
-
-  private val VERDICTS_SCHEMA: JsonObject = buildJsonObject {
-    put("type", "object")
-    put("additionalProperties", false)
-    putJsonArray("required") { add(JsonPrimitive("verdicts")) }
-    putJsonObject("properties") {
-      putJsonObject("verdicts") {
-        put("type", "array")
-        putJsonObject("items") {
-          put("type", "object")
-          put("additionalProperties", false)
-          putJsonArray("required") {
-            listOf("ruleId", "verdict", "confidence", "nodeIds", "reason").forEach {
-              add(JsonPrimitive(it))
-            }
-          }
-          putJsonObject("properties") {
-            putJsonObject("ruleId") { put("type", "string") }
-            putJsonObject("verdict") {
-              put("type", "string")
-              put(
-                "enum",
-                buildJsonArray {
-                  add(JsonPrimitive("pass"))
-                  add(JsonPrimitive("fail"))
-                  add(JsonPrimitive("not_applicable"))
-                },
-              )
-            }
-            putJsonObject("confidence") { put("type", "number") }
-            putJsonObject("nodeIds") {
-              put("type", "array")
-              putJsonObject("items") { put("type", "string") }
-            }
-            putJsonObject("reason") { put("type", "string") }
-          }
-        }
-      }
-    }
-  }
-}
-
-private val GUIDELINES_JSON = Json {
-  ignoreUnknownKeys = true
-  explicitNulls = false
-}
-
-private fun JsonElement.stringOrNull(): String? =
-  (this as? JsonPrimitive)?.takeIf { it.isString }?.content
-
-private fun JsonElement.numberOrNull(): Double? = (this as? JsonPrimitive)?.doubleOrNull

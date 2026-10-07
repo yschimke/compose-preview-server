@@ -226,11 +226,6 @@ jobs:
       # re-sync becomes real, and no-ops while the pinned release predates the file.
       - name: Check vendored preview-selector fixtures
         run: ./scripts/sync-preview-selector-fixtures.sh --check
-      # The same pin for the design-guideline rules the `guidelines` check asks a model about:
-      # compose-ui-builder owns them and its editor asks the same questions. Red on a pin bump that
-      # changed them; a no-op while the pinned release predates the file.
-      - name: Check vendored UI-builder guidelines
-        run: ./scripts/sync-ui-builder-guidelines.sh --check
 
       # The evidence pruner deletes directories, so its keep-rules are what stand between a
       # scheduled job and somebody's baseline. The age floor especially: it is the only thing keeping

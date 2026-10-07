@@ -187,10 +187,10 @@ how those artefacts are regenerated, just run through `build-brief`.
   in. `docs/serve/preview-selector-fixtures.json` is the shared golden table that pins them; it is
   owned upstream, vendored by `scripts/sync-preview-selector-fixtures.sh`, and run by
   `PreviewSelectorFixturesTest`. Change the rule, change the table upstream in the same change.
-- The UI-builder design-guideline rules (`server/src/main/resources/.../guidelines/`) are owned by
-  compose-ui-builder (`docs/guidelines/android-design-guidelines.json`) and vendored against the
-  `composeai-ui-builder` pin by `scripts/sync-ui-builder-guidelines.sh`; CI runs it with `--check`.
-  Change the rules upstream, then re-sync here on the pin bump.
+- The UI-builder design-guideline rules, prompt and picture plan are compose-ui-builder's
+  (`docs/guidelines/android-design-guidelines.json`, embedded in `ui-builder-export` as
+  `DesignGuidelineRuleSet.Bundled`). Nothing is vendored here: change them upstream, and they arrive
+  with the next `composeai-ui-builder` bump.
 - Two JVM floors, `java-server` (17) and `java-ui-builder` (21), declared once in
   `gradle/libs.versions.toml` with the reasoning beside them. Everything this repository compiles or
   resolves against is 17, because compose-ai-tools' `:cli` compiles against the released server on a

@@ -1,5 +1,12 @@
 package ee.schimke.composeai.cli.serve
 
+import ee.schimke.composeai.uibuilder.guidelines.DesignGuidelineFrame
+import ee.schimke.composeai.uibuilder.guidelines.DesignGuidelinePicture
+import ee.schimke.composeai.uibuilder.guidelines.DesignGuidelinePrompt
+import ee.schimke.composeai.uibuilder.guidelines.DesignGuidelineRecord
+import ee.schimke.composeai.uibuilder.guidelines.DesignGuidelineRuleSet
+import ee.schimke.composeai.uibuilder.guidelines.DesignGuidelineVerdict
+import ee.schimke.composeai.uibuilder.guidelines.body
 import ee.schimke.composeai.uibuilder.service.AuthenticatedUiBuilderActor
 import java.time.Clock
 import java.time.Instant
@@ -19,107 +26,44 @@ import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
-import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 
 class ServeUiBuilderGuidelinesTest {
   @Test
-  fun `the bundled rules parse, and every rule is complete and uniquely named`() {
-    val rules = UiBuilderGuidelineRuleSet.bundled()
-    assertEquals("compose-ui-builder/design-guidelines/v1", rules.schema)
-    assertTrue(rules.rules.size >= 10)
+  fun `the rules are compose-ui-builder's bundled set, and m3 is the mobile platform`() {
+    val rules = DesignGuidelineRuleSet.Bundled
+    assertTrue(rules.forPlatform("wear").isNotEmpty())
+    assertTrue(rules.forPlatform("mobile").isNotEmpty())
     assertEquals(rules.rules.size, rules.rules.map { it.id }.toSet().size)
-    rules.rules.forEach { rule ->
-      assertTrue(rule.platforms.isNotEmpty(), rule.id)
-      assertTrue(rule.kind in setOf("structure", "visual"), rule.id)
-      assertTrue(rule.severity in setOf("warning", "info"), rule.id)
-      assertTrue(
-        rule.guidance.isNotBlank() && '?' in rule.check,
-        rule.id,
+    assertEquals("wear", DesignGuidelinePrompt.platformOf("remote-m3"))
+    assertEquals("mobile", DesignGuidelinePrompt.platformOf("m3"))
+    assertNull(DesignGuidelinePrompt.platformOf("compose-foundation"))
+  }
+
+  @Test
+  fun `a request asks the visual rules only with pictures, and describes each picture`() {
+    val bare = ServeUiBuilderGuidelines.prepare("d", 3, wearDocument(), emptyList(), null)
+    val wear = DesignGuidelineRuleSet.Bundled.forPlatform("wear")
+    assertEquals(wear.filterNot { it.visual }.map { it.id }, bare.rules.asked.map { it.id })
+    assertEquals(wear.count { it.visual }, bare.rules.visualSkipped)
+    assertTrue(bare.provenance.any { "No picture is attached" in it }, bare.provenance.toString())
+
+    val frames =
+      listOf(
+        DesignGuidelineFrame(DesignGuidelinePicture.DEVICE, 192, 192, emptyMap()),
+        DesignGuidelineFrame(DesignGuidelinePicture.UNROLLED, 192, 768, emptyMap()),
       )
-      assertTrue(
-        rule.source.startsWith("https://developer.android.com/") || rule.source.startsWith("kb://"),
-        rule.id,
-      )
+    val pictures = frames.mapIndexed { i, frame ->
+      DesignGuidelinePicture.of(frame, i + 1, "data:image/png;base64,AQ==")
     }
-  }
-
-  @Test
-  fun `a catalog's platform is read from its system id`() {
-    assertEquals("wear", UiBuilderGuidelinePrompt.platformOf("wear-m3"))
-    assertEquals("wear", UiBuilderGuidelinePrompt.platformOf("remote-m3"))
-    assertEquals("glasses", UiBuilderGuidelinePrompt.platformOf("glimmer"))
-    assertNull(UiBuilderGuidelinePrompt.platformOf("m3-catalog"))
-  }
-
-  @Test
-  fun `the outline shows the tree, its values and modifiers, and never asset bytes`() {
-    val outline = UiBuilderGuidelinePrompt.outline(wearDocument())
-    assertEquals(
-      """
-      - screen: wear-m3/screen-scaffold {timeText="10:10"}
-        content:
-          - list: wear-m3/transforming-lazy-column
-            items:
-              - one: wear-m3/button {label="Start"} modifiers[fillMaxWidth] events[onClick]
-              - two: wear-m3/button {label="Stop"} modifiers[width(value=80)]
-
-      """
-        .trimIndent(),
-      outline,
-    )
-    assertFalse("base64" in outline)
-  }
-
-  @Test
-  fun `the request carries the rules for the platform, and a picture only when there is one`() {
-    val rules = UiBuilderGuidelineRuleSet.bundled().rules.filter { "wear" in it.platforms }
-    val bare = UiBuilderGuidelinePrompt.requestBody("m", "wear", wearDocument(), rules, emptyList())
-    val content = bare.userContent()
-    assertEquals(1, content.size)
-    val text = content.single().jsonObject["text"]!!.jsonPrimitive.content
-    assertTrue("Platform: wear" in text, text)
-    assertTrue("192×192dp" in text, text)
-    rules.forEach { assertTrue("ruleId: ${it.id}" in text, it.id) }
-    assertEquals(
-      "json_schema",
-      bare["response_format"]!!.jsonObject["type"]!!.jsonPrimitive.content,
-    )
-
-    val pictured =
-      UiBuilderGuidelinePrompt.requestBody(
-        "m",
-        "wear",
-        wearDocument(),
-        rules,
-        listOf(
-          UiBuilderGuidelinePicture(UiBuilderGuidelinePicture.DEVICE, byteArrayOf(1), 192, 192),
-          UiBuilderGuidelinePicture(UiBuilderGuidelinePicture.UNROLLED, byteArrayOf(2), 192, 768),
-        ),
-      )
-    val parts = pictured.userContent()
-    assertEquals(
-      listOf("text", "image_url", "image_url"),
-      parts.map { it.jsonObject["type"]!!.jsonPrimitive.content },
-    )
-    // The text says which picture is which, and that content below the device frame is not cut.
-    val described = parts.first().jsonObject["text"]!!.jsonPrimitive.content
-    assertTrue("Picture 1 (device picture)" in described, described)
-    assertTrue("is not clipped" in described, described)
-    assertTrue("Picture 2 (unrolled picture)" in described, described)
-    assertTrue("192×768dp" in described, described)
-  }
-
-  @Test
-  fun `verdicts are read from a completion, fenced or not`() {
-    val verdicts =
-      UiBuilderGuidelinePrompt.parseVerdicts(
-        "```json\n{\"verdicts\":[{\"ruleId\":\"a\",\"verdict\":\"fail\",\"confidence\":1.4," +
-          "\"nodeIds\":[\"x\"],\"reason\":\"r\"}]}\n```"
-      )
-    assertEquals(1, verdicts.size)
-    assertEquals(1.0, verdicts.single().confidence)
-    assertFailsWith<IllegalArgumentException> { UiBuilderGuidelinePrompt.parseVerdicts("no json") }
+    val request =
+      ServeUiBuilderGuidelines.prepare("d", 3, wearDocument(), pictures, "@Composable fun X() {}")
+    assertEquals(wear.map { it.id }, request.rules.asked.map { it.id })
+    assertTrue("Picture 2 (unrolled picture)" in request.userText, request.userText)
+    assertTrue("@Composable fun X() {}" in request.userText)
+    assertTrue(request.sourceAttached)
+    val body = DesignGuidelinePrompt.body(request, "m")
+    assertEquals(3, body["messages"]!!.jsonArray[1].jsonObject["content"]!!.jsonArray.size)
   }
 
   @Test
@@ -136,165 +80,133 @@ class ServeUiBuilderGuidelinesTest {
             completion(
               verdict("wear.layout.responsive-width", "fail", 0.9, "two", "ghost"),
               verdict("wear.touch-target-48dp", "fail", 0.3, "two"),
-              verdict("wear.dialog.dedicated-task", "not_applicable", 0.9),
               verdict("wear.layout.time-text-shown", "pass", 0.9),
             ),
           )
         }
       )
+    val request = ServeUiBuilderGuidelines.prepare("d", 3, wearDocument(), emptyList(), null)
 
-    val outcome = guidelines.check(wearDocument(), emptyList())
+    val outcome = guidelines.check(request)
 
     assertIs<UiBuilderGuidelineOutcome.Checked>(outcome)
-    val finding = outcome.findings.single()
+    assertEquals(3, outcome.verdicts.size)
+    assertEquals(request.rules.asked.map { it.id }, outcome.asked)
+    val finding =
+      ServeUiBuilderGuidelines.findings(
+          outcome.verdicts,
+          outcome.asked,
+          setOf("screen", "list", "one", "two"),
+          outcome.model,
+          guidelines.minConfidence,
+        )
+        .single()
     assertEquals(CHECK_GUIDELINES, finding.check)
     assertEquals("wear.layout.responsive-width", finding.code)
     assertEquals("two", finding.nodeId)
     assertEquals("warning", finding.severity)
     assertTrue("developer.android.com" in finding.message, finding.message)
-    // No picture, so no visual rule was asked about, and the reply says how many were left out.
-    val visual =
-      UiBuilderGuidelineRuleSet.bundled().rules.filter {
-        "wear" in it.platforms && it.kind == "visual"
-      }
-    assertEquals(visual.size, outcome.visualSkipped)
-    visual.forEach { assertFalse("ruleId: ${it.id}" in sent!!, it.id) }
+    request.rules.asked.forEach { assertTrue("ruleId: ${it.id}" in sent!!, it.id) }
+    DesignGuidelineRuleSet.Bundled.forPlatform("wear")
+      .filter { it.visual }
+      .forEach { assertFalse("ruleId: ${it.id}" in sent!!, it.id) }
   }
 
   @Test
-  fun `a component's body is outlined once, and each placement names it`() {
-    val document =
-      Json.parseToJsonElement(
-          """
-          {
-            "roots": ["screen"],
-            "components": {"card": {"name": "Card", "root": "card-root"}},
-            "nodes": {
-              "screen": {"componentId": "layout/column", "slots": {"children": ["a"]}},
-              "a": {"componentId": "design/component-instance",
-                "component": {"componentKey": "card",
-                  "arguments": {"title": {"type": "string", "value": "Hi"}}}},
-              "card-root": {"componentId": "wear-m3/card", "slots": {"content": ["t"]}},
-              "t": {"componentId": "wear-m3/text",
-                "properties": {"text": {"type": "binding", "value": "title"}}}
-            }
-          }
-          """
-        )
-        .jsonObject
-    val outline = UiBuilderGuidelinePrompt.outline(document)
-    assertTrue("- a: design/component-instance instance of card (title=\"Hi\")" in outline, outline)
-    assertTrue("component card (Card):\n  - card-root: wear-m3/card" in outline, outline)
-    assertTrue("- t: wear-m3/text {text={title}}" in outline, outline)
-    assertFalse("more nodes not shown" in outline, outline)
-  }
-
-  @Test
-  fun `rules the model skipped are unanswered, not passed, and no verdicts at all is a failure`():
-    Unit = runBlocking {
-    val partial = guidelines { _, _ ->
-      OpenRouterTransport.Response(
-        200,
-        completion(
-          verdict("wear.layout.responsive-width", "pass", 0.9),
-          verdict("wear.layout.responsive-width", "fail", 0.9, "two"),
-          verdict("not.a.rule", "fail", 0.9),
-        ),
-      )
-    }
-      .check(wearDocument(), emptyList())
-    assertIs<UiBuilderGuidelineOutcome.Checked>(partial)
-    // The first verdict for a rule stands; a duplicate and an unknown rule are ignored.
-    assertTrue(partial.findings.isEmpty())
-    assertEquals(1, partial.judged)
-    val structural =
-      UiBuilderGuidelineRuleSet.bundled().rules.filter {
-        "wear" in it.platforms && it.kind != "visual"
-      }
-    assertEquals(structural.size - 1, partial.unanswered.size)
-    assertFalse("wear.layout.responsive-width" in partial.unanswered)
-
-    val empty = guidelines { _, _ ->
-      OpenRouterTransport.Response(200, completion())
-    }
-      .check(wearDocument(), emptyList())
-    assertIs<UiBuilderGuidelineOutcome.Failed>(empty)
-  }
-
-  @Test
-  fun `the generated source goes with the tree, fenced, and is cut short when it is huge`() {
-    val rules = UiBuilderGuidelineRuleSet.bundled().rules.take(1)
-    val text =
-      UiBuilderGuidelinePrompt.userText(
-        "wear",
-        wearDocument(),
-        rules,
-        pictures = emptyList(),
-        source = "@Composable fun Workout() { Button(onClick = {}) { Text(\"Start\") } }",
-      )
-    assertTrue("```kotlin\n@Composable fun Workout()" in text, text)
-    assertTrue(text.indexOf("Design tree") < text.indexOf("```kotlin"), text)
-    val long = "x".repeat(UiBuilderGuidelinePrompt.MAX_SOURCE_CHARS + 10)
-    val cut = UiBuilderGuidelinePrompt.userText("wear", wearDocument(), rules, emptyList(), long)
-    assertTrue("// … 10 more characters not shown" in cut, cut.takeLast(200))
-  }
-
-  @Test
-  fun `source is asked for only once there are rules, and reported when it went along`(): Unit =
+  fun `rules the model skipped are unanswered, and no verdicts at all is a failure`(): Unit =
     runBlocking {
-      var sent = ""
-      var asked = 0
-      val checked = guidelines { body, _ ->
-        sent = body
+      val request = ServeUiBuilderGuidelines.prepare("d", 3, wearDocument(), emptyList(), null)
+      val partial = guidelines { _, _ ->
         OpenRouterTransport.Response(
           200,
           completion(verdict("wear.layout.responsive-width", "pass", 0.9)),
         )
       }
-        .check(wearDocument(), emptyList()) {
-          asked++
-          "@Composable fun Workout() {}"
-        }
-      assertIs<UiBuilderGuidelineOutcome.Checked>(checked)
-      assertTrue(checked.sourceAttached)
-      assertEquals(1, asked)
-      assertTrue("@Composable fun Workout() {}" in sent, sent)
+        .check(request)
+      assertIs<UiBuilderGuidelineOutcome.Checked>(partial)
+      assertEquals(request.rules.asked.size - 1, partial.unanswered.size)
 
-      val skipped = guidelines { _, _ ->
-        error("must not be called")
+      val empty = guidelines { _, _ ->
+        OpenRouterTransport.Response(200, completion())
       }
-        .check(wearDocument(systemId = "m3-catalog"), emptyList()) {
-          asked++
-          "unused"
-        }
-      assertIs<UiBuilderGuidelineOutcome.Skipped>(skipped)
-      assertEquals(1, asked)
+        .check(request)
+      assertIs<UiBuilderGuidelineOutcome.Failed>(empty)
     }
 
   @Test
   fun `a refusal from OpenRouter or an unreadable answer is a failure, not a finding`(): Unit =
     runBlocking {
+      val request = ServeUiBuilderGuidelines.prepare("d", 3, wearDocument(), emptyList(), null)
       val refused = guidelines { _, _ ->
         OpenRouterTransport.Response(402, """{"error":{"message":"Insufficient credits"}}""")
       }
-        .check(wearDocument(), emptyList())
+        .check(request)
       assertIs<UiBuilderGuidelineOutcome.Failed>(refused)
       assertTrue("Insufficient credits" in refused.reason, refused.reason)
 
       val garbled = guidelines { _, _ ->
         OpenRouterTransport.Response(200, completionText("sorry"))
       }
-        .check(wearDocument(), emptyList())
+        .check(request)
       assertIs<UiBuilderGuidelineOutcome.Failed>(garbled)
     }
 
   @Test
   fun `a catalog with no guidelines is skipped without calling the model`(): Unit = runBlocking {
-    val outcome = guidelines { _, _ ->
-      error("must not be called")
-    }
-      .check(wearDocument(systemId = "m3-catalog"), emptyList())
+    val request =
+      ServeUiBuilderGuidelines.prepare(
+        "d",
+        3,
+        wearDocument(systemId = "compose-foundation"),
+        emptyList(),
+        null,
+      )
+    val outcome = guidelines { _, _ -> error("must not be called") }.check(request)
     assertIs<UiBuilderGuidelineOutcome.Skipped>(outcome)
+  }
+
+  @Test
+  fun `the store keeps one record per design, stamped by the host, and refuses unknown rules`() {
+    val root = kotlin.io.path.createTempDirectory("guidelines")
+    val store = ServeUiBuilderGuidelineStore(root)
+    val ruleId = DesignGuidelineRuleSet.Bundled.forPlatform("wear").first().id
+    val body =
+      DesignGuidelineRecord(
+        designId = "forged",
+        revision = 4,
+        model = "anthropic/claude-haiku-5.5",
+        rulesVersion = DesignGuidelineRuleSet.Bundled.version,
+        asked = listOf(ruleId),
+        verdicts = listOf(DesignGuidelineVerdict(ruleId, "fail", 2.0, listOf("two"), "Why.")),
+        ranBy = "github:somebody-else",
+      )
+    val stored = store.record("workout", ranBy = "agent:me", body)
+    assertIs<ServeUiBuilderGuidelineStore.GuidelineWriteResult.Stored>(stored)
+    val read = store.read("workout")!!
+    assertEquals("workout", read.designId)
+    assertEquals("agent:me", read.ranBy)
+    assertEquals(1.0, read.verdicts.single().confidence)
+    assertTrue((read.recordedAtEpochMillis ?: 0) > 0)
+
+    assertIs<ServeUiBuilderGuidelineStore.GuidelineWriteResult.Refused>(
+      store.record("workout", "agent:me", body.copy(asked = listOf("made.up")))
+    )
+    assertIs<ServeUiBuilderGuidelineStore.GuidelineWriteResult.Refused>(
+      store.record(
+        "workout",
+        "agent:me",
+        body.copy(verdicts = body.verdicts + DesignGuidelineVerdict("other", "pass")),
+      )
+    )
+    assertIs<ServeUiBuilderGuidelineStore.GuidelineWriteResult.Refused>(
+      store.record(
+        "workout",
+        "agent:me",
+        body.copy(verdicts = listOf(DesignGuidelineVerdict(ruleId, "maybe"))),
+      )
+    )
+    assertTrue(store.delete("workout"))
+    assertNull(store.read("workout"))
   }
 
   @Test
@@ -351,9 +263,6 @@ class ServeUiBuilderGuidelinesTest {
       transport = transport,
     )
   }
-
-  private fun JsonObject.userContent() =
-    this["messages"]!!.jsonArray[1].jsonObject["content"]!!.jsonArray
 
   private fun verdict(
     ruleId: String,
