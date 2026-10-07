@@ -351,6 +351,8 @@ composeai-contracts = "3.19.0"
 # 3.88.0 frames Wear widgets only in the predefined host shapes, ignoring a legacy padding or radius
 # override rather than drawing or refusing it (compose-ui-builder#501), which
 # RecordFreeComposeExportTest now expects.
+# It also adds `PackagedUiBuilderRenderBundle.digest()`, the identity of the PNG render pipeline,
+# which keys the designs page's thumbnail cache beside the server version (compose-ui-builder#502).
 composeai-ui-builder = "3.88.0"
 kotlinx-coroutines = "1.11.0"
 kotlinx-serialization = "1.11.0"

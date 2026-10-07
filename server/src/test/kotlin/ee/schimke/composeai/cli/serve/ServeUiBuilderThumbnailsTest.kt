@@ -24,6 +24,7 @@ import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
+import kotlin.test.assertNotEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -194,6 +195,19 @@ class ServeUiBuilderThumbnailsTest {
       Thread.sleep(20)
     }
     redeployed.close()
+  }
+
+  @Test
+  fun `a new renderer is a new generation even when the server version is not`() {
+    val before = ServeUiBuilderThumbnails.generationOf("1.0.0") { "renderer-a" }
+    val after = ServeUiBuilderThumbnails.generationOf("1.0.0") { "renderer-b" }
+
+    assertNotEquals(before, after, "a UI-builder pin bump alone must redraw the cards")
+    assertEquals(
+      "1.0.0",
+      ServeUiBuilderThumbnails.generationOf("1.0.0") { error("no bundle") },
+      "an unreadable renderer identity keeps the server version",
+    )
   }
 
   @Test

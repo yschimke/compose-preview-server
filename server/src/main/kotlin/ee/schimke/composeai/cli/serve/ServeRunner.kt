@@ -24,6 +24,7 @@ import ee.schimke.composeai.uibuilder.protocol.CatalogCapabilityV1
 import ee.schimke.composeai.uibuilder.service.AuthenticatedUiBuilderActor
 import ee.schimke.composeai.uibuilder.service.CurrentM3UiBuilderCatalogExecutor
 import ee.schimke.composeai.uibuilder.service.FileUiBuilderAssetStore
+import ee.schimke.composeai.uibuilder.service.PackagedUiBuilderRenderBundle
 import ee.schimke.composeai.uibuilder.service.PersistentUiBuilderService
 import ee.schimke.composeai.uibuilder.service.ProductionUiBuilderExportExecutor
 import ee.schimke.composeai.uibuilder.service.UiBuilderBranchPort
@@ -3276,7 +3277,12 @@ public class ServeRunner(
           }
           .getOrNull(),
       thumbnails = runCatching {
-          ServeUiBuilderThumbnails(directory.resolve("thumbnails").toPath(), SERVE_VERSION)
+          ServeUiBuilderThumbnails(
+            directory.resolve("thumbnails").toPath(),
+            ServeUiBuilderThumbnails.generationOf(SERVE_VERSION) {
+              PackagedUiBuilderRenderBundle.digest()
+            },
+          )
         }
           .onFailure {
             System.err.println(
