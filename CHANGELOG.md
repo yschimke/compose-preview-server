@@ -1,5 +1,19 @@
 # Changelog
 
+## [3.107.0](https://github.com/yschimke/compose-preview-server/compare/v3.106.0...v3.107.0) (2026-10-07)
+
+
+### Features
+
+* **ui-builder:** a guidelines check on a shared OpenRouter key, for named users and orgs ([#1411](https://github.com/yschimke/compose-preview-server/issues/1411)) ([6619df2](https://github.com/yschimke/compose-preview-server/commit/6619df2f89afaeeabdbafcf37191e7e093419cf6))
+
+
+### Bug Fixes
+
+* **deps:** update dependency ee.schimke.composeai:compose-preview-daemon-bom to v3.14.1 ([#1418](https://github.com/yschimke/compose-preview-server/issues/1418)) ([e6b0ea8](https://github.com/yschimke/compose-preview-server/commit/e6b0ea83ef14e6208ddfe72b3a3fc94b5ea9ce25))
+* **deps:** update dependency ee.schimke.composeai:compose-preview-ui-builder-bom to v3.90.0 ([#1415](https://github.com/yschimke/compose-preview-server/issues/1415)) ([e6f1b37](https://github.com/yschimke/compose-preview-server/commit/e6f1b3727fb1ef65df27501b33830b85b34a29e4))
+* **ui-builder:** contracts 3.20.0, and the screen export refuses a remoteCall by name ([#1416](https://github.com/yschimke/compose-preview-server/issues/1416)) ([50c52db](https://github.com/yschimke/compose-preview-server/commit/50c52db1db5139e1da6e5156df32e2d8e91f9a57))
+
 ## [3.106.0](https://github.com/yschimke/compose-preview-server/compare/v3.105.0...v3.106.0) (2026-10-07)
 
 
