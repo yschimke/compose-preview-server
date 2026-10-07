@@ -2444,7 +2444,8 @@ class ServeUiBuilderMcp(
         skipped += UiBuilderCheckSkippedV1(CHECK_GUIDELINES, reason)
       } else {
         val png = render?.png
-        val pictures = guidelinePictures(checked!!, png)
+        val pictures =
+          guidelinePictures(checked!!, png, (catalog ?: pinnedCatalog(checked, actor))?.components)
         if (rendered && png == null) {
           skipped +=
             UiBuilderCheckSkippedV1(
@@ -2605,14 +2606,15 @@ class ServeUiBuilderMcp(
 
   /**
    * The renders the guidelines model judges visual rules on: the device frame already made for the
-   * a11y check and, for a scrolling Wear screen, an unrolled render on a canvas
-   * [UNROLLED_HEIGHT_FACTOR] times as tall. There the whole list fits, so it sits at its end and
-   * `ScreenScaffold` reveals the edge button it hides on the first frame. A native render the host
-   * cannot make is left out.
+   * a11y check and, for a screen holding a component its catalog marks [SCROLLABLE_TRAIT], an
+   * unrolled render on a canvas [UNROLLED_HEIGHT_FACTOR] times as tall. There the whole list fits,
+   * so it sits at its end and `ScreenScaffold` reveals the edge button it hides on the first frame.
+   * A native render the host cannot make is left out.
    */
   private fun guidelinePictures(
     document: DesignDocumentV1,
     devicePng: ByteArray?,
+    components: List<ComponentCapabilityV1>?,
   ): List<UiBuilderGuidelinePicture> {
     devicePng ?: return emptyList()
     val environment = document.environment
@@ -2623,7 +2625,9 @@ class ServeUiBuilderMcp(
         environment.widthDp,
         environment.heightDp,
       )
-    val scrolls = document.nodes.values.any { it.componentId in SCROLLING_COMPONENTS }
+    val scrollable =
+      components.orEmpty().filter { SCROLLABLE_TRAIT in it.traits }.map { it.componentId }.toSet()
+    val scrolls = document.nodes.values.any { it.componentId in scrollable }
     if (!scrolls) return listOf(device)
     val tallHeight = environment.heightDp * UNROLLED_HEIGHT_FACTOR
     val unrolled =
@@ -3411,9 +3415,11 @@ class ServeUiBuilderMcp(
     /** How much taller than the device the unrolled guidelines picture is drawn. */
     private const val UNROLLED_HEIGHT_FACTOR = 4
 
-    /** Components whose content scrolls, so a device frame shows only the top of the screen. */
-    private val SCROLLING_COMPONENTS =
-      setOf("wear-m3/transforming-lazy-column", "wear-m3/scaling-lazy-column")
+    /**
+     * The trait a catalog gives a component whose content scrolls, so a device frame shows only the
+     * top of the screen.
+     */
+    private const val SCROLLABLE_TRAIT = "ScrollableContent"
 
     private const val CHECKS_ARGUMENT = "checks"
     private const val DEVICES_ARGUMENT = "devices"
