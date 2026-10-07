@@ -14,7 +14,6 @@ import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonObject
-import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.serializer
 
 /**
@@ -28,63 +27,41 @@ import kotlinx.serialization.serializer
  * the wrong type was certified. The checkout was older than the dependency `:server` resolves, and
  * nothing said so.
  *
- * So the table is generated here, where the descriptors are the ones the server will actually
- * decode with, and committed for the node job to read. This test fails the moment the dependency's
- * shape changes, naming the field — which is the drift check the hand-written version never had.
- * Regenerate with `UPDATE_DECODER_SHAPES=1 ./gradlew :server:test --tests
- * '*DecoderShapeFixtureTest*'`.
+ * So the table is generated from the descriptors the decoders actually use, and committed for the
+ * node job to read. This test fails the moment the dependency's shape changes, naming the field —
+ * which is the drift check the hand-written version never had. Regenerate with
+ * `UPDATE_DECODER_SHAPES=1 ./gradlew :server:test --tests '*DecoderShapeFixtureTest*'`.
+ *
+ * Only the `record` half is generated here, from what `ComponentRecordSource` decodes. The
+ * `componentPolicy` half describes `PublishedUiBuilderCatalog`'s decoder, which moved to
+ * compose-ui-builder's `:ui-builder-runtime` with the composer (compose-ui-builder#503) and is
+ * internal there, so that repository generates it and this one carries its copy.
  */
 class DecoderShapeFixtureTest {
 
   @Test
-  fun `the committed shape table matches the decoders`() {
-    val generated = Json { prettyPrint = true }.encodeToString(JsonObject.serializer(), shapes())
+  fun `the committed record shape matches the decoder`() {
     val fixture = Path.of("..", ".github", "scripts", "decoder-shapes.json").normalize()
+    val committed = Json.parseToJsonElement(Files.readString(fixture)).jsonObject
+    val record = describe(serializer<ComponentRecordFile>().descriptor, mutableSetOf())
     if (System.getenv("UPDATE_DECODER_SHAPES") == "1") {
-      Files.createDirectories(fixture.parent)
-      Files.writeString(fixture, generated + "\n")
+      val updated = JsonObject(committed + ("record" to record))
+      Files.writeString(
+        fixture,
+        Json { prettyPrint = true }.encodeToString(JsonObject.serializer(), updated) + "\n",
+      )
       return
     }
-    val committed = Files.readString(fixture).trim()
+    val pretty = Json { prettyPrint = true }
     assertEquals(
-      generated.trim(),
-      committed,
-      "The decoders changed shape. Regenerate with " +
+      pretty.encodeToString(JsonObject.serializer(), record),
+      pretty.encodeToString(JsonObject.serializer(), committed.getValue("record").jsonObject),
+      "The record decoder changed shape. Regenerate with " +
         "UPDATE_DECODER_SHAPES=1 ./gradlew :server:test --tests '*DecoderShapeFixtureTest*' " +
         "and commit .github/scripts/decoder-shapes.json — the " +
         "readiness gate validates records against this table and cannot see the decoders itself.",
     )
   }
-
-  @Test
-  fun `canvas adapter maps require JSON objects`() {
-    val mapping =
-      shapes()["componentPolicy"]
-        ?.jsonObject
-        ?.get("members")
-        ?.jsonObject
-        ?.get("canvasMapping")
-        ?.jsonObject
-        ?.get("members")
-        ?.jsonObject
-    listOf("defaults", "properties", "slots").forEach { name ->
-      assertEquals("object", mapping?.get(name)?.jsonObject?.get("kind")?.jsonPrimitive?.content)
-    }
-  }
-
-  private fun shapes(): JsonObject =
-    JsonObject(
-      mapOf(
-        // What `ComponentRecordSource` decodes components.json as.
-        "record" to describe(serializer<ComponentRecordFile>().descriptor, mutableSetOf()),
-        // And what `PublishedUiBuilderCatalog` decodes each statusSemantics.components VALUE as.
-        "componentPolicy" to
-          describe(
-            serializer<PublishedUiBuilderCatalog.UiBuilderComponentPolicy>().descriptor,
-            mutableSetOf(),
-          ),
-      )
-    )
 
   /**
    * One descriptor as the gate's `{kind, optional, nullable, members, values}` table.

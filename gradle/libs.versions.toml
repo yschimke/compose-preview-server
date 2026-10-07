@@ -353,6 +353,9 @@ composeai-contracts = "3.19.0"
 # RecordFreeComposeExportTest now expects.
 # It also adds `PackagedUiBuilderRenderBundle.digest()`, the identity of the PNG render pipeline,
 # which keys the designs page's thumbnail cache beside the server version (compose-ui-builder#502).
+# And it owns `PublishedUiBuilderCatalog`, the composer of a catalog's published `ui-builder.json`
+# with its component record (compose-ui-builder#503), which this server called its own copy of;
+# its tests went with it, so they no longer pin that repository's behaviour from here.
 composeai-ui-builder = "3.88.0"
 kotlinx-coroutines = "1.11.0"
 kotlinx-serialization = "1.11.0"

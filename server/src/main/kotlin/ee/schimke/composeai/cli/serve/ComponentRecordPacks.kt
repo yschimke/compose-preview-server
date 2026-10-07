@@ -230,8 +230,13 @@ internal object ComponentRecordPacks {
       .build()
   }
 
-  /** The JSON Schema type a parameter's literal has, or null for a parameter with no literal. */
-  /** Shared with [PublishedUiBuilderCatalog]: one rule for which parameters become properties. */
+  /**
+   * The JSON Schema type a parameter's literal has, or null for a parameter with no literal.
+   *
+   * One rule for which parameters become properties. compose-ui-builder's
+   * `PublishedUiBuilderCatalog` carries its own copy of this object, so the two must change
+   * together.
+   */
   internal fun jsonTypeOf(parameter: TargetParameter): String? =
     when (parameter.typeFqn) {
       "kotlin.String" -> "string"
@@ -324,9 +329,8 @@ internal object ComponentRecordPacks {
 
   /** What `layout/column` may carry: the leaf set plus what a container that fills does. */
   /**
-   * The container/leaf split, shared with `PublishedUiBuilderCatalog`.
-   *
-   * Exposed rather than duplicated so a published catalog that states no `modifiers` gets the same
+   * The container/leaf split. compose-ui-builder's `PublishedUiBuilderCatalog` carries its own
+   * copy, and the two must agree so a published catalog that states no `modifiers` gets the same
    * answer a pack component does — two fallbacks that disagreed would be two different ideas of
    * what "the default" means.
    */
