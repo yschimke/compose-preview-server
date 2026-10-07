@@ -1,5 +1,6 @@
 package ee.schimke.composeai.cli.serve
 
+import ee.schimke.composeai.uibuilder.export.CatalogOwnership
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -320,6 +321,61 @@ class ServeCommandOptionsTest {
     assertFailsWith<IllegalArgumentException> {
       options(listOf("--ui-builder-published-catalogs", "not/a/catalog"))
     }
+  }
+
+  @Test
+  fun `catalog ownership is off unless named, and spelled like the published lever`() {
+    assertEquals(
+      CatalogOwnership.NONE,
+      options(listOf("--ui-builder-catalogs", "m3-catalog,remote-m3")).uiBuilderCatalogOwnership,
+    )
+    assertEquals(
+      CatalogOwnership.ALL,
+      options(
+          listOf("--ui-builder-catalogs", "m3-catalog", "--ui-builder-catalog-ownership", "all")
+        )
+        .uiBuilderCatalogOwnership,
+    )
+    assertEquals(
+      CatalogOwnership.of(setOf("remote-m3")),
+      options(
+          listOf(
+            "--ui-builder-catalogs",
+            "m3-catalog,remote-m3",
+            "--ui-builder-catalog-ownership",
+            "remote-m3",
+          )
+        )
+        .uiBuilderCatalogOwnership,
+    )
+  }
+
+  @Test
+  fun `catalog ownership refuses a catalog it cannot serve from a published file`() {
+    // Not served at all: the same silent-typo case the published lever refuses.
+    val unserved =
+      assertFailsWith<IllegalArgumentException> {
+        options(
+          listOf("--ui-builder-catalogs", "m3-catalog", "--ui-builder-catalog-ownership", "wear-m3")
+        )
+      }
+    assertTrue("wear-m3" in unserved.message.orEmpty(), unserved.message.orEmpty())
+
+    // Served, but withheld from its published file: owning it would mean serving it from nothing.
+    val withheld =
+      assertFailsWith<IllegalArgumentException> {
+        options(
+          listOf(
+            "--ui-builder-catalogs",
+            "m3-catalog,remote-m3",
+            "--ui-builder-published-catalogs",
+            "m3-catalog",
+            "--ui-builder-catalog-ownership",
+            "all",
+          )
+        )
+      }
+    assertTrue("remote-m3" in withheld.message.orEmpty(), withheld.message.orEmpty())
   }
 
   @Test

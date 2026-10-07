@@ -753,6 +753,12 @@ returning it to its synthesised definition. `--ui-builder-published-catalogs` is
 is a startup error rather than a silent no-op. `SERVE_UI_BUILDER_PUBLISHED_CATALOGS` reaches it from
 the deployment image.
 
+**Its finer sibling, `--ui-builder-catalog-ownership` (`SERVE_UI_BUILDER_CATALOG_OWNERSHIP`), defaults
+to `none`.** A catalog it names also seeds new designs from the `templates` documents it publishes,
+exports by its own `composeSourceExport` declaration, and is never synthesised, even as a fallback.
+It must be a catalog this flag lets read its published file. The plan, the readiness test and the
+per-catalog gap ledger are compose-ui-builder's `docs/design/UI_BUILDER_CATALOG_CUTOVER.md`.
+
 **It defaults to `remote-m3`, now served from its own published file.** It defaulted to `none`
 while no catalog was ready and one of them would have broken. `remote-m3` measures clean: 0
 differences, 0 unstated facts, 0 unusable exemptions and 0 unreviewed fields under `--strict`,

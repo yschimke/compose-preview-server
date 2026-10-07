@@ -26,6 +26,7 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.contentOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
 
@@ -1957,12 +1958,20 @@ class ServeCatalogStore(
   internal data class PublishedUiBuilderCatalogAsset(
     val file: File,
     val runtimeId: String?,
+    /**
+     * The seed documents the policy's `statusSemantics.templates` names, by that path and in its
+     * order, read from the same delivery commit; null for one that would not fetch, so the reader
+     * can refuse the set by name. Empty unless asked for: only a catalog-owned catalog seeds from
+     * them, and a host that does not own it should not fetch what it will not read.
+     */
+    val templates: Map<String, String?> = emptyMap(),
   )
 
   internal fun fetchUiBuilderCatalog(
     system: String,
     sourceRepo: String? = null,
     sourceBranchPrefix: String? = null,
+    templates: Boolean = false,
   ): PublishedUiBuilderCatalogAsset? {
     val safe = ServeBundleStore.sanitizeName(system) ?: return null
     val repo = sourceRepo?.takeIf { it.isNotBlank() } ?: this.repo
@@ -2000,7 +2009,38 @@ class ServeCatalogStore(
     return PublishedUiBuilderCatalogAsset(
       file = target,
       runtimeId = catalog.uiBuilderRuntime?.takeIf { it.validateContract().isEmpty() }?.runtimeId,
+      templates = if (templates) fetchUiBuilderTemplates(system, base, bytes) else emptyMap(),
     )
+  }
+
+  /**
+   * The seed documents [policy] names, fetched from [base] (one delivery commit), in the policy's
+   * order. A path that leaves the branch or will not fetch maps to null and is said once; the
+   * reader (`CatalogSeedTemplates.read`) then refuses the set by name, rather than this quietly
+   * serving a chooser with a card missing.
+   */
+  private fun fetchUiBuilderTemplates(
+    system: String,
+    base: String,
+    policy: ByteArray,
+  ): Map<String, String?> {
+    val declared = runCatching {
+      ((json.parseToJsonElement(policy.decodeToString()) as? JsonObject)?.get("statusSemantics")
+          as? JsonObject)
+        ?.get("templates") as? JsonArray
+    }
+      .getOrNull()
+      ?.mapNotNull { (it as? JsonPrimitive)?.contentOrNull?.trim('/') }
+      .orEmpty()
+    return declared.associateWith { path ->
+      path
+        .takeIf { ".." !in it.split("/") }
+        ?.let { runCatching { fetchCatalogAsset("$base$it") }.getOrNull()?.decodeToString() }
+        .also {
+          if (it == null)
+            System.err.println("serve: $system declares template $path and it could not be fetched")
+        }
+    }
   }
 
   /**

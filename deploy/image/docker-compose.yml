@@ -387,6 +387,7 @@ services:
       # catalog. This is the per-catalog reversible lever
       # docs/design/UI_BUILDER_CATALOG_CONTRACT.md asks for.
       SERVE_UI_BUILDER_PUBLISHED_CATALOGS: "${SERVE_UI_BUILDER_PUBLISHED_CATALOGS:-}"
+      SERVE_UI_BUILDER_CATALOG_OWNERSHIP: "${SERVE_UI_BUILDER_CATALOG_OWNERSHIP:-}"
       # The component record the Compose export generates from. The image ships one for
       # `m3-catalog` and the entrypoint installs it by default, so this is an override for a box
       # carrying its own discovery output — an empty value keeps the packaged record.

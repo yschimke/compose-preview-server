@@ -228,6 +228,8 @@ class ServeHttpServer(
   private val uiBuilderDir: File? = null,
   /** Explicit builder-instance allowlist. A served catalog is not authoring-enabled by default. */
   private val uiBuilderCatalogs: Set<String> = setOf("m3-catalog"),
+  /** What a new design can start as; built in unless a catalog owns its seeds. */
+  private val uiBuilderSeeds: UiBuilderCatalogSeeds = UiBuilderCatalogSeeds.BUILT_IN,
   /** Retained native renderer directories, snapshotted before this server accepts requests. */
   uiBuilderRuntimeDirs: Map<String, File> = emptyMap(),
   /** Runtime assets activated atomically with a refreshed catalog generation. */
@@ -6337,7 +6339,12 @@ class ServeHttpServer(
     }
     val outcome =
       withContext(Dispatchers.IO) {
-        ServeUiBuilderCreate(designService!!, uiBuilderDir!!, canonicalServerOrigin())
+        ServeUiBuilderCreate(
+            designService!!,
+            uiBuilderDir!!,
+            canonicalServerOrigin(),
+            uiBuilderSeeds,
+          )
           .installPublished(
             actor = AuthenticatedUiBuilderActor(ADMIN_LIBRARY_ACTOR),
             document = document,
@@ -14708,7 +14715,9 @@ class ServeHttpServer(
     // The shell is one file for every design, so what makes a pasted link unfurl as *this* design
     // is written into its head here. The ETag folds it in, because the body now depends on it.
     val shellHead = uiBuilderShellHead(designId)
-    val head = shellHead.first to (shellHead.second + ServeAnalytics.scriptTag())
+    val head =
+      shellHead.first to
+        (shellHead.second + uiBuilderCatalogOwnershipTag() + ServeAnalytics.scriptTag())
     val headTag = Integer.toHexString(head.second.hashCode())
     val etag =
       "\"${index.length().toString(16)}-${index.lastModified().toString(16)}-$version-$headTag\""
@@ -14729,6 +14738,20 @@ class ServeHttpServer(
       wasmContentType(index.name),
     )
   }
+
+  /**
+   * The catalog-owned cutover flag for the editor's new-design chooser, as a `<meta>` the page
+   * reads; nothing at `none`, so a deployment that has not flipped it serves byte-identical shells.
+   */
+  private fun uiBuilderCatalogOwnershipTag(): String =
+    uiBuilderSeeds.ownership
+      .takeUnless { it.isNone }
+      ?.let {
+        "<meta name=\"ui-builder-catalog-ownership\" content=\"${
+          WebEscaping.htmlEscape(it.wireValue)
+        }\">"
+      }
+      .orEmpty()
 
   /**
    * The `<title>` and unfurl tags for the builder's shell: `(title, meta tags)`.
@@ -14996,8 +15019,8 @@ class ServeHttpServer(
     val template =
       start?.substringAfter('|')?.takeIf { it.isNotBlank() }
         ?: form["template"]?.takeIf { it.isNotBlank() }
-        ?: UiBuilderNewDesignSeed.DEFAULT_TEMPLATE
-    if (template !in UiBuilderNewDesignSeed.templateIds(catalog)) {
+        ?: uiBuilderSeeds.defaultTemplate(catalog)
+    if (template !in uiBuilderSeeds.templateIds(catalog)) {
       call.respondText(
         "$template is not a template $catalog can start from",
         status = HttpStatusCode.BadRequest,
@@ -15017,7 +15040,7 @@ class ServeHttpServer(
     val outcome =
       withContext(Dispatchers.IO) {
         withDesignCreationVisibility(creationVisibility) {
-          ServeUiBuilderCreate(service, dir, canonicalServerOrigin())
+          ServeUiBuilderCreate(service, dir, canonicalServerOrigin(), uiBuilderSeeds)
             .create(
               actor = actor,
               catalogSystemId = catalog,
@@ -15133,7 +15156,8 @@ class ServeHttpServer(
     val outcome =
       withContext(Dispatchers.IO) {
         withDesignCreationVisibility(creationVisibility) {
-          ServeUiBuilderCreate(service, dir, canonicalServerOrigin()).install(actor, copy)
+          ServeUiBuilderCreate(service, dir, canonicalServerOrigin(), uiBuilderSeeds)
+            .install(actor, copy)
         }
       }
     when (outcome) {
@@ -15361,7 +15385,8 @@ class ServeHttpServer(
     when (
       val outcome =
         withContext(Dispatchers.IO) {
-          ServeUiBuilderCreate(service, dir, canonicalServerOrigin()).install(actor, fork)
+          ServeUiBuilderCreate(service, dir, canonicalServerOrigin(), uiBuilderSeeds)
+            .install(actor, fork)
         }
     ) {
       is ServeUiBuilderCreate.Outcome.Created -> {
@@ -15756,7 +15781,7 @@ class ServeHttpServer(
         systemId = catalog,
         label = catalog,
         templates =
-          UiBuilderNewDesignSeed.templateIds(catalog).sorted().map { template ->
+          uiBuilderSeeds.templateIds(catalog).sorted().map { template ->
             ServeWeb.UiBuilderNewDesignTemplate(
               id = template,
               label = template.replace('-', ' ').replaceFirstChar { it.uppercase() },

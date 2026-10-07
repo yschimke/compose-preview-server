@@ -35,6 +35,8 @@ internal class ServeUiBuilderCreate(
    * auto-picked port) is not an identity another copy can find its way back to.
    */
   private val serverOrigin: String?,
+  /** Where a new design's starting document comes from: built in, or the catalog's own. */
+  private val seeds: UiBuilderCatalogSeeds = UiBuilderCatalogSeeds.BUILT_IN,
 ) {
 
   sealed interface Outcome {
@@ -81,7 +83,8 @@ internal class ServeUiBuilderCreate(
     }
     val document =
       try {
-        UiBuilderNewDesignSeed.document(
+        seeds
+          .document(
             designId = designId,
             catalogSystemId = catalogSystemId,
             templateId = templateId,
