@@ -37,7 +37,8 @@ import java.net.URI
  *   and `raw.githubusercontent.com`, where the history strip's past renders are published.
  * * **Fetches and sockets**: this origin (which covers the same-host `ws:`/`wss:` live sockets),
  *   `data:`/`blob:` URLs the report capture reads back, and `raw.githubusercontent.com` for the
- *   published history manifest.
+ *   published history manifest. The UI-builder editor also reaches `openrouter.ai`, for the
+ *   guidelines check a person runs on their own key.
  * * **Frames**: only this origin's own apps (`/wasm/…`, `/rc-player-wasm/…`,
  *   `/ui-builder/runtime/…`).
  * * **Forms** post to this origin, and the issue-report forms open GitHub's new-issue page. A form
@@ -52,6 +53,7 @@ internal object ServePagePolicy {
   const val HEADER: String = "Content-Security-Policy"
 
   private const val RAW_GITHUB = "https://raw.githubusercontent.com"
+  private const val OPENROUTER = "https://openrouter.ai"
   private const val GITHUB = "https://github.com"
   private const val GOOGLE_FONTS_CSS = "https://fonts.googleapis.com"
   private const val GOOGLE_FONTS_FILES = "https://fonts.gstatic.com"
@@ -80,6 +82,23 @@ internal object ServePagePolicy {
   fun hostsWasmApp(path: String): Boolean =
     WASM_APP_PREFIXES.any { path.startsWith(it) } || path == "/ui-builder"
 
+  /**
+   * Where a page may fetch from. The UI-builder editor also reaches OpenRouter, where a person's
+   * own key runs the guidelines check and the PKCE sign-in exchanges its code for that key — the
+   * editor's shell only, never the runtimes it frames.
+   */
+  private fun connectSrc(path: String): List<String> = buildList {
+    add("'self'")
+    add("data:")
+    add("blob:")
+    add(RAW_GITHUB)
+    if (isUiBuilderEditor(path)) add(OPENROUTER)
+  }
+
+  private fun isUiBuilderEditor(path: String): Boolean =
+    (path == "/ui-builder" || path.startsWith("/ui-builder/")) &&
+      !path.startsWith("/ui-builder/runtime/")
+
   /** The policy for an HTML response at [path], with [formActions] added to `form-action`. */
   fun forPath(path: String, formActions: Collection<String> = emptyList()): String {
     val scriptSrc = buildList {
@@ -95,7 +114,7 @@ internal object ServePagePolicy {
       add("font-src 'self' data: $GOOGLE_FONTS_FILES")
       add("img-src 'self' data: blob: $RAW_GITHUB")
       add("media-src 'self' data: blob:")
-      add("connect-src 'self' data: blob: $RAW_GITHUB")
+      add("connect-src ${connectSrc(path).joinToString(" ")}")
       add("worker-src 'self'")
       add("frame-src 'self'")
       add("object-src 'none'")

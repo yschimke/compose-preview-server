@@ -653,6 +653,16 @@ internal const val CHECK_CATALOG = "catalog"
 internal const val CHECK_A11Y = "a11y"
 internal val DESIGN_CHECKS = listOf(CHECK_SCHEMA, CHECK_CATALOG, CHECK_A11Y)
 
+/**
+ * A model's reading of the design against the Android design guides ([ServeUiBuilderGuidelines]).
+ * Never run unless asked for by name: it spends the operator's OpenRouter key and is open only to
+ * the accounts the operator named.
+ */
+internal const val CHECK_GUIDELINES = "guidelines"
+
+/** Every check a caller may name; [DESIGN_CHECKS] is what runs when they name none. */
+internal val ALL_DESIGN_CHECKS = DESIGN_CHECKS + CHECK_GUIDELINES
+
 internal const val UI_BUILDER_DESIGN_CHECK_SCHEMA = "compose-preview/ui-builder-design-check/v1"
 
 /**
@@ -686,7 +696,7 @@ internal data class UiBuilderDesignCheckV1(
 internal data class UiBuilderCheckFindingV1(
   /** `error`, `warning` or `info`. */
   val severity: String,
-  /** `schema`, `catalog` or `a11y`. */
+  /** `schema`, `catalog`, `a11y` or `guidelines`. */
   val check: String,
   val code: String,
   val message: String,

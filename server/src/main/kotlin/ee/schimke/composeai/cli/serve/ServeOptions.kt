@@ -570,6 +570,21 @@ public interface ServeOptions {
     get() = false
 
   /**
+   * `--ui-builder-guidelines-users`: GitHub logins who may run `ui_builder_check_design`'s
+   * `guidelines` check on the operator's OpenRouter key. See [ServeUiBuilderGuidelinesConfig].
+   */
+  public val uiBuilderGuidelinesUsers: Set<String>
+    get() = emptySet()
+
+  /** `--ui-builder-guidelines-orgs`: GitHub organizations whose members may run it too. */
+  public val uiBuilderGuidelinesOrgs: Set<String>
+    get() = emptySet()
+
+  /** `--ui-builder-guidelines-model`: the OpenRouter model id; null for the default. */
+  public val uiBuilderGuidelinesModel: String?
+    get() = null
+
+  /**
    * `--github-auth-open-ui-builder`: every signed-in GitHub member may create, edit and export
    * UI-builder designs, and approve agent grants for them, without repository access. See
    * [ServeGithubAuthConfig.openUiBuilder].

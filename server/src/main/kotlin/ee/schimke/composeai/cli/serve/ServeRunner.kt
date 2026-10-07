@@ -3529,6 +3529,7 @@ public class ServeRunner(
     // the `--public` admission gate decides on (issue #3210), because it is what makes the routes'
     // repo-access check a real check instead of a no-op.
     val githubAuth = buildGithubAuth()
+    val uiBuilderGuidelines = buildUiBuilderGuidelines()
     val agentGrantStore = buildAgentGrantStore(githubAuth)
     if (catalogMcp && agentGrantStore == null) {
       System.err.println(
@@ -3877,6 +3878,7 @@ public class ServeRunner(
         themeOptimizerAdmin = backgroundWork,
         playgroundRedeem = playgroundLane?.redeem,
         githubAuth = githubAuth,
+        uiBuilderGuidelines = uiBuilderGuidelines,
         imageBrowserLogin =
           githubAuth?.let { auth ->
             { call, repository ->
@@ -4060,6 +4062,12 @@ public class ServeRunner(
             ?: "") +
           (githubAuthOrgs.takeIf { it.isNotEmpty() }?.let { " (members of ${it.joinToString()})" }
             ?: "")
+      )
+    }
+    if (uiBuilderGuidelines != null) {
+      System.err.println(
+        "serve: ui-builder guidelines check enabled on ${uiBuilderGuidelines.model} for " +
+          uiBuilderGuidelines.describeAccess()
       )
     }
     if (agentGrantStore != null) {
@@ -5626,6 +5634,45 @@ public class ServeRunner(
         oauthScope = githubAuthScope,
         trustForwardedHeaders = trustForwardedFor,
       )
+    )
+  }
+
+  /**
+   * The `guidelines` check, when the operator gave it a key **and** said who may spend it. A key
+   * with nobody named is refused at startup rather than silently left off, and an allowlist with no
+   * key says why the check will report itself skipped.
+   */
+  private fun buildUiBuilderGuidelines(
+    env: Map<String, String> = System.getenv()
+  ): ServeUiBuilderGuidelines? {
+    val key = env[ServeUiBuilderGuidelinesConfig.API_KEY_ENV]?.trim()?.takeIf { it.isNotEmpty() }
+    val named = uiBuilderGuidelinesUsers.isNotEmpty() || uiBuilderGuidelinesOrgs.isNotEmpty()
+    if (key == null) {
+      if (named) {
+        System.err.println(
+          "serve: --ui-builder-guidelines-users/-orgs set but " +
+            "${ServeUiBuilderGuidelinesConfig.API_KEY_ENV} is not; the guidelines check is off"
+        )
+      }
+      return null
+    }
+    val githubToken =
+      env[ServeUiBuilderGuidelinesConfig.GITHUB_TOKEN_ENV]?.trim()?.takeIf { it.isNotEmpty() }
+    val config =
+      ServeUiBuilderGuidelinesConfig(
+        apiKey = key,
+        model = uiBuilderGuidelinesModel ?: ServeUiBuilderGuidelinesConfig.DEFAULT_MODEL,
+        allowedUsers = uiBuilderGuidelinesUsers,
+        allowedOrgs = uiBuilderGuidelinesOrgs,
+        githubToken = githubToken,
+      )
+    return ServeUiBuilderGuidelines(
+      config,
+      ServeUiBuilderGuidelineAccess(
+        config.allowedUsers,
+        config.allowedOrgs,
+        ServeUiBuilderGuidelineAccess.githubMembership(githubToken),
+      ),
     )
   }
 

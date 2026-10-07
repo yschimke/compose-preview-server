@@ -778,6 +778,28 @@ public design is not listed on anybody else's designs page. Owners switch any on
 public and private from its share page. Unset (or `private`) keeps the old behaviour: a design is
 private to its owner and whoever it is shared with. preview.coo.ee runs `public`.
 
+### UI-builder guidelines check
+
+`ui_builder_check_design` can also run a `guidelines` check: a model, reached through
+[OpenRouter](https://openrouter.ai), judges a design against the Android design guides for its
+platform (Wear OS for `wear-m3`/`remote-m3`, AI glasses for `glimmer`) and reports each broken rule
+as a warning or note with its developer.android.com source. It runs on **this box's** OpenRouter
+key, so it is off unless both are set:
+
+```
+SERVE_UI_BUILDER_GUIDELINES_OPENROUTER_KEY=sk-or-...   # read by the server, never put on argv
+SERVE_UI_BUILDER_GUIDELINES_USERS=yschimke             # GitHub logins who may spend it, and/or
+SERVE_UI_BUILDER_GUIDELINES_ORGS=google                # members of these GitHub orgs
+```
+
+A key with nobody named is refused at startup. An agent working under an access grant counts as the
+person who approved it. Org membership is asked of GitHub and remembered for ten minutes; without
+`SERVE_UI_BUILDER_GUIDELINES_GITHUB_TOKEN` (a token of an org member with `read:org`) only
+**public** memberships are visible. `SERVE_UI_BUILDER_GUIDELINES_MODEL` picks the OpenRouter model
+(default `typesafe/jev-router`). Everyone else gets the check reported as skipped, and can run the
+same rules in the editor's Issues panel with their own OpenRouter key; the editor page's
+`connect-src` admits `https://openrouter.ai` for that.
+
 ### Playground on `preview.coo.ee`
 
 > **preview.coo.ee runs the engine without the playground.** `SERVE_COMPILE_ENGINE=1` starts the

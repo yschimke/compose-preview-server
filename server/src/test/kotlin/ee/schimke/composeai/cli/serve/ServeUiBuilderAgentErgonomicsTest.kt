@@ -127,6 +127,45 @@ class ServeUiBuilderAgentErgonomicsTest {
   }
 
   @Test
+  fun `the guidelines check runs only when named, and says why when it cannot run`() {
+    val bare = start()
+    create(bare, cleanDocument())
+    val unconfigured = check(bare, """{"designId":"agent-screen","checks":["guidelines"]}""")
+    assertEquals(listOf("guidelines"), unconfigured.strings("checks"))
+    val skipped = unconfigured["skipped"]!!.jsonArray.single().jsonObject
+    assertEquals("guidelines", skipped.text("check"))
+    assertTrue("no guidelines model" in skipped.text("reason"), skipped.toString())
+    bare.close()
+
+    // Configured, and the operator may spend the key; this catalog has no guides written for it,
+    // so the model is never asked and the reply says so.
+    val config = ServeUiBuilderGuidelinesConfig(apiKey = "sk-or-test", allowedUsers = setOf("a"))
+    val lane =
+      ServeUiBuilderGuidelines(
+        config,
+        ServeUiBuilderGuidelineAccess(config.allowedUsers, emptySet(), { _, _ -> false }),
+        transport = { _, _ -> error("the model must not be asked") },
+      )
+    val server = start(directory = stateDirectory.resolve("guided"), guidelines = lane)
+    create(server, cleanDocument())
+    val defaults = check(server, """{"designId":"agent-screen"}""")
+    assertEquals(listOf("schema", "catalog", "a11y"), defaults.strings("checks"))
+    val named = check(server, """{"designId":"agent-screen","checks":["a11y","guidelines"]}""")
+    val reason = named["skipped"]!!.jsonArray.single().jsonObject.text("reason")
+    assertTrue("no guidelines are written for catalog `m3-catalog`" in reason, reason)
+  }
+
+  @Test
+  fun `a design's Compose source is served as text for the editor's guidelines check`() {
+    val server = start()
+    create(server, cleanDocument())
+    val (status, body) =
+      http(server, "GET", "/api/ui-builder/v1/designs/agent-screen/export.compose", null)
+    assertEquals(200, status, body)
+    assertTrue("@Composable" in body, body)
+  }
+
+  @Test
   fun `accessibility problems are reported by node, with the number behind each`() {
     val server = start()
 
@@ -991,6 +1030,7 @@ class ServeUiBuilderAgentErgonomicsTest {
     withValidator: Boolean = true,
     withReviews: Boolean = true,
     directory: Path = stateDirectory,
+    guidelines: ServeUiBuilderGuidelines? = null,
   ): Running {
     val registry = ServeSessionRegistry(open = { null })
     val reviews = ServeUiBuilderReviewStore(directory.resolve("reviews"))
@@ -1011,6 +1051,7 @@ class ServeUiBuilderAgentErgonomicsTest {
           uiBuilderReviewStore = if (withReviews) reviews else null,
           uiBuilderValidator =
             if (withValidator) ScratchUiBuilderDraftValidator(catalogs(), exporter()) else null,
+          uiBuilderGuidelines = guidelines,
         )
         .also(ServeHttpServer::start)
     return Running(server, registry, reviews).also { running = it }

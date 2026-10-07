@@ -374,6 +374,27 @@ class ServeCommandOptionsTest {
     )
 
   @Test
+  fun `the guidelines check's allowlists and model are read, lowercased, blanks dropped`() {
+    val parsed =
+      options(
+        listOf(
+          "--ui-builder-guidelines-users",
+          "Alice, bob,,",
+          "--ui-builder-guidelines-orgs",
+          "Google",
+          "--ui-builder-guidelines-model",
+          " openai/gpt-5 ",
+        )
+      )
+    assertEquals(setOf("alice", "bob"), parsed.uiBuilderGuidelinesUsers)
+    assertEquals(setOf("google"), parsed.uiBuilderGuidelinesOrgs)
+    assertEquals("openai/gpt-5", parsed.uiBuilderGuidelinesModel)
+    val bare = options(emptyList())
+    assertEquals(emptySet(), bare.uiBuilderGuidelinesUsers)
+    assertEquals(null, bare.uiBuilderGuidelinesModel)
+  }
+
+  @Test
   fun `the playground role and external playground are read, and an unknown role is refused`() {
     assertFalse(options(emptyList()).playgroundRole)
     assertFalse(options(emptyList()).playgroundExternal)
