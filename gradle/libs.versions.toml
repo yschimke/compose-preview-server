@@ -234,7 +234,10 @@ composeai-preview-daemon = "3.14.0"
 # `:server` already resolved: the UI-builder modules' POMs import the contracts BOM at 3.17.0, and
 # Gradle takes the highest of competing platform constraints. Every BOM ref in this file is a floor
 # under that highest-wins rule, not a ceiling.
-composeai-contracts = "3.19.0"
+# 3.20.0 adds the computed values (`expr`, `system`) and the open `remoteCall` modifier
+# (compose-preview-contracts#141); compose-ui-builder authors them, and the screen projection
+# refuses a `remoteCall` by name.
+composeai-contracts = "3.20.0"
 
 # The extracted UI builder (yschimke/compose-ui-builder), resolved from its RELEASES. Three jars
 # and a BOM on Maven Central, and the editor archive as a GitHub release asset reached through the
