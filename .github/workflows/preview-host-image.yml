@@ -235,8 +235,11 @@ jobs:
             loaded=$(printf '%s' "${status_json}" | jq -r --argjson d "${declared_json}" \
               '[.catalogList[] | select(.id as $i | $d | index($i)) | select(.loadState == "loaded" or .loadState == "stale")] | length' \
               2>/dev/null || echo -1)
+            # Declared AND listed by the box: a catalog this checkout adds is registered by the
+            # `Publish deployment config` step after this one, so requiring it here could never
+            # converge. Not yet registered is not failed; it was not counted before this either.
             total=$(printf '%s' "${status_json}" | jq -r --argjson d "${declared_json}" \
-              'if .catalogList then ($d | length) else -1 end' 2>/dev/null || echo -1)
+              '[.catalogList[] | select(.id as $i | $d | index($i))] | length' 2>/dev/null || echo -1)
             failed=$(printf '%s' "${status_json}" | jq -r --argjson d "${declared_json}" \
               '[.catalogList[] | select(.id as $i | $d | index($i)) | select(.loadState == "failed")] | length' \
               2>/dev/null || echo -1)
