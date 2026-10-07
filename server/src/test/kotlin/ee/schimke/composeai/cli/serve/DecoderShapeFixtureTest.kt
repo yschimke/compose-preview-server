@@ -1,6 +1,7 @@
 package ee.schimke.composeai.cli.serve
 
 import ee.schimke.composeai.discovery.ComponentRecordFile
+import ee.schimke.composeai.uibuilder.service.PublishedUiBuilderCatalog
 import java.nio.file.Files
 import java.nio.file.Path
 import kotlin.test.Test
@@ -35,31 +36,56 @@ import kotlinx.serialization.serializer
  * Only the `record` half is generated here, from what `ComponentRecordSource` decodes. The
  * `componentPolicy` half describes `PublishedUiBuilderCatalog`'s decoder, which moved to
  * compose-ui-builder's `:ui-builder-runtime` with the composer (compose-ui-builder#503) and is
- * internal there, so that repository generates it and this one carries its copy.
+ * internal there. That repository generates it and ships the table in the runtime jar
+ * (compose-ui-builder#508), so the copy here is checked against the release this server pins and a
+ * pin bump that changes the decoder fails here until the copy is refreshed.
  */
 class DecoderShapeFixtureTest {
 
+  private val fixture = Path.of("..", ".github", "scripts", "decoder-shapes.json").normalize()
+  private val pretty = Json { prettyPrint = true }
+
+  private fun committed(): JsonObject =
+    Json.parseToJsonElement(Files.readString(fixture)).jsonObject
+
+  private fun JsonObject.pretty(): String = pretty.encodeToString(JsonObject.serializer(), this)
+
+  /** The `componentPolicy` half as the pinned `ui-builder-runtime` release ships it. */
+  private fun releasedComponentPolicy(): JsonObject {
+    val table =
+      checkNotNull(PublishedUiBuilderCatalog::class.java.getResource(RUNTIME_SHAPES)) {
+          "the pinned ui-builder-runtime ships no $RUNTIME_SHAPES"
+        }
+        .readText()
+    return Json.parseToJsonElement(table).jsonObject.getValue("componentPolicy").jsonObject
+  }
+
   @Test
   fun `the committed record shape matches the decoder`() {
-    val fixture = Path.of("..", ".github", "scripts", "decoder-shapes.json").normalize()
-    val committed = Json.parseToJsonElement(Files.readString(fixture)).jsonObject
     val record = describe(serializer<ComponentRecordFile>().descriptor, mutableSetOf())
     if (System.getenv("UPDATE_DECODER_SHAPES") == "1") {
-      val updated = JsonObject(committed + ("record" to record))
-      Files.writeString(
-        fixture,
-        Json { prettyPrint = true }.encodeToString(JsonObject.serializer(), updated) + "\n",
-      )
+      val updated =
+        JsonObject(
+          committed() + ("record" to record) + ("componentPolicy" to releasedComponentPolicy())
+        )
+      Files.writeString(fixture, updated.pretty() + "\n")
       return
     }
-    val pretty = Json { prettyPrint = true }
     assertEquals(
-      pretty.encodeToString(JsonObject.serializer(), record),
-      pretty.encodeToString(JsonObject.serializer(), committed.getValue("record").jsonObject),
-      "The record decoder changed shape. Regenerate with " +
-        "UPDATE_DECODER_SHAPES=1 ./gradlew :server:test --tests '*DecoderShapeFixtureTest*' " +
-        "and commit .github/scripts/decoder-shapes.json — the " +
-        "readiness gate validates records against this table and cannot see the decoders itself.",
+      record.pretty(),
+      committed().getValue("record").jsonObject.pretty(),
+      "The record decoder changed shape. $REGENERATE",
+    )
+  }
+
+  @Test
+  fun `the committed policy shape matches the pinned runtime`() {
+    if (System.getenv("UPDATE_DECODER_SHAPES") == "1") return
+    assertEquals(
+      releasedComponentPolicy().pretty(),
+      committed().getValue("componentPolicy").jsonObject.pretty(),
+      "The pinned ui-builder-runtime decodes catalog policy differently from the table here. " +
+        REGENERATE,
     )
   }
 
@@ -150,4 +176,13 @@ class DecoderShapeFixtureTest {
       // A free-form JsonElement is carried but not constrained.
       else -> mapOf("kind" to JsonPrimitive("any"))
     }
+
+  private companion object {
+    const val RUNTIME_SHAPES = "/ee/schimke/composeai/uibuilder/service/decoder-shapes.json"
+    const val REGENERATE =
+      "Regenerate with UPDATE_DECODER_SHAPES=1 ./gradlew :server:test --tests " +
+        "'*DecoderShapeFixtureTest*' and commit .github/scripts/decoder-shapes.json — the " +
+        "readiness gate validates published catalogs against this table and cannot see the " +
+        "decoders itself."
+  }
 }
