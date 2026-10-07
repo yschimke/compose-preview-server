@@ -207,7 +207,8 @@ class ServeUiBuilderGuidelinesTest {
 
     val empty = guidelines { _, _ ->
       OpenRouterTransport.Response(200, completion())
-    }.check(wearDocument(), null)
+    }
+      .check(wearDocument(), null)
     assertIs<UiBuilderGuidelineOutcome.Failed>(empty)
   }
 
