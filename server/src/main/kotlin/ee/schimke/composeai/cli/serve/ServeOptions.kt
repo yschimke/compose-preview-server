@@ -855,6 +855,19 @@ public interface ServeOptions {
     get() = emptyMap()
 
   /**
+   * Which player draws a Wear widget design in the native preview lane and its thumbnails
+   * (`--ui-builder-widget-player cmp-android|androidx`, default `cmp-android`).
+   *
+   * Both record the widget with the AndroidX writer on the Android daemon. `cmp-android` is used
+   * only where the widget's bundle carries `rc-player-compose`, else `androidx`. `cmp-android`
+   * plays the document with the Compose Multiplatform `RcComposePlayer`; `androidx` keeps
+   * upstream's `WearWidgetPreview`, whose player currently drops a `RemoteButton`'s container
+   * (yschimke/compose-ui-builder#511).
+   */
+  public val uiBuilderWidgetPlayer: UiBuilderWidgetPlayer
+    get() = UiBuilderWidgetPlayer.DEFAULT
+
+  /**
    * Served catalogs admitted as **component packs** for the UI builder (`--ui-builder-packs <served
    * catalog>=<platform>[,…]`), by id, each naming the platform whose authoring catalogs receive it:
    * `mobile`, `wear` or `remote-compose`.

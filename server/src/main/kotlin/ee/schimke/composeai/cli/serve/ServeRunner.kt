@@ -3280,9 +3280,11 @@ public class ServeRunner(
       thumbnails = runCatching {
           ServeUiBuilderThumbnails(
             directory.resolve("thumbnails").toPath(),
+            // The widget player is part of what draws a widget's picture, so switching it
+            // redraws the cards rather than keeping the other player's pictures current.
             ServeUiBuilderThumbnails.generationOf(SERVE_VERSION) {
               PackagedUiBuilderRenderBundle.digest()
-            },
+            } + "+widget-" + options.uiBuilderWidgetPlayer.flagValue,
           )
         }
           .onFailure {
@@ -3966,6 +3968,15 @@ public class ServeRunner(
                   }
                 },
                 packs = uiBuilderPacks.keys,
+                widgetPlayer = options.uiBuilderWidgetPlayer,
+                // The CMP player is compiled into the widget entry, so it is chosen only for a
+                // bundle whose manifest carries it — positive evidence, as the live lane asks.
+                carriesCmpWidgetPlayer = { served ->
+                  catalogLiveBundles[served.substringBefore('@')]
+                    ?.firstOrNull { it.id == served }
+                    ?.file
+                    ?.let(ServeRcPlayerIds::bundleCarriesCmpAndroidPlayer) ?: false
+                },
                 compile = { generated ->
                   // `true` here, and only here: this call site is downstream of the route's
                   // `ui-builder-export` capability check, and the source it submits came from

@@ -47,16 +47,18 @@ data class UiBuilderGeneratedCompose(
    *
    * A widget's generated source declares `<name>Content` (a `@RemoteComposable` body),
    * `<name>Background` (its `WearWidgetBrush`) and `<name>Params` (the container spec its scaffold
-   * describes). There is no screen in it to call, so the entry composes none: it hands the three to
-   * `androidx.glance.wear.tooling.preview.WearWidgetPreview`, which draws the host's squircle
-   * container around the body exactly as the launcher does — the frame the builder's canvas draws
-   * beside it.
+   * describes). There is no screen in it to call, so the entry composes none: it records the three
+   * through Glance Wear's own `WearWidgetDocument`, which draws the host's container around the
+   * body exactly as the launcher does — the frame the builder's canvas draws beside it — and plays
+   * the document with the player [widgetPlayer] names.
    *
    * Exclusive with [remoteCapture] in practice and not asserted so: that mode wraps a body in
    * `RemoteOverridablePreview` to publish a document, and a widget is drawn rather than published.
    * A caller setting both would get the widget entry, which is the one that can draw.
    */
   val wearWidget: Boolean = false,
+  /** Which player draws a [wearWidget]'s recorded document; ignored for anything else. */
+  val widgetPlayer: UiBuilderWidgetPlayer = UiBuilderWidgetPlayer.DEFAULT,
 ) {
   companion object {
     /** The Skiko desktop daemon — every catalog whose components are Compose Multiplatform. */
@@ -112,6 +114,7 @@ class UiBuilderGeneratedPreviewAdapter(private val playground: PlaygroundCompile
                 heightDp = generated.heightDp,
                 remoteCapture = generated.remoteCapture,
                 wearWidget = generated.wearWidget,
+                widgetPlayer = generated.widgetPlayer,
               ),
             ),
           ),
@@ -137,8 +140,13 @@ class UiBuilderGeneratedPreviewAdapter(private val playground: PlaygroundCompile
       heightDp: Int,
       remoteCapture: Boolean = false,
       wearWidget: Boolean = false,
+      widgetPlayer: UiBuilderWidgetPlayer = UiBuilderWidgetPlayer.DEFAULT,
     ): String =
-      if (wearWidget) wearWidgetEntry(composableName, widthDp, heightDp)
+      if (wearWidget)
+        when (widgetPlayer) {
+          UiBuilderWidgetPlayer.CMP -> cmpWearWidgetEntry(composableName, widthDp, heightDp)
+          UiBuilderWidgetPlayer.ANDROIDX -> wearWidgetEntry(composableName, widthDp, heightDp)
+        }
       else if (remoteCapture) remoteCaptureEntry(composableName, widthDp, heightDp)
       else
         """
@@ -232,5 +240,92 @@ class UiBuilderGeneratedPreviewAdapter(private val playground: PlaygroundCompile
       }
       """
         .trimIndent() + "\n"
+
+    /**
+     * The widget entry [UiBuilderWidgetPlayer.CMP] selects: the same recording, a different player.
+     *
+     * The document is captured exactly as [wearWidgetEntry]'s `WearWidgetPreview` captures it — the
+     * generated params carry Glance Wear's default `SAFE_FALLBACK_VERSION`, so the AndroidX writer
+     * records the operations the oldest widget host accepts, inside the same `WearWidgetContainer`.
+     * Only the playback differs: the bytes go to the Compose Multiplatform `RcComposePlayer`
+     * (cmp-android) rather than AndroidX's `RemoteDocumentPreview`.
+     *
+     * That player is the reason for this entry. AndroidX's drops a `DrawPath` sized from the
+     * component it draws behind, so a `RemoteButton` came back as its label with no container while
+     * the editor drew the filled pill (yschimke/compose-ui-builder#511). The CMP player draws it,
+     * from the same bytes. The recording is still the AndroidX writer's, which is what keeps this
+     * lane the authoritative one.
+     */
+    private fun cmpWearWidgetEntry(name: String, widthDp: Int, heightDp: Int): String =
+      """
+      @file:Suppress("RestrictedApi", "RestrictedApiAndroidX")
+
+      package generated.uibuilder.preview
+
+      import androidx.compose.foundation.layout.Box
+      import androidx.compose.foundation.layout.fillMaxSize
+      import androidx.compose.runtime.Composable
+      import androidx.compose.runtime.remember
+      import androidx.compose.ui.Modifier
+      import androidx.compose.ui.platform.LocalContext
+      import androidx.compose.ui.tooling.preview.Preview
+      import androidx.glance.wear.WearWidgetDocument
+      import ee.schimke.composeai.rcplayer.compose.RcComposePlayer
+      import ee.schimke.composeai.rcplayer.compose.rcGoogleFontsTypefaceLoader
+      import ee.schimke.composeai.rcplayer.protocol.RcDocumentCodec
+      import generated.uibuilder.${name}Background as generatedWidgetBackground
+      import generated.uibuilder.${name}Content as GeneratedWidgetContent
+      import generated.uibuilder.${name}Params as generatedWidgetParams
+      import kotlinx.coroutines.runBlocking
+
+      @Preview(widthDp = $widthDp, heightDp = $heightDp)
+      @Composable
+      fun UiBuilderGeneratedPreview() {
+        val context = LocalContext.current
+        val document =
+          remember(context) {
+            val bytes = runBlocking {
+              WearWidgetDocument(generatedWidgetBackground()) { GeneratedWidgetContent() }
+                .captureRawContent(context, generatedWidgetParams(), isInspectionMode = true)
+                .rcDocument
+            }
+            RcDocumentCodec.decode(bytes)
+          }
+        Box(Modifier.fillMaxSize()) {
+          RcComposePlayer(
+            document,
+            modifier = Modifier.fillMaxSize(),
+            typefaces = rcGoogleFontsTypefaceLoader(document),
+          )
+        }
+      }
+      """
+        .trimIndent() + "\n"
+  }
+}
+
+/**
+ * Which player draws a Wear widget's recorded document in the native lane.
+ *
+ * Both record through the AndroidX writer on the Android daemon; they differ only in playback. Kept
+ * as a switch rather than a replacement so the lane can go back to the upstream preview the day its
+ * player draws what the CMP one does (`--ui-builder-widget-player androidx`).
+ */
+enum class UiBuilderWidgetPlayer(val flagValue: String) {
+  /** The Compose Multiplatform `RcComposePlayer` on Android (cmp-android). */
+  CMP("cmp-android"),
+
+  /** Upstream `androidx.glance.wear.tooling.preview.WearWidgetPreview` and its AndroidX player. */
+  ANDROIDX("androidx");
+
+  companion object {
+    val DEFAULT: UiBuilderWidgetPlayer = CMP
+
+    /** The canonical id, or `cmp` for [CMP]: the same ids `--rc-default-player` reads. */
+    fun fromFlag(value: String): UiBuilderWidgetPlayer? =
+      when (val id = value.trim().lowercase()) {
+        "cmp" -> CMP
+        else -> entries.firstOrNull { it.flagValue == id }
+      }
   }
 }

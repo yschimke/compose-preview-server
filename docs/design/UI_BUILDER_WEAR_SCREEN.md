@@ -277,10 +277,22 @@ three things it actually needs and no ceremony:
 | `<Name>Background()` | the widget's own `WearWidgetBrush` — what the host paints the squircle with |
 | `<Name>Params()` | the `WearWidgetParams` **this design** describes: its footprint, its padding, its radius |
 
-`UiBuilderGeneratedPreviewAdapter` hands the three to `androidx.glance.wear.tooling.preview`'s
-`WearWidgetPreview`, which builds the document and runs it through the same `WearWidgetContainer`
-the real widget pipeline does — the rounded background, the host padding, the content inset inside
-it. Not `CapturingWearWidgetPreview`: that compose-ai-tools wrapper additionally offers the encoded
+`UiBuilderGeneratedPreviewAdapter` records the three through Glance Wear's own `WearWidgetDocument`,
+which runs the body through the same `WearWidgetContainer` the real widget pipeline does — the
+rounded background, the host padding, the content inset inside it — with the AndroidX writer and
+the `SAFE_FALLBACK_VERSION` profile `WearWidgetParams` defaults to. Which player then draws the
+document is `--ui-builder-widget-player`:
+
+| Value | Player | Why |
+| --- | --- | --- |
+| `cmp-android` (default) | the Compose Multiplatform `RcComposePlayer` on the Android daemon, where the widget's bundle manifest carries `rc-player-compose`; a bundle without it is drawn with `androidx` rather than failing to compile | AndroidX's player drops a `DrawPath` sized from the component it draws behind, so a `RemoteButton` came back as its bare label while the editor drew the filled pill ([yschimke/compose-ui-builder#511](https://github.com/yschimke/compose-ui-builder/issues/511)); the CMP player draws it from the same bytes |
+| `androidx` | upstream `androidx.glance.wear.tooling.preview.WearWidgetPreview` | what Android Studio shows for the exported file; kept so the lane can go back once upstream draws the container |
+
+Either way the recording is the AndroidX writer's, which is why the lane stays authoritative. The
+thumbnail generation carries the player, so switching it redraws the design cards. The exported
+widget file is unaffected: it keeps `WearWidgetPreview`, the standard preview support.
+
+Not `CapturingWearWidgetPreview`: that compose-ai-tools wrapper additionally offers the encoded
 document to the render harness's `.rc` sidecar, and this lane wants a frame, not bytes. Requiring
 `ee.schimke.composeai:wear-preview-runtime` on a bundle to publish something nobody reads would be a
 deployment cost for nothing; producing a document is what the

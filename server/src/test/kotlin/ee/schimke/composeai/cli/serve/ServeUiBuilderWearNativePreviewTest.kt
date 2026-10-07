@@ -64,7 +64,9 @@ class ServeUiBuilderWearNativePreviewTest {
   private fun lane(
     nativeTarget: (String) -> UiBuilderNativeTarget? = {
       UiBuilderNativeTarget("wear-m3-catalog", UiBuilderGeneratedCompose.COMPOSE_ANDROID)
-    }
+    },
+    widgetPlayer: UiBuilderWidgetPlayer = UiBuilderWidgetPlayer.DEFAULT,
+    carriesCmpWidgetPlayer: (String) -> Boolean = { true },
   ) =
     ServeUiBuilderNativePreview(
       executor = executor,
@@ -73,6 +75,8 @@ class ServeUiBuilderWearNativePreviewTest {
         PlaygroundRunResponse(previewId = "generated", previewToken = "token", image = "png")
       },
       nativeTarget = nativeTarget,
+      widgetPlayer = widgetPlayer,
+      carriesCmpWidgetPlayer = carriesCmpWidgetPlayer,
     )
 
   @Test
@@ -233,6 +237,47 @@ class ServeUiBuilderWearNativePreviewTest {
     // 168 + 2×32 by 112 + 2×16, which is what `WearWidgetPreview` sizes itself to.
     assertEquals(232, request.widthDp)
     assertEquals(144, request.heightDp)
+  }
+
+  /**
+   * The lane hands a widget to the player the host was started with, on the Android daemon either
+   * way: only playback differs, the recording stays the AndroidX writer's.
+   */
+  @Test
+  fun `a widget is played by the CMP player by default and by androidx when the host asks`() {
+    lane().render(wearWidget())
+    lane(widgetPlayer = UiBuilderWidgetPlayer.ANDROIDX).render(wearWidget())
+
+    val (byDefault, byAndroidx) = submitted
+    assertEquals(UiBuilderWidgetPlayer.CMP, byDefault.widgetPlayer)
+    assertEquals(UiBuilderWidgetPlayer.ANDROIDX, byAndroidx.widgetPlayer)
+    assertEquals(UiBuilderGeneratedCompose.COMPOSE_ANDROID, byDefault.confType)
+    assertEquals(UiBuilderGeneratedCompose.COMPOSE_ANDROID, byAndroidx.confType)
+    assertEquals(byDefault.source, byAndroidx.source)
+  }
+
+  /**
+   * The CMP entry imports `rc-player-compose`, so a bundle that does not carry it is drawn by the
+   * upstream preview instead of failing every widget compile on an unresolved reference.
+   */
+  @Test
+  fun `a widget bundle without the CMP player is drawn by androidx`() {
+    val asked = mutableListOf<String>()
+    lane(
+        carriesCmpWidgetPlayer = {
+          asked += it
+          false
+        }
+      )
+      .render(wearWidget())
+    lane(carriesCmpWidgetPlayer = { false }, widgetPlayer = UiBuilderWidgetPlayer.ANDROIDX)
+      .render(wearWidget())
+
+    assertEquals(listOf("wear-m3-catalog"), asked)
+    assertEquals(
+      listOf(UiBuilderWidgetPlayer.ANDROIDX, UiBuilderWidgetPlayer.ANDROIDX),
+      submitted.map { it.widgetPlayer },
+    )
   }
 
   /** Asking for nothing draws the broad rectangular editing host. */

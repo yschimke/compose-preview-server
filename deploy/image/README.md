@@ -126,6 +126,12 @@ A Remote Compose preview opens on `androidx-embedded` where the daemon can rende
 the Android daemon runs — and a preview that does not enable that player keeps the built-in order.
 `cmp-android` is enabled only for a catalog whose live bundle lists
 `ee.schimke.composeai:rc-player-compose` on its classpath; elsewhere the viewer shows it disabled.
+
+UI-builder Wear widget designs are recorded by the AndroidX writer in the native preview lane and on
+their design cards; `SERVE_UI_BUILDER_WIDGET_PLAYER` (`serve --ui-builder-widget-player`) picks the
+player that draws them. Empty means `cmp-android`, used where the widget's bundle carries
+`rc-player-compose` and otherwise falling back to `androidx`, upstream's `WearWidgetPreview`, which
+draws a `RemoteButton` without its container (yschimke/compose-ui-builder#511).
 Unset by default.
 
 The Compose UI builder's Jetcaster benchmark preview is packaged alongside that browser and served
