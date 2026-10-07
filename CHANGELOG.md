@@ -1,5 +1,18 @@
 # Changelog
 
+## [3.108.0](https://github.com/yschimke/compose-preview-server/compare/v3.107.0...v3.108.0) (2026-10-07)
+
+
+### Features
+
+* **ui-builder:** show the guidelines model a device picture and an unrolled one ([#1422](https://github.com/yschimke/compose-preview-server/issues/1422)) ([ca41da5](https://github.com/yschimke/compose-preview-server/commit/ca41da502c94ac239dfe787739e4928284b7d0f4))
+
+
+### Bug Fixes
+
+* **deps:** update composeai-ui-builder to 3.92.0 ([#1423](https://github.com/yschimke/compose-preview-server/issues/1423)) ([8814def](https://github.com/yschimke/compose-preview-server/commit/8814def877bb5693011ccb1cd73465228cd7331d))
+* **harness:** the thread test that fails on main since ui-builder 3.91.0 ([#1419](https://github.com/yschimke/compose-preview-server/issues/1419)) ([d96500a](https://github.com/yschimke/compose-preview-server/commit/d96500aba472d2a6260142a089fd629f145c5843))
+
 ## [3.107.0](https://github.com/yschimke/compose-preview-server/compare/v3.106.0...v3.107.0) (2026-10-07)
 
 
