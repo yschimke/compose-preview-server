@@ -144,6 +144,13 @@ expect "dropping remote-m3 still publishes the rest" \
   $'--ui-builder-published-catalogs\nm3-catalog,wear-m3' "${wear_only}"
 refute "dropping remote-m3 does not publish it" "remote-m3" "${wear_only}"
 
+# remote-widgets has no built-in catalog, only the file it publishes, so serving it has to publish
+# it too: the box would otherwise offer a builder catalog it cannot define.
+widgets="$(run_case "m3-catalog,remote-m3,remote-widgets")"
+expect "serving remote-widgets takes it from its published file" \
+  $'--ui-builder-published-catalogs\nm3-catalog,remote-m3,remote-widgets' "${widgets}"
+refute "the default does not serve remote-widgets" "remote-widgets" "${default}"
+
 all="$(run_case "" "all")"
 expect "an operator can opt every catalog back in" $'--ui-builder-published-catalogs\nall' "${all}"
 
