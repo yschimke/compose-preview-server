@@ -1,5 +1,14 @@
 # Changelog
 
+## [3.109.0](https://github.com/yschimke/compose-preview-server/compare/v3.108.0...v3.109.0) (2026-10-08)
+
+
+### Features
+
+* **deploy:** serve remote-widgets on preview.coo.ee ([#1428](https://github.com/yschimke/compose-preview-server/issues/1428)) ([5c7ce3c](https://github.com/yschimke/compose-preview-server/commit/5c7ce3c10368e1d6464d8f8ed4d9b7f5596f987c))
+* **guidelines:** prompt, shared result and agent tools over MCP and REST ([#1424](https://github.com/yschimke/compose-preview-server/issues/1424)) ([9b98c5f](https://github.com/yschimke/compose-preview-server/commit/9b98c5fe23712d781c8cf8315c4895943054a397))
+* **ui-builder:** ui-builder 3.93.0, and theme typefaces written for the bundle a design compiles against ([#1426](https://github.com/yschimke/compose-preview-server/issues/1426)) ([3271c57](https://github.com/yschimke/compose-preview-server/commit/3271c57d6dc45dddec6f977abc278dc5aedd7ecf))
+
 ## [3.108.0](https://github.com/yschimke/compose-preview-server/compare/v3.107.0...v3.108.0) (2026-10-07)
 
 
