@@ -191,6 +191,12 @@ how those artefacts are regenerated, just run through `build-brief`.
   (`docs/guidelines/android-design-guidelines.json`, embedded in `ui-builder-export` as
   `DesignGuidelineRuleSet.Bundled`). Nothing is vendored here: change them upstream, and they arrive
   with the next `composeai-ui-builder` bump.
+- A test here of behaviour compose-ui-builder owns — which guideline rules a design is asked, what
+  an export emits or refuses — asserts that the server delegates (its result equals the library
+  call's) plus the invariants the server relies on, never the builder's current output restated.
+  A restated output turns the next `composeai-ui-builder` bump red on a correct builder change
+  (yschimke/compose-ui-builder#574 did; #1401 fixed another), and then the bump waits on a test fix
+  here.
 - Two JVM floors, `java-server` (17) and `java-ui-builder` (21), declared once in
   `gradle/libs.versions.toml` with the reasoning beside them. Everything this repository compiles or
   resolves against is 17, because compose-ai-tools' `:cli` compiles against the released server on a

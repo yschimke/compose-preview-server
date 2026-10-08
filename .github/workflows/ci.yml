@@ -197,10 +197,22 @@ jobs:
         with:
           rw-token: ${{ github.event_name == 'push' && (secrets.BUILDFETCH_COMPOSEAI_GRADLE_REMOTE_CACHE_TOKEN || secrets.BUILDFETCH_GRADLE_REMOTE_CACHE_TOKEN) || '' }}
           ro-token: ${{ secrets.BUILDFETCH_COMPOSEAI_GRADLE_REMOTE_CACHE_TOKEN_RO || secrets.BUILDFETCH_GRADLE_REMOTE_CACHE_TOKEN_RO }}
+      # At the release this repository pins, not the builder's `main`. The lane tests the flag on
+      # the builder the server ships with; against `main` it went red on every builder change a
+      # server test had not caught up with yet (a new catalog component, a rule-selection change),
+      # which nothing here could fix until the next bump. A builder change reaches this lane on
+      # that bump, the same pull request that adopts it.
+      - name: Read the pinned UI-builder release
+        id: ui-builder-pin
+        run: |
+          version="$(sed -n 's/^composeai-ui-builder = "\(.*\)"$/\1/p' gradle/libs.versions.toml)"
+          test -n "$version"
+          echo "ref=v$version" >> "$GITHUB_OUTPUT"
       - name: Check out the UI builder
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: yschimke/compose-ui-builder
+          ref: ${{ steps.ui-builder-pin.outputs.ref }}
           path: .compose-ui-builder
           persist-credentials: false
       # The normal Gradle job proves the shipping default. Keep the opt-in code compiled and
