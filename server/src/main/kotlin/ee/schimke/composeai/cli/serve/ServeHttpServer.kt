@@ -526,6 +526,9 @@ class ServeHttpServer(
    * the check reported as skipped.
    */
   private val uiBuilderGuidelines: ServeUiBuilderGuidelines? = null,
+  /** `--ui-builder-guidelines-picture-budget`, in seconds. */
+  private val uiBuilderGuidelinesPictureBudgetSeconds: Long =
+    DEFAULT_GUIDELINES_PICTURE_BUDGET_SECONDS,
   /**
    * Resolve a browser session into an image-uploader login for [ServeImageUploadAuth.repository].
    *
@@ -895,6 +898,11 @@ class ServeHttpServer(
         agentPresence = uiBuilderAgentPresence,
         guidelines = uiBuilderGuidelines,
         guidelineRecords = uiBuilderGuidelineStore,
+        guidelineFrames = uiBuilderThumbnails?.guidelineFrames,
+        widgetThumbnail = { designId, revision ->
+          uiBuilderThumbnails?.nativeWidgetThumbnail(designId, revision)
+        },
+        guidelinePictureBudgetMillis = uiBuilderGuidelinesPictureBudgetSeconds * 1_000,
       )
     }
   }

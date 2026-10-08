@@ -3942,6 +3942,7 @@ public class ServeRunner(
         playgroundRedeem = playgroundLane?.redeem,
         githubAuth = githubAuth,
         uiBuilderGuidelines = uiBuilderGuidelines,
+        uiBuilderGuidelinesPictureBudgetSeconds = uiBuilderGuidelinesPictureBudgetSeconds,
         imageBrowserLogin =
           githubAuth?.let { auth ->
             { call, repository ->

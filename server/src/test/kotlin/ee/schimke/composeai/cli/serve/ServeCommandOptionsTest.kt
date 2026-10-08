@@ -448,6 +448,17 @@ class ServeCommandOptionsTest {
     val bare = options(emptyList())
     assertEquals(emptySet(), bare.uiBuilderGuidelinesUsers)
     assertEquals(null, bare.uiBuilderGuidelinesModel)
+    assertEquals(45L, bare.uiBuilderGuidelinesPictureBudgetSeconds)
+    assertEquals(
+      10L,
+      options(listOf("--ui-builder-guidelines-picture-budget", "10"))
+        .uiBuilderGuidelinesPictureBudgetSeconds,
+    )
+    assertEquals(
+      45L,
+      options(listOf("--ui-builder-guidelines-picture-budget", "-3"))
+        .uiBuilderGuidelinesPictureBudgetSeconds,
+    )
   }
 
   @Test
