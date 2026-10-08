@@ -7,12 +7,16 @@ import ee.schimke.composeai.discovery.ComponentRecordFile
 import ee.schimke.composeai.discovery.ScreenGenerator
 import ee.schimke.composeai.uibuilder.export.CatalogComposeSourceExportAdapter
 import ee.schimke.composeai.uibuilder.export.CatalogComposeSourceExportAdapters
+import ee.schimke.composeai.uibuilder.export.FlexpressVariableFontSources
 import ee.schimke.composeai.uibuilder.export.RecordFreeExport
 import ee.schimke.composeai.uibuilder.export.ScreenDocumentProjection
 import ee.schimke.composeai.uibuilder.export.ScreenExportGate
 import ee.schimke.composeai.uibuilder.export.TypefaceTarget
 import ee.schimke.composeai.uibuilder.export.UiBuilderBuildFeatures
 import ee.schimke.composeai.uibuilder.export.UiBuilderCatalogPlatform
+import ee.schimke.composeai.uibuilder.export.VariableFontExport
+import ee.schimke.composeai.uibuilder.export.VariableFontExportMode
+import ee.schimke.composeai.uibuilder.export.VariableFontSourceGenerator
 import ee.schimke.composeai.uibuilder.export.WidgetAssetBytes
 import ee.schimke.composeai.uibuilder.export.callableAliases
 import ee.schimke.composeai.uibuilder.export.description
@@ -112,6 +116,14 @@ internal class ScreenGeneratorComposeExportExecutor(
   private val catalogPlatform: (String) -> UiBuilderCatalogPlatform = {
     UiBuilderCatalogPlatform.DEFAULT
   },
+  /**
+   * Writes each variable font text's declaration (`m3/variable-font-text`,
+   * `wear-m3/variable-font-text`): flexpress works the outline out from the font, which
+   * `ui-builder-export` carries on its classpath. The generated call names that declaration, so a
+   * source without it does not compile — hence a generator by default rather than none.
+   */
+  private val variableFontSources: VariableFontSourceGenerator =
+    FlexpressVariableFontSources.fromClasspath(),
 ) : UiBuilderExportExecutor {
 
   override fun export(request: RevisionPinnedUiBuilderExport): ExportArtifactV1 {
@@ -153,6 +165,7 @@ internal class ScreenGeneratorComposeExportExecutor(
               is RecordFreeComponents.Found -> resolved.components
             },
           assets = request.document.widgetAssetBytes(),
+          variableFonts = VariableFontExport(variableFontSources),
         )
         ?.let { recordFree ->
           return when (recordFree) {
@@ -316,6 +329,13 @@ internal class ScreenGeneratorComposeExportExecutor(
      * Multiplatform Desktop bundle such as m3-catalog's has no `GoogleFont` to resolve.
      */
     typefaces: TypefaceTarget = TypefaceTarget.DEFAULT,
+    /**
+     * How a variable font text's declaration draws. The **export** keeps
+     * [LIBRARY][VariableFontExportMode.LIBRARY] — the app depends on `flexpress-compose` — and the
+     * lanes that compile the source against a catalog bundle pass
+     * [STANDALONE][VariableFontExportMode.STANDALONE], since no bundle carries flexpress.
+     */
+    variableFontMode: VariableFontExportMode = VariableFontExportMode.LIBRARY,
   ): Generated {
     // A record-free design never reaches `ScreenGenerator` below — `remote-m3` and `wear-m3` have
     // no component record and the record-driven generator can only refuse them — so the emitter
@@ -442,6 +462,7 @@ internal class ScreenGeneratorComposeExportExecutor(
                 is RecordFreeComponents.Found -> resolved.components
               },
             platform = platform,
+            variableFonts = VariableFontExport(variableFontSources, variableFontMode),
           )
       ) {
         // Unreachable: `applies` was true, so the emitter owns this document. Reported as a
@@ -560,13 +581,24 @@ internal class ScreenGeneratorComposeExportExecutor(
             recordComponentIds = merged.components.flatMapTo(mutableSetOf()) { it.componentIds },
           ),
         )
+      // The calls a variable font text projects to name a declaration flexpress writes, which
+      // `ScreenGenerator` knows nothing of; joined into this file after the screen.
       is ScreenGenerator.Result.Emitted ->
-        Generated.Emitted(
-          generated.source,
-          screenName,
-          projection.assetPlaceholders,
-          systemFontFamilies = projection.systemFontFamilies,
-        )
+        when (
+          val joined =
+            VariableFontExport(variableFontSources, variableFontMode)
+              .join(generated.source, projection.variableFontTexts, packageName)
+        ) {
+          is VariableFontExport.Joined.Refused ->
+            Generated.Refused(UNEXPRESSIBLE_DOCUMENT, joined.reasons)
+          is VariableFontExport.Joined.Emitted ->
+            Generated.Emitted(
+              joined.source,
+              screenName,
+              projection.assetPlaceholders,
+              systemFontFamilies = projection.systemFontFamilies,
+            )
+        }
     }
   }
 
