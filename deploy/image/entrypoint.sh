@@ -419,7 +419,12 @@ if [[ -f /opt/compose-preview-server/ui-builder/index.html && "${SERVE_ROLE:-}" 
     fi
   else
     ui_builder_published=""
-    for candidate in m3-catalog remote-m3 wear-m3; do
+    # `remote-widgets` (Mobile Launcher Widgets, published from yschimke/remote-m3-catalog beside
+    # remote-m3) has NO built-in catalog in this build at all: the builder knows its launcher root,
+    # exporter and hello template, but its definition only exists as the `ui-builder.json` its
+    # delivery branch publishes. So a box that serves it must take it from there, and it is derived
+    # here like the others rather than left for an operator to remember in a second variable.
+    for candidate in m3-catalog remote-m3 wear-m3 remote-widgets; do
       if [[ "${ui_builder_served}" == *",${candidate},"* ]]; then
         ui_builder_published="${ui_builder_published:+${ui_builder_published},}${candidate}"
       fi
