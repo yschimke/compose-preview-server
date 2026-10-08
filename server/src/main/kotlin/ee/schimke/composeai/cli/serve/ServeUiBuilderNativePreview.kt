@@ -2,6 +2,7 @@ package ee.schimke.composeai.cli.serve
 
 import ee.schimke.composeai.uibuilder.export.SystemFontLookups
 import ee.schimke.composeai.uibuilder.export.TypefaceTarget
+import ee.schimke.composeai.uibuilder.export.VariableFontExportMode
 import ee.schimke.composeai.uibuilder.export.WearWidgetHostShape
 import ee.schimke.composeai.uibuilder.protocol.DesignDocumentV1
 
@@ -155,6 +156,8 @@ internal class ServeUiBuilderNativePreview(
             tagNodes = true,
             widgetHostShape = widgetHostShape,
             typefaces = typefaces,
+            // The bundle this compiles against carries Compose, not flexpress.
+            variableFontMode = VariableFontExportMode.STANDALONE,
           )
       ) {
         is ScreenGeneratorComposeExportExecutor.Generated.Emitted -> outcome
