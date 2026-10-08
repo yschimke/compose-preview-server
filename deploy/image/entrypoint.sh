@@ -325,6 +325,10 @@ if [[ -f /opt/compose-preview-server/ui-builder/index.html && "${SERVE_ROLE:-}" 
   # Builder's logical id — its delivery branch and Android compile bundle are `wear-m3-catalog`,
   # named by the native mapping further down — so the delivery-system id never belongs here.
   # SERVE_UI_BUILDER_WEAR=0 still strips `wear-m3` from whatever list is in force.
+  #
+  # These variables are the BASELINE the server starts from. catalogs.json's `uiBuilder` block,
+  # maintained over PUT /admin/ui-builder/config, overrides them per catalog at startup
+  # (ServeUiBuilderSettings.kt), so a catalog can be turned on or off without editing this .env.
   ui_builder_catalogs="${SERVE_UI_BUILDER_CATALOGS:-m3-catalog}"
   if [[ "${SERVE_UI_BUILDER_WEAR:-1}" == "0" ]]; then
     ui_builder_catalogs=",${ui_builder_catalogs},"
@@ -412,6 +416,11 @@ if [[ -f /opt/compose-preview-server/ui-builder/index.html && "${SERVE_ROLE:-}" 
   # set that HAS a usable published file. Adding wear-m3 to a literal string would have
   # reintroduced exactly the startup failure the paragraph above describes, one catalog later.
   ui_builder_served=",${ui_builder_catalogs},"
+  # The catalogs served from their own published file unless told otherwise. One list for the
+  # derivation below AND for the server, which applies it to a catalog catalogs.json's `uiBuilder`
+  # block starts serving (--ui-builder-published-default, passed below), so the two can never
+  # disagree.
+  ui_builder_published_default="m3-catalog remote-m3 wear-m3 remote-widgets"
   if [[ -n "${SERVE_UI_BUILDER_PUBLISHED_CATALOGS:-}" ]]; then
     ui_builder_published="${SERVE_UI_BUILDER_PUBLISHED_CATALOGS}"
     if [[ "${ui_builder_published}" == "m3-catalog,remote-m3,wear-m3-catalog" ]]; then
@@ -426,7 +435,7 @@ if [[ -f /opt/compose-preview-server/ui-builder/index.html && "${SERVE_ROLE:-}" 
     # exporter and hello template, but its definition only exists as the `ui-builder.json` its
     # delivery branch publishes. So a box that serves it must take it from there, and it is derived
     # here like the others rather than left for an operator to remember in a second variable.
-    for candidate in m3-catalog remote-m3 wear-m3 remote-widgets; do
+    for candidate in ${ui_builder_published_default}; do
       if [[ "${ui_builder_served}" == *",${candidate},"* ]]; then
         ui_builder_published="${ui_builder_published:+${ui_builder_published},}${candidate}"
       fi
@@ -470,6 +479,13 @@ if [[ -f /opt/compose-preview-server/ui-builder/index.html && "${SERVE_ROLE:-}" 
   # `wear-m3` back in SERVE_UI_BUILDER_CATALOGS restores the whole lane in one variable rather than
   # producing a catalog whose native render silently compiles against the wrong bundle.
   args+=(--ui-builder-native-catalog "${SERVE_UI_BUILDER_NATIVE_CATALOGS:-wear-m3=wear-m3-catalog}")
+  # The published default above, for a catalog catalogs.json's `uiBuilder` block starts serving.
+  args+=(--ui-builder-published-default "${ui_builder_published_default// /,}")
+  # The Wear opt-out is a fact about this machine, so catalogs.json's `uiBuilder` block must not be
+  # able to undo it: tell the server which catalog it cannot serve, whatever the block says.
+  if [[ "${SERVE_UI_BUILDER_WEAR:-1}" == "0" ]]; then
+    args+=(--ui-builder-unavailable-catalogs wear-m3)
+  fi
   # Which player draws a Wear widget design in that lane and on its design cards: `cmp-android`
   # (the server's default, used only where the bundle carries rc-player-compose) or `androidx`,
   # upstream's WearWidgetPreview. Empty ⇒ the server's default.

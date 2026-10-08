@@ -110,7 +110,14 @@ private fun run(command: String, args: List<String>) {
       options.printUsage()
       return
     }
-    ServeRunner(options, buildHost ?: StandaloneBuildHost, onDiscovered).run()
+    // `catalogs.json`'s `uiBuilder` block over the `SERVE_UI_BUILDER_*` environment the flags
+    // carry: see [ServeUiBuilderSettings] for the mapping and why the environment stays the base.
+    ServeRunner(
+        ServeUiBuilderSettings.overlay(options),
+        buildHost ?: StandaloneBuildHost,
+        onDiscovered,
+      )
+      .run()
   } finally {
     buildHost?.close()
   }

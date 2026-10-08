@@ -148,6 +148,45 @@ authenticated. GitHub collaborators use the existing OAuth session; agents use s
 with independent `ui-builder-read`, `ui-builder-write` and `ui-builder-export` capabilities. The
 authoritative state defaults to `/config/ui-builder-state` on the persistent `preview_config`
 volume, and `SERVE_UI_BUILDER_STATE_DIR=none` is the explicit static-only opt-out.
+
+### UI-builder catalog settings: `catalogs.json` instead of `.env`
+
+Which catalogs the builder offers, and how each is defined, can be maintained in the deployment's
+`catalogs.json` under `uiBuilder`, and changed over `PUT /admin/ui-builder/config` (admin token),
+instead of in `.env`. `publish-config-to-box.sh` reconciles the block from the committed file the
+same way it reconciles the editor pin, and it applies at the box's next start
+(`GET /admin/ui-builder/config` reports `restartRequired`, and what the environment alone, the
+running process and the next start each serve).
+
+The block holds **overrides of the environment**, not a replacement, so nothing is disrupted by
+adopting it. A catalog it does not name keeps exactly what its `SERVE_UI_BUILDER_*` variables give
+it, and a box with no block is unchanged. Each variable maps to one field:
+
+| `.env` | `catalogs.json` `uiBuilder` |
+| --- | --- |
+| `SERVE_UI_BUILDER_CATALOGS` | `catalogs.<id>.serve` |
+| `SERVE_UI_BUILDER_PUBLISHED_CATALOGS` | `catalogs.<id>.published` |
+| `SERVE_UI_BUILDER_CATALOG_OWNERSHIP` | `catalogs.<id>.owned` |
+| `SERVE_UI_BUILDER_NATIVE_CATALOGS` | `catalogs.<id>.nativeCatalog` (`""` removes) |
+| `SERVE_UI_BUILDER_PACKS` | `packs.<served catalog>` (`null` withdraws) |
+| `SERVE_UI_BUILDER_WIDGET_PLAYER` | `widgetPlayer` |
+
+```json
+"uiBuilder": {
+  "catalogs": {
+    "remote-widgets": { "serve": true },
+    "a2ui-catalog": { "serve": false }
+  },
+  "packs": { "confetti-wear": "wear" }
+}
+```
+
+A catalog the block newly serves, with no `published` of its own, follows the entrypoint's rule:
+published for `m3-catalog`, `remote-m3`, `wear-m3` and `remote-widgets`, built-in for the rest.
+Settings that no longer fit together (an owned catalog that is withdrawn) are reported and dropped
+at startup instead of stopping the box. To move a box over: name a catalog here, publish, restart,
+then delete its `.env` value. Secrets and facts about the machine (`SERVE_UI_BUILDER_WEAR`,
+`…_STATE_DIR`, `…_COMPONENTS`, `…_HOST`, the guidelines keys, the admin actors) stay in `.env`.
 `SERVE_UI_BUILDER_PACKS` (`<catalog>=<platform>[,…]`, e.g.
 `confetti-mobile=mobile,confetti-wear=wear`) offers served catalogs as **component packs** inside
 every builder catalog of that platform — their own composables

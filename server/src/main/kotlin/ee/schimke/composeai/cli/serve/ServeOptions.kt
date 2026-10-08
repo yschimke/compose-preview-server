@@ -766,6 +766,24 @@ public interface ServeOptions {
     get() = null
 
   /**
+   * The builder catalogs a deployment serves from their own published `ui-builder.json` unless told
+   * otherwise (`--ui-builder-published-default`). The image entrypoint passes the list it derives
+   * `--ui-builder-published-catalogs` from, so a catalog `catalogs.json`'s `uiBuilder` block starts
+   * serving is published exactly as naming it in the `.env` would publish it. Empty ⇒ a newly
+   * served catalog keeps the build's own definition unless the block says `published`.
+   */
+  public val uiBuilderPublishedDefault: Set<String>
+    get() = emptySet()
+
+  /**
+   * Builder catalogs this machine cannot serve (`--ui-builder-unavailable-catalogs`), which
+   * `catalogs.json`'s `uiBuilder` block cannot turn back on. The image entrypoint passes `wear-m3`
+   * here under `SERVE_UI_BUILDER_WEAR=0`, the opt-out for a box that cannot carry the Wear lane.
+   */
+  public val uiBuilderUnavailableCatalogs: Set<String>
+    get() = emptySet()
+
+  /**
    * Which UI-builder catalogs answer for themselves (`--ui-builder-catalog-ownership
    * <all|none|<id>[,<id>]>`): their seed templates, new-design chooser card and export route come
    * from what they publish, and their synthesised Kotlin definition is never built.

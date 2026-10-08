@@ -405,6 +405,12 @@ class ServeHttpServer(
    */
   private val editorAdmin: ServeUiBuilderEditorAdmin? = null,
   /**
+   * The UI builder's **catalog settings** ([ServeUiBuilderSettingsAdmin]): `catalogs.json`'s
+   * `uiBuilder` block, the replacement for the `SERVE_UI_BUILDER_*` catalog variables. Gated by
+   * [adminToken]; null ⇒ the `/admin/ui-builder/config` routes are not registered.
+   */
+  private val uiBuilderSettingsAdmin: ServeUiBuilderSettingsAdmin? = null,
+  /**
    * Runtime **UI-builder** administration ([ServeUiBuilderAdmin]) — listing every design on the
    * host and deleting one, whoever owns it. Gated by [adminToken], [adminReadToken], or a
    * configured [uiBuilderAdministrators] identity; null ⇒ the `/admin/ui-builder` routes are not
@@ -1018,6 +1024,10 @@ class ServeHttpServer(
 
   /** As [adminEnabled], for the `/admin/editor` routes. */
   private val editorAdminEnabled: Boolean = editorAdmin != null && !adminToken.isNullOrBlank()
+
+  /** As [adminEnabled], for the `/admin/ui-builder/config` routes. */
+  private val uiBuilderSettingsAdminEnabled: Boolean =
+    uiBuilderSettingsAdmin != null && !adminToken.isNullOrBlank()
 
   /** As [adminEnabled], for `/admin/ui-builder`, with the additional UI-builder-only actor gate. */
   private val uiBuilderAdminEnabled: Boolean =
@@ -2228,6 +2238,24 @@ class ServeHttpServer(
           delete("/admin/editor") {
             if (rejectBadAdminToken()) return@delete
             respondAdminEditorResult(withContext(Dispatchers.IO) { admin.clear() })
+          }
+        }
+
+        // The UI builder's catalog settings (catalogs.json `uiBuilder`), applied at the next start.
+        // Operator token only: unlike the design list, this decides what the whole host offers.
+        if (uiBuilderSettingsAdminEnabled) {
+          val admin = uiBuilderSettingsAdmin!!
+          get("/admin/ui-builder/config") {
+            if (rejectBadAdminToken(allowReadToken = true)) return@get
+            respondAdminUiBuilderSettings(admin)
+          }
+          put("/admin/ui-builder/config") {
+            if (rejectBadAdminToken()) return@put
+            handleAdminUiBuilderSettingsSet(admin)
+          }
+          delete("/admin/ui-builder/config") {
+            if (rejectBadAdminToken()) return@delete
+            respondAdminUiBuilderSettingsResult(withContext(Dispatchers.IO) { admin.clear() })
           }
         }
 
@@ -6112,6 +6140,84 @@ class ServeHttpServer(
       ),
       ContentType.Application.Json,
     )
+  }
+
+  /**
+   * `GET /admin/ui-builder/config`: the `uiBuilder` block, what the environment alone gives, what
+   * is serving, and what the next start will serve.
+   */
+  private suspend fun RoutingContext.respondAdminUiBuilderSettings(
+    admin: ServeUiBuilderSettingsAdmin
+  ) {
+    val configured = withContext(Dispatchers.IO) { admin.configured() }
+    val next = withContext(Dispatchers.IO) { admin.next() }
+    call.respondText(
+      JSON.encodeToString(
+        AdminUiBuilderSettingsResponse.serializer(),
+        AdminUiBuilderSettingsResponse(
+          configured = configured,
+          environment = admin.environment().describe(),
+          serving = admin.serving().describe(),
+          next = next.effective.describe(),
+          restartRequired = next.effective != admin.serving(),
+          problems = next.problems,
+        ),
+      ),
+      ContentType.Application.Json,
+    )
+  }
+
+  /** `PUT /admin/ui-builder/config`: replace the `uiBuilder` block with the JSON body. */
+  private suspend fun RoutingContext.handleAdminUiBuilderSettingsSet(
+    admin: ServeUiBuilderSettingsAdmin
+  ) {
+    val body =
+      withContext(Dispatchers.IO) {
+        call.receiveStream().use { readCapped(it, MAX_ADMIN_BODY_BYTES) }
+      }
+    if (body == null) {
+      call.respondText("request body too large", status = HttpStatusCode.PayloadTooLarge)
+      return
+    }
+    val settings = runCatching {
+      JSON.decodeFromString(
+        ServeCatalogsConfig.UiBuilderSettings.serializer(),
+        body.decodeToString(),
+      )
+    }
+      .getOrElse {
+        call.respondText(
+          "invalid UI-builder settings: ${it.message}",
+          status = HttpStatusCode.BadRequest,
+        )
+        return
+      }
+    respondAdminUiBuilderSettingsResult(withContext(Dispatchers.IO) { admin.set(settings) })
+  }
+
+  private suspend fun RoutingContext.respondAdminUiBuilderSettingsResult(
+    result: ServeUiBuilderSettingsAdmin.Result
+  ) {
+    when (result) {
+      is ServeUiBuilderSettingsAdmin.Result.Ok ->
+        call.respondText(
+          JSON.encodeToString(
+            AdminUiBuilderSettingsResult.serializer(),
+            AdminUiBuilderSettingsResult(
+              status = "ok",
+              configured = result.settings,
+              next = result.effective.describe(),
+              restartRequired = result.restartRequired,
+              problems = result.problems,
+            ),
+          ),
+          ContentType.Application.Json,
+        )
+      is ServeUiBuilderSettingsAdmin.Result.Invalid ->
+        call.respondText(result.reason, status = HttpStatusCode.BadRequest)
+      is ServeUiBuilderSettingsAdmin.Result.Unavailable ->
+        call.respondText(result.reason, status = HttpStatusCode.ServiceUnavailable)
+    }
   }
 
   /** `PUT /admin/editor`: pin an editor from a [ServeCatalogsConfig.EditorPin] JSON body. */
@@ -19536,6 +19642,31 @@ private data class AdminEditorResult(
   val pinned: ServeCatalogsConfig.EditorPin?,
   val restartRequired: Boolean,
   val warning: String? = null,
+)
+
+/**
+ * `GET /admin/ui-builder/config`. [environment] is what the `SERVE_UI_BUILDER_*` variables alone
+ * give, [serving] what this process runs, and [next] what the next start runs from [configured].
+ */
+@Serializable
+private data class AdminUiBuilderSettingsResponse(
+  val schema: String = "compose-preview-serve/admin-ui-builder-config/v1",
+  val configured: ServeCatalogsConfig.UiBuilderSettings?,
+  val environment: ServeUiBuilderSettingsDto,
+  val serving: ServeUiBuilderSettingsDto,
+  val next: ServeUiBuilderSettingsDto,
+  val restartRequired: Boolean,
+  val problems: List<String>,
+)
+
+@Serializable
+private data class AdminUiBuilderSettingsResult(
+  val schema: String = "compose-preview-serve/admin-ui-builder-config-result/v1",
+  val status: String,
+  val configured: ServeCatalogsConfig.UiBuilderSettings?,
+  val next: ServeUiBuilderSettingsDto,
+  val restartRequired: Boolean,
+  val problems: List<String>,
 )
 
 @Serializable
