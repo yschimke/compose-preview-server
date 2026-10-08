@@ -165,11 +165,10 @@ class M3CatalogComponentRecordTest {
       "m3/time-picker" to
         "the record carries neither TimePicker nor TimeInput, so no variant entry could name a " +
           "callable that resolves",
-      // `m3/variable-font-text` joins this list on the `composeai-ui-builder` bump to the first
-      // release that declares it (compose-ui-builder#581), not before: the pinned catalog does not
-      // declare it, so listing it fails the check below. Its reason: the call is to a declaration
-      // flexpress generates at export, which the projection records itself
-      // (`VariableFontTextRecord`); no catalog record could name it.
+      // Declared from compose-ui-builder 3.95.0 (#581). The call is to a declaration flexpress
+      // generates at export, which the projection records itself (`VariableFontTextRecord`).
+      "m3/variable-font-text" to
+        "calls a declaration flexpress generates at export; the projection records it, no catalog record could name it",
       "remote-compose/document" to "typed embed, kept out of the Compose exporter by design",
       "remote-compose/inline" to
         "the vocabulary switch: its subtree is @RemoteComposable and InlineRemoteContentExporter writes it, not the Compose exporter",
