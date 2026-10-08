@@ -170,6 +170,7 @@ it, and a box with no block is unchanged. Each variable maps to one field:
 | `SERVE_UI_BUILDER_NATIVE_CATALOGS` | `catalogs.<id>.nativeCatalog` (`""` removes) |
 | `SERVE_UI_BUILDER_PACKS` | `packs.<served catalog>` (`null` withdraws) |
 | `SERVE_UI_BUILDER_WIDGET_PLAYER` | `widgetPlayer` |
+| (none) | `catalogs.<id>.shadow` |
 
 ```json
 "uiBuilder": {
@@ -185,7 +186,13 @@ A catalog the block newly serves, with no `published` of its own, follows the en
 published for `m3-catalog`, `remote-m3`, `wear-m3` and `remote-widgets`, built-in for the rest.
 Settings that no longer fit together (an owned catalog that is withdrawn) are reported and dropped
 at startup instead of stopping the box. To move a box over: name a catalog here, publish, restart,
-then delete its `.env` value. Secrets and facts about the machine (`SERVE_UI_BUILDER_WEAR`,
+then delete its `.env` value.
+
+`shadow` has no variable: it is the step before `owned`. A shadowed catalog is served exactly as
+before, and each time it composes the box logs what owning it would refuse and how the catalog an
+editor is served would change, and `GET /admin/ui-builder/config` reports the same under `shadow`.
+Only a catalog that reads its published file and is not owned yet can be shadowed. Flip it to
+`owned` once its report reads `ready` and the differences are ones you meant. Secrets and facts about the machine (`SERVE_UI_BUILDER_WEAR`,
 `…_STATE_DIR`, `…_COMPONENTS`, `…_HOST`, the guidelines keys, the admin actors) stay in `.env`.
 `SERVE_UI_BUILDER_PACKS` (`<catalog>=<platform>[,…]`, e.g.
 `confetti-mobile=mobile,confetti-wear=wear`) offers served catalogs as **component packs** inside

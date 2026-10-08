@@ -6161,6 +6161,7 @@ class ServeHttpServer(
           next = next.effective.describe(),
           restartRequired = next.effective != admin.serving(),
           problems = next.problems,
+          shadow = admin.shadowReports().toSortedMap(),
         ),
       ),
       ContentType.Application.Json,
@@ -19657,6 +19658,8 @@ private data class AdminUiBuilderSettingsResponse(
   val next: ServeUiBuilderSettingsDto,
   val restartRequired: Boolean,
   val problems: List<String>,
+  /** Each shadowed catalog's report, as this process composed it. */
+  val shadow: Map<String, ServeUiBuilderShadowReportDto> = emptyMap(),
 )
 
 @Serializable

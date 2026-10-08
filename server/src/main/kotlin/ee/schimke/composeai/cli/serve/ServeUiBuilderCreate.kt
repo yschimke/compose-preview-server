@@ -192,7 +192,7 @@ internal class ServeUiBuilderCreate(
     return createOutcome(actor, homed)
   }
 
-  private companion object {
+  internal companion object {
     const val NEW_DESIGN_FIXTURE = "jetcaster-discover-operations-v1.json"
   }
 }

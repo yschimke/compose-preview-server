@@ -206,6 +206,16 @@ class ServeAdminRoutingTest {
       configFile = configFile,
       environment = uiBuilderEnvironment,
       serving = uiBuilderEnvironment,
+      shadowReports = {
+        mapOf(
+          "remote-m3" to
+            ServeUiBuilderShadowReportDto(
+              ready = false,
+              findings = listOf("remote-m3/blank: export refused"),
+              differences = listOf("remote-m3/text: properties: loses style"),
+            )
+        )
+      },
     )
 
   private val server: ServeHttpServer by lazy {
@@ -302,6 +312,9 @@ class ServeAdminRoutingTest {
     )
     val (_, report) = send("/admin/ui-builder/config")
     assertTrue(""""remote-widgets"""" in report, report)
+    // What a shadowed catalog would change if owned, as this process composed it.
+    assertTrue("remote-m3/blank: export refused" in report, report)
+    assertTrue("remote-m3/text: properties: loses style" in report, report)
 
     // A malformed block is refused and leaves the file alone.
     val (bad, reason) =
