@@ -1,6 +1,7 @@
 package ee.schimke.composeai.cli.serve
 
 import ee.schimke.composeai.uibuilder.export.ScreenExportGate
+import ee.schimke.composeai.uibuilder.export.TypefaceTarget
 import ee.schimke.composeai.uibuilder.export.UiBuilderBuildFeatures
 import ee.schimke.composeai.uibuilder.protocol.CatalogBenchmarkV1
 import ee.schimke.composeai.uibuilder.protocol.CatalogCapabilityV1
@@ -21,6 +22,7 @@ import java.io.File
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertIs
 import kotlin.test.assertTrue
 import kotlinx.serialization.json.Json
 
@@ -210,32 +212,7 @@ class ScreenGeneratorComposeExportExecutorTest {
    */
   @Test
   fun `a themed surface exports its theme, as the browser does`() {
-    val document =
-      Json.decodeFromString<DesignDocumentV1>(
-        """
-        {
-          "schema": "compose-ui-builder-document/v1-candidate",
-          "id": "themed", "title": "Themed", "revision": 0,
-          "catalogPin": {"systemId": "m3-catalog", "catalogRevision": "candidate",
-            "capabilityDigest": "candidate", "nativeRuntimeId": "candidate"},
-          "environment": {"widthDp": 360, "heightDp": 640, "density": 1.0, "theme": "dark",
-            "locale": "en-US", "fontScale": 1.0, "layoutDirection": "ltr"},
-          "roots": ["screen"],
-          "nodes": {
-            "screen": {"id": "screen", "componentId": "m3/surface",
-              "properties": {
-                "themePrimaryColor": {"type": "string", "value": "#FFD0BCFF"},
-                "themeDisplayTypeface": {"type": "string", "value": "Michroma"}
-              },
-              "slots": {"content": ["label"]}, "modifiers": []},
-            "label": {"id": "label", "componentId": "m3/text",
-              "properties": {"text": {"type": "string", "value": "Hello"},
-                "color": {"type": "colorToken", "value": "primary"}},
-              "slots": {}, "modifiers": []}
-          }
-        }
-        """
-      )
+    val document = themedDocument()
     val record = ExportRecords.m3Catalog()
     val browser = ScreenExportGate.export(document, record)
     val artifact =
@@ -260,6 +237,36 @@ class ScreenGeneratorComposeExportExecutorTest {
     assertTrue("MaterialTheme(colorScheme = colorScheme" in source, source)
     assertTrue("darkColorScheme(primary = Color(0xFFD0BCFF))" in source, source)
     assertTrue("GoogleFont(\"Michroma\")" in source, source)
+  }
+
+  /**
+   * The lanes that compile the source against a Compose Multiplatform Desktop bundle (m3-catalog's)
+   * ask for desktop typefaces: `GoogleFont` is Android-only and would not resolve there. The export
+   * above is unchanged; this is the native preview's and `design render --local`'s generation.
+   */
+  @Test
+  fun `a desktop lane writes a theme typeface as a system-font lookup and says so`() {
+    val record = ExportRecords.m3Catalog()
+    val executor =
+      ScreenGeneratorComposeExportExecutor(
+        { ComponentRecordSource.Lookup.Found(record) },
+        ScreenExportGate.PACKAGE_NAME,
+      )
+
+    val desktop =
+      assertIs<ScreenGeneratorComposeExportExecutor.Generated.Emitted>(
+        executor.generate(themedDocument(), typefaces = TypefaceTarget.DESKTOP)
+      )
+    assertTrue("SystemFont(\"Michroma\"" in desktop.source, desktop.source)
+    assertFalse("GoogleFont" in desktop.source, desktop.source)
+    assertEquals(listOf("Michroma"), desktop.systemFontFamilies)
+
+    val android =
+      assertIs<ScreenGeneratorComposeExportExecutor.Generated.Emitted>(
+        executor.generate(themedDocument())
+      )
+    assertTrue("GoogleFont(\"Michroma\")" in android.source, android.source)
+    assertEquals(emptyList(), android.systemFontFamilies)
   }
 
   @Test
@@ -574,4 +581,31 @@ fun ScheduleOperations() {
       ),
     )
   }
+
+  private fun themedDocument(): DesignDocumentV1 =
+    Json.decodeFromString<DesignDocumentV1>(
+      """
+      {
+        "schema": "compose-ui-builder-document/v1-candidate",
+        "id": "themed", "title": "Themed", "revision": 0,
+        "catalogPin": {"systemId": "m3-catalog", "catalogRevision": "candidate",
+          "capabilityDigest": "candidate", "nativeRuntimeId": "candidate"},
+        "environment": {"widthDp": 360, "heightDp": 640, "density": 1.0, "theme": "dark",
+          "locale": "en-US", "fontScale": 1.0, "layoutDirection": "ltr"},
+        "roots": ["screen"],
+        "nodes": {
+          "screen": {"id": "screen", "componentId": "m3/surface",
+            "properties": {
+              "themePrimaryColor": {"type": "string", "value": "#FFD0BCFF"},
+              "themeDisplayTypeface": {"type": "string", "value": "Michroma"}
+            },
+            "slots": {"content": ["label"]}, "modifiers": []},
+          "label": {"id": "label", "componentId": "m3/text",
+            "properties": {"text": {"type": "string", "value": "Hello"},
+              "color": {"type": "colorToken", "value": "primary"}},
+            "slots": {}, "modifiers": []}
+        }
+      }
+      """
+    )
 }

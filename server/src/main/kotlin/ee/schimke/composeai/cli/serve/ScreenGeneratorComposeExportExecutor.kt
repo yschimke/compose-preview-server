@@ -10,6 +10,7 @@ import ee.schimke.composeai.uibuilder.export.CatalogComposeSourceExportAdapters
 import ee.schimke.composeai.uibuilder.export.RecordFreeExport
 import ee.schimke.composeai.uibuilder.export.ScreenDocumentProjection
 import ee.schimke.composeai.uibuilder.export.ScreenExportGate
+import ee.schimke.composeai.uibuilder.export.TypefaceTarget
 import ee.schimke.composeai.uibuilder.export.UiBuilderBuildFeatures
 import ee.schimke.composeai.uibuilder.export.UiBuilderCatalogPlatform
 import ee.schimke.composeai.uibuilder.export.WidgetAssetBytes
@@ -252,6 +253,13 @@ internal class ScreenGeneratorComposeExportExecutor(
        */
       val assetPlaceholders: List<ScreenDocumentProjection.AssetPlaceholder> = emptyList(),
       /**
+       * The theme typefaces written as desktop `SystemFont` lookups rather than Google Fonts'
+       * Android-only `GoogleFont` — only when [generate] was asked for [TypefaceTarget.DESKTOP].
+       * Each draws in its family only where that family is installed, which is a warning, not a
+       * refusal: the screen still compiles and draws, in the platform's default face.
+       */
+      val systemFontFamilies: List<String> = emptyList(),
+      /**
        * The container this source is a **Wear widget** for, or null for a screen.
        *
        * Present rather than inferred from the catalog id, because it is what the preview entry the
@@ -300,6 +308,14 @@ internal class ScreenGeneratorComposeExportExecutor(
      */
     widgetHostShape: ee.schimke.composeai.uibuilder.export.WearWidgetHostShape =
       ee.schimke.composeai.uibuilder.export.WearWidgetHostShape.Default,
+    /**
+     * How a theme typeface is written: Google Fonts' `GoogleFont`, which only an Android classpath
+     * resolves, or a desktop `SystemFont` lookup. The **export** keeps the default — the file a
+     * designer pastes into an app — and only the lanes that *compile* the source against a catalog
+     * bundle pass the bundle's own backend ([TypefaceTarget.forNativeBackend]), because a Compose
+     * Multiplatform Desktop bundle such as m3-catalog's has no `GoogleFont` to resolve.
+     */
+    typefaces: TypefaceTarget = TypefaceTarget.DEFAULT,
   ): Generated {
     // A record-free design never reaches `ScreenGenerator` below — `remote-m3` and `wear-m3` have
     // no component record and the record-driven generator can only refuse them — so the emitter
@@ -514,7 +530,10 @@ internal class ScreenGeneratorComposeExportExecutor(
       else aliased.copy(components = aliased.components + packRecords.flatMap { it.components })
     val screenName = ScreenDocumentProjection.screenNameFor(document)
     val projection =
-      when (val outcome = ScreenDocumentProjection.project(document, screenName, tagNodes)) {
+      when (
+        val outcome =
+          ScreenDocumentProjection.project(document, screenName, tagNodes, typefaces = typefaces)
+      ) {
         is ScreenDocumentProjection.Outcome.Projected -> outcome
         is ScreenDocumentProjection.Outcome.Refused ->
           return Generated.Refused(UNEXPRESSIBLE_DOCUMENT, outcome.reasons)
@@ -542,7 +561,12 @@ internal class ScreenGeneratorComposeExportExecutor(
           ),
         )
       is ScreenGenerator.Result.Emitted ->
-        Generated.Emitted(generated.source, screenName, projection.assetPlaceholders)
+        Generated.Emitted(
+          generated.source,
+          screenName,
+          projection.assetPlaceholders,
+          systemFontFamilies = projection.systemFontFamilies,
+        )
     }
   }
 

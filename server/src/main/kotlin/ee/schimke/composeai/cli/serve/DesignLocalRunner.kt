@@ -1,5 +1,6 @@
 package ee.schimke.composeai.cli.serve
 
+import ee.schimke.composeai.uibuilder.export.SystemFontLookups
 import ee.schimke.composeai.uibuilder.protocol.DesignDocumentV1
 
 /**
@@ -46,6 +47,7 @@ internal class DesignLocalRunner(
       is DesignLocalLane.Source.Refused -> refused("export", source.code, source.reasons)
       is DesignLocalLane.Source.Emitted -> {
         val bytes = source.source.toByteArray()
+        source.warnings.forEach { emit("  ${SystemFontLookups.CODE}: $it") }
         write(options.destination, bytes)
         note("design export --local: ${bytes.size} bytes of Kotlin (${source.screenName})")
         DesignCommandRunner.EXIT_OK
@@ -53,7 +55,8 @@ internal class DesignLocalRunner(
     }
 
   private fun render(): Int {
-    val outcome = lane.render(document())
+    val document = document()
+    val outcome = lane.render(document)
     // After the attempt, never before: asked earlier these lines would report what the lane meant
     // to build rather than what it did. On the way to a picture they are noise a `2>/dev/null`
     // silences; on the way to a missing frame they are the answer.
@@ -65,6 +68,11 @@ internal class DesignLocalRunner(
         DesignCommandRunner.EXIT_FAILURE
       }
       is DesignLocalLane.Frame.Rendered -> {
+        // The frame cannot say which faces it drew in the platform default; the source can. A
+        // generation, not a compile, so asking again costs nothing beside the render it follows.
+        (lane.generate(document) as? DesignLocalLane.Source.Emitted)?.warnings?.forEach {
+          emit("  ${SystemFontLookups.CODE}: $it")
+        }
         write(options.destination, outcome.png)
         note("design render --local: ${outcome.png.size} bytes of image/png")
         DesignCommandRunner.EXIT_OK
