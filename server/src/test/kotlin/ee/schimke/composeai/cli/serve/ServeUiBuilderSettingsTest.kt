@@ -25,6 +25,8 @@ class ServeUiBuilderSettingsTest {
       nativeCatalogs = mapOf("wear-m3" to "wear-m3-catalog"),
       packs = mapOf("confetti-mobile" to "mobile"),
       widgetPlayer = UiBuilderWidgetPlayer.DEFAULT,
+      // As the image entrypoint passes it with --ui-builder-published-default.
+      publishedDefault = setOf("m3-catalog", "remote-m3", "wear-m3", "remote-widgets"),
     )
 
   private fun resolve(settings: UiBuilderSettings?) =
@@ -188,14 +190,16 @@ class ServeUiBuilderSettingsTest {
   }
 
   @Test
-  fun `the published default matches the image entrypoint's list`() {
+  fun `the image entrypoint passes the list it derives the published catalogs from`() {
     val entrypoint =
       generateSequence(java.io.File(".").absoluteFile) { it.parentFile }
         .map { java.io.File(it, "deploy/image/entrypoint.sh") }
         .first { it.isFile }
         .readText()
-    val list =
-      Regex("""for candidate in ([a-z0-9 -]+); do""").find(entrypoint)!!.groupValues[1].split(' ')
-    assertEquals(ServeUiBuilderSettings.PUBLISHED_BY_DEFAULT, list.toSet())
+    // One variable feeds both the entrypoint's own derivation and the server's flag.
+    assertTrue("for candidate in \${ui_builder_published_default}; do" in entrypoint)
+    assertTrue(
+      "--ui-builder-published-default \"\${ui_builder_published_default// /,}\"" in entrypoint
+    )
   }
 }

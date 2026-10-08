@@ -758,6 +758,16 @@ public interface ServeOptions {
     get() = null
 
   /**
+   * The builder catalogs a deployment serves from their own published `ui-builder.json` unless told
+   * otherwise (`--ui-builder-published-default`). The image entrypoint passes the list it derives
+   * `--ui-builder-published-catalogs` from, so a catalog `catalogs.json`'s `uiBuilder` block starts
+   * serving is published exactly as naming it in the `.env` would publish it. Empty ⇒ a newly
+   * served catalog keeps the build's own definition unless the block says `published`.
+   */
+  public val uiBuilderPublishedDefault: Set<String>
+    get() = emptySet()
+
+  /**
    * Which UI-builder catalogs answer for themselves (`--ui-builder-catalog-ownership
    * <all|none|<id>[,<id>]>`): their seed templates, new-design chooser card and export route come
    * from what they publish, and their synthesised Kotlin definition is never built.

@@ -79,9 +79,9 @@ data class ServeCatalogsConfig(
   @Serializable
   data class UiBuilderSettings(
     /**
-     * Per-catalog overrides, keyed by builder catalog id (`m3-catalog`, `wear-m3`,
-     * `remote-widgets`, …). Each replaces `SERVE_UI_BUILDER_CATALOGS`, `…_PUBLISHED_CATALOGS`,
-     * `…_CATALOG_OWNERSHIP` and `…_NATIVE_CATALOGS` for that one catalog.
+     * Per-catalog overrides, keyed by builder catalog id. Each replaces
+     * `SERVE_UI_BUILDER_CATALOGS`, `…_PUBLISHED_CATALOGS`, `…_CATALOG_OWNERSHIP` and
+     * `…_NATIVE_CATALOGS` for that one catalog.
      */
     val catalogs: Map<String, UiBuilderCatalogSettings> = emptyMap(),
     /**

@@ -30,22 +30,18 @@ import okio.Path.Companion.toPath
  *
  * ## The published default
  *
- * A catalog the block starts serving, with no `published` of its own, is published when it is one
- * of [PUBLISHED_BY_DEFAULT] — the same rule the image entrypoint applies to
- * `SERVE_UI_BUILDER_CATALOGS`, so turning `remote-widgets` on here behaves exactly as naming it in
- * the `.env` would. Settings left that contradict each other (a published id no longer served, an
- * owned catalog that does not read its published file) are reported and narrowed rather than
- * refusing to boot: a box must come up on a config it wrote itself.
+ * A catalog the block starts serving, with no `published` of its own, is published when it is in
+ * the deployment's published default ([ServeOptions.uiBuilderPublishedDefault]): the list the image
+ * entrypoint derives `--ui-builder-published-catalogs` from and passes alongside it, so turning a
+ * catalog on here behaves exactly as naming it in the `.env` would. The list is the deployment's,
+ * not this file's, because catalog names stay out of the server's Kotlin
+ * (`.github/scripts/ui-builder-catalog-literals.sh`).
+ *
+ * Settings left that contradict each other (a published id no longer served, an owned catalog that
+ * does not read its published file) are reported and narrowed rather than refusing to boot: a box
+ * must come up on a config it wrote itself.
  */
 object ServeUiBuilderSettings {
-
-  /**
-   * The catalogs served from their own published `ui-builder.json` unless told otherwise. Kept
-   * equal to the list in `deploy/image/entrypoint.sh`, which derives
-   * `--ui-builder-published-catalogs` the same way.
-   */
-  val PUBLISHED_BY_DEFAULT: Set<String> =
-    setOf("m3-catalog", "remote-m3", "wear-m3", "remote-widgets")
 
   /** The settings that decide what the builder serves, whichever source they came from. */
   data class Effective(
@@ -56,6 +52,8 @@ object ServeUiBuilderSettings {
     val nativeCatalogs: Map<String, String>,
     val packs: Map<String, String>,
     val widgetPlayer: UiBuilderWidgetPlayer,
+    /** What a newly served catalog defaults to publishing from; not itself a served setting. */
+    val publishedDefault: Set<String> = emptySet(),
   ) {
     /** As `GET /admin/ui-builder/config` reports it. */
     fun describe(): ServeUiBuilderSettingsDto =
@@ -77,6 +75,7 @@ object ServeUiBuilderSettings {
           nativeCatalogs = options.uiBuilderNativeCatalogs,
           packs = options.uiBuilderPacks,
           widgetPlayer = options.uiBuilderWidgetPlayer,
+          publishedDefault = options.uiBuilderPublishedDefault,
         )
     }
   }
@@ -155,7 +154,7 @@ object ServeUiBuilderSettings {
         null
       } else {
         val set = (base.publishedCatalogs ?: base.catalogs).toMutableSet()
-        newlyServed.filterTo(set) { it in PUBLISHED_BY_DEFAULT }
+        newlyServed.filterTo(set) { it in base.publishedDefault }
         for ((id, catalog) in settings.catalogs) {
           when (catalog.published) {
             true -> set += id
@@ -218,7 +217,10 @@ object ServeUiBuilderSettings {
           }
       } ?: base.widgetPlayer
 
-    return Resolution(Effective(catalogs, published, owned, native, packs, player), problems)
+    return Resolution(
+      Effective(catalogs, published, owned, native, packs, player, base.publishedDefault),
+      problems,
+    )
   }
 
   /**
