@@ -1,5 +1,23 @@
 # Changelog
 
+## [3.110.0](https://github.com/yschimke/compose-preview-server/compare/v3.109.0...v3.110.0) (2026-10-08)
+
+
+### Features
+
+* **ui-builder:** maintain the builder's catalog settings in catalogs.json, over the admin API ([#1433](https://github.com/yschimke/compose-preview-server/issues/1433)) ([ef9ac9a](https://github.com/yschimke/compose-preview-server/commit/ef9ac9a1c8a63ec05b43513d7b2df4d95b37ef54))
+* **ui-builder:** ui-builder 3.94.0, launcher widget previews on the launcher grid ([#1431](https://github.com/yschimke/compose-preview-server/issues/1431)) ([d048200](https://github.com/yschimke/compose-preview-server/commit/d0482007bc660e4e2092ec52515380802217cbc9))
+
+
+### Bug Fixes
+
+* **deps:** update dependency ee.schimke.composeai:compose-ai-tools-bom to v2.35.1 ([#1429](https://github.com/yschimke/compose-preview-server/issues/1429)) ([420c1e4](https://github.com/yschimke/compose-preview-server/commit/420c1e42153986d6fbf273b016f816a836aaae00))
+
+
+### Performance Improvements
+
+* **guidelines:** serve guideline pictures from the thumbnail cache, within a time budget ([#1432](https://github.com/yschimke/compose-preview-server/issues/1432)) ([4594a03](https://github.com/yschimke/compose-preview-server/commit/4594a034175f18e54d6ec72dc04b5d35f795a28f))
+
 ## [3.109.0](https://github.com/yschimke/compose-preview-server/compare/v3.108.0...v3.109.0) (2026-10-08)
 
 
