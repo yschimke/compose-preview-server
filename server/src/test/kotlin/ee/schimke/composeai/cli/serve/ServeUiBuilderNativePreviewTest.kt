@@ -96,25 +96,38 @@ class ServeUiBuilderNativePreviewTest {
   @Test
   fun `theme typefaces follow the bundle the design is compiled against`() {
     val record = ExportRecords.m3Catalog()
-    fun sourceFor(confType: String): String {
+    fun render(confType: String): Pair<String, UiBuilderNativePreviewOutcome.Rendered> {
       val compiled = mutableListOf<UiBuilderGeneratedCompose>()
-      ServeUiBuilderNativePreview(
-          executor =
-            ScreenGeneratorComposeExportExecutor({ ComponentRecordSource.Lookup.Found(record) }),
-          compile = { generated ->
-            compiled += generated
-            PlaygroundRunResponse(previewId = "generated", previewToken = "token", image = "png")
-          },
-          nativeTarget = { UiBuilderNativeTarget(it, confType) },
-        )
-        .render(themedM3Document())
-      return compiled.single().source
+      var lookups = 0
+      val outcome =
+        ServeUiBuilderNativePreview(
+            executor =
+              ScreenGeneratorComposeExportExecutor({ ComponentRecordSource.Lookup.Found(record) }),
+            compile = { generated ->
+              compiled += generated
+              PlaygroundRunResponse(previewId = "generated", previewToken = "token", image = "png")
+            },
+            nativeTarget = {
+              lookups++
+              UiBuilderNativeTarget(it, confType)
+            },
+          )
+          .render(themedM3Document())
+      // One lookup per render: routing can change under a refresh, and source written for one
+      // bundle must not be compiled against another.
+      assertEquals(1, lookups)
+      return compiled.single().source to assertIs<UiBuilderNativePreviewOutcome.Rendered>(outcome)
     }
 
-    val desktop = sourceFor(UiBuilderGeneratedCompose.COMPOSE_CMP)
+    val (desktop, desktopOutcome) = render(UiBuilderGeneratedCompose.COMPOSE_CMP)
     assertTrue("SystemFont(\"Michroma\"" in desktop, desktop)
     assertTrue("GoogleFont" !in desktop, desktop)
-    assertTrue("GoogleFont(\"Michroma\")" in sourceFor(UiBuilderGeneratedCompose.COMPOSE_ANDROID))
+    // The frame draws in the default face where Michroma is not installed, and says so.
+    assertTrue(desktopOutcome.warnings.single().contains("Michroma"), "${desktopOutcome.warnings}")
+
+    val (android, androidOutcome) = render(UiBuilderGeneratedCompose.COMPOSE_ANDROID)
+    assertTrue("GoogleFont(\"Michroma\")" in android, android)
+    assertEquals(emptyList(), androidOutcome.warnings)
   }
 
   @Test

@@ -1,5 +1,6 @@
 package ee.schimke.composeai.cli.serve
 
+import ee.schimke.composeai.uibuilder.export.SystemFontLookups
 import ee.schimke.composeai.uibuilder.export.TypefaceTarget
 import ee.schimke.composeai.uibuilder.export.WearWidgetHostShape
 import ee.schimke.composeai.uibuilder.protocol.DesignDocumentV1
@@ -130,16 +131,21 @@ internal class ServeUiBuilderNativePreview(
         ),
       )
     }
-    // The source is compiled against this design's bundle below, so its typefaces are written for
-    // that bundle: a Compose Multiplatform Desktop one (m3-catalog's) has no Google Fonts
-    // `GoogleFont` to resolve and gets `SystemFont` lookups instead. Looked up here as well as
-    // below so a design whose catalog has no bundle still hears the generator's refusal first.
+    // The design's own catalog, not a default. A design pinned to one catalog and compiled against
+    // another is a screen made of different components that happens to type-check. A design using
+    // a pack is compiled against the pack's bundle, which carries both the pack's classes and the
+    // Material 3 its catalog names; the catalog's own bundle carries only the latter. Otherwise the
+    // design's own catalog, exactly as before there were packs.
+    //
+    // Resolved ONCE: the source's typefaces are written for this bundle — a Compose Multiplatform
+    // Desktop one (m3-catalog's) has no Google Fonts `GoogleFont` and gets `SystemFont` lookups —
+    // and catalog routing can change under a refresh, so a second lookup could compile that
+    // source against the other kind of classpath. Its absence is refused after generation, so a
+    // design the generator cannot express still hears that first.
+    val catalogSystemId = usedPacks.singleOrNull() ?: document.catalogPin.systemId
+    val resolvedTarget = nativeTarget(catalogSystemId)
     val typefaces =
-      if (
-        nativeTarget(usedPacks.singleOrNull() ?: document.catalogPin.systemId)?.confType ==
-          UiBuilderGeneratedCompose.COMPOSE_CMP
-      )
-        TypefaceTarget.DESKTOP
+      if (resolvedTarget?.confType == UiBuilderGeneratedCompose.COMPOSE_CMP) TypefaceTarget.DESKTOP
       else TypefaceTarget.DEFAULT
     val generated =
       when (
@@ -155,17 +161,11 @@ internal class ServeUiBuilderNativePreview(
         is ScreenGeneratorComposeExportExecutor.Generated.Refused ->
           return UiBuilderNativePreviewOutcome.Refused(outcome.code, outcome.reasons)
       }
-    // The design's own catalog, not a default. A design pinned to one catalog and compiled against
-    // another is a screen made of different components that happens to type-check. Refused before
-    // the compile rather than after, and by name: "this host has no bundle for `wear-m3`" is an
-    // operator's line of configuration, where a compiler error about an unresolved
-    // `androidx.wear.compose.material3.ScreenScaffold` reads like a bug in the design.
-    // A design using a pack is compiled against the pack's bundle, which carries both the pack's
-    // classes and the Material 3 its catalog names; the catalog's own bundle carries only the
-    // latter. Otherwise the design's own catalog, exactly as before there were packs.
-    val catalogSystemId = usedPacks.singleOrNull() ?: document.catalogPin.systemId
+    // Refused before the compile rather than after, and by name: "this host has no bundle for
+    // `wear-m3`" is an operator's line of configuration, where a compiler error about an
+    // unresolved `androidx.wear.compose.material3.ScreenScaffold` reads like a bug in the design.
     val target =
-      nativeTarget(catalogSystemId)
+      resolvedTarget
         ?: return UiBuilderNativePreviewOutcome.Refused(
           NO_NATIVE_CATALOG,
           listOf(
@@ -230,6 +230,7 @@ internal class ServeUiBuilderNativePreview(
       if (widget != null || generated.remoteContent) emptyList() else document.nodes.keys.sorted(),
       bounds,
       failure = if (response.image == null) response.noFrameReason() else null,
+      warnings = generated.systemFontFamilies.map(SystemFontLookups::note),
     )
   }
 
@@ -363,6 +364,13 @@ sealed interface UiBuilderNativePreviewOutcome {
      * spreads its failures across `exception` and `diagnostics`. See [noFrameReason].
      */
     val failure: String? = null,
+    /**
+     * What the frame draws differently from the design though it rendered: today, theme typefaces
+     * written as desktop `SystemFont` lookups (`TYPEFACE_SYSTEM_FONT_LOOKUP`), which draw in the
+     * platform's default face wherever the family is not installed on this host. Without it the
+     * frame would look authoritative about type it never had.
+     */
+    val warnings: List<String> = emptyList(),
   ) : UiBuilderNativePreviewOutcome
 
   /** The generator's own reasons, unchanged. */

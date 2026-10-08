@@ -1170,6 +1170,7 @@ class ServeUiBuilderMcp(
                 )
               },
             compileError = outcome.failure,
+            warnings = outcome.warnings,
           ),
         )
     }
