@@ -1,6 +1,7 @@
 package ee.schimke.composeai.cli.serve
 
 import ee.schimke.composeai.bundle.TrustStore
+import ee.schimke.composeai.uibuilder.export.CatalogOwnership
 import java.io.File
 
 /**
@@ -845,6 +846,37 @@ public class ServeCommandOptions(
           entries.toSet()
         }
       }
+    }
+
+  /**
+   * `--ui-builder-catalog-ownership <all|none|<id>[,<id>]>`. Absent or empty is `none`.
+   *
+   * A named catalog must also read its published file: owning a catalog means serving it from
+   * nothing BUT that file, so naming one `--ui-builder-published-catalogs` withholds is a
+   * contradiction, refused at startup for the same typo reason that flag refuses unserved ids.
+   */
+  override val uiBuilderCatalogOwnership: CatalogOwnership =
+    args.flagValue("--ui-builder-catalog-ownership").let { raw ->
+      val ownership = CatalogOwnership.parse(raw)
+      val readsPublished = uiBuilderPublishedCatalogs ?: uiBuilderCatalogs
+      val contradictions = uiBuilderCatalogs.filter { ownership.owns(it) && it !in readsPublished }
+      require(contradictions.isEmpty()) {
+        "--ui-builder-catalog-ownership owns ${contradictions.sorted().joinToString()}, which " +
+          "--ui-builder-published-catalogs does not let read a published file"
+      }
+      if (raw != null && raw.trim().lowercase() !in setOf("", "all", "none")) {
+        val unknown =
+          raw
+            .split(',')
+            .map(String::trim)
+            .filter(String::isNotEmpty)
+            .filterNot(uiBuilderCatalogs::contains)
+        require(unknown.isEmpty()) {
+          "--ui-builder-catalog-ownership names ${unknown.joinToString()}, which " +
+            "--ui-builder-catalogs does not serve"
+        }
+      }
+      ownership
     }
 
   /**

@@ -48,6 +48,7 @@ run_case() {
     SERVE_UI_BUILDER_CATALOGS="${1:-}" \
     SERVE_UI_BUILDER_PUBLISHED_CATALOGS="${2:-}" \
     SERVE_UI_BUILDER_WEAR="${3:-1}" \
+    SERVE_UI_BUILDER_CATALOG_OWNERSHIP="${4:-}" \
     bash "${script}"
 }
 
@@ -157,5 +158,12 @@ expect "an operator can opt every catalog back in" $'--ui-builder-published-cata
 named="$(run_case "m3-catalog,remote-m3" "m3-catalog")"
 expect "a named subset is forwarded verbatim" $'--ui-builder-published-catalogs\nm3-catalog' \
   "${named}"
+
+# The catalog-owned cutover rides the same block and is off unless an operator names it: an image
+# nobody configured must not even pass the flag, so the server's own default (`none`) decides.
+refute "catalog ownership is not passed by default" "--ui-builder-catalog-ownership" "${default}"
+owned="$(run_case "" "" "1" "remote-m3")"
+expect "catalog ownership is forwarded verbatim when set" \
+  $'--ui-builder-catalog-ownership\nremote-m3' "${owned}"
 
 exit "${status}"

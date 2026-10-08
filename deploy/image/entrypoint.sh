@@ -432,6 +432,13 @@ if [[ -f /opt/compose-preview-server/ui-builder/index.html && "${SERVE_ROLE:-}" 
     ui_builder_published="${ui_builder_published:-none}"
   fi
   args+=(--ui-builder-published-catalogs "${ui_builder_published}")
+  # The catalog-owned cutover (compose-ui-builder docs/design/UI_BUILDER_CATALOG_CUTOVER.md): which
+  # of the published catalogs also seed from their own templates and export by their own
+  # declaration. Passed only when set, so an image nobody configured starts with exactly the
+  # arguments it always did, and the server's default (`none`) decides.
+  if [[ -n "${SERVE_UI_BUILDER_CATALOG_OWNERSHIP:-}" ]]; then
+    args+=(--ui-builder-catalog-ownership "${SERVE_UI_BUILDER_CATALOG_OWNERSHIP}")
+  fi
   # Keep collaborative designs on the deployment's persistent config volume by default. `none`
   # remains an explicit escape hatch for a static-only builder shell.
   args+=(--ui-builder-state-dir "${SERVE_UI_BUILDER_STATE_DIR:-/config/ui-builder-state}")

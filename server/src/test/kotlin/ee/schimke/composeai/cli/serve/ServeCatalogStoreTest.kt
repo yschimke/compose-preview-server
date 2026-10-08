@@ -4218,6 +4218,50 @@ class ServeCatalogStoreTest {
     assertEquals(builder, published.file.readText())
   }
 
+  @Test
+  fun `a published builder catalog's templates are fetched only when asked for`() {
+    val catalog =
+      """{"schema":"design-parity-catalog/v1","system":"wear-m3","uiBuilderFile":"ui-builder.json","components":[]}"""
+    val builder =
+      """
+      {"schema":"compose-ui-builder-catalog/v1","statusSemantics":{"templates":[
+        "ui-builder/designs/wear-screen.json","ui-builder/designs/gone.json","../escape.json"]}}
+      """
+        .trimIndent()
+    val fetched = mutableListOf<String>()
+    val store =
+      store(TrustStore.EMPTY) { url ->
+        fetched += url
+        when {
+          url.endsWith("/${ServeCatalogStore.CATALOG_FILE}") -> catalog.encodeToByteArray()
+          url.endsWith("/ui-builder.json") -> builder.encodeToByteArray()
+          url.endsWith("/ui-builder/designs/wear-screen.json") -> "{\"seed\":1}".encodeToByteArray()
+          else -> null
+        }
+      }
+
+    // Not owned: nothing beyond the policy is read, so a host that has not flipped the
+    // catalog-owned flag makes exactly the requests it always did.
+    assertEquals(emptyMap(), assertNotNull(store.fetchUiBuilderCatalog("wear-m3")).templates)
+    assertTrue(fetched.none { "/designs/" in it }, fetched.toString())
+
+    // Owned: every declared path, in order, with null for one that will not fetch or leaves the
+    // branch, so the reader can refuse the set by name.
+    val owned = assertNotNull(store.fetchUiBuilderCatalog("wear-m3", templates = true))
+    assertEquals(
+      listOf(
+        "ui-builder/designs/wear-screen.json",
+        "ui-builder/designs/gone.json",
+        "../escape.json",
+      ),
+      owned.templates.keys.toList(),
+    )
+    assertEquals("{\"seed\":1}", owned.templates["ui-builder/designs/wear-screen.json"])
+    assertNull(owned.templates["ui-builder/designs/gone.json"])
+    assertNull(owned.templates["../escape.json"])
+    assertTrue(fetched.none { "escape" in it }, fetched.toString())
+  }
+
   private fun polyglotBundle(
     manifest: String,
     extra: Map<String, ByteArray> = emptyMap(),

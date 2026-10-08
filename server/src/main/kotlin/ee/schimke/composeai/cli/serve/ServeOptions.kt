@@ -3,6 +3,7 @@ package ee.schimke.composeai.cli.serve
 import ee.schimke.composeai.bundle.TrustStore
 import ee.schimke.composeai.previewdata.PreviewManifest
 import ee.schimke.composeai.previewdata.PreviewModule
+import ee.schimke.composeai.uibuilder.export.CatalogOwnership
 import java.io.File
 
 /**
@@ -755,6 +756,21 @@ public interface ServeOptions {
    */
   public val uiBuilderPublishedCatalogs: Set<String>?
     get() = null
+
+  /**
+   * Which UI-builder catalogs answer for themselves (`--ui-builder-catalog-ownership
+   * <all|none|<id>[,<id>]>`): their seed templates, new-design chooser card and export route come
+   * from what they publish, and their synthesised Kotlin definition is never built.
+   *
+   * The finer half of the cutover [uiBuilderPublishedCatalogs] began: that flag moved a catalog's
+   * *definition* to its published file; this one moves everything else the builder still decides by
+   * catalog id. See compose-ui-builder's `docs/design/UI_BUILDER_CATALOG_CUTOVER.md` for what each
+   * catalog still has to publish before naming it here is a no-op.
+   *
+   * [CatalogOwnership.NONE] — the default — changes nothing.
+   */
+  public val uiBuilderCatalogOwnership: CatalogOwnership
+    get() = CatalogOwnership.NONE
 
   /**
    * Discovered component records for the UI-builder's catalogs (`--ui-builder-components
