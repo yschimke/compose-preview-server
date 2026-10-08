@@ -1510,6 +1510,11 @@ public class ServeCommandOptions(
                           published on a running box; re-POSTing one whose system changed re-points
                           it in place. The edge still has to route the name and hold a certificate
                           for it (see --sites).
+                          And the UI builder's catalog settings — GET, PUT and DELETE
+                          /admin/ui-builder/config — catalogs.json's `uiBuilder` block, which
+                          overrides the --ui-builder-catalogs, -published-catalogs,
+                          -catalog-ownership, -native-catalog, -packs and -widget-player flags
+                          per catalog from the next start.
                           And onboarding — POST /admin/onboard ({"url","group","listed"}) takes a
                           GitHub project URL in any spelling, discovers the delivery branches that
                           repository already publishes, and registers each one exactly as POST
@@ -1731,7 +1736,7 @@ public class ServeCommandOptions(
     )
   }
 
-  private companion object {
+  internal companion object {
     val UI_BUILDER_CATALOG_ID = Regex("[A-Za-z0-9][A-Za-z0-9._-]*")
     val UI_BUILDER_ADMIN_ACTOR = Regex("github:[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?")
 

@@ -188,6 +188,26 @@ class ServeAdminRoutingTest {
     )
   private val optimizerWork = ServeBackgroundWork()
 
+  /**
+   * The UI builder's catalog settings, over an environment that serves `m3-catalog` and `remote-m3`
+   * — what an operator's `.env` gives before any `uiBuilder` block exists.
+   */
+  private val uiBuilderEnvironment =
+    ServeUiBuilderSettings.Effective(
+      catalogs = setOf("m3-catalog", "remote-m3"),
+      publishedCatalogs = setOf("m3-catalog", "remote-m3"),
+      catalogOwnership = ee.schimke.composeai.uibuilder.export.CatalogOwnership.NONE,
+      nativeCatalogs = emptyMap(),
+      packs = emptyMap(),
+      widgetPlayer = UiBuilderWidgetPlayer.DEFAULT,
+    )
+  private val uiBuilderSettingsAdmin =
+    ServeUiBuilderSettingsAdmin(
+      configFile = configFile,
+      environment = uiBuilderEnvironment,
+      serving = uiBuilderEnvironment,
+    )
+
   private val server: ServeHttpServer by lazy {
     registry.register("compose-m3", host = bundle("compose-m3"), pinned = true)
     tracker.recordSuccess("compose-m3")
@@ -207,6 +227,7 @@ class ServeAdminRoutingTest {
         trustAdmin = trustAdmin,
         sites = siteRegistry,
         siteAdmin = siteAdmin,
+        uiBuilderSettingsAdmin = uiBuilderSettingsAdmin,
         themeOptimizerAdmin = optimizerWork,
         catalogCacheStats = { blobPool.snapshot() },
         catalogCacheClear = { blobPool.clear() },
@@ -256,6 +277,41 @@ class ServeAdminRoutingTest {
   fun tearDown() {
     server.stop()
     registry.close()
+  }
+
+  @Test
+  fun `UI-builder settings are written to catalogs json and apply at the next start`() {
+    // Gated like every other admin route: without the token it does not exist.
+    assertEquals(404, send("/admin/ui-builder/config", "PUT", "{}", token = null).first)
+    assertEquals(404, send("/admin/ui-builder/config", token = "wrong").first)
+
+    val (code, body) =
+      send(
+        "/admin/ui-builder/config",
+        "PUT",
+        """{"catalogs": {"remote-widgets": {"serve": true}}}""",
+      )
+    assertEquals(200, code, body)
+    assertTrue(""""restartRequired":true""" in body, body)
+    // Newly served, and published by default as the entrypoint would publish it.
+    assertEquals(
+      setOf("m3-catalog", "remote-m3", "remote-widgets"),
+      configFile.load().uiBuilder!!.let {
+        ServeUiBuilderSettings.resolve(uiBuilderEnvironment, it).effective.catalogs
+      },
+    )
+    val (_, report) = send("/admin/ui-builder/config")
+    assertTrue(""""remote-widgets"""" in report, report)
+
+    // A malformed block is refused and leaves the file alone.
+    val (bad, reason) =
+      send("/admin/ui-builder/config", "PUT", """{"packs": {"confetti-mobile": "toaster"}}""")
+    assertEquals(400, bad, reason)
+    assertTrue(configFile.load().uiBuilder!!.catalogs.containsKey("remote-widgets"))
+
+    // Clearing hands every setting back to the environment.
+    assertEquals(200, send("/admin/ui-builder/config", "DELETE").first)
+    assertNull(configFile.load().uiBuilder)
   }
 
   @Test

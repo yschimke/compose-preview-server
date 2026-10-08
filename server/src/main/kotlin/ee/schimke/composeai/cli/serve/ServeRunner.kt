@@ -3558,6 +3558,20 @@ public class ServeRunner(
       } else {
         null
       }
+    // The UI builder's catalog settings, maintained in catalogs.json instead of the box's .env.
+    // Resolved against the environment's own values, never the block being replaced, so a PUT
+    // describes what the next start serves rather than a diff of a diff.
+    val uiBuilderSettingsAdmin =
+      if (adminToken != null) {
+        ServeUiBuilderSettingsAdmin(
+          configFile = catalogsFile,
+          environment =
+            ServeUiBuilderSettings.Effective.of(ServeUiBuilderSettings.environmentOf(options)),
+          serving = ServeUiBuilderSettings.Effective.of(options),
+        )
+      } else {
+        null
+      }
     // Runtime producer-trust administration. Needs only the admin token: unlike the catalog admin
     // there's nothing to fetch, and a box with no trust store yet is exactly the one that most
     // needs
@@ -3896,6 +3910,7 @@ public class ServeRunner(
         sourceOnboarding = sourceOnboarding,
         siteAdmin = siteAdmin,
         editorAdmin = editorAdmin,
+        uiBuilderSettingsAdmin = uiBuilderSettingsAdmin,
         uiBuilderAdmin = uiBuilderAdmin,
         uiBuilderDesignLibrary = uiBuilderDesignLibrary,
         uiBuilderDesignCatalogs = {

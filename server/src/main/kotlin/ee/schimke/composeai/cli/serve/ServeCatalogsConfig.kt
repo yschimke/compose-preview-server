@@ -59,7 +59,59 @@ data class ServeCatalogsConfig(
    * release; rolling back is removing it.
    */
   val editor: EditorPin? = null,
+  /**
+   * The **UI builder's catalog settings** ([UiBuilderSettings]), maintained here and through
+   * `/admin/ui-builder/config` instead of the box's `.env`. Null ⇒ every setting comes from the
+   * `SERVE_UI_BUILDER_*` environment as before, so a file that says nothing changes nothing.
+   */
+  val uiBuilder: UiBuilderSettings? = null,
 ) {
+  /**
+   * The UI builder's catalog settings, as **overrides of the environment** rather than a
+   * replacement for it.
+   *
+   * Every field is optional, and a catalog [catalogs] does not name keeps exactly what the
+   * `SERVE_UI_BUILDER_*` variables give it. So moving a box onto this block is incremental and
+   * cannot drop a catalog the operator's `.env` serves: the old variable stays the baseline and
+   * this names only what changes. [ServeUiBuilderSettings] maps each variable to its field and
+   * resolves the two together.
+   */
+  @Serializable
+  data class UiBuilderSettings(
+    /**
+     * Per-catalog overrides, keyed by builder catalog id (`m3-catalog`, `wear-m3`,
+     * `remote-widgets`, …). Each replaces `SERVE_UI_BUILDER_CATALOGS`, `…_PUBLISHED_CATALOGS`,
+     * `…_CATALOG_OWNERSHIP` and `…_NATIVE_CATALOGS` for that one catalog.
+     */
+    val catalogs: Map<String, UiBuilderCatalogSettings> = emptyMap(),
+    /**
+     * Component packs (`SERVE_UI_BUILDER_PACKS`), `<served catalog>` → platform. A null value
+     * withdraws a pack the environment offers.
+     */
+    val packs: Map<String, String?> = emptyMap(),
+    /** The Wear widget player (`SERVE_UI_BUILDER_WIDGET_PLAYER`); null keeps the environment's. */
+    val widgetPlayer: String? = null,
+  )
+
+  /** One builder catalog's overrides; a null field keeps what the environment says for it. */
+  @Serializable
+  data class UiBuilderCatalogSettings(
+    /** Offered in the builder (`SERVE_UI_BUILDER_CATALOGS`). False withdraws it. */
+    val serve: Boolean? = null,
+    /**
+     * Defined by its repository's published `ui-builder.json` rather than the build's own Kotlin
+     * catalog (`SERVE_UI_BUILDER_PUBLISHED_CATALOGS`).
+     */
+    val published: Boolean? = null,
+    /** Seeds and exports from its own declaration (`SERVE_UI_BUILDER_CATALOG_OWNERSHIP`). */
+    val owned: Boolean? = null,
+    /**
+     * The served catalog its designs compile against for the native preview
+     * (`SERVE_UI_BUILDER_NATIVE_CATALOGS`). An empty string removes the mapping.
+     */
+    val nativeCatalog: String? = null,
+  )
+
   /**
    * One pinned editor archive: compose-ui-builder's [version], the archive's [sha256], and an
    * optional [url] for an archive hosted somewhere other than its GitHub release.

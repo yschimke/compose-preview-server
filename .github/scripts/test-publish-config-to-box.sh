@@ -90,6 +90,19 @@ out="$(run "${BOX_LISTING}" "${STATUS_WITH_REGISTRY}")"
 check "puts the declared pin" 'PUT /admin/editor {"version":"3.48.0"' "${out}"
 check_absent "does not clear a declared pin" "DELETE /admin/editor" "${out}"
 
+echo "UI-builder settings are PUT, and --prune clears a block the file no longer declares"
+check_absent "has no block to put yet" 'PUT /admin/ui-builder/config' "${out}"
+check "clears an undeclared block under --prune" "DELETE /admin/ui-builder/config" "${out}"
+check_absent "leaves the block alone without --prune" "/admin/ui-builder/config" "$(BASE_URL=https://example.invalid \
+  ADMIN_TOKEN=unused DEPLOY_CONFIG_DIR="${work}/config" bash "${SCRIPT}" --dry-run 2>&1 || true)"
+cat > "${work}/config/catalogs.json" <<'JSON'
+{ "uiBuilder": { "catalogs": { "remote-widgets": { "serve": true } } },
+  "catalogs": [ { "system": "compose-m3", "repo": "yschimke/compose-ai-tools" } ], "sites": [] }
+JSON
+out="$(run "${BOX_LISTING}" "${STATUS_WITH_REGISTRY}")"
+check "puts the declared block" 'PUT /admin/ui-builder/config {"catalogs":{"remote-widgets":{"serve":true}}}' "${out}"
+check_absent "does not clear a declared block" "DELETE /admin/ui-builder/config" "${out}"
+
 if [[ "${failures}" -gt 0 ]]; then
   echo "${failures} check(s) failed"
   exit 1

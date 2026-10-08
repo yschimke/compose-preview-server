@@ -559,6 +559,49 @@ elif [[ "${PRUNE}" == 1 ]]; then
   delete /admin/editor "editor pin" || true
 fi
 
+# The UI builder's catalog settings: `uiBuilder` in catalogs.json, the replacement for the
+# SERVE_UI_BUILDER_* catalog variables in the box's private .env (see
+# ServeUiBuilderSettings.kt for the variable -> field mapping). The block holds OVERRIDES of that
+# .env, so publishing it can only change the catalogs it names — a box keeps everything else its
+# .env serves, which is what lets a box move over one catalog at a time.
+#
+# Like the editor pin it applies at the box's next START, and the reply says when it differs from
+# what is serving. Additive like everything else: a file with no `uiBuilder` leaves the box's
+# block alone, except under --prune, where the file is the whole answer and the block is cleared.
+ui_builder=$(jq -c '.uiBuilder // empty' "${CATALOGS_FILE}")
+if [[ -n "${ui_builder}" ]]; then
+  echo "Reconciling the UI-builder catalog settings from ${CATALOGS_FILE#"${REPO_ROOT}/"}"
+  if [[ "${DRY_RUN}" == 1 ]]; then
+    echo "PUT /admin/ui-builder/config ${ui_builder}"
+  else
+    response=$(curl -sS -w $'\n%{http_code}' -m 30 \
+      -X PUT -H "${ADMIN_TOKEN_HEADER}: ${ADMIN_TOKEN}" \
+      -H 'Content-Type: application/json' \
+      -d "${ui_builder}" "${BASE_URL}/admin/ui-builder/config" 2>/dev/null || printf '\n000')
+    code="${response##*$'\n'}"
+    payload="${response%$'\n'*}"
+    case "${code}" in
+      200)
+        next=$(printf '%s' "${payload}" | jq -r '.next.catalogs | join(",")' 2>/dev/null)
+        printf '%s' "${payload}" | jq -r '.problems[]? | "::warning::ui-builder settings: \(.)"' 2>/dev/null
+        if [[ "$(printf '%s' "${payload}" | jq -r '.restartRequired // false' 2>/dev/null)" == true ]]; then
+          echo "::notice::UI-builder catalogs ${next} written — they serve from the box's next restart."
+        else
+          echo "  UI-builder catalogs ${next}: already serving"
+        fi
+        ;;
+      404) echo "::warning::/admin/ui-builder/config returned 404 — this box predates it; its builder catalogs stay on its .env." ;;
+      *)
+        rejected=$((rejected + 1))
+        echo "::error::UI-builder settings: HTTP ${code} — ${payload}"
+        ;;
+    esac
+  fi
+elif [[ "${PRUNE}" == 1 ]]; then
+  echo "Clearing any UI-builder catalog settings (catalogs.json declares none)"
+  delete /admin/ui-builder/config "UI-builder settings" || true
+fi
+
 if [[ "${groups_skipped}" == 1 ]]; then
   echo "::warning::front-page groups were not reconciled — this box predates /admin/groups. Catalogs are published ungrouped; the next publish against a newer image will group them."
 fi

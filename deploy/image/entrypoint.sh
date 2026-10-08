@@ -323,6 +323,10 @@ if [[ -f /opt/compose-preview-server/ui-builder/index.html && "${SERVE_ROLE:-}" 
   # Builder's logical id — its delivery branch and Android compile bundle are `wear-m3-catalog`,
   # named by the native mapping further down — so the delivery-system id never belongs here.
   # SERVE_UI_BUILDER_WEAR=0 still strips `wear-m3` from whatever list is in force.
+  #
+  # These variables are the BASELINE the server starts from. catalogs.json's `uiBuilder` block,
+  # maintained over PUT /admin/ui-builder/config, overrides them per catalog at startup
+  # (ServeUiBuilderSettings.kt), so a catalog can be turned on or off without editing this .env.
   ui_builder_catalogs="${SERVE_UI_BUILDER_CATALOGS:-m3-catalog}"
   if [[ "${SERVE_UI_BUILDER_WEAR:-1}" == "0" ]]; then
     ui_builder_catalogs=",${ui_builder_catalogs},"
