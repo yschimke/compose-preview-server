@@ -135,10 +135,56 @@ internal constructor(
   @Volatile private var service: UiBuilderServicePort? = null
 
   /**
-   * The native render lane, set once the server has one; null draws every design through the
-   * export. See "Wear widgets are drawn in their host" above.
+   * The pictures guidelines prompts attach, kept beside these thumbnails at the same [generation]
+   * and drawn behind them; see [ServeUiBuilderGuidelineFrames]. Null where its directory could not
+   * be made, which leaves a prompt drawing its pictures on every request as before.
    */
-  @Volatile internal var nativePreview: UiBuilderNativePreviewLane? = null
+  val guidelineFrames: ServeUiBuilderGuidelineFrames? = runCatching {
+    ServeUiBuilderGuidelineFrames(
+      directory.resolve(GUIDELINE_FRAMES_DIRECTORY),
+      generation,
+      thumbnailsIdle = ::isIdle,
+      onLog = onLog,
+    )
+  }
+    .onFailure { onLog("serve: UI-builder guideline frame cache unavailable: ${it.message}") }
+    .getOrNull()
+
+  /**
+   * The native render lane, set once the server has one; null draws every design through the
+   * export. See "Wear widgets are drawn in their host" above. The guideline frames draw on it too.
+   */
+  @Volatile
+  internal var nativePreview: UiBuilderNativePreviewLane? = null
+    set(lane) {
+      field = lane
+      guidelineFrames?.render = lane?.let { native ->
+        { document, shape ->
+          (native.render(document, shape) as? UiBuilderNativePreviewOutcome.Rendered)
+            ?.takeIf { it.failure == null }
+            ?.response
+            ?.image
+            ?.let {
+              runCatching { Base64.getDecoder().decode(it.removePrefix(PNG_DATA_URI)) }.getOrNull()
+            }
+        }
+      }
+    }
+
+  /** Whether nothing is queued or drawing; guideline frames warm only then. */
+  internal fun isIdle(): Boolean = jobs.isEmpty() && pending.isEmpty()
+
+  /**
+   * [designId]'s thumbnail at [revision] when it is the native [WearWidgetHostShape.Squircle]
+   * render of a Wear widget — the same render the guidelines' Pixel Watch frame asks for, so that
+   * frame is taken from here rather than drawn again. Null for anything else: an unframed (export)
+   * widget picture, another revision or generation, or a design that is not a widget, whose
+   * thumbnail is the PNG export rather than a native render. The caller says it is a widget.
+   */
+  internal fun nativeWidgetThumbnail(designId: String, revision: Long): ByteArray? =
+    cached(designId)
+      ?.takeIf { it.revision == revision && it.generation == generation && !it.unframed }
+      ?.png
 
   /**
    * The one worker. Every render goes through it, a card's own request included, because the
@@ -201,6 +247,8 @@ internal constructor(
             request is UiBuilderServiceRequest.ReplaceDesignDocument ->
               warm(request.designId, call.actor)
           }
+          if (response !is UiBuilderServiceResponse.Error)
+            editedDesignId(request)?.let { guidelineFrames?.edited(it) }
           return response
         }
       }
@@ -241,6 +289,7 @@ internal constructor(
    * lanes, and the admin lane, which deletes beneath the service port.
    */
   internal fun evict(designId: String) {
+    guidelineFrames?.evict(designId)
     memory.remove(designId)
     nativeFailures.keys.removeIf { it.startsWith("$designId@") }
     memory.keys.removeIf { it.startsWith("$designId$REVISION_SEPARATOR") }
@@ -495,6 +544,7 @@ internal constructor(
   }
 
   override fun close() {
+    guidelineFrames?.close()
     worker.interrupt()
     jobs.forEach { it.result.complete(null) }
     jobs.clear()
@@ -505,6 +555,19 @@ internal constructor(
     const val QUEUE = 512
 
     private const val PNG_DATA_URI = "data:image/png;base64,"
+
+    /** Beside the thumbnails, so one directory holds every picture drawn of a design. */
+    const val GUIDELINE_FRAMES_DIRECTORY = "guideline-frames"
+
+    /** The design an accepted [request] changed, when it is an edit; see [warming]. */
+    private fun editedDesignId(request: UiBuilderServiceRequest): String? =
+      when (request) {
+        is UiBuilderServiceRequest.ApplyOperation -> request.submission.designId
+        is UiBuilderServiceRequest.RestoreRevision -> request.designId
+        is UiBuilderServiceRequest.MoveDesignHome -> request.designId
+        is UiBuilderServiceRequest.ReplaceDesignDocument -> request.designId
+        else -> null
+      }
 
     /** Native draws of one revision before an unframed picture of it stops counting as stale. */
     const val NATIVE_ATTEMPTS = 3

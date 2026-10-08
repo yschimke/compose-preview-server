@@ -847,6 +847,14 @@ agent can judge it with its own model and record the verdicts with `ui_builder_r
 Each design keeps one latest result under `<ui-builder state>/guidelines/`, whoever ran it; the
 editor reads and posts it at `/api/ui-builder/v1/designs/{id}/guidelines`.
 
+The prompt's pictures are native renders, kept per design revision under
+`<ui-builder state>/thumbnails/guideline-frames/` and drawn again only when the design changes (about
+30 seconds after its last edit, behind the design list's thumbnails). A prompt waits at most
+`SERVE_UI_BUILDER_GUIDELINES_PICTURE_BUDGET` seconds (default 45) for pictures it has not drawn yet;
+the rest are left out, named in its provenance, and attached the next time it is asked. A picture the
+renderer drew at some other size than its frame is left out too, rather than shown as something it
+is not.
+
 ### Playground on `preview.coo.ee`
 
 > **preview.coo.ee runs the engine without the playground.** `SERVE_COMPILE_ENGINE=1` starts the

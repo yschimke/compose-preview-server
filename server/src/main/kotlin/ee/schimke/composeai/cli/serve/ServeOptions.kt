@@ -586,6 +586,14 @@ public interface ServeOptions {
     get() = null
 
   /**
+   * `--ui-builder-guidelines-picture-budget`: how many seconds a guidelines prompt waits for the
+   * native renders it has no cached picture of, before answering without them. They keep drawing
+   * into the cache, so asking again a minute later includes them.
+   */
+  public val uiBuilderGuidelinesPictureBudgetSeconds: Long
+    get() = DEFAULT_GUIDELINES_PICTURE_BUDGET_SECONDS
+
+  /**
    * `--github-auth-open-ui-builder`: every signed-in GitHub member may create, edit and export
    * UI-builder designs, and approve agent grants for them, without repository access. See
    * [ServeGithubAuthConfig.openUiBuilder].
@@ -1057,3 +1065,9 @@ internal fun selectRequestedModule(
   val selected = discovered.manifests.filter { it.first.gradlePath.removePrefix(":") == normalized }
   return if (selected.isEmpty()) null else ServeDiscovery(discovered.buildOk, selected)
 }
+
+/**
+ * The default `--ui-builder-guidelines-picture-budget`: under every layer in front of an MCP call,
+ * with room for the model-free rest of the prompt.
+ */
+public const val DEFAULT_GUIDELINES_PICTURE_BUDGET_SECONDS: Long = 45L

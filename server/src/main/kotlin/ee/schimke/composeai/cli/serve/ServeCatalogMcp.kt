@@ -2958,11 +2958,22 @@ class ServeCatalogMcp(
     }
     val described =
       JsonObject(reply + ("pictures" to JsonArray(pictures.map { JsonObject(it - "dataUrl") })))
+    // Pictures the server could not attach this time — still drawing into its cache, or drawn at
+    // the wrong size — said in a text block of their own, so an agent asks again rather than
+    // judging without them.
+    val missing =
+      (reply["provenance"] as? JsonArray)
+        .orEmpty()
+        .mapNotNull { it.jsonPrimitive.contentOrNull }
+        .filter { "still being drawn" in it || " is left out:" in it }
     return buildJsonObject {
       put(
         "content",
         buildJsonArray {
           add(textContent(described.toString()))
+          // After the request rather than before it: clients read the first text block as the
+          // request's JSON.
+          if (missing.isNotEmpty()) add(textContent(missing.joinToString("\n")))
           pngs.filterNotNull().forEach { png ->
             add(
               buildJsonObject {

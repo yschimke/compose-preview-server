@@ -655,6 +655,11 @@ public class ServeCommandOptions(
   override val uiBuilderGuidelinesModel: String? =
     args.flagValue("--ui-builder-guidelines-model")?.trim()?.takeIf { it.isNotEmpty() }
 
+  override val uiBuilderGuidelinesPictureBudgetSeconds: Long =
+    args.flagValue("--ui-builder-guidelines-picture-budget")?.trim()?.toLongOrNull()?.takeIf {
+      it >= 0
+    } ?: DEFAULT_GUIDELINES_PICTURE_BUDGET_SECONDS
+
   override val githubAuthOpenUiBuilder: Boolean = "--github-auth-open-ui-builder" in args
 
   /**
@@ -1337,6 +1342,10 @@ public class ServeCommandOptions(
                           editor with their own OpenRouter key.
         --ui-builder-guidelines-model <id>
                           The OpenRouter model for that check (default typesafe/jev-router).
+        --ui-builder-guidelines-picture-budget <seconds>
+                          How long a guidelines prompt waits for native renders it has not
+                          cached yet (default 45). The rest keep drawing into the cache and are
+                          attached the next time it is asked. 0 attaches only cached pictures.
         --agent-grants    Let an agent ask for temporary access it can't otherwise get. The agent
                           POSTs /agent-access/request and prints a link plus a verification code;
                           you open the link, check the code matches, and approve. It then collects a
