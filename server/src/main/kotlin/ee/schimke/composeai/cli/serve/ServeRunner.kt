@@ -24,6 +24,7 @@ import ee.schimke.composeai.uibuilder.export.UiBuilderCatalogPlatform
 import ee.schimke.composeai.uibuilder.export.UiBuilderPreviewSurfaces
 import ee.schimke.composeai.uibuilder.protocol.CatalogCapabilityV1
 import ee.schimke.composeai.uibuilder.service.AuthenticatedUiBuilderActor
+import ee.schimke.composeai.uibuilder.service.CatalogCutoverShadow
 import ee.schimke.composeai.uibuilder.service.CurrentM3UiBuilderCatalogExecutor
 import ee.schimke.composeai.uibuilder.service.FileUiBuilderAssetStore
 import ee.schimke.composeai.uibuilder.service.PackagedUiBuilderRenderBundle
@@ -44,8 +45,10 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
 import kotlin.system.exitProcess
 import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.jsonObject
 import okio.Path.Companion.toPath
 
 /**
@@ -385,6 +388,12 @@ public class ServeRunner(
    * before the lane, so it reaches the lane through this rather than being handed it.
    */
   @Volatile private var uiBuilderPublishedRefresh: ((String) -> Unit)? = null
+
+  /**
+   * Each shadowed builder catalog's latest report ([ServeOptions.uiBuilderShadowCatalogs]), by
+   * catalog id: recomputed whenever the catalog composes, and read by `/admin/ui-builder/config`.
+   */
+  private val uiBuilderShadowReports = ConcurrentHashMap<String, ServeUiBuilderShadowReportDto>()
 
   /**
    * Whether `/` has anything to show, set alongside [uiBuilderLaneOpen].
@@ -2738,6 +2747,7 @@ public class ServeRunner(
         opened::set,
         // The editor's Google Fonts cache, which the renderer draws a design's typefaces from.
         fonts = ServeGoogleFonts.overHttp(appDirectory, googleFontsHttpClient),
+        appDirectory = appDirectory,
       )
     } catch (failure: Exception) {
       runCatching { opened.get()?.close() }
@@ -2755,6 +2765,8 @@ public class ServeRunner(
     catalogLoads: CatalogLoadTracker?,
     registerCloseable: (AutoCloseable?) -> Unit,
     fonts: ServeGoogleFonts? = null,
+    /** The builder distribution, for the new-design fixture a shadow report seeds from. */
+    appDirectory: File? = null,
   ): UiBuilderLane {
     if (!(directory.isDirectory || directory.mkdirs()) || !directory.canWrite()) {
       throw IllegalStateException("UI-builder state directory is not writable: $directory")
@@ -3000,6 +3012,68 @@ public class ServeRunner(
             "ui-builder.json; ${withheld.joinToString()} keep their built-in definition"
       )
     }
+    // The shadow step before ownership (compose-ui-builder's UI_BUILDER_CATALOG_CUTOVER.md): a
+    // shadowed catalog is served exactly as before, and each time it composes the box also asks
+    // what owning it would refuse and what an editor would see change, and says so.
+    val shadowed =
+      options.uiBuilderShadowCatalogs.filterTo(mutableSetOf()) {
+        it in uiBuilderCatalogs && !ownership.owns(it)
+      }
+    // Every template reads its environment from the same fixture a new design does.
+    val shadowFixture by lazy {
+      appDirectory
+        ?.resolve(ServeUiBuilderCreate.NEW_DESIGN_FIXTURE)
+        ?.takeIf { it.isFile }
+        ?.let { file -> runCatching { Json.parseToJsonElement(file.readText()).jsonObject } }
+        ?.getOrNull()
+    }
+    fun reportShadow(
+      systemId: String,
+      composed: PublishedUiBuilderCatalog.Result.Composed,
+      templates: Map<String, String?>,
+      runtimeId: String?,
+    ) {
+      val fixture = shadowFixture
+      if (fixture == null) {
+        System.err.println(
+          "serve: UI-builder catalog $systemId shadow: no ${ServeUiBuilderCreate.NEW_DESIGN_FIXTURE} " +
+            "in the builder distribution, or unreadable, to seed its templates from; not reported"
+        )
+        return
+      }
+      // A report that cannot be made must not take the catalog down with it: it is served either
+      // way, and the shadow is advice.
+      val report = runCatching {
+        val read = CatalogSeedTemplates.read(systemId, templates.keys.toList()) { templates[it] }
+        CatalogCutoverShadow.report(
+          catalogId = systemId,
+          published = composed.catalog,
+          templates = (read as? CatalogSeedTemplates.Result.Read)?.templates,
+          fixture = fixture,
+          packComponents = composed.records,
+          exportRecord = compose.exportRecord(systemId),
+          nativeRuntimeId = runtimeId,
+        )
+      }
+        .getOrElse {
+          System.err.println("serve: UI-builder catalog $systemId shadow failed: ${it.message}")
+          uiBuilderShadowReports.remove(systemId)
+          return
+        }
+      uiBuilderShadowReports[systemId] =
+        ServeUiBuilderShadowReportDto(report.ready, report.findings, report.differences)
+      System.err.println(
+        "serve: UI-builder catalog $systemId shadow: " +
+          (if (report.ready) "ready to own"
+          else "${report.findings.size} finding(s) before owning") +
+          ", " +
+          (report.differences?.let { "${it.size} difference(s) from its Kotlin catalog" }
+            ?: "no Kotlin catalog to compare")
+      )
+      (report.findings + report.differences.orEmpty()).forEach {
+        System.err.println("serve:   $it")
+      }
+    }
     // One catalog's published definition, fetched from its delivery branch and composed into the
     // maps below. A function rather than a startup loop because the catalog refresher calls it
     // again
@@ -3024,7 +3098,7 @@ public class ServeRunner(
           system = sourceSystem,
           sourceRepo = config?.repo,
           sourceBranchPrefix = config?.branch?.removeSuffix(sourceSystem),
-          templates = ownership.owns(systemId),
+          templates = ownership.owns(systemId) || systemId in shadowed,
         ) ?: return false
       // The catalog's own record, fetched now if this host has never loaded it.
       //
@@ -3066,6 +3140,9 @@ public class ServeRunner(
           // the only component map the export executor could build is a *pack*'s, and a
           // catalog is not a pack of itself.
           publishedRecords[systemId] = composed.records
+          if (systemId in shadowed) {
+            reportShadow(systemId, composed, published.templates, published.runtimeId)
+          }
           if (ownership.owns(systemId)) {
             when (
               val read =
@@ -3095,6 +3172,7 @@ public class ServeRunner(
           publishedRecords.remove(systemId)
           // The seeds belonged to the publication that just stopped composing.
           publishedTemplates.remove(systemId)
+          uiBuilderShadowReports.remove(systemId)
           return false
         }
       }
@@ -3568,6 +3646,7 @@ public class ServeRunner(
           environment =
             ServeUiBuilderSettings.Effective.of(ServeUiBuilderSettings.environmentOf(options)),
           serving = ServeUiBuilderSettings.Effective.of(options),
+          shadowReports = { uiBuilderShadowReports.toMap() },
         )
       } else {
         null

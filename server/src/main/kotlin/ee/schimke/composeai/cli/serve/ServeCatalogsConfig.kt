@@ -110,6 +110,13 @@ data class ServeCatalogsConfig(
      * (`SERVE_UI_BUILDER_NATIVE_CATALOGS`). An empty string removes the mapping.
      */
     val nativeCatalog: String? = null,
+    /**
+     * Report, at startup, what owning this catalog would change, without changing what is served
+     * (compose-ui-builder's `CatalogCutoverShadow`). Only a catalog that reads its published file
+     * and is not already owned can be shadowed. There is no environment variable for it: it is a
+     * step a deployment takes on its way to [owned], from this file.
+     */
+    val shadow: Boolean? = null,
   )
 
   /**

@@ -24,6 +24,7 @@ import okio.Path.Companion.toPath
  * | `SERVE_UI_BUILDER_NATIVE_CATALOGS`    | `catalogs.<id>.nativeCatalog`             |
  * | `SERVE_UI_BUILDER_PACKS`              | `packs.<served catalog>` (null withdraws) |
  * | `SERVE_UI_BUILDER_WIDGET_PLAYER`      | `widgetPlayer`                            |
+ * | (none: this file only)                | `catalogs.<id>.shadow`                    |
  *
  * Secrets, credentials and facts about the machine (`SERVE_UI_BUILDER_WEAR`, `…_STATE_DIR`,
  * `…_COMPONENTS`, `…_HOST`, the guidelines keys, the admin actors) stay in the environment.
@@ -59,6 +60,11 @@ object ServeUiBuilderSettings {
      * ([ServeOptions.uiBuilderUnavailableCatalogs]); not itself a served setting.
      */
     val unavailable: Set<String> = emptySet(),
+    /**
+     * Catalogs reported on as if owned, while served as they are
+     * ([ServeOptions.uiBuilderShadowCatalogs]).
+     */
+    val shadowCatalogs: Set<String> = emptySet(),
   ) {
     /** As `GET /admin/ui-builder/config` reports it. */
     fun describe(): ServeUiBuilderSettingsDto =
@@ -69,6 +75,7 @@ object ServeUiBuilderSettings {
         nativeCatalogs = nativeCatalogs.toSortedMap(),
         packs = packs.toSortedMap(),
         widgetPlayer = widgetPlayer.flagValue,
+        shadowCatalogs = shadowCatalogs.sorted(),
       )
 
     companion object {
@@ -82,6 +89,7 @@ object ServeUiBuilderSettings {
           widgetPlayer = options.uiBuilderWidgetPlayer,
           publishedDefault = options.uiBuilderPublishedDefault,
           unavailable = options.uiBuilderUnavailableCatalogs,
+          shadowCatalogs = options.uiBuilderShadowCatalogs,
         )
     }
   }
@@ -206,6 +214,26 @@ object ServeUiBuilderSettings {
         if (set.isEmpty()) CatalogOwnership.NONE else CatalogOwnership.of(set)
       }
 
+    // Shadow: a report on what owning a catalog would change, so only a catalog that reads its
+    // published file, and is not owned already, has anything to report.
+    val shadow = base.shadowCatalogs.toMutableSet()
+    for ((id, catalog) in settings.catalogs) {
+      when (catalog.shadow) {
+        true -> shadow += id
+        false -> shadow -= id
+        null -> Unit
+      }
+    }
+    val unshadowable = shadow.filterNot {
+      it in catalogs && it in readsPublished && !owned.owns(it)
+    }
+    if (unshadowable.isNotEmpty()) {
+      problems +=
+        "uiBuilder shadows ${unshadowable.sorted().joinToString()}, which is not served from its " +
+          "published file or is owned already; not shadowing it"
+      shadow.removeAll(unshadowable.toSet())
+    }
+
     val native = base.nativeCatalogs.toMutableMap()
     for ((id, catalog) in settings.catalogs) {
       when (val value = catalog.nativeCatalog) {
@@ -240,6 +268,7 @@ object ServeUiBuilderSettings {
         player,
         base.publishedDefault,
         base.unavailable,
+        shadow,
       ),
       problems,
     )
@@ -310,6 +339,9 @@ object ServeUiBuilderSettings {
 
     override val uiBuilderWidgetPlayer: UiBuilderWidgetPlayer
       get() = effective.widgetPlayer
+
+    override val uiBuilderShadowCatalogs: Set<String>
+      get() = effective.shadowCatalogs
   }
 
   /** The environment's options under [options], whether or not an overlay was applied. */
@@ -326,6 +358,20 @@ data class ServeUiBuilderSettingsDto(
   val nativeCatalogs: Map<String, String>,
   val packs: Map<String, String>,
   val widgetPlayer: String,
+  val shadowCatalogs: List<String> = emptyList(),
+)
+
+/**
+ * One shadowed catalog's report (compose-ui-builder's `CatalogCutoverShadow.Report`), as
+ * `/admin/ui-builder/config` reports it: [ready] when owning it would refuse nothing it serves now,
+ * and [differences] what the editor would see change. Null [differences] ⇒ this build synthesises
+ * nothing for the catalog, so owning it loses nothing.
+ */
+@kotlinx.serialization.Serializable
+data class ServeUiBuilderShadowReportDto(
+  val ready: Boolean,
+  val findings: List<String>,
+  val differences: List<String>?,
 )
 
 /**
@@ -342,6 +388,8 @@ class ServeUiBuilderSettingsAdmin(
   private val environment: ServeUiBuilderSettings.Effective,
   /** What this process is serving. */
   private val serving: ServeUiBuilderSettings.Effective,
+  /** Each shadowed catalog's latest report, by catalog id; filled as catalogs compose. */
+  private val shadowReports: () -> Map<String, ServeUiBuilderShadowReportDto> = { emptyMap() },
 ) {
   sealed interface Result {
     data class Ok(
@@ -369,6 +417,8 @@ class ServeUiBuilderSettingsAdmin(
   fun environment(): ServeUiBuilderSettings.Effective = environment
 
   fun serving(): ServeUiBuilderSettings.Effective = serving
+
+  fun shadowReports(): Map<String, ServeUiBuilderShadowReportDto> = shadowReports.invoke()
 
   fun set(settings: ServeCatalogsConfig.UiBuilderSettings): Result {
     val file = configFile ?: return Result.Unavailable(NO_FILE)

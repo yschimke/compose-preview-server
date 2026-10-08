@@ -784,6 +784,14 @@ public interface ServeOptions {
     get() = emptySet()
 
   /**
+   * Builder catalogs reported on, at startup, as if catalog-owned, while still served as they are:
+   * the shadow step before [uiBuilderCatalogOwnership] names them. Set only from `catalogs.json`'s
+   * `uiBuilder.catalogs.<id>.shadow`; empty ⇒ nothing is reported.
+   */
+  public val uiBuilderShadowCatalogs: Set<String>
+    get() = emptySet()
+
+  /**
    * Which UI-builder catalogs answer for themselves (`--ui-builder-catalog-ownership
    * <all|none|<id>[,<id>]>`): their seed templates, new-design chooser card and export route come
    * from what they publish, and their synthesised Kotlin definition is never built.
