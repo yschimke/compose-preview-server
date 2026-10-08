@@ -557,6 +557,7 @@ internal fun Route.installUiBuilderRoutes(
                 taggedNodeIds = result.taggedNodeIds,
                 nodeBounds = result.nodeBounds.mapValues { (_, box) -> box.toNodeBoundsV1() },
                 compileError = result.failure,
+                warnings = result.warnings,
               ),
             ),
             ContentType.Application.Json,
@@ -978,6 +979,12 @@ internal data class NativePreviewResultV1(
    * the field has carried a render-side reason since it started reporting one.
    */
   val compileError: String? = null,
+  /**
+   * What [imageBase64] draws differently from the design though it rendered, one sentence each —
+   * today a theme typeface drawn in the platform default face because this host does not have it
+   * installed (`TYPEFACE_SYSTEM_FONT_LOOKUP`). Empty when the frame is the design.
+   */
+  val warnings: List<String> = emptyList(),
   /**
    * Where to open the live stream for this render, or null when there is none.
    *
