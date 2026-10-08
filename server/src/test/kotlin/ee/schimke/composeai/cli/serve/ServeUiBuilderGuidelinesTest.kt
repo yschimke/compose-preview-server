@@ -43,26 +43,6 @@ class ServeUiBuilderGuidelinesTest {
 
   @Test
   fun `a request asks the visual rules only with pictures, and describes each picture`() {
-    // Which rules a design is asked is compose-ui-builder's to decide (by platform, surface and
-    // kind), so this asserts the server asks what the library asks rather than restating the
-    // selection: a builder change to it would otherwise turn this red on every builder commit.
-    val bare = ServeUiBuilderGuidelines.prepare("d", 3, wearDocument(), emptyList(), null)
-    assertEquals(
-      DesignGuidelinePrompt.prepare(
-        DesignGuidelineRuleSet.Bundled,
-        "d",
-        3,
-        wearDocument(),
-        emptyList(),
-        null,
-      ),
-      bare,
-    )
-    // The one selection property the server relies on: it never asks a visual rule it has no
-    // picture for.
-    assertTrue(bare.rules.asked.none { it.visual }, bare.rules.asked.toString())
-    assertTrue(bare.provenance.any { "No picture is attached" in it }, bare.provenance.toString())
-
     val frames =
       listOf(
         DesignGuidelineFrame(DesignGuidelinePicture.DEVICE, 192, 192, emptyMap()),
@@ -85,6 +65,19 @@ class ServeUiBuilderGuidelinesTest {
       ),
       request,
     )
+    // With pictures the request asks every rule that applies to this design: Wear rules, in the
+    // bundled order. Which Wear rules apply is the library's call (a screen is not asked widget
+    // rules, compose-ui-builder#574), so it is read from the request rather than restated here.
+    val wear = DesignGuidelineRuleSet.Bundled.forPlatform("wear").map { it.id }
+    val applicable = request.rules.asked
+    assertEquals(wear.filter { id -> applicable.any { it.id == id } }, applicable.map { it.id })
+    assertTrue(applicable.any { it.visual } && applicable.any { !it.visual }, applicable.toString())
+
+    // Without one it asks the same rules less the visual ones, and says why.
+    val bare = ServeUiBuilderGuidelines.prepare("d", 3, wearDocument(), emptyList(), null)
+    assertEquals(applicable.filterNot { it.visual }.map { it.id }, bare.rules.asked.map { it.id })
+    assertEquals(applicable.count { it.visual }, bare.rules.visualSkipped)
+    assertTrue(bare.provenance.any { "No picture is attached" in it }, bare.provenance.toString())
     assertTrue("Picture 2 (unrolled picture)" in request.userText, request.userText)
     assertTrue("@Composable fun X() {}" in request.userText)
     assertTrue(request.sourceAttached)

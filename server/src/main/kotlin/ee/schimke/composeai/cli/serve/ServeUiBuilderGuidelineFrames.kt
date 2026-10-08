@@ -14,7 +14,9 @@ import java.util.concurrent.CompletableFuture
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
 import java.util.concurrent.LinkedBlockingDeque
+import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.ScheduledFuture
+import java.util.concurrent.Semaphore
 import java.util.concurrent.TimeUnit
 import kotlin.math.abs
 import kotlinx.coroutines.future.await
@@ -46,11 +48,11 @@ import kotlinx.coroutines.withTimeoutOrNull
  * ## Ahead of the reader, behind everything else
  *
  * One worker draws frames, one at a time (native renders queue behind each other anyway, and a
- * burst is compose-preview-server#1421). A reader waiting on a frame jumps the queue; a frame
- * queued to warm the cache waits while the thumbnail worker has work, so the design list and the
- * editor's own exports go first. Warming follows an accepted edit after a quiet period, so a design
- * being edited is drawn once it settles rather than at every keystroke, and only its latest
- * revision is drawn.
+ * burst is compose-preview-server#1421). A reader waiting on frames jumps the queue, and they draw
+ * in the order it asked for them; a frame queued to warm the cache waits while the thumbnail worker
+ * has work, so the design list and the editor's own exports go first. Warming follows an accepted
+ * edit after a quiet period, so a design being edited is drawn once it settles rather than at every
+ * keystroke, and only its latest revision is drawn.
  *
  * Warming compiles Kotlin, which a caller may only ask for with the `ui-builder-export` route
  * capability. An edit carries no route check, so a design is warmed only once somebody holding that
@@ -101,7 +103,16 @@ internal constructor(
     val result: CompletableFuture<ByteArray?> = CompletableFuture(),
   )
 
-  private val jobs = LinkedBlockingDeque<Job>(QUEUE)
+  /**
+   * Frames a reader is waiting on, in the order asked: drawn before any warm. A queue of their own,
+   * not the front of [warms], because pushing a reader's frames onto the front one by one drew them
+   * last-asked first, so the slowest frame of a request could hold back the one it listed first
+   * past the budget.
+   */
+  private val readers = LinkedBlockingQueue<Job>(QUEUE)
+  private val warms = LinkedBlockingDeque<Job>(QUEUE)
+  /** One permit per job offered to either queue; the worker takes one before each poll. */
+  private val queued = Semaphore(0)
   private val pending = ConcurrentHashMap<Key, Job>()
 
   /** Designs a capable caller has asked for pictures of, and as whom to warm them. */
@@ -115,16 +126,18 @@ internal constructor(
     Thread(
         {
           while (!Thread.currentThread().isInterrupted) {
-            val job =
-              try {
-                jobs.take()
-              } catch (_: InterruptedException) {
-                break
-              }
+            try {
+              queued.acquire()
+            } catch (_: InterruptedException) {
+              break
+            }
+            // A warm promoted to a reader leaves its permit behind; the poll then finds nothing.
+            val job = readers.poll() ?: warms.poll() ?: continue
             // A warming frame waits while the design list's thumbnails are drawing, unless a reader
             // has since asked for it (it is then no longer in [pending] as a background job).
-            if (job.background && !thumbnailsIdle() && jobs.none { !it.background }) {
-              jobs.offerLast(job)
+            if (job.background && !thumbnailsIdle() && readers.isEmpty()) {
+              warms.offerLast(job)
+              queued.release()
               try {
                 Thread.sleep(BACKGROUND_BACKOFF_MILLIS)
               } catch (_: InterruptedException) {
@@ -197,9 +210,9 @@ internal constructor(
   }
 
   /**
-   * The drawing of [frame] queued or running, or a new one: a reader's at the front, a warm at the
-   * back. A reader asking for a frame already queued to warm moves it to the front rather than
-   * queueing it twice.
+   * The drawing of [frame] queued or running, or a new one: a reader's behind the other frames
+   * readers are waiting on and ahead of every warm, a warm at the back. A reader asking for a frame
+   * already queued to warm moves it to the readers' queue rather than queueing it twice.
    */
   internal fun submit(
     key: Key,
@@ -213,14 +226,20 @@ internal constructor(
     val job = Job(key, document, frame, background)
     val existing = pending.putIfAbsent(key, job)
     if (existing != null) {
-      if (!background && existing.background && jobs.remove(existing)) {
+      if (!background && existing.background && warms.remove(existing)) {
         val promoted = Job(key, existing.document, existing.frame, false, existing.result)
         pending[key] = promoted
-        jobs.offerFirst(promoted)
+        if (readers.offer(promoted)) {
+          queued.release()
+        } else {
+          pending.remove(key, promoted)
+          existing.result.complete(null)
+        }
       }
       return existing.result
     }
-    val offered = if (background) jobs.offerLast(job) else jobs.offerFirst(job)
+    val offered = if (background) warms.offerLast(job) else readers.offer(job)
+    if (offered) queued.release()
     if (!offered) {
       pending.remove(key, job)
       job.result.complete(null)
@@ -361,8 +380,9 @@ internal constructor(
   override fun close() {
     worker.interrupt()
     scheduler.shutdownNow()
-    jobs.forEach { it.result.complete(null) }
-    jobs.clear()
+    (readers + warms).forEach { it.result.complete(null) }
+    readers.clear()
+    warms.clear()
   }
 
   internal companion object {
