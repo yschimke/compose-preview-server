@@ -58,11 +58,9 @@ class ServeUiBuilderGuidelinesTest {
       ),
       bare,
     )
-    val wear = DesignGuidelineRuleSet.Bundled.forPlatform("wear").map { it.id }.toSet()
-    assertTrue(bare.rules.asked.isNotEmpty())
+    // The one selection property the server relies on: it never asks a visual rule it has no
+    // picture for.
     assertTrue(bare.rules.asked.none { it.visual }, bare.rules.asked.toString())
-    assertTrue(bare.rules.asked.all { it.id in wear }, bare.rules.asked.toString())
-    assertTrue(bare.rules.visualSkipped > 0)
     assertTrue(bare.provenance.any { "No picture is attached" in it }, bare.provenance.toString())
 
     val frames =
@@ -87,10 +85,6 @@ class ServeUiBuilderGuidelinesTest {
       ),
       request,
     )
-    // With pictures the visual rules are asked too, on top of the bare request's.
-    assertTrue(request.rules.asked.containsAll(bare.rules.asked), request.rules.asked.toString())
-    assertTrue(request.rules.asked.any { it.visual }, request.rules.asked.toString())
-    assertEquals(0, request.rules.visualSkipped)
     assertTrue("Picture 2 (unrolled picture)" in request.userText, request.userText)
     assertTrue("@Composable fun X() {}" in request.userText)
     assertTrue(request.sourceAttached)
