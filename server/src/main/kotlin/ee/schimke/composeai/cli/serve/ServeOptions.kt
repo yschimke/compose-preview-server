@@ -768,6 +768,14 @@ public interface ServeOptions {
     get() = emptySet()
 
   /**
+   * Builder catalogs this machine cannot serve (`--ui-builder-unavailable-catalogs`), which
+   * `catalogs.json`'s `uiBuilder` block cannot turn back on. The image entrypoint passes `wear-m3`
+   * here under `SERVE_UI_BUILDER_WEAR=0`, the opt-out for a box that cannot carry the Wear lane.
+   */
+  public val uiBuilderUnavailableCatalogs: Set<String>
+    get() = emptySet()
+
+  /**
    * Which UI-builder catalogs answer for themselves (`--ui-builder-catalog-ownership
    * <all|none|<id>[,<id>]>`): their seed templates, new-design chooser card and export route come
    * from what they publish, and their synthesised Kotlin definition is never built.

@@ -85,6 +85,50 @@ class ServeUiBuilderSettingsTest {
   }
 
   @Test
+  fun `the block cannot serve a catalog this machine opted out of`() {
+    // SERVE_UI_BUILDER_WEAR=0: the entrypoint strips wear-m3 and marks it unavailable.
+    val noWear =
+      environment.copy(
+        catalogs = setOf("m3-catalog", "remote-m3"),
+        publishedCatalogs = setOf("m3-catalog", "remote-m3"),
+        unavailable = setOf("wear-m3"),
+      )
+    val resolution =
+      ServeUiBuilderSettings.resolve(
+        noWear,
+        UiBuilderSettings(catalogs = mapOf("wear-m3" to UiBuilderCatalogSettings(serve = true))),
+      )
+    assertEquals(setOf("m3-catalog", "remote-m3"), resolution.effective.catalogs)
+    assertTrue(resolution.problems.isNotEmpty())
+  }
+
+  @Test
+  fun `a hand-edited block that would not validate leaves the box on its environment`() {
+    val fs = okio.fakefilesystem.FakeFileSystem()
+    val path = "/config/catalogs.json".toPath()
+    ServeCatalogsConfigFile(path, fs)
+      .save(
+        ServeCatalogsConfig(
+          uiBuilder =
+            UiBuilderSettings(
+              catalogs = mapOf("remote-widgets" to UiBuilderCatalogSettings(serve = true)),
+              packs = mapOf("confetti-mobile" to "toaster"),
+            )
+        )
+      )
+    val logs = mutableListOf<String>()
+    val options =
+      ServeCommandOptions(
+        args = listOf("--catalogs-file", path.toString()),
+        defaultTimeoutSeconds = 600L,
+        previewMatcher = { _, _, _, _, _, _ -> true },
+      )
+    val overlaid = ServeUiBuilderSettings.overlay(options, logs::add, fs)
+    assertTrue(overlaid === options, "an invalid block must not be applied")
+    assertTrue(logs.any { "toaster" in it }, logs.toString())
+  }
+
+  @Test
   fun `the block cannot withdraw every catalog`() {
     val resolution =
       resolve(

@@ -84,7 +84,7 @@ expect $'--wasm-ui-dir\n'"${built_in}"$'\n--ui-builder-dir\n'"${built_in_builder
   "the builder catalog allowlist is operator-selectable" "" "" "remote-m3"
 expect $'--wasm-ui-dir\n'"${built_in}"$'\n--ui-builder-dir\n'"${built_in_builder}"$'\n--ui-builder-catalogs\nm3-catalog,remote-m3\n--ui-builder-published-catalogs\nm3-catalog,remote-m3\n--ui-builder-state-dir\n/config/ui-builder-state\n--ui-builder-native-catalog\nwear-m3=wear-m3-catalog\n--ui-builder-published-default\nm3-catalog,remote-m3,wear-m3,remote-widgets' \
   "an explicit two-catalog allowlist is kept as written" "" "" "m3-catalog,remote-m3"
-expect $'--wasm-ui-dir\n'"${built_in}"$'\n--ui-builder-dir\n'"${built_in_builder}"$'\n--ui-builder-catalogs\nm3-catalog,remote-m3\n--ui-builder-published-catalogs\nm3-catalog,remote-m3\n--ui-builder-state-dir\n/config/ui-builder-state\n--ui-builder-native-catalog\nwear-m3=wear-m3-catalog\n--ui-builder-published-default\nm3-catalog,remote-m3,wear-m3,remote-widgets' \
+expect $'--wasm-ui-dir\n'"${built_in}"$'\n--ui-builder-dir\n'"${built_in_builder}"$'\n--ui-builder-catalogs\nm3-catalog,remote-m3\n--ui-builder-published-catalogs\nm3-catalog,remote-m3\n--ui-builder-state-dir\n/config/ui-builder-state\n--ui-builder-native-catalog\nwear-m3=wear-m3-catalog\n--ui-builder-published-default\nm3-catalog,remote-m3,wear-m3,remote-widgets\n--ui-builder-unavailable-catalogs\nwear-m3' \
   "the explicit Wear opt-out preserves the low-resource lane" "" "" \
   "m3-catalog,remote-m3,wear-m3" "0"
 

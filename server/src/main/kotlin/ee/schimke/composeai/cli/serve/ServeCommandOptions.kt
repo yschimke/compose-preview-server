@@ -861,6 +861,19 @@ public class ServeCommandOptions(
       }
       ?.toSet() ?: emptySet()
 
+  override val uiBuilderUnavailableCatalogs: Set<String> =
+    args
+      .flagValue("--ui-builder-unavailable-catalogs")
+      ?.split(",")
+      ?.map(String::trim)
+      ?.filter(String::isNotEmpty)
+      ?.also { entries ->
+        require(entries.all(UI_BUILDER_CATALOG_ID::matches)) {
+          "--ui-builder-unavailable-catalogs contains an invalid catalog id"
+        }
+      }
+      ?.toSet() ?: emptySet()
+
   /**
    * `--ui-builder-catalog-ownership <all|none|<id>[,<id>]>`. Absent or empty is `none`.
    *

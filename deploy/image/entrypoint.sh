@@ -479,6 +479,11 @@ if [[ -f /opt/compose-preview-server/ui-builder/index.html && "${SERVE_ROLE:-}" 
   args+=(--ui-builder-native-catalog "${SERVE_UI_BUILDER_NATIVE_CATALOGS:-wear-m3=wear-m3-catalog}")
   # The published default above, for a catalog catalogs.json's `uiBuilder` block starts serving.
   args+=(--ui-builder-published-default "${ui_builder_published_default// /,}")
+  # The Wear opt-out is a fact about this machine, so catalogs.json's `uiBuilder` block must not be
+  # able to undo it: tell the server which catalog it cannot serve, whatever the block says.
+  if [[ "${SERVE_UI_BUILDER_WEAR:-1}" == "0" ]]; then
+    args+=(--ui-builder-unavailable-catalogs wear-m3)
+  fi
   # Which player draws a Wear widget design in that lane and on its design cards: `cmp-android`
   # (the server's default, used only where the bundle carries rc-player-compose) or `androidx`,
   # upstream's WearWidgetPreview. Empty ⇒ the server's default.

@@ -54,6 +54,11 @@ object ServeUiBuilderSettings {
     val widgetPlayer: UiBuilderWidgetPlayer,
     /** What a newly served catalog defaults to publishing from; not itself a served setting. */
     val publishedDefault: Set<String> = emptySet(),
+    /**
+     * Catalogs this machine cannot serve, whatever the block says
+     * ([ServeOptions.uiBuilderUnavailableCatalogs]); not itself a served setting.
+     */
+    val unavailable: Set<String> = emptySet(),
   ) {
     /** As `GET /admin/ui-builder/config` reports it. */
     fun describe(): ServeUiBuilderSettingsDto =
@@ -76,6 +81,7 @@ object ServeUiBuilderSettings {
           packs = options.uiBuilderPacks,
           widgetPlayer = options.uiBuilderWidgetPlayer,
           publishedDefault = options.uiBuilderPublishedDefault,
+          unavailable = options.uiBuilderUnavailableCatalogs,
         )
     }
   }
@@ -131,7 +137,14 @@ object ServeUiBuilderSettings {
     val catalogs = base.catalogs.toMutableSet()
     for ((id, catalog) in settings.catalogs) {
       when (catalog.serve) {
-        true -> catalogs += id
+        true ->
+          if (id in base.unavailable) {
+            // A machine-level opt-out (SERVE_UI_BUILDER_WEAR=0): the lane this catalog needs is
+            // not on this box, so no config can turn it back on.
+            problems += "uiBuilder serves $id, which this machine cannot serve; not serving it"
+          } else {
+            catalogs += id
+          }
         false -> catalogs -= id
         null -> Unit
       }
@@ -218,7 +231,16 @@ object ServeUiBuilderSettings {
       } ?: base.widgetPlayer
 
     return Resolution(
-      Effective(catalogs, published, owned, native, packs, player, base.publishedDefault),
+      Effective(
+        catalogs,
+        published,
+        owned,
+        native,
+        packs,
+        player,
+        base.publishedDefault,
+        base.unavailable,
+      ),
       problems,
     )
   }
@@ -228,11 +250,21 @@ object ServeUiBuilderSettings {
    * no file or no block. A file that cannot be read leaves the environment in charge, exactly as
    * the rest of the server treats an unreadable `catalogs.json`.
    */
-  fun overlay(options: ServeOptions, onLog: (String) -> Unit = System.err::println): ServeOptions {
+  fun overlay(
+    options: ServeOptions,
+    onLog: (String) -> Unit = System.err::println,
+    fileSystem: okio.FileSystem = ee.schimke.composeai.io.SystemFileSystem,
+  ): ServeOptions {
     val path = options.catalogsFilePath ?: return options
     val settings =
-      runCatching { ServeCatalogsConfigFile(path.toPath()).load().uiBuilder }.getOrNull()
-        ?: return options
+      runCatching { ServeCatalogsConfigFile(path.toPath(), fileSystem).load().uiBuilder }
+        .getOrNull() ?: return options
+    // The admin route validates what it writes; a hand-edited file has had no such check, and one
+    // bad optional setting (a pack on an unknown platform) must not stop the whole server.
+    validate(settings)?.let {
+      onLog("serve: catalogs config: uiBuilder ignored, keeping the environment: $it")
+      return options
+    }
     val base = Effective.of(options)
     // A block the server cannot resolve must not stop the box: it comes up on its environment.
     val resolution = runCatching {
