@@ -164,6 +164,37 @@ class DesignLocalRunnerTest {
     assertEquals(0, (lane as RecordingLane).renders, "an export must not open a compiler")
   }
 
+  /**
+   * A desktop bundle has no Google Fonts `GoogleFont`, so its lane writes typefaces as `SystemFont`
+   * lookups, which draw in the default face wherever the family is not installed. The source and
+   * the frame both arrive looking fine, so the warning is the only place that is said.
+   */
+  @Test
+  fun `typefaces drawn as system-font lookups are named on export and render`() {
+    val source =
+      DesignLocalLane.Source.Emitted(
+        "fun Themed() {}\n",
+        "Themed",
+        warnings = listOf("Typeface 'Lobster' is set as a desktop system-font lookup"),
+      )
+    runner(options(DesignCommand.EXPORT, out = "Themed.kt"), lane(source = source)).run()
+    assertTrue(
+      logged.any { it.contains("TYPEFACE_SYSTEM_FONT_LOOKUP") && it.contains("Lobster") },
+      "$logged",
+    )
+
+    logged.clear()
+    runner(
+        options(DesignCommand.RENDER, out = "themed.png"),
+        lane(frame = DesignLocalLane.Frame.Rendered(byteArrayOf(1)), source = source),
+      )
+      .run()
+    assertTrue(
+      logged.any { it.contains("TYPEFACE_SYSTEM_FONT_LOOKUP") && it.contains("Lobster") },
+      "$logged",
+    )
+  }
+
   @Test
   fun `a refused export is a failure, not an almost-Kotlin file`() {
     val code =

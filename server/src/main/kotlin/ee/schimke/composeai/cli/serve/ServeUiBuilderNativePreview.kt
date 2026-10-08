@@ -1,5 +1,6 @@
 package ee.schimke.composeai.cli.serve
 
+import ee.schimke.composeai.uibuilder.export.TypefaceTarget
 import ee.schimke.composeai.uibuilder.export.WearWidgetHostShape
 import ee.schimke.composeai.uibuilder.protocol.DesignDocumentV1
 
@@ -129,10 +130,26 @@ internal class ServeUiBuilderNativePreview(
         ),
       )
     }
+    // The source is compiled against this design's bundle below, so its typefaces are written for
+    // that bundle: a Compose Multiplatform Desktop one (m3-catalog's) has no Google Fonts
+    // `GoogleFont` to resolve and gets `SystemFont` lookups instead. Looked up here as well as
+    // below so a design whose catalog has no bundle still hears the generator's refusal first.
+    val typefaces =
+      if (
+        nativeTarget(usedPacks.singleOrNull() ?: document.catalogPin.systemId)?.confType ==
+          UiBuilderGeneratedCompose.COMPOSE_CMP
+      )
+        TypefaceTarget.DESKTOP
+      else TypefaceTarget.DEFAULT
     val generated =
       when (
         val outcome =
-          executor.generate(document, tagNodes = true, widgetHostShape = widgetHostShape)
+          executor.generate(
+            document,
+            tagNodes = true,
+            widgetHostShape = widgetHostShape,
+            typefaces = typefaces,
+          )
       ) {
         is ScreenGeneratorComposeExportExecutor.Generated.Emitted -> outcome
         is ScreenGeneratorComposeExportExecutor.Generated.Refused ->

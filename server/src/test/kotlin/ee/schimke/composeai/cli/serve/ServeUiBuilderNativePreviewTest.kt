@@ -21,6 +21,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertIs
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
+import kotlinx.serialization.json.Json
 
 /**
  * The native render lane: a design compiled and drawn by real Compose instead of by the browser.
@@ -85,6 +86,35 @@ class ServeUiBuilderNativePreviewTest {
     assertEquals(400, generated.widthDp)
     assertEquals(800, generated.heightDp)
     assertEquals("AgentScreen", generated.composableName)
+  }
+
+  /**
+   * A design compiled against a Compose Multiplatform Desktop bundle (m3-catalog's) cannot name
+   * Google Fonts' Android-only `GoogleFont`, so the lane asks for `SystemFont` lookups when the
+   * target bundle is CMP, and leaves an Android bundle with `GoogleFont`.
+   */
+  @Test
+  fun `theme typefaces follow the bundle the design is compiled against`() {
+    val record = ExportRecords.m3Catalog()
+    fun sourceFor(confType: String): String {
+      val compiled = mutableListOf<UiBuilderGeneratedCompose>()
+      ServeUiBuilderNativePreview(
+          executor =
+            ScreenGeneratorComposeExportExecutor({ ComponentRecordSource.Lookup.Found(record) }),
+          compile = { generated ->
+            compiled += generated
+            PlaygroundRunResponse(previewId = "generated", previewToken = "token", image = "png")
+          },
+          nativeTarget = { UiBuilderNativeTarget(it, confType) },
+        )
+        .render(themedM3Document())
+      return compiled.single().source
+    }
+
+    val desktop = sourceFor(UiBuilderGeneratedCompose.COMPOSE_CMP)
+    assertTrue("SystemFont(\"Michroma\"" in desktop, desktop)
+    assertTrue("GoogleFont" !in desktop, desktop)
+    assertTrue("GoogleFont(\"Michroma\")" in sourceFor(UiBuilderGeneratedCompose.COMPOSE_ANDROID))
   }
 
   @Test
@@ -292,4 +322,30 @@ class ServeUiBuilderNativePreviewTest {
   private companion object {
     const val CATALOG = "m3-catalog"
   }
+
+  private fun themedM3Document(): DesignDocumentV1 =
+    Json.decodeFromString<DesignDocumentV1>(
+      """
+      {
+        "schema": "compose-ui-builder-document/v1-candidate",
+        "id": "themed", "title": "Themed", "revision": 0,
+        "catalogPin": {"systemId": "m3-catalog", "catalogRevision": "candidate",
+          "capabilityDigest": "candidate", "nativeRuntimeId": "candidate"},
+        "environment": {"widthDp": 360, "heightDp": 640, "density": 1.0, "theme": "dark",
+          "locale": "en-US", "fontScale": 1.0, "layoutDirection": "ltr"},
+        "roots": ["screen"],
+        "nodes": {
+          "screen": {"id": "screen", "componentId": "m3/surface",
+            "properties": {
+              "themePrimaryColor": {"type": "string", "value": "#FFD0BCFF"},
+              "themeDisplayTypeface": {"type": "string", "value": "Michroma"}
+            },
+            "slots": {"content": ["label"]}, "modifiers": []},
+          "label": {"id": "label", "componentId": "m3/text",
+            "properties": {"text": {"type": "string", "value": "Hello"}},
+            "slots": {}, "modifiers": []}
+        }
+      }
+      """
+    )
 }

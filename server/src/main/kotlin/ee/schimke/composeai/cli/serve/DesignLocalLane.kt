@@ -1,6 +1,8 @@
 package ee.schimke.composeai.cli.serve
 
 import ee.schimke.composeai.bundle.BundleReader
+import ee.schimke.composeai.uibuilder.export.SystemFontLookups
+import ee.schimke.composeai.uibuilder.export.TypefaceTarget
 import ee.schimke.composeai.uibuilder.protocol.DesignDocumentV1
 import ee.schimke.composeai.uibuilder.service.FileUiBuilderAssetStore
 import ee.schimke.composeai.uibuilder.service.UiBuilderAssetStore
@@ -50,7 +52,12 @@ internal interface DesignLocalLane {
   fun render(document: DesignDocumentV1): Frame
 
   sealed interface Source {
-    data class Emitted(val source: String, val screenName: String) : Source
+    data class Emitted(
+      val source: String,
+      val screenName: String,
+      /** What the source draws differently from the design — today, typefaces it cannot ship. */
+      val warnings: List<String> = emptyList(),
+    ) : Source
 
     /** The generator's own code and reasons, unchanged — the same ones the server would send. */
     data class Refused(val code: String, val reasons: List<String>) : Source
@@ -225,9 +232,18 @@ internal class DesignLocalCompileLane(
     )
 
   override fun generate(document: DesignDocumentV1): DesignLocalLane.Source =
-    when (val generated = executor.generate(document)) {
+    // Written for this lane's bundle, as the render below compiles it: a desktop bundle gets
+    // `SystemFont` lookups for its typefaces, because it has no Android `GoogleFont` to resolve.
+    when (
+      val generated =
+        executor.generate(document, typefaces = TypefaceTarget.forNativeBackend(backend))
+    ) {
       is ScreenGeneratorComposeExportExecutor.Generated.Emitted ->
-        DesignLocalLane.Source.Emitted(generated.source, generated.screenName)
+        DesignLocalLane.Source.Emitted(
+          generated.source,
+          generated.screenName,
+          warnings = generated.systemFontFamilies.map(SystemFontLookups::note),
+        )
       is ScreenGeneratorComposeExportExecutor.Generated.Refused ->
         DesignLocalLane.Source.Refused(generated.code, generated.reasons)
     }
