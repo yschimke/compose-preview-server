@@ -1,5 +1,22 @@
 # Changelog
 
+## [3.111.0](https://github.com/yschimke/compose-preview-server/compare/v3.110.0...v3.111.0) (2026-10-08)
+
+
+### Features
+
+* **deploy:** serve a2ui-catalog and glimmer-catalog as catalog-owned UI-builder catalogs on preview.coo.ee ([#1437](https://github.com/yschimke/compose-preview-server/issues/1437)) ([d417364](https://github.com/yschimke/compose-preview-server/commit/d4173644014b73e883ffebb1086eb8ff211cad3f))
+* **deploy:** shadow wear-m3 on preview.coo.ee before owning it ([#1443](https://github.com/yschimke/compose-preview-server/issues/1443)) ([1fc0895](https://github.com/yschimke/compose-preview-server/commit/1fc08954cae18c2810ba71709a0d5fcc828a4663))
+* **ui-builder:** export variable font text with its flexpress declaration ([#1440](https://github.com/yschimke/compose-preview-server/issues/1440)) ([076d26b](https://github.com/yschimke/compose-preview-server/commit/076d26bf2932e9442765b7342eb4f41f254cebf0))
+* **ui-builder:** shadow a catalog before owning it, from catalogs.json ([#1439](https://github.com/yschimke/compose-preview-server/issues/1439)) ([78d9acf](https://github.com/yschimke/compose-preview-server/commit/78d9acf2e8534d284219d9f53788bbef9b3de1f3))
+
+
+### Bug Fixes
+
+* **deps:** compose-ui-builder 3.95.0, which main already calls ([#1442](https://github.com/yschimke/compose-preview-server/issues/1442)) ([a740bdb](https://github.com/yschimke/compose-preview-server/commit/a740bdb360726a3c0c074ed03fadec5f1dcdbc14))
+* **guidelines:** draw a reader's frames in order; read applicable Wear rules from the request ([#1434](https://github.com/yschimke/compose-preview-server/issues/1434)) ([2264b75](https://github.com/yschimke/compose-preview-server/commit/2264b752db88cbb08360384520f54686c05e4628))
+* **ui-builder:** bump composeai-ui-builder to 3.95.0, which [#1440](https://github.com/yschimke/compose-preview-server/issues/1440) already calls ([#1441](https://github.com/yschimke/compose-preview-server/issues/1441)) ([1c28d13](https://github.com/yschimke/compose-preview-server/commit/1c28d134e3df769aa8e5f00eed1acc66a1431833))
+
 ## [3.110.0](https://github.com/yschimke/compose-preview-server/compare/v3.109.0...v3.110.0) (2026-10-08)
 
 
