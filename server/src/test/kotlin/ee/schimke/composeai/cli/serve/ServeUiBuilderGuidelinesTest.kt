@@ -43,10 +43,26 @@ class ServeUiBuilderGuidelinesTest {
 
   @Test
   fun `a request asks the visual rules only with pictures, and describes each picture`() {
+    // Which rules a design is asked is compose-ui-builder's to decide (by platform, surface and
+    // kind), so this asserts the server asks what the library asks rather than restating the
+    // selection: a builder change to it would otherwise turn this red on every builder commit.
     val bare = ServeUiBuilderGuidelines.prepare("d", 3, wearDocument(), emptyList(), null)
-    val wear = DesignGuidelineRuleSet.Bundled.forPlatform("wear")
-    assertEquals(wear.filterNot { it.visual }.map { it.id }, bare.rules.asked.map { it.id })
-    assertEquals(wear.count { it.visual }, bare.rules.visualSkipped)
+    assertEquals(
+      DesignGuidelinePrompt.prepare(
+        DesignGuidelineRuleSet.Bundled,
+        "d",
+        3,
+        wearDocument(),
+        emptyList(),
+        null,
+      ),
+      bare,
+    )
+    val wear = DesignGuidelineRuleSet.Bundled.forPlatform("wear").map { it.id }.toSet()
+    assertTrue(bare.rules.asked.isNotEmpty())
+    assertTrue(bare.rules.asked.none { it.visual }, bare.rules.asked.toString())
+    assertTrue(bare.rules.asked.all { it.id in wear }, bare.rules.asked.toString())
+    assertTrue(bare.rules.visualSkipped > 0)
     assertTrue(bare.provenance.any { "No picture is attached" in it }, bare.provenance.toString())
 
     val frames =
@@ -71,7 +87,10 @@ class ServeUiBuilderGuidelinesTest {
       ),
       request,
     )
-    assertEquals(wear.map { it.id }, request.rules.asked.map { it.id })
+    // With pictures the visual rules are asked too, on top of the bare request's.
+    assertTrue(request.rules.asked.containsAll(bare.rules.asked), request.rules.asked.toString())
+    assertTrue(request.rules.asked.any { it.visual }, request.rules.asked.toString())
+    assertEquals(0, request.rules.visualSkipped)
     assertTrue("Picture 2 (unrolled picture)" in request.userText, request.userText)
     assertTrue("@Composable fun X() {}" in request.userText)
     assertTrue(request.sourceAttached)
