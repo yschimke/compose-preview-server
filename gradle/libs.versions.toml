@@ -366,7 +366,11 @@ composeai-contracts = "3.20.0"
 # and one resizable by a handle that animates in whole cells (compose-ui-builder#567), and draws
 # the launcher root and its button labels on the canvas. `androidx-window` and `composeai-contracts`
 # are unchanged.
-composeai-ui-builder = "3.94.0"
+# 3.95.0 adds CatalogCutoverShadow, the report a shadowed catalog's `uiBuilder.catalogs.<id>.shadow`
+# logs and serves (compose-ui-builder#583), asks a Wear widget only the widget guideline rules and a
+# screen only the screen ones (#574), and records `m3/variable-font-text` at export (#581).
+# `androidx-window` and `composeai-contracts` are unchanged.
+composeai-ui-builder = "3.95.0"
 kotlinx-coroutines = "1.11.0"
 kotlinx-serialization = "1.11.0"
 ktor = "3.6.0"
