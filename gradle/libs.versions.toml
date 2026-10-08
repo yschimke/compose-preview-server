@@ -366,7 +366,11 @@ composeai-contracts = "3.20.0"
 # and one resizable by a handle that animates in whole cells (compose-ui-builder#567), and draws
 # the launcher root and its button labels on the canvas. `androidx-window` and `composeai-contracts`
 # are unchanged.
-composeai-ui-builder = "3.94.0"
+# 3.95.0 makes `VariableFontExport.join` public (compose-ui-builder#585), which the Compose export
+# executor calls to write each variable font text's flexpress declaration into the screen's file
+# (#1440), and carries the `m3/variable-font-text` and `wear-m3/variable-font-text` components
+# (compose-ui-builder#580, #581). `androidx-window` and `composeai-contracts` are unchanged.
+composeai-ui-builder = "3.95.0"
 kotlinx-coroutines = "1.11.0"
 kotlinx-serialization = "1.11.0"
 ktor = "3.6.0"
