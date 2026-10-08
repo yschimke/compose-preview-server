@@ -1,5 +1,6 @@
 package ee.schimke.composeai.cli.serve
 
+import ee.schimke.composeai.uibuilder.export.RecordFreeExport
 import ee.schimke.composeai.uibuilder.export.RemoteDocumentExportSupport
 import ee.schimke.composeai.uibuilder.export.UiBuilderBuildFeatures
 import ee.schimke.composeai.uibuilder.export.WearWidgetHostShape
@@ -198,6 +199,20 @@ class ServeUiBuilderMcp(
    * [GET_GUIDELINES] and [RECORD_GUIDELINES] are then absent, and [CHECK_DESIGN] records nothing.
    */
   private val guidelineRecords: ServeUiBuilderGuidelineStore? = null,
+  /**
+   * The pictures guidelines prompts attach, kept per revision and drawn ahead of the reader; see
+   * [ServeUiBuilderGuidelineFrames]. Null draws every picture on every request, without a budget.
+   */
+  private val guidelineFrames: ServeUiBuilderGuidelineFrames? = null,
+  /**
+   * A Wear widget's native thumbnail at a revision, when the design list holds one; it is the Pixel
+   * Watch frame, so that frame is not drawn twice. See
+   * [ServeUiBuilderThumbnails.nativeWidgetThumbnail].
+   */
+  private val widgetThumbnail: (designId: String, revision: Long) -> ByteArray? = { _, _ -> null },
+  /** How long a prompt waits for frames it has no picture of yet; the rest are left out. */
+  private val guidelinePictureBudgetMillis: Long =
+    DEFAULT_GUIDELINES_PICTURE_BUDGET_SECONDS * 1_000,
 ) {
 
   /** Revisions, restore, fork and diff; see [ServeUiBuilderHistoryTools]. */
@@ -2492,6 +2507,9 @@ class ServeUiBuilderMcp(
             withSource = true,
             devicePng = render?.png,
             components = (catalog ?: pinnedCatalog(checked, actor))?.components,
+            // A stored design at its stored revision, so its frames are kept and its source is the
+            // export route's; a dry run or a loose document is neither.
+            storedDesignId = designId.takeIf { explicit == null && rawOperations == null },
           )
         if (rendered && request.platform != null && request.pictures.isEmpty()) {
           skipped +=
@@ -2639,19 +2657,37 @@ class ServeUiBuilderMcp(
   /**
    * The Compose source [document] exports to, through the same generator `export` uses; null when
    * the export gate refuses it or the host cannot export Compose.
+   *
+   * A stored design at a revision it still has ([storedDesignId]) is exported exactly as `GET
+   * …/export.compose` exports it — `ExportDesignRequestV1` against the stored revision — so the
+   * prompt attaches the source that route serves. A loose or dry-run document has no stored
+   * revision and goes through `ExportDocument`, which on the live host refused designs the route
+   * exported, so every stored design's prompt said "no Compose source is attached".
    */
   private suspend fun composeSource(
     document: DesignDocumentV1,
     actor: AuthenticatedUiBuilderActor,
+    storedDesignId: String? = null,
   ): String? {
     val response =
       try {
-        service.execute(
-          UiBuilderServiceCall(
+        if (storedDesignId != null) {
+          execute(
+            ExportDesignRequestV1(
+              designId = storedDesignId,
+              revision = document.revision,
+              format = ExportFormatV1.COMPOSE,
+            ),
             actor,
-            UiBuilderServiceRequest.ExportDocument(document, ExportFormatV1.COMPOSE),
           )
-        )
+        } else {
+          service.execute(
+            UiBuilderServiceCall(
+              actor,
+              UiBuilderServiceRequest.ExportDocument(document, ExportFormatV1.COMPOSE),
+            )
+          )
+        }
       } catch (cancelled: CancellationException) {
         throw cancelled
       } catch (_: Exception) {
@@ -2676,50 +2712,172 @@ class ServeUiBuilderMcp(
     withSource: Boolean,
     devicePng: ByteArray? = null,
     components: List<ComponentCapabilityV1>? = null,
+    /** The stored design [document] is a revision of; null for a loose or dry-run document. */
+    storedDesignId: String? = null,
   ): DesignGuidelineRequest {
     val platform = DesignGuidelinePrompt.platformOf(document.catalogPin.systemId)
-    val pictures =
+    val drawn =
       if (withRenders && platform != null) {
         guidelinePictures(
           document,
           platform,
           devicePng,
           components ?: pinnedCatalog(document, actor)?.components,
+          storedDesignId,
+          actor,
         )
-      } else emptyList()
-    val source = if (withSource && platform != null) composeSource(document, actor) else null
-    return ServeUiBuilderGuidelines.prepare(
-      designId = document.id,
-      revision = document.revision.toInt(),
-      document =
-        UI_BUILDER_JSON.encodeToJsonElement(DesignDocumentV1.serializer(), document).jsonObject,
-      pictures = pictures,
-      source = source,
-    )
+      } else GuidelinePictures(emptyList(), emptyList(), emptyList())
+    val source =
+      if (withSource && platform != null) composeSource(document, actor, storedDesignId) else null
+    val request =
+      ServeUiBuilderGuidelines.prepare(
+        designId = document.id,
+        revision = document.revision.toInt(),
+        document =
+          UI_BUILDER_JSON.encodeToJsonElement(DesignDocumentV1.serializer(), document).jsonObject,
+        pictures = drawn.pictures,
+        source = source,
+      )
+    val notes =
+      drawn.pending.map { frame ->
+        "The ${frameName(frame)} is still being drawn; ask again in a minute to include it."
+      } +
+        drawn.mismatched.map { frame ->
+          "The ${frameName(frame)} is left out: the renderer drew the design at a size other " +
+            "than ${frame.widthDp}×${frame.heightDp}dp, so it would not show what it claims to."
+        }
+    return if (notes.isEmpty()) request else request.copy(provenance = request.provenance + notes)
   }
+
+  /** The pictures a prompt attaches, and the frames it could not. */
+  private class GuidelinePictures(
+    val pictures: List<DesignGuidelinePicture>,
+    /** Still drawing when the budget ran out; they land in the cache for the next ask. */
+    val pending: List<DesignGuidelineFrame>,
+    /** Drawn at a size other than the frame's, so left out; see [ServeUiBuilderGuidelineFrames]. */
+    val mismatched: List<DesignGuidelineFrame>,
+  )
 
   /**
    * The frames [DesignGuidelineFrames.plan] names for [document], each drawn natively: a Wear
    * widget in the Samsung and Pixel Watch containers, a phone or tablet design at both sizes, a
    * Wear screen on its device and, when it holds a component its catalog marks [SCROLLABLE_TRAIT],
-   * unrolled. The device frame reuses [devicePng] when the caller already has it. A frame the host
-   * cannot render is left out. One at a time: native renders queue behind each other anyway, and a
-   * burst of them is what compose-preview-server#1421 is about.
+   * unrolled.
+   *
+   * A stored design's frames come from [guidelineFrames]: kept per revision, drawn one at a time,
+   * and waited for no longer than [guidelinePictureBudgetMillis] in all — a frame still drawing is
+   * left out and named in [GuidelinePictures.pending]. The device frame is seeded by [devicePng]
+   * when the caller already rendered it, and a widget's Pixel Watch frame by its native thumbnail.
+   * A loose document, or a host with no cache, draws every frame here as before. Either way a
+   * picture drawn at a size other than its frame's is left out rather than mislabelled.
    */
-  private fun guidelinePictures(
+  private suspend fun guidelinePictures(
     document: DesignDocumentV1,
     platform: String,
     devicePng: ByteArray?,
     components: List<ComponentCapabilityV1>?,
-  ): List<DesignGuidelinePicture> {
+    storedDesignId: String?,
+    actor: AuthenticatedUiBuilderActor,
+  ): GuidelinePictures {
+    val frames = guidelineFramesFor(document, platform, components)
+    val cache = guidelineFrames
+    val drawn: List<Pair<DesignGuidelineFrame, ByteArray>>
+    val pending: List<DesignGuidelineFrame>
+    if (cache != null && storedDesignId != null && nativePreview != null) {
+      cache.rememberWarmable(storedDesignId, actor)
+      val seeds = buildMap {
+        devicePng?.let { put(DesignGuidelinePicture.DEVICE, it) }
+        if (RecordFreeExport.isWearWidget(document)) {
+          widgetThumbnail(storedDesignId, document.revision)?.let {
+            put(DesignGuidelinePicture.WIDGET_PIXEL_WATCH, it)
+          }
+        }
+      }
+      val result =
+        cache.pictures(storedDesignId, document, frames, guidelinePictureBudgetMillis, seeds)
+      drawn = result.pictures
+      pending = result.pending
+    } else {
+      drawn = frames.mapNotNull { frame ->
+        val png =
+          if (
+            frame.kind == DesignGuidelinePicture.DEVICE &&
+              frame.environment.isEmpty() &&
+              devicePng != null
+          ) {
+            devicePng
+          } else {
+            val shape =
+              frame.environment[WearWidgetHostShape.ENVIRONMENT_KEY]?.content?.let {
+                WearWidgetHostShape.fromId(it)
+              } ?: WearWidgetHostShape.Default
+            nativeRender(ServeUiBuilderGuidelineFrames.framed(document, frame), shape)?.png
+          }
+        png?.let { frame to it }
+      }
+      pending = emptyList()
+    }
+    // A widget is drawn at its container's frame whatever the environment says, which is the
+    // frame planned for it; every other picture must be drawn at its frame's size.
+    val (matching, mismatched) =
+      drawn.partition { (frame, png) -> ServeUiBuilderGuidelineFrames.matchesFrame(png, frame) }
+    return GuidelinePictures(
+      matching.mapIndexed { index, (frame, png) ->
+        DesignGuidelinePicture.of(
+          frame,
+          index + 1,
+          "data:image/png;base64," + java.util.Base64.getEncoder().encodeToString(png),
+        )
+      },
+      pending,
+      mismatched.map { it.first },
+    )
+  }
+
+  /** [DesignGuidelineFrames.plan] for [document], scrolling by its catalog's [SCROLLABLE_TRAIT]. */
+  private fun guidelineFramesFor(
+    document: DesignDocumentV1,
+    platform: String,
+    components: List<ComponentCapabilityV1>?,
+  ): List<DesignGuidelineFrame> {
     val scrollable =
       components.orEmpty().filter { SCROLLABLE_TRAIT in it.traits }.map { it.componentId }.toSet()
     val scrolls = document.nodes.values.any { it.componentId in scrollable }
-    val frames = DesignGuidelineFrames.plan(document.toUiBuilderDocument(), platform, scrolls)
-    return drawGuidelineFrames(document, frames, devicePng) { framed, shape ->
-      nativeRender(framed, shape)?.png
-    }
+    return DesignGuidelineFrames.plan(document.toUiBuilderDocument(), platform, scrolls)
   }
+
+  /**
+   * What a background warm of [designId] draws: its latest document and planned frames, read as
+   * [actor]; null for a design with no rules for its platform. See [ServeUiBuilderGuidelineFrames].
+   */
+  internal suspend fun guidelineFramePlan(
+    designId: String,
+    actor: AuthenticatedUiBuilderActor,
+  ): Pair<DesignDocumentV1, List<DesignGuidelineFrame>>? {
+    val snapshot =
+      execute(GetSnapshotRequestV1(designId = designId, revision = null), actor)
+        as? UiBuilderServiceResponse.Snapshot ?: return null
+    val document = snapshot.snapshot.state.document
+    val platform = DesignGuidelinePrompt.platformOf(document.catalogPin.systemId) ?: return null
+    return document to
+      guidelineFramesFor(document, platform, pinnedCatalog(document, actor)?.components)
+  }
+
+  init {
+    guidelineFrames?.planner = ::guidelineFramePlan
+  }
+
+  /** How a provenance line names [frame]'s picture, as the user message does. */
+  private fun frameName(frame: DesignGuidelineFrame): String =
+    when (frame.kind) {
+      DesignGuidelinePicture.DEVICE -> "device picture"
+      DesignGuidelinePicture.UNROLLED -> "unrolled picture"
+      DesignGuidelinePicture.PHONE -> "phone picture"
+      DesignGuidelinePicture.TABLET -> "tablet picture"
+      DesignGuidelinePicture.WIDGET_SAMSUNG -> "Samsung widget picture"
+      DesignGuidelinePicture.WIDGET_PIXEL_WATCH -> "Pixel Watch widget picture"
+      else -> "${frame.kind} picture"
+    } + " (${frame.widthDp}×${frame.heightDp}dp)"
 
   /** [outcome] as [designId]'s latest record, run by [actor] on this host's model. */
   private fun recordGuidelineOutcome(
@@ -2776,7 +2934,13 @@ class ServeUiBuilderMcp(
       execute(GetSnapshotRequestV1(designId = designId, revision = revision), actor)
         as? UiBuilderServiceResponse.Snapshot ?: return null
     val document = snapshot.snapshot.state.document
-    return guidelineRequest(document, actor, withRenders = withRenders, withSource = withRenders)
+    return guidelineRequest(
+      document,
+      actor,
+      withRenders = withRenders,
+      withSource = withRenders,
+      storedDesignId = designId,
+    )
   }
 
   private suspend fun guidelinesPrompt(

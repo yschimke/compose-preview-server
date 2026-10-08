@@ -261,6 +261,8 @@ fi
   args+=(--ui-builder-guidelines-orgs "${SERVE_UI_BUILDER_GUIDELINES_ORGS}")
 [[ -n "${SERVE_UI_BUILDER_GUIDELINES_MODEL:-}" ]] &&
   args+=(--ui-builder-guidelines-model "${SERVE_UI_BUILDER_GUIDELINES_MODEL}")
+[[ -n "${SERVE_UI_BUILDER_GUIDELINES_PICTURE_BUDGET:-}" ]] &&
+  args+=(--ui-builder-guidelines-picture-budget "${SERVE_UI_BUILDER_GUIDELINES_PICTURE_BUDGET}")
 # The producer-trust store is CONFIG, on the same /config volume as catalogs.json — for the
 # same reason. It used to live only in the image, which meant trusting a new producer needed a
 # code change, a release and an image publish, while a *catalog* could be published at runtime in

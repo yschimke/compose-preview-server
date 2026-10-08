@@ -217,11 +217,13 @@ class ServeUiBuilderAgentErgonomicsTest {
     assertTrue(pictures.none { "dataUrl" in it }, pictures.toString())
     assertEquals(listOf("image", "image"), blocks.drop(1).map { it.text("type") })
     assertTrue("Picture 2 (tablet picture)" in prompt.text("userText"))
-    // The source goes along when the design exports, and the request says whether it did.
-    assertEquals(
-      prompt["sourceAttached"]!!.jsonPrimitive.booleanOrNull,
-      "```kotlin" in prompt.text("userText"),
-    )
+    // The source goes along, exported as `GET …/export.compose` exports the stored design (it
+    // used to go through `ExportDocument`, which on the live host attached nothing).
+    assertEquals(true, prompt["sourceAttached"]!!.jsonPrimitive.booleanOrNull, prompt.toString())
+    assertTrue("```kotlin" in prompt.text("userText"))
+    val (_, routeSource) =
+      http(server, "GET", "/api/ui-builder/v1/designs/agent-screen/export.compose", null)
+    assertTrue(routeSource.trim().lines().first() in prompt.text("userText"), routeSource)
     assertTrue(prompt["provenance"]!!.jsonArray.isNotEmpty())
 
     // Without renders: a read alone, no pictures, no source, and the visual rules left out.
@@ -236,6 +238,106 @@ class ServeUiBuilderAgentErgonomicsTest {
     assertEquals(false, bare["sourceAttached"]!!.jsonPrimitive.booleanOrNull)
     assertTrue(drawn.isEmpty())
     assertTrue(bare["rules"]!!.jsonObject["visualSkipped"]!!.jsonPrimitive.int > 0)
+  }
+
+  @Test
+  fun `a second ask of the same revision takes its pictures from the cache, at each frame's size`() {
+    val drawn = mutableListOf<Pair<Int, Int>>()
+    val thumbnails = ServeUiBuilderThumbnails(stateDirectory.resolve("thumbs"), "test-generation")
+    val server =
+      start(
+        thumbnails = thumbnails,
+        nativePreview =
+          UiBuilderNativePreviewLane { document, _ ->
+            synchronized(drawn) {
+              drawn += document.environment.widthDp to document.environment.heightDp
+            }
+            nativeFrame(document.environment.widthDp / 8, document.environment.heightDp / 8)
+          },
+      )
+    create(server, cleanDocument())
+
+    val first =
+      reply(server, ServeUiBuilderMcp.GUIDELINES_PROMPT, """{"designId":"agent-screen"}""")
+    // The lane is given each frame's own size: a phone and a tablet are two renders.
+    assertEquals(listOf(412 to 915, 1280 to 800), drawn)
+    assertEquals(listOf("phone", "tablet"), first.pictureKinds())
+
+    val second =
+      reply(server, ServeUiBuilderMcp.GUIDELINES_PROMPT, """{"designId":"agent-screen"}""")
+    assertEquals(listOf("phone", "tablet"), second.pictureKinds())
+    assertEquals(2, drawn.size, "nothing is drawn twice: $drawn")
+    thumbnails.close()
+  }
+
+  @Test
+  fun `a frame still drawing when the budget runs out is left out, said, and kept for next time`() {
+    val drawn = java.util.concurrent.atomic.AtomicInteger()
+    val finished = java.util.concurrent.atomic.AtomicInteger()
+    val thumbnails = ServeUiBuilderThumbnails(stateDirectory.resolve("thumbs"), "test-generation")
+    val server =
+      start(
+        thumbnails = thumbnails,
+        pictureBudgetSeconds = 1,
+        nativePreview =
+          UiBuilderNativePreviewLane { document, _ ->
+            drawn.incrementAndGet()
+            if (document.environment.widthDp == 1280) Thread.sleep(2_500)
+            nativeFrame(document.environment.widthDp / 8, document.environment.heightDp / 8).also {
+              finished.incrementAndGet()
+            }
+          },
+      )
+    create(server, cleanDocument())
+
+    val started = System.nanoTime()
+    val result =
+      call(server, ServeUiBuilderMcp.GUIDELINES_PROMPT, """{"designId":"agent-screen"}""")
+    val tookMillis = (System.nanoTime() - started) / 1_000_000
+    val blocks = result["content"]!!.jsonArray.map { it.jsonObject }
+    val prompt = result["structuredContent"]!!.jsonObject
+    assertEquals(listOf("phone"), prompt.pictureKinds())
+    assertTrue(
+      tookMillis < 2_400,
+      "answered within the budget, not after the slow frame: $tookMillis",
+    )
+    val note = "The tablet picture (1280×800dp) is still being drawn"
+    assertTrue(
+      prompt["provenance"]!!.jsonArray.any { note in it.jsonPrimitive.content },
+      prompt.toString(),
+    )
+    // Said in a text block of its own, after the request's JSON, so an agent asks again rather
+    // than judging without it.
+    assertTrue(note in blocks[1].text("text"), blocks.toString())
+
+    // The slow frame finishes into the cache; the next ask attaches it without drawing again.
+    val deadline = System.currentTimeMillis() + 10_000
+    while (finished.get() < 2 && System.currentTimeMillis() < deadline) Thread.sleep(50)
+    Thread.sleep(200)
+    val again =
+      reply(server, ServeUiBuilderMcp.GUIDELINES_PROMPT, """{"designId":"agent-screen"}""")
+    assertEquals(listOf("phone", "tablet"), again.pictureKinds())
+    assertEquals(2, drawn.get())
+    thumbnails.close()
+  }
+
+  @Test
+  fun `a picture drawn at some other size than its frame is left out, not mislabelled`() {
+    // The desktop lane once drew every m3 design at its 400×800dp sandbox, so the phone and the
+    // tablet picture came back byte-identical.
+    val server =
+      start(nativePreview = UiBuilderNativePreviewLane { _, _ -> nativeFrame(800, 1600) })
+    create(server, cleanDocument())
+
+    val prompt =
+      reply(server, ServeUiBuilderMcp.GUIDELINES_PROMPT, """{"designId":"agent-screen"}""")
+    assertEquals(emptyList(), prompt.pictureKinds())
+    val provenance = prompt["provenance"]!!.jsonArray.map { it.jsonPrimitive.content }
+    assertTrue(
+      provenance.any { "The phone picture (412×915dp) is left out" in it },
+      provenance.toString(),
+    )
+    assertTrue(provenance.any { "The tablet picture (1280×800dp) is left out" in it })
   }
 
   @Test
@@ -1093,6 +1195,9 @@ class ServeUiBuilderAgentErgonomicsTest {
   }
 
   /** A native lane's answer: a plain PNG of the given size. */
+  private fun JsonObject.pictureKinds(): List<String> =
+    this["pictures"]!!.jsonArray.map { it.jsonObject.text("kind") }
+
   private fun nativeFrame(width: Int, height: Int): UiBuilderNativePreviewOutcome {
     val image = BufferedImage(maxOf(width, 1), maxOf(height, 1), BufferedImage.TYPE_INT_RGB)
     val png = ByteArrayOutputStream().also { ImageIO.write(image, "png", it) }.toByteArray()
@@ -1319,6 +1424,8 @@ class ServeUiBuilderAgentErgonomicsTest {
     guidelines: ServeUiBuilderGuidelines? = null,
     withGuidelineRecords: Boolean = true,
     nativePreview: UiBuilderNativePreviewLane? = null,
+    thumbnails: ServeUiBuilderThumbnails? = null,
+    pictureBudgetSeconds: Long = DEFAULT_GUIDELINES_PICTURE_BUDGET_SECONDS,
   ): Running {
     val registry = ServeSessionRegistry(open = { null })
     val reviews = ServeUiBuilderReviewStore(directory.resolve("reviews"))
@@ -1343,6 +1450,8 @@ class ServeUiBuilderAgentErgonomicsTest {
           uiBuilderGuidelines = guidelines,
           uiBuilderGuidelineStore = if (withGuidelineRecords) guidelineRecords else null,
           uiBuilderNativePreview = nativePreview,
+          uiBuilderThumbnails = thumbnails,
+          uiBuilderGuidelinesPictureBudgetSeconds = pictureBudgetSeconds,
         )
         .also(ServeHttpServer::start)
     return Running(server, registry, reviews, guidelineRecords).also { running = it }
