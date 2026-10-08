@@ -3,6 +3,7 @@ package ee.schimke.composeai.cli.serve
 import ee.schimke.composeai.bundle.BundleReader
 import ee.schimke.composeai.uibuilder.export.SystemFontLookups
 import ee.schimke.composeai.uibuilder.export.TypefaceTarget
+import ee.schimke.composeai.uibuilder.export.VariableFontExportMode
 import ee.schimke.composeai.uibuilder.protocol.DesignDocumentV1
 import ee.schimke.composeai.uibuilder.service.FileUiBuilderAssetStore
 import ee.schimke.composeai.uibuilder.service.UiBuilderAssetStore
@@ -236,7 +237,12 @@ internal class DesignLocalCompileLane(
     // `SystemFont` lookups for its typefaces, because it has no Android `GoogleFont` to resolve.
     when (
       val generated =
-        executor.generate(document, typefaces = TypefaceTarget.forNativeBackend(backend))
+        executor.generate(
+          document,
+          typefaces = TypefaceTarget.forNativeBackend(backend),
+          // The bundle this compiles against carries Compose, not flexpress.
+          variableFontMode = VariableFontExportMode.STANDALONE,
+        )
     ) {
       is ScreenGeneratorComposeExportExecutor.Generated.Emitted ->
         DesignLocalLane.Source.Emitted(
