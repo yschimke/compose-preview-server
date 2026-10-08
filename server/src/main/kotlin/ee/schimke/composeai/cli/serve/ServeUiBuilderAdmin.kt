@@ -41,6 +41,8 @@ class ServeUiBuilderAdmin(
    */
   private val designs: UiBuilderServicePort? = null,
   private val onLog: (String) -> Unit = { System.err.println(it) },
+  /** The design's latest guidelines result, forgotten with the design. */
+  private val guidelineRecords: ServeUiBuilderGuidelineStore? = null,
 ) {
   sealed interface Result {
     /** The design is gone, durably. */
@@ -220,6 +222,12 @@ class ServeUiBuilderAdmin(
       }
     }
       .onFailure { onLog("serve: review record for $designId not removed (${it.message})") }
+    runCatching {
+      if (guidelineRecords?.delete(designId) == false) {
+        onLog("serve: guidelines record for $designId not removed")
+      }
+    }
+      .onFailure { onLog("serve: guidelines record for $designId not removed (${it.message})") }
     return Result.Deleted(designId)
   }
 }

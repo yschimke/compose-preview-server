@@ -690,6 +690,12 @@ internal data class UiBuilderDesignCheckV1(
   val truncated: Int = 0,
   /** Checks that were asked for and could not run here, with why. */
   val skipped: List<UiBuilderCheckSkippedV1> = emptyList(),
+  /**
+   * The guidelines result this check recorded as the design's latest — what
+   * `ui_builder_get_guidelines` and the editor now show. Null when `guidelines` did not run, or ran
+   * on a dry run or a loose document, which are not recorded.
+   */
+  val guidelines: ee.schimke.composeai.uibuilder.guidelines.DesignGuidelineRecord? = null,
 )
 
 @Serializable

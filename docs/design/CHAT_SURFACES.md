@@ -69,6 +69,7 @@ the image blocks it always returned and changes nothing.
 | `ui_builder_export_document` (`png`) | image block | ✅ **added here** (kept) | ✅ | Text and JSON exports are text. |
 | `ui_builder_export` | Kotlin, SVG or JSON text | n/a | n/a | Source, not a picture. |
 | `ui_builder_render_design_matrix` (#1260) | image block only with `inline=true` | ✅ (kept) | ✅ | Shares `ui_builder_view`'s result path, so it got the link and the text line without its own change. |
+| `ui_builder_guidelines_prompt` | one image block per picture | n/a | n/a | The pictures are the prompt's own attachments, in the order its user message numbers them, so they stay blocks for the agent's model; the JSON text carries no base64. |
 | `ui_builder_check_design`, `ui_builder_diff_designs`, `ui_builder_list_revisions` | none | n/a | n/a | Text and JSON reports. |
 | `resources/read` | `blob` | n/a | n/a | MCP resource content is base64 by protocol, and a chat host does not call it. |
 

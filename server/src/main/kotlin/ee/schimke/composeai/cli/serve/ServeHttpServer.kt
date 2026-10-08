@@ -604,6 +604,11 @@ class ServeHttpServer(
    * the decision and implementation tools unregistered, for the links store's reason.
    */
   private val uiBuilderReviewStore: ServeUiBuilderReviewStore? = null,
+  /**
+   * Each design's latest guidelines result. Null leaves the guidelines result routes and the
+   * get/record tools unregistered; the prompt route and tool stay, since they keep nothing.
+   */
+  private val uiBuilderGuidelineStore: ServeUiBuilderGuidelineStore? = null,
   /** Shared server-side folders for designs; null leaves folder organization unavailable. */
   private val uiBuilderFolderStore: ServeUiBuilderFolderStore? = null,
   /**
@@ -868,29 +873,37 @@ class ServeHttpServer(
 
   private val renderSemaphore = Semaphore(renderSlots)
   private val uiBuilderAgentPresence = ServeUiBuilderAgentPresence()
+  /**
+   * The UI-builder MCP tools, built once: the catalog MCP endpoint serves them, and the guidelines
+   * prompt route builds its request through the same code the prompt tool does.
+   */
+  private val uiBuilderMcp: ServeUiBuilderMcp? by lazy {
+    designService?.let {
+      ServeUiBuilderMcp(
+        it,
+        ::canonicalServerOrigin,
+        uiBuilderNativePreview,
+        uiBuilderCommentStore,
+        references = uiBuilderReferenceStore,
+        links = uiBuilderLinksStore,
+        assets = designAssets,
+        validator = uiBuilderValidator,
+        reviews = uiBuilderReviewStore,
+        branches = designBranches,
+        agentPresence = uiBuilderAgentPresence,
+        guidelines = uiBuilderGuidelines,
+        guidelineRecords = uiBuilderGuidelineStore,
+      )
+    }
+  }
+
   private val catalogMcp =
     if (catalogMcpEnabled && machineAuthorization != null)
       ServeCatalogMcp(
         sessions,
         renderSemaphore,
         projectHistory = projectHistory,
-        uiBuilder =
-          designService?.let {
-            ServeUiBuilderMcp(
-              it,
-              ::canonicalServerOrigin,
-              uiBuilderNativePreview,
-              uiBuilderCommentStore,
-              references = uiBuilderReferenceStore,
-              links = uiBuilderLinksStore,
-              assets = designAssets,
-              validator = uiBuilderValidator,
-              reviews = uiBuilderReviewStore,
-              branches = designBranches,
-              agentPresence = uiBuilderAgentPresence,
-              guidelines = uiBuilderGuidelines,
-            )
-          },
+        uiBuilder = uiBuilderMcp,
         uiBuilderNative = uiBuilderNativePreview != null,
         publicOrigin = ::canonicalServerOrigin,
         pendingCatalogs = {
@@ -1369,6 +1382,15 @@ class ServeHttpServer(
               designService,
               sameOriginUiBuilderAuthorization,
               uiBuilderReviewStore,
+            )
+          }
+          val guidelinesMcp = uiBuilderMcp
+          if (uiBuilderGuidelineStore != null && guidelinesMcp != null) {
+            installUiBuilderGuidelineRoutes(
+              designService,
+              sameOriginUiBuilderAuthorization,
+              uiBuilderGuidelineStore,
+              guidelinesMcp::guidelinesPromptFor,
             )
           }
           if (uiBuilderFolderStore != null) {
@@ -15442,6 +15464,16 @@ class ServeHttpServer(
           }
             .onFailure {
               System.err.println("serve: review record for $designId not removed (${it.message})")
+            }
+          runCatching {
+            if (uiBuilderGuidelineStore?.delete(designId) == false) {
+              System.err.println("serve: guidelines record for $designId not removed")
+            }
+          }
+            .onFailure {
+              System.err.println(
+                "serve: guidelines record for $designId not removed (${it.message})"
+              )
             }
           runCatching {
             if (uiBuilderFolderStore?.move(designId, null) is FolderWriteResult.Failed) {

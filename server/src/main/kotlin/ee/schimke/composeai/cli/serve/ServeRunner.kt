@@ -2641,6 +2641,8 @@ public class ServeRunner(
     val links: ServeUiBuilderLinksStore?,
     /** Review verdicts and implementing pull requests, beside the state for the links' reasons. */
     val reviews: ServeUiBuilderReviewStore?,
+    /** Each design's latest guidelines result, beside the state for the same reasons. */
+    val guidelineRecords: ServeUiBuilderGuidelineStore? = null,
     /** Shared file-manager folders, stored beside design state without changing revisions. */
     val folders: ServeUiBuilderFolderStore?,
     /**
@@ -3277,6 +3279,15 @@ public class ServeRunner(
             )
           }
           .getOrNull(),
+      guidelineRecords =
+        runCatching { ServeUiBuilderGuidelineStore(directory.resolve("guidelines").toPath()) }
+          .onFailure {
+            System.err.println(
+              "serve: UI-builder guidelines results unavailable (${it.message}); " +
+                "the builder works, and a guidelines check is not kept"
+            )
+          }
+          .getOrNull(),
       thumbnails = runCatching {
           ServeUiBuilderThumbnails(
             directory.resolve("thumbnails").toPath(),
@@ -3635,6 +3646,7 @@ public class ServeRunner(
           reviews = uiBuilderLane.reviews,
           thumbnails = uiBuilderLane.thumbnails,
           designs = uiBuilderLane.service,
+          guidelineRecords = uiBuilderLane.guidelineRecords,
         )
       } else {
         null
@@ -3910,6 +3922,7 @@ public class ServeRunner(
         uiBuilderCommentStore = uiBuilderLane?.comments,
         uiBuilderLinksStore = uiBuilderLane?.links,
         uiBuilderReviewStore = uiBuilderLane?.reviews,
+        uiBuilderGuidelineStore = uiBuilderLane?.guidelineRecords,
         uiBuilderFolderStore = uiBuilderLane?.folders,
         uiBuilderAssets = uiBuilderLane?.service,
         // Wrapped like the service, so a merge redraws the parent's listing card.

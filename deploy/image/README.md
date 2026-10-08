@@ -782,9 +782,11 @@ private to its owner and whoever it is shared with. preview.coo.ee runs `public`
 
 `ui_builder_check_design` can also run a `guidelines` check: a model, reached through
 [OpenRouter](https://openrouter.ai), judges a design against the Android design guides for its
-platform (Wear OS for `wear-m3`/`remote-m3`, AI glasses for `glimmer`) and reports each broken rule
-as a warning or note with its developer.android.com source. It runs on **this box's** OpenRouter
-key, so it is off unless both are set:
+platform (Wear OS for `wear-m3`/`remote-m3`, AI glasses for `glimmer`, phones and tablets for
+`m3`) and reports each broken rule as a warning or note with its developer.android.com source. The
+rules, the prompt and the pictures it is shown are compose-ui-builder's (`ui-builder-export`), so they
+change with the `composeai-ui-builder` pin. It runs on **this box's** OpenRouter key, so it is off
+unless both are set:
 
 ```
 SERVE_UI_BUILDER_GUIDELINES_OPENROUTER_KEY=sk-or-...   # read by the server, never put on argv
@@ -799,6 +801,12 @@ person who approved it. Org membership is asked of GitHub and remembered for ten
 (default `typesafe/jev-router`). Everyone else gets the check reported as skipped, and can run the
 same rules in the editor's Issues panel with their own OpenRouter key; the editor page's
 `connect-src` admits `https://openrouter.ai` for that.
+
+Without any key, `ui_builder_guidelines_prompt` (and `GET /api/ui-builder/v1/designs/{id}/guidelines/prompt`,
+which the editor's **Show the prompt** reads) hands out the same request, pictures included, so an
+agent can judge it with its own model and record the verdicts with `ui_builder_record_guidelines`.
+Each design keeps one latest result under `<ui-builder state>/guidelines/`, whoever ran it; the
+editor reads and posts it at `/api/ui-builder/v1/designs/{id}/guidelines`.
 
 ### Playground on `preview.coo.ee`
 

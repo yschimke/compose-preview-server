@@ -1,5 +1,7 @@
 package ee.schimke.composeai.cli.serve
 
+import ee.schimke.composeai.uibuilder.export.WearWidgetHostShape
+import ee.schimke.composeai.uibuilder.export.toUiBuilderDocument
 import ee.schimke.composeai.uibuilder.protocol.AnimationStateV1
 import ee.schimke.composeai.uibuilder.protocol.BackgroundModifierV1
 import ee.schimke.composeai.uibuilder.protocol.CatalogReferenceV1
@@ -18,6 +20,7 @@ import ee.schimke.composeai.uibuilder.protocol.LayoutDirectionV1
 import ee.schimke.composeai.uibuilder.protocol.NodeLocationV1
 import ee.schimke.composeai.uibuilder.protocol.NullValueV1
 import ee.schimke.composeai.uibuilder.protocol.ParentSlotV1
+import ee.schimke.composeai.uibuilder.protocol.SetPropertyMutationV1
 import ee.schimke.composeai.uibuilder.protocol.SizeModifierV1
 import ee.schimke.composeai.uibuilder.protocol.StringValueV1
 import ee.schimke.composeai.uibuilder.protocol.ThemeV1
@@ -44,12 +47,15 @@ import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.buildJsonArray
+import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.int
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.long
 import kotlinx.serialization.json.longOrNull
+import kotlinx.serialization.json.put
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -137,22 +143,260 @@ class ServeUiBuilderAgentErgonomicsTest {
     assertTrue("no guidelines model" in skipped.text("reason"), skipped.toString())
     bare.close()
 
-    // Configured, and the operator may spend the key; this catalog has no guides written for it,
-    // so the model is never asked and the reply says so.
+    // Configured, and the operator may spend the key: an m3 design is judged against the mobile
+    // (adaptive) rules, and the result becomes the design's recorded one, run by the caller.
+    var asked = 0
     val config = ServeUiBuilderGuidelinesConfig(apiKey = "sk-or-test", allowedUsers = setOf("a"))
     val lane =
       ServeUiBuilderGuidelines(
         config,
         ServeUiBuilderGuidelineAccess(config.allowedUsers, emptySet(), { _, _ -> false }),
-        transport = { _, _ -> error("the model must not be asked") },
+        transport = { body, _ ->
+          asked++
+          assertTrue("mobile.touch-target-48dp" in body, body.take(500))
+          OpenRouterTransport.Response(200, completion("mobile.touch-target-48dp", "fail"))
+        },
       )
     val server = start(directory = stateDirectory.resolve("guided"), guidelines = lane)
     create(server, cleanDocument())
     val defaults = check(server, """{"designId":"agent-screen"}""")
     assertEquals(listOf("schema", "catalog", "a11y"), defaults.strings("checks"))
+    assertEquals(0, asked)
     val named = check(server, """{"designId":"agent-screen","checks":["a11y","guidelines"]}""")
-    val reason = named["skipped"]!!.jsonArray.single().jsonObject.text("reason")
-    assertTrue("no guidelines are written for catalog `m3-catalog`" in reason, reason)
+    assertEquals(1, asked)
+    assertTrue(
+      named["findings"]!!.jsonArray.any {
+        it.jsonObject.text("code") == "mobile.touch-target-48dp"
+      },
+      named.toString(),
+    )
+    val recorded = named["guidelines"]!!.jsonObject
+    assertEquals(OPERATOR_ACTOR, recorded.text("ranBy"))
+    assertEquals(config.model, recorded.text("model"))
+    assertEquals(OPERATOR_ACTOR, server.guidelineRecords.read("agent-screen")!!.ranBy)
+    // A dry run is checked and not recorded.
+    server.guidelineRecords.delete("agent-screen")
+    check(server, """{"designId":"agent-screen","checks":["guidelines"],"operations":[]}""")
+    assertNull(server.guidelineRecords.read("agent-screen"))
+  }
+
+  // ---- guidelines prompt and shared result -----------------------------------------------------
+
+  @Test
+  fun `the guidelines prompt is the request, with each planned frame as a picture, and no key`() {
+    val drawn = mutableListOf<Pair<Int, Int>>()
+    val server =
+      start(
+        nativePreview =
+          UiBuilderNativePreviewLane { document, _ ->
+            drawn += document.environment.widthDp to document.environment.heightDp
+            nativeFrame(document.environment.widthDp / 8, document.environment.heightDp / 8)
+          }
+      )
+    create(server, cleanDocument())
+
+    val result =
+      call(server, ServeUiBuilderMcp.GUIDELINES_PROMPT, """{"designId":"agent-screen"}""")
+
+    assertNull(result["isError"], result.toString())
+    val blocks = result["content"]!!.jsonArray.map { it.jsonObject }
+    val prompt = Json.parseToJsonElement(blocks.first().text("text")).jsonObject
+    assertEquals(prompt, result["structuredContent"])
+    assertTrue(
+      SchemaCheck(outputSchema(server, ServeUiBuilderMcp.GUIDELINES_PROMPT))
+        .errors(prompt)
+        .isEmpty()
+    )
+    assertEquals("compose-ui-builder/guidelines-prompt/v1", prompt.text("schema"))
+    assertEquals("mobile", prompt.text("platform"))
+    // The phone and the tablet, drawn natively in that order, attached as image blocks with their
+    // bytes kept out of the text.
+    assertEquals(listOf(412 to 915, 1280 to 800), drawn)
+    val pictures = prompt["pictures"]!!.jsonArray.map { it.jsonObject }
+    assertEquals(listOf("phone", "tablet"), pictures.map { it.text("kind") })
+    assertTrue(pictures.none { "dataUrl" in it }, pictures.toString())
+    assertEquals(listOf("image", "image"), blocks.drop(1).map { it.text("type") })
+    assertTrue("Picture 2 (tablet picture)" in prompt.text("userText"))
+    // The source goes along when the design exports, and the request says whether it did.
+    assertEquals(
+      prompt["sourceAttached"]!!.jsonPrimitive.booleanOrNull,
+      "```kotlin" in prompt.text("userText"),
+    )
+    assertTrue(prompt["provenance"]!!.jsonArray.isNotEmpty())
+
+    // Without renders: a read alone, no pictures, no source, and the visual rules left out.
+    drawn.clear()
+    val bare =
+      reply(
+        server,
+        ServeUiBuilderMcp.GUIDELINES_PROMPT,
+        """{"designId":"agent-screen","rendered":false}""",
+      )
+    assertTrue(bare["pictures"]!!.jsonArray.isEmpty())
+    assertEquals(false, bare["sourceAttached"]!!.jsonPrimitive.booleanOrNull)
+    assertTrue(drawn.isEmpty())
+    assertTrue(bare["rules"]!!.jsonObject["visualSkipped"]!!.jsonPrimitive.int > 0)
+  }
+
+  @Test
+  fun `an agent records its own verdicts, which read back with who ran them and when stale`() {
+    val server = start()
+    create(server, cleanDocument())
+    val empty = typed(server, ServeUiBuilderMcp.GET_GUIDELINES, """{"designId":"agent-screen"}""")
+    assertNull(empty["record"], empty.toString())
+    val revision = revisionOf(server)
+
+    val recorded =
+      typed(
+        server,
+        ServeUiBuilderMcp.RECORD_GUIDELINES,
+        """{"designId":"agent-screen","revision":$revision,"model":"anthropic/claude-haiku-5.5",
+          "asked":["mobile.touch-target-48dp","mobile.layout.no-stretched-content"],
+          "verdicts":[{"ruleId":"mobile.touch-target-48dp","verdict":"fail","confidence":0.9,
+            "nodeIds":["session"],"reason":"Too small."}]}""",
+      )
+    val record = recorded["record"]!!.jsonObject
+    assertEquals(OPERATOR_ACTOR, record.text("ranBy"))
+    assertEquals(false, recorded["stale"]!!.jsonPrimitive.booleanOrNull)
+    assertEquals(listOf("mobile.layout.no-stretched-content"), recorded.strings("unanswered"))
+    assertEquals("session", recorded["findings"]!!.jsonArray.single().jsonObject.text("nodeId"))
+
+    // A rule this host never wrote, or a verdict on a rule not asked, is refused.
+    assertError(
+      server,
+      ServeUiBuilderMcp.RECORD_GUIDELINES,
+      """{"designId":"agent-screen","revision":$revision,"model":"m","asked":["made.up"],"verdicts":[]}""",
+      "does not know",
+    )
+
+    // The design moves on; the record says so.
+    envelope(
+      server,
+      ServeUiBuilderMcp.APPLY,
+      """{"designId":"agent-screen","operationId":"move-1","baseRevision":$revision,"operations":${operations(
+        SetPropertyMutationV1("session", "text", StringValueV1("Moved"))
+      )}}""",
+    )
+    val stale = typed(server, ServeUiBuilderMcp.GET_GUIDELINES, """{"designId":"agent-screen"}""")
+    assertEquals(true, stale["stale"]!!.jsonPrimitive.booleanOrNull, stale.toString())
+
+    // Deleting the design forgets its record.
+    envelope(server, ServeUiBuilderMcp.DELETE_DESIGN, """{"designId":"agent-screen"}""")
+    assertNull(server.guidelineRecords.read("agent-screen"))
+  }
+
+  @Test
+  fun `the editor's guidelines routes serve the prompt and the shared result, authorised`() {
+    val server = start()
+    create(server, cleanDocument())
+    val revision = revisionOf(server)
+    val (promptStatus, promptBody) =
+      http(
+        server,
+        "GET",
+        "/api/ui-builder/v1/designs/agent-screen/guidelines/prompt?rendered=false",
+        null,
+      )
+    assertEquals(200, promptStatus, promptBody)
+    assertEquals("mobile", Json.parseToJsonElement(promptBody).jsonObject.text("platform"))
+    assertEquals(
+      404,
+      http(server, "GET", "/api/ui-builder/v1/designs/agent-screen/guidelines", null).first,
+    )
+
+    val body =
+      """{"revision":$revision,"model":"openai/gpt-x","rulesVersion":1,
+        "asked":["mobile.touch-target-48dp"],"ranBy":"github:forged",
+        "verdicts":[{"ruleId":"mobile.touch-target-48dp","verdict":"pass","confidence":0.8}]}"""
+    val (posted, stored) =
+      http(server, "POST", "/api/ui-builder/v1/designs/agent-screen/guidelines", body)
+    assertEquals(200, posted, stored)
+    assertEquals(OPERATOR_ACTOR, Json.parseToJsonElement(stored).jsonObject.text("ranBy"))
+    val (read, readBody) =
+      http(server, "GET", "/api/ui-builder/v1/designs/agent-screen/guidelines", null)
+    assertEquals(200, read, readBody)
+    assertEquals("openai/gpt-x", Json.parseToJsonElement(readBody).jsonObject.text("model"))
+
+    assertEquals(
+      422,
+      http(
+          server,
+          "POST",
+          "/api/ui-builder/v1/designs/agent-screen/guidelines",
+          body.replace("\"pass\"", "\"maybe\""),
+        )
+        .first,
+    )
+    assertEquals(
+      404,
+      http(server, "GET", "/api/ui-builder/v1/designs/nobody/guidelines/prompt", null).first,
+    )
+    val anonymous =
+      client
+        .newCall(
+          Request.Builder()
+            .url(
+              "http://127.0.0.1:${server.server.port}/api/ui-builder/v1/designs/agent-screen/guidelines"
+            )
+            .build()
+        )
+        .execute()
+        .use { it.code }
+    assertEquals(401, anonymous)
+  }
+
+  @Test
+  fun `the guidelines record tools exist only with a store, and the prompt tool always`() {
+    val server = start(withGuidelineRecords = false)
+    val names = tools(server)
+    assertTrue(ServeUiBuilderMcp.GUIDELINES_PROMPT in names, names.toString())
+    assertTrue(ServeUiBuilderMcp.GUIDELINE_RECORD_TOOL_NAMES.none { it in names }, names.toString())
+    running?.close()
+    running = null
+    val kept = start(directory = stateDirectory.resolve("kept"))
+    assertTrue(ServeUiBuilderMcp.GUIDELINE_RECORD_TOOL_NAMES.all { it in tools(kept) })
+  }
+
+  @Test
+  fun `a widget is drawn in the Samsung and Pixel Watch containers, each at its own size`() {
+    val widget =
+      cleanDocument()
+        .copy(
+          catalogPin = CatalogReferenceV1("remote-m3", "candidate", "candidate", "candidate"),
+          roots = listOf("widget"),
+          nodes =
+            mapOf(
+              "widget" to
+                DesignNodeV1(id = "widget", componentId = "remote-m3/widget-container-large")
+            ),
+        )
+    val frames =
+      ee.schimke.composeai.uibuilder.guidelines.DesignGuidelineFrames.plan(
+        widget.toUiBuilderDocument(),
+        "wear",
+      )
+    val shapes = mutableListOf<Triple<WearWidgetHostShape, Int, Int>>()
+    val pictures =
+      ServeUiBuilderMcp.drawGuidelineFrames(widget, frames, devicePng = null) { framed, shape ->
+        shapes += Triple(shape, framed.environment.widthDp, framed.environment.heightDp)
+        byteArrayOf(1)
+      }
+    assertEquals(
+      listOf(
+        Triple(WearWidgetHostShape.Round, 230, 168),
+        Triple(WearWidgetHostShape.Squircle, 216, 124),
+      ),
+      shapes,
+    )
+    assertEquals(listOf("widget-samsung", "widget-pixel-watch"), pictures.map { it.kind })
+    assertTrue(pictures[0].description.startsWith("Picture 1 (Samsung widget picture)"))
+
+    // A frame the renderer cannot draw is left out, and the rest are renumbered.
+    val one =
+      ServeUiBuilderMcp.drawGuidelineFrames(widget, frames, devicePng = null) { _, shape ->
+        if (shape == WearWidgetHostShape.Round) null else byteArrayOf(1)
+      }
+    assertTrue(one.single().description.startsWith("Picture 1 (Pixel Watch widget picture)"))
   }
 
   @Test
@@ -848,6 +1092,48 @@ class ServeUiBuilderAgentErgonomicsTest {
     )
   }
 
+  /** A native lane's answer: a plain PNG of the given size. */
+  private fun nativeFrame(width: Int, height: Int): UiBuilderNativePreviewOutcome {
+    val image = BufferedImage(maxOf(width, 1), maxOf(height, 1), BufferedImage.TYPE_INT_RGB)
+    val png = ByteArrayOutputStream().also { ImageIO.write(image, "png", it) }.toByteArray()
+    return UiBuilderNativePreviewOutcome.Rendered(
+      response =
+        PlaygroundRunResponse(
+          previewId = "generated",
+          previewToken = "token",
+          image = Base64.getEncoder().encodeToString(png),
+        ),
+      taggedNodeIds = emptyList(),
+      nodeBounds = emptyMap(),
+    )
+  }
+
+  /** An OpenRouter completion answering [ruleId] with [verdict]. */
+  private fun completion(ruleId: String, verdict: String): String {
+    val content =
+      """{"verdicts":[{"ruleId":"$ruleId","verdict":"$verdict","confidence":0.9,""" +
+        """"nodeIds":["session"],"reason":"Because."}]}"""
+    return buildJsonObject {
+      put(
+        "choices",
+        buildJsonArray {
+          add(
+            buildJsonObject {
+              put(
+                "message",
+                buildJsonObject {
+                  put("role", "assistant")
+                  put("content", content)
+                },
+              )
+            }
+          )
+        },
+      )
+    }
+      .toString()
+  }
+
   private fun create(server: Running, document: DesignDocumentV1) {
     envelope(
       server,
@@ -1031,9 +1317,12 @@ class ServeUiBuilderAgentErgonomicsTest {
     withReviews: Boolean = true,
     directory: Path = stateDirectory,
     guidelines: ServeUiBuilderGuidelines? = null,
+    withGuidelineRecords: Boolean = true,
+    nativePreview: UiBuilderNativePreviewLane? = null,
   ): Running {
     val registry = ServeSessionRegistry(open = { null })
     val reviews = ServeUiBuilderReviewStore(directory.resolve("reviews"))
+    val guidelineRecords = ServeUiBuilderGuidelineStore(directory.resolve("guidelines"))
     val server =
       ServeHttpServer(
           host = "127.0.0.1",
@@ -1052,15 +1341,18 @@ class ServeUiBuilderAgentErgonomicsTest {
           uiBuilderValidator =
             if (withValidator) ScratchUiBuilderDraftValidator(catalogs(), exporter()) else null,
           uiBuilderGuidelines = guidelines,
+          uiBuilderGuidelineStore = if (withGuidelineRecords) guidelineRecords else null,
+          uiBuilderNativePreview = nativePreview,
         )
         .also(ServeHttpServer::start)
-    return Running(server, registry, reviews).also { running = it }
+    return Running(server, registry, reviews, guidelineRecords).also { running = it }
   }
 
   private data class Running(
     val server: ServeHttpServer,
     val registry: ServeSessionRegistry,
     val reviews: ServeUiBuilderReviewStore,
+    val guidelineRecords: ServeUiBuilderGuidelineStore,
   ) : AutoCloseable {
     override fun close() {
       server.stop()
@@ -1070,6 +1362,8 @@ class ServeUiBuilderAgentErgonomicsTest {
 
   private companion object {
     const val OPERATOR_TOKEN = "ui-builder-ergonomics-operator-token"
+    /** Who the operator token acts as, which is who a record says ran it. */
+    val OPERATOR_ACTOR: String = ServeAgentGrants.OPERATOR_ACTOR_ID
     const val PUBLIC_ORIGIN = "https://designs.example"
     const val CATALOG_SYSTEM_ID = "m3-catalog"
     const val LIGHT_FILL = 0xF0F0F0
