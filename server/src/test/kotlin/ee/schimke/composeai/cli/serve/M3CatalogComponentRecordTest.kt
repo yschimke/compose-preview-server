@@ -165,6 +165,11 @@ class M3CatalogComponentRecordTest {
       "m3/time-picker" to
         "the record carries neither TimePicker nor TimeInput, so no variant entry could name a " +
           "callable that resolves",
+      // Called through a declaration flexpress generates into the screen's own package at export,
+      // so no catalog records it: the export adds that declaration's record component itself
+      // (compose-ui-builder's VariableFontTextRecord), the way it does the theme's.
+      "m3/variable-font-text" to
+        "calls a declaration flexpress generates at export; the export records it, not the catalog",
       "remote-compose/document" to "typed embed, kept out of the Compose exporter by design",
       "remote-compose/inline" to
         "the vocabulary switch: its subtree is @RemoteComposable and InlineRemoteContentExporter writes it, not the Compose exporter",

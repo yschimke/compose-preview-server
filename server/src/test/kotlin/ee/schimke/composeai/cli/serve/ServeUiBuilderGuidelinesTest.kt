@@ -4,6 +4,7 @@ import ee.schimke.composeai.uibuilder.guidelines.DesignGuidelineFrame
 import ee.schimke.composeai.uibuilder.guidelines.DesignGuidelinePicture
 import ee.schimke.composeai.uibuilder.guidelines.DesignGuidelinePrompt
 import ee.schimke.composeai.uibuilder.guidelines.DesignGuidelineRecord
+import ee.schimke.composeai.uibuilder.guidelines.DesignGuidelineRule
 import ee.schimke.composeai.uibuilder.guidelines.DesignGuidelineRuleSet
 import ee.schimke.composeai.uibuilder.guidelines.DesignGuidelineVerdict
 import ee.schimke.composeai.uibuilder.guidelines.body
@@ -44,7 +45,9 @@ class ServeUiBuilderGuidelinesTest {
   @Test
   fun `a request asks the visual rules only with pictures, and describes each picture`() {
     val bare = ServeUiBuilderGuidelines.prepare("d", 3, wearDocument(), emptyList(), null)
-    val wear = DesignGuidelineRuleSet.Bundled.forPlatform("wear")
+    // A Wear screen is asked the screen rules: the widget-only ones cannot apply to it.
+    val wear =
+      DesignGuidelineRuleSet.Bundled.forPlatform("wear", DesignGuidelineRule.SURFACE_SCREEN)
     assertEquals(wear.filterNot { it.visual }.map { it.id }, bare.rules.asked.map { it.id })
     assertEquals(wear.count { it.visual }, bare.rules.visualSkipped)
     assertTrue(bare.provenance.any { "No picture is attached" in it }, bare.provenance.toString())
