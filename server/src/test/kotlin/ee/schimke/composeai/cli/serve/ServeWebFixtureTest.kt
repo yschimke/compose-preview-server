@@ -3842,6 +3842,14 @@ class ServeWebFixtureTest {
         isPublic = true,
         version = version,
         cmpWasmPlayerPath = "/rc-player-wasm/index.html",
+        serverPlayers =
+          listOf(
+            ServeWeb.DocServerPlayer(
+              "cmp-jvm",
+              "CMP (JVM)",
+              "/d/Tz3l9WcAq0Xj5RmB7dPuKw/render.png",
+            )
+          ),
       )
 
     // The styled 404 a browser gets when it follows a dead link to a catalog or preview page —
@@ -6164,20 +6172,27 @@ class ServeWebFixtureTest {
     assertTrue(
       docRemoteComposePlayers.contains("data-doc-player=\"camaelon-js\"") &&
         docRemoteComposePlayers.contains("data-doc-player=\"cmp-wasm\"") &&
-        docRemoteComposePlayers.contains("id=\"cp-doc-wasm\"") &&
+        docRemoteComposePlayers.contains("id=\"cp-doc-lane-cmp-wasm\"") &&
         docRemoteComposePlayers.contains("\"/rc-player-wasm/index.html\""),
-      "an .rc permalink on a CMP-serving host offers both players",
+      "an .rc permalink on a CMP-serving host offers both browser players",
+    )
+    assertTrue(
+      docRemoteComposePlayers.contains("data-doc-player=\"cmp-jvm\"") &&
+        docRemoteComposePlayers.contains(
+          "data-doc-lane-path=\"/d/Tz3l9WcAq0Xj5RmB7dPuKw/render.png\""
+        ),
+      "a server-side player is offered as a lane rendered from the document's render path",
     )
     // Each lane reports into its own status line, so the TypeScript lane finishing first cannot
     // mark a still-loading CMP frame ready; and a CMP frame that never reports times out.
     assertTrue(
-      docRemoteComposePlayers.contains("id=\"cp-doc-status-wasm\" hidden") &&
+      docRemoteComposePlayers.contains("id=\"cp-doc-status-cmp-wasm\" hidden") &&
         docRemoteComposePlayers.contains("didn't start") &&
         docRemoteComposePlayers.contains("20000"),
       "the CMP lane has its own status line and a start timeout",
     )
     assertFalse(
-      docRemoteCompose.contains("data-doc-player") || docRemoteCompose.contains("cp-doc-wasm"),
+      docRemoteCompose.contains("data-doc-player") || docRemoteCompose.contains("data-doc-lane"),
       "an .rc permalink on a host without the CMP player offers no toggle",
     )
     assertFalse(

@@ -150,6 +150,35 @@ class ServeDocRoutingTest {
   }
 
   @Test
+  fun `a remote compose document renders server-side only with the cmp-jvm player`() {
+    val path =
+      upload(
+          "watchface.rc",
+          ServeDocFixtures.remoteComposeDoc(width = 320, height = 320),
+          "application/octet-stream",
+        )
+        .use { response ->
+          Json.parseToJsonElement(response.body.string()).jsonObject["url"]!!.jsonPrimitive.content
+        }
+
+    // The one server-side player a shared document can name today; anything else is the caller's
+    // mistake, not a missing document.
+    get("$path/render.png?rcPlayer=androidx-view").use { response ->
+      assertEquals(400, response.code)
+    }
+    // Rendered, or — where this test JVM has no desktop-player sidecar — a retryable 503 naming
+    // why. Never a 404 or a 500: the document is there and the lane exists.
+    get("$path/render.png?rcPlayer=cmp-jvm").use { response ->
+      assertTrue(response.code == 200 || response.code == 503, "got ${response.code}")
+      if (response.code == 200) assertEquals("image/png", response.body.contentType().toString())
+      assertEquals("private, no-store", response.header("Cache-Control"))
+    }
+    get("/d/AAAAAAAAAAAAAAAAAAAAAA/render.png?rcPlayer=cmp-jvm").use { response ->
+      assertEquals(404, response.code)
+    }
+  }
+
+  @Test
   fun `an upload that is not a known document is refused`() {
     upload("evil.rc", "<html><script>alert(1)</script></html>".toByteArray(), "text/html").use {
       assertEquals(400, it.code)

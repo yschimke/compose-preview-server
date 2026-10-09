@@ -10493,6 +10493,12 @@ ${captureControlsHtml().prependIndent("          ")}
      * the same bytes, played by the vendored TypeScript player or by the Compose Multiplatform one.
      */
     cmpWasmPlayerPath: String? = null,
+    /**
+     * The server-side players this host can draw the document with, each answering at its own
+     * render path (`/d/<id>/render.png?rcPlayer=<id>`). Each adds a lane to the `.rc` permalink's
+     * toggle beside the browser players; empty leaves the toggle to those.
+     */
+    serverPlayers: List<DocServerPlayer> = emptyList(),
   ): String {
     val suffix = querySuffix(queryString(token, sessionId = null, isPublic = isPublic))
     val facts =
@@ -10513,22 +10519,41 @@ ${captureControlsHtml().prependIndent("          ")}
     // which reads the global as it starts the lane; this page has no Vue controls.
     val rcFontsScript =
       if (isRemoteComposeDoc) scriptTag("remote-compose.js") + "\n        " else ""
-    // Only a Remote Compose document has two players to choose between, and only a host that serves
-    // the CMP one offers the choice. Same segmented shape and ids as the viewer's `rcPlayer=`
-    // lanes.
-    val playerToggle = isRemoteComposeDoc && cmpWasmPlayerPath != null
+    // Only a Remote Compose document has players to choose between, and only a host with a second
+    // one — the CMP Wasm player, or a server-side player — offers the choice. Same segmented shape
+    // and ids as the viewer's `rcPlayer=` lanes.
+    val lanes =
+      if (!isRemoteComposeDoc) emptyList()
+      else
+        buildList {
+          add(DocLane(DOC_PLAYER_JS, "TypeScript", DocLaneKind.CANVAS))
+          if (cmpWasmPlayerPath != null) {
+            add(DocLane(DOC_PLAYER_CMP_WASM, "CMP (Wasm)", DocLaneKind.FRAME, cmpWasmPlayerPath))
+          }
+          serverPlayers.forEach { add(DocLane(it.id, it.label, DocLaneKind.IMAGE, it.renderPath)) }
+        }
+    val playerToggle = lanes.size > 1
     val toggleHtml =
       if (!playerToggle) ""
       else
-        """
-        <p class="cp-doc-players">
-          <span class="cp-theme" role="group" aria-label="Player">
-            <button type="button" class="cp-theme-btn" data-doc-player="$DOC_PLAYER_JS" aria-pressed="true">TypeScript</button>
-            <button type="button" class="cp-theme-btn" data-doc-player="$DOC_PLAYER_CMP_WASM" aria-pressed="false">CMP (Wasm)</button>
-          </span>
-        </p>
-        """
-          .trimIndent() + "\n"
+        "<p class=\"cp-doc-players\">\n" +
+          "  <span class=\"cp-theme\" role=\"group\" aria-label=\"Player\">\n" +
+          lanes.joinToString("") { lane ->
+            "    <button type=\"button\" class=\"cp-theme-btn\" data-doc-player=\"${
+              WebEscaping.htmlEscape(lane.id)
+            }\" aria-pressed=\"${lane.id == DOC_PLAYER_JS}\">${WebEscaping.htmlEscape(lane.label)}</button>\n"
+          } +
+          "  </span>\n</p>\n"
+    // Every lane past the TypeScript one: its element (loaded on first choice) and its own status.
+    val extraLanes = lanes.drop(1)
+    val laneElements =
+      extraLanes.joinToString("") { lane -> "\n          " + docLaneElement(doc, lane) }
+    val laneStatuses =
+      extraLanes.joinToString("") { lane ->
+        "\n        <p class=\"cp-doc-status\" id=\"cp-doc-status-${
+          WebEscaping.htmlEscape(lane.id)
+        }\" hidden></p>"
+      }
     return document(
       title = "${doc.name} — compose-preview",
       unfurlDescription = "A shared ${doc.formatLabel} document, played back in your browser.",
@@ -10541,11 +10566,9 @@ ${captureControlsHtml().prependIndent("          ")}
         <p class="cp-sub">${WebEscaping.htmlEscape(doc.formatLabel)} · ${WebEscaping.htmlEscape(doc.sizeText)}
           <span class="cp-doc-expiry" title="${WebEscaping.htmlEscape(doc.expiresAtText)}">expires in ${WebEscaping.htmlEscape(doc.expiresInText)}</span></p>
         $toggleHtml<div class="cp-doc-stage" id="cp-doc-stage" data-format="${WebEscaping.htmlEscape(doc.formatId)}">
-          ${docStageElement(doc)}${if (playerToggle) "\n          " + docWasmFrame(doc) else ""}
+          ${docStageElement(doc)}$laneElements
         </div>
-        <p class="cp-doc-status" id="cp-doc-status">Loading the ${WebEscaping.htmlEscape(doc.formatLabel)} player…</p>${
-          if (playerToggle) "\n        <p class=\"cp-doc-status\" id=\"cp-doc-status-wasm\" hidden></p>" else ""
-        }
+        <p class="cp-doc-status" id="cp-doc-status">Loading the ${WebEscaping.htmlEscape(doc.formatLabel)} player…</p>$laneStatuses
         <div class="cp-doc-facts">
         $facts
         </div>
@@ -10554,7 +10577,7 @@ ${captureControlsHtml().prependIndent("          ")}
           <a href="/docs$suffix">Share another</a>
         </p>
         $rcFontsScript<script>${docPlayerScript(doc, rawUrl)}</script>${
-          if (playerToggle) "\n        <script>${docPlayerToggleScript(cmpWasmPlayerPath!!, rawUrl)}</script>"
+          if (playerToggle) "\n        <script>${docPlayerToggleScript(rawUrl, suffix)}</script>"
           else ""
         }
         """
@@ -10574,74 +10597,129 @@ ${captureControlsHtml().prependIndent("          ")}
   /** How long the CMP frame may stay silent before the page says it didn't start — the viewer's. */
   private const val DOC_WASM_START_TIMEOUT_MS = 20_000
 
-  /**
-   * The CMP player's frame, sized like the canvas beside it and loaded only when first chosen — the
-   * Wasm bundle is tens of megabytes, which a reader who never switches should not pay for.
-   */
-  private fun docWasmFrame(doc: DocView): String =
-    "<iframe id=\"cp-doc-wasm\" title=\"Compose Multiplatform player\" hidden" +
-      " width=\"${doc.width ?: 512}\" height=\"${doc.height ?: 512}\"" +
-      " style=\"border:0;background:transparent\"></iframe>"
+  /** A server-side player a `/d/<id>` page can offer: its `rcPlayer=` id, label and render path. */
+  data class DocServerPlayer(val id: String, val label: String, val renderPath: String)
+
+  private enum class DocLaneKind {
+    CANVAS,
+    FRAME,
+    IMAGE,
+  }
+
+  private data class DocLane(
+    val id: String,
+    val label: String,
+    val kind: DocLaneKind,
+    /** The frame's player page, or the image's render path; null for the canvas lane. */
+    val path: String? = null,
+  )
 
   /**
-   * The `.rc` permalink's player toggle. The TypeScript lane is the page as it always was; the CMP
-   * lane points an iframe at the Wasm player with `?src=` the same `/d/<id>/raw` bytes, and is told
-   * apart by its readiness messages (docs/design/RC_PLAYER_EMBED.md in rc-players). The choice
-   * rides the URL as `rcPlayer=`, so a shared link opens on the player it was shared from.
+   * A lane's element beside the canvas, sized like it and loaded only when first chosen: the CMP
+   * Wasm bundle is tens of megabytes, and a server-side render costs a worker, neither of which a
+   * reader who never switches should pay for.
+   */
+  private fun docLaneElement(doc: DocView, lane: DocLane): String {
+    val size = "width=\"${doc.width ?: 512}\" height=\"${doc.height ?: 512}\""
+    val id = WebEscaping.htmlEscape(lane.id)
+    val path = WebEscaping.htmlEscape(lane.path.orEmpty())
+    return when (lane.kind) {
+      DocLaneKind.FRAME ->
+        "<iframe id=\"cp-doc-lane-$id\" data-doc-lane=\"$id\" data-doc-lane-kind=\"frame\"" +
+          " data-doc-lane-path=\"$path\" title=\"${WebEscaping.htmlEscape(lane.label)} player\"" +
+          " hidden $size style=\"border:0;background:transparent\"></iframe>"
+      DocLaneKind.IMAGE ->
+        "<img id=\"cp-doc-lane-$id\" data-doc-lane=\"$id\" data-doc-lane-kind=\"image\"" +
+          " data-doc-lane-path=\"$path\" alt=\"${WebEscaping.htmlEscape(lane.label)} render\"" +
+          " hidden $size>"
+      DocLaneKind.CANVAS -> ""
+    }
+  }
+
+  /**
+   * The `.rc` permalink's player toggle. The TypeScript lane is the page as it always was; every
+   * other lane is an element beside its canvas, pointed at its source the first time it is chosen —
+   * the CMP Wasm player's page with `?src=` the same `/d/<id>/raw` bytes (told apart by its
+   * readiness messages, docs/design/RC_PLAYER_EMBED.md in rc-players), or a server-side player's
+   * `/d/<id>/render.png?rcPlayer=…`. The choice rides the URL as `rcPlayer=`, so a shared link
+   * opens on the player it was shared from.
    *
    * Each lane reports into its own status line, and only the selected one is shown: the TypeScript
    * lane starts on load whatever is selected, and its `done()` / `fail()` would otherwise land on
-   * the CMP lane's status — usually first, since its bundle is far smaller. A CMP frame that never
+   * another lane's status — usually first, since its bundle is far smaller. A CMP frame that never
    * reports (a missing or incompatible bundle) times out like the viewer's own cmp-wasm lane.
    */
-  private fun docPlayerToggleScript(cmpWasmPlayerPath: String, rawUrl: String): String =
+  private fun docPlayerToggleScript(rawUrl: String, querySuffix: String): String =
     """
     (function () {
       var canvas = document.getElementById("cp-doc-mount");
-      var frame = document.getElementById("cp-doc-wasm");
       var jsStatus = document.getElementById("cp-doc-status");
-      var status = document.getElementById("cp-doc-status-wasm");
       var buttons = Array.prototype.slice.call(document.querySelectorAll("[data-doc-player]"));
-      var playerPage = ${jsString(cmpWasmPlayerPath)};
       var raw = new URL(${jsString(rawUrl)}, location.href).href;
-      var loaded = false;
-      var settled = false;
-      function frameSrc() {
-        var theme = matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
-        return playerPage + "?src=" + encodeURIComponent(raw) + "&theme=" + theme;
+      var suffix = ${jsString(querySuffix)};
+      var lanes = {};
+      Array.prototype.slice.call(document.querySelectorAll("[data-doc-lane]")).forEach(function (el) {
+        var id = el.getAttribute("data-doc-lane");
+        lanes[id] = {
+          el: el,
+          kind: el.getAttribute("data-doc-lane-kind"),
+          path: el.getAttribute("data-doc-lane-path"),
+          status: document.getElementById("cp-doc-status-" + id),
+          loaded: false,
+          settled: false,
+        };
+      });
+      function theme() {
+        return matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+      }
+      function load(id, lane) {
+        lane.loaded = true;
+        if (lane.kind === "frame") {
+          lane.status.textContent = "Loading the Compose Multiplatform player…";
+          lane.el.src = lane.path + "?src=" + encodeURIComponent(raw) + "&theme=" + theme();
+          setTimeout(function () {
+            if (!lane.settled) lane.status.textContent = "The Compose Multiplatform player didn't start.";
+          }, $DOC_WASM_START_TIMEOUT_MS);
+        } else {
+          lane.status.textContent = "Rendering on the server…";
+          lane.el.onload = function () { lane.settled = true; lane.status.textContent = ""; };
+          lane.el.onerror = function () {
+            lane.settled = true;
+            lane.status.textContent = "The server could not render this document with this player.";
+          };
+          lane.el.src = lane.path + (suffix ? suffix + "&" : "?") + "rcPlayer=" +
+            encodeURIComponent(id) + "&uiMode=" + theme();
+        }
       }
       function choose(player, remember) {
-        var wasm = player === ${jsString(DOC_PLAYER_CMP_WASM)};
         buttons.forEach(function (b) {
           b.setAttribute("aria-pressed", String(b.getAttribute("data-doc-player") === player));
         });
-        canvas.hidden = wasm;
-        frame.hidden = !wasm;
-        jsStatus.hidden = wasm;
-        status.hidden = !wasm;
-        if (wasm && !loaded) {
-          loaded = true;
-          status.textContent = "Loading the Compose Multiplatform player…";
-          frame.src = frameSrc();
-          setTimeout(function () {
-            if (!settled) status.textContent = "The Compose Multiplatform player didn't start.";
-          }, $DOC_WASM_START_TIMEOUT_MS);
-        }
+        var js = !lanes[player];
+        canvas.hidden = !js;
+        jsStatus.hidden = !js;
+        Object.keys(lanes).forEach(function (id) {
+          var lane = lanes[id];
+          lane.el.hidden = id !== player;
+          lane.status.hidden = id !== player;
+          if (id === player && !lane.loaded) load(id, lane);
+        });
         if (remember) {
           var url = new URL(location.href);
-          if (wasm) url.searchParams.set("rcPlayer", player);
-          else url.searchParams.delete("rcPlayer");
+          if (js) url.searchParams.delete("rcPlayer");
+          else url.searchParams.set("rcPlayer", player);
           history.replaceState(null, "", url.pathname + url.search + url.hash);
         }
       }
       window.addEventListener("message", function (e) {
-        if (e.source !== frame.contentWindow || e.origin !== location.origin) return;
+        var lane = lanes[${jsString(DOC_PLAYER_CMP_WASM)}];
+        if (!lane || e.source !== lane.el.contentWindow || e.origin !== location.origin) return;
         if (e.data === "cp-rc-wasm-ready") {
-          settled = true;
-          status.textContent = "";
+          lane.settled = true;
+          lane.status.textContent = "";
         } else if (typeof e.data === "string" && e.data.indexOf("cp-rc-wasm-error:") === 0) {
-          settled = true;
-          status.textContent = "The Compose Multiplatform player could not play this document: " +
+          lane.settled = true;
+          lane.status.textContent = "The Compose Multiplatform player could not play this document: " +
             e.data.slice("cp-rc-wasm-error:".length);
         }
       });
@@ -10649,7 +10727,7 @@ ${captureControlsHtml().prependIndent("          ")}
         b.addEventListener("click", function () { choose(b.getAttribute("data-doc-player"), true); });
       });
       var initial = new URL(location.href).searchParams.get("rcPlayer");
-      if (initial === ${jsString(DOC_PLAYER_CMP_WASM)}) choose(initial, false);
+      if (initial && lanes[initial]) choose(initial, false);
     })();
     """
       .trimIndent()
