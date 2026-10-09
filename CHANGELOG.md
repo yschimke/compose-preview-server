@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.114.0](https://github.com/yschimke/compose-preview-server/compare/v3.113.0...v3.114.0) (2026-10-09)
+
+
+### Features
+
+* **guidelines:** run the check on the server's key from the editor, for allowed users ([#1468](https://github.com/yschimke/compose-preview-server/issues/1468)) ([5802cb5](https://github.com/yschimke/compose-preview-server/commit/5802cb57350f918713a304f5830c10eae02c9722))
+
 ## [3.113.0](https://github.com/yschimke/compose-preview-server/compare/v3.112.0...v3.113.0) (2026-10-09)
 
 
