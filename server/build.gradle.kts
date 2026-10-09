@@ -351,27 +351,6 @@ dependencies {
   )
 }
 
-/** Stage the published `bundle.js` with the inert-host shim appended, as a classpath resource. */
-abstract class StageRcPlayerJs : DefaultTask() {
-  @get:InputFile abstract val archiveFile: RegularFileProperty
-
-  @get:InputFile abstract val shimFile: RegularFileProperty
-
-  @get:OutputDirectory abstract val outputDirectory: DirectoryProperty
-
-  @get:Inject abstract val archiveOperations: ArchiveOperations
-
-  @TaskAction
-  fun stage() {
-    val bundle =
-      archiveOperations.zipTree(archiveFile).matching { include("bundle.js") }.singleOrNull()
-        ?: error("remote-compose-player-js-dist has no bundle.js")
-    val target = outputDirectory.file("rc-player/bundle.js").get().asFile
-    target.parentFile.mkdirs()
-    target.writeBytes(bundle.readBytes() + "\n".toByteArray() + shimFile.get().asFile.readBytes())
-  }
-}
-
 val stageRcPlayerJs =
   tasks.register<StageRcPlayerJs>("stageRcPlayerJs") {
     description = "Stage the TypeScript Remote Compose player bundle as a server resource."
@@ -379,6 +358,7 @@ val stageRcPlayerJs =
       layout.file(rcPlayerJsDist.elements.map { artifacts -> artifacts.single().asFile })
     )
     shimFile.set(layout.projectDirectory.file("src/rc-player/inert-custom-host.js"))
+    resourcePath.set("rc-player/bundle.js")
     outputDirectory.set(layout.buildDirectory.dir("generated/rc-player-js"))
   }
 

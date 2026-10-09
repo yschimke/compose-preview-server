@@ -91,17 +91,38 @@ val generateMcpVersionResource =
 
 sourceSets.main.get().resources.srcDir(generateMcpVersionResource)
 
-// The `.rc` viewer MCP App (`mcp-app/rc-viewer.html`, issue #1237) inlines the vendored TypeScript
-// Remote Compose player when it is served. That bundle is committed once, as `:server`'s
-// resource; this stages the same file into this module's resources instead of committing a second
-// ~0.7 MB copy. It is a file in this repository, not a project dependency on `:server`.
-val stageRcViewerPlayer =
-  tasks.register<Sync>("stageRcViewerPlayer") {
-    from(rootProject.file("server/src/main/resources/rc-player/bundle.js")) {
-      rename { "rc-player-bundle.js" }
-      into("rc-viewer")
+// The `.rc` viewer MCP App (`mcp-app/rc-viewer.html`, issue #1237) inlines the TypeScript Remote
+// Compose player when it is served. It is the same bundle `:server` serves: rc-players'
+// `remote-compose-player-js-dist` from Central with `server/src/rc-player/inert-custom-host.js`
+// appended, because the viewer plays documents it did not write. Resolved here rather than taken
+// from `:server`, which would be a project dependency for one file.
+val rcPlayerJsDist =
+  configurations.create("rcPlayerJsDist") {
+    description = "The TypeScript Remote Compose player's browser bundle."
+    isCanBeConsumed = false
+    isCanBeResolved = true
+    isTransitive = false
+  }
+
+dependencies {
+  rcPlayerJsDist(
+    variantOf(libs.remote.compose.player.js.dist) {
+      classifier("dist")
+      artifactType("zip")
     }
-    into(layout.buildDirectory.dir("generated/rc-viewer-player"))
+  )
+}
+
+val stageRcViewerPlayer =
+  tasks.register<StageRcPlayerJs>("stageRcViewerPlayer") {
+    archiveFile.set(
+      layout.file(rcPlayerJsDist.elements.map { artifacts -> artifacts.single().asFile })
+    )
+    shimFile.set(
+      rootProject.layout.projectDirectory.file("server/src/rc-player/inert-custom-host.js")
+    )
+    resourcePath.set("rc-viewer/rc-player-bundle.js")
+    outputDirectory.set(layout.buildDirectory.dir("generated/rc-viewer-player"))
   }
 
 sourceSets.main.get().resources.srcDir(stageRcViewerPlayer)
