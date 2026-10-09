@@ -15,6 +15,7 @@ import ee.schimke.composeai.daemon.protocol.PreviewOverrides
 import ee.schimke.composeai.daemon.protocol.RemoteComposeOverride
 import ee.schimke.composeai.daemon.protocol.RemoteNamedValue
 import ee.schimke.composeai.daemon.protocol.StreamCodec
+import ee.schimke.composeai.daemon.protocol.UiMode
 import ee.schimke.composeai.data.layoutinspector.ComposeFigmaSvgProduct
 import ee.schimke.composeai.data.layoutinspector.ExplodedSvg
 import ee.schimke.composeai.data.overrides.PreviewOverrideDeclaration
@@ -13558,12 +13559,15 @@ class ServeHttpServer(
    * picks the sandbox and the player set, never the pixels; and compose-ai-tools 2.37.0 keys the
    * render cache on the document, so two documents through one donor never share an entry.
    *
-   * Resident sessions only ([ServeSessionRegistry.peekHost]): a shared document must never be the
-   * reason this host forks a catalog or boots a daemon it was not already running.
+   * Resident sessions with a running daemon only ([ServeSessionRegistry.peekHost],
+   * [ServeHost.daemonStarted]): a shared document must never be the reason this host forks a
+   * catalog or boots a daemon it was not already running. [respondDocDaemonRender] re-checks under
+   * its lease, since the session can be suspended between this peek and that lease.
    */
   private fun docRcDonor(backend: RcPlayerBackend): DocRcDonor? {
     for (sessionId in sessions.knownSessionIds()) {
       val host = sessions.peekHost(sessionId) ?: continue
+      if (!host.daemonStarted) continue
       val previewId =
         runCatching {
           host.previews
@@ -13696,6 +13700,14 @@ class ServeHttpServer(
         widthPx = widthPx.coerceIn(1, DOC_RENDER_MAX_PX),
         heightPx = heightPx.coerceIn(1, DOC_RENDER_MAX_PX),
         density = density,
+        // The page asks for the viewer's theme on every server lane, and a document whose colours
+        // defer to the host configuration must follow it rather than the donor preview's mode.
+        uiMode =
+          when (params["uiMode"]?.lowercase()) {
+            "dark" -> UiMode.DARK
+            "light" -> UiMode.LIGHT
+            else -> null
+          },
         remoteCompose =
           RemoteComposeOverride.Builder()
             .also {
@@ -13715,6 +13727,16 @@ class ServeHttpServer(
     markGeneration("document", "private, no-store")
     call.response.headers.append(HttpHeaders.CacheControl, "private, no-store")
     withLeasedSession(donor.sessionId) { host ->
+      // The lease resumes a session suspended since [docRcDonor] peeked at it, and a resumed host
+      // has no daemon yet: rendering now would boot one for a shared document. Ask again instead.
+      if (!host.daemonStarted) {
+        call.response.headers.append(HttpHeaders.RetryAfter, "30")
+        call.respondText(
+          "no running catalog here can draw ${ServeRcPlayerIds.of(player)}",
+          status = HttpStatusCode.ServiceUnavailable,
+        )
+        return@withLeasedSession
+      }
       val outcome =
         withContext(Dispatchers.IO) {
           if (!renderSemaphore.tryAcquire(RENDER_QUEUE_WAIT_SECONDS, TimeUnit.SECONDS)) null

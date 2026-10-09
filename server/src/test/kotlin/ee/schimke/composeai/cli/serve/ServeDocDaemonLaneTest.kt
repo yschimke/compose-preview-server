@@ -4,6 +4,7 @@ import ee.schimke.composeai.daemon.protocol.PreviewOverrides
 import ee.schimke.composeai.daemon.protocol.RemoteComposePlayerKind
 import ee.schimke.composeai.daemon.protocol.StreamCodec
 import ee.schimke.composeai.daemon.protocol.StreamFrameParams
+import ee.schimke.composeai.daemon.protocol.UiMode
 import java.util.Base64
 import java.util.concurrent.CopyOnWriteArrayList
 import kotlin.test.AfterTest
@@ -35,6 +36,8 @@ class ServeDocDaemonLaneTest {
 
   @Volatile private var generation = RenderOutcome.Generation.DAEMON
 
+  @Volatile private var daemonRunning = true
+
   private val donorPng = byteArrayOf(0x89.toByte(), 'P'.code.toByte(), 'N'.code.toByte())
 
   /** A catalog with one Remote Compose preview whose daemon has every Android player enabled. */
@@ -42,6 +45,8 @@ class ServeDocDaemonLaneTest {
     object : ServeHost {
       override val previews = listOf(ServePreview(DONOR_ID, "Remote button"))
       override val label = "Remote catalog"
+      override val daemonStarted: Boolean
+        get() = daemonRunning
 
       override fun hasRemoteComposeDoc(previewId: String) = previewId == DONOR_ID
 
@@ -146,11 +151,26 @@ class ServeDocDaemonLaneTest {
     assertEquals(320, view.widthPx)
     assertEquals(200, view.heightPx)
 
-    get("$path/render.png?rcPlayer=cmp-android&density=2").use { assertEquals(200, it.code) }
+    get("$path/render.png?rcPlayer=cmp-android&density=2&uiMode=dark").use {
+      assertEquals(200, it.code)
+    }
     val cmp = renders.last()
     assertEquals("cmp-android", cmp.remoteCompose!!.playerId)
     assertEquals(640, cmp.widthPx)
     assertEquals(2f, cmp.density)
+    // The viewer's theme, not the donor preview's.
+    assertEquals(UiMode.DARK, cmp.uiMode)
+  }
+
+  @Test
+  fun `a catalog whose daemon is not running is never booted for a shared document`() {
+    val path = upload(ServeDocFixtures.remoteComposeDoc(width = 320, height = 200))
+    daemonRunning = false
+    get(path).use { response ->
+      assertFalse(response.body.string().contains("data-doc-lane=\"androidx-view\""))
+    }
+    get("$path/render.png?rcPlayer=androidx-view").use { assertEquals(503, it.code) }
+    assertTrue(renders.isEmpty(), "nothing reached the host's render path")
   }
 
   @Test
