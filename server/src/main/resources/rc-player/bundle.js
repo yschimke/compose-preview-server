@@ -24,6 +24,7 @@ var RC = (() => {
     GOOGLE_PREFIX: () => GOOGLE_PREFIX,
     RcPlayerElement: () => RcPlayerElement,
     RcdPlayer: () => RcdPlayer,
+    WebCustomHost: () => WebCustomHost,
     base64ToArrayBuffer: () => base64ToArrayBuffer,
     configureWebFonts: () => configureWebFonts,
     createPlayer: () => createPlayer,
@@ -31,9 +32,11 @@ var RC = (() => {
     cssQuoted: () => cssQuoted,
     embeddedFontDescriptors: () => embeddedFontDescriptors,
     ensureWebFont: () => ensureWebFont,
+    fitInto: () => fitInto,
     googleFontsAxisUrl: () => googleFontsAxisUrl,
     googleFontsUrl: () => googleFontsUrl,
     namedFontStack: () => namedFontStack,
+    parseEmbedConfig: () => parseEmbedConfig,
     parseFamily: () => parseFamily,
     registerEmbeddedFont: () => registerEmbeddedFont,
     releaseEmbeddedFont: () => releaseEmbeddedFont,
@@ -71,6 +74,14 @@ var RC = (() => {
   }
   function isMacroLocal(id) {
     return id >= 16384 && id <= 20479;
+  }
+  function isVariable(v) {
+    if (Number.isNaN(v)) {
+      const id = idFromNan(v);
+      if (id === 0) return false;
+      return id > 40 || id < 10;
+    }
+    return false;
   }
   function isVariableBits(bits) {
     if (isNaNBits(bits)) {
@@ -584,8 +595,6 @@ var RC = (() => {
     }
     getOpsToUpdate(context, currentTime) {
       if (this.mVarListeners.get(1) != null) return 1;
-      if (this.mVarListeners.get(30) != null) return 1;
-      if (this.mVarListeners.get(31) != null) return 1;
       let repaintMs = Number.MAX_SAFE_INTEGER;
       if (!Number.isNaN(this.mRepaintSeconds)) {
         repaintMs = Math.trunc(this.mRepaintSeconds * 1e3);
@@ -598,6 +607,9 @@ var RC = (() => {
       if (this.mVarListeners.get(3) != null) {
         const sub = Math.trunc(currentTime % 6e4);
         return Math.min(repaintMs, 2 + 6e4 - sub);
+      }
+      if (!Number.isNaN(this.mRepaintSeconds)) {
+        return Math.trunc(this.mRepaintSeconds * 1e3);
       }
       return -1;
     }
@@ -761,9 +773,130 @@ var RC = (() => {
   };
   var SYSTEM_CLOCK = SystemClock;
 
+  // third_party/remote-compose-player/src/core/OperationMeasurement.ts
+  var INSTANCE_ID = /* @__PURE__ */ Symbol("rcMeasureId");
+  var OperationMeasurement = class {
+    constructor(sink) {
+      this.mFrame = 0;
+      this.mTotal = 0;
+      /** Value of mTotal when the paint pass opened; everything before it ran between frames. */
+      this.mFrameStart = 0;
+      this.mUnattributed = 0;
+      this.mNextId = 1;
+      /** type key -> counts for this frame */
+      this.mByType = /* @__PURE__ */ new Map();
+      /** instance id -> counts for this frame */
+      this.mByInstance = /* @__PURE__ */ new Map();
+      /**
+       * Type metadata cached per constructor, so the opcode lookup and name tidying happen
+       * once per class rather than once per operation execution.
+       */
+      this.mTypeInfo = /* @__PURE__ */ new WeakMap();
+      this.mSink = sink;
+    }
+    setSink(sink) {
+      this.mSink = sink;
+    }
+    /**
+     * Record one executed operation.
+     *
+     * `op` may be undefined: a few call sites count an operation the engine performed
+     * without a corresponding object. Those still contribute to `total`, and are reported
+     * separately as `unattributed` rather than being silently dropped or invented — a
+     * profiler showing a total that its own breakdown does not add up to is worse than
+     * one that says how much it could not attribute.
+     */
+    record(op) {
+      this.mTotal++;
+      if (op === void 0 || op === null) {
+        this.mUnattributed++;
+        return;
+      }
+      const info = this.typeInfo(op);
+      let t = this.mByType.get(info.key);
+      if (t === void 0) {
+        t = { key: info.key, name: info.name, opCode: info.opCode, count: 0 };
+        this.mByType.set(info.key, t);
+      }
+      t.count++;
+      const anyOp = op;
+      let id = anyOp[INSTANCE_ID];
+      if (id === void 0) {
+        id = this.mNextId++;
+        Object.defineProperty(anyOp, INSTANCE_ID, {
+          value: id,
+          enumerable: false,
+          writable: false,
+          configurable: true
+        });
+      }
+      let inst = this.mByInstance.get(id);
+      if (inst === void 0) {
+        inst = { id, key: info.key, name: info.name, count: 0 };
+        this.mByInstance.set(id, inst);
+      }
+      inst.count++;
+    }
+    /** Class name and opcode, cached per constructor. */
+    typeInfo(op) {
+      const ctor = op.constructor;
+      let info = this.mTypeInfo.get(ctor);
+      if (info === void 0) {
+        const raw = ctor && ctor.name || "Unknown";
+        const name = raw.startsWith("_") ? raw.slice(1) : raw;
+        const code = ctor?.OP_CODE;
+        const opCode = typeof code === "number" ? code : -1;
+        info = { key: opCode >= 0 ? `op:${opCode}` : `cls:${name}`, name, opCode };
+        this.mTypeInfo.set(ctor, info);
+      }
+      return info;
+    }
+    /**
+     * Mark where the paint pass begins.
+     *
+     * Deliberately does NOT clear. Click and touch handlers execute their child actions
+     * between frames, and clearing here would throw that work away — the engine's own
+     * counter does exactly that, which is why input-driven operations have never appeared
+     * in an op count. Recording the boundary instead keeps them, and lets a report say
+     * which side of it each one fell on.
+     */
+    markFrameStart() {
+      this.mFrameStart = this.mTotal;
+    }
+    /** Build this frame's report and hand it to the sink. */
+    emit() {
+      if (this.mSink === null) return;
+      const byType = [...this.mByType.values()].sort((a, b) => b.count - a.count);
+      const byInstance = [...this.mByInstance.values()].sort((a, b) => b.count - a.count);
+      const report = {
+        frame: this.mFrame++,
+        total: this.mTotal,
+        unattributed: this.mUnattributed,
+        inPaint: this.mTotal - this.mFrameStart,
+        betweenFrames: this.mFrameStart,
+        byType,
+        byInstance
+      };
+      try {
+        this.mSink(report);
+        this.reset();
+      } catch (e) {
+        this.reset();
+        console.error("measurement sink threw:", e);
+      }
+    }
+    /** Clear after emitting, so the next window starts here — which means work done
+     *  between frames lands in the *next* report rather than being discarded. */
+    reset() {
+      this.mTotal = 0;
+      this.mFrameStart = 0;
+      this.mUnattributed = 0;
+      this.mByType.clear();
+      this.mByInstance.clear();
+    }
+  };
+
   // third_party/remote-compose-player/src/core/RemoteContext.ts
-  var DENSITY_BEHAVIOR_LEGACY = 0;
-  var DENSITY_BEHAVIOR_DP = 2;
   var _RemoteContext = class _RemoteContext {
     constructor(clock = SYSTEM_CLOCK) {
       this.mRemoteComposeState = new RemoteComposeState();
@@ -773,6 +906,8 @@ var RC = (() => {
       this.mMode = "UNSET" /* UNSET */;
       this.mDebug = 0;
       this.mOpCount = 0;
+      /** null while measurement is disabled — the disabled path is one null check. */
+      this.mMeasurement = null;
       this.mTheme = -1;
       // Theme.UNSPECIFIED
       this.mWidth = 0;
@@ -783,9 +918,26 @@ var RC = (() => {
       this.mAnimate = true;
       this.mLastComponent = null;
       this.currentTime = 0;
-      this.mTouchVersion = 0;
+      /**
+       * Touch coordinate convention. 1 (FIX_TOUCH_EVENT) means component-local, which is what
+       * the dispatch code actually passes; 0 means absolute. The reference defaults to 1
+       * (LayoutManager.DEFAULT_TOUCH_VERSION) and CoreDocument overrides it from the header.
+       * Defaulting to 0 here paired local coordinates with absolute bounds, so a
+       * TouchExpression inside a component rejected touches that were within it.
+       */
+      this.mTouchVersion = 1;
+      // Whoever draws custom components (LAYOUT_CUSTOM) for this platform, or null: with no
+      // host a custom component is an empty box, exactly as it was before hosts existed.
+      this.mCustomHost = null;
+      this.mDensityBehavior = _RemoteContext.DENSITY_BEHAVIOR_LEGACY;
       this.mClock = clock;
       this.mDocLoadTime = clock.millis();
+    }
+    setCustomHost(host) {
+      this.mCustomHost = host;
+    }
+    getCustomHost() {
+      return this.mCustomHost;
     }
     supportsVersion(major, minor, patch) {
       return this.mDocument?.mVersion?.supportsVersion(major, minor, patch) ?? false;
@@ -793,14 +945,14 @@ var RC = (() => {
     getDensity() {
       return this.mDensity;
     }
+    getDensityBehavior() {
+      return this.mDensityBehavior || (this.mDocument?.getDensityBehavior() ?? _RemoteContext.DENSITY_BEHAVIOR_LEGACY);
+    }
+    setDensityBehavior(v) {
+      this.mDensityBehavior = v;
+    }
     setDensity(density) {
       if (!Number.isNaN(density) && density > 0) this.mDensity = density;
-    }
-    /** The document's density behavior (DOC_DENSITY_BEHAVIOR, key 27). Mirrors
-     *  AndroidX RemoteContext.getDensityBehavior() → CoreDocument.mDensityBehavior.
-     *  Defaults to LEGACY (no scaling) when the header omits the property. */
-    getDensityBehavior() {
-      return this.mDocument?.getDensityBehavior() ?? DENSITY_BEHAVIOR_LEGACY;
     }
     getDocLoadTime() {
       return this.mDocLoadTime;
@@ -878,11 +1030,51 @@ var RC = (() => {
     needsRepaint() {
       if (this.mPaintContext) this.mPaintContext.needsRepaint();
     }
-    incrementOpCount() {
+    /**
+     * Count one executed operation, and — only while measurement is enabled — attribute it.
+     *
+     * `op` is optional and is a reference already in scope at every call site, so with
+     * measurement off this costs the argument push plus one null check on top of the
+     * counting that happened before measurement existed. See `OperationMeasurement`.
+     */
+    incrementOpCount(op) {
       this.mOpCount++;
+      if (this.mMeasurement !== null) {
+        this.mMeasurement.record(op);
+      }
       if (this.mOpCount > _RemoteContext.MAX_OP_COUNT) {
         throw new Error("Too many operations executed");
       }
+    }
+    /**
+     * Turn per-frame operation measurement on or off.
+     *
+     * Pass a sink to enable: it is called once per painted frame with that frame's counts.
+     * Pass `null` to disable, which drops the collector entirely — the instrumented path
+     * is gone, not merely idle.
+     *
+     * Instance ids are assigned lazily and persist for the life of an operation object, so
+     * disabling and re-enabling keeps ids stable for operations already seen.
+     */
+    setMeasurementSink(sink) {
+      if (sink === null) {
+        this.mMeasurement = null;
+      } else if (this.mMeasurement === null) {
+        this.mMeasurement = new OperationMeasurement(sink);
+      } else {
+        this.mMeasurement.setSink(sink);
+      }
+    }
+    isMeasurementEnabled() {
+      return this.mMeasurement !== null;
+    }
+    /** Mark where paint begins. Called by CoreDocument where it clears the op count. */
+    beginMeasuredFrame() {
+      if (this.mMeasurement !== null) this.mMeasurement.markFrameStart();
+    }
+    /** Hand the frame's counts to the sink. Called by CoreDocument at end of paint. */
+    emitMeasuredFrame() {
+      if (this.mMeasurement !== null) this.mMeasurement.emit();
     }
     getLastOpCount() {
       const count = this.mOpCount;
@@ -937,6 +1129,16 @@ var RC = (() => {
     }
   };
   _RemoteContext.MAX_OP_COUNT = 2e4;
+  /**
+   * How the document's dimensions are meant to be interpreted.
+   *
+   * LEGACY(0) and DP(2) both mean "these are dp, scale them by density"; only
+   * PIXELS(1) means "already in pixels". The reference defaults to LEGACY, so scaling
+   * is the default — see DimensionInModifierOperation.updateVariables.
+   */
+  _RemoteContext.DENSITY_BEHAVIOR_LEGACY = 0;
+  _RemoteContext.DENSITY_BEHAVIOR_PIXELS = 1;
+  _RemoteContext.DENSITY_BEHAVIOR_DP = 2;
   // --- System variable IDs ---
   _RemoteContext.ID_CONTINUOUS_SEC = 1;
   _RemoteContext.ID_TIME_IN_SEC = 2;
@@ -1078,6 +1280,7 @@ var RC = (() => {
       doc.setVersion(this.mMajorVersion, this.mMinorVersion, this.mPatchVersion);
       doc.setWidth(this.mWidth);
       doc.setHeight(this.mHeight);
+      doc.setAuthorDimensions(this.mWidth, this.mHeight);
       doc.setRequiredCapabilities(this.mCapabilities);
       doc.setProperties(this.mProperties);
     }
@@ -1189,6 +1392,12 @@ var RC = (() => {
   _Header.DOC_WIDTH = 5;
   _Header.DOC_HEIGHT = 6;
   _Header.DOC_DENSITY_AT_GENERATION = 7;
+  /**
+   * How the document wants dp handled: LEGACY (0), PIXELS (1) or DP (2). Absent means
+   * LEGACY, which is what almost every document in the corpus is — under LEGACY only the
+   * dimension modifiers scale, and padding/spacing do not.
+   */
+  _Header.DOC_DENSITY_BEHAVIOR = 27;
   _Header.DOC_DESIRED_FPS = 8;
   _Header.DOC_CONTENT_DESCRIPTION = 9;
   _Header.DOC_SOURCE = 11;
@@ -1199,7 +1408,6 @@ var RC = (() => {
   _Header.DEBUG = 16;
   _Header.FEATURE_MEASURE_VERSION = 17;
   _Header.FEATURE_TOUCH_VERSION = 18;
-  _Header.DOC_DENSITY_BEHAVIOR = 27;
   // Data types
   _Header.DATA_TYPE_INT = 0;
   _Header.DATA_TYPE_FLOAT = 1;
@@ -1962,7 +2170,7 @@ var RC = (() => {
      */
     static evalRPN(context, values, vars = [0, 0, 0]) {
       const stack = [];
-      const OFFSET3 = _FloatExpression.OFFSET;
+      const OFFSET4 = _FloatExpression.OFFSET;
       const collectionsAccess = context.getCollectionsAccess();
       const useBits = values instanceof Int32Array;
       let r0 = 0, r1 = 0, r2 = 0, r3 = 0;
@@ -1974,8 +2182,8 @@ var RC = (() => {
           const id = idFromBits(bits);
           if ((id & _FloatExpression.ID_REGION_MASK) === _FloatExpression.ID_REGION_ARRAY) {
             stack.push(ARR_SENTINEL + id);
-          } else if (id > OFFSET3 && id <= OFFSET3 + 79) {
-            const op = id - OFFSET3;
+          } else if (id > OFFSET4 && id <= OFFSET4 + 79) {
+            const op = id - OFFSET4;
             switch (op) {
               case 1: {
                 const b = stack.pop(), a = stack.pop();
@@ -2161,10 +2369,10 @@ var RC = (() => {
                 break;
               }
               case 39:
-                stack.push(Math.random());
+                stack.push(AnimatedFloatExpression.nextRandom());
                 break;
               case 40:
-                stack.pop();
+                AnimatedFloatExpression.seedRandom(stack.pop());
                 break;
               case 41: {
                 let x = floatToRawIntBits(stack.pop());
@@ -2176,7 +2384,7 @@ var RC = (() => {
               }
               case 42: {
                 const max = stack.pop(), min = stack.pop();
-                stack.push(min + Math.random() * (max - min));
+                stack.push(min + AnimatedFloatExpression.nextRandom() * (max - min));
                 break;
               }
               case 43: {
@@ -2497,6 +2705,21 @@ var RC = (() => {
       this.mR2 = 0;
       this.mR3 = 0;
     }
+    /** Seed the generator. A seed of 0 means "unseeded", as the reference has it. */
+    static seedRandom(seed) {
+      if (seed === 0) {
+        _AnimatedFloatExpression.rngState = null;
+        return;
+      }
+      const asLong = BigInt.asUintN(64, BigInt(floatToRawIntBits(seed)));
+      _AnimatedFloatExpression.rngState = (asLong ^ _AnimatedFloatExpression.RNG_MULT) & _AnimatedFloatExpression.RNG_MASK;
+    }
+    /** `Random.nextFloat()` when seeded; the platform generator when not. */
+    static nextRandom() {
+      if (_AnimatedFloatExpression.rngState === null) return Math.random();
+      _AnimatedFloatExpression.rngState = _AnimatedFloatExpression.rngState * _AnimatedFloatExpression.RNG_MULT + 0xbn & _AnimatedFloatExpression.RNG_MASK;
+      return Number(_AnimatedFloatExpression.rngState >> 24n) / 16777216;
+    }
     static isMathOperator(v) {
       if (!Number.isNaN(v)) return false;
       const id = idFromNan(v);
@@ -2549,139 +2772,139 @@ var RC = (() => {
       return sp >= 0 ? s[sp] : 0;
     }
     opEval(sp, id, s, ca, vars) {
-      const OFFSET3 = _AnimatedFloatExpression.OFFSET;
+      const OFFSET4 = _AnimatedFloatExpression.OFFSET;
       switch (id) {
-        case OFFSET3 + 1:
+        case OFFSET4 + 1:
           s[sp - 1] += s[sp];
           return sp - 1;
         // ADD
-        case OFFSET3 + 2:
+        case OFFSET4 + 2:
           s[sp - 1] -= s[sp];
           return sp - 1;
         // SUB
-        case OFFSET3 + 3:
+        case OFFSET4 + 3:
           s[sp - 1] *= s[sp];
           return sp - 1;
         // MUL
-        case OFFSET3 + 4:
+        case OFFSET4 + 4:
           s[sp - 1] /= s[sp];
           return sp - 1;
         // DIV
-        case OFFSET3 + 5:
+        case OFFSET4 + 5:
           s[sp - 1] %= s[sp];
           return sp - 1;
         // MOD
-        case OFFSET3 + 6:
+        case OFFSET4 + 6:
           s[sp - 1] = Math.min(s[sp - 1], s[sp]);
           return sp - 1;
         // MIN
-        case OFFSET3 + 7:
+        case OFFSET4 + 7:
           s[sp - 1] = Math.max(s[sp - 1], s[sp]);
           return sp - 1;
         // MAX
-        case OFFSET3 + 8:
+        case OFFSET4 + 8:
           s[sp - 1] = Math.pow(s[sp - 1], s[sp]);
           return sp - 1;
         // POW
-        case OFFSET3 + 9:
+        case OFFSET4 + 9:
           s[sp] = Math.sqrt(s[sp]);
           return sp;
         // SQRT
-        case OFFSET3 + 10:
+        case OFFSET4 + 10:
           s[sp] = Math.abs(s[sp]);
           return sp;
         // ABS
-        case OFFSET3 + 11:
+        case OFFSET4 + 11:
           s[sp] = Math.sign(s[sp]);
           return sp;
         // SIGN
-        case OFFSET3 + 12:
+        case OFFSET4 + 12:
           s[sp - 1] = Math.abs(s[sp - 1]) * Math.sign(s[sp]);
           return sp - 1;
         // COPY_SIGN
-        case OFFSET3 + 13:
+        case OFFSET4 + 13:
           s[sp] = Math.exp(s[sp]);
           return sp;
         // EXP
-        case OFFSET3 + 14:
+        case OFFSET4 + 14:
           s[sp] = Math.floor(s[sp]);
           return sp;
         // FLOOR
-        case OFFSET3 + 15:
+        case OFFSET4 + 15:
           s[sp] = Math.log10(s[sp]);
           return sp;
         // LOG
-        case OFFSET3 + 16:
+        case OFFSET4 + 16:
           s[sp] = Math.log(s[sp]);
           return sp;
         // LN
-        case OFFSET3 + 17:
+        case OFFSET4 + 17:
           s[sp] = Math.round(s[sp]);
           return sp;
         // ROUND
-        case OFFSET3 + 18:
+        case OFFSET4 + 18:
           s[sp] = Math.sin(s[sp]);
           return sp;
         // SIN
-        case OFFSET3 + 19:
+        case OFFSET4 + 19:
           s[sp] = Math.cos(s[sp]);
           return sp;
         // COS
-        case OFFSET3 + 20:
+        case OFFSET4 + 20:
           s[sp] = Math.tan(s[sp]);
           return sp;
         // TAN
-        case OFFSET3 + 21:
+        case OFFSET4 + 21:
           s[sp] = Math.asin(s[sp]);
           return sp;
         // ASIN
-        case OFFSET3 + 22:
+        case OFFSET4 + 22:
           s[sp] = Math.acos(s[sp]);
           return sp;
         // ACOS
-        case OFFSET3 + 23:
+        case OFFSET4 + 23:
           s[sp] = Math.atan(s[sp]);
           return sp;
         // ATAN
-        case OFFSET3 + 24:
+        case OFFSET4 + 24:
           s[sp - 1] = Math.atan2(s[sp - 1], s[sp]);
           return sp - 1;
         // ATAN2
-        case OFFSET3 + 25:
+        case OFFSET4 + 25:
           s[sp - 2] = s[sp] + s[sp - 1] * s[sp - 2];
           return sp - 2;
         // MAD
-        case OFFSET3 + 26: {
+        case OFFSET4 + 26: {
           const c = s[sp];
           s[sp - 2] = c > 0 ? s[sp - 1] : s[sp - 2];
           return sp - 2;
         }
-        case OFFSET3 + 27:
+        case OFFSET4 + 27:
           s[sp - 2] = Math.min(Math.max(s[sp - 2], s[sp]), s[sp - 1]);
           return sp - 2;
         // CLAMP
-        case OFFSET3 + 28:
+        case OFFSET4 + 28:
           s[sp] = Math.pow(s[sp], 1 / 3);
           return sp;
         // CBRT
-        case OFFSET3 + 29:
+        case OFFSET4 + 29:
           s[sp] = s[sp] * 57.29578;
           return sp;
         // DEG
-        case OFFSET3 + 30:
+        case OFFSET4 + 30:
           s[sp] = s[sp] * 0.017453292;
           return sp;
         // RAD
-        case OFFSET3 + 31:
+        case OFFSET4 + 31:
           s[sp] = Math.ceil(s[sp]);
           return sp;
         // CEIL
-        case OFFSET3 + 32: {
+        case OFFSET4 + 32: {
           const arrId = arrIdFromStack2(s[sp - 1]);
           if (ca) s[sp - 1] = ca.getFloatValue(arrId, Math.trunc(s[sp]));
           return sp - 1;
         }
-        case OFFSET3 + 33: {
+        case OFFSET4 + 33: {
           const arrId = arrIdFromStack2(s[sp]);
           if (ca) {
             const arr = ca.getFloats(arrId);
@@ -2691,7 +2914,7 @@ var RC = (() => {
           }
           return sp;
         }
-        case OFFSET3 + 34: {
+        case OFFSET4 + 34: {
           const arrId = arrIdFromStack2(s[sp]);
           if (ca) {
             const arr = ca.getFloats(arrId);
@@ -2703,7 +2926,7 @@ var RC = (() => {
           }
           return sp;
         }
-        case OFFSET3 + 35: {
+        case OFFSET4 + 35: {
           const arrId = arrIdFromStack2(s[sp]);
           if (ca) {
             const arr = ca.getFloats(arrId);
@@ -2713,7 +2936,7 @@ var RC = (() => {
           }
           return sp;
         }
-        case OFFSET3 + 36: {
+        case OFFSET4 + 36: {
           const arrId = arrIdFromStack2(s[sp]);
           if (ca) {
             const arr = ca.getFloats(arrId);
@@ -2723,12 +2946,12 @@ var RC = (() => {
           }
           return sp;
         }
-        case OFFSET3 + 37: {
+        case OFFSET4 + 37: {
           const arrId = arrIdFromStack2(s[sp]);
           if (ca) s[sp] = ca.getListLength(arrId);
           return sp;
         }
-        case OFFSET3 + 38: {
+        case OFFSET4 + 38: {
           const arrId = arrIdFromStack2(s[sp - 1]);
           if (ca) {
             const fl = ca.getFloats(arrId);
@@ -2736,47 +2959,48 @@ var RC = (() => {
           }
           return sp - 1;
         }
-        case OFFSET3 + 39:
-          s[++sp] = Math.random();
+        case OFFSET4 + 39:
+          s[++sp] = _AnimatedFloatExpression.nextRandom();
           return sp;
-        case OFFSET3 + 40:
+        case OFFSET4 + 40:
+          _AnimatedFloatExpression.seedRandom(s[sp]);
           return sp - 1;
-        case OFFSET3 + 41: {
+        case OFFSET4 + 41: {
           let x = Math.trunc(s[sp]);
           x = x << 13 ^ x;
           s[sp] = 1 - (x * (x * x * 15731 + 789221) + 1376312589 & 2147483647) / 1073741800;
           return sp;
         }
-        case OFFSET3 + 42:
+        case OFFSET4 + 42:
           s[sp] = Math.random() * (s[sp] - s[sp - 1]) + s[sp - 1];
           return sp;
-        case OFFSET3 + 43:
+        case OFFSET4 + 43:
           s[sp - 1] = s[sp - 1] * s[sp - 1] + s[sp] * s[sp];
           return sp - 1;
-        case OFFSET3 + 44:
+        case OFFSET4 + 44:
           s[sp - 1] = s[sp - 1] > s[sp] ? 1 : 0;
           return sp - 1;
-        case OFFSET3 + 45:
+        case OFFSET4 + 45:
           s[sp] = s[sp] * s[sp];
           return sp;
-        case OFFSET3 + 46:
+        case OFFSET4 + 46:
           s[sp + 1] = s[sp];
           return sp + 1;
-        case OFFSET3 + 47:
+        case OFFSET4 + 47:
           s[sp - 1] = Math.hypot(s[sp - 1], s[sp]);
           return sp - 1;
-        case OFFSET3 + 48: {
+        case OFFSET4 + 48: {
           const tmp = s[sp - 1];
           s[sp - 1] = s[sp];
           s[sp] = tmp;
           return sp;
         }
-        case OFFSET3 + 49: {
+        case OFFSET4 + 49: {
           const t = s[sp];
           s[sp - 2] = s[sp - 2] + (s[sp - 1] - s[sp - 2]) * t;
           return sp - 2;
         }
-        case OFFSET3 + 50: {
+        case OFFSET4 + 50: {
           const val = s[sp - 2], max2 = s[sp - 1], min1 = s[sp];
           if (val < min1) s[sp - 2] = 0;
           else if (val > max2) s[sp - 2] = 1;
@@ -2786,74 +3010,74 @@ var RC = (() => {
           }
           return sp - 2;
         }
-        case OFFSET3 + 51:
+        case OFFSET4 + 51:
           s[sp] = Math.log(s[sp]) / Math.log(2);
           return sp;
-        case OFFSET3 + 52:
+        case OFFSET4 + 52:
           s[sp] = 1 / s[sp];
           return sp;
-        case OFFSET3 + 53:
+        case OFFSET4 + 53:
           s[sp] = s[sp] - Math.trunc(s[sp]);
           return sp;
-        case OFFSET3 + 54: {
+        case OFFSET4 + 54: {
           const max2 = s[sp] * 2;
           const tmp = s[sp - 1] % max2;
           s[sp - 1] = tmp < s[sp] ? tmp : max2 - tmp;
           return sp - 1;
         }
-        case OFFSET3 + 55:
+        case OFFSET4 + 55:
           return sp;
         // NOP
-        case OFFSET3 + 56:
+        case OFFSET4 + 56:
           this.mR0 = s[sp];
           return sp - 1;
         // STORE_R0
-        case OFFSET3 + 57:
+        case OFFSET4 + 57:
           this.mR1 = s[sp];
           return sp - 1;
         // STORE_R1
-        case OFFSET3 + 58:
+        case OFFSET4 + 58:
           this.mR2 = s[sp];
           return sp - 1;
         // STORE_R2
-        case OFFSET3 + 59:
+        case OFFSET4 + 59:
           this.mR3 = s[sp];
           return sp - 1;
         // STORE_R3
-        case OFFSET3 + 60:
+        case OFFSET4 + 60:
           s[++sp] = this.mR0;
           return sp;
         // LOAD_R0
-        case OFFSET3 + 61:
+        case OFFSET4 + 61:
           s[++sp] = this.mR1;
           return sp;
         // LOAD_R1
-        case OFFSET3 + 62:
+        case OFFSET4 + 62:
           s[++sp] = this.mR2;
           return sp;
         // LOAD_R2
-        case OFFSET3 + 63:
+        case OFFSET4 + 63:
           s[++sp] = this.mR3;
           return sp;
         // LOAD_R3
-        case OFFSET3 + 70:
+        case OFFSET4 + 70:
           s[++sp] = vars.length > 0 ? vars[0] : 0;
           return sp;
-        case OFFSET3 + 71:
+        case OFFSET4 + 71:
           s[++sp] = vars.length > 1 ? vars[1] : 0;
           return sp;
-        case OFFSET3 + 72:
+        case OFFSET4 + 72:
           s[++sp] = vars.length > 2 ? vars[2] : 0;
           return sp;
-        case OFFSET3 + 73:
+        case OFFSET4 + 73:
           s[sp] = -s[sp];
           return sp;
-        case OFFSET3 + 74: {
+        case OFFSET4 + 74: {
           const x1 = s[sp - 4], y1 = s[sp - 3], x2 = s[sp - 2], y2 = s[sp - 1], pos = s[sp];
           s[sp - 4] = FloatExpression.cubicEasing(x1, y1, x2, y2, pos);
           return sp - 4;
         }
-        case OFFSET3 + 75: {
+        case OFFSET4 + 75: {
           const arrId = arrIdFromStack2(s[sp - 1]);
           const frac = s[sp] - Math.floor(s[sp]);
           const r = frac < 0 ? frac + 1 : frac;
@@ -2863,7 +3087,7 @@ var RC = (() => {
           }
           return sp - 1;
         }
-        case OFFSET3 + 76: {
+        case OFFSET4 + 76: {
           const arrId = arrIdFromStack2(s[sp - 1]);
           const last = Math.trunc(s[sp]);
           let sum = 0;
@@ -2873,7 +3097,7 @@ var RC = (() => {
           s[sp - 1] = sum;
           return sp - 1;
         }
-        case OFFSET3 + 77: {
+        case OFFSET4 + 77: {
           const idX = arrIdFromStack2(s[sp - 1]);
           const idY = arrIdFromStack2(s[sp]);
           if (ca) {
@@ -2885,7 +3109,7 @@ var RC = (() => {
           }
           return sp - 1;
         }
-        case OFFSET3 + 78: {
+        case OFFSET4 + 78: {
           const arrId = arrIdFromStack2(s[sp]);
           if (ca) {
             const arr = ca.getFloats(arrId);
@@ -2895,7 +3119,7 @@ var RC = (() => {
           }
           return sp;
         }
-        case OFFSET3 + 79: {
+        case OFFSET4 + 79: {
           const arrId = arrIdFromStack2(s[sp - 1]);
           if (ca) {
             const arr = ca.getFloats(arrId);
@@ -2914,6 +3138,19 @@ var RC = (() => {
       return sp;
     }
   };
+  // ── seeded randomness ────────────────────────────────────────────────────────
+  //
+  // `RAND_SEED` used to be a no-op here ("ignore seed in JS"), so a document that seeded
+  // itself was reproducible on the device and different in the browser on every frame —
+  // which defeats the point of seeding. This is `java.util.Random`'s generator, so the
+  // sequence matches the reference: a 48-bit LCG, with `nextFloat()` being the top 24
+  // bits over 2^24.
+  //
+  // The state is a BigInt because the multiply overflows a double's 53 bits. At a few
+  // hundred draws a frame that cost is irrelevant beside being wrong.
+  _AnimatedFloatExpression.RNG_MULT = 0x5deece66dn;
+  _AnimatedFloatExpression.RNG_MASK = (1n << 48n) - 1n;
+  _AnimatedFloatExpression.rngState = null;
   _AnimatedFloatExpression.OFFSET = 3211264;
   _AnimatedFloatExpression.LAST_OP = _AnimatedFloatExpression.OFFSET + 79;
   _AnimatedFloatExpression.ID_REGION_MASK = 7340032;
@@ -3588,6 +3825,884 @@ var RC = (() => {
   _TouchExpression.STOP_NOTCHES_SINGLE_EVEN = 7;
   var TouchExpression = _TouchExpression;
 
+  // third_party/remote-compose-player/src/core/operations/layout/measure/ComponentMeasure.ts
+  var _ComponentMeasure = class _ComponentMeasure {
+    constructor(id, x, y, w, h, visibility = _ComponentMeasure.VISIBLE) {
+      this.mAllowsAnimation = true;
+      this.mId = id;
+      this.mX = x;
+      this.mY = y;
+      this.mW = w;
+      this.mH = h;
+      this.mVisibility = visibility;
+    }
+    getX() {
+      return this.mX;
+    }
+    setX(value) {
+      this.mX = value;
+    }
+    getY() {
+      return this.mY;
+    }
+    setY(value) {
+      this.mY = value;
+    }
+    getW() {
+      return this.mW;
+    }
+    setW(value) {
+      this.mW = value;
+    }
+    getH() {
+      return this.mH;
+    }
+    setH(value) {
+      this.mH = value;
+    }
+    getVisibility() {
+      return this.mVisibility;
+    }
+    setVisibility(v) {
+      this.mVisibility = v;
+    }
+    getAllowsAnimation() {
+      return this.mAllowsAnimation;
+    }
+    setAllowsAnimation(v) {
+      this.mAllowsAnimation = v;
+    }
+    copyFrom(m) {
+      this.mX = m.mX;
+      this.mY = m.mY;
+      this.mW = m.mW;
+      this.mH = m.mH;
+      this.mVisibility = m.mVisibility;
+    }
+    same(m) {
+      return this.mX === m.mX && this.mY === m.mY && this.mW === m.mW && this.mH === m.mH && this.mVisibility === m.mVisibility;
+    }
+    isGone() {
+      if (this.mVisibility >> 4 > 0) {
+        return (this.mVisibility & 16) === 16;
+      }
+      return this.mVisibility === _ComponentMeasure.GONE;
+    }
+    isVisible() {
+      if (this.mVisibility >> 4 > 0) {
+        return (this.mVisibility & 32) === 32;
+      }
+      return this.mVisibility === _ComponentMeasure.VISIBLE;
+    }
+    isInvisible() {
+      if (this.mVisibility >> 4 > 0) {
+        return (this.mVisibility & 64) === 64;
+      }
+      return this.mVisibility === _ComponentMeasure.INVISIBLE;
+    }
+    clearVisibilityOverride() {
+      this.mVisibility = this.mVisibility & 15;
+    }
+    addVisibilityOverride(value) {
+      let v = this.mVisibility & 15;
+      v += value;
+      if ((v & 128) === 128) {
+        v = v & 15;
+      }
+      this.mVisibility = v;
+    }
+  };
+  // Visibility constants — matches Java Component.Visibility encoding
+  _ComponentMeasure.GONE = 0;
+  _ComponentMeasure.VISIBLE = 1;
+  _ComponentMeasure.INVISIBLE = 2;
+  var ComponentMeasure = _ComponentMeasure;
+
+  // third_party/remote-compose-player/src/core/operations/layout/animation/AnimationSpec.ts
+  function intToAnimation(v) {
+    switch (v) {
+      case 0:
+        return 0 /* FADE_IN */;
+      case 1:
+        return 1 /* FADE_OUT */;
+      case 2:
+        return 2 /* SLIDE_LEFT */;
+      case 3:
+        return 3 /* SLIDE_RIGHT */;
+      case 4:
+        return 4 /* SLIDE_TOP */;
+      case 5:
+        return 5 /* SLIDE_BOTTOM */;
+      case 6:
+        return 6 /* ROTATE */;
+      case 7:
+        return 7 /* PARTICLE */;
+      default:
+        return 0 /* FADE_IN */;
+    }
+  }
+  var _AnimationSpec = class _AnimationSpec extends Operation {
+    constructor(animationId = -1, motionDuration = 300, motionEasingType = Easing.CUBIC_STANDARD, visibilityDuration = 300, visibilityEasingType = Easing.CUBIC_STANDARD, enterAnimation = 0 /* FADE_IN */, exitAnimation = 1 /* FADE_OUT */) {
+      super();
+      this.mAnimationId = animationId;
+      this.mMotionDuration = motionDuration;
+      this.mMotionEasingType = motionEasingType;
+      this.mVisibilityDuration = visibilityDuration;
+      this.mVisibilityEasingType = visibilityEasingType;
+      this.mEnterAnimation = enterAnimation;
+      this.mExitAnimation = exitAnimation;
+    }
+    isAnimationEnabled() {
+      return this.mAnimationId !== 0;
+    }
+    getAnimationId() {
+      return this.mAnimationId;
+    }
+    getMotionDuration() {
+      return this.mMotionDuration;
+    }
+    getMotionEasingType() {
+      return this.mMotionEasingType;
+    }
+    getVisibilityDuration() {
+      return this.mVisibilityDuration;
+    }
+    getVisibilityEasingType() {
+      return this.mVisibilityEasingType;
+    }
+    getEnterAnimation() {
+      return this.mEnterAnimation;
+    }
+    getExitAnimation() {
+      return this.mExitAnimation;
+    }
+    write(buffer) {
+      buffer.start(_AnimationSpec.OP_CODE);
+      buffer.writeInt(this.mAnimationId);
+      buffer.writeFloat(this.mMotionDuration);
+      buffer.writeInt(this.mMotionEasingType);
+      buffer.writeFloat(this.mVisibilityDuration);
+      buffer.writeInt(this.mVisibilityEasingType);
+      buffer.writeInt(this.mEnterAnimation);
+      buffer.writeInt(this.mExitAnimation);
+    }
+    apply(_context) {
+    }
+    deepToString(indent) {
+      return `${indent}AnimationSpec(id=${this.mAnimationId}, motion=${this.mMotionDuration}ms, vis=${this.mVisibilityDuration}ms)`;
+    }
+    static read(buffer, operations) {
+      const animationId = buffer.readInt();
+      const motionDuration = buffer.readFloat();
+      const motionEasingType = buffer.readInt();
+      const visibilityDuration = buffer.readFloat();
+      const visibilityEasingType = buffer.readInt();
+      const enterAnimation = intToAnimation(buffer.readInt());
+      const exitAnimation = intToAnimation(buffer.readInt());
+      const op = new _AnimationSpec(
+        animationId,
+        motionDuration,
+        motionEasingType,
+        visibilityDuration,
+        visibilityEasingType,
+        enterAnimation,
+        exitAnimation
+      );
+      operations.push(op);
+    }
+  };
+  _AnimationSpec.OP_CODE = 14;
+  _AnimationSpec.DEFAULT = new _AnimationSpec(-1, 300, Easing.CUBIC_STANDARD, 300, Easing.CUBIC_STANDARD, 0 /* FADE_IN */, 1 /* FADE_OUT */);
+  _AnimationSpec.DISABLED = new _AnimationSpec(0, 0, Easing.CUBIC_STANDARD, 0, Easing.CUBIC_STANDARD, 0 /* FADE_IN */, 1 /* FADE_OUT */);
+  var AnimationSpec = _AnimationSpec;
+
+  // third_party/remote-compose-player/src/core/operations/paint/PaintBundle.ts
+  var _f32dv = new DataView(new ArrayBuffer(4));
+  function intBitsToFloat2(bits) {
+    _f32dv.setInt32(0, bits);
+    return _f32dv.getFloat32(0);
+  }
+  function floatToRawIntBits3(v) {
+    _f32dv.setFloat32(0, v);
+    return _f32dv.getInt32(0);
+  }
+  function isNaNBitsLocal(bits) {
+    return (bits & 2139095040) === 2139095040 && (bits & 8388607) !== 0;
+  }
+  function idFromBitsLocal(bits) {
+    return bits & 4194303;
+  }
+  function fixFloatVar(val, context) {
+    if (isNaNBitsLocal(val)) {
+      return floatToRawIntBits3(context.getFloat(idFromBitsLocal(val)));
+    }
+    return val;
+  }
+  function fixColor(val, context) {
+    return context.getColor(val);
+  }
+  function listenFloatVar(val, context, op) {
+    if (isNaNBitsLocal(val)) {
+      context.listensTo(idFromBitsLocal(val), op);
+    }
+  }
+  var _PaintBundle = class _PaintBundle {
+    constructor() {
+      // The flat int array and current position
+      this.mArray = [];
+      this.mOutArray = null;
+      this.mPos = 0;
+    }
+    read(buffer) {
+      const len = buffer.readInt();
+      if (len <= 0 || len > 1024) {
+        throw new Error(`PaintBundle: invalid length ${len}`);
+      }
+      this.mArray = new Array(len);
+      for (let i = 0; i < len; i++) {
+        this.mArray[i] = buffer.readInt();
+      }
+      this.mPos = len;
+    }
+    /** Returns the resolved array (mOutArray if available, otherwise mArray). */
+    getArray() {
+      return this.mOutArray ?? this.mArray;
+    }
+    getLength() {
+      return this.mPos;
+    }
+    // --- Programmatic setters for building paint bundles at runtime ---
+    reset() {
+      this.mArray = [];
+      this.mOutArray = null;
+      this.mPos = 0;
+    }
+    setStyle(style) {
+      this.mArray[this.mPos++] = _PaintBundle.STYLE | style << 16;
+    }
+    setColor(aOrColor, r, g, b) {
+      if (r !== void 0 && g !== void 0 && b !== void 0) {
+        const ai = Math.round(aOrColor * 255) & 255;
+        const ri = Math.round(r * 255) & 255;
+        const gi = Math.round(g * 255) & 255;
+        const bi = Math.round(b * 255) & 255;
+        aOrColor = (ai << 24 | ri << 16 | gi << 8 | bi) >>> 0;
+      }
+      this.mArray[this.mPos++] = _PaintBundle.COLOR;
+      this.mArray[this.mPos++] = aOrColor;
+    }
+    setTextSize(size) {
+      this.mArray[this.mPos++] = _PaintBundle.TEXT_SIZE;
+      _f32dv.setFloat32(0, size);
+      this.mArray[this.mPos++] = _f32dv.getInt32(0);
+    }
+    setTextStyle(typeface, fontWeight, italic) {
+      const style = fontWeight & 1023 | (italic ? 2048 : 0);
+      this.mArray[this.mPos++] = _PaintBundle.TYPEFACE | style << 16;
+      this.mArray[this.mPos++] = typeface;
+    }
+    setTextAxis(axisTags, axisValues) {
+      const count = axisTags.length;
+      this.mArray[this.mPos++] = _PaintBundle.FONT_AXIS | count << 16;
+      for (let i = 0; i < count; i++) {
+        this.mArray[this.mPos++] = axisTags[i];
+        _f32dv.setFloat32(0, axisValues[i]);
+        this.mArray[this.mPos++] = _f32dv.getInt32(0);
+      }
+    }
+    setStrokeWidth(width) {
+      this.mArray[this.mPos++] = _PaintBundle.STROKE_WIDTH;
+      _f32dv.setFloat32(0, width);
+      this.mArray[this.mPos++] = _f32dv.getInt32(0);
+    }
+    registerListening(context, op) {
+      let i = 0;
+      const arr = this.mArray;
+      while (i < this.mPos) {
+        const cmd = arr[i++];
+        const tag = cmd & 65535;
+        switch (tag) {
+          case _PaintBundle.STROKE_MITER:
+          case _PaintBundle.STROKE_WIDTH:
+          case _PaintBundle.ALPHA:
+          case _PaintBundle.TEXT_SIZE:
+            listenFloatVar(arr[i], context, op);
+            i++;
+            break;
+          case _PaintBundle.COLOR_FILTER_ID:
+          case _PaintBundle.COLOR_ID:
+            context.listensTo(arr[i], op);
+            i++;
+            break;
+          case _PaintBundle.COLOR:
+          case _PaintBundle.TYPEFACE:
+          case _PaintBundle.SHADER:
+          case _PaintBundle.COLOR_FILTER:
+          case _PaintBundle.FALLBACK_TYPEFACE:
+            i++;
+            break;
+          case _PaintBundle.STROKE_JOIN:
+          case _PaintBundle.FILTER_BITMAP:
+          case _PaintBundle.STROKE_CAP:
+          case _PaintBundle.STYLE:
+          case _PaintBundle.IMAGE_FILTER_QUALITY:
+          case _PaintBundle.BLEND_MODE:
+          case _PaintBundle.ANTI_ALIAS:
+          case _PaintBundle.CLEAR_COLOR_FILTER:
+            break;
+          case _PaintBundle.FONT_AXIS: {
+            const count = cmd >> 16 & 65535;
+            for (let j = 0; j < count; j++) {
+              i++;
+              listenFloatVar(arr[i], context, op);
+              i++;
+            }
+            break;
+          }
+          case _PaintBundle.TEXTURE:
+            i += 3;
+            break;
+          case _PaintBundle.SHADER_MATRIX:
+            i++;
+            break;
+          case _PaintBundle.GRADIENT:
+            i = this.registerGradientListening(cmd, arr, i, context, op);
+            break;
+          case _PaintBundle.PATH_EFFECT: {
+            const count = cmd >> 16 & 65535;
+            for (let j = 0; j < count; j++) {
+              listenFloatVar(arr[i], context, op);
+              i++;
+            }
+            break;
+          }
+          default:
+            break;
+        }
+      }
+    }
+    registerGradientListening(cmd, arr, startIdx, context, op) {
+      let i = startIdx;
+      const meta = arr[i++];
+      const numColors = meta & 255;
+      const register = meta >> 16 & 65535;
+      for (let j = 0; j < numColors; j++) {
+        if ((register & 1 << j) !== 0) {
+          context.listensTo(arr[i], op);
+        }
+        i++;
+      }
+      const numStops = arr[i++];
+      for (let j = 0; j < numStops; j++) {
+        listenFloatVar(arr[i], context, op);
+        i++;
+      }
+      const gradType = cmd >> 16 & 65535;
+      switch (gradType) {
+        case _PaintBundle.LINEAR_GRADIENT:
+          for (let j = 0; j < 4; j++) {
+            listenFloatVar(arr[i], context, op);
+            i++;
+          }
+          i++;
+          break;
+        case _PaintBundle.RADIAL_GRADIENT:
+          for (let j = 0; j < 3; j++) {
+            listenFloatVar(arr[i], context, op);
+            i++;
+          }
+          i++;
+          break;
+        case _PaintBundle.SWEEP_GRADIENT:
+          for (let j = 0; j < 2; j++) {
+            listenFloatVar(arr[i], context, op);
+            i++;
+          }
+          break;
+      }
+      return i;
+    }
+    /**
+     * Resolve NaN-encoded float variable IDs and color IDs in paint parameters.
+     * Matches Java PaintBundle.updateVariables().
+     */
+    updateVariables(context) {
+      if (this.mOutArray === null) {
+        this.mOutArray = this.mArray.slice();
+      } else {
+        for (let j = 0; j < this.mArray.length; j++) {
+          this.mOutArray[j] = this.mArray[j];
+        }
+      }
+      let i = 0;
+      const arr = this.mArray;
+      const out = this.mOutArray;
+      while (i < this.mPos) {
+        const cmd = arr[i++];
+        const tag = cmd & 65535;
+        switch (tag) {
+          case _PaintBundle.STROKE_MITER:
+          case _PaintBundle.STROKE_WIDTH:
+          case _PaintBundle.ALPHA:
+          case _PaintBundle.TEXT_SIZE:
+            out[i] = fixFloatVar(arr[i], context);
+            i++;
+            break;
+          case _PaintBundle.COLOR_FILTER_ID:
+          case _PaintBundle.COLOR_ID:
+            out[i] = fixColor(arr[i], context);
+            i++;
+            break;
+          case _PaintBundle.COLOR:
+          case _PaintBundle.TYPEFACE:
+          case _PaintBundle.SHADER:
+          case _PaintBundle.COLOR_FILTER:
+          case _PaintBundle.FALLBACK_TYPEFACE:
+            i++;
+            break;
+          case _PaintBundle.STROKE_JOIN:
+          case _PaintBundle.FILTER_BITMAP:
+          case _PaintBundle.STROKE_CAP:
+          case _PaintBundle.STYLE:
+          case _PaintBundle.IMAGE_FILTER_QUALITY:
+          case _PaintBundle.BLEND_MODE:
+          case _PaintBundle.ANTI_ALIAS:
+          case _PaintBundle.CLEAR_COLOR_FILTER:
+            break;
+          case _PaintBundle.FONT_AXIS: {
+            const count = cmd >> 16 & 65535;
+            for (let j = 0; j < count; j++) {
+              i++;
+              out[i] = fixFloatVar(arr[i], context);
+              i++;
+            }
+            break;
+          }
+          case _PaintBundle.TEXTURE:
+            i += 3;
+            break;
+          case _PaintBundle.SHADER_MATRIX:
+            i++;
+            break;
+          case _PaintBundle.GRADIENT:
+            i = this.updateGradientVars(cmd, arr, out, i, context);
+            break;
+          case _PaintBundle.PATH_EFFECT: {
+            const count = cmd >> 16 & 65535;
+            for (let j = 0; j < count; j++) {
+              out[i] = fixFloatVar(arr[i], context);
+              i++;
+            }
+            break;
+          }
+          default:
+            break;
+        }
+      }
+    }
+    updateGradientVars(cmd, arr, out, startIdx, context) {
+      let i = startIdx;
+      const gradType = cmd >> 16 & 65535;
+      const meta = arr[i++];
+      const numColors = meta & 255;
+      const register = meta >> 16 & 65535;
+      for (let j = 0; j < numColors; j++) {
+        if ((register & 1 << j) !== 0) {
+          out[i] = fixColor(arr[i], context);
+        }
+        i++;
+      }
+      const numStops = arr[i++];
+      for (let j = 0; j < numStops; j++) {
+        out[i] = fixFloatVar(arr[i], context);
+        i++;
+      }
+      switch (gradType) {
+        case _PaintBundle.LINEAR_GRADIENT:
+          out[i] = fixFloatVar(arr[i], context);
+          i++;
+          out[i] = fixFloatVar(arr[i], context);
+          i++;
+          out[i] = fixFloatVar(arr[i], context);
+          i++;
+          out[i] = fixFloatVar(arr[i], context);
+          i++;
+          i++;
+          break;
+        case _PaintBundle.RADIAL_GRADIENT:
+          out[i] = fixFloatVar(arr[i], context);
+          i++;
+          out[i] = fixFloatVar(arr[i], context);
+          i++;
+          out[i] = fixFloatVar(arr[i], context);
+          i++;
+          i++;
+          break;
+        case _PaintBundle.SWEEP_GRADIENT:
+          out[i] = fixFloatVar(arr[i], context);
+          i++;
+          out[i] = fixFloatVar(arr[i], context);
+          i++;
+          break;
+      }
+      return i;
+    }
+  };
+  // Paint property tags (matching Java PaintBundle constants)
+  _PaintBundle.TEXT_SIZE = 1;
+  _PaintBundle.COLOR = 4;
+  _PaintBundle.STROKE_WIDTH = 5;
+  _PaintBundle.STROKE_MITER = 6;
+  _PaintBundle.STROKE_CAP = 7;
+  _PaintBundle.STYLE = 8;
+  _PaintBundle.SHADER = 9;
+  _PaintBundle.IMAGE_FILTER_QUALITY = 10;
+  _PaintBundle.GRADIENT = 11;
+  _PaintBundle.ALPHA = 12;
+  _PaintBundle.COLOR_FILTER = 13;
+  _PaintBundle.ANTI_ALIAS = 14;
+  _PaintBundle.STROKE_JOIN = 15;
+  _PaintBundle.TYPEFACE = 16;
+  _PaintBundle.FILTER_BITMAP = 17;
+  _PaintBundle.BLEND_MODE = 18;
+  _PaintBundle.COLOR_ID = 19;
+  _PaintBundle.COLOR_FILTER_ID = 20;
+  _PaintBundle.CLEAR_COLOR_FILTER = 21;
+  _PaintBundle.SHADER_MATRIX = 22;
+  _PaintBundle.FONT_AXIS = 23;
+  _PaintBundle.TEXTURE = 24;
+  _PaintBundle.PATH_EFFECT = 25;
+  _PaintBundle.FALLBACK_TYPEFACE = 26;
+  // Gradient types (wire format values)
+  _PaintBundle.LINEAR_GRADIENT = 0;
+  _PaintBundle.RADIAL_GRADIENT = 1;
+  _PaintBundle.SWEEP_GRADIENT = 2;
+  // Style constants
+  _PaintBundle.FILL = 0;
+  _PaintBundle.STROKE = 1;
+  _PaintBundle.FILL_AND_STROKE = 2;
+  var PaintBundle = _PaintBundle;
+
+  // third_party/remote-compose-player/src/core/operations/layout/animation/AnimateMeasure.ts
+  var AnimateMeasure = class {
+    constructor(startTime, component, original, target, duration, durationVisibilityChange, enterAnimation = 0 /* FADE_IN */, exitAnimation = 1 /* FADE_OUT */, motionEasingType = Easing.CUBIC_STANDARD, visibilityEasingType = Easing.CUBIC_ACCELERATE) {
+      this.mP = 0;
+      this.mVp = 0;
+      this.paintBundle = new PaintBundle();
+      this.mStartTime = startTime;
+      this.mComponent = component;
+      this.mOriginal = original;
+      this.mTarget = target;
+      this.mDuration = duration;
+      this.mDurationVisibilityChange = durationVisibilityChange;
+      this.mEnterAnimation = enterAnimation;
+      this.mExitAnimation = exitAnimation;
+      this.mMotionEasingType = motionEasingType;
+      this.mVisibilityEasingType = visibilityEasingType;
+      this.mMotionEasing = new CubicEasing(motionEasingType);
+      this.mVisibilityEasing = new CubicEasing(visibilityEasingType);
+      component.mVisibility = target.getVisibility();
+    }
+    update(currentTime) {
+      const elapsed = Math.max(0, currentTime - this.mStartTime);
+      const motionProgress = this.mDuration > 0 ? Math.min(1, elapsed / this.mDuration) : 1;
+      const visProgress = this.mDurationVisibilityChange > 0 ? Math.min(1, elapsed / this.mDurationVisibilityChange) : 1;
+      this.mP = this.mMotionEasing.get(motionProgress);
+      this.mVp = this.mVisibilityEasing.get(visProgress);
+    }
+    apply(context) {
+      const time = context.mClock?.millis() ?? Date.now();
+      this.update(time);
+      this.mComponent.setX(this.getX());
+      this.mComponent.setY(this.getY());
+      this.mComponent.setWidth(this.getWidth());
+      this.mComponent.setHeight(this.getHeight());
+      if (typeof this.mComponent.updateVariables === "function") {
+        this.mComponent.updateVariables(context);
+      }
+    }
+    paint(context) {
+      this.apply(context.getContext());
+      const origVis = this.mOriginal.getVisibility();
+      const targetVis = this.mTarget.getVisibility();
+      if (origVis !== targetVis) {
+        if (this.mTarget.isGone()) {
+          switch (this.mExitAnimation) {
+            case 1 /* FADE_OUT */: {
+              context.save();
+              context.savePaint();
+              this.paintBundle.reset();
+              this.paintBundle.setColor(Math.max(0, Math.min(1, 1 - this.mVp)), 0, 0, 0);
+              context.applyPaint(this.paintBundle);
+              context.saveLayer(
+                this.mComponent.getX(),
+                this.mComponent.getY(),
+                this.mComponent.getWidth(),
+                this.mComponent.getHeight()
+              );
+              this.mComponent.paintingComponent(context);
+              context.restore();
+              context.restorePaint();
+              context.restore();
+              break;
+            }
+            case 2 /* SLIDE_LEFT */: {
+              const parentW = this.mComponent.getParent()?.getWidth() ?? context.getContext().mWidth;
+              context.save();
+              context.translate(-this.mVp * parentW, 0);
+              context.saveLayer(
+                this.mComponent.getX(),
+                this.mComponent.getY(),
+                this.mComponent.getWidth(),
+                this.mComponent.getHeight()
+              );
+              this.mComponent.paintingComponent(context);
+              context.restore();
+              context.restore();
+              break;
+            }
+            case 3 /* SLIDE_RIGHT */: {
+              const parentW = this.mComponent.getParent()?.getWidth() ?? context.getContext().mWidth;
+              context.save();
+              context.translate(this.mVp * parentW, 0);
+              context.saveLayer(
+                this.mComponent.getX(),
+                this.mComponent.getY(),
+                this.mComponent.getWidth(),
+                this.mComponent.getHeight()
+              );
+              this.mComponent.paintingComponent(context);
+              context.restore();
+              context.restore();
+              break;
+            }
+            case 4 /* SLIDE_TOP */: {
+              const parentH = this.mComponent.getParent()?.getHeight() ?? context.getContext().mHeight;
+              context.save();
+              context.translate(0, -this.mVp * parentH);
+              context.saveLayer(
+                this.mComponent.getX(),
+                this.mComponent.getY(),
+                this.mComponent.getWidth(),
+                this.mComponent.getHeight()
+              );
+              this.mComponent.paintingComponent(context);
+              context.restore();
+              context.restore();
+              break;
+            }
+            case 5 /* SLIDE_BOTTOM */: {
+              const parentH = this.mComponent.getParent()?.getHeight() ?? context.getContext().mHeight;
+              context.save();
+              context.translate(0, this.mVp * parentH);
+              context.saveLayer(
+                this.mComponent.getX(),
+                this.mComponent.getY(),
+                this.mComponent.getWidth(),
+                this.mComponent.getHeight()
+              );
+              this.mComponent.paintingComponent(context);
+              context.restore();
+              context.restore();
+              break;
+            }
+            default: {
+              context.save();
+              context.savePaint();
+              this.paintBundle.reset();
+              this.paintBundle.setColor(Math.max(0, Math.min(1, 1 - this.mVp)), 0, 0, 0);
+              context.applyPaint(this.paintBundle);
+              context.saveLayer(
+                this.mComponent.getX(),
+                this.mComponent.getY(),
+                this.mComponent.getWidth(),
+                this.mComponent.getHeight()
+              );
+              this.mComponent.paintingComponent(context);
+              context.restore();
+              context.restorePaint();
+              context.restore();
+              break;
+            }
+          }
+        } else if (this.mOriginal.isGone() && !this.mTarget.isGone()) {
+          switch (this.mEnterAnimation) {
+            case 6 /* ROTATE */: {
+              const px = this.mTarget.getX() + this.mTarget.getW() / 2;
+              const py = this.mTarget.getY() + this.mTarget.getH() / 2;
+              context.save();
+              context.savePaint();
+              context.matrixRotate(this.mVp * 360, px, py);
+              context.matrixScale(this.mVp, this.mVp, px, py);
+              this.paintBundle.reset();
+              this.paintBundle.setColor(Math.max(0, Math.min(1, this.mVp)), 0, 0, 0);
+              context.applyPaint(this.paintBundle);
+              context.saveLayer(
+                this.mComponent.getX(),
+                this.mComponent.getY(),
+                this.mComponent.getWidth(),
+                this.mComponent.getHeight()
+              );
+              this.mComponent.paintingComponent(context);
+              context.restore();
+              context.restorePaint();
+              context.restore();
+              break;
+            }
+            case 0 /* FADE_IN */: {
+              context.save();
+              context.savePaint();
+              this.paintBundle.reset();
+              this.paintBundle.setColor(Math.max(0, Math.min(1, this.mVp)), 0, 0, 0);
+              context.applyPaint(this.paintBundle);
+              context.saveLayer(
+                this.mComponent.getX(),
+                this.mComponent.getY(),
+                this.mComponent.getWidth(),
+                this.mComponent.getHeight()
+              );
+              this.mComponent.paintingComponent(context);
+              context.restore();
+              context.restorePaint();
+              context.restore();
+              break;
+            }
+            case 2 /* SLIDE_LEFT */: {
+              const parentW = this.mComponent.getParent()?.getWidth() ?? context.getContext().mWidth;
+              context.save();
+              context.translate((1 - this.mVp) * parentW, 0);
+              context.saveLayer(
+                this.mComponent.getX(),
+                this.mComponent.getY(),
+                this.mComponent.getWidth(),
+                this.mComponent.getHeight()
+              );
+              this.mComponent.paintingComponent(context);
+              context.restore();
+              context.restore();
+              break;
+            }
+            case 3 /* SLIDE_RIGHT */: {
+              const parentW = this.mComponent.getParent()?.getWidth() ?? context.getContext().mWidth;
+              context.save();
+              context.translate(-(1 - this.mVp) * parentW, 0);
+              context.saveLayer(
+                this.mComponent.getX(),
+                this.mComponent.getY(),
+                this.mComponent.getWidth(),
+                this.mComponent.getHeight()
+              );
+              this.mComponent.paintingComponent(context);
+              context.restore();
+              context.restore();
+              break;
+            }
+            case 4 /* SLIDE_TOP */: {
+              const parentH = this.mComponent.getParent()?.getHeight() ?? context.getContext().mHeight;
+              context.save();
+              context.translate(0, (1 - this.mVp) * parentH);
+              context.saveLayer(
+                this.mComponent.getX(),
+                this.mComponent.getY(),
+                this.mComponent.getWidth(),
+                this.mComponent.getHeight()
+              );
+              this.mComponent.paintingComponent(context);
+              context.restore();
+              context.restore();
+              break;
+            }
+            case 5 /* SLIDE_BOTTOM */: {
+              const parentH = this.mComponent.getParent()?.getHeight() ?? context.getContext().mHeight;
+              context.save();
+              context.translate(0, -(1 - this.mVp) * parentH);
+              context.saveLayer(
+                this.mComponent.getX(),
+                this.mComponent.getY(),
+                this.mComponent.getWidth(),
+                this.mComponent.getHeight()
+              );
+              this.mComponent.paintingComponent(context);
+              context.restore();
+              context.restore();
+              break;
+            }
+            default: {
+              this.mComponent.paintingComponent(context);
+              break;
+            }
+          }
+        } else {
+          this.mComponent.paintingComponent(context);
+        }
+      } else if (!this.mTarget.isGone()) {
+        this.mComponent.paintingComponent(context);
+      }
+      if (this.mP >= 1 && this.mVp >= 1) {
+        this.mComponent.mVisibility = this.mTarget.getVisibility();
+        this.mComponent.setX(this.mTarget.getX());
+        this.mComponent.setY(this.mTarget.getY());
+        this.mComponent.setWidth(this.mTarget.getW());
+        this.mComponent.setHeight(this.mTarget.getH());
+      }
+    }
+    isDone() {
+      return this.mP >= 1 && this.mVp >= 1;
+    }
+    getX() {
+      return this.mOriginal.getX() * (1 - this.mP) + this.mTarget.getX() * this.mP;
+    }
+    getY() {
+      return this.mOriginal.getY() * (1 - this.mP) + this.mTarget.getY() * this.mP;
+    }
+    getWidth() {
+      return this.mOriginal.getW() * (1 - this.mP) + this.mTarget.getW() * this.mP;
+    }
+    getHeight() {
+      return this.mOriginal.getH() * (1 - this.mP) + this.mTarget.getH() * this.mP;
+    }
+    getVisibility() {
+      if (this.mOriginal.getVisibility() === this.mTarget.getVisibility()) {
+        return 1;
+      } else if (!this.mTarget.isGone()) {
+        return this.mVp;
+      } else {
+        return 1 - this.mVp;
+      }
+    }
+    updateTarget(context, measure, currentTime) {
+      const currentX = this.getX();
+      const currentY = this.getY();
+      const currentW = this.getWidth();
+      const currentH = this.getHeight();
+      this.mOriginal.setX(currentX);
+      this.mOriginal.setY(currentY);
+      this.mOriginal.setW(currentW);
+      this.mOriginal.setH(currentH);
+      const targetX = measure.getX();
+      const targetY = measure.getY();
+      const targetW = measure.getW();
+      const targetH = measure.getH();
+      const targetVisibility = measure.getVisibility();
+      if (this.mTarget.getX() !== targetX || this.mTarget.getY() !== targetY || this.mTarget.getW() !== targetW || this.mTarget.getH() !== targetH || this.mTarget.getVisibility() !== targetVisibility) {
+        this.mTarget.setX(targetX);
+        this.mTarget.setY(targetY);
+        this.mTarget.setW(targetW);
+        this.mTarget.setH(targetH);
+        this.mTarget.setVisibility(targetVisibility);
+        this.mStartTime = currentTime;
+        this.mP = 0;
+        this.mVp = 0;
+      }
+    }
+    getOriginal() {
+      return this.mOriginal;
+    }
+    getTarget() {
+      return this.mTarget;
+    }
+  };
+
   // third_party/remote-compose-player/src/core/operations/layout/Component.ts
   var _Visibility = class _Visibility {
     static isGone(v) {
@@ -3641,6 +4756,9 @@ var RC = (() => {
       this.mNeedsMeasure = true;
       this.mNeedsRepaint = true;
       this.mFirstLayout = true;
+      this.mAnimationSpec = AnimationSpec.DEFAULT;
+      this.mAnimateMeasure = null;
+      this.mNeedsBoundsAnimation = false;
       this.mComponentId = componentId;
       this.mAnimationId = animationId;
       this.mX = x;
@@ -3712,6 +4830,27 @@ var RC = (() => {
     clearNeedsMeasure() {
       this.mNeedsMeasure = false;
     }
+    needsRepaint() {
+      return this.mNeedsRepaint;
+    }
+    doesNeedsRepaint() {
+      return this.mNeedsRepaint;
+    }
+    setNeedsRepaint(v) {
+      this.mNeedsRepaint = v;
+    }
+    needsBoundsAnimation() {
+      return this.mNeedsBoundsAnimation;
+    }
+    markNeedsBoundsAnimation() {
+      this.mNeedsBoundsAnimation = true;
+      if (this.mParent) {
+        this.mParent.markNeedsBoundsAnimation();
+      }
+    }
+    clearNeedsBoundsAnimation() {
+      this.mNeedsBoundsAnimation = false;
+    }
     isVisible() {
       if (Visibility.isGone(this.mVisibility)) return false;
       if (this.mParent) return this.mParent.isVisible();
@@ -3731,6 +4870,10 @@ var RC = (() => {
     }
     inflate() {
       for (const op of this.mChildren) {
+        if (op instanceof AnimationSpec) {
+          this.mAnimationSpec = op;
+          this.mAnimationId = op.getAnimationId();
+        }
         if (op instanceof _Component) {
           op.setParent(this);
         }
@@ -3763,18 +4906,106 @@ var RC = (() => {
     }
     layout(context, measure) {
       const m = measure.get(this);
-      this.mVisibility = m.getVisibility();
-      if (m.isGone()) return;
-      this.mX = m.getX();
-      this.mY = m.getY();
-      this.mWidth = m.getW();
-      this.mHeight = m.getH();
+      const allowAnimation = !this.mFirstLayout && context.isAnimationEnabled() && this.mAnimationSpec.isAnimationEnabled() && m.getAllowsAnimation();
+      if (allowAnimation) {
+        if (this.mAnimateMeasure === null) {
+          const origin = new ComponentMeasure(this.mComponentId, this.mX, this.mY, this.mWidth, this.mHeight, this.mVisibility);
+          const target = new ComponentMeasure(this.mComponentId, m.getX(), m.getY(), m.getW(), m.getH(), m.getVisibility());
+          if (!target.same(origin)) {
+            const now = context.mClock?.millis() ?? Date.now();
+            this.mAnimateMeasure = new AnimateMeasure(
+              now,
+              this,
+              origin,
+              target,
+              this.mAnimationSpec.getMotionDuration(),
+              this.mAnimationSpec.getVisibilityDuration(),
+              this.mAnimationSpec.getEnterAnimation(),
+              this.mAnimationSpec.getExitAnimation(),
+              this.mAnimationSpec.getMotionEasingType(),
+              this.mAnimationSpec.getVisibilityEasingType()
+            );
+          }
+        } else {
+          const now = context.mClock?.millis() ?? Date.now();
+          this.mAnimateMeasure.updateTarget(context, m, now);
+        }
+      } else {
+        this.mAnimateMeasure = null;
+      }
+      if (this.mAnimateMeasure === null) {
+        this.mVisibility = m.getVisibility();
+        this.mX = m.getX();
+        this.mY = m.getY();
+        this.mWidth = m.getW();
+        this.mHeight = m.getH();
+        if (this.mParent) {
+          this.clearNeedsBoundsAnimation();
+        }
+      } else {
+        this.mAnimateMeasure.apply(context);
+        this.markNeedsBoundsAnimation();
+      }
       this.mFirstLayout = false;
     }
-    animatingBounds(_context) {
+    animatingBounds(context) {
+      if (!context.isAnimationEnabled()) {
+        this.mAnimateMeasure = null;
+        if (this.mParent) {
+          this.clearNeedsBoundsAnimation();
+        }
+      } else if (this.mAnimateMeasure !== null) {
+        this.mAnimateMeasure.apply(context);
+        if (this.mAnimateMeasure.isDone()) {
+          this.mAnimateMeasure = null;
+          if (this.mParent) {
+            this.clearNeedsBoundsAnimation();
+          }
+        } else {
+          this.markNeedsBoundsAnimation();
+        }
+      } else {
+        if (this.mParent) {
+          this.clearNeedsBoundsAnimation();
+        }
+      }
+      for (const op of this.mChildren) {
+        if (op instanceof _Component) {
+          op.animatingBounds(context);
+        }
+      }
     }
     // --- Paint ---
+    applyAnimationAsNeeded(paintContext) {
+      if (!paintContext.isAnimationEnabled()) {
+        if (this.mAnimateMeasure !== null) {
+          this.mAnimateMeasure = null;
+          if (this.mParent) {
+            this.clearNeedsBoundsAnimation();
+          }
+        }
+        return false;
+      }
+      if (this.mAnimateMeasure !== null) {
+        this.mAnimateMeasure.paint(paintContext);
+        if (this.mAnimateMeasure.isDone()) {
+          this.mAnimateMeasure = null;
+          if (this.mParent) {
+            this.clearNeedsBoundsAnimation();
+          }
+          paintContext.needsRepaint();
+        } else {
+          this.markNeedsBoundsAnimation();
+          paintContext.needsRepaint();
+        }
+        return true;
+      }
+      return false;
+    }
     paint(paintContext) {
+      if (this.applyAnimationAsNeeded(paintContext)) {
+        return;
+      }
       if (Visibility.isGone(this.mVisibility)) return;
       if (Visibility.isInvisible(this.mVisibility)) return;
       this.paintingComponent(paintContext);
@@ -3784,7 +5015,7 @@ var RC = (() => {
       paintContext.matrixSave();
       paintContext.matrixTranslate(this.mX, this.mY);
       for (const op of this.mChildren) {
-        context.incrementOpCount();
+        context.incrementOpCount(op);
         if (op.isDirty() && typeof op.updateVariables === "function") {
           op.markNotDirty();
           op.updateVariables(context);
@@ -3953,99 +5184,6 @@ var RC = (() => {
     }
   };
 
-  // third_party/remote-compose-player/src/core/operations/layout/measure/ComponentMeasure.ts
-  var _ComponentMeasure = class _ComponentMeasure {
-    constructor(id, x, y, w, h, visibility = _ComponentMeasure.VISIBLE) {
-      this.mAllowsAnimation = true;
-      this.mId = id;
-      this.mX = x;
-      this.mY = y;
-      this.mW = w;
-      this.mH = h;
-      this.mVisibility = visibility;
-    }
-    getX() {
-      return this.mX;
-    }
-    setX(value) {
-      this.mX = value;
-    }
-    getY() {
-      return this.mY;
-    }
-    setY(value) {
-      this.mY = value;
-    }
-    getW() {
-      return this.mW;
-    }
-    setW(value) {
-      this.mW = value;
-    }
-    getH() {
-      return this.mH;
-    }
-    setH(value) {
-      this.mH = value;
-    }
-    getVisibility() {
-      return this.mVisibility;
-    }
-    setVisibility(v) {
-      this.mVisibility = v;
-    }
-    getAllowsAnimation() {
-      return this.mAllowsAnimation;
-    }
-    setAllowsAnimation(v) {
-      this.mAllowsAnimation = v;
-    }
-    copyFrom(m) {
-      this.mX = m.mX;
-      this.mY = m.mY;
-      this.mW = m.mW;
-      this.mH = m.mH;
-      this.mVisibility = m.mVisibility;
-    }
-    same(m) {
-      return this.mX === m.mX && this.mY === m.mY && this.mW === m.mW && this.mH === m.mH && this.mVisibility === m.mVisibility;
-    }
-    isGone() {
-      if (this.mVisibility >> 4 > 0) {
-        return (this.mVisibility & 16) === 16;
-      }
-      return this.mVisibility === _ComponentMeasure.GONE;
-    }
-    isVisible() {
-      if (this.mVisibility >> 4 > 0) {
-        return (this.mVisibility & 32) === 32;
-      }
-      return this.mVisibility === _ComponentMeasure.VISIBLE;
-    }
-    isInvisible() {
-      if (this.mVisibility >> 4 > 0) {
-        return (this.mVisibility & 64) === 64;
-      }
-      return this.mVisibility === _ComponentMeasure.INVISIBLE;
-    }
-    clearVisibilityOverride() {
-      this.mVisibility = this.mVisibility & 15;
-    }
-    addVisibilityOverride(value) {
-      let v = this.mVisibility & 15;
-      v += value;
-      if ((v & 128) === 128) {
-        v = v & 15;
-      }
-      this.mVisibility = v;
-    }
-  };
-  // Visibility constants — matches Java Component.Visibility encoding
-  _ComponentMeasure.GONE = 0;
-  _ComponentMeasure.VISIBLE = 1;
-  _ComponentMeasure.INVISIBLE = 2;
-  var ComponentMeasure = _ComponentMeasure;
-
   // third_party/remote-compose-player/src/core/operations/layout/measure/MeasurePass.ts
   var MeasurePass = class {
     constructor() {
@@ -4080,7 +5218,7 @@ var RC = (() => {
           c.getY(),
           c.getWidth(),
           c.getHeight(),
-          c.getVisibility()
+          c.getVisibility() & 15
         );
         this.mList.set(id, m);
       }
@@ -4113,6 +5251,18 @@ var RC = (() => {
       for (const op of component.getList()) {
         if (op instanceof Component) {
           this.assignId(op);
+        }
+      }
+    }
+    invalidateMeasure() {
+      this.mNeedsMeasure = true;
+      this.invalidateMeasureChildren(this);
+    }
+    invalidateMeasureChildren(component) {
+      component.mNeedsMeasure = true;
+      for (const op of component.getList()) {
+        if (op instanceof Component) {
+          this.invalidateMeasureChildren(op);
         }
       }
     }
@@ -4175,7 +5325,7 @@ var RC = (() => {
       for (const op of this.getList()) {
         if (op instanceof PaintOperation) {
           op.paint(paintContext);
-          remoteContext.incrementOpCount();
+          remoteContext.incrementOpCount(op);
         }
       }
       paintContext.restore();
@@ -4264,377 +5414,6 @@ var RC = (() => {
       context.loadFloat(RemoteContext.ID_API_LEVEL, CoreDocument.DOCUMENT_API_LEVEL);
     }
   };
-
-  // third_party/remote-compose-player/src/core/operations/paint/PaintBundle.ts
-  var _f32dv = new DataView(new ArrayBuffer(4));
-  function intBitsToFloat2(bits) {
-    _f32dv.setInt32(0, bits);
-    return _f32dv.getFloat32(0);
-  }
-  function floatToRawIntBits3(v) {
-    _f32dv.setFloat32(0, v);
-    return _f32dv.getInt32(0);
-  }
-  function isNaNBitsLocal(bits) {
-    return (bits & 2139095040) === 2139095040 && (bits & 8388607) !== 0;
-  }
-  function idFromBitsLocal(bits) {
-    return bits & 4194303;
-  }
-  function fixFloatVar(val, context) {
-    if (isNaNBitsLocal(val)) {
-      return floatToRawIntBits3(context.getFloat(idFromBitsLocal(val)));
-    }
-    return val;
-  }
-  function fixColor(val, context) {
-    return context.getColor(val);
-  }
-  function listenFloatVar(val, context, op) {
-    if (isNaNBitsLocal(val)) {
-      context.listensTo(idFromBitsLocal(val), op);
-    }
-  }
-  var _PaintBundle = class _PaintBundle {
-    constructor() {
-      // The flat int array and current position
-      this.mArray = [];
-      this.mOutArray = null;
-      this.mPos = 0;
-    }
-    read(buffer) {
-      const len = buffer.readInt();
-      if (len <= 0 || len > 1024) {
-        throw new Error(`PaintBundle: invalid length ${len}`);
-      }
-      this.mArray = new Array(len);
-      for (let i = 0; i < len; i++) {
-        this.mArray[i] = buffer.readInt();
-      }
-      this.mPos = len;
-    }
-    /** Returns the resolved array (mOutArray if available, otherwise mArray). */
-    getArray() {
-      return this.mOutArray ?? this.mArray;
-    }
-    getLength() {
-      return this.mPos;
-    }
-    // --- Programmatic setters for building paint bundles at runtime ---
-    reset() {
-      this.mArray = [];
-      this.mOutArray = null;
-      this.mPos = 0;
-    }
-    setStyle(style) {
-      this.mArray[this.mPos++] = _PaintBundle.STYLE | style << 16;
-    }
-    setColor(aOrColor, r, g, b) {
-      if (r !== void 0 && g !== void 0 && b !== void 0) {
-        const ai = Math.round(aOrColor * 255) & 255;
-        const ri = Math.round(r * 255) & 255;
-        const gi = Math.round(g * 255) & 255;
-        const bi = Math.round(b * 255) & 255;
-        aOrColor = (ai << 24 | ri << 16 | gi << 8 | bi) >>> 0;
-      }
-      this.mArray[this.mPos++] = _PaintBundle.COLOR;
-      this.mArray[this.mPos++] = aOrColor;
-    }
-    setTextSize(size) {
-      this.mArray[this.mPos++] = _PaintBundle.TEXT_SIZE;
-      _f32dv.setFloat32(0, size);
-      this.mArray[this.mPos++] = _f32dv.getInt32(0);
-    }
-    setTextStyle(typeface, fontWeight, italic) {
-      const style = fontWeight & 1023 | (italic ? 2048 : 0);
-      this.mArray[this.mPos++] = _PaintBundle.TYPEFACE | style << 16;
-      this.mArray[this.mPos++] = typeface;
-    }
-    setTextAxis(axisTags, axisValues) {
-      const count = axisTags.length;
-      this.mArray[this.mPos++] = _PaintBundle.FONT_AXIS | count << 16;
-      for (let i = 0; i < count; i++) {
-        this.mArray[this.mPos++] = axisTags[i];
-        _f32dv.setFloat32(0, axisValues[i]);
-        this.mArray[this.mPos++] = _f32dv.getInt32(0);
-      }
-    }
-    setStrokeWidth(width) {
-      this.mArray[this.mPos++] = _PaintBundle.STROKE_WIDTH;
-      _f32dv.setFloat32(0, width);
-      this.mArray[this.mPos++] = _f32dv.getInt32(0);
-    }
-    registerListening(context, op) {
-      let i = 0;
-      const arr = this.mArray;
-      while (i < this.mPos) {
-        const cmd = arr[i++];
-        const tag = cmd & 65535;
-        switch (tag) {
-          case _PaintBundle.STROKE_MITER:
-          case _PaintBundle.STROKE_WIDTH:
-          case _PaintBundle.ALPHA:
-          case _PaintBundle.TEXT_SIZE:
-            listenFloatVar(arr[i], context, op);
-            i++;
-            break;
-          case _PaintBundle.COLOR_FILTER_ID:
-          case _PaintBundle.COLOR_ID:
-            context.listensTo(arr[i], op);
-            i++;
-            break;
-          case _PaintBundle.COLOR:
-          case _PaintBundle.TYPEFACE:
-          case _PaintBundle.SHADER:
-          case _PaintBundle.COLOR_FILTER:
-          case _PaintBundle.FALLBACK_TYPEFACE:
-            i++;
-            break;
-          case _PaintBundle.STROKE_JOIN:
-          case _PaintBundle.FILTER_BITMAP:
-          case _PaintBundle.STROKE_CAP:
-          case _PaintBundle.STYLE:
-          case _PaintBundle.IMAGE_FILTER_QUALITY:
-          case _PaintBundle.BLEND_MODE:
-          case _PaintBundle.ANTI_ALIAS:
-          case _PaintBundle.CLEAR_COLOR_FILTER:
-            break;
-          case _PaintBundle.FONT_AXIS: {
-            const count = cmd >> 16 & 65535;
-            for (let j = 0; j < count; j++) {
-              i++;
-              listenFloatVar(arr[i], context, op);
-              i++;
-            }
-            break;
-          }
-          case _PaintBundle.TEXTURE:
-            i += 3;
-            break;
-          case _PaintBundle.SHADER_MATRIX:
-            i++;
-            break;
-          case _PaintBundle.GRADIENT:
-            i = this.registerGradientListening(cmd, arr, i, context, op);
-            break;
-          case _PaintBundle.PATH_EFFECT: {
-            const count = cmd >> 16 & 65535;
-            for (let j = 0; j < count; j++) {
-              listenFloatVar(arr[i], context, op);
-              i++;
-            }
-            listenFloatVar(arr[i], context, op);
-            i++;
-            break;
-          }
-          default:
-            break;
-        }
-      }
-    }
-    registerGradientListening(cmd, arr, startIdx, context, op) {
-      let i = startIdx;
-      const meta = arr[i++];
-      const numColors = meta & 255;
-      const register = meta >> 16 & 65535;
-      for (let j = 0; j < numColors; j++) {
-        if ((register & 1 << j) !== 0) {
-          context.listensTo(arr[i], op);
-        }
-        i++;
-      }
-      const numStops = arr[i++];
-      for (let j = 0; j < numStops; j++) {
-        listenFloatVar(arr[i], context, op);
-        i++;
-      }
-      const gradType = cmd >> 16 & 65535;
-      switch (gradType) {
-        case _PaintBundle.LINEAR_GRADIENT:
-          for (let j = 0; j < 4; j++) {
-            listenFloatVar(arr[i], context, op);
-            i++;
-          }
-          i++;
-          break;
-        case _PaintBundle.RADIAL_GRADIENT:
-          for (let j = 0; j < 3; j++) {
-            listenFloatVar(arr[i], context, op);
-            i++;
-          }
-          i++;
-          break;
-        case _PaintBundle.SWEEP_GRADIENT:
-          for (let j = 0; j < 2; j++) {
-            listenFloatVar(arr[i], context, op);
-            i++;
-          }
-          break;
-      }
-      return i;
-    }
-    /**
-     * Resolve NaN-encoded float variable IDs and color IDs in paint parameters.
-     * Matches Java PaintBundle.updateVariables().
-     */
-    updateVariables(context) {
-      if (this.mOutArray === null) {
-        this.mOutArray = this.mArray.slice();
-      } else {
-        for (let j = 0; j < this.mArray.length; j++) {
-          this.mOutArray[j] = this.mArray[j];
-        }
-      }
-      let i = 0;
-      const arr = this.mArray;
-      const out = this.mOutArray;
-      while (i < this.mPos) {
-        const cmd = arr[i++];
-        const tag = cmd & 65535;
-        switch (tag) {
-          case _PaintBundle.STROKE_MITER:
-          case _PaintBundle.STROKE_WIDTH:
-          case _PaintBundle.ALPHA:
-          case _PaintBundle.TEXT_SIZE:
-            out[i] = fixFloatVar(arr[i], context);
-            i++;
-            break;
-          case _PaintBundle.COLOR_FILTER_ID:
-          case _PaintBundle.COLOR_ID:
-            out[i] = fixColor(arr[i], context);
-            i++;
-            break;
-          case _PaintBundle.COLOR:
-          case _PaintBundle.TYPEFACE:
-          case _PaintBundle.SHADER:
-          case _PaintBundle.COLOR_FILTER:
-          case _PaintBundle.FALLBACK_TYPEFACE:
-            i++;
-            break;
-          case _PaintBundle.STROKE_JOIN:
-          case _PaintBundle.FILTER_BITMAP:
-          case _PaintBundle.STROKE_CAP:
-          case _PaintBundle.STYLE:
-          case _PaintBundle.IMAGE_FILTER_QUALITY:
-          case _PaintBundle.BLEND_MODE:
-          case _PaintBundle.ANTI_ALIAS:
-          case _PaintBundle.CLEAR_COLOR_FILTER:
-            break;
-          case _PaintBundle.FONT_AXIS: {
-            const count = cmd >> 16 & 65535;
-            for (let j = 0; j < count; j++) {
-              i++;
-              out[i] = fixFloatVar(arr[i], context);
-              i++;
-            }
-            break;
-          }
-          case _PaintBundle.TEXTURE:
-            i += 3;
-            break;
-          case _PaintBundle.SHADER_MATRIX:
-            i++;
-            break;
-          case _PaintBundle.GRADIENT:
-            i = this.updateGradientVars(cmd, arr, out, i, context);
-            break;
-          case _PaintBundle.PATH_EFFECT: {
-            const count = cmd >> 16 & 65535;
-            for (let j = 0; j < count; j++) {
-              out[i] = fixFloatVar(arr[i], context);
-              i++;
-            }
-            out[i] = fixFloatVar(arr[i], context);
-            i++;
-            break;
-          }
-          default:
-            break;
-        }
-      }
-    }
-    updateGradientVars(cmd, arr, out, startIdx, context) {
-      let i = startIdx;
-      const gradType = cmd >> 16 & 65535;
-      const meta = arr[i++];
-      const numColors = meta & 255;
-      const register = meta >> 16 & 65535;
-      for (let j = 0; j < numColors; j++) {
-        if ((register & 1 << j) !== 0) {
-          out[i] = fixColor(arr[i], context);
-        }
-        i++;
-      }
-      const numStops = arr[i++];
-      for (let j = 0; j < numStops; j++) {
-        out[i] = fixFloatVar(arr[i], context);
-        i++;
-      }
-      switch (gradType) {
-        case _PaintBundle.LINEAR_GRADIENT:
-          out[i] = fixFloatVar(arr[i], context);
-          i++;
-          out[i] = fixFloatVar(arr[i], context);
-          i++;
-          out[i] = fixFloatVar(arr[i], context);
-          i++;
-          out[i] = fixFloatVar(arr[i], context);
-          i++;
-          i++;
-          break;
-        case _PaintBundle.RADIAL_GRADIENT:
-          out[i] = fixFloatVar(arr[i], context);
-          i++;
-          out[i] = fixFloatVar(arr[i], context);
-          i++;
-          out[i] = fixFloatVar(arr[i], context);
-          i++;
-          i++;
-          break;
-        case _PaintBundle.SWEEP_GRADIENT:
-          out[i] = fixFloatVar(arr[i], context);
-          i++;
-          out[i] = fixFloatVar(arr[i], context);
-          i++;
-          break;
-      }
-      return i;
-    }
-  };
-  // Paint property tags (matching Java PaintBundle constants)
-  _PaintBundle.TEXT_SIZE = 1;
-  _PaintBundle.COLOR = 4;
-  _PaintBundle.STROKE_WIDTH = 5;
-  _PaintBundle.STROKE_MITER = 6;
-  _PaintBundle.STROKE_CAP = 7;
-  _PaintBundle.STYLE = 8;
-  _PaintBundle.SHADER = 9;
-  _PaintBundle.IMAGE_FILTER_QUALITY = 10;
-  _PaintBundle.GRADIENT = 11;
-  _PaintBundle.ALPHA = 12;
-  _PaintBundle.COLOR_FILTER = 13;
-  _PaintBundle.ANTI_ALIAS = 14;
-  _PaintBundle.STROKE_JOIN = 15;
-  _PaintBundle.TYPEFACE = 16;
-  _PaintBundle.FILTER_BITMAP = 17;
-  _PaintBundle.BLEND_MODE = 18;
-  _PaintBundle.COLOR_ID = 19;
-  _PaintBundle.COLOR_FILTER_ID = 20;
-  _PaintBundle.CLEAR_COLOR_FILTER = 21;
-  _PaintBundle.SHADER_MATRIX = 22;
-  _PaintBundle.FONT_AXIS = 23;
-  _PaintBundle.TEXTURE = 24;
-  _PaintBundle.PATH_EFFECT = 25;
-  _PaintBundle.FALLBACK_TYPEFACE = 26;
-  // Gradient types (wire format values)
-  _PaintBundle.LINEAR_GRADIENT = 0;
-  _PaintBundle.RADIAL_GRADIENT = 1;
-  _PaintBundle.SWEEP_GRADIENT = 2;
-  // Style constants
-  _PaintBundle.FILL = 0;
-  _PaintBundle.STROKE = 1;
-  _PaintBundle.FILL_AND_STROKE = 2;
-  var PaintBundle = _PaintBundle;
 
   // third_party/remote-compose-player/src/core/operations/layout/modifiers/ModifierOperations.ts
   var _WidthModifier = class _WidthModifier extends Operation {
@@ -4760,6 +5539,13 @@ var RC = (() => {
     updateVariables(context) {
       if (isNaNBits(this.mMinBits)) this.mOutMin = context.getFloat(idFromBits(this.mMinBits));
       if (isNaNBits(this.mMaxBits)) this.mOutMax = context.getFloat(idFromBits(this.mMaxBits));
+      if (context.getDensityBehavior?.() !== RemoteContext.DENSITY_BEHAVIOR_PIXELS) {
+        const density = context.getDensity();
+        if (density > 0 && !Number.isNaN(density)) {
+          if (this.mOutMin !== -1) this.mOutMin *= density;
+          if (this.mOutMax !== -1 && Number.isFinite(this.mOutMax)) this.mOutMax *= density;
+        }
+      }
     }
     write(_buffer) {
     }
@@ -4795,6 +5581,13 @@ var RC = (() => {
     updateVariables(context) {
       if (isNaNBits(this.mMinBits)) this.mOutMin = context.getFloat(idFromBits(this.mMinBits));
       if (isNaNBits(this.mMaxBits)) this.mOutMax = context.getFloat(idFromBits(this.mMaxBits));
+      if (context.getDensityBehavior?.() !== RemoteContext.DENSITY_BEHAVIOR_PIXELS) {
+        const density = context.getDensity();
+        if (density > 0 && !Number.isNaN(density)) {
+          if (this.mOutMin !== -1) this.mOutMin *= density;
+          if (this.mOutMax !== -1 && Number.isFinite(this.mOutMax)) this.mOutMax *= density;
+        }
+      }
     }
     write(_buffer) {
     }
@@ -4971,22 +5764,13 @@ var RC = (() => {
         const b = Math.trunc(this.mB * 255 + 0.5);
         argb = a << 24 | r << 16 | g << 8 | b | 0;
       }
-      let borderWidth = this.mBorderWidth;
-      let roundedCorner = this.mRoundedCorner;
-      if (context.getDensityBehavior() === DENSITY_BEHAVIOR_DP) {
-        const d = context.getDensity();
-        if (!Number.isNaN(d) && d > 0) {
-          borderWidth *= d;
-          roundedCorner *= d;
-        }
-      }
       pb.reset();
       pb.setStyle(PaintBundle.STROKE);
       pb.setColor(argb);
-      pb.setStrokeWidth(borderWidth);
+      pb.setStrokeWidth(this.mBorderWidth);
       pc.replacePaint(pb);
-      if (roundedCorner > 0) {
-        pc.drawRoundRect(0, 0, w, h, roundedCorner, roundedCorner);
+      if (this.mRoundedCorner > 0) {
+        pc.drawRoundRect(0, 0, w, h, this.mRoundedCorner, this.mRoundedCorner);
       } else {
         pc.drawRect(0, 0, w, h);
       }
@@ -5036,13 +5820,13 @@ var RC = (() => {
       this.mTopValue = isNaNBits(this.mTop) ? context.getFloat(idFromBits(this.mTop)) : intBitsToFloat(this.mTop);
       this.mRightValue = isNaNBits(this.mRight) ? context.getFloat(idFromBits(this.mRight)) : intBitsToFloat(this.mRight);
       this.mBottomValue = isNaNBits(this.mBottom) ? context.getFloat(idFromBits(this.mBottom)) : intBitsToFloat(this.mBottom);
-      if (context.getDensityBehavior() === DENSITY_BEHAVIOR_DP) {
-        const d = context.getDensity();
-        if (!Number.isNaN(d) && d > 0) {
-          this.mLeftValue *= d;
-          this.mTopValue *= d;
-          this.mRightValue *= d;
-          this.mBottomValue *= d;
+      if (context.getDensityBehavior() === RemoteContext.DENSITY_BEHAVIOR_DP) {
+        const density = context.getDensity();
+        if (density > 0 && !Number.isNaN(density)) {
+          this.mLeftValue *= density;
+          this.mTopValue *= density;
+          this.mRightValue *= density;
+          this.mBottomValue *= density;
         }
       }
     }
@@ -5074,43 +5858,6 @@ var RC = (() => {
       this.mTopEnd = topEnd;
       this.mBottomStart = bottomStart;
       this.mBottomEnd = bottomEnd;
-      this.mTopStartValue = isNaNBits(topStart) ? 0 : intBitsToFloat(topStart);
-      this.mTopEndValue = isNaNBits(topEnd) ? 0 : intBitsToFloat(topEnd);
-      this.mBottomStartValue = isNaNBits(bottomStart) ? 0 : intBitsToFloat(bottomStart);
-      this.mBottomEndValue = isNaNBits(bottomEnd) ? 0 : intBitsToFloat(bottomEnd);
-    }
-    registerListening(context) {
-      if (isNaNBits(this.mTopStart)) context.listensTo(idFromBits(this.mTopStart), this);
-      if (isNaNBits(this.mTopEnd)) context.listensTo(idFromBits(this.mTopEnd), this);
-      if (isNaNBits(this.mBottomStart)) context.listensTo(idFromBits(this.mBottomStart), this);
-      if (isNaNBits(this.mBottomEnd)) context.listensTo(idFromBits(this.mBottomEnd), this);
-    }
-    updateVariables(context) {
-      const ts = this.resolve(context, this.mTopStart);
-      const te = this.resolve(context, this.mTopEnd);
-      const bs = this.resolve(context, this.mBottomStart);
-      const be = this.resolve(context, this.mBottomEnd);
-      this.mTopStartValue = ts;
-      this.mTopEndValue = te;
-      this.mBottomStartValue = bs;
-      this.mBottomEndValue = be;
-    }
-    /**
-     * A literal corner is authored in dp, so under DP density behavior AndroidX's
-     * `RoundedClipRectModifierOperation.paint` scales it by the doc density — replicate
-     * that so the clipped corners match the baked render at densities != 1. A *variable*
-     * corner is deliberately left alone: it is computed from the component's measured
-     * width/height, which the engine already carries in generation pixels, so scaling it
-     * would double-apply the density and over-round the shape.
-     */
-    resolve(context, bits) {
-      if (isNaNBits(bits)) return context.getFloat(idFromBits(bits));
-      let v = intBitsToFloat(bits);
-      if (context.getDensityBehavior() === DENSITY_BEHAVIOR_DP) {
-        const d = context.getDensity();
-        if (!Number.isNaN(d) && d > 0) v *= d;
-      }
-      return v;
     }
     setComponent(c) {
       this.mComponent = c;
@@ -5128,26 +5875,18 @@ var RC = (() => {
       const w = this.mLayoutW;
       const h = this.mLayoutH;
       if (w > 0 && h > 0) {
-        this.updateVariables(context);
-        pc.roundedClipRect(
-          w,
-          h,
-          this.mTopStartValue,
-          this.mTopEndValue,
-          this.mBottomStartValue,
-          this.mBottomEndValue
-        );
+        pc.roundedClipRect(w, h, this.mTopStart, this.mTopEnd, this.mBottomStart, this.mBottomEnd);
       }
     }
     deepToString(indent) {
-      return `${indent}RoundedClipRectModifier(${this.mTopStartValue}, ${this.mTopEndValue}, ${this.mBottomStartValue}, ${this.mBottomEndValue})`;
+      return `${indent}RoundedClipRectModifier`;
     }
     static read(buffer, operations) {
       operations.push(new _RoundedClipRectModifier(
-        buffer.readInt(),
-        buffer.readInt(),
-        buffer.readInt(),
-        buffer.readInt()
+        buffer.readFloat(),
+        buffer.readFloat(),
+        buffer.readFloat(),
+        buffer.readFloat()
       ));
     }
   };
@@ -5202,6 +5941,7 @@ var RC = (() => {
     }
     onClick(context, _doc, _x, _y) {
       for (const op of this.mList) {
+        context.incrementOpCount(op);
         op.apply(context);
       }
       context.needsRepaint();
@@ -5239,19 +5979,28 @@ var RC = (() => {
     }
     onClick(context, _doc, _x, _y) {
       if (this.mClickType !== _MultiClickModifier.CLICK_TYPE_SINGLE) return false;
-      for (const op of this.mList) op.apply(context);
+      for (const op of this.mList) {
+        context.incrementOpCount(op);
+        op.apply(context);
+      }
       context.needsRepaint();
       return true;
     }
     onLongPress(context, _doc, _x, _y) {
       if (this.mClickType !== _MultiClickModifier.CLICK_TYPE_LONG) return false;
-      for (const op of this.mList) op.apply(context);
+      for (const op of this.mList) {
+        context.incrementOpCount(op);
+        op.apply(context);
+      }
       context.needsRepaint();
       return true;
     }
     onDoubleClick(context, _doc, _x, _y) {
       if (this.mClickType !== _MultiClickModifier.CLICK_TYPE_DOUBLE) return false;
-      for (const op of this.mList) op.apply(context);
+      for (const op of this.mList) {
+        context.incrementOpCount(op);
+        op.apply(context);
+      }
       context.needsRepaint();
       return true;
     }
@@ -5318,6 +6067,7 @@ var RC = (() => {
     }
     onTouchDown(context) {
       for (const op of this.mList) {
+        context.incrementOpCount(op);
         op.apply(context);
       }
     }
@@ -5344,6 +6094,7 @@ var RC = (() => {
     }
     onTouchUp(context) {
       for (const op of this.mList) {
+        context.incrementOpCount(op);
         op.apply(context);
       }
     }
@@ -5370,6 +6121,7 @@ var RC = (() => {
     }
     onTouchCancel(context) {
       for (const op of this.mList) {
+        context.incrementOpCount(op);
         op.apply(context);
       }
     }
@@ -5467,15 +6219,7 @@ var RC = (() => {
       if (context.mMode !== "PAINT" /* PAINT */) return;
       const pc = context.getPaintContext();
       if (!pc) return;
-      let ox = this.mOutX, oy = this.mOutY;
-      if (context.getDensityBehavior() === DENSITY_BEHAVIOR_DP) {
-        const d = context.getDensity();
-        if (!Number.isNaN(d) && d > 0) {
-          ox *= d;
-          oy *= d;
-        }
-      }
-      pc.translate(ox, oy);
+      pc.translate(this.mOutX, this.mOutY);
     }
     deepToString(indent) {
       return `${indent}OffsetModifier(${this.mOutX}, ${this.mOutY})`;
@@ -5591,6 +6335,29 @@ var RC = (() => {
     constructor(direction, positionId, max, notchMax) {
       super();
       this.mList = [];
+      // ── Scroll state ────────────────────────────────────────────────────────────────
+      // Two ways a scroll position is driven, and a document picks one by whether its
+      // position field is a NaN-encoded variable reference:
+      //
+      //   expression-driven — the TouchExpression below computes the position and writes it
+      //       to that variable. The modifier only feeds it touch events. (stock.rc)
+      //   direct — no variable, so the modifier tracks the offset itself, clamped to
+      //       [-maxScroll, 0]. (dsl_ticker.rc, 02_ticker.rc)
+      //
+      // Both need touch events, which is what was missing: the TouchExpression lives in this
+      // modifier's own list rather than the component's children, so the component's touch
+      // walk never reached it and nothing ever moved.
+      this.mTouchExpression = null;
+      this.mTouchDown = false;
+      this.mTouchDownX = 0;
+      this.mTouchDownY = 0;
+      this.mInitialScrollX = 0;
+      this.mInitialScrollY = 0;
+      this.mScrollX = 0;
+      this.mScrollY = 0;
+      this.mMaxScrollX = 0;
+      this.mMaxScrollY = 0;
+      this.mContentDimension = 0;
       this.mDirection = direction;
       this.mPositionId = positionId;
       this.mMax = max;
@@ -5608,18 +6375,121 @@ var RC = (() => {
     getNotchMaxNan() {
       return this.mNotchMax;
     }
+    getScrollX() {
+      return this.mScrollX;
+    }
+    getScrollY() {
+      return this.mScrollY;
+    }
+    isVertical() {
+      return this.mDirection === _ScrollModifier.VERTICAL;
+    }
+    /** True when the position is a variable the contained TouchExpression writes. */
+    isExpressionDriven() {
+      return isNaNBits(this.mPositionId);
+    }
+    /** Bind the contained TouchExpression to the component, as Java's inflate() does. */
+    inflate(component) {
+      for (const op of this.mList) {
+        if (op instanceof TouchExpression) {
+          this.mTouchExpression = op;
+          op.setComponent(component);
+        }
+      }
+    }
+    updateVariables(context) {
+      this.mTouchExpression?.updateVariables(context);
+    }
+    /** Called by the layout pass once the host and content sizes are known. */
+    setVerticalScrollDimension(hostDimension, contentDimension) {
+      this.mContentDimension = contentDimension;
+      this.mMaxScrollY = Math.max(0, contentDimension - hostDimension);
+    }
+    setHorizontalScrollDimension(hostDimension, contentDimension) {
+      this.mContentDimension = contentDimension;
+      this.mMaxScrollX = Math.max(0, contentDimension - hostDimension);
+    }
+    onTouchDown(context, x, y) {
+      this.mTouchDown = true;
+      this.mTouchDownX = x;
+      this.mTouchDownY = y;
+      this.mInitialScrollX = this.mScrollX;
+      this.mInitialScrollY = this.mScrollY;
+      if (this.mTouchExpression) {
+        this.mTouchExpression.updateVariables(context);
+        if (context.getTouchVersion() === _ScrollModifier.FIX_TOUCH_EVENT) {
+          this.mTouchExpression.touchDown(context, x, y);
+        } else {
+          this.mTouchExpression.touchDown(context, x + this.mScrollX, y + this.mScrollY);
+        }
+      }
+      return true;
+    }
+    onTouchDrag(context, x, y) {
+      this.mTouchDown = true;
+      if (this.mTouchExpression) {
+        this.mTouchExpression.updateVariables(context);
+        if (context.getTouchVersion() === _ScrollModifier.FIX_TOUCH_EVENT) {
+          this.mTouchExpression.touchDrag(context, x, y);
+        } else {
+          this.mTouchExpression.touchDrag(context, x + this.mScrollX, y + this.mScrollY);
+        }
+      }
+      if (!this.isExpressionDriven()) {
+        if (this.isVertical()) {
+          const dy = y - this.mTouchDownY;
+          this.mScrollY = Math.max(
+            -this.mMaxScrollY,
+            Math.min(0, this.mInitialScrollY + dy)
+          );
+        } else {
+          const dx = x - this.mTouchDownX;
+          this.mScrollX = Math.max(
+            -this.mMaxScrollX,
+            Math.min(0, this.mInitialScrollX + dx)
+          );
+        }
+      }
+      return true;
+    }
+    onTouchUp(context, x, y, dx, dy) {
+      const handled = this.mTouchDown;
+      this.mTouchDown = false;
+      if (this.mTouchExpression) {
+        this.mTouchExpression.updateVariables(context);
+        if (context.getTouchVersion() === _ScrollModifier.FIX_TOUCH_EVENT) {
+          this.mTouchExpression.touchUp(context, x, y, dx, dy);
+        } else {
+          this.mTouchExpression.touchUp(context, x + this.mScrollX, y + this.mScrollY, dx, dy);
+        }
+      }
+      return handled;
+    }
+    onTouchCancel(context, x, y) {
+      const handled = this.mTouchDown;
+      this.mTouchDown = false;
+      this.mTouchExpression?.touchUp(context, x, y, 0, 0);
+      return handled;
+    }
     write(_buffer) {
     }
     apply(context) {
       if (context.mMode !== "PAINT" /* PAINT */) return;
+      for (const op of this.mList) {
+        op.apply(context);
+        context.incrementOpCount(op);
+      }
       const pc = context.getPaintContext();
       if (!pc) return;
-      const pos = isNaNBits(this.mPositionId) ? context.getFloat(idFromBits(this.mPositionId)) : 0;
-      if (this.mDirection === _ScrollModifier.HORIZONTAL) {
-        pc.translate(-pos, 0);
-      } else {
-        pc.translate(0, -pos);
+      if (this.mTouchExpression) {
+        const position = context.getFloat(idFromBits(this.mPositionId));
+        if (this.isVertical()) {
+          this.mScrollY = -Math.min(this.mMaxScrollY, position);
+        } else {
+          this.mScrollX = -Math.min(this.mMaxScrollX, position);
+        }
       }
+      pc.translate(this.mScrollX, this.mScrollY);
     }
     deepToString(indent) {
       return `${indent}ScrollModifier(dir=${this.mDirection})`;
@@ -5635,6 +6505,8 @@ var RC = (() => {
   _ScrollModifier.OP_CODE = 226;
   _ScrollModifier.VERTICAL = 0;
   _ScrollModifier.HORIZONTAL = 1;
+  /** LayoutManager.FIX_TOUCH_EVENT — touch coordinates are component-local from here on. */
+  _ScrollModifier.FIX_TOUCH_EVENT = 1;
   var ScrollModifier = _ScrollModifier;
   var _MarqueeModifier = class _MarqueeModifier extends Operation {
     constructor(iterations, animationMode, repeatDelay, initialDelay, spacing, velocity) {
@@ -6234,12 +7106,12 @@ var RC = (() => {
             if (op.isDirty() && typeof op.updateVariables === "function") {
               op.updateVariables(remote);
             }
-            remote.incrementOpCount();
+            remote.incrementOpCount(op);
             op.apply(remote);
           }
           this.mInitialPass = false;
         } else {
-          remote.incrementOpCount();
+          remote.incrementOpCount(this);
           if (this.mProcess) this.mProcess.paint(context);
         }
       } else {
@@ -6273,7 +7145,7 @@ var RC = (() => {
         if (op.isDirty() && typeof op.updateVariables === "function") {
           op.updateVariables(remote);
         }
-        remote.incrementOpCount();
+        remote.incrementOpCount(op);
         op.apply(remote);
       }
     }
@@ -6341,6 +7213,7 @@ var RC = (() => {
     paint(context) {
       const remote = context.getContext();
       for (const op of this.mList) {
+        remote.incrementOpCount(op);
         op.apply(remote);
       }
     }
@@ -6362,10 +7235,13 @@ var RC = (() => {
     write(_buffer) {
     }
     apply(context) {
-      if (context.mMode !== "PAINT" /* PAINT */) return;
+      if (context.mMode === "DATA" /* DATA */) return;
       const document2 = context.getDocument();
       if (!document2) return;
       document2.evaluateFloatExpression(this.mValueExpressionId, this.mTargetValueId, context);
+    }
+    runAction(context, document2, _component, _x, _y) {
+      document2?.evaluateFloatExpression(this.mValueExpressionId, this.mTargetValueId, context);
     }
     deepToString(indent) {
       return `${indent}ValueFloatExpressionChangeAction(${this.mTargetValueId} <- ${this.mValueExpressionId})`;
@@ -7382,6 +8258,904 @@ var RC = (() => {
   _DrawSector.OP_CODE = 52;
   var DrawSector = _DrawSector;
 
+  // third_party/remote-compose-player/src/core/operations/Mesh2DGenerator.ts
+  var LAYOUT_POLAR = 1;
+  var LAYOUT_RING = 2;
+  var LAYOUT_FAN = 4;
+  var LAYOUT_PATH_STRIP = 5;
+  var TYPE_EXPRESSION = 0;
+  var TYPE_F16_VALUES = 2;
+  var TYPE_PATH_SPLINE_STRIP = 3;
+  var TYPE_SPLINE_ROUND_STRIP = 4;
+  var BLEND_MODULATE = 1;
+  var FLAG_ORIGIN = 0;
+  var FLAG_ROTATION = 1;
+  var FLAG_SCALE = 2;
+  var FLAG_FULL = 3;
+  var EXPRESSION_GROUPS = 9;
+  var EXP_X = 0;
+  var EXP_Y = 1;
+  var EXP_TEX_U = 2;
+  var EXP_TEX_V = 3;
+  var EXP_COLOR_A = 4;
+  var EXP_COLOR_R = 5;
+  var EXP_COLOR_G = 6;
+  var EXP_COLOR_B = 7;
+  var EXP_WIDTH = 8;
+  var DEFAULT_RING_INNER_RADIUS = 0.5;
+  var TWO_PI = 6.2831855;
+  var HALF_PI = 1.5707964;
+  var DEGENERATE_EPSILON = 1e-6;
+  var MAX_MESH_2D_VERTICES = 16384;
+  function wrapsU(layout) {
+    return layout === LAYOUT_POLAR || layout === LAYOUT_RING || layout === LAYOUT_FAN;
+  }
+  function vertexCount(layout, uCount, vCount) {
+    if (layout === LAYOUT_FAN) return uCount + 1;
+    return uCount * vCount;
+  }
+  function indexCount(layout, uCount, vCount) {
+    if (layout === LAYOUT_FAN) return uCount * 3;
+    if (vCount < 2 || uCount < 2) return 0;
+    const columns = wrapsU(layout) ? uCount : uCount - 1;
+    return columns * (vCount - 1) * 6;
+  }
+  function domainU(layout, i, uCount) {
+    if (uCount <= 1) return 0;
+    if (wrapsU(layout)) return i / uCount;
+    return i / (uCount - 1);
+  }
+  function domainV(j, vCount) {
+    if (vCount <= 1) return 0;
+    return j / (vCount - 1);
+  }
+  function generateIndices(layout, uCount, vCount) {
+    const out = new Int32Array(Math.max(0, indexCount(layout, uCount, vCount)));
+    let k = 0;
+    if (layout === LAYOUT_FAN) {
+      for (let i = 0; i < uCount; i++) {
+        out[k++] = 0;
+        out[k++] = 1 + i;
+        out[k++] = 1 + (i + 1) % uCount;
+      }
+      return out;
+    }
+    if (vCount < 2 || uCount < 2) return out;
+    const wrap = wrapsU(layout);
+    const columns = wrap ? uCount : uCount - 1;
+    for (let j = 0; j < vCount - 1; j++) {
+      for (let i = 0; i < columns; i++) {
+        const i1 = wrap ? (i + 1) % uCount : i + 1;
+        const topLeft = j * uCount + i;
+        const topRight = j * uCount + i1;
+        const bottomLeft = (j + 1) * uCount + i;
+        const bottomRight = (j + 1) * uCount + i1;
+        out[k++] = topLeft;
+        out[k++] = bottomLeft;
+        out[k++] = topRight;
+        out[k++] = topRight;
+        out[k++] = bottomLeft;
+        out[k++] = bottomRight;
+      }
+    }
+    return out;
+  }
+  function defaultPosition(layout, u, v, out) {
+    switch (layout) {
+      case LAYOUT_POLAR:
+      case LAYOUT_FAN: {
+        const angle = u * TWO_PI;
+        out[0] = v * Math.cos(angle);
+        out[1] = v * Math.sin(angle);
+        break;
+      }
+      case LAYOUT_RING: {
+        const angle = u * TWO_PI;
+        const radius = DEFAULT_RING_INNER_RADIUS + (1 - DEFAULT_RING_INNER_RADIUS) * v;
+        out[0] = radius * Math.cos(angle);
+        out[1] = radius * Math.sin(angle);
+        break;
+      }
+      default:
+        out[0] = u;
+        out[1] = v;
+        break;
+    }
+  }
+  var _f32 = new Float32Array(1);
+  var _i32 = new Int32Array(_f32.buffer);
+  function halfToFloat(half) {
+    const sign = (half & 32768) << 16;
+    const exponent = half >> 10 & 31;
+    let mantissa = half & 1023;
+    let bits;
+    if (exponent === 0) {
+      if (mantissa === 0) {
+        bits = sign;
+      } else {
+        let shift = 0;
+        while ((mantissa & 1024) === 0) {
+          mantissa <<= 1;
+          shift++;
+        }
+        mantissa &= 1023;
+        bits = sign | 127 - 15 - shift << 23 | mantissa << 13;
+      }
+    } else if (exponent === 31) {
+      bits = sign | 2139095040 | mantissa << 13;
+    } else {
+      bits = sign | exponent - 15 + 127 << 23 | mantissa << 13;
+    }
+    _i32[0] = bits;
+    return _f32[0];
+  }
+  var PATH_MOVE = 10;
+  var PATH_LINE = 11;
+  var PATH_QUAD = 12;
+  var PATH_CONIC = 13;
+  var PATH_CUBIC = 14;
+  var PATH_CLOSE = 15;
+  var PATH_DONE = 16;
+  var PATH_CURVE_STEPS = 16;
+  function pathNanId(v) {
+    _f32[0] = v;
+    return _i32[0] & 4194303;
+  }
+  function isPathCommand(v) {
+    if (!Number.isNaN(v)) return false;
+    const id = pathNanId(v);
+    return id >= PATH_MOVE && id <= PATH_DONE;
+  }
+  function flattenPath(data, resolve2) {
+    const out = [];
+    let startX = 0, startY = 0, curX = 0, curY = 0, open = false;
+    const push = (x, y) => {
+      const n2 = out.length;
+      if (n2 >= 2 && out[n2 - 2] === x && out[n2 - 1] === y) return;
+      out.push(x, y);
+    };
+    let i = 0;
+    const n = data.length;
+    while (i < n) {
+      if (!isPathCommand(data[i])) {
+        i++;
+        continue;
+      }
+      switch (pathNanId(data[i])) {
+        case PATH_MOVE:
+          i++;
+          if (i + 1 < n) {
+            curX = startX = resolve2(data[i]);
+            curY = startY = resolve2(data[i + 1]);
+            push(curX, curY);
+            open = true;
+            i += 2;
+          }
+          break;
+        case PATH_LINE:
+          i += 3;
+          if (i + 1 < n) {
+            curX = resolve2(data[i]);
+            curY = resolve2(data[i + 1]);
+            push(curX, curY);
+            i += 2;
+          }
+          break;
+        case PATH_QUAD:
+          i += 3;
+          if (i + 3 < n) {
+            const cx = resolve2(data[i]), cy = resolve2(data[i + 1]);
+            const x = resolve2(data[i + 2]), y = resolve2(data[i + 3]);
+            for (let s = 1; s <= PATH_CURVE_STEPS; s++) {
+              const t = s / PATH_CURVE_STEPS, mt = 1 - t;
+              push(
+                mt * mt * curX + 2 * mt * t * cx + t * t * x,
+                mt * mt * curY + 2 * mt * t * cy + t * t * y
+              );
+            }
+            curX = x;
+            curY = y;
+            i += 4;
+          }
+          break;
+        case PATH_CONIC:
+          i += 3;
+          if (i + 4 < n) {
+            const cx = resolve2(data[i]), cy = resolve2(data[i + 1]);
+            const x = resolve2(data[i + 2]), y = resolve2(data[i + 3]);
+            const w = resolve2(data[i + 4]);
+            for (let s = 1; s <= PATH_CURVE_STEPS; s++) {
+              const t = s / PATH_CURVE_STEPS, mt = 1 - t;
+              const w0 = mt * mt, w1 = 2 * mt * t * w, w2 = t * t;
+              const denom = w0 + w1 + w2;
+              if (denom === 0) continue;
+              push(
+                (w0 * curX + w1 * cx + w2 * x) / denom,
+                (w0 * curY + w1 * cy + w2 * y) / denom
+              );
+            }
+            curX = x;
+            curY = y;
+            i += 5;
+          }
+          break;
+        case PATH_CUBIC:
+          i += 3;
+          if (i + 5 < n) {
+            const c1x = resolve2(data[i]), c1y = resolve2(data[i + 1]);
+            const c2x = resolve2(data[i + 2]), c2y = resolve2(data[i + 3]);
+            const x = resolve2(data[i + 4]), y = resolve2(data[i + 5]);
+            for (let s = 1; s <= PATH_CURVE_STEPS; s++) {
+              const t = s / PATH_CURVE_STEPS, mt = 1 - t;
+              const a = mt * mt * mt, b = 3 * mt * mt * t;
+              const c = 3 * mt * t * t, d = t * t * t;
+              push(
+                a * curX + b * c1x + c * c2x + d * x,
+                a * curY + b * c1y + c * c2y + d * y
+              );
+            }
+            curX = x;
+            curY = y;
+            i += 6;
+          }
+          break;
+        case PATH_CLOSE:
+          i++;
+          if (open) push(startX, startY);
+          curX = startX;
+          curY = startY;
+          break;
+        case PATH_DONE:
+        default:
+          return new Float32Array(out);
+      }
+    }
+    return new Float32Array(out);
+  }
+  function samplePolyline(poly, pointCount, fraction, out) {
+    out[0] = 0;
+    out[1] = 0;
+    out[2] = 1;
+    out[3] = 0;
+    if (pointCount < 2) {
+      if (pointCount === 1) {
+        out[0] = poly[0];
+        out[1] = poly[1];
+      }
+      return;
+    }
+    let total = 0;
+    for (let i = 0; i + 1 < pointCount; i++) {
+      const dx = poly[(i + 1) * 2] - poly[i * 2];
+      const dy = poly[(i + 1) * 2 + 1] - poly[i * 2 + 1];
+      total += Math.sqrt(dx * dx + dy * dy);
+    }
+    if (total <= 0) {
+      out[0] = poly[0];
+      out[1] = poly[1];
+      return;
+    }
+    const target = Math.min(Math.max(fraction, 0), 1) * total;
+    let walked = 0;
+    for (let i = 0; i + 1 < pointCount; i++) {
+      const x0 = poly[i * 2], y0 = poly[i * 2 + 1];
+      const x1 = poly[(i + 1) * 2], y1 = poly[(i + 1) * 2 + 1];
+      const dx = x1 - x0, dy = y1 - y0;
+      const len = Math.sqrt(dx * dx + dy * dy);
+      if (len <= 0) continue;
+      if (walked + len >= target || i + 2 === pointCount) {
+        const t = Math.min(Math.max((target - walked) / len, 0), 1);
+        out[0] = x0 + dx * t;
+        out[1] = y0 + dy * t;
+        out[2] = dx / len;
+        out[3] = dy / len;
+        return;
+      }
+      walked += len;
+    }
+  }
+  function roundCapPoint(sample, halfWidth, t, v, direction, out) {
+    const tx = sample[2] * direction, ty = sample[3] * direction;
+    const nx = -sample[3], ny = sample[2];
+    const angle = (1 - t) * HALF_PI;
+    const along = Math.sin(angle) * halfWidth;
+    const across = Math.cos(angle) * halfWidth;
+    const side = (v - 0.5) * 2;
+    out[0] = sample[0] + tx * along + nx * across * side;
+    out[1] = sample[1] + ty * along + ny * across * side;
+  }
+  var MonotonicSpline = class {
+    constructor() {
+      this.x = [];
+      this.y = [];
+      this.m = [];
+    }
+    fit(xs, ys) {
+      this.x = xs;
+      this.y = ys;
+      const n = xs.length;
+      this.m = new Array(n).fill(0);
+      if (n < 2) return;
+      const d = new Array(n - 1).fill(0);
+      for (let i = 0; i + 1 < n; i++) {
+        const dx = xs[i + 1] - xs[i];
+        d[i] = dx !== 0 ? (ys[i + 1] - ys[i]) / dx : 0;
+      }
+      this.m[0] = d[0];
+      this.m[n - 1] = d[n - 2];
+      for (let i = 1; i + 1 < n; i++) {
+        this.m[i] = d[i - 1] * d[i] <= 0 ? 0 : (d[i - 1] + d[i]) * 0.5;
+      }
+      for (let i = 0; i + 1 < n; i++) {
+        if (d[i] === 0) {
+          this.m[i] = 0;
+          this.m[i + 1] = 0;
+          continue;
+        }
+        const a = this.m[i] / d[i], b = this.m[i + 1] / d[i];
+        const s = a * a + b * b;
+        if (s > 9) {
+          const t = 3 / Math.sqrt(s);
+          this.m[i] = t * a * d[i];
+          this.m[i + 1] = t * b * d[i];
+        }
+      }
+    }
+    get isEmpty() {
+      return this.x.length === 0;
+    }
+    at(x) {
+      const n = this.x.length;
+      if (n === 0) return 0;
+      if (n === 1 || x <= this.x[0]) return this.y[0];
+      if (x >= this.x[n - 1]) return this.y[n - 1];
+      let i = 0;
+      while (i + 2 < n && x > this.x[i + 1]) i++;
+      const h = this.x[i + 1] - this.x[i];
+      if (h <= 0) return this.y[i];
+      const t = (x - this.x[i]) / h, t2 = t * t, t3 = t2 * t;
+      return (2 * t3 - 3 * t2 + 1) * this.y[i] + (t3 - 2 * t2 + t) * h * this.m[i] + (-2 * t3 + 3 * t2) * this.y[i + 1] + (t3 - t2) * h * this.m[i + 1];
+    }
+  };
+  function bilinear(verts, uCount, i0, j0, i1, j1, tu, tv, c) {
+    const v00 = verts[(j0 * uCount + i0) * 2 + c];
+    const v10 = verts[(j0 * uCount + i1) * 2 + c];
+    const v01 = verts[(j1 * uCount + i0) * 2 + c];
+    const v11 = verts[(j1 * uCount + i1) * 2 + c];
+    const top = v00 + (v10 - v00) * tu;
+    const bottom = v01 + (v11 - v01) * tu;
+    return top + (bottom - top) * tv;
+  }
+  function sampleMeshPosition(layout, uCount, vCount, verts, u, v, out) {
+    const vc = verts.length / 2;
+    if (vc === 0) {
+      out[0] = 0;
+      out[1] = 0;
+      return;
+    }
+    if (layout === LAYOUT_FAN && uCount >= 1 && vc === uCount + 1) {
+      const uNorm = (u % 1 + 1) % 1;
+      const fu = uNorm * uCount;
+      const i0 = Math.floor(fu) % uCount;
+      const i1 = (i0 + 1) % uCount;
+      const tu = fu - Math.floor(fu);
+      const rimX = (1 - tu) * verts[(1 + i0) * 2] + tu * verts[(1 + i1) * 2];
+      const rimY = (1 - tu) * verts[(1 + i0) * 2 + 1] + tu * verts[(1 + i1) * 2 + 1];
+      const vClamp = Math.min(Math.max(v, 0), 1);
+      out[0] = (1 - vClamp) * verts[0] + vClamp * rimX;
+      out[1] = (1 - vClamp) * verts[1] + vClamp * rimY;
+      return;
+    }
+    if (uCount >= 2 && vCount >= 2 && uCount * vCount === vc) {
+      let i0, i1, tu;
+      if (wrapsU(layout)) {
+        const uNorm = (u % 1 + 1) % 1;
+        const fu = uNorm * uCount;
+        i0 = Math.floor(fu) % uCount;
+        i1 = (i0 + 1) % uCount;
+        tu = fu - Math.floor(fu);
+      } else {
+        const fu = Math.min(Math.max(u, 0), 1) * (uCount - 1);
+        i0 = Math.floor(fu);
+        i1 = Math.min(uCount - 1, i0 + 1);
+        tu = fu - i0;
+      }
+      const fv = Math.min(Math.max(v, 0), 1) * (vCount - 1);
+      const j0 = Math.floor(fv);
+      const j1 = Math.min(vCount - 1, j0 + 1);
+      const tv = fv - j0;
+      out[0] = bilinear(verts, uCount, i0, j0, i1, j1, tu, tv, 0);
+      out[1] = bilinear(verts, uCount, i0, j0, i1, j1, tu, tv, 1);
+      return;
+    }
+    const nearest = Math.max(0, Math.min(
+      vc - 1,
+      Math.round(Math.min(Math.max(u, 0), 1) * (vc - 1))
+    ));
+    out[0] = verts[nearest * 2];
+    out[1] = verts[nearest * 2 + 1];
+  }
+  function sampleFrame(layout, uCount, vCount, verts, u, v, out) {
+    if (verts.length < 2) return false;
+    const uc = Math.max(2, uCount);
+    const vc = Math.max(2, vCount);
+    const wrap = wrapsU(layout);
+    const du = 1 / (wrap ? uc : uc - 1);
+    const dv = 1 / (vc - 1);
+    const centre = new Float32Array(2), uPlus = new Float32Array(2);
+    const uMinus = new Float32Array(2), vPlus = new Float32Array(2), vMinus = new Float32Array(2);
+    sampleMeshPosition(layout, uCount, vCount, verts, u, v, centre);
+    let uSpan;
+    if (wrap) {
+      sampleMeshPosition(layout, uCount, vCount, verts, u + du * 0.5, v, uPlus);
+      sampleMeshPosition(layout, uCount, vCount, verts, u - du * 0.5, v, uMinus);
+      uSpan = du;
+    } else {
+      const uHi = Math.min(1, u + du * 0.5), uLo = Math.max(0, u - du * 0.5);
+      sampleMeshPosition(layout, uCount, vCount, verts, uHi, v, uPlus);
+      sampleMeshPosition(layout, uCount, vCount, verts, uLo, v, uMinus);
+      uSpan = uHi - uLo;
+      if (uSpan <= 0) uSpan = du;
+    }
+    const vHi = Math.min(1, v + dv * 0.5), vLo = Math.max(0, v - dv * 0.5);
+    sampleMeshPosition(layout, uCount, vCount, verts, u, vHi, vPlus);
+    sampleMeshPosition(layout, uCount, vCount, verts, u, vLo, vMinus);
+    let vSpan = vHi - vLo;
+    if (vSpan <= 0) vSpan = dv;
+    out[0] = (uPlus[0] - uMinus[0]) / uSpan;
+    out[1] = (uPlus[1] - uMinus[1]) / uSpan;
+    out[2] = (vPlus[0] - vMinus[0]) / vSpan;
+    out[3] = (vPlus[1] - vMinus[1]) / vSpan;
+    out[4] = centre[0];
+    out[5] = centre[1];
+    return true;
+  }
+  function buildMatrix(frame, flags, out) {
+    const duX = frame[0], duY = frame[1], dvX = frame[2], dvY = frame[3];
+    const originX = frame[4], originY = frame[5];
+    const duLength = Math.hypot(duX, duY);
+    const dvLength = Math.hypot(dvX, dvY);
+    const cross2 = duX * dvY - duY * dvX;
+    let effective = flags;
+    if (effective >= FLAG_FULL && Math.abs(cross2) < DEGENERATE_EPSILON) effective = FLAG_SCALE;
+    if (effective >= FLAG_SCALE && (duLength < DEGENERATE_EPSILON || dvLength < DEGENERATE_EPSILON)) {
+      effective = FLAG_ROTATION;
+    }
+    if (effective >= FLAG_ROTATION && duLength < DEGENERATE_EPSILON) effective = FLAG_ORIGIN;
+    switch (effective) {
+      case FLAG_FULL:
+        out[0] = duX;
+        out[1] = duY;
+        out[2] = dvX;
+        out[3] = dvY;
+        break;
+      case FLAG_SCALE: {
+        const ux = duX / duLength, uy = duY / duLength;
+        const sign = cross2 < 0 ? -1 : 1;
+        out[0] = ux * duLength;
+        out[1] = uy * duLength;
+        out[2] = -uy * dvLength * sign;
+        out[3] = ux * dvLength * sign;
+        break;
+      }
+      case FLAG_ROTATION: {
+        const ux = duX / duLength, uy = duY / duLength;
+        const sign = cross2 < 0 ? -1 : 1;
+        out[0] = ux;
+        out[1] = uy;
+        out[2] = -uy * sign;
+        out[3] = ux * sign;
+        break;
+      }
+      case FLAG_ORIGIN:
+      default:
+        out[0] = 1;
+        out[1] = 0;
+        out[2] = 0;
+        out[3] = 1;
+        break;
+    }
+    out[4] = originX;
+    out[5] = originY;
+  }
+  function clamp255(f) {
+    const i = Math.trunc(f * 255 + 0.5);
+    return i < 0 ? 0 : i > 255 ? 255 : i;
+  }
+  function packColor(a, r, g, b) {
+    return clamp255(a) << 24 | clamp255(r) << 16 | clamp255(g) << 8 | clamp255(b) | 0;
+  }
+
+  // third_party/remote-compose-player/src/core/operations/Mesh2D.ts
+  var MESH_OP_OFFSET = 3211264;
+  var MESH_ID_REGION_MASK = 7340032;
+  var MESH_ID_REGION_ARRAY = 2097152;
+  function isResolvable(v) {
+    return Number.isNaN(v);
+  }
+  var _AddMesh2D = class _AddMesh2D extends Operation {
+    constructor(mMeshId, mType, mLayout, mUCount, mVCount, mFlags, mAux, mExpressions, mSrcIndices, mSrcVerts, mSrcUv, mSrcColors, mWidths, mWidthPositions) {
+      super();
+      this.mMeshId = mMeshId;
+      this.mType = mType;
+      this.mLayout = mLayout;
+      this.mUCount = mUCount;
+      this.mVCount = mVCount;
+      this.mFlags = mFlags;
+      this.mAux = mAux;
+      this.mExpressions = mExpressions;
+      this.mSrcIndices = mSrcIndices;
+      this.mSrcVerts = mSrcVerts;
+      this.mSrcUv = mSrcUv;
+      this.mSrcColors = mSrcColors;
+      this.mWidths = mWidths;
+      this.mWidthPositions = mWidthPositions;
+      // expanded geometry, in the layout drawVertices wants
+      this.mVerts = new Float32Array(0);
+      this.mUv = new Float32Array(0);
+      this.mColors = new Int32Array(0);
+      this.mIndices = new Int32Array(0);
+      // u and v ride in the VAR1/VAR2 slots, which is exactly how the reference binds them.
+      this.mVars = [0, 0, 0];
+      this.mPolyline = new Float32Array(0);
+      this.mWidthSpline = new MonotonicSpline();
+      // Renamed off the base class: Operation already declares a private field of the
+      // original name, and TypeScript treats two separate private declarations of one
+      // name as a type conflict, which reads as "incorrectly extends".
+      this.mMeshDirty = true;
+      this.mScratchPos = new Float32Array(2);
+      this.mScratchSample = new Float32Array(4);
+    }
+    // Players read documents; they never write them. Stubbed as elsewhere in this tree.
+    write(_buffer) {
+    }
+    registerListening(context) {
+      const watch = (bits) => {
+        if (!isNaNBits(bits)) return;
+        const id = idFromBits(bits);
+        if (id > MESH_OP_OFFSET && id <= MESH_OP_OFFSET + 79) return;
+        if ((id & MESH_ID_REGION_MASK) === MESH_ID_REGION_ARRAY) return;
+        context.listensTo(id, this);
+      };
+      for (const g of this.mExpressions) {
+        for (let i = 0; i < g.length; i++) watch(g[i]);
+      }
+      for (const arr of [this.mSrcVerts, this.mWidths, this.mWidthPositions]) {
+        for (let i = 0; i < arr.length; i++) {
+          if (Number.isNaN(arr[i])) context.listensTo(idFromNan(arr[i]), this);
+        }
+      }
+    }
+    markDirty() {
+      this.mMeshDirty = true;
+    }
+    updateVariables(_context) {
+      this.mMeshDirty = true;
+    }
+    apply(context) {
+      if (this.mMeshDirty) {
+        this.expand(context);
+        this.mMeshDirty = false;
+      }
+      const pc = context.getPaintContext();
+      if (pc) {
+        pc.setMesh(
+          this.mMeshId,
+          this.mLayout,
+          this.mUCount,
+          this.mVCount,
+          this.mVerts,
+          this.mUv,
+          this.mColors,
+          this.mIndices
+        );
+      }
+    }
+    deepToString(indent) {
+      return indent + "AddMesh2D id=" + this.mMeshId + " type=" + this.mType + " layout=" + this.mLayout;
+    }
+    get isSplineStrip() {
+      return this.mType === TYPE_PATH_SPLINE_STRIP || this.mType === TYPE_SPLINE_ROUND_STRIP;
+    }
+    val(context, f) {
+      return isResolvable(f) ? context.getFloat(idFromNan(f)) : f;
+    }
+    expand(context) {
+      if (this.mType === TYPE_EXPRESSION || this.isSplineStrip) {
+        this.expandParametric(context);
+      } else {
+        this.expandLiteral(context);
+      }
+    }
+    expandLiteral(context) {
+      const n = this.mSrcVerts.length;
+      const verts = new Float32Array(n);
+      for (let i = 0; i < n; i++) verts[i] = this.val(context, this.mSrcVerts[i]);
+      this.mVerts = verts;
+      const vertexCount2 = n / 2;
+      this.mUv = this.mSrcUv.length === n ? new Float32Array(this.mSrcUv) : new Float32Array(0);
+      this.mColors = this.mSrcColors.length === vertexCount2 ? new Int32Array(this.mSrcColors) : new Int32Array(0);
+      this.mIndices = new Int32Array(this.mSrcIndices);
+    }
+    roundCapColumns() {
+      if (this.mType !== TYPE_SPLINE_ROUND_STRIP) return 0;
+      const cap = this.mFlags;
+      if (cap <= 0) return 0;
+      return Math.max(0, Math.min(cap, Math.trunc((this.mUCount - 2) / 2)));
+    }
+    evaluate(context, group, u, v, fallback) {
+      const e = this.mExpressions[group];
+      if (!e || e.length === 0) return fallback;
+      if (e.length === 1 && !isNaNBits(e[0])) return intBitsToFloat(e[0]);
+      this.mVars[0] = u;
+      this.mVars[1] = v;
+      return FloatExpression.evalRPN(context, e, this.mVars);
+    }
+    strokeWidthAt(context, fraction, v) {
+      if (this.isSplineStrip) {
+        return this.mWidthSpline.isEmpty ? 1 : this.mWidthSpline.at(fraction);
+      }
+      return this.evaluate(context, EXP_WIDTH, fraction, v, 1);
+    }
+    buildWidthSpline(context) {
+      const n = this.mWidths.length;
+      if (n === 0) return;
+      const xs = [];
+      const ys = [];
+      for (let i = 0; i < n; i++) {
+        const pos = this.mWidthPositions.length === n ? this.val(context, this.mWidthPositions[i]) : n === 1 ? 0 : i / (n - 1);
+        xs.push(pos);
+        ys.push(this.val(context, this.mWidths[i]));
+      }
+      this.mWidthSpline.fit(xs, ys);
+    }
+    positionOnPath(context, u, v, points, out) {
+      const sample = this.mScratchSample;
+      let fraction = u;
+      const capColumns = this.roundCapColumns();
+      if (capColumns > 0 && this.mUCount > 1) {
+        const capSpan = capColumns / (this.mUCount - 1);
+        if (u <= capSpan) {
+          samplePolyline(this.mPolyline, points, 0, sample);
+          const hw = this.strokeWidthAt(context, 0, v) * 0.5;
+          roundCapPoint(sample, hw, capSpan > 0 ? u / capSpan : 0, v, -1, out);
+          return;
+        }
+        if (u >= 1 - capSpan) {
+          samplePolyline(this.mPolyline, points, 1, sample);
+          const hw = this.strokeWidthAt(context, 1, v) * 0.5;
+          roundCapPoint(sample, hw, capSpan > 0 ? (1 - u) / capSpan : 0, v, 1, out);
+          return;
+        }
+        fraction = (u - capSpan) / (1 - 2 * capSpan);
+      }
+      samplePolyline(this.mPolyline, points, fraction, sample);
+      const halfWidth = this.strokeWidthAt(context, fraction, v) * 0.5;
+      const offset = (v - 0.5) * 2 * halfWidth;
+      const nx = -sample[3];
+      const ny = sample[2];
+      out[0] = sample[0] + nx * offset;
+      out[1] = sample[1] + ny * offset;
+    }
+    expandParametric(context) {
+      const uc = Math.max(1, this.mUCount);
+      const vc = Math.max(1, this.mVCount);
+      const total = vertexCount(this.mLayout, uc, vc);
+      if (total <= 0 || total > MAX_MESH_2D_VERTICES) return;
+      const verts = new Float32Array(total * 2);
+      const uv = new Float32Array(total * 2);
+      const texU = this.mExpressions[EXP_TEX_U];
+      const texV = this.mExpressions[EXP_TEX_V];
+      const hasTex = (texU ? texU.length : 0) > 0 || (texV ? texV.length : 0) > 0;
+      const ca = this.mExpressions[EXP_COLOR_A];
+      const cr = this.mExpressions[EXP_COLOR_R];
+      const cg = this.mExpressions[EXP_COLOR_G];
+      const cb = this.mExpressions[EXP_COLOR_B];
+      const hasColor = (ca ? ca.length : 0) > 0 || (cr ? cr.length : 0) > 0 || (cg ? cg.length : 0) > 0 || (cb ? cb.length : 0) > 0;
+      const colors = hasColor ? new Int32Array(total) : new Int32Array(0);
+      let points = 0;
+      if (this.mLayout === LAYOUT_PATH_STRIP) {
+        const raw = context.getPathData(this.mAux);
+        if (raw) {
+          const asFloats = new Float32Array(
+            raw.buffer,
+            raw.byteOffset,
+            raw.length
+          );
+          this.mPolyline = flattenPath(asFloats, (f) => {
+            if (!Number.isNaN(f)) return f;
+            const id = pathNanId(f);
+            if (id >= PATH_MOVE && id <= PATH_DONE) return f;
+            return context.getFloat(id);
+          });
+          points = this.mPolyline.length / 2;
+        }
+        if (this.isSplineStrip) this.buildWidthSpline(context);
+      }
+      const fan = this.mLayout === LAYOUT_FAN;
+      const pos = this.mScratchPos;
+      for (let index = 0; index < total; index++) {
+        let u;
+        let v;
+        if (fan) {
+          if (index === 0) {
+            u = 0;
+            v = 0;
+          } else {
+            u = domainU(this.mLayout, index - 1, uc);
+            v = 1;
+          }
+        } else {
+          u = domainU(this.mLayout, index % uc, uc);
+          v = domainV(Math.trunc(index / uc), vc);
+        }
+        if (this.mLayout === LAYOUT_PATH_STRIP && points > 0) {
+          this.positionOnPath(context, u, v, points, pos);
+        } else {
+          defaultPosition(this.mLayout, u, v, pos);
+        }
+        verts[index * 2] = this.evaluate(context, EXP_X, u, v, pos[0]);
+        verts[index * 2 + 1] = this.evaluate(context, EXP_Y, u, v, pos[1]);
+        if (hasTex) {
+          uv[index * 2] = this.evaluate(context, EXP_TEX_U, u, v, u);
+          uv[index * 2 + 1] = this.evaluate(context, EXP_TEX_V, u, v, v);
+        } else {
+          uv[index * 2] = u;
+          uv[index * 2 + 1] = v;
+        }
+        if (hasColor) {
+          colors[index] = packColor(
+            this.evaluate(context, EXP_COLOR_A, u, v, 1),
+            this.evaluate(context, EXP_COLOR_R, u, v, 1),
+            this.evaluate(context, EXP_COLOR_G, u, v, 1),
+            this.evaluate(context, EXP_COLOR_B, u, v, 1)
+          );
+        }
+      }
+      this.mVerts = verts;
+      this.mUv = uv;
+      this.mColors = colors;
+      this.mIndices = generateIndices(this.mLayout, uc, vc);
+    }
+    static read(buffer, operations) {
+      const meshId = buffer.readInt();
+      const type = buffer.readInt();
+      const layout = buffer.readInt();
+      const uCount = buffer.readInt();
+      const vCount = buffer.readInt();
+      const flags = buffer.readInt();
+      const aux = buffer.readInt();
+      const expressions = [];
+      let srcIndices = new Int32Array(0);
+      let srcVerts = new Float32Array(0);
+      let srcUv = new Float32Array(0);
+      let srcColors = new Int32Array(0);
+      let widths = new Float32Array(0);
+      let widthPositions = new Float32Array(0);
+      if (type === TYPE_EXPRESSION) {
+        for (let g = 0; g < EXPRESSION_GROUPS; g++) {
+          const len = buffer.readInt();
+          const arr = new Int32Array(Math.max(0, len));
+          for (let i = 0; i < len; i++) arr[i] = buffer.readInt();
+          expressions.push(arr);
+        }
+      } else if (type === TYPE_PATH_SPLINE_STRIP || type === TYPE_SPLINE_ROUND_STRIP) {
+        const wn = buffer.readInt();
+        widths = new Float32Array(Math.max(0, wn));
+        for (let i = 0; i < wn; i++) widths[i] = buffer.readFloat();
+        const pn = buffer.readInt();
+        widthPositions = new Float32Array(Math.max(0, pn));
+        for (let i = 0; i < pn; i++) widthPositions[i] = buffer.readFloat();
+        for (let g = 0; g < EXPRESSION_GROUPS; g++) expressions.push(new Int32Array(0));
+      } else {
+        const indexCount2 = buffer.readInt();
+        srcIndices = new Int32Array(Math.max(0, indexCount2));
+        for (let i = 0; i < indexCount2; i++) srcIndices[i] = buffer.readShort() & 65535;
+        const vertCount = buffer.readInt();
+        const uvCount = buffer.readInt();
+        const colorCount = buffer.readInt();
+        srcVerts = new Float32Array(Math.max(0, vertCount));
+        srcUv = new Float32Array(Math.max(0, uvCount));
+        srcColors = new Int32Array(Math.max(0, colorCount));
+        if (type === TYPE_F16_VALUES) {
+          for (let i = 0; i < vertCount; i++) {
+            srcVerts[i] = halfToFloat(buffer.readShort() & 65535);
+          }
+          for (let i = 0; i < uvCount; i++) {
+            srcUv[i] = halfToFloat(buffer.readShort() & 65535);
+          }
+        } else {
+          for (let i = 0; i < vertCount; i++) srcVerts[i] = buffer.readFloat();
+          for (let i = 0; i < uvCount; i++) srcUv[i] = buffer.readFloat();
+        }
+        for (let i = 0; i < colorCount; i++) srcColors[i] = buffer.readInt();
+        for (let g = 0; g < EXPRESSION_GROUPS; g++) expressions.push(new Int32Array(0));
+      }
+      operations.push(new _AddMesh2D(
+        meshId,
+        type,
+        layout,
+        uCount,
+        vCount,
+        flags,
+        aux,
+        expressions,
+        srcIndices,
+        srcVerts,
+        srcUv,
+        srcColors,
+        widths,
+        widthPositions
+      ));
+    }
+  };
+  _AddMesh2D.OP_CODE = 104;
+  var AddMesh2D = _AddMesh2D;
+  var _DrawMesh2D = class _DrawMesh2D extends PaintOperation {
+    constructor(mMeshId, mBlend, mImageId) {
+      super();
+      this.mMeshId = mMeshId;
+      this.mBlend = mBlend;
+      this.mImageId = mImageId;
+    }
+    // Players read documents; they never write them. Stubbed as elsewhere in this tree.
+    write(_buffer) {
+    }
+    paint(context) {
+      context.drawMesh(this.mMeshId, this.mBlend, this.mImageId);
+    }
+    deepToString(indent) {
+      return indent + "DrawMesh2D " + this.mMeshId;
+    }
+    static read(buffer, operations) {
+      operations.push(new _DrawMesh2D(buffer.readInt(), buffer.readInt(), buffer.readInt()));
+    }
+  };
+  _DrawMesh2D.OP_CODE = 105;
+  var DrawMesh2D = _DrawMesh2D;
+  var _MatrixFromMesh2D = class _MatrixFromMesh2D extends PaintOperation {
+    constructor(mMeshId, mU, mV, mFlags) {
+      super();
+      this.mMeshId = mMeshId;
+      this.mU = mU;
+      this.mV = mV;
+      this.mFlags = mFlags;
+      this.mOutU = 0;
+      this.mOutV = 0;
+      this.mOutU = mU;
+      this.mOutV = mV;
+    }
+    // Players read documents; they never write them. Stubbed as elsewhere in this tree.
+    write(_buffer) {
+    }
+    registerListening(context) {
+      if (isResolvable(this.mU)) context.listensTo(idFromNan(this.mU), this);
+      if (isResolvable(this.mV)) context.listensTo(idFromNan(this.mV), this);
+    }
+    markDirty() {
+    }
+    updateVariables(context) {
+      this.mOutU = isResolvable(this.mU) ? context.getFloat(idFromNan(this.mU)) : this.mU;
+      this.mOutV = isResolvable(this.mV) ? context.getFloat(idFromNan(this.mV)) : this.mV;
+    }
+    paint(context) {
+      context.matrixFromMesh(this.mMeshId, this.mOutU, this.mOutV, this.mFlags);
+    }
+    deepToString(indent) {
+      return indent + "MatrixFromMesh2D " + this.mMeshId;
+    }
+    static read(buffer, operations) {
+      operations.push(new _MatrixFromMesh2D(
+        buffer.readInt(),
+        buffer.readFloat(),
+        buffer.readFloat(),
+        buffer.readInt()
+      ));
+    }
+  };
+  _MatrixFromMesh2D.OP_CODE = 106;
+  var MatrixFromMesh2D = _MatrixFromMesh2D;
+
   // third_party/remote-compose-player/src/core/operations/DrawPath.ts
   var _DrawPath = class _DrawPath extends PaintOperation {
     constructor(pathId, start, end) {
@@ -7748,16 +9522,16 @@ var RC = (() => {
       register(this.mScaleFactor);
     }
     updateVariables(context) {
-      const resolve = (b) => isNaNBits(b) ? context.getFloat(idFromBits(b)) : intBitsToFloat(b);
-      this.mOutSrcLeft = resolve(this.mSrcLeft);
-      this.mOutSrcTop = resolve(this.mSrcTop);
-      this.mOutSrcRight = resolve(this.mSrcRight);
-      this.mOutSrcBottom = resolve(this.mSrcBottom);
-      this.mOutDstLeft = resolve(this.mDstLeft);
-      this.mOutDstTop = resolve(this.mDstTop);
-      this.mOutDstRight = resolve(this.mDstRight);
-      this.mOutDstBottom = resolve(this.mDstBottom);
-      this.mOutScaleFactor = resolve(this.mScaleFactor);
+      const resolve2 = (b) => isNaNBits(b) ? context.getFloat(idFromBits(b)) : intBitsToFloat(b);
+      this.mOutSrcLeft = resolve2(this.mSrcLeft);
+      this.mOutSrcTop = resolve2(this.mSrcTop);
+      this.mOutSrcRight = resolve2(this.mSrcRight);
+      this.mOutSrcBottom = resolve2(this.mSrcBottom);
+      this.mOutDstLeft = resolve2(this.mDstLeft);
+      this.mOutDstTop = resolve2(this.mDstTop);
+      this.mOutDstRight = resolve2(this.mDstRight);
+      this.mOutDstBottom = resolve2(this.mDstBottom);
+      this.mOutScaleFactor = resolve2(this.mScaleFactor);
     }
     paint(context) {
       this.mScaling.setup(
@@ -7971,6 +9745,9 @@ var RC = (() => {
     needsRepaint() {
       this.mNeedsRepaint = true;
     }
+    setNeedsRepaint(v) {
+      this.mNeedsRepaint = v;
+    }
     setMeasureVersion(v) {
       this.mMeasureVersion = v;
     }
@@ -7985,6 +9762,18 @@ var RC = (() => {
     }
     saveLayer(_x, _y, _w, _h) {
       this.matrixSave();
+    }
+    /** Display density, from the underlying RemoteContext (mirrors Java's PaintContext). */
+    getDensity() {
+      return this.mContext.getDensity();
+    }
+    /**
+     * The document's density behaviour. Layout managers need this to decide whether their
+     * dp-valued spacing scales; they only ever hold a PaintContext, so it has to be reachable
+     * from here.
+     */
+    getDensityBehavior() {
+      return this.mContext.getDensityBehavior();
     }
     getClock() {
       return this.mContext.getClock();
@@ -8006,6 +9795,19 @@ var RC = (() => {
     }
     wakeIn(seconds) {
       this.mContext.mRemoteComposeState.wakeIn(seconds);
+    }
+    // ── 2D vertex meshes ────────────────────────────────────────────────────────────────
+    //
+    // Deliberately not abstract: a backend that has not implemented meshes still compiles and
+    // draws nothing. Geometry arrives already in the layout drawVertices wants. An empty `uv`
+    // or `colors` means the channel is absent.
+    //
+    // drawMesh must leave the paint exactly as it found it.
+    setMesh(_meshId, _layout, _uCount, _vCount, _verts, _uv, _colors, _indices) {
+    }
+    drawMesh(_meshId, _blend, _imageId) {
+    }
+    matrixFromMesh(_meshId, _u, _v, _flags) {
     }
   };
   PaintContext.TEXT_MEASURE_MONOSPACE_WIDTH = 1;
@@ -8056,16 +9858,16 @@ var RC = (() => {
       this.mOutPanY = isNaNBits(this.mPanYBits) && idFromBits(this.mPanYBits) > 0 ? context.getFloat(idFromBits(this.mPanYBits)) : intBitsToFloat(this.mPanYBits);
     }
     getHorizontalOffset() {
-      const scale = 1;
-      const textWidth = scale * (this.mBounds[2] - this.mBounds[0]);
+      const scale2 = 1;
+      const textWidth = scale2 * (this.mBounds[2] - this.mBounds[0]);
       const boxWidth = 0;
-      return (boxWidth - textWidth) * (1 + this.mOutPanX) / 2 - scale * this.mBounds[0];
+      return (boxWidth - textWidth) * (1 + this.mOutPanX) / 2 - scale2 * this.mBounds[0];
     }
     getVerticalOffset(baseline) {
-      const scale = 1;
+      const scale2 = 1;
       const boxHeight = 0;
-      const textHeight = scale * (this.mBounds[3] - this.mBounds[1]);
-      return (boxHeight - textHeight) * (1 - this.mOutPanY) / 2 + (baseline ? textHeight / 2 : -scale * this.mBounds[1]);
+      const textHeight = scale2 * (this.mBounds[3] - this.mBounds[1]);
+      return (boxHeight - textHeight) * (1 - this.mOutPanY) / 2 + (baseline ? textHeight / 2 : -scale2 * this.mBounds[1]);
     }
     paint(context) {
       const flags = (this.mFlags & _DrawTextAnchored.ANCHOR_MONOSPACE_MEASURE) !== 0 ? PaintContext.TEXT_MEASURE_MONOSPACE_WIDTH : 0;
@@ -8368,6 +10170,3533 @@ var RC = (() => {
   _ClipPath.OP_CODE = 38;
   var ClipPath = _ClipPath;
 
+  // third_party/remote-compose-player/src/core/d3/Paint3DContext.ts
+  var PROJECTION_PERSPECTIVE = 0;
+  var M3_IDENTITY = 0;
+  var M3_TRANSLATE = 1;
+  var M3_SCALE = 2;
+  var M3_ROTATE_AXIS = 3;
+  var M3_MULTIPLY = 4;
+  var LIGHT_DIRECTIONAL = 0;
+  var LIGHT_POINT = 1;
+  var P3_CLEAR_DEPTH = 0;
+  var P3_MATERIAL = 1;
+  var P3_DEPTH_BIAS = 2;
+  var MODE_SOFTWARE_FLAT = 0;
+  var MODE_SMOOTH_MASK = 1;
+  var MODE_WIREFRAME = 256;
+  var WIRE_EDGE0 = 512;
+  var WIRE_EDGE1 = 1024;
+  var WIRE_EDGE2 = 2048;
+  var WIRE_EDGE_MASK = WIRE_EDGE0 | WIRE_EDGE1 | WIRE_EDGE2;
+  var MODE_SOFTWARE_WIREFRAME = MODE_SOFTWARE_FLAT | MODE_WIREFRAME;
+  var MODE_BACKEND_CANVAS = 1;
+  var MODE_BACKEND_CANVAS_ZBUF = 5;
+  function isPaint3DContext(ctx) {
+    return !!ctx && typeof ctx.drawMesh3D === "function";
+  }
+
+  // third_party/remote-compose-player/src/core/d3/MonotonicCurveFit.ts
+  var MonotonicCurveFit2 = class {
+    constructor(time, y) {
+      this.mExtrapolate = true;
+      const n = time.length;
+      const dim = y[0].length;
+      this.mSlopeTemp = new Float64Array(dim);
+      const slope = [];
+      const tangent = [];
+      for (let i = 0; i < n - 1; i++) {
+        slope.push(new Float64Array(dim));
+      }
+      for (let i = 0; i < n; i++) {
+        tangent.push(new Float64Array(dim));
+      }
+      for (let j = 0; j < dim; j++) {
+        for (let i = 0; i < n - 1; i++) {
+          const dt = time[i + 1] - time[i];
+          slope[i][j] = (y[i + 1][j] - y[i][j]) / dt;
+          if (i === 0) {
+            tangent[i][j] = slope[i][j];
+          } else {
+            tangent[i][j] = (slope[i - 1][j] + slope[i][j]) * 0.5;
+          }
+        }
+        tangent[n - 1][j] = slope[n - 2][j];
+      }
+      for (let i = 0; i < n - 1; i++) {
+        for (let j = 0; j < dim; j++) {
+          if (slope[i][j] === 0) {
+            tangent[i][j] = 0;
+            tangent[i + 1][j] = 0;
+          } else {
+            const a = tangent[i][j] / slope[i][j];
+            const b = tangent[i + 1][j] / slope[i][j];
+            const h = Math.hypot(a, b);
+            if (h > 9) {
+              const t = 3 / h;
+              tangent[i][j] = t * a * slope[i][j];
+              tangent[i + 1][j] = t * b * slope[i][j];
+            }
+          }
+        }
+      }
+      this.mT = time instanceof Float64Array ? time : new Float64Array(time);
+      this.mY = y.map((r) => r instanceof Float64Array ? r : new Float64Array(r));
+      this.mTangent = tangent;
+    }
+    /** Position of every curve at t, written into v. Extrapolates linearly beyond the ends. */
+    getPos(t, v) {
+      const n = this.mT.length;
+      const dim = this.mY[0].length;
+      if (this.mExtrapolate) {
+        if (t <= this.mT[0]) {
+          this.getSlope(this.mT[0], this.mSlopeTemp);
+          for (let j = 0; j < dim; j++) {
+            v[j] = this.mY[0][j] + (t - this.mT[0]) * this.mSlopeTemp[j];
+          }
+          return;
+        }
+        if (t >= this.mT[n - 1]) {
+          this.getSlope(this.mT[n - 1], this.mSlopeTemp);
+          for (let j = 0; j < dim; j++) {
+            v[j] = this.mY[n - 1][j] + (t - this.mT[n - 1]) * this.mSlopeTemp[j];
+          }
+          return;
+        }
+      } else {
+        if (t <= this.mT[0]) {
+          for (let j = 0; j < dim; j++) {
+            v[j] = this.mY[0][j];
+          }
+          return;
+        }
+        if (t >= this.mT[n - 1]) {
+          for (let j = 0; j < dim; j++) {
+            v[j] = this.mY[n - 1][j];
+          }
+          return;
+        }
+      }
+      for (let i = 0; i < n - 1; i++) {
+        if (t === this.mT[i]) {
+          for (let j = 0; j < dim; j++) {
+            v[j] = this.mY[i][j];
+          }
+        }
+        if (t < this.mT[i + 1]) {
+          const h = this.mT[i + 1] - this.mT[i];
+          const x = (t - this.mT[i]) / h;
+          for (let j = 0; j < dim; j++) {
+            v[j] = interpolate(
+              h,
+              x,
+              this.mY[i][j],
+              this.mY[i + 1][j],
+              this.mTangent[i][j],
+              this.mTangent[i + 1][j]
+            );
+          }
+          return;
+        }
+      }
+    }
+    /** Position of curve j at t. */
+    getPosAt(t, j) {
+      const n = this.mT.length;
+      if (this.mExtrapolate) {
+        if (t <= this.mT[0]) {
+          return this.mY[0][j] + (t - this.mT[0]) * this.getSlopeAt(this.mT[0], j);
+        }
+        if (t >= this.mT[n - 1]) {
+          return this.mY[n - 1][j] + (t - this.mT[n - 1]) * this.getSlopeAt(this.mT[n - 1], j);
+        }
+      } else {
+        if (t <= this.mT[0]) {
+          return this.mY[0][j];
+        }
+        if (t >= this.mT[n - 1]) {
+          return this.mY[n - 1][j];
+        }
+      }
+      for (let i = 0; i < n - 1; i++) {
+        if (t === this.mT[i]) {
+          return this.mY[i][j];
+        }
+        if (t < this.mT[i + 1]) {
+          const h = this.mT[i + 1] - this.mT[i];
+          const x = (t - this.mT[i]) / h;
+          return interpolate(
+            h,
+            x,
+            this.mY[i][j],
+            this.mY[i + 1][j],
+            this.mTangent[i][j],
+            this.mTangent[i + 1][j]
+          );
+        }
+      }
+      return 0;
+    }
+    /** Slope of every curve at t, written into v. Clamped to the knot range (no extrapolation). */
+    getSlope(t, v) {
+      const n = this.mT.length;
+      const dim = this.mY[0].length;
+      if (t <= this.mT[0]) {
+        t = this.mT[0];
+      } else if (t >= this.mT[n - 1]) {
+        t = this.mT[n - 1];
+      }
+      for (let i = 0; i < n - 1; i++) {
+        if (t <= this.mT[i + 1]) {
+          const h = this.mT[i + 1] - this.mT[i];
+          const x = (t - this.mT[i]) / h;
+          for (let j = 0; j < dim; j++) {
+            v[j] = diff(
+              h,
+              x,
+              this.mY[i][j],
+              this.mY[i + 1][j],
+              this.mTangent[i][j],
+              this.mTangent[i + 1][j]
+            ) / h;
+          }
+          break;
+        }
+      }
+    }
+    getSlopeAt(t, j) {
+      const n = this.mT.length;
+      if (t <= this.mT[0]) {
+        t = this.mT[0];
+      } else if (t >= this.mT[n - 1]) {
+        t = this.mT[n - 1];
+      }
+      for (let i = 0; i < n - 1; i++) {
+        if (t <= this.mT[i + 1]) {
+          const h = this.mT[i + 1] - this.mT[i];
+          const x = (t - this.mT[i]) / h;
+          return diff(
+            h,
+            x,
+            this.mY[i][j],
+            this.mY[i + 1][j],
+            this.mTangent[i][j],
+            this.mTangent[i + 1][j]
+          ) / h;
+        }
+      }
+      return 0;
+    }
+  };
+  function interpolate(h, x, y1, y2, t1, t2) {
+    const x2 = x * x;
+    const x3 = x2 * x;
+    return -2 * x3 * y2 + 3 * x2 * y2 + 2 * x3 * y1 - 3 * x2 * y1 + y1 + h * t2 * x3 + h * t1 * x3 - h * t2 * x2 - 2 * h * t1 * x2 + h * t1 * x;
+  }
+  function diff(h, x, y1, y2, t1, t2) {
+    const x2 = x * x;
+    return -6 * x2 * y2 + 6 * x * y2 + 6 * x2 * y1 - 6 * x * y1 + 3 * h * t2 * x2 + 3 * h * t1 * x2 - 2 * h * t2 * x - 4 * h * t1 * x + h * t1;
+  }
+
+  // third_party/remote-compose-player/src/core/d3/Primitive3D.ts
+  var SPHERE = 0;
+  var CYLINDER = 1;
+  var CONE = 2;
+  var CUBE = 3;
+  var ROUNDED_CUBE = 4;
+  var SPHERICAL_SECTOR = 5;
+  var SPHERICAL_DOME = 6;
+  var TUBE = 7;
+  var CAP_TUBE = 8;
+  var PROFILE_TUBE = 9;
+  var TORUS = 10;
+  var PLANE = 11;
+  var EXTRUDE_CIRCLE = 12;
+  var EXTRUDE_SECTOR = 13;
+  var EXTRUDE_SEGMENT = 14;
+  var EXTRUDE_ARC = 15;
+  var EXTRUDE_ROUNDED_RECT = 16;
+  var EXTRUDE_SQUIRCLE = 17;
+  var EXTRUDE_PATH = 18;
+  var LATHE = 19;
+  var SWEEP = 20;
+  var HELIX = 21;
+  var ICOSPHERE = 22;
+  var FLAG_SPLINE = 1;
+  var FLAG_TUBE_LEGACY = 2;
+  var FLAG_TUBE_PATH_DENSITY = 4;
+  var FLAG_TUBE_CAP = 8;
+  var FLAG_UV_SHIFT = 4;
+  var FLAG_UV_MASK = 3 << FLAG_UV_SHIFT;
+  var UV_NONE = 0;
+  function uvMode(flags) {
+    return (flags & FLAG_UV_MASK) >> FLAG_UV_SHIFT;
+  }
+  var DEFAULT_RADIAL = 24;
+  var DEFAULT_TUBE_SIDES = 14;
+  var MAX_TUBE_PER_SPAN = 256;
+  var DEFAULT_ROUND_SEG = 4;
+  var fround = Math.fround;
+  function fm(a, b) {
+    return fround(a * b);
+  }
+  function fa(a, b) {
+    return fround(a + b);
+  }
+  function clampF(x, lo, hi) {
+    return x < lo ? lo : x > hi ? hi : x;
+  }
+  function cross(ax, ay, az, bx, by, bz, out) {
+    out[0] = fround(fm(ay, bz) - fm(az, by));
+    out[1] = fround(fm(az, bx) - fm(ax, bz));
+    out[2] = fround(fm(ax, by) - fm(ay, bx));
+  }
+  function clampInt(x, lo, hi) {
+    return x < lo ? lo : x > hi ? hi : x;
+  }
+  function catmull(p0, p1, p2, p3, t) {
+    const t2 = fm(t, t);
+    const t3 = fm(t2, t);
+    const c2 = fround(fa(fround(fm(2, p0) - fm(5, p1)), fm(4, p2)) - p3);
+    const c3 = fa(fround(fa(-p0, fm(3, p1)) - fm(3, p2)), p3);
+    return fm(0.5, fa(
+      fa(
+        fa(
+          fm(2, p1),
+          fm(fa(-p0, p2), t)
+        ),
+        fm(c2, t2)
+      ),
+      fm(c3, t3)
+    ));
+  }
+  function segCount(segments2, dflt, min) {
+    const n = segments2 > 0 ? Math.round(segments2) : dflt;
+    return Math.max(min, n);
+  }
+  function concat(parts) {
+    let vc = 0;
+    let ic = 0;
+    let allUv = parts.length > 0;
+    for (const m of parts) {
+      vc += m.verts.length;
+      ic += m.indices.length;
+      if (m.uv === null) {
+        allUv = false;
+      }
+    }
+    const v = new Float32Array(vc);
+    const n = new Float32Array(vc);
+    const idx = new Int32Array(ic);
+    const uvOut = allUv ? new Float32Array(vc / 3 * 2) : null;
+    let vo = 0, io = 0, uvo = 0, base = 0;
+    for (const m of parts) {
+      v.set(m.verts, vo);
+      n.set(m.normals, vo);
+      for (let k = 0; k < m.indices.length; k++) {
+        idx[io + k] = m.indices[k] + base;
+      }
+      if (uvOut !== null && m.uv !== null) {
+        uvOut.set(m.uv, uvo);
+        uvo += m.uv.length;
+      }
+      base += m.verts.length / 3;
+      vo += m.verts.length;
+      io += m.indices.length;
+    }
+    return { verts: v, normals: n, indices: idx, uv: uvOut };
+  }
+  function perpBasis(dx, dy, dz, u, v) {
+    const ax = Math.abs(dx), ay = Math.abs(dy), az = Math.abs(dz);
+    let rx, ry, rz;
+    if (ax <= ay && ax <= az) {
+      rx = 1;
+      ry = 0;
+      rz = 0;
+    } else if (ay <= az) {
+      rx = 0;
+      ry = 1;
+      rz = 0;
+    } else {
+      rx = 0;
+      ry = 0;
+      rz = 1;
+    }
+    const ux = fround(fm(dy, rz) - fm(dz, ry));
+    const uy = fround(fm(dz, rx) - fm(dx, rz));
+    const uz = fround(fm(dx, ry) - fm(dy, rx));
+    let ul = fround(Math.sqrt(fa(fa(fm(ux, ux), fm(uy, uy)), fm(uz, uz))));
+    if (ul < 1e-6) {
+      ul = 1e-6;
+    }
+    u[0] = fround(ux / ul);
+    u[1] = fround(uy / ul);
+    u[2] = fround(uz / ul);
+    cross(dx, dy, dz, u[0], u[1], u[2], v);
+  }
+  function sphereBand(radius, thetaMin, thetaMax, stacks, slices, cx, cy, cz, uvm) {
+    const rows = stacks + 1;
+    const cols = slices + 1;
+    const verts = new Float32Array(rows * cols * 3);
+    const normals = new Float32Array(rows * cols * 3);
+    const uv = uvm !== 0 ? new Float32Array(rows * cols * 2) : null;
+    let p = 0, q = 0;
+    for (let i = 0; i <= stacks; i++) {
+      const theta = fa(thetaMin, fround(fm(fround(thetaMax - thetaMin), i) / stacks));
+      const sinT = fround(Math.sin(theta));
+      const cosT = fround(Math.cos(theta));
+      for (let j = 0; j <= slices; j++) {
+        const phi = 2 * Math.PI * j / slices;
+        const nx = fm(sinT, fround(Math.cos(phi)));
+        const ny = cosT;
+        const nz = fm(sinT, fround(Math.sin(phi)));
+        normals[p] = nx;
+        normals[p + 1] = ny;
+        normals[p + 2] = nz;
+        verts[p] = fa(cx, fm(nx, radius));
+        verts[p + 1] = fa(cy, fm(ny, radius));
+        verts[p + 2] = fa(cz, fm(nz, radius));
+        p += 3;
+        if (uv !== null) {
+          uv[q] = fround(1 - j / slices);
+          uv[q + 1] = fround(1 - i / stacks);
+          q += 2;
+        }
+      }
+    }
+    const indices = new Int32Array(stacks * slices * 6);
+    let k = 0;
+    for (let i = 0; i < stacks; i++) {
+      for (let j = 0; j < slices; j++) {
+        const a = i * cols + j;
+        const b = (i + 1) * cols + j;
+        const c = (i + 1) * cols + (j + 1);
+        const d = i * cols + (j + 1);
+        indices[k++] = d;
+        indices[k++] = c;
+        indices[k++] = b;
+        indices[k++] = b;
+        indices[k++] = a;
+        indices[k++] = d;
+      }
+    }
+    return { verts, normals, indices, uv };
+  }
+  function sphere(radius, cx, cy, cz, slices, stacks, uvm) {
+    return sphereBand(radius, 0, Math.PI, stacks, slices, cx, cy, cz, uvm);
+  }
+  function torus(majorR, minorR, cx, cy, cz, segU, segV, uvm) {
+    const cols = segV + 1;
+    const rows = segU + 1;
+    const verts = new Float32Array(rows * cols * 3);
+    const normals = new Float32Array(rows * cols * 3);
+    const uv = uvm !== 0 ? new Float32Array(rows * cols * 2) : null;
+    let p = 0, q = 0;
+    for (let i = 0; i <= segU; i++) {
+      const u = 2 * Math.PI * i / segU;
+      const cu = fround(Math.cos(u));
+      const su = fround(Math.sin(u));
+      for (let j = 0; j <= segV; j++) {
+        const v = 2 * Math.PI * j / segV;
+        const cv = fround(Math.cos(v));
+        const sv = fround(Math.sin(v));
+        normals[p] = fm(cv, cu);
+        normals[p + 1] = sv;
+        normals[p + 2] = fm(cv, su);
+        verts[p] = fa(cx, fm(fa(majorR, fm(minorR, cv)), cu));
+        verts[p + 1] = fa(cy, fm(minorR, sv));
+        verts[p + 2] = fa(cz, fm(fa(majorR, fm(minorR, cv)), su));
+        p += 3;
+        if (uv !== null) {
+          uv[q] = fround(i / segU);
+          uv[q + 1] = fround(j / segV);
+          q += 2;
+        }
+      }
+    }
+    const indices = new Int32Array(segU * segV * 6);
+    let k = 0;
+    for (let i = 0; i < segU; i++) {
+      for (let j = 0; j < segV; j++) {
+        const a = i * cols + j;
+        const b = (i + 1) * cols + j;
+        const c = (i + 1) * cols + (j + 1);
+        const d = i * cols + (j + 1);
+        indices[k++] = d;
+        indices[k++] = c;
+        indices[k++] = b;
+        indices[k++] = b;
+        indices[k++] = a;
+        indices[k++] = d;
+      }
+    }
+    return { verts, normals, indices, uv };
+  }
+  function plane(width, height, cx, cy, cz, uvm) {
+    const hw = fm(width, 0.5);
+    const hh = fm(height, 0.5);
+    const verts = new Float32Array([
+      fround(cx - hw),
+      fround(cy - hh),
+      cz,
+      fa(cx, hw),
+      fround(cy - hh),
+      cz,
+      fa(cx, hw),
+      fa(cy, hh),
+      cz,
+      fround(cx - hw),
+      fa(cy, hh),
+      cz
+    ]);
+    const normals = new Float32Array([0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1]);
+    const indices = new Int32Array([0, 1, 2, 0, 2, 3]);
+    const uv = uvm !== 0 ? new Float32Array([0, 0, 1, 0, 1, 1, 0, 1]) : null;
+    return { verts, normals, indices, uv };
+  }
+  var CUBE_FACE = [
+    [0, 0, 1],
+    [0, 0, -1],
+    [1, 0, 0],
+    [-1, 0, 0],
+    [0, 1, 0],
+    [0, -1, 0]
+  ];
+  var CUBE_CORNERS = [
+    [[-1, -1, 1], [1, -1, 1], [1, 1, 1], [-1, 1, 1]],
+    // +Z
+    [[1, -1, -1], [-1, -1, -1], [-1, 1, -1], [1, 1, -1]],
+    // -Z
+    [[1, -1, 1], [1, -1, -1], [1, 1, -1], [1, 1, 1]],
+    // +X
+    [[-1, -1, -1], [-1, -1, 1], [-1, 1, 1], [-1, 1, -1]],
+    // -X
+    [[-1, 1, 1], [1, 1, 1], [1, 1, -1], [-1, 1, -1]],
+    // +Y
+    [[-1, -1, -1], [1, -1, -1], [1, -1, 1], [-1, -1, 1]]
+    // -Y
+  ];
+  var CUBE_FACE_UV = [[0, 0], [1, 0], [1, 1], [0, 1]];
+  function cube(dx, dy, dz, cx, cy, cz, uvm) {
+    const hx = fm(dx, 0.5), hy = fm(dy, 0.5), hz = fm(dz, 0.5);
+    const verts = new Float32Array(24 * 3);
+    const normals = new Float32Array(24 * 3);
+    const indices = new Int32Array(6 * 6);
+    const uv = uvm !== 0 ? new Float32Array(24 * 2) : null;
+    let vp = 0, ip = 0, qp = 0;
+    for (let f = 0; f < 6; f++) {
+      const base = f * 4;
+      for (let c = 0; c < 4; c++) {
+        verts[vp] = fa(cx, fm(CUBE_CORNERS[f][c][0], hx));
+        verts[vp + 1] = fa(cy, fm(CUBE_CORNERS[f][c][1], hy));
+        verts[vp + 2] = fa(cz, fm(CUBE_CORNERS[f][c][2], hz));
+        normals[vp] = CUBE_FACE[f][0];
+        normals[vp + 1] = CUBE_FACE[f][1];
+        normals[vp + 2] = CUBE_FACE[f][2];
+        vp += 3;
+        if (uv !== null) {
+          uv[qp] = CUBE_FACE_UV[c][0];
+          uv[qp + 1] = CUBE_FACE_UV[c][1];
+          qp += 2;
+        }
+      }
+      indices[ip++] = base;
+      indices[ip++] = base + 1;
+      indices[ip++] = base + 2;
+      indices[ip++] = base;
+      indices[ip++] = base + 2;
+      indices[ip++] = base + 3;
+    }
+    return { verts, normals, indices, uv };
+  }
+  function disk(cx, cy, cz, ux, uy, uz, vx, vy, vz, radius, sides, flip) {
+    const nrm = new Float32Array(3);
+    cross(ux, uy, uz, vx, vy, vz, nrm);
+    if (flip) {
+      nrm[0] = -nrm[0];
+      nrm[1] = -nrm[1];
+      nrm[2] = -nrm[2];
+    }
+    const verts = new Float32Array((sides + 1) * 3);
+    const normals = new Float32Array((sides + 1) * 3);
+    for (let j = 0; j < sides; j++) {
+      const phi = 2 * Math.PI * j / sides;
+      const c = fround(Math.cos(phi));
+      const s = fround(Math.sin(phi));
+      const p = j * 3;
+      verts[p] = fa(cx, fm(radius, fa(fm(c, ux), fm(s, vx))));
+      verts[p + 1] = fa(cy, fm(radius, fa(fm(c, uy), fm(s, vy))));
+      verts[p + 2] = fa(cz, fm(radius, fa(fm(c, uz), fm(s, vz))));
+      normals[p] = nrm[0];
+      normals[p + 1] = nrm[1];
+      normals[p + 2] = nrm[2];
+    }
+    const center = sides;
+    verts[center * 3] = cx;
+    verts[center * 3 + 1] = cy;
+    verts[center * 3 + 2] = cz;
+    normals[center * 3] = nrm[0];
+    normals[center * 3 + 1] = nrm[1];
+    normals[center * 3 + 2] = nrm[2];
+    const indices = new Int32Array(sides * 3);
+    let k = 0;
+    for (let j = 0; j < sides; j++) {
+      const j1 = (j + 1) % sides;
+      if (flip) {
+        indices[k++] = center;
+        indices[k++] = j1;
+        indices[k++] = j;
+      } else {
+        indices[k++] = center;
+        indices[k++] = j;
+        indices[k++] = j1;
+      }
+    }
+    return { verts, normals, indices, uv: null };
+  }
+  function cone(radius, height, cx, cy, cz, seg) {
+    const slant = fround(Math.sqrt(fa(fm(height, height), fm(radius, radius))));
+    const nY = fround(radius / slant);
+    const nS = fround(height / slant);
+    const sv = new Float32Array((seg + 1) * 2 * 3);
+    const sn = new Float32Array((seg + 1) * 2 * 3);
+    for (let j = 0; j <= seg; j++) {
+      const phi = 2 * Math.PI * j / seg;
+      const c = fround(Math.cos(phi));
+      const s = fround(Math.sin(phi));
+      const b = j * 3;
+      const a = (seg + 1 + j) * 3;
+      sv[b] = fa(cx, fm(radius, c));
+      sv[b + 1] = cy;
+      sv[b + 2] = fa(cz, fm(radius, s));
+      sn[b] = fm(nS, c);
+      sn[b + 1] = nY;
+      sn[b + 2] = fm(nS, s);
+      sv[a] = cx;
+      sv[a + 1] = fa(cy, height);
+      sv[a + 2] = cz;
+      sn[a] = fm(nS, c);
+      sn[a + 1] = nY;
+      sn[a + 2] = fm(nS, s);
+    }
+    const si = new Int32Array(seg * 3);
+    let k = 0;
+    for (let j = 0; j < seg; j++) {
+      si[k++] = j;
+      si[k++] = seg + 1 + j;
+      si[k++] = j + 1;
+    }
+    const side = { verts: sv, normals: sn, indices: si, uv: null };
+    const base = disk(cx, cy, cz, 1, 0, 0, 0, 0, 1, radius, seg, false);
+    return concat([side, base]);
+  }
+  function cylinder(radius, x1, y1, z1, x2, y2, z2, seg) {
+    let ax = fround(x2 - x1), ay = fround(y2 - y1), az = fround(z2 - z1);
+    let len = fround(Math.sqrt(fa(fa(fm(ax, ax), fm(ay, ay)), fm(az, az))));
+    if (len < 1e-6) {
+      len = 1e-6;
+    }
+    ax = fround(ax / len);
+    ay = fround(ay / len);
+    az = fround(az / len);
+    const u = new Float32Array(3);
+    const v = new Float32Array(3);
+    perpBasis(ax, ay, az, u, v);
+    const sv = new Float32Array((seg + 1) * 2 * 3);
+    const sn = new Float32Array((seg + 1) * 2 * 3);
+    for (let j = 0; j <= seg; j++) {
+      const phi = 2 * Math.PI * j / seg;
+      const c = fround(Math.cos(phi));
+      const s = fround(Math.sin(phi));
+      const dx = fa(fm(c, u[0]), fm(s, v[0]));
+      const dy = fa(fm(c, u[1]), fm(s, v[1]));
+      const dz = fa(fm(c, u[2]), fm(s, v[2]));
+      const bi = j * 3;
+      const ti = (seg + 1 + j) * 3;
+      sv[bi] = fa(x1, fm(radius, dx));
+      sv[bi + 1] = fa(y1, fm(radius, dy));
+      sv[bi + 2] = fa(z1, fm(radius, dz));
+      sv[ti] = fa(x2, fm(radius, dx));
+      sv[ti + 1] = fa(y2, fm(radius, dy));
+      sv[ti + 2] = fa(z2, fm(radius, dz));
+      sn[bi] = dx;
+      sn[bi + 1] = dy;
+      sn[bi + 2] = dz;
+      sn[ti] = dx;
+      sn[ti + 1] = dy;
+      sn[ti + 2] = dz;
+    }
+    const si = new Int32Array(seg * 6);
+    let k = 0;
+    for (let j = 0; j < seg; j++) {
+      const bj = j, bj1 = j + 1, tj = seg + 1 + j, tj1 = seg + 1 + j + 1;
+      si[k++] = tj;
+      si[k++] = bj;
+      si[k++] = bj1;
+      si[k++] = bj1;
+      si[k++] = tj1;
+      si[k++] = tj;
+    }
+    const side = { verts: sv, normals: sn, indices: si, uv: null };
+    const capB = disk(x1, y1, z1, u[0], u[1], u[2], v[0], v[1], v[2], radius, seg, true);
+    const capT = disk(x2, y2, z2, u[0], u[1], u[2], v[0], v[1], v[2], radius, seg, false);
+    return concat([side, capB, capT]);
+  }
+  function roundedCube(dx, dy, dz, cx, cy, cz, r, seg) {
+    const ex = Math.max(fround(fm(dx, 0.5) - r), 0);
+    const ey = Math.max(fround(fm(dy, 0.5) - r), 0);
+    const ez = Math.max(fround(fm(dz, 0.5) - r), 0);
+    const ox = fa(ex, r), oy = fa(ey, r), oz = fa(ez, r);
+    const faces = [[0, 1], [0, -1], [1, 1], [1, -1], [2, 1], [2, -1]];
+    const perFace = (seg + 1) * (seg + 1);
+    const vc = 6 * perFace;
+    const verts = new Float32Array(vc * 3);
+    const normals = new Float32Array(vc * 3);
+    const indices = new Int32Array(6 * seg * seg * 6);
+    let vp = 0, ip = 0, vbase = 0;
+    for (const fc of faces) {
+      const axis = fc[0];
+      const sign = fc[1];
+      const uDir = [0, 0, 0], vDir = [0, 0, 0], nDir = [0, 0, 0];
+      nDir[axis] = sign;
+      if (axis === 0) {
+        if (sign > 0) {
+          uDir[1] = 1;
+          vDir[2] = 1;
+        } else {
+          uDir[2] = 1;
+          vDir[1] = 1;
+        }
+      } else if (axis === 1) {
+        if (sign > 0) {
+          uDir[2] = 1;
+          vDir[0] = 1;
+        } else {
+          uDir[0] = 1;
+          vDir[2] = 1;
+        }
+      } else {
+        if (sign > 0) {
+          uDir[0] = 1;
+          vDir[1] = 1;
+        } else {
+          uDir[1] = 1;
+          vDir[0] = 1;
+        }
+      }
+      for (let s = 0; s <= seg; s++) {
+        const u = fround(fround(s / seg) * 2 - 1);
+        for (let t = 0; t <= seg; t++) {
+          const w = fround(fround(t / seg) * 2 - 1);
+          const px = fa(fa(fm(nDir[0], ox), fm(uDir[0], fm(u, ox))), fm(vDir[0], fm(w, ox)));
+          const py = fa(fa(fm(nDir[1], oy), fm(uDir[1], fm(u, oy))), fm(vDir[1], fm(w, oy)));
+          const pz = fa(fa(fm(nDir[2], oz), fm(uDir[2], fm(u, oz))), fm(vDir[2], fm(w, oz)));
+          const qx = clampF(px, -ex, ex);
+          const qy = clampF(py, -ey, ey);
+          const qz = clampF(pz, -ez, ez);
+          let ddx = fround(px - qx), ddy = fround(py - qy), ddz = fround(pz - qz);
+          let l = fround(Math.sqrt(fa(fa(fm(ddx, ddx), fm(ddy, ddy)), fm(ddz, ddz))));
+          if (l < 1e-6) {
+            ddx = nDir[0];
+            ddy = nDir[1];
+            ddz = nDir[2];
+            l = 1;
+          }
+          const inv = fround(1 / l);
+          verts[vp] = fa(fa(cx, qx), fm(r, fm(ddx, inv)));
+          verts[vp + 1] = fa(fa(cy, qy), fm(r, fm(ddy, inv)));
+          verts[vp + 2] = fa(fa(cz, qz), fm(r, fm(ddz, inv)));
+          normals[vp] = fm(ddx, inv);
+          normals[vp + 1] = fm(ddy, inv);
+          normals[vp + 2] = fm(ddz, inv);
+          vp += 3;
+        }
+      }
+      const stride = seg + 1;
+      for (let s = 0; s < seg; s++) {
+        for (let t = 0; t < seg; t++) {
+          const a = vbase + s * stride + t;
+          const b = vbase + (s + 1) * stride + t;
+          const c = vbase + (s + 1) * stride + (t + 1);
+          const d = vbase + s * stride + (t + 1);
+          indices[ip++] = a;
+          indices[ip++] = b;
+          indices[ip++] = c;
+          indices[ip++] = c;
+          indices[ip++] = d;
+          indices[ip++] = a;
+        }
+      }
+      vbase += perFace;
+    }
+    return { verts, normals, indices, uv: null };
+  }
+  function sphericalSector(radius, angle, cx, cy, cz, slices, stacks) {
+    const cap = sphereBand(radius, 0, angle, stacks, slices, cx, cy, cz, UV_NONE);
+    const seg = slices;
+    const ca = fround(Math.cos(angle));
+    const sa = fround(Math.sin(angle));
+    const ringY = fm(radius, ca);
+    const ringR = fm(radius, sa);
+    const cv = new Float32Array((seg + 1) * 2 * 3);
+    const cn = new Float32Array((seg + 1) * 2 * 3);
+    for (let j = 0; j <= seg; j++) {
+      const phi = 2 * Math.PI * j / seg;
+      const c = fround(Math.cos(phi));
+      const s = fround(Math.sin(phi));
+      const ri = j * 3;
+      const ai = (seg + 1 + j) * 3;
+      cv[ri] = fa(cx, fm(ringR, c));
+      cv[ri + 1] = fa(cy, ringY);
+      cv[ri + 2] = fa(cz, fm(ringR, s));
+      cv[ai] = cx;
+      cv[ai + 1] = cy;
+      cv[ai + 2] = cz;
+      const nx = fm(ca, c), ny = -sa, nz = fm(ca, s);
+      cn[ri] = nx;
+      cn[ri + 1] = ny;
+      cn[ri + 2] = nz;
+      cn[ai] = nx;
+      cn[ai + 1] = ny;
+      cn[ai + 2] = nz;
+    }
+    const ci = new Int32Array(seg * 3);
+    let k = 0;
+    for (let j = 0; j < seg; j++) {
+      ci[k++] = j;
+      ci[k++] = j + 1;
+      ci[k++] = seg + 1 + j;
+    }
+    return concat([cap, { verts: cv, normals: cn, indices: ci, uv: null }]);
+  }
+  function sphericalDome(radius, angle, cx, cy, cz, slices, stacks) {
+    const cap = sphereBand(radius, 0, angle, stacks, slices, cx, cy, cz, UV_NONE);
+    const ringY = fm(radius, fround(Math.cos(angle)));
+    const ringR = fm(radius, fround(Math.sin(angle)));
+    const base = disk(cx, fa(cy, ringY), cz, 1, 0, 0, 0, 0, 1, ringR, slices, false);
+    return concat([cap, base]);
+  }
+  var ICO_FACES = [
+    [0, 11, 5],
+    [0, 5, 1],
+    [0, 1, 7],
+    [0, 7, 10],
+    [0, 10, 11],
+    [1, 5, 9],
+    [5, 11, 4],
+    [11, 10, 2],
+    [10, 7, 6],
+    [7, 1, 8],
+    [3, 9, 4],
+    [3, 4, 2],
+    [3, 2, 6],
+    [3, 6, 8],
+    [3, 8, 9],
+    [4, 9, 5],
+    [2, 4, 11],
+    [6, 2, 10],
+    [8, 6, 7],
+    [9, 8, 1]
+  ];
+  function icosphere(radius, cx, cy, cz, subdiv) {
+    const t = fround((1 + Math.sqrt(5)) / 2);
+    const base = [
+      [-1, t, 0],
+      [1, t, 0],
+      [-1, -t, 0],
+      [1, -t, 0],
+      [0, -1, t],
+      [0, 1, t],
+      [0, -1, -t],
+      [0, 1, -t],
+      [t, 0, -1],
+      [t, 0, 1],
+      [-t, 0, -1],
+      [-t, 0, 1]
+    ];
+    const dirs = [];
+    for (const v of base) {
+      const len = fround(Math.sqrt(fa(fa(fm(v[0], v[0]), fm(v[1], v[1])), fm(v[2], v[2]))));
+      dirs.push([fround(v[0] / len), fround(v[1] / len), fround(v[2] / len)]);
+    }
+    let tris = ICO_FACES.map((f) => [f[0], f[1], f[2]]);
+    const mid = /* @__PURE__ */ new Map();
+    const icoMid = (i, j) => {
+      const key = i < j ? i * 67108864 + j : j * 67108864 + i;
+      const e = mid.get(key);
+      if (e !== void 0) {
+        return e;
+      }
+      const a = dirs[i];
+      const b = dirs[j];
+      const mx = fm(fa(a[0], b[0]), 0.5);
+      const my = fm(fa(a[1], b[1]), 0.5);
+      const mz = fm(fa(a[2], b[2]), 0.5);
+      const len = fround(Math.sqrt(fa(fa(fm(mx, mx), fm(my, my)), fm(mz, mz))));
+      const idx = dirs.length;
+      dirs.push([fround(mx / len), fround(my / len), fround(mz / len)]);
+      mid.set(key, idx);
+      return idx;
+    };
+    for (let s = 0; s < subdiv; s++) {
+      const next = [];
+      for (const tr of tris) {
+        const a = icoMid(tr[0], tr[1]);
+        const b = icoMid(tr[1], tr[2]);
+        const c = icoMid(tr[2], tr[0]);
+        next.push([tr[0], a, c], [tr[1], b, a], [tr[2], c, b], [a, b, c]);
+      }
+      tris = next;
+    }
+    const nv = dirs.length;
+    const verts = new Float32Array(nv * 3);
+    const normals = new Float32Array(nv * 3);
+    for (let i = 0; i < nv; i++) {
+      const d = dirs[i];
+      verts[i * 3] = fa(cx, fm(radius, d[0]));
+      verts[i * 3 + 1] = fa(cy, fm(radius, d[1]));
+      verts[i * 3 + 2] = fa(cz, fm(radius, d[2]));
+      normals[i * 3] = d[0];
+      normals[i * 3 + 1] = d[1];
+      normals[i * 3 + 2] = d[2];
+    }
+    const indices = new Int32Array(tris.length * 3);
+    let k = 0;
+    for (const tr of tris) {
+      indices[k++] = tr[0];
+      indices[k++] = tr[1];
+      indices[k++] = tr[2];
+    }
+    return { verts, normals, indices, uv: null };
+  }
+  function lathe(profile, cx, cy, cz, seg) {
+    const nProf = Math.floor(profile.length / 2);
+    if (nProf < 2) {
+      throw new Error("MeshPrimitive lathe: need >= 2 profile points");
+    }
+    const cols = seg + 1;
+    const nv = nProf * cols;
+    const verts = new Float32Array(nv * 3);
+    const normals = new Float32Array(nv * 3);
+    const pnr = new Float32Array(nProf);
+    const pny = new Float32Array(nProf);
+    for (let e = 0; e < nProf - 1; e++) {
+      const dr = fround(profile[(e + 1) * 2] - profile[e * 2]);
+      const dy = fround(profile[(e + 1) * 2 + 1] - profile[e * 2 + 1]);
+      let nr = dy;
+      let ny = -dr;
+      const len = fround(Math.sqrt(fa(fm(nr, nr), fm(ny, ny))));
+      if (len > 1e-9) {
+        nr = fround(nr / len);
+        ny = fround(ny / len);
+      }
+      pnr[e] = fa(pnr[e], nr);
+      pny[e] = fa(pny[e], ny);
+      pnr[e + 1] = fa(pnr[e + 1], nr);
+      pny[e + 1] = fa(pny[e + 1], ny);
+    }
+    for (let i = 0; i < nProf; i++) {
+      const len = fround(Math.sqrt(fa(fm(pnr[i], pnr[i]), fm(pny[i], pny[i]))));
+      if (len > 1e-9) {
+        pnr[i] = fround(pnr[i] / len);
+        pny[i] = fround(pny[i] / len);
+      } else {
+        pnr[i] = 1;
+        pny[i] = 0;
+      }
+    }
+    for (let i = 0; i < nProf; i++) {
+      const r = profile[i * 2];
+      const y = profile[i * 2 + 1];
+      for (let j = 0; j <= seg; j++) {
+        const phi = 2 * Math.PI * j / seg;
+        const c = fround(Math.cos(phi));
+        const s = fround(Math.sin(phi));
+        const idx = (i * cols + j) * 3;
+        verts[idx] = fa(cx, fm(r, c));
+        verts[idx + 1] = fa(cy, y);
+        verts[idx + 2] = fa(cz, fm(r, s));
+        normals[idx] = fm(pnr[i], c);
+        normals[idx + 1] = pny[i];
+        normals[idx + 2] = fm(pnr[i], s);
+      }
+    }
+    const indices = new Int32Array((nProf - 1) * seg * 6);
+    let k = 0;
+    for (let i = 0; i < nProf - 1; i++) {
+      for (let j = 0; j < seg; j++) {
+        const a = i * cols + j;
+        const b = i * cols + j + 1;
+        const c = (i + 1) * cols + j;
+        const d = (i + 1) * cols + j + 1;
+        indices[k++] = b;
+        indices[k++] = a;
+        indices[k++] = c;
+        indices[k++] = c;
+        indices[k++] = d;
+        indices[k++] = b;
+      }
+    }
+    return { verts, normals, indices, uv: null };
+  }
+  function setSideVert(verts, normals, i, x, y, z, nx, ny) {
+    const p = i * 3;
+    verts[p] = x;
+    verts[p + 1] = y;
+    verts[p + 2] = z;
+    normals[p] = nx;
+    normals[p + 1] = ny;
+  }
+  function extrude(poly2D, capTris, loop, depth, cx, cy, cz) {
+    const np = poly2D.length / 2;
+    const hd = fm(depth, 0.5);
+    const le = loop.length;
+    const vcount = np * 2 + le * 4;
+    const verts = new Float32Array(vcount * 3);
+    const normals = new Float32Array(vcount * 3);
+    for (let i = 0; i < np; i++) {
+      const x = poly2D[i * 2];
+      const y = poly2D[i * 2 + 1];
+      const f = i * 3;
+      verts[f] = fa(cx, x);
+      verts[f + 1] = fa(cy, y);
+      verts[f + 2] = fa(cz, hd);
+      normals[f + 2] = 1;
+      const b = (np + i) * 3;
+      verts[b] = fa(cx, x);
+      verts[b + 1] = fa(cy, y);
+      verts[b + 2] = fround(cz - hd);
+      normals[b + 2] = -1;
+    }
+    const indices = new Int32Array(capTris.length * 2 + le * 6);
+    let io = 0;
+    for (let t = 0; t < capTris.length; t += 3) {
+      indices[io++] = capTris[t];
+      indices[io++] = capTris[t + 1];
+      indices[io++] = capTris[t + 2];
+    }
+    for (let t = 0; t < capTris.length; t += 3) {
+      indices[io++] = np + capTris[t];
+      indices[io++] = np + capTris[t + 2];
+      indices[io++] = np + capTris[t + 1];
+    }
+    const sideBase = np * 2;
+    for (let e = 0; e < le; e++) {
+      const ia = loop[e];
+      const ib = loop[(e + 1) % le];
+      const ax = poly2D[ia * 2], ay = poly2D[ia * 2 + 1];
+      const bx = poly2D[ib * 2], by = poly2D[ib * 2 + 1];
+      const dx = fround(bx - ax);
+      const dy = fround(by - ay);
+      let nx = dy;
+      let ny = -dx;
+      const len = fround(Math.sqrt(fa(fm(nx, nx), fm(ny, ny))));
+      if (len > 1e-9) {
+        nx = fround(nx / len);
+        ny = fround(ny / len);
+      }
+      const base = sideBase + e * 4;
+      setSideVert(verts, normals, base, fa(cx, ax), fa(cy, ay), fa(cz, hd), nx, ny);
+      setSideVert(verts, normals, base + 1, fa(cx, bx), fa(cy, by), fa(cz, hd), nx, ny);
+      setSideVert(verts, normals, base + 2, fa(cx, ax), fa(cy, ay), fround(cz - hd), nx, ny);
+      setSideVert(verts, normals, base + 3, fa(cx, bx), fa(cy, by), fround(cz - hd), nx, ny);
+      indices[io++] = base;
+      indices[io++] = base + 2;
+      indices[io++] = base + 3;
+      indices[io++] = base;
+      indices[io++] = base + 3;
+      indices[io++] = base + 1;
+    }
+    return { verts, normals, indices, uv: null };
+  }
+  function extrudeCircle(radius, depth, cx, cy, cz, sides) {
+    const poly = new Float32Array((sides + 1) * 2);
+    for (let j = 0; j < sides; j++) {
+      const phi = 2 * Math.PI * j / sides;
+      poly[j * 2] = fm(radius, fround(Math.cos(phi)));
+      poly[j * 2 + 1] = fm(radius, fround(Math.sin(phi)));
+    }
+    const center = sides;
+    const cap = new Int32Array(sides * 3);
+    const loop = new Int32Array(sides);
+    let k = 0;
+    for (let j = 0; j < sides; j++) {
+      const j1 = (j + 1) % sides;
+      cap[k++] = center;
+      cap[k++] = j;
+      cap[k++] = j1;
+      loop[j] = j;
+    }
+    return extrude(poly, cap, loop, depth, cx, cy, cz);
+  }
+  function extrudeSector(radius, a0, sweepA, depth, cx, cy, cz, n) {
+    const poly = new Float32Array((n + 2) * 2);
+    for (let k = 0; k <= n; k++) {
+      const phi = a0 + sweepA * k / n;
+      poly[(1 + k) * 2] = fm(radius, fround(Math.cos(phi)));
+      poly[(1 + k) * 2 + 1] = fm(radius, fround(Math.sin(phi)));
+    }
+    const cap = new Int32Array(n * 3);
+    let m = 0;
+    for (let k = 0; k < n; k++) {
+      cap[m++] = 0;
+      cap[m++] = 1 + k;
+      cap[m++] = 2 + k;
+    }
+    const loop = new Int32Array(n + 2);
+    loop[0] = 0;
+    for (let k = 0; k <= n; k++) {
+      loop[1 + k] = 1 + k;
+    }
+    return extrude(poly, cap, loop, depth, cx, cy, cz);
+  }
+  function extrudeSegment(radius, a0, sweepA, depth, cx, cy, cz, n) {
+    const poly = new Float32Array((n + 1) * 2);
+    for (let k = 0; k <= n; k++) {
+      const phi = a0 + sweepA * k / n;
+      poly[k * 2] = fm(radius, fround(Math.cos(phi)));
+      poly[k * 2 + 1] = fm(radius, fround(Math.sin(phi)));
+    }
+    const cap = new Int32Array(Math.max(0, n - 1) * 3);
+    let m = 0;
+    for (let k = 1; k < n; k++) {
+      cap[m++] = 0;
+      cap[m++] = k;
+      cap[m++] = k + 1;
+    }
+    const loop = new Int32Array(n + 1);
+    for (let k = 0; k <= n; k++) {
+      loop[k] = k;
+    }
+    return extrude(poly, cap, loop, depth, cx, cy, cz);
+  }
+  function extrudeArc(r0, r1, a0, sweepA, depth, cx, cy, cz, n) {
+    const inner = n + 1;
+    const poly = new Float32Array(2 * (n + 1) * 2);
+    for (let k = 0; k <= n; k++) {
+      const phi = a0 + sweepA * k / n;
+      const c = fround(Math.cos(phi));
+      const s = fround(Math.sin(phi));
+      poly[k * 2] = fm(r1, c);
+      poly[k * 2 + 1] = fm(r1, s);
+      const ii = inner + k;
+      poly[ii * 2] = fm(r0, c);
+      poly[ii * 2 + 1] = fm(r0, s);
+    }
+    const cap = new Int32Array(n * 2 * 3);
+    let m = 0;
+    for (let k = 0; k < n; k++) {
+      const o0 = k, o1 = k + 1, i0 = inner + k, i1 = inner + k + 1;
+      cap[m++] = o0;
+      cap[m++] = o1;
+      cap[m++] = i1;
+      cap[m++] = o0;
+      cap[m++] = i1;
+      cap[m++] = i0;
+    }
+    const loop = new Int32Array(2 * (n + 1));
+    let li = 0;
+    for (let k = 0; k <= n; k++) {
+      loop[li++] = k;
+    }
+    for (let k = n; k >= 0; k--) {
+      loop[li++] = inner + k;
+    }
+    return extrude(poly, cap, loop, depth, cx, cy, cz);
+  }
+  function extrudeRoundedRect(width, height, cr, depth, cx, cy, cz, cseg) {
+    const hw = fm(width, 0.5);
+    const hh = fm(height, 0.5);
+    cr = clampF(cr, 0, Math.min(hw, hh));
+    const ix = fround(hw - cr);
+    const iy = fround(hh - cr);
+    const ccx = [ix, ix, -ix, -ix];
+    const ccy = [-iy, iy, iy, -iy];
+    const startA = [-fround(Math.PI / 2), 0, fround(Math.PI / 2), fround(Math.PI)];
+    const per = cseg + 1;
+    const pcount = 4 * per;
+    const poly = new Float32Array((pcount + 1) * 2);
+    let pi = 0;
+    for (let corner = 0; corner < 4; corner++) {
+      for (let s = 0; s <= cseg; s++) {
+        const ang = startA[corner] + Math.PI / 2 * s / cseg;
+        poly[pi * 2] = fa(ccx[corner], fm(cr, fround(Math.cos(ang))));
+        poly[pi * 2 + 1] = fa(ccy[corner], fm(cr, fround(Math.sin(ang))));
+        pi++;
+      }
+    }
+    const center = pcount;
+    const cap = new Int32Array(pcount * 3);
+    const loop = new Int32Array(pcount);
+    let k = 0;
+    for (let j = 0; j < pcount; j++) {
+      const j1 = (j + 1) % pcount;
+      cap[k++] = center;
+      cap[k++] = j;
+      cap[k++] = j1;
+      loop[j] = j;
+    }
+    return extrude(poly, cap, loop, depth, cx, cy, cz);
+  }
+  function extrudeSquircle(radius, exponent, depth, cx, cy, cz, samples) {
+    const e = exponent <= 0 ? 4 : exponent;
+    const p2 = fround(2 / e);
+    const poly = new Float32Array((samples + 1) * 2);
+    for (let j = 0; j < samples; j++) {
+      const phi = 2 * Math.PI * j / samples;
+      const ct = fround(Math.cos(phi));
+      const st = fround(Math.sin(phi));
+      poly[j * 2] = fm(fm(radius, Math.sign(ct)), fround(Math.pow(Math.abs(ct), p2)));
+      poly[j * 2 + 1] = fm(fm(radius, Math.sign(st)), fround(Math.pow(Math.abs(st), p2)));
+    }
+    const center = samples;
+    const cap = new Int32Array(samples * 3);
+    const loop = new Int32Array(samples);
+    let k = 0;
+    for (let j = 0; j < samples; j++) {
+      const j1 = (j + 1) % samples;
+      cap[k++] = center;
+      cap[k++] = j;
+      cap[k++] = j1;
+      loop[j] = j;
+    }
+    return extrude(poly, cap, loop, depth, cx, cy, cz);
+  }
+  function buildTubeFromCenterline(px, py, pz, tx, ty, tz, radii, n, sides, capped) {
+    const u = new Float32Array(3);
+    const vv = new Float32Array(3);
+    perpBasis(tx[0], ty[0], tz[0], u, vv);
+    const verts = new Float32Array(n * (sides + 1) * 3);
+    const normals = new Float32Array(n * (sides + 1) * 3);
+    for (let i = 0; i < n; i++) {
+      if (i > 0) {
+        const dot = fa(fa(fm(u[0], tx[i]), fm(u[1], ty[i])), fm(u[2], tz[i]));
+        u[0] = fround(u[0] - fm(dot, tx[i]));
+        u[1] = fround(u[1] - fm(dot, ty[i]));
+        u[2] = fround(u[2] - fm(dot, tz[i]));
+        const ul = fround(Math.sqrt(fa(fa(fm(u[0], u[0]), fm(u[1], u[1])), fm(u[2], u[2]))));
+        if (ul < 1e-6) {
+          perpBasis(tx[i], ty[i], tz[i], u, vv);
+        } else {
+          u[0] = fround(u[0] / ul);
+          u[1] = fround(u[1] / ul);
+          u[2] = fround(u[2] / ul);
+          cross(tx[i], ty[i], tz[i], u[0], u[1], u[2], vv);
+        }
+      }
+      for (let j = 0; j <= sides; j++) {
+        const phi = 2 * Math.PI * j / sides;
+        const c = fround(Math.cos(phi));
+        const s = fround(Math.sin(phi));
+        const dx = fa(fm(c, u[0]), fm(s, vv[0]));
+        const dy = fa(fm(c, u[1]), fm(s, vv[1]));
+        const dz = fa(fm(c, u[2]), fm(s, vv[2]));
+        const p = (i * (sides + 1) + j) * 3;
+        const ri = radii[i];
+        verts[p] = fa(px[i], fm(ri, dx));
+        verts[p + 1] = fa(py[i], fm(ri, dy));
+        verts[p + 2] = fa(pz[i], fm(ri, dz));
+        normals[p] = dx;
+        normals[p + 1] = dy;
+        normals[p + 2] = dz;
+      }
+    }
+    const cols = sides + 1;
+    const indices = new Int32Array((n - 1) * sides * 6);
+    let k = 0;
+    for (let i = 0; i < n - 1; i++) {
+      for (let j = 0; j < sides; j++) {
+        const a = i * cols + j;
+        const b = i * cols + j + 1;
+        const cc = (i + 1) * cols + j;
+        const d = (i + 1) * cols + j + 1;
+        indices[k++] = cc;
+        indices[k++] = a;
+        indices[k++] = b;
+        indices[k++] = b;
+        indices[k++] = d;
+        indices[k++] = cc;
+      }
+    }
+    const wall = { verts, normals, indices, uv: null };
+    if (!capped) {
+      return wall;
+    }
+    const u0 = new Float32Array(3), v0 = new Float32Array(3);
+    perpBasis(tx[0], ty[0], tz[0], u0, v0);
+    const u1 = new Float32Array(3), v1 = new Float32Array(3);
+    perpBasis(tx[n - 1], ty[n - 1], tz[n - 1], u1, v1);
+    const cap0 = disk(
+      px[0],
+      py[0],
+      pz[0],
+      u0[0],
+      u0[1],
+      u0[2],
+      v0[0],
+      v0[1],
+      v0[2],
+      radii[0],
+      sides,
+      true
+    );
+    const cap1 = disk(
+      px[n - 1],
+      py[n - 1],
+      pz[n - 1],
+      u1[0],
+      u1[1],
+      u1[2],
+      v1[0],
+      v1[1],
+      v1[2],
+      radii[n - 1],
+      sides,
+      false
+    );
+    return concat([wall, cap0, cap1]);
+  }
+  function buildPositionFit(cxp, cyp, czp, cn, knot) {
+    const y = [];
+    for (let i = 0; i < cn; i++) {
+      y.push(new Float64Array(3));
+    }
+    y[0][0] = cxp[0];
+    y[0][1] = cyp[0];
+    y[0][2] = czp[0];
+    for (let i = 1; i < cn; i++) {
+      const dx = fround(cxp[i] - cxp[i - 1]);
+      const dy = fround(cyp[i] - cyp[i - 1]);
+      const dz = fround(czp[i] - czp[i - 1]);
+      const d = Math.sqrt(fa(fa(fm(dx, dx), fm(dy, dy)), fm(dz, dz)));
+      knot[i] = knot[i - 1] + Math.max(d, 1e-4);
+      y[i][0] = cxp[i];
+      y[i][1] = cyp[i];
+      y[i][2] = czp[i];
+    }
+    return new MonotonicCurveFit2(knot, y);
+  }
+  function radiusAt(radiusFit, t, constRadius) {
+    if (radiusFit === null) {
+      return constRadius;
+    }
+    const r = fround(radiusFit.getPosAt(t, 0));
+    return r < 0 ? 0 : r;
+  }
+  function sampleCenterline(fit, t, pos, slope, px, py, pz, tx, ty, tz, w, pTx, pTy, pTz) {
+    fit.getPos(t, pos);
+    fit.getSlope(t, slope);
+    px[w] = pos[0];
+    py[w] = pos[1];
+    pz[w] = pos[2];
+    const sx = fround(slope[0]);
+    const sy = fround(slope[1]);
+    const sz = fround(slope[2]);
+    const l = fround(Math.sqrt(fa(fa(fm(sx, sx), fm(sy, sy)), fm(sz, sz))));
+    if (l < 1e-6) {
+      tx[w] = pTx;
+      ty[w] = pTy;
+      tz[w] = pTz;
+    } else {
+      tx[w] = fround(sx / l);
+      ty[w] = fround(sy / l);
+      tz[w] = fround(sz / l);
+    }
+    return w + 1;
+  }
+  function splineSweep(fit, knot, cn, sides, capped, pathPerSpan, radiusFit, constRadius) {
+    const manual = pathPerSpan > 0;
+    const fixedNs = manual ? clampInt(Math.round(pathPerSpan), 1, MAX_TUBE_PER_SPAN) : 0;
+    const arcSubSamples = 6;
+    const perSpan = new Int32Array(cn - 1);
+    let total = 1;
+    const a = new Float64Array(3);
+    const b = new Float64Array(3);
+    for (let i = 0; i < cn - 1; i++) {
+      let ns;
+      if (manual) {
+        ns = fixedNs;
+      } else {
+        const k0 = knot[i];
+        const k1 = knot[i + 1];
+        const rMid = radiusFit !== null ? fround(radiusFit.getPosAt((k0 + k1) * 0.5, 0)) : constRadius;
+        const step = Math.max(2 * Math.abs(rMid) * Math.sin(Math.PI / sides), 1e-4);
+        let arc = 0;
+        fit.getPos(k0, a);
+        for (let s = 1; s <= arcSubSamples; s++) {
+          fit.getPos(k0 + (k1 - k0) * s / arcSubSamples, b);
+          const dx = b[0] - a[0];
+          const dy = b[1] - a[1];
+          const dz = b[2] - a[2];
+          arc += Math.sqrt(dx * dx + dy * dy + dz * dz);
+          a[0] = b[0];
+          a[1] = b[1];
+          a[2] = b[2];
+        }
+        ns = clampInt(Math.trunc(Math.round(arc / step)), 1, MAX_TUBE_PER_SPAN);
+      }
+      perSpan[i] = ns;
+      total += ns;
+    }
+    const n = total;
+    const px = new Float32Array(n), py = new Float32Array(n), pz = new Float32Array(n);
+    const tx = new Float32Array(n), ty = new Float32Array(n), tz = new Float32Array(n);
+    const radii = new Float32Array(n);
+    const pos = new Float32Array(3);
+    const slope = new Float64Array(3);
+    let pTx = 0, pTy = 1, pTz = 0;
+    let w = 0;
+    for (let i = 0; i < cn - 1; i++) {
+      const k0 = knot[i];
+      const k1 = knot[i + 1];
+      const ns = perSpan[i];
+      for (let s = 0; s < ns; s++) {
+        const t = k0 + (k1 - k0) * s / ns;
+        w = sampleCenterline(fit, t, pos, slope, px, py, pz, tx, ty, tz, w, pTx, pTy, pTz);
+        radii[w - 1] = radiusAt(radiusFit, t, constRadius);
+        pTx = tx[w - 1];
+        pTy = ty[w - 1];
+        pTz = tz[w - 1];
+      }
+    }
+    const tEnd = knot[cn - 1];
+    w = sampleCenterline(fit, tEnd, pos, slope, px, py, pz, tx, ty, tz, w, pTx, pTy, pTz);
+    radii[w - 1] = radiusAt(radiusFit, tEnd, constRadius);
+    return buildTubeFromCenterline(px, py, pz, tx, ty, tz, radii, n, sides, capped);
+  }
+  function tubeLegacy(cxp, cyp, czp, cn, radius, sides, capped, segments2, flags, pathPerSpan) {
+    let px, py, pz;
+    if ((flags & FLAG_SPLINE) !== 0) {
+      const per = pathPerSpan > 0 ? clampInt(Math.round(pathPerSpan), 1, MAX_TUBE_PER_SPAN) : segCount(segments2, 8, 1);
+      const n2 = (cn - 1) * per + 1;
+      px = new Float32Array(n2);
+      py = new Float32Array(n2);
+      pz = new Float32Array(n2);
+      let w = 0;
+      for (let i = 0; i < cn - 1; i++) {
+        const i0 = Math.max(0, i - 1);
+        const i2 = i + 1;
+        const i3 = Math.min(cn - 1, i + 2);
+        for (let s = 0; s < per; s++) {
+          const t = fround(s / per);
+          px[w] = catmull(cxp[i0], cxp[i], cxp[i2], cxp[i3], t);
+          py[w] = catmull(cyp[i0], cyp[i], cyp[i2], cyp[i3], t);
+          pz[w] = catmull(czp[i0], czp[i], czp[i2], czp[i3], t);
+          w++;
+        }
+      }
+      px[w] = cxp[cn - 1];
+      py[w] = cyp[cn - 1];
+      pz[w] = czp[cn - 1];
+    } else {
+      px = cxp;
+      py = cyp;
+      pz = czp;
+    }
+    const n = px.length;
+    const tx = new Float32Array(n), ty = new Float32Array(n), tz = new Float32Array(n);
+    for (let i = 0; i < n; i++) {
+      let ax = 0, ay = 0, az = 0;
+      if (i > 0) {
+        ax = fa(ax, fround(px[i] - px[i - 1]));
+        ay = fa(ay, fround(py[i] - py[i - 1]));
+        az = fa(az, fround(pz[i] - pz[i - 1]));
+      }
+      if (i < n - 1) {
+        ax = fa(ax, fround(px[i + 1] - px[i]));
+        ay = fa(ay, fround(py[i + 1] - py[i]));
+        az = fa(az, fround(pz[i + 1] - pz[i]));
+      }
+      let l = fround(Math.sqrt(fa(fa(fm(ax, ax), fm(ay, ay)), fm(az, az))));
+      if (l < 1e-6) {
+        ax = 0;
+        ay = 1;
+        az = 0;
+        l = 1;
+      }
+      tx[i] = fround(ax / l);
+      ty[i] = fround(ay / l);
+      tz[i] = fround(az / l);
+    }
+    const radii = new Float32Array(n).fill(radius);
+    return buildTubeFromCenterline(px, py, pz, tx, ty, tz, radii, n, sides, capped);
+  }
+  function tube(params, capped, segments2, flags) {
+    const radius = params[0];
+    const manualDensity = (flags & FLAG_TUBE_PATH_DENSITY) !== 0;
+    const off = manualDensity ? 2 : 1;
+    const pathPerSpan = manualDensity ? params[1] : 0;
+    const cn = Math.floor((params.length - off) / 3);
+    if (cn < 2) {
+      throw new Error("MeshPrimitive tube: need >= 2 points");
+    }
+    const cxp = new Float32Array(cn), cyp = new Float32Array(cn), czp = new Float32Array(cn);
+    for (let i = 0; i < cn; i++) {
+      cxp[i] = params[off + i * 3];
+      cyp[i] = params[off + i * 3 + 1];
+      czp[i] = params[off + i * 3 + 2];
+    }
+    const sides = segCount(segments2, DEFAULT_TUBE_SIDES, 3);
+    if ((flags & FLAG_TUBE_LEGACY) !== 0) {
+      return tubeLegacy(cxp, cyp, czp, cn, radius, sides, capped, segments2, flags, pathPerSpan);
+    }
+    const knot = new Float64Array(cn);
+    const fit = buildPositionFit(cxp, cyp, czp, cn, knot);
+    return splineSweep(fit, knot, cn, sides, capped, pathPerSpan, null, radius);
+  }
+  function profileTube(params, sides, flags) {
+    const nPoints = Math.round(params[0]);
+    const manualDensity = (flags & FLAG_TUBE_PATH_DENSITY) !== 0;
+    const capped = (flags & FLAG_TUBE_CAP) !== 0;
+    const posOff = manualDensity ? 2 : 1;
+    const pathPerSpan = manualDensity ? params[1] : 0;
+    if (nPoints < 2) {
+      throw new Error("MeshPrimitive profile tube: need >= 2 points");
+    }
+    const rOff = posOff + 3 * nPoints;
+    const nR = params.length - rOff;
+    if (nR < 1) {
+      throw new Error("MeshPrimitive profile tube: need >= 1 radius");
+    }
+    const cxp = new Float32Array(nPoints);
+    const cyp = new Float32Array(nPoints);
+    const czp = new Float32Array(nPoints);
+    for (let i = 0; i < nPoints; i++) {
+      cxp[i] = params[posOff + i * 3];
+      cyp[i] = params[posOff + i * 3 + 1];
+      czp[i] = params[posOff + i * 3 + 2];
+    }
+    const knot = new Float64Array(nPoints);
+    const fit = buildPositionFit(cxp, cyp, czp, nPoints, knot);
+    const pathLen = knot[nPoints - 1];
+    let radiusFit = null;
+    if (nR >= 2) {
+      const rk = new Float64Array(nR);
+      const rv = [];
+      for (let j = 0; j < nR; j++) {
+        rk[j] = pathLen * j / (nR - 1);
+        const row = new Float64Array(1);
+        row[0] = params[rOff + j];
+        rv.push(row);
+      }
+      radiusFit = new MonotonicCurveFit2(rk, rv);
+    }
+    return splineSweep(fit, knot, nPoints, sides, capped, pathPerSpan, radiusFit, params[rOff]);
+  }
+  function sweepCap(verts, normals, indices, io, vbase, stationRow, cols, m, fnx, fny, fnz) {
+    let ccx = 0, ccy = 0, ccz = 0;
+    for (let k = 0; k < m; k++) {
+      const p = (stationRow * cols + k) * 3;
+      ccx = fa(ccx, verts[p]);
+      ccy = fa(ccy, verts[p + 1]);
+      ccz = fa(ccz, verts[p + 2]);
+    }
+    ccx = fround(ccx / m);
+    ccy = fround(ccy / m);
+    ccz = fround(ccz / m);
+    const centroid = vbase;
+    verts[centroid * 3] = ccx;
+    verts[centroid * 3 + 1] = ccy;
+    verts[centroid * 3 + 2] = ccz;
+    normals[centroid * 3] = fnx;
+    normals[centroid * 3 + 1] = fny;
+    normals[centroid * 3 + 2] = fnz;
+    for (let k = 0; k < m; k++) {
+      const src = (stationRow * cols + k) * 3;
+      const dst = (vbase + 1 + k) * 3;
+      verts[dst] = verts[src];
+      verts[dst + 1] = verts[src + 1];
+      verts[dst + 2] = verts[src + 2];
+      normals[dst] = fnx;
+      normals[dst + 1] = fny;
+      normals[dst + 2] = fnz;
+    }
+    const r0 = vbase + 1;
+    const r1 = vbase + 1 + 1 % m;
+    const ux = fround(verts[r0 * 3] - ccx);
+    const uy = fround(verts[r0 * 3 + 1] - ccy);
+    const uz = fround(verts[r0 * 3 + 2] - ccz);
+    const wx = fround(verts[r1 * 3] - ccx);
+    const wy = fround(verts[r1 * 3 + 1] - ccy);
+    const wz = fround(verts[r1 * 3 + 2] - ccz);
+    const gx = fround(fm(uy, wz) - fm(uz, wy));
+    const gy = fround(fm(uz, wx) - fm(ux, wz));
+    const gz = fround(fm(ux, wy) - fm(uy, wx));
+    const flip = fa(fa(fm(gx, fnx), fm(gy, fny)), fm(gz, fnz)) < 0;
+    for (let k = 0; k < m; k++) {
+      const aa = vbase + 1 + k;
+      const bb = vbase + 1 + (k + 1) % m;
+      indices[io++] = centroid;
+      if (flip) {
+        indices[io++] = bb;
+        indices[io++] = aa;
+      } else {
+        indices[io++] = aa;
+        indices[io++] = bb;
+      }
+    }
+    return io;
+  }
+  function sweep(scalars, xsec, path, scales, twists) {
+    const m = Math.floor(xsec.length / 2);
+    const n = Math.floor(path.length / 3);
+    if (m < 2 || n < 2) {
+      throw new Error(
+        "MeshPrimitive sweep: need >= 2 cross-section points and >= 2 path points"
+      );
+    }
+    const closed = scalars.length > 0 && scalars[0] !== 0;
+    const capStart = scalars.length > 1 && scalars[1] !== 0;
+    const capEnd = scalars.length > 2 && scalars[2] !== 0;
+    const cx = scalars.length > 3 ? scalars[3] : 0;
+    const cy = scalars.length > 4 ? scalars[4] : 0;
+    const cz = scalars.length > 5 ? scalars[5] : 0;
+    const px = new Float32Array(n), py = new Float32Array(n), pz = new Float32Array(n);
+    for (let i = 0; i < n; i++) {
+      px[i] = fa(cx, path[i * 3]);
+      py[i] = fa(cy, path[i * 3 + 1]);
+      pz[i] = fa(cz, path[i * 3 + 2]);
+    }
+    const tx = new Float32Array(n), ty = new Float32Array(n), tz = new Float32Array(n);
+    for (let i = 0; i < n; i++) {
+      const a = Math.max(0, i - 1);
+      const b = Math.min(n - 1, i + 1);
+      const dx = fround(px[b] - px[a]);
+      const dy = fround(py[b] - py[a]);
+      const dz = fround(pz[b] - pz[a]);
+      let l = fround(Math.sqrt(fa(fa(fm(dx, dx), fm(dy, dy)), fm(dz, dz))));
+      if (l < 1e-9) {
+        l = 1e-9;
+      }
+      tx[i] = fround(dx / l);
+      ty[i] = fround(dy / l);
+      tz[i] = fround(dz / l);
+    }
+    const nlx = new Float32Array(m);
+    const nly = new Float32Array(m);
+    const xEdges = closed ? m : m - 1;
+    for (let e = 0; e < xEdges; e++) {
+      const k0 = e;
+      const k1 = (e + 1) % m;
+      const dx = fround(xsec[k1 * 2] - xsec[k0 * 2]);
+      const dy = fround(xsec[k1 * 2 + 1] - xsec[k0 * 2 + 1]);
+      let ex = dy;
+      let ey = -dx;
+      const l = fround(Math.sqrt(fa(fm(ex, ex), fm(ey, ey))));
+      if (l > 1e-9) {
+        ex = fround(ex / l);
+        ey = fround(ey / l);
+      }
+      nlx[k0] = fa(nlx[k0], ex);
+      nly[k0] = fa(nly[k0], ey);
+      nlx[k1] = fa(nlx[k1], ex);
+      nly[k1] = fa(nly[k1], ey);
+    }
+    for (let k = 0; k < m; k++) {
+      const l = fround(Math.sqrt(fa(fm(nlx[k], nlx[k]), fm(nly[k], nly[k]))));
+      if (l > 1e-9) {
+        nlx[k] = fround(nlx[k] / l);
+        nly[k] = fround(nly[k] / l);
+      } else {
+        nlx[k] = 1;
+        nly[k] = 0;
+      }
+    }
+    const cols = closed ? m + 1 : m;
+    const wallV = n * cols;
+    const capV = (capStart ? m + 1 : 0) + (capEnd ? m + 1 : 0);
+    const verts = new Float32Array((wallV + capV) * 3);
+    const normals = new Float32Array((wallV + capV) * 3);
+    const wallStrips = closed ? m : m - 1;
+    const wallTris = (n - 1) * wallStrips * 2;
+    const capTris = (capStart ? m : 0) + (capEnd ? m : 0);
+    const indices = new Int32Array((wallTris + capTris) * 3);
+    const u = new Float32Array(3);
+    const v = new Float32Array(3);
+    perpBasis(tx[0], ty[0], tz[0], u, v);
+    for (let i = 0; i < n; i++) {
+      if (i > 0) {
+        const dot = fa(fa(fm(u[0], tx[i]), fm(u[1], ty[i])), fm(u[2], tz[i]));
+        u[0] = fround(u[0] - fm(dot, tx[i]));
+        u[1] = fround(u[1] - fm(dot, ty[i]));
+        u[2] = fround(u[2] - fm(dot, tz[i]));
+        const ul = fround(Math.sqrt(fa(fa(fm(u[0], u[0]), fm(u[1], u[1])), fm(u[2], u[2]))));
+        if (ul < 1e-6) {
+          perpBasis(tx[i], ty[i], tz[i], u, v);
+        } else {
+          u[0] = fround(u[0] / ul);
+          u[1] = fround(u[1] / ul);
+          u[2] = fround(u[2] / ul);
+          cross(tx[i], ty[i], tz[i], u[0], u[1], u[2], v);
+        }
+      }
+      const s = scales !== null && scales.length > i ? scales[i] : 1;
+      const tw = twists !== null && twists.length > i ? twists[i] : 0;
+      const ct = fround(Math.cos(tw));
+      const st = fround(Math.sin(tw));
+      for (let j = 0; j < cols; j++) {
+        const k = j % m;
+        const lx = xsec[k * 2];
+        const ly = xsec[k * 2 + 1];
+        const rx = fround(fm(ct, lx) - fm(st, ly));
+        const ry = fa(fm(st, lx), fm(ct, ly));
+        const p = (i * cols + j) * 3;
+        verts[p] = fa(px[i], fm(s, fa(fm(rx, u[0]), fm(ry, v[0]))));
+        verts[p + 1] = fa(py[i], fm(s, fa(fm(rx, u[1]), fm(ry, v[1]))));
+        verts[p + 2] = fa(pz[i], fm(s, fa(fm(rx, u[2]), fm(ry, v[2]))));
+        const nrx = fround(fm(ct, nlx[k]) - fm(st, nly[k]));
+        const nry = fa(fm(st, nlx[k]), fm(ct, nly[k]));
+        let nx = fa(fm(nrx, u[0]), fm(nry, v[0]));
+        let ny = fa(fm(nrx, u[1]), fm(nry, v[1]));
+        let nz = fa(fm(nrx, u[2]), fm(nry, v[2]));
+        const nl = fround(Math.sqrt(fa(fa(fm(nx, nx), fm(ny, ny)), fm(nz, nz))));
+        if (nl > 1e-9) {
+          nx = fround(nx / nl);
+          ny = fround(ny / nl);
+          nz = fround(nz / nl);
+        }
+        normals[p] = nx;
+        normals[p + 1] = ny;
+        normals[p + 2] = nz;
+      }
+    }
+    let io = 0;
+    for (let i = 0; i < n - 1; i++) {
+      for (let j = 0; j < wallStrips; j++) {
+        const a = i * cols + j;
+        const b = i * cols + j + 1;
+        const cc = (i + 1) * cols + j;
+        const d = (i + 1) * cols + j + 1;
+        indices[io++] = cc;
+        indices[io++] = a;
+        indices[io++] = b;
+        indices[io++] = b;
+        indices[io++] = d;
+        indices[io++] = cc;
+      }
+    }
+    let capBase = wallV;
+    if (capStart) {
+      io = sweepCap(verts, normals, indices, io, capBase, 0, cols, m, -tx[0], -ty[0], -tz[0]);
+      capBase += m + 1;
+    }
+    if (capEnd) {
+      io = sweepCap(
+        verts,
+        normals,
+        indices,
+        io,
+        capBase,
+        n - 1,
+        cols,
+        m,
+        tx[n - 1],
+        ty[n - 1],
+        tz[n - 1]
+      );
+    }
+    return { verts, normals, indices, uv: null };
+  }
+  function helix(coilR, tubeR, pitch, turns, cx, cy, cz, sides) {
+    const perTurn = Math.max(8, sides * 2);
+    const stations = Math.max(2, Math.round(perTurn * Math.abs(turns)) + 1);
+    const path = new Float32Array(stations * 3);
+    const totalRise = fm(pitch, turns);
+    for (let i = 0; i < stations; i++) {
+      const f = fround(i / (stations - 1));
+      const ang = 2 * Math.PI * turns * f;
+      path[i * 3] = fm(coilR, fround(Math.cos(ang)));
+      path[i * 3 + 1] = fm(totalRise, fround(f - 0.5));
+      path[i * 3 + 2] = fm(coilR, fround(Math.sin(ang)));
+    }
+    const xsec = new Float32Array(sides * 2);
+    for (let k = 0; k < sides; k++) {
+      const a = 2 * Math.PI * k / sides;
+      xsec[k * 2] = fm(tubeR, fround(Math.cos(a)));
+      xsec[k * 2 + 1] = fm(tubeR, fround(Math.sin(a)));
+    }
+    const scalars = new Float32Array([1, 1, 1, cx, cy, cz]);
+    return sweep(scalars, xsec, path, null, null);
+  }
+  function signedArea(ring) {
+    const n = Math.floor(ring.length / 2);
+    let a = 0;
+    for (let i = 0; i < n; i++) {
+      const j = (i + 1) % n;
+      a = fa(a, fround(fm(ring[i * 2], ring[j * 2 + 1]) - fm(ring[j * 2], ring[i * 2 + 1])));
+    }
+    return fm(a, 0.5);
+  }
+  function pointInPolygon(ring, px, py) {
+    const n = Math.floor(ring.length / 2);
+    let inside = false;
+    for (let i = 0, j = n - 1; i < n; j = i++) {
+      const xi = ring[i * 2], yi = ring[i * 2 + 1];
+      const xj = ring[j * 2], yj = ring[j * 2 + 1];
+      const crosses = yi > py !== yj > py;
+      if (crosses && px < fa(fround(fm(fround(xj - xi), fround(py - yi)) / fround(yj - yi)), xi)) {
+        inside = !inside;
+      }
+    }
+    return inside;
+  }
+  function isHole(contours, ringIndex) {
+    const ring = contours[ringIndex];
+    if (ring.length < 2) {
+      return false;
+    }
+    const px = ring[0];
+    const py = ring[1];
+    let inside = 0;
+    for (let c = 0; c < contours.length; c++) {
+      if (c === ringIndex) {
+        continue;
+      }
+      if (pointInPolygon(contours[c], px, py)) {
+        inside++;
+      }
+    }
+    return (inside & 1) === 1;
+  }
+  function miterInset(ring, b, miterLimit) {
+    const n = Math.floor(ring.length / 2);
+    const out = new Float32Array(ring.length);
+    const sign = signedArea(ring) >= 0 ? 1 : -1;
+    for (let i = 0; i < n; i++) {
+      const ip = (i - 1 + n) % n;
+      const inx = (i + 1) % n;
+      let pdx = fround(ring[i * 2] - ring[ip * 2]);
+      let pdy = fround(ring[i * 2 + 1] - ring[ip * 2 + 1]);
+      let ndx = fround(ring[inx * 2] - ring[i * 2]);
+      let ndy = fround(ring[inx * 2 + 1] - ring[i * 2 + 1]);
+      const pl = fround(Math.sqrt(fa(fm(pdx, pdx), fm(pdy, pdy))));
+      if (pl > 1e-9) {
+        pdx = fround(pdx / pl);
+        pdy = fround(pdy / pl);
+      }
+      const nl = fround(Math.sqrt(fa(fm(ndx, ndx), fm(ndy, ndy))));
+      if (nl > 1e-9) {
+        ndx = fround(ndx / nl);
+        ndy = fround(ndy / nl);
+      }
+      const n1x = fm(sign, -pdy), n1y = fm(sign, pdx);
+      const n2x = fm(sign, -ndy), n2y = fm(sign, ndx);
+      let mx = fa(n1x, n2x);
+      let my = fa(n1y, n2y);
+      const ml = fround(Math.sqrt(fa(fm(mx, mx), fm(my, my))));
+      if (ml < 1e-6) {
+        out[i * 2] = fa(ring[i * 2], fm(b, n2x));
+        out[i * 2 + 1] = fa(ring[i * 2 + 1], fm(b, n2y));
+        continue;
+      }
+      mx = fround(mx / ml);
+      my = fround(my / ml);
+      const cos = fa(fm(mx, n1x), fm(my, n1y));
+      const l = fround(b / Math.max(cos, fround(1 / miterLimit)));
+      out[i * 2] = fa(ring[i * 2], fm(l, mx));
+      out[i * 2 + 1] = fa(ring[i * 2 + 1], fm(l, my));
+    }
+    return out;
+  }
+  function scanlineCaps(contours, cx, cy, frontZ, backZ) {
+    let edgeCount = 0;
+    for (const ring of contours) {
+      edgeCount += ring.length / 2;
+    }
+    const eYlo = new Float32Array(edgeCount);
+    const eYhi = new Float32Array(edgeCount);
+    const eXlo = new Float32Array(edgeCount);
+    const eSlope = new Float32Array(edgeCount);
+    const eDir = new Int32Array(edgeCount);
+    let ne = 0;
+    const ys = new Float32Array(edgeCount * 2);
+    let nys = 0;
+    for (const ring of contours) {
+      const n = ring.length / 2;
+      for (let i = 0; i < n; i++) {
+        const ay = ring[i * 2 + 1];
+        const j = (i + 1) % n;
+        const by = ring[j * 2 + 1];
+        ys[nys++] = ay;
+        if (ay === by) {
+          continue;
+        }
+        const ax = ring[i * 2];
+        const bx = ring[j * 2];
+        if (ay < by) {
+          eYlo[ne] = ay;
+          eYhi[ne] = by;
+          eXlo[ne] = ax;
+        } else {
+          eYlo[ne] = by;
+          eYhi[ne] = ay;
+          eXlo[ne] = bx;
+        }
+        eSlope[ne] = fround(fround(bx - ax) / fround(by - ay));
+        eDir[ne] = by > ay ? 1 : -1;
+        ne++;
+      }
+    }
+    const sorted = ys.subarray(0, nys);
+    sorted.sort();
+    let uy = 0;
+    for (let i = 0; i < nys; i++) {
+      if (uy === 0 || ys[i] > fa(ys[uy - 1], 1e-7)) {
+        ys[uy++] = ys[i];
+      }
+    }
+    const traps = [];
+    const crossX = new Float32Array(ne);
+    const crossE = new Int32Array(ne);
+    for (let s = 0; s + 1 < uy; s++) {
+      const yA = ys[s];
+      const yB = ys[s + 1];
+      if (fround(yB - yA) < 1e-7) {
+        continue;
+      }
+      const ymid = fm(0.5, fa(yA, yB));
+      let nx = 0;
+      for (let e = 0; e < ne; e++) {
+        if (eYlo[e] < ymid && ymid < eYhi[e]) {
+          crossX[nx] = fa(eXlo[e], fm(fround(ymid - eYlo[e]), eSlope[e]));
+          crossE[nx] = e;
+          nx++;
+        }
+      }
+      if (nx < 2) {
+        continue;
+      }
+      for (let a = 1; a < nx; a++) {
+        const kx = crossX[a];
+        const ke = crossE[a];
+        let b = a - 1;
+        while (b >= 0 && crossX[b] > kx) {
+          crossX[b + 1] = crossX[b];
+          crossE[b + 1] = crossE[b];
+          b--;
+        }
+        crossX[b + 1] = kx;
+        crossE[b + 1] = ke;
+      }
+      let winding = 0;
+      for (let i = 0; i + 1 < nx; i++) {
+        winding += eDir[crossE[i]];
+        if (winding === 0) {
+          continue;
+        }
+        const le = crossE[i];
+        const re = crossE[i + 1];
+        const xLtop = fa(eXlo[le], fm(fround(yB - eYlo[le]), eSlope[le]));
+        const xLbot = fa(eXlo[le], fm(fround(yA - eYlo[le]), eSlope[le]));
+        const xRtop = fa(eXlo[re], fm(fround(yB - eYlo[re]), eSlope[re]));
+        const xRbot = fa(eXlo[re], fm(fround(yA - eYlo[re]), eSlope[re]));
+        traps.push(new Float32Array([xLtop, yB, xRtop, yB, xRbot, yA, xLbot, yA]));
+      }
+    }
+    const t = traps.length;
+    const verts = new Float32Array(t * 8 * 3);
+    const normals = new Float32Array(t * 8 * 3);
+    const indices = new Int32Array(t * 12);
+    let io = 0;
+    const backBase = t * 4;
+    for (let q = 0; q < t; q++) {
+      const g = traps[q];
+      const fb = q * 4;
+      const bb = backBase + q * 4;
+      for (let j = 0; j < 4; j++) {
+        const x = g[j * 2];
+        const y = g[j * 2 + 1];
+        const f = (fb + j) * 3;
+        verts[f] = fa(cx, x);
+        verts[f + 1] = fa(cy, y);
+        verts[f + 2] = frontZ;
+        normals[f + 2] = 1;
+        const bk = (bb + j) * 3;
+        verts[bk] = fa(cx, x);
+        verts[bk + 1] = fa(cy, y);
+        verts[bk + 2] = backZ;
+        normals[bk + 2] = -1;
+      }
+      indices[io++] = fb;
+      indices[io++] = fb + 2;
+      indices[io++] = fb + 1;
+      indices[io++] = fb;
+      indices[io++] = fb + 3;
+      indices[io++] = fb + 2;
+      indices[io++] = bb;
+      indices[io++] = bb + 1;
+      indices[io++] = bb + 2;
+      indices[io++] = bb;
+      indices[io++] = bb + 2;
+      indices[io++] = bb + 3;
+    }
+    return { verts, normals, indices, uv: null };
+  }
+  function setV(verts, normals, i, x, y, z, nx, ny, nz) {
+    const p = i * 3;
+    verts[p] = x;
+    verts[p + 1] = y;
+    verts[p + 2] = z;
+    normals[p] = nx;
+    normals[p + 1] = ny;
+    normals[p + 2] = nz;
+  }
+  function extrudePathSides(contours, inset, cx, cy, cz, hd, b) {
+    const beveled = b > 0 && inset !== null;
+    const wallHd = fround(hd - b);
+    const inv = 0.70710678;
+    let edgeCount = 0;
+    for (const ring of contours) {
+      edgeCount += ring.length / 2;
+    }
+    const vpe = beveled ? 12 : 4;
+    const tpe = beveled ? 6 : 2;
+    const verts = new Float32Array(edgeCount * vpe * 3);
+    const normals = new Float32Array(edgeCount * vpe * 3);
+    const indices = new Int32Array(edgeCount * tpe * 3);
+    let io = 0;
+    let se = 0;
+    for (let c = 0; c < contours.length; c++) {
+      const ring = contours[c];
+      const n = ring.length / 2;
+      if (n < 3) {
+        se += n;
+        continue;
+      }
+      const ins = beveled ? inset[c] : null;
+      const hole = isHole(contours, c);
+      const reverse = signedArea(ring) > 0 === hole;
+      for (let i = 0; i < n; i++) {
+        const ia = reverse ? (n - i) % n : i;
+        const ib = reverse ? (n - i - 1 + n) % n : (i + 1) % n;
+        const ax = ring[ia * 2], ay = ring[ia * 2 + 1];
+        const bx = ring[ib * 2], by = ring[ib * 2 + 1];
+        let nx = fround(by - ay);
+        let ny = -fround(bx - ax);
+        const len = fround(Math.sqrt(fa(fm(nx, nx), fm(ny, ny))));
+        if (len > 1e-9) {
+          nx = fround(nx / len);
+          ny = fround(ny / len);
+        }
+        if (!beveled) {
+          const v = se * 4;
+          setV(verts, normals, v, fa(cx, ax), fa(cy, ay), fa(cz, hd), nx, ny, 0);
+          setV(verts, normals, v + 1, fa(cx, bx), fa(cy, by), fa(cz, hd), nx, ny, 0);
+          setV(verts, normals, v + 2, fa(cx, ax), fa(cy, ay), fround(cz - hd), nx, ny, 0);
+          setV(verts, normals, v + 3, fa(cx, bx), fa(cy, by), fround(cz - hd), nx, ny, 0);
+          indices[io++] = v;
+          indices[io++] = v + 2;
+          indices[io++] = v + 3;
+          indices[io++] = v;
+          indices[io++] = v + 3;
+          indices[io++] = v + 1;
+        } else {
+          const iax = ins[ia * 2], iay = ins[ia * 2 + 1];
+          const ibx = ins[ib * 2], iby = ins[ib * 2 + 1];
+          const v = se * 12;
+          const cnx = fm(nx, inv), cny = fm(ny, inv);
+          setV(verts, normals, v, fa(cx, iax), fa(cy, iay), fa(cz, hd), cnx, cny, inv);
+          setV(verts, normals, v + 1, fa(cx, ibx), fa(cy, iby), fa(cz, hd), cnx, cny, inv);
+          setV(verts, normals, v + 2, fa(cx, ax), fa(cy, ay), fa(cz, wallHd), cnx, cny, inv);
+          setV(verts, normals, v + 3, fa(cx, bx), fa(cy, by), fa(cz, wallHd), cnx, cny, inv);
+          indices[io++] = v;
+          indices[io++] = v + 2;
+          indices[io++] = v + 3;
+          indices[io++] = v;
+          indices[io++] = v + 3;
+          indices[io++] = v + 1;
+          setV(verts, normals, v + 4, fa(cx, ax), fa(cy, ay), fa(cz, wallHd), nx, ny, 0);
+          setV(verts, normals, v + 5, fa(cx, bx), fa(cy, by), fa(cz, wallHd), nx, ny, 0);
+          setV(verts, normals, v + 6, fa(cx, ax), fa(cy, ay), fround(cz - wallHd), nx, ny, 0);
+          setV(verts, normals, v + 7, fa(cx, bx), fa(cy, by), fround(cz - wallHd), nx, ny, 0);
+          indices[io++] = v + 4;
+          indices[io++] = v + 6;
+          indices[io++] = v + 7;
+          indices[io++] = v + 4;
+          indices[io++] = v + 7;
+          indices[io++] = v + 5;
+          setV(
+            verts,
+            normals,
+            v + 8,
+            fa(cx, ax),
+            fa(cy, ay),
+            fround(cz - wallHd),
+            cnx,
+            cny,
+            -inv
+          );
+          setV(
+            verts,
+            normals,
+            v + 9,
+            fa(cx, bx),
+            fa(cy, by),
+            fround(cz - wallHd),
+            cnx,
+            cny,
+            -inv
+          );
+          setV(
+            verts,
+            normals,
+            v + 10,
+            fa(cx, iax),
+            fa(cy, iay),
+            fround(cz - hd),
+            cnx,
+            cny,
+            -inv
+          );
+          setV(
+            verts,
+            normals,
+            v + 11,
+            fa(cx, ibx),
+            fa(cy, iby),
+            fround(cz - hd),
+            cnx,
+            cny,
+            -inv
+          );
+          indices[io++] = v + 8;
+          indices[io++] = v + 10;
+          indices[io++] = v + 11;
+          indices[io++] = v + 8;
+          indices[io++] = v + 11;
+          indices[io++] = v + 9;
+        }
+        se++;
+      }
+    }
+    return { verts, normals, indices, uv: null };
+  }
+  function extrudePath(p) {
+    const depth = p[0];
+    const cx = p[1];
+    const cy = p[2];
+    const cz = p[3];
+    const bevel = p[4];
+    const nc = Math.round(p[5]);
+    const contours = [];
+    let idx = 6;
+    for (let c = 0; c < nc; c++) {
+      const cnt = Math.round(p[idx++]);
+      const ring = new Float32Array(cnt * 2);
+      for (let k = 0; k < cnt * 2 && idx < p.length; k++) {
+        ring[k] = p[idx++];
+      }
+      contours.push(ring);
+    }
+    const hd = fm(depth, 0.5);
+    if (bevel <= 0) {
+      const caps2 = scanlineCaps(contours, cx, cy, fa(cz, hd), fround(cz - hd));
+      const sides2 = extrudePathSides(contours, null, cx, cy, cz, hd, 0);
+      return concat([caps2, sides2]);
+    }
+    const b = Math.min(bevel, fm(hd, 0.9));
+    const inset = contours.map((ring) => miterInset(ring, b, 4));
+    const caps = scanlineCaps(inset, cx, cy, fa(cz, hd), fround(cz - hd));
+    const sides = extrudePathSides(contours, inset, cx, cy, cz, hd, b);
+    return concat([caps, sides]);
+  }
+  function build(type, segments2, flags, data) {
+    const p = data[0];
+    const uvm = uvMode(flags);
+    switch (type) {
+      case SPHERE: {
+        const slices = segCount(segments2, DEFAULT_RADIAL, 3);
+        const stacks = Math.max(2, Math.round(slices * 0.5));
+        return sphere(p[0], p[1], p[2], p[3], slices, stacks, uvm);
+      }
+      case CYLINDER:
+        return cylinder(
+          p[0],
+          p[1],
+          p[2],
+          p[3],
+          p[4],
+          p[5],
+          p[6],
+          segCount(segments2, DEFAULT_RADIAL, 3)
+        );
+      case CONE:
+        return cone(p[0], p[1], p[2], p[3], p[4], segCount(segments2, DEFAULT_RADIAL, 3));
+      case CUBE:
+        return cube(p[0], p[1], p[2], p[3], p[4], p[5], uvm);
+      case ROUNDED_CUBE:
+        return roundedCube(
+          p[0],
+          p[1],
+          p[2],
+          p[3],
+          p[4],
+          p[5],
+          p[6],
+          segCount(segments2, DEFAULT_ROUND_SEG, 1)
+        );
+      case SPHERICAL_SECTOR: {
+        const slices = segCount(segments2, DEFAULT_RADIAL, 3);
+        const stacks = Math.max(2, Math.round(slices / 3));
+        return sphericalSector(p[0], p[1], p[2], p[3], p[4], slices, stacks);
+      }
+      case SPHERICAL_DOME: {
+        const slices = segCount(segments2, DEFAULT_RADIAL, 3);
+        const stacks = Math.max(2, Math.round(slices / 3));
+        return sphericalDome(p[0], p[1], p[2], p[3], p[4], slices, stacks);
+      }
+      case TUBE:
+        return tube(p, false, segments2, flags);
+      case CAP_TUBE:
+        return tube(p, true, segments2, flags);
+      case PROFILE_TUBE:
+        return profileTube(p, segCount(segments2, DEFAULT_TUBE_SIDES, 3), flags);
+      case EXTRUDE_PATH:
+        return extrudePath(p);
+      case SWEEP:
+        return sweep(
+          p,
+          data.length > 1 ? data[1] : new Float32Array(0),
+          data.length > 2 ? data[2] : new Float32Array(0),
+          data.length > 3 ? data[3] : null,
+          data.length > 4 ? data[4] : null
+        );
+      case HELIX:
+        return helix(
+          p[0],
+          p[1],
+          p[2],
+          p[3],
+          p.length > 4 ? p[4] : 0,
+          p.length > 5 ? p[5] : 0,
+          p.length > 6 ? p[6] : 0,
+          segCount(segments2, 12, 3)
+        );
+      case TORUS: {
+        const majorR = p[0];
+        const minorR = p[1];
+        const majorSeg = segCount(segments2, DEFAULT_RADIAL, 3);
+        const ratio = Math.abs(majorR) > 1e-6 ? Math.abs(minorR / majorR) : 0.5;
+        const minorSeg = Math.max(3, Math.round(majorSeg * ratio));
+        return torus(majorR, minorR, p[2], p[3], p[4], majorSeg, minorSeg, uvm);
+      }
+      case PLANE:
+        return plane(p[0], p[1], p[2], p[3], p[4], uvm);
+      case EXTRUDE_CIRCLE:
+        return extrudeCircle(
+          p[0],
+          p[1],
+          p[2],
+          p[3],
+          p[4],
+          segCount(segments2, DEFAULT_RADIAL, 3)
+        );
+      case EXTRUDE_SECTOR:
+        return extrudeSector(
+          p[0],
+          p[1],
+          p[2],
+          p[3],
+          p[4],
+          p[5],
+          p[6],
+          segCount(segments2, DEFAULT_RADIAL, 1)
+        );
+      case EXTRUDE_SEGMENT:
+        return extrudeSegment(
+          p[0],
+          p[1],
+          p[2],
+          p[3],
+          p[4],
+          p[5],
+          p[6],
+          segCount(segments2, DEFAULT_RADIAL, 1)
+        );
+      case EXTRUDE_ARC:
+        return extrudeArc(
+          p[0],
+          p[1],
+          p[2],
+          p[3],
+          p[4],
+          p[5],
+          p[6],
+          p[7],
+          segCount(segments2, DEFAULT_RADIAL, 1)
+        );
+      case EXTRUDE_ROUNDED_RECT:
+        return extrudeRoundedRect(
+          p[0],
+          p[1],
+          p[2],
+          p[3],
+          p[4],
+          p[5],
+          p[6],
+          segCount(segments2, 6, 1)
+        );
+      case EXTRUDE_SQUIRCLE:
+        return extrudeSquircle(
+          p[0],
+          p[1],
+          p[2],
+          p[3],
+          p[4],
+          p[5],
+          segCount(segments2, 48, 8)
+        );
+      case LATHE:
+        return lathe(
+          data.length > 1 ? data[1] : new Float32Array(0),
+          p.length > 0 ? p[0] : 0,
+          p.length > 1 ? p[1] : 0,
+          p.length > 2 ? p[2] : 0,
+          segCount(segments2, DEFAULT_RADIAL, 3)
+        );
+      case ICOSPHERE:
+        return icosphere(
+          p[0],
+          p.length > 1 ? p[1] : 0,
+          p.length > 2 ? p[2] : 0,
+          p.length > 3 ? p[3] : 0,
+          Math.max(0, Math.min(4, segments2 > 0 ? Math.round(segments2) : 2))
+        );
+      default:
+        throw new Error(`MeshPrimitive: unknown type ${type}`);
+    }
+  }
+
+  // third_party/remote-compose-player/src/core/operations/d3/Operations3D.ts
+  var MAX_INDICES = 6e5;
+  var MAX_VERTS_FLOATS = 3 * 2e5;
+  var MAX_LIGHTS = 32;
+  var MAX_CHANNELS = 8;
+  var MAX_PRIMITIVE_FLOATS = 2e5;
+  function writeArray(buffer, a) {
+    buffer.writeInt(a.length);
+    for (const v of a) {
+      buffer.writeFloat(v);
+    }
+  }
+  function writeOptional(buffer, a) {
+    if (a === null) {
+      buffer.writeInt(0);
+    } else {
+      writeArray(buffer, a);
+    }
+  }
+  function readFloats(buffer, max, what) {
+    const len = buffer.readInt();
+    if (len < 0 || len > max) {
+      throw new Error(`${what}: bad length ${len}`);
+    }
+    const out = new Float32Array(len);
+    for (let i = 0; i < len; i++) {
+      out[i] = buffer.readFloat();
+    }
+    return out;
+  }
+  function resolve(context, src, dst) {
+    for (let i = 0; i < src.length; i++) {
+      const v = src[i];
+      dst[i] = isVariable(v) ? context.getFloat(idFromNan(v)) : v;
+    }
+  }
+  function listen(context, src, self) {
+    for (const v of src) {
+      if (isVariable(v)) {
+        context.listensTo(idFromNan(v), self);
+      }
+    }
+  }
+  var _DefineMesh3D = class _DefineMesh3D extends PaintOperation {
+    constructor(mId, mIndices, mVerts, mNormals, mUv) {
+      super();
+      this.mId = mId;
+      this.mIndices = mIndices;
+      this.mVerts = mVerts;
+      this.mNormals = mNormals;
+      this.mUv = mUv;
+    }
+    paint(context) {
+      if (isPaint3DContext(context)) {
+        context.defineMesh3D(this.mId, this.mIndices, this.mVerts, this.mNormals, this.mUv);
+      }
+    }
+    write(buffer) {
+      buffer.start(_DefineMesh3D.OP_CODE);
+      buffer.writeInt(this.mId);
+      buffer.writeInt(this.mIndices.length);
+      for (const v of this.mIndices) {
+        buffer.writeInt(v);
+      }
+      buffer.writeInt(this.mVerts.length);
+      for (const v of this.mVerts) {
+        buffer.writeFloat(v);
+      }
+      writeOptional(buffer, this.mNormals);
+      writeOptional(buffer, this.mUv);
+    }
+    deepToString(indent) {
+      return `${indent}DefineMesh3D(id=${this.mId}, tris=${this.mIndices.length / 3}, verts=${this.mVerts.length / 3}, normals=${this.mNormals !== null})`;
+    }
+    /** `id, len+indices[], len+verts[], len+normals[], len+uv[]` (0 length = absent). */
+    static read(buffer, operations) {
+      const id = buffer.readInt();
+      const idxLen = buffer.readInt();
+      if (idxLen < 0 || idxLen > MAX_INDICES || idxLen % 3 !== 0) {
+        throw new Error(`DefineMesh3D: bad indices length ${idxLen}`);
+      }
+      const indices = new Int32Array(idxLen);
+      for (let i = 0; i < idxLen; i++) {
+        indices[i] = buffer.readInt();
+      }
+      const vertLen = buffer.readInt();
+      if (vertLen < 0 || vertLen > MAX_VERTS_FLOATS || vertLen % 3 !== 0) {
+        throw new Error(`DefineMesh3D: bad verts length ${vertLen}`);
+      }
+      const verts = new Float32Array(vertLen);
+      for (let i = 0; i < vertLen; i++) {
+        verts[i] = buffer.readFloat();
+      }
+      const normLen = buffer.readInt();
+      let normals = null;
+      if (normLen !== 0) {
+        if (normLen !== vertLen) {
+          throw new Error(`DefineMesh3D: normals length ${normLen} != verts ${vertLen}`);
+        }
+        normals = new Float32Array(normLen);
+        for (let i = 0; i < normLen; i++) {
+          normals[i] = buffer.readFloat();
+        }
+      }
+      const uvLen = buffer.readInt();
+      let uv = null;
+      if (uvLen !== 0) {
+        if (uvLen !== vertLen / 3 * 2) {
+          throw new Error(`DefineMesh3D: uv length ${uvLen} != 2/3 verts ${vertLen}`);
+        }
+        uv = new Float32Array(uvLen);
+        for (let i = 0; i < uvLen; i++) {
+          uv[i] = buffer.readFloat();
+        }
+      }
+      operations.push(new _DefineMesh3D(id, indices, verts, normals, uv));
+    }
+  };
+  _DefineMesh3D.OP_CODE = 110;
+  var DefineMesh3D = _DefineMesh3D;
+  var _SetCamera3D = class _SetCamera3D extends PaintOperation {
+    constructor(mProjection, mProjParams, mViewParams) {
+      super();
+      this.mProjection = mProjection;
+      this.mProjParams = mProjParams;
+      this.mViewParams = mViewParams;
+      this.mOutProj = mProjParams.slice();
+      this.mOutView = mViewParams.slice();
+    }
+    updateVariables(context) {
+      resolve(context, this.mProjParams, this.mOutProj);
+      resolve(context, this.mViewParams, this.mOutView);
+    }
+    registerListening(context) {
+      listen(context, this.mProjParams, this);
+      listen(context, this.mViewParams, this);
+    }
+    paint(context) {
+      if (isPaint3DContext(context)) {
+        context.setCamera3D(this.mProjection, this.mOutProj, this.mOutView);
+      }
+    }
+    write(buffer) {
+      buffer.start(_SetCamera3D.OP_CODE);
+      buffer.writeInt(this.mProjection);
+      writeArray(buffer, this.mProjParams);
+      writeArray(buffer, this.mViewParams);
+    }
+    deepToString(indent) {
+      return `${indent}SetCamera3D(proj=${this.mProjection})`;
+    }
+    /**
+     * `projection, len+projParams[], len+viewParams[]`. Perspective takes 4 floats
+     * (fovYRadians, aspect, near, far), ortho 6 (l, r, b, t, n, f); view is always 9
+     * (eye xyz, center xyz, up xyz) with gluLookAt semantics.
+     */
+    static read(buffer, operations) {
+      const projection = buffer.readInt();
+      const proj = readFloats(buffer, 16, "SetCamera3D projParams");
+      const view = readFloats(buffer, 16, "SetCamera3D viewParams");
+      operations.push(new _SetCamera3D(projection, proj, view));
+    }
+  };
+  _SetCamera3D.OP_CODE = 111;
+  var SetCamera3D = _SetCamera3D;
+  var _Matrix3DOp = class _Matrix3DOp extends PaintOperation {
+    constructor(mSub, mArgs) {
+      super();
+      this.mSub = mSub;
+      this.mArgs = mArgs;
+      this.mOut = mArgs.slice();
+    }
+    updateVariables(context) {
+      resolve(context, this.mArgs, this.mOut);
+    }
+    registerListening(context) {
+      listen(context, this.mArgs, this);
+    }
+    paint(context) {
+      if (isPaint3DContext(context)) {
+        context.matrix3Op(this.mSub, this.mOut);
+      }
+    }
+    write(buffer) {
+      buffer.start(_Matrix3DOp.OP_CODE);
+      buffer.writeInt(this.mSub);
+      writeArray(buffer, this.mArgs);
+    }
+    deepToString(indent) {
+      return `${indent}Matrix3DOp(sub=${this.mSub}, args=${this.mOut.length})`;
+    }
+    /**
+     * `sub, len+args[]`. IDENTITY takes 0 floats, TRANSLATE/SCALE 3 (x,y,z), ROTATE_AXIS 4
+     * (angleRadians, axisX, axisY, axisZ), MULTIPLY 16 (column-major 4x4).
+     */
+    static read(buffer, operations) {
+      const sub = buffer.readInt();
+      const args = readFloats(buffer, 16, "Matrix3DOp args");
+      operations.push(new _Matrix3DOp(sub, args));
+    }
+  };
+  _Matrix3DOp.OP_CODE = 112;
+  var Matrix3DOp = _Matrix3DOp;
+  var _DrawMesh3D = class _DrawMesh3D extends PaintOperation {
+    constructor(mMeshId, mMode) {
+      super();
+      this.mMeshId = mMeshId;
+      this.mMode = mMode;
+    }
+    paint(context) {
+      if (isPaint3DContext(context)) {
+        context.drawMesh3D(this.mMeshId, this.mMode);
+      }
+    }
+    write(buffer) {
+      buffer.start(_DrawMesh3D.OP_CODE);
+      buffer.writeInt(this.mMeshId);
+      buffer.writeInt(this.mMode);
+    }
+    deepToString(indent) {
+      return `${indent}DrawMesh3D(mesh=${this.mMeshId}, mode=${this.mMode})`;
+    }
+    /** `meshId, mode`. Mode is `(backend << 1) | smoothBit`, plus wireframe flags. */
+    static read(buffer, operations) {
+      operations.push(new _DrawMesh3D(buffer.readInt(), buffer.readInt()));
+    }
+  };
+  _DrawMesh3D.OP_CODE = 113;
+  var DrawMesh3D = _DrawMesh3D;
+  var _Paint3DState = class _Paint3DState extends PaintOperation {
+    constructor(mSub, mParams) {
+      super();
+      this.mSub = mSub;
+      this.mParams = mParams;
+      this.mOut = mParams.slice();
+    }
+    updateVariables(context) {
+      resolve(context, this.mParams, this.mOut);
+    }
+    registerListening(context) {
+      listen(context, this.mParams, this);
+    }
+    paint(context) {
+      if (!isPaint3DContext(context)) {
+        return;
+      }
+      switch (this.mSub) {
+        case P3_CLEAR_DEPTH:
+          context.clearDepth3D();
+          break;
+        case P3_MATERIAL:
+          if (this.mOut.length >= 2) {
+            context.setMaterial3D(this.mOut[0], this.mOut[1]);
+          }
+          break;
+        case P3_DEPTH_BIAS:
+          if (this.mOut.length >= 2) {
+            context.setDepthBias3D(this.mOut[0], this.mOut[1]);
+          }
+          break;
+        default:
+          break;
+      }
+    }
+    write(buffer) {
+      buffer.start(_Paint3DState.OP_CODE);
+      buffer.writeInt(this.mSub);
+      writeArray(buffer, this.mParams);
+    }
+    deepToString(indent) {
+      return `${indent}Paint3DState(sub=${this.mSub})`;
+    }
+    /** `sub, len+params[]` — CLEAR_DEPTH takes none, MATERIAL and DEPTH_BIAS two each. */
+    static read(buffer, operations) {
+      const sub = buffer.readInt();
+      const params = readFloats(buffer, 8, "Paint3DState params");
+      operations.push(new _Paint3DState(sub, params));
+    }
+  };
+  _Paint3DState.OP_CODE = 114;
+  var Paint3DState = _Paint3DState;
+  var _SetLights3D = class _SetLights3D extends PaintOperation {
+    constructor(mTypes, mColors, mParams) {
+      super();
+      this.mTypes = mTypes;
+      this.mColors = mColors;
+      this.mParams = mParams;
+      this.mOut = mParams.slice();
+    }
+    updateVariables(context) {
+      resolve(context, this.mParams, this.mOut);
+    }
+    registerListening(context) {
+      listen(context, this.mParams, this);
+    }
+    paint(context) {
+      if (isPaint3DContext(context)) {
+        context.setLights3D(this.mTypes, this.mColors, this.mOut);
+      }
+    }
+    write(buffer) {
+      buffer.start(_SetLights3D.OP_CODE);
+      buffer.writeInt(this.mTypes.length);
+      for (let i = 0; i < this.mTypes.length; i++) {
+        buffer.writeInt(this.mTypes[i]);
+        buffer.writeInt(this.mColors[i]);
+      }
+      writeArray(buffer, this.mParams);
+    }
+    deepToString(indent) {
+      return `${indent}SetLights3D(n=${this.mTypes.length})`;
+    }
+    /**
+     * `n, (type, colorArgb) x n, len+params[]` with 4 floats per light —
+     * `dirX,dirY,dirZ,intensity` for directional, `posX,posY,posZ,intensity` for point.
+     * An empty set means ambient only; never calling this leaves a default headlight.
+     */
+    static read(buffer, operations) {
+      const n = buffer.readInt();
+      if (n < 0 || n > MAX_LIGHTS) {
+        throw new Error(`SetLights3D: bad light count ${n}`);
+      }
+      const types = new Int32Array(n);
+      const colors = new Int32Array(n);
+      for (let i = 0; i < n; i++) {
+        types[i] = buffer.readInt();
+        colors[i] = buffer.readInt();
+      }
+      const params = readFloats(buffer, MAX_LIGHTS * 4, "SetLights3D params");
+      operations.push(new _SetLights3D(types, colors, params));
+    }
+  };
+  _SetLights3D.OP_CODE = 115;
+  var SetLights3D = _SetLights3D;
+  var _SetTexture3D = class _SetTexture3D extends PaintOperation {
+    constructor(mBitmapId) {
+      super();
+      this.mBitmapId = mBitmapId;
+    }
+    paint(context) {
+      if (isPaint3DContext(context)) {
+        context.setTexture3D(this.mBitmapId);
+      }
+    }
+    write(buffer) {
+      buffer.start(_SetTexture3D.OP_CODE);
+      buffer.writeInt(this.mBitmapId);
+    }
+    deepToString(indent) {
+      return `${indent}SetTexture3D(bitmap=${this.mBitmapId})`;
+    }
+    /** `bitmapId`. */
+    static read(buffer, operations) {
+      operations.push(new _SetTexture3D(buffer.readInt()));
+    }
+  };
+  _SetTexture3D.OP_CODE = 118;
+  var SetTexture3D = _SetTexture3D;
+  var _MeshPrimitive = class _MeshPrimitive extends PaintOperation {
+    constructor(mId, mType, mSegments, mFlags, mData) {
+      super();
+      this.mId = mId;
+      this.mType = mType;
+      this.mSegments = mSegments;
+      this.mFlags = mFlags;
+      this.mData = mData;
+      /** Built from the resolved params; nulled when a watched variable changes. */
+      this.mMesh = null;
+      /** Set once if the build throws, so a broken shape is reported once and not every frame. */
+      this.mFailed = false;
+      this.mOutSegments = mSegments;
+      this.mOutData = mData.map((c) => c.slice());
+    }
+    updateVariables(context) {
+      this.mOutSegments = isVariable(this.mSegments) ? context.getFloat(idFromNan(this.mSegments)) : this.mSegments;
+      for (let c = 0; c < this.mData.length; c++) {
+        resolve(context, this.mData[c], this.mOutData[c]);
+      }
+      this.mMesh = null;
+      this.mFailed = false;
+    }
+    registerListening(context) {
+      if (isVariable(this.mSegments)) {
+        context.listensTo(idFromNan(this.mSegments), this);
+      }
+      for (const channel of this.mData) {
+        listen(context, channel, this);
+      }
+    }
+    paint(context) {
+      if (!isPaint3DContext(context) || this.mFailed) {
+        return;
+      }
+      if (this.mMesh === null) {
+        try {
+          this.mMesh = build(
+            this.mType,
+            this.mOutSegments,
+            this.mFlags,
+            this.mOutData
+          );
+        } catch (e) {
+          this.mFailed = true;
+          console.warn(`MeshPrimitive(id=${this.mId}): ${e.message}`);
+          return;
+        }
+      }
+      const m = this.mMesh;
+      context.defineMesh3D(this.mId, m.indices, m.verts, m.normals, m.uv);
+    }
+    write(buffer) {
+      buffer.start(_MeshPrimitive.OP_CODE);
+      buffer.writeInt(this.mId);
+      buffer.writeInt(this.mType);
+      buffer.writeFloat(this.mSegments);
+      buffer.writeInt(this.mFlags);
+      buffer.writeInt(this.mData.length);
+      for (const ch of this.mData) {
+        writeArray(buffer, ch);
+      }
+    }
+    deepToString(indent) {
+      return `${indent}MeshPrimitive(id=${this.mId}, type=${this.mType}, segments=${this.mSegments}, channels=${this.mData.length})`;
+    }
+    /** `id, type, segments, flags, channelCount, (len + floats) x channelCount`. */
+    static read(buffer, operations) {
+      const id = buffer.readInt();
+      const type = buffer.readInt();
+      const segments2 = buffer.readFloat();
+      const flags = buffer.readInt();
+      const channels = buffer.readInt();
+      if (channels < 0 || channels > MAX_CHANNELS) {
+        throw new Error(`MeshPrimitive: bad channel count ${channels}`);
+      }
+      const data = [];
+      for (let c = 0; c < channels; c++) {
+        data.push(readFloats(buffer, MAX_PRIMITIVE_FLOATS, "MeshPrimitive channel"));
+      }
+      operations.push(new _MeshPrimitive(id, type, segments2, flags, data));
+    }
+  };
+  _MeshPrimitive.OP_CODE = 120;
+  var MeshPrimitive = _MeshPrimitive;
+
+  // third_party/remote-compose-player/src/core/operations/d3/MeshExpression.ts
+  var SURFACE_HEIGHT_FIELD = 1;
+  var SURFACE_SPHERE = 2;
+  var SURFACE_CYLINDER = 3;
+  var FLAG_FLIP_WINDING = 1;
+  var MAX_ARRAY = 4096;
+  var MAX_GROUP = 8;
+  var MAX_GRID = 1024;
+  var ID_REGION_MASK = 3 << 20;
+  var ID_REGION_ARRAY = 2 << 20;
+  function isDataVariableBits(b) {
+    if (!isNaNBits(b)) {
+      return false;
+    }
+    return (idFromBits(b) & ID_REGION_MASK) === ID_REGION_ARRAY;
+  }
+  function isResolvable2(v) {
+    if (!Number.isNaN(v)) {
+      return false;
+    }
+    const bits = floatToRawIntBits(v);
+    return !AnimatedFloatExpression.isMathOperator(v) && !isDataVariableBits(bits);
+  }
+  function lerp(a, b, t) {
+    return Math.fround(a + Math.fround(Math.fround(b - a) * t));
+  }
+  var _MeshExpression = class _MeshExpression extends PaintOperation {
+    constructor(mId, mType, mFlags, mParams, mPos, mNormal, mUv) {
+      super();
+      this.mId = mId;
+      this.mType = mType;
+      this.mFlags = mFlags;
+      this.mParams = mParams;
+      this.mPos = mPos;
+      this.mNormal = mNormal;
+      this.mUv = mUv;
+      this.mEval = new AnimatedFloatExpression();
+      // Output buffers, resized when the grid resolution changes.
+      this.mVerts = new Float32Array(0);
+      this.mNormalsBuf = new Float32Array(0);
+      this.mUvBuf = new Float32Array(0);
+      this.mIndices = new Int32Array(0);
+      this.mGridU = -1;
+      this.mGridV = -1;
+      // The two parameters last fed to the position/normal/uv expressions (u,v or x,z).
+      this.mLastA = 0;
+      this.mLastB = 0;
+      this.mOutParams = mParams.slice();
+      this.mOutPos = mPos.map((e) => e.slice());
+      this.mOutNormal = mNormal.map((e) => e.slice());
+      this.mOutUv = mUv.map((e) => e.slice());
+    }
+    // ----- variable support -------------------------------------------------
+    updateVariables(context) {
+      for (let i = 0; i < this.mParams.length; i++) {
+        this.mOutParams[i] = isResolvable2(this.mParams[i]) ? context.getFloat(idFromNan(this.mParams[i])) : this.mParams[i];
+      }
+      _MeshExpression.resolveGroup(context, this.mPos, this.mOutPos);
+      _MeshExpression.resolveGroup(context, this.mNormal, this.mOutNormal);
+      _MeshExpression.resolveGroup(context, this.mUv, this.mOutUv);
+    }
+    static resolveGroup(context, src, dst) {
+      for (let e = 0; e < src.length; e++) {
+        const inArr = src[e];
+        const out = dst[e];
+        for (let i = 0; i < inArr.length; i++) {
+          out[i] = isResolvable2(inArr[i]) ? context.getFloat(idFromNan(inArr[i])) : inArr[i];
+        }
+      }
+    }
+    registerListening(context) {
+      for (const v of this.mParams) {
+        if (isResolvable2(v)) {
+          context.listensTo(idFromNan(v), this);
+        }
+      }
+      this.listenGroup(context, this.mPos);
+      this.listenGroup(context, this.mNormal);
+      this.listenGroup(context, this.mUv);
+    }
+    listenGroup(context, group) {
+      for (const e of group) {
+        for (const v of e) {
+          if (isResolvable2(v)) {
+            context.listensTo(idFromNan(v), this);
+          }
+        }
+      }
+    }
+    // ----- evaluation -------------------------------------------------------
+    paint(context) {
+      if (!isPaint3DContext(context)) {
+        return;
+      }
+      const ca = context.getContext().getCollectionsAccess();
+      const uCount = this.gridCount(0);
+      const vCount = this.gridCount(1);
+      if (uCount < 2 || vCount < 2 || uCount > MAX_GRID || vCount > MAX_GRID) {
+        return;
+      }
+      this.ensureBuffers(uCount, vCount);
+      const hasUv = this.mOutUv.length >= 2;
+      for (let i = 0; i < uCount; i++) {
+        const fu = Math.fround(i / (uCount - 1));
+        for (let j = 0; j < vCount; j++) {
+          const fv = Math.fround(j / (vCount - 1));
+          const idx = i * vCount + j;
+          this.position(idx * 3, fu, fv, ca);
+          if (hasUv) {
+            this.mUvBuf[idx * 2] = this.eval(this.mOutUv[0], this.mLastA, this.mLastB, ca);
+            this.mUvBuf[idx * 2 + 1] = this.eval(this.mOutUv[1], this.mLastA, this.mLastB, ca);
+          } else {
+            this.mUvBuf[idx * 2] = fu;
+            this.mUvBuf[idx * 2 + 1] = fv;
+          }
+        }
+      }
+      if (this.mOutNormal.length >= 3) {
+        for (let i = 0; i < uCount; i++) {
+          const fu = Math.fround(i / (uCount - 1));
+          for (let j = 0; j < vCount; j++) {
+            const fv = Math.fround(j / (vCount - 1));
+            const n = (i * vCount + j) * 3;
+            this.paramsFor(fu, fv);
+            this.mNormalsBuf[n] = this.eval(this.mOutNormal[0], this.mLastA, this.mLastB, ca);
+            this.mNormalsBuf[n + 1] = this.eval(this.mOutNormal[1], this.mLastA, this.mLastB, ca);
+            this.mNormalsBuf[n + 2] = this.eval(this.mOutNormal[2], this.mLastA, this.mLastB, ca);
+          }
+        }
+      } else {
+        this.computeFiniteDifferenceNormals(uCount, vCount);
+      }
+      context.defineMesh3D(this.mId, this.mIndices, this.mVerts, this.mNormalsBuf, this.mUvBuf);
+    }
+    gridCount(axis) {
+      switch (this.mType) {
+        case SURFACE_HEIGHT_FIELD:
+          return Math.trunc(this.mOutParams[axis === 0 ? 2 : 5]);
+        case SURFACE_SPHERE:
+          return Math.trunc(this.mOutParams[axis === 0 ? 1 : 2]);
+        case SURFACE_CYLINDER:
+          return Math.trunc(this.mOutParams[axis === 0 ? 2 : 3]);
+        default:
+          return Math.trunc(this.mOutParams[axis === 0 ? 2 : 5]);
+      }
+    }
+    /** The (a,b) expression parameters for grid fractions (fu,fv), per surface type. */
+    paramsFor(fu, fv) {
+      const p = this.mOutParams;
+      switch (this.mType) {
+        case SURFACE_HEIGHT_FIELD:
+          this.mLastA = lerp(p[0], p[1], fu);
+          this.mLastB = lerp(p[3], p[4], fv);
+          break;
+        case SURFACE_SPHERE:
+          this.mLastA = Math.fround(fu * Math.fround(2 * Math.PI));
+          this.mLastB = Math.fround(fv * Math.fround(Math.PI));
+          break;
+        case SURFACE_CYLINDER:
+          this.mLastA = Math.fround(fu * Math.fround(2 * Math.PI));
+          this.mLastB = lerp(Math.fround(-p[1] * 0.5), Math.fround(p[1] * 0.5), fv);
+          break;
+        default:
+          this.mLastA = lerp(p[0], p[1], fu);
+          this.mLastB = lerp(p[3], p[4], fv);
+          break;
+      }
+    }
+    /** Evaluate the position into mVerts at `off`; also sets mLastA/mLastB. */
+    position(off, fu, fv, ca) {
+      this.paramsFor(fu, fv);
+      const a = this.mLastA;
+      const b = this.mLastB;
+      switch (this.mType) {
+        case SURFACE_HEIGHT_FIELD: {
+          let h = this.eval(this.mOutPos[0], a, b, ca);
+          const yMin = this.mOutParams[6];
+          const yMax = this.mOutParams[7];
+          if (h < yMin) {
+            h = yMin;
+          }
+          if (h > yMax) {
+            h = yMax;
+          }
+          this.mVerts[off] = a;
+          this.mVerts[off + 1] = h;
+          this.mVerts[off + 2] = b;
+          break;
+        }
+        case SURFACE_SPHERE: {
+          const r = Math.fround(this.mOutParams[0] + this.eval(this.mOutPos[0], a, b, ca));
+          const sinV = Math.fround(Math.sin(b));
+          this.mVerts[off] = Math.fround(Math.fround(r * sinV) * Math.fround(Math.cos(a)));
+          this.mVerts[off + 1] = Math.fround(r * Math.fround(Math.cos(b)));
+          this.mVerts[off + 2] = Math.fround(Math.fround(r * sinV) * Math.fround(Math.sin(a)));
+          break;
+        }
+        case SURFACE_CYLINDER: {
+          const r = Math.fround(this.mOutParams[0] + this.eval(this.mOutPos[0], a, b, ca));
+          this.mVerts[off] = Math.fround(r * Math.fround(Math.cos(a)));
+          this.mVerts[off + 1] = b;
+          this.mVerts[off + 2] = Math.fround(r * Math.fround(Math.sin(a)));
+          break;
+        }
+        default: {
+          this.mVerts[off] = this.eval(this.mOutPos[0], a, b, ca);
+          this.mVerts[off + 1] = this.eval(this.mOutPos[1], a, b, ca);
+          this.mVerts[off + 2] = this.eval(this.mOutPos[2], a, b, ca);
+          break;
+        }
+      }
+    }
+    /** Central-difference surface normals from the sampled grid, clamped at the edges. */
+    computeFiniteDifferenceNormals(uCount, vCount) {
+      const fr2 = Math.fround;
+      const V2 = this.mVerts;
+      for (let i = 0; i < uCount; i++) {
+        const ip = Math.min(i + 1, uCount - 1);
+        const im = Math.max(i - 1, 0);
+        for (let j = 0; j < vCount; j++) {
+          const jp = Math.min(j + 1, vCount - 1);
+          const jm = Math.max(j - 1, 0);
+          const a = (ip * vCount + j) * 3;
+          const b = (im * vCount + j) * 3;
+          const c = (i * vCount + jp) * 3;
+          const d = (i * vCount + jm) * 3;
+          const dux = fr2(V2[a] - V2[b]);
+          const duy = fr2(V2[a + 1] - V2[b + 1]);
+          const duz = fr2(V2[a + 2] - V2[b + 2]);
+          const dvx = fr2(V2[c] - V2[d]);
+          const dvy = fr2(V2[c + 1] - V2[d + 1]);
+          const dvz = fr2(V2[c + 2] - V2[d + 2]);
+          const nx = fr2(fr2(duy * dvz) - fr2(duz * dvy));
+          const ny = fr2(fr2(duz * dvx) - fr2(dux * dvz));
+          const nz = fr2(fr2(dux * dvy) - fr2(duy * dvx));
+          const len = fr2(Math.sqrt(fr2(fr2(fr2(nx * nx) + fr2(ny * ny)) + fr2(nz * nz))));
+          const n = (i * vCount + j) * 3;
+          if (len > 1e-8) {
+            this.mNormalsBuf[n] = fr2(nx / len);
+            this.mNormalsBuf[n + 1] = fr2(ny / len);
+            this.mNormalsBuf[n + 2] = fr2(nz / len);
+          } else {
+            this.mNormalsBuf[n] = 0;
+            this.mNormalsBuf[n + 1] = 1;
+            this.mNormalsBuf[n + 2] = 0;
+          }
+        }
+      }
+    }
+    eval(expr, a, b, ca) {
+      if (ca) {
+        return this.mEval.eval(ca, expr, expr.length, a, b);
+      }
+      return this.mEval.eval(expr, expr.length, a, b);
+    }
+    ensureBuffers(uCount, vCount) {
+      const verts = uCount * vCount;
+      if (this.mVerts.length !== verts * 3) {
+        this.mVerts = new Float32Array(verts * 3);
+        this.mNormalsBuf = new Float32Array(verts * 3);
+        this.mUvBuf = new Float32Array(verts * 2);
+      }
+      if (this.mGridU !== uCount || this.mGridV !== vCount) {
+        this.buildIndices(uCount, vCount);
+        this.mGridU = uCount;
+        this.mGridV = vCount;
+      }
+    }
+    buildIndices(uCount, vCount) {
+      this.mIndices = new Int32Array((uCount - 1) * (vCount - 1) * 6);
+      const flip = (this.mFlags & FLAG_FLIP_WINDING) !== 0;
+      let k = 0;
+      for (let i = 0; i < uCount - 1; i++) {
+        for (let j = 0; j < vCount - 1; j++) {
+          const a = i * vCount + j;
+          const b = i * vCount + (j + 1);
+          const c = (i + 1) * vCount + (j + 1);
+          const d = (i + 1) * vCount + j;
+          if (flip) {
+            this.mIndices[k++] = a;
+            this.mIndices[k++] = c;
+            this.mIndices[k++] = b;
+            this.mIndices[k++] = c;
+            this.mIndices[k++] = a;
+            this.mIndices[k++] = d;
+          } else {
+            this.mIndices[k++] = a;
+            this.mIndices[k++] = b;
+            this.mIndices[k++] = c;
+            this.mIndices[k++] = c;
+            this.mIndices[k++] = d;
+            this.mIndices[k++] = a;
+          }
+        }
+      }
+    }
+    // ----- wire -------------------------------------------------------------
+    write(buffer) {
+      buffer.start(_MeshExpression.OP_CODE);
+      buffer.writeInt(this.mId);
+      buffer.writeInt(this.mType);
+      buffer.writeInt(this.mFlags);
+      writeArray2(buffer, this.mParams);
+      writeGroup(buffer, this.mPos);
+      writeGroup(buffer, this.mNormal);
+      writeGroup(buffer, this.mUv);
+    }
+    deepToString(indent) {
+      return `${indent}MeshExpression(id=${this.mId}, type=${this.mType}, params=${this.mParams.length}, pos=${this.mPos.length})`;
+    }
+    /**
+     * `id, type, flags, params[], pos[][], normal[][], uv[][]`.
+     *
+     * Expression floats are read with readNanId, not readFloat: an operator or variable
+     * reference is a NaN payload that must survive the round trip bit for bit.
+     */
+    static read(buffer, operations) {
+      const id = buffer.readInt();
+      const type = buffer.readInt();
+      const flags = buffer.readInt();
+      const params = readArray(buffer);
+      const pos = readGroup(buffer);
+      const normal = readGroup(buffer);
+      const uv = readGroup(buffer);
+      operations.push(new _MeshExpression(id, type, flags, params, pos, normal, uv));
+    }
+  };
+  _MeshExpression.OP_CODE = 117;
+  var MeshExpression = _MeshExpression;
+  function writeArray2(buffer, a) {
+    buffer.writeInt(a.length);
+    for (const v of a) {
+      buffer.writeFloat(v);
+    }
+  }
+  function writeGroup(buffer, group) {
+    buffer.writeInt(group.length);
+    for (const e of group) {
+      writeArray2(buffer, e);
+    }
+  }
+  function readArray(buffer) {
+    const len = buffer.readInt();
+    if (len < 0 || len > MAX_ARRAY) {
+      throw new Error(`MeshExpression: bad array length ${len}`);
+    }
+    const a = new Float32Array(len);
+    for (let i = 0; i < len; i++) {
+      a[i] = buffer.readNanId();
+    }
+    return a;
+  }
+  function readGroup(buffer) {
+    const n = buffer.readInt();
+    if (n < 0 || n > MAX_GROUP) {
+      throw new Error(`MeshExpression: bad group count ${n}`);
+    }
+    const g = [];
+    for (let i = 0; i < n; i++) {
+      g.push(readArray(buffer));
+    }
+    return g;
+  }
+
+  // third_party/remote-compose-player/src/core/operations/utilities/VectorRpn.ts
+  var fround2 = Math.fround;
+  function fm2(a, b) {
+    return fround2(a * b);
+  }
+  function fa2(a, b) {
+    return fround2(a + b);
+  }
+  var OFFSET = 3211264;
+  var OP_ADD = OFFSET + 1;
+  var OP_SUB = OFFSET + 2;
+  var OP_MUL = OFFSET + 3;
+  var OP_DIV = OFFSET + 4;
+  var OP_MOD = OFFSET + 5;
+  var OP_MIN = OFFSET + 6;
+  var OP_MAX = OFFSET + 7;
+  var OP_POW = OFFSET + 8;
+  var OP_SQRT = OFFSET + 9;
+  var OP_ABS = OFFSET + 10;
+  var OP_FLOOR = OFFSET + 14;
+  var OP_ROUND = OFFSET + 17;
+  var OP_SIN = OFFSET + 18;
+  var OP_COS = OFFSET + 19;
+  var OP_CEIL = OFFSET + 31;
+  var OP_SQUARE = OFFSET + 45;
+  var OP_INV = OFFSET + 52;
+  var OP_NOP = OFFSET + 55;
+  var OP_CHANGE_SIGN = OFFSET + 73;
+  var OP_VBUILD2 = OFFSET + 100;
+  var OP_VBUILD3 = OFFSET + 101;
+  var OP_VBUILD4 = OFFSET + 102;
+  var OP_VDOT = OFFSET + 103;
+  var OP_VCROSS = OFFSET + 104;
+  var OP_VLEN = OFFSET + 105;
+  var OP_VLENSQ = OFFSET + 106;
+  var OP_VNORM = OFFSET + 107;
+  var MAX_DIM = 4;
+  var MAX_STACK = 64;
+  var MAX_PROGRAM = 512;
+  var SOFT_DOMAIN_EPS = 1e-6;
+  var _dv3 = new DataView(new ArrayBuffer(4));
+  function fromNaN(v) {
+    _dv3.setFloat32(0, v);
+    return _dv3.getInt32(0) & 4194303;
+  }
+  function isVectorOp(v) {
+    if (!Number.isNaN(v)) {
+      return false;
+    }
+    const pos = fromNaN(v);
+    return pos >= OP_VBUILD2 && pos <= OP_VNORM;
+  }
+  var VectorRpn = class {
+    constructor() {
+      this.mProgram = new Float32Array(MAX_PROGRAM);
+      this.mStack = new Float32Array(MAX_STACK * MAX_DIM);
+      /** Logical dimensionality of each stack value. */
+      this.mDim = new Int32Array(MAX_STACK);
+      /**
+       * When true, divide and normalize substitute a tiny denominator for a near-zero one instead
+       * of producing Inf/NaN. Off by default (exact); the owning op flips it for a corrective retry.
+       */
+      this.mSoftDomain = false;
+    }
+    /**
+     * Evaluate program[0..len) and write the result's components into out (length >= MAX_DIM).
+     * Returns the logical dimensionality of the result (1 = scalar, 2/3/4 = vector).
+     */
+    apply(program, len, out) {
+      if (len > MAX_PROGRAM) {
+        throw new Error(`VectorRpn: program length ${len} exceeds ${MAX_PROGRAM}`);
+      }
+      this.mProgram.set(program.subarray(0, len), 0);
+      const s = this.mStack;
+      let sp = -1;
+      for (let i = 0; i < len; i++) {
+        const v = this.mProgram[i];
+        if (Number.isNaN(v)) {
+          sp = this.opEval(sp, fromNaN(v));
+        } else {
+          sp++;
+          if (sp >= MAX_STACK) {
+            throw new Error("VectorRpn: stack overflow (malformed program)");
+          }
+          const p2 = sp * MAX_DIM;
+          s[p2] = v;
+          s[p2 + 1] = v;
+          s[p2 + 2] = v;
+          s[p2 + 3] = v;
+          this.mDim[sp] = 1;
+        }
+      }
+      if (sp < 0) {
+        throw new Error("VectorRpn: empty program");
+      }
+      const p = sp * MAX_DIM;
+      out[0] = s[p];
+      out[1] = s[p + 1];
+      out[2] = s[p + 2];
+      out[3] = s[p + 3];
+      return this.mDim[sp];
+    }
+    opEval(sp, id) {
+      const s = this.mStack;
+      const d = this.mDim;
+      const a = (sp - 1) * MAX_DIM;
+      const b = sp * MAX_DIM;
+      switch (id) {
+        case OP_ADD:
+          s[a] += s[b];
+          s[a + 1] += s[b + 1];
+          s[a + 2] += s[b + 2];
+          s[a + 3] += s[b + 3];
+          d[sp - 1] = Math.max(d[sp - 1], d[sp]);
+          return sp - 1;
+        case OP_SUB:
+          s[a] -= s[b];
+          s[a + 1] -= s[b + 1];
+          s[a + 2] -= s[b + 2];
+          s[a + 3] -= s[b + 3];
+          d[sp - 1] = Math.max(d[sp - 1], d[sp]);
+          return sp - 1;
+        case OP_MUL:
+          s[a] *= s[b];
+          s[a + 1] *= s[b + 1];
+          s[a + 2] *= s[b + 2];
+          s[a + 3] *= s[b + 3];
+          d[sp - 1] = Math.max(d[sp - 1], d[sp]);
+          return sp - 1;
+        case OP_DIV:
+          s[a] /= this.softDenom(s[b]);
+          s[a + 1] /= this.softDenom(s[b + 1]);
+          s[a + 2] /= this.softDenom(s[b + 2]);
+          s[a + 3] /= this.softDenom(s[b + 3]);
+          d[sp - 1] = Math.max(d[sp - 1], d[sp]);
+          return sp - 1;
+        case OP_MOD:
+          s[a] %= this.softDenom(s[b]);
+          s[a + 1] %= this.softDenom(s[b + 1]);
+          s[a + 2] %= this.softDenom(s[b + 2]);
+          s[a + 3] %= this.softDenom(s[b + 3]);
+          d[sp - 1] = Math.max(d[sp - 1], d[sp]);
+          return sp - 1;
+        case OP_MIN:
+          s[a] = Math.min(s[a], s[b]);
+          s[a + 1] = Math.min(s[a + 1], s[b + 1]);
+          s[a + 2] = Math.min(s[a + 2], s[b + 2]);
+          s[a + 3] = Math.min(s[a + 3], s[b + 3]);
+          d[sp - 1] = Math.max(d[sp - 1], d[sp]);
+          return sp - 1;
+        case OP_MAX:
+          s[a] = Math.max(s[a], s[b]);
+          s[a + 1] = Math.max(s[a + 1], s[b + 1]);
+          s[a + 2] = Math.max(s[a + 2], s[b + 2]);
+          s[a + 3] = Math.max(s[a + 3], s[b + 3]);
+          d[sp - 1] = Math.max(d[sp - 1], d[sp]);
+          return sp - 1;
+        case OP_POW:
+          s[a] = Math.pow(s[a], s[b]);
+          s[a + 1] = Math.pow(s[a + 1], s[b + 1]);
+          s[a + 2] = Math.pow(s[a + 2], s[b + 2]);
+          s[a + 3] = Math.pow(s[a + 3], s[b + 3]);
+          d[sp - 1] = Math.max(d[sp - 1], d[sp]);
+          return sp - 1;
+        case OP_SQRT:
+          s[b] = Math.sqrt(s[b]);
+          s[b + 1] = Math.sqrt(s[b + 1]);
+          s[b + 2] = Math.sqrt(s[b + 2]);
+          s[b + 3] = Math.sqrt(s[b + 3]);
+          return sp;
+        case OP_ABS:
+          s[b] = Math.abs(s[b]);
+          s[b + 1] = Math.abs(s[b + 1]);
+          s[b + 2] = Math.abs(s[b + 2]);
+          s[b + 3] = Math.abs(s[b + 3]);
+          return sp;
+        case OP_SQUARE:
+          s[b] *= s[b];
+          s[b + 1] *= s[b + 1];
+          s[b + 2] *= s[b + 2];
+          s[b + 3] *= s[b + 3];
+          return sp;
+        case OP_SIN:
+          s[b] = Math.sin(s[b]);
+          s[b + 1] = Math.sin(s[b + 1]);
+          s[b + 2] = Math.sin(s[b + 2]);
+          s[b + 3] = Math.sin(s[b + 3]);
+          return sp;
+        case OP_COS:
+          s[b] = Math.cos(s[b]);
+          s[b + 1] = Math.cos(s[b + 1]);
+          s[b + 2] = Math.cos(s[b + 2]);
+          s[b + 3] = Math.cos(s[b + 3]);
+          return sp;
+        case OP_FLOOR:
+          s[b] = Math.floor(s[b]);
+          s[b + 1] = Math.floor(s[b + 1]);
+          s[b + 2] = Math.floor(s[b + 2]);
+          s[b + 3] = Math.floor(s[b + 3]);
+          return sp;
+        case OP_CEIL:
+          s[b] = Math.ceil(s[b]);
+          s[b + 1] = Math.ceil(s[b + 1]);
+          s[b + 2] = Math.ceil(s[b + 2]);
+          s[b + 3] = Math.ceil(s[b + 3]);
+          return sp;
+        case OP_ROUND:
+          s[b] = javaRound(s[b]);
+          s[b + 1] = javaRound(s[b + 1]);
+          s[b + 2] = javaRound(s[b + 2]);
+          s[b + 3] = javaRound(s[b + 3]);
+          return sp;
+        case OP_CHANGE_SIGN:
+          s[b] = -s[b];
+          s[b + 1] = -s[b + 1];
+          s[b + 2] = -s[b + 2];
+          s[b + 3] = -s[b + 3];
+          return sp;
+        case OP_INV:
+          s[b] = 1 / this.softDenom(s[b]);
+          s[b + 1] = 1 / this.softDenom(s[b + 1]);
+          s[b + 2] = 1 / this.softDenom(s[b + 2]);
+          s[b + 3] = 1 / this.softDenom(s[b + 3]);
+          return sp;
+        case OP_VBUILD2:
+          return this.build(sp, 2);
+        case OP_VBUILD3:
+          return this.build(sp, 3);
+        case OP_VBUILD4:
+          return this.build(sp, 4);
+        case OP_VDOT: {
+          const dot = fa2(fa2(
+            fa2(fm2(s[a], s[b]), fm2(s[a + 1], s[b + 1])),
+            fm2(s[a + 2], s[b + 2])
+          ), fm2(s[a + 3], s[b + 3]));
+          s[a] = dot;
+          s[a + 1] = dot;
+          s[a + 2] = dot;
+          s[a + 3] = dot;
+          d[sp - 1] = 1;
+          return sp - 1;
+        }
+        case OP_VCROSS: {
+          const ax = s[a], ay = s[a + 1], az = s[a + 2];
+          const bx = s[b], by = s[b + 1], bz = s[b + 2];
+          s[a] = fround2(fm2(ay, bz) - fm2(az, by));
+          s[a + 1] = fround2(fm2(az, bx) - fm2(ax, bz));
+          s[a + 2] = fround2(fm2(ax, by) - fm2(ay, bx));
+          s[a + 3] = 0;
+          d[sp - 1] = 3;
+          return sp - 1;
+        }
+        case OP_VLEN:
+        case OP_VLENSQ: {
+          const sq = fa2(fa2(
+            fa2(fm2(s[b], s[b]), fm2(s[b + 1], s[b + 1])),
+            fm2(s[b + 2], s[b + 2])
+          ), fm2(s[b + 3], s[b + 3]));
+          const r = id === OP_VLEN ? fround2(Math.sqrt(sq)) : sq;
+          s[b] = r;
+          s[b + 1] = r;
+          s[b + 2] = r;
+          s[b + 3] = r;
+          d[sp] = 1;
+          return sp;
+        }
+        case OP_VNORM: {
+          const sq = fa2(fa2(
+            fa2(fm2(s[b], s[b]), fm2(s[b + 1], s[b + 1])),
+            fm2(s[b + 2], s[b + 2])
+          ), fm2(s[b + 3], s[b + 3]));
+          const inv = fround2(1 / this.softDenom(fround2(Math.sqrt(sq))));
+          s[b] *= inv;
+          s[b + 1] *= inv;
+          s[b + 2] *= inv;
+          s[b + 3] *= inv;
+          return sp;
+        }
+        case OP_NOP:
+          return sp;
+        // produced by two-body first()/second() substitution
+        default:
+          throw new Error(`VectorRpn op not implemented: ${id - OFFSET}`);
+      }
+    }
+    /** Pop n scalars (lane 0 of the top n slots) into one vec{n}; zero-pad the rest. */
+    build(sp, n) {
+      const s = this.mStack;
+      const base = sp - n + 1;
+      const c0 = s[base * MAX_DIM];
+      const c1 = n > 1 ? s[(base + 1) * MAX_DIM] : 0;
+      const c2 = n > 2 ? s[(base + 2) * MAX_DIM] : 0;
+      const c3 = n > 3 ? s[(base + 3) * MAX_DIM] : 0;
+      const p = base * MAX_DIM;
+      s[p] = c0;
+      s[p + 1] = c1;
+      s[p + 2] = c2;
+      s[p + 3] = c3;
+      this.mDim[base] = n;
+      return base;
+    }
+    softDenom(denom) {
+      if (this.mSoftDomain && denom < SOFT_DOMAIN_EPS && denom > -SOFT_DOMAIN_EPS) {
+        return denom < 0 ? -SOFT_DOMAIN_EPS : SOFT_DOMAIN_EPS;
+      }
+      return denom;
+    }
+  };
+  function javaRound(x) {
+    if (Number.isNaN(x)) {
+      return 0;
+    }
+    const r = Math.floor(x + 0.5);
+    if (r >= 2147483647) {
+      return 2147483647;
+    }
+    if (r <= -2147483648) {
+      return -2147483648;
+    }
+    return r;
+  }
+
+  // third_party/remote-compose-player/src/core/operations/VectorExpression.ts
+  var ID_REGION_MASK2 = 3 << 20;
+  var ID_REGION_ARRAY2 = 2 << 20;
+  function isResolvable3(v) {
+    if (!Number.isNaN(v)) {
+      return false;
+    }
+    const bits = floatToRawIntBits(v);
+    const isArray = isNaNBits(bits) && (idFromBits(bits) & ID_REGION_MASK2) === ID_REGION_ARRAY2;
+    return !AnimatedFloatExpression.isMathOperator(v) && !isVectorOp(v) && !isArray;
+  }
+  var _VectorExpression = class _VectorExpression extends Operation {
+    constructor(mId, mDimension, mFlags, mSrcValue) {
+      super();
+      this.mId = mId;
+      this.mDimension = mDimension;
+      this.mFlags = mFlags;
+      this.mSrcValue = mSrcValue;
+      this.mRpn = new VectorRpn();
+      this.mOut = new Float32Array(MAX_DIM);
+      this.mPreCalc = mSrcValue.slice();
+    }
+    /** Components this expression produces (vec2/3/4). Used for scalar-vs-vector typing. */
+    getDimension() {
+      return this.mDimension;
+    }
+    updateVariables(context) {
+      for (let i = 0; i < this.mSrcValue.length; i++) {
+        const v = this.mSrcValue[i];
+        this.mPreCalc[i] = isResolvable3(v) ? context.getFloat(idFromNan(v)) : v;
+      }
+    }
+    registerListening(context) {
+      context.putObject(this.mId, this);
+      for (const v of this.mSrcValue) {
+        if (isResolvable3(v)) {
+          context.listensTo(idFromNan(v), this);
+        }
+      }
+    }
+    apply(context) {
+      let lanes = this.mRpn.apply(this.mPreCalc, this.mPreCalc.length, this.mOut);
+      if (!this.allFinite(lanes)) {
+        this.mRpn.mSoftDomain = true;
+        try {
+          lanes = this.mRpn.apply(this.mPreCalc, this.mPreCalc.length, this.mOut);
+        } finally {
+          this.mRpn.mSoftDomain = false;
+        }
+      }
+      for (let k = 0; k < this.mDimension; k++) {
+        let c = k < lanes ? this.mOut[k] : 0;
+        if (!Number.isFinite(c)) {
+          c = 0;
+        }
+        context.loadFloat(this.mId + k, c);
+      }
+    }
+    allFinite(lanes) {
+      for (let k = 0; k < lanes; k++) {
+        if (!Number.isFinite(this.mOut[k])) {
+          return false;
+        }
+      }
+      return true;
+    }
+    write(buffer) {
+      buffer.start(_VectorExpression.OP_CODE);
+      buffer.writeInt(this.mId);
+      buffer.writeByte(this.mDimension);
+      buffer.writeByte(this.mFlags);
+      buffer.writeShort(this.mSrcValue.length);
+      for (const v of this.mSrcValue) {
+        buffer.writeFloat(v);
+      }
+    }
+    deepToString(indent) {
+      return `${indent}VectorExpression[${this.mId}] dim=${this.mDimension}`;
+    }
+    /**
+     * `id (int), dimension (byte), flags (byte), length (short), program (floats)`.
+     *
+     * The program is read with readNanId, not readFloat: operators and variable references are
+     * NaN payloads that must survive the round trip bit for bit.
+     */
+    static read(buffer, operations) {
+      const id = buffer.declareId();
+      const dimension = buffer.readByte();
+      const flags = buffer.readByte();
+      const len = buffer.readShort();
+      const values = new Float32Array(len);
+      for (let i = 0; i < len; i++) {
+        values[i] = buffer.readNanId();
+      }
+      operations.push(new _VectorExpression(id, dimension, flags, values));
+    }
+  };
+  _VectorExpression.OP_CODE = 116;
+  var VectorExpression = _VectorExpression;
+
   // third_party/remote-compose-player/src/core/operations/ColorExpression.ts
   var _ColorExpression = class _ColorExpression extends Operation {
     constructor(id, param1, param2, param3, param4) {
@@ -8577,6 +13906,15 @@ var RC = (() => {
       context.loadInteger(this.mId, result);
     }
     /**
+     * Evaluate now, without waiting for this operation's turn in the frame — what
+     * `ValueIntegerExpressionChangeAction` needs at the moment the action runs. Reads the
+     * inputs afresh and does not load the result: the action decides where it goes.
+     */
+    evaluateNow(context) {
+      this.updateVariables(context);
+      return this.evaluate(this.mPreMask, this.mPreCalcValues || this.mValues);
+    }
+    /**
      * Evaluates the RPN program. [exp] is the *resolved* array (`mPreCalcValues`), where every id
      * slot already holds its variable's value.
      *
@@ -8594,11 +13932,11 @@ var RC = (() => {
     evaluate(mask, exp) {
       const stack = new Int32Array(128);
       let sp = -1;
-      const OFFSET3 = _IntegerExpression.OFFSET;
+      const OFFSET4 = _IntegerExpression.OFFSET;
       for (let i = 0; i < exp.length; i++) {
         const v = exp[i];
-        if ((1 << i & mask) !== 0 && this.mValues[i] >= OFFSET3) {
-          const op = this.mValues[i] - OFFSET3;
+        if ((1 << i & mask) !== 0 && this.mValues[i] >= OFFSET4) {
+          const op = this.mValues[i] - OFFSET4;
           switch (op) {
             case 1:
               stack[sp - 1] = stack[sp - 1] + stack[sp] | 0;
@@ -9700,6 +15038,7 @@ var RC = (() => {
       for (const op of this.mList) {
         if (typeof op.updateVariables === "function" && op.isDirty()) {
           op.updateVariables(context);
+          context.incrementOpCount(op);
           op.apply(context);
           op.markNotDirty();
           needsInvalidate = true;
@@ -9981,6 +15320,7 @@ ${inner}`;
           this.mComponentModifiers.push(op);
         } else if (op instanceof ScrollModifier) {
           this.mScrollModifier = op;
+          op.inflate(this);
           this.mComponentModifiers.push(op);
         } else if (op instanceof MarqueeModifier) {
           op.setComponent(this);
@@ -10217,6 +15557,14 @@ ${inner}`;
       for (const mod of this.mPadBeforeHeightMods) ph += mod.mTopValue + mod.mBottomValue;
       this.mPadBeforeHeight = ph;
     }
+    animatingBounds(context) {
+      super.animatingBounds(context);
+      this.updateComponentValues(context, this.mWidth, this.mHeight);
+      this.layoutModifiers(this.mWidth, this.mHeight);
+      for (const child of this.mChildrenComponents) {
+        child.animatingBounds(context);
+      }
+    }
     /** Walk modifiers reducing dimensions by padding and passing to decorators.
      *  Matches Java ComponentModifiers.layout(). */
     layoutModifiers(w, h) {
@@ -10240,6 +15588,11 @@ ${inner}`;
       paintContext.matrixRestore();
     }
     paint(paintContext) {
+      if (this.applyAnimationAsNeeded(paintContext)) {
+        return;
+      }
+      if (Visibility.isGone(this.mVisibility)) return;
+      if (Visibility.isInvisible(this.mVisibility)) return;
       const drawContentOps = this.mDrawContentOperations;
       const hasCustomDraw = drawContentOps !== null && drawContentOps.some((op) => op instanceof PaintOperation);
       if (hasCustomDraw) {
@@ -10247,7 +15600,7 @@ ${inner}`;
         paintContext.matrixTranslate(this.mX, this.mY);
         const context = paintContext.getContext();
         for (const op of drawContentOps) {
-          context.incrementOpCount();
+          context.incrementOpCount(op);
           if (op.isDirty() && typeof op.updateVariables === "function") {
             op.markNotDirty();
             op.updateVariables(context);
@@ -10255,19 +15608,27 @@ ${inner}`;
           op.apply(context);
         }
         paintContext.matrixRestore();
+      } else if (this.mGraphicsLayerMod) {
+        paintContext.matrixSave();
+        this.mGraphicsLayerMod.apply(paintContext.getContext());
+        this.paintingComponent(paintContext);
+        if (typeof this.mGraphicsLayerMod.applyPostPaint === "function") {
+          this.mGraphicsLayerMod.applyPostPaint(paintContext);
+        }
+        paintContext.matrixRestore();
       } else {
         super.paint(paintContext);
       }
     }
     paintingComponent(paintContext) {
-      if (Visibility.isGone(this.mVisibility)) return;
+      if (Visibility.isGone(this.mVisibility) && this.mAnimateMeasure === null) return;
       const context = paintContext.getContext();
       paintContext.matrixSave();
       paintContext.matrixTranslate(this.mX, this.mY);
       let tx = 0;
       let ty = 0;
       for (const mod of this.mComponentModifiers) {
-        context.incrementOpCount();
+        context.incrementOpCount(mod);
         if (mod.isDirty() && typeof mod.updateVariables === "function") {
           mod.markNotDirty();
           mod.updateVariables(context);
@@ -10287,7 +15648,7 @@ ${inner}`;
         if (isDecoration) {
           paintContext.matrixTranslate(-this.mPaddingLeft, -this.mPaddingTop);
         }
-        context.incrementOpCount();
+        context.incrementOpCount(op);
         if (op.isDirty() && typeof op.updateVariables === "function") {
           op.markNotDirty();
           op.updateVariables(context);
@@ -10298,6 +15659,9 @@ ${inner}`;
         }
       }
       const children = this.mChildrenComponents;
+      const shouldPaintChild = (child) => {
+        return (child.mAnimateMeasure !== null || !Visibility.isGone(child.mVisibility)) && this.isChildVisibleInViewport(child);
+      };
       if (children.length > 1) {
         let needsSort = false;
         for (const c of children) {
@@ -10309,25 +15673,57 @@ ${inner}`;
         if (needsSort) {
           const sorted = [...children].sort((a, b) => a.mZIndex - b.mZIndex);
           for (const child of sorted) {
-            if (!Visibility.isGone(child.mVisibility)) {
+            if (shouldPaintChild(child)) {
+              context.incrementOpCount(child);
               child.paint(paintContext);
             }
           }
         } else {
           for (const child of children) {
-            if (!Visibility.isGone(child.mVisibility)) {
+            if (shouldPaintChild(child)) {
+              context.incrementOpCount(child);
               child.paint(paintContext);
             }
           }
         }
       } else {
         for (const child of children) {
-          if (!Visibility.isGone(child.mVisibility)) {
+          if (shouldPaintChild(child)) {
+            context.incrementOpCount(child);
             child.paint(paintContext);
           }
         }
       }
       paintContext.matrixRestore();
+    }
+    isChildVisibleInViewport(child) {
+      const scrollMod = this.mScrollModifier;
+      if (!scrollMod) return true;
+      const childX = child.getX();
+      const childY = child.getY();
+      const childW = child.getWidth();
+      const childH = child.getHeight();
+      if (childW <= 0 && childH <= 0) return true;
+      if (scrollMod.isVertical()) {
+        const hostHeight = this.mHeight - this.mPaddingTop - this.mPaddingBottom;
+        if (hostHeight <= 0) return true;
+        const scrollY = scrollMod.getScrollY();
+        const viewportTop = -scrollY;
+        const viewportBottom = viewportTop + hostHeight;
+        if (childY + childH < viewportTop || childY > viewportBottom) {
+          return false;
+        }
+      } else {
+        const hostWidth = this.mWidth - this.mPaddingLeft - this.mPaddingRight;
+        if (hostWidth <= 0) return true;
+        const scrollX = scrollMod.getScrollX();
+        const viewportLeft = -scrollX;
+        const viewportRight = viewportLeft + hostWidth;
+        if (childX + childW < viewportLeft || childX > viewportRight) {
+          return false;
+        }
+      }
+      return true;
     }
     /** Matches Java Component.updateVariables — re-push dimension/position values
      *  when a component is marked dirty (e.g. by animation or expression change). */
@@ -10340,10 +15736,10 @@ ${inner}`;
     // No override needed — matches Java LayoutComponent which does not override apply().
     // --- Scroll ---
     getScrollX() {
-      return 0;
+      return this.mScrollModifier ? this.mScrollModifier.getScrollX() : 0;
     }
     getScrollY() {
-      return 0;
+      return this.mScrollModifier ? this.mScrollModifier.getScrollY() : 0;
     }
     onClick(context, doc, x, y) {
       for (let i = this.mChildrenComponents.length - 1; i >= 0; i--) {
@@ -10366,34 +15762,146 @@ ${inner}`;
       }
       return false;
     }
+    /**
+     * Touch dispatch, ported from `Component.onTouchDown` in the reference.
+     *
+     * This class has to override the base implementation because the base walks `mChildren`
+     * — the raw operation list — while a layout component keeps its children in
+     * `mChildrenComponents`. That divergence is what broke drag: `onTouchDown` was
+     * overridden and found the children, `onTouchDrag`/`Up`/`Cancel` were inherited and
+     * walked a list that, for a ColumnLayout with 12 children, holds 6 unrelated ops. Down
+     * worked and nothing after it did.
+     *
+     * Three rules come from the reference and all three matter:
+     *
+     *  - **Children receive window coordinates**, not content-relative ones. The previous
+     *    code subtracted this component's origin before recursing, so every level of
+     *    nesting shifted the hit test further off; only `getLocationInWindow` knows the
+     *    real offset, and `contains` already works in window space.
+     *  - **Iterate backwards and let the first component win.** The top-most component
+     *    under the finger captures the gesture; without this, several overlapping
+     *    components all captured the same press and then all received the drags.
+     *  - **`force` skips the bounds test.** This is what locks a drag to the component the
+     *    press landed in: `CoreDocument` only forwards drag/up to components that captured
+     *    the press, and passes force, so they keep receiving events after the finger has
+     *    moved outside them.
+     */
     onTouchDown(context, doc, x, y) {
+      if (!this.contains(x, y)) return false;
+      return this.dispatchTouch(context, doc, x, y, 0, 0, true, "down");
+    }
+    onTouchDrag(context, doc, x, y, force) {
+      if (!force && !this.contains(x, y)) return false;
+      return this.dispatchTouch(context, doc, x, y, 0, 0, force, "drag");
+    }
+    onTouchUp(context, doc, x, y, dx, dy, force) {
+      if (!force && !this.contains(x, y)) return false;
+      return this.dispatchTouch(context, doc, x, y, dx, dy, force, "up");
+    }
+    onTouchCancel(context, doc, x, y, force) {
+      if (!force && !this.contains(x, y)) return false;
+      return this.dispatchTouch(context, doc, x, y, 0, 0, force, "cancel");
+    }
+    /**
+     * The shared body of all four, mirroring the reference's single loop.
+     *
+     * The reference keeps components, touch handlers and touch expressions in one list and
+     * switches on type; here they live in three collections, so the loop is unrolled but
+     * the order and the coordinate spaces are the same: children first (window coords),
+     * then this component's own consumers (local coords).
+     */
+    dispatchTouch(context, doc, x, y, dx, dy, force, phase) {
+      const loc = this.getLocationInWindow();
+      const lx = x - loc[0];
+      const ly = y - loc[1];
       let handled = false;
-      const cx = x - this.mX - this.mPaddingLeft;
-      const cy = y - this.mY - this.mPaddingTop;
-      for (const child of this.mChildrenComponents) {
-        if (child instanceof _LayoutComponent) {
-          handled = child.onTouchDown(context, doc, cx, cy) || handled;
-        }
+      let componentHandled = false;
+      for (let i = this.mChildrenComponents.length - 1; i >= 0; i--) {
+        const child = this.mChildrenComponents[i];
+        if (!(child instanceof _LayoutComponent)) continue;
+        if (componentHandled) continue;
+        const took = phase === "down" ? child.onTouchDown(context, doc, x, y) : phase === "drag" ? child.onTouchDrag(context, doc, x, y, force) : phase === "up" ? child.onTouchUp(context, doc, x, y, dx, dy, force) : child.onTouchCancel(context, doc, x, y, force);
+        if (took) componentHandled = true;
       }
-      if (x >= this.mX && x <= this.mX + this.mWidth && y >= this.mY && y <= this.mY + this.mHeight) {
-        const lx = x - this.mX;
-        const ly = y - this.mY;
-        for (const op of this.mContentOps) {
-          if (op instanceof TouchExpression) {
-            op.updateVariables(context);
-            op.touchDown(context, lx, ly);
-            doc.appliedTouchOperation(this);
+      for (const op of this.mContentOps) {
+        if (op instanceof TouchExpression) {
+          if (this.deliverToExpression(op, context, lx, ly, dx, dy, phase)) {
+            if (phase === "down") doc.appliedTouchOperation(this);
             handled = true;
           }
         }
-        for (const child of this.mChildrenComponents) {
-          if (!(child instanceof _LayoutComponent)) {
-            handled = this.dispatchTouchDownToOps(child.getList(), context, doc, lx, ly) || handled;
+      }
+      for (const child of this.mChildrenComponents) {
+        if (!(child instanceof _LayoutComponent)) {
+          if (this.dispatchToOps(child.getList(), context, doc, lx, ly, dx, dy, phase)) {
+            handled = true;
           }
         }
-        for (const mod of this.mComponentModifiers) {
-          if (mod instanceof TouchDownModifier) {
-            mod.onTouchDown(context);
+      }
+      for (const mod of this.mComponentModifiers) {
+        if (phase === "down" && mod instanceof TouchDownModifier) {
+          mod.onTouchDown(context);
+          handled = true;
+        } else if (phase === "up" && mod instanceof TouchUpModifier) {
+          mod.onTouchUp(context);
+          handled = true;
+        } else if (phase === "cancel" && mod instanceof TouchCancelModifier) {
+          mod.onTouchCancel(context);
+          handled = true;
+        }
+      }
+      if (this.mScrollModifier) {
+        if (phase === "down") {
+          this.mScrollModifier.onTouchDown(context, lx, ly);
+          doc.appliedTouchOperation(this);
+          handled = true;
+        } else if (phase === "drag") {
+          if (this.mScrollModifier.onTouchDrag(context, lx, ly)) {
+            handled = true;
+          }
+        } else if (phase === "up") {
+          if (this.mScrollModifier.onTouchUp(context, lx, ly, dx, dy)) {
+            handled = true;
+          }
+        } else if (this.mScrollModifier.onTouchCancel(context, lx, ly)) {
+          handled = true;
+        }
+      }
+      return componentHandled || handled;
+    }
+    /** One touch phase on a single expression. Only `down` is bounds-checked, as upstream. */
+    deliverToExpression(op, context, lx, ly, dx, dy, phase) {
+      op.updateVariables(context);
+      if (phase === "down") {
+        op.touchDown(context, lx, ly);
+      } else if (phase === "drag") {
+        op.touchDrag(context, lx, ly);
+      } else if (phase === "up") {
+        op.touchUp(context, lx, ly, dx, dy);
+      } else {
+        op.touchUp(context, lx, ly, 0, 0);
+      }
+      return true;
+    }
+    /** Recurse into a non-layout child's operations looking for touch expressions. */
+    dispatchToOps(ops, context, doc, lx, ly, dx, dy, phase) {
+      let handled = false;
+      for (const op of ops) {
+        if (op instanceof TouchExpression) {
+          this.deliverToExpression(op, context, lx, ly, dx, dy, phase);
+          if (phase === "down") doc.appliedTouchOperation(this);
+          handled = true;
+        } else if (typeof op.getList === "function") {
+          if (this.dispatchToOps(
+            op.getList(),
+            context,
+            doc,
+            lx,
+            ly,
+            dx,
+            dy,
+            phase
+          )) {
             handled = true;
           }
         }
@@ -10464,8 +15972,21 @@ ${inner}`;
     constructor() {
       super(...arguments);
       this.mCachedWrapSize = new Size();
+      this.mLastMeasurePass = null;
+      this.mLastMinW = -1;
+      this.mLastMaxW = -1;
+      this.mLastMinH = -1;
+      this.mLastMaxH = -1;
     }
     measure(context, minWidth, maxWidth, minHeight, maxHeight, measure) {
+      if (this.mLastMeasurePass === measure && this.mLastMinW === minWidth && this.mLastMaxW === maxWidth && this.mLastMinH === minHeight && this.mLastMaxH === maxHeight && !this.mNeedsMeasure) {
+        return;
+      }
+      this.mLastMeasurePass = measure;
+      this.mLastMinW = minWidth;
+      this.mLastMaxW = maxWidth;
+      this.mLastMinH = minHeight;
+      this.mLastMaxH = maxHeight;
       const selfMeasure = measure.get(this);
       this.refreshPadding();
       const padding_w = this.mPaddingLeft + this.mPaddingRight;
@@ -10497,8 +16018,10 @@ ${inner}`;
       }
       selfMeasure.setW(w);
       selfMeasure.setH(h);
-      const horizontalWrap = wMod?.getType() === WidthModifier.WRAP;
-      const verticalWrap = hMod?.getType() === HeightModifier.WRAP;
+      const widthWeightUnpinned = wMod?.getType() === WidthModifier.WEIGHT && minWidth <= this.mPadBeforeWidth;
+      const heightWeightUnpinned = hMod?.getType() === HeightModifier.WEIGHT && minHeight <= this.mPadBeforeHeight;
+      const horizontalWrap = wMod?.getType() === WidthModifier.WRAP || widthWeightUnpinned;
+      const verticalWrap = hMod?.getType() === HeightModifier.WRAP || heightWeightUnpinned;
       if (horizontalWrap || verticalWrap) {
         this.mCachedWrapSize.clear();
         const childMaxW = contentExtent(horizontalWrap ? maxWidth : w, padding_w);
@@ -10557,9 +16080,17 @@ ${inner}`;
         if (isVertical) {
           this.mScrollHostDimension = hostH;
           this.mScrollContentDimension = this.mCachedWrapSize.getHeight();
+          scrollMod.setVerticalScrollDimension(
+            this.mScrollHostDimension,
+            this.mScrollContentDimension
+          );
         } else {
           this.mScrollHostDimension = hostW;
           this.mScrollContentDimension = this.mCachedWrapSize.getWidth();
+          scrollMod.setHorizontalScrollDimension(
+            this.mScrollHostDimension,
+            this.mScrollContentDimension
+          );
         }
         const childMaxW = isVertical ? contentExtent(w, padding_w) : Math.max(contentExtent(w, padding_w), this.mScrollContentDimension);
         const childMaxH = isVertical ? Math.max(contentExtent(h, padding_h), this.mScrollContentDimension) : contentExtent(h, padding_h);
@@ -10621,9 +16152,26 @@ ${inner}`;
      *  PIXELS behavior so authored-in-px documents are untouched. */
     getDpBehaviorScale(context) {
       const ctx = context.getContext();
-      if (ctx.getDensityBehavior() !== DENSITY_BEHAVIOR_DP) return 1;
+      if (ctx.getDensityBehavior() !== RemoteContext.DENSITY_BEHAVIOR_DP) return 1;
       const d = ctx.getDensity();
       return Number.isNaN(d) || d <= 0 ? 1 : d;
+    }
+    /**
+     * `spacedBy` in physical pixels.
+     *
+     * Spacing is authored in dp but only scales when the document declares DENSITY_BEHAVIOR_DP
+     * — note `== DP`, not the `!= PIXELS` the dimension modifiers use. Under the default
+     * LEGACY behaviour the reference does not scale spacing either, so this returns the raw
+     * value for almost every document in the corpus.
+     *
+     * Takes a PaintContext because that is all the layout managers are handed.
+     */
+    spacedByPx(context, spacedBy) {
+      if (context.getDensityBehavior?.() !== RemoteContext.DENSITY_BEHAVIOR_DP) {
+        return spacedBy;
+      }
+      const density = context.getDensity();
+      return density > 0 && !Number.isNaN(density) ? spacedBy * density : spacedBy;
     }
   };
 
@@ -10833,7 +16381,7 @@ ${inner}`;
         }
       }
       if (visibleChildren > 0) {
-        size.setWidth(size.getWidth() + this.mSpacedBy * this.getDpBehaviorScale(context) * (visibleChildren - 1));
+        size.setWidth(size.getWidth() + this.spacedByPx(context, this.mSpacedBy) * (visibleChildren - 1));
       }
     }
     // --- Compute size ---
@@ -10888,7 +16436,6 @@ ${inner}`;
         }
       }
       if (hasWeights) {
-        const dp = this.getDpScale(context);
         const availableSpace = selfWidth - nonWeightWidth;
         for (const child of components) {
           if (!(child instanceof LayoutComponent && child.hasWidthWeight())) continue;
@@ -10898,11 +16445,11 @@ ${inner}`;
           let childWidth = weight * availableSpace / totalWeights;
           const wIn = child.getWidthInModifier();
           if (wIn) {
-            if (wIn.getMin() >= 0) childWidth = Math.max(wIn.getMin() * dp, childWidth);
-            if (wIn.getMax() >= 0) childWidth = Math.min(wIn.getMax() * dp, childWidth);
+            if (wIn.getMin() >= 0) childWidth = Math.max(wIn.getMin(), childWidth);
+            if (wIn.getMax() >= 0) childWidth = Math.min(wIn.getMax(), childWidth);
           }
           cm.setW(childWidth);
-          child.measure(context, childWidth, childWidth, 0, selfHeight, measure);
+          child.measure(context, childWidth, childWidth, cm.getH(), cm.getH(), measure);
         }
       }
       let childrenWidth = 0;
@@ -10915,7 +16462,7 @@ ${inner}`;
         childrenHeight = Math.max(childrenHeight, cm.getH());
         visibleChildren++;
       }
-      childrenWidth += this.mSpacedBy * this.getDpBehaviorScale(context) * Math.max(0, visibleChildren - 1);
+      childrenWidth += this.spacedByPx(context, this.mSpacedBy) * Math.max(0, visibleChildren - 1);
       let tx = 0;
       let horizontalGap = 0;
       switch (this.mHorizontalPositioning) {
@@ -10980,7 +16527,7 @@ ${inner}`;
         if (this.mHorizontalPositioning === _RowLayout.SPACE_BETWEEN || this.mHorizontalPositioning === _RowLayout.SPACE_AROUND || this.mHorizontalPositioning === _RowLayout.SPACE_EVENLY) {
           tx += horizontalGap;
         }
-        tx += this.mSpacedBy * this.getDpBehaviorScale(context);
+        tx += this.spacedByPx(context, this.mSpacedBy);
       }
       if (size !== null) {
         size.setWidth(childrenWidth);
@@ -11087,7 +16634,7 @@ ${inner}`;
         }
       }
       if (visibleChildren > 0) {
-        size.setHeight(size.getHeight() + this.mSpacedBy * this.getDpBehaviorScale(context) * (visibleChildren - 1));
+        size.setHeight(size.getHeight() + this.spacedByPx(context, this.mSpacedBy) * (visibleChildren - 1));
       }
     }
     computeSize(context, minWidth, maxWidth, minHeight, maxHeight, measure) {
@@ -11154,7 +16701,6 @@ ${inner}`;
         }
       }
       if (hasWeights) {
-        const dp = this.getDpScale(context);
         const availableSpace = selfHeight - nonWeightHeight;
         for (const child of children) {
           if (!(child instanceof LayoutComponent && child.hasHeightWeight())) continue;
@@ -11164,11 +16710,11 @@ ${inner}`;
           let childHeight = weight * availableSpace / totalWeights;
           const hIn = child.getHeightInModifier();
           if (hIn) {
-            if (hIn.getMin() >= 0) childHeight = Math.max(hIn.getMin() * dp, childHeight);
-            if (hIn.getMax() >= 0) childHeight = Math.min(hIn.getMax() * dp, childHeight);
+            if (hIn.getMin() >= 0) childHeight = Math.max(hIn.getMin(), childHeight);
+            if (hIn.getMax() >= 0) childHeight = Math.min(hIn.getMax(), childHeight);
           }
           cm.setH(childHeight);
-          child.measure(context, 0, selfWidth, childHeight, childHeight, measure);
+          child.measure(context, cm.getW(), cm.getW(), cm.getH(), cm.getH(), measure);
         }
       }
       let childrenWidth = 0;
@@ -11181,7 +16727,7 @@ ${inner}`;
         childrenHeight += cm.getH();
         visibleChildren++;
       }
-      childrenHeight += this.mSpacedBy * this.getDpBehaviorScale(context) * Math.max(0, visibleChildren - 1);
+      childrenHeight += this.spacedByPx(context, this.mSpacedBy) * Math.max(0, visibleChildren - 1);
       let ty = 0;
       let verticalGap = 0;
       switch (this.mVerticalPositioning) {
@@ -11246,7 +16792,7 @@ ${inner}`;
         if (this.mVerticalPositioning === _ColumnLayout.SPACE_BETWEEN || this.mVerticalPositioning === _ColumnLayout.SPACE_AROUND || this.mVerticalPositioning === _ColumnLayout.SPACE_EVENLY) {
           ty += verticalGap;
         }
-        ty += this.mSpacedBy * this.getDpBehaviorScale(context);
+        ty += this.spacedByPx(context, this.mSpacedBy);
       }
     }
     write(buffer) {
@@ -11609,7 +17155,7 @@ ${inner}`;
       }
       if (run) {
         for (const op of this.mList) {
-          context.incrementOpCount();
+          context.incrementOpCount(op);
           if (op instanceof _ConditionalOperations) {
             op.paint(paintContext);
           } else {
@@ -11758,11 +17304,244 @@ ${inner}`;
   _PathAppend.OP_CODE = 160;
   var PathAppend = _PathAppend;
 
+  // third_party/remote-compose-player/src/core/operations/utilities/PathGenerator.ts
+  var MOVE_BITS = 10 | -8388608 | 0;
+  var CUBIC_BITS = 14 | -8388608 | 0;
+  var CLOSE_BITS = 15 | -8388608 | 0;
+  var PATH_MONOTONIC = 2;
+  var PATH_LINEAR = 4;
+  var PATH_MODE_MASK = 6;
+  var fr = Math.fround;
+  var PathBuf = class {
+    constructor(bufferSize) {
+      this.mSize = 0;
+      this.mCx = 0;
+      this.mCy = 0;
+      this.mPath = new Int32Array(Math.max(10, bufferSize));
+    }
+    reset() {
+      this.mSize = 0;
+    }
+    ensure(extra) {
+      if (this.mSize + extra <= this.mPath.length) return;
+      const grown = new Int32Array(Math.max(this.mPath.length * 2, this.mSize + extra));
+      grown.set(this.mPath.subarray(0, this.mSize));
+      this.mPath = grown;
+    }
+    moveTo(x, y) {
+      this.ensure(3);
+      this.mPath[this.mSize++] = MOVE_BITS;
+      this.mPath[this.mSize++] = floatToRawIntBits(fr(x));
+      this.mPath[this.mSize++] = floatToRawIntBits(fr(y));
+      this.mCx = fr(x);
+      this.mCy = fr(y);
+    }
+    cubicTo(x1, y1, x2, y2, x3, y3) {
+      this.ensure(9);
+      this.mPath[this.mSize++] = CUBIC_BITS;
+      this.mPath[this.mSize++] = floatToRawIntBits(this.mCx);
+      this.mPath[this.mSize++] = floatToRawIntBits(this.mCy);
+      this.mPath[this.mSize++] = floatToRawIntBits(fr(x1));
+      this.mPath[this.mSize++] = floatToRawIntBits(fr(y1));
+      this.mPath[this.mSize++] = floatToRawIntBits(fr(x2));
+      this.mPath[this.mSize++] = floatToRawIntBits(fr(y2));
+      this.mPath[this.mSize++] = floatToRawIntBits(fr(x3));
+      this.mPath[this.mSize++] = floatToRawIntBits(fr(y3));
+      this.mCx = fr(x3);
+      this.mCy = fr(y3);
+    }
+    closePath() {
+      this.ensure(1);
+      this.mPath[this.mSize++] = CLOSE_BITS;
+    }
+    copyPoints() {
+      return this.mPath.slice(0, this.mSize);
+    }
+  };
+  function segments(x, y, segs, n, h, dxSeg, dySeg) {
+    for (let i0 = 0; i0 < segs; i0++) {
+      const i1 = (i0 + 1) % n;
+      const sx = fr(x[i1] - x[i0]);
+      const sy = fr(y[i1] - y[i0]);
+      let dist = fr(Math.hypot(sx, sy));
+      if (dist === 0) dist = 1e-12;
+      h[i0] = dist;
+      dxSeg[i0] = fr(sx / dist);
+      dySeg[i0] = fr(sy / dist);
+    }
+  }
+  function monotoneTangents(d, delta, h, loop) {
+    const segs = delta.length;
+    const n = loop ? segs : segs + 1;
+    for (let i = 0; i < n; i++) {
+      const prev = ((i - 1 + segs) % segs + segs) % segs;
+      const next = i % segs;
+      if (!loop && i === 0) {
+        d[i] = delta[0];
+      } else if (!loop && i === n - 1) {
+        d[i] = delta[segs - 1];
+      } else {
+        const dp = delta[prev];
+        const dn = delta[next];
+        if (dp === 0 || dn === 0 || Math.sign(dp) !== Math.sign(dn)) {
+          d[i] = 0;
+        } else {
+          const w1 = fr(fr(2 * h[next]) + h[prev]);
+          const w2 = fr(h[next] + fr(2 * h[prev]));
+          d[i] = fr(fr(w1 + w2) / fr(fr(w1 / dp) + fr(w2 / dn)));
+        }
+      }
+    }
+    for (let i = 0; i < segs; i++) {
+      if (delta[i] === 0) {
+        d[i] = 0;
+        d[(i + 1) % n] = 0;
+      } else {
+        const a = fr(d[i] / delta[i]);
+        const b = fr(d[(i + 1) % n] / delta[i]);
+        const s = fr(fr(a * a) + fr(b * b));
+        if (s > 9) {
+          const t = fr(3 / fr(Math.sqrt(s)));
+          d[i] = fr(fr(t * a) * delta[i]);
+          d[(i + 1) % n] = fr(fr(t * b) * delta[i]);
+        }
+      }
+    }
+  }
+  function smoothTangents(d, delta, h, loop) {
+    const segs = delta.length;
+    const n = loop ? segs : segs + 1;
+    if (loop) {
+      for (let i = 0; i < n; i++) {
+        const im1 = ((i - 1 + segs) % segs + segs) % segs;
+        const ip0 = i % segs;
+        d[i] = fr(fr(fr(h[im1] * delta[ip0]) + fr(h[ip0] * delta[im1])) / fr(h[im1] + h[ip0]));
+      }
+    } else {
+      d[0] = delta[0];
+      d[n - 1] = delta[segs - 1];
+      for (let i = 1; i < n - 1; i++) {
+        const hm1 = h[i - 1];
+        const hi = h[i];
+        d[i] = fr(fr(fr(hm1 * delta[i]) + fr(hi * delta[i - 1])) / fr(hm1 + hi));
+      }
+    }
+  }
+  var Scratch = class {
+    constructor() {
+      this.h = new Float32Array(0);
+      this.dxSeg = new Float32Array(0);
+      this.dySeg = new Float32Array(0);
+      this.dxTan = new Float32Array(0);
+      this.dyTan = new Float32Array(0);
+      this.path = new PathBuf(10);
+    }
+    fit(segs, loop, n) {
+      if (segs !== this.h.length) {
+        this.path = new PathBuf(n * 10);
+        this.h = new Float32Array(segs);
+        this.dxSeg = new Float32Array(segs);
+        this.dySeg = new Float32Array(segs);
+        const tans = loop ? segs : segs + 1;
+        this.dxTan = new Float32Array(tans);
+        this.dyTan = new Float32Array(tans);
+      }
+    }
+  };
+  var PathGenerator = class {
+    constructor() {
+      this.mMonotonic = new Scratch();
+      this.mSpline = new Scratch();
+      this.mLinear = new PathBuf(10);
+    }
+    /** Length of the buffer `getPath` will fill — the reference's `getReturnLength`. */
+    getReturnLength(len, loop) {
+      let ret = 3;
+      ret += loop ? len * 9 + 1 : (len - 1) * 9;
+      return ret;
+    }
+    /**
+     * Build the path for the given sampled points.
+     *
+     * `mode` is the already-masked `flags & 0x6`; anything that is not LINEAR or MONOTONIC
+     * falls through to the spline, matching the reference's `default:` branch.
+     */
+    getPath(x, y, mode, loop) {
+      switch (mode) {
+        case PATH_LINEAR:
+          return this.linearPath(x, y, loop);
+        case PATH_MONOTONIC:
+          return this.curvePath(x, y, loop, this.mMonotonic, true);
+        default:
+          return this.curvePath(x, y, loop, this.mSpline, false);
+      }
+    }
+    /** Straight segments, emitted as cubics whose controls sit on the end points. */
+    linearPath(x, y, loop) {
+      const n = x.length;
+      this.mLinear.reset();
+      if (n === 0) return this.mLinear.copyPoints();
+      this.mLinear.moveTo(x[0], y[0]);
+      if (n === 1) return this.mLinear.copyPoints();
+      const segs = loop ? n : n - 1;
+      for (let i0 = 0; i0 < segs; i0++) {
+        const i1 = (i0 + 1) % n;
+        this.mLinear.cubicTo(x[i0], y[i0], x[i1], y[i1], x[i1], y[i1]);
+      }
+      if (loop) this.mLinear.closePath();
+      return this.mLinear.copyPoints();
+    }
+    /**
+     * Shared body of the spline and monotonic generators. They differ only in which tangent
+     * rule runs and in whether the control points are computed in double (monotonic) or
+     * float (spline) — see the precision note at the top of the file.
+     */
+    curvePath(x, y, loop, sc, monotonic) {
+      const n = x.length;
+      const segs = loop ? n : n - 1;
+      sc.fit(segs, loop, n);
+      sc.path.reset();
+      if (n === 0) return sc.path.copyPoints();
+      sc.path.moveTo(x[0], y[0]);
+      if (n === 1) return sc.path.copyPoints();
+      segments(x, y, segs, n, sc.h, sc.dxSeg, sc.dySeg);
+      if (monotonic) {
+        monotoneTangents(sc.dxTan, sc.dxSeg, sc.h, loop);
+        monotoneTangents(sc.dyTan, sc.dySeg, sc.h, loop);
+      } else {
+        smoothTangents(sc.dxTan, sc.dxSeg, sc.h, loop);
+        smoothTangents(sc.dyTan, sc.dySeg, sc.h, loop);
+      }
+      for (let i0 = 0; i0 < segs; i0++) {
+        const i1 = (i0 + 1) % n;
+        const hi = sc.h[i0];
+        let c1x, c1y, c2x, c2y;
+        if (monotonic) {
+          c1x = x[i0] + sc.dxTan[i0] * hi / 3;
+          c1y = y[i0] + sc.dyTan[i0] * hi / 3;
+          c2x = x[i1] - sc.dxTan[i1] * hi / 3;
+          c2y = y[i1] - sc.dyTan[i1] * hi / 3;
+        } else {
+          c1x = fr(x[i0] + fr(fr(sc.dxTan[i0] * hi) / 3));
+          c1y = fr(y[i0] + fr(fr(sc.dyTan[i0] * hi) / 3));
+          c2x = fr(x[i1] - fr(fr(sc.dxTan[i1] * hi) / 3));
+          c2y = fr(y[i1] - fr(fr(sc.dyTan[i1] * hi) / 3));
+        }
+        sc.path.cubicTo(c1x, c1y, c2x, c2y, x[i1], y[i1]);
+      }
+      if (loop) sc.path.closePath();
+      return sc.path.copyPoints();
+    }
+  };
+
   // third_party/remote-compose-player/src/core/operations/PathExpression.ts
   var ARR_SENTINEL3 = 2 ** 42;
   var _PathExpression = class _PathExpression extends Operation {
     constructor(id, flags, minBits, maxBits, countBits, exprX, exprY) {
       super();
+      // One generator per operation, as the reference keeps one per PathExpression — the
+      // scratch arrays inside it are reused across frames.
+      this.mPathGenerator = new PathGenerator();
       this.mId = id;
       this.mFlags = flags;
       this.mMinBits = minBits;
@@ -11775,23 +17554,23 @@ ${inner}`;
     write(_buffer) {
     }
     registerListening(context) {
-      const listen = (b) => {
+      const listen2 = (b) => {
         if (isNaNBits(b)) context.listensTo(idFromBits(b), this);
       };
-      listen(this.mMinBits);
-      listen(this.mMaxBits);
-      listen(this.mCountBits);
-      const OFFSET3 = _PathExpression.OFFSET;
+      listen2(this.mMinBits);
+      listen2(this.mMaxBits);
+      listen2(this.mCountBits);
+      const OFFSET4 = _PathExpression.OFFSET;
       const isOp = (b) => {
         if (!isNaNBits(b)) return false;
         const id = idFromBits(b);
-        return id > OFFSET3 && id <= OFFSET3 + 79 || id === _PathExpression.VAR1_ID || (id & _PathExpression.ID_REGION_MASK) === _PathExpression.ID_REGION_ARRAY;
+        return id > OFFSET4 && id <= OFFSET4 + 79 || id === _PathExpression.VAR1_ID || (id & _PathExpression.ID_REGION_MASK) === _PathExpression.ID_REGION_ARRAY;
       };
       for (const b of this.mExprX) {
-        if (isNaNBits(b) && !isOp(b)) listen(b);
+        if (isNaNBits(b) && !isOp(b)) listen2(b);
       }
       for (const b of this.mExprY) {
-        if (isNaNBits(b) && !isOp(b)) listen(b);
+        if (isNaNBits(b) && !isOp(b)) listen2(b);
       }
     }
     apply(context) {
@@ -11824,7 +17603,8 @@ ${inner}`;
           yData[i] = this.evalRPN(exprY, val, ca);
         }
       }
-      const pathData = this.splinePath(xData, yData, loop);
+      const mode = this.mFlags & PATH_MODE_MASK;
+      const pathData = this.mPathGenerator.getPath(xData, yData, mode, loop);
       context.loadPathData(this.mId, this.mWinding, pathData);
     }
     rv(bits, ctx) {
@@ -12081,73 +17861,6 @@ ${inner}`;
         }
       }
       return sp >= 0 ? s[sp] : 0;
-    }
-    // Emits resolved path data as raw float32 int bits: command markers as
-    // their NaN-marker bits, coordinates via floatToRawIntBits. Internal float
-    // math is unchanged; only the final emitted array is bits.
-    splinePath(x, y, loop) {
-      const n = x.length;
-      if (n === 0) return new Int32Array(0);
-      const segs = loop ? n : n - 1;
-      const out = new Int32Array(3 + segs * 9 + (loop ? 1 : 0));
-      let p = 0;
-      out[p++] = _PathExpression.MOVE_BITS;
-      out[p++] = floatToRawIntBits(x[0]);
-      out[p++] = floatToRawIntBits(y[0]);
-      if (n <= 1) return out.subarray(0, p);
-      const h = new Float32Array(segs);
-      const dxS = new Float32Array(segs);
-      const dyS = new Float32Array(segs);
-      for (let i = 0; i < segs; i++) {
-        const i1 = (i + 1) % n;
-        const sx = x[i1] - x[i], sy = y[i1] - y[i];
-        let d = Math.hypot(sx, sy);
-        if (d === 0) d = 1e-12;
-        h[i] = d;
-        dxS[i] = sx / d;
-        dyS[i] = sy / d;
-      }
-      const tn = loop ? segs : segs + 1;
-      const dxT = new Float32Array(tn);
-      const dyT = new Float32Array(tn);
-      this.smoothTan(dxT, dxS, h, loop);
-      this.smoothTan(dyT, dyS, h, loop);
-      let cx = x[0], cy = y[0];
-      for (let i = 0; i < segs; i++) {
-        const i1 = (i + 1) % n;
-        const ti1 = loop ? (i + 1) % segs : i + 1;
-        const hi = h[i];
-        out[p++] = _PathExpression.CUBIC_BITS;
-        out[p++] = floatToRawIntBits(cx);
-        out[p++] = floatToRawIntBits(cy);
-        out[p++] = floatToRawIntBits(x[i] + dxT[i] * hi / 3);
-        out[p++] = floatToRawIntBits(y[i] + dyT[i] * hi / 3);
-        out[p++] = floatToRawIntBits(x[i1] - dxT[ti1] * hi / 3);
-        out[p++] = floatToRawIntBits(y[i1] - dyT[ti1] * hi / 3);
-        out[p++] = floatToRawIntBits(x[i1]);
-        out[p++] = floatToRawIntBits(y[i1]);
-        cx = x[i1];
-        cy = y[i1];
-      }
-      if (loop) out[p++] = _PathExpression.CLOSE_BITS;
-      return out.subarray(0, p);
-    }
-    smoothTan(d, delta, h, loop) {
-      const segs = delta.length;
-      const n = loop ? segs : segs + 1;
-      if (loop) {
-        for (let i = 0; i < n; i++) {
-          const im = (i - 1 + segs) % segs;
-          const ip = i % segs;
-          d[i] = (h[im] * delta[ip] + h[ip] * delta[im]) / (h[im] + h[ip]);
-        }
-      } else {
-        d[0] = delta[0];
-        d[n - 1] = delta[segs - 1];
-        for (let i = 1; i < n - 1; i++) {
-          d[i] = (h[i - 1] * delta[i] + h[i] * delta[i - 1]) / (h[i - 1] + h[i]);
-        }
-      }
     }
     deepToString(indent) {
       return `${indent}PathExpression`;
@@ -12465,20 +18178,20 @@ ${inner}`;
   var Matrix = _Matrix;
 
   // third_party/remote-compose-player/src/core/operations/utilities/MatrixOperations.ts
-  var OFFSET = 3276800;
+  var OFFSET2 = 3276800;
   function asNan2(v) {
     return intBitsToFloat(v | -8388608);
   }
-  function fromNaN(v) {
+  function fromNaN2(v) {
     return floatToRawIntBits(v) & 4194303;
   }
-  var ID_REGION_ARRAY = 2097152;
+  var ID_REGION_ARRAY3 = 2097152;
   function isDataVariable(v) {
-    const id = fromNaN(v);
-    return (id & 7340032) === ID_REGION_ARRAY;
+    const id = fromNaN2(v);
+    return (id & 7340032) === ID_REGION_ARRAY3;
   }
-  function isDataVariableBits(b) {
-    return (idFromBits(b) & 7340032) === ID_REGION_ARRAY;
+  function isDataVariableBits2(b) {
+    return (idFromBits(b) & 7340032) === ID_REGION_ARRAY3;
   }
   var _MatrixOperations = class _MatrixOperations {
     constructor() {
@@ -12493,17 +18206,17 @@ ${inner}`;
     static isOperator(v) {
       if (Number.isNaN(v)) {
         if (isDataVariable(v)) return false;
-        const pos = fromNaN(v);
-        return pos > OFFSET && pos <= _MatrixOperations.LAST_OP;
+        const pos = fromNaN2(v);
+        return pos > OFFSET2 && pos <= _MatrixOperations.LAST_OP;
       }
       return false;
     }
     /** Bit-aware operator test: true if raw float32 int bits encode an operator token. */
     static isOperatorBits(b) {
       if (isNaNBits(b)) {
-        if (isDataVariableBits(b)) return false;
+        if (isDataVariableBits2(b)) return false;
         const pos = idFromBits(b);
-        return pos > OFFSET && pos <= _MatrixOperations.LAST_OP;
+        return pos > OFFSET2 && pos <= _MatrixOperations.LAST_OP;
       }
       return false;
     }
@@ -12518,7 +18231,7 @@ ${inner}`;
       for (let i = 0; i < exp.length; i++) {
         const v = exp[i];
         if (Number.isNaN(v)) {
-          this.opEval(i, fromNaN(v));
+          this.opEval(i, fromNaN2(v));
         }
       }
       return this.mMatrices[0];
@@ -12608,46 +18321,46 @@ ${inner}`;
       }
     }
   };
-  _MatrixOperations.OFFSET = OFFSET;
-  _MatrixOperations.LAST_OP = OFFSET + 54;
+  _MatrixOperations.OFFSET = OFFSET2;
+  _MatrixOperations.LAST_OP = OFFSET2 + 54;
   // Operator NaN constants
-  _MatrixOperations.IDENTITY = asNan2(OFFSET + 1);
-  _MatrixOperations.ROT_X = asNan2(OFFSET + 2);
-  _MatrixOperations.ROT_Y = asNan2(OFFSET + 3);
-  _MatrixOperations.ROT_Z = asNan2(OFFSET + 4);
-  _MatrixOperations.TRANSLATE_X = asNan2(OFFSET + 5);
-  _MatrixOperations.TRANSLATE_Y = asNan2(OFFSET + 6);
-  _MatrixOperations.TRANSLATE_Z = asNan2(OFFSET + 7);
-  _MatrixOperations.TRANSLATE2 = asNan2(OFFSET + 8);
-  _MatrixOperations.TRANSLATE3 = asNan2(OFFSET + 9);
-  _MatrixOperations.SCALE_X = asNan2(OFFSET + 10);
-  _MatrixOperations.SCALE_Y = asNan2(OFFSET + 11);
-  _MatrixOperations.SCALE_Z = asNan2(OFFSET + 12);
-  _MatrixOperations.SCALE2 = asNan2(OFFSET + 13);
-  _MatrixOperations.SCALE3 = asNan2(OFFSET + 14);
-  _MatrixOperations.MUL = asNan2(OFFSET + 15);
-  _MatrixOperations.ROT_PZ = asNan2(OFFSET + 16);
-  _MatrixOperations.ROT_AXIS = asNan2(OFFSET + 17);
-  _MatrixOperations.PROJECTION = asNan2(OFFSET + 18);
+  _MatrixOperations.IDENTITY = asNan2(OFFSET2 + 1);
+  _MatrixOperations.ROT_X = asNan2(OFFSET2 + 2);
+  _MatrixOperations.ROT_Y = asNan2(OFFSET2 + 3);
+  _MatrixOperations.ROT_Z = asNan2(OFFSET2 + 4);
+  _MatrixOperations.TRANSLATE_X = asNan2(OFFSET2 + 5);
+  _MatrixOperations.TRANSLATE_Y = asNan2(OFFSET2 + 6);
+  _MatrixOperations.TRANSLATE_Z = asNan2(OFFSET2 + 7);
+  _MatrixOperations.TRANSLATE2 = asNan2(OFFSET2 + 8);
+  _MatrixOperations.TRANSLATE3 = asNan2(OFFSET2 + 9);
+  _MatrixOperations.SCALE_X = asNan2(OFFSET2 + 10);
+  _MatrixOperations.SCALE_Y = asNan2(OFFSET2 + 11);
+  _MatrixOperations.SCALE_Z = asNan2(OFFSET2 + 12);
+  _MatrixOperations.SCALE2 = asNan2(OFFSET2 + 13);
+  _MatrixOperations.SCALE3 = asNan2(OFFSET2 + 14);
+  _MatrixOperations.MUL = asNan2(OFFSET2 + 15);
+  _MatrixOperations.ROT_PZ = asNan2(OFFSET2 + 16);
+  _MatrixOperations.ROT_AXIS = asNan2(OFFSET2 + 17);
+  _MatrixOperations.PROJECTION = asNan2(OFFSET2 + 18);
   // Op codes
-  _MatrixOperations.OP_IDENTITY = OFFSET + 1;
-  _MatrixOperations.OP_ROT_X = OFFSET + 2;
-  _MatrixOperations.OP_ROT_Y = OFFSET + 3;
-  _MatrixOperations.OP_ROT_Z = OFFSET + 4;
-  _MatrixOperations.OP_TRANSLATE_X = OFFSET + 5;
-  _MatrixOperations.OP_TRANSLATE_Y = OFFSET + 6;
-  _MatrixOperations.OP_TRANSLATE_Z = OFFSET + 7;
-  _MatrixOperations.OP_TRANSLATE2 = OFFSET + 8;
-  _MatrixOperations.OP_TRANSLATE3 = OFFSET + 9;
-  _MatrixOperations.OP_SCALE_X = OFFSET + 10;
-  _MatrixOperations.OP_SCALE_Y = OFFSET + 11;
-  _MatrixOperations.OP_SCALE_Z = OFFSET + 12;
-  _MatrixOperations.OP_SCALE2 = OFFSET + 13;
-  _MatrixOperations.OP_SCALE3 = OFFSET + 14;
-  _MatrixOperations.OP_MUL = OFFSET + 15;
-  _MatrixOperations.OP_ROT_PZ = OFFSET + 16;
-  _MatrixOperations.OP_ROT_AXIS = OFFSET + 17;
-  _MatrixOperations.OP_PROJECTION = OFFSET + 18;
+  _MatrixOperations.OP_IDENTITY = OFFSET2 + 1;
+  _MatrixOperations.OP_ROT_X = OFFSET2 + 2;
+  _MatrixOperations.OP_ROT_Y = OFFSET2 + 3;
+  _MatrixOperations.OP_ROT_Z = OFFSET2 + 4;
+  _MatrixOperations.OP_TRANSLATE_X = OFFSET2 + 5;
+  _MatrixOperations.OP_TRANSLATE_Y = OFFSET2 + 6;
+  _MatrixOperations.OP_TRANSLATE_Z = OFFSET2 + 7;
+  _MatrixOperations.OP_TRANSLATE2 = OFFSET2 + 8;
+  _MatrixOperations.OP_TRANSLATE3 = OFFSET2 + 9;
+  _MatrixOperations.OP_SCALE_X = OFFSET2 + 10;
+  _MatrixOperations.OP_SCALE_Y = OFFSET2 + 11;
+  _MatrixOperations.OP_SCALE_Z = OFFSET2 + 12;
+  _MatrixOperations.OP_SCALE2 = OFFSET2 + 13;
+  _MatrixOperations.OP_SCALE3 = OFFSET2 + 14;
+  _MatrixOperations.OP_MUL = OFFSET2 + 15;
+  _MatrixOperations.OP_ROT_PZ = OFFSET2 + 16;
+  _MatrixOperations.OP_ROT_AXIS = OFFSET2 + 17;
+  _MatrixOperations.OP_PROJECTION = OFFSET2 + 18;
   var MatrixOperations = _MatrixOperations;
 
   // third_party/remote-compose-player/src/core/operations/MatrixExpression.ts
@@ -13076,6 +18789,50 @@ ${inner}`;
   _ColorAttribute.COLOR_ALPHA = 6;
   var ColorAttribute = _ColorAttribute;
 
+  // third_party/remote-compose-player/src/core/operations/ImageAttribute.ts
+  var _ImageAttribute = class _ImageAttribute extends Operation {
+    constructor(mOutputId, mImageId, mType, mArgs) {
+      super();
+      this.mOutputId = mOutputId;
+      this.mImageId = mImageId;
+      this.mType = mType;
+      this.mArgs = mArgs;
+    }
+    write(_buffer) {
+    }
+    apply(context) {
+      const bitmap = context.getObject(this.mImageId);
+      if (!(bitmap instanceof BitmapData)) return;
+      let value;
+      switch (this.mType) {
+        case _ImageAttribute.IMAGE_WIDTH:
+          value = bitmap.getWidth();
+          break;
+        case _ImageAttribute.IMAGE_HEIGHT:
+          value = bitmap.getHeight();
+          break;
+        default:
+          throw new Error(`Unknown image attribute ${this.mType}`);
+      }
+      context.loadFloat(this.mOutputId, value);
+    }
+    deepToString(indent) {
+      return `${indent}ImageAttribute(${this.mOutputId}, ${this.mImageId}, ${this.mType}, [${this.mArgs.join(", ")}])`;
+    }
+    static read(buffer, operations) {
+      const outputId = buffer.readInt();
+      const imageId = buffer.readInt();
+      const type = buffer.readShort();
+      const count = buffer.readShort() & 65535;
+      const args = Array.from({ length: count }, () => buffer.readInt());
+      operations.push(new _ImageAttribute(outputId, imageId, type, args));
+    }
+  };
+  _ImageAttribute.OP_CODE = 171;
+  _ImageAttribute.IMAGE_WIDTH = 0;
+  _ImageAttribute.IMAGE_HEIGHT = 1;
+  var ImageAttribute = _ImageAttribute;
+
   // third_party/remote-compose-player/src/core/operations/DataMapLookup.ts
   var TYPE_STRING = 0;
   var TYPE_INT = 1;
@@ -13341,28 +19098,28 @@ ${inner}`;
   var TextSubtext = _TextSubtext;
 
   // third_party/remote-compose-player/src/core/operations/ParticleOperations.ts
-  var OFFSET2 = 3211264;
-  var ID_REGION_MASK = 7340032;
-  var ID_REGION_ARRAY2 = 2097152;
+  var OFFSET3 = 3211264;
+  var ID_REGION_MASK3 = 7340032;
+  var ID_REGION_ARRAY4 = 2097152;
   function isMathOperatorBits(b) {
     if (!isNaNBits(b)) return false;
     const id = idFromBits(b);
-    return id > OFFSET2 && id <= OFFSET2 + 79;
+    return id > OFFSET3 && id <= OFFSET3 + 79;
   }
-  function isDataVariableBits2(b) {
+  function isDataVariableBits3(b) {
     if (!isNaNBits(b)) return false;
     const id = idFromBits(b);
-    return (id & ID_REGION_MASK) === ID_REGION_ARRAY2;
+    return (id & ID_REGION_MASK3) === ID_REGION_ARRAY4;
   }
   var asNan3 = (v) => (v | 4286578688) >>> 0;
-  var CMD1_BITS = asNan3(OFFSET2 + 64) | 0;
-  var CMD2_BITS = asNan3(OFFSET2 + 65) | 0;
-  var NOP_BITS = asNan3(OFFSET2 + 55) | 0;
+  var CMD1_BITS = asNan3(OFFSET3 + 64) | 0;
+  var CMD2_BITS = asNan3(OFFSET3 + 65) | 0;
+  var NOP_BITS = asNan3(OFFSET3 + 55) | 0;
   function resolvePairEquation(src, context, varIds, particle1, particle2) {
     const out = new Int32Array(src.length);
     for (let i = 0; i < src.length; i++) {
       const b = src[i];
-      out[i] = isNaNBits(b) && !isMathOperatorBits(b) && !isDataVariableBits2(b) ? floatToRawIntBits(context.getFloat(idFromBits(b))) : b;
+      out[i] = isNaNBits(b) && !isMathOperatorBits(b) && !isDataVariableBits3(b) ? floatToRawIntBits(context.getFloat(idFromBits(b))) : b;
       if (i + 1 >= src.length) continue;
       for (let k = 0; k < varIds.length; k++) {
         if (!isNaNBits(b) || idFromBits(b) !== varIds[k]) continue;
@@ -13383,7 +19140,7 @@ ${inner}`;
     const out = new Int32Array(src.length);
     for (let i = 0; i < src.length; i++) {
       const b = src[i];
-      if (isNaNBits(b) && !isMathOperatorBits(b) && !isDataVariableBits2(b)) {
+      if (isNaNBits(b) && !isMathOperatorBits(b) && !isDataVariableBits3(b)) {
         out[i] = floatToRawIntBits(context.getFloat(idFromBits(b)));
       } else {
         out[i] = b;
@@ -13394,7 +19151,7 @@ ${inner}`;
   function registerEquationListening(eq, context, op) {
     for (let i = 0; i < eq.length; i++) {
       const b = eq[i];
-      if (isNaNBits(b) && !isMathOperatorBits(b) && !isDataVariableBits2(b)) {
+      if (isNaNBits(b) && !isMathOperatorBits(b) && !isDataVariableBits3(b)) {
         context.listensTo(idFromBits(b), op);
       }
     }
@@ -13543,7 +19300,7 @@ ${inner}`;
             child.markNotDirty();
             child.updateVariables(context);
           }
-          context.incrementOpCount();
+          context.incrementOpCount(child);
           child.apply(context);
         }
       }
@@ -13650,7 +19407,7 @@ ${inner}`;
           child.markNotDirty();
           child.updateVariables(context);
         }
-        context.incrementOpCount();
+        context.incrementOpCount(child);
         child.apply(context);
       }
     }
@@ -13674,7 +19431,7 @@ ${inner}`;
             particle1,
             particle2
           );
-          context.incrementOpCount();
+          context.incrementOpCount(this);
           if (!(FloatExpression.evalRPN(context, cond) > 0)) continue;
           const eq1 = this.mEquations1.map((e) => resolvePairEquation(e, context, varIds, particle1, particle2));
           for (let j = 0; j < varCount; j++) context.loadFloat(varIds[j], particle2[j]);
@@ -13684,11 +19441,13 @@ ${inner}`;
             context.loadFloat(varIds[j], particle1[j]);
           }
           this.runChildren(context);
+          context.incrementOpCount(this);
           for (let j = 0; j < eq2.length && j < varCount; j++) {
             particle2[j] = FloatExpression.evalRPN(context, eq2[j]);
             context.loadFloat(varIds[j], particle2[j]);
           }
           this.runChildren(context);
+          context.incrementOpCount(this);
         }
       }
     }
@@ -13763,7 +19522,7 @@ ${inner}`;
           currentWidth = 0;
         }
         currentRow.push(c);
-        currentWidth += componentWidth;
+        currentWidth += componentWidth + this.spacedByPx(context, this.mSpacedBy);
       }
       return rows;
     }
@@ -13901,6 +19660,7 @@ ${inner}`;
     apply(context) {
       if (context.mMode === "DATA" /* DATA */) {
         for (const op of this.mList) {
+          context.incrementOpCount(op);
           op.apply(context);
         }
         return;
@@ -13911,23 +19671,37 @@ ${inner}`;
       if (step <= 0 || !isFinite(from) || !isFinite(until) || !isFinite(step)) return;
       if (this.mIndexId === 0) {
         for (let i = from; i < until; i += step) {
+          context.incrementOpCount(this);
           for (const op of this.mList) {
-            context.incrementOpCount();
+            context.incrementOpCount(op);
             op.apply(context);
           }
         }
       } else {
         for (let i = from; i < until; i += step) {
           context.loadFloat(this.mIndexId, i);
+          context.incrementOpCount(this);
           for (const op of this.mList) {
             if (op.isDirty() && typeof op.updateVariables === "function") {
               op.updateVariables(context);
             }
-            context.incrementOpCount();
+            context.incrementOpCount(op);
             op.apply(context);
           }
         }
       }
+    }
+    getIndexId() {
+      return this.mIndexId;
+    }
+    getFrom(ctx) {
+      return this.rv(this.mFromBits, ctx);
+    }
+    getStep(ctx) {
+      return this.rv(this.mStepBits, ctx);
+    }
+    getUntil(ctx) {
+      return this.rv(this.mUntilBits, ctx);
     }
     rv(bits, ctx) {
       return isNaNBits(bits) ? ctx.getFloat(idFromBits(bits)) : intBitsToFloat(bits);
@@ -14074,6 +19848,11 @@ ${inner}`;
       this.mNewString = null;
       this.mComputedTextLayout = null;
       this.mPaint = new PaintBundle();
+      this.mLastMeasurePass = null;
+      this.mLastMaxW = -1;
+      this.mLastMaxH = -1;
+      this.mLastSizeW = 0;
+      this.mLastSizeH = 0;
       this.mTextId = textId;
       this.mColor = color;
       this.mColorId = colorId;
@@ -14149,6 +19928,11 @@ ${inner}`;
       this.invalidateMeasure();
     }
     computeWrapSize(context, _minWidth, maxWidth, _minHeight, maxHeight, _horizontalWrap, _verticalWrap, measure, size) {
+      if (this.mLastMeasurePass === measure && this.mLastMaxW === maxWidth && this.mLastMaxH === maxHeight && !this.mNeedsMeasure && this.mNewString === null) {
+        size.setWidth(this.mLastSizeW);
+        size.setHeight(this.mLastSizeH);
+        return;
+      }
       this.mMeasureFontSize = this.mFontSizeValue;
       context.savePaint();
       this.mPaint.reset();
@@ -14173,27 +19957,44 @@ ${inner}`;
         return;
       }
       if (this.mAutosize) {
-        const step = 0.5;
-        const minSize = this.mMinFontSize > 0 ? this.mMinFontSize : 4;
-        const maxSize = this.mMaxFontSize > 0 ? this.mMaxFontSize : 400;
-        let low = minSize;
-        let high = maxSize;
-        let candidate = (low + high) / 2;
-        while (high - low >= step) {
-          this.mPaint.setTextSize(candidate);
+        const stepSize = 0.5;
+        const minFontSize = this.mMinFontSize <= 0 ? 4 : this.mMinFontSize;
+        const maxFontSize = this.mMaxFontSize <= 0 ? 400 : this.mMaxFontSize;
+        let min = minFontSize;
+        let max = maxFontSize;
+        let current = (min + max) / 2;
+        while (max - min >= stepSize) {
+          this.mPaint.setTextSize(current);
           context.replacePaint(this.mPaint);
-          this.textLayout(context, maxWidth, maxHeight, bounds);
-          if (bounds[3] - bounds[1] < maxHeight) low = candidate;
-          else high = candidate;
-          candidate = (low + high) / 2;
+          this.textLayout(context, maxWidth, maxHeight, bounds, true, true);
+          const h2 = bounds[3] - bounds[1];
+          const w2 = bounds[2] - bounds[0];
+          if (h2 >= maxHeight || w2 > maxWidth) {
+            max = current;
+          } else {
+            min = current;
+          }
+          current = (min + max) / 2;
         }
-        candidate = Math.floor((low - minSize) / step) * step + minSize;
-        this.mMeasureFontSize = candidate;
-        this.mFontSizeValue = candidate;
-        this.mPaint.setTextSize(candidate);
+        current = Math.floor((min - minFontSize) / stepSize) * stepSize + minFontSize;
+        if (current + stepSize < maxFontSize) {
+          this.mPaint.setTextSize(current + stepSize);
+          context.replacePaint(this.mPaint);
+          this.textLayout(context, maxWidth, maxHeight, bounds, true, true);
+          const h2 = bounds[3] - bounds[1];
+          const w2 = bounds[2] - bounds[0];
+          if (h2 < maxHeight && w2 <= maxWidth) {
+            current += stepSize;
+          }
+        }
+        this.mFontSizeValue = current;
+        this.mMeasureFontSize = current;
+        this.mPaint.setTextSize(this.mFontSizeValue);
         context.replacePaint(this.mPaint);
+        this.textLayout(context, maxWidth, maxHeight, bounds, true, false);
+      } else {
+        this.textLayout(context, maxWidth, maxHeight, bounds);
       }
-      this.textLayout(context, maxWidth, maxHeight, bounds);
       context.restorePaint();
       const w = bounds[2] - bounds[0];
       const h = bounds[3] - bounds[1];
@@ -14203,6 +20004,11 @@ ${inner}`;
       this.mTextY = -bounds[1];
       this.mTextW = w;
       this.mTextH = h;
+      this.mLastMeasurePass = measure;
+      this.mLastMaxW = maxWidth;
+      this.mLastMaxH = maxHeight;
+      this.mLastSizeW = size.getWidth();
+      this.mLastSizeH = size.getHeight();
     }
     computeSize(context, minWidth, maxWidth, minHeight, maxHeight, measure) {
       super.computeSize(context, minWidth, maxWidth, minHeight, maxHeight, measure);
@@ -14223,10 +20029,10 @@ ${inner}`;
       m.setW(tempSize.getWidth());
       m.setH(tempSize.getHeight());
     }
-    textLayout(context, maxWidth, maxHeight, bounds) {
+    textLayout(context, maxWidth, maxHeight, bounds, forceComplexParam = false, inAutosize = false) {
       if (maxWidth < 0 || maxHeight < 0) return;
       let flags = PaintContext.TEXT_MEASURE_FONT_HEIGHT | PaintContext.TEXT_MEASURE_SPACES;
-      let forceComplex = false;
+      let forceComplex = forceComplexParam;
       if (this.mOverflow === OVERFLOW_START_ELLIPSIS || this.mOverflow === OVERFLOW_MIDDLE_ELLIPSIS || this.mOverflow === OVERFLOW_ELLIPSIS) {
         flags |= PaintContext.TEXT_COMPLEX;
         forceComplex = true;
@@ -14250,7 +20056,11 @@ ${inner}`;
         this.mBaseline = -bounds[1];
       }
       const autosizeNeedsComplex = this.mAutosize && (this.mOverflow === 1 || this.mOverflow === 2) && maxWidth > 0;
-      if (forceComplex || autosizeNeedsComplex || bounds[2] - bounds[0] > maxWidth && this.mMaxLines > 1 && maxWidth > 0) {
+      const wantsComplex = forceComplex || autosizeNeedsComplex || bounds[2] - bounds[0] > maxWidth && this.mMaxLines > 1 && maxWidth > 0;
+      if (wantsComplex) {
+        if (inAutosize) {
+          flags |= 1;
+        }
         this.mComputedTextLayout = context.layoutComplexText(
           this.mTextId,
           0,
@@ -14276,8 +20086,13 @@ ${inner}`;
           bounds[2] = this.mComputedTextLayout.width;
           bounds[3] = this.mComputedTextLayout.naturalHeight ?? this.mComputedTextLayout.height;
         }
-      } else {
+      } else if (maxWidth > 0) {
         this.mComputedTextLayout = null;
+      } else if (this.mComputedTextLayout) {
+        bounds[0] = 0;
+        bounds[1] = 0;
+        bounds[2] = this.mComputedTextLayout.width;
+        bounds[3] = this.mComputedTextLayout.height;
       }
     }
     paintingComponent(paintContext) {
@@ -14308,44 +20123,35 @@ ${inner}`;
         return;
       }
       const length = this.mCachedString.length;
+      const contentW = this.mWidth - this.mPaddingLeft - this.mPaddingRight;
+      const contentH = this.mHeight - this.mPaddingTop - this.mPaddingBottom;
       if (this.mComputedTextLayout) {
         if (this.mOverflow !== OVERFLOW_VISIBLE) {
           paintContext.save();
-          paintContext.clipRect(
-            0,
-            0,
-            this.mWidth - this.mPaddingLeft - this.mPaddingRight,
-            this.mHeight - this.mPaddingTop - this.mPaddingBottom
-          );
-          paintContext.drawComplexText(this.mComputedTextLayout);
+          paintContext.clipRect(0, 0, contentW, contentH);
+          paintContext.drawComplexText(this.mComputedTextLayout, contentW);
           paintContext.restore();
         } else {
-          paintContext.drawComplexText(this.mComputedTextLayout);
+          paintContext.drawComplexText(this.mComputedTextLayout, contentW);
         }
       } else {
         let px = this.mTextX;
         switch (this.mTextAlignValue) {
           case TEXT_ALIGN_CENTER:
-            px = (this.mWidth - this.mPaddingLeft - this.mPaddingRight - this.mTextW) / 2;
+            px = (contentW - this.mTextW) / 2;
             break;
           case TEXT_ALIGN_RIGHT:
           case TEXT_ALIGN_END:
-            px = this.mWidth - this.mPaddingLeft - this.mPaddingRight - this.mTextW;
+            px = contentW - this.mTextW;
             break;
           case TEXT_ALIGN_LEFT:
           case TEXT_ALIGN_START:
           default:
             break;
         }
-        const contentW = this.mWidth - this.mPaddingLeft - this.mPaddingRight;
         if (this.mOverflow !== OVERFLOW_VISIBLE || this.mTextW > contentW) {
           paintContext.save();
-          paintContext.clipRect(
-            0,
-            0,
-            contentW,
-            this.mHeight - this.mPaddingTop - this.mPaddingBottom
-          );
+          paintContext.clipRect(0, 0, contentW, contentH);
           paintContext.drawTextRun(this.mTextId, 0, length, 0, 0, px, this.mTextY, false);
           paintContext.restore();
         } else {
@@ -14707,7 +20513,7 @@ ${inner}`;
           return priority.getPriority();
         }
       }
-      return Number.MAX_VALUE;
+      return 0;
     }
     static sortWithPriorities(components, orientation) {
       const sorted = [...components];
@@ -14735,9 +20541,9 @@ ${inner}`;
       this.computeVisibleChildren(context, maxWidth, maxHeight, false, measure, null);
     }
     internalLayoutMeasure(context, measure) {
-      super.internalLayoutMeasure(context, measure);
       const m = measure.get(this);
       this.computeVisibleChildren(context, m.getW(), m.getH(), false, measure, null);
+      super.internalLayoutMeasure(context, measure);
     }
     computeVisibleChildren(context, maxWidth, maxHeight, horizontalWrap, measure, size) {
       let visibleChildren = 0;
@@ -14754,6 +20560,7 @@ ${inner}`;
           }
         }
         const m = measure.get(c);
+        m.clearVisibilityOverride();
         if (!m.isGone()) {
           if (size !== null) {
             size.setHeight(Math.max(size.getHeight(), m.getH()));
@@ -14768,7 +20575,7 @@ ${inner}`;
         }
       }
       if (this.mChildrenComponents.length > 0 && size !== null) {
-        size.setWidth(size.getWidth() + this.mSpacedBy * this.getDpBehaviorScale(context) * (visibleChildren - 1));
+        size.setWidth(size.getWidth() + this.spacedByPx(context, this.mSpacedBy) * (visibleChildren - 1));
       }
       let childrenWidth = 0;
       let childrenHeight = 0;
@@ -14791,6 +20598,7 @@ ${inner}`;
           childMeasure.addVisibilityOverride(Visibility.OVERRIDE_GONE);
           overflow = true;
         } else {
+          childMeasure.addVisibilityOverride(Visibility.OVERRIDE_VISIBLE);
           childrenWidth += childWidth;
           childrenHeight = Math.max(childrenHeight, childMeasure.getH());
           visibleChildren++;
@@ -14844,9 +20652,9 @@ ${inner}`;
       this.computeVisibleChildren(context, maxWidth, maxHeight, false, measure, null);
     }
     internalLayoutMeasure(context, measure) {
-      super.internalLayoutMeasure(context, measure);
       const m = measure.get(this);
       this.computeVisibleChildren(context, m.getW(), m.getH(), false, measure, null);
+      super.internalLayoutMeasure(context, measure);
     }
     computeVisibleChildren(context, maxWidth, maxHeight, verticalWrap, measure, size) {
       let visibleChildren = 0;
@@ -14863,6 +20671,7 @@ ${inner}`;
           }
         }
         const m = measure.get(c);
+        m.clearVisibilityOverride();
         if (!m.isGone()) {
           if (size !== null) {
             size.setWidth(Math.max(size.getWidth(), m.getW()));
@@ -14877,7 +20686,7 @@ ${inner}`;
         }
       }
       if (this.mChildrenComponents.length > 0 && size !== null) {
-        size.setHeight(size.getHeight() + this.mSpacedBy * this.getDpBehaviorScale(context) * (visibleChildren - 1));
+        size.setHeight(size.getHeight() + this.spacedByPx(context, this.mSpacedBy) * (visibleChildren - 1));
       }
       let childrenWidth = 0;
       let childrenHeight = 0;
@@ -14900,6 +20709,7 @@ ${inner}`;
           childMeasure.addVisibilityOverride(Visibility.OVERRIDE_GONE);
           overflow = true;
         } else {
+          childMeasure.addVisibilityOverride(Visibility.OVERRIDE_VISIBLE);
           childrenHeight += childHeight;
           childrenWidth = Math.max(childrenWidth, childMeasure.getW());
           visibleChildren++;
@@ -15246,7 +21056,7 @@ ${inner}`;
         paintContext.translate(layout.getX(), layout.getY());
         const context = paintContext.getContext();
         for (const op of layout.getList()) {
-          context.incrementOpCount();
+          context.incrementOpCount(op);
           if (op.isDirty() && typeof op.updateVariables === "function") {
             op.markNotDirty();
             op.updateVariables(context);
@@ -15430,7 +21240,16 @@ ${inner}`;
     }
     write(_buffer) {
     }
-    apply(_context) {
+    apply(context) {
+      if (context.mMode === "DATA" /* DATA */) return;
+      context.getDocument()?.evaluateIntegerExpression(
+        this.mValueExpressionId,
+        this.mTargetValueId,
+        context
+      );
+    }
+    runAction(context, document2, _component, _x, _y) {
+      document2?.evaluateIntegerExpression(this.mValueExpressionId, this.mTargetValueId, context);
     }
     deepToString(indent) {
       return `${indent}ValueIntegerExpressionChangeAction(${this.mTargetValueId}, ${this.mValueExpressionId})`;
@@ -15670,6 +21489,42 @@ ${inner}`;
     apply(context) {
       super.apply(context);
     }
+    // The same modifier pass as any layout component, then the host draws the content —
+    // what the C++ engine does for opcode 93 in LayoutOperations.cpp.
+    paintingComponent(paintContext) {
+      const context = paintContext.getContext();
+      const host = context.getCustomHost();
+      if (!host) {
+        super.paintingComponent(paintContext);
+        return;
+      }
+      if (Visibility.isGone(this.mVisibility) && this.mAnimateMeasure === null) return;
+      paintContext.matrixSave();
+      paintContext.matrixTranslate(this.mX, this.mY);
+      let tx = 0;
+      let ty = 0;
+      for (const mod of this.mComponentModifiers) {
+        context.incrementOpCount(mod);
+        if (mod.isDirty() && typeof mod.updateVariables === "function") {
+          mod.markNotDirty();
+          mod.updateVariables(context);
+        }
+        if (mod instanceof PaddingModifier) {
+          paintContext.matrixTranslate(mod.mLeftValue, mod.mTopValue);
+          tx += mod.mLeftValue;
+          ty += mod.mTopValue;
+        } else {
+          mod.apply(context);
+        }
+      }
+      paintContext.matrixTranslate(-tx, -ty);
+      paintContext.matrixTranslate(this.mPaddingLeft, this.mPaddingTop);
+      const config2 = this.mConfigId >= 0 ? context.getText(this.mConfigId) ?? "" : "";
+      const w = this.mWidth - this.mPaddingLeft - this.mPaddingRight;
+      const h = this.mHeight - this.mPaddingTop - this.mPaddingBottom;
+      host.drawCustom(this.getComponentId(), config2, paintContext, w, h, context.getAnimationTime());
+      paintContext.matrixRestore();
+    }
     deepToString(indent) {
       return `${indent}Custom(${this.getComponentId()}, config=${this.mConfigId}, ${this.mProperties.length} props)`;
     }
@@ -15717,6 +21572,285 @@ ${inner}`;
   _FontData.OP_CODE = 189;
   var FontData = _FontData;
 
+  // third_party/remote-compose-player/src/core/operations/UnsupportedOperations.ts
+  var UnsupportedOperation = class extends Operation {
+    write(_buffer) {
+    }
+    apply(_context) {
+    }
+    deepToString(indent) {
+      return `${indent}${this.opName} (unsupported, parsed only)`;
+    }
+  };
+  function readGlyphSpacedId(buffer) {
+    const first = buffer.readInt();
+    if ((first & 2147483648) !== 0) {
+      buffer.readFloat();
+    }
+  }
+  var _ComponentStartStub = class _ComponentStartStub extends UnsupportedOperation {
+    constructor() {
+      super(...arguments);
+      this.opName = "ComponentStart";
+    }
+    static read(buffer, operations) {
+      buffer.readInt();
+      buffer.readInt();
+      buffer.readFloat();
+      buffer.readFloat();
+      operations.push(new _ComponentStartStub());
+    }
+  };
+  _ComponentStartStub.OP_CODE = 2;
+  var ComponentStartStub = _ComponentStartStub;
+  var _AnimationSpecStub = class _AnimationSpecStub extends UnsupportedOperation {
+    constructor() {
+      super(...arguments);
+      this.opName = "AnimationSpec";
+    }
+    static read(buffer, operations) {
+      buffer.readInt();
+      buffer.readFloat();
+      buffer.readInt();
+      buffer.readFloat();
+      buffer.readInt();
+      buffer.readInt();
+      buffer.readInt();
+      operations.push(new _AnimationSpecStub());
+    }
+  };
+  _AnimationSpecStub.OP_CODE = 14;
+  var AnimationSpecStub = _AnimationSpecStub;
+  var _DrawBitmapFontTextStub = class _DrawBitmapFontTextStub extends UnsupportedOperation {
+    constructor() {
+      super(...arguments);
+      this.opName = "DrawBitmapFontText";
+    }
+    static read(buffer, operations) {
+      readGlyphSpacedId(buffer);
+      buffer.readInt();
+      buffer.readInt();
+      buffer.readInt();
+      buffer.readFloat();
+      buffer.readFloat();
+      operations.push(new _DrawBitmapFontTextStub());
+    }
+  };
+  _DrawBitmapFontTextStub.OP_CODE = 48;
+  var DrawBitmapFontTextStub = _DrawBitmapFontTextStub;
+  var _DrawBitmapFontTextOnPathStub = class _DrawBitmapFontTextOnPathStub extends UnsupportedOperation {
+    constructor() {
+      super(...arguments);
+      this.opName = "DrawBitmapFontTextOnPath";
+    }
+    static read(buffer, operations) {
+      readGlyphSpacedId(buffer);
+      buffer.readInt();
+      buffer.readInt();
+      buffer.readInt();
+      buffer.readInt();
+      buffer.readFloat();
+      operations.push(new _DrawBitmapFontTextOnPathStub());
+    }
+  };
+  _DrawBitmapFontTextOnPathStub.OP_CODE = 49;
+  var DrawBitmapFontTextOnPathStub = _DrawBitmapFontTextOnPathStub;
+  var _BitmapTextMeasureStub = class _BitmapTextMeasureStub extends UnsupportedOperation {
+    constructor() {
+      super(...arguments);
+      this.opName = "BitmapTextMeasure";
+    }
+    static read(buffer, operations) {
+      readGlyphSpacedId(buffer);
+      buffer.readInt();
+      buffer.readInt();
+      buffer.readInt();
+      operations.push(new _BitmapTextMeasureStub());
+    }
+  };
+  _BitmapTextMeasureStub.OP_CODE = 183;
+  var BitmapTextMeasureStub = _BitmapTextMeasureStub;
+  var _DrawBitmapTextAnchoredStub = class _DrawBitmapTextAnchoredStub extends UnsupportedOperation {
+    constructor() {
+      super(...arguments);
+      this.opName = "DrawBitmapTextAnchored";
+    }
+    static read(buffer, operations) {
+      readGlyphSpacedId(buffer);
+      buffer.readInt();
+      buffer.readFloat();
+      buffer.readFloat();
+      buffer.readFloat();
+      buffer.readFloat();
+      buffer.readFloat();
+      buffer.readFloat();
+      operations.push(new _DrawBitmapTextAnchoredStub());
+    }
+  };
+  _DrawBitmapTextAnchoredStub.OP_CODE = 184;
+  var DrawBitmapTextAnchoredStub = _DrawBitmapTextAnchoredStub;
+  var _BitmapFontDataStub = class _BitmapFontDataStub extends UnsupportedOperation {
+    constructor() {
+      super(...arguments);
+      this.opName = "BitmapFontData";
+    }
+    static read(buffer, operations) {
+      buffer.readInt();
+      const versionAndCount = buffer.readInt();
+      const version = versionAndCount >>> 16;
+      const numGlyphs = versionAndCount & 65535;
+      for (let i = 0; i < numGlyphs; i++) {
+        buffer.readUTF8();
+        buffer.readInt();
+        buffer.readShort();
+        buffer.readShort();
+        buffer.readShort();
+        buffer.readShort();
+        buffer.readShort();
+        buffer.readShort();
+      }
+      if (version >= _BitmapFontDataStub.VERSION_2) {
+        const numKerning = buffer.readShort();
+        for (let i = 0; i < numKerning; i++) {
+          buffer.readUTF8();
+          buffer.readShort();
+        }
+      }
+      operations.push(new _BitmapFontDataStub());
+    }
+  };
+  _BitmapFontDataStub.OP_CODE = 167;
+  _BitmapFontDataStub.VERSION_2 = 2;
+  var BitmapFontDataStub = _BitmapFontDataStub;
+  var _FontDataStub = class _FontDataStub extends UnsupportedOperation {
+    constructor() {
+      super(...arguments);
+      this.opName = "FontData";
+    }
+    static read(buffer, operations) {
+      buffer.readInt();
+      buffer.readInt();
+      buffer.readBuffer();
+      operations.push(new _FontDataStub());
+    }
+  };
+  _FontDataStub.OP_CODE = 189;
+  var FontDataStub = _FontDataStub;
+  var _FloatFunctionCallStub = class _FloatFunctionCallStub extends UnsupportedOperation {
+    constructor() {
+      super(...arguments);
+      this.opName = "FloatFunctionCall";
+    }
+    static read(buffer, operations) {
+      buffer.readInt();
+      const argLen = buffer.readInt();
+      for (let i = 0; i < argLen; i++) {
+        buffer.readFloat();
+      }
+      operations.push(new _FloatFunctionCallStub());
+    }
+  };
+  _FloatFunctionCallStub.OP_CODE = 166;
+  var FloatFunctionCallStub = _FloatFunctionCallStub;
+  var _FloatFunctionDefineStub = class _FloatFunctionDefineStub extends UnsupportedOperation {
+    constructor() {
+      super(...arguments);
+      this.opName = "FloatFunctionDefine";
+    }
+    static read(buffer, operations) {
+      buffer.readInt();
+      const varLen = buffer.readInt();
+      for (let i = 0; i < varLen; i++) {
+        buffer.readInt();
+      }
+      operations.push(new _FloatFunctionDefineStub());
+    }
+  };
+  _FloatFunctionDefineStub.OP_CODE = 168;
+  var FloatFunctionDefineStub = _FloatFunctionDefineStub;
+  var _DrawTextOnCircleStub = class _DrawTextOnCircleStub extends UnsupportedOperation {
+    constructor() {
+      super(...arguments);
+      this.opName = "DrawTextOnCircle";
+    }
+    static read(buffer, operations) {
+      buffer.readInt();
+      buffer.readInt();
+      buffer.readInt();
+      buffer.readInt();
+      buffer.readInt();
+      buffer.readInt();
+      buffer.readByte();
+      buffer.readByte();
+      operations.push(new _DrawTextOnCircleStub());
+    }
+  };
+  _DrawTextOnCircleStub.OP_CODE = 57;
+  var DrawTextOnCircleStub = _DrawTextOnCircleStub;
+  var _TextLookupIntStub = class _TextLookupIntStub extends UnsupportedOperation {
+    constructor() {
+      super(...arguments);
+      this.opName = "TextLookupInt";
+    }
+    static read(buffer, operations) {
+      buffer.readInt();
+      buffer.readInt();
+      buffer.readInt();
+      operations.push(new _TextLookupIntStub());
+    }
+  };
+  _TextLookupIntStub.OP_CODE = 153;
+  var TextLookupIntStub = _TextLookupIntStub;
+  var _ImageAttributeStub = class _ImageAttributeStub extends UnsupportedOperation {
+    constructor() {
+      super(...arguments);
+      this.opName = "ImageAttribute";
+    }
+    static read(buffer, operations) {
+      buffer.readInt();
+      buffer.readInt();
+      buffer.readShort();
+      const len = buffer.readShort();
+      for (let i = 0; i < len; i++) {
+        buffer.readInt();
+      }
+      operations.push(new _ImageAttributeStub());
+    }
+  };
+  _ImageAttributeStub.OP_CODE = 171;
+  var ImageAttributeStub = _ImageAttributeStub;
+  var _PathCombineStub = class _PathCombineStub extends UnsupportedOperation {
+    constructor() {
+      super(...arguments);
+      this.opName = "PathCombine";
+    }
+    static read(buffer, operations) {
+      buffer.readInt();
+      buffer.readInt();
+      buffer.readInt();
+      buffer.readByte();
+      operations.push(new _PathCombineStub());
+    }
+  };
+  _PathCombineStub.OP_CODE = 175;
+  var PathCombineStub = _PathCombineStub;
+  var _RemStub = class _RemStub extends UnsupportedOperation {
+    constructor(text) {
+      super();
+      this.opName = "Rem";
+      this.mText = text;
+    }
+    static read(buffer, operations) {
+      operations.push(new _RemStub(buffer.readUTF8()));
+    }
+    // The one stub that can show something useful: a REM is a comment, so print it.
+    deepToString(indent) {
+      return `${indent}Rem("${this.mText}")`;
+    }
+  };
+  _RemStub.OP_CODE = 185;
+  var RemStub = _RemStub;
+
   // third_party/remote-compose-player/src/core/Operations.ts
   var _Operations = class _Operations {
     static init() {
@@ -15731,6 +21865,9 @@ ${inner}`;
       m.set(DrawRoundRect.OP_CODE, DrawRoundRect.read);
       m.set(DrawArc.OP_CODE, DrawArc.read);
       m.set(DrawSector.OP_CODE, DrawSector.read);
+      m.set(AddMesh2D.OP_CODE, AddMesh2D.read);
+      m.set(DrawMesh2D.OP_CODE, DrawMesh2D.read);
+      m.set(MatrixFromMesh2D.OP_CODE, MatrixFromMesh2D.read);
       m.set(DrawPath.OP_CODE, DrawPath.read);
       m.set(DrawTweenPath.OP_CODE, DrawTweenPath.read);
       m.set(DrawContent.OP_CODE, DrawContent.read);
@@ -15823,6 +21960,7 @@ ${inner}`;
       m.set(TextLookupInt.OP_CODE, TextLookupInt.read);
       m.set(ColorTheme.OP_CODE, ColorTheme.read);
       m.set(ColorAttribute.OP_CODE, ColorAttribute.read);
+      m.set(ImageAttribute.OP_CODE, ImageAttribute.read);
       m.set(TextLayout.OP_CODE, TextLayout.read);
       m.set(PathAppend.OP_CODE, PathAppend.read);
       m.set(ImpulseOperation.OP_CODE, ImpulseOperation.read);
@@ -15839,6 +21977,16 @@ ${inner}`;
       m.set(ValueFloatExpressionChangeAction.OP_CODE, ValueFloatExpressionChangeAction.read);
       m.set(ParticlesCompareOp.OP_CODE, ParticlesCompareOp.read);
       m.set(ParticlesLoopOp.OP_CODE, ParticlesLoopOp.read);
+      m.set(DefineMesh3D.OP_CODE, DefineMesh3D.read);
+      m.set(SetCamera3D.OP_CODE, SetCamera3D.read);
+      m.set(Matrix3DOp.OP_CODE, Matrix3DOp.read);
+      m.set(DrawMesh3D.OP_CODE, DrawMesh3D.read);
+      m.set(Paint3DState.OP_CODE, Paint3DState.read);
+      m.set(SetLights3D.OP_CODE, SetLights3D.read);
+      m.set(SetTexture3D.OP_CODE, SetTexture3D.read);
+      m.set(MeshPrimitive.OP_CODE, MeshPrimitive.read);
+      m.set(MeshExpression.OP_CODE, MeshExpression.read);
+      m.set(VectorExpression.OP_CODE, VectorExpression.read);
       m.set(LoopOperation.OP_CODE, LoopOperation.read);
       m.set(CoreText.OP_CODE, CoreText.read);
       m.set(FitBoxLayout.OP_CODE, FitBoxLayout.read);
@@ -15873,6 +22021,18 @@ ${inner}`;
       m.set(PatternArgument.OP_CODE, PatternArgument.read);
       m.set(PatternDefine.OP_CODE, PatternDefine.read);
       m.set(Custom.OP_CODE, Custom.read);
+      m.set(AnimationSpec.OP_CODE, AnimationSpec.read);
+      m.set(ComponentStartStub.OP_CODE, ComponentStartStub.read);
+      m.set(DrawBitmapFontTextStub.OP_CODE, DrawBitmapFontTextStub.read);
+      m.set(DrawBitmapFontTextOnPathStub.OP_CODE, DrawBitmapFontTextOnPathStub.read);
+      m.set(BitmapTextMeasureStub.OP_CODE, BitmapTextMeasureStub.read);
+      m.set(DrawBitmapTextAnchoredStub.OP_CODE, DrawBitmapTextAnchoredStub.read);
+      m.set(BitmapFontDataStub.OP_CODE, BitmapFontDataStub.read);
+      m.set(FloatFunctionCallStub.OP_CODE, FloatFunctionCallStub.read);
+      m.set(FloatFunctionDefineStub.OP_CODE, FloatFunctionDefineStub.read);
+      m.set(DrawTextOnCircleStub.OP_CODE, DrawTextOnCircleStub.read);
+      m.set(PathCombineStub.OP_CODE, PathCombineStub.read);
+      m.set(RemStub.OP_CODE, RemStub.read);
     }
     static getOperations() {
       _Operations.init();
@@ -16437,6 +22597,8 @@ ${inner}`;
       this.mVersion = null;
       this.mWidth = 256;
       this.mHeight = 256;
+      this.mAuthorWidth = null;
+      this.mAuthorHeight = null;
       this.mCapabilities = 0;
       this.mProperties = null;
       this.mContentDescription = "";
@@ -16467,6 +22629,8 @@ ${inner}`;
        * Mirrors `CoreDocument.mFloatExpressions` / `evaluateFloatExpression`.
        */
       this.mFloatExpressions = /* @__PURE__ */ new Map();
+      /** Integer expressions by id, for `ValueIntegerExpressionChangeAction`. */
+      this.mIntegerExpressions = /* @__PURE__ */ new Map();
       this.mClock = clock;
       this.mTimeVariables = new TimeVariables(clock);
     }
@@ -16543,6 +22707,16 @@ ${inner}`;
     setHeight(h) {
       this.mHeight = h;
       this.mRemoteComposeState?.setWindowHeight(h);
+    }
+    getAuthorWidth() {
+      return this.mAuthorWidth ?? this.mHeader?.mWidth ?? this.mWidth;
+    }
+    getAuthorHeight() {
+      return this.mAuthorHeight ?? this.mHeader?.mHeight ?? this.mHeight;
+    }
+    setAuthorDimensions(w, h) {
+      this.mAuthorWidth = w;
+      this.mAuthorHeight = h;
     }
     setProperties(properties) {
       this.mProperties = properties;
@@ -16746,6 +22920,7 @@ ${inner}`;
         operations.push(op);
       }
       this.mFloatExpressions.clear();
+      this.mIntegerExpressions.clear();
       this.indexFloatExpressions(operations);
     }
     /** Collect every FloatExpression in the tree, including inside containers. */
@@ -16753,6 +22928,9 @@ ${inner}`;
       for (const op of operations) {
         if (op.constructor?.OP_CODE === 81 && typeof op.mId === "number") {
           this.mFloatExpressions.set(op.mId, op);
+        }
+        if (op.constructor?.OP_CODE === 144 && typeof op.mId === "number") {
+          this.mIntegerExpressions.set(op.mId, op);
         }
         if (typeof op.getList === "function") {
           this.indexFloatExpressions(op.getList());
@@ -16764,6 +22942,13 @@ ${inner}`;
       const expression = this.mFloatExpressions.get(expressionId);
       if (expression && typeof expression.evaluate === "function") {
         context.overrideFloat(targetId, expression.evaluate(context));
+      }
+    }
+    /** Evaluate integer `expressionId` and write the result into `targetId`. */
+    evaluateIntegerExpression(expressionId, targetId, context) {
+      const expression = this.mIntegerExpressions.get(expressionId);
+      if (expression && typeof expression.evaluateNow === "function") {
+        context.overrideInteger(targetId, expression.evaluateNow(context));
       }
     }
     isContainer(op) {
@@ -16784,6 +22969,31 @@ ${inner}`;
      * well. A zero font size is a legal float, so nothing errors — the text measures a
      * real width with zero height, takes up no space, and never paints.
      */
+    /**
+     * Push the document's declared density behaviour onto the context.
+     *
+     * Java keeps this on the document and has `RemoteContext.getDensityBehavior()` delegate
+     * to it; here the context owns the field, so the document has to hand it over. Absent
+     * from the header means LEGACY, and under LEGACY only the dimension modifiers scale —
+     * padding, spacing, borders and offsets deliberately do not.
+     *
+     * Seeded in both passes because layout runs in each: a behaviour applied only at paint
+     * would leave the data pass measuring against unscaled values.
+     */
+    /**
+     * Push the document's touch-coordinate convention onto the context, as Java does.
+     * Absent from the header means FIX_TOUCH_EVENT, not 0.
+     */
+    seedTouchVersion(context) {
+      const declared = this.getProperty(Header.FEATURE_TOUCH_VERSION);
+      context.setTouchVersion(typeof declared === "number" ? declared : 1);
+    }
+    seedDensityBehavior(context) {
+      const declared = this.getProperty(Header.DOC_DENSITY_BEHAVIOR);
+      context.setDensityBehavior(
+        typeof declared === "number" ? declared : RemoteContext.DENSITY_BEHAVIOR_LEGACY
+      );
+    }
     seedPlatformTextSize(context) {
       let density = context.getDensity();
       if (!(density > 0)) {
@@ -16797,6 +23007,8 @@ ${inner}`;
     }
     applyDataOperations(context) {
       context.setMode("DATA" /* DATA */);
+      this.seedDensityBehavior(context);
+      this.seedTouchVersion(context);
       this.seedPlatformTextSize(context);
       this.mTimeVariables.updateTime(context);
       this.registerVariables(context, this.mOperations);
@@ -16810,7 +23022,7 @@ ${inner}`;
           op.updateVariables(context);
         }
         op.markNotDirty();
-        context.incrementOpCount();
+        context.incrementOpCount(op);
         if (this.isContainer(op)) {
           this.applyOperations(context, op.getList());
         } else {
@@ -16837,6 +23049,16 @@ ${inner}`;
       this.mRemoteComposeState.setContext(context);
       this.mClickAreas.clear();
       this.mTimeVariables.updateTime(context);
+      for (const operation of this.mOperations) {
+        if (operation.isDirty() && typeof operation.updateVariables === "function") {
+          operation.markNotDirty();
+          operation.updateVariables(context);
+          operation.apply(context);
+        }
+        if (operation === this.mRootLayoutComponent) {
+          break;
+        }
+      }
       if (this.mRootLayoutComponent && this.mLayoutComputeOps.size > 0) {
         let needsEvaluate = true;
         for (let round = 0; needsEvaluate && round < 2; round++) {
@@ -16849,8 +23071,14 @@ ${inner}`;
       if (this.mRootLayoutComponent && this.mRootLayoutComponent.needsMeasure()) {
         this.mRootLayoutComponent.layoutTree(context);
       }
+      if (this.mRootLayoutComponent && this.mRootLayoutComponent.needsBoundsAnimation()) {
+        this.mNeedsRepaintFlag = 1;
+        this.mRootLayoutComponent.clearNeedsBoundsAnimation();
+        this.mRootLayoutComponent.animatingBounds(context);
+      }
       context.setMode("PAINT" /* PAINT */);
       context.clearLastOpCount();
+      context.beginMeasuredFrame();
       const themeColors = this.getThemedColors();
       if (themeColors.length > 0 && theme !== context.getPaintTheme()) {
         for (const tc of themeColors) {
@@ -16868,6 +23096,8 @@ ${inner}`;
         context.setDensity(density);
       }
       context.loadFloat(27, density);
+      this.seedDensityBehavior(context);
+      this.seedTouchVersion(context);
       this.seedPlatformTextSize(context);
       const pc = context.getPaintContext();
       if (pc) pc.save();
@@ -16898,15 +23128,16 @@ ${inner}`;
             op.markNotDirty();
             op.updateVariables(context);
           }
-          context.incrementOpCount();
+          context.incrementOpCount(op);
           op.apply(context);
         }
       }
       this.mLastOpCount = context.getLastOpCount();
+      context.emitMeasuredFrame();
       if (pc) pc.restore();
       context.setMode("UNSET" /* UNSET */);
       const pc2 = context.getPaintContext();
-      if (pc && pc.doesNeedsRepaint()) {
+      if (pc2 && pc2.doesNeedsRepaint() || this.mRootLayoutComponent && (this.mRootLayoutComponent.needsRepaint() || this.mRootLayoutComponent.needsBoundsAnimation())) {
         this.mNeedsRepaintFlag = 1;
       } else {
         this.mNeedsRepaintFlag = this.mRemoteComposeState.getOpsToUpdate(context, this.mClock.millis());
@@ -17057,38 +23288,38 @@ ${inner}`;
       let contentScaleX = 1;
       let contentScaleY = 1;
       if (this.mContentSizing === RootContentBehavior.SIZING_SCALE) {
-        let scaleX, scaleY, scale;
+        let scaleX, scaleY, scale2;
         switch (this.mContentMode) {
           case RootContentBehavior.SCALE_INSIDE:
             scaleX = w / this.mWidth;
             scaleY = h / this.mHeight;
-            scale = Math.min(1, Math.min(scaleX, scaleY));
-            contentScaleX = scale;
-            contentScaleY = scale;
+            scale2 = Math.min(1, Math.min(scaleX, scaleY));
+            contentScaleX = scale2;
+            contentScaleY = scale2;
             break;
           case RootContentBehavior.SCALE_FIT:
             scaleX = w / this.mWidth;
             scaleY = h / this.mHeight;
-            scale = Math.min(scaleX, scaleY);
-            contentScaleX = scale;
-            contentScaleY = scale;
+            scale2 = Math.min(scaleX, scaleY);
+            contentScaleX = scale2;
+            contentScaleY = scale2;
             break;
           case RootContentBehavior.SCALE_FILL_WIDTH:
-            scale = w / this.mWidth;
-            contentScaleX = scale;
-            contentScaleY = scale;
+            scale2 = w / this.mWidth;
+            contentScaleX = scale2;
+            contentScaleY = scale2;
             break;
           case RootContentBehavior.SCALE_FILL_HEIGHT:
-            scale = h / this.mHeight;
-            contentScaleX = scale;
-            contentScaleY = scale;
+            scale2 = h / this.mHeight;
+            contentScaleX = scale2;
+            contentScaleY = scale2;
             break;
           case RootContentBehavior.SCALE_CROP:
             scaleX = w / this.mWidth;
             scaleY = h / this.mHeight;
-            scale = Math.max(scaleX, scaleY);
-            contentScaleX = scale;
-            contentScaleY = scale;
+            scale2 = Math.max(scaleX, scaleY);
+            contentScaleX = scale2;
+            contentScaleY = scale2;
             break;
           case RootContentBehavior.SCALE_FILL_BOUNDS:
             contentScaleX = w / this.mWidth;
@@ -17228,6 +23459,1614 @@ ${inner}`;
   _CoreDocument.PATCH_VERSION = 0;
   _CoreDocument.DOCUMENT_API_LEVEL = 8;
   var CoreDocument = _CoreDocument;
+
+  // third_party/remote-compose-player/src/core/d3/Matrix4.ts
+  var fround3 = Math.fround;
+  function fm3(a, b) {
+    return fround3(a * b);
+  }
+  function fa3(a, b) {
+    return fround3(a + b);
+  }
+  function flen3(x, y, z) {
+    return fround3(Math.sqrt(fa3(fa3(fm3(x, x), fm3(y, y)), fm3(z, z))));
+  }
+  function mat4() {
+    const m = new Float32Array(16);
+    identity(m);
+    return m;
+  }
+  function identity(out) {
+    out[0] = 1;
+    out[1] = 0;
+    out[2] = 0;
+    out[3] = 0;
+    out[4] = 0;
+    out[5] = 1;
+    out[6] = 0;
+    out[7] = 0;
+    out[8] = 0;
+    out[9] = 0;
+    out[10] = 1;
+    out[11] = 0;
+    out[12] = 0;
+    out[13] = 0;
+    out[14] = 0;
+    out[15] = 1;
+  }
+  var MUL_SCRATCH = new Float32Array(16);
+  function multiply(out, a, b) {
+    const r = MUL_SCRATCH;
+    for (let col = 0; col < 4; col++) {
+      const cb = col * 4;
+      for (let row = 0; row < 4; row++) {
+        r[cb + row] = fa3(
+          fa3(
+            fa3(
+              fm3(a[row], b[cb]),
+              fm3(a[4 + row], b[cb + 1])
+            ),
+            fm3(a[8 + row], b[cb + 2])
+          ),
+          fm3(a[12 + row], b[cb + 3])
+        );
+      }
+    }
+    out.set(r);
+  }
+  function translate(m, tx, ty, tz) {
+    m[12] = fa3(m[12], fa3(fa3(fm3(m[0], tx), fm3(m[4], ty)), fm3(m[8], tz)));
+    m[13] = fa3(m[13], fa3(fa3(fm3(m[1], tx), fm3(m[5], ty)), fm3(m[9], tz)));
+    m[14] = fa3(m[14], fa3(fa3(fm3(m[2], tx), fm3(m[6], ty)), fm3(m[10], tz)));
+    m[15] = fa3(m[15], fa3(fa3(fm3(m[3], tx), fm3(m[7], ty)), fm3(m[11], tz)));
+  }
+  function scale(m, sx, sy, sz) {
+    m[0] = fm3(m[0], sx);
+    m[1] = fm3(m[1], sx);
+    m[2] = fm3(m[2], sx);
+    m[3] = fm3(m[3], sx);
+    m[4] = fm3(m[4], sy);
+    m[5] = fm3(m[5], sy);
+    m[6] = fm3(m[6], sy);
+    m[7] = fm3(m[7], sy);
+    m[8] = fm3(m[8], sz);
+    m[9] = fm3(m[9], sz);
+    m[10] = fm3(m[10], sz);
+    m[11] = fm3(m[11], sz);
+  }
+  function rotateAxis(m, angleRadians, x, y, z) {
+    const len = flen3(x, y, z);
+    if (len === 0) {
+      return;
+    }
+    const ix = fround3(x / len);
+    const iy = fround3(y / len);
+    const iz = fround3(z / len);
+    const c = fround3(Math.cos(angleRadians));
+    const s = fround3(Math.sin(angleRadians));
+    const omc = fround3(1 - c);
+    const r00 = fa3(fm3(fm3(ix, ix), omc), c);
+    const r01 = fa3(fm3(fm3(iy, ix), omc), fm3(iz, s));
+    const r02 = fround3(fm3(fm3(iz, ix), omc) - fm3(iy, s));
+    const r10 = fround3(fm3(fm3(ix, iy), omc) - fm3(iz, s));
+    const r11 = fa3(fm3(fm3(iy, iy), omc), c);
+    const r12 = fa3(fm3(fm3(iz, iy), omc), fm3(ix, s));
+    const r20 = fa3(fm3(fm3(ix, iz), omc), fm3(iy, s));
+    const r21 = fround3(fm3(fm3(iy, iz), omc) - fm3(ix, s));
+    const r22 = fa3(fm3(fm3(iz, iz), omc), c);
+    const a00 = m[0], a01 = m[1], a02 = m[2], a03 = m[3];
+    const a10 = m[4], a11 = m[5], a12 = m[6], a13 = m[7];
+    const a20 = m[8], a21 = m[9], a22 = m[10], a23 = m[11];
+    m[0] = fa3(fa3(fm3(a00, r00), fm3(a10, r01)), fm3(a20, r02));
+    m[1] = fa3(fa3(fm3(a01, r00), fm3(a11, r01)), fm3(a21, r02));
+    m[2] = fa3(fa3(fm3(a02, r00), fm3(a12, r01)), fm3(a22, r02));
+    m[3] = fa3(fa3(fm3(a03, r00), fm3(a13, r01)), fm3(a23, r02));
+    m[4] = fa3(fa3(fm3(a00, r10), fm3(a10, r11)), fm3(a20, r12));
+    m[5] = fa3(fa3(fm3(a01, r10), fm3(a11, r11)), fm3(a21, r12));
+    m[6] = fa3(fa3(fm3(a02, r10), fm3(a12, r11)), fm3(a22, r12));
+    m[7] = fa3(fa3(fm3(a03, r10), fm3(a13, r11)), fm3(a23, r12));
+    m[8] = fa3(fa3(fm3(a00, r20), fm3(a10, r21)), fm3(a20, r22));
+    m[9] = fa3(fa3(fm3(a01, r20), fm3(a11, r21)), fm3(a21, r22));
+    m[10] = fa3(fa3(fm3(a02, r20), fm3(a12, r21)), fm3(a22, r22));
+    m[11] = fa3(fa3(fm3(a03, r20), fm3(a13, r21)), fm3(a23, r22));
+  }
+  function perspective(out, fovYRadians, aspect, near, far) {
+    const f = fround3(1 / Math.tan(fovYRadians * 0.5));
+    const nf = fround3(1 / fround3(near - far));
+    out[0] = fround3(f / aspect);
+    out[1] = 0;
+    out[2] = 0;
+    out[3] = 0;
+    out[4] = 0;
+    out[5] = f;
+    out[6] = 0;
+    out[7] = 0;
+    out[8] = 0;
+    out[9] = 0;
+    out[10] = fm3(fa3(far, near), nf);
+    out[11] = -1;
+    out[12] = 0;
+    out[13] = 0;
+    out[14] = fm3(fm3(fm3(2, far), near), nf);
+    out[15] = 0;
+  }
+  function ortho(out, left, right, bottom, top, near, far) {
+    const lr = fround3(1 / fround3(left - right));
+    const bt = fround3(1 / fround3(bottom - top));
+    const nf = fround3(1 / fround3(near - far));
+    out[0] = fm3(-2, lr);
+    out[1] = 0;
+    out[2] = 0;
+    out[3] = 0;
+    out[4] = 0;
+    out[5] = fm3(-2, bt);
+    out[6] = 0;
+    out[7] = 0;
+    out[8] = 0;
+    out[9] = 0;
+    out[10] = fm3(2, nf);
+    out[11] = 0;
+    out[12] = fm3(fa3(left, right), lr);
+    out[13] = fm3(fa3(top, bottom), bt);
+    out[14] = fm3(fa3(far, near), nf);
+    out[15] = 1;
+  }
+  function lookAt(out, eyeX, eyeY, eyeZ, centerX, centerY, centerZ, upX, upY, upZ) {
+    let fx = fround3(centerX - eyeX);
+    let fy = fround3(centerY - eyeY);
+    let fz = fround3(centerZ - eyeZ);
+    const fl = flen3(fx, fy, fz);
+    if (fl === 0) {
+      identity(out);
+      return;
+    }
+    fx = fround3(fx / fl);
+    fy = fround3(fy / fl);
+    fz = fround3(fz / fl);
+    let sx = fround3(fm3(fy, upZ) - fm3(fz, upY));
+    let sy = fround3(fm3(fz, upX) - fm3(fx, upZ));
+    let sz = fround3(fm3(fx, upY) - fm3(fy, upX));
+    const sl = flen3(sx, sy, sz);
+    if (sl === 0) {
+      identity(out);
+      return;
+    }
+    sx = fround3(sx / sl);
+    sy = fround3(sy / sl);
+    sz = fround3(sz / sl);
+    const ux = fround3(fm3(sy, fz) - fm3(sz, fy));
+    const uy = fround3(fm3(sz, fx) - fm3(sx, fz));
+    const uz = fround3(fm3(sx, fy) - fm3(sy, fx));
+    out[0] = sx;
+    out[1] = ux;
+    out[2] = -fx;
+    out[3] = 0;
+    out[4] = sy;
+    out[5] = uy;
+    out[6] = -fy;
+    out[7] = 0;
+    out[8] = sz;
+    out[9] = uz;
+    out[10] = -fz;
+    out[11] = 0;
+    out[12] = -fa3(fa3(fm3(sx, eyeX), fm3(sy, eyeY)), fm3(sz, eyeZ));
+    out[13] = -fa3(fa3(fm3(ux, eyeX), fm3(uy, eyeY)), fm3(uz, eyeZ));
+    out[14] = fa3(fa3(fm3(fx, eyeX), fm3(fy, eyeY)), fm3(fz, eyeZ));
+    out[15] = 1;
+  }
+  function transformPoint(m, x, y, z, out4) {
+    out4[0] = fa3(fa3(fa3(fm3(m[0], x), fm3(m[4], y)), fm3(m[8], z)), m[12]);
+    out4[1] = fa3(fa3(fa3(fm3(m[1], x), fm3(m[5], y)), fm3(m[9], z)), m[13]);
+    out4[2] = fa3(fa3(fa3(fm3(m[2], x), fm3(m[6], y)), fm3(m[10], z)), m[14]);
+    out4[3] = fa3(fa3(fa3(fm3(m[3], x), fm3(m[7], y)), fm3(m[11], z)), m[15]);
+  }
+  function transformDirection(m, x, y, z, out3) {
+    out3[0] = fa3(fa3(fm3(m[0], x), fm3(m[4], y)), fm3(m[8], z));
+    out3[1] = fa3(fa3(fm3(m[1], x), fm3(m[5], y)), fm3(m[9], z));
+    out3[2] = fa3(fa3(fm3(m[2], x), fm3(m[6], y)), fm3(m[10], z));
+  }
+
+  // third_party/remote-compose-player/src/core/d3/Rasterizer.ts
+  var fround4 = Math.fround;
+  function f2i(v) {
+    if (Number.isNaN(v)) {
+      return 0;
+    }
+    if (v >= 2147483647) {
+      return 2147483647;
+    }
+    if (v <= -2147483648) {
+      return -2147483648;
+    }
+    return Math.trunc(v);
+  }
+  function lerp3(w1, v1, w2, v2, w3, v3) {
+    return fround4(fround4(fround4(fround4(w1 * v1) + fround4(w2 * v2))) + fround4(w3 * v3));
+  }
+  function min3(x1, x2, x3) {
+    return x1 > x2 ? x2 > x3 ? x3 : x2 : x1 > x3 ? x3 : x1;
+  }
+  function max3(x1, x2, x3) {
+    return x1 < x2 ? x2 < x3 ? x3 : x2 : x1 < x3 ? x3 : x1;
+  }
+  function clearDepth(zbuf) {
+    zbuf.fill(Number.POSITIVE_INFINITY);
+  }
+  var SETUP = {
+    ok: false,
+    dx: 0,
+    dy: 0,
+    zoff: 0,
+    minx: 0,
+    maxx: 0,
+    miny: 0,
+    maxy: 0,
+    fdx12: 0,
+    fdx23: 0,
+    fdx31: 0,
+    fdy12: 0,
+    fdy23: 0,
+    fdy31: 0,
+    cy1: 0,
+    cy2: 0,
+    cy3: 0,
+    swapped: false
+  };
+  var V = new Float32Array(9);
+  function setup(w, h, fx3, fy3, fz3, fx2, fy2, fz2, fx1, fy1, fz1) {
+    const s = SETUP;
+    s.swapped = false;
+    if ((fx1 - fx2) * (fy3 - fy2) - (fy1 - fy2) * (fx3 - fx2) < 0) {
+      const tx = fx1, ty = fy1, tz = fz1;
+      fx1 = fx2;
+      fy1 = fy2;
+      fz1 = fz2;
+      fx2 = tx;
+      fy2 = ty;
+      fz2 = tz;
+      s.swapped = true;
+    }
+    V[0] = fx3;
+    V[1] = fy3;
+    V[2] = fz3;
+    V[3] = fx2;
+    V[4] = fy2;
+    V[5] = fz2;
+    V[6] = fx1;
+    V[7] = fy1;
+    V[8] = fz1;
+    const d = fx1 * (fy3 - fy2) - fx2 * fy3 + fx3 * fy2 + (fx2 - fx3) * fy1;
+    if (d === 0) {
+      s.ok = false;
+      return s;
+    }
+    const numDx = -(fy1 * (fz3 - fz2) - fy2 * fz3 + fy3 * fz2 + (fy2 - fy3) * fz1);
+    const numDy = fx1 * (fz3 - fz2) - fx2 * fz3 + fx3 * fz2 + (fx2 - fx3) * fz1;
+    const numZ = fx1 * (fy3 * fz2 - fy2 * fz3) + fy1 * (fx2 * fz3 - fx3 * fz2) + (fx3 * fy2 - fx2 * fy3) * fz1;
+    s.dx = fround4(numDx / d);
+    s.dy = fround4(numDy / d);
+    s.zoff = fround4(numZ / d);
+    const y1 = f2i(fround4(fround4(16 * fy1) + 0.5));
+    const y2 = f2i(fround4(fround4(16 * fy2) + 0.5));
+    const y3 = f2i(fround4(fround4(16 * fy3) + 0.5));
+    const x1 = f2i(fround4(fround4(16 * fx1) + 0.5));
+    const x2 = f2i(fround4(fround4(16 * fx2) + 0.5));
+    const x3 = f2i(fround4(fround4(16 * fx3) + 0.5));
+    const dx12 = x1 - x2 | 0;
+    const dx23 = x2 - x3 | 0;
+    const dx31 = x3 - x1 | 0;
+    const dy12 = y1 - y2 | 0;
+    const dy23 = y2 - y3 | 0;
+    const dy31 = y3 - y1 | 0;
+    s.fdx12 = dx12 << 4;
+    s.fdx23 = dx23 << 4;
+    s.fdx31 = dx31 << 4;
+    s.fdy12 = dy12 << 4;
+    s.fdy23 = dy23 << 4;
+    s.fdy31 = dy31 << 4;
+    let minx = min3(x1, x2, x3) + 15 >> 4;
+    let maxx = max3(x1, x2, x3) + 15 >> 4;
+    let miny = min3(y1, y2, y3) + 15 >> 4;
+    let maxy = max3(y1, y2, y3) + 15 >> 4;
+    if (miny < 0) {
+      miny = 0;
+    }
+    if (minx < 0) {
+      minx = 0;
+    }
+    if (maxx > w) {
+      maxx = w;
+    }
+    if (maxy > h) {
+      maxy = h;
+    }
+    s.minx = minx;
+    s.maxx = maxx;
+    s.miny = miny;
+    s.maxy = maxy;
+    let c1 = dy12 * x1 - dx12 * y1;
+    let c2 = dy23 * x2 - dx23 * y2;
+    let c3 = dy31 * x3 - dx31 * y3;
+    if (dy12 < 0 || dy12 === 0 && dx12 > 0) {
+      c1 = c1 + 1;
+    }
+    if (dy23 < 0 || dy23 === 0 && dx23 > 0) {
+      c2 = c2 + 1;
+    }
+    if (dy31 < 0 || dy31 === 0 && dx31 > 0) {
+      c3 = c3 + 1;
+    }
+    s.cy1 = c1 + dx12 * (miny << 4) - dy12 * (minx << 4);
+    s.cy2 = c2 + dx23 * (miny << 4) - dy23 * (minx << 4);
+    s.cy3 = c3 + dx31 * (miny << 4) - dy31 * (minx << 4);
+    s.ok = true;
+    return s;
+  }
+  function fillTriangle(zbuff, img, color, w, h, fx3, fy3, fz3, fx2, fy2, fz2, fx1, fy1, fz1) {
+    const s = setup(w, h, fx3, fy3, fz3, fx2, fy2, fz2, fx1, fy1, fz1);
+    if (!s.ok) {
+      return;
+    }
+    const { dx, dy, zoff, minx, maxx, miny, maxy, fdx12, fdx23, fdx31, fdy12, fdy23, fdy31 } = s;
+    let cy1 = s.cy1 | 0, cy2 = s.cy2 | 0, cy3 = s.cy3 | 0;
+    let off = miny * w;
+    for (let y = miny; y < maxy; y++) {
+      let cx1 = cy1, cx2 = cy2, cx3 = cy3;
+      const p = fround4(zoff + dy * y);
+      for (let x = minx; x < maxx; x++) {
+        if (cx1 > 0 && cx2 > 0 && cx3 > 0) {
+          const point = x + off;
+          const zval = fround4(p + dx * x);
+          if (zbuff[point] > zval) {
+            zbuff[point] = zval;
+            img[point] = color;
+          }
+        }
+        cx1 = cx1 - fdy12 | 0;
+        cx2 = cx2 - fdy23 | 0;
+        cx3 = cx3 - fdy31 | 0;
+      }
+      cy1 = cy1 + fdx12 | 0;
+      cy2 = cy2 + fdx23 | 0;
+      cy3 = cy3 + fdx31 | 0;
+      off += w;
+    }
+  }
+  function fillTriangleGouraud(zbuff, img, c3, c2, c1, w, h, fx3, fy3, fz3, fx2, fy2, fz2, fx1, fy1, fz1) {
+    const s = setup(w, h, fx3, fy3, fz3, fx2, fy2, fz2, fx1, fy1, fz1);
+    if (!s.ok) {
+      return;
+    }
+    if (s.swapped) {
+      const t = c1;
+      c1 = c2;
+      c2 = t;
+    }
+    const { dx, dy, zoff, minx, maxx, miny, maxy, fdx12, fdx23, fdx31, fdy12, fdy23, fdy31 } = s;
+    let cy1 = s.cy1 | 0, cy2 = s.cy2 | 0, cy3 = s.cy3 | 0;
+    const sum = cy1 + cy2 + cy3;
+    if (sum === 0) {
+      return;
+    }
+    const inv = fround4(1 / fround4(sum));
+    const a1 = c1 >>> 24 & 255, r1 = c1 >>> 16 & 255, g1 = c1 >>> 8 & 255, b1 = c1 & 255;
+    const a2 = c2 >>> 24 & 255, r2 = c2 >>> 16 & 255, g2 = c2 >>> 8 & 255, b2 = c2 & 255;
+    const a3 = c3 >>> 24 & 255, r3 = c3 >>> 16 & 255, g3 = c3 >>> 8 & 255, b3 = c3 & 255;
+    let off = miny * w;
+    for (let y = miny; y < maxy; y++) {
+      let cx1 = cy1, cx2 = cy2, cx3 = cy3;
+      const p = fround4(zoff + dy * y);
+      for (let x = minx; x < maxx; x++) {
+        if (cx1 > 0 && cx2 > 0 && cx3 > 0) {
+          const point = x + off;
+          const zval = fround4(p + dx * x);
+          if (zbuff[point] > zval) {
+            zbuff[point] = zval;
+            const w1 = fround4(fround4(cx2) * inv);
+            const w2 = fround4(fround4(cx3) * inv);
+            const w3 = fround4(fround4(cx1) * inv);
+            const a = f2i(lerp3(w1, a1, w2, a2, w3, a3));
+            const r = f2i(lerp3(w1, r1, w2, r2, w3, r3));
+            const g = f2i(lerp3(w1, g1, w2, g2, w3, g3));
+            const b = f2i(lerp3(w1, b1, w2, b2, w3, b3));
+            img[point] = a << 24 | r << 16 | g << 8 | b | 0;
+          }
+        }
+        cx1 = cx1 - fdy12 | 0;
+        cx2 = cx2 - fdy23 | 0;
+        cx3 = cx3 - fdy31 | 0;
+      }
+      cy1 = cy1 + fdx12 | 0;
+      cy2 = cy2 + fdx23 | 0;
+      cy3 = cy3 + fdx31 | 0;
+      off += w;
+    }
+  }
+  function fillTriangleTextured(zbuff, img, tex, texW, texH, c3, c2, c1, w, h, fx3, fy3, fz3, u3, v3, iw3, fx2, fy2, fz2, u2, v2, iw2, fx1, fy1, fz1, u1, v1, iw1) {
+    const s = setup(w, h, fx3, fy3, fz3, fx2, fy2, fz2, fx1, fy1, fz1);
+    if (!s.ok) {
+      return;
+    }
+    if (s.swapped) {
+      let t = c1;
+      c1 = c2;
+      c2 = t;
+      t = u1;
+      u1 = u2;
+      u2 = t;
+      t = v1;
+      v1 = v2;
+      v2 = t;
+      t = iw1;
+      iw1 = iw2;
+      iw2 = t;
+    }
+    const { dx, dy, zoff, minx, maxx, miny, maxy, fdx12, fdx23, fdx31, fdy12, fdy23, fdy31 } = s;
+    let cy1 = s.cy1, cy2 = s.cy2, cy3 = s.cy3;
+    const sum = cy1 + cy2 + cy3;
+    if (sum === 0) {
+      return;
+    }
+    const inv = fround4(1 / fround4(sum));
+    const a1 = c1 >>> 24 & 255, r1 = c1 >>> 16 & 255, g1 = c1 >>> 8 & 255, b1 = c1 & 255;
+    const a2 = c2 >>> 24 & 255, r2 = c2 >>> 16 & 255, g2 = c2 >>> 8 & 255, b2 = c2 & 255;
+    const a3 = c3 >>> 24 & 255, r3 = c3 >>> 16 & 255, g3 = c3 >>> 8 & 255, b3 = c3 & 255;
+    const uiw1 = fround4(u1 * iw1), uiw2 = fround4(u2 * iw2), uiw3 = fround4(u3 * iw3);
+    const viw1 = fround4(v1 * iw1), viw2 = fround4(v2 * iw2), viw3 = fround4(v3 * iw3);
+    let off = miny * w;
+    for (let y = miny; y < maxy; y++) {
+      let cx1 = cy1, cx2 = cy2, cx3 = cy3;
+      const p = fround4(zoff + dy * y);
+      for (let x = minx; x < maxx; x++) {
+        if (cx1 > 0 && cx2 > 0 && cx3 > 0) {
+          const point = x + off;
+          const zval = fround4(p + dx * x);
+          if (zbuff[point] > zval) {
+            const w1 = fround4(fround4(cx2) * inv), w2 = fround4(fround4(cx3) * inv), w3 = fround4(fround4(cx1) * inv);
+            const invW = fround4(1 / lerp3(w1, iw1, w2, iw2, w3, iw3));
+            const u = fround4(lerp3(w1, uiw1, w2, uiw2, w3, uiw3) * invW);
+            const v = fround4(lerp3(w1, viw1, w2, viw2, w3, viw3) * invW);
+            let tx = f2i(fround4(u * texW));
+            let ty = f2i(fround4(fround4(1 - v) * texH));
+            if (tx < 0) {
+              tx = 0;
+            } else if (tx >= texW) {
+              tx = texW - 1;
+            }
+            if (ty < 0) {
+              ty = 0;
+            } else if (ty >= texH) {
+              ty = texH - 1;
+            }
+            const t = tex[ty * texW + tx];
+            const ta = t >>> 24 & 255;
+            if (ta !== 0) {
+              zbuff[point] = zval;
+              const la = f2i(lerp3(w1, a1, w2, a2, w3, a3));
+              const lr = f2i(lerp3(w1, r1, w2, r2, w3, r3));
+              const lg = f2i(lerp3(w1, g1, w2, g2, w3, g3));
+              const lb = f2i(lerp3(w1, b1, w2, b2, w3, b3));
+              const a = Math.trunc(ta * la / 255);
+              const r = Math.trunc((t >>> 16 & 255) * lr / 255);
+              const g = Math.trunc((t >>> 8 & 255) * lg / 255);
+              const b = Math.trunc((t & 255) * lb / 255);
+              img[point] = a << 24 | r << 16 | g << 8 | b | 0;
+            }
+          }
+        }
+        cx1 -= fdy12;
+        cx2 -= fdy23;
+        cx3 -= fdy31;
+      }
+      cy1 += fdx12;
+      cy2 += fdx23;
+      cy3 += fdx31;
+      off += w;
+    }
+  }
+  function fillTriangleDepthOnly(zbuff, w, h, fx3, fy3, fz3, fx2, fy2, fz2, fx1, fy1, fz1) {
+    const s = setup(w, h, fx3, fy3, fz3, fx2, fy2, fz2, fx1, fy1, fz1);
+    if (!s.ok) {
+      return;
+    }
+    const { dx, dy, zoff, minx, maxx, miny, maxy, fdx12, fdx23, fdx31, fdy12, fdy23, fdy31 } = s;
+    let cy1 = s.cy1 | 0, cy2 = s.cy2 | 0, cy3 = s.cy3 | 0;
+    let off = miny * w;
+    for (let y = miny; y < maxy; y++) {
+      let cx1 = cy1, cx2 = cy2, cx3 = cy3;
+      const p = fround4(zoff + dy * y);
+      for (let x = minx; x < maxx; x++) {
+        if (cx1 > 0 && cx2 > 0 && cx3 > 0) {
+          const point = x + off;
+          const zval = fround4(p + dx * x);
+          if (zbuff[point] > zval) {
+            zbuff[point] = zval;
+          }
+        }
+        cx1 = cx1 - fdy12 | 0;
+        cx2 = cx2 - fdy23 | 0;
+        cx3 = cx3 - fdy31 | 0;
+      }
+      cy1 = cy1 + fdx12 | 0;
+      cy2 = cy2 + fdx23 | 0;
+      cy3 = cy3 + fdx31 | 0;
+      off += w;
+    }
+  }
+  function drawLineDepthTested(zbuff, img, color, w, h, x0, y0, z0, x1, y1, z1, bias) {
+    const dx = fround4(x1 - x0);
+    const dy = fround4(y1 - y0);
+    const adx = dx < 0 ? -dx : dx;
+    const ady = dy < 0 ? -dy : dy;
+    let steps = f2i(adx > ady ? adx : ady);
+    if (steps < 1) {
+      steps = 1;
+    }
+    const inv = fround4(1 / steps);
+    const sx = fround4(dx * inv);
+    const sy = fround4(dy * inv);
+    const sz = fround4(fround4(z1 - z0) * inv);
+    let px = x0, py = y0, pz = z0;
+    for (let i = 0; i <= steps; i++) {
+      const ix = f2i(px);
+      const iy = f2i(py);
+      if (ix >= 0 && ix < w && iy >= 0 && iy < h) {
+        const point = ix + iy * w;
+        if (zbuff[point] >= pz - bias) {
+          img[point] = color;
+        }
+      }
+      px = fround4(px + sx);
+      py = fround4(py + sy);
+      pz = fround4(pz + sz);
+    }
+  }
+
+  // third_party/remote-compose-player/src/core/d3/SoftwarePaint3DContext.ts
+  var fround5 = Math.fround;
+  function fm4(a, b) {
+    return fround5(a * b);
+  }
+  function fa4(a, b) {
+    return fround5(a + b);
+  }
+  var INV_255 = Math.fround(1 / 255);
+  var NEAR_W_EPSILON = 1e-4;
+  var AMBIENT = Math.fround(0.2);
+  var MAX_LIGHTS2 = 32;
+  var WIRE_DEPTH_BIAS = 6e-4;
+  function createCanvasMesh() {
+    return {
+      positions: new Float32Array(0),
+      colors: new Int32Array(0),
+      uvs: new Float32Array(0),
+      depths: new Float32Array(0),
+      hasUv: false,
+      vertexCount: 0
+    };
+  }
+  var SoftwarePaint3DContext = class {
+    constructor() {
+      this.mProj = mat4();
+      this.mView = mat4();
+      this.mModel = mat4();
+      this.mPV = mat4();
+      this.mMVP = mat4();
+      this.mMV = mat4();
+      this.mMeshes = /* @__PURE__ */ new Map();
+      this.mColor = null;
+      this.mZbuf = null;
+      this.mWidth = 0;
+      this.mHeight = 0;
+      this.mBaseColorArgb = 4294967295 | 0;
+      // Lighting state. Until a light op runs we use a default headlight, so an untouched
+      // document is never unlit.
+      this.mLights = [];
+      this.mLightsTouched = false;
+      // Per-draw eye-space light scratch (parallel arrays, filled by prepareLightsEyeSpace).
+      this.mNumEyeLights = 0;
+      this.mEType = new Int32Array(0);
+      this.mElx = new Float32Array(0);
+      this.mEly = new Float32Array(0);
+      this.mElz = new Float32Array(0);
+      this.mElr = new Float32Array(0);
+      this.mElg = new Float32Array(0);
+      this.mElb = new Float32Array(0);
+      this.mScratch4 = new Float32Array(4);
+      this.mLightScratch3 = new Float32Array(3);
+      this.mNormal3 = new Float32Array(3);
+      // Software texture (host-decoded ARGB pixels).
+      this.mTexPixels = null;
+      this.mTexW = 0;
+      this.mTexH = 0;
+      // Specular material (Blinn-Phong). 0 strength => matte (default, no specular cost).
+      this.mSpecStrength = 0;
+      this.mShininess = 32;
+      // Polygon-offset depth bias (window-z units). Both 0 => no bias.
+      this.mDepthBiasC = 0;
+      this.mDepthBiasS = 0;
+      /** Per-triangle screen-space output of projectTriangle: sx,sy,sz x 3. */
+      this.mTriScreen = new Float32Array(9);
+      /** Per-vertex shaded ARGB of the last accepted triangle, in vertex order. */
+      this.mTriColor = new Int32Array(3);
+      /** Per-vertex 1/clipW, for perspective-correct attribute interpolation. */
+      this.mTriInvW = new Float32Array(3);
+      /**
+       * Project, near-reject, backface-cull and Lambert shade one triangle. On acceptance fills
+       * mTriScreen with the three screen-space vertices (Y already flipped for a top-down buffer)
+       * and mTriColor with the per-vertex shaded ARGB, and returns true. Returns false — leaving
+       * the scratch untouched — when the triangle is degenerate, crosses the near plane, or is
+       * back-facing.
+       */
+      // ── Canvas backend front half ─────────────────────────────────────────────────────
+      //
+      // Port of the reference's buildCanvasVertices, and the same code as the C++ one. It
+      // reuses projectTriangle, so transform, backface cull, lighting and depth bias are
+      // literally what the software rasterizer runs — the backends can only disagree about
+      // rasterization, which is the point of having both.
+      this.cvTriXY = new Float32Array(0);
+      this.cvTriUv = new Float32Array(0);
+      this.cvTriColor = new Int32Array(0);
+      this.cvTriDepth = new Float32Array(0);
+      this.cvTriZ = new Float32Array(0);
+      this.cvOrder = new Int32Array(0);
+    }
+    // ----- Buffers ----------------------------------------------------------
+    /**
+     * (Re)allocate the color and depth buffers if the size changed. Pixels are NOT cleared
+     * here — call clearDepth3D() to start a new 3D pass.
+     */
+    setSize(width, height) {
+      if (width <= 0 || height <= 0) {
+        return;
+      }
+      if (this.mColor === null || this.mWidth !== width || this.mHeight !== height) {
+        this.mColor = new Int32Array(width * height);
+        this.mZbuf = new Float32Array(width * height);
+        this.mWidth = width;
+        this.mHeight = height;
+        clearDepth(this.mZbuf);
+      }
+    }
+    getWidth() {
+      return this.mWidth;
+    }
+    getHeight() {
+      return this.mHeight;
+    }
+    /** Engine color buffer (ARGB, length w*h). Null before setSize. */
+    getColorBuffer() {
+      return this.mColor;
+    }
+    setBaseColorArgb(argb) {
+      this.mBaseColorArgb = argb | 0;
+    }
+    getBaseColorArgb() {
+      return this.mBaseColorArgb;
+    }
+    // ----- Paint3DContext ---------------------------------------------------
+    defineMesh3D(id, indices, verts, normals, uv = null) {
+      this.mMeshes.set(id, { indices, verts, normals, uv });
+    }
+    setCamera3D(projection, projParams, viewParams) {
+      if (projection === PROJECTION_PERSPECTIVE) {
+        if (projParams.length !== 4) {
+          return;
+        }
+        perspective(this.mProj, projParams[0], projParams[1], projParams[2], projParams[3]);
+      } else {
+        if (projParams.length !== 6) {
+          return;
+        }
+        ortho(
+          this.mProj,
+          projParams[0],
+          projParams[1],
+          projParams[2],
+          projParams[3],
+          projParams[4],
+          projParams[5]
+        );
+      }
+      if (viewParams.length !== 9) {
+        return;
+      }
+      lookAt(
+        this.mView,
+        viewParams[0],
+        viewParams[1],
+        viewParams[2],
+        viewParams[3],
+        viewParams[4],
+        viewParams[5],
+        viewParams[6],
+        viewParams[7],
+        viewParams[8]
+      );
+      identity(this.mModel);
+    }
+    matrix3Op(sub, args) {
+      switch (sub) {
+        case M3_IDENTITY:
+          identity(this.mModel);
+          break;
+        case M3_TRANSLATE:
+          if (args.length === 3) {
+            translate(this.mModel, args[0], args[1], args[2]);
+          }
+          break;
+        case M3_SCALE:
+          if (args.length === 3) {
+            scale(this.mModel, args[0], args[1], args[2]);
+          }
+          break;
+        case M3_ROTATE_AXIS:
+          if (args.length === 4) {
+            rotateAxis(this.mModel, args[0], args[1], args[2], args[3]);
+          }
+          break;
+        case M3_MULTIPLY:
+          if (args.length === 16) {
+            const m = args instanceof Float32Array ? args : new Float32Array(args);
+            multiply(this.mModel, this.mModel, m);
+          }
+          break;
+        default:
+          break;
+      }
+    }
+    clearDepth3D() {
+      if (this.mZbuf === null || this.mColor === null) {
+        return;
+      }
+      clearDepth(this.mZbuf);
+      this.mColor.fill(0);
+    }
+    setLights3D(types, colors, params) {
+      this.mLights = [];
+      const n = types.length;
+      for (let i = 0; i < n && this.mLights.length < MAX_LIGHTS2; i++) {
+        const p = i * 4;
+        if (p + 3 >= params.length) {
+          break;
+        }
+        const argb = colors[i] | 0;
+        this.mLights.push({
+          type: types[i],
+          r: fround5((argb >>> 16 & 255) * INV_255),
+          g: fround5((argb >>> 8 & 255) * INV_255),
+          b: fround5((argb & 255) * INV_255),
+          wx: params[p],
+          wy: params[p + 1],
+          wz: params[p + 2],
+          intensity: params[p + 3]
+        });
+      }
+      this.mLightsTouched = true;
+    }
+    /** The software engine has no bitmap store; the host supplies pixels via setTextureData. */
+    setTexture3D(_bitmapId) {
+    }
+    setMaterial3D(specStrength, shininess) {
+      this.mSpecStrength = specStrength;
+      this.mShininess = shininess > 0 ? shininess : 1;
+    }
+    setDepthBias3D(constant, slope) {
+      this.mDepthBiasC = constant;
+      this.mDepthBiasS = slope;
+    }
+    /** Host-supplied texture pixels (ARGB, length w*h); null clears the texture. */
+    setTextureData(pixels, w, h) {
+      this.mTexPixels = pixels;
+      this.mTexW = w;
+      this.mTexH = h;
+    }
+    // ----- Lighting ---------------------------------------------------------
+    ensureEyeLightCapacity(n) {
+      if (this.mEType.length < n) {
+        this.mEType = new Int32Array(n);
+        this.mElx = new Float32Array(n);
+        this.mEly = new Float32Array(n);
+        this.mElz = new Float32Array(n);
+        this.mElr = new Float32Array(n);
+        this.mElg = new Float32Array(n);
+        this.mElb = new Float32Array(n);
+      }
+    }
+    /**
+     * Resolve the active lights into eye space for the current view. Directional lights store
+     * the unit vector *toward* the light; point lights store their eye-space position. Color is
+     * premultiplied by intensity.
+     */
+    prepareLightsEyeSpace() {
+      if (!this.mLightsTouched) {
+        this.ensureEyeLightCapacity(1);
+        this.mEType[0] = LIGHT_DIRECTIONAL;
+        this.mElx[0] = 0;
+        this.mEly[0] = 0;
+        this.mElz[0] = 1;
+        this.mElr[0] = 1 - AMBIENT;
+        this.mElg[0] = 1 - AMBIENT;
+        this.mElb[0] = 1 - AMBIENT;
+        this.mNumEyeLights = 1;
+        return;
+      }
+      const n = this.mLights.length;
+      this.ensureEyeLightCapacity(n);
+      for (let i = 0; i < n; i++) {
+        const l = this.mLights[i];
+        this.mEType[i] = l.type;
+        if (l.type === LIGHT_POINT) {
+          transformPoint(this.mView, l.wx, l.wy, l.wz, this.mScratch4);
+          this.mElx[i] = this.mScratch4[0];
+          this.mEly[i] = this.mScratch4[1];
+          this.mElz[i] = this.mScratch4[2];
+        } else {
+          transformDirection(this.mView, l.wx, l.wy, l.wz, this.mLightScratch3);
+          let x = -this.mLightScratch3[0];
+          let y = -this.mLightScratch3[1];
+          let z = -this.mLightScratch3[2];
+          const len = fround5(Math.sqrt(fa4(fa4(fm4(x, x), fm4(y, y)), fm4(z, z))));
+          if (len > 0) {
+            x = fround5(x / len);
+            y = fround5(y / len);
+            z = fround5(z / len);
+          }
+          this.mElx[i] = x;
+          this.mEly[i] = y;
+          this.mElz[i] = z;
+        }
+        this.mElr[i] = l.r * l.intensity;
+        this.mElg[i] = l.g * l.intensity;
+        this.mElb[i] = l.b * l.intensity;
+      }
+      this.mNumEyeLights = n;
+    }
+    /**
+     * Lambert-light a vertex: base modulated by ambient plus each light's (two-sided) N.L.
+     * (nx,ny,nz) is the eye-space normal (need not be unit); (px,py,pz) the eye-space position.
+     */
+    litColor(base, nx, ny, nz, px, py, pz) {
+      const nlen = fround5(Math.sqrt(fa4(fa4(fm4(nx, nx), fm4(ny, ny)), fm4(nz, nz))));
+      const inv = nlen === 0 ? 0 : fround5(1 / nlen);
+      if (this.mSpecStrength > 0) {
+        return this.litColorSpecular(base, nx * inv, ny * inv, nz * inv, px, py, pz);
+      }
+      let lr = AMBIENT, lg = AMBIENT, lb = AMBIENT;
+      for (let i = 0; i < this.mNumEyeLights; i++) {
+        let lx, ly, lz;
+        if (this.mEType[i] === LIGHT_POINT) {
+          lx = this.mElx[i] - px;
+          ly = this.mEly[i] - py;
+          lz = this.mElz[i] - pz;
+          const ll = fround5(Math.sqrt(fa4(fa4(fm4(lx, lx), fm4(ly, ly)), fm4(lz, lz))));
+          if (ll > 0) {
+            lx = fround5(lx / ll);
+            ly = fround5(ly / ll);
+            lz = fround5(lz / ll);
+          }
+        } else {
+          lx = this.mElx[i];
+          ly = this.mEly[i];
+          lz = this.mElz[i];
+        }
+        let d = fm4(fa4(fa4(fm4(nx, lx), fm4(ny, ly)), fm4(nz, lz)), inv);
+        if (d < 0) {
+          d = -d;
+        }
+        lr = fround5(lr + fround5(this.mElr[i] * d));
+        lg = fround5(lg + fround5(this.mElg[i] * d));
+        lb = fround5(lb + fround5(this.mElb[i] * d));
+      }
+      const a = base >>> 24 & 255;
+      let r = Math.trunc(fm4(base >>> 16 & 255, lr));
+      let g = Math.trunc(fm4(base >>> 8 & 255, lg));
+      let b = Math.trunc(fm4(base & 255, lb));
+      if (r > 255) {
+        r = 255;
+      }
+      if (g > 255) {
+        g = 255;
+      }
+      if (b > 255) {
+        b = 255;
+      }
+      return a << 24 | r << 16 | g << 8 | b | 0;
+    }
+    /**
+     * Glossy shading (only when specStrength > 0): diffuse Lambert modulating the base color
+     * plus an additive white Blinn-Phong highlight. The normal is unit and is flipped to face
+     * the viewer, so highlights land on the lit side only.
+     */
+    litColorSpecular(base, nfx, nfy, nfz, px, py, pz) {
+      const vlen = fround5(Math.sqrt(fa4(fa4(fm4(px, px), fm4(py, py)), fm4(pz, pz))));
+      let vx = 0, vy = 0, vz = 1;
+      if (vlen > 0) {
+        vx = fround5(-px / vlen);
+        vy = fround5(-py / vlen);
+        vz = fround5(-pz / vlen);
+      }
+      if (fa4(fa4(fm4(nfx, vx), fm4(nfy, vy)), fm4(nfz, vz)) < 0) {
+        nfx = -nfx;
+        nfy = -nfy;
+        nfz = -nfz;
+      }
+      let lr = AMBIENT, lg = AMBIENT, lb = AMBIENT;
+      let sr = 0, sg = 0, sb = 0;
+      for (let i = 0; i < this.mNumEyeLights; i++) {
+        let lx, ly, lz;
+        if (this.mEType[i] === LIGHT_POINT) {
+          lx = this.mElx[i] - px;
+          ly = this.mEly[i] - py;
+          lz = this.mElz[i] - pz;
+          const ll = fround5(Math.sqrt(lx * lx + ly * ly + lz * lz));
+          if (ll > 0) {
+            lx /= ll;
+            ly /= ll;
+            lz /= ll;
+          }
+        } else {
+          lx = this.mElx[i];
+          ly = this.mEly[i];
+          lz = this.mElz[i];
+        }
+        const ndl = fa4(fa4(fm4(nfx, lx), fm4(nfy, ly)), fm4(nfz, lz));
+        if (ndl <= 0) {
+          continue;
+        }
+        lr = fa4(lr, fm4(this.mElr[i], ndl));
+        lg = fa4(lg, fm4(this.mElg[i], ndl));
+        lb = fa4(lb, fm4(this.mElb[i], ndl));
+        const hx = lx + vx, hy = ly + vy, hz = lz + vz;
+        const hlen = fround5(Math.sqrt(fa4(fa4(fm4(hx, hx), fm4(hy, hy)), fm4(hz, hz))));
+        if (hlen <= 0) {
+          continue;
+        }
+        const ndh = fround5(fa4(fa4(fm4(nfx, hx), fm4(nfy, hy)), fm4(nfz, hz)) / hlen);
+        if (ndh <= 0) {
+          continue;
+        }
+        const spec = fm4(fround5(Math.pow(ndh, this.mShininess)), this.mSpecStrength);
+        sr = fa4(sr, fm4(this.mElr[i], spec));
+        sg = fa4(sg, fm4(this.mElg[i], spec));
+        sb = fa4(sb, fm4(this.mElb[i], spec));
+      }
+      const a = base >>> 24 & 255;
+      let r = Math.trunc((base >>> 16 & 255) * lr + sr * 255);
+      let g = Math.trunc((base >>> 8 & 255) * lg + sg * 255);
+      let b = Math.trunc((base & 255) * lb + sb * 255);
+      if (r > 255) {
+        r = 255;
+      }
+      if (g > 255) {
+        g = 255;
+      }
+      if (b > 255) {
+        b = 255;
+      }
+      return a << 24 | r << 16 | g << 8 | b | 0;
+    }
+    // ----- Drawing ----------------------------------------------------------
+    drawMesh3D(meshId, mode) {
+      const m = this.mMeshes.get(meshId);
+      if (m === void 0 || this.mColor === null || this.mZbuf === null) {
+        return;
+      }
+      const w = this.mWidth;
+      const h = this.mHeight;
+      const pixels = this.mColor;
+      multiply(this.mPV, this.mProj, this.mView);
+      multiply(this.mMV, this.mView, this.mModel);
+      multiply(this.mMVP, this.mPV, this.mModel);
+      this.prepareLightsEyeSpace();
+      const baseColor = this.mBaseColorArgb;
+      const idx = m.indices;
+      const verts = m.verts;
+      const normals = m.normals;
+      const uv = m.uv;
+      if ((mode & MODE_WIREFRAME) !== 0) {
+        this.drawMeshWireframe(idx, verts, normals, baseColor, w, h, pixels, mode);
+        return;
+      }
+      const smooth = (mode & MODE_SMOOTH_MASK) !== 0 && normals !== null;
+      const textured = this.mTexPixels !== null && uv !== null;
+      const interpolate2 = smooth || this.mSpecStrength > 0;
+      const ts = this.mTriScreen;
+      const tc = this.mTriColor;
+      for (let t = 0; t < idx.length; t += 3) {
+        if (!this.projectTriangle(idx, verts, normals, smooth, textured, t, baseColor, w, h)) {
+          continue;
+        }
+        if (textured) {
+          const q0 = idx[t] * 2, q1 = idx[t + 1] * 2, q2 = idx[t + 2] * 2;
+          fillTriangleTextured(
+            this.mZbuf,
+            pixels,
+            this.mTexPixels,
+            this.mTexW,
+            this.mTexH,
+            tc[2],
+            tc[1],
+            tc[0],
+            w,
+            h,
+            ts[6],
+            ts[7],
+            ts[8],
+            uv[q2],
+            uv[q2 + 1],
+            this.mTriInvW[2],
+            ts[3],
+            ts[4],
+            ts[5],
+            uv[q1],
+            uv[q1 + 1],
+            this.mTriInvW[1],
+            ts[0],
+            ts[1],
+            ts[2],
+            uv[q0],
+            uv[q0 + 1],
+            this.mTriInvW[0]
+          );
+        } else if (interpolate2) {
+          fillTriangleGouraud(
+            this.mZbuf,
+            pixels,
+            tc[2],
+            tc[1],
+            tc[0],
+            w,
+            h,
+            ts[6],
+            ts[7],
+            ts[8],
+            ts[3],
+            ts[4],
+            ts[5],
+            ts[0],
+            ts[1],
+            ts[2]
+          );
+        } else {
+          fillTriangle(
+            this.mZbuf,
+            pixels,
+            tc[0],
+            w,
+            h,
+            ts[6],
+            ts[7],
+            ts[8],
+            ts[3],
+            ts[4],
+            ts[5],
+            ts[0],
+            ts[1],
+            ts[2]
+          );
+        }
+      }
+    }
+    /**
+     * Hidden-line wireframe. Two passes over the front-facing triangles: rasterize each into the
+     * depth buffer only (transparent faces), then draw the selected edges as depth-tested lines,
+     * so edges on visible surface show and edges behind nearer surface are occluded.
+     */
+    drawMeshWireframe(idx, verts, normals, lineColor, w, h, pixels, mode) {
+      let edges = mode & WIRE_EDGE_MASK;
+      if (edges === 0) {
+        edges = WIRE_EDGE_MASK;
+      }
+      const e0 = (edges & WIRE_EDGE0) !== 0;
+      const e1 = (edges & WIRE_EDGE1) !== 0;
+      const e2 = (edges & WIRE_EDGE2) !== 0;
+      const ts = this.mTriScreen;
+      for (let t = 0; t < idx.length; t += 3) {
+        if (!this.projectTriangle(idx, verts, normals, false, false, t, lineColor, w, h)) {
+          continue;
+        }
+        fillTriangleDepthOnly(
+          this.mZbuf,
+          w,
+          h,
+          ts[6],
+          ts[7],
+          ts[8],
+          ts[3],
+          ts[4],
+          ts[5],
+          ts[0],
+          ts[1],
+          ts[2]
+        );
+      }
+      for (let t = 0; t < idx.length; t += 3) {
+        if (!this.projectTriangle(idx, verts, normals, false, false, t, lineColor, w, h)) {
+          continue;
+        }
+        const ax = ts[0], ay = ts[1], az = ts[2];
+        const bx = ts[3], by = ts[4], bz = ts[5];
+        const cx = ts[6], cy = ts[7], cz = ts[8];
+        if (e0) {
+          drawLineDepthTested(
+            this.mZbuf,
+            pixels,
+            lineColor,
+            w,
+            h,
+            ax,
+            ay,
+            az,
+            bx,
+            by,
+            bz,
+            WIRE_DEPTH_BIAS
+          );
+        }
+        if (e1) {
+          drawLineDepthTested(
+            this.mZbuf,
+            pixels,
+            lineColor,
+            w,
+            h,
+            bx,
+            by,
+            bz,
+            cx,
+            cy,
+            cz,
+            WIRE_DEPTH_BIAS
+          );
+        }
+        if (e2) {
+          drawLineDepthTested(
+            this.mZbuf,
+            pixels,
+            lineColor,
+            w,
+            h,
+            cx,
+            cy,
+            cz,
+            ax,
+            ay,
+            az,
+            WIRE_DEPTH_BIAS
+          );
+        }
+      }
+    }
+    /**
+     * Project, light and cull a mesh into `out`, returning the vertex count.
+     *
+     * Triangles come out ordered back to front so a host with no depth buffer still gets a
+     * plausible image; `depths` is filled for one that has.
+     */
+    /** The active texture, for a host that rasterizes textured triangles itself. */
+    getTextureData() {
+      return { pixels: this.mTexPixels, width: this.mTexW, height: this.mTexH };
+    }
+    buildCanvasVertices(meshId, out, smooth) {
+      out.vertexCount = 0;
+      const m = this.mMeshes.get(meshId);
+      if (m === void 0) return 0;
+      const w = this.mWidth, h = this.mHeight;
+      multiply(this.mPV, this.mProj, this.mView);
+      multiply(this.mMV, this.mView, this.mModel);
+      multiply(this.mMVP, this.mPV, this.mModel);
+      this.prepareLightsEyeSpace();
+      const idx = m.indices, verts = m.verts, normals = m.normals, uv = m.uv;
+      const useSmooth = smooth && normals !== null;
+      out.hasUv = uv !== null;
+      const triCount = idx.length / 3 | 0;
+      if (triCount <= 0) return 0;
+      if (this.cvTriXY.length < triCount * 6) {
+        this.cvTriXY = new Float32Array(triCount * 6);
+        this.cvTriUv = new Float32Array(triCount * 6);
+        this.cvTriColor = new Int32Array(triCount * 3);
+        this.cvTriZ = new Float32Array(triCount * 3);
+        this.cvTriDepth = new Float32Array(triCount);
+        this.cvOrder = new Int32Array(triCount);
+      }
+      const ts = this.mTriScreen, tc = this.mTriColor;
+      let kept = 0;
+      for (let t = 0; t < idx.length; t += 3) {
+        if (!this.projectTriangle(
+          idx,
+          verts,
+          normals,
+          useSmooth,
+          false,
+          t,
+          this.mBaseColorArgb,
+          w,
+          h
+        )) {
+          continue;
+        }
+        const p = kept * 6;
+        this.cvTriXY[p] = ts[0];
+        this.cvTriXY[p + 1] = ts[1];
+        this.cvTriXY[p + 2] = ts[3];
+        this.cvTriXY[p + 3] = ts[4];
+        this.cvTriXY[p + 4] = ts[6];
+        this.cvTriXY[p + 5] = ts[7];
+        const c = kept * 3;
+        this.cvTriColor[c] = tc[0];
+        this.cvTriColor[c + 1] = tc[1];
+        this.cvTriColor[c + 2] = tc[2];
+        if (uv !== null) {
+          const u0 = idx[t] * 2, u1 = idx[t + 1] * 2, u2 = idx[t + 2] * 2;
+          this.cvTriUv[p] = uv[u0];
+          this.cvTriUv[p + 1] = uv[u0 + 1];
+          this.cvTriUv[p + 2] = uv[u1];
+          this.cvTriUv[p + 3] = uv[u1 + 1];
+          this.cvTriUv[p + 4] = uv[u2];
+          this.cvTriUv[p + 5] = uv[u2 + 1];
+        }
+        this.cvTriDepth[kept] = (ts[2] + ts[5] + ts[8]) * (1 / 3);
+        const zi = kept * 3;
+        this.cvTriZ[zi] = ts[2];
+        this.cvTriZ[zi + 1] = ts[5];
+        this.cvTriZ[zi + 2] = ts[8];
+        kept++;
+      }
+      const order = this.cvOrder, depth = this.cvTriDepth;
+      for (let i = 0; i < kept; i++) order[i] = i;
+      for (let i = 1; i < kept; i++) {
+        const cur = order[i];
+        const key = depth[cur];
+        let j = i - 1;
+        while (j >= 0 && depth[order[j]] < key) {
+          order[j + 1] = order[j];
+          j--;
+        }
+        order[j + 1] = cur;
+      }
+      const vertexCount2 = kept * 3;
+      if (out.positions.length < vertexCount2 * 2) {
+        out.positions = new Float32Array(vertexCount2 * 2);
+        out.uvs = new Float32Array(vertexCount2 * 2);
+        out.colors = new Int32Array(vertexCount2);
+        out.depths = new Float32Array(vertexCount2);
+      }
+      for (let k = 0; k < kept; k++) {
+        const tri = order[k];
+        const src = tri * 6, dst = k * 6;
+        for (let i = 0; i < 6; i++) out.positions[dst + i] = this.cvTriXY[src + i];
+        if (uv !== null) {
+          for (let i = 0; i < 6; i++) out.uvs[dst + i] = this.cvTriUv[src + i];
+        }
+        const srcC = tri * 3, v = k * 3;
+        for (let i = 0; i < 3; i++) {
+          out.colors[v + i] = this.cvTriColor[srcC + i];
+          out.depths[v + i] = this.cvTriZ[srcC + i];
+        }
+      }
+      out.vertexCount = vertexCount2;
+      return vertexCount2;
+    }
+    projectTriangle(idx, verts, normals, smooth, computeInvW, t, baseColor, w, h) {
+      const i0 = idx[t] * 3;
+      const i1 = idx[t + 1] * 3;
+      const i2 = idx[t + 2] * 3;
+      if (i0 < 0 || i1 < 0 || i2 < 0 || i0 + 2 >= verts.length || i1 + 2 >= verts.length || i2 + 2 >= verts.length) {
+        return false;
+      }
+      const s4 = this.mScratch4;
+      transformPoint(this.mMVP, verts[i0], verts[i0 + 1], verts[i0 + 2], s4);
+      const cx0 = s4[0], cy0 = s4[1], cz0 = s4[2], cw0 = s4[3];
+      transformPoint(this.mMVP, verts[i1], verts[i1 + 1], verts[i1 + 2], s4);
+      const cx1 = s4[0], cy1 = s4[1], cz1 = s4[2], cw1 = s4[3];
+      transformPoint(this.mMVP, verts[i2], verts[i2 + 1], verts[i2 + 2], s4);
+      const cx2 = s4[0], cy2 = s4[1], cz2 = s4[2], cw2 = s4[3];
+      if (cw0 < NEAR_W_EPSILON || cw1 < NEAR_W_EPSILON || cw2 < NEAR_W_EPSILON) {
+        return false;
+      }
+      if (computeInvW) {
+        this.mTriInvW[0] = 1 / cw0;
+        this.mTriInvW[1] = 1 / cw1;
+        this.mTriInvW[2] = 1 / cw2;
+      }
+      const nx0 = fround5(cx0 / cw0), ny0 = fround5(cy0 / cw0), nz0 = fround5(cz0 / cw0);
+      const nx1 = fround5(cx1 / cw1), ny1 = fround5(cy1 / cw1), nz1 = fround5(cz1 / cw1);
+      const nx2 = fround5(cx2 / cw2), ny2 = fround5(cy2 / cw2), nz2 = fround5(cz2 / cw2);
+      const sx0 = fm4(fa4(fm4(nx0, 0.5), 0.5), w);
+      const sy0 = fm4(fround5(1 - fa4(fm4(ny0, 0.5), 0.5)), h);
+      let sz0 = fa4(fm4(nz0, 0.5), 0.5);
+      const sx1 = fm4(fa4(fm4(nx1, 0.5), 0.5), w);
+      const sy1 = fm4(fround5(1 - fa4(fm4(ny1, 0.5), 0.5)), h);
+      let sz1 = fa4(fm4(nz1, 0.5), 0.5);
+      const sx2 = fm4(fa4(fm4(nx2, 0.5), 0.5), w);
+      const sy2 = fm4(fround5(1 - fa4(fm4(ny2, 0.5), 0.5)), h);
+      let sz2 = fa4(fm4(nz2, 0.5), 0.5);
+      const signedArea2 = fround5(fm4(fround5(sx1 - sx0), fround5(sy2 - sy0)) - fm4(fround5(sx2 - sx0), fround5(sy1 - sy0)));
+      if (signedArea2 > 0) {
+        return false;
+      }
+      if ((this.mDepthBiasC !== 0 || this.mDepthBiasS !== 0) && signedArea2 !== 0) {
+        const invA = fround5(1 / signedArea2);
+        const dzdx = fm4(fround5(fm4(fround5(sz1 - sz0), fround5(sy2 - sy0)) - fm4(fround5(sz2 - sz0), fround5(sy1 - sy0))), invA);
+        const dzdy = fm4(fround5(fm4(fround5(sz2 - sz0), fround5(sx1 - sx0)) - fm4(fround5(sz1 - sz0), fround5(sx2 - sx0))), invA);
+        const slope = Math.max(Math.abs(dzdx), Math.abs(dzdy));
+        const bias = fa4(this.mDepthBiasC, fm4(this.mDepthBiasS, slope));
+        sz0 = fa4(sz0, bias);
+        sz1 = fa4(sz1, bias);
+        sz2 = fa4(sz2, bias);
+      }
+      const ts = this.mTriScreen;
+      ts[0] = sx0;
+      ts[1] = sy0;
+      ts[2] = sz0;
+      ts[3] = sx1;
+      ts[4] = sy1;
+      ts[5] = sz1;
+      ts[6] = sx2;
+      ts[7] = sy2;
+      ts[8] = sz2;
+      transformPoint(this.mMV, verts[i0], verts[i0 + 1], verts[i0 + 2], s4);
+      const ev0x = s4[0], ev0y = s4[1], ev0z = s4[2];
+      transformPoint(this.mMV, verts[i1], verts[i1 + 1], verts[i1 + 2], s4);
+      const ev1x = s4[0], ev1y = s4[1], ev1z = s4[2];
+      transformPoint(this.mMV, verts[i2], verts[i2 + 1], verts[i2 + 2], s4);
+      const ev2x = s4[0], ev2y = s4[1], ev2z = s4[2];
+      const tc = this.mTriColor;
+      const n3 = this.mNormal3;
+      if (smooth && normals !== null && i0 + 2 < normals.length && i1 + 2 < normals.length && i2 + 2 < normals.length) {
+        transformDirection(this.mMV, normals[i0], normals[i0 + 1], normals[i0 + 2], n3);
+        tc[0] = this.litColor(baseColor, n3[0], n3[1], n3[2], ev0x, ev0y, ev0z);
+        transformDirection(this.mMV, normals[i1], normals[i1 + 1], normals[i1 + 2], n3);
+        tc[1] = this.litColor(baseColor, n3[0], n3[1], n3[2], ev1x, ev1y, ev1z);
+        transformDirection(this.mMV, normals[i2], normals[i2 + 1], normals[i2 + 2], n3);
+        tc[2] = this.litColor(baseColor, n3[0], n3[1], n3[2], ev2x, ev2y, ev2z);
+      } else {
+        const ax = fround5(ev1x - ev0x), ay = fround5(ev1y - ev0y), az = fround5(ev1z - ev0z);
+        const bx = fround5(ev2x - ev0x), by = fround5(ev2y - ev0y), bz = fround5(ev2z - ev0z);
+        const nxn = fround5(fm4(ay, bz) - fm4(az, by));
+        const nyn = fround5(fm4(az, bx) - fm4(ax, bz));
+        const nzn = fround5(fm4(ax, by) - fm4(ay, bx));
+        if (this.mSpecStrength > 0) {
+          tc[0] = this.litColor(baseColor, nxn, nyn, nzn, ev0x, ev0y, ev0z);
+          tc[1] = this.litColor(baseColor, nxn, nyn, nzn, ev1x, ev1y, ev1z);
+          tc[2] = this.litColor(baseColor, nxn, nyn, nzn, ev2x, ev2y, ev2z);
+        } else {
+          const third = fround5(1 / 3);
+          const cx = fm4(fa4(fa4(ev0x, ev1x), ev2x), third);
+          const cy = fm4(fa4(fa4(ev0y, ev1y), ev2y), third);
+          const cz = fm4(fa4(fa4(ev0z, ev1z), ev2z), third);
+          const shaded = this.litColor(baseColor, nxn, nyn, nzn, cx, cy, cz);
+          tc[0] = shaded;
+          tc[1] = shaded;
+          tc[2] = shaded;
+        }
+      }
+      return true;
+    }
+  };
+
+  // third_party/remote-compose-player/src/web/WebGL3DRenderer.ts
+  var VERT = `#version 300 es
+precision highp float;
+layout(location = 0) in vec2 aPos;      // window pixels, y down
+layout(location = 1) in vec4 aColor;    // straight (non-premultiplied) RGBA
+layout(location = 2) in vec2 aUv;
+layout(location = 3) in float aDepth;   // window z in [0,1], smaller = closer
+uniform vec2 uViewport;
+out vec4 vColor;
+out vec2 vUv;
+void main() {
+    // Window pixels to clip space. The y flip is the whole conversion: our window origin is
+    // top-left with y increasing downward, clip space is centre-origin with y up.
+    vec2 clip = vec2(aPos.x / uViewport.x * 2.0 - 1.0,
+                     1.0 - aPos.y / uViewport.y * 2.0);
+    // Depth [0,1] to clip [-1,1], matching the default depth range so gl.LESS means the
+    // same thing here as the software rasterizer's "smaller z wins".
+    gl_Position = vec4(clip, aDepth * 2.0 - 1.0, 1.0);
+    vColor = aColor;
+    vUv = aUv;
+}`;
+  var FRAG = `#version 300 es
+precision highp float;
+in vec4 vColor;
+in vec2 vUv;
+uniform sampler2D uTex;
+uniform bool uUseTex;
+out vec4 fragColor;
+void main() {
+    vec4 c = vColor;
+    if (uUseTex) {
+        // Lighting modulates the sampled texel, as the reference does with a BitmapShader.
+        c *= texture(uTex, vUv);
+    }
+    if (c.a <= 0.0) discard;
+    // Premultiplied out, because the canvas is created with premultipliedAlpha and
+    // compositing it with drawImage otherwise darkens every antialiased edge.
+    fragColor = vec4(c.rgb * c.a, c.a);
+}`;
+  var WebGL3DRenderer = class {
+    constructor() {
+      this.gl = null;
+      this.program = null;
+      this.vao = null;
+      this.buffer = null;
+      this.texture = null;
+      this.texW = 0;
+      this.texH = 0;
+      /** The pixel array last uploaded. The host caches its conversion, so an unchanged texture
+       *  arrives as the same array and the upload can be skipped — otherwise every mesh in
+       *  every frame re-uploads the whole image. */
+      this.texSource = null;
+      /** Interleaved x,y,r,g,b,a,u,v,depth — 9 floats per vertex. */
+      this.interleaved = new Float32Array(0);
+      this.uViewport = null;
+      this.uUseTex = null;
+      /** Batches drawn since construction. Lets a harness prove the GPU path was taken rather
+       *  than the software fallback, which is otherwise invisible in the output. */
+      this.drawCount = 0;
+      this.canvas = document.createElement("canvas");
+    }
+    /** The offscreen canvas — use as a drawImage source after `draw`. */
+    getCanvas() {
+      return this.canvas;
+    }
+    isAvailable() {
+      return this.ensureGl() !== null;
+    }
+    ensureGl() {
+      if (this.gl) return this.gl;
+      const gl = this.canvas.getContext("webgl2", {
+        alpha: true,
+        depth: true,
+        antialias: true,
+        premultipliedAlpha: true,
+        // Without this the drawing buffer is cleared after every composite, so reading it
+        // back with drawImage gets an empty image on some drivers.
+        preserveDrawingBuffer: true
+      });
+      if (!gl) return null;
+      this.gl = gl;
+      const compile = (type, src) => {
+        const sh = gl.createShader(type);
+        if (!sh) return null;
+        gl.shaderSource(sh, src);
+        gl.compileShader(sh);
+        if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS)) {
+          console.error("rc 3d shader:", gl.getShaderInfoLog(sh));
+          gl.deleteShader(sh);
+          return null;
+        }
+        return sh;
+      };
+      const vs = compile(gl.VERTEX_SHADER, VERT);
+      const fs = compile(gl.FRAGMENT_SHADER, FRAG);
+      if (!vs || !fs) return null;
+      const prog = gl.createProgram();
+      if (!prog) return null;
+      gl.attachShader(prog, vs);
+      gl.attachShader(prog, fs);
+      gl.linkProgram(prog);
+      if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) {
+        console.error("rc 3d link:", gl.getProgramInfoLog(prog));
+        return null;
+      }
+      this.program = prog;
+      this.uViewport = gl.getUniformLocation(prog, "uViewport");
+      this.uUseTex = gl.getUniformLocation(prog, "uUseTex");
+      gl.useProgram(prog);
+      gl.uniform1i(gl.getUniformLocation(prog, "uTex"), 0);
+      this.buffer = gl.createBuffer();
+      this.vao = gl.createVertexArray();
+      gl.bindVertexArray(this.vao);
+      gl.bindBuffer(gl.ARRAY_BUFFER, this.buffer);
+      const stride = 9 * 4;
+      gl.enableVertexAttribArray(0);
+      gl.vertexAttribPointer(0, 2, gl.FLOAT, false, stride, 0);
+      gl.enableVertexAttribArray(1);
+      gl.vertexAttribPointer(1, 4, gl.FLOAT, false, stride, 8);
+      gl.enableVertexAttribArray(2);
+      gl.vertexAttribPointer(2, 2, gl.FLOAT, false, stride, 24);
+      gl.enableVertexAttribArray(3);
+      gl.vertexAttribPointer(3, 1, gl.FLOAT, false, stride, 32);
+      gl.bindVertexArray(null);
+      return gl;
+    }
+    /** Upload the active texture. `pixels` is ARGB, as the 3D context stores it. */
+    setTexture(pixels, w, h) {
+      const gl = this.ensureGl();
+      if (!gl) return;
+      if (!pixels || w <= 0 || h <= 0) {
+        this.texW = 0;
+        this.texH = 0;
+        this.texSource = null;
+        return;
+      }
+      if (pixels === this.texSource && this.texW === w && this.texH === h) return;
+      if (!this.texture) this.texture = gl.createTexture();
+      const rgba = new Uint8Array(w * h * 4);
+      for (let i = 0; i < w * h; i++) {
+        const p = pixels[i];
+        rgba[i * 4] = p >>> 16 & 255;
+        rgba[i * 4 + 1] = p >>> 8 & 255;
+        rgba[i * 4 + 2] = p & 255;
+        rgba[i * 4 + 3] = p >>> 24 & 255;
+      }
+      gl.bindTexture(gl.TEXTURE_2D, this.texture);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, rgba);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+      this.texW = w;
+      this.texH = h;
+      this.texSource = pixels;
+    }
+    /** Discard everything drawn so far and resize if needed. Call once per 3D pass. */
+    beginFrame(width, height) {
+      const gl = this.ensureGl();
+      if (!gl) return;
+      if (this.canvas.width !== width || this.canvas.height !== height) {
+        this.canvas.width = width;
+        this.canvas.height = height;
+      }
+      gl.viewport(0, 0, width, height);
+      gl.clearColor(0, 0, 0, 0);
+      gl.clearDepth(1);
+      gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+    }
+    /**
+     * Draw one batch.
+     *
+     * `useDepth` picks the ordering rule. False reproduces the reference's canvas backend:
+     * depth test off, correctness resting entirely on the painter's sort the caller already
+     * applied. True uses the depth buffer, which is what the ZBUF modes ask for and is the
+     * only way interpenetrating geometry comes out right.
+     */
+    draw(batch, useDepth) {
+      const gl = this.ensureGl();
+      if (!gl || !this.program || batch.vertexCount < 3) return;
+      const n = batch.vertexCount;
+      if (this.interleaved.length < n * 9) this.interleaved = new Float32Array(n * 9);
+      const v = this.interleaved;
+      const useTex = batch.hasUv && this.texW > 0;
+      for (let i = 0; i < n; i++) {
+        const o = i * 9;
+        v[o] = batch.positions[i * 2];
+        v[o + 1] = batch.positions[i * 2 + 1];
+        const c = batch.colors[i];
+        v[o + 2] = (c >>> 16 & 255) / 255;
+        v[o + 3] = (c >>> 8 & 255) / 255;
+        v[o + 4] = (c & 255) / 255;
+        v[o + 5] = (c >>> 24 & 255) / 255;
+        v[o + 6] = useTex ? batch.uvs[i * 2] : 0;
+        v[o + 7] = useTex ? 1 - batch.uvs[i * 2 + 1] : 0;
+        v[o + 8] = batch.depths[i];
+      }
+      gl.useProgram(this.program);
+      gl.bindVertexArray(this.vao);
+      gl.bindBuffer(gl.ARRAY_BUFFER, this.buffer);
+      gl.bufferData(gl.ARRAY_BUFFER, v.subarray(0, n * 9), gl.DYNAMIC_DRAW);
+      gl.uniform2f(this.uViewport, this.canvas.width, this.canvas.height);
+      gl.uniform1i(this.uUseTex, useTex ? 1 : 0);
+      if (useTex) {
+        gl.activeTexture(gl.TEXTURE0);
+        gl.bindTexture(gl.TEXTURE_2D, this.texture);
+      }
+      if (useDepth) {
+        gl.enable(gl.DEPTH_TEST);
+        gl.depthFunc(gl.LESS);
+      } else {
+        gl.disable(gl.DEPTH_TEST);
+      }
+      gl.disable(gl.CULL_FACE);
+      gl.enable(gl.BLEND);
+      gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+      gl.drawArrays(gl.TRIANGLES, 0, n);
+      this.drawCount++;
+      gl.bindVertexArray(null);
+    }
+  };
 
   // third_party/remote-compose-player/src/core/shader/AgslTokenizer.ts
   var IDENT_START = /[a-zA-Z_]/;
@@ -17860,11 +25699,11 @@ void main() {
     return found;
   }
   function loadStylesheet(url) {
-    return new Promise((resolve, reject) => {
+    return new Promise((resolve2, reject) => {
       const link = document.createElement("link");
       link.rel = "stylesheet";
       link.href = url;
-      link.addEventListener("load", () => resolve());
+      link.addEventListener("load", () => resolve2());
       link.addEventListener("error", () => reject(new Error(`stylesheet did not load: ${url}`)));
       document.head.appendChild(link);
     });
@@ -18116,6 +25955,8 @@ void main() {
       super(context);
       // Current paint state
       this.color = "rgba(0,0,0,1)";
+      /** The same paint color as a packed ARGB int — what drawMesh3D shades with. */
+      this.colorArgb = 4278190080 | 0;
       this.style = 0;
       // 0=FILL, 1=STROKE, 2=FILL_AND_STROKE
       this.strokeWidth = 1;
@@ -18163,7 +26004,21 @@ void main() {
       this.pathWindingCache = /* @__PURE__ */ new Map();
       // Bitmap cache: id -> ImageBitmap or HTMLImageElement
       this.bitmapCache = /* @__PURE__ */ new Map();
+      // Animated bitmaps (a GIF embedded whole), streamed: one frame decoded at a time, the
+      // next asked for when the document's clock passes the end of the one showing. A long
+      // GIF at full size is hundreds of megabytes as bitmaps, so nothing is decoded ahead —
+      // the C++ player streams through one working buffer for the same reason.
+      this.animatedBitmaps = /* @__PURE__ */ new Map();
+      this.disposed = false;
+      // Bitmaps a host has supplied as video instead: a GIF transcoded once at export time,
+      // decoded by the browser's own video pipeline and drawn frame by frame from the element.
+      // Far cheaper than decoding GIF frames, and the preferred way to animate a bitmap.
+      this.bitmapVideos = /* @__PURE__ */ new Map();
+      /// One stored 2D mesh. Canvas2D has no drawVertices, so drawMesh walks the triangle list.
+      this.meshCache = /* @__PURE__ */ new Map();
       this.bitmapPromises = /* @__PURE__ */ new Map();
+      /** Bitmaps converted to ARGB for 3D texturing, kept so the readback happens once. */
+      this.texturePixels = /* @__PURE__ */ new Map();
       // Text cache: id -> string
       this.textCache = /* @__PURE__ */ new Map();
       // Graphics layer stack for offscreen compositing
@@ -18191,8 +26046,24 @@ void main() {
        * await `webFontsReady()` before painting the frame they keep.
        */
       this.onFontLoaded = null;
+      this.mTextMeasureCache = /* @__PURE__ */ new Map();
       this.mainCanvas = null;
       this.bitmapCanvasCache = /* @__PURE__ */ new Map();
+      // ---- 3D (Paint3DContext) -----------------------------------------------
+      //
+      // Only the software backend is implemented here. Every other backend in the mode word
+      // (canvas-vertices, drawMesh, GL) falls back to software, which is exactly what the
+      // reference does on a platform that lacks them — so a document renders the same picture
+      // rather than silently drawing nothing.
+      this.d3 = null;
+      /** GPU rasterizer for the canvas backends; created on first use, null if WebGL2 is absent. */
+      this.d3gl = null;
+      this.d3glMesh = createCanvasMesh();
+      /** Whether anything has been drawn into the GL canvas this 3D pass. */
+      this.d3glDirty = false;
+      /** Texture generation last uploaded to GL, so an unchanged texture is not re-uploaded. */
+      this.d3glTexGen = -1;
+      this.d3Blit = null;
       if (!canvas) {
         throw new Error("CanvasPaintContext: canvas rendering context is null or undefined");
       }
@@ -18211,6 +26082,11 @@ void main() {
     }
     getCanvas() {
       return this.ctx;
+    }
+    // An embedded document paints on whatever canvas its host is painting on, which can
+    // change between frames (a resize, a new host document on the same page).
+    setCanvas(canvas) {
+      this.ctx = canvas;
     }
     // --- Text cache ---
     loadText(id, text) {
@@ -18268,23 +26144,158 @@ void main() {
     }
     // --- Bitmap cache ---
     loadBitmap(imageId, encoding, type, width, height, bitmap) {
+      if (this.bitmapPromises.has(imageId)) return;
+      const isGif = bitmap.length > 6 && bitmap[0] === 71 && bitmap[1] === 73 && bitmap[2] === 70 && bitmap[3] === 56;
+      if (isGif && !this.bitmapVideos.has(imageId) && typeof globalThis.ImageDecoder !== "undefined") {
+        this.loadAnimatedBitmap(imageId, bitmap);
+      }
       const blob = new Blob([bitmap.buffer], { type: "image/png" });
       const url = URL.createObjectURL(blob);
       const img = new Image();
-      const promise = new Promise((resolve) => {
+      const promise = new Promise((resolve2) => {
         img.onload = () => {
           URL.revokeObjectURL(url);
           this.bitmapCache.set(imageId, img);
-          resolve();
+          resolve2();
         };
         img.onerror = (e) => {
           URL.revokeObjectURL(url);
           console.warn(`CanvasPaintContext: failed to load bitmap ${imageId}`, e);
-          resolve();
+          resolve2();
         };
         img.src = url;
       });
       this.bitmapPromises.set(imageId, promise);
+    }
+    /** Wait until every bitmap loaded by the document's data pass is paintable. */
+    async bitmapsReady() {
+      await Promise.all(this.bitmapPromises.values());
+    }
+    // `videos` maps image ids to video URLs. Called before the document's data pass, so a
+    // bitmap with a video never starts a GIF decoder.
+    setBitmapVideos(videos) {
+      for (const v of this.bitmapVideos.values()) {
+        v.pause();
+        v.removeAttribute("src");
+        v.load();
+        v.remove();
+      }
+      this.bitmapVideos.clear();
+      if (!videos || typeof document === "undefined") return;
+      const entries = videos instanceof Map ? [...videos.entries()] : Object.entries(videos).map(([k, v]) => [Number(k), v]);
+      for (const [id, url] of entries) {
+        const video = document.createElement("video");
+        video.muted = true;
+        video.loop = true;
+        video.playsInline = true;
+        video.preload = "auto";
+        video.src = url;
+        video.style.cssText = "position:fixed;left:-4px;top:-4px;width:2px;height:2px;opacity:0;pointer-events:none";
+        document.body.appendChild(video);
+        video.play().catch(() => {
+        });
+        this.bitmapVideos.set(id, video);
+      }
+    }
+    async loadAnimatedBitmap(imageId, bytes) {
+      try {
+        const Decoder = globalThis.ImageDecoder;
+        const decoder = new Decoder({ data: bytes, type: "image/gif" });
+        await decoder.tracks.ready;
+        const track = decoder.tracks.selectedTrack;
+        const count = track ? track.frameCount : 0;
+        if (count < 2 || this.disposed) {
+          decoder.close();
+          return;
+        }
+        const anim = {
+          decoder,
+          count,
+          index: -1,
+          frame: null,
+          frameEnds: 0,
+          decoding: false,
+          failed: false
+        };
+        this.animatedBitmaps.set(imageId, anim);
+        this.needsRepaint();
+      } catch (e) {
+        console.warn(`CanvasPaintContext: cannot animate bitmap ${imageId}`, e);
+      }
+    }
+    // Decode the frame after the one showing, and make it the one showing when it lands.
+    // One decode in flight at a time: a clock that has run ahead is not chased through the
+    // frames in between (a GIF's frames build on each other, so every one would cost), the
+    // picture just plays late until it catches up.
+    advanceAnimated(anim, now) {
+      if (anim.decoding || anim.failed || anim.count < 1) return;
+      anim.decoding = true;
+      const next = (anim.index + 1) % anim.count;
+      anim.decoder.decode({ frameIndex: next }).then((result) => {
+        const image = result.image;
+        let seconds = (image.duration ?? 0) / 1e6;
+        if (!(seconds >= 0.02)) seconds = 0.1;
+        if (this.disposed) {
+          image.close();
+          return;
+        }
+        if (anim.frame) anim.frame.close();
+        anim.frame = image;
+        anim.index = next;
+        anim.frameEnds = Math.max(now, anim.frameEnds) + seconds;
+        anim.decoding = false;
+        this.needsRepaint();
+      }).catch((e) => {
+        anim.failed = true;
+        anim.decoding = false;
+        console.warn("CanvasPaintContext: animated bitmap frame failed", e);
+      });
+    }
+    // The bitmap to draw now: for an animated one, the frame the document's clock is on —
+    // the next one is asked for once the clock passes the end of this one — and a repaint
+    // asked for so it follows.
+    bitmapToDraw(imageId) {
+      const video = this.bitmapVideos.get(imageId);
+      if (video) {
+        this.needsRepaint();
+        if (video.readyState >= 2 && video.videoWidth > 0) {
+          if (video.paused) video.play().catch(() => {
+          });
+          return video;
+        }
+        return this.bitmapCache.get(imageId);
+      }
+      const anim = this.animatedBitmaps.get(imageId);
+      if (!anim) return this.bitmapCache.get(imageId);
+      const context = this.getContext();
+      const now = context ? context.getAnimationTime() : 0;
+      if (anim.index < 0 || now >= anim.frameEnds) this.advanceAnimated(anim, now);
+      this.needsRepaint();
+      return anim.frame ?? this.bitmapCache.get(imageId);
+    }
+    // Let go of what animated bitmaps hold — decoders and frames are not cheap, and a paint
+    // context outlives its document only as garbage.
+    dispose() {
+      this.disposed = true;
+      for (const v of this.bitmapVideos.values()) {
+        v.pause();
+        v.removeAttribute("src");
+        v.load();
+        v.remove();
+      }
+      this.bitmapVideos.clear();
+      for (const anim of this.animatedBitmaps.values()) {
+        try {
+          anim.decoder.close();
+        } catch {
+        }
+        if (anim.frame) anim.frame.close();
+      }
+      this.animatedBitmaps.clear();
+      for (const img of this.bitmapCache.values()) {
+        if (typeof img.close === "function") img.close();
+      }
+      this.bitmapCache.clear();
     }
     // --- Path cache ---
     loadPathData(id, winding, data) {
@@ -18518,12 +26529,38 @@ void main() {
     fillOrStroke(doFill, doStroke) {
       if (this.style === 0 || this.style === 2) {
         this.applyFillStyle();
+        this.eraseBeneathForSrc(doFill, "#000");
         doFill();
       }
       if (this.style === 1 || this.style === 2) {
         this.applyStrokeStyle();
+        this.eraseBeneathForSrc(doStroke, "#000");
         doStroke();
       }
+    }
+    /**
+     * Skia's `SRC` blend replaces the destination **inside the drawn shape** and leaves everything
+     * else alone. Canvas2D's `copy` (the only operator with the same algebra) replaces the whole
+     * clip region instead: a single `SRC` dot wiped the pill, track and icons painted before it in
+     * the same clip, so every remote-m3 slider drew as one dot on nothing.
+     *
+     * Emulated by punching the shape out first (`destination-out`, opaque, so exactly the shape's
+     * coverage) and then drawing it `source-over`. Called after the style is applied so the caller's
+     * own fill/stroke colour is what ends up drawn; it restores the paint state it borrowed.
+     */
+    eraseBeneathForSrc(draw, punchColor) {
+      if (this.blendMode !== "copy") return;
+      const ctx = this.ctx;
+      const fill = ctx.fillStyle, stroke = ctx.strokeStyle, alpha = ctx.globalAlpha;
+      ctx.globalCompositeOperation = "destination-out";
+      ctx.fillStyle = punchColor;
+      ctx.strokeStyle = punchColor;
+      ctx.globalAlpha = 1;
+      draw();
+      ctx.fillStyle = fill;
+      ctx.strokeStyle = stroke;
+      ctx.globalAlpha = alpha;
+      ctx.globalCompositeOperation = "source-over";
     }
     /**
      * The axis name a [tag] int stands for, in either encoding the format uses.
@@ -18570,6 +26607,11 @@ void main() {
     applyPaint(paintData) {
       const arr = paintData.getArray();
       const len = paintData.getLength();
+      const context = this.getContext();
+      const floatArg = (bits) => {
+        if (isNaNBits(bits) && context) return context.getFloat(idFromBits(bits));
+        return intBitsToFloat2(bits);
+      };
       let i = 0;
       while (i < len) {
         const cmd = arr[i++];
@@ -18577,18 +26619,21 @@ void main() {
         const upper = cmd >> 16 & 65535;
         switch (tag) {
           case PaintBundle.TEXT_SIZE:
-            this.textSize = intBitsToFloat2(arr[i++]);
+            this.textSize = floatArg(arr[i++]);
             this.setFont();
             break;
-          case PaintBundle.COLOR:
-            this.color = argbToRgba(arr[i++]);
-            this.gradientStyle = null;
+          case PaintBundle.COLOR: {
+            const argb = arr[i++] | 0;
+            this.colorArgb = argb;
+            this.alpha = (argb >>> 24 & 255) / 255;
+            this.color = `rgb(${argb >>> 16 & 255},${argb >>> 8 & 255},${argb & 255})`;
             break;
+          }
           case PaintBundle.STROKE_WIDTH:
-            this.strokeWidth = intBitsToFloat2(arr[i++]);
+            this.strokeWidth = floatArg(arr[i++]);
             break;
           case PaintBundle.STROKE_MITER:
-            this.miterLimit = intBitsToFloat2(arr[i++]);
+            this.miterLimit = floatArg(arr[i++]);
             break;
           case PaintBundle.STROKE_CAP:
             this.lineCap = upper === 0 ? "butt" : upper === 1 ? "round" : "square";
@@ -18664,7 +26709,7 @@ void main() {
             break;
           }
           case PaintBundle.ALPHA:
-            this.alpha = intBitsToFloat2(arr[i++]);
+            this.alpha = floatArg(arr[i++]);
             break;
           case PaintBundle.COLOR_FILTER: {
             const cfArgb = arr[i++];
@@ -18698,7 +26743,6 @@ void main() {
             break;
           case PaintBundle.COLOR_ID: {
             this.color = argbToRgba(arr[i++]);
-            this.gradientStyle = null;
             break;
           }
           case PaintBundle.COLOR_FILTER_ID: {
@@ -18762,12 +26806,23 @@ void main() {
             if (count === 0) {
               this.ctx.setLineDash([]);
               this.ctx.lineDashOffset = 0;
-            } else {
+            } else if (count >= 3) {
+              const type = arr[i];
+              const phase = floatArg(arr[i + 1]);
+              const len2 = arr[i + 2];
+              i += 3;
               const intervals = [];
-              for (let k = 0; k < count; k++) {
-                intervals.push(intBitsToFloat2(arr[i++]));
+              for (let k = 0; k < len2 && k < count - 3; k++) intervals.push(floatArg(arr[i++]));
+              for (let k = 3 + len2; k < count; k++) i++;
+              if (type === 1 && intervals.length >= 2 && intervals.length % 2 === 0) {
+                this.ctx.setLineDash(intervals);
+                this.ctx.lineDashOffset = phase;
+              } else {
+                this.ctx.setLineDash([]);
+                this.ctx.lineDashOffset = 0;
               }
-              this.ctx.setLineDash(intervals);
+            } else {
+              i += count;
             }
             break;
           }
@@ -18939,6 +26994,7 @@ void main() {
       if (state) {
         Object.assign(this, state);
         this.setFont();
+        this.ctx.globalAlpha = this.alpha;
       }
     }
     /**
@@ -19072,8 +27128,8 @@ void main() {
     drawOval(left, top, right, bottom) {
       const cx = (left + right) / 2;
       const cy = (top + bottom) / 2;
-      const rx = (right - left) / 2;
-      const ry = (bottom - top) / 2;
+      const rx = Math.abs(right - left) / 2;
+      const ry = Math.abs(bottom - top) / 2;
       this.ctx.beginPath();
       this.ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
       this.fillOrStroke(
@@ -19102,8 +27158,8 @@ void main() {
     drawArc(left, top, right, bottom, startAngle, sweepAngle) {
       const cx = (left + right) / 2;
       const cy = (top + bottom) / 2;
-      const rx = (right - left) / 2;
-      const ry = (bottom - top) / 2;
+      const rx = Math.abs(right - left) / 2;
+      const ry = Math.abs(bottom - top) / 2;
       const start = startAngle * Math.PI / 180;
       const end = (startAngle + sweepAngle) * Math.PI / 180;
       this.ctx.beginPath();
@@ -19120,8 +27176,8 @@ void main() {
     drawSector(left, top, right, bottom, startAngle, sweepAngle) {
       const cx = (left + right) / 2;
       const cy = (top + bottom) / 2;
-      const rx = (right - left) / 2;
-      const ry = (bottom - top) / 2;
+      const rx = Math.abs(right - left) / 2;
+      const ry = Math.abs(bottom - top) / 2;
       const start = startAngle * Math.PI / 180;
       const end = (startAngle + sweepAngle) * Math.PI / 180;
       this.ctx.beginPath();
@@ -19136,6 +27192,101 @@ void main() {
           this.ctx.stroke();
         }
       );
+    }
+    // ── 2D vertex meshes ────────────────────────────────────────────────────────────────
+    //
+    // Canvas2D has no drawVertices and no Gouraud shading, so the triangle list is walked
+    // here. Two consequences worth stating rather than discovering:
+    //
+    //   * Per-vertex colour is approximated by filling each triangle with the AVERAGE of its
+    //     three vertex colours. Skia and Android interpolate across the face, so a mesh used
+    //     as a smooth gradient shows faceting here, more visibly as uCount/vCount drop.
+    //   * A textured triangle is drawn by clipping to it and applying the affine that takes
+    //     its uv triangle to its screen triangle — three corresponding points determine that
+    //     exactly, which makes it a real texture map rather than a stretched blit.
+    setMesh(meshId, layout, uCount, vCount, verts, uv, colors, indices) {
+      this.meshCache.set(meshId, { layout, uCount, vCount, verts, uv, colors, indices });
+    }
+    drawMesh(meshId, blend, imageId) {
+      const m = this.meshCache.get(meshId);
+      if (!m) return;
+      const vertexCount2 = m.verts.length / 2;
+      if (vertexCount2 < 3 || m.indices.length < 3) return;
+      let texture;
+      if (blend === BLEND_MODULATE && imageId !== 0 && m.uv.length === m.verts.length) {
+        texture = this.bitmapCache.get(imageId);
+      }
+      this.ctx.save();
+      const texW = texture ? texture.width : 0;
+      const texH = texture ? texture.height : 0;
+      if (!texture && m.colors.length !== vertexCount2) {
+        const all = new Path2D();
+        for (let t = 0; t + 2 < m.indices.length; t += 3) {
+          const i0 = m.indices[t], i1 = m.indices[t + 1], i2 = m.indices[t + 2];
+          if (i0 < 0 || i1 < 0 || i2 < 0) continue;
+          if (i0 >= vertexCount2 || i1 >= vertexCount2 || i2 >= vertexCount2) continue;
+          all.moveTo(m.verts[i0 * 2], m.verts[i0 * 2 + 1]);
+          all.lineTo(m.verts[i1 * 2], m.verts[i1 * 2 + 1]);
+          all.lineTo(m.verts[i2 * 2], m.verts[i2 * 2 + 1]);
+          all.closePath();
+        }
+        this.applyFillStyle();
+        this.ctx.fill(all);
+        this.ctx.restore();
+        return;
+      }
+      for (let t = 0; t + 2 < m.indices.length; t += 3) {
+        const i0 = m.indices[t], i1 = m.indices[t + 1], i2 = m.indices[t + 2];
+        if (i0 < 0 || i1 < 0 || i2 < 0) continue;
+        if (i0 >= vertexCount2 || i1 >= vertexCount2 || i2 >= vertexCount2) continue;
+        const x0 = m.verts[i0 * 2], y0 = m.verts[i0 * 2 + 1];
+        const x1 = m.verts[i1 * 2], y1 = m.verts[i1 * 2 + 1];
+        const x2 = m.verts[i2 * 2], y2 = m.verts[i2 * 2 + 1];
+        const tri = new Path2D();
+        tri.moveTo(x0, y0);
+        tri.lineTo(x1, y1);
+        tri.lineTo(x2, y2);
+        tri.closePath();
+        if (texture) {
+          const u0 = m.uv[i0 * 2] * texW, v0 = m.uv[i0 * 2 + 1] * texH;
+          const u1 = m.uv[i1 * 2] * texW, v1 = m.uv[i1 * 2 + 1] * texH;
+          const u2 = m.uv[i2 * 2] * texW, v2 = m.uv[i2 * 2 + 1] * texH;
+          const det = (u1 - u0) * (v2 - v0) - (u2 - u0) * (v1 - v0);
+          if (Math.abs(det) < 1e-9) continue;
+          const a = ((x1 - x0) * (v2 - v0) - (x2 - x0) * (v1 - v0)) / det;
+          const b = ((y1 - y0) * (v2 - v0) - (y2 - y0) * (v1 - v0)) / det;
+          const c = ((x2 - x0) * (u1 - u0) - (x1 - x0) * (u2 - u0)) / det;
+          const d = ((y2 - y0) * (u1 - u0) - (y1 - y0) * (u2 - u0)) / det;
+          const e = x0 - a * u0 - c * v0;
+          const f = y0 - b * u0 - d * v0;
+          this.ctx.save();
+          this.ctx.clip(tri);
+          this.ctx.transform(a, b, c, d, e, f);
+          this.ctx.drawImage(texture, 0, 0);
+          this.ctx.restore();
+          continue;
+        }
+        if (m.colors.length === vertexCount2) {
+          const c0 = m.colors[i0], c1 = m.colors[i1], c2 = m.colors[i2];
+          const av = (sh) => Math.round(((c0 >>> sh & 255) + (c1 >>> sh & 255) + (c2 >>> sh & 255)) / 3);
+          const alpha = av(24) / 255;
+          this.ctx.fillStyle = "rgba(" + av(16) + "," + av(8) + "," + av(0) + "," + alpha + ")";
+          this.ctx.fill(tri);
+        } else {
+          this.applyFillStyle();
+          this.ctx.fill(tri);
+        }
+      }
+      this.ctx.restore();
+    }
+    matrixFromMesh(meshId, u, v, flags) {
+      const m = this.meshCache.get(meshId);
+      if (!m) return;
+      const frame = new Float32Array(6);
+      if (!sampleFrame(m.layout, m.uCount, m.vCount, m.verts, u, v, frame)) return;
+      const out = new Float32Array(6);
+      buildMatrix(frame, flags, out);
+      this.ctx.transform(out[0], out[1], out[2], out[3], out[4], out[5]);
     }
     drawPath(id, start, end) {
       const data = this.pathDataCache.get(id);
@@ -19173,8 +27324,8 @@ void main() {
       if (!text) return;
       const data = this.pathDataCache.get(pathId);
       if (!data) return;
-      const { segments, totalLen } = this.collectPathSegments(data);
-      if (totalLen === 0 || segments.length === 0) return;
+      const { segments: segments2, totalLen } = this.collectPathSegments(data);
+      if (totalLen === 0 || segments2.length === 0) return;
       this.setFont();
       this.ctx.textBaseline = "alphabetic";
       let progress = hOffset;
@@ -19184,7 +27335,7 @@ void main() {
         const charCenter = progress + charWidth / 2;
         if (charCenter >= 0 && charCenter <= totalLen) {
           this.ctx.save();
-          this.positionOnPath(segments, charCenter, vOffset);
+          this.positionOnPath(segments2, charCenter, vOffset);
           this.fillOrStroke(
             () => {
               this.applyFillStyle();
@@ -19200,6 +27351,19 @@ void main() {
         progress += charWidth;
       }
     }
+    measureTextCached(text) {
+      const key = `${this.ctx.font}:::${text}`;
+      let res = this.mTextMeasureCache.get(key);
+      if (!res) {
+        res = this.ctx.measureText(text);
+        this.mTextMeasureCache.set(key, res);
+        if (this.mTextMeasureCache.size > 2e3) {
+          this.mTextMeasureCache.clear();
+          this.mTextMeasureCache.set(key, res);
+        }
+      }
+      return res;
+    }
     getTextBounds(textId, start, end, flags, bounds) {
       const text = this.textCache.get(textId);
       if (!text) {
@@ -19210,7 +27374,7 @@ void main() {
       const e = end >= 0 ? Math.min(end, text.length) : text.length;
       const substr = text.substring(s, e);
       this.setFont();
-      const metrics = this.ctx.measureText(substr);
+      const metrics = this.measureTextCached(substr);
       const size = this.textSize > 0 ? this.textSize : DEFAULT_TEXT_SIZE;
       const wantFontBox = (flags & 2) !== 0;
       const pick = (...vals) => {
@@ -19268,7 +27432,7 @@ void main() {
         let currentLine = "";
         for (const word of words) {
           const testLine = currentLine + word;
-          const metrics = this.ctx.measureText(testLine);
+          const metrics = this.measureTextCached(testLine);
           if (metrics.width > maxWidth && currentLine.length > 0) {
             lines.push(currentLine);
             currentLine = word.trimStart();
@@ -19326,7 +27490,7 @@ void main() {
       }
       let totalWidth = 0;
       for (const line of lines) {
-        const w = this.ctx.measureText(line).width;
+        const w = this.measureTextCached(line).width;
         if (w > totalWidth) totalWidth = w;
       }
       const totalHeight = lines.length * lineHeight;
@@ -19337,20 +27501,25 @@ void main() {
         width: Math.min(totalWidth, maxWidth),
         height: Math.min(totalHeight, maxHeight),
         naturalHeight: totalHeight,
-        visibleLines: lines.length
+        visibleLines: lines.length,
+        maxWidth,
+        maxHeight
       };
     }
-    drawComplexText(computedTextLayout) {
+    drawComplexText(computedTextLayout, targetWidth) {
       if (!computedTextLayout) return;
       const { lines, alignment, lineHeight, width } = computedTextLayout;
+      const layoutWidth = typeof targetWidth === "number" && targetWidth > 0 ? targetWidth : width;
       this.setFont();
       this.ctx.textBaseline = "top";
+      const align = typeof alignment === "number" ? alignment & 65535 : 1;
       for (let i = 0; i < lines.length; i++) {
         let x = 0;
-        if (alignment === 2 || alignment === 6) {
-          x = width - this.ctx.measureText(lines[i]).width;
-        } else if (alignment === 3) {
-          x = (width - this.ctx.measureText(lines[i]).width) / 2;
+        const lineW = this.measureTextCached(lines[i]).width;
+        if (align === 2 || align === 6) {
+          x = layoutWidth - lineW;
+        } else if (align === 3) {
+          x = (layoutWidth - lineW) / 2;
         }
         this.fillOrStroke(
           () => {
@@ -19365,7 +27534,7 @@ void main() {
       }
     }
     drawBitmap(imageId, srcLeft, srcTop, srcRight, srcBottom, dstLeft, dstTop, dstRight, dstBottom, _cdId) {
-      const img = this.bitmapCache.get(imageId);
+      const img = this.bitmapToDraw(imageId);
       if (!img) return;
       this.ctx.globalAlpha = this.alpha;
       this.ctx.globalCompositeOperation = this.blendMode;
@@ -19381,7 +27550,7 @@ void main() {
       }
     }
     drawBitmapSimple(id, left, top, right, bottom) {
-      const img = this.bitmapCache.get(id);
+      const img = this.bitmapToDraw(id);
       if (!img) return;
       this.ctx.globalAlpha = this.alpha;
       this.ctx.globalCompositeOperation = this.blendMode;
@@ -19462,6 +27631,15 @@ void main() {
     matrixRestore() {
       this.ctx.restore();
     }
+    saveLayer(x, y, w, h) {
+      this.ctx.save();
+      this.ctx.beginPath();
+      this.ctx.rect(x, y, w, h);
+      this.ctx.clip();
+      if (this.alpha < 1) {
+        this.ctx.globalAlpha *= this.alpha;
+      }
+    }
     matrixTranslate(tx, ty) {
       this.ctx.translate(tx, ty);
     }
@@ -19484,22 +27662,22 @@ void main() {
     matrixFromPath(pathId, fraction, vOffset, _flags) {
       const data = this.pathDataCache.get(pathId);
       if (!data) return;
-      const { segments, totalLen } = this.collectPathSegments(data);
+      const { segments: segments2, totalLen } = this.collectPathSegments(data);
       if (totalLen === 0) return;
       let target = totalLen * fraction % totalLen;
       if (target < 0) target += totalLen;
-      this.positionOnPath(segments, target, vOffset);
+      this.positionOnPath(segments2, target, vOffset);
     }
     // --- Path measurement helpers ---
     /** Flatten path data into line segments (curves are subdivided). */
     collectPathSegments(data) {
-      const segments = [];
+      const segments2 = [];
       let curX = 0, curY = 0, startX = 0, startY = 0;
       let i = 0;
       const addLine = (x1, y1, x2, y2) => {
         const dx = x2 - x1, dy = y2 - y1;
         const len = Math.sqrt(dx * dx + dy * dy);
-        if (len > 0) segments.push({ x1, y1, x2, y2, len });
+        if (len > 0) segments2.push({ x1, y1, x2, y2, len });
       };
       while (i < data.length) {
         const bits = data[i];
@@ -19570,8 +27748,8 @@ void main() {
         }
       }
       let totalLen = 0;
-      for (const s of segments) totalLen += s.len;
-      return { segments, totalLen };
+      for (const s of segments2) totalLen += s.len;
+      return { segments: segments2, totalLen };
     }
     /** Subdivide a quadratic bezier into line segments. */
     flattenQuadratic(x0, y0, cpx, cpy, x1, y1, addLine) {
@@ -19600,10 +27778,10 @@ void main() {
       }
     }
     /** Translate and rotate the canvas to a point at the given distance along segments. */
-    positionOnPath(segments, distance, vOffset) {
+    positionOnPath(segments2, distance, vOffset) {
       let accum = 0;
-      for (const s of segments) {
-        if (accum + s.len >= distance || s === segments[segments.length - 1]) {
+      for (const s of segments2) {
+        if (accum + s.len >= distance || s === segments2[segments2.length - 1]) {
           const t = s.len > 0 ? (distance - accum) / s.len : 0;
           const px = s.x1 + (s.x2 - s.x1) * t;
           const py = s.y1 + (s.y2 - s.y1) * t;
@@ -19742,6 +27920,149 @@ void main() {
       this.resetPaintState();
       this.clearNeedsRepaint();
     }
+    ensure3D() {
+      const w = this.ctx.canvas.width;
+      const h = this.ctx.canvas.height;
+      if (this.d3 === null) {
+        this.d3 = new SoftwarePaint3DContext();
+      }
+      this.d3.setSize(w, h);
+      if (this.d3Blit === null || this.d3Blit.canvas.width !== w || this.d3Blit.canvas.height !== h) {
+        this.d3Blit = this.createLayerCanvas(w, h);
+      }
+      return this.d3;
+    }
+    defineMesh3D(id, indices, verts, normals, uv = null) {
+      this.ensure3D().defineMesh3D(id, indices, verts, normals, uv);
+    }
+    setCamera3D(projection, projParams, viewParams) {
+      this.ensure3D().setCamera3D(projection, projParams, viewParams);
+    }
+    matrix3Op(sub, args) {
+      this.ensure3D().matrix3Op(sub, args);
+    }
+    clearDepth3D() {
+      this.ensure3D().clearDepth3D();
+    }
+    setLights3D(types, colors, params) {
+      this.ensure3D().setLights3D(types, colors, params);
+    }
+    setTexture3D(bitmapId) {
+      const ctx3d = this.ensure3D();
+      if (bitmapId === 0) {
+        ctx3d.setTextureData(null, 0, 0);
+        return;
+      }
+      const img = this.bitmapCache.get(bitmapId);
+      if (!img) {
+        ctx3d.setTextureData(null, 0, 0);
+        return;
+      }
+      const cached = this.texturePixels.get(bitmapId);
+      if (cached) {
+        ctx3d.setTextureData(cached.argb, cached.width, cached.height);
+        return;
+      }
+      const w = img.naturalWidth || img.width;
+      const h = img.naturalHeight || img.height;
+      if (!w || !h) {
+        ctx3d.setTextureData(null, 0, 0);
+        return;
+      }
+      const scratch = document.createElement("canvas");
+      scratch.width = w;
+      scratch.height = h;
+      const sctx = scratch.getContext("2d", { willReadFrequently: true });
+      if (!sctx) {
+        ctx3d.setTextureData(null, 0, 0);
+        return;
+      }
+      sctx.drawImage(img, 0, 0);
+      const data = sctx.getImageData(0, 0, w, h).data;
+      const argb = new Int32Array(w * h);
+      for (let i = 0; i < w * h; i++) {
+        argb[i] = data[i * 4 + 3] << 24 | data[i * 4] << 16 | data[i * 4 + 1] << 8 | data[i * 4 + 2] | 0;
+      }
+      this.texturePixels.set(bitmapId, { argb, width: w, height: h });
+      ctx3d.setTextureData(argb, w, h);
+    }
+    setMaterial3D(specStrength, shininess) {
+      this.ensure3D().setMaterial3D(specStrength, shininess);
+    }
+    setDepthBias3D(constant, slope) {
+      this.ensure3D().setDepthBias3D(constant, slope);
+    }
+    drawMesh3D(meshId, mode) {
+      const ctx3d = this.ensure3D();
+      ctx3d.setBaseColorArgb(this.colorArgb);
+      const backend = mode >> 1;
+      const wire = (mode & MODE_WIREFRAME) !== 0;
+      if (!wire && (backend === MODE_BACKEND_CANVAS || backend === MODE_BACKEND_CANVAS_ZBUF)) {
+        if (this.drawMesh3DGl(
+          ctx3d,
+          meshId,
+          (mode & MODE_SMOOTH_MASK) !== 0,
+          backend === MODE_BACKEND_CANVAS_ZBUF
+        )) {
+          return;
+        }
+      }
+      ctx3d.drawMesh3D(meshId, mode);
+      this.blit3D();
+    }
+    /**
+     * Canvas backend: rasterize on the GPU and composite the result.
+     *
+     * Returns false if WebGL2 is not available, so the caller can fall back to software. Each
+     * mesh composites immediately rather than batching to the end of the pass, because the 3D
+     * content has to interleave correctly with the 2D drawing around it — a document that
+     * draws a mesh, then a label, then another mesh expects that order.
+     */
+    drawMesh3DGl(ctx3d, meshId, smooth, useDepth) {
+      if (this.d3gl === null) this.d3gl = new WebGL3DRenderer();
+      const gl = this.d3gl;
+      if (!gl.isAvailable()) return false;
+      const n = ctx3d.buildCanvasVertices(meshId, this.d3glMesh, smooth);
+      if (n < 3) return true;
+      const w = ctx3d.getWidth(), h = ctx3d.getHeight();
+      gl.beginFrame(w, h);
+      const tex = ctx3d.getTextureData();
+      gl.setTexture(tex.pixels, tex.width, tex.height);
+      gl.draw(this.d3glMesh, useDepth);
+      this.ctx.drawImage(gl.getCanvas(), 0, 0, w, h);
+      this.d3glDirty = true;
+      globalThis.__rcGl3dDraws = gl.drawCount;
+      return true;
+    }
+    /**
+     * Composite the software color buffer onto the canvas. The reference blits after every
+     * software mesh rather than once per pass, so a 3D draw interleaves with 2D content in
+     * document order; matching that keeps mixed 2D/3D documents looking the same.
+     */
+    blit3D() {
+      const ctx3d = this.d3;
+      const blit = this.d3Blit;
+      if (ctx3d === null || blit === null) {
+        return;
+      }
+      const argb = ctx3d.getColorBuffer();
+      if (argb === null) {
+        return;
+      }
+      const w = ctx3d.getWidth();
+      const h = ctx3d.getHeight();
+      const img = blit.createImageData(w, h);
+      const d = img.data;
+      for (let i = 0; i < w * h; i++) {
+        const p = argb[i];
+        d[i * 4] = p >>> 16 & 255;
+        d[i * 4 + 1] = p >>> 8 & 255;
+        d[i * 4 + 2] = p & 255;
+        d[i * 4 + 3] = p >>> 24 & 255;
+      }
+      blit.putImageData(img, 0, 0);
+      this.ctx.drawImage(blit.canvas, 0, 0);
+    }
   };
   // Path command IDs (NaN-encoded in the float array)
   // PathExpression uses short IDs (10-16), binary PathData uses NanMap IDs (0x300000+)
@@ -19775,193 +28096,193 @@ void main() {
   var DEFAULT_SYSTEM_COLORS = {
     // ── system_accent1 (Primary Blue tonal palette) ──
     "system_accent1_0": C(4294967295),
-    "system_accent1_10": C(4278197054),
-    "system_accent1_50": C(4278201706),
-    "system_accent1_100": C(4278207136),
-    "system_accent1_200": C(4279918796),
-    "system_accent1_300": C(4283204328),
-    "system_accent1_400": C(4285373695),
-    "system_accent1_500": C(4288264447),
-    "system_accent1_600": C(4289578751),
-    "system_accent1_700": C(4291157759),
-    "system_accent1_800": C(4292602367),
-    "system_accent1_900": C(4293849343),
+    "system_accent1_10": C(4294900735),
+    "system_accent1_50": C(4293849343),
+    "system_accent1_100": C(4292469503),
+    "system_accent1_200": C(4289775359),
+    "system_accent1_300": C(4287933156),
+    "system_accent1_400": C(4286222536),
+    "system_accent1_500": C(4284511916),
+    "system_accent1_600": C(4282867090),
+    "system_accent1_700": C(4281288056),
+    "system_accent1_800": C(4279578208),
+    "system_accent1_900": C(4278196549),
     "system_accent1_1000": C(4278190080),
     // ── system_accent2 (Secondary muted blue tonal palette) ──
     "system_accent2_0": C(4294967295),
-    "system_accent2_10": C(4279180075),
-    "system_accent2_50": C(4280167746),
-    "system_accent2_100": C(4281615706),
-    "system_accent2_200": C(4283194739),
-    "system_accent2_300": C(4284839564),
-    "system_accent2_400": C(4286484647),
-    "system_accent2_500": C(4288261058),
-    "system_accent2_600": C(4289971677),
-    "system_accent2_700": C(4291813882),
-    "system_accent2_800": C(4292733183),
-    "system_accent2_900": C(4293849343),
+    "system_accent2_10": C(4294900735),
+    "system_accent2_50": C(4293849343),
+    "system_accent2_100": C(4292666105),
+    "system_accent2_200": C(4290823900),
+    "system_accent2_300": C(4288981953),
+    "system_accent2_400": C(4287271077),
+    "system_accent2_500": C(4285560715),
+    "system_accent2_600": C(4283915889),
+    "system_accent2_700": C(4282402393),
+    "system_accent2_800": C(4280954946),
+    "system_accent2_900": C(4279573292),
     "system_accent2_1000": C(4278190080),
     // ── system_accent3 (Tertiary mauve/lavender tonal palette) ──
     "system_accent3_0": C(4294967295),
-    "system_accent3_10": C(4281013825),
-    "system_accent3_50": C(4282263640),
-    "system_accent3_100": C(4283842416),
-    "system_accent3_200": C(4285421450),
-    "system_accent3_300": C(4287131812),
-    "system_accent3_400": C(4288907968),
-    "system_accent3_500": C(4290684124),
-    "system_accent3_600": C(4292526073),
-    "system_accent3_700": C(4293975551),
-    "system_accent3_800": C(4294503679),
-    "system_accent3_900": C(4294966271),
+    "system_accent3_10": C(4294966271),
+    "system_accent3_50": C(4294962170),
+    "system_accent3_100": C(4294825978),
+    "system_accent3_200": C(4292918237),
+    "system_accent3_300": C(4291010753),
+    "system_accent3_400": C(4289234598),
+    "system_accent3_500": C(4287393164),
+    "system_accent3_600": C(4285683058),
+    "system_accent3_700": C(4284038489),
+    "system_accent3_800": C(4282459970),
+    "system_accent3_900": C(4280947244),
     "system_accent3_1000": C(4278190080),
     // ── system_neutral1 (Neutral tonal palette) ──
     "system_neutral1_0": C(4294967295),
-    "system_neutral1_10": C(4279901214),
-    "system_neutral1_50": C(4281217331),
-    "system_neutral1_100": C(4282730570),
-    "system_neutral1_200": C(4284309602),
-    "system_neutral1_300": C(4285954427),
-    "system_neutral1_400": C(4287665046),
-    "system_neutral1_500": C(4289441200),
-    "system_neutral1_600": C(4291217611),
-    "system_neutral1_700": C(4293059559),
-    "system_neutral1_800": C(4294045940),
-    "system_neutral1_900": C(4294835455),
+    "system_neutral1_10": C(4294900735),
+    "system_neutral1_50": C(4294045943),
+    "system_neutral1_100": C(4293059305),
+    "system_neutral1_200": C(4291217101),
+    "system_neutral1_300": C(4289440689),
+    "system_neutral1_400": C(4287664279),
+    "system_neutral1_500": C(4285953917),
+    "system_neutral1_600": C(4284309092),
+    "system_neutral1_700": C(4282730060),
+    "system_neutral1_800": C(4281282614),
+    "system_neutral1_900": C(4279900960),
     "system_neutral1_1000": C(4278190080),
     // ── system_neutral2 (Neutral variant tonal palette) ──
     "system_neutral2_0": C(4294967295),
-    "system_neutral2_10": C(4279835682),
-    "system_neutral2_50": C(4281151544),
-    "system_neutral2_100": C(4282664783),
-    "system_neutral2_200": C(4284243815),
-    "system_neutral2_300": C(4285888384),
-    "system_neutral2_400": C(4287599002),
-    "system_neutral2_500": C(4289309620),
-    "system_neutral2_600": C(4291151568),
-    "system_neutral2_700": C(4292993772),
-    "system_neutral2_800": C(4293980410),
-    "system_neutral2_900": C(4294835199),
+    "system_neutral2_10": C(4294900735),
+    "system_neutral2_50": C(4293980410),
+    "system_neutral2_100": C(4292993772),
+    "system_neutral2_200": C(4291151568),
+    "system_neutral2_300": C(4289309620),
+    "system_neutral2_400": C(4287598745),
+    "system_neutral2_500": C(4285888384),
+    "system_neutral2_600": C(4284243559),
+    "system_neutral2_700": C(4282664527),
+    "system_neutral2_800": C(4281217080),
+    "system_neutral2_900": C(4279835427),
     "system_neutral2_1000": C(4278190080),
     // ── system_error (Error red tonal palette) ──
     "system_error_0": C(4294967295),
-    "system_error_10": C(4282449922),
-    "system_error_50": C(4284219396),
-    "system_error_100": C(4286119944),
-    "system_error_200": C(4287823882),
-    "system_error_300": C(4290386458),
-    "system_error_400": C(4292753200),
-    "system_error_500": C(4294923337),
-    "system_error_600": C(4294936957),
-    "system_error_700": C(4294948011),
-    "system_error_800": C(4294957782),
-    "system_error_900": C(4294965495),
+    "system_error_10": C(4294966271),
+    "system_error_50": C(4294962666),
+    "system_error_100": C(4294957782),
+    "system_error_200": C(4294948011),
+    "system_error_300": C(4294936957),
+    "system_error_400": C(4294923337),
+    "system_error_500": C(4292753200),
+    "system_error_600": C(4290386458),
+    "system_error_700": C(4287823882),
+    "system_error_800": C(4285071365),
+    "system_error_900": C(4282449922),
     "system_error_1000": C(4278190080),
     // ── Semantic colors ──
-    "system_on_surface_light": C(4279901214),
-    "system_on_surface_dark": C(4293059559),
-    "system_on_surface_variant_light": C(4282664783),
+    "system_on_surface_light": C(4279900960),
+    "system_on_surface_dark": C(4293059305),
+    "system_on_surface_variant_light": C(4282664527),
     "system_on_surface_variant_dark": C(4291151568),
     "system_on_surface_disabled": C(1629101086),
-    "system_surface_light": C(4294835455),
-    "system_surface_dark": C(4279901214),
+    "system_surface_light": C(4294637823),
+    "system_surface_dark": C(4279374616),
     "system_surface_disabled": C(521804830),
     "system_surface_variant_light": C(4292993772),
-    "system_surface_variant_dark": C(4282664783),
-    "system_surface_bright_light": C(4294835455),
-    "system_surface_bright_dark": C(4281809214),
-    "system_surface_dim_light": C(4292729309),
-    "system_surface_dim_dark": C(4279901214),
+    "system_surface_variant_dark": C(4282664527),
+    "system_surface_bright_light": C(4294637823),
+    "system_surface_bright_dark": C(4281874751),
+    "system_surface_dim_light": C(4292532704),
+    "system_surface_dim_dark": C(4279374616),
     "system_surface_container_lowest_light": C(4294967295),
-    "system_surface_container_lowest_dark": C(4279111698),
-    "system_surface_container_low_light": C(4294439671),
-    "system_surface_container_low_dark": C(4280164388),
-    "system_surface_container_light": C(4294044912),
-    "system_surface_container_dark": C(4280427816),
-    "system_surface_container_high_light": C(4293650154),
-    "system_surface_container_high_dark": C(4281151539),
-    "system_surface_container_highest_light": C(4293255653),
-    "system_surface_container_highest_dark": C(4281875262),
-    "system_background_light": C(4294835455),
-    "system_background_dark": C(4279901214),
-    "system_on_background_light": C(4279901214),
-    "system_on_background_dark": C(4293059559),
-    "system_primary_light": C(4279918796),
-    "system_primary_dark": C(4289578751),
-    "system_primary_container_light": C(4292602367),
-    "system_primary_container_dark": C(4278207136),
+    "system_surface_container_lowest_dark": C(4278980115),
+    "system_surface_container_low_light": C(4294243322),
+    "system_surface_container_low_dark": C(4279900960),
+    "system_surface_container_light": C(4293848564),
+    "system_surface_container_dark": C(4280164133),
+    "system_surface_container_high_light": C(4293453807),
+    "system_surface_container_high_dark": C(4280822319),
+    "system_surface_container_highest_light": C(4293059305),
+    "system_surface_container_highest_dark": C(4281545786),
+    "system_background_light": C(4294637823),
+    "system_background_dark": C(4279374616),
+    "system_on_background_light": C(4279900960),
+    "system_on_background_dark": C(4293059305),
+    "system_primary_light": C(4282867090),
+    "system_primary_dark": C(4289775359),
+    "system_primary_container_light": C(4292469503),
+    "system_primary_container_dark": C(4281288056),
     "system_on_primary_light": C(4294967295),
-    "system_on_primary_dark": C(4278201706),
-    "system_on_primary_container_light": C(4278197054),
-    "system_on_primary_container_dark": C(4292602367),
-    "system_on_primary_fixed": C(4278197054),
-    "system_on_primary_fixed_variant": C(4278207136),
-    "system_primary_fixed": C(4292602367),
-    "system_primary_fixed_dim": C(4289578751),
-    "system_secondary_light": C(4283194739),
-    "system_secondary_dark": C(4289971677),
-    "system_secondary_container_light": C(4292733183),
-    "system_secondary_container_dark": C(4281615706),
+    "system_on_primary_dark": C(4279578208),
+    "system_on_primary_container_light": C(4281288056),
+    "system_on_primary_container_dark": C(4292469503),
+    "system_on_primary_fixed": C(4278196549),
+    "system_on_primary_fixed_variant": C(4281288056),
+    "system_primary_fixed": C(4292469503),
+    "system_primary_fixed_dim": C(4289775359),
+    "system_secondary_light": C(4283915889),
+    "system_secondary_dark": C(4290823900),
+    "system_secondary_container_light": C(4292666105),
+    "system_secondary_container_dark": C(4282402393),
     "system_on_secondary_light": C(4294967295),
-    "system_on_secondary_dark": C(4280167746),
-    "system_on_secondary_container_light": C(4279180075),
-    "system_on_secondary_container_dark": C(4292733183),
-    "system_on_secondary_fixed": C(4279180075),
-    "system_on_secondary_fixed_variant": C(4281615706),
-    "system_secondary_fixed": C(4292733183),
-    "system_secondary_fixed_dim": C(4289971677),
-    "system_tertiary_light": C(4285421450),
-    "system_tertiary_dark": C(4292526073),
-    "system_tertiary_container_light": C(4294503679),
-    "system_tertiary_container_dark": C(4283842416),
+    "system_on_secondary_dark": C(4280954946),
+    "system_on_secondary_container_light": C(4282402393),
+    "system_on_secondary_container_dark": C(4292666105),
+    "system_on_secondary_fixed": C(4279573292),
+    "system_on_secondary_fixed_variant": C(4282402393),
+    "system_secondary_fixed": C(4292666105),
+    "system_secondary_fixed_dim": C(4290823900),
+    "system_tertiary_light": C(4285683058),
+    "system_tertiary_dark": C(4292918237),
+    "system_tertiary_container_light": C(4294825978),
+    "system_tertiary_container_dark": C(4284038489),
     "system_on_tertiary_light": C(4294967295),
-    "system_on_tertiary_dark": C(4282263640),
-    "system_on_tertiary_container_light": C(4281013825),
-    "system_on_tertiary_container_dark": C(4294503679),
-    "system_on_tertiary_fixed": C(4281013825),
-    "system_on_tertiary_fixed_variant": C(4283842416),
-    "system_tertiary_fixed": C(4294503679),
-    "system_tertiary_fixed_dim": C(4292526073),
+    "system_on_tertiary_dark": C(4282459970),
+    "system_on_tertiary_container_light": C(4284038489),
+    "system_on_tertiary_container_dark": C(4294825978),
+    "system_on_tertiary_fixed": C(4280947244),
+    "system_on_tertiary_fixed_variant": C(4284038489),
+    "system_tertiary_fixed": C(4294825978),
+    "system_tertiary_fixed_dim": C(4292918237),
     "system_error_light": C(4290386458),
     "system_error_dark": C(4294948011),
     "system_error_container_light": C(4294957782),
     "system_error_container_dark": C(4287823882),
     "system_on_error_light": C(4294967295),
     "system_on_error_dark": C(4285071365),
-    "system_on_error_container_light": C(4282449922),
+    "system_on_error_container_light": C(4287823882),
     "system_on_error_container_dark": C(4294957782),
     "system_outline_light": C(4285888384),
-    "system_outline_dark": C(4287599002),
+    "system_outline_dark": C(4287598745),
     "system_outline_variant_light": C(4291151568),
-    "system_outline_variant_dark": C(4282664783),
+    "system_outline_variant_dark": C(4282664527),
     "system_outline_disabled": C(521804830),
-    "system_control_activated_light": C(4279918796),
-    "system_control_activated_dark": C(4289578751),
-    "system_control_normal_light": C(4285954427),
-    "system_control_normal_dark": C(4287665046),
-    "system_control_highlight_light": C(689576990),
-    "system_control_highlight_dark": C(702735335),
-    "system_palette_key_color_primary_light": C(4279918796),
-    "system_palette_key_color_primary_dark": C(4285373695),
-    "system_palette_key_color_secondary_light": C(4283194739),
-    "system_palette_key_color_secondary_dark": C(4286484647),
-    "system_palette_key_color_tertiary_light": C(4285421450),
-    "system_palette_key_color_tertiary_dark": C(4288907968),
-    "system_palette_key_color_neutral_light": C(4284309602),
-    "system_palette_key_color_neutral_dark": C(4287665046),
-    "system_palette_key_color_neutral_variant_light": C(4284243815),
-    "system_palette_key_color_neutral_variant_dark": C(4287599002),
+    "system_control_activated_light": C(4292469503),
+    "system_control_activated_dark": C(4281288056),
+    "system_control_normal_light": C(4282664527),
+    "system_control_normal_dark": C(4291151568),
+    "system_control_highlight_light": C(4278190080),
+    "system_control_highlight_dark": C(4294967295),
+    "system_palette_key_color_primary_light": C(4284511916),
+    "system_palette_key_color_primary_dark": C(4284511916),
+    "system_palette_key_color_secondary_light": C(4285560715),
+    "system_palette_key_color_secondary_dark": C(4285560715),
+    "system_palette_key_color_tertiary_light": C(4287393164),
+    "system_palette_key_color_tertiary_dark": C(4287393164),
+    "system_palette_key_color_neutral_light": C(4285953917),
+    "system_palette_key_color_neutral_dark": C(4285953917),
+    "system_palette_key_color_neutral_variant_light": C(4285888384),
+    "system_palette_key_color_neutral_variant_dark": C(4285888384),
     // ── Text colors ──
-    "system_text_hint_inverse_light": C(2147483648),
-    "system_text_hint_inverse_dark": C(2164260863),
-    "system_text_primary_inverse_light": C(4278190080),
-    "system_text_primary_inverse_dark": C(4294967295),
-    "system_text_primary_inverse_disable_only_light": C(2147483648),
-    "system_text_primary_inverse_disable_only_dark": C(2164260863),
-    "system_text_secondary_and_tertiary_inverse_light": C(3003121664),
-    "system_text_secondary_and_tertiary_inverse_dark": C(3019898879),
-    "system_text_secondary_and_tertiary_inverse_disabled_light": C(2147483648),
-    "system_text_secondary_and_tertiary_inverse_disabled_dark": C(2164260863),
+    "system_text_hint_inverse_light": C(4293059305),
+    "system_text_hint_inverse_dark": C(4279900960),
+    "system_text_primary_inverse_light": C(4293059305),
+    "system_text_primary_inverse_dark": C(4279900960),
+    "system_text_primary_inverse_disable_only_light": C(4293059305),
+    "system_text_primary_inverse_disable_only_dark": C(4279900960),
+    "system_text_secondary_and_tertiary_inverse_light": C(4291151568),
+    "system_text_secondary_and_tertiary_inverse_dark": C(4282664527),
+    "system_text_secondary_and_tertiary_inverse_disabled_light": C(4293059305),
+    "system_text_secondary_and_tertiary_inverse_disabled_dark": C(4279900960),
     // ── Legacy Holo colors ──
     "holo_blue_bright": C(4278246911),
     "holo_blue_dark": C(4278229452),
@@ -20247,6 +28568,363 @@ void main() {
     }
   };
 
+  // third_party/remote-compose-player/src/web/CustomHosts.ts
+  function parseEmbedConfig(config2, defaultFit = "fit") {
+    const out = {
+      kind: "",
+      path: config2,
+      fit: defaultFit,
+      crop: [0, 0, 1, 1],
+      mirror: false,
+      gate: 0,
+      persist: false,
+      hasStep: false,
+      step: 0,
+      stepId: -1,
+      timeId: -1
+    };
+    const colon = config2.indexOf(":");
+    if (colon > 0 && /^[a-z]+$/.test(config2.slice(0, colon))) {
+      out.kind = config2.slice(0, colon);
+      out.path = config2.slice(colon + 1);
+    }
+    if (out.kind === "camera") {
+      out.fit = "fill";
+      if (!out.path || out.path.startsWith("#")) out.path = "default" + out.path;
+    }
+    const hash = out.path.indexOf("#");
+    if (hash >= 0) {
+      const opts = out.path.slice(hash + 1);
+      out.path = out.path.slice(0, hash);
+      for (const tok of opts.split("&")) {
+        const eq = tok.indexOf("=");
+        if (eq < 0) {
+          if (tok === "persist") out.persist = true;
+          else if (tok === "mirror") out.mirror = true;
+          else if (tok) out.fit = tok;
+          continue;
+        }
+        const k = tok.slice(0, eq), v = tok.slice(eq + 1);
+        if (k === "fit") out.fit = v;
+        else if (k === "mirror") out.mirror = !(v === "0" || v === "false" || v === "off");
+        else if (k === "persist") out.persist = !(v === "0" || v === "false" || v === "off");
+        else if (k === "step") {
+          out.hasStep = true;
+          out.step = parseFloat(v) || 0;
+          out.persist = true;
+        } else if (k === "stepid") out.stepId = parseInt(v, 10);
+        else if (k === "timeid") out.timeId = parseInt(v, 10);
+        else if (k === "gate") out.gate = parseFloat(v) || 0;
+        else if (k === "crop") {
+          const t = v.split(",").map(parseFloat);
+          if (t.length === 4 && t.every((x) => !isNaN(x))) out.crop = [t[0], t[1], t[2], t[3]];
+        }
+      }
+    }
+    return out;
+  }
+  function fitInto(w, h, cropW, cropH, fit) {
+    let s;
+    if (fit === "fill") s = Math.max(w / cropW, h / cropH);
+    else if (fit === "native") s = 1;
+    else s = Math.min(w / cropW, h / cropH);
+    const dw = cropW * s, dh = cropH * s;
+    return { s, ox: (w - dw) * 0.5, oy: (h - dh) * 0.5 };
+  }
+  var WebCustomHost = class {
+    constructor(resolver) {
+      this.docs = /* @__PURE__ */ new Map();
+      this.videos = /* @__PURE__ */ new Map();
+      this.camera = null;
+      this.defaultFit = "fit";
+      // Something asked to be painted before it was ready; the page is told so it paints again.
+      this.pending = 0;
+      this.resolver = resolver ?? (async (path) => {
+        try {
+          const response = await fetch(path);
+          return response.ok ? await response.arrayBuffer() : null;
+        } catch {
+          return null;
+        }
+      });
+    }
+    setResolver(resolver) {
+      this.resolver = resolver;
+    }
+    setDefaultFit(fit) {
+      this.defaultFit = fit;
+    }
+    // A new host document: embeds that do not persist go with the old one. The persistent
+    // ones — a film running across slides — carry on, clock and all.
+    retire() {
+      for (const [key, nested] of this.docs) {
+        if (!nested.persist) {
+          if (nested.paint) nested.paint.dispose();
+          this.docs.delete(key);
+        }
+      }
+      for (const [key, video] of this.videos) {
+        video.element.pause();
+        video.element.removeAttribute("src");
+        this.videos.delete(key);
+      }
+    }
+    reset() {
+      for (const nested of this.docs.values()) if (nested.paint) nested.paint.dispose();
+      this.docs.clear();
+      this.retire();
+    }
+    drawCustom(_componentId, config2, pc, w, h, timeSec) {
+      if (w <= 0 || h <= 0) return false;
+      const cfg = parseEmbedConfig(config2, this.defaultFit);
+      if (!cfg.path) return false;
+      if (cfg.kind === "video") return this.drawVideo(cfg, pc, w, h);
+      if (cfg.kind === "camera") return this.drawCamera(cfg, pc, w, h);
+      if (cfg.kind === "web") return this.drawWebFrame(cfg, pc, w, h);
+      if (cfg.kind && cfg.kind !== "rc") return false;
+      return this.drawRc(cfg, config2, pc, w, h, timeSec);
+    }
+    // ── Embedded documents ────────────────────────────────────────────
+    drawRc(cfg, config2, pc, w, h, timeSec) {
+      if (cfg.gate > 0 && timeSec < cfg.gate) return true;
+      const host = pc;
+      if (typeof host.getCanvas !== "function") return false;
+      const canvas = host.getCanvas();
+      const key = cfg.persist ? "persist:" + cfg.path : config2;
+      let nested = this.docs.get(key);
+      if (!nested) {
+        nested = {
+          persist: cfg.persist,
+          ok: false,
+          failed: false,
+          doc: null,
+          ctx: null,
+          paint: null,
+          hostBase: 0,
+          hostLast: 0
+        };
+        this.docs.set(key, nested);
+        this.load(nested, cfg.path, canvas);
+      }
+      if (!nested.ok) {
+        if (!nested.failed) pc.needsRepaint();
+        return true;
+      }
+      const doc = nested.doc, ctx = nested.ctx, paint = nested.paint;
+      let docW = doc.getWidth(), docH = doc.getHeight();
+      if (docW <= 0) docW = w;
+      if (docH <= 0) docH = h;
+      const cropX = cfg.crop[0] * docW, cropY = cfg.crop[1] * docH;
+      let cropW = (cfg.crop[2] - cfg.crop[0]) * docW, cropH = (cfg.crop[3] - cfg.crop[1]) * docH;
+      if (cropW <= 0 || cropH <= 0) {
+        cropW = docW;
+        cropH = docH;
+      }
+      const { s, ox, oy } = fitInto(w, h, cropW, cropH, cfg.fit);
+      let docTime = timeSec;
+      if (nested.persist) {
+        if (timeSec + 1e-6 < nested.hostLast) nested.hostBase += nested.hostLast;
+        nested.hostLast = timeSec;
+        docTime = nested.hostBase + timeSec;
+      }
+      paint.setCanvas(canvas);
+      ctx.mWidth = docW;
+      ctx.mHeight = docH;
+      ctx.currentTime = Date.now();
+      ctx.overrideFloat(RemoteContext.ID_ANIMATION_TIME, docTime);
+      ctx.setAnimationTime(docTime);
+      if (cfg.hasStep && cfg.stepId >= 0) ctx.overrideFloat(cfg.stepId, cfg.step);
+      if (cfg.timeId >= 0) ctx.overrideFloat(cfg.timeId, timeSec);
+      canvas.save();
+      canvas.beginPath();
+      canvas.rect(0, 0, w, h);
+      canvas.clip();
+      canvas.translate(ox, oy);
+      canvas.scale(s, s);
+      canvas.translate(-cropX, -cropY);
+      canvas.beginPath();
+      canvas.rect(0, 0, docW, docH);
+      canvas.clip();
+      paint.reset();
+      paint.clearNeedsRepaint();
+      try {
+        doc.paint(ctx, Theme.DARK);
+      } finally {
+        canvas.restore();
+      }
+      if (doc.needsRepaint() >= 0 || paint.doesNeedsRepaint()) pc.needsRepaint();
+      return true;
+    }
+    async load(nested, path, canvas) {
+      this.pending++;
+      try {
+        const data = await this.resolver(path);
+        if (!data || data.byteLength === 0) {
+          nested.failed = true;
+          return;
+        }
+        const doc = new CoreDocument();
+        doc.initFromBuffer(RemoteComposeBuffer.fromArrayBuffer(data));
+        const paint = new CanvasPaintContext(null, canvas);
+        const ctx = new WebRemoteContext(paint);
+        doc.initializeContext(ctx);
+        ctx.setPaintContext(paint);
+        paint.setContext(ctx);
+        ctx.mWidth = doc.getWidth();
+        ctx.mHeight = doc.getHeight();
+        ctx.setDensity(1);
+        ctx.setCustomHost(this);
+        doc.applyDataOperations(ctx);
+        await new Promise((resolve2) => setTimeout(resolve2, 50));
+        nested.doc = doc;
+        nested.ctx = ctx;
+        nested.paint = paint;
+        nested.ok = true;
+      } catch (e) {
+        console.error("embed: cannot load " + path, e);
+        nested.failed = true;
+      } finally {
+        this.pending--;
+      }
+    }
+    // ── Videos ────────────────────────────────────────────────────────
+    drawVideo(cfg, pc, w, h) {
+      const host = pc;
+      if (typeof host.getCanvas !== "function" || typeof document === "undefined") return false;
+      const canvas = host.getCanvas();
+      let video = this.videos.get(cfg.path);
+      if (!video) {
+        const element = document.createElement("video");
+        element.src = cfg.path;
+        element.muted = true;
+        element.loop = true;
+        element.playsInline = true;
+        element.preload = "auto";
+        video = { element, ready: false };
+        element.addEventListener("loadeddata", () => {
+          video.ready = true;
+        });
+        element.play().catch(() => {
+        });
+        this.videos.set(cfg.path, video);
+      }
+      pc.needsRepaint();
+      const vw = video.element.videoWidth, vh = video.element.videoHeight;
+      if (!video.ready || vw <= 0 || vh <= 0) return true;
+      if (video.element.paused) video.element.play().catch(() => {
+      });
+      const cropX = cfg.crop[0] * vw, cropY = cfg.crop[1] * vh;
+      let cropW = (cfg.crop[2] - cfg.crop[0]) * vw, cropH = (cfg.crop[3] - cfg.crop[1]) * vh;
+      if (cropW <= 0 || cropH <= 0) {
+        cropW = vw;
+        cropH = vh;
+      }
+      const { s, ox, oy } = fitInto(w, h, cropW, cropH, cfg.fit);
+      canvas.save();
+      canvas.beginPath();
+      canvas.rect(0, 0, w, h);
+      canvas.clip();
+      canvas.drawImage(video.element, cropX, cropY, cropW, cropH, ox, oy, cropW * s, cropH * s);
+      canvas.restore();
+      return true;
+    }
+    // ── The camera ────────────────────────────────────────────────────
+    // The viewer's own camera in the box, the way the desktop player puts the speaker's
+    // there. The stream is asked for once, on the first camera embed, and kept for the
+    // page; the browser's own prompt does the asking. Until it arrives — or when it is
+    // refused — the box is a dark plate, as on the desktop.
+    drawCamera(cfg, pc, w, h) {
+      const host = pc;
+      if (typeof host.getCanvas !== "function" || typeof document === "undefined") return false;
+      const canvas = host.getCanvas();
+      if (!this.camera) {
+        const element = document.createElement("video");
+        element.muted = true;
+        element.playsInline = true;
+        element.autoplay = true;
+        element.style.cssText = "position:fixed;left:0;top:0;width:2px;height:2px;opacity:0;pointer-events:none";
+        document.body.appendChild(element);
+        const feed2 = { element, ready: false, failed: false, stream: null };
+        this.camera = feed2;
+        const media = typeof navigator !== "undefined" ? navigator.mediaDevices : void 0;
+        if (!media || !media.getUserMedia) {
+          feed2.failed = true;
+        } else {
+          media.getUserMedia({ video: { facingMode: "user", width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false }).then((stream) => {
+            feed2.stream = stream;
+            element.srcObject = stream;
+            element.addEventListener("loadeddata", () => {
+              feed2.ready = true;
+            });
+            element.play().catch(() => {
+            });
+          }).catch((e) => {
+            console.warn("camera: not available", e);
+            feed2.failed = true;
+          });
+        }
+      }
+      const feed = this.camera;
+      canvas.save();
+      canvas.beginPath();
+      canvas.rect(0, 0, w, h);
+      canvas.clip();
+      const vw = feed.element.videoWidth, vh = feed.element.videoHeight;
+      if (!feed.ready || vw <= 0 || vh <= 0) {
+        canvas.fillStyle = "#101318";
+        canvas.fillRect(0, 0, w, h);
+        canvas.restore();
+        if (!feed.failed) pc.needsRepaint();
+        return true;
+      }
+      const cropX = cfg.crop[0] * vw, cropY = cfg.crop[1] * vh;
+      let cropW = (cfg.crop[2] - cfg.crop[0]) * vw, cropH = (cfg.crop[3] - cfg.crop[1]) * vh;
+      if (cropW <= 0 || cropH <= 0) {
+        cropW = vw;
+        cropH = vh;
+      }
+      const { s, ox, oy } = fitInto(w, h, cropW, cropH, cfg.fit);
+      if (cfg.mirror) {
+        canvas.translate(w, 0);
+        canvas.scale(-1, 1);
+      }
+      canvas.drawImage(feed.element, cropX, cropY, cropW, cropH, ox, oy, cropW * s, cropH * s);
+      canvas.restore();
+      pc.needsRepaint();
+      return true;
+    }
+    // ── Web pages ─────────────────────────────────────────────────────
+    drawWebFrame(cfg, pc, w, h) {
+      const host = pc;
+      if (typeof host.getCanvas !== "function") return false;
+      const canvas = host.getCanvas();
+      canvas.save();
+      canvas.beginPath();
+      canvas.rect(0, 0, w, h);
+      canvas.clip();
+      canvas.fillStyle = "#171a20";
+      canvas.fillRect(0, 0, w, h);
+      canvas.strokeStyle = "#2a2f38";
+      canvas.lineWidth = 2;
+      canvas.strokeRect(1, 1, w - 2, h - 2);
+      canvas.fillStyle = "#868d9c";
+      const size = Math.max(12, Math.min(w * 0.03, h * 0.08));
+      canvas.font = `${size}px -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif`;
+      canvas.textAlign = "center";
+      canvas.textBaseline = "middle";
+      canvas.fillText(cfg.path, w * 0.5, h * 0.5, w * 0.9);
+      canvas.restore();
+      return true;
+    }
+  };
+
+  // third_party/remote-compose-player/src/web/density.ts
+  function resolveDensity(explicit, generation, ambient) {
+    if (explicit !== null && explicit > 0) return explicit;
+    if (generation > 0) return generation;
+    return ambient > 0 ? ambient : 1;
+  }
+
   // third_party/remote-compose-player/src/web/RcPlayerElement.ts
   function base64ToArrayBuffer(base64) {
     const binary = atob(base64);
@@ -20313,7 +28991,9 @@ void main() {
     };
     return handle;
   }
-  var RcPlayerElement = class extends HTMLElement {
+  var BaseElement = typeof HTMLElement !== "undefined" ? HTMLElement : class {
+  };
+  var RcPlayerElement = class extends BaseElement {
     constructor() {
       super();
       this._handle = null;
@@ -20378,6 +29058,7 @@ void main() {
   RcPlayerElement.observedAttributes = ["src", "data", "width", "height", "theme", "background"];
 
   // third_party/remote-compose-player/src/web/main.ts
+  var TOUCH_SLOP = 8;
   var RcdPlayer = class {
     constructor(canvas) {
       this.document = null;
@@ -20390,14 +29071,116 @@ void main() {
       this.themeOverride = "auto";
       // Variable listener
       this.variableListener = null;
+      // Measurement sink, remembered across document loads.
+      this.measurementSink = null;
+      /**
+       * Display density. Dimensions in a document are authored in dp and scaled by this —
+       * a `widthIn(120)` is 120dp, which is 315 physical pixels on a 420dpi phone.
+       *
+       * Defaults to the browser's devicePixelRatio, the closest equivalent to Android's
+       * DisplayMetrics.density. Headless there is no such thing, so it falls back to 1 —
+       * which is what a document authored for a phone will NOT look right at, so the render
+       * tools take an explicit --density.
+       */
+      this.density = typeof window !== "undefined" && window.devicePixelRatio || 1;
+      // True once the host has called setDensity. Until then a document is laid out at its own
+      // generation density rather than at the ambient one — see resolveDensity.
+      this.densityExplicit = false;
       // Touch/pointer tracking
       this.pointerIsDown = false;
       this.pointerHistory = [];
+      // Tap detection. A press that ends without travelling more than TOUCH_SLOP is a
+      // click, and clicks are a *separate dispatch channel* from touch — see the
+      // pointerup handler.
+      this.pointerDownX = 0;
+      this.pointerDownY = 0;
+      this.pointerHasMoved = false;
       // Fit transform applied each frame in renderFrame to scale the document's
       // native size into the canvas. Pointer coords must be inverse-mapped.
       this.mContentScale = 1;
       this.mContentOffsetX = 0;
       this.mContentOffsetY = 0;
+      this.isPaused = false;
+      // Draws the custom components — embedded documents, videos — for every document this
+      // player shows. It outlives the documents, so an embed marked `persist` carries across
+      // them; a new document retires the rest.
+      this.customHost = new WebCustomHost();
+      // Bitmaps the page supplies as video (see setBitmapVideos), for the next document.
+      this.bitmapVideos = null;
+      this.onPointerDown = (e) => {
+        if (!this.document || !this.remoteContext) return;
+        this.pointerIsDown = true;
+        try {
+          this.canvas.setPointerCapture(e.pointerId);
+        } catch (_) {
+        }
+        const { x, y } = this.canvasCoords(e);
+        this.pointerDownX = x;
+        this.pointerDownY = y;
+        this.pointerHasMoved = false;
+        this.pointerHistory = [{ x, y, t: performance.now() }];
+        this.remoteContext.loadFloat(RemoteContext.ID_TOUCH_EVENT_TIME, this.remoteContext.getAnimationTime());
+        this.document.touchDown(this.remoteContext, x, y);
+        this.scheduleRepaint();
+        window.addEventListener("pointermove", this.onPointerMove, { passive: false });
+        window.addEventListener("pointerup", this.onPointerUp, { passive: false });
+        window.addEventListener("pointercancel", this.onPointerCancel, { passive: false });
+      };
+      this.onPointerMove = (e) => {
+        if (!this.pointerIsDown || !this.document || !this.remoteContext) return;
+        const { x, y } = this.canvasCoords(e);
+        if (!this.pointerHasMoved) {
+          const dx = x - this.pointerDownX;
+          const dy = y - this.pointerDownY;
+          const slop = TOUCH_SLOP / (this.mContentScale || 1);
+          if (dx * dx + dy * dy > slop * slop) this.pointerHasMoved = true;
+        }
+        this.pointerHistory.push({ x, y, t: performance.now() });
+        if (this.pointerHistory.length > 5) this.pointerHistory.shift();
+        this.remoteContext.loadFloat(RemoteContext.ID_TOUCH_EVENT_TIME, this.remoteContext.getAnimationTime());
+        this.document.touchDrag(this.remoteContext, x, y);
+        this.scheduleRepaint();
+      };
+      this.onPointerUp = (e) => {
+        if (!this.pointerIsDown || !this.document || !this.remoteContext) return;
+        this.pointerIsDown = false;
+        try {
+          this.canvas.releasePointerCapture(e.pointerId);
+        } catch (_) {
+        }
+        window.removeEventListener("pointermove", this.onPointerMove);
+        window.removeEventListener("pointerup", this.onPointerUp);
+        window.removeEventListener("pointercancel", this.onPointerCancel);
+        const { x, y } = this.canvasCoords(e);
+        const { dx, dy } = this.computeVelocity(x, y);
+        this.remoteContext.loadFloat(RemoteContext.ID_TOUCH_EVENT_TIME, this.remoteContext.getAnimationTime());
+        if (!this.pointerHasMoved) {
+          this.document.onClick(this.remoteContext, x, y);
+        }
+        this.document.touchUp(this.remoteContext, x, y, dx, dy);
+        this.pointerHistory = [];
+        this.scheduleRepaint();
+      };
+      this.onPointerCancel = (e) => {
+        if (!this.pointerIsDown || !this.document || !this.remoteContext) return;
+        this.pointerIsDown = false;
+        try {
+          this.canvas.releasePointerCapture(e.pointerId);
+        } catch (_) {
+        }
+        window.removeEventListener("pointermove", this.onPointerMove);
+        window.removeEventListener("pointerup", this.onPointerUp);
+        window.removeEventListener("pointercancel", this.onPointerCancel);
+        const { x, y } = this.canvasCoords(e);
+        const { dx, dy } = this.computeVelocity(x, y);
+        this.remoteContext.loadFloat(RemoteContext.ID_TOUCH_EVENT_TIME, this.remoteContext.getAnimationTime());
+        this.document.touchCancel(this.remoteContext, x, y, dx, dy);
+        this.pointerHasMoved = false;
+        this.pointerHistory = [];
+        this.scheduleRepaint();
+      };
+      this.naturalWidth = 0;
+      this.naturalHeight = 0;
       this.renderFrame = (timestamp) => {
         this.animationFrameId = null;
         if (!this.document || !this.remoteContext || !this.paintContext) return;
@@ -20424,6 +29207,7 @@ void main() {
         if (this.variableListener) {
           this.variableListener(this.remoteContext.mRemoteComposeState.getFloatEntries());
         }
+        if (this.isPaused) return;
         const repaintDelay = this.document.needsRepaint();
         if (repaintDelay >= 0) {
           if (repaintDelay <= 1) {
@@ -20442,38 +29226,7 @@ void main() {
       this.setupPointerEvents();
     }
     setupPointerEvents() {
-      this.canvas.addEventListener("pointerdown", (e) => {
-        if (!this.document || !this.remoteContext) return;
-        this.pointerIsDown = true;
-        const { x, y } = this.canvasCoords(e);
-        this.pointerHistory = [{ x, y, t: performance.now() }];
-        this.remoteContext.loadFloat(RemoteContext.ID_TOUCH_EVENT_TIME, this.remoteContext.getAnimationTime());
-        this.document.touchDown(this.remoteContext, x, y);
-        this.scheduleRepaint();
-      });
-      this.canvas.addEventListener("pointermove", (e) => {
-        if (!this.pointerIsDown || !this.document || !this.remoteContext) return;
-        const { x, y } = this.canvasCoords(e);
-        this.pointerHistory.push({ x, y, t: performance.now() });
-        if (this.pointerHistory.length > 5) this.pointerHistory.shift();
-        this.remoteContext.loadFloat(RemoteContext.ID_TOUCH_EVENT_TIME, this.remoteContext.getAnimationTime());
-        this.document.touchDrag(this.remoteContext, x, y);
-        this.scheduleRepaint();
-      });
-      this.canvas.addEventListener("pointerup", (e) => {
-        if (!this.pointerIsDown || !this.document || !this.remoteContext) return;
-        this.pointerIsDown = false;
-        const { x, y } = this.canvasCoords(e);
-        const { dx, dy } = this.computeVelocity(x, y);
-        this.remoteContext.loadFloat(RemoteContext.ID_TOUCH_EVENT_TIME, this.remoteContext.getAnimationTime());
-        this.document.touchUp(this.remoteContext, x, y, dx, dy);
-        this.pointerHistory = [];
-        this.scheduleRepaint();
-      });
-      this.canvas.addEventListener("pointercancel", () => {
-        this.pointerIsDown = false;
-        this.pointerHistory = [];
-      });
+      this.canvas.addEventListener("pointerdown", this.onPointerDown);
     }
     canvasCoords(e) {
       const rect = this.canvas.getBoundingClientRect();
@@ -20499,9 +29252,21 @@ void main() {
       };
     }
     scheduleRepaint() {
+      if (this.isPaused) return;
       if (this.animationFrameId === null) {
         this.animationFrameId = requestAnimationFrame(this.renderFrame);
       }
+    }
+    pause() {
+      this.isPaused = true;
+      this.stop();
+    }
+    play() {
+      this.isPaused = false;
+      this.scheduleRepaint();
+    }
+    getIsPaused() {
+      return this.isPaused;
     }
     setOnLoad(cb) {
       this.onLoad = cb;
@@ -20516,6 +29281,37 @@ void main() {
     removeVariableListener() {
       this.variableListener = null;
     }
+    /**
+     * Enable per-frame operation measurement; `sink` is called once per painted frame.
+     * Pass `null` to disable. Safe to call before a document is loaded — the setting is
+     * remembered and reapplied to each document, so a profiler can be armed up front and
+     * see the very first frame.
+     */
+    setMeasurementSink(sink) {
+      this.measurementSink = sink;
+      this.remoteContext?.setMeasurementSink(sink);
+    }
+    /** Set the display density; documents are authored in dp and scale by it. */
+    setDensity(density) {
+      if (density > 0 && !Number.isNaN(density)) {
+        this.density = density;
+        this.densityExplicit = true;
+        this.remoteContext?.setDensity(density);
+        this.scheduleRepaint();
+      }
+    }
+    getDensity() {
+      return this.density;
+    }
+    /** The size the document declares in its header, or null if nothing is loaded. */
+    getNaturalSize() {
+      if (!this.document) return null;
+      return { width: this.naturalWidth, height: this.naturalHeight };
+    }
+    /** Operations executed in the last painted frame — available with measurement off. */
+    getOpsPerFrame() {
+      return this.document?.getOpsPerFrame() ?? 0;
+    }
     async loadFromArrayBuffer(data) {
       this.stop();
       if (this.paintContext) this.paintContext.destroy();
@@ -20523,25 +29319,40 @@ void main() {
       const doc = new CoreDocument();
       doc.initFromBuffer(buffer);
       this.document = doc;
-      const density = doc.getProperty(Header.DOC_DENSITY_AT_GENERATION) || 1;
+      this.naturalWidth = doc.getWidth();
+      this.naturalHeight = doc.getHeight();
+      const density = resolveDensity(
+        this.densityExplicit ? this.density : null,
+        doc.getProperty(Header.DOC_DENSITY_AT_GENERATION) || 0,
+        this.density
+      );
+      if (!this.densityExplicit) this.density = density;
       const docWidth = this.canvas.width;
       const docHeight = this.canvas.height;
       doc.setWidth(docWidth);
       doc.setHeight(docHeight);
+      if (this.paintContext) {
+        if (typeof this.paintContext.destroy === "function") this.paintContext.destroy();
+        if (typeof this.paintContext.dispose === "function") this.paintContext.dispose();
+      }
       this.paintContext = new CanvasPaintContext(null, this.ctx);
       this.paintContext.onFontLoaded = () => {
         this.document?.invalidateMeasure();
         this.scheduleRepaint();
       };
+      this.paintContext.setBitmapVideos(this.bitmapVideos);
       this.remoteContext = new WebRemoteContext(this.paintContext);
       doc.initializeContext(this.remoteContext);
       this.remoteContext.setPaintContext(this.paintContext);
       this.paintContext.setContext(this.remoteContext);
+      this.customHost.retire();
+      this.remoteContext.setCustomHost(this.customHost);
       this.remoteContext.mWidth = docWidth;
       this.remoteContext.mHeight = docHeight;
       this.remoteContext.setDensity(density);
+      if (this.measurementSink) this.remoteContext.setMeasurementSink(this.measurementSink);
       doc.applyDataOperations(this.remoteContext);
-      await new Promise((resolve) => setTimeout(resolve, 50));
+      await this.paintContext.bitmapsReady();
       if (this.onLoad) this.onLoad(doc);
       this.startTime = performance.now();
       this.renderFrame(this.startTime);
@@ -20557,6 +29368,12 @@ void main() {
         cancelAnimationFrame(this.animationFrameId);
         this.animationFrameId = null;
       }
+      if (this.pointerIsDown) {
+        this.pointerIsDown = false;
+        window.removeEventListener("pointermove", this.onPointerMove);
+        window.removeEventListener("pointerup", this.onPointerUp);
+        window.removeEventListener("pointercancel", this.onPointerCancel);
+      }
     }
     /**
      * Stop, and release the WebGL context.
@@ -20568,11 +29385,16 @@ void main() {
      */
     destroy() {
       this.stop();
+      this.canvas.removeEventListener("pointerdown", this.onPointerDown);
       if (this.paintContext) {
         this.paintContext.destroy();
       }
     }
     repaint() {
+      if (this.animationFrameId !== null) {
+        cancelAnimationFrame(this.animationFrameId);
+        this.animationFrameId = null;
+      }
       if (this.document) {
         this.renderFrame(performance.now());
       }
@@ -20592,13 +29414,38 @@ void main() {
     resize(newWidth, newHeight) {
       this.canvas.width = newWidth;
       this.canvas.height = newHeight;
-      this.canvas.style.width = newWidth + "px";
-      this.canvas.style.height = newHeight + "px";
+      const d = this.remoteContext?.getDensity() || this.density || 1;
+      this.canvas.style.width = newWidth / d + "px";
+      this.canvas.style.height = newHeight / d + "px";
       if (this.remoteContext) {
         this.remoteContext.mWidth = newWidth;
         this.remoteContext.mHeight = newHeight;
       }
-      this.scheduleRepaint();
+      if (this.document) {
+        this.document.setWidth(newWidth);
+        this.document.setHeight(newHeight);
+        this.document.invalidateMeasure();
+      }
+      this.repaint();
+    }
+    /**
+     * How embedded documents and videos are fetched: by path, relative to the page, unless
+     * a page supplies its own — a deck opened off the disk cannot fetch, so its embeds
+     * travel inside the page and this hands them over.
+     */
+    setEmbedResolver(resolver) {
+      this.customHost.setResolver(resolver);
+    }
+    /**
+     * Bitmaps of the *next* document to load that should be drawn from a video instead of
+     * their own bytes: image id → URL. An exporter transcodes an animated GIF once and hands
+     * the page the result; the browser's video pipeline then does the decoding.
+     */
+    setBitmapVideos(videos) {
+      this.bitmapVideos = videos;
+    }
+    getCustomHost() {
+      return this.customHost;
     }
     getDocument() {
       return this.document;
@@ -20621,9 +29468,9 @@ void main() {
      *   const url = await player.screenshotDataURL();
      */
     async screenshot(type = "image/png", quality) {
-      return new Promise((resolve, reject) => {
+      return new Promise((resolve2, reject) => {
         this.canvas.toBlob(
-          (blob) => blob ? resolve(blob) : reject(new Error("toBlob failed")),
+          (blob) => blob ? resolve2(blob) : reject(new Error("toBlob failed")),
           type,
           quality
         );
@@ -20646,6 +29493,12 @@ void main() {
   };
   if (typeof window !== "undefined") {
     window.RcdPlayer = RcdPlayer;
+    window.RC = {
+      RcdPlayer,
+      createPlayer,
+      RcPlayerElement,
+      base64ToArrayBuffer
+    };
     if (!customElements.get("rc-player")) {
       customElements.define("rc-player", RcPlayerElement);
     }
