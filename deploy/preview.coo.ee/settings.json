@@ -1,9 +1,43 @@
 {
   "$schema": "../image/settings.schema.json",
+  "auth": {
+    "github": {
+      "callbackBaseUrl": "https://preview.coo.ee",
+      "clientId": "Ov23licZOqvCfKBvSnS1",
+      "scope": "read:user",
+      "cookieDomain": "coo.ee",
+      "openUiBuilder": true
+    }
+  },
+  "catalogs": {
+    "mcp": true,
+    "registry": "yschimke/compose-preview-imports-out"
+  },
+  "uploads": {
+    "acceptDocs": true,
+    "acceptImages": true,
+    "imageRepository": "yschimke/compose-preview-server"
+  },
+  "rendering": {
+    "compileEngine": true,
+    "rcDefaultPlayer": "cmp-android"
+  },
+  "agents": {
+    "grantCapabilities": ["ui-builder-read", "ui-builder-write", "ui-builder-export", "images"]
+  },
   "uiBuilder": {
+    "adminActors": ["github:yschimke"],
+    "startUrl": "https://yschimke.github.io/compose-ui-builder/",
     "guidelines": {
       "model": "deepseek/deepseek-v4.1-flash",
       "users": ["yschimke"]
+    }
+  },
+  "analytics": {
+    "umami": {
+      "enabled": true,
+      "url": "https://preview.coo.ee/__analytics",
+      "websiteId": "6f574f68-107b-43af-bfe1-f0359e911be9"
     }
   }
 }
