@@ -156,8 +156,9 @@ RUN set -eu; \
 # `-Dcomposeai.cli.libRendererDir`, else `$APP_HOME/<name>`.
 #
 # `$APP_HOME` here is `/opt/compose-preview-server`, and the released SERVER tarball
-# carries only `bin/`, `lib/`, `wasm-ui/`, `ui-builder/`, `ui-builder-components/` and `rc-fonts/`
-# (the cmp-jvm lane's faces, which `ServeRcJvmFonts` resolves from the install itself) — those two
+# carries only `bin/`, `lib/`, `wasm-ui/`, `ui-builder/`, `ui-builder-components/`, `rc-fonts/`
+# (the cmp-jvm lane's faces, which `ServeRcJvmFonts` resolves from the install itself) and
+# `rc-player-wasm/` (the CMP/Wasm player the entrypoint serves at `/rc-player-wasm/`) — those two
 # sidecars used to be staged into compose-ai-tools' `:cli` distribution, which this image never
 # installed, and since compose-ai-tools#5336 they are compose-preview-daemon's
 # `compose-preview-desktop-daemon-<ver>.tar.gz`. So the lookup came back

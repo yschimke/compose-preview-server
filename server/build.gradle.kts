@@ -273,6 +273,61 @@ val stageRcJvmFonts =
     into(stagedRcJvmFonts)
   }
 
+// The CMP/Wasm Remote Compose player, shipped as `<APP_HOME>/rc-player-wasm/`. The image's
+// entrypoint passes that directory as `--rc-player-wasm-dir` whenever it holds an `index.html`, and
+// said the release tarball carried it — but nothing put it there, so preview.coo.ee served no
+// `/rc-player-wasm/`: the viewer's cmp-wasm lane stayed disabled and a shared `/d/<id>` `.rc` page
+// could only offer the TypeScript player. Resolved from Central (rc-players publishes the browser
+// bundle as `rc-player-wasm-dist`), unpacked as-is: it is static files served by path.
+val rcPlayerWasmDist =
+  configurations.create("rcPlayerWasmDist") {
+    description = "The CMP/Wasm Remote Compose player's static browser bundle."
+    isCanBeConsumed = false
+    isCanBeResolved = true
+    isTransitive = false
+  }
+
+dependencies {
+  rcPlayerWasmDist(
+    variantOf(libs.rc.player.wasm.dist) {
+      classifier("dist")
+      artifactType("zip")
+    }
+  )
+}
+
+/** Unpack the rc-player-wasm-dist zip, refusing one without the `index.html` the host serves. */
+abstract class UnpackRcPlayerWasm : DefaultTask() {
+  @get:InputFile abstract val archiveFile: RegularFileProperty
+
+  @get:OutputDirectory abstract val outputDirectory: DirectoryProperty
+
+  @get:Inject abstract val archiveOperations: ArchiveOperations
+
+  @get:Inject abstract val fileSystemOperations: FileSystemOperations
+
+  @TaskAction
+  fun unpack() {
+    fileSystemOperations.sync {
+      from(archiveOperations.zipTree(archiveFile))
+      into(outputDirectory)
+    }
+    check(outputDirectory.file("index.html").get().asFile.isFile) {
+      "rc-player-wasm-dist unpacked without an index.html; the entrypoint would skip it"
+    }
+  }
+}
+
+val stageRcPlayerWasm =
+  tasks.register<UnpackRcPlayerWasm>("stageRcPlayerWasm") {
+    description = "Unpack the CMP/Wasm Remote Compose player into the distribution staging area."
+    group = "distribution"
+    archiveFile.set(
+      layout.file(rcPlayerWasmDist.elements.map { artifacts -> artifacts.single().asFile })
+    )
+    outputDirectory.set(layout.buildDirectory.dir("rc-player-wasm"))
+  }
+
 distributions {
   main {
     contents { from(project(":wasm-ui").tasks.named("wasmFrontendDist")) { into("wasm-ui") } }
@@ -293,6 +348,8 @@ distributions {
     }
     // The cmp-jvm render worker's typefaces — see `stageRcJvmFonts`.
     contents { into(RC_JVM_FONTS_DIR) { from(stageRcJvmFonts) } }
+    // The CMP/Wasm Remote Compose player — see `stageRcPlayerWasm`.
+    contents { into("rc-player-wasm") { from(stageRcPlayerWasm) } }
     contents { from(writeDistributionJavaMin) }
   }
 }

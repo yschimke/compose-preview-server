@@ -371,6 +371,11 @@ composeai-contracts = "3.20.0"
 # screen only the screen ones (#574), and records `m3/variable-font-text` at export (#581).
 # `androidx-window` and `composeai-contracts` are unchanged.
 composeai-ui-builder = "3.96.0"
+# The CMP/Wasm Remote Compose player (yschimke/rc-players' `rc-player-wasm-dist`, a zip of its
+# static browser bundle). Shipped in the server tarball as `rc-player-wasm/`, which the image's
+# entrypoint already passes as `--rc-player-wasm-dir`: that serves `/rc-player-wasm/`, enables the
+# viewer's `cmp-wasm` lane, and offers the CMP player beside the TypeScript one on a `/d/<id>` page.
+rc-players = "2.2.1"
 kotlinx-coroutines = "1.11.0"
 kotlinx-serialization = "1.11.0"
 ktor = "3.6.0"
@@ -472,6 +477,9 @@ composeai-ui-builder-export = { module = "ee.schimke.composeai:compose-preview-u
 # repository with no metadata can serve.
 composeai-ui-builder-web = { module = "ee.schimke.composeai:compose-preview-ui-builder-web", version.ref = "composeai-ui-builder" }
 composeai-ui-builder-render-bundle = { module = "ee.schimke.composeai:compose-preview-ui-builder-render-bundle" }
+# Artifact-only at the use site (`dist` classifier, `zip`): the coordinate is a static bundle, not a
+# library, and only its zip is wanted.
+rc-player-wasm-dist = { module = "ee.schimke.composeai:rc-player-wasm-dist", version.ref = "rc-players" }
 
 kotlinx-coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "kotlinx-coroutines" }
 kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "kotlinx-serialization" }
