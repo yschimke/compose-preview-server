@@ -19,8 +19,8 @@ import kotlinx.serialization.json.jsonPrimitive
  *
  * The first test is the regression: it reads the fonts the distribution packages inside
  * `rc-player-wasm/` (`stageRcPlayerWasm`), not a source tree, because the outage was a server
- * install that carried no manifest at all — every remote-m3 card then drew in the worker's
- * fallback sans, 26–31% off the published captures, and nothing reported a failure.
+ * install that carried no manifest at all — every remote-m3 card then drew in the worker's fallback
+ * sans, 26–31% off the published captures, and nothing reported a failure.
  */
 class ServeRcJvmFontsTest {
 

@@ -19,9 +19,9 @@ import java.io.File
  * once carried no player at all (and the image lifts only `lib-rcjvm/` and `lib-bta/` out of the
  * CLI tarball), so on a server install the lookup came back empty every time. It now ships the
  * player, and [PACKAGED_DIR] is that player's `fonts/`: the manifest and faces rc-players vendors
- * (variable faces since 2.3.0), so the server-side and in-browser players resolve every family
- * from the same files. [installPackaged] points the renderer at them explicitly rather than
- * leaning on the worker's fallback.
+ * (variable faces since 2.3.0), so the server-side and in-browser players resolve every family from
+ * the same files. [installPackaged] points the renderer at them explicitly rather than leaning on
+ * the worker's fallback.
  *
  * Offline and deterministic by construction: the faces are files in the install, so a render never
  * fetches and two hosts on the same release draw the same glyphs.
@@ -44,10 +44,10 @@ internal object ServeRcJvmFonts {
   const val MANIFEST: String = "fonts.json"
 
   /**
-   * The packaged fonts directory: `<appHome>/rc-player-wasm/fonts` when [appHome] is set, else
-   * the install inferred from [installDir]. Null when neither holds a [MANIFEST] — a directory
-   * without one would be passed to the worker and silently ignored, which is the failure this
-   * exists to end.
+   * The packaged fonts directory: `<appHome>/rc-player-wasm/fonts` when [appHome] is set, else the
+   * install inferred from [installDir]. Null when neither holds a [MANIFEST] — a directory without
+   * one would be passed to the worker and silently ignored, which is the failure this exists to
+   * end.
    */
   fun packagedDir(
     appHome: String? = System.getProperty("composeai.cli.appHome") ?: System.getenv("APP_HOME"),
