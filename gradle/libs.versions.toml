@@ -382,8 +382,11 @@ composeai-contracts = "3.21.0"
 # 3.98.0 draws a launcher widget's adaptive layout at the slot its frame picks
 # (compose-ui-builder#601). 3.99.0 writes Remote Compose Kotlin source in every build, so the code
 # pane shows a launcher widget's `RemoteComposeWidget` without `-PuiBuilderRemoteCompose`
-# (compose-ui-builder#607). `androidx-window` and `composeai-contracts` are unchanged.
-composeai-ui-builder = "3.99.0"
+# (compose-ui-builder#607). 3.100.0 fetches Compose's Noto fallback slices through
+# `/api/fonts/noto` (#1478) instead of fonts.gstatic.com, which every page's `connect-src` refused,
+# and draws empty-slot invitations only while a component is dragged (compose-ui-builder#612).
+# `androidx-window` and `composeai-contracts` are unchanged.
+composeai-ui-builder = "3.100.0"
 # The CMP/Wasm Remote Compose player (yschimke/rc-players' `rc-player-wasm-dist`, a zip of its
 # static browser bundle). Shipped in the server tarball as `rc-player-wasm/`, which the image's
 # entrypoint already passes as `--rc-player-wasm-dir`: that serves `/rc-player-wasm/`, enables the
