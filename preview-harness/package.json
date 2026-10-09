@@ -5,9 +5,9 @@
     "description": "Playwright harness for `compose-preview serve`: page captures for the visual-diff bot, and the lane / playground / bundle-upload end-to-end specs.",
     "type": "module",
     "scripts": {
-        "harness:pages": "playwright test -c playwright.config.mjs pages-snapshot.spec.mjs",
+        "harness:pages": "node stage-rc-player.mjs && playwright test -c playwright.config.mjs pages-snapshot.spec.mjs",
         "harness:compare": "playwright test -c playwright.config.mjs format-compare-scorer.spec.mjs",
-        "harness:rc-viewer": "playwright test -c playwright.config.mjs mcp-app-rc-viewer.spec.mjs",
+        "harness:rc-viewer": "node stage-rc-player.mjs && playwright test -c playwright.config.mjs mcp-app-rc-viewer.spec.mjs",
         "harness:ui-builder": "playwright test -c ui-builder.config.mjs",
         "harness:ui-builder-editor": "playwright test -c ui-builder-editor.config.mjs",
         "harness:ui-builder-evidence": "playwright test -c capture-evidence.config.mjs",

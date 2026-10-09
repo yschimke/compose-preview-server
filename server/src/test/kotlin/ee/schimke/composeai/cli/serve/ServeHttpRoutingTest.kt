@@ -2977,6 +2977,11 @@ class ServeHttpRoutingTest {
       assertEquals("text/javascript", r.body.contentType()?.let { "${it.type}/${it.subtype}" })
       val body = r.body.string()
       assertTrue(body.contains("RcdPlayer"), "the bundle exposes the RcdPlayer entry point")
+      // The published bundle wires a live custom host (camera, same-origin fetches) into every
+      // document; this server plays documents it did not write, so the inert-host shim must ride
+      // after it, once the bundle has defined the player class.
+      val shim = body.lastIndexOf("Object.defineProperty(Player.prototype, \"customHost\"")
+      assertTrue(shim > body.indexOf("window.RC = {"), "the inert-host shim follows the bundle")
       etag = r.header("ETag") ?: ""
       assertTrue(etag.isNotEmpty(), "carries a content-hash ETag")
     }
