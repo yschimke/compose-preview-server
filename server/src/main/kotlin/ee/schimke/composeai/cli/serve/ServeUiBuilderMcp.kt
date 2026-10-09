@@ -12,6 +12,10 @@ import ee.schimke.composeai.uibuilder.guidelines.DesignGuidelinePrompt
 import ee.schimke.composeai.uibuilder.guidelines.DesignGuidelineRecord
 import ee.schimke.composeai.uibuilder.guidelines.DesignGuidelineRequest
 import ee.schimke.composeai.uibuilder.guidelines.DesignGuidelineRuleSet
+import ee.schimke.composeai.uibuilder.guidelines.GuidelineEvidenceOffer
+import ee.schimke.composeai.uibuilder.guidelines.JEV_DECISION_MODEL
+import ee.schimke.composeai.uibuilder.guidelines.plan
+import ee.schimke.composeai.uibuilder.guidelines.wanted
 import ee.schimke.composeai.uibuilder.protocol.ApplyOperationRequestV1
 import ee.schimke.composeai.uibuilder.protocol.CatalogReferenceV1
 import ee.schimke.composeai.uibuilder.protocol.CatalogsResponseV1
@@ -213,6 +217,12 @@ class ServeUiBuilderMcp(
   /** How long a prompt waits for frames it has no picture of yet; the rest are left out. */
   private val guidelinePictureBudgetMillis: Long =
     DEFAULT_GUIDELINES_PICTURE_BUDGET_SECONDS * 1_000,
+  /**
+   * Each builder catalog's own guidelines (`ui-builder.guidelines.json`): a design pinned to a
+   * catalog that publishes them is asked that catalog's rules and shown its pictures; any other
+   * falls back to the bundled rules. Null keeps every design on the bundled rules.
+   */
+  private val catalogGuidelines: ServeCatalogGuidelines? = null,
 ) {
 
   /** Revisions, restore, fork and diff; see [ServeUiBuilderHistoryTools]. */
@@ -2508,6 +2518,8 @@ class ServeUiBuilderMcp(
             // A stored design at its stored revision, so its frames are kept and its source is the
             // export route's; a dry run or a loose document is neither.
             storedDesignId = designId.takeIf { explicit == null && rawOperations == null },
+            triage = true,
+            nodeBounds = render?.let(::renderedBounds),
           )
         if (rendered && request.platform != null && request.pictures.isEmpty()) {
           skipped +=
@@ -2528,6 +2540,8 @@ class ServeUiBuilderMcp(
                 checked.nodes.keys,
                 outcome.model,
                 lane.minConfidence,
+                known = outcome.askedRules + guidelineRules(checked),
+                served = outcome.served,
               )
             // Only a stored design's current revision is recorded: a dry run or a loose document
             // is not the design anybody else will open.
@@ -2712,30 +2726,130 @@ class ServeUiBuilderMcp(
     components: List<ComponentCapabilityV1>? = null,
     /** The stored design [document] is a revision of; null for a loose or dry-run document. */
     storedDesignId: String? = null,
+    /**
+     * Ask Jev first which extra evidence would help, and gather it: a dark or large-font render,
+     * the accessibility tree. Only a check that is about to spend the key does; a prompt shown to a
+     * person or an agent stays the plain first pass.
+     */
+    triage: Boolean = false,
+    /** The node boxes of a native render already made, for the accessibility evidence. */
+    nodeBounds: UiBuilderAccessibilityCheck.Rendered? = null,
   ): DesignGuidelineRequest {
-    val platform = DesignGuidelinePrompt.platformOf(document.catalogPin.systemId)
-    val drawn =
-      if (withRenders && platform != null) {
-        guidelinePictures(
-          document,
-          platform,
-          devicePng,
-          components ?: pinnedCatalog(document, actor)?.components,
-          storedDesignId,
-          actor,
+    val catalogId = document.catalogPin.systemId
+    val own = catalogGuidelines?.forCatalog(catalogId)
+    val platform = own?.guidelines?.platform ?: DesignGuidelinePrompt.platformOf(catalogId)
+    val encoded =
+      UI_BUILDER_JSON.encodeToJsonElement(DesignDocumentV1.serializer(), document).jsonObject
+    // TODO(contracts 3.22.0): pass `document.environment.remoteProfile` once this host's contracts
+    // pin carries it; until then a rule written for one Remote Compose profile is not asked.
+    val profile: String? = null
+    fun build(pictures: List<DesignGuidelinePicture>, source: String?): DesignGuidelineRequest =
+      if (own != null) {
+        ServeUiBuilderGuidelines.prepare(
+          own.guidelines,
+          designId = document.id,
+          revision = document.revision.toInt(),
+          document = encoded,
+          pictures = pictures,
+          source = source,
+          profile = profile,
+          rulesSource = ServeCatalogGuidelines.routeFor(catalogId),
         )
-      } else GuidelinePictures(emptyList(), emptyList(), emptyList())
+      } else {
+        ServeUiBuilderGuidelines.prepare(
+          designId = document.id,
+          revision = document.revision.toInt(),
+          document = encoded,
+          pictures = pictures,
+          source = source,
+        )
+      }
+    val frames =
+      if (withRenders && platform != null) {
+        guidelineFramesFor(
+            document,
+            platform,
+            components ?: pinnedCatalog(document, actor)?.components,
+            own?.guidelines,
+          )
+          .toMutableList()
+      } else mutableListOf()
     val source =
       if (withSource && platform != null) composeSource(document, actor, storedDesignId) else null
+    val triageNotes = mutableListOf<String>()
+    var accessibility: String? = null
+    val lane = guidelines
+    if (triage && withRenders && platform != null && lane != null && lane.triageEnabled) {
+      // The text Jev reads is the full first pass, visual rules included: a probe picture with no
+      // bytes stands in for the renders, so no rule is dropped for want of one.
+      val probe =
+        build(
+          listOf(
+            DesignGuidelinePicture.device(
+              document.environment.widthDp,
+              document.environment.heightDp,
+              null,
+            )
+          ),
+          source,
+        )
+      val probabilities = lane.triage(probe)
+      if (probabilities == null) {
+        triageNotes +=
+          "Jev ($JEV_DECISION_MODEL) did not answer the evidence triage in time, so no extra " +
+            "evidence was gathered."
+      } else {
+        val wanted = GuidelineEvidenceOffer.DEFAULTS.wanted(probabilities)
+        triageNotes +=
+          "Jev ($JEV_DECISION_MODEL) judged from the design's text which extra evidence would " +
+            "help: " +
+            GuidelineEvidenceOffer.DEFAULTS.joinToString { offer ->
+              offer.key +
+                " " +
+                String.format(java.util.Locale.ROOT, "%.2f", probabilities[offer.key] ?: 0.0)
+            } +
+            "; gathered: " +
+            (wanted.joinToString { it.key }.ifEmpty { "none" }) +
+            "."
+        wanted.forEach { offer ->
+          when (offer.key) {
+            GuidelineEvidenceOffer.DARK_THEME.key ->
+              frames +=
+                evidenceFrame(
+                  document,
+                  DARK_THEME_PICTURE,
+                  mapOf("theme" to JsonPrimitive("dark")),
+                  "the same design in the dark theme, at its own size, for colour and contrast.",
+                )
+            GuidelineEvidenceOffer.LARGE_FONT.key ->
+              frames +=
+                evidenceFrame(
+                  document,
+                  LARGE_FONT_PICTURE,
+                  mapOf("fontScale" to JsonPrimitive(LARGE_FONT_SCALE)),
+                  "the same design at font scale $LARGE_FONT_SCALE, for text that could " +
+                    "truncate, overlap or clip as it grows.",
+                )
+            GuidelineEvidenceOffer.A11Y_HIERARCHY.key ->
+              accessibility =
+                nodeBounds?.let(::accessibilityText)
+                  ?: null.also {
+                    triageNotes +=
+                      "The accessibility tree was asked for but no native render's inspection " +
+                        "was at hand, so it is not attached."
+                  }
+          }
+        }
+      }
+    }
+    val drawn =
+      if (frames.isNotEmpty()) {
+        guidelinePictures(document, frames, devicePng, storedDesignId, actor)
+      } else GuidelinePictures(emptyList(), emptyList(), emptyList())
     val request =
-      ServeUiBuilderGuidelines.prepare(
-        designId = document.id,
-        revision = document.revision.toInt(),
-        document =
-          UI_BUILDER_JSON.encodeToJsonElement(DesignDocumentV1.serializer(), document).jsonObject,
-        pictures = drawn.pictures,
-        source = source,
-      )
+      build(drawn.pictures, source).let { built ->
+        accessibility?.let { built.copy(userText = built.userText + "\n\n" + it) } ?: built
+      }
     val notes =
       drawn.pending.map { frame ->
         "The ${frameName(frame)} is still being drawn; ask again in a minute to include it."
@@ -2743,9 +2857,39 @@ class ServeUiBuilderMcp(
         drawn.mismatched.map { frame ->
           "The ${frameName(frame)} is left out: the renderer drew the design at a size other " +
             "than ${frame.widthDp}×${frame.heightDp}dp, so it would not show what it claims to."
-        }
+        } +
+        triageNotes
     return if (notes.isEmpty()) request else request.copy(provenance = request.provenance + notes)
   }
+
+  /** An extra picture of [document] at its own size with [environment] written over it. */
+  private fun evidenceFrame(
+    document: DesignDocumentV1,
+    kind: String,
+    environment: Map<String, JsonPrimitive>,
+    description: String,
+  ): DesignGuidelineFrame =
+    DesignGuidelineFrame(
+      kind,
+      document.environment.widthDp,
+      document.environment.heightDp,
+      environment,
+      description,
+    )
+
+  /** A native render's node boxes as text: what the accessibility evidence attaches. */
+  private fun accessibilityText(rendered: UiBuilderAccessibilityCheck.Rendered): String =
+    buildString {
+      append("Accessibility evidence (node bounds from a native render, in dp):\n")
+      rendered.boxes.entries
+        .sortedBy { it.key }
+        .forEach { (nodeId, box) ->
+          fun dp(px: Int) = String.format(java.util.Locale.ROOT, "%.1f", px / rendered.pxPerDp)
+          append("- ").append(nodeId).append(": x=").append(dp(box.x)).append(" y=")
+          append(dp(box.y)).append(" w=").append(dp(box.width)).append(" h=")
+          append(dp(box.height)).append('\n')
+        }
+    }
 
   /** The pictures a prompt attaches, and the frames it could not. */
   private class GuidelinePictures(
@@ -2771,13 +2915,11 @@ class ServeUiBuilderMcp(
    */
   private suspend fun guidelinePictures(
     document: DesignDocumentV1,
-    platform: String,
+    frames: List<DesignGuidelineFrame>,
     devicePng: ByteArray?,
-    components: List<ComponentCapabilityV1>?,
     storedDesignId: String?,
     actor: AuthenticatedUiBuilderActor,
   ): GuidelinePictures {
-    val frames = guidelineFramesFor(document, platform, components)
     val cache = guidelineFrames
     val drawn: List<Pair<DesignGuidelineFrame, ByteArray>>
     val pending: List<DesignGuidelineFrame>
@@ -2837,11 +2979,35 @@ class ServeUiBuilderMcp(
     document: DesignDocumentV1,
     platform: String,
     components: List<ComponentCapabilityV1>?,
+    /** The catalog's own guidelines, whose frames replace the built-in plan when present. */
+    own: ee.schimke.composeai.uibuilder.guidelines.CatalogGuidelines? = null,
   ): List<DesignGuidelineFrame> {
     val scrollable =
       components.orEmpty().filter { SCROLLABLE_TRAIT in it.traits }.map { it.componentId }.toSet()
     val scrolls = document.nodes.values.any { it.componentId in scrollable }
-    return DesignGuidelineFrames.plan(document.toUiBuilderDocument(), platform, scrolls)
+    return if (own != null && own.frames.isNotEmpty()) {
+      DesignGuidelineFrames.plan(document.toUiBuilderDocument(), own, scrolls)
+    } else {
+      DesignGuidelineFrames.plan(document.toUiBuilderDocument(), platform, scrolls)
+    }
+  }
+
+  /** The rules a result for [document] is read against: its catalog's own, then the bundled set. */
+  private fun guidelineRules(document: DesignDocumentV1) =
+    guidelineRuleSet(document.catalogPin.systemId).rules
+
+  private fun guidelineRuleSet(catalogId: String): DesignGuidelineRuleSet =
+    catalogGuidelines?.ruleSetFor(catalogId) ?: DesignGuidelineRuleSet.Bundled
+
+  /** [guidelineRuleSet] for [designId]'s catalog, as the record route validates against. */
+  internal suspend fun guidelinesRuleSet(
+    designId: String,
+    actor: AuthenticatedUiBuilderActor,
+  ): DesignGuidelineRuleSet {
+    val snapshot =
+      execute(GetSnapshotRequestV1(designId = designId, revision = null), actor)
+        as? UiBuilderServiceResponse.Snapshot ?: return DesignGuidelineRuleSet.Bundled
+    return guidelineRuleSet(snapshot.snapshot.state.document.catalogPin.systemId)
   }
 
   /**
@@ -2856,9 +3022,11 @@ class ServeUiBuilderMcp(
       execute(GetSnapshotRequestV1(designId = designId, revision = null), actor)
         as? UiBuilderServiceResponse.Snapshot ?: return null
     val document = snapshot.snapshot.state.document
-    val platform = DesignGuidelinePrompt.platformOf(document.catalogPin.systemId) ?: return null
+    val own = catalogGuidelines?.forCatalog(document.catalogPin.systemId)?.guidelines
+    val platform =
+      own?.platform ?: DesignGuidelinePrompt.platformOf(document.catalogPin.systemId) ?: return null
     return document to
-      guidelineFramesFor(document, platform, pinnedCatalog(document, actor)?.components)
+      guidelineFramesFor(document, platform, pinnedCatalog(document, actor)?.components, own)
   }
 
   init {
@@ -2874,6 +3042,8 @@ class ServeUiBuilderMcp(
       DesignGuidelinePicture.TABLET -> "tablet picture"
       DesignGuidelinePicture.WIDGET_SAMSUNG -> "Samsung widget picture"
       DesignGuidelinePicture.WIDGET_PIXEL_WATCH -> "Pixel Watch widget picture"
+      DARK_THEME_PICTURE -> "dark theme picture"
+      LARGE_FONT_PICTURE -> "large font picture"
       else -> "${frame.kind} picture"
     } + " (${frame.widthDp}×${frame.heightDp}dp)"
 
@@ -2896,7 +3066,13 @@ class ServeUiBuilderMcp(
           rulesVersion = outcome.rulesVersion,
           asked = outcome.asked,
           verdicts = outcome.verdicts,
+          servedModel = outcome.served.model,
+          provider = outcome.served.provider,
+          costUsd = outcome.served.costUsd,
+          generationId = outcome.served.generationId,
+          routing = outcome.served.routing,
         ),
+        guidelineRuleSet(document.catalogPin.systemId),
       )
     }
       .getOrElse {
@@ -3028,6 +3204,7 @@ class ServeUiBuilderMcp(
         withSource = true,
         components = pinnedCatalog(document, actor)?.components,
         storedDesignId = designId,
+        triage = true,
       )
     return when (val outcome = lane.check(request)) {
       is UiBuilderGuidelineOutcome.Checked ->
@@ -3068,7 +3245,13 @@ class ServeUiBuilderMcp(
         as? UiBuilderServiceResponse.Snapshot ?: return null
     val document = snapshot.snapshot.state.document
     val record = withContext(Dispatchers.IO) { store.read(designId) }
-    return UiBuilderGuidelinesV1.of(designId, document.revision, document.nodes.keys, record)
+    return UiBuilderGuidelinesV1.of(
+      designId,
+      document.revision,
+      document.nodes.keys,
+      record,
+      known = guidelineRules(document),
+    )
   }
 
   private suspend fun getGuidelines(args: JsonObject, actor: AuthenticatedUiBuilderActor): String {
@@ -3089,6 +3272,7 @@ class ServeUiBuilderMcp(
     if (!service.canRead(actor, designId)) {
       throw McpRequestException("no design `$designId` this actor can read")
     }
+    val rules = guidelinesRuleSet(designId, actor)
     val record =
       try {
         UI_BUILDER_JSON.decodeFromJsonElement(
@@ -3097,8 +3281,7 @@ class ServeUiBuilderMcp(
             args.filterKeys { it in RECORD_GUIDELINES_FIELDS } +
               mapOf(
                 "revision" to (args["revision"] ?: JsonPrimitive(-1)),
-                "rulesVersion" to
-                  (args["rulesVersion"] ?: JsonPrimitive(DesignGuidelineRuleSet.Bundled.version)),
+                "rulesVersion" to (args["rulesVersion"] ?: JsonPrimitive(rules.version)),
               )
           ),
         )
@@ -3107,7 +3290,7 @@ class ServeUiBuilderMcp(
       }
     when (
       val result =
-        withContext(Dispatchers.IO) { store.record(designId, ranBy = actor.actorId, record) }
+        withContext(Dispatchers.IO) { store.record(designId, ranBy = actor.actorId, record, rules) }
     ) {
       is ServeUiBuilderGuidelineStore.GuidelineWriteResult.Refused ->
         throw McpRequestException(result.reason)
@@ -3948,6 +4131,11 @@ class ServeUiBuilderMcp(
      * top of the screen.
      */
     private const val SCROLLABLE_TRAIT = "ScrollableContent"
+
+    /** The extra pictures the Jev evidence triage can ask for; cached under these kinds. */
+    internal const val DARK_THEME_PICTURE = "dark-theme"
+    internal const val LARGE_FONT_PICTURE = "large-font"
+    private const val LARGE_FONT_SCALE = 1.5
 
     private const val CHECKS_ARGUMENT = "checks"
     private const val DEVICES_ARGUMENT = "devices"

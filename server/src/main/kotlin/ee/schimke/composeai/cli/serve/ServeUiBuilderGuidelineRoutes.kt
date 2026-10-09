@@ -3,7 +3,9 @@ package ee.schimke.composeai.cli.serve
 import ee.schimke.composeai.uibuilder.guidelines.DesignGuidelinePrompt
 import ee.schimke.composeai.uibuilder.guidelines.DesignGuidelineRecord
 import ee.schimke.composeai.uibuilder.guidelines.DesignGuidelineRequest
+import ee.schimke.composeai.uibuilder.guidelines.DesignGuidelineRule
 import ee.schimke.composeai.uibuilder.guidelines.DesignGuidelineRuleSet
+import ee.schimke.composeai.uibuilder.guidelines.describe
 import ee.schimke.composeai.uibuilder.service.AuthenticatedUiBuilderActor
 import ee.schimke.composeai.uibuilder.service.UiBuilderServicePort
 import io.ktor.http.ContentType
@@ -53,6 +55,8 @@ internal data class UiBuilderGuidelinesV1(
       currentRevision: Long,
       nodeIds: Set<String>,
       record: DesignGuidelineRecord?,
+      /** The rules the record may name: its catalog's own, then the bundled set. */
+      known: List<DesignGuidelineRule> = DesignGuidelineRuleSet.Bundled.rules,
     ): UiBuilderGuidelinesV1 {
       if (record == null) {
         return UiBuilderGuidelinesV1(
@@ -72,13 +76,18 @@ internal data class UiBuilderGuidelinesV1(
           nodeIds,
           record.model,
           DesignGuidelinePrompt.DEFAULT_MIN_CONFIDENCE,
+          known = known,
+          served = record.served,
         )
       val unanswered = record.asked - record.verdicts.map { it.ruleId }.toSet()
       val broken = findings.map { it.code }.distinct().size
       return UiBuilderGuidelinesV1(
         summary =
           buildString {
-            append("Revision ").append(record.revision).append(", ").append(record.model)
+            append("Revision ").append(record.revision).append(", ")
+            append(
+              record.served.takeIf { it.model != null }?.describe(record.model) ?: record.model
+            )
             record.ranBy?.let { append(", run by ").append(it) }
             append(": ")
             append(
@@ -142,6 +151,11 @@ internal fun Route.installUiBuilderGuidelineRoutes(
       withRenders: Boolean,
       actor: AuthenticatedUiBuilderActor,
     ) -> ServeUiBuilderMcp.GuidelinesCheckResult,
+  /** The rules a recorded result for this design may name: its catalog's own and the bundled. */
+  rules: suspend (designId: String, actor: AuthenticatedUiBuilderActor) -> DesignGuidelineRuleSet =
+    { _, _ ->
+      DesignGuidelineRuleSet.Bundled
+    },
 ) {
   get(UI_BUILDER_GUIDELINES_ACCESS_PATH) {
     val (actor, _) =
@@ -218,10 +232,9 @@ internal fun Route.installUiBuilderGuidelineRoutes(
       call.authorizedGuidelinesDesign(service, authorization, UiBuilderRouteCapability.WRITE)
         ?: return@post
     val record = call.receiveGuidelinesBody(DesignGuidelineRecord.serializer()) ?: return@post
+    val known = rules(designId, actor)
     val result =
-      withContext(Dispatchers.IO) {
-        store.record(designId, ranBy = actor.actorId, record, DesignGuidelineRuleSet.Bundled)
-      }
+      withContext(Dispatchers.IO) { store.record(designId, ranBy = actor.actorId, record, known) }
     when (result) {
       is ServeUiBuilderGuidelineStore.GuidelineWriteResult.Refused ->
         call.respondGuidelinesError(HttpStatusCode.UnprocessableEntity, result.reason)
@@ -230,6 +243,43 @@ internal fun Route.installUiBuilderGuidelineRoutes(
       is ServeUiBuilderGuidelineStore.GuidelineWriteResult.Stored ->
         call.respondGuidelines(DesignGuidelineRecord.serializer(), result.record)
     }
+  }
+}
+
+/**
+ * `GET /api/ui-builder/v1/catalogs/{catalogId}/guidelines`: a builder catalog's own guidelines, as
+ * it published them (`ui-builder.guidelines.json`), or 404 for a catalog that publishes none. A
+ * prompt's `rules.source` links here. Read access only: the rules are the catalog's public
+ * guidance.
+ */
+internal fun Route.installUiBuilderCatalogGuidelinesRoute(
+  authorization: ServeUiBuilderAuthorization,
+  guidelines: ServeCatalogGuidelines,
+) {
+  get(UI_BUILDER_CATALOG_GUIDELINES_PATH) {
+    call.response.headers.append(HttpHeaders.CacheControl, "no-store")
+    when (authorization.authorize(call, UiBuilderRouteCapability.READ)) {
+      is UiBuilderAuthorizationDecision.Authorized -> Unit
+      UiBuilderAuthorizationDecision.Missing -> {
+        call.response.headers.append(HttpHeaders.WWWAuthenticate, "Bearer")
+        call.respondGuidelinesError(HttpStatusCode.Unauthorized, "authentication is required")
+        return@get
+      }
+      UiBuilderAuthorizationDecision.Forbidden -> {
+        call.respondGuidelinesError(HttpStatusCode.Forbidden, "UI-builder access is required")
+        return@get
+      }
+    }
+    val catalogId = call.parameters["catalogId"].orEmpty()
+    val loaded = guidelines.forCatalog(catalogId)
+    if (loaded == null) {
+      call.respondGuidelinesError(
+        HttpStatusCode.NotFound,
+        "catalog `$catalogId` publishes no guidelines",
+      )
+      return@get
+    }
+    call.respondText(loaded.raw, ContentType.Application.Json, HttpStatusCode.OK)
   }
 }
 
@@ -309,6 +359,8 @@ private suspend fun ApplicationCall.respondGuidelinesError(
 }
 
 internal const val UI_BUILDER_GUIDELINES_PATH = "/api/ui-builder/v1/designs/{designId}/guidelines"
+internal const val UI_BUILDER_CATALOG_GUIDELINES_PATH =
+  "/api/ui-builder/v1/catalogs/{catalogId}/guidelines"
 internal const val UI_BUILDER_GUIDELINES_PROMPT_PATH =
   "/api/ui-builder/v1/designs/{designId}/guidelines/prompt"
 internal const val UI_BUILDER_GUIDELINES_ACCESS_PATH =

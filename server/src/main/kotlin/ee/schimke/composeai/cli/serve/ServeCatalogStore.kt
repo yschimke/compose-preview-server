@@ -1965,6 +1965,14 @@ class ServeCatalogStore(
      * them, and a host that does not own it should not fetch what it will not read.
      */
     val templates: Map<String, String?> = emptyMap(),
+    /**
+     * The catalog's `ui-builder.guidelines.json`, read beside [file] from the same delivery commit;
+     * null when it publishes none. Fail-soft: [ServeCatalogGuidelines.accept] decides whether the
+     * bytes are guidelines for this catalog.
+     */
+    val guidelines: ByteArray? = null,
+    /** Where [guidelines] were read from. */
+    val guidelinesUrl: String? = null,
   )
 
   internal fun fetchUiBuilderCatalog(
@@ -2006,10 +2014,16 @@ class ServeCatalogStore(
     dir.mkdirs()
     val target = File(dir, UI_BUILDER_CATALOG_FILE)
     target.writeBytes(bytes)
+    // The catalog's own design guidance, published beside its builder catalog. Absent is the
+    // ordinary case (a catalog that has written none) and says nothing.
+    val guidelinesUrl = base + ServeCatalogGuidelines.siblingOf(declared)
+    val guidelines = runCatching { fetchCatalogAsset(guidelinesUrl) }.getOrNull()
     return PublishedUiBuilderCatalogAsset(
       file = target,
       runtimeId = catalog.uiBuilderRuntime?.takeIf { it.validateContract().isEmpty() }?.runtimeId,
       templates = if (templates) fetchUiBuilderTemplates(system, base, bytes) else emptyMap(),
+      guidelines = guidelines,
+      guidelinesUrl = guidelinesUrl.takeIf { guidelines != null },
     )
   }
 
