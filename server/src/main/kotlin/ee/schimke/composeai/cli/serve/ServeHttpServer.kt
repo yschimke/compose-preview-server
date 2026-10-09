@@ -1851,6 +1851,9 @@ class ServeHttpServer(
         // bundle does not vendor ([ServeGoogleFonts]). Ungated and CORS-open like the route above:
         // public font bytes, and the runtime frames that ask are sandboxed and credential-less.
         get("${ServeGoogleFonts.ROUTE}/{family}/{weight}") { handleGoogleFont() }
+        // A Noto slice Compose's web text fallback asks for when no loaded font has a glyph
+        // ([ServeNotoFallbackFonts]); gstatic itself is outside the page's `connect-src`.
+        get("${ServeNotoFallbackFonts.ROUTE}/{path...}") { handleNotoFallbackFont() }
 
         // The document lane (`--accept-docs`): ingest one **known document format** (Remote Compose
         // or Lottie — see [ServeDocFormats]) and hand back an expiring permalink that plays it in
@@ -4244,6 +4247,43 @@ class ServeHttpServer(
     }
     call.response.headers.append(HttpHeaders.CacheControl, "public, max-age=604800")
     call.respondBytes(bytes, ContentType.parse("font/ttf"))
+  }
+
+  /** The Noto fallback cache, present exactly when this host serves the UI builder. */
+  private val notoFallbackFonts: ServeNotoFallbackFonts? by lazy {
+    val dir = uiBuilderDir ?: return@lazy null
+    ServeNotoFallbackFonts.overHttp(dir, materialSymbolsHttpClient)
+  }
+
+  /**
+   * `GET /api/fonts/noto/{family}/v{n}/{file}.woff2`: the Noto slice Compose's text fallback would
+   * have fetched from `fonts.gstatic.com/s/` at that path. 404 for a path not in Compose's list,
+   * 502 when Google could not be reached — either way the glyph stays undrawn, as it was before the
+   * route.
+   */
+  private suspend fun RoutingContext.handleNotoFallbackFont() {
+    // CORS-open on every answer, for the same sandboxed runtime frames as [handleGoogleFont].
+    call.response.headers.append(HttpHeaders.AccessControlAllowOrigin, "*")
+    val fonts = notoFallbackFonts
+    val path = call.parameters.getAll("path").orEmpty().joinToString("/")
+    if (fonts == null || !fonts.knows(path)) {
+      call.respondText("not found", status = HttpStatusCode.NotFound)
+      return
+    }
+    val bytes =
+      try {
+        withContext(Dispatchers.IO) { fonts.font(path) }
+      } catch (e: Exception) {
+        call.respondText("could not fetch $path: ${e.message}", status = HttpStatusCode.BadGateway)
+        return
+      }
+    if (bytes == null) {
+      call.respondText("not found", status = HttpStatusCode.NotFound)
+      return
+    }
+    // A slice's path names its version, so its bytes never change.
+    call.response.headers.append(HttpHeaders.CacheControl, "public, max-age=31536000, immutable")
+    call.respondBytes(bytes, ContentType.parse("font/woff2"))
   }
 
   /** `GET /assets/serve/{version}/{name}`: static ServeWeb CSS/JS extracted from raw strings. */

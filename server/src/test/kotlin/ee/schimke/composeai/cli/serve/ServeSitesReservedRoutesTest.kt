@@ -56,6 +56,7 @@ class ServeSitesReservedRoutesTest {
       "ServeShareTarget.SHARED_PATH" to ServeShareTarget.SHARED_PATH,
       "ServeRcFonts.URL_BASE" to ServeRcFonts.URL_BASE,
       "ServeGoogleFonts.ROUTE" to ServeGoogleFonts.ROUTE,
+      "ServeNotoFallbackFonts.ROUTE" to ServeNotoFallbackFonts.ROUTE,
       "ServeAgentGrants.BASE_PATH" to ServeAgentGrants.BASE_PATH,
       "ServeAgentGrants.REQUEST_PATH" to ServeAgentGrants.REQUEST_PATH,
       "ServeAgentGrants.POLL_PATH" to ServeAgentGrants.POLL_PATH,
