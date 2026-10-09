@@ -159,7 +159,7 @@ function start() {
 
 const [html, bundle, bytes] = await Promise.all([
   fetch("/mcp-app/rc-viewer.html").then((r) => r.text()),
-  fetch("/server/src/main/resources/rc-player/bundle.js").then((r) => r.text()),
+  fetch("/server/build/generated/rc-player-js/rc-player/bundle.js").then((r) => r.text()),
   fixture
     ? fetch(fixture).then((r) => r.arrayBuffer()).then((b) => new Uint8Array(b))
     : Promise.resolve(new Uint8Array()),
