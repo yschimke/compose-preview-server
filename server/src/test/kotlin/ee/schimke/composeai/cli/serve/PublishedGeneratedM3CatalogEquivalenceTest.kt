@@ -1035,11 +1035,11 @@ class PublishedGeneratedM3CatalogEquivalenceTest {
 
   private companion object {
     /**
-     * The twenty-six published m3 components the generator cannot write, each with its first
-     * reason. **Eighty-two of the hundred and eight export.** Teaching the generator one of these
+     * The twenty-five published m3 components the generator cannot write, each with its first
+     * reason. **Eighty-three of the hundred and eight export.** Teaching the generator one of these
      * shortens the list, and the test above fails until it is shortened here.
      *
-     * Twenty-five are discovery's own "no call site" judgement — a member of a `Defaults` object, a
+     * Twenty-four are discovery's own "no call site" judgement — a member of a `Defaults` object, a
      * scope receiver, type parameters, not public, or a required parameter of a type no design
      * value becomes. Those are upstream API shapes rather than gaps here.
      *
@@ -1077,8 +1077,6 @@ class PublishedGeneratedM3CatalogEquivalenceTest {
           "no placeholder can be written for required parameter `state: CarouselState`",
         "m3/horizontal-uncontained-carousel" to
           "no placeholder can be written for required parameter `state: CarouselState`",
-        "m3/icon" to
-          "no placeholder can be written for required parameter `imageVector: ImageVector`",
         "m3/leading-button" to
           "a member of androidx.compose.material3.SplitButtonDefaults, so a call site needs an instance of it",
         "m3/list-detail-pane-scaffold" to

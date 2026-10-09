@@ -330,7 +330,10 @@ class ScreenGeneratorComposeExportExecutorTest {
       export(
         components = {
           ComponentRecordSource.Lookup.Found(
-            ScreenGeneratorScreenFixture.components().copy(schemaVersion = 99)
+            ScreenGeneratorScreenFixture.components()
+              .newBuilder()
+              .apply { schemaVersion = 99 }
+              .build()
           )
         }
       )

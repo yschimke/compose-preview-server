@@ -267,7 +267,11 @@ class RecordFreeComposeExportTest {
   fun `a published catalog on a schema this build will not generate from refuses by version`() {
     val ahead =
       ScreenGeneratorComposeExportExecutor(
-        { ComponentRecordSource.Lookup.Found(remoteM3Record.copy(schemaVersion = 99)) },
+        {
+          ComponentRecordSource.Lookup.Found(
+            remoteM3Record.newBuilder().apply { schemaVersion = 99 }.build()
+          )
+        },
         PACKAGE_NAME,
         publishedComponents = { publishedRemoteM3 },
       )

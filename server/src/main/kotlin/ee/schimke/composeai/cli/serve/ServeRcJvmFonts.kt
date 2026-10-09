@@ -15,12 +15,13 @@ import java.io.File
  * other players drew Roboto Flex correctly.
  *
  * The renderer looks for that directory at `-D[PROPERTY]`, else at
- * `<APP_HOME>/rc-player-wasm/fonts` — the CMP/Wasm player sidecar the compose-ai-tools CLI install
- * carries. This server's distribution carries no such sidecar (and the image lifts only
- * `lib-rcjvm/` and `lib-bta/` out of the CLI tarball), so on a server install the lookup came back
- * empty every time. The distribution now ships its own vendored faces as [PACKAGED_DIR] — the same
- * `assets/rc-fonts` directory the offline parity harness and the served viewer read, byte-identical
- * to the CLI's `rc-player-wasm/fonts` — and [installPackaged] points the renderer at them.
+ * `<APP_HOME>/rc-player-wasm/fonts` — the CMP/Wasm player's own fonts. This server's distribution
+ * once carried no player at all (and the image lifts only `lib-rcjvm/` and `lib-bta/` out of the
+ * CLI tarball), so on a server install the lookup came back empty every time. It now ships the
+ * player, and [PACKAGED_DIR] is that player's `fonts/`: the manifest and faces rc-players vendors
+ * (variable faces since 2.3.0), so the server-side and in-browser players resolve every family from
+ * the same files. [installPackaged] points the renderer at them explicitly rather than leaning on
+ * the worker's fallback.
  *
  * Offline and deterministic by construction: the faces are files in the install, so a render never
  * fetches and two hosts on the same release draw the same glyphs.
@@ -33,16 +34,20 @@ internal object ServeRcJvmFonts {
    */
   const val PROPERTY: String = "composeai.rcjvm.fontsDir"
 
-  /** The distribution directory holding the manifest and faces (`server/build.gradle.kts`). */
-  const val PACKAGED_DIR: String = "rc-fonts"
+  /**
+   * The distribution directory holding the manifest and faces: the CMP/Wasm player's own `fonts/`
+   * (`stageRcPlayerWasm` in `server/build.gradle.kts`).
+   */
+  const val PACKAGED_DIR: String = "rc-player-wasm/fonts"
 
   /** The manifest a directory must hold to count; the worker ignores a directory without one. */
   const val MANIFEST: String = "fonts.json"
 
   /**
-   * The packaged fonts directory: `<appHome>/rc-fonts` when [appHome] is set, else the install
-   * inferred from [installDir]. Null when neither holds a [MANIFEST] — a directory without one
-   * would be passed to the worker and silently ignored, which is the failure this exists to end.
+   * The packaged fonts directory: `<appHome>/rc-player-wasm/fonts` when [appHome] is set, else the
+   * install inferred from [installDir]. Null when neither holds a [MANIFEST] — a directory without
+   * one would be passed to the worker and silently ignored, which is the failure this exists to
+   * end.
    */
   fun packagedDir(
     appHome: String? = System.getProperty("composeai.cli.appHome") ?: System.getenv("APP_HOME"),

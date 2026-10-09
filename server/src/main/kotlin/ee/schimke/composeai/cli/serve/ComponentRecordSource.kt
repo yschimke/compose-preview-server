@@ -139,7 +139,8 @@ internal class ComponentRecordSource(
       foundation?.components.orEmpty().filterNot { candidate ->
         candidate.canonicalId in taken || candidate.componentIds.any { it in claimed }
       }
-    return if (extra.isEmpty()) this else copy(components = components + extra)
+    return if (extra.isEmpty()) this
+    else newBuilder().apply { components = this@withFoundation.components + extra }.build()
   }
 
   private companion object {

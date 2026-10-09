@@ -17,10 +17,10 @@ import kotlinx.serialization.json.jsonPrimitive
 /**
  * The fonts the server-side cmp-jvm lane resolves `google:Roboto Flex` through.
  *
- * The first test is the regression: it reads the directory the distribution packages as `rc-fonts/`
- * (`stageRcJvmFonts`), not the source tree, because the outage was a server install that carried no
- * manifest at all — every remote-m3 card then drew in the worker's fallback sans, 26–31% off the
- * published captures, and nothing reported a failure.
+ * The first test is the regression: it reads the fonts the distribution packages inside
+ * `rc-player-wasm/` (`stageRcPlayerWasm`), not a source tree, because the outage was a server
+ * install that carried no manifest at all — every remote-m3 card then drew in the worker's fallback
+ * sans, 26–31% off the published captures, and nothing reported a failure.
  */
 class ServeRcJvmFontsTest {
 
@@ -44,11 +44,11 @@ class ServeRcJvmFontsTest {
       File(
         assertNotNull(
           System.getProperty("composeai.test.rcJvmFontsDir"),
-          "the test task passes the staged rc-fonts directory",
+          "the test task passes the staged player fonts directory",
         )
       )
     val manifest = File(packaged, ServeRcJvmFonts.MANIFEST)
-    assertTrue(manifest.isFile, "the distribution's rc-fonts/ carries no fonts.json: $packaged")
+    assertTrue(manifest.isFile, "the distribution's player fonts carry no fonts.json: $packaged")
 
     val families =
       Json.parseToJsonElement(manifest.readText()).jsonObject.getValue("families").jsonArray.map {
@@ -72,7 +72,7 @@ class ServeRcJvmFontsTest {
   }
 
   @Test
-  fun `a server install resolves its packaged rc-fonts directory`() {
+  fun `a server install resolves its packaged player fonts directory`() {
     val install = createTempDirectory("rcjvm-install").toFile()
     try {
       assertNull(ServeRcJvmFonts.packagedDir(appHome = null, installDir = install))
@@ -99,7 +99,7 @@ class ServeRcJvmFontsTest {
 
   @Test
   fun `installing points the cmp-jvm worker at the packaged faces`() {
-    val packaged = File("/opt/compose-preview-server/rc-fonts")
+    val packaged = File("/opt/compose-preview-server/rc-player-wasm/fonts")
     assertEquals(packaged, ServeRcJvmFonts.installPackaged(packaged))
     assertEquals(packaged.absolutePath, System.getProperty(ServeRcJvmFonts.PROPERTY))
   }
@@ -109,7 +109,7 @@ class ServeRcJvmFontsTest {
     System.setProperty(ServeRcJvmFonts.PROPERTY, "/srv/my-fonts")
     assertEquals(
       File("/srv/my-fonts"),
-      ServeRcJvmFonts.installPackaged(File("/opt/compose-preview-server/rc-fonts")),
+      ServeRcJvmFonts.installPackaged(File("/opt/compose-preview-server/rc-player-wasm/fonts")),
     )
     assertEquals("/srv/my-fonts", System.getProperty(ServeRcJvmFonts.PROPERTY))
   }

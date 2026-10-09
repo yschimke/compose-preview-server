@@ -94,7 +94,7 @@ class ComponentRecordPacksTest {
   }
 
   private fun parameter(name: String, typeFqn: String) =
-    TargetParameter(
+    targetParameter(
       name = name,
       type = typeFqn.substringAfterLast('.'),
       typeFqn = typeFqn,
@@ -203,7 +203,7 @@ class ComponentRecordPacksTest {
   companion object {
     /** Confetti's Wear record, as far as a pack reads it; see the Wear projection test above. */
     fun wearRecord(): ComponentRecordFile =
-      ComponentRecordFile(
+      componentRecordFile(
         module = "wearApp",
         variant = "debug",
         components =
@@ -224,8 +224,8 @@ class ComponentRecordPacksTest {
               parameters =
                 listOf(
                   modifier(),
-                  TargetParameter(name = "onClick", type = "() -> Unit", hasDefault = true),
-                  TargetParameter(
+                  targetParameter(name = "onClick", type = "() -> Unit", hasDefault = true),
+                  targetParameter(
                     name = "enabled",
                     type = "Boolean",
                     typeFqn = "kotlin.Boolean",
@@ -239,14 +239,14 @@ class ComponentRecordPacksTest {
               "SessionCard",
               parameters =
                 listOf(
-                  TargetParameter(
+                  targetParameter(
                     name = "session",
                     type = "SessionDetails?",
                     typeFqn = "dev.johnoreilly.confetti.fragment.SessionDetails",
                     nullable = true,
                   ),
-                  TargetParameter(name = "sessionSelected", type = "(String) -> Unit"),
-                  TargetParameter(
+                  targetParameter(name = "sessionSelected", type = "(String) -> Unit"),
+                  targetParameter(
                     name = "isBookmarked",
                     type = "Boolean",
                     typeFqn = "kotlin.Boolean",
@@ -261,12 +261,12 @@ class ComponentRecordPacksTest {
               parameters =
                 listOf(
                   modifier(),
-                  TargetParameter(
+                  targetParameter(
                     name = "speaker",
                     type = "SessionSpeakerDetails",
                     typeFqn = "dev.johnoreilly.confetti.fragment.SessionSpeakerDetails",
                   ),
-                  TargetParameter(name = "navigateToSpeaker", type = "(String) -> Unit"),
+                  targetParameter(name = "navigateToSpeaker", type = "(String) -> Unit"),
                   transformation(),
                 ),
               call = null,
@@ -279,13 +279,13 @@ class ComponentRecordPacksTest {
 
     private fun stringHeader(name: String): List<TargetParameter> =
       listOf(
-        TargetParameter(name = name, type = "String", typeFqn = "kotlin.String"),
+        targetParameter(name = name, type = "String", typeFqn = "kotlin.String"),
         modifier(),
         transformation(),
       )
 
     private fun modifier(): TargetParameter =
-      TargetParameter(
+      targetParameter(
         name = "modifier",
         type = "Modifier",
         typeFqn = "androidx.compose.ui.Modifier",
@@ -293,7 +293,7 @@ class ComponentRecordPacksTest {
       )
 
     private fun transformation(): TargetParameter =
-      TargetParameter(
+      targetParameter(
         name = "transformation",
         type = "SurfaceTransformation?",
         typeFqn = "androidx.wear.compose.material3.SurfaceTransformation",
@@ -317,7 +317,7 @@ class ComponentRecordPacksTest {
       )
 
     fun record(): ComponentRecordFile =
-      ComponentRecordFile(
+      componentRecordFile(
         module = "confetti",
         variant = "debug",
         components =
@@ -326,61 +326,61 @@ class ComponentRecordPacksTest {
               "SessionCard",
               parameters =
                 listOf(
-                  TargetParameter(name = "title", type = "String", typeFqn = "kotlin.String"),
-                  TargetParameter(
+                  targetParameter(name = "title", type = "String", typeFqn = "kotlin.String"),
+                  targetParameter(
                     name = "count",
                     type = "Int",
                     typeFqn = "kotlin.Int",
                     hasDefault = true,
                   ),
-                  TargetParameter(
+                  targetParameter(
                     name = "highlighted",
                     type = "Boolean?",
                     typeFqn = "kotlin.Boolean",
                     nullable = true,
                   ),
-                  TargetParameter(
+                  targetParameter(
                     name = "modifier",
                     type = "Modifier",
                     typeFqn = "androidx.compose.ui.Modifier",
                     hasDefault = true,
                   ),
-                  TargetParameter(name = "onClick", type = "() -> Unit", hasDefault = true),
-                  TargetParameter(
+                  targetParameter(name = "onClick", type = "() -> Unit", hasDefault = true),
+                  targetParameter(
                     name = "speaker",
                     type = "Speaker?",
                     typeFqn = "dev.confetti.model.Speaker",
                     hasDefault = true,
                     nullable = true,
                   ),
-                  TargetParameter(
+                  targetParameter(
                     name = "content",
                     type = "@Composable () -> Unit",
                     composableSlot = true,
                     hasDefault = true,
                   ),
                 ),
-              slots = listOf(ComponentSlot(name = "content", required = false)),
+              slots = listOf(componentSlot(name = "content", required = false)),
               call = "SessionCard(title = \"\")",
             ),
             project(
               "SpeakerRow",
               parameters =
-                listOf(TargetParameter(name = "name", type = "String", typeFqn = "kotlin.String")),
+                listOf(targetParameter(name = "name", type = "String", typeFqn = "kotlin.String")),
               call = "SpeakerRow(name = \"\")",
             ),
-            ComponentRecord(
+            componentRecord(
               canonicalId = "confetti/androidx.compose.material3.TextKt.Text",
               componentIds = emptyList(),
               symbol =
-                ComponentSymbol(
+                componentSymbol(
                   jvmOwner = "androidx.compose.material3.TextKt",
                   callable = "androidx.compose.material3.Text",
                   name = "Text",
                   origin = ComponentOrigin.LIBRARY,
                 ),
               code =
-                ComponentCode(
+                componentCode(
                   call = "Text(text = \"\")",
                   imports = listOf("androidx.compose.material3.Text"),
                 ),
@@ -408,11 +408,11 @@ class ComponentRecordPacksTest {
       call: String?,
       refusedReason: String? = null,
     ): ComponentRecord =
-      ComponentRecord(
+      componentRecord(
         canonicalId = "confetti/$owner.$name",
         componentIds = emptyList(),
         symbol =
-          ComponentSymbol(
+          componentSymbol(
             jvmOwner = owner,
             callable = "${owner.substringBeforeLast('.')}.$name",
             name = name,
@@ -421,7 +421,7 @@ class ComponentRecordPacksTest {
         parameters = parameters,
         slots = slots,
         code =
-          ComponentCode(
+          componentCode(
             call = call,
             imports =
               if (call == null) emptyList() else listOf("${owner.substringBeforeLast('.')}.$name"),
@@ -431,3 +431,71 @@ class ComponentRecordPacksTest {
       )
   }
 }
+
+// The contracts' record types keep their constructors internal and publish a builder each; these
+// read like the constructors the fixtures above were written against.
+
+private fun targetParameter(
+  name: String,
+  type: String,
+  typeFqn: String? = null,
+  hasDefault: Boolean = false,
+  nullable: Boolean = false,
+  composableSlot: Boolean = false,
+): TargetParameter =
+  TargetParameter.Builder(name, type)
+    .apply {
+      typeFqn?.let { this.typeFqn = it }
+      this.hasDefault = hasDefault
+      this.nullable = nullable
+      this.composableSlot = composableSlot
+    }
+    .build()
+
+private fun componentSlot(name: String, required: Boolean): ComponentSlot =
+  ComponentSlot.Builder(name, required).build()
+
+private fun componentSymbol(
+  jvmOwner: String,
+  callable: String,
+  name: String,
+  origin: ComponentOrigin,
+): ComponentSymbol = ComponentSymbol.Builder(jvmOwner, callable, name, origin).build()
+
+private fun componentCode(
+  call: String?,
+  imports: List<String> = emptyList(),
+  refusedReason: String? = null,
+): ComponentCode =
+  ComponentCode.Builder()
+    .apply {
+      call?.let { this.call = it }
+      this.imports = imports
+      refusedReason?.let { this.refusedReason = it }
+    }
+    .build()
+
+private fun componentRecord(
+  canonicalId: String,
+  componentIds: List<String>,
+  symbol: ComponentSymbol,
+  parameters: List<TargetParameter> = emptyList(),
+  slots: List<ComponentSlot> = emptyList(),
+  code: ComponentCode,
+  signatureKnown: Boolean,
+): ComponentRecord =
+  ComponentRecord.Builder(canonicalId, symbol)
+    .apply {
+      this.componentIds = componentIds
+      this.parameters = parameters
+      this.slots = slots
+      this.code = code
+      this.signatureKnown = signatureKnown
+    }
+    .build()
+
+private fun componentRecordFile(
+  module: String,
+  variant: String,
+  components: List<ComponentRecord>,
+): ComponentRecordFile = ComponentRecordFile.Builder(module, variant, components).build()
