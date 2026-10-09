@@ -448,6 +448,82 @@ class ServeUiBuilderAgentErgonomicsTest {
   }
 
   @Test
+  fun `the editor can run the check on this host's key, once per revision, for allowed accounts`() {
+    // No lane: the editor is told to use its own key, and a check is refused with the reason.
+    val bare = start()
+    create(bare, cleanDocument())
+    val (bareAccess, bareAccessBody) =
+      http(bare, "GET", "/api/ui-builder/v1/designs/agent-screen/guidelines/access", null)
+    assertEquals(200, bareAccess, bareAccessBody)
+    val bareAnswer = Json.parseToJsonElement(bareAccessBody).jsonObject
+    assertEquals("false", bareAnswer["serverCheck"].toString())
+    assertTrue("no guidelines model" in bareAnswer.text("reason"), bareAccessBody)
+    val (refused, refusedBody) =
+      http(bare, "POST", "/api/ui-builder/v1/designs/agent-screen/guidelines/check", "")
+    assertEquals(403, refused, refusedBody)
+    bare.close()
+
+    // A lane the caller may spend: one model call however many ask at once, recorded as theirs.
+    val asked = java.util.concurrent.atomic.AtomicInteger()
+    val config = ServeUiBuilderGuidelinesConfig(apiKey = "sk-or-test", allowedUsers = setOf("a"))
+    val lane =
+      ServeUiBuilderGuidelines(
+        config,
+        ServeUiBuilderGuidelineAccess(config.allowedUsers, emptySet(), { _, _ -> false }),
+        transport = { _, _ ->
+          asked.incrementAndGet()
+          Thread.sleep(400)
+          OpenRouterTransport.Response(200, completion("mobile.touch-target-48dp", "fail"))
+        },
+      )
+    val server = start(directory = stateDirectory.resolve("server-check"), guidelines = lane)
+    create(server, cleanDocument())
+    val revision = revisionOf(server)
+    val (access, accessBody) =
+      http(server, "GET", "/api/ui-builder/v1/designs/agent-screen/guidelines/access", null)
+    assertEquals(200, access, accessBody)
+    val answer = Json.parseToJsonElement(accessBody).jsonObject
+    assertEquals("true", answer["serverCheck"].toString())
+    assertEquals(config.model, answer.text("model"))
+    assertFalse("sk-or" in accessBody)
+
+    val path = "/api/ui-builder/v1/designs/agent-screen/guidelines/check?revision=$revision"
+    val results =
+      java.util.concurrent.Executors.newFixedThreadPool(2).let { pool ->
+        try {
+          listOf(
+              pool.submit<Pair<Int, String>> { http(server, "POST", path, "") },
+              pool.submit<Pair<Int, String>> { http(server, "POST", path, "") },
+            )
+            .map { it.get() }
+        } finally {
+          pool.shutdown()
+        }
+      }
+    results.forEach { (status, body) -> assertEquals(200, status, body) }
+    assertEquals(1, asked.get(), "two editors asking at once spend the key once")
+    val record = Json.parseToJsonElement(results.first().second).jsonObject
+    assertEquals(OPERATOR_ACTOR, record.text("ranBy"))
+    assertEquals(OPERATOR_ACTOR, server.guidelineRecords.read("agent-screen")!!.ranBy)
+    val (read, readBody) =
+      http(server, "GET", "/api/ui-builder/v1/designs/agent-screen/guidelines", null)
+    assertEquals(200, read, readBody)
+    assertEquals(
+      revision.toString(),
+      Json.parseToJsonElement(readBody).jsonObject["revision"].toString(),
+    )
+
+    val (stale, staleBody) =
+      http(
+        server,
+        "POST",
+        "/api/ui-builder/v1/designs/agent-screen/guidelines/check?revision=${revision - 1}",
+        "",
+      )
+    assertEquals(409, stale, staleBody)
+  }
+
+  @Test
   fun `the guidelines record tools exist only with a store, and the prompt tool always`() {
     val server = start(withGuidelineRecords = false)
     val names = tools(server)

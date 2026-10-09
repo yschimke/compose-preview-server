@@ -322,6 +322,9 @@ internal class OkHttpOpenRouterTransport(
         .header("Authorization", "Bearer $apiKey")
         // OpenRouter's app attribution headers; neither carries anything about the caller.
         .header("X-Title", "Compose UI Builder guidelines check")
+        // Routing metadata in the body when the model is a router, so the record can name the
+        // model that answered rather than the router it was sent to.
+        .header("X-OpenRouter-Metadata", "enabled")
         .post(body.toRequestBody("application/json".toMediaType()))
         .build()
     return client.newCall(request).execute().use {
