@@ -14,29 +14,32 @@ import java.nio.file.StandardCopyOption
  * and runtime bundles redirect that fetch here instead (compose-ui-builder's
  * `routeFallbackFontsThroughHost`), as they do the families behind [ServeGoogleFonts].
  *
- * Bounded like that route: only a path shaped like a Noto slice ([isNotoSlice]) under
- * `fonts.gstatic.com/s/`, so no request makes this server fetch anything but Google's Noto files,
- * and each file is held to [ServeGoogleFonts.MAX_FONT_BYTES]. Not a committed list: Compose's own
- * list moves with every Compose release, and a slice it asks for that Google does not have is a 404
- * either way.
+ * Bounded like that route: only a path in the committed list of slices Compose knows ([slices],
+ * `noto-fallback-slices.txt`, read from the Compose release this repository pins), so the cache
+ * holds at most that list, a caller cannot make this server send gstatic a request for a path of
+ * its own invention, and the remembered misses are bounded by the same list. Each file is held to
+ * [ServeGoogleFonts.MAX_FONT_BYTES]. A slice a newer Compose asks for and the list lacks is a 404,
+ * and its glyph stays undrawn until the list is regenerated, as it was before the route existed.
  */
 internal class ServeNotoFallbackFonts(
   /** Where the files are kept, mirroring their gstatic paths. */
   val cacheDirectory: File,
+  /** The paths under [GSTATIC_BASE] this will fetch (`notosansmath/v18/….woff2`). */
+  private val slices: Set<String>,
   /**
    * The body of a GET; null when the server answered 4xx, and a throw for anything that is not an
    * answer — so an outage is a 502 now, never a cached "missing".
    */
   private val fetch: (url: String) -> ByteArray?,
 ) {
-  /** Paths Google answered no file for, so asking again costs nothing. */
+  /** Listed paths Google answered no file for, so asking again costs nothing. */
   private val missing = mutableSetOf<String>()
 
   /**
    * The slice at [path] (`notosansmath/v18/….woff2`), cached or fetched; null when there is none.
    */
   fun font(path: String): ByteArray? {
-    if (!isNotoSlice(path)) return null
+    if (!knows(path)) return null
     val cached = File(cacheDirectory, path)
     if (cached.isFile && cached.length() > 0) return cached.readBytes()
     synchronized(this) {
@@ -59,23 +62,31 @@ internal class ServeNotoFallbackFonts(
     }
   }
 
+  /** Whether [path] is a slice this will serve. */
+  fun knows(path: String): Boolean = path in slices
+
   companion object {
     const val ROUTE: String = "/api/fonts/noto"
 
     /** Compose's `FONT_FALLBACK_BASE_URL`. */
     const val GSTATIC_BASE: String = "https://fonts.gstatic.com/s/"
 
-    /**
-     * `<family>/v<n>/<file>.woff2` with a Noto family: the shape of every path Compose asks for
-     * (`notocoloremoji/v39/Yq6P-….0.woff2`). No `..`, no other host, no other directory depth.
-     */
-    private val NOTO_SLICE = Regex("noto[a-z0-9]+/v[0-9]+/[A-Za-z0-9_-]+(\\.[0-9]+)?\\.woff2")
-
-    fun isNotoSlice(path: String): Boolean = NOTO_SLICE.matches(path)
+    /** Compose's slice list, `noto-fallback-slices.txt`; its header says how to regenerate it. */
+    val composeSlices: Set<String> by lazy {
+      ServeNotoFallbackFonts::class
+        .java
+        .classLoader
+        .getResourceAsStream("ee/schimke/composeai/cli/serve/noto-fallback-slices.txt")
+        ?.bufferedReader()
+        ?.useLines { lines ->
+          lines.map { it.trim() }.filter { it.isNotEmpty() && !it.startsWith("#") }.toSet()
+        }
+        .orEmpty()
+    }
 
     /** The cache under the UI builder's app directory [dir], fetching through [client]. */
     fun overHttp(dir: File, client: okhttp3.OkHttpClient): ServeNotoFallbackFonts =
-      ServeNotoFallbackFonts(cacheDirectory = File(dir, "noto-fallback-fonts")) { url ->
+      ServeNotoFallbackFonts(File(dir, "noto-fallback-fonts"), composeSlices) { url ->
         client.newCall(okhttp3.Request.Builder().url(url).build()).execute().use { response ->
           if (response.code in 400..499) return@use null
           check(response.isSuccessful) { "$url answered ${response.code}" }

@@ -4257,7 +4257,7 @@ class ServeHttpServer(
 
   /**
    * `GET /api/fonts/noto/{family}/v{n}/{file}.woff2`: the Noto slice Compose's text fallback would
-   * have fetched from `fonts.gstatic.com/s/` at that path. 404 for any other path, 502 when Google
+   * have fetched from `fonts.gstatic.com/s/` at that path. 404 for a path not in Compose's list, 502 when Google
    * could not be reached — either way the glyph stays undrawn, as it was before the route.
    */
   private suspend fun RoutingContext.handleNotoFallbackFont() {
@@ -4265,7 +4265,7 @@ class ServeHttpServer(
     call.response.headers.append(HttpHeaders.AccessControlAllowOrigin, "*")
     val fonts = notoFallbackFonts
     val path = call.parameters.getAll("path").orEmpty().joinToString("/")
-    if (fonts == null || !ServeNotoFallbackFonts.isNotoSlice(path)) {
+    if (fonts == null || !fonts.knows(path)) {
       call.respondText("not found", status = HttpStatusCode.NotFound)
       return
     }
