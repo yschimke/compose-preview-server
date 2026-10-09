@@ -15,7 +15,7 @@
         "verify": "npm run typecheck && npm run test && npm run build && node scripts/check-bundle-budgets.mjs && node scripts/check-committed-bundle.mjs"
     },
     "devDependencies": {
-        "@design-parity/known-differences": "1.5.0",
+        "@design-parity/known-differences": "1.7.0",
         "@happy-dom/global-registrator": "20.14.6",
         "@types/mocha": "10.0.10",
         "@types/node": "24.19.1",
