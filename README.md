@@ -160,6 +160,23 @@ After discovery, `find_previews_for_file` maps an absolute source path — or on
 registered workspace — to the preview URIs declared there. Both returned URIs can be passed
 directly to `render_preview`.
 
+### Design guidelines: `preview_guidelines_prompt`, `check_preview_guidelines`
+
+Two tools check previews against a catalog's design guidelines (`ui-builder.guidelines.json`, the
+module's `build/compose-previews/` copy unless `guidelines` names a file or URL), on the same
+`ee.schimke.composeai:design-guidelines` engine as the CLI's `compose-preview guidelines`. Both take
+`previews` (preview names, FQNs or `compose-preview://` URIs, judged as one batch), `guidelines` and
+`surface` (`screen`, `widget` or `component`).
+
+- **`preview_guidelines_prompt`** needs no key. It returns the batched request — the rules, each
+  preview's source and accessibility nodes, and the renders as image blocks — so an agent can judge
+  it with its own model.
+- **`check_preview_guidelines`** asks OpenRouter, with the key from `COMPOSE_PREVIEW_OPENROUTER_KEY`
+  (environment only; without it the tool says how to set it). `model` defaults to
+  `deepseek/deepseek-v4.1-flash` and `max_cost` (US dollars, default 0.10) caps the call. It returns
+  each preview's verdicts with the node ids and picture regions they point at, the model that
+  answered and the cost.
+
 ### `.uid` designs: `design_open`
 
 In ChatGPT or Codex desktop, opening a `.uid` UI Builder design opens it in the UI Builder editor

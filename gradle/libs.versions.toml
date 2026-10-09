@@ -249,11 +249,13 @@ composeai-preview-daemon = "3.15.0"
 # refuses a `remoteCall` by name.
 # 3.21.0 adds `RemoteComposeOverride.documentBase64` (compose-preview-contracts#145), the document a
 # shared `/d/<id>` page sends to the daemon for its AndroidX players.
-# 3.22.0 adds `DesignEnvironmentV1.remoteProfile` (compose-preview-contracts#147): the guidelines
-# check passes a design's Remote Compose profile from it. Not 3.23.0+ yet: those add
-# `component-catalog-protocol`, which moves the component-record types under compose-ai-tools
-# 2.38.0, and compose-ui-builder 3.100.0 was built against the old ones (`ComponentRecord.copy`).
-composeai-contracts = "3.22.0"
+# 3.22.0 added `DesignEnvironmentV1.remoteProfile` (compose-preview-contracts#147): the guidelines
+# check passes a design's Remote Compose profile from it. 3.24.0 (2026-10-09) is for the
+# `design-guidelines-protocol` types the local MCP server's preview guideline tools use directly
+# (batched requests, records, `GuidelineRegionV1`). 3.23.0+ moved the component-record types into
+# `component-catalog-protocol`; compose-ui-builder 3.101.0 already builds records through its
+# Builders (compose-ui-builder#617), so the server can take it.
+composeai-contracts = "3.24.0"
 
 # The extracted UI builder (yschimke/compose-ui-builder), resolved from its RELEASES. Three jars
 # and a BOM on Maven Central, and the editor archive as a GitHub release asset reached through the
@@ -490,6 +492,8 @@ composeai-render-session-subprocess = { module = "ee.schimke.composeai:render-se
 # command and `:mcp`'s `render_matrix` tool. Lifted out of compose-ai-tools' `:mcp` before the
 # module moved here, precisely so the offline CLI command did not have to follow it (#5188 there).
 composeai-render-matrix = { module = "ee.schimke.composeai:render-matrix" }
+composeai-design-guidelines = { module = "ee.schimke.composeai:design-guidelines" }
+composeai-design-guidelines-protocol = { module = "ee.schimke.composeai:design-guidelines-protocol" }
 composeai-data-pseudolocale-core = { module = "ee.schimke.composeai:data-pseudolocale-core" }
 composeai-data-remotecompose-core = { module = "ee.schimke.composeai:data-remotecompose-core" }
 # Slot marker/host API shared by JVM and Wasm catalogs. The daemon repository owns and publishes

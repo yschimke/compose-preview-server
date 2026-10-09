@@ -210,6 +210,9 @@ class DaemonMcpServerTest {
         PreviewSettingsMcp.DOCTOR_TOOL,
         PreviewSettingsMcp.REGISTER_PROJECT_TOOL,
         "rc_open",
+        // Design guidelines over previews, on the `design-guidelines` engine.
+        PreviewGuidelinesMcp.PROMPT_TOOL,
+        PreviewGuidelinesMcp.CHECK_TOOL,
       )
   }
 
