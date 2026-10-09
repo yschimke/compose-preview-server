@@ -548,7 +548,11 @@ internal class ScreenGeneratorComposeExportExecutor(
     val aliased = resolvableRecord(record, catalogSystemId)
     val merged =
       if (packRecords.isEmpty()) aliased
-      else aliased.copy(components = aliased.components + packRecords.flatMap { it.components })
+      else
+        aliased
+          .newBuilder()
+          .apply { components = aliased.components + packRecords.flatMap { it.components } }
+          .build()
     val screenName = ScreenDocumentProjection.screenNameFor(document)
     val projection =
       when (
@@ -808,14 +812,18 @@ internal class ScreenGeneratorComposeExportExecutor(
     for ((builderId, component) in published) {
       aliases.getOrPut(component.canonicalId) { mutableListOf() }.add(builderId)
     }
-    return record.copy(
-      components =
-        record.components.map { component ->
-          val added = aliases[component.canonicalId]?.filterNot { it in component.componentIds }
-          if (added.isNullOrEmpty()) component
-          else component.copy(componentIds = component.componentIds + added)
-        }
-    )
+    return record
+      .newBuilder()
+      .apply {
+        components =
+          record.components.map { component ->
+            val added = aliases[component.canonicalId]?.filterNot { it in component.componentIds }
+            if (added.isNullOrEmpty()) component
+            else
+              component.newBuilder().apply { componentIds = component.componentIds + added }.build()
+          }
+      }
+      .build()
   }
 
   /** Each pack component under the id the design refers to it by, for the record-free emitter. */

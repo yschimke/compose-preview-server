@@ -1,8 +1,10 @@
 package ee.schimke.composeai.cli.serve
 
+import ee.schimke.composeai.uibuilder.export.LauncherWidgetCodeExporter
 import ee.schimke.composeai.uibuilder.export.RecordFreeExport
 import ee.schimke.composeai.uibuilder.export.RemoteDocumentExportSupport
 import ee.schimke.composeai.uibuilder.export.UiBuilderBuildFeatures
+import ee.schimke.composeai.uibuilder.export.WEAR_WIDGET_CONTAINER_IDS
 import ee.schimke.composeai.uibuilder.export.WearWidgetHostShape
 import ee.schimke.composeai.uibuilder.export.toUiBuilderDocument
 import ee.schimke.composeai.uibuilder.guidelines.DesignGuidelineFrame
@@ -43,6 +45,7 @@ import ee.schimke.composeai.uibuilder.protocol.ListDesignsRequestV1
 import ee.schimke.composeai.uibuilder.protocol.McpResponseEnvelopeV1
 import ee.schimke.composeai.uibuilder.protocol.OpenDesignRequestV1
 import ee.schimke.composeai.uibuilder.protocol.PropertyCapabilityV1
+import ee.schimke.composeai.uibuilder.protocol.RemoteProfileTargetV1
 import ee.schimke.composeai.uibuilder.protocol.RevokeActorAccessMutationV1
 import ee.schimke.composeai.uibuilder.protocol.ServiceErrorCodeV1
 import ee.schimke.composeai.uibuilder.protocol.SlotCapabilityV1
@@ -2744,9 +2747,15 @@ class ServeUiBuilderMcp(
     val platform = own?.guidelines?.platform ?: DesignGuidelinePrompt.platformOf(catalogId)
     val encoded =
       UI_BUILDER_JSON.encodeToJsonElement(DesignDocumentV1.serializer(), document).jsonObject
-    // TODO(contracts 3.22.0): pass `document.environment.remoteProfile` once this host's contracts
-    // pin carries it; until then a rule written for one Remote Compose profile is not asked.
-    val profile: String? = null
+    val profile =
+      remoteProfileOf(
+        document,
+        encoded,
+        catalogPlatform = {
+          (pinnedCatalog(document, actor)?.statusSemantics?.get("platform") as? JsonPrimitive)
+            ?.contentOrNull
+        },
+      )
     fun build(pictures: List<DesignGuidelinePicture>, source: String?): DesignGuidelineRequest =
       if (own != null) {
         ServeUiBuilderGuidelines.prepare(
@@ -5304,3 +5313,39 @@ internal const val GUIDELINES_NO_MODEL = "this host has no guidelines model conf
 internal const val GUIDELINES_NOT_ENABLED =
   "the guidelines check runs on this host's shared model key and is not enabled for this " +
     "account; ask the operator to add you, or run it in the editor with your own OpenRouter key"
+
+/**
+ * The Remote Compose profile a design targets, as a guideline rule names it (`wear-widgets`,
+ * `launcher-widgets-v6`, `launcher-widgets-v7`, `androidx`, each with `+experimental` when set):
+ * the design's own `remoteProfile` when it names one, else the default for its kind — a Wear widget
+ * draws on the Wear widgets profile, a launcher widget on the Android 16 launcher's (what the
+ * exporter writes), and any other document of a catalog that publishes as `remote-compose` on the
+ * AndroidX player. Null for a design that is not Remote Compose at all, so no profile-tagged rule
+ * is asked of it.
+ */
+internal suspend fun remoteProfileOf(
+  document: DesignDocumentV1,
+  encoded: JsonObject,
+  catalogPlatform: suspend () -> String?,
+): String? {
+  document.environment.remoteProfile?.let { stated ->
+    val target =
+      UI_BUILDER_JSON.encodeToJsonElement(RemoteProfileTargetV1.serializer(), stated.target)
+        .jsonPrimitive
+        .content
+    return if (stated.experimental) "$target+experimental" else target
+  }
+  val roots = (encoded["roots"] as? JsonArray)?.mapNotNull { (it as? JsonPrimitive)?.contentOrNull }
+  val rootComponent = roots?.singleOrNull()?.let { document.nodes[it]?.componentId }
+  return when {
+    rootComponent in WEAR_WIDGET_CONTAINER_IDS -> REMOTE_PROFILE_WEAR_WIDGETS
+    rootComponent == LauncherWidgetCodeExporter.ROOT -> REMOTE_PROFILE_LAUNCHER_V6
+    catalogPlatform() == REMOTE_COMPOSE_PLATFORM -> REMOTE_PROFILE_ANDROIDX
+    else -> null
+  }
+}
+
+internal const val REMOTE_PROFILE_WEAR_WIDGETS = "wear-widgets"
+internal const val REMOTE_PROFILE_LAUNCHER_V6 = "launcher-widgets-v6"
+internal const val REMOTE_PROFILE_ANDROIDX = "androidx"
+private const val REMOTE_COMPOSE_PLATFORM = "remote-compose"

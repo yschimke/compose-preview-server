@@ -237,6 +237,10 @@ dependencies {
   // Axis expansion + contact-sheet stitching behind the `render_matrix` tool, shared with the CLI's
   // offline `render-matrix` command so the two agree by construction.
   implementation(libs.composeai.render.matrix)
+  // The design-guidelines engine behind `preview_guidelines_prompt` and `check_preview_guidelines`:
+  // the same batching, prompt and verdict parsing the CLI's `compose-preview guidelines` runs.
+  implementation(libs.composeai.design.guidelines)
+  implementation(libs.composeai.design.guidelines.protocol)
 
   // See the `uiBuilderWeb` configuration above; a bare ZIP, so requested artifact-only.
   add("uiBuilderWeb", "${libs.composeai.ui.builder.web.get()}@zip")

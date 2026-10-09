@@ -1448,6 +1448,60 @@ class DaemonMcpServer(
       .firstOrNull { it.isFile }
   }
 
+  /**
+   * What [PreviewGuidelinesMcp]'s tools read from this server: name resolution, the raw render, the
+   * `a11y/hierarchy` data product, the preview function's source and the module's build dir.
+   */
+  private val previewGuidelinesHost =
+    object : PreviewGuidelinesMcp.Host {
+      override val openRouterKey: String?
+        get() = System.getenv(PreviewGuidelinesMcp.KEY_ENV)
+
+      override fun resolve(ref: String): PreviewGuidelinesMcp.Resolved? {
+        val uriString =
+          if (ref.startsWith("compose-preview://")) ref
+          else (resolvePreviewName(ref) as? PreviewNameResolution.Found)?.uri ?: return null
+        val uri = PreviewUri.parseOrNull(uriString) ?: return null
+        val entry =
+          previewCatalog().firstOrNull {
+            PreviewUri.parseOrNull(it.uri)?.previewFqn == uri.previewFqn
+          }
+        val buildDir =
+          supervisor.project(uri.workspaceId)?.let {
+            File(moduleDir(it.path, uri.modulePath), "build")
+          }
+        return PreviewGuidelinesMcp.Resolved(
+          uriString,
+          uri.previewFqn,
+          entry?.simpleName ?: uri.previewFqn,
+          buildDir,
+        )
+      }
+
+      override fun render(preview: PreviewGuidelinesMcp.Resolved): ByteArray =
+        renderAndReadRawBytes(PreviewUri.parseOrNull(preview.uri)!!, overrides = null)
+
+      override fun a11yHierarchy(preview: PreviewGuidelinesMcp.Resolved): JsonElement? =
+        runCatching {
+          val uri = PreviewUri.parseOrNull(preview.uri)!!
+          val daemon = supervisor.daemonFor(uri.workspaceId, uri.modulePath)
+          daemon.client.dataFetch(uri.previewFqn, "a11y/hierarchy", null, true).payload
+        }
+        .getOrNull()
+
+      override fun source(preview: PreviewGuidelinesMcp.Resolved): String? = runCatching {
+        val uri = PreviewUri.parseOrNull(preview.uri)!!
+        val entry =
+          previewCatalog().firstOrNull {
+            PreviewUri.parseOrNull(it.uri)?.previewFqn == uri.previewFqn
+          } ?: return@runCatching null
+        val daemon = supervisor.daemonFor(uri.workspaceId, uri.modulePath)
+        val file = resolvePreviewSourceFile(daemon, entry.sourceFile) ?: return@runCatching null
+        previewFunctionSource(file.readLines(), entry.sourceLine)
+      }
+        .getOrNull()
+    }
+
   private fun moduleDir(projectRoot: File, modulePath: String): File {
     val trimmed = modulePath.trimStart(':')
     if (trimmed.isEmpty()) return projectRoot
@@ -2715,6 +2769,7 @@ class DaemonMcpServer(
       ),
     ) +
       listOf(PreviewTray.toolDef(), PreviewMentions.toolDef()) +
+      listOf(PreviewGuidelinesMcp.promptToolDef(), PreviewGuidelinesMcp.checkToolDef()) +
       rcViewer.toolDefs() +
       (uiBuilderDesign?.toolDefs() ?: emptyList()) +
       (uiBuilderMcp?.toolDefs() ?: emptyList()) +
@@ -2757,6 +2812,8 @@ class DaemonMcpServer(
       "find_previews_for_file" -> toolFindPreviewsForFile(args)
       PreviewTray.TOOL ->
         PreviewTray.call(args, previewCatalog(), previewActivity, renderThumbnails)
+      PreviewGuidelinesMcp.PROMPT_TOOL -> PreviewGuidelinesMcp.prompt(args, previewGuidelinesHost)
+      PreviewGuidelinesMcp.CHECK_TOOL -> PreviewGuidelinesMcp.check(args, previewGuidelinesHost)
       PreviewMentions.TOOL ->
         PreviewMentions.call(args, previewCatalog(), previewActivity, renderThumbnails)
       // Both declare an outputSchema, so both carry structuredContent (#1114).
@@ -8281,4 +8338,28 @@ class DaemonMcpServer(
      */
     private val LAYOUT_DETAIL_KINDS: List<String> = listOf("layout/inspector", "compose/semantics")
   }
+}
+
+/**
+ * The preview function starting near 1-based [line] (its annotation or `fun`): from there to the
+ * brace that closes its body, capped at [maxLines]. Null when [line] is unknown.
+ */
+internal fun previewFunctionSource(lines: List<String>, line: Int?, maxLines: Int = 200): String? {
+  val start = ((line ?: return null) - 1).coerceIn(0, lines.lastIndex.coerceAtLeast(0))
+  if (lines.isEmpty()) return null
+  var depth = 0
+  var opened = false
+  val out = mutableListOf<String>()
+  for (index in start until minOf(lines.size, start + maxLines)) {
+    val text = lines[index]
+    out += text
+    text.forEach { ch ->
+      if (ch == '{') {
+        depth++
+        opened = true
+      } else if (ch == '}') depth--
+    }
+    if (opened && depth <= 0) break
+  }
+  return out.joinToString("\n")
 }

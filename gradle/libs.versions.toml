@@ -116,7 +116,11 @@ graphics-shapes = "1.1.0"
 # 2.37.0 keys `ServeRenderHost`'s render cache on a carried Remote Compose document
 # (compose-ai-tools#5736), so two shared `/d/<id>` documents drawn through one catalog preview
 # never answer with each other's pixels; it moves with daemon 3.15.0 and contracts 3.21.0 below.
-composeai-tools = "2.37.0"
+# 2.38.0 publishes `ee.schimke.composeai:design-guidelines`, the design-guidelines engine (batched
+# preview requests, the OpenRouter client that records the served model, Jev triage, evidence
+# rounds and a render-hash cache) the local MCP server's preview guideline tools run on
+# (compose-ai-tools#5739, #5740, #5744). The daemon stays at 3.15.0; contracts move to 3.24.0 below.
+composeai-tools = "2.38.0"
 # The render daemons, the renderers, the preview annotations and data API, and the data extractors,
 # published from yschimke/compose-preview-daemon since its 3.0.0 (compose-ai-tools#5336). Layer 1a
 # in that repository's `docs/design/REPOSITORY_LAYERS.md`: between the contracts and
@@ -246,7 +250,11 @@ composeai-preview-daemon = "3.15.0"
 # refuses a `remoteCall` by name.
 # 3.21.0 adds `RemoteComposeOverride.documentBase64` (compose-preview-contracts#145), the document a
 # shared `/d/<id>` page sends to the daemon for its AndroidX players.
-composeai-contracts = "3.21.0"
+# 3.24.0 adds `DesignEnvironmentV1.remoteProfile` (3.22.0, compose-preview-contracts#147), the
+# `design-guidelines-protocol` module with batches, evidence and the served model (3.23.x, #149,
+# #151, #152) and `GuidelineRegionV1` (#157). compose-ai-tools 2.38.0 is built on it, and the
+# guidelines check passes a design's Remote Compose profile from it.
+composeai-contracts = "3.24.0"
 
 # The extracted UI builder (yschimke/compose-ui-builder), resolved from its RELEASES. Three jars
 # and a BOM on Maven Central, and the editor archive as a GitHub release asset reached through the
@@ -383,7 +391,10 @@ composeai-contracts = "3.21.0"
 # (compose-ui-builder#601). 3.99.0 writes Remote Compose Kotlin source in every build, so the code
 # pane shows a launcher widget's `RemoteComposeWidget` without `-PuiBuilderRemoteCompose`
 # (compose-ui-builder#607). `androidx-window` and `composeai-contracts` are unchanged.
-composeai-ui-builder = "3.99.0"
+# 3.100.0 drops the `X-OpenRouter-Metadata` header from the editor's own-key guidelines check,
+# which OpenRouter's CORS preflight refuses, so every browser check was blocked
+# (compose-ui-builder#610). `androidx-window` and `composeai-contracts` are unchanged.
+composeai-ui-builder = "3.100.0"
 # The CMP/Wasm Remote Compose player (yschimke/rc-players' `rc-player-wasm-dist`, a zip of its
 # static browser bundle). Shipped in the server tarball as `rc-player-wasm/`, which the image's
 # entrypoint already passes as `--rc-player-wasm-dir`: that serves `/rc-player-wasm/`, enables the
@@ -475,6 +486,10 @@ composeai-render-session-subprocess = { module = "ee.schimke.composeai:render-se
 # command and `:mcp`'s `render_matrix` tool. Lifted out of compose-ai-tools' `:mcp` before the
 # module moved here, precisely so the offline CLI command did not have to follow it (#5188 there).
 composeai-render-matrix = { module = "ee.schimke.composeai:render-matrix" }
+# The design-guidelines engine (compose-ai-tools 2.38.0+) and its wire shapes (contracts 3.23.0+):
+# the local MCP server's preview guideline tools build and judge batched requests with them.
+composeai-design-guidelines = { module = "ee.schimke.composeai:design-guidelines" }
+composeai-design-guidelines-protocol = { module = "ee.schimke.composeai:design-guidelines-protocol" }
 composeai-data-pseudolocale-core = { module = "ee.schimke.composeai:data-pseudolocale-core" }
 composeai-data-remotecompose-core = { module = "ee.schimke.composeai:data-remotecompose-core" }
 # Slot marker/host API shared by JVM and Wasm catalogs. The daemon repository owns and publishes
