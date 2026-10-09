@@ -1,5 +1,14 @@
 # Changelog
 
+## [3.115.0](https://github.com/yschimke/compose-preview-server/compare/v3.114.0...v3.115.0) (2026-10-09)
+
+
+### Features
+
+* **deploy:** manage non-secret settings in settings.json instead of .env ([#1473](https://github.com/yschimke/compose-preview-server/issues/1473)) ([d29be36](https://github.com/yschimke/compose-preview-server/commit/d29be3656c319c53600208c3fa7c4bcdb27ac201))
+* **deploy:** preview.coo.ee's non-secret settings in settings.json ([#1474](https://github.com/yschimke/compose-preview-server/issues/1474)) ([2f42296](https://github.com/yschimke/compose-preview-server/commit/2f4229619de1c32a1bee0c4ca783cf516f51190c))
+* **guidelines:** each catalog's own rules and pictures, the model that answered, and a Jev evidence triage ([#1471](https://github.com/yschimke/compose-preview-server/issues/1471)) ([b878f43](https://github.com/yschimke/compose-preview-server/commit/b878f43cd8652a9259fca8370f185b2266941e0e))
+
 ## [3.114.0](https://github.com/yschimke/compose-preview-server/compare/v3.113.0...v3.114.0) (2026-10-09)
 
 
