@@ -114,6 +114,7 @@ internal object CatalogLiveRouting {
       // `?rcPlayer=` reaches the override as the built-in `player` or, for any other player, as
       // `playerId`; the caller spelled both the same way, so they share one name here.
       add("rcPlayer", rc.player ?: rc.playerId)
+      add("rcDocument", rc.documentBase64)
       rc.namedValues.keys.sorted().forEach { names += "${ServeOverrides.RC_NAMED_PREFIX}$it" }
     }
     return names.ifEmpty { listOf("overrides") }
@@ -185,12 +186,15 @@ internal object CatalogLiveRouting {
             else rc
           }
           // An emptied facet must become null for the `!= PreviewOverrides()` comparison. A
-          // `playerId` is never a no-op: the capture records only the built-in player.
+          // `playerId` is never a no-op: the capture records only the built-in player. Nor is a
+          // carried document (`documentBase64`): it replaces the preview's content outright, so
+          // the baked pixels never answer it, whichever player draws it.
           ?.takeIf {
             it.profile != null ||
               it.player != null ||
               it.playerId != null ||
-              it.namedValues.isNotEmpty()
+              it.namedValues.isNotEmpty() ||
+              it.documentBase64 != null
           },
     )
 }
