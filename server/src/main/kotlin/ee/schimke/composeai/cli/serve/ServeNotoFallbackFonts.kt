@@ -17,8 +17,8 @@ import java.nio.file.StandardCopyOption
  * Bounded like that route: only a path shaped like a Noto slice ([isNotoSlice]) under
  * `fonts.gstatic.com/s/`, so no request makes this server fetch anything but Google's Noto files,
  * and each file is held to [ServeGoogleFonts.MAX_FONT_BYTES]. Not a committed list: Compose's own
- * list moves with every Compose release, and a slice it asks for that Google does not have is a
- * 404 either way.
+ * list moves with every Compose release, and a slice it asks for that Google does not have is a 404
+ * either way.
  */
 internal class ServeNotoFallbackFonts(
   /** Where the files are kept, mirroring their gstatic paths. */
@@ -32,7 +32,9 @@ internal class ServeNotoFallbackFonts(
   /** Paths Google answered no file for, so asking again costs nothing. */
   private val missing = mutableSetOf<String>()
 
-  /** The slice at [path] (`notosansmath/v18/….woff2`), cached or fetched; null when there is none. */
+  /**
+   * The slice at [path] (`notosansmath/v18/….woff2`), cached or fetched; null when there is none.
+   */
   fun font(path: String): ByteArray? {
     if (!isNotoSlice(path)) return null
     val cached = File(cacheDirectory, path)
