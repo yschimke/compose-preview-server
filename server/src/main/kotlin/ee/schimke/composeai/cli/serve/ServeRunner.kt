@@ -3069,17 +3069,27 @@ public class ServeRunner(
           return
         }
       uiBuilderShadowReports[systemId] =
-        ServeUiBuilderShadowReportDto(report.ready, report.findings, report.differences)
+        ServeUiBuilderShadowReportDto(
+          report.ready,
+          report.findings,
+          report.differences,
+          report.losses,
+        )
       System.err.println(
         "serve: UI-builder catalog $systemId shadow: " +
           (if (report.ready) "ready to own"
-          else "${report.findings.size} finding(s) before owning") +
+          else
+            "${report.findings.size} finding(s) and " +
+              "${report.losses.orEmpty().size} loss(es) before owning") +
           ", " +
           (report.differences?.let { "${it.size} difference(s) from its Kotlin catalog" }
             ?: "no Kotlin catalog to compare")
       )
-      (report.findings + report.differences.orEmpty()).forEach {
-        System.err.println("serve:   $it")
+      // A loss is marked so a log read alone says what blocks owning, not just what changes.
+      val losses = report.losses.orEmpty().toSet()
+      report.findings.forEach { System.err.println("serve:   $it") }
+      report.differences.orEmpty().forEach {
+        System.err.println("serve:   ${if (it in losses) "[loss] " else ""}$it")
       }
     }
     // One catalog's published definition, fetched from its delivery branch and composed into the
