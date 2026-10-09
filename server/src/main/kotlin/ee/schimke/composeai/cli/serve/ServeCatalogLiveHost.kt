@@ -296,7 +296,9 @@ class ServeCatalogLiveHost(
   override fun guidelineResultFor(
     previewId: String
   ): ee.schimke.composeai.guidelines.protocol.GuidelineRecordV1? =
-    baked.guidelineResultFor(previewId)
+    // The published id first, then the bundle id it aliases: the report is keyed by the ids the
+    // bundle was built with, which a catalog's published ids need not be.
+    baked.guidelineResultFor(previewId) ?: alias[previewId]?.let { baked.guidelineResultFor(it) }
 
   override fun parityFindingsFor(previewId: String, referenceId: String): List<ParityFindingSet> =
     baked.parityFindingsFor(previewId, referenceId)
