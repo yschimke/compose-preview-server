@@ -4158,6 +4158,10 @@ html:not(.cp-bg-transparent) #cp-reference-compare[data-cp-stage-clip] .cp-refer
   background: var(--md-sys-color-surface-container-low); box-shadow: var(--md-sys-elevation-level1);
   padding: 16px; display: flex; align-items: center; justify-content: center; min-height: 260px; }
 .cp-doc-stage canvas, .cp-doc-stage svg, .cp-doc-stage img { max-width: 100%; height: auto; }
+/* The .rc permalink's player toggle (TypeScript | CMP Wasm), when the host serves the CMP player.
+   The frame is sized in CSS pixels like the canvas, so it scales down the same way. */
+.cp-doc-players { margin: 0 0 12px; }
+.cp-doc-stage iframe { max-width: 100%; }
 .cp-doc-status { margin: 8px 0 0; font-size: var(--md-sys-typescale-body-small-size);
   color: var(--cp-fg-muted); min-height: 1.2em; }
 .cp-doc-facts { max-width: 720px; margin: 16px 0 0; display: grid;

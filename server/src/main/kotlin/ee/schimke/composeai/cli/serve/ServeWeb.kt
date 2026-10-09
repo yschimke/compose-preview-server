@@ -10487,6 +10487,12 @@ ${captureControlsHtml().prependIndent("          ")}
      * span.
      */
     version: String? = null,
+    /**
+     * The CMP Wasm player's page (`/rc-player-wasm/index.html`) when this host serves one
+     * (`--rc-player-wasm-dir`), else null. Non-null on an `.rc` permalink adds the player toggle:
+     * the same bytes, played by the vendored TypeScript player or by the Compose Multiplatform one.
+     */
+    cmpWasmPlayerPath: String? = null,
   ): String {
     val suffix = querySuffix(queryString(token, sessionId = null, isPublic = isPublic))
     val facts =
@@ -10507,6 +10513,22 @@ ${captureControlsHtml().prependIndent("          ")}
     // which reads the global as it starts the lane; this page has no Vue controls.
     val rcFontsScript =
       if (isRemoteComposeDoc) scriptTag("remote-compose.js") + "\n        " else ""
+    // Only a Remote Compose document has two players to choose between, and only a host that serves
+    // the CMP one offers the choice. Same segmented shape and ids as the viewer's `rcPlayer=`
+    // lanes.
+    val playerToggle = isRemoteComposeDoc && cmpWasmPlayerPath != null
+    val toggleHtml =
+      if (!playerToggle) ""
+      else
+        """
+        <p class="cp-doc-players">
+          <span class="cp-theme" role="group" aria-label="Player">
+            <button type="button" class="cp-theme-btn" data-doc-player="$DOC_PLAYER_JS" aria-pressed="true">TypeScript</button>
+            <button type="button" class="cp-theme-btn" data-doc-player="$DOC_PLAYER_CMP_WASM" aria-pressed="false">CMP (Wasm)</button>
+          </span>
+        </p>
+        """
+          .trimIndent() + "\n"
     return document(
       title = "${doc.name} — compose-preview",
       unfurlDescription = "A shared ${doc.formatLabel} document, played back in your browser.",
@@ -10518,8 +10540,8 @@ ${captureControlsHtml().prependIndent("          ")}
         <h1 class="cp-head">${WebEscaping.htmlEscape(doc.name)}</h1>
         <p class="cp-sub">${WebEscaping.htmlEscape(doc.formatLabel)} · ${WebEscaping.htmlEscape(doc.sizeText)}
           <span class="cp-doc-expiry" title="${WebEscaping.htmlEscape(doc.expiresAtText)}">expires in ${WebEscaping.htmlEscape(doc.expiresInText)}</span></p>
-        <div class="cp-doc-stage" id="cp-doc-stage" data-format="${WebEscaping.htmlEscape(doc.formatId)}">
-          ${docStageElement(doc)}
+        $toggleHtml<div class="cp-doc-stage" id="cp-doc-stage" data-format="${WebEscaping.htmlEscape(doc.formatId)}">
+          ${docStageElement(doc)}${if (playerToggle) "\n          " + docWasmFrame(doc) else ""}
         </div>
         <p class="cp-doc-status" id="cp-doc-status">Loading the ${WebEscaping.htmlEscape(doc.formatLabel)} player…</p>
         <div class="cp-doc-facts">
@@ -10529,7 +10551,10 @@ ${captureControlsHtml().prependIndent("          ")}
           <a href="$rawUrl" download="${WebEscaping.htmlEscape(doc.name)}">Download the document</a> ·
           <a href="/docs$suffix">Share another</a>
         </p>
-        $rcFontsScript<script>${docPlayerScript(doc, rawUrl)}</script>
+        $rcFontsScript<script>${docPlayerScript(doc, rawUrl)}</script>${
+          if (playerToggle) "\n        <script>${docPlayerToggleScript(cmpWasmPlayerPath!!, rawUrl)}</script>"
+          else ""
+        }
         """
           .trimIndent(),
       // Same lane as the viewer's `camaelon-js` lane, same reason: a shared `.rc` link must not
@@ -10537,6 +10562,79 @@ ${captureControlsHtml().prependIndent("          ")}
       rcFonts = isRemoteComposeDoc,
     )
   }
+
+  /**
+   * The `rcPlayer=` ids the `.rc` permalink's toggle switches between, as the viewer names them.
+   */
+  private const val DOC_PLAYER_JS = "camaelon-js"
+  private const val DOC_PLAYER_CMP_WASM = "cmp-wasm"
+
+  /**
+   * The CMP player's frame, sized like the canvas beside it and loaded only when first chosen — the
+   * Wasm bundle is tens of megabytes, which a reader who never switches should not pay for.
+   */
+  private fun docWasmFrame(doc: DocView): String =
+    "<iframe id=\"cp-doc-wasm\" title=\"Compose Multiplatform player\" hidden" +
+      " width=\"${doc.width ?: 512}\" height=\"${doc.height ?: 512}\"" +
+      " style=\"border:0;background:transparent\"></iframe>"
+
+  /**
+   * The `.rc` permalink's player toggle. The TypeScript lane is the page as it always was; the CMP
+   * lane points an iframe at the Wasm player with `?src=` the same `/d/<id>/raw` bytes, and is told
+   * apart by its readiness messages (docs/design/RC_PLAYER_EMBED.md in rc-players). The choice
+   * rides the URL as `rcPlayer=`, so a shared link opens on the player it was shared from.
+   */
+  private fun docPlayerToggleScript(cmpWasmPlayerPath: String, rawUrl: String): String =
+    """
+    (function () {
+      var canvas = document.getElementById("cp-doc-mount");
+      var frame = document.getElementById("cp-doc-wasm");
+      var status = document.getElementById("cp-doc-status");
+      var buttons = Array.prototype.slice.call(document.querySelectorAll("[data-doc-player]"));
+      var playerPage = ${jsString(cmpWasmPlayerPath)};
+      var raw = new URL(${jsString(rawUrl)}, location.href).href;
+      var loaded = false;
+      function frameSrc() {
+        var theme = matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+        return playerPage + "?src=" + encodeURIComponent(raw) + "&theme=" + theme;
+      }
+      function choose(player, remember) {
+        var wasm = player === ${jsString(DOC_PLAYER_CMP_WASM)};
+        buttons.forEach(function (b) {
+          b.setAttribute("aria-pressed", String(b.getAttribute("data-doc-player") === player));
+        });
+        canvas.hidden = wasm;
+        frame.hidden = !wasm;
+        if (wasm && !loaded) {
+          loaded = true;
+          status.textContent = "Loading the Compose Multiplatform player…";
+          frame.src = frameSrc();
+        } else if (!wasm && status.textContent.indexOf("Compose Multiplatform") >= 0) {
+          status.textContent = "";
+        }
+        if (remember) {
+          var url = new URL(location.href);
+          if (wasm) url.searchParams.set("rcPlayer", player);
+          else url.searchParams.delete("rcPlayer");
+          history.replaceState(null, "", url.pathname + url.search + url.hash);
+        }
+      }
+      window.addEventListener("message", function (e) {
+        if (e.source !== frame.contentWindow || e.origin !== location.origin) return;
+        if (e.data === "cp-rc-wasm-ready") status.textContent = "";
+        else if (typeof e.data === "string" && e.data.indexOf("cp-rc-wasm-error:") === 0) {
+          status.textContent = "The Compose Multiplatform player could not play this document: " +
+            e.data.slice("cp-rc-wasm-error:".length);
+        }
+      });
+      buttons.forEach(function (b) {
+        b.addEventListener("click", function () { choose(b.getAttribute("data-doc-player"), true); });
+      });
+      var initial = new URL(location.href).searchParams.get("rcPlayer");
+      if (initial === ${jsString(DOC_PLAYER_CMP_WASM)}) choose(initial, false);
+    })();
+    """
+      .trimIndent()
 
   /** The element the format's player paints into — a canvas for RC, a container div for Lottie. */
   private fun docStageElement(doc: DocView): String =

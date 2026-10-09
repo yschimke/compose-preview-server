@@ -3816,6 +3816,33 @@ class ServeWebFixtureTest {
         isPublic = true,
         version = version,
       )
+    // The same permalink on a host that serves the CMP/Wasm player (`--rc-player-wasm-dir`): the
+    // page offers both players for the one document.
+    val docRemoteComposePlayers =
+      ServeWeb.docPage(
+        ServeWeb.DocView(
+          id = "Tz3l9WcAq0Xj5RmB7dPuKw",
+          name = "watchface.rc",
+          formatId = ServeDocFormats.REMOTE_COMPOSE.id,
+          formatLabel = ServeDocFormats.REMOTE_COMPOSE.label,
+          playerPath = ServeDocFormats.REMOTE_COMPOSE.playerPath,
+          rawPath = "/d/Tz3l9WcAq0Xj5RmB7dPuKw/raw",
+          facts =
+            listOf(
+              ServeDocFact("Format version", "1.2.0"),
+              ServeDocFact("Document size", "384 × 384"),
+            ),
+          sizeText = "12 kB",
+          expiresInText = "58m",
+          expiresAtText = "2026-07-28T22:13:00Z",
+          width = 384,
+          height = 384,
+        ),
+        token,
+        isPublic = true,
+        version = version,
+        cmpWasmPlayerPath = "/rc-player-wasm/index.html",
+      )
 
     // The styled 404 a browser gets when it follows a dead link to a catalog or preview page —
     // the site's own chrome with a "back to design systems" link, not a bare text/plain dead-end.
@@ -4537,6 +4564,7 @@ class ServeWebFixtureTest {
         "serve-playground-uncompilable.html" to playgroundUncompilable,
         "serve-doc-lottie.html" to docLottie,
         "serve-doc-remotecompose.html" to docRemoteCompose,
+        "serve-doc-remotecompose-players.html" to docRemoteComposePlayers,
         // Not a served page: a frame around the drawn link-unfurl cards, so that raster surface is
         // screenshotted and diffed on every PR like the pages are. See [socialCardPage].
         "serve-social-card.html" to socialCardPage(unfurlCards),
@@ -6130,6 +6158,23 @@ class ServeWebFixtureTest {
       docRemoteCompose.contains(ServeDocFormats.REMOTE_COMPOSE.playerPath) &&
         docRemoteCompose.contains("width=\"384\" height=\"384\""),
       "the Remote Compose page loads the RC player onto a canvas sized from the document",
+    )
+    // The player toggle is offered only where it means something: an `.rc` document, on a host
+    // serving the CMP player. Without one, the page is the TypeScript player alone, as before.
+    assertTrue(
+      docRemoteComposePlayers.contains("data-doc-player=\"camaelon-js\"") &&
+        docRemoteComposePlayers.contains("data-doc-player=\"cmp-wasm\"") &&
+        docRemoteComposePlayers.contains("id=\"cp-doc-wasm\"") &&
+        docRemoteComposePlayers.contains("\"/rc-player-wasm/index.html\""),
+      "an .rc permalink on a CMP-serving host offers both players",
+    )
+    assertFalse(
+      docRemoteCompose.contains("data-doc-player") || docRemoteCompose.contains("cp-doc-wasm"),
+      "an .rc permalink on a host without the CMP player offers no toggle",
+    )
+    assertFalse(
+      docLottie.contains("data-doc-player"),
+      "a Lottie permalink has one player and no toggle",
     )
     assertTrue(
       docLottie.contains("expires in 1h") && docLottie.contains("2026-07-28T22:15:00Z"),

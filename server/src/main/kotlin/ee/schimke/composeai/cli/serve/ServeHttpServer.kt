@@ -3769,6 +3769,9 @@ class ServeHttpServer(
         isPublic = isPublic,
         unfurl = ServeWeb.UnfurlMetadata(pageUrl = externalPageUrl()),
         version = SERVE_VERSION,
+        // The same `/rc-player-wasm/` the viewer's cmp-wasm lane frames; absent, the page offers
+        // only the TypeScript player, as it always did.
+        cmpWasmPlayerPath = rcPlayerWasmDir?.let { "/rc-player-wasm/index.html" },
       ),
       ContentType.Text.Html,
     )
