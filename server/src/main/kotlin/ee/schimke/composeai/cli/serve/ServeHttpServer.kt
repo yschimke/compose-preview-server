@@ -13529,26 +13529,48 @@ class ServeHttpServer(
     doc: ServeDocStore.Doc
   ): List<ServeWeb.DocServerPlayer> {
     if (doc.format.id != ServeDocFormats.REMOTE_COMPOSE.id) return emptyList()
-    val grant = agentGrantFor(call)
-    val mayRenderLive =
-      if (grant != null) grant.allows(AgentGrantScope.LIVE)
-      else githubAuth?.isAuthenticated(call) ?: true
-    if (!mayRenderLive || !RcJvmServerRenderer.isAvailable()) return emptyList()
+    if (!mayRenderDocServerSide(call) || !RcJvmServerRenderer.isAvailable()) return emptyList()
     return listOf(
       ServeWeb.DocServerPlayer(ServeRcPlayerIds.CMP_JVM, "CMP (JVM)", "${doc.path}/render.png")
     )
   }
 
   /**
+   * Whether [call] may spend a render worker on a shared document. Stricter than the live-render
+   * gate, which waves everyone through on a public host with no GitHub auth: `--accept-docs` takes
+   * anonymous uploads there, and its contract is that an anonymous document is only stored and
+   * played in the browser. So a real credential is required — a `live` grant, a GitHub sign-in, or
+   * the host token a non-public host already demanded at [rejectBadToken].
+   */
+  private fun mayRenderDocServerSide(call: ApplicationCall): Boolean {
+    agentGrantFor(call)?.let {
+      return it.allows(AgentGrantScope.LIVE)
+    }
+    githubAuth?.let {
+      return it.isAuthenticated(call)
+    }
+    return !isPublic
+  }
+
+  /**
    * `GET /d/{id}/render.png?rcPlayer=cmp-jvm`: a shared Remote Compose document drawn by a
-   * server-side player. Gated like a catalog preview's live render (sign-in where the host has
-   * GitHub auth, a `live` grant for an agent): unlike the page and its raw bytes, this spends a
-   * render worker on someone else's document. Sized from the document's own header, at `?density=`
-   * (default 1); `?uiMode=` and `rc.<name>=` seeds as on `/render`.
+   * server-side player. Needs a real credential ([mayRenderDocServerSide]) — never anonymous, even
+   * on a public host: unlike the page and its raw bytes, this spends a render worker on someone
+   * else's document. Sized from the document's own header, at `?density=` (default 1); `?uiMode=`
+   * and `rc.<name>=` seeds as on `/render`.
    */
   private suspend fun RoutingContext.handleDocRender(store: ServeDocStore) {
+    // A bodyless probe would still take a render worker: Ktor's AutoHeadResponse runs this handler.
+    if (rejectHeadProbe()) return
     if (rejectBadToken()) return
     if (rejectMissingGithubAuth(api = true)) return
+    if (!mayRenderDocServerSide(call)) {
+      call.respondText(
+        "server-side rendering of shared documents needs a credential on this host",
+        status = HttpStatusCode.Forbidden,
+      )
+      return
+    }
     val doc = leaseDoc(store)
     if (doc == null || doc.format.id != ServeDocFormats.REMOTE_COMPOSE.id) {
       call.respondText("no such Remote Compose document", status = HttpStatusCode.NotFound)
