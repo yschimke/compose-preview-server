@@ -12,6 +12,7 @@ import ee.schimke.composeai.cli.serve.icons.MaterialSymbolsIcons
 import ee.schimke.composeai.cli.serve.icons.MaterialSymbolsSource
 import ee.schimke.composeai.daemon.client.SandboxSparePool
 import ee.schimke.composeai.daemon.protocol.PreviewOverrides
+import ee.schimke.composeai.daemon.protocol.RemoteNamedValue
 import ee.schimke.composeai.daemon.protocol.StreamCodec
 import ee.schimke.composeai.data.layoutinspector.ComposeFigmaSvgProduct
 import ee.schimke.composeai.data.layoutinspector.ExplodedSvg
@@ -1844,6 +1845,7 @@ class ServeHttpServer(
           post("/docs") { handleDocUpload(store) }
           get("/d/{id}") { handleDocPage(store) }
           get("/d/{id}/raw") { handleDocRaw(store) }
+          get("/d/{id}/render.png") { handleDocRender(store) }
           // Each format's vendored browser player, looked up in the registry rather than routed
           // per-format. Ungated + CORS-open like `/rc-player/bundle.js` (generic client code, no
           // session data).
@@ -3772,6 +3774,7 @@ class ServeHttpServer(
         // The same `/rc-player-wasm/` the viewer's cmp-wasm lane frames; absent, the page offers
         // only the TypeScript player, as it always did.
         cmpWasmPlayerPath = rcPlayerWasmDir?.let { "/rc-player-wasm/index.html" },
+        serverPlayers = docServerPlayers(doc),
       ),
       ContentType.Text.Html,
     )
@@ -13450,6 +13453,23 @@ class ServeHttpServer(
           catalogBundleHost(renderHost)?.stageSurface,
         ),
       )
+    respondCmpJvmRender(doc, spec, seeds, format, theme, webMode, stage, cacheControl)
+  }
+
+  /**
+   * Render [doc] with the embedded desktop player under the render semaphore and answer with the
+   * result — the shared tail of a catalog preview's cmp-jvm lane and a shared document's.
+   */
+  private suspend fun RoutingContext.respondCmpJvmRender(
+    doc: ByteArray,
+    spec: RcJvmRenderSpec,
+    seeds: Map<String, RemoteNamedValue>,
+    format: RcJvmServerRenderer.Format,
+    theme: RcJvmServerRenderer.RenderTheme,
+    webMode: Boolean,
+    stage: suspend (ByteArray) -> ByteArray,
+    cacheControl: String,
+  ) {
     val result =
       withContext(Dispatchers.IO) {
         if (!renderSemaphore.tryAcquire(RENDER_QUEUE_WAIT_SECONDS, TimeUnit.SECONDS)) {
@@ -13498,6 +13518,98 @@ class ServeHttpServer(
       is RcJvmServerRenderer.RenderResult.Failed ->
         call.respondText(result.reason, status = HttpStatusCode.InternalServerError)
     }
+  }
+
+  /**
+   * The server-side players a `/d/<id>` page may offer this caller: the embedded desktop player
+   * (cmp-jvm) when it is installed and the caller may run live renders — the same gate
+   * [handleDocRender] applies, so the page never offers a lane that would answer 401 or 403.
+   */
+  private fun RoutingContext.docServerPlayers(
+    doc: ServeDocStore.Doc
+  ): List<ServeWeb.DocServerPlayer> {
+    if (doc.format.id != ServeDocFormats.REMOTE_COMPOSE.id) return emptyList()
+    if (!mayRenderDocServerSide(call) || !RcJvmServerRenderer.isAvailable()) return emptyList()
+    return listOf(
+      ServeWeb.DocServerPlayer(ServeRcPlayerIds.CMP_JVM, "CMP (JVM)", "${doc.path}/render.png")
+    )
+  }
+
+  /**
+   * Whether [call] may spend a render worker on a shared document. Stricter than the live-render
+   * gate, which waves everyone through on a public host with no GitHub auth: `--accept-docs` takes
+   * anonymous uploads there, and its contract is that an anonymous document is only stored and
+   * played in the browser. So a real credential is required — a `live` grant, a GitHub sign-in, or
+   * the host token a non-public host already demanded at [rejectBadToken].
+   */
+  private fun mayRenderDocServerSide(call: ApplicationCall): Boolean {
+    agentGrantFor(call)?.let {
+      return it.allows(AgentGrantScope.LIVE)
+    }
+    githubAuth?.let {
+      return it.isAuthenticated(call)
+    }
+    return !isPublic
+  }
+
+  /**
+   * `GET /d/{id}/render.png?rcPlayer=cmp-jvm`: a shared Remote Compose document drawn by a
+   * server-side player. Needs a real credential ([mayRenderDocServerSide]) — never anonymous, even
+   * on a public host: unlike the page and its raw bytes, this spends a render worker on someone
+   * else's document. Sized from the document's own header, at `?density=` (default 1); `?uiMode=`
+   * and `rc.<name>=` seeds as on `/render`.
+   */
+  private suspend fun RoutingContext.handleDocRender(store: ServeDocStore) {
+    // A bodyless probe would still take a render worker: Ktor's AutoHeadResponse runs this handler.
+    if (rejectHeadProbe()) return
+    if (rejectBadToken()) return
+    if (rejectMissingGithubAuth(api = true)) return
+    if (!mayRenderDocServerSide(call)) {
+      call.respondText(
+        "server-side rendering of shared documents needs a credential on this host",
+        status = HttpStatusCode.Forbidden,
+      )
+      return
+    }
+    val doc = leaseDoc(store)
+    if (doc == null || doc.format.id != ServeDocFormats.REMOTE_COMPOSE.id) {
+      call.respondText("no such Remote Compose document", status = HttpStatusCode.NotFound)
+      return
+    }
+    val params = call.request.queryParameters
+    if (!ServeRcPlayerIds.isCmpJvm(params["rcPlayer"])) {
+      call.respondText(
+        "a shared document renders server-side with rcPlayer=${ServeRcPlayerIds.CMP_JVM}",
+        status = HttpStatusCode.BadRequest,
+      )
+      return
+    }
+    val size = doc.format.size(doc.bytes)
+    val density = params["density"]?.toFloatOrNull()?.takeIf { it in 0.5f..4f } ?: 1f
+    val spec =
+      RcJvmRenderSpec(
+        (size?.width ?: DOC_RENDER_DEFAULT_PX).coerceIn(1, DOC_RENDER_MAX_PX),
+        (size?.height ?: DOC_RENDER_DEFAULT_PX).coerceIn(1, DOC_RENDER_MAX_PX),
+        density,
+        1f,
+      )
+    val seeds =
+      ServeOverrides.rcNamedValueSeeds(
+        params.entries().associate { (key, values) -> key to (values.firstOrNull() ?: "") }
+      )
+    val theme = cmpJvmRenderTheme(params["uiMode"], bakedUiMode = 0)
+    // An expiring capability URL must never be stored by a shared cache — no-store, as the page.
+    markGeneration("document", "private, no-store")
+    respondCmpJvmRender(
+      doc.bytes,
+      spec,
+      seeds,
+      RcJvmServerRenderer.Format.PNG,
+      theme,
+      webMode = false,
+      stage = { it },
+      cacheControl = "private, no-store",
+    )
   }
 
   /**
@@ -18279,6 +18391,12 @@ class ServeHttpServer(
 
     /** Classpath location of the vendored Remote Compose player IIFE bundle (global `RC`). */
     private const val RC_PLAYER_RESOURCE = "/rc-player/bundle.js"
+
+    /** A shared document with no declared size renders at this many pixels a side. */
+    private const val DOC_RENDER_DEFAULT_PX = 512
+
+    /** The largest side a shared document's server-side render is drawn at. */
+    private const val DOC_RENDER_MAX_PX = 4096
 
     /**
      * A vendored browser player bundle baked into the CLI jar: its bytes plus a content-hash ETag.

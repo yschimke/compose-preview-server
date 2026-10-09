@@ -57,12 +57,27 @@ class ServeDocRoutingTest {
       .also { it.start() }
   }
 
+  /** A token-gated host on the same store: the token is the credential server-side renders need. */
+  private val gatedServer: ServeHttpServer by lazy {
+    ServeHttpServer(
+        host = "127.0.0.1",
+        requestedPort = 0,
+        token = GATED_TOKEN,
+        sessions = ServeSessionRegistry(open = { null }),
+        defaultSessionId = "none",
+        isPublic = false,
+        docStore = docStore,
+      )
+      .also { it.start() }
+  }
+
   private val client = OkHttpClient()
 
   @AfterTest
   fun stop() {
     runCatching { server.stop() }
     runCatching { plainServer.stop() }
+    runCatching { gatedServer.stop() }
     runCatching { registry.close() }
   }
 
@@ -146,6 +161,55 @@ class ServeDocRoutingTest {
     get("$path/raw").use { response ->
       assertEquals("application/octet-stream", response.body.contentType().toString())
       assertEquals(bytes.toList(), response.body.bytes().toList())
+    }
+  }
+
+  @Test
+  fun `a remote compose document renders server-side only with a credential and cmp-jvm`() {
+    val path =
+      upload(
+          "watchface.rc",
+          ServeDocFixtures.remoteComposeDoc(width = 320, height = 320),
+          "application/octet-stream",
+        )
+        .use { response ->
+          Json.parseToJsonElement(response.body.string()).jsonObject["url"]!!.jsonPrimitive.content
+        }
+
+    // Anonymous on a public host with no sign-in: `--accept-docs` promises such a document is only
+    // stored and played in the browser, so no server-side player may draw it — nor list it.
+    get("$path/render.png?rcPlayer=cmp-jvm").use { response -> assertEquals(403, response.code) }
+    get(path).use { response ->
+      assertFalse(response.body.string().contains("render.png"), "no server lane offered")
+    }
+
+    // A bodyless probe never reaches a renderer, whoever sends it.
+    val gated = "?token=$GATED_TOKEN"
+    client
+      .newCall(
+        Request.Builder()
+          .url(url("$path/render.png$gated&rcPlayer=cmp-jvm", gatedServer.port))
+          .head()
+          .build()
+      )
+      .execute()
+      .use { assertEquals(405, it.code) }
+
+    // The one server-side player a shared document can name today; anything else is the caller's
+    // mistake, not a missing document.
+    get("$path/render.png$gated&rcPlayer=androidx-view", gatedServer.port).use { response ->
+      assertEquals(400, response.code)
+    }
+    // With the host token: rendered, or — where this test JVM has no desktop-player sidecar — a
+    // retryable 503 naming why. Never a 404 or a 500: the document is there and the lane exists.
+    get("$path/render.png$gated&rcPlayer=cmp-jvm", gatedServer.port).use { response ->
+      assertTrue(response.code == 200 || response.code == 503, "got ${response.code}")
+      if (response.code == 200) assertEquals("image/png", response.body.contentType().toString())
+      assertEquals("private, no-store", response.header("Cache-Control"))
+    }
+    get("/d/AAAAAAAAAAAAAAAAAAAAAA/render.png$gated&rcPlayer=cmp-jvm", gatedServer.port).use {
+      response ->
+      assertEquals(404, response.code)
     }
   }
 
@@ -236,5 +300,9 @@ class ServeDocRoutingTest {
     get("/docs", plainServer.port).use { assertEquals(404, it.code) }
     get("/d/aaaaaaaaaaaaaaaaaaaaaa", plainServer.port).use { assertEquals(404, it.code) }
     get("/doc-player/lottie/bundle.js", plainServer.port).use { assertEquals(404, it.code) }
+  }
+
+  private companion object {
+    const val GATED_TOKEN = "s3cret-doc-render"
   }
 }

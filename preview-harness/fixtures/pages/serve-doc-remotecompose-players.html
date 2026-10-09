@@ -69,14 +69,17 @@
   <span class="cp-theme" role="group" aria-label="Player">
     <button type="button" class="cp-theme-btn" data-doc-player="camaelon-js" aria-pressed="true">TypeScript</button>
     <button type="button" class="cp-theme-btn" data-doc-player="cmp-wasm" aria-pressed="false">CMP (Wasm)</button>
+    <button type="button" class="cp-theme-btn" data-doc-player="cmp-jvm" aria-pressed="false">CMP (JVM)</button>
   </span>
 </p>
 <div class="cp-doc-stage" id="cp-doc-stage" data-format="remotecompose">
           <canvas id="cp-doc-mount" width="384" height="384"></canvas>
-          <iframe id="cp-doc-wasm" title="Compose Multiplatform player" hidden width="384" height="384" style="border:0;background:transparent"></iframe>
+          <iframe id="cp-doc-lane-cmp-wasm" data-doc-lane="cmp-wasm" data-doc-lane-kind="frame" data-doc-lane-path="/rc-player-wasm/index.html" title="CMP (Wasm) player" hidden width="384" height="384" style="border:0;background:transparent"></iframe>
+          <img id="cp-doc-lane-cmp-jvm" data-doc-lane="cmp-jvm" data-doc-lane-kind="image" data-doc-lane-path="/d/Tz3l9WcAq0Xj5RmB7dPuKw/render.png" alt="CMP (JVM) render" hidden width="384" height="384">
         </div>
         <p class="cp-doc-status" id="cp-doc-status">Loading the Remote Compose player…</p>
-        <p class="cp-doc-status" id="cp-doc-status-wasm" hidden></p>
+        <p class="cp-doc-status" id="cp-doc-status-cmp-wasm" hidden></p>
+        <p class="cp-doc-status" id="cp-doc-status-cmp-jvm" hidden></p>
         <div class="cp-doc-facts">
         <div class="cp-stat">
   <div class="cp-stat-key">Format version</div>
@@ -116,50 +119,73 @@ Promise.all([fonts, fetch(raw).then(function (r) { return r.arrayBuffer(); })]).
 })();</script>
         <script>(function () {
   var canvas = document.getElementById("cp-doc-mount");
-  var frame = document.getElementById("cp-doc-wasm");
   var jsStatus = document.getElementById("cp-doc-status");
-  var status = document.getElementById("cp-doc-status-wasm");
   var buttons = Array.prototype.slice.call(document.querySelectorAll("[data-doc-player]"));
-  var playerPage = "/rc-player-wasm/index.html";
   var raw = new URL("/d/Tz3l9WcAq0Xj5RmB7dPuKw/raw", location.href).href;
-  var loaded = false;
-  var settled = false;
-  function frameSrc() {
-    var theme = matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
-    return playerPage + "?src=" + encodeURIComponent(raw) + "&theme=" + theme;
+  var suffix = "";
+  var lanes = {};
+  Array.prototype.slice.call(document.querySelectorAll("[data-doc-lane]")).forEach(function (el) {
+    var id = el.getAttribute("data-doc-lane");
+    lanes[id] = {
+      el: el,
+      kind: el.getAttribute("data-doc-lane-kind"),
+      path: el.getAttribute("data-doc-lane-path"),
+      status: document.getElementById("cp-doc-status-" + id),
+      loaded: false,
+      settled: false,
+    };
+  });
+  function theme() {
+    return matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+  }
+  function load(id, lane) {
+    lane.loaded = true;
+    if (lane.kind === "frame") {
+      lane.status.textContent = "Loading the Compose Multiplatform player…";
+      lane.el.src = lane.path + "?src=" + encodeURIComponent(raw) + "&theme=" + theme();
+      setTimeout(function () {
+        if (!lane.settled) lane.status.textContent = "The Compose Multiplatform player didn't start.";
+      }, 20000);
+    } else {
+      lane.status.textContent = "Rendering on the server…";
+      lane.el.onload = function () { lane.settled = true; lane.status.textContent = ""; };
+      lane.el.onerror = function () {
+        lane.settled = true;
+        lane.status.textContent = "The server could not render this document with this player.";
+      };
+      lane.el.src = lane.path + (suffix ? suffix + "&" : "?") + "rcPlayer=" +
+        encodeURIComponent(id) + "&uiMode=" + theme();
+    }
   }
   function choose(player, remember) {
-    var wasm = player === "cmp-wasm";
     buttons.forEach(function (b) {
       b.setAttribute("aria-pressed", String(b.getAttribute("data-doc-player") === player));
     });
-    canvas.hidden = wasm;
-    frame.hidden = !wasm;
-    jsStatus.hidden = wasm;
-    status.hidden = !wasm;
-    if (wasm && !loaded) {
-      loaded = true;
-      status.textContent = "Loading the Compose Multiplatform player…";
-      frame.src = frameSrc();
-      setTimeout(function () {
-        if (!settled) status.textContent = "The Compose Multiplatform player didn't start.";
-      }, 20000);
-    }
+    var js = !lanes[player];
+    canvas.hidden = !js;
+    jsStatus.hidden = !js;
+    Object.keys(lanes).forEach(function (id) {
+      var lane = lanes[id];
+      lane.el.hidden = id !== player;
+      lane.status.hidden = id !== player;
+      if (id === player && !lane.loaded) load(id, lane);
+    });
     if (remember) {
       var url = new URL(location.href);
-      if (wasm) url.searchParams.set("rcPlayer", player);
-      else url.searchParams.delete("rcPlayer");
+      if (js) url.searchParams.delete("rcPlayer");
+      else url.searchParams.set("rcPlayer", player);
       history.replaceState(null, "", url.pathname + url.search + url.hash);
     }
   }
   window.addEventListener("message", function (e) {
-    if (e.source !== frame.contentWindow || e.origin !== location.origin) return;
+    var lane = lanes["cmp-wasm"];
+    if (!lane || e.source !== lane.el.contentWindow || e.origin !== location.origin) return;
     if (e.data === "cp-rc-wasm-ready") {
-      settled = true;
-      status.textContent = "";
+      lane.settled = true;
+      lane.status.textContent = "";
     } else if (typeof e.data === "string" && e.data.indexOf("cp-rc-wasm-error:") === 0) {
-      settled = true;
-      status.textContent = "The Compose Multiplatform player could not play this document: " +
+      lane.settled = true;
+      lane.status.textContent = "The Compose Multiplatform player could not play this document: " +
         e.data.slice("cp-rc-wasm-error:".length);
     }
   });
@@ -167,7 +193,7 @@ Promise.all([fonts, fetch(raw).then(function (r) { return r.arrayBuffer(); })]).
     b.addEventListener("click", function () { choose(b.getAttribute("data-doc-player"), true); });
   });
   var initial = new URL(location.href).searchParams.get("rcPlayer");
-  if (initial === "cmp-wasm") choose(initial, false);
+  if (initial && lanes[initial]) choose(initial, false);
 })();</script>
         </main>
         <footer class="cp-site-footer">
