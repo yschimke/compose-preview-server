@@ -370,7 +370,7 @@ composeai-contracts = "3.20.0"
 # logs and serves (compose-ui-builder#583), asks a Wear widget only the widget guideline rules and a
 # screen only the screen ones (#574), and records `m3/variable-font-text` at export (#581).
 # `androidx-window` and `composeai-contracts` are unchanged.
-composeai-ui-builder = "3.95.0"
+composeai-ui-builder = "3.96.0"
 kotlinx-coroutines = "1.11.0"
 kotlinx-serialization = "1.11.0"
 ktor = "3.6.0"
