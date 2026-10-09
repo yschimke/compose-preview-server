@@ -384,10 +384,13 @@ composeai-ui-builder = "3.98.0"
 # static browser bundle). Shipped in the server tarball as `rc-player-wasm/`, which the image's
 # entrypoint already passes as `--rc-player-wasm-dir`: that serves `/rc-player-wasm/`, enables the
 # viewer's `cmp-wasm` lane, and offers the CMP player beside the TypeScript one on a `/d/<id>` page.
-rc-players = "2.2.1"
+# 2.4.0 brings 2.3.0's postMessage driver (the player embeds cross-origin), `rcPlayerLoadBytes`,
+# vendored variable fonts, draw-list sounds and per-frame redraw of clock-driven canvases, then
+# 2.4.0's StateLayout enter/exit and shared elements matched by their AnimationSpec id.
+rc-players = "2.4.0"
 # The TypeScript player's browser bundle (`remote-compose-player-js-dist`, a zip with the `dist`
 # classifier). Its own ref because rc-players publishes only the modules a release changed: the
-# bundle last changed in 2.1.2, and 2.1.3–2.2.1 never published this coordinate.
+# bundle last changed in 2.1.2, and 2.1.3–2.4.0 never published this coordinate.
 remote-compose-player-js = "2.1.2"
 kotlinx-coroutines = "1.11.0"
 kotlinx-serialization = "1.11.0"
