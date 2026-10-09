@@ -384,7 +384,7 @@ junit = "4.13.2"
 truth = "1.4.5"
 okhttp = "5.5.0"
 okio = "3.18.2"
-classgraph = "4.8.196"
+classgraph = "4.8.197"
 jmdns = "3.6.3"
 
 [libraries]
