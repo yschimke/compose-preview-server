@@ -1,5 +1,23 @@
 # Changelog
 
+## [3.112.0](https://github.com/yschimke/compose-preview-server/compare/v3.111.0...v3.112.0) (2026-10-09)
+
+
+### Features
+
+* **docs:** draw a shared .rc with the server-side cmp-jvm player ([#1460](https://github.com/yschimke/compose-preview-server/issues/1460)) ([330d49c](https://github.com/yschimke/compose-preview-server/commit/330d49ce7452940919fcae8b18e2d79ff3d61e61))
+* **docs:** toggle a shared .rc between the TypeScript and CMP players ([#1458](https://github.com/yschimke/compose-preview-server/issues/1458)) ([1534b5e](https://github.com/yschimke/compose-preview-server/commit/1534b5e95ab6abf742e7cc9dba44d152c2e1e170))
+
+
+### Bug Fixes
+
+* **deps:** compose-ui-builder 3.96.0, so a new design no longer freezes the editor ([#1457](https://github.com/yschimke/compose-preview-server/issues/1457)) ([3602f79](https://github.com/yschimke/compose-preview-server/commit/3602f79ed2c60d0fba1101975874d5fc34a421bb))
+* **deps:** update androidx-compose to v1.0.0-alpha21 ([#1447](https://github.com/yschimke/compose-preview-server/issues/1447)) ([fd038f1](https://github.com/yschimke/compose-preview-server/commit/fd038f1ae8df727f6db9c3bd6d03c087a388bb5f))
+* **deps:** update compose-multiplatform to v1.3.0 ([#1455](https://github.com/yschimke/compose-preview-server/issues/1455)) ([5dd5271](https://github.com/yschimke/compose-preview-server/commit/5dd5271f4095cf052b29c7d25887f69295df66ba))
+* **deps:** update dependency ee.schimke.composeai:rc-players-bom to v2.2.1 ([#1456](https://github.com/yschimke/compose-preview-server/issues/1456)) ([f6d2935](https://github.com/yschimke/compose-preview-server/commit/f6d2935ba9751d3a3c4fe5fbc549b1792f520ed7))
+* **deps:** update dependency io.github.classgraph:classgraph to v4.8.197 ([#1448](https://github.com/yschimke/compose-preview-server/issues/1448)) ([1bd2ade](https://github.com/yschimke/compose-preview-server/commit/1bd2ade4816f8efe0814ebfe4c407461f2922e70))
+* **deps:** update kotlin to v2.4.21 ([#1449](https://github.com/yschimke/compose-preview-server/issues/1449)) ([1d3e060](https://github.com/yschimke/compose-preview-server/commit/1d3e0607060cbc67da6483dc2bcef1f650362f28))
+
 ## [3.111.0](https://github.com/yschimke/compose-preview-server/compare/v3.110.0...v3.111.0) (2026-10-08)
 
 
