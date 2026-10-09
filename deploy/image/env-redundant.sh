@@ -23,6 +23,10 @@ set -euo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 env_file="${ENV_FILE:-${here}/.env}"
 entrypoint="${ENTRYPOINT_FILE:-${here}/entrypoint.sh}"
+# The deployment's settings.json (SETTINGS.md): a managed setting it holds is one .env should no
+# longer carry. The checkout's copy is what the publish workflow sends the box.
+settings_file="${SETTINGS_FILE:-${here}/../${DEPLOY_SETTINGS_DIR:-preview.coo.ee}/settings.json}"
+settings_schema="${SETTINGS_SCHEMA:-${here}/settings.schema.json}"
 
 [[ -f "${env_file}" ]] || {
   echo "no .env at ${env_file} — nothing to check" >&2
@@ -170,6 +174,34 @@ if ((${#continuations[@]})); then
 fi
 
 # ---------------------------------------------------------------------------------------------
+# What settings.json sets, as its variables would hold it (the entrypoint's own spelling).
+# ---------------------------------------------------------------------------------------------
+
+# Read with jq, and only when there is a file to read: a host without jq is told so rather than
+# advised wrongly, and everything below still runs.
+declare -A settings_value_of
+settings_note=""
+if [[ -f "${settings_file}" && -f "${settings_schema}" ]]; then
+  if command -v jq > /dev/null 2>&1; then
+    while IFS=$'\t' read -r key value; do
+      [[ -n "${key}" ]] && settings_value_of["${key}"]="${value}"
+    done < <(jq -r --slurpfile schema "${settings_schema}" '
+        . as $doc
+        | $schema[0] | paths(type == "object" and has("x-env")) as $p | getpath($p) as $leaf
+        | ($doc | getpath([$p[] | select(. != "properties")])) as $v
+        | select($v != null)
+        | [$leaf."x-env",
+            (if ($v | type) == "boolean" then (if $v then "1" else "0" end)
+             elif ($v | type) == "array" then
+               ($v | join(",")) as $j | if $j == "" then ($leaf."x-empty" // "") else $j end
+             else ($v | tostring) end)]
+        | @tsv' "${settings_file}" 2>/dev/null || true)
+  else
+    settings_note="jq is not installed, so .env lines were not compared with settings.json."
+  fi
+fi
+
+# ---------------------------------------------------------------------------------------------
 # Classify.
 # ---------------------------------------------------------------------------------------------
 
@@ -181,6 +213,8 @@ fi
 migration_sensitive=(DEPLOY_HOOK_TOKEN)
 
 redundant=()
+settings_duplicate=()
+settings_override=()
 empty=()
 empty_load_bearing=()
 active=()
@@ -200,6 +234,13 @@ for key in "${order[@]}"; do
       empty_load_bearing+=("${key}")
     else
       empty+=("${key}")
+    fi
+  elif [[ -n "${settings_value_of[$key]+set}" ]]; then
+    # Compared, never printed: the line wins over settings.json either way, so say which kind.
+    if [[ "${value}" == "${settings_value_of[$key]}" ]]; then
+      settings_duplicate+=("${key}")
+    else
+      settings_override+=("${key}")
     fi
   elif [[ -n "${default_of[$key]+set}" && "${value}" == "${default_of[$key]}" ]]; then
     redundant+=("${key}=${default_of[$key]}")
@@ -222,6 +263,24 @@ if ((${#redundant[@]})); then
   printf '  %s\n' "${redundant[@]}"
 else
   echo "Nothing restates a default."
+fi
+
+if ((${#settings_duplicate[@]})); then
+  echo
+  echo "Duplicating settings.json — safe to delete once the publish has landed:"
+  printf '  %s\n' "${settings_duplicate[@]}"
+fi
+
+if ((${#settings_override[@]})); then
+  echo
+  echo "Overriding settings.json — this .env line wins, so the reviewed value does not apply:"
+  printf '  %s\n' "${settings_override[@]}"
+  echo "  Delete the line to let settings.json apply, or move the value into settings.json first."
+fi
+
+if [[ -n "${settings_note}" ]]; then
+  echo
+  echo "${settings_note}"
 fi
 
 if ((${#empty[@]})); then

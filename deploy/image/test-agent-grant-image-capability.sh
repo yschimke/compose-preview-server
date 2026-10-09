@@ -11,10 +11,11 @@
 #     which is exactly the gap #268 was about: a capability that is configured, admitted everywhere
 #     else, and absent at the one moment it matters.
 #
-# So the default is conditional, in two places that have to agree: the compose file adds `images`
-# when SERVE_IMAGE_UPLOAD_REPO names a repository, and the entrypoint drops it again for the one
-# case compose cannot see — SERVE_ACCEPT_IMAGES=0 with the repository still named, which that file
-# documents as "name it and keep the lane shut".
+# So the default is conditional, in two stanzas of the entrypoint that have to agree: the default
+# adds `images` when SERVE_IMAGE_UPLOAD_REPO names a repository, and the guard drops it again for
+# the one case the default cannot see — SERVE_ACCEPT_IMAGES=0 with the repository still named,
+# documented as "name it and keep the lane shut". (The default lived in docker-compose.yml until
+# settings.json, which can only fill a variable compose leaves empty.)
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -22,13 +23,17 @@ compose="${COMPOSE_FILE_UNDER_TEST:-${here}/docker-compose.yml}"
 entrypoint="${ENTRYPOINT_FILE:-${here}/entrypoint.sh}"
 
 # ---------------------------------------------------------------------------
-# The compose half. `${VAR:-…}` and `${VAR:+…}` mean the same thing to Compose interpolation and to
-# bash, so the default expression is evaluated here rather than reimplemented — a test that restated
-# the rule could agree with itself while disagreeing with the file.
+# The default half. The entrypoint's own expression is evaluated here rather than reimplemented — a
+# test that restated the rule could agree with itself while disagreeing with the file.
 # ---------------------------------------------------------------------------
-default_expr="$(sed -n 's/^ *SERVE_AGENT_GRANT_CAPABILITIES: "\(.*\)"$/\1/p' "${compose}")"
+default_expr="$(sed -n '/^  # >>> agent-grant-capabilities-default$/,/^  # <<< agent-grant-capabilities-default$/s/^ *: "\(.*\)"$/\1/p' "${entrypoint}")"
 [[ -n "${default_expr}" ]] || {
-  echo "FAIL: no SERVE_AGENT_GRANT_CAPABILITIES line in ${compose}" >&2
+  echo "FAIL: no agent-grant-capabilities-default stanza in ${entrypoint}" >&2
+  exit 1
+}
+# And compose must leave the variable empty, or the default above (and settings.json) never runs.
+grep -Fq 'SERVE_AGENT_GRANT_CAPABILITIES: "${SERVE_AGENT_GRANT_CAPABILITIES:-}"' "${compose}" || {
+  echo "FAIL: ${compose} gives SERVE_AGENT_GRANT_CAPABILITIES a default of its own" >&2
   exit 1
 }
 
@@ -55,7 +60,7 @@ for want in ui-builder-read ui-builder-write ui-builder-export; do
     exit 1
   }
 done
-echo "PASS: the compose default offers images exactly when an upload repository is named"
+echo "PASS: the default offers images exactly when an upload repository is named"
 
 # ---------------------------------------------------------------------------
 # The entrypoint half — the guard that catches what compose cannot see. Extracted and run rather

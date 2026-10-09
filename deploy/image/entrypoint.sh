@@ -61,12 +61,6 @@ if [[ -f /opt/compose-preview-server/rc-player-wasm/index.html ]]; then
   args+=(--rc-player-wasm-dir /opt/compose-preview-server/rc-player-wasm)
 fi
 
-# The Remote Compose player the viewer opens on, where a preview enables it (e.g. `cmp-android`,
-# offered only on catalogs whose live bundle carries rc-player-compose). Empty ⇒ the server's
-# built-in order: androidx-embedded, then androidx-view, then camaelon-js.
-[[ -n "${SERVE_RC_DEFAULT_PLAYER:-}" ]] &&
-  args+=(--rc-default-player "${SERVE_RC_DEFAULT_PLAYER}")
-
 # Auth posture (see deploy/cloudrun/entrypoint.sh): SERVE_PUBLIC=1 → the open
 # public preview server (preview.coo.ee); otherwise token-gated (SERVE_TOKEN
 # required, fail closed).
@@ -107,6 +101,95 @@ case "${SERVE_ROLE:-}" in
     exit 64
     ;;
 esac
+
+# The deployment's settings.json: every NON-SECRET setting, reviewed in the repository and published
+# to /config by PUT /admin/settings (.github/scripts/publish-config-to-box.sh), instead of lines in
+# this box's private .env. See deploy/image/SETTINGS.md for the list.
+#
+# Applied HERE, as environment variables, and before anything below reads them: much of this file
+# derives one setting from another (the image lane from the upload repository, the grant
+# capabilities from the image lane, the GitHub auth flags from the client id), and filling the
+# variables first makes a value from settings.json behave exactly as the same line in .env would.
+# Reading it from the config volume is also what keeps a setting from depending on the box's
+# docker-compose.yml, which lags whenever the checkout is not pulled: nothing here is passed through
+# compose.
+#
+# Precedence: default < settings.json < environment. A variable the environment sets non-empty is
+# left alone, so an emergency .env line still wins — and SERVE_SETTINGS_SOURCES records which won,
+# so the server can say so at startup and on GET /admin/settings, and a stale .env line shows up.
+#
+# The variable for each key comes from the schema (generated from ServeSettings.kt, so the mapping
+# is written once). Only the keys the schema lists for this container's role are read: the
+# playground shares /config but must not, say, turn on the catalog MCP its role does not run.
+# Applied best-effort: an unreadable or invalid file is reported and skipped, never fatal, because
+# a box has to come up on what it has.
+: "${SERVE_SETTINGS_FILE:=/config/settings.json}"
+: "${SERVE_SETTINGS_SCHEMA:=/etc/compose-preview/settings.schema.json}"
+apply_settings_file() {
+  local file="$1" schema="$2" role="$3" sources=() applied=0 overridden=0 env value
+  [[ "${file}" != "none" && -f "${file}" ]] || return 0
+  if ! command -v jq > /dev/null 2>&1 || [[ ! -f "${schema}" ]]; then
+    echo "entrypoint: warn: ${file} not applied — this image lacks jq or ${schema}" >&2
+    return 0
+  fi
+  local pairs
+  # One `VAR<TAB>value` line per setting the file sets, for this role. Booleans become 1/0 and
+  # lists comma-joined; an empty list is the setting's own "nobody" spelling (`x-empty`, e.g.
+  # `none` for SERVE_UI_BUILDER_ADMIN_ACTORS, whose default is not empty).
+  if ! pairs="$(jq -r --arg role "${role}" --slurpfile schema "${schema}" '
+      . as $doc
+      | [$schema[0] | paths(type == "object" and has("x-env")) as $p
+          | getpath($p) as $leaf
+          | select(($leaf."x-roles" // ["preview"]) | index($role))
+          | {path: [$p[] | select(. != "properties")], env: $leaf."x-env",
+             empty: ($leaf."x-empty" // "")}]
+      | .[]
+      | . as $s
+      | ($doc | getpath($s.path)) as $v
+      | select($v != null)
+      | [$s.env,
+          (if ($v | type) == "boolean" then (if $v then "1" else "0" end)
+           elif ($v | type) == "array" then
+             ($v | join(",")) as $joined | if $joined == "" then $s.empty else $joined end
+           else ($v | tostring) end)]
+      | @tsv' "${file}" 2>&1)"; then
+    echo "entrypoint: warn: ${file} is not valid settings JSON — not applied: ${pairs}" >&2
+    return 0
+  fi
+  while IFS=$'\t' read -r env value; do
+    [[ "${env}" =~ ^SERVE_[A-Z0-9_]+$ ]] || continue
+    if [[ -n "${!env:-}" ]]; then
+      sources+=("${env}=environment")
+      overridden=$((overridden + 1))
+    else
+      export "${env}=${value}"
+      sources+=("${env}=settings.json")
+      applied=$((applied + 1))
+    fi
+  done <<< "${pairs}"
+  # Variables the environment set that the file does not: reported as the environment's too, so
+  # the server can tell "from .env" from "default" for every managed setting.
+  local managed
+  managed="$(jq -r --arg role "${role}" '[paths(type == "object" and has("x-env")) as $p
+      | getpath($p) | select((."x-roles" // ["preview"]) | index($role)) | ."x-env"] | .[]' \
+    "${schema}" 2>/dev/null || true)"
+  while IFS= read -r env; do
+    [[ "${env}" =~ ^SERVE_[A-Z0-9_]+$ && -n "${!env:-}" ]] || continue
+    [[ " ${sources[*]} " == *" ${env}="* ]] || sources+=("${env}=environment")
+  done <<< "${managed}"
+  SERVE_SETTINGS_SOURCES="$(IFS=,; printf '%s' "${sources[*]}")"
+  export SERVE_SETTINGS_SOURCES
+  echo "entrypoint: ${file}: ${applied} setting(s) applied, ${overridden} overridden by the environment" >&2
+}
+apply_settings_file "${SERVE_SETTINGS_FILE}" "${SERVE_SETTINGS_SCHEMA}" "${SERVE_ROLE:-preview}"
+[[ "${SERVE_SETTINGS_FILE}" != "none" ]] && args+=(--settings-file "${SERVE_SETTINGS_FILE}")
+
+# The Remote Compose player the viewer opens on, where a preview enables it (e.g. `cmp-android`,
+# offered only on catalogs whose live bundle carries rc-player-compose). Empty ⇒ the server's
+# built-in order: androidx-embedded, then androidx-view, then camaelon-js.
+[[ -n "${SERVE_RC_DEFAULT_PLAYER:-}" ]] &&
+  args+=(--rc-default-player "${SERVE_RC_DEFAULT_PLAYER}")
+
 
 # The public-server pillars. The prebuilt image has no catalog modules to build a
 # Wasm app from, so its in-browser tier rides --catalogs: `serve` fetches each
@@ -890,11 +973,16 @@ if [[ "${SERVE_AGENT_GRANTS:-}" == "1" || "${SERVE_AGENT_GRANTS:-}" == "true" ]]
   [[ -n "${SERVE_AGENT_GRANT_SCOPES:-}" ]] &&
     args+=(--agent-grant-scopes "${SERVE_AGENT_GRANT_SCOPES}")
   # Independent of the scope ceiling above. Each named capability is admitted only when its
-  # backing lane is enabled; the prebuilt image always carries the UI-builder lane.
+  # backing lane is enabled; the prebuilt image always carries the UI-builder lane, so those three
+  # are the default. The default is here rather than in docker-compose.yml so settings.json
+  # (`agents.grantCapabilities`) can set it: it fills only what compose leaves empty.
+  # >>> agent-grant-capabilities-default
+  : "${SERVE_AGENT_GRANT_CAPABILITIES:=ui-builder-read,ui-builder-write,ui-builder-export${SERVE_IMAGE_UPLOAD_REPO:+,images}}"
+  # <<< agent-grant-capabilities-default
   #
   # `images` is the one that can be fatal: the server refuses to start when it is offered on a box
   # with no image lane, because a human would tick a capability whose every upload then 404s. The
-  # compose default adds it whenever SERVE_IMAGE_UPLOAD_REPO names a repository, which is one
+  # default adds it whenever SERVE_IMAGE_UPLOAD_REPO names a repository, which is one
   # variable short of the truth — `SERVE_ACCEPT_IMAGES=0` keeps the repository named and the lane
   # shut, a combination that file documents as supported. Drop it here, where both answers are
   # known, rather than let a documented configuration fail to boot. An operator who named the

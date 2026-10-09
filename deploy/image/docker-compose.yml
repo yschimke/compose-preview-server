@@ -62,7 +62,11 @@ services:
     init: true
     pull_policy: always
     environment:
-      SERVE_UMAMI_ENABLED: "${SERVE_UMAMI_ENABLED:-0}"
+      # Analytics, the UI-builder start URL and the other non-secret settings below are better set in
+      # the deployment's settings.json (deploy/image/SETTINGS.md); a line in .env still overrides it.
+      # Every such variable is passed through EMPTY by default here, or settings.json could never
+      # fill it.
+      SERVE_UMAMI_ENABLED: "${SERVE_UMAMI_ENABLED:-}"
       SERVE_UMAMI_URL: "${SERVE_UMAMI_URL:-}"
       SERVE_UMAMI_WEBSITE_ID: "${SERVE_UMAMI_WEBSITE_ID:-}"
       DOMAIN: "${DOMAIN:-}"
@@ -82,6 +86,9 @@ services:
       # (docker compose exec preview vi /config/catalogs.json, then restart) or POST to
       # /admin/catalogs to publish a catalog — no image rebuild, no compose edit.
       SERVE_CATALOGS_FILE: "${SERVE_CATALOGS_FILE:-}"
+      # The deployment's non-secret settings (deploy/image/SETTINGS.md), on the same volume. Empty is
+      # /config/settings.json, which PUT /admin/settings writes; `none` ignores it.
+      SERVE_SETTINGS_FILE: "${SERVE_SETTINGS_FILE:-}"
       # Top-level sites: <host>=<system>[,…] — serve one of those catalogs on a hostname of its
       # own, where it looks like the whole server (e.g. m3.preview.coo.ee=m3-catalog). Same
       # sessions, same pixels, no extra load; the proxy in front must route + terminate TLS for
@@ -100,9 +107,9 @@ services:
       # mutations. Safe to give a narrower audience than SERVE_ADMIN_TOKEN.
       SERVE_ADMIN_READ_TOKEN: "${SERVE_ADMIN_READ_TOKEN:-}"
       # UI Builder-only administrators. These GitHub actors can administer every shared design
-      # and its folder placement, but gain no catalog/trust/site/onboarding authority. The hosted
-      # preview box defaults to its operator; set `none` to disable the default.
-      SERVE_UI_BUILDER_ADMIN_ACTORS: "${SERVE_UI_BUILDER_ADMIN_ACTORS:-github:yschimke}"
+      # and its folder placement, but gain no catalog/trust/site/onboarding authority. Empty takes
+      # the entrypoint's default (the hosted box's operator); set `none` to disable it.
+      SERVE_UI_BUILDER_ADMIN_ACTORS: "${SERVE_UI_BUILDER_ADMIN_ACTORS:-}"
       # `public` starts new UI-builder designs readable by anyone with the link (owners can make one
       # private); `private` (the default) keeps them to their owner and whoever they share with.
       SERVE_UI_BUILDER_DEFAULT_VISIBILITY: "${SERVE_UI_BUILDER_DEFAULT_VISIBILITY:-}"
@@ -349,21 +356,11 @@ services:
       # default of 1 would break every box without an OAuth app). `0` opts out explicitly.
       SERVE_AGENT_GRANTS: "${SERVE_AGENT_GRANTS:-}"
       SERVE_AGENT_GRANT_SCOPES: "${SERVE_AGENT_GRANT_SCOPES:-}"
-      # Non-cumulative permissions a grant may carry beside its scope. UI-builder capabilities are
-      # enabled by default because this image always packages the authenticated design API.
-      #
-      # `images` joins them exactly when SERVE_IMAGE_UPLOAD_REPO names a repository — i.e. when this
-      # box runs the upload lane at all. It is conditional rather than flat because the server
-      # REFUSES TO START when the capability is offered without the lane ("a granted upload would
-      # have nowhere to go"), so an unconditional default would stop every box that does not upload.
-      # An agent still holds it only when a human ticks it on the approval page, and only when that
-      # human has access to the repository uploads are gated on — which since 2.21.0 is asked of the
-      # UPLOAD repo rather than the sign-in one, so the two may differ.
-      #
-      # The one case this line cannot see is SERVE_ACCEPT_IMAGES=0 with the repository still named
-      # (the documented "name it and keep the lane shut" opt-out): the entrypoint drops `images`
-      # there, where both answers are known. Set the variable explicitly to override either way.
-      SERVE_AGENT_GRANT_CAPABILITIES: "${SERVE_AGENT_GRANT_CAPABILITIES:-ui-builder-read,ui-builder-write,ui-builder-export${SERVE_IMAGE_UPLOAD_REPO:+,images}}"
+      # Non-cumulative permissions a grant may carry beside its scope. Empty takes the entrypoint's
+      # default: the three UI-builder capabilities, plus `images` exactly when this box runs the
+      # upload lane. The default lives there, not here, because settings.json
+      # (`agents.grantCapabilities`) can only fill a variable compose leaves empty.
+      SERVE_AGENT_GRANT_CAPABILITIES: "${SERVE_AGENT_GRANT_CAPABILITIES:-}"
       SERVE_AGENT_GRANT_MAX_TTL: "${SERVE_AGENT_GRANT_MAX_TTL:-}"
       SERVE_AGENT_GRANT_MAX_ACTIVE: "${SERVE_AGENT_GRANT_MAX_ACTIVE:-}"
       SERVE_AGENT_GRANT_RATE_LIMIT: "${SERVE_AGENT_GRANT_RATE_LIMIT:-}"
@@ -538,6 +535,7 @@ services:
       SERVE_CATALOGS_UNLISTED: "${SERVE_CATALOGS_UNLISTED:-}"
       SERVE_CATALOG_REGISTRY: "${SERVE_CATALOG_REGISTRY:-}"
       SERVE_CATALOGS_FILE: "${SERVE_CATALOGS_FILE:-}"
+      SERVE_SETTINGS_FILE: "${SERVE_SETTINGS_FILE:-}"
       SERVE_TRUST_STORE: "${SERVE_TRUST_STORE:-}"
       SERVE_CATALOG_MAX_IMAGES: "${SERVE_CATALOG_MAX_IMAGES:-}"
       SERVE_CATALOG_REFRESH: "${SERVE_CATALOG_REFRESH:-}"

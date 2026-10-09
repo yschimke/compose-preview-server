@@ -1,0 +1,9 @@
+{
+  "$schema": "../image/settings.schema.json",
+  "uiBuilder": {
+    "guidelines": {
+      "model": "deepseek/deepseek-v4.1-flash",
+      "users": ["yschimke"]
+    }
+  }
+}

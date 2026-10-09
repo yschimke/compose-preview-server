@@ -149,6 +149,64 @@ with independent `ui-builder-read`, `ui-builder-write` and `ui-builder-export` c
 authoritative state defaults to `/config/ui-builder-state` on the persistent `preview_config`
 volume, and `SERVE_UI_BUILDER_STATE_DIR=none` is the explicit static-only opt-out.
 
+### Deployment settings: `settings.json` instead of `.env`
+
+Every **non-secret** setting — the guidelines model and who may run it, the catalog MCP, upload
+lanes, analytics, the public half of GitHub sign-in — lives in the deployment's
+[`settings.json`](../preview.coo.ee/settings.json), not in the box's `.env`. It is checked in,
+reviewed in a pull request, validated against [`settings.schema.json`](settings.schema.json) by
+`ServeSettingsTest` (a typo fails the PR, with the key it probably meant), and published by the
+`Publish preview deployment config` workflow over `PUT /admin/settings`. No SSH, no `sed`, no
+container recreate for the settings marked **live**. [`SETTINGS.md`](SETTINGS.md) lists every one,
+generated from `ServeSettings.kt`.
+
+```json
+{
+  "$schema": "../image/settings.schema.json",
+  "uiBuilder": { "guidelines": { "model": "deepseek/deepseek-v4.1-flash", "users": ["yschimke"] } }
+}
+```
+
+- **Precedence:** built-in default, then `settings.json`, then `.env`. An `.env` line still wins, so
+  an emergency fix works without a pull request — and is reported: the startup log and
+  `GET /admin/settings` say where each value came from (`default`, `settings.json` or
+  `environment`) and flag every `.env` line shadowing a reviewed value.
+- **Applying:** a **live** setting (the guidelines model, users, orgs, picture budget and triage)
+  is re-read the moment it is published; the reply lists it under `applied`. A **restart** setting
+  is stored and applies at the box's next start; the reply lists it under `pending`, and so does
+  `GET /admin/settings` (`"pending": true`) until the box restarts.
+- **How it reaches the server:** the entrypoint reads `/config/settings.json` (written by the admin
+  route, on the `preview_config` volume) and fills each `SERVE_*` variable compose left empty,
+  *before* deriving anything from them — so a value there behaves exactly as the same line in
+  `.env` would. Nothing passes through `docker-compose.yml`, so a box whose checkout lags the image
+  still gets every setting; that drift is what kept the guidelines variables off preview.coo.ee
+  until a manual `git pull`. The playground container reads only the settings it must agree with
+  `preview` on (sign-in, the upload repository, the registry, the start URL).
+- **What stays in `.env`:** secrets (`SERVE_TOKEN`, `SERVE_ADMIN_TOKEN`, `DEPLOY_HOOK_TOKEN`, the
+  OAuth client and cookie secrets, the OpenRouter key and its GitHub token) — the file is public —
+  and facts about the machine: `PREVIEW_MEM_LIMIT`, `SERVE_JAVA_OPTS`, `COMPOSE_PROFILES`, the
+  rollout cadence, `DOMAIN` / `SITE_DOMAINS` / `SERVE_UI_BUILDER_HOST` / `PLAYGROUND_UPSTREAM`
+  (caddy reads them too), the playground sandbox, and the sizing knobs (`SERVE_LIVE_SEATS`,
+  `SERVE_PLAYGROUND_COMPILE_SLOTS`, `SERVE_BACKGROUND_RENDERS`, `SERVE_CATALOG_CACHE_MAX_BYTES`).
+  Those are sized against this box's memory and cores and have to move with `PREVIEW_MEM_LIMIT`,
+  which is why they are not reviewed config of their own. The builder's catalog set stays in
+  `catalogs.json`'s `uiBuilder` block (below) and top-level sites in its `sites`.
+
+**Moving a box over.** Draft the file from the box's current `.env` — only keys the schema lists are
+read, so no secret can reach the draft:
+
+```bash
+./env-to-settings.sh .env > settings.json.draft     # or, on a host without jq, from the image:
+docker compose run --rm --no-deps -v "$PWD/.env:/tmp/box.env:ro" \
+  --entrypoint /usr/local/bin/env-to-settings.sh preview /tmp/box.env
+```
+
+Commit it as `deploy/<deployment>/settings.json`, merge, and let the workflow publish it. With the
+`.env` lines still in place nothing changes — they still win. `./env-redundant.sh` then lists them
+under **Duplicating settings.json** (same value: delete) or **Overriding settings.json** (different
+value: decide which is right, then delete). Each deletion applies at the next
+`docker compose up -d preview`.
+
 ### UI-builder catalog settings: `catalogs.json` instead of `.env`
 
 Which catalogs the builder offers, and how each is defined, can be maintained in the deployment's
@@ -626,6 +684,11 @@ it strips an inline comment from an unquoted value the way Compose does, so a li
 README complete with its `# the default` still reads as redundant; and where a compose file only
 passes a variable through (`${VAR:-}`), the entrypoint's default is the one compared against.
 
+A line holding a setting the deployment's `settings.json` also sets is reported apart from the
+rest: **Duplicating settings.json** when the values match (delete it), **Overriding settings.json**
+when they differ — that `.env` line wins, so the reviewed value is not in force. It compares the
+checkout's `deploy/preview.coo.ee/settings.json` (`SETTINGS_FILE` to point elsewhere) and needs `jq`.
+
 ### Warming the theme cache aggressively
 
 The pressure gate's defaults assume a box whose spare capacity belongs to visitors. While the cache
@@ -839,6 +902,10 @@ SERVE_UI_BUILDER_GUIDELINES_OPENROUTER_KEY=sk-or-...   # read by the server, nev
 SERVE_UI_BUILDER_GUIDELINES_USERS=yschimke             # GitHub logins who may spend it, and/or
 SERVE_UI_BUILDER_GUIDELINES_ORGS=google                # members of these GitHub orgs
 ```
+
+Only the key (and the GitHub token below) belongs in `.env`. Who may spend it, the model, the
+picture budget and the evidence triage are `uiBuilder.guidelines` in
+[`settings.json`](SETTINGS.md), and they change **live** when it is published: no restart, no SSH.
 
 A key with nobody named is refused at startup. An agent working under an access grant counts as the
 person who approved it. Org membership is asked of GitHub and remembered for ten minutes; without
@@ -1566,7 +1633,9 @@ Unset, it uses the socket peer, the request's `Host` and the connection scheme.
 | File | Purpose |
 |------|---------|
 | `Dockerfile` | Downloads the released server distribution and carries the live-render daemons. |
-| `entrypoint.sh` | Maps `$PORT`/`$SERVE_TOKEN` onto serve flags; generous `--timeout`. |
+| `entrypoint.sh` | Applies `/config/settings.json`, then maps the `SERVE_*` environment onto serve flags; generous `--timeout`. |
+| `settings.schema.json` + `SETTINGS.md` | The deployment `settings.json` schema the entrypoint maps from, and its reference — both generated from `ServeSettings.kt` (`UPDATE_SERVE_SETTINGS_REFERENCE=true`, or `scripts/regenerate-goldens.sh`). `test-settings-file.sh` exercises the merge. |
+| `env-to-settings.sh` + `test-env-to-settings.sh` | Draft a deployment's `settings.json` from a box's `.env`, never reading a secret (see *Deployment settings*). |
 | `docker-compose.yml` + `Caddyfile` | Pull the image + Caddy auto-HTTPS + zero-downtime (`rollout`) / Watchtower auto-updates + the `hook` instant-roll webhook. |
 | `docker-compose.deploy-config.yml` + `test-deploy-config-mount.sh` | Opt-in overlay serving a deployment's `catalogs.json` / `producers.json` read-only from version control instead of the volume (see *Config from version control*), and its offline self-test (run by `ci.yml`). |
 | `rollout.sh` | Poll loop / one-shot that pulls `preview` and rolls it via docker-rollout. |

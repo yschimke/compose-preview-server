@@ -414,6 +414,12 @@ class ServeHttpServer(
    */
   private val uiBuilderSettingsAdmin: ServeUiBuilderSettingsAdmin? = null,
   /**
+   * The deployment's **settings** ([ServeSettingsAdmin]): `settings.json`, the reviewed home of
+   * every non-secret `SERVE_*` setting, with where each serving value came from. Gated by
+   * [adminToken]; null ⇒ the `/admin/settings` routes are not registered.
+   */
+  private val settingsAdmin: ServeSettingsAdmin? = null,
+  /**
    * Runtime **UI-builder** administration ([ServeUiBuilderAdmin]) — listing every design on the
    * host and deleting one, whoever owns it. Gated by [adminToken], [adminReadToken], or a
    * configured [uiBuilderAdministrators] identity; null ⇒ the `/admin/ui-builder` routes are not
@@ -540,6 +546,8 @@ class ServeHttpServer(
   /** `--ui-builder-guidelines-picture-budget`, in seconds. */
   private val uiBuilderGuidelinesPictureBudgetSeconds: Long =
     DEFAULT_GUIDELINES_PICTURE_BUDGET_SECONDS,
+  /** The picture budget as `settings.json` now sets it; null ⇒ the startup value, fixed. */
+  private val uiBuilderGuidelinesPictureBudgetSecondsLive: (() -> Long)? = null,
   /**
    * Resolve a browser session into an image-uploader login for [ServeImageUploadAuth.repository].
    *
@@ -913,7 +921,10 @@ class ServeHttpServer(
         widgetThumbnail = { designId, revision ->
           uiBuilderThumbnails?.nativeWidgetThumbnail(designId, revision)
         },
-        guidelinePictureBudgetMillis = uiBuilderGuidelinesPictureBudgetSeconds * 1_000,
+        guidelinePictureBudgetMillis = {
+          (uiBuilderGuidelinesPictureBudgetSecondsLive?.invoke()
+            ?: uiBuilderGuidelinesPictureBudgetSeconds) * 1_000
+        },
         catalogGuidelines = uiBuilderCatalogGuidelines,
       )
     }
@@ -1034,6 +1045,9 @@ class ServeHttpServer(
   /** As [adminEnabled], for the `/admin/ui-builder/config` routes. */
   private val uiBuilderSettingsAdminEnabled: Boolean =
     uiBuilderSettingsAdmin != null && !adminToken.isNullOrBlank()
+
+  /** As [adminEnabled], for the `/admin/settings` routes. */
+  private val settingsAdminEnabled: Boolean = settingsAdmin != null && !adminToken.isNullOrBlank()
 
   /** As [adminEnabled], for `/admin/ui-builder`, with the additional UI-builder-only actor gate. */
   private val uiBuilderAdminEnabled: Boolean =
@@ -2272,6 +2286,24 @@ class ServeHttpServer(
           delete("/admin/ui-builder/config") {
             if (rejectBadAdminToken()) return@delete
             respondAdminUiBuilderSettingsResult(withContext(Dispatchers.IO) { admin.clear() })
+          }
+        }
+
+        // The deployment's settings.json: live settings apply on PUT, the rest at the next start.
+        // Operator token to change, read token to look: every value here is non-secret.
+        if (settingsAdminEnabled) {
+          val admin = settingsAdmin!!
+          get("/admin/settings") {
+            if (rejectBadAdminToken(allowReadToken = true)) return@get
+            respondAdminSettings(admin)
+          }
+          put("/admin/settings") {
+            if (rejectBadAdminToken()) return@put
+            handleAdminSettingsSet(admin)
+          }
+          delete("/admin/settings") {
+            if (rejectBadAdminToken()) return@delete
+            respondAdminSettingsResult(withContext(Dispatchers.IO) { admin.clear() })
           }
         }
 
@@ -6237,6 +6269,78 @@ class ServeHttpServer(
       is ServeUiBuilderSettingsAdmin.Result.Invalid ->
         call.respondText(result.reason, status = HttpStatusCode.BadRequest)
       is ServeUiBuilderSettingsAdmin.Result.Unavailable ->
+        call.respondText(result.reason, status = HttpStatusCode.ServiceUnavailable)
+    }
+  }
+
+  /**
+   * `GET /admin/settings`: `settings.json` as stored, and for every setting what is serving, where
+   * it came from, and whether the file or the environment changes it at the next start.
+   */
+  private suspend fun RoutingContext.respondAdminSettings(admin: ServeSettingsAdmin) {
+    val (configured, problem) =
+      withContext(Dispatchers.IO) {
+        runCatching { admin.configured() }.fold({ it to null }, { null to it.message })
+      }
+    val entries = withContext(Dispatchers.IO) { admin.entries(configured) }
+    call.respondText(
+      JSON.encodeToString(
+        AdminSettingsResponse.serializer(),
+        AdminSettingsResponse(
+          file = admin.displayPath,
+          configured = configured,
+          settings = entries,
+          restartRequired = entries.any { it.pending },
+          problems = listOfNotNull(problem?.let { "settings.json could not be read: $it" }),
+        ),
+      ),
+      ContentType.Application.Json,
+    )
+  }
+
+  /** `PUT /admin/settings`: replace `settings.json` with the JSON body. */
+  private suspend fun RoutingContext.handleAdminSettingsSet(admin: ServeSettingsAdmin) {
+    val body =
+      withContext(Dispatchers.IO) {
+        call.receiveStream().use { readCapped(it, MAX_ADMIN_BODY_BYTES) }
+      }
+    if (body == null) {
+      call.respondText("request body too large", status = HttpStatusCode.PayloadTooLarge)
+      return
+    }
+    val document = runCatching {
+      ServeSettings.parse(body.decodeToString())
+    }
+      .getOrElse {
+        call.respondText("invalid settings: ${it.message}", status = HttpStatusCode.BadRequest)
+        return
+      }
+    respondAdminSettingsResult(withContext(Dispatchers.IO) { admin.set(document) })
+  }
+
+  private suspend fun RoutingContext.respondAdminSettingsResult(result: ServeSettingsAdmin.Result) {
+    when (result) {
+      is ServeSettingsAdmin.Result.Ok ->
+        call.respondText(
+          JSON.encodeToString(
+            AdminSettingsResult.serializer(),
+            AdminSettingsResult(
+              status = "ok",
+              applied = result.applied,
+              pending = result.entries.filter { it.pending }.map { it.key },
+              overridden = result.entries.filter { it.overridden }.map { it.key },
+              restartRequired = result.entries.any { it.pending },
+              problems = result.problems,
+            ),
+          ),
+          ContentType.Application.Json,
+        )
+      is ServeSettingsAdmin.Result.Invalid ->
+        call.respondText(
+          result.problems.joinToString("\n"),
+          status = HttpStatusCode.BadRequest,
+        )
+      is ServeSettingsAdmin.Result.Unavailable ->
         call.respondText(result.reason, status = HttpStatusCode.ServiceUnavailable)
     }
   }
@@ -19978,6 +20082,36 @@ private data class AdminUiBuilderSettingsResult(
   val status: String,
   val configured: ServeCatalogsConfig.UiBuilderSettings?,
   val next: ServeUiBuilderSettingsDto,
+  val restartRequired: Boolean,
+  val problems: List<String>,
+)
+
+/**
+ * `GET /admin/settings`. [configured] is `settings.json` as stored; each of [settings] says what is
+ * serving, where it came from, and what the next start changes.
+ */
+@Serializable
+private data class AdminSettingsResponse(
+  val schema: String = "compose-preview-serve/admin-settings/v1",
+  val file: String?,
+  val configured: JsonObject?,
+  val settings: List<ServeSettingsAdmin.Entry>,
+  val restartRequired: Boolean,
+  val problems: List<String> = emptyList(),
+)
+
+/**
+ * The result of `PUT`/`DELETE /admin/settings`: the settings [applied] live, those [pending] the
+ * next start, and those [overridden] by the environment (so not applying at all until the `.env`
+ * line goes).
+ */
+@Serializable
+private data class AdminSettingsResult(
+  val schema: String = "compose-preview-serve/admin-settings-result/v1",
+  val status: String,
+  val applied: List<String>,
+  val pending: List<String>,
+  val overridden: List<String>,
   val restartRequired: Boolean,
   val problems: List<String>,
 )

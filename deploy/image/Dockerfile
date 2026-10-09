@@ -34,12 +34,14 @@ ARG DAEMON_VERSION
 # `Profile.CUSTOM -> customCommand`) and so cannot bind the per-session work dir
 # that only exists at compile time. `Profile.BWRAP` builds its argv from `Paths`
 # and binds it correctly. See deploy/image/README.md § "Containment".
+#
+# `jq` is for the entrypoint's settings.json merge (see the settings.schema.json COPY below).
 # ---------------------------------------------------------------------------
 FROM eclipse-temurin:21.0.12_8-jdk AS base
 COPY scripts/install-linux-font-fallbacks.sh /usr/local/bin/install-linux-font-fallbacks
 RUN COMPOSEAI_CLEAN_APT=1 /usr/local/bin/install-linux-font-fallbacks \
       libfreetype6 libfontconfig1 libgl1 libglx-mesa0 libgl1-mesa-dri \
-      curl ca-certificates git bubblewrap
+      curl ca-certificates git bubblewrap jq
 ENV LIBGL_ALWAYS_SOFTWARE=1 \
     GRADLE_USER_HOME=/root/.gradle
 
@@ -420,6 +422,14 @@ COPY trust/ /trust/
 # /admin/catalogs — and an image pull never overwrites it. Mount /config on a volume
 # so it outlives the container.
 COPY catalogs.json /etc/compose-preview/catalogs.default.json
+
+# The settings.json schema (generated from ServeSettings.kt). The entrypoint reads each setting's
+# SERVE_* variable from it, which is why `jq` is in the base image: /config/settings.json is applied
+# as environment variables before the entrypoint derives anything from them.
+COPY settings.schema.json /etc/compose-preview/settings.schema.json
+# …and the one-off migration that drafts a settings.json from a box's .env (see its header), so a
+# host without jq can run it from here.
+COPY env-to-settings.sh /usr/local/bin/env-to-settings.sh
 
 # Baked downloadable-font cache (see the `fonts` stage). Deliberately NOT written straight to
 # `~/.cache/composeai/fonts`: that path is a named volume (docker-compose.yml `preview_cache`), and

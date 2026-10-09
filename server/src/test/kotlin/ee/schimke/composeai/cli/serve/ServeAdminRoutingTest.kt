@@ -218,6 +218,34 @@ class ServeAdminRoutingTest {
       },
     )
 
+  /**
+   * The deployment's settings.json, as the entrypoint left a box: the guidelines model came from
+   * settings.json, the catalog MCP from `.env`. The model is live; the MCP is bound at startup.
+   */
+  private val liveModels = mutableListOf<String?>()
+  private val settingsAdmin =
+    ServeSettingsAdmin(
+      "/config/settings.json".toPath(),
+      environment =
+        mapOf(
+          "SERVE_UI_BUILDER_GUIDELINES_MODEL" to "typesafe/jev-router",
+          "SERVE_CATALOG_MCP" to "1",
+          ServeSettings.SOURCES_ENV to
+            "SERVE_UI_BUILDER_GUIDELINES_MODEL=settings.json,SERVE_CATALOG_MCP=environment",
+        ),
+      live =
+        listOf(
+          object : ServeLiveSettings {
+            override val envs = setOf("SERVE_UI_BUILDER_GUIDELINES_MODEL")
+
+            override fun apply(values: Map<String, String?>) {
+              liveModels += values.values.single()
+            }
+          }
+        ),
+      fileSystem = fs,
+    )
+
   private val server: ServeHttpServer by lazy {
     registry.register("compose-m3", host = bundle("compose-m3"), pinned = true)
     tracker.recordSuccess("compose-m3")
@@ -238,6 +266,7 @@ class ServeAdminRoutingTest {
         sites = siteRegistry,
         siteAdmin = siteAdmin,
         uiBuilderSettingsAdmin = uiBuilderSettingsAdmin,
+        settingsAdmin = settingsAdmin,
         themeOptimizerAdmin = optimizerWork,
         catalogCacheStats = { blobPool.snapshot() },
         catalogCacheClear = { blobPool.clear() },
@@ -325,6 +354,51 @@ class ServeAdminRoutingTest {
     // Clearing hands every setting back to the environment.
     assertEquals(200, send("/admin/ui-builder/config", "DELETE").first)
     assertNull(configFile.load().uiBuilder)
+  }
+
+  @Test
+  fun `settings json is published over HTTP, live settings apply and the rest wait`() {
+    assertEquals(404, send("/admin/settings", "PUT", "{}", token = null).first)
+    assertEquals(404, send("/admin/settings", token = "wrong").first)
+
+    val (code, body) =
+      send(
+        "/admin/settings",
+        "PUT",
+        """{"uiBuilder": {"guidelines": {"model": "deepseek/deepseek-v4.1-flash"}},
+            "uploads": {"acceptDocs": true}, "catalogs": {"mcp": false}}""",
+      )
+    assertEquals(200, code, body)
+    assertTrue(""""applied":["uiBuilder.guidelines.model"]""" in body, body)
+    assertTrue(""""pending":["uploads.acceptDocs"]""" in body, body)
+    assertTrue(""""overridden":["catalogs.mcp"]""" in body, body)
+    assertEquals(listOf<String?>("deepseek/deepseek-v4.1-flash"), liveModels)
+    assertTrue(fs.exists("/config/settings.json".toPath()))
+
+    // Each setting says what it serves and where that came from.
+    val (_, report) = send("/admin/settings")
+    val settings =
+      kotlinx.serialization.json.Json.parseToJsonElement(report)
+        .let { it as kotlinx.serialization.json.JsonObject }["settings"]
+        .let { it as kotlinx.serialization.json.JsonArray }
+        .associate { entry ->
+          val o = entry as kotlinx.serialization.json.JsonObject
+          o["key"].toString().trim('"') to o
+        }
+    assertEquals(
+      "\"settings.json\"",
+      settings.getValue("uiBuilder.guidelines.model")["source"].toString(),
+    )
+    assertEquals("\"environment\"", settings.getValue("catalogs.mcp")["source"].toString())
+    assertEquals("true", settings.getValue("catalogs.mcp")["overridden"].toString())
+
+    // A typo is refused with the key it meant, and the stored file is left alone.
+    val (bad, reason) = send("/admin/settings", "PUT", """{"uploads": {"acceptDoc": true}}""")
+    assertEquals(400, bad, reason)
+    assertTrue("uploads.acceptDocs" in reason, reason)
+
+    assertEquals(200, send("/admin/settings", "DELETE").first)
+    assertTrue(!fs.exists("/config/settings.json".toPath()))
   }
 
   @Test

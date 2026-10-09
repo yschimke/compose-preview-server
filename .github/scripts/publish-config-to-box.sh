@@ -53,6 +53,7 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 DEPLOY_CONFIG_DIR="${DEPLOY_CONFIG_DIR:-${REPO_ROOT}/deploy/preview.coo.ee}"
 CATALOGS_FILE="${CATALOGS_FILE:-${DEPLOY_CONFIG_DIR}/catalogs.json}"
 TRUST_FILE="${TRUST_FILE:-${DEPLOY_CONFIG_DIR}/producers.json}"
+SETTINGS_FILE="${SETTINGS_FILE:-${DEPLOY_CONFIG_DIR}/settings.json}"
 ADMIN_TOKEN_HEADER="X-Compose-Preview-Admin-Token"
 
 # How long the replacement-branch probe below may take. Injectable so the self-test can drive the
@@ -600,6 +601,47 @@ if [[ -n "${ui_builder}" ]]; then
 elif [[ "${PRUNE}" == 1 ]]; then
   echo "Clearing any UI-builder catalog settings (catalogs.json declares none)"
   delete /admin/ui-builder/config "UI-builder settings" || true
+fi
+
+# The deployment's settings (deploy/image/SETTINGS.md, generated from ServeSettings.kt): every
+# non-secret SERVE_* setting, reviewed here instead of edited in the box's private .env. The whole
+# file is PUT, so the box holds exactly what is committed — a setting deleted here is deleted there.
+#
+# The reply says what took effect: `applied` settings were re-read live (the guidelines model and
+# allow-list), `pending` ones apply at the box's next start, and `overridden` ones do not apply at
+# all while the box's .env still sets the same variable — the environment stays on top so an
+# emergency fix works, and this is how a stale line gets noticed. Additive like everything else: no
+# settings.json leaves the box's alone, except under --prune, where the file is the whole answer.
+if [[ -f "${SETTINGS_FILE}" ]]; then
+  echo "Reconciling deployment settings from ${SETTINGS_FILE#"${REPO_ROOT}/"}"
+  settings=$(jq -c . "${SETTINGS_FILE}")
+  if [[ "${DRY_RUN}" == 1 ]]; then
+    echo "PUT /admin/settings ${settings}"
+  else
+    response=$(curl -sS -w $'\n%{http_code}' -m 30 \
+      -X PUT -H "${ADMIN_TOKEN_HEADER}: ${ADMIN_TOKEN}" \
+      -H 'Content-Type: application/json' \
+      -d "${settings}" "${BASE_URL}/admin/settings" 2>/dev/null || printf '\n000')
+    code="${response##*$'\n'}"
+    payload="${response%$'\n'*}"
+    case "${code}" in
+      200)
+        printf '%s' "${payload}" | jq -r '
+          (.applied[]? | "  settings: \(.) applied live"),
+          (.pending[]? | "::notice::settings: \(.) written — it applies at the box'"'"'s next start."),
+          (.overridden[]? | "::warning::settings: \(.) is overridden by the box'"'"'s .env; delete that line to let this value apply."),
+          (.problems[]? | "::warning::settings: \(.)")' 2>/dev/null
+        ;;
+      404) echo "::warning::/admin/settings returned 404 — this box predates settings.json; its settings stay on its .env." ;;
+      *)
+        rejected=$((rejected + 1))
+        echo "::error::settings: HTTP ${code} — ${payload}"
+        ;;
+    esac
+  fi
+elif [[ "${PRUNE}" == 1 ]]; then
+  echo "Clearing any deployment settings (${SETTINGS_FILE#"${REPO_ROOT}/"} does not exist)"
+  delete /admin/settings "deployment settings" || true
 fi
 
 if [[ "${groups_skipped}" == 1 ]]; then

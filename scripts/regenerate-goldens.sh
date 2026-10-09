@@ -27,10 +27,11 @@ cd "$(dirname "$0")/.."
 # `state-actions` fixtures silently stay as they were, which is the failure mode the `--rerun`
 # comment above exists to prevent. A missing checkout fails the require() in `settings.gradle.kts`
 # rather than skipping, which is the right shape for a regeneration.
-UPDATE_SERVE_WEB_FIXTURES=true UPDATE_UI_BUILDER_BEHAVIOR_FIXTURE=true ./gradlew -PcomposeUiBuilderDir=../compose-ui-builder -PuiBuilderRemoteCompose=true :server:test \
+UPDATE_SERVE_WEB_FIXTURES=true UPDATE_UI_BUILDER_BEHAVIOR_FIXTURE=true UPDATE_SERVE_SETTINGS_REFERENCE=true ./gradlew -PcomposeUiBuilderDir=../compose-ui-builder -PuiBuilderRemoteCompose=true :server:test \
   --tests '*ServeWebFixtureTest*' \
   --tests '*ExplodedSvgFixtureTest*' \
   --tests '*BehaviorScreenExportTest*' \
+  --tests '*ServeSettingsTest*' \
   --rerun
 
 # The synthesised `wear-m3` / `remote-m3` catalogs are NOT regenerated here any more. They are
@@ -50,6 +51,7 @@ UPDATE_SERVE_WEB_FIXTURES=true UPDATE_UI_BUILDER_BEHAVIOR_FIXTURE=true ./gradlew
 echo
 echo "regenerated:"
 git status --porcelain -- preview-harness/fixtures/pages 'renders/exploded-view/*.svg' \
+  deploy/image/settings.schema.json deploy/image/SETTINGS.md \
   'docs/design/fixtures/ui-builder/*-capabilities-v1.json' \
   'docs/design/fixtures/ui-builder/state-actions.kt.txt' \
   'docs/design/fixtures/ui-builder/state-actions.document.json'

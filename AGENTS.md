@@ -45,6 +45,10 @@ boundaries.
 - Regenerate the committed goldens with `scripts/regenerate-goldens.sh`, and read the diff. On a
   Renovate branch the `Regenerate goldens` workflow does it for you when CI goes red; on any pull
   request `/regenerate-goldens` asks for the same thing.
+- A deployment's non-secret behaviour goes in its `settings.json` (`deploy/preview.coo.ee/`; the
+  list is `deploy/image/SETTINGS.md`, generated from `ServeSettings.kt`), never in `.env`. `.env`
+  holds only secrets and facts about the machine. A new `SERVE_*` setting that is neither is a line
+  in `ServeSettings.ALL`, not a new `.env` key, and compose passes it through empty.
 - Immediately before every push, fetch `origin main` and confirm the branch or PR has not merged.
 - Open or update a PR automatically after a completed coding change. Never auto-merge.
 - **Embed images only from a GitHub-hosted origin — including images this server serves.** Claude
