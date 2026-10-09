@@ -7403,6 +7403,116 @@ class DaemonMcpServerTest {
       )
   }
 
+  private fun writeGuidelines(dir: java.io.File) {
+    val file = dir.resolve("build/compose-previews/ui-builder.guidelines.json")
+    file.parentFile.mkdirs()
+    file.writeText(
+      """
+      {"schema":"compose-ui-builder/catalog-guidelines/v1","catalog":"wear-m3","platform":"wear",
+       "version":1,"rules":[{"id":"touch","kind":"structure","severity":"warning","guidance":"g",
+       "check":"Is every target 48dp?","source":"https://developer.android.com/x"}]}
+      """
+        .trimIndent()
+    )
+  }
+
+  private fun serveHierarchy(inactive: Boolean) {
+    factory.daemonConfigurer = { d ->
+      val a11y = listOf(capability("a11y/atf"), capability("a11y/hierarchy"))
+      if (inactive) d.enableableExtensions = mapOf("a11y" to a11y)
+      else d.advertisedDataProducts = a11y
+      d.dataFetchHandler = { _, kind, _, _ ->
+        if (kind == "a11y/hierarchy")
+          FakeDaemon.DataFetchOutcome.Ok(
+            kind = kind,
+            schemaVersion = 1,
+            payload =
+              buildJsonObject {
+                putJsonArray("nodes") {
+                  add(
+                    buildJsonObject {
+                      put("ref", "stop-node")
+                      put("role", "Button")
+                      put("label", "Stop")
+                      put("boundsInScreen", "0,0,2,2")
+                    }
+                  )
+                }
+              },
+          )
+        else FakeDaemon.DataFetchOutcome.Unknown
+      }
+    }
+  }
+
+  @Test
+  fun `preview guideline tools enable a11y before fetching the hierarchy`() {
+    client.initialize()
+    val projectDir = tmp.newFolder("guidelines-a11y")
+    // The descriptor's working directory is the project root here, so the module's build dir
+    // resolves there rather than at the `:app` layout path — the remapped-projectDir case.
+    writeGuidelines(projectDir)
+    val workspaceId = registerWorkspace(projectDir, "guidelines")
+    serveHierarchy(inactive = true)
+    val daemon = warmDaemonFor(workspaceId, ":app")
+    daemon.emitDiscovery("com.example.StopPreview")
+    client.expectNotification("notifications/resources/list_changed", 2_000)
+    val png = tmp.newFile("guidelines-stop.png")
+    writeSolidPng(png, 0xff0000ff.toInt())
+    daemon.autoRenderPngPath = { png.absolutePath }
+
+    val call =
+      client.callTool(
+        PreviewGuidelinesMcp.PROMPT_TOOL,
+        buildJsonObject { putJsonArray("previews") { add("StopPreview") } },
+        timeoutMs = 10_000,
+      )
+    val texts = call.textContents()
+    assertThat(daemon.enabledExtensionRequests.poll()).contains("a11y")
+    assertThat(texts.first()).contains("stop-node")
+    assertThat(texts.none { it.startsWith("Note:") }).isTrue()
+  }
+
+  @Test
+  fun `preview guideline source comes from the workspace the uri names`() {
+    client.initialize()
+    serveHierarchy(inactive = false)
+    val png = tmp.newFile("guidelines-same.png")
+    writeSolidPng(png, 0xff00ff00.toInt())
+    val ids =
+      listOf("one", "two").map { name ->
+        val dir = tmp.newFolder("guidelines-$name")
+        writeGuidelines(dir)
+        val source = dir.resolve("src/main/kotlin/com/example/Same.kt")
+        source.parentFile.mkdirs()
+        source.writeText("@Preview\n@Composable\nfun Same() { Text(\"from-$name\") }\n")
+        val workspaceId = registerWorkspace(dir, "guidelines-$name")
+        val daemon = warmDaemonFor(workspaceId, ":app")
+        daemon.autoRenderPngPath = { png.absolutePath }
+        daemon.emitDiscovery(
+          "com.example.Same",
+          sourceFile = "src/main/kotlin/com/example/Same.kt",
+          bodyLine = 3,
+        )
+        client.expectNotification("notifications/resources/list_changed", 2_000)
+        workspaceId
+      }
+
+    val call =
+      client.callTool(
+        PreviewGuidelinesMcp.PROMPT_TOOL,
+        buildJsonObject {
+          putJsonArray("previews") {
+            add("compose-preview://${ids[1].value}/:app/com.example.Same")
+          }
+        },
+        timeoutMs = 10_000,
+      )
+    val request = call.textContents().first()
+    assertThat(request).contains("from-two")
+    assertThat(request).doesNotContain("from-one")
+  }
+
   private fun registerWorkspace(projectDir: java.io.File, rootName: String): WorkspaceId {
     val resp =
       client.callTool(

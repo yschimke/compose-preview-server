@@ -57,6 +57,11 @@ internal data class UiBuilderGuidelinesV1(
       record: DesignGuidelineRecord?,
       /** The rules the record may name: its catalog's own, then the bundled set. */
       known: List<DesignGuidelineRule> = DesignGuidelineRuleSet.Bundled.rules,
+      /**
+       * The version of the rules this design is checked against now. A record against another
+       * version is stale even at the current revision: its verdicts answer rules that changed.
+       */
+      rulesVersion: Int? = null,
     ): UiBuilderGuidelinesV1 {
       if (record == null) {
         return UiBuilderGuidelinesV1(
@@ -68,7 +73,8 @@ internal data class UiBuilderGuidelinesV1(
           currentRevision = currentRevision,
         )
       }
-      val stale = record.revision < currentRevision
+      val rulesChanged = rulesVersion != null && record.rulesVersion != rulesVersion
+      val stale = record.revision < currentRevision || rulesChanged
       val findings =
         ServeUiBuilderGuidelines.findings(
           record.verdicts,
@@ -95,9 +101,12 @@ internal data class UiBuilderGuidelinesV1(
               else "$broken of ${record.verdicts.size} guideline(s) look broken."
             )
             if (unanswered.isNotEmpty()) append(" ${unanswered.size} unanswered.")
-            if (stale) {
+            if (record.revision < currentRevision) {
               append(" The design is now at revision ").append(currentRevision)
               append("; check it again to update.")
+            } else if (rulesChanged) {
+              append(" The guidelines have changed since (version ").append(record.rulesVersion)
+              append(" to ").append(rulesVersion).append("); check it again to update.")
             }
           },
         designId = designId,
@@ -135,7 +144,11 @@ internal const val UI_BUILDER_GUIDELINES_SCHEMA = "compose-preview/ui-builder-gu
 internal fun Route.installUiBuilderGuidelineRoutes(
   service: UiBuilderServicePort,
   authorization: ServeUiBuilderAuthorization,
-  store: ServeUiBuilderGuidelineStore,
+  /**
+   * Where results are kept; null when the host could not open it. The prompt and access routes are
+   * stateless and stay mounted without it; reading, recording and running a check need it.
+   */
+  store: ServeUiBuilderGuidelineStore?,
   prompt:
     suspend (
       designId: String,
@@ -156,6 +169,11 @@ internal fun Route.installUiBuilderGuidelineRoutes(
     { _, _ ->
       DesignGuidelineRuleSet.Bundled
     },
+  /** The design's current revision, which a recorded result may not be newer than. */
+  currentRevision: suspend (designId: String, actor: AuthenticatedUiBuilderActor) -> Long? =
+    { _, _ ->
+      null
+    },
 ) {
   get(UI_BUILDER_GUIDELINES_ACCESS_PATH) {
     val (actor, _) =
@@ -168,6 +186,43 @@ internal fun Route.installUiBuilderGuidelineRoutes(
     )
   }
 
+  get(UI_BUILDER_GUIDELINES_PROMPT_PATH) {
+    val (actor, designId) =
+      call.authorizedGuidelinesDesign(service, authorization, UiBuilderRouteCapability.READ)
+        ?: return@get
+    val revision = call.request.queryParameters["revision"]?.toLongOrNull()
+    val wantsRenders = call.request.queryParameters["rendered"] != "false"
+    val mayRender =
+      wantsRenders &&
+        authorization.authorize(call, UiBuilderRouteCapability.EXPORT) is
+          UiBuilderAuthorizationDecision.Authorized
+    val request = prompt(designId, revision, mayRender, actor)
+    if (request == null) {
+      call.respondGuidelinesError(HttpStatusCode.NotFound, "no such design")
+      return@get
+    }
+    call.respondGuidelines(DesignGuidelineRequest.serializer(), request)
+  }
+
+  if (store != null)
+    installGuidelineResultRoutes(service, authorization, store, check, rules, currentRevision)
+}
+
+/** The routes that keep results: running a check, reading the latest, recording one. */
+private fun Route.installGuidelineResultRoutes(
+  service: UiBuilderServicePort,
+  authorization: ServeUiBuilderAuthorization,
+  store: ServeUiBuilderGuidelineStore,
+  check:
+    suspend (
+      designId: String,
+      revision: Long?,
+      withRenders: Boolean,
+      actor: AuthenticatedUiBuilderActor,
+    ) -> ServeUiBuilderMcp.GuidelinesCheckResult,
+  rules: suspend (designId: String, actor: AuthenticatedUiBuilderActor) -> DesignGuidelineRuleSet,
+  currentRevision: suspend (designId: String, actor: AuthenticatedUiBuilderActor) -> Long?,
+) {
   post(UI_BUILDER_GUIDELINES_CHECK_PATH) {
     val (actor, designId) =
       call.authorizedGuidelinesDesign(service, authorization, UiBuilderRouteCapability.WRITE)
@@ -197,24 +252,6 @@ internal fun Route.installUiBuilderGuidelineRoutes(
     }
   }
 
-  get(UI_BUILDER_GUIDELINES_PROMPT_PATH) {
-    val (actor, designId) =
-      call.authorizedGuidelinesDesign(service, authorization, UiBuilderRouteCapability.READ)
-        ?: return@get
-    val revision = call.request.queryParameters["revision"]?.toLongOrNull()
-    val wantsRenders = call.request.queryParameters["rendered"] != "false"
-    val mayRender =
-      wantsRenders &&
-        authorization.authorize(call, UiBuilderRouteCapability.EXPORT) is
-          UiBuilderAuthorizationDecision.Authorized
-    val request = prompt(designId, revision, mayRender, actor)
-    if (request == null) {
-      call.respondGuidelinesError(HttpStatusCode.NotFound, "no such design")
-      return@get
-    }
-    call.respondGuidelines(DesignGuidelineRequest.serializer(), request)
-  }
-
   get(UI_BUILDER_GUIDELINES_PATH) {
     val (_, designId) =
       call.authorizedGuidelinesDesign(service, authorization, UiBuilderRouteCapability.READ)
@@ -233,8 +270,11 @@ internal fun Route.installUiBuilderGuidelineRoutes(
         ?: return@post
     val record = call.receiveGuidelinesBody(DesignGuidelineRecord.serializer()) ?: return@post
     val known = rules(designId, actor)
+    val current = currentRevision(designId, actor)
     val result =
-      withContext(Dispatchers.IO) { store.record(designId, ranBy = actor.actorId, record, known) }
+      withContext(Dispatchers.IO) {
+        store.record(designId, ranBy = actor.actorId, record, known, currentRevision = current)
+      }
     when (result) {
       is ServeUiBuilderGuidelineStore.GuidelineWriteResult.Refused ->
         call.respondGuidelinesError(HttpStatusCode.UnprocessableEntity, result.reason)

@@ -133,6 +133,71 @@ class ServeUiBuilderGuidelineFramesTest {
   }
 
   @Test
+  fun `a frame drawing when its design is deleted is not written back`() {
+    val frames = frames()
+    val drawing = java.util.concurrent.CountDownLatch(1)
+    val release = java.util.concurrent.CountDownLatch(1)
+    frames.render = { document, _ ->
+      drawing.countDown()
+      release.await()
+      png(document.environment.widthDp, document.environment.heightDp)
+    }
+    val key = frames.keyOf("design", document(revision = 3), PHONE)
+    val inFlight = frames.submit(key, document(revision = 3), PHONE, background = false)
+    drawing.await()
+    // A second frame of the same design is still queued behind it.
+    val queued =
+      frames.submit(
+        frames.keyOf("design", document(revision = 3), TABLET),
+        document(revision = 3),
+        TABLET,
+        background = true,
+      )
+
+    frames.evict("design")
+    release.countDown()
+
+    assertNull(inFlight.get(5, java.util.concurrent.TimeUnit.SECONDS))
+    assertNull(queued.get(5, java.util.concurrent.TimeUnit.SECONDS))
+    assertNull(frames.cached(key), "the deleted design's picture is not written back")
+  }
+
+  @Test
+  fun `a new renderer generation removes the previous one's frames`() {
+    val old =
+      ServeUiBuilderGuidelineFrames(directory.resolve("frames"), "generation-1").also {
+        closing += it
+      }
+    old.store(old.keyOf("design", document(revision = 4), PHONE), png(412, 915))
+    old.close()
+    val next =
+      ServeUiBuilderGuidelineFrames(directory.resolve("frames"), "generation-2").also {
+        closing += it
+      }
+    next.store(next.keyOf("design", document(revision = 4), TABLET), png(1280, 800))
+    val files =
+      Files.walk(directory.resolve("frames")).use { paths ->
+        paths.filter { it.toString().endsWith(".png") }.toList()
+      }
+    assertEquals(1, files.size, "only generation-2's frame stays: $files")
+  }
+
+  @Test
+  fun `frames that differ only in theme or font scale are kept apart`() {
+    val frames = frames()
+    val dark =
+      DesignGuidelineFrame(
+        DesignGuidelinePicture.PHONE,
+        412,
+        915,
+        PHONE.environment + ("theme" to JsonPrimitive("dark")),
+      )
+    val light = frames.keyOf("design", document(revision = 5), PHONE)
+    frames.store(light, png(412, 915))
+    assertNull(frames.cached(frames.keyOf("design", document(revision = 5), dark)))
+  }
+
+  @Test
   fun `only a picture in its frame's aspect counts as that frame`() {
     assertTrue(ServeUiBuilderGuidelineFrames.matchesFrame(png(824, 1830), PHONE))
     assertTrue(ServeUiBuilderGuidelineFrames.matchesFrame(png(2560, 1600), TABLET))

@@ -65,6 +65,9 @@ object PreviewGuidelinesMcp {
     val buildDir: File?,
   )
 
+  /** [Host.a11yHierarchy]'s answer: the payload, or the reason there is none. */
+  data class Hierarchy(val payload: JsonElement?, val problem: String? = null)
+
   /** What the tools need from the MCP server; faked in tests. */
   interface Host {
     /** A preview name, FQN or `compose-preview://` URI; null when it matches nothing. */
@@ -73,8 +76,13 @@ object PreviewGuidelinesMcp {
     /** The preview's render as PNG bytes. */
     fun render(preview: Resolved): ByteArray
 
-    /** The `a11y/hierarchy` data product's payload, or null when the host cannot produce it. */
-    fun a11yHierarchy(preview: Resolved): JsonElement? = null
+    /**
+     * The `a11y/hierarchy` data product, or why it could not be had. A missing hierarchy is said
+     * out loud: without nodes the model cannot cite node ids, and a caller should know that rather
+     * than receive an empty node list that looks like a preview with no nodes.
+     */
+    fun a11yHierarchy(preview: Resolved): Hierarchy =
+      Hierarchy(null, "this host cannot produce the accessibility hierarchy")
 
     /** The preview function's source, or null. */
     fun source(preview: Resolved): String? = null
@@ -183,6 +191,7 @@ object PreviewGuidelinesMcp {
         "Judge every rule for every subject; name the subject and cite node ids from the " +
           "a11y-hierarchy evidence in each verdict, as the request's response schema asks."
       )
+    prepared.notes.forEach { content += ContentBlock.Text("Note: $it") }
     return CallToolResult(content = content)
   }
 
@@ -221,6 +230,7 @@ object PreviewGuidelinesMcp {
       put("costUsd", run.costUsd)
       put("requests", run.requests)
       putJsonArray("problems") { run.problems.forEach { add(JsonPrimitive(it)) } }
+      putJsonArray("notes") { prepared.notes.forEach { add(JsonPrimitive(it)) } }
       putJsonArray("previews") { run.results.forEach { add(resultJson(it)) } }
     }
     val summary =
@@ -236,7 +246,8 @@ object PreviewGuidelinesMcp {
                 "${it.ruleId} (${it.nodeIds.joinToString()}): ${it.reason}"
               })
         } +
-        run.problems.joinToString("") { "\n! $it" }
+        run.problems.joinToString("") { "\n! $it" } +
+        prepared.notes.joinToString("") { "\nNote: $it" }
     return CallToolResult(
       content = listOf(ContentBlock.Text(summary), ContentBlock.Text(structured.toString())),
       structuredContent = structured,
@@ -247,6 +258,8 @@ object PreviewGuidelinesMcp {
     val guidelines: CatalogGuidelinesV1,
     val subjects: List<PreviewSubject>,
     val rulesSource: String,
+    /** What the prepared evidence lacks, said to the caller (e.g. a preview with no nodes). */
+    val notes: List<String> = emptyList(),
   )
 
   private fun prepare(tool: String, args: JsonObject, host: Host): Result<Prepared> = runCatching {
@@ -279,19 +292,27 @@ object PreviewGuidelinesMcp {
     val surface =
       (args["surface"] as? JsonPrimitive)?.contentOrNull?.takeIf { it.isNotBlank() }
         ?: GuidelineSurfaces.COMPONENT
+    val notes = mutableListOf<String>()
     val subjects = resolved.map { preview ->
       val png = host.render(preview)
+      val hierarchy = host.a11yHierarchy(preview)
+      if (hierarchy.payload == null) {
+        notes +=
+          "${preview.previewId}: no accessibility nodes (" +
+            (hierarchy.problem ?: "the hierarchy was empty") +
+            "), so its findings cannot name nodes"
+      }
       PreviewSubject(
         previewId = preview.previewId,
         label = preview.label,
         surface = surface,
         renderHash = sha256(png),
         pictures = listOf(SubjectPicture(GuidelinePictureV1.KIND_DEVICE, png, 0, 0)),
-        nodes = host.a11yHierarchy(preview)?.let(::nodesOf).orEmpty(),
+        nodes = hierarchy.payload?.let(::nodesOf).orEmpty(),
         source = host.source(preview),
       )
     }
-    Prepared(guidelines, subjects, location)
+    Prepared(guidelines, subjects, location, notes)
   }
 
   /** `a11y/hierarchy` nodes as the engine's [PreviewNode]s: id, role, label and pixel bounds. */

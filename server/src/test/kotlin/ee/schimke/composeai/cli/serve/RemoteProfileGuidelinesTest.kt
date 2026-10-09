@@ -3,10 +3,12 @@ package ee.schimke.composeai.cli.serve
 import ee.schimke.composeai.uibuilder.export.LauncherWidgetCodeExporter
 import ee.schimke.composeai.uibuilder.export.WEAR_WIDGET_CONTAINER_IDS
 import ee.schimke.composeai.uibuilder.guidelines.CatalogGuidelines
+import ee.schimke.composeai.uibuilder.guidelines.DesignGuidelineRule
 import ee.schimke.composeai.uibuilder.protocol.DesignDocumentV1
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.jsonObject
 
@@ -68,8 +70,15 @@ class RemoteProfileGuidelinesTest {
         .asked
         .map { it.id }
     }
-    assertEquals(listOf("any", "v7-only"), asked("""{"target":"launcher-widgets-v7"}"""))
-    assertEquals(listOf("any"), asked(null))
+    // What the library asks for a profile is the library's to decide; the server's part is passing
+    // the design's profile, so compare against the library's own answer for that profile.
+    fun library(profile: String) =
+      guidelines.rulesFor(DesignGuidelineRule.SURFACE_WIDGET, profile).map { it.id }
+    assertEquals(library("launcher-widgets-v7"), asked("""{"target":"launcher-widgets-v7"}"""))
+    assertEquals(library("launcher-widgets-v6"), asked(null))
+    // The v7 rule reaches a v7 design and not the default one: the profile really is passed.
+    assertTrue("v7-only" in asked("""{"target":"launcher-widgets-v7"}"""))
+    assertTrue("v7-only" !in asked(null))
   }
 
   private suspend fun profile(

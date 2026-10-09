@@ -1425,7 +1425,9 @@ class ServeHttpServer(
             )
           }
           val guidelinesMcp = uiBuilderMcp
-          if (uiBuilderGuidelineStore != null && guidelinesMcp != null) {
+          // The prompt and access routes are stateless: a host whose result store could not be
+          // opened still shows the prompt; only reading, recording and running checks need it.
+          if (guidelinesMcp != null) {
             installUiBuilderGuidelineRoutes(
               designService,
               sameOriginUiBuilderAuthorization,
@@ -1434,6 +1436,7 @@ class ServeHttpServer(
               guidelinesMcp::guidelinesAccess,
               guidelinesMcp::runGuidelinesCheck,
               guidelinesMcp::guidelinesRuleSet,
+              guidelinesMcp::currentDesignRevision,
             )
           }
           if (uiBuilderCatalogGuidelines != null) {
