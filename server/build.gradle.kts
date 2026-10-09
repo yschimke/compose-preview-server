@@ -908,6 +908,11 @@ tasks.register<CheckServeModuleBoundary>("checkServeModuleBoundary") {
       "ee.schimke.composeai:common-image-crop",
       "ee.schimke.composeai:common-io",
       "ee.schimke.composeai:common-web-escaping",
+      // The component record's wire shapes (`ee.schimke.composeai.discovery.ComponentRecord` and
+      // friends), from compose-preview-contracts. Reached through `preview-discovery` since
+      // compose-ai-tools 2.38.0 stopped carrying its own copy of them; contracts only, no renderer.
+      "ee.schimke.composeai:component-catalog-protocol",
+      "ee.schimke.composeai:component-catalog-protocol-jvm",
       "ee.schimke.composeai:daemon-bta",
       "ee.schimke.composeai:daemon-client",
       // The connector SPI `daemon-core` exposes as `api` since compose-preview-daemon#197: four
