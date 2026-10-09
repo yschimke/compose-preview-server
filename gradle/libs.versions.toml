@@ -249,7 +249,11 @@ composeai-preview-daemon = "3.15.0"
 # refuses a `remoteCall` by name.
 # 3.21.0 adds `RemoteComposeOverride.documentBase64` (compose-preview-contracts#145), the document a
 # shared `/d/<id>` page sends to the daemon for its AndroidX players.
-composeai-contracts = "3.21.0"
+# 3.22.0 adds `DesignEnvironmentV1.remoteProfile` (compose-preview-contracts#147): the guidelines
+# check passes a design's Remote Compose profile from it. Not 3.23.0+ yet: those add
+# `component-catalog-protocol`, which moves the component-record types under compose-ai-tools
+# 2.38.0, and compose-ui-builder 3.100.0 was built against the old ones (`ComponentRecord.copy`).
+composeai-contracts = "3.22.0"
 
 # The extracted UI builder (yschimke/compose-ui-builder), resolved from its RELEASES. Three jars
 # and a BOM on Maven Central, and the editor archive as a GitHub release asset reached through the
@@ -387,7 +391,9 @@ composeai-contracts = "3.21.0"
 # pane shows a launcher widget's `RemoteComposeWidget` without `-PuiBuilderRemoteCompose`
 # (compose-ui-builder#607). 3.100.0 fetches Compose's Noto fallback slices through
 # `/api/fonts/noto` (#1478) instead of fonts.gstatic.com, which every page's `connect-src` refused,
-# and draws empty-slot invitations only while a component is dragged (compose-ui-builder#612).
+# draws empty-slot invitations only while a component is dragged (compose-ui-builder#612), and
+# drops the `X-OpenRouter-Metadata` header from the editor's own-key guidelines check, which
+# OpenRouter's CORS preflight refuses, so every browser check was blocked (compose-ui-builder#610).
 # `androidx-window` and `composeai-contracts` are unchanged.
 # 3.101.0 is built on compose-ai-tools 2.38.0 and builds component records through the contracts'
 # builders (compose-ui-builder#617): 2.38.0's `preview-discovery` no longer carries a public
