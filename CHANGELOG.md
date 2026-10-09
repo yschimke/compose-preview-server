@@ -1,5 +1,20 @@
 # Changelog
 
+## [3.116.0](https://github.com/yschimke/compose-preview-server/compare/v3.115.0...v3.116.0) (2026-10-09)
+
+
+### Features
+
+* **guidelines:** contracts 3.22.0, and Remote Compose profiles in the guidelines check ([#1482](https://github.com/yschimke/compose-preview-server/issues/1482)) ([dc4b7a6](https://github.com/yschimke/compose-preview-server/commit/dc4b7a6ff053d1366ffc4662e32feb8cc1f6dc02))
+* **serve:** report what blocks owning a shadowed catalog — its losses, not only its findings ([#1479](https://github.com/yschimke/compose-preview-server/issues/1479)) ([544017c](https://github.com/yschimke/compose-preview-server/commit/544017c58088a7b3e27196a421e9197de72c541e))
+* **serve:** serve Compose's Noto fallback slices same-origin ([#1478](https://github.com/yschimke/compose-preview-server/issues/1478)) ([852a69e](https://github.com/yschimke/compose-preview-server/commit/852a69e283cd6cf16ba025ab65aa802d7edd2129))
+
+
+### Bug Fixes
+
+* **deps:** compose-ui-builder 3.100.0, which fetches Noto fallback fonts through the host ([#1481](https://github.com/yschimke/compose-preview-server/issues/1481)) ([2c54d8c](https://github.com/yschimke/compose-preview-server/commit/2c54d8c714fb690d7fe95ed36dce798269b86365))
+* **deps:** compose-ui-builder 3.99.0, which writes Remote Compose Kotlin source in every build ([#1475](https://github.com/yschimke/compose-preview-server/issues/1475)) ([9a368bb](https://github.com/yschimke/compose-preview-server/commit/9a368bba6ae0ef68c1ae7410beb5bcd1e912acb0))
+
 ## [3.115.0](https://github.com/yschimke/compose-preview-server/compare/v3.114.0...v3.115.0) (2026-10-09)
 
 
