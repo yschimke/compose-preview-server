@@ -10543,7 +10543,9 @@ ${captureControlsHtml().prependIndent("          ")}
         $toggleHtml<div class="cp-doc-stage" id="cp-doc-stage" data-format="${WebEscaping.htmlEscape(doc.formatId)}">
           ${docStageElement(doc)}${if (playerToggle) "\n          " + docWasmFrame(doc) else ""}
         </div>
-        <p class="cp-doc-status" id="cp-doc-status">Loading the ${WebEscaping.htmlEscape(doc.formatLabel)} player…</p>
+        <p class="cp-doc-status" id="cp-doc-status">Loading the ${WebEscaping.htmlEscape(doc.formatLabel)} player…</p>${
+          if (playerToggle) "\n        <p class=\"cp-doc-status\" id=\"cp-doc-status-wasm\" hidden></p>" else ""
+        }
         <div class="cp-doc-facts">
         $facts
         </div>
@@ -10569,6 +10571,9 @@ ${captureControlsHtml().prependIndent("          ")}
   private const val DOC_PLAYER_JS = "camaelon-js"
   private const val DOC_PLAYER_CMP_WASM = "cmp-wasm"
 
+  /** How long the CMP frame may stay silent before the page says it didn't start — the viewer's. */
+  private const val DOC_WASM_START_TIMEOUT_MS = 20_000
+
   /**
    * The CMP player's frame, sized like the canvas beside it and loaded only when first chosen — the
    * Wasm bundle is tens of megabytes, which a reader who never switches should not pay for.
@@ -10583,17 +10588,24 @@ ${captureControlsHtml().prependIndent("          ")}
    * lane points an iframe at the Wasm player with `?src=` the same `/d/<id>/raw` bytes, and is told
    * apart by its readiness messages (docs/design/RC_PLAYER_EMBED.md in rc-players). The choice
    * rides the URL as `rcPlayer=`, so a shared link opens on the player it was shared from.
+   *
+   * Each lane reports into its own status line, and only the selected one is shown: the TypeScript
+   * lane starts on load whatever is selected, and its `done()` / `fail()` would otherwise land on
+   * the CMP lane's status — usually first, since its bundle is far smaller. A CMP frame that never
+   * reports (a missing or incompatible bundle) times out like the viewer's own cmp-wasm lane.
    */
   private fun docPlayerToggleScript(cmpWasmPlayerPath: String, rawUrl: String): String =
     """
     (function () {
       var canvas = document.getElementById("cp-doc-mount");
       var frame = document.getElementById("cp-doc-wasm");
-      var status = document.getElementById("cp-doc-status");
+      var jsStatus = document.getElementById("cp-doc-status");
+      var status = document.getElementById("cp-doc-status-wasm");
       var buttons = Array.prototype.slice.call(document.querySelectorAll("[data-doc-player]"));
       var playerPage = ${jsString(cmpWasmPlayerPath)};
       var raw = new URL(${jsString(rawUrl)}, location.href).href;
       var loaded = false;
+      var settled = false;
       function frameSrc() {
         var theme = matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
         return playerPage + "?src=" + encodeURIComponent(raw) + "&theme=" + theme;
@@ -10605,12 +10617,15 @@ ${captureControlsHtml().prependIndent("          ")}
         });
         canvas.hidden = wasm;
         frame.hidden = !wasm;
+        jsStatus.hidden = wasm;
+        status.hidden = !wasm;
         if (wasm && !loaded) {
           loaded = true;
           status.textContent = "Loading the Compose Multiplatform player…";
           frame.src = frameSrc();
-        } else if (!wasm && status.textContent.indexOf("Compose Multiplatform") >= 0) {
-          status.textContent = "";
+          setTimeout(function () {
+            if (!settled) status.textContent = "The Compose Multiplatform player didn't start.";
+          }, $DOC_WASM_START_TIMEOUT_MS);
         }
         if (remember) {
           var url = new URL(location.href);
@@ -10621,8 +10636,11 @@ ${captureControlsHtml().prependIndent("          ")}
       }
       window.addEventListener("message", function (e) {
         if (e.source !== frame.contentWindow || e.origin !== location.origin) return;
-        if (e.data === "cp-rc-wasm-ready") status.textContent = "";
-        else if (typeof e.data === "string" && e.data.indexOf("cp-rc-wasm-error:") === 0) {
+        if (e.data === "cp-rc-wasm-ready") {
+          settled = true;
+          status.textContent = "";
+        } else if (typeof e.data === "string" && e.data.indexOf("cp-rc-wasm-error:") === 0) {
+          settled = true;
           status.textContent = "The Compose Multiplatform player could not play this document: " +
             e.data.slice("cp-rc-wasm-error:".length);
         }

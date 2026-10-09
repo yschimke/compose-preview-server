@@ -6168,6 +6168,14 @@ class ServeWebFixtureTest {
         docRemoteComposePlayers.contains("\"/rc-player-wasm/index.html\""),
       "an .rc permalink on a CMP-serving host offers both players",
     )
+    // Each lane reports into its own status line, so the TypeScript lane finishing first cannot
+    // mark a still-loading CMP frame ready; and a CMP frame that never reports times out.
+    assertTrue(
+      docRemoteComposePlayers.contains("id=\"cp-doc-status-wasm\" hidden") &&
+        docRemoteComposePlayers.contains("didn't start") &&
+        docRemoteComposePlayers.contains("20000"),
+      "the CMP lane has its own status line and a start timeout",
+    )
     assertFalse(
       docRemoteCompose.contains("data-doc-player") || docRemoteCompose.contains("cp-doc-wasm"),
       "an .rc permalink on a host without the CMP player offers no toggle",
