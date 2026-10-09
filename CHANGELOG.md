@@ -1,5 +1,21 @@
 # Changelog
 
+## [3.113.0](https://github.com/yschimke/compose-preview-server/compare/v3.112.0...v3.113.0) (2026-10-09)
+
+
+### Features
+
+* **deploy:** shadow remote-m3, m3-catalog and remote-widgets on preview.coo.ee ([#1462](https://github.com/yschimke/compose-preview-server/issues/1462)) ([f9c84fe](https://github.com/yschimke/compose-preview-server/commit/f9c84fe94b382710a67e17681204dd5156f4c4bc))
+
+
+### Bug Fixes
+
+* **deps:** compose-ui-builder 3.98.0, which draws a launcher widget's adaptive layout at the slot its frame picks ([#1466](https://github.com/yschimke/compose-preview-server/issues/1466)) ([2d30448](https://github.com/yschimke/compose-preview-server/commit/2d30448be596564d4fdbf11b74534cbf8b8ce2c4))
+* **docs:** accept untagged AndroidX Remote Compose headers on /docs ([#1464](https://github.com/yschimke/compose-preview-server/issues/1464)) ([5399124](https://github.com/yschimke/compose-preview-server/commit/5399124048e81f662b82425c01e85798e6ae0170))
+* **rc-player:** resolve the TS player from Central and keep its custom host inert ([#1465](https://github.com/yschimke/compose-preview-server/issues/1465)) ([3f0c06f](https://github.com/yschimke/compose-preview-server/commit/3f0c06fee359313b0c2c543eeae99b200c1f505c))
+* **ui-builder:** compose a published catalog against the record published beside it ([#1461](https://github.com/yschimke/compose-preview-server/issues/1461)) ([fe4ad46](https://github.com/yschimke/compose-preview-server/commit/fe4ad46882ccdc59f8cbeb2a57375ad9c4b10abc))
+* **ui-builder:** log the exception behind "UI-builder service failed" ([#1467](https://github.com/yschimke/compose-preview-server/issues/1467)) ([120a848](https://github.com/yschimke/compose-preview-server/commit/120a8487c9089aed47b8d8420efe777e10e6d845))
+
 ## [3.112.0](https://github.com/yschimke/compose-preview-server/compare/v3.111.0...v3.112.0) (2026-10-09)
 
 
