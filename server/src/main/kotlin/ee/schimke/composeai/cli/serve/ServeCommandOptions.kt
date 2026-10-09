@@ -660,6 +660,9 @@ public class ServeCommandOptions(
       it >= 0
     } ?: DEFAULT_GUIDELINES_PICTURE_BUDGET_SECONDS
 
+  override val uiBuilderGuidelinesTriage: Boolean =
+    args.flagValue("--ui-builder-guidelines-triage")?.trim()?.lowercase() != "off"
+
   override val githubAuthOpenUiBuilder: Boolean = "--github-auth-open-ui-builder" in args
 
   /**
@@ -1341,11 +1344,16 @@ public class ServeCommandOptions(
                           private memberships count. Everyone else can still run the check in the
                           editor with their own OpenRouter key.
         --ui-builder-guidelines-model <id>
-                          The OpenRouter model for that check (default typesafe/jev-router).
+                          The OpenRouter model for that check (default
+                          deepseek/deepseek-v4.1-flash).
         --ui-builder-guidelines-picture-budget <seconds>
                           How long a guidelines prompt waits for native renders it has not
                           cached yet (default 45). The rest keep drawing into the cache and are
                           attached the next time it is asked. 0 attaches only cached pictures.
+        --ui-builder-guidelines-triage <on|off>
+                          Before a guidelines check, ask Jev (typesafe/jev-1.13, a fraction of a
+                          cent) which extra evidence would help — a dark render, a large-font
+                          render, the accessibility tree — and gather only that (default on).
         --agent-grants    Let an agent ask for temporary access it can't otherwise get. The agent
                           POSTs /agent-access/request and prints a link plus a verification code;
                           you open the link, check the code matches, and approve. It then collects a

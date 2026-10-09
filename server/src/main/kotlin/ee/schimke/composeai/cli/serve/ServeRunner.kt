@@ -2654,6 +2654,8 @@ public class ServeRunner(
     val reviews: ServeUiBuilderReviewStore?,
     /** Each design's latest guidelines result, beside the state for the same reasons. */
     val guidelineRecords: ServeUiBuilderGuidelineStore? = null,
+    /** Each builder catalog's own `ui-builder.guidelines.json`, read with its published catalog. */
+    val catalogGuidelines: ServeCatalogGuidelines = ServeCatalogGuidelines(),
     /** Shared file-manager folders, stored beside design state without changing revisions. */
     val folders: ServeUiBuilderFolderStore?,
     /**
@@ -3086,6 +3088,7 @@ public class ServeRunner(
     // when that branch moves (yschimke/compose-preview-server#1054): a republished runtime or
     // policy
     // reaches the builder without a restart. True when it composed.
+    val catalogGuidelines = ServeCatalogGuidelines()
     fun composePublished(systemId: String, refresh: Boolean = false): Boolean {
       if (catalogStore == null || publishedAllowed?.contains(systemId) == false) return false
       // A catalog served under another name (`wear-m3` from `wear-m3-catalog`) keeps its record
@@ -3106,6 +3109,17 @@ public class ServeRunner(
           sourceBranchPrefix = config?.branch?.removeSuffix(sourceSystem),
           templates = ownership.owns(systemId) || systemId in shadowed,
         ) ?: return false
+      // The catalog's own design guidance, published beside it. A republish that drops the file
+      // drops the catalog's guidelines too, and the check falls back to the bundled rules.
+      val guidelinesBytes = published.guidelines
+      val guidelinesUrl = published.guidelinesUrl
+      if (guidelinesBytes != null && guidelinesUrl != null) {
+        if (catalogGuidelines.accept(systemId, guidelinesBytes, guidelinesUrl)) {
+          System.err.println("serve: UI-builder catalog $systemId publishes its own guidelines")
+        }
+      } else {
+        catalogGuidelines.remove(systemId)
+      }
       // The catalog's own record, fetched now if this host has never loaded it.
       //
       // Without this a cold start composes the published policy against NOTHING — the store
@@ -3421,6 +3435,7 @@ public class ServeRunner(
             )
           }
           .getOrNull(),
+      catalogGuidelines = catalogGuidelines,
       guidelineRecords =
         runCatching { ServeUiBuilderGuidelineStore(directory.resolve("guidelines").toPath()) }
           .onFailure {
@@ -3743,6 +3758,18 @@ public class ServeRunner(
       }
     val uiBuilderAppDir = usableUiBuilderDir()
     val uiBuilderLane = openUiBuilderService(uiBuilderAppDir, catalogStore, catalogLoads)
+    // A local module's own guidelines, where compose-ai-tools' discovery writes them beside its
+    // `ui-builder.json`; a hosted catalog's arrive with its published catalog instead.
+    localSourceRoots.values.forEach { root ->
+      uiBuilderLane
+        ?.catalogGuidelines
+        ?.loadLocal(
+          File(
+            root,
+            "build/compose-previews/${ee.schimke.composeai.uibuilder.guidelines.CatalogGuidelines.FILE_NAME}",
+          )
+        )
+    }
     uiBuilderLaneOpen = uiBuilderLane != null
     uiBuilderPublishedRefresh = uiBuilderLane?.refreshPublished
     // Named at startup because the failure it prevents surfaces far from its cause: an agent
@@ -4083,6 +4110,7 @@ public class ServeRunner(
         uiBuilderLinksStore = uiBuilderLane?.links,
         uiBuilderReviewStore = uiBuilderLane?.reviews,
         uiBuilderGuidelineStore = uiBuilderLane?.guidelineRecords,
+        uiBuilderCatalogGuidelines = uiBuilderLane?.catalogGuidelines,
         uiBuilderFolderStore = uiBuilderLane?.folders,
         uiBuilderAssets = uiBuilderLane?.service,
         // Wrapped like the service, so a merge redraws the parent's listing card.
@@ -5838,6 +5866,7 @@ public class ServeRunner(
         allowedUsers = uiBuilderGuidelinesUsers,
         allowedOrgs = uiBuilderGuidelinesOrgs,
         githubToken = githubToken,
+        triage = uiBuilderGuidelinesTriage,
       )
     return ServeUiBuilderGuidelines(
       config,

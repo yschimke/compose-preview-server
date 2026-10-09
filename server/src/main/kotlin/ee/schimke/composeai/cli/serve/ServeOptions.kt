@@ -594,6 +594,14 @@ public interface ServeOptions {
     get() = DEFAULT_GUIDELINES_PICTURE_BUDGET_SECONDS
 
   /**
+   * `--ui-builder-guidelines-triage on|off`: whether a guidelines check first asks Jev
+   * (`typesafe/jev-1.13`) which extra evidence would help — a dark render, a large-font render, the
+   * accessibility tree — and gathers only that. On by default; it costs a fraction of a cent.
+   */
+  public val uiBuilderGuidelinesTriage: Boolean
+    get() = true
+
+  /**
    * `--github-auth-open-ui-builder`: every signed-in GitHub member may create, edit and export
    * UI-builder designs, and approve agent grants for them, without repository access. See
    * [ServeGithubAuthConfig.openUiBuilder].

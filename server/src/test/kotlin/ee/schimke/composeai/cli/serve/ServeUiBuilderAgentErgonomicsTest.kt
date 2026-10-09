@@ -180,6 +180,186 @@ class ServeUiBuilderAgentErgonomicsTest {
     assertNull(server.guidelineRecords.read("agent-screen"))
   }
 
+  // ---- a catalog's own guidelines, the served model, the evidence triage ------------------------
+
+  /** `m3-catalog`'s own guidelines: one rule of its own and two sized frames. */
+  private val catalogGuidelinesJson =
+    """
+    {
+      "schema": "compose-ui-builder/catalog-guidelines/v1",
+      "catalog": "$CATALOG_SYSTEM_ID", "platform": "mobile", "version": 7,
+      "frames": [
+        {"kind": "sized", "label": "2x1", "widthDp": 130, "heightDp": 102},
+        {"kind": "sized", "label": "4x2", "widthDp": 276, "heightDp": 220}
+      ],
+      "rules": [
+        {"id": "catalog.own-rule", "kind": "structure", "severity": "warning",
+         "guidance": "Own guidance.", "check": "Does it follow the catalog's own rule?",
+         "source": "https://developer.android.com/own"}
+      ]
+    }
+    """
+      .trimIndent()
+
+  @Test
+  fun `a catalog's own guidelines decide the rules and the pictures, and are served`() {
+    val drawn = mutableListOf<Pair<Int, Int>>()
+    val own = ServeCatalogGuidelines(log = {})
+    assertTrue(own.accept(CATALOG_SYSTEM_ID, catalogGuidelinesJson.toByteArray(), "test:file"))
+    val server =
+      start(
+        nativePreview =
+          UiBuilderNativePreviewLane { document, _ ->
+            drawn += document.environment.widthDp to document.environment.heightDp
+            nativeFrame(document.environment.widthDp / 2, document.environment.heightDp / 2)
+          },
+        catalogGuidelines = own,
+      )
+    create(server, cleanDocument())
+
+    val prompt =
+      reply(server, ServeUiBuilderMcp.GUIDELINES_PROMPT, """{"designId":"agent-screen"}""")
+    assertEquals("mobile", prompt.text("platform"))
+    val rules = prompt["rules"]!!.jsonObject
+    assertEquals(7, rules["version"]!!.jsonPrimitive.int)
+    assertEquals(
+      listOf("catalog.own-rule"),
+      rules["asked"]!!.jsonArray.map { it.jsonObject.text("id") },
+    )
+    assertEquals(ServeCatalogGuidelines.routeFor(CATALOG_SYSTEM_ID), rules.text("source"))
+    // The catalog's frames, not the built-in phone and tablet.
+    assertEquals(listOf(130 to 102, 276 to 220), drawn)
+    assertEquals(
+      listOf("2x1", "4x2"),
+      prompt["pictures"]!!.jsonArray.map { it.jsonObject.text("kind") },
+    )
+
+    val (status, body) =
+      http(server, "GET", "/api/ui-builder/v1/catalogs/$CATALOG_SYSTEM_ID/guidelines", null)
+    assertEquals(200, status, body)
+    assertEquals(catalogGuidelinesJson, body)
+    val (missing, _) = http(server, "GET", "/api/ui-builder/v1/catalogs/remote-m3/guidelines", null)
+    assertEquals(404, missing)
+  }
+
+  @Test
+  fun `a check records the model that answered, and a catalog rule's finding reads`() {
+    val own = ServeCatalogGuidelines(log = {})
+    own.accept(CATALOG_SYSTEM_ID, catalogGuidelinesJson.toByteArray(), "test:file")
+    val config = ServeUiBuilderGuidelinesConfig(apiKey = "sk-or-test", allowedUsers = setOf("a"))
+    val lane =
+      ServeUiBuilderGuidelines(
+        config,
+        ServeUiBuilderGuidelineAccess(config.allowedUsers, emptySet(), { _, _ -> false }),
+        transport = { _, _ ->
+          OpenRouterTransport.Response(200, routedCompletion("catalog.own-rule", "fail"))
+        },
+        decisions = { _, _ -> throw java.io.IOException("no triage in this test") },
+      )
+    val server =
+      start(
+        directory = stateDirectory.resolve("served"),
+        guidelines = lane,
+        catalogGuidelines = own,
+      )
+    create(server, cleanDocument())
+
+    val checked = check(server, """{"designId":"agent-screen","checks":["guidelines"]}""")
+    val finding =
+      checked["findings"]!!
+        .jsonArray
+        .map { it.jsonObject }
+        .single { it.text("code") == "catalog.own-rule" }
+    assertTrue(
+      "Checked by deepseek/deepseek-v4.1-flash on CoreWeave" in finding.text("message"),
+      finding.toString(),
+    )
+    val record = server.guidelineRecords.read("agent-screen")!!
+    assertEquals(config.model, record.model)
+    assertEquals("deepseek/deepseek-v4.1-flash", record.servedModel)
+    assertEquals("CoreWeave", record.provider)
+    assertEquals(0.0034, record.costUsd!!, 1e-9)
+    assertEquals("gen-test", record.generationId)
+    assertEquals("initial", record.routing!!.reason)
+    assertEquals(0.9, record.routing!!.probability!!, 1e-9)
+    assertEquals(listOf("catalog.own-rule"), record.asked)
+  }
+
+  @Test
+  fun `the evidence triage adds a dark render when Jev wants one, and nothing when it fails`() {
+    val themes = mutableListOf<ThemeV1>()
+    fun laneAnswering(decisions: OpenRouterTransport): ServeUiBuilderGuidelines {
+      val config = ServeUiBuilderGuidelinesConfig(apiKey = "sk-or-test", allowedUsers = setOf("a"))
+      return ServeUiBuilderGuidelines(
+        config,
+        ServeUiBuilderGuidelineAccess(config.allowedUsers, emptySet(), { _, _ -> false }),
+        transport = { _, _ ->
+          OpenRouterTransport.Response(200, completion("mobile.touch-target-48dp", "pass"))
+        },
+        decisions = decisions,
+      )
+    }
+    val native = UiBuilderNativePreviewLane { document, _ ->
+      themes += document.environment.theme
+      nativeFrame(document.environment.widthDp / 8, document.environment.heightDp / 8)
+    }
+
+    val wanting =
+      start(
+        directory = stateDirectory.resolve("triage-yes"),
+        guidelines =
+          laneAnswering { body, _ ->
+            assertTrue("typesafe/jev-1.13" in body, body.take(300))
+            OpenRouterTransport.Response(
+              200,
+              """{"answers":{"dark_theme":{"type":"noul","noul":0.9},""" +
+                """"large_font":{"type":"noul","noul":0.1},""" +
+                """"a11y_hierarchy":{"type":"noul","noul":0.2}}}""",
+            )
+          },
+        nativePreview = native,
+      )
+    create(wanting, cleanDocument())
+    check(wanting, """{"designId":"agent-screen","checks":["guidelines"],"rendered":true}""")
+    assertTrue(ThemeV1.DARK in themes, themes.toString())
+    wanting.close()
+
+    themes.clear()
+    val failing =
+      start(
+        directory = stateDirectory.resolve("triage-no"),
+        guidelines = laneAnswering { _, _ -> throw java.io.IOException("decisions are down") },
+        nativePreview = native,
+      )
+    create(failing, cleanDocument())
+    val checked =
+      check(failing, """{"designId":"agent-screen","checks":["guidelines"],"rendered":true}""")
+    assertTrue(themes.isNotEmpty())
+    assertTrue(ThemeV1.DARK !in themes, themes.toString())
+    assertNull(checked["skipped"]?.jsonArray?.firstOrNull { "triage" in it.toString() })
+  }
+
+  /** A routed completion: the answer plus OpenRouter's served model, provider, cost and routing. */
+  private fun routedCompletion(ruleId: String, verdict: String): String {
+    val base = Json.parseToJsonElement(completion(ruleId, verdict)).jsonObject
+    return JsonObject(
+        base +
+          mapOf(
+            "id" to JsonPrimitive("gen-test"),
+            "model" to JsonPrimitive("deepseek/deepseek-v4.1-flash"),
+            "provider" to JsonPrimitive("CoreWeave"),
+            "usage" to buildJsonObject { put("cost", 0.0034) },
+            "openrouter_metadata" to
+              Json.parseToJsonElement(
+                """{"pipeline":[{"name":"jev-router","data":{"version":"1","reason":"initial",""" +
+                  """"selection_probabilities":[{"model":"deepseek/deepseek-v4.1-flash-20260910",""" +
+                  """"probability":0.9}],"answers":{"big_model_gain":{"type":"noul","noul":0.26}}}}]}"""
+              ),
+          )
+      )
+      .toString()
+  }
+
   // ---- guidelines prompt and shared result -----------------------------------------------------
 
   @Test
@@ -1502,6 +1682,7 @@ class ServeUiBuilderAgentErgonomicsTest {
     nativePreview: UiBuilderNativePreviewLane? = null,
     thumbnails: ServeUiBuilderThumbnails? = null,
     pictureBudgetSeconds: Long = DEFAULT_GUIDELINES_PICTURE_BUDGET_SECONDS,
+    catalogGuidelines: ServeCatalogGuidelines? = null,
   ): Running {
     val registry = ServeSessionRegistry(open = { null })
     val reviews = ServeUiBuilderReviewStore(directory.resolve("reviews"))
@@ -1528,6 +1709,7 @@ class ServeUiBuilderAgentErgonomicsTest {
           uiBuilderNativePreview = nativePreview,
           uiBuilderThumbnails = thumbnails,
           uiBuilderGuidelinesPictureBudgetSeconds = pictureBudgetSeconds,
+          uiBuilderCatalogGuidelines = catalogGuidelines,
         )
         .also(ServeHttpServer::start)
     return Running(server, registry, reviews, guidelineRecords).also { running = it }

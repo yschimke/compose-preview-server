@@ -844,9 +844,21 @@ A key with nobody named is refused at startup. An agent working under an access 
 person who approved it. Org membership is asked of GitHub and remembered for ten minutes; without
 `SERVE_UI_BUILDER_GUIDELINES_GITHUB_TOKEN` (a token of an org member with `read:org`) only
 **public** memberships are visible. `SERVE_UI_BUILDER_GUIDELINES_MODEL` picks the OpenRouter model
-(default `typesafe/jev-router`). Everyone else gets the check reported as skipped, and can run the
+(default `deepseek/deepseek-v4.1-flash`, called directly: `typesafe/jev-router` routes to the same
+model most of the time, but at random, through dearer providers, and reads no images). Each record
+keeps the model that actually answered, its provider, cost and generation id, and a router's
+reason. Before a check, the box asks Jev (`typesafe/jev-1.13`, a fraction of a cent) which extra
+evidence would help — a dark render, a large-font render, the accessibility tree — and gathers
+only that; `SERVE_UI_BUILDER_GUIDELINES_TRIAGE=off` skips it. Everyone else gets the check reported as skipped, and can run the
 same rules in the editor's Issues panel with their own OpenRouter key; the editor page's
 `connect-src` admits `https://openrouter.ai` for that.
+
+A catalog that publishes `ui-builder.guidelines.json` beside its `ui-builder.json` (format
+`compose-ui-builder/catalog-guidelines/v1`) has its designs checked against **its own** rules and
+shown **its own** pictures; the box reads the file from the delivery branch with the catalog, and
+serves it at `GET /api/ui-builder/v1/catalogs/{catalogId}/guidelines`, which a prompt's
+`rules.source` links. A catalog that publishes none, or one whose file is malformed or written for
+another catalog, falls back to the rules compose-ui-builder bundles.
 
 Without any key, `ui_builder_guidelines_prompt` (and `GET /api/ui-builder/v1/designs/{id}/guidelines/prompt`,
 which the editor's **Show the prompt** reads) hands out the same request, pictures included, so an

@@ -399,7 +399,21 @@ internal constructor(
       else
         document.copy(
           environment =
-            document.environment.copy(widthDp = frame.widthDp, heightDp = frame.heightDp)
+            document.environment.copy(widthDp = frame.widthDp, heightDp = frame.heightDp).let {
+              environment ->
+              // An evidence frame's overrides: the dark theme, a larger font scale.
+              val theme =
+                frame.environment["theme"]?.content?.let { name ->
+                  ee.schimke.composeai.uibuilder.protocol.ThemeV1.entries.firstOrNull {
+                    it.name.equals(name, ignoreCase = true)
+                  }
+                }
+              val fontScale = frame.environment["fontScale"]?.content?.toDoubleOrNull()
+              environment.copy(
+                theme = theme ?: environment.theme,
+                fontScale = fontScale ?: environment.fontScale,
+              )
+            }
         )
 
     /**

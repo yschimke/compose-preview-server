@@ -535,6 +535,8 @@ class ServeHttpServer(
    * the check reported as skipped.
    */
   private val uiBuilderGuidelines: ServeUiBuilderGuidelines? = null,
+  /** Each builder catalog's own guidelines; null where the host keeps none. */
+  private val uiBuilderCatalogGuidelines: ServeCatalogGuidelines? = null,
   /** `--ui-builder-guidelines-picture-budget`, in seconds. */
   private val uiBuilderGuidelinesPictureBudgetSeconds: Long =
     DEFAULT_GUIDELINES_PICTURE_BUDGET_SECONDS,
@@ -912,6 +914,7 @@ class ServeHttpServer(
           uiBuilderThumbnails?.nativeWidgetThumbnail(designId, revision)
         },
         guidelinePictureBudgetMillis = uiBuilderGuidelinesPictureBudgetSeconds * 1_000,
+        catalogGuidelines = uiBuilderCatalogGuidelines,
       )
     }
   }
@@ -1416,6 +1419,13 @@ class ServeHttpServer(
               guidelinesMcp::guidelinesPromptFor,
               guidelinesMcp::guidelinesAccess,
               guidelinesMcp::runGuidelinesCheck,
+              guidelinesMcp::guidelinesRuleSet,
+            )
+          }
+          if (uiBuilderCatalogGuidelines != null) {
+            installUiBuilderCatalogGuidelinesRoute(
+              sameOriginUiBuilderAuthorization,
+              uiBuilderCatalogGuidelines,
             )
           }
           if (uiBuilderFolderStore != null) {

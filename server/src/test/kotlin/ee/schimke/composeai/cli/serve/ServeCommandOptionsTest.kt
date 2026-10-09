@@ -449,6 +449,11 @@ class ServeCommandOptionsTest {
     assertEquals(emptySet(), bare.uiBuilderGuidelinesUsers)
     assertEquals(null, bare.uiBuilderGuidelinesModel)
     assertEquals(45L, bare.uiBuilderGuidelinesPictureBudgetSeconds)
+    assertEquals(true, bare.uiBuilderGuidelinesTriage)
+    assertEquals(
+      false,
+      options(listOf("--ui-builder-guidelines-triage", "off")).uiBuilderGuidelinesTriage,
+    )
     assertEquals(
       10L,
       options(listOf("--ui-builder-guidelines-picture-budget", "10"))

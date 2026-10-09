@@ -1,18 +1,27 @@
 package ee.schimke.composeai.cli.serve
 
+import ee.schimke.composeai.uibuilder.guidelines.CatalogGuidelines
 import ee.schimke.composeai.uibuilder.guidelines.DesignGuidelinePicture
 import ee.schimke.composeai.uibuilder.guidelines.DesignGuidelinePrompt
 import ee.schimke.composeai.uibuilder.guidelines.DesignGuidelineRequest
+import ee.schimke.composeai.uibuilder.guidelines.DesignGuidelineRule
 import ee.schimke.composeai.uibuilder.guidelines.DesignGuidelineRuleSet
+import ee.schimke.composeai.uibuilder.guidelines.DesignGuidelineServed
 import ee.schimke.composeai.uibuilder.guidelines.DesignGuidelineVerdict
+import ee.schimke.composeai.uibuilder.guidelines.OPENROUTER_DECISIONS_URL
 import ee.schimke.composeai.uibuilder.guidelines.body
+import ee.schimke.composeai.uibuilder.guidelines.describe
+import ee.schimke.composeai.uibuilder.guidelines.parseServed
+import ee.schimke.composeai.uibuilder.guidelines.parseTriage
 import ee.schimke.composeai.uibuilder.guidelines.prepare
+import ee.schimke.composeai.uibuilder.guidelines.triageBody
 import ee.schimke.composeai.uibuilder.service.AuthenticatedUiBuilderActor
 import java.time.Clock
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.JsonObject
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -39,6 +48,15 @@ internal constructor(
   private val config: ServeUiBuilderGuidelinesConfig,
   private val access: ServeUiBuilderGuidelineAccess,
   private val transport: OpenRouterTransport = OkHttpOpenRouterTransport(config.endpoint),
+  /** OpenRouter's decisions endpoint, which Jev answers the evidence triage on. */
+  private val decisions: OpenRouterTransport =
+    OkHttpOpenRouterTransport(
+      config.decisionsEndpoint,
+      OkHttpClient.Builder()
+        .callTimeout(TRIAGE_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS)
+        .readTimeout(TRIAGE_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS)
+        .build(),
+    ),
 ) {
   val model: String
     get() = config.model
@@ -49,6 +67,31 @@ internal constructor(
 
   /** Who may run the check, for the startup banner. */
   fun describeAccess(): String = access.describe()
+
+  /** Whether a check asks Jev which extra evidence would help before it draws anything. */
+  val triageEnabled: Boolean
+    get() = config.triage
+
+  /**
+   * Jev's probability, per evidence offer, that it would help judge [request]'s rules — a dark
+   * render, a large-font render, the accessibility tree — or null when triage is off, the call
+   * fails or it takes longer than [TRIAGE_TIMEOUT_MILLIS]. It never blocks a check: a null answer
+   * just means nothing extra is drawn.
+   */
+  internal suspend fun triage(request: DesignGuidelineRequest): Map<String, Double>? {
+    if (!config.triage) return null
+    return withTimeoutOrNull(TRIAGE_TIMEOUT_MILLIS) {
+      runCatching {
+        withContext(Dispatchers.IO) {
+          decisions.post(DesignGuidelinePrompt.triageBody(request).toString(), config.apiKey)
+        }
+      }
+        .getOrNull()
+        ?.takeIf { it.status in 200..299 }
+        ?.let { DesignGuidelinePrompt.parseTriage(it.body) }
+        ?.takeIf { it.isNotEmpty() }
+    }
+  }
 
   /**
    * Sends [request] to the model on the operator's key and reads the verdicts. The caller has
@@ -91,6 +134,8 @@ internal constructor(
       }
     // One verdict per rule asked. A rule the model skipped is unanswered, never counted as a pass.
     val answered = DesignGuidelinePrompt.answered(verdicts, asked)
+    // The model that wrote the verdicts, which a router chose and the asked model does not name.
+    val served = DesignGuidelinePrompt.parseServed(response.body)
     if (answered.isEmpty()) {
       return UiBuilderGuidelineOutcome.Failed(
         "${config.model} returned no verdict for any of the ${asked.size} rules asked"
@@ -103,11 +148,42 @@ internal constructor(
       verdicts = answered,
       visualSkipped = request.rules.visualSkipped,
       sourceAttached = request.sourceAttached,
+      askedRules = asked,
+      served = served,
     )
   }
 
   companion object {
     private const val MAX_NODES_PER_RULE = 5
+
+    /** How long a check waits for Jev's evidence triage before going on without it. */
+    const val TRIAGE_TIMEOUT_MILLIS: Long = 5_000
+
+    /**
+     * The request built from [guidelines] — the design's own catalog's rules — rather than the
+     * bundled set. [rulesSource] is where the catalog's file is served; [profile] the Remote
+     * Compose profile the design targets, narrowing rules written for one.
+     */
+    fun prepare(
+      guidelines: CatalogGuidelines,
+      designId: String?,
+      revision: Int,
+      document: JsonObject,
+      pictures: List<DesignGuidelinePicture>,
+      source: String?,
+      profile: String?,
+      rulesSource: String,
+    ): DesignGuidelineRequest =
+      DesignGuidelinePrompt.prepare(
+        guidelines,
+        designId,
+        revision,
+        document,
+        pictures,
+        source,
+        profile,
+        rulesSource,
+      )
 
     /**
      * The request for [document] with [pictures] and [source], built from the bundled rules by the
@@ -134,8 +210,15 @@ internal constructor(
       nodeIds: Set<String>,
       model: String,
       minConfidence: Double,
+      /**
+       * The rules [asked] names: the catalog's own and the bundled set; see
+       * [ServeCatalogGuidelines].
+       */
+      known: List<DesignGuidelineRule> = DesignGuidelineRuleSet.Bundled.rules,
+      /** Who answered, when known: a router's served model, not the router. */
+      served: DesignGuidelineServed? = null,
     ): List<UiBuilderCheckFindingV1> {
-      val rules = DesignGuidelineRuleSet.Bundled.rules.filter { it.id in asked }
+      val rules = known.filter { it.id in asked }.distinctBy { it.id }
       return DesignGuidelinePrompt.findings(verdicts, rules, nodeIds, minConfidence).flatMap {
         finding ->
         val rule = finding.rule
@@ -148,7 +231,13 @@ internal constructor(
               buildString {
                 append(finding.reason)
                 append(" Guideline: \"").append(rule.guidance).append("\" (")
-                append(rule.source).append("). Model ").append(model)
+                append(rule.source).append("). ")
+                append(
+                  served
+                    ?.takeIf { it.model != null }
+                    ?.describe(model)
+                    ?.replaceFirstChar { it.uppercase() } ?: "Model $model"
+                )
                 append(", confidence ")
                   .append(String.format(java.util.Locale.ROOT, "%.2f", finding.confidence))
                   .append('.')
@@ -178,6 +267,10 @@ internal sealed interface UiBuilderGuidelineOutcome {
     val visualSkipped: Int,
     /** Whether the generated Compose source went to the model with the design tree. */
     val sourceAttached: Boolean = false,
+    /** The rules [asked] names, as the request carried them. */
+    val askedRules: List<DesignGuidelineRule> = emptyList(),
+    /** The model that actually answered, and how a router chose it. */
+    val served: DesignGuidelineServed = DesignGuidelineServed(),
   ) : UiBuilderGuidelineOutcome {
     val unanswered: List<String>
       get() = asked - verdicts.map { it.ruleId }.toSet()
@@ -203,6 +296,14 @@ internal data class ServeUiBuilderGuidelinesConfig(
    */
   val githubToken: String? = null,
   val endpoint: String = OPENROUTER_CHAT_COMPLETIONS,
+  /** OpenRouter's decisions endpoint, for the Jev evidence triage. */
+  val decisionsEndpoint: String = OPENROUTER_DECISIONS_URL,
+  /**
+   * Ask Jev (`typesafe/jev-1.13`, a fraction of a cent) which extra evidence would help before a
+   * check: a dark render, a large-font render, the accessibility tree. Off with
+   * `--ui-builder-guidelines-triage off`.
+   */
+  val triage: Boolean = true,
   /** Below this, a `fail` verdict is not reported: the model was guessing. */
   val minConfidence: Double = 0.5,
 ) {
@@ -216,8 +317,12 @@ internal data class ServeUiBuilderGuidelinesConfig(
   }
 
   companion object {
-    /** TypeSafe's Jev decision model, as OpenRouter routes it. Any OpenRouter model id works. */
-    const val DEFAULT_MODEL = "typesafe/jev-router"
+    /**
+     * Called directly. `typesafe/jev-router` routes this check to the same model most of the time,
+     * but picks at random, through dearer providers, and reads only the text, so it never chooses a
+     * model for the pictures the visual rules are judged on. Any OpenRouter model id works.
+     */
+    const val DEFAULT_MODEL = "deepseek/deepseek-v4.1-flash"
     const val OPENROUTER_CHAT_COMPLETIONS = "https://openrouter.ai/api/v1/chat/completions"
     const val API_KEY_ENV = "SERVE_UI_BUILDER_GUIDELINES_OPENROUTER_KEY"
     const val GITHUB_TOKEN_ENV = "SERVE_UI_BUILDER_GUIDELINES_GITHUB_TOKEN"
