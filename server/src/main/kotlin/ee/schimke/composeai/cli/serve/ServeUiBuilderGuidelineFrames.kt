@@ -76,6 +76,11 @@ internal constructor(
     val widthDp: Int,
     val heightDp: Int,
     val hostShape: String?,
+    /**
+     * Every environment value the frame draws with (theme, font scale, …), sorted: two frames of
+     * one kind and size that differ in any of them are different pictures.
+     */
+    val environment: String = "",
   )
 
   /** Draws [document] in [shape]; null when the host could not. Set once the host has a lane. */
@@ -101,7 +106,17 @@ internal constructor(
     val frame: DesignGuidelineFrame,
     val background: Boolean,
     val result: CompletableFuture<ByteArray?> = CompletableFuture(),
+    /** [epochs]' value for the design when queued; a later eviction makes the job's result void. */
+    val epoch: Long = 0,
   )
+
+  /**
+   * Bumped by [evict]. A job queued or drawing when its design is deleted carries the old epoch, so
+   * its picture is never written back — a design recreated under the same id must not receive it.
+   */
+  private val epochs = ConcurrentHashMap<String, Long>()
+
+  private fun epochOf(designId: String): Long = epochs[designId] ?: 0
 
   /**
    * Frames a reader is waiting on, in the order asked: drawn before any warm. A queue of their own,
@@ -145,15 +160,24 @@ internal constructor(
               }
               continue
             }
+            if (job.epoch != epochOf(job.key.designId)) {
+              pending.remove(job.key, job)
+              job.result.complete(null)
+              continue
+            }
             val png =
               try {
-                cached(job.key) ?: draw(job.document, job.frame)?.also { store(job.key, it) }
+                cached(job.key)
+                  ?: draw(job.document, job.frame)?.also {
+                    // Evicted while drawing: drop the picture rather than recreate the entry.
+                    if (job.epoch == epochOf(job.key.designId)) store(job.key, it)
+                  }
               } catch (failure: Exception) {
                 onLog("serve: UI-builder guideline frame ${job.key} not drawn: ${failure.message}")
                 null
               }
             pending.remove(job.key, job)
-            job.result.complete(png)
+            job.result.complete(png?.takeIf { job.epoch == epochOf(job.key.designId) })
           }
         },
         "ui-builder-guideline-frames",
@@ -174,6 +198,9 @@ internal constructor(
       frame.widthDp,
       frame.heightDp,
       frame.environment[WearWidgetHostShape.ENVIRONMENT_KEY]?.content,
+      frame.environment.entries
+        .sortedBy { it.key }
+        .joinToString(",") { (name, value) -> "$name=${value.content}" },
     )
 
   /** The kept picture for [key], from memory or disk; null when it was never drawn. */
@@ -188,9 +215,11 @@ internal constructor(
     runCatching {
       val dir = directory.resolve(designBase(key.designId))
       ServeOwnerOnlyFiles.createDirectories(dir)
+      // Only this revision drawn by this generation stays: a deploy that changes the renderer
+      // would otherwise leave every earlier generation's set behind until the design is edited.
       Files.newDirectoryStream(dir, "*.png").use { files ->
         files
-          .filterNot { it.fileName.toString().startsWith("r${key.revision}-") }
+          .filterNot { it.fileName.toString().startsWith(filePrefix(key.revision)) }
           .forEach { Files.deleteIfExists(it) }
       }
       val temp = Files.createTempFile(dir, ".frame", ".tmp")
@@ -223,11 +252,12 @@ internal constructor(
     cached(key)?.let {
       return CompletableFuture.completedFuture(it)
     }
-    val job = Job(key, document, frame, background)
+    val job = Job(key, document, frame, background, epoch = epochOf(key.designId))
     val existing = pending.putIfAbsent(key, job)
     if (existing != null) {
       if (!background && existing.background && warms.remove(existing)) {
-        val promoted = Job(key, existing.document, existing.frame, false, existing.result)
+        val promoted =
+          Job(key, existing.document, existing.frame, false, existing.result, existing.epoch)
         pending[key] = promoted
         if (readers.offer(promoted)) {
           queued.release()
@@ -341,6 +371,16 @@ internal constructor(
 
   /** Forget [designId]'s frames, in memory and on disk; its id may come back as another design. */
   internal fun evict(designId: String) {
+    epochs.merge(designId, 1L, Long::plus)
+    // Queued jobs go now; one already drawing sees the new epoch and drops its picture.
+    listOf(readers, warms).forEach { queue ->
+      queue.removeIf { job ->
+        (job.key.designId == designId).also { if (it) job.result.complete(null) }
+      }
+    }
+    pending.entries.removeIf { (key, job) ->
+      (key.designId == designId).also { if (it) job.result.complete(null) }
+    }
     memory.keys.removeIf { it.designId == designId }
     warmable.remove(designId)
     scheduled.remove(designId)?.cancel(false)
@@ -369,13 +409,17 @@ internal constructor(
     directory
       .resolve(designBase(key.designId))
       .resolve(
-        "r${key.revision}-" +
+        filePrefix(key.revision) +
           digest(
             "${key.revision}|$generation|${key.kind}|${key.widthDp}x${key.heightDp}|" +
-              "${key.hostShape}"
+              "${key.hostShape}|${key.environment}"
           ) +
           ".png"
       )
+
+  /** `r<revision>-g<generation>-`: what [store] keeps when it tidies the design's directory. */
+  private fun filePrefix(revision: Long): String =
+    "r$revision-g${digest(generation).take(GENERATION_TAG)}-"
 
   override fun close() {
     worker.interrupt()
@@ -387,6 +431,8 @@ internal constructor(
 
   internal companion object {
     const val QUEUE = 256
+
+    private const val GENERATION_TAG = 12
 
     /** How long a design stays unedited before its frames are warmed. */
     const val QUIET_PERIOD_MILLIS = 30_000L

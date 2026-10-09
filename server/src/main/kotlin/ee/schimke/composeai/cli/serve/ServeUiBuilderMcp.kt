@@ -3012,6 +3012,18 @@ class ServeUiBuilderMcp(
   private fun guidelineRuleSet(catalogId: String): DesignGuidelineRuleSet =
     catalogGuidelines?.ruleSetFor(catalogId) ?: DesignGuidelineRuleSet.Bundled
 
+  /** [designId]'s current revision as [actor] reads it; null when it cannot be read. */
+  internal suspend fun currentDesignRevision(
+    designId: String,
+    actor: AuthenticatedUiBuilderActor,
+  ): Long? =
+    (execute(GetSnapshotRequestV1(designId = designId, revision = null), actor)
+        as? UiBuilderServiceResponse.Snapshot)
+      ?.snapshot
+      ?.state
+      ?.document
+      ?.revision
+
   /** [guidelineRuleSet] for [designId]'s catalog, as the record route validates against. */
   internal suspend fun guidelinesRuleSet(
     designId: String,
@@ -3159,11 +3171,7 @@ class ServeUiBuilderMcp(
     data class Failed(val reason: String) : GuidelinesCheckResult
   }
 
-  private val guidelinesInFlight =
-    java.util.concurrent.ConcurrentHashMap<
-      Pair<String, Long>,
-      CompletableDeferred<GuidelinesCheckResult>,
-    >()
+  private val guidelinesInFlight = GuidelinesCheckCoalescer<GuidelinesCheckResult>()
 
   /**
    * The guidelines check on this host's key for [designId] at its current revision, as
@@ -3186,19 +3194,11 @@ class ServeUiBuilderMcp(
     if (revision != null && revision != document.revision) {
       return GuidelinesCheckResult.Stale(document.revision)
     }
-    val key = designId to document.revision
-    val mine = CompletableDeferred<GuidelinesCheckResult>()
-    val running = guidelinesInFlight.putIfAbsent(key, mine)
-    if (running != null) return running.await()
-    try {
-      val result = checkGuidelinesNow(designId, document, withRenders, actor)
-      mine.complete(result)
-      return result
-    } catch (thrown: Throwable) {
-      mine.completeExceptionally(thrown)
-      throw thrown
-    } finally {
-      guidelinesInFlight.remove(key, mine)
+    // Only identical checks share one model call: the same revision, render mode and caller, so a
+    // record is never stamped with another collaborator's name or another export capability.
+    val key = GuidelinesCheckKey(designId, document.revision, withRenders, actor.actorId)
+    return guidelinesInFlight.run(key) {
+      checkGuidelinesNow(designId, document, withRenders, actor)
     }
   }
 
@@ -3264,6 +3264,7 @@ class ServeUiBuilderMcp(
       document.nodes.keys,
       record,
       known = guidelineRules(document),
+      rulesVersion = guidelineRuleSet(document.catalogPin.systemId).version,
     )
   }
 
@@ -3301,9 +3302,12 @@ class ServeUiBuilderMcp(
       } catch (e: IllegalArgumentException) {
         throw McpRequestException("the verdicts could not be read: ${e.message}")
       }
+    val current = currentDesignRevision(designId, actor)
     when (
       val result =
-        withContext(Dispatchers.IO) { store.record(designId, ranBy = actor.actorId, record, rules) }
+        withContext(Dispatchers.IO) {
+          store.record(designId, ranBy = actor.actorId, record, rules, currentRevision = current)
+        }
     ) {
       is ServeUiBuilderGuidelineStore.GuidelineWriteResult.Refused ->
         throw McpRequestException(result.reason)
@@ -5349,3 +5353,37 @@ internal const val REMOTE_PROFILE_WEAR_WIDGETS = "wear-widgets"
 internal const val REMOTE_PROFILE_LAUNCHER_V6 = "launcher-widgets-v6"
 internal const val REMOTE_PROFILE_ANDROIDX = "androidx"
 private const val REMOTE_COMPOSE_PLATFORM = "remote-compose"
+
+/** What makes two concurrent guidelines checks the same check. */
+internal data class GuidelinesCheckKey(
+  val designId: String,
+  val revision: Long,
+  val withRenders: Boolean,
+  val actorId: String,
+)
+
+/**
+ * Runs one check per [GuidelinesCheckKey] at a time: a request whose key matches one already
+ * running waits for that result instead of spending the key again. Requests that differ in caller
+ * or render mode run separately, so a result is never another caller's.
+ */
+internal class GuidelinesCheckCoalescer<T> {
+  private val inFlight =
+    java.util.concurrent.ConcurrentHashMap<GuidelinesCheckKey, CompletableDeferred<T>>()
+
+  suspend fun run(key: GuidelinesCheckKey, block: suspend () -> T): T {
+    val mine = CompletableDeferred<T>()
+    val running = inFlight.putIfAbsent(key, mine)
+    if (running != null) return running.await()
+    try {
+      val result = block()
+      mine.complete(result)
+      return result
+    } catch (thrown: Throwable) {
+      mine.completeExceptionally(thrown)
+      throw thrown
+    } finally {
+      inFlight.remove(key, mine)
+    }
+  }
+}

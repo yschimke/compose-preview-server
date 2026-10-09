@@ -704,6 +704,23 @@ class ServeUiBuilderAgentErgonomicsTest {
   }
 
   @Test
+  fun `the prompt route stays without a result store, and the result routes do not`() {
+    val server = start(withGuidelineRecords = false)
+    create(server, cleanDocument())
+    val (prompt, promptBody) =
+      http(
+        server,
+        "GET",
+        "/api/ui-builder/v1/designs/agent-screen/guidelines/prompt?rendered=false",
+        null,
+      )
+    assertEquals(200, prompt, promptBody)
+    val (read, readBody) =
+      http(server, "GET", "/api/ui-builder/v1/designs/agent-screen/guidelines", null)
+    assertEquals(404, read, readBody)
+  }
+
+  @Test
   fun `the guidelines record tools exist only with a store, and the prompt tool always`() {
     val server = start(withGuidelineRecords = false)
     val names = tools(server)

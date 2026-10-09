@@ -62,8 +62,18 @@ class ServeUiBuilderGuidelineStore(private val root: Path) {
     ranBy: String,
     record: DesignGuidelineRecord,
     rules: DesignGuidelineRuleSet = DesignGuidelineRuleSet.Bundled,
+    /**
+     * The design's current revision. A record for a later one would read as current through every
+     * edit up to it, so it is refused; null when the caller has already checked the revision.
+     */
+    currentRevision: Long? = null,
   ): GuidelineWriteResult {
     if (record.revision < 0) return GuidelineWriteResult.Refused("`revision` must not be negative")
+    if (currentRevision != null && record.revision > currentRevision) {
+      return GuidelineWriteResult.Refused(
+        "revision ${record.revision} does not exist yet; the design is at revision $currentRevision"
+      )
+    }
     val model = record.model.trim()
     if (model.isEmpty() || model.length > MAX_ID_CHARS) {
       return GuidelineWriteResult.Refused("`model` must be 1 to $MAX_ID_CHARS characters")

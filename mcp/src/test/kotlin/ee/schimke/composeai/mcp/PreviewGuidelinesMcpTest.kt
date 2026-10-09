@@ -64,7 +64,10 @@ class PreviewGuidelinesMcpTest {
     }
   }
 
-  private inner class FakeHost(override val openRouterKey: String?) : PreviewGuidelinesMcp.Host {
+  private inner class FakeHost(
+    override val openRouterKey: String?,
+    val hierarchyProblem: String? = null,
+  ) : PreviewGuidelinesMcp.Host {
     val model = FakeModel()
 
     override fun resolve(ref: String) =
@@ -79,22 +82,27 @@ class PreviewGuidelinesMcpTest {
 
     override fun render(preview: PreviewGuidelinesMcp.Resolved): ByteArray = png()
 
-    override fun a11yHierarchy(preview: PreviewGuidelinesMcp.Resolved): JsonElement =
-      buildJsonObject {
-        put(
-          "nodes",
-          buildJsonArray {
-            add(
-              buildJsonObject {
-                put("ref", "stop")
-                put("role", "Button")
-                put("label", "Stop")
-                put("boundsInScreen", "2,2,20,20")
-              }
-            )
-          },
-        )
-      }
+    override fun a11yHierarchy(
+      preview: PreviewGuidelinesMcp.Resolved
+    ): PreviewGuidelinesMcp.Hierarchy =
+      if (hierarchyProblem != null) PreviewGuidelinesMcp.Hierarchy(null, hierarchyProblem)
+      else PreviewGuidelinesMcp.Hierarchy(hierarchyJson())
+
+    private fun hierarchyJson(): JsonElement = buildJsonObject {
+      put(
+        "nodes",
+        buildJsonArray {
+          add(
+            buildJsonObject {
+              put("ref", "stop")
+              put("role", "Button")
+              put("label", "Stop")
+              put("boundsInScreen", "2,2,20,20")
+            }
+          )
+        },
+      )
+    }
 
     override fun source(preview: PreviewGuidelinesMcp.Resolved) = "@Composable fun Stop() {}"
 
@@ -152,6 +160,21 @@ class PreviewGuidelinesMcpTest {
   fun `an unknown preview is an error, not a guess`() {
     val result = PreviewGuidelinesMcp.prompt(args("Missing"), FakeHost(openRouterKey = null))
     assertThat(result.isError).isTrue()
+  }
+
+  @Test
+  fun `a preview with no accessibility nodes is said to have none, in both tools`() {
+    val host =
+      FakeHost(openRouterKey = "sk-or-test", hierarchyProblem = "a11y/hierarchy: not enabled")
+    val prompt = PreviewGuidelinesMcp.prompt(args("Stop"), host)
+    assertThat(prompt.content.filterIsInstance<ContentBlock.Text>().map { it.text })
+      .contains(
+        "Note: com.example.Stop: no accessibility nodes (a11y/hierarchy: not enabled), so its findings cannot name nodes"
+      )
+    val check = PreviewGuidelinesMcp.check(args("Stop"), host)
+    assertThat(check.structuredContent!!["notes"]!!.jsonArray.single().jsonPrimitive.content)
+      .contains("no accessibility nodes")
+    assertThat((check.content.first() as ContentBlock.Text).text).contains("Note: com.example.Stop")
   }
 
   private fun png(): ByteArray =

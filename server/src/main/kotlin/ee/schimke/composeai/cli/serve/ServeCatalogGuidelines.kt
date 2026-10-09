@@ -30,8 +30,9 @@ class ServeCatalogGuidelines(private val log: (String) -> Unit = System.err::pri
 
   /**
    * Keeps [bytes] as [catalogId]'s guidelines when they read as guidelines written for it; returns
-   * whether they were kept. Anything else is logged and leaves the catalog's previous guidelines
-   * (or none) in place.
+   * whether they were kept. Anything else is logged and clears the catalog's previous guidelines:
+   * the published file is now broken, so the check falls back to the bundled rules rather than
+   * going on asking rules the catalog no longer publishes.
    */
   fun accept(catalogId: String, bytes: ByteArray, source: String): Boolean {
     val text = bytes.toString(Charsets.UTF_8)
@@ -40,18 +41,25 @@ class ServeCatalogGuidelines(private val log: (String) -> Unit = System.err::pri
     }
       .getOrElse {
         log("serve: $catalogId's guidelines at $source could not be read (${it.message})")
-        return false
+        return rejected(catalogId)
       }
     if (!parsed.schema.startsWith(SCHEMA_PREFIX)) {
       log("serve: $catalogId's guidelines at $source are not catalog guidelines (${parsed.schema})")
-      return false
+      return rejected(catalogId)
     }
     if (parsed.catalog != catalogId) {
       log("serve: $catalogId's guidelines at $source are written for `${parsed.catalog}`; ignored")
-      return false
+      return rejected(catalogId)
     }
     byCatalog[catalogId] = Loaded(parsed, source, text)
     return true
+  }
+
+  private fun rejected(catalogId: String): Boolean {
+    if (byCatalog.remove(catalogId) != null) {
+      log("serve: $catalogId's earlier guidelines are dropped; the bundled rules apply")
+    }
+    return false
   }
 
   /** Forgets [catalogId]'s guidelines, when its republished catalog no longer carries any. */

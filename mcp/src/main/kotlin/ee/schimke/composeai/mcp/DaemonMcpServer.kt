@@ -1462,45 +1462,98 @@ class DaemonMcpServer(
           if (ref.startsWith("compose-preview://")) ref
           else (resolvePreviewName(ref) as? PreviewNameResolution.Found)?.uri ?: return null
         val uri = PreviewUri.parseOrNull(uriString) ?: return null
-        val entry =
-          previewCatalog().firstOrNull {
-            PreviewUri.parseOrNull(it.uri)?.previewFqn == uri.previewFqn
-          }
-        val buildDir =
-          supervisor.project(uri.workspaceId)?.let {
-            File(moduleDir(it.path, uri.modulePath), "build")
-          }
+        val entry = guidelineCatalogEntry(uri)
         return PreviewGuidelinesMcp.Resolved(
           uriString,
           uri.previewFqn,
           entry?.simpleName ?: uri.previewFqn,
-          buildDir,
+          guidelineBuildDir(uri),
         )
       }
 
-      override fun render(preview: PreviewGuidelinesMcp.Resolved): ByteArray =
-        renderAndReadRawBytes(PreviewUri.parseOrNull(preview.uri)!!, overrides = null)
-
-      override fun a11yHierarchy(preview: PreviewGuidelinesMcp.Resolved): JsonElement? =
+      override fun render(preview: PreviewGuidelinesMcp.Resolved): ByteArray {
+        val uri = PreviewUri.parseOrNull(preview.uri)!!
+        // The standalone profile starts daemons with extensions inactive, and the hierarchy is
+        // produced by the render: enable `a11y` first, so the render that follows has nodes.
         runCatching {
-          val uri = PreviewUri.parseOrNull(preview.uri)!!
-          val daemon = supervisor.daemonFor(uri.workspaceId, uri.modulePath)
-          daemon.client.dataFetch(uri.previewFqn, "a11y/hierarchy", null, true).payload
+          enableDetailExtensions(
+            supervisor.daemonFor(uri.workspaceId, uri.modulePath),
+            setOf(RenderDetail.A11Y),
+          )
         }
-        .getOrNull()
+        return renderAndReadRawBytes(uri, overrides = null)
+      }
+
+      override fun a11yHierarchy(
+        preview: PreviewGuidelinesMcp.Resolved
+      ): PreviewGuidelinesMcp.Hierarchy {
+        val uri = PreviewUri.parseOrNull(preview.uri)!!
+        val daemon = runCatching {
+          supervisor.daemonFor(uri.workspaceId, uri.modulePath)
+        }
+          .getOrElse {
+            return PreviewGuidelinesMcp.Hierarchy(null, "no daemon (${it.message})")
+          }
+        fun fetch() = daemon.client.dataFetch(uri.previewFqn, A11Y_HIERARCHY_KIND, null, true)
+        return try {
+          PreviewGuidelinesMcp.Hierarchy(fetch().payload)
+        } catch (e: DataProductWireException) {
+          if (e.code != DataProductWireException.NOT_AVAILABLE) {
+            return PreviewGuidelinesMcp.Hierarchy(null, "$A11Y_HIERARCHY_KIND: ${e.wireMessage}")
+          }
+          // Rendered before the extension took effect: render once more and ask again.
+          runCatching {
+            renderAndReadRawBytes(uri, overrides = null)
+            PreviewGuidelinesMcp.Hierarchy(fetch().payload)
+          }
+            .getOrElse {
+              PreviewGuidelinesMcp.Hierarchy(null, "$A11Y_HIERARCHY_KIND: ${it.message}")
+            }
+        } catch (e: Exception) {
+          PreviewGuidelinesMcp.Hierarchy(null, "$A11Y_HIERARCHY_KIND: ${e.message}")
+        }
+      }
 
       override fun source(preview: PreviewGuidelinesMcp.Resolved): String? = runCatching {
         val uri = PreviewUri.parseOrNull(preview.uri)!!
-        val entry =
-          previewCatalog().firstOrNull {
-            PreviewUri.parseOrNull(it.uri)?.previewFqn == uri.previewFqn
-          } ?: return@runCatching null
+        val entry = guidelineCatalogEntry(uri) ?: return@runCatching null
         val daemon = supervisor.daemonFor(uri.workspaceId, uri.modulePath)
         val file = resolvePreviewSourceFile(daemon, entry.sourceFile) ?: return@runCatching null
         previewFunctionSource(file.readLines(), entry.sourceLine)
       }
         .getOrNull()
     }
+
+  /**
+   * [uri]'s catalog entry, matched on its whole identity — workspace, module and preview — so a
+   * preview FQN registered by two checkouts or modules never reads the other one's source.
+   */
+  private fun guidelineCatalogEntry(uri: PreviewUri) =
+    previewCatalog().firstOrNull { candidate ->
+      PreviewUri.parseOrNull(candidate.uri)?.let {
+        it.workspaceId == uri.workspaceId &&
+          it.modulePath == uri.modulePath &&
+          it.previewFqn == uri.previewFqn
+      } == true
+    }
+
+  /**
+   * The build directory of [uri]'s module: the daemon descriptor's project dir when the module's
+   * `projectDir` is remapped, else the conventional layout under the workspace.
+   */
+  private fun guidelineBuildDir(uri: PreviewUri): File? {
+    val project = supervisor.project(uri.workspaceId) ?: return null
+    val descriptorDir = runCatching {
+      supervisor.daemonFor(uri.workspaceId, uri.modulePath).moduleProjectDirPath
+    }
+      .getOrNull()
+      ?.let(::File)
+    return sequenceOf(descriptorDir, moduleDir(project.path, uri.modulePath))
+      .filterNotNull()
+      .map { File(it, "build") }
+      .firstOrNull { File(it, "compose-previews").isDirectory }
+      ?: File(descriptorDir ?: moduleDir(project.path, uri.modulePath), "build")
+  }
 
   private fun moduleDir(projectRoot: File, modulePath: String): File {
     val trimmed = modulePath.trimStart(':')
@@ -8331,6 +8384,7 @@ class DaemonMcpServer(
 
     /** The daemon extension that produces [A11Y_FINDINGS_KIND] and [DEFAULT_OVERLAY_KIND]. */
     private const val A11Y_EXTENSION_ID: String = "a11y"
+    private const val A11Y_HIERARCHY_KIND: String = "a11y/hierarchy"
 
     /**
      * Layout sources for `details: ["layout"]`, in order of preference. Each is also the id of the
