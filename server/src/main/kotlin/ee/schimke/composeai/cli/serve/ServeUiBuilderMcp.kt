@@ -214,9 +214,13 @@ class ServeUiBuilderMcp(
    * [ServeUiBuilderThumbnails.nativeWidgetThumbnail].
    */
   private val widgetThumbnail: (designId: String, revision: Long) -> ByteArray? = { _, _ -> null },
-  /** How long a prompt waits for frames it has no picture of yet; the rest are left out. */
-  private val guidelinePictureBudgetMillis: Long =
-    DEFAULT_GUIDELINES_PICTURE_BUDGET_SECONDS * 1_000,
+  /**
+   * How long a prompt waits for frames it has no picture of yet; the rest are left out. Asked per
+   * prompt, because publishing `settings.json` can change it while the server runs.
+   */
+  private val guidelinePictureBudgetMillis: () -> Long = {
+    DEFAULT_GUIDELINES_PICTURE_BUDGET_SECONDS * 1_000
+  },
   /**
    * Each builder catalog's own guidelines (`ui-builder.guidelines.json`): a design pinned to a
    * catalog that publishes them is asked that catalog's rules and shown its pictures; any other
@@ -2934,7 +2938,7 @@ class ServeUiBuilderMcp(
         }
       }
       val result =
-        cache.pictures(storedDesignId, document, frames, guidelinePictureBudgetMillis, seeds)
+        cache.pictures(storedDesignId, document, frames, guidelinePictureBudgetMillis(), seeds)
       drawn = result.pictures
       pending = result.pending
     } else {

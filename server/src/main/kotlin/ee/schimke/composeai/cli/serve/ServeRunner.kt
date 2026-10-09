@@ -3713,6 +3713,10 @@ public class ServeRunner(
     // repo-access check a real check instead of a no-op.
     val githubAuth = buildGithubAuth()
     val uiBuilderGuidelines = buildUiBuilderGuidelines()
+    val guidelinesPictureBudget =
+      java.util.concurrent.atomic.AtomicLong(uiBuilderGuidelinesPictureBudgetSeconds)
+    val settingsAdmin = buildSettingsAdmin(uiBuilderGuidelines, guidelinesPictureBudget)
+    settingsAdmin.describe().forEach(System.err::println)
     val agentGrantStore = buildAgentGrantStore(githubAuth)
     if (catalogMcp && agentGrantStore == null) {
       System.err.println(
@@ -4031,6 +4035,7 @@ public class ServeRunner(
         siteAdmin = siteAdmin,
         editorAdmin = editorAdmin,
         uiBuilderSettingsAdmin = uiBuilderSettingsAdmin,
+        settingsAdmin = settingsAdmin.takeIf { adminToken != null },
         uiBuilderAdmin = uiBuilderAdmin,
         uiBuilderDesignLibrary = uiBuilderDesignLibrary,
         uiBuilderDesignCatalogs = {
@@ -4078,6 +4083,7 @@ public class ServeRunner(
         githubAuth = githubAuth,
         uiBuilderGuidelines = uiBuilderGuidelines,
         uiBuilderGuidelinesPictureBudgetSeconds = uiBuilderGuidelinesPictureBudgetSeconds,
+        uiBuilderGuidelinesPictureBudgetSecondsLive = guidelinesPictureBudget::get,
         imageBrowserLogin =
           githubAuth?.let { auth ->
             { call, repository ->
@@ -5876,6 +5882,32 @@ public class ServeRunner(
         ServeUiBuilderGuidelineAccess.githubMembership(githubToken),
       ),
     )
+  }
+
+  /**
+   * `settings.json` ([ServeSettings]) and the settings this process can change while it runs: the
+   * guidelines model and allow-list, when the check is on, and its picture budget. Anything else
+   * published there applies at the next start.
+   */
+  private fun buildSettingsAdmin(
+    guidelines: ServeUiBuilderGuidelines?,
+    pictureBudget: java.util.concurrent.atomic.AtomicLong,
+  ): ServeSettingsAdmin {
+    val live = buildList {
+      if (guidelines != null) add(ServeGuidelinesLiveSettings(guidelines))
+      add(
+        object : ServeLiveSettings {
+          override val envs = setOf("SERVE_UI_BUILDER_GUIDELINES_PICTURE_BUDGET")
+
+          override fun apply(values: Map<String, String?>) {
+            pictureBudget.set(
+              values.values.single()?.toLong() ?: DEFAULT_GUIDELINES_PICTURE_BUDGET_SECONDS
+            )
+          }
+        }
+      )
+    }
+    return ServeSettingsAdmin(settingsFilePath?.toPath(), live = live)
   }
 
   private fun printBanner(moduleLabel: String, port: Int, token: String, previewCount: Int) {

@@ -45,8 +45,8 @@ import okhttp3.RequestBody.Companion.toRequestBody
  */
 class ServeUiBuilderGuidelines
 internal constructor(
-  private val config: ServeUiBuilderGuidelinesConfig,
-  private val access: ServeUiBuilderGuidelineAccess,
+  config: ServeUiBuilderGuidelinesConfig,
+  access: ServeUiBuilderGuidelineAccess,
   private val transport: OpenRouterTransport = OkHttpOpenRouterTransport(config.endpoint),
   /** OpenRouter's decisions endpoint, which Jev answers the evidence triage on. */
   private val decisions: OpenRouterTransport =
@@ -58,8 +58,48 @@ internal constructor(
         .build(),
     ),
 ) {
+  /**
+   * The model and allow-list in force, swapped as one by [reconfigure] when `settings.json` is
+   * published ([ServeSettings]), so a check never reads a new model with an old allow-list.
+   */
+  private class State(
+    val config: ServeUiBuilderGuidelinesConfig,
+    val access: ServeUiBuilderGuidelineAccess,
+  )
+
+  @Volatile private var state = State(config, access)
+
+  private val config: ServeUiBuilderGuidelinesConfig
+    get() = state.config
+
+  private val access: ServeUiBuilderGuidelineAccess
+    get() = state.access
+
   val model: String
     get() = config.model
+
+  /**
+   * Run on [model] for [users] and [orgs], with or without the evidence [triage], from now on; a
+   * null [model] is the default. The key and the endpoints stay as they started. Throws, changing
+   * nothing, when nobody would be allowed: the check spends the operator's key, so it is never open
+   * to everyone, and turning it off is a restart (it is built only when someone is named).
+   */
+  internal fun reconfigure(
+    model: String?,
+    users: Set<String>,
+    orgs: Set<String>,
+    triage: Boolean = state.config.triage,
+  ) {
+    val current = state
+    val next =
+      current.config.copy(
+        model = model ?: ServeUiBuilderGuidelinesConfig.DEFAULT_MODEL,
+        allowedUsers = users,
+        allowedOrgs = orgs,
+        triage = triage,
+      )
+    state = State(next, current.access.allowing(users, orgs))
+  }
 
   /** May [actor] spend the key? An org check can ask GitHub, so it runs on the I/O pool. */
   suspend fun allows(actor: AuthenticatedUiBuilderActor): Boolean =
@@ -99,6 +139,8 @@ internal constructor(
    * is what was asked.
    */
   internal suspend fun check(request: DesignGuidelineRequest): UiBuilderGuidelineOutcome {
+    // One snapshot for the whole check, so the model named in the result is the one asked.
+    val config = state.config
     val platform =
       request.platform
         ?: return UiBuilderGuidelineOutcome.Skipped(
@@ -345,10 +387,24 @@ internal class ServeUiBuilderGuidelineAccess(
   private val isOrgMember: (org: String, login: String) -> Boolean,
   private val clock: Clock = Clock.systemUTC(),
   private val cacheMillis: Long = TimeUnit.MINUTES.toMillis(10),
+  private val memberships: ConcurrentHashMap<String, Pair<Boolean, Long>> = ConcurrentHashMap(),
 ) {
   private val users = allowedUsers.map { it.lowercase() }.toSet()
   private val orgs = allowedOrgs.map { it.lowercase() }.toSet()
-  private val memberships = ConcurrentHashMap<String, Pair<Boolean, Long>>()
+
+  /**
+   * The same membership lookup for a new allow-list. The cache is kept: an answer is about a person
+   * and an org, whichever list asked for it.
+   */
+  fun allowing(allowedUsers: Set<String>, allowedOrgs: Set<String>): ServeUiBuilderGuidelineAccess =
+    ServeUiBuilderGuidelineAccess(
+      allowedUsers,
+      allowedOrgs,
+      isOrgMember,
+      clock,
+      cacheMillis,
+      memberships,
+    )
 
   fun allows(actor: AuthenticatedUiBuilderActor): Boolean {
     if (actor.accessIdentities.any { it == ServeAgentGrants.OPERATOR_ACTOR_ID }) return true
@@ -435,5 +491,46 @@ internal class OkHttpOpenRouterTransport(
     return client.newCall(request).execute().use {
       OpenRouterTransport.Response(it.code, it.body.string())
     }
+  }
+}
+
+/**
+ * The guidelines model, allow-list and evidence triage as live settings ([ServeSettings]):
+ * publishing `settings.json` swaps them on the running check, together. Refused when the new
+ * allow-list names nobody, since the check is never open to everyone and turning it off needs a
+ * restart.
+ */
+internal class ServeGuidelinesLiveSettings(private val guidelines: ServeUiBuilderGuidelines) :
+  ServeLiveSettings {
+  override val envs = setOf(MODEL, USERS, ORGS, TRIAGE)
+
+  override fun check(values: Map<String, String?>): String? =
+    if (names(values[USERS]).isEmpty() && names(values[ORGS]).isEmpty()) {
+      "uiBuilder.guidelines needs users or orgs while the check is on: it spends this box's " +
+        "OpenRouter key, so it is never open to everyone (remove the key from .env to turn it off)"
+    } else null
+
+  override fun apply(values: Map<String, String?>) {
+    guidelines.reconfigure(
+      values[MODEL],
+      names(values[USERS]),
+      names(values[ORGS]),
+      // As `--ui-builder-guidelines-triage` reads it: anything but `off` is on.
+      triage = values[TRIAGE]?.trim()?.lowercase() != "off",
+    )
+    System.err.println(
+      "serve: ui-builder guidelines check now on ${guidelines.model} for " +
+        guidelines.describeAccess()
+    )
+  }
+
+  private fun names(value: String?): Set<String> =
+    value.orEmpty().split(',').map(String::trim).filter(String::isNotEmpty).toSet()
+
+  private companion object {
+    const val MODEL = "SERVE_UI_BUILDER_GUIDELINES_MODEL"
+    const val USERS = "SERVE_UI_BUILDER_GUIDELINES_USERS"
+    const val ORGS = "SERVE_UI_BUILDER_GUIDELINES_ORGS"
+    const val TRIAGE = "SERVE_UI_BUILDER_GUIDELINES_TRIAGE"
   }
 }

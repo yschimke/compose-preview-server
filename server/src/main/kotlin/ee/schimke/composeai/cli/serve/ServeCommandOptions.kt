@@ -529,6 +529,18 @@ public class ServeCommandOptions(
   override val catalogsFilePath: String? =
     args.flagValue("--catalogs-file")?.takeIf { it.isNotBlank() }
 
+  /**
+   * `--settings-file`, else `settings.json` beside `--catalogs-file`; `none` turns it off. The
+   * image entrypoint applies the file before `serve` starts; the server reports on it and keeps it.
+   */
+  override val settingsFilePath: String? =
+    when (val flag = args.flagValue("--settings-file")?.takeIf { it.isNotBlank() }) {
+      "none" -> null
+      null ->
+        catalogsFilePath?.let(::File)?.absoluteFile?.parentFile?.resolve("settings.json")?.path
+      else -> flag
+    }
+
   /** Durable feed cache; defaults beside catalogs.json on deployed boxes, temp for local serve. */
   override val catalogFeedCacheDir: File by lazy {
     val preferred =
@@ -1627,6 +1639,10 @@ public class ServeCommandOptions(
                           history-computation lease; after this many seconds without another request
                           it stops fetching while keeping the last generated feed and shallow Git
                           cache (default ${ServeDefaults.DEFAULT_CATALOG_FEED_IDLE_SECONDS}s; 0 disables).
+        --settings-file <path>|none
+                          The deployment's settings.json (non-secret SERVE_* settings, see
+                          deploy/image/SETTINGS.md), kept by PUT /admin/settings. Defaults to
+                          settings.json beside --catalogs-file. The image entrypoint applies it.
         --catalog-feed-cache <dir>
                           Durable shallow-Git + generated-XML cache for catalog feeds. Defaults to a
                           catalog-feeds directory beside --catalogs-file, or a temp dir in local mode.

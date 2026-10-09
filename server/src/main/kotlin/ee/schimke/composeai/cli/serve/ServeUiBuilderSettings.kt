@@ -27,7 +27,9 @@ import okio.Path.Companion.toPath
  * | (none: this file only)                | `catalogs.<id>.shadow`                    |
  *
  * Secrets, credentials and facts about the machine (`SERVE_UI_BUILDER_WEAR`, `…_STATE_DIR`,
- * `…_COMPONENTS`, `…_HOST`, the guidelines keys, the admin actors) stay in the environment.
+ * `…_COMPONENTS`, `…_HOST`, the guidelines key) stay in the environment. The builder's other
+ * non-secret settings (the guidelines model and allow-list, the admin actors, the start URL) are
+ * the deployment's `settings.json` ([ServeSettings]), which owns none of the catalog settings here.
  *
  * ## The published default
  *

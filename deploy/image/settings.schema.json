@@ -1,0 +1,341 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/yschimke/compose-preview-server/deploy/image/settings.schema.json",
+  "title": "compose-preview-server deployment settings",
+  "description": "Generated from ServeSettings.kt; regenerate with UPDATE_SERVE_SETTINGS_REFERENCE=true. Non-secret settings only: secrets and machine sizing stay in .env.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {
+      "type": "string"
+    },
+    "uiBuilder": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "adminActors": {
+          "description": "GitHub actors who administer every shared UI-builder design and its folder placement. They gain no catalog, trust or site authority. An empty list turns off the image's default (`github:yschimke`).",
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^(?:github:[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?)$"
+          },
+          "x-empty": "none",
+          "x-env": "SERVE_UI_BUILDER_ADMIN_ACTORS",
+          "x-apply": "restart",
+          "x-roles": [
+            "preview"
+          ]
+        },
+        "startUrl": {
+          "description": "Where the UI builder's start page sends a visitor.",
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^(?:https://[^\\s/?#@]+(?:/[^\\s]*)?)$",
+          "x-env": "SERVE_UI_BUILDER_START_URL",
+          "x-apply": "restart",
+          "x-roles": [
+            "preview",
+            "playground"
+          ]
+        },
+        "guidelines": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "model": {
+              "description": "The OpenRouter model id the `guidelines` design check runs on, on this box's key. Default `deepseek/deepseek-v4.1-flash`.",
+              "type": "string",
+              "minLength": 1,
+              "x-env": "SERVE_UI_BUILDER_GUIDELINES_MODEL",
+              "x-apply": "live",
+              "x-roles": [
+                "preview"
+              ]
+            },
+            "users": {
+              "description": "GitHub logins who may spend this box's OpenRouter key on the `guidelines` check. The check stays off unless this or `orgs` names someone.",
+              "type": "array",
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "^(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?)$"
+              },
+              "x-env": "SERVE_UI_BUILDER_GUIDELINES_USERS",
+              "x-apply": "live",
+              "x-roles": [
+                "preview"
+              ]
+            },
+            "orgs": {
+              "description": "GitHub organizations whose members may run the `guidelines` check.",
+              "type": "array",
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "^(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?)$"
+              },
+              "x-env": "SERVE_UI_BUILDER_GUIDELINES_ORGS",
+              "x-apply": "live",
+              "x-roles": [
+                "preview"
+              ]
+            },
+            "pictureBudgetSeconds": {
+              "description": "How long a guidelines prompt waits for frames it has no picture of yet. Default 45.",
+              "type": "integer",
+              "minimum": 0,
+              "x-env": "SERVE_UI_BUILDER_GUIDELINES_PICTURE_BUDGET",
+              "x-apply": "live",
+              "x-roles": [
+                "preview"
+              ]
+            },
+            "triage": {
+              "description": "Before a guidelines check, ask Jev which extra evidence would help (a dark render, a large-font render, the accessibility tree). Default `on`.",
+              "type": "string",
+              "minLength": 1,
+              "enum": [
+                "on",
+                "off"
+              ],
+              "x-env": "SERVE_UI_BUILDER_GUIDELINES_TRIAGE",
+              "x-apply": "live",
+              "x-roles": [
+                "preview"
+              ]
+            }
+          }
+        }
+      }
+    },
+    "catalogs": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "registry": {
+          "description": "Catalog registries this box serves every catalog of, beyond `catalogs.json`, as `--catalog-registry` takes them. `none` turns it off.",
+          "type": "string",
+          "minLength": 1,
+          "x-env": "SERVE_CATALOG_REGISTRY",
+          "x-apply": "restart",
+          "x-roles": [
+            "preview",
+            "playground"
+          ]
+        },
+        "mcp": {
+          "description": "Serve the remote catalog MCP endpoint. Needs agent grants.",
+          "type": "boolean",
+          "x-env": "SERVE_CATALOG_MCP",
+          "x-apply": "restart",
+          "x-roles": [
+            "preview"
+          ]
+        }
+      }
+    },
+    "agents": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "grantCapabilities": {
+          "description": "Capabilities an agent grant may be given, beyond the defaults. `images` is dropped unless the image lane is on.",
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^[^,]+$"
+          },
+          "x-env": "SERVE_AGENT_GRANT_CAPABILITIES",
+          "x-apply": "restart",
+          "x-roles": [
+            "preview"
+          ]
+        }
+      }
+    },
+    "uploads": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "acceptDocs": {
+          "description": "Accept Remote Compose document uploads at `/d/`.",
+          "type": "boolean",
+          "x-env": "SERVE_ACCEPT_DOCS",
+          "x-apply": "restart",
+          "x-roles": [
+            "preview"
+          ]
+        },
+        "acceptImages": {
+          "description": "Accept image uploads. Left out, it is on exactly when `imageRepository` is named.",
+          "type": "boolean",
+          "x-env": "SERVE_ACCEPT_IMAGES",
+          "x-apply": "restart",
+          "x-roles": [
+            "preview"
+          ]
+        },
+        "imageRepository": {
+          "description": "The repository whose collaborators may upload images. Falls back to the sign-in repository.",
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^(?:[A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9._-]+)$",
+          "x-env": "SERVE_IMAGE_UPLOAD_REPO",
+          "x-apply": "restart",
+          "x-roles": [
+            "preview",
+            "playground"
+          ]
+        }
+      }
+    },
+    "rendering": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "compileEngine": {
+          "description": "Run the playground's compile engine without mounting the playground page.",
+          "type": "boolean",
+          "x-env": "SERVE_COMPILE_ENGINE",
+          "x-apply": "restart",
+          "x-roles": [
+            "preview"
+          ]
+        },
+        "rcDefaultPlayer": {
+          "description": "The Remote Compose player the viewer opens on, where a preview offers it.",
+          "type": "string",
+          "minLength": 1,
+          "enum": [
+            "camaelon-js",
+            "cmp-wasm",
+            "androidx-view",
+            "androidx-embedded",
+            "cmp-android",
+            "cmp-jvm"
+          ],
+          "x-env": "SERVE_RC_DEFAULT_PLAYER",
+          "x-apply": "restart",
+          "x-roles": [
+            "preview"
+          ]
+        }
+      }
+    },
+    "analytics": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "umami": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "description": "Add the Umami analytics script to served pages.",
+              "type": "boolean",
+              "x-env": "SERVE_UMAMI_ENABLED",
+              "x-apply": "restart",
+              "x-roles": [
+                "preview"
+              ]
+            },
+            "url": {
+              "description": "The Umami instance's origin.",
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^(?:https://[^\\s/?#@]+(?:/[^\\s]*)?)$",
+              "x-env": "SERVE_UMAMI_URL",
+              "x-apply": "restart",
+              "x-roles": [
+                "preview"
+              ]
+            },
+            "websiteId": {
+              "description": "The Umami website id.",
+              "type": "string",
+              "minLength": 1,
+              "x-env": "SERVE_UMAMI_WEBSITE_ID",
+              "x-apply": "restart",
+              "x-roles": [
+                "preview"
+              ]
+            }
+          }
+        }
+      }
+    },
+    "auth": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "github": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "clientId": {
+              "description": "The GitHub OAuth app's client id. Public by design; its client secret and the cookie secret stay in `.env`.",
+              "type": "string",
+              "minLength": 1,
+              "x-env": "SERVE_GITHUB_AUTH_CLIENT_ID",
+              "x-apply": "restart",
+              "x-roles": [
+                "preview",
+                "playground"
+              ]
+            },
+            "callbackBaseUrl": {
+              "description": "The origin GitHub redirects back to after sign-in.",
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^(?:https://[^\\s/?#@]+(?:/[^\\s]*)?)$",
+              "x-env": "SERVE_GITHUB_AUTH_CALLBACK_BASE_URL",
+              "x-apply": "restart",
+              "x-roles": [
+                "preview",
+                "playground"
+              ]
+            },
+            "cookieDomain": {
+              "description": "The parent domain the sign-in cookies cover, so one sign-in covers every site host. `none` keeps them host-only.",
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^(?:[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?)$",
+              "x-env": "SERVE_GITHUB_AUTH_COOKIE_DOMAIN",
+              "x-apply": "restart",
+              "x-roles": [
+                "preview",
+                "playground"
+              ]
+            },
+            "openUiBuilder": {
+              "description": "Let every signed-in GitHub account create, edit and export UI-builder designs.",
+              "type": "boolean",
+              "x-env": "SERVE_GITHUB_AUTH_OPEN_UI_BUILDER",
+              "x-apply": "restart",
+              "x-roles": [
+                "preview"
+              ]
+            },
+            "scope": {
+              "description": "The OAuth scope asked for. Only read-only identity scopes are accepted.",
+              "type": "string",
+              "minLength": 1,
+              "x-env": "SERVE_GITHUB_AUTH_SCOPE",
+              "x-apply": "restart",
+              "x-roles": [
+                "preview"
+              ]
+            }
+          }
+        }
+      }
+    }
+  }
+}

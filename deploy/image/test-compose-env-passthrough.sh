@@ -37,6 +37,8 @@ EXEMPT=(
   # Pinned to `playground` by the `playground` service and deliberately absent from `preview`: a
   # SERVE_ROLE left in .env must never turn the main server into the playground's container.
   SERVE_ROLE
+  # Where the image keeps the settings.json schema it bakes; a test seam, not an operator knob.
+  SERVE_SETTINGS_SCHEMA
 )
 
 # Every ${SERVE_...} / ${SERVE_...:-default} / ${SERVE_...:=default} expansion in the entrypoint.
@@ -101,16 +103,11 @@ for v in "${read_vars[@]}"; do
   # would arrive as `prefix-60` and go to `--timeout` as garbage. A knob that is forwarded but
   # mangled is no more usable than one that never arrives, which is the whole subject of this guard.
   #
-  # The default text itself is unconstrained (`${VAR:-yschimke/compose-ai-tools}` is fine), and may
-  # contain ONE further `${OTHER:+…}` — a default that depends on another knob, which is how
-  # SERVE_AGENT_GRANT_CAPABILITIES offers `images` only where an upload repo is named. That nesting
-  # used to be rejected outright as unused and regex-hostile; it is neither now, and the property
-  # this guard actually asserts is untouched by it: the whole value is still one interpolation of
-  # the same-named variable, so an operator setting it in .env still wins outright. Only the
-  # DEFAULT varies. `${OTHER:-…}` is deliberately not accepted — a default that falls back to
-  # another variable's value is the copy-paste bug in the comment above, not a conditional.
-  nested='\$\{[A-Z0-9_]+:\+[^{}]*\}'
-  [[ "${mapped[${v}]}" =~ ^\"?\$\{${v}((:[-=?]|-)([^{}]|${nested})*)?\}\"?$ ]] ||
+  # The default text itself is unconstrained (`${VAR:-yschimke/compose-ai-tools}` is fine), but may
+  # not nest another interpolation. A default conditioned on another knob is the entrypoint's job
+  # (SERVE_AGENT_GRANT_CAPABILITIES' moved there for settings.json), and `${OTHER:-…}` — a default
+  # that falls back to another variable's value — is the copy-paste bug in the comment above.
+  [[ "${mapped[${v}]}" =~ ^\"?\$\{${v}((:[-=?]|-)[^{}]*)?\}\"?$ ]] ||
     miswired+=("${v} → ${mapped[${v}]}")
 done
 
@@ -176,18 +173,8 @@ selftest "SERVE_PLAYGROUND reads a different host variable" \
 # The right variable, but wrapped — the host's value would reach the container mangled.
 selftest "SERVE_TIMEOUT interpolates its own variable but wraps it" \
   sed 's|^      SERVE_TIMEOUT: .*|      SERVE_TIMEOUT: "prefix-${SERVE_TIMEOUT:-}"|'
-# A default that FALLS BACK to another variable's value, rather than being conditioned on one. This
-# is the shape the nested-interpolation allowance must not open up: `SERVE_TIMEOUT` would silently
-# take `SERVE_PLAYGROUND`'s value on any box that never set it, which is the copy-paste bug two
-# cases above wearing a default's clothes.
+# A default that FALLS BACK to another variable's value: `SERVE_TIMEOUT` would silently take
+# `SERVE_PLAYGROUND`'s value on any box that never set it, which is the copy-paste bug two cases
+# above wearing a default's clothes.
 selftest "SERVE_TIMEOUT defaults to another variable's value" \
   sed 's|^      SERVE_TIMEOUT: .*|      SERVE_TIMEOUT: "${SERVE_TIMEOUT:-${SERVE_PLAYGROUND:-}}"|'
-# …while the conditional form the image actually uses stays accepted; proven by the real file
-# passing above, and pinned here so a future tightening cannot silently drop it.
-grep -Fq 'SERVE_AGENT_GRANT_CAPABILITIES:-ui-builder-read,ui-builder-write,ui-builder-export${SERVE_IMAGE_UPLOAD_REPO:+,images}' \
-  "${compose}" || {
-  echo "FAIL: the conditional images default is gone from ${compose}; this guard's nesting" >&2
-  echo "      allowance now protects nothing and should be narrowed again." >&2
-  exit 1
-}
-echo "PASS: self-test — the conditional default it exists for is still there"

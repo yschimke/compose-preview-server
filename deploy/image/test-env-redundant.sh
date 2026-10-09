@@ -273,4 +273,39 @@ grep -q "line 1: SERVE_JAVA_OPTS" <<<"${noeol_out}" || {
 }
 echo "PASS: an unterminated final line is still examined"
 
+# Lines settings.json now carries: a duplicate is deletable, an override is the stale-line case.
+if command -v jq > /dev/null; then
+  cat > "${tmp}/settings.json" <<'JSON'
+{ "uiBuilder": { "guidelines": { "model": "deepseek/deepseek-v4.1-flash", "users": ["yschimke"] } },
+  "catalogs": { "mcp": true } }
+JSON
+  cat > "${tmp}/.env-settings" <<'ENV'
+SERVE_UI_BUILDER_GUIDELINES_MODEL=typesafe/jev-router-secret-looking-value
+SERVE_UI_BUILDER_GUIDELINES_USERS=yschimke
+SERVE_CATALOG_MCP=1
+SERVE_LIVE_SEATS=8
+ENV
+  settings_out="$(ENV_FILE="${tmp}/.env-settings" SETTINGS_FILE="${tmp}/settings.json" \
+    "${here}/env-redundant.sh")"
+  dup="$(sed -n '/^Duplicating settings.json/,/^$/p' <<<"${settings_out}")"
+  over="$(sed -n '/^Overriding settings.json/,/^$/p' <<<"${settings_out}")"
+  for key in SERVE_UI_BUILDER_GUIDELINES_USERS SERVE_CATALOG_MCP; do
+    grep -q "  ${key}$" <<<"${dup}" || {
+      echo "FAIL: ${key} duplicates settings.json and was not reported so" >&2
+      echo "${settings_out}" >&2
+      exit 1
+    }
+  done
+  grep -q "  SERVE_UI_BUILDER_GUIDELINES_MODEL$" <<<"${over}" || {
+    echo "FAIL: an .env line overriding settings.json was not reported" >&2
+    echo "${settings_out}" >&2
+    exit 1
+  }
+  if grep -qF "jev-router-secret-looking-value" <<<"${settings_out}"; then
+    echo "FAIL: a value was printed while comparing with settings.json" >&2
+    exit 1
+  fi
+  echo "PASS: lines duplicating or overriding settings.json are reported, by name only"
+fi
+
 echo "PASS: all env-redundant checks"

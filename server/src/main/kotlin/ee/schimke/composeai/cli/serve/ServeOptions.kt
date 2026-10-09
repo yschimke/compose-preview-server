@@ -485,6 +485,13 @@ public interface ServeOptions {
    */
   public val catalogsFilePath: String?
 
+  /**
+   * The deployment's `settings.json` ([ServeSettings]); null ⇒ none. Defaults beside
+   * [catalogsFilePath].
+   */
+  public val settingsFilePath: String?
+    get() = null
+
   /** Durable feed cache; defaults beside catalogs.json on deployed boxes, temp for local serve. */
   public val catalogFeedCacheDir: File
 

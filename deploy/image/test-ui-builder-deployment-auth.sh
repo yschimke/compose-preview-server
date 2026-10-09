@@ -11,13 +11,13 @@ example="${ENV_EXAMPLE_FILE:-${here}/.env.example}"
 # The three UI-builder capabilities are unconditional — the image always packages that lane. The
 # `images` half is conditional on the upload repo being named, because the server refuses to start
 # when the capability is offered without the lane; `test-agent-grant-image-capability.sh` owns that
-# half. Written as one literal because that is how the compose file reads it.
+# half. Written as one literal because that is how the entrypoint reads it.
 expected_capabilities='ui-builder-read,ui-builder-write,ui-builder-export${SERVE_IMAGE_UPLOAD_REPO:+,images}'
 
 grep -Fq \
-  "SERVE_AGENT_GRANT_CAPABILITIES: \"\${SERVE_AGENT_GRANT_CAPABILITIES:-${expected_capabilities}}\"" \
-  "${compose}" || {
-  echo "FAIL: compose does not offer the three UI-builder grant capabilities by default" >&2
+  ": \"\${SERVE_AGENT_GRANT_CAPABILITIES:=${expected_capabilities}}\"" \
+  "${entrypoint}" || {
+  echo "FAIL: the entrypoint does not offer the three UI-builder grant capabilities by default" >&2
   exit 1
 }
 
@@ -49,10 +49,12 @@ grep -Fq \
   exit 1
 }
 
+# Compose passes it through EMPTY, so the entrypoint's default below — or settings.json's
+# `uiBuilder.adminActors` — decides; a compose default would beat both.
 grep -Fq \
-  'SERVE_UI_BUILDER_ADMIN_ACTORS: "${SERVE_UI_BUILDER_ADMIN_ACTORS:-github:yschimke}"' \
+  'SERVE_UI_BUILDER_ADMIN_ACTORS: "${SERVE_UI_BUILDER_ADMIN_ACTORS:-}"' \
   "${compose}" || {
-  echo "FAIL: compose does not default the UI-builder administrator to github:yschimke" >&2
+  echo "FAIL: compose gives the UI-builder administrators a default of its own" >&2
   exit 1
 }
 
@@ -77,8 +79,10 @@ grep -Fq \
   exit 1
 }
 
-grep -Fxq 'SERVE_UI_BUILDER_ADMIN_ACTORS=github:yschimke' "${example}" || {
-  echo "FAIL: the preview host example does not configure github:yschimke as UI-builder admin" >&2
+# The example names it only as an override of settings.json (`uiBuilder.adminActors`); the
+# entrypoint's default above is what makes github:yschimke the administrator.
+grep -Fxq '# SERVE_UI_BUILDER_ADMIN_ACTORS=github:yschimke' "${example}" || {
+  echo "FAIL: the preview host example does not show github:yschimke as the UI-builder admin" >&2
   exit 1
 }
 

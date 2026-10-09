@@ -103,6 +103,18 @@ out="$(run "${BOX_LISTING}" "${STATUS_WITH_REGISTRY}")"
 check "puts the declared block" 'PUT /admin/ui-builder/config {"catalogs":{"remote-widgets":{"serve":true}}}' "${out}"
 check_absent "does not clear a declared block" "DELETE /admin/ui-builder/config" "${out}"
 
+echo "settings.json is PUT whole, and --prune clears settings the deployment no longer declares"
+check "clears undeclared settings under --prune" "DELETE /admin/settings" "${out}"
+check_absent "leaves the box's settings alone without --prune" "/admin/settings" "$(BASE_URL=https://example.invalid \
+  ADMIN_TOKEN=unused DEPLOY_CONFIG_DIR="${work}/config" bash "${SCRIPT}" --dry-run 2>&1 || true)"
+cat > "${work}/config/settings.json" <<'JSON'
+{ "uiBuilder": { "guidelines": { "model": "deepseek/deepseek-v4.1-flash", "users": ["yschimke"] } } }
+JSON
+out="$(run "${BOX_LISTING}" "${STATUS_WITH_REGISTRY}")"
+check "puts the declared settings" \
+  'PUT /admin/settings {"uiBuilder":{"guidelines":{"model":"deepseek/deepseek-v4.1-flash","users":["yschimke"]}}}' "${out}"
+check_absent "does not clear declared settings" "DELETE /admin/settings" "${out}"
+
 if [[ "${failures}" -gt 0 ]]; then
   echo "${failures} check(s) failed"
   exit 1
