@@ -119,7 +119,10 @@ graphics-shapes = "1.1.0"
 # 2.38.0 builds `lib-rcjvm` (the cmp-jvm worker) on rc-players 2.4.0 (compose-ai-tools#5745), whose
 # player draws a variable face listed once per weight at each weight — what lets the cmp-jvm lane
 # read the CMP/Wasm player's own `fonts/` (`ServeRcJvmFonts`).
-composeai-tools = "2.38.0"
+# 2.39.0 (2026-10-10) carries a bundle's `guidelines.json` — each preview's design-guidelines
+# result — and render-host's `ServeGuidelineResultsStore` / `ServeHost.guidelineResultFor`, which
+# the hosted catalog serves as the `guidelines/result` data product (compose-ai-tools#5749).
+composeai-tools = "2.39.0"
 # The render daemons, the renderers, the preview annotations and data API, and the data extractors,
 # published from yschimke/compose-preview-daemon since its 3.0.0 (compose-ai-tools#5336). Layer 1a
 # in that repository's `docs/design/REPOSITORY_LAYERS.md`: between the contracts and

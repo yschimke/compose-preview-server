@@ -49,6 +49,11 @@ internal class ServeModuleLiveHost(
   override fun renderSlots(previewId: String, overrides: PreviewOverrides): SlotsOutcome =
     host.renderSlots(local(previewId), overrides)
 
+  override fun guidelineResultFor(
+    previewId: String
+  ): ee.schimke.composeai.guidelines.protocol.GuidelineRecordV1? =
+    host.guidelineResultFor(local(previewId))
+
   override fun renderA11y(previewId: String, overrides: PreviewOverrides): A11yOutcome =
     host.renderA11y(local(previewId), overrides)
 

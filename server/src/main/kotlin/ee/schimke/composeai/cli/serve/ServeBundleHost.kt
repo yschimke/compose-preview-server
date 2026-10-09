@@ -353,6 +353,19 @@ class ServeBundleHost(
 
   override fun parityIssues(): ParityIssues? = parityIssues
 
+  /**
+   * The bundle's `guidelines.json` — what `compose-preview guidelines` judged each preview against
+   * its catalog's design guidelines — read once, fail-soft: no file, or a file that does not parse,
+   * is no results rather than an error.
+   */
+  private val guidelineResults =
+    BundleGuidelineResults(ServeGuidelineResultsStore.load(bundleDir, fileSystem))
+
+  override fun guidelineResultFor(
+    previewId: String
+  ): ee.schimke.composeai.guidelines.protocol.GuidelineRecordV1? =
+    guidelineResults.forPreview(previewId)
+
   // Same read-once rule as the feeds around it: a published verdict describes the catalog this
   // host was built from, so re-reading it per request could only ever pair a newer verdict with an
   // older inventory.
@@ -2030,3 +2043,24 @@ private data class BundleRenderError(
   val topAppFrame: RenderFailureFrame? = null,
   val stackTrace: String? = null,
 )
+
+/**
+ * A bundle's guideline results, looked up by bundle id. A bundle renames each preview to a
+ * path-safe id (`[^A-Za-z0-9._-]` becomes `_`), and a report written before compose-ai-tools
+ * remapped its ids into the bundle still carries the raw ones, so an exact miss falls back to the
+ * results' ids made safe the same way; the first result to claim a safe id keeps it.
+ */
+internal class BundleGuidelineResults(private val results: ServeGuidelineResults?) {
+  private val bySafeId:
+    Map<String, ee.schimke.composeai.guidelines.protocol.GuidelineRecordV1> by lazy {
+    buildMap { results?.records?.forEach { (id, record) -> putIfAbsent(bundleSafeId(id), record) } }
+  }
+
+  fun forPreview(previewId: String): ee.schimke.composeai.guidelines.protocol.GuidelineRecordV1? =
+    results?.forPreview(previewId) ?: bySafeId[bundleSafeId(previewId)]
+}
+
+/** A preview id as a bundle stores it: anything outside `[A-Za-z0-9._-]` becomes `_`. */
+internal fun bundleSafeId(id: String): String = id.replace(BUNDLE_UNSAFE_ID_CHARS, "_")
+
+private val BUNDLE_UNSAFE_ID_CHARS = Regex("[^A-Za-z0-9._-]")
