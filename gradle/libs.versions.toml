@@ -116,7 +116,10 @@ graphics-shapes = "1.1.0"
 # 2.37.0 keys `ServeRenderHost`'s render cache on a carried Remote Compose document
 # (compose-ai-tools#5736), so two shared `/d/<id>` documents drawn through one catalog preview
 # never answer with each other's pixels; it moves with daemon 3.15.0 and contracts 3.21.0 below.
-composeai-tools = "2.37.0"
+# 2.38.0 builds `lib-rcjvm` (the cmp-jvm worker) on rc-players 2.4.0 (compose-ai-tools#5745), whose
+# player draws a variable face listed once per weight at each weight — what lets the cmp-jvm lane
+# read the CMP/Wasm player's own `fonts/` (`ServeRcJvmFonts`).
+composeai-tools = "2.38.0"
 # The render daemons, the renderers, the preview annotations and data API, and the data extractors,
 # published from yschimke/compose-preview-daemon since its 3.0.0 (compose-ai-tools#5336). Layer 1a
 # in that repository's `docs/design/REPOSITORY_LAYERS.md`: between the contracts and
