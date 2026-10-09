@@ -23,14 +23,14 @@
 # `visual-harness` lane's UI-builder checkout, which is built by that repository's own wrapper.
 java-server = "17"
 java-ui-builder = "21"
-kotlin = "2.4.20"
+kotlin = "2.4.21"
 ktfmt = "0.27.0"
 ktfmt-cli = "0.64"
 compose-multiplatform = "1.12.1"
 # Material 3 adaptive, for the real `SupportingPaneScaffold` on the editor's canvas and preview
 # panes. Its own version line rather than the Compose Multiplatform one, which is why it is a
 # separate ref: the adaptive artifacts ship independently of the CMP bundle.
-compose-material3-adaptive = "1.2.0"
+compose-material3-adaptive = "1.3.0"
 # Wear Compose Material 3 / Foundation, compiled for Compose Multiplatform. `androidx.wear.compose`
 # publishes an Android AAR and nothing else — its Gradle module metadata carries exactly two
 # variants, both `releaseVariantRelease*Publication` — so the canvas cannot link the real library.
@@ -370,7 +370,7 @@ composeai-contracts = "3.20.0"
 # logs and serves (compose-ui-builder#583), asks a Wear widget only the widget guideline rules and a
 # screen only the screen ones (#574), and records `m3/variable-font-text` at export (#581).
 # `androidx-window` and `composeai-contracts` are unchanged.
-composeai-ui-builder = "3.95.0"
+composeai-ui-builder = "3.96.0"
 # The CMP/Wasm Remote Compose player (yschimke/rc-players' `rc-player-wasm-dist`, a zip of its
 # static browser bundle). Shipped in the server tarball as `rc-player-wasm/`, which the image's
 # entrypoint already passes as `--rc-player-wasm-dir`: that serves `/rc-player-wasm/`, enables the
@@ -389,7 +389,7 @@ junit = "4.13.2"
 truth = "1.4.5"
 okhttp = "5.5.0"
 okio = "3.18.2"
-classgraph = "4.8.196"
+classgraph = "4.8.197"
 jmdns = "3.6.3"
 
 [libraries]

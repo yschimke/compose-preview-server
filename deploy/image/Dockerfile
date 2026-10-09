@@ -1,4 +1,4 @@
-# syntax=docker/dockerfile:1.27
+# syntax=docker/dockerfile:1.28
 
 # Fast, prebuilt-friendly image for the standalone preview server.
 #
