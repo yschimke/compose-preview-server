@@ -242,7 +242,7 @@ jobs:
       # The evidence pruner deletes directories, so its keep-rules are what stand between a
       # scheduled job and somebody's baseline. The age floor especially: it is the only thing keeping
       # an open PR's evidence, and it cannot be checked by reading the tree.
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24.21.0
       - name: Evidence pruner tests
@@ -277,7 +277,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24.21.0
           cache: npm
@@ -295,7 +295,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24.21.0
       - run: npm test
@@ -390,7 +390,7 @@ jobs:
       - run: ./gradlew :server:installDist
       # Tarred so the launcher keeps its executable bit; an artifact does not carry modes.
       - run: tar -czf "${RUNNER_TEMP}/server.tgz" server/build/install
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: visual-harness-server
           path: ${{ runner.temp }}/server.tgz
@@ -406,7 +406,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24.21.0
           cache: npm
@@ -423,7 +423,7 @@ jobs:
         working-directory: preview-harness
       - run: npm run harness:rc-viewer
         working-directory: preview-harness
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: ${{ !cancelled() }}
         with:
           name: visual-harness-pages-results
@@ -455,7 +455,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24.21.0
           cache: npm
@@ -468,7 +468,7 @@ jobs:
       - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
         with:
           distribution: temurin
-          java-version: 21
+          java-version: 21.0.12+8.0.LTS
       - run: npm ci
         working-directory: preview-harness
       # `--with-deps` runs `apt-get update`, which reads every source list on the runner image —
@@ -482,7 +482,7 @@ jobs:
         working-directory: preview-harness
       - name: Download the UI-builder distributions
         run: preview-harness/fetch-ui-builder-dists.sh "${COMPOSE_UI_BUILDER_DIR}"
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: visual-harness-server
           path: ${{ runner.temp }}/server
@@ -509,7 +509,7 @@ jobs:
       # #788's three Jetcaster failures sat red across ten merges for exactly that reason.
       # `!cancelled()` rather than `failure()` so a run that goes green still shows what it
       # compared, and `if-no-files-found: ignore` because a fully green run writes nothing here.
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: ${{ !cancelled() }}
         with:
           name: visual-harness-results
