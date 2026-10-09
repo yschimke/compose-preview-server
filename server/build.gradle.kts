@@ -328,6 +328,62 @@ val stageRcPlayerWasm =
     outputDirectory.set(layout.buildDirectory.dir("rc-player-wasm"))
   }
 
+// The TypeScript Remote Compose player behind `/rc-player/bundle.js` — the viewer's camaelon-js
+// lane and shared `/d/<id>` pages. Resolved from Central (rc-players publishes it as
+// `remote-compose-player-js-dist`) instead of a committed copy, which had drifted far enough to
+// stop at opcode 171. The bundle is used as published, with `src/rc-player/inert-custom-host.js`
+// appended: the player wires a live `WebCustomHost` (camera, same-origin fetches) into every
+// document, and this server plays documents it did not write.
+val rcPlayerJsDist =
+  configurations.create("rcPlayerJsDist") {
+    description = "The TypeScript Remote Compose player's browser bundle."
+    isCanBeConsumed = false
+    isCanBeResolved = true
+    isTransitive = false
+  }
+
+dependencies {
+  rcPlayerJsDist(
+    variantOf(libs.remote.compose.player.js.dist) {
+      classifier("dist")
+      artifactType("zip")
+    }
+  )
+}
+
+/** Stage the published `bundle.js` with the inert-host shim appended, as a classpath resource. */
+abstract class StageRcPlayerJs : DefaultTask() {
+  @get:InputFile abstract val archiveFile: RegularFileProperty
+
+  @get:InputFile abstract val shimFile: RegularFileProperty
+
+  @get:OutputDirectory abstract val outputDirectory: DirectoryProperty
+
+  @get:Inject abstract val archiveOperations: ArchiveOperations
+
+  @TaskAction
+  fun stage() {
+    val bundle =
+      archiveOperations.zipTree(archiveFile).matching { include("bundle.js") }.singleOrNull()
+        ?: error("remote-compose-player-js-dist has no bundle.js")
+    val target = outputDirectory.file("rc-player/bundle.js").get().asFile
+    target.parentFile.mkdirs()
+    target.writeBytes(bundle.readBytes() + "\n".toByteArray() + shimFile.get().asFile.readBytes())
+  }
+}
+
+val stageRcPlayerJs =
+  tasks.register<StageRcPlayerJs>("stageRcPlayerJs") {
+    description = "Stage the TypeScript Remote Compose player bundle as a server resource."
+    archiveFile.set(
+      layout.file(rcPlayerJsDist.elements.map { artifacts -> artifacts.single().asFile })
+    )
+    shimFile.set(layout.projectDirectory.file("src/rc-player/inert-custom-host.js"))
+    outputDirectory.set(layout.buildDirectory.dir("generated/rc-player-js"))
+  }
+
+sourceSets.main { resources.srcDir(stageRcPlayerJs) }
+
 distributions {
   main {
     contents { from(project(":wasm-ui").tasks.named("wasmFrontendDist")) { into("wasm-ui") } }
