@@ -114,6 +114,12 @@ internal const val UI_BUILDER_GUIDELINES_SCHEMA = "compose-preview/ui-builder-gu
  * - `POST …/guidelines` — record a result: a person's run on their own OpenRouter key. `ranBy`,
  *   `recordedAtEpochMillis` and `designId` come from the credential, the clock and the path, never
  *   from the body.
+ * - `GET …/guidelines/access` — whether this account may run the check on this host's key
+ *   (`serverCheck`), the model it would use, and why not. Never the key or who else may.
+ * - `POST …/guidelines/check?revision=` — run the check on this host's key, as
+ *   `ui_builder_check_design` runs it with `rendered: true`, record it as this account's run and
+ *   answer with the record. 403 for an account the operator did not enable, 409 when [revision] is
+ *   not the current one, 502 when the model call fails.
  *
  * Authorised as the review routes are: the route capability, then the design read as this actor.
  */
@@ -128,7 +134,55 @@ internal fun Route.installUiBuilderGuidelineRoutes(
       withRenders: Boolean,
       actor: AuthenticatedUiBuilderActor,
     ) -> DesignGuidelineRequest?,
+  access: suspend (actor: AuthenticatedUiBuilderActor) -> ServeUiBuilderMcp.GuidelinesAccess,
+  check:
+    suspend (
+      designId: String,
+      revision: Long?,
+      withRenders: Boolean,
+      actor: AuthenticatedUiBuilderActor,
+    ) -> ServeUiBuilderMcp.GuidelinesCheckResult,
 ) {
+  get(UI_BUILDER_GUIDELINES_ACCESS_PATH) {
+    val (actor, _) =
+      call.authorizedGuidelinesDesign(service, authorization, UiBuilderRouteCapability.READ)
+        ?: return@get
+    val answer = access(actor)
+    call.respondGuidelines(
+      GuidelinesAccessV1.serializer(),
+      GuidelinesAccessV1(answer.serverCheck, answer.model, answer.reason),
+    )
+  }
+
+  post(UI_BUILDER_GUIDELINES_CHECK_PATH) {
+    val (actor, designId) =
+      call.authorizedGuidelinesDesign(service, authorization, UiBuilderRouteCapability.WRITE)
+        ?: return@post
+    val revision = call.request.queryParameters["revision"]?.toLongOrNull()
+    // The pictures are native renders, the export capability's to grant; without it the check runs
+    // on the design tree and source alone, as the prompt route's would.
+    val mayRender =
+      authorization.authorize(call, UiBuilderRouteCapability.EXPORT) is
+        UiBuilderAuthorizationDecision.Authorized
+    when (val result = check(designId, revision, mayRender, actor)) {
+      is ServeUiBuilderMcp.GuidelinesCheckResult.Recorded ->
+        call.respondGuidelines(DesignGuidelineRecord.serializer(), result.record)
+      is ServeUiBuilderMcp.GuidelinesCheckResult.Refused ->
+        call.respondGuidelinesError(HttpStatusCode.Forbidden, result.reason)
+      is ServeUiBuilderMcp.GuidelinesCheckResult.Stale ->
+        call.respondGuidelinesError(
+          HttpStatusCode.Conflict,
+          "revision $revision is not the current one (${result.current}); check that one",
+        )
+      ServeUiBuilderMcp.GuidelinesCheckResult.NotFound ->
+        call.respondGuidelinesError(HttpStatusCode.NotFound, "no such design")
+      is ServeUiBuilderMcp.GuidelinesCheckResult.Unchecked ->
+        call.respondGuidelinesError(HttpStatusCode.UnprocessableEntity, result.reason)
+      is ServeUiBuilderMcp.GuidelinesCheckResult.Failed ->
+        call.respondGuidelinesError(HttpStatusCode.BadGateway, result.reason)
+    }
+  }
+
   get(UI_BUILDER_GUIDELINES_PROMPT_PATH) {
     val (actor, designId) =
       call.authorizedGuidelinesDesign(service, authorization, UiBuilderRouteCapability.READ)
@@ -257,6 +311,18 @@ private suspend fun ApplicationCall.respondGuidelinesError(
 internal const val UI_BUILDER_GUIDELINES_PATH = "/api/ui-builder/v1/designs/{designId}/guidelines"
 internal const val UI_BUILDER_GUIDELINES_PROMPT_PATH =
   "/api/ui-builder/v1/designs/{designId}/guidelines/prompt"
+internal const val UI_BUILDER_GUIDELINES_ACCESS_PATH =
+  "/api/ui-builder/v1/designs/{designId}/guidelines/access"
+internal const val UI_BUILDER_GUIDELINES_CHECK_PATH =
+  "/api/ui-builder/v1/designs/{designId}/guidelines/check"
+
+/** `GET …/guidelines/access`: may this account run the check on this host's key. */
+@kotlinx.serialization.Serializable
+internal data class GuidelinesAccessV1(
+  val serverCheck: Boolean,
+  val model: String? = null,
+  val reason: String? = null,
+)
 
 // Larger than the review routes' 16 KiB: a whole rule set's verdicts, each with a sentence of
 // reason, runs to 20 KB on the bigger platforms. The store caps the record again before it is kept.

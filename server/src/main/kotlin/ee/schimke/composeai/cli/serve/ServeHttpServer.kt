@@ -1412,6 +1412,8 @@ class ServeHttpServer(
               sameOriginUiBuilderAuthorization,
               uiBuilderGuidelineStore,
               guidelinesMcp::guidelinesPromptFor,
+              guidelinesMcp::guidelinesAccess,
+              guidelinesMcp::runGuidelinesCheck,
             )
           }
           if (uiBuilderFolderStore != null) {

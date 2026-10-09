@@ -2489,11 +2489,8 @@ class ServeUiBuilderMcp(
       val lane = guidelines
       val reason =
         when {
-          lane == null -> "this host has no guidelines model configured"
-          !lane.allows(actor) ->
-            "the guidelines check runs on this host's shared model key and is not enabled for " +
-              "this account; ask the operator to add you, or run it in the editor with your own " +
-              "OpenRouter key"
+          lane == null -> GUIDELINES_NO_MODEL
+          !lane.allows(actor) -> GUIDELINES_NOT_ENABLED
           checked == null -> "there is no document to check until the errors above are fixed"
           else -> null
         }
@@ -2942,6 +2939,107 @@ class ServeUiBuilderMcp(
       withSource = withRenders,
       storedDesignId = designId,
     )
+  }
+
+  /** Whether [actor] may run the guidelines check on this host's key, and why not. */
+  internal suspend fun guidelinesAccess(actor: AuthenticatedUiBuilderActor): GuidelinesAccess {
+    val lane = guidelines ?: return GuidelinesAccess(false, null, GUIDELINES_NO_MODEL)
+    return if (lane.allows(actor)) GuidelinesAccess(true, lane.model, null)
+    else GuidelinesAccess(false, lane.model, GUIDELINES_NOT_ENABLED)
+  }
+
+  /** [guidelinesAccess]'s answer, for the editor to choose between this host's key and its own. */
+  internal data class GuidelinesAccess(
+    val serverCheck: Boolean,
+    val model: String?,
+    val reason: String?,
+  )
+
+  /** What [runGuidelinesCheck] came to. */
+  internal sealed interface GuidelinesCheckResult {
+    data class Recorded(val record: DesignGuidelineRecord) : GuidelinesCheckResult
+
+    data class Refused(val reason: String) : GuidelinesCheckResult
+
+    data class Stale(val current: Long) : GuidelinesCheckResult
+
+    data object NotFound : GuidelinesCheckResult
+
+    data class Unchecked(val reason: String) : GuidelinesCheckResult
+
+    data class Failed(val reason: String) : GuidelinesCheckResult
+  }
+
+  private val guidelinesInFlight =
+    java.util.concurrent.ConcurrentHashMap<
+      Pair<String, Long>,
+      CompletableDeferred<GuidelinesCheckResult>,
+    >()
+
+  /**
+   * The guidelines check on this host's key for [designId] at its current revision, as
+   * `ui_builder_check_design` runs it with `rendered: true`, recorded as [actor]'s run. [revision],
+   * when given, must be the current one. A second request for the same revision while one is
+   * running waits for that one rather than spending the key twice.
+   */
+  internal suspend fun runGuidelinesCheck(
+    designId: String,
+    revision: Long?,
+    withRenders: Boolean,
+    actor: AuthenticatedUiBuilderActor,
+  ): GuidelinesCheckResult {
+    val access = guidelinesAccess(actor)
+    if (!access.serverCheck) return GuidelinesCheckResult.Refused(access.reason.orEmpty())
+    val snapshot =
+      execute(GetSnapshotRequestV1(designId = designId, revision = null), actor)
+        as? UiBuilderServiceResponse.Snapshot ?: return GuidelinesCheckResult.NotFound
+    val document = snapshot.snapshot.state.document
+    if (revision != null && revision != document.revision) {
+      return GuidelinesCheckResult.Stale(document.revision)
+    }
+    val key = designId to document.revision
+    val mine = CompletableDeferred<GuidelinesCheckResult>()
+    val running = guidelinesInFlight.putIfAbsent(key, mine)
+    if (running != null) return running.await()
+    try {
+      val result = checkGuidelinesNow(designId, document, withRenders, actor)
+      mine.complete(result)
+      return result
+    } catch (thrown: Throwable) {
+      mine.completeExceptionally(thrown)
+      throw thrown
+    } finally {
+      guidelinesInFlight.remove(key, mine)
+    }
+  }
+
+  private suspend fun checkGuidelinesNow(
+    designId: String,
+    document: DesignDocumentV1,
+    withRenders: Boolean,
+    actor: AuthenticatedUiBuilderActor,
+  ): GuidelinesCheckResult {
+    val lane = guidelines ?: return GuidelinesCheckResult.Refused(GUIDELINES_NO_MODEL)
+    val request =
+      guidelineRequest(
+        document,
+        actor,
+        withRenders = withRenders,
+        withSource = true,
+        components = pinnedCatalog(document, actor)?.components,
+        storedDesignId = designId,
+      )
+    return when (val outcome = lane.check(request)) {
+      is UiBuilderGuidelineOutcome.Checked ->
+        recordGuidelineOutcome(designId, document, outcome, actor)?.let {
+          GuidelinesCheckResult.Recorded(it)
+        } ?: GuidelinesCheckResult.Failed("the guidelines result could not be recorded")
+      is UiBuilderGuidelineOutcome.Skipped -> GuidelinesCheckResult.Unchecked(outcome.reason)
+      is UiBuilderGuidelineOutcome.Failed -> {
+        onLog("[ui-builder] guidelines check failed: ${outcome.reason}")
+        GuidelinesCheckResult.Failed(outcome.reason)
+      }
+    }
   }
 
   private suspend fun guidelinesPrompt(
@@ -5006,3 +5104,11 @@ internal data class DesignWaitTimeoutV1(
   /** Echoed back, so a caller that loops can pass the same cursor without tracking it itself. */
   val afterSequence: Long,
 )
+
+/** Why the guidelines check cannot run on this host's key: no lane at all. */
+internal const val GUIDELINES_NO_MODEL = "this host has no guidelines model configured"
+
+/** Why the guidelines check cannot run on this host's key for this account. */
+internal const val GUIDELINES_NOT_ENABLED =
+  "the guidelines check runs on this host's shared model key and is not enabled for this " +
+    "account; ask the operator to add you, or run it in the editor with your own OpenRouter key"
