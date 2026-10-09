@@ -224,6 +224,10 @@ object ServeSettings {
   private val HTTPS_URL = Regex("https://[^\\s/?#@]+(?:/[^\\s]*)?")
   private val HOSTNAME = Regex("[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?")
   private val BOTH = setOf(Role.PREVIEW, Role.PLAYGROUND)
+  private val OAUTH_SCOPES =
+    ServeGithubAuth.ALLOWED_SCOPES.sorted().joinToString("|").let {
+      Regex("(?:$it)(?:[ ,]+(?:$it))*")
+    }
 
   /**
    * Every managed setting. Adding one is a line here, then `UPDATE_SERVE_SETTINGS_REFERENCE=true`
@@ -415,7 +419,9 @@ object ServeSettings {
       Setting(
         "auth.github.scope",
         "SERVE_GITHUB_AUTH_SCOPE",
-        Type.Text(),
+        // The scopes ServeGithubAuthConfig accepts, so `repo` is refused here rather than by the
+        // next start.
+        Type.Text(pattern = OAUTH_SCOPES, patternHint = "read-only identity scopes only"),
         Apply.RESTART,
         "The OAuth scope asked for. Only read-only identity scopes are accepted.",
       ),

@@ -327,6 +327,7 @@
               "description": "The OAuth scope asked for. Only read-only identity scopes are accepted.",
               "type": "string",
               "minLength": 1,
+              "pattern": "^(?:(?:read:org|read:user|user:email)(?:[ ,]+(?:read:org|read:user|user:email))*)$",
               "x-env": "SERVE_GITHUB_AUTH_SCOPE",
               "x-apply": "restart",
               "x-roles": [

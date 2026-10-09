@@ -95,6 +95,14 @@ class ServeSettingsTest {
       ServeSettings.validate(doc("""{"uploads": {"imageRepository": "not a repo"}}""")).isNotEmpty()
     )
     assertTrue(ServeSettings.validate(doc("""{"uiBuilder": "x"}""")).isNotEmpty())
+    // A scope the server would refuse at startup is refused here instead.
+    assertTrue(
+      ServeSettings.validate(doc("""{"auth": {"github": {"scope": "repo"}}}""")).isNotEmpty()
+    )
+    assertEquals(
+      emptyList(),
+      ServeSettings.validate(doc("""{"auth": {"github": {"scope": "read:user read:org"}}}""")),
+    )
     assertEquals(
       emptyList(),
       ServeSettings.validate(doc("""{"${'$'}schema": "../image/settings.schema.json"}""")),
