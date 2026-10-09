@@ -30,7 +30,7 @@ compose-multiplatform = "1.12.1"
 # Material 3 adaptive, for the real `SupportingPaneScaffold` on the editor's canvas and preview
 # panes. Its own version line rather than the Compose Multiplatform one, which is why it is a
 # separate ref: the adaptive artifacts ship independently of the CMP bundle.
-compose-material3-adaptive = "1.2.0"
+compose-material3-adaptive = "1.3.0"
 # Wear Compose Material 3 / Foundation, compiled for Compose Multiplatform. `androidx.wear.compose`
 # publishes an Android AAR and nothing else — its Gradle module metadata carries exactly two
 # variants, both `releaseVariantRelease*Publication` — so the canvas cannot link the real library.
