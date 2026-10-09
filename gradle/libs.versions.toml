@@ -386,7 +386,10 @@ composeai-contracts = "3.21.0"
 # (compose-ui-builder#601). 3.99.0 writes Remote Compose Kotlin source in every build, so the code
 # pane shows a launcher widget's `RemoteComposeWidget` without `-PuiBuilderRemoteCompose`
 # (compose-ui-builder#607). `androidx-window` and `composeai-contracts` are unchanged.
-composeai-ui-builder = "3.99.0"
+# 3.101.0 is built on compose-ai-tools 2.38.0 and builds component records through the contracts'
+# builders (compose-ui-builder#617): 2.38.0's `preview-discovery` no longer carries a public
+# `ComponentRecord.copy`, which 3.99.0's export called, so the two move together.
+composeai-ui-builder = "3.101.0"
 # The CMP/Wasm Remote Compose player (yschimke/rc-players' `rc-player-wasm-dist`, a zip of its
 # static browser bundle). Shipped in the server tarball as `rc-player-wasm/`, which the image's
 # entrypoint already passes as `--rc-player-wasm-dir`: that serves `/rc-player-wasm/`, enables the
