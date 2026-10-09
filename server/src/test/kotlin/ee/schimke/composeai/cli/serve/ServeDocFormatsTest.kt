@@ -3,6 +3,7 @@ package ee.schimke.composeai.cli.serve
 import java.io.ByteArrayOutputStream
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
+import kotlin.random.Random
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
@@ -81,6 +82,51 @@ class ServeDocFormatsTest {
   }
 
   @Test
+  fun `untagged AndroidX remote compose header is detected and summarised`() {
+    // The leading bytes of rc-players' compat-test fixture `androidx-layout.rc`, written by the
+    // AndroidX writer: Header opcode, major 1 with no magic in its high half, minor 1, patch 0,
+    // width 320, height 180, capabilities 0 — then the first operation (0x65) of the body.
+    val doc = ServeDocFixtures.androidxUntaggedRemoteComposePrefix()
+
+    assertEquals(ServeDocFormats.REMOTE_COMPOSE, ServeDocFormats.detect(doc))
+    assertEquals(ServeDocSize(320, 180), ServeDocFormats.REMOTE_COMPOSE.size(doc))
+    val facts = ServeDocFormats.REMOTE_COMPOSE.describe(doc).associate { it.key to it.value }
+    assertEquals("1.1.0", facts["Format version"])
+    assertEquals("320 × 180", facts["Document size"])
+  }
+
+  @Test
+  fun `implausible or short untagged headers are refused`() {
+    val doc = ServeDocFixtures.androidxUntaggedRemoteComposePrefix()
+
+    // Missing the fixed width/height/capabilities tail: no magic, so the whole layout is required.
+    assertNull(ServeDocFormats.detect(doc.copyOf(28)))
+    // Major version 0 — no writer emits it, and it is what a zero-filled buffer looks like.
+    assertNull(ServeDocFormats.detect(doc.copyOf().also { it[4] = 0 }))
+    // A zero declared width or height.
+    assertNull(ServeDocFormats.detect(doc.copyOf().also { it.fill(0, 13, 17) }))
+    assertNull(ServeDocFormats.detect(doc.copyOf().also { it[20] = 0 }))
+    // A high half that is neither zero nor the magic.
+    assertNull(ServeDocFormats.detect(doc.copyOf().also { it[2] = 0x12 }))
+    assertNull(ServeDocFormats.detect(doc.copyOf().also { it[1] = 0xFF.toByte() }))
+    // A non-Header first opcode.
+    assertNull(ServeDocFormats.detect(doc.copyOf().also { it[0] = 0x65 }))
+  }
+
+  @Test
+  fun `random and short buffers are not remote compose`() {
+    val random = Random(0x5EED)
+    repeat(2_000) {
+      val bytes = random.nextBytes(random.nextInt(0, 128))
+      assertNull(ServeDocFormats.detect(bytes), "accepted random bytes ${bytes.toHex()}")
+    }
+    val tagged = ServeDocFixtures.remoteComposeDoc()
+    for (length in 0 until 13) {
+      assertNull(ServeDocFormats.detect(tagged.copyOf(length)), "accepted a $length-byte prefix")
+    }
+  }
+
+  @Test
   fun `lottie animation is detected and summarised`() {
     val doc = ServeDocFixtures.lottieDoc()
 
@@ -123,7 +169,8 @@ class ServeDocFormatsTest {
     assertNull(ServeDocFormats.detect(png))
     assertNull(ServeDocFormats.detect(html))
     assertNull(ServeDocFormats.detect(ByteArray(0)))
-    // A zero-opcode file whose next bytes aren't the magic must not pass as Remote Compose.
+    // A zero-filled file opens with the Header opcode and an untagged-looking major word, but
+    // declares major 0 and a 0 × 0 size: it must not pass as Remote Compose.
     assertNull(ServeDocFormats.detect(ByteArray(64)))
   }
 
@@ -181,6 +228,50 @@ object ServeDocFixtures {
     return out.toByteArray()
   }
 
+  /**
+   * The first 32 bytes of rc-players' `androidx-layout.rc` compat fixture (built by
+   * `:rc-player-compat-tests` from the AndroidX writer): an untagged `Header` — opcode 0, major 1,
+   * minor 1, patch 0, width 320, height 180, capabilities 0 — and the start of the first body
+   * operation.
+   */
+  fun androidxUntaggedRemoteComposePrefix(): ByteArray =
+    intArrayOf(
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x01,
+        0x00,
+        0x00,
+        0x00,
+        0x01,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x01,
+        0x40,
+        0x00,
+        0x00,
+        0x00,
+        0xb4,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x65,
+        0x00,
+        0x00,
+      )
+      .map { it.toByte() }
+      .toByteArray()
+
   /** A minimal but shape-complete Lottie (Bodymovin) animation. */
   fun lottieDoc(name: String = "Spinner"): ByteArray =
     """
@@ -190,3 +281,5 @@ object ServeDocFixtures {
       .trimIndent()
       .toByteArray()
 }
+
+private fun ByteArray.toHex(): String = joinToString(" ") { "%02x".format(it) }

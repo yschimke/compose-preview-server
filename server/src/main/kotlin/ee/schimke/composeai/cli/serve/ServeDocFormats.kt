@@ -74,10 +74,15 @@ object ServeDocFormats {
    * captures, played back by the same vendored `RC.RcdPlayer` the preview viewer's canvas lane
    * uses.
    *
-   * The stream opens with the `Header` operation: opcode `0x00`, then a big-endian int whose high
-   * 16 bits are the format magic (`0x048C`) and whose low 16 are the major version. That is the
-   * sniff; the rest of [describeRemoteCompose] walks the header's property table for the document's
-   * declared size.
+   * The stream opens with the `Header` operation: opcode `0x00`, then a big-endian `major` int. The
+   * header comes in the two forms the players' reader (`RcDocumentCodec`'s `HeaderCodec`) accepts,
+   * told apart by that int's high 16 bits:
+   * - **tagged** — the high 16 bits are the format magic (`0x048C`) and the low 16 the major
+   *   version, followed by minor, patch and a property table carrying the declared size;
+   * - **untagged** — the high 16 bits are zero, as the AndroidX writer emits: major, minor, patch,
+   *   then a fixed width, height and capabilities long.
+   *
+   * That is the sniff; [describeRemoteCompose] reads the version and declared size from either.
    */
   val REMOTE_COMPOSE =
     ServeDocFormat(
@@ -128,13 +133,51 @@ object ServeDocFormats {
 
   private const val RC_MAGIC = 0x048C
 
-  private fun isRemoteComposeDoc(bytes: ByteArray): Boolean {
-    // opcode(1) + magic|major(4) + minor(4) + patch(4) is the smallest header worth accepting.
-    if (bytes.size < 13) return false
-    if (bytes[0].toInt() != 0) return false
-    val high = ((bytes[1].toInt() and 0xFF) shl 8) or (bytes[2].toInt() and 0xFF)
-    return high == RC_MAGIC
+  /**
+   * opcode(1) + magic|major(4) + minor(4) + patch(4): the smallest tagged header worth accepting.
+   */
+  private const val TAGGED_HEADER_MIN_BYTES = 13
+
+  /**
+   * opcode(1) + major(4) + minor(4) + patch(4) + width(4) + height(4) + capabilities(8): an
+   * untagged header has no property table, so the whole fixed layout must be present.
+   */
+  private const val UNTAGGED_HEADER_BYTES = 29
+
+  /**
+   * Which header form [bytes] open with, or null when they are not a Remote Compose document.
+   *
+   * Mirrors rc-players' `HeaderCodec.decode` (`rc-player/protocol/.../RcDocumentCodec.kt`): a
+   * `major` word below `0x10000` is the untagged (legacy) layout, otherwise its high 16 bits must
+   * be [RC_MAGIC]. The untagged form has no magic to sniff on, so it is held to what a real writer
+   * emits rather than everything the codec tolerates: a major version of at least 1 with a zero
+   * high half (the codec's signed comparison would also take a negative word), and a positive
+   * declared width and height. That keeps a zero-filled or otherwise arbitrary buffer refused.
+   */
+  private fun remoteComposeHeaderForm(bytes: ByteArray): HeaderForm? {
+    if (bytes.size < TAGGED_HEADER_MIN_BYTES) return null
+    if (bytes[0].toInt() != 0) return null
+    val encodedMajor = bytes.intAt(1)
+    if (encodedMajor ushr 16 == RC_MAGIC) return HeaderForm.TAGGED
+    if (encodedMajor ushr 16 != 0 || encodedMajor < 1) return null
+    if (bytes.size < UNTAGGED_HEADER_BYTES) return null
+    val width = bytes.intAt(13)
+    val height = bytes.intAt(17)
+    return if (width > 0 && height > 0) HeaderForm.UNTAGGED else null
   }
+
+  private enum class HeaderForm {
+    TAGGED,
+    UNTAGGED,
+  }
+
+  private fun ByteArray.intAt(offset: Int): Int =
+    ((this[offset].toInt() and 0xFF) shl 24) or
+      ((this[offset + 1].toInt() and 0xFF) shl 16) or
+      ((this[offset + 2].toInt() and 0xFF) shl 8) or
+      (this[offset + 3].toInt() and 0xFF)
+
+  private fun isRemoteComposeDoc(bytes: ByteArray): Boolean = remoteComposeHeaderForm(bytes) != null
 
   /** Version + declared size from the document header. */
   private fun describeRemoteCompose(bytes: ByteArray): List<ServeDocFact> {
@@ -151,12 +194,12 @@ object ServeDocFormats {
   private class RemoteComposeHeader(val version: String, val size: ServeDocSize?)
 
   /**
-   * Walk the document's `Header` operation for its version + declared size. Deliberately total: any
-   * malformed / truncated table stops the walk and yields what was read so far, since this only
-   * feeds a display panel and the stage's initial dimensions.
+   * Read the document's `Header` operation for its version + declared size, in either form.
+   * Deliberately total: any malformed / truncated table stops the walk and yields what was read so
+   * far, since this only feeds a display panel and the stage's initial dimensions.
    */
   private fun readRemoteComposeHeader(bytes: ByteArray): RemoteComposeHeader? {
-    if (!isRemoteComposeDoc(bytes)) return null
+    val form = remoteComposeHeaderForm(bytes) ?: return null
     var version = "unknown"
     var width: Int? = null
     var height: Int? = null
@@ -166,22 +209,31 @@ object ServeDocFormats {
       val minor = reader.int()
       val patch = reader.int()
       version = "$major.$minor.$patch"
-      val propertyCount = reader.int()
-      // The header's property table: a short tag (dataType = tag shr 10, key = tag and 0x3FF), a
-      // short byte length, then the value. Unknown types are skipped by their declared length, so
-      // an
-      // added property key can't derail the walk.
-      repeat(propertyCount.coerceIn(0, MAX_HEADER_PROPERTIES)) {
-        val tag = reader.short()
-        val dataType = tag shr 10
-        val key = tag and 0x3FF
-        val length = reader.short()
-        if (dataType == DATA_TYPE_INT) {
-          val value = reader.int()
-          if (key == DOC_WIDTH) width = value
-          if (key == DOC_HEIGHT) height = value
-        } else {
-          reader.skip(length)
+      when (form) {
+        HeaderForm.UNTAGGED -> {
+          // Fixed layout: width, height, then a capabilities long nothing here needs.
+          width = reader.int()
+          height = reader.int()
+        }
+        HeaderForm.TAGGED -> {
+          val propertyCount = reader.int()
+          // The header's property table: a short tag (dataType = tag shr 10, key = tag and 0x3F,
+          // as AndroidX `Header.readMap` and the players mask it), a short byte length, then the
+          // value. Unknown types are skipped by their declared length, so an added property key
+          // can't derail the walk.
+          repeat(propertyCount.coerceIn(0, MAX_HEADER_PROPERTIES)) {
+            val tag = reader.short()
+            val dataType = tag shr 10
+            val key = tag and 0x3F
+            val length = reader.short()
+            if (dataType == DATA_TYPE_INT) {
+              val value = reader.int()
+              if (key == DOC_WIDTH) width = value
+              if (key == DOC_HEIGHT) height = value
+            } else {
+              reader.skip(length)
+            }
+          }
         }
       }
     } catch (e: IndexOutOfBoundsException) {
