@@ -379,7 +379,11 @@ composeai-contracts = "3.21.0"
 # logs and serves (compose-ui-builder#583), asks a Wear widget only the widget guideline rules and a
 # screen only the screen ones (#574), and records `m3/variable-font-text` at export (#581).
 # `androidx-window` and `composeai-contracts` are unchanged.
-composeai-ui-builder = "3.98.0"
+# 3.98.0 draws a launcher widget's adaptive layout at the slot its frame picks
+# (compose-ui-builder#601). 3.99.0 writes Remote Compose Kotlin source in every build, so the code
+# pane shows a launcher widget's `RemoteComposeWidget` without `-PuiBuilderRemoteCompose`
+# (compose-ui-builder#607). `androidx-window` and `composeai-contracts` are unchanged.
+composeai-ui-builder = "3.99.0"
 # The CMP/Wasm Remote Compose player (yschimke/rc-players' `rc-player-wasm-dist`, a zip of its
 # static browser bundle). Shipped in the server tarball as `rc-player-wasm/`, which the image's
 # entrypoint already passes as `--rc-player-wasm-dir`: that serves `/rc-player-wasm/`, enables the
