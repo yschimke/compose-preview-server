@@ -232,7 +232,8 @@ internal fun Route.installUiBuilderRoutes(
             service.shapeForReader(actor, service.execute(mapping.call))
           } catch (cancelled: CancellationException) {
             throw cancelled
-          } catch (_: Exception) {
+          } catch (failure: Exception) {
+            logUiBuilderServiceFailure(failure)
             UiBuilderServiceResponse.Error(
               ee.schimke.composeai.uibuilder.service.UiBuilderServiceError(
                 ServiceErrorCodeV1.INTERNAL,
@@ -1100,3 +1101,18 @@ internal data class UiBuilderVisibilityPayload(
   val canWrite: Boolean,
   val canManage: Boolean,
 )
+
+/**
+ * Logs what the generic "UI-builder service failed" answer hides.
+ *
+ * The client is told only that the service failed, deliberately: an exception message can carry a
+ * path or another design's content. But the operator was told nothing at all, so a design that
+ * would not open left no trace on the box to start from. The stack goes to the process log, which
+ * only the operator reads.
+ */
+internal fun logUiBuilderServiceFailure(failure: Exception) {
+  System.err.println(
+    "serve: UI-builder service failed: ${failure::class.qualifiedName}: ${failure.message}"
+  )
+  failure.printStackTrace()
+}
