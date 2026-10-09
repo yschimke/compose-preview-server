@@ -365,15 +365,20 @@ data class ServeUiBuilderSettingsDto(
 
 /**
  * One shadowed catalog's report (compose-ui-builder's `CatalogCutoverShadow.Report`), as
- * `/admin/ui-builder/config` reports it: [ready] when owning it would refuse nothing it serves now,
- * and [differences] what the editor would see change. Null [differences] ⇒ this build synthesises
- * nothing for the catalog, so owning it loses nothing.
+ * `/admin/ui-builder/config` reports it: [ready] when owning it would refuse nothing it serves now
+ * and take nothing away ([losses] empty), and [differences] what the editor would see change. Null
+ * [differences] ⇒ this build synthesises nothing for the catalog, so owning it loses nothing.
  */
 @kotlinx.serialization.Serializable
 data class ServeUiBuilderShadowReportDto(
   val ready: Boolean,
   val findings: List<String>,
   val differences: List<String>?,
+  /**
+   * The [differences] that take something away from an editor; non-empty ⇒ not [ready]. Null when
+   * [differences] is: nothing to compare, so nothing to lose.
+   */
+  val losses: List<String>? = differences?.let { emptyList() },
 )
 
 /**

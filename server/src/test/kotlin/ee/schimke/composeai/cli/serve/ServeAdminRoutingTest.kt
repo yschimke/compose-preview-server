@@ -213,6 +213,7 @@ class ServeAdminRoutingTest {
               ready = false,
               findings = listOf("remote-m3/blank: export refused"),
               differences = listOf("remote-m3/text: properties: loses style"),
+              losses = listOf("remote-m3/text: properties: loses style"),
             )
         )
       },
@@ -344,6 +345,8 @@ class ServeAdminRoutingTest {
     // What a shadowed catalog would change if owned, as this process composed it.
     assertTrue("remote-m3/blank: export refused" in report, report)
     assertTrue("remote-m3/text: properties: loses style" in report, report)
+    // And which of those changes take something away, so the operator sees what blocks owning.
+    assertTrue(""""losses":["remote-m3/text: properties: loses style"]""" in report, report)
 
     // A malformed block is refused and leaves the file alone.
     val (bad, reason) =
