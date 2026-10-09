@@ -34,6 +34,13 @@ internal class ComponentRecordSource(
    */
   private val foundation: ComponentRecordFile? = FOUNDATION,
   /**
+   * The catalogs whose served record wins over a configured one in [files]: a catalog whose
+   * published `ui-builder.json` composed against its own delivery-branch record. That file joins on
+   * the record it was published beside, so the export must read the same one; an operator's
+   * `--ui-builder-components` file for it predates the catalog publishing a record at all.
+   */
+  private val preferServed: (catalogSystemId: String) -> Boolean = { false },
+  /**
    * The served catalog's own record for a catalog id, or null where none is served. Consulted only
    * for a catalog [files] does not name.
    */
@@ -80,7 +87,11 @@ internal class ComponentRecordSource(
 
   /** The record for [catalogSystemId], or which of the two ways there isn't one. */
   fun record(catalogSystemId: String): Lookup {
-    val path = files[catalogSystemId] ?: served(catalogSystemId) ?: return Lookup.Unconfigured
+    val path =
+      (if (preferServed(catalogSystemId)) served(catalogSystemId) else null)
+        ?: files[catalogSystemId]
+        ?: served(catalogSystemId)
+        ?: return Lookup.Unconfigured
     val identity =
       path.takeIf { it.isFile }?.let { Identity(it.absolutePath, it.length(), it.lastModified()) }
     last[catalogSystemId]?.let { if (it.identity == identity) return it.lookup }

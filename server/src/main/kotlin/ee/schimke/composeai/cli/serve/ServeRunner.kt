@@ -2823,8 +2823,14 @@ public class ServeRunner(
     // fact. Kept for the life of the process as the export's fallback until that catalog has
     // published a generation of its own to read from.
     val startupRecords = ConcurrentHashMap<String, File>()
+    // The catalogs whose published file composed against their own delivery-branch record; that
+    // record, not a configured one, is then the catalog's (see `composePublished`).
+    val publishedRecordCatalogs = ConcurrentHashMap.newKeySet<String>()
     val records =
-      ComponentRecordSource(uiBuilderComponents) { system ->
+      ComponentRecordSource(
+        uiBuilderComponents,
+        preferServed = { it in publishedRecordCatalogs },
+      ) { system ->
         catalogStore?.componentRecord(system) ?: startupRecords[system]
       }
     if (catalogStore != null) {
@@ -3109,7 +3115,12 @@ public class ServeRunner(
       // place of the synthesised catalog, which is the one outcome worse than not reading the
       // published file at all. Fetched by the same route a pack's record is, for the same
       // reason.
-      if (records.record(systemId) !is ComponentRecordSource.Lookup.Found) {
+      //
+      // Fetched even when the operator configured a record for the catalog: a published file joins
+      // on the record published beside it, and a configured one (the image's authored m3-catalog
+      // fixture) predates the catalog publishing any. It is tried first and wins only if the
+      // published file composes against it; otherwise the configured record stays the catalog's.
+      if (catalogStore.componentRecord(systemId) == null && startupRecords[systemId] == null) {
         catalogStore
           .fetchComponentRecord(
             system = sourceSystem,
@@ -3120,6 +3131,7 @@ public class ServeRunner(
       }
       // The same record the export reads, through the same source, so the shelf the builder
       // offers and the code the export writes cannot disagree about what a component is.
+      publishedRecordCatalogs += systemId
       val record = (records.record(systemId) as? ComponentRecordSource.Lookup.Found)?.record
       when (
         val composed =
@@ -3165,6 +3177,8 @@ public class ServeRunner(
           System.err.println(
             "serve: UI-builder catalog $systemId keeps its built-in definition — " + composed.reason
           )
+          // The served record did not compose this file, so a configured one stays the catalog's.
+          publishedRecordCatalogs -= systemId
           // On a refresh this is a fall back, not a no-op: the policy an earlier publish composed
           // must not outlive a publish that replaced it with something unusable.
           publishedCatalogs.remove(systemId)
