@@ -195,10 +195,14 @@ class ServeDocRoutingTest {
       .execute()
       .use { assertEquals(405, it.code) }
 
-    // The one server-side player a shared document can name today; anything else is the caller's
-    // mistake, not a missing document.
-    get("$path/render.png$gated&rcPlayer=androidx-view", gatedServer.port).use { response ->
+    // A player no server-side lane draws is the caller's mistake, not a missing document…
+    get("$path/render.png$gated&rcPlayer=camaelon-js", gatedServer.port).use { response ->
       assertEquals(400, response.code)
+    }
+    // …while an Android player with no resident catalog to draw it is a retryable 503: the lane
+    // exists, this host just has no daemon running that can replay the document right now.
+    get("$path/render.png$gated&rcPlayer=androidx-view", gatedServer.port).use { response ->
+      assertEquals(503, response.code)
     }
     // With the host token: rendered, or — where this test JVM has no desktop-player sidecar — a
     // retryable 503 naming why. Never a 404 or a 500: the document is there and the lane exists.

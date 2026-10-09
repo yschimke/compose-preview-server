@@ -12,6 +12,7 @@ import ee.schimke.composeai.cli.serve.icons.MaterialSymbolsIcons
 import ee.schimke.composeai.cli.serve.icons.MaterialSymbolsSource
 import ee.schimke.composeai.daemon.client.SandboxSparePool
 import ee.schimke.composeai.daemon.protocol.PreviewOverrides
+import ee.schimke.composeai.daemon.protocol.RemoteComposeOverride
 import ee.schimke.composeai.daemon.protocol.RemoteNamedValue
 import ee.schimke.composeai.daemon.protocol.StreamCodec
 import ee.schimke.composeai.data.layoutinspector.ComposeFigmaSvgProduct
@@ -13524,17 +13525,59 @@ class ServeHttpServer(
 
   /**
    * The server-side players a `/d/<id>` page may offer this caller: the embedded desktop player
-   * (cmp-jvm) when it is installed and the caller may run live renders — the same gate
+   * (cmp-jvm) when it is installed, and each Android player ([DOC_DAEMON_PLAYERS]) a resident
+   * catalog's daemon can draw a carried document with ([docRcDonor]). All behind the same gate
    * [handleDocRender] applies, so the page never offers a lane that would answer 401 or 403.
    */
   private fun RoutingContext.docServerPlayers(
     doc: ServeDocStore.Doc
   ): List<ServeWeb.DocServerPlayer> {
     if (doc.format.id != ServeDocFormats.REMOTE_COMPOSE.id) return emptyList()
-    if (!mayRenderDocServerSide(call) || !RcJvmServerRenderer.isAvailable()) return emptyList()
-    return listOf(
-      ServeWeb.DocServerPlayer(ServeRcPlayerIds.CMP_JVM, "CMP (JVM)", "${doc.path}/render.png")
-    )
+    if (!mayRenderDocServerSide(call)) return emptyList()
+    val renderPath = "${doc.path}/render.png"
+    val jvm =
+      if (RcJvmServerRenderer.isAvailable())
+        listOf(ServeWeb.DocServerPlayer(ServeRcPlayerIds.CMP_JVM, "CMP (JVM)", renderPath))
+      else emptyList()
+    val android =
+      DOC_DAEMON_PLAYERS.filter { docRcDonor(it) != null }
+        .map { ServeWeb.DocServerPlayer(ServeRcPlayerIds.of(it), it.label, renderPath) }
+    return jvm + android
+  }
+
+  /** A catalog preview whose live daemon replays a carried Remote Compose document. */
+  private data class DocRcDonor(val sessionId: String, val previewId: String)
+
+  /**
+   * A preview, in a session already resident on this host, whose daemon can draw a carried document
+   * with [backend]: it replays a captured Remote Compose document (so its daemon carries the replay
+   * connector and the players), renders overrides live, and has [backend] enabled.
+   *
+   * The donor only lends its daemon. compose-preview-daemon 3.15.0 replays
+   * `overrides.remoteCompose.documentBase64` in place of the preview's own content, so the preview
+   * picks the sandbox and the player set, never the pixels; and compose-ai-tools 2.37.0 keys the
+   * render cache on the document, so two documents through one donor never share an entry.
+   *
+   * Resident sessions only ([ServeSessionRegistry.peekHost]): a shared document must never be the
+   * reason this host forks a catalog or boots a daemon it was not already running.
+   */
+  private fun docRcDonor(backend: RcPlayerBackend): DocRcDonor? {
+    for (sessionId in sessions.knownSessionIds()) {
+      val host = sessions.peekHost(sessionId) ?: continue
+      val previewId =
+        runCatching {
+          host.previews
+            .firstOrNull {
+              host.hasRemoteComposeDoc(it.id) &&
+                host.canRenderOverridesFor(it.id) &&
+                backend in host.enabledRcPlayersFor(it.id)
+            }
+            ?.id
+        }
+          .getOrNull() ?: continue
+      return DocRcDonor(sessionId, previewId)
+    }
+    return null
   }
 
   /**
@@ -13579,15 +13622,25 @@ class ServeHttpServer(
       return
     }
     val params = call.request.queryParameters
+    val size = doc.format.size(doc.bytes)
+    val density = params["density"]?.toFloatOrNull()?.takeIf { it in 0.5f..4f } ?: 1f
+    val daemonPlayer =
+      params["rcPlayer"]
+        ?.let { RcPlayerBackend.fromWire(ServeRcPlayerIds.normalizeRequest(it)) }
+        ?.takeIf { it in DOC_DAEMON_PLAYERS }
+    if (daemonPlayer != null) {
+      respondDocDaemonRender(doc, daemonPlayer, size, density, params)
+      return
+    }
     if (!ServeRcPlayerIds.isCmpJvm(params["rcPlayer"])) {
       call.respondText(
-        "a shared document renders server-side with rcPlayer=${ServeRcPlayerIds.CMP_JVM}",
+        "a shared document renders server-side with rcPlayer=" +
+          (listOf(ServeRcPlayerIds.CMP_JVM) + DOC_DAEMON_PLAYERS.map { ServeRcPlayerIds.of(it) })
+            .joinToString("|"),
         status = HttpStatusCode.BadRequest,
       )
       return
     }
-    val size = doc.format.size(doc.bytes)
-    val density = params["density"]?.toFloatOrNull()?.takeIf { it in 0.5f..4f } ?: 1f
     val spec =
       RcJvmRenderSpec(
         (size?.width ?: DOC_RENDER_DEFAULT_PX).coerceIn(1, DOC_RENDER_MAX_PX),
@@ -13612,6 +13665,96 @@ class ServeHttpServer(
       stage = { it },
       cacheControl = "private, no-store",
     )
+  }
+
+  /**
+   * The Android half of [handleDocRender]: [doc] drawn by [player] on a resident catalog's daemon
+   * ([docRcDonor]), carried to it as `overrides.remoteCompose.documentBase64` at the document's own
+   * size. Only a fresh render answers: a baked or published image is the donor preview's pixels,
+   * never this document's, so those are refused rather than served under a 200.
+   */
+  private suspend fun RoutingContext.respondDocDaemonRender(
+    doc: ServeDocStore.Doc,
+    player: RcPlayerBackend,
+    size: ServeDocSize?,
+    density: Float,
+    params: Parameters,
+  ) {
+    val donor = docRcDonor(player)
+    if (donor == null) {
+      call.response.headers.append(HttpHeaders.RetryAfter, "30")
+      call.respondText(
+        "no running catalog here can draw ${ServeRcPlayerIds.of(player)}",
+        status = HttpStatusCode.ServiceUnavailable,
+      )
+      return
+    }
+    val widthPx = ((size?.width ?: DOC_RENDER_DEFAULT_PX) * density).toInt()
+    val heightPx = ((size?.height ?: DOC_RENDER_DEFAULT_PX) * density).toInt()
+    val overrides =
+      PreviewOverrides(
+        widthPx = widthPx.coerceIn(1, DOC_RENDER_MAX_PX),
+        heightPx = heightPx.coerceIn(1, DOC_RENDER_MAX_PX),
+        density = density,
+        remoteCompose =
+          RemoteComposeOverride.Builder()
+            .also {
+              it.player = player.playerKind
+              it.playerId = player.daemonPlayerId
+              it.documentBase64 = java.util.Base64.getEncoder().encodeToString(doc.bytes)
+              it.namedValues =
+                ServeOverrides.rcNamedValueSeeds(
+                  params.entries().associate { (key, values) ->
+                    key to (values.firstOrNull() ?: "")
+                  }
+                )
+            }
+            .build(),
+      )
+    // An expiring capability URL must never be stored by a shared cache — no-store, as the page.
+    markGeneration("document", "private, no-store")
+    call.response.headers.append(HttpHeaders.CacheControl, "private, no-store")
+    withLeasedSession(donor.sessionId) { host ->
+      val outcome =
+        withContext(Dispatchers.IO) {
+          if (!renderSemaphore.tryAcquire(RENDER_QUEUE_WAIT_SECONDS, TimeUnit.SECONDS)) null
+          else
+            try {
+              host.render(donor.previewId, overrides)
+            } finally {
+              renderSemaphore.release()
+            }
+        }
+      when (outcome) {
+        null,
+        RenderOutcome.Busy -> {
+          call.response.headers.append(HttpHeaders.RetryAfter, "2")
+          call.respondText(
+            "render busy; retry shortly",
+            status = HttpStatusCode.ServiceUnavailable,
+          )
+        }
+        is RenderOutcome.Ok ->
+          if (
+            outcome.generation == RenderOutcome.Generation.BAKED ||
+              outcome.generation == RenderOutcome.Generation.RC_PUBLISHED
+          ) {
+            call.response.headers.append(HttpHeaders.RetryAfter, "2")
+            call.respondText(
+              "the ${ServeRcPlayerIds.of(player)} daemon is not warm yet; retry shortly",
+              status = HttpStatusCode.ServiceUnavailable,
+            )
+          } else {
+            call.respondBytes(outcome.png, ContentType.Image.PNG)
+          }
+        is RenderOutcome.Failed ->
+          call.respondText(outcome.reason, status = HttpStatusCode.InternalServerError)
+        RenderOutcome.NotFound ->
+          call.respondText("the donor preview is gone", status = HttpStatusCode.ServiceUnavailable)
+        else ->
+          call.respondText("unexpected render outcome", status = HttpStatusCode.InternalServerError)
+      }
+    }
   }
 
   /**
@@ -18393,6 +18536,18 @@ class ServeHttpServer(
 
     /** Classpath location of the vendored Remote Compose player IIFE bundle (global `RC`). */
     private const val RC_PLAYER_RESOURCE = "/rc-player/bundle.js"
+
+    /**
+     * The Android players a shared `/d/<id>` document can be drawn with, on a resident catalog's
+     * daemon ([docRcDonor]). The default the capture bakes through first, as the viewer orders
+     * them.
+     */
+    private val DOC_DAEMON_PLAYERS: List<RcPlayerBackend> =
+      listOf(
+        RcPlayerBackend.ANDROIDX_EMBEDDED,
+        RcPlayerBackend.ANDROIDX_VIEW,
+        RcPlayerBackend.CMP_ANDROID,
+      )
 
     /** A shared document with no declared size renders at this many pixels a side. */
     private const val DOC_RENDER_DEFAULT_PX = 512

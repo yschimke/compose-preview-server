@@ -99,6 +99,42 @@ class CatalogLiveRoutingTest {
   }
 
   /**
+   * A carried document replaces the preview's content, so even with the baked player named it is
+   * never answered from the baked PNG: a shared `/d/<id>` document drawn by androidx-embedded must
+   * reach the daemon, not come back as the donor preview's own capture under a 200.
+   */
+  @Test
+  fun `a carried document always needs the renderer, even through the baked player`() {
+    val carried =
+      PreviewOverrides(
+        remoteCompose =
+          RemoteComposeOverride.Builder()
+            .also {
+              it.player = RemoteComposePlayerKind.EMBEDDED
+              it.documentBase64 = "AQIDBA=="
+            }
+            .build()
+      )
+    assertTrue(
+      CatalogLiveRouting.overridesAffectRender(
+        lightId,
+        carried,
+        UiMode.LIGHT,
+        RemoteComposePlayerKind.EMBEDDED,
+      )
+    )
+    assertEquals(
+      listOf("rcDocument"),
+      CatalogLiveRouting.droppedOverrideNames(
+        lightId,
+        carried,
+        UiMode.LIGHT,
+        RemoteComposePlayerKind.EMBEDDED,
+      ),
+    )
+  }
+
+  /**
    * …and the no-op follows the *session's* answer, not a constant.
    *
    * A preview pinning `RemoteViewPreviewWrapper` baked through the view player, so on it the
