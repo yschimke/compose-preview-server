@@ -53,4 +53,39 @@ class ComponentRecordSourceTest {
       assertIs<ComponentRecordSource.Lookup.Found>(source.record("m3-catalog")).record.module,
     )
   }
+
+  /**
+   * The image configures an authored m3-catalog record that predates the catalog publishing its
+   * own; once the published file composes against the delivery branch's record, that one is read.
+   */
+  @Test
+  fun `a catalog preferring its served record reads it over the operator's file`() {
+    val named = record("named", "named")
+    val served = record("g1", "served")
+    val preferred = mutableSetOf<String>()
+    val source =
+      ComponentRecordSource(
+        mapOf("m3-catalog" to named),
+        preferServed = { it in preferred },
+      ) {
+        served
+      }
+
+    assertEquals(
+      "named",
+      assertIs<ComponentRecordSource.Lookup.Found>(source.record("m3-catalog")).record.module,
+    )
+    preferred += "m3-catalog"
+    assertEquals(
+      "served",
+      assertIs<ComponentRecordSource.Lookup.Found>(source.record("m3-catalog")).record.module,
+    )
+    // With no served record to prefer, the operator's file still answers.
+    val unserved =
+      ComponentRecordSource(mapOf("m3-catalog" to named), preferServed = { true }) { null }
+    assertEquals(
+      "named",
+      assertIs<ComponentRecordSource.Lookup.Found>(unserved.record("m3-catalog")).record.module,
+    )
+  }
 }
