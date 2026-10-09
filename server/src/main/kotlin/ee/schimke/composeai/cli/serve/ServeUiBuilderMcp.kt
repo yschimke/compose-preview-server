@@ -743,7 +743,8 @@ class ServeUiBuilderMcp(
         service.execute(UiBuilderServiceCall(actor, request))
       } catch (cancelled: CancellationException) {
         throw cancelled
-      } catch (_: Exception) {
+      } catch (failure: Exception) {
+        logUiBuilderServiceFailure(failure)
         UiBuilderServiceResponse.Error(
           ee.schimke.composeai.uibuilder.service.UiBuilderServiceError(
             ServiceErrorCodeV1.INTERNAL,
@@ -3600,7 +3601,8 @@ class ServeUiBuilderMcp(
           service.shapeForReader(actor, service.execute(mapping.call))
         } catch (cancelled: CancellationException) {
           throw cancelled
-        } catch (_: Exception) {
+        } catch (failure: Exception) {
+          logUiBuilderServiceFailure(failure)
           UiBuilderServiceResponse.Error(
             ee.schimke.composeai.uibuilder.service.UiBuilderServiceError(
               ServiceErrorCodeV1.INTERNAL,
