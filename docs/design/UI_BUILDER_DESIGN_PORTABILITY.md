@@ -273,3 +273,14 @@ steps, and it would be reasonable for an author to expect otherwise.
 - **Automatic sync.** For the same reason #536 made local storage a mode rather than a fallback:
   an author needs to know which copy is the one they are editing, and a sync that happened on its
   own is a sync they cannot have decided to postpone.
+
+### Shared native CI reference launcher
+
+`scripts/ui-builder/render-ci-references.sh PILOT_DIRECTORY` is the shared launcher
+used by design-parity's UID workflow inside the pinned `compose-preview-host`
+image. Run it from the consuming app checkout. It locates its sibling reference
+publisher relative to the script, extracts the image's renderer bundle and seeds
+the hash-pinned Wear jars required by that bundle. Consumers supply only their
+committed `references.json` and UID documents; do not copy the launcher or its
+dependency hashes into app repositories. Update the launcher and image pin together
+when their renderer/dependency contract changes.
