@@ -87,6 +87,21 @@ object PreviewGuidelinesMcp {
     /** The preview function's source, or null. */
     fun source(preview: Resolved): String? = null
 
+    /**
+     * The preview's entry in its module's `previews.json`, or null when there is none to read. What
+     * [GuidelineSurfaces.of] reads its surface and profile from — the same answer the CLI's
+     * `compose-preview guidelines` reaches, so a preview is asked the same rules here.
+     */
+    fun manifestEntry(preview: Resolved): JsonObject? {
+      val file = preview.buildDir?.let { File(it, "compose-previews/previews.json") } ?: return null
+      if (!file.isFile) return null
+      val manifest =
+        runCatching { Json.parseToJsonElement(file.readText()) }.getOrNull() as? JsonObject
+      return (manifest?.get("previews") as? JsonArray)
+        ?.mapNotNull { it as? JsonObject }
+        ?.firstOrNull { (it["id"] as? JsonPrimitive)?.contentOrNull == preview.previewId }
+    }
+
     /** The OpenRouter key, from [KEY_ENV]. */
     val openRouterKey: String?
 
@@ -109,7 +124,9 @@ object PreviewGuidelinesMcp {
           "as one batched request (compose-ui-builder/guidelines-prompt/v1), returned with the " +
           "renders as images. Spends no key: judge it with your own model, citing node ids. " +
           "Takes `previews` (names, FQNs or compose-preview:// URIs) and optional `guidelines` " +
-          "(a file or URL) and `surface` (component | screen | widget).",
+          "(a file or URL), `surface` (component | screen | widget) and `profile` (a Remote " +
+          "Compose profile such as wear-widgets); both default to what the preview's manifest " +
+          "entry says.",
       inputSchema = inputSchema(withCost = false),
     )
 
@@ -148,6 +165,15 @@ object PreviewGuidelinesMcp {
           add(JsonPrimitive(GuidelineSurfaces.SCREEN))
           add(JsonPrimitive(GuidelineSurfaces.WIDGET))
         }
+        put("description", "Default: the preview's own, from its manifest entry.")
+      }
+      putJsonObject("profile") {
+        put("type", "string")
+        put(
+          "description",
+          "The Remote Compose profile the previews target (wear-widgets, launcher-widgets-v7, …); " +
+            "default: the preview's own, from its manifest entry.",
+        )
       }
       if (withCost) {
         putJsonObject("max_cost") {
@@ -296,9 +322,8 @@ object PreviewGuidelinesMcp {
         ?: throw IllegalArgumentException(
           "$tool: ${loaded.problem?.let(::redactedProblem) ?: "no guidelines at $location"}"
         )
-    val surface =
-      (args["surface"] as? JsonPrimitive)?.contentOrNull?.takeIf { it.isNotBlank() }
-        ?: GuidelineSurfaces.COMPONENT
+    val surfaceArg = (args["surface"] as? JsonPrimitive)?.contentOrNull?.takeIf { it.isNotBlank() }
+    val profileArg = (args["profile"] as? JsonPrimitive)?.contentOrNull?.takeIf { it.isNotBlank() }
     val notes = mutableListOf<String>()
     val subjects = resolved.map { preview ->
       val png = host.render(preview)
@@ -309,10 +334,14 @@ object PreviewGuidelinesMcp {
             (hierarchy.problem ?: "the hierarchy was empty") +
             "), so its findings cannot name nodes"
       }
+      // The preview's own surface and profile (a Wear widget is `widget` / `wear-widgets`), unless
+      // the caller names them; a preview no manifest lists is a component, as before.
+      val kind = host.manifestEntry(preview)?.let(GuidelineSurfaces::of)
       PreviewSubject(
         previewId = preview.previewId,
         label = preview.label,
-        surface = surface,
+        surface = surfaceArg ?: kind?.surface ?: GuidelineSurfaces.COMPONENT,
+        profile = profileArg ?: kind?.profile,
         renderHash = sha256(png),
         pictures = listOf(SubjectPicture(GuidelinePictureV1.KIND_DEVICE, png, 0, 0)),
         nodes = hierarchy.payload?.let(::nodesOf).orEmpty(),

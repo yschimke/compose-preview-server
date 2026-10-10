@@ -132,6 +132,39 @@ class PreviewGuidelinesMcpTest {
   }
 
   @Test
+  fun `a preview's surface and profile come from its manifest entry`() {
+    // A Wear widget sticker names no device; without its manifest entry it was asked component
+    // rules, and a catalog whose rules are all widget rules asked it nothing.
+    File(buildDir, "compose-previews/previews.json")
+      .writeText(
+        """
+        {"module": "app", "previews": [
+          {"id": "com.example.Widget", "params": {"device": null, "widthDp": 216, "heightDp": 124},
+           "widget": {"host": "wear", "profile": "wear-widgets"}}
+        ]}
+        """
+      )
+    val host = FakeHost(openRouterKey = null)
+    val widget = host.resolve("Widget")!!
+    assertThat(host.manifestEntry(widget)).isNotNull()
+    fun provenance(vararg extra: Pair<String, String>): String {
+      val call =
+        JsonObject(
+          mapOf("previews" to JsonArray(listOf(JsonPrimitive("Widget")))) +
+            extra.associate { (k, v) -> k to JsonPrimitive(v) }
+        )
+      val text = (PreviewGuidelinesMcp.prompt(call, host).content.first() as ContentBlock.Text).text
+      return kotlinx.serialization.json.Json.parseToJsonElement(text)
+        .jsonObject["provenance"]!!
+        .toString()
+    }
+    assertThat(provenance()).contains("surface `widget`")
+    assertThat(provenance("surface" to "component")).contains("surface `component`")
+    // A preview the manifest does not list is a component, as before.
+    assertThat(host.manifestEntry(host.resolve("Stop")!!)).isNull()
+  }
+
+  @Test
   fun `the check judges the previews and names the nodes, the model and the cost`() {
     val host = FakeHost(openRouterKey = "sk-or-test")
     val result = PreviewGuidelinesMcp.check(args("Stop"), host)
