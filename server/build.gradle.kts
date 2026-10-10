@@ -921,6 +921,11 @@ tasks.register<CheckServeModuleBoundary>("checkServeModuleBoundary") {
       "ee.schimke.composeai:daemon-core",
       "ee.schimke.composeai:daemon-devices",
       "ee.schimke.composeai:daemon-protocol",
+      // The design-guidelines wire shapes (`GuidelineRecordV1` and friends), from
+      // compose-preview-contracts. Reached through `render-host` since compose-ai-tools 2.39.0,
+      // whose `ServeGuidelineResultsStore` reads a bundle's `guidelines.json`; contracts only.
+      "ee.schimke.composeai:design-guidelines-protocol",
+      "ee.schimke.composeai:design-guidelines-protocol-jvm",
       "ee.schimke.composeai:data-layoutinspector-core",
       // A `runtime` edge of `daemon-core` since compose-preview-daemon 3.13.0: the pure-JVM APNG
       // encoder/decoder and the interaction-script types (`ee.schimke.composeai.motion`), with no
