@@ -2473,6 +2473,10 @@ cp-history-menu { display: contents; }
 .cp-viewer:not([data-source-lane="side"]) .cp-stage:fullscreen > #cp-img {
   width: 100%; height: 100%; max-height: none !important; object-fit: contain; }
 .cp-stage:fullscreen > .cp-backend, .cp-stage:fullscreen > .cp-stage-live-hint { display: none; }
+/* A spatial scene is not a picture to fit but a viewport to grow: it takes the whole screen, and its
+   own ResizeObserver resizes the WebGL renderer to match. */
+.cp-stage:fullscreen:has(> cp-spatial-view) { padding: 0; }
+.cp-stage:fullscreen > cp-spatial-view { align-self: stretch; height: 100%; }
 /* A stage with no field of its own (the source lanes paint it transparent) would otherwise present
    on the UA's black backdrop. */
 .cp-stage::backdrop { background: var(--md-sys-color-surface, #fff); }

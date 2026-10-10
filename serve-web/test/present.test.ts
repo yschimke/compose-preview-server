@@ -96,4 +96,14 @@ describe("the viewer's Present mode", () => {
         fs.change(null);
         assert.equal(button.getAttribute("aria-pressed"), "false");
     });
+
+    it("is installed by the spatial viewer, which loads instead of viewer.js", async () => {
+        fakeFullscreen(true);
+        const stage = stageWithFullscreen(() => {});
+        await import("../src/spatial.js");
+        assert.ok(
+            stage.querySelector(".cp-present"),
+            "a spatial preview's stage gets the Present button too",
+        );
+    });
 });
