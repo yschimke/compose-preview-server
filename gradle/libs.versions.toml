@@ -407,7 +407,7 @@ composeai-contracts = "3.25.0"
 # `ComponentRecord.copy`, which 3.100.0's export called, so the two move together.
 # 3.102.0 is built on compose-ai-tools 2.39.1 and daemon 3.15.1 (compose-ui-builder#627), and lets
 # its runtime boundary admit the contracts' component record module (compose-ui-builder#622).
-composeai-ui-builder = "3.102.0"
+composeai-ui-builder = "3.103.0"
 # The CMP/Wasm Remote Compose player (yschimke/rc-players' `rc-player-wasm-dist`, a zip of its
 # static browser bundle). Shipped in the server tarball as `rc-player-wasm/`, which the image's
 # entrypoint already passes as `--rc-player-wasm-dir`: that serves `/rc-player-wasm/`, enables the
