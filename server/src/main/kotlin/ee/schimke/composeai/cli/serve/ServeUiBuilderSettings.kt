@@ -397,6 +397,12 @@ class ServeUiBuilderSettingsAdmin(
   private val serving: ServeUiBuilderSettings.Effective,
   /** Each shadowed catalog's latest report, by catalog id; filled as catalogs compose. */
   private val shadowReports: () -> Map<String, ServeUiBuilderShadowReportDto> = { emptyMap() },
+  /**
+   * Each catalog-owned catalog this process cannot serve fully, by catalog id, with why: its
+   * published file is missing or does not compose (left out of the builder), or its templates do
+   * not read (served, new designs start blank). Empty when every owned catalog composes.
+   */
+  private val unavailable: () -> Map<String, String> = { emptyMap() },
 ) {
   sealed interface Result {
     data class Ok(
@@ -426,6 +432,8 @@ class ServeUiBuilderSettingsAdmin(
   fun serving(): ServeUiBuilderSettings.Effective = serving
 
   fun shadowReports(): Map<String, ServeUiBuilderShadowReportDto> = shadowReports.invoke()
+
+  fun unavailable(): Map<String, String> = unavailable.invoke()
 
   fun set(settings: ServeCatalogsConfig.UiBuilderSettings): Result {
     val file = configFile ?: return Result.Unavailable(NO_FILE)

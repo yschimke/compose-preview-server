@@ -217,6 +217,7 @@ class ServeAdminRoutingTest {
             )
         )
       },
+      unavailable = { mapOf("wear-m3" to "unavailable: no published ui-builder.json") },
     )
 
   /**
@@ -347,6 +348,11 @@ class ServeAdminRoutingTest {
     assertTrue("remote-m3/text: properties: loses style" in report, report)
     // And which of those changes take something away, so the operator sees what blocks owning.
     assertTrue(""""losses":["remote-m3/text: properties: loses style"]""" in report, report)
+    // An owned catalog this process withheld, and why: there is no built-in fallback to hide it.
+    assertTrue(
+      """"unavailable":{"wear-m3":"unavailable: no published ui-builder.json"}""" in report,
+      report,
+    )
 
     // A malformed block is refused and leaves the file alone.
     val (bad, reason) =

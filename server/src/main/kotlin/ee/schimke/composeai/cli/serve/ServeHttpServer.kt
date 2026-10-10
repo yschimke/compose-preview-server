@@ -365,6 +365,11 @@ class ServeHttpServer(
    * and `/status` must report what each registry contributes now (see [catalogRegistryStatus]).
    */
   private val catalogRegistries: () -> List<CatalogRegistryStatus> = { emptyList() },
+  /**
+   * Catalog-owned UI-builder catalogs this process cannot serve fully, with why; read per request
+   * because a catalog refresh can recover one. Reported on `/status` and the designs page.
+   */
+  private val uiBuilderCatalogProblems: () -> Map<String, String> = { emptyMap() },
   /** Whether `POST /bundles` runtime uploads are accepted (`--accept-bundles`). */
   private val acceptBundlesEnabled: Boolean = false,
   /**
@@ -6330,6 +6335,7 @@ class ServeHttpServer(
           restartRequired = next.effective != admin.serving(),
           problems = next.problems,
           shadow = admin.shadowReports().toSortedMap(),
+          unavailable = admin.unavailable().toSortedMap(),
         ),
       ),
       ContentType.Application.Json,
@@ -9852,6 +9858,7 @@ class ServeHttpServer(
             imageBytesHeld = imageOccupancy?.totalBytes ?: 0,
             catalogRefreshSeconds = catalogRefreshSeconds,
             catalogRegistries = catalogRegistries(),
+            uiBuilderCatalogProblems = uiBuilderCatalogProblems(),
             maxConcurrentRenders = renderSlots,
             liveSeats = liveSeats.totalPermits,
           ),
@@ -16508,6 +16515,7 @@ class ServeHttpServer(
         catalogs = if (mayCreate) uiBuilderNewDesignOptions() else emptyList(),
         suggestedDesignId = NewDesignNames.random(),
         notice = call.request.queryParameters["notice"].orEmpty().take(200),
+        catalogProblems = if (mayCreate) uiBuilderCatalogProblems() else emptyMap(),
         navSuffix = tokenQuery,
         version = SERVE_VERSION,
         siteName = skin.first,
@@ -19686,6 +19694,11 @@ private data class ConfigDto(
    * worth telling apart, which is the whole reason this is here.
    */
   val catalogRegistries: List<CatalogRegistryStatus> = emptyList(),
+  /**
+   * Catalog-owned UI-builder catalogs this box cannot serve fully, with why (left out, or served
+   * with templates that do not read). Empty when every owned catalog composes.
+   */
+  val uiBuilderCatalogProblems: Map<String, String> = emptyMap(),
   val maxConcurrentRenders: Int,
   /** Live-seat permit budget; `0` ⇒ unbounded. */
   val liveSeats: Int,
@@ -20318,6 +20331,11 @@ private data class AdminUiBuilderSettingsResponse(
   val problems: List<String>,
   /** Each shadowed catalog's report, as this process composed it. */
   val shadow: Map<String, ServeUiBuilderShadowReportDto> = emptyMap(),
+  /**
+   * Each catalog-owned catalog this process cannot serve fully, with why. An owned catalog has no
+   * built-in fallback, so a publish that does not compose leaves it out until it republishes.
+   */
+  val unavailable: Map<String, String> = emptyMap(),
 )
 
 @Serializable
