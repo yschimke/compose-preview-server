@@ -7778,6 +7778,11 @@ ${captureControlsHtml().prependIndent("          ")}
     suggestedDesignId: String = "",
     /** What the last form submission did, shown once above the grid. */
     notice: String = "",
+    /**
+     * Catalog-owned catalogs this box cannot serve fully, with why, so a designer who misses one in
+     * the New design list is told it is withheld rather than left to wonder where it went.
+     */
+    catalogProblems: Map<String, String> = emptyMap(),
     navSuffix: String = "",
     version: String? = null,
     siteName: String = "",
@@ -7801,6 +7806,11 @@ ${captureControlsHtml().prependIndent("          ")}
         .takeIf { it.isNotBlank() }
         ?.let { "<p class=\"cp-designs-notice\" role=\"status\">${esc(it)}</p>" }
         .orEmpty()
+    val catalogProblemsHtml =
+      catalogProblems.entries.joinToString("") { (id, why) ->
+        "<p class=\"cp-designs-notice\" role=\"status\">Catalog <code>${esc(id)}</code>: " +
+          "${esc(why)}</p>"
+      }
     val card: (UiBuilderDesignRow) -> String = { row ->
       val title = if (row.title.isBlank()) row.designId else row.title
       val updated =
@@ -8283,7 +8293,7 @@ ${captureControlsHtml().prependIndent("          ")}
         <p><a href="/ui-builder/projects$navSuffix">Projects — app files, resources and sharing</a></p>
         <p class="cp-sub">Every design this server permits <code>${esc(viewerActorId)}</code> to open,
         newest first. Open one to carry on with it, duplicate one to start from it.</p>
-        $noticeHtml$requestAccess
+        $noticeHtml$catalogProblemsHtml$requestAccess
         $folderPicker
         $recent
         $filter

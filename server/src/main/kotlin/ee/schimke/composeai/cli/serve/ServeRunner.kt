@@ -417,6 +417,15 @@ public class ServeRunner(
   private val uiBuilderShadowReports = ConcurrentHashMap<String, ServeUiBuilderShadowReportDto>()
 
   /**
+   * What is wrong with each catalog-owned builder catalog ([UiBuilderOwnedCatalogHealth]); set when
+   * the UI-builder lane starts, read by `/status`, the designs page and `/admin/ui-builder/config`.
+   */
+  @Volatile private var uiBuilderCatalogHealth: UiBuilderOwnedCatalogHealth? = null
+
+  private fun uiBuilderCatalogProblems(): Map<String, String> =
+    uiBuilderCatalogHealth?.problems().orEmpty()
+
+  /**
    * Whether `/` has anything to show, set alongside [uiBuilderLaneOpen].
    *
    * `handleLanding` answers the front-door index when this server publishes catalogs, and otherwise
@@ -3127,8 +3136,17 @@ public class ServeRunner(
     // policy
     // reaches the builder without a restart. True when it composed.
     val catalogGuidelines = ServeCatalogGuidelines()
+    // An owned catalog that cannot be composed is withheld, never quietly replaced.
+    val health = UiBuilderOwnedCatalogHealth(ownership::owns).also { uiBuilderCatalogHealth = it }
     fun composePublished(systemId: String, refresh: Boolean = false): Boolean {
-      if (catalogStore == null || publishedAllowed?.contains(systemId) == false) return false
+      if (catalogStore == null || publishedAllowed?.contains(systemId) == false) {
+        health.withhold(
+          systemId,
+          if (catalogStore == null) "this box has no catalog store to read its published file from"
+          else "--ui-builder-published-catalogs does not let it read its published file",
+        )
+        return false
+      }
       // A catalog served under another name (`wear-m3` from `wear-m3-catalog`) keeps its record
       // under the builder id, where the delivery branch's reload never replaces it: fetch it again.
       if (refresh) startupRecords.remove(systemId)
@@ -3146,7 +3164,14 @@ public class ServeRunner(
           sourceRepo = config?.repo,
           sourceBranchPrefix = config?.branch?.removeSuffix(sourceSystem),
           templates = ownership.owns(systemId) || systemId in shadowed,
-        ) ?: return false
+        )
+          ?: run {
+            health.withhold(
+              systemId,
+              "no published ui-builder.json could be read from $sourceSystem's delivery branch",
+            )
+            return false
+          }
       // The catalog's own design guidance, published beside it. A republish that drops the file
       // drops the catalog's guidelines too, and the check falls back to the bundled rules.
       val guidelinesBytes = published.guidelines
@@ -3216,21 +3241,30 @@ public class ServeRunner(
                   published.templates[it]
                 }
             ) {
-              is CatalogSeedTemplates.Result.Read -> publishedTemplates[systemId] = read.templates
+              is CatalogSeedTemplates.Result.Read -> {
+                publishedTemplates[systemId] = read.templates
+                health.templatesRead(systemId)
+              }
               is CatalogSeedTemplates.Result.Unusable -> {
                 // Owned, so there is no built-in seed to fall back to: the catalog is offered the
-                // generic blank until it republishes, and the reason is said once.
+                // generic blank until it republishes, and reported as degraded.
                 publishedTemplates.remove(systemId)
-                System.err.println("serve: UI-builder catalog $systemId templates: ${read.reason}")
+                health.degrade(systemId, read.reason)
               }
             }
           }
+          if (health.isWithheld(systemId)) health.healthy(systemId)
           System.err.println("serve: UI-builder catalog ${composed.note}")
         }
         is PublishedUiBuilderCatalog.Result.Unusable -> {
-          System.err.println(
-            "serve: UI-builder catalog $systemId keeps its built-in definition — " + composed.reason
-          )
+          if (ownership.owns(systemId)) {
+            health.withhold(systemId, composed.reason)
+          } else {
+            System.err.println(
+              "serve: UI-builder catalog $systemId keeps its built-in definition — " +
+                composed.reason
+            )
+          }
           // The served record did not compose this file, so a configured one stays the catalog's.
           publishedRecordCatalogs -= systemId
           // On a refresh this is a fall back, not a no-op: the policy an earlier publish composed
@@ -3250,7 +3284,9 @@ public class ServeRunner(
     fun buildCatalogExecutor(): UiBuilderCatalogExecutor =
       CurrentM3UiBuilderCatalogExecutor.Builder()
         .also {
-          it.catalogSystemIds = uiBuilderCatalogs
+          // An owned catalog that did not compose is left out rather than allowed to fail the
+          // whole builder: compose-ui-builder refuses an owned catalog with no published file.
+          it.catalogSystemIds = health.served(uiBuilderCatalogs)
           it.published = publishedCatalogs
           it.nativeRuntimeIds = publishedRuntimeIds
           it.catalogOwnership = ownership
@@ -3349,10 +3385,14 @@ public class ServeRunner(
       val affected = uiBuilderCatalogs.filter {
         uiBuilderPublishedSourceSystem(it, uiBuilderNativeCatalogs) == sourceSystem
       }
-      val before = affected.associateWith { publishedRuntimeIds[it] to publishedCatalogs[it] }
+      val before = affected.associateWith {
+        Triple(publishedRuntimeIds[it], publishedCatalogs[it], health.stateOf(it))
+      }
       affected.forEach { composePublished(it, refresh = true) }
+      // Becoming unavailable, or available again, changes the served set as surely as a new
+      // policy does.
       val changed = affected.filter {
-        (publishedRuntimeIds[it] to publishedCatalogs[it]) != before[it]
+        Triple(publishedRuntimeIds[it], publishedCatalogs[it], health.stateOf(it)) != before[it]
       }
       if (changed.isNotEmpty()) {
         catalogs.swap(buildCatalogExecutor())
@@ -3722,6 +3762,7 @@ public class ServeRunner(
             ServeUiBuilderSettings.Effective.of(ServeUiBuilderSettings.environmentOf(options)),
           serving = ServeUiBuilderSettings.Effective.of(options),
           shadowReports = { uiBuilderShadowReports.toMap() },
+          unavailable = { uiBuilderCatalogProblems() },
         )
       } else {
         null
@@ -4075,6 +4116,7 @@ public class ServeRunner(
         trustStoreConfigured = trustStorePath != null,
         catalogRefreshSeconds = catalogRefreshSeconds,
         catalogRegistries = { catalogRegistryStatuses(catalogRegistrySync) },
+        uiBuilderCatalogProblems = { uiBuilderCatalogProblems() },
         acceptBundlesEnabled = acceptBundles,
         catalogAdmin = catalogAdmin,
         onboarding = onboarding,

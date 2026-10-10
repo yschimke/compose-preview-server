@@ -207,4 +207,23 @@ class ServeWebDesignFoldersTest {
       unopenableReason = null,
       folder = folder,
     )
+
+  @Test
+  fun `an owned catalog the box withholds is named on the designs page with its reason`() {
+    val page =
+      ServeWeb.uiBuilderDesignsPage(
+        rows = listOf(row("a")),
+        viewerActorId = "github:octocat",
+        catalogProblems = mapOf("wear-m3" to "unavailable: no published ui-builder.json"),
+      )
+    assertTrue(
+      page.contains("Catalog <code>wear-m3</code>: unavailable: no published ui-builder.json"),
+      page,
+    )
+    assertFalse(
+      ServeWeb.uiBuilderDesignsPage(rows = listOf(row("a")), viewerActorId = "github:octocat")
+        .contains("Catalog <code>"),
+      "no notice when every owned catalog composes",
+    )
+  }
 }
