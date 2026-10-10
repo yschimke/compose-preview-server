@@ -184,7 +184,10 @@ delete() {
       last_delete=absent
       ;;
     409)
-      if [[ "${payload}" == *"is not published here"* || "${payload}" == *"is not configured"* ]]; then
+      # `: no change` is the trust store's own "not trusted" (ServeTrustAdmin.mutate), the same
+      # nothing-to-do outcome for a producer that the other two phrases are for a catalog.
+      if [[ "${payload}" == *"is not published here"* || "${payload}" == *"is not configured"* ||
+        "${payload}" == *": no change"* ]]; then
         echo "  ${label}: nothing to retire"
         last_delete=absent
       else
@@ -482,6 +485,48 @@ if [[ "${PRUNE}" == 1 ]]; then
           ;;
       esac
     done < <(printf '%s' "${prune_listing}" | jq -r '.catalogs // [] | .[].system')
+  fi
+fi
+
+# PRUNE, trust half (--prune only): revoke branch trust the box holds and producers.json no longer
+# declares. Without it a producer dropped from the file stayed trusted on the box indefinitely —
+# and on a box running --allow-render-trusted, trusted means eligible for server-side execution, so
+# a retired fork kept that standing after its catalogs were gone (thunderbird-android in #1490,
+# compose-samples after it). Revoking through the admin API also retires the verdicts of anything
+# already loaded under the old trust (ServeTrustAdmin.onRevoke), which is the point.
+#
+# Runs AFTER the catalogs pass, so a catalog it just retired is not briefly re-verified against
+# trust that is about to go. Branch entries only: pinned keys and OIDC identities are not
+# declared in producers.json's `branches`, so this file cannot speak for them and leaves them be.
+# Registry catalogs need no special case here the way the catalog prune does — a registry's output
+# repository is trusted by an ordinary entry in this file (compose-preview-imports-out), so it is
+# declared like any other producer.
+if [[ "${PRUNE}" == 1 ]]; then
+  echo "Pruning branch trust the box holds and ${TRUST_FILE#"${REPO_ROOT}/"} no longer declares"
+
+  # Injectable for the self-test, like the catalog listing above; nothing else should set it.
+  trust_listing="${PRUNE_BOX_TRUST_JSON:-}"
+  if [[ -z "${trust_listing}" && "${DRY_RUN}" != 1 ]]; then
+    trust_listing=$(curl -sS -m 30 -H "${ADMIN_TOKEN_HEADER}: ${ADMIN_TOKEN}" \
+      "${BASE_URL}/admin/trust" 2>/dev/null || true)
+  fi
+  trust_declared=$(jq -r '.branches // [] | .[] | "\(.repo)@\(.branch // "*")"' "${TRUST_FILE}" | sort -u)
+
+  if [[ -z "${trust_declared}" ]]; then
+    # An empty or misnamed `branches` would make every trusted producer look undeclared, and the
+    # diff below would revoke the lot — catalogs included, through onRevoke. Never do that from a
+    # file that says nothing; an operator who really wants no trust edits the box directly.
+    echo "::error::--prune found no branches in ${TRUST_FILE#"${REPO_ROOT}/"}; refusing to revoke every trusted producer."
+    rejected=$((rejected + 1))
+  elif ! printf '%s' "${trust_listing}" | jq -e '.branches | type == "array"' >/dev/null 2>&1; then
+    echo "::warning::--prune could not read /admin/trust; no trust was revoked."
+  else
+    while IFS=$'\t' read -r t_repo t_branch; do
+      [[ -n "${t_repo}" ]] || continue
+      grep -qxF "${t_repo}@${t_branch}" <<<"${trust_declared}" && continue
+      delete "/admin/trust?kind=branch&repo=$(jq -rn --arg v "${t_repo}" '$v|@uri')&branch=$(jq -rn --arg v "${t_branch}" '$v|@uri')" \
+        "branch ${t_repo}@${t_branch}"
+    done < <(printf '%s' "${trust_listing}" | jq -r '.branches[] | [.repo, .branch] | @tsv')
   fi
 fi
 
