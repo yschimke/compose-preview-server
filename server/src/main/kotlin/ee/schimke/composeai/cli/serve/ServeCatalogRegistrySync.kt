@@ -31,7 +31,8 @@ class ServeCatalogRegistrySync(
   private val repos: List<ServeCatalogRegistry.Nomination>,
   private val read:
     (
-      ServeCatalogRegistry.Nomination, onProblem: (String) -> Unit,
+      ServeCatalogRegistry.Nomination,
+      onProblem: (String) -> Unit,
     ) -> ServeCatalogRegistry.Contribution?,
   private val tracked: () -> Set<String>,
   private val publish: (ServeCatalogRegistry.Contribution, ServeCatalogsConfig.Entry) -> String?,
