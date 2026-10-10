@@ -123,7 +123,7 @@ graphics-shapes = "1.1.0"
 # result — and render-host's `ServeGuidelineResultsStore` / `ServeHost.guidelineResultFor`, which
 # the hosted catalog serves as the `guidelines/result` data product (compose-ai-tools#5749).
 # 2.39.1 is built on compose-preview-daemon 3.15.1 (compose-ai-tools#5755), the pair below.
-composeai-tools = "2.39.2"
+composeai-tools = "2.40.0"
 # The render daemons, the renderers, the preview annotations and data API, and the data extractors,
 # published from yschimke/compose-preview-daemon since its 3.0.0 (compose-ai-tools#5336). Layer 1a
 # in that repository's `docs/design/REPOSITORY_LAYERS.md`: between the contracts and
