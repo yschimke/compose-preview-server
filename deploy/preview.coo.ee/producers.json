@@ -54,6 +54,10 @@
       "branch": "design-artifacts/*"
     },
     {
+      "repo": "yschimke/RemoteCompose-Examples",
+      "branch": "design-artifacts/remote-compose-examples"
+    },
+    {
       "repo": "yschimke/cadence",
       "branch": "design-artifacts/*"
     },

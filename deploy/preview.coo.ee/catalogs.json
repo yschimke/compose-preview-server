@@ -6,6 +6,11 @@
       "heading": "Design Systems",
       "noun": "design system(s)",
       "priority": 100
+    },
+    {
+      "id": "remote-compose-samples",
+      "heading": "Remote Compose Samples",
+      "noun": "sample(s)"
     }
   ],
   "catalogs": [
@@ -100,6 +105,15 @@
       "system": "homeassistant-remotecompose",
       "repo": "yschimke/homeassistant-remotecompose",
       "listed": true
+    },
+    {
+      "system": "remote-compose-examples",
+      "repo": "yschimke/RemoteCompose-Examples",
+      "listed": true,
+      "group": "remote-compose-samples",
+      "attributionRepos": [
+        "hoford/RemoteCompose-Examples"
+      ]
     },
     {
       "system": "confetti-wear",
