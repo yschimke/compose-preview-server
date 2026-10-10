@@ -506,6 +506,8 @@ jobs:
         working-directory: preview-harness
       - run: npm run harness:ui-builder-design-url
         working-directory: preview-harness
+      - run: npm run harness:ui-builder-projects
+        working-directory: preview-harness
       # Playwright writes `<name>-actual.png` and `<name>-diff.png` next to every snapshot it
       # rejects, and until now the job threw them away. That is why a deliberate render change can
       # leave a baseline stale indefinitely: the only platform that gates these snapshots is this
