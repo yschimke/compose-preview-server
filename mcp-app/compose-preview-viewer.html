@@ -87,6 +87,7 @@
   .audit-actions[hidden] { display: none; }
   .audit-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
   #audit p { margin: 0; }
+  #audit-status:empty { display: none; }
   #audit summary { cursor: pointer; }
   #audit-prompt { display: block; width: 100%; box-sizing: border-box; margin-top: 6px; padding: 7px; font: inherit; color: inherit; background: var(--color-background-primary, #fff); border: 1px solid var(--color-border, #aaa); border-radius: 6px; }
   .detail-modes { display: flex; gap: 0; }
@@ -182,11 +183,10 @@
     <ol id="findings" class="findings" aria-label="Accessibility findings"></ol>
   </section>
   <section id="audit" class="details" aria-label="Design guidelines review" hidden>
-    <strong>Design guidelines review</strong>
-    <p class="muted">Results appear in chat. Saved UI Builder reviews also appear in the design’s Issues panel.</p>
     <div class="audit-actions"><button id="audit-run" type="button" hidden>Review design guidelines</button><button id="audit-saved" type="button" hidden>Show saved review</button></div>
     <details id="audit-copy">
-      <summary>Copy a review request</summary>
+      <summary>Copy a design review request</summary>
+      <p class="muted">Copy this request into chat to run the review. Results appear in chat. Saved UI Builder reviews also appear in the design’s Issues panel.</p>
       <label for="audit-prompt" class="muted">Review request</label>
       <textarea id="audit-prompt" readonly rows="5"></textarea>
       <button id="audit-select" type="button">Select request to copy</button>
@@ -264,7 +264,7 @@
     auditRun.parentElement.hidden = auditRun.hidden && auditSaved.hidden;
     if (!auditStatus.textContent) {
       auditStatus.textContent = auditRun.hidden
-        ? 'Copy this request into chat to run the review.'
+        ? ''
         : 'The review runs with the agent in this chat.';
     }
   }
