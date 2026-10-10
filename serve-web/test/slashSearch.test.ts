@@ -77,6 +77,33 @@ describe("slash focuses the page filter", () => {
         assert.equal(box("cp-search").getAttribute("aria-keyshortcuts"), "/");
     });
 
+    it("annotates boxes the page emits after the shell bundle ran", () => {
+        // The shell runs as `<body>`'s first child: the boxes do not exist yet while parsing.
+        const own = Object.getOwnPropertyDescriptor(document, "readyState");
+        Object.defineProperty(document, "readyState", {
+            configurable: true,
+            get: () => "loading",
+        });
+        try {
+            uninstall = installSlashSearch();
+            document.body.innerHTML = `<input id="cp-search" type="search">`;
+            assert.equal(
+                box("cp-search").hasAttribute("aria-keyshortcuts"),
+                false,
+            );
+            document.dispatchEvent(new Event("DOMContentLoaded"));
+            assert.equal(
+                box("cp-search").getAttribute("aria-keyshortcuts"),
+                "/",
+            );
+        } finally {
+            if (own) Object.defineProperty(document, "readyState", own);
+            else
+                delete (document as unknown as { readyState?: string })
+                    .readyState;
+        }
+    });
+
     for (const id of ["cp-compare-search", "cp-design-filter"]) {
         it(`finds #${id}`, () => {
             document.body.innerHTML = `<input id="${id}" type="search">`;

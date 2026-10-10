@@ -124,11 +124,18 @@ function escape(event: KeyboardEvent): void {
  */
 export function installSlashSearch(): () => void {
     // Said in the markup as well as bound, so a screen reader announces the shortcut on the box.
-    // Set here rather than in each page's Kotlin template: this file is what makes it true.
-    for (const target of SEARCH_TARGETS)
-        document
-            .querySelector(target.input)
-            ?.setAttribute("aria-keyshortcuts", "/");
+    // Set here rather than in each page's Kotlin template: this file is what makes it true. After
+    // parsing, not now: the shell bundle runs as `<body>`'s first child, before the header and
+    // `<main>` have emitted any of these boxes, so an immediate pass would find none of them.
+    const annotate = (): void => {
+        for (const target of SEARCH_TARGETS)
+            document
+                .querySelector(target.input)
+                ?.setAttribute("aria-keyshortcuts", "/");
+    };
+    if (document.readyState === "loading")
+        document.addEventListener("DOMContentLoaded", annotate, { once: true });
+    else annotate();
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
 }
