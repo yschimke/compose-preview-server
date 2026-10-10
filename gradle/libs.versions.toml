@@ -125,7 +125,7 @@ graphics-shapes = "1.1.0"
 # 2.39.1 is built on compose-preview-daemon 3.15.1 (compose-ai-tools#5755), the pair below.
 # 2.42.0 records a preview's guidelines surface and profile in `previews.json` and reads them
 # through `GuidelineSurfaces.of` (compose-ai-tools#5778), which the MCP guideline tools use.
-composeai-tools = "2.42.0"
+composeai-tools = "2.43.0"
 # The render daemons, the renderers, the preview annotations and data API, and the data extractors,
 # published from yschimke/compose-preview-daemon since its 3.0.0 (compose-ai-tools#5336). Layer 1a
 # in that repository's `docs/design/REPOSITORY_LAYERS.md`: between the contracts and
