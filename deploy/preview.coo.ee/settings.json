@@ -26,7 +26,7 @@
     "grantCapabilities": ["ui-builder-read", "ui-builder-write", "ui-builder-export", "images"]
   },
   "uiBuilder": {
-    "hostRoot": true,
+    "hostRoot": false,
     "adminActors": ["github:yschimke"],
     "startUrl": "https://yschimke.github.io/compose-ui-builder/",
     "guidelines": {
