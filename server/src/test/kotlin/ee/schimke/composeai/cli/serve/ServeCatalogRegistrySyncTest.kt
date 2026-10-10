@@ -115,6 +115,42 @@ class ServeCatalogRegistrySyncTest {
   }
 
   @Test
+  fun `one registry failing while another reads cleanly retires nothing of the failed one`() {
+    val box = Box()
+    val other = "yschimke/other-imports"
+    var first: ServeCatalogRegistry.Contribution? = contributionOf("a")
+    val second =
+      ServeCatalogRegistry.normalize(
+        other,
+        ServeCatalogsConfig(catalogs = listOf(ServeCatalogsConfig.Entry(system = "b"))),
+      )
+    val sync =
+      ServeCatalogRegistrySync(
+        repos = listOf(nomination, ServeCatalogRegistry.Nomination(other)),
+        read = { n, _ -> if (n.repo == repo) first else second },
+        tracked = { box.tracked.toSet() },
+        publish = { _, entry -> entry.system.also { box.tracked += it }.let { null } },
+        retire = { system ->
+          box.tracked -= system
+          box.retired += system
+        },
+        intervalMillis = 0,
+        onLog = {},
+      )
+    sync.syncOnce()
+    assertEquals(setOf("a", "b"), box.tracked)
+
+    first = null
+    sync.syncOnce()
+    assertEquals(emptyList(), box.retired)
+    assertEquals(setOf("a", "b"), sync.ownedSystems())
+
+    first = contributionOf()
+    sync.syncOnce()
+    assertEquals(listOf("a"), box.retired)
+  }
+
+  @Test
   fun `a listed catalog whose branch is not built yet is retried on the next pass`() {
     val box = Box()
     box.failWith = "could not fetch catalog.json"

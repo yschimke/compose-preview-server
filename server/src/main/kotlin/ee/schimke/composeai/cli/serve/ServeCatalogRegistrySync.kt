@@ -59,6 +59,16 @@ class ServeCatalogRegistrySync(
    */
   private val publishedAs = java.util.Collections.synchronizedMap(HashMap<String, String>())
 
+  /**
+   * Which registry repository each owned system came from, so a pass that cannot read one registry
+   * can still vouch for that registry's catalogs.
+   *
+   * Withdrawal diffs [owned] against everything listed on this pass. Without this, a pass where one
+   * registry read cleanly and another failed would find the failed registry's catalogs unlisted and
+   * retire them — the "silence is not a withdrawal" rule held only when EVERY read failed.
+   */
+  private val ownerRepo = java.util.Collections.synchronizedMap(HashMap<String, String>())
+
   /** The registration-affecting fields of an entry, as a comparable string. */
   private fun fingerprintOf(
     contribution: ServeCatalogRegistry.Contribution,
@@ -100,6 +110,7 @@ class ServeCatalogRegistrySync(
     for (entry in entries) {
       owned += entry.system
       publishedAs[entry.system] = fingerprintOf(contribution, entry)
+      ownerRepo[entry.system] = contribution.repo
     }
   }
 
@@ -148,6 +159,9 @@ class ServeCatalogRegistrySync(
         lastReads.compute(nomination) { _, previous ->
           LastRead(previous?.contribution, problem ?: "catalog registry $nomination: unreadable")
         }
+        // This registry said nothing this pass, so everything it contributed stays listed: another
+        // registry reading cleanly must not turn this one's outage into a withdrawal.
+        listed += synchronized(ownerRepo) { ownerRepo.filterValues { it == repo }.keys.toList() }
         continue
       }
       lastReads[nomination] = LastRead(contribution, null)
@@ -181,6 +195,7 @@ class ServeCatalogRegistrySync(
         if (failure == null) {
           owned += entry.system
           publishedAs[entry.system] = fingerprint
+          ownerRepo[entry.system] = contribution.repo
           if (!registered) onLog("serve: catalog ${entry.system} imported from registry $repo")
         } else {
           publishedAs.remove(entry.system)
@@ -200,6 +215,7 @@ class ServeCatalogRegistrySync(
       retire(system)
       owned.remove(system)
       publishedAs.remove(system)
+      ownerRepo.remove(system)
       onLog("serve: catalog $system retired — no longer listed by any catalog registry")
     }
   }
