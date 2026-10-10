@@ -82,18 +82,40 @@ export function clearRecent(system?: string): void {
 
 /**
  * The catalog a page belongs to: the path ahead of the viewer's `/p/` segment, or the whole path on
- * a landing. A top-level site serves its one catalog at `/`, which keys as `""` on both pages. The
- * same rule `chrome/stars.ts` keys stars by, so the two agree on what "this catalog" is.
+ * a landing. The server mounts catalogs two ways, and this keys both to the same session id it
+ * routes by (`ServeHttpServer.selectedSessionId`): the canonical `/<system>/…` form names it in the
+ * path, and the older root-mounted form carries it as `?session=<id>` — without reading that, every
+ * legacy session would key as `""` and their histories would mix. A root page with no `?session=`
+ * is the default session (or a top-level site, already isolated by its own origin) and keys as `""`.
  */
-export function systemFromPath(pathname: string): string {
+export function catalogKey(pathname: string, search: string): string {
     const parts = pathname.split("/").filter((p) => p.length > 0);
     const at = parts.indexOf("p");
     const own = at >= 0 ? parts.slice(0, at) : parts;
+    let system: string;
     try {
-        return own.map(decodeURIComponent).join("/");
+        system = own.map(decodeURIComponent).join("/");
     } catch {
-        return own.join("/");
+        system = own.join("/");
     }
+    return system || new URLSearchParams(search).get("session") || "";
+}
+
+/**
+ * The routing part of this page's query, which every same-catalog link the server builds carries
+ * (`ServeWeb.linkQuery`): `token` on a private host, and `session` on a root-mounted catalog. Only
+ * those two — the viewer's own state (`mode=`, theme, overrides) would turn a link back to a
+ * preview into a link back to one particular configuration of it.
+ */
+export function routingQuery(search: string): string {
+    const from = new URLSearchParams(search);
+    const kept = new URLSearchParams();
+    for (const key of ["token", "session"]) {
+        const value = from.get(key);
+        if (value !== null) kept.set(key, value);
+    }
+    const query = kept.toString();
+    return query ? `?${query}` : "";
 }
 
 // ---------------------------------------------------------------- viewer: record
@@ -110,28 +132,24 @@ function titleText(title: Element): string {
 }
 
 /**
- * What the viewer at [viewer] should remember. The current nav item is the best source for both
- * link and thumbnail: the server built them, with whatever access token this host's links carry,
- * and its thumbnail is the same small `/render/<id>.png` a catalog card shows. A viewer without a
- * nav falls back to this page's path and the catalog's render URL for the preview.
+ * What the viewer at [viewer] should remember. Link and thumbnail are built from the preview id
+ * itself rather than read off the nav drawer: the drawer folds a non-default state, props or size
+ * variant into its component's representative and marks THAT row current, and a single-preview
+ * session has no drawer at all. Both carry the page's routing query, so a private host's token and
+ * a root-mounted catalog's `?session=` survive the trip back.
  */
 export function viewerEntry(viewer: Element, loc: Location): RecentEntry {
     const id = viewer.getAttribute("data-preview-id")!;
-    const system = systemFromPath(loc.pathname);
     const title = document.querySelector(".cp-preview-title");
-    const current = document.querySelector<HTMLAnchorElement>(
-        'a.cp-nav-item[aria-current="page"]',
-    );
-    const thumb = current?.querySelector<HTMLImageElement>("img.cp-nav-thumb");
     const base = loc.pathname.slice(0, loc.pathname.lastIndexOf("/p/") + 1);
+    const segment = encodeURIComponent(id);
+    const query = routingQuery(loc.search);
     return {
-        system,
+        system: catalogKey(loc.pathname, loc.search),
         id,
         label: (title && titleText(title)) || id,
-        href: current?.getAttribute("href") || loc.pathname,
-        thumb:
-            thumb?.getAttribute("src") ||
-            `${base}render/${encodeURIComponent(id)}.png`,
+        href: `${base}p/${segment}${query}`,
+        thumb: `${base}render/${segment}.png${query}`,
     };
 }
 
@@ -226,7 +244,7 @@ function render(
 // ---------------------------------------------------------------- page wiring
 
 function install(): void {
-    const system = systemFromPath(location.pathname);
+    const system = catalogKey(location.pathname, location.search);
     const viewer = document.querySelector(".cp-viewer[data-preview-id]");
     if (viewer) {
         recordRecent(viewerEntry(viewer, location));
