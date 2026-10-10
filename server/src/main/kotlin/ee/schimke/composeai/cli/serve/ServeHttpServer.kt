@@ -750,8 +750,11 @@ class ServeHttpServer(
    * Which design a branch was forked from, read from the runtime, so a grant naming a design also
    * reaches its branches ([ServeUiBuilderGrantScope]). Null where the host wires no branches.
    */
+  private val projectBranches: UiBuilderBranchPort? = uiBuilderBranches?.let { raw ->
+    uiBuilderProjectStore?.let { ServeUiBuilderProjectBranches(raw, it) } ?: raw
+  }
   private val branchParents: ServeUiBuilderGrantScope.Parents? =
-    uiBuilderBranches?.let(ServeUiBuilderGrantScope::parentsOf)
+    projectBranches?.let(ServeUiBuilderGrantScope::parentsOf)
 
   /**
    * The design service every route, sidecar, stream and MCP tool here reaches designs through, with
@@ -759,7 +762,8 @@ class ServeHttpServer(
    * class reaches the unwrapped port, which is why the constructor parameter is not a property.
    */
   private val designService: UiBuilderServicePort? = uiBuilderService?.let { raw ->
-    val service = uiBuilderProjectStore?.let { ServeUiBuilderProjectService(raw, it) } ?: raw
+    val service =
+      uiBuilderProjectStore?.let { ServeUiBuilderProjectService(raw, it, uiBuilderBranches) } ?: raw
     agentGrants?.let {
       ServeUiBuilderGrantScope.limit(service, ServeUiBuilderGrantScope.lookupOf(it), branchParents)
     } ?: service
@@ -767,14 +771,15 @@ class ServeHttpServer(
 
   /** The asset lane of [designService], under the same limit. */
   private val designAssets: UiBuilderAssetPort? = uiBuilderAssets?.let { raw ->
-    val assets = uiBuilderProjectStore?.let { ServeUiBuilderProjectAssets(raw, it) } ?: raw
+    val assets =
+      uiBuilderProjectStore?.let { ServeUiBuilderProjectAssets(raw, it, uiBuilderBranches) } ?: raw
     agentGrants?.let {
       ServeUiBuilderGrantScope.limit(assets, ServeUiBuilderGrantScope.lookupOf(it), branchParents)
     } ?: assets
   }
 
   /** The branch lane of [designService], under the same limit. */
-  private val designBranches: UiBuilderBranchPort? = uiBuilderBranches?.let { branches ->
+  private val designBranches: UiBuilderBranchPort? = projectBranches?.let { branches ->
     agentGrants?.let {
       ServeUiBuilderGrantScope.limit(branches, ServeUiBuilderGrantScope.lookupOf(it), branchParents)
     } ?: branches
