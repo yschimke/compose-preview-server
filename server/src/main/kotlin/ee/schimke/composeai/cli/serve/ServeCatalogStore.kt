@@ -1976,6 +1976,12 @@ class ServeCatalogStore(
     val guidelines: ByteArray? = null,
     /** Where [guidelines] were read from. */
     val guidelinesUrl: String? = null,
+    /**
+     * The delivery commit [file] was read from, or null when the branch head could not be resolved.
+     * A record fetched to compose against it is read at this same commit (see
+     * [fetchComponentRecord]), so the policy and the record are one publication.
+     */
+    val deliveryCommit: String? = null,
   )
 
   internal fun fetchUiBuilderCatalog(
@@ -2027,6 +2033,7 @@ class ServeCatalogStore(
       templates = if (templates) fetchUiBuilderTemplates(system, base, bytes) else emptyMap(),
       guidelines = guidelines,
       guidelinesUrl = guidelinesUrl.takeIf { guidelines != null },
+      deliveryCommit = deliveryCommit,
     )
   }
 
@@ -2079,12 +2086,18 @@ class ServeCatalogStore(
     system: String,
     sourceRepo: String? = null,
     sourceBranchPrefix: String? = null,
+    /**
+     * Read at this delivery commit rather than the branch head: the commit a published builder
+     * catalog was read from ([PublishedUiBuilderCatalogAsset.deliveryCommit]), so a branch that
+     * moves between the two reads cannot pair one publication's policy with another's record.
+     */
+    atCommit: String? = null,
   ): File? {
     val safe = ServeBundleStore.sanitizeName(system) ?: return null
     val repo = sourceRepo?.takeIf { it.isNotBlank() } ?: this.repo
     val branchPrefix = sourceBranchPrefix?.takeIf { it.isNotBlank() } ?: this.branchPrefix
     val branch = "$branchPrefix$system"
-    val deliveryCommit = fetchRevisions(repo, branch).firstOrNull()?.commit
+    val deliveryCommit = atCommit ?: fetchRevisions(repo, branch).firstOrNull()?.commit
     val base =
       deliveryCommit?.let { "https://raw.githubusercontent.com/$repo/$it/" }
         ?: "https://raw.githubusercontent.com/$repo/$branch/"

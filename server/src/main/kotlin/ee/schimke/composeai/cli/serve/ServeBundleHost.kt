@@ -2068,9 +2068,9 @@ private data class BundleRenderError(
 
 /**
  * A bundle's guideline results, looked up by bundle id. A bundle renames each preview to a
- * path-safe id (`[^A-Za-z0-9._-]` becomes `_`), and a report written before compose-ai-tools
- * remapped its ids into the bundle still carries the raw ones, so an exact miss falls back to the
- * results' ids made safe the same way. A safe id more than one raw id maps to is left out.
+ * path-safe id ([bundleSafeId]), and a report written before compose-ai-tools remapped its ids into
+ * the bundle still carries the raw ones, so an exact miss falls back to the results' ids made safe
+ * the same way. A safe id more than one raw id maps to is left out.
  */
 internal class BundleGuidelineResults(private val results: ServeGuidelineResults?) {
   private val bySafeId:
@@ -2086,7 +2086,11 @@ internal class BundleGuidelineResults(private val results: ServeGuidelineResults
     results?.forPreview(previewId) ?: bySafeId[bundleSafeId(previewId)]
 }
 
-/** A preview id as a bundle stores it: anything outside `[A-Za-z0-9._-]` becomes `_`. */
-internal fun bundleSafeId(id: String): String = id.replace(BUNDLE_UNSAFE_ID_CHARS, "_")
-
-private val BUNDLE_UNSAFE_ID_CHARS = Regex("[^A-Za-z0-9._-]")
+/**
+ * A preview id as a bundle stores it: anything but a letter, a digit, `.`, `_` or `-` becomes `_`.
+ * Letters and digits are Unicode ones, as `bundle split`'s sanitiser (and the catalog store's copy
+ * of it) keeps them, so `Über:dark` and `Äber:dark` stay two ids.
+ */
+internal fun bundleSafeId(id: String): String = buildString {
+  for (c in id) append(if (c.isLetterOrDigit() || c == '.' || c == '_' || c == '-') c else '_')
+}

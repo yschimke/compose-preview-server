@@ -9,7 +9,7 @@ import java.util.concurrent.ConcurrentHashMap
  * An owned catalog is served from nothing but what it publishes, and compose-ui-builder refuses to
  * synthesise one for it. So when its published file is missing or does not compose, the catalog is
  * **withheld** — left out of the builder, with the reason reported — rather than replaced by a
- * stale Kotlin definition, which is how the wear-m3 template regression stayed hidden (#1526). When
+ * stale Kotlin definition, which is how the catalog template regression stayed hidden (#1526). When
  * the file composes but its templates do not read, the catalog is **degraded**: still served, new
  * designs start blank. Both clear the moment a publish composes again; every catalog refresh asks.
  *
@@ -49,9 +49,12 @@ class UiBuilderOwnedCatalogHealth(
     }
   }
 
-  /** [systemId] composed with readable templates (or needs none): clear whatever was recorded. */
+  /**
+   * [systemId]'s published definition composed again: lift the withhold. Whether its templates read
+   * is a separate fact, recorded by [degrade] or cleared by [templatesRead] in the same refresh, so
+   * a degradation recorded just before this call survives it.
+   */
   fun healthy(systemId: String) {
-    degraded.remove(systemId)
     if (withheld.remove(systemId) != null) {
       log("serve: UI-builder catalog $systemId is available again")
     }

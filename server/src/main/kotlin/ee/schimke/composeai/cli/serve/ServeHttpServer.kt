@@ -9883,7 +9883,9 @@ class ServeHttpServer(
             imageBytesHeld = imageOccupancy?.totalBytes ?: 0,
             catalogRefreshSeconds = catalogRefreshSeconds,
             catalogRegistries = catalogRegistries(),
-            uiBuilderCatalogProblems = uiBuilderCatalogProblems(),
+            // Box-wide, so a top-level site's snapshot does not list its neighbours' problems.
+            uiBuilderCatalogProblems =
+              if (onlySystem == null) uiBuilderCatalogProblems() else emptyMap(),
             maxConcurrentRenders = renderSlots,
             liveSeats = liveSeats.totalPermits,
           ),
@@ -10276,8 +10278,10 @@ class ServeHttpServer(
           renderAgg.firstRenderMs?.let { add(ServeWeb.Stat("Worst first render", "${it}ms")) }
         }
       }
+      // Box-wide, so only on the box's own page, never a top-level site's.
+      val catalogProblems = if (onlySystem == null) uiBuilderCatalogProblems() else emptyMap()
       val config =
-        listOf(
+        listOfNotNull(
           ServeWeb.Stat("Access", if (isPublic) "public (open)" else "token-gated"),
           ServeWeb.Stat("Bind", "$host:$port"),
           ServeWeb.Stat("Trusted re-render", if (allowRenderTrusted) "on" else "off"),
@@ -10308,6 +10312,15 @@ class ServeHttpServer(
                 }
             },
           ),
+          // Why an owned UI-builder catalog is withheld or degraded, as `/status.json` says it.
+          catalogProblems
+            .takeIf { it.isNotEmpty() }
+            ?.let { problems ->
+              ServeWeb.Stat(
+                "UI-builder catalogs",
+                problems.entries.joinToString(" · ") { (id, why) -> "$id — $why" },
+              )
+            },
           ServeWeb.Stat(
             "Live seats",
             if (liveSeats.unbounded) "unbounded" else liveSeats.totalPermits.toString(),
