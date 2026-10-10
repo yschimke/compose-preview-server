@@ -24,7 +24,9 @@ class ServeStatusCatalogRegistryTest {
 
   @AfterTest fun tearDown() = server?.stop().let {}
 
-  private fun start(registries: List<CatalogRegistryStatus>): ServeHttpServer =
+  private fun start(registries: List<CatalogRegistryStatus>): ServeHttpServer = start { registries }
+
+  private fun start(registries: () -> List<CatalogRegistryStatus>): ServeHttpServer =
     ServeHttpServer(
         host = "127.0.0.1",
         requestedPort = 0,
@@ -104,5 +106,34 @@ class ServeStatusCatalogRegistryTest {
     // fixes, so the error string has to survive to the status surface.
     assertTrue(statusJson(s).contains("document not found"), "error dropped from status.json")
     assertTrue(statusPage(s).contains("unreadable"), "status page does not flag the failure")
+  }
+
+  @Test
+  fun `status reports what the registry contributes now, not at boot`() {
+    // The registry sync publishes catalogs after boot. A status built once from the boot read kept
+    // reporting the boot set, and `publish-config-to-box.sh --prune` deleted everything since.
+    var live =
+      listOf(
+        CatalogRegistryStatus(
+          repo = "yschimke/compose-preview-imports",
+          catalogs = 1,
+          systems = listOf("joreilly-peopleinspace"),
+        )
+      )
+    val s = start { live }
+    assertTrue(!statusJson(s).contains("compose-samples-jetsnack"))
+
+    live =
+      listOf(
+        live
+          .single()
+          .copy(
+            catalogs = 2,
+            systems = listOf("joreilly-peopleinspace", "compose-samples-jetsnack"),
+          )
+      )
+
+    assertTrue(statusJson(s).contains("compose-samples-jetsnack"), "status.json is a boot snapshot")
+    assertTrue(statusPage(s).contains("2 catalog(s)"), "status page is a boot snapshot")
   }
 }

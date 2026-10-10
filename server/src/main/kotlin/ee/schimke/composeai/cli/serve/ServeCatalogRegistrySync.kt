@@ -17,7 +17,8 @@ import java.util.concurrent.TimeUnit
  * read cleanly and no longer names a system retires it.
  *
  * @param repos the nominated registry projects, in `--catalog-registry` order.
- * @param read fetch + normalise one registry's document; null ⇒ unreadable this pass.
+ * @param read fetch + normalise one registry's document, reporting why through its second argument;
+ *   null ⇒ unreadable this pass.
  * @param tracked the systems the box currently serves or is configured to serve — the
  *   [CatalogLoadTracker], read per pass rather than captured, so an admin publish between ticks is
  *   seen.
@@ -28,7 +29,11 @@ import java.util.concurrent.TimeUnit
  */
 class ServeCatalogRegistrySync(
   private val repos: List<ServeCatalogRegistry.Nomination>,
-  private val read: (ServeCatalogRegistry.Nomination) -> ServeCatalogRegistry.Contribution?,
+  private val read:
+    (
+      ServeCatalogRegistry.Nomination,
+      onProblem: (String) -> Unit,
+    ) -> ServeCatalogRegistry.Contribution?,
   private val tracked: () -> Set<String>,
   private val publish: (ServeCatalogRegistry.Contribution, ServeCatalogsConfig.Entry) -> String?,
   private val retire: (system: String) -> Unit,
@@ -53,6 +58,16 @@ class ServeCatalogRegistrySync(
    * comparing whole entries would re-publish on a cosmetic edit elsewhere in the document.
    */
   private val publishedAs = java.util.Collections.synchronizedMap(HashMap<String, String>())
+
+  /**
+   * Which registry repository each owned system came from, so a pass that cannot read one registry
+   * can still vouch for that registry's catalogs.
+   *
+   * Withdrawal diffs [owned] against everything listed on this pass. Without this, a pass where one
+   * registry read cleanly and another failed would find the failed registry's catalogs unlisted and
+   * retire them — the "silence is not a withdrawal" rule held only when EVERY read failed.
+   */
+  private val ownerRepo = java.util.Collections.synchronizedMap(HashMap<String, String>())
 
   /** The registration-affecting fields of an entry, as a comparable string. */
   private fun fingerprintOf(
@@ -95,11 +110,29 @@ class ServeCatalogRegistrySync(
     for (entry in entries) {
       owned += entry.system
       publishedAs[entry.system] = fingerprintOf(contribution, entry)
+      ownerRepo[entry.system] = contribution.repo
     }
   }
 
   /** The systems this sync published, for status / tests. */
   fun ownedSystems(): Set<String> = synchronized(owned) { owned.toSet() }
+
+  /**
+   * One nomination as the most recent pass saw it.
+   *
+   * [contribution] is the last document that read **cleanly**, kept across a failed read: a pass
+   * that cannot read the registry retires nothing, so the catalogs that document named are still
+   * served and still the registry's. [error] is the most recent read's problem, null when it
+   * succeeded — so a transient outage shows on `/status` without making the registry's catalogs
+   * look like nobody's.
+   */
+  data class LastRead(val contribution: ServeCatalogRegistry.Contribution?, val error: String?)
+
+  private val lastReads =
+    java.util.concurrent.ConcurrentHashMap<ServeCatalogRegistry.Nomination, LastRead>()
+
+  /** What the latest pass read for [nomination]; null before the first pass (or with no sync). */
+  fun lastRead(nomination: ServeCatalogRegistry.Nomination): LastRead? = lastReads[nomination]
 
   fun start() {
     if (intervalMillis <= 0 || repos.isEmpty()) return
@@ -120,7 +153,18 @@ class ServeCatalogRegistrySync(
     var readAny = false
     for (nomination in repos) {
       val repo = nomination.repo
-      val contribution = read(nomination) ?: continue
+      var problem: String? = null
+      val contribution = read(nomination) { problem = it }
+      if (contribution == null) {
+        lastReads.compute(nomination) { _, previous ->
+          LastRead(previous?.contribution, problem ?: "catalog registry $nomination: unreadable")
+        }
+        // This registry said nothing this pass, so everything it contributed stays listed: another
+        // registry reading cleanly must not turn this one's outage into a withdrawal.
+        listed += synchronized(ownerRepo) { ownerRepo.filterValues { it == repo }.keys.toList() }
+        continue
+      }
+      lastReads[nomination] = LastRead(contribution, null)
       readAny = true
       val known = tracked()
       for (entry in contribution.entries) {
@@ -151,6 +195,7 @@ class ServeCatalogRegistrySync(
         if (failure == null) {
           owned += entry.system
           publishedAs[entry.system] = fingerprint
+          ownerRepo[entry.system] = contribution.repo
           if (!registered) onLog("serve: catalog ${entry.system} imported from registry $repo")
         } else {
           publishedAs.remove(entry.system)
@@ -170,6 +215,7 @@ class ServeCatalogRegistrySync(
       retire(system)
       owned.remove(system)
       publishedAs.remove(system)
+      ownerRepo.remove(system)
       onLog("serve: catalog $system retired — no longer listed by any catalog registry")
     }
   }
@@ -177,4 +223,35 @@ class ServeCatalogRegistrySync(
   override fun close() {
     exec.shutdownNow()
   }
+}
+
+/**
+ * The `/status` row for one nomination: what the registry contributes **now**.
+ *
+ * [live] is the sync's latest read ([ServeCatalogRegistrySync.lastRead]) and wins when present; the
+ * boot read is the answer only before the first pass, or on a box that never syncs (refresh
+ * interval ≤ 0). Reporting the boot snapshot forever was the bug: a catalog the sync published
+ * after boot was missing from `systems`, and `publish-config-to-box.sh --prune` — which keeps
+ * exactly the registry's `systems` — retired it as stale.
+ *
+ * `systems` is the registry's whole nominated list from its last clean document, not the subset
+ * this box has managed to publish. The prune needs "what the registry nominates": an entry whose
+ * branch is not built yet is still the registry's, and one the operator's config also names is
+ * listed here as it always was (the config keeps it either way). If the latest read failed, the
+ * last clean document still stands — the sync retired nothing on that pass — and [error] says why.
+ */
+fun catalogRegistryStatus(
+  nomination: ServeCatalogRegistry.Nomination,
+  bootContribution: ServeCatalogRegistry.Contribution?,
+  bootProblem: String?,
+  live: ServeCatalogRegistrySync.LastRead?,
+): CatalogRegistryStatus {
+  val contribution = live?.contribution ?: bootContribution
+  return CatalogRegistryStatus(
+    repo = nomination.repo,
+    ref = nomination.ref,
+    catalogs = contribution?.entries?.size ?: 0,
+    systems = contribution?.entries?.map { it.system }.orEmpty(),
+    error = if (live != null) live.error else bootProblem,
+  )
 }

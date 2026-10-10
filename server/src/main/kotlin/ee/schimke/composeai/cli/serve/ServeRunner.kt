@@ -904,19 +904,20 @@ public class ServeRunner(
     get() = catalogRegistryBoot.mapNotNull { it.contribution }
 
   /**
-   * The nominations as `/status` reports them. Built from the same boot read, so the status surface
-   * cannot disagree with what the server actually loaded.
+   * The nominations as `/status` reports them: what each registry contributes NOW. The boot read
+   * until [sync] has read a nomination (or forever, when there is no sync), then the sync's latest
+   * read — see [catalogRegistryStatus] for why a boot snapshot was not enough.
    */
-  private val catalogRegistryStatuses: List<CatalogRegistryStatus>
-    get() = catalogRegistryBoot.map { boot ->
-      CatalogRegistryStatus(
-        repo = boot.nomination.repo,
-        ref = boot.nomination.ref,
-        catalogs = boot.contribution?.entries?.size ?: 0,
-        systems = boot.contribution?.entries?.map { it.system }.orEmpty(),
-        error = boot.problem,
-      )
-    }
+  private fun catalogRegistryStatuses(
+    sync: ServeCatalogRegistrySync?
+  ): List<CatalogRegistryStatus> = catalogRegistryBoot.map { boot ->
+    catalogRegistryStatus(
+      nomination = boot.nomination,
+      bootContribution = boot.contribution,
+      bootProblem = boot.problem,
+      live = sync?.lastRead(boot.nomination),
+    )
+  }
 
   /**
    * Read one registry document off the network. A seam so the sync and the boot fold-in share it.
@@ -4037,7 +4038,7 @@ public class ServeRunner(
         allowRenderTrusted = allowRenderTrusted,
         trustStoreConfigured = trustStorePath != null,
         catalogRefreshSeconds = catalogRefreshSeconds,
-        catalogRegistries = catalogRegistryStatuses,
+        catalogRegistries = { catalogRegistryStatuses(catalogRegistrySync) },
         acceptBundlesEnabled = acceptBundles,
         catalogAdmin = catalogAdmin,
         onboarding = onboarding,
@@ -4981,8 +4982,9 @@ public class ServeRunner(
     val sync =
       ServeCatalogRegistrySync(
         repos = catalogRegistryRepos,
-        read = { nomination ->
+        read = { nomination, onProblem ->
           ServeCatalogRegistry.fetch(nomination, ::fetchRegistryDocument) {
+            onProblem(it)
             System.err.println("serve: $it")
           }
         },

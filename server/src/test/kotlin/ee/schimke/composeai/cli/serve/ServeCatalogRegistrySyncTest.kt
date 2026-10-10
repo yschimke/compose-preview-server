@@ -27,15 +27,21 @@ class ServeCatalogRegistrySyncTest {
     val tracked = linkedSetOf<String>()
     val retired = mutableListOf<String>()
     var failWith: String? = null
+    /** What an unreadable document reports through `read`'s problem callback. */
+    var readProblem: String? = null
   }
+
+  private val nomination = ServeCatalogRegistry.Nomination("yschimke/compose-preview-imports")
 
   private fun syncOf(
     box: Box,
     document: () -> ServeCatalogRegistry.Contribution?,
   ): ServeCatalogRegistrySync =
     ServeCatalogRegistrySync(
-      repos = listOf(ServeCatalogRegistry.Nomination("yschimke/compose-preview-imports")),
-      read = { document() },
+      repos = listOf(nomination),
+      read = { _, onProblem ->
+        document().also { if (it == null) box.readProblem?.let(onProblem) }
+      },
       tracked = { box.tracked.toSet() },
       publish = { _, entry ->
         box.failWith ?: entry.system.also { box.tracked += it }.let { null }
@@ -106,6 +112,42 @@ class ServeCatalogRegistrySyncTest {
     // the box on the first GitHub hiccup.
     assertEquals(emptyList(), box.retired)
     assertEquals(setOf("a"), box.tracked)
+  }
+
+  @Test
+  fun `one registry failing while another reads cleanly retires nothing of the failed one`() {
+    val box = Box()
+    val other = "yschimke/other-imports"
+    var first: ServeCatalogRegistry.Contribution? = contributionOf("a")
+    val second =
+      ServeCatalogRegistry.normalize(
+        other,
+        ServeCatalogsConfig(catalogs = listOf(ServeCatalogsConfig.Entry(system = "b"))),
+      )
+    val sync =
+      ServeCatalogRegistrySync(
+        repos = listOf(nomination, ServeCatalogRegistry.Nomination(other)),
+        read = { n, _ -> if (n.repo == repo) first else second },
+        tracked = { box.tracked.toSet() },
+        publish = { _, entry -> entry.system.also { box.tracked += it }.let { null } },
+        retire = { system ->
+          box.tracked -= system
+          box.retired += system
+        },
+        intervalMillis = 0,
+        onLog = {},
+      )
+    sync.syncOnce()
+    assertEquals(setOf("a", "b"), box.tracked)
+
+    first = null
+    sync.syncOnce()
+    assertEquals(emptyList(), box.retired)
+    assertEquals(setOf("a", "b"), sync.ownedSystems())
+
+    first = contributionOf()
+    sync.syncOnce()
+    assertEquals(listOf("a"), box.retired)
   }
 
   @Test
@@ -281,5 +323,103 @@ class ServeCatalogRegistrySyncTest {
     box.failWith = null
     sync.syncOnce()
     assertEquals(setOf("a"), box.tracked)
+  }
+
+  /** The `/status` row for [nomination], as the server builds it from a boot read of [boot]. */
+  private fun statusOf(
+    sync: ServeCatalogRegistrySync,
+    boot: ServeCatalogRegistry.Contribution?,
+    bootProblem: String? = null,
+  ) = catalogRegistryStatus(nomination, boot, bootProblem, sync.lastRead(nomination))
+
+  @Test
+  fun `a catalog published by a pass after boot appears in the status systems`() {
+    // preview.coo.ee: the imports registry grew from 16 catalogs to 23 after boot, the sync served
+    // all 23, and /status.json kept reporting the boot 16. `publish-config-to-box.sh --prune` keeps
+    // exactly those `systems`, so it DELETEd the seven new ones on every config publish.
+    val box = Box()
+    val boot = contributionOf("a")
+    box.tracked += "a"
+    var doc = boot
+    val sync = syncOf(box) { doc }
+    sync.adopt(boot)
+
+    // Before the first pass the boot read is the answer.
+    assertEquals(listOf("a"), statusOf(sync, boot).systems)
+
+    doc = contributionOf("a", "compose-samples-jetsnack")
+    sync.syncOnce()
+
+    val status = statusOf(sync, boot)
+    assertEquals(setOf("a", "compose-samples-jetsnack"), box.tracked)
+    assertEquals(listOf("a", "compose-samples-jetsnack"), status.systems)
+    assertEquals(2, status.catalogs)
+    assertEquals(null, status.error)
+  }
+
+  @Test
+  fun `a catalog retired after boot leaves the status systems`() {
+    val box = Box()
+    val boot = contributionOf("a", "b")
+    box.tracked += listOf("a", "b")
+    var doc = boot
+    val sync = syncOf(box) { doc }
+    sync.adopt(boot)
+
+    doc = contributionOf("a")
+    sync.syncOnce()
+
+    assertEquals(listOf("b"), box.retired)
+    assertEquals(listOf("a"), statusOf(sync, boot).systems)
+  }
+
+  @Test
+  fun `a nominated entry whose branch is not built yet still counts as the registry's`() {
+    // The prune needs "what the registry nominates", not "what this box managed to publish": an
+    // entry that is not served yet is not on the box to be pruned, and the moment it is published
+    // it must already be covered, so there is no window in which it reads as stale.
+    val box = Box()
+    box.failWith = "could not fetch catalog.json"
+    val sync = syncOf(box) { contributionOf("a") }
+
+    sync.syncOnce()
+
+    assertEquals(emptySet(), sync.ownedSystems())
+    assertEquals(listOf("a"), statusOf(sync, boot = null).systems)
+  }
+
+  @Test
+  fun `a failed re-read reports its error and keeps the last clean document`() {
+    val box = Box()
+    var readable = true
+    val sync = syncOf(box) { if (readable) contributionOf("a", "b") else null }
+    sync.syncOnce()
+
+    readable = false
+    box.readProblem = "catalog registry yschimke/compose-preview-imports: timed out"
+    sync.syncOnce()
+
+    // The sync retired nothing on the failed pass, so both catalogs are still served and still
+    // the registry's — dropping them from `systems` here would have the prune delete them.
+    val status = statusOf(sync, boot = null)
+    assertEquals(listOf("a", "b"), status.systems)
+    assertEquals("catalog registry yschimke/compose-preview-imports: timed out", status.error)
+
+    readable = true
+    sync.syncOnce()
+    assertEquals(null, statusOf(sync, boot = null).error)
+  }
+
+  @Test
+  fun `a registry unreadable at boot and read by a later pass reports the pass`() {
+    val box = Box()
+    val sync = syncOf(box) { contributionOf("a") }
+    assertEquals("boot failed", statusOf(sync, boot = null, bootProblem = "boot failed").error)
+
+    sync.syncOnce()
+
+    val status = statusOf(sync, boot = null, bootProblem = "boot failed")
+    assertEquals(null, status.error)
+    assertEquals(listOf("a"), status.systems)
   }
 }
