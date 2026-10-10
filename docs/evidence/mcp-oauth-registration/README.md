@@ -14,5 +14,6 @@ shared-directory registrations, capacity, corrupt state and file permissions.
 
 The existing deployment keeps `/config` on its `preview_config` volume, so the
 runner's `/config/mcp-oauth/clients.json` survives container replacements.
-Previously lost registrations cannot be reconstructed: disconnect/remove and
+Read-only config directories use writable home state; read-only config files
+on the writable volume keep state on the volume. Previously lost registrations cannot be reconstructed: disconnect/remove and
 re-add the app once to register again. Approval and token state stays ephemeral.

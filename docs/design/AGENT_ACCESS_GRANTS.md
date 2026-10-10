@@ -502,7 +502,8 @@ will never see.
 
 **Registrations survive restarts; approvals do not.** Public OAuth client IDs and their registered
 redirect URIs live in `mcp-oauth/clients.json` beside the catalogs configuration, or in
-`~/.compose-preview/mcp-oauth/clients.json` when no catalogs file is configured. Keep this directory
+`~/.compose-preview/mcp-oauth/clients.json` when no catalogs file is configured or its directory
+is read-only. A read-only catalogs file on a writable config volume still uses that volume. Keep this directory
 on persistent storage. Overlapping processes sharing the directory coordinate through a file lock
 and atomic replacement. Registration expires after 30 days without a client lookup; use renews that
 idle window. Anonymous registration remains bounded at 256 clients.

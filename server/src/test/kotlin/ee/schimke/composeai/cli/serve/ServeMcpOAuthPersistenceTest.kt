@@ -117,6 +117,59 @@ class ServeMcpOAuthPersistenceTest {
     }
 
   @Test
+  fun `read only catalog directory uses durable writable home state`() = withRegistry { file ->
+    val catalogRoot = Files.createDirectories(file.parent.resolve("catalogs"))
+    val catalogsFile = catalogRoot.resolve("catalogs.default.json")
+    Files.writeString(catalogsFile, "{}")
+    val view =
+      Files.getFileAttributeView(
+        catalogRoot,
+        java.nio.file.attribute.PosixFileAttributeView::class.java,
+      ) ?: return@withRegistry
+    try {
+      view.setPermissions(java.nio.file.attribute.PosixFilePermissions.fromString("r-x------"))
+      org.junit.jupiter.api.Assumptions.assumeFalse(
+        Files.isWritable(catalogRoot),
+        "Test process must enforce directory write permissions",
+      )
+      val homeRoot = file.parent.resolve("home/.compose-preview")
+      val selected = ServeMcpOAuthClients.defaultFile(catalogsFile, homeRoot)
+      assertEquals(homeRoot.resolve("mcp-oauth/clients.json"), selected)
+      val client =
+        assertNotNull(
+          ServeMcpOAuth.Store(selected).register("host", listOf("https://host.example/cb"))
+        )
+      assertNotNull(
+        ServeMcpOAuth.Store(ServeMcpOAuthClients.defaultFile(catalogsFile, homeRoot))
+          .client(client.clientId)
+      )
+      assertFalse(Files.exists(catalogRoot.resolve("mcp-oauth")))
+    } finally {
+      view.setPermissions(java.nio.file.attribute.PosixFilePermissions.fromString("rwx------"))
+    }
+  }
+
+  @Test
+  fun `read only catalog file in writable config volume keeps state on that volume`() =
+    withRegistry { file ->
+      val root = Files.createDirectories(file.parent.resolve("config"))
+      val catalogsFile = root.resolve("catalogs.json")
+      Files.writeString(catalogsFile, "{}")
+      val view =
+        Files.getFileAttributeView(
+          catalogsFile,
+          java.nio.file.attribute.PosixFileAttributeView::class.java,
+        ) ?: return@withRegistry
+      view.setPermissions(java.nio.file.attribute.PosixFilePermissions.fromString("r--------"))
+      val selected = ServeMcpOAuthClients.defaultFile(catalogsFile, file.parent.resolve("home"))
+      assertEquals(root.resolve("mcp-oauth/clients.json"), selected)
+      assertNotNull(
+        ServeMcpOAuth.Store(selected).register("host", listOf("https://host.example/cb"))
+      )
+      assertTrue(Files.exists(selected))
+    }
+
+  @Test
   fun `corrupt state or unwritable directory does not silently fall back to memory`() =
     withRegistry { file ->
       Files.createDirectories(file.parent)

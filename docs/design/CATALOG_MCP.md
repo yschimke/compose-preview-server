@@ -131,7 +131,8 @@ An app host's **connection expired** notice blocks delivery before the tool runs
 host's reconnect action. If the authorization browser says `Unknown client_id`, remove/disconnect
 and add the app again to trigger fresh registration; a server device grant cannot restore that ID.
 Public OAuth registrations now persist beside the catalogs config in `mcp-oauth/clients.json`
-(fallback `~/.compose-preview/mcp-oauth/clients.json`), independently of grants. They expire after
+(fallback `~/.compose-preview/mcp-oauth/clients.json` when config/state storage is read-only or
+absent), independently of grants. A read-only config file on a writable volume still uses that volume. They expire after
 30 idle days, renewed by client lookup. Keep the registry directory on a persistent volume.
 Unknown registrations cannot be reconstructed from authorization URLs or redirected to an
 unregistered callback. Hosted reviews need no local checkout or Gradle environment to recover.

@@ -120,6 +120,21 @@ internal class ServeMcpOAuthClients(file: Path?, private val clock: () -> Long) 
   }
 
   companion object {
+    /** Config may be a read-only bind mount or the image's baked-in fallback. */
+    fun defaultFile(catalogsFile: Path?, fallbackRoot: Path): Path {
+      val root = catalogsFile?.toAbsolutePath()?.normalize()?.parent
+      val candidate = root?.resolve("mcp-oauth/clients.json")
+      if (root != null && candidate != null && Files.isDirectory(root) && Files.isWritable(root)) {
+        val state = candidate.parent
+        if (
+          (!Files.exists(state) || (Files.isDirectory(state) && Files.isWritable(state))) &&
+            (!Files.exists(candidate) || Files.isWritable(candidate))
+        )
+          return candidate
+      }
+      return fallbackRoot.toAbsolutePath().normalize().resolve("mcp-oauth/clients.json")
+    }
+
     private const val MAX_BYTES = 8 * 1024 * 1024L
     // JVM locks prevent overlapping FileChannel locks between stores in the same process.
     private val locks = ConcurrentHashMap<Path, Any>()
