@@ -3,6 +3,7 @@ package ee.schimke.composeai.cli.serve
 import ee.schimke.composeai.agentgrants.AgentGrantCapability
 import ee.schimke.composeai.agentgrants.AgentGrantScope
 import java.net.URI
+import java.nio.file.Path
 import java.security.MessageDigest
 import java.security.SecureRandom
 import java.util.Base64
@@ -81,20 +82,11 @@ object ServeMcpOAuth {
   const val AUTHORIZATION_TTL_SECONDS = ServeAgentGrantStore.DEFAULT_REQUEST_TTL_SECONDS
 
   /**
-   * How long a dynamic registration survives.
-   *
-   * A TTL rather than "forever", and the reason is availability rather than tidiness. Registration
-   * is anonymous and [MAX_REGISTERED_CLIENTS] is a hard cap, so without expiry the cap is a
-   * countdown that *ordinary use* runs down: every client that ever registers holds its slot for
-   * the life of the process, and once 256 have accumulated `/oauth/register` answers `429` forever
-   * — telling every future caller to "try again shortly" when nothing will ever free a slot.
-   *
-   * A day is far longer than any exchange needs and comfortably outlasts the longest grant this
-   * server will mint, so a client re-authorizing after its token expires still finds its
-   * registration. One that has genuinely aged out is told to register again, which costs it one
-   * request.
+   * Idle lifetime of a public client registration, independent of approval and token lifetimes.
+   * Successful client lookups renew it. Anonymous registration is bounded, so unused clients must
+   * eventually release their slots; one-day exchange expiry broke clients that cache their IDs.
    */
-  const val CLIENT_TTL_SECONDS = 86_400L
+  const val CLIENT_TTL_SECONDS = 30 * 86_400L
 
   /** Bound on both maps. Anonymous callers drive registration and authorization alike. */
   const val MAX_PENDING_AUTHORIZATIONS = 256
@@ -208,13 +200,16 @@ object ServeMcpOAuth {
   // ---------------------------------------------------------------- clients
 
   /** A client that registered itself. Public, so the id is a handle rather than a credential. */
+  @Serializable
   data class RegisteredClient(
     val clientId: String,
     val clientName: String,
     val redirectUris: List<String>,
     val issuedAtMillis: Long,
+    val lastUsedAtMillis: Long = issuedAtMillis,
   ) {
-    fun isExpired(nowMillis: Long): Boolean = nowMillis - issuedAtMillis > CLIENT_TTL_SECONDS * 1000
+    fun isExpired(nowMillis: Long): Boolean =
+      nowMillis - lastUsedAtMillis > CLIENT_TTL_SECONDS * 1000
   }
 
   /**
@@ -257,17 +252,15 @@ object ServeMcpOAuth {
   // ----------------------------------------------------------------- store
 
   /**
-   * The two maps this façade owns, and nothing else. Grants, scopes, ceilings and revocation all
-   * stay in [ServeAgentGrantStore]; what lives here is the correspondence between an OAuth exchange
-   * and a grant request, which is meaningless outside the exchange and dies with it.
-   *
-   * Deliberately in memory, like the grant store itself: a restart drops every grant, so an
-   * authorization that outlived one would redeem to a token that no longer exists. Losing both
-   * together is the honest behaviour, and the client's answer is the same either way — start over.
+   * Public client metadata survives restarts when a registry file is configured. Authorization
+   * codes and refresh bindings stay in memory: the grants they refer to do not survive a restart.
    */
-  class Store(private val clock: () -> Long = System::currentTimeMillis) {
+  class Store(
+    registeredClientsFile: Path? = null,
+    private val clock: () -> Long = System::currentTimeMillis,
+  ) {
 
-    private val clients = ConcurrentHashMap<String, RegisteredClient>()
+    private val clients = ServeMcpOAuthClients(registeredClientsFile, clock)
     private val refreshTokens = ConcurrentHashMap<String, RefreshBinding>()
     private val pending = ConcurrentHashMap<String, PendingAuthorization>()
     /** Request id → code, so the decision handler can find the return leg by what it holds. */
@@ -275,20 +268,10 @@ object ServeMcpOAuth {
 
     fun register(name: String, redirectUris: List<String>): RegisteredClient? {
       purge()
-      if (clients.size >= MAX_REGISTERED_CLIENTS) return null
-      val client =
-        RegisteredClient(
-          clientId = randomId(),
-          clientName = ServeAgentGrantStore.sanitizeLabel(name),
-          redirectUris = redirectUris,
-          issuedAtMillis = clock(),
-        )
-      clients[client.clientId] = client
-      return client
+      return clients.register(name, redirectUris)
     }
 
-    fun client(clientId: String?): RegisteredClient? =
-      clientId?.let { clients[it] }?.takeIf { !it.isExpired(clock()) }
+    fun client(clientId: String?): RegisteredClient? = clients.client(clientId)
 
     fun open(
       requestId: String,
@@ -347,7 +330,7 @@ object ServeMcpOAuth {
       }
       // Sweeping this map is what keeps MAX_REGISTERED_CLIENTS a bound on concurrent use rather
       // than a lifetime quota; see CLIENT_TTL_SECONDS.
-      clients.entries.removeIf { (_, client) -> client.isExpired(now) }
+      clients.purge()
     }
 
     /**
@@ -407,7 +390,7 @@ object ServeMcpOAuth {
 
     fun pendingCount(): Int = pending.size
 
-    fun clientCount(): Int = clients.size
+    fun clientCount(): Int = clients.count()
   }
 
   // ------------------------------------------------------------- decisions
@@ -440,8 +423,8 @@ object ServeMcpOAuth {
     if (client == null) {
       return AuthorizeRejection.Unredirectable(
         "invalid_client",
-        "Unknown client_id. Register at $REGISTER_PATH first; a server restart drops every " +
-          "registration, so re-register rather than reusing an id from a previous run.",
+        "Unknown or expired client_id. Register at $REGISTER_PATH first. Disconnect or remove " +
+          "the MCP app, then reconnect it to register a new client; retrying this old id cannot work.",
       )
     }
     if (redirectUri.isNullOrBlank()) {
@@ -669,7 +652,7 @@ object ServeMcpOAuth {
 
   private val random = SecureRandom()
 
-  private fun randomId(): String {
+  internal fun randomId(): String {
     val bytes = ByteArray(16)
     random.nextBytes(bytes)
     return Base64.getUrlEncoder().withoutPadding().encodeToString(bytes)

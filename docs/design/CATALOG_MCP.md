@@ -126,7 +126,15 @@ header, or the OAuth flow below.
 This is also the recovery path when a token stops working mid-task. Grants live in memory
 (`ServeAgentGrantStore`: *"a restart drops every request and every grant"*), so a redeploy of the
 host invalidates every bearer regardless of its remaining TTL. A client that meets a sudden 401 asks
-for a new grant the same way it asked for the first.
+for a new grant the same way it asked for the first, provided the tool connection still works.
+An app host's **connection expired** notice blocks delivery before the tool runs and needs the
+host's reconnect action. If the authorization browser says `Unknown client_id`, remove/disconnect
+and add the app again to trigger fresh registration; a server device grant cannot restore that ID.
+Public OAuth registrations now persist beside the catalogs config in `mcp-oauth/clients.json`
+(fallback `~/.compose-preview/mcp-oauth/clients.json`), independently of grants. They expire after
+30 idle days, renewed by client lookup. Keep the registry directory on a persistent volume.
+Unknown registrations cannot be reconstructed from authorization URLs or redirected to an
+unregistered callback. Hosted reviews need no local checkout or Gradle environment to recover.
 
 ## MCP surface
 

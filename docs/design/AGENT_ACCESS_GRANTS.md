@@ -500,12 +500,21 @@ OAuth leg adds is a note that this particular request has somewhere to return to
 An `access_denied` goes back to the client's redirect URI rather than stranding it on a page it
 will never see.
 
-**No refresh tokens, and that is the point.** A grant is short-lived because re-authorization is a
-human decision, and a silent renewal would launder exactly the property the rest of this document
-is built around. When a token expires or a restart drops it, the client meets a `401`, reads the
-`resource_metadata` on it, and walks the flow again — a person approves, once, in a browser. That
-costs a click per rotation and buys the guarantee that no credential outlives a decision someone
-actually made.
+**Registrations survive restarts; approvals do not.** Public OAuth client IDs and their registered
+redirect URIs live in `mcp-oauth/clients.json` beside the catalogs configuration, or in
+`~/.compose-preview/mcp-oauth/clients.json` when no catalogs file is configured. Keep this directory
+on persistent storage. Overlapping processes sharing the directory coordinate through a file lock
+and atomic replacement. Registration expires after 30 days without a client lookup; use renews that
+idle window. Anonymous registration remains bounded at 256 clients.
+
+Grants, pending authorizations and refresh bindings remain in memory. Refresh tokens rotate within
+the approved grant's lifetime; they cannot extend the human decision. After a restart the client
+can reuse its registered ID and start a new approval, but cannot redeem an old code or refresh token.
+
+If an older deployment already lost a registration, the browser cannot safely reconstruct it from
+an authorization URL. Disconnect or remove the MCP app in the host and reconnect it to force a new
+`POST /oauth/register`. Retrying authorization with the missing ID cannot work. The server rejects
+unknown IDs and unregistered redirects locally rather than redirecting an error to an unsafe URL.
 
 **Nothing is configured client-side.** Registration is dynamic and the token is discovered, so a
 session never edits an `mcp.json`, never holds a pasted secret, and never needs to be talked into

@@ -145,6 +145,68 @@ class ServeMcpOAuthRoutingTest {
     registry.close()
   }
 
+  @Test
+  fun `cached client can authorize after HTTP server restart`() {
+    val directory = Files.createTempDirectory("oauth-http-restart-").toFile()
+    val file = File(directory, "clients.json")
+    fun start() =
+      ServeHttpServer(
+          host = "127.0.0.1",
+          requestedPort = 0,
+          token = operatorToken,
+          sessions = registry,
+          defaultSessionId = "demo",
+          agentGrants =
+            ServeAgentGrantStore(maxScope = AgentGrantScope.PLAYGROUND, maxGrantTtlSeconds = 3600),
+          mcpOAuthClientsFile = file,
+        )
+        .also { it.start() }
+    try {
+      val first = start()
+      val id =
+        try {
+          val request =
+            Request.Builder()
+              .url("http://127.0.0.1:${first.port}${ServeMcpOAuth.REGISTER_PATH}")
+              .post(
+                """{"client_name":"cached host","redirect_uris":["$redirectUri"]}"""
+                  .toRequestBody("application/json".toMediaType())
+              )
+              .build()
+          client.newCall(request).execute().use { response ->
+            assertEquals(201, response.code)
+            str(response.body.string(), "client_id")
+          }
+        } finally {
+          first.stop()
+        }
+      val second = start()
+      try {
+        val authorize =
+          "http://127.0.0.1:${second.port}${ServeMcpOAuth.AUTHORIZE_PATH}" +
+            "?response_type=code&client_id=$id&redirect_uri=$redirectUri" +
+            "&code_challenge=$challenge&code_challenge_method=S256"
+        client.newCall(Request.Builder().url(authorize).build()).execute().use { response ->
+          assertEquals(302, response.code)
+          assertTrue(assertNotNull(response.header("Location")).contains("/agent-access/"))
+        }
+        client
+          .newCall(
+            Request.Builder().url(authorize.replace(redirectUri, "https://evil.example/cb")).build()
+          )
+          .execute()
+          .use { response ->
+            assertEquals(400, response.code)
+            assertNull(response.header("Location"))
+          }
+      } finally {
+        second.stop()
+      }
+    } finally {
+      directory.deleteRecursively()
+    }
+  }
+
   // ------------------------------------------------------------- discovery
 
   /**

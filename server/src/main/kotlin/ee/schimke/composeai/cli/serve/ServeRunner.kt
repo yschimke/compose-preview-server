@@ -4110,6 +4110,13 @@ public class ServeRunner(
             }
           },
         agentGrants = agentGrantStore,
+        mcpOAuthClientsFile =
+          agentGrantStore?.let {
+            val stateRoot =
+              catalogsFilePath?.let(::File)?.absoluteFile?.parentFile
+                ?: File(System.getProperty("user.home"), ".compose-preview")
+            stateRoot.resolve("mcp-oauth/clients.json")
+          },
         agentGrantLimiter = agentGrantStore?.let { buildAgentGrantRateLimiter() },
         catalogMcpEnabled = catalogMcp,
         machineAuthorization = machineAuthorization,
