@@ -5226,11 +5226,62 @@ class ServeHttpServer(
   private suspend fun RoutingContext.handleDesignReferenceAsset(sessionInPath: Boolean) {
     if (rejectBadToken() || rejectMalformedPin() || rejectMalformedGeneration()) return
     val sessionId = selectedSessionId(sessionInPath)
-    val referenceId = call.parameters["name"]?.removeSuffix(".png").orEmpty()
+    val name = call.parameters["name"].orEmpty()
+    val uid = name.endsWith(".uid") || name.endsWith(".html")
+    val referenceId = name.substringBeforeLast('.')
     val requestedPin =
       ServeCatalogRevision.normalize(call.request.queryParameters[ServeCatalogRevision.PARAM])
     withLeasedSession(sessionId, onMissing = { call.respond(HttpStatusCode.NotFound) }) { renderHost
       ->
+      if (uid) {
+        // Never silently open today's design under a historical comparison. The source-commit
+        // link remains available; serving historical documents needs the historical manifest too.
+        if (requestedPin != null || staleGeneration(renderHost) != null) {
+          call.respondText(
+            "This design snapshot is no longer the current publish. Open its commit-pinned .uid source.",
+            status = HttpStatusCode.Conflict,
+          )
+          return@withLeasedSession
+        }
+        val snapshot = catalogBundleHost(renderHost)?.uidReference(referenceId)
+        if (snapshot == null) {
+          call.respond(HttpStatusCode.NotFound)
+          return@withLeasedSession
+        }
+        val (reference, bytes) = snapshot
+        val expected = call.request.queryParameters["sha"]
+        if (
+          (name.endsWith(".html") || expected != null) &&
+            expected != reference.source.attributes["documentSha256"]
+        ) {
+          call.respondText(
+            "This design reference is unpinned or has changed. Reopen the comparison to review the current publish.",
+            status = HttpStatusCode.Conflict,
+          )
+          return@withLeasedSession
+        }
+        call.response.headers.append(HttpHeaders.CacheControl, "no-store")
+        if (name.endsWith(".uid")) call.respondBytes(bytes, ContentType.Application.Json)
+        else
+          call.respondText(
+            ServeUidReference.page(
+              reference,
+              bytes,
+              if (sessionInPath) "/${WebEscaping.urlEncodeSegment(sessionId.orEmpty())}" else "",
+              catalogBundleHost(renderHost)?.catalogSource?.let { source ->
+                val preview = renderHost.previews.firstOrNull { it.id == reference.previewId }
+                ServeUrls.githubBlobUrl(
+                  source.repo,
+                  source.ref,
+                  preview?.sourceModule ?: source.module,
+                  preview?.sourceFile,
+                )
+              },
+            ),
+            ContentType.Text.Html,
+          )
+        return@withLeasedSession
+      }
       // A reference is republished with the catalog, so this lane reads the branch for the same two
       // reasons the render lane does: an explicit `at=` pin, and a `gen=` naming a publish this
       // host is no longer serving ([ServeCacheGeneration]). The second is what keeps a comparison
@@ -12262,7 +12313,10 @@ class ServeHttpServer(
           // The Figma node this preview is specified by, when the catalog publishes a Figma-backed
           // design reference for it. Resolved from data the catalog already carries — nothing is
           // fetched from Figma, here or anywhere else in serve.
-          figmaSpec = ServeFigmaSpec.of(renderHost.designReferencesFor(preview.id)),
+          figmaSpec =
+            ServeUidReference.spec(renderHost.designReferencesFor(preview.id), basePath).takeIf {
+              revisions.pinned == null
+            } ?: ServeFigmaSpec.of(renderHost.designReferencesFor(preview.id)),
           // …and the spec itself, as a lane the viewer can put on the stage beside the players.
           // First reference, the same precedence [ServeFigmaSpec] uses: a preview with several has
           // one canonical spec, and the manifest's order is the producer's own. Absent for every

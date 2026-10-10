@@ -1,0 +1,190 @@
+{
+  "results": [
+    {
+      "id": "inbox-412-list-light",
+      "score": "100.0% structural match \u00b7 0.00% pixels changed",
+      "referenceSha256": "d7f780415bba69886272c23a994c9c2f22edba94ed07f6cde21c0c33634c537d",
+      "documentSha256": "e99a9db762f0ba1b42bed5fda82ef32ac2416cf54e30e93f4744c31cccd63283",
+      "candidateSha256": "d7f780415bba69886272c23a994c9c2f22edba94ed07f6cde21c0c33634c537d",
+      "pixelWidth": 824,
+      "pixelHeight": 1440
+    },
+    {
+      "id": "inbox-412-detail-light",
+      "score": "100.0% structural match \u00b7 1.67% pixels changed",
+      "referenceSha256": "4f2b7363640ddae41a32bbbfbf18c13be86a5d9901411878566fd3cb8d9fde72",
+      "documentSha256": "596da23d93571f3db65e075d888c13e1a0e7dfa195fbeb170f5e265b46b85dc6",
+      "candidateSha256": "9141250cc840e8c3d0e7d218ddc89a7f8d39a7eeb367edf98f90d6de84eab428",
+      "pixelWidth": 824,
+      "pixelHeight": 1440
+    },
+    {
+      "id": "inbox-412-list-dark",
+      "score": "100.0% structural match \u00b7 0.00% pixels changed",
+      "referenceSha256": "0cf93187a65ad0d97fe17edd065c3c9093232851689456f1a4a38ca8d0382d2d",
+      "documentSha256": "83bee5f1f2b89cb61b87839816a73371a640c5547bbdd5b5a49907b244859c9b",
+      "candidateSha256": "0cf93187a65ad0d97fe17edd065c3c9093232851689456f1a4a38ca8d0382d2d",
+      "pixelWidth": 824,
+      "pixelHeight": 1440
+    },
+    {
+      "id": "inbox-412-detail-dark",
+      "score": "100.0% structural match \u00b7 1.69% pixels changed",
+      "referenceSha256": "e4efcd65e1f44ba6daf903896349f5b8d03b17b92b8d8da0d7392fdf0a8ae2b4",
+      "documentSha256": "dd4da900ce69d2fa38e72aa8c275af3385c0b877cad5e951214986d1858a2257",
+      "candidateSha256": "1a8d5dbd59540ba0f8a2f2417fdea7d5358a8544fd3713dab49c0bf822899cc0",
+      "pixelWidth": 824,
+      "pixelHeight": 1440
+    },
+    {
+      "id": "inbox-700-list-light",
+      "score": "100.0% structural match \u00b7 0.00% pixels changed",
+      "referenceSha256": "475e0efdef7ded1790a778a3e51b56be3e8cd32e6cd616f8f31b5332b75ae360",
+      "documentSha256": "9af3ad89d49e476fdd339f96b75b7535e02e6f17b2b648dadca28e5daf490967",
+      "candidateSha256": "475e0efdef7ded1790a778a3e51b56be3e8cd32e6cd616f8f31b5332b75ae360",
+      "pixelWidth": 1400,
+      "pixelHeight": 1440
+    },
+    {
+      "id": "inbox-700-detail-light",
+      "score": "100.0% structural match \u00b7 0.98% pixels changed",
+      "referenceSha256": "68e0f865d5482ca6b130f140f5da76aa6fdba6c9fd11ba7822202ac70048521c",
+      "documentSha256": "d176d1e50a59e86751f88f74b1903b59279b8f3d7c994fbc6a299d9bc493cbc6",
+      "candidateSha256": "1ff1b07558af870adba957c5915abaf3fea7b85849446f8ab52138d90a039d1a",
+      "pixelWidth": 1400,
+      "pixelHeight": 1440
+    },
+    {
+      "id": "inbox-700-list-dark",
+      "score": "100.0% structural match \u00b7 0.00% pixels changed",
+      "referenceSha256": "6ae6b2789b43104f8cc28c9ae84abff5481fef5f021565bd994ec713a0e3d39a",
+      "documentSha256": "e9e211ec64eb1b1d141bd9f0f38b1d82c4386ff92298a362358a0e573923c269",
+      "candidateSha256": "6ae6b2789b43104f8cc28c9ae84abff5481fef5f021565bd994ec713a0e3d39a",
+      "pixelWidth": 1400,
+      "pixelHeight": 1440
+    },
+    {
+      "id": "inbox-700-detail-dark",
+      "score": "100.0% structural match \u00b7 1.00% pixels changed",
+      "referenceSha256": "6e0fafb58fe7f204f0f43e6537546fe62bcda7f904cfea1fae849250f18e80d7",
+      "documentSha256": "5022dd92dc89e0cd288b11b65231df5621ddb4dfa4946c750cd8463d17d75e63",
+      "candidateSha256": "ba83d9655ac28a0d43988a9f1f8d6b826823e4dc69851ac45fed0751a1186c83",
+      "pixelWidth": 1400,
+      "pixelHeight": 1440
+    },
+    {
+      "id": "inbox-839-list-light",
+      "score": "100.0% structural match \u00b7 0.00% pixels changed",
+      "referenceSha256": "98f232397b06f347673a667aa99dbb3b5762b3f8096d0b2b60ac5b28f3cb6aa1",
+      "documentSha256": "7fc729a07e28693838c76a488e40451d8427d59b87e8a9d7a05f68b24f2500e9",
+      "candidateSha256": "98f232397b06f347673a667aa99dbb3b5762b3f8096d0b2b60ac5b28f3cb6aa1",
+      "pixelWidth": 1678,
+      "pixelHeight": 1440
+    },
+    {
+      "id": "inbox-839-detail-light",
+      "score": "100.0% structural match \u00b7 0.82% pixels changed",
+      "referenceSha256": "ba71d855be54f436e97380973f9fee4e4bf741fd474ecef1d3723c7aef0d287c",
+      "documentSha256": "2cffa78443d224cd1e7d65bca6fa1aebdf57f0f80b1dea41aea380ee5e62dce2",
+      "candidateSha256": "0de66101feaee3ff282c447de4dac326905097122b6903cb6e651e74ebf5dba3",
+      "pixelWidth": 1678,
+      "pixelHeight": 1440
+    },
+    {
+      "id": "inbox-839-list-dark",
+      "score": "100.0% structural match \u00b7 0.00% pixels changed",
+      "referenceSha256": "a0314b244d63c95658c93fd4f13bc7b941ad222b46cd8caed8a23d7e7cc023c4",
+      "documentSha256": "ce20a9e3a7103976aca531007c901e45c7c6f314a3ab08f7b956e65e982594f0",
+      "candidateSha256": "a0314b244d63c95658c93fd4f13bc7b941ad222b46cd8caed8a23d7e7cc023c4",
+      "pixelWidth": 1678,
+      "pixelHeight": 1440
+    },
+    {
+      "id": "inbox-839-detail-dark",
+      "score": "100.0% structural match \u00b7 0.83% pixels changed",
+      "referenceSha256": "e5d398640069edde9d5892fcf70a908c6da714a402c78e4f5f439e9e9430d044",
+      "documentSha256": "9150bad29e2b6941873bd9498a0928b80da3736288a51059466027ee214a3171",
+      "candidateSha256": "80029d9b14f8fac0419e0153431a1a99384521e9b0df9272a9ac50cef27ab6c1",
+      "pixelWidth": 1678,
+      "pixelHeight": 1440
+    },
+    {
+      "id": "inbox-840-list-light",
+      "score": "100.0% structural match \u00b7 0.00% pixels changed",
+      "referenceSha256": "53303c1f7628c9b228a3b9ceb636c37541aca2f89c07e22a334271f7c79dc3eb",
+      "documentSha256": "71211fedf2878e5f5250381a5203a003903985089478812f0ffec30cc05e7048",
+      "candidateSha256": "53303c1f7628c9b228a3b9ceb636c37541aca2f89c07e22a334271f7c79dc3eb",
+      "pixelWidth": 1680,
+      "pixelHeight": 1440
+    },
+    {
+      "id": "inbox-840-detail-light",
+      "score": "100.0% structural match \u00b7 0.82% pixels changed",
+      "referenceSha256": "53303c1f7628c9b228a3b9ceb636c37541aca2f89c07e22a334271f7c79dc3eb",
+      "documentSha256": "7f2fe112d545fb17ab7be77f01680bc54ce45e3275b962970e0aa116bb3ba1ad",
+      "candidateSha256": "b7c6f3e0eee035cb420665fd4e5dc743d51d76799dcff7e63e8d5ab9791d6d3c",
+      "pixelWidth": 1680,
+      "pixelHeight": 1440
+    },
+    {
+      "id": "inbox-840-list-dark",
+      "score": "100.0% structural match \u00b7 0.00% pixels changed",
+      "referenceSha256": "442b4d2f467515777968cc91e034cecb6a022c735b93f3130b6541271e48757b",
+      "documentSha256": "8de4eb10b9c6bff184ad687cbf0663e843d3baf94d6dba6ccfc1a47350a8d5c3",
+      "candidateSha256": "442b4d2f467515777968cc91e034cecb6a022c735b93f3130b6541271e48757b",
+      "pixelWidth": 1680,
+      "pixelHeight": 1440
+    },
+    {
+      "id": "inbox-840-detail-dark",
+      "score": "100.0% structural match \u00b7 0.83% pixels changed",
+      "referenceSha256": "442b4d2f467515777968cc91e034cecb6a022c735b93f3130b6541271e48757b",
+      "documentSha256": "a40a53d30fdc90bee19b91736ea3d443e28fa5ee807f2adb07e47fbd5446c8ce",
+      "candidateSha256": "ce157ef1d820f083815fbbb7235303d16d8fe74b12bc5a8f89e2eaa33197f549",
+      "pixelWidth": 1680,
+      "pixelHeight": 1440
+    },
+    {
+      "id": "inbox-960-list-light",
+      "score": "100.0% structural match \u00b7 0.00% pixels changed",
+      "referenceSha256": "582ad805bb3204f97e285617c28d47634e3b414c556e25d4061ca16085f04ee8",
+      "documentSha256": "772cb0102f4d5cc139a709b22ac2004336d9aa862b88a696fe1a33bf9e19474a",
+      "candidateSha256": "582ad805bb3204f97e285617c28d47634e3b414c556e25d4061ca16085f04ee8",
+      "pixelWidth": 1920,
+      "pixelHeight": 1440
+    },
+    {
+      "id": "inbox-960-detail-light",
+      "score": "100.0% structural match \u00b7 0.72% pixels changed",
+      "referenceSha256": "582ad805bb3204f97e285617c28d47634e3b414c556e25d4061ca16085f04ee8",
+      "documentSha256": "ed49372e942266e2217ff0d002ca693e7e63fd02c3236a655197903413a0bc3c",
+      "candidateSha256": "b63275db904121342dc5bde07359a46e53d61d74543795fd2a7160b55115d26c",
+      "pixelWidth": 1920,
+      "pixelHeight": 1440
+    },
+    {
+      "id": "inbox-960-list-dark",
+      "score": "100.0% structural match \u00b7 0.00% pixels changed",
+      "referenceSha256": "1cbac9024ec53571242f2b0046a7990fae5b59f5cd88e1dca291bbd997123288",
+      "documentSha256": "1b5b666d33287da1bc01a8dfebc27628ea550d3d3984ea9ebbdd9741e1d8f167",
+      "candidateSha256": "1cbac9024ec53571242f2b0046a7990fae5b59f5cd88e1dca291bbd997123288",
+      "pixelWidth": 1920,
+      "pixelHeight": 1440
+    },
+    {
+      "id": "inbox-960-detail-dark",
+      "score": "100.0% structural match \u00b7 0.73% pixels changed",
+      "referenceSha256": "1cbac9024ec53571242f2b0046a7990fae5b59f5cd88e1dca291bbd997123288",
+      "documentSha256": "a9987248e1b73932270f8308e7b64bfaae4f81872c40ea0d9f8aa4d0d59dafb7",
+      "candidateSha256": "5230568a611145039cca39cd59ecddd1270b3e2d2b2dd9bda20fa45a317561bc",
+      "pixelWidth": 1920,
+      "pixelHeight": 1440
+    }
+  ],
+  "code": "https://github.com/yschimke/m3-catalog/blob/7790f6e/adaptive-uid-pilot/src/main/kotlin/ee/schimke/adaptivepilot/AdaptiveInbox.kt",
+  "download": "adaptive-inbox.uid",
+  "errors": [],
+  "sourceRevision": "7790f6e22749e98541279cb7c4f9e0db860ae9f0",
+  "rendererBundleSha256": "0fa2df75d3e01909109c2e1525075d242b791061ca06d13e912bab514c8db56c",
+  "notes": "Browser scorer results are whole-frame scores. Detail captures have an untriaged Back-button appearance difference. Native UID and app renders are independent."
+}

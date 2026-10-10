@@ -105,6 +105,7 @@ const BUNDLES = [
     { entry: "src/chrome.ts", out: "serve-chrome.js" },
     { entry: "src/keyboardNavigation.ts", out: "keyboard-navigation.js" },
     { entry: "src/reportCapture.ts", out: "report-capture.js" },
+    { entry: "src/uidReference.ts", out: "uid-reference.js" },
     // Settings → Notifications. Its own bundle because it is emitted only beside a signed-in
     // session on a host with Web Push; `serve-chrome.js` is on every page, the front door included.
     { entry: "src/pushSettings.ts", out: "push-settings.js" },

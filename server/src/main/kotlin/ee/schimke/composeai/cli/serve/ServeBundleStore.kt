@@ -202,6 +202,12 @@ class ServeBundleStore(
         // the per-preview sidecars). A top-level file (no path segments), so it's exempt from the
         // `previews/` prefix check but still zip-slip guarded below.
         val isPreviewsJson = name == PREVIEWS_JSON
+        // Provider-neutral references are inert input for the existing comparison lane. UID
+        // snapshots are separately size/digest checked when opened; never extract active HTML.
+        val isReferenceData =
+          name.startsWith("references/") &&
+            ".." !in segments &&
+            (name == "references/index.json" || name.endsWith(".png") || name.endsWith(".uid"))
         if (
           !entry.isDirectory &&
             (isPng ||
@@ -210,6 +216,7 @@ class ServeBundleStore(
               isRemoteCompose ||
               isSpatial ||
               isRc ||
+              isReferenceData ||
               isPreviewsJson)
         ) {
           val target = File(dir, name)

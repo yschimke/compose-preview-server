@@ -207,6 +207,10 @@ internal class ServeUiBuilderNativePreview(
           // size and a bounds rectangle means the same thing in both.
           widthDp = widget?.widthDp ?: environment.widthDp,
           heightDp = widget?.heightDp ?: environment.heightDp,
+          material3Theme =
+            environment.theme.name.lowercase().takeIf {
+              document.catalogPin.systemId == "m3-catalog" && it in setOf("light", "dark")
+            },
           confType = target.confType,
           wearWidget = widget != null,
           remoteCapture = generated.remoteContent,

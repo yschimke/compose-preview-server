@@ -59,6 +59,8 @@ data class UiBuilderGeneratedCompose(
   val wearWidget: Boolean = false,
   /** Which player draws a [wearWidget]'s recorded document; ignored for anything else. */
   val widgetPlayer: UiBuilderWidgetPlayer = UiBuilderWidgetPlayer.DEFAULT,
+  /** The stock Material 3 design environment; null preserves the catalog theme. */
+  val material3Theme: String? = null,
 ) {
   companion object {
     /** The Skiko desktop daemon — every catalog whose components are Compose Multiplatform. */
@@ -112,6 +114,7 @@ class UiBuilderGeneratedPreviewAdapter(private val playground: PlaygroundCompile
                 composableName = generated.composableName,
                 widthDp = generated.widthDp,
                 heightDp = generated.heightDp,
+                material3Theme = generated.material3Theme,
                 remoteCapture = generated.remoteCapture,
                 wearWidget = generated.wearWidget,
                 widgetPlayer = generated.widgetPlayer,
@@ -141,6 +144,7 @@ class UiBuilderGeneratedPreviewAdapter(private val playground: PlaygroundCompile
       remoteCapture: Boolean = false,
       wearWidget: Boolean = false,
       widgetPlayer: UiBuilderWidgetPlayer = UiBuilderWidgetPlayer.DEFAULT,
+      material3Theme: String? = null,
     ): String =
       if (wearWidget)
         when (widgetPlayer) {
@@ -159,7 +163,7 @@ class UiBuilderGeneratedPreviewAdapter(private val playground: PlaygroundCompile
         @Preview(widthDp = $widthDp, heightDp = $heightDp)
         @Composable
         fun UiBuilderGeneratedPreview() {
-          GeneratedUiBuilderScreen()
+          ${if (material3Theme == null) "GeneratedUiBuilderScreen()" else "androidx.compose.material3.MaterialTheme(colorScheme = androidx.compose.material3.${if (material3Theme == "dark") "darkColorScheme" else "lightColorScheme"}()) { GeneratedUiBuilderScreen() }"}
         }
         """
           .trimIndent() + "\n"

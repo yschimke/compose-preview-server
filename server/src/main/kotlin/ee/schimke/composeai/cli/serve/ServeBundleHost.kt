@@ -309,6 +309,26 @@ class ServeBundleHost(
   override fun designReferenceRaster(referenceId: String): ByteArray? =
     designReferences.raster(referenceId)
 
+  internal fun uidReference(referenceId: String): Pair<DesignReference, ByteArray>? {
+    val reference =
+      designReferences.all.firstOrNull { it.id == referenceId && ServeUidReference.isUid(it) }
+        ?: return null
+    val file = File(bundleDir, reference.artifact!!.path!!).canonicalFile
+    if (!file.toPath().startsWith(bundleDir.canonicalFile.toPath())) return null
+    val bytes =
+      runCatching {
+        fileSystem.read(file.toOkioPath()) {
+          readByteArray(
+            (ServeUidReference.MAX_BYTES + 1)
+              .toLong()
+              .coerceAtMost(fileSystem.metadata(file.toOkioPath()).size ?: 0)
+          )
+        }
+      }
+        .getOrNull() ?: return null
+    return if (ServeUidReference.valid(reference, bytes)) reference to bytes else null
+  }
+
   // Whole-screen backdrops, read once at load like the reference manifest above. A bundle that
   // carries none yields an empty store and the viewer never offers the surface.
   private val designPages = ServeDesignPageStore.load(bundleDir, fileSystem)

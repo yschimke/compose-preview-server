@@ -164,7 +164,28 @@ class ServeUiBuilderDesignLibrary(
     val bytes =
       runCatching { read(catalog, "$DESIGNS_DIR/${entry.file}", MAX_DOCUMENT_BYTES) }.getOrNull()
         ?: return null
-    return runCatching { json.decodeFromString<DesignDocumentV1>(bytes.toString(Charsets.UTF_8)) }
+    return runCatching {
+      val root = json.parseToJsonElement(bytes.toString(Charsets.UTF_8)).jsonObject
+      // A collection's active tab is editor state. A published entry always names its design
+      // explicitly, so changing the active tab cannot silently change a reference.
+      val document =
+        if (root.text("schema") == "compose-ui-builder-designs/v1") {
+          val documents = root.getValue("designs").jsonArray.map { it.jsonObject }
+          require(documents.map { it.text("id") }.distinct().size == documents.size) {
+            "duplicate design ids in collection"
+          }
+          documents.single { it.text("id") == designId }
+        } else root
+      require(
+        document.text("schema") in
+          setOf("compose-ui-builder-document/v1", "compose-ui-builder-document/v1-candidate")
+      ) {
+        "unsupported design schema"
+      }
+      json.decodeFromJsonElement(DesignDocumentV1.serializer(), document).also {
+        require(it.id == designId) { "document id does not match the index entry" }
+      }
+    }
       .onFailure {
         onLog(
           "serve: ${catalog.system}'s design $designId is not a DesignDocumentV1 (${it.message})"
@@ -271,7 +292,7 @@ class ServeUiBuilderDesignLibrary(
     /** The same shape `--ui-builder-catalogs` and the create route already require of an id. */
     private val DESIGN_ID = Regex("[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
 
-    private val DESIGN_FILE = Regex("[A-Za-z0-9][A-Za-z0-9._-]{0,127}\\.json")
+    private val DESIGN_FILE = Regex("[A-Za-z0-9][A-Za-z0-9._-]{0,127}\\.(?:json|uid)")
 
     private val json = Json {
       ignoreUnknownKeys = true
