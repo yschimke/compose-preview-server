@@ -574,6 +574,8 @@ class ServeHttpServer(
    * to answer the existing questions and no new surface behind them.
    */
   private val agentGrants: ServeAgentGrantStore? = null,
+  /** Durable public OAuth client metadata; grants and authorization codes remain ephemeral. */
+  private val mcpOAuthClientsFile: File? = null,
   /**
    * Per-caller budget on the two **ungated** grant routes (`request` and `poll`), keyed by client
    * address. Ungated is the point — an agent with no credential must be able to ask — so this is
@@ -16893,12 +16895,8 @@ class ServeHttpServer(
    */
   private val agentGrantCsrf = ServeAgentGrants.Csrf()
 
-  /**
-   * The OAuth façade's own state: registered clients and authorizations waiting on a human. Same
-   * lifetime as [agentGrantCsrf] and for the same reason — a restart drops every grant, so an
-   * authorization that survived one would redeem to a token that no longer exists.
-   */
-  private val mcpOAuth = ServeMcpOAuth.Store()
+  /** Only public client registrations persist; approval and token state dies with the grants. */
+  private val mcpOAuth = ServeMcpOAuth.Store(mcpOAuthClientsFile?.toPath())
 
   private suspend fun RoutingContext.handleAgentGrantRequest(store: ServeAgentGrantStore) {
     val permit = acquireAgentGrantPermit() ?: return

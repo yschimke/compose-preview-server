@@ -4110,6 +4110,14 @@ public class ServeRunner(
             }
           },
         agentGrants = agentGrantStore,
+        mcpOAuthClientsFile =
+          agentGrantStore?.let {
+            ServeMcpOAuthClients.defaultFile(
+                catalogsFilePath?.let(::File)?.toPath(),
+                File(System.getProperty("user.home"), ".compose-preview").toPath(),
+              )
+              .toFile()
+          },
         agentGrantLimiter = agentGrantStore?.let { buildAgentGrantRateLimiter() },
         catalogMcpEnabled = catalogMcp,
         machineAuthorization = machineAuthorization,
