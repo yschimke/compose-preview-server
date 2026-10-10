@@ -65,6 +65,27 @@ internal fun uiBuilderPublishedSourceSystem(
 ): String = nativeCatalogs[builderSystem] ?: builderSystem
 
 /**
+ * The component record a Builder catalog composes and exports against: the one its delivery
+ * system's live catalog holds ([served], keyed by delivery system), else the one fetched for it at
+ * startup ([startup], keyed by Builder id).
+ *
+ * Keyed by the delivery system, never the Builder id, because the two namespaces overlap. Wear is
+ * where they collide: the Builder catalog `wear-m3` is delivered as `wear-m3-catalog`, while a
+ * served catalog named `wear-m3` also exists (compose-ai-tools' own Wear harness, a different and
+ * much smaller record). Asking the catalog store for `wear-m3` handed the owned Builder catalog the
+ * harness's record once that catalog had loaded; its published `ui-builder.json` then would not
+ * compose, the catalog fell back to its built-in definition, and — owned, so with no built-in seeds
+ * — the New design chooser offered only `blank`.
+ */
+internal fun uiBuilderCatalogRecord(
+  builderSystem: String,
+  nativeCatalogs: Map<String, String>,
+  served: (deliverySystem: String) -> File?,
+  startup: (builderSystem: String) -> File?,
+): File? =
+  served(uiBuilderPublishedSourceSystem(builderSystem, nativeCatalogs)) ?: startup(builderSystem)
+
+/**
  * `compose-preview serve`, from the first port bind to the last shutdown hook.
  *
  * This is the body that used to live in `:cli`'s `ServeCommand`. It reaches its configuration
@@ -2835,7 +2856,12 @@ public class ServeRunner(
         uiBuilderComponents,
         preferServed = { it in publishedRecordCatalogs },
       ) { system ->
-        catalogStore?.componentRecord(system) ?: startupRecords[system]
+        uiBuilderCatalogRecord(
+          system,
+          uiBuilderNativeCatalogs,
+          served = { catalogStore?.componentRecord(it) },
+          startup = { startupRecords[it] },
+        )
       }
     if (catalogStore != null) {
       uiBuilderPacks.keys
@@ -3146,7 +3172,9 @@ public class ServeRunner(
       // on the record published beside it, and a configured one (the image's authored m3-catalog
       // fixture) predates the catalog publishing any. It is tried first and wins only if the
       // published file composes against it; otherwise the configured record stays the catalog's.
-      if (catalogStore.componentRecord(systemId) == null && startupRecords[systemId] == null) {
+      // By the delivery system, as the fetch below is: a served catalog sharing the Builder id (the
+      // Wear harness `wear-m3`) is not this catalog's record. See [uiBuilderCatalogRecord].
+      if (catalogStore.componentRecord(sourceSystem) == null && startupRecords[systemId] == null) {
         catalogStore
           .fetchComponentRecord(
             system = sourceSystem,
