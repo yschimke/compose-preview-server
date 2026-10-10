@@ -5,6 +5,9 @@ storage connection. Folders remain file-manager organisation; a project is an ac
 boundary. This workspace surrounds the released editor, so it needs a server release rather than a
 new editor archive or a dependency-pin change.
 
+On a rooted UI Builder host, the same workspace is served at `/projects`; the legacy
+`/ui-builder/projects` address redirects there with the selected project and design query intact.
+
 ## Identity and access
 
 A `.uid` file has a stable manifest ID and a project-relative path. Each contained design retains
