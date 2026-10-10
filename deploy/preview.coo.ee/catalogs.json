@@ -11,11 +11,6 @@
       "id": "android-samples",
       "heading": "android/compose-samples",
       "noun": "sample(s)"
-    },
-    {
-      "id": "thunderbird",
-      "heading": "thunderbird/thunderbird-android",
-      "noun": "app(s)"
     }
   ],
   "catalogs": [
@@ -110,15 +105,6 @@
       "system": "homeassistant-remotecompose",
       "repo": "yschimke/homeassistant-remotecompose",
       "listed": true
-    },
-    {
-      "system": "thunderbird",
-      "repo": "yschimke/thunderbird-android",
-      "listed": true,
-      "group": "thunderbird",
-      "attributionRepos": [
-        "thunderbird/thunderbird-android"
-      ]
     },
     {
       "system": "jetnews",
