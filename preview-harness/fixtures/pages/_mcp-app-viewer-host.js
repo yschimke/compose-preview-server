@@ -571,7 +571,11 @@ window.addEventListener("message", async (event) => {
           ],
         };
         if (mode === "comments") {
-          await new Promise((resolve) => window.setTimeout(resolve, 250));
+          if (window.__mcpHoldCommentPosts) {
+            await new Promise((resolve) => { window.__mcpReleaseCommentPost = resolve; });
+          } else {
+            await new Promise((resolve) => window.setTimeout(resolve, 250));
+          }
         }
       }
       if (mode === "comments-denied") {

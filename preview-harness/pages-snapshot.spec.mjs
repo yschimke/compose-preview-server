@@ -4432,8 +4432,15 @@ for (const fixture of listPageFixtures()) {
               await expect(zoom).toHaveText("Actual size");
               await expect.poll(width).toBeLessThan(200);
             } else {
-              // Already drawn at its own size, so there is nothing to enlarge.
-              await expect(zoom).toBeHidden();
+              // Compact review controls share the default frame. The tall static image fits
+              // below its own size, but Actual size still restores its real pixels.
+              const naturalWidth = await image.evaluate((img) => img.naturalWidth);
+              const width = () => image.evaluate((img) => img.clientWidth);
+              await expect.poll(width).toBeLessThan(naturalWidth);
+              await zoom.click();
+              await expect.poll(width).toBe(naturalWidth);
+              await zoom.click();
+              await expect.poll(width).toBeLessThan(naturalWidth);
             }
           }
         } else if (
@@ -4518,6 +4525,7 @@ for (const fixture of listPageFixtures()) {
           );
           expect(await page.evaluate(() => window.__mcpCommentPostCall)).toBeUndefined();
           await viewer.locator("#comment-body").fill("Increase the touch target.");
+          await page.evaluate(() => { window.__mcpHoldCommentPosts = true; });
           await viewer.locator("#comment-post").click();
           await page.waitForFunction(() => window.__mcpCommentPostCall != null);
           await expect(viewer.locator("#comment-post")).toBeDisabled();
@@ -4531,6 +4539,7 @@ for (const fixture of listPageFixtures()) {
           expect(posted.arguments.x).toBeLessThan(0.8);
           expect(posted.arguments.y).toBeGreaterThan(0.7);
           expect(posted.arguments.y).toBeLessThan(0.8);
+          await page.evaluate(() => window.__mcpReleaseCommentPost());
           await expect(viewer.locator("#comment-list")).toContainText(
             "Increase the touch target.",
           );
@@ -5836,10 +5845,9 @@ test("contract · the render history is a menu in the toggle row, and the fit ca
   );
   let manifest = null;
   await page.route("**/history.json", async (route) => {
-    const inline = await (await route.fetch()).text().catch(() => null);
     await route.fulfill({
       contentType: "application/json",
-      body: manifest ?? inline ?? "{}",
+      body: manifest ?? "{}",
     });
   });
 
@@ -7170,7 +7178,8 @@ test("contract · with no containerDimensions a tall preview fits about 480px", 
   await expect.poll(() => firstScreenBottom(viewer)).toBeLessThanOrEqual(480);
   expect((await image.boundingBox()).height).toBeGreaterThan(250);
   await expect.poll(() => reportedHeights(page)).toContainEqual(expect.any(Number));
-  // Details and comments may sit below the fold, but this result has neither.
+  // Expanded review prompts, details and comments may sit below the fold. The initial card fits.
+  await expect(viewer.locator("#audit-copy")).toHaveJSProperty("open", false);
   expect(Math.max(...(await reportedHeights(page)))).toBeLessThanOrEqual(480);
 });
 

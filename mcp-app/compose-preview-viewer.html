@@ -84,8 +84,10 @@
   .comment-raw pre { max-height: 180px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
   .details { margin-top: 10px; display: grid; gap: 8px; }
   .details[hidden] { display: none; }
+  .audit-actions[hidden] { display: none; }
   .audit-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
   #audit p { margin: 0; }
+  #audit-status:empty { display: none; }
   #audit summary { cursor: pointer; }
   #audit-prompt { display: block; width: 100%; box-sizing: border-box; margin-top: 6px; padding: 7px; font: inherit; color: inherit; background: var(--color-background-primary, #fff); border: 1px solid var(--color-border, #aaa); border-radius: 6px; }
   .detail-modes { display: flex; gap: 0; }
@@ -181,11 +183,10 @@
     <ol id="findings" class="findings" aria-label="Accessibility findings"></ol>
   </section>
   <section id="audit" class="details" aria-label="Design guidelines review" hidden>
-    <strong>Design guidelines review</strong>
-    <p class="muted">Results appear in chat. Saved UI Builder reviews also appear in the design’s Issues panel.</p>
     <div class="audit-actions"><button id="audit-run" type="button" hidden>Review design guidelines</button><button id="audit-saved" type="button" hidden>Show saved review</button></div>
     <details id="audit-copy">
-      <summary>Copy a review request</summary>
+      <summary>Copy a design review request</summary>
+      <p class="muted">Copy this request into chat to run the review. Results appear in chat. Saved UI Builder reviews also appear in the design’s Issues panel.</p>
       <label for="audit-prompt" class="muted">Review request</label>
       <textarea id="audit-prompt" readonly rows="5"></textarea>
       <button id="audit-select" type="button">Select request to copy</button>
@@ -257,12 +258,13 @@
   function updateAuditAction() {
     auditRun.hidden = staticMode || !initialized || !hostMessageText || auditMessageUnavailable;
     auditRun.disabled = auditPending;
-    auditCopy.open = auditRun.hidden;
+    if (auditMessageUnavailable) auditCopy.open = true;
     auditSaved.hidden = staticMode || !initialized || !auditDesignId || !guidelinesToolName;
     auditSaved.disabled = auditReadPending;
+    auditRun.parentElement.hidden = auditRun.hidden && auditSaved.hidden;
     if (!auditStatus.textContent) {
       auditStatus.textContent = auditRun.hidden
-        ? 'Copy this request into chat to run the review.'
+        ? ''
         : 'The review runs with the agent in this chat.';
     }
   }
@@ -271,6 +273,7 @@
     ++auditGeneration;
     auditPending = false;
     auditStatus.textContent = '';
+    auditCopy.open = false;
     auditPrompt.value = '';
     auditDesignId = undefined;
     auditReadPending = false;
@@ -2003,9 +2006,14 @@
     // size-changed), and size-changed asks for up to `target` so the frame can grow to it.
     const target = limit ?? DEFAULT_FRAME_HEIGHT;
     const frame = Math.min(window.innerHeight || Infinity, target);
-    // Only the header, the toolbar and the source line must share the first screen with the
-    // image; details and comments may sit below the fold.
-    const firstScreenBottom = q('#source-location').getBoundingClientRect().bottom + window.scrollY + 8;
+    // The compact review controls share the first screen with the image. Expanded copy prompts,
+    // saved findings, render details and comments may sit below the fold.
+    let auditChrome = auditSection.hidden ? 0 : auditSection.getBoundingClientRect().height + 10;
+    if (!auditSection.hidden && auditCopy.open) {
+      auditChrome -= auditCopy.getBoundingClientRect().height - auditCopy.querySelector('summary').getBoundingClientRect().height;
+    }
+    if (!auditSection.hidden && !auditResult.hidden) auditChrome -= auditResult.getBoundingClientRect().height + 8;
+    const firstScreenBottom = q('#source-location').getBoundingClientRect().bottom + window.scrollY + 8 + auditChrome;
     const image = canvas.classList.contains('has-image') ? canvas.querySelector('.preview-stage > img') : null;
     const grid = image ? null : canvas.querySelector('.grid');
     // The content's own height. The root's scrollHeight is never less than the frame, so a frame
