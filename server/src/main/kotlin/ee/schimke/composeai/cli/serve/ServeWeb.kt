@@ -12758,8 +12758,17 @@ ${captureControlsHtml().prependIndent("          ")}
       if (hasPreviews && !componentBrowser)
         bgPickerHtml("Show the transparent checkerboard behind each preview")
       else ""
+    // 🎲 Surprise me: a random preview from the cards the filter and tabs leave showing. Beside
+    // Transparent rather than in a named group — it is neither a comparison nor a report, it is a
+    // way into the grid — and, like Transparent, the row is rendered by its element in the catalog
+    // bundle (`serve-web/src/components/SurpriseMe.ts`), so a no-JS page carries an empty tag
+    // instead of a button that does nothing.
+    val surpriseAction =
+      if (hasPreviews && !componentBrowser) "<cp-surprise-me></cp-surprise-me>" else ""
     val catalogActions =
-      listOf(actionChips, transparentAction).filter { it.isNotBlank() }.joinToString("\n          ")
+      listOf(actionChips, surpriseAction, transparentAction)
+        .filter { it.isNotBlank() }
+        .joinToString("\n          ")
     // …behind one `⋯` menu beside the Theme pill, at every width. These are the catalog's
     // *destinations* — the comparison views, the parity view, the playground — plus the Transparent
     // toggle: things a visitor goes looking for, not things they read on the way past, which is why

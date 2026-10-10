@@ -93,6 +93,20 @@ function dedupe<T>(items: T[], key: (item: T) => string): T[] {
     });
 }
 
+/**
+ * Whether this page offers the catalog's 🎲 Surprise me (`<cp-surprise-me>`). Read off the
+ * server-emitted tag rather than the button inside it: the catalog bundle may upgrade the element
+ * after this script has drawn the hint rail.
+ */
+function hasSurprise(): boolean {
+    return !!document.querySelector("cp-surprise-me");
+}
+
+/** …and its button, once the catalog bundle has rendered it. */
+function surpriseButton(): HTMLButtonElement | null {
+    return document.querySelector<HTMLButtonElement>("cp-surprise-me button");
+}
+
 function componentKey(element: HTMLAnchorElement): string {
     const encodedTargetId = element.hash.slice(1);
     let targetId = encodedTargetId;
@@ -182,14 +196,17 @@ class KeyboardNavigation {
             entries.push(["M", "Modes", "modes"]);
         if (document.getElementById("cp-controls"))
             entries.push(["O", "Overrides", "overrides"]);
+        if (hasSurprise()) entries.push(["R", "Surprise me", "all"]);
         entries.push(["?", "Help", "all"]);
         entries.forEach(([key, label, section]) => {
             const button = document.createElement("button");
             button.type = "button";
             button.innerHTML = `<kbd>${key}</kbd><span>${label}</span>`;
-            button.addEventListener("click", () =>
-                label === "Help" ? this.openHelp() : this.openPalette(section),
-            );
+            button.addEventListener("click", () => {
+                if (label === "Help") this.openHelp();
+                else if (key === "R") surpriseButton()?.click();
+                else this.openPalette(section);
+            });
             bar.appendChild(button);
         });
         document.body.appendChild(bar);
@@ -242,6 +259,13 @@ class KeyboardNavigation {
         } else if (key === "[" || key === "]") {
             event.preventDefault();
             this.navigateRelative("variants", key === "]" ? 1 : -1);
+        } else if (key.toLowerCase() === "r") {
+            // Only where the catalog's 🎲 is: pressing its button keeps one implementation of the
+            // pick (filter-aware, no repeats) and the key does nothing on pages without one.
+            const button = surpriseButton();
+            if (!button) return;
+            event.preventDefault();
+            button.click();
         }
     }
 
@@ -726,7 +750,7 @@ class KeyboardNavigation {
           <div class="cp-shortcut-grid"><kbd>⌘/Ctrl K</kbd><span>Search every available command</span>
           <kbd>C</kbd><span>Jump to a component</span><kbd>J / K</kbd><span>Next / previous component</span>
           <kbd>V</kbd><span>Choose a state or variant</span><kbd>[ / ]</kbd><span>Previous / next variant</span>
-          <kbd>M</kbd><span>Choose renderer, theme, or display mode</span><kbd>O</kbd><span>Find and focus an override</span>
+          <kbd>M</kbd><span>Choose renderer, theme, or display mode</span><kbd>O</kbd><span>Find and focus an override</span>${hasSurprise() ? "<kbd>R</kbd><span>Open a random preview from the ones showing</span>" : ""}
           <kbd>?</kbd><span>Show this guide</span><kbd>Esc</kbd><span>Close any keyboard panel</span></div>
           <p class="cp-keyboard-note">Shortcuts pause while you type in a field. Tab and arrow keys keep their native browser behavior.</p>`;
         dialog
