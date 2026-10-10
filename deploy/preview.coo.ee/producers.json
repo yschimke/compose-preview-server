@@ -58,10 +58,6 @@
       "branch": "design-artifacts/*"
     },
     {
-      "repo": "yschimke/compose-samples",
-      "branch": "design-artifacts/*"
-    },
-    {
       "repo": "joreilly/Confetti",
       "branch": "design-artifacts/*"
     },

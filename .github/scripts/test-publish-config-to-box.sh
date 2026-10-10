@@ -115,6 +115,40 @@ check "puts the declared settings" \
   'PUT /admin/settings {"uiBuilder":{"guidelines":{"model":"deepseek/deepseek-v4.1-flash","users":["yschimke"]}}}' "${out}"
 check_absent "does not clear declared settings" "DELETE /admin/settings" "${out}"
 
+echo "--prune revokes branch trust producers.json no longer declares, and nothing else"
+cat > "${work}/config/producers.json" <<'JSON'
+{ "branches": [
+    { "repo": "yschimke/compose-ai-tools", "branch": "design-artifacts/*" },
+    { "repo": "yschimke/compose-preview-imports-out", "branch": "design-artifacts/*" } ] }
+JSON
+BOX_TRUST='{"branches":[{"repo":"yschimke/compose-ai-tools","branch":"design-artifacts/*"},{"repo":"yschimke/compose-preview-imports-out","branch":"design-artifacts/*"},{"repo":"yschimke/compose-samples","branch":"design-artifacts/*"}],"keys":[{"keyId":"k1"}],"oidc":["repo:x/y:*"]}'
+run_trust() {
+  BASE_URL=https://example.invalid ADMIN_TOKEN=unused \
+    DEPLOY_CONFIG_DIR="${work}/config" \
+    PRUNE_BOX_CATALOGS_JSON="${BOX_LISTING}" PRUNE_STATUS_JSON="${STATUS_WITH_REGISTRY}" \
+    PRUNE_BOX_TRUST_JSON="$1" \
+    bash "${SCRIPT}" --dry-run "${@:2}" 2>&1 || true
+}
+out="$(run_trust "${BOX_TRUST}" --prune)"
+check "revokes the undeclared branch, query-encoded" \
+  "DELETE /admin/trust?kind=branch&repo=yschimke%2Fcompose-samples&branch=design-artifacts%2F%2A" "${out}"
+check_absent "leaves a declared branch alone" "repo=yschimke%2Fcompose-ai-tools&" "${out}"
+check_absent "leaves the registry's declared output repository alone" \
+  "repo=yschimke%2Fcompose-preview-imports-out" "${out}"
+check_absent "never touches keys or oidc" "kind=key" "${out}"
+check_absent "never touches oidc" "kind=oidc" "${out}"
+check_absent "revokes nothing without --prune" "DELETE /admin/trust" "$(run_trust "${BOX_TRUST}")"
+out="$(run_trust 'not json' --prune)"
+check "an unreadable listing revokes nothing, loudly" "could not read /admin/trust" "${out}"
+check_absent "and issues no delete" "DELETE /admin/trust" "${out}"
+cat > "${work}/config/producers.json" <<'JSON'
+{ "producers": [] }
+JSON
+out="$(run_trust "${BOX_TRUST}" --prune)"
+check "refuses to revoke everything from a file declaring no branches" \
+  "refusing to revoke every trusted producer" "${out}"
+check_absent "and issues no delete" "DELETE /admin/trust" "${out}"
+
 if [[ "${failures}" -gt 0 ]]; then
   echo "${failures} check(s) failed"
   exit 1
