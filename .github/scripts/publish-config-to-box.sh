@@ -69,15 +69,42 @@ fi
 
 DRY_RUN=0
 PRUNE=0
+# Restart the box when a PUT below owes one (see "Applying config that waits for a restart" at the
+# end). On by default: the committed file is meant to be what the box serves, and without this a
+# config change sits written-but-unserved until the next image happens to roll. --no-restart (or
+# NO_RESTART=1) writes the config and leaves the restart to whoever runs it.
+RESTART=1
+[[ "${NO_RESTART:-0}" == 1 ]] && RESTART=0
 for arg in "$@"; do
   case "${arg}" in
     --dry-run) DRY_RUN=1 ;;
     --prune) PRUNE=1 ;;
+    --no-restart) RESTART=0 ;;
     # Refused rather than ignored: a typo'd flag that silently did nothing would read as a
     # successful prune on a box that pruned nothing.
-    *) echo "::error::unknown argument '${arg}' (expected --dry-run and/or --prune)" >&2; exit 2 ;;
+    *) echo "::error::unknown argument '${arg}' (expected --dry-run, --prune and/or --no-restart)" >&2; exit 2 ;;
   esac
 done
+
+# The deploy hook's restart route (deploy/image/deploy-hook.sh), gated by its own token rather than
+# the admin token: the admin API writes config, the hook is what can roll the box.
+DEPLOY_HOOK_TOKEN="${DEPLOY_HOOK_TOKEN:-}"
+DEPLOY_HOOK_RESTART_URL="${DEPLOY_HOOK_RESTART_URL:-${BASE_URL:-}/__hooks/restart}"
+# How long a restart may take to be proven: a forced rollout boots a fresh replica and waits for its
+# /readyz (up to the rollout's 300s health timeout), then drains the old one. Injectable so the
+# self-test runs in seconds.
+RESTART_WAIT_SECONDS="${RESTART_WAIT_SECONDS:-900}"
+RESTART_POLL_SECONDS="${RESTART_POLL_SECONDS:-20}"
+RESTART_RETRIES="${RESTART_RETRIES:-10}"
+RESTART_RETRY_SECONDS="${RESTART_RETRY_SECONDS:-30}"
+# Reads in a row that must say nothing is owed. During the swap two replicas answer this host and
+# the old one still owes the restart, so one clean answer can be the new replica alone.
+RESTART_CONSECUTIVE="${RESTART_CONSECUTIVE:-3}"
+
+# What a PUT below said is written but not yet serving. `restart_candidate` is the dry-run's
+# stand-in: a block that WOULD be PUT, which may owe one.
+restart_owed=()
+restart_candidate=0
 
 : "${BASE_URL:?BASE_URL required}"
 if [[ "${DRY_RUN}" == 0 ]]; then
@@ -577,6 +604,7 @@ if [[ -n "${editor_pin}" ]]; then
   editor_version=$(printf '%s' "${editor_pin}" | jq -r '.version')
   if [[ "${DRY_RUN}" == 1 ]]; then
     echo "PUT /admin/editor ${editor_pin}"
+    restart_candidate=1
   else
     response=$(curl -sS -w $'\n%{http_code}' -m 900 \
       -X PUT -H "${ADMIN_TOKEN_HEADER}: ${ADMIN_TOKEN}" \
@@ -588,6 +616,7 @@ if [[ -n "${editor_pin}" ]]; then
       200)
         if [[ "$(printf '%s' "${payload}" | jq -r '.restartRequired // false' 2>/dev/null)" == true ]]; then
           echo "::notice::editor ${editor_version} pinned — it serves from the box's next restart."
+          restart_owed+=(editor)
         else
           echo "  editor ${editor_version}: applied"
         fi
@@ -619,6 +648,7 @@ if [[ -n "${ui_builder}" ]]; then
   echo "Reconciling the UI-builder catalog settings from ${CATALOGS_FILE#"${REPO_ROOT}/"}"
   if [[ "${DRY_RUN}" == 1 ]]; then
     echo "PUT /admin/ui-builder/config ${ui_builder}"
+    restart_candidate=1
   else
     response=$(curl -sS -w $'\n%{http_code}' -m 30 \
       -X PUT -H "${ADMIN_TOKEN_HEADER}: ${ADMIN_TOKEN}" \
@@ -632,6 +662,7 @@ if [[ -n "${ui_builder}" ]]; then
         printf '%s' "${payload}" | jq -r '.problems[]? | "::warning::ui-builder settings: \(.)"' 2>/dev/null
         if [[ "$(printf '%s' "${payload}" | jq -r '.restartRequired // false' 2>/dev/null)" == true ]]; then
           echo "::notice::UI-builder catalogs ${next} written — they serve from the box's next restart."
+          restart_owed+=(ui-builder/config)
         else
           echo "  UI-builder catalogs ${next}: already serving"
         fi
@@ -662,6 +693,7 @@ if [[ -f "${SETTINGS_FILE}" ]]; then
   settings=$(jq -c . "${SETTINGS_FILE}")
   if [[ "${DRY_RUN}" == 1 ]]; then
     echo "PUT /admin/settings ${settings}"
+    restart_candidate=1
   else
     response=$(curl -sS -w $'\n%{http_code}' -m 30 \
       -X PUT -H "${ADMIN_TOKEN_HEADER}: ${ADMIN_TOKEN}" \
@@ -676,6 +708,9 @@ if [[ -f "${SETTINGS_FILE}" ]]; then
           (.pending[]? | "::notice::settings: \(.) written — it applies at the box'"'"'s next start."),
           (.overridden[]? | "::warning::settings: \(.) is overridden by the box'"'"'s .env; delete that line to let this value apply."),
           (.problems[]? | "::warning::settings: \(.)")' 2>/dev/null
+        if [[ "$(printf '%s' "${payload}" | jq -r '(.pending // []) | length' 2>/dev/null)" != 0 ]]; then
+          restart_owed+=(settings)
+        fi
         ;;
       404) echo "::warning::/admin/settings returned 404 — this box predates settings.json; its settings stay on its .env." ;;
       *)
@@ -698,6 +733,82 @@ if [[ "${catalogs_skipped}" == 1 ]]; then
 fi
 if [[ "${sites_skipped}" == 1 ]]; then
   echo "::warning::top-level sites were not reconciled — this box predates /admin/sites. Its hostnames keep serving whatever it booted with; the next publish against a newer image applies them."
+fi
+
+# Applying config that waits for a restart.
+#
+# The editor pin, the `uiBuilder` block and some settings are read once at the server's START, so
+# a PUT that answers `restartRequired` (or settings `pending`) has written config the box is not
+# serving. Leaving it there is how a reviewed, merged config change used to need someone to SSH in
+# and restart the container — or sit unapplied until the next image happened to roll.
+#
+# So the publish restarts the box itself, through the deploy hook's /__hooks/restart: a forced,
+# zero-downtime rollout of the tag the box already runs (deploy/image/rollout.sh --force). Then it
+# proves it, by reading the same three routes until none owes a restart — the step goes red if the
+# config still is not serving, rather than reporting a restart that did not happen.
+restart_needed=0
+if [[ "${DRY_RUN}" == 1 && "${restart_candidate}" == 1 ]] || [[ "${#restart_owed[@]}" -gt 0 ]]; then
+  restart_needed=1
+fi
+
+restart_owes() { # restart_owes → 0 when any route still answers restartRequired (or pending)
+  local route answer
+  for route in /admin/editor /admin/ui-builder/config /admin/settings; do
+    answer=$(curl -sS -m 30 -H "${ADMIN_TOKEN_HEADER}: ${ADMIN_TOKEN}" \
+      "${BASE_URL}${route}" 2>/dev/null || true)
+    # 404 (a box without the route) and unreadable answers owe nothing that this can wait for.
+    if [[ "$(printf '%s' "${answer}" | jq -r '.restartRequired // false' 2>/dev/null)" == true ]]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+if [[ "${restart_needed}" == 1 && "${RESTART}" == 0 ]]; then
+  echo "::notice::config owes a restart (${restart_owed[*]:-dry run}); --no-restart given, so it applies at the box's next start."
+elif [[ "${restart_needed}" == 1 && "${DRY_RUN}" == 1 ]]; then
+  echo "POST ${DEPLOY_HOOK_RESTART_URL#"${BASE_URL}"} (only when a PUT above answers restartRequired)"
+elif [[ "${restart_needed}" == 1 && -z "${DEPLOY_HOOK_TOKEN}" ]]; then
+  echo "::warning::config owes a restart (${restart_owed[*]}) but DEPLOY_HOOK_TOKEN is unset — it applies at the box's next start (the next image roll)."
+elif [[ "${restart_needed}" == 1 ]]; then
+  echo "Restarting the box so ${restart_owed[*]} serves: POST ${DEPLOY_HOOK_RESTART_URL}"
+  attempt=0
+  code=000
+  while :; do
+    attempt=$((attempt + 1))
+    code=$(curl -sS -o /dev/null -w '%{http_code}' -m 30 -X POST \
+      -H "Authorization: Bearer ${DEPLOY_HOOK_TOKEN}" "${DEPLOY_HOOK_RESTART_URL}" 2>/dev/null || echo 000)
+    # 409: a rollout is already running and may have booted on the old config, so it does not
+    # count; wait for it and ask again.
+    [[ "${code}" == 409 && "${attempt}" -lt "${RESTART_RETRIES}" ]] || break
+    echo "  restart hook: a rollout is in progress — retrying in ${RESTART_RETRY_SECONDS}s"
+    sleep "${RESTART_RETRY_SECONDS}"
+  done
+  case "${code}" in
+    200 | 202)
+      echo "  restart hook: accepted — waiting for the box to serve the new config"
+      waited=0
+      clean=0
+      while [[ "${clean}" -lt "${RESTART_CONSECUTIVE}" ]]; do
+        if [[ "${waited}" -ge "${RESTART_WAIT_SECONDS}" ]]; then
+          rejected=$((rejected + 1))
+          echo "::error::the box still owes a restart ${RESTART_WAIT_SECONDS}s after /__hooks/restart was accepted. A hook older than restarts answers ANY path with a plain rollout, which is a no-op without a new image — if the box's deploy/image predates deploy-hook.sh's restart route, update it once; otherwise check \`docker compose logs hook\` there."
+          break
+        fi
+        sleep "${RESTART_POLL_SECONDS}"
+        waited=$((waited + RESTART_POLL_SECONDS))
+        if restart_owes; then clean=0; else clean=$((clean + 1)); fi
+      done
+      [[ "${clean}" -ge "${RESTART_CONSECUTIVE}" ]] && echo "  restart: the box serves the published config (${waited}s)"
+      ;;
+    404)
+      echo "::warning::/__hooks/restart returned 404 — the box's hook predates restarts (update deploy/image on the box once); the config applies at its next start."
+      ;;
+    *)
+      rejected=$((rejected + 1))
+      echo "::error::restart hook: HTTP ${code} — the config is written but not serving."
+      ;;
+  esac
 fi
 
 if [[ "${rejected}" -gt 0 ]]; then

@@ -174,7 +174,8 @@ generated from `ServeSettings.kt`.
 - **Applying:** a **live** setting (the guidelines model, users, orgs, picture budget and triage)
   is re-read the moment it is published; the reply lists it under `applied`. A **restart** setting
   is stored and applies at the box's next start; the reply lists it under `pending`, and so does
-  `GET /admin/settings` (`"pending": true`) until the box restarts.
+  `GET /admin/settings` (`"pending": true`) until the box restarts. `publish-config-to-box.sh`
+  restarts it for you — see [Applying config without SSH](#applying-config-without-ssh).
 - **How it reaches the server:** the entrypoint reads `/config/settings.json` (written by the admin
   route, on the `preview_config` volume) and fills each `SERVE_*` variable compose left empty,
   *before* deriving anything from them — so a value there behaves exactly as the same line in
@@ -214,7 +215,9 @@ Which catalogs the builder offers, and how each is defined, can be maintained in
 instead of in `.env`. `publish-config-to-box.sh` reconciles the block from the committed file the
 same way it reconciles the editor pin, and it applies at the box's next start
 (`GET /admin/ui-builder/config` reports `restartRequired`, and what the environment alone, the
-running process and the next start each serve).
+running process and the next start each serve). The publish then restarts the box itself, with no
+downtime and no SSH — see [Applying config without SSH](#applying-config-without-ssh). Switching a
+catalog to `owned`, or out of `shadow`, is a one-line change to the committed `catalogs.json`.
 
 The block holds **overrides of the environment**, not a replacement, so nothing is disrupted by
 adopting it. A catalog it does not name keeps exactly what its `SERVE_UI_BUILDER_*` variables give
@@ -1503,6 +1506,39 @@ secret it's skipped, and any failure just falls back to the poll loop, which sti
 rolls within one interval. To disable the webhook entirely, comment out the `hook`
 service **and** the Caddyfile `/__hooks/rollout` route; the poll loop keeps working.
 
+### Applying config without SSH
+
+The UI-builder catalog settings (`catalogs.json` `uiBuilder`), the editor pin and the **restart**
+settings in `settings.json` are read once, when the server starts. Publishing one writes it through
+the admin API and the reply says `restartRequired` (or `pending`) — written, not yet serving. The
+hook's second route is what closes that:
+
+> edit `deploy/preview.coo.ee/catalogs.json` (or `settings.json`) → merge → `publish-preview-config.yml`
+> → `publish-config-to-box.sh` PUTs it → a reply owes a restart → **the publish POSTs
+> `/__hooks/restart`** → `hook` runs `rollout.sh --force` → a fresh replica of the **same tag** boots
+> on the new config, goes healthy, takes the traffic → the publish reads the three admin routes
+> until none owes a restart (three clean reads in a row, since both replicas answer mid-swap)
+
+- **Same zero-downtime swap** as an image update, minus the new digest: `rollout.sh --force`
+  (`ROLLOUT_FORCE=1`) rolls even when the pulled image is the one running.
+- **Same safety argument** as `/__hooks/rollout`: same token, same single-flight lock, and the
+  caller still cannot choose the image — a leaked token buys at most a restart of the pinned tag.
+- **A restart is never folded into a rollout already running**, which may have booted its replica
+  before the config was written: the hook answers `409` and the publish retries. A forced
+  `rollout.sh` that finds the cross-container lock held waits for it rather than skipping.
+- **Proven, not assumed.** If the box still owes a restart after `RESTART_WAIT_SECONDS` (900), the
+  publish step fails. `--no-restart` (or `NO_RESTART=1`) writes the config and leaves the restart to
+  you; with no `DEPLOY_HOOK_TOKEN` secret it warns and the config applies at the next image roll.
+- **Wiring:** the same `DEPLOY_HOOK_TOKEN` secret as the image publish. Off `preview.coo.ee`, set a
+  `DEPLOY_HOOK_RESTART_URL` repo variable to `https://<your-domain>/__hooks/restart`.
+
+**One-time step on an existing box.** The `hook` and `rollout` services run `deploy-hook.sh` and
+`rollout.sh` from the box's checkout of `deploy/image/` (bind-mounted at `/workspace`), which only a
+`git pull` there updates — the image roll does not. Until it is pulled once, the box's hook treats
+`/__hooks/restart` as a plain digest-gated rollout (a no-op without a new image), and the publish
+says so when its restart never takes effect. The Caddyfile route ships in the caddy image and
+arrives through Watchtower on its own. After that pull, config changes need no SSH.
+
 **How the swap stays seamless.** `preview` has a Docker `healthcheck` on the
 app's ungated `/readyz` **readiness** route — green only once the new replica has
 actually rendered a preview, not merely bound its port (that's `/healthz`), so a
@@ -1639,7 +1675,7 @@ Unset, it uses the socket peer, the request's `Host` and the connection scheme.
 | `docker-compose.yml` + `Caddyfile` | Pull the image + Caddy auto-HTTPS + zero-downtime (`rollout`) / Watchtower auto-updates + the `hook` instant-roll webhook. |
 | `docker-compose.deploy-config.yml` + `test-deploy-config-mount.sh` | Opt-in overlay serving a deployment's `catalogs.json` / `producers.json` read-only from version control instead of the volume (see *Config from version control*), and its offline self-test (run by `ci.yml`). |
 | `rollout.sh` | Poll loop / one-shot that pulls `preview` and rolls it via docker-rollout. |
-| `deploy-hook.sh` | Token-gated `POST /__hooks/rollout` webhook (the `hook` service) that runs `rollout.sh` on demand — instant roll on publish. |
+| `deploy-hook.sh` | Token-gated webhook (the `hook` service): `POST /__hooks/rollout` runs `rollout.sh` on demand — instant roll on publish — and `POST /__hooks/restart` runs `rollout.sh --force`, so published config applies without SSH. |
 | `docker-rollout` | Vendored [docker-rollout](https://github.com/wowu/docker-rollout) CLI plugin (adds `docker rollout`). |
 | `prewarm-fonts.sh` + `test-prewarm-fonts.sh` | Bake the downloadable-font cache into the image at build time (see *Fonts* below), and its offline self-test (run by `ci.yml`). |
 | `setup.sh` | Install Docker + the docker-rollout plugin, write `.env`, pull + start. |

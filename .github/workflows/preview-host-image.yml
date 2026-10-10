@@ -319,6 +319,10 @@ jobs:
           BASE_URL: ${{ vars.DEPLOY_BASE_URL || 'https://preview.coo.ee' }}
           DEPLOY_CONFIG_DIR: ${{ vars.DEPLOY_CONFIG_DIR || 'deploy/preview.coo.ee' }}
           ADMIN_TOKEN: ${{ secrets.SERVE_ADMIN_TOKEN }}
+          # So a config this roll did not boot on (written after its replica started) still ends up
+          # serving: same restart path as publish-preview-config.yml.
+          DEPLOY_HOOK_TOKEN: ${{ secrets.DEPLOY_HOOK_TOKEN }}
+          DEPLOY_HOOK_RESTART_URL: ${{ vars.DEPLOY_HOOK_RESTART_URL || 'https://preview.coo.ee/__hooks/restart' }}
         run: |
           if [[ -z "${ADMIN_TOKEN}" ]]; then
             echo "SERVE_ADMIN_TOKEN is unset; skipping deployment config publish"

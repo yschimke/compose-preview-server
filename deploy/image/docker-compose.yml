@@ -643,7 +643,12 @@ services:
   # Fail-closed: with no DEPLOY_HOOK_TOKEN the service stays up but idle (never opens
   # the port) — set it in .env (setup.sh generates one) to enable. Only `expose`d on
   # the compose network, never a host port; reachable solely via Caddy's route.
-  # Comment this service out (and the Caddyfile /__hooks/rollout route) to disable the
+  # POST /__hooks/restart is the same, forced (rollout.sh --force): it restarts `preview` on
+  # the tag it already runs, so config published through the admin API (catalogs.json
+  # `uiBuilder`, the editor pin, restart settings) serves without SSH — publish-config-to-box.sh
+  # calls it when a PUT answers restartRequired. These scripts are read from this checkout, so
+  # a change to them reaches the box with its next `git pull`, not the image roll.
+  # Comment this service out (and the Caddyfile /__hooks/* route) to disable the
   # webhook and rely on the poll loop alone.
   hook:
     logging: *default-logging

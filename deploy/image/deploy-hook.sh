@@ -24,15 +24,37 @@
 # rollout.sh verbatim. socat is apk-added at start, mirroring how rollout.sh
 # apk-adds the compose plugin — runtime apk-add is the established pattern here.
 #
+# Two routes, both POST, both behind the same token and the same single-flight lock:
+#
+#   POST /__hooks/rollout   roll if the pinned tag's digest changed (the image-publish CI)
+#   POST /__hooks/restart   roll even if it did not (`rollout.sh --force`)
+#
+# /__hooks/restart is how a CONFIG change takes effect without SSH. `publish-config-to-box.sh` PUTs
+# catalogs.json's `uiBuilder` block, the editor pin and settings.json through the admin API; the
+# server reads those at START, so when a PUT answers `restartRequired: true` the publish calls this
+# route and the box swaps to a fresh replica of the SAME tag, which boots on the new config. The
+# safety argument above holds unchanged: the caller still cannot choose what image runs, so a leaked
+# token buys at most a zero-downtime restart of the pinned tag. A restart that finds a rollout
+# already running answers 409 rather than folding into it — that rollout may have booted its
+# replica before the config was written — so the caller retries.
+#
+# Any other path is a 404, so a typo'd route is a visible error and not an unintended rollout.
+#
 # Modes:
 #   deploy-hook.sh --serve    listen on $HOOK_PORT (default 9000), fork a handler
 #                             per connection (used by the `hook` compose service)
 #   deploy-hook.sh --handle   process ONE HTTP request on stdin/stdout (socat EXEC)
-#   deploy-hook.sh --roll     run the single-flight rollout (spawned detached)
+#   deploy-hook.sh --roll [rollout|restart]
+#                             run the single-flight rollout (spawned detached); `restart`
+#                             forces it
 set -eu
 
 HOOK_PORT="${HOOK_PORT:-9000}"
-LOCK="/tmp/deploy-hook-rollout.lock"
+LOCK="${DEPLOY_HOOK_LOCK:-/tmp/deploy-hook-rollout.lock}"
+# Where the detached rollout logs (the service's stdout, pid 1) and which script it runs; both
+# injectable so test-deploy-hook.sh can drive the handler without a container.
+ROLL_LOG="${DEPLOY_HOOK_ROLL_LOG:-/proc/1/fd/1}"
+ROLLOUT_SCRIPT="${DEPLOY_HOOK_ROLLOUT_SCRIPT:-/workspace/rollout.sh}"
 TOKEN="${DEPLOY_HOOK_TOKEN:-}"
 
 # ALWAYS log to stderr, never stdout. In --handle mode stdout IS the client
@@ -48,6 +70,7 @@ handle() {
   # Request line: "POST /__hooks/rollout HTTP/1.1". Split on whitespace.
   IFS=' ' read -r method path _rest || return 0
   : "${path:=/}"
+  path="${path%%\?*}"
 
   # Headers until the blank line; capture Authorization + Content-Length. Use tr
   # (not bash `${//}`, which busybox ash lacks) to strip CR and surrounding space.
@@ -73,6 +96,14 @@ handle() {
     respond "405 Method Not Allowed" "POST only"
     return 0
   fi
+  case "$path" in
+    /__hooks/rollout) mode=rollout ;;
+    /__hooks/restart) mode=restart ;;
+    *)
+      respond "404 Not Found" "unknown hook"
+      return 0
+      ;;
+  esac
   if [ -z "$TOKEN" ] || ! token_matches "$auth"; then
     log "rejected ${method} ${path} (bad or missing token)"
     respond "401 Unauthorized" "bad token"
@@ -82,12 +113,15 @@ handle() {
   # Single-flight: mkdir is atomic. Got it → start a detached rollout; else a
   # rollout is already running and this call folds into it.
   if mkdir "$LOCK" 2>/dev/null; then
-    log "authorized — triggering rollout"
-    respond "202 Accepted" "rolling"
+    log "authorized — triggering ${mode}"
+    respond "202 Accepted" "$([ "$mode" = restart ] && echo restarting || echo rolling)"
     # Detach into its own session so the multi-minute rollout survives this
     # short-lived connection handler being reaped by socat when the socket closes.
     # Log to the service's stdout (pid 1) so `docker compose logs hook` shows it.
-    setsid "$0" --roll </dev/null >/proc/1/fd/1 2>&1 &
+    setsid "$0" --roll "$mode" </dev/null >"$ROLL_LOG" 2>&1 &
+  elif [ "$mode" = restart ]; then
+    log "authorized — restart refused, a rollout is in progress"
+    respond "409 Conflict" "rollout in progress; retry the restart"
   else
     log "authorized — rollout already in progress"
     respond "200 OK" "rollout already in progress"
@@ -119,9 +153,13 @@ respond() {
 roll() {
   # rmdir on ANY exit so a crash can't wedge the single-flight lock permanently.
   trap 'rmdir "$LOCK" 2>/dev/null || true' EXIT INT TERM
-  log "rollout.sh start"
-  # Reuse the vendored one-shot rollout verbatim (pull + roll only if changed).
-  ROLLOUT_SERVICE="${ROLLOUT_SERVICE:-preview}" sh /workspace/rollout.sh || log "rollout.sh exited non-zero"
+  force=0
+  [ "${1:-rollout}" = restart ] && force=1
+  log "rollout.sh start ($([ "$force" = 1 ] && echo forced restart || echo rollout))"
+  # Reuse the vendored one-shot rollout verbatim (pull + roll only if changed, or regardless when
+  # forced).
+  ROLLOUT_SERVICE="${ROLLOUT_SERVICE:-preview}" ROLLOUT_FORCE="$force" sh "$ROLLOUT_SCRIPT" ||
+    log "rollout.sh exited non-zero"
   log "rollout.sh done"
 }
 
@@ -150,6 +188,6 @@ serve() {
 case "${1:-}" in
   --serve)  serve ;;
   --handle) handle ;;
-  --roll)   roll ;;
+  --roll)   roll "${2:-rollout}" ;;
   *) echo "usage: $0 --serve|--handle|--roll" >&2; exit 64 ;;
 esac

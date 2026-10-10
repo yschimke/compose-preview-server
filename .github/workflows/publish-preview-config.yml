@@ -26,7 +26,10 @@ concurrency:
 jobs:
   publish:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    # Long enough for the restart a config change can owe: a forced zero-downtime rollout boots and
+    # readiness-checks a fresh replica (up to the rollout's 300s health timeout) before the old one
+    # drains, and the publish then reads the box until it serves the new config.
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -36,6 +39,12 @@ jobs:
           BASE_URL: ${{ vars.DEPLOY_BASE_URL || 'https://preview.coo.ee' }}
           DEPLOY_CONFIG_DIR: ${{ vars.DEPLOY_CONFIG_DIR || 'deploy/preview.coo.ee' }}
           ADMIN_TOKEN: ${{ secrets.SERVE_ADMIN_TOKEN }}
+          # The deploy hook's token, the same one the image publish uses for /__hooks/rollout. When a
+          # PUT answers restartRequired, the publish POSTs /__hooks/restart with it so the config
+          # serves without anyone SSHing in. Unset ⇒ the config is written and applies at the next
+          # image roll, with a warning.
+          DEPLOY_HOOK_TOKEN: ${{ secrets.DEPLOY_HOOK_TOKEN }}
+          DEPLOY_HOOK_RESTART_URL: ${{ vars.DEPLOY_HOOK_RESTART_URL || 'https://preview.coo.ee/__hooks/restart' }}
         run: |
           test -n "${ADMIN_TOKEN}" || { echo "::error::SERVE_ADMIN_TOKEN is required"; exit 1; }
           # --prune: this file is the whole answer for this box, so a catalog dropped from it is
