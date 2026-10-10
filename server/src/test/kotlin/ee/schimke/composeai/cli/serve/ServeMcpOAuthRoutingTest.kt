@@ -352,6 +352,19 @@ class ServeMcpOAuthRoutingTest {
     assertEquals("xyz", query(back, "state"))
     val authorizationCode = assertNotNull(query(back, "code"))
 
+    // Reopening the approval link must resume an interrupted callback rather than strand the
+    // browser on a device-flow notice. The same outstanding code and state must be returned.
+    val (resumeCode, _, resumeLocation) = get(approvalPath, operatorToken)
+    assertEquals(302, resumeCode)
+    assertEquals(back, resumeLocation)
+
+    val grantCount = grants.activeGrants().size
+    val (retryCode, _, retryLocation) =
+      postForm(approvalPath, "action=approve&csrf=${field(page, "csrf")}&scope=live&ttl=1800")
+    assertEquals(302, retryCode)
+    assertEquals(back, retryLocation)
+    assertEquals(grantCount, grants.activeGrants().size)
+
     // 4. The client redeems it with the verifier.
     val (tokenCode, tokenBody, _) =
       post(
@@ -364,6 +377,12 @@ class ServeMcpOAuthRoutingTest {
     val accessToken = str(tokenBody, "access_token")
     assertEquals("Bearer", str(tokenBody, "token_type"))
     assertTrue(str(tokenBody, "scope").contains("live"), tokenBody)
+
+    // Once redeemed, reopening cannot send the browser back with a spent code.
+    val (completedCode, completedPage, completedLocation) = get(approvalPath, operatorToken)
+    assertEquals(200, completedCode)
+    assertNull(completedLocation)
+    assertTrue(completedPage.contains("Access granted"))
 
     // 5. And the token opens the door that answered 401 at the top of this test.
     val (mcpCode, _, _) = post("/mcp", gatedCall, bearer = accessToken)
@@ -453,6 +472,9 @@ class ServeMcpOAuthRoutingTest {
     val back = assertNotNull(location)
     assertEquals("access_denied", query(back, "error"))
     assertEquals("xyz", query(back, "state"))
+    val (resumeCode, _, resumeLocation) = get(approvalPath, operatorToken)
+    assertEquals(302, resumeCode)
+    assertEquals(back, resumeLocation)
   }
 
   @Test
