@@ -149,8 +149,112 @@ check "refuses to revoke everything from a file declaring no branches" \
   "refusing to revoke every trusted producer" "${out}"
 check_absent "and issues no delete" "DELETE /admin/trust" "${out}"
 
+# ---- applying config that waits for a restart ------------------------------------------------
+mkdir -p "${work}/restart"
+cat > "${work}/restart/catalogs.json" <<'JSON'
+{ "catalogs": [], "sites": [],
+  "uiBuilder": { "catalogs": { "remote-m3": { "owned": true } } } }
+JSON
+cat > "${work}/restart/producers.json" <<'JSON'
+{ "producers": [] }
+JSON
+run_restart() {
+  BASE_URL=https://example.invalid ADMIN_TOKEN=unused DEPLOY_CONFIG_DIR="${work}/restart" \
+    bash "${SCRIPT}" --dry-run "$@" 2>&1 || true
+}
+
+echo "a block that can owe a restart is followed by the restart hook, after every PUT"
+out="$(run_restart)"
+check "names the restart hook" "POST /__hooks/restart" "${out}"
+put_line=$(printf '%s\n' "${out}" | grep -n 'PUT /admin/ui-builder/config' | cut -d: -f1)
+hook_line=$(printf '%s\n' "${out}" | grep -n 'POST /__hooks/restart' | cut -d: -f1)
+check "restarts only after the config is written" "after" \
+  "$([[ -n "${put_line}" && -n "${hook_line}" && "${hook_line}" -gt "${put_line}" ]] && echo after || echo before)"
+out="$(run_restart --no-restart)"
+check "--no-restart leaves the restart to the operator" "--no-restart given" "${out}"
+check_absent "and calls no hook" "POST /__hooks/restart" "${out}"
+out="$(NO_RESTART=1 run_restart)"
+check_absent "NO_RESTART=1 does the same" "POST /__hooks/restart" "${out}"
+cat > "${work}/restart/nothing.json" <<'JSON'
+{ "catalogs": [], "sites": [] }
+JSON
+out="$(BASE_URL=https://example.invalid ADMIN_TOKEN=unused DEPLOY_CONFIG_DIR="${work}/restart" \
+  CATALOGS_FILE="${work}/restart/nothing.json" SETTINGS_FILE=/nonexistent \
+  bash "${SCRIPT}" --dry-run 2>&1 || true)"
+check_absent "nothing that can owe a restart calls no hook" "__hooks/restart" "${out}"
+
+# The live path, against a stub `curl` on PATH: the box answers the PUT with restartRequired, the
+# hook first reports a rollout in progress (409) and then accepts, and the box keeps owing the
+# restart for two reads before the new replica is the only one answering.
+mkdir -p "${work}/bin" "${work}/state"
+cat > "${work}/bin/curl" <<'STUB'
+#!/usr/bin/env bash
+method=GET; wfmt=""; out=""; url=""; auth=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -X) method="$2"; shift 2 ;;
+    -w) wfmt="$2"; shift 2 ;;
+    -o) out="$2"; shift 2 ;;
+    -d|-m) shift 2 ;;
+    -H) [[ "$2" == Authorization:* ]] && auth="$2"; shift 2 ;;
+    http*) url="$1"; shift ;;
+    *) shift ;;
+  esac
+done
+path="/${url#*://*/}"
+echo "${method} ${path} ${auth}" >> "${STUB_STATE}/calls"
+count() { local n; n=$(( $(cat "${STUB_STATE}/$1" 2>/dev/null || echo 0) + 1 )); echo "$n" > "${STUB_STATE}/$1"; echo "$n"; }
+body='{}'; code=200
+case "${method} ${path}" in
+  "PUT /admin/ui-builder/config") body='{"restartRequired":true,"next":{"catalogs":["remote-m3"]}}' ;;
+  "POST /__hooks/restart") [[ "$(count hook)" == 1 ]] && code=409 || code=202; body="" ;;
+  "GET /admin/ui-builder/config") [[ "$(count owed)" -le 2 ]] && body='{"restartRequired":true}' || body='{"restartRequired":false}' ;;
+  "GET /admin/catalogs") body='{"catalogs":[]}' ;;
+esac
+if [[ -n "${out}" ]]; then printf '%s' "${body}" > "${out}"; fi
+if [[ -n "${wfmt}" ]]; then
+  [[ -z "${out}" ]] && printf '%s' "${body}"
+  printf '%s' "${wfmt//%\{http_code\}/${code}}"
+else
+  printf '%s' "${body}"
+fi
+STUB
+chmod +x "${work}/bin/curl"
+
+echo "a PUT that owes a restart restarts the box through the hook and waits until it serves"
+out="$(PATH="${work}/bin:${PATH}" STUB_STATE="${work}/state" \
+  BASE_URL=https://example.invalid ADMIN_TOKEN=admin DEPLOY_HOOK_TOKEN=hook \
+  DEPLOY_CONFIG_DIR="${work}/restart" SETTINGS_FILE=/nonexistent \
+  RESTART_POLL_SECONDS=0 RESTART_RETRY_SECONDS=0 RESTART_CONSECUTIVE=2 RESTART_WAIT_SECONDS=60 \
+  bash "${SCRIPT}" 2>&1 || true)"
+calls="$(cat "${work}/state/calls")"
+check "posts the restart hook with the hook token" "POST /__hooks/restart Authorization: Bearer hook" "${calls}"
+check "retries a restart refused while a rollout runs" "2" "$(cat "${work}/state/hook")"
+check "waits until the box no longer owes the restart" "the box serves the published config" "${out}"
+check_absent "and does not report an error" "::error::" "${out}"
+
+echo "a hook token that is unset leaves the config to the next start, loudly"
+rm -f "${work}/state/"*
+out="$(PATH="${work}/bin:${PATH}" STUB_STATE="${work}/state" \
+  BASE_URL=https://example.invalid ADMIN_TOKEN=admin \
+  DEPLOY_CONFIG_DIR="${work}/restart" SETTINGS_FILE=/nonexistent \
+  bash "${SCRIPT}" 2>&1 || true)"
+check "says the restart is owed" "DEPLOY_HOOK_TOKEN is unset" "${out}"
+check_absent "and calls no hook" "__hooks/restart" "$(cat "${work}/state/calls")"
+
+echo "a restart that never takes effect fails the publish"
+rm -f "${work}/state/"*
+sed -i 's/\[\[ "$(count owed)" -le 2 \]\]/[[ "$(count owed)" -le 1000 ]]/' "${work}/bin/curl"
+out="$(PATH="${work}/bin:${PATH}" STUB_STATE="${work}/state" \
+  BASE_URL=https://example.invalid ADMIN_TOKEN=admin DEPLOY_HOOK_TOKEN=hook \
+  DEPLOY_CONFIG_DIR="${work}/restart" SETTINGS_FILE=/nonexistent \
+  RESTART_POLL_SECONDS=1 RESTART_RETRY_SECONDS=0 RESTART_WAIT_SECONDS=2 \
+  bash "${SCRIPT}" 2>&1; echo "exit=$?")"
+check "names why" "still owes a restart" "${out}"
+check "and exits non-zero" "exit=1" "${out}"
+
 if [[ "${failures}" -gt 0 ]]; then
   echo "${failures} check(s) failed"
   exit 1
 fi
-echo "All publish-config-to-box prune checks passed."
+echo "All publish-config-to-box checks passed."

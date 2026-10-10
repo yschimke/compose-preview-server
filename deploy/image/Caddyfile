@@ -132,7 +132,10 @@
 	# `handle` (not a bare directive) so this one path peels off before the catch-all
 	# proxy below. The hook is fail-closed (idle without DEPLOY_HOOK_TOKEN), and only
 	# reachable here — it publishes no host port of its own.
-	handle /__hooks/rollout {
+	# /__hooks/restart is the same hook forcing the roll (no new image) so a config change published
+	# through the admin API takes effect without SSH; see deploy-hook.sh.
+	@deploy_hooks path /__hooks/rollout /__hooks/restart
+	handle @deploy_hooks {
 		reverse_proxy hook:9000
 	}
 

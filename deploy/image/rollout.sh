@@ -9,9 +9,17 @@
 # onto it (see Caddyfile — dynamic upstreams + passive health), then retire the
 # old replica. Existing traffic is served the entire time.
 #
-# Two ways to run it:
+# Three ways to run it:
 #   ./rollout.sh          one-shot: pull + roll if the image changed (manual op)
 #   ./rollout.sh --loop   poll forever (used by the `rollout` compose service)
+#   ./rollout.sh --force  one-shot: roll even when the image is unchanged (ROLLOUT_FORCE=1 too)
+#
+# --force is how a CONFIG change takes effect without SSH. The server reads the UI-builder catalog
+# settings, the editor pin and some deployment settings once at start, so a `PUT /admin/…` that
+# answers `restartRequired: true` has written config nothing is serving yet. A forced rollout is the
+# same zero-downtime swap as an image update — a fresh replica boots on the pinned tag, reads
+# /config, passes /readyz, and only then replaces the old one — just without a new digest to wait
+# for. `deploy-hook.sh` runs it for `POST /__hooks/restart`, which `publish-config-to-box.sh` calls.
 #
 # Only `preview` is rolled this way — `caddy` publishes fixed 80/443 ports so it
 # can't be scaled, and stays on Watchtower's recreate (a ~1s proxy blip, and only
@@ -33,6 +41,15 @@ LOCK_NAME="${ROLLOUT_LOCK_NAME:-compose-preview-rollout-lock}"
 # A rollout can legitimately take several health-timeout windows while replicas start and drain.
 # Keep the crash-recovery TTL comfortably above that so a slow rollout cannot lose exclusivity.
 LOCK_TTL="${ROLLOUT_LOCK_TTL:-$((HEALTH_TIMEOUT * 4 + 600))}"
+# Roll even when the pulled image is the one already running (see --force above).
+FORCE="${ROLLOUT_FORCE:-0}"
+# A forced restart WAITS for a held lock instead of skipping. An image rollout that finds the lock
+# held can skip, because the holder is deploying that same image; a restart cannot, because a
+# rollout that started before the config was written may have booted its replica on the old config,
+# and a skipped restart would report a config as applied that nothing serves. Bounded by the lock's
+# own crash-recovery TTL plus a margin, so a wedged lock fails the restart instead of hanging it.
+LOCK_WAIT="${ROLLOUT_LOCK_WAIT:-$((LOCK_TTL + 60))}"
+LOCK_POLL="${ROLLOUT_LOCK_POLL:-10}"
 
 log() { echo "rollout: $*"; }
 
@@ -102,7 +119,11 @@ acquire_rollout_lock() {
       return 0
     fi
   fi
-  log "another rollout is active — skipping"
+  if [ "$FORCE" = 1 ]; then
+    log "another rollout is active — waiting for it before the forced restart"
+  else
+    log "another rollout is active — skipping"
+  fi
   return 1
 }
 
@@ -138,8 +159,20 @@ roll_once() {
   # The hook and poller can notice the same image seconds apart. Without one host-wide lock both
   # call docker-rollout, each treats the other's new replica as an old replica, and the steady-state
   # count doubles. A skipped contender is success: the lock holder is already deploying that image.
+  # A forced restart is the exception — see LOCK_WAIT.
   if ! acquire_rollout_lock; then
-    return 0
+    if [ "$FORCE" != 1 ]; then
+      return 0
+    fi
+    waited=0
+    while ! acquire_rollout_lock; do
+      if [ "$waited" -ge "$LOCK_WAIT" ]; then
+        log "forced restart: lock still held after ${LOCK_WAIT}s — giving up"
+        return 1
+      fi
+      run_interruptible sleep "$LOCK_POLL" || true
+      waited=$((waited + LOCK_POLL))
+    done
   fi
   docker compose pull "$SERVICE" >/dev/null 2>&1 || log "pull failed (using cached image)"
   before="$(running_image_id)"
@@ -150,7 +183,7 @@ roll_once() {
     trap - EXIT INT TERM
     return 0
   fi
-  if [ -n "$before" ] && [ "$before" = "$after" ]; then
+  if [ -n "$before" ] && [ "$before" = "$after" ] && [ "$FORCE" != 1 ]; then
     log "'$SERVICE' already up to date"
     release_rollout_lock
     trap - EXIT INT TERM
@@ -158,6 +191,8 @@ roll_once() {
   fi
   if [ -z "$before" ]; then
     log "'$SERVICE' not running — starting via rollout"
+  elif [ "$before" = "$after" ]; then
+    log "forced restart of '$SERVICE' on its current image (health timeout ${HEALTH_TIMEOUT}s)"
   else
     log "new image for '$SERVICE' — rolling (health timeout ${HEALTH_TIMEOUT}s)"
   fi
@@ -189,6 +224,9 @@ if [ "${1:-}" = "--loop" ]; then
     # most often be swallowed.
     run_interruptible sleep "$INTERVAL" || true
   done
+elif [ "${1:-}" = "--force" ]; then
+  FORCE=1
+  roll_once
 else
   roll_once
 fi
