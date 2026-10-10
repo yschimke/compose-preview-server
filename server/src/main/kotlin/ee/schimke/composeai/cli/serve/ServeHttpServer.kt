@@ -5246,9 +5246,12 @@ class ServeHttpServer(
         }
         val (reference, bytes) = snapshot
         val expected = call.request.queryParameters["sha"]
-        if (expected != null && expected != reference.source.attributes["documentSha256"]) {
+        if (
+          (name.endsWith(".html") || expected != null) &&
+            expected != reference.source.attributes["documentSha256"]
+        ) {
           call.respondText(
-            "This design reference has changed. Reopen the comparison to review the new publish.",
+            "This design reference is unpinned or has changed. Reopen the comparison to review the current publish.",
             status = HttpStatusCode.Conflict,
           )
           return@withLeasedSession

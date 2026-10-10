@@ -10,7 +10,9 @@ The adaptive inbox pilot in `yschimke/m3-catalog/adaptive-uid-pilot` covers phon
 
 The CLI takes `--root`, `--plan`, `--out`, full source `--revision`, installed `--renderer`, native renderer `--catalog`, and optional `--components catalog=path`. Its native-render prerequisite is the same as `design render --local`, including the Kotlin compiler sidecar. Renderer density must match the declared capture density; mismatched dimensions fail publication.
 
-The publisher verifies the source document against the selected Git commit. It renders to temporary files, verifies dimensions, and writes content-addressed PNG/UID files before atomically replacing `references/index.json`. The existing `compose-preview-references/v1` schema carries provider `ui-builder`, a commit-pinned source URI, document/source hashes, renderer/component hashes, capture dimensions/theme/state and an inert UID artifact. It does not fetch the source URI. Catalog producers should include that directory with their ordinary images and source metadata.
+The CLI verifies both the capture plan and source documents against the selected Git commit before rendering. It rejects a malformed existing manifest before starting any captures. It renders to temporary files, verifies dimensions, and writes content-addressed PNG/UID files before atomically replacing `references/index.json`. The existing `compose-preview-references/v1` schema carries provider `ui-builder`, a commit-pinned source URI, document/source hashes, renderer/component hashes, capture dimensions/theme/state and an inert UID artifact. It does not fetch the source URI. Catalog producers should include that directory with their ordinary images and source metadata.
+
+Use a fresh staging directory for each publication. The publisher deliberately retains old content-addressed files so a reader holding the previous manifest can finish reading its assets; it does not garbage-collect a shared live output directory. Retire the old staging directory after its readers are finished.
 
 ## Navigation and review
 
@@ -18,13 +20,15 @@ The viewer's spec link and the focused comparison's **Open in UI Builder** link 
 
 The existing comparison scorer, highlighted pixel diff, overlay and report-region controls work unchanged. Reports should include viewport/theme/state, source commit, candidate/reference URLs and a selected region where useful. Fix the app or propose a reviewed UID change; do not regenerate the baseline merely to clear a diff.
 
-UID artifact reads are bounded and digest-checked. A missing or damaged UID leaves the raster comparison usable. A stale fingerprint or historical editor request returns a conflict instead of silently opening today's design. Historical raster comparison remains unchanged; historical editable snapshots are a follow-up.
+UID artifact reads are bounded and digest-checked. A missing or damaged UID leaves the raster comparison usable. Editor HTML requires its `sha` fingerprint: a missing/stale fingerprint or historical editor request returns a conflict instead of silently opening today's design. Raw UID downloads may omit `sha`. Historical raster comparison remains unchanged; historical editable snapshots are a follow-up.
 
 The project design library also accepts `.uid` files and explicit design IDs in collections, so a checked-in design can be opened independently of a published comparison. No dependency edge or release seam changes in compose-ui-builder are needed.
 
 ## Pilot evidence
 
-All 20 independent reference/candidate pairs were rendered and scored in Chromium. The list captures match exactly at every width and theme. Detail captures retain a visible Back-button appearance difference (0.72–1.69% changed pixels); that is an untriaged result, not an accepted baseline update. Both captures switch to two panes at 840dp. Interaction tests separately verify selection survives resize and Back returns to the phone list.
+All 20 independent reference/candidate pairs were rendered and scored in Chromium using a custom baked bundle with `RenderPilot` file-stem IDs. They are not the pilot's six discovered IDE preview IDs and cannot be attached through normal discovery publication unchanged. The pilot README documents the custom bundle and the extra catalog metadata used for code/report links; production publication remains separate work. The module is excluded from default builds unless `-PadaptiveUidPilot=true` is supplied.
+
+The list captures match exactly at every width and theme. Detail captures retain a visible Back-button appearance difference (0.72–1.69% changed pixels); that is an untriaged result, not an accepted baseline update. Both captures switch to two panes at 840dp. Interaction tests separately verify selection survives resize and Back returns to the phone list.
 
 The browser check also opened UI Builder from the comparison, followed the code context, downloaded the correct UID/state, returned to the same comparison, and inspected the issue draft's repository/source/reference fields. It submitted no issue. UI Builder's editing canvas deliberately unfolds all panes; its **Device view** toggle shows the actual adaptive layout.
 

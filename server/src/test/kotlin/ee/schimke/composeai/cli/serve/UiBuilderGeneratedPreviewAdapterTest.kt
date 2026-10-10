@@ -34,6 +34,15 @@ class UiBuilderGeneratedPreviewAdapterTest {
 
     assertEquals(first, second)
     assertEquals(
+      first,
+      UiBuilderGeneratedPreviewAdapter.previewEntry(
+        "JetcasterDiscoverExpanded",
+        1280,
+        800,
+        material3Theme = null,
+      ),
+    )
+    assertEquals(
       """
       package generated.uibuilder.preview
 
@@ -51,6 +60,25 @@ class UiBuilderGeneratedPreviewAdapterTest {
         .trimIndent(),
       first,
     )
+  }
+
+  @Test
+  fun `an explicit Material 3 environment wraps the generated screen in its color scheme`() {
+    for (theme in listOf("light", "dark")) {
+      val source =
+        UiBuilderGeneratedPreviewAdapter.previewEntry(
+          "Inbox",
+          412,
+          720,
+          material3Theme = theme,
+        )
+      assertTrue(
+        source.contains(
+          "androidx.compose.material3.MaterialTheme(colorScheme = androidx.compose.material3.${theme}ColorScheme()) { GeneratedUiBuilderScreen() }"
+        ),
+        source,
+      )
+    }
   }
 
   /**

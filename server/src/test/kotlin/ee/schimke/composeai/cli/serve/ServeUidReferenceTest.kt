@@ -48,7 +48,14 @@ class ServeUidReferenceTest {
         .use { it.code to it.body.string() }
     try {
       server.start()
-      assertEquals(200, get("/app/reference/phone.html").first)
+      assertEquals(
+        200,
+        get(
+            "/app/reference/phone.html?sha=${reference.source.attributes.getValue("documentSha256")}"
+          )
+          .first,
+      )
+      assertEquals(409, get("/app/reference/phone.html").first)
       assertEquals(document.decodeToString(), get("/app/reference/phone.uid").second)
       assertEquals(409, get("/app/reference/phone.html?sha=changed").first)
       assertEquals(409, get("/app/reference/phone.html?at=${"a".repeat(40)}").first)

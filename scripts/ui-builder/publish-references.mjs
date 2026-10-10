@@ -12,6 +12,18 @@ const schemas = new Set(['compose-ui-builder-document/v1', 'compose-ui-builder-d
 const safeId = /^[A-Za-z0-9][A-Za-z0-9._-]{0,150}$/;
 export const digest = bytes => createHash('sha256').update(bytes).digest('hex');
 
+// Verify before parsing: overrides in the capture plan are part of the reviewed baseline too.
+export function readCommittedFile(root, revision, file) {
+  const base = fs.realpathSync(root);
+  const absolute = fs.realpathSync(path.resolve(base, file));
+  const relative = path.relative(base, absolute);
+  if (relative.startsWith('..') || path.isAbsolute(relative)) throw new Error('Input must be inside the project');
+  const bytes = fs.readFileSync(absolute);
+  const committed = execFileSync('git', ['show', `${revision}:${relative.split(path.sep).join('/')}`], { cwd: base });
+  if (!committed.equals(bytes)) throw new Error(`Input differs from the selected source commit: ${relative}`);
+  return bytes;
+}
+
 export function selectDesign(text, id) {
   const file = JSON.parse(text);
   const documents = file.schema === 'compose-ui-builder-designs/v1' ? file.designs : [file];
@@ -50,6 +62,16 @@ export function publish({ config, root, out, revision, renderer, catalog, compon
   if (!/^[a-f0-9]{40}$/.test(revision)) throw new Error('A full source commit is required');
   if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(config.repository)) throw new Error('Invalid repository');
   if (!Array.isArray(config.captures) || !config.captures.length) throw new Error('No captures');
+  const dir = path.join(out, 'references');
+  const manifestPath = path.join(dir, 'index.json');
+  let old = [];
+  if (fs.existsSync(manifestPath)) {
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+    if (manifest.schema !== 'compose-preview-references/v1' || !Array.isArray(manifest.references) ||
+        manifest.references.some(ref => !ref || typeof ref.id !== 'string'))
+      throw new Error('Existing reference manifest requires schema compose-preview-references/v1 and a references array');
+    old = manifest.references;
+  }
   const provenance = catalog ? { rendererBundleSha256: digest(fs.readFileSync(catalog)) } : {};
   if (components) provenance.componentsSha256 = digest(fs.readFileSync(components.slice(components.indexOf('=') + 1)));
   const ids = new Set(), previews = new Set();
@@ -85,10 +107,7 @@ export function publish({ config, root, out, revision, renderer, catalog, compon
       };
     });
     // Only replace the manifest after every reference rendered successfully. Other providers remain.
-    const dir = path.join(out, 'references');
     fs.mkdirSync(dir, { recursive: true });
-    const manifestPath = path.join(dir, 'index.json');
-    const old = fs.existsSync(manifestPath) ? JSON.parse(fs.readFileSync(manifestPath, 'utf8')).references : [];
     const retained = old.filter(r => r.source?.provider !== 'ui-builder');
     if (retained.some(r => ids.has(r.id))) throw new Error('Reference id collides with another provider');
     for (const ref of references) {
@@ -109,11 +128,9 @@ if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.ar
       if (!options[key]) throw new Error(`Required: ${key}`);
     if (!/^[a-f0-9]{40}$/.test(options['--revision'])) throw new Error('A full source commit is required');
     const root = path.resolve(options['--root'] ?? '.');
-    const config = JSON.parse(fs.readFileSync(path.resolve(root, options['--plan']), 'utf8'));
+    const config = JSON.parse(readCommittedFile(root, options['--revision'], options['--plan']).toString('utf8'));
     for (const file of new Set(config.captures.map(entry => entry.file))) {
-      const committed = execFileSync('git', ['show', `${options['--revision']}:${file}`], { cwd: root });
-      if (!committed.equals(fs.readFileSync(path.resolve(root, file))))
-        throw new Error(`UID differs from the selected source commit: ${file}`);
+      readCommittedFile(root, options['--revision'], file);
     }
     const refs = publish({ config, root, out: path.resolve(options['--out']), revision: options['--revision'], renderer: path.resolve(options['--renderer']), catalog: path.resolve(options['--catalog']), components: options['--components'] });
     console.log(`Published ${refs.length} UID references`);
