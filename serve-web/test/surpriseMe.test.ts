@@ -8,6 +8,7 @@ import { pickSurprise } from "../src/surprisePick.js";
 import {
     SURPRISE_LAST_KEY,
     surprise,
+    surpriseNavigation,
     visibleCards,
 } from "../src/components/SurpriseMe.js";
 
@@ -68,6 +69,9 @@ describe("pickSurprise", () => {
 
 describe("<cp-surprise-me>", () => {
     let opened: string[];
+    let assigned: string[];
+    const realAssign = surpriseNavigation.assign;
+    const startHref = location.href;
 
     beforeEach(() => {
         resetDom();
@@ -75,6 +79,8 @@ describe("<cp-surprise-me>", () => {
         // deliberately does not clear.
         sessionStorage.removeItem(SURPRISE_LAST_KEY);
         opened = [];
+        assigned = [];
+        surpriseNavigation.assign = (href) => void assigned.push(href);
         document.body.innerHTML = `
           <cp-surprise-me></cp-surprise-me>
           <div id="cp-grid">
@@ -94,12 +100,18 @@ describe("<cp-surprise-me>", () => {
         document.addEventListener("click", record, true);
     });
 
-    afterEach(() => document.removeEventListener("click", record, true));
+    afterEach(() => {
+        document.removeEventListener("click", record, true);
+        surpriseNavigation.assign = realAssign;
+        history.replaceState(null, "", startHref);
+    });
 
+    // Records the card click without cancelling it, since a cancelled click is now what sends
+    // the die down its fallback path. happy-dom follows the link by moving `location`, which
+    // `afterEach` puts back.
     function record(event: Event): void {
         const card = (event.target as Element).closest?.("a.cp-card");
         if (!card) return;
-        event.preventDefault();
         opened.push(card.getAttribute("href")!);
     }
 
@@ -140,5 +152,27 @@ describe("<cp-surprise-me>", () => {
             null,
         );
         assert.deepEqual(opened, []);
+    });
+
+    it("still navigates when a handler swallows the card's click (a live card)", () => {
+        // `<cp-catalog-live>` cancels every click on the card it is streaming; the keyboard's R
+        // sends no pointerdown to end that session first.
+        const live = document.querySelector<HTMLAnchorElement>(
+            'a.cp-card[href="/p/one"]',
+        )!;
+        live.addEventListener("click", (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+        });
+        assert.equal(
+            surprise(() => 0),
+            live,
+        );
+        assert.deepEqual(assigned, [live.href]);
+    });
+
+    it("leaves an uncancelled click to the link itself", () => {
+        surprise(() => 0);
+        assert.deepEqual(assigned, []);
     });
 });

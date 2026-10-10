@@ -11,10 +11,14 @@
 // visitor to a freshly loaded landing. Per tab, like the theme choice, and best-effort: blocked
 // storage only loses the no-repeat rule.
 //
-// The navigation is the card's own `click()`, not `location.assign`: the card is the link the
-// visitor would have pressed, and going through it keeps whatever the page hangs off a card click
-// (the live-session lane's click suppression, analytics) in the path. Inert without JS, like
-// `<cp-bg-toggle>`, so this renders the button rather than adopting a server-emitted one.
+// The navigation is a click on the card itself first: the card is the link the visitor would have
+// pressed, and going through it keeps whatever the page hangs off a card click (analytics) in the
+// path. A handler may cancel that click, though — `<cp-catalog-live>` swallows every click on the
+// card it is streaming, because there a click drives the composition — and the keyboard's `R`
+// sends no outside pointerdown to end that session first. So a cancelled click falls back to
+// `location.assign`: the visitor asked to go somewhere, and the die must not silently do nothing.
+// Inert without JS, like `<cp-bg-toggle>`, so this renders the button rather than adopting a
+// server-emitted one.
 
 import { h, type VNode } from "../vue.js";
 import { customElement } from "../controllerElement.js";
@@ -35,6 +39,11 @@ export function visibleCards(root: ParentNode = document): HTMLAnchorElement[] {
         (card) => !card.closest("[hidden]"),
     );
 }
+
+/** The fallback navigation for a cancelled card click; an object so a test can stand in for it. */
+export const surpriseNavigation = {
+    assign: (href: string) => location.assign(href),
+};
 
 function remembered(): string | null {
     try {
@@ -63,7 +72,11 @@ export function surprise(
     const card = pickSurprise(visibleCards(), (c) => c.href, remembered(), rng);
     if (!card) return null;
     remember(card.href);
-    card.click();
+    // `dispatchEvent` rather than `click()` because it reports whether a handler cancelled it.
+    const followed = card.dispatchEvent(
+        new MouseEvent("click", { bubbles: true, cancelable: true }),
+    );
+    if (!followed) surpriseNavigation.assign(card.href);
     return card;
 }
 
