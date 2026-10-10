@@ -1773,6 +1773,10 @@ class ServeHttpServer(
             return@get
           }
           val file = resolved.toFile()
+          // Opened top-level, the player's shell runs under `sandbox allow-scripts`
+          // ([ServePagePolicy.sandboxFor]), an opaque origin whose module and Wasm requests need
+          // CORS — the same answer `/wasm/` gives for the same reason.
+          call.response.headers.append(HttpHeaders.AccessControlAllowOrigin, "*")
           val etag = "\"${file.length().toString(16)}-${file.lastModified().toString(16)}\""
           // These filenames are stable across preview-host releases. Revalidate every use so a
           // rollout cannot leave an already-open browser executing an older protocol decoder for
@@ -15002,12 +15006,12 @@ class ServeHttpServer(
     // A site hostname serves ONE catalog's app. These constant-prefix routes bypass canonical-path
     // isolation, so enforce the same one-catalog projection here.
     val site = call.siteSystem()
+    val catalogApp = if (site != null && system != site) null else system?.let(wasmCatalogs::get)
     val dir =
       if (site != null && system != site) null
       else
-        system?.let { selected ->
-          wasmCatalogs[selected] ?: wasmUiDir?.takeIf { sessions.isKnownSession(selected) }
-        }
+        catalogApp
+          ?: system?.let { selected -> wasmUiDir?.takeIf { sessions.isKnownSession(selected) } }
     if (dir == null) {
       call.respondText("not found", status = HttpStatusCode.NotFound)
       return
@@ -15021,6 +15025,9 @@ class ServeHttpServer(
       return
     }
     val file = resolved.toFile()
+    // A catalog's own app is that producer's code and is sandboxed when opened top-level; the
+    // packaged frontend this distribution ships is not ([ServePagePolicy.sandboxFor]).
+    if (catalogApp == null) ServePagePolicy.markServerOwned(call)
     // The sandboxed iframe has an opaque origin, so its ES-module and Wasm requests require CORS.
     call.response.headers.append(HttpHeaders.AccessControlAllowOrigin, "*")
     val etag = "\"${file.length().toString(16)}-${file.lastModified().toString(16)}\""

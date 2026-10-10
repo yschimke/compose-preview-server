@@ -5862,19 +5862,21 @@ public class ServeRunner(
   private fun buildUiBuilderGuidelines(
     env: Map<String, String> = System.getenv()
   ): ServeUiBuilderGuidelines? {
-    val key = env[ServeUiBuilderGuidelinesConfig.API_KEY_ENV]?.trim()?.takeIf { it.isNotEmpty() }
+    // Either the variable or `<name>_FILE` (a Docker secret), which keeps the key out of this
+    // process's environment block and so out of every child's ([ServeSecretEnv]).
+    val key = ServeSecretEnv.read(ServeUiBuilderGuidelinesConfig.API_KEY_ENV, env)
     val named = uiBuilderGuidelinesUsers.isNotEmpty() || uiBuilderGuidelinesOrgs.isNotEmpty()
     if (key == null) {
       if (named) {
         System.err.println(
           "serve: --ui-builder-guidelines-users/-orgs set but " +
-            "${ServeUiBuilderGuidelinesConfig.API_KEY_ENV} is not; the guidelines check is off"
+            "${ServeUiBuilderGuidelinesConfig.API_KEY_ENV} (or its ${ServeSecretEnv.FILE_SUFFIX}) " +
+            "is not; the guidelines check is off"
         )
       }
       return null
     }
-    val githubToken =
-      env[ServeUiBuilderGuidelinesConfig.GITHUB_TOKEN_ENV]?.trim()?.takeIf { it.isNotEmpty() }
+    val githubToken = ServeSecretEnv.read(ServeUiBuilderGuidelinesConfig.GITHUB_TOKEN_ENV, env)
     val config =
       ServeUiBuilderGuidelinesConfig(
         apiKey = key,

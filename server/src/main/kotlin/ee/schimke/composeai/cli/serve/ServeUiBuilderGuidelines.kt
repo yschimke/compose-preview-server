@@ -358,7 +358,20 @@ internal data class ServeUiBuilderGuidelinesConfig(
     }
   }
 
+  /**
+   * The generated `toString()` would print [apiKey] and [githubToken]: one `println(config)` or
+   * `"$config"` in a log line or a `require` message away from a leak. Both are redacted here, and
+   * only whether each is present is said.
+   */
+  override fun toString(): String =
+    "ServeUiBuilderGuidelinesConfig(apiKey=$REDACTED, model=$model, " +
+      "allowedUsers=$allowedUsers, allowedOrgs=$allowedOrgs, " +
+      "githubToken=${if (githubToken == null) "null" else REDACTED}, endpoint=$endpoint, " +
+      "decisionsEndpoint=$decisionsEndpoint, triage=$triage, minConfidence=$minConfidence)"
+
   companion object {
+    private const val REDACTED = "<redacted>"
+
     /**
      * Called directly. `typesafe/jev-router` routes this check to the same model most of the time,
      * but picks at random, through dearer providers, and reads only the text, so it never chooses a

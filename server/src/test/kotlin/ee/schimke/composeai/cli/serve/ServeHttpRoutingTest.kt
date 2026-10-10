@@ -2099,6 +2099,21 @@ class ServeHttpRoutingTest {
       assertTrue(fetch("/wasm/owned/").second.contains("catalog-owned app"))
       assertEquals(404, fetch("/wasm/not-a-catalog/").first)
 
+      // Opened top-level, a catalog's own app runs in an opaque origin; the packaged frontend is
+      // this distribution's code, a top-level app by design, and keeps the origin.
+      fun policy(path: String): String =
+        client
+          .newCall(
+            Request.Builder()
+              .url("http://127.0.0.1:${scopedServer.port}$path")
+              .header("Sec-Fetch-Dest", "document")
+              .build()
+          )
+          .execute()
+          .use { assertNotNull(it.header(ServePagePolicy.HEADER), path) }
+      assertTrue(policy("/wasm/owned/").endsWith("; sandbox allow-scripts"))
+      assertFalse(policy("/wasm/compose-m3/").contains("sandbox"))
+
       val noRedirects = OkHttpClient.Builder().followRedirects(false).build()
       val oldUrl =
         Request.Builder()
@@ -2322,8 +2337,27 @@ class ServeHttpRoutingTest {
           assertTrue(policy.contains("'wasm-unsafe-eval'"), policy)
           assertFalse(policy.contains("'unsafe-eval'"), policy)
           assertFalse(policy.contains("frame-ancestors"), policy)
+          // Opened top-level it is sandboxed into an opaque origin, away from the editor's
+          // localStorage; the answer depends on the request, so caches must key on it.
+          assertTrue(policy.endsWith("; sandbox allow-scripts"), policy)
+          assertTrue(response.headers("Vary").any { it.contains("Sec-Fetch-Dest") })
+          assertEquals("*", response.header("Access-Control-Allow-Origin"))
         }
       }
+      // Framed, the viewer's own `<iframe sandbox>` decides (a trusted catalog keeps its origin).
+      client
+        .newCall(
+          Request.Builder()
+            .url("http://127.0.0.1:${builderServer.port}/wasm/compose-m3/")
+            .header("Sec-Fetch-Dest", "iframe")
+            .build()
+        )
+        .execute()
+        .use { response ->
+          assertEquals(200, response.code)
+          val policy = assertNotNull(response.header(ServePagePolicy.HEADER))
+          assertFalse(policy.contains("sandbox"), policy)
+        }
       // The editor shell is a Wasm app too, but not a framed one.
       fetch("/ui-builder/").let { (code, response) ->
         response.use {
@@ -2332,6 +2366,8 @@ class ServeHttpRoutingTest {
           assertTrue(policy.contains("'wasm-unsafe-eval'"), policy)
           assertFalse(policy.contains("'unsafe-eval'"), policy)
           assertTrue(policy.contains("frame-ancestors 'self'"), policy)
+          // It holds the browser's OpenRouter key, so it keeps its origin and is never sandboxed.
+          assertFalse(policy.contains("sandbox"), policy)
         }
       }
     } finally {

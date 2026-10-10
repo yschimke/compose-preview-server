@@ -177,6 +177,62 @@ class PreviewGuidelinesMcpTest {
     assertThat((check.content.first() as ContentBlock.Text).text).contains("Note: com.example.Stop")
   }
 
+  private fun withGuidelines(location: String) =
+    JsonObject(
+      mapOf(
+        "previews" to JsonArray(listOf(JsonPrimitive("Stop"))),
+        "guidelines" to JsonPrimitive(location),
+      )
+    )
+
+  private fun errorText(result: ee.schimke.composeai.mcp.protocol.CallToolResult): String {
+    assertThat(result.isError).isTrue()
+    return result.content.filterIsInstance<ContentBlock.Text>().joinToString("\n") { it.text }
+  }
+
+  @Test
+  fun `a guidelines path must name a ui-builder guidelines file, so no other file is read`() {
+    val dir = Files.createTempDirectory("guidelines-path").toFile()
+    val dotEnv = File(dir, ".env").apply { writeText("OPENROUTER_KEY=sk-or-not-a-real-key\n") }
+    for (tool in listOf(PreviewGuidelinesMcp::prompt, PreviewGuidelinesMcp::check)) {
+      val text =
+        errorText(tool(withGuidelines(dotEnv.path), FakeHost(openRouterKey = "sk-or-test")))
+      assertThat(text).contains("ui-builder.guidelines.json")
+      assertThat(text).doesNotContain("sk-or-not-a-real-key")
+    }
+    // A symlink carrying the right name is judged by what it points at.
+    val link = File(File(dir, "linked").apply { mkdirs() }, "ui-builder.guidelines.json")
+    Files.createSymbolicLink(link.toPath(), dotEnv.toPath())
+    val text = errorText(PreviewGuidelinesMcp.prompt(withGuidelines(link.path), FakeHost(null)))
+    assertThat(text).contains("must be an http(s) URL")
+    assertThat(text).doesNotContain("sk-or-not-a-real-key")
+  }
+
+  @Test
+  fun `a malformed guidelines file is reported without echoing its contents`() {
+    val dir = Files.createTempDirectory("guidelines-bad").toFile()
+    val bad =
+      File(dir, "ui-builder.guidelines.json").apply { writeText("SECRET=hunter2-not-json\n") }
+    val text = errorText(PreviewGuidelinesMcp.prompt(withGuidelines(bad.path), FakeHost(null)))
+    assertThat(text).contains("not a readable ui-builder.guidelines.json")
+    assertThat(text).doesNotContain("hunter2")
+    assertThat(text).doesNotContain("SECRET")
+  }
+
+  @Test
+  fun `a problem keeps its first line only`() {
+    assertThat(
+        PreviewGuidelinesMcp.redactedProblem(
+          "not a readable ui-builder.guidelines.json: Unexpected JSON token at offset 0: " +
+            "Expected start of the object '{', but had 'S' instead at path: \$\n" +
+            "JSON input: SECRET=hunter2"
+        )
+      )
+      .isEqualTo("not a readable ui-builder.guidelines.json (invalid at offset 0)")
+    assertThat(PreviewGuidelinesMcp.redactedProblem("https://x answered 500\nbody"))
+      .isEqualTo("https://x answered 500")
+  }
+
   private fun png(): ByteArray =
     ByteArrayOutputStream()
       .also { ImageIO.write(BufferedImage(24, 24, BufferedImage.TYPE_INT_ARGB), "png", it) }
