@@ -80,6 +80,9 @@ class GradleRevisionBuilder(
     return try {
       val process =
         ProcessBuilder(listOf(gradlew.absolutePath) + args)
+          // The revision's build scripts are code the server did not write: they get the build
+          // allowlist, not the server's tokens and keys.
+          .also(BuildChildEnvironment::applyTo)
           .directory(worktreeDir)
           .redirectErrorStream(true)
           .start()

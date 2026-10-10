@@ -135,7 +135,11 @@ object PreviewGuidelinesMcp {
       }
       putJsonObject("guidelines") {
         put("type", "string")
-        put("description", "A ui-builder.guidelines.json file or URL; default: the module's.")
+        put(
+          "description",
+          "A ui-builder.guidelines.json file (by that name) or an http(s) URL; default: the " +
+            "module's.",
+        )
       }
       putJsonObject("surface") {
         put("type", "string")
@@ -273,7 +277,10 @@ object PreviewGuidelinesMcp {
       host.resolve(ref) ?: throw IllegalArgumentException("$tool: no preview matches `$ref`")
     }
     val location =
-      (args["guidelines"] as? JsonPrimitive)?.contentOrNull?.takeIf { it.isNotBlank() }
+      (args["guidelines"] as? JsonPrimitive)
+        ?.contentOrNull
+        ?.takeIf { it.isNotBlank() }
+        ?.also { requireGuidelinesLocation(tool, it) }
         ?: resolved
           .firstNotNullOfOrNull { it.buildDir }
           ?.let { File(it, "compose-previews/${CatalogGuidelinesV1.FILE_NAME}") }
@@ -287,7 +294,7 @@ object PreviewGuidelinesMcp {
     val guidelines =
       loaded.guidelines
         ?: throw IllegalArgumentException(
-          "$tool: ${loaded.problem ?: "no guidelines at $location"}"
+          "$tool: ${loaded.problem?.let(::redactedProblem) ?: "no guidelines at $location"}"
         )
     val surface =
       (args["surface"] as? JsonPrimitive)?.contentOrNull?.takeIf { it.isNotBlank() }
@@ -314,6 +321,40 @@ object PreviewGuidelinesMcp {
     }
     Prepared(guidelines, subjects, location, notes)
   }
+
+  /**
+   * A caller-named `guidelines` location: an `http(s)` URL, or a local file named
+   * [CatalogGuidelinesV1.FILE_NAME] — by the path given and by the path it resolves to, so a
+   * symlink of that name pointing elsewhere is refused too. The tool is reachable by whatever model
+   * drives the MCP client, prompt injection included, and an arbitrary path (`.env`, a shell
+   * profile) is not something it has any business reading.
+   */
+  internal fun requireGuidelinesLocation(tool: String, location: String) {
+    if (location.startsWith("http://") || location.startsWith("https://")) return
+    val file = File(location)
+    val resolvedName = runCatching { file.canonicalFile.name }.getOrNull()
+    require(file.name == CatalogGuidelinesV1.FILE_NAME && resolvedName == file.name) {
+      "$tool: `guidelines` must be an http(s) URL or a file named " +
+        "${CatalogGuidelinesV1.FILE_NAME}"
+    }
+  }
+
+  /**
+   * [CatalogGuidelinesLoader.Loaded.problem] fit to hand back to the caller. A decoding failure's
+   * message carries the input it failed on (kotlinx's `JSON input: …`, the whole text when it is
+   * short), so it is reduced to where the input went wrong; anything else keeps its first line.
+   */
+  internal fun redactedProblem(problem: String): String {
+    val readable = "not a readable ${CatalogGuidelinesV1.FILE_NAME}"
+    if (problem.startsWith(readable)) {
+      val offset = DECODE_OFFSET.find(problem)?.groupValues?.get(1)
+      return readable + (offset?.let { " (invalid at offset $it)" } ?: "")
+    }
+    return problem.lineSequence().first().take(MAX_PROBLEM_CHARS)
+  }
+
+  private val DECODE_OFFSET = Regex("at offset ([0-9]+)")
+  private const val MAX_PROBLEM_CHARS = 200
 
   /** `a11y/hierarchy` nodes as the engine's [PreviewNode]s: id, role, label and pixel bounds. */
   internal fun nodesOf(payload: JsonElement): List<PreviewNode> {

@@ -1353,8 +1353,10 @@ public class ServeCommandOptions(
                           is off unless that is set and one of these names somebody. Org
                           membership is read from GitHub; set
                           SERVE_UI_BUILDER_GUIDELINES_GITHUB_TOKEN to a token of an org member so
-                          private memberships count. Everyone else can still run the check in the
-                          editor with their own OpenRouter key.
+                          private memberships count. Either secret may instead be a file named by
+                          the same variable with _FILE appended (a Docker secret), which keeps it
+                          out of the process environment. Everyone else can still run the check in
+                          the editor with their own OpenRouter key.
         --ui-builder-guidelines-model <id>
                           The OpenRouter model for that check (default
                           deepseek/deepseek-v4.1-flash).

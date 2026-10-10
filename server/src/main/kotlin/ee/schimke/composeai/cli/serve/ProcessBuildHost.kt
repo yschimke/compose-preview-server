@@ -137,6 +137,9 @@ private constructor(private val process: Process, private val connection: BuildH
       val process =
         try {
           ProcessBuilder(command)
+            // The host drives a Gradle build of the project; neither it nor that build's scripts
+            // get the server's own secrets ([BuildChildEnvironment]).
+            .also(BuildChildEnvironment::applyTo)
             .directory(workingDirectory)
             // The host's own diagnostics are on stderr and are never framed; letting them through
             // is what makes a failure to start visible instead of silent.

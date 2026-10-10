@@ -64,6 +64,8 @@ class ServeUiBuilderRuntimeAssetsTest {
         assertTrue(policy.contains("'wasm-unsafe-eval'"), policy)
         assertTrue(!policy.contains("'unsafe-eval'"), policy)
         assertTrue(!policy.contains("frame-ancestors"), policy)
+        // Opaque even when opened top-level, as the editor's `sandbox="allow-scripts"` frame is.
+        assertTrue(policy.endsWith("; sandbox allow-scripts"), policy)
       }
       get("/ui-builder/runtime/m3-2026.09/").use { response ->
         assertEquals(200, response.code)

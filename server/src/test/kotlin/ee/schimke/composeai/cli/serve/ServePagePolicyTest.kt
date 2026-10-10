@@ -7,8 +7,12 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class ServePagePolicyTest {
-  private fun directives(path: String, formActions: List<String> = emptyList()) =
-    ServePagePolicy.forPath(path, formActions).split("; ").associate {
+  private fun directives(
+    path: String,
+    formActions: List<String> = emptyList(),
+    fetchDest: String? = null,
+  ) =
+    ServePagePolicy.forPath(path, formActions, fetchDest).split("; ").associate {
       it.substringBefore(' ') to it.substringAfter(' ', "")
     }
 
@@ -76,6 +80,91 @@ class ServePagePolicyTest {
     for (path in pages) {
       val ancestors = directives(path)["frame-ancestors"]
       if (path in framable) assertNull(ancestors, path) else assertEquals("'self'", ancestors, path)
+    }
+  }
+
+  @Test
+  fun `catalog-built app shells get an opaque origin when opened top-level`() {
+    // The editor keeps a person's OpenRouter key in this origin's localStorage, so no page running
+    // code a catalog producer built may have this origin when loaded as a document. These fail
+    // closed: no fetch metadata at all (plain-HTTP LAN origin, older browser) also sandboxes.
+    val catalogApps =
+      listOf(
+        "/wasm/m3-catalog/",
+        "/wasm/m3-catalog/index.html",
+        "/wasm-private/a/m3-catalog/",
+        "/ui-builder/runtime/m3-2026.09/index.html",
+      )
+    for (path in catalogApps) {
+      for (dest in listOf(null, "", "document", "embed", "object")) {
+        assertEquals(
+          "allow-scripts",
+          directives(path, fetchDest = dest)["sandbox"],
+          "$path ($dest)",
+        )
+      }
+      assertFalse(ServePagePolicy.forPath(path).contains("allow-same-origin"), path)
+    }
+    // The Remote Compose player is this server's own, and its frames need their origin, so it is
+    // sandboxed only when the browser says the load is not a frame.
+    for (path in listOf("/rc-player-wasm/", "/rc-player-wasm/index.html")) {
+      for (dest in listOf("document", "embed", "object")) {
+        assertEquals(
+          "allow-scripts",
+          directives(path, fetchDest = dest)["sandbox"],
+          "$path ($dest)",
+        )
+      }
+      for (dest in listOf(null, "")) {
+        assertNull(directives(path, fetchDest = dest)["sandbox"], "$path ($dest)")
+      }
+    }
+  }
+
+  @Test
+  fun `a framed app shell is left to its embedding frame, except a renderer runtime`() {
+    // A trusted catalog's app and the Remote Compose player are framed with their real origin on
+    // purpose; a response-level sandbox would override the iframe's `allow-same-origin`.
+    for (path in listOf("/wasm/m3-catalog/", "/wasm-private/a/m3-catalog/", "/rc-player-wasm/")) {
+      for (dest in listOf("iframe", "frame", "IFRAME")) {
+        assertNull(directives(path, fetchDest = dest)["sandbox"], "$path ($dest)")
+      }
+      assertTrue(ServePagePolicy.variesByFetchDest(path), path)
+    }
+    // The editor only ever frames a runtime opaque, so it is sandboxed whatever the request says.
+    val runtime = "/ui-builder/runtime/m3-2026.09/index.html"
+    assertEquals("allow-scripts", directives(runtime, fetchDest = "iframe")["sandbox"])
+    assertFalse(ServePagePolicy.variesByFetchDest(runtime))
+  }
+
+  @Test
+  fun `a server-owned shell at a catalog-app path keeps its origin, a renderer runtime never`() {
+    for (path in listOf("/wasm/m3-catalog/", "/wasm-private/a/m3-catalog/")) {
+      val policy = ServePagePolicy.forPath(path, fetchDest = "document", serverOwned = true)
+      assertFalse(policy.contains("sandbox"), "$path: $policy")
+    }
+    assertTrue(
+      ServePagePolicy.forPath(
+          "/ui-builder/runtime/m3-2026.09/index.html",
+          fetchDest = "document",
+          serverOwned = true,
+        )
+        .endsWith("; sandbox allow-scripts")
+    )
+  }
+
+  @Test
+  fun `the editor and the catalog pages are not sandboxed`() {
+    for (path in
+      pages -
+        setOf(
+          "/ui-builder/runtime/m3-2026.09/index.html",
+          "/wasm/m3-catalog/",
+          "/wasm-private/a/m3-catalog/",
+          "/rc-player-wasm/",
+        )) {
+      assertNull(directives(path, fetchDest = "document")["sandbox"], path)
+      assertFalse(ServePagePolicy.variesByFetchDest(path), path)
     }
   }
 
