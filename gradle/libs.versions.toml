@@ -219,7 +219,7 @@ composeai-tools = "2.39.2"
 # own content: the AndroidX lanes on a shared `/d/<id>` page. The image's `lib-daemon-android`
 # sidecar is read from this pin, so it is what makes the deployed host replay the bytes.
 # 3.15.1 is built on contracts 3.24.0 (compose-preview-daemon#234), the line this build pins.
-composeai-preview-daemon = "3.15.1"
+composeai-preview-daemon = "3.15.2"
 # 2.9.0 is the first release carrying `DesignEnvironmentV1.exportDevices` and its Set/Reset
 # changes, which is the field a design names its export devices in. 2.14.0 adds the components a
 # design defines — `DesignDocumentV1.components`, `DesignNodeV1.component` and the `binding` value
