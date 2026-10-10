@@ -892,3 +892,29 @@ that reaches the browser's Design API reaches these tools and nothing more.
   MCP does not create an unmetered rendering lane.
 - Grant authorization is evaluated for every call, so expiry or revocation takes effect without an
   MCP-session teardown.
+
+## Requesting a design-guidelines review from the MCP App
+
+The Compose Preview viewer offers **Review design guidelines** for a preview
+or UI Builder design. When the host advertises text messaging, a click sends
+a `ui/message` user request to the current chat agent with the subject,
+revision when available, and render overrides. The agent uses the catalog
+guidelines checklist; the viewer does not directly invoke a model provider.
+A sent request is labeled as a request, never as a passed review.
+
+Static cards, hosts without messaging, and rejected deliveries expose a
+selectable request to copy into chat. Transport credentials are not included.
+Comparison and tray results do not offer a subject-specific review action.
+
+For a UI Builder subject, **Show saved review** appears only when the host
+actually lists `ui_builder_get_guidelines`. It reads the shared result on
+click and displays model, rules version, reviewed/current revisions,
+answered/asked and unchecked counts, and findings. Stale, missing and denied
+results are labeled explicitly; this action performs no review or write.
+
+The compact verdict and coverage also appear in chat. Requested UI Builder results
+recorded with `ui_builder_record_guidelines` appear in the editor's Issues
+panel, with model and revision freshness. The viewer's accessibility findings
+and layout overlays are measured render details, separate from model
+guideline verdicts. See [browser evidence](../evidence/mcp-audit-action/README.md);
+live host delivery must be verified before claiming support in Codex Desktop.
