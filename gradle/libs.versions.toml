@@ -122,7 +122,8 @@ graphics-shapes = "1.1.0"
 # 2.39.0 (2026-10-10) carries a bundle's `guidelines.json` — each preview's design-guidelines
 # result — and render-host's `ServeGuidelineResultsStore` / `ServeHost.guidelineResultFor`, which
 # the hosted catalog serves as the `guidelines/result` data product (compose-ai-tools#5749).
-composeai-tools = "2.39.0"
+# 2.39.1 is built on compose-preview-daemon 3.15.1 (compose-ai-tools#5755), the pair below.
+composeai-tools = "2.39.1"
 # The render daemons, the renderers, the preview annotations and data API, and the data extractors,
 # published from yschimke/compose-preview-daemon since its 3.0.0 (compose-ai-tools#5336). Layer 1a
 # in that repository's `docs/design/REPOSITORY_LAYERS.md`: between the contracts and
@@ -217,7 +218,8 @@ composeai-tools = "2.39.0"
 # (`overrides.remoteCompose.documentBase64`, compose-preview-daemon#231) in place of the preview's
 # own content: the AndroidX lanes on a shared `/d/<id>` page. The image's `lib-daemon-android`
 # sidecar is read from this pin, so it is what makes the deployed host replay the bytes.
-composeai-preview-daemon = "3.15.0"
+# 3.15.1 is built on contracts 3.24.0 (compose-preview-daemon#234), the line this build pins.
+composeai-preview-daemon = "3.15.1"
 # 2.9.0 is the first release carrying `DesignEnvironmentV1.exportDevices` and its Set/Reset
 # changes, which is the field a design names its export devices in. 2.14.0 adds the components a
 # design defines — `DesignDocumentV1.components`, `DesignNodeV1.component` and the `binding` value
@@ -403,7 +405,9 @@ composeai-contracts = "3.24.0"
 # 3.101.0 is built on compose-ai-tools 2.38.0 and builds component records through the contracts'
 # builders (compose-ui-builder#617): 2.38.0's `preview-discovery` no longer carries a public
 # `ComponentRecord.copy`, which 3.100.0's export called, so the two move together.
-composeai-ui-builder = "3.101.0"
+# 3.102.0 is built on compose-ai-tools 2.39.1 and daemon 3.15.1 (compose-ui-builder#627), and lets
+# its runtime boundary admit the contracts' component record module (compose-ui-builder#622).
+composeai-ui-builder = "3.102.0"
 # The CMP/Wasm Remote Compose player (yschimke/rc-players' `rc-player-wasm-dist`, a zip of its
 # static browser bundle). Shipped in the server tarball as `rc-player-wasm/`, which the image's
 # entrypoint already passes as `--rc-player-wasm-dir`: that serves `/rc-player-wasm/`, enables the
