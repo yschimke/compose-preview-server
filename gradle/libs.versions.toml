@@ -262,7 +262,7 @@ composeai-preview-daemon = "3.15.2"
 # (batched requests, records, `GuidelineRegionV1`). 3.23.0+ moved the component-record types into
 # `component-catalog-protocol`; compose-ui-builder 3.101.0 already builds records through its
 # Builders (compose-ui-builder#617), so the server can take it.
-composeai-contracts = "3.25.0"
+composeai-contracts = "3.26.0"
 
 # The extracted UI builder (yschimke/compose-ui-builder), resolved from its RELEASES. Three jars
 # and a BOM on Maven Central, and the editor archive as a GitHub release asset reached through the
