@@ -115,6 +115,7 @@ test('UI Builder review preserves revision and links result recording to its Iss
     assert.ok(prompt.includes('"designId":"my-design","revision":12'));
     assert.ok(prompt.includes('ui_builder_record_guidelines'));
     assert.ok(prompt.includes('canonical editor link'));
+    assert.ok(prompt.includes('home/thread links in chat rather than duplicating'));
     assert.ok(!prompt.includes('transport-secret'));
   } finally { await browser.close(); }
 });

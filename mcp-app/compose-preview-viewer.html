@@ -290,7 +290,9 @@
       'Use your own model with a keyless prompt where available; do not start a paid provider run. ' +
       'Report verdict, rule findings, answered and unchecked coverage, revision/render identity, freshness, model and evidence links. ' +
       'Do not edit the UI. For a UI Builder design, save this requested review with ui_builder_record_guidelines if authorized access permits, ' +
-      'and return its canonical editor link. Otherwise return findings in chat and explain any missing evidence or unavailable shared result.';
+      'and return its canonical editor link. Keep detailed design findings and discussion at the recorded home when authorized, ' +
+      'and return a compact verdict, coverage and home/thread links in chat rather than duplicating that discussion. ' +
+      'Only subjects without a recorded home return detailed findings directly in chat. Report missing evidence, unavailable posting or an unsaved shared result.';
     auditSection.hidden = false;
     updateAuditAction();
   }
