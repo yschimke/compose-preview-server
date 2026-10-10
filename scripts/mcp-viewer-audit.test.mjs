@@ -100,6 +100,8 @@ for (const options of [{ messaging: false }, { static: true }, { reject: true },
       }
       assert.equal(await frame.locator('#audit-run').isVisible(), false);
       assert.ok((await frame.locator('#audit-prompt').inputValue()).includes(uri));
+      if (!options.reject) assert.equal(await frame.locator('#audit-copy').evaluate(el => el.open), false);
+      if (!await frame.locator('#audit-copy').evaluate(el => el.open)) await frame.locator('#audit-copy summary').click();
       await frame.locator('#audit-select').click();
       assert.ok(await frame.locator('#audit-prompt').evaluate(el => el.selectionEnd === el.value.length));
       assert.equal(await page.evaluate(() => window.messages.length), options.reject ? 1 : 0);

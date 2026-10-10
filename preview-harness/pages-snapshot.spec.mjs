@@ -7170,7 +7170,8 @@ test("contract · with no containerDimensions a tall preview fits about 480px", 
   await expect.poll(() => firstScreenBottom(viewer)).toBeLessThanOrEqual(480);
   expect((await image.boundingBox()).height).toBeGreaterThan(250);
   await expect.poll(() => reportedHeights(page)).toContainEqual(expect.any(Number));
-  // Details and comments may sit below the fold, but this result has neither.
+  // Expanded review prompts, details and comments may sit below the fold. The initial card fits.
+  await expect(viewer.locator("#audit-copy")).toHaveJSProperty("open", false);
   expect(Math.max(...(await reportedHeights(page)))).toBeLessThanOrEqual(480);
 });
 
@@ -7864,3 +7865,4 @@ test("design cards expose two primary actions and tuck secondary controls into m
     card.getByRole("button", { name: "Create the copy" }),
   ).toBeHidden();
 });
+
