@@ -86,20 +86,22 @@ describe("the viewer's copyable preview id", () => {
                 },
             },
         } as unknown as Navigator;
-        assert.equal(await copyText("p1", el, nav), true);
+        assert.equal(await copyText("p1", nav), true);
         assert.deepEqual(written, ["p1"]);
 
+        // The fallback copies the id even while the chip is showing its confirmation.
+        el.textContent = "Copied ✓";
         const commands: string[] = [];
         const original = document.execCommand;
         document.execCommand = (c: string) => {
-            commands.push(c);
+            commands.push(`${c}:${document.getSelection()?.toString()}`);
             return true;
         };
         try {
-            assert.equal(await copyText("p1", el, {} as Navigator), true);
+            assert.equal(await copyText("p1", {} as Navigator), true);
         } finally {
             document.execCommand = original;
         }
-        assert.deepEqual(commands, ["copy"]);
+        assert.deepEqual(commands, ["copy:p1"]);
     });
 });

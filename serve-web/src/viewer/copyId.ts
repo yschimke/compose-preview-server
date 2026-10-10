@@ -16,12 +16,13 @@ const FLASH_MS = 1400;
  * Put `text` on the clipboard, resolving whether it got there.
  *
  * The async Clipboard API first; where it is missing (an insecure `http://` LAN host) the legacy
- * `execCommand("copy")`, which copies the current selection — so `selectTarget`'s contents are
- * selected for it, the same requirement the export bar's Copy URL meets with its hidden field.
+ * `execCommand("copy")`, which copies the current selection — so `text` is put in a detached-from-
+ * view span and selected, the same requirement the export bar's Copy URL meets with its hidden
+ * field. Never the chip itself: during the confirmation flash the chip reads "Copied ✓", and a
+ * second activation in that window would copy the status message instead of the id.
  */
 export function copyText(
     text: string,
-    selectTarget: Node,
     nav: Navigator = navigator,
     doc: Document = document,
 ): Promise<boolean> {
@@ -31,10 +32,14 @@ export function copyText(
             () => false,
         );
     }
+    const holder = doc.createElement("span");
+    holder.textContent = text;
+    holder.style.cssText = "position:fixed;left:-9999px;top:0;white-space:pre";
     try {
+        doc.body.append(holder);
         const sel = doc.getSelection();
         const range = doc.createRange();
-        range.selectNodeContents(selectTarget);
+        range.selectNodeContents(holder);
         sel?.removeAllRanges();
         sel?.addRange(range);
         const ok = doc.execCommand("copy");
@@ -42,13 +47,15 @@ export function copyText(
         return Promise.resolve(ok);
     } catch {
         return Promise.resolve(false);
+    } finally {
+        holder.remove();
     }
 }
 
 /** Make one preview-id chip copy its id on click, Enter or Space. */
 export function wireCopyId(
     el: HTMLElement,
-    copy: (text: string, target: Node) => Promise<boolean> = copyText,
+    copy: (text: string) => Promise<boolean> = (text) => copyText(text),
 ): void {
     // The `title` carries the full id even when the visible text has been swapped for the
     // confirmation, so it is the source of truth; the text is the fallback for markup without one.
@@ -65,7 +72,7 @@ export function wireCopyId(
     el.after(live);
     let timer: ReturnType<typeof setTimeout> | undefined;
     const activate = () => {
-        void copy(id, el).then((ok) => {
+        void copy(id).then((ok) => {
             const message = ok ? "Copied ✓" : "Copy failed";
             // Pin the width while the shorter confirmation shows, so the disclosures riding the
             // same row do not hop left and back.
