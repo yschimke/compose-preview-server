@@ -179,6 +179,9 @@ class ServePagePolicyTest {
     assertTrue(
       directives("/ui-builder/designs/x").getValue("connect-src").contains("https://openrouter.ai")
     )
+    assertTrue(
+      directives("/ui-builder/x").getValue("connect-src").contains("https://openrouter.ai")
+    )
     assertFalse(
       directives("/ui-builder/runtime/r1/index.html").getValue("connect-src").contains("openrouter")
     )

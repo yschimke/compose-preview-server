@@ -39,7 +39,8 @@ import java.net.URI
  * * **Fetches and sockets**: this origin (which covers the same-host `ws:`/`wss:` live sockets),
  *   `data:`/`blob:` URLs the report capture reads back, and `raw.githubusercontent.com` for the
  *   published history manifest. The UI-builder editor also reaches `openrouter.ai`, for the
- *   guidelines check a person runs on their own key.
+ *   guidelines check and browser-owned chat a person runs on their own key. The editor calls the
+ *   provider directly; this allowance does not admit provider access from catalog runtime frames.
  * * **Frames**: only this origin's own apps (`/wasm/…`, `/rc-player-wasm/…`,
  *   `/ui-builder/runtime/…`).
  * * **Forms** post to this origin, and the issue-report forms open GitHub's new-issue page. A form
