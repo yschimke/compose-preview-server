@@ -102,17 +102,23 @@ export function setPreviewStarred(
 
 /**
  * The catalog this page belongs to: the path ahead of the viewer's `/p/` segment, or the whole path
- * on a landing. A top-level site serves its one catalog at `/`, which keys as `""` on both pages.
+ * on a landing. A root-mounted legacy catalog has no such path and is told apart by `?session=`
+ * instead — the same order `ServeHttpServer.selectedSessionId` resolves them in — so two of those
+ * keep separate stars. A top-level site serves its one catalog at `/`, which keys as `""`, and is
+ * already kept apart from every other by its origin.
  */
-export function systemFromPath(pathname: string): string {
+export function systemFromPath(pathname: string, search = ""): string {
     const parts = pathname.split("/").filter((p) => p.length > 0);
     const at = parts.indexOf("p");
     const own = at >= 0 ? parts.slice(0, at) : parts;
+    let path: string;
     try {
-        return own.map(decodeURIComponent).join("/");
+        path = own.map(decodeURIComponent).join("/");
     } catch {
-        return own.join("/");
+        path = own.join("/");
     }
+    if (path) return path;
+    return new URLSearchParams(search).get("session") ?? "";
 }
 
 /** The preview ids a catalog-grid card shows: both renders of a light/dark pair, else its link. */
@@ -411,7 +417,7 @@ function install(): void {
     const viewer = document.querySelector<HTMLElement>(
         ".cp-viewer[data-preview-id]",
     );
-    const system = systemFromPath(location.pathname);
+    const system = systemFromPath(location.pathname, location.search);
 
     if (isHome) {
         page = { kind: "home" };

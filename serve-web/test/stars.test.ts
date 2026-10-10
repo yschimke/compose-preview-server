@@ -63,6 +63,19 @@ describe("stars", () => {
         // A top-level site serves its one catalog at `/`.
         assert.equal(systemFromPath("/"), "");
         assert.equal(systemFromPath("/p/button"), "");
+        // A root-mounted legacy catalog is told apart by its session.
+        assert.equal(
+            systemFromPath("/p/button", "?session=wear-m3"),
+            "wear-m3",
+        );
+        assert.equal(
+            systemFromPath("/", "?token=t&session=wear-m3"),
+            "wear-m3",
+        );
+        assert.equal(
+            systemFromPath("/compose-m3/", "?session=other"),
+            "compose-m3",
+        );
     });
 
     it("reads a light/dark card as both of its renders", () => {
