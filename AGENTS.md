@@ -51,6 +51,14 @@ boundaries.
   in `ServeSettings.ALL`, not a new `.env` key, and compose passes it through empty.
 - Immediately before every push, fetch `origin main` and confirm the branch or PR has not merged.
 - Open or update a PR automatically after a completed coding change.
+- **Subscribe to PR notifications by default.** After opening or updating a PR,
+  check the signed-in GitHub account's thread subscription. If it is already
+  `SUBSCRIBED`, keep it; otherwise subscribe when the connection supports it,
+  then verify the state. If subscription reads or writes are unavailable, state
+  that limitation in the PR instead of claiming success. Before pushing and
+  before finishing, check every PR you opened or actively drive for unresolved
+  human and automated review comments. A GitHub subscription does not keep an
+  agent session running or provide background monitoring by itself.
 - **Merge only when explicitly requested.** Only merge a PR or enable auto-merge
   when the user specifically asks. If the request or intended PRs are unclear,
   ask for clarification before merging. A request to implement, fix, review,
