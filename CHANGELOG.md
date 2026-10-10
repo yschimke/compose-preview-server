@@ -1,5 +1,24 @@
 # Changelog
 
+## [3.118.0](https://github.com/yschimke/compose-preview-server/compare/v3.117.0...v3.118.0) (2026-10-10)
+
+
+### Features
+
+* compare checked-in UID references and open editor snapshots ([#1495](https://github.com/yschimke/compose-preview-server/issues/1495)) ([7275fb7](https://github.com/yschimke/compose-preview-server/commit/7275fb7f4f7fdf743382afd845a0630ed423f8cf))
+
+
+### Bug Fixes
+
+* **deps:** compose-ui-builder 3.103.0, which drops the jetcaster template, honours a record component's shelfRole and refreshes the remote-m3 record ([#1501](https://github.com/yschimke/compose-preview-server/issues/1501)) ([eca9a25](https://github.com/yschimke/compose-preview-server/commit/eca9a25de030024b8042e3e64419569f11ea5549))
+* **deps:** update dependency ee.schimke.composeai:compose-ai-tools-bom to v2.39.2 ([#1492](https://github.com/yschimke/compose-preview-server/issues/1492)) ([8303624](https://github.com/yschimke/compose-preview-server/commit/83036241b3b1e6b14dd77c8be4f689cd300cbd1a))
+* **deps:** update dependency ee.schimke.composeai:compose-ai-tools-bom to v2.40.0 ([#1499](https://github.com/yschimke/compose-preview-server/issues/1499)) ([310d1b2](https://github.com/yschimke/compose-preview-server/commit/310d1b2648121352ac2cc919ef74aced76e39f09))
+* **deps:** update dependency ee.schimke.composeai:compose-ai-tools-bom to v2.41.0 ([#1502](https://github.com/yschimke/compose-preview-server/issues/1502)) ([313cc3c](https://github.com/yschimke/compose-preview-server/commit/313cc3c1d2cd0eab16770fb5681df4654b1797cb))
+* **deps:** update dependency ee.schimke.composeai:compose-preview-contracts-bom to v3.25.0 ([#1414](https://github.com/yschimke/compose-preview-server/issues/1414)) ([f445e80](https://github.com/yschimke/compose-preview-server/commit/f445e8065f7541f1d70daf9fb29c3b1b6542e216))
+* **deps:** update dependency ee.schimke.composeai:compose-preview-daemon-bom to v3.15.2 ([#1496](https://github.com/yschimke/compose-preview-server/issues/1496)) ([8f94bc0](https://github.com/yschimke/compose-preview-server/commit/8f94bc0fba690904f789571f4cd8d6d829ee5af7))
+* **security:** sandbox catalog app pages and keep the guidelines key out of build children ([#1491](https://github.com/yschimke/compose-preview-server/issues/1491)) ([0c08bf1](https://github.com/yschimke/compose-preview-server/commit/0c08bf1853f5d0934054568b92d9b0d66419086b))
+* **serve:** report registry catalogs from the latest sync read on /status ([#1498](https://github.com/yschimke/compose-preview-server/issues/1498)) ([9a81644](https://github.com/yschimke/compose-preview-server/commit/9a81644ea94d2ca2c36b3ebd8bfc1b5a31b3a1b5))
+
 ## [3.117.0](https://github.com/yschimke/compose-preview-server/compare/v3.116.0...v3.117.0) (2026-10-10)
 
 
