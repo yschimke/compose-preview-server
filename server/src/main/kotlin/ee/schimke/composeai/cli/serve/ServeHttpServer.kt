@@ -17683,6 +17683,13 @@ class ServeHttpServer(
       return
     }
     if (grant == null) {
+      // Retrying a submitted OAuth approval must resume its outstanding callback too. The
+      // original CSRF seal was verified above; no new grant is minted by this return leg.
+      if (mcpOAuth.forRequest(requestId) != null) {
+        store.request(requestId)?.let { request ->
+          if (respondAgentGrantOutcome(store, request)) return
+        }
+      }
       respondAgentGrantNotice(
         heading = "Nothing to approve",
         message =

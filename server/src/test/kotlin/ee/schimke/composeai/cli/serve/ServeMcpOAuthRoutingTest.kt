@@ -358,6 +358,13 @@ class ServeMcpOAuthRoutingTest {
     assertEquals(302, resumeCode)
     assertEquals(back, resumeLocation)
 
+    val grantCount = grants.activeGrants().size
+    val (retryCode, _, retryLocation) =
+      postForm(approvalPath, "action=approve&csrf=${field(page, "csrf")}&scope=live&ttl=1800")
+    assertEquals(302, retryCode)
+    assertEquals(back, retryLocation)
+    assertEquals(grantCount, grants.activeGrants().size)
+
     // 4. The client redeems it with the verifier.
     val (tokenCode, tokenBody, _) =
       post(
