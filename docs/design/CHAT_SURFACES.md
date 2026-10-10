@@ -1,11 +1,11 @@
-# Chat surfaces: Slack first
+# Chat surfaces
 
 ## Browser-owned chat
 
 The companion compose-ui-builder change adds **Connect agent → Browser chat** with local history,
 default design instructions and opt-in comment monitoring while the page is open. Its lifecycle
 and credential storage are documented in
-[Browser-owned design chat](https://github.com/yschimke/compose-ui-builder/blob/main/docs/design/UI_BUILDER_BROWSER_CHAT.md).
+[Browser-owned design chat](https://github.com/yschimke/compose-ui-builder/blob/419bca7319d7df61baca1771a9543abe36681e9f/docs/design/UI_BUILDER_BROWSER_CHAT.md).
 Deploying it requires a release of that editor and the normal `composeai-ui-builder` pin update;
 changing this document does not upgrade the served editor archive.
 
