@@ -321,6 +321,12 @@ class ServeCatalogStore(
     path.endsWith(it)
   }
 
+  private fun isPublishedRcDocumentPath(path: String): Boolean =
+    path.startsWith("documents/") &&
+      path.endsWith(".rc") &&
+      path.split('/').all { it.isNotBlank() && it != "." && it != ".." } &&
+      path.none { it == '\\' || it == '?' || it == '#' || it == '%' }
+
   /**
    * One declared baked image, resolved to everything the load loop needs *before* any fetch: its
    * route-safe [id], the staged [target] it writes to (null when that path escaped the previews dir
@@ -333,6 +339,7 @@ class ServeCatalogStore(
     val id: String,
     val target: File?,
     val image: Image,
+    val rcDocument: String?,
     val componentId: String?,
     val section: String?,
     val group: String?,
@@ -630,6 +637,7 @@ class ServeCatalogStore(
             id,
             target,
             image,
+            component.rcDocument,
             componentId,
             section,
             group,
@@ -651,6 +659,7 @@ class ServeCatalogStore(
     // paint therefore fills the default previews concurrently through the ordinary request path —
     // no separate background pass to schedule, cancel on refresh, or reason about.
     val bakedPathById = LinkedHashMap<String, String>()
+    val rcDocumentPathById = LinkedHashMap<String, String>()
     // Branch path per capture route id, for the host to fetch on demand. Captures are NOT staged
     // here, on the same reasoning that made the baked images lazy — and more so: a capture is one
     // to
@@ -673,6 +682,7 @@ class ServeCatalogStore(
         val id = planned.id
         val image = planned.image
         bakedPathById[id] = planned.path
+        planned.rcDocument?.takeIf(::isPublishedRcDocumentPath)?.let { rcDocumentPathById[id] = it }
         slugs.add(id.substringBefore(SLUG_SEPARATOR))
         planned.path
           .removePrefix("$IMAGES_DIR/")
@@ -966,6 +976,10 @@ class ServeCatalogStore(
       if (trust().trustsBranch(repo, branch))
         BundleVerifier.Verdict.Trusted(listOf(BundleVerifier.Basis.Branch(repo, branch)))
       else BundleVerifier.Verdict.Unverified("branch $repo@$branch is not trusted")
+    // A published RC document is executable input to the browser player. Only an explicitly
+    // trusted delivery branch may advertise that lane, and the bytes arrive only when requested.
+    val replayableRcDocs =
+      if (verdict is BundleVerifier.Verdict.Trusted) rcDocumentPathById.toMap() else emptyMap()
 
     // Fetch the catalog's baked editable vectors (figma/<slug>.svg + crops) so the host can serve
     // an SVG per preview; null when the branch carried none (host then 404s the .svg lane).
@@ -1142,6 +1156,12 @@ class ServeCatalogStore(
           // host never builds a URL or applies a fetch policy, it just asks for an id it declared.
           fetchBakedPng = { id ->
             bakedPathById[id]?.let { path -> fetchCatalogAsset(base + path) }
+          },
+          declaredRcDocs = replayableRcDocs.keys.toList(),
+          fetchRcDoc = { id ->
+            replayableRcDocs[id]?.let { path ->
+              fetchCatalogAsset(base + path)?.takeIf { it.size <= MAX_PUBLISHED_RC_DOC_BYTES }
+            }
           },
           // The same seam for the motion axis: ids the catalog publishes a capture for, and the
           // fetch that lands one. Captures are never staged at registration (see [motionPathById]),
@@ -1485,6 +1505,10 @@ class ServeCatalogStore(
                 ((liveBundle != null || declaredLiveBundles.isNotEmpty()) ||
                   (src != null && src.module.isNotBlank())) ->
                 ServeDegradation.unverifiedNoRerender()
+              // Every baked card can also replay its published document in the browser. This is a
+              // live client-side lane even though the branch carries no server daemon bundle.
+              bakedPathById.isNotEmpty() && replayableRcDocs.keys.containsAll(bakedPathById.keys) ->
+                null
               else -> ServeDegradation.catalogBakedOnly()
             },
           deferredNote,
@@ -3722,6 +3746,8 @@ class ServeCatalogStore(
   private data class Component(
     val componentId: String? = null,
     val images: List<Image> = emptyList(),
+    /** Branch-relative Remote Compose document shared by this component's baked variants. */
+    val rcDocument: String? = null,
     /**
      * The `componentId` of this component's counterpart in the [Catalog.compareWith] sibling
      * (`@CatalogComponent(parallel = …)`). The other half of the pairing: `compareWith` says which
@@ -4245,6 +4271,7 @@ class ServeCatalogStore(
     const val MAX_DESIGN_PAGES = 40
     private const val MAX_FETCH_BYTES = 25L * 1024 * 1024 // 25 MB per catalog asset
     private const val MAX_RUNTIME_ARCHIVE_FETCH_BYTES = 64L * 1024 * 1024
+    private const val MAX_PUBLISHED_RC_DOC_BYTES = 8 * 1024 * 1024
 
     /**
      * A catalog's live directories are `<root>/<system>/g<generation>`; the staging tree it is

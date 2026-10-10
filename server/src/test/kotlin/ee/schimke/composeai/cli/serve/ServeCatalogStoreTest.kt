@@ -563,6 +563,79 @@ class ServeCatalogStoreTest {
   }
 
   @Test
+  fun `trusted published RC documents replay lazily without a live bundle`() {
+    val document = byteArrayOf(0x52, 0x43, 0x01)
+    val requested = CopyOnWriteArrayList<String>()
+    val catalog =
+      """{"schema":"design-parity-catalog/v1","system":"compose-m3","components":[
+        {"componentId":"Example","rcDocument":"documents/example.rc",
+         "images":[{"path":"images/example/ideal.png"}]}]}"""
+    val trust =
+      TrustStore(
+        branches = listOf(TrustedBranch("yschimke/compose-ai-tools", "design-artifacts/compose-m3"))
+      )
+    val fetch: (String) -> ByteArray? = { url ->
+      requested += url
+      when {
+        url.endsWith("/catalog.json") -> catalog.toByteArray()
+        url.endsWith("/documents/example.rc") -> document
+        url.endsWith(".png") -> png()
+        else -> null
+      }
+    }
+    assertTrue(store(trust, fetch = fetch).load("compose-m3") is ServeCatalogStore.Result.Ok)
+    val host = registered.getValue("compose-m3")
+    val id = host.previews.single().id
+    assertTrue(host.hasRemoteComposeDoc(id))
+    assertEquals(listOf(RcPlayerBackend.CAMAELON_JS), host.enabledRcPlayersFor(id))
+    assertTrue(host.degradations.isEmpty(), "every baked preview has a browser replay lane")
+    assertFalse(requested.any { it.endsWith(".rc") }, "document fetch waits for playback")
+    assertContentEquals(document, host.remoteComposeDoc(id))
+    assertContentEquals(document, host.remoteComposeDoc(id))
+    assertEquals(1, requested.count { it.endsWith("/documents/example.rc") })
+
+    assertTrue(
+      store(TrustStore.EMPTY, fetch = fetch).load("compose-m3") is ServeCatalogStore.Result.Ok
+    )
+    val untrusted = registered.getValue("compose-m3")
+    assertFalse(untrusted.hasRemoteComposeDoc(untrusted.previews.single().id))
+    assertTrue(untrusted.enabledRcPlayersFor(untrusted.previews.single().id).isEmpty())
+    assertEquals(
+      listOf(ServeDegradation.CATALOG_BAKED_ONLY),
+      untrusted.degradations.map { it.code },
+    )
+  }
+
+  @Test
+  fun `published RC paths cannot escape the documents directory`() {
+    val catalog =
+      """{"schema":"design-parity-catalog/v1","system":"compose-m3","components":[
+        {"componentId":"Example","rcDocument":"documents/../../outside.rc",
+         "images":[{"path":"images/example/ideal.png"}]},
+        {"componentId":"Encoded","rcDocument":"documents/%2e%2e/outside.rc",
+         "images":[{"path":"images/encoded/ideal.png"}]}]}"""
+    val requested = CopyOnWriteArrayList<String>()
+    val trust =
+      TrustStore(
+        branches = listOf(TrustedBranch("yschimke/compose-ai-tools", "design-artifacts/compose-m3"))
+      )
+    assertTrue(
+      store(trust) { url ->
+          requested += url
+          when {
+            url.endsWith("/catalog.json") -> catalog.toByteArray()
+            url.endsWith(".png") -> png()
+            else -> null
+          }
+        }
+        .load("compose-m3") is ServeCatalogStore.Result.Ok
+    )
+    val host = registered.getValue("compose-m3")
+    assertTrue(host.previews.none { host.hasRemoteComposeDoc(it.id) })
+    assertFalse(requested.any { it.endsWith(".rc") })
+  }
+
+  @Test
   fun `catalog imports the published reference manifest and keeps source URLs inert`() {
     val root = tempRoot()
     val referencePng = png()
