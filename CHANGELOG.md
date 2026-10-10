@@ -1,5 +1,21 @@
 # Changelog
 
+## [3.117.0](https://github.com/yschimke/compose-preview-server/compare/v3.116.0...v3.117.0) (2026-10-10)
+
+
+### Features
+
+* **guidelines:** preview_guidelines_prompt and check_preview_guidelines MCP tools ([#1483](https://github.com/yschimke/compose-preview-server/issues/1483)) ([34b6f7e](https://github.com/yschimke/compose-preview-server/commit/34b6f7e0fd649c01451bd55806ab93bce0c24c14))
+* **guidelines:** serve each preview's guideline result as a data product ([#1488](https://github.com/yschimke/compose-preview-server/issues/1488)) ([e9c5e78](https://github.com/yschimke/compose-preview-server/commit/e9c5e78cc05cad23f04228c8d6d64ea71764cf8d))
+
+
+### Bug Fixes
+
+* **deps:** compose-ai-tools 2.39.1, compose-preview-daemon 3.15.1 and ui-builder 3.102.0 ([#1489](https://github.com/yschimke/compose-preview-server/issues/1489)) ([7395c4a](https://github.com/yschimke/compose-preview-server/commit/7395c4a725373a91dd21af43e7819d5b6c3a3fe0))
+* **deps:** update dependency ee.schimke.composeai:compose-ai-tools-bom to v2.38.0 ([#1485](https://github.com/yschimke/compose-preview-server/issues/1485)) ([de86bc5](https://github.com/yschimke/compose-preview-server/commit/de86bc50bc38b2d32d7725ff1a7e19137986fa50))
+* **deps:** update dependency ee.schimke.composeai:compose-ai-tools-bom to v2.39.0 ([#1487](https://github.com/yschimke/compose-preview-server/issues/1487)) ([dc16244](https://github.com/yschimke/compose-preview-server/commit/dc162441ec3d77d065674e2d0b7cca8490c2b388))
+* **guidelines:** review findings from [#1424](https://github.com/yschimke/compose-preview-server/issues/1424), [#1432](https://github.com/yschimke/compose-preview-server/issues/1432), [#1468](https://github.com/yschimke/compose-preview-server/issues/1468), [#1471](https://github.com/yschimke/compose-preview-server/issues/1471), [#1482](https://github.com/yschimke/compose-preview-server/issues/1482) and [#1483](https://github.com/yschimke/compose-preview-server/issues/1483) ([#1486](https://github.com/yschimke/compose-preview-server/issues/1486)) ([43ab970](https://github.com/yschimke/compose-preview-server/commit/43ab970dda61d2e180e4442fd897abc6278bedfe))
+
 ## [3.116.0](https://github.com/yschimke/compose-preview-server/compare/v3.115.0...v3.116.0) (2026-10-09)
 
 
