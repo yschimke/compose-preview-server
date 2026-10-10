@@ -1,5 +1,28 @@
 # Chat surfaces: Slack first
 
+## Browser-owned chat
+
+The companion compose-ui-builder change adds **Connect agent → Browser chat** with local history,
+default design instructions and opt-in comment monitoring while the page is open. Its lifecycle
+and credential storage are documented in
+[Browser-owned design chat](https://github.com/yschimke/compose-ui-builder/blob/main/docs/design/UI_BUILDER_BROWSER_CHAT.md).
+Deploying it requires a release of that editor and the normal `composeai-ui-builder` pin update;
+changing this document does not upgrade the served editor archive.
+
+The shared server remains the design and discussion service. Chat calls OpenRouter directly from
+the editor; no user provider keys, private conversation store, inference proxy or persistent agent
+runner are added here. Existing operator-funded guideline checks are a separate opt-in feature.
+The editor's CSP already admits `https://openrouter.ai`; catalog runtime frames do not receive
+that permission. The existing comment feed supplies snapshots, and reviews remain private until
+a person chooses to post through the ordinary comment UI.
+
+For work after the browser closes, the user's own agent runtime watches comments through
+`ui_builder_await_comments` and saves its own conversation/cursor. It authenticates using the
+existing scoped, expiring and revocable design access grant. Reopening browser chat never renews
+a grant or automatically starts monitoring. This server does not need the agent's provider token.
+
+## External chat surfaces
+
 Issue [#1254](https://github.com/yschimke/compose-preview-server/issues/1254), part of
 [#1235](https://github.com/yschimke/compose-preview-server/issues/1235).
 
