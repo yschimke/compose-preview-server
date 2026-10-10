@@ -10,6 +10,7 @@ Non-secret settings live in a deployment's `settings.json` (preview.coo.ee: [`de
 |---|---|---|---|---|
 | `uiBuilder.adminActors` | `SERVE_UI_BUILDER_ADMIN_ACTORS` | restart | preview | GitHub actors who administer every shared UI-builder design and its folder placement. They gain no catalog, trust or site authority. An empty list turns off the image's default (`github:yschimke`). |
 | `uiBuilder.startUrl` | `SERVE_UI_BUILDER_START_URL` | restart | preview, playground | Where the UI builder's start page sends a visitor. |
+| `uiBuilder.hostRoot` | `SERVE_UI_BUILDER_HOST_ROOT` | restart | preview | Serve the UI builder at the root of SERVE_UI_BUILDER_HOST (`https://ui.coo.ee/<design>`) instead of under `/ui-builder/`, keeping every server route (`/start`, `/api`, `/mcp`, `/agent-access`, `/auth`, `/admin`, health and status, assets) on that host. Needs an editor bundle that reads the `ui-builder-base-path` meta. Ignored without SERVE_UI_BUILDER_HOST. |
 | `uiBuilder.guidelines.model` | `SERVE_UI_BUILDER_GUIDELINES_MODEL` | live | preview | The OpenRouter model id the `guidelines` design check runs on, on this box's key. Default `deepseek/deepseek-v4.1-flash`. |
 | `uiBuilder.guidelines.users` | `SERVE_UI_BUILDER_GUIDELINES_USERS` | live | preview | GitHub logins who may spend this box's OpenRouter key on the `guidelines` check. The check stays off unless this or `orgs` names someone. |
 | `uiBuilder.guidelines.orgs` | `SERVE_UI_BUILDER_GUIDELINES_ORGS` | live | preview | GitHub organizations whose members may run the `guidelines` check. |

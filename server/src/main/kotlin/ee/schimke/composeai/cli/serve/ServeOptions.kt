@@ -478,6 +478,16 @@ public interface ServeOptions {
   public val uiBuilderStartUrl: String?
 
   /**
+   * Serve the UI builder at the ROOT of [uiBuilderHost] (`https://ui.coo.ee/<design>`) instead of
+   * under `/ui-builder/`, keeping every server route ([ServeSites.RESERVED_SYSTEMS]) on that host.
+   * Off by default: it needs an editor bundle that reads the `ui-builder-base-path` meta, or the
+   * editor writes `/ui-builder/<id>` links (still served, and redirected on navigation). Ignored
+   * without [uiBuilderHost]. See `ServeUiBuilderHostRoot.kt`.
+   */
+  public val uiBuilderHostRoot: Boolean
+    get() = false
+
+  /**
    * Raw `--catalogs-file` path, unopened.
    *
    * The CLI knows a path was given; `ServeCatalogsConfigFile` — what that file means, and how it is

@@ -517,6 +517,13 @@ public class ServeCommandOptions(
       requireNotNull(ServeSites.normalizeHost(raw)) { "--ui-builder-host must be a hostname" }
     }
 
+  override val uiBuilderHostRoot: Boolean =
+    ("--ui-builder-host-root" in args).also { rooted ->
+      require(!rooted || uiBuilderHost != null) {
+        "--ui-builder-host-root needs --ui-builder-host: it roots the builder on that host"
+      }
+    }
+
   override val uiBuilderStartUrl: String? =
     args.flagValue("--ui-builder-start-url")?.also { raw ->
       val uri = java.net.URI(raw)

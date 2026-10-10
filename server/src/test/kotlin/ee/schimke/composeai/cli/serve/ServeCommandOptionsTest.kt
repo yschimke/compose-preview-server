@@ -34,6 +34,16 @@ class ServeCommandOptionsTest {
   }
 
   @Test
+  fun `rooting the builder on its host is opt in and needs the host`() {
+    assertFalse(options(emptyList()).uiBuilderHostRoot)
+    assertFalse(options(listOf("--ui-builder-host", "ui.coo.ee")).uiBuilderHostRoot)
+    assertTrue(
+      options(listOf("--ui-builder-host", "ui.coo.ee", "--ui-builder-host-root")).uiBuilderHostRoot
+    )
+    assertFailsWith<IllegalArgumentException> { options(listOf("--ui-builder-host-root")) }
+  }
+
+  @Test
   fun `constructor normalises network and capacity arguments`() {
     val options =
       options(

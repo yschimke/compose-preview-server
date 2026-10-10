@@ -257,6 +257,17 @@ object ServeSettings {
         BOTH,
       ),
       Setting(
+        "uiBuilder.hostRoot",
+        "SERVE_UI_BUILDER_HOST_ROOT",
+        Type.Flag,
+        Apply.RESTART,
+        "Serve the UI builder at the root of SERVE_UI_BUILDER_HOST (`https://ui.coo.ee/<design>`) " +
+          "instead of under `/ui-builder/`, keeping every server route (`/start`, `/api`, `/mcp`, " +
+          "`/agent-access`, `/auth`, `/admin`, health and status, assets) on that host. Needs an " +
+          "editor bundle that reads the `ui-builder-base-path` meta. Ignored without " +
+          "SERVE_UI_BUILDER_HOST.",
+      ),
+      Setting(
         "uiBuilder.guidelines.model",
         "SERVE_UI_BUILDER_GUIDELINES_MODEL",
         Type.Text(),
