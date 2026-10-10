@@ -8280,6 +8280,7 @@ ${captureControlsHtml().prependIndent("          ")}
       body =
         """
         <h1 class="cp-head">Designs</h1>
+        <p><a href="/ui-builder/projects$navSuffix">Projects — app files, resources and sharing</a></p>
         <p class="cp-sub">Every design this server permits <code>${esc(viewerActorId)}</code> to open,
         newest first. Open one to carry on with it, duplicate one to start from it.</p>
         $noticeHtml$requestAccess

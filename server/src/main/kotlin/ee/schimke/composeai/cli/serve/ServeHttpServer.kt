@@ -641,6 +641,7 @@ class ServeHttpServer(
   private val uiBuilderGuidelineStore: ServeUiBuilderGuidelineStore? = null,
   /** Shared server-side folders for designs; null leaves folder organization unavailable. */
   private val uiBuilderFolderStore: ServeUiBuilderFolderStore? = null,
+  private val uiBuilderProjectStore: ServeUiBuilderProjectStore? = null,
   /**
    * The asset lane of [uiBuilderService] — the bytes behind a design's `assets` map. Null leaves
    * the asset routes and the `ui_builder_put_asset` tool unregistered, which is what a host with no
@@ -753,14 +754,16 @@ class ServeHttpServer(
    * a grant that names its designs held to them — see [ServeUiBuilderGrantScope]. Nothing in this
    * class reaches the unwrapped port, which is why the constructor parameter is not a property.
    */
-  private val designService: UiBuilderServicePort? = uiBuilderService?.let { service ->
+  private val designService: UiBuilderServicePort? = uiBuilderService?.let { raw ->
+    val service = uiBuilderProjectStore?.let { ServeUiBuilderProjectService(raw, it) } ?: raw
     agentGrants?.let {
       ServeUiBuilderGrantScope.limit(service, ServeUiBuilderGrantScope.lookupOf(it), branchParents)
     } ?: service
   }
 
   /** The asset lane of [designService], under the same limit. */
-  private val designAssets: UiBuilderAssetPort? = uiBuilderAssets?.let { assets ->
+  private val designAssets: UiBuilderAssetPort? = uiBuilderAssets?.let { raw ->
+    val assets = uiBuilderProjectStore?.let { ServeUiBuilderProjectAssets(raw, it) } ?: raw
     agentGrants?.let {
       ServeUiBuilderGrantScope.limit(assets, ServeUiBuilderGrantScope.lookupOf(it), branchParents)
     } ?: assets
@@ -1449,6 +1452,17 @@ class ServeHttpServer(
             installUiBuilderCatalogGuidelinesRoute(
               sameOriginUiBuilderAuthorization,
               uiBuilderCatalogGuidelines,
+            )
+          }
+          if (uiBuilderProjectStore != null) {
+            installUiBuilderProjectRoutes(
+              ServeUiBuilderProjects(
+                uiBuilderProjectStore,
+                designService,
+                serverOrigin = ::canonicalServerOrigin,
+              ),
+              sameOriginUiBuilderAuthorization,
+              agentGrants?.let(ServeUiBuilderGrantScope::lookupOf),
             )
           }
           if (uiBuilderFolderStore != null) {

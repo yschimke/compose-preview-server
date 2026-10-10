@@ -1,0 +1,16 @@
+{
+  "serverVersion": "3.119.1-SNAPSHOT",
+  "checks": [
+    "project create",
+    "uid import",
+    "scoped document open",
+    "source identity on download",
+    "shared resource save",
+    "unauthenticated access refused",
+    "workspace browser flow",
+    "review browser flow",
+    "canonical copy badge",
+    "embedded editor ready"
+  ],
+  "browserErrors": []
+}

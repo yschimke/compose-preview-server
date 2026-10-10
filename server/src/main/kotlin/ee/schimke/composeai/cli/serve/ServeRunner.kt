@@ -2659,6 +2659,7 @@ public class ServeRunner(
     val catalogGuidelines: ServeCatalogGuidelines = ServeCatalogGuidelines(),
     /** Shared file-manager folders, stored beside design state without changing revisions. */
     val folders: ServeUiBuilderFolderStore?,
+    val projects: ServeUiBuilderProjectStore? = null,
     /**
      * The components this host's editors publish, beside the state for the reason designs live here
      * while they move: a project's own `ui-builder/components/` is its repository's to change.
@@ -3482,6 +3483,12 @@ public class ServeRunner(
             )
           }
           .getOrNull(),
+      projects =
+        runCatching { ServeUiBuilderProjectStore(directory.resolve("projects").toPath()) }
+          .onFailure {
+            System.err.println("serve: UI-builder projects unavailable (${it.message})")
+          }
+          .getOrNull(),
       components = runCatching {
           ServeUiBuilderComponentStore(
             directory.resolve(ServeUiBuilderComponentStore.DIRECTORY).toPath()
@@ -4137,6 +4144,7 @@ public class ServeRunner(
         uiBuilderGuidelineStore = uiBuilderLane?.guidelineRecords,
         uiBuilderCatalogGuidelines = uiBuilderLane?.catalogGuidelines,
         uiBuilderFolderStore = uiBuilderLane?.folders,
+        uiBuilderProjectStore = uiBuilderLane?.projects,
         uiBuilderAssets = uiBuilderLane?.service,
         // Wrapped like the service, so a merge redraws the parent's listing card.
         uiBuilderBranches =

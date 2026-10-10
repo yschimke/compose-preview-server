@@ -338,6 +338,11 @@ A signed-in person can browse every design the service permits them to read at
 shows the exact service reason when one cannot open, and lets an owner manage sharing inline. It is
 actor-scoped and has no connection to the all-designs operator surface at `/admin/ui-builder`.
 
+`/ui-builder/projects` groups multiple design files, shared JSON resources and collaborators into
+an app workspace. Projects can load commit-pinned `.uid` files from GitHub and propose reviewed
+edits as a pull request while displaying each design's canonical home; see
+[`UI_BUILDER_HOSTED_PROJECTS.md`](docs/design/UI_BUILDER_HOSTED_PROJECTS.md).
+
 A served catalog's own composables can also be offered *inside* the builder's catalogs as a
 component pack (`--ui-builder-packs confetti-mobile=mobile,confetti-wear=wear`), switched on by an
 author from the editor's settings; see
