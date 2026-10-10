@@ -416,6 +416,37 @@ input, select, textarea, progress { accent-color: var(--md-sys-color-primary); }
 .cp-home-component-name { font-weight: 500; }
 .cp-home-component-catalog { color: var(--md-sys-color-on-surface-variant);
   font-size: var(--md-sys-typescale-label-medium-size); }
+/* Recently viewed (`chrome/recent.ts`): the last few previews opened, above the front door's and a
+   landing's grid. Deliberately smaller than a card — a strip of chips with a 40px thumbnail, one
+   line high — so it is a shortcut back rather than another section to scroll past. A long strip
+   scrolls sideways inside itself instead of wrapping into a second band. */
+.cp-recent { margin: 0 0 24px; }
+.cp-recent-head-row { display: flex; align-items: baseline; gap: 12px; margin: 0 0 8px; }
+.cp-recent-head { margin: 0; font-size: var(--md-sys-typescale-title-small-size); font-weight: 500;
+  color: var(--md-sys-color-on-surface-variant); }
+.cp-recent-clear { padding: 2px 8px; border: 0; border-radius: var(--md-sys-shape-corner-full);
+  background: transparent; color: var(--md-sys-color-on-surface-variant); font: inherit;
+  font-size: var(--md-sys-typescale-label-medium-size); cursor: pointer; }
+.cp-recent-clear:hover { color: var(--md-sys-color-primary);
+  background: color-mix(in srgb, var(--md-sys-color-primary) 8%, transparent); }
+.cp-recent-clear:focus-visible { outline: 3px solid var(--md-sys-color-secondary); outline-offset: 1px; }
+.cp-recent-list { display: flex; gap: 8px; overflow-x: auto; padding: 2px 2px 6px;
+  scrollbar-width: thin; }
+.cp-recent-item { flex: none; display: inline-flex; align-items: center; gap: 8px; max-width: 240px;
+  padding: 4px 12px 4px 4px; border: 1px solid var(--md-sys-color-outline-variant);
+  border-radius: var(--md-sys-shape-corner-small); color: var(--md-sys-color-on-surface);
+  text-decoration: none; }
+.cp-recent-item:hover { text-decoration: none; border-color: var(--md-sys-color-outline);
+  background: color-mix(in srgb, var(--md-sys-color-on-surface) 8%, transparent); }
+.cp-recent-item:focus-visible { outline: 3px solid var(--md-sys-color-secondary); outline-offset: 1px; }
+.cp-recent-thumb { flex: none; width: 40px; height: 40px; object-fit: contain;
+  border-radius: calc(var(--md-sys-shape-corner-small) - 3px);
+  background: var(--md-sys-color-surface-container); }
+.cp-recent-text { display: flex; flex-direction: column; min-width: 0; }
+.cp-recent-label, .cp-recent-catalog { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.cp-recent-label { font-size: var(--md-sys-typescale-label-large-size); font-weight: 500; }
+.cp-recent-catalog { color: var(--md-sys-color-on-surface-variant);
+  font-size: var(--md-sys-typescale-label-small-size); }
 @media (max-width: 640px) {
   /* No room for a field beside the brand: the bar keeps the button and the field takes the row
      under it, full width, which is where a phone expects a search to open anyway. */
