@@ -50,7 +50,12 @@ boundaries.
   holds only secrets and facts about the machine. A new `SERVE_*` setting that is neither is a line
   in `ServeSettings.ALL`, not a new `.env` key, and compose passes it through empty.
 - Immediately before every push, fetch `origin main` and confirm the branch or PR has not merged.
-- Open or update a PR automatically after a completed coding change. Never auto-merge.
+- Open or update a PR automatically after a completed coding change.
+- **Merge only when explicitly requested.** Only merge a PR or enable auto-merge
+  when the user specifically asks. If the request or intended PRs are unclear,
+  ask for clarification before merging. A request to implement, fix, review,
+  or open a PR does not by itself authorize merging. Honor required checks,
+  reviews, and branch protections.
 - **Embed images only from a GitHub-hosted origin — including images this server serves.** Claude
   Code on the web silently rewrites `![alt](url)` to `[alt](url)` on the way to the API whenever the
   destination is not a GitHub host, so the picture lands as a bare link and the API still returns
