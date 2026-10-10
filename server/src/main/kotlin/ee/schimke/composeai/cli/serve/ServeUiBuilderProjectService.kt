@@ -118,7 +118,9 @@ internal class ServeUiBuilderProjectService(
     val own =
       result.designs.mapNotNull { row ->
         if (row.designId in sharedIds) return@mapNotNull null
-        val project = scope.projectForDesign(row.designId) ?: return@mapNotNull row
+        // The runtime lists canonical designs only; alternatives are listed under their parent.
+        // Ordinary rows need no branch lookup, even on hosts with many project owners.
+        val project = projects.projectForDesign(row.designId) ?: return@mapNotNull row
         if (project.role(call.actor) == null) null
         else row.copy(requesterAccess = projectAccess(call.actor, project))
       }
@@ -249,10 +251,17 @@ internal class ServeUiBuilderProjectScope(
     var current = id
     val visited = mutableSetOf<String>()
     while (visited.add(current)) {
+      val indexed = port as? UiBuilderAdminPort
+      val candidates =
+        if (indexed != null) {
+          val owner = indexed.adminDesignSummary(current)?.ownerActorId ?: return null
+          if (owner !in owners) return null
+          listOf(owner)
+        } else owners
       // The underlying designs are private to the project owner. Look up only branch ancestry
       // internally, then enforce the caller's current project role before delegating any action.
       val branch =
-        owners.firstNotNullOfOrNull { owner ->
+        candidates.firstNotNullOfOrNull { owner ->
           (port.executeBranch(
               UiBuilderBranchCall(
                 AuthenticatedUiBuilderActor(owner),

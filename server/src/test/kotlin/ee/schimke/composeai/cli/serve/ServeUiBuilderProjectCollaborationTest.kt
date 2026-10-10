@@ -262,6 +262,66 @@ class ServeUiBuilderProjectCollaborationTest {
     }
 
   @Test
+  fun `ordinary listing does not scan owners and indexed opens need at most one branch read`() =
+    runBlocking<Unit> {
+      seed()
+      repeat(20) { n ->
+        store.save(
+          BuilderProject(id = "other-$n", name = "Other $n", owner = "github:other-$n"),
+          null,
+        )
+      }
+      assertIs<UiBuilderServiceResponse.Snapshot>(
+        raw.execute(
+          UiBuilderServiceCall(
+            owner,
+            UiBuilderServiceRequest.CreateDesign(
+              PROJECT_JSON.decodeFromString(documentText("ordinary"))
+            ),
+          )
+        )
+      )
+      var branchReads = 0
+      val indexed =
+        object : UiBuilderBranchPort, UiBuilderAdminPort by raw {
+          override suspend fun executeBranch(call: UiBuilderBranchCall): UiBuilderBranchResponse {
+            branchReads++
+            return raw.executeBranch(call)
+          }
+        }
+      val guarded = ServeUiBuilderProjectService(raw, store, indexed)
+      val listing =
+        assertIs<UiBuilderServiceResponse.Designs>(
+          guarded.execute(
+            UiBuilderServiceCall(
+              owner,
+              UiBuilderServiceRequest.ListDesigns(null, 200),
+            )
+          )
+        )
+      assertTrue(listing.designs.any { it.designId == "ordinary" })
+      assertEquals(0, branchReads, "ordinary listing rows never request branch ancestry")
+      assertIs<UiBuilderServiceResponse.Snapshot>(
+        guarded.execute(
+          UiBuilderServiceCall(
+            owner,
+            UiBuilderServiceRequest.OpenDesign("ordinary"),
+          )
+        )
+      )
+      assertEquals(1, branchReads, "the direct owner index avoids scanning 21 project owners")
+      assertIs<UiBuilderServiceResponse.Error>(
+        guarded.execute(
+          UiBuilderServiceCall(
+            owner,
+            UiBuilderServiceRequest.OpenDesign("missing"),
+          )
+        )
+      )
+      assertEquals(1, branchReads, "missing IDs need no branch read")
+    }
+
+  @Test
   fun `HTTP wiring exposes project listings and branch documents to collaborators`() =
     runBlocking<Unit> {
       val (_, id) = seed()
@@ -360,9 +420,49 @@ class ServeUiBuilderProjectCollaborationTest {
           .designs
           .map { it.designId },
       )
+      assertIs<UiBuilderServiceResponse.Snapshot>(
+        raw.execute(
+          UiBuilderServiceCall(
+            editor,
+            UiBuilderServiceRequest.CreateDesign(
+              PROJECT_JSON.decodeFromString(documentText("unrelated"))
+            ),
+          )
+        )
+      )
+      val unrelated =
+        assertIs<UiBuilderBranchResponse.Branch>(
+            raw.executeBranch(
+              UiBuilderBranchCall(
+                editor,
+                UiBuilderBranchRequest.CreateBranch(
+                  "unrelated",
+                  "Outside grant",
+                  branchId = "outside",
+                ),
+              )
+            )
+          )
+          .branch
       assertIs<UiBuilderServiceResponse.Error>(
         scopedService.execute(
           UiBuilderServiceCall(agent, UiBuilderServiceRequest.OpenDesign("unrelated"))
+        )
+      )
+      assertIs<UiBuilderServiceResponse.Error>(
+        scopedService.execute(
+          UiBuilderServiceCall(
+            agent,
+            UiBuilderServiceRequest.OpenDesign(unrelated.branchId),
+          )
+        )
+      )
+      assertIs<UiBuilderBranchResponse.Error>(
+        scopedBranches.executeBranch(
+          UiBuilderBranchCall(
+            agent,
+            UiBuilderBranchRequest.GetBranch(unrelated.branchId),
+          )
         )
       )
     }
