@@ -9,6 +9,7 @@ import java.util.concurrent.Semaphore
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
@@ -49,6 +50,9 @@ class ServeCatalogMcpToolsTest {
     private val png: ByteArray,
     private val annotationsFor: Map<String, ByteArray> = emptyMap(),
     private val scrollSvg: String? = null,
+    private val guidelines:
+      Map<String, ee.schimke.composeai.guidelines.protocol.GuidelineRecordV1> =
+      emptyMap(),
     override val previews: List<ServePreview> =
       listOf(
         ServePreview(id = "card", label = "Card"),
@@ -57,6 +61,8 @@ class ServeCatalogMcpToolsTest {
   ) : ServeHost {
     override val label: String = "tools"
     val scrollRenders = AtomicInteger()
+
+    override fun guidelineResultFor(previewId: String) = guidelines[previewId]
 
     override fun render(previewId: String, overrides: PreviewOverrides): RenderOutcome =
       RenderOutcome.Ok(png)
@@ -123,6 +129,70 @@ class ServeCatalogMcpToolsTest {
       .content
 
   private fun JsonObject.parsed(): JsonObject = Json.parseToJsonElement(firstText()).jsonObject
+
+  private fun guidelineRecord() =
+    ee.schimke.composeai.guidelines.protocol.GuidelineRecordV1.Builder(
+        revision = 0,
+        model = "deepseek/deepseek-v4.1-flash",
+        rulesVersion = 3,
+        asked = listOf("wear.layout.responsive-width"),
+        verdicts =
+          listOf(
+            ee.schimke.composeai.guidelines.protocol.GuidelineVerdictV1.Builder(
+                "wear.layout.responsive-width",
+                ee.schimke.composeai.guidelines.protocol.GuidelineVerdictV1.FAIL,
+              )
+              .apply { reason = "Fixed width." }
+              .build()
+          ),
+      )
+      .build()
+
+  @Test
+  fun `a preview with a published guidelines result advertises and serves it`() {
+    val host = ToolHost(png = pixel, guidelines = mapOf("card" to guidelineRecord()))
+
+    val listed =
+      Json.parseToJsonElement(
+          call(host, "catalog_list_data_products", """{"catalog":"m3"}""").firstText()
+        )
+        .jsonArray
+        .associate {
+          it.jsonObject["previewId"]!!.jsonPrimitive.content to
+            it.jsonObject["kinds"]!!.jsonArray.map { kind -> kind.jsonPrimitive.content }
+        }
+    assertTrue(GUIDELINES_RESULT_KIND in listed.getValue("card"), listed.toString())
+    assertFalse(GUIDELINES_RESULT_KIND in listed.getValue("other"), listed.toString())
+
+    val found =
+      call(
+          host,
+          "catalog_get_preview_data",
+          """{"catalog":"m3","previewId":"card","kind":"guidelines/result"}""",
+        )
+        .parsed()
+    assertEquals("true", found["found"]!!.jsonPrimitive.content, found.toString())
+    assertEquals(
+      "Fixed width.",
+      found["record"]!!
+        .jsonObject["verdicts"]!!
+        .jsonArray
+        .single()
+        .jsonObject["reason"]!!
+        .jsonPrimitive
+        .content,
+    )
+
+    val missing =
+      call(
+          host,
+          "catalog_get_preview_data",
+          """{"catalog":"m3","previewId":"other","kind":"guidelines/result"}""",
+        )
+        .parsed()
+    assertEquals("false", missing["found"]!!.jsonPrimitive.content, missing.toString())
+    assertTrue("no guidelines result" in missing["message"]!!.jsonPrimitive.content)
+  }
 
   @Test
   fun `data-product array text is wrapped for its object output schema`() {

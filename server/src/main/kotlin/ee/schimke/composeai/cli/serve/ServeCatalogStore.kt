@@ -931,6 +931,7 @@ class ServeCatalogStore(
     writeTagIndex(base, staging)
     writeParityActivity(base, staging)
     writeParityIssues(base, staging)
+    writeGuidelineResults(base, staging)
     writeParityFindings(base, staging)
     writeDesignPages(base, staging)
     writeKnownDifferences(base, staging)
@@ -1255,6 +1256,7 @@ class ServeCatalogStore(
           val localAlias = moduleAlias.mapValues { (_, id) -> localPreviewIds.getValue(id) }
           extractCatalogRcDocs(bundleFile, localAlias, dir)
           extractComponentRecord(bundleFile, dir)
+          extractGuidelineResults(bundleFile, dir)
           val resources =
             when (
               val res = rehydrateExternalResources(bundleFile, base, descriptor.path, dir, safe)
@@ -1347,6 +1349,7 @@ class ServeCatalogStore(
         // `.rc` lane needs no daemon, so it must survive a live-tier fallback.
         extractCatalogRcDocs(bundleFile, alias, dir)
         extractComponentRecord(bundleFile, dir)
+        extractGuidelineResults(bundleFile, dir)
         // IR-backed previews have no class in app.jar by design. The bundle daemon replays them
         // from the extracted `ir/` document + bundle manifest, so they remain in this alias just
         // like class-backed previews and can expose Java / CMP Android renderer selection.
@@ -3229,6 +3232,31 @@ class ServeCatalogStore(
       .writeText(json.encodeToString(ParityActivity.serializer(), activity))
   }
 
+  /**
+   * Stage the catalog's design-guidelines results (`guidelines.json`, each preview's verdicts as
+   * `compose-preview guidelines` wrote them), when the branch publishes the file. Same reason as
+   * [writeParityIssues]: the staging tree is assembled from explicitly fetched parts, so a file
+   * nobody copies is invisible to [ServeBundleHost]. Written only when it parses as results, and
+   * fail-soft: no file, an unfetchable one or a malformed one stages nothing.
+   */
+  private fun writeGuidelineResults(base: String, staging: File) {
+    val bytes =
+      runCatching { fetchCatalogAsset("$base${ServeGuidelineResultsStore.FILE}") }.getOrNull()
+        ?: return
+    if (bytes.size > MAX_GUIDELINE_RESULTS_BYTES) return
+    if (ServeGuidelineResultsStore.parse(bytes.decodeToString()) == null) return
+    File(staging, ServeGuidelineResultsStore.FILE).writeBytes(bytes)
+  }
+
+  /**
+   * Lift `guidelines.json` out of the fetched live [bundleFile] into `<dir>/guidelines.json`,
+   * unless the branch already supplied one — the bundle is where `BundlePreviewTask` carries it,
+   * and a catalog need not publish it beside `catalog.json` as well. Best-effort, like
+   * [extractComponentRecord].
+   */
+  private fun extractGuidelineResults(bundleFile: File, dir: File) =
+    liftGuidelineResults(bundleFile, dir, MAX_GUIDELINE_RESULTS_BYTES)
+
   /** Stage the validated GitHub issue snapshot published beside the parity activity feed. */
   private fun writeParityIssues(base: String, staging: File) {
     val bytes =
@@ -4133,6 +4161,7 @@ class ServeCatalogStore(
 
     /** A record is a couple of megabytes for a large catalog; this is a decompression guard. */
     private const val MAX_COMPONENT_RECORD_BYTES = 32L * 1024 * 1024
+    private const val MAX_GUIDELINE_RESULTS_BYTES = 16L * 1024 * 1024
 
     /**
      * Sibling of `previews/` holding the captured Remote Compose documents (`ir/<catalog-id>.rc`),
@@ -4802,4 +4831,46 @@ class ServeCatalogStore(
   private fun fetchExecutableBundle(url: String): ByteArray? =
     if (fetch != null) fetch.invoke(url)
     else branchRead(url, MAX_LIVE_BUNDLE_FETCH_BYTES).bytesOrNull
+}
+
+/**
+ * Lift `guidelines.json` out of [bundleFile] into `<dir>/guidelines.json`, unless [dir] already has
+ * one: written only when the entry is at most [maxBytes] and parses as guideline results.
+ * Best-effort — a bundle without the entry, or one that will not read, leaves [dir] as it was.
+ */
+internal fun liftGuidelineResults(bundleFile: File, dir: File, maxBytes: Long) {
+  val target = File(dir, ServeGuidelineResultsStore.FILE)
+  if (target.isFile) return
+  val bytes =
+    runCatching { zipEntryBytes(bundleFile, ServeGuidelineResultsStore.FILE, maxBytes) }.getOrNull()
+      ?: return
+  if (ServeGuidelineResultsStore.parse(bytes.decodeToString()) == null) return
+  target.parentFile?.mkdirs()
+  target.writeBytes(bytes)
+}
+
+/** The bytes of [bundleFile]'s entry named [name], capped at [maxBytes]; null when absent. */
+private fun zipEntryBytes(bundleFile: File, name: String, maxBytes: Long): ByteArray? {
+  val zipBytes = BundleReader.extractZipBytes(bundleFile)
+  java.util.zip.ZipInputStream(java.io.ByteArrayInputStream(zipBytes)).use { zin ->
+    var entry = zin.nextEntry
+    while (entry != null) {
+      if (!entry.isDirectory && entry.name.replace('\\', '/') == name) {
+        val buf = java.io.ByteArrayOutputStream()
+        val chunk = ByteArray(64 * 1024)
+        var total = 0L
+        while (true) {
+          val n = zin.read(chunk)
+          if (n < 0) break
+          total += n
+          check(total <= maxBytes) { "$name exceeds the cap" }
+          buf.write(chunk, 0, n)
+        }
+        return buf.toByteArray()
+      }
+      zin.closeEntry()
+      entry = zin.nextEntry
+    }
+  }
+  return null
 }

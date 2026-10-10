@@ -1912,6 +1912,8 @@ class ServeCatalogMcp(
     kind: String,
     overrides: PreviewOverrides,
   ): JsonObject {
+    // A stored result, not a render: no permit, and an answer either way.
+    if (kind == GUIDELINES_RESULT_KIND) return textResult(guidelinesResultJson(host, previewId))
     val bytes = withRenderPermit {
       when {
         kind.startsWith("a11y/") ->
@@ -2168,6 +2170,37 @@ class ServeCatalogMcp(
       else -> throw McpRequestException("override values must be strings, numbers, or booleans")
     }
 
+  /**
+   * [previewId]'s design-guidelines result, as the catalog's bundle carries it (`guidelines.json`,
+   * written by `compose-preview guidelines`): the `GuidelineRecordV1` — verdicts with the nodes and
+   * regions they point at, the model that answered and its cost — or a `found: false` answer saying
+   * there is none, so a caller can tell "no result" from a failure.
+   */
+  internal fun guidelinesResultJson(host: ServeHost, previewId: String): String {
+    val record = host.guidelineResultFor(previewId)
+    return buildJsonObject {
+      put("kind", GUIDELINES_RESULT_KIND)
+      put("previewId", previewId)
+      if (record == null) {
+        put("found", false)
+        put(
+          "message",
+          "no guidelines result for this preview: the catalog has not published one for it",
+        )
+      } else {
+        put("found", true)
+        put(
+          "record",
+          GUIDELINES_RESULT_JSON.encodeToJsonElement(
+            ee.schimke.composeai.guidelines.protocol.GuidelineRecordV1.serializer(),
+            record,
+          ),
+        )
+      }
+    }
+      .toString()
+  }
+
   private suspend fun dataProductsJson(args: JsonObject): JsonArray {
     val uriTarget = args.optionalString("uri")?.let(::targetFromUri)
     val selectedCatalog = uriTarget?.catalog ?: requireCatalog("list_data_products", args)
@@ -2181,6 +2214,7 @@ class ServeCatalogMcp(
               val kinds = buildSet {
                 addAll(preview.dataProductKinds)
                 if (host.hasA11yOverlayFor(preview.id)) add("a11y/hierarchy")
+                if (host.guidelineResultFor(preview.id) != null) add(GUIDELINES_RESULT_KIND)
                 if (
                   host.hasDesignAnnotationsFor(preview.id) ||
                     host.hasPublishedTypographyFor(preview.id)
@@ -3692,3 +3726,8 @@ class ServeCatalogMcp(
  * A tool call this surface understood and refused. Carried as a tool error, not a transport one.
  */
 internal class McpRequestException(message: String) : RuntimeException(message)
+
+/** The data product a hosted catalog serves each preview's design-guidelines result as. */
+internal const val GUIDELINES_RESULT_KIND = "guidelines/result"
+
+private val GUIDELINES_RESULT_JSON = kotlinx.serialization.json.Json { explicitNulls = false }

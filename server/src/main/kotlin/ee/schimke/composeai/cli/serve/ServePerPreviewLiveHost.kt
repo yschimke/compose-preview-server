@@ -118,6 +118,15 @@ class ServePerPreviewLiveHost(
 
   override fun parityIssues(): ParityIssues? = baked.parityIssues()
 
+  // A design-guidelines result is published catalog data, like the parity issues: the baked
+  // bundle carries it, and a live lane has nothing different to say about it.
+  override fun guidelineResultFor(
+    previewId: String
+  ): ee.schimke.composeai.guidelines.protocol.GuidelineRecordV1? =
+    // The published id first, then the bundle id it aliases: the report is keyed by the ids the
+    // bundle was built with, which a catalog's published ids need not be.
+    baked.guidelineResultFor(previewId) ?: alias[previewId]?.let { baked.guidelineResultFor(it) }
+
   override fun parityFindingsFor(previewId: String, referenceId: String): List<ParityFindingSet> =
     baked.parityFindingsFor(previewId, referenceId)
 
