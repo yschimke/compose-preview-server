@@ -24,6 +24,15 @@ subscription on its next update. A design-scoped agent grant cannot read an enti
 files; it continues to use the existing scoped design API. Unrelated designs retain their existing
 access rules.
 
+Project-member designs also appear in the ordinary design browser and MCP listing with the member's
+effective permissions. Shared entries are included once on the first page; the runtime cursor
+continues to page the caller's own designs, as with existing design-scoped grants.
+
+Branches and suggestions inherit project membership. Editors can create, edit, merge and archive
+them; viewers can list and read them. Branch documents, assets and subscriptions use the same rule.
+Ancestry is read from the runtime's branch records on each call, rather than trusting a cached ID
+after deletion or reuse. Agent grants naming a project design continue to reach its branches.
+
 Project documents start private even on a host whose ordinary new-design default is public.
 Original bytes and metadata are stored together under the existing state directory's `projects/`,
 using a forced temporary file and atomic rename. Project writes compare the metadata revision.
