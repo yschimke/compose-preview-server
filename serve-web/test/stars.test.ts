@@ -196,10 +196,54 @@ describe("stars", () => {
         at("/");
         document.body.innerHTML = HOME;
         installStars();
-        assert.doesNotThrow(() =>
-            star('#cp-grid [data-cp-system="wear-m3"] > .cp-star').click(),
-        );
+        const button = star('#cp-grid [data-cp-system="wear-m3"] > .cp-star');
+        assert.doesNotThrow(() => button.click());
+        // The write failed, but the click still holds for this page view.
+        assert.equal(button.getAttribute("aria-pressed"), "true");
+        assert.ok(document.getElementById("cp-starred"));
         void storage;
+    });
+
+    it("hides a starred copy the landing's filter rules out, but not another tab's", async () => {
+        at("/compose-m3/");
+        document.body.innerHTML = '<input id="cp-search" value="">' + LANDING;
+        installStars();
+        star("#c-chip > .cp-star").click();
+        const copy = () =>
+            document.querySelector<HTMLElement>("#cp-starred .cp-card")!;
+        const original = document.getElementById("c-chip")!;
+
+        // No query: the original is hidden only because it is in another tab.
+        original.hidden = true;
+        await new Promise((r) => setTimeout(r, 0));
+        assert.equal(copy().hidden, false);
+
+        // A query the original does not match hides the copy, and the empty row with it.
+        (document.getElementById("cp-search") as HTMLInputElement).value =
+            "zzz";
+        original.hidden = false;
+        original.hidden = true;
+        await new Promise((r) => setTimeout(r, 0));
+        assert.equal(copy().hidden, true);
+        assert.equal(document.getElementById("cp-starred")!.hidden, true);
+    });
+
+    it("does not copy the live-preview affordances onto a starred copy", () => {
+        at("/compose-m3/");
+        document.body.innerHTML = LANDING;
+        const original = document.getElementById("c-button")!;
+        original.classList.add("cp-card-livable");
+        original
+            .querySelector(".cp-imgwrap")!
+            .insertAdjacentHTML(
+                "beforeend",
+                '<span class="cp-live-hint">hold for live</span>',
+            );
+        installStars();
+        star("#c-button > .cp-star").click();
+        const copy = document.querySelector("#cp-starred .cp-card")!;
+        assert.equal(copy.classList.contains("cp-card-livable"), false);
+        assert.equal(copy.querySelector(".cp-live-hint"), null);
     });
 
     it("leaves a page with nothing to star alone", () => {

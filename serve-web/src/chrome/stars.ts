@@ -34,6 +34,7 @@ const strings = (value: unknown): string[] =>
 
 /** The stored stars, or none — a missing, blocked or malformed entry is the same empty shortlist. */
 export function readStars(): Stars {
+    if (unsaved) return unsaved;
     let raw: string | null = null;
     try {
         raw = localStorage.getItem(STARS_KEY);
@@ -56,11 +57,19 @@ export function readStars(): Stars {
     }
 }
 
+/**
+ * Stars that could not be written — private mode, a full quota, storage blocked outright. Held for
+ * the rest of this page view, so a click still toggles: without it every repaint would read the
+ * unchanged store back and undo the click the moment it landed.
+ */
+let unsaved: Stars | null = null;
+
 function writeStars(stars: Stars): void {
     try {
         localStorage.setItem(STARS_KEY, JSON.stringify(stars));
+        unsaved = null;
     } catch {
-        // Private mode or a full quota: the star still shows for this page view.
+        unsaved = stars;
     }
 }
 
@@ -193,6 +202,20 @@ function copyOf(card: Element): Element {
     copy.querySelectorAll(".cp-star, .cp-image-error").forEach((el) =>
         el.remove(),
     );
+    // Nor does a copy inherit the live-preview affordances `<cp-catalog-live>` gave the original:
+    // its press-and-hold listeners are on the original, so a copy that kept the "hold for live"
+    // hint would advertise an interaction that just follows the link.
+    copy.classList.remove(
+        "cp-card-livable",
+        "cp-card-live",
+        "cp-card-pressing",
+    );
+    copy.querySelectorAll(
+        ".cp-live-hint, .cp-live-chip, .cp-live-error, .cp-card-canvas",
+    ).forEach((el) => el.remove());
+    copy.querySelectorAll<HTMLElement>("img").forEach((img) =>
+        img.style.removeProperty("visibility"),
+    );
     copy.setAttribute("data-cp-starred-copy", "1");
     return copy;
 }
@@ -253,6 +276,12 @@ function renderHomeStarred(): void {
     }
     section.append(title, grid);
     anchor.parentNode.insertBefore(section, anchor);
+    // The front door's search re-reads every `.cp-sys` on each pass, copies included — but a row
+    // built while a query is already typed has not had a pass yet, so ask for one.
+    const search = document.getElementById(
+        "cp-browser-catalog-search",
+    ) as HTMLInputElement | null;
+    if (search?.value.trim()) search.dispatchEvent(new Event("input"));
 }
 
 // ---------------------------------------------------------------- catalog landing
@@ -305,14 +334,54 @@ function renderLandingStarred(system: string): void {
     head.textContent = "Starred";
     const row = document.createElement("div");
     row.className = "cp-cards";
+    const pairs: Array<[HTMLElement, HTMLElement]> = [];
     for (const card of picked) {
         const copy = copyOf(card) as HTMLElement;
-        copy.hidden = false;
         wireLandingCard(copy, system);
         row.append(copy);
+        pairs.push([card, copy]);
     }
     section.append(head, row);
     anchor.parentNode.insertBefore(section, anchor);
+    followFilter(section, pairs);
+}
+
+/**
+ * Keeps the Starred row honest about the landing's filter.
+ *
+ * The server's filter script captured its card list before this row existed, so it never visits a
+ * copy. It does mark each ORIGINAL `hidden`, though, and while a query is typed that mark means
+ * exactly "does not match" (every tab is searched then). With no query the mark only means "in
+ * another tab", which must not empty a row that sits above every tab — so the copy follows its
+ * original only while the field holds a query, and the row folds away when nothing in it matches.
+ */
+let filterObserver: MutationObserver | null = null;
+
+function followFilter(
+    section: HTMLElement,
+    pairs: Array<[HTMLElement, HTMLElement]>,
+): void {
+    filterObserver?.disconnect();
+    const input = document.getElementById(
+        "cp-search",
+    ) as HTMLInputElement | null;
+    const sync = (): void => {
+        const searching = !!input?.value.trim();
+        let shown = 0;
+        for (const [card, copy] of pairs) {
+            copy.hidden = searching && card.hidden;
+            if (!copy.hidden) shown++;
+        }
+        section.hidden = shown === 0;
+    };
+    sync();
+    if (typeof MutationObserver === "undefined") return;
+    filterObserver = new MutationObserver(sync);
+    for (const [card] of pairs)
+        filterObserver.observe(card, {
+            attributes: true,
+            attributeFilter: ["hidden"],
+        });
 }
 
 // ---------------------------------------------------------------- page wiring
@@ -376,7 +445,9 @@ function install(): void {
     refresh();
     // A star added in another tab shows up here too.
     window.addEventListener("storage", (event) => {
-        if (event.key === STARS_KEY) refresh();
+        if (event.key !== STARS_KEY) return;
+        unsaved = null;
+        refresh();
     });
 }
 
@@ -390,4 +461,7 @@ export function installStars(): void {
 /** Test hook: forget which page was wired, so a suite can install against a fresh document. */
 export function resetStarsForTest(): void {
     page = null;
+    unsaved = null;
+    filterObserver?.disconnect();
+    filterObserver = null;
 }
