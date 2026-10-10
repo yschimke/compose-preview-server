@@ -1122,8 +1122,23 @@ class ServeHttpServer(
   /**
    * The builder is served at the root of [uiBuilderHost] (`ServeUiBuilderHostRoot.kt`). Decided
    * once: the rooted routes are registered at bind time, like every other route.
+   *
+   * Only for an editor that reads its base path ([uiBuilderRootEditorProblem]). Asked for with an
+   * older one, the host stays on `/ui-builder/` and says why, rather than serving a root every page
+   * of which fails to open its design.
    */
-  private val uiBuilderRootMode: Boolean = uiBuilderHost != null && uiBuilderHostRoot
+  private val uiBuilderRootMode: Boolean =
+    uiBuilderHost != null &&
+      uiBuilderHostRoot &&
+      uiBuilderRootEditorProblem(uiBuilderDir).let { problem ->
+        if (problem != null) {
+          System.err.println(
+            "serve: ERROR --ui-builder-host-root ignored, $uiBuilderHost stays on /ui-builder/: " +
+              problem
+          )
+        }
+        problem == null
+      }
 
   /** Whether [call] is on the rooted builder host, where the editor's pages live at `/`. */
   private fun isUiBuilderRootCall(call: ApplicationCall): Boolean =
@@ -1247,6 +1262,11 @@ class ServeHttpServer(
         intercept(ApplicationCallPipeline.Plugins) {
           val current: ApplicationCall = context
           if (!isUiBuilderHost(current)) return@intercept
+          // A rooted builder page carries the headers of its `/ui-builder/` form — the CSP above
+          // all, whose `'wasm-unsafe-eval'` the editor cannot start without.
+          uiBuilderRootCanonicalPath(current.request.path())?.let {
+            ServePagePolicy.servesAs(current, it)
+          }
           val target =
             uiBuilderRootRedirect(
               method = current.request.httpMethod.value,

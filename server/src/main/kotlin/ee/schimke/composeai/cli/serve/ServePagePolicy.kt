@@ -152,6 +152,20 @@ internal object ServePagePolicy {
     call.attributes.put(SERVER_OWNED, Unit)
   }
 
+  private val POLICY_PATH = AttributeKey<String>("ServePagePolicy.policyPath")
+
+  /**
+   * Decide this response's policy as if it had been requested at [canonicalPath]. The rooted UI
+   * builder host serves the editor's pages at `/` and `/<design>` (`ServeUiBuilderHostRoot.kt`),
+   * where the path no longer starts with `/ui-builder/`; every path rule here —
+   * `'wasm-unsafe-eval'`, the editor's OpenRouter `connect-src`, framing and sandboxing — must
+   * still see the page it is. Without it the rooted editor ran under a plain page's `script-src`
+   * and could not compile its Wasm (ui.coo.ee, 3.120.0).
+   */
+  fun servesAs(call: ApplicationCall, canonicalPath: String) {
+    call.attributes.put(POLICY_PATH, canonicalPath)
+  }
+
   private val PHASE = PipelinePhase("PageContentPolicy")
 
   /**
@@ -270,7 +284,7 @@ internal object ServePagePolicy {
       if (!type.match(ContentType.Text.Html)) return@intercept
       if (call.response.headers[HEADER] != null) return@intercept
       val extras = formActions() + call.attributes.getOrNull(EXTRA_FORM_ACTIONS).orEmpty()
-      val path = call.request.path()
+      val path = call.attributes.getOrNull(POLICY_PATH) ?: call.request.path()
       val fetchDest = call.request.headers[FETCH_DEST_HEADER]
       if (variesByFetchDest(path)) call.response.headers.append(HttpHeaders.Vary, FETCH_DEST_HEADER)
       val serverOwned = call.attributes.contains(SERVER_OWNED)
