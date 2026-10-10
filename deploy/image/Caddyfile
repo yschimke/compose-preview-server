@@ -175,12 +175,15 @@
 
 	# A browser opening the UI builder on any host but SERVE_UI_BUILDER_HOST (ui.coo.ee on
 	# preview.coo.ee) is sent to that host, so the editor has one address and one cookie scope.
-	# Navigations only — an HTML Accept on /ui-builder — so its APIs, assets and MCP stay reachable
-	# on every host. Inert when the variable is unset. This used to live only in preview.coo.ee's
-	# untracked Caddyfile.ui-domain, mounted over this file by a box-local compose override — which
-	# meant no change committed here (the /__hooks/restart route of #1512 included) reached that box.
+	# Navigations only — a GET/HEAD with an HTML Accept on /ui-builder — so its APIs, assets and MCP
+	# stay reachable on every host, and a form POST from a tab still open on the old host is not
+	# turned into a GET by the 302 (losing its body and its mutation). Inert when the variable is
+	# unset. This used to live only in preview.coo.ee's untracked Caddyfile.ui-domain, mounted over
+	# this file by a box-local compose override — which meant no change committed here (the
+	# /__hooks/restart route of #1512 included) reached that box.
 	@builderNavigation {
 		expression `{env.SERVE_UI_BUILDER_HOST} != "" && {host} != {env.SERVE_UI_BUILDER_HOST}`
+		method GET HEAD
 		path /ui-builder /ui-builder/*
 		header Accept *text/html*
 	}

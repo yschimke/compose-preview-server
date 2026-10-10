@@ -72,4 +72,17 @@ class UiBuilderOwnedCatalogHealthTest {
     health.templatesRead("m3-catalog")
     assertTrue(health.problems().isEmpty())
   }
+
+  @Test
+  fun `a withheld catalog restored with unreadable templates stays reported as degraded`() {
+    health.withhold("wear-m3", "no published ui-builder.json")
+
+    // The order a refresh records them in: templates first, then the withhold is lifted.
+    health.degrade("wear-m3", "ui-builder/designs/hello.json is missing")
+    health.healthy("wear-m3")
+
+    assertFalse(health.isWithheld("wear-m3"))
+    assertEquals(enabled, health.served(enabled))
+    assertTrue(health.problems().getValue("wear-m3").startsWith("served, but its templates"))
+  }
 }
