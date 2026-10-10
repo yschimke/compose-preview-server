@@ -245,6 +245,10 @@ fi
 # catalogs.json's "sites" says the same thing as durable config.
 [[ -n "${SERVE_UI_BUILDER_HOST:-}" ]] && args+=(--ui-builder-host "${SERVE_UI_BUILDER_HOST}")
 [[ -n "${SERVE_UI_BUILDER_START_URL:-}" ]] && args+=(--ui-builder-start-url "${SERVE_UI_BUILDER_START_URL}")
+# The builder at the ROOT of SERVE_UI_BUILDER_HOST (ui.coo.ee/<design>) instead of under /ui-builder/.
+# Opt in once the served editor bundle reads its `ui-builder-base-path` meta; ignored without a host.
+[[ -n "${SERVE_UI_BUILDER_HOST:-}" && ( "${SERVE_UI_BUILDER_HOST_ROOT:-}" == "1" || "${SERVE_UI_BUILDER_HOST_ROOT:-}" == "true" ) ]] &&
+  args+=(--ui-builder-host-root)
 [[ -n "${SERVE_SITES:-}" && "${SERVE_SITES}" != "none" ]] && args+=(--sites "${SERVE_SITES}")
 # Runtime catalog administration (GET/POST /admin/catalogs, DELETE /admin/catalogs/<system>),
 # gated by its own secret — never the browse token, which a public box hands to every visitor.

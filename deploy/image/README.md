@@ -817,7 +817,26 @@ changing `.env`.
 `https://ui.coo.ee/` redirects to `https://ui.coo.ee/ui-builder/`, preserving the query.
 Editor assets, REST APIs, preview frames and WebSockets use that same origin and the
 same backend/design store. Existing `preview.coo.ee/ui-builder/` links continue to work.
-This does not mount design URLs at the hostname root.
+
+To make the hostname the builder — `https://ui.coo.ee/` the editor's home and
+`https://ui.coo.ee/<design>` a design — also set `SERVE_UI_BUILDER_HOST_ROOT=true`
+(`uiBuilder.hostRoot` in settings.json). On that host:
+
+- every server route keeps its path: `/start`, `/api/…`, `/mcp`, `/agent-access/…`,
+  `/oauth/…`, `/.well-known/…`, `/auth/…`, `/admin/…`, `/healthz`, `/readyz`, `/version`,
+  `/status`, `/robots.txt`, `/sitemap.xml`, the icons and manifest, `/assets/…`, `/wasm/…`,
+  the Remote Compose players and fonts. The list is `ServeSites.RESERVED_SYSTEMS`, the same
+  allowlist a top-level site uses, so a route added later is carved out with it;
+- the catalog namespace (`/<system>/…`) is given up — catalogs stay on every other host;
+- a browser opening a `/ui-builder/…` page is redirected (302) to its rooted URL; assets,
+  API calls and form posts under `/ui-builder/` are served where they are, so an older
+  editor bundle keeps working;
+- the editor shell carries `<meta name="ui-builder-base-path" content="/">`. An editor that
+  reads it writes rooted links; one that does not keeps writing `/ui-builder/<design>` links,
+  which still open (one redirect each).
+
+A design whose id is a reserved segment (a design named `api`) has no rooted URL; its
+`/ui-builder/<id>` link keeps working.
 
 For shared GitHub sign-in between these sibling hosts, explicitly set:
 

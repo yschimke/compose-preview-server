@@ -71,6 +71,7 @@ import io.ktor.server.plugins.compression.gzip
 import io.ktor.server.plugins.compression.matchContentType
 import io.ktor.server.plugins.compression.minimumSize
 import io.ktor.server.plugins.origin
+import io.ktor.server.request.httpMethod
 import io.ktor.server.request.path
 import io.ktor.server.request.queryString
 import io.ktor.server.request.receiveParameters
@@ -82,6 +83,7 @@ import io.ktor.server.response.respondBytes
 import io.ktor.server.response.respondBytesWriter
 import io.ktor.server.response.respondRedirect
 import io.ktor.server.response.respondText
+import io.ktor.server.routing.Route
 import io.ktor.server.routing.RoutingContext
 import io.ktor.server.routing.delete
 import io.ktor.server.routing.get
@@ -283,6 +285,8 @@ class ServeHttpServer(
   private val sites: ServeSiteRegistry = ServeSiteRegistry.empty(),
   private val uiBuilderHost: String? = null,
   private val uiBuilderStartUrl: String? = null,
+  /** `--ui-builder-host-root`; see [uiBuilderRootMode]. */
+  private val uiBuilderHostRoot: Boolean = false,
   /**
    * Configured catalog availability shared with startup + refresh. When present, `/status` includes
    * failed/pending catalogs instead of silently omitting them. Catalog loading remains best-effort:
@@ -1105,6 +1109,25 @@ class ServeHttpServer(
   private fun isUiBuilderHost(call: ApplicationCall): Boolean =
     uiBuilderHost != null && requestHost(call, trustForwardedFor) == uiBuilderHost
 
+  /**
+   * The builder is served at the root of [uiBuilderHost] (`ServeUiBuilderHostRoot.kt`). Decided
+   * once: the rooted routes are registered at bind time, like every other route.
+   */
+  private val uiBuilderRootMode: Boolean = uiBuilderHost != null && uiBuilderHostRoot
+
+  /** Whether [call] is on the rooted builder host, where the editor's pages live at `/`. */
+  private fun isUiBuilderRootCall(call: ApplicationCall): Boolean =
+    uiBuilderRootMode && isUiBuilderHost(call)
+
+  /**
+   * A builder page's path as [call]'s host spells it: `/<rest>` on the rooted builder host,
+   * `/ui-builder/<rest>` everywhere else. For the redirects the server writes itself, so a create
+   * or a legacy permalink lands on the rooted URL in one hop instead of bouncing through
+   * [uiBuilderRootRedirect].
+   */
+  private fun uiBuilderPagePath(call: ApplicationCall, rest: String): String =
+    if (isUiBuilderRootCall(call)) "/$rest" else "/ui-builder/$rest"
+
   private val server: EmbeddedServer<*, *> =
     embeddedServer(CIO, host = host, port = port) {
       install(WebSockets)
@@ -1206,6 +1229,26 @@ class ServeHttpServer(
       // registration on a box that started with none would otherwise take effect only on the next
       // restart — the exact staleness the route exists to remove. On a server with neither, there
       // is still no interceptor at all.
+      // The rooted builder host (`ServeUiBuilderHostRoot.kt`): a browser opening a `/ui-builder/…`
+      // page there is sent to the same page's rooted URL, so old links, bookmarks and an older
+      // editor
+      // bundle's own links converge on one address. Only navigations; see [uiBuilderRootRedirect].
+      if (uiBuilderRootMode) {
+        intercept(ApplicationCallPipeline.Plugins) {
+          val current: ApplicationCall = context
+          if (!isUiBuilderHost(current)) return@intercept
+          val target =
+            uiBuilderRootRedirect(
+              method = current.request.httpMethod.value,
+              path = current.request.path(),
+              query = current.request.queryString(),
+              accept = current.request.headers[HttpHeaders.Accept],
+            ) ?: return@intercept
+          current.response.headers.append(HttpHeaders.Location, target)
+          current.respond(HttpStatusCode.Found)
+          finish()
+        }
+      }
       if (!sites.isEmpty || siteAdminEnabled) {
         intercept(ApplicationCallPipeline.Plugins) {
           val current: ApplicationCall = context
@@ -1718,62 +1761,14 @@ class ServeHttpServer(
         get("/wasm-private/{access}/{system}/{path...}") { handleWasmAsset(privateRoute = true) }
 
         // The builder is a distinct product surface, not a mode of the catalog-scoped Wasm
-        // preview app. Its static shell is public like the existing Wasm assets; design data and
-        // mutations remain separately authenticated API concerns.
-        get("/ui-builder") {
-          if (uiBuilderDir == null) call.respondText("not found", status = HttpStatusCode.NotFound)
-          else {
-            // WITH the query. On a token-gated host the credential rides as `?token=…`, and the
-            // Wasm client reads it from `location.search` — so dropping it here landed the editor
-            // on a page whose identity, design and WebSocket requests were all unauthenticated,
-            // for anyone who typed, bookmarked or was handed the slashless spelling.
-            val query = call.request.queryString()
-            call.respondRedirect(if (query.isEmpty()) "/ui-builder/" else "/ui-builder/?$query")
-          }
+        // preview app; its page routes are registered by [uiBuilderPageRoutes] under `/ui-builder`
+        // on every host, and — with `--ui-builder-host-root` — a second time at the ROOT of the
+        // builder host, behind [UiBuilderHostRootSelector], which steps aside for every server
+        // route ([ServeSites.RESERVED_SYSTEMS]) and for every other host.
+        uiBuilderPageRoutes("/ui-builder")
+        if (uiBuilderRootMode) {
+          createChild(UiBuilderHostRootSelector(::isUiBuilderHost)).uiBuilderPageRoutes("")
         }
-        // A person's index over only the designs the service says this actor may read. This is not
-        // the operator's `/admin/ui-builder`: it has no delete or document-replacement path, and a
-        // design that was never shared with the caller never reaches the page.
-        get("/ui-builder/designs") { handleUiBuilderDesigns() }
-        // Creating a design is a POST, and its answer is a redirect to the design's permalink.
-        // The form the New design dialog submits is an ordinary HTML form, so the browser follows
-        // the `303` itself and lands on a URL that is safe to reload, bookmark and share — which
-        // is the whole reason creation is not a navigation to a `?create=1` URL any more.
-        post("/ui-builder/designs") { handleUiBuilderCreate() }
-        // Starting from a design that already exists rather than from a template. Registered
-        // before the compatibility route below, whose `{catalog}` would otherwise swallow
-        // `designs` — it is two segments, so nothing about the old form's target changes.
-        post("/ui-builder/designs/copy") { handleUiBuilderCopy() }
-        // Compatibility for creation forms emitted by older builder bundles.
-        post("/ui-builder/{catalog}") { handleUiBuilderCreate() }
-        // Sharing one design, as a page rather than a hand-written protocol POST. Registered
-        // before the asset catch-all; a literal `access` segment outranks `{path...}`, so the
-        // editor shell is still what every other path under a design serves.
-        get("/ui-builder/{designId}/access") { handleUiBuilderAccess() }
-        post("/ui-builder/{designId}/access") { handleUiBuilderAccessUpdate() }
-        // A design's history: its retained revisions as pictures, each one openable, restorable
-        // (forward, as a new revision) and forkable into a design of its own.
-        get("/ui-builder/{designId}/history") { handleUiBuilderHistory() }
-        post("/ui-builder/{designId}/history/{revision}/restore") { handleUiBuilderRestore() }
-        post("/ui-builder/{designId}/history/{revision}/fork") { handleUiBuilderFork() }
-        // Removing one's own design, which until now only an operator's token or an MCP tool
-        // could do. Owner-only, and it is the service that says so.
-        post("/ui-builder/{designId}/delete") { handleUiBuilderDelete() }
-        // Shared file-manager metadata. A move changes no design revision, but it is visible to
-        // every collaborator, so the design's WRITE action gates the form.
-        post("/ui-builder/{designId}/folder") { handleUiBuilderFolderMove() }
-        // Compatibility for bookmarks emitted before the catalog became document-only state.
-        get("/ui-builder/{catalog}/{designId}/access") { handleUiBuilderAccess() }
-        post("/ui-builder/{catalog}/{designId}/access") { handleUiBuilderAccessUpdate() }
-        // A runtime id is an exact immutable pin. There is deliberately no unversioned or
-        // `latest` route: an unavailable pin has to surface as an explicit migration decision.
-        get("/ui-builder/runtime/{runtimeId}/{path...}") { handleUiBuilderRuntimeAsset() }
-        // The bundle under a content-addressed prefix. Registered before the catch-all so the
-        // prefix is matched as a version rather than as the first path segment of a bundle file.
-        get("/ui-builder/$UI_BUILDER_VERSION_SEGMENT/{version}/{path...}") {
-          handleUiBuilderVersionedAsset()
-        }
-        get("/ui-builder/{path...}") { handleUiBuilderAsset() }
 
         // The CMP/Wasm Remote Compose player is a single shared app rather than a per-catalog app.
         // Keep it opt-in while operation coverage is incomplete; an unset directory simply makes
@@ -2506,7 +2501,10 @@ class ServeHttpServer(
         // single
         // segments fall through to a session lookup (and 404 like a bad session).
         get("/") {
-          if (isUiBuilderHost(call)) {
+          if (isUiBuilderRootCall(call)) {
+            // The editor's home IS this host's root page.
+            handleUiBuilderAsset()
+          } else if (isUiBuilderHost(call)) {
             call.respondRedirect("/ui-builder/" + call.request.queryString().prefixedQuery())
           } else {
             handleLanding(sessionInPath = false)
@@ -7005,6 +7003,73 @@ class ServeHttpServer(
     // them to it, so refusing it would 404 the last step of their own run.
     if (playgroundRedeem?.isRedeemedSession(first) == true) return true
     return first in ServeSites.RESERVED_SYSTEMS
+  }
+
+  /**
+   * The UI builder's page routes — shell, assets, the designs index, create/copy, a design's access
+   * and history pages — under [base]: `/ui-builder` everywhere, and `""` at the root of the builder
+   * host when `--ui-builder-host-root` is on. The handlers read only their route parameters, so the
+   * same handler serves both spellings of a page.
+   */
+  private fun Route.uiBuilderPageRoutes(base: String) {
+    // The builder is a distinct product surface, not a mode of the catalog-scoped Wasm
+    // preview app. Its static shell is public like the existing Wasm assets; design data and
+    // mutations remain separately authenticated API concerns.
+    if (base.isNotEmpty())
+      get(base) {
+        if (uiBuilderDir == null) call.respondText("not found", status = HttpStatusCode.NotFound)
+        else {
+          // WITH the query. On a token-gated host the credential rides as `?token=…`, and the
+          // Wasm client reads it from `location.search` — so dropping it here landed the editor
+          // on a page whose identity, design and WebSocket requests were all unauthenticated,
+          // for anyone who typed, bookmarked or was handed the slashless spelling.
+          val query = call.request.queryString()
+          call.respondRedirect(if (query.isEmpty()) "$base/" else "$base/?$query")
+        }
+      }
+    // A person's index over only the designs the service says this actor may read. This is not
+    // the operator's `/admin/ui-builder`: it has no delete or document-replacement path, and a
+    // design that was never shared with the caller never reaches the page.
+    get("${base}/designs") { handleUiBuilderDesigns() }
+    // Creating a design is a POST, and its answer is a redirect to the design's permalink.
+    // The form the New design dialog submits is an ordinary HTML form, so the browser follows
+    // the `303` itself and lands on a URL that is safe to reload, bookmark and share — which
+    // is the whole reason creation is not a navigation to a `?create=1` URL any more.
+    post("${base}/designs") { handleUiBuilderCreate() }
+    // Starting from a design that already exists rather than from a template. Registered
+    // before the compatibility route below, whose `{catalog}` would otherwise swallow
+    // `designs` — it is two segments, so nothing about the old form's target changes.
+    post("${base}/designs/copy") { handleUiBuilderCopy() }
+    // Compatibility for creation forms emitted by older builder bundles.
+    post("${base}/{catalog}") { handleUiBuilderCreate() }
+    // Sharing one design, as a page rather than a hand-written protocol POST. Registered
+    // before the asset catch-all; a literal `access` segment outranks `{path...}`, so the
+    // editor shell is still what every other path under a design serves.
+    get("${base}/{designId}/access") { handleUiBuilderAccess() }
+    post("${base}/{designId}/access") { handleUiBuilderAccessUpdate() }
+    // A design's history: its retained revisions as pictures, each one openable, restorable
+    // (forward, as a new revision) and forkable into a design of its own.
+    get("${base}/{designId}/history") { handleUiBuilderHistory() }
+    post("${base}/{designId}/history/{revision}/restore") { handleUiBuilderRestore() }
+    post("${base}/{designId}/history/{revision}/fork") { handleUiBuilderFork() }
+    // Removing one's own design, which until now only an operator's token or an MCP tool
+    // could do. Owner-only, and it is the service that says so.
+    post("${base}/{designId}/delete") { handleUiBuilderDelete() }
+    // Shared file-manager metadata. A move changes no design revision, but it is visible to
+    // every collaborator, so the design's WRITE action gates the form.
+    post("${base}/{designId}/folder") { handleUiBuilderFolderMove() }
+    // Compatibility for bookmarks emitted before the catalog became document-only state.
+    get("${base}/{catalog}/{designId}/access") { handleUiBuilderAccess() }
+    post("${base}/{catalog}/{designId}/access") { handleUiBuilderAccessUpdate() }
+    // A runtime id is an exact immutable pin. There is deliberately no unversioned or
+    // `latest` route: an unavailable pin has to surface as an explicit migration decision.
+    get("${base}/runtime/{runtimeId}/{path...}") { handleUiBuilderRuntimeAsset() }
+    // The bundle under a content-addressed prefix. Registered before the catch-all so the
+    // prefix is matched as a version rather than as the first path segment of a bundle file.
+    get("${base}/$UI_BUILDER_VERSION_SEGMENT/{version}/{path...}") {
+      handleUiBuilderVersionedAsset()
+    }
+    get("${base}/{path...}") { handleUiBuilderAsset() }
   }
 
   /** `?a=b` for a non-empty query string, else `""` — for rebuilding a URL we are redirecting. */
@@ -15188,7 +15253,7 @@ class ServeHttpServer(
   ) {
     val scopedCatalog = segments.firstOrNull()?.takeIf(uiBuilderCatalogs::contains)
     if (scopedCatalog != null && segments.size == 1 && !call.request.path().endsWith("/")) {
-      call.respondRedirect("/ui-builder/$scopedCatalog/")
+      call.respondRedirect(uiBuilderPagePath(call, "$scopedCatalog/"))
       return
     }
     val assetSegments = if (scopedCatalog == null) segments else segments.drop(1)
@@ -15212,7 +15277,7 @@ class ServeHttpServer(
       val designId = assetSegments[0]
       if (!File(dir, designId).isFile) {
         val suffix = call.request.queryString().let { if (it.isEmpty()) "" else "?$it" }
-        call.respondRedirect("/ui-builder/$designId$suffix")
+        call.respondRedirect(uiBuilderPagePath(call, "$designId$suffix"))
         return
       }
     } else if (assetSegments.size == 1 && isUiBuilderDesignSegment(assetSegments[0])) {
@@ -15223,7 +15288,7 @@ class ServeHttpServer(
       if (!File(dir, assetSegments[0]).isFile) {
         if (call.request.path().endsWith("/")) {
           val suffix = call.request.queryString().let { if (it.isEmpty()) "" else "?$it" }
-          call.respondRedirect("/ui-builder/${assetSegments[0]}$suffix")
+          call.respondRedirect(uiBuilderPagePath(call, "${assetSegments[0]}$suffix"))
         } else {
           respondUiBuilderShell(dir, File(dir, "index.html"), designId = assetSegments[0])
         }
@@ -15380,7 +15445,10 @@ class ServeHttpServer(
     val shellHead = uiBuilderShellHead(designId)
     val head =
       shellHead.first to
-        (shellHead.second + uiBuilderCatalogOwnershipTag() + ServeAnalytics.scriptTag())
+        (shellHead.second +
+          uiBuilderCatalogOwnershipTag() +
+          uiBuilderBasePathTag(call) +
+          ServeAnalytics.scriptTag())
     val headTag = Integer.toHexString(head.second.hashCode())
     val etag =
       "\"${index.length().toString(16)}-${index.lastModified().toString(16)}-$version-$headTag\""
@@ -15401,6 +15469,15 @@ class ServeHttpServer(
       wasmContentType(index.name),
     )
   }
+
+  /**
+   * Where the editor's pages live, as a `<meta>` the page reads: `/` on the rooted builder host,
+   * and nothing elsewhere, so every other host serves byte-identical shells and the editor keeps
+   * its `/ui-builder/` default. See [UI_BUILDER_BASE_PATH_META].
+   */
+  private fun uiBuilderBasePathTag(call: ApplicationCall): String =
+    if (isUiBuilderRootCall(call)) "<meta name=\"$UI_BUILDER_BASE_PATH_META\" content=\"/\">"
+    else ""
 
   /**
    * The catalog-owned cutover flag for the editor's new-design chooser, as a `<meta>` the page
@@ -16761,7 +16838,7 @@ class ServeHttpServer(
   }
 
   /** The design's own URL, carrying forward only the identity a create link was opened with. */
-  private fun uiBuilderPermalink(
+  private fun RoutingContext.uiBuilderPermalink(
     designId: String,
     query: io.ktor.http.Parameters,
   ): String {
@@ -16770,7 +16847,7 @@ class ServeHttpServer(
       "$name=" + java.net.URLEncoder.encode(value, "UTF-8")
     }
     val suffix = if (carried.isEmpty()) "" else carried.joinToString("&", prefix = "?")
-    return "/ui-builder/$designId$suffix"
+    return uiBuilderPagePath(call, "$designId$suffix")
   }
 
   private suspend fun RoutingContext.handleUiBuilderRuntimeAsset() {

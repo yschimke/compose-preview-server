@@ -72,6 +72,7 @@ services:
       DOMAIN: "${DOMAIN:-}"
       SERVE_UI_BUILDER_HOST: "${SERVE_UI_BUILDER_HOST:-}"
       SERVE_UI_BUILDER_START_URL: "${SERVE_UI_BUILDER_START_URL:-}"
+      SERVE_UI_BUILDER_HOST_ROOT: "${SERVE_UI_BUILDER_HOST_ROOT:-}"
       # Public preview server by default (preview.coo.ee): open, serving our
       # published design systems. The in-browser CMP Wasm tier rides --catalogs —
       # `serve` fetches each system's web/wasm/ from the trusted branch (the
