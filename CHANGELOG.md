@@ -1,5 +1,21 @@
 # Changelog
 
+## [3.119.0](https://github.com/yschimke/compose-preview-server/compare/v3.118.0...v3.119.0) (2026-10-10)
+
+
+### Features
+
+* request and inspect guideline reviews in the MCP viewer ([#1505](https://github.com/yschimke/compose-preview-server/issues/1505)) ([96de961](https://github.com/yschimke/compose-preview-server/commit/96de961bdb14aa7539858ef43db988f639b254a8))
+
+
+### Bug Fixes
+
+* **deps:** update dependency ee.schimke.composeai:compose-ai-tools-bom to v2.42.0 ([#1510](https://github.com/yschimke/compose-preview-server/issues/1510)) ([3494aa9](https://github.com/yschimke/compose-preview-server/commit/3494aa91890c8a7fbcb9339b250caafb5d3aa17b))
+* **deps:** update dependency ee.schimke.composeai:compose-preview-contracts-bom to v3.26.0 ([#1511](https://github.com/yschimke/compose-preview-server/issues/1511)) ([8424207](https://github.com/yschimke/compose-preview-server/commit/84242075dc229311b027e5301c503725fd0b2d4e))
+* fit audit controls within the MCP viewer frame ([#1509](https://github.com/yschimke/compose-preview-server/issues/1509)) ([0280db7](https://github.com/yschimke/compose-preview-server/commit/0280db70555414936feab4d2adae10c111836d4d))
+* **mcp:** read a preview's guidelines surface and profile from its manifest entry ([#1500](https://github.com/yschimke/compose-preview-server/issues/1500)) ([2fc5dc1](https://github.com/yschimke/compose-preview-server/commit/2fc5dc1469117a549c03951d19a76bfe00fe1e22))
+* persist MCP OAuth client registrations across restarts ([#1507](https://github.com/yschimke/compose-preview-server/issues/1507)) ([003feb8](https://github.com/yschimke/compose-preview-server/commit/003feb83ab389a36b53cbf06147834a4abed791c))
+
 ## [3.118.0](https://github.com/yschimke/compose-preview-server/compare/v3.117.0...v3.118.0) (2026-10-10)
 
 
