@@ -84,6 +84,10 @@
   .comment-raw pre { max-height: 180px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
   .details { margin-top: 10px; display: grid; gap: 8px; }
   .details[hidden] { display: none; }
+  .audit-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  #audit p { margin: 0; }
+  #audit summary { cursor: pointer; }
+  #audit-prompt { display: block; width: 100%; box-sizing: border-box; margin-top: 6px; padding: 7px; font: inherit; color: inherit; background: var(--color-background-primary, #fff); border: 1px solid var(--color-border, #aaa); border-radius: 6px; }
   .detail-modes { display: flex; gap: 0; }
   .detail-modes button { border-radius: 0; margin-left: -1px; }
   .detail-modes button:first-child { border-radius: 6px 0 0 6px; margin-left: 0; }
@@ -176,6 +180,19 @@
     <div id="detail-summary" class="muted"></div>
     <ol id="findings" class="findings" aria-label="Accessibility findings"></ol>
   </section>
+  <section id="audit" class="details" aria-label="Design guidelines review" hidden>
+    <strong>Design guidelines review</strong>
+    <p class="muted">Results appear in chat. Saved UI Builder reviews also appear in the design’s Issues panel.</p>
+    <div class="audit-actions"><button id="audit-run" type="button" hidden>Review design guidelines</button><button id="audit-saved" type="button" hidden>Show saved review</button></div>
+    <details id="audit-copy">
+      <summary>Copy a review request</summary>
+      <label for="audit-prompt" class="muted">Review request</label>
+      <textarea id="audit-prompt" readonly rows="5"></textarea>
+      <button id="audit-select" type="button">Select request to copy</button>
+    </details>
+    <p id="audit-status" class="muted" role="status"></p>
+    <div id="audit-result" hidden><p id="audit-summary" role="status"></p><ol id="audit-findings"></ol></div>
+  </section>
   <section id="comments" class="comments" aria-label="Design comments" hidden>
     <div class="comments-heading"><span>Design comments</span><button id="comment-refresh" type="button" hidden>Refresh comments</button></div>
     <p class="muted">Reading comments requires <code>ui-builder-read</code>; posting requires <code>ui-builder-write</code>. The current viewer grant is used only when it carries that capability.</p>
@@ -219,6 +236,144 @@
   const detailModes = q('#detail-modes');
   const detailSummary = q('#detail-summary');
   const findingsList = q('#findings');
+  const auditSection = q('#audit');
+  const auditRun = q('#audit-run');
+  const auditCopy = q('#audit-copy');
+  const auditSaved = q('#audit-saved');
+  const auditResult = q('#audit-result');
+  const auditSummary = q('#audit-summary');
+  const auditFindings = q('#audit-findings');
+  let auditDesignId;
+  let guidelinesToolName;
+  let auditReadPending = false;
+  const auditSelect = q('#audit-select');
+  const auditPrompt = q('#audit-prompt');
+  const auditStatus = q('#audit-status');
+  let hostMessageText = false;
+  let auditGeneration = 0;
+  let auditPending = false;
+  let auditMessageUnavailable = false;
+
+  function updateAuditAction() {
+    auditRun.hidden = staticMode || !initialized || !hostMessageText || auditMessageUnavailable;
+    auditRun.disabled = auditPending;
+    auditCopy.open = auditRun.hidden;
+    auditSaved.hidden = staticMode || !initialized || !auditDesignId || !guidelinesToolName;
+    auditSaved.disabled = auditReadPending;
+    if (!auditStatus.textContent) {
+      auditStatus.textContent = auditRun.hidden
+        ? 'Copy this request into chat to run the review.'
+        : 'The review runs with the agent in this chat.';
+    }
+  }
+
+  function configureAudit(result, value, comparison) {
+    ++auditGeneration;
+    auditPending = false;
+    auditStatus.textContent = '';
+    auditPrompt.value = '';
+    auditDesignId = undefined;
+    auditReadPending = false;
+    auditResult.hidden = true;
+    auditSummary.textContent = '';
+    auditFindings.replaceChildren();
+    auditSection.hidden = true;
+    if (result?.isError || comparison || isTrayResult(value)) return;
+    const subject = typeof value?.designId === 'string' && value.designId
+      ? { designId: value.designId, ...(value.revision != null ? { revision: value.revision } : {}) }
+      : liveTarget;
+    if (!subject || credentialKeyIn(subject)) return;
+    auditDesignId = subject.designId;
+    auditPrompt.value = `Review this subject against its catalog design guidelines: ${JSON.stringify(subject)}. ` +
+      'Use the compose-preview catalog guidelines checklist and advertised tools. Choose the correct screen, widget or component surface. ' +
+      'Inspect real renders and measured accessibility; obtain any required Wear scrolling or phone/tablet views. ' +
+      'Use your own model with a keyless prompt where available; do not start a paid provider run. ' +
+      'Report verdict, rule findings, answered and unchecked coverage, revision/render identity, freshness, model and evidence links. ' +
+      'Do not edit the UI. For a UI Builder design, save this requested review with ui_builder_record_guidelines if authorized access permits, ' +
+      'and return its canonical editor link. Otherwise return findings in chat and explain any missing evidence or unavailable shared result.';
+    auditSection.hidden = false;
+    updateAuditAction();
+  }
+
+  async function readSavedAudit() {
+    if (auditSaved.hidden || auditReadPending) return;
+    const generation = auditGeneration;
+    const designId = auditDesignId;
+    auditReadPending = true;
+    auditResult.hidden = false;
+    auditSummary.textContent = 'Reading the saved review…';
+    auditFindings.replaceChildren();
+    updateAuditAction();
+    try {
+      const result = await callTool(guidelinesToolName, { designId });
+      if (generation !== auditGeneration) return;
+      const value = data(result);
+      if (result?.isError || value?.schema !== 'compose-preview/ui-builder-guidelines/v1' || value.designId !== designId) {
+        throw new Error('No readable shared review was returned for this design.');
+      }
+      if (!value.record) {
+        auditSummary.textContent = 'No saved guideline review. Request a review in chat; this is not a passed check.';
+        return;
+      }
+      const record = value.record;
+      if (record.schema !== 'compose-ui-builder/guidelines-result/v1' || !Array.isArray(record.asked) || !Array.isArray(record.verdicts) || typeof record.model !== 'string' || !Number.isInteger(record.revision) || !Number.isInteger(value.currentRevision)) {
+        throw new Error('The shared review has an unsupported shape.');
+      }
+      const asked = new Set(record.asked);
+      const answered = new Set(record.verdicts.map(v => v?.ruleId).filter(id => asked.has(id)));
+      const stale = value.stale === true || record.revision !== value.currentRevision;
+      auditSummary.textContent = `${stale ? 'Stale saved review' : 'Saved review'}: revision ${record.revision} ` +
+        `(current ${value.currentRevision}), ${record.model}, rules v${record.rulesVersion}. ${answered.size}/${asked.size} asked rules answered; ` +
+        `${asked.size - answered.size} unchecked. ${typeof value.summary === 'string' ? value.summary : ''}`;
+      const findings = Array.isArray(value.findings) ? value.findings : [];
+      for (const finding of findings.slice(0, 40)) {
+        const item = document.createElement('li');
+        item.textContent = [finding.severity, finding.code, finding.message, finding.nodeId && `node ${finding.nodeId}`]
+          .filter(part => typeof part === 'string' && part).join(' · ');
+        auditFindings.append(item);
+      }
+      if (findings.length > 40) {
+        const item = document.createElement('li');
+        item.textContent = 'More findings are available in the design’s Issues panel.';
+        auditFindings.append(item);
+      }
+    } catch (error) {
+      if (generation !== auditGeneration) return;
+      auditSummary.textContent = 'Saved review unavailable. Ask the agent to read the shared result or open the design’s Issues panel.';
+      console.debug('The viewer could not read the saved guidelines:', error);
+    } finally {
+      if (generation === auditGeneration) {
+        auditReadPending = false;
+        updateAuditAction();
+      }
+    }
+  }
+
+  async function requestAudit() {
+    if (auditPending || auditRun.hidden || !auditPrompt.value) return;
+    const generation = auditGeneration;
+    const text = auditPrompt.value;
+    auditPending = true;
+    auditStatus.textContent = 'Sending the review request to chat…';
+    updateAuditAction();
+    try {
+      const result = await request('ui/message', { role: 'user', content: [{ type: 'text', text }] });
+      if (generation !== auditGeneration) return;
+      if (result?.isError) throw new Error('The host did not deliver the review request.');
+      auditStatus.textContent = 'Review requested in chat. This is not an audit result; read the agent’s response for findings and coverage.';
+    } catch (error) {
+      if (generation !== auditGeneration) return;
+      auditMessageUnavailable = true;
+      auditStatus.textContent = 'Delivery could not be confirmed. Check chat before sending again, or copy the request into chat.';
+      console.debug('The host could not deliver the review request:', error);
+    } finally {
+      if (generation === auditGeneration) {
+        auditPending = false;
+        updateAuditAction();
+      }
+    }
+  }
+
   // render_preview `details` (#1170): blocks after the render, marked in `_meta`, carrying the a11y
   // overlay PNG and the findings + layout boxes. Everything is embedded, so a static card toggles
   // between them with no call.
@@ -3240,6 +3395,7 @@
     resourceResult = undefined;
     resourcePollUnchanged = 0;
     configureLiveActions(result, value, resource, comparison);
+    configureAudit(result, value, comparison);
     if (isTrayResult(value)) {
       renderTray(result, value);
       return;
@@ -3411,6 +3567,7 @@
   // offer tools/list (or refuses it) still gets the live actions; a refused call disables only its
   // control. A successful listing stays authoritative.
   function assumeOwnTools() {
+    guidelinesToolName = undefined;
     overlayToolName = 'render_preview_overlay';
     renderToolName = 'render_preview';
     dataToolName = 'get_preview_data';
@@ -3435,6 +3592,7 @@
       const tools = await request('tools/list', {});
       if (generation !== toolDiscoveryGeneration) return;
       const names = tools?.tools?.map(tool => tool?.name) || [];
+      guidelinesToolName = names.find(name => typeof name === 'string' && /(^|__|\/)ui_builder_get_guidelines$/.test(name));
       overlayToolName = names
         .find(name => typeof name === 'string' && /(^|__|\/)render_preview_overlay$/.test(name));
       listCommentsToolName = names
@@ -3455,6 +3613,7 @@
     updateAccessibilityAction();
     updateCommentAction();
     updateA2uiAction();
+    updateAuditAction();
     if (commentDesignId && listCommentsToolName) void loadComments();
     sendPendingImageRequest();
     resumeTray();
@@ -3469,10 +3628,12 @@
       });
       hostResourceSubscriptions = result?.hostCapabilities?.serverResources?.subscribe === true;
       hostServerTools = result?.hostCapabilities?.serverTools != null;
+      hostMessageText = result?.hostCapabilities?.message?.text != null;
       // OpenAI MCP Extensions: "Open source" can ask the host to open a local file.
       hostFiles = result?.hostCapabilities?.experimental?.['openai/files'] != null;
       applyHostContext(result?.hostContext);
       initialized = true;
+      updateAuditAction();
       notify('ui/notifications/initialized', {});
       scheduleFit();
       updateAccessibilityAction();
@@ -3543,6 +3704,9 @@
       );
     }
   });
+  auditSaved.addEventListener('click', () => readSavedAudit());
+  auditRun.addEventListener('click', () => requestAudit());
+  auditSelect.addEventListener('click', () => { auditPrompt.focus(); auditPrompt.select(); });
   variantSelect.addEventListener('change', () => chooseVariant(variantSelect.value));
   rerender.addEventListener('click', () => renderLive(liveTarget));
   layoutToggle.addEventListener('click', () => toggleLayoutBounds());
