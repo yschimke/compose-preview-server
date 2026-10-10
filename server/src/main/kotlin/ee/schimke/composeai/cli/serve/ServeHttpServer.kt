@@ -17728,6 +17728,38 @@ class ServeHttpServer(
     store: ServeAgentGrantStore,
     request: ServeAgentGrantStore.Request,
   ): Boolean {
+    // A browser can revisit this link after approval in another tab, or after an interrupted
+    // callback navigation. Finish the OAuth return leg while its code is still outstanding;
+    // displaying a device-flow success page here leaves the OAuth client waiting indefinitely.
+    // Redeeming the code removes this binding, so a completed exchange is never replayed.
+    mcpOAuth.forRequest(request.id)?.let { authorization ->
+      when (request.state) {
+        ServeAgentGrantStore.Request.State.PENDING -> Unit
+        ServeAgentGrantStore.Request.State.DENIED -> {
+          call.respondRedirect(
+            ServeMcpOAuth.redirectWithError(
+              authorization.redirectUri,
+              "access_denied",
+              "The request was declined.",
+              authorization.state,
+            )
+          )
+          return true
+        }
+        ServeAgentGrantStore.Request.State.APPROVED -> {
+          if (store.grant(request.grantId) != null) {
+            call.respondRedirect(
+              ServeMcpOAuth.redirectWithCode(
+                authorization.redirectUri,
+                authorization.code,
+                authorization.state,
+              )
+            )
+            return true
+          }
+        }
+      }
+    }
     when (request.state) {
       ServeAgentGrantStore.Request.State.PENDING -> return false
       ServeAgentGrantStore.Request.State.DENIED -> {
