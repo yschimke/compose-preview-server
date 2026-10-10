@@ -62,10 +62,6 @@
       "branch": "design-artifacts/*"
     },
     {
-      "repo": "yschimke/thunderbird-android",
-      "branch": "design-artifacts/*"
-    },
-    {
       "repo": "joreilly/Confetti",
       "branch": "design-artifacts/*"
     },
