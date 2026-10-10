@@ -1541,7 +1541,7 @@ ${captureControlsHtml().prependIndent("          ")}
    * a hostile catalog cannot put an arbitrary href on the page) and the reference's [label], which
    * names *which* spec the link opens when a producer publishes several.
    */
-  data class FigmaSpec(val url: String, val label: String? = null)
+  data class FigmaSpec(val url: String, val label: String? = null, val provider: String = "Figma")
 
   /**
    * A published design page as the catalog's **navigation** needs it: what to call it, and the id
@@ -1672,11 +1672,13 @@ ${captureControlsHtml().prependIndent("          ")}
     val s = spec ?: return ""
     val label =
       s.label?.takeIf { it.isNotBlank() }?.let { " — ${WebEscaping.htmlEscape(it)}" } ?: ""
-    val tip = "Open the Figma node this preview is specified by$label"
+    val tip =
+      if (s.provider == "Figma") "Open the Figma node this preview is specified by$label"
+      else "Open the ${s.provider} design this preview is specified by$label"
     return "\n      <p class=\"cp-figma\">" +
       "<a class=\"cp-figma-link\" href=\"${WebEscaping.htmlEscape(s.url)}\"" +
       " target=\"_blank\" rel=\"noopener noreferrer\" title=\"${WebEscaping.htmlEscape(tip)}\">" +
-      "$FIGMA_ICON figma spec</a></p>"
+      "${if (s.provider == "Figma") "$FIGMA_ICON figma spec" else "UI Builder design"}</a></p>"
   }
 
   /**
@@ -14354,6 +14356,15 @@ ${if (annotationsSelectable) "          data-cp-selectable=\"1\"\n" else ""}    
 ${scriptTag("known-differences.js")}
 <cp-acceptance></cp-acceptance>"""
     val source = WebEscaping.htmlEscape(reference.source.provider)
+    val uidEditor =
+      if (revisions.pinned != null) ""
+      else
+        ServeUidReference.spec(listOf(reference), basePath)
+          ?.let { spec ->
+            val href = spec.url + if (linkQuery.isEmpty()) "" else "&$linkQuery"
+            " · <a href=\"${WebEscaping.htmlEscape(href)}\">Open in UI Builder</a>"
+          }
+          .orEmpty()
     val revision =
       reference.source.revision
         ?.takeIf { it.isNotBlank() }
@@ -14412,7 +14423,7 @@ ${scriptTag("known-differences.js")}
           <p class="cp-sub">${WebEscaping.htmlEscape(previewDisplayName(preview))} · ${WebEscaping.htmlEscape(preview.id)}</p>
           $revisionsBlock
           $referencePicker$issueRows
-          <div class="cp-reference-meta"><strong>Source:</strong> $source$revision</div>
+          <div class="cp-reference-meta"><strong>Source:</strong> $source$revision$uidEditor</div>
           <div class="cp-reference-grid">
             <section><h2>Reference</h2><div class="cp-compare-shot" data-cp-annotated="reference"><img src="$raster" alt="Design reference"></div></section>
             <section><h2>Diff</h2><div class="cp-compare-shot"><canvas class="cp-reference-diff" aria-label="Highlighted pixel difference"></canvas></div></section>

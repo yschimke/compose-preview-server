@@ -3411,7 +3411,17 @@ class ServeCatalogStore(
             file.parentFile?.mkdirs()
             file.writeBytes(bytes)
             branchPaths[reference.id] = reference.raster.path
-            reference.copy(raster = reference.raster.copy(path = localPath))
+            val artifact =
+              if (ServeUidReference.isUid(reference)) {
+                val original = reference.artifact!!
+                val document = fetchCatalogAsset("$base${original.path}")
+                if (document != null && ServeUidReference.valid(reference, document)) {
+                  val uidPath = "references/${reference.id}.uid"
+                  File(staging, uidPath).writeBytes(document)
+                  original.copy(path = uidPath)
+                } else null
+              } else reference.artifact
+            reference.copy(raster = reference.raster.copy(path = localPath), artifact = artifact)
           }
         }
     if (accepted.isEmpty()) return emptyMap()

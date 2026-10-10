@@ -10,6 +10,26 @@ import kotlin.test.assertTrue
 
 class ServeUiBuilderDesignLibraryTest {
 
+  @Test
+  fun `uid collections select the indexed design rather than the active editor tab`() {
+    val library = library { url ->
+      if (url.endsWith("index.json")) index("""{"id":"checkout","file":"screens.uid"}""")
+      else
+        """{"schema":"compose-ui-builder-designs/v1","active":"other","designs":[$DOCUMENT,${DOCUMENT.replace("checkout", "other")}] }"""
+          .toByteArray()
+    }
+    assertEquals("checkout", library.document(m3, "checkout")?.id)
+  }
+
+  @Test
+  fun `a uid with a mismatched identity is not opened as the requested design`() {
+    val library = library { url ->
+      if (url.endsWith("index.json")) index("""{"id":"other","file":"screen.uid"}""")
+      else DOCUMENT.toByteArray()
+    }
+    assertNull(library.document(m3, "other"))
+  }
+
   private val m3 =
     ServeUiBuilderDesignLibrary.Coordinate(
       system = "m3-catalog",

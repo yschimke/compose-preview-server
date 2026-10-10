@@ -55,6 +55,7 @@ internal object ServeWebAssets {
       // prefix: a worker's scope is bounded by its own path.
       "push-sw.js" to "text/javascript; charset=utf-8",
       "viewer.js" to "text/javascript; charset=utf-8",
+      "uid-reference.js" to "text/javascript; charset=utf-8",
       "spatial-view.js" to "text/javascript; charset=utf-8",
       "format-compare.js" to "text/javascript; charset=utf-8",
       // The scorer's worker half, named by `format-compare.js`'s own tag rather than emitted as a

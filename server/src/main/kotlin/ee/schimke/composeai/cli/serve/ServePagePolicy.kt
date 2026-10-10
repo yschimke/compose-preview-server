@@ -80,7 +80,10 @@ internal object ServePagePolicy {
       path.startsWith("/ui-builder/runtime/")
 
   fun hostsWasmApp(path: String): Boolean =
-    WASM_APP_PREFIXES.any { path.startsWith(it) } || path == "/ui-builder"
+    WASM_APP_PREFIXES.any { path.startsWith(it) } ||
+      path == "/ui-builder" ||
+      // The reference snapshot embeds the released editor in srcdoc, which inherits this CSP.
+      Regex("/(?:[^/]+/)?reference/[^/]+\\.html").matches(path)
 
   /**
    * Where a page may fetch from. The UI-builder editor also reaches OpenRouter, where a person's

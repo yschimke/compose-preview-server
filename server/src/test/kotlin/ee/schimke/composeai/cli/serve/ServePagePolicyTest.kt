@@ -29,6 +29,9 @@ class ServePagePolicyTest {
       "/rc-player-wasm/",
       "/iframe.html",
       "/m3-catalog/iframe.html",
+      "/reference/phone.html",
+      "/app/reference/phone.html",
+      "/app/reference/phone.png",
     )
 
   @Test
@@ -55,6 +58,8 @@ class ServePagePolicyTest {
         "/wasm/m3-catalog/",
         "/wasm-private/a/m3-catalog/",
         "/rc-player-wasm/",
+        "/reference/phone.html",
+        "/app/reference/phone.html",
       )
     for (path in pages) {
       val scripts = directives(path).getValue("script-src")
