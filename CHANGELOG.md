@@ -1,5 +1,21 @@
 # Changelog
 
+## [3.120.0](https://github.com/yschimke/compose-preview-server/compare/v3.119.0...v3.120.0) (2026-10-10)
+
+
+### Features
+
+* **deploy:** preview.coo.ee owns m3-catalog, wear-m3, remote-m3 and remote-widgets in the UI builder ([#1514](https://github.com/yschimke/compose-preview-server/issues/1514)) ([be226d7](https://github.com/yschimke/compose-preview-server/commit/be226d7348b542b77a0b6d8679d64a9af4200ab1))
+* **deploy:** restart the box through the deploy hook when published config owes one, so config changes need no SSH ([#1512](https://github.com/yschimke/compose-preview-server/issues/1512)) ([85d25cc](https://github.com/yschimke/compose-preview-server/commit/85d25ccc2ec56054d14c1bab2c6fc5b0ae5b0bfa))
+* **deploy:** send UI-builder navigations to SERVE_UI_BUILDER_HOST from the committed Caddyfile ([#1516](https://github.com/yschimke/compose-preview-server/issues/1516)) ([a995f60](https://github.com/yschimke/compose-preview-server/commit/a995f60afffedbc962f02627e5e3af694927168f))
+* **serve:** serve the UI builder at the root of its own host, behind --ui-builder-host-root ([#1518](https://github.com/yschimke/compose-preview-server/issues/1518)) ([ffa788f](https://github.com/yschimke/compose-preview-server/commit/ffa788fc2896979e0289446c341cf273734ad780))
+* **ui-builder:** add projects with GitHub-backed working copies ([#1519](https://github.com/yschimke/compose-preview-server/issues/1519)) ([e0f7ec9](https://github.com/yschimke/compose-preview-server/commit/e0f7ec9e90f2e4fcbc87124c21a6a4170758f6ae))
+
+
+### Bug Fixes
+
+* **oauth:** resume callbacks from resolved approval pages ([#1517](https://github.com/yschimke/compose-preview-server/issues/1517)) ([ac9294d](https://github.com/yschimke/compose-preview-server/commit/ac9294de880e49d21195851aa04ace32ad7a3b42))
+
 ## [3.119.0](https://github.com/yschimke/compose-preview-server/compare/v3.118.0...v3.119.0) (2026-10-10)
 
 
