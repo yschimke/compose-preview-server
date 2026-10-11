@@ -11,14 +11,10 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
 /**
- * The wire types, the CSRF seal, and the pure decisions behind `/agent-access/…` — the device-grant
- * flow described in
+ * The wire types, CSRF seal and pure decisions behind `/agent-access/…`, the device-grant flow in
  * [docs/design/AGENT_ACCESS_GRANTS.md](../../../../../../../../docs/design/AGENT_ACCESS_GRANTS.md).
- *
- * The routes themselves are `handleAgentGrant*` on [ServeHttpServer], like every other lane on this
- * server, because they need its gates, its site skin and its external-origin view. What lives here
- * is everything that can be decided without a live call — which is deliberately most of it, so the
- * interesting parts are unit-testable without standing up Ktor.
+ * The routes are `handleAgentGrant*` on [ServeHttpServer], which owns the gates and site skin;
+ * everything decidable without a live call lives here so it is unit-testable.
  */
 object ServeAgentGrants {
 
@@ -32,37 +28,27 @@ object ServeAgentGrants {
   const val LEAVE_PATH = "$BASE_PATH/leave"
 
   /**
-   * Where the confirmation page shown when a grant link would replace the browser's current grant
-   * posts. POST only and same-origin only, so an agent-grant link can never switch a browser's
-   * identity without the person confirming it on a page this server served.
+   * Where the confirmation page posts when a grant link would replace the browser's current grant.
+   * POST and same-origin only, so a grant link can never switch a browser's identity without
+   * confirmation on a page this server served.
    */
   const val SWITCH_PATH = "$BASE_PATH/switch"
 
   /**
-   * The longest a poll may be held open. Chosen well inside the reverse proxies and load balancers
-   * a box sits behind (Caddy's defaults included), and short enough that a client which loses
-   * interest is not holding a connection for minutes.
+   * The longest a poll may be held open: well inside common reverse-proxy timeouts (Caddy's
+   * included), and short enough that an abandoned client doesn't hold a connection for minutes.
    */
   const val MAX_POLL_WAIT_SECONDS = 30L
 
   /**
-   * What a poll waits when the caller asked to wait but did not say how long — the MCP tool's
-   * default.
-   *
-   * Deliberately under ten seconds, not at [MAX_POLL_WAIT_SECONDS]. A held request is only useful
-   * if the CLIENT is willing to hold it too, and a conservative HTTP client gives up sooner than
-   * this lane would like: OkHttp's default read timeout is 10s, and it is the client this
-   * repository's own tests use. A default that outlives the caller's timeout turns a latency
-   * improvement into a transport error, which is strictly worse than answering `pending` — so the
-   * default fits inside the tightest common timeout, and a client that knows its own limits can ask
-   * for up to the maximum.
+   * The wait when the caller asked to wait without a duration (the MCP tool's default). Kept under
+   * OkHttp's 10s default read timeout: a wait outliving the client's timeout turns into a transport
+   * error, worse than answering `pending`.
    */
   const val DEFAULT_POLL_WAIT_SECONDS = 8L
 
   /**
-   * How often a held poll re-reads the store. Small enough that an approval feels instant to the
-   * human who just clicked, large enough that thirty seconds of waiting is a rounding error of lock
-   * acquisitions on a lane that is already rate-limited per caller.
+   * How often a held poll re-reads the store: approvals feel instant, at negligible locking cost.
    */
   const val POLL_WAIT_TICK_MILLIS = 250L
 
@@ -86,9 +72,7 @@ object ServeAgentGrants {
     @SerialName("ttlSeconds") val ttlSeconds: Long = 0,
     /**
      * Independent permissions wanted beside [scope], by wire name ([AgentGrantCapability]). Unknown
-     * names are ignored rather than refused: this is an agent describing what it would like, and a
-     * newer client naming a capability this server has never heard of should get the rest of its
-     * request honoured, not a 400.
+     * names are ignored, not refused, so a newer client still gets the rest of its request.
      */
     val capabilities: List<String> = emptyList(),
   )
@@ -125,17 +109,12 @@ object ServeAgentGrants {
     val requestId: String = "",
     val deviceSecret: String = "",
     /**
-     * Hold the request open for up to this many seconds, answering the moment a human decides.
+     * Hold the request open up to this many seconds, answering the moment a human decides.
      *
-     * Zero (the default) is RFC 8628's shape: answer immediately, come back after
-     * [ServeAgentGrantStore.POLL_INTERVAL_SECONDS]. That is fine for a shell loop, where a sleep
-     * costs nothing, and wasteful for an MCP client, where every poll is a tool call through a
-     * model — a human taking half a minute to find the tab costs a dozen round trips, each with its
-     * own latency and tokens.
-     *
-     * Clamped to [MAX_POLL_WAIT_SECONDS]. A wait that reaches its deadline answers exactly what an
-     * immediate poll would have — `pending`, with the same retry interval — so a caller that gets
-     * bored is in the state it would have been in anyway.
+     * Zero (the default) is RFC 8628's shape: answer now, retry after
+     * [ServeAgentGrantStore.POLL_INTERVAL_SECONDS]. Fine for a shell loop, wasteful for an MCP
+     * client where each poll is a model tool call. Clamped to [MAX_POLL_WAIT_SECONDS]; a wait that
+     * times out answers `pending`, as an immediate poll would.
      */
     val waitSeconds: Long = 0,
   )
@@ -184,11 +163,8 @@ object ServeAgentGrants {
     /** SHA-256 prefix, so a caller can match its grant to a `/status` row without disclosing it. */
     val fingerprint: String? = null,
     /**
-     * How the rest of the server names this grant's holder — `agent:<fingerprint>`.
-     *
-     * Here because an agent has to be able to *say* who it is: sharing a design names the other
-     * party by actor id, so an agent asked "which id should I grant?" can answer with this rather
-     * than with a shrug.
+     * How the rest of the server names this grant's holder (`agent:<fingerprint>`), so an agent can
+     * say which actor id to share a design with.
      */
     val actorId: String? = null,
     /**
@@ -203,9 +179,7 @@ object ServeAgentGrants {
     val designIds: List<String> = emptyList(),
     /**
      * Why this is not a live grant ([ServeAgentGrantStore.TokenState] wire name), absent when
-     * [active]. An inactive answer used to carry no fields at all, which left an agent unable to
-     * choose between retrying, re-running the approval flow, and stopping because a human revoked
-     * it — three very different responses to one indistinguishable reply.
+     * [active], so an agent can choose between retrying, re-running approval, and stopping.
      */
     val reason: String? = null,
     /** Human-readable expansion of [reason], safe to print. Never contains a token. */
@@ -217,50 +191,33 @@ object ServeAgentGrants {
   // --------------------------------------------------------------- approver
 
   /**
-   * Who is approving, and what they are themselves allowed to pass on.
-   *
-   * The second half is the rule that matters: **an approver may never grant a capability they do
-   * not hold**. On a GitHub-gated box, [ceiling] drops to [AgentGrantScope.LIVE] for a visitor
-   * without access to `--github-auth-repo`, because that repo check is exactly the playground's own
-   * gate — letting them tick the playground box would be a privilege escalation dressed as a
-   * delegation.
+   * Who is approving, and what they may pass on. **An approver may never grant a capability they do
+   * not hold**: on a GitHub-gated box, [ceiling] drops to [AgentGrantScope.LIVE] for a visitor
+   * without `--github-auth-repo` access, since that is the playground's own gate.
    */
   data class Approver(
     /** Display name, and what the audit line records: a GitHub login, or `operator (token)`. */
     val name: String,
     /**
-     * The same person as [name], spelled the way the rest of the server spells an identity —
-     * `github:<login>` or `operator`, exactly what [ServeMachineAuthorization] hands a route as its
-     * actor id.
-     *
-     * It is carried onto the minted grant so an agent acting under it can be recognised as acting
-     * *for this person*: the UI builder owns a design by actor id, and a grant that could not name
-     * its approver produced designs owned by a short-lived `agent:…` id that nobody — the approver
-     * included — could open afterwards.
+     * The same person as [name] as an actor id (`github:<login>` or `operator`, as
+     * [ServeMachineAuthorization] spells it). Carried onto the grant so designs an agent creates
+     * are owned by the approver rather than an unopenable `agent:…` id.
      */
     val actorId: String,
     val ceiling: AgentGrantScope,
     /**
-     * The capabilities this approver may pass on — the same "never grant what you do not hold"
-     * rule, applied to the half of a grant that is not a rung.
-     *
-     * [AgentGrantCapability.IMAGES] is the case that makes it concrete. The image lane admits a
-     * caller who has **write access to the gating repository**, so a signed-in visitor without that
-     * access cannot upload — and must not be able to hand an agent a token that does. It is the
-     * identical argument to the playground's; what differs is only *which* repository the question
-     * is asked about, because a box may gate uploads on one repository and sign-in on another.
+     * The capabilities this approver may pass on: the same rule for the non-rung half of a grant.
+     * E.g. [AgentGrantCapability.IMAGES] requires write access to the image gating repository, so a
+     * visitor without it must not mint an agent token that has it.
      */
     val capabilityCeiling: Set<AgentGrantCapability> = emptySet(),
     /**
-     * True when this approver answers for the whole box rather than only for what they approved
-     * themselves: the `--token` holder (every approver on a box that is not `--public` has to
-     * present it), or a configured UI-builder administrator. Such an approver sees every pending
-     * request and live grant on `/status`, may revoke any grant, and is held only to the box-wide
-     * cap on live grants.
+     * True when this approver answers for the whole box: the `--token` holder or a configured
+     * UI-builder administrator. They see every pending request and live grant on `/status`, may
+     * revoke any grant, and are held only to the box-wide cap.
      *
-     * False for an ordinary signed-in visitor on a `--public` box, who sees and revokes only the
-     * grants they approved (and the requests they opened for themselves), and may hold at most the
-     * store's per-approver number of live grants.
+     * False for an ordinary signed-in visitor on a `--public` box, who sees and revokes only their
+     * own grants and requests, within the per-approver cap.
      */
     val administers: Boolean = true,
   ) {
@@ -280,15 +237,11 @@ object ServeAgentGrants {
       ): Approver = Approver("operator (token)", OPERATOR_ACTOR_ID, storeCeiling, storeCapabilities)
 
       /**
-       * @param repositoryAccess access to the sign-in repository (`--github-auth-repo`) — the bit
-       *   behind the scope ceiling and every capability except [AgentGrantCapability.IMAGES].
-       * @param imageRepositoryAccess access to the repository the image lane gates on
-       *   (`--image-upload-repo`, which falls back to the sign-in one). Asked separately because
-       *   the two may differ: a bit computed about one repository says nothing about another, and
-       *   answering for `images` out of [repositoryAccess] would let someone with access to the
-       *   OAuth repo alone mint a grant that publishes where they have no rights. When the box
-       *   gates both on the same repository the two are simply equal, and this reduces to what it
-       *   always was.
+       * @param repositoryAccess access to the sign-in repository (`--github-auth-repo`), behind the
+       *   scope ceiling and every capability except [AgentGrantCapability.IMAGES].
+       * @param imageRepositoryAccess access to the image lane's repository (`--image-upload-repo`,
+       *   defaulting to the sign-in one). Asked separately so access to the OAuth repo alone can't
+       *   mint a grant that publishes where the approver has no rights.
        */
       fun github(
         login: String,
@@ -299,8 +252,7 @@ object ServeAgentGrants {
         administers: Boolean = true,
         /**
          * `--github-auth-open-ui-builder`: this approver holds the UI builder's capabilities
-         * without repository access, so — by the same "never grant what you do not hold" rule — may
-         * pass them on. Nothing else rides in on it.
+         * without repository access, and so may pass them on. Nothing else.
          */
         opensUiBuilder: Boolean = false,
       ) =
@@ -314,9 +266,8 @@ object ServeAgentGrants {
             buildSet {
               if (repositoryAccess) addAll(storeCapabilities)
               if (opensUiBuilder) addAll(storeCapabilities intersect UI_BUILDER_CAPABILITIES)
-              // Added and removed independently of the rest: `images` is the one capability whose
-              // question is about a different repository, so it neither rides in on the sign-in
-              // bit nor is withheld by it.
+              // `images` asks about a different repository, so it neither rides in on nor is
+              // withheld by the sign-in bit.
               remove(AgentGrantCapability.IMAGES)
               if (imageRepositoryAccess && AgentGrantCapability.IMAGES in storeCapabilities) {
                 add(AgentGrantCapability.IMAGES)
@@ -349,16 +300,9 @@ object ServeAgentGrants {
 
   /**
    * A per-process seal over `(requestId, approver, action)`, embedded in the approval form and
-   * required back on the POST.
-   *
-   * `SameSite=Lax` on the session cookie already means a cross-site POST arrives without one, and
-   * on a token-gated box the attacker would additionally need the `?token=`. This is the third
-   * lock, and it is the one that does not depend on a browser honouring an attribute: a POST whose
-   * seal was minted for a different approver, a different request, or a different action is refused
-   * outright.
-   *
-   * The key is random per process and never persisted, so seals do not survive a restart. Neither
-   * do grant requests, so there is nothing to be compatible with.
+   * required on the POST. Beyond `SameSite=Lax` and the `?token=` gate, this lock doesn't depend on
+   * browser behaviour: a seal minted for another approver, request or action is refused. The key is
+   * random per process and never persisted; grant requests don't survive restarts either.
    */
   class Csrf(private val key: ByteArray = randomKey()) {
 
@@ -385,14 +329,6 @@ object ServeAgentGrants {
     }
   }
 
-  // ----------------------------------------------------------- pure helpers
-
-  /**
-   * The scopes an approver may actually tick on the page: everything up to the lower of the store's
-   * ceiling, the approver's own ceiling, and what the agent asked for. Asking for less than the
-   * ceiling is the agent's own restraint and is honoured — the page never offers to *widen* a
-   * request, because the agent has not told its human it wants more.
-   */
   /**
    * The capabilities an approver may actually tick: the same three-way narrowing the scopes get —
    * what the agent asked for, what this approver holds, and what the box permits — so the form can
@@ -405,6 +341,10 @@ object ServeAgentGrants {
   ): Set<AgentGrantCapability> =
     requested intersect approver.capabilityCeiling intersect storeCeiling
 
+  /**
+   * The scopes an approver may tick: up to the lowest of the store's ceiling, the approver's
+   * ceiling and what the agent asked for. The page never offers to widen a request.
+   */
   fun selectableScopes(
     requested: AgentGrantScope,
     approver: Approver,

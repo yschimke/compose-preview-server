@@ -31,14 +31,24 @@ class ServeUiBuilderHostRootTest {
     servers.forEach { runCatching { it.stop() } }
   }
 
-  private val bundle: File =
+  private fun bundle(editorVersion: String? = UI_BUILDER_BASE_PATH_MIN_EDITOR): File =
     Files.createTempDirectory("ui-builder-bundle").toFile().also { dir ->
       dir.deleteOnExit()
       File(dir, "index.html").writeText(SHELL)
       File(dir, "app.mjs").writeText("export const a = 1")
+      if (editorVersion != null) {
+        File(dir, ServeUiBuilderEditor.MANIFEST_FILE)
+          .writeText(
+            """{"schema":"${ServeUiBuilderEditor.MANIFEST_SCHEMA}","version":"$editorVersion",""" +
+              """"serverApi":1}"""
+          )
+      }
     }
 
-  private fun server(rooted: Boolean = true): ServeHttpServer =
+  private fun server(
+    rooted: Boolean = true,
+    bundle: File = bundle(),
+  ): ServeHttpServer =
     ServeHttpServer(
         host = "127.0.0.1",
         requestedPort = 0,
@@ -140,6 +150,77 @@ class ServeUiBuilderHostRootTest {
     server.call("/ui-builder/v/$version/app.mjs", BUILDER).use { assertEquals(200, it.code) }
     // A design named after a server route has no rooted URL, so it is left alone.
     assertTrue(server.call("/ui-builder/api", BUILDER).isShell())
+  }
+
+  /**
+   * Every response header but the ones that legitimately differ: the date, and the entity tag — the
+   * rooted shell's body adds the base-path `<meta>`, so it is a different entity.
+   */
+  private fun Response.pageHeaders(): Map<String, String> = use { response ->
+    response.headers
+      .names()
+      .filterNot { it.equals("Date", true) || it.equals("ETag", true) }
+      .associateWith { response.headers(it).joinToString(", ") }
+      .toSortedMap(String.CASE_INSENSITIVE_ORDER)
+  }
+
+  @Test
+  fun `a rooted page carries exactly the headers of its ui-builder form`() {
+    val server = server()
+
+    // ui.coo.ee shipped the rooted editor under a plain page's policy, `script-src 'self'
+    // 'unsafe-inline'`, and the editor died compiling its Wasm. The rooted page is the same page,
+    // so its whole header set — the CSP above all — must be the prefixed form's.
+    for ((rooted, prefixed) in
+      listOf("/" to "/ui-builder/", "/my-design" to "/ui-builder/my-design")) {
+      val onRoot = server.call(rooted, BUILDER).pageHeaders()
+      val elsewhere = server.call(prefixed, OTHER).pageHeaders()
+      val csp = onRoot[ServePagePolicy.HEADER] ?: error("$rooted has no CSP")
+      assertTrue("'wasm-unsafe-eval'" in csp, "$rooted must be able to compile the editor: $csp")
+      assertTrue("https://openrouter.ai" in csp, "$rooted is the editor shell: $csp")
+      assertEquals(elsewhere, onRoot, "$rooted on the builder host vs $prefixed elsewhere")
+    }
+  }
+
+  @Test
+  fun `a carved-out route on the builder host keeps its own policy`() {
+    val server = server()
+
+    // `/api/…` is the server's, not a builder page: whatever policy it has elsewhere, it has here.
+    val path = "/api/ui-builder/v1/catalogs"
+    assertEquals(
+      server.call(path, OTHER, html = false).pageHeaders()[ServePagePolicy.HEADER],
+      server.call(path, BUILDER, html = false).pageHeaders()[ServePagePolicy.HEADER],
+    )
+  }
+
+  @Test
+  fun `an editor that cannot read its base path keeps the host on ui-builder`() {
+    // ui.coo.ee turned root mode on while serving editor 3.103.0, which hard-codes `/ui-builder/`.
+    for (editor in listOf("3.103.0", null)) {
+      val server = server(bundle = bundle(editor))
+      server.call("/", BUILDER).use { response ->
+        assertEquals(302, response.code, "editor $editor")
+        assertEquals("/ui-builder/", response.header("Location"))
+      }
+      assertFalse(server.call("/my-design", BUILDER).isShell(), "editor $editor")
+      server.call("/ui-builder/my-design", BUILDER).use {
+        assertEquals(200, it.code, "editor $editor: no redirect to a root it cannot serve")
+      }
+    }
+  }
+
+  @Test
+  fun `editor versions are compared by their release line`() {
+    assertTrue(editorVersionAtLeast("3.104.0", "3.104.0"))
+    assertTrue(editorVersionAtLeast("3.104.0-SNAPSHOT", "3.104.0"))
+    assertTrue(editorVersionAtLeast("3.110.2", "3.104.0"))
+    assertTrue(editorVersionAtLeast("4.0.0", "3.104.0"))
+    assertFalse(editorVersionAtLeast("3.103.9", "3.104.0"))
+    assertFalse(editorVersionAtLeast("3.99.0", "3.104.0"))
+    assertFalse(editorVersionAtLeast("not-a-version", "3.104.0"))
+    assertNull(uiBuilderRootEditorProblem(bundle("3.104.0")))
+    assertTrue(uiBuilderRootEditorProblem(bundle("3.103.0"))!!.contains("3.103.0"))
   }
 
   @Test

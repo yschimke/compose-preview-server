@@ -107,3 +107,64 @@ internal const val UI_BUILDER_SERVICE_WORKER = "ui-builder-sw.js"
  * the rooted form on navigation).
  */
 internal const val UI_BUILDER_BASE_PATH_META = "ui-builder-base-path"
+
+/**
+ * The `/ui-builder/…` path a request on the rooted builder host stands for, or null when it is one
+ * of the server's own routes ([ServeSites.RESERVED_SYSTEMS]) and keeps its own meaning. Mirrors
+ * [UiBuilderHostRootSelector]: on that host, every other path is a builder page, and `/` is the
+ * editor's home. Used so the page's headers ([ServePagePolicy.servesAs]) are those of the
+ * `/ui-builder/` form, not of whatever a bare root path would otherwise be.
+ */
+internal fun uiBuilderRootCanonicalPath(path: String): String? {
+  if (path == "/" || path.isEmpty()) return "/ui-builder/"
+  val first = path.trimStart('/').substringBefore('/')
+  val decodedFirst = runCatching {
+    java.net.URLDecoder.decode(first, Charsets.UTF_8)
+  }
+    .getOrDefault(first)
+  if (decodedFirst in ServeSites.RESERVED_SYSTEMS) return null
+  return "/ui-builder" + path
+}
+
+/**
+ * The first compose-ui-builder editor that reads [UI_BUILDER_BASE_PATH_META]
+ * (compose-ui-builder #659, released in 3.104.0). An older editor hard-codes `/ui-builder/`: served
+ * at the root it cannot tell which design to open.
+ */
+internal const val UI_BUILDER_BASE_PATH_MIN_EDITOR: String = "3.104.0"
+
+/**
+ * Why the editor in [dir] cannot be served at the root of its host, or null when it can.
+ *
+ * Read from the archive's own manifest ([ServeUiBuilderEditor.MANIFEST_FILE]) by version, because
+ * the manifest carries no feature list yet. An editor with no manifest predates it, and so predates
+ * the base path too. ui.coo.ee turned root mode on while serving editor 3.103.0, and every page
+ * failed; refusing here keeps the host on `/ui-builder/` instead.
+ */
+internal fun uiBuilderRootEditorProblem(dir: java.io.File?): String? {
+  dir ?: return "no editor directory is served"
+  val manifest =
+    ServeUiBuilderEditor.readManifest(dir)
+      ?: return "the editor at $dir has no ${ServeUiBuilderEditor.MANIFEST_FILE}, so it predates " +
+        "base-path support (compose-ui-builder $UI_BUILDER_BASE_PATH_MIN_EDITOR)"
+  return if (editorVersionAtLeast(manifest.version, UI_BUILDER_BASE_PATH_MIN_EDITOR)) null
+  else
+    "editor ${manifest.version} predates base-path support (compose-ui-builder " +
+      "$UI_BUILDER_BASE_PATH_MIN_EDITOR)"
+}
+
+/**
+ * Whether [version] is at least [minimum], comparing the leading `major.minor.patch` numerically. A
+ * pre-release of the minimum (`3.104.0-SNAPSHOT`) counts as the minimum: it is built from that
+ * line. An unparsable version is not trusted.
+ */
+internal fun editorVersionAtLeast(version: String, minimum: String): Boolean {
+  fun parts(v: String): List<Int>? =
+    v.substringBefore('-').split('.').let { p ->
+      if (p.size < 3) null else p.take(3).map { it.toIntOrNull() ?: return null }
+    }
+  val have = parts(version) ?: return false
+  val need = parts(minimum) ?: return false
+  for (i in 0 until 3) if (have[i] != need[i]) return have[i] > need[i]
+  return true
+}

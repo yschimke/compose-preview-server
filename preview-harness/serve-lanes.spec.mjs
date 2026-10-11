@@ -1,24 +1,14 @@
-// End-to-end proof that every render lane of a live, daemon-backed
-// `compose-preview serve` really honors a named-knob override — not just that the
-// viewer HTML contains the right controls (that's ServeWebFixtureTest's job), but
-// that flipping a knob actually changes the pixels/bytes each backend produces.
+// End-to-end proof that each render lane of a live, daemon-backed `compose-preview serve` honours a
+// named-knob override (that flipping a knob changes the bytes), not just that the controls exist
+// (ServeWebFixtureTest's job). For a preview declaring a `label` string knob:
+//   - PNG: `/render/<id>.png` vs `?knob.label=<X>`, both 200, bytes differ.
+//   - SVG: `/render/<id>.svg?knob.label=<X>`, 200 with <X> in the body.
+//   - Live: `/ws/<id>?knob.label=<X>` upgrades and pushes a frame.
+//   - Wasm: the in-browser iframe re-renders when the knob changes.
+// Plus a viewer drive switching modes and editing the knob.
 //
-// Lanes covered for a preview that declares a `label` string knob:
-//   - PNG  : GET /render/<id>.png  vs  ?knob.label=<X>  → both 200, bytes differ
-//            (the daemon re-rendered).
-//   - SVG  : GET /render/<id>.svg?knob.label=<X>        → 200 image/svg+xml whose
-//            body literally contains <X> (the override text is in the vector).
-//   - Live : open the /ws/<id>?knob.label=<X> WebSocket  → upgrades (101) and
-//            pushes a frame.
-//   - Wasm : the in-browser CMP iframe re-renders when the knob changes (stage
-//            pixels differ before/after).
-// Plus a viewer drive: switching the PNG/SVG/Live/Wasm mode radios and editing the
-// knob repoints the render URLs / stream the way the backend lane expects.
-//
-// Requires a running serve; point SERVE_URL at it (SERVE_SYSTEM defaults to
-// compose-m3). The CI job boots one daemon-backed
-// (`serve --catalogs compose-m3 --allow-render-trusted --trust-store …` under
-// xvfb). Self-skips with a clear message when no label-knob preview is reachable.
+// Point SERVE_URL at a running serve (SERVE_SYSTEM defaults to compose-m3); CI boots a
+// daemon-backed one under xvfb. Skips when no label-knob preview is reachable.
 
 import { test, expect } from "@playwright/test";
 import { readFileSync } from "node:fs";
@@ -45,23 +35,12 @@ test.beforeAll(async ({ request }) => {
   previewId = hit?.id ?? null;
 });
 
-// The declared knobs now live in a collapsed-by-default "Overrides"
-// `<details class="cp-group">` section (the viewer remembers each section's
-// open/closed state in localStorage, defaulting everything except Export to
-// closed). Expand it before touching a `.cp-knob`, since Playwright refuses to
-// fill a control inside a closed <details> ("element is not visible").
+// Knobs live in a collapsed "Overrides" `<details>` group; expand it before filling a `.cp-knob`
+// (Playwright won't fill hidden controls).
 async function openOverridesGroup(page) {
-  // TWO things are shut, not one. The knobs live in a `<details>` group inside the overrides
-  // DRAWER, and the drawer is a column of the viewer that `.cp-viewer.cp-controls-open` reveals —
-  // #3893 stopped serving that class, so the drawer now starts closed at every width and
-  // `.cp-viewer:not(.cp-controls-open) .cp-controls { display: none }` hides the group whatever
-  // its own `open` says. Opening only the group left every knob resolvable and invisible, which is
-  // exactly what these tests then timed out on.
-  //
-  // The drawer is opened the way a reader opens it, through its toggle, so this keeps testing the
-  // control rather than the class it happens to set today; the group is still forced, because it
-  // is the server that decides which groups start expanded and that is not what these tests are
-  // about.
+  // Two things are shut: the group, and the overrides drawer (revealed by `.cp-controls-open`,
+  // which now starts closed and hides every group). Open the drawer through its toggle; force the
+  // group open, since which groups start expanded isn't under test.
   const viewer = page.locator(".cp-viewer");
   const open = await viewer.evaluate((v) =>
     v.classList.contains("cp-controls-open"),
@@ -75,11 +54,8 @@ async function openOverridesGroup(page) {
     });
 }
 
-// The catalog landing's theme chips are behind a dropdown — the same `.cp-theme-menu` the viewer's
-// Theme control has always been — so a chip is resolvable but invisible until the menu is opened,
-// and Playwright refuses to click it ("element is not visible"). Same shape as
-// `openOverridesGroup` above, and idempotent for the same reason: a pick closes the menu again
-// (`<cp-catalog-toolbar>`), so a caller cannot know what state it inherits.
+// The landing's theme chips are behind the `.cp-theme-menu` dropdown, so open it first. Idempotent,
+// since a pick closes it again.
 async function openCatalogThemeBar(page) {
   const bar = page.locator("#cp-catalog-theme-bar");
   if ((await bar.count()) && (await bar.isHidden()))
@@ -87,9 +63,7 @@ async function openCatalogThemeBar(page) {
 }
 
 function requirePreview() {
-  // In CI the boot step starts a known compose-m3 daemon serve, so a missing
-  // label-knob preview is a real regression — FAIL, don't green-skip the required
-  // suite. The skip path is only for a local run without a suitable serve target.
+  // In CI a missing label-knob preview is a regression, so fail rather than skip.
   if (!previewId && process.env.CI) {
     throw new Error(
       `no label-knob preview at /${SYSTEM}/api/previews — the daemon-backed serve isn't exposing the expected catalog; refusing to green-skip the Serve Lanes suite`,
@@ -117,9 +91,7 @@ test("PNG lane re-renders on knob override", async ({ request }) => {
     Buffer.compare(baseBuf, overBuf) !== 0,
     "override PNG bytes should differ from baseline (daemon re-rendered)",
   ).toBeTruthy();
-  // #3449: the honest-render side of the same contract. These pixels DID come from
-  // a daemon, so the response must carry no dropped-override signal — a refusal
-  // here would mean the live lane silently stopped being used.
+  // These pixels came from a daemon, so no dropped-override signal is allowed.
   expect(
     over.headers()["x-compose-preview-dropped-overrides"],
     "a real override render drops nothing",
@@ -139,9 +111,8 @@ test("SVG lane bakes the override text into the vector", async ({
   // The overridden label must appear as text in the SVG body — this is the lane
   // that regressed when the bundle daemon didn't register compose/figma-svg.
   expect(svg, "SVG body should contain the override text").toContain(OVERRIDE);
-  // #3449: this vector was really rendered with the override, so the response must
-  // carry no dropped-override signal. A refusal here would mean the lane had
-  // silently dropped back to the catalog's baked `figma/<slug>.svg`.
+  // This vector was rendered with the override, so no dropped-override signal (that would mean a
+  // silent fallback to the baked SVG).
   expect(
     res.headers()["x-compose-preview-dropped-overrides"],
     "a real override SVG export drops nothing",
@@ -218,9 +189,7 @@ test("viewer wires the knob into every render lane", async ({ page }) => {
   await knob.dispatchEvent("input");
   await knob.dispatchEvent("change");
 
-  // The copyable direct-link fields track the current knobs regardless of the
-  // active mode — the clearest signal the viewer folded the override into the
-  // render URLs the PNG and SVG lanes are hit with.
+  // The direct-link fields track the current knobs in every mode.
   await expect(page.locator("#cp-url-png")).toHaveValue(
     new RegExp(`knob\\.label=${OVERRIDE}`),
   );
@@ -228,24 +197,14 @@ test("viewer wires the knob into every render lane", async ({ page }) => {
     new RegExp(`knob\\.label=${OVERRIDE}`),
   );
 
-  // PNG mode (default): the on-screen <img> was painted from the override PNG, and loads.
-  //
-  // Assert on `data-cp-src`, not `src`. The viewer fetches the render bytes once and hands the
-  // <img> an object URL (so an override-bearing `no-store` render isn't performed twice and raced
-  // through the daemon's shared override state), which makes `src` an opaque `blob:` with nothing
-  // to match on. `data-cp-src` carries the /render URL those bytes actually came from and is set
-  // in the same `onload` that swaps the frame in, so it still proves the *displayed* pixels are
-  // the override's — which the `#cp-url-*` fields above cannot, since they track the live control
-  // state whether or not a render followed.
+  // PNG mode: assert on `data-cp-src`, not `src`. The viewer hands the <img> a `blob:` URL (to
+  // avoid rendering a no-store override twice); `data-cp-src` is the /render URL those bytes came
+  // from, set when the frame swaps in.
   await expect(page.locator("#cp-img")).toHaveAttribute(
     "data-cp-src",
     new RegExp(`\\.png.*knob\\.label=${OVERRIDE}`),
   );
-  // …and `src` is still the object URL. With the override assertion moved off `src`, nothing else
-  // pins that the blob swap is happening at all: a regression to assigning the render URL straight
-  // to `img.src` would keep `data-cp-src` matching and leave this suite green, while quietly
-  // reinstating the double-fetch of an override-bearing `no-store` render that the swap exists to
-  // prevent.
+  // ...and `src` is still a blob, pinning the swap itself.
   await expect(page.locator("#cp-img")).toHaveAttribute("src", /^blob:/);
   await expect
     .poll(() => page.locator("#cp-img").evaluate((im) => im.naturalWidth), {
@@ -267,11 +226,8 @@ test("viewer wires the knob into every render lane", async ({ page }) => {
   // Toggle SVG back off before exercising the live lane.
   await page.click("#cp-svg-toggle");
 
-  // Live mode: flipping the single Static⇄Live toggle must actually open the stream. A
-  // failed activation now routes through #cp-error (and CLEARS #cp-status), so checking
-  // status alone would pass on a silent failure — assert the error overlay stays hidden
-  // instead, which is only true once a frame has painted (the WS-frame test proves the
-  // frame itself).
+  // Live mode: the toggle must open the stream. A failed activation shows #cp-error (and clears
+  // #cp-status), so assert the error overlay stays hidden.
   await page.click("#cp-live-toggle");
   await page.waitForTimeout(6000);
   await expect(
@@ -323,9 +279,8 @@ test("Wasm iframe re-renders on knob override", async ({ page }) => {
   await knob.dispatchEvent("input");
   await knob.dispatchEvent("change");
 
-  // The wasm transport radio is hidden behind the single Static⇄Live toggle (which, on a
-  // daemon-backed catalog, prefers the stream). Drive the wasm lane directly to exercise the
-  // in-browser tier specifically: tick its radio and fire change so the transition JS enters it.
+  // The wasm radio is hidden behind the Static/Live toggle (which prefers the stream here), so tick
+  // it directly and fire change.
   await wasmToggle.evaluate((el) => {
     el.checked = true;
     el.dispatchEvent(new Event("change", { bubbles: true }));
@@ -348,17 +303,10 @@ test("Wasm iframe re-renders on knob override", async ({ page }) => {
     .toBeTruthy();
 });
 
-// The client-side RC lane draws a document's *generic* families through the concrete faces Android
-// resolves them to (`Roboto, sans-serif`, …). That is only a request: on a page that registered no
-// such faces the browser falls through to whatever the visitor's own machine calls `sans-serif`, so
-// the same document renders in a different typeface, at ~4% different line metrics and without the
-// Medium weight — while the PNG lane beside it used the vendored files (issue #3480). The server now
-// serves those files (`/rc-fonts/…`) and the matching `@font-face` block.
-//
-// Driven through the **document lane** rather than a catalog preview: it needs only a `.rc` file, so
-// it runs on every serve this suite boots instead of skipping wherever the served catalog happens to
-// carry no `ir/` sidecars. The claim needs a real browser and a real server — `@font-face` is lazy,
-// canvas neither drives a load nor repaints when one lands, and no HTML fixture can show either.
+// The client-side RC lane must draw with the vendored faces (`/rc-fonts/…`), not the visitor's own
+// `sans-serif`, matching the PNG lane. Driven through the document lane, which needs only a `.rc`
+// file. Needs a real browser and server: `@font-face` is lazy and canvas neither triggers loads nor
+// repaints.
 test("a Remote Compose document plays in the vendored typefaces, not the visitor's", async ({
   browser,
   request,
@@ -414,9 +362,7 @@ test("a Remote Compose document plays in the vendored typefaces, not the visitor
   const served = await play(false);
   const unregistered = await play(true);
 
-  // Both Roboto faces must be *loaded* before the lane paints: a declared-but-unloaded face is
-  // precisely the state canvas silently substitutes for, and 500 is the one no fallback stack has a
-  // file for.
+  // Both Roboto faces must be loaded before painting; 500 is a weight no fallback has.
   expect(
     served.loaded.filter((f) => f === "Roboto").length,
     `both Roboto faces should be loaded, saw ${JSON.stringify(served.loaded)}`,
@@ -431,13 +377,8 @@ test("a Remote Compose document plays in the vendored typefaces, not the visitor
   ).toBeTruthy();
 });
 
-// ——— Address-bar state ————————————————————————————————————————————————————————————————————
-//
-// What a visitor picks on a catalog page — the section tab, the theme, the filter — is reflected
-// into the URL, so the page on screen is the page its URL describes: bookmarkable, shareable, and
-// reachable with Back. These drive the real server (not a fixture) because the claim is a
-// *navigation* one: the URL has to change, the page must NOT reload, and Back has to restore the
-// previous selection in place.
+// Address-bar state: catalog selections (tab, theme, filter) land in the URL without a reload, and
+// Back restores them in place. Driven against the real server because it is a navigation claim.
 test("catalog selections land in the URL and Back restores them without reloading", async ({
   page,
 }) => {
@@ -557,25 +498,11 @@ test("viewer overrides ride the page URL and survive Back", async ({
   );
 });
 
-// ---------------------------------------------------------------------------
-// Live-lane text input (issue #3491).
-//
-// The Live lane forwards the visitor's real keyboard and mouse into a held
-// composition running in the render daemon. Two things about a text field are
-// easy to get silently wrong there, and were:
-//
-//   - typing needs the *character* on the wire, not just the physical keycode.
-//     Caret keys and Backspace map off the keycode alone, so the lane could look
-//     responsive — caret moves, Backspace deletes — while no character ever
-//     appeared;
-//   - selecting needs the pointer's *device class*. Compose only drags out a text
-//     selection for a mouse; a drag forwarded as touch is a gesture and leaves the
-//     selection alone.
-//
-// Both are asserted the only way that can't be faked from the client side: the
-// streamed frame's own pixels have to change. The daemon-side dispatch is unit
-// covered (`DesktopTextInputSessionTest`, `AndroidInteractiveSessionTest`); these
-// prove the browser half sends what those need.
+// Live-lane text input. Typing needs the character on the wire, not just the keycode (caret keys
+// and Backspace work from the keycode alone, so the lane can look responsive while nothing is
+// typed). Selecting needs the pointer's device class: Compose only drag-selects for a mouse. Both
+// asserted by the streamed frame's pixels changing; daemon dispatch is unit-tested
+// (`DesktopTextInputSessionTest`, `AndroidInteractiveSessionTest`).
 
 /** A preview id that renders a text field, or null when the catalog has none. */
 let textFieldPreviewId = null;
@@ -589,11 +516,7 @@ test.beforeAll(async ({ request }) => {
     previews.find((p) => /^textfield-/.test(p.id ?? ""))?.id ?? null;
 });
 
-/**
- * The one catalog that is expected to carry a text field. The suite also runs against the Android
- * lane's `androidlane` system, whose bundle is a single-card fixture with no text field at all —
- * demanding one there fails a job for serving exactly what it was built to serve.
- */
+/** The one catalog expected to carry a text field (the `androidlane` system has none). */
 const TEXT_FIELD_SYSTEM = "compose-m3";
 
 function requireTextField() {
@@ -614,9 +537,7 @@ async function openLiveTextField(page) {
     waitUntil: "domcontentloaded",
   });
   await page.click("#cp-live-toggle");
-  // The canvas only carries a buffer once a frame has painted; input forwarding
-  // is gated on exactly that (`liveActive()`), so waiting for it is also waiting
-  // for the lane to be able to accept input at all.
+  // The canvas has a buffer only once a frame painted; input forwarding is gated on that.
   await expect
     .poll(() => page.locator("#cp-canvas").evaluate((c) => c.width), {
       timeout: 60000,
@@ -649,26 +570,11 @@ function frameDiffPct(a, b) {
 }
 
 /**
- * Floor for "the composition visibly reacted", in percent of the frame's pixels.
- *
- * A bare "the frame changed at all" assertion would pass on nothing: a focused
- * field blinks its caret, and a click that only *moves* the caret redraws it
- * somewhere else. Re-measured against this lane, with a text field focused:
- *
- *   caret blink alone .................. 0.07%
- *   caret moved, nothing typed ......... 0.07%
- *   two characters typed at the caret .. 0.82%
- *   a drag-selection highlight ......... 1.49%
- *
- * 0.4% sits in the gap — comfortably above anything the caret can do by itself,
- * comfortably below the smallest real edit. Without it, the selection test in
- * particular would have gone green against the very bug it exists to catch.
- *
- * Both numbers on the "real edit" side are measured with the caret **inside the
- * word** (see [TEXT_X_FRACTION]). Appending the same two characters past the end
- * of the text instead scores 0.34% — a genuine edit that lands under this floor,
- * because nothing already on screen has to move. That is not a reason to lower
- * the floor; it is why these tests press on the glyphs.
+ * Floor for "the composition visibly reacted", in percent of frame pixels. Measured with a focused
+ * field: caret blink 0.07%, caret moved 0.07%, two characters typed 0.82%, drag-selection 1.49%.
+ * 0.4% sits between. The "real edit" numbers are with the caret inside the word (see
+ * [TEXT_X_FRACTION]); appending past the end scores only 0.34%, which is why these tests press on
+ * the glyphs.
  */
 const REACTED_DIFF_PCT = 0.4;
 
@@ -678,15 +584,8 @@ async function liveCanvasBox(page) {
 }
 
 /**
- * Horizontal fraction of the canvas that lands **on the field's glyphs**.
- *
- * A text-field sticker is mostly empty field: the control is 280dp wide and the
- * seeded value only fills the first fifth of it, left-aligned. So the canvas
- * centre is inside the field but *past the end of the text* — a click there
- * focuses the field and parks the caret at the last offset, which is not a
- * position either of these tests means to drive from. Pressing here instead puts
- * the caret **inside** the word, so typing shifts the tail (rather than merely
- * appending two glyphs off the end) and a drag has text to its right to select.
+ * Horizontal fraction of the canvas landing on the field's glyphs: the seeded text fills only the
+ * first fifth of the field, so pressing here puts the caret inside the word.
  */
 const TEXT_X_FRACTION = 0.18;
 
@@ -721,23 +620,15 @@ test("Live lane selects text on a mouse drag", async ({ page }) => {
 
   const box = await liveCanvasBox(page);
   const y = box.y + box.height / 2;
-  // Deliberately the canvas centre — past the last glyph — so the field is
-  // focused with its caret parked at the end of the text before the drag starts.
-  // That is the decoy the drag below has to ignore.
+  // The canvas centre (past the text), focusing the field with the caret at the end: the decoy the
+  // drag must ignore.
   await page.mouse.click(box.x + box.width / 2, y);
   await page.waitForTimeout(2000);
   const before = await liveFrame(page);
 
-  // Press on the glyphs and drag right, off the end of the text. The press is
-  // deliberately separate from the moves: the viewer defers the pointerDown until
-  // the first move so a plain tap stays a click, and it is the move that promotes
-  // the gesture to a drag — which also means the daemon is handed the press and
-  // the first move back to back, with nothing in between (issue #3697).
-  //
-  // Ending past the last glyph is what makes a press the selection *forgot* show
-  // up: a selection anchored on the pre-existing caret instead of on the press
-  // collapses to an empty range out here, so the frame carries no highlight at
-  // all rather than a wrong one.
+  // Press on the glyphs and drag right past the end. The viewer defers pointerDown until the first
+  // move, so the daemon gets press and first move back to back. Ending past the text makes a
+  // selection anchored on the old caret collapse to nothing.
   await page.mouse.move(box.x + box.width * TEXT_X_FRACTION, y);
   await page.mouse.down();
   for (let i = 1; i <= 12; i++) {
@@ -746,10 +637,8 @@ test("Live lane selects text on a mouse drag", async ({ page }) => {
   }
   await page.mouse.up();
 
-  // A selection paints a highlight behind the selected glyphs. Dispatched as
-  // touch — which is what this lane used to do with every pointer — Compose
-  // treats the same drag as a gesture and paints no highlight at all; the frame
-  // then only differs by the caret the press moved, well under the floor.
+  // A selection paints a highlight; dispatched as touch the drag would only move the caret, under
+  // the floor.
   await expect
     .poll(async () => frameDiffPct(before, await liveFrame(page)), {
       timeout: 30000,

@@ -1,9 +1,5 @@
-// The comparison metric's tuning numbers, with why each is the number it is.
-//
-// Gathered here rather than left at the top of the file that uses them, because they are the whole
-// behaviour: every one of them is a judgement about what counts as a difference, and changing any of
-// them changes what the catalog reports as a finding. None of these is shared with another surface —
-// `compare/thresholds.ts` holds the ones that are.
+// The comparison metric's tuning numbers. Each is a judgement about what counts as a difference;
+// shared thresholds live in `compare/thresholds.ts`.
 
 /** Longest side of the downscale a score is computed over. */
 export const MAX_SIDE = 192;
@@ -17,13 +13,9 @@ export const EDGE_GRADIENT_THRESHOLD = 12;
 export const LUMA_TOLERANCE = 16;
 
 /**
- * The luminance gap at which a pixel counts as *completely* wrong.
- *
- * Below this the cost ramps, so a fill that drifted a shade still reads as mostly right. At or above
- * it the pixel is charged in full: half the luminance range apart is not a tone that moved, it is a
- * different mark. Charging the gap linearly all the way to 255 — which is what this used to do —
- * meant a filled control sitting where the reference has bare background cost about a fifth of a
- * pixel, so a component that had lost its fills entirely still read as "mostly matching".
+ * The luminance gap at which a pixel counts as completely wrong. Below it the cost ramps (a shade
+ * of drift reads as mostly right); at or above it the pixel is charged in full, so lost fills score
+ * as a mismatch.
  */
 export const FULL_DIFFERENCE_DELTA = 128;
 
@@ -48,11 +40,9 @@ export const BOX_COLOUR_TOLERANCE = 12;
 export const MIN_BOX_COVERAGE = 0.05;
 
 /**
- * The backing colours `@Preview(showBackground = true)` resolves to.
- *
- * White for a day uiMode and Material 3's dark surface (#1C1B1F) for a night one, mirroring
- * `PreviewBackground` on the server. An opaque capture whose corner is one of these is sitting on a
- * scaffold sheet; any other corner colour is artwork reaching the edge. See `contentBox`.
+ * The backing colours `@Preview(showBackground = true)` resolves to (white for day, M3 dark surface
+ * #1C1B1F for night), mirroring the server's `PreviewBackground`. A corner of one of these colours
+ * means a scaffold sheet; see `contentBox`.
  */
 export const SCAFFOLD_SHEETS: ReadonlyArray<readonly [number, number, number]> =
     [
@@ -64,36 +54,16 @@ export const SCAFFOLD_SHEETS: ReadonlyArray<readonly [number, number, number]> =
 export const SHEET_TOLERANCE = 6;
 
 /**
- * The grounds a comparison is scored on — **both** of them, every time.
- *
- * Fixed rather than themed, for the reason a single ground was fixed before: site appearance must
- * not move a score, and two frames composited onto different colours differ by that colour
- * everywhere. What has changed is the count, because one opaque ground is not a neutral choice. It
- * *annihilates* ink that matches it, and the metric next door reads that as agreement rather than as
- * missing evidence: `scorePlanes` finds no content and no disagreement in two blank planes and
- * returns `100` by definition.
- *
- * That is not a corner case. Measured off `samples/design-catalog-wear-m3`, `TextMaxLinesTruncated`
- * is 8% opaque with an ink luminance of 255 — pure white glyphs on transparency. Composited onto
- * white it is a blank image, so it was being scored as a perfect match against whatever it was
- * paired with, including a reference it looks nothing like. Black has the same flaw pointed the
- * other way, and a theme-derived ground only makes the collision rarer, never impossible.
- *
- * Scoring on white AND black and keeping the worse result makes the failure structural rather than
- * statistical: a pixel can only vanish on both grounds when its alpha is zero on both sides — that
- * is, when it is genuinely absent from both images, which is the one case where "no evidence" is the
- * honest answer. The cost is two passes over a plane capped at {@link MAX_SIDE}, so under 37k pixels
- * either way.
+ * The grounds a comparison is scored on — both, every time, keeping the worse score. Fixed rather
+ * than themed so site appearance never moves a score. One opaque ground would annihilate ink that
+ * matches it (e.g. white glyphs on transparency become a blank plane that `scorePlanes` scores
+ * 100); with white AND black a pixel can only vanish when it is absent from both images.
  */
 export const COMPARISON_GROUNDS: ReadonlyArray<string> = ["#ffffff", "#000000"];
 
 /**
- * The same two grounds as RGB triples, for the path that has no canvas to hand a CSS string to.
- *
- * The design-reference score composites in arithmetic rather than through `fillRect` — see
- * `grayFromRaster` — so it needs the colours as numbers. Two spellings of one decision, kept
- * adjacent so a third ground cannot be added to one and not the other; the offline mirror test
- * compares the two engines' grounds by colour, which catches it from the other side as well.
+ * The same two grounds as RGB triples, for the arithmetic compositing path (`grayFromRaster`). Kept
+ * adjacent to `COMPARISON_GROUNDS` so the two cannot drift.
  */
 export const COMPARISON_GROUND_RGB: ReadonlyArray<
     readonly [number, number, number]
@@ -103,31 +73,12 @@ export const COMPARISON_GROUND_RGB: ReadonlyArray<
 ];
 
 /**
- * Which pixel path produced a score — the carrier D3 asks for, so a published number can be told
- * from a rebaselined one.
- *
- * `1` was the browser-only era: both downscales went through `drawImage`, whose smoothing is
- * implementation-defined, so the number could not be reproduced outside a browser at all and
- * nothing offline could have carried a version even if it had wanted to. `2` is the portable area
- * average — the kernel `known-difference-resample.mjs` names and both engines run.
- *
- * `3` premultiplies that kernel on the score path. `2` averaged straight colour and composited the
- * ground afterwards, and those two steps do not commute: the same half-covered white edge on black
- * scored 128 encoded as one pixel at alpha 128 and 64 encoded as an opaque pixel beside a
- * transparent one, so two visually identical exports at different resolutions read as a mismatch.
- * `drawImage` had this right by accident of the host — a canvas downscales premultiplied — so `1`
- * agreed with `3` here and `2` was the regression. The gate path is untouched and no acceptance
- * verdict moves; only the number does.
- *
- * It rides on every baked `match` and the reader drops a match that does not carry the version it
- * would compute with, rather than clamping or trusting it. That is the whole reason to have it: a
- * catalog published before the rebaseline and served by a viewer after it would otherwise print a
- * chip that contradicts the readout it links to, which is the one failure a number whose job is to
- * be trusted at a glance cannot survive. Dropped, the lane simply scores live on entry — the
- * behaviour every catalog had before the number was baked at all.
- *
- * **Bump it in the same change that moves the number, never in one that also changes acceptance
- * semantics.** A moved number and a changed verdict in one diff cannot be told apart.
+ * Which pixel path produced a score, so a published number can be told from a rebaselined one. `1`:
+ * browser `drawImage` downscale (not reproducible offline). `2`: portable area average. `3`:
+ * premultiplied area average, so visually identical exports at different resolutions score alike.
+ * Readers drop a baked `match` whose version differs from the one they compute with, and score live
+ * instead. **Bump it in the same change that moves the number, never in one that also changes
+ * acceptance semantics.**
  */
 export const SCORE_VERSION = 3;
 

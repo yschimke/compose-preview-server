@@ -23,37 +23,21 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /**
- * Multiplier on every poll budget in this file — see [ServeCatalogLiveHostTest.awaitOk] and
- * [ServeCatalogLiveHostTest.awaitOptimization].
- *
- * Those budgets are wall-clock deadlines for work a BACKGROUND thread does: the theme-optimization
- * pass taking a slice, draining a dirty key by rendering, parking at the quiet gate. The numbers at
- * the call sites (2s, 5s, 10s) are generous on an idle machine and are not on a loaded one. In CI
- * `:server:test` runs concurrently with `:ui-builder:wasmJsBrowserTest` and
- * `:wasm-ui:wasmJsBrowserTest`, both of which spawn browsers, so the pass thread can simply not be
- * scheduled inside a 5-second window. That is what failed `a marked render is regenerated through
- * the daemon, not answered from the cache` on #449: not a wrong outcome, an unfinished one.
- *
- * Scaling here rather than at each of the thirteen call sites keeps their relative intent — a
- * 10-second wait still says "this one is slower than the 2-second ones" — and keeps the next call
- * site correct by default.
- *
- * A generous budget is close to free. Both helpers return the moment the condition holds, so the
- * budget is spent only by a run that is genuinely failing; the cost is that such a run takes longer
- * to report, not that a passing one takes longer. Nothing here weakens an assertion: every
- * condition is still required to become true, and to become true by the same means.
+ * Multiplier on every poll budget in this file (see [ServeCatalogLiveHostTest.awaitOk] and
+ * [ServeCatalogLiveHostTest.awaitOptimization]). Those budgets wait on background threads, which a
+ * loaded CI machine (concurrent browser tests) may not schedule in time. Scaling here keeps call
+ * sites' relative intent; the helpers return as soon as the condition holds, so only a failing run
+ * waits longer, and no assertion is weakened.
  */
 private const val POLL_BUDGET_FACTOR = 6
 
 /**
  * The catalog-id bridge: [ServeCatalogLiveHost] fronts the baked catalog with an opt-in daemon
- * stream. An override-free snapshot (or one replaying only the variant's own sticky theme) is the
- * baked PNG — browsing stays instant and never wakes the daemon. A snapshot carrying a
- * pixel-changing override (a knob, font scale, device, a differing theme, …) re-renders on the
- * daemon, mapping the catalog id to its daemon-preview id; an unmapped id (an Android-only variant)
- * has no daemon twin and always replays baked. The composite reports itself as a static-snapshot
- * host ([canApplyOverrides] false) that still offers Live ([hasLiveStream] true), and exposes its
- * baked host so the trust badge + card title survive.
+ * stream. An override-free snapshot (or one replaying the variant's own theme) is the baked PNG and
+ * never wakes the daemon. A pixel-changing override re-renders on the daemon under the mapped
+ * daemon id; an unmapped id (Android-only variant) always replays baked. The composite reports
+ * [canApplyOverrides] false yet [hasLiveStream] true, and exposes its baked host for the trust
+ * badge and card title.
  */
 class ServeCatalogLiveHostTest {
 
@@ -74,8 +58,8 @@ class ServeCatalogLiveHostTest {
     /** Published typography this host can replay over its baked frame, keyed by preview id. */
     private val publishedTypography: Set<String> = emptySet(),
     /**
-     * Ids this host lists but has no pixels for (a catalog's deferred previews) — `render` reports
-     * `NotFound` for them, exactly as the real baked host does.
+     * Ids this host lists but has no pixels for (deferred previews): `render` reports `NotFound`,
+     * like the real baked host.
      */
     override val liveOnlyPreviewIds: Set<String> = emptySet(),
     /** Published captures this host can serve, keyed `<motionId><extension>`. */
@@ -83,10 +67,9 @@ class ServeCatalogLiveHostTest {
     /** An open circuit breaker's reason, as [ServeRenderHost] reports one after a linkage fault. */
     private val breakerReason: String? = null,
     /**
-     * False models a **catalog** baked host whose published PNGs are fetched from the delivery
-     * branch on first use: `bakedRender` answers only from local pixels (it must never trigger the
-     * fetch), while `render` fetches and serves. The distinction is what turned an open breaker
-     * into a catalog-wide 409 in #4220.
+     * False models a catalog baked host that fetches published PNGs from the delivery branch on
+     * first use: `bakedRender` answers only from local pixels (never fetching), while `render`
+     * fetches.
      */
     private val bakedPixelsLocal: Boolean = true,
   ) : ServeHost {
@@ -239,11 +222,9 @@ class ServeCatalogLiveHostTest {
 
   @Test
   fun `a published capture is read off the baked host`() {
-    // The composite merges `previews` FROM the baked host, so a catalog's captures are listed —
-    // and the viewer offers a Motion chip for them — through this host. Without the delegation the
-    // bytes behind that chip fell to `ServeHost.motionBytes`'s null default, so the lane opened on
-    // an error for every live-fronted catalog in production while every (pinned, bundle-hosted)
-    // fixture stayed green. A daemon has no notion of a recording; the branch is the only source.
+    // The composite merges `previews` from the baked host, so it must also delegate `motionBytes`
+    // there; a daemon has no recordings, and the default null opened the lane on an error for every
+    // live-fronted catalog.
     val motionId = "switch-on__ideal__default__light"
     val capture = byteArrayOf(9, 8, 7)
     val baked =
@@ -310,7 +291,7 @@ class ServeCatalogLiveHostTest {
   private val brandTheme = ServeTheme("Brand Dark", "com.example.BrandDark")
 
   /**
-   * A Remote Compose catalog: the baked host carries the `.rc` doc for both ids, the live daemon
+   * A Remote Compose catalog: the baked host carries the `.rc` for both ids; the live daemon
    * honours the player override when [selectable].
    */
   private fun rcComposite(
@@ -458,10 +439,8 @@ class ServeCatalogLiveHostTest {
 
   @Test
   fun `grafts the daemon's detected-feature flags onto the mapped baked preview`() {
-    // The baked catalog images carry no detected-feature flags; the daemon twin (from
-    // previews.json)
-    // does. Without grafting, a mapped @FocusedPreview catalog component would never show the
-    // Keyboard focus control even though the daemon could render focus=0.
+    // Baked catalog images carry no detected-feature flags; the daemon twin does. Grafting them is
+    // what shows the Keyboard focus control for a mapped @FocusedPreview component.
     val baked =
       RecordingHost(
         previews =
@@ -499,9 +478,8 @@ class ServeCatalogLiveHostTest {
   fun `a knob-bearing render on a mapped id routes to the daemon`() {
     val (composite, live, baked) = host()
     val out = composite.render(catalogId, knobOverride()) as RenderOutcome.Ok
-    // A named-override edit can only be honoured by re-running the composable — routed to the
-    // daemon
-    // under its daemon id, with the override carried through.
+    // A named-override edit needs the composable re-run: routed to the daemon under its daemon id
+    // with the override.
     assertEquals("live:$daemonId", out.png.decodeToString())
     assertEquals(daemonId, live.lastRenderId)
     assertEquals(knobOverride().namedOverrides, live.lastRenderOverrides?.namedOverrides)
@@ -510,9 +488,8 @@ class ServeCatalogLiveHostTest {
 
   @Test
   fun `the live bundle's A2UI playground is served though the catalog does not list it`() {
-    // A catalog lists its component cells only; the A2UI playground draws whatever document it is
-    // handed, so it has no cell. The live bundle carries it, and `/{system}/a2ui` finds it by its
-    // `document` knob — which it could not while `previews` came from the catalog alone.
+    // The A2UI playground has no catalog cell; the live bundle carries it, and `/{system}/a2ui`
+    // finds it by its `document` knob.
     val playgroundId = "ee.schimke.a2uicatalog.playground.PlaygroundKt.A2uiDocumentPreview"
     val documentKnob =
       PreviewOverrideDeclaration(
@@ -608,11 +585,8 @@ class ServeCatalogLiveHostTest {
 
   @Test
   fun `typography inspection maps the catalog id and preserves live overrides`() {
-    // Issue #4254: the composite reports `canApplyOverrides = false` (browsing is baked pixels),
-    // and
-    // the default `hasDesignAnnotations` reads exactly that flag — so a catalog fronted by a live
-    // daemon claimed it could not produce the layers its daemon produces on request, and
-    // `.annotations` 404'd while the viewer still offered the Typography checkbox.
+    // The composite reports `canApplyOverrides = false`, and the default `hasDesignAnnotations`
+    // reads that flag, so `.annotations` 404'd though the daemon produces them.
     val baked = RecordingHost(previews = listOf(ServePreview(catalogId, catalogId)), tag = "baked")
     val live =
       RecordingHost(
@@ -628,9 +602,7 @@ class ServeCatalogLiveHostTest {
     assertTrue(composite.hasDesignAnnotationsFor(catalogId))
     val out = composite.renderAnnotations(catalogId, overrides) as AnnotationsOutcome.Ok
     assertEquals(daemonId, live.lastAnnotationsId)
-    // The viewer's overrides must reach the daemon: a font-scaled frame's type sizes are the whole
-    // point of the layer, so inspecting the catalog's original pixels would describe the wrong
-    // text.
+    // The viewer's overrides must reach the daemon: a font-scaled frame's type sizes are the point.
     assertEquals(overrides, live.lastRenderOverrides)
     assertTrue(out.json.decodeToString().contains("\"previewId\":\"$daemonId\""))
     assertNull(baked.lastAnnotationsId)
@@ -676,8 +648,8 @@ class ServeCatalogLiveHostTest {
       )
     val composite = ServeCatalogLiveHost(mapOf(catalogId to daemonId), live, baked)
 
-    // Browsing an unmapped id serves the baked PNG, and the published annotations were measured
-    // over exactly that frame — so the layer is answerable without any daemon.
+    // Browsing an unmapped id serves the baked PNG, over which the published annotations were
+    // measured, so no daemon is needed.
     assertTrue(composite.hasPublishedTypographyFor(androidOnlyId))
     val out =
       composite.renderAnnotations(androidOnlyId, PreviewOverrides()) as AnnotationsOutcome.Ok
@@ -685,9 +657,8 @@ class ServeCatalogLiveHostTest {
     assertTrue(out.json.decodeToString().contains("\"previewId\":\"$androidOnlyId\""))
     assertNull(live.lastAnnotationsId, "an unmapped id must never wake the daemon")
 
-    // …but only while the baked pixels are what the request asks for. A font scale would be
-    // reported as a dropped override and answered with the baked PNG, yet the published bounds
-    // were measured at the baked scale, so drawing them would misplace every box.
+    // ...only while the baked pixels are what's asked for: under a font scale the published bounds
+    // would misplace every box.
     baked.lastAnnotationsId = null
     assertEquals(
       AnnotationsOutcome.NotFound,
@@ -721,11 +692,8 @@ class ServeCatalogLiveHostTest {
 
   @Test
   fun `a typography-only request is answered from the bundle without waking the daemon`() {
-    // #213. The whole point of `layers=`: typography is the one layer a published bundle can
-    // answer (theme is derived live and never authored into a bundle; the published layout layer
-    // is the compare page's, and `drawableAnnotations` drops it), so a request that names only
-    // typography can be replayed off the catalog. Measured on the deployed server, that is the
-    // difference between 16-22s and a local read on an idle catalog.
+    // Typography is the one layer a published bundle can answer, so a `layers=typography` request
+    // can be replayed from the catalog (a local read rather than a slow daemon round trip).
     val baked =
       RecordingHost(
         previews = listOf(ServePreview(catalogId, catalogId)),
@@ -751,9 +719,8 @@ class ServeCatalogLiveHostTest {
 
   @Test
   fun `a request naming a live-only layer still routes to the daemon`() {
-    // Theme and layout are not answerable from a bundle, so naming either must reach the daemon
-    // even though the catalog publishes typography. This is the guard on the gate itself: widen
-    // `AnnotationKind.PUBLISHABLE` carelessly and this is what breaks.
+    // Theme and layout can't come from a bundle, so naming either must reach the daemon. Guards
+    // `AnnotationKind.PUBLISHABLE` against careless widening.
     val baked =
       RecordingHost(
         previews = listOf(ServePreview(catalogId, catalogId)),
@@ -786,9 +753,8 @@ class ServeCatalogLiveHostTest {
 
   @Test
   fun `a typography-only request under a render-moving override still goes live`() {
-    // The published bounds were measured at the baked scale, so `layers=typography` does not buy a
-    // published replay when the pixels have moved — `bakedAnnotations` answers NotFound and the
-    // request falls through, exactly as an unscoped one would.
+    // With moved pixels, `layers=typography` doesn't buy a published replay; `bakedAnnotations` is
+    // NotFound and the request falls through.
     val baked =
       RecordingHost(
         previews = listOf(ServePreview(catalogId, catalogId)),
@@ -814,11 +780,8 @@ class ServeCatalogLiveHostTest {
 
   @Test
   fun `a mapped preview keeps the daemon's layers even when the catalog publishes typography`() {
-    // #213 guard. The published manifest carries only what `drawableAnnotations` draws, which
-    // filters `layout` out, so answering a mapped preview from it would drop the Layout layer the
-    // viewer still offers — measured on the deployed server at 34 of 52 annotations on a jetchat
-    // preview and 5 of 7 on an m3-catalog button. Whatever this lane does about the cold-start
-    // cost, it must not be "prefer the published payload for a preview the daemon can project".
+    // The published manifest omits `layout` (filtered by `drawableAnnotations`), so a mapped
+    // preview must not be answered from it, or the Layout layer would silently lose annotations.
     val baked =
       RecordingHost(
         previews = listOf(ServePreview(catalogId, catalogId)),
@@ -841,11 +804,9 @@ class ServeCatalogLiveHostTest {
 
   @Test
   fun `a plain SVG export of a mapped id prefers the daemon's per-variant vector over the baked slug`() {
-    // The baked figma/<slug>.svg is slug-keyed + light-preferred (the catalog emits one SVG per
-    // component, the light variant), so a `…__dark` id would otherwise serve the LIGHT vector even
-    // though its PNG + live render are dark. A daemon-twinned id must route its plain SVG to the
-    // daemon — which carries the variant's uiMode/theme — NOT the baked slug SVG, which still
-    // exists.
+    // The baked figma/<slug>.svg is slug-keyed and light-preferred, so a `…__dark` id would get the
+    // light vector. A daemon-twinned id routes its plain SVG to the daemon, which carries the
+    // variant's theme.
     val (composite, live, baked) = host()
     val out = composite.renderSvg(catalogId, PreviewOverrides()) as SvgOutcome.Ok
     assertEquals("live-svg:$daemonId", out.svg.decodeToString())
@@ -856,10 +817,8 @@ class ServeCatalogLiveHostTest {
 
   @Test
   fun `a plain SVG export falls back to the daemon when the baked vector is absent`() {
-    // The SVG row is advertised because a lane can export, but this mapped preview has no baked
-    // figma/<slug>.svg — the baked lane 404s. Rather than 404 the advertised link, a plain
-    // (no-knob)
-    // SVG export falls back to the daemon (an explicit action, so waking it is fine).
+    // An advertised SVG row with no baked figma/<slug>.svg falls back to the daemon rather than
+    // 404ing (an explicit action, so waking it is fine).
     val baked =
       RecordingHost(
         previews = listOf(ServePreview(catalogId, catalogId)),
@@ -913,9 +872,8 @@ class ServeCatalogLiveHostTest {
     val composite =
       ServeCatalogLiveHost(mapOf(catalogId to daemonId), live, baked, warmInBackground = true)
 
-    // Cold: the first no-override SVG serves the BAKED vector immediately — a cold daemon must
-    // never
-    // block the browse. The daemon's renderSvg is NOT awaited synchronously on this first call.
+    // Cold: the first no-override SVG serves the baked vector immediately without waiting on the
+    // daemon.
     val first = composite.renderSvg(catalogId, PreviewOverrides()) as SvgOutcome.Ok
     assertEquals("baked-svg:$catalogId", first.svg.decodeToString())
 
@@ -956,9 +914,8 @@ class ServeCatalogLiveHostTest {
 
   @Test
   fun `a presence heartbeat gets the daemon ready for a visitor who has only browsed baked pixels`() {
-    // The point of the keepalive's warming half. Browsing a catalog is entirely baked by design, so
-    // a visitor reading the grid has never woken the daemon — and their first theme click would pay
-    // its cold start. A heartbeat while they read turns that into a warm render.
+    // The keepalive's warming half: while a visitor browses (all baked), a heartbeat warms the
+    // daemon so their first theme click isn't a cold start.
     val baked = RecordingHost(previews = listOf(ServePreview(catalogId, catalogId)), tag = "baked")
     val live =
       RecordingHost(
@@ -1030,18 +987,11 @@ class ServeCatalogLiveHostTest {
     )
   }
 
+  /** Poll [block] until non-null or [timeoutMs] (× [POLL_BUDGET_FACTOR]) elapses. */
   /**
-   * Poll [block] until it returns non-null or [timeoutMs] (times [POLL_BUDGET_FACTOR]) elapses (for
-   * the async warm).
-   */
-  /**
-   * The residency half of `--live-seats`.
-   *
-   * `deploy/image/README.md` documents the budget as "concurrent daemon *residency*, weighted
-   * (Android costs 2)", but the only thing that ever charged it was an interactive stream, so a box
-   * with no visitors at all warmed one resident daemon per catalog: 22 of them and 64 live JVMs on
-   * `preview.coo.ee` against `liveSeatsAvailable: 8/8`, with the container out of memory while the
-   * host still had 70% free. A warm is what starts that JVM, so a warm is what has to pay for it.
+   * The residency half of `--live-seats`: the budget is concurrent daemon residency (Android costs
+   * 2), but only interactive streams were charged, so an idle box warmed one resident daemon per
+   * catalog and ran out of memory. A warm starts the JVM, so a warm pays.
    */
   @Test
   fun `a background warm charges the catalog daemon residency against the live-seat budget`() {
@@ -1072,8 +1022,8 @@ class ServeCatalogLiveHostTest {
   }
 
   /**
-   * The refusal is the whole point: a box already at its budget must stay at its budget rather than
-   * start daemon number twenty-three and let the kernel decide which process dies.
+   * A box at its budget must stay there rather than start another daemon and let the OOM killer
+   * decide.
    */
   @Test
   fun `a full residency budget leaves the catalog cold instead of starting another daemon`() {
@@ -1085,8 +1035,7 @@ class ServeCatalogLiveHostTest {
         streaming = true,
       )
     // A background holder must leave STREAM_RESERVE (2) free for an interactive stream, so a
-    // two-permit box can afford no resident background daemon at all — the state a box that has
-    // spent its budget is already in.
+    // two-permit box can afford no resident background daemon.
     val seats = LiveSeatLimiter(2, perPreviewReserve = 0)
     val composite =
       ServeCatalogLiveHost(
@@ -1140,12 +1089,8 @@ class ServeCatalogLiveHostTest {
   }
 
   /**
-   * The asymmetry in the residency refusal, from the side that must never be refused.
-   *
-   * A leased render short-circuits the `||` that used to carry the residency charge, so on
-   * preview.coo.ee seats sat at 5/8 while 23 daemons ran. Charging it is the fix -- but a visitor's
-   * leased render is not deferrable, and refusing it would return Busy for every card rather than
-   * letting the pool grow. So it asks the budget, proceeds regardless, and the daemon is reached.
+   * A visitor's leased render is charged against residency but never refused (that would return
+   * Busy for every card); it asks the budget and proceeds.
    */
   @Test
   fun `a full residency budget still lets a visitor's leased render reach the daemon`() {
@@ -1209,9 +1154,8 @@ class ServeCatalogLiveHostTest {
 
   @Test
   fun `a variant-matching uiMode (sticky-theme replay) stays baked`() {
-    // The viewer replays its sticky theme into the snapshot URL. catalogId is the `…__dark`
-    // variant, so a uiMode=dark override is a no-op the baked PNG already encodes — it must NOT
-    // cold-start the daemon.
+    // catalogId is the `…__dark` variant, so a sticky uiMode=dark is a no-op the baked PNG already
+    // encodes and must not cold-start the daemon.
     val (composite, live, baked) = host()
     val out =
       composite.render(catalogId, PreviewOverrides(uiMode = UiMode.DARK)) as RenderOutcome.Ok
@@ -1222,9 +1166,8 @@ class ServeCatalogLiveHostTest {
 
   @Test
   fun `a display-axis override on a mapped id routes to the daemon`() {
-    // A font scale (like device / locale / orientation) can't be replayed from the baked sticker,
-    // so it must re-render on the daemon — the correctness fix for standalone
-    // `/render?fontScale=…`.
+    // A font scale (like device / locale / orientation) can't be replayed from baked, so it
+    // re-renders on the daemon.
     val (composite, live, baked) = host()
     val out = composite.render(catalogId, PreviewOverrides(fontScale = 1.5f)) as RenderOutcome.Ok
     assertEquals("live:$daemonId", out.png.decodeToString())
@@ -1246,10 +1189,9 @@ class ServeCatalogLiveHostTest {
 
   @Test
   fun `baked theme is the last theme segment, not a stray earlier one`() {
-    // A `dark` STATE segment sits before the real `light` theme segment. Detection must take the
-    // last theme segment (matching wasmAppSrc / cardTheme), so this variant reads as LIGHT: a
-    // uiMode=light is the no-op (baked) and uiMode=dark is the real re-render (daemon). A naive
-    // "dark in segments" check would flip both.
+    // A `dark` state segment precedes the real `light` theme segment. Detection takes the last
+    // theme segment (like wasmAppSrc / cardTheme), so uiMode=light is the no-op and uiMode=dark
+    // re-renders.
     val trickyId = "toggle__dark__default__light"
     val daemon = "ToggleLight"
     val baked = RecordingHost(previews = listOf(ServePreview(trickyId, trickyId)), tag = "baked")
@@ -1547,14 +1489,9 @@ class ServeCatalogLiveHostTest {
   }
 
   /**
-   * The dirty queue's one load-bearing property: a marked entry is actually RE-RENDERED.
-   *
-   * A dirty render is deliberately still servable — a possibly-stale preview beats a cold one — so
-   * the ordinary render path answers it straight out of [CatalogThemeCache] and never reaches a
-   * daemon. That is correct for a visitor and fatal for the pass: no daemon render means no fresh
-   * bytes, no `put`, and no flag cleared, so the pass re-selects the same dirty set every slice,
-   * renders nothing, and converges never. Regeneration has to ask the renderer, because a render is
-   * the entire question being asked.
+   * A marked (dirty) entry must actually be re-rendered. Dirty renders stay servable from
+   * [CatalogThemeCache] for visitors, but regeneration must ask the renderer, or the pass never
+   * clears the flag and never converges.
    */
   @Test
   fun `a marked render is regenerated through the daemon, not answered from the cache`() {
@@ -1728,9 +1665,8 @@ class ServeCatalogLiveHostTest {
     Thread.sleep(50)
     assertEquals(0, firstLive.renderCalls)
     assertEquals("paused", first.themeOptimizationSnapshot()?.state)
-    // Parked at the gate, holding no lane — and therefore NOT keeping its host resident. The
-    // catalog's progress is in the shared cache, not in the daemon, which is what lets the registry
-    // reclaim the daemon's memory while the pass waits.
+    // Parked at the gate, the pass holds no lane and doesn't keep its host resident; progress lives
+    // in the shared cache, so the registry can reclaim the daemon.
     assertFalse(first.backgroundWorkActive, "a parked pass does not pin its daemon")
     idle.set(true)
     awaitOptimization(first)
@@ -1758,10 +1694,8 @@ class ServeCatalogLiveHostTest {
 
   @Test
   fun `the no-admission fast path serves baked pixels but never a daemon render`() {
-    // `bakedRender` is what lets a mostly-browsing box skip the global render-slot queue. It must
-    // answer exactly the requests `render` would have replayed from baked pixels — and refuse the
-    // ones that were supposed to reach a daemon, or the fast path would silently serve stale
-    // pixels for a re-render.
+    // `bakedRender` lets a browsing box skip the render-slot queue. It must answer exactly what
+    // `render` would replay from baked pixels and refuse what needs a daemon.
     val baked =
       RecordingHost(
         previews =
@@ -1802,8 +1736,8 @@ class ServeCatalogLiveHostTest {
         alias = mapOf(catalogId to daemonId),
         live = live,
         baked = RecordingHost(listOf(ServePreview(catalogId, catalogId)), "baked"),
-        // An idle server by the registry's reckoning — startup draws no request traffic, which is
-        // exactly how the optimizer used to end up competing with the catalogs still loading.
+        // Idle by the registry's reckoning: startup has no request traffic, which is how the
+        // optimizer once competed with catalogs still loading.
         serverIdleMillis = backgroundWork.idleClock { Long.MAX_VALUE },
         themeOptimizationEnabled = true,
         themeOptimizationIdleMillis = 0,
@@ -1842,9 +1776,8 @@ class ServeCatalogLiveHostTest {
       )
 
     composite.prewarm()
-    // The pass is at the quiet gate, which it waits out holding NO lane — and, since residency
-    // follows the lane, not keeping its host resident either. So what says it has started is the
-    // gate wait it is accruing, not an admission and not `backgroundWorkActive`.
+    // At the quiet gate the pass holds no lane (so isn't resident); what shows it started is its
+    // accruing gate wait.
     awaitOk(5_000) { composite.themeOptimizationSnapshot()?.takeIf { it.gateWaitMillis > 0 } }
     assertEquals(
       0,
@@ -1863,12 +1796,8 @@ class ServeCatalogLiveHostTest {
   }
 
   /**
-   * A pass gives its lane back on a preview boundary and re-queues for another.
-   *
-   * Without this, fair admission is not enough to un-starve anything. A pass on an idle box runs
-   * until its catalog is fully optimized — measured on the deployed box, `reply` took a lane and
-   * held it through all 354 of its entries — so a 10,120-target catalog would hold a lane for ~28
-   * hours and the queue behind it would be fair and immovable at the same time.
+   * A pass gives its lane back at preview boundaries and re-queues. Otherwise one catalog could
+   * hold a lane for many hours and the fair queue behind it could never move.
    */
   @Test
   fun `a long pass yields its lane between previews instead of holding it to the end`() {
@@ -1902,9 +1831,7 @@ class ServeCatalogLiveHostTest {
       "one admission per preview — the lane goes back to the queue between them",
     )
 
-    // The control: a slice longer than the pass never fires, and the whole catalog is one
-    // admission. Without it, "4 admissions" would also be satisfied by a pass that re-queues for
-    // reasons having nothing to do with the slice.
+    // Control: a slice longer than the pass never fires, so the whole catalog is one admission.
     val whole = ServeBackgroundWork(maxConcurrentRenders = 4, maxConcurrentOptimizers = 1)
     val unsliced =
       ServeCatalogLiveHost(
@@ -1925,10 +1852,8 @@ class ServeCatalogLiveHostTest {
   }
 
   /**
-   * A slice yields at least one preview however short it is.
-   *
-   * The failure this closes is a livelock: check the deadline before doing any work and a slice
-   * shorter than the admission round-trip re-queues forever, rendering nothing while looking busy.
+   * A slice yields at least one preview however short; checking the deadline before any work would
+   * livelock.
    */
   @Test
   fun `an already-spent slice still renders one preview before giving the lane back`() {
@@ -2026,13 +1951,8 @@ class ServeCatalogLiveHostTest {
   }
 
   /**
-   * The shared lane bounds the optimizers — it no longer serialises them.
-   *
-   * This asserted a peak of exactly 1 while the background cap was 1. That cap was measured on the
-   * deployed server as the prefetcher's dominant bottleneck: 15 catalogs queueing on one permit,
-   * 74.3% of the pass's active time spent waiting for it against 6.3% rendering. The invariant
-   * worth keeping is the ceiling, not the serialisation, so the cap is now passed explicitly and
-   * the assertion follows it.
+   * The shared lane bounds optimizers rather than serialising them; the cap is explicit and the
+   * assertion follows it.
    */
   @Test
   fun `catalog optimizers sharing one server never exceed the background lane`() {
@@ -2081,16 +2001,9 @@ class ServeCatalogLiveHostTest {
   }
 
   /**
-   * The optimization pass used to run exactly once, from `prewarm` at catalog open. Anything it
-   * could not fill on that single attempt stayed unfilled for the life of the catalog generation —
-   * `startThemeOptimization` clears `optimizationStarted` in its `finally`, but nothing ever called
-   * it again.
-   *
-   * meshcore-mobile sat at `paused 288/372, failed: 0` across two server lifetimes because of it,
-   * stopping at the same 288 both times while the other fourteen catalogs on the box reached
-   * `complete`. The presence heartbeat is the natural re-entry point: it already fires while a
-   * visitor is on the catalog's pages, and the pass holds its own idle gate, so the work it
-   * schedules waits for quiet rather than competing with them.
+   * The optimization pass used to run only once (from `prewarm`), so anything unfilled stayed
+   * unfilled for the catalog generation. The presence heartbeat now re-enters it; the pass's idle
+   * gate keeps the work from competing with visitors.
    */
   @Test
   fun `a presence heartbeat re-enters an optimization pass that ended unfinished`() {
@@ -2139,10 +2052,8 @@ class ServeCatalogLiveHostTest {
 
   @Test
   fun `a broken live lane stops theme optimization, live advertising, and busy retries`() {
-    // Issue #3448: the m3-catalog daemon hit an UnsatisfiedLinkError and theme pre-optimization
-    // kept feeding it — 4740 remaining, a ~7h ETA, 275s of gate wait, all on work where every
-    // single render fails — while the catalog went on reporting `live: true, degradation: null`
-    // and visitors got `503 render busy; retry shortly`.
+    // A daemon failing every render (e.g. UnsatisfiedLinkError) must trip the breaker: optimization
+    // kept feeding it while the catalog reported healthy and visitors got 503s.
     val renderRoot = java.nio.file.Files.createTempDirectory("breaker").toFile()
     renderRoot.deleteOnExit()
     lateinit var session: FakeRenderSession
@@ -2230,12 +2141,8 @@ class ServeCatalogLiveHostTest {
 
   /** Wait for the background pass to go quiet, finished or not (unlike [awaitOptimization]). */
   /**
-   * A pass still waiting at the idle gate must report the time it is spending there.
-   *
-   * The wait used to be charged by the caller, once [awaitQuiet] returned — so a gate that had not
-   * opened yet contributed nothing, and `gateWaitMillis: 0` meant both "sailed straight through"
-   * and "has been stuck here for three hours". The deployed server published exactly that: 23
-   * catalogs, `turnsGranted 0`, and a wait counter reading zero on every one of them.
+   * A pass waiting at the idle gate must report that time while waiting; charging it only after
+   * [awaitQuiet] returned made a stuck gate read as zero wait.
    */
   @Test
   fun `time spent at a gate that has not opened is reported while it is still shut`() {
@@ -2272,13 +2179,8 @@ class ServeCatalogLiveHostTest {
   }
 
   /**
-   * A gated pass must not hold a lane while it waits — the failure that took the deployed server's
-   * theme cache to a standstill.
-   *
-   * Two catalogs won the two lanes at startup, blocked in the quiet wait, and never came out:
-   * `idleMillis()` answers *busy* outright while any session holds a lease, so nothing they were
-   * waiting for could ever arrive. Every other catalog was refused every 20s — 8,052 refusals, 43
-   * cumulative hours at the door — and not one of the 23 was ever granted a turn.
+   * A gated pass must not hold a lane while waiting: `idleMillis()` reports busy while any session
+   * holds a lease, so two lane-holders blocked forever and every other catalog was refused.
    */
   @Test
   fun `a pass waiting on a gate that never opens leaves both lanes free for everyone else`() {
@@ -2324,12 +2226,9 @@ class ServeCatalogLiveHostTest {
   }
 
   /**
-   * The ceiling: a gate that can shut permanently is indistinguishable from the feature being off.
-   *
-   * `idleMillis()` returning null is not "very busy", it is "unanswerable" — no quiet window ever
-   * satisfies it — so without a ceiling one leaked session lease switches theme optimization off
-   * for the life of the process, silently. The forced turn is deliberately one preview wide, which
-   * this asserts by leaving the box permanently busy and still expecting the work to finish.
+   * The ceiling: `idleMillis()` returning null means "unanswerable", so one leaked lease would
+   * disable optimization forever. The forced turn is one preview wide; the box stays busy and the
+   * work still finishes.
    */
   @Test
   fun `a gate that stays shut past the ceiling still grants a turn`() {
@@ -2364,12 +2263,8 @@ class ServeCatalogLiveHostTest {
   }
 
   /**
-   * The one refusal the ceiling must respect.
-   *
-   * Catalog loading reads as busy on purpose: a daemon start starved by background renders is
-   * recorded as `livebundle-unavailable` and degrades that catalog to baked PNGs for the whole
-   * process. A cold theme cache is recoverable; that is not — so the ceiling waits for loading in a
-   * way it deliberately does not wait for traffic.
+   * The one refusal the ceiling respects: catalog loading. A daemon start starved by background
+   * renders degrades that catalog to baked PNGs for the whole process, which isn't recoverable.
    */
   @Test
   fun `the ceiling does not override the catalog-loading gate`() {
@@ -2405,14 +2300,9 @@ class ServeCatalogLiveHostTest {
   }
 
   /**
-   * The residency rule this whole memory fix rests on.
-   *
-   * `backgroundWorkActive` is what [ServeSessionRegistry.suspendIdle] reads as "this host must stay
-   * resident", and the pass worker does not end while a catalog has targets left — it loops through
-   * the quiet gate forever. Setting the flag for the worker's life therefore meant "not fully
-   * optimized" implied "daemon can never be released", and on the public box nine catalogs held a
-   * ~1.2 GB Android daemon each with no traffic, which is the memory reading the pressure gate then
-   * refused to admit work against.
+   * `backgroundWorkActive` is what [ServeSessionRegistry.suspendIdle] reads as "must stay
+   * resident", and a pass worker loops while targets remain. Set for the worker's life, an
+   * unoptimized catalog could never release its daemon; residency now follows the lane.
    */
   @Test
   fun `optimizer residency follows the lane, not the backlog`() {
@@ -2453,9 +2343,7 @@ class ServeCatalogLiveHostTest {
   }
 
   private fun awaitPassIdle(host: ServeCatalogLiveHost) {
-    // The WORKER, not the residency flag. Since residency follows the lane, `backgroundWorkActive`
-    // is false while a worker is parked at the gate and before it takes its first slice — so
-    // reading it here returned the instant the pass was scheduled, ahead of any render.
+    // Wait on the worker, not the residency flag, which is false while parked at the gate.
     repeat(200) {
       if (!host.optimizationPassRunning) return
       Thread.sleep(25)
@@ -2583,9 +2471,8 @@ class ServeCatalogLiveHostTest {
   @Test
   fun `an override render falls back to the monolithic daemon when no per-preview daemon resolves`() {
     val (_, monolithic, baked) = host()
-    // The per-preview resolver always fails (no per-preview bundle / materialise failed). The
-    // composite must fall back to the monolithic liveBundle daemon, never baked, so a knob edit
-    // still re-renders — worst case is exactly the pre-per-preview behaviour.
+    // The per-preview resolver always fails; the composite must fall back to the monolithic
+    // liveBundle daemon (never baked), so knob edits still re-render.
     val composite =
       ServeCatalogLiveHost(
         alias = mapOf(catalogId to daemonId),
@@ -2672,9 +2559,8 @@ class ServeCatalogLiveHostTest {
 
   @Test
   fun `a live-only (deferred) preview renders through the daemon even with no override`() {
-    // A deferred preview has NO baked PNG — the baked host lists it (so it has a card, a route and
-    // its place in the grid) but every render must reach the daemon, including the plain
-    // override-free browse that keeps ordinary catalog previews on baked pixels.
+    // A deferred preview has no baked PNG: listed by the baked host, but every render, including a
+    // plain browse, must reach the daemon.
     val deferredId = "button-filled__ideal__default__light"
     val deferredDaemonId = "FilledButton_Light"
     val baked =
@@ -2715,11 +2601,9 @@ class ServeCatalogLiveHostTest {
 
   @Test
   fun `a daemon that carries no such id falls back to the baked snapshot`() {
-    // Both lanes can miss an aliased id: the shared monolithic daemon lists only the primary
-    // bundle's previews, and the per-preview daemon that would cover the rest fails to start when
-    // its classpath won't resolve on this box. That is a fact about the daemons, not about the
-    // pixels — the preview has a baked PNG, so an override request must degrade to the snapshot
-    // rather than hand the browser a broken image.
+    // Both daemon lanes can miss an aliased id (the monolithic daemon lists only the primary
+    // bundle's previews; the per-preview daemon may fail to start). The preview still has a baked
+    // PNG, so an override request degrades to the snapshot rather than a broken image.
     val baked = RecordingHost(previews = listOf(ServePreview(catalogId, catalogId)), tag = "baked")
     val live =
       RecordingHost(
@@ -2738,9 +2622,8 @@ class ServeCatalogLiveHostTest {
 
   @Test
   fun `a theme render on an id no daemon carries reports Busy, never baked pixels`() {
-    // The grid retries a Busy card; a 200 carrying baked pixels would make it believe the requested
-    // theme had loaded and it would sit on the wrong palette forever. So the NotFound fallback
-    // above must stop short of the theme lane.
+    // The grid retries a Busy card; a 200 with baked pixels would make it think the theme loaded,
+    // so the NotFound fallback stops short of the theme lane.
     val baked = RecordingHost(previews = listOf(ServePreview(catalogId, catalogId)), tag = "baked")
     val live =
       RecordingHost(
@@ -2759,10 +2642,8 @@ class ServeCatalogLiveHostTest {
   }
 
   /**
-   * The theme cache is an optimization, not a correctness requirement. A cache miss on a cold
-   * daemon id used to schedule a warm and then abandon the request — returning Busy despite the
-   * caller already holding a render slot — which made a server restart (empty cache) break the
-   * whole grid until the hours-long background pass refilled it.
+   * The theme cache is an optimization: a cold-daemon cache miss used to schedule a warm and return
+   * Busy, so a restart broke the grid until the background pass refilled it.
    */
   @Test
   fun `a pure theme render on a cold id waits for its warm instead of reporting busy`() {
@@ -2795,9 +2676,8 @@ class ServeCatalogLiveHostTest {
   }
 
   /**
-   * A knob edit cannot use the baked fallback: those pixels ignore the requested value and the HTTP
-   * layer correctly turns them into a 503. The foreground request must therefore wait for the
-   * bounded warm just like a theme edit, then render the requested value itself.
+   * A knob edit can't use the baked fallback (the HTTP layer turns those pixels into a 503), so it
+   * waits for the bounded warm and renders the requested value.
    */
   @Test
   fun `a knob render on a cold id waits for its warm instead of dropping the override`() {
@@ -2919,13 +2799,9 @@ class ServeCatalogLiveHostTest {
   }
 
   /**
-   * The optimizer used to re-demand the whole 60s entry window before EVERY render, so a server
-   * that was quiet-but-not-silent-for-a-minute advanced one entry and then stalled. On the public
-   * box that measured one entry per ~105s against a sub-second render — ~99% waiting.
-   *
-   * Modelled here by an idle clock that reports a full minute once (letting the pass start) and
-   * then a steady 10s: quiet by any reasonable measure, but under the entry window. The old gate
-   * caches exactly one entry and blocks; keeping the turn caches them all.
+   * The optimizer re-demanded the full 60s entry window before every render, so a
+   * quiet-but-not-silent server advanced one entry at a time. An idle clock reporting a minute
+   * once, then 10s, distinguishes keeping the turn (caches all) from the old gate (caches one).
    */
   @Test
   fun `the optimizer keeps its turn while the server stays quiet`() {
@@ -2957,14 +2833,9 @@ class ServeCatalogLiveHostTest {
   }
 
   /**
-   * #4220: one broken daemon must not black out the pixels it was never the source of.
-   *
-   * A catalog fetches its published PNGs from the delivery branch on first use, so `bakedRender`
-   * (deliberately local-only) says null for a preview nobody has asked for yet — and the HTTP layer
-   * consults [renderFailureLatch] the moment it does. Latching every id in the alias therefore
-   * answered `409` to a plain override-free browse whose pixels `render` would have fetched
-   * happily, breaking every `<img>` on every page of the catalog while the degradation banner
-   * promised those very snapshots. Only requests the daemon was the answer to may be refused.
+   * One broken daemon must not black out pixels it never served. `bakedRender` is local-only, so it
+   * is null for a not-yet-fetched preview, and latching every aliased id answered `409` to plain
+   * browses `render` could have fetched. Only requests the daemon was the answer to may be refused.
    */
   @Test
   fun `an open breaker does not latch a browse the baked lane can answer`() {
@@ -3002,9 +2873,8 @@ class ServeCatalogLiveHostTest {
   }
 
   /**
-   * The other half of the same rule: a request the baked pixels cannot answer still gets the
-   * terminal `409` naming the linkage error, rather than a dishonest `200` of the un-overridden
-   * snapshot or a `503` that invites the viewer to retry a lane that will never come back.
+   * A request baked pixels can't answer still gets the terminal `409` naming the linkage error, not
+   * a dishonest `200` or a retry-inviting `503`.
    */
   @Test
   fun `an open breaker still latches the renders only the daemon could serve`() {

@@ -1,19 +1,10 @@
-// End-to-end proof that the Kotlin **playground** of a live, daemon-backed
-// `compose-preview serve` works the whole way through: the browser editor compiles a
-// Compose snippet on the server, gets back a first-frame still, and the returned
-// `/pg/<token>` capability redeems into the ordinary live viewer.
+// End-to-end proof that the Kotlin playground of a live `compose-preview serve` works: editor →
+// `POST /api/1/compiler/run` → BTA compile → Robolectric first frame → `/pg/<token>` redemption →
+// viewer, against a real daemon (unit tests cover each seam with fakes).
 //
-// This is the browser counterpart to the playground's unit tests (compile service,
-// token store, redeem service): those prove each seam in isolation against fakes;
-// this proves the real wiring — editor page → `POST /api/1/compiler/run` → BTA
-// compile → Android/Robolectric first frame → `/pg/` live redemption → viewer — with
-// a real daemon behind it, the one thing a fake can't cover.
-//
-// Requires a running playground serve; point SERVE_URL at it. The CI job boots one
-// with `--playground-android-bundle` (a locally packed `:samples:android-live-lane`),
-// token-gated (the lane is refused under --public), so the spec appends
-// `?token=<SERVE_TOKEN>` to every navigation. Self-skips with a clear message when no
-// SERVE_URL / playground page is reachable (a local run without a target).
+// Requires SERVE_URL pointing at a playground serve. CI boots one with
+// `--playground-android-bundle`, token-gated (refused under --public), so `?token=<SERVE_TOKEN>` is
+// appended to every navigation. Self-skips when no playground page is reachable.
 
 import { test, expect } from "@playwright/test";
 
@@ -26,9 +17,8 @@ const ANDROID_MODE = "compose-android";
 // The token gates every route; carry it on each navigation.
 const q = `?token=${encodeURIComponent(TOKEN)}`;
 
-// Resolved in beforeAll: is a playground editor page actually reachable? Left false
-// when SERVE_URL is unset/unreachable so the suite self-skips locally (and hard-fails
-// in CI, where the boot step guarantees the page).
+// Set in beforeAll: whether a playground page is reachable; false self-skips locally (CI guarantees
+// the page).
 let playgroundUp = false;
 
 test.beforeAll(async ({ request }) => {
@@ -50,9 +40,7 @@ function requirePlayground() {
   );
 }
 
-// After a run the status ends on one of two terminal strings ("Done." on success, or
-// an error message on a compile/exception failure) — "Compiling…" is the only
-// non-terminal one. Wait for a terminal status, then let the test assert which.
+// "Compiling…" is the only non-terminal status; wait for "Done." or an error, then assert which.
 async function runAndAwaitTerminal(page) {
   await page.click("#pg-run");
   const status = page.locator("#pg-status");
@@ -67,9 +55,8 @@ async function runAndAwaitTerminal(page) {
   return (await status.textContent())?.trim();
 }
 
-// The editor is CodeMirror when its bundle loaded and a plain <textarea> when it didn't (the
-// page degrades on purpose). Drive whichever is live rather than assuming: `fromTextArea`
-// hides `#pg-source`, so `fill()` on it would fail against the real page.
+// Drive CodeMirror when it loaded, else the plain `<textarea>` fallback; `fromTextArea` hides
+// `#pg-source`, so `fill()` on it would fail.
 async function setSource(page, text) {
   await page.evaluate((value) => {
     const cm = document.querySelector(".CodeMirror");
@@ -84,11 +71,8 @@ async function setSource(page, text) {
 }
 
 /**
- * The visible editing surface — CodeMirror's wrapper, or the textarea when it's absent.
- *
- * Not a `.CodeMirror, #pg-source` locator with `.first()`: `fromTextArea` leaves the hidden
- * textarea EARLIER in the DOM than the wrapper it inserts, so first-in-document-order picks the
- * invisible one and a visibility assertion fails against a perfectly healthy editor.
+ * The visible editing surface. Not `.first()` over both: the hidden textarea precedes the
+ * CodeMirror wrapper in the DOM.
  */
 async function sourceLocator(page) {
   const cm = page.locator(".CodeMirror");
@@ -137,10 +121,8 @@ test("compiles the default Android snippet to a first frame + live /pg/ handoff"
     /\/pg\/pg_[A-Za-z0-9_-]+/,
   );
 
-  // The advertised first frame must actually render — the daemon drew a still and the
-  // response carried it as a data:image/png URI. Asserting it (rather than treating the
-  // image as best-effort) is what proves the compile→daemon→PNG path really ran, not
-  // just that a token was minted; a silent render failure is otherwise invisible here.
+  // The first frame must actually render: asserting it proves the compile→daemon→PNG path ran, not
+  // just that a token was minted.
   const image = page.locator("#pg-image");
   await expect(image, "first-frame image is shown").toBeVisible();
   const src = await image.getAttribute("src");
@@ -186,9 +168,8 @@ test("a multi-file snippet compiles as one module and offers every preview it de
   await page.goto(`/playground${q}`, { waitUntil: "domcontentloaded" });
   await page.selectOption("#pg-mode", ANDROID_MODE);
 
-  // Split the snippet across two files, with the second declaring what the first uses. A
-  // cross-file reference is the whole point: the files reach ONE compile, so this only
-  // resolves if the server staged both into the same module (#3017).
+  // Split across two files with a cross-file reference, which only resolves if both reach one
+  // compile (#3017).
   await page.click("#pg-add-file");
   await setSource(
     page,
@@ -238,9 +219,8 @@ test("a multi-file snippet compiles as one module and offers every preview it de
   await expect(note, "preview note for a multi-preview snippet").toBeVisible();
   expect(await note.textContent()).toMatch(/2 previews in this snippet/);
 
-  // …and BOTH are reachable. The session stands on the whole compiled module, so every declared
-  // preview gets its own `?preview=<id>` link into the same `/pg/` token rather than only the
-  // drawn one being openable.
+  // …and both previews are reachable: every declared preview gets a `?preview=<id>` link into the
+  // same `/pg/` token.
   const links = page.locator("#pg-previews a");
   await expect(links, "one link per declared preview").toHaveCount(2);
   const hrefs = await links.evaluateAll((els) =>
@@ -262,9 +242,7 @@ test("the /pg/ token redeems into the live viewer", async ({ page }) => {
   await page.goto(`/playground${q}`, { waitUntil: "domcontentloaded" });
   await page.selectOption("#pg-mode", ANDROID_MODE);
   const terminal = await runAndAwaitTerminal(page);
-  // A non-Done terminal in CI is a real regression, not a reason to skip: the boot
-  // guarantees a compilable lane, so failing here (rather than green-skipping) keeps the
-  // redemption chain actually covered.
+  // A non-Done terminal in CI is a regression, not a skip: the boot guarantees a compilable lane.
   expect(
     terminal,
     `compile did not succeed (status "${terminal}") — nothing to redeem`,
@@ -272,11 +250,8 @@ test("the /pg/ token redeems into the live viewer", async ({ page }) => {
 
   const href = await page.locator("#pg-open").getAttribute("href");
 
-  // Hit the /pg/ capability RAW (no redirect-follow) first. Redemption must 302 to the
-  // viewer at /<sessionId>/p/<previewId>; a NotFound/Unavailable serves inline HTML with NO
-  // redirect. One assertion on the Location header, whose failure message carries the status
-  // AND the body — the body text ("expired, or never existed" vs "Live preview isn't
-  // available") says whether it was NotFound or Unavailable.
+  // Hit the `/pg/` capability raw first: redemption must 302 to `/<sessionId>/p/<previewId>`; the
+  // failure message carries status and body to distinguish NotFound from Unavailable.
   const raw = await page.request.get(href, { maxRedirects: 0 });
   const location = raw.headers()["location"] ?? "";
   const body =
@@ -289,9 +264,7 @@ test("the /pg/ token redeems into the live viewer", async ({ page }) => {
       `location="${location}" body="${body}"`,
   ).toMatch(/\/p\//);
 
-  // And the viewer actually loads (follow the redirect in a real page). The live frame
-  // itself is the /ws/ lane's job (proven by the serve-lanes suite); here we only assert
-  // redemption reached the real viewer shell, not an error page.
+  // The viewer shell loads (live frames are the serve-lanes suite's job).
   await page.goto(href, { waitUntil: "domcontentloaded" });
   await expect
     .poll(() => new URL(page.url()).pathname, { timeout: 30_000 })

@@ -11,15 +11,9 @@ import okio.Path
 import okio.Path.Companion.toPath
 
 /**
- * The `producers.json` file itself — the operator's trust store as an editable document.
- *
- * Mirrors [ServeCatalogsConfigFile] deliberately: same staged-write discipline, same "absent file
- * reads as empty" rule, same Okio [FileSystem] injection so tests drive it with a fake. The trust
- * store used to be baked into the container image, which made adding a producer a code change —
- * open a PR, wait for a release, wait for an image publish, wait for a roll — even though the box
- * could publish a *catalog* at runtime in one HTTP call. That asymmetry made runtime catalog
- * registration close to useless: the new catalog served, but badged `unverified` until an image
- * caught up. Moving this file onto the same config volume as `catalogs.json` closes it.
+ * The `producers.json` trust store as an editable document, on the same config volume as
+ * `catalogs.json` so runtime-registered catalogs can be trusted without an image rebuild. Mirrors
+ * [ServeCatalogsConfigFile]: staged writes, absent reads as empty, injected Okio [FileSystem].
  */
 class ServeTrustStoreFile(
   private val path: Path,
@@ -37,9 +31,8 @@ class ServeTrustStoreFile(
   }
 
   /**
-   * Write [store] back, staged through a sibling temp file + [FileSystem.atomicMove]. A truncated
-   * trust store is worse than a truncated catalog list: it fails *closed*, so every catalog on the
-   * box would silently drop to `unverified` on the next boot.
+   * Write [store] via a temp file and [FileSystem.atomicMove]. A truncated trust store fails
+   * closed, dropping every catalog to `unverified` on the next boot.
    */
   fun save(store: TrustStore) {
     val parent = path.parent
@@ -51,43 +44,28 @@ class ServeTrustStoreFile(
 }
 
 /**
- * A trust store that can change while the server runs.
- *
- * [TrustStore] is an immutable value read on every verification, and it used to be resolved once
- * into a `by lazy` val at startup — so an edit to producers.json needed a restart to take effect.
- * Consumers ([ServeCatalogStore], [ServeBundleStore]) now take a `() -> TrustStore` and call it per
- * verification, which makes the *next* catalog fetch or bundle upload see an admin change with no
- * restart. Reads are lock-free through the `@Volatile` reference; writers serialise in
+ * A trust store that can change while the server runs. Consumers ([ServeCatalogStore],
+ * [ServeBundleStore]) call a `() -> TrustStore` per verification, so admin changes apply to the
+ * next fetch or upload without a restart. Reads are lock-free via `@Volatile`; writers serialise in
  * [ServeTrustAdmin].
  */
 class MutableTrustStore(
   initial: TrustStore = TrustStore.EMPTY,
-  /**
-   * The backing document, when there is one. Given a [source], [get] also picks up an operator's
-   * **direct** edit to producers.json — without it, a hand-edit would sit unnoticed until the next
-   * admin call or a restart, which is exactly the staleness this class exists to remove.
-   */
+  /** The backing document, if any; lets [get] also pick up direct hand-edits to producers.json. */
   private val source: ServeTrustStoreFile? = null,
   private val onLog: (String) -> Unit = { System.err.println(it) },
 ) {
   @Volatile private var current: TrustStore = initial
 
   /**
-   * The trust store as of now, re-read from [source] on every call.
-   *
-   * Deliberately not mtime-gated. Filesystem timestamp granularity is coarse enough that two writes
-   * inside the same tick are indistinguishable, so a "has it changed?" check can silently miss an
-   * edit — the exact staleness this exists to remove. Re-parsing instead is affordable because a
-   * verification is *rare and expensive*: it accompanies a catalog branch fetch or the hashing of
-   * an uploaded bundle, next to which reading a few KB of JSON does not register.
+   * The trust store now, re-read from [source] on every call. Not mtime-gated (coarse timestamps
+   * can miss edits); affordable because verifications are rare and accompany far costlier work.
    */
   fun get(): TrustStore {
     val file = source ?: return current
-    // Only a successfully parsed, present file replaces what's in force. A malformed or truncated
-    // edit — or a deleted file — keeps the last good store rather than dropping to EMPTY: failing
-    // closed here would silently un-trust every catalog on the box mid-flight over a half-saved
-    // write. The admin API separately refuses to *write* over an unreadable document, so stale
-    // state can't be laundered back onto disk.
+    // Only a present, parseable file replaces the store; a malformed, truncated or deleted file
+    // keeps the last good one rather than un-trusting everything mid-flight. The admin API
+    // separately refuses to write over an unreadable document.
     if (file.exists()) {
       runCatching { file.load() }
         .onSuccess { current = it }
@@ -102,11 +80,8 @@ class MutableTrustStore(
 }
 
 /**
- * One producer entry on the admin API — a flat, discriminated shape covering all three trust bases.
- *
- * Flat rather than a sealed hierarchy because it's also the wire DTO: `kind` picks which fields
- * matter, which keeps the request body obvious to write by hand (`curl -d '{"kind":"branch",…}'`)
- * and keeps one route pair instead of three.
+ * One producer entry on the admin API, flat and discriminated by `kind` across all three trust
+ * bases, so request bodies are easy to write by hand and one route pair suffices.
  */
 @Serializable
 data class AdminTrustEntry(
@@ -127,56 +102,37 @@ data class AdminTrustEntry(
 )
 
 /**
- * Add and remove trusted producers on a **running** server, and persist the result.
+ * Add and remove trusted producers on a running server and persist the result, like
+ * [ServeCatalogAdmin] for catalogs: validate, mutate the live store, write the file; a persistence
+ * failure is a warning, since the change already serves.
  *
- * The runtime half of making the trust store config, exactly as [ServeCatalogAdmin] is for the
- * catalog set. Same contract in both directions: validate first, mutate the live store, then write
- * the file back; a persistence failure downgrades to a warning on an otherwise-successful result
- * rather than rolling back, because the in-memory change is already serving.
- *
- * **This grants more than it looks like.** With `--allow-render-trusted` a trusted branch is
- * eligible for server-side re-render — the box builds and executes that producer's Compose. So the
- * admin token is, on such a box, effectively a code-execution credential. That is why the routes
- * are off unless `--admin-token` is set, why the token is separate from the browse token, and why
- * [TrustStore.validateBranch] refuses a match-everything repo pattern.
+ * With `--allow-render-trusted`, a trusted branch's Compose is built and executed here, so the
+ * admin token is effectively a code-execution credential: hence routes off without `--admin-token`,
+ * a token separate from browsing, and [TrustStore.validateBranch] refusing match-everything
+ * patterns.
  */
 class ServeTrustAdmin(
   private val store: MutableTrustStore,
   /** The operator's producers.json; null ⇒ changes are runtime-only and don't survive a restart. */
   private val file: ServeTrustStoreFile?,
   /**
-   * Called with the reduced store after trust is **removed**, so the caller can retire anything
-   * that was already trusted under the old one. Revocation that only affects future verifications
-   * isn't revocation: a loaded catalog keeps its `Trusted` verdict (and any live daemon) in the
-   * session registry, and the branch refresher skips a reload while the branch SHA is unchanged —
-   * so without this the producer stays executable until its branch moves or the box restarts.
+   * Called with the reduced store after trust is removed, so already-trusted catalogs (and their
+   * live daemons) are retired now; otherwise they'd stay executable until their branch moved or the
+   * box restarted.
    */
   private val onRevoke: (TrustStore) -> Unit = {},
   /**
-   * Called with the store **before** and **after** trust is added, so the caller can re-verify a
-   * catalog that is already loaded under the narrower one.
-   *
-   * The mirror image of [onRevoke], and needed for the same reason. A verdict is computed when a
-   * catalog loads and then baked into its registered session; the branch refresher short-circuits
-   * on an unchanged SHA. So a catalog that loaded as `unverified` keeps serving as `unverified`
-   * after its producer is trusted — until the branch moves or the box restarts. Revocation was
-   * given this treatment because an over-trusted catalog is a security problem; the grant direction
-   * was left out because, until a catalog could arrive *before* its trust, it never happened.
-   * `--catalog-registry` is exactly that case: the registry contributes a catalog the operator
-   * never listed, so trust is necessarily added afterwards (issue seen on preview.coo.ee —
-   * joreilly-peopleinspace stayed `unverified` through a successful `POST /admin/trust` reconcile).
-   *
-   * Both stores are handed over rather than just the new one, because the caller needs the
-   * **delta**. "Everything trusted now" would re-fetch every catalog on the box on every trust add;
-   * "trusted now and not before" is the only set whose verdict can actually have changed.
+   * Called with the store before and after trust is added, so catalogs already loaded as
+   * `unverified` are re-verified (verdicts are baked in at load and unchanged SHAs skip reloads).
+   * Matters for `--catalog-registry`, whose catalogs arrive before their trust. Both stores are
+   * passed so the caller re-verifies only the delta.
    */
   private val onGrant: (before: TrustStore, updated: TrustStore) -> Unit = { _, _ -> },
   private val onLog: (String) -> Unit = { System.err.println(it) },
 ) {
   /**
-   * Serialises the whole load-modify-save, not just the save — same lost-update hazard
-   * [ServeCatalogAdmin] guards: two concurrent adds would each load the same document, apply one
-   * edit, and atomically move, silently discarding the loser.
+   * Serialises the whole load-modify-save so concurrent adds can't lose updates, as in
+   * [ServeCatalogAdmin].
    */
   private val lock = Any()
 
@@ -196,7 +152,7 @@ class ServeTrustAdmin(
   fun list(): TrustStore = store.get()
 
   /**
-   * Trust [entry]. Idempotency is a conflict, not a silent no-op, so a typo'd repeat is visible.
+   * Trust [entry]. Repeating an existing entry is a conflict, not a no-op, so typos are visible.
    */
   fun add(entry: AdminTrustEntry): Result =
     when (entry.kind) {
@@ -283,20 +239,15 @@ class ServeTrustAdmin(
   }
 
   /**
-   * Apply [edit] to the trust store under [lock] and publish the result. [edit] returns null when
-   * the change is a no-op (already trusted / not trusted), which becomes a [Result.Conflict].
-   *
-   * The document is re-read from the file first, not taken from memory, so an operator's hand-edit
-   * between admin calls isn't clobbered — the same rule [ServeCatalogAdmin.persist] follows.
+   * Apply [edit] under [lock] and publish. [edit] returns null for a no-op, reported as
+   * [Result.Conflict]. Re-reads the file first so hand-edits aren't clobbered
+   * ([ServeCatalogAdmin.persist]).
    */
   private fun mutate(summary: String, edit: (TrustStore) -> TrustStore?): Result =
     synchronized(lock) {
       val target = file
-      // An UNREADABLE existing document aborts the mutation instead of falling back to the cached
-      // store. Swallowing the parse error and saving would replace a half-written or malformed
-      // producers.json with stale state plus this edit — silently resurrecting entries the operator
-      // was in the middle of removing, which is the opposite of the hand-edit rule below. An ABSENT
-      // file is different and fine: there's nothing to lose, so it reads as the empty store.
+      // An unreadable document aborts the mutation rather than overwriting it with stale state plus
+      // this edit; an absent file is fine and reads as empty.
       val current =
         if (target == null) store.get()
         else
@@ -319,17 +270,14 @@ class ServeTrustAdmin(
               "not persisted: ${e.message ?: "write failed"}"
             }
       onLog("serve: trust $summary updated via admin API")
-      // Anything that was trusted only under the old store has to be retired now, not at the next
-      // branch move. Runs inside the lock so a concurrent add can't re-trust mid-teardown; failures
-      // are logged rather than thrown, since the trust change itself has already taken effect.
+      // Retire anything trusted only under the old store now, inside the lock so a concurrent add
+      // can't re-trust mid-teardown. Failures are logged, since the change already took effect.
       if (isReduction(current, updated)) {
         runCatching { onRevoke(updated) }
           .onFailure { onLog("serve: revocation cleanup after $summary failed: ${it.message}") }
       } else {
-        // The grant direction, same discipline: a catalog already loaded under the narrower store
-        // has to be re-verified, not left on the verdict it happened to load with. Failures are
-        // logged rather than thrown for the same reason — the trust change itself has taken
-        // effect, and refusing the request afterwards would misreport that.
+        // The grant direction: re-verify catalogs loaded under the narrower store. Failures are
+        // logged for the same reason.
         runCatching { onGrant(current, updated) }
           .onFailure { onLog("serve: re-verification after $summary failed: ${it.message}") }
       }

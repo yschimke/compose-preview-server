@@ -1,22 +1,9 @@
-// The **Page theme** setting: whether the site chrome follows the SELECTED PREVIEW THEME or the
-// visitor's operating system.
-//
-// The catalog's Theme control re-renders the previews; until this existed it said nothing about the
-// page around them, which followed `prefers-color-scheme` alone. So opening `…/m3-catalog/?theme=dark`
-// handed a dark grid to a light page — the one combination nobody picked. With the setting on (the
-// default) the chrome follows the choice instead.
-//
-// It is a SETTING, not a second toggle, because it is a standing preference rather than page state:
-// somebody who keeps their machine in dark mode all day can turn it off in the header's Settings
-// menu and keep the OS behaviour everywhere, without touching a control again. That is also why it
-// is not carried in the URL — a shared link describes the previews, not the reader's chrome.
-//
-// Mechanically the whole feature is `color-scheme`: `serve.css` writes every mode-dependent value as
-// a `light-dark()` pair, so pinning the scheme with `cp-scheme-light` / `cp-scheme-dark` on `<html>`
-// repaints chrome, catalog palette and semantic badges together, with no second stylesheet to keep
-// in step. The class is first set by the pre-paint script in `<head>` (`ServeWeb.pageThemeScript`),
-// so a page served under `?theme=dark` never flashes light; this keeps it in step afterwards and
-// owns the Settings menu.
+// The **Page theme** setting: whether site chrome follows the selected preview theme (default) or
+// the OS. A standing preference in the Settings menu, not URL state, since a shared link describes
+// the previews, not the reader's chrome. Implemented via `color-scheme`: `serve.css` uses
+// `light-dark()` pairs and `cp-scheme-light`/`cp-scheme-dark` on `<html>` pins the scheme. The
+// pre-paint script (`ServeWeb.pageThemeScript`) sets it first to avoid a flash; this keeps it in
+// step and owns the menu.
 
 import { readThemeMemory } from "./themeMemory.js";
 
@@ -38,8 +25,8 @@ declare global {
 }
 
 /**
- * The Page theme SETTING, which is a standing preference and stays in `localStorage` — unlike the
- * theme CHOICE, which is per-tab ({@link readThemeMemory}).
+ * The Page theme setting lives in `localStorage`; the theme choice is per-tab ({@link
+ * readThemeMemory}).
  */
 function storedSetting(): string | null {
     try {
@@ -54,9 +41,8 @@ export function setting(): PageThemeSetting {
 }
 
 /**
- * The per-tab storage key this catalog remembers its theme choice under, shared with the landing
- * grid and the viewer. Empty on a page with no theme control at all (the front door, `/status`),
- * which simply never pins a scheme.
+ * Per-tab storage key for this catalog's theme choice, shared with the landing grid and viewer.
+ * Empty on pages with no theme control.
  */
 function themeKey(): string {
     return document.documentElement.getAttribute("data-cp-theme-key") || "";
@@ -74,28 +60,18 @@ function modeOf(choice: string): string {
 }
 
 /**
- * The theme choice in force on load, resolved exactly as the pre-paint script does: the URL first
- * (someone picked that chip, or was handed the link), then the choice this tab remembers for this
- * catalog, and only then the theme a `__light` / `__dark` preview bakes. `uiMode` is the viewer's
- * spelling of the same axis.
- *
- * The remembered choice OUTRANKS the baked one, because the viewer applies it too: a tab that
- * picked Expressive Dark and then opened a `…__light` preview is looking at a dark re-render, and
- * painting the chrome from the id would leave that render inside a light page. A tab that picked
- * nothing has nothing remembered, so a shared `__light` link still opens light, chrome and all.
+ * The theme choice on load, resolved as the pre-paint script does: URL, then this tab's remembered
+ * choice, then the theme a `__light`/`__dark` preview bakes (`uiMode` is the viewer's spelling).
+ * The remembered choice outranks the baked one because the viewer re-renders with it.
  */
 function currentChoice(): string {
     const params = new URLSearchParams(location.search);
     const fromUrl = params.get("theme") || params.get("uiMode");
     if (fromUrl) return fromUrl;
     if (themeChoiceApplies()) {
-        // Only a remembered value THIS page can actually take. The memory is one key per catalog,
-        // written by the viewer's select, the landing chips and the compare wall alike, so it
-        // routinely arrives carrying a choice the destination does not offer — `light` picked on a
-        // Wear catalog's comparison wall, opened in a Wear viewer that only offers Dark — or one
-        // nothing declares any more, after a catalog dropped or renamed a theme. Either way the
-        // page goes on showing its baked render, and honouring the memory would paint the chrome
-        // for a theme that is not on the stage.
+        // Only a remembered value this page can take: the per-catalog memory may hold a theme this
+        // page does not offer or that no longer exists, and then the baked render is what is on
+        // stage.
         const remembered = readThemeMemory(themeKey());
         if (remembered && usableChoice(remembered)) return remembered;
     }
@@ -111,11 +87,8 @@ function currentChoice(): string {
 }
 
 /**
- * The theme values this page's own control offers, or `null` when it carries no theme control.
- *
- * Three shapes for one question, because three different pages remember into the same key: the
- * viewer's `<select>` (a disabled option is not on offer), the landing grid's chips, and the
- * comparison wall's Light/Dark pair.
+ * Theme values this page's control offers, or `null` with no control. Handles the viewer's
+ * `<select>` (disabled options excluded), the landing chips and the wall's Light/Dark pair.
  */
 function offeredChoices(): Set<string> | null {
     const select = document.querySelector<HTMLSelectElement>("#cp-theme");
@@ -137,13 +110,8 @@ function offeredChoices(): Set<string> | null {
 }
 
 /**
- * Whether [choice] describes something this page could be showing.
- *
- * Offered wins over resolvable where a control exists: an offered theme whose mode is unqualified
- * is still what the stage is drawing, and the honest chrome for it is the visitor's OS — the same
- * answer {@link follow} gives when that theme is picked outright. Where no control exists there is
- * nothing to ask, so a value is trusted only as far as it can be read: one that names no mode is
- * indistinguishable from a stale one, and giving way to the baked theme is the safer reading.
+ * Whether [choice] could be what this page shows. With a control, offered wins (an unqualified mode
+ * follows the OS, like {@link follow}); without one, a value naming no mode is treated as stale.
  */
 function usableChoice(choice: string): boolean {
     const offered = offeredChoices();
@@ -151,14 +119,9 @@ function usableChoice(choice: string): boolean {
 }
 
 /**
- * Whether a remembered choice can change what this page shows.
- *
- * A disabled Theme select is a viewer that cannot re-render — a static bundle with no daemon or
- * Wasm tier, a fixed-theme specimen — so the stage keeps its baked image whatever the tab
- * remembers, and following the memory would frame that image in the opposite chrome. The server
- * makes the same call for the pre-paint script (`ServeWeb.themeChoiceApplies`); this is the
- * post-parse half, which can simply look at the control. Pages with no such select (the landing
- * grid, whose chips re-point at published pixels) always apply.
+ * Whether a remembered choice can change what this page shows. A disabled Theme select means the
+ * stage keeps its baked image (server-side twin: `ServeWeb.themeChoiceApplies`). Pages without the
+ * select always apply.
  */
 function themeChoiceApplies(): boolean {
     const select = document.querySelector<HTMLSelectElement>("#cp-theme");
@@ -181,10 +144,8 @@ export function follow(choice?: string): void {
 }
 
 /**
- * Wire the Settings menu's radios. Split from the global on purpose: the API has to exist early —
- * `serve-chrome.js` is evaluated before the page's own scripts — while these inputs live in the
- * header and the `.cp-theme-btn` chips `follow()` reads live in `<main>`, so the wiring waits for a
- * parsed document. Under the old end-of-body `<script>` that was true by position; now it is said.
+ * Wire the Settings menu radios once the document is parsed; split from the global, which must
+ * exist before the page's own scripts run.
  */
 export function wireSettingsMenu(): void {
     const inputs = document.querySelectorAll<HTMLInputElement>(
@@ -207,11 +168,8 @@ export function wireSettingsMenu(): void {
 }
 
 /**
- * Publish the global, then wire the menu once the document can be queried. The rest of the page
- * tells us when the visitor picks a theme — the landing grid's chips and the viewer's Theme select
- * both call `follow()` — so the chrome turns over with the previews rather than waiting for a
- * reload. Every caller reads `window.cpPageTheme` lazily inside a handler, so publishing early is
- * safe and publishing late would not be.
+ * Publish the global, then wire the menu once the document can be queried. Callers read
+ * `window.cpPageTheme` lazily in handlers, so publishing early is safe.
  */
 export function installPageTheme(): void {
     window.cpPageTheme = { follow, setting };

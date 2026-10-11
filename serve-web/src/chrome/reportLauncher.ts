@@ -1,15 +1,7 @@
-// The floating "Report a problem" launcher, and the one decision it exists to make plain: whether
-// what is wrong belongs to the preview SERVER or to the CATALOG.
-//
-// Those go to different repositories and always have — the server's own tracker for the page, the
-// controls and the render lanes; the catalog's own for a preview that draws the wrong thing — but
-// until this existed the distinction was a sentence on `/report-bug`, which is a page you only
-// reach after choosing. A report in the wrong tracker reaches people who cannot act on it, so the
-// panel states the split before the choice and names the repository each half files against.
-//
-// Lives in the page-shell bundle because the launcher is on every page, and it is small on purpose:
-// the capture machinery it can reach is a separate bundle fetched on first use, so a visitor who
-// never reports anything pays for a `<details>` and this file.
+// The floating "Report a problem" launcher, which states up front whether a problem belongs to the
+// preview server's tracker or the catalog's own repository, and names each destination. In the
+// shell bundle because it is on every page; the capture machinery is a separate bundle fetched on
+// first use.
 
 import { whenReady } from "../dom/whenReady.js";
 
@@ -19,9 +11,7 @@ function loadCapture(): void {
     const src = host?.getAttribute("data-cp-capture-src");
     if (!src || document.querySelector(`script[data-cp-capture]`)) return;
     const script = document.createElement("script");
-    // Same-origin by construction: the value is an asset href this server rendered. Resolving it
-    // against the page's own origin and refusing anything else keeps that true by construction
-    // rather than by trusting the attribute, which is DOM text like any other.
+    // Resolved against the page's origin and refused otherwise, rather than trusting DOM text.
     const url = new URL(src, location.href);
     if (url.origin !== location.origin) return;
     script.src = url.href;
@@ -31,29 +21,19 @@ function loadCapture(): void {
 }
 
 /**
- * Offer the catalog half, on the pages that have one.
- *
- * The per-preview affordance is already in the page — `<details id="cp-report">`, emitted beside
- * the preview's "source" link — and it already knows the derived repository, published on
- * `data-cp-repo`. So the launcher does not build a second report: it names the destination and
- * takes you to the one that is there. On a page with no preview (the front door, `/status`, a
- * catalog that failed to load) the entry stays hidden, which is the truth — there is no catalog
- * bug to file from a page that is showing no catalog.
+ * Offer the catalog half on pages that have one: the launcher points at the existing per-preview
+ * `<details id="cp-report">` (which publishes `data-cp-repo`) rather than building a second report.
+ * Hidden on pages with no preview.
  */
 function wireCatalogChoice(): void {
     const choice = document.querySelector<HTMLAnchorElement>(".cp-fab-catalog");
     const report = document.querySelector<HTMLElement>("#cp-report");
     if (!choice || !report) return;
-    // The destination is completed HERE rather than server-side, because only this page knows it:
-    // the repo is derived per catalog and published on the affordance the launcher points at. The
-    // named form is the one that matters — "goes to the catalog's own repository" is true and
-    // useless next to "goes to `acme/widgets`" — so the generic wording is only the fallback for a
-    // page whose affordance published no repo.
+    // Completed here because only the page knows the per-catalog repo; the generic wording is a
+    // fallback for an affordance with no repo.
     const repo = report.getAttribute("data-cp-repo") || "";
-    // …and what it is about, from the same affordance. The offer's default wording names a single
-    // preview, which is true on the viewer and false on the comparison wall — that page shows every
-    // component at once and files a page-scoped report (issue #4289). Server-published rather than
-    // inferred from the URL, because the affordance is the thing that knows what it files.
+    // …and its subject, published by the affordance: a single preview on the viewer, a page-scoped
+    // report on the comparison wall.
     const subject = report.getAttribute("data-cp-subject") || "";
     const what = choice.querySelector<HTMLElement>(".cp-fab-what");
     if (what && subject) {
@@ -88,27 +68,11 @@ function wireCatalogChoice(): void {
 }
 
 /**
- * Put the report panels away once a report has actually been filed.
- *
- * Both reporting forms open GitHub in a NEW TAB (`target="_blank"`), which is deliberate — it keeps
- * the page the bug is about alive behind the issue you are writing about it — but it also means
- * nothing ever navigates the page that raised the panel, so the panel simply stays. Come back to
- * the tab and the per-preview box is still hanging over the render, covering the thing you just
- * reported (issue #4333). A `<details>` has no idea its form went anywhere; something has to tell
- * it, and submit is the moment.
- *
- * Delegated from the document rather than bound per form, because the affordances are not all in
- * the page at load: the launcher panel is, but the per-preview `#cp-report` is emitted by whichever
- * surface bundle drew the preview, and the comparison wall rebuilds its own as the wall re-renders.
- * One listener covers every copy, present and future.
- *
- * Only `<details>` closes — no field is cleared and no state is reset. Submitting is not
- * necessarily the end of the gesture: a refused GitHub sign-in, a popup blocker, or a second
- * thought about the summary all land the reporter back on this tab wanting the words they typed,
- * and reopening the panel has to still show them.
- *
- * A blocked submit never reaches here: the Summary is `required`, so a browser that rejects an
- * empty one fires no `submit` event and the panel correctly stays open with the error on it.
+ * Close the report panels once a report is filed: both forms open GitHub in a new tab, so nothing
+ * navigates this page and the panel would keep covering the render. Delegated from the document
+ * because `#cp-report` is emitted by surface bundles and rebuilt by the wall. Only `<details>`
+ * close; fields are kept in case the reporter returns. A `required` Summary blocks empty submits
+ * before this fires.
  */
 function wireDismissOnSubmit(): void {
     document.addEventListener("submit", (event) => {
@@ -120,9 +84,7 @@ function wireDismissOnSubmit(): void {
 }
 
 export function installReportLauncher(): void {
-    // Deferred until the document is parsed. This bundle is the first element in `<body>`, so at
-    // evaluation time the launcher — which `ServeWeb.document` emits after `<main>` — does not
-    // exist yet, and every query below would find nothing and no-op for the life of the page.
+    // Deferred until parse: this bundle is first in `<body>`, before the launcher exists.
     whenReady(install);
 }
 
@@ -132,9 +94,8 @@ function install(): void {
     if (fab) {
         wireCatalogChoice();
         const menu = fab.querySelector<HTMLDetailsElement>(".cp-fab-menu");
-        // Fetched when the panel first opens rather than on load: see the header. `toggle` fires
-        // for close as well, hence the guard, and the listener stays because `loadCapture` is the
-        // thing that is idempotent.
+        // Fetched when the panel first opens. `toggle` also fires on close, hence the guard;
+        // `loadCapture` is idempotent.
         menu?.addEventListener("toggle", () => {
             if (menu.open) loadCapture();
         });

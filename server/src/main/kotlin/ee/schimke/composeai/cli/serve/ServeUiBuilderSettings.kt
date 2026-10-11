@@ -4,17 +4,12 @@ import ee.schimke.composeai.uibuilder.export.CatalogOwnership
 import okio.Path.Companion.toPath
 
 /**
- * The UI builder's catalog settings, resolved from the box's environment **and** `catalogs.json`'s
+ * The UI builder's catalog settings, resolved from the box's environment and `catalogs.json`'s
  * `uiBuilder` block ([ServeCatalogsConfig.UiBuilderSettings]).
  *
- * ## Why the environment stays the baseline
- *
- * These settings used to live only in `SERVE_UI_BUILDER_*` variables in the box's private `.env`,
- * read once by the entrypoint into `--ui-builder-*` flags. Moving them to `catalogs.json` — which
- * the repository publishes to the box through the admin API — must not disrupt a box whose `.env`
- * already names them, and nobody but the operator can read that `.env`. So the block is a set of
- * **overrides**: a catalog it does not mention keeps exactly what the environment gives it, and a
- * box with no block is unchanged. The mapping is one variable to one field:
+ * The environment stays the baseline (only the operator can read the box's `.env`), so the block is
+ * a set of overrides: a catalog it doesn't mention keeps what the environment gives it. One
+ * variable maps to one field:
  *
  * | Environment                           | `catalogs.json` `uiBuilder`               |
  * |---------------------------------------|-------------------------------------------|
@@ -26,23 +21,16 @@ import okio.Path.Companion.toPath
  * | `SERVE_UI_BUILDER_WIDGET_PLAYER`      | `widgetPlayer`                            |
  * | (none: this file only)                | `catalogs.<id>.shadow`                    |
  *
- * Secrets, credentials and facts about the machine (`SERVE_UI_BUILDER_WEAR`, `…_STATE_DIR`,
- * `…_COMPONENTS`, `…_HOST`, the guidelines key) stay in the environment. The builder's other
- * non-secret settings (the guidelines model and allow-list, the admin actors, the start URL) are
- * the deployment's `settings.json` ([ServeSettings]), which owns none of the catalog settings here.
+ * Secrets and machine facts (`SERVE_UI_BUILDER_WEAR`, `…_STATE_DIR`, `…_COMPONENTS`, `…_HOST`, the
+ * guidelines key) stay in the environment; other non-secret builder settings live in
+ * `settings.json` ([ServeSettings]).
  *
- * ## The published default
+ * A catalog the block starts serving with no `published` of its own is published when it is in
+ * [ServeOptions.uiBuilderPublishedDefault], the deployment's list, which keeps catalog names out of
+ * the server's Kotlin (`.github/scripts/ui-builder-catalog-literals.sh`).
  *
- * A catalog the block starts serving, with no `published` of its own, is published when it is in
- * the deployment's published default ([ServeOptions.uiBuilderPublishedDefault]): the list the image
- * entrypoint derives `--ui-builder-published-catalogs` from and passes alongside it, so turning a
- * catalog on here behaves exactly as naming it in the `.env` would. The list is the deployment's,
- * not this file's, because catalog names stay out of the server's Kotlin
- * (`.github/scripts/ui-builder-catalog-literals.sh`).
- *
- * Settings left that contradict each other (a published id no longer served, an owned catalog that
- * does not read its published file) are reported and narrowed rather than refusing to boot: a box
- * must come up on a config it wrote itself.
+ * Contradictory settings are reported and narrowed rather than refusing to boot: a box must come up
+ * on a config it wrote itself.
  */
 object ServeUiBuilderSettings {
 
@@ -277,9 +265,8 @@ object ServeUiBuilderSettings {
   }
 
   /**
-   * [options] with `catalogs.json`'s `uiBuilder` block applied, or [options] itself when there is
-   * no file or no block. A file that cannot be read leaves the environment in charge, exactly as
-   * the rest of the server treats an unreadable `catalogs.json`.
+   * [options] with the `uiBuilder` block applied, or [options] itself when there is no file or
+   * block. An unreadable file leaves the environment in charge.
    */
   fun overlay(
     options: ServeOptions,
@@ -319,9 +306,8 @@ object ServeUiBuilderSettings {
   }
 
   /**
-   * The environment's options with the builder settings answered from `catalogs.json`. [base] is
-   * kept so the admin route can resolve a new block against the environment rather than against the
-   * block it replaces.
+   * The environment's options with builder settings answered from `catalogs.json`. [base] is kept
+   * so the admin route resolves a new block against the environment, not the block it replaces.
    */
   class Overlay(val base: ServeOptions, private val effective: Effective) : ServeOptions by base {
     override val uiBuilderCatalogs: Set<String>
@@ -364,10 +350,9 @@ data class ServeUiBuilderSettingsDto(
 )
 
 /**
- * One shadowed catalog's report (compose-ui-builder's `CatalogCutoverShadow.Report`), as
- * `/admin/ui-builder/config` reports it: [ready] when owning it would refuse nothing it serves now
- * and take nothing away ([losses] empty), and [differences] what the editor would see change. Null
- * [differences] ⇒ this build synthesises nothing for the catalog, so owning it loses nothing.
+ * One shadowed catalog's report (compose-ui-builder's `CatalogCutoverShadow.Report`): [ready] when
+ * owning it would take nothing away ([losses] empty); [differences] is what the editor would see
+ * change, null when this build synthesises nothing for the catalog.
  */
 @kotlinx.serialization.Serializable
 data class ServeUiBuilderShadowReportDto(
@@ -382,12 +367,9 @@ data class ServeUiBuilderShadowReportDto(
 )
 
 /**
- * `/admin/ui-builder/config`: the `uiBuilder` block in `catalogs.json`, validated and written so it
- * applies at the next start, like the editor pin.
- *
- * Applied at the next start rather than live because the builder's catalog set feeds the routes,
- * the seeds, the native lanes and the packs, all decided once at startup; a reply says when the
- * written settings differ from what is serving.
+ * `/admin/ui-builder/config`: the `uiBuilder` block, validated and written to apply at the next
+ * start, since the catalog set feeds routes, seeds, native lanes and packs decided at startup. A
+ * reply says when the written settings differ from what is serving.
  */
 class ServeUiBuilderSettingsAdmin(
   private val configFile: ServeCatalogsConfigFile?,
@@ -398,9 +380,8 @@ class ServeUiBuilderSettingsAdmin(
   /** Each shadowed catalog's latest report, by catalog id; filled as catalogs compose. */
   private val shadowReports: () -> Map<String, ServeUiBuilderShadowReportDto> = { emptyMap() },
   /**
-   * Each catalog-owned catalog this process cannot serve fully, by catalog id, with why: its
-   * published file is missing or does not compose (left out of the builder), or its templates do
-   * not read (served, new designs start blank). Empty when every owned catalog composes.
+   * Each owned catalog this process can't serve fully, with why: its published file is missing or
+   * doesn't compose (left out), or its templates don't read (served, new designs start blank).
    */
   private val unavailable: () -> Map<String, String> = { emptyMap() },
 ) {

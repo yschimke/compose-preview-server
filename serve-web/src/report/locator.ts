@@ -1,17 +1,9 @@
-// Writing a selection into the `compose-parity-locator/v1` block.
-//
-// The Kotlin writer (`ServeIssueReport`) emits the block; this fills the one part of it that is not
-// known until somebody clicks. Both sides therefore write the same two fields, and they have to
-// agree byte for byte — the block is canonical bytes so two records are comparable without parsing
-// one, and the producer that indexes reports refuses a non-canonical field rather than storing a
-// guess. `test/reportLocator.test.ts` asserts this module against the SHARED fixture the Kotlin
-// writer and the JavaScript parser are already pinned to, so no engine can move the contract alone.
-//
-// The invariants are enforced here, at the point the rectangle is MADE, exactly as
-// `ServeIssueReport.Bounds` enforces them in its constructor. A writer that emits a rectangle its
-// own producer refuses hands the reporter a prefilled body that looks right and takes the whole
-// issue out of the index when the workflow next runs — a failure with no symptom until someone
-// wonders why the report never appeared.
+// Writing a selection into the `compose-parity-locator/v1` block. The Kotlin writer
+// (`ServeIssueReport`) emits the block; this fills the part known only after a click. Both must
+// agree byte for byte (the block is canonical bytes, and the indexing producer refuses
+// non-canonical fields); `test/reportLocator.test.ts` checks this module against the shared fixture
+// the Kotlin writer and JS parser use. Invariants are enforced where the rectangle is made, like
+// `ServeIssueReport.Bounds`, since a refused rectangle silently drops the issue from the index.
 
 /** The only plane `v1` accepts. See D1: both tag-index producers publish render pixels. */
 export const RENDER_PIXELS = "render-pixels";
@@ -32,22 +24,17 @@ export interface Selection {
 }
 
 /**
- * `element` as a **JSON string**, which is what keeps a tag from becoming syntax.
- *
- * The block is line-oriented `key: value` and a `testTag` is arbitrary text: one containing a
- * newline would not stay one field (`row\nrevision: injected` reads back as an element plus a
- * revision nobody wrote) and one carrying a fence delimiter could end the block early and drop the
- * whole issue from the index. Quoting also makes a tag with leading or trailing whitespace
- * expressible, which a format whose readers trim otherwise cannot carry at all.
+ * `element` as a JSON string, so a tag can't become syntax: the block is line-oriented and a
+ * newline or fence delimiter in a `testTag` could inject fields or end the block. Quoting also
+ * preserves leading/trailing whitespace.
  */
 export function canonicalElement(element: string): string {
     return JSON.stringify(element);
 }
 
 /**
- * Canonical bounds JSON: the same code-point key order the overrides carry, so a block is
- * comparable byte for byte without parsing it back. Code point order is height < space < width < x
- * < y, and it is written out rather than sorted because there are five of them and they are fixed.
+ * Canonical bounds JSON in code-point key order (height < space < width < x < y), written out since
+ * the keys are fixed.
  */
 export function canonicalBounds(bounds: Bounds): string {
     return (
@@ -57,16 +44,9 @@ export function canonicalBounds(bounds: Bounds): string {
 }
 
 /**
- * Whether a rectangle is one `v1` will accept.
- *
- * The origin may be **negative**, deliberately: a uniquely tagged node can extend above or left of
- * the render root, and both tag-index producers emit signed coordinates for that case. Requiring a
- * non-negative origin here would mean a selection could not copy the bounds the index handed it.
- * Clipping is the comparison's plane transform's business.
- *
- * The extent must be positive and every coordinate an integer. A drag selection starts in DISPLAY
- * pixels and is converted before it gets here; a conversion that produced a sub-pixel or an empty
- * rectangle is a bug at the point of construction, and this is where it stops.
+ * Whether a rectangle is acceptable to `v1`. The origin may be negative (a tagged node can extend
+ * beyond the render root, and the tag index emits signed coordinates). The extent must be positive
+ * and every coordinate an integer; drag selections are converted from display pixels before this.
  */
 export function usableBounds(bounds: Bounds | undefined): bounds is Bounds {
     if (!bounds) return false;
@@ -98,18 +78,10 @@ export function selectionLines(selection: Selection): string {
 export const SELECTION_PLACEHOLDER = "{{selection}}";
 
 /**
- * [template] with the selection placeholder replaced by [selectionLines].
- *
- * The placeholder occupies a whole LINE, and this matches it as one — the line has to equal the
- * placeholder exactly, which is how the server writes it. A first-occurrence substring replace was
- * the obvious spelling and the wrong one: any earlier locator value ending in the placeholder text
- * (a preview id or a variant carrying it, both catalog-authored and so third-party data) would be
- * rewritten instead, and the real placeholder would then be filed verbatim — a malformed locator
- * that takes the whole issue out of the parity index, with nothing to notice it.
- *
- * The line is consumed WITH its newline: substituting the empty string then yields exactly the
- * block a server with no selection to report writes by itself, where a stray blank line inside the
- * fence is one the producer's line parser reads a field short.
+ * [template] with the selection placeholder line replaced by [selectionLines]. Matched as a whole
+ * line, since catalog-authored values earlier in the block could end with the placeholder text. The
+ * line is consumed with its newline, so an empty selection yields exactly the block the server
+ * writes without one.
  */
 export function fillSelection(template: string, selection: Selection): string {
     const lines = template.split("\n");
@@ -123,30 +95,16 @@ export function fillSelection(template: string, selection: Selection): string {
 }
 
 /**
- * The placeholder the server leaves for the locator's `overrides:` VALUE, and the whole line it
- * sits in. `ServeIssueReport.OVERRIDES_PLACEHOLDER`.
- *
- * The viewer's controls re-render the frame in place, so the overrides the page was SERVED at stop
- * describing what is on screen the moment anyone touches a knob. The server writes the key and
- * leaves the value, and this fills it from live state on the same pass that fills `{{render}}` —
- * one pass, one source, so the identity and the pixels the body links cannot disagree.
+ * The placeholder for the locator's `overrides:` value (`ServeIssueReport.OVERRIDES_PLACEHOLDER`).
+ * Filled from live control state in the same pass as `{{render}}`, so identity and pixels agree.
  */
 export const OVERRIDES_PLACEHOLDER = "{{overrides}}";
 const OVERRIDES_PLACEHOLDER_LINE = `overrides: ${OVERRIDES_PLACEHOLDER}`;
 
 /**
- * [template] with its `overrides: {{overrides}}` line rewritten from [overrides].
- *
- * Matched as a WHOLE line, for the reason [fillSelection] and [fillLocators] are: every other value
- * in the block is catalog-authored (a preview id, a component id, a variant derived from one), so a
- * first-occurrence substring replace could rewrite one of those and file the real placeholder
- * verbatim — a malformed locator that takes the whole issue out of the parity index, with nothing
- * to notice it. Anchoring on the server-written `overrides: ` key makes that unreachable: no other
- * line in the block can equal this one.
- *
- * A template without the line is returned unchanged — that is every page whose overrides the server
- * already knew for certain (the focused comparison), and rewriting a value it wrote would be a
- * guess replacing a fact.
+ * [template] with its `overrides: {{overrides}}` line rewritten from [overrides], matched as a
+ * whole line anchored on the `overrides: ` key (other values are catalog-authored). Templates
+ * without the line (where the server knew the overrides) are returned unchanged.
  */
 export function fillOverrides(
     template: string,
@@ -159,19 +117,17 @@ export function fillOverrides(
     return lines.join("\n");
 }
 
-// ---- the whole block, for a report the server could not write ---------------------------------
-//
-// Everything above fills in a block `ServeIssueReport` already wrote. What follows writes one from
-// nothing, and exists for a single caller: the comparison wall's multi-row picker, where which
-// comparisons the report names is decided by ticking rows after the page was served. The server
-// cannot write those blocks and the browser therefore has to — so this is a third engine on
-// `compose-parity-locator/v1`, pinned to the same shared fixture as the Kotlin writer and the
-// JavaScript producer (`test/reportLocator.test.ts`).
+// Writing a whole block from nothing, for the comparison wall's multi-row picker, where rows are
+// ticked after serving. A third engine on `compose-parity-locator/v1`, pinned to the same shared
+// fixture (`test/reportLocator.test.ts`).
 
-/** The fence both delimiters carry. Kept in step with `ServeIssueReport.LOCATOR_FENCE`. */
+/** The fence both delimiters carry; kept in step with `ServeIssueReport.LOCATOR_FENCE`. */
 export const LOCATOR_FENCE = "compose-parity-locator/v1";
 
-/** The placeholder line a pickable page's template carries. `ServeIssueReport.LOCATORS_PLACEHOLDER`. */
+/**
+ * The placeholder line a pickable page's template carries
+ * (`ServeIssueReport.LOCATORS_PLACEHOLDER`).
+ */
 export const LOCATORS_PLACEHOLDER = "{{locators}}";
 
 /** One comparison, as the block names it. */
@@ -189,14 +145,9 @@ export interface Locator {
 }
 
 /**
- * Compare two strings by CODE POINT, which is not what `Array.prototype.sort` does.
- *
- * The default comparator orders by UTF-16 code unit, so an astral key (`😀`, a surrogate pair
- * starting at U+D83D) sorts *before* a BMP key above U+D800 (`！`, U+FF01) — the opposite of the
- * canonical order, which the Kotlin writer produces with an explicit code-point comparator. Two
- * writers disagreeing about that produce two byte-different blocks for one comparison, which is
- * exactly what "canonical" exists to stop. The shared fixture's `astral-override-keys` case is this
- * function's reason to exist and the thing that catches its absence.
+ * Compare by code point, unlike `Array.prototype.sort` (UTF-16 code units), which orders astral
+ * keys before high-BMP ones, unlike the Kotlin writer. Covered by the shared fixture's
+ * `astral-override-keys` case.
  */
 function compareCodePoints(a: string, b: string): number {
     const left = [...a];
@@ -223,11 +174,8 @@ export function canonicalOverrides(
 }
 
 /**
- * The block for one comparison, newline-terminated, byte for byte what
- * `ServeIssueReport.locatorBlock` writes for the same fields.
- *
- * Field ORDER is part of the format, not a style: the block is compared without being parsed, so a
- * reordered one is a different record for the same comparison.
+ * The block for one comparison, newline-terminated, byte-identical to
+ * `ServeIssueReport.locatorBlock`. Field order is part of the format: blocks are compared unparsed.
  */
 export function locatorBlock(locator: Locator): string {
     let out = "```" + LOCATOR_FENCE + "\n";
@@ -248,11 +196,8 @@ export function locatorBlock(locator: Locator): string {
 }
 
 /**
- * The axis segments a preview id already encodes, which is the `variant:` line.
- *
- * Ported from `ServeIssueReport.variantFor`, and deliberately the same one-liner: the value is the
- * preview id's own tail with its separator swapped, so there is nothing here to get subtly right
- * beyond not inventing a second rule for it.
+ * The `variant:` line: the preview id's tail with its separator swapped, ported from
+ * `ServeIssueReport.variantFor`.
  */
 export function variantOf(previewId: string): string {
     const at = previewId.indexOf("__");
@@ -266,37 +211,24 @@ export function variantOf(previewId: string): string {
 
 /**
  * [template] with its `{{locators}}` line replaced by [blocks], or removed when there are none.
- *
- * Whole-line matching and whole-line consumption, exactly as [fillSelection] does it and for the
- * same reason: the line has to equal the placeholder, so a locator value that merely ends with the
- * placeholder text cannot be rewritten instead. Removing the line reproduces byte for byte the body
- * a server with nothing to fill writes on its own, which is what a report filed with no rows ticked
- * must be.
+ * Whole-line matching as in [fillSelection]; removal reproduces the server's body with nothing to
+ * fill.
  */
 export function fillLocators(template: string, blocks: string[]): string {
     const lines = template.split("\n");
     const at = lines.indexOf(LOCATORS_PLACEHOLDER);
     if (at < 0) return template;
-    // A blank line ahead of the first fence, written HERE rather than by the server: the server's
-    // own line has no separator before it, so that a body with nothing ticked is the body it writes
-    // without this placeholder at all.
+    // The blank line before the first fence is written here, so an empty selection matches the
+    // server's body exactly.
     const filled = blocks.length ? "\n" + blocks.join("") : "";
     lines.splice(at, 1, ...(filled ? filled.split("\n").slice(0, -1) : []));
     return lines.join("\n");
 }
 
 /**
- * [body] with every `compose-parity-locator/v1` block removed, and the blank line that separated it.
- *
- * For a page that has a locator in its template but must not file one right now — the viewer in an
- * interactive lane, where the stage's pixels are painted by a canvas or an iframe that
- * `data-cp-src` knows nothing about. Removing the block leaves an ordinary report: still filed,
- * still labelled, simply not joined to a comparison it cannot honestly name.
- *
- * Line-oriented, and it removes the SEPARATOR too, so the result is the body a server with no
- * locator to write produces on its own. Leaving the blank line behind would be harmless to a reader
- * and is still worth not doing: the two bodies being byte-identical is what makes "no locator" one
- * state rather than two.
+ * [body] with every `compose-parity-locator/v1` block and its separating blank line removed, for a
+ * page that must not file a locator now (an interactive lane, whose pixels `data-cp-src` doesn't
+ * describe). The result is byte-identical to a body written without a locator.
  */
 export function withoutLocators(body: string): string {
     const lines = body.split("\n");
