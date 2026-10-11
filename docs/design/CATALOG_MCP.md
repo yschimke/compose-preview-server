@@ -124,8 +124,11 @@ carry no arguments to put a token in; a client that needs those on a token-gated
 header, or the OAuth flow below.
 
 This is also the recovery path when a token stops working mid-task. Grants live in memory
-(`ServeAgentGrantStore`: *"a restart drops every request and every grant"*), so a redeploy of the
-host invalidates every bearer regardless of its remaining TTL. A client that meets a sudden 401 asks
+(`ServeAgentGrantStore`: *"a restart drops every grant and its bearer"*), so a redeploy of the
+host invalidates every bearer regardless of its remaining TTL. A `request_access` still pending, or
+approved but not yet collected, does survive it — its hashed device secret and the approval
+decision are on disk, never a token — so `poll_access` simply carries on
+([AGENT_ACCESS_GRANTS.md](AGENT_ACCESS_GRANTS.md#lifetime-revocation-blast-radius)). A client that meets a sudden 401 asks
 for a new grant the same way it asked for the first, provided the tool connection still works.
 An app host's **connection expired** notice blocks delivery before the tool runs and needs the
 host's reconnect action. If the authorization browser says `Unknown client_id`, remove/disconnect

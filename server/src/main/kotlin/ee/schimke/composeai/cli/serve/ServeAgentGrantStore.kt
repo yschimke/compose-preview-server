@@ -3,6 +3,9 @@ package ee.schimke.composeai.cli.serve
 import ee.schimke.composeai.agentgrants.AgentGrantCapability
 import ee.schimke.composeai.agentgrants.AgentGrantProtocol
 import ee.schimke.composeai.agentgrants.AgentGrantScope
+import java.nio.file.Files
+import java.nio.file.Path
+import java.security.MessageDigest
 import java.security.SecureRandom
 import java.util.Base64
 import java.util.concurrent.ConcurrentHashMap
@@ -18,8 +21,13 @@ import javax.crypto.spec.SecretKeySpec
  * only the requesting agent holds. The token goes to whoever presents the secret, never whoever
  * opens the link, so the link is safe to paste in chat.
  *
- * Nothing is persisted: a restart drops every request and grant, which suits a short-lived,
- * revocable credential.
+ * Grants live in memory only: a restart drops every grant and its bearer, which suits a
+ * short-lived, revocable credential. Requests are different — a person slow to approve should not
+ * have to start over because the server was redeployed — so with a [requestsFile] the unresolved
+ * and the approved-but-uncollected ones are written there ([ServeAgentGrantRequestFile]): the
+ * request with its device secret hashed, and for an approval the *decision*, never a token. A grant
+ * whose approval survived a restart is minted when its requester collects it ([Poll.Approved]), its
+ * lifetime counted from the approval. Without a file (tests, a local server) nothing touches disk.
  */
 class ServeAgentGrantStore(
   /** How long an unopened link stays approvable. Short — a request is a live conversation. */
@@ -52,6 +60,11 @@ class ServeAgentGrantStore(
    * fingerprint, never the token. No-op by default.
    */
   private val audit: (String) -> Unit = {},
+  /**
+   * Where requests survive a restart, or null to keep them in memory only. See
+   * [defaultRequestsFile].
+   */
+  requestsFile: Path? = null,
 ) {
 
   /** A request waiting for a human, or already resolved by one. */
@@ -59,8 +72,9 @@ class ServeAgentGrantStore(
     /** Public handle. Appears in the approval link and nowhere sensitive. */
     val id: String,
     /**
-     * The agent's half, presented on `/agent-access/poll` and compared constant-time. Never
-     * rendered, logged or put in a URL.
+     * The agent's half, handed back once by [openRequest]. Never rendered, logged, put in a URL or
+     * written to disk; blank for a request reloaded after a restart, which knows only
+     * [deviceSecretHash].
      */
     val deviceSecret: String,
     /**
@@ -90,6 +104,11 @@ class ServeAgentGrantStore(
     val designIds: Set<String> = emptySet(),
     val createdAtMillis: Long,
     val expiresAtMillis: Long,
+    /**
+     * SHA-256 of [deviceSecret]; what a poll is compared against (constant-time), and the only form
+     * of the secret that is persisted.
+     */
+    val deviceSecretHash: String = ServeAgentGrantStore.secretHash(deviceSecret),
     @Volatile var state: State = State.PENDING,
     /** Set exactly once, when [State.APPROVED] — the token the poller collects. */
     @Volatile var grantId: String? = null,
@@ -101,6 +120,11 @@ class ServeAgentGrantStore(
      * trigger: a lost response must be retriable, so expiry follows the grant's life ([purge]).
      */
     @Volatile var collected: Boolean = false,
+    /**
+     * What the approver decided, set with [State.APPROVED]. After a restart it is all that is left
+     * of an uncollected approval, and the grant is minted from it at collection.
+     */
+    @Volatile var approval: Approval? = null,
   ) {
     enum class State {
       PENDING,
@@ -115,6 +139,18 @@ class ServeAgentGrantStore(
 
     override fun hashCode(): Int = id.hashCode()
   }
+
+  /** An approval decision: the grant it stands for, without the bearer. */
+  data class Approval(
+    val approvedBy: String,
+    val approvedByActorId: String,
+    val scope: AgentGrantScope,
+    val capabilities: Set<AgentGrantCapability>,
+    val designIds: Set<String>,
+    val approvedAtMillis: Long,
+    /** The grant's expiry, fixed at approval: collecting later never extends it. */
+    val expiresAtMillis: Long,
+  )
 
   /** A live grant: a bearer token, what it may do, until when, and who said so. */
   data class Grant(
@@ -204,6 +240,12 @@ class ServeAgentGrantStore(
   /** Grant-specific path credential for opaque private-Wasm iframe subresources. */
   private val byWasmCredential = ConcurrentHashMap<String, String>()
 
+  private val disk = requestsFile?.let { ServeAgentGrantRequestFile(it, clock) }
+
+  init {
+    disk?.all()?.values?.forEach { record -> record.toRequest()?.let { requests[it.id] = it } }
+  }
+
   // ---------------------------------------------------------------- requests
 
   /**
@@ -280,6 +322,7 @@ class ServeAgentGrantStore(
         expiresAtMillis = now + requestTtlSeconds * 1000,
       )
     requests[request.id] = request
+    persist(request)
     return request
   }
 
@@ -288,6 +331,7 @@ class ServeAgentGrantStore(
     val key = id?.takeIf { isWellFormedId(it) } ?: return null
     val now = clock()
     purge(now)
+    syncFromDisk(key)
     // An approved, uncollected request stays reachable past its deadline until [purge] decides; a
     // pending one expires exactly on time.
     return requests[key]?.takeIf {
@@ -320,7 +364,7 @@ class ServeAgentGrantStore(
       // can't detach the request mid-approval.
       val request = request(id) ?: return null
       when (request.state) {
-        Request.State.APPROVED -> return request.grantId?.let { grants[it] }
+        Request.State.APPROVED -> return grantFor(request, clock())
         Request.State.DENIED -> return null
         Request.State.PENDING -> Unit
       }
@@ -334,28 +378,32 @@ class ServeAgentGrantStore(
       val grantedCapabilities =
         capabilities intersect request.requestedCapabilities intersect maxCapabilities
       val ttl = ttlSeconds.coerceIn(1, minOf(request.requestedTtlSeconds, maxGrantTtlSeconds))
-      val grant =
-        Grant(
-          id = mintId(),
-          token = mintToken(),
-          scope = granted,
-          capabilities = grantedCapabilities,
-          label = request.label,
+      val approval =
+        Approval(
           approvedBy = approvedBy,
           approvedByActorId = approvedByActorId,
-          requesterActorId = request.requesterActorId,
+          scope = granted,
+          capabilities = grantedCapabilities,
           designIds = if (limitToRequestedDesigns) request.designIds else emptySet(),
-          issuedAtMillis = now,
+          approvedAtMillis = now,
           expiresAtMillis = now + ttl * 1000,
         )
-      grants[grant.id] = grant
-      byToken[grant.token] = grant.id
-      byBrowserCredential[browserCredentialValue(grant.token)] = grant.id
-      byWasmCredential[wasmCredentialValue(grant.token)] = grant.id
+      val grant = grantFrom(request, approval)
+      register(grant)
       // Data before the flag that says it is there; [poll]'s lock is the main guarantee.
       request.grantId = grant.id
+      request.approval = approval
       request.resolvedBy = approvedBy
       request.state = Request.State.APPROVED
+      if (request.requesterActorId.isBlank()) {
+        // The decision, not the grant: a restart before collection mints a fresh bearer from it.
+        persist(request)
+      } else {
+        // A person's own request is carried by their session ([activeGrantForRequester]), never
+        // polled: it is collected the moment it is approved, so it lives exactly as long as a
+        // grant.
+        disk?.delete(listOf(request.id))
+      }
       audit(
         "agent-grant: minted ${grant.fingerprint} scope=${granted.wire} " +
           capabilityAuditField(grantedCapabilities) +
@@ -374,6 +422,7 @@ class ServeAgentGrantStore(
       if (request.state != Request.State.PENDING) return false
       request.state = Request.State.DENIED
       request.resolvedBy = deniedBy
+      persist(request)
       audit("agent-grant: denied request by $deniedBy label=\"${request.label}\"")
       return true
     }
@@ -393,15 +442,22 @@ class ServeAgentGrantStore(
    */
   private fun pollLocked(id: String?, deviceSecret: String?): Poll {
     val request = request(id) ?: return Poll.Unknown
-    if (!ServeUrls.tokensMatch(request.deviceSecret, deviceSecret)) return Poll.Unknown
+    // Hashes on both sides: a reloaded request knows only the hash.
+    if (!ServeUrls.tokensMatch(request.deviceSecretHash, deviceSecret?.let(::secretHash))) {
+      return Poll.Unknown
+    }
     return when (request.state) {
       Request.State.PENDING -> Poll.Pending(request.secondsUntilExpiry(clock()))
       Request.State.DENIED -> Poll.Denied(request.resolvedBy)
       Request.State.APPROVED -> {
         // The grant may have been revoked or expired since approval; say so rather than return a
-        // dead token.
-        val grant = request.grantId?.let { grant(it) } ?: return Poll.Expired
-        request.collected = true
+        // dead token. An approval reloaded after a restart mints its grant here.
+        val grant = grantFor(request, clock()) ?: return Poll.Expired
+        if (!request.collected) {
+          request.collected = true
+          // Collected: the bearer is out, and a later restart must not mint a second one.
+          disk?.delete(listOf(request.id))
+        }
         Poll.Approved(grant)
       }
     }
@@ -588,6 +644,8 @@ class ServeAgentGrantStore(
     byToken.remove(grant.token)
     byBrowserCredential.remove(browserCredentialValue(grant.token))
     byWasmCredential.remove(wasmCredentialValue(grant.token))
+    // An uncollected approval of it must not be minted again after a restart.
+    disk?.delete(requests.values.filter { it.grantId == id }.map { it.id })
     audit("agent-grant: revoked ${grant.fingerprint} by $by label=\"${grant.label}\"")
     return true
   }
@@ -614,13 +672,155 @@ class ServeAgentGrantStore(
       .sortedBy { it.expiresAtMillis }
   }
 
-  /** True when the grant a request minted is expired or revoked, so the record owes nobody. */
+  /**
+   * True when the grant a request minted is expired or revoked, so the record owes nobody. An
+   * approval reloaded after a restart, not yet minted, is owed until its grant would expire.
+   */
   private fun grantIsGone(request: Request, nowMillis: Long): Boolean {
-    val grant = request.grantId?.let { grants[it] } ?: return true
+    val grantId =
+      request.grantId ?: return (request.approval?.expiresAtMillis ?: return true) <= nowMillis
+    val grant = grants[grantId] ?: return true
     return grant.expiresAtMillis <= nowMillis
   }
 
-  /** Drop everything — server shutdown, and the tests' reset. */
+  /**
+   * [request]'s grant: the one already minted, or — for an approval that outlived a restart — one
+   * minted now from the decision, its lifetime still counted from the approval. Null when the grant
+   * is revoked, expired, or there is no approval.
+   */
+  private fun grantFor(request: Request, nowMillis: Long): Grant? {
+    request.grantId?.let {
+      return grant(it)
+    }
+    val approval = request.approval ?: return null
+    if (approval.expiresAtMillis <= nowMillis) return null
+    val grant = grantFrom(request, approval)
+    register(grant)
+    request.grantId = grant.id
+    audit(
+      "agent-grant: minted ${grant.fingerprint} scope=${grant.scope.wire} " +
+        capabilityAuditField(grant.capabilities) +
+        designAuditField(grant.designIds) +
+        "from an approval made before a restart, expires in " +
+        "${grant.secondsUntilExpiry(nowMillis)}s approver=${grant.approvedBy} " +
+        "label=\"${grant.label}\""
+    )
+    return grant
+  }
+
+  private fun grantFrom(request: Request, approval: Approval): Grant =
+    Grant(
+      id = mintId(),
+      token = mintToken(),
+      scope = approval.scope,
+      capabilities = approval.capabilities,
+      label = request.label,
+      approvedBy = approval.approvedBy,
+      approvedByActorId = approval.approvedByActorId,
+      requesterActorId = request.requesterActorId,
+      designIds = approval.designIds,
+      issuedAtMillis = approval.approvedAtMillis,
+      expiresAtMillis = approval.expiresAtMillis,
+    )
+
+  private fun register(grant: Grant) {
+    grants[grant.id] = grant
+    byToken[grant.token] = grant.id
+    byBrowserCredential[browserCredentialValue(grant.token)] = grant.id
+    byWasmCredential[wasmCredentialValue(grant.token)] = grant.id
+  }
+
+  /** Write [request] as it now stands; a no-op without a [requestsFile]. */
+  private fun persist(request: Request) {
+    disk?.upsert(request.toRecord())
+  }
+
+  /**
+   * Adopt what another process wrote about [id] — the old and new servers overlap during a deploy,
+   * and a request opened or resolved on the old one must not read as unknown on the new. Only an
+   * unknown or still-pending request is refreshed; anything this process resolved is its own.
+   */
+  private fun syncFromDisk(id: String) {
+    val disk = disk ?: return
+    val memory = requests[id]
+    if (memory != null && memory.state != Request.State.PENDING) return
+    val record = disk.all()[id] ?: return
+    if (memory != null && record.state == PENDING_WIRE) return
+    record.toRequest()?.let { requests[id] = it }
+  }
+
+  private fun Request.toRecord(): ServeAgentGrantRequestFile.Record =
+    ServeAgentGrantRequestFile.Record(
+      id = id,
+      deviceSecretSha256 = deviceSecretHash,
+      userCode = userCode,
+      label = label,
+      client = client,
+      requestedScope = requestedScope.wire,
+      requestedTtlSeconds = requestedTtlSeconds,
+      requestedCapabilities = AgentGrantCapability.wireNames(requestedCapabilities).toList(),
+      requesterActorId = requesterActorId,
+      designIds = designIds.sorted(),
+      createdAtMillis = createdAtMillis,
+      expiresAtMillis = expiresAtMillis,
+      state = state.name.lowercase(),
+      resolvedBy = resolvedBy,
+      approval =
+        approval?.let {
+          ServeAgentGrantRequestFile.Approval(
+            approvedBy = it.approvedBy,
+            approvedByActorId = it.approvedByActorId,
+            scope = it.scope.wire,
+            capabilities = AgentGrantCapability.wireNames(it.capabilities).toList(),
+            designIds = it.designIds.sorted(),
+            approvedAtMillis = it.approvedAtMillis,
+            expiresAtMillis = it.expiresAtMillis,
+          )
+        },
+    )
+
+  /** Null for a row this version cannot read back faithfully; it is then simply not restored. */
+  private fun ServeAgentGrantRequestFile.Record.toRequest(): Request? {
+    if (!isWellFormedId(id)) return null
+    val restoredState =
+      Request.State.entries.firstOrNull { it.name.lowercase() == state } ?: return null
+    val scope = AgentGrantScope.parse(requestedScope) ?: return null
+    val approval = approval?.let {
+      Approval(
+        approvedBy = it.approvedBy,
+        approvedByActorId = it.approvedByActorId,
+        scope = AgentGrantScope.parse(it.scope) ?: return null,
+        capabilities = it.capabilities.mapNotNull(AgentGrantCapability::parse).toSet(),
+        designIds = it.designIds.toSet(),
+        approvedAtMillis = it.approvedAtMillis,
+        expiresAtMillis = it.expiresAtMillis,
+      )
+    }
+    if ((restoredState == Request.State.APPROVED) != (approval != null)) return null
+    return Request(
+      id = id,
+      deviceSecret = "",
+      userCode = userCode,
+      label = sanitizeLabel(label),
+      client = sanitizeLabel(client),
+      requestedScope = scope,
+      requestedTtlSeconds = requestedTtlSeconds,
+      requestedCapabilities = requestedCapabilities.mapNotNull(AgentGrantCapability::parse).toSet(),
+      requesterActorId = requesterActorId,
+      designIds = designIds.filter(::isWellFormedDesignId).toSet(),
+      createdAtMillis = createdAtMillis,
+      expiresAtMillis = expiresAtMillis,
+      deviceSecretHash = deviceSecretSha256,
+      state = restoredState,
+      resolvedBy = resolvedBy,
+      approval = approval,
+    )
+  }
+
+  /**
+   * Drop everything held in memory — the tests' reset. The [requestsFile] is left alone: it exists
+   * to outlive this process.
+   */
   fun clear() {
     requests.clear()
     grants.clear()
@@ -720,6 +920,34 @@ class ServeAgentGrantStore(
      */
     private fun Char.isInvisibleFormat(): Boolean =
       Character.getType(this) == Character.FORMAT.toInt()
+
+    private const val PENDING_WIRE = "pending"
+
+    /** Base64url SHA-256 of a device secret: how it is compared and how it is persisted. */
+    internal fun secretHash(secret: String): String =
+      Base64.getUrlEncoder()
+        .withoutPadding()
+        .encodeToString(
+          MessageDigest.getInstance("SHA-256").digest(secret.toByteArray(Charsets.UTF_8))
+        )
+
+    /**
+     * `mcp-oauth/agent-access-requests.json` beside the catalogs file, next to the OAuth client
+     * registry ([ServeMcpOAuthClients.defaultFile]) on the deploy's config volume. Null — requests
+     * in memory only — without a catalogs file or when its directory is not writable; unlike the
+     * client registry there is no home-directory fallback, so a local server writes nothing.
+     */
+    fun defaultRequestsFile(catalogsFile: Path?): Path? {
+      val root = catalogsFile?.toAbsolutePath()?.normalize()?.parent ?: return null
+      val candidate = root.resolve("mcp-oauth/agent-access-requests.json")
+      val state = candidate.parent
+      return candidate.takeIf {
+        Files.isDirectory(root) &&
+          Files.isWritable(root) &&
+          (!Files.exists(state) || (Files.isDirectory(state) && Files.isWritable(state))) &&
+          (!Files.exists(candidate) || Files.isWritable(candidate))
+      }
+    }
 
     /** The bearer's prefix — greppable, and unmistakable for the operator's `--token`. */
     const val TOKEN_PREFIX = "cpat_"

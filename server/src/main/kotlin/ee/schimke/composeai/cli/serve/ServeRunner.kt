@@ -1941,6 +1941,10 @@ public class ServeRunner(
       maxActiveGrants = agentGrantMaxActive,
       // Audit trail for minted credentials; only token fingerprints are logged.
       audit = { line -> System.err.println("serve: $line") },
+      // Pending and approved-but-uncollected requests survive a redeploy on the config volume;
+      // grants and their bearers do not. In memory only without a writable catalogs directory.
+      requestsFile =
+        ServeAgentGrantStore.defaultRequestsFile(catalogsFilePath?.let(::File)?.toPath()),
     )
   }
 
