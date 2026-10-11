@@ -77,6 +77,67 @@ class UiBuilderDesignReviewUnitTest {
   }
 
   @Test
+  fun `a hard-coded colour on a theme role is checked in both themes, naming the one that fails`() {
+    // `#5F6368` on `surface` clears 4.5:1 against the light baseline (about 5.7:1) and falls to
+    // about 3.1:1 against the dark one: the title an author checked in light and shipped
+    // unreadable.
+    fun titleOnSurface(theme: ThemeV1) =
+      document(
+          "panel" to
+            DesignNodeV1(
+              id = "panel",
+              componentId = "layout/box",
+              modifiers = listOf(BackgroundModifierV1(ColorTokenValueV1("surface"), null)),
+              slots = mapOf("content" to listOf("title")),
+            ),
+          "title" to
+            DesignNodeV1(
+              id = "title",
+              componentId = "m3/text",
+              properties =
+                mapOf("text" to StringValueV1("Schedule"), "color" to ColorValueV1("#5F6368")),
+            ),
+        )
+        .let { it.copy(environment = it.environment.copy(theme = theme)) }
+
+    for (theme in listOf(ThemeV1.LIGHT, ThemeV1.DARK)) {
+      val finding = UiBuilderAccessibilityCheck.check(titleOnSurface(theme), emptyMap()).single()
+      assertEquals(UiBuilderAccessibilityCheck.CODE_CONTRAST, finding.code)
+      assertEquals("title", finding.nodeId)
+      assertEquals("color", finding.field)
+      assertEquals(SEVERITY_WARNING, finding.severity)
+      assertEquals("dark", finding.measured?.theme, "$theme: ${finding.message}")
+      assertTrue(finding.measured!!.ratio!! < 4.5, finding.message)
+      assertTrue(finding.message.contains("in the dark theme"), finding.message)
+      assertTrue(finding.message.contains("passes in the light theme"), finding.message)
+    }
+  }
+
+  @Test
+  fun `literal colours on a literal background are checked once, in the design's own theme`() {
+    val document =
+      document(
+        "panel" to
+          DesignNodeV1(
+            id = "panel",
+            componentId = "layout/box",
+            modifiers = listOf(BackgroundModifierV1(ColorValueV1("#FFFFFF"), null)),
+            slots = mapOf("content" to listOf("title")),
+          ),
+        "title" to
+          DesignNodeV1(
+            id = "title",
+            componentId = "m3/text",
+            properties =
+              mapOf("text" to StringValueV1("Schedule"), "color" to ColorValueV1("#5F6368")),
+          ),
+      )
+    assertTrue(UiBuilderAccessibilityCheck.check(document, emptyMap()).isEmpty())
+    val dark = document.copy(environment = document.environment.copy(theme = ThemeV1.DARK))
+    assertTrue(UiBuilderAccessibilityCheck.check(dark, emptyMap()).isEmpty())
+  }
+
+  @Test
   fun `a rendered box replaces the declared size`() {
     val document =
       document(

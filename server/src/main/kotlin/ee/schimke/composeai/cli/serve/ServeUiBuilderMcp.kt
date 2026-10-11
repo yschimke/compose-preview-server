@@ -4623,7 +4623,9 @@ class ServeUiBuilderMcp(
             "is about, so you can fix them with $APPLY and check again. `$RENDERED_ARGUMENT: true` " +
             "measures touch targets on a native render where the host has one (needs the " +
             "ui-builder-export capability). Contrast against theme roles is resolved with the " +
-            "Material 3 baseline scheme and reported as a warning, never an error. " +
+            "Material 3 baseline scheme, in both the light and the dark theme when a colour " +
+            "follows the theme (the finding names the theme that fails), and reported as a " +
+            "warning, never an error. " +
             "`$CHECK_GUIDELINES` runs only when named: a model judges the design against the " +
             "Android design guides (developer.android.com) for its platform and reports each " +
             "broken rule as a warning or note with its source. It uses this host's shared model " +

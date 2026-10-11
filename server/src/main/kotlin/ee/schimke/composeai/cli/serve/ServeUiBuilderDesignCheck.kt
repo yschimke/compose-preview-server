@@ -168,6 +168,15 @@ internal object UiBuilderAccessibilityCheck {
 
   // ── Contrast ──────────────────────────────────────────────────────────────────────────────────
 
+  /**
+   * Text or an icon against what is behind it, in the design's own theme and — when either colour
+   * follows the theme — in the other one as well.
+   *
+   * A theme role resolves differently in light and dark, so a pair that involves one can pass in
+   * the theme the author happens to be looking at and fail in the other: a hard-coded `#5F6368`
+   * title on a `surface` background reads at about 5.7:1 in light and 3.1:1 in dark. Literal
+   * colours on a literal background are the same pixels in both themes and are checked once.
+   */
   private fun contrastFindings(
     tree: Tree,
     node: DesignNodeV1,
@@ -176,46 +185,100 @@ internal object UiBuilderAccessibilityCheck {
     val isText = tree.isText(node)
     val isIcon = !isText && tree.hasTrait(node, TRAIT_ICON)
     if (!isText && !isIcon) return emptyList()
-    val dark = document.environment.theme == ThemeV1.DARK
+    val large = isIcon || isLargeText(node)
+    val required = if (large) 3.0 else 4.5
+    val ownDark = document.environment.theme == ThemeV1.DARK
+    val own = contrastIn(tree, node, document, ownDark) ?: return emptyList()
+    val other = if (own.followsTheme) contrastIn(tree, node, document, !ownDark) else null
+    val evaluated = listOfNotNull(own, other)
+    val failing = evaluated.filter { it.ratio < required }
+    if (failing.isEmpty()) return emptyList()
+    val worst = failing.minBy { it.ratio }
+    val approximate = evaluated.any { it.approximate }
+    val needs =
+      "${if (isIcon) "an icon" else if (large) "large text" else "text"} needs " +
+        "${required.toInt().let { if (it.toDouble() == required) "$it" else "$required" }}:1"
+    val passing = evaluated.firstOrNull { it.ratio >= required }
+    val measuredAs =
+      when {
+        other == null -> "a contrast of ${own.ratio.ratio()}:1 against `${own.backgroundNodeId}`"
+        passing == null ->
+          "a contrast of ${own.ratio.ratio()}:1 in the ${own.theme} theme and " +
+            "${other.ratio.ratio()}:1 in the ${other.theme} theme against " +
+            "`${own.backgroundNodeId}`"
+        else ->
+          "a contrast of ${worst.ratio.ratio()}:1 against `${worst.backgroundNodeId}` in the " +
+            "${worst.theme} theme; it passes in the ${passing.theme} theme " +
+            "(${passing.ratio.ratio()}:1), so the colours do not follow the theme together"
+      }
+    return listOf(
+      finding(
+        if (approximate) SEVERITY_WARNING else SEVERITY_ERROR,
+        CODE_CONTRAST,
+        "`${node.id}` has $measuredAs; $needs" +
+          (if (approximate)
+            " (theme roles resolved against the Material 3 baseline" +
+              (if (own.explicitField == null) ", text assumed to be `$DEFAULT_CONTENT_ROLE`"
+              else "") +
+              "; a custom or dynamic theme can differ)"
+          else "") +
+          (if (passing != null) ". Use a theme role for both colours, or a literal for both"
+          else ""),
+        node.id,
+        field = own.explicitField,
+        measured =
+          UiBuilderCheckMeasurementV1(
+            ratio = worst.ratio,
+            required = required,
+            theme = if (other != null) worst.theme else null,
+          ),
+      )
+    )
+  }
+
+  /** One theme's reading of a node's contrast. */
+  private class Contrast(
+    val theme: String,
+    val ratio: Double,
+    val backgroundNodeId: String,
+    val explicitField: String?,
+    /** A theme role was resolved, so the number is the baseline's, not the app's. */
+    val approximate: Boolean,
+    /** Either end changes with the theme, so the other theme is worth checking too. */
+    val followsTheme: Boolean,
+  )
+
+  private fun contrastIn(
+    tree: Tree,
+    node: DesignNodeV1,
+    document: DesignDocumentV1,
+    dark: Boolean,
+  ): Contrast? {
     val explicitForeground = FOREGROUND_PROPERTIES.firstNotNullOfOrNull { name ->
       node.properties[name]?.let { value -> resolveColor(value, dark)?.let { name to it } }
     }
-    val background = backgroundOf(tree, node, document, dark)
+    val background = backgroundOf(tree, node, document, dark) ?: return null
     val foreground =
       explicitForeground?.second
         ?: run {
           // A default content colour is only predictable against a plain background modifier: a
           // component with a container colour supplies its own matching content colour, which this
           // check cannot see.
-          if (background == null || background.source != BackgroundSource.MODIFIER) return@run null
+          if (background.source != BackgroundSource.MODIFIER) return@run null
           baselineScheme(dark).getValue(DEFAULT_CONTENT_ROLE)
         }
-        ?: return emptyList()
-    if (background == null) return emptyList()
-    val ratio = contrastRatio(foreground.argb, background.color.argb)
-    val large = isIcon || isLargeText(node)
-    val required = if (large) 3.0 else 4.5
-    if (ratio >= required) return emptyList()
-    val approximate = foreground.fromToken || background.color.fromToken
-    return listOf(
-      finding(
-        if (approximate) SEVERITY_WARNING else SEVERITY_ERROR,
-        CODE_CONTRAST,
-        "`${node.id}` has a contrast of ${"%.2f".format(ratio)}:1 against `${background.nodeId}`" +
-          "; ${if (isIcon) "an icon" else if (large) "large text" else "text"} needs " +
-          "${required.toInt().let { if (it.toDouble() == required) "$it" else "$required" }}:1" +
-          (if (approximate)
-            " (theme roles resolved against the Material 3 baseline" +
-              (if (explicitForeground == null) ", text assumed to be `$DEFAULT_CONTENT_ROLE`"
-              else "") +
-              "; a custom or dynamic theme can differ)"
-          else ""),
-        node.id,
-        field = explicitForeground?.first,
-        measured = UiBuilderCheckMeasurementV1(ratio = ratio, required = required),
-      )
+        ?: return null
+    return Contrast(
+      theme = if (dark) THEME_DARK else THEME_LIGHT,
+      ratio = contrastRatio(foreground.argb, background.color.argb),
+      backgroundNodeId = background.nodeId,
+      explicitField = explicitForeground?.first,
+      approximate = foreground.fromToken || background.color.fromToken,
+      followsTheme = foreground.themed || background.color.themed,
     )
   }
+
+  private fun Double.ratio(): String = "%.2f".format(this)
 
   private enum class BackgroundSource {
     MODIFIER,
@@ -267,7 +330,14 @@ internal object UiBuilderAccessibilityCheck {
   }
 
   /** A colour as opaque-or-not ARGB, and whether a theme role had to be resolved to get it. */
-  class Resolved(val argb: Long, val fromToken: Boolean) {
+  class Resolved(
+    val argb: Long,
+    val fromToken: Boolean,
+    /**
+     * Whether the theme decided this colour: a role, or a translucent colour over its background.
+     */
+    val themed: Boolean = fromToken,
+  ) {
     val alpha: Int
       get() = ((argb shr 24) and 0xff).toInt()
 
@@ -275,7 +345,7 @@ internal object UiBuilderAccessibilityCheck {
     fun overOpaque(dark: Boolean): Resolved {
       if (alpha == 0xff) return this
       val base = baselineScheme(dark).getValue("background").argb
-      return Resolved(composite(argb, base), fromToken)
+      return Resolved(composite(argb, base), fromToken, themed = true)
     }
   }
 
@@ -609,6 +679,8 @@ internal object UiBuilderAccessibilityCheck {
   private const val MAX_FONT_SCALE = 2.0
   private const val DEFAULT_LINE_HEIGHT_SP = 20.0
   private const val DEFAULT_CONTENT_ROLE = "onSurface"
+  private const val THEME_LIGHT = "light"
+  private const val THEME_DARK = "dark"
 
   /** What a finding names as the background when only the design environment supplied one. */
   private const val ENVIRONMENT_NODE = "environment.background"
@@ -701,6 +773,11 @@ internal data class UiBuilderCheckMeasurementV1(
   val ratio: Double? = null,
   val required: Double? = null,
   val unit: String? = null,
+  /**
+   * The theme a contrast was measured in (`light` or `dark`), when it was measured in both because
+   * a colour follows the theme; [ratio] is then the failing theme's.
+   */
+  val theme: String? = null,
 )
 
 @Serializable internal data class UiBuilderCheckSkippedV1(val check: String, val reason: String)
