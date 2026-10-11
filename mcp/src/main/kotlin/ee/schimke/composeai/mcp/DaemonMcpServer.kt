@@ -34,6 +34,7 @@ import ee.schimke.composeai.data.layoutinspector.SemanticsTarget
 import ee.schimke.composeai.data.layoutinspector.SemanticsTargets
 import ee.schimke.composeai.data.layoutinspector.TargetResolution
 import ee.schimke.composeai.data.render.pipeline.PreviewExtensionCommandCatalog
+import ee.schimke.composeai.guidelines.GuidelineCredentials
 import ee.schimke.composeai.io.SystemFileSystem
 import ee.schimke.composeai.mcp.protocol.CallToolResult
 import ee.schimke.composeai.mcp.protocol.ContentBlock
@@ -1310,8 +1311,8 @@ class DaemonMcpServer(
    */
   private val previewGuidelinesHost =
     object : PreviewGuidelinesMcp.Host {
-      override val openRouterKey: String?
-        get() = System.getenv(PreviewGuidelinesMcp.KEY_ENV)
+      override val openRouterKey: GuidelineCredentials.Resolved?
+        get() = GuidelineCredentials.openRouter { System.err.println("compose-preview-mcp: $it") }
 
       override fun resolve(ref: String): PreviewGuidelinesMcp.Resolved? {
         val uriString =
@@ -1324,6 +1325,7 @@ class DaemonMcpServer(
           uri.previewFqn,
           entry?.simpleName ?: uri.previewFqn,
           guidelineBuildDir(uri),
+          supervisor.project(uri.workspaceId)?.path,
         )
       }
 
