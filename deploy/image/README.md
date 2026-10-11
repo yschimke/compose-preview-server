@@ -1546,10 +1546,15 @@ hook's second route is what closes that:
   before the config was written: the hook answers `409` and the publish retries. A forced
   `rollout.sh` that finds the cross-container lock held waits for it rather than skipping.
 - **Proven, not assumed.** If the box still owes a restart after `RESTART_WAIT_SECONDS` (900), the
-  publish step fails. `--no-restart` (or `NO_RESTART=1`) writes the config and leaves the restart to
+  publish step fails. A read only counts as clean when the route answers a 200 JSON document with
+  `restartRequired: false` (a 404 route is skipped); errors, 5xx and unparseable replies keep the
+  wait going, so an admin-API outage fails the step instead of passing it. `--no-restart` (or `NO_RESTART=1`) writes the config and leaves the restart to
   you; with no `DEPLOY_HOOK_TOKEN` secret it warns and the config applies at the next image roll.
-- **Wiring:** the same `DEPLOY_HOOK_TOKEN` secret as the image publish. Off `preview.coo.ee`, set a
-  `DEPLOY_HOOK_RESTART_URL` repo variable to `https://<your-domain>/__hooks/restart`.
+- **`--prune` clears count too.** Deleting the editor pin, the `uiBuilder` block or the settings
+  because the committed file no longer declares them owes a restart exactly as writing them does.
+- **Wiring:** the same `DEPLOY_HOOK_TOKEN` secret as the image publish. The hook URL defaults to
+  `${DEPLOY_BASE_URL}/__hooks/restart`, so the box restarted is the box written; set a
+  `DEPLOY_HOOK_RESTART_URL` repo variable only when the hook lives somewhere else.
 
 **One-time step on an existing box.** The `hook` and `rollout` services run `deploy-hook.sh` and
 `rollout.sh` from the box's checkout of `deploy/image/` (bind-mounted at `/workspace`), which only a

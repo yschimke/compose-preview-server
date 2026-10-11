@@ -209,7 +209,22 @@ case "${method} ${path}" in
   "PUT /admin/ui-builder/config") body='{"restartRequired":true,"next":{"catalogs":["remote-m3"]}}' ;;
   "POST /__hooks/restart") [[ "$(count hook)" == 1 ]] && code=409 || code=202; body="" ;;
   "GET /admin/ui-builder/config") [[ "$(count owed)" -le 2 ]] && body='{"restartRequired":true}' || body='{"restartRequired":false}' ;;
+  # The other two status routes: readable and owing nothing, unless a test says how they fail.
+  "GET /admin/editor" | "GET /admin/settings")
+    case "${STUB_STATUS:-clean}" in
+      clean) body='{"restartRequired":false}' ;;
+      absent) code=404; body="not found" ;;
+      down) code=503; body="" ;;
+      fieldless) body='{}' ;;
+    esac
+    ;;
+  # Clearing startup-only config answers the same document as writing it.
+  "DELETE /admin/editor") body='{"pin":null,"restartRequired":true}' ;;
+  "DELETE /admin/ui-builder/config") body='{"restartRequired":true,"next":{"catalogs":[]}}' ;;
+  "DELETE /admin/settings") body='{"applied":[],"pending":["SERVE_UI_BUILDER_HOST"],"restartRequired":true}' ;;
   "GET /admin/catalogs") body='{"catalogs":[]}' ;;
+  "GET /status.json") body='{"config":{"catalogRegistries":[]}}' ;;
+  "GET /admin/trust") body='{"branches":[{"repo":"yschimke/compose-ai-tools","branch":"design-artifacts/*"}]}' ;;
 esac
 if [[ -n "${out}" ]]; then printf '%s' "${body}" > "${out}"; fi
 if [[ -n "${wfmt}" ]]; then
@@ -252,6 +267,61 @@ out="$(PATH="${work}/bin:${PATH}" STUB_STATE="${work}/state" \
   bash "${SCRIPT}" 2>&1; echo "exit=$?")"
 check "names why" "still owes a restart" "${out}"
 check "and exits non-zero" "exit=1" "${out}"
+
+sed -i 's/\[\[ "$(count owed)" -le 1000 \]\]/[[ "$(count owed)" -le 2 ]]/' "${work}/bin/curl"
+
+echo "a box without one of the status routes (404) can still be proven to serve"
+rm -f "${work}/state/"*
+out="$(PATH="${work}/bin:${PATH}" STUB_STATE="${work}/state" STUB_STATUS=absent \
+  BASE_URL=https://example.invalid ADMIN_TOKEN=admin DEPLOY_HOOK_TOKEN=hook \
+  DEPLOY_CONFIG_DIR="${work}/restart" SETTINGS_FILE=/nonexistent \
+  RESTART_POLL_SECONDS=0 RESTART_RETRY_SECONDS=0 RESTART_CONSECUTIVE=2 RESTART_WAIT_SECONDS=60 \
+  bash "${SCRIPT}" 2>&1; echo "exit=$?")"
+check "waits until the box no longer owes the restart" "the box serves the published config" "${out}"
+check "and exits zero" "exit=0" "${out}"
+
+for status in down fieldless; do
+  echo "status routes that cannot be read (${status}) never count as serving"
+  rm -f "${work}/state/"*
+  out="$(PATH="${work}/bin:${PATH}" STUB_STATE="${work}/state" STUB_STATUS="${status}" \
+    BASE_URL=https://example.invalid ADMIN_TOKEN=admin DEPLOY_HOOK_TOKEN=hook \
+    DEPLOY_CONFIG_DIR="${work}/restart" SETTINGS_FILE=/nonexistent \
+    RESTART_POLL_SECONDS=1 RESTART_RETRY_SECONDS=0 RESTART_CONSECUTIVE=2 RESTART_WAIT_SECONDS=5 \
+    bash "${SCRIPT}" 2>&1; echo "exit=$?")"
+  check_absent "does not report the config as serving" "the box serves the published config" "${out}"
+  check "names why" "could not be read" "${out}"
+  check "and exits non-zero" "exit=1" "${out}"
+done
+
+echo "--prune clearing startup-only config restarts the box like writing it does"
+mkdir -p "${work}/prune"
+cat > "${work}/prune/catalogs.json" <<'JSON'
+{ "catalogs": [], "sites": [] }
+JSON
+cat > "${work}/prune/producers.json" <<'JSON'
+{ "branches": [ { "repo": "yschimke/compose-ai-tools", "branch": "design-artifacts/*" } ] }
+JSON
+rm -f "${work}/state/"*
+out="$(PATH="${work}/bin:${PATH}" STUB_STATE="${work}/state" \
+  BASE_URL=https://example.invalid ADMIN_TOKEN=admin DEPLOY_HOOK_TOKEN=hook \
+  DEPLOY_CONFIG_DIR="${work}/prune" SETTINGS_FILE=/nonexistent \
+  RESTART_POLL_SECONDS=0 RESTART_RETRY_SECONDS=0 RESTART_CONSECUTIVE=2 RESTART_WAIT_SECONDS=60 \
+  bash "${SCRIPT}" --prune 2>&1; echo "exit=$?")"
+calls="$(cat "${work}/state/calls")"
+check "clears the editor pin" "DELETE /admin/editor" "${calls}"
+check "clears the UI-builder block" "DELETE /admin/ui-builder/config" "${calls}"
+check "clears the settings" "DELETE /admin/settings" "${calls}"
+check "names everything the deletes owe" "Restarting the box so editor ui-builder/config settings serves" "${out}"
+check "posts the restart hook" "POST /__hooks/restart Authorization: Bearer hook" "${calls}"
+check "waits until the box serves without them" "the box serves the published config" "${out}"
+check_absent "and reports no error" "::error::" "${out}"
+check "and exits zero" "exit=0" "${out}"
+echo "--prune --dry-run names the hook a clearing delete may need"
+out="$(BASE_URL=https://example.invalid ADMIN_TOKEN=unused DEPLOY_CONFIG_DIR="${work}/prune" \
+  SETTINGS_FILE=/nonexistent \
+  PRUNE_BOX_CATALOGS_JSON='{"catalogs":[]}' PRUNE_STATUS_JSON='{"config":{}}' \
+  bash "${SCRIPT}" --dry-run --prune 2>&1 || true)"
+check "names the restart hook" "POST /__hooks/restart" "${out}"
 
 if [[ "${failures}" -gt 0 ]]; then
   echo "${failures} check(s) failed"

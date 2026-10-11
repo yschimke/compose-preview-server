@@ -178,7 +178,8 @@ post() {
   return 0
 }
 
-# DELETE one admin path. Sets `last_delete` to ok | absent | refused.
+# DELETE one admin path. Sets `last_delete` to ok | absent | refused, and `last_delete_payload` to
+# the reply body (empty on a dry run).
 #
 # A 409 is NOT uniformly "it was already gone". `ServeCatalogAdmin.unregister` answers 409 for two
 # opposite situations: the catalog is not published here (benign — the POST below will create it),
@@ -190,6 +191,7 @@ post() {
 delete() {
   local path="$1" label="$2"
   last_delete=refused
+  last_delete_payload=""
   if [[ "${DRY_RUN}" == 1 ]]; then
     echo "DELETE ${path}"
     last_delete=ok
@@ -201,6 +203,7 @@ delete() {
     "${BASE_URL}${path}" 2>/dev/null || printf '\n000')
   code="${response##*$'\n'}"
   payload="${response%$'\n'*}"
+  last_delete_payload="${payload}"
   case "${code}" in
     200 | 201)
       echo "  ${label}: retired the stale registration"
@@ -588,6 +591,25 @@ while IFS= read -r site; do
   }
 done < <(jq -c '.sites // [] | .[]' "${CATALOGS_FILE}")
 
+# Clearing startup-only config under --prune owes a restart exactly as writing it does: the DELETEs
+# of /admin/editor, /admin/ui-builder/config and /admin/settings answer the same document as their
+# PUTs, `restartRequired` (settings: a non-empty `pending`) included. Without this, a prune that
+# clears one exits green with the removed config still serving until an unrelated rollout.
+# owe_restart_after_delete NAME → appends NAME to `restart_owed` when the last delete says so.
+owe_restart_after_delete() {
+  local name="$1"
+  if [[ "${DRY_RUN}" == 1 ]]; then
+    restart_candidate=1
+    return 0
+  fi
+  [[ "${last_delete}" == ok ]] || return 0
+  if [[ "$(printf '%s' "${last_delete_payload}" |
+    jq -r '(.restartRequired // false) or (((.pending // []) | length) > 0)' 2>/dev/null)" == true ]]; then
+    echo "::notice::${name} cleared — the box serves without it from its next restart."
+    restart_owed+=("${name}")
+  fi
+}
+
 # The UI-builder editor pin (#1035). `editor` in catalogs.json names the compose-ui-builder release
 # this box serves, by version and archive digest, so an editor fix ships as a config change instead
 # of a server release. PUT /admin/editor fetches and verifies the archive BEFORE writing the pin —
@@ -632,6 +654,7 @@ if [[ -n "${editor_pin}" ]]; then
 elif [[ "${PRUNE}" == 1 ]]; then
   echo "Clearing any UI-builder editor pin (catalogs.json declares none)"
   delete /admin/editor "editor pin" || true
+  owe_restart_after_delete editor
 fi
 
 # The UI builder's catalog settings: `uiBuilder` in catalogs.json, the replacement for the
@@ -677,6 +700,7 @@ if [[ -n "${ui_builder}" ]]; then
 elif [[ "${PRUNE}" == 1 ]]; then
   echo "Clearing any UI-builder catalog settings (catalogs.json declares none)"
   delete /admin/ui-builder/config "UI-builder settings" || true
+  owe_restart_after_delete ui-builder/config
 fi
 
 # The deployment's settings (deploy/image/SETTINGS.md, generated from ServeSettings.kt): every
@@ -722,6 +746,7 @@ if [[ -f "${SETTINGS_FILE}" ]]; then
 elif [[ "${PRUNE}" == 1 ]]; then
   echo "Clearing any deployment settings (${SETTINGS_FILE#"${REPO_ROOT}/"} does not exist)"
   delete /admin/settings "deployment settings" || true
+  owe_restart_after_delete settings
 fi
 
 if [[ "${groups_skipped}" == 1 ]]; then
@@ -751,16 +776,34 @@ if [[ "${DRY_RUN}" == 1 && "${restart_candidate}" == 1 ]] || [[ "${#restart_owed
   restart_needed=1
 fi
 
-restart_owes() { # restart_owes → 0 when any route still answers restartRequired (or pending)
-  local route answer
+# restart_owes → 0 when any route still answers restartRequired, or when the poll cannot tell: a
+# poll is clean (1) only when every route answered either 404 (a box without that route) or a 200
+# JSON document whose `restartRequired` is false, and at least one did the latter. Transport
+# errors, 401s, 5xx, empty and non-JSON bodies are inconclusive, never clean — otherwise an API
+# outage during the swap would count towards RESTART_CONSECUTIVE and report a restart nobody saw.
+# Sets `restart_poll` to owed | unreadable | clean, for the message if the wait runs out.
+restart_poll=clean
+restart_owes() {
+  local route response code answer owed readable=0
+  restart_poll=unreadable
   for route in /admin/editor /admin/ui-builder/config /admin/settings; do
-    answer=$(curl -sS -m 30 -H "${ADMIN_TOKEN_HEADER}: ${ADMIN_TOKEN}" \
-      "${BASE_URL}${route}" 2>/dev/null || true)
-    # 404 (a box without the route) and unreadable answers owe nothing that this can wait for.
-    if [[ "$(printf '%s' "${answer}" | jq -r '.restartRequired // false' 2>/dev/null)" == true ]]; then
-      return 0
-    fi
+    response=$(curl -sS -w $'\n%{http_code}' -m 30 -H "${ADMIN_TOKEN_HEADER}: ${ADMIN_TOKEN}" \
+      "${BASE_URL}${route}" 2>/dev/null || printf '\n000')
+    code="${response##*$'\n'}"
+    answer="${response%$'\n'*}"
+    [[ "${code}" == 404 ]] && continue
+    [[ "${code}" == 200 ]] || return 0
+    owed=$(printf '%s' "${answer}" |
+      jq -r 'if type == "object" and (.restartRequired | type) == "boolean" then .restartRequired else "unreadable" end' \
+        2>/dev/null || echo unreadable)
+    case "${owed}" in
+      false) readable=$((readable + 1)) ;;
+      true) restart_poll=owed; return 0 ;;
+      *) return 0 ;;
+    esac
   done
+  [[ "${readable}" -gt 0 ]] || return 0
+  restart_poll=clean
   return 1
 }
 
@@ -792,7 +835,11 @@ elif [[ "${restart_needed}" == 1 ]]; then
       while [[ "${clean}" -lt "${RESTART_CONSECUTIVE}" ]]; do
         if [[ "${waited}" -ge "${RESTART_WAIT_SECONDS}" ]]; then
           rejected=$((rejected + 1))
-          echo "::error::the box still owes a restart ${RESTART_WAIT_SECONDS}s after /__hooks/restart was accepted. A hook older than restarts answers ANY path with a plain rollout, which is a no-op without a new image — if the box's deploy/image predates deploy-hook.sh's restart route, update it once; otherwise check \`docker compose logs hook\` there."
+          if [[ "${restart_poll}" == unreadable ]]; then
+            echo "::error::the box's admin routes could not be read ${RESTART_WAIT_SECONDS}s after /__hooks/restart was accepted (an error, a non-200 or a reply without restartRequired) — the restart is unconfirmed."
+          else
+            echo "::error::the box still owes a restart ${RESTART_WAIT_SECONDS}s after /__hooks/restart was accepted. A hook older than restarts answers ANY path with a plain rollout, which is a no-op without a new image — if the box's deploy/image predates deploy-hook.sh's restart route, update it once; otherwise check \`docker compose logs hook\` there."
+          fi
           break
         fi
         sleep "${RESTART_POLL_SECONDS}"
