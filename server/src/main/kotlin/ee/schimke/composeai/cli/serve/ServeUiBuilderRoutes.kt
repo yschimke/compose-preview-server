@@ -61,37 +61,25 @@ internal fun Route.installUiBuilderRoutes(
   /** Stable server address for documents created through the REST transport. */
   serverOrigin: () -> String?,
   /**
-   * The native render lane, on a host that can compile. Null simply leaves the route out: a box
-   * with no playground bundle has no Kotlin compiler and no catalog classpath, and a route that
-   * always answers "unavailable" is worse than one a client can discover the absence of.
+   * The native render lane, on a host that can compile; null leaves the route out so clients
+   * discover its absence.
    */
   nativePreview: UiBuilderNativePreviewLane? = null,
   /** The inline Remote Compose capture lane, left out on a host that cannot compile — as above. */
   inlineCapture: UiBuilderInlineCaptureLane? = null,
   /**
-   * Sign-in state and the reason a write would be refused, for the identity endpoint. Supplied by
-   * the host, which knows the GitHub session and the allowlist; null details leave those fields
-   * out, and the editor behaves as it did before they existed.
+   * Sign-in state and why a write would be refused, for the identity endpoint, supplied by the
+   * host; null leaves those fields out.
    */
   identityDetails: (call: ApplicationCall, canWrite: Boolean) -> UiBuilderIdentityDetails? =
     { _, _ ->
       null
     },
   /**
-   * Turns the token a native render already minted into a live, streamed session, or null where
-   * this host cannot.
-   *
-   * The compile lane has always answered with `previewToken` and `previewUrl` — a `/pg/<token>`
-   * capability over the classes it just built — and the editor has always thrown them away and
-   * drawn the still. Redeeming here rather than making the browser follow the `/pg/` redirect and
-   * read a session id back out of its own address bar is the difference between a documented field
-   * and a client parsing a redirect: the editor is handed `{sessionId, previewId}` and opens
-   * `/{sessionId}/ws/{previewId}`, which is the same lane the viewer's Live toggle opens.
-   *
-   * Redeemed here rather than lazily on first socket because the native pane is open exactly when
-   * this route is called: a render nobody asked for is not one this lane produces. Null — and a
-   * redemption this host has no live backend for — leaves the payload's live fields absent, which
-   * the editor reads as "still only" and says so.
+   * Turns a native render's minted token into a live streamed session, or null where this host
+   * can't. Redeemed here (rather than the browser following the `/pg/` redirect) so the editor gets
+   * `{sessionId, previewId}` and opens `/{sessionId}/ws/{previewId}`, the viewer's Live lane. Null
+   * leaves the live fields absent, which the editor reads as still-only.
    */
   liveNativeSession: ((token: String, previewId: String) -> UiBuilderNativeLiveSession?)? = null,
   agentPresence: ServeUiBuilderAgentPresence? = null,
@@ -255,18 +243,10 @@ internal fun Route.installUiBuilderRoutes(
   }
 
   /**
-   * `GET` one design's document from its own URL: the read half of the `PUT` below.
-   *
-   * Before this route the document was readable only through MCP (`ui_builder_get_design`, which is
-   * what `compose-preview-server design get` calls), and `/mcp` is mounted only with
-   * `--agent-grants --catalog-mcp`. A caller holding the operator token on a plain `ui` server
-   * could create a design and export its pixels, but could not read back the JSON it had just
-   * written (compose-ui-builder#492). The body is the same document `ui_builder_get_design` returns
-   * under `snapshot.state.document`, so a file saved from either is the same file.
-   *
-   * `?revision=N` reads a retained revision, as on the export routes. A caller that may not read
-   * the design is answered 404, never 403: whether a design exists is not something its URL leaks.
-   * A public reader gets the document shaped as every other read shapes it for them.
+   * `GET` one design's document from its own URL, the read half of the `PUT` below; previously
+   * readable only via MCP (compose-ui-builder#492). Same document as `ui_builder_get_design`'s
+   * `snapshot.state.document`. `?revision=N` reads a retained revision. Unreadable designs answer
+   * 404, never 403, so existence doesn't leak.
    */
   get(UI_BUILDER_DESIGN_PATH) {
     call.response.headers.append(HttpHeaders.CacheControl, "no-store")
@@ -324,17 +304,9 @@ internal fun Route.installUiBuilderRoutes(
   }
 
   /**
-   * `PUT` one design into existence at its own URL.
-   *
-   * The envelope endpoint above already creates designs, and keeps doing so; this is the same
-   * command with the resource semantics a programmatic caller expects — the id is in the URL, the
-   * body is the document, and `If-None-Match: *` says out loud what the service has always done
-   * anyway: create, never overwrite. That precondition is required rather than assumed, so a client
-   * that meant `PUT`-as-replace is told it asked for something this design service does not offer
-   * instead of silently getting a create or a refusal it has to parse a message to explain.
-   *
-   * `201` carries `Location`, and the location is the editor permalink rather than this API path:
-   * the useful answer to "I made a design" is where a person can open it.
+   * `PUT` one design into existence at its own URL: the same create command with resource
+   * semantics. `If-None-Match: *` is required, so a client expecting replace is told this service
+   * never overwrites. `201` carries `Location` pointing at the editor permalink.
    */
   put(UI_BUILDER_DESIGN_PATH) {
     call.response.headers.append(HttpHeaders.CacheControl, "no-store")
@@ -389,10 +361,8 @@ internal fun Route.installUiBuilderRoutes(
       )
       return@put
     }
-    // `If-None-Match: *` is answered where the answer is known. The service reports a create onto
-    // an existing id as a bad request, indistinguishable in its code from a malformed one, so the
-    // precondition is evaluated as its own read first — and a create that still fails afterwards
-    // is the race between two of these, which is the same precondition failing a moment later.
+    // The service reports create-onto-existing as a generic bad request, so the precondition is
+    // checked with a read first; a later failure is the race between two creates.
     val existing = service.executeMapped(OpenDesignRequestV1(designId), actor)
     if (
       existing !is UiBuilderServiceResponse.Error ||
@@ -423,9 +393,8 @@ internal fun Route.installUiBuilderRoutes(
     val document = incoming.withServerHome(serverOrigin())
     when (val created = service.executeMapped(CreateDesignRequestV1(document), actor)) {
       is UiBuilderServiceResponse.Error -> {
-        // A bad request is the race with another create only when the design is there now. The
-        // service says "bad request" for every other refusal too — a design limit, a quota, a
-        // document its catalog does not validate — and those are not a failed precondition.
+        // A bad request is the race only if the design exists now; limits, quotas and invalid
+        // documents are also bad requests.
         val raced =
           created.error.code == ServiceErrorCodeV1.BAD_REQUEST &&
             (service.executeMapped(OpenDesignRequestV1(designId), actor)
@@ -442,13 +411,9 @@ internal fun Route.installUiBuilderRoutes(
 
   if (nativePreview != null) {
     /**
-     * One design, compiled and rendered by real Compose on this host.
-     *
-     * A plain POST rather than a protocol request for the same reason the device presets are a
-     * plain GET: the released `UiBuilderRequestV1` union has no native-render request, and adding
-     * one means releasing `ui-builder-protocol`. Gated on EXPORT rather than READ because it
-     * compiles and runs the Kotlin an export hands back — an actor that may not read that source
-     * may not run it.
+     * One design compiled and rendered by real Compose on this host. A plain POST because
+     * `UiBuilderRequestV1` has no native-render request. Gated on EXPORT, since it runs the
+     * exported Kotlin.
      */
     post(UI_BUILDER_NATIVE_PREVIEW_PATH) {
       call.response.headers.append(HttpHeaders.CacheControl, "no-store")
@@ -470,11 +435,8 @@ internal fun Route.installUiBuilderRoutes(
         call.respondText("a design id is required", status = HttpStatusCode.BadRequest)
         return@post
       }
-      // Which revision to render, from the query rather than the body so it reads like the export
-      // routes beside it. Absent means the current committed revision, which is what every caller
-      // sent before this existed. A pinned editor names one: without it this lane answers a
-      // historical page with a render of the head, and on a catalog whose Wasm canvas is only a
-      // stand-in that render is the *only* faithful picture the page has.
+      // Which revision to render, from the query like the export routes; absent means current. A
+      // pinned editor needs it, or a historical page would show a render of the head.
       val revisionParameter = call.request.queryParameters["revision"]
       val revision = revisionParameter?.toLongOrNull()
       if (revisionParameter != null && (revision == null || revision < 0)) {
@@ -484,9 +446,8 @@ internal fun Route.installUiBuilderRoutes(
         )
         return@post
       }
-      // Read through the service, as this actor, so the design's own access control decides
-      // whether there is anything to render. A lane that took the document from anywhere else
-      // would be a way to render a design you cannot open.
+      // Read through the service as this actor, so the design's access control decides whether
+      // there is anything to render.
       val mapping =
         UiBuilderProtocolMapper.toServiceCall(
           actor,
@@ -500,16 +461,9 @@ internal fun Route.installUiBuilderRoutes(
         return@post
       }
       val document = snapshot.snapshot.state.document
-      // Which host container to frame a widget in, from the body. Absent means the squircle, which
-      // is what every caller sent before this existed and what the editor's canvas opens on.
-      //
-      // Two different failures, deliberately answered differently. A body that does not *decode* —
-      // malformed JSON, or `hostShape` sent as something other than a string — is a client or
-      // protocol bug, and answering it with a valid-looking render in the default frame hides the
-      // bug behind a picture that looks right; that is a 400. A body that decodes and names a shape
-      // this host does not know is forward compatibility, not a bug — a newer editor naming a
-      // container this build predates — and falls back to the default, because the shape is a
-      // *view* and refusing over one leaves a pane empty where the honest answer is a frame.
+      // Widget host shape from the body; absent means the squircle. An undecodable body is a client
+      // bug (400); a decodable but unknown shape is forward compatibility and falls back to the
+      // default, since the shape is just a view.
       val requestBytes =
         withContext(Dispatchers.IO) {
           call.receiveStream().use { input -> input.readNBytes(MAX_UI_BUILDER_REQUEST_BYTES + 1) }
@@ -570,15 +524,9 @@ internal fun Route.installUiBuilderRoutes(
 
   if (inlineCapture != null) {
     /**
-     * One design's inline Remote Compose content, captured into the document it describes.
-     *
-     * A POST beside the native render and gated the same way, for the same two reasons: the
-     * released `UiBuilderRequestV1` union has no capture request, and this compiles and runs the
-     * Kotlin an export hands back — an actor that may not read that source may not run it.
-     *
-     * The node id is in the path rather than in a body because it is the thing being captured: a
-     * design holds any number of inline nodes and each is a separate document, so the URL names one
-     * the same way the design path names one design.
+     * One design's inline Remote Compose content captured into a document. A POST gated like the
+     * native render (no protocol request; runs exported Kotlin). The node id is in the path since
+     * each inline node is a separate document.
      */
     post(UI_BUILDER_INLINE_CAPTURE_PATH) {
       call.response.headers.append(HttpHeaders.CacheControl, "no-store")
@@ -652,13 +600,8 @@ internal fun Route.installUiBuilderRoutes(
   }
 
   /**
-   * Who the server decided this caller is.
-   *
-   * The browser editor cannot know its own actor id: it is derived from the operator token, the
-   * GitHub session or the presented agent grant, all of which live on the server side of the
-   * request. Without this the wasm host had to guess ("browser-user"), and every request it sent
-   * was rejected by the actor checks in this route and in `UiBuilderProtocolMapper`. Read-gated
-   * like the device presets, and a plain GET for the same reason: no new protocol request type.
+   * Who the server decided this caller is: the editor can't derive its actor id (it comes from the
+   * token, session or grant server-side). Read-gated, plain GET (no new protocol type).
    */
   get(UI_BUILDER_IDENTITY_PATH) {
     call.response.headers.append(HttpHeaders.CacheControl, "no-store")
@@ -666,9 +609,8 @@ internal fun Route.installUiBuilderRoutes(
       when (val decision = authorization.authorize(call, UiBuilderRouteCapability.READ)) {
         is UiBuilderAuthorizationDecision.Authorized -> decision.actorId
         UiBuilderAuthorizationDecision.Missing -> {
-          // Still a 401, and still one a bearer client understands — but with the way in, so a
-          // person who opened a private box's editor signed out is offered a sign-in rather than
-          // an editor that cannot start.
+          // Still a bearer-style 401, but carrying a sign-in route so a signed-out visitor is
+          // offered one.
           call.response.headers.append(HttpHeaders.WWWAuthenticate, "Bearer")
           call.respondText(
             UI_BUILDER_JSON.encodeToString(
@@ -707,13 +649,8 @@ internal fun Route.installUiBuilderRoutes(
   }
 
   /**
-   * The device frames the builder's Screen inspector offers.
-   *
-   * A plain GET rather than a protocol request because the payload is derived from a compile-time
-   * catalog, is identical for every actor, and adding a request type would mean releasing
-   * `ui-builder-protocol`. Read-gated all the same, so the editor's frame menu lives behind the
-   * same door as everything else it fetches — the browser sends cookies on a same-origin GET, so
-   * the wasm host needs no transport of its own.
+   * The device frames the Screen inspector offers. A plain GET (compile-time data, same for every
+   * actor, no protocol change), read-gated like everything else the editor fetches.
    */
   get(UI_BUILDER_DEVICE_PRESETS_PATH) {
     when (authorization.authorize(call, UiBuilderRouteCapability.READ)) {
@@ -814,10 +751,7 @@ internal fun ee.schimke.composeai.uibuilder.protocol.UiBuilderRequestV1.required
     is OpenDesignRequestV1,
     is GetDesignAccessRequestV1,
     is GetSnapshotRequestV1,
-    // A preview writes nothing: it answers what moving a design to another catalog would cost, and
-    // the service admits it on READ access. Classified WRITE while it was a stub that refused every
-    // caller, which made no difference then and would now lock a read-only caller out of the one
-    // answer a design the catalog outgrew can still give.
+    // A catalog-upgrade preview writes nothing, and the service admits it on READ.
     is PreviewCatalogUpgradeRequestV1,
     is GetDeltaRequestV1 -> UiBuilderRouteCapability.READ
     is ExportDesignRequestV1 -> UiBuilderRouteCapability.EXPORT
@@ -828,10 +762,8 @@ internal fun ee.schimke.composeai.uibuilder.protocol.UiBuilderRequestV1.required
   }
 
 /**
- * Run one protocol request through the mapper and the service, as this actor.
- *
- * The envelope route does this inline because it also has a request id to answer with. The resource
- * routes have no envelope, so they share this instead of repeating the mapping.
+ * Run one protocol request through the mapper and the service as this actor, for resource routes
+ * that have no envelope.
  */
 internal suspend fun UiBuilderServicePort.executeMapped(
   request: ee.schimke.composeai.uibuilder.protocol.UiBuilderRequestV1,
@@ -886,15 +818,13 @@ internal data class UiBuilderIdentityV1(
   val designVisibilitySupported: Boolean = true,
   val actorId: String,
   /**
-   * Whether a person (or an operator token) is behind this request, as opposed to the anonymous
-   * reader of a `--public` box. Absent from an older host.
+   * Whether a person or operator token is behind this request, rather than a `--public` anonymous
+   * reader. Absent from older hosts.
    */
   val signedIn: Boolean? = null,
   /**
-   * Whether this caller may create designs and apply edits here — asked of the same authorizer with
-   * the same capability the write routes demand, off the same call, so the editor and the server
-   * cannot disagree. A hint for what to offer, never a gate: every write is still authorized where
-   * it lands. Absent from an older host, which a client reads as "may write".
+   * Whether this caller may create and edit designs, from the same authorizer and capability as the
+   * write routes. A hint, never a gate; absent (older host) reads as "may write".
    */
   val canWrite: Boolean? = null,
   /** Why [canWrite] is false, in words the person can act on. */
@@ -903,10 +833,7 @@ internal data class UiBuilderIdentityV1(
   val signInUrl: String? = null,
 )
 
-/**
- * The 401 an unauthenticated identity request gets: still a refusal, but one that says where to
- * sign in, so the editor can offer that instead of failing to start.
- */
+/** The 401 for an unauthenticated identity request, saying where to sign in. */
 @kotlinx.serialization.Serializable
 internal data class UiBuilderIdentityRefusalV1(
   val schemaVersion: Int = 1,
@@ -964,49 +891,31 @@ internal data class NativePreviewResultV1(
   val imageBase64: String? = null,
   val taggedNodeIds: List<String> = emptyList(),
   /**
-   * Design node id → the box it drew, in the frame's own **render pixels**.
-   *
-   * A subset of [taggedNodeIds], never a rename of it: a node the render never placed — an
-   * off-screen row, a lazy slot that never composed — is tagged and has no rectangle, and saying so
-   * by omission is more honest than a zero-area box a client would draw. Empty where the render
-   * backend has no semantics producer, which costs the frame nothing.
+   * Design node id → drawn box in render pixels. A subset of [taggedNodeIds]: nodes never placed
+   * get no rectangle rather than a zero-area box. Empty without a semantics producer.
    */
   val nodeBounds: Map<String, NativePreviewNodeBoundsV1> = emptyMap(),
   /**
-   * Why there is no [imageBase64], in one sentence — a compiler error with its position, the
-   * compile lane's own exception, or "the renderer produced no frame". Null when a frame arrived.
-   *
-   * Named for the common case rather than renamed as it grew: a client keys off "is this null", and
-   * the field has carried a render-side reason since it started reporting one.
+   * Why there is no [imageBase64] (compiler error, compile exception, or no frame); null when a
+   * frame arrived. Name kept as the field grew.
    */
   val compileError: String? = null,
   /**
-   * What [imageBase64] draws differently from the design though it rendered, one sentence each —
-   * today a theme typeface drawn in the platform default face because this host does not have it
-   * installed (`TYPEFACE_SYSTEM_FONT_LOOKUP`). Empty when the frame is the design.
+   * How [imageBase64] differs from the design despite rendering, e.g. a typeface drawn in the
+   * default face (`TYPEFACE_SYSTEM_FONT_LOOKUP`). Empty when faithful.
    */
   val warnings: List<String> = emptyList(),
   /**
-   * Where to open the live stream for this render, or null when there is none.
-   *
-   * Absent on a host with no live backend, on a compile that minted no token, and on a redemption
-   * that found no daemon for the design's mode. A client that sees it draws the streamed,
-   * interactive frame; one that does not draws [imageBase64] and says the pane is a still.
+   * Where to open this render's live stream, or null (no live backend, no token, or no daemon for
+   * the mode); the client then draws the still.
    */
   val live: NativePreviewLiveV1? = null,
 )
 
 /**
- * Where this render can be streamed from, or null when it cannot be.
- *
- * Three ways to get null, and they are deliberately one answer to the editor rather than three: a
- * host with no Stage-2 redemption wired, a compile that minted no token (nothing to redeem), and a
- * redemption that found no daemon backend for the design's mode. All three mean "still only", the
- * editor draws the still and says so, and none of them is a failure worth a sentence — the pane
- * still has a picture of the design.
- *
- * Pulled out of the route so it can be tested without standing up ktor, a compiler and a catalog
- * bundle: what is worth pinning here is the gating, not the JSON.
+ * This render's stream coordinates, or null. No backend, no token and no daemon all mean "still
+ * only", which isn't an error. Extracted so the gating is testable without ktor, a compiler or a
+ * bundle.
  */
 internal fun nativePreviewLiveOf(
   response: PlaygroundRunResponse,
@@ -1020,11 +929,8 @@ internal fun nativePreviewLiveOf(
 }
 
 /**
- * The live lane's coordinates: the registered session and the preview inside it.
- *
- * Two fields rather than a URL because the client already knows how to build one — `/{sessionId}/
- * ws/{previewId}`, the path form the viewer uses — and a server-built absolute URL would have to
- * guess the scheme and the host behind whatever proxy is in front of this one.
+ * The registered session and preview; two fields rather than a URL, since a server-built absolute
+ * URL would have to guess the scheme and host behind a proxy.
  */
 @kotlinx.serialization.Serializable
 internal data class NativePreviewLiveV1(val sessionId: String, val previewId: String)
@@ -1033,10 +939,8 @@ internal data class NativePreviewLiveV1(val sessionId: String, val previewId: St
 data class UiBuilderNativeLiveSession(val sessionId: String, val previewId: String)
 
 /**
- * One node's rectangle on the native frame, in render pixels with the origin at its top-left.
- *
- * Its own type rather than `render-host`'s `AnnotationBounds`: this is a wire shape this repository
- * owns and versions with the payload around it, and the four fields are the whole of it.
+ * One node's rectangle on the native frame, in render pixels from the top-left. A wire type owned
+ * here, not `render-host`'s `AnnotationBounds`.
  */
 @kotlinx.serialization.Serializable
 internal data class NativePreviewNodeBoundsV1(
@@ -1050,13 +954,9 @@ private fun AnnotationBounds.toNodeBoundsV1() =
   NativePreviewNodeBoundsV1(x = x, y = y, width = width, height = height)
 
 /**
- * Where one inline node's captured Remote Compose document is served.
- *
- * [documentUrl] is the same shape a `remote-compose/document` node's own `documentUrl` carries — a
- * `/d/<id>` permalink this host serves — so a client plays it through the resolver it already has
- * rather than through a second path that happens to end in bytes. [functionName] names the
- * `@RemoteComposable` body these bytes were captured from, which is what lets a client say *which*
- * generated body produced them when a design holds several.
+ * Where one inline node's captured document is served: [documentUrl] is a `/d/<id>` permalink like
+ * a `remote-compose/document` node's, and [functionName] names the `@RemoteComposable` body it came
+ * from.
  */
 @kotlinx.serialization.Serializable
 internal data class InlineCaptureResultV1(
@@ -1077,12 +977,8 @@ internal data class InlineCaptureRefusalV1(
 )
 
 /**
- * What a native-render request may say, which is currently one thing.
- *
- * Its own type rather than a query parameter, because the shape is a property of what to draw
- * rather than of which design to read — the revision beside it names the design's version, and
- * mixing the two on one line reads like they are the same kind of choice. Every field optional, so
- * the `{}` the editor posted before this existed still parses.
+ * What a native-render request may say (currently the host shape). A body type because shape
+ * describes what to draw, not which version; all fields optional so `{}` still parses.
  */
 @kotlinx.serialization.Serializable
 internal data class NativePreviewRequestV1(val hostShape: String? = null)
@@ -1103,12 +999,9 @@ internal data class UiBuilderVisibilityPayload(
 )
 
 /**
- * Logs what the generic "UI-builder service failed" answer hides.
- *
- * The client is told only that the service failed, deliberately: an exception message can carry a
- * path or another design's content. But the operator was told nothing at all, so a design that
- * would not open left no trace on the box to start from. The stack goes to the process log, which
- * only the operator reads.
+ * Logs what the generic "UI-builder service failed" answer hides. The client gets no details
+ * (messages may carry paths or other designs' content); the stack goes to the operator's process
+ * log.
  */
 internal fun logUiBuilderServiceFailure(failure: Exception) {
   System.err.println(

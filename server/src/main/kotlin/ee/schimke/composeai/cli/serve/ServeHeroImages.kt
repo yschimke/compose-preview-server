@@ -17,21 +17,17 @@ import kotlin.math.min
 import kotlin.math.roundToInt
 
 /**
- * Prebaked thumbnails: the front door's hero cards ([heroFor]) and the catalog grid's component
- * cards ([gridThumbFor]), so a landing page does not lease a session and read a full-resolution
- * render per card.
+ * Prebaked thumbnails for the front door's hero cards ([heroFor]) and the catalog grid
+ * ([gridThumbFor]), so a landing page doesn't lease a session and read a full render per card.
  *
- * Heroes are cropped ([ContentCrop]) and downscaled to [DISPLAY_CAP] × [PIXEL_SCALE] at bake time
- * (never upscaled), named by a hash of their bytes so `/hero/` is served `immutable`, held in
- * memory, and persisted when a cache directory is configured. Baking happens off the request path
- * when a catalog host is first seen ([ServeHttpServer.rememberCatalogMeta]); a refresh installs a
- * new host and re-bakes.
+ * Heroes are cropped ([ContentCrop]) and downscaled to [DISPLAY_CAP] × [PIXEL_SCALE] (never
+ * upscaled), named by content hash so `/hero/` is `immutable`, held in memory and persisted when a
+ * cache dir is configured. Baked off the request path when a catalog host is first seen
+ * ([ServeHttpServer.rememberCatalogMeta]); a refresh re-bakes.
  *
- * Grid thumbnails differ in two ways:
- * - **The crop is not baked in.** The card is re-pointed at a full render when a theme is picked,
- *   so the crop stays the percentage-based CSS clip ([ServeWeb.thumbImg]); it only sets the scale.
- * - **Served through the render lane** as `/render/<id>.png?thumb=<hash>`
- *   ([ServeHttpServer.handleRender]), which exists under both `/<system>/` and a plain session.
+ * Grid thumbnails differ: the crop isn't baked in (cards switch to full renders on theme change, so
+ * the CSS clip remains, [ServeWeb.thumbImg]), and they are served through the render lane as
+ * `/render/<id>.png?thumb=<hash>` ([ServeHttpServer.handleRender]).
  */
 class ServeHeroImages(private val cacheDir: java.io.File? = null) {
 
@@ -56,10 +52,8 @@ class ServeHeroImages(private val cacheDir: java.io.File? = null) {
   }
 
   /**
-   * One baked catalog-grid thumbnail. Unlike a [Hero] it carries no layout size — the card's CSS
-   * (and, for a framed card, the clip window) sizes it exactly as it sized the full render — and no
-   * file name, because it is served from the render lane under its own preview id with [hash] as
-   * the cache-busting query param.
+   * One baked grid thumbnail: no layout size (CSS sizes it like the full render) and no file name
+   * (served under its preview id with [hash] as cache-buster).
    */
   data class Thumb(val bytes: ByteArray, val hash: String, val etag: String) {
     // See [Hero]: identity equality, for the same reason.
@@ -69,59 +63,39 @@ class ServeHeroImages(private val cacheDir: java.io.File? = null) {
   }
 
   /**
-   * Every hero baked in this process, keyed by [Hero.fileName]. The `/hero/` route resolves purely
-   * through this map, so a URL minted before a catalog refresh keeps serving the exact bytes it was
-   * hashed from instead of 404ing under an already-open tab. Heroes are a few kB each and bounded
-   * by the catalog count × refreshes, so nothing is evicted.
+   * Every hero baked in this process by [Hero.fileName]. `/hero/` resolves only through this map,
+   * so URLs from before a refresh keep serving their exact bytes. Small and bounded, so never
+   * evicted.
    */
   private val byFileName = ConcurrentHashMap<String, Hero>()
 
   /**
-   * Memo of the bake, per host **object** then per preview id — so the decode + scale runs once per
-   * catalog, and a refreshed catalog (which installs a fresh host) re-bakes. A bake that fails
-   * caches its failure too, so a corrupt PNG isn't retried on every hit.
-   *
-   * The outer map is a [java.util.WeakHashMap] keyed by the host itself, deliberately, rather than
-   * by something derived from it. A host has no stable id of its own, and the obvious stand-in —
-   * `System.identityHashCode` — is *not* unique: it can collide between live objects, and the JVM
-   * may hand a fresh object the value a collected one used to have. Either would let a republished
-   * catalog inherit the previous host's hero and serve stale front-door imagery indefinitely.
-   * Keying on the object gives true identity (these hosts don't override `equals`), and the weak
-   * key ties each entry's lifetime to its host, so a retired catalog's memo is collected with it
-   * instead of accumulating across refreshes. `WeakHashMap` isn't thread-safe, hence the lock —
-   * uncontended in practice, since it only guards resolving a host to its (concurrent) per-preview
-   * map, not the bake.
+   * Bake memo per host object, then per preview id, so each catalog bakes once and a refreshed host
+   * re-bakes; failures are cached too. A [java.util.WeakHashMap] keyed by the host itself:
+   * `identityHashCode` isn't unique and could let a republished catalog inherit stale heroes, while
+   * weak keys free retired catalogs' memos. Locked because `WeakHashMap` isn't thread-safe (only
+   * around resolving the per-host map).
    */
   private val baked = WeakHashMap<ServeHost, ConcurrentHashMap<String, Optional<Hero>>>()
 
   private val bakedLock = Any()
 
   /**
-   * The grid-thumbnail counterpart of [baked] — same weak-per-host, concurrent-per-preview shape
-   * and the same reasoning, kept separate because the two lanes bake the same preview differently
-   * (a hero has its crop in the pixels, a grid thumbnail does not).
-   *
-   * These are held only here, never in [byFileName]: a grid thumbnail's URL names its preview, so
-   * the render lane re-resolves it through this memo against the *current* host, and a retired
-   * catalog's few hundred thumbnails are collected with it. A hero, whose URL is the hash alone,
-   * has to stay resolvable after a refresh and so is retained; at ~40× the count per catalog,
-   * retaining grid thumbnails the same way would be a slow leak rather than a rounding error.
+   * Grid-thumbnail counterpart of [baked], kept separate because the lanes bake differently. Never
+   * added to [byFileName]: grid URLs name their preview and re-resolve against the current host, so
+   * retired catalogs' many thumbnails can be collected.
    */
   private val gridBaked = WeakHashMap<ServeHost, ConcurrentHashMap<String, Optional<Thumb>>>()
 
   private val gridLock = Any()
 
   /**
-   * The hero for [previewId] on [host], baking it on first sight. [crop] is the card's content-crop
-   * (baked into the pixels here, so the page needs no CSS clip window). Returns null when the host
-   * has no such render or the PNG can't be decoded — the caller then falls back to the plain
-   * `/render/` lane.
+   * The hero for [previewId] on [host], baked on first sight with [crop] in the pixels. Null when
+   * there's no render or it won't decode; the caller falls back to `/render/`.
    */
   fun heroFor(host: ServeHost, previewId: String, crop: ContentCrop?): Hero? {
     val perHost = synchronized(bakedLock) { baked.getOrPut(host) { ConcurrentHashMap() } }
-    // The bake itself runs outside the lock (it decodes and rescales a full render); worst case
-    // two callers racing the same cold catalog bake it twice and agree on the result, which is
-    // content-hashed and therefore identical.
+    // The bake runs outside the lock; racing callers produce identical content-hashed results.
     perHost[previewId]?.let {
       return it.orElse(null)
     }
@@ -134,18 +108,15 @@ class ServeHeroImages(private val cacheDir: java.io.File? = null) {
   private val cachedHeroes = ConcurrentHashMap<String, Hero>()
 
   /**
-   * Per cache key, the [Hero.fileName] last written to (or read from) [cacheDir]. Kept apart from
-   * [cachedHeroes], which is updated before the write, so a write that fails is retried by the next
-   * [remember] instead of being mistaken for one that landed.
+   * Per cache key, the [Hero.fileName] last persisted to [cacheDir], kept apart from [cachedHeroes]
+   * so a failed write is retried.
    */
   private val persistedFileNames = ConcurrentHashMap<String, String>()
 
   private fun cacheKey(config: CatalogLoadTracker.Config): String =
     sha256Hex("${config.system}\n${config.repo}\n${config.branch}".toByteArray())
 
-  /**
-   * Last successful thumbnail, scoped to the configured source, restored without a catalog host.
-   */
+  /** Last successful thumbnail for the configured source, restorable without a catalog host. */
   fun cached(config: CatalogLoadTracker.Config): Hero? {
     val key = cacheKey(config)
     cachedHeroes[key]?.let {
@@ -268,19 +239,14 @@ class ServeHeroImages(private val cacheDir: java.io.File? = null) {
   }
 
   /**
-   * Bake [png] into a hero: apply [crop] (if any) to the source pixels, scale the result down to at
-   * most [DISPLAY_CAP] × [PIXEL_SCALE] on its largest edge, re-encode as PNG, and register it under
-   * its content hash. Null when the bytes aren't a decodable image.
-   *
-   * Visible only for tests.
+   * Bake [png] into a hero: apply [crop], scale down to at most [DISPLAY_CAP] × [PIXEL_SCALE],
+   * re-encode and register by content hash. Null when undecodable. Visible for tests.
    */
   internal fun bake(png: ByteArray, crop: ContentCrop?): Hero? {
     val src = runCatching { ImageIO.read(ByteArrayInputStream(png)) }.getOrNull() ?: return null
     if (src.width <= 0 || src.height <= 0) return null
-    // A hero bakes its crop into the pixels, and a capture-gutter window is the one crop that must
-    // not be: the pixels it leaves outside the box are the component's shadow (see
-    // [ContentCrop.clip]). A hero is one image rather than a row to line up, so it keeps its whole
-    // canvas — the size comparison this window exists for does not arise there.
+    // A capture-gutter crop is never baked into a hero: the pixels outside its box are the
+    // component's shadow ([ContentCrop.clip]), and a hero keeps its whole canvas.
     val region = sourceRegion(src.width, src.height, crop?.takeIf { it.clip })
     // The CSS size is the region fitted into the card's cap (never upscaled) — the same size the
     // browser used to compute for itself. The baked raster is PIXEL_SCALE times that, so a 2×
@@ -365,9 +331,8 @@ class ServeHeroImages(private val cacheDir: java.io.File? = null) {
 
   companion object {
     /**
-     * Largest CSS edge a hero is laid out at — the card's own ceiling (`.cp-imgwrap img {
-     * max-height: 240px }`, and the [computeThumbCrop] cap a cropped thumbnail was already scaled
-     * to).
+     * Largest CSS edge a hero is laid out at (the card's `max-height: 240px`, and the
+     * [computeThumbCrop] cap).
      */
     const val DISPLAY_CAP = 240
 
@@ -381,9 +346,8 @@ class ServeHeroImages(private val cacheDir: java.io.File? = null) {
     const val PATH_PREFIX = "/hero"
 
     /**
-     * Query parameter carrying a grid thumbnail's [Thumb.hash] on the render lane. Present ⇒ the
-     * card wants the prebaked thumbnail; the hash makes the URL change when the pixels do, so the
-     * response can be `immutable`.
+     * Render-lane query parameter carrying a grid thumbnail's [Thumb.hash]; the hash changes with
+     * the pixels, so responses can be `immutable`.
      */
     const val THUMB_PARAM = "thumb"
 

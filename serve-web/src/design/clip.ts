@@ -1,22 +1,9 @@
-// What the design ACTUALLY painted for a node — the measured box, cut down by the clips that crop it.
-//
-// `getBoundingClientRect()` on an SVG element answers with the union of its descendants' geometry and
-// ignores `clip-path` entirely, which is the browser behaving to spec and not what "the box the
-// design drew" means. Figma exports lean on that difference: a shimmering placeholder is a small
-// container with a huge rotated gradient sweep inside it, and the sweep is kept inside the component
-// only by a `clip-path` on the group that holds it. Measured raw, that node's box came out 402×402
-// user units for a 52×52 button — so the slot the render was fitted into was ~7.7x too big, and our
-// circle landed on the page as a grey blob the size of a whole section (issue #4323).
-//
-// So the box is walked rather than read: children unioned, and each element's own clip intersected
-// in. Everything is in SCREEN coordinates, the same space `getBoundingClientRect()` answers in, so
-// the result drops straight into the placement that already existed. Clips ABOVE the node are
-// deliberately not applied — see `paintedRect`.
-//
-// DEGRADES TO THE RAW RECT. Every step that cannot be computed — a clip this doesn't understand
-// (`objectBoundingBox` units, a clip on the clip), a browser with no `getScreenCTM`, a shape with no
-// `getBBox` — contributes nothing rather than guessing, so the worst case is exactly the measurement
-// this replaced.
+// What the design actually painted for a node: the measured box cut down by the clips inside it.
+// `getBoundingClientRect()` on SVG ignores `clip-path`, so a Figma placeholder with a huge rotated
+// sweep clipped to a 52×52 button measures ~402×402 (see #4323). The box is walked instead:
+// children unioned, each element's own clip intersected, all in screen coordinates. Ancestor clips
+// are not applied (see `paintedRect`). Anything not computable (`objectBoundingBox` units, clip on
+// a clip, no `getScreenCTM`/`getBBox`) contributes nothing, so the worst case is the raw rect.
 
 import type { Box } from "./geometry.js";
 
@@ -58,10 +45,7 @@ export interface Geometry {
     attribute(element: Element, name: string): string | null;
 }
 
-/**
- * A guard against a pathological export rather than a real limit: the deepest node group in a Figma
- * page export is a handful of levels.
- */
+/** A guard against pathological exports, not a real limit. */
 const MAX_DEPTH = 24;
 
 /** Tags whose box is the union of their children's rather than geometry of their own. */
@@ -119,10 +103,8 @@ export function multiply(a: Matrix, b: Matrix): Matrix {
 }
 
 /**
- * A user-space box through a matrix, as the axis-aligned box holding its four mapped corners.
- *
- * All four, not the two opposite ones: a rotated sweep is exactly the shape this module exists for,
- * and mapping only `(x, y)` and `(x+w, y+h)` reports a rotated rectangle as a sliver.
+ * A user-space box through a matrix, as the bounding box of all four mapped corners (two corners
+ * turn a rotated rectangle into a sliver).
  */
 export function mapBox(box: UserBox, m: Matrix): Box {
     const xs: number[] = [];
@@ -184,12 +166,8 @@ export function clipRegion(element: Element, geo: Geometry): Box | null {
 }
 
 /**
- * Whether anything in this subtree is clipped at all.
- *
- * The walk below only pays for itself where a clip exists: with none, an element's own rect is
- * already the union of its children's, and reading it is ONE layout read against one per leaf. A
- * specimen sheet has hundreds of nodes and re-measures on every resize, so the fast path is the path
- * nearly every node takes.
+ * Whether anything in this subtree is clipped. Without clips an element's own rect is already the
+ * union of its children's, so this fast path avoids one layout read per leaf on resize.
  */
 export function clippedInside(
     element: Element,
@@ -223,10 +201,7 @@ function paintedBox(
         box = geo.rect(element);
     }
     if (!box) return null;
-    // A nested `<svg>` establishes a viewport, and content outside it is not painted. Reading the
-    // element's own rect used to bound the answer for free; walking its children does not, so the
-    // viewport is intersected back in — otherwise a clip somewhere inside a nested `<svg>` would
-    // trade one over-measure for another.
+    // A nested `<svg>` is a viewport that clips its content, so intersect it back in.
     if (geo.tag(element) === "svg" && children.length > 0) {
         const viewport = geo.rect(element);
         if (viewport) {
@@ -240,19 +215,10 @@ function paintedBox(
 }
 
 /**
- * The box the design actually paints for `element`, in screen coordinates.
- *
- * ITS OWN CLIPS ONLY — the ones inside the node. An ancestor's clip is deliberately NOT applied,
- * even though the pixels it hides are genuinely not on screen: this box is what the render is
- * FITTED to, and `fitInk` scales rather than crops. A component half outside the card it sits in
- * would come back as its visible sliver, and the swap would answer by squeezing the whole render
- * into that sliver — a shrunken component where the design shows a cropped one, which is a worse
- * lie than the crop. Cropping to an ancestor is a different feature (the render would have to be
- * clipped, not scaled) and it is not this one.
- *
- * Null when nothing is painted — every child clipped away, or an element with no measurable
- * geometry. Callers treat that the same way they treat a zero-area box: the node is missing as far
- * as the sheet is concerned.
+ * The box the design paints for `element`, in screen coordinates, applying only its own clips. An
+ * ancestor's clip is deliberately ignored: the render is fitted (scaled, not cropped) to this box,
+ * so a visible sliver would squeeze the whole render into it. Null when nothing is painted; callers
+ * treat it like a zero-area box.
  */
 export function paintedRect(element: Element, geo: Geometry): Box | null {
     return paintedBox(element, geo, MAX_DEPTH);

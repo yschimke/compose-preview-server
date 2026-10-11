@@ -17,12 +17,9 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 
 /**
- * One cache generation for a page, its verdict and the frame beside it (issue #4695).
- *
- * The fixture is the delivery-branch stub [ServePinnedRevisionTest] uses — a catalog whose tip and
- * whose previous publish serve *different* bytes for the same preview id — because that difference
- * is the whole subject. A test that could not tell the two publishes apart could not tell a coupled
- * page from an uncoupled one either.
+ * One cache generation for a page, its verdict and the frame beside it. Uses
+ * [ServePinnedRevisionTest]'s delivery-branch stub, whose tip and previous publish serve different
+ * bytes for the same preview id.
  */
 class ServeCacheGenerationTest {
 
@@ -57,11 +54,8 @@ class ServeCacheGenerationTest {
       .trimIndent()
 
   /**
-   * A published tag index for the preview on the fixture's comparison page.
-   *
-   * Present so the tag picker is actually offered: the coupling between this index and the frame is
-   * the whole subject of the P1 the review raised, and a fixture that publishes none would let the
-   * assertions about it pass without testing anything.
+   * A published tag index, so the tag picker is offered and its coupling to the frame is actually
+   * tested.
    */
   private val tagsJson =
     """
@@ -148,9 +142,8 @@ class ServeCacheGenerationTest {
 
     assertTrue(page.contains("render/$previewId.png?gen=$newCommit"), page)
     assertTrue(page.contains("reference/$referenceId.png?gen=$newCommit"), page)
-    // The generation is the server's own note about which publish drew these frames. It must not
-    // leak into a link a reader copies: a `gen=` on a `/compare/` URL reads as a permalink that
-    // is not one, and survives into a later publish as a stale claim about a current page.
+    // The generation must not leak into copyable links, where `gen=` would read as a false
+    // permalink.
     assertFalse(page.contains("/compare/$previewId?gen="), page)
     assertFalse(page.contains("/p/$previewId?gen="), page)
     // …and it is not a pin, so the page shows no pin banner and withholds nothing.
@@ -163,9 +156,7 @@ class ServeCacheGenerationTest {
 
     val page = text("http://127.0.0.1:$port/$system/p/$previewId")
 
-    // The viewer builds its frame URL in the browser from the controls, so the coupling reaches it
-    // as data. Without this attribute the one page that re-fetches its own frame would keep the
-    // gap: published typography and a published score drawn over the next publish's pixels.
+    // The viewer builds its frame URL in the browser, so the generation reaches it as data.
     assertTrue(page.contains("data-generation=\"$newCommit\""), page)
     // …and the unfurl card points at the frame this page drew, so a link shared out of the viewer
     // is not a different picture from the one that was on screen.
@@ -180,10 +171,8 @@ class ServeCacheGenerationTest {
 
     val page = text("http://127.0.0.1:$port/$system/p/$previewId?chrome=catalog")
 
-    // The embedded component browser has no business offering a publish history — but the
-    // generation is not a control, it is which publish this HTML is. Dropping it left the
-    // browser-built stage URL unscoped while the server-built card and report URLs beside it still
-    // named the publish: one page, two generations.
+    // The embedded browser offers no publish history, but still scopes its stage URL to the page's
+    // generation.
     assertFalse(page.contains("cp-revisions"), page)
     assertTrue(page.contains("data-generation=\"$newCommit\""), page)
   }
@@ -192,9 +181,8 @@ class ServeCacheGenerationTest {
   fun `a page a refresh overtook still gets its own generation's frames`() {
     val port = start().port
 
-    // The frame a comparison assembled one publish ago points at. The catalog on disk has moved on
-    // — the unscoped URL below proves it — but the verdict that page carries was measured on THESE
-    // pixels, so these are the pixels it must be answered with.
+    // The scoped frame answers with the pixels the verdict was measured on, even after the catalog
+    // moved on.
     assertContentEquals(
       historicalRender,
       bytes("http://127.0.0.1:$port/$system/render/$previewId.png?gen=$oldCommit"),
@@ -233,9 +221,7 @@ class ServeCacheGenerationTest {
     val scoped = cacheControl("http://127.0.0.1:$port/$system/render/$previewId.png?gen=$newCommit")
     val unscoped = cacheControl("http://127.0.0.1:$port/$system/render/$previewId.png")
 
-    // Naming the generation makes the URL content-addressed: a republish moves the page's
-    // generation and therefore this URL, so these bytes are what it answers with for as long as it
-    // resolves at all.
+    // A generation makes the URL content-addressed, hence `immutable`.
     assertTrue(scoped.contains("immutable"), scoped)
     // Without one the URL is the moving target it always was, and caching the ambiguity for longer
     // is not the fix.
@@ -260,10 +246,8 @@ class ServeCacheGenerationTest {
   fun `a stale generation steps aside for a product made to order rather than refusing`() {
     val port = start().port
 
-    // Turning a knob on a page a refresh overtook is the one interaction this coupling must not
-    // cost. An override makes the response `no-store` and about no publish at all, so there is no
-    // pair for a cache to hold wrongly — where a *pin* on the same URL is a contradiction (a
-    // request for the past, rendered to order) and is refused.
+    // An override makes the response `no-store` and generation-free, so turning a knob still works;
+    // a pin on the same URL is contradictory and refused.
     val overridden =
       get("http://127.0.0.1:$port/$system/render/$previewId.png?gen=$oldCommit&fontScale=1.5")
     assertNotEquals(400, overridden.first)
@@ -283,11 +267,9 @@ class ServeCacheGenerationTest {
   fun `a lane that can only describe today refuses a stale generation rather than answering`() {
     val port = start().port
 
-    // Every product that *describes* the frame — the published tag index, and the semantics,
-    // typography and a11y passes the redline and the element picker read — is measured against the
-    // catalog on disk. There is no older copy to serve, so answering would hand a page from one
-    // publish a measurement of another's: the record corruption the coupling exists to prevent,
-    // arriving through the one door "step aside" left open.
+    // Frame-describing products (tag index, semantics, typography, a11y) are measured on the
+    // current catalog and have no older copy, so they must refuse a stale generation rather than
+    // mix publishes.
     assertEquals(
       409,
       get("http://127.0.0.1:$port/$system/tags/$previewId?gen=$oldCommit").first,
@@ -320,10 +302,8 @@ class ServeCacheGenerationTest {
   fun `a prebaked thumbnail never answers for a generation it is not`() {
     val port = start().port
 
-    // The thumbnail is downscaled from the catalog on disk, so it is this generation's by
-    // definition — and its fast path sits ahead of the routing that would fetch the named
-    // publish's bytes. A 200 marked `immutable` from the wrong generation is the worst shape
-    // available, so a stale `gen=` has to leave the lane before it is reached.
+    // Thumbnails come from the current catalog and their fast path precedes generation routing, so
+    // a stale `gen=` must leave the thumbnail lane first.
     val hash =
       Regex("[?&]${ServeHeroImages.THUMB_PARAM}=([A-Za-z0-9_-]+)")
         .find(text("http://127.0.0.1:$port/$system/"))

@@ -3,17 +3,13 @@ package ee.schimke.composeai.cli.serve
 import java.util.concurrent.ConcurrentHashMap
 
 /**
- * Which functions each preview's own declaration **calls**, so the landing grid's filter can answer
- * "show me the previews that call `SwipeToReveal`" — the cards a name search cannot find.
+ * Which functions each preview's declaration calls, so the landing grid's filter can find previews
+ * that call e.g. `SwipeToReveal`. Reuses the playground's Source-panel inputs
+ * ([PlaygroundSeedResolver.Location], [UsageSourceParser]), fetching each distinct file once and
+ * splitting it by [PlaygroundSeedResolver.declarationLines].
  *
- * Reuses the playground's Source-panel inputs: [PlaygroundSeedResolver.Location] for where each
- * preview's source lives and [UsageSourceParser] for the parse, with one fetch per distinct file
- * split among its previews by [PlaygroundSeedResolver.declarationLines].
- *
- * Callees are recorded as written, with no symbol resolution and no expansion through delegation (a
- * `Sticker("<slug>")` catalog indexes as calling `Sticker`). Every stage may be absent (no parser
- * sidecar, no source metadata, a failed fetch), and [Match.available] distinguishes "nothing
- * indexed" from "no preview calls that".
+ * Callees are recorded as written, unresolved. Any stage may be absent, and [Match.available]
+ * distinguishes "nothing indexed" from "no preview calls that".
  */
 class PreviewUsageIndex(
   /** Where a preview's source lives, or null when this server can't say. */
@@ -21,17 +17,15 @@ class PreviewUsageIndex(
   /** Fetches a URL, returning its bytes or null. Injected so tests never touch the network. */
   private val fetch: (String) -> ByteArray?,
   /**
-   * The Kotlin parser, or null when its sidecar is not staged. A function rather than an instance
-   * so the (one-off, ~0.5 s) classloader build is not paid by a server that never indexes.
+   * The Kotlin parser, or null when its sidecar isn't staged. A function so the ~0.5 s classloader
+   * build is paid only by a server that indexes.
    */
   private val parser: () -> UsageSourceParser? = { UsageSourceParser.of() },
   /** Source files are code; anything larger than this is not a preview file worth indexing. */
   private val maxBytes: Int = DEFAULT_MAX_BYTES,
   /**
-   * A ceiling on the distinct files one index build will fetch. A catalog's previews cluster into a
-   * few dozen section files, so this is a runaway guard rather than a working limit — and it is
-   * reported ([Index.truncated]) rather than silently applied, because a partial index that looks
-   * complete answers "nothing calls that" for a file it never read.
+   * Ceiling on distinct files one build fetches: a runaway guard, reported via [Index.truncated] so
+   * a partial index doesn't claim "nothing calls that".
    */
   private val maxFiles: Int = DEFAULT_MAX_FILES,
   /** How long a built index may be served before it is rebuilt. */
@@ -57,24 +51,16 @@ class PreviewUsageIndex(
   private val cache = ConcurrentHashMap<String, Entry>()
 
   /**
-   * One lock per catalog, so a build never blocks a search of a DIFFERENT catalog.
-   *
-   * The obvious `@Synchronized` on [match] was wrong in a way worth recording: building an index is
-   * up to [maxFiles] network reads, and holding one process-wide monitor across them meant a single
-   * cold catalog could park every other `uses:` request behind it — on a host whose request threads
-   * are shared with the routes that serve renders. Per-catalog locks keep the one property actually
-   * wanted (two concurrent searches of the same cold catalog do one build, not two) and drop the
-   * one that was accidental.
+   * One lock per catalog: building is up to [maxFiles] network reads, and a process-wide lock let
+   * one cold catalog block every other `uses:` request. Concurrent searches of the same cold
+   * catalog still share one build.
    */
   private val locks = ConcurrentHashMap<String, Any>()
 
   /**
-   * The previews among [previewIds] whose declaration calls something matching [token].
-   *
-   * Matching is a **case-insensitive substring** of the callee's name as written, so `button` finds
-   * `Button`, `FilledIconButton` and `ButtonGroup` alike. A filter box is a place to narrow by
-   * half-remembered names; an exact-match operator would need the reader to already know the
-   * answer.
+   * The previews among [previewIds] whose declaration calls something matching [token], by
+   * case-insensitive substring of the callee name (`button` finds `Button`, `FilledIconButton`,
+   * `ButtonGroup`).
    */
   fun match(system: String, previewIds: List<String>, token: String): Match {
     val index = index(system, previewIds)
@@ -90,12 +76,8 @@ class PreviewUsageIndex(
   }
 
   /**
-   * This catalog's index, built or reused.
-   *
-   * Keyed by system and *validated* against the preview list, not keyed by it: a catalog
-   * republished under the same id with previews added or dropped must rebuild rather than answer
-   * from the previous publication, and a hash of the ids is what notices that without holding the
-   * list.
+   * This catalog's index, built or reused. Validated against a hash of the preview list so a
+   * republished catalog with changed previews rebuilds.
    */
   private fun index(system: String, previewIds: List<String>): Index {
     val signature = previewIds.sorted().hashCode()
@@ -121,10 +103,8 @@ class PreviewUsageIndex(
       ?.index
 
   private fun build(system: String, previewIds: List<String>): Index {
-    // Grouped by file, because that is the unit of both the fetch and the parse. Previews that
-    // carry no location (an uploaded bundle, or a manifest predating `sourceFile`) drop out here
-    // and are simply not in the index — they match nothing, and `available` still describes whether
-    // the *catalog* could be indexed.
+    // Grouped by file, the unit of fetch and parse. Previews with no location aren't indexed and
+    // match nothing.
     val byFile = LinkedHashMap<FileKey, MutableList<Pair<String, Int?>>>()
     for (id in previewIds) {
       val where = locate(system, id) ?: continue
@@ -237,11 +217,8 @@ class PreviewUsageIndex(
       onLog("$url is not valid UTF-8; not indexing it")
       return null
     }
-    // Normalised here, before anything measures it. `String.lines()` splits on `\r\n` too, so a
-    // CRLF file would give line *contents* that are one character shorter than the source the
-    // parser reported offsets into — and the drift accumulates down the file, quietly moving calls
-    // out of the declaration they belong to. Parsing the same normalised text keeps one coordinate
-    // system.
+    // Normalise line endings before measuring: `String.lines()` splits on `\r\n`, so CRLF text
+    // would drift from the parser's offsets and misattribute calls.
     return text.replace("\r\n", "\n").replace('\r', '\n')
   }
 
@@ -266,16 +243,9 @@ class PreviewUsageIndex(
 
   companion object {
     /**
-     * Deliberately the **same** cap as [PlaygroundSeedResolver.DEFAULT_MAX_BYTES], and not merely a
-     * similar number.
-     *
-     * `PlaygroundSeedResolver.httpFetch` reads `maxBytes + 1` bytes and stops. That extra byte is
-     * the whole truncation protocol: a body at or over the cap comes back one byte longer than the
-     * cap, so a reader whose own limit matches can tell "a big file" from "the start of a bigger
-     * one". Setting a *larger* limit here silently accepts that prefix as if it were the file — and
-     * a prefix still parses, so the index would answer with the calls in the first 256 KiB and
-     * report itself complete, which is exactly the confident-but-wrong answer `available` exists to
-     * prevent.
+     * Deliberately the same cap as [PlaygroundSeedResolver.DEFAULT_MAX_BYTES]: `httpFetch` reads
+     * `maxBytes + 1` bytes to signal truncation, so a larger limit here would accept a truncated
+     * prefix as the whole file and report a confidently incomplete index.
      */
     const val DEFAULT_MAX_BYTES: Int = PlaygroundSeedResolver.DEFAULT_MAX_BYTES
     const val DEFAULT_MAX_FILES: Int = 200

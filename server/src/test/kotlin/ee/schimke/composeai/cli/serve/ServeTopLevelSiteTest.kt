@@ -18,12 +18,9 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 
 /**
- * End-to-end check for **top-level sites** ([ServeSites]) on a real embedded [ServeHttpServer]: one
- * box serving three catalogs, with `m3.example.test` published as a site for `compose-m3`.
- *
- * The property under test is that the site host *looks like its own server* while being the same
- * one — so every assertion pairs a site-host request with the identical request on the main host,
- * and the main host's behaviour must be untouched.
+ * End-to-end check for top-level sites ([ServeSites]) on a real [ServeHttpServer]: three catalogs,
+ * with `m3.example.test` published as a site for `compose-m3`. The site host must look like its own
+ * server while the main host is untouched, so assertions pair site-host and main-host requests.
  */
 class ServeTopLevelSiteTest {
 
@@ -60,17 +57,12 @@ class ServeTopLevelSiteTest {
     )
   }
 
-  /**
-   * Bytes a fixture capture serves. Deliberately readable text rather than a PNG signature: nothing
-   * on this path decodes the image, and a recognisable body makes "which 404 was that" legible in
-   * an assertion message.
-   */
+  /** Bytes a fixture capture serves: readable text, so assertion messages show which 404 it was. */
   private val captureMarker = "fixture-capture-bytes"
 
   /**
-   * [bundle] plus one published capture, wired the way [ServeCatalogStore] wires a real one: the id
-   * is declared, its branch path names the extension, and the bytes arrive through the fetch seam
-   * on first request rather than being staged up front.
+   * [bundle] plus one published capture, wired like [ServeCatalogStore]: declared id, branch path,
+   * bytes fetched on first request.
    */
   private fun motionBundle(label: String, previewId: String, motionId: String): ServeBundleHost {
     val dir = Files.createTempDirectory("site-motion-$label").toFile().also { it.deleteOnExit() }
@@ -174,8 +166,8 @@ class ServeTopLevelSiteTest {
   }
 
   /**
-   * A site host installs as its own app: its manifest is named for the site's catalog, while the
-   * main host keeps the box's own name. Both stay ungated like the icons they name.
+   * A site host installs as its own app (manifest named for its catalog); the main host keeps the
+   * box's name. Both ungated, like the icons.
    */
   @Test
   fun `each site host serves a manifest named for its own catalog`() {
@@ -194,9 +186,8 @@ class ServeTopLevelSiteTest {
     val mainJson = kotlinx.serialization.json.Json.parseToJsonElement(main).jsonObject
     assertEquals("Compose Preview", mainJson.getValue("name").jsonPrimitive.content)
 
-    // The screenshots the manifest names are served on the site host too…
-    // …and so are its icons, the monochrome badge included: the push worker on a site host asks
-    // its own origin for it.
+    // The manifest's screenshots and icons (including the monochrome badge the push worker
+    // requests) are served on the site host too.
     for (path in
       listOf(
         "/icons/screenshot-narrow.png",
@@ -311,8 +302,7 @@ class ServeTopLevelSiteTest {
       location!!.startsWith("/") && !location.startsWith("//"),
       "the redirect target must be same-origin: $location",
     )
-    // 308 rather than 301, because the canonical prefix also carries POST routes and a 301 is
-    // re-issued as GET by most clients.
+    // 308, not 301: the canonical prefix also carries POST routes, which 301 turns into GET.
     assertEquals(308, get("/compose-m3/p/button-filled", host = siteHost).first)
   }
 
@@ -341,8 +331,7 @@ class ServeTopLevelSiteTest {
   @Test
   fun `the header bar names the catalog on every page`() {
     server = newServer()
-    // The bar used to say only "compose-preview" everywhere, so which design system you were
-    // looking at lived solely in the page's own <h1> and scrolled away with it.
+    // The header names the design system on every page, not just in the page's <h1>.
     for (path in listOf("/", "/p/button-filled")) {
       val (code, body, _) = get(path, host = siteHost)
       assertEquals(200, code, path)
@@ -469,11 +458,8 @@ class ServeTopLevelSiteTest {
 
   @Test
   fun `a suspended session still counts as known to its site`() {
-    // `peekHost` answers "resident right now" and goes null for a session that has been suspended
-    // while its registry entry stays, registered and resumable. Both the site's status count and
-    // the foreign-session gate read membership now, not residency — reading residency reported
-    // `known: 0` beside an available catalog, and let an idle neighbour fall through the gate to
-    // the `/{system}/…` handler that would resume and serve it.
+    // `peekHost` is null for suspended sessions; the status count and the foreign-session gate read
+    // membership, not residency.
     server = newServer()
     // Re-register the site's catalog as known-but-not-resident: the shape a suspended session has.
     registry.register(
@@ -494,10 +480,9 @@ class ServeTopLevelSiteTest {
 
   @Test
   fun `real routes reach their handlers on a site host`() {
-    // Written OUT independently of ServeSites.RESERVED_SYSTEMS, and asserting each path reaches its
-    // handler — not merely that it wasn't redirected. Iterating the allowlist could never catch an
-    // omission from the allowlist (a missing route is missing from the loop too), and "not a 308"
-    // passes on the interceptor's own 404, which is precisely the failure a missing entry causes.
+    // Written independently of ServeSites.RESERVED_SYSTEMS, asserting each path reaches its
+    // handler: iterating the allowlist can't catch an omission, and "not a 308" passes on the
+    // interceptor's own 404.
     server = newServer()
     val routes =
       mapOf(
@@ -510,10 +495,8 @@ class ServeTopLevelSiteTest {
         "/p/button-filled" to "<!doctype html>",
         "/render/button-filled.png" to "",
         "/assets/serve/serve.css" to "",
-        // Issue #4319: the one link the site footer offers on EVERY page. Its path is built from
-        // `ServeBugReport.PATH`, so it was absent from the allowlist and the interceptor answered
-        // the site's own styled 404 — for the affordance a visitor reaches when something else is
-        // already broken.
+        // The footer's link on every site page, built from `ServeBugReport.PATH`; it must not hit
+        // the site's 404.
         "/report-bug" to "Report a bug in the preview server",
       )
     for ((path, marker) in routes) {
@@ -527,10 +510,8 @@ class ServeTopLevelSiteTest {
 
   @Test
   fun `the report page on a site host sends pixel bugs to that catalog's tracker`() {
-    // The other half of issue #4319. A site host publishes exactly ONE catalog, so "go back to the
-    // preview and use its report link" — sound advice from a multi-catalog front door — is advice
-    // the server can follow on the reporter's behalf here: it knows the catalog, and the page they
-    // came from (`/pages/buttons`, an index) may have no preview to go back to at all.
+    // A site host serves exactly one catalog, so the bug report can route to that catalog directly,
+    // even from a page with no preview.
     registry.register(
       "compose-m3",
       host =
@@ -580,12 +561,8 @@ class ServeTopLevelSiteTest {
 
   @Test
   fun `a published capture is reachable on a site host`() {
-    // `motion` was missing from ServeSites.RESERVED_SYSTEMS, so this interceptor — which runs
-    // BEFORE routing — read `/motion/…` as a neighbour catalog and answered the site's own styled
-    // 404. Every capture on every site host was unreachable, and the viewer reported it as "the
-    // recorded interaction could not be loaded", which reads as a missing artifact rather than a
-    // route that was never consulted. The assertion is deliberately on the BYTES: a 404 from the
-    // handler and a 404 from the interceptor are both 404s, and only one of them is this bug.
+    // `motion` must be reserved, or the interceptor (which runs before routing) treats `/motion/…`
+    // as a neighbour catalog. Asserted on the bytes, since both 404s look alike.
     val motionId = "switch-on__ideal__default__light"
     registry.register(
       "compose-m3",
@@ -619,10 +596,8 @@ class ServeTopLevelSiteTest {
 
   @Test
   fun `a capture is behind the token gate on a private server`() {
-    // Rooting `motion` means the site interceptor stops refusing it, and the interceptor's refusal
-    // was never the security boundary anyway — `/{system}/motion/…` was servable unauthenticated on
-    // a token-gated box before this. `handleMotion` now opens with `rejectBadToken` like every
-    // sibling asset lane, so both spellings are gated rather than one of them accidentally being.
+    // `handleMotion` opens with `rejectBadToken` like its sibling asset lanes, so both spellings
+    // are gated.
     val motionId = "switch-on__ideal__default__light"
     val secret = "s3cret-token"
     registry.register(
@@ -643,9 +618,8 @@ class ServeTopLevelSiteTest {
         )
         .also { it.start() }
 
-    // 404 rather than 401 throughout: the gate deliberately declines to confirm the server to a
-    // scanner. The property under test is the body, not the code — a refusal that still carried the
-    // bytes would be a 404 too.
+    // 404 rather than 401, so the gate doesn't confirm the server to scanners; the body is what's
+    // tested.
     for (path in listOf("/motion/$motionId.apng", "/compose-m3/motion/$motionId.apng")) {
       val host = if (path.startsWith("/motion")) siteHost else null
       val (code, body, _) = get(path, host = host)
@@ -659,10 +633,8 @@ class ServeTopLevelSiteTest {
 
   @Test
   fun `a site host does not report the box's branch-read counters`() {
-    // `/status` on a site reports on ONE app by design — a monitor pointed at the site alerts on
-    // the site, and a visitor learns nothing about what else the box runs. The branch-read counters
-    // are box-wide with no per-system breakdown, so including them would fire this site's monitor
-    // on a neighbour's throttle AND disclose that the neighbour exists.
+    // `/status` on a site reports one app. Branch-read counters are box-wide, so including them
+    // would trip this site's monitor on a neighbour's throttle and disclose the neighbour.
     val stats = BranchFetchStats(clock = { 5L })
     stats.record(BranchFetch.Throttled(3))
     registry.register(
@@ -699,10 +671,7 @@ class ServeTopLevelSiteTest {
 
   @Test
   fun `a site host does not report the box's subprocess census`() {
-    // Same rule as the branch counters above, for the counter with the sharpest edge: a census
-    // cannot say which catalog a JVM or a defunct child belongs to, so a neighbour's reaping leak
-    // would appear on this site's `/status.json` and trip this site's monitor — while also
-    // disclosing how many processes the box runs and which executables are dying on it.
+    // Likewise the process census, which can't attribute processes to catalogs.
     registry.register(
       "compose-m3",
       host = bundle("compose-m3", listOf("button-filled"), "Compose Material 3"),
@@ -730,9 +699,7 @@ class ServeTopLevelSiteTest {
       "a site must not surface the box's process census: $siteBody",
     )
 
-    // The main host still reports it — this scopes the field, it does not remove it. Asserted only
-    // where there is a `/proc` to census, so the check does not quietly become a platform
-    // assertion: on macOS the census is legitimately null everywhere.
+    // The main host still reports it; asserted only where `/proc` exists (null on macOS).
     if (ServeProcessCensusSnapshot.read() != null) {
       val (mainCode, mainBody, _) = get("/status.json")
       assertEquals(200, mainCode)
@@ -745,9 +712,8 @@ class ServeTopLevelSiteTest {
 
   @Test
   fun `an unauthenticated refusal never carries the access token`() {
-    // The interceptor runs BEFORE the routes' own token gate, and the styled 404 threads the access
-    // token through its links — so on a token-gated box a made-up path would have handed the secret
-    // to any unauthenticated caller, which is every scanner.
+    // The interceptor runs before the routes' token gate, and the styled 404 threads the token
+    // through its links, so it must not leak the secret to unauthenticated callers.
     registry.register(
       "compose-m3",
       host = bundle("compose-m3", listOf("button-filled"), "Compose Material 3"),
@@ -777,30 +743,23 @@ class ServeTopLevelSiteTest {
 
   @Test
   fun `no ingestion path can name a session after a route`() {
-    // The upload lane was only one of five ways a session gets named (`--bundles` directories,
-    // `--bundle`, catalog ids and revision refs are the others), and fixing them one at a time is
-    // how the previous two rounds went. The registry is where every one of them converges, so the
-    // invariant is enforced there: a session called `api` would make `/api/` — which no constant
-    // route matches — fall to `/{system}/` and serve through a site hostname. "There" is two
-    // methods, not one: `register` (below) and the on-demand fork in `entryFor`, covered by
-    // `ServeSessionRegistryTest.a reserved route name is never bound to a session`.
+    // Every way of naming a session converges on the registry, so the invariant is enforced there
+    // (`register` and the on-demand fork in `entryFor`, covered by `ServeSessionRegistryTest.a
+    // reserved route name is never bound to a session`).
     server = newServer()
     registry.register("api", host = bundle("api", listOf("sneaky"), "Sneaky"), pinned = true)
     assertFalse(registry.isKnownSession("api"), "the registry refuses a route's name")
     assertEquals(404, get("/api/", host = siteHost).first)
-    // …and the real /api/ routes still answer. (On the main host this fixture has no default
-    // session, so the route needs an explicit one — that is the pre-existing behaviour, not the
-    // interceptor.)
+    // ...and the real /api/ routes still answer (the main host here needs an explicit session, as
+    // before).
     assertEquals(200, get("/api/previews", host = siteHost).first)
     assertEquals(200, get("/api/previews?session=wear-m3").first)
   }
 
   @Test
   fun `an uploaded bundle may not take a route's name`() {
-    // A session called `api` would be reachable at `/api/` — a path no constant route matches, so
-    // it falls to `/{system}/` — which is how a reserved first segment could still resolve to a
-    // foreign session on a site host. The invariant the interceptor rests on is that no session
-    // can be named a route.
+    // A session called `api` would be served by `/{system}/` on a site host; no session may be
+    // named after a route.
     for (reserved in listOf("api", "render", "p", "status", "rc-fonts")) {
       assertNull(ServeBundleStore.sanitizeName(reserved), "'$reserved' must be refused as a name")
     }
@@ -809,10 +768,9 @@ class ServeTopLevelSiteTest {
 
   @Test
   fun `an unknown first segment is refused rather than resolved`() {
-    // With --revisions a raw ref like `main` is not a registered session until the generic route
-    // leases it and the factory BUILDS it, so no enumeration of existing sessions can catch it in
-    // time. The gate is an allowlist for exactly that reason: anything that is neither this site's
-    // system nor one of the server's routes is refused before it can be created.
+    // With --revisions a raw ref isn't a session until the generic route leases and builds it, so
+    // the gate is an allowlist: anything not this site's system or a server route is refused before
+    // creation.
     server = newServer()
     for (unknown in listOf("main", "some-ref", "not-a-catalog", "wear-m3@abc123")) {
       assertEquals(404, get("/$unknown/", host = siteHost).first, "'/$unknown/' must be refused")
@@ -822,10 +780,8 @@ class ServeTopLevelSiteTest {
   @Test
   fun `a neighbour's social card is not served through a site host`() {
     server = newServer()
-    // Bake the neighbour's card the way the main host does — by rendering its landing — then take
-    // the hash out of its og:image, which is public there. `/social/` is ungated by design (an
-    // unfurler never replays a token), so ownership is the only thing standing between that hash
-    // and this hostname answering with another catalog's title.
+    // `/social/` is ungated (unfurlers never send tokens), so ownership is what stops a site
+    // hostname from serving another catalog's card by hash.
     val (_, wearLanding, _) = get("/wear-m3/")
     val hash =
       Regex("/social/([a-z0-9]+\\.png)").find(wearLanding)?.groupValues?.get(1)
@@ -864,9 +820,8 @@ class ServeTopLevelSiteTest {
 
   @Test
   fun `retiring a catalog a site is published as is refused`() {
-    // Retiring it would strand the hostname: its root 404s at once, and after a restart the now
-    // unserved mapping is dropped so the host falls through to the global front door — a domain
-    // published as one app quietly becoming an index of every other.
+    // Retiring it would strand the hostname (its root 404s, and after a restart it falls through to
+    // the global front door).
     val tracker =
       CatalogLoadTracker(
         listOf(
@@ -901,9 +856,8 @@ class ServeTopLevelSiteTest {
 
   @Test
   fun `a site cannot claim a built-in route as its system`() {
-    // `/render/<id>.png` on a site mapped to `render` would be read as a canonical prefixed URL and
-    // redirected to `/<id>.png`, breaking every image. Such an id is already unreachable at its
-    // canonical path anyway (the constant route outscores `/{system}`), so it is refused.
+    // `/render/<id>.png` on a site mapped to `render` would redirect and break images; such an id
+    // is already unreachable at its canonical path, so it's refused.
     val problems = mutableListOf<String>()
     val sites =
       ServeSites.of(
@@ -953,9 +907,8 @@ class ServeTopLevelSiteTest {
     assertNull(sites.systemFor("unknown.coo.ee"))
     assertEquals("m3.preview.coo.ee", sites.hostFor("m3-catalog"))
     assertTrue(ServeSites.parse(null).isEmpty)
-    // The `--sites` flag path parses BEFORE the served set is known (ServeCommand re-validates the
-    // combined list against it afterwards), so an unchecked parse must keep its entries rather
-    // than read "no systems supplied" as "no systems exist".
+    // `--sites` parses before the served set is known (re-validated later), so an unchecked parse
+    // must keep its entries.
     assertEquals(
       "m3-catalog",
       ServeSites.parse("m3.preview.coo.ee=m3-catalog").systemFor("m3.preview.coo.ee"),

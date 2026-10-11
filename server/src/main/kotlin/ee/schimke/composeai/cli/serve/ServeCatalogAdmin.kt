@@ -1,21 +1,17 @@
 package ee.schimke.composeai.cli.serve
 
 /**
- * Publish and retire catalogs on a **running** server, and persist the result.
- *
- * The catalog set used to be a startup-only decision: a comma-separated flag the container
- * entrypoint baked in, so adding a catalog meant editing the image's compose file and recreating
- * the container. This is the runtime half of making it config ([ServeCatalogsConfig]) — the admin
- * API's `POST`/`DELETE` land here, which:
+ * Publish and retire catalogs on a running server, and persist the result. The admin API's
+ * `POST`/`DELETE` land here, which:
  * 1. validates the entry (id/repo shape, unknown group, duplicate system),
- * 2. fetches + registers (or unregisters) the catalog through the same [ServeCatalogStore] path
- *    startup uses, so a runtime catalog is in every way an ordinary one,
- * 3. records it in the [CatalogLoadTracker] — the configured-set source of truth the home index,
- *    `/status`, and the branch refresher all read, so the change is visible everywhere at once,
+ * 2. fetches and registers (or unregisters) it through the same [ServeCatalogStore] path startup
+ *    uses,
+ * 3. records it in the [CatalogLoadTracker], the configured-set source of truth for the home index,
+ *    `/status` and the branch refresher,
  * 4. rewrites the operator's `catalogs.json` so it survives a restart.
  *
- * Persistence is best-effort and reported, never fatal: a registration that worked but couldn't be
- * written back is still serving, and says so, rather than being rolled back.
+ * Persistence is best-effort and reported, never fatal: a working registration that couldn't be
+ * written back keeps serving.
  */
 class ServeCatalogAdmin(
   private val tracker: CatalogLoadTracker,
@@ -33,26 +29,15 @@ class ServeCatalogAdmin(
   private val unload: (system: String) -> Unit,
   /**
    * The top-level sites this server publishes ([ServeSites]), so a catalog a hostname depends on
-   * cannot be retired out from under it. The LIVE map ([ServeSiteRegistry]), not a startup
-   * snapshot: a site published at runtime has to protect its catalog from the moment it exists, or
-   * the two admin routes race to leave a hostname pointing at a system that was just retired. Empty
-   * by default — a server with no sites is unaffected.
+   * can't be retired under it. The live map, not a startup snapshot, so a runtime-published site
+   * protects its catalog immediately.
    */
   private val sites: ServeSiteRegistry = ServeSiteRegistry.empty(),
   /**
-   * The server's catalog-registration monitor, so a re-point's **load and its provenance record**
-   * are one critical section rather than two.
-   *
-   * [load] already takes this lock internally; passing the same object here makes the wider section
-   * a reentrant nesting rather than a second lock with its own ordering. Defaulted to a private
-   * object for the tests and for any caller whose `load` takes no lock — there the swap serialises
-   * against nothing, which is exactly what it did before.
-   *
-   * What it closes: the branch refresher captures each entry's repo when it snapshots the tracker,
-   * then blocks on this monitor. With the load inside the lock and the [CatalogLoadTracker.repoint]
-   * outside it, the refresher could acquire the lock in between, see a tracker still naming the OLD
-   * repo, and reload it over the new registration — leaving the old repo's host serving while the
-   * provenance and `catalogs.json` both said the new one.
+   * The server's catalog-registration monitor, so a re-point's load and its provenance record are
+   * one critical section. [load] takes this lock internally, so the outer section nests
+   * reentrantly. Without it, the branch refresher could slip in between, see the old repo in the
+   * tracker and reload it over the new registration.
    */
   private val registrationLock: Any = Any(),
   /** Group table for resolving [ServeCatalogsConfig.Entry.group]; seeded from the config file. */
@@ -60,20 +45,14 @@ class ServeCatalogAdmin(
   private val onLog: (String) -> Unit = { System.err.println(it) },
 ) {
   /**
-   * The group table, refreshed from the file each time [persist] rewrites it (an operator can add a
-   * section by hand between admin calls). Replaced wholesale rather than mutated in place, so a
-   * concurrent [register] reading it can't observe a half-rebuilt list and reject a group that does
-   * exist.
+   * The group table, refreshed from the file on each [persist] (an operator may edit by hand
+   * between calls). Replaced wholesale so a concurrent [register] never sees a half-rebuilt list.
    */
   @Volatile private var groups: List<ServeCatalogsConfig.Group> = groups
 
   /**
-   * Guards [groups] across the write that refreshes it, so a concurrent [register] can't read a
-   * table rebuilt from a document a different request is still replacing.
-   *
-   * The file's own read-modify-write is serialised by [ServeCatalogsConfigFile.update] — it moved
-   * there when [ServeSiteAdmin] started editing the same document, because a lock held here only
-   * ever serialised this administrator against itself.
+   * Guards [groups] across the write that refreshes it. The file's own read-modify-write is
+   * serialised by [ServeCatalogsConfigFile.update], shared with [ServeSiteAdmin].
    */
   private val configLock = Any()
 
@@ -99,12 +78,8 @@ class ServeCatalogAdmin(
   fun listGroups(): List<ServeCatalogsConfig.Group> = groups
 
   /**
-   * Define [group], or update the heading/noun of one that already exists.
-   *
-   * Groups used to be the one part of the catalog config with no runtime path at all: adding a
-   * section meant editing the box's `catalogs.json` and restarting, and a catalog claiming a
-   * section the server didn't know about was rejected outright. That made a committed config
-   * genuinely unable to converge — the gap flagged on #2967.
+   * Define [group], or update the heading/noun of an existing one, so a committed config can
+   * converge without a restart.
    */
   fun upsertGroup(group: ServeCatalogsConfig.Group): Result {
     ServeCatalogsConfig.validateGroup(group)?.let {
@@ -133,13 +108,10 @@ class ServeCatalogAdmin(
   }
 
   /**
-   * Re-resolve every registered catalog's front-page placement against the current group table and
-   * the persisted entry that declares it. Returns how many changed.
-   *
-   * Reads the entries from the config file rather than the tracker, because the tracker holds the
-   * *resolved* [ServeWeb.HomeGroup] and not the `group` id that produced it — so the declared claim
-   * only survives on disk. A catalog with no config entry (a `--catalogs` flag addition, say)
-   * declares no group and is left alone.
+   * Re-resolve every registered catalog's front-page placement against the current group table.
+   * Returns how many changed. Reads entries from the config file because the tracker holds only the
+   * resolved [ServeWeb.HomeGroup], not the declared `group` id; catalogs with no config entry are
+   * left alone.
    */
   private fun reapplyGroupClaims(): Int {
     val declared = configFile?.let { runCatching { it.load() }.getOrNull() } ?: return 0
@@ -188,49 +160,22 @@ class ServeCatalogAdmin(
       return Result.Invalid("unknown group '${entry.group}'")
     }
     val repo = entry.repo?.takeIf { it.isNotBlank() } ?: defaultRepo
-    // Already published? Converge its LISTING rather than refusing outright. A flat conflict here
-    // is
-    // what made a committed config unable to catch up with a running box: re-posting an entry whose
-    // group or listed flag had changed was rejected, so the box kept its original placement
-    // forever.
-    // The content is untouched — no re-fetch, no dropped load state. A repo change is handled
-    // separately just below: it DOES decide what bytes get served, so it re-fetches, and it does
-    // that before anything is dropped.
-    // `loadPriority` converges the same way: it changes nothing about a catalog already registered,
-    // but the point of writing it back is the NEXT boot's fetch order, and the deployment reconcile
-    // (.github/scripts/publish-config-to-box.sh) is additive — without this, re-declaring a
-    // priority on an already-published catalog would 409 and never reach the box's config.
+    // Already published: converge its listing (group, listed flag, `loadPriority`) rather than
+    // refusing, so a re-posted committed config can catch up with a running box;
+    // `.github/scripts/publish-config-to-box.sh` is additive. Content is untouched; a repo change,
+    // which does change the served bytes, is handled below.
     tracker.configFor(entry.system)?.let { current ->
       val resolved = homeGroup(entry, repo, declared)
-      // A REPO CHANGE is a swap, not a conflict — and the order here is the whole point.
-      //
-      // This used to answer 409 "retire it before re-publishing from …", which made re-pointing a
-      // catalog a two-step dance every caller had to get right: DELETE, then POST. It is not a safe
-      // dance. `load` fetches before anything is persisted, and the failure path below drops the
-      // entry it added — so a retire that succeeds followed by a publish that cannot fetch leaves
-      // the system published NOWHERE, and the deployment reconcile that drives this is
-      // non-blocking, so it stays that way. The 409 also read as success to that reconcile
-      // (.github/scripts/publish-config-to-box.sh), which is how a moved catalog went on being
-      // served from the repository it had left, with a green log either side of it.
-      //
-      // Loading FIRST removes the window instead of narrowing it. A load that fails returns before
-      // it touches any registration, so the old catalog is still serving and this returns Failed
-      // with that said plainly; a load that succeeds re-registers the host in place — exactly what
-      // the branch refresher does on every poll — so the swap is one atomic replacement of content
-      // followed by [CatalogLoadTracker.repoint] recording where it now comes from.
-      //
-      // It works for a catalog published as a top-level site, too, which the retire-first route
-      // could not: `unregister` refuses those outright to keep a hostname from being stranded, and
-      // a swap never strands one because the system never stops existing.
+      // A repo change is a swap, not a conflict. Load first: a failed load returns before touching
+      // any registration, so the old catalog keeps serving; a successful one re-registers the host
+      // in place (as the branch refresher does) and [CatalogLoadTracker.repoint] records the new
+      // source. Retire-then-publish would leave the system published nowhere if the fetch failed,
+      // and couldn't handle a catalog published as a top-level site.
       if (current.repo != repo) {
-        // ONE critical section, not two. The load takes this same monitor internally, so this is a
-        // reentrant nesting whose only effect is to hold it across the provenance record as well —
-        // and that is the whole fix: with `repoint` outside the lock, the branch refresher (which
-        // captured this system's repo when it snapshotted the tracker, then queued on the monitor)
-        // could get in between, still see the OLD repo in the tracker, and reload it straight over
-        // the new registration. The old repo's host would then be serving while the provenance and
-        // `catalogs.json` both named the new one. The refresher declines a stale capture too — see
-        // `ServeRunner.buildCatalogRefresher` — because either side alone leaves a window.
+        // One critical section: hold the registration monitor across the provenance record too, or
+        // the branch refresher could reload the old repo over the new registration. The refresher
+        // also declines stale captures (`ServeRunner.buildCatalogRefresher`); either side alone
+        // leaves a window.
         val failure =
           synchronized(registrationLock) {
             val loadFailure = runCatching {
@@ -251,11 +196,8 @@ class ServeCatalogAdmin(
             loadFailure
           }
         if (failure != null) {
-          // What the old catalog is actually doing, not what it is configured to do. `configFor`
-          // answers for a pending entry and for one whose initial load failed exactly as it does
-          // for a live one, so "still serving" was the reassuring half of a two-part answer that
-          // could be wrong — reconciliation during startup, or a persistent startup fetch failure,
-          // reaches here with nothing behind the old configuration at all.
+          // What the old catalog is actually doing: `configFor` answers the same for pending or
+          // failed entries, so check availability rather than configuration.
           val serving = tracker.stateFor(entry.system)?.available == true
           val held =
             if (serving) "still serving ${current.repo}"
@@ -272,22 +214,14 @@ class ServeCatalogAdmin(
         current.group == resolved &&
           current.listed == entry.listed &&
           current.loadPriority == entry.loadPriority &&
-          // Attribution converges like the placement it is: an entry re-posted with an
-          // `importedFrom` the running registration lacks has to reach the tracker, or the only
-          // way to move an import off the staging owner's section is a restart (#5012).
+          // Attribution converges like placement, so an import can move off the staging owner's
+          // section without a restart.
           current.importedFrom == entry.importedFrom
       ) {
-        // Everything the runtime tracks already matches — but the FILE may not, and this branch
-        // used to be the dead end that guaranteed it never would. A swap whose runtime half
-        // succeeded and whose `persist` failed transiently answers Ok-with-warning, leaving the
-        // tracker on the new repo and `catalogs.json` on the old one (or without the entry at all,
-        // after a retire-first caller). Every later POST of the same desired entry then arrives
-        // here, matches on every tracked field, and returns 409 before attempting persistence. The
-        // reconcile can never repair the file, and the next restart reverts or drops the catalog.
-        //
-        // So a mismatch between the file and what is running is a repair, not a conflict: persist
-        // and report it. In the ordinary steady state the file already agrees and this is the same
-        // 409 it always was.
+        // Everything tracked matches, but the file may not: a swap whose persist failed transiently
+        // leaves `catalogs.json` stale, and answering 409 here would stop the reconcile ever
+        // repairing it. So a file mismatch is persisted and reported; otherwise this is the usual
+        // 409.
         if (persistedRepoMatches(entry.system, repo)) {
           return Result.Conflict("catalog '${entry.system}' is already published")
         }
@@ -325,11 +259,8 @@ class ServeCatalogAdmin(
 
   /** Retire [system] — its session is dropped and the entry removed from the config file. */
   fun unregister(system: String): Result {
-    // A site is a hostname pointing at this catalog, and retiring it would strand that hostname:
-    // its root 404s immediately (the mapping still routes, the session is gone), and after a
-    // restart `ServeSites.of` drops the now-unserved mapping so the host falls THROUGH to the
-    // global front door — a domain published as one app quietly becoming an index of every other.
-    // Fail closed instead: drop the site first, then retire.
+    // Retiring a site's catalog would strand its hostname (404 now, and after a restart the host
+    // falls through to the global front door). Fail closed: drop the site first.
     sites.hostFor(system)?.let { host ->
       return Result.Conflict(
         "catalog '$system' is published as the top-level site '$host'; remove the site first"
@@ -355,26 +286,17 @@ class ServeCatalogAdmin(
       repo = repo,
       branch = "$branchPrefix${entry.system}",
       group = homeGroup(entry, repo, declaredGroups),
-      // Carried, not dropped. The field is persisted with the entry either way, so leaving it out
-      // of the runtime registration made an admin-published import correct in `catalogs.json` and
-      // wrong on the front page until the next restart — filed under the staging repository's
-      // owner, which is how `joreilly` imports appeared under `yschimke repositories`
-      // (compose-ai-tools#5012).
+      // Carried, not dropped, so an admin-published import is attributed correctly on the front
+      // page before a restart.
       importedFrom = entry.importedFrom,
       loadPriority = entry.loadPriority,
       designSystem = entry.isDesignSystem,
     )
 
   /**
-   * Whether the on-disk config already records [system] as coming from [repo].
-   *
-   * The question the unchanged-repo branch has to ask before answering 409, so a runtime swap whose
-   * persistence failed has somewhere to be retried from. True when there is no config file at all:
-   * registrations are then runtime-only by configuration and there is nothing that could disagree.
-   *
-   * A file that cannot be read answers **false**, so the caller attempts the write. That write will
-   * fail too and come back as a persistence warning naming the reason — which is a better answer
-   * than a 409 claiming the catalog is already published from a document nobody can parse.
+   * Whether the on-disk config already records [system] as coming from [repo], so a swap whose
+   * persistence failed can be retried. True with no config file. An unreadable file answers false,
+   * so the caller attempts the write and reports why it fails rather than a misleading 409.
    */
   private fun persistedRepoMatches(system: String, repo: String): Boolean {
     val file = configFile ?: return true
@@ -393,9 +315,8 @@ class ServeCatalogAdmin(
     val file = configFile ?: return "not persisted: no catalogs config file is configured"
     return synchronized(configLock) {
       runCatching {
-        // The read-modify-write itself is serialised by the FILE (every administrator that edits
-        // this document shares one instance); configLock additionally guards `groups`, which is
-        // refreshed from what was written.
+        // The read-modify-write is serialised by the file instance; configLock additionally guards
+        // `groups`.
         groups = file.update(mutate).groups
         null
       }
@@ -438,10 +359,9 @@ internal fun ServeCatalogsConfig.withGroup(group: ServeCatalogsConfig.Group): Se
 }
 
 /**
- * This config with group [id] removed. Entries claiming it are left declaring it: an unknown group
- * id is already a tolerated condition ([ServeCatalogsConfig.problems] reports it, and the card
- * falls back to its owner heading), and silently rewriting an operator's catalog entries because a
- * section was deleted would lose the claim they'd have to retype if the group came back.
+ * This config with group [id] removed. Entries claiming it keep the claim: an unknown group is
+ * tolerated ([ServeCatalogsConfig.problems] reports it, the card falls back to its owner heading),
+ * and the claim survives the group coming back.
  */
 internal fun ServeCatalogsConfig.withoutGroup(id: String): ServeCatalogsConfig =
   copy(groups = groups.filterNot { it.id == id })

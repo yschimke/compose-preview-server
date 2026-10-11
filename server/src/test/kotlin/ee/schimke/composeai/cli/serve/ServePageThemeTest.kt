@@ -8,15 +8,10 @@ import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 /**
- * The **Page theme** setting: the site chrome follows the selected preview theme (`?theme=dark`, a
- * Light/Dark chip, the viewer's Theme select) unless the visitor turns it off in the header's
- * Settings menu.
- *
- * Structural assertions on what the server emits — the pre-paint script, the `<html>` attributes it
- * reads, the Settings control, and the wiring that keeps the class in step when a chip is clicked.
- * The behaviour itself (pick Dark on a light machine, watch the page turn over; turn the setting
- * off, watch it revert) is captured in a real browser by the `serve-landing-catalog-palette`
- * `theme-sync` / `theme-sync-menu` / `theme-sync-off` states in `preview-harness`.
+ * The Page theme setting: the site chrome follows the selected preview theme (`?theme=dark`, a
+ * chip, the viewer's Theme select) unless turned off in Settings. Structural assertions on what the
+ * server emits; the behaviour is captured in a browser by `serve-landing-catalog-palette`'s
+ * `theme-sync`, `theme-sync-menu` and `theme-sync-off` states in `preview-harness`.
  */
 class ServePageThemeTest {
 
@@ -67,14 +62,9 @@ class ServePageThemeTest {
   }
 
   /**
-   * A catalog that DECLARES a dark stage offers no Light chip, whatever its id reads like —
-   * yschimke/wear-m3-catalog#99.
-   *
-   * The viewer used to decide this from the system id alone (`SystemDisplay.isDarkFirst`) while the
-   * stage under the pixels went through the declaration-first `resolveDarkFirst`. `remote-m3` —
-   * dark-only Remote Compose documents, `display.surface: "dark"`, an id with no `wear`/`watch`
-   * token in it — landed between the two: dark stage, and a Light chip on top of it that no lane
-   * behind the page could honour, because every document carries explicit dark-first colours.
+   * A catalog declaring a dark stage offers no Light chip whatever its id: deciding from the id
+   * alone offered `remote-m3` (dark-only documents, no `wear` token) a Light chip nothing could
+   * honour.
    */
   @Test
   fun `a catalog declaring a dark surface offers no day-night choice`() {
@@ -108,13 +98,9 @@ class ServePageThemeTest {
   }
 
   /**
-   * A dark STAGE is not a dark-only catalog.
-   *
-   * `display.surface` is a stage colour in the spec schema, declared independently of what a
-   * catalog bakes: a non-Wear catalog can perfectly well publish a light/dark pair and ask for a
-   * dark ground under both. Suppressing its Light chip would leave `previewTheme` labelling the
-   * light render on screen as Dark, with no way back to it. Only a declared-dark catalog with no
-   * light render anywhere in the session is dark-only.
+   * A dark stage isn't a dark-only catalog: `display.surface` is a stage colour, and a catalog may
+   * publish light/dark pairs on a dark ground. Only a declared-dark catalog with no light render is
+   * dark-only.
    */
   @Test
   fun `a declared dark stage keeps the pair when the catalog bakes a light render`() {
@@ -133,12 +119,8 @@ class ServePageThemeTest {
   }
 
   /**
-   * A declaration can ADD an always-dark catalog; it cannot take one away from a Wear id.
-   *
-   * `SystemDisplay.normalizeOverrideParams` drops `uiMode` for a Wear/watch id unconditionally, on
-   * every render and socket lane, and it is handed a system id with no declaration to read. So a
-   * Wear catalog declaring `display.surface: "light"` must not sprout an enabled Light choice: it
-   * would move the control and the URL while the server returned the same pixels.
+   * A declaration can add an always-dark catalog but can't remove a Wear id's: `uiMode` is dropped
+   * for Wear/watch ids on every lane, so a Light choice would change nothing.
    */
   @Test
   fun `a Wear id keeps its veto over a declared light surface`() {
@@ -168,10 +150,8 @@ class ServePageThemeTest {
 
   @Test
   fun `the resolved scheme is pinned before first paint, not after the page loads`() {
-    // Deferring this to the shell bundle would paint the page in the wrong mode and correct it a
-    // frame
-    // later — a full-screen flash on a dark-to-light swap. It has to be inline, in the head, and
-    // ahead of the body.
+    // Inline in the head, ahead of the body; deferring to the shell bundle would flash the wrong
+    // mode.
     val html = landing()
     val script = html.substringAfter("<script>try{var p=new URLSearchParams").substringBefore("\n")
     assertTrue(script.isNotBlank(), "no pre-paint page-theme script emitted")
@@ -186,9 +166,8 @@ class ServePageThemeTest {
       ),
       script,
     )
-    // Per-TAB, and above the baked id: the viewer applies this tab's choice on a `__light`
-    // preview too, so the chrome has to follow it or frame a dark render in a light page. The
-    // baked theme is `r`'s own fallback, so it is reached only when the memory cannot be used.
+    // Per tab, and above the baked id: the viewer applies this tab's choice to a `__light` preview
+    // too, so the chrome follows it. The baked theme is `r`'s fallback.
     assertTrue(script.contains("r(sessionStorage.getItem(\"cp-theme:wear-m3\"))"), script)
     assertFalse(
       script.contains("p.get(\"uiMode\")||((decodeURIComponent"),
@@ -204,12 +183,8 @@ class ServePageThemeTest {
   }
 
   /**
-   * A remembered value the mode table cannot answer for must not shadow the baked theme.
-   *
-   * `t = stored || baked` with one resolve at the end paints nothing for a `theme:<provider>` the
-   * catalog has stopped declaring while a tab stayed open: the string is truthy, so the baked theme
-   * is never reached. Resolving each candidate as it is considered is what keeps OS chrome off a
-   * plainly light preview after a catalog update.
+   * A remembered value the mode table can't resolve (e.g. a provider no longer declared) must not
+   * shadow the baked theme; each candidate is resolved in turn.
    */
   @Test
   fun `an unresolvable remembered theme falls through to the baked one`() {
@@ -226,12 +201,7 @@ class ServePageThemeTest {
     )
   }
 
-  /**
-   * A viewer that cannot re-render never consults the memory at all.
-   *
-   * A static bundle disables the Theme control, so the stage keeps its baked image whatever the tab
-   * remembers; following the memory there frames a light snapshot in dark chrome.
-   */
+  /** A viewer that can't re-render ignores the memory: the stage keeps its baked image. */
   @Test
   fun `a viewer that cannot apply a theme resolves the chrome from its baked one`() {
     val html = viewer()
@@ -251,11 +221,8 @@ class ServePageThemeTest {
   }
 
   /**
-   * A remembered choice the destination does not offer gives way to its baked theme.
-   *
-   * One key serves a catalog's viewer, its landing grid and its comparison wall, so `light` picked
-   * on a Wear catalog's wall arrives at a Wear viewer that offers Dark alone. The sticky script
-   * finds no Light option and leaves the dark render up; the chrome has to agree with it.
+   * A remembered choice the destination doesn't offer gives way to its baked theme (one key serves
+   * a catalog's viewer, landing and wall).
    */
   @Test
   fun `the pre-paint script checks a remembered theme against what the viewer offers`() {
@@ -350,21 +317,14 @@ class ServePageThemeTest {
       landing().contains("c.setAttribute(\"aria-label\", lbl);"),
       "a swapped card's accessible name must follow its visible theme variant",
     )
-    // The comparison page's Theme control moved to `<cp-compare-wall>` with the port, and is tested
-    // there as behaviour: `compareWallElement.test.ts` clicks the control against a stubbed
-    // `cpPageTheme` and asserts the choice is handed over.
+    // The comparison page's Theme control is tested as behaviour in `compareWallElement.test.ts`.
   }
 
   @Test
   fun `Back and Forward repaint the chrome with the entry they restore`() {
-    // Every pop path restores its theme by ASSIGNING the control's value, which fires no `change`
-    // — so each one has to hand the restored choice over itself. Missing this left Back from Dark
-    // to a Light entry re-rendering the preview light inside a page still pinned dark.
-    //
-    // It must hand over the ACTIVE choice, not the displayed one: a viewer opened with no theme
-    // anywhere shows its baked default under `data-theme-active="0"`, and passing `.value` there
-    // pins the page to a mode nobody picked. #3544 fixed that in `viewer.js` and left this
-    // assertion on the old spelling, so it has been failing on `main` since.
+    // Every pop path restores its theme by assigning the value (no `change`), so it must hand over
+    // the active choice itself, not the displayed one (which would pin a baked default nobody
+    // picked).
     val viewerJs = viewerSource()
     assertTrue(
       viewerJs
@@ -372,16 +332,13 @@ class ServePageThemeTest {
         .contains("window.cpPageTheme.follow(activeThemeChoice())"),
       "the viewer's Back/Forward hydrate must repaint the chrome, from the active choice",
     )
-    // The comparison page's pop path moved to `<cp-compare-wall>`; the same element test drives its
-    // `onPop` handler and asserts the restored theme is handed over too — which a grep could only
-    // ever claim was present, not that it ran.
+    // The comparison page's pop path is driven by the element test too.
   }
 
   @Test
   fun `theme chips with a resolved mode are painted in their own theme`() {
-    // The chips are a taster, not two labels: each pins its own `color-scheme`, which re-resolves
-    // every `light-dark()` pair — including a served catalog's palette — in THAT chip's mode. The
-    // same property the page-theme setting uses, applied one level down.
+    // Each chip pins its own `color-scheme`, re-resolving every `light-dark()` pair (including a
+    // catalog's palette) in that chip's mode.
     val sheet = ServeWebAssets.load("serve.css")!!.bytes.decodeToString()
     assertTrue(
       sheet.contains("""[data-compare-theme="light"]) { color-scheme: light; }"""),
@@ -391,10 +348,8 @@ class ServePageThemeTest {
       sheet.contains("""[data-compare-theme="dark"]) { color-scheme: dark; }"""),
       "the Dark chip must resolve it in dark",
     )
-    // Selection is a ring rather than a fill swap: the fill IS the swatch, so replacing it would
-    // hide the theme at the moment it is picked. The ring must be INSET — the viewer's theme bar is
-    // an `overflow` scroller padded on one edge, so an outward ring is clipped to three sides
-    // there and stops reading as a selection marker at all.
+    // Selection is an inset ring, not a fill swap (the fill is the swatch); inset because the
+    // viewer's theme bar is a padded scroller that clips outward rings.
     val pressed =
       sheet
         .substringAfter("""[data-compare-theme="dark"])[aria-pressed="true"] {""")
@@ -433,12 +388,8 @@ class ServePageThemeTest {
 
   @Test
   fun `a disabled chip is dimmed inside its own scheme, not against the page`() {
-    // The viewer greys the Day/Night pair on a fixed lane. The shared disabled treatment fades the
-    // label to 38% of `on-surface`; on a chip pinned to the opposite scheme, resolving that against
-    // the PAGE would paint near-white text on a light page (or near-black on a dark one) — an
-    // unavailable option that has vanished rather than one that reads as unavailable. So the chip
-    // keeps its own surface under the dimmed label, and the scheme pin stays unconditional: every
-    // colour on the chip resolves in one mode, in every state.
+    // A disabled chip keeps its own surface under the dimmed label and its scheme pin, so it reads
+    // as unavailable rather than vanishing against the page.
     val sheet = ServeWebAssets.load("serve.css")!!.bytes.decodeToString()
     val disabled =
       sheet.substringAfter("""[data-compare-theme="dark"]):disabled {""").substringBefore("}")
@@ -452,9 +403,8 @@ class ServePageThemeTest {
 
   @Test
   fun `the stylesheet resolves both modes from color-scheme alone`() {
-    // The setting is implemented as `color-scheme` on <html>, which can only re-resolve values
-    // written as `light-dark()` pairs. A `prefers-color-scheme` block anywhere in the sheet would
-    // be a rule the pin cannot move — the page would go dark while that rule stayed light.
+    // The setting works via `color-scheme` on <html>, which only re-resolves `light-dark()` pairs;
+    // a `prefers-color-scheme` block would be immune to the pin.
     val sheet = ServeWebAssets.load("serve.css")!!.bytes.decodeToString()
     assertFalse(
       sheet.contains("@media (prefers-color-scheme"),

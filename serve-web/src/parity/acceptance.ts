@@ -1,26 +1,16 @@
-// The browser half of `compose-preview-known-differences/v1` — and it is an *adapter*, not an
-// implementation.
+// The browser adapter for `compose-preview-known-differences/v1`. It runs the same engine module as
+// `design-artifacts`, so the two can't disagree; the conformance fixtures still check
+// `design-parity`, a separate implementation. (Possible because the reader no longer needs
+// `node:zlib` / `node:crypto`; decoding via `<img>` would normalise colour types and hide the
+// mask-encoding rules. See `png-lite.mjs`.)
 //
-// §4 asks for two engines that agree about what an acceptance means, and shared conformance fixtures
-// to keep them honest. This file takes the stronger option where it is available: the browser runs
-// the **same module** `design-artifacts` runs, so the two cannot disagree at all, and the fixtures go
-// on doing their job against `design-parity`, which is a genuine second implementation in another
-// repository. That was only possible once the reader stopped needing `node:zlib` and `node:crypto`
-// — see `png-lite.mjs`'s header for why the alternative, decoding through an `<img>` onto a canvas,
-// is not an option here: it normalises every colour type to 8-bit RGBA and so cannot see the
-// mask-encoding rules the contract spends a section on.
-//
-// What is left for this file is everything the engine deliberately does not do:
-//
-// - **Fetching**, with the three reader obligations §4 names discharged on the server side and
-//   reported as status codes — 403 `path-not-contained`, 413 `artifact-too-large`, 404
-//   `artifact-unreadable`. Collapsing those into one failure would leave two of the three
-//   unreachable, and the traversal is the one worth seeing.
-// - **Prefetching**, because `readArtifact` is synchronous by design: the evaluation ladder is a
-//   sequence of ordering requirements (preflight strictly before decode, gates strictly before
-//   scoring) and threading a promise through it would turn every one of those into a race.
-// - **Deciding what a comparison is**: the scope fields, the plane, and the canonical rasters both
-//   sides are gated in.
+// This file does what the engine deliberately doesn't:
+// - Fetching, with the server's three refusals kept distinct as status codes: 403
+//   `path-not-contained`, 413 `artifact-too-large`, 404 `artifact-unreadable`.
+// - Prefetching, because `readArtifact` is synchronous: the evaluation ladder's ordering would turn
+//   into races if it awaited.
+// - Deciding what a comparison is: scope fields, the plane, and the canonical rasters both sides
+//   are gated in.
 
 import {
     BUDGET,
@@ -73,40 +63,25 @@ export interface AcceptanceStatus {
 
 export interface AcceptanceReport {
     /**
-     * Three outcomes, not two.
-     *
-     * `absent` is a catalog that has accepted nothing — the ordinary case, and the one the band says
-     * nothing about. `unavailable` is a catalog that has, and whose document this page could not
-     * fetch: an auth failure, a server error, a network drop. Folding the second into the first
-     * would hide the band on exactly the pages where an acceptance exists and went unevaluated,
-     * which reads to a viewer as "nothing is accepted here" — a clean bill of health for a page that
-     * measured nothing. The page only carries this evaluator at all because the *server* found a
-     * document, so absence at this point is already surprising.
+     * `absent`: the catalog accepts nothing (the ordinary case). `unavailable`: it has a document
+     * this page couldn't fetch (auth, server error, network). Folding the two would read as a clean
+     * bill of health for a page that measured nothing.
      */
     state: "absent" | "unavailable" | "evaluated";
     /**
-     * Whether the engine refused the **document** rather than judging its records.
-     *
-     * The engine says this by omitting `statuses` entirely, and it is not recoverable from the
-     * failures: `duplicate-id` is deliberately attributed to the first spelling seen and so carries
-     * an `id`, exactly like a per-record refusal that does have a row. A reader that told the two
-     * apart by that `id` would drop the loudest document-level verdict there is and leave the band
-     * showing scores above an empty list — "this catalog accepts nothing here" and "this catalog's
-     * document was refused" are the same picture with opposite meanings.
+     * Whether the engine refused the document rather than judging records, signalled by omitting
+     * `statuses`. Not recoverable from failures: `duplicate-id` carries an `id` like a per-record
+     * refusal, so telling them apart that way would hide a refused document behind an empty list.
      */
     documentRejected: boolean;
     /**
-     * What happened to the two rasters this comparison is scored from.
-     *
-     * `unavailable` is the one worth carrying: with no pair the engine runs its validation-only
-     * pass, which reports every in-scope acceptance as `out-of-scope` — the token that ordinarily
-     * means "authored for another comparison" and that a band therefore hides. A transient 503 on
-     * the render lane would then be indistinguishable from a catalog that accepts nothing here.
-     * `none` is a walk that never sought a pair at all.
+     * What happened to the two rasters. `unavailable` matters: with no pair the engine runs
+     * validation-only and reports in-scope acceptances as `out-of-scope`, which bands hide, so a
+     * transient 503 would look like "accepts nothing here". `none`: the walk never sought a pair.
      */
     pair: "scored" | "unavailable" | "none";
     statuses: Record<string, AcceptanceStatus>;
-    /** Issue-index lifecycle joined separately from the comparison verdict. */
+    /** Issue-index lifecycle, joined separately from the comparison verdict. */
     lifecycles: Record<string, AcceptanceLifecycle>;
     /** `index` rather than `id` on a record too broken to have one — see `sortFailures`. */
     validationFailures: Array<{ id?: string; index?: number; reason: string }>;
@@ -117,9 +92,8 @@ export interface AcceptanceReport {
 }
 
 function empty(state: AcceptanceReport["state"]): AcceptanceReport {
-    // A function rather than a shared frozen object: the report is handed to a component that reads
-    // it and could reasonably sort or filter it, and two pages sharing one array is the kind of
-    // aliasing that only shows up once someone does.
+    // A function rather than a shared frozen object, so callers can sort or filter without
+    // aliasing.
     return {
         state,
         documentRejected: false,
@@ -133,11 +107,8 @@ function empty(state: AcceptanceReport["state"]): AcceptanceReport {
 }
 
 /**
- * Evaluate this catalog's acceptances against one comparison, and score it.
- *
- * Returns `published: false` when the catalog carries no document — which is every catalog until it
- * accepts something, and is why the route answers 404 rather than inventing an empty document for
- * the engine to judge.
+ * Evaluate this catalog's acceptances against one comparison, and score it. `published: false` when
+ * the catalog carries no document (the route 404s rather than inventing an empty one).
  */
 export async function evaluateComparison(
     sources: AcceptanceSources,
@@ -149,17 +120,15 @@ export async function evaluateComparison(
     if (document.state === "absent") return empty("absent");
     if (document.state === "unavailable") return empty("unavailable");
 
-    // The two rasters, decoded by the contract's own reader rather than by the browser's. Both are
-    // needed before any gate can run: the plane gate samples their pixels, and the candidate gate
-    // compares inside the mask at canonical resolution.
+    // Decoded by the contract's own reader. Both rasters are needed before any gate: the plane gate
+    // samples pixels and the candidate gate compares inside the mask at canonical resolution.
     const pair = await fetchPair(sources);
     if (
         !pair ||
         !currentGeneration(pair.referenceBytes, scope.referenceSha256)
     ) {
-        // Nothing here is a verdict about the *document*, so the evaluation still runs — with no
-        // comparison, which is the validation-only pass. An acceptance is then `out-of-scope` rather
-        // than falsely invalidated by a comparison that could not be measured.
+        // Not a document verdict, so run the validation-only pass: acceptances become
+        // `out-of-scope` rather than being falsely invalidated.
         const artifacts = await prefetch(document.text, sources.artifactUrl);
         const result = evaluateKnownDifferences({
             documentText: document.text,
@@ -201,13 +170,10 @@ export async function evaluateComparison(
                 resolved.boxes.candidate,
                 resolved.plane,
             ),
-            // **Projected, not passed through.** The index publishes `boundsInRoot` in render
-            // pixels and says so on the wire; an acceptance's `element.bounds` is its baseline in
-            // the canonical plane, and the element gate compares the two directly. §4 names the
-            // failure for skipping this: an engine that expects canonical bounds from the index
-            // reports `element-moved` for an element that never moved — a false invalidation with a
-            // plausible explanation attached, which nothing surfaces. The transform belongs to the
-            // comparison (D1), and this is the comparison.
+            // Projected, not passed through: the index publishes `boundsInRoot` in render pixels,
+            // while an acceptance's `element.bounds` is in the canonical plane. Without projection
+            // the element gate reports `element-moved` for elements that never moved. The transform
+            // belongs to the comparison.
             tagIndex: projectTagIndex(
                 tagIndex,
                 resolved.boxes.candidate,
@@ -216,9 +182,7 @@ export async function evaluateComparison(
         },
     });
 
-    // I5, as one line: only the masks the gates left `valid` reach the union. `resolved`,
-    // `invalidated` and `refused` suppress nothing, and the engine has already applied that rule —
-    // reapplying it here from `statuses` would be a second copy of the precedence table.
+    // Only masks the gates left `valid` reach the union; the engine already applied that rule.
     const survivingMasks = result.survivingMasks ?? [];
     const scores = scoreComparison({
         reference: pair.reference,
@@ -279,17 +243,10 @@ function currentGeneration(
 }
 
 /**
- * Walk the whole acceptance set against the catalog, with no comparison at all.
- *
- * Per-comparison evaluation is not the whole job, and the gap is a *shape* rather than a rule: an
- * acceptance naming a removed or renamed preview, reference, component or variant is never scoped
- * into any focused comparison, so an engine that only ever runs inside one leaves it permanently
- * absent from the browser while `design-parity` reports `orphaned-target` for the same record. That
- * is the "invisible forever" failure the rule exists to prevent, reintroduced by where the
- * evaluation is called from.
- *
- * No rasters are decoded — a validation-only pass reaches every document-level and record-level
- * refusal, which is exactly the set this walk is for.
+ * Walk the whole acceptance set with no comparison. An acceptance naming a removed or renamed
+ * target is never scoped into any focused comparison, so without this walk it would never surface
+ * in the browser while `design-parity` reports `orphaned-target`. Validation-only, no rasters
+ * decoded.
  */
 export async function walkCatalog(
     sources: Pick<AcceptanceSources, "documentUrl" | "artifactUrl">,
@@ -344,18 +301,9 @@ function joinLifecycles(
 }
 
 /**
- * The document's text, or which of the two ways there isn't one.
- *
- * **A 404 is the only absence.** Anything else — 401, 500, a network drop — means the catalog has a
- * document this page could not read, and reporting that as "nothing accepted" would hide the band on
- * exactly the pages where an acceptance exists and went unevaluated. The page only carries this
- * evaluator because the *server* already found a document, so even the 404 is a surprise; it is
- * still the honest reading of one, because the document can be deleted between the page render and
- * the fetch.
- *
- * A 413 is turned into the text the engine would refuse rather than reported either way: the host
- * refuses an oversized document from its length, so nothing has allocated it, and the consumer that
- * owns `document-too-large` still needs to be able to say so.
+ * The document's text, or which kind of absence. Only a 404 is absence; 401, 500 or a network drop
+ * mean a document exists that couldn't be read. A 413 is turned into text the engine refuses, so
+ * the engine still reports `document-too-large`.
  */
 type DocumentFetch =
     | { state: "absent" }
@@ -414,8 +362,8 @@ async function fetchRaster(
     try {
         return { raster: decodePng(bytes), bytes };
     } catch {
-        // A comparison side this reader cannot decode is not an acceptance verdict — it is a
-        // comparison that cannot be measured, and the caller falls back to the validation-only pass.
+        // An undecodable side means the comparison can't be measured, not a verdict; fall back to
+        // validation-only.
         return null;
     }
 }
@@ -426,13 +374,12 @@ interface PrefetchedArtifact {
     /** The header-pass answer: a prefix and the whole file's size, or the reader token that stands
      *  in for it. Always present — every declared path gets a header read. */
     header: ArtifactAnswer;
-    /** The decode-pass answer, present only for a path whose header preflight came back clean —
-     *  the bytes, **or the refusal the second read established**. `path-not-contained` and
-     *  `artifact-too-large` are verdicts only the server can reach, so a body refused between the two
-     *  rounds has to carry its own token: flattening it to a missing entry reports
-     *  `artifact-unreadable`, where the reference reader stats the file again and names the reason.
-     *  Absent entirely is `artifact-unreadable`, which is safe — the engine only full-reads a record
-     *  its preflight already cleared, so this is never missing for one it actually asks to decode. */
+    /**
+     * The decode-pass answer, present only for a path whose header preflight was clean: the bytes,
+     * or a refusal the second read established (`path-not-contained` / `artifact-too-large`, which
+     * only the server can determine). Absent means `artifact-unreadable`, which is safe since the
+     * engine only decodes records its preflight cleared.
+     */
     full?: Uint8Array | { error: string };
     /** Whether the header round learned the artifact's real size from the response, or only from how
      *  much of it arrived. False forces a full read purely to measure the file — see `prefetch`. */
@@ -440,45 +387,26 @@ interface PrefetchedArtifact {
 }
 
 /**
- * Fetch what the document names, in two rounds, before the synchronous evaluation begins.
- *
- * The reference reader in `known-differences.mjs` bounds its memory not by fetching little but by
- * reading one record at a time and **retaining nothing** — the header preflight reads a few dozen
- * bytes, and the whole file is read again, and dropped again, only inside the decode of a record the
- * preflight already cleared. A browser reader is synchronous, so it cannot fetch mid-ladder and must
- * have every answer in hand before the engine starts; the naive way to satisfy that — fetch every
- * artifact in full up front — reintroduces exactly the four gigabytes of simultaneously-held bytes
- * the reference design spends a paragraph avoiding, and does it *before* a single preflight has had
- * the chance to refuse a record.
- *
- * So this mirrors the reference reader's two phases instead of collapsing them:
- *
- * 1. A bounded **prefix** of every declared path — `maxPreflightBytes`, streamed and cut off rather
- *    than allocated whole, so a hostile eight-megabyte artifact costs four kilobytes here. That is
- *    the read the header preflight runs on, and it is enough for it: a conforming header resolves
- *    within {@link MAX_CONFORMING_HEADER_BYTES}, and one that does not is `header-invalid` — which is
- *    the same verdict on the same bytes the reference reader reaches, because the engine caps its own
- *    view to the same constant regardless of what a reader hands over.
- * 2. The **full body** of only the paths whose prefix preflights cleanly and sits within the byte
- *    cap. That set is a superset of the records the engine will actually decode — it drops the
- *    mask-encoding and pixel-budget filters, which only ever *remove* records — so the engine never
- *    asks to decode a path this round skipped, while a flood of malformed, oversized, animated, or
- *    non-PNG artifacts is refused on its prefix alone and never fetched in full.
- *
- * What this must not do is *filter the header round*: a record whose path is illegal is still
- * fetched-and-refused rather than skipped, so the engine sees the reader's answer instead of an
- * absence this file invented. The paths are discovered by parsing the document leniently — a parse
- * that fails here changes nothing, because the engine parses it again and owns `document-unreadable`.
+ * Fetch what the document names, in two rounds, before the synchronous evaluation. The reference
+ * reader bounds memory by reading one record at a time and retaining nothing; fetching every
+ * artifact in full up front would hold gigabytes before any preflight could refuse. So, mirroring
+ * its phases:
+ * 1. A bounded prefix of every declared path (`maxPreflightBytes`, streamed and cut off) for the
+ *    header preflight. A conforming header fits in {@link MAX_CONFORMING_HEADER_BYTES}; the engine
+ *    caps its own view to the same constant, so verdicts match.
+ * 2. The full body only of paths whose prefix preflights cleanly within the byte cap: a superset of
+ *    what the engine decodes, so it never asks for a skipped path, while malformed or oversized
+ *    artifacts are refused on their prefix alone. The header round must not be filtered: illegal
+ *    paths are still fetched and refused, so the engine sees the reader's answer. Paths come from a
+ *    lenient parse; the engine re-parses and owns `document-unreadable`.
  */
 async function prefetch(
     documentText: string,
     artifactUrl: (path: string) => string,
     /**
-     * The catalog the **evaluation** will be given, or none when it will be given none.
-     *
-     * Not optional in spirit: `orphaned-target` is a pre-read refusal, so a planner without the
-     * catalog the engine has counts records the engine never reads. See the ceiling gate below for
-     * why that direction is the dangerous one.
+     * The catalog the evaluation will be given (or none). Needed because `orphaned-target` is a
+     * pre-read refusal; without it the planner counts records the engine never reads (see the
+     * ceiling gate).
      */
     catalog: unknown = null,
 ): Promise<Map<string, PrefetchedArtifact>> {
@@ -492,18 +420,10 @@ async function prefetch(
     const acceptances = (parsed as { acceptances?: unknown })?.acceptances;
     if (!Array.isArray(acceptances)) return artifacts;
 
-    // **A document the engine rejects outright is fetched for not at all.** `readArtifact` is
-    // synchronous by design, so this file has to have the bytes in hand before the ladder starts —
-    // which means a rejected document would otherwise be paid for in full: up to 256 × 2 × 8 MiB of
-    // legal, individually-capped artifacts held for a result that carries no `statuses` and reads
-    // nothing. The engine's own preflight goes to some length to avoid exactly that (it retains no
-    // bytes and re-reads them later), and prefetching undoes it unless the same question is asked
-    // first.
-    //
-    // Asked *of the engine* rather than answered here: `readsNoArtifacts` is the same code path the
-    // evaluation takes, so the two cannot drift. A second copy of the rejection rules that skipped
-    // for a document the engine does read would turn every one of its records into
-    // `artifact-unreadable` — a verdict change, and the only failure direction that matters.
+    // A document the engine rejects outright is not fetched for at all; otherwise up to 256 × 2 × 8
+    // MiB would be held for a result that reads nothing. Asked of the engine (`readsNoArtifacts`,
+    // the same code path) so the two can't drift: wrongly skipping a document the engine does read
+    // would turn every record into `artifact-unreadable`.
     if (readsNoArtifacts(documentText)) return artifacts;
 
     const paths = new Set<string>();
@@ -531,40 +451,19 @@ async function prefetch(
         );
     });
 
-    // **A document over the aggregate ceiling is not paid for either.** `readsNoArtifacts` above
-    // catches the document the engine refuses from its *text*; this catches the one it refuses from
-    // the reader's *sizes* — `document-too-large` against `maxTotalArtifactBytes`, a verdict reached
-    // without decoding anything. Round one has already answered every size, so the total is known
-    // here, and round two would otherwise retain full bodies right up until the engine said the
-    // document was never readable. The ceiling bounds the legal case; this is the illegal one, which
-    // is the one an attacker picks.
+    // A document over the aggregate ceiling (`document-too-large` against `maxTotalArtifactBytes`)
+    // isn't paid for either; round one already knows every size.
     //
-    // **Over-estimating this total is the dangerous direction, and under-estimating is free.** The
-    // gate skips when the sum exceeds the ceiling, so a sum that is too high skips round two for a
-    // document whose engine-side total is *under* it — and every record the engine then asks to
-    // decode is a body nobody fetched, reported as `artifact-unreadable`. A verdict changed by a
-    // planner. A sum that is too low merely fetches bytes for a document that turns out to be
-    // rejected: wasteful, never wrong.
-    //
-    // So this mirrors `preflightRecord`'s accounting exactly rather than summing the map:
-    //
-    // - **only records the engine reads at all.** `id-not-safe`, a schema failure,
-    //   `orphaned-target` and `path-not-contained` all return before the first read, so their
-    //   artifacts never reach the engine's total. `recordsThatRead` is the engine's own answer, and
-    //   it is given the same catalog the evaluation gets — without it, `orphaned-target` cannot be
-    //   seen and every orphan is counted, which is exactly the over-estimate above.
-    // - **only records whose two artifacts both answered, and both within `maxArtifactBytes`.** A
-    //   record refused for busting the per-artifact cap returns before `artifactBytes` is assigned,
-    //   so the engine charges it nothing — while its declared size is the largest number in the
-    //   document, and counting it is the easiest way to over-estimate by gigabytes.
-    // - **per record's two fields, not per unique path.** A record may legitimately name the same
-    //   file for `mask` and `acceptedCandidate`; the engine reads it twice and charges it twice,
-    //   and the fetch map holds it once. Counting map entries under-charges such a record — the
-    //   safe direction, but not the right number.
-    //
-    // An undeclared size (`totalKnown: false`) contributes only what arrived, under-counting for the
-    // same safe reason, and is the honest limit of this check: a producer whose server declares no
-    // length is measured by round two rather than here.
+    // Over-estimating the total is the dangerous direction (it skips round two for a readable
+    // document, making records `artifact-unreadable`); under-estimating only wastes bytes. So this
+    // mirrors `preflightRecord`'s accounting:
+    // - only records the engine reads at all (`recordsThatRead`, given the same catalog, so orphans
+    //   aren't counted);
+    // - only records whose two artifacts both answered within `maxArtifactBytes` (oversized ones
+    //   are refused before being charged);
+    // - per record field, not per unique path (a file named for both `mask` and `acceptedCandidate`
+    //   is charged twice). An undeclared size counts only what arrived (an under-count); such
+    //   producers are measured by round two.
     const reading = new Set(recordsThatRead(documentText, catalog));
     let plannedBytes = 0;
     for (const record of acceptances) {
@@ -592,8 +491,8 @@ async function prefetch(
     }
     if (plannedBytes > BUDGET.maxTotalArtifactBytes) return artifacts;
 
-    // Round two: the full body of the prefixes that earned it — and of the ones whose size the
-    // response never declared, which must be read to be measured. See `totalKnown`.
+    // Round two: full bodies for prefixes that earned one, and for responses with no declared size
+    // (read to be measured; see `totalKnown`).
     await pooled(
         [...artifacts],
         ARTIFACT_CONCURRENCY,
@@ -602,11 +501,9 @@ async function prefetch(
                 if (!entry.totalKnown) {
                     const measured = await fetchArtifact(artifactUrl(path));
                     if (measured instanceof Uint8Array) {
-                        // The real size at last. Correcting the header answer here is what stops the two
-                        // passes disagreeing about an unchanged file: left at the prefix's length, the
-                        // decode pass reports the whole body's length, `samePreflight` sees two different
-                        // numbers and the engine refuses a file that never changed as
-                        // `artifact-unreadable`.
+                        // Correct the header's size to the real one; left at the prefix length, the
+                        // two passes would disagree and the engine would refuse an unchanged file
+                        // as `artifact-unreadable`.
                         const header = entry.header;
                         if ("bytes" in header)
                             entry.header = {
@@ -634,42 +531,19 @@ async function prefetch(
 }
 
 /**
- * How many artifact requests may be in flight at once.
- *
- * `Promise.all` over a 256-record catalog opens 512 requests simultaneously, and each one the server
- * answers costs it a whole artifact in memory — the repository's own route reads the file after
- * checking its size, so 512 concurrent near-cap artifacts is four gigabytes on the *server* to return
- * four kilobytes apiece. The client pays a matching peak. A pool caps both at
- * `ARTIFACT_CONCURRENCY x maxArtifactBytes` in flight without changing which requests are made or
- * what any of them answer: it is a rate, not a budget, so no record's verdict depends on it.
- *
- * Eight is the usual browser per-host connection ceiling, so a larger number mostly queues in the
- * network stack anyway, where it is invisible instead of bounded.
+ * Max artifact requests in flight. `Promise.all` over 256 records opens 512 requests, each costing
+ * the server a whole artifact in memory. A pool bounds that without changing which requests are
+ * made or their answers. Eight matches the usual per-host connection limit.
  */
 const ARTIFACT_CONCURRENCY = 8;
 
 /**
- * Whether joining this path onto the artifact base would produce a request somewhere else.
- *
- * The rule above — fetch every path and let the *server* refuse the illegal ones — assumes the
- * request arrives at the artifact route, where containment is checked against the filesystem. A
- * traversal never gets there: `ok/../../../../status` is normalised by the URL parser **before**
- * `fetch` is called, so the browser issues a same-origin GET to an unrelated route, carrying the
- * session credential in the query, and the route that owns `path-not-contained` is never consulted.
- * Opening a page would then make requests the catalog's document chose.
- *
- * So the shapes a URL join can rewrite are answered here instead, with the **same token the server
- * would have answered** (`path-not-contained`, its 403) — which keeps this from inventing a verdict:
- * every such path is one the host refuses anyway, and a well-behaved server and this shortcut agree
- * byte for byte. Everything else still goes to the host, whose grammar check stays the authority.
- *
- * `\\` is in the list because WHATWG URL parsing treats a backslash as a separator for http(s), so
- * `..\..` traverses exactly like `../..`. `?` and `#` end the path component, which would drop the
- * credential the query carries or re-point the request. Tab, CR and LF are there because the
- * parser **removes** them from the URL before it resolves anything — measurably, the pathname of
- * `new URL(base + "glyph/\\t../\\t../status")` is `/parity/status`, so a segment spelled with one
- * is a `..` by the time it matters and something else to any check that compares strings. None of
- * these can occur in a path this contract calls legal.
+ * Whether joining this path onto the artifact base would request somewhere else. The URL parser
+ * normalises traversal before `fetch`, so `ok/../../../../status` would hit an unrelated
+ * same-origin route with the session credential, bypassing the server's containment check. Such
+ * paths are answered here with the same token the server would give (`path-not-contained`, 403);
+ * everything else goes to the host. Covered: `\` (a separator for http(s)), `?` and `#` (end the
+ * path), and tab/CR/LF (removed by the parser before resolution). None appear in a legal path.
  */
 function rewritesTheUrl(path: string): boolean {
     if (/[\\?#\t\n\r]/.test(path)) return true;
@@ -677,16 +551,9 @@ function rewritesTheUrl(path: string): boolean {
 }
 
 /**
- * A single- or double-dot path segment, **as the URL parser recognises one**.
- *
- * Not a string comparison against `.` and `..`: the WHATWG path state spells a dot segment with
- * either literal dots or `%2e` in ASCII-case-insensitive form, so `%2e%2e`, `%2E%2e` and `.%2e`
- * normalise away exactly like `..` does — measurably, the pathname of
- * `new URL(base + "glyph/%2e%2e/%2e%2e/status")` is `/parity/status`. A literal-only check catches
- * the obvious spelling and lets the encoded one through, which is the same request by another name.
- *
- * The decode is one pass and not recursive, because the parser's is: `%252e` stays `%252e`, reaches
- * the host, and is refused on the grammar like any other odd segment.
+ * A single- or double-dot segment as the URL parser recognises one, including `%2e` forms
+ * (case-insensitive). The decode is one pass like the parser's, so `%252e` reaches the host and is
+ * refused there.
  */
 function isDotSegment(segment: string): boolean {
     const decoded = segment.replace(/%2e/gi, ".");
@@ -723,13 +590,9 @@ function headerEarnsFullRead(header: ArtifactAnswer): boolean {
 }
 
 /**
- * Fetch at most `limit` bytes of `url`, and the whole file's size, without allocating the rest.
- *
- * A `Range` request is the ask, but a server that ignores it and answers `200` must not defeat the
- * bound — so the body is streamed and cancelled once `limit` bytes are in hand rather than trusting
- * the status. `byteLength` comes from `Content-Range`'s total when the server honoured the range, and
- * from `Content-Length` otherwise; a file the server will not size is read to its (bounded) end and
- * measured by what arrived.
+ * Fetch at most `limit` bytes of `url` plus the whole file's size, without allocating the rest.
+ * Uses a `Range` request, but streams and cancels at `limit` in case the server ignores it. Size
+ * comes from `Content-Range`'s total, else `Content-Length`; otherwise from what arrived.
  */
 async function fetchPrefix(
     url: string,
@@ -750,12 +613,9 @@ async function fetchPrefix(
     }
     if (response.status === 403) return failed("path-not-contained");
     if (response.status === 413) return failed("artifact-too-large");
-    // **An unsatisfiable range is a statement about the file, not a failure to read it.** The request
-    // starts at byte zero, which no resource with any bytes in it can fail to satisfy — so `416` means
-    // the artifact is empty, and a range-honouring server is required to say so that way. Relaying it
-    // as a failed fetch reports `artifact-unreadable` for a file the filesystem reader opens without
-    // complaint, where the engine refuses its too-short header as `header-invalid`. Handing the
-    // preflight an empty prefix lets it reach that same verdict from the same facts.
+    // A 416 for a range starting at zero means the file is empty. Hand the preflight an empty
+    // prefix so it reaches `header-invalid` like the filesystem reader, rather than reporting
+    // `artifact-unreadable`.
     if (response.status === 416) {
         return {
             header: { bytes: new Uint8Array(0), byteLength: 0 },
@@ -768,11 +628,8 @@ async function fetchPrefix(
     const total = totalBytesFromHeaders(response);
     const bytes = await readAtMost(response, limit);
     if (!bytes) return failed("artifact-unreadable");
-    // **A short read is its own proof of size.** Fewer bytes than asked for means the file ended, so
-    // the artifact is exactly what arrived however silent the headers were. Only a response that
-    // filled the prefix leaves the real size unknown, and that is the one worth a second read: the
-    // prefix's length is *not* the artifact's, and recording it as though it were makes the header
-    // and decode passes disagree about a file that never changed.
+    // A short read proves the size; only a full prefix with no declared size leaves it unknown,
+    // needing a second read so the two passes agree.
     const ranTooLongToTell = total === null && bytes.length >= limit;
     return {
         header: { bytes, byteLength: total ?? bytes.length },
@@ -844,17 +701,13 @@ async function fetchArtifact(
     } catch {
         return { error: "artifact-unreadable" };
     }
-    // The three the host distinguishes, kept distinct. Each is a different verdict for the record,
-    // and the engine honours only these two tokens from a reader — anything else it treats as
-    // unreadable rather than trusting into the result.
+    // Keep the host's three refusals distinct; the engine honours only these two tokens from a
+    // reader.
     if (response.status === 403) return { error: "path-not-contained" };
     if (response.status === 413) return { error: "artifact-too-large" };
     if (!response.ok) return { error: "artifact-unreadable" };
-    // **Bounded at the cap, not at whatever the server sends.** `arrayBuffer()` allocates the entire
-    // response, so a server answering with far more than `maxArtifactBytes` exhausted the tab through
-    // the very read the cap governs. One byte past the ceiling is enough to *know* it is past —
-    // §4's caps are inclusive — so the read stops there and the record is refused on its size, which
-    // is the verdict the reference reader reaches from a `stat` without allocating anything.
+    // Bounded at the cap, not at whatever the server sends: one byte past the (inclusive) cap
+    // proves the size, and the record is refused without allocating the rest.
     const bytes = await readAtMost(response, BUDGET.maxArtifactBytes + 1);
     if (!bytes) return { error: "artifact-unreadable" };
     if (bytes.length > BUDGET.maxArtifactBytes)
@@ -863,15 +716,9 @@ async function fetchArtifact(
 }
 
 /**
- * The synchronous reader the engine calls, over what `prefetch` already has.
- *
- * The header pass passes `{ prefix }` and gets the bounded prefix answer; the decode pass passes no
- * options and gets the full body. A path the prefetch never saw — one a record spells but no
- * acceptance declared, or one a lenient parse missed — is `artifact-unreadable`, which is what a
- * reader that could not open it would say. So is a full read of a path whose header never earned a
- * body: the engine only reaches that for a record its own preflight cleared, so it never happens for
- * one the engine actually decodes, and answering `artifact-unreadable` for the rest is the truthful
- * "nothing was fetched" rather than a truncated prefix masquerading as the whole file.
+ * The synchronous reader the engine calls over prefetched data: `{ prefix }` for the header pass,
+ * no options for the full body. A path never prefetched, or a full read of one that never earned a
+ * body, is `artifact-unreadable` (the engine only decodes records its preflight cleared).
  */
 function reader(artifacts: Map<string, PrefetchedArtifact>) {
     return (path: string, options?: ReadOptions): ArtifactAnswer | null => {

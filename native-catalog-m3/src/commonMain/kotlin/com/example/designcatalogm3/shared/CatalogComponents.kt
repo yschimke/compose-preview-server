@@ -114,16 +114,11 @@ import org.jetbrains.compose.resources.stringResource
 @Composable
 fun CatalogComponent(id: String) {
   when (id) {
-    // The filled button — one emphasis level, not five. This catalog covers the preview
-    // pipeline's FEATURES, not Material's component surface (m3-catalog is the exhaustive
-    // reference), and the four other emphasis levels re-proved nothing this one doesn't: the label
-    // is an editable `catalogOverrideString("label", …)` knob so a daemon-backed render can retitle
-    // it from the `compose/overrides` surface, `enabled` is the `@OverrideVariant` knob, and the
-    // pressed / focused / icon-label ids below hang off this same button.
-    //
-    // A plain button has no intrinsic state to show, so its click is made visible by [counted]: the
-    // label picks up a click tally. A never-clicked render is unaffected — see [counted] for why
-    // the first frame is byte-identical.
+    // The filled button. This catalog covers the preview pipeline's features, not Material's
+    // surface (m3-catalog is the exhaustive reference). The label is an editable
+    // `catalogOverrideString("label", …)` knob, `enabled` is the `@OverrideVariant` knob, and the
+    // pressed / focused / icon-label ids hang off this button. Clicks are made visible by
+    // [counted]; a never-clicked render is unaffected.
     "button-filled" -> {
       val (label, onClick) =
         counted(catalogOverrideString("label", stringResource(Res.string.label_filled)))
@@ -132,15 +127,9 @@ fun CatalogComponent(id: String) {
       Button(onClick = onClick, enabled = catalogOverrideBoolean("enabled", true)) { Text(label) }
     }
 
-    // Selection controls — primary (checked/selected) state. The checked/selected flag is a
-    // `catalogOverrideBoolean` knob: it is what the `@OverrideVariant` folds (`off`, `unchecked`)
-    // seed, and it is the control's **initial** value, so the first composed frame is exactly the
-    // seeded state on every surface. A tap then moves it from there.
-    //
-    // Two controls carry that knob, not five: the radio button and the filter chip were a third
-    // and fourth spelling of the same `@OverrideVariant`-seeds-a-boolean feature, and the
-    // segmented button and assist chip carried no feature at all. The slider stays because its
-    // knob is a `Float` rather than a `Boolean`.
+    // Selection controls. The checked flag is a `catalogOverrideBoolean` knob, seeded by the
+    // `@OverrideVariant` folds, and is the control's initial value, so the first frame is the
+    // seeded state everywhere; a tap moves it. The slider stays because its knob is a `Float`.
     "checkbox-checked" -> StatefulCheckbox(catalogOverrideBoolean("checked", true))
     "switch-on" -> StatefulSwitch(catalogOverrideBoolean("checked", true))
     "slider" -> Box(Modifier.width(220.dp)) { StatefulSlider(catalogOverrideFloat("value", 0.5f)) }
@@ -193,44 +182,29 @@ fun CatalogComponent(id: String) {
         }
       }
 
-    // Communication — one progress indicator (the `Float` `progress` knob) and the badge (the
-    // `Int` `count` knob). The circular indicator drew the same knob as the linear one, so it went;
-    // the badge stays because it is the only `catalogOverrideInt` on the sheet.
-    //
-    // The indicator is **determinate** on every surface. This is the one place where dropping the
-    // `interactive` axis (issue #3674) genuinely removed behaviour rather than a redundant branch:
-    // the in-browser tier used to compose the no-`progress` (indeterminate, animated) overload,
-    // which is a different composable drawing different pixels from the sticker the catalog
-    // publishes — the exact "the capture isn't what runs live" split the issue is about. The
-    // animated ring lives on the Wear sheet, which models it as its own catalog id
-    // (`Progress/Circular/Indeterminate`) rather than as a hidden lane flag.
+    // Communication: one progress indicator (`Float` `progress` knob) and the badge (the only
+    // `catalogOverrideInt`). The indicator is determinate everywhere, so every surface draws the
+    // published sticker; the animated ring lives on the Wear sheet as its own catalog id
+    // (`Progress/Circular/Indeterminate`).
     "progress-linear" -> {
       val progress = catalogOverrideFloat("progress", 0.6f)
       Box(Modifier.width(220.dp)) { LinearProgressIndicator(progress = { progress }) }
     }
     "badge" -> Badge { Text(catalogOverrideInt("count", 8).toString()) }
 
-    // Text field — the entered value and the floating label are both editable knobs, and this is
-    // the sheet's only component that owns *text* state. It owns its value everywhere, seeded from
-    // the `value` knob, so a visitor can actually type into it and an un-typed render still shows
-    // exactly the seeded text. (The outlined twin was the same knobs behind a different border.)
+    // Text field: the value and floating label are editable knobs. It owns its value everywhere,
+    // seeded from the `value` knob, so visitors can type and an untouched render shows the seeded
+    // text.
     "textfield-filled" ->
       StatefulTextField(
         catalogOverrideString("value", stringResource(Res.string.label_filled)),
         catalogOverrideString("label", stringResource(Res.string.textfield_label)),
       )
 
-    // States — interaction (pressed / focused), disabled, and toggle off↔on.
-    //
-    // The two interaction states are **plain buttons** (issue #3672). They used to hold a
-    // hand-emitted `PressInteraction.Press` / `FocusInteraction.Focus` on a
-    // `MutableInteractionSource`, which forged the visual: nothing was really focused or pressed,
-    // the emission was never paired with a `Release` / `Unfocus`, and the capture only worked
-    // because `Button` happens to read its indication off the interaction source. The state now
-    // comes from the render harness instead — `@FocusedPreview` on the sticker previews next door
-    // in `:samples:design-catalog-m3` walks real focus and dispatches a real pointer press — so
-    // these ids compose the same button the rest of the catalog does, and a live lane shows the
-    // state when a visitor actually focuses or presses it.
+    // States: interaction (pressed / focused), disabled, and toggle. The interaction states are
+    // plain buttons; the render harness supplies real focus and pointer presses (`@FocusedPreview`
+    // in `:samples:design-catalog-m3`), so a live lane shows them when a visitor actually
+    // interacts.
     "button-filled-pressed" -> {
       val (label, onClick) =
         counted(catalogOverrideString("label", stringResource(Res.string.label_pressed)))
@@ -241,11 +215,8 @@ fun CatalogComponent(id: String) {
         counted(catalogOverrideString("label", stringResource(Res.string.label_focused)))
       Button(onClick = onClick) { Text(label) }
     }
-    // Content axis (not a state): the same Filled button with a leading icon + label, so the
-    // catalog shows the icon-and-text configuration alongside the label-only default. The icon is
-    // an inline `ImageVector` (a plus glyph) — this module deliberately carries no icon library,
-    // and
-    // `Icon` tints it with the button's content color regardless of the vector's own fill.
+    // Content axis: the Filled button with a leading icon + label. The icon is an inline
+    // `ImageVector` (no icon library here), tinted by `Icon` regardless of its fill.
     "button-filled-icon-label" -> {
       val (label, onClick) =
         counted(catalogOverrideString("label", stringResource(Res.string.label_filled)))
@@ -256,9 +227,8 @@ fun CatalogComponent(id: String) {
       }
     }
 
-    // Text options — maxLines + ellipsis overflow. The 128dp box reproduces the wrap/truncation
-    // point the Android sticker got from its 160dp preview canvas minus the sticker's 16dp padding
-    // (160 − 2·16 = 128), so the baked frame is unchanged and both surfaces share one body.
+    // Text maxLines + ellipsis. The 128dp box reproduces the Android sticker's wrap point (160dp
+    // canvas minus 2×16dp padding), so the baked frame is unchanged.
     "text-maxlines-truncated" ->
       Box(Modifier.width(128.dp)) {
         Text(
@@ -267,10 +237,8 @@ fun CatalogComponent(id: String) {
           overflow = TextOverflow.Ellipsis,
         )
       }
-    // Generic-family specimens — where the Android catalog said `FontFamily.Serif`/`.Monospace`,
-    // this uses `genericFontFamily(...)` so both the desktop render and the wasm tier can
-    // substitute
-    // the URL-loaded copy of the same file the platform's system font table resolves that name to.
+    // Generic-family specimens: `genericFontFamily(...)` lets desktop and wasm substitute the
+    // URL-loaded copy of the file the platform resolves that name to.
     "text-serif" ->
       Text(
         catalogOverrideString("text", "Serif specimen 0123"),
@@ -281,20 +249,17 @@ fun CatalogComponent(id: String) {
         catalogOverrideString("text", "Mono specimen 0123"),
         fontFamily = genericFontFamily("monospace"),
       )
-    // Named downloadable-GoogleFont specimen — where an Android-only component would say
-    // `FontFamily(Font(GoogleFont("Orbitron"), provider))`, this uses `namedFontFamily(...)` so the
-    // desktop render and the wasm tier resolve the vendored Orbitron faces (`role: "named"` in the
-    // fonts manifest). Falls back to the platform sans if the tier didn't vendor the family.
+    // Named downloadable-font specimen: `namedFontFamily(...)` resolves the vendored Orbitron faces
+    // (`role: "named"`), falling back to platform sans if not vendored.
     "text-branded" ->
       Text(catalogOverrideString("text", "Orbitron 0123"), fontFamily = namedFontFamily("Orbitron"))
   }
 }
 
 /**
- * Every catalog component id, in sticker-sheet order. The wasm app uses it to tell a known id from
- * the "unknown component" diagnostic branch. All but `text-branded` carry a `@CatalogComponent` /
- * `@CatalogVariant` next door in `:samples:design-catalog-m3`; that one renders and mounts but is
- * deliberately absent from the published inventory.
+ * Every catalog component id in sticker-sheet order; the wasm app uses it to tell known ids from
+ * the "unknown component" diagnostic. `text-branded` renders but is deliberately absent from the
+ * published inventory.
  */
 val catalogComponentIds: List<String> =
   listOf(
@@ -317,10 +282,8 @@ val catalogComponentIds: List<String> =
   )
 
 /**
- * A minimal "add" (plus) glyph as an inline [ImageVector], for the `button-filled-icon-label`
- * content variant. Built by hand because this catalog module carries no `material-icons`
- * dependency; `Icon` recolors it to the button's content color, so the vector's own fill is
- * irrelevant. A 12×12 plus centered in the standard 24dp icon viewport.
+ * A minimal "add" glyph as an inline [ImageVector] (no `material-icons` dependency): a 12×12 plus
+ * in the standard 24dp viewport; `Icon` recolors it.
  */
 private val addGlyph: ImageVector =
   ImageVector.Builder(
@@ -349,9 +312,8 @@ private val addGlyph: ImageVector =
     }
     .build()
 
-// --- State holders. Every catalog control is one of these, on every surface: the initial value is
-// --- an ordinary argument (the seeded `catalogOverride*` knob), so the first frame is the seeded
-// --- state and a real click moves it from there. ---
+// State holders: the initial value is an ordinary argument (the seeded `catalogOverride*` knob), so
+// the first frame is the seeded state and a click moves it.
 
 @Composable
 fun StatefulCheckbox(initial: Boolean) {
@@ -365,12 +327,7 @@ fun StatefulSwitch(initial: Boolean) {
   Switch(checked = on, onCheckedChange = { on = it })
 }
 
-/**
- * The slider, seeded from the `value` knob. It used to hard-code its own `0.5f` start and ignore
- * that knob entirely — harmless while the two lanes were separate composables (only the inert lane
- * read the knob), but a live seed of `value` silently did nothing. With one composable per id the
- * knob has to be the initial value.
- */
+/** The slider, seeded from the `value` knob. */
 @Composable
 fun StatefulSlider(initial: Float) {
   var value by remember { mutableFloatStateOf(initial) }
@@ -441,16 +398,9 @@ fun StatefulTextField(initial: String, label: String) {
 }
 
 /**
- * Gives a stateless action component — a button — something visible to do when clicked, by tallying
- * clicks into its label: `Filled` → `Filled (1)` → `Filled (2)`.
- *
- * Returns the label to draw and the `onClick` to wire. The counter starts at `0` and the `0` case
- * draws [base] verbatim, so a render that nothing has clicked — the baked sticker sheet and every
- * one-shot `/render` — is byte-identical to the one this catalog has always produced. It moves only
- * where a real pointer dispatches into a held composition.
- *
- * That `clicks == 0` fold is what let the preview-vs-live `interactive` flag go (issue #3674): the
- * inert branch it used to take (`base to {}`) was already the same first frame this returns.
+ * Gives a stateless button something visible to do on click: a click tally in its label (`Filled` →
+ * `Filled (1)`). Returns the label and `onClick`. At zero clicks the label is [base] verbatim, so
+ * unclicked renders are byte-identical to the baked sticker sheet.
  */
 @Composable
 fun counted(base: String): Pair<String, () -> Unit> {
@@ -458,17 +408,6 @@ fun counted(base: String): Pair<String, () -> Unit> {
   return (if (clicks == 0) base else "$base ($clicks)") to { clicks++ }
 }
 
-// --- No held interaction sources live here any more (issue #3672). ---
-//
-// `pressedSource()` / `focusedSource()` used to sit at the bottom of this file, emitting a
-// `PressInteraction.Press` / `FocusInteraction.Focus` from a `LaunchedEffect` so the two
-// interaction-state stickers would render with a state layer. They were marked as a stopgap and
-// they are gone: the desktop renderer now drives `@FocusedPreview` the way the Android one does —
-// a real `FocusManager.moveFocus` traversal under a synthetic keyboard input mode, plus a real
-// pointer press dispatched onto the focused element — so `button-filled-pressed` /
-// `button-filled-focused` compose a plain `Button` and the harness supplies the state.
-//
-// If a future sticker needs a state this catalog can't reach through real input, add the capture
-// mechanism to the renderer rather than a held interaction source here: a forged interaction
-// documents the state layer, not the component, and silently keeps documenting it after the
-// component stops being able to enter that state at all.
+// Don't add held interaction sources here: a forged `PressInteraction` / `FocusInteraction`
+// documents the state layer rather than the component. If a sticker needs a state real input can't
+// reach, add the capture mechanism to the renderer instead.
