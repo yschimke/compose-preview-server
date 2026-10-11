@@ -281,5 +281,48 @@ describe("power-user keyboard navigation", () => {
             /Components/,
             "an empty page never advertises an empty component palette",
         );
+        assert.doesNotMatch(
+            document.getElementById("cp-keyboard-hints")!.textContent!,
+            /Surprise me/,
+            "R is only advertised where the catalog's 🎲 is",
+        );
+
+        // The catalog landing's 🎲: R presses its button, the rail and the guide name it.
+        let surprises = 0;
+        document.body.insertAdjacentHTML(
+            "beforeend",
+            `<cp-surprise-me><button type="button">Surprise me</button></cp-surprise-me>`,
+        );
+        document
+            .querySelector("cp-surprise-me button")!
+            .addEventListener("click", () => surprises++);
+        document.dispatchEvent(
+            new KeyboardEvent("keydown", { key: "r", bubbles: true }),
+        );
+        assert.equal(surprises, 1, "R opens a surprise preview");
+        document.dispatchEvent(
+            new KeyboardEvent("keydown", {
+                key: "r",
+                ctrlKey: true,
+                bubbles: true,
+            }),
+        );
+        assert.equal(surprises, 1, "Ctrl+R stays the browser's reload");
+        setting.click();
+        setting.click();
+        assert.match(
+            document.getElementById("cp-keyboard-hints")!.textContent!,
+            /Surprise me/,
+        );
+        document.dispatchEvent(
+            new KeyboardEvent("keydown", { key: "?", bubbles: true }),
+        );
+        assert.match(
+            document.querySelector("[role='dialog']")!.textContent!,
+            /random preview/,
+        );
+        document.dispatchEvent(
+            new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
+        );
     });
 });
