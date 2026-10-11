@@ -34,34 +34,17 @@ import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 
 /**
- * Mounts one catalog component by id inside the M3 theme, centred on the surface. `dark` flips the
- * color scheme so the viewer's `uiMode` deep-link parameter maps straight through; [fontScale] and
- * [rtl] map the viewer's font-scale slider and locale control so those overrides drive the
- * in-browser render too. An unknown id renders a visible diagnostic rather than a blank canvas.
+ * Mounts one catalog component by id inside the M3 theme. `dark`, [fontScale] and [rtl] map the
+ * viewer's uiMode, font-scale and locale controls. An unknown id renders a diagnostic. The body is
+ * the shared [CatalogComponent], the same composables the desktop sticker sheet bakes; controls are
+ * always stateful.
  *
- * The component body itself is [CatalogComponent] from `:samples:design-catalog-m3-shared` — the
- * exact same composables the desktop `:samples:design-catalog-m3` sticker sheet bakes. Its controls
- * are unconditionally stateful (they used to be selected by an `interactive` flag this tier passed
- * as `true`, see issue #3674), so a visitor can toggle switches, drag sliders and type into the
- * text fields, and the sticker this tier draws is exactly the one the catalog published.
- *
- * **Snapshot parity is the contract.** The baked catalog PNG is `CatalogSticker` — a wrap-content
- * **transparent** `Surface` holding the component behind 16dp padding — cropped to its bounds. This
- * app reproduces exactly that sticker (same dp geometry, same transparent surface) on a transparent
- * viewport, and contain-fit scales it to the frame. The embedding viewer sizes the iframe to the
- * snapshot `<img>`'s rendered box, so the same-aspect sticker fills it edge-to-edge and the
- * snapshot→Wasm switch doesn't move a pixel — and, since the sticker paints no fill of its own,
- * doesn't add a panel the snapshot never had either.
- *
- * [onFirstFrame] fires once, after the sticker has been measured, fit-scaled, and drawn — the
- * embedding viewer keeps the snapshot on-stage until this signal so enabling Wasm never flashes.
- *
- * The area *around* the sticker can't be truly transparent — the compose-web surface paints an
- * opaque base — so the app paints the serve stage's own checkerboard there instead ([checkerPhase]
- * is the stage pattern's tile origin in this frame's CSS-px coordinates, supplied by the viewer),
- * making the canvas visually continue the page behind it. With the sticker itself transparent, that
- * checkerboard is what shows through behind the component — exactly what the baked PNG looks like
- * on the same stage.
+ * Snapshot parity is the contract: the baked PNG is `CatalogSticker` (a transparent wrap-content
+ * `Surface` with 16dp padding) cropped to bounds, so this app draws the same sticker on a
+ * transparent viewport and contain-fits it; the viewer sizes the iframe to the snapshot's box, so
+ * the swap moves no pixels. [onFirstFrame] fires once the sticker is measured, scaled and drawn.
+ * The surrounding area can't be transparent (compose-web paints an opaque base), so it paints the
+ * stage's checkerboard, aligned via [checkerPhase].
  */
 @Composable
 fun CatalogApp(
@@ -71,55 +54,38 @@ fun CatalogApp(
   rtl: Boolean = false,
   checkerPhase: Offset = Offset.Zero,
   /**
-   * The viewer's resolved solid stage colour (`stageBg=#rrggbb`), painted behind the transparent
-   * sticker so the swap doesn't change what the component sits on. Null ⇒ the page is in its
-   * transparent/checkerboard mode and the app continues that pattern instead.
+   * The viewer's solid stage colour (`stageBg=#rrggbb`) painted behind the sticker; null means
+   * checkerboard mode.
    */
   stageColor: Color? = null,
   /**
-   * Typeface for the whole M3 type scale — the URL-loaded Roboto that matches what the Android
-   * renderer baked into the snapshots. Null ⇒ the CMP bundled default (fetch failed/timed out).
+   * Typeface for the M3 type scale (the URL-loaded Roboto matching the Android snapshots). Null
+   * falls back to the CMP bundled default.
    */
   fontFamily: FontFamily? = null,
   /**
-   * Generic-family substitutes (`fonts.json` `role: "generic"`): family name (`serif`, `monospace`,
-   * …) → the URL-loaded [FontFamily] holding the same files Android's system font table resolves
-   * that name to. Provided as `LocalGenericFonts`, which `genericFontFamily` (in the shared module)
-   * consults. Empty ⇒ skiko's own (bundled-font) fallback, as before.
+   * Generic-family substitutes (`fonts.json` `role: "generic"`): family name → URL-loaded
+   * [FontFamily], provided as `LocalGenericFonts` for `genericFontFamily`.
    */
   genericFamilies: Map<String, FontFamily> = emptyMap(),
   /**
-   * Named downloadable-GoogleFont substitutes (`fonts.json` `role: "named"`): the font's display
-   * name (`Orbitron`, `Space Grotesk`, …) → the URL-loaded [FontFamily] holding the vendored faces.
-   * Provided as `LocalNamedFonts`, which `namedFontFamily` (in the shared module) consults. Empty ⇒
-   * the shared fallback (platform sans), as before.
+   * Named font substitutes (`fonts.json` `role: "named"`): display name → URL-loaded [FontFamily],
+   * provided as `LocalNamedFonts` for `namedFontFamily`.
    */
   namedFamilies: Map<String, FontFamily> = emptyMap(),
   onFirstFrame: (() -> Unit)? = null,
 ) {
-  // Typeface + palette are read from the override surface (the viewer pushes `knob.theme.*` into
-  // `LocalWasmCatalogKnobs`) and resolved via the *shared* catalog choices, so the live Wasm render
-  // agrees with the desktop-baked snapshot. No seed ⇒ Roboto Flex + the M3 light/dark scheme (the
-  // baked default). A selected typeface resolves to the URL-loaded family: the default `fontFamily`
-  // for Roboto Flex, else the matching `role: "named"` family from `fonts.json` (falling back to
-  // the
-  // default when a face isn't vendored, e.g. Google Sans Flex).
+  // Typeface and palette come from the override knobs (`knob.theme.*` via `LocalWasmCatalogKnobs`),
+  // resolved through the shared choices so Wasm matches the desktop snapshot. No seed means Roboto
+  // Flex and the M3 light/dark scheme.
   val scheme =
     catalogColorScheme(catalogOverrideString(CATALOG_COLORS_KNOB, CATALOG_PALETTE_M3), dark)
   val fontName = catalogOverrideString(CATALOG_FONT_KNOB, CATALOG_FONT_ROBOTO_FLEX)
   val resolvedFont = resolveCatalogFont(fontName, fontFamily, namedFamilies)
-  // Shapes + typography-metrics overrides resolve through the same shared choices, so the live Wasm
-  // corners / type scale track the desktop-baked snapshot. No seed ⇒ stock M3 shapes + the
-  // font-only
-  // type scale (the baked default).
+  // Shapes and type metrics resolve through the same shared choices.
   val shapes = catalogShapes(catalogOverrideString(CATALOG_SHAPES_KNOB, ""))
-  // Type scale = the `theme.font` single face, then per-role-group families from `theme.fonts`
-  // (e.g. display=Orbitron, body=Space Grotesk — resolved against the URL-loaded [namedFamilies],
-  // the same `role: "named"` faces `fonts.json` lists), then the `theme.typography` metrics
-  // overlay.
-  // Mirrors the desktop `CatalogSticker` so the live Wasm render brands identically to the baked
-  // sticker; absent the fonts knob the middle step is a no-op, so an un-overridden render is
-  // pixel-identical.
+  // Type scale: the `theme.font` face, then per-group families from `theme.fonts` (resolved against
+  // [namedFamilies]), then the `theme.typography` metrics. Mirrors the desktop `CatalogSticker`.
   val typography =
     catalogApplyTypography(
       catalogApplyFontFamilies(
@@ -130,9 +96,8 @@ fun CatalogApp(
       ),
       catalogOverrideString(CATALOG_TYPOGRAPHY_KNOB, ""),
     )
-  // Re-point density's fontScale (preserving the real pixel density) and the layout direction, so
-  // the viewer's font-scale + locale controls take effect client-side — same overrides the server
-  // render honours, just running in the browser sandbox.
+  // Re-point density's fontScale (keeping pixel density) and layout direction so font-scale and
+  // locale apply client-side.
   val density = LocalDensity.current
   val scaled = Density(density = density.density, fontScale = fontScale)
   val direction = if (rtl) LayoutDirection.Rtl else LayoutDirection.Ltr
@@ -155,10 +120,8 @@ fun CatalogApp(
               .onGloballyPositioned { frame = it.size },
           contentAlignment = Alignment.Center,
         ) {
-          // Contain-fit, no inset and no clamp: the sticker's dp geometry matches the snapshot's,
-          // so when the viewer sizes this frame to the snapshot's rendered box the exact fit is
-          // what
-          // reproduces it — any breathing-room factor or cap would reintroduce a visible jump.
+          // Contain-fit with no inset or clamp: the sticker's dp geometry matches the snapshot, so
+          // the exact fit reproduces it.
           val scale =
             if (frame == IntSize.Zero || content.width == 0 || content.height == 0) 1f
             else
@@ -168,20 +131,15 @@ fun CatalogApp(
               Modifier.onGloballyPositioned { content = it.size }
                 .graphicsLayer(scaleX = scale, scaleY = scale)
           ) {
-            // The sticker itself — a 1:1 port of the shared `CatalogSticker`: a TRANSPARENT
-            // Surface + 16dp padding, so the box the snapshot baked is the box we draw. The
-            // colour is deliberately not `colorScheme.surface`: the desktop `CatalogStickerFrame`
-            // renders component stickers on `Color.Transparent` so each reads as a silhouette on
-            // the viewer's backing, and painting a surface fill here put a solid `#FFFBFF` panel
-            // behind the component the moment the viewer handed the render to this tier.
+            // A 1:1 port of the shared `CatalogSticker`: a transparent Surface with 16dp padding
+            // (not `colorScheme.surface`, which would add a panel the snapshot doesn't have).
             Surface(color = Color.Transparent, contentColor = MaterialTheme.colorScheme.onSurface) {
               Box(Modifier.padding(16.dp)) { CatalogComponent(id) }
             }
           }
         }
-        // First-frame signal: once both boxes are measured the fit scale is final; let that frame
-        // (and one settle frame for the scale recomposition) actually draw before telling the
-        // embedding viewer it can swap the snapshot out.
+        // Once both boxes are measured the scale is final; let that frame and one settle frame draw
+        // before signalling the viewer.
         if (
           onFirstFrame != null && !signalled && frame != IntSize.Zero && content != IntSize.Zero
         ) {
@@ -219,13 +177,11 @@ fun CatalogApp(
 }
 
 /**
- * Resolves a selected typeface [name] to the URL-loaded family, mirroring the desktop `catalogFont`
- * so the live Wasm render matches the baked snapshot:
- * * Roboto Flex → the default [family] (`fonts.json` `role: "default"`).
- * * Google Sans Flex → its `role: "named"` family if the dist vendors it, else
- *   `FontFamily.SansSerif` — the **same** fallback the desktop catalog uses for the unvendored
- *   brand face (not the default), so the two tiers agree on that choice.
- * * any other named face (Lobster Two, …) → its named family, else the default.
+ * Resolves typeface [name] to a URL-loaded family, mirroring the desktop `catalogFont`:
+ * * Roboto Flex → the default [family].
+ * * Google Sans Flex → its named family if vendored, else `FontFamily.SansSerif` (the desktop's
+ *   fallback).
+ * * other named faces → their named family, else the default.
  */
 internal fun resolveCatalogFont(
   name: String,
@@ -239,23 +195,14 @@ internal fun resolveCatalogFont(
   }
 
 /**
- * The serve viewer's stage checkerboard, replicated pixel-for-pixel: CSS
- * `repeating-conic-gradient(<odd> 0% 25%, <even> 0% 50%) / 16px 16px` — 8px squares where the
- * tile's top-left square is the [even] colour. [dark] follows the *page's* `prefers-color-scheme`
- * (the stage's own media query), not the component's theme. [phase] is the pattern's tile origin in
- * this frame's coordinates (CSS px), so the drawn cells line up exactly with the page's cells
- * outside the iframe.
+ * The viewer's stage checkerboard, pixel-for-pixel: `repeating-conic-gradient(<odd> 0% 25%, <even>
+ * 0% 50%) / 16px 16px`. [dark] follows the page's `prefers-color-scheme`, not the component theme;
+ * [phase] is the tile origin in this frame's CSS px.
  */
 /**
- * The stage backdrop the embedding viewer is showing behind the snapshot, painted here so the
- * transparent sticker sits on the same thing it sits on in the PNG lane. [stageColor] is the
- * viewer's resolved solid stage (`#fff` for a light preview, `#1d1d20` for a dark one); null means
- * the page is in its transparent/checkerboard mode, so we continue that pattern instead.
- *
- * This has to track the page: the app's own surface can't be truly transparent, so *something* is
- * painted here either way, and painting the wrong one is a visible background change on the
- * snapshot⇄Wasm swap — a checkerboard appearing behind a component the snapshot showed on flat
- * white.
+ * The viewer's stage backdrop behind the snapshot, so the transparent sticker sits on the same
+ * ground here: [stageColor] when solid, else the checkerboard. Something is always painted (the
+ * surface can't be transparent), so it must match the page.
  */
 private fun Modifier.stageBackdrop(stageColor: Color?, dark: Boolean, phase: Offset): Modifier =
   if (stageColor != null) drawBehind { drawRect(color = stageColor) }

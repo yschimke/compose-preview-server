@@ -1,18 +1,7 @@
-// What a reporter can point at, and in which plane it ends up recorded.
-//
-// Two ways to name a part of a render, and they are not interchangeable.
-//
-// A TAG is an identity: `testTag → {count, bounds, space}` from the published index. It survives a
-// re-render, a re-layout and an inserted sibling, which is the whole reason the index exists — a
-// `SemanticsRefs` path does not, because it indexes siblings sharing an anchor, so inserting a
-// Button ahead of `r/role:Button[0]` silently retargets that string at different pixels.
-//
-// A REGION is a rectangle and nothing more. It cannot be resolved against a later render, so it can
-// only ever support a geometric acceptance — but it needs nothing from the server, which makes it
-// the honest fallback everywhere a tag would be a guess.
-//
-// Selection is a REPORT affordance. Nothing here accepts a difference; it only says which part of
-// the picture the report is about.
+// What a reporter can point at, and in which plane it is recorded. A tag (`testTag → {count,
+// bounds, space}`) is an identity that survives re-layout, unlike a `SemanticsRefs` path that
+// indexes siblings. A region is just a rectangle: geometric only, but needs nothing from the
+// server. Selection only says what the report is about; it accepts nothing.
 
 import type { Bounds } from "./locator.js";
 
@@ -31,13 +20,9 @@ export interface TagTarget {
     /** Absent for a tag whose every carrying node had a zero-area box. */
     bounds?: Bounds;
     /**
-     * True when more than one node carries the tag.
-     *
-     * Such a tag is **not a usable element identity** — a consumer resolving "the node with this
-     * tag" would silently pick one of several — so it may be listed (knowing the tag exists is
-     * useful) but never chosen as an element selector. `count` counts every node carrying the tag
-     * including ones whose bounds are unusable, precisely so a zero-area duplicate cannot hide
-     * behind a usable sibling and report a genuinely ambiguous tag as unique.
+     * True when more than one node carries the tag; such a tag may be listed but never chosen as an
+     * element selector. `count` includes nodes with unusable bounds so a zero-area duplicate can't
+     * make an ambiguous tag look unique.
      */
     ambiguous: boolean;
 }
@@ -46,16 +31,9 @@ export interface TagTarget {
 const RENDER_PIXELS = "render-pixels";
 
 /**
- * The index payload as a picker's worth of targets, in tag order.
- *
- * Sorted by tag rather than left in the payload's own (depth-first) order because a `<select>` the
- * reader scans is a list to find a name in, not a walk of the tree.
- *
- * An entry that declares no space, or declares one this version does not know, is **dropped**. Not
- * defaulted: silently reading an undeclared index as render-pixel is exactly what the discriminator
- * was added to prevent, and a future canonical-plane producer must not be mistaken for this one by
- * an older page. An entry counting fewer than one node is dropped for the same reason — it is a
- * producer bug, not something to resolve badly.
+ * The index payload as picker targets, sorted by tag for scanning. Entries with a missing or
+ * unknown space are dropped, not defaulted (that is what the discriminator prevents), as are
+ * entries counting fewer than one node (a producer bug).
  */
 export function tagTargets(payload: unknown): TagTarget[] {
     const tags = (payload as { tags?: Record<string, WireTagEntry> } | null)
@@ -94,11 +72,8 @@ export interface DisplayRect {
 }
 
 /**
- * One display point, as **unrounded** render-plane coordinates.
- *
- * Unrounded on purpose: rounding belongs to the rectangle, where it can be done outward from both
- * ends at once. Null when the frame has not decoded — no natural size means no scale, and guessing
- * one is how a rectangle ends up in a plane nobody stated.
+ * One display point as unrounded render-plane coordinates (rounding happens outward on the
+ * rectangle). Null before the frame decodes, since there is no scale.
  */
 export function toRenderPoint(
     point: { x: number; y: number },
@@ -136,12 +111,9 @@ export function renderRectBetween(
 }
 
 /**
- * A dragged rectangle converted from display pixels into the render's own pixels, in one step.
- *
- * The convenience form, for a gesture whose frame cannot have moved under it. `v1` accepts
- * `render-pixels` and nothing else — both parsers refuse any other space rather than storing the
- * guess — because a rectangle recorded in the display plane makes an element that never moved
- * report as *moved* the first time someone views the page at a different width.
+ * A dragged rectangle from display pixels to render pixels in one step, for a gesture whose frame
+ * cannot have moved. `v1` accepts only `render-pixels`; a display-plane rectangle would report a
+ * still element as moved at a different width.
  */
 export function toRenderPixels(
     rect: DisplayRect,

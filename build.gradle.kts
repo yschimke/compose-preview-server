@@ -55,16 +55,10 @@ val generateMaterialIconCatalogFixture =
     )
   }
 
-// `wear-m3-capabilities-v1.json` is deliberately absent here. It is a **golden**, owned by
-// `SynthesisedCatalogGoldenTest`: `wearM3Catalog` is synthesised in Kotlin from the packaged
-// Material 3 catalog, so the golden already carries the full icon list and regenerating it is what
-// records an icon-catalog change. Patching the same file here as well gave it two writers that
-// produce the same icons in different bytes — the allowlist spliced onto one line here, expanded
-// one entry per line by the golden's `Json { prettyPrint = true }` — and `VerifyMatchingFile`
-// compares bytes, so no content of the file could satisfy both. Every push since the icon catalog
-// grew was red on whichever of the two ran last (#710).
-//
-// `m3-catalog-capabilities-v1.json` has no golden and stays here, which is what this task is for.
+// `wear-m3-capabilities-v1.json` is absent on purpose: it is a golden owned by
+// `SynthesisedCatalogGoldenTest`, and two writers with different byte layouts could never both
+// satisfy `VerifyMatchingFile`. `m3-catalog-capabilities-v1.json` has no golden, so it is updated
+// here.
 tasks.register<UpdateMaterialIconCatalogFixtures>("updateMaterialIconCatalogFixture") {
   group = "code generation"
   description = "Updates the m3 icon allowlist from the shipped Material Icons artifact."
@@ -82,10 +76,8 @@ tasks.named("check") { dependsOn(checkMaterialIconCatalogFixture) }
 
 tasks.named("check") {
   group = "verification"
-  // The UI-builder modules left for yschimke/compose-ui-builder, which checks them in its own CI.
-  // This build reaches four of them as PUBLISHED releases by default, and as projects only under
-  // `-PcomposeUiBuilderDir` -- so `:server:check` does not run their tests either way, and it
-  // should not: resolving a dependency is not owning somebody else's verification.
+  // UI-builder modules live in yschimke/compose-ui-builder and are verified by its CI, not
+  // `:server:check`.
   dependsOn(
     ":server:check",
     ":mcp:check",
@@ -157,31 +149,10 @@ subprojects {
   }
 }
 
-// ---------------------------------------------------------------------------
-// No Maven set: this repository does not publish to Maven Central.
-// ---------------------------------------------------------------------------
-//
-// What it ships are the GitHub release assets — `compose-preview-server-<v>.tar.gz` and
-// `compose-preview-mcp-<v>.tar.gz`, built by `:server:distTar` and `:mcp:distTar`.
-// `compose-preview serve`, `browse`, `ui-builder` and `mcp serve` launch those; nothing links this
-// build's classes. The editor archive inside the server distribution is no longer built here: it
-// is yschimke/compose-ui-builder's own release asset, and this build resolves it by coordinate.
-//
-// Six modules used to publish, and five of them only because the sixth's POM named them. A project
-// dependency reaches a published POM as a coordinate, so `:server` depending on
-// `:ui-builder-export` meant `:ui-builder-export` had to be on Central too — which is how 3.1.0
-// shipped `compose-preview-server:ui-builder-export-jvm:unspecified` and 3.3.0 through 3.8.0 shipped
-// a `compose-preview-ui-builder-runtime` POM naming an artifact nobody had uploaded. Six releases
-// nobody could resolve, for a transitive nobody wanted.
-//
-// With no POM there is no coordinate to dangle, so the machinery those breakages produced —
-// `publishReleaseArtifacts`, `printPublishedProjectPaths`, `CheckPublishedPomCoordinates` and the
-// external-consumer gate that staged the derived set into a local repository — is gone with it. The
-// modules keep their `archivesName`, which names the distribution archives and always did.
-//
-// The one consumer this cost anything is compose-ai-tools, whose `:cli` compiled two wire-drift
-// tests against `compose-preview-serve`. Those tests launch the distribution now
-// (compose-ai-tools#5436), which is the artifact `serve` runs anyway.
+// No Maven publishing: this repository ships only the GitHub release tarballs built by
+// `:server:distTar` and `:mcp:distTar`, which `compose-preview serve`/`browse`/`ui-builder`/`mcp
+// serve` launch. The editor archive is compose-ui-builder's own release asset, resolved by
+// coordinate.
 
 // One compile-time choice for the editor/server and the independently published MCP adapter.
 // No environment, URL or request parameter can turn a released build's feature set on.

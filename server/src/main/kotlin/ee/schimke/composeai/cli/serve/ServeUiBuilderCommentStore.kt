@@ -16,50 +16,28 @@ import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
 
 /**
- * The **discussion** attached to one design: threads pinned to a mark, a node or a point on the
- * frame, and the replies under them, between the people editing a design and the agents helping.
+ * The discussion attached to one design: threads pinned to a mark, node or point, and their
+ * replies, between people and agents.
  *
- * ### Why this is not in the design document
+ * Not in the design document, for the reasons [ServeUiBuilderReferenceStore] gives: it must never
+ * reach the export; `DesignMutationV1` has no comment mutation; and a reply must not advance the
+ * revision, invalidate clients' optimistic state or appear in catalog-upgrade diffs.
  *
- * The same three reasons [ServeUiBuilderReferenceStore] gives, and they hold at least as strongly:
- *
- * 1. **It is not part of the design.** "Should this row be a card?" must never reach the Compose
- *    export or the rendered document. A design that shipped its own review notes as nodes would be
- *    a bug in the generator, not a feature.
- * 2. **The wire cannot carry it.** `DesignMutationV1` is a closed set with no comment mutation, so
- *    there is no way to write one without releasing `ui-builder-protocol` — to carry something
- *    point 1 says should not be in the document.
- * 3. **It must not disturb the document.** The document is replayed, hashed, diffed for catalog
- *    upgrades and pushed to every subscriber on every edit. A reply typed into a review thread
- *    would advance the design's revision, invalidate every client's optimistic state, and show up
- *    in the catalog-upgrade diff. Discussion has to be able to happen *about* a revision without
- *    changing it.
- *
- * ### Why it is a change feed rather than a poll
- *
- * The point of comments here is a conversation between people and agents who are not looking at the
- * page at the same moment. So every accepted write bumps [StoredCommentBoard.sequence] and wakes
- * every subscriber: the browser holds a socket, and an agent holds [awaitBoardAfter] through the
- * MCP tool. Both are told the same thing at the same time by the same code, which is what makes
- * "open the page and watch" and "wait for a reply" the same feature rather than two.
- *
- * Losing this directory loses the discussion and no design content, which is the correct blast
- * radius.
+ * A change feed rather than a poll: every accepted write bumps [StoredCommentBoard.sequence] and
+ * wakes subscribers (the browser socket and MCP's [awaitBoardAfter]) through the same code. Losing
+ * this directory loses discussion but no design content.
  */
 class ServeUiBuilderCommentStore(
   private val root: Path,
   /**
-   * How many designs may hold a discussion at once.
-   *
-   * A cap rather than eviction, for the reason the reference store gives: evicting one design's
-   * threads to make room for another's destroys work silently, and a refusal that names the limit
-   * is something an operator can act on.
+   * How many designs may hold a discussion. A cap rather than eviction, since evicting silently
+   * destroys work and a named limit is actionable.
    */
   private val maximumDesigns: Int = DEFAULT_MAXIMUM_DESIGNS,
   private val now: () -> Long = System::currentTimeMillis,
   /**
-   * Where a removal is recorded. The board keeps no trace of a deleted thread — the contract shape
-   * has nowhere to put one — so the operator's log is the record of who removed what.
+   * Where removals are recorded: the board keeps no trace of a deleted thread, so the log is the
+   * record.
    */
   private val onLog: (String) -> Unit = { System.err.println(it) },
 ) {
@@ -71,30 +49,17 @@ class ServeUiBuilderCommentStore(
   private val subscribers = ConcurrentHashMap<String, MutableSet<(StoredCommentBoard) -> Unit>>()
 
   /**
-   * Subscribers to **every** design on this host, told what the board looked like before the write
-   * as well as after it.
-   *
-   * The outbound webhook is the caller. It cannot use [subscribe], because that is keyed by a
-   * design id and the webhook has no list of the designs it should be watching — a design created a
-   * minute from now is one it has to hear about too. And it needs the pair rather than the result,
-   * because "somebody replied" and "somebody reacted" are the same board arriving with a higher
-   * sequence; only the difference between two boards says which.
-   *
-   * Announced from the same statement as [subscribers], deliberately: an outbound notification that
-   * could learn about a comment the browser socket and `ui_builder_await_comments` do not — or miss
-   * one they see — would be a second, quieter feed with its own bugs. There is one feed.
-   *
-   * The listener runs on the writer's thread and must not block, exactly as [subscribe]'s does.
+   * Subscribers to every design on this host, given the board before and after each write. For the
+   * outbound webhook, which can't use per-design [subscribe] (it must hear about future designs)
+   * and needs the pair to tell a reply from a reaction. Announced from the same statement as
+   * [subscribers], so there is one feed. Must not block (runs on the writer's thread).
    */
   private val hostSubscribers =
     ConcurrentHashMap.newKeySet<(StoredCommentBoard?, StoredCommentBoard) -> Unit>()
 
   /**
-   * Ids are minted here rather than accepted from the caller.
-   *
-   * A client-chosen thread id is a way to overwrite somebody else's thread by guessing its name,
-   * and a client-chosen comment id is a way to make one reply masquerade as another. The counter is
-   * per process and the id carries the wall clock, so ids stay unique across a restart.
+   * Ids are minted here, never accepted from callers (which could overwrite or impersonate
+   * threads). Per-process counter plus wall clock keeps them unique across restarts.
    */
   private val ids = AtomicLong(0)
 
@@ -123,12 +88,9 @@ class ServeUiBuilderCommentStore(
     read(designId) ?: StoredCommentBoard(designId = designId)
 
   /**
-   * Say something: a new thread, or a reply under an existing one.
-   *
-   * [authorId] is the authenticated actor and is never read from [request]; see [StoredComment].
-   * [authorKind] is not read from it either: it comes from the credential ([commentAuthorKindOf])
-   * unless the caller knows the channel better — the MCP lane, where every caller is an agent.
-   * [CommentPostRequest.authorKind] is accepted for older clients and ignored.
+   * Post a new thread or a reply. [authorId] is the authenticated actor, never from [request].
+   * [authorKind] comes from the credential ([commentAuthorKindOf]) unless the caller knows better
+   * (MCP: always an agent); [CommentPostRequest.authorKind] is ignored.
    */
   fun post(
     designId: String,
@@ -203,12 +165,8 @@ class ServeUiBuilderCommentStore(
   }
 
   /**
-   * Close a thread, or reopen it.
-   *
-   * Anybody who can write may resolve anybody's thread. Not an oversight: a resolution is a claim
-   * that the question is answered, it is attributed to whoever made it, and it is reversible by the
-   * same call — which is a better fit for a design review than an ownership rule that leaves a
-   * thread open forever because its author has moved on.
+   * Close or reopen a thread. Anyone who can write may resolve any thread: it is attributed and
+   * reversible, which suits review better than ownership.
    */
   fun resolve(
     designId: String,
@@ -239,20 +197,10 @@ class ServeUiBuilderCommentStore(
     }
 
   /**
-   * Say "I have read this", which is not the same act as saying it is settled.
-   *
-   * [threadId] null acknowledges every thread on the board, which is what an agent that has just
-   * read the whole discussion means, and what stops a catch-up costing one call per thread.
-   *
-   * Acknowledgement is **per actor**: a thread the agent has read is still waiting for the second
-   * designer, and the board says so for each of them separately. It never claims anything about the
-   * question underneath — that is [resolve], and conflating the two is what makes an agent choose
-   * between staying invisible and resolving a bug it has not fixed yet.
-   *
-   * The write bumps the board sequence like any other, so a page that is open learns the agent has
-   * seen the comment at the moment it does. It deliberately does not move any thread's
-   * [StoredCommentThread.updatedAtSequence]: one actor catching up is not news the others have to
-   * catch up with.
+   * "I have read this", distinct from resolving. [threadId] null acknowledges every thread. Per
+   * actor, so other readers still see it waiting. Bumps the board sequence (open pages learn
+   * immediately) but not any thread's [StoredCommentThread.updatedAtSequence], since one actor
+   * catching up isn't news.
    */
   fun acknowledge(designId: String, actorId: String, threadId: String?): CommentWriteResult =
     mutate(designId) { board, _ ->
@@ -268,16 +216,9 @@ class ServeUiBuilderCommentStore(
     }
 
   /**
-   * React to one comment, or take the reaction back.
-   *
-   * The lightest thing an actor can say, and the point of it: 👀 on a comment an agent has picked
-   * up and 👍 on a fix are answers, and writing them as replies would put two sentences nobody
-   * needs into a thread somebody has to read.
-   *
-   * A reaction **acknowledges the thread** for whoever left it. That is the decision the two
-   * features force — a reaction is engagement with the comment, and telling an agent to catch up
-   * with a thread it has just reacted to would be nagging it about its own answer. What a reaction
-   * is not is a resolution: the thread stays open, and it stays unacknowledged for everybody else.
+   * React to one comment, or remove the reaction: the lightest answer (👀, 👍) without adding
+   * replies. A reaction acknowledges the thread for its author but doesn't resolve it or
+   * acknowledge it for anyone else.
    */
   fun react(
     designId: String,
@@ -337,15 +278,9 @@ class ServeUiBuilderCommentStore(
   }
 
   /**
-   * Remove a thread and everything said in it.
-   *
-   * Unlike [resolve], this is not reversible and is not attributed on the board, so it is narrower:
-   * the actor who opened the thread may remove it, and so may an actor the caller has established
-   * holds the design's own WRITE action ([mayDeleteAnyThread]) — its owner and editors. A reviewer
-   * who may comment may still remove their own question, and may not remove anybody else's.
-   *
-   * Who removed it, and whose thread it was, goes to the log: the board keeps nothing of a deleted
-   * thread, and the contract shape has no field to keep it in.
+   * Remove a thread and its replies. Irreversible and unattributed on the board, so narrower than
+   * [resolve]: only the thread's opener, or an actor holding the design's WRITE action
+   * ([mayDeleteAnyThread]). Who removed whose thread goes to the log.
    */
   fun deleteThread(
     designId: String,
@@ -382,11 +317,8 @@ class ServeUiBuilderCommentStore(
   }
 
   /**
-   * The board once it is past [afterSequence], or null when nothing was said in time.
-   *
-   * The event-driven half, and the reason a watching agent does not have to poll: it registers
-   * before it re-reads, so a comment posted between the read and the wait cannot be missed. A null
-   * return is "nothing yet", which the caller answers as a timeout rather than an error.
+   * The board once past [afterSequence], or null on timeout. Registers before re-reading, so a
+   * comment between read and wait can't be missed.
    */
   suspend fun awaitBoardAfter(
     designId: String,
@@ -412,16 +344,10 @@ class ServeUiBuilderCommentStore(
   }
 
   /**
-   * Every accepted write on [designId], until the handle is closed.
-   *
-   * The listener runs on the writer's thread, so it must not block: both callers hand the board to
-   * a channel or complete a deferred and return.
-   *
-   * Closing removes the listener and leaves the design's (now empty) set in place. Deliberately:
-   * dropping it correctly needs a lock around every registration to close the window where one
-   * subscriber leaves as another arrives, and what it would reclaim is one empty set per design
-   * anybody has ever watched on this host — bounded by the same number of designs the store itself
-   * is bounded to.
+   * Every accepted write on [designId] until the handle closes. The listener runs on the writer's
+   * thread and must not block. Closing leaves the design's empty listener set in place; removing it
+   * safely would need locking every registration, and the leftovers are bounded by the store's
+   * design cap.
    */
   fun subscribe(designId: String, listener: (StoredCommentBoard) -> Unit): Closeable {
     val listeners =
@@ -433,12 +359,9 @@ class ServeUiBuilderCommentStore(
   }
 
   /**
-   * Every accepted write on **every** design, as the pair `(before, after)`, until the handle is
-   * closed. See [hostSubscribers] for why this is not [subscribe] with a loop around it.
-   *
-   * `before` is null only for the very first write to a design that had no board at all, which is
-   * exactly the state in which every thread on `after` is new — so a subscriber diffing the two
-   * needs no special case and no seeding pass at startup.
+   * Every accepted write on every design as `(before, after)` until closed; see [hostSubscribers].
+   * `before` is null only for a design's first write, when every thread is new, so diffing needs no
+   * special case.
    */
   fun subscribeToHost(listener: (StoredCommentBoard?, StoredCommentBoard) -> Unit): Closeable {
     hostSubscribers.add(listener)
@@ -449,12 +372,8 @@ class ServeUiBuilderCommentStore(
     data class Applied(val board: StoredCommentBoard) : CommentMutation
 
     /**
-     * The write was understood, and there was nothing to change.
-     *
-     * Neither a refusal nor a write: an agent acknowledging a discussion it has already
-     * acknowledged asked a reasonable question and gets the board back, and the sequence does not
-     * move — every open page waking up because somebody re-read a thread would make the feed's own
-     * cursor meaningless.
+     * Understood, nothing to change (e.g. re-acknowledging): the board comes back and the sequence
+     * doesn't move, so open pages aren't woken needlessly.
      */
     data object Unchanged : CommentMutation
 
@@ -462,19 +381,15 @@ class ServeUiBuilderCommentStore(
   }
 
   /**
-   * Read, change, write and announce, under the design's own lock.
-   *
-   * Striped rather than one lock per design so the map cannot grow with the number of designs this
-   * host has ever seen; two designs sharing a stripe serialise against each other, which costs a
-   * write that was going to touch the disk anyway.
+   * Read, change, write and announce under the design's lock. Striped locks so the map doesn't grow
+   * with every design ever seen.
    */
   private fun mutate(
     designId: String,
     change: (StoredCommentBoard, Long) -> CommentMutation,
   ): CommentWriteResult {
-    // What the board was, for [subscribeToHost]. Read under the same lock as the write it precedes,
-    // so the pair a whole-host subscriber receives is a real before/after and not two boards from
-    // two overlapping writes.
+    // The previous board, read under the same lock so host subscribers get a real before/after
+    // pair.
     var previous: StoredCommentBoard? = null
     val stored =
       synchronized(lockFor(designId)) {
@@ -487,9 +402,8 @@ class ServeUiBuilderCommentStore(
         }
         previous = current
         val board = current ?: StoredCommentBoard(designId = designId)
-        // The sequence this write will land at, handed to the change rather than stamped after it:
-        // a thread records the sequence it was last spoken at and an acknowledgement records the
-        // sequence it was made at, and neither can be written by a caller that does not know it.
+        // The sequence this write will land at, passed to the change so threads and
+        // acknowledgements can record it.
         val applied =
           when (val outcome = change(board, board.sequence + 1)) {
             is CommentMutation.Refused ->
@@ -508,19 +422,10 @@ class ServeUiBuilderCommentStore(
               }
             }
           }
-        // Host subscribers are announced *inside* the lock, unlike the per-design ones below.
-        //
-        // They are told what changed, as a before and an after, so the order they are told in is
-        // part of the message: two actors writing the same board concurrently both release this
-        // lock before announcing, and the second write can then be announced first — a reply
-        // reaching a chat channel above the thread it answers. Holding the lock across the
-        // announcement makes the announcement order the write order, which is the only order that
-        // reads correctly.
-        //
-        // Affordable only because this listener is bounded by construction: it diffs two small
-        // in-memory boards and offers the result to a queue that never blocks
-        // ([ServeUiBuilderCommentWebhook]). A listener that did I/O here would serialize writes to
-        // the design behind it, so this seam stays deliberately narrow.
+        // Host subscribers are announced inside the lock so announcement order is write order (a
+        // reply never reaches a chat channel before its thread). Affordable only because the
+        // listener diffs small in-memory boards and enqueues without blocking
+        // ([ServeUiBuilderCommentWebhook]); keep this seam narrow.
         hostSubscribers.forEach { listener -> runCatching { listener(previous, applied) } }
         applied
       }
@@ -551,8 +456,7 @@ class ServeUiBuilderCommentStore(
   }
 
   /**
-   * Drop a design's whole board. For the administrator removing the design itself, so the
-   * discussion does not outlive what it was about. False when there was nothing to remove.
+   * Drop a design's whole board when the design itself is removed. False when there was nothing.
    */
   fun delete(designId: String): Boolean =
     synchronized(lockFor(designId)) {
@@ -564,16 +468,10 @@ class ServeUiBuilderCommentStore(
     }
 
   /**
-   * Replace [actorId] with [placeholder] on every board on this host: as the author of a comment,
-   * the resolver of a thread, a reader in `acknowledgedBy` and an actor behind a reaction. The
-   * words stay — a reply is part of the conversation other people had — and only who said them
-   * goes.
-   *
-   * The display name typed beside each of their comments goes too, since it is usually a name.
-   * Reaction counts are kept: two erased actors who left the same reaction are two placeholders,
-   * not one. Each board is rewritten through [mutate], so an open page is sent the new board.
-   *
-   * Returns how many boards changed. For the administrator, through [ServeUiBuilderAdmin].
+   * Replace [actorId] with [placeholder] everywhere on every board (author, resolver, acknowledger,
+   * reactor), along with typed display names; the words stay. Reaction counts are preserved.
+   * Rewritten through [mutate], so open pages update. Returns boards changed; for
+   * [ServeUiBuilderAdmin].
    */
   fun eraseActor(actorId: String, placeholder: String): Int {
     val target = actorId.trim()
@@ -660,8 +558,8 @@ class ServeUiBuilderCommentStore(
   private fun lockFor(designId: String): Any = locks[(designId.hashCode() and 0x7fffffff) % LOCKS]
 
   /**
-   * A design id is caller-supplied text, so it never becomes a path segment: the file is named by
-   * the digest of the id, which is fixed-length, path-safe, and cannot escape [root].
+   * Design ids are caller-supplied, so files are named by the id's digest, which can't escape
+   * [root].
    */
   private fun fileFor(designId: String): Path =
     root.resolve(sha256Hex(designId.toByteArray(StandardCharsets.UTF_8)) + ".json")
@@ -679,12 +577,7 @@ class ServeUiBuilderCommentStore(
     /** The whole board is one response and one file; a megabyte of text is already generous. */
     const val MAX_BOARD_BYTES: Int = 1024 * 1024
 
-    /**
-     * Ceilings on one comment's reactions.
-     *
-     * A reaction row is a handful of chips; past that it is a way to grow the board a byte at a
-     * time under a write that looks free, which is the shape every other limit here answers.
-     */
+    /** Limits on one comment's reactions, so reactions can't grow the board unboundedly. */
     const val MAXIMUM_REACTIONS: Int = 20
 
     const val MAXIMUM_ACTORS_PER_REACTION: Int = 200
@@ -705,12 +598,8 @@ class ServeUiBuilderCommentStore(
 }
 
 /**
- * This thread with [actorId] caught up to what has been said in it.
- *
- * The acknowledgement is pinned to [StoredCommentThread.updatedAtSequence] rather than to the
- * sequence of the write making it, so acknowledging the same thread twice is the same board and
- * costs nobody a wake-up. Callers that also *say* something set that field first, so their own
- * sentence is acknowledged along with it.
+ * This thread acknowledged by [actorId] up to [StoredCommentThread.updatedAtSequence] (not the
+ * write's sequence), so re-acknowledging is a no-op. Callers that also post set that field first.
  */
 private fun StoredCommentThread.caughtUpBy(actorId: String): StoredCommentThread =
   copy(acknowledgedBy = acknowledgedBy.acknowledging(actorId, updatedAtSequence))
@@ -719,11 +608,8 @@ private fun StoredCommentBoard.replacing(thread: StoredCommentThread) =
   copy(threads = threads.map { if (it.id == thread.id) thread else it })
 
 /**
- * This actor's acknowledgement moved forward to [sequence], and never backwards.
- *
- * Bounded, because the map is one entry per actor who has ever read the thread and a board is one
- * file: past the cap the oldest acknowledgements are dropped, which costs those actors one
- * resurfaced thread rather than costing everybody the board.
+ * Move this actor's acknowledgement forward to [sequence], never back. Bounded: past the cap the
+ * oldest entries drop, costing those actors one resurfaced thread.
  */
 private fun Map<String, Long>.acknowledging(actorId: String, sequence: Long): Map<String, Long> {
   val moved = this + (actorId to maxOf(this[actorId] ?: 0L, sequence))
@@ -744,21 +630,16 @@ sealed interface CommentWriteResult {
   data class Stored(val board: StoredCommentBoard) : CommentWriteResult
 
   /**
-   * A sentence the route hands back verbatim; it is written to be read by an operator.
-   *
-   * [forbidden] is true when the thing exists and this actor may not do it to it, which a route
-   * answers 403 rather than as a missing thread.
+   * A sentence the route returns verbatim. [forbidden] means the thing exists but this actor may
+   * not act on it (403, not 404).
    */
   data class Refused(val reason: String, val forbidden: Boolean = false) : CommentWriteResult
 }
 
 /**
- * What kind of author [actorId] is, from the identity the authorization layer established.
- *
- * An agent grant's own identity (`agent:<fingerprint>`) is an agent. Everything else — a GitHub
- * session, a grant a person requested for their own session (which acts under their `github:` id),
- * the operator token — is a person. The published contract knows only these two kinds, and clients
- * read anything else as a person, so the operator is recorded as one rather than as a third kind.
+ * Author kind from the authenticated identity: an agent grant's own identity
+ * (`agent:<fingerprint>`) is an agent; everything else (GitHub session, a person's own grant, the
+ * operator token) is a person, since the contract knows only these two kinds.
  */
 internal fun commentAuthorKindOf(actorId: String): String =
   if (actorId.startsWith(ServeAgentGrants.agentActorId(""))) StoredComment.AUTHOR_KIND_AGENT

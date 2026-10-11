@@ -1,10 +1,6 @@
-// `<cp-element-selection>` end to end: from a click on the focused comparison to the two fields the
-// filed issue actually carries.
-//
-// The rules are pinned next door (`elementTargets.test.ts`, `reportLocator.test.ts`). What only the
-// element can answer is whether the selection REACHES the report — the failure mode this whole batch
-// exists to close is a report that says "somewhere in this picture", and a selector whose choice
-// never lands in the body is indistinguishable from not having one.
+// `<cp-element-selection>` end to end: from a click on the focused comparison to the fields the
+// filed issue carries. Rules are pinned in `elementTargets.test.ts` and `reportLocator.test.ts`;
+// this checks the selection actually reaches the report.
 
 import "./setup.js";
 import assert from "node:assert/strict";
@@ -37,9 +33,8 @@ const INDEX = {
             bounds: { x: 18, y: 18, width: 24, height: 24 },
             space: "render-pixels",
         },
-        // The case the annotation-box-only design misses: a uniquely tagged node with neither
-        // typography nor container tokens produces no annotation at all, so nothing on the page
-        // draws a box for it — and it is exactly the kind of node a tag selector is best at.
+        // A uniquely tagged node with no typography or container tokens has no annotation box, yet
+        // is exactly what a tag selector is best at.
         "plain-marker": { count: 1, bounds: null, space: "render-pixels" },
         row: {
             count: 2,
@@ -197,11 +192,8 @@ async function dragWithSecondFinger(): Promise<void> {
 }
 
 /**
- * A drag whose `pointerup` is dispatched somewhere OUTSIDE the selection layer.
- *
- * happy-dom implements no pointer capture, so it cannot re-target the event the way a browser does.
- * Dispatching on `document` instead is the closest honest stand-in: it asserts that the component
- * does not depend on the release landing inside the layer's own subtree.
+ * A drag whose `pointerup` lands outside the selection layer. happy-dom has no pointer capture, so
+ * dispatching on `document` checks the component doesn't rely on the release landing inside it.
  */
 async function dragReleasingOutside(
     from: [number, number],
@@ -353,10 +345,8 @@ describe("<cp-element-selection>", () => {
     });
 
     it("keeps a region drag bound to the finger that started it", async () => {
-        // `touch-action: none` stops the browser stealing a touch drag for scrolling, which makes a
-        // second contact on the overlay reachable. Without an owner, it would reset the origin and
-        // either finger could finish the gesture — recording a rectangle spanning two contacts that
-        // nobody drew.
+        // `touch-action: none` makes a second contact reachable; without a pointer owner it could
+        // reset the origin and record a rectangle spanning two contacts.
         await mount();
         await dragWithSecondFinger();
         assert.deepEqual(locatorLines(), [
@@ -399,9 +389,8 @@ describe("<cp-element-selection>", () => {
     });
 
     it("records a clicked annotated element as a region", async () => {
-        // The brief's first of two ways to choose. A REGION and not an element, because an
-        // annotation carries no testTag — it is typography or a resolved container projected from
-        // the semantics tree, so there is no identity to name and claiming one would invent it.
+        // An annotation selects a region, not an element: it carries no testTag, so there is no
+        // identity to name.
         await mount();
         window.dispatchEvent(
             new CustomEvent("cp-element-pick", {
@@ -453,9 +442,8 @@ describe("<cp-element-selection>", () => {
     });
 
     it("offers only the drag where the server withheld the tag index", async () => {
-        // No `data-cp-tags` is the server saying a tag selection would not describe THIS frame — an
-        // override or a pin has re-rendered it. The drag is derived from the displayed pixels, so it
-        // stays honest and stays available.
+        // No `data-cp-tags` means a tag selection wouldn't describe this frame (an override or pin
+        // re-rendered it); the drag still works from displayed pixels.
         await mount(false);
         assert.deepEqual(fetched, []);
         assert.equal(picker().hidden, true);

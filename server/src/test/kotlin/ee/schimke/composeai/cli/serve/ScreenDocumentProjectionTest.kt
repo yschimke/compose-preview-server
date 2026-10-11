@@ -33,13 +33,9 @@ import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonPrimitive
 
 /**
- * What the projection **refuses**, node by node.
- *
- * The successful path is covered by the golden in [ScreenGeneratorComposeExportExecutorTest], which
- * is the better place for it: a golden shows the whole output at once and a per-value assertion
- * would only restate the table. What is worth asserting one at a time is each refusal, because each
- * one is a promise that a document holding that content produces an error naming it rather than
- * source that quietly omits it — which is exactly what the executor this replaced did.
+ * What the projection refuses, node by node. The success path is covered by the golden in
+ * [ScreenGeneratorComposeExportExecutorTest]; each refusal is asserted individually because each
+ * promises an error naming the content rather than source that silently omits it.
  */
 class ScreenDocumentProjectionTest {
 
@@ -151,13 +147,9 @@ class ScreenDocumentProjectionTest {
   }
 
   /**
-   * A `colorToken` wrapper holding a literal, which is what every design committed before the
-   * editor's `colourWrapper` rule carries.
-   *
-   * The canvas has always drawn these: `UiBuilderRenderer.uiBuilderColor` tests `startsWith("#")`
-   * before it consults the token table, so the wrapper never decided. Reading it as a role asked
-   * the theme for one called `#FF0D0E11` and refused the whole export over a colour the design
-   * renders correctly.
+   * A `colorToken` wrapper holding a literal (what designs predating `colourWrapper` carry). The
+   * canvas checks `startsWith("#")` first, so reading it as a role name refused an export the
+   * design renders correctly.
    */
   @Test
   fun `a colour token holding a literal is that literal`() {
@@ -174,9 +166,8 @@ class ScreenDocumentProjectionTest {
 
   @Test
   fun `a colour written as a string is refused as a colour, not as a Text`() {
-    // Left to the generator this was "`Text`.`color` is androidx.compose.ui.graphics.Color, which
-    // Text is not" — a sentence about a type the author never wrote (#476). The property gets the
-    // words the `background` modifier already had.
+    // The property gets designer-facing wording (as the `background` modifier does), not a
+    // generator type error.
     assertEquals(
       listOf(
         "node `text`.`color` is a colour, which is written as a `#RRGGBB` literal or as a theme " +
@@ -221,16 +212,9 @@ class ScreenDocumentProjectionTest {
 
   @Test
   fun `a variant nothing selects is refused for its own reason, not a card's`() {
-    // A variant property is not a value at all. Where `COMPONENT_VARIANTS` says which component it
-    // names, the projection selects it; where nothing does, this is the sentence — and it has to
-    // describe **this** property. It used to say "the catalog spells three Compose components as
-    // one id", which was true of `m3/card` and has never been true of a carousel's `kind`: it names
-    // which carousel function to call. The reason is authored per entry now, which is what keeps
-    // that from happening again.
-    //
-    // `layout/supporting-pane-scaffold`'s `layoutMode` was this test's example until the projection
-    // learned to write the scaffold's directive and value (compose-ui-builder#230); the carousel is
-    // the entry the table has left.
+    // A variant property isn't a value: where `COMPONENT_VARIANTS` names a component the projection
+    // selects it; otherwise this message, authored per entry so it describes this property (here a
+    // carousel's `kind`, naming which function to call).
     assertTrue(
       "node `carousel`.`kind` is `uncontained`, which names which carousel function to call " +
         "rather than an argument to one, and no record selects a carousel yet: its `items` is a " +
@@ -249,11 +233,9 @@ class ScreenDocumentProjectionTest {
 
   @Test
   fun `a button style selects the component, and a fab is not a Button under another name`() {
-    // Eleven of the twelve variants are the same signature under another name. `fab` is not:
-    // `FloatingActionButton`'s content slot has no receiver where `Button`'s is a `RowScope`, so a
-    // weight that is legal in a `TextButton` must refuse inside a fab. Reading the scope from the
-    // catalog id rather than from the variant would have emitted it against a receiver that is not
-    // there.
+    // `fab` differs from the other button variants: `FloatingActionButton`'s content has no
+    // `RowScope` receiver, so a weight legal in a `TextButton` must refuse inside a fab. Read the
+    // scope from the variant, not the catalog id.
     fun weightInside(style: String) =
       reasonsFor(
         document(
@@ -294,10 +276,8 @@ class ScreenDocumentProjectionTest {
 
   @Test
   fun `a container colour follows the style to its own ButtonDefaults factory`() {
-    // All four factories return a `ButtonColors`, so `buttonColors` compiles on a `TextButton` and
-    // hands it the filled button's content and disabled colours for every role the design did not
-    // set. A wrong colour that compiles is the failure this projection exists to refuse, so the
-    // factory tracks the component actually being emitted.
+    // All four factories return `ButtonColors`, so a wrong one compiles but gives wrong colours;
+    // the factory follows the emitted component.
     fun factoryFor(style: String): String {
       val colors =
         assertIs<ScreenValue.Construct>(
@@ -321,9 +301,8 @@ class ScreenDocumentProjectionTest {
 
   @Test
   fun `a fab takes the colour on its own parameter, not in a bundle`() {
-    // The case that needed a new axis rather than another table row (#393).
     // `FloatingActionButton` declares `containerColor: Color` directly, so the property lands on a
-    // different parameter holding a different shape — and no choice of defaults factory says that.
+    // different parameter shape no defaults factory describes.
     val arguments = styledButton("fab", "containerColor" to ColorValueV1("#FF0000")).arguments
 
     assertFalse("colors" in arguments, arguments.keys.toString())
@@ -346,10 +325,8 @@ class ScreenDocumentProjectionTest {
 
   @Test
   fun `a property whose values are an enumeration is read the same through either wrapper`() {
-    // A `string` wrapper on an `allowedValues` property is the legacy spelling the reducer now
-    // rejects on a write (#339). Documents already hold it, already render, and refused here with
-    // a type error naming `TextStyle` — a message about the wrapper's consequence rather than the
-    // wrapper. Both spellings resolve through the one table instead.
+    // A `string` wrapper on an `allowedValues` property is the legacy spelling (rejected on write
+    // but present in documents); both spellings resolve through the one table.
     assertEquals(
       projected(document(text("textAlign" to EnumValueV1("center")))).root.arguments,
       projected(document(text("textAlign" to StringValueV1("center")))).root.arguments,
@@ -358,9 +335,8 @@ class ScreenDocumentProjectionTest {
 
   @Test
   fun `an icon key becomes a chain, because the icon is an extension property`() {
-    // `androidx.compose.material.icons.Icons.Filled.Star` written as one qualified path does not
-    // resolve: the member is an extension on `Icons.Filled` declared in a different package, so it
-    // has to be imported and read by its simple name.
+    // `Icons.Filled.Star` as one qualified path doesn't resolve (the member is an extension in
+    // another package), so it is imported and used by simple name.
     val icon =
       projected(
           document(
@@ -383,9 +359,8 @@ class ScreenDocumentProjectionTest {
 
   @Test
   fun `a weight in a column becomes a scoped Modifier weight`() {
-    // Both halves of what made this inexpressible: the link is scoped to the slot the node sits in
-    // (`ColumnScope`, claimed and checked rather than assumed), and its argument is a `Float`,
-    // because a nested `Fractional` renders as a `Double` and `weight(1.0)` does not compile.
+    // The link is scoped to the node's slot (`ColumnScope`, checked) and its argument is a `Float`
+    // (`weight(1.0)` doesn't compile).
     val column =
       projected(
         document(
@@ -414,9 +389,8 @@ class ScreenDocumentProjectionTest {
 
   @Test
   fun `a weight outside a row or column is refused, and says where the node is`() {
-    // `m3/surface`'s content slot has no receiver, so there is no `weight` to call. The refusal
-    // names the placement rather than the property, because the property is fine and the placement
-    // is the thing a designer can change.
+    // `m3/surface`'s content slot has no receiver, so no `weight`; the refusal names the placement,
+    // which the designer can change.
     assertEquals(
       listOf(
         "node `text`.`weight` is a layout weight, which `Modifier.weight` supplies from a row's " +
@@ -589,9 +563,7 @@ class ScreenDocumentProjectionTest {
 
   @Test
   fun `every unexpressible modifier is reported, not only the first`() {
-    // The promise of `Outcome.Refused` is that a document can be fixed in one pass. A non-local
-    // return out of the modifier loop broke it silently: the second problem only appeared after
-    // the first was fixed and the export re-run.
+    // `Outcome.Refused` promises a one-pass fix: every problem is reported, not just the first.
     val reasons =
       refusal(
         document(
@@ -614,10 +586,8 @@ class ScreenDocumentProjectionTest {
 
   @Test
   fun `a padding with no numeric axis is refused, not emitted as an ambiguous call`() {
-    // `Modifier.padding()` and `PaddingValues()` are each ambiguous between fully-defaulted
-    // overloads, so an empty argument list compiles as none of them. Catalog validation checks the
-    // modifier type and not its axes, and the renderer reads a bad number as zero, so a document
-    // like this really does arrive here.
+    // `Modifier.padding()` and `PaddingValues()` are ambiguous with no arguments, and such
+    // documents do arrive (validation checks type, not axes).
     assertEquals(
       listOf("node `text` pads with no axis that is a number"),
       refusal(
@@ -734,8 +704,7 @@ class ScreenDocumentProjectionTest {
 
   @Test
   fun `a dimension past the Int range keeps a receiver that has a dp extension`() {
-    // `2147483648.dp` does not compile: Compose declares `dp` on Int, Double and Float, never on
-    // Long. It used to be emitted as a clean success.
+    // `2147483648.dp` doesn't compile: `dp` exists on Int, Double and Float, not Long.
     val document =
       ScreenGeneratorScreenFixture.document().let { base ->
         base.copy(
@@ -764,9 +733,8 @@ class ScreenDocumentProjectionTest {
 
   @Test
   fun `a dimension that cannot survive the narrowing to Float is refused`() {
-    // `1e100.dp` compiles — Compose declares `dp` on `Double` too — and evaluates to
-    // `Float.POSITIVE_INFINITY`, because `Dp` is a value class over `Float`. A success carrying a
-    // number the design never contained is worse than a refusal.
+    // `1e100.dp` compiles but becomes `Float.POSITIVE_INFINITY` (`Dp` wraps a `Float`); refuse
+    // rather than emit a number the design never had.
     val document =
       ScreenGeneratorScreenFixture.document().let { base ->
         base.copy(
@@ -823,10 +791,8 @@ class ScreenDocumentProjectionTest {
 
   @Test
   fun `a lazy list wraps each child in its scope's item, and keeps the slot's own arguments`() {
-    // The whole point of #394: a lazy container is a component record now, and its children are
-    // declared through `LazyListScope` rather than composed into the lambda. `ScreenGenerator`
-    // checks the scope named here against the record's `scopeDslReceiver`, so a wrong table entry
-    // refuses rather than emitting Kotlin that does not compile.
+    // A lazy container is a component record whose children are declared through `LazyListScope`;
+    // `ScreenGenerator` checks the scope named here against the record's `scopeDslReceiver`.
     val projected =
       projected(
         document(
@@ -882,9 +848,8 @@ class ScreenDocumentProjectionTest {
 
   @Test
   fun `a scroll state key is spent rather than handed to a component with no such parameter`() {
-    // Required on `layout/lazy-column` in the catalog, so every real lazy container carries one.
-    // It names the scroll position the builder's canvas restores, which is not in the design —
-    // the one thing this projection drops on purpose, and `IDENTITY_PROPERTIES` says why.
+    // Required on `layout/lazy-column`; it names the canvas's restored scroll position, which isn't
+    // part of the design, so it is dropped on purpose (see `IDENTITY_PROPERTIES`).
     val root =
       projected(
           document(
@@ -900,11 +865,8 @@ class ScreenDocumentProjectionTest {
 
   @Test
   fun `a grid span is refused, because dropping it would export a full-width row as one cell`() {
-    // The counter-example to the one above. `span` reads like more bookkeeping and is a layout
-    // instruction: the old exporter wrote it as `item(span = { GridItemSpan(maxLineSpan) })`, an
-    // argument to the wrapper read off the grid's own scope. `ScreenValue.Lambda` did not change
-    // this — it returns a value the document holds, and `maxLineSpan` is exactly what it cannot
-    // reach.
+    // `span` is a layout instruction, an `item(span = { GridItemSpan(maxLineSpan) })` argument read
+    // off the grid's scope, which `ScreenValue.Lambda` can't reach.
     assertEquals(
       listOf(
         "node `list`.`span` is the span this node takes in its parent grid, which is " +
@@ -923,10 +885,8 @@ class ScreenDocumentProjectionTest {
 
   @Test
   fun `a weight inside a lazy list refuses, because an item body has no receiver`() {
-    // A child of a lazy list sits inside `item { }`, whose receiver nothing in the record attests,
-    // so `SLOT_SCOPES` is silent and a scoped modifier refuses the way one at the root does.
-    // Stated here because the alternative — claiming `LazyListScope` for the children — would emit
-    // a `Modifier.weight` that resolves nowhere.
+    // A lazy list child sits inside `item { }`, whose receiver the record doesn't attest, so scoped
+    // modifiers refuse (claiming `LazyListScope` would emit an unresolvable `Modifier.weight`).
     assertTrue(
       refusal(
           document(
@@ -948,10 +908,8 @@ class ScreenDocumentProjectionTest {
 
   @Test
   fun `a progress value becomes the lambda the determinate indicator takes`() {
-    // Refused outright until `ScreenValue.Lambda` existed (compose-ai-tools#5219), on the honest
-    // grounds that no value in this vocabulary was a lambda. The catalog's own note says what the
-    // argument means: absent is the indeterminate indicator, present is the determinate one, which
-    // is Kotlin overload resolution and needs no variant of its own.
+    // The progress lambda: absent means indeterminate, present determinate, resolved by Kotlin
+    // overloads.
     val progress =
       assertIs<ScreenValue.Lambda>(
         projected(document(indicator("progress" to DecimalValueV1(0.4)), roots = listOf("bar")))

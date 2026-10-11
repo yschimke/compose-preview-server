@@ -25,19 +25,17 @@ import okio.Path.Companion.toPath
 import okio.fakefilesystem.FakeFileSystem
 
 /**
- * The **playground lane** over real HTTP: `POST /api/{v}/compiler/run` returns the Stage-1 result
- * (diagnostics + preview token) when the lane is enabled, and 404s when it isn't. The compile
- * service is driven by fakes (a real compile is `PlaygroundBtaCompiler`'s job, covered elsewhere)
- * so this is purely about the route wiring + JSON contract.
+ * The playground lane over real HTTP: `POST /api/{v}/compiler/run` returns the Stage-1 result
+ * (diagnostics + preview token) when enabled and 404s otherwise. The compile service is faked; this
+ * covers route wiring and the JSON contract.
  */
 class PlaygroundRoutingTest {
 
   private val fs = FakeFileSystem()
   private var workN = 0
 
-  // Shared between the compile service (mints tokens) and the redeem service (looks them up), like
-  // production — so the token-gated redemption test below exercises a real mint → redeem
-  // round-trip.
+  // Shared by the compile and redeem services, as in production, so redemption is a real mint →
+  // redeem round-trip.
   private val tokenStore = PlaygroundTokenStore(fileSystem = fs)
 
   private val playground =
@@ -120,9 +118,8 @@ class PlaygroundRoutingTest {
   }
 
   /**
-   * A **token-gated** host (`isPublic = false`) with the redemption lane wired — the shape a real
-   * playground runs as (the lane is refused under `--public`). Here the access token rides as
-   * `?token=…`, which is what made the `/pg/{token}` path-param collision surface.
+   * A token-gated host (`isPublic = false`) with redemption wired, as a real playground runs. The
+   * access token rides as `?token=…`, which collides by name with the `/pg/{token}` path param.
    */
   private val gatedServer: ServeHttpServer by lazy {
     ServeHttpServer(
@@ -254,8 +251,8 @@ class PlaygroundRoutingTest {
   }
 
   /**
-   * A host whose compile lane carries a per-caller budget of two per window (issue #3214). Two is
-   * the smallest number that still shows the *bucket* rather than only its floor.
+   * A per-caller compile budget of two per window: the smallest that shows the bucket, not just its
+   * floor.
    */
   private val limitedServer: ServeHttpServer by lazy {
     ServeHttpServer(
@@ -303,8 +300,7 @@ class PlaygroundRoutingTest {
 
   @Test
   fun `an unmetered host still admits every compile`() {
-    // The default `server` has no limiter wired — the pre-#3214 behaviour, which must be exactly
-    // what a host that opts out of the budget still gets.
+    // The default `server` has no limiter, which must match a host that opts out.
     val body =
       """{"files":[{"name":"Snippet.kt","text":"@Preview @Composable fun P(){}"}],"confType":"compose-cmp"}"""
     repeat(4) { i ->
@@ -507,10 +503,8 @@ class PlaygroundRoutingTest {
   /** Opens `/ws/{name}` and answers the upgrade's HTTP status: 101 when it opened. */
   private fun socketStatus(port: Int, query: String, headers: Map<String, String>): Int? {
     val done = CountDownLatch(1)
-    // Only the handshake's answer counts. The server closes a socket for an unknown session
-    // straight
-    // after the upgrade, and OkHttp then reports that as a failure with no response, which must not
-    // replace the 101 already recorded.
+    // Only the handshake's answer counts: the server closes an unknown session's socket right after
+    // the upgrade, which OkHttp reports as a failure that must not replace the recorded 101.
     val status = AtomicReference<Int?>()
     val answered = AtomicBoolean(false)
     fun answer(code: Int?) {
@@ -611,11 +605,8 @@ class PlaygroundRoutingTest {
             .content
         }
 
-    // Redeem it WITH the access token in the query. The `/pg/{pgToken}` path segment must resolve
-    // to
-    // the minted id — NOT be shadowed by the same-named `?token=` access token (which would fail
-    // the
-    // pg_ shape check and 404 as NotFound). Assert the 302 to the viewer, don't follow it.
+    // Redeem with the access token in the query: the `/pg/{pgToken}` segment must resolve to the
+    // minted id, not be shadowed by `?token=`. Assert the 302, don't follow it.
     val noRedirect = client.newBuilder().followRedirects(false).build()
     noRedirect
       .newCall(

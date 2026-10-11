@@ -8,30 +8,21 @@ import okio.Path
 import okio.Path.Companion.toPath
 
 /**
- * The compile half of the playground's per-session sandbox (`docs/design/PLAYGROUND.md` §6.3,
- * issue #3090): run `kotlinc` **outside** the serve JVM, inside the same jail the render lanes use.
+ * The compile half of the playground's per-session sandbox (`docs/design/PLAYGROUND.md` §6.3): run
+ * `kotlinc` outside the serve JVM, in the same jail the render lanes use.
  *
- * Phase 4 ([PlaygroundSandbox]) contained everything that *executes* a snippet — the first frame,
- * the RC capture, the live session — but [PlaygroundBtaCompiler] still compiled in-process. That
- * compile does not run snippet code, so it was never an arbitrary-execution hole; it is a
- * **resource** one. The Kotlin compiler is the least predictable thing on the request path: a
- * pathological snippet (deep generic inference, a huge literal, an exponential type) can burn CPU
- * and heap inside the serve JVM itself, where `-Xmx` is the operator's, not the snippet's, and no
- * wall clock applies. Moving it into the jail puts the compiler under the same memory ceiling, CPU
- * quota and hard TTL as everything else a stranger touches — and a compiler that OOMs now kills a
- * disposable child instead of the host.
+ * Compiling doesn't run snippet code, so this is a resource limit, not an execution one: a
+ * pathological snippet can burn CPU and heap with no wall clock. In the jail it gets the same
+ * memory ceiling, CPU quota and hard TTL as everything else, and an OOM kills a disposable child
+ * instead of the host.
  *
- * The subprocess speaks the same one-JSON-line protocol as [PlaygroundSandboxProbe]: the parent
- * writes a [PlaygroundCompileRequest] into the snippet's own (jail-writable) work dir, the child
- * prints one [PlaygroundCompileReport], and anything else — a jail that wouldn't launch, a killed
- * JVM, unparseable output — becomes a single file-level error so the route still answers the JSON
- * contract instead of throwing.
+ * The child speaks [PlaygroundSandboxProbe]'s one-JSON-line protocol: the parent writes a
+ * [PlaygroundCompileRequest] into the snippet's work dir, the child prints one
+ * [PlaygroundCompileReport], and any other outcome becomes a single file-level error so the route
+ * keeps its JSON contract.
  *
- * **Cost.** Each compile pays a cold BTA toolchain bootstrap (the in-process compiler amortised it
- * across requests by holding one `BtaCompileSession`). That is the deliberate v1 trade: a warm
- * compile JVM per catalog classpath would claw the seconds back, but it re-introduces exactly the
- * long-lived, shared, snippet-touched process Phase 4 exists to avoid — so it stays a follow-up
- * with a measurement behind it rather than a guess.
+ * Each compile pays a cold BTA bootstrap. A warm compile JVM per classpath would win that back but
+ * reintroduce a long-lived, shared, snippet-touched process, so it awaits measurement.
  */
 class PlaygroundJailedCompiler(
   private val sandbox: PlaygroundSandbox,
@@ -44,12 +35,9 @@ class PlaygroundJailedCompiler(
   private val compilerPluginJars: List<String>,
   private val moduleName: String = "playground",
   /**
-   * How many snippet compiles may hold a JVM at once. **Load-bearing:** the in-process compiler it
-   * replaces serialized compiles behind one `BtaCompileSession`, so concurrency was implicitly 1; a
-   * subprocess per request removes that, and per-process caps bound one compile without bounding
-   * the *aggregate* — N concurrent compiles is N × [PlaygroundSandbox.memoryMb]. This is the
-   * playground's compile-side counterpart to `--live-seats`: peak compile memory an operator has to
-   * budget for is `slots × memoryMb`.
+   * How many compiles may hold a JVM at once. **Load-bearing:** per-process caps bound one compile,
+   * not the aggregate, so peak compile memory is `slots × [PlaygroundSandbox.memoryMb]` (the
+   * compile-side counterpart to `--live-seats`).
    */
   private val slots: Int = DEFAULT_COMPILE_SLOTS,
   /** How long a request waits for a slot before answering "busy" rather than queueing forever. */
@@ -62,10 +50,8 @@ class PlaygroundJailedCompiler(
   private val compileSlots = java.util.concurrent.Semaphore(slots.coerceAtLeast(1), true)
 
   /**
-   * A compile never outlives the sandbox's own wall-clock deadline: an operator who shortens
-   * `--playground-sandbox-ttl` is asking for *everything* snippet-related to be reclaimed by then,
-   * and the render path already honours it via the descriptor's `hardTtlSeconds`. Whichever of the
-   * two budgets is tighter wins.
+   * A compile never outlives the sandbox's wall-clock deadline (`--playground-sandbox-ttl`); the
+   * tighter of the two budgets wins.
    */
   internal val effectiveTimeoutSeconds: Long =
     if (sandbox.isActive) minOf(timeoutSeconds, sandbox.ttlSeconds) else timeoutSeconds
@@ -112,9 +98,8 @@ class PlaygroundJailedCompiler(
     removed: List<Path> = emptyList(),
     firstBuild: Boolean = false,
   ): List<PlaygroundDiagnostic> {
-    // The snippet's work dir — the one path the jail leaves writable, and the parent of both the
-    // staged sources and the class output. Everything the compile writes (classes, the IC dir, this
-    // request file) therefore lands inside the directory the token store deletes.
+    // The snippet's work dir is the one path the jail leaves writable, so everything the compile
+    // writes lands inside the directory the token store deletes.
     val workDir = File(outputDir.toString()).parentFile ?: File(outputDir.toString())
     val requestFile = File(workDir, "compile-request.json")
     val request =
@@ -187,9 +172,8 @@ class PlaygroundJailedCompiler(
   }
 
   /**
-   * Narrow the compile child's environment to [CHILD_ENVIRONMENT]. The child needs nothing from the
-   * server's own environment (its `java` is an absolute path and everything else is argv), so it
-   * shouldn't inherit it, whichever sandbox profile it runs under.
+   * Narrow the child's environment to [CHILD_ENVIRONMENT]: it needs nothing from the server's (its
+   * `java` is absolute and everything else is argv).
    */
   internal fun retainChildEnvironment(environment: MutableMap<String, String>) {
     environment.keys.retainAll(CHILD_ENVIRONMENT)
@@ -234,10 +218,8 @@ class PlaygroundJailedCompiler(
       process.destroyForcibly()
       process.waitFor(5, TimeUnit.SECONDS)
     }
-    // Best-effort: a drain thread that outlives this is still appending, so both reads below stay
-    // under the same monitor its appends take. Without that, `toString()` copies the backing array
-    // while a concurrent `append` may be resizing it — a torn read, or an
-    // ArrayIndexOutOfBoundsException out of StringBuilder itself.
+    // A drain thread that outlives this may still be appending, so the reads below take the same
+    // monitor to avoid a torn read of the StringBuilder.
     outThread.join(DRAIN_JOIN_MILLIS)
     errThread.join(DRAIN_JOIN_MILLIS)
     return PlaygroundSandboxProbe.Launch(
@@ -270,17 +252,14 @@ class PlaygroundJailedCompiler(
       setOf("PATH", "HOME", "LANG", "LC_ALL", "TZ", "TMPDIR")
 
     /**
-     * A cold BTA bootstrap plus a snippet compile; generous, because the cost of being wrong is a
-     * spurious "no result" on a slow box. Clamped to the sandbox's own wall-clock TTL when that is
-     * tighter (see `effectiveTimeoutSeconds`).
+     * A cold BTA bootstrap plus a compile; generous, since being wrong means a spurious "no
+     * result". Clamped to the sandbox TTL (see `effectiveTimeoutSeconds`).
      */
     const val DEFAULT_COMPILE_TIMEOUT_SECONDS = 180L
 
     /**
-     * Concurrent compile JVMs. Two, not one: one in flight while another is being typed is the
-     * common case, and a sandbox's memory cap is per process — so the host budget an operator
-     * reasons about is `slots × --playground-sandbox-memory-mb` (3 GB at the defaults). Raise it
-     * only with that arithmetic in hand.
+     * Concurrent compile JVMs: one in flight while another is typed is common. Host budget is
+     * `slots × --playground-sandbox-memory-mb` (3 GB at defaults); raise with that in mind.
      */
     const val DEFAULT_COMPILE_SLOTS = 2
 
@@ -288,19 +267,17 @@ class PlaygroundJailedCompiler(
     const val DEFAULT_SLOT_WAIT_SECONDS = 30L
 
     /**
-     * How long to wait for a drain thread after the child exits. The pipes are closed by then, so
-     * this only ever expires on a wedged reader — and the reads it guards are synchronized, so
-     * expiring costs a truncated log rather than a corrupted one.
+     * How long to wait for a drain thread after the child exits. Only a wedged reader expires it,
+     * costing a truncated log, not a corrupted one.
      */
     private const val DRAIN_JOIN_MILLIS = 2_000L
 
     private val JSON = Json { ignoreUnknownKeys = true }
 
     /**
-     * Wrap [inProcess] in a jailed subprocess when [sandbox] is active; otherwise hand back the
-     * in-process compiler unchanged. A dev host with no sandbox keeps today's warm, fast compile
-     * (and today's exposure, which is bounded by the token gate); a `--public` host cannot reach
-     * here without a verified sandbox, so its compiles are always jailed.
+     * Wrap [inProcess] in a jailed subprocess when [sandbox] is active, else return it unchanged. A
+     * `--public` host can't reach here without a verified sandbox, so its compiles are always
+     * jailed.
      */
     fun wrap(
       sandbox: PlaygroundSandbox,
@@ -316,8 +293,8 @@ class PlaygroundJailedCompiler(
           it.isNotBlank()
         }
       if (cliClasspath.isEmpty() || btaImplJars.isEmpty()) {
-        // Fail *loud but soft*: the lane still works, just with the pre-#3090 exposure, and the
-        // operator is told which half is missing rather than quietly getting an unjailed compiler.
+        // Fail loud but soft: the lane still works unjailed, and the operator is told which half is
+        // missing.
         onLog(
           "playground: cannot jail the compiler (" +
             (if (cliClasspath.isEmpty()) "the serve process reports no classpath"
@@ -326,9 +303,8 @@ class PlaygroundJailedCompiler(
         )
         return inProcess
       }
-      // A dropped jail still gets a disposable, capped child — better than the in-process
-      // compiler — but saying it runs "inside the sandbox" would be a lie, and this line is
-      // exactly where an operator looks to confirm the jail took.
+      // A dropped jail still gets a disposable capped child, but must not be logged as "inside the
+      // sandbox": operators check this line to confirm the jail.
       onLog(
         if (sandbox.jailDropped)
           "playground: compiles run in a capped child with NO jail (the ${sandbox.profile.id} " +
@@ -373,11 +349,9 @@ data class PlaygroundCompileRequest(
 data class PlaygroundCompileReport(val diagnostics: List<PlaygroundDiagnostic> = emptyList())
 
 /**
- * The in-jail compiler entrypoint: read one [PlaygroundCompileRequest], run the *same*
- * [PlaygroundBtaCompiler] the in-process path uses, print one [PlaygroundCompileReport].
- *
- * Deliberately thin — the compile behaviour (BTA session, Compose plugin wiring, diagnostic
- * mapping) stays in one place, so jailing the compiler can't silently drift from not jailing it.
+ * The in-jail compiler entrypoint: read one [PlaygroundCompileRequest], run the same
+ * [PlaygroundBtaCompiler] as the in-process path, print one [PlaygroundCompileReport]. Thin, so
+ * jailed and unjailed compiles can't drift.
  */
 object PlaygroundCompileMain {
 

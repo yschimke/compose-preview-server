@@ -59,20 +59,12 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import org.junit.jupiter.api.io.TempDir
 
 /**
- * A design authored, edited and exported entirely over MCP.
- *
- * ## Why an integration test rather than unit ones
- *
- * Every seam this change adds is a wiring seam, and each of them fails silently in a unit test:
- * that the tools appear in `tools/list` only when a service is configured, that a tool name routes
- * to the UI-builder door rather than falling through to the catalog surface, that the capability
- * checked is the one the HTTP routes check, that the actor reaching `UiBuilderProtocolMapper` is
- * the authenticated one rather than a field from the message, and that the reply is the released
- * [McpResponseEnvelopeV1]. A mock of the service port proves the JSON and none of that.
- *
- * So this starts the real server, wired the way `ServeRunner` wires it, and asks it as an agent
- * would: list, create, read, mutate, export — with the export's Kotlin as the last assertion,
- * because that is the whole point of the door existing.
+ * A design authored, edited and exported entirely over MCP. An integration test because every seam
+ * here is wiring that a unit test can't see: the tools appear only with a configured service, names
+ * route to the UI-builder door, the capability checked matches the HTTP routes, the actor is the
+ * authenticated one (not a message field), and replies are the released [McpResponseEnvelopeV1]. So
+ * it starts the real server wired like `ServeRunner` and acts as an agent: list, create, read,
+ * mutate, export, ending on the exported Kotlin.
  */
 class ServeUiBuilderMcpIntegrationTest {
   @TempDir lateinit var stateDirectory: Path
@@ -169,9 +161,8 @@ class ServeUiBuilderMcpIntegrationTest {
     val catalogs = envelope(server, ServeUiBuilderMcp.LIST_CATALOGS)
     assertTrue(catalogs.contains(CATALOG_SYSTEM_ID), catalogs)
 
-    // 2. A design. `includeCatalog` because this test decodes the reply as the released shape,
-    // whose snapshot carries the catalog; the default leaves it out, and the test below is about
-    // that.
+    // `includeCatalog` because this test decodes the released shape, whose snapshot carries the
+    // catalog (the default omits it; see the test below).
     val created =
       envelope(
         server,
@@ -663,10 +654,7 @@ class ServeUiBuilderMcpIntegrationTest {
         """{"designId":"agent-screen","revision":0,"format":"compose"}""",
       )
     val artifact = assertIs<ExportResponseV1>(response(exported)).artifact
-    // Emitting is the released behaviour now that the shared generator carries action-lambda
-    // support; the `VERIFY_LOCAL_LAYOUT_CLICKS` branch existed to prove this path against a local
-    // generator publication before that release, and the diagnostics it fell back to asserted a
-    // limitation that has lifted.
+    // Emitting is released behaviour now that the shared generator supports action lambdas.
     assertEquals(emptyList(), artifact.diagnostics, artifact.content)
     assertTrue(
       artifact.content.endsWith(
@@ -954,9 +942,7 @@ class ServeUiBuilderMcpIntegrationTest {
     )
     val catalog = summary["catalogs"]!!.jsonArray.single().jsonObject
     assertEquals(CATALOG_SYSTEM_ID, catalog["systemId"]!!.jsonPrimitive.content)
-    // The pin a document must carry — which the capability itself never spelled, so an agent
-    // used to guess the digest. This is the one the test document below pins, and creating with
-    // it succeeds.
+    // The catalog pin a document must carry, now spelled out so agents needn't guess the digest.
     assertEquals(
       CatalogReferenceV1(CATALOG_SYSTEM_ID, "candidate", "candidate", "candidate"),
       json.decodeFromJsonElement(CatalogReferenceV1.serializer(), catalog["catalogPin"]!!),
@@ -978,10 +964,8 @@ class ServeUiBuilderMcpIntegrationTest {
     assertNull(text["wasm"])
     assertNull(text["svg"])
     assertNull(text["code"])
-    // A generated inventory does not get spelled out here. `m3/icon`.`iconKey` is the complete
-    // Material icon set since #710, and inlining it took this summary to 241 KB — four times the
-    // full envelope it exists to be a cheap alternative to. It reports its size and where to get
-    // the values; an agent that needs them asks for `full`, which is checked below.
+    // A generated inventory isn't inlined: `m3/icon`.`iconKey` is the whole Material icon set,
+    // which would bloat the summary. It reports size and how to get the values (`full`).
     val icon = components.single { it["id"]!!.jsonPrimitive.content == "m3/icon" }
     val iconProperties = icon["properties"]!!.jsonArray.map { it.jsonPrimitive.content }
     val iconKey = iconProperties.single { it.startsWith("iconKey:") }
@@ -1323,10 +1307,8 @@ class ServeUiBuilderMcpIntegrationTest {
 
   @Test
   fun `the native render tool returns a stable refusal where the host cannot compile`() {
-    // A server with a builder advertises the same authoring surface regardless of whether this
-    // particular deployment carries a compiler. A client can therefore call one stable tool and
-    // branch on a stable code instead of treating an absent declaration as an ambiguous version or
-    // configuration mismatch.
+    // A server with a builder advertises the same authoring surface with or without a compiler, so
+    // clients branch on a stable code.
     val server = start()
     val withoutCompiler = tools(server)
     assertTrue(
@@ -1372,7 +1354,7 @@ class ServeUiBuilderMcpIntegrationTest {
       "{\"designId\":\"$designId\",\"document\":$documentJson}",
     )
 
-    // The whole reason the tool exists (#478): bytes behind a key, then a node naming the key.
+    // Bytes behind a key, then a node naming the key.
     val stored =
       response(
         envelope(
@@ -1409,8 +1391,8 @@ class ServeUiBuilderMcpIntegrationTest {
       )
     assertEquals(ServiceErrorCodeV1.BAD_REQUEST, assertIs<ErrorResponseV1>(refused).error.code)
 
-    // The node that names the key. #497 refuses an `assetKey` nothing resolves at commit, and the
-    // pinned key is resolved — so the picture's node commits, and a guessed key's node does not.
+    // A node naming the key: unresolvable `assetKey`s are refused at commit, so the pinned key's
+    // node commits and a guessed key's doesn't.
     fun insertPhoto(operationId: String, baseRevision: Long, key: String) =
       response(
         envelope(
@@ -2033,7 +2015,7 @@ class ServeUiBuilderMcpIntegrationTest {
       .jsonObject
 
   /**
-   * A view's `structuredContent` is the JSON its text carries, link included, and satisfies the
+   * A view's `structuredContent` is the JSON its text carries (link included) and satisfies the
    * `outputSchema` `ui_builder_view` declares.
    */
   private fun assertTypedView(server: RunningServer, result: JsonObject, view: JsonObject) {
@@ -2108,8 +2090,8 @@ class ServeUiBuilderMcpIntegrationTest {
       }
 
   /**
-   * A column holding one text, so the mutation above has a slot to insert into and the export has
-   * something to nest. Pinned to the packaged M3 catalog, like the HTTP export test's document.
+   * A column holding one text, so the mutation has a slot and the export has nesting. Pinned to the
+   * packaged M3 catalog.
    */
   private fun document(): DesignDocumentV1 =
     DesignDocumentV1(

@@ -273,6 +273,43 @@ describe("power-user keyboard navigation", () => {
             new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
         );
 
+        // F presses the viewer's Present button, and the guide lists it.
+        const present = document.createElement("button");
+        present.className = "cp-present";
+        let presses = 0;
+        present.addEventListener("click", () => presses++);
+        document.body.appendChild(present);
+        const key = (k: string, target: EventTarget = document) =>
+            target.dispatchEvent(
+                new KeyboardEvent("keydown", { key: k, bubbles: true }),
+            );
+        key("f");
+        assert.equal(presses, 1, "F presents");
+        const liveCanvas = document.createElement("canvas");
+        document.body.appendChild(liveCanvas);
+        key("f", liveCanvas);
+        assert.equal(presses, 1, "an F typed into the live stream stays there");
+        // While presenting, only F answers: a palette would open behind the full-screen stage.
+        Object.defineProperty(document, "fullscreenElement", {
+            configurable: true,
+            get: () => present,
+        });
+        key("c");
+        assert.equal(
+            document.querySelector("[role='dialog']"),
+            null,
+            "no palette opens under the presented stage",
+        );
+        key("F");
+        assert.equal(presses, 2, "F leaves present mode too");
+        delete (document as { fullscreenElement?: unknown }).fullscreenElement;
+        key("?");
+        assert.match(
+            document.querySelector("[role='dialog']")!.textContent!,
+            /F\s*Present the preview full screen/,
+        );
+        key("Escape");
+
         document.body.replaceChildren(settings);
         setting.click();
         setting.click();

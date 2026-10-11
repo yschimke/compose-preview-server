@@ -36,7 +36,12 @@ test("sandbox semantic actions operate Jetcaster state and an independent scroll
     page,
 }, testInfo) => {
     const errors = [];
-    page.on("pageerror", (error) => errors.push(error.message));
+    // The same filter as the console errors below: the renderer's sandboxed frame can surface the
+    // Cache API refusal as an uncaught page error rather than a logged one, and it is the same
+    // known, already-handled refusal either way.
+    page.on("pageerror", (error) => {
+        if (!isIgnorableConsoleError(error.message)) errors.push(error.message);
+    });
     page.on("console", (message) => {
         if (
             message.type() === "error" &&

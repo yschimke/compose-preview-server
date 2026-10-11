@@ -1,19 +1,11 @@
-// The rules behind `<cp-viewer-drawers>`, as pure functions over plain flags.
-//
-// Separated from the element for the same reason `zoom/viewport.ts` is: every decision the drawers
-// make is a small piece of arithmetic over three inputs — the viewport band, what the visitor
-// stored, and what the server's markup implies — and none of it needs a DOM to be right or wrong.
-// Held in the element it would only be reachable through a browser, which is exactly how the
-// viewer arrived at a state where a drawer's default could change and nothing failed until a page
-// capture noticed weeks later.
-//
-// The three bands matter and are not the same question:
+// The rules behind `<cp-viewer-drawers>`, as pure functions over the viewport band, the stored
+// preference and the server's markup, so they are unit-tested without a DOM. Three bands:
 //
 //   phone   (≤ 640px)  drawers are MODAL bottom sheets over the preview
 //   middle  (641–1099) inline columns, nav hidden by default
 //   wide    (≥ 1100px) inline columns, nav shown by default
 //
-// so "is the nav open" has a different answer in each, and `isWide` is not `!isMobile`.
+// so `isWide` is not `!isMobile`.
 
 /** Which viewport band the page is in. Both false is the middle band. */
 export interface Viewport {
@@ -27,15 +19,10 @@ export interface Viewport {
 export type FoldPref = string | null;
 
 /**
- * The component nav's resting state.
- *
- * On a phone the answer is always CLOSED, whatever a desktop visit stored: an open bottom sheet is
- * a modal over the preview, never a resting state to restore. Off the phone a stored choice wins,
- * and with none the CSS default applies — shown wide, hidden in the middle band.
- *
- * This has to be resolved into an explicit class rather than left to CSS, because the server's
- * markup carries neither class: `classList.contains("cp-nav-open")` would read the wide band's
- * default as "closed" on the very width where it is open, and the toggle would be inert there.
+ * The component nav's resting state: always closed on a phone (a sheet is never a resting state);
+ * otherwise a stored choice, else the CSS default (shown wide, hidden middle). Resolved into an
+ * explicit class because the markup carries none, and reading the class would mistake the wide
+ * default for closed.
  */
 export function resolveNavOpen(viewport: Viewport, pref: FoldPref): boolean {
     if (viewport.mobile) return false;
@@ -44,12 +31,8 @@ export function resolveNavOpen(viewport: Viewport, pref: FoldPref): boolean {
 }
 
 /**
- * The overrides drawer's resting state.
- *
- * Closed on a phone so the preview leads — the toggle row keeps it one tap away as a sheet, and
- * restoring a stored preference there would put a sheet back over the render, which is the rule
- * this breakpoint exists to state. Off the phone a stored choice wins; with none, `serverDefault`
- * stands, which is whatever `cp-controls-open` the markup shipped with.
+ * The overrides drawer's resting state: closed on a phone so the preview leads; otherwise a stored
+ * choice, else `serverDefault` (the markup's `cp-controls-open`).
  */
 export function resolveControlsOpen(
     viewport: Viewport,
@@ -62,13 +45,9 @@ export function resolveControlsOpen(
 }
 
 /**
- * Whether a drawer toggle should be remembered.
- *
- * A phone stores NOTHING about the drawers. Both are modal sheets there — opened for one thing and
- * dismissed — so remembering one open would restore the sheet on the next page, and every
- * component you picked would arrive covered and need dismissing. The sheets also close each other
- * on a phone, which would store a state the visitor never chose. The in-page folds are ordinary
- * rows rather than sheets, and keep their memory at every width.
+ * Whether a drawer toggle is remembered. Never on a phone: the sheets are modal and close each
+ * other, so a stored state would cover the next page or record a choice never made. In-page folds
+ * remember at every width.
  */
 export function shouldPersistDrawer(viewport: Viewport): boolean {
     return !viewport.mobile;
@@ -95,10 +74,8 @@ export function toggleIdFor(drawer: DrawerClass): string {
 }
 
 /**
- * Per-CATALOG storage key, the way `cp-theme:<catalog>` and `cp-tab:<catalog>` already are.
- * `localStorage` is per-origin and one host serves many catalogs under different base paths, so an
- * unscoped key would let folding this catalog's thirty-state axis fold a normally-inline axis on
- * every unrelated catalog beside it.
+ * Per-catalog storage key, like `cp-theme:<catalog>`: one origin serves many catalogs, so an
+ * unscoped key would leak folds across catalogs.
  */
 export function foldKey(scope: string, id: string): string {
     return `cp-fold:${scope}.${id}`;
