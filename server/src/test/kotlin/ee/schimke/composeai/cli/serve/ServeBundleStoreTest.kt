@@ -8,9 +8,11 @@ import ee.schimke.composeai.daemon.protocol.PreviewOverrides
 import java.awt.image.BufferedImage
 import java.io.ByteArrayOutputStream
 import java.io.File
+import java.util.zip.ZipException
 import javax.imageio.ImageIO
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class ServeBundleStoreTest {
@@ -222,6 +224,22 @@ class ServeBundleStoreTest {
     assertTrue(store().add(".", zip, isSecurityChecked = true) is ServeBundleStore.Result.Failed)
     assertTrue(store().add("..", zip, isSecurityChecked = true) is ServeBundleStore.Result.Failed)
     assertTrue(store().add("...", zip, isSecurityChecked = true) is ServeBundleStore.Result.Failed)
+  }
+
+  @Test
+  fun `a bundle the verifier rejects is a failed upload, not a crash`() {
+    val root = tempRoot()
+    val store =
+      ServeBundleStore(
+        root,
+        register = { n, h -> registered[n] = h },
+        trust = { throw ZipException("bundle inflates past the budget") },
+      )
+    val result =
+      store.add("bomb", zipOf("previews/p.png" to byteArrayOf(1)), isSecurityChecked = true)
+    assertTrue(result is ServeBundleStore.Result.Failed)
+    assertTrue(registered.isEmpty())
+    assertFalse(File(root, "bomb").exists())
   }
 
   @Test
