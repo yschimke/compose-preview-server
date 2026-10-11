@@ -30,6 +30,12 @@ function stageWithImage(
     return { stage, img };
 }
 
+const snapshot = (img: HTMLImageElement) => ({
+    el: img,
+    width: img.naturalWidth,
+    height: img.naturalHeight,
+});
+
 const toggle = () =>
     document.querySelector<HTMLButtonElement>(".cp-grid-toggle")!;
 const grid = () => document.querySelector<HTMLElement>(".cp-grid-overlay")!;
@@ -67,34 +73,57 @@ describe("the viewer's 8dp grid", () => {
         });
     });
 
-    it("reads a picked device's density off its dp size and the PNG", () => {
+    it("reads a picked device's density off its dp size and the render", () => {
         const pixel5 = {
             textContent: "Pixel 5 · compact phone (393 × 851 dp)",
         };
-        const png = (naturalWidth: number, naturalHeight: number) => ({
-            naturalWidth,
-            naturalHeight,
-        });
-        assert.equal(densityFromDeviceLabel(pixel5, png(1179, 2553)), 3);
+        assert.equal(densityFromDeviceLabel(pixel5, 1179, 2553), 3);
         assert.equal(
-            densityFromDeviceLabel(pixel5, png(2553, 1179)),
+            densityFromDeviceLabel(pixel5, 2553, 1179),
             3,
             "landscape is the same device turned round",
         );
         assert.equal(
             densityFromDeviceLabel(
                 { textContent: "(preview default)" },
-                png(10, 10),
+                10,
+                10,
             ),
             null,
         );
-        assert.equal(densityFromDeviceLabel(undefined, png(10, 10)), null);
+        assert.equal(densityFromDeviceLabel(undefined, 10, 10), null);
+    });
+
+    it("reads it off the width alone for a full-page scroll render", () => {
+        const pixel5 = {
+            textContent: "Pixel 5 · compact phone (393 × 851 dp)",
+        };
+        // 393dp at 3x, scrolled to 2000dp of content: the long edge would say 7.05.
+        assert.equal(densityFromDeviceLabel(pixel5, 1179, 6000, ""), 3);
+        assert.equal(densityFromDeviceLabel(pixel5, 1179, 6000, "portrait"), 3);
+        assert.equal(
+            densityFromDeviceLabel(pixel5, 2553, 6000, "landscape"),
+            3,
+            "landscape puts the long side across",
+        );
+        const tablet = { textContent: "Pixel Tablet · tablet (1280 × 800 dp)" };
+        assert.equal(
+            densityFromDeviceLabel(tablet, 2560, 9000, ""),
+            2,
+            "a device listed landscape is across its first size by default",
+        );
+        assert.equal(densityFromDeviceLabel(tablet, 1600, 9000, "portrait"), 2);
     });
 
     it("draws one cell per 8dp of the render as shown, over the image's box", () => {
         // 360dp at density 2.625 is 945px, shown at half size: 8dp is 10.5 CSS px.
         const { stage, img } = stageWithImage([945, 1890], [472.5, 945]);
-        installGridOverlay(stage, img, () => 2.625);
+        installGridOverlay(
+            stage,
+            img,
+            () => snapshot(img),
+            () => 2.625,
+        );
         assert.equal(grid().hidden, true, "off until asked for");
         assert.equal(toggle().getAttribute("aria-pressed"), "false");
         assert.match(toggle().title, /2\.625 px per dp/);
@@ -113,7 +142,12 @@ describe("the viewer's 8dp grid", () => {
     it("stays hidden with no decoded render to lay it over", () => {
         const { stage, img } = stageWithImage([0, 0], [104, 20]);
         localStorage.setItem("cp-grid-overlay", "1");
-        installGridOverlay(stage, img, () => 2);
+        installGridOverlay(
+            stage,
+            img,
+            () => snapshot(img),
+            () => 2,
+        );
         assert.equal(toggle().getAttribute("aria-pressed"), "true");
         assert.equal(grid().hidden, true, "an alt-text box is not a render");
     });
@@ -121,7 +155,12 @@ describe("the viewer's 8dp grid", () => {
     it("is remembered per browser", () => {
         localStorage.setItem("cp-grid-overlay", "1");
         const { stage, img } = stageWithImage([200, 200], [200, 200]);
-        installGridOverlay(stage, img, () => 1);
+        installGridOverlay(
+            stage,
+            img,
+            () => snapshot(img),
+            () => 1,
+        );
         assert.equal(grid().hidden, false, "on from the last visit");
         toggle().click();
         assert.equal(localStorage.getItem("cp-grid-overlay"), "0");
@@ -134,7 +173,12 @@ describe("the viewer's 8dp grid", () => {
             [1000, 600],
             "contain",
         );
-        installGridOverlay(stage, img, () => 2);
+        installGridOverlay(
+            stage,
+            img,
+            () => snapshot(img),
+            () => 2,
+        );
         presentAs(stage);
         assert.equal(grid().hidden, true, "presenting is for showing");
         assert.equal(toggle().getAttribute("aria-pressed"), "false");
@@ -158,5 +202,35 @@ describe("the viewer's 8dp grid", () => {
             false,
             "back on the page, the page's choice",
         );
+    });
+    it("follows the live canvas, re-measured after each frame", () => {
+        const { stage, img } = stageWithImage([720, 1440], [360, 720]);
+        const canvas = document.createElement("canvas");
+        stage.appendChild(canvas);
+        // The viewer contain-fits the canvas to the frame; a landscape frame after Orientation.
+        canvas.getBoundingClientRect = () =>
+            ({ left: 10, top: 200, width: 400, height: 200 }) as DOMRect;
+        let frame: { width: number; height: number } | null = null;
+        const refresh = installGridOverlay(
+            stage,
+            img,
+            () =>
+                frame ? { el: canvas, ...frame, live: true } : snapshot(img),
+            () => 2,
+        );
+        toggle().click();
+        assert.equal(
+            grid().style.width,
+            "360px",
+            "the snapshot until a frame paints",
+        );
+
+        frame = { width: 1600, height: 800 };
+        refresh();
+        assert.equal(grid().style.left, "10px");
+        assert.equal(grid().style.top, "200px");
+        assert.equal(grid().style.width, "400px");
+        // 1600px frame shown at 400: a 16px cell is 4 CSS px.
+        assert.equal(grid().style.getPropertyValue("--cp-grid-x"), "4px");
     });
 });

@@ -53,19 +53,48 @@ export function contentBox(
 }
 
 /**
+ * What the grid is laid over: the snapshot `<img>`, or the live canvas once a stream frame is on it.
+ * [width]/[height] are its natural pixels (a canvas's frame size); [live] says which.
+ */
+export interface GridSurface {
+    el: Element;
+    width: number;
+    height: number;
+    live?: boolean;
+}
+
+/**
  * The density of the render on stage when a Device override is picked: its option names the size
- * in dp (`Pixel 5 · compact phone (393 × 851 dp)`), and the PNG is that size in px, so the ratio of
- * the long edges is the density — whichever way round Orientation turned it. Null for no option or
- * one with no size (`(preview default)`), which leaves the page's own `data-render-density` to answer.
+ * in dp (`Pixel 5 · compact phone (393 × 851 dp)`), and the render is that size in px, so the ratio
+ * of the long edges is the density — whichever way round Orientation turned it. Null for no option
+ * or one with no size (`(preview default)`), which leaves the page's own `data-render-density` to
+ * answer.
+ *
+ * "Full page (scroll)" grows the PNG downwards to the content's scroll extent, so its long edge is
+ * no longer the device's. Only the width still is, so with [scrollOrientation] non-null the width
+ * alone answers: the label lists the device as it stands by default (width first), and Orientation
+ * turns it so its short (portrait) or long (landscape) side is across.
  */
 export function densityFromDeviceLabel(
     option: Pick<Element, "textContent"> | null | undefined,
-    img: Pick<HTMLImageElement, "naturalWidth" | "naturalHeight">,
+    width: number,
+    height: number,
+    scrollOrientation: string | null = null,
 ): number | null {
     const m = /\(([\d.]+) × ([\d.]+) dp\)/.exec(option?.textContent || "");
-    const dpLong = m ? Math.max(+m[1], +m[2]) : 0;
-    const pxLong = Math.max(img.naturalWidth, img.naturalHeight);
-    return dpLong > 0 && pxLong > 0 ? pxLong / dpLong : null;
+    if (!m) return null;
+    const a = +m[1];
+    const b = +m[2];
+    const dp =
+        scrollOrientation == null
+            ? Math.max(a, b)
+            : scrollOrientation == "portrait"
+              ? Math.min(a, b)
+              : scrollOrientation == "landscape"
+                ? Math.max(a, b)
+                : a;
+    const px = scrollOrientation == null ? Math.max(width, height) : width;
+    return dp > 0 && px > 0 ? px / dp : null;
 }
 
 function stored(): boolean {
@@ -85,15 +114,18 @@ function store(on: boolean): void {
 }
 
 /**
- * Add the grid overlay and its toggle to [stage], measured off [img]. [density] answers the
- * render's px-per-dp at the moment of measuring (it changes with a Device override).
+ * Add the grid overlay and its toggle to [stage], measured off whatever [surface] names — the
+ * snapshot, or the live canvas — with [density] the px-per-dp of that surface's pixels (it changes
+ * with a Device override). Returns the re-measure, for the live lane to call after each frame: a
+ * stream frame repaints the canvas without the `<img>` loading or resizing, so nothing here hears it.
  */
 export function installGridOverlay(
     stage: HTMLElement | null,
     img: HTMLImageElement | null,
-    density: () => number,
-): void {
-    if (!stage || !img) return;
+    surface: () => GridSurface,
+    density: (surface: GridSurface) => number,
+): () => void {
+    if (!stage || !img) return () => {};
     const grid = document.createElement("div");
     grid.className = "cp-grid-overlay";
     const button = document.createElement("button");
@@ -108,20 +140,23 @@ export function installGridOverlay(
     const shown = () => (presenting() ? presentOn : on);
 
     const place = () => {
-        const nw = img.naturalWidth;
-        const nh = img.naturalHeight;
-        const r = img.getBoundingClientRect();
-        const d = density();
+        const s = surface();
+        const nw = s.width;
+        const nh = s.height;
+        const r = s.el.getBoundingClientRect();
+        const d = density(s);
         if (!shown() || !nw || !nh || !r.width || !r.height || !(d > 0)) {
             grid.hidden = true;
             return;
         }
+        // The live canvas is already contain-fitted to its frame by the viewer, so its box is its
+        // pixels; only the full-screen snapshot letterboxes inside its own box.
         const box = contentBox(
             r.width,
             r.height,
             nw,
             nh,
-            getComputedStyle(img).objectFit,
+            getComputedStyle(s.el).objectFit,
         );
         const sr = stage.getBoundingClientRect();
         // Relative to the stage's padding box, as the live overlays are: subtract its border. One
@@ -136,7 +171,7 @@ export function installGridOverlay(
         // density falls back to 2 (`data-render-density`), and this is where that would show.
         const label =
             (visible ? "Hide" : "Show") +
-            ` the 8dp grid (${+density().toFixed(3)} px per dp)`;
+            ` the 8dp grid (${+density(surface()).toFixed(3)} px per dp)`;
         button.setAttribute("aria-pressed", String(visible));
         button.setAttribute("aria-label", label);
         button.title = label;
@@ -165,4 +200,5 @@ export function installGridOverlay(
     }
     stage.append(grid, button);
     sync();
+    return sync;
 }
