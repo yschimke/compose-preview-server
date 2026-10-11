@@ -14902,23 +14902,57 @@ class ServeHttpServer(
     val store = agentGrants ?: return emptyList()
     val approver = agentGrantApprover(store) ?: return emptyList()
     val now = System.currentTimeMillis()
-    return store
-      .activeGrants()
-      .filter { approver.manages(it) }
-      .map { grant ->
-        ServeWeb.StatusAgentGrant(
-          id = grant.id,
-          fingerprint = grant.fingerprint,
-          scopes = grant.scopes.joinToString(", ") { it.wire },
-          capabilities = AgentGrantCapability.wireNames(grant.capabilities).joinToString(", "),
-          label = grant.label,
-          approvedBy = grant.approvedBy,
-          expiresInText = AgentGrantProtocol.formatDuration(grant.secondsUntilExpiry(now)),
-          revokeCsrf =
-            agentGrantCsrf.seal(grant.id, approver.name, ServeAgentGrants.Csrf.ACTION_DENY),
-        )
-      }
+    val local =
+      store
+        .activeGrants()
+        .filter { approver.manages(it) }
+        .map { grant ->
+          ServeWeb.StatusAgentGrant(
+            id = grant.id,
+            fingerprint = grant.fingerprint,
+            scopes = grant.scopes.joinToString(", ") { it.wire },
+            capabilities = AgentGrantCapability.wireNames(grant.capabilities).joinToString(", "),
+            label = grant.label,
+            approvedBy = grant.approvedBy,
+            expiresInText = AgentGrantProtocol.formatDuration(grant.secondsUntilExpiry(now)),
+            revokeCsrf =
+              agentGrantCsrf.seal(grant.id, approver.name, ServeAgentGrants.Csrf.ACTION_DENY),
+          )
+        }
+    // Held by the other process on the shared requests file during a rollout: listed and
+    // revocable here too, under the same approver rule the revoke handler applies.
+    val elsewhere =
+      store
+        .grantsHeldElsewhere()
+        .filter { managesApproval(approver, it.approval) }
+        .map { held ->
+          val approval = held.approval
+          ServeWeb.StatusAgentGrant(
+            id = held.grantId,
+            fingerprint = held.fingerprint,
+            scopes = AgentGrantScope.upTo(approval.scope).joinToString(", ") { it.wire },
+            capabilities = AgentGrantCapability.wireNames(approval.capabilities).joinToString(", "),
+            label = held.label,
+            approvedBy = approval.approvedBy,
+            expiresInText =
+              AgentGrantProtocol.formatDuration(
+                ((approval.expiresAtMillis - now) / 1000).coerceAtLeast(0)
+              ),
+            revokeCsrf =
+              agentGrantCsrf.seal(held.grantId, approver.name, ServeAgentGrants.Csrf.ACTION_DENY),
+          )
+        }
+    return local + elsewhere
   }
+
+  /** [ServeAgentGrants.Approver.manages], for a grant known only by its stored decision. */
+  private fun managesApproval(
+    approver: ServeAgentGrants.Approver,
+    approval: ServeAgentGrantStore.Approval,
+  ): Boolean =
+    approver.administers ||
+      if (approval.approvedByActorId.isNotBlank()) approval.approvedByActorId == approver.actorId
+      else approval.approvedBy == approver.name
 
   /**
    * How many live grants this reader isn't shown — the same number `/status.json` publishes as
@@ -14927,7 +14961,7 @@ class ServeHttpServer(
   private fun RoutingContext.agentGrantHiddenCount(shown: Int): Int {
     if (siteSystem() != null) return 0
     val store = agentGrants ?: return 0
-    return (store.activeGrants().size - shown).coerceAtLeast(0)
+    return (store.activeGrants().size + store.grantsHeldElsewhere().size - shown).coerceAtLeast(0)
   }
 
   /**
@@ -14962,10 +14996,13 @@ class ServeHttpServer(
    * or daemon and conferring nothing.
    */
   /**
-   * The per-process seal on the approval form. No configuration; a restart drops every request, so
-   * older seals protect nothing.
+   * The seal on the approval, request-access and revoke forms. Per process and random, unless the
+   * grant store shares a requests file with another process (a rollout runs old and new side by
+   * side): then the key is the one kept beside that file, so a form either process drew is accepted
+   * by both.
    */
-  private val agentGrantCsrf = ServeAgentGrants.Csrf()
+  private val agentGrantCsrf =
+    agentGrants?.sharedFormKey()?.let { ServeAgentGrants.Csrf(it) } ?: ServeAgentGrants.Csrf()
 
   /** Only public client registrations persist; approval and token state dies with the grants. */
   private val mcpOAuth = ServeMcpOAuth.Store(mcpOAuthClientsFile?.toPath())
@@ -15483,7 +15520,26 @@ class ServeHttpServer(
       call.respondText("not found", status = HttpStatusCode.NotFound)
       return
     }
-    store.revoke(grantId, approver.name)
+    if (grant == null) {
+      // Held by another process sharing the requests file: the same rule, against the decision.
+      val approval = store.approvalForGrant(grantId)
+      if (approval == null || !managesApproval(approver, approval)) {
+        call.respondText("not found", status = HttpStatusCode.NotFound)
+        return
+      }
+    }
+    if (store.revokeGrant(grantId, approver.name) == ServeAgentGrantStore.Revocation.UNAVAILABLE) {
+      // Not recorded where the process holding it would see it: say so, and keep its refresh
+      // bindings, rather than redirect as if it were gone.
+      respondAgentGrantNotice(
+        heading = "Try again in a moment",
+        message =
+          "The server could not record the revocation, so the grant may still be live. Press " +
+            "Revoke again; if this keeps happening, tell the operator.",
+        status = HttpStatusCode.ServiceUnavailable,
+      )
+      return
+    }
     // Its refresh tokens go with it now rather than sitting in the bounded map until someone
     // presents one.
     mcpOAuth.forgetRefreshFor(grantId)
@@ -15626,7 +15682,18 @@ class ServeHttpServer(
     if (deny) {
       // Check the return value: if another operator approved first, saying "nothing was granted"
       // would be false.
-      if (store.deny(requestId, approver.name)) {
+      val denial = store.denyRequest(requestId, approver.name)
+      if (denial == ServeAgentGrantStore.Denial.UNAVAILABLE) {
+        respondAgentGrantNotice(
+          heading = "Try again in a moment",
+          message =
+            "The server could not record your decision, so nothing was declined. Press Deny " +
+              "again; if this keeps happening, tell the operator.",
+          status = HttpStatusCode.ServiceUnavailable,
+        )
+        return
+      }
+      if (denial == ServeAgentGrantStore.Denial.DENIED) {
         // An OAuth client is owed the refusal on its own redirect URI — RFC 6749 §4.1.2.1 — rather
         // than being left to time out while the human reads a page it will never see.
         mcpOAuth.forRequest(requestId)?.let { authorization ->
@@ -15672,8 +15739,8 @@ class ServeHttpServer(
     // A request that names a design is approved for it alone unless the approver chose every
     // design they can edit instead. Anything but that explicit choice keeps the request's designs.
     val limitToRequestedDesigns = form["designScope"]?.firstOrNull() != ServeWeb.DESIGN_SCOPE_ALL
-    val grant =
-      store.approve(
+    val decision =
+      store.decide(
         requestId,
         approver.name,
         chosen,
@@ -15683,14 +15750,20 @@ class ServeHttpServer(
         enforceApproverCap = !approver.administers,
         limitToRequestedDesigns = limitToRequestedDesigns,
       )
-    if (
-      grant == null && store.request(requestId)?.state == ServeAgentGrantStore.Request.State.PENDING
-    ) {
+    if (decision is ServeAgentGrantStore.Decision.Unavailable) {
+      respondAgentGrantNotice(
+        heading = "Try again in a moment",
+        message =
+          "The server could not record your decision, so nothing was approved. Press Approve " +
+            "again; if this keeps happening, tell the operator.",
+        status = HttpStatusCode.ServiceUnavailable,
+      )
+      return
+    }
+    if (decision is ServeAgentGrantStore.Decision.NoCapacity) {
       // Still pending, so the refusal was a limit on live grants, not a stale request. The request
       // stays open: revoking a grant and pressing Approve again completes it.
-      val full =
-        store.capacityFor(approver.name, approver.actorId, !approver.administers) ==
-          ServeAgentGrantStore.Capacity.APPROVER_FULL
+      val full = decision.capacity == ServeAgentGrantStore.Capacity.APPROVER_FULL
       respondAgentGrantNotice(
         heading = "No room for another grant",
         message =
@@ -15705,7 +15778,14 @@ class ServeHttpServer(
       )
       return
     }
-    if (grant == null) {
+    // Approved by this decision, or by an earlier one (another tab, another approver, or another
+    // process during a deploy): either way the outcome page shows the decision that stands.
+    val approved =
+      decision is ServeAgentGrantStore.Decision.Approved ||
+        (decision is ServeAgentGrantStore.Decision.AlreadyDecided &&
+          decision.request.state == ServeAgentGrantStore.Request.State.APPROVED &&
+          mcpOAuth.forRequest(requestId) == null)
+    if (!approved) {
       // Retrying a submitted OAuth approval must resume its outstanding callback too. The
       // original CSRF seal was verified above; no new grant is minted by this return leg.
       if (mcpOAuth.forRequest(requestId) != null) {
@@ -15771,7 +15851,7 @@ class ServeHttpServer(
           return true
         }
         ServeAgentGrantStore.Request.State.APPROVED -> {
-          if (store.grant(request.grantId) != null) {
+          if (store.liveApproval(request) != null) {
             call.respondRedirect(
               ServeMcpOAuth.redirectWithCode(
                 authorization.redirectUri,
@@ -15797,27 +15877,33 @@ class ServeHttpServer(
         return true
       }
       ServeAgentGrantStore.Request.State.APPROVED -> {
-        val grant = store.grant(request.grantId) ?: return false
+        // The decision, which with a requests file is all there is until the agent collects it.
+        val approval = store.liveApproval(request) ?: return false
+        val grant = store.grant(request.grantId)
+        val expiresAt = grant?.expiresAtMillis ?: approval.expiresAtMillis
         respondAgentGrantNotice(
           heading = "Access granted",
           message =
             "The agent can now use this server for " +
               AgentGrantProtocol.formatDuration(
-                grant.secondsUntilExpiry(System.currentTimeMillis())
+                ((expiresAt - System.currentTimeMillis()) / 1000).coerceAtLeast(0)
               ) +
               ". You can end it early from the server status page at any time.",
           detail =
             buildString {
-              append("Scopes: ${grant.scopes.joinToString(", ") { it.wire }}")
-              if (grant.capabilities.isNotEmpty()) {
-                val names = AgentGrantCapability.wireNames(grant.capabilities).joinToString(", ")
+              val scopes = grant?.scopes ?: AgentGrantScope.upTo(approval.scope)
+              append("Scopes: ${scopes.joinToString(", ") { it.wire }}")
+              val capabilities = grant?.capabilities ?: approval.capabilities
+              if (capabilities.isNotEmpty()) {
+                val names = AgentGrantCapability.wireNames(capabilities).joinToString(", ")
                 append(" · also: $names")
               }
-              if (grant.designIds.isNotEmpty()) {
-                append(" · designs: ${grant.designIds.sorted().joinToString(", ")}")
+              val designIds = grant?.designIds ?: approval.designIds
+              if (designIds.isNotEmpty()) {
+                append(" · designs: ${designIds.sorted().joinToString(", ")}")
               }
-              append(" · grant ${grant.fingerprint}")
-              append(" · approved by ${grant.approvedBy}")
+              grant?.let { append(" · grant ${it.fingerprint}") }
+              append(" · approved by ${approval.approvedBy}")
             },
         )
         return true
@@ -16121,7 +16207,8 @@ class ServeHttpServer(
       val request = store.request(authorization.requestId)
       val grant =
         when (request?.state) {
-          ServeAgentGrantStore.Request.State.APPROVED -> store.grant(request.grantId)
+          // Collected here, as a poll would: with a requests file that is the moment it is minted.
+          ServeAgentGrantStore.Request.State.APPROVED -> store.collectGrant(request.id)
           else -> null
         }
       if (grant == null) {

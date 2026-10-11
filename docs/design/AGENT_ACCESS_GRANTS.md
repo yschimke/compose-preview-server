@@ -254,37 +254,79 @@ internet mint itself credentials.
   TTLs are short, and a credential that cannot survive a redeploy has a much smaller worst case than
   one that can.
 - **Requests survive a restart; no credential does.** A person slow to approve should not have to
-  start over because the host was redeployed, so pending requests, denials and approvals nobody has
-  collected yet are written to `mcp-oauth/agent-access-requests.json` beside the catalogs file (the
-  OAuth client registry's directory, same file lock and atomic replace). A row holds what the
-  approval page shows — id, user code, label, client, the requested scope, TTL, capabilities and
-  designs, the requester, created and expiry times — plus the device secret as a **SHA-256**, which
-  is what a poll is compared against. An approval is written as the **decision** (approver, granted
-  scope, capabilities and designs, approval time and the grant's expiry), never as a token: after a
-  restart the grant is minted when its requester's first poll collects it, and its lifetime is still
-  counted from the approval, so a restart never extends it. A collected or revoked approval is not
-  deleted but marked — a `collected` or `revoked` tombstone kept until its grant would have expired —
-  and a restored approval is minted only after re-reading the file under its lock and finding it
-  still `approved`. Handing a bearer out is then a single compare-and-set under that lock, `approved`
-  to `collected`, on every collection path — including a grant this process minted at approval — and
-  a process that loses it discards its grant and answers `expired`. The old and new processes overlap
-  during a deploy, and without the marker and the claim a revocation or collection on one could be
-  undone by a stale copy on the other, or both could hand out a bearer. (A person's own
-  request, carried by their session and never polled, is marked collected the moment it is
-  approved.) Everything else is dropped when it expires: a pending or denied request at its
-  deadline, an approval when its grant would. Without a writable catalogs directory — tests, a local
-  server — nothing is written.
-- **A restored approval meets today's limits, not yesterday's.** An approval waiting to be minted
-  holds its grant's place: it counts towards `--agent-grant-max-active` and its approver's cap as if
-  it were live, so a restart cannot admit more approvals than the box allows. Minting it re-applies
-  the server's *current* ceilings: the scope is clamped to the current maximum, the capabilities are
-  intersected with the ones still allowed, and the lifetime with the current maximum, still counted
-  from the approval. That clamped lifetime is also how long it reserves a place: one already past
-  it holds none and is marked `expired` when polled. If the approval carried capabilities and none survive, or the caps are full
-  (overlapping processes can each have approved up to their own limit), the request is refused
-  instead: the poll answers `denied` with a `message` saying why, and the agent asks again. The refusal
-  is kept until the approval would have expired, even past the request's own deadline, so a retry
-  after another restart still reads `denied` rather than `unknown`.
+  start over because the host was redeployed, so with a writable catalogs directory every request
+  lives in `mcp-oauth/agent-access-requests.v2.json` beside the catalogs file (the OAuth client
+  registry's directory, same file lock and atomic replace). A row holds what the approval page shows
+  — id, user code, label, client, the requested scope, TTL, capabilities and designs, the requester,
+  created and expiry times — plus the device secret as a **SHA-256**, which is what a poll is
+  compared against. An approval is written as the **decision** (approver, granted scope,
+  capabilities and designs, approval time and the grant's expiry), never as a token. Without a
+  writable catalogs directory — tests, a local server — nothing is written and a grant is minted at
+  approval, as it always was.
+- **The file is the authority, not either process's memory.** A deploy runs the old and new
+  processes side by side (`docker-rollout` scales up before it scales down), and both serve the
+  same requests. So each process's memory is only a cache of the file, refreshed when the file
+  changes, and every change of a request's state is a **compare-and-set on its row under the file
+  lock**: `pending` → `approved` or `denied` (the first decision in any process wins; a losing
+  approval or denial issues nothing and the page shows the decision that stands), `approved` →
+  `collected` (the claim), and `approved`/`collected` → `revoked`. Rows are never deleted early;
+  `collected`, `revoked` and `expired` stay exactly as long as the grant would have lived (the
+  expiry decided at approval) — never shorter, so "gone" is never confused with "never seen", and no
+  longer, so short grants do not pile up to the request's deadline; a pending or denied row keeps the
+  request's deadline. Each process also remembers every revocation it has read until that grant's
+  expiry, whatever later happens to the row.
+- **Only the collector mints.** With the file, approving mints nothing. The grant and its bearer are
+  minted by the one process that wins `approved` → `collected` — on a poll, or the MCP OAuth code
+  exchange — from the decision as stored, and its lifetime is still counted from the approval, so
+  neither a restart nor a late poll extends it. There are no grants waiting in an approver's process
+  to be handed out by someone else. The `collected` row records the grant's id (not a credential),
+  so revoking it on any process moves the row to `revoked`, and every process refuses that grant
+  from its next token check: each keeps the set of revoked grant ids, re-read only when the file's
+  modification time or size changes, so a check stays a stat. (A person's own request, carried by
+  their session and never polled, is the exception: approving it is the claim, `pending` →
+  `collected`, and mints there.)
+- **Either process can show and revoke a grant.** `/status` lists the grants this process holds and,
+  from their `collected` rows, the ones the other process holds (by fingerprint, under the same
+  approver rule), and the approval, request-access and revoke forms are sealed with a key kept
+  beside the file — `mcp-oauth/agent-grant-csrf.key`, 32 random bytes, owner-only, made once under
+  the file lock — so a form drawn by one process is accepted by the other. Without the file each
+  process keeps its own random key, as before.
+- **No fallback when the file fails.** A decision, claim or revocation that cannot read or write the
+  file changes nothing: the approval page says to try again (for a denial as for an approval —
+  never "already decided"; for a revocation too, which then keeps the grant's refresh bindings
+  rather than reporting it gone), and a poll answers `pending` — retry —
+  never a bearer. A corrupt file is reported and treated as unreadable, not as empty; so is a file
+  this process has seen that has since gone missing. While the file has changed in a way a process
+  cannot read, that process accepts no grant bearer at all — a revocation may be in what it cannot
+  read — and accepts them again once it can.
+- **The file's format, and the first rollout of it.** The file says what it is
+  (`"format": "compose-preview/agent-access-requests", "version": 2`), and anything else is refused
+  as unreadable rather than half-read. Its name is new because the release before it reads and
+  rewrites `mcp-oauth/agent-access-requests.json` with a row shape of its own, which would strip
+  this format's fields (the collected grant's id among them) on every write. A new process reads
+  that old file once, at start, and carries over its still-pending requests that are not already in
+  the new one; approved and denied rows there are left to expire, decided under the old release,
+  and the old file is never written. Two consequences last only for the overlap of that first
+  rollout, old release beside new:
+  - a request opened on the old replica after the new one started is not seen by the new one; the
+    agent asks again;
+  - a form drawn by one generation and posted to the other is rejected (404) — it fails closed,
+    nothing is granted or revoked; reload the page and submit again. The old release cannot be
+    taught the shared key. From the next rollout on, both replicas share the key file and the
+    requests file.
+- **A collected approval meets today's limits, not yesterday's.** An approval not yet collected, by
+  any process, holds its grant's place: it counts towards `--agent-grant-max-active` and its
+  approver's cap as if it were live, and so does a grant another process collected (its `collected`
+  row, attributed to its approver), so the caps count every live grant once whichever process holds
+  it. Collecting re-applies the server's *current* ceilings: the scope
+  is clamped to the current maximum, the capabilities are intersected with the ones still allowed,
+  and the lifetime with the current maximum, still counted from the approval. That clamped lifetime
+  is also how long it reserves a place: one already past it holds none and is marked `expired` when
+  polled. If the approval carried capabilities and none survive, or the caps are full (the operator
+  lowered them), the request is refused instead: the poll answers `denied` with a `message` saying
+  why, and the agent asks again. The refusal is kept until the approval would have expired, even past
+  the request's own deadline, so a retry after another restart still reads `denied` rather than
+  `unknown`.
 - **Never printed.** The token appears exactly once, in the poll response. `/status`, the server log,
   and every error message carry only a fingerprint (`sha256` prefix). The audit line names the
   approver, the label, the scopes, the expiry, and that fingerprint.
