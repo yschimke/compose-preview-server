@@ -1570,9 +1570,6 @@ class ServeBundleHost(
       fileSystem.exists(File(irDir, "$previewId$RC_SUFFIX").toOkioPath())
   }
 
-  override fun enabledRcPlayersFor(previewId: String): List<RcPlayerBackend> =
-    if (hasRemoteComposeDoc(previewId)) listOf(RcPlayerBackend.CAMAELON_JS) else emptyList()
-
   // The cmp-jvm render is sized to the baked PNG's exact pixel dimensions — so the desktop-player
   // PNG lands at the same size the viewer shows the baked / View-player lane at — with the density
   // the capture used. Null when the preview has no captured doc or no baked PNG to size against.

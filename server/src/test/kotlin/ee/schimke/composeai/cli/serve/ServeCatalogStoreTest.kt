@@ -587,7 +587,7 @@ class ServeCatalogStoreTest {
     val host = registered.getValue("compose-m3")
     val id = host.previews.single().id
     assertTrue(host.hasRemoteComposeDoc(id))
-    assertEquals(listOf(RcPlayerBackend.CAMAELON_JS), host.enabledRcPlayersFor(id))
+    assertTrue(RcPlayerBackend.CAMAELON_JS in host.enabledRcPlayersFor(id))
     assertTrue(host.degradations.isEmpty(), "every baked preview has a browser replay lane")
     assertFalse(requested.any { it.endsWith(".rc") }, "document fetch waits for playback")
     assertContentEquals(document, host.remoteComposeDoc(id))
