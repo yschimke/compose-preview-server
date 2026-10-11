@@ -167,7 +167,21 @@ object ServeDocFormats {
   private fun remoteComposeSize(bytes: ByteArray): ServeDocSize? =
     readRemoteComposeHeader(bytes)?.size
 
-  private class RemoteComposeHeader(val version: String, val size: ServeDocSize?)
+  /**
+   * The screen density the document declares it was generated at
+   * (`Header.DOC_DENSITY_AT_GENERATION`, a float header property), or null when it declares none,
+   * is untagged (no property table), or is not a Remote Compose document. Non-finite and
+   * non-positive values read as undeclared. [bytes] may be just a prefix: the header opens the
+   * document, and a truncated table yields what was read.
+   */
+  fun remoteComposeDensityAtGeneration(bytes: ByteArray): Float? =
+    readRemoteComposeHeader(bytes)?.densityAtGeneration?.takeIf { it.isFinite() && it > 0f }
+
+  private class RemoteComposeHeader(
+    val version: String,
+    val size: ServeDocSize?,
+    val densityAtGeneration: Float? = null,
+  )
 
   /**
    * Read the `Header` operation's version and declared size, in either form. Total: a malformed
@@ -178,6 +192,7 @@ object ServeDocFormats {
     var version = "unknown"
     var width: Int? = null
     var height: Int? = null
+    var densityAtGeneration: Float? = null
     try {
       val reader = ByteReader(bytes, offset = 1)
       val major = reader.int() and 0xFFFF
@@ -204,6 +219,8 @@ object ServeDocFormats {
               val value = reader.int()
               if (key == DOC_WIDTH) width = value
               if (key == DOC_HEIGHT) height = value
+            } else if (dataType == DATA_TYPE_FLOAT && key == DOC_DENSITY_AT_GENERATION) {
+              densityAtGeneration = Float.fromBits(reader.int())
             } else {
               reader.skip(length)
             }
@@ -215,12 +232,18 @@ object ServeDocFormats {
     }
     val w = width
     val h = height
-    return RemoteComposeHeader(version, if (w != null && h != null) ServeDocSize(w, h) else null)
+    return RemoteComposeHeader(
+      version,
+      if (w != null && h != null) ServeDocSize(w, h) else null,
+      densityAtGeneration,
+    )
   }
 
   private const val DOC_WIDTH = 5
   private const val DOC_HEIGHT = 6
+  private const val DOC_DENSITY_AT_GENERATION = 7
   private const val DATA_TYPE_INT = 0
+  private const val DATA_TYPE_FLOAT = 1
 
   /** Same ceiling the players apply to the header property table — a bound, not a format rule. */
   private const val MAX_HEADER_PROPERTIES = 1000

@@ -604,6 +604,7 @@ class ServeCatalogStoreTest {
     summary: String,
     requested: MutableList<String> = CopyOnWriteArrayList(),
     trust: TrustStore = TrustStore.EMPTY,
+    rcDoc: ByteArray = byteArrayOf(0x52, 0x43, 0x01),
   ): ServeBundleHost {
     val fetch: (String) -> ByteArray? = { url ->
       requested += url
@@ -611,7 +612,7 @@ class ServeCatalogStoreTest {
         url.endsWith("/catalog.json") -> catalog.toByteArray()
         url.endsWith("/${ServeRcCompare.SUMMARY_FILE}") -> summary.toByteArray()
         url.endsWith(".png") -> png()
-        url.endsWith(".rc") -> byteArrayOf(0x52, 0x43, 0x01)
+        url.endsWith(".rc") -> rcDoc
         else -> null
       }
     }
@@ -736,6 +737,153 @@ class ServeCatalogStoreTest {
       val compare = get("/compare?format=rc").use { it.body.string() }
       assertTrue(manifest.lanes.single { it.id == "embedded" }.label in compare, compare)
       assertTrue("cropped" in compare, compare)
+    } finally {
+      server.stop()
+      playerDaemon.close()
+      registry.close()
+    }
+  }
+
+  private val PRESSURE_GAUGE = "advanced-samples__pressure-gauge"
+
+  /** remote-compose-examples' pressure gauge: a trusted `.rc` baked by a web player, no alias. */
+  private fun documentOnlyCatalog(rcDoc: ByteArray): ServeBundleHost =
+    stagedRcCompare(
+      """{"schema":"design-parity-catalog/v1","system":"compose-m3",
+        "renderer":"Remote Compose web player 1:cb84224aae12e593","components":[
+        {"componentId":"advanced-samples/pressure-gauge",
+         "rcDocument":"documents/advanced-samples/pressure-gauge.rc",
+         "images":[{"path":"images/advanced-samples/pressure-gauge.png"}]}]}""",
+      harnessSummary(PRESSURE_GAUGE),
+      trust = trustedCompose,
+      rcDoc = rcDoc,
+    )
+
+  /**
+   * A document-only catalog's documents are authored one unit per pixel (the baked PNG is that
+   * draw) and declare no generation density, so a server-side replay is sized to the PNG at 1 — not
+   * at the phone default, which magnified the gauge ~2.6x and pushed it off the canvas.
+   */
+  @Test
+  fun `a document-only catalog replays its documents at density 1`() {
+    val host = documentOnlyCatalog(ServeDocFixtures.remoteComposeDoc(width = 2, height = 2))
+    // The spec is asked after the document is read on every render path, which stages it.
+    assertNotNull(host.remoteComposeDoc(PRESSURE_GAUGE))
+    assertEquals(RcJvmRenderSpec(2, 2, 1.0f), host.remoteComposeRenderSpec(PRESSURE_GAUGE))
+  }
+
+  @Test
+  fun `a document-only catalog's document that declares its density is replayed at it`() {
+    val host =
+      documentOnlyCatalog(
+        ServeDocFixtures.remoteComposeDoc(width = 2, height = 2, densityAtGeneration = 2.0f)
+      )
+    assertNotNull(host.remoteComposeDoc(PRESSURE_GAUGE))
+    assertEquals(RcJvmRenderSpec(2, 2, 2.0f), host.remoteComposeRenderSpec(PRESSURE_GAUGE))
+  }
+
+  @Test
+  fun `a catalog with daemon preview ids keeps the renderer default density`() {
+    val host =
+      stagedRcCompare(
+        """{"schema":"design-parity-catalog/v1","system":"compose-m3",
+          "renderer":"compose-preview 2.46.0","components":[
+          {"componentId":"Card","rcDocument":"documents/card.rc",
+           "images":[{"path":"images/card/ideal.png","previewId":"ee.x.CardsKt.CardRemote"}]}]}""",
+        harnessSummary("ee.x.CardsKt.CardRemote"),
+        trust = trustedCompose,
+        rcDoc = ServeDocFixtures.remoteComposeDoc(width = 2, height = 2),
+      )
+    assertNotNull(host.remoteComposeDoc("card__ideal"))
+    // A compose capture: nothing here changes how its replay is scaled.
+    assertEquals(2.625f, host.remoteComposeRenderSpec("card__ideal")?.density)
+  }
+
+  /**
+   * End to end: `?rcPlayer=androidx-embedded` on a document-only preview reaches the server's
+   * player daemon with the catalog's document, the baked PNG's pixel size and density 1.
+   */
+  @Test
+  fun `a document-only preview's player daemon render carries density 1 and the baked size`() {
+    val doc = ServeDocFixtures.remoteComposeDoc(width = 2, height = 2)
+    val host = documentOnlyCatalog(doc)
+    val renders = CopyOnWriteArrayList<PreviewOverrides>()
+    val playerPng = byteArrayOf(0x89.toByte(), 'R'.code.toByte(), 'C'.code.toByte())
+    val registry =
+      ServeSessionRegistry(open = { null }).also {
+        it.register("compose-m3", host = host, pinned = true)
+      }
+    val playerDaemon =
+      ServeRcPlayerDaemon(
+        listOf(RcPlayerBackend.ANDROIDX_EMBEDDED, RcPlayerBackend.ANDROIDX_VIEW),
+        openHost = {
+          object : ServeHost {
+            override val previews = listOf(ServeRcPlayerDaemon.PREVIEW)
+            override val label = "Remote Compose players"
+
+            override fun render(previewId: String, overrides: PreviewOverrides): RenderOutcome {
+              renders += overrides
+              return RenderOutcome.Ok(playerPng, RenderOutcome.Generation.DAEMON)
+            }
+
+            override fun subscribeStream(
+              previewId: String,
+              overrides: PreviewOverrides,
+              codec: ee.schimke.composeai.daemon.protocol.StreamCodec?,
+              maxFps: Int?,
+              onUnavailable: ((String) -> Unit)?,
+              onFrame: (ee.schimke.composeai.daemon.protocol.StreamFrameParams) -> Unit,
+            ): StreamHandle? = null
+
+            override fun activeStreamCount(): Int = 0
+
+            override fun close() {}
+          }
+        },
+      )
+    val server =
+      ServeHttpServer(
+          host = "127.0.0.1",
+          requestedPort = 0,
+          token = "doc-only",
+          sessions = registry,
+          defaultSessionId = "compose-m3",
+          isPublic = false,
+          rcPlayerDaemon = playerDaemon,
+        )
+        .also { it.start() }
+    val client = okhttp3.OkHttpClient()
+    fun get(path: String) =
+      client
+        .newCall(
+          okhttp3.Request.Builder()
+            .url("http://127.0.0.1:${server.port}/compose-m3$path&token=doc-only")
+            .build()
+        )
+        .execute()
+    try {
+      val path = "/render/$PRESSURE_GAUGE.png?rcPlayer=androidx-embedded"
+      // Cold: the request starts the daemon and is told to come back.
+      get(path).use { assertEquals(503, it.code) }
+      val deadline = System.currentTimeMillis() + 10_000
+      while (playerDaemon.snapshot().state != "running") {
+        check(System.currentTimeMillis() < deadline) { "never came up: ${playerDaemon.snapshot()}" }
+        Thread.sleep(10)
+      }
+      get(path).use { response ->
+        assertEquals(200, response.code)
+        assertContentEquals(playerPng, response.body.bytes())
+      }
+      assertTrue(renders.isNotEmpty())
+      for (rendered in renders) {
+        assertEquals(
+          java.util.Base64.getEncoder().encodeToString(doc),
+          rendered.remoteCompose!!.documentBase64,
+        )
+        assertEquals(2, rendered.widthPx, "the baked PNG's width")
+        assertEquals(2, rendered.heightPx, "the baked PNG's height")
+        assertEquals(1.0f, rendered.density, "one document unit per pixel")
+      }
     } finally {
       server.stop()
       playerDaemon.close()

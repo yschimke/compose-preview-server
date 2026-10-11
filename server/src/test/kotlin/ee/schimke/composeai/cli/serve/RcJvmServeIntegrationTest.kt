@@ -40,6 +40,7 @@ class RcJvmServeIntegrationTest {
     density: Float?,
     withDoc: Boolean = true,
     device: String? = null,
+    doc: ByteArray = byteArrayOf(1, 2, 3),
   ): File {
     val dir =
       java.nio.file.Files.createTempDirectory("rcjvm-bundle").toFile().also { it.deleteOnExit() }
@@ -47,7 +48,7 @@ class RcJvmServeIntegrationTest {
     File(dir, "previews/Foo.png").writeBytes(pngBytes(width, height))
     if (withDoc) {
       File(dir, "ir").mkdirs()
-      File(dir, "ir/Foo.rc").writeBytes(byteArrayOf(1, 2, 3))
+      File(dir, "ir/Foo.rc").writeBytes(doc)
     }
     if (density != null || device != null) {
       val params =
@@ -124,6 +125,70 @@ class RcJvmServeIntegrationTest {
     // ServeBundleHost.DEFAULT_RENDER_DENSITY — the desktop renderer's own default, and the only
     // thing left to say when nothing in the manifest speaks for this preview.
     assertEquals(2.625f, spec?.density)
+  }
+
+  /**
+   * Without a device, the document speaks for itself: a `.rc` that declares the density it was
+   * generated at is replayed at that density, not the phone default.
+   */
+  @Test
+  fun `render spec takes the document's declared generation density when no device states one`() {
+    val host =
+      ServeBundleHost(
+        bundle(
+          width = 120,
+          height = 80,
+          density = null,
+          doc = ServeDocFixtures.remoteComposeDoc(densityAtGeneration = 2.0f),
+        ),
+        label = "b",
+      )
+    assertEquals(RcJvmRenderSpec(120, 80, 2.0f), host.remoteComposeRenderSpec("Foo"))
+    // It outranks the document-only fallback too.
+    val docOnly =
+      ServeBundleHost(
+        bundle(
+          width = 120,
+          height = 80,
+          density = null,
+          doc = ServeDocFixtures.remoteComposeDoc(densityAtGeneration = 2.0f),
+        ),
+        label = "b",
+        documentDensityFallback = 1f,
+      )
+    assertEquals(2.0f, docOnly.remoteComposeRenderSpec("Foo")?.density)
+  }
+
+  /**
+   * A document-only catalog (remote-compose-examples) bakes one document unit per pixel, and its
+   * documents declare no generation density; 2.625 magnified the replay ~2.6x against that PNG.
+   */
+  @Test
+  fun `a document-only host replays an undeclared document at density 1`() {
+    val host =
+      ServeBundleHost(
+        bundle(width = 120, height = 80, density = null, doc = ServeDocFixtures.remoteComposeDoc()),
+        label = "b",
+        documentDensityFallback = 1f,
+      )
+    assertEquals(RcJvmRenderSpec(120, 80, 1.0f), host.remoteComposeRenderSpec("Foo"))
+  }
+
+  @Test
+  fun `a device still outranks the document's density and the document-only fallback`() {
+    val watch =
+      ServeBundleHost(
+        bundle(
+          width = 120,
+          height = 80,
+          density = null,
+          device = "id:wearos_large_round",
+          doc = ServeDocFixtures.remoteComposeDoc(densityAtGeneration = 1.0f),
+        ),
+        label = "b",
+        documentDensityFallback = 1f,
+      )
+    assertEquals(2.0f, watch.remoteComposeRenderSpec("Foo")?.density)
   }
 
   @Test
