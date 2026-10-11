@@ -553,13 +553,6 @@ public interface ServeOptions {
     get() = emptySet()
 
   /**
-   * Builder catalogs reported at startup as if catalog-owned while still served as-is: the shadow
-   * step before [uiBuilderCatalogOwnership].
-   */
-  public val uiBuilderShadowCatalogs: Set<String>
-    get() = emptySet()
-
-  /**
    * Which UI-builder catalogs answer for themselves: seed templates, chooser card and export route
    * come from what they publish, and their synthesised Kotlin definition is never built.
    * [CatalogOwnership.NONE] (default) changes nothing.
