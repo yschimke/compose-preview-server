@@ -45,6 +45,17 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event_name == 'push' && github.run_id || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
+# Release-please PRs change only `.release-please-manifest.json`, `CHANGELOG.md` and the version
+# line in `deploy/image/Dockerfile` -- every source and build input is the `main` commit whose push
+# run already verified it -- yet release-please rewrites the branch on every merge to `main`, so the
+# full matrix (~45 runner-minutes) re-ran on each one: 16 runs on the release branch in 14 hours,
+# every one of them queued behind the PR traffic on the account's shared runner pool. The Gradle and
+# visual-harness jobs below are skipped on those PRs, and `gradle` passes when they were skipped for
+# that reason, so the release PR goes green in the time the cheap gates take; `source-gates`,
+# `deployment` (which covers the Dockerfile), `selector-fixtures` and `serve-web` still run. The
+# guard pairs the `release-please--` head branch with the release bot as PR author: the branch name
+# alone is contributor-controlled, the author is not. The same guard compose-ai-tools' CI carries.
+# Pushes to `main` have no `head_ref`, so they always run everything.
 jobs:
   # The UI builder is a second project in this repository (docs/design/UI_BUILDER_PROJECT_BOUNDARY.md).
   # Its own job rather than a step in `gradle`: the check reads build files and needs no JDK, no
@@ -81,6 +92,7 @@ jobs:
   # on, and passes only if both did; see the note on `visual-harness` for why a gate must run
   # whatever its `needs` did rather than be skipped.
   gradle-build:
+    if: ${{ !(startsWith(github.head_ref, 'release-please--') && github.event.pull_request.user.login == 'github-actions[bot]') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -122,6 +134,7 @@ jobs:
           "${dist_root}/bin/compose-preview-server" --help
 
   gradle-server-test:
+    if: ${{ !(startsWith(github.head_ref, 'release-please--') && github.event.pull_request.user.login == 'github-actions[bot]') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -156,7 +169,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Every split Gradle job succeeded
-        if: ${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'skipped') || contains(needs.*.result, 'cancelled') }}
+        if: >-
+          ${{ (contains(needs.*.result, 'failure') || contains(needs.*.result, 'skipped') || contains(needs.*.result, 'cancelled'))
+          && !(startsWith(github.head_ref, 'release-please--') && github.event.pull_request.user.login == 'github-actions[bot]') }}
         run: |
           echo "::error::A Gradle job did not succeed: ${NEEDS}"
           exit 1
@@ -164,6 +179,7 @@ jobs:
           NEEDS: ${{ toJSON(needs.*.result) }}
 
   ui-builder-remote-compose:
+    if: ${{ !(startsWith(github.head_ref, 'release-please--') && github.event.pull_request.user.login == 'github-actions[bot]') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -290,6 +306,7 @@ jobs:
         working-directory: serve-web
 
   ui-builder-contract:
+    if: ${{ !(startsWith(github.head_ref, 'release-please--') && github.event.pull_request.user.login == 'github-actions[bot]') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -368,6 +385,7 @@ jobs:
   # `gradle-build`'s (same build files), and this job must never be the one that writes it -- an
   # entry holding only what `installDist` resolves would leave `check` a cold start on every PR.
   visual-harness-server:
+    if: ${{ !(startsWith(github.head_ref, 'release-please--') && github.event.pull_request.user.login == 'github-actions[bot]') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -401,6 +419,7 @@ jobs:
   # repository behind `_server.mjs`, and no build output at all, so they need not wait for one.
   # The longest of the harnesses (~5 min of the old job's 7.5), now off the critical path.
   visual-harness-pages:
+    if: ${{ !(startsWith(github.head_ref, 'release-please--') && github.event.pull_request.user.login == 'github-actions[bot]') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -438,7 +457,7 @@ jobs:
   # `gradle-build`'s time), runs whatever they did, and fails first thing unless both succeeded.
   visual-harness:
     needs: [visual-harness-server, visual-harness-pages]
-    if: ${{ !cancelled() }}
+    if: ${{ !cancelled() && !(startsWith(github.head_ref, 'release-please--') && github.event.pull_request.user.login == 'github-actions[bot]') }}
     runs-on: ubuntu-latest
     env:
       # The harness server resolves `/ui-builder/...` and the renderer routes against this
