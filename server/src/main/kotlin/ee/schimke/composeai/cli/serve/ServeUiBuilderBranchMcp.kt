@@ -306,14 +306,16 @@ internal class ServeUiBuilderBranchTools(private val branches: UiBuilderBranchPo
             "`applied` with the revision it landed at and any `STALE_*` notice of what it " +
             "overwrote, or `refused` with the rejection code that stopped the run (nothing is " +
             "then written), plus `skippedOperationIds` and how many were never tried. Run " +
-            "`dryRun: true` first. Resolve a refusal by passing that command's id in " +
-            "`skipOperationIds` (skip an undo with what it undoes), or branch again from the " +
-            "parent. On success the branch is merged and its open siblings — branches forked " +
-            "at the same revision — are archived. Needs write access to the parent.",
+            "`dryRun: true` first: it reports `merged: false` and `wouldMerge` (true when " +
+            "every command would land) and writes nothing. Resolve a refusal by passing that " +
+            "command's id in `skipOperationIds` (skip an undo with what it undoes), or branch " +
+            "again from the parent. On success the branch is merged and its open siblings — " +
+            "branches forked at the same revision — are archived. Needs write access to the " +
+            "parent.",
           """
           {"type":"object","properties":{
             "branchId":{"type":"string"},
-            "dryRun":{"type":"boolean","description":"Replay and report without writing anything. Defaults to false."},
+            "dryRun":{"type":"boolean","description":"Replay and report without writing anything: the reply's merged is then false and wouldMerge carries the verdict. Defaults to false."},
             "skipOperationIds":{"type":"array","items":{"type":"string"},"description":"Logged commands to leave out of the replay."}
           },"required":["branchId"],"additionalProperties":false}
           """,
@@ -430,8 +432,16 @@ internal data class DesignBranchMergeV1(
   val branchId: String,
   val parentDesignId: String,
   val dryRun: Boolean,
-  /** True when every command landed — and, unless [dryRun], the parent now carries them. */
+  /**
+   * True only when the parent now carries the branch's commands. Always false for a [dryRun], which
+   * writes nothing: read [wouldMerge] for its verdict.
+   */
   val merged: Boolean,
+  /**
+   * True when every command landed or, for a [dryRun], would land. Equal to [merged] on a real
+   * merge.
+   */
+  val wouldMerge: Boolean,
   val forkRevision: Long,
   val parentRevisionBefore: Long,
   /** Equal to [parentRevisionBefore] when nothing was written. */
@@ -545,7 +555,10 @@ internal fun UiBuilderBranchMergeReport.wire(): DesignBranchMergeV1 {
     branchId = branchId,
     parentDesignId = parentDesignId,
     dryRun = dryRun,
-    merged = merged,
+    // The runtime's report says `merged` when every command landed, dry run or not; on the wire a
+    // dry run must not claim a merge it never wrote.
+    merged = merged && !dryRun,
+    wouldMerge = merged,
     forkRevision = forkRevision,
     parentRevisionBefore = parentRevisionBefore,
     parentRevisionAfter = parentRevisionAfter,
