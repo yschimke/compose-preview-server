@@ -15299,7 +15299,7 @@ class ServeHttpServer(
         ServeAgentGrants.PollResponse(
           status = ServeAgentGrants.PollResponse.DENIED,
           approvedBy = outcome.by,
-          message = "the request was declined",
+          message = outcome.reason ?: "the request was declined",
         )
       ServeAgentGrantStore.Poll.Expired ->
         ServeAgentGrants.PollResponse(

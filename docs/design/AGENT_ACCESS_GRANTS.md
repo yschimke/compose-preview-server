@@ -98,8 +98,9 @@ very different responses to what used to be one indistinguishable empty reply.
 | `expired` | known here, past its TTL |
 | `unknown` | revoked, **or** issued by a previous run of this server |
 
-`unknown` deliberately conflates revocation with a restart. Nothing in the store is persisted, so a
-redeploy invalidates every outstanding token, and telling the two apart would mean keeping a
+`unknown` deliberately conflates revocation with a restart. Grants are never persisted (only
+unresolved and uncollected *requests* are, below), so a redeploy invalidates every outstanding token,
+and telling the two apart would mean keeping a
 tombstone for every revoked token — retaining exactly what revocation is meant to discard. The
 message names both causes so the reader can tell which happened from context the server does not
 have.
@@ -249,9 +250,41 @@ internet mint itself credentials.
   request left waiting so it can be approved once a grant is revoked or expires; nothing live is
   ended to make room for it. Requests are bounded too, and
   shed only once denied or collected — an approval nobody has polled for yet still owes its owner a
-  credential. The store is in memory, so a restart drops every grant. That is deliberate: the
+  credential. Grants are in memory, so a restart drops every grant. That is deliberate: the
   TTLs are short, and a credential that cannot survive a redeploy has a much smaller worst case than
   one that can.
+- **Requests survive a restart; no credential does.** A person slow to approve should not have to
+  start over because the host was redeployed, so pending requests, denials and approvals nobody has
+  collected yet are written to `mcp-oauth/agent-access-requests.json` beside the catalogs file (the
+  OAuth client registry's directory, same file lock and atomic replace). A row holds what the
+  approval page shows — id, user code, label, client, the requested scope, TTL, capabilities and
+  designs, the requester, created and expiry times — plus the device secret as a **SHA-256**, which
+  is what a poll is compared against. An approval is written as the **decision** (approver, granted
+  scope, capabilities and designs, approval time and the grant's expiry), never as a token: after a
+  restart the grant is minted when its requester's first poll collects it, and its lifetime is still
+  counted from the approval, so a restart never extends it. A collected or revoked approval is not
+  deleted but marked — a `collected` or `revoked` tombstone kept until its grant would have expired —
+  and a restored approval is minted only after re-reading the file under its lock and finding it
+  still `approved`. Handing a bearer out is then a single compare-and-set under that lock, `approved`
+  to `collected`, on every collection path — including a grant this process minted at approval — and
+  a process that loses it discards its grant and answers `expired`. The old and new processes overlap
+  during a deploy, and without the marker and the claim a revocation or collection on one could be
+  undone by a stale copy on the other, or both could hand out a bearer. (A person's own
+  request, carried by their session and never polled, is marked collected the moment it is
+  approved.) Everything else is dropped when it expires: a pending or denied request at its
+  deadline, an approval when its grant would. Without a writable catalogs directory — tests, a local
+  server — nothing is written.
+- **A restored approval meets today's limits, not yesterday's.** An approval waiting to be minted
+  holds its grant's place: it counts towards `--agent-grant-max-active` and its approver's cap as if
+  it were live, so a restart cannot admit more approvals than the box allows. Minting it re-applies
+  the server's *current* ceilings: the scope is clamped to the current maximum, the capabilities are
+  intersected with the ones still allowed, and the lifetime with the current maximum, still counted
+  from the approval. That clamped lifetime is also how long it reserves a place: one already past
+  it holds none and is marked `expired` when polled. If the approval carried capabilities and none survive, or the caps are full
+  (overlapping processes can each have approved up to their own limit), the request is refused
+  instead: the poll answers `denied` with a `message` saying why, and the agent asks again. The refusal
+  is kept until the approval would have expired, even past the request's own deadline, so a retry
+  after another restart still reads `denied` rather than `unknown`.
 - **Never printed.** The token appears exactly once, in the poll response. `/status`, the server log,
   and every error message carry only a fingerprint (`sha256` prefix). The audit line names the
   approver, the label, the scopes, the expiry, and that fingerprint.
@@ -438,10 +471,11 @@ now asked per message: the handshake, `tools/list` and these two tools are open,
 reads a catalog is not, and an unrecognised method or tool name is gated by default. See
 [the catalog MCP guide](CATALOG_MCP.md#or-ask-from-inside-the-protocol).
 
-It is also how a client recovers from a restart. Nothing here is persisted — deliberately, see
+It is also how a client recovers from a restart. Grants are not persisted — deliberately, see
 above — so a redeployed host invalidates every live bearer at once, and an agent mid-task meets a
 401 with plenty of TTL left on a token that no longer exists. Asking again is the whole remedy, and
-now it costs no out-of-band tooling.
+now it costs no out-of-band tooling. A request still waiting for its human, or approved and not yet
+collected, is not lost: keep polling it after the restart.
 
 ## Using it without a header
 
