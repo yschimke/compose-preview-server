@@ -864,6 +864,38 @@ class ServeUiBuilderAgentErgonomicsTest {
   }
 
   @Test
+  fun `an export gate refusal names the node it is about`() {
+    val server = start()
+    create(server, cleanDocument())
+    val before = revisionOf(server)
+    val insert =
+      operations(
+        InsertNodeMutationV1(
+          node =
+            DesignNodeV1(
+              id = "newIcon",
+              componentId = "m3/icon",
+              properties = mapOf("iconKey" to StringValueV1("add")),
+            ),
+          location = NodeLocationV1(parent = ParentSlotV1("column", "children")),
+        )
+      )
+
+    // The fixture's component records stop short of `m3/icon`, so the generator refuses it with a
+    // sentence that names the component and no node; the finding says which node that is.
+    val reply =
+      check(
+        server,
+        """{"designId":"agent-screen","baseRevision":$before,"operations":$insert,"checks":["catalog"]}""",
+      )
+
+    val export =
+      reply["findings"]!!.jsonArray.map { it.jsonObject }.filter { it.text("severity") == "error" }
+    assertTrue(export.isNotEmpty(), reply.toString())
+    assertTrue(export.all { it["nodeId"]?.jsonPrimitive?.content == "newIcon" }, reply.toString())
+  }
+
+  @Test
   fun `a past revision is checked as it was`() {
     val server = start()
     create(server, cleanDocument())

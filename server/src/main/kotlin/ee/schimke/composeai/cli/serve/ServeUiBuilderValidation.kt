@@ -3,6 +3,7 @@ package ee.schimke.composeai.cli.serve
 import ee.schimke.composeai.uibuilder.protocol.AcceptedOutcomeV1
 import ee.schimke.composeai.uibuilder.protocol.ApplyOperationRequestV1
 import ee.schimke.composeai.uibuilder.protocol.CatalogCapabilityV1
+import ee.schimke.composeai.uibuilder.protocol.ComponentCapabilityV1
 import ee.schimke.composeai.uibuilder.protocol.CreateDesignRequestV1
 import ee.schimke.composeai.uibuilder.protocol.DesignCommandV1
 import ee.schimke.composeai.uibuilder.protocol.DesignDocumentV1
@@ -302,19 +303,29 @@ class ScratchUiBuilderDraftValidator(
           scratch.run(actor, ExportDesignRequestV1(designId, revision, ExportFormatV1.COMPOSE))
       ) {
         is UiBuilderServiceResponse.Export ->
-          exported.artifact.diagnostics.map {
-            UiBuilderValidationProblemV1(
-              severity =
-                when (it.severity) {
-                  DiagnosticSeverityV1.ERROR -> SEVERITY_ERROR
-                  DiagnosticSeverityV1.WARNING -> SEVERITY_WARNING
-                  DiagnosticSeverityV1.INFO -> SEVERITY_INFO
-                },
-              source = SOURCE_EXPORT,
-              code = it.code,
-              message = it.message,
-              nodeId = it.nodeId,
-            )
+          exported.artifact.diagnostics.flatMap { diagnostic ->
+            val severity =
+              when (diagnostic.severity) {
+                DiagnosticSeverityV1.ERROR -> SEVERITY_ERROR
+                DiagnosticSeverityV1.WARNING -> SEVERITY_WARNING
+                DiagnosticSeverityV1.INFO -> SEVERITY_INFO
+              }
+            UiBuilderExportDiagnosticLocation.locate(
+                diagnostic.message,
+                diagnostic.nodeId,
+                checked,
+                catalog.components,
+              )
+              .map { place ->
+                UiBuilderValidationProblemV1(
+                  severity = severity,
+                  source = SOURCE_EXPORT,
+                  code = diagnostic.code,
+                  message = place.message,
+                  nodeId = place.nodeId,
+                  field = place.field,
+                )
+              }
           }
         else -> listOf(problemOf(exported, SOURCE_EXPORT))
       }
@@ -368,6 +379,116 @@ class ScratchUiBuilderDraftValidator(
     const val SCRATCH_OPERATION_ID = "validate"
     const val SCRATCH_CLIENT_ID = "mcp-validate"
   }
+}
+
+/**
+ * Which node, and which of its properties, an export-gate diagnostic is about.
+ *
+ * The gate reports a refusal as a sentence: `ScreenExportGate` and `ScreenGenerator` keep their
+ * reasons as strings, and the server's executor turns each into an `ExportDiagnosticV1` with no
+ * `nodeId`. So a finding said *what* was wrong and left the caller to guess *where*, which on a
+ * screen of a hundred nodes is the whole problem. This reads the place back out of the sentence,
+ * against the document it was about, in the three shapes the reasons take:
+ * - ``node `email`.singleLine: …`` — the projection's, naming the node and the property;
+ * - a backticked token that is one of the document's node ids;
+ * - ``…`OutlinedTextField` has no parameter `singleLine` `` — the generator's, naming the callable
+ *   and the parameter but no node: every node whose component the catalog says calls that callable,
+ *   and which sets that property, is the place (one problem each); and ``no component `m3/icon` in
+ *   this catalog``, whose place is every node of that component.
+ *
+ * When the property is one the pinned catalog declares for that component, the gate and the catalog
+ * disagree — the catalog offered something its own export cannot write — and the message says so,
+ * so an agent stops editing a design that is not wrong.
+ */
+internal object UiBuilderExportDiagnosticLocation {
+  class Place(val message: String, val nodeId: String?, val field: String?)
+
+  fun locate(
+    message: String,
+    nodeId: String?,
+    document: DesignDocumentV1,
+    components: List<ComponentCapabilityV1>,
+  ): List<Place> {
+    val places = places(message, nodeId, document, components)
+    if (places.isEmpty()) return listOf(Place(message, nodeId, null))
+    return places.map { (node, field) ->
+      val componentId = document.nodes[node]?.componentId
+      val declared = field?.let { name ->
+        components
+          .firstOrNull { it.componentId == componentId }
+          ?.properties
+          ?.firstOrNull { it.name == name }
+      }
+      val text =
+        when {
+          declared == null -> message
+          declared.required ->
+            "$message — the pinned catalog requires `$field` on `$componentId`, so the Compose " +
+              "export gate and the catalog disagree: the design is not wrong, and `$node` cannot " +
+              "export on this host until the catalog or its export is fixed"
+          else ->
+            "$message — the pinned catalog declares `$field` on `$componentId`, so the Compose " +
+              "export gate and the catalog disagree: the design is not wrong, this host's export " +
+              "cannot write that property yet. Remove `$field` from `$node` to export now"
+        }
+      Place(text, node, field)
+    }
+  }
+
+  private fun places(
+    message: String,
+    nodeId: String?,
+    document: DesignDocumentV1,
+    components: List<ComponentCapabilityV1>,
+  ): List<Pair<String, String?>> {
+    NODE_PROPERTY.find(message)?.let { match ->
+      val node = match.groupValues[1]
+      if (node in document.nodes) {
+        val field = match.groupValues[2].ifEmpty { match.groupValues[3] }.ifEmpty { null }
+        return listOf(node to field)
+      }
+    }
+    if (nodeId != null && nodeId in document.nodes) return listOf(nodeId to null)
+    val named = TICKED.findAll(message).map { it.groupValues[1] }.toList()
+    named
+      .filter { it in document.nodes }
+      .distinct()
+      .singleOrNull()
+      ?.let { node ->
+        return listOf(
+          node to named.firstOrNull { it in (document.nodes[node]?.properties ?: emptyMap()) }
+        )
+      }
+    NO_COMPONENT.find(message)?.let { match ->
+      val componentId = match.groupValues[1]
+      val using = document.nodes.values.filter { it.componentId == componentId }
+      if (using.isNotEmpty()) return using.map { it.id to null }
+    }
+    NO_PARAMETER.find(message)?.let { match ->
+      val callable = match.groupValues[1].substringAfterLast('.')
+      val parameter = match.groupValues[2]
+      val calling =
+        components
+          .filter { it.code?.symbol?.substringAfterLast('.') == callable }
+          .mapTo(HashSet()) { it.componentId }
+      return document.nodes.values
+        .filter { it.componentId in calling && parameter in it.properties }
+        .map { it.id to parameter }
+    }
+    return emptyList()
+  }
+
+  /** ``node `id`.property`` or ``node `id`.`property` ``, as the projection words a reason. */
+  private val NODE_PROPERTY =
+    Regex("""node `([^`]+)`(?:\.(?:`([^`]+)`|([A-Za-z_][A-Za-z0-9_]*)))?""")
+
+  /** ``no component `m3/icon` in this catalog``, as the generator words a component it lacks. */
+  private val NO_COMPONENT = Regex("""no component `([^`]+)`""")
+
+  /** ``…`Callable` has no parameter `name` ``, as the generator words an unproven argument. */
+  private val NO_PARAMETER = Regex("""`([^`]+)` has no parameter `([^`]+)`""")
+
+  private val TICKED = Regex("""`([^`]+)`""")
 }
 
 internal const val SEVERITY_ERROR = "error"

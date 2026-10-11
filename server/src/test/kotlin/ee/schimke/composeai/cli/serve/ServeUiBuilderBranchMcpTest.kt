@@ -134,13 +134,17 @@ class ServeUiBuilderBranchMcpTest {
       val dry =
         call(mcp, ServeUiBuilderBranchTools.MERGE_BRANCH, """{"branchId":"bold","dryRun":true}""")
       assertEquals("true", dry["dryRun"]!!.jsonPrimitive.content)
-      assertEquals("true", dry["merged"]!!.jsonPrimitive.content)
+      // Nothing was written, so a dry run never claims it merged; `wouldMerge` carries the verdict.
+      assertEquals("false", dry["merged"]!!.jsonPrimitive.content)
+      assertEquals("true", dry["wouldMerge"]!!.jsonPrimitive.content)
+      assertEquals("1", dry["parentRevisionBefore"]!!.jsonPrimitive.content)
       assertEquals(listOf("quiet"), dry["archivedSiblingIds"]!!.jsonArray.map { it.string() })
       assertTrue(dry["summary"]!!.jsonPrimitive.content.startsWith("Dry run:"), dry.toString())
       assertEquals(1L, currentRevision(DESIGN))
 
       val merged = call(mcp, ServeUiBuilderBranchTools.MERGE_BRANCH, """{"branchId":"bold"}""")
       assertEquals("true", merged["merged"]!!.jsonPrimitive.content)
+      assertEquals("true", merged["wouldMerge"]!!.jsonPrimitive.content)
       assertEquals("1", merged["parentRevisionBefore"]!!.jsonPrimitive.content)
       assertEquals("2", merged["parentRevisionAfter"]!!.jsonPrimitive.content)
       val command = merged["commands"]!!.jsonArray.single().jsonObject
@@ -198,6 +202,7 @@ class ServeUiBuilderBranchMcpTest {
 
       val refused = call(mcp, ServeUiBuilderBranchTools.MERGE_BRANCH, """{"branchId":"cleanup"}""")
       assertEquals("false", refused["merged"]!!.jsonPrimitive.content)
+      assertEquals("false", refused["wouldMerge"]!!.jsonPrimitive.content)
       val commands = refused["commands"]!!.jsonArray.map { it.jsonObject }
       assertEquals(listOf("applied", "refused"), commands.map { it.string("status") })
       val stop = commands.last()
@@ -410,6 +415,11 @@ class ServeUiBuilderBranchMcpTest {
       assertEquals("object", schema["type"]!!.jsonPrimitive.content)
       assertEquals("false", schema["additionalProperties"]!!.jsonPrimitive.content)
     }
+    val mergeProperties =
+      assertNotNull(ServeUiBuilderBranchTools.outputSchema(ServeUiBuilderBranchTools.MERGE_BRANCH))[
+          "properties"]!!
+        .jsonObject
+    assertTrue("wouldMerge" in mergeProperties, mergeProperties.toString())
   }
 
   // ---- helpers ---------------------------------------------------------------------------------

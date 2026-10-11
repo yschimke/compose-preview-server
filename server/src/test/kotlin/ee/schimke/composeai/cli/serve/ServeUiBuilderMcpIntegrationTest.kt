@@ -1032,6 +1032,68 @@ class ServeUiBuilderMcpIntegrationTest {
   }
 
   @Test
+  fun `component search ignores case and separators and puts the named component first`() {
+    val server = start()
+
+    fun search(arguments: String): List<String> =
+      Json.parseToJsonElement(envelope(server, ServeUiBuilderMcp.SEARCH_COMPONENTS, arguments))
+        .jsonObject
+        .getValue("catalogs")
+        .jsonArray
+        .flatMap { catalog ->
+          catalog.jsonObject.getValue("components").jsonArray.map {
+            it.jsonObject.getValue("id").jsonPrimitive.content
+          }
+        }
+
+    // How the eval asked for it; only `text-field` used to find anything.
+    for (query in listOf("text field", "textfield", "TextField", "text_field", "Text-Field")) {
+      val ids = search("""{"query":"$query"}""")
+      assertEquals("m3/text-field", ids.firstOrNull(), "$query: $ids")
+      assertTrue("layout/column" !in ids, "$query: $ids")
+    }
+  }
+
+  @Test
+  fun `component search takes catalogSystemId for catalog and refuses a catalog it does not have`() {
+    val server = start()
+
+    fun catalogs(arguments: String): List<String> =
+      Json.parseToJsonElement(envelope(server, ServeUiBuilderMcp.SEARCH_COMPONENTS, arguments))
+        .jsonObject
+        .getValue("catalogs")
+        .jsonArray
+        .map { it.jsonObject.getValue("systemId").jsonPrimitive.content }
+
+    assertEquals(
+      listOf(CATALOG_SYSTEM_ID),
+      catalogs("""{"query":"text","catalog":"$CATALOG_SYSTEM_ID"}"""),
+    )
+    assertEquals(
+      listOf(CATALOG_SYSTEM_ID),
+      catalogs("""{"query":"text","catalogSystemId":"$CATALOG_SYSTEM_ID"}"""),
+    )
+    // A misspelt or unknown catalog used to be ignored or to answer an empty list, which reads
+    // as "no such component" rather than "no such catalog".
+    val unknown =
+      call(
+        server,
+        ServeUiBuilderMcp.SEARCH_COMPONENTS,
+        """{"query":"text","catalog":"m4-catalog"}""",
+      )
+    assertEquals("true", unknown["isError"]?.jsonPrimitive?.content, unknown.toString())
+    val text = unknown["content"]!!.jsonArray.first().jsonObject["text"]!!.jsonPrimitive.content
+    assertTrue(text.contains(CATALOG_SYSTEM_ID), text)
+    val conflicting =
+      call(
+        server,
+        ServeUiBuilderMcp.SEARCH_COMPONENTS,
+        """{"query":"text","catalog":"$CATALOG_SYSTEM_ID","catalogSystemId":"other"}""",
+      )
+    assertEquals("true", conflicting["isError"]?.jsonPrimitive?.content, conflicting.toString())
+  }
+
+  @Test
   fun `an optional property can be unset with null, and a required one cannot`() {
     val server = start()
     envelope(
@@ -1825,6 +1887,106 @@ class ServeUiBuilderMcpIntegrationTest {
     assertEquals(100, picture.width)
     assertEquals(200, picture.height)
     assertTrue(content.any { it["type"]!!.jsonPrimitive.content == "resource_link" })
+  }
+
+  @Test
+  fun `ui_builder_view outlines a selection with no renderer named, on the native frame`() {
+    // The eval call: a node id in `selection` and nothing else. It used to draw the PNG export,
+    // which reports no boxes, so the picture came back identical to one with no selection.
+    val selected = ServeUiBuilderView.Box(16, 24, 200, 40)
+    val server =
+      start(
+        withPngExport = true,
+        nativePreview =
+          UiBuilderNativePreviewLane { _, _ ->
+            UiBuilderNativePreviewOutcome.Rendered(
+              response =
+                PlaygroundRunResponse(
+                  previewId = "generated",
+                  previewToken = "token",
+                  image = java.util.Base64.getEncoder().encodeToString(VIEW_FRAME),
+                ),
+              taggedNodeIds = listOf("session"),
+              nodeBounds =
+                mapOf(
+                  "session" to
+                    AnnotationBounds(
+                      x = selected.x,
+                      y = selected.y,
+                      width = selected.width,
+                      height = selected.height,
+                    )
+                ),
+            )
+          },
+      )
+    envelope(
+      server,
+      ServeUiBuilderMcp.CREATE_DESIGN,
+      """{"designId":"agent-screen","document":${json.encodeToString(DesignDocumentV1.serializer(), document())}}""",
+    )
+
+    val result =
+      call(
+        server,
+        ServeUiBuilderMcp.VIEW,
+        """{"designId":"agent-screen","selection":["session"],"inline":true}""",
+      )
+    assertEquals(null, result["isError"], result.toString())
+    val content = result["content"]!!.jsonArray.map { it.jsonObject }
+    val view = Json.parseToJsonElement(content.first()["text"]!!.jsonPrimitive.content).jsonObject
+    assertEquals("native", view["renderer"]!!.jsonPrimitive.content, view.toString())
+    val image = content.single { it["type"]!!.jsonPrimitive.content == "image" }
+    val picture =
+      javax.imageio.ImageIO.read(
+        java.util.Base64.getDecoder().decode(image["data"]!!.jsonPrimitive.content).inputStream()
+      )
+    val edge = java.awt.Color(picture.getRGB(selected.x, selected.y + selected.height / 2))
+    assertTrue(edge.blue > 200 && edge.red < 100, "selection outline at the node's edge: $edge")
+
+    // With no selection the view stays the cheap export frame.
+    val bare = call(server, ServeUiBuilderMcp.VIEW, """{"designId":"agent-screen"}""")
+    val bareView =
+      Json.parseToJsonElement(
+          bare["content"]!!.jsonArray.first().jsonObject["text"]!!.jsonPrimitive.content
+        )
+        .jsonObject
+    assertEquals("export", bareView["renderer"]!!.jsonPrimitive.content, bareView.toString())
+  }
+
+  @Test
+  fun `ui_builder_view falls back to the export, saying why, when the chosen native render fails`() {
+    val server =
+      start(
+        withPngExport = true,
+        nativePreview =
+          UiBuilderNativePreviewLane { _, _ ->
+            UiBuilderNativePreviewOutcome.Refused("compile_failed", listOf("no such symbol"))
+          },
+      )
+    envelope(
+      server,
+      ServeUiBuilderMcp.CREATE_DESIGN,
+      """{"designId":"agent-screen","document":${json.encodeToString(DesignDocumentV1.serializer(), document())}}""",
+    )
+
+    val result =
+      call(
+        server,
+        ServeUiBuilderMcp.VIEW,
+        """{"designId":"agent-screen","selection":["session"]}""",
+      )
+    assertEquals(null, result["isError"], result.toString())
+    val view =
+      Json.parseToJsonElement(
+          result["content"]!!.jsonArray.first().jsonObject["text"]!!.jsonPrimitive.content
+        )
+        .jsonObject
+    assertEquals("export", view["renderer"]!!.jsonPrimitive.content)
+    assertTrue(
+      view["notes"]!!.jsonArray.any { it.jsonPrimitive.content.contains("no such symbol") },
+      view.toString(),
+    )
   }
 
   @Test

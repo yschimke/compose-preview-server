@@ -2784,7 +2784,19 @@ class ServeCatalogMcp(
       val again = authorize(capability, presentedToken)
       again is UiBuilderAuthorizationDecision.Authorized && again.actor == actor
     }
-    val text = builder.call(name, args, actor, callId = name, clientInteraction = interaction)
+    val text =
+      builder.call(
+        name,
+        args,
+        actor,
+        callId = name,
+        clientInteraction = interaction,
+        // Asked lazily, by a view with no renderer named that has a selection to outline.
+        mayExport = {
+          authorize(UiBuilderRouteCapability.EXPORT, presentedToken) is
+            UiBuilderAuthorizationDecision.Authorized
+        },
+      )
     if (name == ServeUiBuilderMcp.GUIDELINES_PROMPT) return uiBuilderGuidelinesPromptResult(text)
     if (
       name == ServeUiBuilderMcp.VIEW ||

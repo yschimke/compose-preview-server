@@ -598,8 +598,11 @@ under them. Unlike `ui_builder_fork_design`, a branch remembers its parent *and*
   each and attributed to the actor who authored it on the branch, or nothing is written. The reply
   lists every command attempted — `applied` with `committedRevision` and any last-writer-wins
   `conflicts` (`STALE_PROPERTY_WRITE`, `STALE_MOVE`, …), or `refused` with the reducer's `code` —
-  plus `remaining` (never tried), `skippedOperationIds` and `archivedSiblingIds`. A refusal is
-  resolved by skipping the command (and any undo of it) or branching again from the parent's head.
+  plus `remaining` (never tried), `skippedOperationIds` and `archivedSiblingIds`. `merged` is true
+  only when the parent now carries the commands, so `dryRun: true` always answers `merged: false`
+  with `wouldMerge` saying whether the real merge would land (on a real merge the two agree). A
+  refusal is resolved by skipping the command (and any undo of it) or branching again from the
+  parent's head.
 - `ui_builder_archive_branch {branchId}` — closes a branch unmerged; it stays readable and listed.
 
 Every other tool works on a branch's id unchanged — `ui_builder_get_design`, `ui_builder_apply`,

@@ -354,6 +354,11 @@ class ServeUiBuilderMcp(
     /** Optional 2025 request-scoped interaction; every operation must retain a text fallback. */
     clientInteraction: ServeCatalogMcp.ClientInteraction =
       ServeCatalogMcp.ClientInteraction.Unsupported,
+    /**
+     * Whether the caller's credential also carries the export capability. Asked only by [VIEW] with
+     * no `renderer`, to choose the native frame when a selection has to be outlined.
+     */
+    mayExport: () -> Boolean = { false },
   ): String {
     // Only a design this actor may read can acquire presence. A failed or spoofed design id
     // must never reveal another actor's access or add a participant to someone else's room.
@@ -372,7 +377,7 @@ class ServeUiBuilderMcp(
         tool,
         args,
         actor,
-        withLinks(tool, args, run(tool, args, actor, callId, clientInteraction)),
+        withLinks(tool, args, run(tool, args, actor, callId, clientInteraction, mayExport)),
       )
     } finally {
       leave?.invoke()
@@ -385,6 +390,7 @@ class ServeUiBuilderMcp(
     actor: AuthenticatedUiBuilderActor,
     callId: String,
     clientInteraction: ServeCatalogMcp.ClientInteraction,
+    mayExport: () -> Boolean,
   ): String {
     val request =
       when (tool) {
@@ -461,7 +467,7 @@ class ServeUiBuilderMcp(
             format = args.exportFormat(),
           )
         RENDER_NATIVE -> return renderNative(args, actor)
-        VIEW -> return view(args, actor)
+        VIEW -> return view(args, actor, mayExport)
         PUT_ASSET -> return envelope(callId, putAsset(args, actor))
         AWAIT_DESIGN -> return awaitDesign(args, actor)
         LIST_COMMENTS,
@@ -565,8 +571,9 @@ class ServeUiBuilderMcp(
   }
 
   /**
-   * Components whose id, role or traits contain `query` (case-insensitive), in [listCatalogs]'
-   * summary shape.
+   * Components [UiBuilderComponentSearch] matches `query` against — id, display name, Compose
+   * symbol, role and traits, ignoring case and separators — best first, in [listCatalogs]' summary
+   * shape. Catalogs are ordered by their best match.
    */
   private suspend fun searchComponents(
     args: JsonObject,
@@ -576,12 +583,19 @@ class ServeUiBuilderMcp(
     val query =
       args[QUERY_ARGUMENT]?.jsonPrimitive?.contentOrNull?.trim()?.takeIf { it.isNotEmpty() }
         ?: throw McpRequestException("`$QUERY_ARGUMENT` is required")
-    val catalogFilter = args[CATALOG_ARGUMENT]?.jsonPrimitive?.contentOrNull
+    val catalogFilter = args.catalogFilter()
     val listed =
       when (val response = execute(ListCatalogsRequestV1, actor)) {
         is UiBuilderServiceResponse.Catalogs -> response
         else -> return envelope(callId, response)
       }
+    val systemIds = listed.catalogs.map { it.benchmark.catalogSystemId }
+    if (catalogFilter != null && catalogFilter !in systemIds) {
+      throw McpRequestException(
+        "no catalog `$catalogFilter` on this server; it serves " +
+          systemIds.sorted().joinToString(", ") { "`$it`" }
+      )
+    }
     return SUMMARY_JSON.encodeToString(
       CatalogSummaryReplyV1.serializer(),
       CatalogSummaryReplyV1(
@@ -591,24 +605,52 @@ class ServeUiBuilderMcp(
             .filter { catalogFilter == null || it.benchmark.catalogSystemId == catalogFilter }
             .mapNotNull { catalog ->
               val systemId = catalog.benchmark.catalogSystemId
-              val matches =
-                catalog.components.filter { component ->
-                  component.componentId.contains(query, ignoreCase = true) ||
-                    component.role.contains(query, ignoreCase = true) ||
-                    component.traits.any { it.contains(query, ignoreCase = true) }
+              val ranked =
+                catalog.components.mapNotNull { component ->
+                  UiBuilderComponentSearch.rank(query, component.searchCandidate())?.let {
+                    it to component
+                  }
                 }
-              if (matches.isEmpty()) null
+              if (ranked.isEmpty()) null
               else
-                CatalogSummaryV1(
-                  systemId = systemId,
-                  platform = catalog.statusSemantics[PLATFORM_KEY]?.jsonPrimitive?.contentOrNull,
-                  catalogPin = listed.pins[systemId],
-                  components = matches.map(::summarize),
-                )
-            },
+                ranked.minOf { it.first } to
+                  CatalogSummaryV1(
+                    systemId = systemId,
+                    platform = catalog.statusSemantics[PLATFORM_KEY]?.jsonPrimitive?.contentOrNull,
+                    catalogPin = listed.pins[systemId],
+                    components = ranked.sortedBy { it.first }.map { summarize(it.second) },
+                  )
+            }
+            .sortedBy { it.first }
+            .map { it.second },
       ),
     )
   }
+
+  /**
+   * The catalog [SEARCH_COMPONENTS] is narrowed to. `catalog` is the documented name;
+   * `catalogSystemId`, what the catalog itself calls the id, is taken as the same thing rather than
+   * ignored, which silently searched every catalog. Naming two different catalogs is refused.
+   */
+  private fun JsonObject.catalogFilter(): String? {
+    val documented = text(CATALOG_ARGUMENT)
+    val alias = text(CATALOG_SYSTEM_ID_ARGUMENT)
+    if (documented != null && alias != null && documented != alias) {
+      throw McpRequestException(
+        "`$CATALOG_ARGUMENT` and `$CATALOG_SYSTEM_ID_ARGUMENT` name different catalogs; pass one"
+      )
+    }
+    return documented ?: alias
+  }
+
+  private fun ComponentCapabilityV1.searchCandidate(): UiBuilderComponentSearch.Candidate =
+    UiBuilderComponentSearch.Candidate(
+      id = componentId,
+      displayName = displayName,
+      symbol = code?.symbol,
+      role = role,
+      traits = traits,
+    )
 
   /** One component as a few short strings, which keeps the whole summary at about 12 KB. */
   private fun summarize(component: ComponentCapabilityV1): ComponentSummaryV1 =
@@ -1126,13 +1168,31 @@ class ServeUiBuilderMcp(
    * The editor canvas as a person sees it (selection, reference, comment pins, optional layout
    * bounds) plus the same facts as JSON (#1114). See [ServeUiBuilderView]. Read as this actor
    * first; the frame is one of the design's existing renders.
+   *
+   * With no `renderer`, a selection to outline picks the native frame where one can be had: the PNG
+   * export reports no node boxes, so a view drawn from it can never outline anything, and answering
+   * `selection` with an unmarked picture is the bug an agent reported. Where the native frame
+   * cannot be had — no lane, no export grant, or a render that failed — the export frame is drawn
+   * and [UiBuilderViewV1.notes] says why the outline is missing.
    */
-  private suspend fun view(args: JsonObject, actor: AuthenticatedUiBuilderActor): String {
+  private suspend fun view(
+    args: JsonObject,
+    actor: AuthenticatedUiBuilderActor,
+    mayExport: () -> Boolean = { false },
+  ): String {
     val designId = args.requiredText("designId")
     val include = args.viewIncludes()
     val selection = args.stringList(SELECTION_ARGUMENT)
     val viewport = args.viewport()
-    val renderer = args.text(RENDERER_ARGUMENT) ?: ServeUiBuilderView.RENDERER_EXPORT
+    val notes = mutableListOf<String>()
+    val asked = args.text(RENDERER_ARGUMENT)
+    val renderer =
+      asked
+        ?: defaultViewRenderer(
+          outline = ServeUiBuilderView.INCLUDE_SELECTION in include && selection.isNotEmpty(),
+          mayExport = mayExport,
+          notes = notes,
+        )
     if (
       renderer != ServeUiBuilderView.RENDERER_EXPORT &&
         renderer != ServeUiBuilderView.RENDERER_NATIVE
@@ -1147,10 +1207,23 @@ class ServeUiBuilderMcp(
         as? UiBuilderServiceResponse.Snapshot
         ?: throw McpRequestException("no design `$designId` this actor can read")
     val document = snapshot.snapshot.state.document
-    val notes = mutableListOf<String>()
     val frame =
-      if (renderer == ServeUiBuilderView.RENDERER_NATIVE) nativeViewFrame(designId, document)
-      else exportViewFrame(designId, document.revision, actor)
+      if (renderer != ServeUiBuilderView.RENDERER_NATIVE) {
+        exportViewFrame(designId, document.revision, actor)
+      } else if (asked != null) {
+        nativeViewFrame(designId, document)
+      } else {
+        // Chosen here rather than asked for, so a native render that fails falls back to the frame
+        // the caller would have had before, with the reason, instead of failing the view.
+        try {
+          nativeViewFrame(designId, document)
+        } catch (failed: McpRequestException) {
+          notes +=
+            "the native render, which reports the node boxes a selection is outlined with, " +
+              "failed (${failed.message}); this is the PNG export, which reports none"
+          exportViewFrame(designId, document.revision, actor)
+        }
+      }
     val board =
       if (ServeUiBuilderView.INCLUDE_COMMENTS !in include) null
       else if (comments == null) {
@@ -1180,6 +1253,31 @@ class ServeUiBuilderMcp(
         throw McpRequestException(refused.message ?: "the view could not be drawn")
       }
     return UI_BUILDER_JSON.encodeToString(UiBuilderViewV1.serializer(), view)
+  }
+
+  /**
+   * The frame [VIEW] draws when no `renderer` is named: native exactly when a selection is to be
+   * outlined and this host and caller can render one, else the PNG export. Why an outline cannot be
+   * drawn is added to [notes], since the picture alone cannot say it.
+   */
+  private fun defaultViewRenderer(
+    outline: Boolean,
+    mayExport: () -> Boolean,
+    notes: MutableList<String>,
+  ): String {
+    if (!outline) return ServeUiBuilderView.RENDERER_EXPORT
+    val why =
+      when {
+        nativePreview == null ->
+          "this host has no native render lane, and the PNG export reports no node boxes, so " +
+            "the selection cannot be outlined"
+        !mayExport() ->
+          "outlining the selection needs the native render, which needs the ui-builder-export " +
+            "capability this grant lacks; the PNG export reports no node boxes"
+        else -> return ServeUiBuilderView.RENDERER_NATIVE
+      }
+    notes += why
+    return ServeUiBuilderView.RENDERER_EXPORT
   }
 
   /** The render [COMPARE_REFERENCE] measures: as asked, else native exactly when layers are. */
@@ -3904,6 +4002,8 @@ class ServeUiBuilderMcp(
     private const val FULL_ARGUMENT = "full"
     private const val QUERY_ARGUMENT = "query"
     private const val CATALOG_ARGUMENT = "catalog"
+    /** Accepted for [CATALOG_ARGUMENT] by [SEARCH_COMPONENTS]; see `catalogFilter`. */
+    private const val CATALOG_SYSTEM_ID_ARGUMENT = "catalogSystemId"
     private const val COMPONENT_IDS_ARGUMENT = "componentIds"
     private const val INCLUDE_ARGUMENT = "include"
     private const val SELECTION_ARGUMENT = "selection"
@@ -4089,14 +4189,18 @@ class ServeUiBuilderMcp(
         ),
         tool(
           SEARCH_COMPONENTS,
-          "Find catalog components by name, role or trait (case-insensitive substring), e.g. " +
-            "`TextField`, `Button`, `Card`. Returns the same summary as $LIST_CATALOGS " +
+          "Find catalog components by id, display name, Compose symbol, role or trait, e.g. " +
+            "`TextField`, `text field`, `OutlinedTextField`, `Button`, `Card`. Case, spaces, " +
+            "hyphens, underscores, slashes and camelCase are ignored, and the components the " +
+            "query names come first: an exact name, then a prefix, then a name containing it, " +
+            "then role and traits. Returns the same summary as $LIST_CATALOGS " +
             "(id, role, traits, slots, properties, and the catalog pin) for only the matches, " +
             "so you don't pay for the whole catalog.",
           """
           {"type":"object","properties":{
-            "$QUERY_ARGUMENT":{"type":"string","description":"Text to look for in a component's id, role or traits."},
-            "$CATALOG_ARGUMENT":{"type":"string","description":"Only this catalog system id. Omit to search every catalog."}
+            "$QUERY_ARGUMENT":{"type":"string","description":"Text to look for in a component's id, display name, Compose symbol, role or traits."},
+            "$CATALOG_ARGUMENT":{"type":"string","description":"Only this catalog system id, e.g. m3-catalog. Omit to search every catalog; an id this server does not serve is an error."},
+            "$CATALOG_SYSTEM_ID_ARGUMENT":{"type":"string","description":"The same as `$CATALOG_ARGUMENT`."}
           },"required":["$QUERY_ARGUMENT"],"additionalProperties":false}
           """,
         ),
@@ -4595,8 +4699,11 @@ class ServeUiBuilderMcp(
             "The frame is the PNG export (`$RENDERER_ARGUMENT: \"export\"`, the editor's own " +
             "renderer), which reports no node boxes; `$RENDERER_ARGUMENT: \"native\"` draws " +
             "real Compose on a host with a native render lane, reports every node's box so the " +
-            "selection can be outlined, and needs the ui-builder-export capability. A node with " +
-            "no box is reported, never drawn at a guessed position. Not an McpResponseEnvelopeV1.",
+            "selection can be outlined, and needs the ui-builder-export capability. With no " +
+            "`$RENDERER_ARGUMENT`, a non-empty `selection` is drawn on the native frame when the " +
+            "host has a lane and the caller the capability, and otherwise on the export with a " +
+            "note saying why it is not outlined. A node with no box is reported in `notes`, " +
+            "never drawn at a guessed position. Not an McpResponseEnvelopeV1.",
           """
           {"type":"object","properties":{
             "designId":{"type":"string"},
@@ -4604,7 +4711,7 @@ class ServeUiBuilderMcp(
             "$VIEWPORT_ARGUMENT":{"type":"object","properties":{"width":{"type":"integer","minimum":1,"maximum":${ServeUiBuilderView.MAX_VIEWPORT_PX}},"height":{"type":"integer","minimum":1,"maximum":${ServeUiBuilderView.MAX_VIEWPORT_PX}}},"required":["width","height"],"additionalProperties":false,"description":"Fit the picture inside this many pixels, keeping its aspect ratio. Omit for the render's own size."},
             "$INCLUDE_ARGUMENT":{"type":"array","items":{"type":"string","enum":[${ServeUiBuilderView.INCLUDES.joinToString(",") { "\"$it\"" }}]},"description":"Overlays to draw. Defaults to ${ServeUiBuilderView.DEFAULT_INCLUDES.sorted().joinToString(", ")}; [] draws the bare frame."},
             "$SELECTION_ARGUMENT":{"type":"array","items":{"type":"string"},"description":"Node ids to show as selected."},
-            "$RENDERER_ARGUMENT":{"type":"string","enum":["${ServeUiBuilderView.RENDERER_EXPORT}","${ServeUiBuilderView.RENDERER_NATIVE}"],"description":"Defaults to ${ServeUiBuilderView.RENDERER_EXPORT}."},
+            "$RENDERER_ARGUMENT":{"type":"string","enum":["${ServeUiBuilderView.RENDERER_EXPORT}","${ServeUiBuilderView.RENDERER_NATIVE}"],"description":"Defaults to ${ServeUiBuilderView.RENDERER_EXPORT}, or ${ServeUiBuilderView.RENDERER_NATIVE} when a selection is to be outlined and this host and grant can render it."},
             "$INLINE_ARGUMENT":{"type":"boolean","description":"Also return the PNG as an image block. Defaults to false; a host with no public origin always does."}
           },"required":["designId"],"additionalProperties":false}
           """,
@@ -4623,7 +4730,9 @@ class ServeUiBuilderMcp(
             "is about, so you can fix them with $APPLY and check again. `$RENDERED_ARGUMENT: true` " +
             "measures touch targets on a native render where the host has one (needs the " +
             "ui-builder-export capability). Contrast against theme roles is resolved with the " +
-            "Material 3 baseline scheme and reported as a warning, never an error. " +
+            "Material 3 baseline scheme, in both the light and the dark theme when a colour " +
+            "follows the theme (the finding names the theme that fails), and reported as a " +
+            "warning, never an error. " +
             "`$CHECK_GUIDELINES` runs only when named: a model judges the design against the " +
             "Android design guides (developer.android.com) for its platform and reports each " +
             "broken rule as a warning or note with its source. It uses this host's shared model " +
