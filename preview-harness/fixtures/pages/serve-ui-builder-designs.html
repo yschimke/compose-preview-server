@@ -241,9 +241,10 @@
               <details class="cp-design-more cp-design-danger">
     <summary>Delete</summary>
     <form class="cp-design-form" method="post" action="/ui-builder/morning-player/delete?token=fixture-token">
-      <p class="cp-grant-fineprint">This removes <code>morning-player</code>, its history,
-      its comments and its access list. It cannot be undone.</p>
-      <button class="cp-grant-deny" type="submit" name="confirm" value="delete">Delete permanently</button>
+      <p class="cp-grant-fineprint">This moves <code>morning-player</code> to the trash with
+      its history, comments and access list. You can restore it from the trash below for a
+      day; after that it is gone for good.</p>
+      <button class="cp-grant-deny" type="submit" name="confirm" value="delete">Move to trash</button>
     </form>
   </details>
                     <details class="cp-design-more">
@@ -290,6 +291,7 @@
   </div>
 </section>
 <p class="cp-sub" id="cp-designs-none" hidden>No design here matches that.</p>
+        
         <details class="cp-designs-create-more">
 <summary>New design</summary>
 <section class="cp-designs-create">
