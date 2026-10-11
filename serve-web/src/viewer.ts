@@ -19,6 +19,7 @@ import { visibilityMessage } from "./live/session.js";
 import * as rules from "./viewer/rules.js";
 import { CONTINUOUS_EDIT_DEBOUNCE_MS, debounced } from "./viewer/debounce.js";
 import { viewParam } from "./spec/views.js";
+import { rcWasmFailureMessage } from "./viewer/rcWasmFailure.js";
 import {
     KIT_SOURCE,
     activeSource,
@@ -3221,7 +3222,7 @@ if (rcWasmFrame) {
             e.data.indexOf("cp-rc-wasm-error:") === 0
         ) {
             rcLaneFailed(
-                "Rendering the Remote Compose document failed in CMP Wasm.",
+                rcWasmFailureMessage(e.data.slice("cp-rc-wasm-error:".length)),
                 "rc-wasm",
                 rcWasmReady,
             );
