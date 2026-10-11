@@ -89,12 +89,6 @@ data class ServeCatalogsConfig(
      * (`SERVE_UI_BUILDER_NATIVE_CATALOGS`); empty removes the mapping.
      */
     val nativeCatalog: String? = null,
-    /**
-     * Report at startup what owning this catalog would change, without changing what is served
-     * (`CatalogCutoverShadow`). Only for a published, not-yet-owned catalog; file-only, as a step
-     * toward [owned].
-     */
-    val shadow: Boolean? = null,
   )
 
   /**

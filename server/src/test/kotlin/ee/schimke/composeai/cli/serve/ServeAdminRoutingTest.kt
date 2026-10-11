@@ -195,17 +195,6 @@ class ServeAdminRoutingTest {
       configFile = configFile,
       environment = uiBuilderEnvironment,
       serving = uiBuilderEnvironment,
-      shadowReports = {
-        mapOf(
-          "remote-m3" to
-            ServeUiBuilderShadowReportDto(
-              ready = false,
-              findings = listOf("remote-m3/blank: export refused"),
-              differences = listOf("remote-m3/text: properties: loses style"),
-              losses = listOf("remote-m3/text: properties: loses style"),
-            )
-        )
-      },
       unavailable = { mapOf("wear-m3" to "unavailable: no published ui-builder.json") },
     )
 
@@ -332,11 +321,6 @@ class ServeAdminRoutingTest {
     )
     val (_, report) = send("/admin/ui-builder/config")
     assertTrue(""""remote-widgets"""" in report, report)
-    // What a shadowed catalog would change if owned, as this process composed it.
-    assertTrue("remote-m3/blank: export refused" in report, report)
-    assertTrue("remote-m3/text: properties: loses style" in report, report)
-    // And which of those changes take something away, so the operator sees what blocks owning.
-    assertTrue(""""losses":["remote-m3/text: properties: loses style"]""" in report, report)
     // An owned catalog this process withheld, and why: there is no built-in fallback to hide it.
     assertTrue(
       """"unavailable":{"wear-m3":"unavailable: no published ui-builder.json"}""" in report,

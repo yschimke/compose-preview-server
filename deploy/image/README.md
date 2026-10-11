@@ -217,7 +217,7 @@ same way it reconciles the editor pin, and it applies at the box's next start
 (`GET /admin/ui-builder/config` reports `restartRequired`, and what the environment alone, the
 running process and the next start each serve). The publish then restarts the box itself, with no
 downtime and no SSH — see [Applying config without SSH](#applying-config-without-ssh). Switching a
-catalog to `owned`, or out of `shadow`, is a one-line change to the committed `catalogs.json`.
+catalog to `owned` is a one-line change to the committed `catalogs.json`.
 
 The block holds **overrides of the environment**, not a replacement, so nothing is disrupted by
 adopting it. A catalog it does not name keeps exactly what its `SERVE_UI_BUILDER_*` variables give
@@ -231,7 +231,6 @@ it, and a box with no block is unchanged. Each variable maps to one field:
 | `SERVE_UI_BUILDER_NATIVE_CATALOGS` | `catalogs.<id>.nativeCatalog` (`""` removes) |
 | `SERVE_UI_BUILDER_PACKS` | `packs.<served catalog>` (`null` withdraws) |
 | `SERVE_UI_BUILDER_WIDGET_PLAYER` | `widgetPlayer` |
-| (none) | `catalogs.<id>.shadow` |
 
 ```json
 "uiBuilder": {
@@ -249,11 +248,9 @@ Settings that no longer fit together (an owned catalog that is withdrawn) are re
 at startup instead of stopping the box. To move a box over: name a catalog here, publish, restart,
 then delete its `.env` value.
 
-`shadow` has no variable: it is the step before `owned`. A shadowed catalog is served exactly as
-before, and each time it composes the box logs what owning it would refuse and how the catalog an
-editor is served would change, and `GET /admin/ui-builder/config` reports the same under `shadow`.
-Only a catalog that reads its published file and is not owned yet can be shadowed. Flip it to
-`owned` once its report reads `ready` and the differences are ones you meant. Secrets and facts about the machine (`SERVE_UI_BUILDER_WEAR`,
+The `shadow` flag, a startup report on what owning a catalog would change, is retired: every
+catalog preview.coo.ee serves has been owned since 2026-10-10. A box `catalogs.json` that still
+names it loads, and the flag is ignored; `PUT /admin/ui-builder/config` refuses it. Secrets and facts about the machine (`SERVE_UI_BUILDER_WEAR`,
 `…_STATE_DIR`, `…_COMPONENTS`, `…_HOST`, the guidelines keys, the admin actors) stay in `.env`.
 `SERVE_UI_BUILDER_PACKS` (`<catalog>=<platform>[,…]`, e.g.
 `confetti-mobile=mobile,confetti-wear=wear`) offers served catalogs as **component packs** inside

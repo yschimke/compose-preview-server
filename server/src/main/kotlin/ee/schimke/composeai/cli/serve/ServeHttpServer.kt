@@ -5492,7 +5492,6 @@ class ServeHttpServer(
           next = next.effective.describe(),
           restartRequired = next.effective != admin.serving(),
           problems = next.problems,
-          shadow = admin.shadowReports().toSortedMap(),
           unavailable = admin.unavailable().toSortedMap(),
         ),
       ),
@@ -17924,8 +17923,6 @@ private data class AdminUiBuilderSettingsResponse(
   val next: ServeUiBuilderSettingsDto,
   val restartRequired: Boolean,
   val problems: List<String>,
-  /** Each shadowed catalog's report, as this process composed it. */
-  val shadow: Map<String, ServeUiBuilderShadowReportDto> = emptyMap(),
   /**
    * Each catalog-owned catalog this process can't fully serve, with why. Owned catalogs have no
    * fallback, so a non-composing publish is left out until republished.

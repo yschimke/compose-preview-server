@@ -248,49 +248,15 @@ class ServeUiBuilderSettingsTest {
   }
 
   @Test
-  fun `a shadowed catalog is reported on and served as it was`() {
-    val resolution =
-      resolve(
-        UiBuilderSettings(catalogs = mapOf("wear-m3" to UiBuilderCatalogSettings(shadow = true)))
+  fun `a box config still naming the retired shadow flag loads, and the flag is ignored`() {
+    // Boxes wrote `shadow` into their catalogs.json while shadow mode existed; a start must not
+    // fail on one.
+    val config =
+      ServeCatalogsConfig.parse(
+        """{"uiBuilder": {"catalogs": {"wear-m3": {"published": true, "shadow": true}}}}"""
       )
-    assertEquals(setOf("wear-m3"), resolution.effective.shadowCatalogs)
-    assertEquals(environment.copy(shadowCatalogs = setOf("wear-m3")), resolution.effective)
+    val resolution = resolve(config.uiBuilder)
     assertEquals(emptyList(), resolution.problems)
-    assertEquals(listOf("wear-m3"), resolution.effective.describe().shadowCatalogs)
-  }
-
-  @Test
-  fun `only a published catalog that is not owned yet can be shadowed`() {
-    val resolution =
-      resolve(
-        UiBuilderSettings(
-          catalogs =
-            mapOf(
-              "m3-catalog" to UiBuilderCatalogSettings(published = false, shadow = true),
-              "remote-m3" to UiBuilderCatalogSettings(owned = true, shadow = true),
-              "a2ui-catalog" to UiBuilderCatalogSettings(shadow = true),
-              "wear-m3" to UiBuilderCatalogSettings(shadow = true),
-            )
-        )
-      )
-    assertEquals(setOf("wear-m3"), resolution.effective.shadowCatalogs)
-    assertTrue(
-      resolution.problems.any { "a2ui-catalog, m3-catalog, remote-m3" in it && "shadow" in it },
-      resolution.problems.toString(),
-    )
-  }
-
-  @Test
-  fun `the overlay answers the shadow set`() {
-    val overlay =
-      ServeUiBuilderSettings.Overlay(
-        ServeCommandOptions(
-          args = emptyList(),
-          defaultTimeoutSeconds = 600L,
-          previewMatcher = { _, _, _, _, _, _ -> true },
-        ),
-        environment.copy(shadowCatalogs = setOf("wear-m3")),
-      )
-    assertEquals(setOf("wear-m3"), overlay.uiBuilderShadowCatalogs)
+    assertEquals(environment, resolution.effective)
   }
 }
