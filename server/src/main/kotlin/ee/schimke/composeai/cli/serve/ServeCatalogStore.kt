@@ -914,6 +914,8 @@ class ServeCatalogStore(
           // Kept in step with [scheduleRcCompareFetch]'s own guard through the shared helper: a
           // host that claims a lane which never runs stays "pending" forever and never caches.
           stagesRcCompare = ServeRcCompare.stagesFor(rcCompareAlias),
+          // Staged through the identity fallback, its lanes are comparison data, not players.
+          rcCompareComparisonOnly = alias.isEmpty(),
           // Every id the catalog bakes, so the grid is complete the moment `catalog.json` lands…
           declaredBaked = bakedPathById.keys.toList() + failedIds,
           // …and the pixels follow on first use. The store keeps ownership of the network here: the
