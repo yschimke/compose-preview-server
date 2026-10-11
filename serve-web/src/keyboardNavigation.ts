@@ -205,6 +205,11 @@ class KeyboardNavigation {
         if (this.overlay) {
             return;
         }
+        // Present mode (`viewer/present.ts`) puts only the stage in the top layer, so a palette or
+        // the guide would open behind it, invisibly. While it is up the one shortcut is the one that
+        // leaves it; Esc is the browser's own and needs nothing from here.
+        const presenting = !!document.fullscreenElement;
+        if (presenting && event.key.toLowerCase() !== "f") return;
         if (
             (event.metaKey || event.ctrlKey) &&
             event.key.toLowerCase() === "k"
@@ -242,6 +247,19 @@ class KeyboardNavigation {
         } else if (key === "[" || key === "]") {
             event.preventDefault();
             this.navigateRelative("variants", key === "]" ? 1 : -1);
+        } else if (
+            key.toLowerCase() === "f" &&
+            // A focused live canvas is a typing surface: its keys go to the running composable,
+            // and an F typed into one of its text fields must not take the page full screen.
+            !(event.target instanceof HTMLCanvasElement)
+        ) {
+            // The same button a pointer presses, so the gesture cannot drift from it — and a page
+            // without one (no stage, or no Fullscreen API) leaves F alone.
+            const present =
+                document.querySelector<HTMLButtonElement>(".cp-present");
+            if (!present) return;
+            event.preventDefault();
+            present.click();
         }
     }
 
@@ -727,6 +745,7 @@ class KeyboardNavigation {
           <kbd>C</kbd><span>Jump to a component</span><kbd>J / K</kbd><span>Next / previous component</span>
           <kbd>V</kbd><span>Choose a state or variant</span><kbd>[ / ]</kbd><span>Previous / next variant</span>
           <kbd>M</kbd><span>Choose renderer, theme, or display mode</span><kbd>O</kbd><span>Find and focus an override</span>
+          <kbd>F</kbd><span>Present the preview full screen</span>
           <kbd>?</kbd><span>Show this guide</span><kbd>Esc</kbd><span>Close any keyboard panel</span></div>
           <p class="cp-keyboard-note">Shortcuts pause while you type in a field. Tab and arrow keys keep their native browser behavior.</p>`;
         dialog

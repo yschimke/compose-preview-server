@@ -44,6 +44,7 @@ import { reportBody } from "./report/body.js";
 import { withStage } from "./annotate/report.js";
 import { isTransparent } from "./backgroundChoice.js";
 import { installWebShare } from "./viewer/webShare.js";
+import { installPresent } from "./viewer/present.js";
 import { pageWakeHold } from "./viewer/wakeLock.js";
 import { writeThemeMemory } from "./chrome/themeMemory.js";
 import { fitInk, imageInk, type InkBounds } from "./design/ink.js";
@@ -1486,6 +1487,8 @@ installWebShare(function () {
     if (!field || !field.value) return null;
     return isTransparent() ? field.value : withStage(field.value);
 });
+// The stage alone, full screen: a corner button on it, and F with keyboard navigation on.
+installPresent(stage);
 // --- Live frame painting.
 //
 // Frames land on `frameQueue` and are drained one per animation frame, never straight from the

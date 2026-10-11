@@ -5,6 +5,7 @@ import {
     spatialTextureUrl,
     type SpatialSceneDocument,
 } from "./spatial/model";
+import { installPresent } from "./viewer/present";
 
 const METRES_PER_DP = 0.001;
 
@@ -312,3 +313,8 @@ class ComposeSpatialView extends HTMLElement {
 if (!customElements.get("cp-spatial-view")) {
     customElements.define("cp-spatial-view", ComposeSpatialView);
 }
+
+// A spatial preview's page loads this bundle INSTEAD of viewer.js, so Present is installed here too.
+// The scene sizes its renderer from its own box through a ResizeObserver, and the stylesheet lets
+// that box take the whole screen while presenting, so the WebGL canvas re-measures by itself.
+installPresent(document.querySelector<HTMLElement>(".cp-stage"));
