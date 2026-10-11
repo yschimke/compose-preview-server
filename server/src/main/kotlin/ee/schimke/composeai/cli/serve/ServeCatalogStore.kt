@@ -191,6 +191,17 @@ class ServeCatalogStore(
   private fun withLaunchReason(cause: String, system: String): String =
     liveLaneFailure(system)?.trim()?.takeIf { it.isNotEmpty() }?.let { "$cause: $it" } ?: cause
 
+  /**
+   * The bridge the published-comparison lane re-keys `rc-compare-summary.json` through: [alias],
+   * or, for a catalog of pure `.rc` documents with no daemon twin, the identity over its RC-backed
+   * served ids, which is what such a producer keys its rows by. Only that lane takes it: widening
+   * [alias] itself would make the catalog look live-renderable.
+   */
+  private fun rcCompareAliasFor(
+    alias: Map<String, String>,
+    rcDocumentIds: Collection<String>,
+  ): Map<String, String> = alias.ifEmpty { rcDocumentIds.associateWith { it } }
+
   private fun previewAliasFor(catalog: Catalog): Map<String, String> {
     val alias = LinkedHashMap<String, String>()
     for (component in catalog.components) {
@@ -805,9 +816,13 @@ class ServeCatalogStore(
     // terminal registration. [liveOnly] (deferred ids) is passed only by live builders that can
     // render them.
     // [alias] bridges catalog ids to daemon descriptor ids (unmapped ids fall back to baked PNGs).
-    // Read first because it also decides whether the published-comparison lane runs
-    // ([ServeRcCompare.stagesFor]).
     val alias = previewAliasFor(catalog)
+    // The published-comparison lane's own bridge ([rcCompareAliasFor]), read first because it also
+    // decides whether that lane runs ([ServeRcCompare.stagesFor]). Never handed to anything else.
+    val rcCompareAlias = rcCompareAliasFor(alias, rcDocumentPathById.keys)
+    // A catalog with no daemon twin baked its PNGs with whatever player it declares, not with the
+    // AndroidX embedded one the comparison's baked column is named for.
+    val bakedLaneLabel = catalog.renderer?.takeIf { alias.isEmpty() && it.isNotBlank() }
 
     val bakedFallback: (List<ServeDegradation>, List<String>) -> ServeBundleHost =
       { degradations, liveOnly ->
@@ -898,7 +913,7 @@ class ServeCatalogStore(
           liveOnly = liveOnly,
           // Kept in step with [scheduleRcCompareFetch]'s own guard through the shared helper: a
           // host that claims a lane which never runs stays "pending" forever and never caches.
-          stagesRcCompare = ServeRcCompare.stagesFor(alias),
+          stagesRcCompare = ServeRcCompare.stagesFor(rcCompareAlias),
           // Every id the catalog bakes, so the grid is complete the moment `catalog.json` lands…
           declaredBaked = bakedPathById.keys.toList() + failedIds,
           // …and the pixels follow on first use. The store keeps ownership of the network here: the
@@ -953,7 +968,7 @@ class ServeCatalogStore(
 
     // Published Remote Compose player comparison, fetched in the background so the catalog doesn't
     // wait on ~150 small PNGs.
-    scheduleRcCompareFetch(system, generation, alias, base, dir)
+    scheduleRcCompareFetch(system, generation, rcCompareAlias, bakedLaneLabel, base, dir)
 
     // Trusted re-render from a carried executable bundle (opt-in), tried before the Gradle `source`
     // build. Only a Trusted catalog that declares `liveBundle` reaches the builder, and only once
@@ -2284,6 +2299,7 @@ class ServeCatalogStore(
     system: String,
     generation: Int,
     alias: Map<String, String>,
+    bakedLaneLabel: String?,
     base: String,
     dir: File,
   ) {
@@ -2292,7 +2308,9 @@ class ServeCatalogStore(
       if (generations[system] != generation) return@execute
       // Post-publish and self-reporting, like the vector fills beside it.
       val incomplete = inFetchScope { scope ->
-        runCatching { fetchRcCompare(alias, base, dir) { generations[system] == generation } }
+        runCatching {
+          fetchRcCompare(alias, bakedLaneLabel, base, dir) { generations[system] == generation }
+        }
           .onFailure { System.err.println("serve: catalog $system rc-compare: ${it.message}") }
         scope.sawTransientFailure
       }
@@ -2303,13 +2321,15 @@ class ServeCatalogStore(
   /**
    * Stage the published Remote Compose player comparison (`rc-compare-summary.json` plus lane PNGs)
    * so the compare page needs no in-browser rendering. [ServeRcCompare.plan] re-keys rows through
-   * [alias]; a catalog with no `.rc` docs costs one 404.
+   * [alias]; a catalog with no `.rc` docs costs one 404. [bakedLaneLabel], when set, names the
+   * baked column in place of the AndroidX player [ServeRcCompare.LANES] assumes drew it.
    *
    * The manifest is written last, since [ServeRcCompareStore] gates on it, so no row is served
    * before its pixels; cells whose image didn't arrive are dropped.
    */
   private fun fetchRcCompare(
     alias: Map<String, String>,
+    bakedLaneLabel: String?,
     base: String,
     dir: File,
     stillWanted: () -> Boolean,
@@ -2328,7 +2348,17 @@ class ServeCatalogStore(
       runCatching { fetchCatalogAsset(base + ServeRcCompare.SUMMARY_FILE) }.getOrNull()
         ?: return settle(ServeRcCompare.NONE)
     val summary = ServeRcCompare.parseSummary(summaryBytes) ?: return settle(ServeRcCompare.NONE)
-    val plan = ServeRcCompare.plan(summary, alias) ?: return settle(ServeRcCompare.NONE)
+    val plan =
+      ServeRcCompare.plan(summary, alias)?.let { plan ->
+        if (bakedLaneLabel == null) plan
+        else {
+          val lanes =
+            plan.manifest.lanes.map {
+              if (it.id == BAKED_LANE) it.copy(label = bakedLaneLabel) else it
+            }
+          plan.copy(manifest = plan.manifest.copy(lanes = lanes))
+        }
+      } ?: return settle(ServeRcCompare.NONE)
     if (!stillWanted()) return
 
     val root = File(dir, ServeRcCompare.DIRECTORY)
@@ -3383,6 +3413,8 @@ class ServeCatalogStore(
      */
     const val MAX_DESIGN_PAGES = 40
     private const val MAX_FETCH_BYTES = 25L * 1024 * 1024 // 25 MB per catalog asset
+    /** The reference column's id in [ServeRcCompare.LANES], always present in a staged plan. */
+    private const val BAKED_LANE = "baked"
     private const val MAX_RUNTIME_ARCHIVE_FETCH_BYTES = 64L * 1024 * 1024
     private const val MAX_PUBLISHED_RC_DOC_BYTES = 8L * 1024 * 1024
 
