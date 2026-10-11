@@ -127,6 +127,13 @@ class ServeAgentGrantStore(
     @Volatile var approval: Approval? = null,
     /** Why this server refused an approval that outlived a restart; null for a human's denial. */
     @Volatile var refusal: String? = null,
+    /**
+     * For a [refusal] made after the request's deadline: kept until the refused approval would have
+     * expired, so a retry reads `denied`, not `unknown`.
+     */
+    @Volatile var retainUntilMillis: Long? = null,
+    /** Loaded from the requests file rather than opened or approved by this process. */
+    val restored: Boolean = false,
   ) {
     enum class State {
       PENDING,
@@ -338,9 +345,7 @@ class ServeAgentGrantStore(
     syncFromDisk(key)
     // An approved, uncollected request stays reachable past its deadline until [purge] decides; a
     // pending one expires exactly on time.
-    return requests[key]?.takeIf {
-      it.expiresAtMillis > now || (it.state == Request.State.APPROVED && !grantIsGone(it, now))
-    }
+    return requests[key]?.takeIf { isLive(it, now) }
   }
 
   /**
@@ -465,10 +470,15 @@ class ServeAgentGrantStore(
               Poll.Expired
             }
         if (!request.collected) {
+          // Collected: the bearer goes out only if this process wins the row from `approved` to
+          // `collected` in one step under the file lock, so neither a later restart nor an
+          // overlapping process can hand out a second one from the same approval.
+          if (!claim(request)) {
+            discard(grant)
+            requests.remove(request.id)
+            return Poll.Expired
+          }
           request.collected = true
-          // Collected: the bearer is out, and neither a later restart nor an overlapping process
-          // may mint a second one from the same approval.
-          tombstone(request, COLLECTED_WIRE)
         }
         Poll.Approved(grant)
       }
@@ -635,7 +645,7 @@ class ServeAgentGrantStore(
     val reserved =
       requests.values
         .filter { it !== excluding && it.grantId == null && it.state == Request.State.APPROVED }
-        .mapNotNull { it.approval?.takeIf { approval -> approval.expiresAtMillis > now } }
+        .mapNotNull { it.approval?.takeIf { approval -> effectiveExpiry(approval) > now } }
     val byApprover =
       grants.values.count { it.isApprovedBy(approvedBy, approvedByActorId) } +
         reserved.count {
@@ -719,10 +729,26 @@ class ServeAgentGrantStore(
    */
   private fun grantIsGone(request: Request, nowMillis: Long): Boolean {
     val grantId =
-      request.grantId ?: return (request.approval?.expiresAtMillis ?: return true) <= nowMillis
+      request.grantId ?: return effectiveExpiry(request.approval ?: return true) <= nowMillis
     val grant = grants[grantId] ?: return true
     return grant.expiresAtMillis <= nowMillis
   }
+
+  /**
+   * Whether [request] is still owed an answer: before its deadline; approved while its grant lives
+   * (a late approval must not strand the token); or a refusal kept past the deadline.
+   */
+  private fun isLive(request: Request, nowMillis: Long): Boolean =
+    request.expiresAtMillis > nowMillis ||
+      (request.state == Request.State.APPROVED && !grantIsGone(request, nowMillis)) ||
+      (request.retainUntilMillis ?: 0) > nowMillis
+
+  /**
+   * When [approval]'s grant ends under the ceiling this server runs with now: the expiry decided at
+   * approval, or sooner when the maximum lifetime has been lowered since. Counted from approval.
+   */
+  private fun effectiveExpiry(approval: Approval): Long =
+    minOf(approval.expiresAtMillis, approval.approvedAtMillis + maxGrantTtlSeconds * 1000)
 
   /**
    * [request]'s grant: the one already minted, or — for an approval that outlived a restart — one
@@ -734,7 +760,13 @@ class ServeAgentGrantStore(
       return grant(it)
     }
     val decided = request.approval ?: return null
-    if (decided.expiresAtMillis <= nowMillis) return null
+    val expiresAt = effectiveExpiry(decided)
+    if (expiresAt <= nowMillis) {
+      // Dead under today's ceiling: stop reserving a place for it, here and in the file.
+      requests.remove(request.id)
+      tombstone(request, EXPIRED_WIRE)
+      return null
+    }
     // Another process sharing the file may have revoked or collected it since this one loaded it;
     // the file, read now under its lock, is the authority, and a missing row owes nobody.
     disk?.let { disk ->
@@ -748,16 +780,15 @@ class ServeAgentGrantStore(
       decided.copy(
         scope = minOf(decided.scope, maxScope),
         capabilities = decided.capabilities intersect maxCapabilities,
-        expiresAtMillis =
-          minOf(decided.expiresAtMillis, decided.approvedAtMillis + maxGrantTtlSeconds * 1000),
+        expiresAtMillis = expiresAt,
       )
-    if (approval.expiresAtMillis <= nowMillis) return null
     if (decided.capabilities.isNotEmpty() && approval.capabilities.isEmpty()) {
       val withdrawn = AgentGrantCapability.wireNames(decided.capabilities).joinToString(", ")
       return refuseRestored(
         request,
         "this server no longer allows $withdrawn, which this approval was for; " +
           "request access again",
+        retainUntilMillis = expiresAt,
       )
     }
     val capacity =
@@ -777,6 +808,7 @@ class ServeAgentGrantStore(
           "this server already holds as many live grants as it allows; request access again " +
             "once one ends"
         },
+        retainUntilMillis = expiresAt,
       )
     }
     val grant = grantFrom(request, approval)
@@ -794,14 +826,40 @@ class ServeAgentGrantStore(
   }
 
   /** Refuse a restored approval for [reason]: it reads as denied, here and after a restart. */
-  private fun refuseRestored(request: Request, reason: String): Grant? {
+  private fun refuseRestored(request: Request, reason: String, retainUntilMillis: Long): Grant? {
     request.state = Request.State.DENIED
     request.resolvedBy = "this server"
     request.refusal = reason
+    request.retainUntilMillis = retainUntilMillis
     request.approval = null
     persist(request)
     audit("agent-grant: refused a restored approval label=\"${request.label}\": $reason")
     return null
+  }
+
+  /**
+   * Whether this process may hand [request]'s bearer out: it won the file's row from `approved` to
+   * `collected`. A row someone else already moved on loses. A missing or unreadable file only stops
+   * a restored approval; one approved here, whose write may simply have failed, falls back to the
+   * in-memory store's own answer.
+   */
+  private fun claim(request: Request): Boolean {
+    val disk = disk ?: return true
+    return when (disk.claim(request.id, request.toRecord().copy(state = COLLECTED_WIRE))) {
+      ServeAgentGrantRequestFile.Claim.WON -> true
+      ServeAgentGrantRequestFile.Claim.TAKEN -> false
+      ServeAgentGrantRequestFile.Claim.MISSING,
+      ServeAgentGrantRequestFile.Claim.UNAVAILABLE -> !request.restored
+    }
+  }
+
+  /** Forget a grant nobody was given, because another process collected its approval. */
+  private fun discard(grant: Grant) {
+    grants.remove(grant.id)
+    byToken.remove(grant.token)
+    byBrowserCredential.remove(browserCredentialValue(grant.token))
+    byWasmCredential.remove(wasmCredentialValue(grant.token))
+    audit("agent-grant: discarded ${grant.fingerprint}: its approval was collected elsewhere")
   }
 
   /**
@@ -850,7 +908,7 @@ class ServeAgentGrantStore(
     if (memory != null && memory.state != Request.State.PENDING) return
     val record = disk.all()[id] ?: return
     if (memory != null && record.state == PENDING_WIRE) return
-    if (record.state == COLLECTED_WIRE || record.state == REVOKED_WIRE) {
+    if (record.state in TOMBSTONES) {
       // Resolved and finished elsewhere: a pending copy here must not be approved a second time.
       requests.remove(id)
       return
@@ -888,6 +946,7 @@ class ServeAgentGrantStore(
           )
         },
       refusal = refusal,
+      retainUntilMillis = retainUntilMillis,
     )
 
   /** Null for a row this version cannot read back faithfully; it is then simply not restored. */
@@ -927,6 +986,8 @@ class ServeAgentGrantStore(
       resolvedBy = resolvedBy,
       approval = approval,
       refusal = refusal,
+      retainUntilMillis = retainUntilMillis,
+      restored = true,
     )
   }
 
@@ -952,8 +1013,7 @@ class ServeAgentGrantStore(
       // An approved request outlives its deadline while its grant lives, so a late approval doesn't
       // strand the token; [grantIsGone] reclaims it. `collected` doesn't cause deletion, since a
       // response can be lost in flight.
-      val keepForCollection = r.state == Request.State.APPROVED && !grantIsGone(r, nowMillis)
-      (!keepForCollection && r.expiresAtMillis <= nowMillis).also { if (it) dropped++ }
+      (!isLive(r, nowMillis)).also { if (it) dropped++ }
     }
     grants.entries.removeIf { (_, g) ->
       (g.expiresAtMillis <= nowMillis).also {
@@ -1040,6 +1100,8 @@ class ServeAgentGrantStore(
     /** Tombstones: never restored, kept so an older copy elsewhere cannot mint. */
     private const val COLLECTED_WIRE = "collected"
     private const val REVOKED_WIRE = "revoked"
+    private const val EXPIRED_WIRE = "expired"
+    private val TOMBSTONES = setOf(COLLECTED_WIRE, REVOKED_WIRE, EXPIRED_WIRE)
 
     /** Base64url SHA-256 of a device secret: how it is compared and how it is persisted. */
     internal fun secretHash(secret: String): String =

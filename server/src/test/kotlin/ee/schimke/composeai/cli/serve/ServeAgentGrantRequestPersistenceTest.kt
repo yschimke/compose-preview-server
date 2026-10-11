@@ -40,6 +40,7 @@ class ServeAgentGrantRequestPersistenceTest {
     maxGrantTtlSeconds: Long = 3600,
     maxActiveGrants: Int = 16,
     maxActiveGrantsPerApprover: Int = 8,
+    audit: (String) -> Unit = {},
   ) =
     ServeAgentGrantStore(
       maxGrantTtlSeconds = maxGrantTtlSeconds,
@@ -48,6 +49,7 @@ class ServeAgentGrantRequestPersistenceTest {
       maxActiveGrants = maxActiveGrants,
       maxActiveGrantsPerApprover = maxActiveGrantsPerApprover,
       clock = { now },
+      audit = audit,
       requestsFile = file,
     )
 
@@ -435,5 +437,93 @@ class ServeAgentGrantRequestPersistenceTest {
       assertIs<ServeAgentGrantStore.Poll.Denied>(reloaded.poll(request.id, request.deviceSecret))
     assertNotNull(denied.reason)
     assertTrue(reloaded.activeGrants().isEmpty())
+  }
+
+  // ---- claiming, refusal lifetime and the reservation's clamp ----------------------------------
+
+  @Test
+  fun `two processes polling one restored approval at once hand out exactly one bearer`() {
+    val origin = store()
+    val request = origin.ask()
+    assertNotNull(origin.approve(request.id, "@yuri", AgentGrantScope.LIVE, 600, emptySet(), "u"))
+
+    // Both processes restored the approval. B is interleaved: after it has checked the file and
+    // minted, but before it marks the row collected, A polls and collects.
+    val a = store()
+    var interleaved: ServeAgentGrantStore.Poll? = null
+    val b =
+      store(
+        audit = { line ->
+          if (interleaved == null && "before a restart" in line) {
+            interleaved = a.poll(request.id, request.deviceSecret)
+          }
+        }
+      )
+    val fromB = b.poll(request.id, request.deviceSecret)
+    val fromA = assertNotNull(interleaved, "the interleaving hook ran")
+
+    val winners = listOf(fromA, fromB).filterIsInstance<ServeAgentGrantStore.Poll.Approved>()
+    assertEquals(1, winners.size, "A=$fromA B=$fromB")
+    // The loser holds no live grant for it either.
+    assertEquals(1, a.activeGrants().size + b.activeGrants().size)
+  }
+
+  @Test
+  fun `a grant minted at approval is not handed out once another process collected the approval`() {
+    val approver = store()
+    val request = approver.ask()
+    assertNotNull(approver.approve(request.id, "@yuri", AgentGrantScope.LIVE, 600, emptySet(), "u"))
+    // A new process restored it and collected first.
+    assertIs<ServeAgentGrantStore.Poll.Approved>(store().poll(request.id, request.deviceSecret))
+
+    val late = approver.poll(request.id, request.deviceSecret)
+    assertTrue(late !is ServeAgentGrantStore.Poll.Approved, "a second bearer: $late")
+    assertTrue(approver.activeGrants().isEmpty(), "the in-memory grant is discarded")
+  }
+
+  @Test
+  fun `a refusal after the request deadline is kept until the approval would have expired`() {
+    val first = store()
+    val request = first.ask()
+    now += 10 * 60_000
+    assertNotNull(
+      first.approve(
+        request.id,
+        "@yuri",
+        AgentGrantScope.LIVE,
+        1800,
+        setOf(AgentGrantCapability.IMAGES),
+        "u",
+      )
+    )
+    // Past the request's 30-minute deadline, inside the grant's 40.
+    now += 25 * 60_000
+    val refusing = store(maxCapabilities = emptySet())
+    assertIs<ServeAgentGrantStore.Poll.Denied>(refusing.poll(request.id, request.deviceSecret))
+    assertIs<ServeAgentGrantStore.Poll.Denied>(refusing.poll(request.id, request.deviceSecret))
+
+    val denied =
+      assertIs<ServeAgentGrantStore.Poll.Denied>(
+        store(maxCapabilities = emptySet()).poll(request.id, request.deviceSecret)
+      )
+    assertNotNull(denied.reason)
+  }
+
+  @Test
+  fun `an approval past a lowered lifetime ceiling stops holding a place`() {
+    val first = store(maxActiveGrants = 1)
+    val request = first.ask()
+    assertNotNull(first.approve(request.id, "@yuri", AgentGrantScope.LIVE, 1800, emptySet(), "u"))
+
+    // Redeployed with a one-minute ceiling, two minutes after the approval.
+    now += 2 * 60_000
+    val reloaded = store(maxActiveGrants = 1, maxGrantTtlSeconds = 60)
+    assertEquals(ServeAgentGrantStore.Capacity.OK, reloaded.capacityFor("@ana", "github:ana"))
+    assertEquals(ServeAgentGrantStore.Poll.Expired, reloaded.poll(request.id, request.deviceSecret))
+    val next = reloaded.ask()
+    assertNotNull(reloaded.approve(next.id, "@ana", AgentGrantScope.LIVE, 60, emptySet(), "a"))
+    // Dropped on disk too: a later process does not restore it as a reservation.
+    val later = store(maxActiveGrants = 2, maxGrantTtlSeconds = 3600)
+    assertNull(later.request(request.id))
   }
 }

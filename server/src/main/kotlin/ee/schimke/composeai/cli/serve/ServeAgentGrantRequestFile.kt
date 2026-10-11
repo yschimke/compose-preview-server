@@ -58,10 +58,27 @@ internal class ServeAgentGrantRequestFile(file: Path, private val clock: () -> L
     val approval: Approval? = null,
     /** Why the server refused a restored approval, for a `denied` row it refused. */
     val refusal: String? = null,
+    /** A refusal's own lifetime, when it outlives the request's deadline. */
+    val retainUntilMillis: Long? = null,
   ) {
-    /** Past which nobody is owed anything: the request's deadline, or an approval's grant's. */
+    /**
+     * Past which nobody is owed anything: an approval's grant's expiry, or the request's deadline
+     * (later, for a refusal kept until its approval would have expired).
+     */
     val keepUntilMillis: Long
-      get() = approval?.expiresAtMillis ?: expiresAtMillis
+      get() = approval?.expiresAtMillis ?: maxOf(expiresAtMillis, retainUntilMillis ?: 0)
+  }
+
+  /** How a [claim] went. */
+  enum class Claim {
+    /** The row was `approved` and is now `collected` by this caller. */
+    WON,
+    /** The row had already moved on: collected, revoked or expired elsewhere. */
+    TAKEN,
+    /** No such live row. */
+    MISSING,
+    /** The file could not be read or written. */
+    UNAVAILABLE,
   }
 
   /** What an approver decided — enough to mint the grant later, with no credential in it. */
@@ -101,6 +118,34 @@ internal class ServeAgentGrantRequestFile(file: Path, private val clock: () -> L
     } catch (e: IOException) {
       System.err.println("serve: agent-grant: could not read access requests from $file: $e")
       null
+    }
+
+  /**
+   * Compare-and-set [id] from `approved` to [collected] under one hold of the file lock, so of two
+   * processes collecting one approval exactly one wins.
+   */
+  @Synchronized
+  fun claim(id: String, collected: Record): Claim =
+    try {
+      val outcome = locked {
+        val rows = read().toMutableMap()
+        rows.values.removeIf { it.keepUntilMillis <= clock() }
+        val row = rows[id]
+        when {
+          row == null -> Claim.MISSING
+          row.state != APPROVED -> Claim.TAKEN
+          else -> {
+            rows[id] = collected
+            write(rows.values.toList())
+            Claim.WON
+          }
+        }
+      }
+      cachedStamp = null
+      outcome
+    } catch (e: IOException) {
+      System.err.println("serve: agent-grant: could not claim an access request in $file: $e")
+      Claim.UNAVAILABLE
     }
 
   fun upsert(record: Record) = change { it[record.id] = record }
@@ -182,6 +227,7 @@ internal class ServeAgentGrantRequestFile(file: Path, private val clock: () -> L
   companion object {
     /** Bounded by the store's own caps (pending + denied, plus live grants); this is a backstop. */
     private const val MAX_BYTES = 2 * 1024 * 1024L
+    private const val APPROVED = "approved"
     private val JSON = Json { ignoreUnknownKeys = true }
     private val locks = ConcurrentHashMap<Path, Any>()
   }
