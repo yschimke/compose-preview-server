@@ -1,5 +1,24 @@
 # Changelog
 
+## [3.122.0](https://github.com/yschimke/compose-preview-server/compare/v3.121.0...v3.122.0) (2026-10-11)
+
+
+### Features
+
+* **serve-web:** a "Recently viewed" row on the front door and catalog landings ([#1536](https://github.com/yschimke/compose-preview-server/issues/1536)) ([8c89ca6](https://github.com/yschimke/compose-preview-server/commit/8c89ca6774ca7b28d6e7c12996dd327f7ccae8f1))
+* **serve-web:** present the viewer's stage full screen ([#1539](https://github.com/yschimke/compose-preview-server/issues/1539)) ([28a25dd](https://github.com/yschimke/compose-preview-server/commit/28a25dd9993699a4406391096b4e38ef1a6ae91a))
+* **serve-web:** press / to focus the page's filter box ([#1535](https://github.com/yschimke/compose-preview-server/issues/1535)) ([c39d461](https://github.com/yschimke/compose-preview-server/commit/c39d461d8c2f627b85c77fa7d665ea1c80e0291c))
+* **serve-web:** star catalogs and previews and pin them to the top ([#1533](https://github.com/yschimke/compose-preview-server/issues/1533)) ([49c0db1](https://github.com/yschimke/compose-preview-server/commit/49c0db1b75b57621d33ed0f554cd084ebfa423d7))
+* **serve:** replay published Remote Compose documents ([#1537](https://github.com/yschimke/compose-preview-server/issues/1537)) ([0b726e9](https://github.com/yschimke/compose-preview-server/commit/0b726e906161bfade0a8501812474e97ad8269c9))
+* **viewer:** click the preview id to copy it ([#1534](https://github.com/yschimke/compose-preview-server/issues/1534)) ([8b8b339](https://github.com/yschimke/compose-preview-server/commit/8b8b3392a2d46ba75a689cdd1458b23e551a7045))
+
+
+### Bug Fixes
+
+* **deps:** update dependency ee.schimke.composeai:compose-preview-contracts-bom to v3.27.0 ([#1545](https://github.com/yschimke/compose-preview-server/issues/1545)) ([6ca567c](https://github.com/yschimke/compose-preview-server/commit/6ca567c6a23a6a00e02bd6b483021efefc660627))
+* **deps:** update UI Builder to 3.105.0 ([#1544](https://github.com/yschimke/compose-preview-server/issues/1544)) ([e7a8c8d](https://github.com/yschimke/compose-preview-server/commit/e7a8c8df34b9f99a76c5e3bd0a4d5cab47808f50))
+* **serve:** a bundle the verifier rejects fails the upload instead of a 500 ([#1548](https://github.com/yschimke/compose-preview-server/issues/1548)) ([7786b7b](https://github.com/yschimke/compose-preview-server/commit/7786b7bf2bec6e05f28539f8c16564e97d3708a0))
+
 ## [3.121.0](https://github.com/yschimke/compose-preview-server/compare/v3.120.0...v3.121.0) (2026-10-11)
 
 
