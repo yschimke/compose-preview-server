@@ -67,6 +67,20 @@ describe("<cp-backend-badge>", () => {
         assert.equal(badge.textContent?.trim(), "▶ CMP-WASM");
     });
 
+    it("names the in-browser Remote Compose players as live, not the snapshot", async () => {
+        const { badge, root } = await mount();
+        await setMode(root, "rc");
+        assert.equal(badge.textContent?.trim(), "▶ Camaelon JS");
+        assert.equal(badge.getAttribute("data-live"), "true");
+        await setMode(root, "rc-wasm");
+        assert.equal(badge.textContent?.trim(), "▶ CMP Wasm");
+        assert.equal(badge.getAttribute("data-live"), "true");
+        // …and leaving the lane hands the stage back to the snapshot.
+        await setMode(root, "snapshot");
+        assert.equal(badge.textContent?.trim(), "▪ Snapshot");
+        assert.equal(badge.getAttribute("data-live"), "false");
+    });
+
     it("names the SVG lane as static", async () => {
         const { badge, root } = await mount();
         await setMode(root, "svg");
