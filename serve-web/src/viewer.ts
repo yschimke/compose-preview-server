@@ -37,6 +37,7 @@ import { reportBody } from "./report/body.js";
 import { withStage } from "./annotate/report.js";
 import { isTransparent } from "./backgroundChoice.js";
 import { installWebShare } from "./viewer/webShare.js";
+import { installPhoneQr } from "./viewer/phoneQr.js";
 import { installPresent } from "./viewer/present.js";
 import { wireCopyId } from "./viewer/copyId.js";
 import { pageWakeHold } from "./viewer/wakeLock.js";
@@ -1250,6 +1251,9 @@ installWebShare(function () {
     if (!field || !field.value) return null;
     return isTransparent() ? field.value : withStage(field.value);
 });
+// "On phone": a QR code of this page at the end of the export line, its encoder fetched on first
+// open. Desktop only; a phone already has the page.
+installPhoneQr();
 // The stage alone, full screen: a corner button on it, and F with keyboard navigation on.
 installPresent(stage);
 // Live frame painting. Frames land on `frameQueue` and drain one per animation frame. Two

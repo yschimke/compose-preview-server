@@ -68,6 +68,9 @@ const BUNDLES = [
     { entry: "src/scorer/scorerWorker.ts", out: "compare-scorer.js" },
     { entry: "src/knownDifferences.ts", out: "known-differences.js" },
     { entry: "src/viewer.ts", out: "viewer.js" },
+    // The export bar's "On phone" QR encoder: fetched by `viewer/phoneQr.ts` the first time its
+    // popover opens, because the viewer bundle is at its budget and most visits never open it.
+    { entry: "src/qrCode.ts", out: "qr-code.js" },
     { entry: "src/spatial.ts", out: "spatial-view.js" },
 ];
 

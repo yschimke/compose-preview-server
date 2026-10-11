@@ -2719,14 +2719,37 @@ cp-history-menu { display: contents; }
 .cp-url { position: absolute; left: 0; top: 0; width: 1px; height: 1px; padding: 0; margin: -1px;
   overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
 /* M3 text buttons on the export line. */
-.cp-copyurl, .cp-copyimg, .cp-share, .cp-dl { font-size: var(--md-sys-typescale-label-large-size);
+.cp-copyurl, .cp-copyimg, .cp-share, .cp-dl, .cp-qr-btn { font-size: var(--md-sys-typescale-label-large-size);
   letter-spacing: var(--md-sys-typescale-label-large-tracking); font-weight: 500;
   padding: 8px 10px; border-radius: var(--md-sys-shape-corner-full); border: 0;
   background: transparent; color: var(--md-sys-color-primary); cursor: pointer;
   text-decoration: none; flex: none; white-space: nowrap; font-family: inherit;
   transition: background var(--md-sys-motion-duration-short2) var(--md-sys-motion-easing-standard); }
-.cp-copyurl:hover, .cp-copyimg:hover, .cp-share:hover, .cp-dl:hover {
+.cp-copyurl:hover, .cp-copyimg:hover, .cp-share:hover, .cp-dl:hover, .cp-qr-btn:hover,
+.cp-qr-btn[aria-expanded="true"] {
   background: color-mix(in srgb, var(--md-sys-color-primary) 8%, transparent); }
+/* "On phone" (`viewer/phoneQr.ts`): the last item on the export line, pushed to its end, with the
+   QR popover opening upward over the stage, or downward (`.cp-qr-below`) where the sticky header
+   would cover it. The code itself stays black on white in both themes — an inverted QR is one many
+   cameras refuse. */
+.cp-qr { position: relative; margin-left: auto; flex: none; }
+.cp-qr-pop { position: absolute; right: 0; bottom: calc(100% + 8px); z-index: 20; width: 232px;
+  padding: 16px; box-sizing: border-box; border-radius: var(--md-sys-shape-corner-large);
+  background: var(--md-sys-color-surface-container-high); color: var(--cp-fg);
+  box-shadow: 0 4px 16px rgb(0 0 0 / 0.24); }
+.cp-qr-pop.cp-qr-below { bottom: auto; top: calc(100% + 8px); }
+.cp-qr-pop[hidden] { display: none; }
+.cp-qr-pop:focus { outline: none; }
+.cp-qr-pop:focus-visible { outline: 2px solid var(--cp-accent); outline-offset: 2px; }
+.cp-qr-art { width: 200px; height: 200px; display: grid; place-items: center; overflow: hidden;
+  border-radius: var(--md-sys-shape-corner-small); background: #fff; color: #444;
+  font-size: var(--md-sys-typescale-body-small-size); text-align: center; }
+.cp-qr-art svg { display: block; width: 100%; height: 100%; }
+.cp-qr-caption, .cp-qr-url, .cp-qr-warn { margin: 8px 0 0;
+  font-size: var(--md-sys-typescale-body-small-size); line-height: 1.35; }
+.cp-qr-url { color: var(--cp-fg-muted); overflow-wrap: anywhere;
+  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.cp-qr-warn { color: var(--md-sys-color-error); }
 /* Drawer toggles + the two collapsible drawers (left component nav, right overrides). The open
    state is a class on .cp-viewer — cp-controls-open (default on) and cp-nav-open (default off) —
    so a drawer hides purely in CSS and the toggle JS just flips the class + aria-expanded. */
