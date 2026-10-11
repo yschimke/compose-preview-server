@@ -115,6 +115,14 @@ class ServePerPreviewLiveHost(
 
   override fun rcComparePending(): Boolean = baked.rcComparePending()
 
+  // The baked host decides whether its staged lanes are players at all
+  // ([ServeBundleHost.stagedRcPlayers]).
+  override fun stagedRcPlayers(previewId: String): List<RcPlayerBackend> =
+    baked.stagedRcPlayers(previewId)
+
+  override fun publishedRcPlayerRender(previewId: String, backend: RcPlayerBackend): ByteArray? =
+    baked.publishedRcPlayerRender(previewId, backend)
+
   /**
    * The baked host's live-only (deferred) ids, always routed to a daemon. Mirrors
    * [ServeCatalogLiveHost.liveOnlyPreviewIds].

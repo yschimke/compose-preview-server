@@ -20,6 +20,7 @@ import kotlin.test.Test
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNotEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -602,6 +603,7 @@ class ServeCatalogStoreTest {
     catalog: String,
     summary: String,
     requested: MutableList<String> = CopyOnWriteArrayList(),
+    trust: TrustStore = TrustStore.EMPTY,
   ): ServeBundleHost {
     val fetch: (String) -> ByteArray? = { url ->
       requested += url
@@ -609,14 +611,23 @@ class ServeCatalogStoreTest {
         url.endsWith("/catalog.json") -> catalog.toByteArray()
         url.endsWith("/${ServeRcCompare.SUMMARY_FILE}") -> summary.toByteArray()
         url.endsWith(".png") -> png()
+        url.endsWith(".rc") -> byteArrayOf(0x52, 0x43, 0x01)
         else -> null
       }
     }
-    assertTrue(
-      store(TrustStore.EMPTY, fetch = fetch).load("compose-m3") is ServeCatalogStore.Result.Ok
-    )
+    assertTrue(store(trust, fetch = fetch).load("compose-m3") is ServeCatalogStore.Result.Ok)
     return registered.getValue("compose-m3")
   }
+
+  private val trustedCompose =
+    TrustStore(
+      branches = listOf(TrustedBranch("yschimke/compose-ai-tools", "design-artifacts/compose-m3"))
+    )
+
+  /** A summary row scored by the Camaelon JS and vendored AndroidX Embedded harness lanes. */
+  private fun harnessSummary(id: String) =
+    """{"rows":[{"id":"$id","width":2,"height":2,"rendered":true,"mismatchPct":1.5,
+      "embeddedRendered":true,"embeddedMismatchPct":40.0,"embeddedNote":"cropped"}]}"""
 
   @Test
   fun `a catalog of pure RC documents stages its comparison by served id`() {
@@ -647,6 +658,104 @@ class ServeCatalogStoreTest {
     assertTrue(requested.any { it.endsWith("/rc/advanced-samples__2-vtext.png") })
     // The fallback feeds only this lane: no player is claimed for the untrusted documents.
     assertTrue(host.previews.all { host.enabledRcPlayersFor(it.id).isEmpty() })
+  }
+
+  @Test
+  fun `a document-only catalog's staged comparison is comparison data, not players`() {
+    // remote-compose-examples: trusted `.rc` documents baked by a web player, no `previewId`. Its
+    // harness lanes are keyed through the identity fallback and were never checked against that
+    // capture, so they must not become players or answer `?rcPlayer=`.
+    val id = "advanced-samples__pressure-gauge"
+    val host =
+      stagedRcCompare(
+        """{"schema":"design-parity-catalog/v1","system":"compose-m3",
+          "renderer":"Remote Compose web player 1:cb84224aae12e593","components":[
+          {"componentId":"advanced-samples/pressure-gauge",
+           "rcDocument":"documents/advanced-samples/pressure-gauge.rc",
+           "images":[{"path":"images/advanced-samples/pressure-gauge.png"}]}]}""",
+        harnessSummary(id),
+        trust = trustedCompose,
+      )
+    val manifest = assertNotNull(host.rcCompare())
+    val cell = manifest.rows.single().lanes.getValue("embedded")
+    assertTrue(cell.rendered)
+    assertNotNull(host.rcCompareImage(cell.render), "the lane's pixels are staged")
+    // The bake's own player only; Android players come from the server's player daemon instead.
+    assertEquals(listOf(RcPlayerBackend.CAMAELON_JS), host.enabledRcPlayersFor(id))
+    assertTrue(host.stagedRcPlayers(id).isEmpty())
+    for (backend in listOf(RcPlayerBackend.ANDROIDX_EMBEDDED, RcPlayerBackend.CAMAELON_JS)) {
+      assertNull(host.publishedRcPlayerRender(id, backend))
+    }
+
+    val registry =
+      ServeSessionRegistry(open = { null }).also {
+        it.register("compose-m3", host = host, pinned = true)
+      }
+    val playerDaemon =
+      ServeRcPlayerDaemon(
+        listOf(RcPlayerBackend.ANDROIDX_EMBEDDED, RcPlayerBackend.ANDROIDX_VIEW),
+        // Never brought up: the test is about what the catalog answers, not what the daemon draws.
+        openHost = { error("player daemon unavailable in this test") },
+      )
+    val server =
+      ServeHttpServer(
+          host = "127.0.0.1",
+          requestedPort = 0,
+          token = "doc-only",
+          sessions = registry,
+          defaultSessionId = "compose-m3",
+          isPublic = false,
+          rcPlayerDaemon = playerDaemon,
+        )
+        .also { it.start() }
+    val client = okhttp3.OkHttpClient()
+    fun get(path: String) =
+      client
+        .newCall(
+          okhttp3.Request.Builder()
+            .url(
+              "http://127.0.0.1:${server.port}/compose-m3$path" +
+                "${if ('?' in path) "&" else "?"}token=doc-only"
+            )
+            .build()
+        )
+        .execute()
+    try {
+      // The viewer opens on the bake's player, and offers the daemon-drawn AndroidX players.
+      val viewer = get("/p/$id").use { it.body.string() }
+      assertTrue("data-rc-default=\"camaelon-js\"" in viewer, viewer)
+      assertTrue("<option value=\"rc:androidx-embedded\">" in viewer, viewer)
+      // A bare player pick is never answered from the staged lane.
+      get("/render/$id.png?rcPlayer=androidx-embedded").use {
+        assertNotEquals(
+          RenderOutcome.Generation.RC_PUBLISHED.wire,
+          it.header(ServeHttpServer.GENERATION_HEADER),
+        )
+      }
+      // The compare page still shows every published lane, its note included.
+      val compare = get("/compare?format=rc").use { it.body.string() }
+      assertTrue(manifest.lanes.single { it.id == "embedded" }.label in compare, compare)
+      assertTrue("cropped" in compare, compare)
+    } finally {
+      server.stop()
+      playerDaemon.close()
+      registry.close()
+    }
+  }
+
+  @Test
+  fun `a catalog with daemon preview ids keeps its staged lanes as players`() {
+    val host =
+      stagedRcCompare(
+        """{"schema":"design-parity-catalog/v1","system":"compose-m3",
+          "renderer":"compose-preview 2.46.0","components":[
+          {"componentId":"Card","rcDocument":"documents/card.rc",
+           "images":[{"path":"images/card/ideal.png","previewId":"ee.x.CardsKt.CardRemote"}]}]}""",
+        harnessSummary("ee.x.CardsKt.CardRemote"),
+        trust = trustedCompose,
+      )
+    assertTrue(RcPlayerBackend.ANDROIDX_EMBEDDED in host.enabledRcPlayersFor("card__ideal"))
+    assertNotNull(host.publishedRcPlayerRender("card__ideal", RcPlayerBackend.ANDROIDX_EMBEDDED))
   }
 
   @Test

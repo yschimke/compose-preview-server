@@ -120,6 +120,13 @@ class ServeBundleHost(
    */
   private val stagesRcCompare: Boolean = false,
   /**
+   * Whether the staged comparison is comparison data only: its lanes are shown on the compare page
+   * but are not players this host offers or answers `?rcPlayer=` with. Set for a catalog of pure
+   * `.rc` documents, whose comparison is keyed through the identity fallback rather than a daemon
+   * alias, so its harness lanes were never checked against the catalog's own capture.
+   */
+  private val rcCompareComparisonOnly: Boolean = false,
+  /**
    * Ids this catalog publishes a baked PNG for, whether or not the pixels are local yet. Catalogs
    * pass their declared set (images are fetched lazily via [fetchBakedPng]); plain bundles pass
    * none and are exactly their `previews/` PNGs.
@@ -255,6 +262,12 @@ class ServeBundleHost(
   override fun rcCompareImage(name: String): ByteArray? = rcCompare.image(name)
 
   override fun rcComparePending(): Boolean = stagesRcCompare && rcCompare.pending()
+
+  override fun stagedRcPlayers(previewId: String): List<RcPlayerBackend> =
+    if (rcCompareComparisonOnly) emptyList() else super.stagedRcPlayers(previewId)
+
+  override fun publishedRcPlayerRender(previewId: String, backend: RcPlayerBackend): ByteArray? =
+    if (rcCompareComparisonOnly) null else super.publishedRcPlayerRender(previewId, backend)
 
   // Read once at load, like the reference manifest: the feed is a published snapshot, so re-reading
   // it per request would buy nothing (a refresh reloads the whole catalog and rebuilds this host).
