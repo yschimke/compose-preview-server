@@ -19,29 +19,17 @@ import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
 
 /**
- * The review side of a design: who approved or rejected which revision, and the pull request that
- * implements it (compose-preview-server#1255).
+ * The review side of a design: who approved or rejected which revision, and the pull request
+ * implementing it.
  *
- * ## Why this is not in the design document, and not in the links record
+ * Not in the document (a verdict is about a revision and must not move it; see
+ * [ServeUiBuilderLinksStore]), nor in the published `DesignLinksV1` links record, whose shape can't
+ * carry a status, revision and match result or a decision log without a contracts release.
  *
- * Not in the document for the reasons [ServeUiBuilderLinksStore] gives — a verdict is a fact
- * *about* a revision, never content of one, and recording it must not move the revision it is
- * about. Not in the links record because that record's shape is published (`DesignLinksV1`, in
- * `compose-preview-contracts`) and is five plain URLs; an implementation link here carries a
- * status, the revision it implements and whether its rendered previews were found to match, and
- * decisions are a log rather than a field. A second small file per design is cheaper than a
- * contracts release for something only this host reads.
- *
- * ## What a decision is
- *
- * The minimal record that lets an agent stop waiting: who decided ([StoredDesignDecision.decidedBy]
- * and whether that was a person or an agent), when, which revision, `approve` or `reject`, and an
- * optional note. Every write moves the design's review [StoredDesignReview.sequence], which is the
- * cursor `ui_builder_await_decision` waits past — the comment board's model, so an agent holding a
- * conversation and an agent waiting for a verdict poll the same way.
- *
- * Decisions are idempotent by id: recording the same `decisionId` twice answers the first record,
- * so a retried call after a lost reply never records a second approval.
+ * A decision records who (person or agent), when, which revision, `approve`/`reject`, and an
+ * optional note. Every write moves [StoredDesignReview.sequence], the cursor
+ * `ui_builder_await_decision` waits past, as on the comment board. Decisions are idempotent by
+ * `decisionId`, so a retried call never records a second approval.
  */
 class ServeUiBuilderReviewStore(private val root: Path) {
   init {
@@ -131,11 +119,9 @@ class ServeUiBuilderReviewStore(private val root: Path) {
   }
 
   /**
-   * Replace the implementation record — the pull request, its status, the revision it implements
-   * and whether its previews match — or clear it with a request carrying no pull request.
-   *
-   * A write that changes nothing does not move [StoredDesignReview.sequence], so a CI job that
-   * reports the same status on every push does not wake every agent waiting on the design.
+   * Replace the implementation record (pull request, status, implemented revision, preview match),
+   * or clear it with a request carrying no pull request. A no-op write doesn't move
+   * [StoredDesignReview.sequence], so repeated CI reports don't wake waiters.
    */
   fun setImplementation(
     designId: String,
@@ -248,11 +234,9 @@ class ServeUiBuilderReviewStore(private val root: Path) {
   }
 
   /**
-   * Every accepted write on any design, as the record was and as it is, until the handle is closed.
-   *
-   * The comment store's host feed ([ServeUiBuilderCommentStore.subscribeToHost]) for reviews: what
-   * changed is a diff of the two records ([diffDesignReviews]) rather than a field this store
-   * carries. Called under the store's lock, on the writer's thread — listeners must not block.
+   * Every accepted write on any design, as before and after, until the handle is closed: the review
+   * counterpart of [ServeUiBuilderCommentStore.subscribeToHost] ([diffDesignReviews] says what
+   * changed). Called under the store's lock on the writer's thread; listeners must not block.
    */
   fun subscribeToHost(listener: (StoredDesignReview?, StoredDesignReview) -> Unit): Closeable {
     hostSubscribers.add(listener)
@@ -260,11 +244,9 @@ class ServeUiBuilderReviewStore(private val root: Path) {
   }
 
   /**
-   * Every design whose implementation record names [pr], in a stable order.
-   *
-   * A directory scan, for the reason [ServeUiBuilderLinksStore.citing] gives, and with the same
-   * caveat: this answers what is stored, and the caller filters each id through a read of the
-   * design as the asking actor before naming it.
+   * Every design whose implementation record names [pr], in stable order: a directory scan, as in
+   * [ServeUiBuilderLinksStore.citing]. The caller filters each id by the asking actor's read
+   * access.
    */
   fun implementedBy(pr: String): List<String> {
     val wanted = pr.trim().ifEmpty { null } ?: return emptyList()

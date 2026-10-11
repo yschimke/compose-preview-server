@@ -6,13 +6,9 @@ import kotlin.test.Test
 import kotlin.test.assertTrue
 
 /**
- * Pins the knob attributes the viewer's Wasm patch reads.
- *
- * A `@OverrideVariant` sticker (the unchecked checkbox, the disabled button) opens with its knob
- * already seeded away from the author default. The PNG lane can ignore that — the baked capture
- * carries the seed — but the Wasm tier mounts the live component from `?id=<slug>` with the variant
- * axis stripped off the id, so it has to be *told*. That means the page must publish both numbers:
- * what the control opens on, and what the author declared.
+ * Pins the knob attributes the viewer's Wasm patch reads. An `@OverrideVariant` opens with its knob
+ * seeded away from the default; the Wasm tier mounts the component without the variant axis, so the
+ * page must publish both the opening value and the declared default.
  */
 class ServeWebKnobSeedTest {
 
@@ -63,13 +59,8 @@ class ServeWebKnobSeedTest {
   }
 
   /**
-   * A deep link's knob value reaches the CONTROL, not only the snapshot `<img>`.
-   *
-   * The page's thumbnail has always carried the request's query, so `?knob.secondary=true` showed
-   * the override immediately. Everything that reads the controls instead — the live socket's
-   * `setOverrides`, the export links, the next `/render` — read the preview's declaration and sent
-   * the un-overridden value, so the page disagreed with its own address the moment the live lane
-   * was opened (yschimke/wear-m3-catalog#66).
+   * A deep link's knob value reaches the control, not only the snapshot `<img>`, so live
+   * `setOverrides`, export links and the next `/render` agree with the address.
    */
   @Test
   fun `a request override seeds the control`() {
@@ -82,12 +73,9 @@ class ServeWebKnobSeedTest {
   }
 
   /**
-   * …and `data-knob-initial` keeps naming the DECLARATION while it does.
-   *
-   * That gap is the mechanism, not an oversight: the viewer omits a knob still equal to `initial`,
-   * so a plain visit sends no `knob.*` and a published catalog replays its instant baked PNG.
-   * Pointing `initial` at the request instead would make the seeded control look untouched and
-   * swallow the very override the visitor followed the link for.
+   * …while `data-knob-initial` keeps naming the declaration: the viewer omits knobs equal to
+   * `initial`, so a plain visit replays the baked PNG while a seeded value still counts as an
+   * override.
    */
   @Test
   fun `a request override leaves the declared initial alone, so it still rides into the render`() {
@@ -120,13 +108,8 @@ class ServeWebKnobSeedTest {
   }
 
   /**
-   * A deep link may spell the value with its legacy `<kind>:` wire tag. The control holds the BARE
-   * value, so the tag is stripped exactly where `ServeOverrides.parse` strips it.
-   *
-   * Seeded verbatim, `?knob.enabled=bool:true` reads as unchecked (the checkbox tests the whole
-   * string) and `?knob.count=int:3` puts `int:3` in a number input, which the browser sanitizes to
-   * empty — either way the control disagrees with the render the same URL produced, and the next
-   * query built from that control drops or inverts the value.
+   * A legacy `<kind>:` wire tag is stripped exactly as `ServeOverrides.parse` does; seeded
+   * verbatim, `bool:true` reads unchecked and `int:3` blanks a number input.
    */
   @Test
   fun `a legacy kind prefix is stripped before the control is seeded`() {
@@ -142,9 +125,7 @@ class ServeWebKnobSeedTest {
   }
 
   /**
-   * …but only when it matches the DECLARED kind. A string knob may legitimately hold text beginning
-   * `int:` — the type-free viewer submits it verbatim — and eating that prefix would silently
-   * rewrite the value, which is the same rule `ServeOverrides.parse` applies on the way in.
+   * …but only when it matches the declared kind: a string knob may legitimately start with `int:`.
    */
   @Test
   fun `a mismatched kind prefix is left in a string knob's value`() {
@@ -196,14 +177,7 @@ class ServeWebKnobSeedTest {
   private fun rcRow(html: String, name: String): String =
     html.lineSequence().first { it.contains("""data-rc-name="$name"""") }
 
-  /**
-   * A Remote Compose bool reads `1` as true, like every other consumer of the same seed.
-   *
-   * `?rc.enabled=bool:1` parses to `BooleanValue(true)` and `hydrateFromUrl` ticks the box for it.
-   * Testing only for the literal `true` was safe while the control always showed the declaration
-   * (whose text is `true` / `false`); once a deep link can seed it, that spelling would have drawn
-   * an unticked box beside a render that obeyed the value.
-   */
+  /** An RC bool reads `1` as true, like `hydrateFromUrl` does. */
   @Test
   fun `an rc bool seeded as 1 is checked`() {
     val row =
@@ -221,14 +195,9 @@ class ServeWebKnobSeedTest {
   }
 
   /**
-   * An RC seed whose kind won't parse as the declared one leaves the control alone.
-   *
-   * RC params type themselves from their own `<kind>:` tag and default to `string` with no
-   * declaration lookup — unlike a plain knob, which takes its type from the declaration. So
-   * `?rc.count=3` on a declared int parses as `StringValue("3")` and the renderer keeps the
-   * authored int: showing `3` would contradict the pixels, and the next query built from that
-   * control would serialise `rc.count=int:3`, turning a request the renderer ignored into one it
-   * obeys.
+   * An RC seed whose kind won't parse as the declared one leaves the control alone: RC params type
+   * themselves (default `string`), so the renderer ignores `?rc.count=3` on a declared int, and
+   * seeding it would turn an ignored request into an obeyed one.
    */
   @Test
   fun `an rc seed that would not parse as the declared kind is ignored`() {
@@ -263,10 +232,7 @@ class ServeWebKnobSeedTest {
     assertTrue(row.contains("""value="3""""), row)
   }
 
-  /**
-   * `bool:TRUE` ticks the box, because `parse` reads it with `ignoreCase = true` and the parser is
-   * what decides the pixels.
-   */
+  /** `bool:TRUE` ticks the box, since `parse` ignores case. */
   @Test
   fun `a mixed-case bool seed is checked`() {
     val row =
@@ -280,13 +246,7 @@ class ServeWebKnobSeedTest {
     assertTrue(row.contains(" checked"), row)
   }
 
-  /**
-   * An EMPTY non-string seed leaves the control on the declaration, because `parse` skips it.
-   *
-   * `?knob.count=` (or `int:`) has nothing to parse, so the render keeps the authored count.
-   * Assigning `""` to the number field would blank it beside pixels that used `5` — the same
-   * disagreement, produced by seeding rather than by not seeding.
-   */
+  /** An empty non-string seed leaves the control on the declaration, because `parse` skips it. */
   @Test
   fun `an empty non-string seed keeps the declaration`() {
     val preview =

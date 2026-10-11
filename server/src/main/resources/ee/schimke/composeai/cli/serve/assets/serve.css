@@ -416,6 +416,37 @@ input, select, textarea, progress { accent-color: var(--md-sys-color-primary); }
 .cp-home-component-name { font-weight: 500; }
 .cp-home-component-catalog { color: var(--md-sys-color-on-surface-variant);
   font-size: var(--md-sys-typescale-label-medium-size); }
+/* Recently viewed (`chrome/recent.ts`): the last few previews opened, above the front door's and a
+   landing's grid. Deliberately smaller than a card — a strip of chips with a 40px thumbnail, one
+   line high — so it is a shortcut back rather than another section to scroll past. A long strip
+   scrolls sideways inside itself instead of wrapping into a second band. */
+.cp-recent { margin: 0 0 24px; }
+.cp-recent-head-row { display: flex; align-items: baseline; gap: 12px; margin: 0 0 8px; }
+.cp-recent-head { margin: 0; font-size: var(--md-sys-typescale-title-small-size); font-weight: 500;
+  color: var(--md-sys-color-on-surface-variant); }
+.cp-recent-clear { padding: 2px 8px; border: 0; border-radius: var(--md-sys-shape-corner-full);
+  background: transparent; color: var(--md-sys-color-on-surface-variant); font: inherit;
+  font-size: var(--md-sys-typescale-label-medium-size); cursor: pointer; }
+.cp-recent-clear:hover { color: var(--md-sys-color-primary);
+  background: color-mix(in srgb, var(--md-sys-color-primary) 8%, transparent); }
+.cp-recent-clear:focus-visible { outline: 3px solid var(--md-sys-color-secondary); outline-offset: 1px; }
+.cp-recent-list { display: flex; gap: 8px; overflow-x: auto; padding: 2px 2px 6px;
+  scrollbar-width: thin; }
+.cp-recent-item { flex: none; display: inline-flex; align-items: center; gap: 8px; max-width: 240px;
+  padding: 4px 12px 4px 4px; border: 1px solid var(--md-sys-color-outline-variant);
+  border-radius: var(--md-sys-shape-corner-small); color: var(--md-sys-color-on-surface);
+  text-decoration: none; }
+.cp-recent-item:hover { text-decoration: none; border-color: var(--md-sys-color-outline);
+  background: color-mix(in srgb, var(--md-sys-color-on-surface) 8%, transparent); }
+.cp-recent-item:focus-visible { outline: 3px solid var(--md-sys-color-secondary); outline-offset: 1px; }
+.cp-recent-thumb { flex: none; width: 40px; height: 40px; object-fit: contain;
+  border-radius: calc(var(--md-sys-shape-corner-small) - 3px);
+  background: var(--md-sys-color-surface-container); }
+.cp-recent-text { display: flex; flex-direction: column; min-width: 0; }
+.cp-recent-label, .cp-recent-catalog { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.cp-recent-label { font-size: var(--md-sys-typescale-label-large-size); font-weight: 500; }
+.cp-recent-catalog { color: var(--md-sys-color-on-surface-variant);
+  font-size: var(--md-sys-typescale-label-small-size); }
 @media (max-width: 640px) {
   /* No room for a field beside the brand: the bar keeps the button and the field takes the row
      under it, full width, which is where a phone expects a search to open anyway. */
@@ -2175,6 +2206,10 @@ html:not(.cp-bg-transparent) .cp-viewer[data-bg-theme="light"] .cp-stage { backg
   font-size: var(--md-sys-typescale-body-small-size);
   letter-spacing: var(--md-sys-typescale-body-small-tracking);
   max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* The viewer bundle makes the id a click-to-copy button (`viewer/copyId.ts`); say so on hover. */
+.cp-preview-id[role="button"] { cursor: pointer; }
+.cp-preview-id[role="button"]:hover { color: var(--md-sys-color-on-surface);
+  background: var(--md-sys-color-surface-container-highest); }
 /* The four disclosures — Components, State/Variant, Theme, Overrides — ride at the end of that
    same identity row, pushed to the trailing edge by the auto margin. They are the page's controls
    over what is *shown*, so grouping them buys one place to look; keeping them on the title row
@@ -2448,6 +2483,38 @@ cp-history-menu { display: contents; }
 .cp-backend { position: absolute; top: 8px; right: 8px; font-size: 0.62rem; font-weight: 600;
   letter-spacing: 0.02em; padding: 2px 8px; border-radius: 999px; background: rgba(20,20,22,0.72);
   color: #fff; pointer-events: none; }
+/* --- Present (`viewer/present.ts`): the stage alone, full screen.
+   The corner button wears the backend badge's dark pill so it reads as stage furniture rather than
+   page chrome, and stays faint until the stage is hovered or focused — like the live hint, there is
+   one stage, so it can afford to be always present without shouting. It sits ABOVE the overlays
+   (live canvas, Wasm frame) because while presenting it is the only way out on a touchscreen. */
+.cp-present { position: absolute; right: 8px; bottom: 8px; z-index: 5; width: 32px; height: 32px;
+  padding: 0; border: 0; border-radius: 999px; background: rgba(20,20,22,0.72); color: #fff;
+  font-size: 18px; line-height: 1; cursor: pointer; opacity: 0.5;
+  transition: opacity var(--md-sys-motion-duration-short2) var(--md-sys-motion-easing-standard); }
+.cp-stage:hover > .cp-present, .cp-present:focus-visible { opacity: 1; }
+.cp-present:focus-visible { outline: 2px solid var(--cp-accent); outline-offset: 2px; }
+/* Full screen, the stage becomes the screen: no card corners or shadow, and its OWN background —
+   the theme-pinned #fff / #1d1d20, the checkerboard, or a chosen backdrop — fills it, so the render
+   sits on exactly the field it sat on in the page. The snapshot is contain-fitted to the whole box,
+   UP as well as down: a 400px phone render on a 1080p screen is the point of presenting. Its box is
+   the full stage, which is what the live canvas and Wasm frame pin to, and both of those contain-fit
+   their own content within it, so the three transports still agree. The fit-screen cap viewer.ts
+   writes inline is measured for the page, not the screen, hence `!important`; the other lanes' own
+   images and canvases (spec, motion, Remote Compose) are only allowed to use the height, not
+   enlarged. The side source lane keeps its two columns, so its snapshot is left at its own size. */
+.cp-stage:fullscreen { border-radius: 0; box-shadow: none; padding: 24px; min-height: 0; }
+.cp-stage:fullscreen img, .cp-stage:fullscreen canvas:not(.cp-canvas-live) { max-height: 100% !important; }
+.cp-viewer:not([data-source-lane="side"]) .cp-stage:fullscreen > #cp-img {
+  width: 100%; height: 100%; max-height: none !important; object-fit: contain; }
+.cp-stage:fullscreen > .cp-backend, .cp-stage:fullscreen > .cp-stage-live-hint { display: none; }
+/* A spatial scene is not a picture to fit but a viewport to grow: it takes the whole screen, and its
+   own ResizeObserver resizes the WebGL renderer to match. */
+.cp-stage:fullscreen:has(> cp-spatial-view) { padding: 0; }
+.cp-stage:fullscreen > cp-spatial-view { align-self: stretch; height: 100%; }
+/* A stage with no field of its own (the source lanes paint it transparent) would otherwise present
+   on the UA's black backdrop. */
+.cp-stage::backdrop { background: var(--md-sys-color-surface, #fff); }
 .cp-stage iframe { position: absolute; border: 0; background: transparent; opacity: 0;
   transition: opacity 0.15s ease; pointer-events: none; }
 .cp-stage iframe.cp-wasm-live { opacity: 1; pointer-events: auto; }

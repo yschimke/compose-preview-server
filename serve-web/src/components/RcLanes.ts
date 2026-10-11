@@ -1,19 +1,10 @@
-// `<cp-rc-lanes>` — the compare page's "Remote Compose players" view.
-//
-// Every player's published render of the same `ir/*.rc` document side by side, and — once a column
-// is picked as the reference — a pixel diff of every other column against it. The renders and the
-// baked-PNG diffs were computed offline by `compose-ai-tools/scripts/design-artifacts/rc-compare.mjs` and published
-// on the delivery branch, so nothing here renders a document: it places `<img>`s and, for the one
-// question the build cannot answer (two players against each other), diffs two of them on a canvas.
-//
-// This one renders nothing of its own. The table is server-rendered — that is what makes the page
-// readable before any of this runs, and with JavaScript off — so the element's job is to observe,
-// measure and write into cells it does not own. `serve.css` hides the tag.
-//
-// The decisions live next door: `rc/rowPlan.ts` (which of a row's lanes get a number, and which of
-// them need measuring at all), `rc/pixelDiff.ts` (the metric itself, previously nine untested magic
-// constants), `rc/rowFilter.ts` (the shared search box, and what the status line admits about where
-// a number came from).
+// `<cp-rc-lanes>` — the compare page's "Remote Compose players" view: each player's published
+// render of the same `ir/*.rc` side by side, and once a reference column is picked, a pixel diff of
+// the others against it. Renders and baked diffs come from
+// `compose-ai-tools/scripts/design-artifacts/rc-compare.mjs`; this only diffs player against player
+// on a canvas. The table is server-rendered (works without JS), so this writes into cells it does
+// not own and `serve.css` hides the tag. Decisions live in `rc/rowPlan.ts`, `rc/pixelDiff.ts` and
+// `rc/rowFilter.ts`.
 
 import { ControllerElement, customElement } from "../controllerElement.js";
 import { aliasesFor, readAliasTable } from "../compare/aliases.js";
@@ -64,9 +55,8 @@ export class RcLanes extends ControllerElement {
     private aliases: import("../compare/aliases.js").AliasTable | null = null;
     private reference = NO_REFERENCE;
     /**
-     * Bumped on every reference change. Every asynchronous step carries the token it started under
-     * and abandons itself if it no longer matches, so switching reference mid-scroll drops the
-     * previous pass instead of racing it into the same cells.
+     * Bumped on every reference change; async steps abandon themselves when their token no longer
+     * matches, so a switch mid-scroll does not race into the same cells.
      */
     private pass = 0;
     private installed = false;
@@ -76,17 +66,9 @@ export class RcLanes extends ControllerElement {
     private cleanups: Array<() => void> = [];
 
     /**
-     * Set up NOW if the markup is already there, and only wait for the parse if it is not.
-     *
-     * The server emits this tag as the last thing in the compare section, immediately after the
-     * inline model — so by the time the parser upgrades it, everything it reads exists, and
-     * `install()` says so by finding `#cp-rc-model`. That matters because `format-compare.js` runs
-     * its first pass as soon as it loads and calls `window.cpRcLanes.filter()` on the way through:
-     * deferring unconditionally to `DOMContentLoaded` would publish the global after the only
-     * caller had already looked for it, and the lanes view would open unfiltered with no count.
-     *
-     * The fallback is what keeps that from being an ordering accident — a page that emits the tag
-     * somewhere else still works, one parse later.
+     * Set up now if the markup is there, else after parse. `format-compare.js` calls
+     * `window.cpRcLanes.filter()` on its first pass, so always deferring to `DOMContentLoaded`
+     * would publish the global too late; the fallback covers a tag emitted elsewhere.
      */
     connectedCallback(): void {
         super.connectedCallback();
@@ -99,11 +81,9 @@ export class RcLanes extends ControllerElement {
         this.observer?.disconnect();
         this.observer = null;
         if (window.cpRcLanes === this.api) delete window.cpRcLanes;
-        // Everything this element owns lives OUTSIDE it — listeners on the picker, an observer on
-        // the rows, a global — so a teardown has to be undoable. Clearing the flag lets `install()`
-        // wire it all up again if the tag is reinserted; without that the picker and the shared
-        // filter would come back inert after any DOM relocation. The pass is bumped so work still
-        // in flight abandons itself rather than writing into a table nobody is observing.
+        // Everything this owns lives outside it (picker listeners, row observer, a global), so
+        // teardown clears the flag for a re-insert to rewire, and bumps the pass so in-flight work
+        // abandons itself.
         this.installed = false;
         this.pass++;
         super.disconnectedCallback();
@@ -171,10 +151,8 @@ export class RcLanes extends ControllerElement {
                 button.removeEventListener("click", onClick),
             );
         }
-        // Unsubscribed with the rest: `onPop` is a `popstate` listener on `window`, so without
-        // this a detached-and-reinserted element would stack one callback per connection — every
-        // Back would then clear the rows and restart the diff work once per prior life — and a
-        // permanently detached one would keep writing into a table it no longer observes.
+        // Unsubscribed with the rest, so re-insertion doesn't stack `popstate` callbacks and a
+        // detached element stops writing.
         const offPop = urlState()?.onPop(() => {
             this.reference = referenceFrom(location.search, this.laneIds);
             this.apply();
@@ -202,9 +180,8 @@ export class RcLanes extends ControllerElement {
             );
         }
         this.section.setAttribute("data-reference", this.reference);
-        // Unconditionally, and BEFORE re-observing: `observe()` on an already-observed target is a
-        // no-op, so switching straight from one reference to another would leave every on-screen
-        // row blank until it scrolled out and back. Disconnecting queues a fresh initial callback.
+        // Disconnect before re-observing: `observe()` on an observed target is a no-op, and
+        // disconnecting queues a fresh initial callback so on-screen rows refill.
         this.observer?.disconnect();
         for (const row of this.rows) {
             this.clearRow(row);
@@ -262,17 +239,12 @@ export class RcLanes extends ControllerElement {
         const scores = row.querySelector<HTMLElement>("[data-scores]");
         if (!model || !scores) return;
         this.cellFor(row, this.reference)?.classList.add("is-reference");
-        // Say out loud that this row is mid-measurement, and when it stops being so. The whole
-        // point of the reference picker is asynchronous, so without a signal there is no way — for
-        // the preview-harness, or for anyone debugging — to tell "still working" from "finished,
-        // and this is all there is". `clearRow` drops it again on the next pass.
+        // Mark the row mid-measurement so the harness (and debugging) can tell "still working" from
+        // "finished"; `clearRow` drops it.
         row.dataset.scored = "pending";
 
-        // The reference frame is decoded ONCE for the row. Every lane is measured against the same
-        // image, and `load()` caching the `HTMLImageElement` is not enough: each `pixels()` call
-        // allocates a full-size canvas, redraws, and does another `getImageData` readback. On the
-        // five-player wall that is four redundant full-frame readbacks per row, in the lazy scroll
-        // path this observer exists to keep smooth.
+        // Decode the reference frame once per row: each `pixels()` call allocates a canvas and does
+        // a full `getImageData` readback.
         let referencePixels: Promise<Pixels> | null = null;
 
         // Sequential on purpose: each step decodes two full frames onto a canvas, and a row of
@@ -368,9 +340,7 @@ export class RcLanes extends ControllerElement {
     }
 
     private cellFor(row: HTMLElement, laneId: string): HTMLElement | null {
-        // `querySelector` with an interpolated attribute value would be a selector-injection sink
-        // for a lane id — but every id reaching here came from `laneIds`, and `referenceFrom`
-        // refuses anything the model does not name. Compared rather than interpolated anyway.
+        // Compared rather than interpolated into a selector, even though ids are already validated.
         return (
             Array.from(row.querySelectorAll<HTMLElement>(".cp-rc-cell")).find(
                 (cell) => cell.dataset.lane === laneId,

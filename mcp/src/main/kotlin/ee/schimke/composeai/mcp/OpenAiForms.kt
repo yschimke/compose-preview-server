@@ -25,24 +25,16 @@ import kotlinx.serialization.json.putJsonArray
 import kotlinx.serialization.json.putJsonObject
 
 /**
- * OpenAI form elicitation (issue #1240): the `openai/elicitation` extension's resource-selection
- * fields, with thumbnails and previews on each option. Spec:
- * https://github.com/openai/mcp-extensions/blob/main/docs/spec.md, section "OpenAI Form
- * Elicitation"; the wire shapes follow the TypeScript SDK's `server/forms` (`file-picker.ts`,
- * `elicitation.ts`) and the Python SDK's `form/_resource_picker.py`.
+ * OpenAI form elicitation: the `openai/elicitation` extension's resource-selection fields, with
+ * thumbnails and previews. Spec: https://github.com/openai/mcp-extensions/blob/main/docs/spec.md
+ * ("OpenAI Form Elicitation"); wire shapes follow the TS SDK's `server/forms` and the Python SDK's
+ * `form/_resource_picker.py`.
  *
- * **Transport.** The spec offers two flows. OpenAI-registered servers must use MCP `2026-07-28`
- * with multi-round-trip requests (MRTR); direct connections may also use the legacy
- * `openai/elicitation/create` request, a drop-in replacement for `elicitation/create`. The Kotlin
- * MCP SDK this module links (0.15.0) negotiates at most `2025-11-25` and has no MRTR, so only the
- * legacy request is implemented: a client that would require MRTR cannot negotiate `2026-07-28`
- * with this server in the first place, and gets the plain MCP behaviour instead.
- *
- * The SDK's typed `elicitation/create` decodes `requestedSchema` into its primitive-schema classes,
- * which would drop `x-openai-input`, and its custom requests carry only `_meta`. So the request
- * travels as a [CustomRequest] whose `_meta` holds the real params under [RAW_PARAMS_META_KEY];
- * [RawParamsTransport] swaps them in on the way out. The answer comes back through the SDK's own
- * response matching and decodes as an ordinary [ElicitResult].
+ * Only the legacy `openai/elicitation/create` request is implemented: the Kotlin MCP SDK negotiates
+ * at most `2025-11-25` and has no MRTR, so clients needing `2026-07-28` get plain MCP behaviour.
+ * The SDK's typed `elicitation/create` would drop `x-openai-input`, so the request is a
+ * [CustomRequest] carrying real params under [RAW_PARAMS_META_KEY], swapped in by
+ * [RawParamsTransport]; the answer decodes as an ordinary [ElicitResult].
  */
 object OpenAiForms {
   /** `capabilities.extensions` key a host declares (`{ form: {} }`) when it renders these forms. */
@@ -64,8 +56,8 @@ object OpenAiForms {
   internal const val RAW_PARAMS_META_KEY: String = "ee.schimke.composeai/rawParams"
 
   /**
-   * True when the client declared `capabilities.extensions["openai/elicitation"].form` as an object
-   * — exactly the check the TypeScript and Python SDKs make before sending the request.
+   * True when the client declared `capabilities.extensions["openai/elicitation"].form` as an
+   * object, the same check the TS and Python SDKs make.
    */
   fun supportsForms(capabilities: ClientCapabilities?): Boolean =
     capabilities?.extensions?.get(EXTENSION_ID)?.get("form") is JsonObject
@@ -79,10 +71,7 @@ object OpenAiForms {
     IMPLICIT("implicit"),
   }
 
-  /**
-   * One server-supplied option: an `MCP.Resource` whose `_meta` may carry a thumbnail and a preview
-   * target.
-   */
+  /** One option: an `MCP.Resource` whose `_meta` may carry a thumbnail and a preview target. */
   data class ResourceOption(
     val uri: String,
     val name: String,
@@ -110,10 +99,7 @@ object OpenAiForms {
     }
   }
 
-  /**
-   * An `MCP.Icon` for a thumbnail. The spec requires an HTTPS URL or a base64 data URI; a local
-   * server has no HTTPS origin, so it is always the data URI.
-   */
+  /** An `MCP.Icon` for a thumbnail; always a data URI, since a local server has no HTTPS origin. */
   fun thumbnailIcon(pngBase64: String): JsonObject = buildJsonObject {
     put("src", "data:image/png;base64,$pngBase64")
     put("mimeType", "image/png")
@@ -203,11 +189,9 @@ object OpenAiForms {
     }
 
   /**
-   * [uri] as a valid RFC 3986 URI, for a `format: "uri"` field and its options. Every character
-   * outside the unreserved set and `:/?@!$&'()*+,;=` is percent-encoded as UTF-8, `%` included, so
-   * [decodeUri] reverses it exactly. A `compose-preview://` URI keeps a multipreview's name
-   * verbatim (`…Screen_Devices - Small`), and a host that checks the `uri` format refuses the
-   * spaces: Codex Desktop answered every pick with "Check this answer and try again".
+   * [uri] as a valid RFC 3986 URI: everything outside the unreserved set and `:/?@!$&'()*+,;=` is
+   * percent-encoded as UTF-8 (`%` included) so [decodeUri] reverses it exactly. Hosts that validate
+   * the `uri` format reject the spaces in multipreview names.
    */
   fun encodeUri(uri: String): String {
     if (uri.all { it.isUriSafe() }) return uri
@@ -258,9 +242,8 @@ object OpenAiForms {
       this in ":/?@!$&'()*+,;="
 
   /**
-   * The URI a single-select field submitted, or null when it is missing, not a string, or not one
-   * of [offered]. Without `userOptions` a picker may only answer with a supplied option (the SDKs'
-   * `isValidFileSelection`), so anything else is treated as a malformed answer.
+   * The URI a single-select field submitted, or null when missing, not a string, or not in
+   * [offered] (without `userOptions` only supplied options are valid).
    */
   fun selectedUri(content: JsonObject?, field: String, offered: Collection<String>): String? =
     (content?.get(field) as? JsonPrimitive)
@@ -268,18 +251,15 @@ object OpenAiForms {
       ?.contentOrNull
       ?.let { offeredUri(it, offered) }
 
-  /**
-   * The member of [offered] that [answer] names: the option's URI as sent ([encodeUri]'d) or as
-   * given, so a host that hands back either form is understood.
-   */
+  /** The member of [offered] that [answer] names, whether sent encoded or as given. */
   private fun offeredUri(answer: String, offered: Collection<String>): String? =
     answer.takeIf { it in offered }
       ?: decodeUri(answer)?.takeIf { it in offered }
       ?: offered.firstOrNull { encodeUri(it) == answer }
 
   /**
-   * The URIs a multi-select field submitted, in answer order, or null when the value is not an
-   * array of distinct offered URIs.
+   * The URIs a multi-select field submitted, in order, or null unless an array of distinct offered
+   * URIs.
    */
   fun selectedUris(
     content: JsonObject?,
@@ -298,9 +278,8 @@ object OpenAiForms {
   }
 
   /**
-   * Sends `openai/elicitation/create` when [session]'s client declared the extension. Returns
-   * [FormElicitation.Unsupported] when it did not, or when the client rejected the request, so the
-   * caller falls back exactly as it would for a client without forms.
+   * Sends `openai/elicitation/create` when the client declared the extension; otherwise, or when
+   * the client rejected it, [FormElicitation.Unsupported] so the caller falls back.
    */
   internal suspend fun elicit(
     session: ServerSession?,
@@ -331,9 +310,8 @@ object OpenAiForms {
   }
 
   /**
-   * Replaces an outgoing request's params with the object under `_meta[RAW_PARAMS_META_KEY]`, so a
-   * [CustomRequest] can carry params the SDK has no type for. Every other message passes through
-   * untouched.
+   * Replaces an outgoing request's params with `_meta[RAW_PARAMS_META_KEY]`; other messages pass
+   * through.
    */
   internal fun unwrapRawParams(message: JSONRPCMessage): JSONRPCMessage {
     if (message !is JSONRPCRequest) return message

@@ -38,60 +38,26 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeoutOrNull
 
 /**
- * The picture on each card of `/ui-builder/designs`, kept on disk and redrawn ahead of the reader.
+ * The picture on each `/ui-builder/designs` card, kept on disk and redrawn ahead of the reader.
  *
- * ## Why the listing does not link the live export
+ * A PNG export rather than linking the live SVG export: the SVG re-rendered on every request
+ * (queuing behind the editor's own exports) and pins text widths, which squeezed lettering in other
+ * fonts.
  *
- * The cards used to point their `<img>` at `/designs/{id}/export.svg`, which renders the design on
- * every request: a second or more each on the one renderer the editor's own exports also queue on,
- * a page of cards at a time. Cards that lost that race drew nothing, and the SVG itself pins every
- * line of text to the width the renderer measured (`textLength`), so a browser whose font is not
- * the renderer's squeezed the lettering. The PNG export is the renderer's own pixels and draws the
- * same everywhere, so a thumbnail is that PNG.
+ * Stale is fine, missing is not: each thumbnail records the revision and generation
+ * ([generationOf]: server version plus renderer identity) it was drawn at. A newer revision still
+ * gets the cached picture while a redraw is queued; only a never-drawn design renders while the
+ * reader waits. [warming] queues a redraw on every accepted edit from any lane; one worker, because
+ * the renderer answers concurrent renders with "busy".
  *
- * ## Stale is fine, missing is not
+ * Wear widgets are drawn via the [nativePreview] lane inside the [WearWidgetHostShape.Squircle]
+ * container, since the export is a bare rectangle. That compiles Kotlin, so it only runs for
+ * callers with the `ui-builder-export` capability (`native = true`); others get the export, kept as
+ * [Entry.unframed] and redrawn natively by the next capable viewer. Failed native draws are retried
+ * up to [NATIVE_ATTEMPTS] times per revision.
  *
- * A thumbnail is kept per design with the revision and the server generation it was drawn at. A
- * request for a newer revision still gets the picture this cache holds — a card showing the design
- * as it was a minute ago is better than a blank card — and the redraw is queued behind it, so the
- * next page view has the current one. Only a design never drawn at all is rendered while the reader
- * waits. The generation is the server version and the renderer's identity ([generationOf]), so a
- * deploy that changes either redraws every design in the background while the old pictures keep
- * serving.
- *
- * ## Ahead of the reader
- *
- * [warming] wraps the service so every accepted edit, from any lane — editor, MCP, admin — queues a
- * redraw of the design it changed, and the listing page queues every card it finds out of date. One
- * worker, because the renderer answers a second concurrent render with "busy" and the editor's
- * interactive exports matter more than a thumbnail.
- *
- * ## Wear widgets are drawn in their host
- *
- * A Wear widget's PNG export is the widget's content at its environment size, with square corners
- * and no host container around it, so on the card it read as a squashed rectangle rather than the
- * widget a person put on their watch. Where the host has the [nativePreview] lane, a widget design
- * is drawn through it instead: the generated `WearWidgetPreview`, compiled and rendered on the
- * device renderer, inside the [WearWidgetHostShape.Squircle] container — the round-rect frame the
- * host really draws, and the render recommended for the widget picker — rather than corners faked
- * in CSS.
- *
- * That lane compiles and runs Kotlin, which is the separately granted `ui-builder-export` route
- * capability rather than anything a reader holds, so a native draw only runs for a request whose
- * caller passed that check (`native = true`). A reader's view, an anonymous unfurl, and a redraw
- * queued by an edit (which has no request to ask) draw the export instead, kept as
- * [Entry.unframed]; the next view by a caller who may compile treats that picture as out of date
- * and redraws it natively. A native draw that fails falls back the same way, and is retried on
- * later views up to [NATIVE_ATTEMPTS] times per revision, so a busy renderer does not leave a
- * widget unframed for good and a widget the lane can never draw is not recompiled on every page
- * view.
- *
- * ## Access
- *
- * The bytes on disk carry no access record, so every serve asks the design's own access control
- * first ([designActions]): a reader must hold the design's EXPORT action, which is the check the
- * export itself would have made. Queued redraws run as the actor whose edit or page view queued
- * them, so the redraw is an export that actor was already allowed to make.
+ * Access: cached bytes carry no ACL, so every serve checks the design's EXPORT action
+ * ([designActions]). Queued redraws run as the actor who queued them.
  */
 class ServeUiBuilderThumbnails
 internal constructor(
@@ -135,9 +101,8 @@ internal constructor(
   @Volatile private var service: UiBuilderServicePort? = null
 
   /**
-   * The pictures guidelines prompts attach, kept beside these thumbnails at the same [generation]
-   * and drawn behind them; see [ServeUiBuilderGuidelineFrames]. Null where its directory could not
-   * be made, which leaves a prompt drawing its pictures on every request as before.
+   * Pictures guidelines prompts attach, kept beside thumbnails at the same [generation]
+   * ([ServeUiBuilderGuidelineFrames]). Null if its directory couldn't be made.
    */
   val guidelineFrames: ServeUiBuilderGuidelineFrames? = runCatching {
     ServeUiBuilderGuidelineFrames(
@@ -151,8 +116,8 @@ internal constructor(
     .getOrNull()
 
   /**
-   * The native render lane, set once the server has one; null draws every design through the
-   * export. See "Wear widgets are drawn in their host" above. The guideline frames draw on it too.
+   * The native render lane, once the server has one; null draws everything through the export. Also
+   * used by the guideline frames.
    */
   @Volatile
   internal var nativePreview: UiBuilderNativePreviewLane? = null
@@ -175,11 +140,9 @@ internal constructor(
   internal fun isIdle(): Boolean = jobs.isEmpty() && pending.isEmpty()
 
   /**
-   * [designId]'s thumbnail at [revision] when it is the native [WearWidgetHostShape.Squircle]
-   * render of a Wear widget — the same render the guidelines' Pixel Watch frame asks for, so that
-   * frame is taken from here rather than drawn again. Null for anything else: an unframed (export)
-   * widget picture, another revision or generation, or a design that is not a widget, whose
-   * thumbnail is the PNG export rather than a native render. The caller says it is a widget.
+   * [designId]'s thumbnail at [revision] when it is the native Squircle render of a Wear widget
+   * (the same render the guidelines' Pixel Watch frame needs); null otherwise. The caller asserts
+   * it is a widget.
    */
   internal fun nativeWidgetThumbnail(designId: String, revision: Long): ByteArray? =
     cached(designId)
@@ -187,9 +150,8 @@ internal constructor(
       ?.png
 
   /**
-   * The one worker. Every render goes through it, a card's own request included, because the
-   * renderer answers a second concurrent render with "busy": a card waiting for its first picture
-   * jumps the queue ([submit] with `urgent`) rather than racing the redraws behind it.
+   * The one worker: every render goes through it since the renderer rejects concurrent renders; a
+   * card's first picture jumps the queue ([submit] `urgent`).
    */
   private val worker =
     Thread(
@@ -224,17 +186,16 @@ internal constructor(
   }
 
   /**
-   * [delegate], with every accepted edit queueing a redraw of the design it changed, and every
-   * deletion or creation forgetting the picture held under that id; the result is also what this
-   * cache renders through.
+   * [delegate] with each accepted edit queueing a redraw and each deletion or creation evicting the
+   * id's picture; also what this cache renders through.
    */
   internal fun warming(delegate: UiBuilderServicePort): UiBuilderServicePort {
     val wrapped =
       object : UiBuilderServicePort by delegate {
         override suspend fun execute(call: UiBuilderServiceCall): UiBuilderServiceResponse {
           val request = call.request
-          // Before as well as after: a picture of the design an id used to name must not be what
-          // a design created under that id shows, however the create itself turns out.
+          // Before and after: a newly created design must never show the picture of a previous
+          // design with this id.
           if (request is UiBuilderServiceRequest.CreateDesign) evict(request.document.id)
           val response = delegate.execute(call)
           when {
@@ -257,9 +218,8 @@ internal constructor(
   }
 
   /**
-   * The branch lane, redrawing what it changes: a merge commits to the parent outside
-   * [UiBuilderServicePort], so without this the parent's card would show it as it was before the
-   * merge, and a new branch would have no card until its first edit.
+   * The branch lane, redrawing what it changes: merges commit outside [UiBuilderServicePort], and
+   * new branches need a card.
    */
   internal fun warmingBranches(delegate: UiBuilderBranchPort): UiBuilderBranchPort =
     object : UiBuilderBranchPort {
@@ -281,12 +241,8 @@ internal constructor(
     }
 
   /**
-   * Forget [designId]'s picture, in memory and on disk.
-   *
-   * Pictures are keyed by id, and an id outlives its design: deleted, it can be created or put back
-   * as a different design by a different owner, who must never be served the old pixels. So every
-   * lane that deletes or replaces a design calls this — the service wrapper for the HTTP and MCP
-   * lanes, and the admin lane, which deletes beneath the service port.
+   * Forget [designId]'s picture in memory and on disk. Ids outlive designs and may be reused by
+   * another owner, so every lane that deletes or replaces a design calls this.
    */
   internal fun evict(designId: String) {
     guidelineFrames?.evict(designId)
@@ -306,8 +262,7 @@ internal constructor(
   }
 
   /**
-   * The cached picture of [designId] as it was at [revision], for the history view. A retained
-   * revision never changes, so once drawn it is kept until the design is deleted.
+   * The cached picture of [designId] at [revision], for history; retained revisions never change.
    */
   internal fun cachedRevision(designId: String, revision: Long): Entry? {
     val key = revisionKey(designId, revision)
@@ -321,8 +276,8 @@ internal constructor(
       ?: runCatching { readEntry(designId) }.getOrNull()?.also { memory[designId] = it }
 
   /**
-   * Whether the cache holds [designId] drawn at [revision] by this generation — and, for a caller
-   * that may compile ([native]), drawn in its host frame unless native draws of it keep failing.
+   * Whether the cache holds [designId] at [revision] for this generation and, for a [native]
+   * caller, in its host frame (unless native draws keep failing).
    */
   internal fun isCurrent(designId: String, revision: Long, native: Boolean = false): Boolean =
     cached(designId)?.let {
@@ -332,9 +287,8 @@ internal constructor(
     } == true
 
   /**
-   * Whether [entry] of [designId] at [revision] is an unframed widget that a caller who may compile
-   * ([native]) should have redrawn natively: there is a lane, and its draws of this revision have
-   * not yet failed [NATIVE_ATTEMPTS] times.
+   * Whether an unframed widget [entry] should be redrawn natively for a [native] caller: a lane
+   * exists and fewer than [NATIVE_ATTEMPTS] draws of this revision have failed.
    */
   internal fun awaitsNativeRedraw(
     entry: Entry,
@@ -348,10 +302,8 @@ internal constructor(
       (nativeFailures["$designId@$revision"] ?: 0) < NATIVE_ATTEMPTS
 
   /**
-   * Queue a redraw of [designId] at its latest revision, as [actor]; a no-op when one is queued.
-   *
-   * [knownRevision] lets a caller that already knows the revision (the listing) skip a design the
-   * cache already has current.
+   * Queue a redraw of [designId] at its latest revision as [actor]; no-op when already queued.
+   * [knownRevision] skips designs already current.
    */
   internal fun warm(
     designId: String,
@@ -364,8 +316,8 @@ internal constructor(
   }
 
   /**
-   * The render of [designId] that is queued or running, or a new one: at the front of the queue
-   * when [urgent], at the back otherwise. A full queue answers null at once.
+   * The queued or running render of [designId], or a new one (front of the queue when [urgent]). A
+   * full queue answers null.
    */
   internal fun submit(
     designId: String,
@@ -390,8 +342,8 @@ internal constructor(
   }
 
   /**
-   * Render [designId] now — at its latest revision, or at [revision] for the history view — and
-   * keep it; null when the export refused.
+   * Render [designId] now (latest, or [revision] for history) and keep it; null when the export
+   * refused.
    */
   internal suspend fun render(
     designId: String,
@@ -440,10 +392,8 @@ internal constructor(
   }
 
   /**
-   * [designId]'s document when it is a Wear widget this host could draw natively, else null.
-   *
-   * Asks the same EXPORT question the export would, and reads the document through the service as
-   * [actor], so this is never a way to picture a design the actor could not export.
+   * [designId]'s document when it is a natively drawable Wear widget, else null. Checks EXPORT and
+   * reads as [actor], so it never pictures a design the actor couldn't export.
    */
   private suspend fun widgetDocument(
     port: UiBuilderServicePort,
@@ -465,9 +415,8 @@ internal constructor(
   }
 
   /**
-   * [document] drawn by the [nativePreview] lane inside its widget host, or null when the lane
-   * could not draw it. Only called for a caller that holds the export capability; see the class
-   * comment.
+   * [document] drawn natively inside its widget host, or null. Only for callers holding the export
+   * capability.
    */
   private fun nativeWidget(designId: String, document: DesignDocumentV1): Entry? {
     val lane = nativePreview ?: return null
@@ -584,15 +533,9 @@ internal constructor(
       if (revision == null) designId else "$designId$REVISION_SEPARATOR$revision"
 
     /**
-     * The generation a picture is drawn at: [serveVersion] and [renderer], the identity of the
-     * pipeline that draws a PNG export (`PackagedUiBuilderRenderBundle.digest()`).
-     *
-     * The server version alone was the generation, and it does not move when only the UI-builder
-     * pin does. Pictures drawn before compose-ui-builder 3.85.0 — whose render projection dropped
-     * every placement's `component`, drawing each as "Unsupported component:
-     * design/component-instance → (none)" — therefore stayed current on every card of a design not
-     * edited since, through the deploys that fixed the renderer. A renderer whose identity cannot
-     * be read draws nothing either, so the server version alone is kept for it.
+     * A picture's generation: [serveVersion] plus the PNG pipeline's identity ([renderer],
+     * `PackagedUiBuilderRenderBundle.digest()`), so a renderer-only upgrade still invalidates old
+     * pictures. Falls back to the server version if the identity can't be read.
      */
     internal fun generationOf(serveVersion: String, renderer: () -> String): String =
       runCatching(renderer).map { "$serveVersion+$it" }.getOrDefault(serveVersion)
@@ -607,11 +550,8 @@ internal constructor(
 }
 
 /**
- * `GET /api/ui-builder/v1/designs/{designId}/thumbnail.png[?revision=N]`: the listing card's image.
- *
- * `revision` is the revision the listing saw. A picture cached at it (by this generation) is
- * answered as cacheable; anything older is answered at once with `no-store` and redrawn behind the
- * response; nothing cached at all is rendered now.
+ * `GET …/designs/{designId}/thumbnail.png[?revision=N]`: the listing card image. Cached at the
+ * listed revision ⇒ cacheable; older ⇒ served `no-store` and redrawn behind; none ⇒ rendered now.
  */
 internal suspend fun ApplicationCall.serveUiBuilderThumbnail(
   thumbnails: ServeUiBuilderThumbnails,
@@ -667,9 +607,8 @@ internal suspend fun ApplicationCall.serveUiBuilderThumbnail(
 }
 
 /**
- * `GET /api/ui-builder/v1/designs/{designId}/revisions/{revision}/thumbnail.png`: one retained
- * revision's picture, for the history view. A revision never changes, so a drawn one is served as
- * cacheable; the first request draws it through the same single worker the listing uses.
+ * `GET …/designs/{designId}/revisions/{revision}/thumbnail.png`: one retained revision's picture
+ * for history, cacheable once drawn, first drawn through the same worker.
  */
 internal suspend fun ApplicationCall.serveUiBuilderRevisionThumbnail(
   thumbnails: ServeUiBuilderThumbnails,

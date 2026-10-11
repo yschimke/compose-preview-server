@@ -1,16 +1,8 @@
-// The browser adapter, end to end over a synthetic catalog.
-//
-// What this checks is the **plumbing**, not the contract: the contract's semantics are pinned by
-// `scripts/design-artifacts/fixtures/known-differences/`, which this adapter runs the very same
-// implementation against. What no fixture there can reach is everything between a page and that
-// implementation — a document fetched over HTTP, artifacts prefetched so a synchronous
-// `readArtifact` can answer, a plane resolved from the two panels' own rasters rather than handed
-// over, and a reader's status codes turned back into the three tokens §4 gives a reader.
-//
-// The last of those is the one worth a test of its own. `path-not-contained` and
-// `artifact-too-large` are verdicts the *server* establishes and the engine only relays, so an
-// adapter that collapsed them into "could not read" would leave two of the three unreachable from
-// the browser — and the traversal is the one worth seeing.
+// The browser adapter end to end over a synthetic catalog. The contract's semantics are pinned by
+// `scripts/design-artifacts/fixtures/known-differences/` (same implementation); this checks the
+// plumbing: fetching over HTTP, prefetching for the synchronous `readArtifact`, resolving the plane
+// from the panels' rasters, and mapping status codes back to the reader tokens, in particular the
+// server-established `path-not-contained` and `artifact-too-large`.
 
 import assert from "node:assert/strict";
 import {
@@ -36,12 +28,9 @@ interface RecordedRequest {
 }
 
 /**
- * A `fetch` that records every request and, optionally, honours `Range` the way a real static server
- * would — `206` with a `Content-Range` naming the whole size.
- *
- * The default `serve` above deliberately ignores `Range` and answers `200` with the entire body,
- * which is the *other* case worth covering: a host that cannot range-request must still be bounded,
- * because the adapter cuts the stream itself rather than trusting the status.
+ * A `fetch` that records every request and optionally honours `Range` (`206` with a `Content-Range`
+ * naming the whole size). The default `serve` ignores `Range` and returns the whole body, covering
+ * a host that can't range-request.
  */
 function recordingFetch(
     routes: Record<string, Uint8Array | string | number>,
@@ -53,12 +42,8 @@ function recordingFetch(
         honourRange: boolean;
         declareSize?: boolean;
         /**
-         * Sizes to *claim* for named paths, without transferring them.
-         *
-         * A hostile catalog does not have to send 64 MiB to make a reader plan for it — it declares
-         * the length and lets the reader decide. Modelling that with a header rather than with real
-         * bytes is both faithful and the only way to test an aggregate ceiling without allocating
-         * one.
+         * Sizes to claim for paths without sending the bytes, modelling a hostile catalog that
+         * declares lengths, and making an aggregate ceiling testable without allocating it.
          */
         declaredSizes?: Record<string, number>;
     },
@@ -130,11 +115,9 @@ function withRecordingFetch<T>(
 }
 
 /**
- * A PNG whose `PLTE` declares far more data than the header prefix can hold.
- *
- * The chunk is well-formed except for its length, which is the point: a reader that walks it reaches
- * `IDAT` and decodes, while one bounded to a prefix runs out first. It is the artifact the whole
- * prefix mechanism is measured against, so it is built by hand rather than by the encoder.
+ * A PNG whose `PLTE` declares more data than the header prefix can hold: a full reader reaches
+ * `IDAT`, a prefix-bounded one runs out first. Hand-built since the prefix mechanism is measured
+ * against it.
  */
 function pngWithOversizedPlte(): Uint8Array {
     const base = png(raster(4, 4, WHITE));
@@ -153,13 +136,8 @@ function pngWithOversizedPlte(): Uint8Array {
     return out;
 }
 /**
- * The fixture document repeated across [ids], so an aggregate ceiling has something to aggregate.
- *
- * Every record names the same shape of artifact; only the ids differ. The ceiling is only reachable
- * with several records because each *individual* artifact must stay under `maxArtifactBytes` — one
- * refused for busting the per-file cap is refused before its size is counted, and contributes
- * nothing to the total. Which is the whole reason the aggregate ceiling exists: the exhaustion is
- * built from files that are each perfectly legal.
+ * The fixture document repeated across [ids], so an aggregate ceiling is reachable from
+ * individually legal artifacts (a per-file-oversized one would be refused before being counted).
  */
 function repeatedRecords(
     scene: ReturnType<typeof world>,
@@ -174,12 +152,9 @@ function repeatedRecords(
 }
 
 /**
- * The fixture document plus a record the engine refuses **before reading anything**.
- *
- * `bad id` is a perfectly ordinary string — so it survives the identity scan, and the document is
- * evaluated — but it is not a portable path segment, so `isSafeId` refuses the record and its two
- * artifacts are never read. The adapter still fetches their headers, because it plans leniently and
- * lets the engine own the verdict; what it must not do is count them toward the ceiling.
+ * The fixture plus a record the engine refuses before reading: `bad id` survives the identity scan
+ * but fails `isSafeId`. Its headers are still fetched (lenient planning), but must not count toward
+ * the ceiling.
  */
 function withUnreadableRecord(scene: ReturnType<typeof world>): string {
     const parsed = JSON.parse(knownDifferencesJson(scene)) as {
@@ -200,9 +175,7 @@ describe("evaluateComparison", () => {
     });
 
     it("tells a document it could not fetch apart from one that is not there", async () => {
-        // Folding a 401 or a 500 into "absent" hides the band on exactly the pages where an
-        // acceptance exists and went unevaluated — which reads to a viewer as a clean bill of
-        // health for a comparison nobody measured.
+        // A 401 or 500 must not read as "absent", which looks like a clean bill of health.
         const scene = world();
         for (const status of [401, 500, 503] as const) {
             const routes = catalogRoutes(scene, knownDifferencesJson(scene));
@@ -281,16 +254,14 @@ describe("evaluateComparison", () => {
         const report = await withFetch(routes, () =>
             evaluateComparison(SOURCES, scope(scene), {}),
         );
-        // No comparison means no gate has fired, so the acceptance is out of scope rather than
-        // invalidated — a comparison that could not be measured is not evidence against a record.
+        // No comparison means no gate fired: out of scope, not invalidated.
         assert.deepEqual(report.statuses, {
             glyph: { status: "out-of-scope" },
         });
         assert.equal(report.scores, null);
         assert.deepEqual(report.suppressing, []);
-        // And it says WHY there are no scores. Without this the band cannot tell a comparison it
-        // could not fetch from one the catalog has nothing to say about: both are a set of
-        // `out-of-scope` rows and a null score, and only one of them is a clean bill of health.
+        // ...and it says why there are no scores, distinguishing an unfetchable comparison from one
+        // the catalog says nothing about.
         assert.equal(report.pair, "unavailable");
     });
 
@@ -319,9 +290,8 @@ describe("evaluateComparison", () => {
     });
 
     it("scores a catalog that publishes no digest rather than pre-empting the engine", async () => {
-        // `reference-hash-missing` is the engine's verdict to reach. A generation check that fired
-        // on a null digest would turn every such catalog into an unevaluated page, replacing a
-        // record-level refusal with a comparison-level one.
+        // `reference-hash-missing` is the engine's verdict; a generation check firing on a null
+        // digest would replace it with a comparison-level failure.
         const scene = world();
         const report = await withFetch(
             catalogRoutes(scene, knownDifferencesJson(scene)),
@@ -344,10 +314,8 @@ describe("evaluateComparison", () => {
     });
 
     it("marks a wholesale document rejection as such, not as an empty verdict", async () => {
-        // `duplicate-id` is attributed to the first spelling seen, so it carries an `id` exactly
-        // like a per-record refusal — while `statuses` is absent, because no record was judged. A
-        // reader that told the two apart by that `id` would show scores over an empty list and
-        // explain nothing.
+        // `duplicate-id` carries an `id` like a per-record refusal, but `statuses` is absent
+        // because no record was judged.
         const scene = world();
         const doc = JSON.parse(knownDifferencesJson(scene)) as {
             acceptances: unknown[];
@@ -366,9 +334,7 @@ describe("evaluateComparison", () => {
     });
 
     it("projects the tag index into the canonical plane before gating on it", async () => {
-        // The index publishes render pixels; `element.bounds` is canonical. Handing the raw index to
-        // the engine compares two coordinate systems, and §4 names the result: an element that never
-        // moved is reported as moved. Here the plane's origin is non-zero, so the two differ — and
+        // The index is in render pixels, `element.bounds` canonical; with a non-zero plane origin
         // the acceptance only stays `valid` if the projection happened.
         const scene = world();
         const plane = scene.plane;
@@ -403,9 +369,8 @@ describe("evaluateComparison", () => {
         const report = await withFetch(catalogRoutes(scene, doc), () =>
             evaluateComparison(SOURCES, scope(scene), {}),
         );
-        // Served preview and reference ids are unique only *within* a system, so scope matching uses
-        // every recorded field. Dropping `system` would let this mask suppress pixels in a catalog
-        // nobody accepted anything for.
+        // Preview and reference ids are unique only within a system, so scope matching uses every
+        // field, including `system`.
         assert.deepEqual(report.statuses, {
             glyph: { status: "out-of-scope" },
         });
@@ -430,13 +395,8 @@ describe("evaluateComparison", () => {
     });
 
     it("reads a bounded prefix of every artifact before reading any of them whole", async () => {
-        // The reference reader bounds its memory by reading a header, then reading the whole file
-        // again only inside the decode of a record the preflight already cleared. A browser reader is
-        // synchronous and must have every answer in hand first, so the naive adapter fetched all of
-        // them in full up front — reintroducing the four gigabytes of simultaneously-held bytes the
-        // reference design exists to avoid, *before* a single preflight could refuse anything.
-        //
-        // This pins the two rounds: every declared path is asked for with a bounded `Range` first.
+        // Two rounds: every declared path is first requested with a bounded `Range`, rather than
+        // fetching every artifact in full before any preflight can refuse.
         const scene = world();
         const routes = catalogRoutes(scene, knownDifferencesJson(scene));
         const report = await withRecordingFetch(
@@ -483,16 +443,9 @@ describe("evaluateComparison", () => {
     });
 
     it("never fetches a body for a document past the aggregate ceiling", async () => {
-        // The gap `readsNoArtifacts` cannot close. That one refuses a document from its *text*; this
-        // one is refused from the reader's *sizes* — `document-too-large` against
-        // `maxTotalArtifactBytes`, a verdict the engine reaches without decoding anything. Round one
-        // has already answered every size, so the total is knowable before round two, and without
-        // this gate the adapter retains full bodies right up until the engine says the document was
-        // never readable. The ceiling bounds the legal case; this is the illegal one, and the
-        // illegal one is what an attacker picks.
-        //
-        // The sizes are *declared*, not sent: a hostile catalog does not upload 64 MiB to make a
-        // reader plan for it.
+        // The size-based gate: `document-too-large` against `maxTotalArtifactBytes` is reachable
+        // from round one's sizes, so full bodies aren't retained for a document the engine will
+        // refuse. Sizes are declared, not sent.
         const scene = world();
         // Five records x two artifacts x 7 MiB = 70 MiB, past the 64 MiB ceiling — and every file
         // individually under the 8 MiB per-artifact cap, so none is refused before it is counted.
@@ -546,15 +499,10 @@ describe("evaluateComparison", () => {
     });
 
     it("still fetches when the records the engine reads are under the ceiling", async () => {
-        // The test that separates this gate from the naive one. Summing every path the *document
-        // names* is an upper bound on the engine's total: `id-not-safe`, a schema failure,
-        // `orphaned-target` and `path-not-contained` all refuse a record before its first read, so
-        // their artifacts never count toward `maxTotalArtifactBytes`.
-        //
-        // Here one legal record is small and one `id-not-safe` record declares 80 MiB. The naive sum
-        // is over the ceiling; the engine's is not. Gating on the naive sum would skip round two, and
-        // the legal record — which the engine does ask to decode — would come back
-        // `artifact-unreadable`: a verdict changed by a planner, on a document the engine evaluated.
+        // The naive sum over every named path over-estimates: `id-not-safe`, schema failures,
+        // `orphaned-target` and `path-not-contained` refuse before reading. Here an `id-not-safe`
+        // record declares 80 MiB; gating on the naive sum would make the legal record
+        // `artifact-unreadable`.
         const scene = world();
         const doc = withUnreadableRecord(scene);
         const routes = catalogRoutes(scene, doc);
@@ -597,18 +545,10 @@ describe("evaluateComparison", () => {
     });
 
     it("charges a record twice when it names one file for both artifacts", async () => {
-        // A record may legitimately use the same path for `mask` and `acceptedCandidate` — the
-        // engine says so explicitly, and reads it twice and charges it twice. The fetch map holds it
-        // once, so a sum over map entries under-charges every such record and the ceiling arrives
-        // late: the browser retains full bodies for a document that is about to be rejected.
-        //
-        // Five records x one aliased file x 7 MiB charged twice = 70 MiB, past the 64 MiB ceiling —
-        // where counting unique paths sees 35 MiB and fetches everything.
-        //
-        // 7 MiB, not 9: an artifact past the 8 MiB per-artifact cap is refused per-record and never
-        // full-read anyway, so a larger figure makes this test pass for a reason that has nothing to
-        // do with the aliasing. The property is only observable in the band where each file is legal
-        // and the aggregate is not.
+        // A record may use one path for both `mask` and `acceptedCandidate`; the engine charges it
+        // twice, so counting unique paths under-charges. Five records × 7 MiB × 2 = 70 MiB, past
+        // the 64 MiB ceiling. 7 MiB because over the 8 MiB per-artifact cap the record is refused
+        // anyway.
         const scene = world();
         const ids = ["glyph", "glyph2", "glyph3", "glyph4", "glyph5"];
         const parsed = JSON.parse(knownDifferencesJson(scene)) as {
@@ -655,14 +595,8 @@ describe("evaluateComparison", () => {
     });
 
     it("charges nothing for a record refused by the per-artifact cap", async () => {
-        // `preflightRecord` reads a record's two prefixes and then returns *before* assigning
-        // `artifactBytes` when either is past `maxArtifactBytes` — so the engine charges such a
-        // record zero toward the aggregate ceiling, while its declared size is the largest number in
-        // the document. A planner that counted it would over-estimate by gigabytes, skip round two,
-        // and turn a perfectly legal sibling into `artifact-unreadable`.
-        //
-        // Here one record declares 200 MiB per artifact (refused per-record, charged zero) beside one
-        // ordinary record the engine does read.
+        // A record with an artifact over `maxArtifactBytes` is charged zero by the engine; counting
+        // its declared 200 MiB would wrongly skip round two for the legal sibling.
         const scene = world();
         const routes = catalogRoutes(
             scene,
@@ -704,15 +638,9 @@ describe("evaluateComparison", () => {
     });
 
     it("does not count records the catalog orphans toward the ceiling", async () => {
-        // The catalog-aware call site, and the reason `prefetch` needs the catalog the evaluation
-        // gets. `orphaned-target` is a *pre-read* refusal: the engine charges an orphaned record
-        // nothing toward the aggregate ceiling. A planner without the catalog cannot see that, counts
-        // every orphan, and over-estimates — which is the direction that skips round two for a
-        // document the engine evaluates and turns its readable records into `artifact-unreadable`.
-        //
-        // Four orphans at 7 MiB x 2 = 56 MiB the engine never charges, beside one resolvable record
-        // at 14 MiB it does. Catalog-blind the sum is 70 MiB and the gate fires; catalog-aware it is
-        // 14 MiB and the readable record is fetched.
+        // `orphaned-target` is a pre-read refusal, so `prefetch` needs the evaluation's catalog:
+        // four orphans at 56 MiB beside a 14 MiB readable record; catalog-blind the sum (70 MiB)
+        // trips the gate.
         const scene = world();
         const ids = ["glyph", "orphan1", "orphan2", "orphan3", "orphan4"];
         const routes = catalogRoutes(scene, repeatedRecords(scene, ids));
@@ -731,10 +659,7 @@ describe("evaluateComparison", () => {
                 ]),
             ),
         );
-        // Every record names the same preview, so the catalog resolves them all or none — which is
-        // no use here. The orphans are made orphans by giving the catalog a preview that matches
-        // only the first record's `referenceId`... except they share that too. So instead the
-        // catalog resolves the shared preview, and the orphans are re-pointed at one it lacks.
+        // Every record names the same preview, so re-point the orphans at one the catalog lacks.
         const parsed = JSON.parse(repeatedRecords(scene, ids)) as {
             acceptances: Record<string, unknown>[];
         };
@@ -780,11 +705,8 @@ describe("evaluateComparison", () => {
     });
 
     it("never reads an artifact whole when its prefix already refuses it", async () => {
-        // The property the whole mechanism is for. A `PLTE` declaring eight kilobytes runs off the end
-        // of a four-kilobyte prefix, so the header pass refuses it — and the body, which a hostile
-        // catalog would make as large as the byte cap allows, is never fetched at all. Without the
-        // two rounds this artifact is downloaded in full and *then* refused, which is the resource
-        // exhaustion reached through the guard meant to prevent it.
+        // A `PLTE` declaring 8 KB runs past the 4 KB prefix, so the header pass refuses it and the
+        // body is never fetched.
         const scene = world();
         const oversized = pngWithOversizedPlte();
         const routes = catalogRoutes(
@@ -824,15 +746,9 @@ describe("evaluateComparison", () => {
     });
 
     it("reads an empty artifact as a short header, not as an unopenable file", async () => {
-        // A zero-byte artifact makes `bytes=0-4095` unsatisfiable, and a range-honouring server answers
-        // `416` with `Content-Range: bytes */0`. Treating that as a failed fetch reports
-        // `artifact-unreadable`, while the filesystem reader opens the empty file happily and the
-        // engine refuses its too-short header as `header-invalid` — two engines, one committed file,
-        // different verdicts.
-        //
-        // `416` is only reachable here because the range starts at zero, which no non-empty resource
-        // can fail to satisfy. So it is not an error to relay: it is the server saying the artifact is
-        // empty, which is a fact the preflight is entitled to judge for itself.
+        // A zero-byte artifact makes `bytes=0-4095` unsatisfiable (`416`, `Content-Range: bytes
+        // */0`); that means the file is empty, so the preflight should reach `header-invalid` like
+        // the filesystem reader, not `artifact-unreadable`.
         const scene = world();
         const routes = catalogRoutes(scene, knownDifferencesJson(scene));
         const base = recordingFetch(routes, { honourRange: true });
@@ -867,12 +783,9 @@ describe("evaluateComparison", () => {
     });
 
     it("keeps the full read's own refusal token when an artifact changes between the rounds", async () => {
-        // The header round can succeed and the body round still be refused — the tree moves, or a file
-        // is swapped for an oversized one. `path-not-contained` and `artifact-too-large` are verdicts
-        // only the server establishes, and dropping them here degrades the record to
-        // `artifact-unreadable`, where the reference reader (which stats the file on its own second
-        // read) reports the specific token. Same divergence class as the prefix itself: one contract,
-        // two engines, different answers.
+        // The body round can be refused after a clean header round (tree moved, file swapped);
+        // `path-not-contained` / `artifact-too-large` must survive rather than degrade to
+        // `artifact-unreadable`.
         const scene = world();
         for (const [status, token] of [
             [413, "artifact-too-large"],
@@ -912,11 +825,8 @@ describe("evaluateComparison", () => {
     });
 
     it("keeps its requests inside a fixed concurrency, however many records there are", async () => {
-        // `Promise.all` over a 256-record catalog opens 512 requests at once, and the repository's own
-        // route holds a whole artifact in memory for each — four gigabytes on the *server* to return
-        // four kilobytes apiece. A pool bounds that peak on both sides. It is a rate and not a budget:
-        // every request that would have been made is still made, and every answer is unchanged, which
-        // is why no verdict here moves.
+        // A request pool bounds peak concurrency (and server memory); every request is still made
+        // and every answer unchanged.
         const scene = world();
         const routes = catalogRoutes(scene, knownDifferencesJson(scene));
         let inFlight = 0;
@@ -943,14 +853,8 @@ describe("evaluateComparison", () => {
     });
 
     it("keeps an artifact's true size when the response never declares one", async () => {
-        // A chunked `200` carries no `Content-Length`, and a server that ignores `Range` sends one for
-        // every artifact. The prefix is then all this adapter has seen, and recording *its* length as
-        // the artifact's makes the header pass disagree with the decode pass about the same
-        // unchanged file — which the engine reads as an artifact that changed underneath the
-        // evaluation and refuses as `artifact-unreadable`.
-        //
-        // Invisible to every other test here because their artifacts are smaller than the prefix, so
-        // the truncated length and the real one coincide. This one is deliberately past 4096 bytes.
+        // A chunked `200` has no `Content-Length`, so the prefix length isn't the artifact's;
+        // recording it would make the two passes disagree. Deliberately past 4096 bytes.
         const scene = world();
         // Deterministic noise, because a flat raster deflates to well under the prefix and the whole
         // point of this case is an artifact that outgrows it.
@@ -988,10 +892,8 @@ describe("evaluateComparison", () => {
     });
 
     it("reaches the same verdict from a server that ignores Range entirely", async () => {
-        // `Range` is a request, and a static host may answer `200` with the whole body regardless.
-        // That must cost bytes, never a different answer: the adapter cuts the stream itself, and the
-        // engine caps its own header view to the same constant whatever a reader hands over. So the
-        // oversized `PLTE` is `header-invalid` here too, rather than walking through to a decode.
+        // A host may answer `Range` with a full `200`; that costs bytes, never a different answer
+        // (the adapter cuts the stream, the engine caps its header view).
         const scene = world();
         const oversized = pngWithOversizedPlte();
         const routes = catalogRoutes(
