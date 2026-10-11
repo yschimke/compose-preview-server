@@ -1,5 +1,13 @@
 # Changelog
 
+## [3.125.0](https://github.com/yschimke/compose-preview-server/compare/v3.124.0...v3.125.0) (2026-10-11)
+
+
+### Bug Fixes
+
+* **deps:** compose-ui-builder 3.107.0, compose-ai-tools 2.50.0 and contracts 3.30.0 together ([#1580](https://github.com/yschimke/compose-preview-server/issues/1580)) ([7db152a](https://github.com/yschimke/compose-preview-server/commit/7db152aaff3fe1a1ec28f1fe00c145c1c22dfcc4))
+* **serve:** keep a document-only catalog's staged rc comparison out of the player picker ([#1581](https://github.com/yschimke/compose-preview-server/issues/1581)) ([f531cd7](https://github.com/yschimke/compose-preview-server/commit/f531cd7f3a35915aa4287d77ed546634a8775024))
+
 ## [3.124.0](https://github.com/yschimke/compose-preview-server/compare/v3.123.0...v3.124.0) (2026-10-11)
 
 
