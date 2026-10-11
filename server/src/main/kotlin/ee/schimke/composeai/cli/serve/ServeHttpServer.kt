@@ -10622,6 +10622,22 @@ class ServeHttpServer(
       // The publication-aware HEAD probe is network I/O; keep it off Ktor's request dispatcher.
       val executableBundleAvailable =
         withContext(Dispatchers.IO) { renderHost.canDownloadExecutableBundle(preview.id) }
+      // Per-preview Remote Compose backend lanes: the host's server/client lanes plus the opt-in
+      // CMP/Wasm browser lane when the preview has an RC document. Empty ⇒ no selector.
+      val ownRcPlayers = buildList {
+        // In this server's player vocabulary ([ServeRcPlayerIds]), not compose-ai-tools' wire
+        // spelling: the pinned release still spells the embedded player `cmp-android`.
+        addAll(renderHost.enabledRcPlayersFor(preview.id).map(ServeRcPlayerIds::of))
+        if (rcPlayerWasmDir != null && renderHost.hasRemoteComposeDoc(preview.id)) {
+          add(ServeRcPlayerIds.CMP_WASM)
+        }
+      }
+      // …plus the Android players another catalog's resident daemon draws this preview's document
+      // with, while one is resident ([donorBackedRcPlayers]).
+      val donorRcPlayers =
+        donorBackedRcPlayers(renderHost, preview.id).map(ServeRcPlayerIds::of).filterNot {
+          it in ownRcPlayers
+        }
       markGeneration(
         "static-page",
         viewerCacheControl(
@@ -10674,22 +10690,16 @@ class ServeHttpServer(
           // …but a replayed preview can still take a declared theme when the session publishes its
           // colours, so the viewer greys the recomposition-only controls without greying this one.
           replayThemes = applicableThemes(renderHost, preview.id).isNotEmpty(),
-          // Per-preview Remote Compose backend lanes: the host's server/client lanes plus the
-          // opt-in CMP/Wasm browser lane when the preview has an RC document. Empty ⇒ no selector.
-          enabledRcPlayers =
-            buildList {
-              // In this server's player vocabulary ([ServeRcPlayerIds]), not compose-ai-tools'
-              // wire spelling: the pinned release still spells the embedded player `cmp-android`.
-              addAll(renderHost.enabledRcPlayersFor(preview.id).map(ServeRcPlayerIds::of))
-              if (rcPlayerWasmDir != null && renderHost.hasRemoteComposeDoc(preview.id)) {
-                add(ServeRcPlayerIds.CMP_WASM)
-              }
-            },
+          enabledRcPlayers = ownRcPlayers + donorRcPlayers,
           // Which lane a bare `/render` already is, so the viewer can stop naming it; empty when
           // unknown.
           bakedRcPlayer =
             renderHost.bakedRcPlayer(preview.id)?.let(ServeRcPlayerIds::ofKind).orEmpty(),
-          preferredRcPlayer = preferredRcPlayer,
+          // A borrowed daemon's lane is offered but never opened on, so a page view doesn't
+          // commission a render on another catalog's daemon.
+          preferredRcPlayer =
+            if (donorRcPlayers.isEmpty()) preferredRcPlayer
+            else ServeRcPlayerIds.defaultPlayer(ownRcPlayers, preferredRcPlayer).ifEmpty { null },
           wasmSrc = wasmSrc,
           wasmSameOrigin = wasmSameOrigin,
           basePath = basePath,
@@ -11371,6 +11381,74 @@ class ServeHttpServer(
               return@withLeasedSession
             }
           }
+          // An Android player this host can't draw (a baked-only catalog) but another catalog's
+          // resident daemon can, by replaying this preview's document ([donorBackedRcPlayers]).
+          // Only when the published chain can't answer the player truthfully, and only for what a
+          // replay applies (the player, `uiMode`, `rc.<name>=`); anything else, or no donor, keeps
+          // the existing lane.
+          val donorPlayer =
+            renderParams()["rcPlayer"]
+              ?.let { RcPlayerBackend.fromWire(ServeRcPlayerIds.normalizeRequest(it)) }
+              ?.takeIf {
+                !scroll &&
+                  overrides.copy(uiMode = null, remoteCompose = null) == PreviewOverrides() &&
+                  (cached == null ||
+                    droppedOverridesFor(renderHost, cached.generation, previewId, overrides)
+                      .isNotEmpty()) &&
+                  // A replay can't apply string `rc.<name>=` seeds; leave those to the existing
+                  // lane's refusal rather than answering 200 with unchanged pixels.
+                  CatalogLiveRouting.irReplayDroppedOverrideNames(
+                      previewId,
+                      overrides,
+                      renderHost.bakedTheme(previewId),
+                      renderHost.bakedRcPlayer(previewId),
+                    )
+                    .isEmpty() &&
+                  it in donorBackedRcPlayers(renderHost, previewId)
+              }
+          if (donorPlayer != null) {
+            // A borrowed daemon render is commissioned work, whether or not a baked snapshot
+            // exists, so a bare player selection below `live` is refused here too.
+            bareRcPlayerBelowLive?.let {
+              respondBelowScope(it, AgentGrantScope.LIVE, api = true)
+              return@withLeasedSession
+            }
+            val docOutcome = remoteComposeDocOutcome(renderHost, previewId)
+            if (docOutcome.isTransient) {
+              respondDocumentUnavailable(docOutcome)
+              return@withLeasedSession
+            }
+            val doc = docOutcome.bytesOrNull
+            val spec = renderHost.remoteComposeRenderSpec(previewId)
+            if (doc != null && spec != null) {
+              // Sized and themed as the cmp-jvm lane draws the same document: the catalog's spec,
+              // and the preview's own mode unless the viewer asks for one.
+              val theme =
+                cmpJvmRenderTheme(
+                  renderParams()["uiMode"],
+                  renderHost.previews.firstOrNull { it.id == previewId }?.uiMode ?: 0,
+                  ServeWeb.SystemDisplay.resolveDarkFirst(
+                    sessionId,
+                    catalogBundleHost(renderHost)?.stageSurface,
+                  ),
+                )
+              respondDonorRcRender(
+                player = donorPlayer,
+                document = doc,
+                widthPx = spec.widthPx,
+                heightPx = spec.heightPx,
+                density = spec.density,
+                fontScale = spec.fontScale.takeIf { it != 1f },
+                uiMode =
+                  if (theme == RcJvmServerRenderer.RenderTheme.DARK) UiMode.DARK else UiMode.LIGHT,
+                namedValues = ServeOverrides.rcNamedValueSeeds(themeSeeding.params),
+                generation = RenderOutcome.Generation.DAEMON.wire,
+                cacheControl = DYNAMIC_RESOURCE_CACHE_CONTROL,
+                stage = { staged(it, overrideParams) },
+              )
+              return@withLeasedSession
+            }
+          }
           // A pure declared-theme render, the classification the burst lease admits on. Read from
           // the request, since the expanded provider is no longer in the parsed overrides.
           val pureThemeProvider =
@@ -12044,6 +12122,65 @@ class ServeHttpServer(
     density: Float,
     params: Parameters,
   ) {
+    respondDonorRcRender(
+      player = player,
+      document = doc.bytes,
+      widthPx = ((size?.width ?: DOC_RENDER_DEFAULT_PX) * density).toInt(),
+      heightPx = ((size?.height ?: DOC_RENDER_DEFAULT_PX) * density).toInt(),
+      density = density,
+      // The page asks for the viewer's theme on every server lane, and a document whose colours
+      // defer to the host configuration must follow it rather than the donor preview's mode.
+      uiMode =
+        when (params["uiMode"]?.lowercase()) {
+          "dark" -> UiMode.DARK
+          "light" -> UiMode.LIGHT
+          else -> null
+        },
+      namedValues =
+        ServeOverrides.rcNamedValueSeeds(
+          params.entries().associate { (key, values) -> key to (values.firstOrNull() ?: "") }
+        ),
+      // An expiring capability URL must never be stored by a shared cache — no-store, as the page.
+      generation = "document",
+      cacheControl = "private, no-store",
+    )
+  }
+
+  /**
+   * The Android players ([DOC_DAEMON_PLAYERS]) [previewId] is drawn with only by lending its
+   * captured document to another catalog's resident daemon ([docRcDonor]), as a `/d/<id>` document
+   * is: its own host renders no overrides for it (a baked-only bundle) but carries the document and
+   * its render spec. Empty whenever the host draws the preview itself. The one answer to both "may
+   * the viewer offer it" and "does `/render` route it to a donor".
+   */
+  private fun donorBackedRcPlayers(host: ServeHost, previewId: String): List<RcPlayerBackend> {
+    if (host.canRenderOverridesFor(previewId)) return emptyList()
+    if (!host.hasRemoteComposeDoc(previewId)) return emptyList()
+    if (host.remoteComposeRenderSpec(previewId) == null) return emptyList()
+    return DOC_DAEMON_PLAYERS.filter { docRcDonor(it) != null }
+  }
+
+  /**
+   * [document] drawn by [player] on a resident catalog's daemon ([docRcDonor]) via
+   * `overrides.remoteCompose.documentBase64` — the shared tail of shared documents
+   * ([respondDocDaemonRender]) and donor-backed catalog previews ([donorBackedRcPlayers]). Only a
+   * fresh render answers; baked or published images are the donor's pixels, so they are refused.
+   * [generation] and [cacheControl] mark the response once a donor is found.
+   */
+  private suspend fun RoutingContext.respondDonorRcRender(
+    player: RcPlayerBackend,
+    document: ByteArray,
+    widthPx: Int,
+    heightPx: Int,
+    density: Float,
+    uiMode: UiMode?,
+    namedValues: Map<String, RemoteNamedValue>,
+    generation: String,
+    cacheControl: String,
+    fontScale: Float? = null,
+    /** The `?bg=` stage for the drawn PNG; identity by default. */
+    stage: suspend (ByteArray) -> ByteArray = { it },
+  ) {
     val donor = docRcDonor(player)
     if (donor == null) {
       call.response.headers.append(HttpHeaders.RetryAfter, "30")
@@ -12053,42 +12190,27 @@ class ServeHttpServer(
       )
       return
     }
-    val widthPx = ((size?.width ?: DOC_RENDER_DEFAULT_PX) * density).toInt()
-    val heightPx = ((size?.height ?: DOC_RENDER_DEFAULT_PX) * density).toInt()
     val overrides =
       PreviewOverrides(
         widthPx = widthPx.coerceIn(1, DOC_RENDER_MAX_PX),
         heightPx = heightPx.coerceIn(1, DOC_RENDER_MAX_PX),
         density = density,
-        // The page asks for the viewer's theme on every server lane, and a document whose colours
-        // defer to the host configuration must follow it rather than the donor preview's mode.
-        uiMode =
-          when (params["uiMode"]?.lowercase()) {
-            "dark" -> UiMode.DARK
-            "light" -> UiMode.LIGHT
-            else -> null
-          },
+        fontScale = fontScale,
+        uiMode = uiMode,
         remoteCompose =
           RemoteComposeOverride.Builder()
             .also {
               it.player = player.playerKind
               it.playerId = player.daemonPlayerId
-              it.documentBase64 = java.util.Base64.getEncoder().encodeToString(doc.bytes)
-              it.namedValues =
-                ServeOverrides.rcNamedValueSeeds(
-                  params.entries().associate { (key, values) ->
-                    key to (values.firstOrNull() ?: "")
-                  }
-                )
+              it.documentBase64 = java.util.Base64.getEncoder().encodeToString(document)
+              it.namedValues = namedValues
             }
             .build(),
       )
-    // An expiring capability URL must never be stored by a shared cache — no-store, as the page.
-    markGeneration("document", "private, no-store")
-    call.response.headers.append(HttpHeaders.CacheControl, "private, no-store")
+    markGeneration(generation, cacheControl)
     withLeasedSession(donor.sessionId) { host ->
       // The lease resumes a session suspended since [docRcDonor] peeked at it, and a resumed host
-      // has no daemon yet: rendering now would boot one for a shared document. Ask again instead.
+      // has no daemon yet: rendering now would boot one for a borrowed document. Ask again instead.
       if (!host.daemonStarted) {
         call.response.headers.append(HttpHeaders.RetryAfter, "30")
         call.respondText(
@@ -12127,7 +12249,7 @@ class ServeHttpServer(
               status = HttpStatusCode.ServiceUnavailable,
             )
           } else {
-            call.respondBytes(outcome.png, ContentType.Image.PNG)
+            call.respondBytes(stage(outcome.png), ContentType.Image.PNG)
           }
         is RenderOutcome.Failed ->
           call.respondText(outcome.reason, status = HttpStatusCode.InternalServerError)
@@ -16547,8 +16669,9 @@ class ServeHttpServer(
     private const val RC_PLAYER_RESOURCE = "/rc-player/bundle.js"
 
     /**
-     * The Android players a shared `/d/<id>` document can be drawn with on a resident catalog's
-     * daemon ([docRcDonor]), default first, in viewer order.
+     * The Android players a shared `/d/<id>` document, or a baked-only catalog preview
+     * ([donorBackedRcPlayers]), can be drawn with on a resident catalog's daemon ([docRcDonor]),
+     * default first, in viewer order.
      */
     private val DOC_DAEMON_PLAYERS: List<RcPlayerBackend> =
       listOf(
