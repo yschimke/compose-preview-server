@@ -2526,11 +2526,11 @@ cp-history-menu { display: contents; }
    passes for part of the render. Keylines are the same hue, stronger. It sits under the stage's
    buttons and takes no pointer, so hovering, picking and the live stream's input pass through. */
 .cp-grid-overlay { position: absolute; z-index: 4; pointer-events: none;
-  --cp-grid-line: rgba(233, 30, 140, 0.18);
+  --grid-overlay-line: rgba(233, 30, 140, 0.18);
   background-image:
-    repeating-linear-gradient(to right, var(--cp-grid-line) 0 1px, transparent 1px var(--cp-grid-x, 16px)),
-    repeating-linear-gradient(to bottom, var(--cp-grid-line) 0 1px, transparent 1px var(--cp-grid-y, 16px)); }
-.cp-viewer[data-bg-theme="dark"] .cp-grid-overlay { --cp-grid-line: rgba(255, 92, 180, 0.24); }
+    repeating-linear-gradient(to right, var(--grid-overlay-line) 0 1px, transparent 1px var(--cp-grid-x, 16px)),
+    repeating-linear-gradient(to bottom, var(--grid-overlay-line) 0 1px, transparent 1px var(--cp-grid-y, 16px)); }
+.cp-viewer[data-bg-theme="dark"] .cp-grid-overlay { --grid-overlay-line: rgba(255, 92, 180, 0.24); }
 .cp-grid-overlay::before { content: ""; position: absolute; top: 0; bottom: 0;
   left: calc(2 * var(--cp-grid-x, 16px)); right: calc(2 * var(--cp-grid-x, 16px));
   border: solid rgba(233, 30, 140, 0.55); border-width: 0 1px; }
