@@ -874,6 +874,8 @@ class ServeAgentGrantStore(
     if (requesterActorId.isNullOrBlank()) return null
     val now = clock()
     dropRevokedElsewhere()
+    // As for a bearer: a file that changed or vanished unread may hold a revocation (fail closed).
+    if (disk != null && !disk.isCurrent()) return null
     return grants.values
       .filter { it.requesterActorId == requesterActorId && it.expiresAtMillis > now }
       .filter { capability == null || it.allows(capability) }

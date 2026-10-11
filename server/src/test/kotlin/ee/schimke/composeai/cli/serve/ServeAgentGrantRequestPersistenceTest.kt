@@ -846,6 +846,31 @@ class ServeAgentGrantRequestPersistenceTest {
   }
 
   @Test
+  fun `a session-carried grant is not vouched for while the file cannot be read`() {
+    val a = store()
+    val request =
+      assertNotNull(
+        a.openRequest(
+          "edit my design",
+          "10.0.0.1",
+          AgentGrantScope.PREVIEW,
+          600,
+          setOf(AgentGrantCapability.UI_BUILDER_WRITE),
+          requesterActorId = "github:ana",
+        )
+      )
+    assertNotNull(a.approveOk(request.id, "@yuri", AgentGrantScope.PREVIEW, 600, emptySet(), "u"))
+    assertNotNull(a.activeGrantForRequester("github:ana"))
+    val before = file.readText()
+    Files.delete(file)
+
+    assertNull(a.activeGrantForRequester("github:ana"), "a revocation A cannot read is not ignored")
+
+    file.writeText(before)
+    assertNotNull(a.activeGrantForRequester("github:ana"))
+  }
+
+  @Test
   fun `a revocation once seen outlives the row that carried it`() {
     val a = store()
     val request = a.ask()
