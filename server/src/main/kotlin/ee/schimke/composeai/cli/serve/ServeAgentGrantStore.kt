@@ -445,6 +445,7 @@ class ServeAgentGrantStore(
               resolvedBy = approvedBy,
               approval = wire,
               grantId = grant?.id,
+              grantFingerprint = grant?.fingerprint,
             )
           }
         when (outcome) {
@@ -524,11 +525,27 @@ class ServeAgentGrantStore(
    * Deny [id]. Idempotent; a no-op on an already-decided request. With a [requestsFile], a
    * compare-and-set from pending: an approval in another process that got there first wins.
    */
-  fun deny(id: String, deniedBy: String): Boolean {
+  fun deny(id: String, deniedBy: String): Boolean = denyRequest(id, deniedBy) == Denial.DENIED
+
+  /** What [denyRequest] did. */
+  enum class Denial {
+    DENIED,
+    /** Someone decided first — here or in another process. */
+    ALREADY_DECIDED,
+    /** No such live request. */
+    GONE,
+    /** The requests file could not be read or written; nothing was decided. Retry. */
+    UNAVAILABLE,
+  }
+
+  /**
+   * [deny], saying why when it did not: a lost race and a failed write call for different pages.
+   */
+  fun denyRequest(id: String, deniedBy: String): Denial {
     synchronized(this) {
       // Same reason as [decide]: the lookup belongs inside the lock that purging takes.
-      val request = request(id) ?: return false
-      if (request.state != Request.State.PENDING) return false
+      val request = request(id) ?: return Denial.GONE
+      if (request.state != Request.State.PENDING) return Denial.ALREADY_DECIDED
       val disk = disk
       if (disk != null) {
         interleave("deny")
@@ -540,16 +557,16 @@ class ServeAgentGrantStore(
           is ServeAgentGrantRequestFile.Outcome.Done -> adopt(outcome.record)
           is ServeAgentGrantRequestFile.Outcome.Conflict -> {
             adoptOrForget(request.id, outcome.current)
-            return false
+            return Denial.ALREADY_DECIDED
           }
-          ServeAgentGrantRequestFile.Outcome.Unavailable -> return false
+          ServeAgentGrantRequestFile.Outcome.Unavailable -> return Denial.UNAVAILABLE
         }
       } else {
         request.state = Request.State.DENIED
         request.resolvedBy = deniedBy
       }
       audit("agent-grant: denied request by $deniedBy label=\"${request.label}\"")
-      return true
+      return Denial.DENIED
     }
   }
 
@@ -708,7 +725,11 @@ class ServeAgentGrantStore(
     return when (
       val outcome =
         disk.transition(request.id, setOf(ServeAgentGrantRequestFile.APPROVED)) {
-          it!!.copy(state = ServeAgentGrantRequestFile.COLLECTED, grantId = grant.id)
+          it!!.copy(
+            state = ServeAgentGrantRequestFile.COLLECTED,
+            grantId = grant.id,
+            grantFingerprint = grant.fingerprint,
+          )
         }
     ) {
       is ServeAgentGrantRequestFile.Outcome.Done -> {
@@ -1020,6 +1041,50 @@ class ServeAgentGrantStore(
         it.grantId == grantId && it.state == ServeAgentGrantRequestFile.COLLECTED
       } ?: return null
     return row.toRequest()?.approval
+  }
+
+  /**
+   * The key approval and revoke forms are sealed with when this store shares a [requestsFile]: the
+   * same in every process on that file ([ServeAgentGrantRequestFile.sharedKey]), so a form one
+   * process drew is accepted by the other during a rollout. Null without a file, or when the key
+   * cannot be read or made; the server then keeps its own random key, as before.
+   */
+  fun sharedFormKey(): ByteArray? = formKey
+
+  private val formKey: ByteArray? by lazy { disk?.sharedKey() }
+
+  /** A grant another process sharing the requests file collected and holds. Not a credential. */
+  data class HeldElsewhere(
+    val grantId: String,
+    val fingerprint: String,
+    val label: String,
+    /** As minted: clamped to this server's ceilings, the lifetime counted from approval. */
+    val approval: Approval,
+  )
+
+  /**
+   * Live grants held by other processes on the requests file — `collected`, unexpired, not revoked
+   * and not in this process's map — so `/status` here can list and revoke them. Empty without a
+   * file.
+   */
+  fun grantsHeldElsewhere(): List<HeldElsewhere> {
+    val disk = disk ?: return emptyList()
+    val now = clock()
+    return disk.all().values.mapNotNull { row ->
+      val grantId = row.grantId ?: return@mapNotNull null
+      if (row.state != ServeAgentGrantRequestFile.COLLECTED || grants.containsKey(grantId)) {
+        return@mapNotNull null
+      }
+      val decided = row.toRequest()?.approval ?: return@mapNotNull null
+      val approval =
+        decided.copy(
+          scope = minOf(decided.scope, maxScope),
+          capabilities = decided.capabilities intersect maxCapabilities,
+          expiresAtMillis = effectiveExpiry(decided),
+        )
+      if (approval.expiresAtMillis <= now) return@mapNotNull null
+      HeldElsewhere(grantId, row.grantFingerprint ?: "", sanitizeLabel(row.label), approval)
+    }
   }
 
   /** Revoke by presenting the token itself — how an agent hands its own access back. */

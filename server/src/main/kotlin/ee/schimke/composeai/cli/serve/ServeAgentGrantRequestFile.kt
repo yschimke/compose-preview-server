@@ -7,6 +7,8 @@ import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.StandardCopyOption
 import java.nio.file.StandardOpenOption
+import java.nio.file.attribute.PosixFilePermissions
+import java.security.SecureRandom
 import java.time.Instant
 import java.util.concurrent.ConcurrentHashMap
 import kotlinx.serialization.Serializable
@@ -61,6 +63,11 @@ internal class ServeAgentGrantRequestFile(file: Path, private val clock: () -> L
     val approval: Approval? = null,
     /** The grant the winning collector minted, from [COLLECTED] on. Not a credential. */
     val grantId: String? = null,
+    /**
+     * That grant's fingerprint — a truncated SHA-256 of the bearer, already what `/status` and the
+     * audit log show — so another process can list it. Not a credential.
+     */
+    val grantFingerprint: String? = null,
     /** Why the server refused an approval at collection, for a [DENIED] row it refused. */
     val refusal: String? = null,
     /** A refusal's own lifetime, when it outlives the request's deadline. */
@@ -181,6 +188,57 @@ internal class ServeAgentGrantRequestFile(file: Path, private val clock: () -> L
       Outcome.Unavailable
     }
 
+  /**
+   * The key every process sharing this file seals its approval and revoke forms with, so a form
+   * drawn by one is accepted by the other: 32 random bytes in [FORM_KEY_NAME] beside the file,
+   * owner-only, made once under the file lock and read by everyone after. Null, reported, when it
+   * cannot be read or made — the caller then keeps a per-process key.
+   */
+  fun sharedKey(): ByteArray? =
+    try {
+      locked {
+        val keyFile = file.resolveSibling(FORM_KEY_NAME)
+        Files.exists(keyFile)
+          .takeIf { it }
+          ?.let { Files.readAllBytes(keyFile) }
+          ?.takeIf { it.size == FORM_KEY_BYTES }
+          ?: ByteArray(FORM_KEY_BYTES).also { key ->
+            SecureRandom().nextBytes(key)
+            val temporary = ownerOnlyTempFile(file.parent)
+            try {
+              Files.write(temporary, key)
+              try {
+                Files.move(
+                  temporary,
+                  keyFile,
+                  StandardCopyOption.ATOMIC_MOVE,
+                  StandardCopyOption.REPLACE_EXISTING,
+                )
+              } catch (_: AtomicMoveNotSupportedException) {
+                Files.move(temporary, keyFile, StandardCopyOption.REPLACE_EXISTING)
+              }
+            } finally {
+              Files.deleteIfExists(temporary)
+            }
+          }
+      }
+    } catch (e: IOException) {
+      System.err.println("serve: agent-grant: could not read or make the shared form key: $e")
+      null
+    }
+
+  private fun ownerOnlyTempFile(directory: Path): Path =
+    if (directory.fileSystem.supportedFileAttributeViews().contains("posix")) {
+      Files.createTempFile(
+        directory,
+        "agent-grant-csrf-",
+        ".key",
+        PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rw-------")),
+      )
+    } else {
+      Files.createTempFile(directory, "agent-grant-csrf-", ".key")
+    }
+
   /** Ids of live rows whose state is in [states] and that name [grantId]. */
   @Synchronized
   fun idsForGrant(grantId: String, states: Set<String>): List<String> =
@@ -254,6 +312,9 @@ internal class ServeAgentGrantRequestFile(file: Path, private val clock: () -> L
     const val REVOKED = "revoked"
     /** An approval that ran out before anyone collected it. */
     const val EXPIRED = "expired"
+
+    const val FORM_KEY_NAME = "agent-grant-csrf.key"
+    private const val FORM_KEY_BYTES = 32
 
     /** Bounded by the store's own caps (pending + denied, plus live grants); this is a backstop. */
     private const val MAX_BYTES = 2 * 1024 * 1024L

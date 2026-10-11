@@ -14902,23 +14902,57 @@ class ServeHttpServer(
     val store = agentGrants ?: return emptyList()
     val approver = agentGrantApprover(store) ?: return emptyList()
     val now = System.currentTimeMillis()
-    return store
-      .activeGrants()
-      .filter { approver.manages(it) }
-      .map { grant ->
-        ServeWeb.StatusAgentGrant(
-          id = grant.id,
-          fingerprint = grant.fingerprint,
-          scopes = grant.scopes.joinToString(", ") { it.wire },
-          capabilities = AgentGrantCapability.wireNames(grant.capabilities).joinToString(", "),
-          label = grant.label,
-          approvedBy = grant.approvedBy,
-          expiresInText = AgentGrantProtocol.formatDuration(grant.secondsUntilExpiry(now)),
-          revokeCsrf =
-            agentGrantCsrf.seal(grant.id, approver.name, ServeAgentGrants.Csrf.ACTION_DENY),
-        )
-      }
+    val local =
+      store
+        .activeGrants()
+        .filter { approver.manages(it) }
+        .map { grant ->
+          ServeWeb.StatusAgentGrant(
+            id = grant.id,
+            fingerprint = grant.fingerprint,
+            scopes = grant.scopes.joinToString(", ") { it.wire },
+            capabilities = AgentGrantCapability.wireNames(grant.capabilities).joinToString(", "),
+            label = grant.label,
+            approvedBy = grant.approvedBy,
+            expiresInText = AgentGrantProtocol.formatDuration(grant.secondsUntilExpiry(now)),
+            revokeCsrf =
+              agentGrantCsrf.seal(grant.id, approver.name, ServeAgentGrants.Csrf.ACTION_DENY),
+          )
+        }
+    // Held by the other process on the shared requests file during a rollout: listed and
+    // revocable here too, under the same approver rule the revoke handler applies.
+    val elsewhere =
+      store
+        .grantsHeldElsewhere()
+        .filter { managesApproval(approver, it.approval) }
+        .map { held ->
+          val approval = held.approval
+          ServeWeb.StatusAgentGrant(
+            id = held.grantId,
+            fingerprint = held.fingerprint,
+            scopes = AgentGrantScope.upTo(approval.scope).joinToString(", ") { it.wire },
+            capabilities = AgentGrantCapability.wireNames(approval.capabilities).joinToString(", "),
+            label = held.label,
+            approvedBy = approval.approvedBy,
+            expiresInText =
+              AgentGrantProtocol.formatDuration(
+                ((approval.expiresAtMillis - now) / 1000).coerceAtLeast(0)
+              ),
+            revokeCsrf =
+              agentGrantCsrf.seal(held.grantId, approver.name, ServeAgentGrants.Csrf.ACTION_DENY),
+          )
+        }
+    return local + elsewhere
   }
+
+  /** [ServeAgentGrants.Approver.manages], for a grant known only by its stored decision. */
+  private fun managesApproval(
+    approver: ServeAgentGrants.Approver,
+    approval: ServeAgentGrantStore.Approval,
+  ): Boolean =
+    approver.administers ||
+      if (approval.approvedByActorId.isNotBlank()) approval.approvedByActorId == approver.actorId
+      else approval.approvedBy == approver.name
 
   /**
    * How many live grants this reader isn't shown — the same number `/status.json` publishes as
@@ -14927,7 +14961,7 @@ class ServeHttpServer(
   private fun RoutingContext.agentGrantHiddenCount(shown: Int): Int {
     if (siteSystem() != null) return 0
     val store = agentGrants ?: return 0
-    return (store.activeGrants().size - shown).coerceAtLeast(0)
+    return (store.activeGrants().size + store.grantsHeldElsewhere().size - shown).coerceAtLeast(0)
   }
 
   /**
@@ -14962,10 +14996,13 @@ class ServeHttpServer(
    * or daemon and conferring nothing.
    */
   /**
-   * The per-process seal on the approval form. No configuration; a restart drops every request, so
-   * older seals protect nothing.
+   * The seal on the approval, request-access and revoke forms. Per process and random, unless the
+   * grant store shares a requests file with another process (a rollout runs old and new side by
+   * side): then the key is the one kept beside that file, so a form either process drew is accepted
+   * by both.
    */
-  private val agentGrantCsrf = ServeAgentGrants.Csrf()
+  private val agentGrantCsrf =
+    agentGrants?.sharedFormKey()?.let { ServeAgentGrants.Csrf(it) } ?: ServeAgentGrants.Csrf()
 
   /** Only public client registrations persist; approval and token state dies with the grants. */
   private val mcpOAuth = ServeMcpOAuth.Store(mcpOAuthClientsFile?.toPath())
@@ -15486,13 +15523,7 @@ class ServeHttpServer(
     if (grant == null) {
       // Held by another process sharing the requests file: the same rule, against the decision.
       val approval = store.approvalForGrant(grantId)
-      val manages =
-        approval != null &&
-          (approver.administers ||
-            if (approval.approvedByActorId.isNotBlank())
-              approval.approvedByActorId == approver.actorId
-            else approval.approvedBy == approver.name)
-      if (!manages) {
+      if (approval == null || !managesApproval(approver, approval)) {
         call.respondText("not found", status = HttpStatusCode.NotFound)
         return
       }
@@ -15640,7 +15671,18 @@ class ServeHttpServer(
     if (deny) {
       // Check the return value: if another operator approved first, saying "nothing was granted"
       // would be false.
-      if (store.deny(requestId, approver.name)) {
+      val denial = store.denyRequest(requestId, approver.name)
+      if (denial == ServeAgentGrantStore.Denial.UNAVAILABLE) {
+        respondAgentGrantNotice(
+          heading = "Try again in a moment",
+          message =
+            "The server could not record your decision, so nothing was declined. Press Deny " +
+              "again; if this keeps happening, tell the operator.",
+          status = HttpStatusCode.ServiceUnavailable,
+        )
+        return
+      }
+      if (denial == ServeAgentGrantStore.Denial.DENIED) {
         // An OAuth client is owed the refusal on its own redirect URI — RFC 6749 §4.1.2.1 — rather
         // than being left to time out while the human reads a page it will never see.
         mcpOAuth.forRequest(requestId)?.let { authorization ->

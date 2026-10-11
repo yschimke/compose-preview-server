@@ -282,8 +282,15 @@ internet mint itself credentials.
   modification time or size changes, so a check stays a stat. (A person's own request, carried by
   their session and never polled, is the exception: approving it is the claim, `pending` →
   `collected`, and mints there.)
+- **Either process can show and revoke a grant.** `/status` lists the grants this process holds and,
+  from their `collected` rows, the ones the other process holds (by fingerprint, under the same
+  approver rule), and the approval, request-access and revoke forms are sealed with a key kept
+  beside the file — `mcp-oauth/agent-grant-csrf.key`, 32 random bytes, owner-only, made once under
+  the file lock — so a form drawn by one process is accepted by the other. Without the file each
+  process keeps its own random key, as before.
 - **No fallback when the file fails.** A decision, claim or revocation that cannot read or write the
-  file changes nothing: the approval page says to try again, and a poll answers `pending` — retry —
+  file changes nothing: the approval page says to try again (for a denial as for an approval —
+  never "already decided"), and a poll answers `pending` — retry —
   never a bearer. A corrupt file is reported and treated as unreadable, not as empty.
 - **A collected approval meets today's limits, not yesterday's.** An approval not yet collected, by
   any process, holds its grant's place: it counts towards `--agent-grant-max-active` and its
