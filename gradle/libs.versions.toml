@@ -421,7 +421,7 @@ composeai-contracts = "3.29.0"
 # 3.106.0 keeps deleted designs in a 24-hour trash (compose-ui-builder#687), the runtime API
 # `ServeUiBuilderTrash` and the admin and MCP trash routes (#1564) call; it is built on
 # compose-ai-tools 2.46.0 and androidx-window 1.5.1, so `composeai-tools` above moves with it.
-composeai-ui-builder = "3.106.0"
+composeai-ui-builder = "3.107.0"
 # The CMP/Wasm Remote Compose player (yschimke/rc-players' `rc-player-wasm-dist`, a zip of its
 # static browser bundle). Shipped in the server tarball as `rc-player-wasm/`, which the image's
 # entrypoint already passes as `--rc-player-wasm-dir`: that serves `/rc-player-wasm/`, enables the
