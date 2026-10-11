@@ -130,6 +130,10 @@ class ServeBundleHost(
    * [ServeCatalogStore], which owns the SSRF gate, size cap and test seam; null for a plain bundle.
    */
   private val fetchBakedPng: ((String) -> ByteArray?)? = null,
+  /** Published RC documents offered by a trusted catalog, keyed by the baked preview id. */
+  declaredRcDocs: List<String> = emptyList(),
+  /** Fetches one published document on demand; the catalog store owns the branch URL and limits. */
+  private val fetchRcDoc: ((String) -> ByteArray?)? = null,
   /**
    * Ids this catalog publishes an animated capture for. Separate from [declaredBaked]: a capture
    * owns no card and is reachable only from its still.
@@ -1073,6 +1077,8 @@ class ServeBundleHost(
 
   private val fillLocks = java.util.concurrent.ConcurrentHashMap<String, Any>()
 
+  private val declaredRcDocIds = declaredRcDocs.toSet()
+
   /**
    * The staged file for one capture, fetched on first request. A near-copy of [bakedPngFile] rather
    * than a shared generic, so a capture can never be written under a still's name.
@@ -1165,21 +1171,32 @@ class ServeBundleHost(
   }
 
   override fun remoteComposeDoc(previewId: String): ByteArray? {
-    if (previewId !in previewIds) return null
+    if (!hasRemoteComposeDoc(previewId)) return null
     val doc = File(irDir, "$previewId$RC_SUFFIX").toOkioPath()
-    if (!fileSystem.exists(doc)) return null
-    return try {
-      fileSystem.read(doc) { readByteArray() }
-    } catch (e: Exception) {
-      null
+    if (!fileSystem.exists(doc)) {
+      val fetch = fetchRcDoc ?: return null
+      synchronized(fillLocks.computeIfAbsent("rc:$previewId") { Any() }) {
+        if (!fileSystem.exists(doc)) {
+          val bytes = runCatching { fetch(previewId) }.getOrNull() ?: return null
+          val saved = runCatching {
+            fileSystem.createDirectories(doc.parent!!)
+            val partial = doc.parent!!.resolve("${doc.name}.$instanceTag$PARTIAL_SUFFIX")
+            fileSystem.write(partial) { write(bytes) }
+            fileSystem.atomicMove(partial, doc)
+          }
+          if (saved.isFailure) return null
+        }
+      }
     }
+    return runCatching { fileSystem.read(doc) { readByteArray() } }.getOrNull()
   }
 
   // Cheap existence check (no read) so the per-preview page render can gate the client-side canvas
   // lane without pulling the whole document — the browser fetches the bytes over `/render/<id>.rc`.
   override fun hasRemoteComposeDoc(previewId: String): Boolean {
     if (previewId !in previewIds) return false
-    return fileSystem.exists(File(irDir, "$previewId$RC_SUFFIX").toOkioPath())
+    return previewId in declaredRcDocIds ||
+      fileSystem.exists(File(irDir, "$previewId$RC_SUFFIX").toOkioPath())
   }
 
   // The cmp-jvm render is sized to the baked PNG's pixels at the capture density; null without a
