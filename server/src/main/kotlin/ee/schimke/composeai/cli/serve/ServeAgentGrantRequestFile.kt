@@ -15,15 +15,21 @@ import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 
 /**
- * The on-disk half of [ServeAgentGrantStore]'s requests, so a person slow to approve does not lose
- * the request to a redeploy. See
+ * The authoritative lifecycle of [ServeAgentGrantStore]'s requests when persistence is configured.
+ * See
  * [docs/design/AGENT_ACCESS_GRANTS.md](../../../../../../../../docs/design/AGENT_ACCESS_GRANTS.md).
  *
+ * A deploy overlaps the old and new processes (`docker-rollout` scales up before it scales down),
+ * so both serve the same requests at once. Each process's memory is a cache of this file; every
+ * change of a request's state is a compare-and-set ([transition]) under a JVM lock and an OS file
+ * lock, with an atomic replace — the [ServeMcpOAuthClients] pattern — so of two processes acting on
+ * one request exactly one wins, and the loser reads the winner's row.
+ *
  * Holds requests and approval *decisions* only: the device secret as a SHA-256, and no bearer, no
- * browser or Wasm credential, ever — a grant is minted from the decision when its requester
- * collects it. Every change is a read-modify-write under a JVM lock and an OS file lock with an
- * atomic replace, the [ServeMcpOAuthClients] pattern, so two overlapping processes during a deploy
- * add to the file rather than overwrite each other. Expired rows are dropped on every read.
+ * browser or Wasm credential, ever. A `collected` row names the grant id the winning process
+ * minted, so a revocation in any process ([REVOKED]) reaches it ([revokedGrantIds]). Expired rows
+ * are dropped on every write. A file that cannot be read or written fails the transition
+ * ([Outcome.Unavailable]) — never silently read as empty, which would let a stale copy act.
  */
 internal class ServeAgentGrantRequestFile(file: Path, private val clock: () -> Long) {
   private val file: Path = file.toAbsolutePath().normalize()
@@ -48,15 +54,14 @@ internal class ServeAgentGrantRequestFile(file: Path, private val clock: () -> L
     val designIds: List<String> = emptyList(),
     val createdAtMillis: Long,
     val expiresAtMillis: Long,
-    /**
-     * `pending`, `approved` or `denied`; or the tombstones `collected` and `revoked`, which are
-     * never restored and are kept only so a process holding an older copy cannot mint from it.
-     */
+    /** [PENDING], [APPROVED], [DENIED], [COLLECTED], [REVOKED] or [EXPIRED]. */
     val state: String,
     val resolvedBy: String? = null,
-    /** Set when [state] is `approved`, and kept on a tombstone so it lives as long. */
+    /** The decision, from [APPROVED] on; kept on later states so they live as long as it would. */
     val approval: Approval? = null,
-    /** Why the server refused a restored approval, for a `denied` row it refused. */
+    /** The grant the winning collector minted, from [COLLECTED] on. Not a credential. */
+    val grantId: String? = null,
+    /** Why the server refused an approval at collection, for a [DENIED] row it refused. */
     val refusal: String? = null,
     /** A refusal's own lifetime, when it outlives the request's deadline. */
     val retainUntilMillis: Long? = null,
@@ -66,19 +71,7 @@ internal class ServeAgentGrantRequestFile(file: Path, private val clock: () -> L
      * (later, for a refusal kept until its approval would have expired).
      */
     val keepUntilMillis: Long
-      get() = approval?.expiresAtMillis ?: maxOf(expiresAtMillis, retainUntilMillis ?: 0)
-  }
-
-  /** How a [claim] went. */
-  enum class Claim {
-    /** The row was `approved` and is now `collected` by this caller. */
-    WON,
-    /** The row had already moved on: collected, revoked or expired elsewhere. */
-    TAKEN,
-    /** No such live row. */
-    MISSING,
-    /** The file could not be read or written. */
-    UNAVAILABLE,
+      get() = maxOf(approval?.expiresAtMillis ?: 0, expiresAtMillis, retainUntilMillis ?: 0)
   }
 
   /** What an approver decided — enough to mint the grant later, with no credential in it. */
@@ -95,77 +88,103 @@ internal class ServeAgentGrantRequestFile(file: Path, private val clock: () -> L
     val enforceApproverCap: Boolean = true,
   )
 
+  /** How a [transition] went. */
+  sealed interface Outcome {
+    /** This caller's change is now the row. */
+    data class Done(val record: Record) : Outcome
+
+    /** The row was not in an expected state (or is gone); [current] is what it is now. */
+    data class Conflict(val current: Record?) : Outcome
+
+    /** The file could not be read or written: nothing changed, retry. */
+    data object Unavailable : Outcome
+  }
+
   private var cachedStamp: Pair<Instant, Long>? = null
   private var cached: Map<String, Record> = emptyMap()
+  private var cachedRevoked: Set<String> = emptySet()
 
-  /** Every live row. Unreadable state is reported and read as empty rather than failing a poll. */
+  /**
+   * Every live row, from a cache refreshed when the file's modification time or size changes. An
+   * unreadable file reads as the last good view, and is reported.
+   */
   @Synchronized
   fun all(): Map<String, Record> {
-    val stamp = stamp() ?: return emptyMap<String, Record>().also { cached = it }
-    if (stamp != cachedStamp) {
-      cached = locked { read() }
-      cachedStamp = stamp
-    }
+    refresh()
     val now = clock()
     return cached.filterValues { it.keepUntilMillis > now }
   }
 
-  /** [id]'s row read now under the file lock, past the cache: for a decision that must not race. */
-  @Synchronized
-  fun fresh(id: String): Record? =
-    try {
-      locked { read() }[id]?.takeIf { it.keepUntilMillis > clock() }
-    } catch (e: IOException) {
-      System.err.println("serve: agent-grant: could not read access requests from $file: $e")
-      null
-    }
-
   /**
-   * Compare-and-set [id] from `approved` to [collected] under one hold of the file lock, so of two
-   * processes collecting one approval exactly one wins.
+   * Grant ids whose rows are [REVOKED], by any process: what every token lookup checks. Cheap — a
+   * stat of the file, and a re-read only when it changed.
    */
   @Synchronized
-  fun claim(id: String, collected: Record): Claim =
+  fun revokedGrantIds(): Set<String> {
+    refresh()
+    return cachedRevoked
+  }
+
+  private fun refresh() {
+    val stamp = stamp()
+    if (stamp == null) {
+      cached = emptyMap()
+      cachedRevoked = emptySet()
+      cachedStamp = null
+      return
+    }
+    if (stamp == cachedStamp) return
+    try {
+      remember(locked { read() })
+      cachedStamp = stamp
+    } catch (e: IOException) {
+      System.err.println("serve: agent-grant: could not read access requests from $file: $e")
+    }
+  }
+
+  private fun remember(rows: Map<String, Record>) {
+    cached = rows
+    cachedRevoked =
+      rows.values.filter { it.state == REVOKED }.mapNotNullTo(HashSet()) { it.grantId }
+  }
+
+  /** Add a new row; false when the file could not be written. */
+  fun insert(record: Record): Boolean =
+    transition(record.id, expected = null) { record } is Outcome.Done
+
+  /**
+   * Compare-and-set [id]: when its live row's state is in [expected] (or, with null, when there is
+   * no row), replace it with [change]'s result, all under one hold of the file lock.
+   */
+  @Synchronized
+  fun transition(id: String, expected: Set<String>?, change: (Record?) -> Record): Outcome =
     try {
       val outcome = locked {
         val rows = read().toMutableMap()
-        rows.values.removeIf { it.keepUntilMillis <= clock() }
-        val row = rows[id]
-        when {
-          row == null -> Claim.MISSING
-          row.state != APPROVED -> Claim.TAKEN
-          else -> {
-            rows[id] = collected
-            write(rows.values.toList())
-            Claim.WON
-          }
+        val now = clock()
+        rows.values.removeIf { it.keepUntilMillis <= now }
+        val current = rows[id]
+        val matches = if (expected == null) current == null else current?.state in expected
+        if (!matches) {
+          Outcome.Conflict(current)
+        } else {
+          val next = change(current)
+          rows[id] = next
+          write(rows.values.toList())
+          Outcome.Done(next)
         }
       }
       cachedStamp = null
       outcome
     } catch (e: IOException) {
-      System.err.println("serve: agent-grant: could not claim an access request in $file: $e")
-      Claim.UNAVAILABLE
+      System.err.println("serve: agent-grant: could not update access requests in $file: $e")
+      Outcome.Unavailable
     }
 
-  fun upsert(record: Record) = change { it[record.id] = record }
-
+  /** Ids of live rows whose state is in [states] and that name [grantId]. */
   @Synchronized
-  private fun change(action: (MutableMap<String, Record>) -> Unit) {
-    try {
-      locked {
-        val rows = read().toMutableMap()
-        val before = rows.toMap()
-        rows.values.removeIf { it.keepUntilMillis <= clock() }
-        action(rows)
-        if (rows != before || !Files.exists(file)) write(rows.values.toList())
-      }
-      cachedStamp = null
-    } catch (e: IOException) {
-      // The in-memory store still works; only restart survival is lost for this change.
-      System.err.println("serve: agent-grant: could not persist access requests to $file: $e")
-    }
-  }
+  fun idsForGrant(grantId: String, states: Set<String>): List<String> =
+    all().values.filter { it.grantId == grantId && it.state in states }.map { it.id }
 
   private fun <T> locked(action: () -> T): T =
     synchronized(locks.computeIfAbsent(file) { Any() }) {
@@ -186,26 +205,27 @@ internal class ServeAgentGrantRequestFile(file: Path, private val clock: () -> L
       null
     }
 
+  /** Strict: an unreadable or malformed file is an [IOException], never an empty map. */
   private fun read(): Map<String, Record> {
     if (!Files.exists(file)) return emptyMap()
-    return try {
-      require(Files.size(file) <= MAX_BYTES) { "too large" }
-      val snapshot = JSON.decodeFromString<Snapshot>(Files.readString(file))
-      require(snapshot.version == 1) { "unsupported version ${snapshot.version}" }
-      snapshot.requests.filter { it.id.isNotBlank() }.associateBy { it.id }
-    } catch (e: Exception) {
-      if (e !is IOException && e !is SerializationException && e !is IllegalArgumentException) {
-        throw e
+    if (Files.size(file) > MAX_BYTES) throw IOException("access requests file is too large")
+    val snapshot =
+      try {
+        JSON.decodeFromString<Snapshot>(Files.readString(file))
+      } catch (e: SerializationException) {
+        throw IOException("malformed access requests file", e)
+      } catch (e: IllegalArgumentException) {
+        throw IOException("malformed access requests file", e)
       }
-      // A corrupt file costs the pending requests in it, never startup; the next write replaces it.
-      System.err.println("serve: agent-grant: ignoring unreadable access requests in $file: $e")
-      emptyMap()
-    }
+    if (snapshot.version != 1) throw IOException("unsupported version ${snapshot.version}")
+    return snapshot.requests.filter { it.id.isNotBlank() }.associateBy { it.id }
   }
 
   private fun write(rows: List<Record>) {
     val json = JSON.encodeToString(Snapshot(requests = rows))
-    require(json.toByteArray(Charsets.UTF_8).size <= MAX_BYTES) { "access requests too large" }
+    if (json.toByteArray(Charsets.UTF_8).size > MAX_BYTES) {
+      throw IOException("access requests too large")
+    }
     val temporary = Files.createTempFile(file.parent, "agent-access-requests-", ".json")
     try {
       Files.writeString(temporary, json)
@@ -225,9 +245,18 @@ internal class ServeAgentGrantRequestFile(file: Path, private val clock: () -> L
   }
 
   companion object {
+    const val PENDING = "pending"
+    const val APPROVED = "approved"
+    const val DENIED = "denied"
+    /** Approved and handed out — to exactly one process, named by [Record.grantId]. */
+    const val COLLECTED = "collected"
+    /** Ended by a person; its [Record.grantId], if any, is refused by every process. */
+    const val REVOKED = "revoked"
+    /** An approval that ran out before anyone collected it. */
+    const val EXPIRED = "expired"
+
     /** Bounded by the store's own caps (pending + denied, plus live grants); this is a backstop. */
     private const val MAX_BYTES = 2 * 1024 * 1024L
-    private const val APPROVED = "approved"
     private val JSON = Json { ignoreUnknownKeys = true }
     private val locks = ConcurrentHashMap<Path, Any>()
   }
