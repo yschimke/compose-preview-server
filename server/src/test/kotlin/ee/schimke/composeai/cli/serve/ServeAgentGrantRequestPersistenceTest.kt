@@ -160,14 +160,16 @@ class ServeAgentGrantRequestPersistenceTest {
   }
 
   @Test
-  fun `an approval whose grant would already have expired answers expired after a restart`() {
+  fun `an approval whose grant would already have expired is not collected after a restart`() {
     val first = store()
     val request = first.ask()
     assertNotNull(first.approveOk(request.id, "@yuri", AgentGrantScope.LIVE, 60, emptySet(), "u"))
     now += 30_000
     val reloaded = store()
     now += 31_000
-    assertEquals(ServeAgentGrantStore.Poll.Expired, reloaded.poll(request.id, request.deviceSecret))
+    // Past the grant's lifetime the row itself is gone, so the request reads as unknown; either
+    // way, nothing is handed out.
+    assertNotPollable(reloaded.poll(request.id, request.deviceSecret))
   }
 
   @Test
@@ -806,5 +808,84 @@ class ServeAgentGrantRequestPersistenceTest {
     assertEquals(ServeAgentGrantStore.Revocation.REVOKED, a.revokeGrant(grant.id, "@yuri"))
     assertNull(b.grantForToken(grant.token))
     assertEquals(ServeAgentGrantStore.Revocation.UNKNOWN, a.revokeGrant("nobody-knows", "@yuri"))
+  }
+
+  // ---- a missing file fails closed; rows live as long as their grant ---------------------------
+
+  @Test
+  fun `a revocation is not forgotten when the file goes missing before the holder checks`() {
+    val a = store()
+    val revoked = a.ask()
+    val kept = a.ask()
+    a.approveOk(revoked.id, "@yuri", AgentGrantScope.LIVE, 600, emptySet(), "u")
+    a.approveOk(kept.id, "@yuri", AgentGrantScope.LIVE, 600, emptySet(), "u")
+    val pending = a.ask()
+    val revokedGrant =
+      assertIs<ServeAgentGrantStore.Poll.Approved>(a.poll(revoked.id, revoked.deviceSecret)).grant
+    val keptGrant =
+      assertIs<ServeAgentGrantStore.Poll.Approved>(a.poll(kept.id, kept.deviceSecret)).grant
+    // B revokes one; the file then disappears before A's next token check.
+    val b = store()
+    assertEquals(ServeAgentGrantStore.Revocation.REVOKED, b.revokeGrant(revokedGrant.id, "@yuri"))
+    val afterRevoke = file.readText()
+    Files.delete(file)
+
+    assertNull(a.grantForToken(revokedGrant.token), "a revocation A cannot read is not ignored")
+    assertNull(a.grantForToken(keptGrant.token), "nor can A vouch for any grant meanwhile")
+    assertIs<ServeAgentGrantStore.Poll.Pending>(a.poll(pending.id, pending.deviceSecret))
+    assertEquals(
+      ServeAgentGrantStore.Decision.Unavailable,
+      a.decide(pending.id, "@yuri", AgentGrantScope.LIVE, 600, emptySet(), "u"),
+      "a missing file is unavailable, not empty",
+    )
+
+    // The file back: the revocation holds and the other grant is good again.
+    file.writeText(afterRevoke)
+    assertNull(a.grantForToken(revokedGrant.token))
+    assertEquals(keptGrant, a.grantForToken(keptGrant.token))
+  }
+
+  @Test
+  fun `a revocation once seen outlives the row that carried it`() {
+    val a = store()
+    val request = a.ask()
+    a.approveOk(request.id, "@yuri", AgentGrantScope.LIVE, 600, emptySet(), "u")
+    val b = store()
+    val grant =
+      assertIs<ServeAgentGrantStore.Poll.Approved>(b.poll(request.id, request.deviceSecret)).grant
+    assertEquals(ServeAgentGrantStore.Revocation.REVOKED, a.revokeGrant(grant.id, "@yuri"))
+    assertNull(b.grantForToken(grant.token))
+    // Even a file rewritten without the row cannot bring it back.
+    val stripped =
+      Regex("\\{\"id\":\"${request.id}\"[^{}]*(\\{[^{}]*\\}[^{}]*)*\\},?")
+        .replace(file.readText(), "")
+        .replace(",]", "]")
+    file.writeText(stripped)
+    assertFalse(file.readText().contains(request.id))
+    assertNull(b.grantForToken(grant.token))
+  }
+
+  @Test
+  fun `a row with a short approval goes when its grant would, not at the request deadline`() {
+    val store = store()
+    val short = store.ask()
+    store.approveOk(short.id, "@yuri", AgentGrantScope.LIVE, 60, emptySet(), "u")
+    val revoked = store.ask()
+    store.approveOk(revoked.id, "@yuri", AgentGrantScope.LIVE, 120, emptySet(), "u")
+    assertTrue(store.revokeRequest(revoked.id, "@yuri"))
+    val pending = store.ask()
+
+    now += 61_000
+    store.ask() // any write rewrites the file without what has expired
+    var text = file.readText()
+    assertFalse(text.contains(short.id), "a one-minute approval is gone at a minute")
+    assertTrue(text.contains(revoked.id), "a revoked tombstone lives as long as its grant would")
+    assertTrue(text.contains(pending.id), "a pending request keeps its own deadline")
+
+    now += 60_000
+    store.ask()
+    text = file.readText()
+    assertFalse(text.contains(revoked.id))
+    assertTrue(text.contains(pending.id))
   }
 }

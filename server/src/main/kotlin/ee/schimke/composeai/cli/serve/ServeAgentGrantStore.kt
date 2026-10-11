@@ -856,6 +856,7 @@ class ServeAgentGrantStore(
       dropLocal(id)
       return TokenState.UNKNOWN
     }
+    if (disk != null && !disk.isCurrent()) return TokenState.UNKNOWN
     val grant = grants[id] ?: return TokenState.UNKNOWN
     // Expired grants linger until [purge]; after that the token honestly reads as UNKNOWN.
     return if (grant.expiresAtMillis > clock()) TokenState.LIVE else TokenState.EXPIRED
@@ -1209,9 +1210,14 @@ class ServeAgentGrantStore(
   private fun liveGrant(id: String?): Grant? {
     val grant = grants[id ?: return null] ?: return null
     if (grant.expiresAtMillis <= clock()) return null
-    if (disk != null && grant.id in disk.revokedGrantIds()) {
-      dropLocal(grant.id)
-      return null
+    if (disk != null) {
+      if (grant.id in disk.revokedGrantIds()) {
+        dropLocal(grant.id)
+        return null
+      }
+      // The file changed or vanished and could not be read: a revocation may be in it. Refuse
+      // until it can be read again, without forgetting the grant (fail closed, not destructive).
+      if (!disk.isCurrent()) return null
     }
     return grant
   }

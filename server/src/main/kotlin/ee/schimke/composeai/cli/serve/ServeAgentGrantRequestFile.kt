@@ -93,11 +93,14 @@ internal class ServeAgentGrantRequestFile(
     val retainUntilMillis: Long? = null,
   ) {
     /**
-     * Past which nobody is owed anything: an approval's grant's expiry, or the request's deadline
-     * (later, for a refusal kept until its approval would have expired).
+     * Past which nobody is owed anything. A row carrying an approval — approved, collected,
+     * revoked, or refused at collection — lives exactly as long as the grant it stands for could
+     * (the expiry decided at approval; a lowered ceiling only ever shortens the grant, never this),
+     * so a revoked tombstone is never shorter than its grant and a short grant's row does not
+     * linger to the request's deadline. A pending or human-denied row keeps the request's deadline.
      */
     val keepUntilMillis: Long
-      get() = maxOf(approval?.expiresAtMillis ?: 0, expiresAtMillis, retainUntilMillis ?: 0)
+      get() = approval?.expiresAtMillis ?: maxOf(expiresAtMillis, retainUntilMillis ?: 0)
   }
 
   /** What an approver decided — enough to mint the grant later, with no credential in it. */
@@ -128,7 +131,18 @@ internal class ServeAgentGrantRequestFile(
 
   private var cachedStamp: Pair<Instant, Long>? = null
   private var cached: Map<String, Record> = emptyMap()
-  private var cachedRevoked: Set<String> = emptySet()
+
+  /**
+   * Revoked grant ids, each until its grant would have expired. Only ever grows (until expiry): a
+   * file that loses a row, goes missing or turns unreadable never un-revokes anything.
+   */
+  private val revokedUntil = HashMap<String, Long>()
+
+  /** True once this process has seen the file exist: from then on, its absence is a fault. */
+  @Volatile private var seen = false
+
+  /** False while the file has changed (or vanished) in a way this process could not read. */
+  @Volatile private var current = true
 
   /**
    * Every live row, from a cache refreshed when the file's modification time or size changes. An
@@ -148,30 +162,56 @@ internal class ServeAgentGrantRequestFile(
   @Synchronized
   fun revokedGrantIds(): Set<String> {
     refresh()
-    return cachedRevoked
+    val now = clock()
+    revokedUntil.values.removeIf { it <= now }
+    return revokedUntil.keys.toSet()
+  }
+
+  /**
+   * Whether this process's view of the file is the file as it is now. False when it changed or
+   * disappeared and could not be read: a revocation may be in it, so no grant can be vouched for.
+   */
+  @Synchronized
+  fun isCurrent(): Boolean {
+    refresh()
+    return current
   }
 
   private fun refresh() {
     val stamp = stamp()
     if (stamp == null) {
-      cached = emptyMap()
-      cachedRevoked = emptySet()
-      cachedStamp = null
+      if (seen) {
+        // It existed and is gone (or cannot be stat'ed): keep what we knew, trust none of it.
+        if (current) System.err.println("serve: agent-grant: access requests file $file is missing")
+        current = false
+      } else {
+        cached = emptyMap()
+        cachedStamp = null
+      }
       return
     }
-    if (stamp == cachedStamp) return
+    seen = true
+    if (stamp == cachedStamp && current) return
     try {
       remember(locked { read() })
       cachedStamp = stamp
+      current = true
     } catch (e: IOException) {
-      System.err.println("serve: agent-grant: could not read access requests from $file: $e")
+      if (current) {
+        System.err.println("serve: agent-grant: could not read access requests from $file: $e")
+      }
+      current = false
     }
   }
 
   private fun remember(rows: Map<String, Record>) {
     cached = rows
-    cachedRevoked =
-      rows.values.filter { it.state == REVOKED }.mapNotNullTo(HashSet()) { it.grantId }
+    for (row in rows.values) {
+      val grantId = row.grantId ?: continue
+      if (row.state == REVOKED) {
+        revokedUntil[grantId] = maxOf(revokedUntil[grantId] ?: 0, row.keepUntilMillis)
+      }
+    }
   }
 
   /** Add a new row; false when the file could not be written. */
@@ -332,7 +372,12 @@ internal class ServeAgentGrantRequestFile(
 
   /** Strict: an unreadable or malformed file is an [IOException], never an empty map. */
   private fun read(): Map<String, Record> {
-    if (!Files.exists(file)) return emptyMap()
+    if (!Files.exists(file)) {
+      // Never written yet is empty; written once and now gone is a fault, never "no requests".
+      if (seen) throw IOException("access requests file has disappeared")
+      return emptyMap()
+    }
+    seen = true
     if (Files.size(file) > MAX_BYTES) throw IOException("access requests file is too large")
     val snapshot =
       try {
@@ -368,6 +413,7 @@ internal class ServeAgentGrantRequestFile(
       } catch (_: AtomicMoveNotSupportedException) {
         Files.move(temporary, file, StandardCopyOption.REPLACE_EXISTING)
       }
+      seen = true
     } finally {
       Files.deleteIfExists(temporary)
     }

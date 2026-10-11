@@ -270,8 +270,11 @@ internet mint itself credentials.
   lock**: `pending` → `approved` or `denied` (the first decision in any process wins; a losing
   approval or denial issues nothing and the page shows the decision that stands), `approved` →
   `collected` (the claim), and `approved`/`collected` → `revoked`. Rows are never deleted early;
-  `collected`, `revoked` and `expired` stay until the grant would have expired, so "gone" is never
-  confused with "never seen".
+  `collected`, `revoked` and `expired` stay exactly as long as the grant would have lived (the
+  expiry decided at approval) — never shorter, so "gone" is never confused with "never seen", and no
+  longer, so short grants do not pile up to the request's deadline; a pending or denied row keeps the
+  request's deadline. Each process also remembers every revocation it has read until that grant's
+  expiry, whatever later happens to the row.
 - **Only the collector mints.** With the file, approving mints nothing. The grant and its bearer are
   minted by the one process that wins `approved` → `collected` — on a poll, or the MCP OAuth code
   exchange — from the decision as stored, and its lifetime is still counted from the approval, so
@@ -292,7 +295,10 @@ internet mint itself credentials.
   file changes nothing: the approval page says to try again (for a denial as for an approval —
   never "already decided"; for a revocation too, which then keeps the grant's refresh bindings
   rather than reporting it gone), and a poll answers `pending` — retry —
-  never a bearer. A corrupt file is reported and treated as unreadable, not as empty.
+  never a bearer. A corrupt file is reported and treated as unreadable, not as empty; so is a file
+  this process has seen that has since gone missing. While the file has changed in a way a process
+  cannot read, that process accepts no grant bearer at all — a revocation may be in what it cannot
+  read — and accepts them again once it can.
 - **The file's format, and the first rollout of it.** The file says what it is
   (`"format": "compose-preview/agent-access-requests", "version": 2`), and anything else is refused
   as unreadable rather than half-read. Its name is new because the release before it reads and
