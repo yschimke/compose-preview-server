@@ -2106,7 +2106,7 @@ cp-parity-scores { display: contents; }
    state layer like the star, but it takes no pointer events: the whole card stays one target. */
 .cp-card > .cp-changed { position: absolute; z-index: 4; top: 10px; left: 10px; width: 10px;
   height: 10px; border-radius: 50%; background: var(--md-sys-color-primary);
-  box-shadow: 0 0 0 2px var(--md-sys-color-surface-container-low); pointer-events: none; }
+  box-shadow: 0 0 0 2px var(--md-sys-color-surface-container-low); }
 .cp-image-error { position: absolute; z-index: 2; inset: 12px; display: flex; flex-direction: column;
   align-items: center; justify-content: center; gap: 8px; padding: 12px; text-align: center;
   color: var(--md-sys-color-on-error-container); background: var(--md-sys-color-error-container);
