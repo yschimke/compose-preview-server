@@ -359,8 +359,15 @@ abstract class CheckServerDesktopSidecarPackaging : DefaultTask() {
     // The `androidx.window` classes the daemon force-delegates to its parent loader. Without this
     // jar the UI-builder render fails with `NoClassDefFoundError:
     // androidx/window/core/layout/WindowSizeClass` on the first constrained frame (#812). The
-    // dependency is easy to drop; this notices.
-    check(renderer.any { it.name.startsWith("window-core-desktop-") }) {
+    // dependency is easy to drop; this notices. It looks for the class, not a jar name: from 1.5
+    // `window-core-desktop` is an empty redirect to Google's `window-core-jvm`, which holds it.
+    val windowSizeClass = "androidx/window/core/layout/WindowSizeClass.class"
+    check(
+      renderer.any { jar ->
+        jar.name.startsWith("window-core-") &&
+          ZipFile(jar).use { it.getEntry(windowSizeClass) != null }
+      }
+    ) {
       "Standalone server distribution lost window-core, which the UI-builder render needs on the " +
         "daemon parent loader (#812)"
     }
