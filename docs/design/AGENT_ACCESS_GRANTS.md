@@ -384,9 +384,10 @@ asking to edit it — goes through the same approval, from `/ui-builder/request-
   reconfigures the box — and nothing it can be granted reaches `/admin/ui-builder`, the operator's
   list-and-delete over every design on the host: a `ui-builder-*` grant lists what its actor owns
   or was given. The one delete it does reach, `ui_builder_delete_design`, is the design's
-  **owner's** and nobody else's — not a grantee's whatever its role, and not a write grant's over
-  somebody else's design — so a session can remove the probes it made and cannot wipe anybody's
-  work. A design whose owner no longer exists (one created under a pre-3.10 grant, which owned it
+  **owner's**, and otherwise only the agent's that created the design under this same grant — not a
+  grantee's whatever its role, and not a write grant's over somebody else's design — so a session
+  can remove the probes it made and cannot wipe anybody's work. Even that delete only moves the
+  design to the trash for a day, restorable with `ui_builder_restore_design`. A design whose owner no longer exists (one created under a pre-3.10 grant, which owned it
   as the agent rather than as the approver) is therefore still only the operator's to remove.
 
 ## Waiting for the decision

@@ -50,6 +50,7 @@ import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import okhttp3.MediaType.Companion.toMediaType
@@ -1250,6 +1251,7 @@ class ServeUiBuilderMcpIntegrationTest {
       deleted["schema"]!!.jsonPrimitive.content,
     )
     assertEquals("probe", deleted["designId"]!!.jsonPrimitive.content)
+    assertNotNull(deleted["restorableUntilEpochMillis"]?.jsonPrimitive?.longOrNull)
     // Gone from every angle, and a second delete is the service's own "not found" rather than a
     // silent yes.
     assertEquals(
@@ -1274,6 +1276,31 @@ class ServeUiBuilderMcpIntegrationTest {
         )
         .designs
         .none { it.designId == "probe" }
+    )
+
+    // But it is in the trash, and comes back whole, title and all.
+    val trash =
+      Json.parseToJsonElement(envelope(server, ServeUiBuilderMcp.LIST_TRASH, "{}")).jsonObject
+    assertEquals("compose-preview/ui-builder-trash/v1", trash["schema"]!!.jsonPrimitive.content)
+    assertEquals(
+      listOf("probe"),
+      trash["designs"]!!.jsonArray.map { it.jsonObject["designId"]!!.jsonPrimitive.content },
+    )
+    val restored =
+      Json.parseToJsonElement(
+          envelope(server, ServeUiBuilderMcp.RESTORE_DESIGN, """{"designId":"probe"}""")
+        )
+        .jsonObject
+    assertEquals(
+      "compose-preview/ui-builder-design-restored/v1",
+      restored["schema"]!!.jsonPrimitive.content,
+    )
+    assertEquals(
+      "Discord client",
+      restored["design"]!!.jsonObject["title"]!!.jsonPrimitive.content,
+    )
+    assertIs<SnapshotResponseV1>(
+      response(envelope(server, ServeUiBuilderMcp.GET_DESIGN, """{"designId":"probe"}"""))
     )
   }
 

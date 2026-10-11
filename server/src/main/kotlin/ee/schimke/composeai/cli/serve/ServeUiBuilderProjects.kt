@@ -311,6 +311,9 @@ internal class ServeUiBuilderProjects(
       // A rejected import leaves no half-project and never touches pre-existing designs.
       created.forEach {
         service.execute(UiBuilderServiceCall(owner, UiBuilderServiceRequest.DeleteDesign(it)))
+        // A rollback is not a delete anybody would undo, and a retried import mints the same ids,
+        // which the trash would hold for a day: empty them out of it at once.
+        (service as? UiBuilderAdminPort)?.adminDeleteDesign(it)
       }
       throw failure
     }

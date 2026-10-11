@@ -5969,7 +5969,10 @@ class ServeHttpServer(
     call.respondText(
       JSON.encodeToString(
         AdminUiBuilderDesignsResponse.serializer(),
-        AdminUiBuilderDesignsResponse(designs = listed + quarantined),
+        AdminUiBuilderDesignsResponse(
+          designs = listed + quarantined,
+          trash = withContext(Dispatchers.IO) { admin.trash() }.map(TrashedDesignV1::of),
+        ),
       ),
       ContentType.Application.Json,
     )
@@ -6168,6 +6171,8 @@ class ServeHttpServer(
     post("${base}/{designId}/history/{revision}/fork") { handleUiBuilderFork() }
     // Delete one's own design. Owner-only, enforced by the service.
     post("${base}/{designId}/delete") { handleUiBuilderDelete() }
+    // Bring one back out of the trash. Whoever could delete it may, enforced by the service.
+    post("${base}/{designId}/restore") { handleUiBuilderTrashRestore() }
     // Shared file-manager metadata. A move changes no design revision, but it is visible to
     // every collaborator, so the design's WRITE action gates the form.
     post("${base}/{designId}/folder") { handleUiBuilderFolderMove() }
@@ -13965,11 +13970,9 @@ class ServeHttpServer(
   }
 
   /**
-   * `POST /ui-builder/{designId}/delete`: remove one design, then `303` back to the index. The page
-   * route to the owner-only [UiBuilderServiceRequest.DeleteDesign] (no grantee may delete).
-   *
-   * Sidecars (overlay, comments, links) are swept as the admin path and MCP tool do, so the next
-   * holder of the id inherits nothing; failures there are logged, since the design is already gone.
+   * `POST /ui-builder/{designId}/delete`: move one design to the trash, then `303` back to the index,
+   * whose trash section can restore it for a day. The page route to the owner-only
+   * [UiBuilderServiceRequest.DeleteDesign] (no grantee may delete). Sidecars stay until the purge.
    * `confirm=delete` is required to stop a stray re-POST.
    */
   private suspend fun RoutingContext.handleUiBuilderDelete() {
@@ -13986,53 +13989,9 @@ class ServeHttpServer(
     val response =
       service.execute(UiBuilderServiceCall(actor, UiBuilderServiceRequest.DeleteDesign(designId)))
     when (response) {
+      // In the trash, not gone: its overlay, discussion, links and folder wait with it, and the
+      // purge ([ServeUiBuilderTrashPurger]) sweeps them only once it cannot come back.
       is UiBuilderServiceResponse.DesignDeleted -> {
-        withContext(Dispatchers.IO) {
-          runCatching { uiBuilderReferenceStore?.delete(designId) }
-            .onFailure {
-              System.err.println(
-                "serve: reference overlay for $designId not removed (${it.message})"
-              )
-            }
-          runCatching { uiBuilderCommentStore?.delete(designId) }
-            .onFailure {
-              System.err.println("serve: comment board for $designId not removed (${it.message})")
-            }
-          runCatching {
-            if (uiBuilderLinksStore?.delete(designId) == LinksDeleteResult.FAILED) {
-              System.err.println("serve: links record for $designId not removed")
-            }
-          }
-            .onFailure {
-              System.err.println("serve: links record for $designId not removed (${it.message})")
-            }
-          runCatching {
-            if (uiBuilderReviewStore?.delete(designId) == false) {
-              System.err.println("serve: review record for $designId not removed")
-            }
-          }
-            .onFailure {
-              System.err.println("serve: review record for $designId not removed (${it.message})")
-            }
-          runCatching {
-            if (uiBuilderGuidelineStore?.delete(designId) == false) {
-              System.err.println("serve: guidelines record for $designId not removed")
-            }
-          }
-            .onFailure {
-              System.err.println(
-                "serve: guidelines record for $designId not removed (${it.message})"
-              )
-            }
-          runCatching {
-            if (uiBuilderFolderStore?.move(designId, null) is FolderWriteResult.Failed) {
-              System.err.println("serve: folder record for $designId not removed")
-            }
-          }
-            .onFailure {
-              System.err.println("serve: folder record for $designId not removed (${it.message})")
-            }
-        }
         call.response.headers.append(
           HttpHeaders.Location,
           "/ui-builder/designs${agentGrantTokenQuery()}",
@@ -14048,6 +14007,49 @@ class ServeHttpServer(
       else ->
         call.respondText(
           "the design service answered a delete with something else",
+          status = HttpStatusCode.InternalServerError,
+        )
+    }
+  }
+
+  /**
+   * `POST /ui-builder/{designId}/restore`: bring a design back out of the trash, then `303` to it.
+   * The trash section of the designs page posts here; the service admits whoever could have deleted
+   * it, until its retention passes. `confirm=restore` stops a stray re-POST.
+   */
+  private suspend fun RoutingContext.handleUiBuilderTrashRestore() {
+    if (!isSameOriginFormSubmission()) {
+      call.respondText("cross-site restore is refused", status = HttpStatusCode.Forbidden)
+      return
+    }
+    val (actor, designId) = uiBuilderAccessTarget(UiBuilderRouteCapability.WRITE) ?: return
+    val service = designService ?: return
+    if (call.receiveParameters()["confirm"] != "restore") {
+      call.respondText("restore was not confirmed", status = HttpStatusCode.BadRequest)
+      return
+    }
+    when (
+      val response =
+        service.execute(
+          UiBuilderServiceCall(actor, UiBuilderServiceRequest.RestoreDesign(designId))
+        )
+    ) {
+      is UiBuilderServiceResponse.DesignRestored -> {
+        call.response.headers.append(
+          HttpHeaders.Location,
+          uiBuilderPermalink(designId, call.request.queryParameters),
+        )
+        call.respond(HttpStatusCode.SeeOther)
+      }
+      is UiBuilderServiceResponse.Error ->
+        respondUiBuilderDenied(
+          HttpStatusCode.fromValue(response.httpStatusValue()),
+          response.error.message,
+          response.error.message,
+        )
+      else ->
+        call.respondText(
+          "the design service answered a restore with something else",
           status = HttpStatusCode.InternalServerError,
         )
     }
@@ -14296,6 +14298,22 @@ class ServeHttpServer(
               tokenQuery.replaceFirst("?", "&"),
       )
     }
+    // What this viewer could bring back: their own deletions, and deletions of designs they own.
+    val trash =
+      (service.execute(UiBuilderServiceCall(actor, UiBuilderServiceRequest.ListTrash))
+          as? UiBuilderServiceResponse.Trash)
+        ?.designs
+        .orEmpty()
+        .map {
+          ServeWeb.UiBuilderTrashRow(
+            designId = it.designId,
+            title = it.title,
+            trashedByActorId = it.trashedByActorId,
+            restorableUntilEpochMillis = it.restorableUntilEpochMillis,
+            restoreAction =
+              "/ui-builder/${WebEscaping.urlEncodeSegment(it.designId)}/restore$tokenQuery",
+          )
+        }
     val skin = call.siteSkin()
     markGeneration("static-page", "no-store")
     call.respondText(
@@ -14315,6 +14333,7 @@ class ServeHttpServer(
         siteName = skin.first,
         themeCss = skin.second,
         requestAccessHref = requestAccessHref,
+        trash = trash,
       ),
       ContentType.Text.Html,
     )
@@ -17680,6 +17699,8 @@ private data class AdminUiBuilderDesignDto(
 private data class AdminUiBuilderDesignsResponse(
   val schema: String = "compose-preview-serve/admin-ui-builder-designs/v1",
   val designs: List<AdminUiBuilderDesignDto> = emptyList(),
+  /** Designs in the trash, whoever deleted them; `DELETE` on one empties it out at once. */
+  val trash: List<TrashedDesignV1> = emptyList(),
 )
 
 /**

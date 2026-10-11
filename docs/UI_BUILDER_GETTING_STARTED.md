@@ -201,10 +201,12 @@ Everything a design can have done to it from outside the editor is on its card:
   design it was copied from is untouched. This is the same `POST /ui-builder/designs/copy` the home
   screen's **Start from this** uses.
 - **Share** it, which is the design's own access page.
-- **Delete** it, behind a disclosure that says what is about to be lost. Owner-only, and it is the
-  service that says so — a grantee cannot delete somebody else's work however wide its grant. The
-  design's history, comments, reference overlay and links record go with it. `POST
-  /ui-builder/<designId>/delete` with `confirm=delete`, same-origin.
+- **Delete** it, behind a disclosure that says what will happen. Owner-only, and it is the service
+  that says so — a grantee cannot delete somebody else's work however wide its grant. The design
+  moves to the **Trash** section at the bottom of the page with its history, comments, reference
+  overlay and links, and **Restore** brings it back for a day; the server then purges it for good.
+  `POST /ui-builder/<designId>/delete` with `confirm=delete`, and `POST
+  /ui-builder/<designId>/restore` with `confirm=restore`, both same-origin.
 
 The page is also where a design is created: **Start a new design** picks one starting point (a
 catalog and a template, as one control) and **Start from an existing design** copies one.
@@ -1213,7 +1215,9 @@ with the same bearer. It is off by default: a server mounts `/mcp` only with `--
 | `ui_builder_design_access` | `ui-builder-read` | Who can open the design: its owner, and everyone it is shared with |
 | `ui_builder_share_design` | `ui-builder-write` | Shares it with an actor id as `viewer` or `editor`, or takes that back |
 | `ui_builder_rename_design` | `ui-builder-write` | A new title, from anybody who may write the design; the revision does not move |
-| `ui_builder_delete_design` | `ui-builder-write` | Removes a design — its **owner** only, so a session cleans up after itself and nobody else |
+| `ui_builder_delete_design` | `ui-builder-write` | Moves a design to the trash for a day — its **owner**, or the agent that created it under this grant, so a session cleans up after itself and nobody else |
+| `ui_builder_list_trash` | `ui-builder-read` | The trashed designs you could restore, with their deadlines |
+| `ui_builder_restore_design` | `ui-builder-write` | Brings a trashed design back whole |
 | `ui_builder_render_native` | `ui-builder-export` | A frame compiled by real Compose on the host, plus where each node drew on it |
 | `ui_builder_list_comments` | `ui-builder-read` | The discussion on a design, and the cursor to wait from |
 | `ui_builder_await_comments` | `ui-builder-read` | Waits for the next thing anybody says about the design |

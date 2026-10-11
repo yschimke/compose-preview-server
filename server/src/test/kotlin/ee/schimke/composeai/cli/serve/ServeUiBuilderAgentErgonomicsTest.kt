@@ -28,6 +28,8 @@ import ee.schimke.composeai.uibuilder.protocol.WindowPostureV1
 import ee.schimke.composeai.uibuilder.service.CurrentM3UiBuilderCatalogExecutor
 import ee.schimke.composeai.uibuilder.service.FileUiBuilderStateStorage
 import ee.schimke.composeai.uibuilder.service.PersistentUiBuilderService
+import ee.schimke.composeai.uibuilder.service.UiBuilderAdminDesignSummary
+import ee.schimke.composeai.uibuilder.service.UiBuilderAdminPort
 import ee.schimke.composeai.uibuilder.service.UiBuilderExportExecutor
 import java.awt.image.BufferedImage
 import java.io.ByteArrayOutputStream
@@ -39,6 +41,7 @@ import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlinx.serialization.builtins.ListSerializer
@@ -561,8 +564,11 @@ class ServeUiBuilderAgentErgonomicsTest {
     val stale = typed(server, ServeUiBuilderMcp.GET_GUIDELINES, """{"designId":"agent-screen"}""")
     assertEquals(true, stale["stale"]!!.jsonPrimitive.booleanOrNull, stale.toString())
 
-    // Deleting the design forgets its record.
+    // Deleting the design keeps its record while it can still be restored; the trash purge forgets
+    // it.
     envelope(server, ServeUiBuilderMcp.DELETE_DESIGN, """{"designId":"agent-screen"}""")
+    assertNotNull(server.guidelineRecords.read("agent-screen"))
+    purged("agent-screen", ServeUiBuilderSidecars(guidelineRecords = server.guidelineRecords))
     assertNull(server.guidelineRecords.read("agent-screen"))
   }
 
@@ -1333,6 +1339,8 @@ class ServeUiBuilderAgentErgonomicsTest {
       """{"designId":"agent-screen","pr":"https://github.com/x/y/pull/9"}""",
     )
     envelope(server, ServeUiBuilderMcp.DELETE_DESIGN, """{"designId":"agent-screen"}""")
+    assertNotNull(server.reviews.read("agent-screen"), "kept while the design is restorable")
+    purged("agent-screen", ServeUiBuilderSidecars(reviews = server.reviews))
     assertNull(server.reviews.read("agent-screen"))
 
     running?.close()
@@ -1751,5 +1759,18 @@ class ServeUiBuilderAgentErgonomicsTest {
     const val CATALOG_SYSTEM_ID = "m3-catalog"
     const val LIGHT_FILL = 0xF0F0F0
     const val DARK_FILL = 0x202020
+  }
+
+  /** One purge pass that reports [designId] expired, sweeping through [sidecars]. */
+  private fun purged(designId: String, sidecars: ServeUiBuilderSidecars) {
+    val port =
+      object : UiBuilderAdminPort {
+        override fun adminListDesigns(): List<UiBuilderAdminDesignSummary> = emptyList()
+
+        override fun adminDeleteDesign(designId: String): Boolean = false
+
+        override fun purgeExpiredTrash(): List<String> = listOf(designId)
+      }
+    assertEquals(listOf(designId), ServeUiBuilderTrashPurger(port, sidecars, onLog = {}).purge())
   }
 }

@@ -9,6 +9,7 @@ import ee.schimke.composeai.uibuilder.service.UiBuilderServiceCall
 import ee.schimke.composeai.uibuilder.service.UiBuilderServicePort
 import ee.schimke.composeai.uibuilder.service.UiBuilderServiceRequest
 import ee.schimke.composeai.uibuilder.service.UiBuilderServiceResponse
+import ee.schimke.composeai.uibuilder.service.UiBuilderTrashedDesign
 
 /**
  * Runtime UI-builder administration: what designs this host holds, repairing one the host cannot
@@ -44,6 +45,17 @@ class ServeUiBuilderAdmin(
   /** The design's latest guidelines result, forgotten with the design. */
   private val guidelineRecords: ServeUiBuilderGuidelineStore? = null,
 ) {
+  private val sidecars =
+    ServeUiBuilderSidecars(
+      references = references,
+      comments = comments,
+      links = links,
+      reviews = reviews,
+      thumbnails = thumbnails,
+      guidelineRecords = guidelineRecords,
+      onLog = onLog,
+    )
+
   sealed interface Result {
     /** The design is gone, durably. */
     data class Deleted(val designId: String) : Result
@@ -203,33 +215,16 @@ class ServeUiBuilderAdmin(
   fun delete(rawDesignId: String): Result {
     val designId = rawDesignId.trim()
     if (designId.isEmpty()) return Result.Invalid("design id is required")
+    // Permanent, past the trash: the operator's delete is the one that does not wait a day, and it
+    // also empties a design already in the trash.
     if (!service.adminDeleteDesign(designId)) return Result.NotFound(designId)
     onLog("serve: admin deleted UI-builder design $designId")
-    thumbnails?.evict(designId)
-    runCatching { references?.delete(designId) }
-      .onFailure { onLog("serve: reference overlay for $designId not removed (${it.message})") }
-    runCatching { comments?.delete(designId) }
-      .onFailure { onLog("serve: comment board for $designId not removed (${it.message})") }
-    runCatching {
-      if (links?.delete(designId) == LinksDeleteResult.FAILED) {
-        onLog("serve: links record for $designId not removed")
-      }
-    }
-      .onFailure { onLog("serve: links record for $designId not removed (${it.message})") }
-    runCatching {
-      if (reviews?.delete(designId) == false) {
-        onLog("serve: review record for $designId not removed")
-      }
-    }
-      .onFailure { onLog("serve: review record for $designId not removed (${it.message})") }
-    runCatching {
-      if (guidelineRecords?.delete(designId) == false) {
-        onLog("serve: guidelines record for $designId not removed")
-      }
-    }
-      .onFailure { onLog("serve: guidelines record for $designId not removed (${it.message})") }
+    sidecars.sweep(designId)
     return Result.Deleted(designId)
   }
+
+  /** Every design in the trash, whoever deleted it, most recently deleted first. */
+  fun trash(): List<UiBuilderTrashedDesign> = service.adminListTrash()
 }
 
 /**
