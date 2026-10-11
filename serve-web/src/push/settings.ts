@@ -1,24 +1,17 @@
-// Settings → Notifications: turn Web Push on or off for this browser, and choose what it is for.
+// Settings → Notifications: turn Web Push on or off for this browser and choose what it is for. The
+// server renders the group disabled and hidden (`ServeWeb.pushNotificationSettings`); this enables
+// what the browser can offer.
 //
-// The server renders the group (`ServeWeb.pushNotificationSettings`) with its kinds disabled and its
-// button hidden; this decides what the browser can actually offer and enables exactly that. Three
-// rules shape it:
+// - **Permission is asked only from the click**, first in the handler, so the gesture counts
+//   (Safari) and nobody is prompted on load.
+// - **The worker is registered only when turning on**, at `/push-sw.js` with scope `/`; it handles
+//   only `push` and `notificationclick` (no `fetch`), and the UI builder's narrower `/ui-builder/`
+//   worker keeps the editor. Turning off unregisters it.
+// - **Nothing about a subscription is shown**; the page reads back only kinds and a device count.
 //
-// * **Permission is asked from the click and nowhere else.** `Notification.requestPermission()` is
-//   the first thing the button's handler does, before any network round trip, so the browser sees
-//   the user's gesture (Safari is strict about that) and nobody is ever prompted on page load.
-// * **The worker is registered only when somebody turns notifications on**, at `/push-sw.js` with
-//   scope `/`. It handles `push` and `notificationclick` and nothing else — no `fetch` — so it
-//   cannot change how any page loads, and the UI builder's own `/ui-builder/` worker, being the
-//   more specific scope, keeps controlling the editor. Turning notifications off unregisters it.
-// * **Nothing about a subscription is shown.** The endpoint and keys go to the server in the
-//   subscribe request, and the page only ever reads back the kinds and a device count.
-//
-// A subscription belongs to the browser's origin, not to whoever is signed in, so it outlives a
-// change of account. Two things keep it from delivering one person's notifications to the next:
-// on every load an existing subscription is posted again — idempotent on the server, and it binds
-// the endpoint to the person signed in now — and is shown as on only once the server has said so;
-// and Settings → Session → Sign out turns it off before the session ends.
+// A subscription belongs to the origin, not the signed-in person, so every load re-posts it to bind
+// it to whoever is signed in now (shown as on only after the server agrees), and Sign out turns it
+// off.
 
 import {
     applicationServerKey,
@@ -281,13 +274,9 @@ async function savePreferences(
 }
 
 /**
- * Post this browser's existing subscription again, binding it to whoever is signed in now.
- *
- * The browser keeps a subscription across a change of account, so finding one proves only that
- * *somebody* turned notifications on here. The server's answer is what says it is now this
- * person's: the post is idempotent for the same person, and for a different one it moves the
- * endpoint to them, so the previous person's notifications stop arriving. No `kinds` are sent, so
- * the person's own choice stands. Answers the kinds on success, or the reason it was not bound.
+ * Re-post this browser's existing subscription, binding it to whoever is signed in now (idempotent
+ * for the same person; moves it for a different one). No `kinds` are sent, so the person's choice
+ * stands. Answers the kinds on success, or the reason it was not bound.
  */
 async function rebind(
     group: Group,
@@ -321,10 +310,8 @@ async function refresh(group: Group, browser: PushBrowser): Promise<void> {
             setStatus(group, "Notifications are on for this browser.");
             return;
         }
-        // The server would not bind it to this person (too many devices, a key it no longer
-        // accepts). It must not keep delivering to whoever it belonged to before, so a refusal
-        // ends it here too; a server error or an outage is only reported, and the next load
-        // tries again.
+        // A 4xx refusal must not keep delivering to the previous owner, so it ends the
+        // subscription; 5xx or outages are only reported and retried next load.
         if (bound.status >= 400 && bound.status < 500) {
             await subscription.unsubscribe().catch(() => undefined);
         }
@@ -394,13 +381,9 @@ function wire(group: Group, browser: PushBrowser): void {
 const SIGN_OUT_GRACE_MS = 3000;
 
 /**
- * Turn this browser's notifications off before the Session group's Sign out submits.
- *
- * Signing out ends the session, not the subscription, and the next person to sign in here — or
- * nobody — would otherwise go on receiving the person's notifications. The server drops the
- * subscription on sign-out too, from the device cookie it set at subscribe; this is the half that
- * also removes it from the browser. Never the thing that stops a sign-out: whatever happens, or
- * after [SIGN_OUT_GRACE_MS], the form is submitted.
+ * Turn this browser's notifications off before Sign out submits, so the next person doesn't receive
+ * them (the server also drops the subscription via the device cookie). Never blocks sign-out: the
+ * form submits regardless, at the latest after [SIGN_OUT_GRACE_MS].
  */
 function wireSignOut(
     form: HTMLFormElement,
@@ -440,8 +423,8 @@ function wireSignOut(
 }
 
 /**
- * Enhance every Notifications group on the page. Answers a promise that settles once each group
- * shows this browser's current state, which is what a test waits on.
+ * Enhance every Notifications group; the promise settles once each shows this browser's state (what
+ * tests wait on).
  */
 export function installPushSettings(
     root: ParentNode = document,

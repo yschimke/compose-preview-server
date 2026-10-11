@@ -1,10 +1,6 @@
-// The last few centimetres of a screenshot's journey into a GitHub issue. The normal path hosts
-// the capture and embeds its URL in the prefilled body; the fallback re-copies it inside the submit
-// gesture so browsers permit the clipboard write and an intervening copy cannot replace it.
-//
-// None of that is visible by looking at the running feature: a hand-off that silently never fires
-// looks exactly like one that fired, right up until the paste produces whatever the reporter
-// happened to copy while they were typing the summary.
+// The screenshot hand-off into a GitHub issue: the normal path embeds the hosted capture's URL in
+// the body; the fallback re-copies it inside the submit gesture. A hand-off that never fires looks
+// the same as one that did until the paste, so it is tested here.
 
 import "./setup.js";
 import assert from "node:assert/strict";
@@ -97,11 +93,8 @@ function reportPage(canUpload = false): void {
 }
 
 /**
- * A preview page: the per-preview report box, and the capture block in the launcher panel.
- *
- * Both disclosures start SHUT, which is the state a submit leaves them in — `reportLauncher.ts`
- * closes `#cp-report` on submit (issue #4333) and the capture flow closed the launcher to take the
- * shot. That is what makes the note's visibility a real question here and not on `/report-bug`.
+ * A preview page: the report box and the launcher's capture block, both starting shut, as a submit
+ * leaves them (`reportLauncher.ts` closes `#cp-report` on submit).
  */
 function previewPage(): void {
     history.replaceState({}, "", SUBJECT);
@@ -209,10 +202,8 @@ describe("handing a capture to the clipboard as the issue is opened", () => {
     });
 
     it("hands off from a form the page rebuilt after the bundle loaded", async () => {
-        // `installCapture` runs once per page, but `.cp-report-form` is emitted by whichever
-        // surface bundle drew the preview and the comparison wall replaces its own as the wall
-        // re-renders. A snapshot taken at install time wires a form that is no longer in the
-        // document, and the failure is exactly the silent one this whole change removes.
+        // The wall replaces its `.cp-report-form` as it re-renders, so wiring a form snapshotted at
+        // install time would fail silently.
         stubBrowser([capture("shot-1", "Whole view")]);
         reportPage();
         installCapture();
@@ -279,10 +270,8 @@ describe("hosting captures in the prefilled issue body", () => {
     });
 
     it("discovers the image service on a catalog page and embeds its custom capture", async () => {
-        // The real order is capability first, capture second: the browser resolves the local
-        // capability request while the reporter is still choosing which screen/tab to share.
-        // Pre-populating the store here would only test restored captures and miss the shutter
-        // path this regression is about.
+        // Real order: the capability request resolves while the reporter is still choosing what to
+        // share. Pre-populating the store would only test restored captures, not the shutter path.
         stubBrowser([]);
         Object.defineProperty(globalThis, "fetch", {
             configurable: true,
@@ -385,10 +374,8 @@ describe("telling this report's capture from one the tab is carrying", () => {
     beforeEach(resetDom);
 
     it("stays silent when the only captures are of another page", async () => {
-        // `sessionStorage` lasts as long as the tab. File one report with a screenshot, then file a
-        // second later from somewhere else without taking another, and the first picture is still
-        // in the pile — handing it over while saying "paste this" attaches a screenshot of an
-        // unrelated page, with every appearance of being deliberate.
+        // `sessionStorage` lasts as long as the tab, so a later report without a new capture must
+        // not hand over the earlier, unrelated screenshot.
         stubBrowser([
             capture("shot-1", "Whole view", "/catalog/p/somewhere-else"),
         ]);
@@ -449,10 +436,8 @@ describe("making a failed hand-off visible", () => {
     beforeEach(resetDom);
 
     it("opens the launcher panel the note is buried in", async () => {
-        // On a preview page the note's only home is the capture block inside the launcher panel,
-        // which the capture flow closed to take the shot and the submit closed again. Writing the
-        // one message that needs acting on into a closed drawer is the same silent failure in a
-        // different costume: the reporter returns from GitHub and pastes stale clipboard contents.
+        // On a preview page the note lives in the launcher's capture block, which is closed by now;
+        // writing it there unopened would go unseen.
         stubBrowser([capture("shot-1", "Region")]);
         previewPage();
         installCapture();
@@ -467,8 +452,7 @@ describe("making a failed hand-off visible", () => {
     });
 
     it("leaves the panels shut when the hand-off worked", async () => {
-        // A success has nothing to act on. Reopening the launcher over the page would undo the
-        // dismissal that issue #4333 is about.
+        // A success has nothing to act on, so the launcher stays dismissed.
         stubBrowser([capture("shot-1", "Region")]);
         previewPage();
         installCapture();
@@ -489,10 +473,9 @@ describe("embedding hosted captures in the form actually being submitted", () =>
     function hosted(id: string, label: string): Capture {
         return {
             ...capture(id, label),
-            // Absolute and same-origin: `safeUploadUrl` parses with no base, and
-            // `hostedCaptureUrl` then requires the origin to match and the path to be
-            // `/i/<id>.<ext>`. A relative value fails the first and the store drops the
-            // whole capture.
+            // Absolute and same-origin: `safeUploadUrl` parses without a base and
+            // `hostedCaptureUrl` requires the origin and an `/i/<id>.<ext>` path, else the capture
+            // is dropped.
             uploadedUrl: `${location.origin}/i/${id}.png`,
         };
     }
@@ -502,12 +485,8 @@ describe("embedding hosted captures in the form actually being submitted", () =>
     }
 
     it("writes into a preview page's own form, not just the bug page's", async () => {
-        // Two forms carry a report, with two different body ids: `#cp-bug-body` on `/report-bug`
-        // and `#cp-report-body` on a preview page. Looking only for the first meant a hand-off
-        // from the second embedded nothing — and then reported success anyway, because "every
-        // capture hosted" was read as "every capture embedded". The issue opened with no
-        // screenshot and no clipboard fallback either: the one path where the reporter is told
-        // it worked and it did not.
+        // Both report forms must be handled: `#cp-bug-body` on `/report-bug` and `#cp-report-body`
+        // on a preview page. Otherwise the second embeds nothing yet reports success.
         stubBrowser([hosted("shot-1", "Region")]);
         previewPage();
         installCapture();
@@ -534,11 +513,8 @@ describe("embedding hosted captures in the form actually being submitted", () =>
     });
 
     it("rebuilds from the body as it is now, not as it was first submitted", async () => {
-        // A preview page's body is live: `refreshReportLink` in viewer.ts replaces it wholesale
-        // with the current render URL whenever the knobs change. Caching the first submission's
-        // value and rebuilding every later one from it means the second report quietly describes
-        // the first bug — the reporter changed the preview precisely because the first framing
-        // was wrong.
+        // A preview page's body is live (`refreshReportLink` replaces it as knobs change), so each
+        // submission must be built from the current value, not a cached first one.
         stubBrowser([hosted("shot-1", "Region")]);
         previewPage();
         installCapture();
@@ -560,9 +536,8 @@ describe("embedding hosted captures in the form actually being submitted", () =>
     });
 
     it("copies the newest capture the report will NOT carry", async () => {
-        // A capture is unhosted because its upload failed, or because marking it up cleared the
-        // URL. Copying `latest` regardless sends a picture the body already embeds and drops the
-        // edited one entirely — the reporter's most recent, most deliberate evidence.
+        // An unhosted capture (failed upload, or markup cleared its URL) is the one to copy, not
+        // `latest`, which the body already embeds.
         stubBrowser([
             capture("shot-1", "Edited region"),
             hosted("shot-2", "Whole view"),
@@ -607,9 +582,8 @@ describe("saying the capture will have to be pasted", () => {
     }
 
     it("warns on the report page, before the issue is opened", async () => {
-        // The submit-time note lands on a page the reporter leaves in the same gesture — the issue
-        // form is `target="_blank"` — so on a host that cannot embed anything, the only warning
-        // there has ever been was one nobody was looking at. Issue #556.
+        // The submit-time note lands on a page the reporter leaves (`target="_blank"`), so a host
+        // that cannot embed must warn earlier (see #556).
         stubBrowser([capture("shot-1", "Region")]);
         reportPage();
         installCapture();
@@ -642,8 +616,7 @@ describe("saying the capture will have to be pasted", () => {
         withTemplate();
         installCapture();
         submitReport();
-        // Written synchronously: the form's entry list is built as the handler returns, so a body
-        // set from the clipboard promise would arrive after the issue had already opened.
+        // Written synchronously: the form's entry list is built as the handler returns.
         assert.match(bugBody(), /on the clipboard/);
         assert.doesNotMatch(bugBody(), /Paste your capture of the page here/);
         // In the Screenshot section, not appended to the end of the report.

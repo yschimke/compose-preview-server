@@ -12,17 +12,11 @@ import kotlin.math.min
 import kotlin.math.roundToInt
 
 /**
- * The **link-unfurl card**: a 1200×630 picture of what a page is, drawn once per distinct set of
- * inputs and served immutable off `/social/`.
- *
- * Drawn rather than a catalog's hero render: heroes are portrait phone screenshots that unfurlers
- * crop to an often-empty band, and one sample says nothing about the site. The card is drawn at the
- * Open Graph aspect from live server state, reusing the [ServeHeroImages.Hero] thumbnails already
- * baked (no render permit).
- *
- * Content-addressed (unfurlers cache by URL and often never revalidate) and memoised by input
- * ([cacheKey]: text plus the heroes' content hashes). Nothing is evicted, so the subtitle a caller
- * passes must never carry a per-request value; see [ServeSocialCard.Spec].
+ * The link-unfurl card: a 1200×630 picture of a page, drawn once per distinct input and served
+ * immutable from `/social/`. Drawn rather than a hero render (portrait screenshots crop badly and
+ * show one sample), reusing already-baked [ServeHeroImages.Hero] thumbnails without a render
+ * permit. Content-addressed and memoised by input ([cacheKey]); nothing is evicted, so subtitles
+ * must never carry per-request values (see [ServeSocialCard.Spec]).
  */
 internal class ServeSocialCard {
 
@@ -33,14 +27,9 @@ internal class ServeSocialCard {
     val fileName: String,
     val etag: String,
     /**
-     * The catalogs allowed to serve this card; empty for the front door's own.
-     *
-     * A **set**, not one owner: the file name is a content hash, so two catalogs that draw an
-     * identical card — same title, same preview count, same hero bytes — collapse onto one entry.
-     * Recording a single owner cached the second catalog's card under the first's name, and the
-     * second site then 404'd the very card its own `og:image` advertised. Every spec that produced
-     * these bytes is remembered instead, so a shared hash serves for all of them and none of their
-     * neighbours. See [Spec.system].
+     * Catalogs allowed to serve this card; empty for the front door's. A set because identical
+     * cards from two catalogs share one content hash, and each must still serve it. See
+     * [Spec.system].
      */
     val systems: Set<String> = emptySet(),
   ) {
@@ -58,39 +47,26 @@ internal class ServeSocialCard {
   }
 
   /**
-   * What a card should say and show.
-   *
-   * [title] and [subtitle] must be **stable for as long as the page is** — they are part of the
-   * cache key (see the class doc). A count of published catalogs or previews is fine; a view
-   * counter, a timestamp, or anything else that moves per request is not: it would mint a card per
-   * visit, none of which is ever evicted.
-   *
-   * [heroes] are the already-baked front-door thumbnails, in the order they should appear. At most
-   * [MAX_HEROES] are drawn, for the reason given there. An empty list is valid and lays the text
-   * across the full width, which is the right card for a server publishing nothing yet.
+   * What a card says and shows. [title] and [subtitle] are part of the cache key and must stay
+   * stable for the page's life (counts are fine; timestamps are not, as each value mints a
+   * never-evicted card). [heroes] are baked front-door thumbnails in order, at most [MAX_HEROES];
+   * empty lays the text across the full width.
    */
   data class Spec(
     val title: String,
     val subtitle: String,
     val heroes: List<ServeHeroImages.Hero> = emptyList(),
     /**
-     * The catalog this card depicts, or null for the front door's whole-server card.
-     *
-     * Recorded so a **top-level site** ([ServeSites]) can refuse a neighbour's card. `/social/` is
-     * deliberately ungated — a link unfurler never replays a page's token — and the file name is a
-     * content hash, so a hash published by one catalog's `og:image` on the main host could be
-     * fetched back through a one-catalog hostname and answer with that other catalog's title and
-     * thumbnails. Ownership travels with the card rather than being re-derived at request time,
-     * because by then the bytes are all that is left.
+     * The catalog this card depicts, or null for the whole-server card. Lets a top-level site
+     * ([ServeSites]) refuse a neighbour's card: `/social/` is ungated and content-hashed, so
+     * otherwise another catalog's card could be fetched through a one-catalog hostname.
      */
     val system: String? = null,
   )
 
   private val byFileName = ConcurrentHashMap<String, Card>()
 
-  /**
-   * Memo of the bake, keyed by [cacheKey]. A failed bake caches its failure so it isn't retried.
-   */
+  /** Bake memo by [cacheKey]; failures are cached too. */
   private val baked = ConcurrentHashMap<String, Optional<Card>>()
 
   /** The card for [spec], drawing it on first sight. Null only if PNG encoding fails. */
@@ -108,11 +84,9 @@ internal class ServeSocialCard {
   fun byFileName(fileName: String): Card? = byFileName[fileName]
 
   /**
-   * The memo key: the text plus each hero's **content hash**. Hashes rather than object identity
-   * because a catalog refresh installs fresh [ServeHeroImages.Hero] objects whose bytes are usually
-   * unchanged, and re-baking an identical card on every refresh would grow [byFileName] for
-   * nothing. The unit separator can't occur in a title (it is not text anyone can type) so no field
-   * can be confused with another's.
+   * Memo key: text plus each hero's content hash (not identity, since a refresh installs new hero
+   * objects with usually unchanged bytes). Fields are joined with [FIELD_SEPARATOR], which can't
+   * appear in a title.
    */
   private fun cacheKey(spec: Spec): String =
     (listOf(spec.system.orEmpty(), spec.title, spec.subtitle) +
@@ -147,10 +121,8 @@ internal class ServeSocialCard {
         etag = "\"$hash\"",
         systems = setOfNotNull(spec.system),
       )
-    // Two specs that draw to identical bytes share the URL, so the bytes are already right and
-    // only the OWNERS have to accumulate: a card drawn identically for a second catalog must stay
-    // serveable by that catalog's site too, which first-wins (`putIfAbsent`) silently prevented —
-    // the second site 404'd the very card its own og:image advertised.
+    // Identical bytes share a URL, so only the owners accumulate; first-wins would 404 the second
+    // catalog's own `og:image`.
     return byFileName.compute(card.fileName) { _, existing ->
       when {
         existing == null -> card
@@ -175,13 +147,9 @@ internal class ServeSocialCard {
   }
 
   /**
-   * The headline and its supporting line, as a block vertically centred in the space under the
-   * brand row.
-   *
-   * The headline **shrinks to fit** rather than being truncated: catalog titles are operator data
-   * and range from "Wear M3" to a four-word product name, and a card that clipped one would be
-   * worse than a card that set it a size smaller. Only when the smallest size still overflows two
-   * lines does it ellipsize — at that point the text is long enough that no size would have helped.
+   * Headline and supporting line, vertically centred under the brand row. The headline shrinks to
+   * fit rather than truncating (titles are operator data of varying length), ellipsizing only if
+   * two lines still overflow at the smallest size.
    */
   private fun drawText(g: Graphics2D, spec: Spec, width: Int) {
     val headline =
@@ -242,14 +210,8 @@ internal class ServeSocialCard {
   private data class Laid(val font: Font, val lines: List<String>, val size: Float)
 
   /**
-   * The thumbnails, bottom-aligned in a row down the right of the card, each on its own tonal
-   * panel.
-   *
-   * Bottom-aligned rather than centred because the artwork is device screenshots of differing
-   * aspect — a phone beside a watch face — and standing them on a shared floor reads as a shelf of
-   * devices, while centring them reads as a mistake. The panel is what makes a dark screenshot
-   * legible at all: without it a dark render on the dark card has no edge, and the phone appears to
-   * bleed into the background.
+   * Thumbnails bottom-aligned on tonal panels down the right: a shared floor reads as a shelf of
+   * differently shaped devices, and the panel gives dark screenshots an edge against the dark card.
    */
   private fun drawHeroes(g: Graphics2D, heroes: List<BufferedImage>) {
     val columnX = PAD + TEXT_COLUMN + COLUMN_GAP
@@ -259,10 +221,8 @@ internal class ServeSocialCard {
     val maxImageH = HEIGHT - PAD * 2 - PANEL_INSET * 2
     val floor = HEIGHT - PAD - PANEL_INSET
     heroes.forEachIndexed { index, hero ->
-      // Never past 1.0: a hero is baked at up to 480px on its longest edge, so fitting a *square*
-      // one to the card's height would blow a 480² watch face up to fill half the card — twice the
-      // area of a phone standing beside it, and visibly soft. Capped, the shelf reads as devices at
-      // their own sizes rather than as one image stretched.
+      // Never upscale: a square 480² watch face fitted to the card's height would dwarf the phone
+      // beside it.
       val fit = minOf(maxImageW.toDouble() / hero.width, maxImageH.toDouble() / hero.height, 1.0)
       val w = max(1, (hero.width * fit).roundToInt())
       val h = max(1, (hero.height * fit).roundToInt())
@@ -299,12 +259,8 @@ internal class ServeSocialCard {
   }
 
   /**
-   * [text] broken onto at most [maxLines] lines that each fit [width], or **null** when it doesn't
-   * fit — the signal [drawText] uses to try the next size down.
-   *
-   * Breaks on spaces only. A word longer than the line is left to overflow the measurement and so
-   * fails the fit, which is the honest answer: the caller's next smaller size may well take it, and
-   * mid-word hyphenation of a product name would be worse than either outcome.
+   * [text] broken on spaces into at most [maxLines] lines fitting [width], or null when it doesn't
+   * fit (the signal to try a smaller size). No mid-word hyphenation.
    */
   private fun wrap(
     g: Graphics2D,
@@ -332,10 +288,7 @@ internal class ServeSocialCard {
     return lines.takeIf { it.isNotEmpty() && it.size <= maxLines }
   }
 
-  /**
-   * Last resort for text that fits at no size: fill [maxLines] and cut the final one with an
-   * ellipsis. Character-wise, because by definition word-wrapping has already failed here.
-   */
+  /** Last resort when no size fits: fill [maxLines] and ellipsize the last, character-wise. */
   private fun ellipsize(
     g: Graphics2D,
     text: String,
@@ -364,10 +317,8 @@ internal class ServeSocialCard {
 
   companion object {
     /**
-     * The card's pixel size. 1200×630 is what the Open Graph documentation names, what X's
-     * `summary_large_image` is laid out at, and what Slack, Discord, LinkedIn and iMessage all
-     * treat as the native shape — so the card is never cropped by anyone. Its 1.90:1 aspect is also
-     * comfortably inside the band [ServeWeb] will still claim a large card for.
+     * The card size: 1200×630 is the Open Graph and X `summary_large_image` size and native for
+     * Slack, Discord, LinkedIn and iMessage, so it is never cropped.
      */
     const val WIDTH = 1200
 
@@ -377,21 +328,14 @@ internal class ServeSocialCard {
     const val PATH_PREFIX = "/social"
 
     /**
-     * Thumbnails drawn at most.
-     *
-     * Two, not more, because the artwork is *portrait* and the card is wide: three phones side by
-     * side have to shrink to a third of the art column's width each, which at the ~500px a chat
-     * client actually renders the card at leaves each one about 60px wide — a grey sliver rather
-     * than a recognisable UI. Two fill the card's full height at their natural size and still say
-     * "there is more than one catalog here", which is all the artwork is being asked to say.
+     * Thumbnails drawn at most: portrait art in a wide card means three would each shrink to
+     * slivers at chat-client size; two fill the height and still say "more than one catalog".
      */
     const val MAX_HEROES = 2
 
     /**
-     * Widest a single thumbnail is drawn, matching [ServeHeroImages.DISPLAY_CAP] — the CSS size the
-     * front door lays the same image out at. Without it a square hero (a watch face bakes to 480²)
-     * fits the card's *height* and takes over the composition; with it, a phone and a watch stand
-     * beside each other at the relative sizes they have in the world.
+     * Widest a thumbnail is drawn, matching [ServeHeroImages.DISPLAY_CAP], so a phone and a watch
+     * keep their relative sizes.
      */
     private const val MAX_HERO_WIDTH = ServeHeroImages.DISPLAY_CAP
 
@@ -432,8 +376,8 @@ internal class ServeSocialCard {
     private const val HASH_CHARS = 16
 
     /**
-     * Separates the fields of [cacheKey]. ASCII unit separator: it is not text anyone can type into
-     * a catalog title, so no combination of title and subtitle can collide with a different pair.
+     * Separates [cacheKey] fields: the ASCII unit separator can't be typed into a title, so no
+     * fields collide.
      */
     private const val FIELD_SEPARATOR = "\u001F"
 

@@ -1,23 +1,13 @@
-// `<cp-design-page>` — a whole page of the design file, inlined as SVG, with this catalog's renders
-// standing in for the design's own drawing of the components it implements.
+// `<cp-design-page>`: a design-file page inlined as SVG, with this catalog's renders standing in
+// for the components it implements.
 //
-// THE SVG IS THE GEOMETRY, AND THAT IS THE WHOLE DESIGN
+// The SVG is the geometry: each node is found by `data-node-id` and measured by the browser, so the
+// manifest carries no rectangles and the swap lands exactly on the drawn shape. Positions are
+// percentages of the stage, so a resize only re-measures.
 //
-// The screen backdrop this replaced was a flat PNG, so its manifest had to carry a rectangle per
-// component and this file did no measuring at all. An inlined SVG is a document: the node is right
-// there, `data-node-id` names it, and its box is whatever the browser says it is. So the manifest
-// carries no geometry, and everything positional here is measured rather than declared. That is
-// strictly more accurate — a Figma export box includes effect bleed, so a recorded rectangle and the
-// drawn shape disagree by a few pixels on anything with a shadow — and it is what makes the swap
-// land exactly on the shape it replaces.
-//
-// Positions are written as percentages of the stage, so a resize only has to re-measure rather than
-// re-place, and a stale measurement degrades into a small offset rather than a wrong corner.
-//
-// Renders nothing of its own; `serve.css` hides the tag. The decisions live next door:
-// `design/ink.ts` (fitting our drawn pixels onto the design's drawn box), `design/score.ts` (what a
-// diff badge says), `design/geometry.ts` (slots, crops, the tip) and `design/lanes.ts` (the three
-// lanes and the two filters).
+// Renders nothing itself (`serve.css` hides the tag). Decisions live in `design/ink.ts` (fitting
+// drawn pixels), `design/score.ts` (badges), `design/geometry.ts` (slots, crops, tip) and
+// `design/lanes.ts` (lanes and filters).
 
 import { ControllerElement, customElement } from "../controllerElement.js";
 import { urlState } from "../urlState.js";
@@ -55,14 +45,9 @@ import {
 import { badgeFor } from "../design/score.js";
 
 /**
- * One catalog's render of a node, in that node's slot.
- *
- * A slot can hold TWO of these now — this catalog's and the `compareWith` sibling's — because the
- * diff axis scores a pair and either side of that pair may be the one on screen. They are separate
- * elements rather than one element whose `src` is swapped: a swapped `src` re-fetches and re-decodes
- * on every flip, loses the ink measurement each image needs its own of, and would put a URL through
- * JavaScript as a string (CodeQL `js/xss-through-dom`), which is exactly what the server-built
- * `<template>` exists to avoid.
+ * One catalog's render of a node in its slot. A slot can hold two (ours and the `compareWith`
+ * sibling's) as separate elements rather than one with a swapped `src`, which would re-fetch, lose
+ * the per-image ink measurement, and pass a URL through JavaScript (CodeQL `js/xss-through-dom`).
  */
 interface Picture {
     image: HTMLImageElement;
@@ -95,16 +80,10 @@ const rectOf = (element: Element): Box => {
 };
 
 /**
- * A DESIGN NODE's box, which is not the same question as an element's box.
- *
- * `getBoundingClientRect()` ignores `clip-path`, so a node whose export keeps an oversized shape
- * inside it by clipping — a placeholder's shimmer sweep is the case that found this — measures as
- * the sweep rather than as the component, and the render fitted into that slot lands on the page as
- * a blob several times the size of the thing it stands for (issue #4323). `paintedRect` walks the
- * clips; it degrades to exactly this rect when there are none to walk.
- *
- * A node clipped away to nothing comes back as a zero-area box rather than as its unclipped rect,
- * which is what the caller already spells "missing as far as the sheet is concerned".
+ * A design node's box. `getBoundingClientRect()` ignores `clip-path`, so a node clipping an
+ * oversized shape measured as that shape and its render landed as a blob. `paintedRect` walks the
+ * clips (degrading to this rect without any). A node clipped to nothing returns a zero-area box,
+ * which callers treat as missing.
  */
 const EMPTY_BOX: Box = { left: 0, top: 0, width: 0, height: 0 };
 
@@ -112,10 +91,8 @@ const nodeBoxOf = (element: SVGElement): Box =>
     paintedRect(element, domGeometry) ?? EMPTY_BOX;
 
 /**
- * Where each source's renders are parked until something asks for them.
- *
- * `design` is absent on purpose and always will be: the design's own drawing is the inlined SVG,
- * already on the page, and the one source that needs no template because it needs no fetching.
+ * Where each source's renders wait until asked for. `design` has none: its drawing is the inlined
+ * SVG.
  */
 const SOURCE_TEMPLATES: ReadonlyArray<[Source, string]> = [
     ["code", "[data-cp-page-render-source]"],
@@ -136,13 +113,9 @@ export class DesignPage extends ControllerElement {
     private stage!: HTMLElement;
     private svg!: SVGSVGElement;
     /**
-     * The zooming layer, transformed by `<cp-page-zoom>`: the export, the overlays and the renders
-     * inside them, moved by ONE transform so nothing can come unstuck from the shape it marks.
-     * Everything is measured against this rather than the stage, because it is the box the overlays'
-     * percentages are relative to — and, being transformed, their containing block as well.
-     *
-     * Named for the LAYER rather than its class, because "canvas" in this file also means a
-     * `<canvas>` element — the one the ink fit rasterises a render into.
+     * The zooming layer transformed by `<cp-page-zoom>`: export, overlays and renders move under
+     * one transform. Everything is measured against it, since it is the overlays' containing block.
+     * Named "layer" because "canvas" here means the `<canvas>` the ink fit uses.
      */
     private zoomLayer!: HTMLElement;
 
@@ -169,11 +142,9 @@ export class DesignPage extends ControllerElement {
 
     private sheetRaster: Promise<Sheet | null> | null = null;
     /**
-     * Scored once per PAIRING, keyed by {@link scoreKey}. The numbers cannot move without the
-     * renders moving, and re-scoring on every flip back would redo dozens of rasterise-and-count
-     * passes for an answer already on screen — while keying on the node alone would answer "how far
-     * from wear-m3?" with the number measured against Figma. A pairing that FAILED is left unscored,
-     * so re-entering it retries.
+     * Scored once per pairing ({@link scoreKey}), so flipping back doesn't redo the work, and a
+     * node's score against Figma isn't reused for the sibling. Failed pairings stay unscored so
+     * re-entry retries.
      */
     private scoredNodes = new Set<string>();
     private described: string | null = null;
@@ -236,10 +207,8 @@ export class DesignPage extends ControllerElement {
             const id = overlay.getAttribute("data-cp-node") ?? "";
             const target = this.findInSvg(id);
             if (!target) {
-                // Named by the manifest, absent from the export — a layer the design tool flattened
-                // on the way out. Say so on the element rather than dropping it: the row in the list
-                // still shows the mapping, and `[data-cp-missing]` is what a test (or a person
-                // wondering where their shape went) can look for.
+                // Named by the manifest but absent from the export (flattened by the design tool):
+                // mark it rather than drop it, so the list still shows the mapping.
                 overlay.setAttribute("data-cp-missing", "");
                 continue;
             }
@@ -257,9 +226,8 @@ export class DesignPage extends ControllerElement {
         this.wireNodes();
         this.wireControls();
 
-        // The URL has the first word, before anything is applied: a shared
-        // `?lane=parallel&baseline=design` sheet must open on that pairing rather than paint the
-        // code lane and swap a frame later, which on a page of this size is a visible rebuild.
+        // Hydrate from the URL first, so a shared `?lane=parallel&baseline=design` opens on that
+        // pairing without a visible rebuild.
         this.hydrate();
         this.shown = this.lane();
         this.applyOutlines();
@@ -292,9 +260,7 @@ export class DesignPage extends ControllerElement {
     }
 
     /**
-     * Built by COMPARING attribute values rather than with `querySelector` on an attribute value,
-     * which would need escaping. A node id is text from a design file, and interpolating it into a
-     * selector has the same shape as an HTML injection.
+     * Compare attribute values rather than interpolating the id (design-file text) into a selector.
      */
     private findInSvg(id: string): SVGElement | null {
         if (!id) return null;
@@ -315,9 +281,8 @@ export class DesignPage extends ControllerElement {
             const node = nodeBoxOf(entry.target);
             const slot = slotIn(layer, node);
             if (!slot) {
-                // A zero-area node is missing as far as the sheet is concerned; a zero-area LAYER
-                // means the page is not laid out yet, and the previous placement is left alone for
-                // the observer to correct.
+                // A zero-area node is missing; a zero-area layer means not laid out yet, so leave
+                // the placement for the observer.
                 if (layer.width > 0 && layer.height > 0)
                     entry.overlay.setAttribute("data-cp-missing", "");
                 continue;
@@ -349,11 +314,9 @@ export class DesignPage extends ControllerElement {
     }
 
     /**
-     * The tight bounds of an image's non-transparent pixels — the browser-side twin of
-     * `ServeThumbCrop.pngAlphaBounds`, down to the alpha threshold.
-     *
-     * Null when there is nothing to measure with: no canvas, or a tainted one (a cross-origin
-     * render). Both fall back to the plain `contain` this lane had before.
+     * Tight bounds of an image's non-transparent pixels, the browser twin of
+     * `ServeThumbCrop.pngAlphaBounds`. Null without a usable canvas (none, or tainted), falling
+     * back to plain `contain`.
      */
     private inkBounds(image: HTMLImageElement): InkBounds | null {
         return imageInk(image);
@@ -362,9 +325,7 @@ export class DesignPage extends ControllerElement {
     private takeInk(entry: Entry, picture: Picture): void {
         const read = () => {
             picture.ink = this.inkBounds(picture.image);
-            // Just this slot. The node's box hasn't moved — only what we now know about the image
-            // has — and re-running the whole measure per arriving render is dozens of layout reads
-            // for one placement.
+            // Re-place just this slot; the node's box hasn't moved.
             const node = nodeBoxOf(entry.target);
             if (node.width > 0 && node.height > 0)
                 this.placeRender(picture, node);
@@ -377,21 +338,10 @@ export class DesignPage extends ControllerElement {
     // ---- the renders ---------------------------------------------------------
 
     /**
-     * A source's renders are served inside an inert `<template>` and adopted the first time a
-     * pairing names that source — as the lane on the sheet, or as the baseline it is scored
-     * against.
-     *
-     * `code` is normally adopted on first paint, since that is the lane the page opens on; the
-     * images carry `loading="lazy"`, which is what keeps a tall sheet from asking the daemon for
-     * every node at once. `parallel` is adopted only when the reader asks for the sibling, and that
-     * gate is the point: those images come off ANOTHER catalog's daemon, and a page that warmed
-     * them speculatively would charge every reader of every sheet for a comparison almost none of
-     * them opened.
-     *
-     * A template rather than a `data-src` swap, deliberately: template content is inert, so the
-     * browser parses it and loads none of its images until it is adopted — and it keeps every URL
-     * server-built and server-escaped. Reading a URL out of the DOM and assigning it to `img.src` is
-     * a taint path (CodeQL `js/xss-through-dom`), and not having the sink beats validating it.
+     * A source's renders are served in an inert `<template>` and adopted the first time a pairing
+     * names that source. `code` is adopted on first paint (images are `loading="lazy"`); `parallel`
+     * only when asked for, since those images come from another catalog's daemon. A template rather
+     * than a `data-src` swap keeps every URL server-built and avoids a `js/xss-through-dom` sink.
      */
     private armSource(source: Source): void {
         const template = this.sources.get(source);
@@ -418,21 +368,10 @@ export class DesignPage extends ControllerElement {
     }
 
     /**
-     * The design's drawing is hidden ONLY once the picture the reader asked for has actually
-     * arrived, and comes back if it never does.
-     *
-     * Hiding on adoption instead leaves an empty slot for any render the server can't produce: a
-     * preview that throws, a daemon that falls over, a 404. There is no "untick to get the sheet
-     * back" control, so a failed render would be a hole where the whole point is that something is
-     * in the slot.
-     *
-     * Recomputed from the SHOWN source rather than latched on the first image to load, because a
-     * slot can now hold two of them: with our render broken and the sibling's fine, latching would
-     * hide the design's drawing on the sibling's arrival and leave the `code` lane showing nothing
-     * at all.
-     *
-     * Also hides a failed `<img>` itself, or the browser's broken-image glyph would sit on top of
-     * the drawing just restored.
+     * Hide the design's drawing only once the requested picture has arrived, and restore it if it
+     * fails, so a missing render never leaves a hole. Recomputed from the shown source (a slot can
+     * hold two pictures). A failed `<img>` is hidden too, so the broken-image glyph doesn't cover
+     * the drawing.
      */
     private standIn(entry: Entry, picture: Picture): void {
         const image = picture.image;
@@ -451,12 +390,9 @@ export class DesignPage extends ControllerElement {
     }
 
     /**
-     * Whether the design's own drawing of [entry] stays hidden under what is being shown.
-     *
-     * Not recomputed on the design's own lane, and that is not an oversight: nothing stands in
-     * there, `cp-page-hide-design` is off, and the sheet's drawing is back whatever this says. The
-     * mark is what a slot WOULD be covered by, so clearing it on a lane that covers nothing would
-     * lose the record of which slots have a stand-in at all.
+     * Whether [entry]'s design drawing stays hidden under what is shown. Not recomputed on the
+     * design lane: the mark records what a slot would be covered by, which must survive a lane that
+     * covers nothing.
      */
     private syncStandIn(entry: Entry): void {
         const lane = this.lane();
@@ -500,11 +436,8 @@ export class DesignPage extends ControllerElement {
     }
 
     /**
-     * A change to what the sheet SHOWS, which may move the baseline with it.
-     *
-     * The two axes range over the same three sources, so flipping onto the one you were scoring
-     * against is a SWAP rather than a contradiction — {@link baselineAfterLane} hands the baseline
-     * the lane just vacated, and the pair the reader was looking at survives the flip.
+     * A change to what the sheet shows. Both axes range over the same sources, so switching onto
+     * the current baseline swaps them ({@link baselineAfterLane}) and keeps the pair.
      */
     private changeLane(): void {
         const next = this.lane();
@@ -526,12 +459,8 @@ export class DesignPage extends ControllerElement {
     }
 
     /**
-     * Hides the baseline the sheet is already showing, rather than disabling it in place.
-     *
-     * A control that can never do anything is worse than one that is not there: "diff ours against
-     * ours" is 0.0% in every slot by construction, and a permanently dead third button is what the
-     * catalogs with no sibling — which is most of them — would be left looking at. Hidden, the group
-     * always offers exactly the comparisons that exist.
+     * Hide the baseline the sheet already shows rather than disabling it: comparing a source with
+     * itself is always 0.0%, and most catalogs have no sibling.
      */
     private syncBaselines(): void {
         const lane = this.lane();
@@ -549,11 +478,9 @@ export class DesignPage extends ControllerElement {
     }
 
     /**
-     * Hold a `Diff against` control to see every badge; let go to get the sheet back.
-     *
-     * Re-entered through {@link applyLane} rather than toggling the class here, so the gate on the
-     * diff axis being on at all is stated once, and a release that arrives after the reader has
-     * already switched it off cannot leave the class behind.
+     * Hold a `Diff against` control to see every badge; release to get the sheet back. Goes through
+     * {@link applyLane} so the diff-axis gate is stated once and a late release can't strand the
+     * class.
      */
     private holdDiff(held: boolean): void {
         if (this.diffHeld === held) return;
@@ -562,10 +489,8 @@ export class DesignPage extends ControllerElement {
     }
 
     /**
-     * The resting layer of colour over every node: off by default, because the sheet is the content
-     * and thirty-eight coloured rectangles are an answer to a question nobody asked yet. The legend
-     * only explains marks that are actually on screen, so it follows the toggle rather than standing
-     * above an unmarked sheet naming four colours it isn't showing.
+     * Node outlines are off by default (the sheet is the content). The legend follows the toggle so
+     * it only explains marks on screen.
      */
     private applyOutlines(): void {
         const toggle = this.outlinesToggle;
@@ -591,9 +516,8 @@ export class DesignPage extends ControllerElement {
     }
 
     /**
-     * A muted overlay is also taken out of the tab order and the accessibility tree. CSS alone can't
-     * do this: `opacity: 0` + `pointer-events: none` still leaves a control focusable, so a keyboard
-     * user could tab onto an invisible rectangle — no focus ring, no indication of where they are.
+     * Muted overlays are removed from the tab order and accessibility tree too; CSS alone leaves
+     * them focusable.
      */
     private syncFocusability(): void {
         const unlinkedOnly = Boolean(this.unlinkedToggle?.checked);
@@ -608,27 +532,13 @@ export class DesignPage extends ControllerElement {
         }
     }
 
-    // ---- the diff axis -------------------------------------------------------
-    //
-    // When the DESIGN is one half of the pair, its side is this page's own SVG cropped to the node —
-    // not the component's imported reference raster. Both are defensible, but only one is on the
-    // page already: cropping the export needs no server round trip, no manifest field, and covers
-    // every node that has a render rather than only those with an imported reference. It also
-    // answers the question the page actually poses, which is about THIS slot: how far is our pixel
-    // from the design's pixel, here, at this size, in the layout the designer drew.
-    //
-    // When both halves are catalogs — ours against the `compareWith` sibling — no crop is involved
-    // at all: two rasters of the same kit cell, scored directly. That comparison is the one the
-    // export cannot make, because the two catalogs implement one design and the design has no
-    // opinion about which of them is right.
+    // The diff axis. When the design is half the pair, its side is this page's SVG cropped to the
+    // node (already on the page, covers every rendered node, and compares at this slot's size and
+    // layout). When both halves are catalogs, two rasters of the same cell are scored directly.
 
     /**
-     * ONE raster of the sheet, cropped per node — not one clone of the sheet per node.
-     *
-     * The first cut cloned, serialised and URI-encoded the whole export for every scoreable node. On
-     * this catalog's own Shape page that is 858 KB × 35 nodes, so entering the lane built well over
-     * 100 MB of transient markup before a single comparison settled. One raster costs one
-     * serialisation and one decode, and every crop is a `drawImage` out of it.
+     * One raster of the sheet, cropped per node, rather than cloning and encoding the whole export
+     * per node (tens of copies of a large SVG).
      */
     private rasteriseSheet(): Promise<Sheet | null> {
         if (this.sheetRaster) return this.sheetRaster;
@@ -642,9 +552,7 @@ export class DesignPage extends ControllerElement {
         clone.setAttribute("height", String(sized.height));
         clone.removeAttribute("style");
         const markup = new XMLSerializer().serializeToString(clone);
-        // A `data:` URL rather than a blob: nothing is allocated to leak, and the string is one this
-        // element just built out of the page's own markup rather than anything a URL could be read
-        // from.
+        // A `data:` URL rather than a blob: nothing to leak, built from the page's own markup.
         const url = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(markup)}`;
         this.sheetRaster = new Promise<Sheet | null>((resolve) => {
             const image = new Image();
@@ -663,14 +571,10 @@ export class DesignPage extends ControllerElement {
     }
 
     /**
-     * The node's own drawing, cut out of that raster.
-     *
-     * KNOWN LIMIT: the crop is of the sheet, so whatever the design drew BEHIND or across the node —
-     * a page backdrop, an overlapping neighbour — is in the reference while our render carries only
-     * the component. On a definition sheet (a grid of component sets on a flat ground) that is a
-     * near-uniform background against the scorer's own white, which is small; on a composed screen it
-     * would not be. Isolating the node would mean a clone per node, which is the cost the single
-     * raster exists to avoid.
+     * The node's drawing, cropped from the sheet raster. Known limit: anything the design drew
+     * behind or across the node is included, while our render has only the component. Small on a
+     * definition sheet (flat ground), larger on composed screens; isolating nodes would cost a
+     * clone each.
      */
     private async sheetImage(
         target: SVGElement,
@@ -684,22 +588,10 @@ export class DesignPage extends ControllerElement {
         canvas.height = Math.max(1, Math.round(crop.height));
         const context = canvas.getContext("2d");
         if (!context) return null;
-        // White, to match what the scorer composites OUR render onto. Without it a transparent
-        // design node would be compared as black and every score would be wrong in the same
-        // direction.
-        //
-        // This stays even though the scorer now composites on two grounds, because THIS crop is not
-        // an isolated node: `rasteriseSheet` rasterises a clone of the whole sheet, so the crop
-        // carries whatever the design drew behind and around the target — on a definition sheet, an
-        // opaque ground and its neighbouring cells. That furniture is opaque, so no ground moves it,
-        // while the render's surround is transparent and every ground does. Handing the crop over
-        // unflattened would make the black pass compare light sheet furniture against a black
-        // surround and charge the difference to the component, which `scoreOnEveryGround`'s
-        // minimum would then take as the answer.
-        //
-        // The scorer's own opacity gate catches this even without the fill — an opaque reference
-        // never earns a second ground — but normalising here keeps the two lanes agreeing about
-        // what the reference *is* rather than relying on that gate to notice.
+        // White, matching what the scorer composites our render onto, so transparent design nodes
+        // don't compare as black. Kept despite the scorer's two grounds: the crop carries opaque
+        // sheet furniture around the node, which no ground changes, while the render's transparent
+        // surround changes with each; flattening keeps the lanes agreeing on what the reference is.
         context.fillStyle = "#fff";
         context.fillRect(0, 0, canvas.width, canvas.height);
         context.drawImage(
@@ -717,10 +609,8 @@ export class DesignPage extends ControllerElement {
     }
 
     /**
-     * A render is `loading="lazy"`, so on a tall sheet most of them have not been fetched — let
-     * alone decoded — when the lane is entered. Scoring an undecoded image measures a blank, so each
-     * comparison waits for its own image and a failure is left RETRYABLE rather than burned into a
-     * permanent dash.
+     * Renders are lazy, so most aren't decoded when the lane opens. Each comparison waits for its
+     * own image; failures stay retryable.
      */
     private decoded(image: HTMLImageElement): Promise<HTMLImageElement> {
         if (image.complete && image.naturalWidth > 0)
@@ -730,9 +620,8 @@ export class DesignPage extends ControllerElement {
             image.addEventListener("error", () =>
                 reject(new Error("render unavailable")),
             );
-            // `loading="lazy"` only fetches on approach, and a node far below the fold may never be
-            // approached. Asking for it explicitly is what makes the lane answer for the whole sheet
-            // rather than only the part that has been scrolled past.
+            // Lazy images only load on approach; request it explicitly so the lane covers the whole
+            // sheet.
             if (image.loading === "lazy") image.loading = "eager";
         });
     }
@@ -748,12 +637,8 @@ export class DesignPage extends ControllerElement {
     }
 
     /**
-     * One side of the comparison, decoded and ready to score.
-     *
-     * The three sources are not the same KIND of thing and this is where that stops mattering: the
-     * design's is cut out of the sheet already on the page, ours and the sibling's are rasters the
-     * server produced. Above this line a pairing is just two sources; below it, each knows how to
-     * become pixels.
+     * One side of the comparison, decoded: the design's is cut from the sheet, ours and the
+     * sibling's are server rasters.
      */
     private async pictureFor(
         entry: Entry,
@@ -768,11 +653,8 @@ export class DesignPage extends ControllerElement {
     }
 
     private score(): void {
-        // Read at SCORE time, not at install. `format-compare.js` publishes the global from its own
-        // script tag, and on this page that tag comes after the components bundle — so an element
-        // that cached the handle when it upgraded would cache `null` and the diff axis would score
-        // nothing, silently, with every badge stuck on a dash. Reading it here costs one property
-        // lookup per entry into the axis and cannot be got wrong by moving a script.
+        // Read at score time, not install: `format-compare.js` loads after the components bundle,
+        // so a handle cached at upgrade would be `null`.
         const compare = compareApi();
         if (!compare) return;
         const lane = this.lane();
@@ -799,10 +681,8 @@ export class DesignPage extends ControllerElement {
         baseline: Baseline,
         compare: CompareApi,
     ): Promise<void> {
-        // The badge is the whole readout, deliberately. A per-node diff MAP was the obvious next
-        // thing and is the wrong thing here: thirty-eight magenta thumbnails at slot size is the
-        // annotated sheet this page was just rescued from. The number triages; the map is one click
-        // away, at a size where it can be read.
+        // The badge is the whole readout: per-node diff maps would clutter the sheet; the full map
+        // is one click away.
         const badge = this.badgeElement(entry.overlay);
         badge.textContent = "…";
         try {
@@ -816,11 +696,8 @@ export class DesignPage extends ControllerElement {
             badge.textContent = read.text;
             badge.title = read.title;
             badge.setAttribute("data-cp-score", read.band);
-            // The band on the NODE as well as on the badge. The badges only appear where the reader
-            // is pointing now (see {@link holdDiff}), so without this the diff lane at rest would be
-            // an unmarked sheet — the triage would be there and invisible. Colour on the node
-            // survives the badge being hidden, which is the whole point of hiding it: the sheet says
-            // where to look, the badge says how far.
+            // The band goes on the node too, so the diff lane at rest still shows where to look
+            // while badges only appear on demand.
             entry.overlay.setAttribute("data-cp-score", read.band);
             entry.overlay.setAttribute(
                 "data-cp-score-value",
@@ -836,15 +713,9 @@ export class DesignPage extends ControllerElement {
         }
     }
 
-    // ---- describing a node ---------------------------------------------------
-    //
-    // Describing follows the POINTER rather than landing in a strip under the sheet. The strip was
-    // in the wrong place: a specimen sheet is taller than the fold, so on the shapes two thirds down
-    // the page the answer appeared somewhere the reader could not see it while pointing.
-    //
-    // Its content is the audit list's own row, CLONED — one server-built description of a node
-    // instead of two that can disagree, and the row's `href` never passes through JavaScript as a
-    // string, so the tip cannot become the taint path `armRenders` avoids for the same reason.
+    // Describing a node follows the pointer (a strip under a tall sheet was out of view). The tip
+    // clones the audit list's own row, so there is one description and its `href` never passes
+    // through JavaScript.
 
     private rowFor(nodeId: string): HTMLElement | null {
         if (!this.list) return null;
@@ -893,10 +764,7 @@ export class DesignPage extends ControllerElement {
         tip.style.top = `${at.top}px`;
     }
 
-    /**
-     * A keyboard reader gets the same tip, parked at the node instead of at a pointer that isn't
-     * there. Without this, tabbing the sheet would light the outline and say nothing.
-     */
+    /** Keyboard readers get the same tip, parked at the node. */
     private parkTipAt(spot: HTMLElement): void {
         const tip = this.tip;
         if (!tip || tip.hidden) return;
@@ -924,10 +792,7 @@ export class DesignPage extends ControllerElement {
             spot.classList.remove("cp-page-selected");
     }
 
-    /**
-     * Hovering a row in the list highlights its node on the sheet, and vice versa — the cheapest way
-     * to answer "which one is that?" on a sheet with thirty-five near-identical silhouettes.
-     */
+    /** Hovering a list row highlights its node and vice versa. */
     private pair(nodeId: string, on: boolean): void {
         for (const element of this.root.querySelectorAll("[data-cp-node]")) {
             if (element.getAttribute("data-cp-node") === nodeId)
@@ -937,12 +802,9 @@ export class DesignPage extends ControllerElement {
 
     private wireNodes(): void {
         for (const spot of this.overlays) {
-            // Clicking GOES. The overlay is an anchor, so the browser already does the right thing
-            // for the ordinary case, for the middle click and for a modifier click — this handler
-            // exists only to redirect the diff lane, where the destination is the component's full
-            // comparison rather than its preview. Redirected by clicking a second server-built
-            // anchor, never by assigning a URL, and only for a plain left click so "open in a new
-            // tab" keeps working.
+            // Clicking navigates: the overlay is an anchor, so ordinary, middle and modifier clicks
+            // work. This handler only redirects plain left clicks in the diff lane to the
+            // component's full comparison, by clicking a second server-built anchor.
             this.on(spot, "click", (event) => {
                 const click = event as MouseEvent;
                 if (this.baseline() === "off") return;
@@ -966,9 +828,7 @@ export class DesignPage extends ControllerElement {
             "[data-cp-node]",
         )) {
             const id = element.getAttribute("data-cp-node") ?? "";
-            // Pointing DESCRIBES. Sweeping the sheet describes several components in one pass
-            // without committing to any of them — the reading motion the page is for. Keyboard focus
-            // does exactly the same thing, so tabbing the sheet reads like sweeping it.
+            // Pointing (or keyboard focus) describes a component without committing to it.
             this.on(element, "mouseenter", (event) => {
                 const move = event as MouseEvent;
                 this.pair(id, true);
@@ -981,9 +841,7 @@ export class DesignPage extends ControllerElement {
             });
             this.on(element, "mouseleave", () => {
                 this.pair(id, false);
-                // Unlike the strip it replaced, the tip DOES clear on the way out — it sits over the
-                // sheet, so leaving it up would cover the very drawing the reader moved on to look
-                // at.
+                // The tip clears on leave, since it sits over the sheet.
                 if (this.described === id) this.hideTip();
             });
             this.on(element, "focus", () => {
@@ -997,10 +855,9 @@ export class DesignPage extends ControllerElement {
             });
         }
 
-        // Escape clears the selection from anywhere on the page — including from inside the
-        // disclosure, where a reader who arrived by keyboard is most likely to be. `<cp-page-zoom>`
-        // watches for the same key and defers to this while `.cp-page-selected` is on the sheet, so
-        // one press unwinds the selection and the next unwinds the zoom.
+        // Escape clears the selection from anywhere. `<cp-page-zoom>` defers to this while
+        // `.cp-page-selected` is on the sheet, so one press clears selection and the next unwinds
+        // zoom.
         this.on(this.root, "keydown", (event) => {
             const key = event as KeyboardEvent;
             if (key.key !== "Escape" || !this.described) return;
@@ -1009,22 +866,15 @@ export class DesignPage extends ControllerElement {
                     candidate.getAttribute("data-cp-node") === this.described,
             );
             this.hideTip();
-            // Focus goes back to the node that was selected — but only while that node is still
-            // exposed. The coverage filter takes the nodes it mutes out of the accessibility tree,
-            // and a selection survives the filter being switched on, so the node Escape wants to
-            // hand focus back to may by then be `aria-hidden` and 12% opaque. Focusing it would drop
-            // a keyboard or screen-reader user onto an element the page has deliberately hidden;
-            // leaving focus where it is (on the filter they just used) is the honest alternative.
+            // Return focus to the selected node only while it is still exposed; the coverage filter
+            // may have made it `aria-hidden`.
             if (spot && !spot.hasAttribute("aria-hidden")) spot.focus();
         });
     }
 
     /**
-     * While the diff axis is on, a node's click leaves for the component's full comparison rather
-     * than selecting in place — the number on the sheet is the invitation, and the diff map,
-     * triptych and wipe are what it opens onto. That viewer carries its own source picker, so the
-     * sibling comparison is one control away from where this lands. Clicking a server-built anchor,
-     * never assigning a URL.
+     * With the diff axis on, a node click opens the component's full comparison (whose source
+     * picker covers the sibling), via a server-built anchor.
      */
     private armDiffLinks(): void {
         const source = this.diffLinkSource;
@@ -1042,10 +892,7 @@ export class DesignPage extends ControllerElement {
         this.diffLinkSource = null;
     }
 
-    /**
-     * Put the URL's state onto the controls, without applying it — the caller owns the order the
-     * four are applied in, and it is not this method's to duplicate.
-     */
+    /** Put the URL's state onto the controls without applying it; the caller owns the order. */
     private hydrate(): void {
         const url = urlState();
         if (!url) return;
@@ -1066,12 +913,8 @@ export class DesignPage extends ControllerElement {
     }
 
     /**
-     * Write the four controls into the address bar.
-     *
-     * Pushed, not replaced: each of them is a discrete choice — a lane, a baseline, a filter — and
-     * Back returning to the previous pairing is the whole point of naming them. The press-and-hold
-     * that reveals every badge is deliberately NOT here: it is a gesture, not a state, and it is
-     * over before a history entry would be worth having.
+     * Write the four controls into the address bar, pushed (each is a discrete choice). The
+     * press-and-hold badge reveal is a gesture, not state, so it isn't recorded.
      */
     private syncUrl(): void {
         urlState()?.push(
@@ -1110,12 +953,9 @@ export class DesignPage extends ControllerElement {
                 this.syncUrl();
             });
         }
-        // The hold, on every scoring control rather than on one lane's own. Its label is the hit
-        // target a pointer actually lands on (the radio itself is visually replaced), while the
-        // keyboard reaches the input — so the press is taken from both and the release from
-        // `window`, which is the only place that hears a pointer let go outside the control it went
-        // down on. Without that last one a drag off the button would latch the sheet on, which is
-        // the exact failure mode a press-and-hold has to not have.
+        // The hold works on every scoring control: pressed via the label (pointer) or input
+        // (keyboard), and released from `window`, the only place that hears a pointer let go
+        // elsewhere; otherwise a drag off the button would latch the sheet on.
         for (const input of this.baselines) {
             if (baselineOf(input.value) === "off") continue;
             const grip = input.closest("label") ?? input;
@@ -1130,8 +970,8 @@ export class DesignPage extends ControllerElement {
         }
         this.on(window, "pointerup", () => this.holdDiff(false));
         this.on(window, "pointercancel", () => this.holdDiff(false));
-        // Opening the audit list changes nothing about the sheet, but it does change how tall the
-        // stage's container is on a short viewport, and every overlay is placed off a measured box.
+        // Opening the audit list can change the stage container's height on short viewports, so
+        // re-measure.
         if (this.disclosure)
             this.on(this.disclosure, "toggle", () => this.measure());
     }

@@ -3,36 +3,19 @@ package ee.schimke.composeai.cli.serve
 import java.io.File
 
 /**
- * `compose-preview-server ui` — the UI builder, pointed at the project you are sitting in.
+ * `compose-preview-server ui`: the UI builder pointed at the project you are in (see #301).
  *
- * The builder has always been reachable from `serve`, as `/ui-builder/`, `--ui-builder-catalogs`,
- * `--ui-builder-components <catalog>=<components.json>` and friends. What it was not was
- * *launchable*: aiming it at a local project meant knowing which of those flags to combine and
- * producing the component record yourself
- * ([#301](https://github.com/yschimke/compose-preview-server/issues/301)).
+ * A combination of existing `serve` flags plus the one fact they can't know before the build runs:
+ * where the module's `components.json` is. Nothing here computes a record; the Gradle plugin's
+ * discovery writes it beside `previews.json`, so the export uses the module's real record.
  *
- * So this is a combination of flags that already exist, plus one fact the flags cannot know until
- * the build has run: **where the local module's `components.json` is**. Nothing here computes a
- * component record. The Gradle plugin's discovery task already writes one beside `previews.json`
- * (`build/compose-previews/components.json`) from the same scan that produced the manifest, so the
- * record the builder exports against is the module's real, derived record — not a fixture, and not
- * a second projection that could disagree with the one bundles carry.
+ * The record is copied rather than pointed at because `--ui-builder-components` is read before
+ * Gradle runs; the path is named up front and filled once discovery reports the module
+ * ([publishRecord]). [ComponentRecordSource] re-reads by `(length, lastModified)`, so it is picked
+ * up without a restart.
  *
- * ## Why the record is copied rather than pointed at
- *
- * `--ui-builder-components` is read when the server's options are constructed, which is before any
- * Gradle work has happened and therefore before the module — and so its project directory — is
- * known. The lane names a path up front and fills it in once discovery reports the module
- * ([publishRecord]). [ComponentRecordSource] re-reads by `(length, lastModified)` on every export,
- * so a file that appears after startup is picked up with no restart and no special case.
- *
- * ## The catalog stays a packaged one
- *
- * `--ui-builder-catalogs` names catalogs the builder has a packaged adapter for (`m3-catalog`,
- * `remote-m3`); a project is not one of them and inventing an id here would only produce "catalog
- * <id> has no packaged adapter" at startup. The palette is the design system; the local project
- * enters through the record the export generates call sites from. That is exactly the seam
- * `--ui-builder-components` was built for — this command just fills it in for you.
+ * The catalog stays a packaged one (`m3-catalog`, `remote-m3`): a project isn't a packaged adapter,
+ * so it enters only through the component record.
  */
 internal object LocalUiBuilder {
 
@@ -43,10 +26,8 @@ internal object LocalUiBuilder {
   private const val BUILDER_ASSETS = "ui-builder"
 
   /**
-   * The packaged component record's directory, a sibling of [BUILDER_ASSETS] in the distribution.
-   *
-   * Written by `server/build.gradle.kts`, whose own comment says what it is for: without the record
-   * "a packaged host advertises no Compose export at all".
+   * The packaged component record's directory, a sibling of [BUILDER_ASSETS], written by
+   * `server/build.gradle.kts`.
    */
   private const val BUILDER_COMPONENTS = "ui-builder-components"
 
@@ -54,18 +35,11 @@ internal object LocalUiBuilder {
   private const val PACKAGED_RECORD = "m3-catalog-components-v1.json"
 
   /**
-   * The options that only mean something with a Gradle project, and so contradict [NO_PROJECT].
-   *
-   * Refused rather than dropped. Forwarding them sent `ServeRunner` down its Gradle path — which
-   * with no build host exits on a render-build failure, and with one builds a project the caller
-   * asked not to have — and dropping them silently would make a typed flag vanish. The help text
-   * said these "stop applying"; a usage error is the only reading of that which does not lie.
-   *
-   * The first five are exactly what `ServeRunner.needsGradle` keys on — `explicitModule`,
-   * `discover`, `exportPath`, `catalogSourceRoot`, `revisions` — so this list has to move with it
-   * or a projectless invocation reaches discovery through the option nobody thought to name here.
-   * `--variant` is the sixth because it selects an Android build variant to render a module under,
-   * which is meaningless with no module, even though it does not itself request the Gradle path.
+   * Options that only make sense with a Gradle project and contradict [NO_PROJECT]. Refused rather
+   * than forwarded (which would take `ServeRunner`'s Gradle path) or silently dropped. The first
+   * five mirror `ServeRunner.needsGradle` (`explicitModule`, `discover`, `exportPath`,
+   * `catalogSourceRoot`, `revisions`) and must move with it; `--variant` is meaningless without a
+   * module.
    */
   private val PROJECT_FLAGS: List<String> =
     listOf(
@@ -86,27 +60,15 @@ internal object LocalUiBuilder {
   const val NO_OPEN: String = "--no-open"
 
   /**
-   * This lane's other flag: the builder against the packaged design systems, with no project.
-   *
-   * `ui` exists to point the builder at *your* module, and everything that makes it worth using —
-   * the discovery, the component record, the export that calls your own composables — needs a build
-   * host and a Gradle project. But the other reason to open the builder is to draw against a design
-   * system that is already packaged in it, which needs none of that, and until now the only way to
-   * do it was to work out the `serve` flags by hand.
-   *
-   * A flag rather than a silent degrade. The two modes differ in what the export can do, and a `ui`
-   * that quietly became the smaller one whenever a build host happened to be missing would look
-   * like it had worked — which is exactly the failure the hard exit in `StandaloneServerMain` was
-   * added to avoid.
+   * The builder against the packaged design systems with no project, which needs no build host or
+   * discovery. An explicit flag rather than a silent degrade, so a missing build host can't quietly
+   * yield the smaller mode.
    */
   const val NO_PROJECT: String = "--no-project"
 
   /**
-   * The catalogs offered when a projectless builder names none.
-   *
-   * Both are packaged adapters ([ProductionUiBuilderRuntime]), which is the whole reason this mode
-   * needs nothing fetched: `--catalogs` serves the browsable preview *sites*, a different feature,
-   * and a builder catalog with no packaged adapter is refused at startup rather than fetched.
+   * Catalogs offered when a projectless builder names none: both packaged adapters
+   * ([ProductionUiBuilderRuntime]), so nothing is fetched.
    */
   val DEFAULT_CATALOGS: List<String> = listOf(DEFAULT_CATALOG, "remote-m3")
 
@@ -120,11 +82,8 @@ internal object LocalUiBuilder {
     } ?: DEFAULT_CATALOG
 
   /**
-   * The `serve` argv this command implies.
-   *
-   * Every addition is skipped when the caller made the choice themselves, so `ui` narrows nothing:
-   * it is the set of decisions someone launching the builder for their own project should not have
-   * to make, and no more.
+   * The `serve` argv this command implies. Every addition is skipped when the caller made that
+   * choice, so `ui` overrides nothing.
    */
   fun serveArgs(
     args: List<String>,
@@ -149,32 +108,21 @@ internal object LocalUiBuilder {
       add("--ui-builder-components")
       add("$catalog=${componentRecord.path}")
     }
-    // Without one, the DISTRIBUTION's record. `--no-project` is the documented stock-distribution
-    // command and the distribution ships `ui-builder-components/m3-catalog-components-v1.json`, so
-    // omitting it left `uiBuilderComponents` empty, `composeExportFor` false for the default
-    // `m3-catalog`, and its Compose export action withdrawn — the packaged record sitting unread
-    // beside the binary. Only `remote-m3` worked, and only because its exporter needs no record.
-    //
-    // Pinned to [DEFAULT_CATALOG] rather than to `catalog`: it is M3's record, and naming it for a
-    // catalog it does not describe would make the export generate call sites for the wrong system.
+    // Without one, use the distribution's packaged M3 record so the default catalog's Compose
+    // export is offered. Pinned to [DEFAULT_CATALOG], since it is M3's record.
     if (projectless && !args.hasFlag("--ui-builder-components")) {
       packagedComponentRecord()?.let {
         add("--ui-builder-components")
         add("$DEFAULT_CATALOG=${it.path}")
       }
     }
-    // Offer every packaged design system rather than only the one being opened: the reason to run
-    // this mode is to draw against them, and picking one at launch would mean relaunching to try
-    // the other.
+    // Offer every packaged design system, so trying another needs no relaunch.
     if (projectless && !args.hasFlag("--ui-builder-catalogs")) {
       add("--ui-builder-catalogs")
       add(DEFAULT_CATALOGS.joinToString(","))
     }
-    // `--open-path` is set even under `--no-open`, because it is the page this command is ABOUT,
-    // not only the page a browser is pointed at: `ServeRunner` prints it in the banner and names it
-    // when a desktop browse fails. Without it the only URL a headless caller saw was the generic
-    // root landing page, which on a projectless server has no session and no served catalog behind
-    // it — a 404 offered as the way in.
+    // Set even under `--no-open`: `ServeRunner` prints it in the banner, and the root landing would
+    // 404 on a projectless server.
     if (!args.hasFlag("--open-path")) {
       add("--open-path")
       add("/ui-builder/$catalog/")
@@ -189,11 +137,8 @@ internal object LocalUiBuilder {
     if (!isProjectless(args)) emptyList() else PROJECT_FLAGS.filter { args.hasFlag(it) }
 
   /**
-   * The packaged component record shipped beside this binary, or null when it is not there.
-   *
-   * Resolved exactly as [packagedBuilderDir] resolves the assets — explicit app home first, then
-   * the install inferred from this class's own jar — because the two are siblings written by the
-   * same distribution block, and a build that moves one moves the other.
+   * The packaged component record beside this binary, or null. Resolved like [packagedBuilderDir],
+   * since both are written by the same distribution block.
    */
   fun packagedComponentRecord(): File? {
     val appHome = System.getProperty("composeai.cli.appHome") ?: System.getenv("APP_HOME")
@@ -206,13 +151,9 @@ internal object LocalUiBuilder {
   }
 
   /**
-   * The builder distribution shipped beside this binary, or null when it is not there.
-   *
-   * Same ordering as `locateBundleSidecarJars` uses for the daemon sidecars: an explicit app home
-   * first (`composeai.cli.appHome` / `APP_HOME`), then the install inferred from where this class
-   * was loaded from — `<APP_HOME>/lib/compose-preview-serve.jar` puts the distribution two levels
-   * up. A directory only counts when it actually holds `index.html`, because the failure worth
-   * avoiding is a builder route that 404s every asset.
+   * The builder distribution beside this binary, or null. Explicit app home first
+   * (`composeai.cli.appHome` / `APP_HOME`), then two levels up from this class's jar, as
+   * `locateBundleSidecarJars` does. Only a directory holding `index.html` counts.
    */
   fun packagedBuilderDir(): File? {
     val appHome = System.getProperty("composeai.cli.appHome") ?: System.getenv("APP_HOME")
@@ -238,14 +179,9 @@ internal object LocalUiBuilder {
     File(module.projectDir, "$MODULE_PREVIEW_OUTPUT/$COMPONENT_RECORD")
 
   /**
-   * Copy the discovered module's component record to [destination], reporting what happened.
-   *
-   * Returns the message to print, or null when there was nothing to say. Never throws and never
-   * exits: a builder that opens with no export is worth more than a command that refuses to start,
-   * and the export itself already refuses per request with a message naming the file and reason.
-   *
-   * A discovery carrying several modules is left alone — `serve` refuses to host more than one and
-   * says which, and guessing here would only put a different module's record behind that error.
+   * Copy the discovered module's component record to [destination], returning a message to print or
+   * null. Never throws or exits: a builder without export beats one that won't start. Multi-module
+   * discoveries are left alone; `serve` already refuses them.
    */
   fun publishRecord(discovery: ServeDiscovery, destination: File): String? {
     val (module, _) = discovery.manifests.singleOrNull() ?: return null

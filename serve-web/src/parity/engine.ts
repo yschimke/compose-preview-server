@@ -1,21 +1,8 @@
-// The typed seam onto the shared acceptance engine.
-//
-// `scripts/design-artifacts/*.mjs` is plain JavaScript with `node --test` behind it, and `tsc` reads
-// it with `allowJs`/`checkJs: false` — inference only. That works for most of the surface and fails
-// in exactly one place: a parameter with a default of `null` or `[]` infers as `null` or `never[]`,
-// so a call passing a real comparison or a real mask list is a type error against a signature the
-// implementation does not actually have.
-//
-// The alternatives were worse. Annotating the JavaScript with JSDoc types would put a TypeScript
-// concern inside the contract's reference implementation, which `design-parity` and a future Kotlin
-// reader also read. Weakening the call sites to `any` would lose the shapes at the point they are
-// most useful. So the widening happens **here, once**, next to the reason for it: this file states
-// the engine's shape as this consumer relies on it, and every other file in `src/parity/` is
-// ordinarily typed against it.
-//
-// If one of these declarations drifts from the implementation, the conformance suite next door does
-// not catch it — it runs the JavaScript directly. What catches it is that the adapter stops
-// compiling, or stops working; keep the declarations minimal so there is little to drift.
+// Typed seam onto the shared acceptance engine (`scripts/design-artifacts/*.mjs`). `tsc` reads the
+// JS by inference only, which types `null`/`[]` defaults as `null`/`never[]`, so the signatures are
+// widened here, once, rather than with JSDoc in the reference implementation or `any` at call
+// sites. The conformance suite runs the JS directly and won't catch drift, so keep these
+// declarations minimal.
 
 import {
     BUDGET as BudgetJs,
@@ -58,12 +45,9 @@ export interface Plane {
 }
 
 /**
- * `{ error }` is the reader's own vocabulary; the engine turns it into the record's verdict.
- *
- * `{ bytes, byteLength }` is the prefix answer the header pass takes: `bytes` is at most the
- * requested prefix, and `byteLength` is the size of the *whole* artifact, which the byte cap and the
- * second-read comparison are both measured against. A bare `Uint8Array` is the whole file, its own
- * length standing in for both — the shape the decode pass takes.
+ * `{ error }` is the reader's vocabulary. `{ bytes, byteLength }` is the header pass's prefix
+ * answer: `bytes` is at most the requested prefix, `byteLength` the whole artifact's size. A bare
+ * `Uint8Array` is the whole file (the decode pass).
  */
 export type ArtifactAnswer =
     Uint8Array | { bytes: Uint8Array; byteLength: number } | { error: string };
@@ -134,19 +118,12 @@ export interface Catalog {
 }
 
 /**
- * Whether the engine rejects this document before reading a single artifact.
- *
- * The one question a fetch-ahead consumer can ask the engine *in advance*, and the reason it is the
- * engine's function rather than this file's: planning reads from a second copy of the rejection
- * rules is how a consumer fetches for a document that reads nothing, or — worse — skips for one that
- * does.
+ * Whether the engine rejects this document before reading any artifact. The engine's own function
+ * so fetch-ahead planning never uses a second copy of the rejection rules.
  */
 /**
- * The ids whose artifacts the engine will actually read, for a document it does not refuse whole.
- *
- * The exact set, shared with the evaluation — see the engine's own doc. A planner needs it because
- * summing the sizes of every path a document *names* is an upper bound, and gating on an upper
- * bound skips fetching for a document the engine would have evaluated.
+ * The ids whose artifacts the engine will actually read (the exact set the evaluation uses), so a
+ * planner doesn't gate on the upper bound of every named path.
  */
 export const recordsThatRead = recordsThatReadJs as unknown as (
     documentText: string,
@@ -201,11 +178,7 @@ export const sha256Hex = sha256HexJs as unknown as (
 ) => string;
 
 /**
- * The header preflight, exposed so the browser host can decide what to fetch in full.
- *
- * The host reads a bounded prefix of every artifact, and only the ones whose header is clean earn a
- * full-body fetch — which is how it inherits the reference reader's "read the header, then read the
- * whole file only for a survivor" bound instead of allocating every artifact up front.
+ * The header preflight, so the browser host can full-fetch only artifacts whose header is clean.
  */
 export const preflightPng = preflightPngJs as unknown as (
     bytes: Uint8Array,
@@ -230,10 +203,8 @@ export const BUDGET = BudgetJs as unknown as {
     maxAxis: number;
     maxArtifactBytes: number;
     /**
-     * What one document may oblige a reader to hold in total, across every artifact it reads.
-     *
-     * Declared here because the prefetch gate needs it: `maxArtifactBytes` bounds one file, and 256
-     * records × 2 files of legal, individually-capped artifacts is what this bounds instead.
+     * The total bytes one document may oblige a reader to hold across all artifacts; needed by the
+     * prefetch gate since `maxArtifactBytes` bounds only one file.
      */
     maxTotalArtifactBytes: number;
     maxPreflightBytes: number;

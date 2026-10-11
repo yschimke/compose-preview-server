@@ -4,20 +4,14 @@ import ee.schimke.composeai.daemon.client.WorkspaceId
 import java.util.concurrent.ConcurrentHashMap
 
 /**
- * Per-session subscription bookkeeping. The two operations every MCP server with the `subscribe`
- * resources capability needs:
+ * Per-session subscription bookkeeping for the `subscribe` resources capability:
+ * - **Per-URI subscriptions** ([subscribe]/[unsubscribe]) from `resources/subscribe`, forwarded as
+ *   `notifications/resources/updated` when that URI's bytes change.
+ * - **Watch sets** ([watch]/[unwatch]) from the `watch` tool: workspace + optional module +
+ *   optional FQN glob, expanded to URIs, prioritised via `setVisible`/`setFocus`, and re-expanded
+ *   on `discoveryUpdated`.
  *
- * - **Per-URI subscriptions** ([subscribe]/[unsubscribe]) — clients call `resources/subscribe` with
- *   a specific URI; we forward `notifications/resources/updated` to that session whenever that
- *   URI's bytes change.
- * - **Area-of-interest watch sets** ([watch]/[unwatch]) — clients call the `watch` MCP tool with a
- *   workspace + (optional) module + (optional) FQN glob, and the server expands that to a URI set,
- *   prioritises rendering it via `setVisible`/`setFocus` on the appropriate daemons, and pushes
- *   per-URI updates as renders complete. Re-expansion happens on `discoveryUpdated`.
- *
- * Sessions are opaque — we identify them by `Session` reference equality so the MCP transport layer
- * (which owns the actual session object) decides what counts as a session. In v0 every connected
- * MCP client is one session; HTTP transport later may multiplex.
+ * Sessions are identified by reference equality, so the transport decides what a session is.
  */
 class Subscriptions {
 
@@ -28,12 +22,9 @@ class Subscriptions {
   private val watches = ConcurrentHashMap<Session, MutableList<WatchEntry>>()
 
   /**
-   * D1 — `(uri, kind)` → set of sessions subscribed to that data-product attachment via
-   * `subscribe_preview_data`. Refcounted across sessions: the supervisor only forwards
-   * `data/subscribe` to the daemon on first reference and `data/unsubscribe` on last release. This
-   * matches the resource-subscription model — multiple MCP sessions can hold the same logical
-   * subscription without redundant wire traffic to the daemon — and prevents leaked daemon-side
-   * subscriptions when a session disconnects without explicitly unsubscribing.
+   * `(uri, kind)` → sessions subscribed via `subscribe_preview_data`, refcounted so the daemon gets
+   * `data/subscribe` on first reference and `data/unsubscribe` on last release, and disconnects
+   * don't leak daemon-side subscriptions.
    */
   private val byDataKey = ConcurrentHashMap<DataSubKey, MutableSet<Session>>()
 
@@ -47,9 +38,8 @@ class Subscriptions {
   }
 
   /**
-   * Adds a `(uri, kind)` data-product subscription for [session]. Returns `true` iff this is the
-   * first session interested in the pair — the supervisor uses that signal to decide whether to
-   * forward `data/subscribe` to the daemon (idempotent on repeat).
+   * Adds a data-product subscription; `true` iff [session] is the first for the pair (forward
+   * `data/subscribe`).
    */
   fun subscribeData(uri: String, kind: String, session: Session): Boolean {
     val key = DataSubKey(uri, kind)
@@ -65,9 +55,8 @@ class Subscriptions {
   }
 
   /**
-   * Removes [session] from the `(uri, kind)` subscription. Returns `true` iff this was the last
-   * session — the supervisor uses that signal to decide whether to forward `data/unsubscribe` to
-   * the daemon.
+   * Removes [session] from the subscription; `true` iff it was the last (forward
+   * `data/unsubscribe`).
    */
   fun unsubscribeData(uri: String, kind: String, session: Session): Boolean {
     val key = DataSubKey(uri, kind)
@@ -83,10 +72,8 @@ class Subscriptions {
   }
 
   /**
-   * Returns the `(uri, kind)` pairs [session] held the last reference to, removing them from the
-   * registry. The supervisor calls this on session disconnect and forwards `data/unsubscribe` to
-   * the matching daemon for each pair so the daemon doesn't leak subscriptions for previews the
-   * client will never look at again.
+   * On disconnect: removes and returns the pairs [session] held the last reference to, so the
+   * supervisor can unsubscribe each from its daemon.
    */
   fun forgetDataSubscriptions(session: Session): List<DataSubKey> {
     val released = mutableListOf<DataSubKey>()
@@ -119,11 +106,8 @@ class Subscriptions {
   }
 
   /**
-   * Drops resource subscriptions and watches owned by [session]. Data-product subscriptions are NOT
-   * dropped here — call [forgetDataSubscriptions] separately and forward `data/unsubscribe` to the
-   * matching daemons for each released `(uri, kind)`. Splitting the two lets the caller see which
-   * keys lost their last reference (so it knows which wire calls to make) without this method
-   * needing to know about the supervisor.
+   * Drops [session]'s resource subscriptions and watches. Data subscriptions are released
+   * separately by [forgetDataSubscriptions], which reports which keys need a wire call.
    */
   fun forget(session: Session) {
     byUri.values.forEach { it.remove(session) }
@@ -134,9 +118,8 @@ class Subscriptions {
   fun sessionsSubscribedTo(uri: String): Set<Session> = byUri[uri]?.toSet() ?: emptySet()
 
   /**
-   * Exact subscribed resource URIs for the same preview as [uri], including override-bearing
-   * variants. The returned keys stay byte-for-byte identical to what each client subscribed to so
-   * `notifications/resources/updated` can name the resource the client actually knows.
+   * Subscribed URIs for the same preview as [uri], including override-bearing variants. Keys are
+   * exactly what each client subscribed to, so notifications name the resource the client knows.
    */
   fun subscribedUrisMatching(uri: PreviewUri): Map<String, Set<Session>> {
     val base = uri.copy(overridesJson = null)
@@ -153,11 +136,7 @@ class Subscriptions {
   fun watchesFor(session: Session): List<WatchEntry> =
     watches[session]?.let { synchronized(it) { it.toList() } } ?: emptyList()
 
-  /**
-   * Returns every session whose watch set matches [uri]. Used to push per-URI updates to clients
-   * who didn't explicitly `subscribe` but did `watch` a glob covering the URI. A session that both
-   * subscribed AND watched is returned once (set semantics).
-   */
+  /** Every session whose watch set matches [uri] (each once). */
   fun sessionsWatching(uri: PreviewUri): Set<Session> {
     val out = mutableSetOf<Session>()
     for ((session, entries) in watches) {
@@ -168,9 +147,8 @@ class Subscriptions {
   }
 
   /**
-   * The aggregated URI set every watch (across all sessions) cares about for
-   * [workspaceId] + [modulePath]. Used by [WatchPropagator] to compute what to forward as
-   * `setVisible` on the daemon — the union, not the per-session view.
+   * Union of all sessions' watched URIs for [workspaceId] + [modulePath]; [WatchPropagator]
+   * forwards it as `setVisible`.
    */
   fun urisWatchedFor(
     workspaceId: WorkspaceId,
@@ -198,24 +176,12 @@ class Subscriptions {
   }
 }
 
-/**
- * Refcount key for `subscribe_preview_data` bookkeeping. Modelled as a value type so the `(uri,
- * kind)` pair stays opaque to callers — they get back the released keys on disconnect and forward
- * unsubscribes without reaching into individual fields.
- */
+/** Refcount key for `subscribe_preview_data`, returned to callers on disconnect. */
 data class DataSubKey(val uri: String, val kind: String)
 
 /**
- * One area-of-interest registration. The matching dimensions:
- *
- * - **workspaceId** — required. Cross-workspace watch is opt-in; the v0 watch tool requires callers
- *   to register a workspace explicitly (via `register_project`) and pass its id.
- * - **modulePath** — null means "any module in the workspace". Useful for "show me everything in
- *   this project".
- * - **fqnGlob** — null means "every preview in the matched module(s)". Otherwise a glob from
- *   [FqnGlob].
- *
- * Pure-data; equality is structural.
+ * One area-of-interest registration: [workspaceId] is required (registered via `register_project`);
+ * a null [modulePath] means any module, and a null [fqnGlob] every preview ([FqnGlob] syntax).
  */
 data class WatchEntry(
   val workspaceId: WorkspaceId,

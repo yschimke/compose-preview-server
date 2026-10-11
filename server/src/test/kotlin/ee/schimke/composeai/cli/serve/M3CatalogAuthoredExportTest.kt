@@ -34,37 +34,14 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 
 /**
- * A screen spelled the way the **builder** spells one, exported through the **shipped** record.
- *
- * ## The gap this closes
- *
- * `exportDesign format=compose` produced zero lines of Kotlin for every `m3-catalog` design a
- * person could author in the UI builder — 119 refusals on a 387-node design, and nothing on a
- * two-node cut of it (issue #332). Two golden tests were green throughout, and both were honest
- * about their own scope rather than wrong:
- *
- * - `ScreenGeneratorScreenFixture` states that "every value kind the projection can express appears
- *   exactly once", so it holds no enum value at all, and it runs against a purpose-built test
- *   record rather than the one the deployment installs.
- * - `M3CatalogComponentRecordTest`'s end-to-end does use the shipped record — and authors
- *   `"color"`, which is `Surface`'s **parameter** name. No builder writes that; the inspector
- *   writes `containerColor`, and that is the write that refused.
- *
- * So nothing anywhere proved that the catalog this server *serves* and the record it *ships* can
- * turn a document somebody *authored* into Kotlin. This does, and it is written to fail the moment
- * they drift apart again: [`every property this screen sets is one the served catalog declares`]
- * checks the vocabulary against `m3-catalog-capabilities-v1.json` before the export is even run, so
- * a document that quietly starts spelling properties the way the record wants stops counting as
- * evidence.
- *
- * ## Why the screen is shaped like this
- *
- * Every node here is one the refusal list named: an `m3/text` carrying a `style` (51 of the 119
- * refusals), an `m3/icon` (29, plus an unproven call site behind them), an `m3/card` with a
- * `containerColor` and an `elevationDp`, a `layout/column` with a `verticalSpacingDp`, and an
- * `m3/surface` with a `containerColor` and a `shapeDp`, and a `weight` on a `Row` child — the
- * largest single refusal left after the icons landed. None of them is exotic; together they are
- * roughly what a screen is.
+ * A screen spelled the way the builder spells it, exported through the shipped record. Other
+ * goldens use a purpose-built record or parameter names (e.g. `color`) the builder never writes, so
+ * nothing else proves the served catalog and shipped record can export an authored document. The
+ * first test checks the vocabulary against `m3-catalog-capabilities-v1.json` before exporting, so a
+ * drifting document stops counting as evidence. The nodes are the common refusal cases: `m3/text`
+ * with `style`, `m3/icon`, `m3/card` with `containerColor`/`elevationDp`, `layout/column` with
+ * `verticalSpacingDp`, `m3/surface` with `containerColor`/`shapeDp`, and a `weight` on a `Row`
+ * child.
  */
 class M3CatalogAuthoredExportTest {
 
@@ -196,10 +173,8 @@ class M3CatalogAuthoredExportTest {
 
   @Test
   fun `every property this screen sets is one the served catalog declares`() {
-    // The guard that makes the export below evidence rather than a restatement. A test document
-    // that drifts towards the record's parameter names would keep passing the export and would
-    // stop covering anything a person can author, which is precisely how the shipped catalog and
-    // the shipped record diverged without a red build.
+    // Guards that the document uses only served property names, so the export below proves
+    // something authorable.
     val served = servedProperties()
     val undeclared = nodes.flatMap { node ->
       val declared = served[node.componentId] ?: return@flatMap listOf("${node.componentId}: *")
@@ -234,9 +209,7 @@ class M3CatalogAuthoredExportTest {
       "refused: ${artifact.diagnostics.map { it.message }}\n$source",
     )
 
-    // The five translations that were each a refusal of their own, asserted where they land rather
-    // than as a count: a count goes green for the wrong reason the first time one of them is
-    // silently dropped instead of refused.
+    // Each translation asserted where it lands, not as a count that a silent drop would satisfy.
     assertTrue(
       source.contains("color = MaterialTheme.colorScheme.surfaceContainer"),
       source,
@@ -277,9 +250,8 @@ class M3CatalogAuthoredExportTest {
     // `sizeDp` is not a parameter of `Icon` and never was; the catalog declares `size` among the
     // component's modifier capabilities, and this is where it goes.
     assertTrue(source.contains("Modifier.size(24.dp)"), source)
-    // The layout weight: a scoped modifier, supplied by the `Row`'s receiver, so it is written by
-    // simple name and imported nowhere — and its argument is a `Float`, because `weight(1.0)` does
-    // not compile.
+    // The layout weight is a `Row`-receiver modifier written by simple name, with a `Float`
+    // argument.
     assertTrue(source.contains("modifier = Modifier.weight(1f)"), source)
     assertTrue(!source.contains("import androidx.compose.foundation.layout.RowScope"), source)
     assertTrue(
@@ -290,13 +262,8 @@ class M3CatalogAuthoredExportTest {
 
   @Test
   fun `the modifiers the catalog offers reach the source as the calls Compose declares`() {
-    // The same screen with an authored **modifier list** on three of its nodes, which is the half
-    // the test above does not reach: it covers properties, and a modifier is admitted onto a
-    // component by type rather than by name, so nothing here was proven by that one passing.
-    //
-    // Every modifier used is one `m3-catalog-capabilities-v1.json` declares for the component it
-    // sits on — asserted below rather than assumed, because a modifier the catalog does not offer
-    // is not evidence about anything a person can author.
+    // The same screen with authored modifier lists, which the property test doesn't cover
+    // (modifiers are admitted by type). Each modifier is asserted to be declared for its component.
     val served = servedModifiers()
     for ((component, capability) in
       listOf(

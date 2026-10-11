@@ -45,8 +45,7 @@ class ServeBugReportTest {
 
   @Test
   fun `a server bug is always filed against the repo that ships the server`() {
-    // The whole point of the split from ServeIssueReport: a catalog's repo cannot fix the server.
-    // And the server's repo is this one, not the compose-ai-tools the code was extracted from.
+    // Server bugs go to this repository, not a catalog's (which cannot fix the server).
     assertEquals("yschimke/compose-preview-server", ServeBugReport.REPO)
     assertEquals(
       "https://github.com/yschimke/compose-preview-server/issues/new",
@@ -113,8 +112,8 @@ class ServeBugReportTest {
 
   @Test
   fun `a token-gated render is not embedded even from a public hostname`() {
-    // The body strips the token, and the lane 404s a tokenless request — so an embed would be a
-    // broken image in every filed issue no matter how reachable the host is.
+    // The body strips the token and the lane 404s tokenless requests, so an embed would always be
+    // broken.
     val gated = page.copy(publicRender = false)
     val body = ServeBugReport.body(server, gated)
     assertFalse(body.contains("![render]"), body)
@@ -152,9 +151,7 @@ class ServeBugReportTest {
 
   @Test
   fun `table syntax in a diagnostic value cannot shear the row or escape its code span`() {
-    // Almost every value here is text this server did not write — a degradation detail, a
-    // catalog's trust string, a load error. A `|` splits the row into extra columns and a backtick
-    // closes the code span, so a report about a broken catalog would arrive visibly mangled.
+    // Most values are text this server did not write; `|` and backticks must not mangle the table.
     val hostile =
       page.copy(
         system = "we|ird",
@@ -233,8 +230,8 @@ class ServeBugReportTest {
 
   @Test
   fun `a served path says which system and preview it is showing`() {
-    // …and which of the two preview-shaped routes it was, because they draw different things from
-    // the same id: one render on a stage, or that render beside a design reference (#4765).
+    // …and which preview route it was: one render on a stage, or that render beside a design
+    // reference.
     assertEquals(
       ServeBugReport.PageRef("jetnews", "Article__dark", "p"),
       ServeBugReport.parsePath("/jetnews/p/Article__dark"),
@@ -295,8 +292,8 @@ class ServeBugReportTest {
 
   @Test
   fun `a report from a comparison carries the pair, not one panel of it`() {
-    // #4765: the render alone was the wrong evidence for "these two disagree" — the picture in the
-    // issue contradicted the complaint it was filed with.
+    // For a comparison, the render alone would contradict the complaint, so both images are
+    // included.
     val comparison =
       page.copy(
         path = "/jetnews/compare/Article__dark",
@@ -304,8 +301,7 @@ class ServeBugReportTest {
         referenceUrl = "https://preview.coo.ee/jetnews/reference/article-card-figma.png",
       )
     val body = ServeBugReport.body(server, comparison)
-    // Still below the paste slot, and still labelled for what it is rather than standing in as
-    // "the screenshot" — the split issue #4261 drew.
+    // Below the paste slot, and labelled as the render rather than "the screenshot" (see #4261).
     val screenshot = body.indexOf("### Screenshot")
     val pair = body.indexOf("### Reference and render")
     assertTrue(screenshot in 0 until pair, body)
@@ -347,9 +343,7 @@ class ServeBugReportTest {
 
   @Test
   fun `the screenshot section asks for a paste first and labels the render as the base one`() {
-    // Issue #4261. The embedded PNG used to BE the "Screenshot", so a report filed from the spec
-    // triptych arrived showing an ordinary render and contradicting its own complaint. The paste
-    // slot comes first now, and the render is under a heading that says what it is.
+    // The paste slot comes first; the embedded render sits under a heading saying what it is.
     val body = ServeBugReport.body(server, page.copy(view = "design spec (triptych)"))
     val screenshot = body.indexOf("### Screenshot")
     val base = body.indexOf("### Base render")
@@ -376,15 +370,12 @@ class ServeBugReportTest {
       "Remote Compose (wasm player)",
       ServeBugReport.viewLabel("/jetnews/p/Article?mode=rc-wasm"),
     )
-    // The reference-alone view is spelled out rather than echoed: "design spec (spec)" reads as a
-    // stutter, and since #4376 it is not the lane's default either.
+    // The reference-alone view is spelled out, as it is not the lane's default.
     assertEquals(
       "design spec (reference only)",
       ServeBugReport.viewLabel("/p/Article?mode=spec&specView=spec"),
     )
-    // A spec-lane URL that names no view is not silent about the view — the viewer leaves the
-    // lane's default out of the query precisely because it needs no parameter, so the row says
-    // which picture the reporter was looking at instead of dropping its most useful half.
+    // A spec-lane URL without a view is on the lane's default, so the row names it.
     assertEquals("design spec (triptych)", ServeBugReport.viewLabel("/p/Article?mode=spec"))
     // An unrecognised view is not echoed into a public issue body; the lane's default stands in.
     assertEquals(
@@ -413,12 +404,10 @@ class ServeBugReportTest {
 
   @Test
   fun `an unrecognised view value is dropped rather than echoed into a public issue`() {
-    // The query arrives from the browser and lands in an issue body; there are finitely many real
-    // answers and anything else was never a view at all.
+    // The query is browser-supplied and lands in an issue body; only real view names are accepted.
     assertNull(ServeBugReport.viewLabel("/p/Article?mode=%3Cimg+src%3Dx%3E"))
     assertNull(ServeBugReport.viewLabel("/p/Article?mode=| shear | the | table"))
-    // Dropped in the sense that matters — the value never reaches the issue body. What the row
-    // then names is the lane's own default, which is what a viewer showing no named view is on.
+    // Never echoed: the row names the lane's default instead.
     assertEquals(
       "design spec (triptych)",
       ServeBugReport.viewLabel("/p/Article?mode=spec&specView=nonsense"),

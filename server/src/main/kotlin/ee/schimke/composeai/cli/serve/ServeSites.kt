@@ -1,30 +1,21 @@
 package ee.schimke.composeai.cli.serve
 
 /**
- * **Top-level sites**: a catalog this server already publishes at `/<system>/`, additionally
- * reachable on a hostname of its own where it looks like the only thing on the box — e.g.
- * `m3.preview.coo.ee` serving what `preview.coo.ee/m3-catalog/` serves.
+ * Top-level sites: a catalog already published at `/<system>/` also reachable on its own hostname,
+ * where it looks like the only thing on the box (e.g. `m3.preview.coo.ee` serving
+ * `preview.coo.ee/m3-catalog/`).
  *
- * This is deliberately a **view**, not a second deployment. The same [ServeSessionRegistry]
- * session, the same baked pixels, the same daemon (if any), the same hero/social/asset caches: a
- * site host costs one map lookup on the request and changes nothing about what the server does with
- * the request afterwards. Adding a site adds no catalog, no render, no memory. What it changes is
- * only what the request *resolves to* and what the pages *say*:
+ * A view, not a second deployment: same session, pixels, daemon and caches; a site costs one map
+ * lookup. It changes only what the request resolves to and what pages say:
+ * - the site's system is the session, so root-mounted routes (`/`, `/p/<id>`, `/render/<id>`, …)
+ *   answer for it;
+ * - links use an empty base path, staying on the custom domain;
+ * - the front door, back button and cross-system nav are suppressed;
+ * - `/status`, `/robots.txt` and `/sitemap.xml` are scoped to this system.
  *
- * - the site's system is the session, so the root-mounted routes (`/`, `/p/<id>`, `/render/<id>`,
- *   `/api/previews`, …) — which already exist for the legacy `?session=` form — answer for it;
- * - links are built with an **empty** base path, so every href stays on the custom domain rather
- *   than pointing back at `preview.coo.ee/<system>/`;
- * - the front-door index, the "← All design systems" back button and the cross-system nav are
- *   suppressed, so the site doesn't advertise its neighbours;
- * - `/status`, `/robots.txt` and `/sitemap.xml` are scoped to this one system.
- *
- * The canonical `/<system>/` form is still served on the *main* host; on a site host it redirects
- * to the root form so the two spellings don't compete for indexing, and another system's path 404s
- * rather than quietly serving a neighbour under the wrong domain.
- *
- * Nothing here grants access: a site can only name a system this server is already configured to
- * serve, and every route stays behind the same token/public gate it always was.
+ * On a site host the canonical `/<system>/` form redirects to the root form, and other systems'
+ * paths 404. Grants no access: a site can only name an already-served system, behind the same
+ * gates.
  */
 data class ServeSites(private val byHost: Map<String, String>) {
 
@@ -41,19 +32,15 @@ data class ServeSites(private val byHost: Map<String, String>) {
     get() = byHost.values.toSet()
 
   /**
-   * The configured `host to system` pairs, in configuration order — the map as [of] would take it
-   * back. What [ServeSiteAdmin] rebuilds a candidate map from, and what gets written to
-   * `catalogs.json`, so a runtime change round-trips through exactly the same validation a restart
-   * would apply.
+   * Configured `host to system` pairs in order, as [of] takes them; what [ServeSiteAdmin] rebuilds
+   * from and writes to `catalogs.json`, so runtime changes get the same validation as a restart.
    */
   val pairs: List<Pair<String, String>>
     get() = byHost.entries.map { it.key to it.value }
 
   /**
-   * The system [rawHost] is a top-level site for, or null when it isn't one (the main host, an
-   * IP/localhost dev origin, an unknown vhost). [rawHost] is taken straight from `X-Forwarded-Host`
-   * / `Host`, so it may carry a port, a trailing dot, or bracketed IPv6 — [normalizeHost] deals
-   * with that.
+   * The system [rawHost] is a site for, or null (main host, IP/localhost, unknown vhost). [rawHost]
+   * comes straight from `X-Forwarded-Host` / `Host`; see [normalizeHost].
    */
   fun systemFor(rawHost: String?): String? {
     if (byHost.isEmpty() || rawHost == null) return null
@@ -68,9 +55,8 @@ data class ServeSites(private val byHost: Map<String, String>) {
     val EMPTY: ServeSites = ServeSites(emptyMap())
 
     /**
-     * A hostname as it may be written in config: labels of letters/digits/hyphens separated by
-     * dots. Deliberately narrow — a site host is compared against an attacker-supplied `Host`
-     * header, so the set of strings that can ever match is worth keeping small and boring.
+     * A config hostname: letter/digit/hyphen labels separated by dots. Narrow on purpose, since it
+     * is compared against an attacker-supplied `Host` header.
      */
     private val HOST_RE =
       Regex(
@@ -78,14 +64,9 @@ data class ServeSites(private val byHost: Map<String, String>) {
       )
 
     /**
-     * The comparable form of a `Host` / `X-Forwarded-Host` value: lowercased, port dropped, IPv6
-     * brackets and the root-zone trailing dot stripped. Null when what's left isn't a hostname we
-     * would ever have accepted as config, so a junk header can't match anything.
-     *
-     * Host headers are case-insensitive and routinely carry a port (`m3.preview.coo.ee:8080` from a
-     * local `curl`, or from a reverse proxy that doesn't rewrite it), and `m3.preview.coo.ee.` is a
-     * legal absolute spelling of the same name. All three have to land on the same key or a site
-     * would work through Caddy and mysteriously not through a direct hit.
+     * Comparable form of a `Host` value: lowercased, port dropped, IPv6 brackets and trailing root
+     * dot stripped, so direct hits and proxied requests land on the same key. Null when the rest
+     * isn't a hostname we'd accept as config.
      */
     fun normalizeHost(raw: String): String? {
       var host = raw.trim().lowercase()
@@ -100,22 +81,15 @@ data class ServeSites(private val byHost: Map<String, String>) {
     }
 
     /**
-     * Build a site map from `host=system` pairs, dropping any that are malformed or that name a
-     * system this server doesn't serve. [knownSystems] is the served catalog set; an empty set
-     * means "don't check" (the caller validates elsewhere). [onProblem] receives one line per
-     * dropped entry so startup can report it instead of silently serving less than configured.
-     *
-     * First host wins on a duplicate — the same rule the catalog config uses — because a host that
-     * resolved to two systems would serve whichever the map iteration happened to keep.
+     * Build a site map from `host=system` pairs, dropping malformed ones and ones naming an
+     * unserved system; [onProblem] gets one line per drop. First host wins on duplicates, as in the
+     * catalog config.
      */
     fun of(
       pairs: List<Pair<String, String>>,
       /**
-       * The systems this server serves, or null to skip the check entirely (tests, and callers that
-       * validate elsewhere). Deliberately nullable rather than "empty means don't check": a
-       * module-backed server with no catalogs at all knows an EMPTY set, and a site naming anything
-       * on it must be dropped — reading that as "unvalidated" kept a dead hostname that 404s every
-       * route instead of reporting the typo at startup.
+       * The served systems, or null to skip the check. Nullable rather than "empty means skip",
+       * since a server with no catalogs must still drop sites naming anything.
        */
       knownSystems: Set<String>? = null,
       onProblem: (String) -> Unit = {},
@@ -135,13 +109,9 @@ data class ServeSites(private val byHost: Map<String, String>) {
           onProblem("site '$host' names '$system', which this server does not serve")
           continue
         }
-        // A: a site's system id is ALSO the first path segment its canonical URLs use, and the
-        // canonical-path redirect keys off exactly that. An id that collides with a rooted route
-        // — a catalog literally called `render`, `p` or `api` — would make the interceptor read
-        // this site's own `/render/<id>.png` as a prefixed URL and redirect it to `/<id>.png`,
-        // breaking every image on the site. Such an id is already ambiguous on the main host
-        // (the constant route outscores `/{system}`), so it is refused here rather than served
-        // half-working.
+        // A site's system id is also its canonical first path segment, which the redirect keys off;
+        // an id colliding with a rooted route (`render`, `p`, `api`) would break every image on the
+        // site, and is already unreachable on the main host. Refused.
         if (system in RESERVED_SYSTEMS) {
           onProblem("site '$host' names '$system', which collides with a built-in route")
           continue
@@ -154,9 +124,8 @@ data class ServeSites(private val byHost: Map<String, String>) {
     }
 
     /**
-     * Parse the `--sites` flag: `m3.preview.coo.ee=m3-catalog,wear.preview.coo.ee=wear-m3`. Blank
-     * or null ⇒ [EMPTY]. Entries the shape can't be read from are reported through [onProblem] and
-     * skipped, matching how `--catalogs` treats a bad entry.
+     * Parse `--sites` (`m3.preview.coo.ee=m3-catalog,…`); blank ⇒ [EMPTY]. Unreadable entries are
+     * reported through [onProblem] and skipped, like `--catalogs`.
      */
     fun parse(
       spec: String?,
@@ -184,26 +153,17 @@ data class ServeSites(private val byHost: Map<String, String>) {
     private val SYSTEM_RE = Regex("[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
 
     /**
-     * First path segments the server routes itself, which a site's system id therefore may not be.
-     * These are the constant routes registered alongside `/{system}/…`; Ktor scores a constant
-     * segment above the parameter, so a catalog with one of these ids is unreachable at its
-     * canonical path on ANY host — a site just makes the collision visible.
+     * First path segments the server routes itself, which a site system id may not be (Ktor scores
+     * constant segments above `/{system}`, so such a catalog is unreachable anyway). Enumerated
+     * from [ServeHttpServer]'s routing, including routes built from constants
+     * (`ServeRcFonts.URL_BASE`, `/hero`, `/auth/…`).
      *
-     * Enumerated from [ServeHttpServer]'s routing block — every `get("/x…` / `post("/x…` /
-     * `webSocket("/x…` whose first segment is a literal, **including the ones built from a
-     * constant** (`ServeRcFonts.URL_BASE`, `/hero`, `/social`, `/auth/…`), which are the easy ones
-     * to miss.
-     *
-     * The list is load-bearing twice over, so keep it complete when adding a top-level route. A
-     * missing entry lets a site *claim* that prefix and swallow the route — `pg` did exactly that,
-     * breaking playground redemption — and, because the site interceptor uses this as its allowlist
-     * of "not a session", a missing entry also 404s that route on every site host.
-     *
-     * Two tests keep it honest, because neither can do it alone. `ServeSitesReservedRoutesTest`
-     * reads [ServeHttpServer]'s routing block and fails on a registered segment that is missing
-     * from this list — the omission itself, which no test driving the list could ever see.
-     * `ServeTopLevelSiteTest` drives real routes against a live server on a site host, which is the
-     * only way to catch an entry that is listed here and still broken.
+     * Keep it complete when adding a top-level route: a missing entry lets a site swallow the
+     * route, and since the site interceptor uses this as its "not a session" allowlist, the route
+     * 404s on every site host. Every routed segment is reserved unconditionally, even for opt-in
+     * lanes, since a flag can be turned on later. `ServeSitesReservedRoutesTest` checks for
+     * omissions against the routing block; `ServeTopLevelSiteTest` drives real routes on a site
+     * host.
      */
     internal val RESERVED_SYSTEMS =
       setOf(
@@ -212,20 +172,15 @@ data class ServeSites(private val byHost: Map<String, String>) {
         "version",
         "status",
         "status.json",
-        // Registered from `ServeBugReport.PATH`, and missed for the same reason `rc-fonts` nearly
-        // was: the path is built from a constant, so a text search for `get("/report-bug` finds
-        // nothing. Every site host answered its own styled 404 for the one link its footer offers
-        // on every page — the affordance was unreachable on exactly the deployments (m3, wear)
-        // where a visitor is most likely to press it (issue #4319).
+        // Registered from `ServeBugReport.PATH`, so a text search for the literal misses it (see
+        // #4319).
         "report-bug",
         "robots.txt",
         "sitemap.xml",
         "favicon.svg",
         "favicon.ico",
         "apple-touch-icon.png",
-        // The installable-app icons (`/icons/app-*.png`) and the web app manifest they are named
-        // in. A browser fetches both from the site host's own origin, so a catalog claiming either
-        // would make every site host uninstallable.
+        // App icons and the web manifest, fetched from the site's own origin.
         "icons",
         "manifest.webmanifest",
         // The push service worker (`PUSH_SERVICE_WORKER_PATH`). Its scope is bounded by its path,
@@ -239,9 +194,7 @@ data class ServeSites(private val byHost: Map<String, String>) {
         // a site host links to. A catalog named `a2ui` would otherwise shadow it.
         "a2ui",
         "wasm",
-        // `GET /wasm-private/<access>/<system>/…` — the token-in-path twin of `/wasm/…` for
-        // auto-discovered local apps. A site host is normally public, but the segment is a route
-        // either way and a catalog may not claim it.
+        // `/wasm-private/<access>/<system>/…`, the token-in-path twin of `/wasm/…`.
         "wasm-private",
         "rc-player",
         "rc-player-wasm",
@@ -253,19 +206,10 @@ data class ServeSites(private val byHost: Map<String, String>) {
         "social",
         "admin",
         "auth",
-        // `/agent-access/…` — the agent access-grant flow (`--agent-grants`). Reserved
-        // unconditionally like every other opt-in lane's segments: what a site host may name
-        // itself cannot depend on a flag the operator can turn on later. It matters more here than
-        // most, because the route a *human* opens is the approval page, and a site that had
-        // claimed the prefix would 404 the link an agent just told someone to click.
+        // `/agent-access/…`: the grant flow, whose approval page a human opens.
         "agent-access",
-        // `/oauth/…` and `/.well-known/…` — the OAuth façade an MCP client discovers and walks
-        // (`ServeMcpOAuth`). Reserved unconditionally, like `agent-access` above and for a sharper
-        // version of the same reason: `/oauth/authorize` is a route a *human's browser* lands on,
-        // and every one of the `.well-known` documents is read by a client that has no credential
-        // and no other way to find out where authorization starts. A site host that claimed either
-        // prefix would answer its styled 404 to the one request that bootstraps the whole exchange,
-        // and the client would report it as a registration failure with no hint of the real cause.
+        // `/oauth/…` and `/.well-known/…`: the OAuth façade MCP clients discover; a 404 here breaks
+        // the bootstrap request with no hint why.
         "oauth",
         ".well-known",
         // `POST /mcp` — the aggregate catalog MCP endpoint. Reserved unconditionally so a site
@@ -276,9 +220,7 @@ data class ServeSites(private val byHost: Map<String, String>) {
         "bundle.zip",
         "docs",
         "d",
-        // `POST /images` + `GET /i/<id>.png` — the image lane. Reserved unconditionally like every
-        // other opt-in lane's segments: what a site host may name itself cannot depend on a flag
-        // the operator can turn on later.
+        // `POST /images` and `GET /i/<id>.png`: the image lane.
         "images",
         "i",
         "playground",
@@ -287,37 +229,23 @@ data class ServeSites(private val byHost: Map<String, String>) {
         "api",
         "ws",
         "p",
-        // `GET /parallel/<previewId>` — the cross-catalog layer diff (issue #4838). Reserved like
-        // every other routed segment: a site host that claimed it would answer its own styled 404
-        // where the route resolves, and this lane in particular WORKS on a site (the diff is joined
-        // server-side and needs no URL into the neighbour catalog), so losing it there would be the
-        // one avoidable gap.
+        // `GET /parallel/<previewId>`: the cross-catalog layer diff, which works on a site (see
+        // #4838).
         "parallel",
         // `GET /usage/<previewId>` — the viewer's Source panel.
         "usage",
         "render",
-        // `GET /motion/<previewId>.apng` — the viewer's Motion lane. Omitted when the lane landed,
-        // which made every published capture 404 on a site host: the interceptor runs before
-        // routing, so `/motion/…` was read as a neighbour catalog and refused with the site's own
-        // styled page rather than reaching `handleMotion` at all.
+        // `GET /motion/<previewId>.apng`: the Motion lane.
         "motion",
-        // `GET /spatial/<previewId>/…` — portable scene documents and their sibling textures.
-        // Without this reservation a site host treats `spatial` as a neighbour catalog and
-        // intercepts the request before the scene-asset handler can serve it.
+        // `GET /spatial/<previewId>/…`: scene documents and textures.
         "spatial",
         "history",
         "compare",
         "reference",
         "pages",
-        // `GET /pages.json` — the design-pages index as data, beside `parity.json` and
-        // `status.json` below. Reserved for the same reason its HTML neighbour is: the segment is
-        // routed, so a catalog that claimed it would be unreachable at its canonical path.
+        // `GET /pages.json`: the design-pages index as data.
         "pages.json",
-        // `GET /tags/<previewId>` — the published element tag index (see [ServeTagIndex]), which
-        // the focused comparison's element selector fetches. Reserved beside its neighbours for the
-        // same reason: a site host that had claimed the prefix would answer its own styled 404 and
-        // the selector would silently offer no tag targets on exactly the deployments the parity
-        // workflow runs on.
+        // `GET /tags/<previewId>`: the published element tag index ([ServeTagIndex]).
         "tags",
         // `GET /schemas/<name>.json` — the UI-builder document and mutation JSON Schemas (#1114).
         "schemas",
@@ -325,9 +253,7 @@ data class ServeSites(private val byHost: Map<String, String>) {
         "parity",
         "parity.json",
         "refresh",
-        // `GET /feed.xml` — the catalog change feed, registered only when a feed is configured.
-        // Reserved unconditionally: what a site host may name itself cannot depend on a flag the
-        // operator can turn on later.
+        // `GET /feed.xml`: the catalog change feed (only registered when configured).
         "feed.xml",
         "index.json",
         "iframe.html",

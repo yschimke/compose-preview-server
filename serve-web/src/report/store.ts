@@ -1,18 +1,7 @@
-// Where a capture lives between the page it was taken on and the report it is pasted into.
-//
-// A screenshot of the page a bug is about has to be taken ON that page, while the report is written
-// a navigation later on `/report-bug`. Something has to carry the pixels across that navigation,
-// both for automatic hosting and for the clipboard fallback when hosting is unavailable.
-//
-// `sessionStorage`, not `localStorage`: this is scratch state belonging to one reporting gesture in
-// one tab, and it is a picture of whatever the reporter happened to have on screen — which on a
-// preview server can be an unreleased design. It should not outlive the tab, and it must not be
-// visible to another one.
-//
-// Every function here takes the storage as an argument rather than reaching for the global. That is
-// what makes the eviction rules testable without a browser, and it is also the honest shape: a
-// storage that throws (Safari's private mode, a blocked third-party context) is a case this has to
-// survive, not an impossibility.
+// Where a capture lives between the page it was taken on and the `/report-bug` page a navigation
+// later. `sessionStorage`, not `localStorage`: it is per-gesture scratch that may show an
+// unreleased design, so it must not outlive the tab or be visible to another. Storage is passed in
+// so eviction is testable and a throwing storage (private mode, blocked context) is handled.
 
 /** One captured picture, plus whatever else the selection yielded. */
 export interface Capture {
@@ -28,19 +17,9 @@ export interface Capture {
     /** Markdown the selection also produced — a picked table, rendered as one. Absent otherwise. */
     markdown?: string;
     /**
-     * `location.pathname` of the page this was a picture of.
-     *
-     * The pile outlives the report it was taken for — it is `sessionStorage`, so it lasts as long as
-     * the tab — and the automatic hand-off has to be able to tell "the screenshot for THIS report"
-     * from "a screenshot that happens to still be here". Without that, a second report filed later
-     * in the same tab, from somewhere else, would silently put the first report's picture on the
-     * clipboard and then instruct the reporter to paste it: a screenshot of an unrelated page,
-     * attached with every appearance of being deliberate.
-     *
-     * The path alone, not the query. Two reports about the same preview at different knob settings
-     * are the same subject and a capture of one is honest evidence for the other; two reports about
-     * different pages are not. Absent on a capture written by a build older than this field, which
-     * is treated as "cannot vouch for it" — the Copy button still sends it, the hand-off does not.
+     * `location.pathname` of the captured page, so the automatic hand-off only uses a capture taken
+     * for this report, not one left over in the tab. Path only: different knob settings of the same
+     * preview are the same subject. Absent on older captures, which only the Copy button will send.
      */
     page?: string;
     /** Expiring, anonymous read URL returned by this host's image lane. Cleared whenever markup
@@ -52,12 +31,8 @@ export interface Capture {
 export const STORE_KEY = "cp-report-captures";
 
 /**
- * How many captures ride along, and how big the pile may get.
- *
- * `sessionStorage` is a ~5 MB budget per origin that this server shares with nothing else, but a
- * full-viewport PNG of a catalog grid is comfortably over a megabyte, so three is the honest
- * ceiling — and three is more than a bug report needs. Exceeding either limit evicts the OLDEST,
- * because the newest capture is the one the reporter just deliberately took.
+ * `sessionStorage` is ~5 MB and a full-viewport PNG can exceed 1 MB, so three is the ceiling.
+ * Exceeding either limit evicts the oldest, since the newest was just taken deliberately.
  */
 export const MAX_CAPTURES = 3;
 export const MAX_BYTES = 3_500_000;
@@ -73,13 +48,8 @@ export function sessionStore(): Storage | null {
 }
 
 /**
- * Read the pile back, tolerating every way it can be wrong.
- *
- * The value is JSON this page wrote, but it is JSON in a store another tab, an extension, or an
- * older build of this server could have written — so each entry is checked field by field and a
- * malformed one is dropped rather than reaching the DOM. A capture whose `dataUrl` is not a PNG
- * data URL is the one that matters: that string becomes an `<img src>`, and the whole point of
- * pinning the prefix is that nothing else can.
+ * Read the pile back, validating each entry field by field since another tab, extension or older
+ * build may have written it. `dataUrl` must be a PNG data URL because it becomes an `<img src>`.
  */
 export function readCaptures(store: Storage | null): Capture[] {
     if (!store) return [];
@@ -130,13 +100,8 @@ function safeUploadUrl(value: unknown): value is string {
 }
 
 /**
- * Write the pile, dropping the oldest entries until it fits.
- *
- * Two independent limits, and the quota exception is a third: a browser may refuse a write this
- * function believes is within budget (another tab of the same origin has filled the partition), and
- * the right answer there is the same one — drop the oldest and try again — rather than losing the
- * capture the reporter just took. Returns what actually landed, which can be fewer than it was
- * handed and, in the worst case, none at all.
+ * Write the pile, dropping the oldest until it fits — including on a quota exception the size
+ * estimate didn't predict. Returns what actually landed, possibly nothing.
  */
 export function writeCaptures(
     store: Storage | null,
@@ -192,11 +157,8 @@ export function replaceCapture(
 }
 
 /**
- * An id for a capture, unique within this session.
- *
- * A counter over the ids already stored rather than a timestamp or a random string: the pile is at
- * most three long, the id is never shown, and this is the only version of it that cannot collide
- * with itself when two captures are taken inside the same millisecond.
+ * A counter over the stored ids: never shown, and unlike a timestamp it cannot collide within a
+ * millisecond.
  */
 export function nextId(existing: Capture[]): string {
     const used = new Set(existing.map((c) => c.id));

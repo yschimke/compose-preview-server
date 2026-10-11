@@ -1,10 +1,7 @@
-// Behavioural contract for `<cp-spec-compare>`.
-//
-// The rules are pinned next door — `specViews.test.ts`, `specVerdict.test.ts`,
-// `sameOrigin.test.ts`. What only the element can answer is the lane's lifecycle: that `viewer.js`
-// finds the global it calls, that entering and leaving the lane hands the chip back exactly as the
-// server rendered it, that a view switch inside one visit does not re-run the comparison, and that
-// a comparison still in flight when the lane closes cannot paint over the published verdict.
+// Behavioural contract for `<cp-spec-compare>`. The rules are pinned in `specViews.test.ts`,
+// `specVerdict.test.ts` and `sameOrigin.test.ts`; this covers the lane's lifecycle: `viewer.js`
+// finds the global, entering and leaving restores the chip as served, a view switch doesn't re-run
+// the comparison, and a comparison in flight at close can't paint over the published verdict.
 
 import "./setup.js";
 import assert from "node:assert/strict";
@@ -141,10 +138,8 @@ describe("<cp-spec-compare>", () => {
     });
 
     it("claims the eyedropper's row as the lane opens", async () => {
-        // The lane wraps, so a readout that appeared with the first reading added a line to the
-        // header and pushed the stage 26px down — under the cursor, mid-hover, which made the
-        // first reading on screen describe a pixel the pointer had just left. The row is claimed
-        // while nothing is being read instead.
+        // The readout row is claimed while nothing is read, so the first reading doesn't reflow the
+        // header under the cursor.
         stubCompare();
         await mount();
         assert.equal(pick().hidden, true, "no row before the lane is entered");
@@ -153,22 +148,13 @@ describe("<cp-spec-compare>", () => {
         assert.equal(pick().textContent, "", "reserved, not filled");
     });
 
-    // ---- Freezing a reading (issue #464) -------------------------------------------------------
-    //
-    // The picker's one gesture is "hold what I am looking at". It was not holding that: the click
-    // took its OWN reading, and a click's coordinates are not the pointer's — Chromium rounds
-    // `MouseEvent.clientX/clientY` to whole CSS pixels while `pointermove` carries fractions. On a
-    // panel scaled down to fit its box that whole pixel is several pixels of the normalised space,
-    // so the row swapped to a neighbouring pixel, and to its verdict, at the moment of freezing.
-    // Measured on the triptych at devicePixelRatio 2, pointer held still:
-    // `146,122 · … · Δ 22` on screen, `146,121 · … · identical` frozen.
+    // Freezing a reading must hold what is on screen: a click's coordinates are rounded to whole
+    // CSS pixels (unlike `pointermove`), so re-reading at the click could freeze a neighbouring
+    // pixel with a different verdict.
 
     /**
-     * A pair whose two sides hand back real pixels, so a reading can actually be taken.
-     *
-     * The reference alternates by ROW against a uniform candidate, which is what makes a
-     * one-pixel-off reading visible as a different LINE rather than the same one: row 3 matches
-     * the candidate exactly, row 2 is its opposite.
+     * A pair whose sides return real pixels. The reference alternates by row against a uniform
+     * candidate, so a one-pixel-off reading produces a visibly different line.
      */
     const readablePair = (size = 8) => {
         const buffer = (
@@ -200,11 +186,8 @@ describe("<cp-spec-compare>", () => {
     };
 
     /**
-     * The lane open on a readable pair, with the render panel laid out at HALF the pair's height.
-     *
-     * The scale is the point: two rows of the normalised space per CSS pixel is what turns the
-     * click's rounding into a different reading, and it is the ordinary case — a panel is the
-     * raster fitted into its box, not shown at its intrinsic size.
+     * The lane open on a readable pair, with the render panel at half the pair's height, so the
+     * click's rounding lands on a different row (the ordinary, scaled-to-fit case).
      */
     async function openReadableLane(): Promise<HTMLCanvasElement> {
         const pair = readablePair();
@@ -259,13 +242,8 @@ describe("<cp-spec-compare>", () => {
         );
 
     it("reads through the drawn frame, not the panel's box", async () => {
-        // The triptych stretches its columns, so a panel is `object-fit: contain` and a frame
-        // whose ratio does not match its column is letterboxed inside the box. Mapping through
-        // the element's box then slides every reading toward the centre by half the bar.
-        // Here: an 8x8 pair in a 16-wide, 8-tall box, so the frame draws 8x8 centred, with 4px
-        // bars either side of it. Client x 5.5 is the frame's own x 1; mapping through the box
-        // instead reads 5.5 x 8/16 = 2.75, i.e. x 2 — a whole pixel out, and further out the
-        // squarer the frame is.
+        // A panel letterboxed by `object-fit: contain`: an 8x8 pair centred in a 16x8 box with 4px
+        // bars. Client x 5.5 is frame x 1; mapping through the element box would read x 2.
         const actual = await openReadableLane();
         actual.getBoundingClientRect = () =>
             ({
@@ -286,9 +264,7 @@ describe("<cp-spec-compare>", () => {
     });
 
     it("reads nothing over the letterbox beside a frame", async () => {
-        // The bars are the panel's background, not the picture. `sampleAt` would answer "outside
-        // this frame" for them — a reading, about a point that is not on the frame at all — so
-        // the row stays empty exactly as it does off a panel.
+        // The letterbox bars aren't the picture, so the row stays empty there.
         const actual = await openReadableLane();
         actual.getBoundingClientRect = () =>
             ({
@@ -324,9 +300,8 @@ describe("<cp-spec-compare>", () => {
 
     it("freezes the reading on screen, not the click's own pixel", async () => {
         const actual = await openReadableLane();
-        // y 1.9 of a panel at half scale is row 3 — the row that matches. The click that follows
-        // carries y 2, which is row 4... and row 2 either side of it: whatever it reads, it must
-        // not be what the row is made to say.
+        // y 1.9 at half scale is row 3 (the matching row); the click carries y 2, which the latched
+        // reading must not use.
         movePointer(actual, 4.4, 1.9);
         const onScreen = pick().textContent;
         assert.match(onScreen ?? "", /^4,3 /, "the pointer is on row 3");
@@ -352,9 +327,7 @@ describe("<cp-spec-compare>", () => {
     });
 
     it("hands the row back to the pointer when a second click releases it", async () => {
-        // Escape blanked the row and a second click did not, so releasing by click left the
-        // latched line up — unstyled, and therefore reading as a LIVE reading of whatever the
-        // cursor had moved onto in the meantime.
+        // Releasing by click must behave like Escape, not leave the latched line up unstyled.
         const actual = await openReadableLane();
         movePointer(actual, 4.4, 1.9);
         const held = pick().textContent;
@@ -432,10 +405,8 @@ describe("<cp-spec-compare>", () => {
     });
 
     it("lets a frozen reading go when the view changes", async () => {
-        // The view decides which panels exist, so a reading outliving a switch describes a surface
-        // that may not be on screen. Carried into Slider it is also a trap: moves are latched, and
-        // the wipe canvas is the one surface whose click cannot release the latch, leaving Escape
-        // as the only way out.
+        // A reading must not survive a view switch (it may describe a hidden surface, and in Slider
+        // only Escape could release it).
         stubCompare();
         await mount();
         lane().open("/render/Button.png");
@@ -474,10 +445,7 @@ describe("<cp-spec-compare>", () => {
     });
 
     it("takes a frozen reading away when the lane closes", async () => {
-        // `cp-spec-lane` carries the source buttons, so it stays in the page off the lane. A
-        // reading left in it goes on naming two colours beside a picture neither came from, and
-        // the latch would still be holding when the lane is next opened — the pointer ignored
-        // until someone guesses to press Escape.
+        // `cp-spec-lane` persists off the lane, so leaving must clear the reading and the latch.
         stubCompare();
         await mount();
         lane().open("/render/Button.png");
@@ -500,10 +468,7 @@ describe("<cp-spec-compare>", () => {
     });
 
     it("opens comparing, without waiting to be asked", async () => {
-        // #4376: the lane is entered to ask how the render and the reference compare, so it opens
-        // on the triptych — spec, diff and render side by side — rather than on the reference
-        // alone, which answered that only by asking the eye to hold one frame while looking at the
-        // other.
+        // The lane opens on the triptych (spec, diff and render side by side).
         const stub = stubCompare({ percent: 98.44, geometry: 0 });
         await mount();
         lane().open("/render/Button.png");
@@ -516,9 +481,7 @@ describe("<cp-spec-compare>", () => {
     });
 
     it("leaves the stage alone on the plain Spec view", async () => {
-        // The one view that paints nothing of its own: pressing Spec puts the lane back to what it
-        // showed before any of this existed — the raster `<img>` viewer.js put on the stage as the
-        // whole surface, with no comparison panel and no score over it.
+        // Spec paints nothing of its own: the stage is just viewer.js's raster `<img>`.
         stubCompare();
         await mount();
         lane().open("/render/Button.png");
@@ -652,10 +615,8 @@ describe("<cp-spec-compare>", () => {
     });
 
     it("puts the live verdict on the chip, and the published one back on the way out", async () => {
-        // The chip carries the score baked at PUBLISH. Once an override or a knob has moved the
-        // render, that number describes a frame that is no longer on the stage — but off the lane
-        // there is nothing live to describe, so leaving a knob-bent number there would misreport
-        // every later visit as if it were the publish.
+        // The chip's published score must be restored on leaving, not left showing a knob-bent live
+        // number.
         stubCompare({ percent: 99.9, geometry: 0 });
         await mount();
         lane().open("/render/Button.png?knob=1");
@@ -678,11 +639,8 @@ describe("<cp-spec-compare>", () => {
     });
 
     it("drops the published verdict once the render leaves the baseline", async () => {
-        // The baked number is measured against the catalog's own snapshot, while the imported spec
-        // is exported once and never re-exported per theme. Pick a theme and only ONE side of that
-        // comparison moves — so the published number is no longer describing anything on the
-        // stage, and it is generous about it: the pair that publishes at 99.6% scores 88.9% under
-        // Light High Contrast. Left on the chip it makes entering the lane look like a regression.
+        // Off the baseline (a theme picked), only the render moves since the spec isn't re-exported
+        // per theme, so the published number no longer describes the stage.
         await mount();
         lane().baseline(false);
         assert.equal(chip().textContent, "Button", "just the provider label");
@@ -700,27 +658,17 @@ describe("<cp-spec-compare>", () => {
     });
 
     it("never paints a published verdict the served page already knows is stale", async () => {
-        // A deep link naming a theme is served with the baked verdict in the markup, and viewer.js
-        // has no guaranteed ordering against this element — so the state is read off the stage at
-        // install rather than waited for.
+        // viewer.js has no guaranteed ordering against this element, so the baseline state is read
+        // off the stage at install.
         await mount({ baseline: false });
         assert.equal(chip().textContent, "Button");
         assert.equal(chip().getAttribute("data-spec-match"), null);
     });
 
     it("publishes no match score at all off the baseline", async () => {
-        // This test used to assert the opposite — that a live measurement outranked the baseline
-        // flag, because it had been taken from the frames actually on the stage. That reasoning
-        // answers the wrong objection. The problem with the baked number off the baseline is not
-        // that it is STALE, it is that no spec exists for the frame being looked at: a reference is
-        // imported once, at the catalog's default, and is never re-exported per theme. Measuring
-        // against it anyway grades the theme.
-        //
-        // `shape-bun__ideal__default__light` under Light Medium Contrast is the case that settled
-        // it. The geometry is identical — only the token colour moves — and the lane reported
-        // "90.5% match · 89.34% pixels differ", which reads as a component that has fallen apart.
-        // A live number is not a better answer than a stale one here; both are answers to a
-        // question the spec cannot be asked.
+        // Off the baseline, neither the published nor a live number is shown: no spec exists for
+        // the themed frame, so measuring grades the theme (e.g. a token-colour change scoring
+        // "90.5% match" on pixel-correct geometry).
         const stub = stubCompare({ percent: 88.9, geometry: 0 });
         await mount({ baseline: false });
         lane().open("/render/Button.png?themeProvider=HighContrast");
@@ -731,8 +679,8 @@ describe("<cp-spec-compare>", () => {
         assert.equal(chip().textContent, "Button", "just the provider label");
         assert.equal(chip().getAttribute("data-spec-match"), null);
         assert.equal(chip().title, "measured against the default render");
-        // The changed-pixel count survives: it is literally true about the two frames, and it is
-        // the panels' own caption. What it is no longer allowed to do is read as a verdict.
+        // The changed-pixel count stays (it is true and is the panels' caption), but not as a
+        // verdict.
         assert.equal(
             score().textContent,
             "18.75% pixels differ · the imported spec is baseline-only, " +
@@ -741,9 +689,8 @@ describe("<cp-spec-compare>", () => {
     });
 
     it("re-decides the readout when the render returns to the baseline", async () => {
-        // The flag can flip while the lane is open, and `compute()`'s cached-frames path returns
-        // without touching the readout — so a pair scored under one baseline state would go on
-        // describing itself under the other.
+        // The baseline flag can flip while the lane is open, and the cached-frames path skips the
+        // readout, so it must be re-decided.
         const stub = stubCompare({ percent: 98.44, geometry: 0 });
         await mount({ baseline: false });
         lane().open("/render/Button.png");
@@ -758,9 +705,8 @@ describe("<cp-spec-compare>", () => {
     });
 
     it("does not re-compare when only the view changes", async () => {
-        // One normalisation feeds the diff, the three panels and the wipe, so switching between
-        // them inside a visit is free — and re-running it would be a second `/render` request on a
-        // `no-store` override, which can come back different.
+        // One normalisation feeds every view, so switching is free; re-running would re-request a
+        // no-store render that could differ.
         const stub = stubCompare();
         await mount();
         lane().open("/render/Button.png");
@@ -788,9 +734,7 @@ describe("<cp-spec-compare>", () => {
     });
 
     it("abandons a comparison the lane no longer wants", async () => {
-        // `close()` restores the published verdict; a score resolving afterwards would otherwise
-        // still pass its generation check and paint a live, possibly override-specific number onto
-        // the chip while the published render is back on the stage.
+        // `close()` restores the published verdict; a late score must not paint over it.
         const stub = stubCompare({ percent: 42, geometry: 0 }, { hold: true });
         await mount();
         lane().open("/render/Button.png?knob=1");
@@ -872,12 +816,8 @@ describe("<cp-spec-compare>", () => {
         assert.equal(viewer().getAttribute("data-spec-view"), "slider");
     });
 
-    // ---- The source picker (issue #4895) ------------------------------------------------------
-    //
-    // The picker is `viewer.js`'s: it owns the buttons, the pressed state and the raster's
-    // origin check, and names the winner on `open()`. What this element owes it is that naming a
-    // source actually MOVES the pair — the reported bug was a picker whose button latched and
-    // whose canvases went on showing the comparison they had already normalised.
+    // The source picker belongs to `viewer.js`, which names the winner on `open()`; this element
+    // must actually move the pair to that source.
 
     const sibling = {
         reference: "https://preview.example/wear-m3/render/AppCard.png",
@@ -943,10 +883,8 @@ describe("<cp-spec-compare>", () => {
     });
 
     it("keeps the design-spec chip out of a sibling comparison", async () => {
-        // The pair is scored — two renders is a real pixel comparison, and it is the number the
-        // cross-system parity surfaces report. What it is not is a SPEC match, and the chip is
-        // named for the kit's provider, so putting 62.5% there would be one comparison wearing
-        // another's label.
+        // A sibling pair is scored (a real pixel comparison), but not shown on the chip named for
+        // the kit's provider.
         const stub = stubCompare({ percent: 62.5, geometry: 0 });
         await mount();
         lane().open("/render/AppCard.png", sibling);
@@ -963,9 +901,8 @@ describe("<cp-spec-compare>", () => {
     });
 
     it("uses the sibling's typography rather than the imported kit's", async () => {
-        // The peer source now carries its own annotations endpoint. The same fixture is returned
-        // for both endpoints here, proving the sibling pair is considered instead of silently
-        // suppressing typography because the imported-kit payload names another frame.
+        // The peer source has its own annotations endpoint; the same fixture for both proves the
+        // sibling pair is considered.
         stubCompare();
         globalThis.fetch = (async () => ({
             ok: true,
@@ -1010,11 +947,8 @@ describe("<cp-spec-compare>", () => {
         );
     });
 
-    // ---- The loupe, and content-aware alignment (issue #830) -----------------------------------
-    //
-    // The eyedropper answers "what is this pixel, on both sides". Extended to a magnifier it
-    // answers "what is this NEIGHBOURHOOD", which is the question a 3px shift is an answer to —
-    // and, with alignment on, it answers it about the element rather than about the coordinate.
+    // The loupe and content-aware alignment: magnify the neighbourhood, and with alignment on,
+    // compare the element rather than the coordinate.
 
     const loupeControls = () =>
         document.getElementById("cp-spec-loupe-controls") as HTMLElement;
@@ -1119,9 +1053,7 @@ describe("<cp-spec-compare>", () => {
     });
 
     it("lets the modifier go when the page loses focus", async () => {
-        // A key released while the page is not focused never arrives, and Shift is half of
-        // Shift+Tab — so without this the patch would follow the cursor for the rest of the visit
-        // with no gesture that turns it off.
+        // Shift released while unfocused never arrives, so blur must drop the held modifier.
         const actual = await openReadableLane();
         movePointer(actual, 4.4, 1.9, { shift: true });
         assert.equal(loupe()?.hidden, false);
@@ -1141,11 +1073,8 @@ describe("<cp-spec-compare>", () => {
     });
 
     it("keeps a frozen reading when a toggle is pressed from outside the comparison", async () => {
-        // The toggles are in the lane, not on the stage, so reaching one sends `pointerleave`
-        // first and empties the live point. Re-reading a frozen line from THAT blanked the row and
-        // hid the patch with the latch still shut — and returning to the panels could not restore
-        // either, because pointer moves are latched. A frozen reading is re-read at the point the
-        // latch closed on.
+        // Pressing a toggle sends `pointerleave` first; a frozen reading must re-read at its
+        // latched point, not the emptied live one.
         const actual = await openReadableLane();
         movePointer(actual, 4.4, 1.9);
         clickPanel(actual, 4.4, 1.9);
@@ -1179,11 +1108,9 @@ describe("<cp-spec-compare>", () => {
     });
 
     /**
-     * The lane open on a pair whose "label" is one row lower in the render, with layout
-     * annotations on both sides saying so.
-     *
-     * This is issue #830's case at its smallest: read at the same coordinate the label's row is
-     * white on one side and black on the other, which is a maximal difference for a shift of one.
+     * The lane open on a pair whose "label" is one row lower in the render, with layout annotations
+     * on both sides saying so: at the same coordinate the row is white on one side and black on the
+     * other.
      */
     async function openShiftedLane(): Promise<HTMLCanvasElement> {
         const size = 8;
@@ -1333,9 +1260,7 @@ describe("<cp-spec-compare>", () => {
     });
 
     it("drops the matched boxes with the pair they describe", async () => {
-        // Boxes carried into the next pair would align new pixels by the old frame's geometry —
-        // the same class of fault as a reading that outlives its pair, and harder to see, because
-        // the patch would still look like a patch.
+        // Boxes must not carry into the next pair.
         const restore = stubAnnotations(5);
         try {
             const actual = await openShiftedLane();

@@ -6,21 +6,15 @@ import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 /**
- * Pins the **breakpoint (size) axis** in [ServeWeb]: a component documented at several declared
- * screen sizes shows ONE landing card — its first declared size — with the others reachable from
- * the viewer's component subtree, exactly as a non-default state or props variant is.
- *
- * The bug this answers is wear-m3-catalog#41 ("So many duplicate components"). That catalog renders
- * every full-screen component at the five sizes its Figma kit declares (`192dp` … `240dp`); the
- * export tags each image with its `size`, but the serve layer dropped the tag, so the axis was
- * invisible and 14 components published as 70 cards — five apiece, all wearing the same name.
+ * Pins the breakpoint (size) axis in [ServeWeb]: a component documented at several screen sizes
+ * shows one landing card (its first declared size), with the others reachable from the viewer's
+ * subtree like a state or props variant (see wear-m3-catalog#41).
  */
 class ServeWebBreakpointFoldTest {
 
   /**
-   * One render of a full-screen component: a state at a declared breakpoint. Sectioned, because a
-   * catalog that documents breakpoints is a catalog with an authored inventory, and the tabbed
-   * landing tree this pins is only built for one.
+   * One render of a full-screen component at a declared breakpoint; sectioned, because the tabbed
+   * landing tree is only built for an authored inventory.
    */
   private fun render(slug: String, componentId: String, state: String, size: String, order: Int) =
     ServePreview(
@@ -128,11 +122,8 @@ class ServeWebBreakpointFoldTest {
 
   @Test
   fun `a drawer row points at the prebaked thumbnail lane when the preview has one`() {
-    // #215. The drawer's rows are ~40px thumbnails, one per sibling component — 57 of them on the
-    // m3 catalog — and each used to load the preview's FULL-resolution render: 849 KB at
-    // `max-age=300` with no validator, so the expiry could not even end in a 304. The grid's cards
-    // already had the answer; this puts the drawer on the same `?thumb=<hash>` lane, which the
-    // render route serves out of memory as an `immutable`, ETagged, downscaled copy.
+    // Drawer rows (~40px thumbnails) use the grid's `?thumb=<hash>` lane — an immutable, ETagged,
+    // downscaled copy served from memory — rather than the full-resolution render.
     val html =
       ServeWeb.viewerPage(
         alertDialog.first(),
@@ -153,9 +144,7 @@ class ServeWebBreakpointFoldTest {
       thumbs.all { it.contains("thumb=hash-") },
       "every row rides the prebaked lane: $thumbs",
     )
-    // The hash is appended to the row's OWN url, so the id and the link query are untouched — the
-    // same rule the grid's `renderSrc` follows, which is what keeps one URL shape across the two
-    // surfaces.
+    // The hash is appended to the row's own URL, as the grid's `renderSrc` does.
     assertTrue(
       thumbs.all { it.startsWith("/wear/render/") && it.contains(".png?") },
       "the thumbnail is the row's own render URL with a parameter added: $thumbs",
@@ -164,9 +153,8 @@ class ServeWebBreakpointFoldTest {
 
   @Test
   fun `a drawer row keeps the plain render when no thumbnail is baked`() {
-    // The fallback is not a degradation to avoid — a catalog fills its images in after it loads, so
-    // a preview with no locally baked pixels yet keeps the full render and picks a thumbnail up on
-    // a later page build. Pinned so the lane can never become mandatory.
+    // A preview with no locally baked pixels yet keeps the full render; the thumbnail lane must
+    // never be mandatory.
     val html =
       ServeWeb.viewerPage(
         alertDialog.first(),
@@ -224,11 +212,8 @@ class ServeWebBreakpointFoldTest {
 
   @Test
   fun `a lane whose only render is at a non-primary size keeps it`() {
-    // The theme × size product is not always full. Here the component is drawn light at its first
-    // declared breakpoint and dark ONLY at another one — so folding every non-primary size would
-    // take the dark render off the grid, out of the drawer, and out of the palette, while the size
-    // switcher (which holds the theme lane fixed) could never offer it from the light page. Each
-    // lane resolves its own primary, so both renders survive.
+    // A sparse theme × size product (light at one size, dark only at another): each lane resolves
+    // its own primary, so both renders survive.
     val sparse =
       listOf(
         ServePreview(
@@ -271,9 +256,7 @@ class ServeWebBreakpointFoldTest {
       ServeWeb.componentSearchEntries(sparse).map { it.previewId },
       "the palette keeps a representative for each lane",
     )
-    // …and names them apart. Both rows would otherwise read "Sparse Dialog": the id-token
-    // vocabulary has no entry for `192dp`, so the qualifier fell through to the bare label and the
-    // palette offered two destinations spelled identically.
+    // …and they are named apart (the id-token vocabulary has no entry for `192dp`).
     assertEquals(
       listOf("Sparse Dialog · 192dp", "Sparse Dialog · 240dp"),
       ServeWeb.componentSearchEntries(sparse).map { it.label },
@@ -283,10 +266,8 @@ class ServeWebBreakpointFoldTest {
 
   @Test
   fun `the drawer names a sparse component once, in the theme being viewed`() {
-    // Two survivors of ONE component (light at 192dp, dark at 240dp) carry different size tokens,
-    // so `groupPreviews` cannot pair them into a single card. Without a dedupe after the lane pick
-    // the drawer names the component twice, and one of the two links walks out of the theme on
-    // screen — the opposite of what the drawer promises.
+    // Two survivors of one component with different size tokens can't be paired, so the drawer must
+    // dedupe after the lane pick or list it twice.
     val sparse =
       listOf(
         ServePreview(
@@ -349,11 +330,8 @@ class ServeWebBreakpointFoldTest {
 
   @Test
   fun `lanes that disagree on breakpoint order still fold to one card`() {
-    // A full theme × size product whose lanes enumerate their breakpoints in a DIFFERENT order —
-    // what two per-theme preview functions produce. Resolving each lane's primary independently
-    // would pick 192dp for light and 240dp for dark; the survivors' ids would then differ by size,
-    // `baseKey` could not pair them, and a full product would publish two cards. The component-wide
-    // primary wins in every lane that has it.
+    // Lanes enumerating breakpoints in different orders: the component-wide primary wins in every
+    // lane that has it, so a full product still publishes one card.
     val interleaved =
       listOf(
         ServePreview(
@@ -416,11 +394,8 @@ class ServeWebBreakpointFoldTest {
 
   @Test
   fun `a breakpoint named light or dark is not mistaken for a theme`() {
-    // `breakpoints[].size` is an arbitrary catalog-chosen string, so a size can be spelled `light`.
-    // Inferring the fold's lane from the flattened id would read that SIZE as a baked theme, keep
-    // both sizes as separate lane primaries, and let `groupPreviews` pair them into a light/dark
-    // swap card — a Theme control that changes device size. The lane comes from declared metadata
-    // only, so this catalog has one lane and folds to one card.
+    // `breakpoints[].size` is arbitrary and may be spelled `light`; the lane comes from declared
+    // metadata only, never the flattened id.
     val oddlyNamed =
       listOf("light", "dark").mapIndexed { i, size ->
         ServePreview(
@@ -517,9 +492,8 @@ class ServeWebBreakpointFoldTest {
 
   @Test
   fun `a live-only preview carries its component's caption`() {
-    // A wholly-deferred component never reaches `components[]`, so its caption exists only on the
-    // deferred record — the component-map lookup alone would leave exactly the live-only cards
-    // (which have no baked pixels to explain them either) unable to say what they are.
+    // A wholly-deferred component never reaches `components[]`, so its caption comes from the
+    // deferred record.
     val liveOnly =
       ServePreview(
         id = "livedialog__ideal__default__192dp",
@@ -543,9 +517,8 @@ class ServeWebBreakpointFoldTest {
 
   @Test
   fun `a catalog that declares no sizes keeps a card per render`() {
-    // The same fan-out as above with the metadata a pre-breakpoint export never wrote. Folding on
-    // the id alone would make these renders unreachable — there would be no switcher to reach them
-    // from — so each stays its own card, disambiguated by its size token.
+    // Without breakpoint metadata (pre-breakpoint exports), folding on id alone would strand
+    // renders, so each stays its own card.
     val untagged = openOnPhone.map { it.copy(size = null) }
     val html = ServeWeb.landingPage("legacy", untagged, token = "t", basePath = "/legacy")
 
