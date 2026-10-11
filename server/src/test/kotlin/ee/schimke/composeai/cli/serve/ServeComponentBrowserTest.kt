@@ -47,9 +47,8 @@ class ServeComponentBrowserTest {
       html.indexOf("</main>") < html.indexOf("querySelectorAll(\"[data-cp-interface-mode]\")")
     )
     assertTrue(html.contains("androidx/androidx"))
-    // The card names itself through the title link's own TEXT rather than an `aria-label` on a
-    // whole-tile anchor: the card is a div now (it has to be able to hold the compare chip), and
-    // the link's text is both the visible title and its accessible name.
+    // The card is named by the title link's text (the card is a div so it can hold the compare
+    // chip).
     assertTrue(
       html.contains("<a class=\"cp-sys-open\" href=\"/compose-m3/?token=$token\">Material 3</a>"),
       html,
@@ -193,10 +192,8 @@ class ServeComponentBrowserTest {
     assertTrue(html.contains("id=\"cp-wasm\""))
     assertTrue(html.contains("id=\"cp-wasm-toggle\""))
     assertTrue(html.contains("data-wasm-src=\"/wasm/compose-m3/\""))
-    // The Wasm lane is available but NOT entered on load: Catalog mode opens on the same baked
-    // snapshot Dev mode does. Auto-enabling it bypassed viewer.js's "wait for the snapshot to
-    // land" gate, which cancelled the in-flight render and left the iframe sized to a src-less
-    // <img>'s placeholder box — a blank stage on every component page (#4091).
+    // The Wasm lane is available but not entered on load: auto-enabling it bypassed the "wait for
+    // the snapshot" gate and left a blank stage (#4091).
     assertTrue(html.contains("data-mode=\"snapshot\""))
     assertFalse(html.contains("getElementById(\"cp-wasm-toggle\")"))
     assertTrue(html.contains("id=\"cp-localeTag\""))
@@ -206,14 +203,11 @@ class ServeComponentBrowserTest {
     assertTrue(html.contains("Copy SVG"))
 
     assertFalse(html.contains("id=\"cp-live-toggle\""))
-    // The switcher survives here, because this preview carries a `.rc` document — which player drew
-    // a document is the subject of a Remote Compose catalog, not operational chrome. See `catalog
-    // mode keeps the whole remote compose facet`.
+    // The switcher stays for a `.rc` preview: which player drew a document is the subject of a
+    // Remote Compose catalog.
     assertTrue(html.contains("id=\"cp-lane-select\""))
-    // …and it survives UNJOINED. Everywhere else the combo is a caret beside a chip that names the
-    // current renderer; here the chip is gone, so the combo is the sole indicator of what is
-    // drawing and has to keep its own label and its full width. Wrapping it in the caret segment
-    // would leave a `▾` with nothing beside it to name.
+    // …unjoined: without the renderer chip the combo is the sole indicator and keeps its own label
+    // and width.
     assertFalse(html.contains("class=\"cp-renderer\""))
     assertFalse(html.contains("cp-renderer-more"))
     assertTrue(html.contains("value=\"rc:camaelon-js\""))
@@ -229,14 +223,8 @@ class ServeComponentBrowserTest {
   }
 
   /**
-   * Catalog mode keeps the **catalog** report, though it drops every developer affordance beside
-   * it.
-   *
-   * This mode is the presentation a design reviewer is handed, and a reviewer noticing that a
-   * component draws the wrong thing is precisely who the report exists for. Stripping it with the
-   * source link and the playground left the floating launcher with no `#cp-report` to unhide its
-   * catalog half against, so the only route out of a wrong preview was the preview SERVER's tracker
-   * — which does not own the component (issue #4704).
+   * Catalog mode keeps the catalog report while dropping developer affordances: reviewers are
+   * exactly who files it, and the launcher needs `#cp-report` for its catalog half.
    */
   @Test
   fun `catalog mode keeps the catalog report beside the preview`() {
@@ -285,16 +273,9 @@ class ServeComponentBrowserTest {
   }
 
   /**
-   * A Remote Compose preview keeps the **whole** player facet in Catalog mode — embedded included.
-   *
-   * It used to come off with the rest of the dev surface, which made a shared `?rcPlayer=…` link
-   * inert here: no canvas, no chips, no lane select, and no control owning the param, so
-   * `url-state.js` cleared it from the address bar and the link quietly became an ordinary baked
-   * snapshot. Which player drew a document is the *subject* of a Remote Compose catalog rather than
-   * an operational detail, so the reader of one is exactly who wants to switch between them.
-   *
-   * The landing lane matching Dev's is the load-bearing half: both modes open on the embedded
-   * player, so the two cannot disagree about what the default rendering of a document is.
+   * A Remote Compose preview keeps the whole player facet in Catalog mode, so a shared
+   * `?rcPlayer=…` link still works. Both modes land on the embedded player, so they agree on the
+   * default rendering.
    */
   @Test
   fun `catalog mode keeps the whole remote compose facet`() {
@@ -318,19 +299,14 @@ class ServeComponentBrowserTest {
       listOf("camaelon-js", "cmp-wasm", "androidx-view", "androidx-embedded", "cmp-jvm")) {
       assertTrue(html.contains("value=\"rc:$wire\""), "$wire is offered in Catalog mode")
     }
-    // The lane it opens on is the embedded player, exactly as in Dev. Asserted on both attributes
-    // because it is the visible consequence of the change and the thing a reviewer should weigh: an
-    // RC preview in Catalog mode now lands on a rendered player rather than the baked PNG.
+    // Opens on the embedded player, as in Dev.
     assertTrue(html.contains("data-rc-default=\"androidx-embedded\""))
     assertTrue(html.contains("data-default=\"rc:androidx-embedded\""))
   }
 
   /**
-   * Catalog mode drops the renderer **chip** with the rest of the Live control, and that chip is
-   * what made the combo a *command* menu: "Switch renderer…" at rest is only honest while something
-   * beside it names the renderer in use. Without a chip the combo is the sole indicator, so the
-   * server marks it as a state field and `viewer.js` keeps the selection in it — otherwise picking
-   * Java left nothing on the page, or in the accessibility tree, saying Java was drawing.
+   * Without the renderer chip the combo is the sole indicator of what is drawing, so the server
+   * marks it as a state field and `viewer.js` keeps the selection in it.
    */
   @Test
   fun `catalog mode marks the renderer combo as a state field, having no chip`() {
@@ -422,12 +398,8 @@ class ServeComponentBrowserTest {
 
   @Test
   fun `catalog mode paints no render-server badge`() {
-    // The badge is a count ON the header's Status link, and Catalog mode carries neither the nav
-    // that holds it nor a `/status` page to read the detail from. It used to be created anyway and
-    // appended to `<header>`, where the header's two-column grid pushed it into an implicit second
-    // row and stretched it across the `1fr` track — the count painted as a full-width bar under the
-    // brand. Both halves are asserted: no slot in Catalog mode, and no code path that manufactures
-    // one when the slot is missing.
+    // Catalog mode has no Status nav or `/status`, so there is no badge slot, and nothing creates
+    // one when the slot is missing (it used to render as a full-width bar).
     val catalog =
       ServeWeb.viewerPage(
         preview = ServePreview("button-filled", "Filled button", componentId = "Button/Filled"),
@@ -437,9 +409,8 @@ class ServeComponentBrowserTest {
         componentBrowser = true,
       )
 
-    // The heartbeat stays — it is what warms the daemon for the catalog being read. Only the badge
-    // goes. Asserted on the slot's markup rather than the bare class name, which the (now inert)
-    // poller still mentions in its `getElementById` lookup.
+    // The presence heartbeat stays (it warms the daemon); only the badge goes. Asserted on markup,
+    // since the inert poller still mentions the class.
     assertTrue(catalog.contains("/api/presence/compose-m3"))
     assertFalse(catalog.contains("id=\"cp-daemon-status\""))
     assertFalse(catalog.contains("document.querySelector(\"header\")"))

@@ -12,43 +12,25 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 
 /**
- * The **UI-builder editor as a per-instance pin** rather than a server release
- * ([#1035](https://github.com/yschimke/compose-preview-server/issues/1035)).
- *
- * An editor-only fix used to need four steps before a user saw it: a compose-ui-builder release, a
- * version bump here, a server release and a deploy — even when no server code changed. The catalogs
- * had already escaped that: which catalogs a box serves is `catalogs.json` under `/config`, and
- * their runtimes are fetched live. What stayed baked in was the editor itself, unpacked into the
- * distribution by `unpackUiBuilderWeb`.
- *
- * Now the editor is served like a catalog runtime: a versioned, immutable archive named by the
- * instance's own config.
+ * The UI-builder editor as a per-instance pin rather than part of a server release (#1035), served
+ * like a catalog runtime: a versioned, immutable archive named by the instance's own config.
  *
  * ```json
  * { "editor": { "version": "3.48.0", "sha256": "<64 hex>" }, "catalogs": [ … ] }
  * ```
  *
- * - **Publish.** compose-ui-builder attaches `compose-preview-ui-builder-web-<v>.zip` (and its
- *   `.sha256`) to each GitHub release — public, credential-free, and the same asset this build's
- *   ivy repository already resolves.
- * - **Pin.** `editor` in `catalogs.json`, or `PUT /admin/editor` ([ServeUiBuilderEditorAdmin]),
- *   which verifies the archive before it writes the pin. Rolling back is `DELETE /admin/editor` or
- *   deleting the key.
- * - **Fetch and cache.** [ServeUiBuilderEditorStore] downloads the archive once, checks its SHA-256
- *   against the pin, unpacks it under `/config/ui-builder-editors/`, and serves that directory in
- *   place of the bundled one. Any failure falls back to the bundled editor, which stays for first
- *   boot and offline use.
- * - **Contract.** The archive's [EditorManifest] declares the editor↔server HTTP API it speaks
- *   ([EditorManifest.serverApi]); a pin outside [SUPPORTED_SERVER_API] is refused.
+ * - Publish: compose-ui-builder attaches `compose-preview-ui-builder-web-<v>.zip` (and `.sha256`)
+ *   to each GitHub release.
+ * - Pin: `editor` in `catalogs.json`, or `PUT /admin/editor` ([ServeUiBuilderEditorAdmin]), which
+ *   verifies first. Roll back with `DELETE /admin/editor` or by removing the key.
+ * - Fetch and cache: [ServeUiBuilderEditorStore] downloads once, checks SHA-256, unpacks under
+ *   `/config/ui-builder-editors/` and serves it instead of the bundled editor; any failure falls
+ *   back to the bundled one.
+ * - Contract: [EditorManifest.serverApi] must be in [SUPPORTED_SERVER_API].
  *
- * A pin takes effect at **startup**. The editor directory is read by several lazily built caches in
- * [ServeHttpServer] (the bundle version, the icon cache, the new-design fixture), and swapping it
- * under them would serve a page from one editor with assets from another. A restart is cheap beside
- * the release-and-deploy chain this replaces, and the admin API says when one is owed.
- *
- * The JVM-side pieces — runtime, export and render-bundle jars — stay build-time dependencies: they
- * run in-process or in the render subprocess. [SUPPORTED_SERVER_API] is what keeps a pinned editor
- * within range of them.
+ * A pin takes effect at startup: several lazy caches in [ServeHttpServer] read the editor
+ * directory, and swapping it live would mix editors. JVM-side runtime, export and render jars stay
+ * build-time dependencies, which [SUPPORTED_SERVER_API] keeps the editor compatible with.
  */
 object ServeUiBuilderEditor {
   /** The manifest compose-ui-builder writes into the archive root. */
@@ -57,12 +39,9 @@ object ServeUiBuilderEditor {
   const val MANIFEST_SCHEMA: String = "compose-ui-builder-web/v1"
 
   /**
-   * The editor↔server HTTP API versions this server speaks.
-   *
-   * Bumped — in step with `serverApi` in compose-ui-builder's `ui-builder-web/build.gradle.kts` —
-   * only when a change to the routes the editor calls would break an editor that does not know
-   * about it. Widen the set while both shapes are served, so an instance can move its pin across
-   * the change without a flag day.
+   * Editor↔server HTTP API versions this server speaks. Bumped with `serverApi` in
+   * compose-ui-builder's `ui-builder-web/build.gradle.kts` only for breaking route changes; widen
+   * the set while both shapes are served.
    */
   val SUPPORTED_SERVER_API: Set<Int> = setOf(1)
 
@@ -94,11 +73,8 @@ object ServeUiBuilderEditor {
   }
 
   /**
-   * Why an editor carrying [manifest] cannot be served by this server, or null when it can.
-   *
-   * [pinnedVersion] is what the operator asked for. The digest already pins the bytes; this catches
-   * the other mistake — a URL override or a copy-pasted digest that names a different release than
-   * the version the operator believes is serving.
+   * Why an editor carrying [manifest] can't be served, or null. [pinnedVersion] catches a URL
+   * override or pasted digest naming a different release than the operator believes.
    */
   fun contractProblem(manifest: EditorManifest, pinnedVersion: String?): String? =
     when {
@@ -114,12 +90,9 @@ object ServeUiBuilderEditor {
 }
 
 /**
- * Fetches, verifies and caches pinned editor archives under [cacheRoot].
- *
- * Every archive is content-addressed by its pin (`<version>-<sha256 prefix>`), unpacked into a
- * staging directory and moved into place only once complete, so a crash or a failed check never
- * leaves a half-unpacked editor that a later boot would serve. A cache hit is a directory rename
- * away from the last successful fetch — which is what keeps a restart, and so a rollback, fast.
+ * Fetches, verifies and caches pinned editor archives under [cacheRoot], content-addressed by pin
+ * (`<version>-<sha256 prefix>`) and unpacked into staging then moved into place, so a crash never
+ * leaves a half-unpacked editor. Cache hits keep restarts and rollbacks fast.
  */
 class ServeUiBuilderEditorStore(
   private val cacheRoot: File,
@@ -143,10 +116,8 @@ class ServeUiBuilderEditorStore(
     File(cacheRoot, "${pin.version}-${pin.sha256.lowercase().take(16)}")
 
   /**
-   * [pin]'s editor directory, fetching and verifying it first when it is not cached yet.
-   *
-   * Synchronized: two admin calls pinning the same version at once would otherwise race each other
-   * into the same staging names and the same final rename.
+   * [pin]'s editor directory, fetched and verified first if not cached. Synchronized so concurrent
+   * pins of one version don't race on staging names.
    */
   @Synchronized
   fun resolve(pin: ServeCatalogsConfig.EditorPin): Result {
@@ -162,10 +133,8 @@ class ServeUiBuilderEditorStore(
   }
 
   /**
-   * Delete cached editors other than [keep] and the [retain] most recently installed others.
-   *
-   * Retaining a few is what makes a rollback a restart rather than a re-download; retaining all of
-   * them would let `/config` fill with 40 MB archives nobody pins any more.
+   * Delete cached editors other than [keep] and the [retain] most recent, so a rollback is a
+   * restart without filling `/config`.
    */
   fun prune(keep: File?, retain: Int = 2) {
     val dirs = cacheRoot.listFiles { f -> f.isDirectory } ?: return
@@ -252,10 +221,8 @@ class ServeUiBuilderEditorStore(
   }
 
   /**
-   * Unpack [archive] into [into], refusing anything that could land outside it.
-   *
-   * The digest makes the archive trusted-by-pin, not trusted-by-construction: a URL override can
-   * name any zip whose hash the operator pasted, so path traversal and zip bombs are still checked.
+   * Unpack [archive] into [into], refusing path traversal and zip bombs: the digest pins the bytes
+   * but a URL override can name any zip.
    */
   private fun unpack(archive: File, into: File) {
     into.mkdirs()
@@ -326,9 +293,8 @@ class ServeUiBuilderEditorStore(
 }
 
 /**
- * Which editor this server is serving, and what `catalogs.json` pins — the answer to `GET
- * /admin/editor`, and the pair [ServeUiBuilderEditorAdmin] compares to say whether a restart is
- * owed.
+ * Which editor is serving and what `catalogs.json` pins: `GET /admin/editor`'s answer, compared to
+ * say whether a restart is owed.
  */
 data class ServeUiBuilderEditorState(
   /** The bundled editor's version, from its manifest, or null when unknown / not packaged. */
@@ -340,12 +306,9 @@ data class ServeUiBuilderEditorState(
 )
 
 /**
- * `GET`/`PUT`/`DELETE /admin/editor`: change the instance's editor pin.
- *
- * A pin is fetched and verified **before** it is written. A typo'd version or a wrong digest is
- * therefore refused with the reason, rather than written, silently failing at the next boot and
- * leaving the operator believing a fix shipped. Writing a pin that verified also leaves it cached,
- * so the restart that applies it does not download anything.
+ * `GET`/`PUT`/`DELETE /admin/editor`: change the editor pin. A pin is fetched and verified before
+ * it's written, so a bad version or digest is refused rather than failing at next boot, and the
+ * restart that applies it needs no download.
  */
 class ServeUiBuilderEditorAdmin(
   private val store: ServeUiBuilderEditorStore,
@@ -366,7 +329,7 @@ class ServeUiBuilderEditorAdmin(
     data class Invalid(val reason: String) : Result
 
     /**
-     * Already pinned exactly so (or nothing to remove) — a 409, which a reconcile reads as done.
+     * Already pinned exactly so (or nothing to remove): a 409, which a reconcile treats as done.
      */
     data class Conflict(val reason: String) : Result
 

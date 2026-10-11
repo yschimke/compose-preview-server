@@ -1,16 +1,7 @@
-// Static file server for the preview-server harness: serves this directory's fixture pages and
-// the serve viewer's own CSS/JS so a capture exercises the real assets.
-//
-// A copy of [`preview-harness/_server.mjs`](https://github.com/yschimke/compose-preview-vscode/blob/main/preview-harness/_server.mjs), rooted here instead of at the
-// extension. Copied rather than shared for the same reason as `_themes.mjs`: this directory
-// travels to the preview-server repo, and importing across `compose-preview-vscode/` would be a new
-// cross-boundary dependency. The two servers answer to different roots and different fixtures;
-// what they share is 100 lines of MIME table and `createServer` boilerplate, which is a cheaper
-// duplicate than a coupling the split has to unpick later.
-//
-// Note what the ORIGINAL already did: it resolved the serve viewer's assets out of
-// `cli/serve/src/main/resources/.../serve/assets`. The extension's harness server was serving serve's
-// stylesheets — one more way the misfiling showed.
+// Static file server for the preview-server harness: serves this directory's fixture pages and the
+// serve viewer's own CSS/JS so captures exercise the real assets. A copy of
+// compose-preview-vscode's `preview-harness/_server.mjs`, rooted here; copied rather than shared to
+// avoid a cross-repository dependency.
 
 import { fileURLToPath } from "node:url";
 import {
@@ -27,34 +18,20 @@ import { createServer } from "node:http";
 const harnessDir = dirname(fileURLToPath(import.meta.url));
 export const harnessRoot = resolve(harnessDir, "..");
 
-// The UI builder is a separate repository (yschimke/compose-ui-builder) whose build output this
-// harness serves, laid out as a checkout holds it: either a built checkout, or the pinned release's
-// archives unpacked into that shape by `fetch-ui-builder-dists.sh`, which is what CI does.
-//
-// TWO spellings, and the difference matters. `COMPOSE_UI_BUILDER_DIR` is the harness's own, and it
-// is what CI sets to that unpacked directory inside the workspace. `ORG_GRADLE_PROJECT_composeUiBuilderDir` is Gradle's environment
-// spelling for `-PcomposeUiBuilderDir`, which turns the build itself into a composite against that
-// checkout -- so a developer who exports that one gets the local editor AND a harness that serves
-// it, with no second variable.
-//
-// Reading only `COMPOSE_UI_BUILDER_DIR` once meant this server silently fell back to the sibling
-// default on a runner: the editor's dist 404'd and Playwright waited out its 60s `webServer`
-// timeout with no clue as to why.
+// The UI builder (yschimke/compose-ui-builder) build output, as a built checkout or the pinned
+// release unpacked by `fetch-ui-builder-dists.sh` (CI). Both `COMPOSE_UI_BUILDER_DIR` (the
+// harness's own, set by CI) and `ORG_GRADLE_PROJECT_composeUiBuilderDir` (Gradle's spelling of
+// `-PcomposeUiBuilderDir`) are read; reading only the first made CI fall back silently to the
+// sibling default and time out.
 export const uiBuilderRoot = resolve(
     process.env.COMPOSE_UI_BUILDER_DIR ||
         process.env.ORG_GRADLE_PROJECT_composeUiBuilderDir ||
         resolve(harnessRoot, "../compose-ui-builder"),
 );
 
-// Path prefixes that resolve against that checkout rather than this repository.
-//
-// Matched on the FIRST SEGMENT, not as a string prefix: `ui-builder` is a prefix of
-// `ui-builder-renderer`, so a `startsWith` here would send the renderer's requests into the
-// editor's directory and serve 404s that look like a broken build.
-//
-// The specs and configs ask for these by their in-repo paths — `/ui-builder/build/wasmDist/...`,
-// `/ui-builder-reference-jetcaster/build/wasmDist/...` — and there are dozens of those spellings
-// across the harness. Mapping them once here is what keeps the extraction from rewriting every one.
+// Path prefixes resolved against that checkout. Matched on the first segment, not as a string
+// prefix, since `ui-builder` prefixes `ui-builder-renderer`. Mapping them here keeps the specs'
+// in-repo paths unchanged.
 const UI_BUILDER_SEGMENTS = new Set([
     "ui-builder",
     "ui-builder-renderer",
@@ -91,18 +68,14 @@ export function startServer(root, port = 0) {
                     /^\/+/,
                     "",
                 );
-                // Development-only projection of the renderer-only bundle onto the same exact,
-                // version-addressed route used by the production server. Keeping this mapping in
-                // the static harness means the browser test exercises opaque-origin iframe
-                // messaging rather than importing the renderer into the editor page.
+                // Dev-only mapping of the renderer bundle onto the production server's
+                // version-addressed route, so tests exercise opaque-origin iframe messaging.
                 const rendererMatch =
                     /^ui-builder\/runtime\/m3-2026\.09-protocol2\/(.*)$/.exec(
                         rel,
                     );
                 if (rendererMatch) {
-                    // Built in yschimke/compose-ui-builder now. The default is the sibling
-                    // directory a two-repository checkout already has; CI checks the repository
-                    // out inside the workspace and names it through `COMPOSE_UI_BUILDER_DIR`.
+                    // Defaults to the sibling checkout; CI sets `COMPOSE_UI_BUILDER_DIR`.
                     const rendererRoot = resolve(
                         uiBuilderRoot,
                         "ui-builder-renderer/build/wasmRendererDist",
@@ -138,24 +111,15 @@ export function startServer(root, port = 0) {
                         return;
                     }
                 }
-                // Serve-page fixtures embed the CLI viewer's hashed asset URLs
-                // (`/assets/serve/<hash>/serve.css`). Those live in the CLI's resources, not under
-                // the extension root, so without this they 404 — which is why every `serve-*` page
-                // capture has been rendering unstyled and with no JS at all, making the captures
-                // far weaker evidence than they look (a JS-driven surface could regress or be
-                // deleted and the capture would not move). The hash is cache-busting and changes
-                // whenever the asset does, so match on the basename and ignore it.
+                // Serve-page fixtures embed hashed asset URLs (`/assets/serve/<hash>/serve.css`)
+                // that live in the server's resources; without this, captures render unstyled and
+                // without JS. Match on the basename and ignore the cache-busting hash.
                 const assetMatch = /^assets\/serve\/[^/]+\/([^/]+)$/.exec(rel);
                 if (assetMatch) {
                     const name = assetMatch[1];
                     const assetPath = resolve(SERVE_ASSETS_DIR, name);
-                    // Check the RESOLVED path, not the shape of the input. Rejecting `..` and `/`
-                    // only covers the escapes you thought of: on Windows `%5C` decodes to `\`,
-                    // which the pattern above happily accepts, and `resolve()` then treats
-                    // `C:\Users\…` as absolute and silently leaves this directory. Asking whether
-                    // the result is still inside SERVE_ASSETS_DIR is platform-independent and does
-                    // not depend on enumerating attack shapes — the same containment test the
-                    // static handler below already uses.
+                    // Check the resolved path rather than the input's shape (e.g. `%5C` decodes to
+                    // `\` on Windows); the same containment test as the static handler below.
                     const within = relative(SERVE_ASSETS_DIR, assetPath);
                     if (
                         within.startsWith("..") ||
@@ -214,9 +178,8 @@ export function startServer(root, port = 0) {
                 });
                 res.end(body);
             } catch (err) {
-                // Don't echo the error (stack trace / internal paths) back
-                // to the client — log it server-side and return a generic
-                // 500. (CodeQL: information exposure through a stack trace.)
+                // Don't echo the error (stack trace / internal paths) to the client; log it and
+                // return a generic 500. (CodeQL: information exposure through a stack trace.)
                 console.error("[harness] request error:", err);
                 res.writeHead(500);
                 res.end("internal server error");
@@ -242,24 +205,14 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
 }
 
 /**
- * Console errors the suites ignore rather than fail on.
+ * Console errors the suites ignore; neither originates here.
+ * - `Cache storage is disabled` — the sandboxed renderer frame has no Cache API, and the code falls
+ *   back.
+ * - `Accessing \`memory\` via \`wasmExports\`` — a Kotlin 2.4.20 deprecation notice from a
+ *   dependency (https://kotl.in/vr3szr), still emitted on Compose Multiplatform 1.12.0.
  *
- * Asserting `errors` is empty is the right default — a console error during a render is almost
- * always a real defect. These two are not, and neither originates in this repository.
- *
- * - `Cache storage is disabled` — the renderer runs in a sandboxed frame with no Cache API, and
- *   the code already falls back. Filtered in `ui-builder-renderer.spec.mjs` before this existed.
- * - `Accessing \`memory\` via \`wasmExports\`` — a Kotlin 2.4.20 deprecation notice about a
- *   dependency reaching `wasmExports.memory`, emitted at `console.error` severity:
- *   https://kotl.in/vr3szr. Nothing here references `wasmExports`.
- *
- * The message advises updating the dependency, and that was tried: Compose Multiplatform 1.12.0
- * is on `main` (#731, with the recorder migrated to its new frame API in #735) and the warning
- * still fires. So it is not ours to fix by upgrading, and the alternative — failing five
- * `ui-builder-jetcaster` tests on a notice about somebody else's code — tells us nothing.
- *
- * Delete an entry once its message stops being emitted; a stale one silently widens what every
- * suite tolerates. For the second, that means when Skiko stops reaching for `wasmExports.memory`.
+ * Delete an entry once its message stops being emitted (for the second, when Skiko stops reaching
+ * for `wasmExports.memory`); a stale entry widens what every suite tolerates.
  */
 export function isIgnorableConsoleError(text) {
     return (

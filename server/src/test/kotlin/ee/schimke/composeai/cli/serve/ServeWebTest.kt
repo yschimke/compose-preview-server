@@ -11,11 +11,9 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 
 /**
- * Pins the **component-state** wiring in [ServeWeb]: baked non-default states
- * (`unchecked`/`pressed`/…) are folded out of the landing grid so a component shows ONE card, and
- * the viewer grows a `.cp-axes-tree` subtree — the catalog tree filtered to this component — of
- * plain links to its other renders *in the same theme*. Stateless previews (a plain uploaded
- * bundle) are untouched.
+ * Pins the component-state wiring in [ServeWeb]: baked non-default states are folded out of the
+ * landing grid (one card per component), and the viewer grows a `.cp-axes-tree` subtree of links to
+ * the component's other renders in the same theme. Stateless previews are untouched.
  */
 class ServeWebTest {
 
@@ -24,8 +22,8 @@ class ServeWebTest {
   }
 
   /**
-   * A themed, state-bearing preview (id carries the theme token so the grid's theme swap still
-   * pairs it).
+   * A themed, state-bearing preview (the id carries the theme token so the grid's theme swap pairs
+   * it).
    */
   private fun preview(slug: String, state: String, theme: String) =
     ServePreview(
@@ -133,11 +131,9 @@ class ServeWebTest {
     )
   }
 
-  // A component whose non-default states are published UNTAGGED on the primary (light) lane while
-  // their dark twins carry the theme — the shape an `@OverrideVariant` matrix exports, because the
-  // synthetic capture inherits the base `@Preview`'s `uiMode` param (dark) but not its `name`
-  // ("Light"). m3-catalog publishes 446 renders like this; the whole size x shape matrix used to be
-  // unreachable from the light lane, which is the one the grid links to.
+  // A component whose non-default states are published untagged on the light lane while their dark
+  // twins carry the theme: the shape an `@OverrideVariant` matrix exports (the synthetic capture
+  // inherits the base `@Preview`'s `uiMode` but not its `name`).
   private val mixedTagging =
     listOf(
       ServePreview(
@@ -269,9 +265,8 @@ class ServeWebTest {
 
   @Test
   fun `a state named dark is not mistaken for a theme`() {
-    // An unthemed component may legitimately call a STATE `dark` (or `light`). Reading the lane off
-    // the raw id would find that token and file the state in the dark lane while its own default
-    // sits in the light one — the grid folds the state out, so it would then be unreachable.
+    // An unthemed component may call a state `dark`; reading the lane off the raw id would misfile
+    // it and make it unreachable.
     val toggle =
       listOf(
         ServePreview("toggle__ideal__default", "Toggle", state = "default"),
@@ -331,9 +326,8 @@ class ServeWebTest {
 
   @Test
   fun `the state switcher stays within the current variant axis, not just the slug`() {
-    // Button/Filled varies on BOTH a state axis (default/pressed) and a content-props axis
-    // (label-only default vs a content=icon+label render, which keeps state=default). All share the
-    // `button-filled` slug, so keying on slug alone would cross-link the two axes.
+    // Button/Filled varies on both a state axis and a content-props axis, all sharing the
+    // `button-filled` slug, so keying on slug alone would cross-link them.
     val labelDefault =
       ServePreview(
         "button-filled__ideal__default__light",
@@ -373,11 +367,8 @@ class ServeWebTest {
     )
     assertFalse(labelNav.contains("content-icon-label"), "does not cross into the content axis")
 
-    // The icon+label render has no sibling STATE of its own. The old chip switcher, keyed to the
-    // current render's axes, therefore showed it nothing at all — a dead end you could navigate
-    // into and not back out of. A subtree roots at the COMPONENT, so arriving on a props variant
-    // shows the same tree every other render of that component shows, with this one marked: the
-    // component's renders are a property of the component, not of where you happened to enter.
+    // The icon+label render has no sibling state of its own. The subtree roots at the component, so
+    // arriving on a props variant shows the same tree as every other render, with this one marked.
     val iconHtml =
       ServeWeb.viewerPage(iconLabel, token = "t", basePath = "/compose-m3", siblings = all)
     val iconNav =
@@ -438,13 +429,9 @@ class ServeWebTest {
   }
 
   /**
-   * The stage-presentation group is for controls that answer a press, and on a spatial preview
-   * neither of these does.
-   *
-   * The scene is an opaque WebGL canvas (`alpha: false`), so the checkerboard `Transparent` paints
-   * is never seen through it; and the zoom handler sizes `#cp-img` and the ordinary render
-   * canvases, never `cp-spatial-view`, so `Fit width` moves nothing. Offering them anyway spends
-   * the reader's first press on a control that does nothing and makes them doubt the panel.
+   * On a spatial preview neither stage-presentation control does anything: the WebGL scene is
+   * opaque (`alpha: false`) so `Transparent` is never seen, and zoom never sizes `cp-spatial-view`,
+   * so they are omitted.
    */
   @Test
   fun `the stage view group is withheld from a spatial preview`() {
@@ -606,10 +593,7 @@ class ServeWebTest {
     )
   }
 
-  /**
-   * Declared dimensions let an unfurler lay the card out without downloading and measuring the
-   * image first — the step both Slack and Google skip (dropping the image) when it is slow.
-   */
+  /** Declared dimensions let an unfurler lay out the card without fetching the image first. */
   @Test
   fun `a known image size is declared, and sizes the card honestly`() {
     fun viewerWith(w: Int?, h: Int?): String =
@@ -651,10 +635,8 @@ class ServeWebTest {
   }
 
   /**
-   * Being big enough was never sufficient. A large-image card is laid out at ~1.91:1 and the image
-   * is cropped to fill it, so what a portrait render actually shows is a horizontal band through
-   * its middle. The front door's own hero — 1078×2399 — cleared the min-edge test comfortably and
-   * unfurled as a strip of the empty half of an app scaffold.
+   * Size alone isn't enough: a large-image card is ~1.91:1 and crops to fill, so a portrait render
+   * shows only a horizontal band.
    */
   @Test
   fun `a large card is claimed only for a shape that can fill one`() {
@@ -680,7 +662,7 @@ class ServeWebTest {
     assertEquals("summary_large_image", cardFor(1024, 640))
     assertEquals("summary_large_image", cardFor(1024, 768), "4:3 survives the crop")
 
-    // The regression this exists for: a phone screenshot, and the front door's real hero.
+    // A phone screenshot, and the front door's real hero.
     assertEquals("summary", cardFor(1078, 2399), "a portrait render can't fill a banner")
     assertEquals("summary", cardFor(945, 1376))
     // A square watch face is closer to the slot than a phone is, and still loses a third of itself.
@@ -690,10 +672,7 @@ class ServeWebTest {
     assertEquals("summary", cardFor(3000, 600), "a panorama is not a card either")
   }
 
-  /**
-   * Every page carries the site icon links. Without them an unfurl card shows a generic globe
-   * beside itself, whatever the picture on it is.
-   */
+  /** Every page carries the site icon links, or unfurl cards show a generic globe. */
   @Test
   fun `every page advertises the site icon`() {
     val html = ServeWeb.viewerPage(preview = ServePreview("red", "Red"), token = "unused")
@@ -708,11 +687,7 @@ class ServeWebTest {
     )
   }
 
-  /**
-   * The front door used to call itself two different things — "Design systems" in the tab and
-   * "Compose previews" in the Open Graph block — so a link's name depended on which one the
-   * consumer preferred.
-   */
+  /** The front door names itself consistently in the tab and the Open Graph block. */
   @Test
   fun `the front door's tab and card agree on its name`() {
     val html =
@@ -748,10 +723,8 @@ class ServeWebTest {
     )
 
   /**
-   * The builder was reachable only by knowing its URL, so the whole authoring surface was invisible
-   * from the front door. The header offers it once — to the visitors whose credential the create
-   * route will accept, on a host that runs it for a listed catalog — rather than repeating the same
-   * link on every card.
+   * The header offers the builder once, to visitors whose credential the create route accepts, on a
+   * host that runs it for a listed catalog.
    */
   @Test
   fun `the front-door header offers the UI builder to a permitted visitor`() {
@@ -812,11 +785,7 @@ class ServeWebTest {
     assertFalse(html.contains("UI Builder"), html)
   }
 
-  /**
-   * The refusal is the point. A signed-in visitor whose account does not carry the write capability
-   * used to get *nothing* — no chip, no explanation, no way to learn that the builder exists or
-   * what would let them in. Silence is indistinguishable from the feature not being there.
-   */
+  /** A signed-in visitor without the write capability gets an explanation rather than nothing. */
   @Test
   fun `a visitor without access gets the reason rather than an absence`() {
     val html =
@@ -878,9 +847,8 @@ class ServeWebTest {
   }
 
   /**
-   * The front door's search is one field over two indexes: the catalog cards in the DOM, and the
-   * cross-catalog component index the command palette already reads. Typing a component's name used
-   * to empty the page — nothing on a card names the components inside it.
+   * The front door's search covers both the catalog cards and the cross-catalog component index
+   * (the command palette's), since cards don't name their components.
    */
   @Test
   fun `the front-door search reaches component names, and collapses into the bar`() {
@@ -914,11 +882,7 @@ class ServeWebTest {
     assertFalse(html.contains("innerHTML"), html)
   }
 
-  /**
-   * The comparison used to be reachable only from a catalog's own landing page, so "compare this
-   * system against its Figma" cost a visit to the catalog first and was invisible from `/`
-   * (compose-ai-tools#4324).
-   */
+  /** The design comparison is offered on the front door, not only on a catalog's landing. */
   @Test
   fun `a front-door card offers the comparison, named after the tool the catalog names`() {
     fun system(id: String, compares: Boolean, tool: String?) =
@@ -938,9 +902,7 @@ class ServeWebTest {
         listOf(
           system("compose-m3", compares = true, tool = "Figma"),
           system("penpot-kit", compares = true, tool = "Penpot"),
-          // Publishes references whose provider names no design tool — a checked-in `png`, an
-          // `svg`, an unmapped token. The route works, so the action stays and takes the neutral
-          // wording; gating it on the vendor label instead dropped it entirely (#4349).
+          // References from no named design tool still offer the comparison, with neutral wording.
           system("png-kit", compares = true, tool = null),
           system("plain", compares = false, tool = null),
         ),
@@ -969,21 +931,15 @@ class ServeWebTest {
     // A catalog that publishes no design references has nothing behind `format=reference`, so it
     // gets no action rather than a chip that deep-links a format the comparison page won't offer.
     assertFalse(html.contains("/plain/compare"), html)
-    // …and no EMPTY row stands in for it. The chip lives inside the card now, so the grid's own
-    // stretch is what makes a card with an action and one without the same size — the reserved
-    // placeholder row the outside-the-card layout needed is gone.
+    // ...and no empty row stands in for it: the chip is inside the card, and the grid's stretch
+    // equalises card sizes.
     assertEquals(3, Regex("<div class=\"cp-sys-actions\">").findAll(html).count(), html)
     assertFalse(html.contains("<div class=\"cp-sys-actions\"></div>"), html)
   }
 
   /**
-   * The PAIRED catalog's comparison, on the card.
-   *
-   * `remote-m3` and `wear-m3-catalog` sit as adjacent cards on the real front door and nothing
-   * there said they were a pair: "how does the Remote Compose rendition differ from the Wear one"
-   * cost a visit to one catalog's landing first, which is exactly the journey the Figma action
-   * above exists to remove. `docs/design/COMPARE_NAVIGATION.md` §1 names this the comparison the
-   * reader most wants and the one with the fewest ways in.
+   * The paired catalog's comparison, on the card (`docs/design/COMPARE_NAVIGATION.md` §1): e.g.
+   * `remote-m3` vs `wear-m3-catalog`, adjacent cards with nothing saying they were a pair.
    */
   @Test
   fun `a front-door card offers the paired catalog's comparison, named after the sibling`() {
@@ -1014,13 +970,9 @@ class ServeWebTest {
         isPublic = true,
       )
 
-    // The chip reads the SYSTEM id — short, bounded, and the handle the card already prints under
-    // its own title — and the catalog's real name joins it in the accessible name and the tooltip,
-    // where length costs nothing.
-    //
-    // BOTH, not just the title: the accessible name has to contain the visible text verbatim (WCAG
-    // 2.5.3 Label in Name), or someone driving the page by voice reads `wear-m3-catalog` off the
-    // chip and nothing happens.
+    // The chip reads the system id; the catalog's real name joins it in the accessible name and
+    // tooltip. The accessible name must contain the visible text verbatim (WCAG 2.5.3 Label in
+    // Name).
     assertTrue(
       html.contains(
         "<a class=\"cp-action-chip cp-action-chip--compact\" " +
@@ -1033,9 +985,7 @@ class ServeWebTest {
     )
     // The design-tool chip shows its own label, so it stays one phrase rather than "Figma — Figma".
     assertTrue(html.contains("aria-label=\"remote-m3: compare to Figma\""), html)
-    // It stands BESIDE the design-tool chip under one "Compare to", rather than replacing it or
-    // repeating the verb: they are two different comparisons, and a catalog with a sibling still
-    // has a design file.
+    // Beside the design-tool chip under one "Compare to": two different comparisons.
     assertTrue(html.contains("/remote-m3/compare?format=reference"), html)
     assertEquals(2, Regex(">Compare to</span>").findAll(html).count(), html)
     // …and a catalog with no pairing gets no second chip rather than a dead one.
@@ -1044,10 +994,8 @@ class ServeWebTest {
   }
 
   /**
-   * A front door lists many catalogs, and several may name the same tool — so several sibling links
-   * are announced identically as "compare to Figma". The tile that gives each one its context is a
-   * SIBLING, so nothing labels the chip by it: a screen-reader link list or a voice command has
-   * nothing to tell them apart unless the accessible name carries the catalog.
+   * Several catalogs may name the same tool, so each chip's accessible name carries its catalog;
+   * otherwise a link list or voice command can't tell them apart.
    */
   @Test
   fun `front-door comparison links are told apart by catalog, keeping their visible text`() {
@@ -1080,9 +1028,7 @@ class ServeWebTest {
       names,
       html,
     )
-    // WCAG 2.5.3 Label in Name: the visible string survives INTACT inside the accessible name, so
-    // "click Figma" still matches. A name like "compare Wear Material 3 to Figma" would read fine
-    // and break that — and so would shortening the chip to something the name does not contain.
+    // WCAG 2.5.3: the visible string survives intact inside the accessible name.
     names.forEach { assertTrue(it.contains("Figma"), it) }
     // The chip itself stays short — the verb is on the row and the catalog's name is in the
     // accessible name, neither of them repeated on screen once per destination.
@@ -1114,10 +1060,7 @@ class ServeWebTest {
     assertTrue(gated.contains("/compose-m3/compare?format=reference&amp;token=a%20token"), gated)
   }
 
-  /**
-   * Catalog mode strips the format comparisons from a catalog's landing page — it is for browsing
-   * components, not for auditing them against a design file — so the front door has to agree.
-   */
+  /** Catalog mode strips format comparisons from landings, so the front door agrees. */
   @Test
   fun `catalog mode offers no comparison on the front door`() {
     val system =
@@ -1143,9 +1086,8 @@ class ServeWebTest {
   }
 
   /**
-   * The chip lives INSIDE the card, so the card cannot be one big `<a>` — a link inside a link is
-   * not a thing HTML has, and the browser would reparent the inner one out of the card. The tile is
-   * still one click target, via the title link's stretched overlay.
+   * The chip is inside the card, so the card can't be one `<a>` (no nested links); the tile stays
+   * one click target via the title link's stretched overlay.
    */
   @Test
   fun `the front door's card is a div whose title links, with the chip outside that link`() {
@@ -1234,19 +1176,9 @@ class ServeWebTest {
   }
 
   /**
-   * Every full-page comparison this preview has, behind one affordance.
-   *
-   * The three destinations — the spec diff, the paired catalog's layer diff, every Remote Compose
-   * player — are alike in the one way that matters to a reader deciding whether to click: each
-   * LEAVES the page, giving up the overrides, knobs and theme that produced the render worth
-   * comparing. Loose in the row they neither read as a set nor stayed together: the players link
-   * sat before the spec lane and the layer link INSIDE it, so a pairing that had all three put
-   * forty-odd characters of grey link text either side of a control that grows with the length of a
-   * design tool's name, and the bar's real controls wrapped around them.
-   *
-   * The order is asserted because it is the order they are reached in: what this render is
-   * specified by, what the other implementation of that spec does, then the ways this one can be
-   * drawn.
+   * Every full-page comparison behind one affordance: each leaves the page (losing overrides,
+   * knobs, theme), so they belong together. Order: what specifies this render, what the other
+   * implementation does, then the ways this one can be drawn.
    */
   @Test
   fun `the comparison destinations are one menu, in reading order`() {
@@ -1289,25 +1221,16 @@ class ServeWebTest {
         .map { it.groupValues[1] }
         .toList()
     assertEquals(listOf("Spec diff", "Wear M3 layers", "Compare players"), rows, html)
-    // The spec lane keeps its instruments and nothing else. The layer link used to live inside it,
-    // which is why a wide lane and a small grey link kept trading places on the same row.
+    // The spec lane holds its instruments and nothing else.
     val lane = html.substringAfter("class=\"cp-spec-lane\"", "").substringBefore("</span></span>")
     assertFalse(lane.contains("cp-format-link"), "the lane carries no step-out link: $lane")
   }
 
   /**
-   * The sign-in affordance is not a renderer control, and must not be dressed as half of one.
-   *
-   * When auth is the only thing between the visitor and the daemon lane, the chip's slot holds an
-   * ANCHOR to GitHub rather than a button that toggles a lane. Joined to the renderer caret it
-   * would put a dashed segment against a solid one — and the dash is load-bearing, not decoration:
-   * it marks the control as an action to take rather than a state to read, which is exactly the
-   * distinction a shared outline erases. It would also wrap a link to another origin in
-   * `role="group" aria-label="Renderer"`.
-   *
-   * Reachable and previously uncaptured: a Remote Compose preview HAS a renderer combo, and an
-   * auth-gated live lane is independent of it, so a server with `--github-auth` serves both at once
-   * and no fixture held the pair.
+   * The sign-in affordance is a link to GitHub, not a renderer control, so it must not be joined to
+   * the renderer caret: its dashed outline marks an action, and it must not sit inside
+   * `role="group" aria-label="Renderer"`. A Remote Compose preview with `--github-auth` serves both
+   * at once.
    */
   @Test
   fun `the sign-in affordance is never joined to the renderer caret`() {
@@ -1334,9 +1257,8 @@ class ServeWebTest {
 
   @Test
   fun `the renderer combo lists every player with the unavailable ones disabled`() {
-    // A Remote Compose preview on an Android daemon: camaelon-js (client canvas) + androidx-view +
-    // androidx-embedded are enabled; the opt-in CMP Wasm, CMP Android and unadvertised cmp-jvm
-    // lanes remain disabled.
+    // A Remote Compose preview on an Android daemon: camaelon-js, androidx-view and
+    // androidx-embedded enabled; CMP Wasm, CMP Android and cmp-jvm disabled.
     val preview = ServePreview(id = "widget.Chip", label = "chip")
     val html =
       ServeWeb.viewerPage(
@@ -1362,31 +1284,20 @@ class ServeWebTest {
       )) {
       assertTrue(html.contains("value=\"rc:$wire\""), "option for $wire present")
     }
-    // The LANE VALUES (`rc:androidx-view`, `rc:androidx-embedded`) are this repository's
-    // ([ServeRcPlayerIds]) and name the implementation that draws; so do the LABELS. They were
-    // `rc:java` / `rc:cmp-android` until `cmp-android` came to mean the CMP player on Android.
-    // Asserted literally rather than read back off the combo: the point of this test is that the
-    // chip and the combo agree on ONE label, and comparing them to each other would hold even if
-    // both said the wrong thing.
-    //
-    // AndroidX Embedded is the seeded default: both the combo's selection and the chip's opening
-    // label.
-    // It opens on the embedded player because that is the lane whose output is a real Compose tree
-    // — editable figma-svg geometry and a described semantics tree, rather than one interop leaf
-    // (#3936). `?rcPlayer=androidx-view` still selects the view player.
+    // Lane values and labels ([ServeRcPlayerIds]) name the implementation that draws. Asserted
+    // literally: comparing chip to combo would pass even if both were wrong. AndroidX Embedded is
+    // the seeded default (a real Compose tree: editable figma-svg geometry and semantics);
+    // `?rcPlayer=androidx-view` still selects the view player.
     assertTrue(
       html.contains("data-rc-default=\"androidx-embedded\""),
       "androidx-embedded is the default player",
     )
     assertTrue(html.contains("<option value=\"rc:androidx-view\">AndroidX View</option>"), html)
-    // The combo itself rests on its placeholder — the chip is what names the current lane, and a
-    // combo repeating that name beside it read as two controls arguing about the same fact. The
-    // placeholder is never SEEN once the two are joined (the combo is a caret), but it is what the
-    // combo falls back to naming when the chip is dropped in the component browser.
+    // The combo rests on its placeholder; the chip names the current lane. The placeholder is
+    // unseen when joined (the combo is a caret) but named when the chip is dropped in the component
+    // browser.
     assertTrue(html.contains("<option value=\"\" selected>Switch renderer…</option>"), html)
-    // ONE control, in two segments: the chip inside the group, the combo laid over the caret beside
-    // it. Two pills side by side read as two independent controls and spent a whole control's width
-    // on the words "Switch renderer…", which a caret next to a named renderer already says.
+    // One control in two segments: the chip in the group, the combo laid over the caret beside it.
     val renderer =
       html.substringAfter("<span class=\"cp-renderer\"", "").substringBefore("</span></span>")
     assertTrue(renderer.isNotEmpty(), "the renderer group is emitted: $html")
@@ -1409,11 +1320,8 @@ class ServeWebTest {
       html.contains("<option value=\"rc:cmp-android\" disabled>CMP Android (unavailable)</option>"),
       html,
     )
-    // …and the step out to every player side by side. This preview has exactly ONE full-page
-    // comparison surface, and one destination is not a menu — so it stays the inline link it has
-    // always been rather than costing a click to reach what a link already said. The ampersands are
-    // entity-escaped now that the href goes through `WebEscaping.htmlEscape` with every other URL
-    // the bar emits; `&amp;` in an attribute is the same URL, correctly written.
+    // ...and the link to every player side by side, inline because this preview has only one
+    // full-page comparison. Ampersands are entity-escaped via `WebEscaping.htmlEscape`.
     assertTrue(
       html.contains("href=\"/remote-m3/compare?format=rc&amp;preview=widget.Chip&amp;token=t\""),
       html,
@@ -1459,9 +1367,8 @@ class ServeWebTest {
 
   @Test
   fun `a js-only host disables the server-side player options and offers no comparison`() {
-    // A static bundle carries the `.rc` doc (camaelon-js works client-side) but has no daemon, so
-    // the server-side androidx-* / cmp-android lanes are disabled alongside the never-available
-    // cmp-jvm lane.
+    // A static bundle carries the `.rc` (camaelon-js works client-side) but no daemon, so the
+    // server-side lanes are disabled.
     val preview = ServePreview(id = "widget.Chip", label = "chip")
     val html =
       ServeWeb.viewerPage(
@@ -1643,9 +1550,9 @@ class ServeWebTest {
       )
     assertTrue(html.contains("class=\"cp-preview-links\""), "source + report share one row")
     assertTrue(html.contains("id=\"cp-report\""), "report affordance rendered")
-    // A GET form, not a link: nothing page-derived may reach a navigation sink, so the action is a
-    // server-rendered literal and the prefill rides in a hidden input the browser encodes on
-    // submit. The link-styled toggle is the disclosure's own <summary>, so it works with JS off.
+    // A GET form, not a link: the action is a server-rendered literal and the prefill rides in a
+    // hidden input, so nothing page-derived reaches a navigation sink. The toggle is the
+    // `<summary>`, so it works without JS.
     assertTrue(
       html.contains(
         "<details class=\"cp-report\" id=\"cp-report\" data-cp-repo=\"o/r\"" +
@@ -1656,8 +1563,7 @@ class ServeWebTest {
         html.contains("action=\"https://github.com/o/r/issues/new\""),
       "the issue form posts to the resolved repo",
     )
-    // The reporter writes the title — the server no longer derives one from the preview's name,
-    // and `required` is what stops an untitled report whether or not the page's script ran.
+    // The reporter writes the title; `required` enforces it with or without the page script.
     assertTrue(
       html.contains(
         "<input class=\"cp-report-summary-input\" type=\"text\" name=\"title\" required"
@@ -1677,10 +1583,8 @@ class ServeWebTest {
       html.contains("data-report-template=\"render: {{render}}\""),
       "carries the template the viewer JS re-substitutes at the current overrides",
     )
-    // The toggle's tooltip and the panel's note both name the repo the issue lands on, and — when
-    // this box knows the visitor's GitHub session — whose account will author it. Both also say
-    // what the report is ABOUT: this server has a second one a click away in the footer, and the
-    // two used to be distinguishable only by where they sat on the page.
+    // The toggle tooltip and panel note name the target repo, the authoring account when known, and
+    // what the report is about (distinct from the footer's server report).
     assertTrue(
       html.contains("title=\"Something wrong with this preview — files against o/r as @octocat\""),
       html,
@@ -1706,11 +1610,9 @@ class ServeWebTest {
             repo = "o/r",
           ),
       )
-    // `name="labels"` is the whole transport: GitHub's new-issue form reads it straight from the
-    // query, so the answer reaches the filed issue with the browser's own control and no script.
+    // `name="labels"` is the transport: GitHub's new-issue form reads it from the query.
     assertTrue(html.contains("<select class=\"cp-report-class-input\" name=\"labels\">"), html)
-    // The three answers, in the `parity:` vocabulary the catalog's own issue index speaks — a value
-    // outside it comes back from `parity/issues.json` as no classification at all.
+    // The three answers in the `parity:` vocabulary the catalog's issue index uses.
     for (value in listOf("parity:upstream", "parity:catalog", "parity:verification-needed")) {
       assertTrue(html.contains("<option value=\"$value\""), "$value offered: $html")
     }
@@ -1720,9 +1622,7 @@ class ServeWebTest {
       html.contains("whether this is ours or upstream.\" selected>Needs investigating"),
       html,
     )
-    // Every option carries the sentence `<cp-report-classification>` writes into the body, so the
-    // issue states the answer in prose as well — for the reader, and for a repository that has no
-    // such label to apply.
+    // Each option carries the sentence `<cp-report-classification>` writes into the body.
     assertTrue(html.contains("data-cp-sentence=\"Upstream: the framework"), html)
   }
 
@@ -1765,10 +1665,8 @@ class ServeWebTest {
 
   @Test
   fun `the report body carries a classification line pointing at the label`() {
-    // Written by the server in BOTH the plain body and the template, and pointing at the label
-    // rather than pre-writing an answer: a visitor with scripting off can still pick one — the
-    // select works — but cannot have the body rewritten, so any specific sentence here would be a
-    // claim the label beside it could contradict.
+    // Server-written in both the plain body and the template, pointing at the label rather than
+    // pre-writing an answer that the label could contradict for a no-JS visitor.
     val body =
       ServeIssueReport.body(
         ServeIssueReport.Context(repo = "yschimke/m3-catalog", previewId = "button")
@@ -1836,9 +1734,8 @@ class ServeWebTest {
           ),
       )
     assertTrue(html.contains("id=\"cp-spec-lane\""), "the spec lane carrier is rendered")
-    // The lane is a top-level chip named after the design tool it imported from — NOT an option
-    // inside the renderer combo, which is where it used to sit behind five player names. The raster
-    // is served from THIS server's reference route; nothing points at figma.com.
+    // The lane is a top-level chip named for its design tool, not a renderer-combo option. The
+    // raster is served from this server's reference route.
     assertTrue(
       html.contains("id=\"cp-spec-chip\"") && html.contains(">Figma</button>"),
       "the spec lane has its own chip, named after the design tool: $html",
@@ -1871,10 +1768,8 @@ class ServeWebTest {
 
   @Test
   fun `a static catalog's published typography offers the Typography layer but not Theme`() {
-    // The two lanes behind one layer. A published bundle carries typography measured over its baked
-    // frame, so `.annotations` answers with no daemon at all — but theme attributes are projected
-    // live from a semantics tree and nothing authors them into a bundle, so that row must stay off.
-    // Folding the two into one flag would either hide a layer that works or offer one that cannot.
+    // Two lanes behind one layer: a published bundle's typography answers `.annotations` without a
+    // daemon, but theme attributes need a live semantics tree, so that row stays off.
     val preview = ServePreview(id = "com.example.ProfileScreenPreview", label = "Profile")
     val html =
       ServeWeb.viewerPage(
@@ -1930,9 +1825,7 @@ class ServeWebTest {
   @Test
   fun `the design-spec chip states the published match score`() {
     val html = chipHtmlFor(DesignReferenceMatch(percent = 71.52, changedPercent = 29.7))
-    // The catalog exists to answer "does this render match its design?", and before the verdict
-    // moved onto the chip no page answered it at rest — the number was a click and two raster
-    // decodes away, on every page, including the ones where the answer is 57%.
+    // The chip states the score at rest.
     assertTrue(html.contains(">Figma 71.5%</button>"), "the chip states the score: $html")
     assertTrue(html.contains("data-spec-match=\"off\""), "71.5% is below the close band: $html")
     // The exact numbers stay available without entering the lane.
@@ -1942,11 +1835,8 @@ class ServeWebTest {
     )
     // The bare provider name is kept so the client can rebuild the label around a live score.
     assertTrue(html.contains("data-spec-chip-name=\"Figma\""), html)
-    // And what the chip says once the render has left the snapshot the verdict was measured
-    // against. The spec is imported once, never re-exported per theme, so picking a theme moves
-    // one side of the comparison and not the other — and the published number then describes a
-    // frame that is off the stage, generously: a pair that publishes at 99.6% scores 88.9% under
-    // Light High Contrast, which reads as the spec lane being broken rather than the chip stale.
+    // Off the snapshot the verdict was measured against (a theme picked), the published number
+    // describes a frame no longer on stage.
     assertTrue(
       html.contains("data-spec-chip-stale-tip=\"The published match is measured against this"),
       "the chip carries the off-baseline tooltip: $html",
@@ -1964,9 +1854,8 @@ class ServeWebTest {
 
   @Test
   fun `a disabled theme control keeps the published spec verdict at baseline`() {
-    // Static viewers cannot apply either a URL-selected or remembered theme. The sticky bootstrap
-    // may still display that choice and mark it active, but it must not suppress a score for pixels
-    // that remain exactly the baked snapshot.
+    // Static viewers can't apply a URL-selected or remembered theme, so the score still describes
+    // the baked pixels and must not be suppressed.
     val html = chipHtmlFor(DesignReferenceMatch(percent = 99.6))
     assertTrue(
       Regex("<select id=\"cp-theme\"[^>]* disabled>").containsMatchIn(html),
@@ -1982,9 +1871,8 @@ class ServeWebTest {
 
   @Test
   fun `the match band colours the chip without deciding whether the number shows`() {
-    // Bands are read off the distribution a real catalog produces, not off round numbers: across
-    // wear-m3-catalog's 186 published pairs the median is 91, scored over drawn content rather
-    // than over the whole canvas (issue #4290), so `match` is the quiet majority from 95 up.
+    // Bands follow a real catalog's distribution (wear-m3-catalog median ~91, scored over drawn
+    // content), so `match` is 95 and up.
     listOf(100.0 to "match", 95.0 to "match", 94.99 to "close", 85.0 to "close", 84.99 to "off")
       .forEach { (percent, band) ->
         val html = chipHtmlFor(DesignReferenceMatch(percent = percent))
@@ -2003,9 +1891,7 @@ class ServeWebTest {
 
   @Test
   fun `a reference with no published score keeps the plain provider chip`() {
-    // Every catalog published before the producer existed, and any run whose driver had no browser
-    // to score with. The lane still computes the same number live on entry, so this must degrade to
-    // exactly the chip it had before rather than to an empty or zeroed verdict.
+    // Catalogs without a published score degrade to the plain chip (the lane still scores live).
     val html = chipHtmlFor(null)
     assertTrue(html.contains(">Figma</button>"), "the chip is the bare provider name: $html")
     assertFalse(html.contains("data-spec-match="), "no band is claimed: $html")
@@ -2043,14 +1929,11 @@ class ServeWebTest {
             )
           ),
       )
-    // Four ways to look at the same pair, all four on the stage rather than behind a navigation to
-    // /compare — which is the point: the render worth comparing is the one the viewer's overrides,
-    // knobs and theme just produced, and leaving the page loses it.
+    // Four views of the same pair, all on the stage, so the viewer's overrides aren't lost.
     listOf("spec", "diff", "triptych", "slider").forEach { view ->
       assertTrue(html.contains("data-cp-spec-view=\"$view\""), "the $view view is offered: $html")
     }
-    // `triptych` is the default and the only pressed one (#4376), so a visitor who ignores the
-    // group is already comparing rather than looking at the reference on its own.
+    // `triptych` is the default and only pressed view.
     assertTrue(
       html.contains("data-cp-spec-view=\"triptych\" aria-pressed=\"true\""),
       "the triptych is the default view",
@@ -2084,12 +1967,10 @@ class ServeWebTest {
       html.contains("id=\"cp-spec-annotations\"") && html.contains("Roboto Flex"),
       "the Figma raster carries its own typography for the overlay",
     )
-    // Load order is load-bearing: `viewer.js` calls `window.cpSpecCompare` on the way into the
-    // lane, and `<cp-spec-compare>` draws every surface from format-compare.js's primitives. The
-    // element wires itself up as its tag upgrades, so the components bundle has to be requested
-    // before viewer.js, and the tag itself before the bundle that defines it. The inline theme
-    // bootstrap must publish the baseline before that upgrade too: otherwise a cold themed deep
-    // link can paint the baked verdict while the parser waits for the later scripts.
+    // Load order matters: `viewer.js` calls `window.cpSpecCompare` on entering the lane, so the
+    // components bundle loads before viewer.js and the tag precedes the bundle. The inline theme
+    // bootstrap must publish the baseline before the upgrade, or a cold themed deep link paints the
+    // baked verdict.
     val tag = html.indexOf("<cp-spec-compare>")
     val baseline = html.indexOf("root.setAttribute(\"data-spec-baseline\"")
     val runtime = html.indexOf("vue-runtime.js")
@@ -2156,9 +2037,8 @@ class ServeWebTest {
 
   @Test
   fun `the spec lane offers the compareWith sibling as a second source`() {
-    // The cross-system pairing, reachable from the component page rather than only from the static
-    // `matches.html` (issue #4621). A SECOND SOURCE for the lane, not a second mode: the four views
-    // are untouched and the kit reference stays the default pair.
+    // The cross-system pairing as a second source for the lane, not a second mode; the kit
+    // reference stays the default.
     val preview = ServePreview(id = "remote.FilledRemoteButton", label = "filled")
     val html =
       ServeWeb.viewerPage(
@@ -2182,10 +2062,8 @@ class ServeWebTest {
             provenance = "wear-m3-catalog's own render, under that catalog's theme and knobs.",
           ),
       )
-    // THE SIBLING HAS A CONTROL ON THE RESTING BAR, not only inside a panel the kit's chip opens.
-    // The picker below ships `hidden`, so before this the bar named one source and gave the other
-    // no way in at all — a button labelled with ONE source opening a panel of things that are not
-    // that source (`docs/design/COMPARE_NAVIGATION.md`, F1).
+    // The sibling has a control on the resting bar, not only inside the (hidden) picker
+    // (`docs/design/COMPARE_NAVIGATION.md` F1).
     assertTrue(
       html.contains("data-cp-spec-open-source=\"parallel\""),
       "the sibling is a peer chip on the bar: $html",
@@ -2219,11 +2097,7 @@ class ServeWebTest {
 
   @Test
   fun `a catalog with no parallel keeps exactly the lane it had`() {
-    // …including no group heading. A "Compare" label over a single chip is a word that earns
-    // nothing, and most catalogs on this server declare no `compareWith`.
-    // Every catalog that declares no `compareWith` pairing — which is most of them. One source is
-    // not a picker with a single button; it is no picker, because a control that acts on nothing is
-    // worse than no control.
+    // Most catalogs declare no `compareWith`: one source means no picker and no group heading.
     val preview = ServePreview(id = "plain.Button", label = "button")
     val html =
       ServeWeb.viewerPage(
@@ -2463,11 +2337,8 @@ class ServeWebTest {
 
   @Test
   fun `a component with a reference per state gets a row per state, each named and each selectable`() {
-    // A design reference names one exact state/props mapping, so every referenced variant is kept
-    // out of the landing grid's fold and gets a comparison row of its own. m3-catalog publishes
-    // fourteen for `button-elevated` — and every one of them printed the bare component name, in no
-    // stated order, so a page whose pairings are in fact correct reads as if the references were
-    // mapped to the wrong renders.
+    // A design reference names one exact state/props mapping, so each referenced variant gets its
+    // own comparison row, labelled with its variant in a stated order.
     val previews =
       listOf("default", "hovered", "pressed").map { state ->
         ServePreview(
@@ -2493,9 +2364,7 @@ class ServeWebTest {
       html.contains("<span class=\"cp-compare-variant\">Hovered</span>"),
       "the variant renders as its own line under the component name: $html",
     )
-    // And each row answers for its own variant only. `previewIdsByCard` is keyed state- and
-    // props-invariantly, so every row used to carry every sibling's id — filtering the page by one
-    // variant's id matched all fourteen rows at once, which is no filter at all.
+    // Each row answers for its own variant only; filtering by one variant's id must match one row.
     val ids =
       Regex("data-preview-ids=\"([^\"]+)\"").findAll(html).map { it.groupValues[1] }.toList()
     assertEquals(
@@ -2511,9 +2380,8 @@ class ServeWebTest {
 
   @Test
   fun `a folded-out variant still aliases onto exactly one row`() {
-    // The alias exists for ids with NO row of their own — a variant folded out of the comparison
-    // page has to select SOMETHING rather than land on an empty page. It goes to the first row of
-    // its comparison card, not to every row of the component.
+    // The alias exists for ids with no row of their own, pointing at the first row of their
+    // comparison card.
     val previews =
       listOf(
         ServePreview("button-elevated__ideal__default", "Default", state = "default"),
@@ -2536,9 +2404,8 @@ class ServeWebTest {
     val ids =
       Regex("data-preview-ids=\"([^\"]+)\"").findAll(html).map { it.groupValues[1] }.toList()
     assertEquals(2, ids.size, "two referenced states, two rows: $html")
-    // The row carries its OWN ids and a KEY into the page's alias table; the folded sibling is
-    // written once, there. Only the row that claimed the card carries the key, which is what still
-    // aliases the fold onto exactly one row.
+    // The row carries its own ids and a key into the page's alias table, where the folded sibling
+    // is written once.
     assertTrue(ids.none { it.contains("direction-rtl") }, "no fold on the row itself: $html")
     val keys =
       Regex("data-alias-card=\"([^\"]+)\"").findAll(html).map { it.groupValues[1] }.toList()
@@ -2562,9 +2429,7 @@ class ServeWebTest {
 
   @Test
   fun `the comparison wall carries the catalog report the launcher's catalog half needs`() {
-    // The floating launcher unhides its catalog choice only on a page carrying `#cp-report`, so
-    // without one this page offered the SERVER tracker as its only route — which is how a
-    // comparison that looked wrong got filed against the preview server (issue #4289).
+    // The launcher unhides its catalog choice only with `#cp-report`, so this page must carry one.
     val preview = ServePreview(id = "button-elevated__ideal__default", label = "Button")
     val html =
       ServeWeb.comparisonPage(
@@ -2598,10 +2463,8 @@ class ServeWebTest {
 
   @Test
   fun `the viewer compares every variant of the component on its stage`() {
-    // The viewer could put ONE baseline behind ONE variant. Asking "is this component wrong, or is
-    // this STATE of it wrong?" meant leaving for a wall of the whole catalog and narrowing by hand
-    // — from a page that already knew which component you were looking at.
-    // See `docs/design/COMPARE_NAVIGATION.md`, F4 and §3.1.
+    // The compare strip: every variant of the component against the baseline, from the viewer
+    // (`docs/design/COMPARE_NAVIGATION.md` F4, §3.1).
     val html =
       ServeWeb.viewerPage(
         ServePreview("card__ideal__default__light", "Card", componentId = "Card"),
@@ -2653,10 +2516,8 @@ class ServeWebTest {
 
   @Test
   fun `the compare strip carries both baselines and shows the lane's own`() {
-    // The strip stood opposite the design reference and nothing else, so pressing the lane's
-    // source picker changed the pair on the stage and left every row under it comparing against
-    // something the reader had just stopped looking at. Both baselines are rendered, tagged, and
-    // one is shown — `viewer.ts` moves the attribute, `?specSource=` restores it.
+    // Both baselines are rendered and tagged, one shown; `viewer.ts` moves the attribute and
+    // `?specSource=` restores it.
     val html =
       ServeWeb.viewerPage(
         ServePreview("card__ideal__default__light", "Card", componentId = "Card"),
@@ -2704,9 +2565,7 @@ class ServeWebTest {
       html.contains("aria-labelledby=\"cp-strip-head\" data-cp-strip-source=\"kit\""),
       html,
     )
-    // The published match was measured against the design reference, so it is tagged to it. The
-    // parallel column says `not scored` rather than lending a design number to a pair nobody
-    // measured.
+    // The published match is tagged to the design reference; the parallel column says `not scored`.
     assertTrue(html.contains("data-spec-match=\"match\">96.4%"), html)
     assertTrue(html.contains("not scored"), html)
     // The sibling is named beside the design provider, over its own column.
@@ -2745,9 +2604,7 @@ class ServeWebTest {
 
   @Test
   fun `a compare strip with no design reference anywhere leaves the baseline column out`() {
-    // An imported catalog has no design file. Every row used to carry an empty reference frame and
-    // a `not scored`, under a heading claiming the variants were compared "against Design
-    // reference" — and a link to a reference wall with no rows to draw.
+    // An imported catalog has no design file: no empty reference frames or reference-wall link.
     val html =
       ServeWeb.viewerPage(
         ServePreview("list__narrow", "Message List", componentId = "MessageList"),
@@ -2801,10 +2658,8 @@ class ServeWebTest {
 
   @Test
   fun `the viewer bar keeps its view controls in one group`() {
-    // Loose in the bar, `SVG` / `3D` / `Transparent` / `Fit width` were sorted by nothing, and the
-    // line each landed on depended on how wide the design-spec lane beside them happened to be —
-    // a lane that grows when it is entered. Pressing the spec chip rearranged controls that have
-    // nothing to do with it. See `docs/design/COMPARE_NAVIGATION.md`, F1.
+    // The stage-presentation toggles are grouped rather than wrapping beside the growing spec lane
+    // (`docs/design/COMPARE_NAVIGATION.md` F1).
     val html =
       ServeWeb.viewerPage(
         ServePreview("card__ideal__default__light", "Card"),
@@ -2820,10 +2675,8 @@ class ServeWebTest {
 
   @Test
   fun `the wall writes every folded preview id once, in one table`() {
-    // Each row used to carry its comparison card's whole id list, and the haystack carried it a
-    // second time. On `remote-m3` that was 19,188 mentions of 538 distinct ids — 967 KB of
-    // `data-preview-ids` and most of another 1.08 MB of `data-hay`, on a 6.4 MB page that took two
-    // minutes to arrive. See `docs/design/COMPARE_NAVIGATION.md`, F2.
+    // Rows used to carry their card's whole id list twice, bloating large walls; ids are now
+    // written once (`docs/design/COMPARE_NAVIGATION.md` F2).
     val previews =
       listOf(
         ServePreview("button__ideal__default", "Default", state = "default"),
@@ -2862,11 +2715,8 @@ class ServeWebTest {
 
   @Test
   fun `the alias table names both facts, because the two walls apply different rules`() {
-    // `rowed` is what the comparison wall subtracts: a design reference names one exact
-    // state/props mapping, so that variant gets a row of its own and must not also alias onto its
-    // siblings' rows. The Remote Compose lane wall, whose rows are one per preview, does not
-    // subtract it. Publishing both facts once and letting each caller pick is what keeps the
-    // browser from re-deriving a rule with one right answer.
+    // `rowed` is what the comparison wall subtracts (a referenced variant has its own row); the RC
+    // lane wall doesn't. Publishing both facts lets each caller choose.
     val html =
       ServeWeb.comparisonPage(
         "m3-catalog",
@@ -2891,12 +2741,7 @@ class ServeWebTest {
 
   @Test
   fun `the baseline leads the pair on every lane`() {
-    // ONE order, every lane: baseline · diff · ours. The viewer's spec lane says it three ways
-    // already (the Spec / Diff / Render triptych, the wipe's seam, the focused Reference / Diff /
-    // Actual page). The wall's `svg` and `rc` lanes used to read the other way round, so pressing
-    // a baseline button swapped both pictures' sides as well as relabelling both headers — the one
-    // control that changes the question also moved the answer.
-    // See `docs/design/COMPARE_NAVIGATION.md`, F3.
+    // One order on every lane: baseline · diff · ours (`docs/design/COMPARE_NAVIGATION.md` F3).
     val reference =
       ServeWeb.comparisonPage(
         "m3-catalog",
@@ -2921,8 +2766,7 @@ class ServeWebTest {
         "and its header moves with it on the $lane lane: $html",
       )
     }
-    // Named for the lane it is showing, not the constant `SVG` this head used to be — a header
-    // reading `SVG` over the Figma column would state the pair backwards.
+    // Named for the lane shown, not a constant `SVG`.
     assertTrue(reference.contains(">Figma</span>"), reference)
     assertTrue(svg.contains(">SVG</span>"), svg)
     // The button that enters the lane names the pair in the order the columns stand.
@@ -2954,10 +2798,8 @@ class ServeWebTest {
 
   @Test
   fun `each picture cell carries an empty caption for its own pixel size`() {
-    // The two panels are one fixed frame each now, so a baseline exported at a different scale no
-    // longer looks bigger than the render. `<cp-compare-wall>` fills these from the DECODED raster
-    // — the wall chooses which theme variant is on screen, so a size printed here by the server
-    // would be describing a picture the reader may not be looking at.
+    // Each panel is one fixed frame; `<cp-compare-wall>` fills sizes from the decoded raster, since
+    // it chooses which theme variant is on screen.
     val html =
       ServeWeb.comparisonPage(
         "m3-catalog",
@@ -2998,9 +2840,7 @@ class ServeWebTest {
 
   @Test
   fun `the reference wall is served worst first, on the scores the branch already measured`() {
-    // The order is the wall's whole argument, and it used to exist only AFTER the browser had
-    // decoded and scored two rasters per row — tens of seconds of catalog order on a real catalog,
-    // which is the one order that says nothing about which pair is wrong (issue #4624).
+    // The server serves rows worst-first, rather than only after the browser has scored every row.
     val previews =
       listOf("good" to 98.5, "awful" to 41.0, "middling" to 84.25).map { (id, _) ->
         ServePreview(id = id, label = id)
@@ -3022,9 +2862,7 @@ class ServeWebTest {
 
   @Test
   fun `a pair the branch never scored trails the ones it did`() {
-    // "Nobody has measured this yet" is not a finding. A catalog baked before the score producer
-    // existed carries none at all, and leading with them would serve its whole table under a banner
-    // of rows claiming to be the worst.
+    // Unscored rows aren't findings, so they don't lead.
     val previews = listOf("unscored", "scored").map { ServePreview(id = it, label = it) }
     val html =
       ServeWeb.comparisonPage(
@@ -3041,12 +2879,8 @@ class ServeWebTest {
 
   @Test
   fun `the vector lanes keep catalog order rather than borrowing the design lane's`() {
-    // `svg` and `rc` publish no score of their own, and re-ordering their rows by a number about a
-    // different comparison is worse than the order the catalog chose.
-    //
-    // A catalog with NO references, because that is the only one the vector lane is served as the
-    // default for now (see the lane-order test below). The gate in `orderedCards` is what keeps the
-    // rule true for the pages that still reach it.
+    // `svg` and `rc` publish no score of their own, so their rows keep catalog order. A catalog
+    // with no references, the only one served on the vector lane by default now.
     val previews = listOf("alpha", "beta").map { ServePreview(id = it, label = it) }
     val html = ServeWeb.comparisonPage("m3-catalog", previews, token = "t", hasSvgFor = { true })
     val labels = Regex("data-label=\"([^\"]+)\"").findAll(html).map { it.groupValues[1] }.toList()
@@ -3055,12 +2889,8 @@ class ServeWebTest {
 
   @Test
   fun `the wall opens on a raster pair, not on the SVG lane`() {
-    // `svg` led because it was the first lane this page had. It is the slowest pair to put on
-    // screen — a vector document laid out and rasterised per row, against a PNG the decoder hands
-    // back whole — and the only one that can be wrong through no fault of the renderer: an SVG
-    // resolves its own typefaces at paint time, so a face the visitor's browser cannot get draws
-    // TOFU, on the page whose whole job is to say what looks wrong.
-    // See `docs/design/COMPARE_NAVIGATION.md`, §3.2.
+    // The vector lane no longer leads: it is the slowest to render and can show tofu for fonts the
+    // browser lacks (`docs/design/COMPARE_NAVIGATION.md` §3.2).
     val previews = listOf("alpha", "beta").map { ServePreview(id = it, label = it) }
     val withReference =
       ServeWeb.comparisonPage(
@@ -3072,8 +2902,7 @@ class ServeWebTest {
       )
     assertTrue(withReference.contains("data-default-format=\"reference\""), withReference)
 
-    // …and with a reference lane to lead with, the served order is worst-first, which the vector
-    // default used to withhold from exactly the catalogs that publish scores.
+    // With a reference lane leading, the served order is worst-first.
     val scored =
       ServeWeb.comparisonPage(
         "m3-catalog",
@@ -3155,11 +2984,10 @@ class ServeWebTest {
     assertTrue(cell.indexOf(">#40<") < cell.indexOf(">#41<"), cell)
     assertTrue(cell.contains("cp-compare-bug-item--closed"), "the closed one says so: $cell")
     assertTrue(cell.contains("<span class=\"cp-compare-bug-state\">closed</span>"), cell)
-    // Matched on the component as well as on the preview id — an issue may name either.
+    // Matched on the component or the preview id; an issue may name either.
     assertTrue(cell.contains("/issues/41"), cell)
     assertFalse(cell.contains("/issues/39"), "an exact-variant issue must not broaden: $cell")
-    // Opened, the panel says what each issue IS, which is the fact the collapsed number cannot
-    // carry and the reason the disclosure exists at all.
+    // Opened, the panel says what each issue is.
     assertTrue(
       cell.contains(
         "<span class=\"cp-compare-bug-title\" title=\"Glyph colour is darker than the design " +
@@ -3170,10 +2998,8 @@ class ServeWebTest {
     // The reporter's classification rides along, since "known-difference" and "nobody has verified
     // this" are different answers to the question the panel was opened to settle.
     assertTrue(cell.contains("<span class=\"cp-compare-bug-tag\">known-difference</span>"), cell)
-    // "+ file" is offered on every row, including rows with nothing filed: an unfiled bad score is
-    // exactly what a reader is scanning this wall for. It lands on the focused comparison, which
-    // files a report naming that exact preview AND reference. OUTSIDE the disclosure, because a row
-    // with nothing filed has no disclosure to put it in.
+    // "+ file" is offered on every row (outside the disclosure), landing on the focused comparison
+    // that files against that exact preview and reference.
     assertTrue(cell.substringAfter("</details>").contains("cp-compare-bug-new"), cell)
     // The panel closes by saying what it is as of. Nothing here re-checks GitHub, so a `closed`
     // with no date would invite more trust than a render-time snapshot can carry.
@@ -3182,14 +3008,9 @@ class ServeWebTest {
       cell,
     )
     assertTrue(cell.contains("/compare/button?token=t&amp;reference=button"), cell)
-    // The numbers join the haystack, so `#40` narrows the wall to the rows a report names — and so
-    // do the titles, because the pill now shows them and a filter has to match what the reader can
-    // see.
-    // The haystack is the row's LABEL and the issues filed against it. The preview ids used to be
-    // copied in here as well — the same list the row already carried in `data-preview-ids`, and
-    // the single biggest thing on a real wall. They are written once in the page's alias table
-    // now, and `keepRow` matches a typed id against the resolved list.
-    // See `docs/design/COMPARE_NAVIGATION.md`, F2.
+    // Issue numbers and titles join the haystack so `#40` filters to the rows it names. The
+    // haystack is the label plus issues; ids live once in the alias table
+    // (`docs/design/COMPARE_NAVIGATION.md` F2).
     assertTrue(
       html.contains(
         "data-hay=\"button #40 glyph colour is darker than the design token " +
@@ -3274,9 +3095,7 @@ class ServeWebTest {
             locatorRevision = "o/r@design-artifacts/m3-catalog",
           ),
       )
-    // The two page-level halves of a locator, which no row can know. Their presence is also the
-    // switch: `<cp-compare-wall>` shows the row checkboxes only where it can turn a tick into a
-    // block, and a wall with no report to file leaves them hidden.
+    // The two page-level locator halves; their presence also enables the row checkboxes.
     assertTrue(html.contains("data-cp-locator-system=\"m3-catalog\""), html)
     assertTrue(
       html.contains("data-cp-locator-revision=\"o/r@design-artifacts/m3-catalog\""),
@@ -3293,9 +3112,8 @@ class ServeWebTest {
 
   @Test
   fun `a page report names no locator until a page can pick one`() {
-    // The placeholder is a line the browser either fills or deletes. On a page with nothing to fill
-    // it — every page-scoped report but the wall's — it would be filed verbatim, so it is not
-    // written at all, and the body a visitor with JS off files is unchanged either way.
+    // The placeholder is only written where the browser fills it (the wall); elsewhere it would be
+    // filed verbatim.
     val context = ServeIssueReport.Context(repo = "yschimke/m3-catalog", system = "m3-catalog")
     val plain = ServeIssueReport.body(context, renderPlaceholder = true)
     assertFalse(plain.contains(ServeIssueReport.LOCATORS_PLACEHOLDER), plain)

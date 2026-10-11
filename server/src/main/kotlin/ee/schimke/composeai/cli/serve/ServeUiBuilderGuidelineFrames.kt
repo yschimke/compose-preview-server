@@ -25,38 +25,20 @@ import kotlinx.coroutines.withTimeoutOrNull
 
 /**
  * The pictures a guidelines prompt attaches, drawn once per design revision and kept on disk beside
- * the design list's thumbnails.
+ * the design list's thumbnails. Every frame [DesignGuidelineFrames.plan] names is a native render
+ * (tens of seconds each), so caching turns a repeat ask into a file read.
  *
- * ## Why
+ * A frame is keyed by everything that decides its pixels: design and revision, the thumbnails'
+ * [generation], kind, size and widget host shape. Where the design list's thumbnail is the frame (a
+ * Wear widget in [WearWidgetHostShape.Squircle]), the thumbnail is reused;
+ * [ServeUiBuilderThumbnails] says when.
  *
- * Every frame [DesignGuidelineFrames.plan] names is a native render: generated Compose, compiled
- * and drawn on a daemon. Drawn on every request, a widget's two containers took 78s and a scrolling
- * Wear screen's device and unrolled pictures 118s — and the same again when asked twice, so the
- * editor's **Show the prompt** sat for two minutes and an MCP call could outlast the client. Kept
- * here, a second ask of the same revision costs a file read.
+ * One worker draws frames one at a time. A waiting reader's frames jump the queue in the order
+ * asked; warm frames wait while the thumbnail worker has work. Warming follows an accepted edit
+ * after a quiet period, latest revision only.
  *
- * ## The same picture is not drawn twice
- *
- * A frame is keyed by everything that decides its pixels: the design and revision, the [generation]
- * the thumbnails are drawn at (server version and renderer identity), the frame's kind, its size
- * and its widget host shape. Size is in the key on purpose: a phone and a tablet picture of one
- * revision are two renders, and must never answer for each other. Where the design list's thumbnail
- * *is* the frame — a Wear widget's thumbnail is its native render in the
- * [WearWidgetHostShape.Squircle] container, the Pixel Watch frame — the thumbnail is taken instead
- * of drawing it again; [ServeUiBuilderThumbnails] says when that holds.
- *
- * ## Ahead of the reader, behind everything else
- *
- * One worker draws frames, one at a time (native renders queue behind each other anyway, and a
- * burst is compose-preview-server#1421). A reader waiting on frames jumps the queue, and they draw
- * in the order it asked for them; a frame queued to warm the cache waits while the thumbnail worker
- * has work, so the design list and the editor's own exports go first. Warming follows an accepted
- * edit after a quiet period, so a design being edited is drawn once it settles rather than at every
- * keystroke, and only its latest revision is drawn.
- *
- * Warming compiles Kotlin, which a caller may only ask for with the `ui-builder-export` route
- * capability. An edit carries no route check, so a design is warmed only once somebody holding that
- * capability has asked for its prompt with pictures; the warm runs as that actor.
+ * Warming compiles Kotlin, which requires the `ui-builder-export` capability, so a design is warmed
+ * only once someone holding it has asked for its prompt with pictures; the warm runs as that actor.
  */
 class ServeUiBuilderGuidelineFrames
 internal constructor(
@@ -119,10 +101,8 @@ internal constructor(
   private fun epochOf(designId: String): Long = epochs[designId] ?: 0
 
   /**
-   * Frames a reader is waiting on, in the order asked: drawn before any warm. A queue of their own,
-   * not the front of [warms], because pushing a reader's frames onto the front one by one drew them
-   * last-asked first, so the slowest frame of a request could hold back the one it listed first
-   * past the budget.
+   * Frames a reader is waiting on, in the order asked, drawn before any warm. A separate queue
+   * because pushing onto the front of [warms] reversed the reader's order.
    */
   private val readers = LinkedBlockingQueue<Job>(QUEUE)
   private val warms = LinkedBlockingDeque<Job>(QUEUE)
@@ -463,11 +443,9 @@ internal constructor(
         )
 
     /**
-     * Whether [png] is a picture of [frame] rather than of some other size: its pixel extent in the
-     * frame's aspect, so both axes are drawn at one density. A renderer that ignored the frame and
-     * drew its default size (a 412×915 phone frame and a 1280×800 tablet frame both coming back as
-     * the same 400×800) fails this, and a frame failing it is left out rather than shown to the
-     * model as something it is not.
+     * Whether [png] matches [frame]'s aspect, so both axes are drawn at one density. Catches a
+     * renderer that ignored the frame and drew its default size; such a frame is left out rather
+     * than misrepresented to the model.
      */
     fun matchesFrame(png: ByteArray, frame: DesignGuidelineFrame): Boolean {
       val (width, height) = pngSize(png) ?: return false

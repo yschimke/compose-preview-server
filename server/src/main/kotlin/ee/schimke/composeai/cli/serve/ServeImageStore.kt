@@ -3,35 +3,19 @@ package ee.schimke.composeai.cli.serve
 import java.util.concurrent.ConcurrentHashMap
 
 /**
- * Runtime ingestion of **rendered preview images** — held for a bounded time and handed back as a
- * direct, embeddable image URL.
+ * Runtime ingestion of rendered preview images, held for a bounded time and handed back as a direct
+ * embeddable URL. For an agent preparing a pull request without GitHub CLI or capture-branch push
+ * rights: it POSTs the bytes, gets `https://<host>/i/<id>.png`, and writes `![before](…)`.
  *
- * The lane exists for one job: an **agent preparing a pull request** has just rendered a
- * before/after pair and needs each PNG at a URL it can put in the PR body, on a box where it has
- * neither a GitHub CLI nor push rights to a capture branch (the two mechanisms `compose-preview
- * share-preview` already covers). It POSTs the bytes, gets back `https://<host>/i/<id>.png`, and
- * writes `![before](…)`.
+ * A sibling of [ServeDocStore], not a format inside it, because policy differs:
+ * - **Who may write.** Documents play in the viewer's browser, so anonymous upload is cheap. Images
+ *   are served back by this origin (small-scale hosting), so this lane is gated on GitHub access to
+ *   the operator's repository ([ServeImageUploadAuth]) and never open, even on `--public`.
+ * - **How long.** PR bodies outlive reviews, so the TTL is days ([DEFAULT_TTL_SECONDS]).
  *
- * Sibling of [ServeDocStore], and deliberately **not** a format inside it. Both are TTL-bounded
- * in-memory shares, but the two lanes differ in every way that decides policy:
- * - **Who may write.** The document lane is an anonymous drop-box: a document is data the
- *   *viewer's* browser plays, so an open upload costs the host nothing but memory. An image is
- *   bytes this origin serves back to anyone holding the link, which is a small hosting service — so
- *   this lane is gated on a GitHub account with real access to the operator's repository
- *   ([ServeImageUploadAuth]) and is never open, not even on a `--public` box. Folding images into
- *   `--accept-docs` would have silently converted every existing document host into an open image
- *   host.
- * - **How long.** A document link is shared into a chat and used within the hour. A PR body
- *   outlives the review it was opened for, so this lane's default TTL is measured in days
- *   ([DEFAULT_TTL_SECONDS]) — see the caveat on that constant.
- *
- * What it keeps from [ServeDocStore], because those parts were right: content sniffing (an upload
- * must *be* a known raster image — [ServeImageFormats]), hard per-image / count / total-memory caps
- * with eviction rather than unbounded growth, and an unguessable id that is itself the capability.
- *
- * **No `?url=` leg.** [ServeDocStore] can fetch a document for a client behind an SSRF allowlist;
- * this store deliberately cannot. The caller here is a build agent that already holds the bytes on
- * local disk, so a server-side fetcher would add an SSRF surface to buy nothing.
+ * Kept from [ServeDocStore]: content sniffing ([ServeImageFormats]), hard per-image/count/memory
+ * caps with eviction, and an unguessable id as the capability. No `?url=` leg: the caller already
+ * has the bytes, so a fetcher would only add SSRF surface.
  */
 class ServeImageStore(
   /** How long an uploaded image stays reachable. */
@@ -53,11 +37,7 @@ class ServeImageStore(
     val name: String,
     val format: ServeImageFormat,
     val bytes: ByteArray,
-    /**
-     * The GitHub login that uploaded this, as verified at the gate. Kept so the operator can see
-     * who filled the store on `/status.json` — an audit trail is the other half of a lane that
-     * hands out hosting.
-     */
+    /** The GitHub login verified at the gate, shown on `/status.json` as an audit trail. */
     val uploadedBy: String,
     val uploadedAtMillis: Long,
     val expiresAtMillis: Long,
@@ -66,9 +46,8 @@ class ServeImageStore(
       get() = bytes.size
 
     /**
-     * The permalink path. It ends in the format's real extension so that everything downstream
-     * which decides by suffix — a markdown renderer, an image proxy, a reader saving the file —
-     * agrees with the content type served alongside it.
+     * The permalink path, ending in the format's real extension so suffix-based consumers agree
+     * with the served content type.
      */
     val path: String
       get() = "/i/$id${format.extension}"
@@ -90,14 +69,9 @@ class ServeImageStore(
   private val images = ConcurrentHashMap<String, Image>()
 
   /**
-   * Store [bytes] as an image and mint its expiring link.
-   *
-   * [isSecurityChecked] is the same greppable audit marker [ServeDocStore.add] uses (no runtime
-   * enforcement): the caller passes `true` only once the request has cleared the route's identity
-   * gate. The store still defends in depth — format sniff, size caps, TTL.
-   *
-   * [name] is the client-supplied filename; it is only ever used as a **label** (sanitised), never
-   * as a path and never as the format decision.
+   * Store [bytes] as an image and mint its expiring link. [isSecurityChecked] is the same greppable
+   * audit marker as [ServeDocStore.add]: pass `true` only after the route's identity gate. [name]
+   * is only ever a sanitised label, never a path or the format decision.
    */
   fun add(
     name: String?,
@@ -132,12 +106,8 @@ class ServeImageStore(
   }
 
   /**
-   * The live image for [id], or null when it's unknown **or expired** (expired ⇒ dropped).
-   *
-   * [extension], when given, must be the format's own — the permalink's suffix is part of the
-   * address, not decoration, so `/i/<id>.jpg` for a stored PNG is a miss rather than a PNG served
-   * under a JPEG name. A bare id (no suffix) still resolves, so a client that stripped it isn't
-   * stranded.
+   * The live image for [id], or null when unknown or expired (expired ⇒ dropped). [extension], when
+   * given, must be the format's own (`/i/<id>.jpg` for a PNG is a miss); a bare id still resolves.
    */
   fun get(id: String, extension: String? = null): Image? {
     val now = clock()
@@ -150,9 +120,8 @@ class ServeImageStore(
   }
 
   /**
-   * Seconds left on [image]'s link, measured on the **store's** clock — the one that decides
-   * expiry. Callers must not read the wall clock themselves, or a test (or a host whose clock is
-   * injected) reports a lifetime the store doesn't honour.
+   * Seconds left on [image]'s link, on the store's clock, which decides expiry; callers must not
+   * use the wall clock.
    */
   fun remainingSeconds(image: Image): Long = image.secondsUntilExpiry(clock())
 
@@ -193,12 +162,8 @@ class ServeImageStore(
   )
 
   /**
-   * Enforce the count + total-memory caps by dropping the images closest to expiry first — an
-   * upload burst evicts the oldest links rather than being refused, and the heap stays bounded.
-   *
-   * With a TTL measured in days, "closest to expiry" is "uploaded longest ago", so a busy host
-   * expires old PR evidence to make room for new. That is the intended trade and the reason the
-   * total cap is generous relative to a single render.
+   * Enforce the count and memory caps by evicting the images closest to expiry (with a days-long
+   * TTL, the oldest uploads), keeping the heap bounded instead of refusing uploads.
    */
   private fun evictOverflow() {
     while (
@@ -224,15 +189,9 @@ class ServeImageStore(
 
   companion object {
     /**
-     * Seven days: a PR link has to outlive the review that opened it, which an hour (the document
-     * lane's default) does not.
-     *
-     * **It is still a TTL, and a PR body is forever.** GitHub proxies and caches embedded images
-     * through camo, so a body usually keeps painting after the source expires — but that is a
-     * cache, not a guarantee. For evidence that must survive indefinitely, commit the PNG to a
-     * capture branch (`compose-preview share-preview`, which is SHA-pinned by design); this lane is
-     * for the box where that isn't available. `--image-ttl` raises it, bounded by the memory caps
-     * below.
+     * Seven days: a PR link must outlive its review. Still a TTL: GitHub's camo cache usually keeps
+     * a body painting after expiry, but for permanent evidence commit the PNG to a capture branch
+     * (`compose-preview share-preview`). `--image-ttl` raises it, within the memory caps.
      */
     const val DEFAULT_TTL_SECONDS = 7L * 24 * 60 * 60
 
