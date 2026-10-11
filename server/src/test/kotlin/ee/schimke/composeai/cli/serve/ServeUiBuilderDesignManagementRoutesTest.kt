@@ -23,9 +23,9 @@ import ee.schimke.composeai.uibuilder.service.UiBuilderServiceError
 import ee.schimke.composeai.uibuilder.service.UiBuilderServicePort
 import ee.schimke.composeai.uibuilder.service.UiBuilderServiceRequest
 import ee.schimke.composeai.uibuilder.service.UiBuilderServiceResponse
-import ee.schimke.composeai.uibuilder.service.UiBuilderTrashedDesign
 import ee.schimke.composeai.uibuilder.service.UiBuilderServiceUpdate
 import ee.schimke.composeai.uibuilder.service.UiBuilderSubscriptionCall
+import ee.schimke.composeai.uibuilder.service.UiBuilderTrashedDesign
 import java.io.Closeable
 import java.io.File
 import java.nio.file.Files
@@ -397,7 +397,6 @@ class ServeUiBuilderDesignManagementRoutesTest {
     assertEquals("/ui-builder/from-one", location)
     assertTrue(documents.containsKey("from-one"))
   }
-
 
   private fun listItem(document: DesignDocumentV1): DesignListItemV1 =
     DesignListItemV1(

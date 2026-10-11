@@ -13970,8 +13970,8 @@ class ServeHttpServer(
   }
 
   /**
-   * `POST /ui-builder/{designId}/delete`: move one design to the trash, then `303` back to the index,
-   * whose trash section can restore it for a day. The page route to the owner-only
+   * `POST /ui-builder/{designId}/delete`: move one design to the trash, then `303` back to the
+   * index, whose trash section can restore it for a day. The page route to the owner-only
    * [UiBuilderServiceRequest.DeleteDesign] (no grantee may delete). Sidecars stay until the purge.
    * `confirm=delete` is required to stop a stray re-POST.
    */

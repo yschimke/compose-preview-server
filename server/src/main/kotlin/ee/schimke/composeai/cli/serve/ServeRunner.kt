@@ -3296,7 +3296,8 @@ public class ServeRunner(
         )
     }
     uiBuilderLaneOpen = uiBuilderLane != null
-    // Deleted designs wait a day in the trash; this empties it, sidecars included, on the way up and
+    // Deleted designs wait a day in the trash; this empties it, sidecars included, on the way up
+    // and
     // hourly after. Every host with a builder runs it: the trash is not an admin feature.
     uiBuilderLane?.let { lane ->
       ServeUiBuilderTrashPurger(

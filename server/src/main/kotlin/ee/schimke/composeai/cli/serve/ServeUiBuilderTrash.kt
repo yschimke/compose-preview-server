@@ -7,14 +7,14 @@ import java.util.concurrent.TimeUnit
 
 /**
  * Everything this host keeps beside a design rather than in it: the reference overlay, comment
- * board, links record, review verdicts, guidelines result, folder and card picture. [sweep] forgets them
- * all, and is called only once the design itself is gone for good. Before the trash, a delete swept
- * them at once. Now a deleted design can come back within its retention, with its discussion and
- * links intact, so they wait for its purge (`UI_BUILDER_TRASH.md` in compose-ui-builder).
+ * board, links record, review verdicts, guidelines result, folder and card picture. [sweep] forgets
+ * them all, and is called only once the design itself is gone for good. Before the trash, a delete
+ * swept them at once. Now a deleted design can come back within its retention, with its discussion
+ * and links intact, so they wait for its purge (`UI_BUILDER_TRASH.md` in compose-ui-builder).
  *
  * Leaving one behind is not merely untidy: a design id recreated later would inherit the previous
- * design's issue, pull request and thread. Each removal is best-effort, logged on failure, since the
- * design state is the record and a stray file is an orphan, not a resurrected design.
+ * design's issue, pull request and thread. Each removal is best-effort, logged on failure, since
+ * the design state is the record and a stray file is an orphan, not a resurrected design.
  */
 internal class ServeUiBuilderSidecars(
   private val references: ServeUiBuilderReferenceStore? = null,
@@ -72,12 +72,13 @@ internal class ServeUiBuilderTrashPurger(
 ) {
   /** One pass: the ids purged, each with its sidecars swept. Never throws. */
   fun purge(): List<String> {
-    val purged =
-      runCatching { service.purgeExpiredTrash() }
-        .getOrElse {
-          onLog("serve: UI-builder trash purge failed (${it.message})")
-          return emptyList()
-        }
+    val purged = runCatching {
+      service.purgeExpiredTrash()
+    }
+      .getOrElse {
+        onLog("serve: UI-builder trash purge failed (${it.message})")
+        return emptyList()
+      }
     purged.forEach { designId ->
       sidecars.sweep(designId)
       onLog("serve: purged UI-builder design $designId from the trash")
