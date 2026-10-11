@@ -1459,6 +1459,55 @@ html.cp-js.cp-multi-section .cp-section-head { display: block; }
 .cp-cards > .cp-card { flex: 0 0 var(--cp-card-w, 212px); max-width: 100%;
   display: flex; flex-direction: column; }
 .cp-cards > .cp-card > .cp-imgwrap { flex: 1 1 auto; }
+/* --- Thumbnail size: the S / M / L track `components/GridDensity.ts` adds to a catalog landing's
+   toggle row, and the grids it resizes. M is no attribute at all — the rules above, untouched — so
+   S and L are the only additions, and only above the phone breakpoint: a phone's grid is already
+   its own two-column size (the narrow block below), and its single toolbar row has no room for a
+   fourth control, so the track is hidden there and the remembered size simply waits for a wider
+   window. On `html` rather than `#cp-grid` so the Starred row, a sibling of the grid, follows it.
+
+   The track is one outlined pill split three ways, the same 34px and full radius as the Theme pill
+   and `⋯` beside it, so the row still reads as one set of controls. A connected segmented track is
+   right here where it was wrong for Theme: three fixed, short options that can never wrap. The
+   radios themselves are visually hidden (native, for the keyboard model), so focus is drawn on the
+   segment that holds the focused one. */
+.cp-density { display: inline-flex; align-items: stretch; min-height: 34px; padding: 0;
+  border: 1px solid var(--md-sys-color-outline); border-radius: var(--md-sys-shape-corner-full);
+  overflow: hidden; }
+.cp-density-opt { position: relative; display: inline-flex; align-items: center;
+  justify-content: center; min-width: 34px; padding: 0 10px; cursor: pointer;
+  color: var(--md-sys-color-on-surface-variant);
+  font-size: var(--md-sys-typescale-label-large-size); font-weight: 500;
+  transition: background var(--md-sys-motion-duration-short2) var(--md-sys-motion-easing-standard); }
+.cp-density-opt + .cp-density-opt { border-left: 1px solid var(--md-sys-color-outline-variant); }
+.cp-density-opt:hover { color: var(--md-sys-color-on-surface);
+  background: color-mix(in srgb, var(--md-sys-color-on-surface) 8%, transparent); }
+.cp-density-opt:has(input:checked) { background: var(--md-sys-color-secondary-container);
+  color: var(--md-sys-color-on-secondary-container); }
+.cp-density-opt:has(input:focus-visible) { outline: 3px solid var(--md-sys-color-secondary);
+  outline-offset: -3px; }
+@media (max-width: 640px) { .cp-density { display: none; } }
+@media (min-width: 641px) {
+  /* S: the whole catalog on a screen. Cards about two thirds as wide and an image well half as
+     tall; the fully qualified id line goes, since at this size the label is what is scanned. */
+  html[data-cp-density="s"] .cp-grid:not(.cp-syslist) {
+    grid-template-columns: repeat(auto-fill, minmax(132px, 1fr)); gap: 12px; }
+  html[data-cp-density="s"] .cp-section, html[data-cp-density="s"] .cp-grid-groups,
+  html[data-cp-density="s"] .cp-starred { --cp-card-w: 132px; --cp-card-gap: 12px; }
+  html[data-cp-density="s"] .cp-imgwrap { min-height: 56px; padding: 8px; }
+  html[data-cp-density="s"] .cp-imgwrap img { max-height: 112px; }
+  html[data-cp-density="s"] .cp-crop { --cp-thumb-cap: 112px; }
+  html[data-cp-density="s"] .cp-meta { padding: 8px 10px 10px; }
+  html[data-cp-density="s"] .cp-card .cp-id { display: none; }
+  /* L: detail you can read without opening the viewer — cards about 1.6x as wide and an image well
+     nearly twice as tall. */
+  html[data-cp-density="l"] .cp-grid:not(.cp-syslist) {
+    grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 22px; }
+  html[data-cp-density="l"] .cp-section, html[data-cp-density="l"] .cp-grid-groups,
+  html[data-cp-density="l"] .cp-starred { --cp-card-w: 340px; --cp-card-gap: 22px; }
+  html[data-cp-density="l"] .cp-imgwrap img { max-height: 460px; }
+  html[data-cp-density="l"] .cp-crop { --cp-thumb-cap: 460px; }
+}
 /* The Theme picker carries one chip per configured theme (the baked light/dark pair plus any
    app-declared @ThemeCatalog theme), so it wraps rather than overflowing a narrow viewport.
    That is exactly why it is NOT an M3 segmented button: a segmented track is specified for a
