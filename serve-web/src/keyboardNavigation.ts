@@ -727,7 +727,7 @@ class KeyboardNavigation {
           <kbd>C</kbd><span>Jump to a component</span><kbd>J / K</kbd><span>Next / previous component</span>
           <kbd>V</kbd><span>Choose a state or variant</span><kbd>[ / ]</kbd><span>Previous / next variant</span>
           <kbd>M</kbd><span>Choose renderer, theme, or display mode</span><kbd>O</kbd><span>Find and focus an override</span>
-          <kbd>?</kbd><span>Show this guide</span><kbd>Esc</kbd><span>Close any keyboard panel</span></div>
+          <kbd>/</kbd><span>Focus the page filter</span><kbd>?</kbd><span>Show this guide</span><kbd>Esc</kbd><span>Close any keyboard panel</span></div>
           <p class="cp-keyboard-note">Shortcuts pause while you type in a field. Tab and arrow keys keep their native browser behavior.</p>`;
         dialog
             .querySelector(".cp-keyboard-close")
