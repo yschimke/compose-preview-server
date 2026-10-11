@@ -131,7 +131,9 @@ graphics-shapes = "1.1.0"
 # 2.42.0 records a preview's guidelines surface and profile in `previews.json` and reads them
 # through `GuidelineSurfaces.of` (compose-ai-tools#5778), which the MCP guideline tools use.
 # 2.46.0 carries the export-projection API compose-ui-builder 3.106.0's export reads
-# (`ExportProjectionJson`, compose-ai-tools#5832, #5835); it moves with the UI builder below.
+# (`ExportProjectionJson`, compose-ai-tools#5832, #5835); it moves with the UI builder below. It
+# also adds the engine's `GuidelineCredentials` and `OpenAiCompatibleClient`, which
+# `check_preview_guidelines` uses (compose-ai-tools#5833, #5846).
 composeai-tools = "2.46.0"
 # The render daemons, the renderers, the preview annotations and data API, and the data extractors,
 # published from yschimke/compose-preview-daemon since its 3.0.0 (compose-ai-tools#5336). Layer 1a
